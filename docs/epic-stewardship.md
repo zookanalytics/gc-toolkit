@@ -28,7 +28,8 @@ catalog ([component-model.md](component-model.md)).
 
 ## Recording a ruling
 
-The operator rules at a sitting on the epic, and the ruling is recorded on the
+The operator rules at a review of the epic
+([epics.md](epics.md#reviewing-an-epic)), and the ruling is recorded on the
 epic bead as metadata: `epic_ruling` is `continue`, `shift`, or `close`, and
 `epic_ruling_reason` says why. On a close ruling the reason is the outcome (the
 hypothesis held, was disproven, cannot be met as stated, stalled, or ran past
@@ -48,24 +49,24 @@ The fields are registered in
 epic, which
 [`gctk epic create`](../services/gctk/internal/cli/epic.go) makes. It refuses an
 epic with no hypothesis unless the epic's parent is an epic, which makes it a
-Delivery. The hypothesis can be the filer's first draft until the
-operator's first ruling on the epic
-([epics.md](epics.md#the-contract-an-epic-carries)). The other contract fields
-and the ruling's fields are the operator's: stamped when the operator states or
-confirms a contract field or rules, the dated decision [epics.md](epics.md)
-calls for. No pack script writes the ruling's fields. The finalize gate and the
-doctor check read the hypothesis, the ruling, and its reason.
+Delivery. A field the filer writes is its proposal, and the epic's notes say
+whose words each field is ([epics.md](epics.md#the-contract-an-epic-carries)).
+After the filing, a contract field takes only words the operator stated or
+approved, and the ruling's fields are stamped at a review when the operator
+rules, with the review's block in the epic's notes as the dated record. No pack
+script writes the ruling's fields. The finalize gate and the doctor check read
+the hypothesis, the ruling, and its reason.
 
 | Field | Meaning |
 |---|---|
 | `epic_handle` | the 3–5 word handle |
-| `epic_hypothesis` | the one-sentence hypothesis — a floor field, a first draft until the epic's first ruling, and what brings an epic under the close requirement |
+| `epic_hypothesis` | the one-sentence hypothesis — a floor field, and what brings an epic under the close requirement |
 | `epic_boundaries` | the epic's boundaries |
 | `epic_closure_condition` | the 3–6 operator-runnable closure checks |
 | `epic_indicators` | the 1–3 leading indicators |
 | `epic_ruling` | the latest ruling: `continue`, `shift`, or `close` |
 | `epic_ruling_reason` | why the latest ruling was made; on `close`, the outcome |
-| `epic_ruling_at` / `epic_ruling_by` / `epic_ruling_evidence` | when, who, and the human gate whose resolve carried the ruling |
+| `epic_ruling_at` / `epic_ruling_by` / `epic_ruling_evidence` | when the operator ruled, who recorded it, and the human gate whose resolve carried the ruling |
 
 ## Closing an epic: the before-close enforcement
 
@@ -123,11 +124,12 @@ Delivery, and both layers hold it as one.
 
 ## Direction: the checkpoint's machinery
 
-An Epic Checkpoint runs by hand: the operator calls the sitting, and the sitting
-gathers the evidence and makes the ruling's writes from the
-[`converse-epic-checkpoint`](../skills/converse-epic-checkpoint/SKILL.md) skill
-([epics.md](epics.md#deliveries-and-epic-checkpoints)). Machinery that does any of
-that for them is not built. It is designed from what those hand runs record.
+A review of an epic, the Epic Checkpoint among them, runs by hand: the operator
+calls the sitting, and the sitting gathers the evidence and makes the ruling's
+writes from the
+[`converse-epic-review`](../skills/converse-epic-review/SKILL.md) skill
+([epics.md](epics.md#reviewing-an-epic)). Machinery that does any of that for
+them is not built. It is designed from what those hand runs record.
 Plausibly that is a formula that files the checkpoint sitting and gathers its
 evidence when a Delivery lands, and one verb that makes the ruling's writes. It
 is not a doctor check: doctor is already over-leveraged, and its role here stays
@@ -137,8 +139,9 @@ gate and I15 read.
 Until it lands, nothing files the checkpoint sitting. A landed Delivery's row on
 the helm board asks for the checkpoint, among the rows the operator owes, and the
 operator calls the sitting from there. An epic with no Deliveries whose work has
-landed waits for the operator to call a sitting on it, so an answered or stalled
-epic stays open until someone looks. A Delivery that stalls before it lands is
+landed is reviewed only when a review is called
+([epics.md](epics.md#reviewing-an-epic)), so an answered or stalled epic stays
+open until someone looks. A Delivery that stalls before it lands is
 inspected only by such a sitting, and the machinery may add a nudge on a
 Delivery's age.
 

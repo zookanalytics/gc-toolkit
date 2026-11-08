@@ -1,61 +1,82 @@
 ---
-name: converse-epic-checkpoint
-description: Converse's Epic Checkpoint, where the operator rules continue, shift or close on an epic (safety-critical).
+name: converse-epic-review
+description: Converse's review of an epic, whenever its contract or its course needs the operator's judgment and at its Epic Checkpoint after work lands, where the operator rules continue, shift or close (safety-critical).
 ---
 
-# The Epic Checkpoint
+# Reviewing an epic
 
-An Epic Checkpoint is the sitting at which the operator judges an epic against
-its hypothesis and rules continue, shift or close (`docs/epics.md`, "How an
-epic closes"). It follows the landing of a Delivery under the epic, and an epic
-with no Deliveries has one whenever the operator calls a sitting on it for its
-ruling. A Delivery has landed when it has Stories and every one has closed.
+One procedure reviews an epic whenever its contract or its course needs the
+operator's judgment (`docs/epics.md`, "Reviewing an epic"). The same steps
+serve a thin epic just filed, an epic whose contract lacks something or is
+contradicted by what has been found, and the Epic Checkpoint that follows the
+landing of a Delivery under the epic. A Delivery has landed when it has
+Stories and every one has closed.
 
-A ruling can also come before any work lands, as a judgment of the hypothesis
-sentence itself. An epic that carries `epic_hypothesis` and no `epic_ruling`
-has a first draft for its hypothesis, which can be the filer's own words, and
-its first ruling ends the draft (`docs/epics.md`, "The contract an epic
-carries"). The operator's yes to the sentence, as written or sharpened, is that
-ruling: a continue, unless the ruling changes the epic's course.
+At every review you read the contract and the evidence, propose the changes
+the evidence calls for, gate only the work that waits on the answer, and frame
+the judgments the operator owes. The operator rules continue, shift or close
+(`docs/epics.md`, "How an epic closes"), and you make the ruling's writes in
+the order below. An Epic Checkpoint also reads the work that landed and closes
+each landed Delivery.
+
+No field or status marks an epic as reviewed or unreviewed. A past ruling
+records what the operator judged then. It never stands in for a judgment of
+the contract as it reads now, so every review judges the contract as it reads.
 
 The ruling is the operator's. You gather the evidence, frame the choice, and
 once the operator rules, make its writes in the order below. The steps keep
 their own skills: the prep, the hold, the record and the sign-off still run
 from `converse-prep`, `converse-hold` and `converse-settle`, and this skill says
-what a checkpoint adds to each.
+what a review adds to each.
 
 Each tool call starts a fresh shell, so set `CONV`, `CONVERSATION`, `SUBJECT`
 and `EPIC` literally at the top of every call below. `EPIC` is the epic the
-ruling answers. It is the subject, unless the subject is a Delivery, an epic
-whose parent is an epic and which carries no `epic_hypothesis`. Then `EPIC` is
-the Delivery's parent, and the Delivery is one of the landed Deliveries the
-checkpoint closes. This read tells the two apart:
+review judges. It is the subject, unless the subject is a Delivery, an epic
+whose parent is an epic and which carries no `epic_hypothesis`, or work that
+waits on a judgment about an epic. Then `EPIC` is the Delivery's parent, or the
+epic named in the message of the gate that holds the work. A landed Delivery is
+one of the Deliveries the checkpoint closes. This read tells them apart:
 ```bash
 gc bd show "$SUBJECT" --json | jq -r '.[0] | "type=\(.issue_type) parent=\(.parent // "none") hypothesis=\((.metadata.epic_hypothesis // "none") | .[0:80])"'
 ```
 
-## Read the evidence
+## Read the contract and the evidence
 
-Do this at the prep, once the subject is primed. The worker that built a
-Delivery never judges it, so read the work itself rather than any worker's
-account of it.
+Do this at the prep, once the subject is primed. The worker that built work
+under the epic never judges it, so read the work itself rather than any
+worker's account of it.
 
-The epic's contract and its notes, where the newest
-`## Epic Checkpoint after` block is the last checkpoint, with the commits its
-measures were run at:
+Read the epic's contract and its notes. The notes are its history, newest last:
+the note its filer wrote on whose words each field is, each review's block
+with the commits its measures were run at, and each proposal an agent recorded
+since:
 ```bash
 gc bd show "$EPIC"
 gc bd show "$EPIC" --json | jq -r '.[0].metadata | to_entries[] | select(.key | startswith("epic_")) | "\(.key): \(.value)"'
 ```
-When that read shows `epic_hypothesis` and no `epic_ruling`, the hypothesis is
-a first draft and this sitting is the first to judge it, so test its signal.
-Could it still come out wrong once the work lands? A count the work moves by
-itself, such as lines removed or members closed, cannot, so it is a leading
-indicator and not the signal. Can it be read soon after the work lands, without
-waiting for data that does not exist yet? Where either answer is no, write the
-sharper sentence you would propose.
+Whose words a field is comes from that history: the filer's note, or the block
+of the review that last set the field. On an epic whose notes say neither, read
+the field's write history (`gc bd history "$EPIC" --events --json`) and the
+conversations that track the epic. A field that no record shows the operator
+stating or approving is the proposal of whoever wrote it.
 
-The work under it, Deliveries and Stories alike, and then each Delivery's
+Then assess the contract as it reads, whoever wrote it and whatever a past
+ruling said. Wherever one of these finds a gap, write the change you propose:
+
+- a field the contract lacks: the floor (the handle, the hypothesis and the
+  boundaries) first, then the closure condition and the indicators;
+- the hypothesis's signal. Could it still come out wrong once the work lands?
+  A count the work moves by itself, such as lines removed or members closed,
+  cannot, so it is a leading indicator and not the signal. Can it be read soon
+  after the work lands, without waiting for data that does not exist yet?
+- the boundaries, against the ones the other open epics record and the
+  deletion schedule in `docs/built-once-target.md`, either of which can own the
+  epic's ground already:
+  `gc bd list -t epic --status open --limit 0 --json | jq -r '.[] | "\(.id) \(.metadata.epic_boundaries // "none")"'`;
+- each proposal recorded since the last review;
+- what the evidence below contradicts.
+
+Read the work under it, Deliveries and Stories alike, and then each Delivery's
 Stories with the commit and the PR each one landed. Every read of what sits
 under a bead uses its parent-child edges, the ones bd's close reads, because
 the `--parent` filter of `gc bd list` also returns a bead moved out from under
@@ -64,15 +85,15 @@ it whose id still carries the parent's:
 gc bd dep list "$EPIC" --direction=up -t parent-child --json | jq -r '.[] | "\(.id) [\(.issue_type) \(.status)] \(.title)"'
 gc bd dep list <delivery> --direction=up -t parent-child --json | jq -r '.[] | "\(.id) [\(.status)] \(.metadata.merged_sha // "-") \(.metadata.pr_url // "-") \(.title)"'
 ```
-Then read or run each of these:
+Then read or run each of these that the epic has:
 
 - each landed Story's merged change on main and its closed bead, read directly
   (`git show --stat <merged_sha>`, `gh pr view <pr_url>`, `gc bd show <story>`);
 - each check in `epic_closure_condition`, run again;
 - each measured criterion, run by one method at the commit of the latest landing
-  you read and at the last checkpoint's commit. A measure the city's other work
-  also moves is read against that work, so the landed work is not credited with
-  the whole change;
+  you read and at the last review's commit, or at main's head as the baseline
+  while nothing has landed. A measure the city's other work also moves is read
+  against that work, so the landed work is not credited with the whole change;
 - each graded criterion, which the operator grades. One with no way to grade it
   is recorded as such;
 - the leading indicators in `epic_indicators`, and the backstop invariant;
@@ -82,24 +103,33 @@ Then read or run each of these:
   itself, and each PR in flight under either, a member at
   `merge_result=pull_request`.
 
-One checkpoint reads every Delivery of the epic that has landed by now and
+An Epic Checkpoint reads every Delivery of the epic that has landed by now and
 closes each under its one ruling. Each ruling overwrites the epic's last one,
 so two sittings run back to back would each write the ruling fields, and the
 second would overwrite the first's.
 
-## Hold: gate what the ruling closes
+## Hold: gate only what waits for the ruling
 
-What waits for the ruling is the close of each landed Delivery. In the hold's
-gate step, file the gate on each landed Delivery, with that Delivery as the bead
-that must wait. Run the hold's block once for each, with this message:
+Work under the epic that no judgment holds goes on while the operator decides.
+What waits for the ruling is each bead whose next step depends on it. At a
+checkpoint, that is the close of each landed Delivery: in the hold's gate step,
+file the gate on each landed Delivery, with that Delivery as the bead that must
+wait. At any review, it is also each bead whose work depends on a judgment you
+frame, such as a Story whose scope the boundaries decide, and you file the gate
+on that bead the same way. Run the hold's block once for each, with one of
+these messages:
 ```
 Rule on <epic>'s Epic Checkpoint: <delivery> has landed, and its close waits for the ruling
 <what the operator rules on, and what the ruling closes>
 ```
+```
+Rule on <epic>'s review: <bead> waits for <the judgment>
+<the judgment, the change you propose for it, and what waits on it>
+```
 A landed Delivery has nothing unstarted under it, so its gate pauses no work.
 Gate no other part of the epic, and never the epic itself: a gate on the epic
-holds every unstarted part of it until the operator rules. An epic with no
-landed Delivery needs no gate, because nothing waits for the ruling.
+holds every unstarted part of it until the operator rules. A review with
+nothing waiting for its ruling needs no gate.
 
 When the choice you frame would retire a PR in flight under the epic, or move
 one into another rig's store, its merge waits for the ruling too. Gate that
@@ -108,31 +138,39 @@ about it. The ruling can then retire it through the sign-off's writer, which
 reaches a PR only through the subject or a gate it answers.
 
 The framing leads with your recommendation, continue, shift or close, and what
-each costs. Above it sit the measures with their commits, the grades the
-operator owes, each landed Delivery's aim against what it showed, and the open
-work. On a close, the framing asks the operator what becomes of each piece of
-open work. When the hypothesis is a first draft, the framing says so, quotes
-it, says what the test of its signal found, and quotes any sharper sentence you
-propose, so that a yes approves words the operator has read.
+each costs. Above the recommendation, give what you read: the contract as it
+reads, with whose words each field is and what the test of its signal found,
+the measures with their commits, the grades the operator owes, each landed
+Delivery's aim against what it showed, and the open work. Quote each change
+you propose, as your proposal, so that a yes approves words the operator has
+read. Ask each judgment the ruling needs as a question of its own, and say what
+waits on it. A yes covers only what the framing quoted. On a close, the framing
+asks the operator what becomes of each piece of open work.
 
 ## The writes, in order
 
 Once the operator rules, make these writes in this order. Notes are
 append-only, so never pass `--notes`.
 
-**1. Record the checkpoint on the epic.** The block names each Delivery the
-checkpoint closes, or `none`. While checkpoints run by hand, it also says what
-was mechanical, what took judgment and what the contract lacked. The block
-reads back before anything else is written:
+**1. Record the review on the epic.** The block says what prompted the review
+and names each landed Delivery the checkpoint closes, or `none`. It gives the
+contract as it reads after the ruling, with whose words each field is, and each
+judgment still owed, with the gate that asks it and the work that waits on it.
+While reviews run by hand, it also says what was mechanical, what took judgment
+and what the contract lacked. The block reads back before anything else is
+written:
 ```bash
 TODAY=$(date -u +%Y-%m-%d) \
-  && RECORD="## Epic Checkpoint after <each landed Delivery's id, or none>, $TODAY
+  && RECORD="## Epic review, $TODAY
 $(cat <<'BLOCK'
+Prompted by: <what called this review: the epic's filing, the operator's call, a judgment an agent asked for, or each landed Delivery's id>
 Ruling: <continue, shift or close>. <why; on a close, the outcome>
-Measures: <each measure, its value, the commit it was run at, and the method>
-Grades: <each graded criterion and the operator's grade, or why it has no way to be graded>
-Indicators: <each leading indicator and the backstop invariant, as read>
-Deliveries: <each landed Delivery's aim and what its landing showed>
+Contract: <each field as it reads after the ruling, and whose words it is: the operator's, or whose proposal and whether this ruling took it>
+Measures: <each measure, its value, the commit it was run at, and the method, or none>
+Grades: <each graded criterion and the operator's grade, or why it has no way to be graded, or none>
+Indicators: <each leading indicator and the backstop invariant, as read, or none>
+Deliveries: <each landed Delivery's aim and what its landing showed, or none>
+Open: <each judgment still owed, the gate that asks it and the work that waits on it, or none>
 Next: <what comes next; on a close, each piece of open work and what becomes of it>
 Mechanical: <what was mechanical>
 Judgment: <what took judgment>
@@ -141,16 +179,18 @@ BLOCK
 )" \
   && gc bd update "$EPIC" --append-notes "$RECORD" \
   && gc bd show "$EPIC" --json | jq -e --arg b "$RECORD" '(.[0].notes // "") | contains($b)' >/dev/null \
-  && echo "the checkpoint record is on $EPIC"
+  && echo "the review record is on $EPIC"
 ```
 No closing line means the record did not land: write nothing more, and say so
 in the thread. When the subject is the epic, this block is the record of the
-settle step. When the subject is a Delivery, that step's record on the
-Delivery is one line naming this block.
+settle step. When the subject is another bead, such as a Delivery or work that
+waited on a judgment, that step's record on the subject is one line naming
+this block.
 
 **2. Record the ruling on the epic,** in the fields `docs/epic-stewardship.md`
-registers ("Recording a ruling"). The evidence is each human gate the ruling
-clears, which the conversation replies to. This lists them:
+registers ("Recording a ruling"). `epic_ruling_at` is when the operator ruled,
+which is now. The evidence is each human gate the ruling clears, which the
+conversation replies to. This lists them:
 ```bash
 gc bd list --id "$CONVERSATION" --all --json | jq -r '[.[0].dependencies[]? | select(.type == "replies-to") | .depends_on_id] | join(" ")'
 ```
@@ -168,16 +208,19 @@ one.
 Then answer the gates now, on this turn, through the sign-off's writer. The
 close gate refuses a bead that an open human gate holds, so every close below
 waits for these answers, and the sign-off later reads each gate as already
-cleared. One call answers, under the ruling, each gate a landed Delivery's close
-waits on:
+cleared. One call answers, under the ruling, each gate a landed Delivery's
+close waits on, and each gate on work whose judgment the ruling gave:
 ```bash
 "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" --answer <gate> \
   --ruling "<the ruling, one line>" \
   --outcome "<where the epic stands now, at most 140 characters>" --no-wait
-  # --answer <gate> once for each gate a landed Delivery's close waits on
+  # --answer <gate> once for each gate the ruling settles
 ```
+A gate whose judgment the ruling leaves open stays owed: answer it on no call,
+and name it with `--leave` at the sign-off (the `converse-settle` skill).
+
 Each gate on a PR's anchor is answered on a call of its own, under that PR's
-own ruling: the checkpoint's ruling and what it does to that PR, naming the PR.
+own ruling: the review's ruling and what it does to that PR, naming the PR.
 The sign-off records the PR a retirement acts on under the words of its ruling,
 so a re-run of the call recovers its own PR. Two calls under the same words
 share one record, and without `--pr-anchor` the second acts on the first PR
@@ -201,9 +244,9 @@ printed and run the same call again, which acts on the same PR. A call that
 leaves a PR standing prints a line when that PR's merge still waits on GitHub:
 pass the line on, with its link.
 
-**3. Close each landed Delivery.** Every close here and in write 6 is made the
-same way, and none is forced. First, nothing under the bead may be open. This
-prints what still is:
+**3. At a checkpoint, close each landed Delivery.** Every close here and in
+write 6 is made the same way, and none is forced. First, nothing under the
+bead may be open. This prints what still is:
 ```bash
 gc bd dep list <bead> --direction=up -t parent-child --json | jq -r '.[] | select(.status != "closed") | "\(.id) [\(.status)] \(.title)"'
 ```
@@ -243,15 +286,22 @@ close ruling, and bd refuses while anything under the bead is open or a blocker
 still holds it. Settle what the refusal names and run the line again. Never
 force a close.
 
-**4. On continue or shift, aim the next body of work.** First re-aim each
-contract field the ruling changes, in its own key
-(`gc bd update "$EPIC" --set-metadata epic_hypothesis="<its new text>"`, and
-the same way `epic_handle`, `epic_boundaries`, `epic_closure_condition` and
-`epic_indicators`), such as a shift's new aim, or the sharper sentence a
-continue gives a first draft. On a shift, also re-aim each Delivery still open
-whose aim the shift changes. A Delivery's aim is the `Aim:` line its
-description opens with, so read the description, then write it whole with the
-new line:
+**4. On continue or shift, aim the next body of work.** First record each
+contract field the ruling sets, in its own key: each change the operator took,
+each field the operator stated, and a shift's new aim. A field takes only the
+operator's words or a change they approved, so leave out each line for a field
+the ruling does not set. A proposal the operator did not take stays out of the
+keys, and the block says what became of it:
+```bash
+gc bd update "$EPIC" --set-metadata epic_hypothesis="<the sentence: for whom, what changes, and the signal that shows it worked>" \
+  --set-metadata epic_handle="<three to five words>" \
+  --set-metadata epic_boundaries="<the axis it is cut on, and the work beside it that it is not, with where that lives>" \
+  --set-metadata epic_closure_condition="<the checks a person runs to answer the hypothesis>" \
+  --set-metadata epic_indicators="<the signals watched while it is in flight>"
+```
+On a shift, also re-aim each Delivery still open whose aim the shift changes. A Delivery's aim is the `Aim:`
+line its description opens with, so read the description, then write it whole
+with the new line:
 `gc bd update <delivery> --description "<the description, with its new Aim: and Done when: lines>"`.
 
 When the ruling aims a next Delivery, list the epic's open Deliveries first.
@@ -337,4 +387,4 @@ the sign-off reaches none of those PRs and takes none of `--rework`,
 closes the conversation. When it refuses because it reaches an open PR, that
 PR's gate is still open: make the PR's own call first, then sign off again. A PR
 answer added to the sign-off itself would answer that gate under the
-checkpoint's ruling instead of the PR's own. Then drain.
+review's ruling instead of the PR's own. Then drain.

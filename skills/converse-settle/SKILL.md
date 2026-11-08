@@ -17,24 +17,13 @@ never pass `--notes`, which replaces them:
 ```bash
 gc bd update "$SUBJECT" --append-notes "<the decision>. <why>. <what changed>."
 ```
-When the subject is an epic and the ruling states or confirms its contract
-(`docs/epics.md`, "The contract an epic carries"), record each field in its own
-key as well, never in the description or the notes alone: the close gate, the
-doctor's I15 and the Epic Checkpoint read the keys. Give a field only as the
-operator stated or confirmed it, and leave out each line for a field the
-ruling does not settle:
-```bash
-gc bd update "$SUBJECT" --set-metadata epic_hypothesis="<the sentence: for whom, what changes, and the signal that shows it worked>" \
-  --set-metadata epic_handle="<three to five words>" \
-  --set-metadata epic_boundaries="<the axis it is cut on, and the work beside it that it is not, with where that lives>" \
-  --set-metadata epic_closure_condition="<the checks a person runs to answer the hypothesis>" \
-  --set-metadata epic_indicators="<the signals watched while it is in flight>"
-```
-The operator's yes to the epic's hypothesis, as they stated, confirmed or
-sharpened it, is a ruling on the epic, a continue, and the first ruling ends the
-sentence's first draft (`docs/epics.md`, "The contract an epic carries"). So a
-sitting that hears it is an Epic Checkpoint, and the `converse-epic-checkpoint`
-skill records the ruling.
+When the subject is an epic, or work that waits on a judgment about one, and
+the operator judged the epic's contract or ruled on its course, the sitting is
+a review of the epic (`docs/epics.md`, "Reviewing an epic"), and the
+`converse-epic-review` skill's writes record it: the review's block on the
+epic, the ruling, and each field the ruling sets in its own key, never in the
+description or the notes alone. The close gate, the doctor's I15 and the next
+review read the keys.
 
 When the notes have grown past a quick read, append a current-state block too.
 The newest one is the one in force, and step 4 primes from it:
@@ -292,17 +281,13 @@ message.
 `--waiting-on <work-bead>` to the sign-off for each dependency it sent.** The
 `work` skill says which bead carries the work and how to choose its formula. An
 epic the ruling files takes that skill's epic create, which records the epic's
-contract in the create and refuses an epic with no hypothesis. When the
-operator stated or confirmed the new epic's hypothesis, that yes is its first
-ruling, a continue, so record it once the create has returned the epic's id,
-with `--set-metadata epic_ruling_evidence=<the gate>` in place of the last line
-when a human gate carried the yes:
+contract in the create and refuses an epic with no hypothesis, and the note it
+writes once the create has returned the epic's id, which says whose words each
+field is. A field the operator stated or approved in this sitting is theirs,
+and the note quotes their words, so a review of the epic can tell it from this
+sitting's proposal:
 ```bash
-gc bd update <the new epic> --set-metadata epic_ruling=continue \
-  --set-metadata epic_ruling_reason="<what the operator said yes to, and where>" \
-  --set-metadata epic_ruling_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --set-metadata epic_ruling_by="$GC_SESSION_NAME" \
-  --unset-metadata epic_ruling_evidence
+gc bd update <the new epic> --append-notes "Filed $(date -u +%Y-%m-%d) by $GC_SESSION_NAME in conversation $CONVERSATION. Proposed by this sitting: <each field it wrote, or none>. Stated by the operator: <each field they stated or approved, quoting their words, or none>."
 ```
 The sling runs only once the create returned the bead's id:
 ```bash

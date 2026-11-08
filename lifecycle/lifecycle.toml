@@ -1467,14 +1467,14 @@ keys = [
 # them. `gctk epic create` (assets/scripts/epic.sh, the work skill's epic
 # create) writes the contract fields into the create that files an epic, and
 # refuses an epic whose parent is not an epic when it has no epic_hypothesis.
-# The hypothesis can be the filer's first draft until the operator's first
-# ruling, and an epic with epic_hypothesis and no epic_ruling has one. The other
-# contract fields and the ruling's keys are the operator's: stamped when the
-# operator states or confirms a contract field or rules at a sitting on the
-# epic, the dated decision docs/epics.md calls for. No pack script writes the
-# ruling's keys. finalize-gate.sh (clause_epic_ruling_recorded) and
-# doctor/check-epic-closed-implies-ruled read epic_hypothesis, epic_ruling and
-# epic_ruling_reason.
+# A contract field the filer writes is its proposal, and the epic's notes say
+# whose words each field is. After the filing a contract field takes only words
+# the operator stated or approved, and the ruling's keys are stamped when the
+# operator rules at a review of the epic, whose block in the epic's notes is the
+# dated record docs/epics.md calls for. No key marks an epic as reviewed, and no
+# pack script writes the ruling's keys. finalize-gate.sh
+# (clause_epic_ruling_recorded) and doctor/check-epic-closed-implies-ruled read
+# epic_hypothesis, epic_ruling and epic_ruling_reason.
 keys = [
   "epic_handle", "epic_hypothesis", "epic_boundaries",
   "epic_closure_condition", "epic_indicators",
@@ -1499,9 +1499,10 @@ keys = [
 #   disproven, cannot be met as stated, stalled, or ran past its cost. On continue
 #   or shift it says what the next body of work is aimed at. Absent or whitespace
 #   alone reads as unrecorded.
-# epic_ruling_at / epic_ruling_by / epic_ruling_evidence — when the latest ruling
-#   was recorded, who recorded it, and the human gate whose resolve carried it.
-#   Bookkeeping beside epic_ruling; absent leaves the provenance unstated.
+# epic_ruling_at / epic_ruling_by / epic_ruling_evidence — when the operator
+#   made the latest ruling, who recorded it, and the human gate whose resolve
+#   carried it. Bookkeeping beside epic_ruling; absent leaves the provenance
+#   unstated.
 
 [metadata.human_surface]
 keys = [
