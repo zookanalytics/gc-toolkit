@@ -40,11 +40,14 @@ anchor() { # id merge_result [extra_meta]
   printf '{"id":"%s","status":"open","assignee":"","notes":"","title":"anchor %s","metadata":{"merge_result":"%s"%s}}' \
     "$1" "$1" "$2" "${3:-}"
 }
-SUP='"gc.superseded_by":"SUCC"'          # bead-rehome stamped a successor pointer
+# The anchor names a successor through bd's supersedes edge, which bead-rehome.sh
+# records with the close. The edge rides the row as `gc bd list` prints it, the
+# row bd_disposed_to reads.
+sup() { jq -c '.dependencies = [{issue_id: .id, depends_on_id: "SUCC", type: "supersedes"}]'; }
 DISP='"gc.pr_close_disposition_kind":"not-needed"'  # pr-dispose recorded intent
 
-echo "# the sweep condition: machine scaffolding on a disposed anchor (superseded_by)"
-store "[$(scaf F1 ADISP finding),$(scaf V1 ADISP validation),$(scaf RW1 ADISP rework),$(anchor ADISP pull_request ",$SUP")]"
+echo "# the sweep condition: machine scaffolding on a disposed anchor (a supersedes edge)"
+store "[$(scaf F1 ADISP finding),$(scaf V1 ADISP validation),$(scaf RW1 ADISP rework),$(anchor ADISP pull_request | sup)]"
 out=$(run); rc=$?
 eq "$rc" 0 "a completed pass exits 0"
 eq "$(bstatus F1)"  "closed" "the finding is retired"
@@ -52,14 +55,14 @@ eq "$(bstatus V1)"  "closed" "the validation pass is retired"
 eq "$(bstatus RW1)" "closed" "the rework is retired"
 eq "$(meta F1 gc.outcome)" "moot" "…recorded as moot, not as a verdict"
 eq "$(bstatus ADISP)" "open" "the anchor itself is NEVER closed by this arm"
-eq "$(meta ADISP gc.superseded_by)" "SUCC" "…and the anchor is otherwise untouched"
+eq "$(jq -r '.[] | select(.id == "ADISP") | [.dependencies[]? | .type + ">" + .depends_on_id] | join(",")' "$STUB_STORE")" "supersedes>SUCC" "…and the anchor is otherwise untouched"
 has "$out" "3 scaffolding bead(s) closed" "the pass counts what it closed"
 has "$out" "closed finding F1" "…and names each"
 n=$(notes F1)
 has "$n" "dispatch note" "the dispatch note survives (notes are APPENDED)"
 has "$n" "retired as moot" "the reason is recorded on the bead"
 has "$n" "ADISP" "…naming the anchor"
-has "$n" "superseded_by=SUCC" "…and the disposition that made it moot"
+has "$n" "superseded by SUCC" "…and the disposition that made it moot"
 
 echo "# the other disposition marker: a pre-recorded PR-close disposition"
 store "[$(scaf F2 ADISP2 finding),$(anchor ADISP2 pull_request ",$DISP")]"
@@ -68,7 +71,7 @@ eq "$(bstatus F2)" "closed" "a pr_close_disposition_kind is a disposed anchor to
 has "$(notes F2)" "pr_close_disposition=not-needed" "…and the note names it"
 
 echo "# scope boundary: human visits and review beads are left standing"
-store "[$(scaf F3 ADISP3 finding),{\"id\":\"VIS3\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"title\":\"visit\",\"metadata\":{\"task_kind\":\"visit\",\"anchor_bead\":\"ADISP3\"}},{\"id\":\"REV3\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"title\":\"review\",\"metadata\":{\"task_kind\":\"review\",\"anchor_bead\":\"ADISP3\"}},$(anchor ADISP3 pull_request ",$SUP")]"
+store "[$(scaf F3 ADISP3 finding),{\"id\":\"VIS3\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"title\":\"visit\",\"metadata\":{\"task_kind\":\"visit\",\"anchor_bead\":\"ADISP3\"}},{\"id\":\"REV3\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"title\":\"review\",\"metadata\":{\"task_kind\":\"review\",\"anchor_bead\":\"ADISP3\"}},$(anchor ADISP3 pull_request | sup)]"
 out=$(run)
 eq "$(bstatus F3)"  "closed" "the finding on the disposed anchor is retired"
 eq "$(bstatus VIS3)" "open"  "a human visit on the same anchor is left standing"
@@ -82,14 +85,14 @@ eq "$(bstatus F4)" "open" "an anchor with no disposition marker is left alone"
 has "$out" "0 scaffolding bead(s) closed" "…and nothing is swept"
 
 echo "# a merged anchor is a landing, not a disposal (close-answered's, not this arm's)"
-store "[$(scaf F5 AMRG finding),$(anchor AMRG merged ",$SUP")]"
+store "[$(scaf F5 AMRG finding),$(anchor AMRG merged | sup)]"
 run >/dev/null
-eq "$(bstatus F5)" "open" "scaffolding on a merged anchor is left alone even with a pointer present"
+eq "$(bstatus F5)" "open" "scaffolding on a merged anchor is left alone even with a successor named"
 
 echo "# reworks close before the findings they block, in one pass"
 # The edges finding.sh writes: a fix unit blocks the anchor and every must-fix
 # finding it answers, and the finding blocks the anchor.
-store "[$(scaf FB ABLK finding),$(scaf RB ABLK rework),$(anchor ABLK pull_request ",$SUP")]"
+store "[$(scaf FB ABLK finding),$(scaf RB ABLK rework),$(anchor ABLK pull_request | sup)]"
 printf 'RB|blocks|FB\nRB|blocks|ABLK\nFB|blocks|ABLK\n' >> "$STUB_DEPS"
 out=$(STUB_ENFORCE_BLOCKS=1 run); rc=$?
 eq "$rc" 0 "the pass exits 0"
@@ -107,7 +110,7 @@ has "$out" "carries rebase_hold" "…and the pass says why it is left"
 eq "$(bstatus FH)" "closed" "the unfrozen finding beside it is still retired"
 
 echo "# a claimed scaffolding bead is swept too"
-store "[$(scaf F6 ADISP6 rework in_progress),$(anchor ADISP6 pull_request ",$SUP")]"
+store "[$(scaf F6 ADISP6 rework in_progress),$(anchor ADISP6 pull_request | sup)]"
 run >/dev/null
 eq "$(bstatus F6)" "closed" "a claimed rework on a disposed anchor has nothing left to produce"
 
@@ -121,13 +124,13 @@ eq "$(bstatus F8)" "open" "a finding whose anchor does not resolve is left alone
 has "$out" "does not resolve" "…and the pass says which anchor it could not read"
 
 echo "# only scaffolding beads, only live ones (idempotence across passes)"
-store "[{\"id\":\"W1\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"title\":\"work\",\"metadata\":{\"anchor_bead\":\"A9\"}},$(scaf F9 A9 finding closed),$(anchor A9 pull_request ",$SUP")]"
+store "[{\"id\":\"W1\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"title\":\"work\",\"metadata\":{\"anchor_bead\":\"A9\"}},$(scaf F9 A9 finding closed),$(anchor A9 pull_request | sup)]"
 out=$(run)
 eq "$(bstatus W1)" "open" "a bead carrying no scaffolding task_kind is not this arm's business"
 has "$out" "no live scaffolding beads" "…and an all-closed population is nothing to do"
 
 echo "# a close that does not read back is reported, never counted"
-store "[$(scaf FX ADX finding),$(anchor ADX pull_request ",$SUP")]"
+store "[$(scaf FX ADX finding),$(anchor ADX pull_request | sup)]"
 out=$(STUB_DROP_KEYS="FX:status" run); rc=$?
 eq "$rc" 0 "a stuck write does not fail the arm (the next pass retries)"
 eq "$(bstatus FX)" "open" "the bead really did not close"
@@ -136,15 +139,16 @@ has "$out" "0 scaffolding bead(s) closed" "…without counting it swept"
 has "$out" "1 write(s) held for retry" "…and reports it held for retry"
 
 echo "# an unreadable enumeration sweeps nothing"
-store "[$(scaf FY ADY finding),$(anchor ADY pull_request ",$SUP")]"
+store "[$(scaf FY ADY finding),$(anchor ADY pull_request | sup)]"
 out=$(STUB_LIST_FAIL=1 run); rc=$?
 eq "$rc" 1 "an unreadable scaffolding listing exits 1"
 eq "$(bstatus FY)" "open" "…and closes nothing"
 has "$out" "false all-clear" "…rather than reporting one"
 
 # bead-rehome.sh, the close a carried-forward finding takes: on success it
-# stamps gc.superseded_by and closes the origin, and writes the back-pointer on
-# the successor. STUB_REHOME_RC models a refusal that closes nothing.
+# records its supersedes edge onto the successor and closes the origin.
+# STUB_REHOME_RC models a refusal that closes nothing, and STUB_REHOME_NOEDGE an
+# edge that did not write, which closes nothing either.
 cat > "$SD/bead-rehome.sh" <<'REHOME'
 #!/usr/bin/env bash
 set -u
@@ -158,8 +162,9 @@ while [ $# -gt 0 ]; do
   shift || true
 done
 [ -z "${STUB_REHOME_RC:-}" ] || exit "$STUB_REHOME_RC"
-gc bd update "$origin" --status=closed --set-metadata "gc.superseded_by=$succ" >/dev/null 2>&1 || exit 5
-gc bd update "$succ" --set-metadata "gc.supersedes=$origin" >/dev/null 2>&1 || true
+[ -z "${STUB_REHOME_NOEDGE:-}" ] || exit 4
+gc bd dep add "$origin" "$succ" --type supersedes >/dev/null 2>&1 || exit 4
+gc bd update "$origin" --status=closed >/dev/null 2>&1 || exit 5
 REHOME
 chmod +x "$SD/bead-rehome.sh"
 export STUB_REHOME_LOG="$TMP/rehome.log"; : > "$STUB_REHOME_LOG"
@@ -178,8 +183,18 @@ hfind() { # id anchor locus [comment-id]
   printf '{"id":"%s","status":"open","assignee":"","notes":"dispatch note","title":"finding[human]: objection %s","description":"Locus: %s\\n\\nThe objection %s.\\n\\nRaised by human:op reviewing anchor %s.","metadata":{"task_kind":"finding","anchor_bead":"%s","finding.lane":"human","finding.source":"human:op","finding.disposition":"must-fix"%s}}' \
     "$1" "$1" "$3" "$1" "$2" "$2" "${4:+,\"finding.comment_id\":\"$4\"}"
 }
+# The bugs born discovered-from <finding>, one id a line: the beads that carry
+# its objection forward.
+carriers() {
+  local b
+  for b in $(awk -F'|' -v f="$1" '$2 == "discovered-from" && $3 == f { print $1 }' "$STUB_DEPS"); do
+    [ "$(jq -r --arg b "$b" '.[] | select(.id == $b) | .issue_type // "task"' "$STUB_STORE")" = "bug" ] && printf '%s\n' "$b"
+  done
+}
 # The bead that carries <finding>'s objection forward, if one was filed.
-carrier() { jq -r --arg f "$1" '[ .[] | select((.metadata["gc.supersedes"] // "") == $f) | .id ] | .[0] // "<none>"' "$STUB_STORE"; }
+carrier() { local c; c=$(carriers "$1" | head -1); printf '%s' "${c:-<none>}"; }
+# The bead <id> names through its own supersedes edge, or <none>.
+succ_of() { awk -F'|' -v id="$1" '$1 == id && $2 == "supersedes" { print $3; f = 1; exit } END { if (!f) print "<none>" }' "$STUB_DEPS"; }
 # PR #<n>'s inline review comments: 501 sits on an added line, and 502 and 504
 # on lines the diff left unchanged, 504 in a file at the repository root.
 comments() { # num
@@ -233,7 +248,7 @@ BUG=$(carrier FCX)
 hasnt "$BUG" "<none>" "a human comment on a line the PR left unchanged is carried forward to a bead of its own"
 eq "$(bstatus FCX)" "closed" "…the finding closes"
 eq "$(meta FCX gc.outcome)" "<absent>" "…but not as moot"
-eq "$(meta FCX gc.superseded_by)" "$BUG" "…pointed at the bead that carries it"
+eq "$(succ_of FCX)" "$BUG" "…naming the bead that carries it"
 has "$(cat "$STUB_REHOME_LOG")" "--origin FCX --successor $BUG --kind re-homed" "…through bead-rehome.sh"
 eq "$(bstatus "$BUG")" "open" "the carrier is open work"
 eq "$(jq -r --arg b "$BUG" '.[] | select(.id == $b) | .title' "$STUB_STORE")" "objection FCX" "…titled with the objection"
@@ -249,12 +264,29 @@ has "$out" "1 finding(s) carried forward" "the pass counts what it carried forwa
 
 echo "# a carried-forward finding is not filed twice"
 # An earlier pass filed the bug, then lost the finding's close.
-store "[$(hfind FC2 AP2 docs/b.md:7 502),{\"id\":\"BUG2\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"title\":\"objection FC2\",\"metadata\":{\"gc.supersedes\":\"FC2\"}},$(anchor AP2 pull_request "$(PRD 41)")]"
+store "[$(hfind FC2 AP2 docs/b.md:7 502),{\"id\":\"BUG2\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"title\":\"objection FC2\",\"issue_type\":\"bug\",\"metadata\":{}},$(anchor AP2 pull_request "$(PRD 41)")]"
+printf 'BUG2|discovered-from|FC2\n' > "$STUB_DEPS"
 comments 41
 : > "$STUB_GC_LOG"; : > "$STUB_REHOME_LOG"
 "$SUT" --anchor AP2 >/dev/null 2>&1
 hasnt "$(cat "$STUB_GC_LOG")" "bd create" "no second carrier is filed"
-eq "$(meta FC2 gc.superseded_by)" "BUG2" "…the finding closes onto the one already filed"
+eq "$(succ_of FC2)" "BUG2" "…the finding closes onto the one already filed"
+: > "$STUB_DEPS"
+
+echo "# a deferral's follow-up is not the carrier"
+# finding.sh files a deferral's follow-up discovered-from the finding too: a
+# task stamped source_finding, which waits for the anchor and is no bug.
+store "[$(hfind FC4 AP7 docs/b.md:7 502),{\"id\":\"FUP4\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"title\":\"follow-up FC4\",\"issue_type\":\"task\",\"metadata\":{\"source_finding\":\"FC4\"}},$(anchor AP7 pull_request "$(PRD 46)")]"
+printf 'FUP4|discovered-from|FC4\n' > "$STUB_DEPS"
+comments 46
+: > "$STUB_GC_LOG"
+"$SUT" --anchor AP7 >/dev/null 2>&1
+has "$(cat "$STUB_GC_LOG")" "bd create" "a bug is filed beside the follow-up"
+BUG4=$(carrier FC4)
+hasnt "$BUG4" "<none>" "…born discovered-from the finding"
+eq "$(succ_of FC4)" "$BUG4" "…and the finding closes onto the bug, not onto the follow-up"
+eq "$(bstatus FUP4)" "open" "…which is left as it was"
+: > "$STUB_DEPS"
 
 echo "# a refused bead-rehome leaves the finding for the next pass"
 store "[$(hfind FC3 AP3 docs/b.md:7 502),$(anchor AP3 pull_request "$(PRD 42)")]"
@@ -266,8 +298,17 @@ has "$out" "did not read back" "…and the pass says so"
 has "$out" "1 write(s) held for retry" "…holding it for a retry"
 BUG3=$(carrier FC3)
 "$SUT" --anchor AP3 >/dev/null 2>&1
-eq "$(meta FC3 gc.superseded_by)" "$BUG3" "the retry closes it onto the bug the first pass filed"
-eq "$(jq --arg f FC3 '[ .[] | select((.metadata["gc.supersedes"] // "") == $f) ] | length' "$STUB_STORE")" "1" "…and files no twin"
+eq "$(succ_of FC3)" "$BUG3" "the retry closes it onto the bug the first pass filed"
+eq "$(carriers FC3 | wc -l | tr -d ' ')" "1" "…and files no twin"
+
+echo "# a close that names no successor is not counted carried forward"
+store "[$(hfind FC5 AP8 docs/b.md:7 502),$(anchor AP8 pull_request "$(PRD 47)")]"
+comments 47
+out=$(STUB_REHOME_NOEDGE=1 "$SUT" --anchor AP8 2>&1); rc=$?
+eq "$(succ_of FC5)" "<none>" "the finding has no edge onto its bug"
+eq "$(bstatus FC5)" "open" "…and stays open"
+has "$out" "did not read back" "…which the pass reports"
+has "$out" "0 finding(s) carried forward" "…without counting it carried forward"
 
 echo "# a human finding whose line can never be checked is carried forward"
 store "[$(hfind FNI AP4 docs/b.md:7),$(hfind FNP ANOPR docs/b.md:7 502),$(anchor AP4 pull_request "$(PRD 43)"),$(anchor ANOPR pull_request ",$DISP")]"
@@ -284,7 +325,7 @@ out=$("$SUT" --anchor AP6 2>&1); rc=$?
 eq "$rc" 0 "the pass exits 0"
 BUGR=$(carrier FRT)
 hasnt "$BUGR" "<none>" "a comment on an unchanged line of a root-level file is carried forward, not mooted as an objection to the whole PR"
-eq "$(meta FRT gc.superseded_by)" "$BUGR" "…the finding closes pointed at the bead that carries it"
+eq "$(succ_of FRT)" "$BUGR" "…the finding closes naming the bead that carries it"
 eq "$(meta FCV gc.outcome)" "moot" "a Conversation comment objects to the PR as a whole, and is mooted"
 has "$(notes FCV)" "names no file" "…and the note says so"
 eq "$(meta FNL gc.outcome)" "moot" "a finding with no Locus line names no file, and is mooted"

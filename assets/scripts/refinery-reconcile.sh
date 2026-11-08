@@ -13,10 +13,8 @@
 # projection), review-sweep (cleanup over closed anchors; no projection, no
 # merge authority), scaffolding-sweep (retires validation/finding/rework on a
 # disposed anchor; BEADS_ACTOR projected: it closes a finding it carries forward
-# through bead-rehome; no merge authority), duplicate-sweep (BEADS_ACTOR
-# projected: it closes duplicate dispatches through bead-rehome; no merge
-# authority), pr-stack (PR bodies only — both managed regions; no projection,
-# no merge authority).
+# through bead-rehome; no merge authority), pr-stack (PR bodies only — both
+# managed regions; no projection, no merge authority).
 # The arms that walk a set growing with the queue share the pass budget (see
 # PASS_BUDGET_SECS and PACED_ARMS below): merge, pr-open, pr-feedback,
 # pre-open-rebase, gate-ensure, pr-facts and pr-stack.
@@ -431,17 +429,7 @@ run_pass "(8) review-sweep" review-sweep.sh || FAILED="${FAILED}review-sweep rc=
   run_pass "(9) scaffolding-sweep" scaffolding-sweep.sh ) \
   || FAILED="${FAILED}scaffolding-sweep rc=$?; "
 
-# (10) duplicate-sweep: dispose of verified no-op duplicate dispatches and of
-# never-dispatched rework twins whose same-review sibling landed. Late, and
-# after review-sweep, because the gate it re-verifies is a CLOSED successor: a
-# twin that arm 2 merged or arm 7 recorded this pass is disposable on this tick
-# rather than a minute later. BEADS_ACTOR projected — the close it delegates to
-# bead-rehome is attributed in the events table.
-( export BEADS_ACTOR="$AGENT"
-  run_pass "(10) duplicate-sweep" duplicate-sweep.sh ) \
-  || FAILED="${FAILED}duplicate-sweep rc=$?; "
-
-# (11) pr-stack: bring each open PR's body current with its anchor in both managed
+# (10) pr-stack: bring each open PR's body current with its anchor in both managed
 # regions — re-render the beads-on-this-branch section, and refresh the pr-summary
 # region when a rework moved the anchor summary past the published one (pr-open
 # composes that region only at pre_open_gate, which an open anchor never re-enters).
@@ -450,7 +438,7 @@ run_pass "(8) review-sweep" review-sweep.sh || FAILED="${FAILED}review-sweep rc=
 # later. It writes only PR bodies — no bead, no merge authority — so it runs
 # unprojected and its failure gates nothing.
 pace_args pr-stack
-run_pass "(11) pr-stack" pr-stack.sh "${PACE_ARGS[@]}" || FAILED="${FAILED}pr-stack rc=$?; "
+run_pass "(10) pr-stack" pr-stack.sh "${PACE_ARGS[@]}" || FAILED="${FAILED}pr-stack rc=$?; "
 
 # The per-pass bd_list cache is this pass's; drop it so no later pass can read
 # these rows. A killed pass never reaches here and the next pass's rm-then-create

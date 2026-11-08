@@ -6,7 +6,8 @@
 # stewarded epic not ruled closed, allows (exit 0) otherwise, and fails closed
 # (exit 1) on an unreadable probe. A gate filed under the --except-key situation
 # passes only while no person is assigned it. --as-disposed reads the bead as
-# carrying a disposition pointer, which only the ruling clause reads.
+# naming its successor through a disposition edge, which only the ruling clause
+# reads.
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/finalize-gate-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
@@ -202,10 +203,14 @@ store "[$(epic_bead E3b open '{}')]"; : > "$STUB_DEPS"
 out=$("$SUT" check E3b 2>/dev/null); rc=$?
 eq "$rc" 0 "an epic with no hypothesis is not held by the ruling clause: exit 0"
 
-# 22. A disposed epic (gc.superseded_by) is exempt — a recorded terminal reason.
-store "[$(epic_bead E3c open '{"epic_hypothesis":"h","gc.superseded_by":"s-1"}')]"; : > "$STUB_DEPS"
+# 22. A disposed epic (its supersedes edge onto a successor, on the show row)
+# is exempt — a recorded terminal reason. The retired successor key alone is not.
+store '[{"id":"E3c","status":"open","assignee":"","title":"E3c","description":"","notes":"","issue_type":"epic","metadata":{"epic_hypothesis":"h"},"dependencies":[{"id":"s-1","dependency_type":"supersedes"}]}]'; : > "$STUB_DEPS"
 out=$("$SUT" check E3c 2>/dev/null); rc=$?
 eq "$rc" 0 "a disposed epic is not held by the ruling clause: exit 0"
+store "[$(epic_bead E3k open '{"epic_hypothesis":"h","gc.superseded_by":"s-1"}')]"; : > "$STUB_DEPS"
+out=$("$SUT" check E3k 2>/dev/null); rc=$?
+eq "$rc" 1 "an epic carrying only the retired gc.superseded_by key is held: exit 1"
 
 # 23. The clause is epic-only: a plain work bead with no ruling may finalize.
 store "[$(work W1 open)]"; : > "$STUB_DEPS"
@@ -259,8 +264,8 @@ out=$("$SUT" check E27r --except-key dispose-failed.27 2>/dev/null); rc=$?
 eq "$rc" 0 "an epic ruled close with its outcome whose only gate is excepted: exit 0"
 
 # 28. --as-disposed answers as a disposed epic (22) answers, whatever the epic's
-# ruling reads. That is what bead-rehome.sh's close finds once it has stamped its
-# pointer, and what its --check asks before the stamp.
+# ruling reads. That is what bead-rehome.sh asks before it writes anything, on
+# its close and its --check alike.
 for m in '{"epic_hypothesis":"h"}' '{"epic_hypothesis":"h","epic_ruling":"continue"}' '{"epic_hypothesis":"h","epic_ruling":"shift"}' '{"epic_hypothesis":"h","epic_ruling":"pending"}' '{"epic_hypothesis":"h","epic_ruling":"close"}'; do
   store "[$(epic_bead E28 open "$m")]"; : > "$STUB_DEPS"
   "$SUT" check E28 >/dev/null 2>&1; eq "$?" 1 "$m: held as it stands"

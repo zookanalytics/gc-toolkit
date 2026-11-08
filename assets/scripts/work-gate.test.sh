@@ -149,7 +149,7 @@ for self in "$SELF_NAME" "$REFINERY"; do
 done
 eq "$(FAKE_SESSIONS="$SESS_OTHER" run "$(row '{"status":"closed","assignee":"hq-other","metadata":{}}')")" "$DONE_NOBODY" "closed under a live owner: finished, the liveness read does not apply"
 
-run "$(row '{"status":"closed","assignee":"","close_reason":"duplicate of tk-twin:\n  landed there first","metadata":{"gc.superseded_by":"tk-twin","gc.outcome":"duplicate"}}')" >/dev/null
+run "$(row '{"status":"closed","assignee":"","close_reason":"duplicate of tk-twin:\n  landed there first","dependencies":[{"id":"tk-twin","status":"open","dependency_type":"duplicates"}],"metadata":{"gc.outcome":"duplicate"}}')" >/dev/null
 has "$(cat "$TMP/cancel")" 'superseded by tk-twin' "closed: the reason names what superseded it"
 has "$(cat "$TMP/cancel")" 'outcome duplicate' "closed: the reason names gc.outcome"
 has "$(cat "$TMP/cancel")" 'close reason: duplicate of tk-twin: landed there first' "closed: the close reason rides on one line"

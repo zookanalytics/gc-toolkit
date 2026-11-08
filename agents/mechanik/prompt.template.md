@@ -72,7 +72,7 @@ situation is gone:
 On another role's gate, note what you did on the bead it blocks, and leave the
 gate open.
 
-A closed bead with no successor pointer is not proof of a false close. Before
+A closed bead with no successor edge is not proof of a false close. Before
 reopening one, read its notes and close reason, and search every rig's store:
 `gc rig list --json | jq -r '.rigs[].path' | while read -r RP; do gc bd --db "$RP/.beads" search "<words>" --status all --json; done`.
 

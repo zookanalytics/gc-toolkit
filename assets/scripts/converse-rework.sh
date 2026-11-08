@@ -28,7 +28,8 @@
 #     --ruling "<the ruling, one line>" [--pool <pool-name>]
 #   The anchor must be an open PR: live in the store, at
 #   merge_result=pull_request, carrying no disposition (gc.pr_close_disposition_kind
-#   or gc.superseded_by), and naming its branch, its landing target and its PR.
+#   or a duplicates or supersedes edge onto a successor), and naming its branch,
+#   its landing target and its PR.
 #   Its rig checkout, the one its id prefix names in `gc rig list`, must resolve,
 #   and its branch's head must read from that checkout's origin, since the lanes
 #   the supersede returns to unreviewed are resolved at that commit, in that
@@ -93,9 +94,9 @@ MERGE_RESULT=$(row_meta "$ANCHOR_ROW" merge_result)
 DISPOSITION=$(row_meta "$ANCHOR_ROW" gc.pr_close_disposition_kind)
 [ -z "$DISPOSITION" ] \
   || die "anchor $ANCHOR is disposed (gc.pr_close_disposition_kind=$DISPOSITION), so its PR is closing; nothing filed"
-SUCCESSOR=$(row_meta "$ANCHOR_ROW" gc.superseded_by)
+SUCCESSOR=$(printf '%s' "$ANCHOR_ROW" | jq -r "$DISPOSITION_JQ"'.[0] | disposed_to' 2>/dev/null)
 [ -z "$SUCCESSOR" ] \
-  || die "anchor $ANCHOR is superseded by $SUCCESSOR (gc.superseded_by); nothing filed"
+  || die "anchor $ANCHOR is superseded by $SUCCESSOR (its disposition edge names it); nothing filed"
 
 # branch is authoritative for the resume: mol-polecat-work checks it out and never
 # cuts a new one.
