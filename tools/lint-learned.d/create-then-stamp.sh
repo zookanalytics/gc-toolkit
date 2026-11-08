@@ -9,9 +9,9 @@
 # never comes back. No reader can see such a bead, so nothing closes it, and the
 # producer's next run files a stamped twin beside it. `bd create --metadata`
 # lands the payload in the bead's own row insert, so every key a stamp could
-# write can ride the create instead. A create that carries --metadata is free to be
-# followed by later writes: the bead was born findable, and what comes after is
-# a change of state, not its identity.
+# write can ride the create instead. A create that carries --metadata is free
+# to be followed by later writes: the bead was born findable, and what comes
+# after is a change of state, not its identity.
 #
 # Scanned: *.sh; fenced code (``` fences and `# >>>`…`# <<<` markers) in *.toml
 # and *.md, where formulas, prompts and skills keep the commands an agent runs.

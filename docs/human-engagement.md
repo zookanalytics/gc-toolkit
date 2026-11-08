@@ -518,8 +518,7 @@ ruling leaves owed stays open with its reply in place. It reads those gates
 from the conversation's own row (`gc bd list --id <task>`), whose edges keep a
 reply onto a gate in another store. Every read it depends on runs before its
 first write, and it stops short, with nothing posted, when the store refuses a
-write, or when a write that an act it cannot undo depends on does not read
-back, so a re-run repeats each write safely. A gate can be what holds a
+write, so a re-run repeats each write safely. A gate can be what holds a
 merge, and resolving it releases the merge, so whatever the ruling puts in the
 merge's way lands before any gate is resolved. A ruling that reaches an open
 PR must say what it does to the PR (`--rework`, `--no-rework` or `--retire`),

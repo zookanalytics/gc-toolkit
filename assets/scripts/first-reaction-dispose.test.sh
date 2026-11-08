@@ -402,10 +402,9 @@ has "only when the next move is the operator's" "$ERR" "(ACTPOOL) …keeping the
 unset FAKE_POOL_DEAD
 
 # real_helm_run <args...> — run with the real gc-helm.sh in place of the stub.
-# This fake's `bd update` keeps none of the keys a takeaway writes, so the real
-# release exits 0 and lands nothing: the lost whole update a degraded server or
-# a racing legacy writer leaves (docs/warrants.md, "bd write durability"). A run
-# cancel it reaches is logged as RUNCANCEL, and its board cache sits under $TMP.
+# This fake's `bd update` keeps none of the keys a takeaway writes, and refuses
+# an update that carries FAKE_UPDATE_REFUSE. A run cancel it reaches is logged
+# as RUNCANCEL, and its board cache sits under $TMP.
 printf '#!/usr/bin/env bash\nprintf "RUNCANCEL %%s\\n" "$*" >> "$FAKE_LOG"\n' > "$TMP/run-cancel"
 chmod +x "$TMP/run-cancel"
 real_helm_run() {

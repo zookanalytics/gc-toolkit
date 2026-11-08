@@ -389,9 +389,9 @@ follows the bead, directly or through others: the members under it, the
 PR-finishing work of each anchor among them, and the live workflow of each,
 meaning its input convoy, its root and every open step. Held beads are written
 too, so a parked epic's members take a new priority while the park holds them,
-and each is at its priority when the park is released. The move reads back every
-priority it writes. `--dry-run` prints what it would write and writes nothing.
-The writer is `assets/scripts/queue-priority.sh move`.
+and each is at its priority when the park is released. Each write the move makes
+takes its exit. `--dry-run` prints what it would write and writes nothing. The
+writer is `assets/scripts/queue-priority.sh move`.
 
 ### Settle
 

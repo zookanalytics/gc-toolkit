@@ -163,16 +163,6 @@ case "$1 ${2:-}" in
     asg="$(awk -F'|' -v i="$id" '$1==i{print $2; exit}' "$FAKE_ASSIGNEES" 2>/dev/null || true)"
     if [ -n "$convoy" ]; then row=$(jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg c "$convoy" --arg rt "$routed" --arg er "$exec_routed" --arg sd "$settled" --arg tk "$takeaway" --arg sn "$sname" --arg si "$sid" --arg br "$br" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.takeaway":$tk,"gc.takeaway_settled":$sd,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br}}]')
     else row=$(jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg rt "$routed" --arg er "$exec_routed" --arg sd "$settled" --arg tk "$takeaway" --arg sn "$sname" --arg si "$sid" --arg br "$br" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.takeaway":$tk,"gc.takeaway_settled":$sd,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br}}]'); fi
-    # The placement marker intake writes, and a parent-child parent: the release's
-    # pour-stamp read-back judges both through placement.sh. FAKE_PLACEMENT and
-    # FAKE_PARENT hold them, and an empty file leaves the key off the row, as on
-    # every bead intake never held.
-    pl="$(cat "${FAKE_PLACEMENT:-/dev/null}" 2>/dev/null || true)"
-    pa="$(cat "${FAKE_PARENT:-/dev/null}" 2>/dev/null || true)"
-    if [ -n "$pl$pa" ]; then
-      row=$(printf '%s' "$row" | jq --arg pl "$pl" --arg pa "$pa" \
-        '(if $pl != "" then .[0].metadata.placement = $pl else . end) | (if $pa != "" then .[0].parent = $pa else . end)')
-    fi
     printf '%s\n' "$row" ;;
   "bd close")
     printf '%s\n' "$*" >> "$FAKE_CLOSES" ;;
@@ -259,7 +249,7 @@ export FAKE_STEPS_JSON="$TMP/steps.json" FAKE_ROOTS="$TMP/roots" \
        FAKE_DEPS="$TMP/deps" FAKE_CLOSES="$TMP/closes" FAKE_LISTS="$TMP/lists" \
        FAKE_ROUTED="$TMP/routed" FAKE_SUPERSEDED="$TMP/superseded" \
        FAKE_SETTLED="$TMP/settled" FAKE_TAKEAWAY="$TMP/takeaway" \
-       FAKE_EXEC="$TMP/exec" FAKE_PLACEMENT="$TMP/placement" FAKE_PARENT="$TMP/parent" \
+       FAKE_EXEC="$TMP/exec" \
        FAKE_SNAME="$TMP/sname" FAKE_SID="$TMP/sid" FAKE_DEPLISTS="$TMP/deplists" \
        FAKE_BRANCHES="$TMP/branches" FAKE_ASSIGNEES="$TMP/assignees" \
        FAKE_CONVOY_CALLS="$TMP/convoy-calls"
@@ -345,8 +335,7 @@ grep -q 'gc.routed_to=' <<< "$A" \
   && ok "(RELEASE) anchor route cleared" || bad "(RELEASE) anchor route cleared"
 # The pour that dispatched this bead stamped gc.execution_routed_to; a release
 # ends that pour, so the stamp is retired in the same write, and a parked or
-# re-routed bead does not linger advertising a finished pour's pool. The stamp's
-# read-back is covered with the EXEC cases below.
+# re-routed bead does not linger advertising a finished pour's pool.
 grep -q -- '--unset-metadata gc.execution_routed_to' <<< "$A" \
   && ok "(RELEASE) anchor pour stamp (gc.execution_routed_to) retired" || bad "(RELEASE) anchor execution_routed_to cleared (got: $A)"
 # The unassign takes the departing executor's identity with it: a gc.session_name
@@ -700,8 +689,8 @@ esac
 #   (ROUTECLR)  no --route still clears the route (the release is unchanged)
 #   (ROUTEQUAL) a bare agent name is refused before anything is written
 #   (ROUTEREL)  --route without --release is refused (the unreadable half-state)
-#   (ROUTEONE)  the release is one write, read back through the stamp beside
-#               it, and says where the bead went
+#   (ROUTEONE)  the release is one write, whose exit decides, and says where
+#               the bead went
 #   (REFUSED)   an update the store refuses fails the verb: no success line, no
 #               edge and no run ended
 POOL="gc-toolkit/gc-toolkit.polecat"
@@ -751,8 +740,7 @@ eq "$RRC" "2" "(ROUTEREL) --route without --release is a usage error"
 eq "$(grep -c '^bd update' "$TMP/updates" || true)" "0" "(ROUTEREL) …and nothing was written"
 
 # (ROUTEONE) bd applies every pair of the release as one atomic operation, so
-# the release is one write, and the stamp beside it reading back shows it all
-# landed (docs/warrants.md, "bd write durability").
+# the release is one write, whose exit says whether all of it landed.
 : > "$TMP/updates"; : > "$TMP/routed"
 GRC=0
 sh "$SCRIPT" takeaway A-PARKED "landed clean" --release --route "$POOL" >"$TMP/rout" 2>/dev/null || GRC=$?
