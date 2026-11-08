@@ -90,7 +90,11 @@ named for the conversation, binds the conversation to that sitting's alias
 with a write guarded on the holder it read, so the session's own claim adopts
 it, and attaches once the reconciler has started it, however long the start
 takes, reporting the sitting's state while it waits (an interrupted wait leaves
-the sitting to start on its own, to attach later). Pointed at a human gate,
+the sitting to start on its own, to attach later). When the sitting it waits on
+ends before the reconciler starts it, engage hands the conversation back to the
+operator's queue with a write guarded on that sitting and on the conversation's
+status, and leaves one that another writer has taken or closed since as it is.
+Pointed at a human gate,
 engage takes the one bead still waiting on the gate and makes the conversation
 it lands on reply to the gate; with several beads waiting it names them and
 starts nothing, and with none it says nothing waits and starts nothing.
@@ -4563,6 +4567,42 @@ cmd_engage() {
         echo "$PROG: engage: stopped waiting after $(engage_dur "$start_waited"). Conversation $CONV stays held by $sname, which the reconciler goes on starting; attach once it reads active in 'gc session list': gc session attach $sid" >&2
         exit "$1"
     }
+    # engage_hand_back <holder> <status> — the wait found that the sitting
+    # holding conversation $CONV under <holder> ended before the reconciler
+    # started it, so engage puts the conversation back in the operator's
+    # queue itself. Nothing else would: the witness's orphan recovery passes
+    # over a conversation, which keeps its sitting's alias as its assignee
+    # until a sitting under that alias takes it back. <status> is the
+    # conversation's status as engage read it while the sitting held it, and
+    # the write is the one a sitting cut short makes at its sign-off, guarded
+    # on both. bd's close keeps the assignee, so a write guarded on the holder
+    # alone would reopen a conversation that a dismiss or a sign-off closed
+    # while the sitting started. A guard that misses writes nothing and exits
+    # 13, and one read then says where the conversation is: back in the queue
+    # already, closed, or held by another writer, and engage leaves it there.
+    # Leaves in hb_said what became of the conversation and what the operator
+    # runs next, the same sentences whichever sitting ended.
+    engage_hand_back() {
+        _hb_rc=0; _hb_row=""; _hb_owner=""; _hb_status=""
+        gc bd update "$CONV" --if-assignee "$1" --if-status "$2" --assignee human --status open >/dev/null 2>&1 || _hb_rc=$?
+        if [ "$_hb_rc" -eq 13 ]; then
+            _hb_row=$(row_now "$CONV")
+            _hb_owner=$(printf '%s' "$_hb_row" | jq -r '.assignee // "" | tostring' 2>/dev/null || true)
+            _hb_status=$(printf '%s' "$_hb_row" | jq -r '.status // "" | tostring | ascii_downcase' 2>/dev/null || true)
+        fi
+        [ "$_hb_rc" -ne 0 ] || bust_cache
+        if [ "$_hb_rc" -eq 0 ] || { [ "$_hb_owner" = human ] && [ "$_hb_status" = open ]; }; then
+            hb_said="Conversation $CONV is back in the operator's queue. Engage it again to start a new sitting: $PROG engage $CONV"
+        elif [ "$_hb_rc" -ne 13 ]; then
+            hb_said="The store refused to hand conversation $CONV back to the operator's queue (gc bd update exited $_hb_rc), so it is still bound to the sitting that ended. Engage it again to start a new sitting once the store answers: $PROG engage $CONV"
+        elif [ "$_hb_status" = closed ]; then
+            hb_said="Conversation $CONV was closed while the sitting started, so it stays closed. Engage the subject to open a fresh conversation: $PROG engage $bead"
+        elif [ -z "$_hb_row" ]; then
+            hb_said="Conversation $CONV changed while the sitting started and could not be read, so engage left it as it is. Engage it again to reach it where it is now: $PROG engage $CONV"
+        else
+            hb_said="Conversation $CONV is held by '${_hb_owner:-nobody}' now (${_hb_status:-status unread}), so engage left it as it is. Engage it again to reach it where it is now: $PROG engage $CONV"
+        fi
+    }
 
     # Once the attach returns, the tab is back at this shell, and what it prints
     # next is the operator's only account of the sitting it left: nothing of the
@@ -4625,7 +4665,8 @@ cmd_engage() {
                 0) attach_rc=0
                    gc session attach "$sid" || attach_rc=$?
                    engage_after_attach "$attach_rc" ;;
-                2) echo "$PROG: engage: the sitting $sname that holds conversation $CONV ended before the reconciler started it (its state in 'gc session list': $start_state), so there is nothing to attach. Re-run to start a sitting on it: $PROG engage $bead" >&2
+                2) engage_hand_back "$conv_holder" "$conv_status"
+                   echo "$PROG: engage: the sitting $sname that holds conversation $CONV ended before the reconciler started it (its state in 'gc session list': $start_state), so there is nothing to attach. $hb_said" >&2
                    exit 4 ;;
                 *) echo "$PROG: engage: the reconciler has not started $sname after $(engage_dur "$ENGAGE_WAIT_TIMEOUT") (its state in 'gc session list': ${start_state:-unreadable}), so it was not attached; an attach now would launch it without its prompt. Attach once it reads active there: gc session attach $sid" >&2
                    exit 4 ;;
@@ -4913,7 +4954,8 @@ cmd_engage() {
     if [ "$engage_attach" = "1" ]; then
         engage_wait
         if [ "$start_rc" -eq 2 ]; then
-            echo "$PROG: engage: the sitting $sname ended before the reconciler started it (its state in 'gc session list': $start_state), so there is nothing to attach. Conversation $CONV is still bound to it; hand it back to the operator's queue: gc bd update $CONV --if-assignee \"$salias\" --assignee human --status open" >&2
+            engage_hand_back "$salias" "$bound_status"
+            echo "$PROG: engage: the sitting $sname ended before the reconciler started it (its state in 'gc session list': $start_state), so there is nothing to attach. $hb_said" >&2
             exit 4
         fi
     fi

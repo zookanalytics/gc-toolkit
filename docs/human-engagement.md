@@ -227,6 +227,17 @@ these steps:
    bind that misses, or a read-back that finds the task closed, closes the
    session this engage started. Then engage waits for the reconciler to start
    the session, and attaches the operator.
+7. **A session that ends before it starts hands the task back.** When the
+   session engage waits on ends before the reconciler starts it, whether
+   engage spawned it or reused it, engage writes
+   `gc bd update <task> --if-assignee <holder> --if-status <status> --assignee
+   human --status open`, where the holder is the assignee that session holds
+   the task under and the status is the task's status as engage read it while
+   that session held it. That is the write a sitting cut short makes at its
+   sign-off. A task that another writer has taken, or
+   that a dismiss has closed, misses the guard and is left as it is. Engage
+   then says where the task is, exits 4, and names the engage of the task
+   that starts a new sitting on it.
 
 **Engage offers what holds the bead.** It reads the reasons
 `gctk pr-status derive --json` gives (`prstatus.Read` and `prstatus.Reasons`),
@@ -759,8 +770,14 @@ sign-off, keeps its session running indefinitely.
 
 A conversation can also outlive its sitting: the sitting's create fails after
 `gc-helm engage` bound the conversation to it, or its session is closed while
-the conversation is still open. The conversation keeps the alias of a sitting
-whose session has ended. The board reads it as waiting for the operator,
+the conversation is still open. An engage that waits to attach hands the
+conversation back to the operator's queue when the sitting it waits on ends
+before it starts, whether that engage spawned the sitting or reused it (step 7
+of *Engage*, above). A sitting spawned without an attach, as helm-svc's engage
+route spawns one, is waited on only by a later engage that reuses it, and no
+engage waits on a session closed after it started. A conversation whose
+sitting no engage waited on keeps the alias of a sitting whose session has
+ended. The board reads it as waiting for the operator,
 because no live sitting holds it, and `gc-helm engage` takes it up again:
 under the same alias, or bound to a fresh sitting's with a write guarded on the
 holder it read, which also drops the session pins the gone sitting's claim

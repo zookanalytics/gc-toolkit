@@ -28,7 +28,9 @@
 #   (REUSE-*) a live sitting engage reuses is attached only once it reads
 #             active: one still start-pending or creating is waited on and left
 #             unattached at the bound, which exits 4, one that ends first is
-#             reported, and --no-attach does not wait
+#             reported and its conversation handed back to the operator's
+#             queue, unless another writer has taken it since, and --no-attach
+#             does not wait
 #   (LEFT)    a conversation whose sitting's session closed is resumed under
 #             the same alias, with no bind needed
 #   (TWO-TRACKS, UNREAD) a task assigned to human that tracks the bead and
@@ -70,8 +72,14 @@
 #             long the start takes (START-LONG, minutes on a fake clock), and
 #             says so when the wait opens, when the state changes, and every
 #             30s (START-PROGRESS). One that ends first exits 4 at once, early
-#             or late; a sitting not yet listed, or a listing that fails, is
-#             waited through. A sitting still unstarted at
+#             or late, and hands its conversation back to the operator's queue
+#             with one write guarded on the sitting's alias and on the status
+#             the conversation was bound at (START-HANDBACK*): a conversation
+#             another writer took, or a dismiss closed, is left as it is, one
+#             already back in the queue is said to be there, and a write the
+#             store refuses leaves it bound and says so. A sitting not yet
+#             listed, or a listing that fails, is waited through. A sitting
+#             still unstarted at
 #             GC_HELM_ENGAGE_WAIT_TIMEOUT, 15 minutes by default
 #             (START-BACKSTOP), is left unattached and exits 4, with the attach
 #             to run later. (START-INTERRUPT) Ctrl-C stops the wait, leaves the
@@ -458,15 +466,31 @@ case "$1 ${2:-}" in
     printf 'bd update %s\n' "$*" >> "$CALLS"
     _id="$3"; shift 3
     _ifa_set=0; _ifa=""; _ifs_set=0; _ifs=""; _new_set=0; _new=""; _notes=0
+    _st_set=0; _st=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --if-assignee) _ifa_set=1; _ifa="${2-}"; shift 2 ;;
         --if-status)   _ifs_set=1; _ifs="${2-}"; shift 2 ;;
         --assignee)    _new_set=1; _new="${2-}"; shift 2 ;;
+        --status)      _st_set=1; _st="${2-}"; shift 2 ;;
         --append-notes) _notes=1; shift 2 ;;
         *) shift ;;
       esac
     done
+    # The hand-back: an update that gives the conversation to human.
+    # $BEFORE_HANDBACK_ASSIGNEE and $BEFORE_HANDBACK_STATUS land another
+    # writer's change just ahead of it, as a sitting that took the conversation
+    # or a dismiss that closed it does, so its guards judge the conversation as
+    # that writer left it, and a write without them overwrites it.
+    # $HANDBACK_RC fails it with that exit and writes nothing, as a store that
+    # refused the write does. $BEFORE_HANDBACK_UNREAD makes every later read of
+    # the conversation fail.
+    if [ "$_new_set" = 1 ] && [ "$_new" = human ]; then
+      [ -n "${BEFORE_HANDBACK_ASSIGNEE:-}" ] && printf '%s' "$BEFORE_HANDBACK_ASSIGNEE" > "$ST/$_id.assignee"
+      [ -n "${BEFORE_HANDBACK_STATUS:-}" ] && printf '%s' "$BEFORE_HANDBACK_STATUS" > "$ST/$_id.status"
+      [ -n "${BEFORE_HANDBACK_UNREAD:-}" ] && : > "$ST/$_id.unread"
+      [ -n "${HANDBACK_RC:-}" ] && exit "$HANDBACK_RC"
+    fi
     # bd's --if-assignee and --if-status guards, checked and written under one
     # lock, as the store does: a mismatch writes nothing and exits 13.
     # $RACE_LOST makes the guard lose: another writer took the conversation in
@@ -488,12 +512,14 @@ case "$1 ${2:-}" in
       if [ "$_cur" != "$_ifa" ]; then stub_unlock "$ST/$_id.lock"; exit 13; fi
       if [ "$_ifs_set" = 1 ] && [ "$(stat_of "$_id")" != "$_ifs" ]; then stub_unlock "$ST/$_id.lock"; exit 13; fi
       [ "$_new_set" = 1 ] && printf '%s' "$_new" > "$ST/$_id.assignee"
+      [ "$_st_set" = 1 ] && printf '%s' "$_st" > "$ST/$_id.status"
       stub_unlock "$ST/$_id.lock"
       [ -n "${BIND_STOMP:-}" ] && printf '%s' "$BIND_STOMP" > "$ST/$_id.assignee"
       [ -n "${CLOSE_AFTER_BIND:-}" ] && printf 'closed' > "$ST/$_id.status"
       exit 0
     fi
     [ "$_new_set" = 1 ] && printf '%s' "$_new" > "$ST/$_id.assignee"
+    [ "$_st_set" = 1 ] && printf '%s' "$_st" > "$ST/$_id.status"
     exit 0 ;;
   "bd create")
     printf 'bd create %s\n' "$*" >> "$CALLS"
@@ -594,6 +620,7 @@ reset() {
 # held <conversation> <assignee> [status] — seed a conversation's holder.
 held() { printf '%s' "$2" > "$STATE_DIR/$1.assignee"; printf '%s' "${3:-in_progress}" > "$STATE_DIR/$1.status"; }
 asg()  { cat "$STATE_DIR/$1.assignee" 2>/dev/null || printf 'human'; }
+sts()  { cat "$STATE_DIR/$1.status" 2>/dev/null || printf 'open'; }
 
 # run_engage <bead> [extra-args...] -> RC/OUT/CALLED. stdin is /dev/null so the
 # run is non-interactive regardless of the terminal the suite runs from. It does
@@ -791,7 +818,17 @@ GC_HELM_ENGAGE_WAIT_TIMEOUT=60 LIVE_STATES="start-pending start-pending start-pe
 eq "$RC" 4 "(REUSE-ENDED) a reused sitting that ends before it starts exits 4"
 hasnt "$CALLED" "session attach" "(REUSE-ENDED) …without attaching"
 has "$OUT" "ended before the reconciler started it" "(REUSE-ENDED) …saying it ended"
-has "$OUT" "gc-helm engage tk-subj" "(REUSE-ENDED) …and pointing at the engage that starts a sitting on it"
+has "$CALLED" "bd update tk-conv --if-assignee gc-toolkit/gc-toolkit.tk-conv --if-status in_progress --assignee human --status open" \
+    "(REUSE-ENDED) …handing its conversation back with one write guarded on the holder and the status engage read"
+eq "$(asg tk-conv)/$(sts tk-conv)" "human/open" "(REUSE-ENDED) …so the conversation is back in the operator's queue"
+has "$OUT" "Conversation tk-conv is back in the operator's queue. Engage it again to start a new sitting: gc-helm engage tk-conv" \
+    "(REUSE-ENDED) …saying so, and naming the engage of the conversation that starts a new sitting, as an engage whose own sitting ended does"
+reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
+BEFORE_HANDBACK_ASSIGNEE=gc-toolkit/gc-toolkit.tk-conv-elsewhere GC_HELM_ENGAGE_WAIT_TIMEOUT=60 LIVE_STATES="start-pending start-pending start-pending start-pending gone" run_engage tk-subj
+eq "$RC" 4 "(REUSE-ENDED-TAKEN) a reused sitting that ends after another writer took its conversation exits 4"
+eq "$(asg tk-conv)/$(sts tk-conv)" "gc-toolkit/gc-toolkit.tk-conv-elsewhere/in_progress" "(REUSE-ENDED-TAKEN) …leaving the conversation with the writer that took it"
+has "$OUT" "Conversation tk-conv is held by 'gc-toolkit/gc-toolkit.tk-conv-elsewhere' now (in_progress), so engage left it as it is." \
+    "(REUSE-ENDED-TAKEN) …and saying who holds it"
 reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
 GC_HELM_ENGAGE_WAIT_TIMEOUT=60 LIVE_STATES="start-pending" run_engage tk-subj --no-attach
 eq "$RC" 0 "(REUSE-NOATTACH) --no-attach on a reused unstarted sitting exits 0"
@@ -1334,7 +1371,7 @@ eq "$RC" 4 "(START-CLOSED) a sitting listed and then gone from the list (closed,
 hasnt "$CALLED" "session attach" "(START-CLOSED) …without attaching"
 eq "$(cat "$POLLS")" 2 "(START-CLOSED) …at the first listing it is gone from, not at the bound"
 has "$OUT" "ended before the reconciler started it (its state in 'gc session list': gone)" "(START-CLOSED) …saying the sitting ended"
-has "$OUT" "gc bd update tk-conv --if-assignee" "(START-CLOSED) …and how to hand its still-bound conversation back to the queue"
+eq "$(asg tk-conv)/$(sts tk-conv)" "human/open" "(START-CLOSED) …and its conversation is back in the operator's queue"
 
 GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="blank" run_fresh tk-conv
 eq "$RC" 4 "(START-BLANK) a sitting listed with an empty state (closed, read from the supervisor) exits 4"
@@ -1346,6 +1383,59 @@ GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="failed-create" run_fresh tk-conv
 eq "$RC" 4 "(START-FAILED) a sitting whose create failed exits 4"
 hasnt "$CALLED" "session attach" "(START-FAILED) …without attaching"
 has "$OUT" "state in 'gc session list': failed-create" "(START-FAILED) …naming the state"
+
+echo "# a sitting that ends before it starts hands its conversation back to the operator's queue"
+# Nothing else gives back a conversation whose sitting never started, because
+# the witness's orphan recovery passes over conversations. So the engage that
+# saw the sitting end writes the hand-back, guarded on the sitting's alias and on
+# the status the conversation was bound at, and leaves a conversation that
+# another writer has taken or closed since as that writer left it.
+GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="start-pending failed-create" run_fresh tk-conv
+eq "$RC" 4 "(START-HANDBACK) a sitting whose create failed still exits 4: the engage put no sitting in front of the operator"
+has "$CALLED" "bd update tk-conv --if-assignee gc-toolkit/gc-toolkit.tk-conv --if-status open --assignee human --status open" \
+    "(START-HANDBACK) …and hands its conversation back with one write guarded on the sitting's alias and the status the conversation was bound at"
+eq "$(asg tk-conv)" "human" "(START-HANDBACK) …so the conversation is assigned to human"
+eq "$(sts tk-conv)" "open" "(START-HANDBACK) …and open: it is back in the operator's queue"
+has "$OUT" "the sitting s-gc-77 ended before the reconciler started it (its state in 'gc session list': failed-create), so there is nothing to attach. Conversation tk-conv is back in the operator's queue. Engage it again to start a new sitting: gc-helm engage tk-conv" \
+    "(START-HANDBACK) …saying so, and naming the engage of the conversation that starts a new sitting on it"
+hasnt "$OUT" "gc bd update" "(START-HANDBACK) …and leaving the operator no write to run by hand"
+
+reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
+GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="start-pending gone" run_engage tk-subj
+eq "$RC" 4 "(START-HANDBACK-LEFT) a sitting started on a conversation a closed session left, that ends before it starts, exits 4"
+has "$CALLED" "bd update tk-conv --if-assignee gc-toolkit/gc-toolkit.tk-conv --if-status in_progress --assignee human --status open" \
+    "(START-HANDBACK-LEFT) …guarding the hand-back on the status the conversation had, in_progress"
+eq "$(asg tk-conv)/$(sts tk-conv)" "human/open" "(START-HANDBACK-LEFT) …and the conversation is back in the operator's queue"
+
+BEFORE_HANDBACK_ASSIGNEE=gc-toolkit/gc-toolkit.tk-conv-elsewhere GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="start-pending failed-create" run_fresh tk-conv
+eq "$RC" 4 "(START-HANDBACK-TAKEN) a sitting that ends after another writer took its conversation exits 4"
+eq "$(asg tk-conv)/$(sts tk-conv)" "gc-toolkit/gc-toolkit.tk-conv-elsewhere/open" \
+    "(START-HANDBACK-TAKEN) …and the conversation another writer holds is not touched"
+has "$OUT" "Conversation tk-conv is held by 'gc-toolkit/gc-toolkit.tk-conv-elsewhere' now (open), so engage left it as it is. Engage it again to reach it where it is now: gc-helm engage tk-conv" \
+    "(START-HANDBACK-TAKEN) …saying who holds it now"
+
+BEFORE_HANDBACK_STATUS=closed GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="start-pending failed-create" run_fresh tk-conv
+eq "$RC" 4 "(START-HANDBACK-DISMISSED) a sitting that ends after a dismiss closed its conversation exits 4"
+eq "$(asg tk-conv)/$(sts tk-conv)" "gc-toolkit/gc-toolkit.tk-conv/closed" \
+    "(START-HANDBACK-DISMISSED) …and the conversation stays closed, with the holder the dismiss kept, since the status guard misses"
+has "$OUT" "Conversation tk-conv was closed while the sitting started, so it stays closed. Engage the subject to open a fresh conversation: gc-helm engage tk-subj" \
+    "(START-HANDBACK-DISMISSED) …saying so"
+
+BEFORE_HANDBACK_ASSIGNEE=human GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="start-pending failed-create" run_fresh tk-conv
+eq "$(asg tk-conv)/$(sts tk-conv)" "human/open" "(START-HANDBACK-RETURNED) a conversation another writer already put back in the queue stays there"
+has "$OUT" "Conversation tk-conv is back in the operator's queue. Engage it again to start a new sitting: gc-helm engage tk-conv" \
+    "(START-HANDBACK-RETURNED) …and is reported back in the queue, not as held by another"
+
+HANDBACK_RC=1 GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="start-pending failed-create" run_fresh tk-conv
+eq "$RC" 4 "(START-HANDBACK-REFUSED) a sitting whose hand-back the store refuses exits 4"
+eq "$(asg tk-conv)" "gc-toolkit/gc-toolkit.tk-conv" "(START-HANDBACK-REFUSED) …the conversation still bound to the sitting"
+has "$OUT" "The store refused to hand conversation tk-conv back to the operator's queue (gc bd update exited 1), so it is still bound to the sitting that ended. Engage it again to start a new sitting once the store answers: gc-helm engage tk-conv" \
+    "(START-HANDBACK-REFUSED) …saying so, with the exit the store gave and the engage that takes it up again"
+
+BEFORE_HANDBACK_ASSIGNEE=gc-toolkit/gc-toolkit.tk-conv-elsewhere BEFORE_HANDBACK_UNREAD=1 GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="start-pending failed-create" run_fresh tk-conv
+eq "$(asg tk-conv)" "gc-toolkit/gc-toolkit.tk-conv-elsewhere" "(START-HANDBACK-UNREAD) a hand-back whose guard misses writes nothing"
+has "$OUT" "Conversation tk-conv changed while the sitting started and could not be read, so engage left it as it is." \
+    "(START-HANDBACK-UNREAD) …and a conversation that will not read then is said to be unread, not named as held by anyone"
 
 # A sitting not listed yet may only lag the supervisor's read cache, and a
 # listing that fails says nothing about the sitting, so neither ends the wait.
