@@ -636,7 +636,7 @@ case "$(cat "$CALLS")" in
   *"bd update tk-conv --set-metadata gc.ruling_consequence="*"pr-dispose --anchor tk-mem"*) ok "(RECORD) …before the retirement acts" ;;
   *) bad "(RECORD) the record should precede the retirement: $(cat "$CALLS")" ;;
 esac
-setf tk-mem status closed; setm tk-mem gc.superseded_by tk-conv
+setf tk-mem status closed; edge tk-mem supersedes tk-conv
 : > "$CALLS"
 run_signoff --conversation tk-conv --outcome "the member's PR moves to the new design" "${RETIRED[@]}" --retire not-needed
 eq "$RC" 0 "(RETIRED-RERUN) the re-run exits 0 though the retired member has closed since"
@@ -645,7 +645,7 @@ hasnt "$(cat "$CALLS")" "pr-dispose" "(RETIRED-RERUN) …disposing nothing again
 eq "$(field tk-conv status)" "closed" "(RETIRED-RERUN) …and closing the conversation"
 shared_pr; CLOSE_STUCK=tk-conv run_signoff --conversation tk-conv --outcome "settled" "${RETIRED[@]}" --retire duplicate --successor tk-anc --pr-anchor tk-pr2
 eq "$RC" 1 "(RETIRED-RERUN-PICK) a sign-off that retired the PR --pr-anchor names, and whose close does not land, stops short"
-setf tk-pr2 status closed; setm tk-pr2 gc.superseded_by tk-anc
+setf tk-pr2 status closed; edge tk-pr2 duplicates tk-anc
 : > "$CALLS"
 run_signoff --conversation tk-conv --outcome "settled" "${RETIRED[@]}" --retire duplicate --successor tk-anc --pr-anchor tk-pr2
 eq "$RC" 0 "(RETIRED-RERUN-PICK) the re-run with the same --pr-anchor exits 0, the PR it names recovered from the record once closed"
@@ -812,7 +812,7 @@ eq "$(acts tk-conv)" "Retired the PR of tk-anc.|Ruled: the work moved to the new
 # The same sign-off run again once pr-facts has consummated the retirement,
 # closing the anchor: nothing is disposed again, and the conversation keeps the
 # action the first attempt recorded.
-setf tk-anc status closed; setm tk-anc gc.superseded_by tk-conv
+setf tk-anc status closed; edge tk-anc supersedes tk-conv
 : > "$CALLS"
 run_signoff --conversation tk-conv --outcome "retired: the work moved" "${RETIRED[@]}" --retire not-needed
 eq "$RC" 0 "(RETIRE-RETRY) the same sign-off, run again once the retirement has closed the PR, exits 0"

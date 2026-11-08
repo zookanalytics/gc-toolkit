@@ -1,7 +1,7 @@
 # refinery-reconcile — the merge cadence, controller-owned. Runs the arms
 # (pr-facts --posture-only, merge, pr-open, pr-facts --route-comments-only,
 # pre-open-rebase, gate-ensure, pr-facts, review-sweep, scaffolding-sweep,
-# duplicate-sweep, pr-stack) once per tick. The
+# pr-stack) once per tick. The
 # dispatcher's open-tracking gate keys on
 # ScopedName() (refinery-reconcile:rig:<rig>) and is the first half of
 # single-flight — never set no_work_gate, that flag opts out of exactly that

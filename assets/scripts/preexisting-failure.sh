@@ -28,15 +28,15 @@
 # stamp is no key's tracker.
 #
 # A tracker can close while its failure is still red. bead-rehome.sh closes a
-# folded, re-homed or duplicate tracker with gc.superseded_by naming the bead
-# that carries its work now, such as a batch that clears a set of lint
+# folded, re-homed or duplicate tracker with a supersedes or duplicates edge
+# naming the bead that carries its work now, such as a batch that clears a set of lint
 # trackers, and that bead carries no stamp of its own. So when no live tracker
 # holds the key, the most recently closed one decides, because its close is
-# the latest word on the failure. Its pointer is followed through every bead
+# the latest word on the failure. Its edge is followed through every bead
 # that closed onward the same way, and a live bead at the end of the chain is
-# the key's filing. The chain ends with no filing at a bead that closed with no
-# pointer, because the failure was fixed there. It also ends at a not-needed
-# close, whose pointer names the evidence for that ruling rather than a bead
+# the key's filing. The chain ends with no filing at a bead that closed naming
+# no successor, because the failure was fixed there. It also ends at a not-needed
+# close, whose edge names the evidence for that ruling rather than a bead
 # that carries the failure. A red seen after either is new, and it is filed.
 #
 # Exit: 0 the store answered: `find` prints the id of the bead that tracks the
@@ -57,8 +57,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # that outlives a landed fix is new information.
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 
-# The most pointers a gc.superseded_by chain is followed through. A real chain
-# is a fold or two long, so a longer one is a fault in the pointers, and it is
+# The most edges a chain of dispositions is followed through. A real chain
+# is a fold or two long, so a longer one is a fault in the edges, and it is
 # read as naming no bead that carries the failure rather than walked further.
 CHAIN_MAX=20
 
@@ -97,7 +97,7 @@ usage: preexisting-failure.sh key --test <test function>
   find    prints the id of the bead that tracks the key, or nothing when none
           does. That bead is the live tracker stamped with the key. When there
           is none, it is the live bead that the most recently closed tracker's
-          gc.superseded_by chain reaches. --closed-after reads the trackers
+          chain of disposition edges reaches. --closed-after reads the trackers
           closed since that date instead, and follows no chain.
   file    files the key's tracker and prints its id: a P1 bug titled
           `Pre-existing failure: <key>`, with --message as its body and the
@@ -237,16 +237,18 @@ read_stamp() {
 
 # tracked_by <key> — the bead that tracks the key, set in the caller's shell so
 # that both answers reach it: FILING is that bead's id, or empty when none
-# tracks the key, and FILING_VIA is the closed tracker whose gc.superseded_by
-# chain reached FILING, or empty when FILING is the key's own live tracker.
+# tracks the key, and FILING_VIA is the closed tracker whose chain of
+# disposition edges reached FILING, or empty when FILING is the key's own live tracker.
 # Non-zero when the store could not be read, which the caller must treat as
 # "unknown", never as "untracked".
 #
-# The chain is read as bead-rehome.sh writes it. A not-needed close carries the
-# reason `not needed, per <successor> in <store>`, as its close reason, or, when
-# the pointer was added after an earlier close, in a `Disposition recorded
-# <time>: <reason>.` note. A pointer to a bead the store does not hold ends the
-# chain the way a fixed tracker does, because no bead carries the failure.
+# The chain is read as bead-rehome.sh writes it: each closed bead's duplicates
+# or supersedes edge names the next. A not-needed close carries the note
+# `Disposition <time>: not needed, per <successor> in <store>`, or, when the edge
+# was added after an earlier close, `Disposition recorded <time>: ...`; a close
+# made before the edges carries the same words as its close reason. An edge onto
+# a bead the store does not hold ends the chain the way a fixed tracker does,
+# because no bead carries the failure.
 tracked_by() {
   local key="$1" rows tracker id prev="" out step hops=0 seen=" "
   FILING=""; FILING_VIA=""
@@ -262,30 +264,29 @@ tracked_by() {
   while [ -n "$id" ]; do
     case "$seen" in
       *" $id "*)
-        warn "the gc.superseded_by chain from $tracker loops back to $id, so it names no bead that carries '$key'"
+        warn "the chain of disposition edges from $tracker loops back to $id, so it names no bead that carries '$key'"
         return 0 ;;
     esac
     if [ "$hops" -gt "$CHAIN_MAX" ]; then
-      warn "the gc.superseded_by chain from $tracker runs past $CHAIN_MAX pointers without reaching a live bead, so it is read as naming none that carries '$key'"
+      warn "the chain of disposition edges from $tracker runs past $CHAIN_MAX edges without reaching a live bead, so it is read as naming none that carries '$key'"
       return 0
     fi
     seen="$seen$id "
-    # The answer decides, not the exit status. bd answers an id that names no
-    # bead with an error object at exit 1, and a store it could not reach with
-    # another error or with nothing.
-    out=$(bd_json show "$id")
-    step=$(printf '%s' "$out" | jq -r --arg id "$id" --arg live "$LIVE_STATUSES" '
-        if type == "array" and length > 0 and ((.[0].id // "") | tostring) == $id then
+    # The bead's list row, the one that carries an edge onto a bead in another
+    # rig's store. No row is a store that holds no such bead, and a read that
+    # fails is unknown.
+    out=$(bd_exact_row "$id") || return 1
+    step=$(printf '%s' "$out" | jq -r --arg live "$LIVE_STATUSES" "$DISPOSITION_JQ"'
+        if length > 0 then
           .[0] as $b
-          | ((($b.metadata // {})["gc.superseded_by"] // "") | tostring) as $p
+          | ($b | disposed_to) as $p
           | if ($live | split(",") | any(. == (($b.status // "") | tostring))) then "live"
             elif $p == "" then "fixed"
             elif ((($b.close_reason // "") | tostring) | startswith("not needed, per " + $p + " "))
               or ((($b.notes // "") | tostring) | contains(": not needed, per " + $p + " in "))
             then "ruled"
             else "next " + $p end
-        elif type == "object" and ((.error // "") | tostring | ascii_downcase | contains("no issues found")) then "missing"
-        else error("unread") end' 2>/dev/null) || return 1
+        else "missing" end' 2>/dev/null) || return 1
     case "$step" in
       live)
         FILING="$id"
@@ -293,7 +294,7 @@ tracked_by() {
         return 0 ;;
       fixed|ruled) return 0 ;;
       missing)
-        [ -z "$prev" ] || warn "$prev names $id in gc.superseded_by, but the store holds no such bead, so the chain from $tracker names no bead that carries '$key'"
+        [ -z "$prev" ] || warn "$prev names $id as its successor, but the store holds no such bead, so the chain from $tracker names no bead that carries '$key'"
         return 0 ;;
       "next "*) prev="$id"; id="${step#next }"; hops=$((hops + 1)) ;;
       *) return 1 ;;

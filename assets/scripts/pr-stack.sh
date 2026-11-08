@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pr-stack — arm 11 of the merge cadence: keep an open PR current with its anchor,
+# pr-stack — arm 10 of the merge cadence: keep an open PR current with its anchor,
 # in both managed body regions and in its title.
 # A PR body is composed once, by pr-open.sh, out of one anchor. Then two things
 # drift it. Commits keep arriving on the branch — a fold, a rework or rebase
@@ -123,8 +123,9 @@ _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # a branch, unioned and deduped, then the rows that recorded no work removed. A
 # closed duplicate keeps its metadata.branch — and for a rebase or rework twin
 # that branch names this very head — so it reaches the union by that key while
-# having contributed no commit. A row carrying duplicate_of, or a no-op
-# work_outcome under either key, is dropped, so the section never tells a
+# having contributed no commit. A row closed as a duplicate (its duplicates
+# edge names the canonical), or a no-op work_outcome under either key, is
+# dropped, so the section never tells a
 # reviewer to approve work that is not on the branch. Any unreadable half fails
 # the whole ledger.
 #
@@ -149,9 +150,9 @@ ledger_of() { # <branch>
   landed=$(bd_list --status="$ALL_STATUSES" --metadata-field merged_target="$br" \
     --metadata-field merge_result=merged) || return 1
   printf '%s\n%s\n%s\n' "$direct" "$folded" "$landed" \
-    | jq -s 'add | unique_by(.id)
+    | jq -s "$DISPOSITION_JQ"'add | unique_by(.id)
         | map(select(
-            (((.metadata // {}).duplicate_of // "") | tostring) == "" and
+            (duplicate_to == "") and
             (((.metadata // {}).work_outcome // "") | tostring) != "no-op" and
             (((.metadata // {})["gc.work_outcome"] // "") | tostring) != "no-op"
           ))' 2>/dev/null

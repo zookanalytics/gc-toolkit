@@ -899,20 +899,30 @@ mkdir -p "$TMP/resbin"
 # resolver can pin --db for its cross-store PR search; the stub ignores the --db
 # value and answers by argv pattern. `bd show` branches on the id so a supersede
 # chain and a live bead read differently; `bd list` answers the PR search (which
-# carries `blocked` in --status) and the read-back of the conversation a create
-# filed (--id).
+# carries `blocked` in --status), a supersede chain's edge (--id of a settled
+# bead, as bd's list row carries it), and the read-back of the conversation a
+# create filed (any other --id).
+# succ_of <id> — the bead a settled fixture's supersedes edge names, or nothing.
+succ_of() {
+  case "$1" in
+    tk-pred|tk-mid) echo tk-succ ;; tk-pred2) echo tk-gone ;; tk-head) echo tk-mid ;;
+    tk-cyc1) echo tk-cyc2 ;; tk-cyc2) echo tk-cyc1 ;;
+  esac
+}
+settled() { jq -n --arg i "$1" --arg s "$(succ_of "$1")" '[{id:$i, status:"closed", metadata:{}, dependencies:[{id:$s, dependency_type:"supersedes"}]}]'; }
+# A closed gate whose successor only its list row names, the way bd's listing
+# hides a gate unless --include-gates lifts that, whatever the --id names; and
+# closed beads whose list read goes wrong after their show answered.
+closed_row() { jq -n --arg i "$1" '[{id:$i, status:"closed", metadata:{}}]'; }
 case "$1 ${2:-}" in
   "rig list")
     jq -n '{rigs:[{name:"gc-toolkit", path:env.RESRIG, prefix:"tk"}]}' ;;
   "bd show")
     case "$3" in
-      tk-pred)    jq -n '[{id:"tk-pred",   status:"closed", metadata:{"gc.superseded_by":"tk-succ","gc.superseded_by_store":"rig:gc-toolkit"}}]' ;;
-      tk-pred2)   jq -n '[{id:"tk-pred2",  status:"closed", metadata:{"gc.superseded_by":"tk-gone"}}]' ;;
-      tk-head)    jq -n '[{id:"tk-head",   status:"closed", metadata:{"gc.superseded_by":"tk-mid"}}]' ;;
-      tk-mid)     jq -n '[{id:"tk-mid",    status:"closed", metadata:{"gc.superseded_by":"tk-succ"}}]' ;;
+      tk-pred|tk-pred2|tk-head|tk-mid|tk-cyc1|tk-cyc2) settled "$3" ;;
+      tk-oldgate) jq -n '[{id:"tk-oldgate", status:"closed", issue_type:"gate", await_type:"human", metadata:{}}]' ;;
+      tk-oldinfra|tk-oldtmpl|tk-listfail|tk-listjunk|tk-listerr|tk-listgone|tk-settled) closed_row "$3" ;;
       tk-succ)    jq -n '[{id:"tk-succ",   status:"open",   title:"the live successor"}]' ;;
-      tk-cyc1)    jq -n '[{id:"tk-cyc1",   status:"closed", metadata:{"gc.superseded_by":"tk-cyc2"}}]' ;;
-      tk-cyc2)    jq -n '[{id:"tk-cyc2",   status:"closed", metadata:{"gc.superseded_by":"tk-cyc1"}}]' ;;
       tk-live1)   jq -n '[{id:"tk-live1",  status:"open",   title:"a live bead"}]' ;;
       tk-prbead)  jq -n '[{id:"tk-prbead", status:"open",   title:"the PR anchor"}]' ;;
       tk-prbead2) jq -n '[{id:"tk-prbead2",status:"open",   title:"another PR anchor"}]' ;;
@@ -924,6 +934,30 @@ case "$1 ${2:-}" in
     case " $* " in
       *" --id "*)
         _p=""; _c=""; for a in "$@"; do [ "$_p" = --id ] && _c="$a"; _p="$a"; done
+        if [ -n "$(succ_of "$_c")" ]; then
+          jq -n --arg i "$_c" --arg s "$(succ_of "$_c")" '[{id:$i, status:"closed", dependencies:[{issue_id:$i, depends_on_id:$s, type:"supersedes"}]}]'
+          exit 0
+        fi
+        case "$_c" in
+          tk-oldgate)
+            case " $* " in
+              *" --include-gates "*) jq -n '[{id:"tk-oldgate", status:"closed", issue_type:"gate", dependencies:[{issue_id:"tk-oldgate", depends_on_id:"tk-succ", type:"supersedes"}]}]' ;;
+              *) printf '[]' ;;
+            esac
+            exit 0 ;;
+          tk-oldinfra|tk-oldtmpl)
+            case "$_c:$* " in
+              tk-oldinfra:*" --include-infra "*|tk-oldtmpl:*" --include-templates "*)
+                jq -n --arg i "$_c" '[{id:$i, status:"closed", dependencies:[{issue_id:$i, depends_on_id:"tk-succ", type:"supersedes"}]}]' ;;
+              *) printf '[]' ;;
+            esac
+            exit 0 ;;
+          tk-listfail) echo "bd: database is locked" >&2; exit 1 ;;
+          tk-listjunk) printf 'not json at all'; exit 0 ;;
+          tk-listerr)  printf '{"error":"database is locked"}'; exit 0 ;;
+          tk-listgone) printf '[]'; exit 0 ;;
+          tk-settled)  closed_row tk-settled; exit 0 ;;
+        esac
         jq -n --arg c "$_c" --arg s "$(cat "$TMP_SUBJ" 2>/dev/null)" \
           '[{id:$c, issue_type:"task", status:"open", assignee:"human", dependencies:[{issue_id:$c, depends_on_id:$s, type:"tracks"}]}]'
         exit 0 ;;
@@ -1014,6 +1048,38 @@ eq "$RC" "4" "(RESOLVE-BROKEN-POINTER) an unresolvable successor exits 4"
 grep -q 'tk-gone' <<< "$ERR" \
   && ok "(RESOLVE-BROKEN-POINTER) names the successor it could not resolve" \
   || bad "(RESOLVE-BROKEN-POINTER) names the successor (err: $ERR)"
+
+# (RESOLVE-GATE) a closed gate, an infrastructure bead and a template name their
+# successor as any bead does, though a plain listing hides each of them.
+for _hidden in tk-oldgate tk-oldinfra tk-oldtmpl; do
+  set +e
+  OUT="$(PATH="$TMP/resbin:$PATH" sh "$SCRIPT" resolve "$_hidden" 2>"$TMP/err")"; RC=$?
+  set -e
+  eq "$RC/$OUT" "0/tk-succ" "(RESOLVE-GATE) superseded $_hidden resolves to its successor"
+done
+
+# (RESOLVE-SETTLED) a closed bead whose read answers and names no successor is
+# itself the answer.
+set +e
+OUT="$(PATH="$TMP/resbin:$PATH" sh "$SCRIPT" resolve tk-settled 2>"$TMP/err")"; RC=$?
+set -e
+eq "$RC/$OUT" "0/tk-settled" "(RESOLVE-SETTLED) a closed bead that names no successor resolves to itself"
+
+# (RESOLVE-UNREAD) a closed bead whose list row does not read is refused: a failed
+# read, output that is not JSON, an answer that is no listing and a listing without
+# the row each say nothing about its successor, and none of them is "it names none".
+for _unread in tk-listfail tk-listjunk tk-listerr tk-listgone; do
+  set +e
+  OUT="$(PATH="$TMP/resbin:$PATH" sh "$SCRIPT" resolve "$_unread" 2>"$TMP/err")"; RC=$?
+  set -e
+  eq "$RC/$OUT" "4/" "(RESOLVE-UNREAD) resolve refuses $_unread, and prints no id"
+  grep -q "$_unread is closed, and its list row did not read" "$TMP/err" \
+    && ok "(RESOLVE-UNREAD) the refusal says why, for $_unread" \
+    || bad "(RESOLVE-UNREAD) the refusal says why, for $_unread (err: $(cat "$TMP/err"))"
+  FAKE_PR_ROWS='[]'; run_resolve "$_unread"
+  eq "$RC" "4" "(RESOLVE-UNREAD) open refuses $_unread"
+  [ -z "$CALLS" ] && ok "(RESOLVE-UNREAD) nothing filed on $_unread" || bad "(RESOLVE-UNREAD) filed on $_unread (calls: $CALLS)"
+done
 
 # (RESOLVE-PR-NUMBER) a bare PR number resolves to the anchor recording it.
 FAKE_PR_ROWS='[{"id":"tk-prbead","status":"open","metadata":{"pr_number":"615","pr_url":"https://github.com/o/r/pull/615"}}]'
@@ -1298,7 +1364,7 @@ case "$1 ${2:-}" in
     jq -n '{rigs:[{name:"gc-toolkit", path:env.REBINRIG, prefix:"tk"}]}' ;;
   "bd show")
     case "$3" in
-      tk-pred)   jq -n '[{id:"tk-pred",   status:"closed", metadata:{"gc.superseded_by":"tk-succ"}}]' ;;
+      tk-pred)   jq -n '[{id:"tk-pred",   status:"closed", metadata:{}, dependencies:[{id:"tk-succ", dependency_type:"supersedes"}]}]' ;;
       tk-succ)   jq -n '[{id:"tk-succ",   status:"open",   title:"the live successor"}]' ;;
       tk-prbead) jq -n '[{id:"tk-prbead", status:"open",   title:"the PR anchor"}]' ;;
       tk-convE)
@@ -1315,6 +1381,8 @@ case "$1 ${2:-}" in
         if [ "$_id" = tk-convE ]; then
           _a="$(cat "$CONV_STATE" 2>/dev/null || true)"
           jq -n --arg a "${_a:-human}" --arg s "${FAKE_CONV_SUBJ:-}" '[{id:"tk-convE", issue_type:"task", status:"open", assignee:$a, title:"an earlier concern", created_at:"2026-10-01T00:00:00Z", dependencies:[{issue_id:"tk-convE", depends_on_id:$s, type:"tracks"}]}]'
+        elif [ "$_id" = tk-pred ]; then
+          jq -n '[{id:"tk-pred", status:"closed", dependencies:[{issue_id:"tk-pred", depends_on_id:"tk-succ", type:"supersedes"}]}]'
         else printf '[]'; fi ;;
     esac ;;
   "bd dep")

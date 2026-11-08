@@ -173,12 +173,14 @@ bead() {
       closed_at: (if $c == "" then null else $c end)}'
 }
 # folded <id> <key> <successor> — a tracker bead-rehome.sh closed into the bead
-# that carries its failure now, such as a batch.
+# that carries its failure now, such as a batch: its supersedes edge onto that
+# bead, as `bd show` prints it, and the note the close appended.
 folded() {
   jq -nc --arg id "$1" --arg k "$2" --arg s "$3" \
     '{id: $id, status: "closed", issue_type: "bug", title: ("Pre-existing failure: " + $k),
-      metadata: {failure_key: $k, "gc.superseded_by": $s, "gc.superseded_by_store": "rig:gc-toolkit"},
-      closed_at: "2026-10-09T07:17:10Z", close_reason: ("folded into " + $s + " in rig:gc-toolkit — absorbed by the batch")}'
+      metadata: {failure_key: $k}, dependencies: [{id: $s, dependency_type: "supersedes"}],
+      closed_at: "2026-10-09T07:17:10Z",
+      notes: ("Disposition 2026-10-09T07:17Z: folded into " + $s + " in rig:gc-toolkit — absorbed by the batch.")}'
 }
 store() {
   local IFS=,

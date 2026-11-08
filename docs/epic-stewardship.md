@@ -85,16 +85,16 @@ fixed by recording its hypothesis
 ([epics.md](epics.md#the-contract-an-epic-carries)). The pass for an incomplete
 Epic is compatibility debt
 ([built-once-target.md](built-once-target.md#compatibility-debt)). A disposed
-epic (`gc.superseded_by`, written by `bead-rehome.sh`) carries a recorded
-terminal reason and passes.
+epic (its duplicates or supersedes edge, written by `bead-rehome.sh`) carries a
+recorded terminal reason and passes.
 
 1. **The finalize-gate clause** (`finalize-gate.sh` `clause_epic_ruling_recorded`)
    refuses to finalize an epic the predicate holds, on every close path that
    runs the gate. Neither path wired today reaches an undisposed epic:
-   `merge.sh` finalizes merge anchors, and `bead-rehome.sh` records its
-   disposition before it gates. Its read-only `--check` asks the gate about the
-   epic as that record will leave it (`--as-disposed`), so `stand-down.sh` carries
-   out a person's ruling that an epic will not go on. The clause is the
+   `merge.sh` finalizes merge anchors, and `bead-rehome.sh` asks the gate about
+   the epic as its disposition will leave it (`--as-disposed`), before it writes
+   anything and in its read-only `--check`, so `stand-down.sh` carries out a
+   person's ruling that an epic will not go on. The clause is the
    precondition any gate-running close of an epic inherits, not a choke point on
    today's closes.
 2. **The doctor invariant** (I15, `doctor/check-epic-closed-implies-ruled`) sees
