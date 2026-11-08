@@ -405,11 +405,9 @@ since_format = "RFC 3339 UTC"
 # bead's dispatch. A raw pool route goes through `gc sling <pool> <bead>
 # --no-formula --no-convoy`: a rework child routed to its fix pool (bd-lib.sh's
 # route_finishing, for pr-facts.sh and pre-open-rebase.sh) and a review bead
-# returned to its pool after an abandoned round (mol-review.toml). The shapes
-# stamped directly with gc bd update --set-metadata: a bead with no run parked
-# to `human` until a person decides (mol-polecat-work's hand-back of a
-# bring-current it cannot finish); a reaction bead routed to the proactive pool
-# (gc-proactive.sh). A route value is a rig-qualified pool identity
+# returned to its pool after an abandoned round (mol-review.toml). A reaction
+# bead is stamped directly: gc-proactive.sh creates it with its proactive pool
+# route in the create's metadata. A route value is a rig-qualified pool identity
 # (<rig>/<agent>) or the park sentinel `human` ([machine] park_route); the pool
 # offer is exact byte equality (gascity hookClaimMatchesRoute), so a bare,
 # unqualified or padded value matches no pool and doctor/check-routed-work-
@@ -1093,16 +1091,15 @@ keys = [
 #   neither one failed, or with a fail a rig_check_pre_existing value holds this
 #   very note for. Each run of the step rewrites it. Absent means no run noted
 #   them. Never cleared.
-# aborted_at — `self-review-exhausted`, stamped by self-review-check.sh on the
-#   budget's last failing attempt. The same update reopens the work bead, clears
-#   its route and session pins, reassigns it to the witness derived from its
-#   pool route, and appends the failure to its notes. self-review-check.sh is
-#   also its only reader: a bead already carrying it gets no second handback.
-#   Absent means no handback has run. Never cleared. The opt-in
-#   packs/gascity-keeper sub-pack stamps the same key with its own step names.
-# self_review_loop_attempts — the attempt number that exhausted the budget,
-#   written in the same handback. No pack path reads it back. Absent means no
-#   handback has run. Never cleared. An integer string.
+# aborted_at — RETIRED for the self-review loop. `self-review-exhausted`,
+#   which self-review-check.sh stamped on the budget's last failing attempt.
+#   No core pack path writes or reads it. The opt-in packs/gascity-keeper
+#   sub-pack stamps the same key with its own step names. Registered so that
+#   residue on a pre-retirement bead reads as known, not as a stray.
+# self_review_loop_attempts — RETIRED. The attempt number that exhausted the
+#   budget, which self-review-check.sh wrote beside aborted_at. No pack path
+#   writes or reads it. Registered so that residue on a pre-retirement bead
+#   reads as known, not as a stray.
 
 [metadata.rig_checks]
 # What beads carry about a rig's recorded checks: the published copy of a
