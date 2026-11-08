@@ -45,6 +45,10 @@ case "$1 ${2:-}" in
     # failing: the update carrying gc.proactive_reaction=1 exits non-zero.
     # FAKE_NOTES_FAILS models a notes append that does not land, and
     # FAKE_CLOSE_FAILS a close of the reaction bead the store refuses.
+    # FAKE_UPDATE_REFUSE refuses an update whose arguments carry that text.
+    if [ -n "${FAKE_UPDATE_REFUSE:-}" ]; then
+      case " $* " in *"$FAKE_UPDATE_REFUSE"*) echo "Error updating: the store refused it" >&2; exit 1 ;; esac
+    fi
     case " $* " in
       *" gc.proactive_reaction=1 "*) [ -n "${FAKE_PROACTIVE_STAMP_FAILS:-}" ] && exit 1 ;;
       *" --append-notes "*) [ -n "${FAKE_NOTES_FAILS:-}" ] && exit 1 ;;
@@ -304,11 +308,6 @@ GH
 chmod +x "$TMP/bin/git" "$TMP/bin/gh"
 
 export PATH="$TMP/bin:$PATH"
-# The recommendation key, intake's write and the real gc-helm.sh's headline,
-# where a case runs it, go through `gctk bead --verify`, which gctk.stub.sh
-# stands in for: each write reaches the stub gc above, and GCTK_STUB_MISS names
-# one that does not read back.
-export GCTK_BIN="$HERE/gctk.stub.sh" GCTK_STUB_LOG="$TMP/gctk.log"
 export FAKE_LOG="$TMP/log"
 export FAKE_STATE="$TMP/reco_state"
 # The subject fixture when a test sets no FAKE_SHOW_JSON. Held in a variable
@@ -417,24 +416,20 @@ real_helm_run() {
   if [ -n "$_tmpdir" ]; then export TMPDIR="$_tmpdir"; else unset TMPDIR; fi
 }
 
-# (ACTLOST) the real gc-helm.sh's release does not read back, over a subject
+# (ACTREFUSED) the store refuses the real gc-helm.sh's release, over a subject
 # carrying an earlier sitting's headline, an old route and assignee, and the
-# session pins of the executor that held it. takeaway's update reads its stamp
-# back through `gctk bead` before it exits 0, so the exit stops before its
-# landed proof and leaves R open, and a re-run resumes.
+# session pins of the executor that held it. takeaway exits non-zero, so the
+# exit stops before its landed proof and leaves R open, and a re-run resumes.
 export FAKE_SHOW_JSON='[{"id":"tk-sub",'"$MEMBER"',"status":"open","assignee":"gc-toolkit__proactive-hq-dead","metadata":{"gc.takeaway":"the sitting before this one parked it","gc.takeaway_at":"2026-11-01T09:00:00Z","gc.takeaway_by":"converse","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_name":"gc-toolkit__proactive-hq-dead","gc.session_id":"gc-dead-session"}}]'
-export GCTK_STUB_MISS='~gc.takeaway='
-: > "$TMP/gctk.log"
+export FAKE_UPDATE_REFUSE='gc.takeaway='
 real_helm_run tk-sub --disposition actionable --reason "states a done condition and a branch" \
     --takeaway "routed to the polecat pool" --route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
-unset FAKE_SHOW_JSON GCTK_STUB_MISS
-eq "$RC" "4" "(ACTLOST) a release whose update does not read back fails the actionable exit"
-has "bead|update|tk-sub|--set-metadata|gc.takeaway=routed to the polecat pool|" "$(cat "$TMP/gctk.log")" \
-    "(ACTLOST) …after the real gc-helm.sh wrote the release"
-has "its stamp did not read back" "$ERR" "(ACTLOST) …which its read of its own stamp finds missing"
-hasnt "RUNCANCEL" "$LOG" "(ACTLOST) …so no run is ended"
-hasnt "gc.reacted_by" "$LOG" "(ACTLOST) …no landed proof is stamped"
-hasnt "UPDATE bd update $R" "$LOG" "(ACTLOST) …and the reaction bead stays open, for a re-run to resume"
+unset FAKE_SHOW_JSON FAKE_UPDATE_REFUSE
+eq "$RC" "4" "(ACTREFUSED) a release the store refuses fails the actionable exit"
+has "could not update 'tk-sub'" "$ERR" "(ACTREFUSED) …after the real gc-helm.sh says its update was refused"
+hasnt "RUNCANCEL" "$LOG" "(ACTREFUSED) …so no run is ended"
+hasnt "gc.reacted_by" "$LOG" "(ACTREFUSED) …no landed proof is stamped"
+hasnt "UPDATE bd update $R" "$LOG" "(ACTREFUSED) …and the reaction bead stays open, for a re-run to resume"
 
 : > "$FAKE_LOG"; RC=0
 OUT="$(GC_RIG=gc-toolkit "$SCRIPT" tk-sub --disposition actionable --reason "r" --takeaway "t" --reaction-bead "$R" 2>"$TMP/err")" || RC=$?
@@ -544,12 +539,11 @@ eq "$LOG" "" "(NOTIFYTOOL) …before anything is written"
 
 # ── blocked: the wait is an edge, in one store ───────────────────────────────
 #   (BLK)      the release carries the wait as --waiting-on
-#   (BLKORDER) the landed proof follows the edge's verification
 #   (BLKCROSS) a cross-store blocker is refused with the I1 remedy
 #   (BLKSELF)  a bead never waits on itself
 #   (BLKNEW)   --blocker files the missing bead and waits on it
 #   (BLKDEDUP) --blocker-key reuses the bead a prior reaction filed
-#   (BLKEDGE)  an edge that did not land fails the exit, so nothing records done
+#   (BLKEDGE)  an edge takeaway could not write fails the exit, so nothing records done
 #   (BLKARM)   --then-route arms the dispatch that resumes the work
 #   (BLKARMFAIL)  an arm that did not land fails the exit the same way, and a
 #                 re-run arms, then stamps the landed proof, then closes R
@@ -563,7 +557,6 @@ has "--release --waiting-on tk-blk1" "$LOG" "(BLK) the wait rides the release as
 hasnt "--route" "$LOG" "(BLK) …and a held bead is not also routed"
 hasnt "--no-wait" "$LOG" "(BLK) …and the named wait is not also called settled"
 has "gc.reacted_by=$R" "$LOG" "(BLK) the landed proof is stamped"
-before '^DEP bd dep list' 'gc.reacted_by' "(BLKORDER) …after the edge is verified"
 has "UPDATE bd update $R" "$LOG" "(BLK) …and the reaction bead is closed"
 has "disposed as blocked (tk-blk1)" "$OUT" "(BLK) …and the run reports the bead it waits on"
 
@@ -604,31 +597,18 @@ hasnt "CREATE" "$LOG" "(BLKDEDUP) …and files no second bead"
 has "--waiting-on tk-already" "$LOG" "(BLKDEDUP) …it waits on the one already filed"
 unset FAKE_LIST_JSON FAKE_NEW_ID
 
-export FAKE_DEPS_JSON='[]'
-run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 --reaction-bead "$R"
-eq "$RC" "4" "(BLKEDGE) a dropped edge fails the verb — the bead is recorded as waiting and nothing holds it"
-has "not held by tk-blk1" "$ERR" "(BLKEDGE) …the missing edge is named"
-has "gc bd dep add tk-sub tk-blk1 -t blocks" "$ERR" "(BLKEDGE) …with the repair spelled out"
-has "parked on prose alone" "$ERR" "(BLKEDGE) …and the failure says what it costs"
-has "a re-run resumes" "$ERR" "(BLKEDGE) …and that a re-run resumes, since no landed proof was stamped"
-hasnt "gc.reacted_by" "$LOG" "(BLKEDGE) …the landed proof is NOT stamped over an unheld bead"
-hasnt "UPDATE bd update $R" "$LOG" "(BLKEDGE) …and the reaction bead is NOT closed"
-hasnt "disposed as blocked" "$OUT" "(BLKEDGE) …and the run does not report a disposition"
-
-# A partial landing is still a failure: one edge holds, the other does not, and
-# the failure names only the missing one.
-export FAKE_DEPS_JSON='[{"id":"tk-blk1"}]'
-run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 --waiting-on tk-blk2 --reaction-bead "$R"
-eq "$RC" "4" "(BLKEDGE) one of two edges landing is still a failed exit"
-has "not held by tk-blk2" "$ERR" "(BLKEDGE) …naming only the one that missed"
-hasnt "not held by tk-blk1" "$ERR" "(BLKEDGE) …and not the one that landed"
-
-# The arm is downstream of the hold: no edge, no deferred dispatch.
-export FAKE_DEPS_JSON='[]'
+# takeaway exits non-zero when the store refuses a wait edge, which FAKE_HELM_FAILS
+# models, and the exit stops there: the bead is recorded as waiting and nothing
+# holds it, so no landed proof, no arm and no closed R say otherwise.
+export FAKE_HELM_FAILS=1
 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 \
     --then-route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
-eq "$RC" "4" "(BLKEDGE) a dropped edge fails before the deferred dispatch is armed"
-hasnt "DEFERRED arm" "$LOG" "(BLKEDGE) …so nothing is armed on a wait that does not exist"
+eq "$RC" "4" "(BLKEDGE) a wait edge takeaway could not write fails the exit"
+hasnt "gc.reacted_by" "$LOG" "(BLKEDGE) …the landed proof is NOT stamped over an unheld bead"
+hasnt "DEFERRED arm" "$LOG" "(BLKEDGE) …nothing is armed on a wait that does not exist"
+hasnt "UPDATE bd update $R" "$LOG" "(BLKEDGE) …and the reaction bead is NOT closed"
+hasnt "disposed as blocked" "$OUT" "(BLKEDGE) …and the run does not report a disposition"
+unset FAKE_HELM_FAILS
 
 # A first-reaction subject can carry the pour stamp gc.execution_routed_to. The
 # blocked exit releases it (gc-helm.sh --release retires that stamp as
@@ -757,7 +737,6 @@ hasnt "DEFERRED arm" "$LOG" "(BLKASSIGN) …and no sling is armed for a named ag
 has "PROACTIVE assignable gc-toolkit.mechanik tk-sub" "$LOG" "(BLKASSIGN) the exit asks whether the agent's hook would offer the bead"
 has "DEFERRED notify tk-sub --agent gc-toolkit.mechanik --reason first reaction: the comment can change only once the order lands" \
     "$LOG" "(BLKNOTIFY) the exit asks deferred-dispatch.sh for the notice that tells the agent when the wait lifts"
-before '^DEP bd dep list' '^DEFERRED notify' "(BLKNOTIFY) …once the hold is proven"
 before '^DEFERRED notify' 'gc.reacted_by' "(BLKNOTIFY) …and before the landed proof"
 
 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 \
@@ -801,7 +780,6 @@ unset FAKE_AGENT_GONE FAKE_DEPS_JSON
 #   (RULORDER) gate, then release, then the landed proof
 #   (RULGATE)  a gate that did not file fails the exit before the release, with
 #              nothing recorded done
-#   (RULEDGE)  a hold that did not land fails the exit
 #   (RULSUPER) an open first-reaction gate a superseded reaction filed is
 #              withdrawn before the new one, and this reaction's own is kept
 #   (RULTITLE) the gate's title line is the takeaway on one line, as the
@@ -851,12 +829,6 @@ has "re-run this command" "$ERR" "(RULGATE) …and the failure names the retry"
 hasnt "gc.reacted_by" "$LOG" "(RULGATE) …with no landed proof stamped"
 hasnt "UPDATE bd update $R" "$LOG" "(RULGATE) …and the reaction bead left open for the re-offer"
 unset FAKE_GATE_FAILS
-
-export FAKE_DEPS_JSON='[]'
-run tk-sub --disposition ruling --reason "r" --takeaway "t" --reaction-bead "$R"
-eq "$RC" "4" "(RULEDGE) a gate edge that is not on the subject fails the exit"
-has "not held by tk-gate1" "$ERR" "(RULEDGE) …naming the gate it is not held by"
-hasnt "gc.reacted_by" "$LOG" "(RULEDGE) …with no landed proof stamped"
 
 export FAKE_DEPS_JSON='[{"id":"tk-gate0","issue_type":"gate","await_type":"human","await_id":"first-reaction","status":"open","title":"an older reaction asked this"},{"id":"tk-gate1"}]'
 run tk-sub --disposition ruling --reason "r" --takeaway "needs a ruling: which default" --reaction-bead "$R"
@@ -1064,42 +1036,38 @@ before '--unset-metadata gc.recommended_formula' '^GATE --subject' "(RECOORDER) 
 before '^GATE --subject' 'gc.recommended_formula=mol-new' "(RECOORDER) …and stamping the new one after it"
 unset FAKE_SHOW_JSON
 
-# ── The recommendation must land before the act (read-back guard) ─────────────
-# gc.recommended_formula is presence-sensitive downstream, so a write that did
-# not land is a wrong operator affordance, not a cosmetic miss. The act after it
-# cannot be undone, so the write goes through `gctk bead update --verify`, and
-# the exit refuses before the act when it does not read back — nothing else has
-# been written, so the command re-runs. services/gctk/internal/cli/bead_test.go
-# proves the read, an unreadable one included; here its miss is named.
+# ── The recommendation must land before the act ───────────────────────────────
+# gc.recommended_formula is presence-sensitive downstream, so a write the store
+# refuses is a wrong operator affordance, not a cosmetic miss. The act after it
+# cannot be undone, so the exit refuses before the act — nothing else has been
+# written, so the command re-runs.
 export FAKE_DEPS_JSON='[{"id":"tk-gate1"}]'
 
-# A set that does not read back: the release is withheld, so the
-# reaction is not recorded done over a gate that offers only Discuss. The gate is
-# filed before the set, and a re-run finds it and sets the recommendation again.
-export GCTK_STUB_MISS='~gc.recommended_formula'
-: > "$TMP/gctk.log"
+# A set the store refuses: the release is withheld, so the reaction is not
+# recorded done over a gate that offers only Discuss. The gate is filed before
+# the set, and a re-run finds it and sets the recommendation again.
+export FAKE_UPDATE_REFUSE='gc.recommended_formula'
 run tk-sub --disposition recommend --reason "operator authority" \
     --takeaway "recommend: execute via mol-x — Accept or Discuss" \
     --recommended-formula mol-x --reaction-bead "$R"
-eq "$RC" "4" "(RECOGUARD) a recommendation set that did not land refuses the exit"
+eq "$RC" "4" "(RECOGUARD) a recommendation set the store refuses refuses the exit"
 hasnt "HELM takeaway" "$LOG" "(RECOGUARD) …the release is withheld"
-has "did not land" "$ERR" "(RECOGUARD) …and the refusal names the key that did not land"
+has "the store refused gc.recommended_formula=mol-x" "$ERR" "(RECOGUARD) …and the refusal names the key"
 has "The gate tk-gate1 is filed" "$ERR" "(RECOGUARD) …saying the gate is already filed"
 hasnt "UPDATE bd update $R" "$LOG" "(RECOGUARD) …and the reaction bead is left open for the re-offer"
-has "bead|update|tk-sub|--set-metadata|gc.recommended_formula=mol-x|" "$(cat "$TMP/gctk.log")" "(RECOGUARD) …after the set went through gctk"
-unset GCTK_STUB_MISS
+unset FAKE_UPDATE_REFUSE
 
-# A stale-clear that does not read back: the act is withheld, so a
-# Discuss-only retry never leaves a superseded Accept executable.
+# A stale-clear the store refuses: the act is withheld, so a Discuss-only retry
+# never leaves a superseded Accept executable.
 export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.recommended_formula":"mol-old"}}]'
-export GCTK_STUB_MISS='~gc.recommended_formula'
+export FAKE_UPDATE_REFUSE='gc.recommended_formula'
 run tk-sub --disposition ruling --reason "on reflection this is a plain discussion" \
     --takeaway "needs a ruling: which default" --reaction-bead "$R"
-eq "$RC" "4" "(RECOGUARD) a stale-clear that did not land refuses the exit"
+eq "$RC" "4" "(RECOGUARD) a stale-clear the store refuses refuses the exit"
 hasnt "HELM" "$LOG" "(RECOGUARD) …the act is withheld, so the superseded Accept is never left executable"
 hasnt "GATE " "$LOG" "(RECOGUARD) …and no gate is filed beside the older recommendation"
-has "did not clear" "$ERR" "(RECOGUARD) …and the refusal names the stale key that did not clear"
-unset GCTK_STUB_MISS FAKE_SHOW_JSON  # leave FAKE_DEPS_JSON: later ruling tests reuse the gate edge
+has "the store refused the clear of the earlier recommendation" "$ERR" "(RECOGUARD) …and the refusal names the stale key"
+unset FAKE_UPDATE_REFUSE FAKE_SHOW_JSON  # leave FAKE_DEPS_JSON: later ruling tests reuse the gate edge
 
 # --recommended-formula belongs to the recommend exit only: actionable, blocked,
 # and close route, hold, or hand the bead to a closer, and none files a gate the
@@ -1663,8 +1631,8 @@ unset FAKE_HELM_FAILS
 #   (INTAKEMEMBER) a parent-child dependency is membership even with no .parent,
 #                  and a blocks edge is not
 #   (INTAKEANCHOR) PR-finishing work (anchor_bead) is routed
-#   (INTAKEMARK)   a marker that does not land stops the exit before the release
-#   (INTAKESTAMP)  a held subject's release that did not land, its pour stamp
+#   (INTAKEMARK)   a marker the store refuses stops the exit before the release
+#   (INTAKESTAMP)  a held subject's release the store refuses, its pour stamp
 #                  still set, stops the exit before its landed proof
 #   (INTAKEBLK)    an unplaced blocked subject's edge lands and nothing is armed
 #   (INTAKEDRY)    a dry run names the hold and writes nothing
@@ -1703,35 +1671,34 @@ eq "$RC" "0" "(INTAKEANCHOR) PR-finishing work's actionable exit succeeds"
 has "--release --route gc-toolkit/gc-toolkit.polecat --no-wait" "$LOG" "(INTAKEANCHOR) …and it is routed"
 hasnt "placement=pending" "$LOG" "(INTAKEANCHOR) …unmarked"
 
-export FAKE_SHOW_JSON="$UNPLACED" GCTK_STUB_MISS='~placement=pending'
+export FAKE_SHOW_JSON="$UNPLACED" FAKE_UPDATE_REFUSE='placement=pending'
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
-eq "$RC" "4" "(INTAKEMARK) a marker that does not land stops the exit"
-has "placement=pending did not land" "$ERR" "(INTAKEMARK) …naming the write that missed"
+eq "$RC" "4" "(INTAKEMARK) a marker the store refuses stops the exit"
+has "could not write placement=pending on tk-sub" "$ERR" "(INTAKEMARK) …naming the write that was refused"
 hasnt "HELM takeaway" "$LOG" "(INTAKEMARK) …before the release, so the bead is not left unrouted without its marker"
 hasnt "gc.reacted_by" "$LOG" "(INTAKEMARK) …with no landed proof"
 hasnt "UPDATE bd update $R" "$LOG" "(INTAKEMARK) …and the reaction bead open for a re-run"
-unset GCTK_STUB_MISS
+unset FAKE_UPDATE_REFUSE
 
 # (INTAKESTAMP) a held subject still carries a dead pour's stamp, and the release
-# that clears it does not land, so the stamp stays and placement.sh reads it as a
-# live pour, which keeps the bead out of the queue. The real gc-helm.sh's update
-# does not read back, so it fails the release. The exit stops there, before its
+# that clears it is refused, so the stamp stays and placement.sh reads it as a
+# live pour, which keeps the bead out of the queue. The store refuses the real
+# gc-helm.sh's update, so it fails the release. The exit stops there, before its
 # landed proof, so the reaction is not recorded done over a hold the sitting
 # cannot see, and R stays open for a re-run.
 export FAKE_SHOW_JSON='[{"id":"tk-sub","status":"open","metadata":{"gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}}]'
-export GCTK_STUB_MISS='~gc.takeaway='
-: > "$TMP/gctk.log"
+export FAKE_UPDATE_REFUSE='gc.takeaway='
 real_helm_run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
-unset GCTK_STUB_MISS
-eq "$RC" "4" "(INTAKESTAMP) a held subject whose release did not land, its pour stamp still set, fails the exit"
-has "bead|update|tk-sub|--set-metadata|gc.takeaway=t|" "$(cat "$TMP/gctk.log")" "(INTAKESTAMP) …at the release"
+unset FAKE_UPDATE_REFUSE
+eq "$RC" "4" "(INTAKESTAMP) a held subject whose release the store refuses, its pour stamp still set, fails the exit"
+has "could not update 'tk-sub'" "$ERR" "(INTAKESTAMP) …at the release"
 has "UPDATE bd update tk-sub --set-metadata placement=pending" "$LOG" "(INTAKESTAMP) …after intake marked it held"
 has "gc-helm.sh takeaway failed on tk-sub" "$ERR" "(INTAKESTAMP) …naming the release that failed"
 hasnt "gc.reacted_by" "$LOG" "(INTAKESTAMP) …with no landed proof"
 hasnt "UPDATE bd update $R" "$LOG" "(INTAKESTAMP) …and the reaction bead open for a re-run"
 # Control: on a member, a stamp still set after a release that exits 0 is no
-# hold, so the reaction lands. gc-helm.sh clears the stamp in the update it reads
-# back, so a stamp set after a zero exit was written after the release landed.
+# hold, so the reaction lands. gc-helm.sh clears the stamp in its update, so a
+# stamp set after a zero exit was written after the release landed.
 export FAKE_EXEC_ROUTED_FILE="$TMP/exec_routed" FAKE_HELM_KEEPS_STAMP=1
 printf 'gc-toolkit/gc-toolkit.polecat' > "$FAKE_EXEC_ROUTED_FILE"
 export FAKE_SHOW_JSON='[{"id":"tk-sub",'"$MEMBER"',"metadata":{"gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}}]'
@@ -1757,10 +1724,10 @@ eq "$RC" "0" "(INTAKEDRY) a dry run of a held exit succeeds"
 has "would hold tk-sub for placement (placement=pending, unrouted)" "$OUT" "(INTAKEDRY) …naming the hold"
 hasnt "UPDATE" "$LOG" "(INTAKEDRY) …and writing nothing"
 
-export FAKE_SHOW_JSON='not json' GCTK_STUB_MISS='~placement=pending'
+export FAKE_SHOW_JSON='not json' FAKE_UPDATE_REFUSE='placement=pending'
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
-unset GCTK_STUB_MISS
-eq "$RC" "4" "(INTAKEUNREAD) an unreadable subject is held, and a marker that does not read back stops the exit"
+unset FAKE_UPDATE_REFUSE
+eq "$RC" "4" "(INTAKEUNREAD) an unreadable subject is held, and a marker the store refuses stops the exit"
 hasnt "HELM takeaway" "$LOG" "(INTAKEUNREAD) …so it is never routed on an unread membership"
 unset FAKE_SHOW_JSON
 
@@ -1781,7 +1748,7 @@ unset FAKE_SHOW_JSON
 #                 statuses confirms it, because both are read across every page
 #   (EMERGSLOW)   a GitHub that stalls is cut off at the bound and confirms
 #                 nothing, so the exit lands rather than hold its pool slot
-#   (EMERGPRIO)   a P0 that does not land stops the exit before the route
+#   (EMERGPRIO)   a P0 the store refuses stops the exit before the route
 #   (EMERGBLK)    an emergency's then-route arms at P0
 #   (EMERGARGS)   --emergency rides only a pool route, and names a check
 mkdir -p "$TMP/rig/.beads"
@@ -1875,12 +1842,12 @@ has "GitHub did not answer for the check runs on main of zook/repo within 1s" "$
 unset GC_FIRST_REACTION_GH_TIMEOUT
 export FAKE_GH=red
 
-export GCTK_STUB_MISS='~--priority'
+export FAKE_UPDATE_REFUSE='--priority 0'
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --emergency test-macos --reaction-bead "$R"
-eq "$RC" "4" "(EMERGPRIO) a P0 that does not land stops the exit"
-has "priority P0 did not land" "$ERR" "(EMERGPRIO) …naming the write that missed"
+eq "$RC" "4" "(EMERGPRIO) a P0 the store refuses stops the exit"
+has "could not write priority P0 on tk-sub" "$ERR" "(EMERGPRIO) …naming the write that was refused"
 hasnt "HELM takeaway" "$LOG" "(EMERGPRIO) …before the route, so it is never claimable at the wrong priority"
-unset GCTK_STUB_MISS
+unset FAKE_UPDATE_REFUSE
 
 export FAKE_DEPS_JSON='[{"id":"tk-blk1"}]'
 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 \

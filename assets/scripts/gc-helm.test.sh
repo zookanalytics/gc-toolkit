@@ -451,7 +451,7 @@ if [ -n "$ERR" ]; then printf 'note: script stderr:\n%s\n' "$ERR" >&2; fi
 #   (EDGEMANY)  repeatable; --waiting-on=<id> parses too
 #   (EDGESTAMP) the takeaway is still stamped in the same run
 #   (EDGESELF)  a bead cannot wait on itself
-#   (EDGEFAIL)  a rejected edge never loses the takeaway, and the verb exits 0
+#   (EDGEFAIL)  a rejected edge never loses the takeaway, and the verb exits 4
 #   (EDGENONE)  no flag, no edges
 : > "$TMP/updates"; : > "$TMP/deps"
 sh "$SCRIPT" takeaway A-PARKED "routed — the fix is slung" --by converse \
@@ -477,7 +477,8 @@ grep -q 'bead itself' "$TMP/werr" \
   && ok "(EDGESELF) …and the refusal names the reason" \
   || bad "(EDGESELF) silent skip (stderr: $(cat "$TMP/werr"))"
 
-# (EDGEFAIL) the takeaway is written FIRST; a failed edge warns, exit stays 0.
+# (EDGEFAIL) the takeaway is written FIRST; a failed edge warns, and the exit is
+# 4, so a caller that holds on the edge does not take the wait as wired.
 : > "$TMP/updates"; : > "$TMP/deps"
 WRC=0
 sh "$SCRIPT" takeaway A-PARKED "held for review" --waiting-on A-NOPE >/dev/null 2>"$TMP/werr" || WRC=$?
@@ -487,7 +488,7 @@ grep -q -- '--set-metadata gc.takeaway=held for review' "$TMP/updates" \
 grep -q 'could not wire' "$TMP/werr" \
   && ok "(EDGEFAIL) …and the failure is reported, not swallowed" \
   || bad "(EDGEFAIL) the failed edge was silent (stderr: $(cat "$TMP/werr"))"
-eq "$WRC" "0" "(EDGEFAIL) …and the verb still succeeds: the takeaway landed"
+eq "$WRC" "4" "(EDGEFAIL) …and the verb exits 4, the takeaway landed and the wait unwired"
 
 # (EDGENONE) the flag is opt-in; existing callers are unchanged.
 : > "$TMP/updates"; : > "$TMP/deps"

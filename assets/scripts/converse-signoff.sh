@@ -732,7 +732,7 @@ for p in "${STANDS[@]+"${STANDS[@]}"}"; do echo "the ruling leaves the branch of
 # its own argument, and nothing when it is empty. The resolves, the release and
 # the close below cannot be undone, so they wait on takeaway's exit.
 "$HELM" takeaway "$SUBJECT" "$OUTCOME" --by converse "${WAIT[@]+"${WAIT[@]}"}" \
-  || stopped "the headline did not land on $SUBJECT (gc-helm.sh takeaway refused it)${APPROVE_CLAUSE:+. It carries \"; $APPROVE_CLAUSE\" after --outcome, which counts toward the cap, so a shorter --outcome makes room}; no gate was resolved and the conversation is not closed"
+  || stopped "gc-helm.sh takeaway did not finish on $SUBJECT, and its message above says which write it could not make${APPROVE_CLAUSE:+. It carries \"; $APPROVE_CLAUSE\" after --outcome, which counts toward the cap, so a shorter --outcome makes room}; no gate was resolved and the conversation is not closed"
 
 if [ "$RULED" = yes ]; then
   # 3. The gates the ruling answers: those --answer names, or else each one the

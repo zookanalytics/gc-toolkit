@@ -1298,18 +1298,22 @@ cmd_takeaway() {
         echo "$PROG: takeaway: could not update '$bead' (does it exist in rig '${path:-?}'?)" >&2
         exit 4
     fi
-    # Edges AFTER the stamp: a failure here degrades to prose-only, never
-    # loses the conclusion. `dep add <bead> <blocker>` = "<bead> is blocked by
-    # <blocker>", so the edge lands on <bead> — what the board reads. Only the
-    # waits still owed reach here; landed riders were partitioned out above and
-    # are reported after, so the reason each got no edge is on the log.
+    # Edges AFTER the stamp: a refused edge never loses the conclusion, and the
+    # verb exits 4 once the rest is written, so a caller that holds on the edge
+    # does not take the wait as wired. `dep add <bead> <blocker>` = "<bead> is
+    # blocked by <blocker>", so the edge lands on <bead> — what the board
+    # reads. Only the waits still owed reach here; landed riders were
+    # partitioned out above and are reported after, so the reason each got no
+    # edge is on the log.
+    edge_missed=""
     for _w in $real_waits; do
         [ -n "$_w" ] || continue
         # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
         if gc bd dep add "$bead" "$_w" -t blocks ${db:+--db "$db"} >/dev/null 2>&1; then
             echo "waiting-on edge: $bead depends on $_w"
         else
-            echo "$PROG: takeaway: could not wire --waiting-on $_w (same store? already wired? cycle?) — the takeaway text still stands, but the board cannot see this wait" >&2
+            edge_missed=1
+            echo "$PROG: takeaway: could not wire --waiting-on $_w (a cycle, or another edge between the two?) — the takeaway text still stands, but nothing holds $bead on $_w and the board cannot see this wait. Wire it by hand: gc bd dep add $bead $_w -t blocks${db:+ --db $db}" >&2
         fi
     done
     for _w in $skipped_riders; do
@@ -1335,6 +1339,9 @@ cmd_takeaway() {
     fi
     if [ -n "$assign" ] && [ -z "$release_park" ]; then
         echo "$PROG: takeaway: $bead is closed, so it was NOT assigned to '$assign' — the agent would be handed a bead whose disposition landed. The headline and the run's end are written. If the disposition is wrong, reopen the bead deliberately and re-run: gc bd update $bead${db:+ --db $db} --status=open" >&2
+        exit 4
+    fi
+    if [ -n "$edge_missed" ]; then
         exit 4
     fi
     rel_note=""
