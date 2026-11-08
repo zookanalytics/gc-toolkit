@@ -92,12 +92,12 @@ it, and attaches once the reconciler has started it, however long the start
 takes, reporting the sitting's state while it waits (an interrupted wait leaves
 the sitting to start on its own, to attach later). When the sitting it waits on
 ends before the reconciler starts it, engage hands the conversation back to the
-operator's queue with a write guarded on that sitting and on the conversation's
-status, and leaves one that another writer has taken or closed since as it is.
-Pointed at a human gate,
-engage takes the one bead still waiting on the gate and makes the conversation
-it lands on reply to the gate; with several beads waiting it names them and
-starts nothing, and with none it says nothing waits and starts nothing.
+operator's queue with a write guarded on that sitting's alias and on the
+conversation's status, and leaves one that another writer has taken or closed
+since as it is. Pointed at a human gate, engage takes the one bead still
+waiting on the gate and makes the conversation it lands on reply to the gate;
+with several beads waiting it names them and starts nothing, and with none it
+says nothing waits and starts nothing.
 Named by a conversation that has closed, engage says when it closed and the
 first line of its last hand-back after the header, before any prompt. On a
 TTY it then engages the conversation's subject, where Enter files a new

@@ -234,10 +234,11 @@ these steps:
    human --status open`, where the holder is the assignee that session holds
    the task under and the status is the task's status as engage read it while
    that session held it. That is the write a sitting cut short makes at its
-   sign-off. A task that another writer has taken, or
-   that a dismiss has closed, misses the guard and is left as it is. Engage
-   then says where the task is, exits 4, and names the engage of the task
-   that starts a new sitting on it.
+   sign-off. A task that another writer has taken, or that a dismiss has
+   closed, misses the guard and is left as it is. Engage then says where the
+   task is and exits 4. It names the engage of the task that takes it up
+   again, or, for a task that closed, the engage of the subject that opens a
+   fresh one.
 
 **Engage offers what holds the bead.** It reads the reasons
 `gctk pr-status derive --json` gives (`prstatus.Read` and `prstatus.Reasons`),
@@ -774,10 +775,10 @@ the conversation is still open. An engage that waits to attach hands the
 conversation back to the operator's queue when the sitting it waits on ends
 before it starts, whether that engage spawned the sitting or reused it (step 7
 of *Engage*, above). A sitting spawned without an attach, as helm-svc's engage
-route spawns one, is waited on only by a later engage that reuses it, and no
-engage waits on a session closed after it started. A conversation whose
-sitting no engage waited on keeps the alias of a sitting whose session has
-ended. The board reads it as waiting for the operator,
+route spawns one, is waited on only by a later engage that reuses it, and an
+engage stops waiting once the session starts. A conversation whose sitting no
+engage waited on keeps the alias of a sitting whose session has ended. The
+board reads it as waiting for the operator,
 because no live sitting holds it, and `gc-helm engage` takes it up again:
 under the same alias, or bound to a fresh sitting's with a write guarded on the
 holder it read, which also drops the session pins the gone sitting's claim
