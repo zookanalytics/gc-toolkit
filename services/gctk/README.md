@@ -85,7 +85,7 @@ worktree of the clone shares and which outlives any one of them:
 | `gc-rig-checks/test/trees/<tree>.json` | the full-suite test pass every commit with that tree reads |
 
 `--publish-bead <bead>` copies a record onto the bead's `rig_check.<check>` key,
-which `lifecycle/lifecycle.toml` registers. A record says what a command did at
+a key rig declares through the ledger, in one write that nothing reads back. A record says what a command did at
 a commit and never whose failure it is: a caller that judges a recorded fail
 pre-existing writes that judgment on a bead with
 `assets/scripts/rig-check-pre-existing.sh`. `gctk rig <check> --help` states the
@@ -109,6 +109,8 @@ built from sources other than the checkout's.
 cmd/gctk/            the binary's entry point, and the revision `version` prints
 internal/cli/        the command tree, each command with its help, flags and exit codes
 internal/lifecycle/  the lifecycle state machine, which lifecycle/lifecycle.toml declares
+internal/ledger/     typed bead records: each key's declaration, one write per act,
+                     the read-back before an act that cannot be undone, and snapshots
 internal/gcbd/       the store adapter: bead reads and writes through `gc bd` and the
                      supervisor API, and the store's blocked set
 internal/gcbd/fake/  the store adapter's in-memory fake, for the domains' tests
@@ -116,12 +118,15 @@ internal/daemon/     finding the supervisor API the store adapter's reads go thr
 internal/git/        the git subprocess seam: one git command per call, in a named directory
 internal/rig/        rig's runner and its commit-keyed record store
 prstatus/            the PR status derivation, exported for the helm board
+waits/               what holds a bead: the keys it reads, declared read-only
+key-registry.json    every declared key, generated from the declarations
 ```
 
 ## Running the tests
 
 ```bash
 cd services/gctk && go test ./...          # every package
+cd services/gctk && go test ./cmd/gctk -run TestKeyRegistry -update   # write key-registry.json again
 bash assets/scripts/lifecycle.test.sh      # lifecycle through its bridge
 bash assets/scripts/merge.test.sh          # merge through its bridge
 bash assets/scripts/epic.test.sh           # epic through its bridge

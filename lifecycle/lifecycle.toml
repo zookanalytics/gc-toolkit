@@ -383,16 +383,19 @@ keys = ["pr.machine", "pr.conversation", "pr_posture"]
 # instant alone, and a head move arrives with a fresh one no owed row reads.
 since_format = "RFC 3339 UTC"
 
-# The metadata-key registry: every key the pack writes, grouped and defined. A
-# key absent from the groups below is not pack state (docs/component-model.md
-# §2-§3), and doctor/check-state-space flags a bead carrying a key whose writer
-# was retired (its HEALER_RE and RETIRED_KEYS lists; retiring a key adds it
-# there). Each key's definition names five things a reader needs and only
-# two of which the value shows: what WRITES it, what READS it, what its ABSENCE
-# means, how it is CLEARED, and its value TYPE. Prose is spent where a reader
-# cannot recover those from the group and the sections above; a key whose
-# mechanics already sit in [gates], [posture], [holds], [machine],
-# [machine_axis] or [dated_keys] is defined there and only registered here.
+# The metadata-key registry: every key the pack writes that no gctk domain
+# declares, grouped and defined. A key a gctk domain owns is declared in that
+# domain's package and listed in services/gctk/key-registry.json, which is
+# generated from the declarations (docs/gctk-architecture.md, "The ledger"). A
+# key absent from both is not pack state (docs/component-model.md §2-§3), and
+# doctor/check-state-space flags a bead carrying a key whose writer was retired
+# (its HEALER_RE and RETIRED_KEYS lists; retiring a key adds it there). Each
+# key's definition names five things a reader needs and only two of which the
+# value shows: what WRITES it, what READS it, what its ABSENCE means, how it is
+# CLEARED, and its value TYPE. Prose is spent where a reader cannot recover
+# those from the group and the sections above; a key whose mechanics already sit
+# in [gates], [posture], [holds], [machine], [machine_axis] or [dated_keys] is
+# defined there and only registered here.
 #
 # Four field-vocabulary rules the whole registry rests on, each settled against
 # the code that reads it:
@@ -1104,29 +1107,16 @@ keys = [
 #   handback has run. Never cleared. An integer string.
 
 [metadata.rig_checks]
-# What beads carry about a rig's recorded checks: the published copy of a
-# check's result, which `gctk rig <check> --publish-bead <bead>` writes on the
-# bead its caller names, and a caller's judgment that a recorded fail is
-# pre-existing. The result that answers a later `gctk rig` call is the record
-# under the rig clone's git common directory (services/gctk/README.md, "rig");
-# these keys are for whoever reads the bead.
+# A caller's judgment, on a bead, that a rig's recorded fail is pre-existing.
+# The result that answers a later `gctk rig` call is the record under the rig
+# clone's git common directory (services/gctk/README.md, "rig"). The published
+# copy of a result, rig_check.<check>, is rig's key, declared in
+# services/gctk/internal/rig and listed in services/gctk/key-registry.json.
 keys = [
-  "rig_check.test", "rig_check.lint", "rig_check.typecheck",
   "rig_check_pre_existing.test", "rig_check_pre_existing.lint",
   "rig_check_pre_existing.typecheck", "rig_check_pre_existing.setup",
   "rig_check_pre_existing.build",
 ]
-# rig_check.test, rig_check.lint, rig_check.typecheck — the record the
-#   publishing call answered with, as one JSON object: check, result, scope
-#   (absent on a lint or typecheck run), commit, tree, exit_code, duration_ms,
-#   runner, recorded_at and command. gctk writes it only once the record store
-#   holds the result it copies: after recording a result, and after answering
-#   from a record. It reads the copy back once to confirm the write. No other
-#   pack path reads it. Absent means no call published that check to the bead.
-#   Never cleared: the next publish replaces it. Its commit is the one the check
-#   ran at: the head the call answered for, or, for a full-suite test pass
-#   answered through the tree, an earlier commit with the same tree. A JSON
-#   object stored as a string.
 # rig_check_pre_existing.test, .lint, .typecheck, .setup, .build — a caller's
 #   judgment that one recorded fail of the check is pre-existing: the same
 #   failure is red on the base branch, and a tracker carries it. One JSON

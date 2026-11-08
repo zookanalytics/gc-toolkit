@@ -12,6 +12,7 @@ import (
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/git"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/rig"
 )
 
@@ -246,7 +247,7 @@ func rigRecorded(check string, o rigOpts, stdout, stderr io.Writer) int {
 	if !o.force {
 		if rec, src := found.Answer(scope, o.command); rec != nil {
 			say("%s; not run again%s", describeRecord(rec, src, co.Commit), forceHint(rec))
-			rigPublish(check, o.publish, rec, say)
+			rigPublish(o.publish, rec, say)
 			return resultExit(rec)
 		}
 		if r := found.Commit; r != nil {
@@ -261,7 +262,7 @@ func rigRecorded(check string, o rigOpts, stdout, stderr io.Writer) int {
 			return rigExitMachine
 		}
 		say("nothing declared to run; recorded at %s as a pass that ran nothing", co.Commit)
-		rigPublish(check, o.publish, rec, say)
+		rigPublish(o.publish, rec, say)
 		return rigExitPass
 	}
 
@@ -302,7 +303,7 @@ func rigRecorded(check string, o rigOpts, stdout, stderr io.Writer) int {
 	if left != "" {
 		say("WARN the run left files git does not ignore, and the next call in this checkout is refused until they are gone:\n%s", firstLines(left, 10))
 	}
-	rigPublish(check, o.publish, rec, say)
+	rigPublish(o.publish, rec, say)
 	return resultExit(rec)
 }
 
@@ -447,28 +448,18 @@ func printRecord(w io.Writer, rec *rig.Record) {
 	fmt.Fprintf(w, "%s\n", raw)
 }
 
-// rigPublish copies rec onto the bead's rig_check.<check> key through the gcbd
-// write path and reads it back. rec is a record the store holds: one it just
+// rigPublish copies rec onto the bead through rig's publish, which writes its
+// check's key through the ledger. rec is a record the store holds: one it just
 // took, or one a lookup returned. The copy is for whoever reads the bead; the
 // record in the store is what answers a later call, so a publish that fails is
 // reported and changes nothing else.
-func rigPublish(check, bead string, rec *rig.Record, say func(string, ...any)) {
+func rigPublish(bead string, rec *rig.Record, say func(string, ...any)) {
 	if bead == "" {
 		return
 	}
-	raw, err := json.Marshal(rec)
+	key, err := rig.Publish(ledger.New(gcbd.New()), bead, rec)
 	if err != nil {
 		say("WARN the result was not published to %s: %v", bead, err)
-		return
-	}
-	key := "rig_check." + check
-	client := gcbd.New()
-	if out, err := client.Update(bead, "--set-metadata", key+"="+string(raw)); err != nil {
-		say("WARN the result was not published to %s (gc bd update exit %d): %s", bead, gcbd.ExitCode(err), firstLines(out, 3))
-		return
-	}
-	if b := client.ShowDirect(bead); b == nil || b.Meta(key) != string(raw) {
-		say("WARN the result was written to %s's %s, but did not read back as written", bead, key)
 		return
 	}
 	say("published to %s as %s", bead, key)

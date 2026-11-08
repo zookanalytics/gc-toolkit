@@ -1,0 +1,44 @@
+[
+  {
+    "name": "branch",
+    "type": "string",
+    "readers": [
+      "waits"
+    ],
+    "doc": "The source branch a work bead's change is on, which the work formula's workspace-setup writes (lifecycle/lifecycle.toml, [metadata.merge_identity]). A bead carrying it is in flight."
+  },
+  {
+    "name": "merge_result",
+    "type": "string",
+    "readers": [
+      "waits"
+    ],
+    "doc": "The anchor's lifecycle state, which lifecycle.sh, through gctk lifecycle, writes on every transition (lifecycle/lifecycle.toml, [machine] and [states]). A bead carrying it is in flight."
+  },
+  {
+    "name": "rejection_reason",
+    "type": "string",
+    "readers": [
+      "waits"
+    ],
+    "doc": "Why the bead's last attempt bounced, which the refinery writes (lifecycle/lifecycle.toml, [metadata.merge_identity]). A bead carrying it is in flight."
+  },
+  {
+    "name": "rig_check.lint",
+    "type": "json",
+    "owner": "internal/rig",
+    "doc": "The published copy of a recorded check's result, which `gctk rig \u003ccheck\u003e --publish-bead \u003cbead\u003e` writes on the bead its caller names: the record the call answered with, as one JSON object of check, result, scope (absent on a lint or typecheck run), commit, tree, exit_code, duration_ms, runner, recorded_at and command. gctk writes it only once the record store holds the result it copies, after recording a result or answering from a record. No pack path reads it: the record under the rig clone's git common directory answers a later call. Absent means no call published that check to the bead. Never cleared: the next publish replaces it. Its commit is the one the check ran at: the head the call answered for, or, for a full-suite test pass answered through the tree, an earlier commit with the same tree."
+  },
+  {
+    "name": "rig_check.test",
+    "type": "json",
+    "owner": "internal/rig",
+    "doc": "The published copy of a recorded check's result, which `gctk rig \u003ccheck\u003e --publish-bead \u003cbead\u003e` writes on the bead its caller names: the record the call answered with, as one JSON object of check, result, scope (absent on a lint or typecheck run), commit, tree, exit_code, duration_ms, runner, recorded_at and command. gctk writes it only once the record store holds the result it copies, after recording a result or answering from a record. No pack path reads it: the record under the rig clone's git common directory answers a later call. Absent means no call published that check to the bead. Never cleared: the next publish replaces it. Its commit is the one the check ran at: the head the call answered for, or, for a full-suite test pass answered through the tree, an earlier commit with the same tree."
+  },
+  {
+    "name": "rig_check.typecheck",
+    "type": "json",
+    "owner": "internal/rig",
+    "doc": "The published copy of a recorded check's result, which `gctk rig \u003ccheck\u003e --publish-bead \u003cbead\u003e` writes on the bead its caller names: the record the call answered with, as one JSON object of check, result, scope (absent on a lint or typecheck run), commit, tree, exit_code, duration_ms, runner, recorded_at and command. gctk writes it only once the record store holds the result it copies, after recording a result or answering from a record. No pack path reads it: the record under the rig clone's git common directory answers a later call. Absent means no call published that check to the bead. Never cleared: the next publish replaces it. Its commit is the one the check ran at: the head the call answered for, or, for a full-suite test pass answered through the tree, an earlier commit with the same tree."
+  }
+]
