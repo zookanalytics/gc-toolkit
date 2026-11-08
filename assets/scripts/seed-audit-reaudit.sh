@@ -37,37 +37,22 @@
 # reads the store itself, never a pass's memo, since a memo taken before this
 # run's own write would show no bead. Otherwise the bead is created with its
 # identity in the create, settled at its priority (queue-priority.sh settle),
-# and slung with mol-polecat-work. A sling cannot be undone, so the create goes
-# through `gctk bead create --verify`, which reads the identity back before the
-# sling (docs/warrants.md, "bd write durability"), and the sling's exit says
-# whether it dispatched. An adopted bead was just found by that identity. The
-# route is proved before any write, after the
-# dedup read, so a base whose re-audit is already in flight costs one query
-# (pool-route.sh).
+# and slung with mol-polecat-work, and each write's exit says whether it landed.
+# An adopted bead is judged by the row the dedup query found it by. The route is
+# proved before any write, after the dedup read, so a base whose re-audit is
+# already in flight costs one query (pool-route.sh).
 #
 # Output: one line on stdout, "<bead> <route> <filed|adopted|in-flight|held>",
 #   or "none <base> not-default" for a base that is not the default branch. The
 #   narrative goes to stderr.
 # Exit: 0 the base has its re-audit, or is not one to re-audit · 1 usage,
 #   nothing written · 2 not dispatched: the route, the dedup query, the create,
-#   the identity's read-back, the settle or the sling did not land, and a retry
-#   adopts what was filed
+#   the settle or the sling did not land, and a retry adopts what was filed
 set -uo pipefail
 
 _lib_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$_lib_dir/bd-lib.sh}" || { echo "seed-audit-reaudit: cannot source bd-lib.sh beside this script" >&2; exit 2; }
-# >>> control-char-scrub
-# A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
-# C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
-# above 0x1F pass through raw, which JSON permits; the output feeds jq, so
-# dropping a structural LF or TAB just minifies.
-scrub() { tr -d '\000-\037'; }
-# <<< control-char-scrub
-# The re-audit is filed through `gctk bead create --verify`.
-# >>> gctk-bin
-GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
-# <<< gctk-bin
 SCRIPT_DIR="$_lib_dir"
 
 PROG="seed-audit-reaudit"
@@ -175,15 +160,15 @@ else
   BODY=$(printf '## What happened\n\nThe `gc` binary renders files of generated/seed-audit differently from what %s commits, and no change in this repository moved them. %s found %s already stale in the files below: each renders the same at %s as at the change it was checking. The text came from gc itself, whose builtin packs carry the prompts and recipes those files mirror (assets/scripts/render-seed-audit.sh, WHOSE TEXT IT IS).\n\n%s\n## The work\n\nOn a branch from %s, run `assets/scripts/render-seed-audit.sh` and commit generated/seed-audit as it renders, every file the render changes, including any not listed above. That re-render is the whole change. Edit no rendered file by hand and change no seed input: a page that reads wrong is corrected in gc and arrives here on the next re-audit.\n\nIn the PR summary, name the gc that rendered it (`gc version`, the binary'"'"'s path and its build time) and say what text moved.\n\nIf the render changes nothing, %s already carries this text and there is nothing to land: decline the work through a human gate, as for a falsified premise, so a person closes this bead.' \
     "$BASE" "${SEEN_BY:-A caller}" "$BASE" "$BASE" "$PAGE_LIST" "$BASE" "$BASE")
   TITLE="Re-render the seed audit on $BASE: the gc binary moved its text"
+  # A create bd could not confirm after a lost connection exits non-zero and may
+  # still have written, so a retry adopts by the key before it files again.
   CREATE_RC=0
-  REPLY=$("$GCTK" bead create --title "$TITLE" -t task --priority=2 -d "$BODY" --metadata "$IDENTITY" --json --verify </dev/null 2>/dev/null) || CREATE_RC=$?
+  REPLY=$(gc bd create --title "$TITLE" -t task --priority=2 -d "$BODY" --metadata "$IDENTITY" --json </dev/null 2>/dev/null) || CREATE_RC=$?
   REPLY=$(printf '%s' "$REPLY" | scrub)
   BEAD=$(printf '%s' "$REPLY" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
-  case "$CREATE_RC" in
-    0) [ -n "$BEAD" ] || fail "the re-audit create returned no id; a retry adopts the bead by $KEY=$BASE if the create landed" ;;
-    3) fail "re-audit ${BEAD:-?} was filed but did not read back carrying its identity; not dispatched, and a retry adopts the bead by $KEY=$BASE once it reads" ;;
-    *) fail "the re-audit create was refused${REPLY:+: $(printf '%s' "$REPLY" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null)}; nothing filed, and a retry files it" ;;
-  esac
+  [ "$CREATE_RC" = 0 ] \
+    || fail "the re-audit create failed${REPLY:+: $(printf '%s' "$REPLY" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null)}; a retry adopts the bead by $KEY=$BASE if it was written anyway, and files it otherwise"
+  [ -n "$BEAD" ] || fail "the re-audit create returned no id; a retry adopts the bead by $KEY=$BASE if the create landed"
   STATE=filed
 fi
 

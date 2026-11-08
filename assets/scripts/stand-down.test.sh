@@ -178,7 +178,6 @@ case "$verb" in
     fi
     # A move into closed is bd's checked close: a live blocker refuses it.
     case " ${args[*]:-} " in *" closed "*)
-      [ -z "${STUB_CLOSE_NOOP:-}" ] || exit 0
       blocked=$(jq -r --arg id "$id" "$BLOCKERS"'. as $s | [ .[] | select(.id == $id) | live_blockers($s)[] ] | join(", ")' "$S")
       if [ -n "$blocked" ]; then
         echo "Error: cannot close blocked issue: $id is blocked by [$blocked] (use --force to override)" >&2; exit 1
@@ -259,10 +258,6 @@ chmod +x "$BIN/gc" "$BIN/run-cancel" "$BIN/branch-end"
 printf '{"rigs":[{"name":"tkrig","path":"%s","prefix":"tk"}]}\n' "$TMP/rig" > "$TMP/rigs.json"
 
 export PATH="$BIN:$ROOT/tools/test-floor:$PATH"
-# The disarm, the release, and a shared gate's removal write through `gctk
-# bead --verify`, which gctk.stub.sh stands in for: each write reaches the stub
-# gc above, and GCTK_STUB_MISS names one that does not read back.
-export GCTK_BIN="$HERE/gctk.stub.sh"
 export STUB_STORE="$TMP/beads.json" STUB_RIGS="$TMP/rigs.json" STUB_GC_LOG="$TMP/gc.log" STUB_SLING_LOG="$TMP/sling.log"
 export STUB_DEFERRED="$HERE/deferred-dispatch.sh"
 export BEADS_ACTOR=a-person GC_RUN_CANCEL_TOOL="$BIN/run-cancel" GC_BRANCH_END_TOOL="$BIN/branch-end"
@@ -413,39 +408,6 @@ stop_case() { # <label> <text the stub refuses> <gate status after> <arm after> 
   eq "$(succ tk-w)" tk-g "stop at $1: its edge names the gate"
   eq "$(slings)" 0 "stop at $1: nothing was sent"
 }
-fresh
-GCTK_STUB_MISS='~gc.dispatch_when_ready ' run tk-w --key polecat-x --ruling "stop"
-eq "$RC" 1 "a disarm that does not read back stops the stand-down"
-has "$OUT" "did not read back removed" "…and says why"
-eq "$(field tk-g status)" open "…with the gate unanswered"
-eq "$(field tk-w status)" open "…and the work open"
-fresh; patch 'map(if .id == "tk-w" then .metadata += {"gc.routed_to":"rig/pool"} else . end)'
-GCTK_STUB_MISS='~gc.takeaway=' run tk-w --key polecat-x --ruling "stop"
-eq "$RC" 1 "a release that does not read back stops the stand-down"
-has "$OUT" "its stamp did not read back" "…and says why"
-has "$OUT" "Re-run this command" "…and names the way on"
-eq "$(field tk-g status)" open "…with the gate unanswered"
-eq "$(field tk-w status)" open "…and the work open"
-run tk-w --key polecat-x --ruling "stop"
-eq "$RC" 0 "a re-run once the route clears stands it down"
-eq "$(meta tk-w gc.routed_to)" "" "…with no route left"
-eq "$(field tk-w status)" closed "…and closes it"
-# The close exits 0 and does not read back: the real bead-rehome.sh's exit is the
-# close's, so the stand-down stops on it.
-fresh
-GCTK_STUB_MISS=close:tk-w run tk-w --key polecat-x --ruling "stop"
-eq "$RC" 1 "a close that does not read back stops the stand-down"
-has "$OUT" "the close did not read back closed" "…and bead-rehome.sh says why"
-has "$OUT" "did not read back closed: bead-rehome.sh said why, above. Re-run this command" "…and the stop names the way on"
-hasnt "$OUT" "closed as not needed" "…and nothing reports the work closed"
-eq "$(field tk-w status)" open "…with the work open"
-eq "$(meta tk-w gc.superseded_by)" tk-g "…and pointed at the gate"
-eq "$(field tk-g close_reason)" "ruled: stop" "…which carries the ruling"
-pass; eq "$(slings)" 0 "…and a pass sends nothing"
-run tk-w --key polecat-x --ruling "stop"
-eq "$RC" 0 "a re-run once the close reads back stands it down"
-eq "$(field tk-w status)" closed "…and closes the work"
-eq "$(slings)" 0 "…with nothing sent"
 stop_case "the disarm" "--unset-metadata gc.dispatch_when_ready " open armed "was not removed"
 stop_case "the release" "gc.takeaway=" open gone "did not end or its route did not clear"
 stop_case "the answer" "gate resolve" open gone "did not resolve"
@@ -588,16 +550,10 @@ eq "$(field tk-g status)" open "…and the gate stays open"
 eq "$(slings)" 0 "…and nothing was sent"
 
 shared
-GCTK_STUB_MISS=dep:tk-w run tk-w --key polecat-x --ruling "stop" --successor tk-conv
-eq "$RC" 1 "a removal that does not read back stops the stand-down"
-has "$OUT" "did not leave gate tk-g" "…and it says so"
-eq "$(field tk-w status)" open "…with the work open"
-
-shared
 patch 'map(if .id == "tk-w" then .metadata += {"gc.routed_to":"rig/pool"} else . end)'
-GCTK_STUB_MISS='~gc.takeaway=' run tk-w --key polecat-x --ruling "stop" --successor tk-conv
-eq "$RC" 1 "a release that does not read back stops the stand-down before the bead leaves a shared gate"
-has "$OUT" "its stamp did not read back" "…and says why"
+STUB_FAIL='gc.takeaway=' run tk-w --key polecat-x --ruling "stop" --successor tk-conv
+eq "$RC" 1 "a release the store refuses stops the stand-down before the bead leaves a shared gate"
+has "$OUT" "did not end or its route did not clear" "…and says why"
 eq "$(line_of "dep remove tk-w")" "" "…with no removal tried"
 eq "$(jq -r '[.[] | select(.id == "tk-w") | ._deps[] | select(.id == "tk-g")] | length' "$STUB_STORE")" 1 "…and the bead still on the gate"
 

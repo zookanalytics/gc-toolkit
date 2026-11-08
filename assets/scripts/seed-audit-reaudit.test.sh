@@ -10,10 +10,9 @@
 # armed to re-sling once its wait clears, or never dispatched (adopted and
 # slung), while a closed one or
 # another base's files beside it; the stops that dispatch nothing (an
-# unanswered dedup query, a refused create, an identity that does not read back
-# before the sling, an unsettled priority, a sling that fails), each leaving
-# what a retry adopts; and every metadata key it writes registered in
-# lifecycle.toml.
+# unanswered dedup query, a refused create, an unsettled priority, a sling that
+# fails), each leaving what a retry adopts; and every metadata key it writes
+# registered in lifecycle.toml.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -126,14 +125,10 @@ chmod +x "$BIN/gc"
 printf '#!/usr/bin/env bash\nprintf "settle %%s\\n" "$2" >> "${STUB_GC_LOG:?}"\n[ -z "${STUB_SETTLE_RC:-}" ] || { echo "queue-priority: settle: could not take the priority lock" >&2; exit "$STUB_SETTLE_RC"; }\n' > "$BIN/queue-priority"
 chmod +x "$BIN/queue-priority"
 export PATH="$BIN:$PATH"
-# The re-audit is filed through `gctk bead create --verify`, which gctk.stub.sh
-# stands in for: the create reaches the stub gc above, and GCTK_STUB_MISS names
-# one that does not read back.
-export GCTK_BIN="$HERE/gctk.stub.sh" GCTK_STUB_LOG="$TMP/gctk.log"
 export GC_RIG="gc-toolkit"
 export GC_QUEUE_PRIORITY_TOOL="$BIN/queue-priority"
 export STUB_STORE="$TMP/store.json" STUB_GC_LOG="$TMP/gc.log" STUB_SEQ="$TMP/seq"
-unset STUB_LIST_FAIL STUB_SETTLE_RC STUB_SLING_FAIL STUB_CREATE_FAIL STUB_CREATE_LOSE_META
+unset STUB_LIST_FAIL STUB_SETTLE_RC STUB_SLING_FAIL STUB_CREATE_FAIL
 
 # The checkout the writer runs in: its origin/HEAD names the default branch.
 repo() { # <dir> <default branch>
@@ -291,20 +286,10 @@ eq "$(meta re-1 gc.routed_to)" "" "…and stamps no bare route in its place"
 reset
 OUT=$(STUB_CREATE_FAIL=1 run --base main 2>&1); RC=$?
 eq "$RC" "2" "a create the store refuses exits 2"
-has "$OUT" "the re-audit create was refused: the store refused the create" "…with bd's reason"
+has "$OUT" "the re-audit create failed: the store refused the create" "…with bd's reason"
+has "$OUT" "a retry adopts the bead by seed_audit_reaudit=main if it was written anyway" "…and what a retry does"
 eq "$(beads)|$(calls '^sling ')" "0|0" "…filing and slinging nothing"
 
-reset
-: > "$TMP/gctk.log"
-OUT=$(run --base main 2>&1); RC=$?
-grep -qF -- '|--metadata|{"seed_audit_reaudit":"main","target":"main"}|--json|--verify|' "$TMP/gctk.log" \
-  && ok "the create carries the identity and asks gctk to read it back" \
-  || bad "the create is not verified (gctk calls: $(cat "$TMP/gctk.log"))"
-reset
-OUT=$(GCTK_STUB_MISS=create run --base main 2>&1); RC=$?
-eq "$RC" "2" "a created re-audit whose identity does not read back exits 2"
-has "$OUT" "re-1 was filed but did not read back carrying its identity" "…naming the bead it filed"
-eq "$(calls '^sling ')" "0" "…and slings nothing"
 
 echo "# --- metadata-key drift against lifecycle.toml ---"
 # A key the writer stamps that nothing registers is state no audit can account
