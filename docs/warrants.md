@@ -510,9 +510,9 @@ shares only the word ([authority-map.md](authority-map.md)).
     findings, and its `ce-pr-comment-resolver` agent is handed a thread to fix
     or answer. Neither keeps a record of the thread.
   - The search is [specs/tk-iydyiup/gas-city-search.md](../specs/tk-iydyiup/gas-city-search.md).
-- **Verified.** 2026-11-06, at `gastownhall/gascity` main b2c0f62ae6c9 with
+- **Verified.** 2026-11-08, at `gastownhall/gascity` main 9f1abb50188b with
   the `gastown` pack it bundles at 66897e7132c9, `gastownhall/gascity-packs`
-  main e3cb468bbc65, and `gastownhall/beads` main 8c3eb30f30f7.
+  main 2a3b142e3fbd, and `gastownhall/beads` main 2edea9ced8c6.
 - **Retires when.** Gas City records a pull request's review threads where a
   reader of the PR's own bead finds them, for example once its readiness
   monitor reads review threads, or a webhook receiver keeps their state from
