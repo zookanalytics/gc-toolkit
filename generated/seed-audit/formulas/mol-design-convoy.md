@@ -9,7 +9,7 @@ subject the effort's landing bead: it cuts `integration/<subject-id>` and record
 it on the subject, then files a design child whose doc lands on that branch, an
 implementation child held behind the design's approval, and the summary task
 that writes the subject's PR summary once the children have landed. Only once
-every wait among them reads back does it hand the subject to the refinery and
+every wait among them is written does it hand the subject to the refinery and
 dispatch the children and the summary task. The subject's PR carries design and
 implementation to the default branch as one reviewed unit, and the subject
 closes when that PR merges, as any PR's owning bead does, so work queued behind
