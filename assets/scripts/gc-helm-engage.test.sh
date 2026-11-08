@@ -2111,6 +2111,13 @@ if ( cd "$ROOT/services/gctk" && go build -buildvcs=false -o "$TMP/gctk" ./cmd/g
   export WALK_EDGES='{"tk-subj":['"$REWORK_EDGE"','"$DECISION_EDGE"'],"tk-rework":['"$GATE_EDGE"']}'
   run_fresh tk-subj --no-attach --no-input
   has "$OUT" 'tk-subj is held by tk-dec ("keep the old flag?"), which a person has to clear.' "(HOLD-REAL) a decision the anchor waits on is offered beside the gate"
+  OTHER_PR_EDGE='{"id":"tk-other","title":"the PR the rework builds on","status":"open","issue_type":"task","metadata":{"merge_result":"pull_request","pr_posture":"review_required@h@2026-10-27T00:00:00Z","pr.machine":"settled@h@2026-10-27T00:00:00Z"},"dependency_type":"blocks"}'
+  export WALK_EDGES='{"tk-subj":['"$REWORK_EDGE"'],"tk-rework":['"$OTHER_PR_EDGE"']}'
+  run_fresh tk-subj --no-attach --no-input
+  has "$OUT" 'tk-subj is held by tk-other ("the PR the rework builds on"), which a person has to clear. To engage it: gc-helm engage tk-other' "(HOLD-REAL) another PR waiting on a review, which the rework waits on, is offered"
+  run_fresh_tty '1\n\n' tk-subj --no-attach
+  has "$OUT" '[1] tk-other — "the PR the rework builds on"  (a person has to clear it: engages it)' "(HOLD-REAL) …numbered at the prompt"
+  has "$CALLED" "--deps tracks:tk-other" "(HOLD-REAL) …and picking it engages that PR"
   export WALK_EDGES='{"tk-subj":['"$REWORK_EDGE"'],"tk-rework":[{"id":"tk-gate","status":"closed","issue_type":"gate","await_type":"human","dependency_type":"blocks"}]}'
   run_fresh tk-subj --no-attach --no-input
   hasnt "$OUT" "is held" "(HOLD-REAL) resolving the gate clears the offer"

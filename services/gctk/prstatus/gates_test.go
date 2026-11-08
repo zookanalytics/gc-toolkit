@@ -311,11 +311,10 @@ func TestHoldingGatesShareReadsAcrossLevels(t *testing.T) {
 	}
 }
 
-// anchorBlocker is an open bead with the metadata a merge anchor records on itself,
-// read as a caller reads it.
+// anchorBlocker is an open bead carrying the metadata a merge anchor records on
+// itself.
 func anchorBlocker(id string, md map[string]string) Blocker {
-	return Blocker{ID: id, Title: "pr " + id, Status: "open", IssueType: "task"}.
-		WithMetadata(func(key string) string { return md[key] })
+	return Blocker{ID: id, Title: "pr " + id, Status: "open", IssueType: "task", Metadata: md}
 }
 
 // with returns md with each pair of keys and values added, leaving md as it was.
@@ -338,8 +337,11 @@ func decision(id string) Blocker {
 	return Blocker{ID: id, Title: "decide " + id, Status: "open", IssueType: "decision"}
 }
 
+// toPerson is the metadata of a bead routed to a person.
+var toPerson = map[string]string{"gc.routed_to": "human"}
+
 func routedToPerson(id string) Blocker {
-	return Blocker{ID: id, Title: "for " + id, Status: "open", IssueType: "task", RoutedTo: "human"}
+	return Blocker{ID: id, Title: "for " + id, Status: "open", IssueType: "task", Metadata: toPerson}
 }
 
 // The walk keeps the beads a person owes the next move on, other than the human
@@ -385,6 +387,8 @@ func TestHoldingOwed(t *testing.T) {
 			[]string{"g"}, []string{}},
 		{"a pull request waiting on a review and a decision is two moves",
 			map[string][]Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", awaitingReview)}, "b": {decision("d")}}, []string{}, []string{"b", "d"}},
+		{"a pull request waiting on a review and a gate is two moves",
+			map[string][]Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", awaitingReview)}, "b": {gate("g")}}, []string{"g"}, []string{"b"}},
 		{"of two stacked pull requests the review owed is the one the other waits on",
 			map[string][]Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b1", awaitingReview)}, "b1": {anchorBlocker("b2", awaitingReview)}},
 			[]string{}, []string{"b2"}},
@@ -392,7 +396,7 @@ func TestHoldingOwed(t *testing.T) {
 			map[string][]Blocker{"a": {task("rw")}, "rw": {closed(anchorBlocker("b", with(awaitingReview, "merge_result", "merged")))}}, []string{}, []string{}},
 		{"a closed decision holds nothing", map[string][]Blocker{"a": {closed(decision("d"))}}, []string{}, []string{}},
 		{"a human gate routed to a person counts once, as a gate",
-			map[string][]Blocker{"a": {task("rw")}, "rw": {{ID: "g", Status: "open", IssueType: "gate", AwaitType: "human", RoutedTo: "human"}}},
+			map[string][]Blocker{"a": {task("rw")}, "rw": {{ID: "g", Status: "open", IssueType: "gate", AwaitType: "human", Metadata: toPerson}}},
 			[]string{"g"}, []string{}},
 		{"owed beads nearest first",
 			map[string][]Blocker{"a": {task("rw"), decision("near")}, "rw": {decision("far")}}, []string{}, []string{"near", "far"}},

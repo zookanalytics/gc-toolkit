@@ -232,12 +232,13 @@ these steps:
 `gctk pr-status derive --json` gives (`prstatus.Read` and `prstatus.Reasons`),
 the one definition the PR's `held:` labels and the board's row read: each open
 human gate reached from the bead through its open `blocks` edges, so a gate on a
-rework or a review the anchor waits on is offered from the PR, each blocker the
-bead waits on that a person has to clear, and the PR's own review threads or
-blocked verdict. The prompt lists them under "Held by" after the bead's
-conversations. A gate or a blocker takes a number, and picking one engages it as
-if it were named, except that a gate several beads wait on takes the bead it was
-picked from when that bead is one of them. The PR's own threads and verdict take
+rework or a review the anchor waits on is offered from the PR, each bead a person
+owes the next move on that the same edges reach, such as a decision or another PR
+waiting on a review that the PR's rework waits for, and the PR's own review
+threads or blocked verdict. The prompt lists them under "Held by" after the
+bead's conversations. A gate or a bead takes a number, and picking one engages it
+as if it were named, except that a gate several beads wait on takes the bead it
+was picked from when that bead is one of them. The PR's own threads and verdict take
 none, because engaging the PR is how a person acts on them. An engage that asks
 nothing, as `--no-input` and the board's route do, names each
 and how to engage it, and an engage pointed at a gate or a conversation does not
