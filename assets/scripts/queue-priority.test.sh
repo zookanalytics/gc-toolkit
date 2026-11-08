@@ -267,7 +267,7 @@ case "$verb" in
       shift || true
     done
     [ -n "${STUB_UPDATE_FAIL:-}" ] && { echo "gc: simulated update refusal" >&2; exit 1; }
-    if [ -n "${STUB_UPDATE_FAIL_ID:-}" ] && printf '%s\n' "${ids[@]}" | grep -qxF -- "$STUB_UPDATE_FAIL_ID"; then
+    if [ -n "${STUB_UPDATE_FAIL_ID:-}" ] && grep -qxF -- "$STUB_UPDATE_FAIL_ID" <<< "$(printf '%s\n' "${ids[@]}")"; then
       echo "gc: simulated update refusal" >&2; exit 1
     fi
     idj="$(printf '%s\n' "${ids[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')"

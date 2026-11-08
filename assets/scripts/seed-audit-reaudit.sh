@@ -56,6 +56,14 @@ _lib_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 SCRIPT_DIR="$_lib_dir"
 
 PROG="seed-audit-reaudit"
+
+# >>> control-char-scrub
+# A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
+# C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
+# above 0x1F pass through raw, which JSON permits; the output feeds jq, so
+# dropping a structural LF or TAB just minifies.
+scrub() { tr -d '\000-\037'; }
+# <<< control-char-scrub
 usage() { warn "$1"; exit 1; }
 fail()  { warn "$1"; exit 2; }
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
