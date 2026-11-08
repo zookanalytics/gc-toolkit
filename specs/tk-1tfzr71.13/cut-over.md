@@ -123,14 +123,15 @@ disposed through their edges.
 Eight open doctor findings in the gc-toolkit store named tk-8akayez in
 `duplicate_of`: tk-f1ouz56, tk-cbwm0e8, tk-u71sytl, tk-nn62zvy, tk-qcvfkqt,
 tk-n334ypp, tk-j0315fe and tk-osdwdw. tk-8akayez is the open bug that carries
-the doctor-timeout family, checks that overran their fixed 60-second budget at
-host-load peaks. Each finding was held on it because that overrun was its own
-cause. Each closed on 2026-11-08 through `bead-rehome.sh --kind duplicate`, with a
-note saying why it is the same work. Each close replaced the finding's blocks edge
-onto tk-8akayez with the `duplicates` edge, and no open bead waited on any of
-them, so no wait moved. Three of them had later recorded a different situation
-under the same key: I2 violations, a PR with more than one open anchor under I4,
-and an order failing repeatedly. Run at 06:08Z, I4 and the order check passed,
+the doctor-timeout family, checks that overran their fixed 60-second budget,
+most of them at host-load peaks. Each finding was held on it because that
+overrun was its own cause. Each closed on 2026-11-08 through
+`bead-rehome.sh --kind duplicate`, with a note saying why it is the same work.
+Each close replaced the finding's blocks edge onto tk-8akayez with the
+`duplicates` edge, and no open bead waited on any of them, so no wait moved.
+Three of them had later recorded a different situation under the same key: I2
+violations, a PR with more than one open anchor under I4, and an order failing
+repeatedly. Run at 06:08Z, I4 and the order check passed,
 and I2 reported only the retired keys on the parked beads this section settles.
 A recurrence after a close files a new bead that names the closed one
 (`patrol-finding.sh`), so closing a held finding loses no later report.
@@ -152,11 +153,15 @@ tk-9749w9 stays, because `gc.supersedes` is inert on every bead.
 ## Closed beads that name their canonical only in duplicate_of
 
 The backfill reads the two `superseded_by` keys. Some closed beads carry
-`duplicate_of` alone, with no edge onto the bead it names: 51 in gc-toolkit, 63
-in rig A and 5 in rig B. Before the edges, two scripts read `duplicate_of`. The
-duplicate sweep read live beads only. `pr-stack.sh` also read it on a closed row,
-to keep a closed duplicate out of a PR's ledger, which gathers rows by branch,
-and it reads the `duplicates` edge there now. On 2026-11-08 no open PR in either
-rig was on a branch any of these beads carries. Each that carries one either
-records a no-op outcome, which keeps it out of a ledger anyway, or names a branch
-whose bead has closed. So nothing acts on these beads, and they are left alone.
+`duplicate_of` alone, with no `duplicates` or `supersedes` edge onto the bead it
+names: 51 in gc-toolkit, 63 in rig A and 5 in rig B. Of gc-toolkit's, 32 keep a
+`blocks` edge onto that bead, which holds nothing once the bead waiting on it is
+closed. Before the edges, two scripts read `duplicate_of`. The duplicate sweep
+read it to close a live duplicate, and on a closed rework child to keep a
+disposed sibling from counting as the one that landed, and this change deleted
+the sweep. `pr-stack.sh` also read it on a closed row, to keep a closed duplicate
+out of a PR's ledger, which gathers rows by branch, and it reads the `duplicates`
+edge there now. On 2026-11-08 no open PR in gc-toolkit, rig A or rig B was on a
+branch any of these beads carries. Each that carries one either records a no-op
+outcome, which keeps it out of a ledger anyway, or names a branch whose bead has
+closed. So nothing acts on these beads, and they are left alone.
