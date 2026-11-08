@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
 # review-evidence.sh — what `gctk rig` recorded at the commit a review reads.
-#   review-evidence.sh --anchor <bead> --commit <sha>
-# Runs in the review's worktree, which must be checked out at <sha>. Callers:
-# the review-gather block of formulas/mol-review.toml and of
+#   review-evidence.sh --anchor <bead> --commit <sha> --worktree <path>
+# Reads the review's worktree, which --worktree names and which must be checked
+# out at <sha>, whatever directory the call is made in. Callers: the
+# review-gather block of formulas/mol-review.toml and of
 # formulas/mol-review-quorum-signoff.toml, which every check's review runs.
+#
+# A call that names no worktree reads the checkout it is made in. A run keeps
+# the step text it was poured with, and a review poured before its gather named
+# the worktree makes that call after a cd into it. That form goes once no open
+# step calls this script without --worktree.
 #
 # Every run of a rig's checks through `gctk rig`, by a self-review, the
 # refinery or an earlier review, is recorded against the commit it ran at, and
@@ -21,8 +27,9 @@
 # that very record at <sha>, and which trackers carry it, by rig-check-lib.sh's
 # definition of that judgment. The anchor is read only when some record fails.
 #
-# Exit: 0 printed · 1 nothing printed: the checkout is not at <sha>, or a lib
-# beside this script or a temp file is missing · 2 usage
+# Exit: 0 printed · 1 nothing printed: the worktree cannot be entered or is not
+# at <sha>, or a lib beside this script or a temp file is missing · 2 usage, a
+# --worktree with no path included
 set -uo pipefail
 
 PROG="review-evidence"
@@ -35,18 +42,19 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() {
   [ -z "${1:-}" ] || echo "$PROG: $1" >&2
-  echo "usage: $PROG --anchor <bead> --commit <sha>" >&2
+  echo "usage: $PROG --anchor <bead> --commit <sha> --worktree <path>" >&2
   exit 2
 }
 
-ANCHOR=""; COMMIT=""
+ANCHOR=""; COMMIT=""; WORKTREE=""; NAMED=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --anchor|--commit)
+    --anchor|--commit|--worktree)
       [ "$#" -ge 2 ] || usage "$1 needs a value"
       case "$1" in
         --anchor) ANCHOR="$2" ;;
         --commit) COMMIT="$2" ;;
+        --worktree) WORKTREE="$2"; NAMED=1 ;;
       esac
       shift 2 ;;
     -h|--help) usage ;;
@@ -55,6 +63,14 @@ while [ "$#" -gt 0 ]; do
 done
 [ -n "$ANCHOR" ] || usage "--anchor is required"
 [ -n "$COMMIT" ] || usage "--commit is required"
+# An empty path is a caller that lost its worktree, never the checkout it is in.
+[ -z "$NAMED" ] || [ -n "$WORKTREE" ] || usage "--worktree needs a path"
+
+# gctk rig reads the checkout of the directory it runs in, so every read below
+# runs in the worktree.
+if [ -n "$WORKTREE" ]; then
+  CDPATH='' cd -- "$WORKTREE" 2>/dev/null || { echo "$PROG: cannot enter the worktree $WORKTREE, so no record of it can be read" >&2; exit 1; }
+fi
 
 # A record and a pre-existing mark both name a full sha, so the commit is the
 # one the checkout's HEAD resolves to, and a checkout at any other commit has
