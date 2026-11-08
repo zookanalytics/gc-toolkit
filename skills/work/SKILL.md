@@ -142,11 +142,14 @@ With no `--on`, the sling runs the pool's `default_sling_formula`, which for a
 polecat pool is `mol-polecat-work`.
 
 - **One dispatch, never two.** A sling starts a workflow on the bead and sets
-  `gc.execution_routed_to` on it. Setting `gc.routed_to=<pool>` by hand has the
-  pool claim the bead itself. Arming the bead (`deferred-dispatch.sh arm`) has
-  the deferred-dispatch order sling it once nothing holds it. Send it one way,
-  and disarm an armed bead before you send it another. Any two start two
-  workers on one branch.
+  `gc.execution_routed_to` on it. A raw route,
+  `gc sling <rig>/<pool> <bead> --no-formula --no-convoy`, has the pool claim
+  the bead itself, for work whose method the bead carries. It needs both flags,
+  because without them the sling pours the pool's default formula and files a
+  convoy for the bead, and it is never a `gc.routed_to` written by hand. Arming
+  the bead (`deferred-dispatch.sh arm`) has the deferred-dispatch order sling it
+  once nothing holds it. Send it one way, and disarm an armed bead before you
+  send it another. Any two start two workers on one branch.
 - **Release its wait first.** A worker's first step builds nothing that still
   waits. It re-arms a bead with an open blocker to be sent again when the
   blocker closes, and it ends the run on a bead that carries a `merge_result`
