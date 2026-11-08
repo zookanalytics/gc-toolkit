@@ -337,28 +337,26 @@ blocked, and leaving it to route once the blocker closes is the
 come-back-later that keeps you or a person on the hook. Make it wait on the
 blocker, then arm it, so it routes itself when the blocker closes and the
 sitting can queue everything and close. An arm with nothing holding the
-follow-up sends it on the next pass, so the arm runs only once the follow-up's
-own store reads the edge back. A `dep add` onto a bead in another rig's store
-prints success and exits 0, but holds nothing. Each call names the
-follow-up's rig, the one its pool reads: unpinned, a command that also names a
-city bead is answered from the city's store.
+follow-up sends it on the next pass, so the arm runs only once the add exits 0.
+A `dep add` onto a bead in another rig's store prints success and exits 0, but
+holds nothing, so the edge is written only when the follow-up and the blocker
+carry the same id prefix, the text before the first `-`, which names the
+store. Each call names the follow-up's rig, the one its pool reads: unpinned,
+a command that also names a city bead is answered from the city's store.
 ```bash
-gc bd --rig <rig> dep add <follow-up> <blocker> --type=blocks \
-  && gc bd --rig <rig> dep list <follow-up> --direction=down -t blocks --json | tr -d '[:cntrl:]' | jq -e --arg b <blocker> 'any(.[]; .id == $b)' >/dev/null \
+[ "$(echo <follow-up> | cut -d- -f1)" = "$(echo <blocker> | cut -d- -f1)" ] \
+  && gc bd --rig <rig> dep add <follow-up> <blocker> --type=blocks \
   && "$CONV/deferred-dispatch.sh" arm <follow-up> --target <rig>/<pool> --reason "waits for <blocker>"
 ```
-When the edge does not read back and `dep list` warns that its target has no
-row in this database, the blocker is in another rig's store, where no edge can
-hold the follow-up. Make it wait on a human gate in its own store that names
-the blocker, and arm it on that gate. The gate reaches the operator, who
-clears it once the blocker lands, and the arm then sends the follow-up.
-Remove the edge first, because the arm reads it as a blocker that holds
-nothing and warns that the next pass sends the follow-up. The helper files the
-gate in the follow-up's own store, and the message's first line is the gate's
-title, cut at 140 characters, so keep that line to one plain sentence:
+When the prefixes differ, the blocker is in another rig's store, where no
+edge can hold the follow-up, and the block writes nothing. Make the follow-up
+wait on a human gate in its own store that names the blocker, and arm it on
+that gate. The gate reaches the operator, who clears it once the blocker
+lands, and the arm then sends the follow-up. The helper files the gate in the
+follow-up's own store, and the message's first line is the gate's title, cut
+at 140 characters, so keep that line to one plain sentence:
 ```bash
-gc bd --rig <rig> dep remove <follow-up> <blocker> \
-  && "$CONV/human-gate.sh" --subject <follow-up> --key waits-for-<blocker> --message "Clear once <what the blocker delivers> lands, so <what the follow-up does> can start
+"$CONV/human-gate.sh" --subject <follow-up> --key waits-for-<blocker> --message "Clear once <what the blocker delivers> lands, so <what the follow-up does> can start
 <follow-up> waits for <blocker> in <its rig>. Clear this gate once <blocker> closes." \
   && "$CONV/deferred-dispatch.sh" arm <follow-up> --target <rig>/<pool> --reason "waits for <blocker>, through its human gate"
 ```

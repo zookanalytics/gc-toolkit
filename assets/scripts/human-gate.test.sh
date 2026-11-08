@@ -41,8 +41,6 @@ hasnt() { if hasin "$1" "$2"; then bad "$3 (found '$2')"; else ok "$3"; fi; }
 #     other calls.
 #   dep add <issue> <depends-on> --type <t> — records the edge, for the hold
 #     skill's reply from a conversation onto its gate.
-#   list --id <id> --all --json — the bead's row with its outgoing edges as
-#     dependencies, the read-back the hold skill makes of that reply.
 # The store is a JSON array of beads; EDGES holds `<issue>|<type>|<depends-on>`
 # lines, a waiter's `<waiter>|blocks|<gate>` among them.
 BIN="$TMP/bin"; mkdir -p "$BIN"
@@ -123,11 +121,6 @@ Reason: $reason" \
     exit 0 ;;
 esac
 case "${1:-}" in
-  list)
-    id=""; prev=""; for a in "$@"; do [ "$prev" = "--id" ] && id="$a"; prev="$a"; done
-    deps=$(awk -F'|' -v b="$id" '$1 == b { printf "%s{\"issue_id\":\"%s\",\"depends_on_id\":\"%s\",\"type\":\"%s\"}", (n++ ? "," : ""), $1, $3, $2 }' "$EDGES")
-    jq -c --arg id "$id" --argjson d "[$deps]" '[ .[] | select(.id == $id) | . + {dependencies: $d} ]' "$STORE"
-    exit 0 ;;
   update)
     id="${2:-}"; shift 2
     desc=""

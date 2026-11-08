@@ -122,8 +122,8 @@ append-only, so never pass `--notes`.
 
 **1. Record the checkpoint on the epic.** The block names each Delivery the
 checkpoint closes, or `none`. While checkpoints run by hand, it also says what
-was mechanical, what took judgment and what the contract lacked. The block
-reads back before anything else is written:
+was mechanical, what took judgment and what the contract lacked. The block is
+written before anything else, and its write's exit decides whether it landed:
 ```bash
 TODAY=$(date -u +%Y-%m-%d) \
   && RECORD="## Epic Checkpoint after <each landed Delivery's id, or none>, $TODAY
@@ -140,11 +140,10 @@ Contract lacked: <what the contract lacked>
 BLOCK
 )" \
   && gc bd update "$EPIC" --append-notes "$RECORD" \
-  && gc bd show "$EPIC" --json | jq -e --arg b "$RECORD" '(.[0].notes // "") | contains($b)' >/dev/null \
   && echo "the checkpoint record is on $EPIC"
 ```
-No closing line means the record did not land: write nothing more, and say so
-in the thread. When the subject is the epic, this block is the record of the
+No closing line means the store refused the record: write nothing more, and
+say so in the thread. When the subject is the epic, this block is the record of the
 settle step. When the subject is a Delivery, that step's record on the
 Delivery is one line naming this block.
 
