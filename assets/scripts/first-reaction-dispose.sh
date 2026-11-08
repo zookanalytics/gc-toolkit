@@ -290,9 +290,8 @@ fi
 
 # One store. `bd dep add` naming a bead in another rig's store answers "✓
 # Added dependency" and holds nothing (component-model I1), so a cross-store
-# wait is refused here rather than written and believed.
-same_store() { [ "${1%%-*}" = "${2%%-*}" ]; }
-
+# wait is refused here, by bd-lib.sh's bd_same_store, before anything is
+# written.
 case "$DISPOSITION" in
     actionable)
         [ -z "$WAITING$BLOCKER_TITLE$THEN_ROUTE$THEN_ASSIGN$AFTER_WORKFLOW$RECOMMENDED_FORMULA" ] \
@@ -342,12 +341,12 @@ case "$DISPOSITION" in
             [ -z "$REACTION_BEAD" ] \
                 || usage_die "--after-workflow names a frozen reaction molecule's root; a reaction bead ($REACTION_BEAD) is not a workflow on $BEAD, so its close slings the closer now. Drop --after-workflow."
             [ "$AFTER_WORKFLOW" != "$BEAD" ] || usage_die "--after-workflow $AFTER_WORKFLOW is the bead itself"
-            same_store "$AFTER_WORKFLOW" "$BEAD" \
+            bd_same_store "$AFTER_WORKFLOW" "$BEAD" \
                 || usage_die "--after-workflow $AFTER_WORKFLOW is in another store than $BEAD; the gating hold is a blocks edge, which holds nothing across stores (component-model I1)."
         fi
         for w in $WAITING; do
             [ "$w" != "$BEAD" ] || usage_die "--waiting-on $w is the bead itself"
-            same_store "$w" "$BEAD" \
+            bd_same_store "$w" "$BEAD" \
                 || usage_die "--waiting-on $w is in another store than $BEAD; the hold is a blocks edge, which holds nothing across stores (component-model I1), so the closer would run before $w lands. A person closes $BEAD once $w lands instead: put that to the operator with --disposition ruling."
         done
         # The arm is part of this exit's write-back when the closer waits, and
@@ -372,7 +371,7 @@ case "$DISPOSITION" in
         fi
         for w in $WAITING; do
             [ "$w" != "$BEAD" ] || usage_die "--waiting-on $w is the bead itself"
-            same_store "$w" "$BEAD" \
+            bd_same_store "$w" "$BEAD" \
                 || usage_die "--waiting-on $w is in another store than $BEAD; a cross-store edge reports success and holds nothing. File a bead in ${BEAD%%-*}'s store that names $w in its body, and wait on that."
         done
         if [ -n "$THEN_ROUTE" ]; then

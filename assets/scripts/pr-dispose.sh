@@ -167,29 +167,23 @@ if [ "$DRY" -eq 1 ]; then
   exit 0
 fi
 
-# Stamp the marker and read it back: a marker that did not land would let the PR
-# close abandon the anchor as an unknown close, the very thing this prevents.
+# Stamp the marker before the close: a PR closed with no marker would abandon the
+# anchor as an unknown close, the very thing this prevents. The update's exit
+# decides whether it landed, so a refused stamp closes nothing.
 SET_ARGS=(--set-metadata "gc.pr_close_disposition_kind=$KIND" \
           --set-metadata "gc.pr_close_disposition_successor=$SUCCESSOR")
 # The store is part of the marker pr-facts hands to bead-rehome: an ambiguous
 # successor needs it to resolve in the right store. Stamp it when given; when
 # omitted, UNSET it, so an omitted store cannot silently inherit a stale value a
-# prior disposition attempt left and consummate in the wrong store. The read-back
-# below asserts the landed store equals the requested one — "" when omitted.
+# prior disposition attempt left and consummate in the wrong store. Both edits
+# ride one update, which bd applies whole or not at all.
 if [ -n "$STORE" ]; then
   SET_ARGS+=(--set-metadata "gc.pr_close_disposition_successor_store=$STORE")
 else
   SET_ARGS+=(--unset-metadata "gc.pr_close_disposition_successor_store")
 fi
 gc bd update "$ANCHOR" "${SET_ARGS[@]}" >/dev/null 2>&1 \
-  || die "could not stamp the disposition marker on $ANCHOR" 1
-CJSON=$(gc bd show "$ANCHOR" --json 2>/dev/null | scrub)
-GOT_KIND=$(printf '%s' "$CJSON" | jq -r '.[0].metadata["gc.pr_close_disposition_kind"] // ""')
-GOT_SUCC=$(printf '%s' "$CJSON" | jq -r '.[0].metadata["gc.pr_close_disposition_successor"] // ""')
-GOT_STORE=$(printf '%s' "$CJSON" | jq -r '.[0].metadata["gc.pr_close_disposition_successor_store"] // ""')
-if [ "$GOT_KIND" != "$KIND" ] || [ "$GOT_SUCC" != "$SUCCESSOR" ] || [ "$GOT_STORE" != "$STORE" ]; then
-  die "the disposition marker did NOT stick on $ANCHOR (read back kind='$GOT_KIND' successor='$GOT_SUCC' store='$GOT_STORE', wanted kind='$KIND' successor='$SUCCESSOR' store='$STORE'); NOT closing the PR — a close now would abandon the anchor as an unknown close, or consummate it in the wrong store. Re-run once the store accepts the write" 1
-fi
+  || die "the store refused the disposition marker on $ANCHOR; NOT closing the PR, since a close now would abandon the anchor as an unknown close. Re-run once the store accepts the write" 1
 echo "$PROG: $ANCHOR — recorded PR-close disposition ($KIND -> $SUCCESSOR${STORE:+ in $STORE})"
 
 # Close the PR unless the caller closes it themselves. pr-facts consummates the

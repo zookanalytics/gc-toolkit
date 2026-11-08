@@ -123,6 +123,15 @@ eq "$rc/$out" "1/" "…and for a read that fails, so 'none' and 'unread' stay ap
 bd_disposed_to tk-d "$TMP/other/.beads" >/dev/null
 has "$(cat "$STUB_GC_LOG")" "--db $TMP/other/.beads" "…and reads another store when named one"
 
+# --- bd_same_store: the prefix up to an id's first hyphen names its store ------
+: > "$STUB_GC_LOG"
+bd_same_store tk-a1.2 tk-b; r1=$?
+bd_same_store tk-a hq-wisp-x1; r2=$?
+bd_same_store hq-wisp-x1 hq-b; r3=$?
+bd_same_store tk-a tkx-a; r4=$?
+eq "$r1$r2$r3$r4/$(wc -c < "$STUB_GC_LOG" | tr -d ' ')" "0101/0" \
+  "bd_same_store: one prefix is one store, a child id and a wisp id included, a longer prefix is another store, and it reads nothing"
+
 store '[{"id":"tk-a","status":"open","assignee":"","title":"a","notes":"","metadata":{"anchor_bead":"tk-anc"}}]'
 
 CACHE="$TMP/cache"
@@ -637,15 +646,6 @@ eq "$(bd_meta_readback tk-m '{"pr_number":"42"}')" "landed	" \
   "…values compare as text, so a number read back matches the string written"
 eq "$(bd_meta_readback tk-gone '{"task_kind":"review"}')" "unreadable	" "…a bead the store does not return is unreadable"
 eq "$(STUB_SHOW_FAIL=1 bd_meta_readback tk-m '{"task_kind":"review"}')" "unreadable	" "…and so is a read that fails"
-# The status is what an act gates on: 0 for landed and 1 for every other verdict,
-# and the read writes nothing either way.
-before=$(update_calls)
-bd_meta_readback tk-m '{"task_kind":"review"}' >/dev/null; rc_landed=$?
-bd_meta_readback tk-m '{"branch":"b"}' >/dev/null; rc_bare=$?
-bd_meta_readback tk-m '{"task_kind":"rework"}' >/dev/null; rc_partial=$?
-bd_meta_readback tk-gone '{"task_kind":"review"}' >/dev/null; rc_unread=$?
-eq "$rc_landed|$rc_bare|$rc_partial|$rc_unread|$(( $(update_calls) - before ))" "0|1|1|1|0" \
-  "bd_meta_readback: returns 0 only when every key landed, 1 for bare, partial and unreadable, and writes nothing"
 
 # false, null and true compare as their text too, so each reads back as itself
 # whether bd kept it typed or as a string, and none of them reads as an empty
