@@ -58,7 +58,8 @@
 #     and passes no change on a gap in architecture it does touch. This repo's
 #     own docs/review-arch.md and docs/review-triage.md, read the way a review
 #     reads them at its commit, carry the divergence lens and the changes that
-#     make arch mandatory, and the pack's arch skill carries none of that lens.
+#     make arch or pm mandatory, and the pack's arch skill carries none of that
+#     lens.
 #   - The demo method lists a message the rig's app sends people among the
 #     surfaces triage adds it for, even when no screen changes, and such a
 #     message settles need. It shows each message a change adds or alters as
@@ -207,6 +208,9 @@ hasF "$TMP/own.arch" 'A converter is a finding on sight.' "…makes a converter 
 hasF "$TMP/own.arch" 'neither are tests or the fixtures they use' "…and leaves tests out of operational surface"
 hasF "$TMP/own.triage" '## When `arch` is mandatory' "this repo's triage guidance says when the arch check is mandatory"
 hasF "$TMP/own.triage" 'does not make `arch` mandatory' "…and that a diff of tests alone does not make it so"
+hasF "$TMP/own.triage" '## When `pm` is mandatory' "…says when the pm check is mandatory"
+hasF "$TMP/own.triage" 'does not make `pm` mandatory, and neither do tests and the fixtures they use' \
+  "…and that an edit changing no behavior, or a test, does not make it so"
 
 echo "# a region the review formulas repeat is one text in every step carrying it"
 python3 - "$ROOT/formulas/mol-review.toml" "$ROOT/formulas/mol-review-quorum-signoff.toml" > "$TMP/regions" <<'PY'
