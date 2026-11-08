@@ -365,6 +365,8 @@ case "$1 ${2:-}" in
         esac ;;
       add)
         printf 'bd dep %s\n' "$*" >> "$CALLS"
+        # REPLY_FAIL refuses the edge, as a store that will not write it does.
+        [ -z "${REPLY_FAIL:-}" ] || { echo "Error adding dependency: the store refused it" >&2; exit 1; }
         printf '%s %s\n' "$4" "$5" >> "$ST/replies" ;;
       *) printf 'bd dep %s\n' "$*" >> "$CALLS" ;;
     esac ;;
@@ -471,10 +473,7 @@ case "$1 ${2:-}" in
     # lock, as the store does: a mismatch writes nothing and exits 13.
     # $RACE_LOST makes the guard lose: another writer took the conversation in
     # the spawn window, recorded as $RACE_WINNER (empty for none) with status
-    # $RACE_STATUS. $BIND_FAIL fails it for another reason, $BIND_NOPERSIST
-    # reports success and writes nothing, $BIND_STOMP overwrites the binding
-    # just written, and $CLOSE_AFTER_BIND closes the conversation just after
-    # it, as a dismiss landing between the bind and its read-back does.
+    # $RACE_STATUS. $BIND_FAIL fails it for another reason.
     if [ "$_ifa_set" = 1 ]; then
       if [ -n "${RACE_LOST:-}" ]; then
         printf '%s' "${RACE_WINNER-gc-toolkit/gc-toolkit.tk-conv-elsewhere}" > "$ST/$_id.assignee"
@@ -482,15 +481,12 @@ case "$1 ${2:-}" in
         exit 13
       fi
       [ -n "${BIND_FAIL:-}" ] && exit 1
-      [ -n "${BIND_NOPERSIST:-}" ] && exit 0
       stub_lock "$ST/$_id.lock"
       _cur="$(cat "$ST/$_id.assignee" 2>/dev/null || printf 'human')"
       if [ "$_cur" != "$_ifa" ]; then stub_unlock "$ST/$_id.lock"; exit 13; fi
       if [ "$_ifs_set" = 1 ] && [ "$(stat_of "$_id")" != "$_ifs" ]; then stub_unlock "$ST/$_id.lock"; exit 13; fi
       [ "$_new_set" = 1 ] && printf '%s' "$_new" > "$ST/$_id.assignee"
       stub_unlock "$ST/$_id.lock"
-      [ -n "${BIND_STOMP:-}" ] && printf '%s' "$BIND_STOMP" > "$ST/$_id.assignee"
-      [ -n "${CLOSE_AFTER_BIND:-}" ] && printf 'closed' > "$ST/$_id.status"
       exit 0
     fi
     [ "$_new_set" = 1 ] && printf '%s' "$_new" > "$ST/$_id.assignee"
@@ -545,10 +541,6 @@ chmod +x "$TMP/bin/date" "$TMP/bin/sleep"
 reps() { _r=""; _n=0; while [ "$_n" -lt "$2" ]; do _r="$_r $1"; _n=$((_n + 1)); done; printf '%s' "$_r"; }
 
 export PATH="$TMP/bin:$PATH"
-# engage files a conversation through open, which writes it through `gctk
-# bead`. gctk.stub.sh stands in for it and sends each write to the fake gc
-# above, and a stand-in for `gctk pr-status` sits behind it as GCTK_STUB_NEXT.
-export GCTK_BIN="$HERE/gctk.stub.sh" GCTK_STUB_LOG="$TMP/gctk-bead.log"
 export CALLS="$TMP/calls" STATE_DIR="$TMP/state" ALIAS_REFUSED="$TMP/alias-refused"
 export SPAWNED="$TMP/spawned" POLLS="$TMP/polls"
 unset GC_HELM_FIXTURE || true
@@ -971,8 +963,8 @@ eq "$RC" 0 "(GATE-LIVE) a gate whose bead a live sitting holds exits 0"
 has "$CALLED" "bd dep bd dep add tk-conv tk-gate --type replies-to" "(GATE-REPLY-LIVE) the live sitting's conversation replies to the gate"
 hasnt "$CALLED" "session new" "(GATE-LIVE) …and engage attaches to it rather than spawning"
 unset LIVE_SITTINGS
-reset; GCTK_STUB_MISS=dep:tk-conv run_engage tk-gate --no-attach
-eq "$RC" 4 "(GATE-NOREPLY) a reply that does not read back exits 4"
+reset; REPLY_FAIL=1 run_engage tk-gate --no-attach
+eq "$RC" 4 "(GATE-NOREPLY) a reply the store refuses exits 4"
 hasnt "$CALLED" "session new" "(GATE-NOREPLY) …starting no sitting that would not know its gate"
 has "$OUT" "gc bd dep add tk-conv tk-gate --type replies-to" "(GATE-NOREPLY) …and naming the edge to add by hand"
 
@@ -1026,18 +1018,6 @@ eq "$RC" 4 "(BIND-FAIL) a failed bind exits 4"
 has "$CALLED" "session close gc-77" "(BIND-FAIL) …the spawned sitting is closed, not left orphaned"
 eq "$(asg tk-conv)" "human" "(BIND-FAIL) …the conversation stays in the queue"
 
-echo "# a bind another writer stomps: the read-back shows a different holder"
-reset; BIND_STOMP="gc-toolkit/gc-toolkit.tk-conv-y" run_engage tk-conv --no-attach
-eq "$RC" 4 "(STOMP) a stomped bind exits 4"
-has "$CALLED" "session close gc-77" "(STOMP) …the stranded sitting is closed"
-has "$OUT" "gc-toolkit/gc-toolkit.tk-conv-y" "(STOMP) …and the operator is told who holds it"
-
-echo "# a bind that does not persist: the read-back finds the conversation still in the queue"
-reset; BIND_NOPERSIST=1 run_engage tk-conv --no-attach
-eq "$RC" 4 "(NOPERSIST) a non-persisting bind exits 4"
-has "$CALLED" "session close gc-77" "(NOPERSIST) …the spawned sitting is closed"
-has "$OUT" "the bind did not persist" "(NOPERSIST) …and the operator is told the bind did not persist"
-
 echo "# a conversation a dismiss closes while the sitting spawns is not bound, and the sitting is closed"
 # bd's close keeps the assignee, so the holder engage read still holds a
 # dismissed conversation: only the status guard and the read-back tell a closed
@@ -1059,7 +1039,7 @@ reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
 DISMISS_ON_SPAWN=tk-conv run_engage tk-subj --model codex --no-attach
 eq "$RC" 4 "(DISMISSED-LEFT) a conversation resumed under its own alias, dismissed during the spawn, exits 4"
 hasnt "$CALLED" "bd update" "(DISMISSED-LEFT) …binding nothing, since it is already assigned to the alias"
-has "$OUT" "reads closed" "(DISMISSED-LEFT) …its read-back finding it closed"
+has "$OUT" "reads closed" "(DISMISSED-LEFT) …its read finding it closed"
 has "$CALLED" "session close gc-77" "(DISMISSED-LEFT) …and closing the sitting it spawned"
 reset; held tk-conv gc-toolkit/gc-toolkit.c-tk-conv
 run_engage tk-subj --no-attach
@@ -1071,10 +1051,6 @@ eq "$RC" 4 "(DISMISSED-LEFT-REBIND) that conversation dismissed during the spawn
 has "$OUT" "was closed while this sitting spawned" "(DISMISSED-LEFT-REBIND) …the status guard missing on the closed conversation"
 eq "$(asg tk-conv)/$(cat "$STATE_DIR/tk-conv.status")" "gc-toolkit/gc-toolkit.c-tk-conv/closed" "(DISMISSED-LEFT-REBIND) …which keeps the holder the dismiss left"
 has "$CALLED" "session close gc-77" "(DISMISSED-LEFT-REBIND) …and the sitting it spawned is closed"
-reset; CLOSE_AFTER_BIND=1 run_engage tk-conv --no-attach
-eq "$RC" 4 "(DISMISSED-AFTER-BIND) a conversation closed between the bind and its read-back exits 4"
-has "$OUT" "reads closed" "(DISMISSED-AFTER-BIND) …the read-back finding it closed"
-has "$CALLED" "session close gc-77" "(DISMISSED-AFTER-BIND) …and closing the sitting it spawned"
 
 echo "# a spawn whose answer names no alias reads it from the session list"
 reset; SPAWN_NO_ALIAS=1 run_engage tk-conv --no-attach
@@ -1932,7 +1908,7 @@ printf '%s\n' "$*" >> "$STATE_DIR/gctk.calls"
 printf '{"status":"needs-attention","held":[],"reasons":%s}\n' "${GCTK_REASONS:-[]}"
 GCTK
 chmod +x "$TMP/bin/gctk-stub"
-export GCTK_STUB_NEXT="$TMP/bin/gctk-stub"
+export GCTK_BIN="$TMP/bin/gctk-stub"
 ONE_GATE='[{"held":"gate","id":"tk-gate","title":"Approve the rollout"}]'
 gctk_calls() { cat "$STATE_DIR/gctk.calls" 2>/dev/null || true; }
 fresh_gctk() { rm -f "$STATE_DIR/gctk.calls"; }
@@ -2101,7 +2077,7 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 if ( cd "$ROOT/services/gctk" && go build -buildvcs=false -o "$TMP/gctk" ./cmd/gctk ) >"$TMP/gctk-build.log" 2>&1; then
   { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; printf 'GC_NO_API=1 STUB_WALK=1 exec "%s/gctk" "$@"\n' "$TMP"; } > "$TMP/bin/gctk-real"
   chmod +x "$TMP/bin/gctk-real"
-  export GCTK_STUB_NEXT="$TMP/bin/gctk-real"
+  export GCTK_BIN="$TMP/bin/gctk-real"
   REWORK_EDGE='{"id":"tk-rework","title":"fix the check","status":"open","issue_type":"task","dependency_type":"blocks"}'
   GATE_EDGE='{"id":"tk-gate","title":"Approve the rollout","status":"open","issue_type":"gate","await_type":"human","dependency_type":"blocks"}'
   DECISION_EDGE='{"id":"tk-dec","title":"keep the old flag?","status":"open","issue_type":"decision","dependency_type":"blocks"}'

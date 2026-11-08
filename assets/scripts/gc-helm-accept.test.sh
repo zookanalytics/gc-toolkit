@@ -219,7 +219,12 @@ case "$1 ${2:-}" in
     _g="$3"; lock; log "bd reopen $_g"
     row "$_g" | jq '.status = "open" | del(.close_reason) | del(.closed_at)' | put "$_g"; unlock ;;
   "bd update")
-    _id="$3"; shift 3; lock; log "bd update $_id $*"
+    _id="$3"; shift 3
+    # REFUSE_UPDATE_MATCH refuses an update whose arguments carry that text.
+    if [ -n "${REFUSE_UPDATE_MATCH:-}" ]; then
+      case " $* " in *"$REFUSE_UPDATE_MATCH"*) echo "gc: the store refused the update" >&2; exit 1 ;; esac
+    fi
+    lock; log "bd update $_id $*"
     _r=$(row "$_id")
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -285,10 +290,6 @@ GC
 chmod +x "$TMP/bin/gc"
 
 export PATH="$TMP/bin:$PATH"
-# Accept records each acceptance on its gate through `gctk bead update
-# --verify`, which gctk.stub.sh stands in for: each write reaches the fake gc
-# above, and GCTK_STUB_MISS names one that does not read back.
-export GCTK_BIN="$HERE/gctk.stub.sh" GCTK_STUB_LOG="$TMP/gctk.log"
 export STORE="$TMP/store" CALLS="$TMP/calls" LINGERERS="$TMP/lingerers" CITY_ROOT="$TMP/city"
 export GC_CITY_PATH="$TMP/city" ACC_BEAD=tk-anc
 unset GC_HELM_FIXTURE GC_CITY GC_CITY_ROOT GC_RIG BEADS_DIR 2>/dev/null || true
@@ -418,21 +419,18 @@ case "$(cat "$CALLS")" in
   *"bd update tk-rec --set-metadata gc.acceptance="*"bd gate resolve tk-rec"*) ok "(ACCEPT) …before the resolve that names the token" ;;
   *) bad "(ACCEPT) the dispatch input should be recorded before the resolve (calls: $(cat "$CALLS"))" ;;
 esac
-grep -q -- '^bead|update|tk-rec|--set-metadata|gc.acceptance=.*|--verify|$' "$TMP/gctk.log" \
-  && ok "(ACCEPT) …through gctk, which reads the record back before the resolve" \
-  || bad "(ACCEPT) the record is not verified (gctk calls: $(cat "$TMP/gctk.log"))"
 hasnt "$(cat "$CALLS")" "bd close" "(ACCEPT) Accept runs no dismiss"
 : > "$CALLS"; run_accept tk-anc
 eq "$RC" 2 "(DISPATCHED) an Accept run after the first one's record exits 2"
 has "$OUT" "was dispatched (mol-fix)" "(DISPATCHED) …because the recommendation is dispatched"
 eq "$(writes)" 0 "(DISPATCHED) …and writes nothing"
 
-echo "# an acceptance whose record does not read back answers no gate and dispatches nothing"
-rec; GCTK_STUB_MISS='~gc.acceptance=' run_accept tk-anc
-eq "$RC" 4 "(RECORD-LOST) an acceptance whose record on its gate does not read back exits 4"
-has "$OUT" "could not record acceptance" "(RECORD-LOST) …saying so"
-eq "$(field tk-rec status)" "open" "(RECORD-LOST) …the recommendation's gate stays open"
-hasnt "$(cat "$CALLS")" "sling tk-anc" "(RECORD-LOST) …and nothing is slung"
+echo "# an acceptance whose record the store refuses answers no gate and dispatches nothing"
+rec; REFUSE_UPDATE_MATCH='gc.acceptance=' run_accept tk-anc
+eq "$RC" 4 "(RECORD-REFUSED) an acceptance whose record on its gate the store refuses exits 4"
+has "$OUT" "could not record acceptance" "(RECORD-REFUSED) …saying so"
+eq "$(field tk-rec status)" "open" "(RECORD-REFUSED) …the recommendation's gate stays open"
+hasnt "$(cat "$CALLS")" "sling tk-anc" "(RECORD-REFUSED) …and nothing is slung"
 
 echo "# a gate filed after the live read stops the dispatch"
 rec; LATE_GATE_ON_RESOLVE=tk-late run_accept tk-anc

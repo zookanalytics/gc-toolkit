@@ -8,9 +8,7 @@
 #     run cancel) and writes no step or root itself, while a run the releasing
 #     session holds a step of is left to close its own chain
 #   --release on a CLOSED anchor: the run's end without the resurrecting park
-#   the update goes through `gctk bead`, naming the stamp as its witness, and
-#     one that does not read back fails the verb and ends no run
-#   --waiting-on edges
+#   --waiting-on edges, and the refusal of a wait in another store
 #   the ≤140-codepoint length gate
 #   the retired board verb refuses and names helm-svc board
 #   the rig-enumeration helper leaving no trap installed on its caller
@@ -138,10 +136,8 @@ case "$1 ${2:-}" in
     # that is not there: a bare error OBJECT, never an array.
     case "$id" in UNKNOWN-*) printf '{"error":"no issues found"}\n'; exit 0 ;; esac
     # CLOSED- ids answer status=closed; everything else is open. --release on a
-    # closed anchor ends its run without the park. FAKE_STATUS_NOW, when it
-    # holds a status, is the one the bead reads as, as a claim leaves it.
-    st=open; case "$id" in CLOSED-*) st=closed ;; esac
-    [ -s "${FAKE_STATUS_NOW:-/dev/null}" ] && st="$(cat "$FAKE_STATUS_NOW")"
+    # closed anchor ends its run without the park.
+    st=open; case "$id" in CLOSED-*|A-CLOSED-*) st=closed ;; esac
     convoy=$(awk -F'|' -v r="$id" '$1==r{print $2; exit}' "$FAKE_ROOTS")
     # What gc.routed_to reads as: FAKE_ROUTED holds it.
     routed="$(cat "${FAKE_ROUTED:-/dev/null}" 2>/dev/null || true)"
@@ -151,10 +147,8 @@ case "$1 ${2:-}" in
     # What gc.takeaway_settled reads as. Every landed write updates it below.
     settled="$(cat "${FAKE_SETTLED:-/dev/null}" 2>/dev/null || true)"
     # What gc.takeaway, the headline itself, reads as. It lands below the same
-    # way gc.takeaway_settled does, and so do the stamp's time and author.
+    # way gc.takeaway_settled does.
     takeaway="$(cat "${FAKE_TAKEAWAY:-/dev/null}" 2>/dev/null || true)"
-    takeaway_at="$(cat "${FAKE_TAKEAWAY_AT:-/dev/null}" 2>/dev/null || true)"
-    takeaway_by="$(cat "${FAKE_TAKEAWAY_BY:-/dev/null}" 2>/dev/null || true)"
     # What gc.session_name / gc.session_id read as: the executor identity a
     # --release clears via --unset-metadata. FAKE_SNAME/FAKE_SID hold them.
     sname="$(cat "${FAKE_SNAME:-/dev/null}" 2>/dev/null || true)"
@@ -167,10 +161,8 @@ case "$1 ${2:-}" in
     # as one proof a same-branch wait's work has LANDED on the branch: the handoff
     # submit-and-exit writes only after it verifies the push. Absent id -> empty.
     asg="$(awk -F'|' -v i="$id" '$1==i{print $2; exit}' "$FAKE_ASSIGNEES" 2>/dev/null || true)"
-    # FAKE_ASSIGNEE_NOW, when it holds one, is the assignee the bead reads as.
-    [ -s "${FAKE_ASSIGNEE_NOW:-/dev/null}" ] && asg="$(cat "$FAKE_ASSIGNEE_NOW")"
-    if [ -n "$convoy" ]; then row=$(jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg c "$convoy" --arg rt "$routed" --arg er "$exec_routed" --arg sd "$settled" --arg tk "$takeaway" --arg ta "$takeaway_at" --arg tb "$takeaway_by" --arg sn "$sname" --arg si "$sid" --arg br "$br" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.takeaway":$tk,"gc.takeaway_at":$ta,"gc.takeaway_by":$tb,"gc.takeaway_settled":$sd,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br}}]')
-    else row=$(jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg rt "$routed" --arg er "$exec_routed" --arg sd "$settled" --arg tk "$takeaway" --arg ta "$takeaway_at" --arg tb "$takeaway_by" --arg sn "$sname" --arg si "$sid" --arg br "$br" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.takeaway":$tk,"gc.takeaway_at":$ta,"gc.takeaway_by":$tb,"gc.takeaway_settled":$sd,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br}}]'); fi
+    if [ -n "$convoy" ]; then row=$(jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg c "$convoy" --arg rt "$routed" --arg er "$exec_routed" --arg sd "$settled" --arg tk "$takeaway" --arg sn "$sname" --arg si "$sid" --arg br "$br" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.takeaway":$tk,"gc.takeaway_settled":$sd,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br}}]')
+    else row=$(jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg rt "$routed" --arg er "$exec_routed" --arg sd "$settled" --arg tk "$takeaway" --arg sn "$sname" --arg si "$sid" --arg br "$br" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.takeaway":$tk,"gc.takeaway_settled":$sd,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br}}]'); fi
     # The placement marker intake writes, and a parent-child parent: the release's
     # pour-stamp read-back judges both through placement.sh. FAKE_PLACEMENT and
     # FAKE_PARENT hold them, and an empty file leaves the key off the row, as on
@@ -202,8 +194,6 @@ case "$1 ${2:-}" in
     for a in "$@"; do
       case "$a" in
         gc.takeaway_settled=*) printf '%s' "${a#gc.takeaway_settled=}" > "$FAKE_SETTLED" ;;
-        gc.takeaway_at=*) printf '%s' "${a#gc.takeaway_at=}" > "$FAKE_TAKEAWAY_AT" ;;
-        gc.takeaway_by=*) printf '%s' "${a#gc.takeaway_by=}" > "$FAKE_TAKEAWAY_BY" ;;
         gc.takeaway=*) printf '%s' "${a#gc.takeaway=}" > "$FAKE_TAKEAWAY" ;;
         gc.execution_routed_to) : > "$FAKE_EXEC" ;;
         gc.session_name) : > "$FAKE_SNAME" ;;
@@ -247,10 +237,6 @@ export GC_RUN_CANCEL_TOOL="$TMP/bin/run-cancel-stub" FAKE_CANCELS="$TMP/cancels"
 : > "$TMP/cancels"
 
 export PATH="$TMP/bin:$PATH"
-# takeaway writes through `gctk bead`, which gctk.stub.sh stands in for: each
-# write reaches the fake gc above, and GCTK_STUB_MISS names one that does not
-# read back.
-export GCTK_BIN="$HERE/gctk.stub.sh" GCTK_STUB_LOG="$TMP/gctk.log"
 # run-lib.sh's verbs answer from the fixture store that is current: the live
 # store while its section's gc stub is first on PATH, the main one otherwise.
 # Its rows, with a convoy row for each "convoy|anchor" line tracking that
@@ -273,8 +259,6 @@ export FAKE_STEPS_JSON="$TMP/steps.json" FAKE_ROOTS="$TMP/roots" \
        FAKE_DEPS="$TMP/deps" FAKE_CLOSES="$TMP/closes" FAKE_LISTS="$TMP/lists" \
        FAKE_ROUTED="$TMP/routed" FAKE_SUPERSEDED="$TMP/superseded" \
        FAKE_SETTLED="$TMP/settled" FAKE_TAKEAWAY="$TMP/takeaway" \
-       FAKE_TAKEAWAY_AT="$TMP/takeaway_at" FAKE_TAKEAWAY_BY="$TMP/takeaway_by" \
-       FAKE_STATUS_NOW="$TMP/status_now" FAKE_ASSIGNEE_NOW="$TMP/assignee_now" \
        FAKE_EXEC="$TMP/exec" FAKE_PLACEMENT="$TMP/placement" FAKE_PARENT="$TMP/parent" \
        FAKE_SNAME="$TMP/sname" FAKE_SID="$TMP/sid" FAKE_DEPLISTS="$TMP/deplists" \
        FAKE_BRANCHES="$TMP/branches" FAKE_ASSIGNEES="$TMP/assignees" \
@@ -293,47 +277,46 @@ mkdir -p "$TMP/rig-a/.beads" "$TMP/deplists"
 # Teach the stub to serve it instead of failing and both probe cases go red.
 # That is what proves they pass on the unreadable path and not on an empty one.
 cat > "$TMP/deplists/A-BLOCKED.json" <<'J'
-[{"id":"w-child","status":"open","dependency_type":"blocks","metadata":{}},
+[{"id":"A-w-child","status":"open","dependency_type":"blocks","metadata":{}},
  {"id":"g-mine","status":"open","issue_type":"gate","await_type":"human","await_id":"rollout","dependency_type":"blocks","metadata":{}}]
 J
 cat > "$TMP/deplists/A-GATED.json" <<'J'
 [{"id":"g-mine","status":"open","issue_type":"gate","await_type":"human","await_id":"rollout","dependency_type":"blocks","metadata":{}}]
 J
 cat > "$TMP/deplists/A-DONEBLK.json" <<'J'
-[{"id":"w-child","status":"closed","dependency_type":"blocks","metadata":{}}]
+[{"id":"A-w-child","status":"closed","dependency_type":"blocks","metadata":{}}]
 J
 cat > "$TMP/deplists/CLOSED-A-FOLD.json" <<'J'
-[{"id":"w-child","status":"open","dependency_type":"blocks","metadata":{}}]
+[{"id":"A-w-child","status":"open","dependency_type":"blocks","metadata":{}}]
 J
 cat > "$TMP/deplists/A-PROBEDEAD.json" <<'J'
-[{"id":"w-child","status":"open","dependency_type":"blocks","metadata":{}}]
+[{"id":"A-w-child","status":"open","dependency_type":"blocks","metadata":{}}]
 J
 cat > "$TMP/deplists/A-PROBEJUNK.json" <<'J'
-[{"id":"w-child","status":"open","dependency_type":"blocks","metadata":{}}]
+[{"id":"A-w-child","status":"open","dependency_type":"blocks","metadata":{}}]
 J
 export FAKE_RA_PATH="$TMP/rig-a"
 : > "$TMP/deps"; : > "$TMP/closes"; : > "$TMP/lists"; : > "$TMP/routed"
-: > "$TMP/settled"; : > "$TMP/takeaway"; : > "$TMP/takeaway_at"; : > "$TMP/takeaway_by"
-: > "$TMP/status_now"; : > "$TMP/assignee_now"
-# metadata.branch per bead, for the --waiting-on landed-rider skip. w-same,
-# w-pend and CLOSED-w-rider all share A-ONBR's branch; w-diff rides its own and
-# w-nobr has none. A-PARKED/tk-blk* stay branchless so the edge tests above them
+: > "$TMP/settled"; : > "$TMP/takeaway"
+# metadata.branch per bead, for the --waiting-on landed-rider skip. A-w-same,
+# A-w-pend and A-CLOSED-w-rider all share A-ONBR's branch; A-w-diff rides its own and
+# A-w-nobr has none. A-PARKED/tk-blk* stay branchless so the edge tests above them
 # keep writing edges. A shared branch alone is not landing: the proof is the
-# status/assignee below — w-same is handed off to the refinery and CLOSED-w-rider
-# has merged (both landed riders), while w-pend is still open under a pool, so its
+# status/assignee below — A-w-same is handed off to the refinery and A-CLOSED-w-rider
+# has merged (both landed riders), while A-w-pend is still open under a pool, so its
 # work is not on the branch yet and its edge stands.
 cat > "$TMP/branches" <<'BR'
 A-ONBR|polecat/A-ONBR
-w-same|polecat/A-ONBR
-w-pend|polecat/A-ONBR
-CLOSED-w-rider|polecat/A-ONBR
-w-diff|polecat/w-diff
+A-w-same|polecat/A-ONBR
+A-w-pend|polecat/A-ONBR
+A-CLOSED-w-rider|polecat/A-ONBR
+A-w-diff|polecat/A-w-diff
 BR
 # Top-level assignee per bead. The refinery is the post-push handoff that makes
-# w-same a LANDED rider; w-pend's pool assignee is work still owed, not that proof.
+# A-w-same a LANDED rider; A-w-pend's pool assignee is work still owed, not that proof.
 cat > "$TMP/assignees" <<'ASG'
-w-same|gc-toolkit/gc-toolkit.refinery
-w-pend|gc-toolkit/gc-toolkit.polecat-3
+A-w-same|gc-toolkit/gc-toolkit.refinery
+A-w-pend|gc-toolkit/gc-toolkit.polecat-3
 ASG
 unset GC_HELM_FIXTURE || true
 # GC_RIG and BEADS_DIR too: the current-sitting lookup resolves the session's
@@ -472,15 +455,15 @@ if [ -n "$ERR" ]; then printf 'note: script stderr:\n%s\n' "$ERR" >&2; fi
 #   (EDGENONE)  no flag, no edges
 : > "$TMP/updates"; : > "$TMP/deps"
 sh "$SCRIPT" takeaway A-PARKED "routed — the fix is slung" --by converse \
-   --waiting-on tk-blk1 --waiting-on=tk-blk2 >/dev/null 2>"$TMP/werr" || true
+   --waiting-on A-blk1 --waiting-on=A-blk2 >/dev/null 2>"$TMP/werr" || true
 DEPS="$(cat "$TMP/deps")"
 
-grep -qE '^bd dep add A-PARKED tk-blk1 -t blocks' <<< "$DEPS" \
-  && ok "(EDGE) the wait is written as an edge: A-PARKED depends on tk-blk1" \
-  || bad "(EDGE) no depends-on edge for tk-blk1 (got: ${DEPS:-<none>})"
-grep -qE '^bd dep add A-PARKED tk-blk2 -t blocks' <<< "$DEPS" \
+grep -qE '^bd dep add A-PARKED A-blk1 -t blocks' <<< "$DEPS" \
+  && ok "(EDGE) the wait is written as an edge: A-PARKED depends on A-blk1" \
+  || bad "(EDGE) no depends-on edge for A-blk1 (got: ${DEPS:-<none>})"
+grep -qE '^bd dep add A-PARKED A-blk2 -t blocks' <<< "$DEPS" \
   && ok "(EDGEMANY) --waiting-on repeats, and the =VALUE form parses" \
-  || bad "(EDGEMANY) tk-blk2 missing (got: ${DEPS:-<none>})"
+  || bad "(EDGEMANY) A-blk2 missing (got: ${DEPS:-<none>})"
 eq "$(grep -c '^bd dep add' <<< "$DEPS")" "2" "(EDGEMANY) exactly one edge per flag, no duplicates"
 grep -q -- '--set-metadata gc.takeaway=routed — the fix is slung' "$TMP/updates" \
   && ok "(EDGESTAMP) the takeaway itself is still stamped in the same run" \
@@ -497,7 +480,7 @@ grep -q 'bead itself' "$TMP/werr" \
 # (EDGEFAIL) the takeaway is written FIRST; a failed edge warns, exit stays 0.
 : > "$TMP/updates"; : > "$TMP/deps"
 WRC=0
-sh "$SCRIPT" takeaway A-PARKED "held for review" --waiting-on NOPE >/dev/null 2>"$TMP/werr" || WRC=$?
+sh "$SCRIPT" takeaway A-PARKED "held for review" --waiting-on A-NOPE >/dev/null 2>"$TMP/werr" || WRC=$?
 grep -q -- '--set-metadata gc.takeaway=held for review' "$TMP/updates" \
   && ok "(EDGEFAIL) a rejected edge does not cost the takeaway" \
   || bad "(EDGEFAIL) the stamp was lost when the edge failed: $(cat "$TMP/updates")"
@@ -537,7 +520,7 @@ grep -q -- '--set-metadata gc.takeaway=no edges here' "$TMP/updates" \
 #   (EDGEMIX)      one rider + one separate: only the separate lands, unsettled
 : > "$TMP/updates"; : > "$TMP/deps"
 sh "$SCRIPT" takeaway A-ONBR "routed — folded onto this branch" --by converse \
-   --waiting-on w-same >/dev/null 2>"$TMP/werr" || true
+   --waiting-on A-w-same >/dev/null 2>"$TMP/werr" || true
 eq "$(grep -c '^bd dep add' "$TMP/deps" || true)" "0" \
   "(EDGERIDE) a wait that rode the subject's own branch writes no edge"
 grep -q "landed rider on A-ONBR's own branch" "$TMP/werr" \
@@ -553,7 +536,7 @@ grep -q -- '--set-metadata gc.takeaway_settled=1' "$TMP/updates" \
 # (EDGECLOSED) the other landing proof: a same-branch rider that has MERGED.
 : > "$TMP/deps"; : > "$TMP/updates"
 sh "$SCRIPT" takeaway A-ONBR "routed — the rider already merged" --by converse \
-   --waiting-on CLOSED-w-rider >/dev/null 2>&1 || true
+   --waiting-on A-CLOSED-w-rider >/dev/null 2>&1 || true
 eq "$(grep -c '^bd dep add' "$TMP/deps" || true)" "0" \
   "(EDGECLOSED) a merged same-branch rider is landed — no edge"
 grep -q -- '--set-metadata gc.takeaway_settled=1' "$TMP/updates" \
@@ -565,8 +548,8 @@ grep -q -- '--set-metadata gc.takeaway_settled=1' "$TMP/updates" \
 # the sitting must NOT settle. Dropping it would let A merge past unlanded work.
 : > "$TMP/deps"; : > "$TMP/updates"
 sh "$SCRIPT" takeaway A-ONBR "waiting on same-branch work still in flight" --by converse \
-   --waiting-on w-pend >/dev/null 2>&1 || true
-grep -qE '^bd dep add A-ONBR w-pend -t blocks' "$TMP/deps" \
+   --waiting-on A-w-pend >/dev/null 2>&1 || true
+grep -qE '^bd dep add A-ONBR A-w-pend -t blocks' "$TMP/deps" \
   && ok "(EDGEUNLANDED) a same-branch wait not yet landed keeps its edge" \
   || bad "(EDGEUNLANDED) a same-branch wait was dropped without proof it landed (got: $(cat "$TMP/deps"))"
 grep -q -- '--set-metadata gc.takeaway_settled=1' "$TMP/updates" \
@@ -574,28 +557,28 @@ grep -q -- '--set-metadata gc.takeaway_settled=1' "$TMP/updates" \
   || ok "(EDGEUNLANDED) …and the sitting stays unsettled"
 
 : > "$TMP/deps"
-sh "$SCRIPT" takeaway A-ONBR "waiting on a separate PR" --waiting-on w-diff >/dev/null 2>&1 || true
-grep -qE '^bd dep add A-ONBR w-diff -t blocks' "$TMP/deps" \
+sh "$SCRIPT" takeaway A-ONBR "waiting on a separate PR" --waiting-on A-w-diff >/dev/null 2>&1 || true
+grep -qE '^bd dep add A-ONBR A-w-diff -t blocks' "$TMP/deps" \
   && ok "(EDGESEP) a wait on its OWN branch still records its edge" \
   || bad "(EDGESEP) the separate-deliverable edge was dropped (got: $(cat "$TMP/deps"))"
 
 : > "$TMP/deps"
-sh "$SCRIPT" takeaway A-ONBR "waiting on a branchless bead" --waiting-on w-nobr >/dev/null 2>&1 || true
-grep -qE '^bd dep add A-ONBR w-nobr -t blocks' "$TMP/deps" \
+sh "$SCRIPT" takeaway A-ONBR "waiting on a branchless bead" --waiting-on A-w-nobr >/dev/null 2>&1 || true
+grep -qE '^bd dep add A-ONBR A-w-nobr -t blocks' "$TMP/deps" \
   && ok "(EDGENOBR) a wait with no branch still records its edge (fail toward keeping)" \
   || bad "(EDGENOBR) a branchless wait was dropped (got: $(cat "$TMP/deps"))"
 
 : > "$TMP/deps"
-sh "$SCRIPT" takeaway A-PARKED "branchless subject" --waiting-on w-same >/dev/null 2>&1 || true
-grep -qE '^bd dep add A-PARKED w-same -t blocks' "$TMP/deps" \
+sh "$SCRIPT" takeaway A-PARKED "branchless subject" --waiting-on A-w-same >/dev/null 2>&1 || true
+grep -qE '^bd dep add A-PARKED A-w-same -t blocks' "$TMP/deps" \
   && ok "(EDGENOSUBJ) a branchless subject never skips — the guard needs the subject's own branch" \
   || bad "(EDGENOSUBJ) a branchless subject wrongly skipped an edge (got: $(cat "$TMP/deps"))"
 
 : > "$TMP/deps"; : > "$TMP/updates"
 sh "$SCRIPT" takeaway A-ONBR "one rides, one is separate" \
-   --waiting-on w-same --waiting-on w-diff >/dev/null 2>&1 || true
+   --waiting-on A-w-same --waiting-on A-w-diff >/dev/null 2>&1 || true
 eq "$(grep -c '^bd dep add' "$TMP/deps" || true)" "1" "(EDGEMIX) exactly one edge from a rider+separate pair"
-grep -qE '^bd dep add A-ONBR w-diff -t blocks' "$TMP/deps" \
+grep -qE '^bd dep add A-ONBR A-w-diff -t blocks' "$TMP/deps" \
   && ok "(EDGEMIX) …and it is the separate deliverable, not the rider" \
   || bad "(EDGEMIX) the wrong edge survived (got: $(cat "$TMP/deps"))"
 grep -q -- '--set-metadata gc.takeaway_settled=1' "$TMP/updates" \
@@ -630,14 +613,14 @@ grep -q -- '--set-metadata gc.takeaway_settled=$' <<< "$U" \
   && ok "(UNSETTLED) a takeaway with no disposition clears the settled key" \
   || bad "(UNSETTLED) the key was left standing for the next sitting to inherit: $U"
 : > "$TMP/updates"
-sh "$SCRIPT" takeaway A-PARKED "routed — the fix is slung" --waiting-on tk-blk1 >/dev/null 2>&1 || true
+sh "$SCRIPT" takeaway A-PARKED "routed — the fix is slung" --waiting-on A-blk1 >/dev/null 2>&1 || true
 grep -q -- '--set-metadata gc.takeaway_settled=$' "$TMP/updates" \
   && ok "(UNSETTLED) …and so does a takeaway whose wait is an edge" \
   || bad "(UNSETTLED) --waiting-on left a settled key standing: $(cat "$TMP/updates")"
 
 : > "$TMP/updates"; : > "$TMP/deps"
 BRC=0
-sh "$SCRIPT" takeaway A-PARKED "both" --no-wait --waiting-on tk-blk1 >/dev/null 2>"$TMP/berr" || BRC=$?
+sh "$SCRIPT" takeaway A-PARKED "both" --no-wait --waiting-on A-blk1 >/dev/null 2>"$TMP/berr" || BRC=$?
 eq "$BRC" "2" "(BOTH) --no-wait beside --waiting-on is refused"
 eq "$(wc -c < "$TMP/updates" | tr -d ' ')" "0" "(BOTH) …before anything is written"
 eq "$(grep -c '^bd dep' "$TMP/deps" || true)" "0" "(BOTH) …and no edge is wired"
@@ -783,7 +766,7 @@ grep -q "released to $POOL" "$TMP/rout" \
 : > "$TMP/updates"; : > "$TMP/deps"; : > "$FAKE_CANCELS"
 URC=0
 FAKE_UPDATE_RC=1 sh "$SCRIPT" takeaway A-PARKED "refused" --release --route "$POOL" \
-   --waiting-on w-child >"$TMP/rout" 2>"$TMP/rerr" || URC=$?
+   --waiting-on A-w-child >"$TMP/rout" 2>"$TMP/rerr" || URC=$?
 eq "$URC" "4" "(REFUSED) an update the store refuses is a verb runtime failure"
 grep -q "could not update 'A-PARKED'" "$TMP/rerr" \
   && ok "(REFUSED) …and says the write did not land" \
@@ -794,83 +777,19 @@ grep -q 'takeaway set on' "$TMP/rout" \
 eq "$(wc -l < "$TMP/deps" | tr -d ' ')|$(wc -l < "$FAKE_CANCELS" | tr -d ' ')" "0|0" \
    "(REFUSED) …with no edge written and no run ended"
 
-# ── takeaway's stamp reads back before anything it cannot take back ────────
-# An update can exit 0 and still be lost under a degraded server or a racing
-# legacy writer (docs/warrants.md, "bd write durability"). The run's end, and the
-# close a caller makes on a zero exit, cannot be taken back, so the verb's update
-# goes through `gctk bead update`, which reads the stamp back before the verb
-# does anything after it. services/gctk/internal/cli/bead_test.go proves that
-# read; here gctk.stub.sh names its miss. Each case starts from a bead carrying
-# an earlier sitting's stamp, an old route, pour stamp and assignee, and the
-# session pins of the executor that held it. Covered:
-#   (WITNESS)   the update names the four stamp keys as its witness and none of
-#               the release's fields, which a pool's claim right after it
-#               rewrites: the status, the assignee, the route and the pins
-#   (LOSTREL)   a release whose update does not read back exits 4, says so,
-#               repairs nothing and ends no run
-#   (LOSTWAIT)  a headline whose update does not read back wires no wait edge
-lost_fixture() {
-  : > "$TMP/updates"; : > "$TMP/deps"; : > "$FAKE_CANCELS"; : > "$TMP/status_now"; : > "$TMP/gctk.log"
-  printf '%s' "the sitting before this one parked it" > "$TMP/takeaway"
-  printf '%s' "2026-11-01T09:00:00Z" > "$TMP/takeaway_at"
-  printf '%s' "converse" > "$TMP/takeaway_by"
-  : > "$TMP/settled"
-  printf '%s' "gc-toolkit/gc-toolkit.proactive" > "$TMP/routed"
-  printf '%s' "gc-toolkit/gc-toolkit.proactive" > "$TMP/exec"
-  printf '%s' "gc-toolkit__proactive-hq-dead" > "$TMP/assignee_now"
-  printf '%s' "gc-toolkit__proactive-hq-dead" > "$TMP/sname"
-  printf '%s' "gc-dead-session" > "$TMP/sid"
-}
-lost_fixture
-WRC=0
-sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the polecat pool" \
-   --by proactive --release --route "$POOL" --no-wait >/dev/null 2>"$TMP/lerr" || WRC=$?
-eq "$WRC" "0" "(WITNESS) a release that reads back exits 0"
-WCALL="$(grep '^bead|update|A-PARKED|' "$TMP/gctk.log" || true)"
-eq "$(grep -o -- '--verify-key|[^|]*|' <<< "$WCALL" | tr -d '\n')" \
-   "--verify-key|gc.takeaway|--verify-key|gc.takeaway_at|--verify-key|gc.takeaway_by|--verify-key|gc.takeaway_settled|" \
-   "(WITNESS) the update names the four stamp keys as its witness"
-grep -q -- '|--verify|' <<< "$WCALL" \
-  && bad "(WITNESS) the update asked for every key it sets, the route among them ($WCALL)" \
-  || ok "(WITNESS) …and no other: the route, status, assignee and pins a claim rewrites are not read"
-grep -q -- '--set-metadata|gc.routed_to='"$POOL"'|' <<< "$WCALL" \
-  && ok "(WITNESS) …while the release rides the same update" \
-  || bad "(WITNESS) the release is not in the verified update ($WCALL)"
-grep -q -- '--root root-PARKED' "$FAKE_CANCELS" \
-  && ok "(WITNESS) …and the run beneath the bead is ended once it reads back" \
-  || bad "(WITNESS) the run was not ended (cancels: $(cat "$FAKE_CANCELS"); stderr: $(cat "$TMP/lerr"))"
-
-lost_fixture
-LRC=0
-GCTK_STUB_MISS=update:A-PARKED sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the polecat pool" \
-   --by proactive --release --route "$POOL" --no-wait >"$TMP/lout" 2>"$TMP/lerr" || LRC=$?
-eq "$LRC" "4" "(LOSTREL) a release whose update does not read back fails the verb"
-grep -q "the update on A-PARKED exited 0, but its stamp did not read back" "$TMP/lerr" \
-  && ok "(LOSTREL) …saying the stamp did not read back" \
-  || bad "(LOSTREL) the miss was not reported (stderr: $(cat "$TMP/lerr"))"
-grep -q 'gctk.stub.sh: GCTK_STUB_MISS' "$TMP/lerr" \
-  && ok "(LOSTREL) …after what gctk said was missing" \
-  || bad "(LOSTREL) gctk's own lines were dropped (stderr: $(cat "$TMP/lerr"))"
-grep -q 'The release rides the same update, so it is not taken as landed either' "$TMP/lerr" \
-  && ok "(LOSTREL) …and that the release in the update is not taken as landed either" \
-  || bad "(LOSTREL) the release is not named as lost (stderr: $(cat "$TMP/lerr"))"
-eq "$(grep -c . "$FAKE_CANCELS" || true)" "0" \
-  "(LOSTREL) no run is ended while the bead still names its old route and session pins"
-eq "$(grep -cE '^bd update A-PARKED( |$)' "$TMP/updates" || true)" "0" \
-  "(LOSTREL) nothing is repaired: the verb writes nothing after the update"
-grep -q 'takeaway set on' "$TMP/lout" \
-  && bad "(LOSTREL) the verb reported success on an update that did not read back" \
-  || ok "(LOSTREL) …and success is not reported"
-
-# (LOSTWAIT) a headline that did not read back carries no wait edge beside it.
-lost_fixture
-LWRC=0
-GCTK_STUB_MISS=update:A-PARKED sh "$SCRIPT" takeaway A-PARKED "held for the rollout" --by converse \
-   --waiting-on tk-blk1 >/dev/null 2>"$TMP/lerr" || LWRC=$?
-eq "$LWRC" "4" "(LOSTWAIT) a headline whose update does not read back fails the verb"
-eq "$(grep -c '^bd dep add' "$TMP/deps" || true)" "0" "(LOSTWAIT) …and wires no wait edge"
-: > "$TMP/status_now"; : > "$TMP/assignee_now"; : > "$TMP/routed"; : > "$TMP/exec"
-: > "$TMP/sname"; : > "$TMP/sid"; : > "$TMP/takeaway"; : > "$TMP/takeaway_at"; : > "$TMP/takeaway_by"
+# ── takeaway --waiting-on in another store: refused before anything is written ─
+# An id's prefix names its store, and bd stores an edge onto another store's
+# bead without finding it, so the edge holds nothing. The wait is refused before
+# the update, so neither the headline nor an edge is written.
+: > "$TMP/updates"; : > "$TMP/deps"; : > "$FAKE_CANCELS"
+XRC=0
+sh "$SCRIPT" takeaway A-PARKED "held for the other rig's fix" --waiting-on tk-blk9 >/dev/null 2>"$TMP/xerr" || XRC=$?
+eq "$XRC" "2" "(XSTORE) a wait in another store is refused"
+grep -q -- '--waiting-on tk-blk9 lives in another store than A-PARKED' "$TMP/xerr" \
+  && ok "(XSTORE) …naming the wait and the store it is not in" \
+  || bad "(XSTORE) the refusal does not say why (stderr: $(cat "$TMP/xerr"))"
+eq "$(grep -c . "$TMP/updates" || true)" "0" "(XSTORE) …before the headline is written"
+eq "$(grep -c '^bd dep add' "$TMP/deps" || true)" "0" "(XSTORE) …and with no edge written"
 
 # ── takeaway --release on a CLOSED anchor: the run's end without the park ────
 # A fold that lands after the pour leaves a molecule routed under an anchor
@@ -971,7 +890,7 @@ sh "$SCRIPT" takeaway A-BLOCKED "routed — the fix is slung" --by converse \
    --release --route "$POOL" >/dev/null 2>"$TMP/derr" || DRC=$?
 eq "$DRC" "2" "(DELEG) an open blocker that is no human gate makes --route a usage error"
 eq "$(wc -l < "$TMP/updates" | tr -d ' ')" "0" "(DELEG) …refused before any write: the bead is untouched"
-grep -q 'w-child' "$TMP/derr" \
+grep -q 'A-w-child' "$TMP/derr" \
   && ok "(DELEGWHY) the refusal names the blocker the work is on" \
   || bad "(DELEGWHY) the blocker is unnamed (stderr: $(cat "$TMP/derr"))"
 grep -q 'g-mine' "$TMP/derr" \
@@ -1128,7 +1047,7 @@ sh "$SCRIPT" takeaway A-BLOCKED "assigned — the fix is mechanik's" \
    --release --assign "$AGENT" --no-wait >/dev/null 2>"$TMP/aerr" || KRC=$?
 eq "$KRC" "2" "(TOAGENTBLK) an open blocker that is no human gate refuses a bare --assign"
 eq "$(wc -l < "$TMP/updates" | tr -d ' ')" "0" "(TOAGENTBLK) …before any write"
-grep -q 'w-child' "$TMP/aerr" \
+grep -q 'A-w-child' "$TMP/aerr" \
   && ok "(TOAGENTBLK) …naming the blocker the work is on" \
   || bad "(TOAGENTBLK) the blocker is unnamed (stderr: $(cat "$TMP/aerr"))"
 grep -q -- '--then-assign' "$TMP/aerr" \
@@ -1138,12 +1057,12 @@ grep -q -- '--then-assign' "$TMP/aerr" \
 : > "$TMP/updates"; : > "$TMP/deps"
 WRC3=0
 sh "$SCRIPT" takeaway A-BLOCKED "held — mechanik edits once the child lands" \
-   --release --assign "$AGENT" --waiting-on w-child >/dev/null 2>"$TMP/aerr" || WRC3=$?
+   --release --assign "$AGENT" --waiting-on A-w-child >/dev/null 2>"$TMP/aerr" || WRC3=$?
 eq "$WRC3" "0" "(TOAGENTWAIT) an --assign that names its wait lands"
 grep -qE "^bd update A-BLOCKED .*--assignee=$AGENT" "$TMP/updates" \
   && ok "(TOAGENTWAIT) …assigned to the agent" \
   || bad "(TOAGENTWAIT) the assignee was lost: $(cat "$TMP/updates")"
-grep -qE '^bd dep add A-BLOCKED w-child -t blocks' "$TMP/deps" \
+grep -qE '^bd dep add A-BLOCKED A-w-child -t blocks' "$TMP/deps" \
   && ok "(TOAGENTWAIT) …and held on the named wait, which gates the hand-off" \
   || bad "(TOAGENTWAIT) the wait edge was not written (got: $(cat "$TMP/deps"))"
 
@@ -1202,7 +1121,7 @@ grep -q -- '--set-metadata gc.takeaway=a b' "$TMP/updates" \
 
 # (CAPFIRST) a refusal must cost nothing: no park, no edge.
 : > "$TMP/updates"; : > "$TMP/deps"
-sh "$SCRIPT" takeaway A-PARKED "$T141" --release --waiting-on tk-blk1 >/dev/null 2>&1 || true
+sh "$SCRIPT" takeaway A-PARKED "$T141" --release --waiting-on A-blk1 >/dev/null 2>&1 || true
 eq "$(grep -c '^bd update' "$TMP/updates" || true)" "0" "(CAPFIRST) a refused takeaway does not park the bead"
 eq "$(grep -c '^bd dep' "$TMP/deps" || true)"       "0" "(CAPFIRST) …and writes no waiting-on edge"
 
