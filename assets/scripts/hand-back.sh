@@ -38,10 +38,10 @@
 # argument beyond its bead and holder, so it carries none of the caller's flags,
 # and releases only an in_progress claim.
 #
-# Callers: mol-polecat-work's hand-back arms (the stop to ask a person about a
-# bead with no molecule, the store-only exit, the auto_push=false halt), and
-# decline.sh's end of a claim with no run declined with no gate, such as
-# mol-review's refusal of a review held with no workflow whose record is short.
+# Callers: mol-polecat-work's hand-back arms (the store-only exit, the
+# auto_push=false halt), and decline.sh's end of a claim with no run declined
+# with no gate, such as mol-review's refusal of a review held with no workflow
+# whose record is short.
 # The polecat and polecat-codex nudges spell out this write for an in_progress
 # claim, guarded on $GC_ALIAS when it is non-empty and on $GC_SESSION_ID
 # otherwise, so a change to its shape changes them too

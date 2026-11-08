@@ -403,8 +403,6 @@ since_format = "RFC 3339 UTC"
 # it. Routes on beads outside that state machine — a bead with no --to edge for
 # --route to carry — are stamped directly with gc bd update --set-metadata by
 # whichever script or formula owns that bead's dispatch. The recurring shapes: a
-# bead with no run parked to `human` until a person decides (mol-polecat-work's
-# hand-back of a bring-current it cannot finish); a
 # reaction bead routed to the proactive pool (gc-proactive.sh); a rework child
 # routed to its fix pool (pr-facts.sh, pre-open-rebase.sh); a review
 # bead's pool route restored after an abandoned round (mol-review.toml). A route
@@ -1092,16 +1090,15 @@ keys = [
 #   neither one failed, or with a fail a rig_check_pre_existing value holds this
 #   very note for. Each run of the step rewrites it. Absent means no run noted
 #   them. Never cleared.
-# aborted_at — `self-review-exhausted`, stamped by self-review-check.sh on the
-#   budget's last failing attempt. The same update reopens the work bead, clears
-#   its route and session pins, reassigns it to the witness derived from its
-#   pool route, and appends the failure to its notes. self-review-check.sh is
-#   also its only reader: a bead already carrying it gets no second handback.
-#   Absent means no handback has run. Never cleared. The opt-in
-#   packs/gascity-keeper sub-pack stamps the same key with its own step names.
-# self_review_loop_attempts — the attempt number that exhausted the budget,
-#   written in the same handback. No pack path reads it back. Absent means no
-#   handback has run. Never cleared. An integer string.
+# aborted_at — RETIRED for the self-review loop. `self-review-exhausted`,
+#   which self-review-check.sh stamped on the budget's last failing attempt.
+#   No core pack path writes or reads it. The opt-in packs/gascity-keeper
+#   sub-pack stamps the same key with its own step names. Registered so that
+#   residue on a pre-retirement bead reads as known, not as a stray.
+# self_review_loop_attempts — RETIRED. The attempt number that exhausted the
+#   budget, which self-review-check.sh wrote beside aborted_at. No pack path
+#   writes or reads it. Registered so that residue on a pre-retirement bead
+#   reads as known, not as a stray.
 
 [metadata.rig_checks]
 # What beads carry about a rig's recorded checks: the published copy of a

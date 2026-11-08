@@ -211,8 +211,9 @@ you, so you stay parked until a human walks past your pane.
 - **A decision you cannot make:** file a bead, or a human gate on the bead
   that waits (`human-gate.sh`).
   Durable state outlives your session; a pending prompt does not.
-- **Something a person must see:** park the bead with `gc.routed_to=human`.
-  They read it when they are there; you keep cycling.
+- **Something a person must see:** file a human gate on the bead
+  (`human-gate.sh`), whose message says what they must see. They read it when
+  they are there; you keep cycling.
 - **Context exhaustion mid-task:** `gc runtime request-restart`. On a named
   session it prints `Restart skipped for named session` and returns 0 — not
   a failure; keep cycling in-session.

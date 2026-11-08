@@ -12,11 +12,12 @@
 #   - lifecycle.sh refuses the park without one at runtime (lifecycle.test.sh
 #     proves the refusal); here we only assert the guard is still wired in
 #     gctk lifecycle, the implementation lifecycle.sh execs.
-#   - a raw `gc bd update` bypasses lifecycle.sh entirely, so each such site is
-#     read out of the tree and required to carry the takeaway in the same
-#     statement.
+#   - a raw `gc bd update` bypasses lifecycle.sh entirely, so the tree is read
+#     for such a site, and none may stand: outside lifecycle, a wait for a
+#     person is a human gate on the bead (human-gate.sh), never the park route.
 #
-# A new writer that parks a bead and says nothing fails this suite.
+# A new raw writer that parks a bead fails this suite, and so does a
+# lifecycle transition that parks one and says nothing.
 #
 # run-tests-scope: tree
 set -uo pipefail
@@ -131,9 +132,18 @@ statement() { # <file> <line>
   ' "$1"
 }
 
-# --- raw writers: the takeaway must ride the same statement ---------------------
+# --- raw writers: none may stand ------------------------------------------------
+# The discovery is proved against a park write of each shape before its silence
+# counts, since a pattern gone stale would find nothing too.
 echo "# raw gc.routed_to writers"
-raw_checked=0
+RAW_PARK='gc\.routed_to="\?human"\?'
+grep -qG -e "$RAW_PARK" <<< 'gc bd update x --set-metadata gc.routed_to=human' \
+  && ok "the discovery matches a raw write of the park route" \
+  || bad "the discovery no longer matches a raw write of the park route"
+[ -n "$(sed -n 's/.*\[ -z "\$\([A-Z_][A-Z0-9_]*\)" \] && \1="'"$PARK"'".*/\1/p' <<< '[ -z "$OWNER" ] && OWNER="human"')" ] \
+  && ok "the discovery matches a route that falls back to the park sentinel" \
+  || bad "the discovery no longer matches a route that falls back to the park sentinel"
+raw_found=0
 while IFS=: read -r f n _; do
   [ -n "$f" ] || continue
   skip_file "$f" && continue
@@ -143,9 +153,9 @@ while IFS=: read -r f n _; do
   # writer is a `gc bd update` (or a `set --` that builds its args) and never
   # leads with echo/printf, so a statement that does is a message, not a park.
   if [[ "$stmt" =~ ^[[:space:]]*(echo|printf)[[:space:]] ]]; then continue; fi
-  raw_checked=$((raw_checked + 1))
-  has "$stmt" "gc.takeaway=" "$f:$n writes the takeaway in the same update"
-done < <(git grep -a -n -G -e 'gc\.routed_to="\?human"\?' -- '*.sh' '*.toml' '*.md' \
+  raw_found=$((raw_found + 1))
+  bad "$f:$n writes the park route outside lifecycle.sh; file a human gate on the bead instead"
+done < <(git grep -a -n -G -e "$RAW_PARK" -- '*.sh' '*.toml' '*.md' \
            | grep -F -- '--set-metadata')
 
 # A route that FALLS BACK to the park sentinel is a park too, whatever the
@@ -158,13 +168,11 @@ while IFS=: read -r f n _; do
   # The nearest write of that variable into gc.routed_to, at or below here.
   wn=$(awk -v start="$n" -v v="$var" 'NR >= start && index($0, "gc.routed_to=\"$" v "\"") { print NR; exit }' "$f")
   [ -n "$wn" ] || continue
-  stmt=$(statement "$f" "$wn")
-  raw_checked=$((raw_checked + 1))
-  has "$stmt" "gc.takeaway=" "$f:$wn parks via \$$var and writes the takeaway with it"
+  raw_found=$((raw_found + 1))
+  bad "$f:$wn parks via \$$var outside lifecycle.sh; file a human gate on the bead instead"
 done < <(git grep -a -n -F -e "=\"$PARK\"" -- '*.sh' '*.toml' | grep -F '[ -z "$')
 
-[ "$raw_checked" -gt 0 ] && ok "raw park writers found and checked ($raw_checked)" \
-  || bad "no raw park writer found — the discovery patterns have gone stale"
+[ "$raw_found" -eq 0 ] && ok "no raw writer parks a bead on the park route"
 
 # --- the lifecycle guard that covers every --route caller ------------------------
 # Callers reach the park through lifecycle.sh's --route, and there the rule is
