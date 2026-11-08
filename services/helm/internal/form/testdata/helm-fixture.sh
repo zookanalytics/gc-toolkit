@@ -20,7 +20,7 @@ case "${1:-} ${2:-}" in
  {"id":"tk-demo3","rig":"gc-toolkit","subject":"tk-demo4","subject_title":"Refinery: land siblings independently","title":"what would it take to land siblings on their own?","status":"open","state":"live","readiness":"starting","created_at":"2026-11-08T11:00:00Z","session":{"id":"s-2","name":"s-2","state":"start-pending","attached":false,"created_at":"2026-11-08T11:00:00Z"}},
  {"id":"tk-demo5","rig":"gascity","subject":"gc-demo6","subject_title":"Upstream: session wake on assignment","title":"is the wake path worth an upstream issue?","status":"in_progress","state":"left","readiness":"ended","created_at":"2026-11-07T15:00:00Z","session":null},
  {"id":"tk-demo7","rig":"gc-toolkit","subject":"tk-demo8","subject_title":"Intake: multi-line questions","title":"operator pick from the board","status":"open","state":"queue","readiness":"queued","created_at":"2026-11-08T09:00:00Z","session":null}],
- "rigs":[{"name":"gc-toolkit","converse":true,"suspended":false},{"name":"gascity","converse":true,"suspended":false},{"name":"signal-loom","converse":true,"suspended":true}],
+ "rigs":[{"name":"gc-toolkit","converse":true,"suspended":false},{"name":"gascity","converse":true,"suspended":false},{"name":"paused","converse":true,"suspended":true}],
  "unread":[]}
 JSON
     ;;

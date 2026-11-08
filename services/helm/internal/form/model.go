@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -26,6 +25,7 @@ type Options struct {
 	DraftDir string   // where the question of a cancelled form is kept
 	Debounce time.Duration
 	Poll     time.Duration
+	Refresh  time.Duration // how often the return list reads the city again
 	Now      func() time.Time
 }
 
@@ -102,6 +102,7 @@ type Model struct {
 	city     *City
 	cityErr  string
 	cityBusy bool
+	ticking  bool // a refresh of the return list is scheduled
 
 	rig   string // the rig a new topic is filed in, chosen by name and only by the operator
 	model int    // index into opt.Models
@@ -113,12 +114,14 @@ type Model struct {
 	// The progress of a submit.
 	saving    bool
 	saved     *Saved
-	existing  bool // the conversation was chosen, not filed
+	partial   string // a new subject a failed save filed without its conversation
+	existing  bool   // the conversation was chosen, not filed
 	starting  bool
 	started   bool
 	startErr  string
 	readiness string
 	pollErr   string
+	leaving   bool // the operator left while a save or a start ran, so the form leaves once it lands
 
 	retCursor int
 	status    string
@@ -132,6 +135,9 @@ func New(ctx context.Context, helm Helm, opt Options) *Model {
 	}
 	if opt.Poll <= 0 {
 		opt.Poll = 3 * time.Second
+	}
+	if opt.Refresh <= 0 {
+		opt.Refresh = 10 * time.Second
 	}
 	if opt.Now == nil {
 		opt.Now = time.Now
@@ -177,13 +183,28 @@ func New(ctx context.Context, helm Helm, opt Options) *Model {
 func (m *Model) Note() string { return m.note }
 
 // Init starts the background reads: the city's conversations and rigs, and the
-// subject the command line named.
+// subject the command line named. The return list reads the city again while
+// it is on screen.
 func (m *Model) Init() tea.Cmd {
 	cmds := []tea.Cmd{m.loadCity()}
 	if ref := m.ref(); ref != "" {
 		cmds = append(cmds, m.lookup(ref))
 	}
+	if m.scr == returnScreen {
+		cmds = append(cmds, m.refreshCity())
+	}
 	return tea.Batch(cmds...)
+}
+
+// refreshCity schedules the next read of the city for the return list, so the
+// readiness it shows stays current. One refresh is scheduled at a time, and it
+// schedules the next only while the list is on screen.
+func (m *Model) refreshCity() tea.Cmd {
+	if m.ticking {
+		return nil
+	}
+	m.ticking = true
+	return tea.Tick(m.opt.Refresh, func(time.Time) tea.Msg { return cityTickMsg{} })
 }
 
 func (m *Model) ref() string { return strings.TrimSpace(m.subject.Value()) }
@@ -201,12 +222,13 @@ func (m *Model) loadCity() tea.Cmd {
 	}
 }
 
-// lookup reads the subject ref names, once per reference.
+// lookup reads the subject ref names, once per reference while that read is
+// running or has answered. A read that failed is read again.
 func (m *Model) lookup(ref string) tea.Cmd {
 	if ref == "" {
 		return nil
 	}
-	if _, ok := m.lookups[ref]; ok {
+	if l, ok := m.lookups[ref]; ok && (l.pending || l.err == nil) {
 		return nil
 	}
 	m.lookups[ref] = &lookup{pending: true}
@@ -350,6 +372,9 @@ func (m *Model) destination() (string, bool) {
 			if m.city == nil && m.cityErr == "" {
 				return "a new topic: loading the rigs it can be filed in…", false
 			}
+			if m.city == nil {
+				return fmt.Sprintf("a new topic: the rigs it can be filed in did not read (%s)", m.cityErr), false
+			}
 			return "a new topic: choose its rig (Tab to Rig, then ←/→)", false
 		}
 		if m.city != nil {
@@ -456,9 +481,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.starting = false
 		if msg.err != nil {
 			m.startErr = msg.err.Error()
+		} else {
+			m.started, m.startErr = true, ""
+		}
+		if m.leaving {
+			return m, m.quit()
+		}
+		if msg.err != nil {
 			return m, nil
 		}
-		m.started, m.startErr = true, ""
 		return m, m.poll(0)
 	case pollMsg:
 		if m.saved == nil {
@@ -488,8 +519,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.poll(m.opt.Poll)
 	case cityTickMsg:
+		m.ticking = false
 		if m.scr == returnScreen {
-			return m, tea.Batch(m.loadCity(), tea.Tick(10*time.Second, func(time.Time) tea.Msg { return cityTickMsg{} }))
+			return m, tea.Batch(m.loadCity(), m.refreshCity())
 		}
 		return m, nil
 	case attachedMsg:
@@ -533,6 +565,9 @@ func (m *Model) typeInto(msg tea.Msg) tea.Cmd {
 func (m *Model) key(k tea.KeyPressMsg) tea.Cmd {
 	s := k.String()
 	if s == "ctrl+c" {
+		if m.leaving {
+			return m.leaveNow()
+		}
 		return m.quit()
 	}
 	switch m.scr {
@@ -548,7 +583,7 @@ func (m *Model) key(k tea.KeyPressMsg) tea.Cmd {
 		return m.submit()
 	case "ctrl+r":
 		m.scr = returnScreen
-		return tea.Batch(m.loadCity(), tea.Tick(10*time.Second, func(time.Time) tea.Msg { return cityTickMsg{} }))
+		return tea.Batch(m.loadCity(), m.refreshCity())
 	case "tab":
 		return m.moveFocus(1)
 	case "shift+tab":
@@ -621,7 +656,11 @@ func (m *Model) submit() tea.Cmd {
 	dest, ok := m.destination()
 	if !ok {
 		m.status = "Not saved: " + dest
-		return nil
+		cmd := m.reread()
+		if cmd != nil {
+			m.status = strings.TrimSuffix(m.status, ".") + ". Reading it again."
+		}
+		return cmd
 	}
 	q := m.question.Value()
 	blank := strings.TrimSpace(q) == ""
@@ -662,6 +701,26 @@ func (m *Model) submit() tea.Cmd {
 	}
 }
 
+// reread reads again what a refused submit was refused on, when that read can
+// answer differently now: a subject lookup that failed or named a refusal,
+// such as a suspended rig, or the city's rigs for a new topic. Nothing is
+// filed, and the next Ctrl+S reads the new answer.
+func (m *Model) reread() tea.Cmd {
+	if m.newTopic() {
+		if m.rig == "" && m.cityErr == "" {
+			return nil
+		}
+		return m.loadCity()
+	}
+	ref := m.ref()
+	l := m.lookups[ref]
+	if l == nil || l.pending || (l.err == nil && l.about.Refusal == "") {
+		return nil
+	}
+	delete(m.lookups, ref)
+	return m.lookup(ref)
+}
+
 func (m *Model) onSaved(msg savedMsg) tea.Cmd {
 	m.saving = false
 	if msg.err != nil || !msg.saved.Filed {
@@ -671,15 +730,20 @@ func (m *Model) onSaved(msg savedMsg) tea.Cmd {
 			why = msg.err.Error()
 		}
 		m.status = "Not saved: " + why + ". Your question is still here."
+		var cmd tea.Cmd
 		if msg.saved.Subject != "" && m.newTopic() {
 			// The new subject was filed and its conversation was not: the next
 			// save files the question onto that subject, never a second one.
+			m.partial = msg.saved.Subject
 			m.subject.SetValue(msg.saved.Subject)
 			m.seq++
 			m.status += fmt.Sprintf(" Subject %s was filed; saving again files your question onto it.", msg.saved.Subject)
-			return m.lookup(msg.saved.Subject)
+			cmd = m.lookup(msg.saved.Subject)
 		}
-		return nil
+		if m.leaving {
+			return m.quit()
+		}
+		return cmd
 	}
 	sv := msg.saved
 	m.saved = &sv
@@ -767,14 +831,37 @@ func (m *Model) attach(conv string) tea.Cmd {
 	return tea.ExecProcess(m.helm.AttachCommand(conv), func(err error) tea.Msg { return attachedMsg{err: err} })
 }
 
-// quit leaves the form. A question the form did not save is kept in a file,
-// named in the note, so leaving never loses it.
+// quit leaves the form. While a save or a start runs, the form leaves once it
+// lands instead. The verb's process outlives the form, and once the form's
+// end of its output pipes closes, the verb's next write kills it, which can
+// cut a save off between a new subject and its conversation. A question the
+// form did not save is kept in a file, named in the note, so leaving never
+// loses it.
 func (m *Model) quit() tea.Cmd {
+	if m.saving || m.starting {
+		m.leaving = true
+		return nil
+	}
 	switch {
 	case m.saved != nil:
 		m.note = m.savedNote()
 	case strings.TrimSpace(m.question.Value()) != "":
-		m.note = m.keepDraft()
+		filed := "Nothing was filed."
+		if m.partial != "" {
+			filed = fmt.Sprintf("Subject %s was filed, and its conversation was not.", m.partial)
+		}
+		m.note = m.keepDraft(filed)
+	}
+	return tea.Quit
+}
+
+// leaveNow leaves at once, on a second Ctrl+C while a save or a start runs.
+// What that run did is unknown, so the note says so and keeps the question.
+func (m *Model) leaveNow() tea.Cmd {
+	if m.saved != nil {
+		m.note = m.savedNote()
+	} else {
+		m.note = m.keepDraft("You left while your question was being saved, so whether it was filed is unknown: gc-helm.sh conversations lists the open conversations.")
 	}
 	return tea.Quit
 }
@@ -787,6 +874,8 @@ func (m *Model) savedNote() string {
 	}
 	state := "its sitting is starting"
 	switch {
+	case m.starting:
+		state = "you left while its sitting was being started, so whether it started is unknown"
 	case m.startErr != "":
 		state = "no sitting started (" + m.startErr + "); it waits in your queue"
 	case m.readiness == Ready:
@@ -797,23 +886,54 @@ func (m *Model) savedNote() string {
 	return fmt.Sprintf("Conversation %s on %s %s, and %s. Return to it with: gc-helm.sh attach %s", s.Conversation, s.Subject, what, state, s.Conversation)
 }
 
-// keepDraft writes the question, unchanged, to a file in the draft directory.
-func (m *Model) keepDraft() string {
+// keepDraft writes the question, unchanged, to a file in the draft directory,
+// and says, after what filed says was filed, where the question is and the
+// command that files it again on the subject or rig the form was filing it on.
+func (m *Model) keepDraft(filed string) string {
 	q := m.question.Value()
-	dir := m.opt.DraftDir
-	if dir != "" {
-		if err := os.MkdirAll(dir, 0o700); err == nil {
-			f, err := os.CreateTemp(dir, "engage-draft-"+m.opt.Now().UTC().Format("20060102-150405")+"-*.txt")
-			if err == nil {
-				_, werr := f.WriteString(q)
-				cerr := f.Close()
-				if werr == nil && cerr == nil {
-					return fmt.Sprintf("Nothing was filed. Your question is kept in %s; start it again with: gc-helm.sh engage <subject> --reason \"$(cat %s)\"", f.Name(), filepath.Clean(f.Name()))
-				}
-			}
-		}
+	path, err := m.writeDraft(q)
+	if err != nil {
+		return filed + " The question could not be kept in a file. Here it is:\n\n" + q
 	}
-	return "Nothing was filed, and the question could not be kept in a file. Here it is:\n\n" + q
+	again := "gc-helm.sh engage --new-subject --rig <rig>"
+	switch {
+	case !m.newTopic():
+		again = "gc-helm.sh engage " + shellQuote(m.ref())
+	case m.rig != "":
+		again = "gc-helm.sh engage --new-subject --rig " + shellQuote(m.rig)
+	}
+	return fmt.Sprintf("%s Your question is kept in %s; start it again with: %s --reason \"$(cat %s)\"", filed, path, again, shellQuote(path))
+}
+
+func (m *Model) writeDraft(q string) (string, error) {
+	dir := m.opt.DraftDir
+	if dir == "" {
+		return "", fmt.Errorf("no draft directory")
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	f, err := os.CreateTemp(dir, "engage-draft-"+m.opt.Now().UTC().Format("20060102-150405")+"-*.txt")
+	if err != nil {
+		return "", err
+	}
+	_, werr := f.WriteString(q)
+	if cerr := f.Close(); werr == nil {
+		werr = cerr
+	}
+	if werr != nil {
+		return "", werr
+	}
+	return f.Name(), nil
+}
+
+// shellQuote is s as one shell word, so a command the note prints can be
+// pasted as it is: a PR URL can carry & or ?, and a path can carry a space.
+func shellQuote(s string) string {
+	if s != "" && strings.Trim(s, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_./:") == "" {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 var (
@@ -938,7 +1058,10 @@ func (m *Model) progressView() string {
 			b.WriteString(hintStyle.Render("  its state did not read: "+m.pollErr) + "\n")
 		}
 	}
-	if m.saved != nil && !m.saving {
+	switch {
+	case m.leaving:
+		b.WriteString("\n" + waitStyle.Render("Leaving once this lands, so it is not cut off midway. Ctrl+C again leaves now.") + "\n")
+	case m.saved != nil && !m.saving:
 		b.WriteString("\n" + hintStyle.Render("Enter attaches · q leaves it running; return with gc-helm.sh attach") + "\n")
 	}
 	return b.String()

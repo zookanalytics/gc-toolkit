@@ -269,11 +269,18 @@ it as a new conversation (`--allow-duplicate` on a subject, `--new-subject
 `conversation_title`, and the form says it is saved. Then `engage
 <conversation> --no-input --no-attach` starts the sitting, and the form follows
 it through its readiness to ready. Enter attaches; leaving keeps everything
-running. A save that fails leaves the question in the form, and a new subject
-filed whose conversation was not becomes the subject of the next save, so a
-retry never files a second subject. A question the form did not save is kept in
-a file under `GC_HELM_DRAFT_DIR` (else `$XDG_STATE_HOME/gc/engage-drafts`, else
-`~/.local/state/gc/engage-drafts`) when it closes, and the form names the file.
+running. Leaving while the save or the start still runs waits until it lands,
+because a verb the form leaves behind dies at its next line of output, and a save
+cut off there can leave a new subject without its conversation. A second Ctrl+C
+leaves at once, and the form then says what it does not know. A save that fails
+leaves the question in the form, and a new subject filed whose conversation was
+not becomes the subject of the next save, so a retry never files a second
+subject. A save refused because a read failed, or because of a refusal that can
+change, such as a suspended rig, reads it again for the next Ctrl+S. A question
+the form did not save is kept in a file under `GC_HELM_DRAFT_DIR` (else
+`$XDG_STATE_HOME/gc/engage-drafts`, else `~/.local/state/gc/engage-drafts`)
+when it closes, and the form names the file and the command that files it
+again.
 
 Engage warns when it starts a sitting while another live sitting tracks the
 bead, or replies to a gate the bead waits on. **One sitting per bead is a
@@ -434,8 +441,9 @@ created (`gc.handback_at`, which `gc-helm handback` stamps on each framing),
 ready once it has, and ended when its sitting's session has closed while the
 conversation stays open. Each row says whether a terminal is attached to the
 sitting. `gc-helm attach` opens the conversation form on that list, those no
-terminal is attached to first, by readiness and then newest first, and Enter
-attaches to the one picked. `gc-helm attach <conversation>` is engage's attach
+terminal is attached to first, by readiness and then newest first, and reads it
+again every ten seconds while it is on screen. Enter attaches to the one
+picked. `gc-helm attach <conversation>` is engage's attach
 for a script or a shortcut: it attaches to a live sitting once it has started,
 and holds a conversation whose sitting ended, or one in the queue, in a new
 sitting first. Starting and returning are two acts of one form: Ctrl+R moves

@@ -20,6 +20,7 @@ type fakeHelm struct {
 	about    map[string]About
 	aboutErr map[string]error
 	city     City
+	cityErr  error
 	saveResp Saved
 	saveErr  error
 	startErr error
@@ -35,7 +36,7 @@ func (f *fakeHelm) About(_ context.Context, ref string) (About, error) {
 	}
 	return f.about[ref], nil
 }
-func (f *fakeHelm) City(context.Context) (City, error) { return f.city, nil }
+func (f *fakeHelm) City(context.Context) (City, error) { return f.city, f.cityErr }
 func (f *fakeHelm) Save(_ context.Context, req SaveRequest) (Saved, error) {
 	f.saves = append(f.saves, req)
 	return f.saveResp, f.saveErr
@@ -69,7 +70,17 @@ func newForm(t *testing.T, f *fakeHelm, opt Options) *Model {
 	}
 	opt.Debounce = time.Millisecond
 	opt.Poll = time.Millisecond
+	opt.Refresh = time.Millisecond
 	return New(context.Background(), f, opt)
+}
+
+// isQuit says whether cmd is the one that ends the program.
+func isQuit(cmd tea.Cmd) bool {
+	if cmd == nil {
+		return false
+	}
+	_, ok := cmd().(tea.QuitMsg)
+	return ok
 }
 
 func key(code rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: code} }
@@ -421,8 +432,8 @@ func TestAnAmbiguousPRIsChosenExplicitly(t *testing.T) {
 }
 
 func TestARefusedSubjectIsShownAndNothingIsFiled(t *testing.T) {
-	a := subjectAbout("hq-1", "loomington")
-	a.Refusal = "converse is not available for 'hq-1': its rig 'loomington' carries no converse template."
+	a := subjectAbout("hq-1", "city-hq")
+	a.Refusal = "converse is not available for 'hq-1': its rig 'city-hq' carries no converse template."
 	f := &fakeHelm{about: map[string]About{"hq-1": a}, aboutErr: map[string]error{"tk-gone": &Refusal{Code: 4, Why: "gc-helm: conversations: bead not found: 'tk-gone'"}}}
 	m := newForm(t, f, Options{Subject: "hq-1"})
 	settle(m)
@@ -549,5 +560,223 @@ func TestTheDestinationIsOnScreenBeforeSubmitting(t *testing.T) {
 	deliver(m, cmd)
 	if len(f.saves) != 1 || f.saves[0].Ref != "tk-g" {
 		t.Fatalf("saves = %+v, want the conversation filed through the gate", f.saves)
+	}
+}
+
+func TestLeavingWhileTheSaveRunsWaitsForTheSaveAndTheStart(t *testing.T) {
+	dir := t.TempDir()
+	f := &fakeHelm{
+		about:    map[string]About{"tk-a": subjectAbout("tk-a", "gc-toolkit")},
+		saveResp: Saved{Subject: "tk-a", Conversation: "tk-c1", Filed: true},
+	}
+	m := newForm(t, f, Options{Subject: "tk-a", DraftDir: dir})
+	settle(m)
+	typeText(m, "a question")
+	_, saveCmd := m.Update(ctrl('s'))
+	if _, cmd := m.Update(key('q')); cmd != nil || !m.leaving {
+		t.Fatalf("q while the save runs: leaving %v, a command %v", m.leaving, cmd != nil)
+	}
+	if v := m.progressView(); !strings.Contains(v, "Leaving once this lands") {
+		t.Fatalf("screen while leaving:\n%s", v)
+	}
+	_, startCmd := m.Update(saveCmd())
+	if startCmd == nil {
+		t.Fatalf("the form left before the start ran")
+	}
+	started := startCmd()
+	if _, ok := started.(startedMsg); !ok {
+		t.Fatalf("after the save landed the form ran %T, not the start", started)
+	}
+	_, last := m.Update(started)
+	if !isQuit(last) {
+		t.Fatalf("the form did not leave once the start landed")
+	}
+	if len(f.starts) != 1 || !strings.Contains(m.Note(), "Conversation tk-c1 on tk-a is saved, and its sitting is starting") {
+		t.Fatalf("starts %v, note %q", f.starts, m.Note())
+	}
+	if files, _ := filepath.Glob(filepath.Join(dir, "*")); len(files) != 0 {
+		t.Fatalf("a saved question was kept as a draft too: %v", files)
+	}
+}
+
+func TestLeavingWhileANewTopicIsSavedNamesTheSubjectItFiled(t *testing.T) {
+	dir := t.TempDir()
+	f := &fakeHelm{
+		city:     rigCity(),
+		saveResp: Saved{Subject: "tk-new", Filed: false},
+		saveErr:  &Refusal{Code: 4, Why: "gc-helm: open: subject tk-new was filed, but its conversation was not"},
+	}
+	m := newForm(t, f, Options{Rig: "gc-toolkit", DraftDir: dir})
+	loadCity(m)
+	typeText(m, "the question\nin two lines")
+	_, saveCmd := m.Update(ctrl('s'))
+	m.Update(key(tea.KeyEscape))
+	_, last := m.Update(saveCmd())
+	if !isQuit(last) {
+		t.Fatalf("the form did not leave once the save landed")
+	}
+	note := m.Note()
+	if !strings.Contains(note, "Subject tk-new was filed, and its conversation was not.") || strings.Contains(note, "Nothing was filed") {
+		t.Fatalf("note = %q", note)
+	}
+	if !strings.Contains(note, "start it again with: gc-helm.sh engage tk-new --reason") {
+		t.Fatalf("the note does not file the question onto tk-new: %q", note)
+	}
+	files, _ := filepath.Glob(filepath.Join(dir, "engage-draft-*.txt"))
+	if len(files) != 1 {
+		t.Fatalf("draft files %v", files)
+	}
+	if b, _ := os.ReadFile(files[0]); string(b) != "the question\nin two lines" {
+		t.Fatalf("kept draft = %q", b)
+	}
+}
+
+func TestCancellingAfterAPartialSaveNamesTheSubjectItFiled(t *testing.T) {
+	f := &fakeHelm{
+		city:     rigCity(),
+		about:    map[string]About{"tk-new": subjectAbout("tk-new", "gc-toolkit")},
+		saveResp: Saved{Subject: "tk-new", Filed: false},
+		saveErr:  &Refusal{Code: 4, Why: "gc-helm: open: subject tk-new was filed, but its conversation was not"},
+	}
+	m := newForm(t, f, Options{Rig: "gc-toolkit", DraftDir: t.TempDir()})
+	loadCity(m)
+	typeText(m, "the question")
+	_, cmd := m.Update(ctrl('s'))
+	deliver(m, cmd)
+	m.Update(key(tea.KeyEscape))
+	if note := m.Note(); !strings.Contains(note, "Subject tk-new was filed") || strings.Contains(note, "Nothing was filed") {
+		t.Fatalf("note = %q", note)
+	}
+}
+
+func TestASecondCtrlCLeavesAtOnceAndSaysTheSaveIsUnknown(t *testing.T) {
+	dir := t.TempDir()
+	f := &fakeHelm{about: map[string]About{"tk-a": subjectAbout("tk-a", "gc-toolkit")}}
+	m := newForm(t, f, Options{Subject: "tk-a", DraftDir: dir})
+	settle(m)
+	typeText(m, "a question")
+	m.Update(ctrl('s')) // the save's command never runs
+	if _, cmd := m.Update(ctrl('c')); cmd != nil {
+		t.Fatalf("the first Ctrl+C left while the save ran")
+	}
+	_, cmd := m.Update(ctrl('c'))
+	if !isQuit(cmd) {
+		t.Fatalf("the second Ctrl+C did not leave")
+	}
+	if !strings.Contains(m.Note(), "whether it was filed is unknown") {
+		t.Fatalf("note = %q", m.Note())
+	}
+	if files, _ := filepath.Glob(filepath.Join(dir, "engage-draft-*.txt")); len(files) != 1 {
+		t.Fatalf("draft files %v", files)
+	}
+}
+
+func TestARefusedSaveReadsTheSubjectAgain(t *testing.T) {
+	f := &fakeHelm{
+		about:    map[string]About{"tk-a": subjectAbout("tk-a", "gc-toolkit")},
+		aboutErr: map[string]error{"tk-a": errors.New("gc-helm.sh conversations exited 4")},
+		saveResp: Saved{Subject: "tk-a", Conversation: "tk-c1", Filed: true},
+	}
+	m := newForm(t, f, Options{Subject: "tk-a"})
+	settle(m)
+	typeText(m, "a question")
+	_, cmd := m.Update(ctrl('s'))
+	if len(f.saves) != 0 || cmd == nil || !strings.Contains(m.status, "exited 4. Reading it again.") {
+		t.Fatalf("saves %v, a read %v, status %q", f.saves, cmd != nil, m.status)
+	}
+	delete(f.aboutErr, "tk-a")
+	deliver(m, cmd)
+	if _, ok := m.destination(); !ok {
+		t.Fatalf("the read again did not settle the destination")
+	}
+	// A refusal that can change, such as a suspended rig, is read again too.
+	a := subjectAbout("tk-a", "gc-toolkit")
+	a.Refusal = "rig 'gc-toolkit' is suspended."
+	f.about["tk-a"] = a
+	settle(m)
+	_, cmd = m.Update(ctrl('s'))
+	if len(f.saves) != 0 || !strings.HasSuffix(m.status, "is suspended. Reading it again.") {
+		t.Fatalf("saves %v, status %q", f.saves, m.status)
+	}
+	f.about["tk-a"] = subjectAbout("tk-a", "gc-toolkit")
+	deliver(m, cmd)
+	_, cmd = m.Update(ctrl('s'))
+	deliver(m, cmd)
+	if len(f.saves) != 1 || f.saves[0].Question != "a question" {
+		t.Fatalf("saves = %+v", f.saves)
+	}
+	// A failed lookup is read again when the operator leaves the field, too.
+	f.aboutErr = map[string]error{"tk-b": errors.New("timed out")}
+	m2 := newForm(t, f, Options{})
+	typeText(m2, "tk-b")
+	deliver(m2, m2.lookup("tk-b"))
+	if m2.lookups["tk-b"].err == nil || m2.lookup("tk-b") == nil {
+		t.Fatalf("a failed lookup is not read again")
+	}
+}
+
+func TestANewTopicReadsTheRigsAgainWhenTheyDidNotRead(t *testing.T) {
+	f := &fakeHelm{city: rigCity(), cityErr: errors.New("gc rig list timed out"), saveResp: Saved{Subject: "tk-new", Conversation: "tk-c", Filed: true}}
+	m := newForm(t, f, Options{})
+	loadCity(m)
+	if dest, ok := m.destination(); ok || !strings.Contains(dest, "did not read (gc rig list timed out)") {
+		t.Fatalf("destination = %q, %v", dest, ok)
+	}
+	focusOn(t, m, questionField)
+	typeText(m, "a new topic")
+	_, cmd := m.Update(ctrl('s'))
+	if cmd == nil || !strings.Contains(m.status, "Reading it again") {
+		t.Fatalf("a read %v, status %q", cmd != nil, m.status)
+	}
+	f.cityErr = nil
+	deliver(m, cmd)
+	focusOn(t, m, rigField)
+	m.Update(key(tea.KeyRight))
+	_, cmd = m.Update(ctrl('s'))
+	deliver(m, cmd)
+	if len(f.saves) != 1 || f.saves[0].Rig != "gc-toolkit" {
+		t.Fatalf("saves = %+v", f.saves)
+	}
+}
+
+func TestTheReturnListReadsTheCityAgainWhileOnScreen(t *testing.T) {
+	f := &fakeHelm{city: City{Conversations: []Conversation{{ID: "tk-c1", Readiness: Starting}}}}
+	m := newForm(t, f, Options{Return: true})
+	deliver(m, m.Init())
+	if !m.ticking || len(m.returnRows()) != 1 {
+		t.Fatalf("the return list schedules no refresh (ticking %v, rows %d)", m.ticking, len(m.returnRows()))
+	}
+	f.city.Conversations[0].Readiness = Ready
+	_, next := m.Update(cityTickMsg{})
+	deliver(m, next)
+	if rows := m.returnRows(); rows[0].Readiness != Ready || !m.ticking {
+		t.Fatalf("after a refresh: readiness %q, ticking %v", rows[0].Readiness, m.ticking)
+	}
+	if m.refreshCity() != nil {
+		t.Fatalf("a second refresh was scheduled beside the first")
+	}
+	m.Update(ctrl('r')) // to the compose screen
+	if _, next := m.Update(cityTickMsg{}); next != nil || m.ticking {
+		t.Fatalf("the compose screen kept refreshing the return list")
+	}
+}
+
+func TestTheKeptDraftNamesTheCommandThatFilesItAgain(t *testing.T) {
+	dir := t.TempDir()
+	url := "https://github.com/o/r/pull/12?x=1&y=2"
+	m := newForm(t, &fakeHelm{}, Options{Subject: url, DraftDir: dir})
+	typeText(m, "q")
+	m.Update(key(tea.KeyEscape))
+	if !strings.Contains(m.Note(), "gc-helm.sh engage '"+url+"' --reason") {
+		t.Fatalf("note = %q", m.Note())
+	}
+	m = newForm(t, &fakeHelm{}, Options{Rig: "gc-toolkit", DraftDir: dir})
+	typeText(m, "q")
+	m.Update(key(tea.KeyEscape))
+	if !strings.Contains(m.Note(), "gc-helm.sh engage --new-subject --rig gc-toolkit --reason") {
+		t.Fatalf("note = %q", m.Note())
+	}
+	if shellQuote("it's here") != `'it'\''s here'` || shellQuote("tk-a") != "tk-a" {
+		t.Fatalf("shellQuote")
 	}
 }
