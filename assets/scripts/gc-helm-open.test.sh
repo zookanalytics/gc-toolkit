@@ -249,6 +249,15 @@ export TMP_NOTES="$TMP/notes" TMP_NOW_STATUS="$TMP/now-status" TMP_TRACKS_READS=
 unset GC_HELM_FIXTURE || true
 # Keep the cache out of the operator's real cache dir.
 export TMPDIR="$TMP"
+# A city root of the suite's own. engage keeps each conversation's engage lock
+# under the city root, and starts no sitting where none can be named, as in CI.
+# An agent's session carries GC_CITY_PATH and GC_CITY naming the live city,
+# which would put the suite's lock files in the live city's runtime dir.
+# city_root reads GC_CITY_PATH first, so pointing it at a fixture city holding
+# .gc keeps the lock here, and GC_CITY and GC_CITY_ROOT go too.
+mkdir -p "$TMP/city/.gc"
+export GC_CITY_PATH="$TMP/city"
+unset GC_CITY GC_CITY_ROOT || true
 
 # reset_store — forget the conversation an earlier case filed, the notes an
 # update appended, a close an update made, and the listings counted.
