@@ -98,9 +98,14 @@ ROW=$(gc bd show "$SUBJECT" --json) \
   && { "$CONV/pr-sitting-comment.sh" refresh --sitting "$CONVERSATION" || true; } \
   && echo "closed $CONVERSATION as $KIND"
 ```
-When it prints its `closed` line, drain (the prompt's **How this thread
-ends**). **Post nothing** — no framing, no sign-off, not even "this turned out
-to be fine".
+When it prints its `closed` line, mark the operator's tab done and drain, with
+nothing after it (the prompt's **How this thread ends**):
+```bash
+[ -z "${TMUX_PANE:-}" ] || tmux set-option -t "$TMUX_PANE" set-titles-string 'done · #T'
+gc runtime drain-ack
+```
+**Post nothing** — no framing, no sign-off, not even "this turned out to be
+fine".
 
 No `closed` line means the close stopped short: the subject or its blockers
 did not read, or a write did not read back. The conversation stays open under

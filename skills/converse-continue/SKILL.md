@@ -85,14 +85,16 @@ up.
 
 **Once the conversation has closed, the thread has ended, and so does this
 session.** Whichever path closed it, once the close has landed and every write
-that must follow it has run, drain, with nothing after it (the prompt's **How
-this thread ends**):
+that must follow it has run, mark the operator's tab done and drain, with
+nothing after it (the prompt's **How this thread ends**):
 ```bash
+[ -z "${TMUX_PANE:-}" ] || tmux set-option -t "$TMUX_PANE" set-titles-string 'done · #T'
 gc runtime drain-ack
 ```
-Nothing is left to claim, so never claim again. The operator's dismiss stops
-this session itself, and a tab showing the sitting exits when the session
-ends, printing the last hand-back recorded on the conversation. A new concern
+Nothing is left to claim, so never claim again. The operator's dismiss marks
+the tab and stops this session itself. A tab showing the sitting holds the
+stop until it detaches, with a title that leads with `done`, and then prints
+the last hand-back recorded on the conversation. A new concern
 the operator raises is a new conversation. Open it on its bead, where it waits
 in the operator's queue until they engage it:
 `"$CONV/gc-helm.sh" open <bead> --reason "<what it is about>" --body "<the ask>"`.

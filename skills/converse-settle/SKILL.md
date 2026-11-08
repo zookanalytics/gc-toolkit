@@ -375,9 +375,15 @@ to. The sign-off is owed to a sitting that was **held**; one closed before any
 framing was posted (step 2's `moot` or `benign`) asked the operator nothing,
 so closing it silently is the contract.
 
-Then drain: a closed conversation ends this session (the prompt's **How this
-thread ends**). Run `gc runtime drain-ack` once the sign-off has closed the
-conversation and its message is posted, and run nothing after it. A sign-off
+Then mark the tab done and drain: a closed conversation ends this session
+(the prompt's **How this thread ends**). Once the sign-off has closed the
+conversation and its message is posted, run this, and nothing after it:
+```bash
+[ -z "${TMUX_PANE:-}" ] || tmux set-option -t "$TMUX_PANE" set-titles-string 'done · #T'
+gc runtime drain-ack
+```
+The operator's tab then shows a title that leads with `done`, and the session
+stops once the tab detaches. A sign-off
 that stopped short leaves the conversation open and the sitting not over:
 repair what `converse-signoff.sh` printed, or raise it in the thread, and do
 not drain.

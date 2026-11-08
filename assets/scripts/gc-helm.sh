@@ -200,14 +200,17 @@ dismissal, and answers nothing: every human gate the conversation replies to
 stays open and owed, for its filer or the next sitting. It records the
 dismissal as one of the visit's actions, a comment on the conversation that
 carries no reason, and draws the comment that shows the visit on the subject's
-PR again. It then stops the converse session that held the conversation with
-`gc runtime drain-ack`, so the controller ends the session outside this
-process: the session dismiss runs in acks itself, last, and any other is acked
-as an operator. --operator says the caller is outside the sitting even when it
-runs under the sitting's identity to infer the subject, as prefix+X does, so
-every session is acked as an operator and none acks itself. A session that
-will not stop is left to converse-reap, which closes any converse session
-whose conversation reads closed. The close falls back to --force when bd
+PR again. It then marks the tab of the converse session that held the
+conversation done, so the title tmux sends a client attached to it leads with
+"done", and stops the session with `gc runtime drain-ack`, so the controller
+ends the session outside this process: the session dismiss runs in acks itself,
+last, and any other is acked as an operator. Gas City holds that stop while a
+client is attached, so the pane stays live under a tab until it detaches.
+--operator says the caller is outside the sitting even when it runs under the
+sitting's identity to infer the subject, as prefix+X does, so every session is
+acked as an operator and none acks itself. A session that will not stop holds
+no conversation any more, so its template's idle sleep stops it once no client
+is attached. The close falls back to --force when bd
 refuses an operator closing a conversation its sitting holds. A conversation
 the verb could not account for aborts the run, which exits 4. It writes
 nothing to the subject. A subject with no live sitting has nothing to end, and
@@ -2599,8 +2602,10 @@ cmd_handback() {
 }
 
 # sitting_session_of <conversation-row> — the live converse session holding a
-# conversation, printed as "<session-id> own" when it is the session this verb
-# runs in and "<session-id> other" when it is not, else nothing. The holder is
+# conversation, printed as "<session-id> own <session-name> <state>" when it is
+# the session this verb runs in and "<session-id> other <session-name> <state>"
+# when it is not, else nothing. The session name is its tmux session's, and the
+# state is the one `gc session list` reads, "-" when either is empty. The holder is
 # the session the conversation's gc.session_id names, else the one its
 # gc.session_name or assignee names: the claim stamps both pins, and a bind the
 # sitting never claimed leaves the assignee alone. Only a converse template
@@ -2623,7 +2628,9 @@ sitting_session_of() {
                        or ($as != "" and ((.session_name // "") == $as or (.alias // "") == $as or (.id // "") == $as)))
               | select((.id // "") != "")
               | .id + " " + (if ([.id, .session_name, .alias] | map(select(. != null and . != "")) | any(. as $x | $mine | index($x) != null))
-                             then "own" else "other" end) ]
+                             then "own" else "other" end)
+                    + " " + ((.session_name // "") | tostring | if . == "" then "-" else . end)
+                    + " " + ((.state // "") | tostring | if . == "" then "-" else . end) ]
             | first // empty
           else empty end' 2>/dev/null || true
 }
@@ -2642,6 +2649,30 @@ operator_drain_ack() {
     ) >/dev/null 2>&1
 }
 
+# city_tmux_socket — the name of the tmux server the city's sessions run on,
+# which Gas City takes from `[session] socket` and otherwise from the city's
+# name (tmuxConfigFromSession in gastownhall/gascity cmd/gc/providers.go). Both
+# are read from gc, because the caller can be outside every tmux server, as the
+# board is. Prints nothing when neither reads.
+city_tmux_socket() {
+    _cts=$(gc config show --json 2>/dev/null | scrub | jq -r '.config.Session.Socket // "" | tostring' 2>/dev/null || true)
+    [ -n "$_cts" ] || _cts=$(gc status --json 2>/dev/null | scrub | jq -r '.city_name // "" | tostring' 2>/dev/null || true)
+    printf '%s' "$_cts"
+}
+
+# mark_sitting_done <tmux-session> — show a sitting's tab as done once its
+# conversation is. The session's set-titles-string becomes "done · #T", so the
+# title tmux sends an attached client leads with "done" while the pane stays
+# live under it, until the session stops. It sets that one session's option on
+# the city's tmux server, and a restart of the session puts back the template's
+# "#T". Returns non-zero when it marked nothing.
+mark_sitting_done() {
+    [ -n "$1" ] && [ "$1" != "-" ] || return 1
+    _msd_sock=$(city_tmux_socket)
+    [ -n "$_msd_sock" ] || return 1
+    tmux -L "$_msd_sock" set-option -t "=$1:" set-titles-string 'done · #T' >/dev/null 2>&1
+}
+
 # ── Verb: dismiss ────────────────────────────────────────────────────
 # The operator's explicit "end this sitting". converse runs with no
 # idle_timeout, so a held conversation keeps its sitting up until something
@@ -2658,13 +2689,16 @@ operator_drain_ack() {
 # one waiting in the queue. A conversation the verb could not account for
 # aborts the run. Idempotent.
 #
-# The stop is `gc runtime drain-ack`, so the controller ends the session
-# outside this process: a dismiss typed into the sitting's own pane is never
-# killed half done. The session this verb runs in acks itself, last of all;
-# any other is acked as an operator. Under --operator the caller is outside
-# every sitting, whatever identity it runs under, so no session acks itself.
-# A session that will not stop is left to converse-reap, which closes any
-# converse session whose conversation reads closed.
+# Each session that held a closed conversation first has its tab marked done
+# (mark_sitting_done), and is then stopped with `gc runtime drain-ack`, so the
+# controller ends the session outside this process: a dismiss typed into the
+# sitting's own pane is never killed half done. The session this verb runs in
+# acks itself, last of all; any other is acked as an operator. Under --operator
+# the caller is outside every sitting, whatever identity it runs under, so no
+# session acks itself. Gas City holds that stop while a client is attached, so
+# the pane stays live under the tab, marked done, until the tab detaches. A
+# session whose stop does not take holds no conversation any more, so its
+# template's idle sleep stops it once no client is attached.
 cmd_dismiss() {
     bead=""; dismiss_reason=""; dismiss_json=""; dismiss_stop=""; dismiss_operator=""
     while [ $# -gt 0 ]; do
@@ -2788,28 +2822,45 @@ cmd_dismiss() {
         fi
     done
 
-    # dismiss_stop_sittings — stop each session dismiss_stop names, the one this
-    # verb runs in last, since a dismiss typed into a sitting's pane ends with
-    # that pane. Under --operator none is the one this verb runs in.
+    # dismiss_mark_done <session-id> <tmux-session> <state> — mark a stopping
+    # sitting's tab done. A mark that does not take is said only for a session
+    # that reads active, whose pane a tab can be showing.
+    dismiss_mark_done() {
+        mark_sitting_done "$2" && return 0
+        [ "$3" = active ] || return 0
+        echo "$PROG: dismiss: could not mark the tab of session $1 done, so a tab on it keeps its live title until the session stops" >&2
+    }
+
+    # dismiss_stop_sittings — mark each session dismiss_stop names done and stop
+    # it, the one this verb runs in last, since a dismiss typed into a sitting's
+    # pane ends with that pane. Under --operator none is the one this verb runs
+    # in. Each line is "<session-id> <own|other> <tmux-session> <state>".
     dismiss_stop_sittings() {
-        _ds_own=""
+        _ds_own=""; _ds_own_name=""; _ds_own_state=""
         _ds_ifs=$IFS
         IFS='
 '
         for _ds_line in $dismiss_stop; do
-            _ds_id=${_ds_line%% *}
-            if [ "${_ds_line#* }" = own ] && [ -z "$dismiss_operator" ]; then _ds_own=$_ds_id; continue; fi
+            _ds_id=${_ds_line%% *}; _ds_rest=${_ds_line#* }
+            _ds_who=${_ds_rest%% *}; _ds_rest=${_ds_rest#* }
+            _ds_name=${_ds_rest%% *}; _ds_state=${_ds_rest#* }
+            if [ "$_ds_who" = own ] && [ -z "$dismiss_operator" ]; then
+                _ds_own=$_ds_id; _ds_own_name=$_ds_name; _ds_own_state=$_ds_state
+                continue
+            fi
+            dismiss_mark_done "$_ds_id" "$_ds_name" "$_ds_state"
             if operator_drain_ack "$_ds_id"; then
                 _dmsg "$PROG: dismiss: stopped session $_ds_id, which held the sitting"
             else
-                echo "$PROG: dismiss: could not stop session $_ds_id, which held the sitting; converse-reap closes it on its next pass, because its conversation is closed" >&2
+                echo "$PROG: dismiss: could not stop session $_ds_id, which held the sitting; it holds no conversation now, so its idle sleep stops it once no client is attached" >&2
             fi
         done
         IFS=$_ds_ifs
         if [ -n "$_ds_own" ]; then
+            dismiss_mark_done "$_ds_own" "$_ds_own_name" "$_ds_own_state"
             _dmsg "$PROG: dismiss: ending this session ($_ds_own), which held the sitting"
             gc runtime drain-ack >/dev/null 2>&1 \
-                || echo "$PROG: dismiss: could not end this session ($_ds_own); converse-reap closes it on its next pass, because its conversation is closed" >&2
+                || echo "$PROG: dismiss: could not end this session ($_ds_own); it holds no conversation now, so its idle sleep stops it once no client is attached" >&2
         fi
     }
 
@@ -4098,7 +4149,7 @@ engage_new_subject_cleanup() {
 # conversation picked at the prompt) is a distinct dialogue, so it files a
 # fresh conversation even when the bead has one. A sitting is a manual
 # converse-<model> session named for its conversation (origin=manual, which the
-# pool execution backstop never governs). The session is spawned before the
+# work ladder that paces pool seats never governs). The session is spawned before the
 # bind, because its alias is the reservation: only one session that is not
 # closed can hold the alias. Then the conversation is bound to the session's
 # alias with a write guarded on the holder engage read, so of two engages only
@@ -4607,26 +4658,37 @@ cmd_engage() {
     # [detached] when the operator left it, and both exit 0, so the
     # conversation says which. A closed conversation is a sitting that ended,
     # and the tab prints how the conversation closed and the last hand-back the
-    # sitting recorded on it (cmd_handback). A conversation still open is a
-    # sitting still going, and the tab prints how to re-attach. A failed attach
-    # reads the same conversation first, because a sitting that ended before the
-    # tab reached it is reported, not offered for an attach.
+    # sitting recorded on it (cmd_handback). A conversation back in the
+    # operator's queue is a sitting cut short, which handed it back and drained,
+    # so the tab prints that hand-back and how to take the conversation up
+    # again: its session holds the conversation no more, and attaching to it
+    # would only wake it. A conversation its sitting still holds is a sitting
+    # still going, and the tab prints how to re-attach. A failed attach reads
+    # the same conversation first, because a sitting that ended before the tab
+    # reached it is reported, not offered for an attach.
+    engage_print_handback() {
+        _ph_at=$(printf '%s' "$1" | jq -r '(.metadata // {})["gc.handback_at"] // "" | tostring' 2>/dev/null || true)
+        # The text is the sitting's own, printed to the operator's terminal,
+        # so control bytes other than tab and newline are dropped.
+        _ph_text=$(printf '%s' "$1" | jq -r '(.metadata // {})["gc.handback"] // "" | tostring
+            | gsub("[\\x00-\\x08\\x0b-\\x1f\\x7f]"; "")' 2>/dev/null || true)
+        if [ -n "$_ph_text" ]; then
+            printf 'Its last hand-back%s:\n\n%s\n' "${_ph_at:+, recorded $_ph_at}" "$_ph_text"
+        else
+            printf 'It recorded no hand-back.\n'
+        fi
+    }
     engage_after_attach() {
         _aa_row=$(row_now "$CONV")
         _aa_status=$(printf '%s' "$_aa_row" | jq -r '.status // ""' 2>/dev/null || true)
+        _aa_holder=$(printf '%s' "$_aa_row" | jq -r '.assignee // ""' 2>/dev/null || true)
         if [ "$_aa_status" = "closed" ]; then
             _aa_reason=$(printf '%s' "$_aa_row" | jq -r '.close_reason // "" | tostring' 2>/dev/null || true)
-            _aa_at=$(printf '%s' "$_aa_row" | jq -r '(.metadata // {})["gc.handback_at"] // "" | tostring' 2>/dev/null || true)
-            # The text is the sitting's own, printed to the operator's terminal,
-            # so control bytes other than tab and newline are dropped.
-            _aa_text=$(printf '%s' "$_aa_row" | jq -r '(.metadata // {})["gc.handback"] // "" | tostring
-                | gsub("[\\x00-\\x08\\x0b-\\x1f\\x7f]"; "")' 2>/dev/null || true)
             printf '\nThe sitting on %s has ended: conversation %s closed%s.\n' "$bead" "$CONV" "${_aa_reason:+ ($_aa_reason)}"
-            if [ -n "$_aa_text" ]; then
-                printf 'Its last hand-back%s:\n\n%s\n' "${_aa_at:+, recorded $_aa_at}" "$_aa_text"
-            else
-                printf 'It recorded no hand-back.\n'
-            fi
+            engage_print_handback "$_aa_row"
+        elif [ "$_aa_status" = "open" ] && [ "$_aa_holder" = "human" ]; then
+            printf '\nThe sitting on %s has ended: conversation %s is back in your queue. Take it up again: %s engage %s\n' "$bead" "$CONV" "$PROG" "$bead"
+            engage_print_handback "$_aa_row"
         elif [ "$1" -ne 0 ]; then
             echo "$PROG: engage: could not attach to $sid — attach when ready: gc session attach $sid" >&2
         elif [ -z "$_aa_status" ]; then
@@ -4673,7 +4735,8 @@ cmd_engage() {
     # A session still in the list under this conversation's alias that does not
     # hold it keeps the alias, since only a closed session gives one up. A
     # sitting cut short leaves exactly that: its conversation back in the queue
-    # and its session waiting for converse-reap. So such a session is closed
+    # and its drained session open until the core reaper closes it a day after
+    # its stop. So such a session is closed
     # first and read back gone, and only then is the alias free for the new
     # sitting. A session spawned less than the bind wait ago may be a concurrent
     # engage about to bind the conversation, and one the operator is attached to

@@ -116,7 +116,7 @@ defect only on a line some test executes.
   shared `scrub` helper first, and `inline-ctrl-scrub.sh` flags a scrub written
   inline.
 - **Loop input.** A loop that can report an all-clear reads an explicit,
-  checked temp file, as `assets/scripts/converse-reap.sh` does, never a `<<<`
+  checked temp file, as `assets/scripts/notification-wisp-reap.sh` does, never a `<<<`
   here-string. Under disk
   pressure bash cannot write the temp file behind a large here-string, so the
   loop runs zero times and the caller reports nothing found, and no detector

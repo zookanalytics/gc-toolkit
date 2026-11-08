@@ -144,7 +144,7 @@ CONVS=$(printf '%s' "$OUT" | jq -r '[.matched[]?.id] | join(" ")' 2>/dev/null ||
 CLOSED=$(printf '%s' "$OUT" | jq -r '.closed // 0' 2>/dev/null || echo 0)
 case "$CLOSED" in ''|*[!0-9]*) CLOSED=0 ;; esac
 if [ "$CLOSED" -gt 0 ]; then
-    say 6000 "dismiss: the sitting on ${SUBJECT:-?} is over (conversation ${CONVS:-?} closed), and its session is ending"
+    say 6000 "dismiss: the sitting on ${SUBJECT:-?} is over (conversation ${CONVS:-?} closed), and its session stops once this tab detaches"
 else
     say 6000 "dismiss: no live sitting on ${SUBJECT:-?} — nothing to end"
 fi
