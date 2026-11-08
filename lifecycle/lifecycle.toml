@@ -1708,8 +1708,7 @@ keys = [
   "gc.dispatch_when_ready_armed_by", "gc.dispatch_when_ready_armed_at",
   "gc.dispatch_when_ready_reason", "gc.dispatch_when_ready_slung",
   "gc.dispatch_when_ready_fail_count", "gc.notify_when_ready",
-  "gc.deferred_routed_to", "gc.deferred_execution_routed_to",
-  "gc.deferred_assignee", "resling_target",
+  "resling_target",
 ]
 # gc.dispatch_when_ready — the sling target (agent or pool); its PRESENCE means
 #   armed, and its value is what deferred-dispatch.sh slings to. Cleared with
@@ -1744,12 +1743,6 @@ keys = [
 #   these clears re-reads the bead first and leaves a value that names another
 #   agent by then. The disarm verb clears it with the family, while reconcile
 #   retiring an arm on the same bead leaves it.
-# gc.deferred_routed_to / gc.deferred_execution_routed_to / gc.deferred_assignee —
-#   the deferred counterparts of gc.routed_to, gc.execution_routed_to and the
-#   assignee: the routing a fired dispatch restores. mol-polecat-work's bd-ready
-#   guard clears them (to "") alongside the live route when it de-routes a bead
-#   that reached a polecat while blocked, and await-ruling.sh clears them the
-#   same way before it arms a declined run's re-sling.
 # resling_target — the pool a declined run's work re-slings to. await-ruling.sh
 #   writes it in the update that clears the work bead's route keys before the
 #   arm, because from that clear until the arm lands nothing else on the bead
