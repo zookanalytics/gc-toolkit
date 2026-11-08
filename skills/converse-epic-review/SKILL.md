@@ -221,8 +221,10 @@ and name it with `--leave` at the sign-off (the `converse-settle` skill).
 
 Each gate on a PR's anchor is answered on a call of its own, under that PR's
 own ruling: the review's ruling and what it does to that PR, naming the PR.
-The sign-off records the PR a retirement acts on under the words of its ruling,
-so a re-run of the call recovers its own PR. Two calls under the same words
+When the subject is itself a PR's anchor, its own gate takes no call here,
+because the sign-off answers it (the last step). The sign-off records the PR a
+retirement acts on under the words of its ruling, so a re-run of the call
+recovers its own PR. Two calls under the same words
 share one record, and without `--pr-anchor` the second acts on the first PR
 again and answers the second PR's gate with that PR left standing, free to
 merge. A PR the ruling retires, with `--pr-anchor` naming it so that no other PR
@@ -299,9 +301,9 @@ gc bd update "$EPIC" --set-metadata epic_hypothesis="<the sentence: for whom, wh
   --set-metadata epic_closure_condition="<the checks a person runs to answer the hypothesis>" \
   --set-metadata epic_indicators="<the signals watched while it is in flight>"
 ```
-On a shift, also re-aim each Delivery still open whose aim the shift changes. A Delivery's aim is the `Aim:`
-line its description opens with, so read the description, then write it whole
-with the new line:
+On a shift, also re-aim each Delivery still open whose aim the shift changes.
+A Delivery's aim is the `Aim:` line its description opens with, so read the
+description, then write it whole with the new line:
 `gc bd update <delivery> --description "<the description, with its new Aim: and Done when: lines>"`.
 
 When the ruling aims a next Delivery, list the epic's open Deliveries first.
@@ -379,12 +381,20 @@ the close.
 **Last, whatever the ruling, sign off** as the settle step says, once nothing
 important is pending:
 `--ruled yes --ruling "<the ruling, one line>" --no-wait`, with an
-outcome of at most 140 characters. Its subject is no PR, so it reaches a PR only
-through a gate still open, or one closed with its own answer. Once each PR's own
-call has exited 0, every gate on a PR's anchor carries that PR's own ruling, so
-the sign-off reaches none of those PRs and takes none of `--rework`,
-`--no-rework` or `--retire`. It reads each gate write 2 answered as cleared and
-closes the conversation. When it refuses because it reaches an open PR, that
-PR's gate is still open: make the PR's own call first, then sign off again. A PR
-answer added to the sign-off itself would answer that gate under the
-review's ruling instead of the PR's own. Then drain.
+outcome of at most 140 characters. Add `--leave <gate>` for each gate write 2
+left owed. The sign-off answers every gate the conversation replies to that no
+`--leave` names, so a gate left out would be answered and would release the
+work still waiting on its judgment. When one of those gates holds the subject,
+leave out `--no-wait` too, because the subject is then parked for a person.
+
+Unless the subject is a PR's anchor, the sign-off reaches a PR only through a
+gate still open, or one closed with its own answer. Once each PR's own call has
+exited 0, every gate on a PR's anchor carries that PR's own ruling, so the
+sign-off reaches none of those PRs and takes none of `--rework`, `--no-rework`
+or `--retire`. It reads each gate write 2 answered as cleared and closes the
+conversation. When it refuses because it reaches an open PR, that PR's gate is
+still open: make the PR's own call first, then sign off again. A PR answer added
+to the sign-off itself would answer that gate under the review's ruling instead
+of the PR's own. A subject that is a PR's anchor is the one PR the sign-off
+always reaches, so its own gate takes no call in write 2, and the sign-off
+answers it with that PR's answer, as the settle step gives it. Then drain.

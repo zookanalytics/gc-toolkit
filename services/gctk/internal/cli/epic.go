@@ -18,10 +18,10 @@ import (
 // whose parent is not an epic is refused without one, and nothing is filed.
 // The gate is that a sentence is there, never how good it is: a rough sentence
 // passes, and a review of the epic judges it (docs/epics.md, "Reviewing an
-// epic"). bd's create checks
-// (validation.on-create, validation.metadata) and gc bd's admission refusals
-// take no rule that holds one issue type to a metadata key, so the check runs
-// here, in the create the work skill gives for an epic.
+// epic"). bd's create checks (validation.on-create, validation.metadata) and
+// gc bd's admission refusals take no rule that holds one issue type to a
+// metadata key, so the check runs here, in the create the work skill gives for
+// an epic.
 //
 // An epic whose parent is an epic and that carries no hypothesis is a
 // Delivery, a step toward its epic's hypothesis. Its description opens with

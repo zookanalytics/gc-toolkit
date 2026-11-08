@@ -372,10 +372,10 @@ default. Work that served only this hypothesis is retired.
 **A checkpoint is always qualified.** A checkpoint is any point where the city
 evaluates something, and its qualifier names what is evaluated. An Epic
 Checkpoint evaluates an epic against its hypothesis once a Delivery under it has
-landed. A PR Checkpoint is the merge
-workflow's checkpoint, a pull request that lands a stage on an integration branch
-for review ([state-machine.md](state-machine.md)). A Bead Checkpoint evaluates a
-single bead.
+landed. A PR Checkpoint is the merge workflow's checkpoint, a pull request that
+lands a stage on an integration branch for review
+([state-machine.md](state-machine.md)). A Bead Checkpoint evaluates a single
+bead.
 
 **Goals fold into the epic.** A goal is not a separate primitive. Its design
 record (`specs/tk-yaor8a/`) already carried a goal at epic altitude, with no
