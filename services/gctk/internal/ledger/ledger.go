@@ -5,7 +5,7 @@
 // A domain declares each key it owns in its own package, with Declare, as an
 // unexported Key that names the key, its codec and its legacy aliases, and reads
 // and writes the key only through that value, so the compiler refuses any other
-// package that tries. A key whose writer is still shell stays in
+// package that tries. A key no domain owns yet stays in
 // lifecycle/lifecycle.toml, and a domain that must read one declares it
 // ReadOnly. services/gctk/key-registry.json lists every declaration, generated
 // from them, and a test fails when it is stale.
@@ -41,11 +41,11 @@ func New(store gcbd.Store) *Ledger { return &Ledger{store: store} }
 // Write is one act on one bead: every key it sets or clears, made in one
 // update.
 type Write struct {
-	id    string
-	sets  []string // key=value, in the order set
+	id     string
+	sets   []string // key=value, in the order set
 	unsets []string
-	wrote map[string]string // what each set key must read back as
-	err   error
+	wrote  map[string]string // what each set key must read back as
+	err    error
 }
 
 // Write starts an act on the bead.

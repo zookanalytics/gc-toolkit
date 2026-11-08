@@ -105,13 +105,15 @@ bead.
 | `gctk pr summary <bead>` | agent, hook | record what the change does, for its PR's summary | Gas Town's refinery fills a PR's summary from its bead's description, which is written before the work. This summary is written once the work is done, and says what the diff does. |
 | `gctk pr compose <bead>` | hook | the PR's conventional-commit title and managed summary region, from the bead that owns it | Gas Town's refinery titles a PR with its bead's title and writes the body once, when it opens the PR. Compose puts the type prefix the repository's title check requires ahead of the title, and keeps a marked region of the body current with the summary while leaving the text people add. |
 | `gctk pr owner <pr>` | agent, order | which bead owns this PR | Nothing in Gas City's PR concept takes a GitHub event on an open PR to the bead that owns it, and the hop is what turns a review comment into work on that bead. |
-| `gctk pr status <bead>` | hook, order | where the PR stands: working, needs-review or needs-attention | Nothing in Gas City gates a merge on approval or on required checks, so the pack reads both for the status label and the board. A pack writer that changes one of its inputs, opening the PR or recording a review verdict, sets the label in the same act. The order is the backstop: the merge cadence's pass walks the open beads that carry a PR, a set bounded by the open PRs, in a rotation that starts no bead past the pass's deadline, and writes a label only where its value changed. |
+| `gctk pr status <bead>` | hook, order | where the PR stands: working, merging, needs-review or needs-attention | Nothing in Gas City gates a merge on approval or on required checks, so the pack reads both for the status label and the board. A pack writer that changes one of its inputs, opening the PR or recording a review verdict, sets the label in the same act. The order is the backstop: the merge cadence's pass walks the open beads that carry a PR, a set bounded by the open PRs, in a rotation that starts no bead past the pass's deadline, and writes a label only where its value changed. |
 | `gctk pr post <pr>` | agent, hook | post the city's comment, review or reply on a PR, carrying the city's mark | Every agent's `gh` token is one bot account, so a post's author cannot tell the city's notice from feedback. The mark can, and this one writer owns the mark and the definition of which posts are feedback. |
 | `gctk pr guard` | hook | refuse an agent's `gh` write outside the rig's own origin, or an unmarked post on it | Gas City scopes no agent's writes ([warrants.md](warrants.md#gh-write-containment)). The rule lives in the GitHub adapter, so gctk's own writes meet it, and the tool-use hook every agent carries applies it to the commands an agent types. |
+| `gctk epic create <title>` | agent | file an epic with its contract, each field in its own key | bd's create checks hold no issue type to a metadata key, so nothing native refuses an epic filed with no hypothesis, which [epics.md](epics.md) makes the one hard gate on an epic. The verb refuses such an epic, files the contract in the create itself, and files a Delivery under an epic with no contract. |
 | `gctk rig test`, `lint`, `typecheck`, `setup`, `build` | agent, hook | run a rig's check and record its result at the commit, or read that record | One consistent surface that simplifies an agent's logic, caches each result at its commit, and processes every check the same way. |
 | `gctk review checks` | hook, order | which checks gate a change at a commit, with the rig's index laid over the pack's | Gas City's formula check loop runs a check script and iterates, and holds no review checks. The check index and its rig overlay are the feature. The review formula's steps read it at the reviewed commit, a lane for its own row and triage for the whole index, and the merge cadence reads it for the lanes a change needs before it dispatches them or lands the change. The loop's shape is the review-lane member's design. |
 | `gctk review guidance <check>` | hook | the rig's guidance for a check at the reviewed commit | Part of the check index: a rig's guidance, read at the commit under review rather than the one checked out. |
 | `gctk review passed <bead>` | hook | whether every lane has passed at the head: the loop's pass-or-iterate check | The check script that a review formula's check loop runs after each round. It holds the pass rule over the lanes, which the loop itself cannot. |
+| `gctk session title` | agent | give a session a title its record and its terminal show | `gc session rename` writes only the title on Gas City's record. An agent's terminal shows the name the agent's own `/rename` sets, typed into its input box, so the verb renames the session and has Gas City type `/rename <title>` into it through `gc session submit`, for Claude Code and Codex alike. |
 | `gctk quota-park nudge` | order | nudge each live session parked at a provider's limit banner, backing off per session and telling a person once an episode | Nothing in Gas City wakes a live session idle under a limit banner ([warrants.md](warrants.md#quota-park-nudging)). A nudge costs a busy or still-blocked agent nothing, and the pass polls rather than trusting the banner's reset time, because quota returns by routes no banner predicts. The standing revisit of its cadence, backoff and scope is tk-vtnyw8d. |
 | `gctk quota-park status <session>` | hook | whether this session is parked on a provider limit | The patrols read it, rather than the session's pane, before they warrant a session. |
 | `gctk seed render` | hook, order | render every agent's prompt and every formula's recipe into the audit under `generated/seed-audit/` | Gas City renders one prompt or recipe on demand and keeps no copy. The audit keeps them all in the tree, so a PR's diff shows what each agent will receive. It writes only the output it owns, which is what lets an order run it. |
@@ -136,14 +138,17 @@ What each noun owns:
   `gc github pr backfill` read a PR's readiness when something runs them, and
   a `gh:pr` gate resolves when its PR merges. A pr verb is only what those
   leave out.
+- **`epic`:** the contract an epic is filed with, its fields' keys in
+  `lifecycle/lifecycle.toml`'s `[metadata.epic_stewardship]`.
 - **`rig`:** actions specific to, or on, the rig an agent works in. The check
   records are the first: the records under the rig clone's git common
   directory, and their copies on beads.
 - **`quota-park`:** the nudge episode of each parked session, under the city's
   runtime directory.
 - **`seed`:** the rendered audit under `generated/seed-audit/`.
-- **`review` and `dolt`:** nothing. The check index is config in the pack and
-  the rig.
+- **`review`, `dolt` and `session`:** nothing. The check index is config in the
+  pack and the rig, and a session's title is Gas City's record and the agent's
+  own terminal.
 
 What gets a verb:
 
@@ -158,9 +163,9 @@ What gets a verb:
   today, and the member keeps the noun and what it owns.
 - **Judgment gets no verb.** The synthesis of review lanes into one verdict
   stays in the review formula's step text.
-- **The commands gctk holds now keep their place.** `rig` and `version` stay,
-  `pr-status` becomes `pr status`, and `lifecycle` and `merge` join the tree
-  unchanged.
+- **The commands gctk holds keep their place.** `epic`, `rig`, `session` and
+  `version` stand on their own rows, `pr status` is the pr noun's status verb,
+  and `lifecycle` and `merge` sit in the tree with their own flag parsing.
 
 ## The rule that names a verb
 
@@ -349,8 +354,10 @@ Nothing outside it parses a metadata value or spells a key's name.
   edge onto an id its store does not hold and reports success, and the edge
   holds nothing. So the ledger reads the target in the bead's own store first,
   and refuses the write when the store does not hold it.
-- **The key registry is generated from the declarations.** Each entry names
-  its key, its owner, its type, its aliases and, for a pack noun, its warrant.
+- **The key registry is generated from the declarations.** It is
+  `services/gctk/key-registry.json`, and a test fails when it is stale. Each
+  entry names its key, its owner, its type, its aliases and, for a pack noun,
+  its warrant, and a key no domain owns yet names the packages that read it.
   A doctor check that reads the registry reads the generated one, so the
   registry cannot drift from the code. A key that shell still writes stays in
   `lifecycle/lifecycle.toml` until its writer moves or retires, and the change
@@ -359,8 +366,8 @@ Nothing outside it parses a metadata value or spells a key's name.
   it read-only in its own package, and the change that moves the key's writer
   takes that declaration over.
 - **A snapshot is one pass's read.** The ledger reads, in one pass, the beads a
-  question needs, with their dependencies and the store's own blocked and ready
-  answers, and types them through the declarations. A domain's question takes
+  question needs and every parent-child ancestor, with their dependencies and
+  the store's own blocked answers, and types them through the declarations. A domain's question takes
   that snapshot and reads what it needs from it. A caller hands over a snapshot
   or bead ids, never facts it assembled, so every caller in one pass gets the
   same answer. A command builds a snapshot of the beads it names, and the
@@ -377,7 +384,7 @@ and CI runs those tests on every PR.
 
 | Adapter | Outside system | How it reaches it | Its fake |
 |---|---|---|---|
-| store | the bead store | `gc bd` for writes and for reads that must see a fresh write, the supervisor API for other reads | in-memory rows and edges, with the store's blocked and ready answers set by the test |
+| store | the bead store | `gc bd` for writes, for reads that must see a fresh write and for the blocked set, the supervisor API for other reads | in-memory rows and edges, with the store's blocked answers set by the test |
 | git | git | one `git` command per call, in a named directory | a scratch repository |
 | github | GitHub | `gh` and the GitHub API | recorded responses |
 | runtime | Gas City | `gc` (sling, session, events, runtime) and the supervisor API (runs, sessions) | recorded responses |

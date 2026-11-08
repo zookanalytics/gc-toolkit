@@ -6,9 +6,9 @@
 // assets/scripts/run-lib.sh is the one definition of how a run links to the
 // bead it works.
 //
-// None of these keys' writers has moved into gctk, so each is declared
-// read-only here, and its definition stays in lifecycle/lifecycle.toml. The
-// change that moves a writer takes its key's declaration over.
+// No domain owns these keys yet, so each is declared read-only here, and its
+// definition stays in lifecycle/lifecycle.toml. The change that moves a
+// writer into a domain takes its key's declaration over.
 //
 // The package sits outside internal/ so the helm board, a separate module, can
 // import it.

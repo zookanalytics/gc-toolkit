@@ -72,9 +72,9 @@ func Declare[T any](name string, c Codec[T], doc string, opts ...Option) Key[T] 
 }
 
 // ReadOnly declares a key the calling package reads and does not write,
-// because its writer has not moved into gctk and the key stays in
-// lifecycle/lifecycle.toml. The change that moves the writer takes the
-// declaration over with Declare. Any number of packages may declare one key
+// because no domain owns it yet: its writer is shell, or code that has not
+// moved into a domain, and the key stays in lifecycle/lifecycle.toml. The
+// change that moves the writer takes the declaration over with Declare. Any number of packages may declare one key
 // read-only, but none may declare read-only a key a package owns.
 func ReadOnly[T any](name string, c Codec[T], doc string, opts ...Option) Key[T] {
 	return declare(name, c, doc, true, opts)
@@ -115,7 +115,7 @@ func (k Key[T]) Get(r *Record) (v T, ok bool, err error) {
 // not encode, fails the write.
 func (k Key[T]) Set(w *Write, v T) {
 	if k.decl.readOnly {
-		w.fail(fmt.Errorf("%s is declared read-only by %s, whose writer has not moved into gctk", k.decl.name, k.decl.pkg))
+		w.fail(fmt.Errorf("%s is declared read-only by %s, since no domain owns it yet", k.decl.name, k.decl.pkg))
 		return
 	}
 	text, err := k.codec.Encode(v)
@@ -129,7 +129,7 @@ func (k Key[T]) Set(w *Write, v T) {
 // Clear adds the key's removal to w: its current spelling and every alias.
 func (k Key[T]) Clear(w *Write) {
 	if k.decl.readOnly {
-		w.fail(fmt.Errorf("%s is declared read-only by %s, whose writer has not moved into gctk", k.decl.name, k.decl.pkg))
+		w.fail(fmt.Errorf("%s is declared read-only by %s, since no domain owns it yet", k.decl.name, k.decl.pkg))
 		return
 	}
 	for _, name := range append([]string{k.decl.name}, k.decl.aliases...) {
