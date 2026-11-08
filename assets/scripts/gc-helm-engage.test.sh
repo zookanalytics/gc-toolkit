@@ -176,7 +176,7 @@ conv_row() {
        then {dependencies:([ $tracked[] | {id:., dependency_type:"tracks"} ] + [ $r[] | {id:., dependency_type:"replies-to"} ])}
        else {dependencies:([ $tracked[] | {issue_id:$c, depends_on_id:., type:"tracks"} ] + [ $r[] | {issue_id:$c, depends_on_id:., type:"replies-to"} ])} end)'
 }
-# The reads `gctk pr-status derive` makes, under the (HOLD-REAL) wrapper: a show
+# The reads `gctk pr status` makes, under the (HOLD-REAL) wrapper: a show
 # answers a row per id, its edges from $WALK_EDGES, a JSON object of each bead's
 # dependency rows, and the in-flight list answers $WALK_IN_FLIGHT, [] when unset.
 if [ -n "${STUB_WALK:-}" ] && [ "$1 ${2:-}" = "bd list" ] && case " $* " in *" anchor_bead="*) true ;; *) false ;; esac; then
@@ -1920,7 +1920,7 @@ unset LIVE_SITTINGS
 reset
 
 # --- what holds the bead -------------------------------------------------------
-# The stub answers `gctk pr-status derive --json` with $GCTK_REASONS as its
+# The stub answers `gctk pr status --json` with $GCTK_REASONS as its
 # reasons, the one list engage reads.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gctk-stub" <<'GCTK'
 printf '%s\n' "$*" >> "$STATE_DIR/gctk.calls"
@@ -1938,7 +1938,7 @@ export GATE_WAITERS='[{"id":"tk-rework","status":"open","dependency_type":"block
 export GCTK_REASONS="$ONE_GATE" HAVE_CONV=0
 fresh_gctk; run_fresh_tty '1\n\n' tk-subj --no-attach
 eq "$RC" 0 "(HOLD-OFFER) picking a gate that holds the bead exits 0"
-eq "$(gctk_calls)" "pr-status derive --anchor tk-subj --json" "(HOLD-OFFER) …read through the one definition"
+eq "$(gctk_calls)" "pr status tk-subj --json" "(HOLD-OFFER) …read through the one definition"
 has "$OUT" "Held by:" "(HOLD-OFFER) …listed under their own heading"
 has "$OUT" '[1] tk-gate — "Approve the rollout"  (human gate:' "(HOLD-OFFER) …numbered, with what the gate asks"
 has "$OUT" "[1-1] engage a listed gate or blocker" "(HOLD-OFFER) …and the prompt says the number engages it"

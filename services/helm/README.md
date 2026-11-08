@@ -683,7 +683,7 @@ rule the `status:` label applies, `prstatus.Blocked`: it was recorded at the hea
 the posture was read at, and nothing is in flight on the anchor unless its cause
 is `blocker`. The work in flight is the anchor's in-flight set, every bead
 carrying its `anchor_bead` at a live status, which `prstatus.Read` gathers for the
-board as it does for `gctk pr-status derive`. A PR whose facts did not read
+board as it does for `gctk pr status`. A PR whose facts did not read
 cannot tell, so its recorded `blocked` reads `unknown`. A cause outside the
 vocabulary holds wherever it was
 recorded, because the derivation cannot name it. Any other recorded `blocked`

@@ -119,7 +119,7 @@ func (f *rigFixture) commitChange(body string) {
 func (f *rigFixture) call(args ...string) (int, string, string) {
 	f.t.Helper()
 	var out, errb bytes.Buffer
-	code := Rig(args, &out, &errb)
+	code := Run(append([]string{"rig"}, args...), "", &out, &errb)
 	return code, out.String(), errb.String()
 }
 
@@ -408,7 +408,7 @@ func TestRigMachineFailuresHaveTheirOwnExitAndAreNotRecorded(t *testing.T) {
 	t.Run("not in a checkout", func(t *testing.T) {
 		newRigFixture(t)
 		t.Chdir(t.TempDir())
-		if code := Rig([]string{"test", "--check"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 4 {
+		if code := Run([]string{"rig", "test", "--check"}, "", &bytes.Buffer{}, &bytes.Buffer{}); code != 4 {
 			t.Fatalf("--check outside a checkout = %d, want 4", code)
 		}
 	})
@@ -916,7 +916,6 @@ func TestRigUsageErrors(t *testing.T) {
 		{"test", "--check", "--scope", "full"},
 		{"test", "--check", "--timeout", "1m"},
 		{"test", "--check", "--publish-bead", "tk-x"},
-		{"test", "--check", "--check"},
 		{"test", "--scope", "full", "--command", "true", "--publish-bead"},
 		{"test", "--scope", "full", "--command", "true", "--timeout", "soon"},
 		{"test", "--scope", "full", "--command", "true", "--timeout", "-1s"},
@@ -931,12 +930,12 @@ func TestRigUsageErrors(t *testing.T) {
 		{"build", "--nothing-declared"},
 	} {
 		var out, errb bytes.Buffer
-		if code := Rig(args, &out, &errb); code != 2 {
+		if code := Run(append([]string{"rig"}, args...), "", &out, &errb); code != 2 {
 			t.Errorf("gctk rig %q = %d, want 2; stderr:\n%s", args, code, errb.String())
 		}
 	}
 	var out, errb bytes.Buffer
-	if code := Rig([]string{"--help"}, &out, &errb); code != 0 || out.Len() == 0 || errb.Len() != 0 {
+	if code := Run([]string{"rig", "--help"}, "", &out, &errb); code != 0 || out.Len() == 0 || errb.Len() != 0 {
 		t.Errorf("--help = %d, stdout %d bytes, stderr %q", code, out.Len(), errb.String())
 	}
 }

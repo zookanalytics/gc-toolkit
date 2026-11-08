@@ -1,5 +1,5 @@
 // Package prstatus is the one definition of what holds a PR and where the PR
-// stands. Every reader asks it: the PR's labels through `gctk pr-status derive`
+// stands. Every reader asks it: the PR's labels through `gctk pr status`
 // (assets/scripts/pr-status-label.sh), gc-helm.sh engage through the same verb,
 // and the helm board (services/helm), which imports the package. [Read] gathers
 // what the city records about each anchor through a [Store], the reader's

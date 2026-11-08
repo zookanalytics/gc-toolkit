@@ -618,7 +618,7 @@ lands while `held: review` stands.
 those facts for every reader: the anchor's own row, `pr.unanswered_threads`
 among it, its in-flight set, every bead carrying the anchor's `anchor_bead`, any
 `task_kind`, at a live status (`prstatus.InFlightStatuses`), the blockers its
-`blocks` edges name, and the gates its walk reaches. `gctk pr-status derive` and
+`blocks` edges name, and the gates its walk reaches. `gctk pr status` and
 the board's beads source each hand it their own adapter onto the store, and
 neither gathers or decides any of it.
 
@@ -639,7 +639,7 @@ needs phrase.
 `prstatus.HoldingGates` is the one reader of the gates that hold a PR, and
 `prstatus.Read` gathers through it. The label's value counts them, the board's
 row names them, and `gc-helm engage` on the PR offers each, beside every other
-reason `prstatus.Reasons` gives, through `gctk pr-status derive --json`. Each
+reason `prstatus.Reasons` gives, through `gctk pr status --json`. Each
 bead walks for itself, and the walks of one call share their reads: each bead is
 read once, and its edges a level at a time. So a PR reads the same on the board,
 which walks a rig's PRs together, as on its label and at engage, which walk it

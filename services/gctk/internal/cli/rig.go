@@ -2,10 +2,13 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
 	"time"
+
+	"github.com/spf13/cobra"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/git"
@@ -27,29 +30,13 @@ import (
 // The command's output passes through untouched. rig's own lines go to
 // stderr, and --check prints the record it found on stdout as one JSON line.
 
-const rigUsage = `usage:
-  gctk rig test --scope full|affected --command <command> [--force]
-                [--publish-bead <id>] [--timeout <duration>]
-  gctk rig lint|typecheck --command <command> [--force]
-                [--publish-bead <id>] [--timeout <duration>]
-  gctk rig test|lint|typecheck --nothing-declared [--publish-bead <id>]
-  gctk rig test|lint|typecheck --check
-  gctk rig setup|build --command <command> [--timeout <duration>]
-
-Runs <command> with bash at the top of the checkout the current directory sits
-in. test, lint and typecheck record the result against HEAD; setup and build
-record nothing.
-
-  --command <command>    the command line to run
-  --scope full|affected  which test run the command is: the whole suite, or the
-                         subset the commit's diff selects
-  --nothing-declared     the rig declares no command for this check: record a
-                         pass that ran nothing
-  --check                print the result recorded at HEAD and run nothing
-  --force                run even when a result is already recorded
-  --publish-bead <id>    copy the result onto the bead's rig_check.<check> key
-  --timeout <duration>   stop a run still going after this long; 0 never
-                         (default 2h)
+// rigRecordedLong is the help of the verbs whose result is recorded: test,
+// lint and typecheck.
+const rigRecordedLong = `Runs the check's command with bash at the top of the checkout the current
+directory sits in, and records the result against HEAD. A call passes the
+command with --command, says with --nothing-declared that the rig declares
+none, or asks with --check what is recorded and runs nothing. test also
+declares which of its two runs the command is, with --scope.
 
 A recorded result answers a call that declares the same run, without running
 it again: the same command line and, for test, the same scope. A full-suite
@@ -58,13 +45,11 @@ fails. A call that declares another run runs, and its result replaces the
 record. --check needs no command: it reports whatever is recorded at HEAD, and
 calls nothing but git.
 
-A checkout with changes HEAD does not hold is refused, except by setup and
-build: a record certifies a commit. In a checkout they find clean, setup and
-build put back what their command changes, other than files git ignores, so
-the recorded checks after them can run. A run that moves HEAD or changes a
-tracked file records nothing, pass or fail. Untracked files a run leaves
-behind do not stop its record, but the next call refuses them, so a check
-command leaves none that git does not ignore.
+A checkout with changes HEAD does not hold is refused: a record certifies a
+commit. A run that moves HEAD or changes a tracked file records nothing, pass
+or fail. Untracked files a run leaves behind do not stop its record, but the
+next call refuses them, so a check command leaves none that git does not
+ignore.
 
 exit: 0 pass · 1 fail · 2 usage · 3 nothing recorded (--check)
       4 machine failure, nothing recorded or published: a refused checkout, a
@@ -73,10 +58,21 @@ exit: 0 pass · 1 fail · 2 usage · 3 nothing recorded (--check)
         HEAD or changed a tracked file, a checkout rig cannot read after the
         run, or a result the record store did not take. Such a run says
         nothing about the code.
-      128+N stopped by signal N
-`
+      128+N stopped by signal N`
 
-// The exit codes rigUsage states.
+// rigRunOnlyLong is the help of setup and build, which record nothing.
+const rigRunOnlyLong = `Runs --command with bash at the top of the checkout the current directory
+sits in, and records nothing: setup leaves environment state behind, and a
+build makes itself current. In a checkout they find clean, they put back what
+their command changes, other than files git ignores, so the recorded checks
+after them can run.
+
+exit: 0 pass · 1 fail · 2 usage
+      4 machine failure: a command bash cannot parse, find or execute, or one
+        still running at the timeout
+      128+N stopped by signal N`
+
+// The exit codes rigRecordedLong states.
 const (
 	rigExitPass    = 0
 	rigExitFail    = 1
@@ -98,129 +94,109 @@ type rigOpts struct {
 	force   bool
 	publish string
 	timeout time.Duration
-	// set records which flags were given, for the checks of what goes with
-	// what.
-	set map[string]bool
+	// given reports whether a flag was on the command line, for the checks of
+	// what goes with what.
+	given func(name string) bool
 }
 
-// Rig dispatches `gctk rig <verb>`, returning a process exit code so the
-// surface stays testable in-process.
-func Rig(args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 {
-		fmt.Fprint(stderr, rigUsage)
-		return rigExitUsage
+func newRigCmd(stdout, stderr io.Writer) *cobra.Command {
+	verbs := []*cobra.Command{
+		rigVerb(rig.CheckTest, "run the rig's test command and record the result at the commit", rigRecordedLong, stdout, stderr),
+		rigVerb(rig.CheckLint, "run the rig's lint command and record the result at the commit", rigRecordedLong, stdout, stderr),
+		rigVerb(rig.CheckTypecheck, "run the rig's typecheck command and record the result at the commit", rigRecordedLong, stdout, stderr),
+		rigVerb("setup", "run the rig's setup command, recording nothing", rigRunOnlyLong, stdout, stderr),
+		rigVerb("build", "run the rig's build command, recording nothing", rigRunOnlyLong, stdout, stderr),
 	}
-	verb := args[0]
-	switch verb {
-	case "-h", "--help", "help":
-		fmt.Fprint(stdout, rigUsage)
-		return rigExitPass
-	case rig.CheckTest, rig.CheckLint, rig.CheckTypecheck, "setup", "build":
-	default:
-		fmt.Fprintf(stderr, "gctk rig: unknown verb %q\n\n%s", verb, rigUsage)
-		return rigExitUsage
-	}
-	o, msg := parseRigArgs(verb, args[1:])
-	if msg != "" {
-		fmt.Fprintf(stderr, "gctk rig %s: %s\n\n%s", verb, msg, rigUsage)
-		return rigExitUsage
-	}
-	if verb == "setup" || verb == "build" {
-		return rigRunOnly(verb, o, stdout, stderr)
-	}
-	return rigRecorded(verb, o, stdout, stderr)
+	return group("rig", "actions on the rig an agent works in",
+		`Actions on the rig an agent works in. Its first are the checks: test, lint and
+typecheck run the command their caller passes and record the result against
+the commit it ran at, and setup and build run theirs and record nothing.
+
+gctk reads no formula var and works out no diff. The caller passes the command,
+a test caller declares which of the two test runs it is, and a caller whose rig
+declares no command for a check says so with --nothing-declared. The command's
+output passes through untouched. rig's own lines go to stderr, and --check
+prints the record it found on stdout as one JSON line.`, verbs...)
 }
 
-// parseRigArgs reads verb's flags, or returns why they do not parse.
-func parseRigArgs(verb string, args []string) (rigOpts, string) {
-	o := rigOpts{timeout: rigDefaultTimeout, set: map[string]bool{}}
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		if o.set[a] {
-			return o, "flag " + a + " given twice"
-		}
-		o.set[a] = true
-		switch a {
-		case "--nothing-declared":
-			o.nothing = true
-			continue
-		case "--check":
-			o.check = true
-			continue
-		case "--force":
-			o.force = true
-			continue
-		case "--command", "--scope", "--publish-bead", "--timeout":
-		default:
-			return o, fmt.Sprintf("unknown argument %q", a)
-		}
-		if i+1 >= len(args) || args[i+1] == "" {
-			if a == "--command" {
-				return o, "--command needs a command line; when the rig declares none, pass --nothing-declared"
-			}
-			return o, "flag " + a + " needs a value"
-		}
-		i++
-		v := args[i]
-		switch a {
-		case "--command":
-			o.command = v
-		case "--scope":
-			if v != rig.ScopeFull && v != rig.ScopeAffected {
-				return o, fmt.Sprintf("--scope %q is not full or affected", v)
-			}
-			o.scope = v
-		case "--publish-bead":
-			o.publish = v
-		case "--timeout":
-			d, err := time.ParseDuration(v)
-			if err != nil || d < 0 {
-				return o, fmt.Sprintf("--timeout %q is not a duration such as 90m or 2h", v)
-			}
-			o.timeout = d
-		}
+// rigVerb builds one rig verb and its flags.
+func rigVerb(verb, short, long string, stdout, stderr io.Writer) *cobra.Command {
+	o := rigOpts{}
+	c := &cobra.Command{
+		Use:   verb,
+		Short: short,
+		Long:  long,
+		Args:  cobra.NoArgs,
 	}
-	allowed := map[string]bool{"--command": true, "--timeout": true}
-	if verb != "setup" && verb != "build" {
-		for _, f := range []string{"--nothing-declared", "--check", "--force", "--publish-bead"} {
-			allowed[f] = true
-		}
+	f := c.Flags()
+	f.StringVar(&o.command, "command", "", "the `command` line to run")
+	f.DurationVar(&o.timeout, "timeout", rigDefaultTimeout, "stop a run still going after this long, such as 90m; 0 never")
+	recorded := verb != "setup" && verb != "build"
+	if recorded {
+		f.BoolVar(&o.nothing, "nothing-declared", false, "the rig declares no command for this check: record a pass that ran nothing")
+		f.BoolVar(&o.check, "check", false, "print the result recorded at HEAD and run nothing")
+		f.BoolVar(&o.force, "force", false, "run even when a result is already recorded")
+		f.StringVar(&o.publish, "publish-bead", "", "copy the result onto this `bead`'s rig_check.<check> key")
 	}
 	if verb == rig.CheckTest {
-		allowed["--scope"] = true
+		f.StringVar(&o.scope, "scope", "", "which test run the command is, `full|affected`: the whole suite, or the subset the commit's diff selects")
 	}
-	for f := range o.set {
-		if !allowed[f] {
-			return o, fmt.Sprintf("%s does not take %s", verb, f)
+	c.RunE = func(cmd *cobra.Command, _ []string) error {
+		o.given = cmd.Flags().Changed
+		if msg := checkRigOpts(verb, o); msg != "" {
+			return errors.New(msg)
 		}
+		if !recorded {
+			return exit(rigRunOnly(verb, o, stdout, stderr))
+		}
+		return exit(rigRecorded(verb, o, stdout, stderr))
+	}
+	return c
+}
+
+// checkRigOpts says why verb's flags do not go together, or returns "".
+func checkRigOpts(verb string, o rigOpts) string {
+	if o.given("command") && o.command == "" {
+		return "--command needs a command line; when the rig declares none, pass --nothing-declared"
+	}
+	for name, v := range map[string]string{"scope": o.scope, "publish-bead": o.publish} {
+		if o.given(name) && v == "" {
+			return "flag --" + name + " needs a value"
+		}
+	}
+	if o.scope != "" && o.scope != rig.ScopeFull && o.scope != rig.ScopeAffected {
+		return fmt.Sprintf("--scope %q is not full or affected", o.scope)
+	}
+	if o.timeout < 0 {
+		return fmt.Sprintf("--timeout %s is not a duration such as 90m or 2h", o.timeout)
 	}
 	if verb == "setup" || verb == "build" {
-		if !o.set["--command"] {
-			return o, verb + " needs --command"
+		if !o.given("command") {
+			return verb + " needs --command"
 		}
-		return o, ""
+		return ""
 	}
 	modes := 0
-	for _, f := range []string{"--command", "--nothing-declared", "--check"} {
-		if o.set[f] {
+	for _, f := range []string{"command", "nothing-declared", "check"} {
+		if o.given(f) {
 			modes++
 		}
 	}
 	switch {
 	case modes == 0:
-		return o, "pass --command, --nothing-declared or --check"
+		return "pass --command, --nothing-declared or --check"
 	case modes > 1:
-		return o, "--command, --nothing-declared and --check exclude one another"
+		return "--command, --nothing-declared and --check exclude one another"
 	case o.check && o.publish != "":
-		return o, "--check runs no gc, so it publishes nothing; drop --publish-bead"
-	case o.check && (o.force || o.set["--scope"] || o.set["--timeout"]):
-		return o, "--check runs nothing, so it takes no --force, --scope or --timeout"
-	case o.nothing && (o.force || o.set["--scope"] || o.set["--timeout"]):
-		return o, "--nothing-declared runs nothing, so it takes no --force, --scope or --timeout"
+		return "--check runs no gc, so it publishes nothing; drop --publish-bead"
+	case o.check && (o.force || o.given("scope") || o.given("timeout")):
+		return "--check runs nothing, so it takes no --force, --scope or --timeout"
+	case o.nothing && (o.force || o.given("scope") || o.given("timeout")):
+		return "--nothing-declared runs nothing, so it takes no --force, --scope or --timeout"
 	case verb == rig.CheckTest && o.command != "" && o.scope == "":
-		return o, "test --command needs --scope full or --scope affected"
+		return "test --command needs --scope full or --scope affected"
 	}
-	return o, ""
+	return ""
 }
 
 // rigRecorded runs a check whose result is recorded: test, lint or typecheck.

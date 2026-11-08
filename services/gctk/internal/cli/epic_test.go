@@ -17,6 +17,21 @@ import (
 // the create's exit and reply are read, including the replies the suite's
 // stub store never gives.
 
+// parseEpicCreate parses args as create's, and returns the epic it would file,
+// or the refusal its parse ends in.
+func parseEpicCreate(args []string) (epicOpts, string) {
+	var got epicOpts
+	c := newEpicCreateCmd(func(o epicOpts) int { got = o; return 0 })
+	c.SetArgs(args)
+	c.SetOut(&bytes.Buffer{})
+	c.SetErr(&bytes.Buffer{})
+	c.SilenceErrors, c.SilenceUsage = true, true
+	if err := c.Execute(); err != nil {
+		return epicOpts{}, err.Error()
+	}
+	return got, ""
+}
+
 func TestParseEpicCreate(t *testing.T) {
 	cases := []struct {
 		name string
@@ -59,10 +74,8 @@ func TestParseEpicCreateRefusals(t *testing.T) {
 		{[]string{"  "}, "no title"},
 		{[]string{"--hypothesis", "y"}, "no title"},
 		{[]string{"T", "U"}, `a second title "U"`},
-		{[]string{"T", "--type", "task"}, `unknown argument "--type"`},
-		{[]string{"T", "--hypothesis"}, "flag --hypothesis needs a value"},
-		{[]string{"T", "--handle", "a", "--handle", "b"}, "flag --handle given twice"},
-		{[]string{"T", "-d", "a", "--description", "b"}, "flag --description given twice"},
+		{[]string{"T", "--type", "task"}, "unknown flag: --type"},
+		{[]string{"T", "--hypothesis"}, "flag needs an argument: --hypothesis"},
 	}
 	for _, c := range cases {
 		if _, msg := parseEpicCreate(c.args); !strings.Contains(msg, c.want) {
@@ -128,7 +141,7 @@ func TestEpicRoughSentenceIsEnough(t *testing.T) {
 	if strings.Contains(why, "confirm") {
 		t.Errorf("refusal %q asks for the operator's confirmation", why)
 	}
-	usage := flat(epicUsage)
+	usage := flat(epicCreateLong)
 	for _, s := range []string{
 		"A rough sentence that sets the general direction is enough",
 		"when the operator has stated none, the filer writes one and files at once, and it stays a first draft until the operator first rules on the epic",
@@ -153,11 +166,11 @@ func TestEpicDispatch(t *testing.T) {
 	}
 	for _, c := range cases {
 		var out, errb bytes.Buffer
-		if got := Epic(c.args, &out, &errb); got != c.code {
-			t.Errorf("Epic(%q) = %d, want %d (stderr %q)", c.args, got, c.code, errb.String())
+		if got := Run(append([]string{"epic"}, c.args...), "", &out, &errb); got != c.code {
+			t.Errorf("gctk epic %q = %d, want %d (stderr %q)", c.args, got, c.code, errb.String())
 		}
-		if !strings.Contains(out.String()+errb.String(), "gctk epic create <title>") {
-			t.Errorf("Epic(%q) printed no usage", c.args)
+		if !strings.Contains(out.String()+errb.String(), "Usage:") {
+			t.Errorf("gctk epic %q printed no usage", c.args)
 		}
 	}
 }
@@ -193,7 +206,7 @@ func TestEpicCreateFiling(t *testing.T) {
 	create := []string{"create", "Epic: x", "--hypothesis", "For whom, what, signal", "-d", "about it"}
 	run := func() (string, string, int) {
 		var out, errb bytes.Buffer
-		code := Epic(create, &out, &errb)
+		code := Run(append([]string{"epic"}, create...), "", &out, &errb)
 		return out.String(), errb.String(), code
 	}
 

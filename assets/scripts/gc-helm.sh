@@ -101,7 +101,7 @@ conversation whose ask names the closed one; with --no-input it starts nothing
 and names the subject's engage. A subject that is closed too takes no new
 conversation, so that engage starts nothing either way.
 Engaging a bead or a PR names everything that holds it, by the definition the
-PR's held: labels and the board's row read (gctk pr-status derive): each open
+PR's held: labels and the board's row read (gctk pr status): each open
 human gate reached through its open blocks edges, each blocker it waits on that
 a person has to clear, and the PR's own review threads or blocked verdict. The
 interactive prompt offers each gate and blocker, and picking one engages it,
@@ -3449,7 +3449,7 @@ engage_valid_model() {
 }
 
 # holding_rows <bead> — what holds the bead, one "<held>\t<id>\t<title>" row
-# each, in the order of the reasons `gctk pr-status derive --json` gives: the
+# each, in the order of the reasons `gctk pr status --json` gives: the
 # definition the PR's held: labels and the board's row read, so what engage
 # offers cannot differ from what they say. <held> is the held: value the row
 # stands for. <id> is the bead to engage, an open human gate or a blocker a
@@ -3464,7 +3464,7 @@ holding_rows() {
         _hr_bin="$_hr_root/.gc/services/gctk/bin/gctk"
     fi
     [ -x "$_hr_bin" ] || return 1
-    _hr_json=$("$_hr_bin" pr-status derive --anchor "$1" --json 2>/dev/null) || return 1
+    _hr_json=$("$_hr_bin" pr status "$1" --json 2>/dev/null) || return 1
     printf '%s' "$_hr_json" | jq -r '.reasons[] | [.held, (.id // ""), (.title // "")] | @tsv' 2>/dev/null
 }
 
@@ -3473,7 +3473,7 @@ holding_rows() {
 # can still be started. It writes to stdout, as engage_say_holds does, because
 # stdout is all the board's route returns from an engage that exits 0.
 engage_warn_holds_unread() {
-    echo "$PROG: engage: could not read what holds $1 ('gctk pr-status derive' did not answer), so nothing that holds it is offered."
+    echo "$PROG: engage: could not read what holds $1 ('gctk pr status' did not answer), so nothing that holds it is offered."
 }
 
 # engage_say_holds <bead> — name each thing that holds the bead, and how to

@@ -479,7 +479,7 @@ shares only the word ([authority-map.md](authority-map.md)).
   handled post with (`WB_RESOLVED_REACTION`). Its reader is package
   `services/gctk/prstatus`: `RowFacts` reads it off the anchor and
   `unansweredFeedback` decides from it. `prstatus.Read` gathers it for
-  `gctk pr-status derive` in `services/gctk/internal/cli/prstatus.go` and for the
+  `gctk pr status` in `services/gctk/internal/cli/prstatus.go` and for the
   helm board's beads source in `services/helm/internal/source/beads.go`.
 - **Stands in for.** A record of a pull request's review threads kept on the
   bead whose pull request it is, which says whether review feedback still

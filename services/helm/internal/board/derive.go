@@ -2345,8 +2345,8 @@ func aggregatePhases(tiles []Tile, anchors []Anchor) {
 
 // prPhase names what stands between a LIVE merge anchor's PR and landing:
 // prstatus.Derive over the PR's facts ([Anchor.PR]), the same function and the
-// same gathering assets/scripts/pr-status-label.sh runs through `gctk pr-status
-// derive` to write the GitHub PR list's status: label. Empty on a non-merge row,
+// same gathering assets/scripts/pr-status-label.sh runs through `gctk pr status`
+// to write the GitHub PR list's status: label. Empty on a non-merge row,
 // and on a PR whose facts have no answer. [classifyPhases] calls it only on a
 // live row; a resolved anchor's PR state is [terminalPRPhase]'s, off the close
 // rather than the frozen pre-merge facts.
