@@ -44,7 +44,17 @@ attach = true
 # session_live after every start of the session with GC_TMUX_SOCKET naming the
 # city's tmux server, and re-applies a changed value without a restart. The
 # `=<name>:` target matches the session exactly.
-session_live = ['tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} set-option -t "={{.Session}}:" detach-on-destroy on']
+# The second entry passes the sitting's pane title on to the terminal of a
+# client attached to it, so the operator's tab shows the sitting's title. The
+# sitting sets that title with `gctk session title`, which has Claude Code or
+# Codex name its own session, and each draws that name as its terminal title,
+# which tmux keeps as the pane title (#T). set-titles is a session option too,
+# so the entry reaches the sitting's session alone and leaves the server's
+# global value as it is.
+session_live = [
+  'tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} set-option -t "={{.Session}}:" detach-on-destroy on',
+  'tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} set-option -t "={{.Session}}:" set-titles on \; set-option -t "={{.Session}}:" set-titles-string "#T"',
+]
 # Empty on purpose, and empty is not what protects a sitting. A sitting runs as
 # a manual (spawn-on-engagement) session, never pool_managed, and all three
 # claim backstops gate governs() on pool_managed (gascity idle_nudge.go,
@@ -58,14 +68,14 @@ session_live = ['tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} set-option -t "={{
 # no-op. Neither of those drains. So for a pool_managed session emptiness
 # drains only through the execution backstop, and a sitting, never
 # pool_managed, is reached by none of it.
-# Nothing is lost at launch. The launch delivers the rendered prompt, and step 1
-# of that prompt is the claim block, so a fresh sitting claims with no
+# Nothing is lost at launch. The launch delivers the rendered prompt, and that
+# prompt's loop opens with the claim block, so a fresh sitting claims with no
 # keystrokes. A provider that takes no prompt argument gets the prompt prepended
 # to this field, and prepending to an empty field still delivers it, so the
 # precondition is the prompt rather than prompt_mode. A prompt that stops
 # opening with the claim block leaves nothing to start the turn.
 # Non-empty text does not arm a backstop here; it feeds that launch delivery.
-# The text must then send the session back through the prompt's step-1 block
+# The text must then send the session back through the prompt's claim block
 # rather than name `gc hook --claim` alone: the block's restart rule, which
 # reads an existing assignment as a sitting to resume rather than one to drain
 # or work to a close, is what stops a nudge from ending a live sitting, and it

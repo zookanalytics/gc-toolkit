@@ -11,9 +11,12 @@
 # every invocation one per line; a `gc bd list` logs a line starting `bd list`.
 #
 # warn and die, the report every script that sources the library makes, row_meta,
-# the metadata read it shares with them, and bd_gates_open_under_key, the order
-# every writer and reader of one situation's human gates reads them in, are
-# pinned first; they read no store.
+# the metadata read it shares with them, bd_gates_open_under_key, the order
+# every writer and reader of one situation's human gates reads them in, and
+# $DISPOSITION_JQ, the one reading of a disposition, are pinned first; they read
+# no store. bd_disposed_to, its store read, follows them. The readers that judge
+# a gate by $HUMAN_GATE_JQ are checked last, for sourcing it rather than copying
+# it.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-bd-lib-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
@@ -69,6 +72,56 @@ for bad_in in '{"error":"not found"}' ''; do
   eq "$rc" 1 "…returns 1 on input that is not an array ('$bad_in')"
   eq "$out" "" "…and prints nothing then"
 done
+
+# --- $DISPOSITION_JQ: the successor a disposed bead names, off either row shape -
+# A `gc bd list` row names an edge's far bead by depends_on_id and its type as
+# type; a `gc bd show` row names it by the far bead's id and dependency_type.
+disp() { printf '%s' "$1" | jq -r "$DISPOSITION_JQ"'.[0] | [disposed_to, duplicate_to] | join("|")'; }
+eq "$(disp '[{"id":"a","dependencies":[{"issue_id":"a","depends_on_id":"b","type":"supersedes"}]}]')" "b|" \
+  "disposed_to reads a list row's supersedes edge, which names no canonical"
+eq "$(disp '[{"id":"a","dependencies":[{"issue_id":"a","depends_on_id":"c","type":"duplicates"}]}]')" "c|c" \
+  "…and a duplicates edge, which also names the canonical"
+eq "$(disp '[{"id":"a","dependencies":[{"id":"b","dependency_type":"supersedes"}]}]')" "b|" \
+  "…a show row's edge by the far bead's id"
+eq "$(disp '[{"id":"a","dependencies":[{"id":"p","dependency_type":"parent-child"},{"issue_id":"a","depends_on_id":"g","type":"blocks"},{"issue_id":"a","depends_on_id":"b","type":"supersedes"}]}]')" "b|" \
+  "…past the edges of other types"
+eq "$(disp '[{"id":"a","dependencies":[{"id":"p","dependency_type":"parent-child"},{"id":"t","dependency_type":"tracks"}]}]')" "|" \
+  "…and names none for a bead whose edges are all of other types"
+eq "$(disp '[{"id":"a","metadata":{"gc.superseded_by":"b"}}]')" "|" \
+  "…or for one that carries only the retired key"
+
+# --- bd_exact_row and bd_disposed_to: a bead's own list row --------------------
+# The edge onto x-1, a bead in another rig's store, rides only the list row.
+store '[{"id":"tk-d","status":"closed","metadata":{},"dependencies":[{"issue_id":"tk-d","depends_on_id":"x-1","type":"supersedes","external":true}]},
+        {"id":"tk-n","status":"closed","metadata":{}},
+        {"id":"tk-g","status":"closed","issue_type":"gate","metadata":{},"dependencies":[{"issue_id":"tk-g","depends_on_id":"tk-g2","type":"supersedes"}]}]'
+out=$(bd_exact_row tk-n); rc=$?
+eq "$rc/$(printf '%s' "$out" | jq -r 'map(.id) | join(",")')" "0/tk-n" "bd_exact_row answers the bead's own row, whatever else the listing holds"
+out=$(bd_exact_row tk-g); rc=$?
+eq "$rc/$(printf '%s' "$out" | jq -r 'map(.id) | join(",")')" "0/tk-g" "…a gate's, which a plain list hides"
+out=$(bd_exact_row tk-gone); rc=$?
+eq "$rc/$out" "0/[]" "…no row for a bead the store does not hold, at exit 0"
+out=$(STUB_LIST_FAIL=1 bd_exact_row tk-n); rc=$?
+eq "$rc/$out" "1/" "…and returns 1 for a read that fails"
+out=$(STUB_LIST_TRAILING=tk-n bd_exact_row tk-n); rc=$?
+eq "$rc/$out" "1/" "…or an answer with unreadable bytes after the listing"
+out=$(_bd_call() { printf '{"error":"database is locked"}'; }; bd_exact_row tk-n); rc=$?
+eq "$rc/$out" "1/" "…or an answer that is no listing, at exit 0"
+: > "$STUB_GC_LOG"
+out=$(bd_disposed_to tk-d); rc=$?
+eq "$rc/$out" "0/x-1" "bd_disposed_to names the successor an edge into another store records"
+has "$(cat "$STUB_GC_LOG")" "bd list --id tk-d --all --include-gates --include-infra --include-templates" "…read off the bead's list row, every type included"
+out=$(bd_disposed_to tk-g); rc=$?
+eq "$rc/$out" "0/tk-g2" "…and names a gate's successor too"
+out=$(bd_disposed_to tk-n); rc=$?
+eq "$rc/$out" "0/" "…prints nothing for a bead that names none"
+out=$(bd_disposed_to tk-gone); rc=$?
+eq "$rc/$out" "1/" "…returns 1 for a bead the store does not hold"
+out=$(STUB_LIST_FAIL=1 bd_disposed_to tk-d); rc=$?
+eq "$rc/$out" "1/" "…and for a read that fails, so 'none' and 'unread' stay apart"
+: > "$STUB_GC_LOG"
+bd_disposed_to tk-d "$TMP/other/.beads" >/dev/null
+has "$(cat "$STUB_GC_LOG")" "--db $TMP/other/.beads" "…and reads another store when named one"
 
 store '[{"id":"tk-a","status":"open","assignee":"","title":"a","notes":"","metadata":{"anchor_bead":"tk-anc"}}]'
 
@@ -933,6 +986,23 @@ eq "$(printf '%s' "$LISTING" | jq -c "$HUMAN_GATE_JQ"'open_human_gates as $g | .
   "gates_blocking: the open gates a row's own blocks edges reach, and no other edge type"
 eq "$(printf '%s' "$LISTING" | jq -c "$HUMAN_GATE_JQ"'open_human_gates as $g | [.[] | select(blocked_by_any($g)) | .id]')" '["w1"]' \
   "blocked_by_any: the rows a gate holds"
+
+# The readers that judge one bead's blockers or a store's gates by this rule
+# source it, and keep to themselves only which edges they follow and which key a
+# gate is filed under. A test of a gate's await type in one of them is a second
+# definition of a human gate. Comment lines are left out, so a reader that names
+# the rule in prose but no longer applies it still fails.
+ROOT="$(cd "$HERE/../.." && pwd)"
+for r in tools/gc-proactive.sh doctor/check-blocked-work-armed/run.sh doctor/check-hq-marooned-work/run.sh; do
+  code=$(grep -vE '^[[:space:]]*#' "$ROOT/$r")
+  if grep -qE '^[[:space:]]*\.[[:space:]].*bd-lib\.sh' <<< "$code"; then ok "(READERS) $r sources bd-lib.sh"
+  else bad "(READERS) $r sources bd-lib.sh"; fi
+  if grep -q 'HUMAN_GATE_JQ' <<< "$code" && grep -q 'open_human_gate' <<< "$code"; then
+    ok "(READERS) …and judges a gate by \$HUMAN_GATE_JQ's open_human_gate"
+  else bad "(READERS) $r judges a gate by \$HUMAN_GATE_JQ's open_human_gate"; fi
+  if grep -q 'await_type' <<< "$code"; then bad "(READERS) $r tests no gate's await type itself"
+  else ok "(READERS) …and tests no gate's await type itself"; fi
+done
 
 echo
 echo "passed: $PASS  failed: $FAIL"

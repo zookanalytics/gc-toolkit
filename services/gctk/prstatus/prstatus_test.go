@@ -5,9 +5,16 @@ import (
 	"testing"
 )
 
+// oneGate is one open human gate that holds the anchor, as [Facts.Gates] carries
+// it, and personOwed one live blocker of the anchor's a person owes.
+var (
+	oneGate    = []Blocker{gate("g")}
+	personOwed = []Blocker{{ID: "d", Title: "pick the release window", Status: "open", IssueType: "task", RoutedTo: "human"}}
+)
+
 // The precedence table, one row per case pr-status-label.test.sh asserts.
-// Keeping them here too proves the rule in isolation from the `gc bd` gathering,
-// so a failure names the logic or the wiring, never both at once.
+// Keeping them here too proves the rule in isolation from the gathering
+// ([Read]), so a failure names the logic or the wiring, never both at once.
 func TestDerive(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -23,15 +30,15 @@ func TestDerive(t *testing.T) {
 		{"rebase hold", Facts{RebaseHold: "true"}, NeedsAttention},
 		{"posture commented, empty in-flight set", Facts{PRPosture: "commented@oid@t"}, NeedsReview},
 		{"needs-attention outranks working (hold + live work)", Facts{MergeHold: "true", InFlightCount: 2}, NeedsAttention},
-		{"open human gate on the anchor", Facts{OpenHumanGate: true}, NeedsAttention},
-		{"open human gate on an approved PR", Facts{OpenHumanGate: true, PRPosture: "approved@oid@t", PRMachine: "settled@oid@t"}, NeedsAttention},
-		{"open human gate outranks live work", Facts{OpenHumanGate: true, InFlightCount: 2}, NeedsAttention},
+		{"open human gate on the anchor", Facts{Gates: oneGate}, NeedsAttention},
+		{"open human gate on an approved PR", Facts{Gates: oneGate, PRPosture: "approved@oid@t", PRMachine: "settled@oid@t"}, NeedsAttention},
+		{"open human gate outranks live work", Facts{Gates: oneGate, InFlightCount: 2}, NeedsAttention},
 		{"a hold outranks an approval", Facts{MergeHold: "true", PRPosture: "approved@oid@t"}, NeedsAttention},
 
 		// Whatever Held names is a thing a person has to act on, so it holds the PR
 		// as a human gate on the anchor does, whatever is in flight beside it.
-		{"a blocker a person owes", Facts{PersonBlocker: true}, NeedsAttention},
-		{"a blocker a person owes on an approved PR with work in flight", Facts{PersonBlocker: true, PRPosture: "approved@oid@t", InFlightCount: 1}, NeedsAttention},
+		{"a blocker a person owes", Facts{Blockers: personOwed}, NeedsAttention},
+		{"a blocker a person owes on an approved PR with work in flight", Facts{Blockers: personOwed, PRPosture: "approved@oid@t", InFlightCount: 1}, NeedsAttention},
 		{"review feedback the city has not answered, nothing in flight", Facts{PRPosture: "review_required@oid@t", PRMachine: "settled@oid@t", PRUnansweredThreads: "1@oid"}, NeedsAttention},
 		{"…which a fix unit in flight answers", Facts{PRPosture: "review_required@oid@t", PRUnansweredThreads: "1@oid", InFlightCount: 1}, Working},
 		{"…and an answer or a resolve releases", Facts{PRPosture: "review_required@oid@t", PRMachine: "settled@oid@t", PRUnansweredThreads: "0@oid"}, NeedsReview},
@@ -142,8 +149,8 @@ func TestHeld(t *testing.T) {
 		{"the merge freeze carries no held value", Facts{MergeHold: "true"}, nil},
 		{"the rebase hold carries no held value", Facts{RebaseHold: "true"}, nil},
 
-		{"an open human gate on the anchor", Facts{OpenHumanGate: true}, []Hold{HeldGate}},
-		{"…whatever is in flight beside it", Facts{OpenHumanGate: true, InFlightCount: 1}, []Hold{HeldGate}},
+		{"an open human gate on the anchor", Facts{Gates: oneGate}, []Hold{HeldGate}},
+		{"…whatever is in flight beside it", Facts{Gates: oneGate, InFlightCount: 1}, []Hold{HeldGate}},
 
 		{"an unresolved required thread, nothing in flight", threads, []Hold{HeldReview}},
 		{"the thread verdict with a fix in flight", func() Facts { f := threads; f.InFlightCount = 1; return f }(), nil},
@@ -164,12 +171,12 @@ func TestHeld(t *testing.T) {
 		{"a blocker no automated actor holds", stuck, []Hold{HeldBlocked}},
 		{"the stuck blocker holds whatever is in flight", func() Facts { f := stuck; f.InFlightCount = 2; return f }(), []Hold{HeldBlocked}},
 		{"the stuck blocker at a head the posture has left", func() Facts { f := stuck; f.PRPosture = "approved@new@t"; return f }(), nil},
-		{"a blocker a person owes", Facts{PersonBlocker: true}, []Hold{HeldBlocked}},
-		{"a stuck blocker beside one a person owes is one value", func() Facts { f := stuck; f.PersonBlocker = true; return f }(), []Hold{HeldBlocked}},
+		{"a blocker a person owes", Facts{Blockers: personOwed}, []Hold{HeldBlocked}},
+		{"a stuck blocker beside one a person owes is one value", func() Facts { f := stuck; f.Blockers = personOwed; return f }(), []Hold{HeldBlocked}},
 
-		{"a human gate and a person's blocker stand together", Facts{OpenHumanGate: true, PersonBlocker: true}, []Hold{HeldGate, HeldBlocked}},
-		{"a human gate beside the thread verdict", func() Facts { f := threads; f.OpenHumanGate = true; return f }(), []Hold{HeldGate, HeldReview}},
-		{"every value at once", func() Facts { f := threads; f.OpenHumanGate = true; f.PersonBlocker = true; return f }(), []Hold{HeldGate, HeldReview, HeldBlocked}},
+		{"a human gate and a person's blocker stand together", Facts{Gates: oneGate, Blockers: personOwed}, []Hold{HeldGate, HeldBlocked}},
+		{"a human gate beside the thread verdict", func() Facts { f := threads; f.Gates = oneGate; return f }(), []Hold{HeldGate, HeldReview}},
+		{"every value at once", func() Facts { f := threads; f.Gates = oneGate; f.Blockers = personOwed; return f }(), []Hold{HeldGate, HeldReview, HeldBlocked}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := Held(tc.f)
@@ -241,31 +248,5 @@ func TestSplitDated(t *testing.T) {
 	// The split reaches Derive: a dated approved posture lands merging.
 	if got := Derive(Facts{PRPosture: "approved@abc123@2026-09-27T00:00:00Z"}); got != Merging {
 		t.Errorf("dated approved posture derived %q, want merging", got)
-	}
-}
-
-// The PR's own work in flight is a review or rework child that is open or
-// in_progress. Any other kind in the in-flight set, or a
-// review or rework child at another live status, counts in flight and holds
-// nothing.
-func TestIsWork(t *testing.T) {
-	for _, tc := range []struct {
-		kind, status string
-		want         bool
-	}{
-		{"review", "open", true},
-		{"review", "in_progress", true},
-		{"rework", "open", true},
-		{"rework", "in_progress", true},
-		{"review", "blocked", false},
-		{"rework", "deferred", false},
-		{"rework", "", false},
-		{"validation", "open", false},
-		{"finding", "in_progress", false},
-		{"", "open", false},
-	} {
-		if got := IsWork(tc.kind, tc.status); got != tc.want {
-			t.Errorf("IsWork(%q, %q) = %v, want %v", tc.kind, tc.status, got, tc.want)
-		}
 	}
 }

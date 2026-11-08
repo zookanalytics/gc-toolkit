@@ -7,11 +7,11 @@
 # tops the agent tier with no peer to mail, a worker has one.
 #
 # A decline is not a blocker to mail, though: it cancels the run, so it must
-# leave a tracked record first. This also pins that the decline path files a
-# human gate and records the wait before run-cancel.sh runs, never bare mail
-# behind a cancel, which would leave work nothing re-offers and no query
-# returns. A decline is an event of its run, so its gate declares no quiet
-# window.
+# leave a tracked record first. The doctrine's decline is one decline.sh call,
+# which files the human gate and records the wait before it cancels
+# (decline.test.sh holds that order), so no cancel lands behind bare mail. A
+# gate is an event of its run, so the doctrine's human-gate.sh call declares no
+# quiet window.
 #
 # The sender half is useless without the receiver half, so this pins both: the
 # doctrine that tells the polecat to mail HELP or NOTICE, and the witness patrol
@@ -59,16 +59,6 @@ else
   ok "no doctrine call declares a quiet window"
 fi
 
-# A decline files the gate FIRST, records the wait on the work bead next, and
-# gates the cancel on both: human-gate.sh, then await-ruling.sh, then
-# run-cancel.sh, within one block. A cancelled run therefore always leaves a
-# tracked record a query returns, and never lands behind bare mail (mail reaches
-# an agent peer, not the record).
-if awk '/human-gate\.sh.*--key/{e=NR} /await-ruling\.sh.*--key/{if(e&&NR>e)a=NR} /run-cancel\.sh.*--step/{if(e&&a&&NR>a&&NR-e<=8)f=1} END{exit !f}' "$DOCTRINE"; then
-  ok "the cancel is gated on a filed human gate and a recorded wait (human-gate, await-ruling, run-cancel)"
-else
-  bad "a decline must run human-gate.sh, then await-ruling.sh, then run-cancel.sh; a cancel behind bare mail leaves work nothing re-offers"
-fi
 if grep -q 'molecule-hold' "$DOCTRINE"; then
   bad "the doctrine still teaches molecule-hold.sh; a molecule's lifecycle is gascity's, so a decline cancels the run"
 else

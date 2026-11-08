@@ -55,9 +55,9 @@ not hold into a backlog item. A finding anywhere is a finding.
 A detector lands via a `prompt-update: harden` PR that deletes the
 corresponding prose bullet AND its anchor from the fragment that carries it
 **in the same diff** — the rule is never stated twice and the fragment
-shrinks as rules harden. The pattern bead records the detector as
-its successor (metadata, e.g. `superseded_by` on the bead), so provenance
-lives on the bead and the harden PR, not in the fragment.
+shrinks as rules harden. The pattern bead's close names the detector
+that replaced it, so provenance lives on the bead and the harden PR, not in the
+fragment.
 
 Detectors retire the same way prose rules do: a challenge that finds the rule
 no longer earns its keep produces a PR deleting the detector. A detector that

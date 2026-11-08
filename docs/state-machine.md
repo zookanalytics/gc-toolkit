@@ -76,9 +76,6 @@ stateDiagram-v2
   refused_false_completion --> [*]: human
   abandoned --> [*]: human
   retargeted --> [*]: human
-
-  UN --> held: the converse hold — a sitting holds for an operator decision
-  held --> UN: the ruling landed, or nothing holds it any more
 ```
 
 `handed_off` is the unanchored bead after the polecat's single handoff write
@@ -103,15 +100,11 @@ there until the checkout fetches it, so the transition fetches that branch into
 `GC_RIG_ROOT`, or a target git does not accept as a branch name, it fetches
 nothing and prints one WARN line naming the landing.
 
-`held` is the one human state a sitting writes rather than the refinery, and it
-is entered only from `unanchored`. `merge.sh`, `gate-ensure.sh` and `pr-facts.sh`
-each enumerate anchors by their gating state, so moving a live anchor to `held`
-to record a conversation would drop it from all three for as long as the hold
-lasts. An anchor already carries a state and a reader; an unanchored subject
-carried neither, which is what the state exists to fix. A subject armed for
-deferred dispatch (`gc.dispatch_when_ready`) does not enter it: the hold's gate
-already holds that bead, and `deferred-dispatch.sh` retires an arm on any
-`merge_result`.
+A sitting that holds a bead for an operator decision writes no state. The human
+gate it files blocks the bead, so `bd ready` leaves the bead out until the gate
+is resolved, and the board reads the open gate as the bead's hold
+([human-engagement.md](human-engagement.md#the-sitting)). The bead keeps the
+state, the route and any deferred-dispatch arm it carried.
 
 `pre_open_gate` and `pull_request` are the declared *detached* states
 (`detached_states`). The merge cadence drives them and no queue offers them, so
@@ -119,8 +112,8 @@ the anchor rests unrouted and unheld, and `lifecycle.sh` writes both halves on
 entry to one: it clears `gc.routed_to`, and it clears the assignee of a bead
 still at `status=open`.
 
-The route exception is `park_route` (`human`), the sentinel a hold leaves for
-a person. No pool claims that value, so a transition
+The route exception is `park_route` (`human`), the sentinel that parks a bead
+for a person. No pool claims that value, so a transition
 that finds it leaves it in place. Any other route on a detached anchor is pool demand
 for work that is already in the merge queue. A worker claims it, the claim moves
 the bead out of `--status=open`, and `merge.sh` and `pr-facts.sh` both enumerate
@@ -187,8 +180,6 @@ transition into a closed state writes none.
 | handed_off / pull_request → poured | `mol-refinery-patrol` (rejection), through `assets/scripts/rejection-repool.sh` | `rejection_reason` written and the assignee and `gc.routed_to` cleared, then a fresh `mol-polecat-work` pour dispatches the rebuild and stamps `gc.execution_routed_to` |
 | handed_off → poured | `mol-refinery-patrol` merge-push, through `assets/scripts/await-ruling.sh` | the zero-diff check could not run three patrols in a row: a human gate names git's error and blocks the bead, which waits on it unassigned and armed, until clearing the gate pours a fresh `mol-polecat-work` run on it |
 | poured → handed_off | the pour's `mol-polecat-work` submit step | push verified on the remote |
-| unanchored → held | `skills/converse-hold`, a converse sitting's hold, via `lifecycle.sh`, only beside a human gate that blocks the bead | a sitting is waiting on an operator decision; state + route in one write |
-| held → unanchored | `assets/scripts/converse-signoff.sh`, a converse sitting's sign-off; `gc-helm.sh accept`, before it dispatches the recommendation; `skills/converse-recheck-premise`, a moot or benign close; each via `lifecycle.sh`; or human | the ruling landed; Accept's answer read back; or the premise re-check found the conversation moot or benign, and no open human gate still holds the bead |
 
 A request-changes verdict does NOT transition the anchor: `signoff.sh` files one
 routed rework child that blocks the anchor, with the reviewer's findings and the
@@ -362,7 +353,7 @@ login, which has no review queue to return to. A `needs-you` finding holds that
 review open until the operator clears the human gate holding its question with
 a reason headed `ruled:` and the work the ruling calls for lands, while the
 others let it clear. A re-home hands the question on to the bead its
-`gc.superseded_by` names, and a gate cleared `moot:` or `benign:` releases
+supersedes edge names, and a gate cleared `moot:` or `benign:` releases
 nothing. Such a finding stays open until its anchor closes, and the review it
 holds stays changes-requested until the operator's own approval replaces it. A
 sitting cut short leaves the gate open, so the later sitting that rules on the
@@ -592,7 +583,7 @@ carries none.
 |---|---|---|
 | `held: gate` | an open human gate holds the anchor: on the anchor itself, or behind a bead it waits on, such as a rework | `prstatus.HoldingGates`, which follows the anchor's `blocks` edges through every blocker that is not closed and keeps the human gates it reaches, one a person has claimed included. A conversation blocks nothing, so it never counts |
 | `held: review` | review feedback the city has not answered, or a review thread the merge waits on, and nothing in flight acts on it | the merge pass's count of review threads waiting on the city's answer (`pr.unanswered_threads`), by the rule below, or its `blocked` verdict with cause `review-threads`, as `prstatus.Blocked` counts it |
-| `held: blocked` | a live blocker holds the PR that no automated actor will clear | the merge pass's `blocked` verdict with cause `blocker`, as `prstatus.Blocked` counts it, or a bead a person owes the next move on that `prstatus.Holding` reaches through the anchor's open `blocks` edges, on the anchor or behind a bead it waits on, such as its rework. That bead is routed to a person, is a decision, or is another merge anchor whose own status, by the same rule over the facts it records and its own `blocks` edges, is `needs-attention`, or `needs-review` once its PR is open. An open bead on that anchor's edges that no person moves counts as work in flight on it, so a pull request the city is changing or landing holds nothing. Live work that waits on such a bead is not the city changing the PR, so the PR reads `needs-attention` and not `working`. A human gate is not among them, whatever its route, because `held: gate` counts it |
+| `held: blocked` | a live blocker holds the PR that no automated actor will clear | the merge pass's `blocked` verdict with cause `blocker`, as `prstatus.Blocked` counts it, or a live bead the anchor's `blocks` edge names that is routed to a person or is a decision. A human gate is not among them, whatever its route, because `held: gate` counts it |
 
 Any `held:` label reads `status: needs-attention`, because each names something
 a person has to act on. The merge freeze and the rebase hold carry no `held:`
@@ -623,11 +614,13 @@ count, so on a base that requires no thread resolution an approved PR still
 lands while `held: review` stands.
 
 `prstatus.Held` is the rule, and the helm board shows the same values as a row's
-`pr_held`, from the same derivation over the same facts: the anchor's
-`pr.unanswered_threads` among them, and the same in-flight set, every bead
-carrying the anchor's `anchor_bead`, any `task_kind`, at a live status
-(`prstatus.InFlightStatuses`), which the board's beads source reads as
-`gctk pr-status derive` does.
+`pr_held`, from the same derivation over the same facts. `prstatus.Read` gathers
+those facts for every reader: the anchor's own row, `pr.unanswered_threads`
+among it, its in-flight set, every bead carrying the anchor's `anchor_bead`, any
+`task_kind`, at a live status (`prstatus.InFlightStatuses`), the blockers its
+`blocks` edges name, and the gates its walk reaches. `gctk pr-status derive` and
+the board's beads source each hand it their own adapter onto the store, and
+neither gathers or decides any of it.
 
 A blocked machine verdict whose cause is outside its writer's vocabulary holds
 the PR wherever it was recorded, as any state the derivation cannot name does.
@@ -643,16 +636,15 @@ board applies it too, over the in-flight set the labels count, and by it decides
 a blocked row's phase, whether the operator's queue lists the row, and the row's
 needs phrase.
 
-`prstatus.Holding` is the one reader of what holds a PR behind its edges: the
-human gates, and the beads a person owes the next move on. The labels count both.
-The board's row asks each gate and names the other beads as where the move is,
-and `gc-helm engage` on the PR offers each gate, through `gctk pr-status gates`
-(`prstatus.HoldingGates`, the gates alone). Each bead walks for itself, and
-the walks of one call share their reads: each bead is read once, and its edges a
-level at a time. So a PR reads the same on the board, which walks a rig's PRs
-together, as on its label and at engage, which walk it alone. A walk is bounded,
-and one that passes its bound reads as a read that did not answer, for that bead
-alone.
+`prstatus.HoldingGates` is the one reader of the gates that hold a PR, and
+`prstatus.Read` gathers through it. The label's value counts them, the board's
+row names them, and `gc-helm engage` on the PR offers each, beside every other
+reason `prstatus.Reasons` gives, through `gctk pr-status derive --json`. Each
+bead walks for itself, and the walks of one call share their reads: each bead is
+read once, and its edges a level at a time. So a PR reads the same on the board,
+which walks a rig's PRs together, as on its label and at engage, which walk it
+alone. A walk is bounded, and one that passes its bound reads as a read that did
+not answer, for that bead alone.
 
 A read that does not answer changes no label. When gctk is unavailable, or the
 anchor, its in-flight set, its blockers or the walk from them do not read,
@@ -982,22 +974,21 @@ review's result set.
 - **Duplicate / superseded disposal** (`bead-rehome.sh`, the one evidence-gated
   close-with-successor writer): a bead that duplicates another or was fixed
   upstream closes through `bead-rehome.sh --kind duplicate|fixed-upstream`, which
-  gates its own evidence — the named successor resolves and is closed or shipped
-  in the same store AND the origin recorded no work (`work_outcome=no-op` or no
-  work-product key at all), unless the origin carries the operator's
-  pre-recorded PR-close disposition for that kind and successor — and holds on
-  anything it cannot establish. Converse and operator dispositions use the same
-  writer, and so does `duplicate-sweep.sh` (cadence arm 10). The sweep reads
-  the `duplicate_of` marker a polecat stamps when it diagnoses and parks a
-  duplicate dispatch: polecats never close work beads, so the bead has no other
-  way out. It checks the same evidence before it calls the writer. It also
-  closes an unmarked rework twin: an open rework child that was never
-  dispatched (no dispatch metadata, no convoy tracking it) whose source is
-  closed (the review it answers, or the conversation a ruling's child answers) and
-  whose same-source, same-anchor sibling landed. That twin would otherwise hold
-  its anchor forever; the sweep records `gc.work_outcome=no-op` on it before the
-  close. A first reaction never closes a bead: it hands a confident no-op to the
-  validating closer (`mol-validate-close`).
+  gates its own evidence — the named successor resolves in the same store, and
+  under `fixed-upstream` it is closed or shipped, AND the origin recorded no work
+  (`work_outcome=no-op` or no work-product key at all), unless the origin carries
+  the operator's pre-recorded PR-close disposition for that kind and successor —
+  and holds on anything it cannot establish. A duplicate closes at once, whatever
+  state its canonical is in, because the canonical carries the work. While the
+  canonical has neither closed nor shipped, each open bead the duplicate blocks
+  first gains a `blocks` edge onto it, so none goes ready before the canonical
+  delivers (Disposition, below). Converse and operator dispositions use the
+  same writer, and so does a polecat whose work
+  bead duplicates another: that close is the one a polecat makes on its work
+  bead, before it declines its run. A never-dispatched rework twin, an open
+  rework child whose same-source sibling landed, holds its anchor until a person
+  or a sitting closes it the same way. A first reaction never closes a bead: it
+  hands a confident no-op to the validating closer (`mol-validate-close`).
 - **No re-gate on head move**: a new commit stales nothing. gate-ensure
   dispatches on the lane — a declared check that is neither `green` nor in
   flight gets one review bead (stamp first, then attach `mol-review` via `gc
@@ -1124,32 +1115,49 @@ reads only from the push's own start.
 ## Disposition
 
 A close that is not a landing must say so from the store the bead lived in:
-`assets/scripts/bead-rehome.sh` closes the bead with `gc.superseded_by` +
-`gc.superseded_by_store` (and stamps the inverse `gc.supersedes*` on the
-successor), so a sound disposition and a careless false close are
-distinguishable on read. Four kinds — `re-homed`, `folded`, `fixed-upstream`,
-`duplicate` — say the work relocated, and the pointer names the bead that
-carries it now. The fifth, `not-needed`, says nothing carries it: the bead
-was not needed, and the pointer names the evidence that concluded so,
-typically the conversation of the sitting that ruled, or the human gate its
-ruling answered. The pointer is required
-under every kind, because it is the whole of that distinction. The kind is
-read from the close reason, which opens with the kind's phrase and the
-successor, as in `not needed, per <successor> in <store>`. When the pointer is
-added after an earlier close, a `Disposition recorded` note carries that reason
-instead. The read side searches every store before concluding a close was
-false. Consumers: the mechanik/converse close paths
-(`template-fragments/bead-disposition.template.md`), `duplicate-sweep.sh` (the
-cadence's reader for `duplicate_of`, and the closer of never-dispatched rework
-twins), `stand-down.sh` (a person's ruling that work a human gate holds will
-not go on), `preexisting-failure.sh` (a pre-existing-failure gate follows a
-closed tracker's pointer to the live bead that carries its failure, and a
-`not-needed` close ends that chain), and any patrol judging a closed bead.
+`assets/scripts/bead-rehome.sh` closes the bead and records its successor in
+bd's own edge from it, so a sound disposition and a careless false close are
+distinguishable on read. The edge is `duplicates` under `duplicate`, which
+`bd show` renders as DUPLICATE OF, and `supersedes` under every other kind. It
+lives in the bead's own store, and it may name a bead in another rig's store,
+which bd keeps unverified: `gc bd list --json` returns such an edge and `gc bd
+show` leaves it out, so `bd-lib.sh`'s `$DISPOSITION_JQ`, the one reading of a
+disposition, reads the list row where the far end can be another store's. Four
+kinds — `re-homed`, `folded`, `fixed-upstream`, `duplicate` — say the work
+relocated, and the edge names the bead that carries it now. The fifth,
+`not-needed`, says nothing carries it: the bead was not needed, and the edge
+names the evidence that concluded so, typically the conversation of the
+sitting that ruled, or the human gate its ruling answered. The successor is
+required under every kind, because it is the whole of that distinction. The
+kind's phrase and the successor ride the close as an appended note, as in
+`Disposition <time>: not needed, per <successor> in <store>`, because bd's
+guarded close sets no close reason; when the edge is added after an earlier
+close, a `Disposition recorded` note carries them instead. The read side
+searches every store before concluding a close was false. Consumers: the
+close paths of the `work` skill and the converse prompt, the mechanik's prompt,
+which searches every store before it reopens a closed bead, `stand-down.sh` (a
+person's ruling that work a human gate holds will not go on),
+`preexisting-failure.sh` (a pre-existing-failure gate follows a closed
+tracker's edge to the live bead that carries its failure, and a `not-needed`
+close ends that chain), the doctor's I5 and I15, the board's subject resolver,
+and any patrol judging a closed bead.
 
 `bead-rehome.sh` proves the evidence kinds itself. Under `fixed-upstream` and
-`duplicate` it re-establishes that the successor is closed or shipped in the
-same store and that the origin recorded no work, unless the origin carries the
-operator's pre-recorded PR-close disposition for that kind and successor.
+`duplicate` it re-establishes that the successor is in the same store and that
+the origin recorded no work, and under `fixed-upstream` that the successor is
+closed or shipped, unless the origin carries the operator's pre-recorded
+PR-close disposition for that kind and successor.
+Under `duplicate` it also keeps the waits on the bead in force. bd's ready rule
+follows a `blocks` edge and never a `duplicates` edge, so before a duplicate of a
+canonical that has neither closed nor shipped closes, each open bead it blocks
+gains a `blocks` edge onto the canonical, read back. The canonical itself and a
+bead it already blocks need none. A waiter that cannot take the edge refuses the
+close before anything is written: one the canonical already joins by another
+edge type, since bd keeps one edge per pair, and every waiter of a canonical in
+another store, where the edge would hold nothing. A waiter bd refuses the edge,
+for a cycle or a parent chain, refuses the close too, once the edges before it
+are written, and those stay. Every other kind ends the waits on the bead with its
+close.
 Under `re-homed`, `folded` and `not-needed` it applies only the checks every
 kind gets: the origin is not a review bead, a step bead or a workflow root, and
 no other session holds it in progress. The judgment that the bead should close
@@ -1157,10 +1165,18 @@ is the caller's. A hand disposition, by the mechanik, converse or the operator,
 judges the bead itself. An automated caller proves its own case before it
 calls, and [authority-map.md](authority-map.md) records the power in its
 Close-with-successor row. Whoever judges, `bead-rehome.sh` stays the one
-writer of the pointer and the close. It stamps the pointer in one write bd
-applies only while the bead still has the status and assignee its gates read,
-so a caller whose gates passed before another actor claimed the bead stamps
-nothing while that claim holds.
+writer of the close and its edge. The edge goes on first and is read back, so
+a reader finds the writer's close with its successor, and a second caller
+finds the first one's choice on the bead, a reopened bead included, and refuses
+to name another. bd keeps one edge per pair of beads and none per bead, so two
+callers that read the bead before either wrote can each add one, and the caller
+that finds another disposition edge beside its own takes its own back. The close
+is bd's checked close, in one write bd applies only while the bead still has the
+status and assignee its gates read, so a caller whose gates passed before another
+actor claimed or closed the bead closes nothing and takes its edge back. `bd
+duplicate` and `bd supersede` write the same two things in the same order, but
+they close past an open human gate and an open child, and refuse a successor in
+another store, so the pack closes through the writer instead.
 
 A disposition ends the bead's branch, the way a merge ends a landed one
 through the repository's delete-on-merge setting. Once the close reads back,
@@ -1206,11 +1222,11 @@ INTENT on the still-open anchor — `assets/scripts/pr-dispose.sh` stamps
 optional `_store` naming the intended `bead-rehome.sh` invocation — and closes
 the PR. `pr-facts.sh`'s close arm reads that marker when the PR reaches CLOSED
 and runs `bead-rehome.sh` to consummate the terminal close, so `bead-rehome.sh`
-stays the sole writer of `gc.superseded_by` and the disposition reaches the
+stays the sole writer of the disposition edge and the disposition reaches the
 same terminal state through the same verb. The same consummation disposes the
 branch's parked rebase and rework children BEFORE it closes the anchor: a rework
 child holds a `blocks` edge on the anchor, so an open one refuses the anchor's
-own non-force close and would strand it open with its pointer already stamped.
+own non-force close and would strand it open.
 Each exists only to carry a branch the closed PR will never merge, so an open,
 unheld one is closed through `bead-rehome.sh` as `not-needed` against the
 anchor's successor — clearing that hold and leaving no husk to re-offer to a
@@ -1228,7 +1244,7 @@ disposed anchor, and the consummation runs it for its own anchor just before the
 close, so the close is not refused and put to a person over scaffolding that arm 9
 would retire later in the same pass. It closes every
 `task_kind=validation|finding|rework` bead whose `anchor_bead` names a disposed,
-non-merged anchor (`gc.superseded_by` or `gc.pr_close_disposition_kind`
+non-merged anchor (its disposition edge or `gc.pr_close_disposition_kind`
 present) as `gc.outcome=moot`, reworks before the findings they block, so no
 close is refused by a blocker still open in the same pass. A bead an operator
 froze (`rebase_hold`) is left standing, like a frozen child.

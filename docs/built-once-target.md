@@ -89,9 +89,10 @@ The keeper is the opt-in `packs/gascity-keeper/`.
 ### Work
 
 `mol-polecat-work` extends core's `mol-polecat-base` and overrides only what
-differs: load-context's refusals, the per-bead worktree that `gc worktree`
-provisions, the pre-flights and the self-review loop over `gctk rig` records, and
-the push and handoff, each for the reason its warrant gives. Each step closes
+differs: load-context's refusals, the per-bead worktree, cut with git and removed
+at the handoff as core's own variants cut and remove theirs, the pre-flights and
+the self-review loop over `gctk rig` records, and the push and handoff, each for
+the reason its warrant gives. Each step closes
 through `gc hook current`, and a decline is one call. Work owns the work branch
 and the handoff write. Priority following stays under its warrant, and deferred
 dispatch shrinks to the residual tk-1tfzr71.16 keeps under a warrant: sling on
@@ -145,8 +146,8 @@ pack's attention model.
 The trade: the second data plane that reads the store directly, the rows that
 exist only because a pack writer stamped a route, and the hand-written
 TypeScript mirror of the Go contract with the parity test that holds the two
-equal all go. Which views stay is the Helm UX epic's (tk-ikpyzn) decision with
-tk-1tfzr71.24, which makes the board's estimate the least certain on the page.
+equal all go. The web page is the board's one view for people, and
+`helm-svc board --json` prints its rows for agents.
 
 ### Patrol
 
@@ -162,6 +163,25 @@ reapers no native one covers: scratch, the review workspaces outside
 The trade: the liveness census stops filing human gates, the incident ledger
 moves onto events and bead notes, and the dog's due process moves to the
 controller's stall handling or to Gas Town's dance (tk-1tfzr71.18 and .19).
+
+The witness's target is Gas Town's witness. Each remaining difference names its
+reason and what ends it:
+
+- **The spacing.** Its `next-iteration` defers the next wisp an hour, so Gas
+  City's reassignment restart starts the next pass once the hour has passed. Gas
+  Town's asks for that hour through `idle_timeout = "1h"`, which Gas City does
+  not apply to an always-on session, so there its passes run back to back. This
+  ends when Gas City gives an always-on patrol an idle interval.
+- **Reading our anchors, PR states and conversations.** Our pipeline writes them.
+  This ends as tk-1tfzr71.20 and .22 land.
+- **Findings and human gates in place of mayor mail.** This ends when the mayor
+  design tk-rl8gz4b.28 rules.
+- **No stuck-polecat check.** The liveness sweep covers it. This ends when
+  tk-1tfzr71.19 retires the sweep.
+- **The nudge order.** Gas Town's deacon does this through a command and a step
+  we do not carry. This ends when we take Gas Town's deacon or Gas City closes
+  issue #4090 with a fix that also reaches a session stopped short of
+  `next-iteration`.
 
 ### Doctor
 
@@ -227,9 +247,7 @@ bd 1.3.2.
 | Pack machinery | Gas City's primitive | Carried by |
 |---|---|---|
 | `worktree-reap.sh` | the controller's closed-bead worktree reaper | tk-1tfzr71.42 |
-| the work flow's `git worktree add` for a per-bead tree | `gc worktree ensure` and `cleanup` | tk-1tfzr71.43 |
 | `step-close.sh` | `gc hook current` | tk-1tfzr71.39 |
-| `duplicate-sweep.sh` and the successor keys | `bd duplicate`, `bd supersede` | tk-1tfzr71.13 |
 | hand-stamped routes and the sweeps that repair them | `gc sling --no-formula`, assignment | tk-1tfzr71.15 |
 | `orphan-dispose.sh`'s generic arms | core's orphan-sweep | tk-1tfzr71.19 |
 | `pr-facts.sh` polling and its mirrored keys | the PR monitor and webhook receiver | tk-1tfzr71.21 |
@@ -243,10 +261,11 @@ home.
   gc copies into a session with no template pass, so their text cannot name the
   binding. Carried by tk-rzic0sg. All other pack text asks gc, in one line per
   shell block that runs a pack script, since each block is its own shell.
-- The decline sequence (file the human gate, record the wait, cancel the run,
-  drain): 19 copies in step text, 11 of them in `mol-polecat-work.toml` and one
-  in the polecat doctrine fragment, with 28 copies of its refusal sentence.
-  Carried by tk-qitjxcm (P3).
+- The decline sequence (file the human gate, cancel the run, drain): two copies
+  in the step text of `mol-validate.toml`, which tk-1tfzr71.22 retires. Outside
+  that file a decline calls `decline.sh`. `mol-review`'s failed gather cancels
+  its own run, because it restores the review's pool route once the cancel has
+  landed, and tk-1tfzr71.15 converts that restore.
 - A rule kept in two languages, with a test holding the copies equal:
   `gctk merge` and `review-verdict.sh`, `gctk lifecycle` and the key registry,
   and the board's Go contract and its TypeScript mirror. Carried by
@@ -262,13 +281,10 @@ and the change that fires the trigger deletes it.
   cutover still runs. Carried by tk-kvdomjb.
 - `molecule-hold.sh`, for step text poured before `run-cancel.sh`, 168 lines
   with its test. Trigger: no open step bead names it. Carried by tk-1tfzr71.39.
-- The PR reminder's old marker. Trigger: no open PR carries one. Carried by
-  tk-1tfzr71.45.
 - Readers of legacy shapes, which "legacy" names 31 times across 15 runtime
-  files: the bare `superseded_by` key, the
-  `gc.proactive_reaction=1` proof and PR bodies older than the managed region,
-  among others. Trigger: no store or open PR holds the shape. Each goes with the
-  member that rewrites its reader.
+  files: the `gc.proactive_reaction=1` proof and PR bodies older than the
+  managed region, among others. Trigger: no store or open PR holds the shape.
+  Each goes with the member that rewrites its reader.
 - The pass for an incomplete Epic, an epic that is not a Delivery and carries no
   hypothesis, in the close gate's `clause_epic_ruling_recorded` and I15's
   `exempt-nohyp` arm. Each is one line that passes every epic with no hypothesis.
@@ -310,10 +326,8 @@ shows its measured net instead.
 | Bead | What it removes | Size | Waits on |
 |---|---|---|---|
 | tk-kvdomjb | the hand-offs at `escalate.sh` and `escalation-rig.sh` | 241 | its drain check |
-| tk-1tfzr71.45 | the PR reminder's old marker | partial files | the open PRs whose reminders carry it (tk-3zlwp6p, tk-r4c0g67) |
 | tk-1tfzr71.39 | step-close, the work-tree holder, the lease wrapper, `molecule-hold.sh` | 3,390 | tk-1tfzr71.12, then no open step naming them |
-| tk-1tfzr71.43 | the per-bead tree left behind at hand-off, and its `git worktree add` | partial files | tk-1tfzr71.12 |
-| tk-1tfzr71.42 | the worktree reaper, with its branch pass as a residual | 1,448 | the controller reaping after its dry run (tk-1tfzr71.41), and tk-1tfzr71.43 |
+| tk-1tfzr71.42 | the worktree reaper, with its branch pass as a residual | 1,448 | the controller reaping after its dry run (tk-1tfzr71.41) |
 
 ### 3. The lanes
 
@@ -328,8 +342,6 @@ convoy lands only after the operator approves its design.
 | A | tk-1tfzr71.22 | review beads, lane derivation, validation passes, machine findings | 10,924 |
 | A | tk-1tfzr71.21 | `pr-facts.sh` polling and mirroring | 15,233 |
 | A | tk-1tfzr71.23 | the membership readers on parent-child | partial files |
-| B | tk-1tfzr71.14 | the rig checkout healer; the operator rules at its design | 2,704 |
-| B | tk-1tfzr71.13 | the duplicate sweep and the successor keys | 1,054 |
 | B | tk-1tfzr71.15 | raw route stamps and the checks that police them | 1,175 |
 | B | tk-1tfzr71.16 | deferred dispatch's notify path, lock, budget and crash marker | partial files |
 | B | tk-1tfzr71.17 | the reaction bead and the intake converters | 189, plus partial files |
@@ -338,11 +350,11 @@ convoy lands only after the operator approves its design.
 | B | tk-1tfzr71.24 | the board's second data plane and pack-stamped rows, verbs that only call Gas City | partial files |
 | B | tk-1tfzr71.25 | registry entries, wrapper lint rules, parity tests, the `board` stub verb | 1,488 |
 
-The whole files that tk-kvdomjb and the migration members name come to 63k of
+The whole files that tk-kvdomjb and the migration members name come to 60k of
 the 202k between the baseline and the built-once estimate. Their partial
 rewrites carry more, chiefly the board, `gc-helm.sh`, the work and patrol
 formulas, deferred dispatch and the sign-off. The page's own items below carry
-the decline copies and the step-text tests.
+the step-text tests.
 Most of the comment and test weight of the code that survives has no bead.
 
 ### 4. The page's own items
@@ -351,7 +363,6 @@ Each item is carried by the bead it names.
 
 | # | Item | Extent | Carried by | Waits on |
 |---|---|---|---|---|
-| P3 | One decline call replaces the 19 copies of the decline sequence in step text, under rule 2 | 19 copies, 28 refusal sentences | tk-qitjxcm | nothing |
 | P4 | Rule 2: step text calls tested scripts, and the block-extraction tests go with the blocks they extract | 3.7k lines of shell in step text, 47 tests of 16.4k lines | tk-1tfzr71.19 and .20, each applying it to the formulas it rewrites | each bead's place in its lane |
 | P5 | Each Go port (tk-ssm8qns) carries only the migration map's surviving intents and deletes the shell it replaces in the same change, and rule 3's size line shows its net | the port's contract | a note on tk-ssm8qns | the port's blockers |
 

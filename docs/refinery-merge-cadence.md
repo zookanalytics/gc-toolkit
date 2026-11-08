@@ -300,7 +300,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    or a scratch failure — holds the anchor at `pre_open_gate` for the next pass
    rather than flip a managed body that may be stale. This adopt-time re-splice
    covers only the `pre_open_gate` window; once the anchor is `pull_request`,
-   republishing a rework's restamp is arm 11's job (`pr-stack.sh`), the anchor
+   republishing a rework's restamp is arm 10's job (`pr-stack.sh`), the anchor
    never returning to the state this arm scans (no `pull_request → pre_open_gate`
    lifecycle edge).
 4. **pr-facts.sh --route-comments-only** — the feedback routing of arm 7, run
@@ -639,8 +639,8 @@ the cadence — the arms run whether or not any refinery session is awake.
    residue is filed by two dispatchers, arm 6 and arm 7.
 9. **scaffolding-sweep.sh** — cleanup over DISPOSED anchors, no merge authority.
    An anchor withdrawn won't-do or closed not-planned carries a disposition —
-   `gc.superseded_by` (the pointer `bead-rehome.sh` stamps) or
-   `gc.pr_close_disposition_kind` (the intent `pr-dispose.sh` records) — but its
+   the duplicates or supersedes edge `bead-rehome.sh` records onto its successor,
+   or `gc.pr_close_disposition_kind` (the intent `pr-dispose.sh` records) — but its
    machine review scaffolding does not close with it: the validation pass, the
    finding beads, and the rework/fix-unit beads stay open, each holding a
    `blocks` edge on the anchor (a fix unit also blocks the must-fix findings it
@@ -664,46 +664,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    the one anchor whose PR-close disposition it is consummating, just before
    that close, so the close lands in the pass that reads the closed PR. A
    merged anchor is a landing, never a disposal, and is skipped.
-10. **duplicate-sweep.sh** — the reader for `duplicate_of`, no merge authority.
-   A polecat that diagnoses a duplicate dispatch stamps the marker and parks
-   the bead, because polecats never close work beads; with no reader the bead
-   waits for a human ruling, one bead at a time. This arm closes the ones that
-   are provably safe through `bead-rehome.sh --kind duplicate`, which is the
-   one writer of a successor pointer, and leaves every other one alone with the
-   reason on stdout. The stamp is never enough on its own: the named successor
-   must resolve and be closed or shipped, and the duplicate must be proved to
-   have recorded no work — either `work_outcome=no-op`, or no work-product key
-   at all (`branch`, `work_dir`, `pr_number`, `pr_url`, `merge_result`,
-   `gc.work_commit`). "No work" cannot be read off an absent `branch`: on a
-   rework dispatch that field names the TWIN's branch, so most verified no-op
-   duplicates carry one. A bead somebody else owns — assigned,
-   `in_progress`, a review bead, a step bead, or already pointed at a different
-   successor — is out of the population by construction. A second pass needs
-   no marker: it closes a never-dispatched rework twin, an open rework child
-   for a review whose work a sibling child already carried and landed. The
-   twin blocks its anchor, so merge.sh and gate-ensure's quiescence hold the
-   anchor on work nothing will run, and no other arm closes it. The pass
-   proves the twin was never dispatched two ways: its metadata records no
-   route, deferred dispatch, claim, worktree, commit or outcome other than
-   `no-op`, and no convoy tracks it, which is the edge every pour mints. It
-   requires the review to be closed, since close_review is signoff.sh's last
-   write. It requires a sibling
-   naming the same review and anchor to have landed: dispatched, not itself
-   disposed or retired, and either recording `work_outcome=shipped` or closed
-   with `rejection_reason` unset. signoff.sh stamps that field on every child.
-   The polecat unsets it when it resumes the branch, and the refinery unsets
-   it when it lands the child, merges it, or promotes it to an anchor of its
-   own. So a closed sibling counts only with `merge_result=merged`, or with
-   neither a `merge_result` nor the `merged_target` a promotion stamps. A bare
-   hand close of a child whose polecat had begun still reads as a landing.
-   The twin then records `gc.work_outcome=no-op`, the statement that it
-   pushed nothing: `bead-rehome.sh`'s duplicate evidence accepts it beside the
-   work-order `branch` rework-child.sh stamped on the twin, and it keeps the twin
-   off pr-stack.sh's bead list for the branch. A close that is held leaves the
-   twin in this pass, and the next pass finishes it. Closing the twin releases
-   its blocks edge. The arm runs after review-sweep so a twin that arm 2
-   merged or arm 7 recorded on this pass is disposable on the same tick.
-11. **pr-stack.sh** — keeps an open PR current with its anchor, in both managed
+10. **pr-stack.sh** — keeps an open PR current with its anchor, in both managed
    body regions and in its title. No merge authority, and the only arm that
    writes no bead. A body is composed once, by arm 3, out of one anchor; then two
    things drift it, and this arm lands both fixes in one body edit.
@@ -908,26 +869,13 @@ each rig checkout:
 `--ff-only` mutates nothing on divergence, on a local change to a path the
 incoming commits rewrite, or on untracked content in the way of what they write,
 and `--no-overwrite-ignore` makes that include an ignored file, which git
-otherwise overwrites. A refusal gets one heal first, and each heal acts only
-when nothing is lost. A checkout that is only behind sets aside the local
-changes on those paths and fast-forwards, when each working copy is absent,
-committed, upstream or on a pushed branch. It pins the staged and working-tree
-state first, under `refs/gc-toolkit/reconcile-set-aside/<UTC time>`, and leaves
-a dirty path the fast-forward does not rewrite, such as local bd config, as it
-is. Untracked content in the way of the fast-forward, an ignored file included,
-goes only when it is a file that already holds the incoming bytes on its own
-path. A file the incoming commits stop tracking while the remote's tree
-ignores it, such as bd config a repository stops tracking, stays in place
-untracked where the fast-forward would delete it: pinned first when it is
-modified, its working copy waits under `.git/gc-toolkit-reconcile-kept` while
-git fast-forwards and goes back on its path unchanged. A copy that cannot go
-back, because other content was written on its path meanwhile, waits there, and
-the rig stays escalated until none waits. A diverged checkout resets to the remote
-when its content is provably upstream, with
-`git checkout --no-overwrite-ignore -B`, which refuses rather than overwrites
-or deletes untracked content in its way, ignored or not. Anything else files
-one idempotent human gate per blocked rig (via `human-gate.sh`, on the rig's
-subject bead and carrying what blocked it and `git status`). Once the rig
-fast-forwards cleanly with no kept copy waiting aside, the gate is withdrawn
+otherwise overwrites. A file the incoming commits delete leaves the working
+tree with them when its copy is unmodified, so a change that stops tracking a
+file a live checkout still needs, such as machine-local config, removes an
+unmodified copy of it there. A checkout whose HEAD is off its default branch is
+not fast-forwarded. A refused fast-forward and a checkout off its default
+branch each file one idempotent human gate per blocked rig (via
+`human-gate.sh`, on the rig's subject bead and carrying what git refused and
+`git status`). Once the rig fast-forwards cleanly, the gate is withdrawn
 `moot:` and the subject bead closes. The 15-minute window is also the exposure behind
 component-model I9, watched by `doctor/check-pour-text-current`.

@@ -2085,7 +2085,7 @@ func (m *merger) recordBlockerVerdict(anchor *gcbd.Bead, num, headOid, route str
 // ungated is the beads among ids that no open human gate holds, in their order.
 // ok is false when the walk to their gates did not read.
 func (m *merger) ungated(ids []string) (out []string, ok bool) {
-	gates, err := prstatus.HoldingGates(ids, blockerRead(m.client, nil))
+	gates, err := prstatus.HoldingGates(ids, gcbdStore{m.client}.Blockers)
 	if err != nil {
 		return nil, false
 	}

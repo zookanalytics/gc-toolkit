@@ -12,12 +12,12 @@
 #
 # A test names a marker when a line of it that is not a comment carries the
 # marker's whole name. Extractors build the marker pattern at run time from a
-# name they are handed (`extract submit-branch-gate "$TOML"`), so the name is
-# what every test that runs a block carries, whatever its extraction looks
-# like. A comment does not count, because a comment is what a rewrite leaves
-# behind. A longer name that contains the marker's does not count, and neither
-# does a file name that starts with it: `submit-branch-gate.test.sh` names a
-# test, not the submit-branch-gate marker. The check is by name, so a name that
+# name they are handed (`extract downstream-court-skip`), so the name is what
+# every test that runs a block carries, whatever its extraction looks like. A
+# comment does not count, because a comment is what a rewrite leaves behind. A
+# longer name that contains the marker's does not count, and neither does a
+# file name that starts with it: `downstream-court-skip.test.sh` names a test,
+# not the downstream-court-skip marker. The check is by name, so a name that
 # several formulas share is covered once a test names it.
 #
 # A formula line that opens with `#` and then `>>>` or `<<<` must read exactly

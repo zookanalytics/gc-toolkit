@@ -9,14 +9,14 @@
 # optional gc.pr_close_disposition_successor_store — reads them back, and closes
 # the PR with an explaining comment (unless --no-close-pr, for an operator who
 # will close it in the UI). It does NOT close the anchor: that terminal close is
-# pr-facts's, the single consummation point, which stamps gc.superseded_by (the
-# terminal state doctor/check-closed-implies-landed accepts) and retires any
-# rework-or-close human gate an earlier pass filed.
+# pr-facts's, the single consummation point, which closes it with the edge that
+# names its successor (the terminal state doctor/check-closed-implies-landed
+# accepts) and retires any rework-or-close human gate an earlier pass filed.
 #
 # The anchor must be OPEN and carrying merge_result=pull_request — the state
-# pr-facts enumerates. An anchor already disposed (gc.superseded_by set) is a
-# no-op; an anchor past that state (abandoned, merged) is refused, with
-# bead-rehome.sh named as the direct verb for it.
+# pr-facts enumerates. An anchor already disposed (its duplicates or supersedes
+# edge names a successor) is a no-op; an anchor past that state (abandoned,
+# merged) is refused, with bead-rehome.sh named as the direct verb for it.
 #
 #   pr-dispose.sh --anchor <bead-id> --successor <bead-id> \
 #                 --kind re-homed|folded|fixed-upstream|duplicate|not-needed \
@@ -119,12 +119,14 @@ printf '%s' "$AJSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1 \
   || die "could not read anchor $ANCHOR from the current store; set GC_RIG to its rig, or run in that rig's checkout" 1
 A_STATUS=$(printf '%s' "$AJSON" | jq -r '.[0].status // ""')
 A_MR=$(printf '%s' "$AJSON" | jq -r '(.[0].metadata.merge_result // "") | tostring')
-A_PRIOR=$(printf '%s' "$AJSON" | jq -r '.[0].metadata["gc.superseded_by"] // .[0].metadata.superseded_by // ""')
+# The disposition is read off the anchor's list row, which carries an edge onto
+# a successor in another rig's store as well.
+A_PRIOR=$(bd_disposed_to "$ANCHOR" || true)
 [ -n "$PRNUM" ] || PRNUM=$(printf '%s' "$AJSON" | jq -r '(.[0].metadata.pr_number // "") | tostring')
 
-# Already disposed: bead-rehome already stamped a pointer. Nothing to add.
+# Already disposed: bead-rehome already recorded its successor. Nothing to add.
 if [ -n "$A_PRIOR" ]; then
-  echo "$PROG: $ANCHOR already carries gc.superseded_by=$A_PRIOR — already disposed, nothing to do"
+  echo "$PROG: $ANCHOR already names $A_PRIOR as its successor — already disposed, nothing to do"
   exit 0
 fi
 # The marker only means something on the state pr-facts enumerates: an OPEN

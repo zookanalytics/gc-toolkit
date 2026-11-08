@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Thin wiring check: every role that files human gates outside a sitting
-# composes the human-gate-withdraw fragment, and the command that fragment
-# teaches stays runnable against human-gate.sh. A gate closed with a bare
+# composes the human-gate-withdraw fragment, or gives the same withdrawal in its
+# own prompt, as the mechanik does to keep its prime under Claude Code's
+# session-start cap, and the command each teaches stays runnable against
+# human-gate.sh. A gate closed with a bare
 # `gc bd close` carries no resolve reason, so the board reads it as a need
 # nobody met. The fragment is what tells a role other than converse to withdraw
 # its own gate through human-gate.sh --retract, and to leave another role's gate
@@ -23,7 +25,7 @@ grep -qE '\{\{-? *define "human-gate-withdraw" *-?\}\}' "$FRAG" \
   && ok "the fragment defines human-gate-withdraw" \
   || bad "template-fragments/human-gate-withdraw.template.md does not define \"human-gate-withdraw\""
 
-for role in witness deacon refinery proactive mechanik; do
+for role in witness deacon refinery proactive; do
   P="$ROOT/agents/$role/prompt.template.md"
   [ -s "$P" ] || { bad "missing $P"; continue; }
   if grep -qE '\{\{-? *template "human-gate-withdraw" \. *-?\}\}' "$P"; then
@@ -32,6 +34,28 @@ for role in witness deacon refinery proactive mechanik; do
     bad "$role does not compose human-gate-withdraw, so nothing tells it how to withdraw its own gate"
   fi
 done
+
+# The mechanik withdraws its own gate through human-gate.sh --retract with flags
+# the script parses, and leaves another role's gate open.
+MECH="$ROOT/agents/mechanik/prompt.template.md"
+[ -s "$MECH" ] || { echo "missing $MECH" >&2; exit 1; }
+MLINE=$(grep -F '/human-gate.sh" --retract' "$MECH" || true)
+if [ -z "$MLINE" ]; then
+  bad "the mechanik's prompt does not withdraw its own gate through human-gate.sh --retract"
+else
+  for f in $(printf '%s\n' "$MLINE" | grep -oE -- '--[a-z][a-z-]*' | sort -u); do
+    if grep -qE -- "^[[:space:]]*$f\)" "$HG"; then
+      ok "human-gate.sh parses the mechanik's $f"
+    else
+      bad "human-gate.sh does not parse $f, which the mechanik's prompt passes it"
+    fi
+  done
+fi
+if tr '\n' ' ' <"$MECH" | grep -qF "another role's gate, note what you did on the bead it blocks, and leave the gate open"; then
+  ok "the mechanik's prompt leaves another role's gate open"
+else
+  bad "the mechanik's prompt no longer says to leave another role's gate open"
+fi
 
 # The roles whose prompts tell them when to file a gate say what the gate holds
 # from one fragment.

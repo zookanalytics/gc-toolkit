@@ -84,6 +84,16 @@ improve through the work, and nothing here is meant as a major gate on filing.
 A Delivery carries an aim in place of this contract, and its epic carries the
 contract ([Deliveries and Epic Checkpoints](#deliveries-and-epic-checkpoints)).
 
+**A first draft.** A hypothesis is a first draft until the operator's first
+ruling on its epic, so an epic that carries `epic_hypothesis` and no
+`epic_ruling` has one. A first draft can be the filer's own words: whoever files
+an epic writes a rough sentence when the operator has stated none, and files the
+epic at once rather than asking first. A ruling can judge the sentence before
+any work lands, and the operator's yes to it, as written or sharpened, is
+recorded as a continue ruling ([How an epic closes](#how-an-epic-closes)). The
+other fields of the contract are recorded only as the operator states or
+confirms them.
+
 ## How an epic closes
 
 An epic closes when its hypothesis is answered, following SAFe's model, never as
@@ -111,6 +121,11 @@ landed work and the measures re-run. The worker that built the units under
 judgment never rules on them, because a worker's account of its own work is not
 evidence.
 
+A ruling can also come before any unit lands, as the operator's judgment of the
+hypothesis sentence itself. The first ruling on an epic ends its hypothesis's
+[first draft](#the-contract-an-epic-carries), and a continue that sharpens the
+sentence records the sharper sentence with it.
+
 A disproven epic's surviving work is not swept back into ordinary flow by
 default: work begun to serve a disproven hypothesis is evaluated deliberately,
 and work that still coheres around a hypothesis is rehomed onto an epic that
@@ -119,9 +134,9 @@ owns it rather than scattered.
 The latest ruling and its reason are recorded on the epic (`epic_ruling`,
 `epic_ruling_reason`). An epic that carries a hypothesis stays open until it is
 ruled close with its outcome recorded, or until a disposition closes it, which
-records what carries the work or the evidence that it will not go on
-(`gc.superseded_by`). A person's ruling that an epic will not go on closes it that
-way, through `stand-down.sh`, whatever its latest ruling reads.
+records what carries the work or the evidence that it will not go on (its
+duplicates or supersedes edge). A person's ruling that an epic will not go on
+closes it that way, through `stand-down.sh`, whatever its latest ruling reads.
 [Epic stewardship](epic-stewardship.md) enforces both.
 
 ## Epics are mortal
@@ -174,18 +189,27 @@ write the contract up front: create-time classification proposing an epic's
 hypothesis, boundaries, and closure condition for the operator to confirm,
 recorded as a dated decision on the epic, and a periodic scope-reading audit
 re-reading the epic against completed work and proposing updates in place.
-Neither is built. Today the operator records the contract on the epic, and
-[epic stewardship](epic-stewardship.md) enforces only the ruling that closes it.
+Neither is built. Today the contract is recorded on the epic in the create that
+files it ([`gctk epic create`](../services/gctk/internal/cli/epic.go), which the
+`work` skill gives), and in a later write for each field stated after it. The
+hypothesis can be the filer's [first draft](#the-contract-an-epic-carries) until
+the operator's first ruling. The other fields are recorded as the operator
+states or confirms them, and each ruling as the operator makes it. The create
+refuses an epic with no hypothesis unless the epic's parent is an epic, which
+makes it a Delivery. [Epic stewardship](epic-stewardship.md) enforces the ruling
+that closes an epic.
 
 ## Deliveries and Epic Checkpoints
 
 The Delivery is built from what bd and the pack already do with a child epic,
-and the Epic Checkpoint runs by hand. The operator records each
-ruling on the epic, and the pack checks that an epic closes only on the close
-ruling with its outcome or on a disposition
-([epic-stewardship.md](epic-stewardship.md)). Nothing
-prompts an evaluation when work lands, so one happens when the operator calls a
-sitting on the epic. The machinery a checkpoint may grow is
+and the Epic Checkpoint runs by hand, as a sitting on the epic that follows the
+[`converse-epic-checkpoint`](../skills/converse-epic-checkpoint/SKILL.md) skill.
+The sitting records each ruling on the epic, and the pack checks that an epic
+closes only on the close ruling with its outcome or on a disposition
+([epic-stewardship.md](epic-stewardship.md)). When a Delivery lands, its row on
+the helm board asks for the checkpoint, among the rows the operator owes. Nothing
+else prompts an evaluation, so one happens when the operator calls a sitting on
+the epic. The machinery a checkpoint may grow is
 [direction](epic-stewardship.md#direction-the-checkpoints-machinery).
 
 **Epic, Delivery, Story.** A Delivery is a bounded step toward an epic's
@@ -253,7 +277,8 @@ every epic and Delivery ([steering.md](steering.md#pr-finishing-work)).
 **How a Delivery ends.** A Delivery has landed when every Story under it has
 closed. It closes at the Epic Checkpoint that follows its landing, as one of the
 ruling's writes, never on its own when its last Story closes. Between its landing
-and its checkpoint it stays open, so its row stays on the board.
+and its checkpoint it stays open, and its row on the board reads
+`landed — waits for its Epic Checkpoint`, among the rows the operator owes.
 
 Until its checkpoint it takes only work its aim covers, such as a follow-up that
 finishes one of its Stories, and a follow-up still open at the checkpoint is

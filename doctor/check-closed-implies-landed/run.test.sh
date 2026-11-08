@@ -138,11 +138,22 @@ OUT=$(run_check); RC=$?
 eq "$RC" "2" "a parent with no merge_result cannot clear its child"
 
 # --- 6. a disposed bead carries its own terminal state ---------------------------
-store "$(bead c-10 '{"merge_result":"pull_request","gc.superseded_by":"s-1","gc.superseded_by_store":"rig:alpha"}')"
+# A listing row carries every edge the bead has, one onto another rig's bead
+# included, by depends_on_id and type.
+store '{"id":"c-10","status":"closed","parent":null,"metadata":{"merge_result":"pull_request"},"dependencies":[{"issue_id":"c-10","depends_on_id":"s-1","type":"supersedes"}]}' \
+      '{"id":"c-10d","status":"closed","parent":null,"metadata":{"merge_result":"pre_open_gate"},"dependencies":[{"issue_id":"c-10d","depends_on_id":"c-1","type":"duplicates"}]}' \
+      '{"id":"c-10x","status":"closed","parent":null,"metadata":{"merge_result":"pull_request"},"dependencies":[{"issue_id":"c-10x","depends_on_id":"zz-9","type":"supersedes"}]}'
 OUT=$(run_check); RC=$?
-eq "$RC" "0" "gc.superseded_by IS the explicit terminal state the OK line promises"
-hasnt "$OUT" "c-10" "the disposed bead is not named"
-has "$OUT" "disposed via gc.superseded_by" "the disposal is counted"
+eq "$RC" "0" "a supersedes or duplicates edge IS the explicit terminal state the OK line promises"
+hasnt "$OUT" "c-10" "the disposed beads are not named"
+has "$OUT" "3 disposed onto a successor" "the disposals are counted, an edge into another store's bead among them"
+# The retired successor key alone records nothing a reader acts on.
+store "$(bead c-10k '{"merge_result":"pull_request","gc.superseded_by":"s-1"}')" \
+      '{"id":"c-10r","status":"closed","parent":null,"metadata":{"merge_result":"pull_request"},"dependencies":[{"issue_id":"c-10r","depends_on_id":"s-1","type":"related"}]}'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "the retired gc.superseded_by key, and an edge of another type, leave the bead judged"
+has "$OUT" "c-10k" "the bead with only the retired key is named"
+has "$OUT" "c-10r" "the bead with only a related edge is named"
 
 # --- 7. the remedy states the ledger's fact, never the PR's -----------------------
 store "$(bead c-11 '{"merge_result":"pull_request","existing_pr":"https://x/pr/11"}')"

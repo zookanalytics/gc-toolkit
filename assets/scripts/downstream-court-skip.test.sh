@@ -99,7 +99,7 @@ pipeline() {
 # d1  merge_result pre_open_gate           -> DROP (in-flight, pre-open codex gate)
 # d2  merge_result pull_request            -> DROP (in-flight, open PR)
 # d4  gc.routed_to human                   -> DROP (a person owns it)
-# k1  merge_result merged                  -> KEEP (landed; step 4 closes it)
+# k1  merge_result merged                  -> KEEP (landed; recovery's merge check closes it)
 # k2  merge_result empty                   -> KEEP (no PR — the pool's to recover)
 # k3  no metadata key                      -> KEEP (robust to absent metadata)
 # k4  pr.machine progressing, no anchor    -> KEEP (stale stamp; the pool's to recover)

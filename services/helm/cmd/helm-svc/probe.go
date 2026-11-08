@@ -12,7 +12,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/helm/internal/source"
 )
 
-// `helm-svc probe` is the readability check without the board's render or its
+// `helm-svc probe` is the readability check without the board's gather or its
 // cost: a build gate on a 5-minute cooldown cannot spend a cross-rig gather
 // (2.7s warm, unbounded against a wedged Dolt) on a question that opening one
 // store answers, and `board` exits 3 for every gather failure alike.
@@ -24,7 +24,7 @@ const probeUsage = `Usage:
 
   Report whether THIS BINARY can read the city's bead stores — the check the
   board's gather depends on, without the gather. One readable store is enough,
-  matching what "helm-svc board" needs to render at all.
+  matching what "helm-svc board --json" needs to gather at all.
 
   --timeout=SECONDS  Bound the open (default: GC_HELM_PROBE_TIMEOUT, else 10).
 

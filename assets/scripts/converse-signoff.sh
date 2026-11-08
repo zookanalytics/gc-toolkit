@@ -22,16 +22,14 @@
 #      the gate first: a filer's withdrawal, an Accept, another sitting, or a
 #      person at the command line. The first answer wins, and the sign-off
 #      reports it;
-#   4. releases a subject that reads `held`, and stops, the conversation left
-#      open, when that release fails;
-#   5. takes the subject's recommendation when the ruling takes it (--accept),
+#   4. takes the subject's recommendation when the ruling takes it (--accept),
 #      through gc-helm.sh accept, the writer the board's Accept runs: under the
 #      subject's acceptance lock it answers the recommendation's gate, which
 #      step 3 leaves to it, dispatches the recommended formula at the subject
 #      and records the dispatch, or finishes an acceptance an earlier Accept
 #      left unfinished without dispatching it again;
-#   6. closes the conversation;
-#   7. draws the comment that shows the visit on the subject's PR again, from
+#   5. closes the conversation;
+#   6. draws the comment that shows the visit on the subject's PR again, from
 #      the conversation.
 # What it does to the subject's universe is recorded on the conversation as it
 # lands, one comment in plain words for each act: the rework or the retirement,
@@ -43,10 +41,7 @@
 # beads each gate releases are read before the first write, so a gate that
 # releases an open PR other than the subject, such as an epic member's gate the
 # epic's sitting answers, or a gate about the subject and another PR, puts the
-# question of that PR to the ruling just as an open-PR subject does. The
-# acceptance follows the release: mol-polecat-work's load-context reads any
-# merge_result, `held` included, as a PR or merge that already exists, and
-# cancels a run poured at a bead that still carries one.
+# question of that PR to the ruling just as an open-PR subject does.
 #
 # A ruling is not an approval: the merge counts only an Approve review on GitHub
 # from an account other than the city's (review-verdict.sh). So the headline
@@ -61,7 +56,7 @@
 # operator's, so each line reads true whichever it is.
 #
 # A ruling given on a turn that does not sign off (--answer) runs steps 1 to 3
-# for the gates --answer names, and step 5 when it takes the recommendation,
+# for the gates --answer names, and step 4 when it takes the recommendation,
 # and stops there: the conversation stays open under its sitting, and the
 # sign-off later reads each of those gates as already cleared.
 #
@@ -83,30 +78,29 @@
 # What waits on the subject is the caller's to state: one --waiting-on per bead
 # it ROUTED work into, --no-wait when it settled the subject and nothing is
 # waiting, and NEITHER where the subject is parked for a person. The scripts it
-# runs (converse-rework.sh, gc-helm.sh, lifecycle.sh, pr-sitting-comment.sh) are
+# runs (converse-rework.sh, gc-helm.sh, pr-sitting-comment.sh) are
 # its siblings in the pack's assets/scripts, found through pack_script.
 #
 # Usage:
 #   converse-signoff.sh --conversation <task> --outcome "<headline, ≤140 chars>" \
 #     [--subject <id>] [--ruled yes|no] [--ruling "<one line>"] \
-#     [--route <rig>/<agent>|human] [--leave <gate> ...] [--answer <gate> ...] \
+#     [--leave <gate> ...] [--answer <gate> ...] \
 #     [--no-wait | --waiting-on <bead> ...] \
 #     [--rework | --no-rework | --retire <kind> [--successor <bead>]] \
 #     [--pr-anchor <bead>] [--accept [--var <key>=<value> ...]]
 #   --outcome is the subject's headline, and the close reason the sittings card
 #   falls back to. A PR the ruling leaves standing with no Approve review adds a
 #   clause saying so, which counts toward the cap. --ruled defaults to `no`.
-#   --ruled yes requires --ruling, the answer each gate resolves with, and
-#   --route, where a `held` subject is released to. --subject, when given, must
-#   be the bead the conversation tracks.
+#   --ruled yes requires --ruling, the answer each gate resolves with.
+#   --subject, when given, must be the bead the conversation tracks.
 #   --leave (with --ruled yes) names a gate the conversation replies to that the
 #   ruling leaves owed: it stays open, and its reply stays as the record that
 #   this conversation took it up.
 #   --answer names a gate the conversation replies to that the ruling answers
 #     on a turn that does not sign off. It carries a ruling, so it takes
 #     --ruling and the open-PR answer below; it releases no subject and leaves
-#     every other gate as it is, so --ruled no, --route and --leave are refused
-#     beside it.
+#     every other gate as it is, so --ruled no and --leave are refused beside
+#     it.
 #   --rework | --no-rework | --retire <kind> (with a ruling): what the ruling
 #     does to an already-published PR it reaches: the subject at
 #     merge_result=pull_request, and each bead at merge_result=pull_request
@@ -145,7 +139,7 @@
 #     replies to it, and on a turn that does not sign off --answer names it. A
 #     gate under the key that blocks another bead, such as an epic's member,
 #     asks that bead's recommendation, which --accept does not take. Step 3
-#     leaves the subject's gate to step 5, which runs gc-helm.sh accept, the
+#     leaves the subject's gate to step 4, which runs gc-helm.sh accept, the
 #     one writer that dispatches a recommendation, so the sitting never slings
 #     it itself. Accept answers each open gate under the key on the subject, or
 #     with none open the newest one, and the ruling must answer each of those.
@@ -154,17 +148,15 @@
 #     before recording it. Refused while another open human gate that the
 #     ruling does not answer holds the subject, since the dispatch waits for
 #     every gate that holds it.
-#     A subject that still reads `held` when Accept's writer runs, as on a turn
-#     that does not sign off, is released by that writer before it dispatches.
 #   --var <key>=<value> (with --accept, repeatable) is a var the ruling settled
 #     for the recommendation's dispatch, such as mol-design-convoy's
 #     design_gated=false. Accept passes each one to its sling. A dispatch an
 #     earlier Accept already made keeps the vars it was made with.
 # Exit: 0 signed off, or with --answer the named gates answered; 1 stopped
 #   short — a read failed, the rework did not file, the PR did not retire, the
-#   headline did not land, a gate did not close, a held subject did not
-#   release, the recommendation was not taken, or the conversation did not
-#   close or hand back — so do NOT post the sign-off, or report the ruling as
+#   headline did not land, a gate did not close, the recommendation was not
+#   taken, or the conversation did not close or hand back — so do NOT post the
+#   sign-off, or report the ruling as
 #   carried out; repair what it names and re-run, which repeats every write it
 #   made safely; 2 refused before any write: usage, a conversation that is not
 #   one, a gate it does not reply to, a ruling that reaches an open PR and gave
@@ -190,7 +182,6 @@ SUBJECT=""
 OUTCOME=""
 RULED=""
 RULING=""
-ROUTE=""
 PR_ANSWER=""
 RETIRE_KIND=""
 SUCCESSOR=""
@@ -283,7 +274,6 @@ while [ $# -gt 0 ]; do
     --outcome)    shift; [ $# -gt 0 ] || die "--outcome needs a value"; OUTCOME="$1" ;;
     --ruled)      shift; [ $# -gt 0 ] || die "--ruled needs yes|no"; RULED="$1" ;;
     --ruling)     shift; [ $# -gt 0 ] || die "--ruling needs a value"; RULING="$1" ;;
-    --route)      shift; [ $# -gt 0 ] || die "--route needs a value"; ROUTE="$1" ;;
     --leave)      shift; [ $# -gt 0 ] || die "--leave needs a gate id"; LEAVE+=("$1") ;;
     --answer)     shift; [ $# -gt 0 ] || die "--answer needs a gate id"; ANSWER_GATES+=("$1") ;;
     --rework)     pr_answer rework ;;
@@ -316,7 +306,6 @@ if [ "${#ANSWER_GATES[@]}" -gt 0 ]; then
   ANSWERING=yes
   [ "${RULED:-yes}" = yes ] || die "--answer carries a ruling, so it cannot be --ruled no"
   [ -n "$RULING" ] || die "--answer requires --ruling (the answer each gate it names resolves with)"
-  [ -z "$ROUTE" ] || die "--route is where a sign-off releases a held subject to, and --answer releases nothing"
   [ "${#LEAVE[@]}" -eq 0 ] || die "--answer resolves only the gates it names, so --leave has nothing to leave"
   RULED=yes
   UNDONE="NOT ANSWERED — do NOT tell the operator the ruling is carried out."
@@ -324,7 +313,6 @@ fi
 RULED="${RULED:-no}"
 if [ "$RULED" = yes ]; then
   [ -n "$RULING" ] || die "--ruled yes requires --ruling (the answer each gate resolves with)"
-  [ -n "$ANSWERING" ] || [ -n "$ROUTE" ] || die "--ruled yes requires --route (where a held subject is released to)"
 else
   [ -z "$PR_ANSWER" ] || die "--rework, --no-rework and --retire require a ruling (they answer what it does to an open PR)"
   [ "${#LEAVE[@]}" -eq 0 ] || die "--leave requires --ruled yes: a cut-short sign-off leaves every gate open"
@@ -520,7 +508,7 @@ in_target_rig() { ( cd "$TARGET_PATH" && GC_RIG="$TARGET_RIG" GC_RIG_ROOT="$TARG
 # the epic a sitting is about, asks that bead's recommendation, and Accept on
 # the subject never answers it. The gate must be one the ruling answers, so the
 # conversation's reply on it records which conversation took it up. Step 3
-# leaves it, and step 5 hands it to Accept's writer, which answers the gates it
+# leaves it, and step 4 hands it to Accept's writer, which answers the gates it
 # chooses on the subject: each open one under the key, or with none open the
 # newest, whose acceptance an earlier Accept left unfinished. The sign-off
 # answers no gate its conversation does not reply to, so each gate Accept
@@ -566,20 +554,6 @@ if [ -n "$ACCEPT" ]; then
               | "\(.id) (\(.title // "untitled"))" ] | join("; ")')
   [ -z "$OTHERS" ] \
     || die "$SUBJECT's recommendation is dispatched only once no other human gate holds it, and $OTHERS still holds it, which this ruling does not answer; nothing was written. Answer that gate in the same ruling once the operator rules on it, or leave the recommendation's gate owed until it is cleared, when Accept on the board takes the recommendation"
-fi
-# A ruling releases a subject that still reads `held`, so the state is read
-# here, with the other reads. lifecycle.sh exits 2 when the subject does not
-# read, an answer that cannot say whether it is held. Any other refusal (an
-# undeclared state, no gctk binary) answers as not held, the side that leaves
-# the bead visibly waiting on a person. An answer releases nothing, so it reads
-# no state. One that takes the recommendation leaves a held subject to Accept's
-# writer, which releases it once its answer reads back and before it sends the
-# formula, because mol-polecat-work cancels a run poured at a held bead.
-LC=$(pack_script lifecycle.sh)
-SUBJECT_STATE=""
-if [ "$RULED" = yes ] && [ -z "$ANSWERING" ] && [ -n "$LC" ]; then
-  SUBJECT_STATE=$("$LC" state "$SUBJECT" 2>/dev/null)
-  [ $? -ne 2 ] || stopped "the lifecycle state of $SUBJECT could not be read, so this ruling cannot tell whether it reads held; nothing was written"
 fi
 HELM=$(pack_script gc-helm.sh) || stopped "no gc-helm.sh beside $0, so the subject's headline cannot be written; nothing was written"
 
@@ -652,7 +626,7 @@ tell_approval() {
   for line in "${APPROVE_TELL[@]+"${APPROVE_TELL[@]}"}"; do echo "$line"; done
 }
 
-# take_recommendation — step 5: hand the recommendation's gate to gc-helm.sh
+# take_recommendation — step 4: hand the recommendation's gate to gc-helm.sh
 # accept, the writer the board's Accept runs, and read back what it left. Accept
 # exits 0 once it has dispatched the formula, or recorded a dispatch that an
 # earlier Accept poured under its token. Any other exit is read off the gates
@@ -765,7 +739,7 @@ if [ "$RULED" = yes ]; then
   # 3. The gates the ruling answers: those --answer names, or else each one the
   # conversation replies to. A reply onto a bead that is no human gate holds
   # nothing to resolve. The recommendation's gate, when the ruling takes the
-  # recommendation, is step 5's to answer through Accept.
+  # recommendation, is step 4's to answer through Accept.
   UNCLOSED=""
   for g in $TO_ANSWER; do
     case " $REC_GATES " in *" $g "*) continue ;; esac
@@ -807,21 +781,10 @@ if [ "$RULED" = yes ]; then
     exit 0
   fi
 
-  # 4. `held` is cleared by a ruling, not by a sitting ending. The state was
-  # read before the first write; nothing this sign-off writes changes it. A
-  # release that fails stops every ruled sign-off here, before the
-  # recommendation and the close: mol-polecat-work cancels a run poured at a
-  # bead that still reads `held`, so the conversation stays open for the
-  # re-run that releases it.
-  if [ "$SUBJECT_STATE" = "held" ]; then
-    "$LC" transition "$SUBJECT" --to unanchored --route "$ROUTE" \
-      || stopped "RELEASE FROM held FAILED on $SUBJECT: it still reads as waiting on a person, and mol-polecat-work cancels a run poured at it. The conversation is not closed, so a re-run releases it${ACCEPT:+ and then takes the recommendation}"
-  fi
-
-  # 5. The recommendation, once nothing holds the subject back.
+  # 4. The recommendation.
   [ -z "$ACCEPT" ] || take_recommendation
 
-  # 6. Close the conversation. The work-record gate the close runs wants
+  # 5. Close the conversation. The work-record gate the close runs wants
   # gc.work_outcome, stamped in a write of its own so it never decides whether
   # the conversation closes. The sitting holds the conversation, so a plain
   # close is the holder's own; --force covers an actor bd does not read as its
@@ -864,7 +827,7 @@ else
   [ "$BACK_AT" != human/open ] || SIGNED="back in the operator's queue"
 fi
 
-# 7. The comment that shows the visit on the subject's PR, drawn again from
+# 6. The comment that shows the visit on the subject's PR, drawn again from
 # the conversation now that it reads closed, so it shows the conclusion and the
 # actions. Best effort and update-only: a conversation whose sitting named no
 # topic has no comment, and the hand-back recorded after this sign-off draws it

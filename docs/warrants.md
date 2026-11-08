@@ -80,18 +80,32 @@ shares only the word ([authority-map.md](authority-map.md)).
     forced relaunch and a claimant with no poured workflow, so it adds no key and
     writes nothing to let a run through.
   - `workspace-setup` brings a rejected branch current by merge, where Gas Town's
-    rebases and force-pushes under an open PR, and waits behind a sibling.
+    rebases it under an open PR, and waits behind a sibling.
   - `preflight-tests` runs the checks through `gctk rig`, so every polecat starting
     from one base shares one recorded run, and keys a tracker on a stamp. Core's
     runs each command raw per polecat and matches trackers by title.
   - `self-review` is a bounded check loop over those records, where Gas Town's is
     one inline step.
   - `submit-and-exit` holds the anchor, the bring-current guard and the store-only
-    exit, which are nouns of the merge and review subsystems.
+    exit, which are nouns of the merge and review subsystems. Once the handoff is
+    written it removes the run's worktree with its local branch, as core's own
+    variants remove theirs. Gas Town's detaches the tree and deletes the branch, so
+    once a squash merge deletes origin's branch the tree sits on commits no ref
+    reaches, and the controller's reaper never removes it.
 - **Evidence.** In `gastownhall/gascity`:
   - `internal/bootstrap/packs/core/formulas/mol-polecat-base.toml`: its
-    `load-context` has no duplicate-dispatch gate, and its `preflight-tests` runs
-    `{{test_command}}` raw.
+    `load-context` has no duplicate-dispatch gate, its `preflight-tests` runs
+    `{{test_command}}` raw, and its `workspace-setup` is a placeholder each
+    variant overrides with a tree of its own. `mol-polecat-commit.toml` and
+    `mol-scoped-work.toml` cut theirs with `git worktree add` and remove them with
+    `git worktree remove` once the work is pushed.
+  - `internal/worktree/worktree.go`, the owner `gc worktree` runs: `Cleanup`
+    removes a tree only when its HEAD is merged into the base given, and
+    `verifyProvenance` requires that base to be the one the tree was made from, so
+    `gc worktree cleanup` cannot remove a tree at the handoff, before the merge.
+    `rejectRegisteredWorktreeAncestor` refuses a path inside a registered worktree,
+    so `gc worktree ensure` cannot make a tree inside an agent's home. The search
+    is [specs/tk-1tfzr71.43/gas-city-search.md](../specs/tk-1tfzr71.43/gas-city-search.md).
   - `internal/formula/parser.go`, `mergeSteps`: a child step replaces its parent's
     whole, so an inherited step cannot gain metadata, and a step that needs
     `gc.continuation_group` must be overridden. The base declares none.
@@ -100,16 +114,16 @@ shares only the word ([authority-map.md](authority-map.md)).
     live root of one formula on one bead is refused, unless `--force` skips the
     lookup, under the lock `withGraphV2SourceWorkflowLock` takes.
   In `gastownhall/gascity-packs`, `gastown/formulas/mol-polecat-work.toml` overrides
-  `workspace-setup`, `self-review` and `submit-and-exit`, and rebases a rejected
-  branch.
-- **Verified.** 2026-11-06, at `gastownhall/gascity` main f26113c98 and
-  `gastownhall/gascity-packs` main 796d7ecd7.
+  `workspace-setup`, `self-review` and `submit-and-exit`, rebases a rejected
+  branch, and at the handoff detaches the tree and deletes its branch.
+- **Verified.** 2026-11-07, at `gastownhall/gascity` main 6c9663d4c and
+  `gastownhall/gascity-packs` main e3cb468bb.
 - **Retires when.** A step at a time. `load-context`: core's gate refuses finished
-  and parked work and ends a run by cancelling it. `workspace-setup`:
-  `tk-1tfzr71.43` moves its worktree to `gc worktree`, and the refinery's rework
-  machinery goes (`tk-1tfzr71.20`), which ends the merge resume. `preflight-tests`
-  and `self-review`: Gas City ships a record of a check per commit. `submit-and-exit`:
-  `tk-1tfzr71.20` moves the merge onto GitHub's branch rules.
+  and parked work and ends a run by cancelling it. `workspace-setup`: the
+  refinery's rework machinery goes (`tk-1tfzr71.20`), which ends the merge resume.
+  `preflight-tests` and `self-review`: Gas City ships a record of a check per
+  commit. `submit-and-exit`: `tk-1tfzr71.20` moves the merge onto GitHub's branch
+  rules.
 
 ## Dolt reclaim
 
@@ -415,9 +429,9 @@ shares only the word ([authority-map.md](authority-map.md)).
     a reader keys on. The `gastown` pack's `pr-merge-reconcile` records a PR's
     lifecycle in `pr_state`, a key of its own.
   - The search is [specs/tk-blloeo/gas-city-search.md](../specs/tk-blloeo/gas-city-search.md).
-- **Verified.** 2026-11-06, at `gastownhall/gascity` main ce86ff7eccc9,
-  `gastownhall/gascity-packs` main e3cb468bbc65 with the packs Gas City
-  bundles at 66897e7132c9, and `gastownhall/beads` main 8c3eb30f30f7.
+- **Verified.** 2026-11-06, at `gastownhall/gascity` main 74d62eb1e0c0,
+  `gastownhall/gascity-packs` main e3cb468bbc65, and `gastownhall/beads` main
+  8c3eb30f30f7.
 - **Retires when.** Gas City records a pull request's merge readiness where a
   reader of the PR's own bead finds it, and tells a required check still
   running from a block, for example once its PR monitor reads the base
@@ -462,12 +476,11 @@ shares only the word ([authority-map.md](authority-map.md)).
   `assets/scripts/pr-post.sh`, which reads a thread's posts through
   `live_comments` in `assets/scripts/review-dismissal.sh` and sets aside a post
   carrying the reaction the write-back in `assets/scripts/pr-facts.sh` marks a
-  handled post with (`WB_RESOLVED_REACTION`). Its readers:
-  `unansweredFeedback` in package `services/gctk/prstatus`, and
-  `Blocker.WithMetadata` there, which reads it off each merge anchor that
-  `prstatus.Holding` reaches behind a PR, `gctk pr-status derive` in
-  `services/gctk/internal/cli/prstatus.go`, and `phaseFacts` in the helm
-  board's `services/helm/internal/board/derive.go`.
+  handled post with (`WB_RESOLVED_REACTION`). Its reader is package
+  `services/gctk/prstatus`: `RowFacts` reads it off the anchor and
+  `unansweredFeedback` decides from it. `prstatus.Read` gathers it for
+  `gctk pr-status derive` in `services/gctk/internal/cli/prstatus.go` and for the
+  helm board's beads source in `services/helm/internal/source/beads.go`.
 - **Stands in for.** A record of a pull request's review threads kept on the
   bead whose pull request it is, which says whether review feedback still
   waits on an answer.
@@ -486,12 +499,18 @@ shares only the word ([authority-map.md](authority-map.md)).
   - In `gastownhall/beads`, the example formula `gh-pr-review` tells the agent
     running it to check for unresolved review threads, and records none
     (`examples/formulas/gh-pr-review.formula.toml`).
-  - In `gastownhall/gascity-packs`, no pack reads whether a review thread is
-    resolved or answered. The `compound-engineering` pack's
-    `ce-pr-comment-resolver` agent is handed a thread to fix or answer, and
-    keeps no record of it.
+  - In `gastownhall/gascity-packs`, no pack keeps a record of which of a pull
+    request's review threads wait on an answer. The `pr-review` pack's
+    `mol-pr-iterate` formula checks whether the copilot comments it was slung
+    to address are resolved, and records on its own run only whether that one
+    signal cleared (`evidence.cleared`, in
+    `pr-review/formulas/mol-pr-iterate.formula.toml`). The
+    `compound-engineering` pack's `ce-previous-comments-reviewer` agent reads a
+    PR's review comments for feedback the diff leaves unaddressed and returns
+    findings, and its `ce-pr-comment-resolver` agent is handed a thread to fix
+    or answer. Neither keeps a record of the thread.
   - The search is [specs/tk-iydyiup/gas-city-search.md](../specs/tk-iydyiup/gas-city-search.md).
-- **Verified.** 2026-11-06, at `gastownhall/gascity` main ce86ff7eccc9 with
+- **Verified.** 2026-11-06, at `gastownhall/gascity` main b2c0f62ae6c9 with
   the `gastown` pack it bundles at 66897e7132c9, `gastownhall/gascity-packs`
   main e3cb468bbc65, and `gastownhall/beads` main 8c3eb30f30f7.
 - **Retires when.** Gas City records a pull request's review threads where a
@@ -544,10 +563,13 @@ shares only the word ([authority-map.md](authority-map.md)).
     `session.quarantined` has no emitter (`cmd/gc/cmd_analyze_reliability.go`).
     So the script reports a home it cannot sync through `patrol-finding.sh`, one
     report per home, which the next clean start clears.
-  - The search, and each way this script differs from Gas Town's and why, is
-    [specs/tk-1tfzr71.10/gas-city-search.md](../specs/tk-1tfzr71.10/gas-city-search.md).
-- **Verified.** 2026-11-05, at `gastownhall/gascity` main 9f807760c191 and
-  `gastownhall/gascity-packs` main 796d7ecd73cf.
+  - The search, and each way this script differs from Gas Town's and why, are
+    in two records:
+    [specs/tk-1tfzr71.10/gas-city-search.md](../specs/tk-1tfzr71.10/gas-city-search.md),
+    and [specs/tk-eu1f6tm/gas-city-search.md](../specs/tk-eu1f6tm/gas-city-search.md)
+    for when the script fetches, its retry of the add and its signal traps.
+- **Verified.** 2026-11-08, at `gastownhall/gascity` main 27a4857eabd5 and
+  `gastownhall/gascity-packs` main 2a3b142e3fbd.
 - **Retires when.** Gas City provisions a tree bound to an agent, with a sync to
   the default branch, or Gas Town's agents stop running a script of their own at
   `pre_start`.

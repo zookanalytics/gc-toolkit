@@ -277,7 +277,7 @@ if [ -n "$looks_like_bead_id" ]; then
     [ -z "$RIG" ] || die "--rig does not apply to an existing bead ('$ARG' belongs to rig '$prefix_hit')" 2
     [ -z "$SUBJ_TYPE" ] || die "--type does not apply to an existing bead ('$ARG' already has a type)" 2
     # A settled (superseded) id redirects to its live successor before it is
-    # stamped as the subject: gc-helm's resolver follows gc.superseded_by, and a
+    # stamped as the subject: gc-helm's resolver follows its supersedes edge, and a
     # live id passes through unchanged. Recompute the rig from the successor.
     if [ -z "$FORCE_TOPIC" ]; then
         RESOLVED_SUBJECT_REF=$("$HELM" resolve "$ARG") || exit $?
@@ -419,8 +419,8 @@ if [ -n "$REACT" ]; then
         note "$PROG: a live workflow already drives subject $SUBJECT — no reaction was filed; filing the conversation directly"
         REACT_WHY="no: a live workflow already drives the subject (a first reaction never races work in flight)"
     elif [ "$REACT_RC" -eq 7 ]; then
-        note "$PROG: subject $SUBJECT is already routed or armed — no reaction was filed; filing the conversation directly"
-        REACT_WHY="no: the subject is already routed or armed (a first reaction never second-guesses a dispatch already decided)"
+        note "$PROG: subject $SUBJECT is already routed or armed, or waits on a person's answer — no reaction was filed; filing the conversation directly"
+        REACT_WHY="no: the subject is already routed or armed, or waits on a person's answer (a first reaction never second-guesses a dispatch already decided)"
     else
         note "$PROG: filing the first reaction FAILED — falling back to filing the conversation directly"
         REACT_WHY="no: filing the first reaction failed"

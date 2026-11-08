@@ -275,6 +275,20 @@ has "$OUT" "gc bd update a-r1 --unset-metadata stall_root" "it gives the clearin
 hasnt "$OUT" "a-r2" "a closed bead carrying it is history, not a finding"
 hasnt "$OUT" "a-r3" "an empty value is a cleared key, not a finding"
 has "$OUT" "Discharge that by hand, then clear the key" "a key whose residue leaves work undone says to discharge it first"
+# The successor keys are a disposition's before bd's own edges carried it. A
+# live bead carrying one is a close nothing will make; gc.supersedes, the inert
+# back-pointer on a successor, is no finding.
+store '[{"id":"a-s1","status":"open","metadata":{"duplicate_of":"a-canon"}},
+        {"id":"a-s2","status":"open","metadata":{"gc.superseded_by":"a-succ","gc.superseded_by_store":"rig:alpha"}},
+        {"id":"a-s3","status":"open","metadata":{"gc.supersedes":"a-old"}},
+        {"id":"a-s4","status":"closed","metadata":{"duplicate_of":"a-canon","gc.superseded_by":"a-canon"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a live bead carrying a retired successor key is an ERROR"
+has "$OUT" "bead-rehome.sh --successor a-canon --kind duplicate" "a parked duplicate is told to close as a duplicate of its canonical"
+has "$OUT" "Close it onto a-succ through bead-rehome.sh" "a bead whose disposition never closed is told to close onto its successor"
+has "$OUT" "gc bd update a-s2 --unset-metadata gc.superseded_by_store" "…and the store half is named with its clearing command"
+hasnt "$OUT" "a-s3" "a successor's inert back-pointer is no finding"
+hasnt "$OUT" "a-s4" "a closed bead carrying them is history, not a finding"
 # The visit-era helper's escalation keys have no writer and no reader. A live
 # bead carrying one holds nothing back: the finding says a retired writer is
 # back and asks for no discharge.

@@ -8,25 +8,28 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus/fixture"
 )
 
-// gcStub answers a `bd show` of a bead $STUB_SHOW holds with $STUB_SHOW, the
-// anchor's `blocks` blockers (`bd dep list`) with $STUB_BLOCKERS, `[]` when it is
-// unset, and every `bd list` with $STUB_LIST, so a derive test drives the whole
-// gathering path with no live store — the same `gc bd` seam
-// pr-status-label.test.sh exercises through the shell, proven here in-process. A
-// `bd show` of any other bead is the walk's read, and answers a row per id from
-// $STUB_EDGES, a JSON object of each bead's dependency rows, unless $STUB_EDGES_RAW
-// gives its whole answer. $STUB_BLOCKERS_FAIL fails the blocker read,
-// $STUB_EDGES_FAIL the walk's, and $STUB_LOG, when set, records the arguments of
-// every call.
+// gcStub answers a `bd show` of a bead $STUB_SHOW holds with $STUB_SHOW, each
+// row carrying the anchor's `blocks` edges, $STUB_BLOCKERS, `[]` when it is
+// unset, unless the row names dependencies of its own. It answers every `bd
+// list` with $STUB_LIST, so a derive test drives the whole gathering path with
+// no live store — the same `gc bd` seam pr-status-label.test.sh exercises
+// through the shell, proven here in-process. A `bd show` of any other bead is
+// the walk's read, and answers a row per id from $STUB_EDGES, a JSON object of
+// each bead's dependency rows, unless $STUB_EDGES_RAW gives its whole answer.
+// $STUB_EDGES_FAIL fails the walk's read past the anchor, and $STUB_LOG, when
+// set, records the arguments of every call.
 const gcStub = `#!/bin/sh
 [ -z "$STUB_LOG" ] || printf '%s\n' "$*" >> "$STUB_LOG"
 case "$2" in
   show)
     shift 2
     if printf '%s' "$STUB_SHOW" | jq -e --arg id "$1" 'any(.[]; .id == $id)' >/dev/null 2>&1; then
-      printf '%s\n' "$STUB_SHOW"
+      printf '%s' "$STUB_SHOW" | jq -c --argjson b "${STUB_BLOCKERS:-[]}" 'map(if has("dependencies") then . else . + {dependencies: $b} end)'
       exit 0
     fi
     [ -z "$STUB_EDGES_FAIL" ] || { echo "simulated show failure" >&2; exit 1; }
@@ -37,9 +40,6 @@ case "$2" in
     [ -n "$edges" ] || edges='{}'
     # shellcheck disable=SC2086
     printf '%s' "$edges" | jq -c --args '. as $e | [$ARGS.positional[] | {id: ., dependencies: ($e[.] // [])}]' $ids ;;
-  dep)
-    [ -z "$STUB_BLOCKERS_FAIL" ] || { echo "simulated dep list failure" >&2; exit 1; }
-    printf '%s\n' "${STUB_BLOCKERS:-[]}" ;;
   list) printf '%s\n' "$STUB_LIST" ;;
   *) echo unsupported >&2; exit 2 ;;
 esac
@@ -167,7 +167,7 @@ func TestPRStatusDerive(t *testing.T) {
 
 	t.Run("unreadable blocker read => exit 2, no guess", func(t *testing.T) {
 		stubGC(t, approved, `[]`)
-		t.Setenv("STUB_BLOCKERS_FAIL", "1")
+		t.Setenv("STUB_BLOCKERS", `[{"id":"tk-x"}]`)
 		if out, code := derive(t, "tk-a"); code != 2 || out != "" {
 			t.Fatalf("derive with the blocker read failing = (%q, %d), want (%q, 2)", out, code, "")
 		}
@@ -207,9 +207,8 @@ func TestPRStatusDerive(t *testing.T) {
 	// The gate read names the anchor, so the cost follows the anchor rather than
 	// the number of gates in the store, and nothing lists visits store-wide. The
 	// in-flight read names the anchor too, over bd-lib.sh's live statuses,
-	// spelled out here as the helm board's source test spells them, so both pin
-	// the one list.
-	t.Run("the gate read is the anchor's blocker read", func(t *testing.T) {
+	// spelled out here so a change to prstatus.InFlightStatuses shows here.
+	t.Run("the gate read is the anchor's own show", func(t *testing.T) {
 		stubGC(t, approved, `[]`)
 		log := filepath.Join(t.TempDir(), "gc.log")
 		t.Setenv("STUB_LOG", log)
@@ -223,13 +222,13 @@ func TestPRStatusDerive(t *testing.T) {
 		calls := string(raw)
 		for _, want := range []string{
 			"bd list --metadata-field anchor_bead=tk-a --status open,in_progress,blocked,deferred,hooked,pinned --limit 0 --json\n",
-			"bd dep list tk-a --type blocks --json\n",
+			"bd show tk-a --json\n",
 		} {
 			if !strings.Contains(calls, want) {
 				t.Errorf("the derive did not make the read %q; calls:\n%s", want, calls)
 			}
 		}
-		for _, stray := range []string{"task_kind=visit", "gc.continuation_group", "-t tracks"} {
+		for _, stray := range []string{"task_kind=visit", "gc.continuation_group", "-t tracks", "bd dep list"} {
 			if strings.Contains(calls, stray) {
 				t.Errorf("the derive made a visit read (%q); calls:\n%s", stray, calls)
 			}
@@ -239,8 +238,8 @@ func TestPRStatusDerive(t *testing.T) {
 
 // --json prints the status beside what holds the PR, the values the held: labels
 // carry. An open human gate blocking the anchor holds it, and a live blocker
-// routed to a person, a decision, or another pull request whose own state is a
-// person's to move holds it as the merge pass's stuck-blocker verdict does.
+// routed to a person or a decision holds it as the merge pass's stuck-blocker
+// verdict does.
 func TestPRStatusDeriveHeld(t *testing.T) {
 	approved := `[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"approved@abc@t","pr.machine":"settled@abc@t"}}]`
 	rework := `[{"id":"tk-k","status":"in_progress","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}}]`
@@ -251,50 +250,42 @@ func TestPRStatusDeriveHeld(t *testing.T) {
 		want             string
 	}{
 		{"nothing holds an approved PR", approved, `[]`, nil,
-			`{"status":"merging","held":[]}`},
+			`{"status":"merging","held":[],"reasons":[]}`},
 		{"an open human gate on the anchor", approved, `[]`,
 			map[string]string{"STUB_BLOCKERS": gate},
-			`{"status":"needs-attention","held":["gate"]}`},
+			`{"status":"needs-attention","held":["gate"],"reasons":[{"held":"gate","id":"tk-g","title":""}]}`},
 		{"an open human gate beside the PR's rework in flight", approved, rework,
 			map[string]string{"STUB_BLOCKERS": gate},
-			`{"status":"needs-attention","held":["gate"]}`},
+			`{"status":"needs-attention","held":["gate"],"reasons":[{"held":"gate","id":"tk-g","title":""}]}`},
 		{"a closed human gate releases the PR", approved, `[]`,
 			map[string]string{"STUB_BLOCKERS": `[{"id":"tk-g","status":"closed","issue_type":"gate","await_type":"human","dependency_type":"blocks"}]`},
-			`{"status":"merging","held":[]}`},
+			`{"status":"merging","held":[],"reasons":[]}`},
 		{"a live blocker routed to a person", approved, `[]`,
 			map[string]string{"STUB_BLOCKERS": `[{"id":"tk-d","status":"open","metadata":{"gc.routed_to":"human"},"dependency_type":"blocks"}]`},
-			`{"status":"needs-attention","held":["blocked"]}`},
+			`{"status":"needs-attention","held":["blocked"],"reasons":[{"held":"blocked","id":"tk-d","title":""}]}`},
 		{"a live decision blocker", approved, `[]`,
 			map[string]string{"STUB_BLOCKERS": `[{"id":"tk-d","status":"open","issue_type":"decision","metadata":{},"dependency_type":"blocks"}]`},
-			`{"status":"needs-attention","held":["blocked"]}`},
+			`{"status":"needs-attention","held":["blocked"],"reasons":[{"held":"blocked","id":"tk-d","title":""}]}`},
 		{"a blocker routed to a person with no status reads open", approved, `[]`,
 			map[string]string{"STUB_BLOCKERS": `[{"id":"tk-d","metadata":{"gc.routed_to":"human"},"dependency_type":"blocks"}]`},
-			`{"status":"needs-attention","held":["blocked"]}`},
+			`{"status":"needs-attention","held":["blocked"],"reasons":[{"held":"blocked","id":"tk-d","title":""}]}`},
 		{"a closed blocker routed to a person no longer holds", approved, `[]`,
 			map[string]string{"STUB_BLOCKERS": `[{"id":"tk-d","status":"closed","metadata":{"gc.routed_to":"human"},"dependency_type":"blocks"}]`},
-			`{"status":"merging","held":[]}`},
+			`{"status":"merging","held":[],"reasons":[]}`},
 		{"a blocker a pool will claim is the city's", approved, `[]`,
 			map[string]string{"STUB_BLOCKERS": `[{"id":"tk-d","status":"open","metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"},"dependency_type":"blocks"}]`},
-			`{"status":"merging","held":[]}`},
-		{"another pull request it waits on, waiting on a review", approved, `[]`,
-			map[string]string{"STUB_BLOCKERS": `[{"id":"tk-b","status":"open","issue_type":"task","metadata":{"merge_result":"pull_request","pr_posture":"review_required@def@t","pr.machine":"settled@def@t"},"dependency_type":"blocks"}]`},
-			`{"status":"needs-attention","held":["blocked"]}`},
-		{"another pull request it waits on, which the city is changing", approved, `[]`,
-			map[string]string{
-				"STUB_BLOCKERS": `[{"id":"tk-b","status":"open","issue_type":"task","metadata":{"merge_result":"pull_request","pr_posture":"review_required@def@t","pr.machine":"settled@def@t"},"dependency_type":"blocks"}]`,
-				"STUB_EDGES":    `{"tk-b":[{"id":"tk-b.rw","status":"open","issue_type":"task","metadata":{"task_kind":"rework","anchor_bead":"tk-b"},"dependency_type":"blocks"}]}`},
-			`{"status":"merging","held":[]}`},
+			`{"status":"merging","held":[],"reasons":[]}`},
 		{"the merge pass's thread verdict", `[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"approved@abc@t","pr.machine":"blocked@abc@t","pr.machine_cause":"review-threads"}}]`, `[]`, nil,
-			`{"status":"needs-attention","held":["review"]}`},
+			`{"status":"needs-attention","held":["review"],"reasons":[{"held":"review","id":"","title":"unresolved review threads hold the merge"}]}`},
 		{"the merge pass's stuck-blocker verdict", `[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"approved@abc@t","pr.machine":"blocked@abc@t","pr.machine_cause":"blocker"}}]`, `[]`, nil,
-			`{"status":"needs-attention","held":["blocked"]}`},
+			`{"status":"needs-attention","held":["blocked"],"reasons":[{"held":"blocked","id":"","title":"a live blocker no automated actor holds"}]}`},
 		{"a failed check reads needs-attention and holds nothing", `[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"approved@abc@t","pr.machine":"blocked@abc@t","pr.machine_cause":"check-failed"}}]`, `[]`, nil,
-			`{"status":"needs-attention","held":[]}`},
+			`{"status":"needs-attention","held":[],"reasons":[]}`},
 		{"the merge freeze reads needs-attention and holds nothing", `[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","merge_hold":"true"}}]`, `[]`, nil,
-			`{"status":"needs-attention","held":[]}`},
+			`{"status":"needs-attention","held":[],"reasons":[]}`},
 		{"a human gate on the anchor beside a person's blocker", approved, `[]`,
 			map[string]string{"STUB_BLOCKERS": `[{"id":"tk-g","status":"open","issue_type":"gate","await_type":"human","dependency_type":"blocks"},{"id":"tk-d","status":"open","metadata":{"gc.routed_to":"human"},"dependency_type":"blocks"}]`},
-			`{"status":"needs-attention","held":["gate","blocked"]}`},
+			`{"status":"needs-attention","held":["gate","blocked"],"reasons":[{"held":"gate","id":"tk-g","title":""},{"held":"blocked","id":"tk-d","title":""}]}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			stubGC(t, tc.show, tc.list)
@@ -318,144 +309,116 @@ func TestPRStatusDeriveHeld(t *testing.T) {
 	})
 
 	// A read the held values rest on that does not answer derives nothing, so the
-	// labels stay as they are rather than flip on a guess.
-	for _, fail := range []string{"STUB_BLOCKERS_FAIL"} {
-		t.Run("unreadable ("+fail+") => exit 2, no guess", func(t *testing.T) {
-			stubGC(t, approved, rework)
-			t.Setenv(fail, "1")
-			if out, code := derive(t, "tk-a", "--json"); code != 2 || out != "" {
-				t.Fatalf("derive --json with a read failing = (%q, %d), want (%q, 2)", out, code, "")
-			}
-		})
-	}
+	// labels stay as they are rather than flip on a guess: the anchor's edges that
+	// do not decode, and an in-flight set that does not read.
+	t.Run("unreadable edges => exit 2, no guess", func(t *testing.T) {
+		stubGC(t, approved, rework)
+		t.Setenv("STUB_BLOCKERS", `[{"dependency_type":"blocks"}]`)
+		if out, code := derive(t, "tk-a", "--json"); code != 2 || out != "" {
+			t.Fatalf("derive --json with a read failing = (%q, %d), want (%q, 2)", out, code, "")
+		}
+	})
+	t.Run("unreadable in-flight set => exit 2, no guess", func(t *testing.T) {
+		stubGC(t, approved, `{"error":"timeout"}`)
+		if out, code := derive(t, "tk-a", "--json"); code != 2 || out != "" {
+			t.Fatalf("derive --json with a read failing = (%q, %d), want (%q, 2)", out, code, "")
+		}
+	})
 }
 
-// parityCase is one row of prstatus/testdata/parity.json, the table the PR
-// labels and the helm board are both held to: anchor tk-a's metadata, its
-// in-flight set, the beads its `blocks` edges name, the beads an open human gate
-// blocks, the beads a conversation tracks, the beads further `blocks` edges name
-// behind a bead, each with its own fields, and the status and held values both
-// derive from them.
-type parityCase struct {
-	Name     string            `json:"name"`
-	Metadata map[string]string `json:"metadata"`
-	InFlight []struct {
-		ID       string `json:"id"`
-		TaskKind string `json:"task_kind"`
-		Status   string `json:"status"`
-	} `json:"in_flight"`
-	Blockers      []string                `json:"blockers"`
-	Gates         []string                `json:"gates"`
-	Conversations []string                `json:"conversations"`
-	Behind        map[string][]parityBead `json:"behind"`
-	Want          struct {
-		Status string   `json:"status"`
-		Held   []string `json:"held"`
-	} `json:"want"`
-}
-
-// parityBead is a bead a `blocks` edge names behind another in the parity
-// table, with the fields its row carries. An absent status reads open and an
-// absent issue type reads task.
-type parityBead struct {
-	ID        string            `json:"id"`
-	Title     string            `json:"title"`
-	Status    string            `json:"status"`
-	IssueType string            `json:"issue_type"`
-	Metadata  map[string]string `json:"metadata"`
-}
-
-// row is the bead as a `gc bd show` dependency row carries it, the far end of a
-// `blocks` edge.
-func (b parityBead) row() map[string]any {
-	status, issueType := b.Status, b.IssueType
-	if status == "" {
-		status = "open"
-	}
-	if issueType == "" {
-		issueType = "task"
-	}
-	return map[string]any{"id": b.ID, "title": b.Title, "status": status, "issue_type": issueType,
-		"dependency_type": "blocks", "metadata": b.Metadata}
-}
-
-// The label's side of the parity table: each case reaches the derive as the
-// `gc bd` reads return it. The helm board's TestPRHeldParity builds the same
-// cases as the rows its beads source gathers, so neither side can drift from the
-// other unseen.
-func TestPRStatusDeriveParity(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", "prstatus", "testdata", "parity.json"))
+// Every scenario the readers are tested against reaches the derive as the `gc
+// bd` reads return its beads, and the derive answers what prstatus.Read gathers
+// from the same beads through the in-memory store: the status, the held values
+// and the reasons. The answer is the definition's own, so a change to it reaches
+// this reader with no edit here, and a rule kept in this command would part from
+// it. The helm board's TestBoardReadsTheDefinition holds the board to the same
+// scenarios the same way.
+func TestPRStatusDeriveReadsTheDefinition(t *testing.T) {
+	scenarios, err := fixture.Scenarios()
 	if err != nil {
 		t.Fatal(err)
 	}
-	var cases []parityCase
-	if err := json.Unmarshal(raw, &cases); err != nil || len(cases) == 0 {
-		t.Fatalf("parity.json: %d cases, err %v", len(cases), err)
-	}
-	gate := map[string]any{"id": "tk-g", "status": "open", "issue_type": "gate", "await_type": "human", "dependency_type": "blocks"}
-	for _, tc := range cases {
-		t.Run(tc.Name, func(t *testing.T) {
-			show, err := json.Marshal([]any{map[string]any{"id": "tk-a", "status": "open", "metadata": tc.Metadata}})
+	for _, sc := range scenarios {
+		t.Run(sc.Name, func(t *testing.T) {
+			want, err := sc.Answer()
 			if err != nil {
 				t.Fatal(err)
 			}
-			rows := []any{}
-			for _, c := range tc.InFlight {
-				rows = append(rows, map[string]any{"id": c.ID, "status": c.Status,
-					"metadata": map[string]string{"task_kind": c.TaskKind, "anchor_bead": "tk-a"}})
-			}
-			list, err := json.Marshal(rows)
+			anchor, _ := sc.Bead(sc.Anchor)
+			show, err := json.Marshal([]any{storeRow(sc, anchor)})
 			if err != nil {
 				t.Fatal(err)
 			}
-			stubGC(t, string(show), string(list))
-			// The anchor's own edges come from its blocker read, and every other
-			// bead's from the walk's. A conversation is never among them: it tracks
-			// its bead and blocks nothing.
-			own := []any{}
-			for _, b := range tc.Blockers {
-				own = append(own, map[string]any{"id": b, "status": "open", "issue_type": "task", "dependency_type": "blocks"})
-			}
-			edges := map[string][]any{}
-			for _, g := range tc.Gates {
-				if g == "tk-a" {
-					own = append(own, gate)
-				} else {
-					edges[g] = append(edges[g], gate)
+			// The store's answer to the in-flight read: the beads naming the
+			// anchor in anchor_bead at a status the read asks for.
+			list := []any{}
+			for _, b := range sc.Beads {
+				if b.Metadata["anchor_bead"] == sc.Anchor && slices.Contains(prstatus.InFlightStatuses, b.Status) {
+					list = append(list, storeRow(sc, b))
 				}
 			}
-			for id, beads := range tc.Behind {
-				for _, b := range beads {
-					if id == "tk-a" {
-						own = append(own, b.row())
-					} else {
-						edges[id] = append(edges[id], b.row())
-					}
-				}
-			}
-			rawOwn, err := json.Marshal(own)
+			rawList, err := json.Marshal(list)
 			if err != nil {
 				t.Fatal(err)
+			}
+			edges := map[string]any{}
+			for _, b := range sc.Beads {
+				if b.ID != sc.Anchor {
+					edges[b.ID] = storeRow(sc, b)["dependencies"]
+				}
 			}
 			rawEdges, err := json.Marshal(edges)
 			if err != nil {
 				t.Fatal(err)
 			}
-			t.Setenv("STUB_BLOCKERS", string(rawOwn))
+			stubGC(t, string(show), string(rawList))
 			t.Setenv("STUB_EDGES", string(rawEdges))
-			out, code := derive(t, "tk-a", "--json")
+			out, code := derive(t, sc.Anchor, "--json")
 			var got struct {
-				Status string   `json:"status"`
-				Held   []string `json:"held"`
+				Status  prstatus.State    `json:"status"`
+				Held    []prstatus.Hold   `json:"held"`
+				Reasons []prstatus.Reason `json:"reasons"`
 			}
 			if code != 0 || json.Unmarshal([]byte(out), &got) != nil {
 				t.Fatalf("derive --json = (%q, %d)", out, code)
 			}
-			if got.Status != tc.Want.Status || !slices.Equal(got.Held, tc.Want.Held) {
-				t.Errorf("status=%q held=%v, want %q and %v", got.Status, got.Held, tc.Want.Status, tc.Want.Held)
+			if got.Status != want.Status || !slices.Equal(got.Held, want.Held) || !slices.Equal(got.Reasons, want.Reasons) {
+				t.Errorf("derive --json = %+v\nthe definition gives status=%q held=%v reasons=%+v", got, want.Status, want.Held, want.Reasons)
 			}
 		})
 	}
+}
+
+// storeRow is a scenario bead as `gc bd show --json` prints it: its fields, and
+// each edge of its own as the far bead's row with the type of the edge.
+func storeRow(sc fixture.Scenario, b fixture.Bead) map[string]any {
+	row := map[string]any{"id": b.ID, "title": b.Title, "status": b.Status, "metadata": b.Metadata}
+	if b.IssueType != "" {
+		row["issue_type"] = b.IssueType
+	}
+	if b.AwaitType != "" {
+		row["await_type"] = b.AwaitType
+	}
+	deps := []any{}
+	for _, edge := range []struct {
+		kind string
+		ids  []string
+	}{{"blocks", b.WaitsOn}, {"tracks", b.Tracks}} {
+		for _, id := range edge.ids {
+			if far, ok := sc.Bead(id); ok {
+				dep := map[string]any{"id": far.ID, "title": far.Title, "status": far.Status, "metadata": far.Metadata, "dependency_type": edge.kind}
+				if far.IssueType != "" {
+					dep["issue_type"] = far.IssueType
+				}
+				if far.AwaitType != "" {
+					dep["await_type"] = far.AwaitType
+				}
+				deps = append(deps, dep)
+			}
+		}
+	}
+	row["dependencies"] = deps
+	return row
 }
 
 // The walk behind the held: gate value: a gate on a rework the anchor waits on
@@ -507,7 +470,7 @@ func TestPRStatusDeriveWalksToTheGate(t *testing.T) {
 		stubGC(t, unapproved, `[]`)
 		t.Setenv("STUB_BLOCKERS", `[{"id":"tk-g","status":"open","issue_type":"gate","await_type":"human","dependency_type":"blocks","metadata":{"gc.routed_to":"human"}}]`)
 		out, code := derive(t, "tk-a", "--json")
-		if want := `{"status":"needs-attention","held":["gate"]}` + "\n"; code != 0 || out != want {
+		if want := `{"status":"needs-attention","held":["gate"],"reasons":[{"held":"gate","id":"tk-g","title":""}]}` + "\n"; code != 0 || out != want {
 			t.Errorf("derive --json = (%q, %d), want (%q, 0)", out, code, want)
 		}
 	})
@@ -516,7 +479,7 @@ func TestPRStatusDeriveWalksToTheGate(t *testing.T) {
 		stubGC(t, unapproved, `[]`)
 		t.Setenv("STUB_BLOCKERS", `[{"id":"tk-g","status":"open","issue_type":"gate","await_type":"timer","dependency_type":"blocks","metadata":{"gc.routed_to":"human"}}]`)
 		out, code := derive(t, "tk-a", "--json")
-		if want := `{"status":"needs-attention","held":["blocked"]}` + "\n"; code != 0 || out != want {
+		if want := `{"status":"needs-attention","held":["blocked"],"reasons":[{"held":"blocked","id":"tk-g","title":""}]}` + "\n"; code != 0 || out != want {
 			t.Errorf("derive --json = (%q, %d), want (%q, 0)", out, code, want)
 		}
 	})
@@ -546,64 +509,8 @@ func TestPRStatusDeriveWalksToTheGate(t *testing.T) {
 		if !strings.Contains(calls, "bd show tk-x tk-y --json\n") {
 			t.Errorf("the open blockers read in one show, the closed one left out: %s", calls)
 		}
-		if strings.Count(calls, "bd show") != 2 {
-			t.Errorf("the anchor's row and one read per level, the anchor's edges not read again: %s", calls)
-		}
-	})
-}
-
-func TestPRStatusGates(t *testing.T) {
-	gates := func(t *testing.T) (string, int) {
-		t.Helper()
-		var out, errbuf bytes.Buffer
-		code := PRStatus([]string{"gates", "--anchor", "tk-a"}, &out, &errbuf)
-		return out.String(), code
-	}
-	const (
-		rework = `{"id":"tk-rw","status":"open","issue_type":"task","dependency_type":"blocks"}`
-		near   = `{"id":"tk-near","title":"sign off","status":"open","issue_type":"gate","await_type":"human","dependency_type":"blocks"}`
-		far    = `{"id":"tk-far","title":"approve the \"release\"","status":"in_progress","issue_type":"gate","await_type":"human","dependency_type":"blocks"}`
-	)
-	for _, tc := range []struct{ name, edges, want string }{
-		{"nothing holds the bead", `{}`, "[]\n"},
-		{"nearest first", `{"tk-a":[` + rework + `,` + near + `],"tk-rw":[` + far + `]}`,
-			`[{"id":"tk-near","title":"sign off"},{"id":"tk-far","title":"approve the \"release\""}]` + "\n"},
-		{"a gate behind a closed blocker is not held",
-			`{"tk-a":[{"id":"tk-rw","status":"closed","dependency_type":"blocks"}],"tk-rw":[` + far + `]}`, "[]\n"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			stubGC(t, `[]`, `[]`)
-			t.Setenv("STUB_EDGES", tc.edges)
-			if out, code := gates(t); code != 0 || out != tc.want {
-				t.Errorf("gates = (%q, %d), want (%q, 0)", out, code, tc.want)
-			}
-		})
-	}
-
-	// Each of these leaves the gates past it unread, so the caller is told, and
-	// never reads an empty list.
-	for _, tc := range []struct{ name, env, value string }{
-		{"the read fails", "STUB_EDGES_FAIL", "1"},
-		{"the bead has no row", "STUB_EDGES_RAW", `[]`},
-		{"the answer is no list", "STUB_EDGES_RAW", `{"error":"no issues found"}`},
-		{"an edge has no type", "STUB_EDGES_RAW", `[{"id":"tk-a","dependencies":[{"id":"tk-x"}]}]`},
-		{"an edge has no id", "STUB_EDGES_RAW", `[{"id":"tk-a","dependencies":[{"dependency_type":"blocks"}]}]`},
-		{"the edges are no list", "STUB_EDGES_RAW", `[{"id":"tk-a","dependencies":"none"}]`},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			stubGC(t, `[]`, `[]`)
-			t.Setenv(tc.env, tc.value)
-			if out, code := gates(t); code != 2 || out != "" {
-				t.Errorf("gates = (%q, %d), want (%q, 2)", out, code, "")
-			}
-		})
-	}
-
-	t.Run("a bead with no edges at all has none", func(t *testing.T) {
-		stubGC(t, `[]`, `[]`)
-		t.Setenv("STUB_EDGES_RAW", `[{"id":"tk-a"}]`)
-		if out, code := gates(t); code != 0 || out != "[]\n" {
-			t.Errorf("gates = (%q, %d), want (%q, 0)", out, code, "[]\n")
+		if strings.Count(calls, "bd show") != 3 {
+			t.Errorf("the anchor's row, its own edges and one read per level past them, each once: %s", calls)
 		}
 	})
 }
@@ -613,14 +520,14 @@ func TestPRStatusUsageErrors(t *testing.T) {
 	if code := PRStatus([]string{"derive"}, &out, &errbuf); code != 1 {
 		t.Errorf("derive with no --anchor = %d, want 1", code)
 	}
-	if code := PRStatus([]string{"gates"}, &out, &errbuf); code != 1 {
-		t.Errorf("gates with no --anchor = %d, want 1", code)
+	if code := PRStatus([]string{"derive", "--anchor"}, &out, &errbuf); code != 1 {
+		t.Errorf("derive with --anchor and no value = %d, want 1", code)
 	}
-	if code := PRStatus([]string{"gates", "--anchor"}, &out, &errbuf); code != 1 {
-		t.Errorf("gates with --anchor and no value = %d, want 1", code)
+	if code := PRStatus([]string{"derive", "--anchor", "tk-a", "--all"}, &out, &errbuf); code != 1 {
+		t.Errorf("derive with an unknown flag = %d, want 1", code)
 	}
-	if code := PRStatus([]string{"gates", "--anchor", "tk-a", "--json"}, &out, &errbuf); code != 1 {
-		t.Errorf("gates takes no --json = %d, want 1", code)
+	if code := PRStatus([]string{"gates", "--anchor", "tk-a"}, &out, &errbuf); code != 1 {
+		t.Errorf("gates, a verb gctk does not have = %d, want 1", code)
 	}
 	out.Reset()
 	errbuf.Reset()

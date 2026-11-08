@@ -7,45 +7,17 @@ import (
 	"strings"
 )
 
-// Blocker is the far end of one `blocks` edge, in the fields [Holding] reads of
-// it. A caller fills it from its own read of the store, passes the status and the
-// issue type as they read, in any case, and fills the rest from the bead's
-// metadata through [Blocker.WithMetadata], so every caller reads a blocker alike.
+// Blocker is the far end of one `blocks` edge, in the fields [HoldingGates] and
+// [IsPersonBlocker] read of it. A [Store] fills it from its own read, and passes
+// the status and the issue type as they read, in any case. RoutedTo is the far
+// bead's metadata.gc.routed_to.
 type Blocker struct {
 	ID        string
 	Title     string
 	Status    string
 	IssueType string
 	AwaitType string
-	// RoutedTo is gc.routed_to. A blocker routed to "human" is a person's to move.
-	RoutedTo string
-	// MergeResult is merge_result: set on a merge anchor, and pull_request while
-	// its pull request is open.
-	MergeResult string
-	// Own is what a merge anchor records about its own pull request: the
-	// metadata-keyed fields of [Facts], as its own label reads them. [Holding]
-	// counts the rest off the blocker's own edges when it weighs whose move it is.
-	Own Facts
-}
-
-// WithMetadata returns b with the fields it reads off the bead's metadata: its
-// route, its merge_result, and the facts a merge anchor records about its own
-// pull request. meta answers one key as the bead stores it, the raw value a
-// caller passes [Facts] for an anchor.
-func (b Blocker) WithMetadata(meta func(key string) string) Blocker {
-	b.RoutedTo = meta("gc.routed_to")
-	b.MergeResult = meta("merge_result")
-	b.Own = Facts{
-		MergeHold:           meta("merge_hold"),
-		RebaseHold:          meta("rebase_hold"),
-		PRPosture:           meta("pr_posture"),
-		PRMachine:           meta("pr.machine"),
-		PRMachineCause:      meta("pr.machine_cause"),
-		PRUnansweredThreads: meta("pr.unanswered_threads"),
-		OpenedAsDraft:       meta("opened_as_draft"),
-		DraftReadied:        meta("draft_readied"),
-	}
-	return b
+	RoutedTo  string
 }
 
 // open reports whether the blocker still blocks: any status but closed, a
@@ -54,53 +26,25 @@ func (b Blocker) WithMetadata(meta func(key string) string) Blocker {
 // read applies.
 func (b Blocker) open() bool { return !strings.EqualFold(b.Status, "closed") }
 
-// personal reports whether an open blocker other than a human gate is a person's
-// to move by what it is: a decision, or a bead routed to a person. It is the helm
-// board's demand test (board.demand). A human gate is not among them, whatever its
-// route, because [Holds.Gates] counts it.
-func (b Blocker) personal() bool {
-	return b.open() && !IsHumanGate(b.IssueType, b.AwaitType) &&
-		(strings.EqualFold(b.IssueType, "decision") || b.RoutedTo == "human")
-}
-
-// mergeResultPullRequest is the merge_result of an anchor whose pull request is
-// open.
-const mergeResultPullRequest = "pull_request"
-
-// awaitsPerson reports whether a merge anchor the walk reached is a person's to
-// move by its own state: what [Derive] returns over the facts it records
-// ([Blocker.Own]) and its own `blocks` edges. Each of those edges onto an open
-// bead that is neither a human gate nor a person's to move counts as work in
-// flight on it, because the city moves that bead before the anchor's next move.
-// Its gates and the beads a person moves count for nothing here: the walk reaches
-// each of them and counts it itself, so one move is not counted twice. A person's
-// move is needs-attention, and needs-review once the pull request is open, where
-// the move is a review. A pre-open anchor has no pull request to review yet.
-func (b Blocker) awaitsPerson(edges []Blocker) bool {
-	if b.MergeResult == "" {
-		return false
-	}
-	f := b.Own
-	f.OpenHumanGate, f.PersonBlocker, f.InFlightCount = false, false, 0
-	for _, e := range edges {
-		if e.open() && !IsHumanGate(e.IssueType, e.AwaitType) && !e.personal() {
-			f.InFlightCount++
-		}
-	}
-	switch Derive(f) {
-	case NeedsAttention:
-		return true
-	case NeedsReview:
-		return b.MergeResult == mergeResultPullRequest
-	}
-	return false
-}
-
 // IsHumanGate reports whether a bead of this issue type and await type is a
 // human gate: Gas City's native bead for a wait a person must clear. It is the
 // one reader rule bd_human_gates applies in assets/scripts/bd-lib.sh.
 func IsHumanGate(issueType, awaitType string) bool {
 	return strings.EqualFold(issueType, "gate") && awaitType == "human"
+}
+
+// IsPersonBlocker reports whether a blocker is a person's to clear and not a
+// human gate: a live blocker routed to a person (gc.routed_to=human), or a
+// decision. No automated actor will clear it, so it holds a PR as held: blocked.
+// A human gate is never one, whatever its route, because held: gate is what
+// counts it. A blocker with no status reads open, and only a closed one is not
+// live. The helm board asks it of any bead's blockers, for the rows that ask a
+// person for something.
+func IsPersonBlocker(b Blocker) bool {
+	if !b.open() || IsHumanGate(b.IssueType, b.AwaitType) {
+		return false
+	}
+	return b.RoutedTo == "human" || strings.EqualFold(b.IssueType, "decision")
 }
 
 // ReadBlockers answers the `blocks` edges of each bead it is given: for each id,
@@ -122,63 +66,46 @@ const (
 // past it unread. A caller treats it as a read that did not resolve.
 var ErrWalkBound = errors.New("the blocks edges run past the walk's bound")
 
-// Holds is what the walk from one bead finds holding it that only a person
-// moves, each nearest first.
-type Holds struct {
-	// Gates is every open human gate the walk reaches, in the order it reaches
-	// them.
-	Gates []Blocker
-	// Owed is every other open bead the walk reaches that a person owes the next
-	// move on: a decision or a bead routed to a person ([Blocker.personal]), or a
-	// merge anchor whose own state is a person's to move ([Blocker.awaitsPerson]),
-	// such as another pull request that waits on a review. A merge anchor is
-	// kept once the walk has read its own edges, after the other beads at its
-	// depth.
-	Owed []Blocker
-}
-
-// Holding returns, for each root, what holds it that only a person moves ([Holds]):
-// every open human gate, and every other bead a person owes the next move on,
-// reached from the root through `blocks` edges whose blocker is open. A PR's
-// anchor is held by a gate on a rework it waits on as it is by a gate on itself,
-// and by another pull request that rework waits on while that pull request waits
-// on a person.
+// HoldingGates returns, for each root, the open human gates that hold it: every
+// open human gate reached from the root through `blocks` edges whose blocker is
+// open, in the order the walk reaches them, nearest first. A PR's anchor is held
+// by a gate on a rework it waits on as it is by a gate on itself.
 //
 // It reads only the edges read returns, so a conversation, which tracks its bead
-// and blocks nothing, never counts. An edge onto a closed blocker is not followed,
-// so nothing behind it holds anything. A bead that holds the root but waits on
-// another is followed too, so what it waits on is named beside it.
+// and blocks nothing, never counts, and no metadata key decides anything. An edge
+// onto a closed blocker is not followed, so a gate behind it holds nothing. A
+// gate that holds the root but waits on another bead is followed too, so what it
+// waits on is named beside it.
 //
 // Each root walks for itself and the walks share their reads: one read per level
 // names the beads no walk has read yet, and each bead is read once, however many
 // edges reach it. So a cycle ends, a caller holding many anchors pays per level
 // rather than per anchor, and a root's answer is the same alone or beside others.
 //
-// A root whose walk runs past its bound has no answer, because what holds it past
-// the bound is unknown: the map leaves it out, and the error wraps [ErrWalkBound]
-// and names it, while the other roots still answer. A read that fails returns
-// nothing and its error, because a bead no read reached proves nothing about any
-// root.
+// A root whose walk runs past its bound has no answer, because the gates past it
+// are unknown: the map leaves it out, and the error wraps [ErrWalkBound] and names
+// it, while the other roots still answer. A read that fails returns nothing and
+// its error, because a bead no read reached proves nothing about any root.
 //
-// This is the one reader of what holds a bead behind its edges. [Facts.OpenHumanGate]
-// is whether it finds a gate, and [Facts.PersonBlocker] whether it finds a bead a
-// person owes, so the PR's held: labels and the helm board's PR row read it, and
-// `gctk pr-status gates` is how gc-helm.sh engage lists the gates to offer.
-func Holding(roots []string, read ReadBlockers) (map[string]Holds, error) {
-	var walks []*holdWalk
+// This is the one reader of the human gates that hold a bead. [Read] gathers
+// [Facts.Gates] through it, so the `held: gate` label, the helm board's PR row
+// and what gc-helm.sh engage offers all read its answer. The merge pass asks it
+// too, for the blockers it would otherwise call stuck.
+func HoldingGates(roots []string, read ReadBlockers) (map[string][]Blocker, error) {
+	var walks []*gateWalk
 	named := make(map[string]bool, len(roots))
 	for _, r := range roots {
 		if !named[r] {
 			named[r] = true
-			walks = append(walks, &holdWalk{root: r, seen: map[string]bool{r: true}, weigh: map[string]Blocker{}, level: []string{r}})
+			walks = append(walks, &gateWalk{root: r, seen: map[string]bool{r: true}, level: []string{r}})
 		}
 	}
-	holds := make(map[string]Holds, len(walks))
+	gates := make(map[string][]Blocker, len(walks))
 	edges := make(map[string][]Blocker)
 	var past []string
 	for depth := 0; len(walks) > 0; depth++ {
 		var unread []string
-		walks = slices.DeleteFunc(walks, func(w *holdWalk) bool {
+		walks = slices.DeleteFunc(walks, func(w *gateWalk) bool {
 			if depth == walkDepth || len(w.seen) > walkBeads {
 				past = append(past, w.root)
 				return true
@@ -200,57 +127,33 @@ func Holding(roots []string, read ReadBlockers) (map[string]Holds, error) {
 				edges[id] = rows[id]
 			}
 		}
-		walks = slices.DeleteFunc(walks, func(w *holdWalk) bool {
+		walks = slices.DeleteFunc(walks, func(w *gateWalk) bool {
 			w.step(edges)
 			if len(w.level) > 0 {
 				return false
 			}
-			holds[w.root] = w.holds
+			gates[w.root] = w.gates
 			return true
 		})
 	}
 	if len(past) > 0 {
-		return holds, fmt.Errorf("%w: %s", ErrWalkBound, strings.Join(past, " "))
+		return gates, fmt.Errorf("%w: %s", ErrWalkBound, strings.Join(past, " "))
 	}
-	return holds, nil
+	return gates, nil
 }
 
-// HoldingGates returns, for each root, the open human gates that hold it, the
-// [Holds.Gates] that [Holding] reads, with the same answer, bound and errors.
-func HoldingGates(roots []string, read ReadBlockers) (map[string][]Blocker, error) {
-	holds, err := Holding(roots, read)
-	if holds == nil {
-		return nil, err
-	}
-	gates := make(map[string][]Blocker, len(holds))
-	for root, h := range holds {
-		gates[root] = h.Gates
-	}
-	return gates, err
-}
-
-// holdWalk is one root's walk: the beads it has reached, the merge anchors among
-// them it weighs once their own edges are read, the level it follows next, and
-// what it has found holding the root.
-type holdWalk struct {
+// gateWalk is one root's walk: the beads it has reached, the level it follows
+// next, and the open human gates it has reached.
+type gateWalk struct {
 	root  string
 	seen  map[string]bool
-	weigh map[string]Blocker
 	level []string
-	holds Holds
+	gates []Blocker
 }
 
-// step weighs each merge anchor of the walk's level by its own edges, which
-// edges holds, then follows the level's open edges to the next level, keeping
-// each open human gate and each bead a person moves by what it is once. The
-// whole level is weighed before any of its edges is followed, so no bead of the
-// next level is kept ahead of an anchor of this one.
-func (w *holdWalk) step(edges map[string][]Blocker) {
-	for _, id := range w.level {
-		if b, ok := w.weigh[id]; ok && b.awaitsPerson(edges[id]) {
-			w.holds.Owed = append(w.holds.Owed, b)
-		}
-	}
+// step follows the open edges of the walk's level, which edges holds, to its next
+// level, and keeps each open human gate once.
+func (w *gateWalk) step(edges map[string][]Blocker) {
 	var next []string
 	for _, id := range w.level {
 		for _, b := range edges[id] {
@@ -259,13 +162,8 @@ func (w *holdWalk) step(edges map[string][]Blocker) {
 			}
 			w.seen[b.ID] = true
 			next = append(next, b.ID)
-			switch {
-			case IsHumanGate(b.IssueType, b.AwaitType):
-				w.holds.Gates = append(w.holds.Gates, b)
-			case b.personal():
-				w.holds.Owed = append(w.holds.Owed, b)
-			case b.MergeResult != "":
-				w.weigh[b.ID] = b
+			if IsHumanGate(b.IssueType, b.AwaitType) {
+				w.gates = append(w.gates, b)
 			}
 		}
 	}

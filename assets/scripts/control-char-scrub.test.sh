@@ -2,10 +2,10 @@
 # control-char-scrub.test.sh — regression test for the one control-character
 # scrubber and every copy of it.
 #
-# Formula bodies and pack scripts have no include mechanism, so the scrubber
-# lives as marker-delimited copies (# >>> control-char-scrub / # <<<). This
-# test extracts every copy from assets/scripts, doctor and overlays, and
-# asserts what the pack pays for when they disagree:
+# Formula bodies, skills and pack scripts have no include mechanism, so the
+# scrubber lives as marker-delimited copies (# >>> control-char-scrub / # <<<).
+# This test extracts every copy from assets/scripts, doctor, overlays, tools
+# and the skills, and asserts what the pack pays for when they disagree:
 #   - one byte set, asserted by EXECUTING the block over every C0 byte
 #     rather than by matching its text;
 #   - the rescue property doctor/check-state-space depends on: a raw TAB
@@ -48,6 +48,11 @@ hosts() {
         -name '*.sh' ! -name '*.test.sh' -type f 2>/dev/null \
         | grep -v '/lint-learned\.d/' | sort
 }
+# Every file whose copy is held to the canonical block: those shell files, and
+# the skills, whose steps carry the block into the shell that runs them.
+copy_hosts() {
+    { hosts; find "$REPO/skills" -name SKILL.md -type f 2>/dev/null; } | sort
+}
 
 echo "── 1. the canonical block ──"
 CANON_HOST="$SDIR/human-gate.sh"
@@ -68,7 +73,7 @@ while IFS= read -r f; do
         DIVERGENT=$((DIVERGENT + 1))
         bad "$(basename "$f"): copy matches canonical" "block differs from $(basename "$CANON_HOST")"
     fi
-done < <(hosts)
+done < <(copy_hosts)
 [ "$DIVERGENT" -eq 0 ] && ok "all $COPIES copies identical"
 # A floor, not an equality: new hosts are expected, a host going missing is not.
 if [ "$COPIES" -ge 81 ]; then ok "copy census $COPIES ≥ 81"

@@ -50,6 +50,15 @@ h1 {
   color: #b3261e;
 }
 
+/* The board's age stays in view while the rows scroll, because a warning
+   scrolled away above the row being read warns nobody. */
+.banner {
+  background: Canvas;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
 .warn,
 /* Incomplete, not broken — the same amber as a warning rather than the red of
    an error, because a partial read still carries real data worth reading. */

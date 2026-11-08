@@ -118,8 +118,8 @@ that does not import the pack itself.
   execs the same binary.
 - **Orders** — the merge cadence (`refinery-reconcile`, 60s, rig-scoped),
   `deferred-dispatch`, `liveness-sweep`, `reconcile-rig-checkouts`,
-  `boot-health`, `quota-park-nudge`, `gctk-build`, `helm-build`, and the
-  feedback miner/distiller.
+  `boot-health`, `quota-park-nudge`, `witness-nudge`, `gctk-build`, `helm-build`,
+  and the feedback miner/distiller.
 - **Skills** — surfaced via `gc skill list` (`gc-toolkit.handoff`,
   `gc-toolkit.session-title`, …).
 - **Doctor checks** — the structural checks verified below.
@@ -195,8 +195,9 @@ kind = "proxy_process"
 ```
 
 The launcher `exec`s a prebuilt binary; the `helm-build` order keeps it built.
-Write verbs (takeaway / open / react) stay in `assets/scripts/gc-helm.sh`;
-rendering is `helm-svc board --json`. See
+Write verbs (takeaway / open / react) stay in `assets/scripts/gc-helm.sh`. The
+board is the service's web page, and `helm-svc board --json` prints its rows for
+agents. See
 [`services/helm/README.md`](../services/helm/README.md).
 
 ---
@@ -226,7 +227,7 @@ The pack's checks, and what a failure means:
 | `check-claim-advancing` | every step a pool should run is advancing: a claimed step is held by a running session still producing output, and an offered step has been claimed (I11) | a claimed step whose holder is gone or stalled past the bound, or a routed open step a live pool session leaves unclaimed |
 | `check-root-advancing` | a started workflow root is still advancing or reachable: no in_progress `gc.kind=workflow` root sits with a dead session, unlanded work, and an unclaimable — unrouted AND unowned — executable frontier (I13) | a molecule drained mid-flight, and its inline steps have no owner and no route, so orphan recovery and the pool both pass over them |
 | `check-refinery-patrol-live` | a refinery whose find-work queue has held a bead past the bound (default 60m) has written its `mol-refinery-patrol` wisp within that bound (I14) | a refinery session working outside its patrol loop, or none running, while handed-off work waits in its queue |
-| `check-epic-closed-implies-ruled` | a closed epic that carries a hypothesis was ruled closed with its outcome (`epic_ruling=close` and `epic_ruling_reason`) or carries an explicit disposition (`gc.superseded_by`); a closed epic with no hypothesis, a Delivery or an incomplete Epic that owes one, is exempt, and the incomplete Epic's exemption is compatibility debt (I15) | an epic closed by a bare `gc bd close`, which runs no finalize gate, before it was ruled close, or on a continue or shift ruling |
+| `check-epic-closed-implies-ruled` | a closed epic that carries a hypothesis was ruled closed with its outcome (`epic_ruling=close` and `epic_ruling_reason`) or carries an explicit disposition (a duplicates or supersedes edge onto its successor); a closed epic with no hypothesis, a Delivery or an incomplete Epic that owes one, is exempt, and the incomplete Epic's exemption is compatibility debt (I15) | an epic closed by a bare `gc bd close`, which runs no finalize gate, before it was ruled close, or on a continue or shift ruling |
 | `check-config-bound` | prompts/overlays/fragments resolve in the composed config | a rename that missed a reference |
 | `check-seed-audit-current` | `generated/seed-audit/` is present and the pre-commit hook that regenerates it is wired (warn-only) | a fresh clone before its first render, or `core.hooksPath` not set to `assets/hooks` |
 | `check-recycle-capable` | cycle-recycle can fire: the Stop and UserPromptSubmit events reach the hook with its stdin intact, the hook's own `--measure` reads a transcript's context size, its `--drift` sees a changed pack file, and no refinery defer guard is latched | the wiring stopped passing the hook its stdin, the transcript shape moved under the measurement or the drift check, or an uncommitted tracked file has latched the refinery's git-op guard |

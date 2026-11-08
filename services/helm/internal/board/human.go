@@ -53,6 +53,16 @@ const (
 	// assigneeHuman is a conversation's assignee while it waits in the
 	// operator's queue.
 	assigneeHuman = "human"
+	// boardPickTitle is the title gc-helm.sh's open gives a conversation when
+	// its caller names neither a reason nor a gate, as a pick off the board
+	// does. It says how the conversation was filed and nothing of what it
+	// asks, so a sitting's headline passes over it ([sittingHeadline]).
+	boardPickTitle = "operator pick from the board"
+	// intakeTitle is the title operator-intake.sh gives the conversation it
+	// files directly on an operator's topic, when no first reaction is filed to
+	// frame the topic. Like boardPickTitle it says how the conversation came in
+	// and nothing of what it asks, so a sitting's headline passes over it too.
+	intakeTitle = "operator-origin topic intake"
 )
 
 // acceptAnswer is an Accept's answer on the recommendation's gate: the close
@@ -252,9 +262,10 @@ func SessionEnded(state string) bool {
 
 // humanIndex holds, for each bead, the open human gates that hold it and the
 // open conversations that track it, read off the gate and conversation anchors
-// the gather admitted and off a merge anchor's [Anchor.HoldingGates], and which
-// of them a live sitting holds or answers. [BuildBoard] builds it once, before
-// it derives any tile, so a row's held fact and the fold read one index.
+// the gather admitted and off the gates among a merge anchor's
+// [Anchor.PRReasons], and which of them a live sitting holds or answers.
+// [BuildBoard] builds it once, before it derives any tile, so a row's held fact
+// and the fold read one index.
 type humanIndex struct {
 	// gates maps a bead id to the open human gates whose Subjects name it, and,
 	// on a merge anchor, the ones behind the beads it waits on.
@@ -281,8 +292,8 @@ func indexHuman(anchors []Anchor, f Facts) humanIndex {
 	}
 	seen := map[string]bool{}
 	for _, a := range anchors {
-		for _, g := range a.HoldingGates {
-			if !slices.Contains(ix.gates[a.ID], g.ID) {
+		for _, g := range a.PRReasons {
+			if humanGate(g) && !slices.Contains(ix.gates[a.ID], g.ID) {
 				ix.gates[a.ID] = append(ix.gates[a.ID], g.ID)
 			}
 		}

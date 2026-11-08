@@ -67,7 +67,7 @@ describe('ActuateButton', () => {
     const onDone = vi.fn();
     reply = () => json({ bead: BEAD_ID, verb: 'accept', message: 'accept: dispatched mol-dispose-pr at ' + BEAD_ID });
     render(<ActuateButton verb="accept" beadId={BEAD_ID} formula="mol-dispose-pr" onDone={onDone} />);
-    // The resting label names the formula, mirroring the CLI board's "accept ▸".
+    // The resting label names the formula.
     expect(screen.getByRole('button', { name: /accept ▸ mol-dispose-pr/i })).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button'));

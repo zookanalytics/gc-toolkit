@@ -568,8 +568,9 @@ assert_out "names the dirty-tree reason" "worktree is dirty"
 rm -f "$WT/untracked"
 
 # --- 4b. a read gctk cannot make ---------------------------------------------
-# Config hides the untracked file from step 4's status but not from gctk's, so
-# --check reads nothing, and the verdict gives gctk's reason, not a red check.
+# Config hides the untracked file from the clean-tree check's status but not
+# from gctk's, so --check reads nothing, and the verdict gives gctk's reason, not
+# a red check.
 reset_env; write_state; green
 git -C "$WT" config status.showUntrackedFiles no
 echo dirt > "$WT/untracked"

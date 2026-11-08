@@ -19,14 +19,14 @@
 # that lands with its script kept as the fallback.
 #
 # gctk_require is for a script that is only the exec (lifecycle.sh,
-# merge.sh). It execs the binary the same chain resolves. When there is none,
-# it names what is missing and exits 1, so it never returns. GCTK_BIN=none
-# names no binary and is refused like a missing one. GCTK_FALLBACK is not read,
-# because there is no shell to fall back to.
+# merge.sh, epic.sh). It execs the binary the same chain resolves. When there
+# is none, it names what is missing and exits 1, so it never returns.
+# GCTK_BIN=none names no binary and is refused like a missing one.
+# GCTK_FALLBACK is not read, because there is no shell to fall back to.
 #
 # Resolution is EXPLICIT: $GCTK_BIN, else the city named by GC_CITY_PATH,
 # GC_CITY or GC_CITY_ROOT — the same precedence boot-health.sh, doctor-sweep.sh
-# and the tmux pickers read, and GC_CITY_PATH is the one the supervisor puts in
+# and the tmux session picker read, and GC_CITY_PATH is the one the supervisor puts in
 # an agent session — else the city `gc service list --json` reports. The
 # listing is what the merge cadence itself needs: the order runner that execs
 # refinery-reconcile.sh carries no city variable at all (docs/

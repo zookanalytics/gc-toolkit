@@ -23,9 +23,9 @@ pool so it is schedulable again.
 - Write code or fix bugs (polecats), or merge branches (refinery/cadence).
 - Manage processes — start/stop/restart/zombies are the controller's.
 - Kill a wedged session directly — a live-but-wedged owner gets ONE warrant
-  bead for the dog pool (the formula's step 2b carries the command); the
-  `DOG_DONE:` notice in your inbox reports the outcome — acknowledge and
-  archive it.
+  bead for the dog pool (the `warrant-file` block in the formula's
+  recover-orphaned-beads step carries the command); the `DOG_DONE:` notice in
+  your inbox reports the outcome — acknowledge and archive it.
 - Warrant a converse sitting that is only holding. The converse role runs
   `idle_timeout = 0`, so a held sitting waits at its prompt for the operator
   for hours or days: its conversation stays `in_progress` and that bead's
@@ -58,16 +58,19 @@ on your hook.
 # keeping a foreign rig's wisp and burning this rig's as surplus. Keep a
 # wisp only when its rig — the assignee's rig segment, or the gc.rig its
 # pour stamps — is this rig's or unset; a not-yet-assigned orphan carries
-# neither and is still collected.
+# neither and is still collected. A pass leaves its successor deferred for the
+# hour between passes, so the deferred list is read too: a session restarted
+# inside that hour adopts that successor rather than pouring a second chain.
 WISP_ROWS=$(
   gc bd list --status=in_progress --type=molecule --include-infra --limit=0 --json | jq -r --arg rig "$GC_RIG" 'def mine($r): (if (.assignee//"")=="" then "" else (.assignee|split("/")[0]) end) as $a | ((.metadata."gc.rig")//"") as $m | ($a=="" or $a==$r) and ($m=="" or $m==$r); .[] | select(.title == "mol-witness-patrol") | select(mine($rig)) | "\(.created_at)\t\(.id)"'
   gc bd list --status=open --type=molecule --include-infra --limit=0 --json | jq -r --arg rig "$GC_RIG" 'def mine($r): (if (.assignee//"")=="" then "" else (.assignee|split("/")[0]) end) as $a | ((.metadata."gc.rig")//"") as $m | ($a=="" or $a==$r) and ($m=="" or $m==$r); .[] | select(.title == "mol-witness-patrol") | select(mine($rig)) | "\(.created_at)\t\(.id)"'
+  gc bd list --status=deferred --type=molecule --include-infra --limit=0 --json | jq -r --arg rig "$GC_RIG" 'def mine($r): (if (.assignee//"")=="" then "" else (.assignee|split("/")[0]) end) as $a | ((.metadata."gc.rig")//"") as $m | ($a=="" or $a==$r) and ($m=="" or $m==$r); .[] | select(.title == "mol-witness-patrol") | select(mine($rig)) | "\(.created_at)\t\(.id)"'
 )
 # Adopt the NEWEST wisp; burn the rest. When a completed cycle is caught
 # awaiting burn beside the fresh successor it poured, the successor is always
 # the newer created_at — a cycle pours its successor only at its terminal step.
 # Selecting by status adopts the completed (in_progress) cycle and drops the
-# fresh (open) successor.
+# fresh (open or deferred) successor.
 WISP_IDS=$(printf '%s\n' "$WISP_ROWS" | sort -r | awk -F'\t' 'NF>=2 {print $2}')
 WISP=$(printf '%s\n' "$WISP_IDS" | sed -n '1p')
 for extra in $(printf '%s\n' "$WISP_IDS" | sed '1d'); do gc bd mol burn "$extra" --force; done
@@ -84,6 +87,16 @@ empty). Then follow the formula. Never exit a wisp from an intermediate
 step: continue, or jump to next-iteration, which pours and ASSIGNS the next
 wisp before burning this one — a failed assign rolls the pour back and keeps
 the current wisp.
+
+**A pass ends at next-iteration.** That step leaves the next wisp assigned and
+deferred an hour and ends your turn, and once the hour has passed the
+controller's reassignment restart runs the next pass in a fresh session.
+Never mark your next wisp in progress or work it in the same conversation: a
+session holding in-progress work gets no restart, so it sits idle once its turn
+ends. The adopt above stays, because there a fresh session is taking its own
+wisp, and a session restarted inside the hour takes its deferred wisp early.
+When the witness-nudge order tells you your pass stopped, no restart is coming,
+so run that reconcile again and work the wisp it adopts.
 
 ## Recovery doctrine (the formula carries the mechanics)
 

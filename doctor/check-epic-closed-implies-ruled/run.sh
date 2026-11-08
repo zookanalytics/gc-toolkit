@@ -9,10 +9,11 @@
 # clause_epic_ruling_recorded applies the same predicate to the close paths that
 # run the gate, and this is the after-the-fact backstop for a bare `gc bd close`,
 # which runs no gate.
-# One shape is out of scope: an epic carrying gc.superseded_by was retired into a
-# successor by bead-rehome.sh, which IS an explicit terminal state (the same
-# exemption check-closed-implies-landed makes) — a deliberate disposition, not a
-# silent close.
+# One shape is out of scope: an epic that names its successor through a
+# duplicates or supersedes edge was retired into it by bead-rehome.sh, which IS
+# an explicit terminal state (the same exemption check-closed-implies-landed
+# makes) — a deliberate disposition, not a silent close. The listing's rows
+# carry every edge, one onto a bead in another rig's store included.
 # Read-only, ledger-only, offline-safe. Exit 0=OK 1=Warning 2=Error. stdout:
 # first line = message, then "  - detail" lines. Probes bounded; an UNREADABLE
 # store warns (1), never passes.
@@ -61,6 +62,15 @@ detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
 # dropping a structural LF or TAB just minifies.
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
+
+# The reading of a disposition, $DISPOSITION_JQ. Unsourceable, a retired epic
+# cannot be told from one closed without its ruling, so the check warns.
+# shellcheck source=../../assets/scripts/bd-lib.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/bd-lib.sh" || {
+    echo "cannot determine whether closed epics were ruled (I15)"
+    detail "assets/scripts/bd-lib.sh could not be sourced from this pack, so a retired epic cannot be told from one closed without its ruling; nothing was scanned"
+    exit 1
+}
 
 # rig-map.sh prints the map when the listing reads and only its reason when it
 # does not, so one capture holds whichever came back.
@@ -135,14 +145,14 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     # (bead-context.sh). Iterating it with `.[]?` would yield zero rows at exit 0
     # and report the store OK; `error` on a non-array aborts jq non-zero, caught
     # below as "NOT checked" — an all-clear is only a clean array.
-    rows=$(printf '%s' "$raw" | scrub | jq -r '
+    rows=$(printf '%s' "$raw" | scrub | jq -r "$DISPOSITION_JQ"'
         (if type != "array" then error("not an array") else .[] end)
         | select(((.status // "") | tostring) == "closed")
         | (.metadata // {}) as $m
         | ((.id // "?") | tostring | gsub("[[:cntrl:]]"; " ")) as $id
         | ((($m.epic_ruling // "") | tostring)) as $ruling
         | ((($m.epic_hypothesis // "") | tostring)) as $hyp
-        | ((($m["gc.superseded_by"] // "") | tostring)) as $disposed
+        | disposed_to as $disposed
         | ((($m.epic_ruling_reason // "") | tostring | test("\\S"))) as $reasoned
         # "ruled" only for the close ruling with its outcome recorded: close is the
         # one terminal ruling docs/epics.md defines, and it carries its outcome. A
@@ -185,7 +195,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         esac
     done < "$ENUM_TMP/rows"
     if [ "$n_disposed" -gt 0 ]; then
-        notes+=("$label: $n_disposed closed epic(s) carry gc.superseded_by (retired into a successor), so they were not judged")
+        notes+=("$label: $n_disposed closed epic(s) name a successor (retired into it), so they were not judged")
     fi
     if [ "$n_nohyp" -gt 0 ]; then
         notes+=("$label: $n_nohyp closed epic(s) carry no recorded hypothesis, so there is no ruling to read: Deliveries, or incomplete Epics that owed one")

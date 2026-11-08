@@ -27,7 +27,7 @@ dir="${GC_PACK_DIR:-.}"
 
 # The declared enum. "unanchored" (merge_result absent) has no stored value on
 # the ordinary path, but a literal write of it is a declared state, not a drift.
-BUILTIN_STATES="unanchored pre_open_gate pull_request merged abandoned retargeted blocked refused_false_completion held"
+BUILTIN_STATES="unanchored pre_open_gate pull_request merged abandoned retargeted blocked refused_false_completion"
 BUILTIN_CLOSED="merged"
 BUILTIN_DETACHED="pre_open_gate pull_request"
 BUILTIN_PARK_ROUTE="human"
@@ -70,18 +70,23 @@ HEALER_RE='^(check_set_healed|merge_result_healed|reopened_not_landed|anchorless
 # visit-era close's (section 10): a conversation's close reason carries that
 # sentence, and the board's sittings card reads it there. From escalation_key
 # on, the keys are the visit's and the legacy demand's own, and the finding
-# keys that named a visit (section 10).
+# keys that named a visit (section 10). The successor keys are the disposition's
+# before bd's own edges carried it: a disposed bead closes with a duplicates or
+# supersedes edge, so a live bead still carrying one is a close that never
+# landed. gc.supersedes, the successor's inert back-pointer, is not among them.
 RETIRED_KEYS=(
     stall_root escalation_raised_by escalation.recurrences escalation.recurrence_last
     gc.hold_demand gc.pr_visit_summary gc.pr_visit_actions gc.outcome_reason
     escalation_key gc.demand_for gc.gate_visit gc.ruling gc.folded_into
     visit.recheck sweep.new_ids sweep.carried_ids sweep.pass_at
     finding.visit finding.ruling_visit
+    gc.superseded_by gc.superseded_by_store superseded_by superseded_by_store
+    duplicate_of duplicate_of_store
 )
 retired_consequence() { # <key> <value>
     local inert="so nothing writes or reads the key; it holds nothing back, and a live bead carrying it means a retired writer stamped it. Find that writer, then clear the key"
     case "$1" in
-        stall_root) printf '%s' "a sitting that read it may have filed its hold's demand (a human gate that blocks $2), takeaway and held state on $2, and no sign-off reads the key back to discharge them. Discharge that by hand, then clear the key" ;;
+        stall_root) printf '%s' "a sitting that read it may have filed its hold's demand (a human gate that blocks $2) and takeaway on $2, and no sign-off reads the key back to discharge them. Discharge that by hand, then clear the key" ;;
         escalation_raised_by|escalation.recurrences|escalation.recurrence_last)
             printf '%s' "human-gate.sh neither redirects a wisp nor keeps a recurrence tally, $inert" ;;
         gc.hold_demand)
@@ -92,6 +97,12 @@ retired_consequence() { # <key> <value>
             printf '%s' "the board's sittings card reads a conversation's close reason, $inert" ;;
         escalation_key|gc.demand_for|gc.gate_visit|gc.ruling|gc.folded_into|visit.recheck|sweep.new_ids|sweep.carried_ids|sweep.pass_at|finding.visit|finding.ruling_visit)
             printf '%s' "the key belongs to visits and legacy demands, which human gates and conversations replace, $inert" ;;
+        gc.superseded_by|superseded_by)
+            printf '%s' "a disposition records its successor in a duplicates or supersedes edge and closes with it, so this one never closed and nothing will close it. Close it onto $2 through bead-rehome.sh with its kind, or clear the key" ;;
+        duplicate_of)
+            printf '%s' "a duplicate closes at once with a duplicates edge, and no sweep closes a parked one, so its close is owed. Close it with bead-rehome.sh --successor $2 --kind duplicate, or clear the key" ;;
+        gc.superseded_by_store|superseded_by_store|duplicate_of_store)
+            printf '%s' "the store half of a retired successor key, read beside it and nowhere else. Settle the bead's successor key first, then clear this one" ;;
         *) printf '%s' "nothing reads it. Clear the key" ;;
     esac
 }

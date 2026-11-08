@@ -147,7 +147,7 @@ and the date the write printed:
 "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" \
   --outcome "<what this sitting settled, and that the rework is sent, at most 140 characters>" \
   --ruled yes --ruling "Rework PR #<number> to the scaffold in the notes of <bead>, the block headed ## Current state (<date>)" \
-  --route human --no-wait --rework
+  --no-wait --rework
 ```
 
 The `converse-settle` step carries the rest of that call, such as `--pr-anchor`

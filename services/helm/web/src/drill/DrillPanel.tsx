@@ -145,9 +145,8 @@ export function DrillPanel({ beadId, onClose }: DrillPanelProps) {
 
 // The drill's conversation actions, for any drilled bead: file a conversation in
 // the queue (open), draw one into a live Discuss sitting (engage), or end it
-// (dismiss). This is where the board's parity with the CLI's conversation verbs
-// lands — the board row carries only Accept, matching the CLI board's "accept ▸"
-// marker, and the fuller set lives here in the per-bead panel.
+// (dismiss). The board row carries only Accept, and the fuller set lives here
+// in the per-bead panel.
 //
 // All three are offered unconditionally, even when the session list did not
 // answer: each verb's own gate in gc-helm.sh is what prevents a wrong write

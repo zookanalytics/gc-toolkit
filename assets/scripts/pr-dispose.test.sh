@@ -83,7 +83,7 @@ eq "$(meta A1 'gc.pr_close_disposition_kind')" "duplicate" "kind stamped"
 eq "$(meta A1 'gc.pr_close_disposition_successor')" "S1" "successor stamped"
 eq "$(meta A1 'gc.pr_close_disposition_successor_store')" "<absent>" "no store key when none given"
 eq "$(bstatus A1)" "open" "the anchor is NOT closed — that terminal close is pr-facts's"
-eq "$(meta A1 'gc.superseded_by')" "<absent>" "…and no gc.superseded_by is written here (bead-rehome is its sole writer)"
+eq "$(cat "$STUB_DEPS")" "" "…and no edge is written here (bead-rehome is its sole writer)"
 hasnt "$(cat "$STUB_GH_LOG")" "pr close" "--no-close-pr closes no PR"
 
 echo "# the PR is closed through gh when the anchor is open"
@@ -107,8 +107,9 @@ store "[$(anchor A3 72), $(succ S3)]"
 out=$("$SUT" --anchor A3 --successor bt-xyz --kind duplicate --successor-store rig:beta --no-close-pr 2>&1)
 eq "$(meta A3 'gc.pr_close_disposition_successor_store')" "rig:beta" "store key stamped"
 
-echo "# already disposed (gc.superseded_by set): no-op, nothing stamped, no close"
-store "[$(anchor A4 73 ',"gc.superseded_by":"S9"'), $(succ S4)]"
+echo "# already disposed (closed naming a successor): no-op, nothing stamped, no close"
+# The edge rides the row as `gc bd list` prints it, the row bd_disposed_to reads.
+store "[$(anchor A4 73 | jq -c '.status = "closed" | .dependencies = [{issue_id: "A4", depends_on_id: "S9", type: "supersedes"}]'), $(succ S4)]"
 : > "$STUB_GH_LOG"
 out=$("$SUT" --anchor A4 --successor S4 --kind duplicate 2>&1); rc=$?
 eq "$rc" 0 "exits 0 (idempotent)"
