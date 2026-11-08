@@ -499,8 +499,8 @@ hasF "$TMP/demo.blocks" 'or the capture tools may be unable to reach a required 
   "a required state the capture tools cannot reach does not block"
 hasF "$TMP/verdict.demo" "**Delivered, and it shows a violation of the rig's standard.** Request changes" \
   "the demo verdict requests changes on a violation of the rig's standard"
-hasF "$TMP/verdict.demo" 'Each cause of a violation is one finding in `findings.json` that names the rule' \
-  "…with one finding for each cause"
+hasF "$TMP/verdict.demo" 'Each cause of a violation is one finding in `findings.json` that names the rule, with an example or two of its captures as evidence.' \
+  "…with one finding for each cause, and an example or two of its captures as evidence"
 hasF "$TMP/verdict.demo" 'If the rig names a standard, approve only when every capture meets it.' \
   "…approves under a standard only when every capture meets it"
 hasF "$TMP/verdict.demo" 'If the rig names a standard, the verdict names it.' "…names the standard"
