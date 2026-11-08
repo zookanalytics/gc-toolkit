@@ -309,9 +309,16 @@ bd_disposed_to() {
 # bd_same_store <id> <id> — whether two bead ids name one store, which a writer
 # asks before it adds a blocks edge between them. An id's prefix, up to its
 # first hyphen, names the store that holds it (types.ExtractPrefix in beads).
-# bd's dep add stores an edge onto a bead its own store does not hold without
-# finding it, and the edge holds nothing (cmd/bd/dep.go). Reads nothing.
-bd_same_store() { [ "${1%%-*}" = "${2%%-*}" ]; }
+# bd's dep add stores a target its store cannot resolve without finding it, and
+# the edge holds nothing, when both ids carry a prefix and the two differ
+# (cmd/bd/dep.go). An id with no hyphen carries none, and bd then resolves it or
+# refuses the add itself, so only two prefixes that differ answer no. Reads
+# nothing.
+bd_same_store() {
+  case "$1" in *-*) ;; *) return 0 ;; esac
+  case "$2" in *-*) ;; *) return 0 ;; esac
+  [ "${1%%-*}" = "${2%%-*}" ]
+}
 
 # bd_open_human_gates <bead> [<key>] — the bead's human gates that still hold it
 # (open_human_gate above), and with <key> only those under that situation key,

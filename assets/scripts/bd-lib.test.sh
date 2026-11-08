@@ -129,8 +129,10 @@ bd_same_store tk-a1.2 tk-b; r1=$?
 bd_same_store tk-a hq-wisp-x1; r2=$?
 bd_same_store hq-wisp-x1 hq-b; r3=$?
 bd_same_store tk-a tkx-a; r4=$?
-eq "$r1$r2$r3$r4/$(wc -c < "$STUB_GC_LOG" | tr -d ' ')" "0101/0" \
-  "bd_same_store: one prefix is one store, a child id and a wisp id included, a longer prefix is another store, and it reads nothing"
+bd_same_store wb gate1; r5=$?
+bd_same_store tk-a gate1; r6=$?
+eq "$r1$r2$r3$r4$r5$r6/$(wc -c < "$STUB_GC_LOG" | tr -d ' ')" "010100/0" \
+  "bd_same_store: one prefix is one store, a child id and a wisp id included, a longer prefix is another store, an id with no hyphen carries no prefix to differ, as bd reads it, and it reads nothing"
 
 store '[{"id":"tk-a","status":"open","assignee":"","title":"a","notes":"","metadata":{"anchor_bead":"tk-anc"}}]'
 
