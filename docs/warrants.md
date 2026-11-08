@@ -563,10 +563,13 @@ shares only the word ([authority-map.md](authority-map.md)).
     `session.quarantined` has no emitter (`cmd/gc/cmd_analyze_reliability.go`).
     So the script reports a home it cannot sync through `patrol-finding.sh`, one
     report per home, which the next clean start clears.
-  - The search, and each way this script differs from Gas Town's and why, is
-    [specs/tk-1tfzr71.10/gas-city-search.md](../specs/tk-1tfzr71.10/gas-city-search.md).
-- **Verified.** 2026-11-05, at `gastownhall/gascity` main 9f807760c191 and
-  `gastownhall/gascity-packs` main 796d7ecd73cf.
+  - The search, and each way this script differs from Gas Town's and why, are
+    in two records:
+    [specs/tk-1tfzr71.10/gas-city-search.md](../specs/tk-1tfzr71.10/gas-city-search.md),
+    and [specs/tk-eu1f6tm/gas-city-search.md](../specs/tk-eu1f6tm/gas-city-search.md)
+    for when the script fetches, its retry of the add and its signal traps.
+- **Verified.** 2026-11-08, at `gastownhall/gascity` main 27a4857eabd5 and
+  `gastownhall/gascity-packs` main 2a3b142e3fbd.
 - **Retires when.** Gas City provisions a tree bound to an agent, with a sync to
   the default branch, or Gas Town's agents stop running a script of their own at
   `pre_start`.
