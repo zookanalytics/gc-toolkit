@@ -17,7 +17,7 @@ at both. The store counts were read on 2026-11-08 at about 06:40Z.
 Today the pack hands work to a pool by writing the route key, `gc.routed_to`,
 itself at several sites. It parks a bead for you by writing `human` into that
 key beside the human gate it already files. It keeps a doctor check of 1,175
-lines (I3) to catch the strings those writes get wrong. Approving this design
+lines with its test (I3) to catch the strings those writes get wrong. Approving this design
 moves every pool dispatch onto Gas City's own `gc sling`, gives a named agent
 work by assignment alone, makes the human gate the only record that you owe
 something, and deletes that check. What reaches you changes only as call 1
@@ -28,11 +28,21 @@ Four calls carry a cost either way:
 
 1. **Your wait becomes the human gate alone, and the `human` route retires.**
    Every move of an anchor into a parked state already files a gate on the
-   bead, so the route is a second record of one wait. Unit 5 moves the 38 open
-   beads parked on the route today onto gates. The 29 of them with no gate get
-   one, so they show in your gate list instead of as routed-to-you rows.
-   Keeping `human` as a park value builds nothing, but keeps two records of one
-   wait, and keeps the readers that key on a value only this pack interprets.
+   bead, so the route is a second record of one wait. Units 3 and 4 stop
+   writing it, and unit 5 clears it from the 38 open beads that carry it. It
+   files no gate in its place: a gate on an epic would hold every bead under
+   it, and a gate from a ruled bead's headline would ask again what a sitting
+   answered. The cost is 16 rows on your board. Each is a bead a sitting left
+   its headline on, and every wait the sitting recorded has landed. The board
+   lists each under cleanup as "ruled — close or extend" only because the
+   route marks it as yours. Without the route it shows in what needs you as
+   disposition due, the same close-or-extend ask, until you close or extend
+   it. No other row starts or stops asking for you. Keeping `human` as a park
+   value builds nothing and moves no row, but keeps two records of each park
+   and the readers that key on a value only this pack interprets. The
+   native-gates design left the route in place as a subject's marker
+   ([specs/tk-0ur8r9p](../tk-0ur8r9p/design.md)), and this call retires that
+   use too.
 2. **A self-review loop that runs out of attempts asks you, through a gate.**
    Today it assigns the bead to the witness and nudges it. Nothing in the
    witness's formula or prompt reads a bead assigned to it or the loop's
@@ -103,15 +113,18 @@ Once the units land, work reaches whoever does it in exactly one of four ways.
    work should not retain pool-demand metadata". The pack's releases also unset
    `gc.session_id` and `gc.session_name`, because Gas City's detached-handoff
    orphan lane restores a pool route on an open, unassigned, unrouted bead that
-   carries a branch and a session pin (`cmd/gc/detached_orphan_lane.go`). A
+   carries a branch and a session pin (`isDetachedHandoffOrphanCandidate`,
+   `cmd/gc/pool_detached_orphan_sweep.go`, run by
+   `cmd/gc/detached_orphan_lane.go`). A
    release that has ended the bead's run also clears `gc.execution_routed_to`,
    which is what Gas City's own plain re-sling writes when it hands a bead back
    (`clearGraphTakeoverRoute`, `internal/sling/sling_core.go`).
 
-Two things follow. Nothing reads a route back, since `gc sling`'s exit is the
-answer. And a route is never written to say something other than "this pool
-may claim this bead": the `human` value and every pairing of a route with an
-assignment go.
+Two things follow. No site the units convert reads a route back, since `gc
+sling`'s exit is the answer; the read-backs in `pr-facts.sh` and
+`pre-open-rebase.sh` go with those files. And a route is never written to say
+something other than "this pool may claim this bead": the `human` value and
+every pairing of a route with an assignment go.
 
 What a sling does that a hand-written route does not, read in
 `internal/sling/sling_core.go` and `cmd/gc/cmd_sling.go`: it refuses a target
@@ -141,7 +154,7 @@ carry.
 | Site | Writes today | Becomes | Converted by |
 |---|---|---|---|
 | `formulas/mol-review.toml:183-184`, the failed gather in load-dispatch | `gc.routed_to` from the review's `review_pool`, read after the run's cancel | `gc sling "$GC_TEMPLATE" "{{review_bead}}" --no-formula --no-convoy`, which reads nothing from the store | unit 1 |
-| `formulas/mol-review.toml:409-410`, the review step's failure arm | the same, after the step closes | the same | unit 1 |
+| `formulas/mol-review.toml:409-410`, the failure arm of the verdict step (`verdict-and-drain`) | the same, after the step closes | the same | unit 1 |
 | `formulas/mol-review-quorum-signoff.toml:523` | prose telling the reader to restore from `review_pool` | the same sling | unit 1 |
 | `assets/scripts/bd-lib.sh:880`, `route_finishing`, called at `pr-facts.sh:2956`, `:3176`, `:3959` and `pre-open-rebase.sh:424` | `gc.routed_to=$FIX_POOL` on a rework child | `gc sling "$FIX_POOL" "$child" --no-formula --no-convoy` after the settle. The callers are left as they are, and their read-back still holds, since the sling writes the same value | unit 1 |
 | `assets/scripts/gc-helm.sh:1313-1316`, takeaway `--release --route`, with its read-back and repair at `:1361-1374` | the route inside the park write | the park writes no route, the run beneath the bead ends, and then `gc sling <pool> <bead> --no-formula --no-convoy` routes it | unit 2 |
@@ -165,12 +178,12 @@ was poured to.
 | `lifecycle/lifecycle.toml:21-25` (`human_states`) and `:39-46` (`park_route`), with `services/gctk/internal/lifecycle/machine.go:37-58` and `services/gctk/internal/cli/lifecycle.go:561-567` | `gc.routed_to=human` on entering abandoned, retargeted, blocked or refused_false_completion | no route. A human state rests unrouted and unassigned, as a detached state does, and its gate is the park | unit 3 |
 | `formulas/mol-refinery-patrol.toml:922`, `:950`, `:1056` | `--route human`, each beside a `human-gate.sh` call | the flag goes. At `:950` and `:1056` the gate is filed first and the transition made only once it reads back, as `:922` already does | unit 3 |
 | `pr-facts.sh:2095` and `:2598` | the human state's default route | changes with lifecycle's default, with no edit | unit 3 |
-| `pr-facts.sh:3800`, `:3892`, `:3918`, the red-check parks | `--route human`, each beside a gate | the flag goes. That is the smallest edit that lets the lifecycle change land, the edit the approved native-hold design made in the liveness scripts when it deleted `placement.sh` (specs/tk-rl8gz4b.29/native-hold-and-po.md, noted on tk-1tfzr71.19) | unit 3 |
+| `pr-facts.sh:3800`, `:3892`, `:3918`, the red-check parks | `--route human`, each beside a gate | the flag goes. That is the smallest edit that lets the lifecycle change land, the edit the approved native-hold design made in the liveness scripts when it deleted `placement.sh` (specs/tk-rl8gz4b.29/native-hold-and-po.md on `integration/tk-rl8gz4b.28`, noted on tk-1tfzr71.19) | unit 3 |
 | `assets/scripts/work-setup.sh:156-159`, a stop with no molecule | a hand-back that writes `gc.routed_to=human` and a headline | `await-ruling.sh` onto the gate its ask filed on the anchor, as the molecule case does at `:143-146`. That releases the claim, clears the route and arms the re-sling | unit 4 |
 | `assets/scripts/self-review-check.sh:155-233`, the exhausted loop | the route cleared, and the bead assigned to the witness | the loop's last iteration, finding a check still red, declines through `decline.sh` with a gate (key `self-review-exhausted`, re-sling on `mol-polecat-work`), the one call that files the gate, records the wait, ends the run and drains. The condition keeps only its note on the work bead. It runs inside the control dispatcher's judgment of the control bead that a run's end would close (`self-review-check.sh:16-30`), so the ask moves to the session (call 2) | unit 4 |
 | `packs/gascity-keeper/formulas/mol-upstream-gc-sync.toml:91-92`, `:145-146`, `:183-184` | assignee and route both set to `notify_recipient`, which is `human` when unset | a human gate on the bead when the owner is a person, and an assignment with its notice when it is a keeper | unit 4 |
 | `template-fragments/heartbeat-no-consent-ui.template.md:18`, read by the witness, deacon and refinery | "park the bead with `gc.routed_to=human`" | file a human gate with `human-gate.sh` | unit 4 |
-| the 38 open beads that carry the route (gc-toolkit 27, growth-factor 8, gascity 2, signal-loom 1; none an anchor) | stored | a human gate from the bead's headline where no open gate blocks it (29 beads), then the route cleared | unit 5 |
+| the 38 open beads that carry the route (27 in gc-toolkit's store and 11 in three other rigs' stores; none an anchor) | stored | the route cleared, with no gate filed in its place (unit 5 says why) | unit 5 |
 
 ### Assignments to a named agent
 
@@ -193,7 +206,7 @@ was poured to.
 | `hand-back.sh:119-120`, and its callers `work-submit.sh:221` and `:340` (store-only and `auto_push=false`) and `decline.sh:156` | stays: each is the release half of a hand-back, guarded on the claim it read |
 | `work-submit.sh:396` and `:410`, the refinery handoff's clear | stays |
 | the polecat's nudge hand-back, `agents/polecat/agent.toml:33-36` and its codex twin | stays; it writes no route |
-| `await-ruling.sh:337-341` | the clears of `gc.routed_to` and `gc.execution_routed_to` and the pin unsets stay. The clears of `gc.deferred_routed_to`, `gc.deferred_execution_routed_to` and `gc.deferred_assignee` go (unit 1): Gas City writes those only on a poured graph node (`deferGraphNodeRouting`, `internal/molecule/graph_apply.go`), and every one of the 70 non-step beads in gc-toolkit's store that carries them holds them empty, which are this script's own writes |
+| `await-ruling.sh:337-341` | the clears of `gc.routed_to` and `gc.execution_routed_to` and the pin unsets stay. The clears of `gc.deferred_routed_to`, `gc.deferred_execution_routed_to` and `gc.deferred_assignee` go (unit 1): Gas City writes those only on a bead its pour creates, until the pour activates it (`deferGraphNodeRouting`, `internal/molecule/graph_apply.go`, and `deferBeadRouting`, `internal/molecule/molecule.go`), and every one of the 70 non-step beads in gc-toolkit's store that carries them holds them empty, which are this script's own writes |
 | `skills/converse-settle/SKILL.md:166`, `skills/converse-continue/SKILL.md:46`, a sitting clearing its subject's pool route | stays. Unit 5 drops "and keeps a `human` route" from the text |
 | lifecycle's detached states, which clear the route and the assignee (`lifecycle.toml:26-38`) | stays: an anchor the merge cadence drives rests unrouted (section 5, tk-futn21) |
 | `rejection-repool.sh:220-221`, `:294`; `orphan-dispose.sh:302-303`; `pr-facts.sh:957` | retire with their files (tk-1tfzr71.20, .19, .21). `pr-facts.sh:957` clears only a `human` route, so it does nothing once unit 5 lands |
@@ -348,9 +361,11 @@ held problem tk-ngm6ewg (section 5).
   to its pool, which goes with the review beads (tk-1tfzr71.22). Once those
   members pour runs (call 4), every pool claim is a step that arm 1 already
   judges. Widening arm 1 now would judge pools nobody has measured against its
-  stall bound, for shapes that are retiring. The refinery pool design's widening to the refinery's route
-  (specs/tk-9w4e8av) is not in the code at cbf5fca0f, and the refinery is a
-  named session that takes its work by assignment (`pack.toml:107-110`).
+  stall bound, for shapes that are retiring. The refinery pool design's
+  widening to the refinery's route (specs/tk-9w4e8av/refinery-pool-of-one.md,
+  on `integration/tk-alyaztk`) is not in the code at cbf5fca0f, and the
+  refinery is a named session that takes its work by assignment
+  (`pack.toml:107-110`).
 - **The review's return takes a store that does not answer as no pool.** Unit 1
   reads nothing: the pool is the session's `$GC_TEMPLATE`. When the sling itself
   fails, the review stays unrouted, and gate-ensure asks a person about it once
@@ -365,11 +380,14 @@ held problem tk-ngm6ewg (section 5).
   stamp "only where a bare sling would be hijacked" goes, since `--no-formula`
   is the native answer to that hijack. The clause on clears stays as it reads,
   and names Gas Town's handoff as its source.
-- **The ROUTE rule in `lifecycle/lifecycle.toml`** (`:400-420`) states that
-  lifecycle writes no route on a transition, except the clear of a detached
-  state, and that a park is a human gate. Its list of shapes that stamp directly
-  goes. `park_route` and the human states' route go with it, and so does the
-  park route as a hold marker in `[holds]` (unit 5).
+- **The ROUTE rule in `lifecycle/lifecycle.toml`** (`:400-420`) states that a
+  transition writes no park route and routes no work: it clears a route, on a
+  detached state's entry or a caller's empty `--route`, or keeps the one the
+  bead carries, and a park is a human gate. Its list of shapes that stamp
+  directly goes, and so does its reason for a park sentinel, that the
+  stranded-rework rescue re-stamps an empty route. `park_route` and the human
+  states' route go with it, and so does the park route as a hold marker in
+  `[holds]` (unit 5).
 - **`docs/gascity/routing-model.md`**, "A graph.v2 attach routes the workflow
   root", states that upstream now clears the work bead's `gc.routed_to` and
   `gc.run_target` at the attach (`restampWorkBeadRouting`). The fork's
@@ -390,13 +408,13 @@ the city working. The writers convert before the check that polices them goes.
 |---|---|---|---|
 | 1. Raw routes go through `gc sling` | the review's two returns and the quorum sign-off's prose; `route_finishing`; the work skill's dispatch forms; `await-ruling.sh`'s three dead clears; the routing model's attach section and dates. Tests for each converted write, with `gc sling` stubbed where the suites stub `gc` | nothing at filing | the review's failed read |
 | 2. The takeaway release dispatches through `gc sling` | the park writes no route and is a compare-and-swap; `--route` slings after the run's end; the route's read-back and repair go; `--route` and `--assign` refuse a detached anchor; an in-progress claim is released only once its holder is shown gone, through `gc bd release-if-current`, and a live holder's bare bead gets its headline alone and a nudge to its holder; the work skill's stop path; `gc-helm.test.sh` regressions for each | tk-1tfzr71.11, whose PR rewrites this block and takes out its per-key read-backs, and tk-rl8gz4b.28, whose branch rewrites the block's pour-stamp read-back | tk-77b54fz, tk-ks7yjzo, tk-futn21 |
-| 3. Lifecycle writes no park route | human states rest unrouted; `park_route` goes from lifecycle.toml, gctk's machine and CLI, and lifecycle.sh's comment; the refinery patrol's three transitions, gate first; pr-facts' three red-check flags; the ROUTE rule's text | tk-1tfzr71.11, whose PR changes lifecycle's route read-back, lifecycle.toml and the refinery patrol | call 1, with units 4 and 5 |
+| 3. Lifecycle writes no park route | human states rest unrouted; `park_route` goes from lifecycle.toml, gctk's machine and CLI, and lifecycle.sh's comment, so `--route human` fails the rig-qualified check as any bare name does; `--route` and `--keep-route` stay, because every caller left passes an empty route or the anchor's own (gctk merge's three self-transitions on `pull_request`, `gate-ensure.sh`'s verdict record, `pr-facts.sh`'s rank records and its clear at `:957`, and the clears in the refinery patrol and `rejection-repool.sh`), so none of those callers changes; the refinery patrol's three transitions, gate first; pr-facts' three red-check flags; the ROUTE rule's text | tk-1tfzr71.11, whose PR changes lifecycle's route read-back, lifecycle.toml and the refinery patrol | call 1, with units 4 and 5 |
 | 4. The other parks file a gate | `work-setup.sh`'s stop with no molecule; the self-review step's last-attempt decline, read from the control bead's `gc.max_attempts` and `gc.attempt_log`, and the condition's hand-back reduced to its note; the keeper's sync aborts and pr-prep hand-backs; the heartbeat fragment | nothing at filing | call 2 |
-| 5. The `human` route's last parks move onto gates | a one-off migration, run once and recorded in its spec with no shipped script: in every rig store, each open bead on the route gets a human gate from its headline unless one already blocks it, then its route is cleared, each read back. Then the readers' `human` clauses outside the plan go: `IsPersonBlocker`'s route test (`services/gctk/prstatus/gates.go`), `blocker-holder.sh`, `bead-context.sh`, `pool-route.sh`, `resolve-route.sh`, `pr-stack.sh`, `check-wait-is-an-edge`'s park marker, `check-hq-marooned-work`'s exemption, `check-state-space`'s park exemption, and the converse skills' wording | units 3 and 4 | call 1 |
+| 5. The `human` route leaves the store | a one-off migration, run once and recorded in its spec with no shipped script: in every rig store, each open bead on the route has it cleared and read back, and gets no gate in its place. Of the 38 on 2026-11-08, 9 already have an open human gate, whose ask the board folds onto the bead's row (`foldWrappers`, `services/helm/internal/board/derive.go`). The board lists the 5 decision beads and the 5 epics with no gate by their type, whatever their route (`typedAnchorKinds`, `services/helm/internal/source/beads.go`), and a gate on an epic would hold every open bead under it: bd reports each member of a gated epic that has no blocker of its own as blocked by the epic. Of the other 19, 16 move from the board's ruled band into disposition due, owed (call 1), because the board reads an ordinary bead as ruled only while the route makes it `humanGated`, and each of the 16 records waits that have all landed (`ruled`, `dispositionDue`, `derive.go`). No other row's owed state changes. None of the 38 carries an anchor or a branch, so neither the stranded-rework rescue nor Gas City's orphan lane routes one again. Then the readers' `human` clauses outside the plan go: `IsPersonBlocker`'s route test (`services/gctk/prstatus/gates.go`), `blocker-holder.sh`, `bead-context.sh`, `pool-route.sh`, `resolve-route.sh`, `pr-stack.sh`, `check-wait-is-an-edge`'s park marker, `check-hq-marooned-work`'s exemption, `check-state-space`'s park exemption, and the converse skills' wording | units 3 and 4 | call 1 |
 | 6. The route check retires | `doctor/check-routed-work-claimable` deleted with its plan rows; its order-scope arm moved into `doctor/check-config-bound`; the parallel-reads test's reference moved; I11's note and description; the I3 rows in `docs/component-model.md` and `docs/install.md`; the authority map's route row | units 1 to 4 | tk-ngm6ewg, call 3 |
 
 The readers of `human` that unit 5 leaves are each in code another member owns,
-and each does nothing once no bead carries the route: the board's routed-to-you
+and each matches nothing once no bead carries the route: the board's routed-to-you
 query and derive (`services/helm/internal/source/beads.go:536`,
 `board/derive.go`, `board/state.go`; tk-1tfzr71.24), the orphan and liveness
 readers and the witness patrol's skip (tk-1tfzr71.19), and `pr-facts.sh:957` and
@@ -405,8 +423,9 @@ readers and the witness patrol's skip (tk-1tfzr71.19), and `pr-facts.sh:957` and
 ### What each waiting member needs
 
 The members that wait on this one block on the landing bead, tk-1tfzr71.15, so
-all four are released together when the effort reaches the default branch. Each
-needs these units.
+the effort's landing on the default branch lifts its hold on all four at once.
+Each still waits on its other blockers, as tk-1tfzr71.17 waits on
+tk-1tfzr71.16. Each needs these units.
 
 | Member | Needs | Because |
 |---|---|---|
@@ -423,10 +442,15 @@ landing bead and the summary task (tk-1tfzr71.56) each wait on every unit
 through a `blocks` edge. Each unit waits on the units and beads its row names,
 and is armed to dispatch when they close. Before it files, the child surveys
 the open branches against each unit's files again, since they move. At this
-design's reading two overlap: tk-1tfzr71.11 (PR #1414, open), which rewrites the
-takeaway release and lifecycle's route read-back, for units 2 and 3; and
+design's reading three overlap: tk-1tfzr71.11 (PR #1414, open), which rewrites
+the takeaway release and lifecycle's route read-back, for units 2 and 3;
 `integration/tk-rl8gz4b.28` (at its pre-open gate), which also rewrites the
-takeaway's pour-stamp read-back that unit 2 removes.
+takeaway's pour-stamp read-back that unit 2 removes; and tk-ikpyzn.14 (PR
+#1419, open and held by a human gate), which moves `IsPersonBlocker`'s route
+test in `services/gctk/prstatus/gates.go` into a method with a second reader,
+for unit 5. Unit 5 takes no wait on that one, since a wait on a held PR would
+hold the whole landing, and whichever lands second drops the route clause from
+the code it finds.
 
 It appends a Rule 1 note to each member below, saying what its replacement must
 not carry.
@@ -447,8 +471,14 @@ not carry.
 - **tk-1tfzr71.17.** A first reaction is slung or claimed through the work
   query, and no create carries a route in its metadata.
 - **tk-1tfzr71.24.** The board's routed-to-you query and the derive's reads of
-  the `human` route do nothing once unit 5 lands, and the board renders a
-  person's wait from the gate.
+  the `human` route match nothing once unit 5 lands, and the board renders a
+  person's wait from the gate. Its `ruled` reads an ordinary bead as ruled only
+  through that route, so a bead a sitting ruled on reads as disposition due
+  until the replacement tells a ruling from an ask some other way.
+
+The child also notes on tk-ikpyzn.14 that its person-blocker reader keeps its
+decision clause and drops its `human` route clause, since unit 5 leaves the
+route on no bead; a human gate stays what the gate count reads.
 
 The held problems tk-77b54fz, tk-ks7yjzo and tk-ngm6ewg already wait on the
 landing bead, with the validating closer armed. The child appends to each the
@@ -471,7 +501,8 @@ installed build cb80c5354.
 | A named session claims work routed to its alias, and is woken for work assigned to it | `namedSelfTargetAdmit` (`internal/config/workquery.go`, upstream 358a8c9ef3, an ancestor of cb80c5354); `ComputeAwakeSet`'s `assigned-work` reason (`cmd/gc/compute_awake_set.go`) |
 | A pool session's `$GC_TEMPLATE` is its pool's queue key | `engdocs/architecture/prompt-templates.md`, the table of identities |
 | Core nudges on a route write and on a blocker's close, and resets dead holders' claims | `internal/bootstrap/packs/core/orders/nudge-on-route.toml`, `cascade-nudge-on-blocker-close.toml`, `orphan-sweep.toml`; all three in `gc order list` on 2026-11-08 |
-| Gas City restores a pool route from a session pin on a bead whose handoff cleared both halves | `cmd/gc/detached_orphan_lane.go` |
+| Gas City restores a pool route from a session pin on a bead whose handoff cleared both halves, if the bead carries a branch | `isDetachedHandoffOrphanCandidate` (`cmd/gc/pool_detached_orphan_sweep.go`), run by `cmd/gc/detached_orphan_lane.go` |
+| A child of a blocked parent is itself blocked, so a gate on an epic holds every open member | `IsBlockedBatch`'s transitive flag (`internal/storage/dependency_queries.go`) and `testAuditBlockedInheritedParent` (`backend/conformance/audit_dependencies_readiness.go`) at bd 7ef2fd05e; in the store on 2026-11-08, each member of the gated epic tk-ikpyzn with no blocker of its own read `blocked_by` the epic |
 | `gc bd release-if-current` releases only a claim still held as read | `cmd/gc/cmd_bd.go`, the command's help |
 | bd refuses a plain update that changes another actor's live claim, and lets one through whose `--if-assignee` names the holder; a status or assignee mismatch on `--if-status` or `--if-assignee` writes nothing and exits 13 | `validateIssueReassignable` (`cmd/bd/show_unit_helpers.go`, called from `cmd/bd/update.go`) at bd 7ef2fd05e, the installed bd 1.3.4; `gc bd update --help` |
 | An order from a city-level layer registers rigless whatever its scope, and runs in the city store | `internal/orderdiscovery/discovery.go`; `resolveOrderStoreTarget` (`cmd/gc/order_store.go`) |
