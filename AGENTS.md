@@ -58,3 +58,12 @@ only explains the design shows no search.
 The arch check's divergence lens sends back a change without this record.
 [review-arch.md](docs/review-arch.md) holds its method, the evidence it accepts
 and its other checks.
+
+## A change to the pack's behavior names the foundation belief or goal it serves
+
+A change that makes the pm check mandatory
+([review-triage.md](docs/review-triage.md#when-pm-is-mandatory)), such as one
+that changes what a skill, a formula or a prompt has an agent do, names the
+belief or goal it serves in one sentence of its PR summary. That is one of the
+Core Beliefs in [foundation.md](docs/foundation.md), or one of its goals G1 to
+G3. Any other change adds no such sentence.
