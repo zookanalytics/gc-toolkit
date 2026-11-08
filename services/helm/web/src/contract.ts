@@ -380,6 +380,15 @@ export interface Tile {
    * read as-is here.
    */
   work_held: boolean;
+  /**
+   * An epic whose hypothesis is a first draft: it carries `epic_hypothesis` and
+   * no `epic_ruling`, so the operator has not ruled on the sentence yet and it
+   * can be the filer's own words. The row says so beside its title and asks
+   * nothing more for it. False on every other row, among them a Delivery, an
+   * epic with no hypothesis and a closed epic. Derived on the Go side and read
+   * as-is here.
+   */
+  hypothesis_first_draft: boolean;
 }
 
 /**

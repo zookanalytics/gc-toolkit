@@ -660,6 +660,15 @@ type Tile struct {
 	// every row that is not held. It is derived here rather than in the browser,
 	// so each surface tells the two kinds of held row apart from one reading.
 	WorkHeld bool `json:"work_held"`
+
+	// HypothesisFirstDraft marks a live epic whose hypothesis is a first draft:
+	// it carries epic_hypothesis and no epic_ruling, so the operator has not
+	// ruled on the sentence yet and it can be the filer's own words
+	// (docs/epics.md). The row says so and asks nothing more for it, because its
+	// band, its owed state and its needs are what they are without it. False on
+	// every other row, among them a Delivery, an epic with no hypothesis and a
+	// closed epic ([hypothesisFirstDraft]).
+	HypothesisFirstDraft bool `json:"hypothesis_first_draft"`
 }
 
 // Sitting is one converse sitting — the conversation task a sitting runs on —

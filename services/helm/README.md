@@ -81,6 +81,7 @@ pr_number pr_url pr_branch pr_machine pr_conversation pr_approval pr_owed_since
 section cluster_key group_root group_parent
 acceptable accept_formula pr_branch_url pr_phase phase recommendation
 accept_withheld gates_in_session sitting_start_failure pr_held work_held
+hypothesis_first_draft
 ```
 
 `sitting_state` rolls up the `state` of the sittings on a row (see *Where a
@@ -266,6 +267,14 @@ the operator's to call, so its row reads `landed — waits for its Epic
 Checkpoint` ahead of any takeaway, bands ELEVATED and is owed, and its epic's
 roll-up counts it as parked. Both backends carry an epic's metadata on its row,
 which is where the derivation reads the hypothesis.
+
+A live `epic` row whose epic carries `epic_hypothesis` and no `epic_ruling` reads
+`hypothesis_first_draft`: the operator has not ruled on its hypothesis yet, so
+the sentence can be the filer's own words (`docs/epics.md`, "The contract an
+epic carries"; `board.hypothesisFirstDraft`). The web board tags the row
+`hypothesis: first draft` beside its title, and the row keeps its band, its
+owed state and its NEEDS. A Delivery, an epic with no hypothesis and a closed
+epic never read it.
 
 `gate` and `conversation` are WRAPPERS: each folds onto the rows of the beads
 it concerns (`board.foldWrappers`), which it marks `held`. A gate also marks

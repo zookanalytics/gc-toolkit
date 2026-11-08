@@ -72,6 +72,7 @@ function tile(over: Partial<Tile> & Pick<Tile, 'id' | 'kind' | 'title' | 'severi
     sitting_start_failure: '',
     pr_held: null,
     work_held: false,
+    hypothesis_first_draft: false,
     ...over,
   };
 }
@@ -507,6 +508,67 @@ it('shows a key for the row markers and the state tints', async () => {
   expect(key.textContent).toContain('conversation = a conversation holds nothing, so the work is not held');
   expect(key.textContent).not.toContain('conversation holds it');
   expect(key.textContent).not.toContain('visit');
+  expect(key.textContent).toContain("hypothesis: first draft you have not ruled on the epic's hypothesis yet");
+});
+
+// An epic whose hypothesis is a first draft says so beside its title, on a
+// family header and on a childless row alike, and the row still says what it
+// says without the tag. A Delivery and an epic the operator has ruled on carry
+// no tag, read straight off the wire's hypothesis_first_draft.
+it('tags an epic whose hypothesis is a first draft beside its title, and no other row', async () => {
+  serve([
+    tile({
+      id: 'tk-draft',
+      kind: 'epic',
+      title: 'the draft family root',
+      severity: 'NORMAL',
+      section: 'active',
+      needs: 'in flight',
+      hypothesis_first_draft: true,
+    }),
+    tile({
+      id: 'tk-draft.1',
+      kind: 'epic',
+      title: 'Delivery: the first step',
+      severity: 'NORMAL',
+      section: 'active',
+      needs: 'in flight',
+      group_root: 'tk-draft',
+      group_parent: 'tk-draft',
+    }),
+    tile({
+      id: 'tk-leaf',
+      kind: 'epic',
+      title: 'a childless draft epic',
+      severity: 'LOW',
+      section: 'cleanup',
+      needs: 'no children — decompose or assign',
+      hypothesis_first_draft: true,
+    }),
+    tile({
+      id: 'tk-ruled',
+      kind: 'epic',
+      title: 'an epic ruled continue',
+      severity: 'NORMAL',
+      section: 'active',
+      needs: 'in flight',
+    }),
+  ]);
+  render(<App />);
+  await waitFor(() => expect(screen.getByText(/the draft family root/)).toBeTruthy());
+
+  const header = rowFor(/the draft family root/) as HTMLElement;
+  expect(within(header).getByText('hypothesis: first draft')).toBeTruthy();
+  expect(header.textContent).toContain('in flight');
+  const leaf = rowFor(/a childless draft epic/) as HTMLElement;
+  expect(within(leaf).getByText('hypothesis: first draft')).toBeTruthy();
+  expect(leaf.textContent).toContain('no children — decompose or assign');
+
+  for (const title of [/Delivery: the first step/, /an epic ruled continue/]) {
+    const row = rowFor(title) as HTMLElement;
+    expect(row).not.toBeNull();
+    expect(within(row).queryByText('hypothesis: first draft')).toBeNull();
+  }
 });
 
 // Within a family the members read in SECTION_ORDER — the most-pressing move

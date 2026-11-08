@@ -149,6 +149,22 @@ th {
 }
 
 /*
+ * The first-draft tag beside an epic's title: the operator has not ruled on its
+ * hypothesis yet. It is reference, not a demand, so it stays muted: small, in
+ * italics, inside a dashed outline.
+ */
+.first-draft {
+  border: 1px dashed color-mix(in srgb, currentColor 45%, transparent);
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-style: italic;
+  margin-left: 0.5rem;
+  opacity: 0.75;
+  padding: 0 0.3rem;
+  white-space: nowrap;
+}
+
+/*
  * A parent reads as a navigable, summarizing header rather than an indented
  * title: a disclosure control folds its subtree, and a summary beside the title
  * states what the fold leaves legible — how many descendants want the operator,

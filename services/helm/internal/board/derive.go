@@ -432,6 +432,23 @@ const (
 // epic that is an epic of its own ([deliveries]).
 const mdEpicHypothesis = "epic_hypothesis"
 
+// mdEpicRuling is the key an epic's latest ruling on its hypothesis is recorded
+// under (docs/epic-stewardship.md, "Recording a ruling"). An epic that carries a
+// hypothesis and no ruling has a first draft ([hypothesisFirstDraft]).
+const mdEpicRuling = "epic_ruling"
+
+// hypothesisFirstDraft reports whether a row is a live epic whose hypothesis is
+// a first draft: it carries epic_hypothesis and no epic_ruling, so the operator
+// has not ruled on the sentence yet and it can be the filer's own words
+// (docs/epics.md, "The contract an epic carries"). Any ruling ends the draft. A
+// Delivery carries no hypothesis and an epic with no hypothesis has no sentence
+// to draft, so neither reads as one. Nor does a closed epic, because no ruling
+// is coming for it.
+func hypothesisFirstDraft(a Anchor) bool {
+	return a.Source == "epic" && a.ClosedAt.IsZero() &&
+		a.Metadata[mdEpicHypothesis] != "" && a.Metadata[mdEpicRuling] == ""
+}
+
 // deliveries names the epic rows that are Deliveries, keyed by id. A Delivery is
 // an epic whose parent is a live epic and which carries no epic_hypothesis
 // (docs/epics.md, "Deliveries and Epic Checkpoints"). Its epic's checkpoint makes
@@ -1968,6 +1985,8 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		PRConversation: prConversation(a, ask),
 		PRApproval:     approval,
 		PROwedSince:    owedSince,
+
+		HypothesisFirstDraft: hypothesisFirstDraft(a),
 	}
 	// Accept-ability: the three conditions [readAcceptance] reads. While only
 	// the third fails, the row names the gates that hold Accept back, and

@@ -653,6 +653,15 @@ function RowMarker({ tile, sittings }: { tile: Tile; sittings: Sitting[] }) {
   );
 }
 
+// The first-draft tag on an epic whose hypothesis the operator has not ruled on
+// yet, so its sentence can be the filer's own words (tile.hypothesis_first_draft,
+// derived in the Go layer). It sits beside the title rather than in NEEDS
+// because it asks nothing more of the operator: the row's band, owed state and
+// needs read as they would without it. The key says what it means.
+function FirstDraftTag({ tile }: { tile: Tile }) {
+  return tile.hypothesis_first_draft ? <span className="first-draft">hypothesis: first draft</span> : null;
+}
+
 // One row of the unified table. Every row carries the same columns; the grouping
 // treatment reads from the row shape (a row that heads a group — the family root
 // or a nested sub-epic — leads with a disclosure control, a header title, and a
@@ -733,6 +742,7 @@ function AnchorRow({
               </span>
             </button>
             <span className="family-title">{tile.title}</span>
+            <FirstDraftTag tile={tile} />
             <FamilySummary descendants={descendants} collapsed={collapsed} />
           </span>
         ) : (
@@ -741,6 +751,7 @@ function AnchorRow({
                 title lines up under its siblings' rather than shifting left. */}
             <span className="disclosure disclosure--leaf" aria-hidden="true" />
             {tile.title}
+            <FirstDraftTag tile={tile} />
           </span>
         )}
       </td>
@@ -842,6 +853,12 @@ function Legend() {
       <span className="legend__item">
         <span aria-hidden="true">💬</span> PR conversation: outstanding = a comment waits on the city ·
         answered = the reply is there to look at · quiet = nothing said
+      </span>
+      <span className="legend__item">
+        <span className="first-draft" aria-hidden="true">
+          hypothesis: first draft
+        </span>{' '}
+        you have not ruled on the epic's hypothesis yet, so its sentence can be the filer's own words
       </span>
       <span className="legend__item legend__item--done">closed rows dimmed</span>
     </p>

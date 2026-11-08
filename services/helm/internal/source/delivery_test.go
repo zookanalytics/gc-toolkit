@@ -11,8 +11,9 @@ import (
 )
 
 // The Delivery family both backends serve below: an epic carrying its
-// hypothesis, with a Delivery whose Stories have all closed and a child epic
-// with a hypothesis of its own whose child has closed.
+// hypothesis, which nobody has ruled on, with a Delivery whose Stories have all
+// closed and a child epic with a hypothesis of its own, ruled continue, whose
+// child has closed.
 const familyHypothesis = "operators rule on each epic from its landed work"
 
 // deliverySupervisor serves the family over the supervisor API, with the
@@ -32,7 +33,7 @@ func deliverySupervisor(t *testing.T) *httptest.Server {
 				 "metadata":{"epic_hypothesis":"`+familyHypothesis+`","epic_handle":"rulings"}},
 				{"id":"tk-ep.1","title":"Delivery: the first step","status":"open","issue_type":"epic","priority":2,"parent":"tk-ep"},
 				{"id":"tk-ep.2","title":"an epic of its own","status":"open","issue_type":"epic","priority":2,"parent":"tk-ep",
-				 "metadata":{"epic_hypothesis":"`+familyHypothesis+`"}}
+				 "metadata":{"epic_hypothesis":"`+familyHypothesis+`","epic_ruling":"continue"}}
 			],"total":3}`)
 		case r.URL.Path == base+"/beads" && (q.Get("type") == "decision" || q.Get("type") == "gate" || q.Get("status") == "open"):
 			writeJSON(w, `{"items":[],"total":0}`)
@@ -61,7 +62,7 @@ func deliverySupervisor(t *testing.T) *httptest.Server {
 // deliveryStore is the same family in one rig's store, as the beads backend
 // reads it.
 func deliveryStore() *fakeStore {
-	hyp := `{"epic_hypothesis":"` + familyHypothesis + `"}`
+	ruled := `{"epic_hypothesis":"` + familyHypothesis + `","epic_ruling":"continue"}`
 	kid := func(id, status, kind string) *beads.IssueWithDependencyMetadata {
 		c := withDepType(child(id, status, testNow, ""), "parent-child")
 		if kind != "" {
@@ -73,7 +74,7 @@ func deliveryStore() *fakeStore {
 		issues: map[string][]*beads.Issue{"epic": {
 			issue("tk-ep", "an epic", "epic", 2, testNow, `{"epic_hypothesis":"`+familyHypothesis+`","epic_handle":"rulings"}`),
 			issue("tk-ep.1", "Delivery: the first step", "epic", 2, testNow, ""),
-			issue("tk-ep.2", "an epic of its own", "epic", 2, testNow, hyp),
+			issue("tk-ep.2", "an epic of its own", "epic", 2, testNow, ruled),
 		}},
 		depsUp: map[string][]*beads.IssueWithDependencyMetadata{
 			"tk-ep":   {kid("tk-ep.1", "open", "epic"), kid("tk-ep.2", "open", "epic")},
@@ -143,6 +144,39 @@ func TestBothBackendsShowALandedDelivery(t *testing.T) {
 			if tile.Needs != w.needs || tile.Severity != w.sev || tile.Owed != w.owed || tile.Section != w.section {
 				t.Errorf("%s: %s reads needs=%q severity=%s owed=%v section=%s, want %q / %s / %v / %s",
 					name, id, tile.Needs, tile.Severity, tile.Owed, tile.Section, w.needs, w.sev, w.owed, w.section)
+			}
+		}
+	}
+}
+
+// TestBothBackendsShowAFirstDraftHypothesis: either backend gives the board an
+// epic's ruling beside its hypothesis, so the epic nobody has ruled on reads as
+// a first draft, and neither the child epic ruled continue nor the Delivery
+// does.
+func TestBothBackendsShowAFirstDraftHypothesis(t *testing.T) {
+	supervisor, err := newTestSource(t, deliverySupervisor(t)).Gather(context.Background())
+	if err != nil {
+		t.Fatalf("supervisor Gather: %v", err)
+	}
+	backends := map[string]*Result{"supervisor": supervisor, "beads": gatherOneStore(t, deliveryStore())}
+
+	want := map[string]bool{"tk-ep": true, "tk-ep.1": false, "tk-ep.2": false}
+	for name, res := range backends {
+		b := board.BuildBoard(res.Anchors, testNow, res.Partial, res.PartialErrors, res.Facts)
+		seen := map[string]bool{}
+		for _, tile := range b.Tiles {
+			w, ok := want[tile.ID]
+			if !ok {
+				continue
+			}
+			seen[tile.ID] = true
+			if tile.HypothesisFirstDraft != w {
+				t.Errorf("%s: %s reads hypothesis_first_draft=%v, want %v", name, tile.ID, tile.HypothesisFirstDraft, w)
+			}
+		}
+		for id := range want {
+			if !seen[id] {
+				t.Errorf("%s: no row for %s", name, id)
 			}
 		}
 	}
