@@ -1,4 +1,10 @@
-// Package gcbd reads and writes beads for the cadence.
+// Package gcbd is gctk's store adapter: the one package that reaches the bead
+// store (docs/gctk-architecture.md, "The adapters"). It uses `gc bd` for writes,
+// for reads that must see a fresh write and for the blocked set, and the
+// supervisor API for other reads. The ledger reaches it through [Store], which
+// gcbd/fake implements in memory for the domains' tests. The commands that
+// predate the ledger, lifecycle and merge among them, still call [Client]
+// directly.
 //
 // A bead READ (Show) goes through the running supervisor's pooled,
 // process-lifetime Dolt connection over HTTP and falls back to forking
@@ -34,7 +40,6 @@ import (
 	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/daemon"
-	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
 )
 
 // Bead is one row of `gc bd show --json`, decoded far enough for the fields the
@@ -44,7 +49,7 @@ import (
 // distinction too. Dependencies keeps its JSON shape as well, so a row shape no
 // reader expects still decodes the bead, and so does IssueType, which
 // IssueTypeString reads as jq's tostring. IssueType, AwaitType and AwaitID are
-// the fields that make a bead a human gate (IsHumanGate); `gc bd dep list`
+// the fields that make a bead a human gate (prstatus.IsHumanGate); `gc bd dep list`
 // carries them on each far bead's row, and bd leaves a field out of a row when
 // its value is empty. DependencyType is the edge a `gc bd show` row's
 // dependency was reached by, and is empty on any other row.
@@ -107,14 +112,6 @@ func (b *Bead) Meta(key string) string {
 		return ""
 	}
 	return jqString(b.Metadata[key])
-}
-
-// IsHumanGate reports whether b is a human gate: Gas City's native bead for a
-// wait a person must clear (issue_type gate, await_type human). A reader of a
-// bead's `blocks` blockers keeps these rows to find the bead's human gates, by
-// the rule [prstatus.IsHumanGate] states.
-func (b *Bead) IsHumanGate() bool {
-	return b != nil && prstatus.IsHumanGate(b.IssueTypeString(), b.AwaitType)
 }
 
 // AssigneeString returns `.assignee // "" | tostring`.

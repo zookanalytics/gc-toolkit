@@ -114,30 +114,29 @@ func TestMetaOnNilBeadIsEmpty(t *testing.T) {
 }
 
 // A `gc bd dep list <bead> --type blocks --json` row carries the far bead's
-// issue_type and await_type, and bd leaves an empty field out of the row. A bead
-// is a human gate only when it is a gate whose await type is human: a gate of
-// another await type, or of none, as park's gate declares, is not one, and
-// neither is a task.
-func TestIsHumanGateReadsTheGateFields(t *testing.T) {
+// issue_type and await_type, the two fields prstatus.IsHumanGate reads, and bd
+// leaves an empty field out of the row. The decode keeps each as the row has
+// it, an absent or null one as empty.
+func TestRowsCarryTheGateFields(t *testing.T) {
 	for _, tc := range []struct {
-		name, row string
-		want      bool
+		name, row            string
+		issueType, awaitType string
 	}{
-		{"human gate", `[{"id":"g","issue_type":"gate","await_type":"human","await_id":"k","status":"open","dependency_type":"blocks"}]`, true},
-		{"a gate with no await type", `[{"id":"g","issue_type":"gate","status":"open"}]`, false},
-		{"a gate of another await type", `[{"id":"g","issue_type":"gate","await_type":"timer"}]`, false},
-		{"a task", `[{"id":"t","issue_type":"task","await_type":"human"}]`, false},
-		{"a null await type", `[{"id":"g","issue_type":"gate","await_type":null}]`, false},
+		{"human gate", `[{"id":"g","issue_type":"gate","await_type":"human","await_id":"k","status":"open","dependency_type":"blocks"}]`, "gate", "human"},
+		{"a gate with no await type", `[{"id":"g","issue_type":"gate","status":"open"}]`, "gate", ""},
+		{"a gate of another await type", `[{"id":"g","issue_type":"gate","await_type":"timer"}]`, "gate", "timer"},
+		{"a task", `[{"id":"t","issue_type":"task","await_type":"human"}]`, "task", "human"},
+		{"a null await type", `[{"id":"g","issue_type":"gate","await_type":null}]`, "gate", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := decode(t, tc.row).IsHumanGate(); got != tc.want {
-				t.Errorf("IsHumanGate = %v, want %v", got, tc.want)
+			b := decode(t, tc.row)
+			if got := b.IssueTypeString(); got != tc.issueType {
+				t.Errorf("IssueTypeString = %q, want %q", got, tc.issueType)
+			}
+			if b.AwaitType != tc.awaitType {
+				t.Errorf("AwaitType = %q, want %q", b.AwaitType, tc.awaitType)
 			}
 		})
-	}
-	var b *Bead
-	if b.IsHumanGate() {
-		t.Error("IsHumanGate on a nil bead = true, want false")
 	}
 	if got := decode(t, `[{"id":"g","issue_type":"gate","await_type":"human","await_id":"pr-comments.7.x"}]`).AwaitID; got != "pr-comments.7.x" {
 		t.Errorf("AwaitID = %q, want the situation key", got)

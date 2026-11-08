@@ -7,8 +7,8 @@ command is shaped for ad-hoc human use. The command tree is cobra's, and a
 command's generated help (`gctk <noun> <verb> --help`) and its code's doc
 comments state what it does and how; this README is the map to them.
 
-gctk links no beads library: it reaches beads through `gc bd` and the
-supervisor's API (`internal/gcbd`).
+gctk links no beads library: its store adapter (`internal/gcbd`) reaches beads
+through `gc bd` and the supervisor's API.
 
 ## Commands
 
@@ -109,8 +109,10 @@ built from sources other than the checkout's.
 cmd/gctk/            the binary's entry point, and the revision `version` prints
 internal/cli/        the command tree, each command with its help, flags and exit codes
 internal/lifecycle/  the lifecycle state machine, which lifecycle/lifecycle.toml declares
-internal/gcbd/       bead reads and writes, through `gc bd` and the supervisor API
-internal/daemon/     finding the supervisor API the gcbd reads go through
+internal/gcbd/       the store adapter: bead reads and writes through `gc bd` and the
+                     supervisor API, and the store's blocked set
+internal/gcbd/fake/  the store adapter's in-memory fake, for the domains' tests
+internal/daemon/     finding the supervisor API the store adapter's reads go through
 internal/git/        the git subprocess seam: one git command per call, in a named directory
 internal/rig/        rig's runner and its commit-keyed record store
 prstatus/            the PR status derivation, exported for the helm board

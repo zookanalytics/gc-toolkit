@@ -1,0 +1,288 @@
+package gcbd
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os/exec"
+	"slices"
+	"strings"
+)
+
+// The store's blocked set, as the adapter reads it (docs/gctk-architecture.md,
+// "The adapters"). The store's rules are the store's own: the adapter returns
+// bd's answer and computes none itself. The supervisor serves no blocked set, so
+// the adapter reads it through `gc bd blocked`, whose listing names, for each bead
+// the store marks blocked, the bead's own live waits or, when it has none, the
+// parent it is held through.
+//
+// Two compensations stand in for answers bd's listing cannot give, and both go
+// once the bd the city runs judges a waits-for edge by its gate and fails its
+// listing when a read of parents fails (tk-ssm8qns.5, then tk-ssm8qns.6):
+//
+//   - bd judges a waits-for edge by its spawner's status rather than by its gate,
+//     in its listing and in its close rule alike. So a bead with a waits-for edge
+//     of its own is answered with a *WaitsForError, taken from the bead's own
+//     edges, whatever the listing says of it.
+//   - The listing drops every bead held only through a parent when its read of
+//     parents fails, and still exits 0. So the adapter also reads the ids the
+//     store marks blocked, through `gc bd sql` with the query the listing starts
+//     from, and answers a marked bead the listing leaves out with a *ReadError.
+//
+// The two reads are not one transaction, so a bead that changes between them can
+// get a *ReadError, which the next read clears.
+
+// marksQuery is the first read of bd's blocked listing (GetBlockedIssuesInTx in
+// internal/storage/issueops/blocked.go, beads 7ef2fd05e): the ids the store marks
+// blocked, from its issues table and its wisps table.
+const marksQuery = "SELECT id FROM issues WHERE is_blocked = 1 AND status <> 'closed' AND status <> 'pinned' " +
+	"UNION ALL SELECT id FROM wisps WHERE is_blocked = 1 AND status <> 'closed' AND status <> 'pinned'"
+
+// The edge types that hold a bead, as bd's blocked rule reads them.
+const (
+	EdgeBlocks            = "blocks"
+	EdgeConditionalBlocks = "conditional-blocks"
+	EdgeWaitsFor          = "waits-for"
+	EdgeParentChild       = "parent-child"
+)
+
+// WaitsForError answers a bead that has a waits-for edge of its own. bd judges
+// such an edge by its spawner's status rather than by its gate, so neither its
+// blocked listing nor its close rule answers the bead. The answer stands until
+// the bd the city runs judges the gate, so it is not a failed read: a caller
+// that acts holds the bead, and one that reports shows the edge as unjudged.
+type WaitsForError struct {
+	ID       string
+	Spawners []string
+}
+
+func (e *WaitsForError) Error() string {
+	return fmt.Sprintf("%s waits for %s through a waits-for edge, which bd judges by its spawner's status rather than its gate, so the store cannot say whether it holds",
+		e.ID, strings.Join(e.Spawners, ", "))
+}
+
+// ReadError says one read could not answer: the store's reply failed or did not
+// decode, or its blocked listing left out a bead the store marks blocked. ID
+// names the bead it could not answer, and is empty when the whole read failed.
+// The next read can answer, so it is never an answer about the bead.
+type ReadError struct {
+	ID     string
+	Reason string
+}
+
+func (e *ReadError) Error() string {
+	if e.ID == "" {
+		return "the store's read failed: " + e.Reason
+	}
+	return fmt.Sprintf("the store's read could not answer %s: %s", e.ID, e.Reason)
+}
+
+// Edge is one of a bead's own edges as a `gc bd show` row carries it: its type,
+// the far bead, and the far bead's status and, once it closed, when.
+type Edge struct {
+	Type     string
+	ID       string
+	Status   string
+	ClosedAt string
+}
+
+// Edges decodes the bead's own edges. A row with no edges has none. An edge with
+// no id or no type cannot be told from any other, so it fails the decode.
+func (b *Bead) Edges() ([]Edge, error) {
+	if b.Dependencies == nil {
+		return nil, nil
+	}
+	raw, err := json.Marshal(b.Dependencies)
+	if err != nil {
+		return nil, err
+	}
+	var deps []struct {
+		ID       string `json:"id"`
+		Type     string `json:"dependency_type"`
+		Status   any    `json:"status"`
+		ClosedAt any    `json:"closed_at"`
+	}
+	if err := json.Unmarshal(raw, &deps); err != nil {
+		return nil, err
+	}
+	edges := make([]Edge, 0, len(deps))
+	for _, d := range deps {
+		if d.ID == "" || d.Type == "" {
+			return nil, fmt.Errorf("an edge of %s has no id or no type", b.ID)
+		}
+		edges = append(edges, Edge{Type: d.Type, ID: d.ID, Status: jqString(d.Status), ClosedAt: jqString(d.ClosedAt)})
+	}
+	return edges, nil
+}
+
+// Blocking is the store's answer for one bead: whether it holds the bead out of
+// bd ready for a wait and, when it does, what the listing names. On holds the
+// bead's own live waits. Through is the parent the bead is held through, when
+// it has none of its own.
+type Blocking struct {
+	Blocked bool
+	On      []string
+	Through string
+}
+
+// BlockedSet is the store's blocked set as one read gave it: the beads its
+// blocked listing names, each with what holds it, and the ids it marks blocked.
+type BlockedSet struct {
+	listed map[string][]string
+	marked map[string]bool
+}
+
+// NewBlockedSet builds a blocked set from a listing, each bead with the ids the
+// listing names for it, and the ids the store marks blocked. The real store's
+// read builds one, and so does a fake's, whose test sets both.
+func NewBlockedSet(listed map[string][]string, marked []string) *BlockedSet {
+	s := &BlockedSet{listed: make(map[string][]string, len(listed)), marked: make(map[string]bool, len(marked))}
+	for id, by := range listed {
+		s.listed[id] = slices.Clone(by)
+	}
+	for _, id := range marked {
+		s.marked[id] = true
+	}
+	return s
+}
+
+// Answer is the store's answer for b, whose row and edges were read beside this
+// set. A bead with a waits-for edge of its own gets a *WaitsForError. A bead the
+// store marks blocked that the listing leaves out gets a *ReadError, and so does
+// one the listing names as held by a bead its row does not reach, since the row
+// and the listing then disagree. Every other bead gets the listing's answer.
+func (s *BlockedSet) Answer(b *Bead) (Blocking, error) {
+	edges, err := b.Edges()
+	if err != nil {
+		return Blocking{}, &ReadError{ID: b.ID, Reason: "its edges did not decode: " + err.Error()}
+	}
+	var spawners []string
+	own := map[string]bool{}
+	parent := ""
+	for _, e := range edges {
+		switch e.Type {
+		case EdgeWaitsFor:
+			spawners = append(spawners, e.ID)
+		case EdgeBlocks, EdgeConditionalBlocks:
+			own[e.ID] = true
+		case EdgeParentChild:
+			parent = e.ID
+		}
+	}
+	if len(spawners) > 0 {
+		return Blocking{}, &WaitsForError{ID: b.ID, Spawners: spawners}
+	}
+	by, listed := s.listed[b.ID]
+	if !listed {
+		if s.marked[b.ID] {
+			return Blocking{}, &ReadError{ID: b.ID, Reason: "the store marks it blocked, and its blocked listing leaves it out"}
+		}
+		return Blocking{}, nil
+	}
+	if len(by) > 0 && !slices.ContainsFunc(by, func(id string) bool { return !own[id] }) {
+		return Blocking{Blocked: true, On: slices.Clone(by)}, nil
+	}
+	if len(by) == 1 && by[0] == parent && parent != "" {
+		return Blocking{Blocked: true, Through: parent}, nil
+	}
+	return Blocking{}, &ReadError{ID: b.ID, Reason: fmt.Sprintf("its blocked listing names %s, which is neither a wait of its own nor its parent", strings.Join(by, ", "))}
+}
+
+// Rows reads each bead named, with its own edges, from the store itself in one
+// `gc bd show`, so the read sees a write just made. A bead the store does not
+// hold is left out. A read that fails returns a *ReadError.
+func (c *Client) Rows(ids []string) ([]Bead, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	raw, err := c.strictArray(append(append([]string{"bd", "show"}, ids...), "--json")...)
+	if err != nil {
+		return nil, err
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var rows []Bead
+	if err := dec.Decode(&rows); err != nil {
+		return nil, &ReadError{Reason: "gc bd show's rows did not decode: " + err.Error()}
+	}
+	return rows, nil
+}
+
+// Blocked reads the store's blocked set: `gc bd blocked`, then the marks it is
+// checked against. A read that fails returns a *ReadError.
+func (c *Client) Blocked() (*BlockedSet, error) {
+	raw, err := c.strictArray("bd", "blocked", "--json")
+	if err != nil {
+		return nil, err
+	}
+	var listing []struct {
+		ID        string   `json:"id"`
+		BlockedBy []string `json:"blocked_by"`
+	}
+	if err := json.Unmarshal(raw, &listing); err != nil {
+		return nil, &ReadError{Reason: "gc bd blocked's listing did not decode: " + err.Error()}
+	}
+	listed := make(map[string][]string, len(listing))
+	for _, r := range listing {
+		if r.ID == "" {
+			return nil, &ReadError{Reason: "gc bd blocked listed a bead with no id"}
+		}
+		listed[r.ID] = r.BlockedBy
+	}
+	raw, err = c.strictArray("bd", "sql", "--json", marksQuery)
+	if err != nil {
+		return nil, err
+	}
+	var marks []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(raw, &marks); err != nil {
+		return nil, &ReadError{Reason: "the marks read did not decode: " + err.Error()}
+	}
+	marked := make([]string, 0, len(marks))
+	for _, m := range marks {
+		if m.ID == "" {
+			return nil, &ReadError{Reason: "the marks read named a row with no id"}
+		}
+		marked = append(marked, m.ID)
+	}
+	return NewBlockedSet(listed, marked), nil
+}
+
+// strictArray runs `gc <args>` and returns the one JSON array it prints, under
+// List's strict contract: a non-zero exit, a reply that is not an array, or
+// anything but whitespace after the array fails the read with a *ReadError.
+func (c *Client) strictArray(args ...string) (json.RawMessage, error) {
+	what := "gc " + strings.Join(args[:min(len(args), 2)], " ")
+	var stderr bytes.Buffer
+	cmd := exec.Command(c.bin, args...)
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			return nil, &ReadError{Reason: fmt.Sprintf("%s exited %d: %s", what, ee.ExitCode(), firstLine(stderr.String()))}
+		}
+		return nil, &ReadError{Reason: fmt.Sprintf("%s did not run: %v", what, err)}
+	}
+	dec := json.NewDecoder(bytes.NewReader(Scrub(out)))
+	var raw json.RawMessage
+	if err := dec.Decode(&raw); err != nil || len(raw) == 0 || raw[0] != '[' {
+		return nil, &ReadError{Reason: what + " did not answer with a JSON array"}
+	}
+	var rest json.RawMessage
+	if err := dec.Decode(&rest); err != io.EOF {
+		return nil, &ReadError{Reason: what + " printed more than one JSON array"}
+	}
+	return raw, nil
+}
+
+func firstLine(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
+}
