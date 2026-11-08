@@ -285,6 +285,24 @@ STUB_DROP_KEYS="tk-s:gc.execution_routed_to" gc sling pool tk-s --on mol-x >/dev
 eq "$(meta tk-s gc.routed_to)" "<absent>" "sling: a dropped stamp still retires the route"
 eq "$(meta tk-s gc.execution_routed_to)" "<absent>" "sling: …and leaves the stamp unwritten"
 
+# A raw route pours nothing: it writes the route, and empties the execution
+# route a pour left on a bead that is no workflow's member. A member keeps its
+# own, and an empty target is refused with nothing written.
+store '[{"id":"tk-r","status":"open","assignee":"","title":"r","notes":"","metadata":{"gc.execution_routed_to":"pool"}},
+        {"id":"tk-m","status":"open","assignee":"","title":"m","notes":"","metadata":{"gc.execution_routed_to":"pool","gc.root_bead_id":"tk-root"}}]'
+gc sling rig/pool tk-r --no-formula --no-convoy >/dev/null; rc=$?
+eq "$rc|$(meta tk-r gc.routed_to)|$(meta tk-r gc.execution_routed_to)|$(bpoured tk-r)" "0|rig/pool||<unpoured>" \
+  "sling --no-formula: the bead is routed, its execution route emptied, and nothing poured"
+gc sling rig/pool tk-m --no-formula --no-convoy >/dev/null
+eq "$(meta tk-m gc.routed_to)|$(meta tk-m gc.execution_routed_to)" "rig/pool|pool" "sling --no-formula: …a workflow member keeps its execution route"
+out=$(gc sling "" tk-r --no-formula --no-convoy 2>&1); rc=$?
+eq "$rc|$out|$(meta tk-r gc.routed_to)" '1|gc sling: agent "" not found in city.toml|rig/pool' "sling --no-formula: an empty target is refused, writing nothing"
+out=$(STUB_SLING_FAIL=1 gc sling rig/other tk-r --no-formula --no-convoy 2>&1); rc=$?
+eq "$rc|$(meta tk-r gc.routed_to)" "1|rig/pool" "sling --no-formula: …and so is every sling under STUB_SLING_FAIL"
+store '[{"id":"tk-d","status":"open","assignee":"","title":"d","notes":"","metadata":{}}]'
+STUB_DROP_KEYS="tk-d:gc.routed_to" gc sling rig/pool tk-d --no-formula --no-convoy >/dev/null; rc=$?
+eq "$rc|$(meta tk-d gc.routed_to)" "0|<absent>" "sling --no-formula: a dropped route exits 0 and leaves it unwritten"
+
 # STUB_ENFORCE_CLOSE_OWNER mirrors real bd's close-ownership check: `bd close`
 # refuses a bead assigned to another actor unless --force is passed, an
 # unassigned bead or the actor's own closes plainly, and `bd update
