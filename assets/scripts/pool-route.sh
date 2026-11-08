@@ -14,8 +14,8 @@
 # script cannot reconcile with the caller's store is refused, never repaired.
 # Only proof refuses: an unreadable agent set returns the route with a loud
 # UNVERIFIED warning, because a route nobody could check still beats an outage.
-# Callers: the gate-visit copies (formulas/mol-visit.toml and every consumer),
-# escalate.sh, rework-child.sh's rework route.
+# Callers: rework-child.sh's rework route, rejection-repool.sh,
+# branch-supersession.sh's hold, and mol-upstream-gc-rebase's refinery route.
 # Exit: 0 route on stdout · 1 nothing routable · 2 usage
 set -uo pipefail
 
@@ -44,7 +44,9 @@ usage: pool-route.sh <pool-name>
 U
 }
 
-warn() { echo "pool-route: $*" >&2; }
+_bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 
 # The live agent identity set, read once. Empty means UNREADABLE, never "no
 # agents" — an empty answer is the absence of proof, not a refusal.

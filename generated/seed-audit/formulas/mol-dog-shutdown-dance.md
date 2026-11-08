@@ -24,15 +24,16 @@ pool session never receives $GC_BEAD_ID, so a close written against that
 variable writes nothing and still exits 0, leaving the warrant open and
 silent. Every step that touches the warrant re-derives the id in its own
 shell. Pardon-biased: one `alive` verdict ends the dance. EVERY stop path
-either closes the warrant with gc.outcome=pardoned|executed|refused or files
-escalate.sh (--key wedged-<session>) — never both silence and an open claim.
+either closes the warrant with gc.outcome=pardoned|executed|refused or files a
+human gate on the warrant (human-gate.sh --key wedged-<session>) — never both
+silence and an open claim.
 
 Step-close discipline, same as the sibling formulas: when this runs as a
 poured molecule each step closes its own bead via
-assets/scripts/step-close.sh --step mol-dog-shutdown-dance.<id>, never by an
-environment id. Warrants normally arrive as PLAIN routed beads with no step
-beads at all; step-close then refuses (exit 2, nothing written), which is
-the designed no-op — never improvise a close in its place.
+assets/scripts/claim-close.sh --step mol-dog-shutdown-dance.<id>. Warrants
+normally arrive as PLAIN routed beads with no step beads at all; claim-close.sh
+then refuses (exit 2, nothing written), which is the designed no-op. Never
+improvise a close in its place.
 
 Round timeouts: 60s / 120s / 240s (cumulative 7m), carried by dance-probe.sh
 (env-tunable there). On crash, re-read the steps and resume from live state:

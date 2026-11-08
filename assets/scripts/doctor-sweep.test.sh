@@ -33,6 +33,11 @@ if [ "${1:-}" = "dolt" ] && [ "${2:-}" = "health" ]; then
   else printf '%s' '{"server":{"reachable":true,"latency_ms":120}}'; fi
   exit "${STUB_DOLT_RC:-0}"
 fi
+# `gc gc-toolkit scripts-dir` names the pack, $STUB_PACK, and is no sweep either.
+if [ "${1:-} ${2:-}" = "gc-toolkit scripts-dir" ]; then
+  [ -n "${STUB_PACK:-}" ] || exit 1
+  printf '%s/assets/scripts\n' "$STUB_PACK"; exit 0
+fi
 printf '%s\n' "$*" >> "${STUB_LOG:?}"
 [ "${1:-}" = "doctor" ] || exit 0
 [ -n "${STUB_CHECK:-}" ] && "$STUB_CHECK" &
@@ -806,7 +811,7 @@ TOML="$HERE/../../formulas/mol-deacon-patrol.toml"
 # The description is a TOML basic multi-line string, so a literal backslash
 # ships escaped; un-escape to recover the shell text the deacon runs.
 sed -n '/# >>> doctor-sweep-run/,/# <<< doctor-sweep-run/p' "$TOML" \
-    | sed 's/\\\\/\\/g' > "$TMP/step-snippet.sh"
+    | sed -e 's/\\\\/\\/g' -e 's/{{binding_prefix}}/gc-toolkit./g' > "$TMP/step-snippet.sh"
 if [ -s "$TMP/step-snippet.sh" ]; then
   ok "extracted the doctor-sweep-run snippet from the shipped formula"
 else
@@ -818,8 +823,8 @@ else
   bad "  ... and it parses as bash ($(cat "$TMP/err"))"
 fi
 
-# A rig root holding a scripted runner, so the snippet resolves one the way it
-# does in the city and no real sweep is involved.
+# A pack holding a scripted runner, which gc names, so the snippet resolves one
+# the way it does in the city and no real sweep is involved.
 FORMULA_RIG="$TMP/formula-rig"; mkdir -p "$FORMULA_RIG/assets/scripts"
 cat > "$FORMULA_RIG/assets/scripts/doctor-sweep.sh" <<'RUNNER'
 #!/usr/bin/env bash
@@ -831,7 +836,7 @@ chmod +x "$FORMULA_RIG/assets/scripts/doctor-sweep.sh"
 # Under `set -e` an uncaptured non-zero assignment ends the block before the
 # report is echoed, so the snippet is driven in the strictest shell it can meet.
 snippet_run() { # <report-file> <rc>
-  SNIP_OUT=$(STUB_REPORT="$1" STUB_REPORT_RC="$2" GC_RIG_ROOT="$FORMULA_RIG" \
+  SNIP_OUT=$(STUB_REPORT="$1" STUB_REPORT_RC="$2" STUB_PACK="$FORMULA_RIG" GC_RIG_ROOT="" \
     bash -euo pipefail -c '. "$0"; printf "read-state=%s\nread-rc=%s\nread-payload=%s\n" \
       "${STATE:-}" "${RC:-}" "${PAYLOAD:-}"' "$TMP/step-snippet.sh" 2>"$TMP/snip.err")
   SNIP_RC=$?

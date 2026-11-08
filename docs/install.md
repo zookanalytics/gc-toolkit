@@ -10,12 +10,12 @@ converse-fable and converse-codex sittings — declared in its own `pack.toml`.
 It imports nothing: there are no gastown prerequisites, no transitive imports,
 and no agent patches to wire.
 
-The host needs `flock(1)` on the `PATH` the controller runs orders with. The
-merge cadence (`refinery-reconcile`) and `deferred-dispatch` each take a
-per-rig pass lock with it and refuse to run a pass without one, so on a host
-that lacks it nothing merges and no armed dispatch fires. Linux distributions
-ship it in util-linux; on macOS, run `brew install flock`.
-`check-cadence-live` reports it missing (see [Verification](#5-verification)).
+The host needs:
+
+- `flock`, on the `PATH` the controller runs orders with. Linux distributions
+  ship it in util-linux; on macOS, run `brew install flock`.
+- `timeout` or `gtimeout`, from coreutils. Linux distributions ship it; on
+  macOS, run `brew install coreutils`.
 
 Covered here:
 
@@ -69,12 +69,13 @@ version = "v0.1.0"
 ```
 
 `version` is required for git-backed imports; run `gc import install` to
-materialize the pack under `.gc/cache/`.
+fetch the pack into gc's repository cache, `$GC_HOME/cache/repos`
+(`~/.gc/cache/repos` by default).
 
 ### Default import across every rig
 
 ```toml
-# pack.toml (city root)
+# city.toml
 [defaults.rig]
 [defaults.rig.imports.gc-toolkit]
 source = "rigs/gc-toolkit"
@@ -82,12 +83,32 @@ source = "rigs/gc-toolkit"
 
 Any per-rig `[rigs.imports.gc-toolkit]` overrides the default for that rig.
 
+### The city-level import
+
+The city root `pack.toml` imports the pack as well, under the binding its rigs
+use and from the same `source` (and `version`, for a git import):
+
+```toml
+# pack.toml (city root)
+[imports.gc-toolkit]
+source = "rigs/gc-toolkit"
+```
+
+The pack's formula steps, prompts and skills run its scripts through
+`gc gc-toolkit scripts-dir`, a pack command. gc registers a pack's commands
+only for an import in the city root `pack.toml`, and none for a rig's import or
+for `[defaults.rig.imports]`. Without the city-level import, each of those
+calls answers `gc: unknown command "gc-toolkit"`, and the step stops. Every
+step runs the scripts of the city-level copy, which is why its `source` matches
+the rigs'. The city-level import also gives the pack's rig agents to every rig
+that does not import the pack itself.
+
 ### What the import brings in
 
 - **The roster** — worker pools (`polecat`, and `polecat-codex` on the
   codex provider), patrols (`refinery`, `witness`, `deacon`), conversation
   sittings (`converse-opus`, `converse-fable`, `converse-codex`, which
-  `gc-helm engage` opens per visit), and `proactive` (always-on, 2-slot).
+  `gc-helm engage` opens per conversation), and `proactive` (always-on, 2-slot).
 - **The lifecycle** — `lifecycle/lifecycle.toml` (states, transitions,
   metadata registry) and the single transition writer
   `assets/scripts/lifecycle.sh`. The script execs the `gctk` binary that the
@@ -97,8 +118,8 @@ Any per-rig `[rigs.imports.gc-toolkit]` overrides the default for that rig.
   execs the same binary.
 - **Orders** — the merge cadence (`refinery-reconcile`, 60s, rig-scoped),
   `deferred-dispatch`, `liveness-sweep`, `reconcile-rig-checkouts`,
-  `boot-health`, `quota-park-nudge`, `gctk-build`, `helm-build`, and the
-  feedback miner/distiller.
+  `boot-health`, `quota-park-nudge`, `witness-nudge`, `gctk-build`, `helm-build`,
+  and the feedback miner/distiller.
 - **Skills** — surfaced via `gc skill list` (`gc-toolkit.handoff`,
   `gc-toolkit.session-title`, …).
 - **Doctor checks** — the structural checks verified below.
@@ -106,6 +127,12 @@ Any per-rig `[rigs.imports.gc-toolkit]` overrides the default for that rig.
   posts on a pull request stays out of review when it opens with gc-toolkit's
   no-review mark or with a marker the rig declares in
   `not-for-review.toml` ([not-for-review.md](not-for-review.md)).
+- **Demo captures of a rig's app** — a demo capture can record a rig's app
+  that a worktree of the rig serves on this host. Setting
+  `app_reads_city = "true"` among a rig's `[rigs.formula_vars]` in `city.toml`
+  turns that off for the rig. Set it for a rig whose app reads the city, such
+  as a rig that develops code for a city. The gc-toolkit rig the city imports
+  the pack from needs no setting.
 
 ---
 
@@ -168,8 +195,9 @@ kind = "proxy_process"
 ```
 
 The launcher `exec`s a prebuilt binary; the `helm-build` order keeps it built.
-Write verbs (takeaway / open / react) stay in `assets/scripts/gc-helm.sh`;
-rendering is `helm-svc board --json`. See
+Write verbs (takeaway / open / react) stay in `assets/scripts/gc-helm.sh`. The
+board is the service's web page, and `helm-svc board --json` prints its rows for
+agents. See
 [`services/helm/README.md`](../services/helm/README.md).
 
 ---
@@ -199,17 +227,15 @@ The pack's checks, and what a failure means:
 | `check-claim-advancing` | every step a pool should run is advancing: a claimed step is held by a running session still producing output, and an offered step has been claimed (I11) | a claimed step whose holder is gone or stalled past the bound, or a routed open step a live pool session leaves unclaimed |
 | `check-root-advancing` | a started workflow root is still advancing or reachable: no in_progress `gc.kind=workflow` root sits with a dead session, unlanded work, and an unclaimable — unrouted AND unowned — executable frontier (I13) | a molecule drained mid-flight, and its inline steps have no owner and no route, so orphan recovery and the pool both pass over them |
 | `check-refinery-patrol-live` | a refinery whose find-work queue has held a bead past the bound (default 60m) has written its `mol-refinery-patrol` wisp within that bound (I14) | a refinery session working outside its patrol loop, or none running, while handed-off work waits in its queue |
-| `check-epic-closed-implies-ruled` | a closed epic that carries a hypothesis was ruled closed with its outcome (`epic_ruling=close` and `epic_ruling_reason`) or carries an explicit disposition (`gc.superseded_by`); a closed epic with no hypothesis predates stewardship and is exempt (I15) | an epic closed by a bare `gc bd close`, which runs no finalize gate, before it was ruled close, or on a continue or shift ruling |
+| `check-epic-closed-implies-ruled` | a closed epic that carries a hypothesis was ruled closed with its outcome (`epic_ruling=close` and `epic_ruling_reason`) or carries an explicit disposition (a duplicates or supersedes edge onto its successor); a closed epic with no hypothesis, a Delivery or an incomplete Epic that owes one, is exempt, and the incomplete Epic's exemption is compatibility debt (I15) | an epic closed by a bare `gc bd close`, which runs no finalize gate, before it was ruled close, or on a continue or shift ruling |
 | `check-config-bound` | prompts/overlays/fragments resolve in the composed config | a rename that missed a reference |
 | `check-seed-audit-current` | `generated/seed-audit/` is present and the pre-commit hook that regenerates it is wired (warn-only) | a fresh clone before its first render, or `core.hooksPath` not set to `assets/hooks` |
-| `check-recycle-capable` | cycle-recycle can fire: a Stop event reaches the hook with its stdin intact, the hook's own `--measure` reads a transcript's context size, and no refinery defer guard is latched | the Stop wiring stopped passing the hook its stdin, the transcript shape moved under the measurement, or an uncommitted tracked file has latched the refinery's git-op guard |
+| `check-recycle-capable` | cycle-recycle can fire: the Stop and UserPromptSubmit events reach the hook with its stdin intact, the hook's own `--measure` reads a transcript's context size, its `--drift` sees a changed pack file, and no refinery defer guard is latched | the wiring stopped passing the hook its stdin, the transcript shape moved under the measurement or the drift check, or an uncommitted tracked file has latched the refinery's git-op guard |
 | `check-cycle-recycle-hook` | the cycle-recycle Stop hook and its no-consent doctrine are wired to the same roles: every agent carrying the `cycle-recycle` overlay also injects the `heartbeat-no-consent-ui` fragment, and vice versa (static: pack.toml + prompt templates) | a role that recycles with nothing forbidding it a blocking consent UI, or a role carrying the doctrine for a turn boundary it never reaches |
 | `check-wisp-cascade-intact` | every bead store carries the four `ON DELETE CASCADE` foreign keys from the wisp auxiliary tables into `wisps(id)` | a store whose schema migration recorded the constraints as applied without adding them, leaving it to accumulate auxiliary rows no wisp reaches |
 | `check-session-store-scope` | a live agent's store environment names only its own rig's scope, in both the running pane and the warm-respawn environment | a global store key the tmux server holds reaching the next respawned session, so one agent reads another rig's store |
 | `check-blocked-work-armed` | every blocked, unassigned plain-work bead carries a dispatch path — `gc.routed_to` or a `gc.dispatch_when_ready` arm (warn-only) | a blocked work bead with no route and no arm, so it strands when its blocker closes and no pool is offered it |
-| `check-visit-outcome-recorded` | every CLOSED visit records the `gc.outcome` it closed on, so the board can report the finished sitting (warn-only) | a visit closed with no outcome, so a dropped need reads identically to a correct dedup close |
 | `check-armed-dispatch-owed` | every bead armed with `gc.dispatch_when_ready` that nothing holds, by an open blocker on it or, unless it is in flight, on an ancestor, was slung within the deferred-dispatch cadence (warn-only) | the deferred-dispatch order not firing, or an arm set at a non-open status that `bd ready` never surfaces |
-| `check-until-resolved-owed` | every open, unassigned bead whose `until` targets have all closed, and which no open `blocks` blocker of its own holds, was disposed within the deferred-dispatch cadence of becoming owed, unless it carries live work (`assets/scripts/live-work.sh`), which the order never disposes (warn-only) | the deferred-dispatch order not firing, its passes spending their budget before they reach the bead, or the close held, commonly by an open visit on the bead; a resolved bead left open because it carries live work is reported separately, for a person to decide |
 | `check-feedback-routing-owed` | an open anchor whose PR posture is `commented`/`changes_requested` has that feedback routed within the owed window (warn-only) | the merge cadence's feedback arm not routing, so operator feedback reads as consumed while nothing acts on it |
 | `check-hq-marooned-work` | no rig-workable bead sits unclaimed in the HQ (city) store, which no pool reads | a city-scoped role with `GC_RIG` unset filing a bare `bd create` into the HQ store, marooning the work by construction |
 | `check-demo-toolchain` | the demo:capture toolchain — Node, ffmpeg, `OPENAI_API_KEY`, and `gh` — is resolvable, and `VERCEL_AUTOMATION_BYPASS_SECRET` reaches the session whenever the secrets file holds it (readiness, warn-only) | a missing demo dependency, so a capture degrades to a silent, captioned clip, or `VERCEL_AUTOMATION_BYPASS_SECRET` in the secrets file but not in the session, because `GC_SUPERVISOR_ENV` does not name it or the supervisor was installed before the file held it |
@@ -262,6 +288,18 @@ gained lands over that input. `merge.sh` refuses such a merge, using
 `render-seed-audit.sh --check-merge`, which renders the tree `git merge-tree`
 writes. So the host that runs the refinery's merges needs `gc` on its PATH and
 git 2.38 or newer.
+
+A commit carries the renders its branch moves. The hook renders `--since` the
+branch's fork point from the default branch, so a file whose text moved with
+the `gc` binary, and not with the branch, stays as the fork point has it. That
+text lands in a pull request of its own: the merge gate hands the files the
+default branch is stale in to `seed-audit-reaudit.sh`, which slings one bead to
+re-render them. A file that a branch re-rendered itself, as that bead does, is
+the branch's adoption of gc's text, and later commits render it fresh, so a
+newer `gc` renews the adoption rather than undoing it. `INDEX.md` lists every
+page, so a commit that moves the index, by adding an agent for example, also
+carries a page that `gc` added or removed, and the index lists no page the
+commit leaves out.
 
 ### Smoke test
 

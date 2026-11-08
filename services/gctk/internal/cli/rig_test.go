@@ -884,7 +884,9 @@ func TestRigStoppedBySignalRecordsNothing(t *testing.T) {
 			time.Sleep(10 * time.Millisecond)
 		}
 	}()
-	code, _, errs := f.call("test", "--scope", "full", "--command", `touch "`+ready+`"; sleep 30 & wait $!`)
+	// Short sleeps, because a sleep starting just as the SIGTERM lands can miss it
+	// and hold the stop open until that sleep ends or the grace runs out.
+	code, _, errs := f.call("test", "--scope", "full", "--command", `touch "`+ready+`"; while [ "$SECONDS" -lt 30 ]; do sleep 0.05 & wait $!; done`)
 	if code != 128+int(syscall.SIGTERM) || !strings.Contains(errs, "nothing was recorded") {
 		t.Fatalf("a run stopped by SIGTERM = %d:\n%s", code, errs)
 	}

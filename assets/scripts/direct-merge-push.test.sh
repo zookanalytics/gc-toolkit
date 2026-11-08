@@ -65,9 +65,10 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR 2
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 
-# The script under test, the bd-lib.sh it sources and the
-# refinery-workspace.sh it checks the prep worktree's record with, beside a stub
-# lifecycle.sh that logs each transition and the GC_RIG_ROOT it was handed. The
+# The script under test, the bd-lib.sh it sources, the rig-root.sh it
+# resolves the rig through and the refinery-workspace.sh it checks the prep
+# worktree's record with, beside a stub lifecycle.sh that logs each
+# transition and the GC_RIG_ROOT it was handed. The
 # stub refuses every call when LC_FAIL is set, and the first LC_FAIL_TIMES calls
 # when that is set. With LC_WRITE_RC set, a call it does not refuse writes the
 # transition to the bead file, as the real writer's one update does, and then
@@ -75,7 +76,7 @@ export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER
 # what it wrote.
 SUT="$TMP/sut"
 mkdir -p "$SUT" "$TMP/bin" "$TMP/gitshim" "$TMP/sleepshim"
-cp "$HERE/direct-merge-push.sh" "$HERE/bd-lib.sh" "$HERE/refinery-workspace.sh" "$SUT/"
+cp "$HERE/direct-merge-push.sh" "$HERE/bd-lib.sh" "$HERE/rig-root.sh" "$HERE/refinery-workspace.sh" "$SUT/"
 chmod +x "$SUT/direct-merge-push.sh"
 cat > "$SUT/lifecycle.sh" <<'LC'
 #!/usr/bin/env bash

@@ -85,12 +85,12 @@ const TRANSPORT_UNCERTAINTY: Record<ActuateVerb, string> = {
   engage:
     'could not reach the board service — if the request had already been sent, a Discuss sitting may still have been spawned',
   dismiss:
-    'could not reach the board service — if the request had already been sent, the visit may still have been closed',
+    'could not reach the board service — if the request had already been sent, the sitting may still have been ended',
 };
 
 /**
- * Run one write verb on `bead` (a subject id, or a visit id the server resolves
- * to its subject).
+ * Run one write verb on `bead` (a subject id, or a conversation or gate id the
+ * server resolves to the bead it concerns).
  *
  * NOTE WHAT ENGAGE DOES NOT DO: like open, it does not put the operator into the
  * conversation. It spawns the Discuss sitting server-side (with --no-attach);

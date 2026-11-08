@@ -90,12 +90,13 @@ is silent manual-follow-up debt — the exact miss
 An arm is a dispatch path, as a route is. Both are defined once, in
 `assets/scripts/dispatch-path.sh`, and each reader that asks whether a bead's
 dispatch is already decided sources that file: the proactive scan and sling,
-`doctor/check-blocked-work-armed` and `doctor/check-step-terminal`. So an arm
-also keeps the bead out of the proactive scan. `tools/gc-proactive.sh scan`
-looks for raw input to react to, and it drops a bead that has a dispatch path.
+`doctor/check-blocked-work-armed`, `doctor/check-step-terminal` and
+`assets/scripts/stand-down.sh`. So an arm also keeps the bead out of the
+proactive scan. `tools/gc-proactive.sh scan` looks for raw input to react to,
+and it drops a bead that has a dispatch path.
 Otherwise a sweep that ran between a blocker closing and the next reconcile
 pass would sling a first reaction at a bead the arm is about to dispatch.
-`gc-helm.sh react` and `gc-visit-open.sh` skip the scan and name a bead to
+`gc-helm.sh react` and `operator-intake.sh` skip the scan and name a bead to
 `tools/gc-proactive.sh sling` directly, so the sling refuses a bead that has a
 dispatch path too, and a reaction they ask for cannot race the arm either.
 
@@ -106,6 +107,25 @@ deferred-dispatch.sh list        # each armed bead: held (and by what) / dispatc
 deferred-dispatch.sh list --json # the armed beads alone, as bd lists them: no hold, no notice
 deferred-dispatch.sh disarm <bead> --reason "superseded by <x>"
 ```
+
+A converse sitting holds a bead with a human gate and writes nothing else the
+pass reads, so an armed bead keeps its arm through the hold. The gate holds it
+as any blocker does, and the arm sends it once the gate is resolved, unless the
+sitting's ruling sends it elsewhere. Then the sitting disarms it before it
+answers the gate, at the sign-off or on a turn that does not sign off (the
+converse-settle and converse-continue steps).
+
+A person who rules that armed work a human gate holds will not go on runs
+`stand-down.sh <bead> --key <situation-key> --ruling "<why>"`. Answering the gate
+first would send the work, and bd refuses to close a bead an open gate blocks,
+so it removes the arm, ends the run beneath the bead, answers the gate and closes
+the bead, in that order. The pass reads the arm once more just before it slings,
+so a pass already running cannot send the work past that disarm: a pass that read
+the gate open holds the bead, and one that read it closed reads the arm gone. A
+gate that also holds another open bead takes no answer, because an answer releases
+everything it blocks. With `--successor` naming the evidence, the bead leaves that
+gate after its arm and route are gone. Removing that edge first would send the work,
+as any release of an armed bead does.
 
 ## Work assigned to a named agent owes a notice
 
@@ -196,16 +216,13 @@ one pass at a time (see
 [One pass at a time, inside the timeout](#one-pass-at-a-time-inside-the-timeout)).
 Each pass runs `deferred-dispatch.sh reconcile`, which:
 
-- **finishes** first the disposals an earlier pass left under its claim (see
-  [The resolved-by consumer](#the-resolved-by-consumer-until)), before any
-  other half reads the store;
-- **notifies**: it sends every notice owed whose bead `bd` reports
+- **notifies** first: it sends every notice owed whose bead `bd` reports
   ready, and retires the notices no longer owed (see
   [Work assigned to a named agent owes a notice](#work-assigned-to-a-named-agent-owes-a-notice));
 - **dispatches** every armed open bead nothing holds — the ones `bd` reports
-  ready, and also the ones bd keeps unready only through an ancestor that
-  waits on a demand gate, or through any held ancestor of a bead in flight
-  (see below) — stamping its own
+  ready, and also a bead in flight that bd keeps unready only through a held
+  ancestor (see below) — reading the arm once more, so that an arm disarmed since
+  the pass's listing is not sent, then stamping its own
   `gc.dispatch_when_ready_slung` marker in its unproven `slinging@` state,
   running the recorded sling, promoting the marker to `slung@` on success,
   then clearing the record;
@@ -222,12 +239,10 @@ Each pass runs `deferred-dispatch.sh reconcile`, which:
   retiring it would silently lose the work;
 - **withholds** — leaving the record armed and saying so — when a blocker
   holds the bead, on it or on an ancestor, when someone has it by `assignee`,
-  when the sling fails, when the recorded arguments are malformed, when
-  the pass has spent its budget, or when the bead is in progress or closed
-  under the resolved-by consumer's claim, a disposal no pass has finished;
+  when the sling fails, when the recorded arguments are malformed, or when
+  the pass has spent its budget;
 - **names as STRANDED**, every pass and on stderr, an armed bead sitting
-  at a non-`open` live status, unless it is in progress under the
-  resolved-by consumer's claim. The record is kept, because the status may
+  at a non-`open` live status. The record is kept, because the status may
   yet be cleared, but it is counted apart from `held` and reported rather
   than left in a silent count. `list` marks the same beads
   `STRANDED — status=<s> is never --ready`. A stranded bead and a held
@@ -237,14 +252,18 @@ Each pass runs `deferred-dispatch.sh reconcile`, which:
 
 The arm waits on what holds the bead, as `assets/scripts/hold-lib.sh`
 defines it: an open `blocks` blocker on the bead or on one of its
-parent-child ancestors. A park and a prerequisite hold alike, so an armed
-member of a parked epic, or of an epic that waits on a task, is held at any
-depth under it, and so is a bead whose own blocker is still open. A demand
-gate on an ancestor does not count: it is the operator's pending decision
-(`gc.demand_for`), and waiting on that decision is not a hold. A demand gate
-on the bead itself does count. Where `bd` decides the same question, the
-definition follows it: a closed or pinned blocker holds nothing, and a closed
-or pinned ancestor ends the walk.
+parent-child ancestors. A park, a prerequisite and a human gate hold alike,
+so an armed member of a parked epic, of an epic that waits on a task, or of
+an epic that waits on a person's answer is held at any depth under it, and so
+is a bead whose own blocker is still open. A wait on an epic is a wait of the
+whole, which bd's cascade carries to every part that has not started, so a
+wait that belongs to one member goes on that member
+([component-model.md](component-model.md#i1-in-full-the-hold-the-demand-and-the-shape-law)).
+Where `bd` decides the same question, the definition follows it: a closed or
+pinned blocker holds nothing, and a closed or pinned ancestor ends the walk.
+A human gate is the one blocker read otherwise. It holds until a person
+resolves it, pinned included, by the pack's rule of which human gates still
+hold (`$HUMAN_GATE_JQ` in `assets/scripts/bd-lib.sh`).
 
 A read that fails fails the pass, so an unread hold never passes for none. A
 read that answers without an id it was asked for says this store holds no
@@ -253,10 +272,10 @@ hold down only from an ancestor row the store holds, so an ancestor with no
 row, or a blocker with no row on an ancestor, holds nothing, as it holds
 nothing in `bd list --ready`. A blocker with no row on the bead itself holds
 it, marked unread, because it is the bead's own sequencing and the walk
-cannot tell whether it is open. The walk runs only where bd keeps the bead
-out of `--ready`, though, and bd holds nothing on an edge it cannot resolve,
-so a bead bd has no other reason to hold is ready and the pass slings it, as
-`arm` warns when it records the arm. An ancestor past the walk's depth cap
+cannot tell whether it is open. That counts only where bd keeps the bead out
+of `--ready`, though. bd holds nothing on an edge it cannot resolve, so a
+bead bd has no other reason to hold is ready and the pass slings it, as `arm`
+warns when it records the arm. An ancestor past the walk's depth cap
 (`HOLD_MAX_DEPTH` in `hold-lib.sh`) is never read, and it holds the bead as
 unread.
 
@@ -268,15 +287,18 @@ work already begun therefore fires under a parked epic once its own blockers
 close, while the epic's members that have not started stay held, including
 the ones under a parent in flight.
 
-`bd list --ready` stays the fast path. bd's `is_blocked` flag cascades down
-parent-child edges, so an armed child of an epic that waits only on a demand
-gate never enters `--ready`, and neither does a bead in flight under a parked
-epic. The pass therefore asks hold-lib about every open armed bead bd keeps
-unready, and slings the ones nothing holds. The
-status gate still holds (a non-`open` bead is never dispatched), and an
-assignee still keeps the pass off the bead. The pass reads each generation
-of ancestors in one listing and their blockers in one more, so its cost does
-not grow with the number of armed beads under a held epic.
+`bd list --ready` stays the fast path, and the pass asks hold-lib about every
+open armed bead beside it. bd's `is_blocked` flag cascades down parent-child
+edges, so a bead in flight under a parked epic never enters `--ready`. For a
+bead bd keeps unready, every hold the walk finds counts, and the pass slings
+the ones nothing holds. For a bead bd reports ready, the answer bd gives
+stands for every blocker but a human gate, and only a human gate on the bead
+or on an ancestor holds it: bd counts a pinned blocker as none, and a pinned
+human gate still holds. The status gate still holds (a non-`open` bead is
+never dispatched), and an assignee still keeps the pass off the bead. The
+pass reads each generation of ancestors in one listing and their blockers in
+one more, so its cost does not grow with the number of armed beads under a
+held epic.
 
 A held arm keeps its record. Releasing the hold, by closing a park's gate or
 by the prerequisite landing, needs no re-arm: the first pass after it
@@ -348,10 +370,10 @@ the pass carries its own lock:
   `refinery-reconcile.sh` takes its pass lock through the same
   `take_pass_lock` and runs its arms through `pass_child`, under a state key
   of its own.
-- Every `gc`, `escalate.sh` and `bead-rehome.sh` call the pass makes runs
-  through `pass_child`, with the lock's descriptor closed. A process that a
-  `gc` call starts can outlive the pass: a store read can bring up a Dolt
-  server, and `gc` hands the descriptors it was given to what it starts. A
+- Every `gc`, `human-gate.sh` and `gc-helm.sh` call the pass makes runs
+  through `pass_child`, with the lock's descriptor closed. A process
+  that a `gc` call starts can outlive the pass: a store read can bring up a
+  Dolt server, and `gc` hands the descriptors it was given to what it starts. A
   process that kept the descriptor would hold the lock against every later
   pass. The subshell `pass_child` runs a call from holds the descriptor until
   the call exits, so a pass killed by itself leaves the lock held while the
@@ -381,7 +403,7 @@ budget from its own start, `DEFERRED_DISPATCH_PASS_BUDGET_SECS` (420s,
 0 = unpaced), and starts a notice or a sling only while at least
 `DEFERRED_DISPATCH_SLING_ALLOWANCE_SECS` (90s) of it is left. Past that
 point it sends no notice, starts no sling and files no escalation, since
-`escalate.sh` is store work the timeout can cut short too. Each remaining
+`human-gate.sh` is store work the timeout can cut short too. Each remaining
 ready bead keeps its arm with no marker on it, this pass counts no attempt
 against it, and the next pass slings it. A notice it leaves keeps its record,
 and the next pass sends it. A capped bead stays capped and armed, and the next
@@ -406,211 +428,31 @@ override that lowers the order's `timeout` has to lower the budget in its
 spends no budget. It lists every notice a pass would send or retire and
 every bead it would sling, whether or not a pass is in flight.
 
-## The resolved-by consumer (`until`)
+## A bead whose job ends when other work lands
 
-A `blocks` edge says "X must land before me": when X closes the dependent
-becomes ready and is still fully owed. An `until` edge says the other thing —
-"X resolves me" — and the same reconcile pass acts on it. Once a bead's own
-`until` targets have all closed, the pass disposes the bead through
-`assets/scripts/bead-rehome.sh`, so the close carries a successor pointer
-(`gc.superseded_by`) instead of the bead re-entering triage as fresh work. A
-wait whose named cause has landed is closed, not re-derived by hand.
+A bead whose whole job ends once another bead lands, such as a problem in
+code another bead retires, still owes a check before it closes, because the
+bead it waits on can close without the fix it promised. So it waits on that
+bead through a `blocks` edge, and its arm sends it to the validating closer,
+`mol-validate-close`, instead of to a worker:
 
-`until` is not a blocking type, so an `until` edge does not hold a bead out of
-`bd ready`. bd also keeps one edge type per pair of beads: a bead cannot carry
-both a `blocks` edge and an `until` edge to the same X, and `bd dep add` refuses
-the second. So a bead that waits on X and is resolved by X carries only the
-`until` edge, and it reads as ready while X is open. The unnamed-wait census in
-`assets/scripts/liveness-sweep.sh` reads `bd ready` and has no arm for `until`,
-so it reports such a bead as an unnamed wait until X closes.
+```bash
+gc bd dep add <bead> <blocker> -t blocks
+"$PACK_DIR/assets/scripts/deferred-dispatch.sh" arm <bead> \
+    --target <rig>/gc-toolkit.polecat \
+    --sling-arg --on --sling-arg mol-validate-close \
+    --reason "waits for <blocker>; the validating closer checks it once that closes"
+```
 
-The pass acts only on an OPEN, UNASSIGNED bead: a non-`open` status is a
-deliberate hold and an assignee is a live worker, both left alone. It disposes
-only when EVERY `until` target has closed — a target still open, or one the
-status read cannot resolve, leaves the bead waiting, never disposed on a guess.
-A bead that one of its own `blocks` blockers still holds waits for that blocker
-as well, and so does one whose blocker the status read cannot resolve. `bd
-close` refuses a blocked bead, so a call there could only fail.
-ONLY `until` disposes: a `blocks` edge is never a dispose trigger, so the common
-sequencing edge ("land A before B", where B is still owed after A) is never
-auto-closed.
+The edge keeps the bead out of `bd ready` while the blocker is open, and the
+pass slings the closer once nothing holds the bead. The closer checks the close
+brief in the bead's notes against what landed, then closes the bead or puts it
+to a person. The waits skill gives the steps an agent runs, the close brief
+among them, and the first reaction's close exit writes the edge and the arm
+itself when it is given `--waiting-on <blocker>`.
 
-Which beads are owed is decided in one place, `assets/scripts/until-resolved.sh`,
-which the pass and its doctor mirror both read. It makes one listing of the
-store, then one status read of every bead the candidates' edges name, and
-decides every candidate in one jq pass.
-
-Open and unassigned is not the same as idle. An anchor stays open and
-unassigned for as long as its PR is reviewed, and a bead slung to a pool stays
-that way until a worker claims it. bd closes either without complaint, so the
-guard is the pass's own. The pass disposes only a pure wait: a bead that
-carries no live work as `assets/scripts/live-work.sh` defines it. The marks of
-live work fall into these groups:
-
-- **Dispatched:** a pool route, a deferred-dispatch arm or its sling marker, a
-  formula pour, a deferred route, a claim, or a bound session.
-- **Worked:** a live run working the bead (`assets/scripts/run-lib.sh`), a
-  branch, a worktree, a commit, a review round, a landing target, a PR, a
-  landing state, or an outcome.
-- **Owned by another closer:** any `task_kind`, a molecule step or workflow
-  root, a demand, a duplicate diagnosis, a successor pointer
-  (`gc.superseded_by`) that a disposition recorded without its close landing,
-  or an issue type outside plain work (task, bug, feature, chore, spike). An
-  epic closes on its own ruling.
-- **Parked:** a `hold_reason` or a `rebase_hold`.
-- **Structural:** a convoy that parents the bead, or an open child under it.
-
-A convoy that tracks the bead is no mark. A status grouping holds nothing, and
-the input convoy of a run that has finished works nothing, so what a pour
-leaves live is its run, until the run's root closes.
-
-Before the close, the pass reads these marks twice. The first read is the row
-the pass-start listing returns. The second is a fresh read of the bead, of
-what depends on it and of the runs that work it, made under the pass's claim on
-the bead (below) just before the close, because a sling or a claim can land
-mid-pass. That includes a sling
-the pass's own dispatch half made moments earlier. A bead with any mark is
-reported and left open, which is never a pass failure. The fresh read also
-confirms the bead is still owed: its `until` edge to the successor is still
-there, no `until` target has reopened, and no `blocks` blocker has opened. It takes the bead's edges from the bead's own
-`bd list` row, as the listing does, because `bd show` leaves out an edge whose
-target has no row in this store. An edge added since the listing to a bead in
-another store, or to an external reference, is such an edge. When an `until`
-or `blocks` edge, or the edge to the bead's parent, is one of them, the bead
-cannot be decided: the target's status is unknown, and an unknown parent could
-be a convoy. The pass reports the bead and leaves it waiting, as it does a
-bead whose target the status read cannot resolve. Removing the edge is how a
-person keeps a bead the pass would otherwise dispose, so a bead whose edge
-went after the listing is kept.
-The guard runs before `bead-rehome` is called, because `bead-rehome` can stamp
-its successor pointer and still have the close refused. A pointer on an anchor
-reads as a disposed anchor to `scaffolding-sweep.sh`, which then retires that
-anchor's review scaffolding.
-
-No read can keep a dispatch out of the gap between that read and the close. A
-dispatch writes its mark (a pool route, an arm, a pour) whatever the bead
-holds, and bd makes a write conditional only on the status and assignee it
-finds. So the pass disposes a bead under a claim of its own:
-
-1. It claims the bead in one write that bd applies only while the bead is
-   still open and unassigned. The write sets it in progress under the assignee
-   `deferred-dispatch`. While the pass holds the claim, bd refuses a worker's
-   claim and an assignment, and no pool offers the bead.
-2. It makes the fresh read above under the claim, and goes on only when that
-   read finds the bead still owed and carrying no mark. Otherwise it gives the
-   bead back, open and unassigned, with whatever landed on it.
-3. It marks the bead with the successor it is about to point it at
-   (`gc.until_disposal`), in one write bd applies only while the claim still
-   holds the bead.
-4. `bead-rehome` stamps the pointer and closes the bead, acting as
-   `deferred-dispatch`, the actor bd's close requires of a bead assigned to it.
-   `bead-rehome` stamps in one write bd applies only while the bead still has
-   the status and assignee its gates read. So a closer whose gates passed
-   before the claim stamps nothing once the claim lands, and its gate refuses
-   one that reads the bead under the claim. Under the claim, the only pointer
-   that can land is the pass's own, to the successor the mark names.
-5. It reads the bead and its edges again. A mark that landed while the pass
-   held the bead landed before this read, so the read finds it, and the pass
-   reopens the bead, removes its successor pointer and appends a note naming
-   what landed. A removed `until` edge, a reopened target and an opened
-   blocker reopen it too. Otherwise it releases the claim from the closed
-   bead.
-
-A dispatch that lands before the pass's last read of the bead therefore keeps
-it open, unassigned and dispatched. One that lands after that read meets a
-closed bead, as a dispatch of any closed bead does: no pool offers it, and
-`mol-polecat-work`'s load-context cancels a run poured over it. Each write the
-pass makes under its claim is conditional on the status and assignee the
-claim leaves, so none lands on a bead somebody else has taken since.
-
-`bead-rehome` stamps the pointer before its finalize gate and before its
-close, so a close that is held or refused leaves the pass's pointer on a bead
-the pass did not close. The write that gives the bead back removes that
-pointer, in the same write that reopens it and clears the mark. A bead the
-pass gives back therefore never carries its pointer, which on a bead that goes
-on to carry a PR would read as a disposed anchor to `scaffolding-sweep.sh`.
-When that write fails, the bead stays in progress under the claim with its
-pointer and its mark, and the next pass removes both.
-
-A pass that stops while it holds a claim leaves the bead in progress, or
-closed, under `deferred-dispatch`. The next pass finishes both first, before
-any half reads the store, as far as its budget (below) allows. It gives back a
-bead it finds in progress, so its listing reads that bead as it reads any
-other. When the bead's mark names the successor its pointer names, the pass
-stopped after `bead-rehome` stamped that pointer, and the give-back removes
-it. A pointer the mark does not name is another closer's, and stays. It checks
-a bead it finds closed as step 5 does. That check reads the marks that landed
-on the bead while the pass held it, a deferred-dispatch arm among them: it
-finds the arm, reopens the bead, and the arm fires once nothing holds it. A
-close the pass cannot check, or that its budget leaves, stays closed under the
-claim, and the dispatch half keeps the arm on it rather than retiring it as it
-retires an arm on any other closed bead. Until a pass finishes it, a bead in
-progress under the claim reads to the doctor check below as the bead the pass
-claimed.
-
-When the close is held, commonly by an open visit tracking the bead,
-`bead-rehome` refuses the close rather than forcing it, after it has stamped
-the pointer. The pass gives the bead back without the pointer, and a later
-pass retries the disposal once the hold clears. A successor pointer on an open
-bead is live work, a disposition another closer recorded and has not closed,
-so the pass never disposes a bead another closer has pointed.
-
-Enumeration is fail-closed the way the dispatch half is: an unreadable store
-leaves every until-gated bead for the next pass rather than reading "none
-owed". The same-store limit below holds for an `until` target as much as for a
-`blocks` blocker — one in another rig is not seen here.
-
-A pass pinned to a store, by the order's `GC_RIG_ROOT` or by `--db`, reads
-every bead from that store whatever its id prefix says. Left to itself,
-`bead-rehome` derives each bead's store from its id prefix, so the pass names
-its store instead, as the rig whose `.beads` it is, and `bead-rehome` closes
-there. A pinned store that no rig in `gc rig list` holds disposes nothing,
-because a close aimed by id prefix could land in another store. An unpinned
-pass leaves the store to `bead-rehome`, whose derivation by prefix is the
-routing an unpinned read of an id takes.
-
-A disposal costs a claim, a fresh read, a mark, a `bead-rehome` call, which
-makes several store reads and writes of its own, and a read and a write after
-the close, so a target with many `until` dependents could run a pass past the
-order's timeout. The timeout kills a pass mid-loop,
-before it prints its summary. So the until half starts a disposal only while
-one disposal's allowance (`DEFERRED_DISPATCH_DISPOSE_ALLOWANCE_SECS`, 30s) is
-left in the same pass budget (`DEFERRED_DISPATCH_PASS_BUDGET_SECS`, 420s from the
-start of the pass, 0 for unpaced). Finishing a bead an earlier pass left under
-its claim takes the same allowance. The owed beads past that point wait,
-untouched, for the next pass, and so do the beads under a claim that the pass
-did not reach. The pass names them, its summary counts them as left for the
-next pass, and its `partial` declaration names each one beside the notices,
-slings and escalations the other halves left. A failure in any half fails the
-pass, which then declares nothing. The budget counts from the start of the
-pass, so each half spends only what the halves before it left: finishing what
-an earlier pass left comes first, and the until half's scan comes last. With
-nothing left the until half does not list the store at all. The budget sits at
-least one disposal allowance below the order's timeout, so the last disposal a
-pass starts can run for twice its allowance, and `deferred-dispatch.test.sh`
-holds the budget and each allowance against the order's timeout. A dry run
-spends no budget.
-
-Each half of the pass enumerates on its own. A dispatch half that cannot read
-its armed set, or that stops short of it, still lets the until half run, and
-a failure in any half fails the pass.
-
-The positive control in `deferred-dispatch.test.sh` and `check-cadence-live`
-(I10) cover this half too, because this is the same order on the same cadence.
-`doctor/check-until-resolved-owed` is the resolved-by mirror of
-`check-armed-dispatch-owed`: it flags an open, unassigned
-bead whose `until` targets have all closed and that no open `blocks` blocker
-of its own still holds, yet that has stayed undisposed past the reconcile window — the
-disposition silently not firing, surfaced before the bead drifts back into a
-triage sitting. It decides through the same `until-resolved.sh` and makes the
-same fresh read before it reports a bead, so it reports what the pass would do.
-It measures how long a bead has been owed from the moment it became owed: the
-latest of its `until` targets' closes, its `until` edges' creation, and its
-`blocks` blockers' closes. An edge added today to a target that closed last
-week is owed from today. A resolved bead the pass left open because it carries
-live work is reported separately, as a decision for a person. If the work is
-still wanted, the person removes the `until` edge. If the target's close made
-it moot, the work is retired and the bead disposed by ruling.
+bd also defines an `until` edge type. Nothing in the pack acts on one, so an
+`until` edge holds no bead and closes none.
 
 ## What this does not do
 

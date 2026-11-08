@@ -34,16 +34,17 @@ for c in bash sed grep head dirname tr mktemp cut rm; do
 done
 TPATH="$STUBS:$COREUTILS"
 
-clear_stubs() { rm -f "$STUBS/node" "$STUBS/ffmpeg" "$STUBS/gc" "$STUBS/gh"; }
+clear_stubs() { rm -f "$STUBS/node" "$STUBS/ffmpeg" "$STUBS/gc" "$STUBS/gh" "$STUBS/sandbox-exec"; }
 stub_node() { printf '#!/bin/sh\necho v%s\n' "$1" > "$STUBS/node"; chmod +x "$STUBS/node"; }
 stub_ffmpeg() { printf '#!/bin/sh\nexit 0\n' > "$STUBS/ffmpeg"; chmod +x "$STUBS/ffmpeg"; }
 stub_gh() { printf '#!/bin/sh\necho "gh version %s (2026-01-01)"\n' "$1" > "$STUBS/gh"; chmod +x "$STUBS/gh"; }
+stub_sandbox() { printf '#!/bin/sh\nexit 0\n' > "$STUBS/sandbox-exec"; chmod +x "$STUBS/sandbox-exec"; }
 stub_gc_ss() { # stub_gc_ss <sprintshow-path>
   printf '#!/bin/sh\nif [ "$1" = rig ]; then printf %s\x27{"rigs":[{"name":"sprintshow","path":"%s"}]}\x27; fi\n' '' "$1" > "$STUBS/gc"
   chmod +x "$STUBS/gc"
 }
 # Every tool but the key in place, so a case's one warning is the key's.
-stub_rest() { clear_stubs; stub_node 22.18.0; stub_ffmpeg; stub_gh 2.99.0; }
+stub_rest() { clear_stubs; stub_sandbox; stub_node 22.18.0; stub_ffmpeg; stub_gh 2.99.0; }
 
 # A HOME with the key in .gc/secrets.env, and one without. Neither holds a
 # Playwright browser cache.
@@ -72,10 +73,10 @@ run_check() { # run_check <home> [KEY]
 # gh 2.101.0 also proves the version compare is numeric: 2.101 is not below 2.99.
 # No browser is installed anywhere: the capture installs its own, so the check
 # passes without one.
-clear_stubs; stub_node 22.18.0; stub_ffmpeg; stub_gh 2.101.0
+clear_stubs; stub_sandbox; stub_node 22.18.0; stub_ffmpeg; stub_gh 2.101.0
 OUT="$(run_check "$HOME_KEY" sk-env-value)"; RC=$?
 eq "$RC" 0 "case1: all present exits OK"
-has "$OUT" "OK: demo:capture toolchain ready" "case1: reports ready"
+has "$OUT" "OK: demo:capture toolchain ready — sandbox-exec, " "case1: reports ready, the sandbox first"
 has "$OUT" "OPENAI_API_KEY (environment)" "case1: key from environment wins"
 has "$OUT" "gh 2.101.0" "case1: names the gh version (2.101 >= 2.99, numeric compare)"
 hasnt "$OUT" "Chromium" "case1: reports no browser item"
@@ -84,6 +85,7 @@ hasnt "$OUT" "Chromium" "case1: reports no browser item"
 clear_stubs
 OUT="$(run_check "$HOME_BARE")"; RC=$?
 eq "$RC" 1 "case2: all absent exits Warning"
+has "$OUT" "sandbox-exec not found" "case2: warns on the sandbox"
 has "$OUT" "Node not found" "case2: warns on Node"
 has "$OUT" "No ffmpeg resolvable" "case2: warns on ffmpeg"
 has "$OUT" "OPENAI_API_KEY is not set (checked the environment and $HOME_BARE/.gc/secrets.env)" "case2: warns on key, naming the file it read"
@@ -93,7 +95,7 @@ hasnt "$OUT" "Chromium" "case2: does not warn on a browser"
 hasnt "$OUT" "chromium" "case2: names no browser build"
 
 # --- Case 3: ffmpeg only via the engine's ffmpeg-static → OK -------------
-clear_stubs; stub_node 24.18.0; stub_gc_ss "$SS_FIX"; stub_gh 2.99.0
+clear_stubs; stub_sandbox; stub_node 24.18.0; stub_gc_ss "$SS_FIX"; stub_gh 2.99.0
 OUT="$(run_check "$HOME_KEY" sk-env-value)"; RC=$?
 eq "$RC" 0 "case3: ffmpeg-static fallback satisfies ffmpeg"
 has "$OUT" "ffmpeg-static (sprintshow engine)" "case3: names the engine fallback"
@@ -111,13 +113,13 @@ hasnt "$OUT" "OPENAI_API_KEY is not set" "case4: does not report a placed key as
 hasnt "$OUT" "sk-fixture-value" "case4: never prints the key value"
 
 # --- Case 5: node present but below the floor → Warning ------------------
-clear_stubs; stub_node 20.5.0; stub_ffmpeg; stub_gh 2.99.0
+clear_stubs; stub_sandbox; stub_node 20.5.0; stub_ffmpeg; stub_gh 2.99.0
 OUT="$(run_check "$HOME_KEY" sk-env-value)"; RC=$?
 eq "$RC" 1 "case5: old node exits Warning"
 has "$OUT" "below the engine's floor" "case5: names the version floor"
 
 # --- Case 6: gh below the delivery floor → Warning naming it -------------
-clear_stubs; stub_node 22.18.0; stub_ffmpeg; stub_gh 2.98.0
+clear_stubs; stub_sandbox; stub_node 22.18.0; stub_ffmpeg; stub_gh 2.98.0
 OUT="$(run_check "$HOME_KEY" sk-env-value)"; RC=$?
 eq "$RC" 1 "case6: old gh exits Warning"
 has "$OUT" "gh 2.98.0 is below 2.99.0" "case6: names the gh floor with the version"
@@ -204,7 +206,7 @@ eq "$RC" 0 "case12: an absent Vercel key leaves the check OK"
 has "$OUT" "VERCEL_AUTOMATION_BYPASS_SECRET (not set)" "case12: the OK line reports the key absent"
 NOTE="$(printf '%s\n' "$OUT" | grep -F 'VERCEL_AUTOMATION_BYPASS_SECRET is not set')"
 eq "$NOTE" "  - VERCEL_AUTOMATION_BYPASS_SECRET is not set (checked the environment and $HOME_KEY/.gc/secrets.env). A key set nowhere is reported and not counted as an item." "case12: a detail line says only that the key is absent, and where the check looked"
-clear_stubs; stub_node 22.18.0; stub_gh 2.99.0   # no ffmpeg, so one item
+clear_stubs; stub_sandbox; stub_node 22.18.0; stub_gh 2.99.0   # no ffmpeg, so one item
 OUT="$(run_check "$HOME_KEY" sk-env-value)"; RC=$?
 eq "$RC" 1 "case12: with another gap the check warns"
 has "$OUT" "incomplete — 1 item(s) to provision" "case12: the absent key is not counted"
@@ -226,6 +228,13 @@ for form in 'VERCEL_AUTOMATION_BYPASS_SECRET=' '# VERCEL_AUTOMATION_BYPASS_SECRE
   eq "$RC" 0 "case13: no usable key leaves the check OK: $form"
   has "$OUT" "VERCEL_AUTOMATION_BYPASS_SECRET is not set" "case13: no usable key reads as not set: $form"
 done
+
+# --- Case 14: no sandbox-exec → one item, and no capture runs here -------
+stub_rest; rm -f "$STUBS/sandbox-exec"
+OUT="$(run_check "$HOME_KEY" sk-env-value)"; RC=$?
+eq "$RC" 1 "case14: a host without sandbox-exec exits Warning"
+has "$OUT" "incomplete — 1 item(s) to provision" "case14: the sandbox is the one item"
+has "$OUT" "sandbox-exec not found — every capture runs inside its sandbox, where the live city cannot be reached, so no capture runs on this host" "case14: it says no capture runs without it"
 
 echo "check-demo-toolchain: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

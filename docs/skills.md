@@ -1,6 +1,6 @@
 ---
 name: Skills Conventions
-description: How gc-toolkit authors, files, and exposes skills so the same SKILL.md serves Gas City and, where it stays portable, Claude / Codex / other Agent-Skills consumers. Covers the portability and visibility axes, directory layout, frontmatter, and what skill-to-skill composition is and is not possible.
+description: Use when you write, file or change a gc-toolkit skill, or decide which agents and other consumers see it.
 ---
 
 # Skills Conventions
@@ -111,16 +111,28 @@ Separate the tiers by **frontmatter, not by directory**.
 ```yaml
 ---
 name: <skill-name>              # MUST equal the directory name; lowercase, hyphens
-description: <what it does AND when to use it>   # the trigger — keyword-rich
+description: <what it is for, when to load it>   # the only trigger
 compatibility: <portability statement>           # see Axis 1
 ---
 ```
 
 - **`name` equals the directory name.** Lowercase letters, numbers, hyphens.
 - **`description` is the trigger, and the only trigger.** It is the
-  always-loaded metadata both consumers match against; put every "when to use
-  this" cue here, not in the body. Skills under-trigger far more often than
-  they over-trigger.
+  always-loaded metadata both consumers match against, so it says what the skill
+  is for and when to load it, in the words an agent has in mind when it feels
+  the need. Put every "when to load this" cue here, not in the body, including
+  a neighboring skill to load instead. Skills under-trigger far more often than
+  they over-trigger, so a shorter description still has to carry the words a
+  real need used.
+- **`description` carries only what decides whether to load the skill.** Every
+  agent holds it in context in every session, whether or not the skill loads. It
+  does not summarize the skill's contents or list its sections, state a rule the
+  skill applies, name a finding or verdict the skill produces, or carry a step
+  number. Those belong in the body. A list of occasions belongs here when each
+  item is something an agent sets out to do ("holding its merge until something
+  is settled"), and in the body when each item is a part of the skill ("the two
+  binary verdicts"). A skill loaded only by name, such as a converse step from
+  its table, needs no more than a short identifier.
 - **`compatibility` declares the portability axis** — a recommended local
   convention (the spec treats the field as optional), so the boundary is
   legible without reading the body.
@@ -167,12 +179,17 @@ genuinely-runnable-outside subset: no `gc` CLI, no `$GC_*`, no beads.
 
 ## Validation
 
-- `name` matches the directory; frontmatter parses; `description` is present.
-  `compatibility` is recommended, not required.
+- `name` matches the directory; frontmatter parses, so an unquoted value holds
+  no `: ` or ` #`; `description` is present. `compatibility` is recommended, not
+  required.
 - Portable skills contain no reference to `gc `, `$GC_`, beads, or fragments
   anywhere in the body or `scripts/`.
 - No skill or formula names a pack skill to load by its path.
   `assets/scripts/skill-needs.test.sh` fails on one that does.
+- The same suite scores every description against needs agents recorded in their
+  own words, and fails when the skill that answers a need does not score highest.
+  It also fails a description over its character limit, one with a sentence
+  opening on `Covers`, and one that names a step number.
 - Every skill in `marketplace.json` declares portable `compatibility`.
   (Vacuous until the manifest exists.)
 - Inside Gas City, `gc skill list` shows the skill where expected and

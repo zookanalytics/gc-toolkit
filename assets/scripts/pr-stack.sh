@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pr-stack — arm 11 of the merge cadence: keep an open PR current with its anchor,
+# pr-stack — arm 10 of the merge cadence: keep an open PR current with its anchor,
 # in both managed body regions and in its title.
 # A PR body is composed once, by pr-open.sh, out of one anchor. Then two things
 # drift it. Commits keep arriving on the branch — a fold, a rework or rebase
@@ -26,12 +26,12 @@
 # anchor's title, and the squash commit takes its subject from it, so a PR whose
 # anchor a rework retitled would otherwise merge under the superseded name. For a
 # pull_request anchor this arm composes the title exactly as the create does
-# (cc_title's conventional-commit type, the anchor's title, then the bead id) and
-# edits the PR when its words differ. Whitespace alone is never a difference, so a
-# title stored with other spacing is not rewritten every pass. The anchor owns the
-# title: a title edited on the PR alone is composed back from the anchor on the
-# next pass, so a retitle is made on the anchor. The title is an edit of its own,
-# so one that fails never holds back a body refresh, nor the other way round.
+# (cc_title over the anchor's title, then the bead id) and edits the PR when its
+# words differ. Whitespace alone is never a difference, so a title stored with
+# other spacing is not rewritten every pass. The anchor owns the title: a title
+# edited on the PR alone is composed back from the anchor on the next pass, so a
+# retitle is made on the anchor. The title is an edit of its own, so one that
+# fails never holds back a body refresh, nor the other way round.
 # For each open anchor (a bead carrying merge_result) that records a pr_number:
 # read the branch's bead ledger, three code-written facts unioned —
 # metadata.branch (committed onto the branch: the anchor, plus every rework and
@@ -123,8 +123,9 @@ _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # a branch, unioned and deduped, then the rows that recorded no work removed. A
 # closed duplicate keeps its metadata.branch — and for a rebase or rework twin
 # that branch names this very head — so it reaches the union by that key while
-# having contributed no commit. A row carrying duplicate_of, or a no-op
-# work_outcome under either key, is dropped, so the section never tells a
+# having contributed no commit. A row closed as a duplicate (its duplicates
+# edge names the canonical), or a no-op work_outcome under either key, is
+# dropped, so the section never tells a
 # reviewer to approve work that is not on the branch. Any unreadable half fails
 # the whole ledger.
 #
@@ -149,9 +150,9 @@ ledger_of() { # <branch>
   landed=$(bd_list --status="$ALL_STATUSES" --metadata-field merged_target="$br" \
     --metadata-field merge_result=merged) || return 1
   printf '%s\n%s\n%s\n' "$direct" "$folded" "$landed" \
-    | jq -s 'add | unique_by(.id)
+    | jq -s "$DISPOSITION_JQ"'add | unique_by(.id)
         | map(select(
-            (((.metadata // {}).duplicate_of // "") | tostring) == "" and
+            (duplicate_to == "") and
             (((.metadata // {}).work_outcome // "") | tostring) != "no-op" and
             (((.metadata // {})["gc.work_outcome"] // "") | tostring) != "no-op"
           ))' 2>/dev/null

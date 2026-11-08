@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Hermetic test for doctor/check-hq-marooned-work. Stub gc/bd only; no city,
 # no network. Covers: a marooned bug and a pool-routed task are flagged; every
-# legitimate HQ resident is exempt (infra type, human route, task_kind=visit,
+# legitimate HQ resident is exempt (infra type, human route, a bead an open
+# human gate blocks, which another gate does not exempt, a conversation,
 # deacon-ledger label, debt label, gc-doctor title, an assigned bead, a bead
 # routed to a city-scoped agent, a warrant label, a standing subject); the
 # machinery types bd's ready-work query excludes (step, convoy,
@@ -9,7 +10,8 @@
 # city-route exemption keys off the agent's scope not its name; a warrant is
 # still exempt when the agent list is down; a mix names only the marooned beads;
 # an empty store passes; the probes' scratch tree is removed on exit; and the
-# fail-closed arms — no locatable city, an unreadable store (its warning ends
+# fail-closed arms — no locatable city, an unreadable gate listing, an
+# unreadable store (its warning ends
 # with bd's error, never with gc's line naming the store), a listing that exits
 # 0 with no output, a scratch tree that cannot be made, and the GC_CITY_PATH
 # fallback when `gc agent list` cannot answer.
@@ -56,7 +58,25 @@ name=$(basename "$(dirname "$db")")
 [ "$name" = "${BD_FAIL_STORE:-}" ] && { [ -n "${BD_ERR:-}" ] && printf '%s\n' "$BD_ERR" >&2; exit 3; }
 [ "$name" = "${BD_SILENT_STORE:-}" ] && exit 0
 case "$sub" in
-  list) f="$STORES/$name.json"; if [ -f "$f" ]; then cat "$f"; else printf '[]'; fi ;;
+  # `list --type gate` is the read of the store's gates; GATES_FAIL fails it. It
+  # answers in bd's scope: with no --status and no --all, bd leaves out status
+  # closed and pinned and every bead whose pinned flag is set; a --status set
+  # keeps the rows in it, and a flagged row only when the set names pinned or
+  # hooked.
+  list) case " $* " in
+          *" --type gate "*) [ -z "${GATES_FAIL:-}" ] || exit 3
+                             f="$STORES/$name.gates.json"; [ -f "$f" ] || { printf '[]'; exit 0; }
+                             st=""; all=""; p=""
+                             for a in "$@"; do [ "$p" = "--status" ] && st="$a"; [ "$a" = "--all" ] && all=1; p="$a"; done
+                             jq -c --arg st "$st" --arg all "$all" '
+                               if $all != "" then .
+                               elif $st == "" then [ .[] | select((.status // "open") != "closed" and (.status // "open") != "pinned" and (.pinned // false) != true) ]
+                               else ($st | split(",")) as $set
+                                 | [ .[] | select(((.status // "open") as $s | $set | index($s)) != null)
+                                         | select(($set | index("pinned")) != null or ($set | index("hooked")) != null or (.pinned // false) != true) ]
+                               end' "$f" ;;
+          *) f="$STORES/$name.json"; if [ -f "$f" ]; then cat "$f"; else printf '[]'; fi ;;
+        esac ;;
   *) printf '[]' ;;
 esac
 BD
@@ -71,13 +91,16 @@ run_check() {
     PATH="$TMP/bin:$PATH" STORES="$TMP/stores" TMPDIR="${CHECK_TMPDIR:-$TMP/rt}" \
     bash "$CHECK" 2>&1
 }
-store() { local IFS=,; printf '[%s]' "$*" > "$TMP/stores/testcity.json"; }
+store() { local IFS=,; printf '[%s]' "$*" > "$TMP/stores/testcity.json"; rm -f "$TMP/stores/testcity.gates.json"; }
+gates() { local IFS=,; printf '[%s]' "$*" > "$TMP/stores/testcity.gates.json"; }
 
 B_BUG='{"id":"m-bug","status":"open","issue_type":"bug","title":"real marooned defect"}'
 B_POOL='{"id":"m-pool","status":"open","issue_type":"task","title":"work routed nowhere readable","metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}}'
 B_SESSION='{"id":"ok-sess","status":"open","issue_type":"session","title":"gc-toolkit/gc-toolkit.witness"}'
 B_HUMAN='{"id":"ok-human","status":"open","issue_type":"task","title":"operator disk-size call","metadata":{"gc.routed_to":"human"}}'
-B_VISIT='{"id":"ok-visit","status":"open","issue_type":"task","title":"visit: operator pick","metadata":{"task_kind":"visit"}}'
+B_CONV='{"id":"ok-conv","status":"open","issue_type":"task","title":"about an operator pick","assignee":"human","dependencies":[{"issue_id":"ok-conv","depends_on_id":"tk-pick","type":"tracks"}]}'
+B_GATE='{"id":"ok-gate","status":"open","issue_type":"gate","await_type":"human","await_id":"operator-pick","title":"operator pick"}'
+B_UNASSIGNED_CONV='{"id":"m-conv","status":"open","issue_type":"task","title":"a conversation someone unassigned by hand","dependencies":[{"issue_id":"m-conv","depends_on_id":"tk-pick","type":"tracks"}]}'
 B_LEDGER='{"id":"ok-ledger","status":"open","issue_type":"task","title":"deacon ledger 2026-09-29","labels":["deacon-ledger"]}'
 B_DEBT='{"id":"ok-debt","status":"open","issue_type":"task","title":"gc doctor: 2 new findings (dolt-drift)","labels":["debt"]}'
 B_DOCTOR='{"id":"ok-doctor","status":"open","issue_type":"task","title":"gc doctor: agent-token-telemetry"}'
@@ -108,17 +131,64 @@ eq "$RC" "2" "a task routed to a pool but sitting in the HQ store is an ERROR"
 has "$OUT" "routed to gc-toolkit/gc-toolkit.polecat" "the finding names the pool route"
 
 # --- 3. every legitimate HQ resident is exempt ------------------------------
-store "$B_SESSION" "$B_HUMAN" "$B_VISIT" "$B_LEDGER" "$B_DEBT" "$B_DOCTOR" "$B_ASSIGNED"
+store "$B_SESSION" "$B_HUMAN" "$B_CONV" "$B_GATE" "$B_LEDGER" "$B_DEBT" "$B_DOCTOR" "$B_ASSIGNED"
 OUT=$(run_check); RC=$?
-eq "$RC" "0" "session/human/visit/ledger/debt/doctor/assigned are all legitimate HQ contents"
+eq "$RC" "0" "session/human/conversation/gate/ledger/debt/doctor/assigned are all legitimate HQ contents"
 has "$OUT" "OK:" "the pass message is the OK line"
 hasnt "$OUT" "ok-sess" "an infra session type is not flagged"
 hasnt "$OUT" "ok-human" "a decision routed to human is not flagged"
-hasnt "$OUT" "ok-visit" "a task_kind=visit is not flagged"
+hasnt "$OUT" "ok-conv" "a conversation in the operator's queue is assigned, so it is not flagged"
+hasnt "$OUT" "ok-gate" "a human gate is a gate, an infra type, so it is not flagged"
 hasnt "$OUT" "ok-ledger" "a deacon-ledger daily digest is not flagged"
 hasnt "$OUT" "ok-debt" "a debt-labelled advisory is not flagged"
 hasnt "$OUT" "ok-doctor" "a gc-doctor-titled advisory with no label is not flagged"
 hasnt "$OUT" "ok-assigned" "an already-assigned bead is not flagged"
+
+# --- 3a. a bead an open human gate blocks waits on a person ----------------
+# A sitting's hold on an HQ bead is a human gate that blocks it, and the board
+# shows that gate, so the bead waits on a person's answer and is not marooned.
+# A gate of another kind leaves it marooned.
+B_HELD='{"id":"ok-held","status":"open","issue_type":"task","title":"a bead a sitting holds","dependencies":[{"issue_id":"ok-held","depends_on_id":"hq-g1","type":"blocks"}]}'
+G_HUMAN='{"id":"hq-g1","status":"open","issue_type":"gate","await_type":"human","await_id":"conversation.hq-c1"}'
+G_TIMER='{"id":"hq-g1","status":"open","issue_type":"gate","await_type":"timer","await_id":"cooldown"}'
+store "$B_HELD"; gates "$G_HUMAN"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a bead an open human gate blocks is not flagged"
+hasnt "$OUT" "ok-held" "…and not named"
+store "$B_HELD"; gates "$G_TIMER"
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a bead only a gate of another kind blocks is still flagged"
+has "$OUT" "ok-held" "…and named"
+# Which gates hold is the rule every reader of a gate shares (bd-lib.sh's
+# open_human_gate): every status but closed, pinned included. bd's default
+# scope leaves out a gate in status pinned and a gate whose pinned flag is set,
+# so the check's listing names every live status, and each such gate still
+# keeps the bead it blocks from being flagged.
+G_HUMAN_PINNED='{"id":"hq-g1","status":"pinned","issue_type":"gate","await_type":"human","await_id":"conversation.hq-c1"}'
+G_HUMAN_FLAGGED='{"id":"hq-g1","status":"open","pinned":true,"issue_type":"gate","await_type":"human","await_id":"conversation.hq-c1"}'
+store "$B_HELD"; gates "$G_HUMAN_PINNED"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a bead a human gate in status pinned blocks is not flagged"
+store "$B_HELD"; gates "$G_HUMAN_FLAGGED"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a bead an open human gate whose pinned flag is set blocks is not flagged"
+store "$B_HELD"; gates "$G_HUMAN"
+OUT=$(GATES_FAIL=1 run_check); RC=$?
+eq "$RC" "1" "a gate listing that does not read warns (exit 1)"
+has "$OUT" "whether an open human gate holds it could not be read" "…naming what could not be read"
+store "$B_BUG"; gates "$G_HUMAN"
+OUT=$(GATES_FAIL=1 run_check); RC=$?
+eq "$RC" "2" "a bead with no blocks edge is flagged whatever the gate listing says"
+
+# --- 3b. a conversation unassigned by hand is marooned work ----------------
+# The design keeps a conversation assigned through every hand-off, so one
+# someone unassigned is not a state it keeps: the check reports it, and a
+# pre-cutover visit, which carries no exemption any more, the same way.
+store "$B_UNASSIGNED_CONV" '{"id":"m-visit","status":"open","issue_type":"task","title":"visit: left from before the cutover","metadata":{"task_kind":"visit"}}'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "an unassigned conversation in the HQ store is an ERROR"
+has "$OUT" "m-conv" "…and the finding names it"
+has "$OUT" "m-visit" "…and a leftover visit is flagged like any unassigned task"
 
 # --- 4. a mix names only the marooned beads ---------------------------------
 store "$B_BUG" "$B_SESSION" "$B_DEBT" "$B_HUMAN" "$B_DOCTOR"

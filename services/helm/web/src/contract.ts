@@ -44,8 +44,9 @@ export type Severity = 'HIGH' | 'ELEVATED' | 'NORMAL' | 'LOW' | 'DONE';
 /**
  * Tile is one rendered row of the board.
  *
- * The field set and its order mirror the `--json` object gc-helm.sh emits, so
- * the dashboard and the `helm-svc board` CLI describe a row the same way. Every
+ * The field set and its order mirror the Go `board.Tile`, the row the service
+ * serves and `helm-svc board --json` prints, so both describe a row the same
+ * way. Every
  * `*_heads` / `cross_rig_refs` list is always emitted (`[]` when empty) even
  * though the mechanical Go mapping widens it to `| null`; narrow before
  * iterating.
@@ -57,32 +58,32 @@ export interface Tile {
   title: string;
   severity: Severity;
   /**
-   * The next move on this row is a PERSON'S: an unanswered human gate, or a
-   * parked conversation whose recorded waits have all landed. Not derivable
-   * from `severity`, which is coarse and shared — a one-bead demand bands
-   * ELEVATED while a stranded container bands HIGH, so rank alone always sorts
-   * the operator's own queue underneath the city's.
+   * The next move on this row is a PERSON'S: an unanswered human gate, a
+   * conversation waiting for the operator, or a parked subject whose recorded
+   * waits have all landed. Not derivable from `severity`, which is coarse and
+   * shared — a one-bead question bands ELEVATED while a stranded container bands
+   * HIGH, so rank alone always sorts the operator's own queue underneath the
+   * city's.
    */
   owed: boolean;
   /** Rank proxy: subtree size + priority weight + capped cross-rig refs. */
   weight: number;
-  /** An open visit bead names this anchor — a conversation is holding it. */
+  /**
+   * The operator's side has this bead: an open human gate holds it, an
+   * acceptance an earlier Accept left unfinished keeps it, or an open
+   * conversation tracks it. Only the first two hold its work (`work_held`); a
+   * conversation blocks nothing.
+   */
   held: boolean;
   /**
-   * Refines `held` into the visit's engagement: `'engaged'` when a live sitting
-   * is in the conversation right now, `'start-failed'` when the sitting last
-   * spawned for the visit failed to start (`visit_start_failure` says why),
-   * `'parked'` when the visit stands open and un-engaged — filed and waiting for
-   * a person to pick it up. `''` on a row no open visit holds (`held` is
-   * false), except a visit's own row whose sitting failed to start, which reads
-   * `'start-failed'`.
-   *
-   * Derived on the Go side from the same rule `acceptable` reads — an engaged
-   * visit suppresses Accept — so the web reads this field rather than
-   * re-deriving it (the rule reads the visit's assignee, which the wire does not
-   * carry). Always present.
+   * Refines `held`. It is the roll-up of the `state` of the sittings on this
+   * row, so the row and the record cannot disagree: `'start-failed'` when one
+   * failed to start (`sitting_start_failure` says why), `'in_session'` when a
+   * live session holds one right now, `'waiting'` on any other held row, which
+   * waits for the operator. `''` on a row nothing holds (`held` is false).
+   * Derived on the Go side. Always present.
    */
-  visit_state: string;
+  sitting_state: string;
   n_closed: number;
   m_total: number;
   open: number;
@@ -103,8 +104,8 @@ export interface Tile {
   /** Convoys only: `false` marks the unowned-convoy orphan exception. `null` for every other kind. */
   owned: boolean | null;
   /**
-   * Open work with nothing live in it, no open visit, and no UNANSWERED human
-   * gate — the three ways a row's silence is already accounted for. A bead
+   * Open work with nothing live in it, nothing holding it, and no UNANSWERED
+   * human gate — the three ways a row's silence is already accounted for. A bead
    * routed to the operator is not stranded; once the ruling is recorded the
    * gate is discharged and open children under it are ordinary idle work again.
    */
@@ -121,21 +122,25 @@ export interface Tile {
   priority: number | null;
   /** Bead ids belonging to OTHER rigs, scanned out of the anchor's prose. */
   cross_rig_refs: string[] | null;
-  /** Idle open children — unclaimed, not carried by a live workflow, and not parked. */
+  /**
+   * Stranded open children — unclaimed, not carried by a live workflow, and
+   * waiting on nothing: no open wait, no route, no arm.
+   */
   open_heads: string[] | null;
   dead_owner_heads: string[] | null;
   /**
-   * Open children that carry a board row of their own — routed to the operator,
-   * or holding a takeaway. Split out of `open_heads` so a parent cannot report
-   * a child that is waiting on a ruling as work nobody has picked up. `open`
+   * Open children a person holds — each waits on an open gate a person
+   * releases or on a demand, is routed to the operator, or a conversation about
+   * it waits in the operator's queue. A takeaway alone parks nothing. `open`
    * still counts them.
    */
   parked_heads: string[] | null;
   /**
    * Beads this row depends on by a `blocks` edge, and the subset still open.
    * On a parked conversation these are the work a sitting routed out of it:
-   * `disposition_due` is true once every one of them has closed, which is the
-   * board's only way to tell a finished topic from a live hold (tk-2plde).
+   * `disposition_due` is true once every one of them has closed and nothing
+   * else holds or moves the bead, which is the board's only way to tell a
+   * finished topic from a live hold (tk-2plde).
    */
   waiting_on: string[] | null;
   waiting_on_open: string[] | null;
@@ -184,10 +189,14 @@ export interface Tile {
    * `'blocked'`, or `'unknown'`.
    *
    * `'blocked'` is a hold no automated actor will clear and no review verdict is
-   * owed on — an unresolved required review thread, a base gone BEHIND, or an
-   * unrouted blocker. It is owed by the operator (needs-attention), distinct from
-   * `'settled'`, which waits on a review or the merge pass. Its specific cause is
-   * spelled out in `needs`.
+   * owed on — an unresolved required review thread, a failed required check, a
+   * base gone BEHIND, a conflict whose merge-in a hold defers, a blocker no
+   * automated actor holds, or a branch rule the merge pass cannot name. It is
+   * owed by the operator (needs-attention), distinct from `'settled'`, which
+   * waits on a review or the merge pass. Its specific cause is spelled out in
+   * `needs`. A recorded blocked verdict reads `'blocked'` only while the rule
+   * `pr_phase` reads it by counts it, and `'progressing'` otherwise, since the
+   * next merge pass replaces it.
    *
    * `'unknown'` is a RENDERED value, never a fallback to the quiet end — the
    * same choice `waiting_unknown` makes on the gather side. A missing key means
@@ -197,11 +206,12 @@ export interface Tile {
   pr_machine: string;
   /**
    * Where the exchange with the operator stands: `'quiet'`, `'outstanding'`,
-   * `'answered'`, `'asking'`, or `'unknown'`. `'asking'` is the demand edge;
+   * `'answered'`, `'asking'`, or `'unknown'`. `'asking'` is an open human gate
+   * that holds the anchor;
    * `'quiet'`, `'outstanding'` and `'answered'` are read off the position the
    * merge cadence records against the acknowledgement watermarks and the routing
    * disposition — `'answered'` once the routed fix unit closes (a rework child
-   * landing, a visit resolved), not on a bare head move. `'covered'` is not
+   * landing, a gate resolved), not on a bare head move. `'covered'` is not
    * reachable yet — it waits on a comment-to-bead link nothing records — so an
    * utterance the city is working reads the coarser `'outstanding'`.
    * `'unknown'` is a RENDERED value, never a fallback to the quiet end.
@@ -234,8 +244,8 @@ export interface Tile {
    * `'active'` (healthy in-flight), `'cleanup'` (a finished or empty row to
    * dispose of), or `'done'` (the anchor itself closed). Orthogonal to
    * `severity`'s how-badly. A surface groups by this and reads the bands in the
-   * order model.go's `SectionOrder` fixes; it is on the wire so the CLI and this
-   * app cannot each invent their own split. The Go type is a plain string, so an
+   * order model.go's `SectionOrder` fixes; it is on the wire so this app does
+   * not invent its own split. The Go type is a plain string, so an
    * unknown value is representable even though this union is not exhaustive here.
    */
   section: string;
@@ -268,12 +278,14 @@ export interface Tile {
    */
   group_parent: string;
   /**
-   * Set when this row can be ACCEPTED: the subject carries a recommended
-   * execution formula (`gc.recommended_formula`) and its visit is un-engaged, so
-   * a person can dispatch that formula at the subject and dismiss the visit in
-   * one procedural order — the extra move a recommendation row offers over a
-   * discuss-only gate. A live sitting suppresses it and leaving without a ruling
-   * restores it. Always present (Go bool); false on every non-recommendation row.
+   * Set when this row can be ACCEPTED: resolve the recommendation's human gate
+   * and dispatch the formula at the bead, no sitting — the extra move a
+   * recommendation row offers over a discuss-only gate. All three of Accept's
+   * conditions hold: the bead carries `gc.recommended_formula`; the gate under
+   * the key `first-reaction` is open and unassigned, or closed with an
+   * acceptance an earlier Accept did not finish; and no other open human gate
+   * blocks the bead. A live sitting does not withhold it. Always present (Go
+   * bool); false on every row those conditions do not hold on.
    */
   acceptable: boolean;
   /**
@@ -292,17 +304,17 @@ export interface Tile {
   pr_branch_url: string;
   /**
    * This merge anchor's PR status. On a live anchor it is who must act next —
-   * `'working'`, `'needs-review'`, or `'needs-attention'` — the same status:
-   * taxonomy the GitHub PR list carries, so the board and the label read one
-   * vocabulary. On a closed (`DONE`) anchor it is the PR's resolved state,
+   * `'working'`, `'merging'`, `'needs-review'`, or `'needs-attention'` — the
+   * same status: taxonomy the GitHub PR list carries, so the board and the
+   * label read one vocabulary. On a closed (`DONE`) anchor it is the PR's resolved state,
    * `'merged'` or `'closed'`, so a done row names how its PR ended. `''` on a
    * non-merge row.
    */
   pr_phase: string;
   /**
-   * This bead's liveness in the same tri-state vocabulary — `'working'`,
-   * `'needs-review'`, or `'needs-attention'` — on EVERY live row, and the word
-   * the `frontier` string leads with. It begins as the per-bead value derived
+   * This bead's liveness in the same status vocabulary — `'working'`,
+   * `'merging'`, `'needs-review'`, or `'needs-attention'` — on EVERY live row,
+   * and the word the `frontier` string leads with. It begins as the per-bead value derived
    * from the same inputs as `pr_phase`, but a row with child tiles then takes its
    * children's rolled-up state instead: an epic's frontier is its children's.
    *
@@ -323,70 +335,110 @@ export interface Tile {
    */
   recommendation: string | null;
   /**
-   * Why the sitting last spawned for this row's visit failed to start —
-   * `'startup timeout'`, `'setup timeout'`, `'provider error: <code>'`,
-   * `'never started'`, `'start error: <the recorded error>'`, or
-   * `'reason unread'`. Non-empty exactly when `visit_state`
-   * is `'start-failed'`, `''` on every other row. Always present.
+   * The open human gates that hold Accept back, on a row that meets Accept's
+   * first two conditions and fails the third: each gate's title, or
+   * `N× — a · b` over several, the way `needs` names gates. The bead's next step
+   * waits for every gate that blocks it, so Accept waits until the
+   * recommendation's gate is the last; Discuss answers the others. `null` on
+   * every other row.
    */
-  visit_start_failure: string;
+  accept_withheld: string | null;
+  /**
+   * The open human gates on this row that a live sitting's conversation replies
+   * to — the gates being answered now — named the way `needs` names gates. Set
+   * on every row such a gate folds onto, so a bead whose gate an epic's sitting
+   * answers shows it though no conversation tracks the bead. `null` on a row
+   * with none.
+   */
+  gates_in_session: string | null;
+  /**
+   * Why the sitting last spawned for a conversation on this row failed to start
+   * — `'startup timeout'`, `'setup timeout'`, `'provider error: <code>'`,
+   * `'never started'`, `'start error: <the recorded error>'`, or
+   * `'reason unread'`. Non-empty exactly when `sitting_state` is
+   * `'start-failed'`, `''` on every other row. Always present.
+   */
+  sitting_start_failure: string;
+  /**
+   * What holds this live merge anchor's PR that the city will not clear on its
+   * own, in order — `'gate'` (an open human gate blocks the anchor), `'review'`
+   * (review feedback the city has not answered, or a review thread the merge
+   * waits on), `'blocked'` (a blocker no automated actor will clear, or one a
+   * person owes). Each is the value of one GitHub `held:` label, derived by the
+   * same code, and any of them reads `pr_phase` `'needs-attention'`. `null` on
+   * a PR nothing holds, on a closed row, and on a non-merge row. `held` is
+   * wider: a conversation that tracks the bead makes its row held and holds no
+   * PR.
+   */
+  pr_held: string[] | null;
+  /**
+   * Refines `held`: true when the operator's answer is required before this
+   * bead's work can move, because an open human gate blocks it or an acceptance
+   * an earlier Accept left unfinished keeps it. A held row where it is false
+   * only has a conversation on it, which blocks nothing, so the work can move
+   * and merge. False on every row that is not held. Derived on the Go side and
+   * read as-is here.
+   */
+  work_held: boolean;
 }
 
 /**
- * Sitting is one converse sitting — the visit bead a conversation runs inside.
+ * Sitting is one converse sitting — the conversation task a sitting runs on.
  *
  * Sittings are not tiles and are not ranked against them: a tile is an anchor
  * that wants something, a sitting is an event in the conversation record. The
- * board carries every running sitting plus those closed inside the service's
+ * board carries every open sitting plus those closed inside the service's
  * recent window (`GC_HELM_SITTINGS_WINDOW`, a day by default).
  */
 export interface Sitting {
   id: string;
   rig: string;
-  /** The anchor the conversation is about — the same id `held` keys on. */
+  /** The bead the conversation is about: the one bead its `tracks` edge names. */
   subject: string;
   title: string;
-  /** The visit bead's status. `'closed'` is finished; anything else is running. */
-  status: string;
   /**
-   * The one-word justification a sitting closed on (`gc.outcome`: folded,
-   * moot, benign, diagnosed, cut-short, the word a held sitting signs off with,
-   * or `dismissed` when the operator ends it from the board). Normally empty
-   * while a sitting is still running, with one exception: a board dismissal
-   * that stamped the outcome but could not close the visit leaves a running
-   * sitting reading `dismissed` until it is closed or signed off over.
-   */
-  outcome: string;
-  /**
-   * The one-line human-readable sentence naming WHY the visit closed
-   * (`gc.outcome_reason`): "moot: premise died, subject already closed",
-   * "folded into <holder>", or what a held sitting signed off on. `outcome` is
-   * the word to group by; this is the sentence to read, so a dedup close reads
-   * as a decision rather than a dropped need. `''` when the writer stamped only
-   * the word.
+   * The conversation's close reason: the headline a sign-off settled on, or the
+   * operator's dismissal. The sentence a closed sitting reads by when it left no
+   * takeaway. `''` while it is open.
    */
   outcome_reason: string;
-  /** The converse session that ran it — what an operator attaches to. */
+  /** The converse session that ran it — what an operator attaches to while it is in session. */
   session: string;
   /** RFC 3339. Omitted when the source could not read the stamp. */
   opened_at?: string;
-  /** RFC 3339. Omitted while the sitting is still running. */
+  /** RFC 3339. Omitted while it is open. */
   closed_at?: string;
   /**
    * The headline THIS sitting left on its subject, or `''`. A takeaway lives on
    * the subject and each sitting overwrites the last one's, so the service
    * hands it only to the sitting that was running when it was stamped — a
-   * subject visited three times has two sittings that did not write it.
+   * subject discussed three times has two sittings that did not write it.
    */
   takeaway: string;
   /**
    * The subject bead's title — the row's topic, what the conversation is about.
    * Read in the same batch as the takeaway, so a row says what it concerns even
    * with nothing concluded on it. `''` when the subject could not be read, which
-   * the render falls back on the subject id (topic) or the visit title
-   * (headline) for.
+   * the render falls back on the subject id (topic) for.
    */
   subject_title: string;
+  /**
+   * Where this sitting stands: `'in_session'` while a live session holds its
+   * conversation, `'waiting'` while it is open and no live session holds it,
+   * `'start-failed'` when the sitting last spawned for it failed to start and
+   * none has been spawned since, `'closed'` once it has ended. Derived on the
+   * Go side, because it reads the holder against the session list, which the
+   * wire does not carry. Print it; do not re-derive it. Always present.
+   */
+  state: string;
+  /**
+   * What this sitting concluded, or failing that what its conversation asks: its
+   * takeaway, else its close reason, else the conversation's own title. A title
+   * that says nothing of the ask, an empty one or a writer's stock title, gives
+   * way to the subject's title, and is kept only when the subject could not be
+   * read. Derived on the Go side. Print it; do not re-derive it. Always present.
+   */
+  headline: string;
 }
 
 /**
@@ -400,9 +452,9 @@ export interface Sitting {
  * field a quiet tick moves, so it is the only one that can say the build order
  * itself has stopped.
  *
- * `severity` and `detail` are DERIVED on the Go side so this view and the
- * `helm-svc board` CLI cannot disagree about what a row means. Render them;
- * do not re-derive them from the raw fields.
+ * `severity` and `detail` are DERIVED on the Go side, so this view states
+ * what the derivation says. Render them; do not re-derive them from the raw
+ * fields.
  */
 export interface PackBuild {
   component: string;
@@ -439,7 +491,7 @@ export interface PackBuild {
  *
  * The partition is on the wire rather than left to each renderer because
  * `rank_score` cannot express it — severity is coarse and shared, so the term
- * that really orders the list is subtree size, and a demand owed by a person
+ * that really orders the list is subtree size, and a question owed by a person
  * has a subtree of one. Filter on `owed` to take just the queue.
  */
 export interface Board {
@@ -453,7 +505,7 @@ export interface Board {
    */
   tiles: Tile[] | null;
   /**
-   * The conversation record: running sittings first (longest-running first),
+   * The conversation record: open sittings first (longest-open first),
    * then the recently closed (most recent first). `null` rather than `[]` when
    * empty, exactly like `tiles` — narrow before iterating.
    */

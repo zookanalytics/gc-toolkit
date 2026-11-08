@@ -1,5 +1,5 @@
 {
-  "description": "Cases for the run rule (assets/scripts/run-lib.sh). beads is a store in the shape `bd list --json` prints, each bead carrying its own edges. A root names its input convoy in gc.input_convoy_id, and a run works the one bead that convoy tracks; a classic molecule names no convoy and works the bead its gc.var.issue names. A convoy that tracks no bead or several, or that the store does not return, names none, and so does a root whose gc.var.issue names a bead its convoy does not track. A run is live until its root closes. Each case names a verb, its argument, and the runs it prints, ordered by root: runs is every run that works a bead, subject is the run a root is or every run poured over an input convoy, and map is every live run, or with scope all every run. Every live root is open or in_progress, the statuses the Go copy in services/helm/internal/source/facts.go reads, and every classic molecule is closed, as they are in the stores it reads, so its fixture test runs the live map case. Any copy of the rule runs these cases.",
+  "description": "Cases for the run rule (assets/scripts/run-lib.sh). beads is a store in the shape `bd list --json` prints, each bead carrying its own edges. A root names its input convoy in gc.input_convoy_id, and a run works the one bead that convoy tracks; a classic molecule names no convoy and works the bead its gc.var.issue names. A convoy that tracks no bead or several, or that the store does not return, names none, and so does a root whose gc.var.issue names a bead its convoy does not track. A run is live until its root closes. Each case names a verb, its argument, and the runs it prints, ordered by root: runs is every run that works a bead, subject is the run a root is or every run poured over an input convoy, and map is every live run. Every live root is open or in_progress, the statuses the Go copy in services/helm/internal/source/facts.go reads, and every classic molecule is closed, as they are in the stores it reads, so its fixture test runs the live map case. Any copy of the rule runs these cases.",
   "beads": [
     {"id": "work-a", "title": "A bead a live run and a finished run work", "status": "open", "issue_type": "task"},
     {"id": "cv-a1", "title": "input convoy for work-a", "status": "open", "issue_type": "convoy",
@@ -105,14 +105,6 @@
 
     {"name": "the map holds every live run, a run that names no bead included", "verb": "map", "arg": "",
      "runs": [{"root": "root-a1", "convoy": "cv-a1", "bead": "work-a", "formula": "mol-polecat-work", "live": true},
-              {"root": "root-e", "convoy": "cv-empty", "bead": "", "formula": "mol-review", "live": true},
-              {"root": "root-g", "convoy": "cv-ghost", "bead": "", "formula": "mol-polecat-work", "live": true},
-              {"root": "root-t", "convoy": "cv-two", "bead": "", "formula": "mol-polecat-work", "live": true},
-              {"root": "root-x", "convoy": "cv-x", "bead": "", "formula": "mol-polecat-work", "live": true}]},
-    {"name": "the map of every run holds the finished runs too", "verb": "map", "arg": "all",
-     "runs": [{"root": "mol-l", "convoy": "", "bead": "work-l", "formula": "", "live": false},
-              {"root": "root-a0", "convoy": "cv-a0", "bead": "work-a", "formula": "mol-review", "live": false},
-              {"root": "root-a1", "convoy": "cv-a1", "bead": "work-a", "formula": "mol-polecat-work", "live": true},
               {"root": "root-e", "convoy": "cv-empty", "bead": "", "formula": "mol-review", "live": true},
               {"root": "root-g", "convoy": "cv-ghost", "bead": "", "formula": "mol-polecat-work", "live": true},
               {"root": "root-t", "convoy": "cv-two", "bead": "", "formula": "mol-polecat-work", "live": true},

@@ -235,8 +235,8 @@ func (l *lockedBuffer) String() string {
 }
 
 // startServe runs cmdline with bash from dir on a free port it hands over as
-// PORT, as the engine runs a --serve command, waits for it to answer, and stops
-// its process group when the test ends, as the engine does.
+// PORT, as demo-screenshot.sh's --port 0 does for a --serve command, waits for it
+// to answer, and stops its process group when the test ends, as the engine does.
 func startServe(t *testing.T, cmdline, dir string) string {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

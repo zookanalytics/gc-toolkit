@@ -12,9 +12,10 @@ when to run the assembled `gh pr create` command.
 
 Extends `mol-polecat-base` for load-context but replaces the implement /
 self-review chain with cherry-pick / scrub / test / push / draft / handback.
-Every abort path (cherry-pick conflict, test failure, push race) mails the
-keeper + operator and hands the bead back open, assigned and routed to the
-keeper — never stranded `in_progress` on the drained session.
+Every abort path (a roster with no gascity rig, cherry-pick conflict, test
+failure, push race) mails the keeper + operator and hands the bead back open,
+assigned and routed to the keeper — never stranded `in_progress` on the drained
+session.
 
 Required vars:
   {{commit_sha}}: Whitespace-separated, ORDERED list of one-or-more local commits on origin/main to extract for upstream submission. Apply order is topological — old→new, as the commits sit on origin/main. A single SHA (N=1) is the original single-commit behavior.
@@ -22,6 +23,7 @@ Required vars:
 
 Optional vars:
   {{base_branch}}: The base branch to rebase on and compare against (e.g., main, integration/convoy-id) (default=main)
+  {{binding_prefix}}: The binding the city imports gc-toolkit under, with its trailing dot. This sub-pack's formulas run on gc-toolkit's polecats, so gc sling pours them with that binding, and a step drops the dot to call the pack's scripts as gc <binding> scripts-dir prints them. (default=gc-toolkit.)
   {{branch_name}}: Explicit name for the assembled PR branch. Empty (default): a single SHA yields upstream-pr/<short-sha>, multiple SHAs yield upstream-pr/<issue> (stable + unique). Set: used verbatim, e.g. upstream-pr/test-env-isolation. (default=)
   {{build_command}}: Command to run build. From rig `formula_vars` or empty to skip; if ALL are empty, falls back to repo instructions. (default=)
   {{escalation_target}}: Mail recipient for help and escalation mail. Defaults to the reserved `human`

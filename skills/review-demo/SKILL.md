@@ -1,6 +1,6 @@
 ---
 name: review-demo
-description: The method for the demo check, the visual review. Decide whether a change needs a visual to be understood and, when it does, pick the cheapest modality that conveys it (a visual the repo already carries, a screenshot, or a narrated video), deliver it to the PR inline and uncommitted, and record the decision on one signoff verdict. Use when you hold a review bead whose check is demo, or when triage asks whether a diff warrants the demo check.
+description: Use when you hold a review bead whose check is demo, or when triage asks whether a diff warrants the demo check.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
@@ -24,7 +24,8 @@ The anchor `<anchor_bead>` for what the change is for, then the diff at
 draft PR, `<review_pr_url>`, and its preview where the rig's host deploys one.
 The rig's guidance for this check, the reviewed commit's `docs/review-demo.md`,
 which the review formula printed when the commit carries one: a rig names its
-own visual surfaces there, and how to serve its app for a capture.
+own visual surfaces there, how to serve its app for a capture, and how a run of
+its app shows the messages it sends.
 
 ### When it runs
 
@@ -44,12 +45,16 @@ Triage adds `demo` when the diff changes a surface a person looks at:
 - a layout or styling change;
 - a new or changed interactive flow;
 - output a person reads in a terminal, such as a command's report;
-- markdown the city posts on GitHub, such as a review comment or a PR body.
+- markdown the city posts on GitHub, such as a review comment or a PR body;
+- a message the rig's app sends people, such as an email, that the diff adds or
+  whose sender, subject or body it alters, even when no screen changes.
 
 Logic, refactors, internal plumbing, tests, and docs read as text need no
-visual, and triage adds nothing for them. That is the common case. The default
-check set is the baseline, `correctness,triage`, so under it `demo` runs only on
-a diff triage added it to.
+visual, and triage adds nothing for them. That is the common case. A message is
+text in the diff, as a doc is, but its recipient reads the message and never the
+diff, so a diff that changes only a message still adds `demo`. The default check
+set is the baseline, `correctness,triage`, so under it `demo` runs only on a
+diff triage added it to.
 
 ### Decide need
 
@@ -61,6 +66,10 @@ to notice in a capture, needs no visual.
 An explicit request for a visual, in the anchor or from a human on the PR,
 settles need: a visual is needed.
 
+A message the change adds or alters settles need the same way, whatever the
+check decides for the change's screens: the check shows each one, as the
+section Show each message says.
+
 When no visual helps, approve with a one-line note that says why, attach
 nothing, and record `--visual none`.
 
@@ -71,7 +80,7 @@ When a visual helps, pick the cheapest one that conveys the change.
 | Modality | What it shows | Pick it when |
 |---|---|---|
 | `repo-artifact` | a visual the repo already carries: a diagram, an image, or a clip in the diff or named by the change | a committed visual already shows what changed, so nothing needs capturing |
-| `screenshot` | one rendered state of an app page, of a command's output in a terminal, or of markdown as GitHub renders it | a single frame carries the change: a page or a board, a report a command prints, a comment the city posts |
+| `screenshot` | one rendered state of an app page, of a command's output in a terminal, or of markdown as GitHub renders it | a single frame carries the change: a page or a board, a report a command prints, a comment the city posts, a message the app sends |
 | `video` | motion, or a flow across several steps, with narration | the change happens over time: an interaction or a sequence |
 
 Prefer the cheaper modality unless the change needs the richer one. A static
@@ -81,10 +90,21 @@ layout change is a screenshot, not a video. A new multi-step flow is a video.
 
 The pack's scripts named here sit in the directory `gc <binding> scripts-dir`
 prints, where `<binding>` is the name in front of this skill's: `gc-toolkit` in
-`gc-toolkit.review-demo`. A capture takes minutes, so it runs under the
-claim-lease keepalive the review formula names, from the review workspace, the
-directory that holds `<worktree>`, so the engine's working files stay out of
-the reviewed tree.
+`gc-toolkit.review-demo`. A capture runs from the review workspace, the directory
+that holds `<worktree>`, so the engine's working files stay out of the reviewed
+tree.
+
+Every capture runs inside a sandbox from which the live city cannot be reached
+(`demo-engine-lib.sh`). The engine, the command a terminal capture types, the
+server a capture starts and the page it loads can read none of the city's
+stores, configuration or API, and get none of the variables that point at it.
+A command or page that reads the city fails there. So a capture shows the
+reviewed commit on fixture data that stands in for live data: a fixture the
+rig's guidance names, or one the reviewed commit's own tests build. A visual
+that only live state could produce is no capture, and the verdict says so, as
+for any visual that cannot be produced here. The sandbox is macOS's
+`sandbox-exec`, and a host without it runs no capture;
+`doctor/check-demo-toolchain` reports whether this one has it.
 
 Every modality reaches the PR the same way. `demo-deliver.sh --file <path>
 --subject <anchor_bead>` resolves the PR from the anchor and attaches the file
@@ -102,13 +122,22 @@ reports whether the `gh` it needs is present.
   The app target is the draft's preview, `--base-url <url>`, where one
   deploys. Otherwise serve the reviewed worktree, so the clip shows the
   reviewed commit: `--serve-dir <worktree>/<dir>` for a static build, or
-  `--serve "<command>" --cwd <worktree>` for a dev server. Exit 0 is a clip
+  `--serve "<command>" --cwd <worktree>` for a dev server. When the rig's
+  guidance serves its app on this host from `<worktree>`, give its
+  `--base-url`, unless `city.toml` sets `app_reads_city = "true"` for the rig.
+  The capture refuses any other URL on this host and says why. Exit 0 is a clip
   in which every step's proof held, exit 3 is a clip in which at least one
   step failed its proof, and exit 1 is no clip. The last line names the clip
   and says whether it is narrated. Narration needs `OPENAI_API_KEY` in the
   session. Without it the clip is silent and captioned, and it still shows the
   change. `doctor/check-demo-toolchain` reports which parts of the capture
   toolchain resolve in this session.
+
+  A video's `--serve` command chooses its own port, because the SprintShow
+  engine sets no `$PORT` for it. The engine waits for the command on the port
+  `--port` names, or on 5173 when none is named, and it refuses `--port 0`. So
+  `--port` names the port the command binds, and two captures side by side each
+  need a different port.
 - `repo-artifact`: list the visuals the reviewed commit already carries.
 
   ```bash
@@ -145,16 +174,28 @@ reports whether the `gh` it needs is present.
   For a page, write the script as you would for a video
   (`gc-toolkit.gc-demo-script`). Its steps drive the app to the state, the
   capture is the state the last step leaves, and the app target is the one a
-  video takes. A `--serve` command given `--port` finds that port in `$PORT`,
-  and `--port 0` picks a free one, so two captures never share a server.
+  video takes. `demo-screenshot.sh` adds what the engine lacks for a `--serve`
+  command. It puts the port `--port` names in the command's `$PORT`, and it
+  turns `--port 0` into a free port first, so two screenshots side by side each
+  get a server of their own. With no `--port`, the command gets no `$PORT` and
+  the engine waits on 5173, as for a video.
   `--selector <css>` captures one element instead of the viewport, and
-  `--full-page` captures the whole page. For a terminal, the command runs
-  with bash from `--cwd`, so a relative path runs the reviewed commit's script.
-  The capture shows the command after a `$` prompt, then what it printed. Run
-  only a command that reads, because one that files, routes or closes anything
-  does it in the live city. `--text <file>` renders output captured earlier
-  instead. For markdown, write the markdown the reviewed commit composes to the
-  file. GitHub's own markdown renderer turns it into HTML in the context of the
+  `--full-page` captures the whole page. For a terminal, the engine types the
+  command at a bash prompt in a terminal of its own, whose shell starts in
+  `--cwd`, so a relative path runs the reviewed commit's script. The capture
+  shows the command after a `$` prompt, then what it printed, or the screen a
+  full-screen program it starts draws. A command that waits for input is no
+  capture, and one that pages a long output in a terminal, such as `git log`,
+  waits in its pager, so run it with the pager off (`git --no-pager log`). The
+  capture is as tall as the session, so bound a long output with the command's
+  own limit. The command runs inside the sandbox, so one that reads or writes
+  the city fails, and the capture shows the failure; run it on fixture data, as
+  the rig's guidance says. `--text <file>` shows output captured earlier, which
+  the terminal prints with `cat`. For markdown, write the markdown the reviewed
+  commit composes to the file. `--text` and markdown draw a file as it is, and
+  the sandbox cannot see how the file was made, so write to it only what the
+  reviewed commit produced on fixture data, never output read from the live
+  city. GitHub's own markdown renderer turns it into HTML in the context of the
   rig's origin, so the capture shows it as the PR would. github.com's page
   script finishes some blocks after that renderer returns, such as a mermaid
   diagram or math, and the capture has no such script. So markdown holding one
@@ -167,7 +208,8 @@ reports whether the `gh` it needs is present.
   the file's name is the image's alt text on the PR. Exit 0 is a capture. For a
   page, exit 3 is a capture in which at least one step failed its proof. Exit 1
   is no capture. The last line names the PNG and its size, and for a command it
-  gives the command's exit status. Open the PNG before you deliver it with
+  says how the command ended: its exit status, or that it took over the screen
+  and was still running. Open the PNG before you deliver it with
   `demo-deliver.sh --file <name>.png --subject <anchor_bead> --body "<what it
   shows, and what it was rendered from>"`.
 
@@ -175,6 +217,33 @@ When the modality that fits cannot be produced here, a cheaper one that still
 shows the change is the fallback where it can be produced. Otherwise the note
 stands. The verdict records a delivered fallback as one: `--visual` names the
 modality delivered, and `--visual-fallback-from` names the one that fits.
+
+### Show each message
+
+When the change adds or alters a message the rig's app sends, the check shows
+each such message as its recipient would see it: the sender, the subject and the
+body. Each comes from a run of the reviewed commit. The rig's
+guidance names the run that shows the messages its app sends, such as one whose
+development mail transport writes each message to a file. Where it names none,
+use a run of the reviewed commit's own tests that builds the message. The run
+keeps each message for the capture and sends none, so no live mail service
+takes part in it. A committed picture of a message shows what its author
+recorded, not a run of the reviewed commit, so it is no fallback for one.
+
+The modality is the cheapest screenshot that shows a message whole. A
+plain-text message fits a `terminal` capture, either of the command that prints
+it or, with `--text`, of the file the run wrote. A `markdown` capture can carry
+one too, with the message inside a fenced code block. Outside one, GitHub's
+renderer reads the message as markdown, and a line that opens with a `#` and a
+space, or one above a `--` signature line, shows as a heading. An HTML message
+is a `page` capture of the HTML the run wrote: serve the directory that holds it
+with `--serve-dir`, start the script at the file, and take the capture with
+`--full-page`. When the capture holds the body alone, give the sender and the
+subject in the delivery's `--body`, as the same run produced them. Open each PNG
+and check that it holds the whole message.
+
+Deliver each message on its own, in a PNG named for it, beside the clip or the
+screenshot of any screen the change alters.
 
 ### Judge what it shows
 
@@ -190,20 +259,24 @@ correct before you capture again.
 
 ## What blocks
 
-A capture in which the surface errors, a flow breaks, or a step fails against
-what the change claims is a finding against the change. Request changes, and
-name the visual as the evidence. A change that fails is that finding, and the
-clip or the screenshot is its evidence to deliver.
+A capture in which the surface errors, a flow breaks, a step fails against what
+the change claims, or a message differs from what the change claims, such as one
+with a placeholder left unfilled, is a finding against the change. Request
+changes, and name the visual as the evidence. A change that fails is that
+finding, and the clip or the screenshot is its evidence to deliver.
 
 A capture that cannot run for a reason outside the change is not a finding. The
-capture toolchain may not resolve, the rig may have no app to serve, or no
-preview may deploy. Each of those is the note below, and it never blocks.
+capture toolchain may not resolve, the rig may have no app to serve, no preview
+may deploy, or the surface may show only what live state produces. Each of
+those is the note below, and it never blocks.
 
 ## The verdict
 
 The formula's one `signoff.sh` call records the verdict and the decision, with
 the check's two flags. `--visual` carries the decision: `none` when no visual is
-needed, otherwise the modality you picked. A fallback adds
+needed, otherwise the modality you picked. A verdict that delivers more than one
+modality, such as a clip of the screens beside a screenshot of each message,
+names the costliest. A fallback adds
 `--visual-fallback-from <the modality that fits>`.
 
 `signoff.sh` refuses a demo verdict without `--visual`, and refuses `none` with
@@ -223,7 +296,9 @@ and where the visual was delivered, or what stopped it. A delivered video's
 sentence also says whether the clip is narrated or silent. A delivered
 repo-artifact's sentence also says where the visual came from, as its delivery
 comment does. A delivered screenshot's sentence also says what it was rendered
-from: the reviewed commit, and any fixture that stands in for live data.
+from: the reviewed commit, and any fixture that stands in for live data. A
+verdict on a change that adds or alters a message names each message it shows,
+by its subject, and each one it could not show, with what stopped it.
 
 - **No visual needed.** Approve with `--visual none` and a one-line note. Attach
   nothing.
@@ -235,8 +310,8 @@ from: the reviewed commit, and any fixture that stands in for live data.
   `--visual-fallback-from`, and say what stopped the one that fits.
 - **The fitting visual cannot be produced here.** Approve with its modality, and
   say that a visual is warranted and what stopped it: a surface none of these
-  captures renders, a capture toolchain that does not resolve, or no running app
-  to capture.
+  captures renders, a surface only live state produces, a capture toolchain that
+  does not resolve, or no running app to capture.
   This never blocks. A rework child cannot build the city's capture capability,
   and a red lane would keep the PR in draft, away from the human who would judge
   it.

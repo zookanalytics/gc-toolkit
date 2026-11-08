@@ -1,18 +1,20 @@
 #!/usr/bin/env bash
-# doctor/check-recycle-capable — cycle-recycle can actually fire. The Stop hook
-# in overlays/cycle-recycle exits 0 on every uncertainty (docs/cycle-recycle.md:
+# doctor/check-recycle-capable — cycle-recycle can actually fire. The hook in
+# overlays/cycle-recycle exits 0 on every uncertainty (docs/cycle-recycle.md:
 # "uncertain -> skip ... There is no fallback heuristic"), which is right per
 # turn and leaves a permanently dead mechanism indistinguishable from an idle
 # one. This check asserts the preconditions the hook needs before it can measure
-# or act: a Stop event is wired to the hook with its stdin intact, the hook's own
-# measurement returns the context size a transcript carries, and the refinery's
-# git-op defer guard is not latched. Capability, not installation —
-# check-config-bound already asserts the overlay_dir exists.
-# The measurement arms drive the SHIPPED script (`cycle-recycle.sh --measure`)
-# rather than a copy of its logic, so a check that passes is evidence about the
-# hook and not about the fixture. The guard arm reads the rig's canonical
-# checkout only; the hook also reads its own CWD, which is the refinery's
-# worktree and is not addressable from here.
+# or act: the Stop and UserPromptSubmit events are wired to the hook with its
+# stdin intact, the hook's own measurement returns the context size a
+# transcript carries, its drift check finds a pack file changed after a
+# transcript's first prompt, and the refinery's git-op defer guard is not
+# latched. Capability, not installation — check-config-bound already asserts
+# the overlay_dir exists.
+# The measurement arms drive the SHIPPED script (`cycle-recycle.sh --measure`
+# and `--drift`) rather than a copy of its logic, so a check that passes is
+# evidence about the hook and not about the fixture. The guard arm reads the
+# rig's canonical checkout only; the hook also reads its own CWD, which is the
+# refinery's worktree and is not addressable from here.
 # Read-only. Exit 0=OK 1=Warning 2=Error. stdout: message, then "  - detail"
 # lines. Probes bounded; an UNREADABLE probe warns (1), never passes.
 
@@ -99,6 +101,23 @@ else
             fi
         fi
     fi
+
+    # --- Arm 1c: a UserPromptSubmit event reaches the hook's --prompt mode --
+    # A turn's end is the only other place the hook looks for drift, and a
+    # session idle between turns has none, so without this wiring a change that
+    # lands while the refinery waits for its next nudge reaches that turn unseen.
+    prompt_cmds=$(jq -r '[.hooks.UserPromptSubmit[]?.hooks[]?
+        | select((.type // "command") == "command") | .command // empty] | .[]' "$SETTINGS" 2>/dev/null)
+    prompt_wired=$(printf '%s\n' "$prompt_cmds" | grep 'cycle-recycle\.sh' | grep -c -- '--prompt' || true)
+    if [ "${prompt_wired:-0}" -eq 0 ]; then
+        errors+=("no UserPromptSubmit hook in $SETTINGS runs cycle-recycle.sh --prompt — a pack change that lands while a patrol session waits between turns reaches its next turn on the old text")
+    else
+        starved=$(printf '%s\n' "$prompt_cmds" | grep 'cycle-recycle\.sh' \
+            | grep -E '<[[:space:]]*/dev/null|0<' || true)
+        if [ -n "$starved" ]; then
+            errors+=("the UserPromptSubmit wiring in $SETTINGS redirects the hook's stdin away (\"$starved\") — the transcript path and the prompt arrive ON stdin, so it would find no drift before any prompt")
+        fi
+    fi
 fi
 
 # --- Arm 1b: the hook's own measurement reads a transcript -----------------
@@ -129,6 +148,25 @@ else
         "$want") : ;;
         '')      errors+=("\`sh $HOOK --measure\` returned nothing for a transcript whose newest usage entry totals $want tokens — the hook can read no context size, so it compares nothing against its $THRESHOLD threshold and exits on every turn, for every patrol agent") ;;
         *)       errors+=("\`sh $HOOK --measure\` returned \"$got\" for a transcript whose newest usage entry totals $want tokens — its measurement disagrees with the transcript, so the threshold it enforces is not the one docs/cycle-recycle.md declares") ;;
+    esac
+
+    # --- Arm 1d: the hook's drift check sees a pack file change --------------
+    # Drives `cycle-recycle.sh --drift refinery` on a fixture pack whose patrol
+    # formula was written an hour after the transcript's first prompt. --drift
+    # takes its role as an argument, so GC_AGENT stays empty here too, and a
+    # script predating --drift self-gates out instead of recycling anything.
+    mkdir -p "$probe/pack/formulas"
+    printf 'text\n' > "$probe/pack/formulas/mol-refinery-patrol.toml"
+    dt="$probe/drift.jsonl"
+    first=$(jq -nr --argjson t "$(($(date +%s) - 3600))" '$t | todate' 2>/dev/null)
+    printf '{"type":"user","timestamp":"%s","message":{"content":"startup"}}\n' "$first" > "$dt"
+    want_drift="formulas/mol-refinery-patrol.toml"
+    got_drift=$(printf '{"transcript_path":"%s"}' "$dt" \
+        | GC_AGENT='' GC_RIG_ROOT="$probe/pack" GC_CITY_PATH='' run_piped sh "$HOOK" --drift refinery 2>/dev/null)
+    case "$got_drift" in
+        "$want_drift") : ;;
+        '') errors+=("\`sh $HOOK --drift refinery\` found no change in a pack whose patrol formula was written an hour after the transcript's first prompt — the hook cannot see a pack change, so a patrol session runs the text it started with until something else restarts it") ;;
+        *)  errors+=("\`sh $HOOK --drift refinery\` returned \"$got_drift\" for a pack whose only changed file is $want_drift — its drift check disagrees with the files it watches") ;;
     esac
     rm -rf "$probe"
 fi
@@ -264,6 +302,6 @@ if [ "${#warnings[@]}" -ne 0 ]; then
     detail ${notes[@]+"${notes[@]}"}
     exit 1
 fi
-echo "OK: the Stop wiring reaches the hook with stdin intact, its measurement reads a transcript, and no refinery defer guard is latched"
+echo "OK: the Stop and UserPromptSubmit wiring reach the hook with stdin intact, its measurement reads a transcript, its drift check sees a changed pack file, and no refinery defer guard is latched"
 detail ${notes[@]+"${notes[@]}"}
 exit 0

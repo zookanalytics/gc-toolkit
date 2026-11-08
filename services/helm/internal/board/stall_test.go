@@ -66,7 +66,7 @@ func TestPreOpenCheckStallFires(t *testing.T) {
 	}
 	for _, c := range cases {
 		a := preOpenGateAnchor(c.id, 5, nil, c.blockers...)
-		b := BuildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{})
+		b := buildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{})
 		tile := mustTile(t, b, c.id)
 
 		if !tile.Owed {
@@ -155,7 +155,7 @@ func TestPreOpenCheckStallNamesFirstUngreenLane(t *testing.T) {
 	}
 	for _, c := range cases {
 		a := withReviews(preOpenGateAnchor("tk-lane", 5, c.extra), approved("tk-lane", c.green...)...)
-		tile := mustTile(t, BuildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}), "tk-lane")
+		tile := mustTile(t, buildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}), "tk-lane")
 		if tile.Needs != c.want {
 			t.Errorf("%s: needs = %q, want %q", c.name, tile.Needs, c.want)
 		}
@@ -180,7 +180,7 @@ func TestPreOpenCheckLiveVsDeadReview(t *testing.T) {
 
 	// A codex polecat is claiming the review: the city's move, not a stall.
 	liveAnchor := preOpenGateAnchor("tk-gate", 5, nil, review("gc-toolkit__polecat-codex-hq-live"))
-	live := BuildBoard([]Anchor{liveAnchor}, fixtureNow, false, nil, liveOwners("gc-toolkit__polecat-codex-hq-live"))
+	live := buildBoard([]Anchor{liveAnchor}, fixtureNow, false, nil, liveOwners("gc-toolkit__polecat-codex-hq-live"))
 	lt := mustTile(t, live, "tk-gate")
 	if lt.PRMachine != MachineProgressing {
 		t.Fatalf("a pool-routed review reads progressing, got %q", lt.PRMachine)
@@ -195,7 +195,7 @@ func TestPreOpenCheckLiveVsDeadReview(t *testing.T) {
 	// The same anchor and the same routed review, but the session has drained —
 	// no pool is draining the queue, so nothing is moving it.
 	deadAnchor := preOpenGateAnchor("tk-gate", 5, nil, review("gc-toolkit__polecat-codex-hq-gone"))
-	dead := BuildBoard([]Anchor{deadAnchor}, fixtureNow, false, nil,
+	dead := buildBoard([]Anchor{deadAnchor}, fixtureNow, false, nil,
 		Facts{OwnerState: map[string]string{"gc-toolkit__polecat-codex-hq-gone": "archived"}})
 	dt := mustTile(t, dead, "tk-gate")
 	if dt.PRMachine != MachineProgressing {
@@ -293,7 +293,7 @@ func TestPreOpenCheckStallDoesNotFire(t *testing.T) {
 		},
 	}
 	for _, c := range cases {
-		b := BuildBoard([]Anchor{c.anchor}, fixtureNow, false, nil, Facts{})
+		b := buildBoard([]Anchor{c.anchor}, fixtureNow, false, nil, Facts{})
 		tile := mustTile(t, b, c.anchor.ID)
 		if strings.Contains(tile.Needs, "check stalled") {
 			t.Errorf("%s: the stall must not fire, got needs %q", c.name, tile.Needs)
@@ -330,7 +330,7 @@ func TestPreOpenCheckStallReadsTheReviews(t *testing.T) {
 	}
 	for _, c := range cases {
 		a := withReviews(preOpenGateAnchor("tk-rev", 5, nil), c.reviews...)
-		tile := mustTile(t, BuildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}), "tk-rev")
+		tile := mustTile(t, buildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}), "tk-rev")
 		if !strings.HasPrefix(tile.Needs, c.want) {
 			t.Errorf("%s: needs = %q, want it to start %q", c.name, tile.Needs, c.want)
 		}
@@ -387,7 +387,7 @@ func TestPreOpenCheckStallYieldsToStrongerSurfacing(t *testing.T) {
 	})
 	human.Kind, human.Source = "human", "human"
 
-	b := BuildBoard([]Anchor{parked, human}, fixtureNow, false, nil, Facts{})
+	b := buildBoard([]Anchor{parked, human}, fixtureNow, false, nil, Facts{})
 
 	pk := mustTile(t, b, "tk-parked")
 	if strings.Contains(pk.Needs, "check stalled") {
@@ -406,28 +406,28 @@ func TestPreOpenCheckStallYieldsToStrongerSurfacing(t *testing.T) {
 	}
 }
 
-// TestPreOpenCheckStallYieldsToOpenDemand: an open demand already owns the row
+// TestPreOpenCheckStallYieldsToOpenGate: an open human gate already owns the row
 // and names the operator's actual question, so the stall must not overwrite it
 // with the stall's generic wording. The row renders `asking: <title>`, not
 // `correctness check stalled`, even though every other stall precondition holds
 // — past the threshold, no live review. This is the row shape the stall guard's
 // `ask == nil` clause protects.
-func TestPreOpenCheckStallYieldsToOpenDemand(t *testing.T) {
-	demand := Blocker{
+func TestPreOpenCheckStallYieldsToOpenGate(t *testing.T) {
+	gate := Blocker{
 		ID: "tk-ask", Title: "operator: which rig owns the shared fixture?",
-		Status: "open", IssueType: "decision",
+		Status: "open", IssueType: "gate", AwaitType: "human",
 	}
-	a := preOpenGateAnchor("tk-demand", 5, nil, demand)
-	tile := mustTile(t, BuildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}), "tk-demand")
+	a := preOpenGateAnchor("tk-gated", 5, nil, gate)
+	tile := mustTile(t, buildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}), "tk-gated")
 
 	if strings.Contains(tile.Needs, "check stalled") {
-		t.Errorf("an open demand owns the row; the stall must not overwrite it, got %q", tile.Needs)
+		t.Errorf("an open gate owns the row; the stall must not overwrite it, got %q", tile.Needs)
 	}
 	if tile.Needs != "asking: operator: which rig owns the shared fixture?" {
-		t.Errorf("needs = %q, want the demand rendered as `asking: <title>`", tile.Needs)
+		t.Errorf("needs = %q, want the gate rendered as `asking: <title>`", tile.Needs)
 	}
 	if !tile.Owed {
-		t.Error("a row carrying an unanswered demand is owed")
+		t.Error("a row carrying an unanswered gate is owed")
 	}
 }
 
@@ -444,7 +444,7 @@ func TestPreOpenCheckLiveReviewNotRouted(t *testing.T) {
 		Inflight:   map[string][]string{"tk-rev": {"gc-toolkit__polecat-codex-hq-run"}},
 		OwnerState: map[string]string{"gc-toolkit__polecat-codex-hq-run": "active"},
 	}
-	tile := mustTile(t, BuildBoard([]Anchor{a}, fixtureNow, false, nil, f), "tk-live")
+	tile := mustTile(t, buildBoard([]Anchor{a}, fixtureNow, false, nil, f), "tk-live")
 
 	if strings.Contains(tile.Needs, "check stalled") {
 		t.Errorf("a live review workflow with no route is a healthy hold, not a stall; got %q", tile.Needs)

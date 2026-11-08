@@ -111,6 +111,11 @@ if [ "$1" = "session" ] && [ "$2" = "nudge" ]; then
   printf 'gc session nudge %s\n' "$3" >> "$CALLS"
   exit 0
 fi
+# The step's check call reads the work bead's tree from what the bd stub serves.
+if [ "$1" = "bd" ] && [ "$2" = "show" ]; then
+  shift
+  exec "${0%/*}/bd" "$@"
+fi
 # The self-review step's note of setup and build lands in the state the bd stub
 # serves, so the exit condition reads what the step wrote.
 if [ "$1" = "bd" ] && [ "$2" = "update" ]; then
@@ -139,9 +144,9 @@ echo base > "$WT/f"; git -C "$WT" add f; git -C "$WT" commit -qm base
 echo more > "$WT/f"; git -C "$WT" add f; git -C "$WT" commit -qm work
 HEAD_SHA=$(git -C "$WT" rev-parse HEAD)
 OLD_SHA=$(git -C "$WT" rev-parse HEAD~1)
-# The step's note of setup and build at <commit>: setup <s>, build <b>, and the
-# build command [bc], default make.
-noted() { jq -nc --arg c "$1" --arg s "$2" --arg b "$3" --arg bc "${4:-make}" '{commit: $c, setup: $s, build: $b, setup_command: "", build_command: $bc}'; }
+# The step's note of setup and build at <commit>: setup <s>, build <b>, the
+# build command [bc], default make, and the setup command [sc], default none.
+noted() { jq -nc --arg c "$1" --arg s "$2" --arg b "$3" --arg bc "${4-make}" --arg sc "${5-}" '{commit: $c, setup: $s, build: $b, setup_command: $sc, build_command: $bc}'; }
 # Unless a case says otherwise, setup and build passed at HEAD.
 SB_GREEN=$(noted "$HEAD_SHA" none pass)
 # A second worktree of the same clone, at HEAD~1, and a third at HEAD: records
@@ -174,7 +179,7 @@ pour_vars() {
     --arg lint "${VAR_LINT-true}" --arg build "${VAR_BUILD-make}" --arg affected "${VAR_AFFECTED-true}" \
     --arg test "${VAR_TEST-}" '{base_branch: $base, setup_command: $setup,
       typecheck_command: $typecheck, lint_command: $lint, build_command: $build,
-      affected_tests_command: $affected, test_command: $test}'
+      affected_tests_command: $affected, test_command: $test, binding_prefix: "gc-toolkit."}'
 }
 
 write_state() {
@@ -380,36 +385,80 @@ MD_PRE_BUILD=$(premark "$HEAD_SHA" "$MD_SETUP_BUILD" tk-b1); write_state; green
 run_case "FAIL when setup failed too and only the build is marked" 1
 assert_out "names the unmarked setup" "not green at $HEAD_SHA: setup"
 
+# A command the step does not declare has none to match, so the iteration may
+# run the repo's own in its place, and the note's outcome for it answers, as any
+# run's record does for such a check.
+OWN_SETUP='pnpm install --frozen-lockfile'; OWN_BUILD='pnpm build'
+reset_env; VAR_BUILD=""; MD_SETUP_BUILD=$(noted "$HEAD_SHA" pass pass "$OWN_BUILD" "$OWN_SETUP"); write_state; green
+run_case "PASS on the note of the repo's own setup and build when the step declares neither" 0
+reset_env; VAR_BUILD=""; MD_SETUP_BUILD=$(noted "$HEAD_SHA" none none ""); write_state; green
+run_case "PASS on a note of none and no commands when the step declares neither" 0
+reset_env; VAR_BUILD=""; MD_SETUP_BUILD=$(noted "$OLD_SHA" pass pass "$OWN_BUILD" "$OWN_SETUP"); write_state; green
+run_case "FAIL when the repo's own setup and build were noted at another commit" 1
+assert_out "…counting them as unrecorded" "nothing recorded at $HEAD_SHA for: setup build"
+# Its outcome counts whichever way it went.
+reset_env; VAR_BUILD=""; MD_SETUP_BUILD=$(noted "$HEAD_SHA" pass fail "$OWN_BUILD" "$OWN_SETUP"); write_state; green
+run_case "FAIL when the repo's own build failed at HEAD" 1
+assert_out "…naming that build" "not green at $HEAD_SHA: build"
+reset_env; VAR_BUILD=""; MD_SETUP_BUILD=$(noted "$HEAD_SHA" fail pass "$OWN_BUILD" "$OWN_SETUP"); write_state; green
+run_case "FAIL when the repo's own setup failed at HEAD" 1
+assert_out "…naming that setup" "not green at $HEAD_SHA: setup"
+reset_env; VAR_BUILD=""; MD_SETUP_BUILD=$(noted "$HEAD_SHA" pass fail "$OWN_BUILD" "$OWN_SETUP")
+MD_PRE_BUILD=$(premark "$HEAD_SHA" "$MD_SETUP_BUILD" tk-b1); write_state; green
+run_case "PASS when a pre-existing mark holds the note of the repo's own failed build" 0
+assert_out "…naming its tracker" "build: the fail at $HEAD_SHA is pre-existing, tracked by tk-b1"
+# Each command is judged by itself, so the one the step does declare still has
+# to match.
+reset_env; MD_SETUP_BUILD=$(noted "$HEAD_SHA" pass pass make "$OWN_SETUP"); write_state; green
+run_case "PASS on the repo's own setup beside the declared build" 0
+reset_env; MD_SETUP_BUILD=$(noted "$HEAD_SHA" pass pass "$OWN_BUILD" "$OWN_SETUP"); write_state; green
+run_case "FAIL when the build is not the declared one, though the step declares no setup" 1
+assert_out "…counting both as unrecorded" "nothing recorded at $HEAD_SHA for: setup build"
+reset_env; VAR_SETUP="$OWN_SETUP"; VAR_BUILD=""; MD_SETUP_BUILD=$(noted "$HEAD_SHA" pass pass "$OWN_BUILD" "$OWN_SETUP"); write_state; green
+run_case "PASS on the repo's own build beside the declared setup" 0
+reset_env; VAR_SETUP="$OWN_SETUP"; VAR_BUILD=""; MD_SETUP_BUILD=$(noted "$HEAD_SHA" pass pass "$OWN_BUILD" 'npm ci'); write_state; green
+run_case "FAIL when the setup is not the declared one, though the step declares no build" 1
+assert_out "…counting both as unrecorded" "nothing recorded at $HEAD_SHA for: setup build"
+# A note that names no command says the declared one never ran.
+reset_env; MD_SETUP_BUILD=$(noted "$HEAD_SHA" none none ""); write_state; green
+run_case "FAIL when the note ran no build, though the step declares one" 1
+assert_out "…counting both as unrecorded" "nothing recorded at $HEAD_SHA for: setup build"
+reset_env; VAR_SETUP="$OWN_SETUP"; VAR_BUILD=""; MD_SETUP_BUILD=$(noted "$HEAD_SHA" none none ""); write_state; green
+run_case "FAIL when the note ran no setup, though the step declares one" 1
+assert_out "…counting both as unrecorded" "nothing recorded at $HEAD_SHA for: setup build"
+
 # --- 3d4. the step's own block, rendered as a pour renders it -------------------
-# The self-review step's check block, rendered with the case's commands, runs in
-# the fixture worktree against the gctk built from this checkout. The root stub
+# The self-review step's check call, rendered with the case's commands, runs
+# rig-checks.sh in the fixture worktree against the gctk built from this checkout. The root stub
 # stamps the same commands, as a pour does, and the block's note of setup and
 # build reaches the state the bd stub serves, so the exit condition reads what
 # the block wrote.
 ROOT="$(cd "$HERE/../.." && pwd)"
 awk '
   /^```bash$/ {buf = ""; f = 1; next}
-  /^```$/ {if (f && buf ~ /# >>> self-review-lease-keepalive/) {printf "%s", buf; exit} f = 0; next}
+  /^```$/ {if (f && buf ~ /rig-checks\.sh" self-review/) {printf "%s", buf; exit} f = 0; next}
   f {buf = buf $0 "\n"}' "$ROOT/formulas/mol-polecat-work.toml" > "$TMP/checks.tmpl"
-grep -qF 'self_review_setup_build=' "$TMP/checks.tmpl" \
-  && ok "the self-review check block extracts, with its note of setup and build" \
-  || bad "the self-review check block did not extract with its note of setup and build"
+grep -qF 'rig-checks.sh" self-review' "$TMP/checks.tmpl" \
+  && ok "the self-review check call extracts" \
+  || bad "the self-review check call did not extract"
 # render_checks : the block, each placeholder filled with what the case's pour
 # renders (pour_vars).
 render_checks() {
   jq -Rr --argjson v "$(pour_vars)" \
-    'reduce ($v | to_entries[]) as $e (.; split("{{" + $e.key + "}}") | join($e.value))' "$TMP/checks.tmpl"
+    'reduce ($v | to_entries[]) as $e (.; split("{{" + $e.key + "}}") | join($e.value))' "$TMP/checks.tmpl" \
+    | sed -e "s|\"<the work bead>\"|\"\${ISSUE_ID-gc-issue}\"|" \
+          -e "s|\"\$(b='gc-toolkit.'; gc \"\${b%.}\" scripts-dir)/rig-checks.sh\"|\"$HERE/rig-checks.sh\"|"
 }
 # run_checks <shell> : the rendered block in the fixture worktree.
 run_checks() {
   render_checks > "$TMP/checks.sh"
   ( cd "$WT" && env GC_PACK_DIR="" GC_RIG_ROOT="" GC_CITY_PATH="$TMP/no-city" GCTK_BIN="$GCTK_BUILT" \
-      WORK_BEAD_ID="${ISSUE_ID-gc-issue}" CLAIMED_ITER_BEAD=iter-1 "$1" "$TMP/checks.sh" ) >"$TMP/checks.out" 2>&1
+      ISSUE_ID="${ISSUE_ID-gc-issue}" "$1" "$TMP/checks.sh" ) >"$TMP/checks.out" 2>&1
 }
 reset_env; render_checks > "$TMP/checks.sh"
 grep -qF '{{' "$TMP/checks.sh" \
-  && bad "the block renders with a placeholder pour_vars does not fill" \
-  || ok "pour_vars fills every placeholder in the block"
+  && bad "the call renders with a placeholder pour_vars does not fill" \
+  || ok "pour_vars fills every placeholder in the call"
 SHELLS="bash"; command -v zsh >/dev/null 2>&1 && SHELLS="bash zsh"
 for sh in $SHELLS; do
   reset_env; MD_SETUP_BUILD=""; VAR_BUILD='exit 1'; write_state
@@ -426,6 +475,15 @@ for sh in $SHELLS; do
   reset_env; MD_SETUP_BUILD=""; VAR_BUILD=true; write_state
   run_checks "$sh"
   run_case "$sh: PASS after the step's own block ran a build that passes" 0
+  # On a root stamped with neither command, the iteration gives the block the
+  # repo's own, and its note names them.
+  reset_env; MD_SETUP_BUILD=""; VAR_BUILD=""; write_state
+  VAR_SETUP=true VAR_BUILD=true run_checks "$sh"
+  run_case "$sh: PASS after the block ran the repo's own setup and build where the step declares neither" 0
+  # shellcheck disable=SC1090  # the generated state file the stubs read
+  BLOCK_NOTE=$(MD_SETUP_BUILD=""; . "$STATE"; printf '%s' "$MD_SETUP_BUILD")
+  eq "$(printf '%s' "$BLOCK_NOTE" | jq -r '[.commit, .setup, .build, .setup_command, .build_command] | join(" ")')" "$HEAD_SHA pass pass true true" \
+    "$sh: …with a note that names them"
   # What setup and build leave that git does not ignore is put back, so the
   # checks after them run, and the block notes them, in one run of the block.
   reset_env; MD_SETUP_BUILD=""; VAR_SETUP='printf rewritten > f'; VAR_BUILD='printf out > dist.txt'; write_state
@@ -434,6 +492,14 @@ for sh in $SHELLS; do
   eq "$(git -C "$WT" status --porcelain)/$(cat "$WT/f")" "/more" "$sh: …which leaves the tree HEAD holds"
   # Whatever the case left must not reach the cases after it.
   git -C "$WT" reset -q --hard; git -C "$WT" clean -fdq
+  # A rig's command may run over several lines or hold a here-document. It reaches
+  # the record whole, so the exit condition reads the run the step declares.
+  reset_env; MD_SETUP_BUILD=""; VAR_BUILD=$'true\ntrue'; VAR_AFFECTED=$'true\ntrue'
+  VAR_LINT=$'cat <<EOF >/dev/null\nit\'s a "body" ) (\n\nEOF\ntrue'; write_state
+  run_checks "$sh"
+  run_case "$sh: PASS after the block ran multi-line commands and one holding a here-document" 0
+  eq "$(recorded lint | jq -r '.command')" "$VAR_LINT" "$sh: …with the here-document's command recorded whole"
+  eq "$(recorded test | jq -r '.command')" "$VAR_AFFECTED" "$sh: …and the multi-line test run"
   # A test run that leaves a file keeps its record, and the note the block
   # wrote before the run stands, so removing the file is all the loop needs.
   reset_env; MD_SETUP_BUILD=""; VAR_AFFECTED='printf x > cover.out'; VAR_BUILD=true; write_state
@@ -502,8 +568,9 @@ assert_out "names the dirty-tree reason" "worktree is dirty"
 rm -f "$WT/untracked"
 
 # --- 4b. a read gctk cannot make ---------------------------------------------
-# Config hides the untracked file from step 4's status but not from gctk's, so
-# --check reads nothing, and the verdict gives gctk's reason, not a red check.
+# Config hides the untracked file from the clean-tree check's status but not
+# from gctk's, so --check reads nothing, and the verdict gives gctk's reason, not
+# a red check.
 reset_env; write_state; green
 git -C "$WT" config status.showUntrackedFiles no
 echo dirt > "$WT/untracked"

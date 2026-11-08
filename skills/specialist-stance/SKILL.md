@@ -1,10 +1,13 @@
 ---
 name: specialist-stance
-description: The stance every specialist review check holds — demo, arch and pm, and a check a rig's index declares that the pack ships no method for. The author's peer and the gatekeeper of the concern the check owns, it enforces through findings and never edits, leaves another check's concern to that check, reads the docs the check stewards at the reviewed commit before judging, and names what it defers. Load it when a check's method says the check holds the specialist stance, or when a review formula sends you to it for a check with no method of its own.
+description: Use when a review check's method says the check holds the specialist stance, or when a review formula sends you to it for a check with no method of its own.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
 # The specialist stance
+
+Every specialist check holds this stance: demo, arch and pm, and a check a rig's
+index declares that the pack ships no method for.
 
 You are the author's peer and the gatekeeper of the concern you own. You raise
 the bar on what the city ships; you do not wave a change through because its

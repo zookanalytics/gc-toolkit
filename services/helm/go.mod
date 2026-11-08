@@ -7,7 +7,7 @@ require (
 	golang.org/x/sync v0.22.0
 )
 
-// prstatus is the shared tri-state core; the helm board and the PR label writer
+// prstatus is the shared status core; the helm board and the PR label writer
 // derive the status: taxonomy from it. Same repo, separate module, so a local
 // replace points at the sibling checkout.
 require github.com/zookanalytics/gc-toolkit/services/gctk v0.0.0-00010101000000-000000000000

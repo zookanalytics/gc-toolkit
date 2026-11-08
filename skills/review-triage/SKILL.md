@@ -1,6 +1,6 @@
 ---
 name: review-triage
-description: The method for the triage check — a broad, cheap scan that does not judge a change but decides which specialist checks it needs, then records that decision by widening the anchor's check_set from the check index's declared checks; and, when bringing the branch current conflicted, rules from the worker's audit on what that round reopens. Use when you hold a review bead whose check is triage, or when asked which review checks a diff warrants. Covers the index contract, the monotonic-widen rule, the expected common case of adding nothing, and the bring-current round ruling.
+description: Use when you hold a review bead whose check is triage, or when asked which review checks a diff warrants.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 

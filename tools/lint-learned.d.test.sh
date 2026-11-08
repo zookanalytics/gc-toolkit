@@ -2282,11 +2282,11 @@ plantcs "$TMP/cs-stamp.sh" <<'FIX'
 #!/usr/bin/env bash
 X=$(gc @CREATE@ "t" -t task --json | jq -r '.id')
 gc bd update "$X" @STAMP@ task_kind=review
-V_JSON=$(gc @CREATE@ -t task --title "visit: s" \
+V_JSON=$(gc @CREATE@ -t task --title "finding: s" \
   -d "body" --json)
 V=$(printf '%s' "$V_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end')
 gc bd update "$V" @STAMP@ "gc.routed_to=human" \
-  @STAMP@ task_kind=visit
+  @STAMP@ task_kind=finding
 f() {
   local id
   id=$(gc_bd create "t" --json | jq -r .id)

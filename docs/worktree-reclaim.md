@@ -1,208 +1,139 @@
 # Worktree reclaim
 
-A polecat creates a git worktree per bead and records the path in
-`metadata.work_dir`. Nothing removes it when the bead closes: the refinery
-merges and moves on, the witness inventories and flags but does not delete,
-and the polecat drains. Every checkout is a full working tree, so the
-directories are a monotonic floor under the disk, and the only reclaim is an
-operator noticing the pressure and doing it by hand.
-
-The pressure arrives faster than anyone notices. On this city the registry
-grew from 351 worktrees to 790 in five weeks, `.gc/worktrees/gc-toolkit` from
-1.3G to 9.2G, and the disk reached 99% used with 3.2G free. A full disk kills
-Dolt, which makes `bd` queries return false-empty results, so the failure
-presents as a city with no work rather than as a disk alarm.
+A polecat works each bead in a git worktree of its own under its agent home,
+and records the path in `metadata.work_dir`. Its hand-off to the refinery
+removes the tree and deletes the tree's local branch. A tree the hand-off
+leaves is the controller's: Gas City's closed-bead reaper removes it once its
+bead has closed, the tree reads clean, and a ref reaches every commit in it.
+Every checkout is a full working tree, so a tree that nothing removes stays as
+a floor under the disk.
 
 ## Scope
 
-**Mandate.** Reclaiming the git worktrees and `polecat/<bead-id>` branches that
-closed work leaves behind: when each may go, how a removal is pinned so it can
-be restored, what the reports mean, and the rails that protect live work.
+**Mandate.** What removes a polecat's per-bead worktree and its local
+`polecat/<bead-id>` branch, what each removal checks first, what stays, and how
+a person releases a tree the controller holds or restores a removed one.
 
-**Boundaries.** Refs outside the `polecat/<bead-id>` family, and agent homes,
-are outside it. Which bead statuses count as live is `bd`'s own status
-contract, which the reaper reads rather than restates. Harness scratch is
-[scratch-reclaim.md](scratch-reclaim.md).
+**Boundaries.** Who holds each removal, with its evidence and its limits, is
+[authority-map.md](authority-map.md). A review's workspace is
+[review-workspace.md](review-workspace.md)'s, an agent's home is
+`worktree-setup.sh`'s ([pack-authoring.md](pack-authoring.md)), and harness
+scratch is [scratch-reclaim.md](scratch-reclaim.md)'s.
 
-## What the reaper does
+## At the hand-off
 
-`orders/worktree-reap.toml` runs `assets/scripts/worktree-reap.sh` hourly,
-`scope = "city"`, no LLM and no agent. It enumerates `git worktree list` over
-every rig repo and the town repo, because a worktree living under one rig's
-tree can be registered in another repo's git dir and only the registry knows
-which. It reads the bead store of every repo it enumerates, opening each by
-path as `gc bd --db <repo>/.beads`. `gc bd --rig` resolves only the rigs
-`city.toml` declares, so the town's store answers to no rig name. It runs two
-passes in one budget: it removes the worktrees of closed beads, then drops the
-`polecat/<bead-id>` branches those worktrees leave behind.
+`work-submit.sh` removes the run's tree once the branch is pushed, the hand-off
+is written and the step is closed. It runs `git worktree remove` without force,
+deletes the local branch, and clears `work_dir`. A tree with an uncommitted or
+untracked path stays on its branch, and so does a tree that holds a checkout of
+any repository or has a directory the walk cannot read. `work_dir` keeps naming
+each of them. A run that takes the store-only exit, halts before its push
+(`auto_push=false`) or ends before its hand-off leaves its tree on its branch
+too.
 
-A worktree is removed when all of these hold:
+## The controller's closed-bead reaper
 
-- some bead names its path in `metadata.work_dir`, and none of the beads
-  naming that path is still live
-- no live bead names its branch, and no open pull request has that branch as
-  its head
-- the newest close among the beads naming it is older than
-  `WORKTREE_REAP_CLOSED_AFTER` (24h)
-- `git status --porcelain` is empty
-- it is not an agent home, a session `work_dir`, or a live process's cwd
-- it is not locked, not the main worktree, and not the parent of another
-  registered worktree
+A city turns the reaper on with `auto_reap_closed_bead_worktrees = true` under
+`[daemon]` in `city.toml`
+([DaemonConfig](https://docs.gascity.com/reference/config#daemonconfig)).
+Without it, nothing removes a tree the hand-off leaves. On each tick the
+controller lists each rig's registered worktrees with `git worktree list`, run
+in the rig's own repository. It removes a tree with `git worktree remove`, never
+forced, when all of these hold (`reapClosedBeadWorktrees` in
+`cmd/gc/bead_worktree_reaper.go`):
 
-"Live" is read from the bead-status contract, not a list fixed in the reaper.
-`gc bd statuses` sorts every status into a category, and one category, `done`,
-means the work is finished and its checkout disposable. Every other status is
-live: `deferred` is frozen for later, `pinned` stays open indefinitely,
-`hooked` is on an agent's hook, and a checkout any of them names is still
-someone's. The reaper asks each store for every non-`done` status it defines,
-so a status added to `bd` or configured on a rig protects its worktrees the
-day it exists. The reap side keys on `closed` alone — the one done status with
-a defined close time — so a custom done status leaves a worktree unreaped
-rather than reaped while live. A store whose contract cannot be read is skipped
-whole, and if none can be read the pass refuses.
+- the tree sits under the city's worktree root for the rig,
+  `.gc/worktrees/<rig>/`
+- the first bead id it reads in its directory name, or in its parent's when
+  that name holds none, names a bead that reads closed in the rig's store. It
+  reads an id as two neighboring pieces of the name, split at its dashes, of
+  which the first is one of the city's prefixes
+- it is not a named agent's home
+- it is older than `auto_reap_closed_bead_worktrees_min_age_minutes`, 10 by
+  default, measured from the mtime of its `.git` file
+- no bead outside the terminal states names it in `work_dir` or `gc.work_dir`
+- no live process and no active session stands at or under it
+- `git status --porcelain` reads empty in it, and every commit it holds is
+  reachable from a branch, a tag or a remote-tracking ref
 
-For worktree removal the identity chain is `metadata.work_dir`, so the reverse
-lookup is exact path equality and no bead id is parsed out of a path. Path and
-branch disagree in practice: a rework child stands on its predecessor's branch
-while keeping its own directory, so `worktrees/tk-ok9t2` is checked out on
-`polecat/tk-z4aka`, and either name alone resolves to the wrong bead. The branch
-pass is the exception — it has no `work_dir` and keys on the ref's bead id, as
-"Dropping the branch" below describes.
+A probe that fails holds its tree, and a liveness scan that cannot be read
+holds every tree for that tick. A build without upstream b244d69f5 also holds
+every tree of a repository whose stash list is not empty. A repository's
+worktrees share one stash list, so in such a build one stash anywhere in a rig
+holds all of that rig's trees until it is dropped.
 
-Both branch questions are asked, for the same reason. The branch the checkout
-is on and the branch its beads recorded are not always the same ref, and
-either being live holds the tree. Asking the ledger for live beads on the
-branch is what covers a branch in the pre-open codex check, which is live work
-carrying no pull request at all.
+The removal deletes the tree's ignored files with it, and the reaper does not
+look under the tree first, so a checkout of another repository under an ignored
+path goes too. The hand-off keeps a tree that holds such a checkout, so the
+checkout is safe until the tree's bead closes, and no longer. That gap is filed
+as work on Gas City.
 
-## Dropping the branch
-
-`git worktree remove` deletes the checkout and leaves the branch, so a
-`polecat/<bead-id>` ref outlives every worktree the pass takes and accretes one
-per work item. The branch pass drops those refs. Unlike the worktree pass it
-parses the bead id out of the branch name: a branch carries no `work_dir`, and
-the name is its only link to a bead.
-
-It owns one family, `polecat/<bead-id>`, and the whole name after `polecat/`
-must be exactly a bead id to belong to it. Any other ref — a roadmap branch, a
-`claude/*` research branch, a design-doc trio, or a `polecat/<bead-id>-<suffix>`
-variant a different bead holds — names no bead the pass may reason about and is
-left alone. Within the family a branch is dropped only once the bead it names
-has closed, its content is already on the default branch, and no live bead
-records the ref and no open pull request has it as head. The bead a branch names
-is not always the bead that holds it: a rework or rebase child records its
-predecessor's branch, so a ref whose name-bead has closed can still be a live
-claimant's only copy of resumable work. That is the same signal the worktree
-pass reads to keep a tree. A branch whose content is proven nowhere is kept too,
-because the pass must never take the only copy of unmerged work.
-
-`origin/main`, not the shared checkout's own lagging `main`, is the authority
-for "on the default branch". The proof is reachability — the tip is an ancestor
-of it — or the squash signal, the bead id on one of its commit subjects, since a
-squash tip is a new sha and never an ancestor. A branch whose origin counterpart
-was deleted (`[gone]` upstream, the usual post-merge cleanup) is offered to `git
-branch -d` first, whose own merged-check is a second gate; every squash-merged
-tip it declines falls to `git branch -D`, safe because the proof already showed
-the content landed. A closed-lookup that fails or answers empty confirms
-nothing, so the family is held — the same fail-closed the worktree pass takes on
-an unreadable ledger.
-
-## Removal is reversible, not gated
-
-Deleting a worktree is destructive-looking, and the reflex is to route it to a
-human for confirmation. That reproduces the gap the reaper exists to close:
-the reclaim still waits for someone to notice.
-
-Instead every removal is pinned first. The tip is written as an annotated
-`archive/worktree/<bead>@<sha>` tag carrying the path, the bead, the branch,
-and the command that restores it. Restoring is
-`git -C <repo> worktree add <path> <tag>`. If the tag cannot be written the
-worktree is not removed — no pin, no removal.
-
-The pin is load-bearing rather than ceremonial. Roughly half the registry is
-detached-HEAD merge residue, and a detached worktree's HEAD is the only ref
-reaching its commits, so removing the checkout would leave them unreachable.
-Squash-merged work has the same shape from the other direction: the branch tip
-is never an ancestor of the default branch, so landed work reads as unpushed.
-
-The same pin guards registry litter. A worktree whose directory was deleted out
-from under git leaves an admin `HEAD` behind, and `git worktree prune` reclaims
-that entry by dropping the `HEAD` — for a detached entry the only ref its
-commits have, dropped immediately with no expiry to make it safe. So each
-prunable tip is pinned by an `archive/worktree` tag before the prune runs, and
-a dry run prunes nothing at all.
-
-## What the reports mean
-
-Reclaim is reported as a count of removals plus the free space on the
-filesystem holding the first repo. That figure moves for every other writer on
-the host too, so it is labelled as the filesystem's rather than as the pass's
-yield.
-
-The count is honest because each removal is asserted on disk afterwards.
-`git worktree remove` can return success and leave the directory standing;
-those are counted as failures and named, because a pass that freed nothing
-would otherwise print the same summary as one that freed everything.
-
-Removal itself runs without `--force`, so git's own dirty check is the last
-gate and it runs after the status probe rather than instead of it.
-
-## Rails
-
-An agent home is never removed. It is created by `worktree-setup.sh` at the
-agent's configured `work_dir` before any session exists and it outlives every
-session that runs in it, so a stopped pool member still owns its home and no
-liveness probe can see that. The roster states the shape as a path template,
-which becomes an anchored regex whose substitutions widen to one path
-*segment*. A shell glob cannot express that: `*` crosses `/`, so
-`.gc/worktrees/*/polecats/*` would also match every per-bead worktree nested
-under a home, and the reaper would protect the whole population it exists to
-take.
-
-Live processes are read with `lsof -w -n -P -F n -d cwd`, which lists the cwd
-of every process this user can see on Linux and on macOS, and a live cwd
-protects every worktree containing it, not only an exact path match. A listing
-that fails, or that names no cwd at all, refuses the pass. A protection that
-finds none of the live processes still reads as a check, so it is worse than
-none.
-
-A repo whose open-pull-request listing fails is held whole for the next pass
-rather than reaped without the check. That gate is the backstop for a ledger
-that already disagrees with reality, so failing open would drop it exactly
-where it earns its place. A ledger that answers nothing anywhere, or a
-registry that enumerates nothing, is treated the same way: a broken lookup is
-not an empty city, and every path would otherwise read as unclaimed.
-
-Nested worktrees drain leaf-first. A worktree that is the parent of another
-registered worktree is held, so the child goes this pass and the parent
-becomes eligible on the next.
-
-`assets/scripts/worktree-reap.test.sh` is the regression suite, hermetic
-against a synthetic city in a tempdir: real git and a real filesystem, with
-only `gc` and `gh` stubbed. Every keep is asserted alongside a take in the
-same run, because a pass that filtered everything and a pass that filtered
-nothing print the same summary.
-
-## Operating it
+Each removal records a `bead.worktree.reaped` event, which names the bead, the
+path, the rig and the branch, `HEAD` for a detached tree. A closed bead's tree
+that the reaper holds records `bead.worktree.reap_skipped` with the reason when
+the reaper first holds it, and again each time the reason changes, so a tree
+held for days for one reason can have a single event:
 
 ```bash
-assets/scripts/worktree-reap.sh --dry-run   # the full plan, every path
-assets/scripts/worktree-reap.sh             # reap, one summary line per repo
+gc events --type bead.worktree.reaped --since 24h | jq -r '.payload.path'
+gc events --type bead.worktree.reap_skipped --since 24h \
+  | jq -r '"\(.payload.path)\t\(.payload.reason)"'
 ```
 
-`--dry-run` prints every path it would take rather than a sample: it is the
-operator's review surface, and a truncated list is not something anyone can
-approve.
+So the reaper never takes:
 
-`WORKTREE_REAP_CLOSED_AFTER` (seconds, default 24h) is the grace after a
-bead's close. `WORKTREE_REAP_BUDGET` (default 420s) bounds the pass; what it
-yields is reported as untaken and the next pass takes it.
-`WORKTREE_REAP_TAG_PREFIX` (default `archive/worktree`) names the pin
-namespace. `WORKTREE_REAP_REPOS` overrides the rig list with explicit repo
-paths, and then reads the ledger with no store selector, from whatever store
-`gc bd` resolves on its own.
+- a tree outside `.gc/worktrees/<rig>/`, such as a review's workspace under
+  `$TMPDIR`
+- a tree in whose name, or its parent's, it reads no closed bead of the rig's,
+  such as an agent's home. A home is named for its agent, as
+  `gc-toolkit.polecat-4` is. A converse sitting's home,
+  `gc-toolkit.tk-<conversation>`, does hold its conversation's id, but split at
+  its dashes the name's pieces are `gc`, `toolkit.tk` and the id's suffix, so
+  the reaper never reads that id
+- a tree that reads dirty
+- a tree whose commits no ref reaches
 
-To restore a reaped worktree, read the tag and run the command in it:
+## What stays, and how to release it
+
+A dirty tree stays until a person keeps or discards what it holds. The first
+tick that finds it clean takes it.
+
+A tree whose commits no ref reaches stays for good, because removing it would
+lose them. A detached tree comes to this when nothing else reaches its commits,
+as when its branch is deleted locally, then from origin by a squash merge, and
+then from the remote-tracking refs by the next `git fetch --prune`. The reaper
+names such a tree in a `bead.worktree.reap_skipped` event whose reason carries
+`unreachable=true`, so read back far enough to reach that event, or check the
+tree itself, which prints each commit no ref reaches. To release such a tree,
+pin its HEAD with an annotated tag. The tag keeps the commits, and the next
+tick takes the tree:
+
+```bash
+gc events --type bead.worktree.reap_skipped --since 168h \
+  | jq -r 'select(.payload.reason | contains("unreachable=true")) | .payload.path' | sort -u
+git -C <tree> log HEAD --oneline --not --branches --remotes --tags
+sha=$(git -C <tree> rev-parse HEAD)
+git -C <tree> tag -a "archive/worktree/<bead>@${sha:0:12}" "$sha" \
+  -m "worktree <tree> (bead <bead>) pinned so the controller can remove it
+Restore: git -C <repo> worktree add <path> archive/worktree/<bead>@${sha:0:12}"
+```
+
+## Branches
+
+The hand-off deletes the local `polecat/<bead-id>` branch with the tree.
+No reaper deletes the branch that a kept tree, a store-only exit, a halt or a
+run that ended before its hand-off leaves behind. The controller's reaper
+deletes no ref, and core's `prune-branches` order reads only `gc/*` branches
+and deletes with `git branch -d`, which refuses a squash-merged tip. Such a
+branch costs one ref. It keeps the commits of work that never landed reachable,
+so the controller can still take the tree they sit in once its bead closes.
+
+## Restoring a removed tree
+
+A repository's `archive/worktree/<bead>@<sha>` tags each pin the tip of a tree
+that was removed or released. A tag can be the only ref to the commits it pins,
+so none is deleted. Its message names the tree's path and its bead, and the
+command that restores it:
 
 ```bash
 git -C <repo> tag -l 'archive/worktree/*'
@@ -210,12 +141,7 @@ git -C <repo> cat-file -p archive/worktree/<bead>@<sha>
 git -C <repo> worktree add <path> archive/worktree/<bead>@<sha>
 ```
 
-## What it does not touch
-
-The reaper takes worktrees, and the `polecat/<bead-id>` refs of closed work
-whose content has landed. It leaves every other ref: one outside that family,
-one whose bead is still live, one whose content is on no default branch, and the
-branch of any worktree still on disk — a checked-out branch is never a
-candidate, which is what keeps an attached worktree restorable without
-consulting a tag. Harness scratch is `scratch-reap`'s (docs/scratch-reclaim.md);
-the two are separate tenants of separate roots and neither reclaims the other's.
+Restore to a path outside `.gc/worktrees/`. A tree restored at its old path
+belongs to its closed bead again, so the controller takes it once it is 10
+minutes old. The restored tree is detached at the tag, and
+`git -C <path> switch -c <branch>` puts a branch there to work on.

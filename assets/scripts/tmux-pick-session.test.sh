@@ -114,6 +114,14 @@
 #              foreground `run-shell` and tmux reads the child's stdout to
 #              EOF, so a fetch that inherits it stalls the menu for exactly
 #              the time the cache exists to avoid.
+#
+# On the menu text:
+#
+#   (HASH)     tmux expands an item name and the menu title as formats, and a
+#              session title, a pane title and a pane's command are text other
+#              components write, so every # in them reaches tmux doubled.
+#   (STATIC)   every item name and title the picker hands display-menu is a
+#              literal or goes through menu_text, so no row skips the escape.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -148,16 +156,16 @@ export GC_PICKER_CACHE_DIR="$TMP/cache"
 export CURL_LOG="$TMP/curl.log"
 : > "$CURL_LOG"
 
-# tmux stub. Serves the fixture roster, an empty pane list (no sub-rows to
-# assert here) and an empty client_session, and dumps the display-menu argv
-# one argument per line — labels contain spaces and box-drawing characters,
-# so one-per-line is the only unambiguous dump.
+# tmux stub. Serves the fixture roster, the pane list in STUB_PANES (none
+# unless a case sets it) and an empty client_session, and dumps the
+# display-menu argv one argument per line — labels contain spaces and
+# box-drawing characters, so one-per-line is the only unambiguous dump.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/tmux" <<'STUB'
 set -u
 while [ $# -gt 0 ] && [ "$1" = "-L" ]; do shift 2; done
 case "${1:-}" in
     display-message) printf '%s\n' "${STUB_ACTIVE:-}" ;;
-    list-panes)      : ;;
+    list-panes)      if [ -n "${STUB_PANES:-}" ]; then cat "$STUB_PANES"; fi ;;
     list-sessions)   cat "${STUB_SESSIONS:?}" ;;
     display-menu)    shift; printf '%s\n' "$@" > "${STUB_MENU:?}" ;;
     *)               exit 1 ;;
@@ -387,7 +395,8 @@ has "$APIMENU" '── oversight • 1 polecat ──' \
 hasnt "$APIMENU" '[oversight]' \
     "HEADER: the rig's every session is folded, and its header still renders"
 
-has "$APIMENU" '│ landing PR #497' \
+# tmux shows the doubled # as one, so the row reads "landing PR #497".
+has "$APIMENU" '│ landing PR ##497' \
     "TITLE: the title column survives the widened projection"
 
 # --- switch target ---------------------------------------------------------
@@ -439,6 +448,87 @@ DETACH_ELAPSED=$(( $(date +%s) - DETACH_T0 ))
     && ok "DETACH: a slow refresh does not hold the keypress open" \
     || bad "DETACH: the keypress waited ${DETACH_ELAPSED}s on the background fetch"
 eq "$DETACH_OUT" '' "DETACH: ...and the picker writes nothing to stdout itself"
+
+# --- text other components write -------------------------------------------
+# tmux expands a display-menu item name and its -T title as formats, where
+# #(...) runs a shell command, #{...} expands and #[...] restyles. A session's
+# title comes from the supervisor, and any program running in a pane can set
+# the pane's title and command name, so every # in them reaches tmux doubled,
+# which tmux shows as one #. Its own city keys its own role cache, so this
+# roster leaves the one above untouched.
+HASH_SESSIONS="$TMP/hash-sessions.txt"; HASH_PANES="$TMP/hash-panes.txt"
+cat > "$HASH_SESSIONS" <<'ROSTER'
+gc-toolkit--gc-toolkit__refinery|0|1|gc-toolkit/gc-toolkit.refinery
+ROSTER
+cat > "$HASH_PANES" <<'PANES'
+gc-toolkit--gc-toolkit__refinery|0|0|1|#(echo c)|#(echo p) #{host} #[bg=red]p
+gc-toolkit--gc-toolkit__refinery|0|1|0|zsh|plain
+PANES
+cat > "$TMP/hash-api.json" <<'API'
+{"items": [
+  {"session_name": "gc-toolkit--gc-toolkit__refinery", "template": "gc-toolkit/gc-toolkit.refinery", "title": "#(echo s) #{host} #[fg=red]title"}
+]}
+API
+hash_env() {
+    env -u GC_CITY -u GC_CITY_ROOT -u GC_TMUX_SOCKET -u GC_AGENT \
+        GC_HOME="$TMP/gchome" GC_CITY_PATH="$TMP/hashcity" \
+        STUB_SESSIONS="$HASH_SESSIONS" STUB_PANES="$HASH_PANES" "$@"
+}
+hash_env STUB_API="$TMP/hash-api.json" "$SUT" --refresh-cache >/dev/null 2>&1
+: > "$STUB_MENU"
+hash_env GC_PICKER_REFRESH_EVERY=999999 "$SUT" >/dev/null 2>&1
+HASHMENU="$(cat "$STUB_MENU")"
+# The dump is the flags, then `--`, then name, key and command triples.
+HASHNAMES="$(printf '%s\n' "$HASHMENU" | awk 'seen && (n++ % 3) == 0 { print } $0 == "--" { seen = 1 }')"
+HASHTITLE="$(printf '%s\n' "$HASHMENU" | awk 'prev == "-T" { print; exit } { prev = $0 }')"
+
+no_lone_hash() { # <lines> <message> — every # in every line is doubled
+    local line rest
+    while IFS= read -r line; do
+        rest=${line//\#\#/}
+        case "$rest" in *'#'*) bad "$2 (a lone # in: $line)"; return 0 ;; esac
+    done <<< "$1"
+    ok "$2"
+}
+has "$HASHNAMES" '│ ##(echo s) ##{host} ##[fg=red]title' \
+    "HASH: a session title reaches tmux with every # doubled"
+has "$HASHNAMES" '##(echo c)  ##(echo p) ##{host} ##[bg=red]p' \
+    "HASH: and so do a pane's command and title"
+no_lone_hash "$HASHNAMES" \
+    "HASH: no item name carries a # that tmux would expand"
+[ -n "$HASHTITLE" ] && no_lone_hash "$HASHTITLE" "HASH: nor does the menu title" \
+    || bad "HASH: the menu carried no title"
+
+# --- static guard ----------------------------------------------------------
+# Every item name the picker appends, and every -T title, is a literal or goes
+# through menu_text whole. A label built from session or pane text and appended
+# any other way reaches tmux's format expansion as written.
+menu_escape_findings() { # <script> -> each line that skips the escape
+    awk '
+        /^[[:space:]]*#/ { next }
+        /set -- "\$@" / {
+            rest = $0
+            sub(/.*set -- "\$@" /, "", rest)
+            if (rest ~ /^"\$\(menu_text "\$[A-Za-z_][A-Za-z0-9_]*"\)"/) next
+            if (rest ~ /^"[^"$`\\]*"/) next
+            print FNR ": " $0
+            next
+        }
+        /display-menu/ && $0 !~ /display-menu -T "\$\(menu_text "\$[A-Za-z_][A-Za-z0-9_]*"\)"/ {
+            print FNR ": " $0
+        }' "$1"
+}
+eq "$(menu_escape_findings "$SRC")" "" \
+    "STATIC: every menu item name and title goes through menu_text"
+[ "$(grep -c -F 'set -- "$@" "$(menu_text "' "$SRC" || true)" -ge 2 ] \
+    && ok "STATIC: the guard reads the picker's header and row appends" \
+    || bad "STATIC: fewer than two menu_text item appends found in $SRC"
+sed -e 's/"$(menu_text "$label")" "$key"/"$label" "$key"/' "$SRC" > "$TMP/unescaped-pick.sh"
+has "$(menu_escape_findings "$TMP/unescaped-pick.sh")" 'set -- "$@" "$label" "$key"' \
+    "STATIC: the guard names a row label appended without the escape"
+sed -e 's/-T "$(menu_text "$MENU_TITLE")" -x C -y C --/-T "$MENU_TITLE" -x C -y C --/' "$SRC" > "$TMP/unescaped-title.sh"
+has "$(menu_escape_findings "$TMP/unescaped-title.sh")" 'display-menu -T "$MENU_TITLE"' \
+    "STATIC: and a title handed over without it"
 
 echo
 echo "PASS=$PASS FAIL=$FAIL"

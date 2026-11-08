@@ -1,12 +1,12 @@
 // Command helm-svc has TWO entry points over ONE board, plus a check on itself:
 //
-//	helm-svc            the Attention Canvas backend sidecar (default; `serve`)
-//	helm-svc board      the terminal board — the CLI VIEW of the same data
-//	helm-svc probe      can THIS binary read the city's bead stores? (see probe.go)
+//	helm-svc               the Attention Canvas backend sidecar (default; `serve`)
+//	helm-svc board --json  the board's rows as JSON, for agents and tooling
+//	helm-svc probe         can THIS binary read the city's bead stores? (see probe.go)
 //
 // They share the gather (internal/source) and the ranking (internal/board)
-// rather than reimplementing either, which is the whole point: a fix to the
-// board is a fix to both views. Keeping them in one binary also keeps them from
+// rather than reimplementing either, so the rows `board --json` prints are the
+// rows the web page shows. Keeping them in one binary also keeps them from
 // going stale independently — see the comment atop board.go.
 //
 // As the sidecar, it runs as a
@@ -39,7 +39,7 @@ import (
 
 	"github.com/zookanalytics/gc-toolkit/services/helm/internal/server"
 	"github.com/zookanalytics/gc-toolkit/services/helm/internal/source"
-	"github.com/zookanalytics/gc-toolkit/services/helm/internal/visit"
+	"github.com/zookanalytics/gc-toolkit/services/helm/internal/verbs"
 	"github.com/zookanalytics/gc-toolkit/services/helm/web"
 )
 
@@ -92,12 +92,13 @@ func main() {
 }
 
 const topUsage = `Usage:
-  helm-svc [serve]        run the Attention Canvas backend sidecar (needs GC_SERVICE_SOCKET)
-  helm-svc board [flags]  render the cross-rig attention board in the terminal
-  helm-svc probe [flags]  report whether this binary can read the city's bead stores
+  helm-svc [serve]               run the Attention Canvas backend sidecar (needs GC_SERVICE_SOCKET)
+  helm-svc board --json [flags]  print the cross-rig attention board's rows as JSON
+  helm-svc probe [flags]         report whether this binary can read the city's bead stores
 
-Both views share one gather and one ranking. Run "helm-svc board --help" for
-the board's flags, or "helm-svc probe --help" for the readability check.
+The sidecar's web page and "board --json" share one gather and one ranking. Run
+"helm-svc board --help" for the board's flags, or "helm-svc probe --help" for
+the readability check.
 `
 
 func serve() {
@@ -107,8 +108,8 @@ func serve() {
 	}
 
 	ttl := cacheTTL()
-	// Resolve the city once. Discovery shells out to gc, and the source, the visit
-	// opener, and the board's pack-health read must all name the same city — so
+	// Resolve the city once. Discovery shells out to gc, and the source, the verb
+	// runner, and the board's pack-health read must all name the same city — so
 	// resolve it here and thread it, rather than have each rediscover.
 	cityPath := source.DiscoverCityPath()
 	src, closeSrc := selectSource(cityPath)
@@ -177,7 +178,7 @@ func spaHandler() http.Handler {
 // The routes then answer 503 with the reason rather than 404, so an operator who
 // clicks an action learns why instead of thinking it vanished.
 func selectActuator(cityPath string) server.Actuator {
-	a, err := visit.New(cityPath)
+	a, err := verbs.New(cityPath)
 	if err != nil {
 		log.Printf("board actuation unavailable, board is read-only: %v", err)
 		return nil

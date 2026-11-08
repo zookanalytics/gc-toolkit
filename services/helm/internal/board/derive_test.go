@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
 )
 
 func ptr(i int) *int { return &i }
@@ -56,7 +58,7 @@ func TestFourAnchorBoard(t *testing.T) {
 		}},
 	}
 
-	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	b := buildBoard(anchors, fixtureNow, false, nil, Facts{})
 
 	if got := len(b.Tiles); got != 4 {
 		t.Fatalf("all four anchors admitted: want 4, got %d", got)
@@ -106,7 +108,7 @@ func TestMetadataKindDerivation(t *testing.T) {
 		{ID: "tk-parked", Title: "helm returns the raw script path", Kind: "parked", Source: "parked",
 			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1)},
 	}
-	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	b := buildBoard(anchors, fixtureNow, false, nil, Facts{})
 
 	human, ok := tileByID(b, "tk-human")
 	if !ok {
@@ -185,7 +187,7 @@ func TestParkedWithChildren(t *testing.T) {
 			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
 			Children: []Child{{ID: "tk-hk", Status: "open"}}},
 	}
-	b := BuildBoard(anchors, fixtureNow, false, nil, liveOwners("polecat-live"))
+	b := buildBoard(anchors, fixtureNow, false, nil, liveOwners("polecat-live"))
 
 	stranded, ok := tileByID(b, "tk-stranded")
 	if !ok {
@@ -287,7 +289,7 @@ func TestParkedWithLiveMoleculeIsActive(t *testing.T) {
 		},
 		OwnerState: map[string]string{"gc-toolkit__polecat-hq-live": "active"},
 	}
-	b := BuildBoard([]Anchor{parked("tk-live"), parked("tk-drained"), parked("tk-none")}, fixtureNow, false, nil, f)
+	b := buildBoard([]Anchor{parked("tk-live"), parked("tk-drained"), parked("tk-none")}, fixtureNow, false, nil, f)
 
 	live := mustTile(t, b, "tk-live")
 	if live.Severity != SevNormal {
@@ -296,7 +298,9 @@ func TestParkedWithLiveMoleculeIsActive(t *testing.T) {
 	if live.Section != SectionActive {
 		t.Errorf("…so it bands active, not cleanup: got %s", live.Section)
 	}
-	if live.Frontier != "working · parked — work in flight" {
+	// The frontier speaks the row's state: a takeaway does not park a bead the
+	// city is working.
+	if live.Frontier != "working · in flight" {
 		t.Errorf("frontier: %q", live.Frontier)
 	}
 	// The takeaway still answers NEEDS, exactly as it does for ruledInFlight: the
@@ -328,14 +332,14 @@ func TestParkedWithLiveMoleculeIsActive(t *testing.T) {
 // should not ask for.
 func TestParkedNeverOutranksAttention(t *testing.T) {
 	anchors := []Anchor{
-		{ID: "tk-parked", Title: "ancient parked visit", Kind: "parked", Source: "parked",
+		{ID: "tk-parked", Title: "ancient parked conversation", Kind: "parked", Source: "parked",
 			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(1), UpdatedAt: daysAgo(400)},
 		{ID: "tk-live", Title: "healthy in-flight epic", Kind: "epic", Source: "epic",
 			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(4), UpdatedAt: fixtureNow, Children: []Child{
 				{ID: "c1", Status: "in_progress"},
 			}},
 	}
-	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	b := buildBoard(anchors, fixtureNow, false, nil, Facts{})
 	if b.Tiles[0].ID != "tk-live" {
 		t.Errorf("in-flight work sorts above a parked conversation: got %q first", b.Tiles[0].ID)
 	}
@@ -377,7 +381,7 @@ func TestParkedDispositionDue(t *testing.T) {
 		{ID: "tk-bare", Title: "parked, no edges", Kind: "parked", Source: "parked",
 			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1)},
 	}
-	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	b := buildBoard(anchors, fixtureNow, false, nil, Facts{})
 
 	done, ok := tileByID(b, "tk-done")
 	if !ok {
@@ -449,7 +453,7 @@ func TestUnresolvedBlockerStaysQuiet(t *testing.T) {
 			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
 			WaitingOn: []string{"ra-9999"}},
 	}
-	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	b := buildBoard(anchors, fixtureNow, false, nil, Facts{})
 	tile, _ := tileByID(b, "tk-unk")
 	if tile.DispositionDue {
 		t.Error("an unresolvable blocker must not read as discharged")
@@ -471,7 +475,7 @@ func TestDispositionDueIsParkedOnly(t *testing.T) {
 			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
 			WaitingOn: []string{"tk-x"}, WaitingOnClosed: []string{"tk-x"}},
 	}
-	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	b := buildBoard(anchors, fixtureNow, false, nil, Facts{})
 	tile, _ := tileByID(b, "tk-h")
 	if tile.DispositionDue {
 		t.Error("disposition_due is a parked-row distinction")
@@ -491,7 +495,7 @@ func TestMetadataKindDedup(t *testing.T) {
 		{ID: "tk-both", Title: "routed and parked", Kind: "human", Source: "human",
 			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1)},
 	}
-	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	b := buildBoard(anchors, fixtureNow, false, nil, Facts{})
 	if len(b.Tiles) != 1 {
 		t.Fatalf("dedup by id: want 1 tile, got %d", len(b.Tiles))
 	}
@@ -511,7 +515,7 @@ func TestDedupKeepsHigherBand(t *testing.T) {
 			{ID: "c2", Status: "closed"},
 		}},
 	}
-	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	b := buildBoard(anchors, fixtureNow, false, nil, Facts{})
 	if len(b.Tiles) != 1 {
 		t.Fatalf("dedup by id: want 1 tile, got %d", len(b.Tiles))
 	}
@@ -529,7 +533,7 @@ func TestLowSeverity(t *testing.T) {
 			{ID: "d1", Status: "closed"}, {ID: "d2", Status: "closed"},
 		}},
 	}
-	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	b := buildBoard(anchors, fixtureNow, false, nil, Facts{})
 	if e, _ := tileByID(b, "tk-empty"); e.Severity != SevLow {
 		t.Errorf("empty epic is LOW: got %s", e.Severity)
 	}
@@ -602,7 +606,7 @@ func TestStaleBumpFires(t *testing.T) {
 			}}
 	}
 	live := liveOwners("polecat-live")
-	b := BuildBoard([]Anchor{mk("tk-fresh", daysAgo(1)), mk("tk-idle", daysAgo(40))}, fixtureNow, false, nil, live)
+	b := buildBoard([]Anchor{mk("tk-fresh", daysAgo(1)), mk("tk-idle", daysAgo(40))}, fixtureNow, false, nil, live)
 
 	fresh, _ := tileByID(b, "tk-fresh")
 	idle, _ := tileByID(b, "tk-idle")
@@ -621,7 +625,7 @@ func TestStaleBumpFires(t *testing.T) {
 		t.Errorf("the stale anchor must outrank the fresh one: idle=%d fresh=%d", idle.RankScore, fresh.RankScore)
 	}
 	// Exactly at the threshold is NOT stale — gc-helm.sh bumps on `> 14`.
-	atThreshold := BuildBoard([]Anchor{mk("tk-edge", daysAgo(staleThresholdDays))}, fixtureNow, false, nil, live)
+	atThreshold := buildBoard([]Anchor{mk("tk-edge", daysAgo(staleThresholdDays))}, fixtureNow, false, nil, live)
 	if got := atThreshold.Tiles[0].Severity; got != SevNormal {
 		t.Errorf("exactly %d days is not yet stale: got %s", staleThresholdDays, got)
 	}
@@ -637,7 +641,7 @@ func TestStaleDoesNotBumpOtherBands(t *testing.T) {
 		{ID: "tk-done", Kind: "epic", Source: "epic", Priority: ptr(2), UpdatedAt: daysAgo(400),
 			Children: []Child{{ID: "d1", Status: "closed"}}},
 	}
-	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	b := buildBoard(anchors, fixtureNow, false, nil, Facts{})
 	for id, want := range map[string]Severity{"tk-stranded": SevHigh, "tk-dec": SevElevated, "tk-done": SevLow} {
 		if tl, _ := tileByID(b, id); tl.Severity != want {
 			t.Errorf("%s: severity %s, want %s (staleness must not move this band)", id, tl.Severity, want)
@@ -649,7 +653,7 @@ func TestStaleDoesNotBumpOtherBands(t *testing.T) {
 // stale_days 0 is ambiguous on its own, so updated_at rides alongside to
 // separate "genuinely fresh" from "the source could not read it".
 func TestTileCarriesUpdatedAt(t *testing.T) {
-	b := BuildBoard([]Anchor{
+	b := buildBoard([]Anchor{
 		{ID: "tk-known", Kind: "epic", Source: "epic", Priority: ptr(2), UpdatedAt: fixtureNow},
 		{ID: "tk-unknown", Kind: "epic", Source: "epic", Priority: ptr(2)},
 	}, fixtureNow, false, nil, Facts{})
@@ -675,7 +679,7 @@ func TestInProgressNotStranded(t *testing.T) {
 			{ID: "b1", Status: "in_progress", Assignee: "polecat-live"}, {ID: "b2", Status: "open"},
 		}},
 	}
-	b := BuildBoard(anchors, fixtureNow, false, nil, liveOwners("polecat-live"))
+	b := buildBoard(anchors, fixtureNow, false, nil, liveOwners("polecat-live"))
 	tl := b.Tiles[0]
 	if tl.Severity != SevNormal {
 		t.Errorf("epic with in-progress work is NORMAL: got %s", tl.Severity)
@@ -701,7 +705,7 @@ func TestDeadOwnerIsNotMoving(t *testing.T) {
 		}},
 	}
 	// "polecat-gone" is absent from OwnerState entirely — the canonical orphan.
-	b := BuildBoard(anchors, fixtureNow, false, nil, liveOwners("someone-else"))
+	b := buildBoard(anchors, fixtureNow, false, nil, liveOwners("someone-else"))
 	tl := b.Tiles[0]
 	if tl.InProgress != 1 {
 		t.Errorf("raw in_progress still counts the claim: got %d", tl.InProgress)
@@ -730,7 +734,7 @@ func TestSlungWorkIsInFlight(t *testing.T) {
 	f := liveOwners("gc-toolkit__polecat-hq-1")
 	f.Inflight = map[string][]string{"w1": {"gc-toolkit__polecat-hq-1"}}
 
-	b := BuildBoard(anchors, fixtureNow, false, nil, f)
+	b := buildBoard(anchors, fixtureNow, false, nil, f)
 	tl := b.Tiles[0]
 	if tl.Severity != SevNormal || tl.Stranded {
 		t.Errorf("slung work is in flight, not stranded: got %s stranded=%v", tl.Severity, tl.Stranded)
@@ -749,37 +753,39 @@ func TestSlungWorkIsInFlight(t *testing.T) {
 	// The same workflow, but its session has drained: back to stranded. Liveness
 	// is re-derived at derive time precisely so this flips without a re-gather.
 	dead := Facts{Inflight: f.Inflight, OwnerState: map[string]string{"gc-toolkit__polecat-hq-1": "archived"}}
-	if tl := BuildBoard(anchors, fixtureNow, false, nil, dead).Tiles[0]; !tl.Stranded {
+	if tl := buildBoard(anchors, fixtureNow, false, nil, dead).Tiles[0]; !tl.Stranded {
 		t.Errorf("a drained workflow stops counting: got severity=%s stranded=%v", tl.Severity, tl.Stranded)
 	}
 }
 
-// TestHeldAnchorIsNotStranded pins the visit glyph: a conversation IS attention,
-// so an anchor someone is conversing about is not flagged for lacking it.
+// TestHeldAnchorIsNotStranded: a human gate on an anchor is attention already
+// on it, so an anchor a question holds is not flagged for lacking attention.
 func TestHeldAnchorIsNotStranded(t *testing.T) {
 	a := Anchor{ID: "tk-held", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2),
 		Children: []Child{{ID: "c1", Status: "open"}}}
 
-	bare := BuildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}).Tiles[0]
+	bare := buildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}).Tiles[0]
 	if bare.Severity != SevHigh || bare.Held {
-		t.Fatalf("without a visit the anchor is stranded/HIGH: got %s held=%v", bare.Severity, bare.Held)
+		t.Fatalf("with nothing holding it the anchor is stranded/HIGH: got %s held=%v", bare.Severity, bare.Held)
 	}
 
-	held := BuildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{Visits: map[string]bool{"tk-held": true}}).Tiles[0]
+	gate := Anchor{ID: "tk-gate", Kind: KindGate, Source: KindGate, Rig: "gc-toolkit", Prefix: "tk",
+		Title: "which way?", Subjects: []string{"tk-held"}}
+	held := mustTile(t, buildBoard([]Anchor{a, gate}, fixtureNow, false, nil, Facts{}), "tk-held")
 	if !held.Held || held.Severity != SevNormal || held.Stranded {
 		t.Errorf("a held anchor is NORMAL and not stranded: got %s held=%v stranded=%v", held.Severity, held.Held, held.Stranded)
 	}
-	if held.Needs != "open to join" {
-		t.Errorf("needs names the conversation: got %q", held.Needs)
+	if held.Needs != "which way?" {
+		t.Errorf("needs names the gate's question: got %q", held.Needs)
 	}
 }
 
 // TestTakeawayWinsNeeds: the LLM headline replaces the deterministic phrase, and
-// its internal whitespace is collapsed so it cannot break the terminal table.
+// its internal whitespace is collapsed so it reads as one line.
 func TestTakeawayWinsNeeds(t *testing.T) {
 	a := Anchor{ID: "tk-parked", Kind: "parked", Source: "parked", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(3),
 		Takeaway: "  needs a  decision\n  from the operator ", TakeawayAt: "2026-06-01T00:00:00Z", TakeawayBy: "host"}
-	tl := BuildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}).Tiles[0]
+	tl := buildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}).Tiles[0]
 
 	if tl.Takeaway == nil || *tl.Takeaway != "needs a decision from the operator" {
 		t.Errorf("takeaway collapsed and trimmed: got %v", tl.Takeaway)
@@ -792,7 +798,7 @@ func TestTakeawayWinsNeeds(t *testing.T) {
 	}
 
 	// No takeaway -> the key is null, not absent, and NEEDS falls back.
-	plain := BuildBoard([]Anchor{{ID: "tk-p2", Kind: "parked", Source: "parked", Rig: "gc-toolkit", Prefix: "tk"}},
+	plain := buildBoard([]Anchor{{ID: "tk-p2", Kind: "parked", Source: "parked", Rig: "gc-toolkit", Prefix: "tk"}},
 		fixtureNow, false, nil, Facts{}).Tiles[0]
 	if plain.Takeaway != nil {
 		t.Errorf("absent takeaway is null: got %v", plain.Takeaway)
@@ -811,7 +817,7 @@ func TestCrossRigRefsWeighAnchor(t *testing.T) {
 		Description: "blocks ra-abc12 and rb-9zz, follows tk-local1 and tk-xref itself",
 		Children:    []Child{{ID: "c1", Status: "open"}}}
 
-	tl := BuildBoard([]Anchor{a}, fixtureNow, false, nil, f).Tiles[0]
+	tl := buildBoard([]Anchor{a}, fixtureNow, false, nil, f).Tiles[0]
 	if !equalIDs(tl.CrossRigRefs, []string{"ra-abc12", "rb-9zz"}) {
 		t.Errorf("cross_rig_refs = %v, want [ra-abc12 rb-9zz] (own prefix and self excluded)", tl.CrossRigRefs)
 	}
@@ -823,14 +829,14 @@ func TestCrossRigRefsWeighAnchor(t *testing.T) {
 	// A decision is banded by what it IS, so the scan is skipped entirely.
 	dec := Anchor{ID: "ra-dec", Kind: "decision", Source: "decision", Rig: "rig-a", Prefix: "ra",
 		Description: "mentions tk-abc12"}
-	if refs := BuildBoard([]Anchor{dec}, fixtureNow, false, nil, f).Tiles[0].CrossRigRefs; len(refs) != 0 {
+	if refs := buildBoard([]Anchor{dec}, fixtureNow, false, nil, f).Tiles[0].CrossRigRefs; len(refs) != 0 {
 		t.Errorf("a decision is not scanned: got %v", refs)
 	}
 
 	// Single-rig city: the "other prefixes" set is empty, so nothing matches.
 	// (jq's empty alternation would match a bare "-abc" here; see crossRigRefs.)
 	solo := Facts{Prefixes: []string{"tk"}, RigNames: []string{"gc-toolkit"}}
-	if refs := BuildBoard([]Anchor{a}, fixtureNow, false, nil, solo).Tiles[0].CrossRigRefs; len(refs) != 0 {
+	if refs := buildBoard([]Anchor{a}, fixtureNow, false, nil, solo).Tiles[0].CrossRigRefs; len(refs) != 0 {
 		t.Errorf("no other rigs, no refs: got %v", refs)
 	}
 }
@@ -844,7 +850,7 @@ func TestUnownedConvoyIsHigh(t *testing.T) {
 		{ID: "tk-owncv", Kind: "convoy", Source: "convoy", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(3), Owned: &yes,
 			Children: []Child{{ID: "m1", Status: "closed"}}},
 	}
-	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	b := buildBoard(anchors, fixtureNow, false, nil, Facts{})
 
 	orphan, _ := tileByID(b, "tk-orphan")
 	if orphan.Severity != SevHigh {
@@ -910,7 +916,7 @@ func TestRuledStandsDown(t *testing.T) {
 			Takeaway:  "routed — design ruled; tk-vie5k slung",
 			WaitingOn: []string{"tk-vie5k"}, WaitingOnClosed: []string{"tk-vie5k"}},
 	}
-	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	b := buildBoard(anchors, fixtureNow, false, nil, Facts{})
 
 	for _, id := range []string{"tk-z130v", "tk-lpf9g", "tk-j5wrs"} {
 		tile, ok := tileByID(b, id)
@@ -967,7 +973,7 @@ func TestRuledInFlightIsInProgress(t *testing.T) {
 			Takeaway:  "ruled: bring Pino back — work slung ra-9kd2, awaiting implementation",
 			WaitingOn: []string{"ra-9kd2"}},
 	}
-	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	b := buildBoard(anchors, fixtureNow, false, nil, Facts{})
 
 	for _, c := range []struct{ id, needs string }{
 		{"tk-hs2e8", "answered NO — real bug is stranded holds, routed tk-jsyci7"},
@@ -1028,7 +1034,7 @@ func TestRuledNeedsTheWaitsToBeLegible(t *testing.T) {
 			Takeaway:       "routed — design ruled; tk-vie5k slung",
 			WaitingUnknown: true},
 	}
-	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	b := buildBoard(anchors, fixtureNow, false, nil, Facts{})
 
 	for _, c := range []struct{ id, frontier, needs string }{
 		{"tk-z130v", "needs-review · human-gated decision", "ROUTED: mayor mailed to excise gc-8yr6px"},
@@ -1060,7 +1066,7 @@ func TestDispositionDueSurvivesUnreadableWaits(t *testing.T) {
 	a := Anchor{ID: "tk-2plde", Title: "helm returns the raw script path", Kind: "parked", Source: "parked",
 		Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(2),
 		Takeaway: "routed to tk-9k2ab; nothing further needed here", WaitingUnknown: true}
-	tile := BuildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}).Tiles[0]
+	tile := buildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}).Tiles[0]
 
 	if tile.DispositionDue {
 		t.Error("an unread wait set is not a landed blocker")
@@ -1080,7 +1086,7 @@ func TestUnruledHumanGatedRowsAreUnchanged(t *testing.T) {
 		{ID: "tk-dec", Kind: "decision", Source: "decision", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2)},
 		{ID: "tk-hum", Kind: "human", Source: "human", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2)},
 	}
-	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	b := buildBoard(anchors, fixtureNow, false, nil, Facts{})
 	dec, _ := tileByID(b, "tk-dec")
 	hum, _ := tileByID(b, "tk-hum")
 	if dec.Severity != SevElevated || dec.Frontier != "needs-review · human-gated decision" || dec.Needs != "operator decision" {
@@ -1109,7 +1115,7 @@ func TestRuledWithChildrenIsBandedByItsRollUp(t *testing.T) {
 			Takeaway: "decided — the follow-up is filed under this bead",
 			Children: []Child{{ID: "tk-dkid", Status: "open"}}},
 	}
-	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	b := buildBoard(anchors, fixtureNow, false, nil, Facts{})
 
 	for _, id := range []string{"tk-rkids", "tk-dkids"} {
 		tile, ok := tileByID(b, id)
@@ -1166,7 +1172,7 @@ func TestRuledTwinDoesNotReElevate(t *testing.T) {
 			Takeaway:  "routed — all of it landed",
 			WaitingOn: []string{"tk-w2"}, WaitingOnClosed: []string{"tk-w2"}, Children: kids})
 
-	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	b := buildBoard(anchors, fixtureNow, false, nil, Facts{})
 	if len(b.Tiles) != 2 {
 		t.Fatalf("dedup by id: want 2 tiles, got %d", len(b.Tiles))
 	}
@@ -1196,118 +1202,46 @@ func TestRuledTwinDoesNotReElevate(t *testing.T) {
 	}
 }
 
-// TestOpenDemandStaysOwed is the acceptance case for the demand verb. The verb
-// files what a person owes as its own bead: `gc.demand_for` names the work it
-// gates, `gc.routed_to=human` puts it on the operator's queue, and the authored
-// headline is stamped as `gc.takeaway` so the board has a question to show. The
-// demand carries no blocker of its own — it IS the blocker — so a fresh one
-// satisfies every clause [ruled] had before [isDemand], and stood down on the
-// render that first saw it. The row the verb exists to raise dropped straight
-// out of the default queue.
-//
-// The two controls are what make the exclusion narrow rather than a hole in the
-// stand-down: an ordinary answered row beside the demand still stands down, and
-// the demand stops being owed the moment it closes, which is how it is answered.
-func TestOpenDemandStaysOwed(t *testing.T) {
-	const headline = "which of the two shapes should converse file?"
-	const ruling = "file the sibling shape — it keeps the visit claimable"
-	demandMD := map[string]string{
-		"gc.routed_to":   "human",
-		"gc.takeaway":    headline,
-		"gc.demand_for":  "tk-gated",
-		"gc.takeaway_at": "2026-06-30T10:00:00Z",
-	}
+// TestGateRowReadsNoTakeaway: a human gate's question is its title, so its row
+// reads no takeaway. A gate that carries one holds the question there too — a
+// question read as an answer would stand the gate's row down as ruled — so the
+// gate stays owed, names its question, and publishes no takeaway on the wire,
+// open or closed. The control is what keeps the rule narrow: an ordinary
+// answered row beside it still stands down.
+func TestGateRowReadsNoTakeaway(t *testing.T) {
+	const question = "which of the two shapes should converse file?"
+	gate := Anchor{ID: "tk-gate", Title: question, Kind: KindGate, Source: KindGate,
+		Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
+		Metadata: map[string]string{"gc.takeaway": question, "gc.takeaway_at": "2026-06-30T10:00:00Z"},
+		Takeaway: question, TakeawayAt: "2026-06-30T10:00:00Z", TakeawayBy: "converse"}
+	closed := gate
+	closed.ID, closed.ClosedAt = "tk-closed-gate", daysAgo(0)
 	anchors := []Anchor{
-		// A decision demand, gathered twice: once as a decision, once
-		// off the `gc.routed_to=human` marker. Both rows are one bead, and the
-		// dedup keeps the higher band — so both have to stay up, or the twin
-		// hands the stand-down back.
-		{ID: "tk-demand", Title: headline, Kind: "decision", Source: "decision",
-			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
-			Metadata: demandMD, Takeaway: headline, TakeawayAt: demandMD["gc.takeaway_at"]},
-		{ID: "tk-demand", Title: headline, Kind: "human", Source: "human",
-			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
-			Metadata: demandMD, Takeaway: headline, TakeawayAt: demandMD["gc.takeaway_at"]},
-		// Control: answered, no demand marker, still stands down.
+		gate, closed,
 		{ID: "tk-answered", Title: "an ordinary ruling", Kind: "human", Source: "human",
 			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
 			Metadata: map[string]string{"gc.routed_to": "human", "gc.takeaway": "routed — nothing further needed here"},
 			Takeaway: "routed — nothing further needed here"},
-		// Control: the same demand once answered. Closing it is what makes the
-		// gated work ready, and what takes the row off the queue. Its ruling was
-		// never stamped back (gc.takeaway_settled empty), so its takeaway is still
-		// the QUESTION and must not ride the DONE band as if unanswered.
-		{ID: "tk-discharged", Title: "an answered demand", Kind: "decision", Source: "decision",
-			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(2),
-			ClosedAt:   daysAgo(1),
-			Metadata:   map[string]string{"gc.routed_to": "human", "gc.takeaway": headline, "gc.demand_for": "tk-gated"},
-			Takeaway:   headline,
-			TakeawayAt: "2026-06-30T10:00:00Z", TakeawayBy: "converse"},
-		// Control: a closed demand whose ruling WAS stamped back over the question
-		// and marked settled. Its takeaway is the answer now, so the DONE band
-		// shows the ruling rather than suppressing it.
-		{ID: "tk-settled", Title: "a settled demand", Kind: "decision", Source: "decision",
-			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(2),
-			ClosedAt: daysAgo(1),
-			Metadata: map[string]string{"gc.routed_to": "human", "gc.takeaway": ruling, "gc.demand_for": "tk-gated", "gc.takeaway_settled": "1"},
-			Takeaway: ruling},
 	}
-	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	b := buildBoard(anchors, fixtureNow, false, nil, Facts{})
 
-	tile, ok := tileByID(b, "tk-demand")
-	if !ok {
-		t.Fatal("tk-demand is missing from the board")
+	g := mustTile(t, b, "tk-gate")
+	if !g.Owed || g.Severity != SevElevated || g.Needs != question {
+		t.Errorf("an open gate stays owed and names its question: owed=%v %s %q", g.Owed, g.Severity, g.Needs)
 	}
-	if !tile.Owed {
-		t.Error("an open demand is what a person owes — it must stay on the operator's queue")
+	if b.Tiles[0].ID != "tk-gate" {
+		t.Errorf("the open gate heads the queue, got %q", b.Tiles[0].ID)
 	}
-	if tile.Severity != SevElevated {
-		t.Errorf("an unanswered demand keeps the human-gated band, got %s (kind %s)", tile.Severity, tile.Kind)
+	for _, row := range []Tile{g, mustTile(t, b, "tk-closed-gate")} {
+		if row.Takeaway != nil || row.TakeawayAt != nil || row.TakeawayBy != nil {
+			t.Errorf("%s: a gate publishes no takeaway: %v %v %v", row.ID, row.Takeaway, row.TakeawayAt, row.TakeawayBy)
+		}
 	}
-	if tile.Needs != headline {
-		t.Errorf("needs is the question itself, not a disposition: %q", tile.Needs)
+	if c := mustTile(t, b, "tk-closed-gate"); c.Owed || c.Severity != SevDone {
+		t.Errorf("a closed gate owes nothing: owed=%v %s", c.Owed, c.Severity)
 	}
-	if tile.Frontier == "ruled — takeaway recorded" {
-		t.Errorf("frontier reads the demand as answered: %q", tile.Frontier)
-	}
-	// Owed rows partition ahead of the rest, oldest ask first.
-	if b.Tiles[0].ID != "tk-demand" {
-		t.Errorf("the demand heads the queue, got %q", b.Tiles[0].ID)
-	}
-
-	answered, ok := tileByID(b, "tk-answered")
-	if !ok {
-		t.Fatal("tk-answered is missing from the board")
-	}
-	if answered.Owed || answered.Severity != SevLow || answered.Needs != "ruled — close or extend" {
-		t.Errorf("the stand-down still fires for an ordinary answered row: owed=%v %s %q",
-			answered.Owed, answered.Severity, answered.Needs)
-	}
-
-	discharged, ok := tileByID(b, "tk-discharged")
-	if !ok {
-		t.Fatal("tk-discharged is missing from the board")
-	}
-	if discharged.Owed || discharged.Severity != SevDone {
-		t.Errorf("a closed demand owes nothing: owed=%v %s", discharged.Owed, discharged.Severity)
-	}
-	// The QUESTION must not ride the wire once the demand is closed: --json
-	// takeaway is where a row publishes its ruling, and a stale question there
-	// reads as a decision still owed. The triple is suppressed together.
-	if discharged.Takeaway != nil {
-		t.Errorf("a closed unsettled demand still carries its question on the wire: %q", *discharged.Takeaway)
-	}
-	if discharged.TakeawayAt != nil || discharged.TakeawayBy != nil {
-		t.Errorf("a suppressed takeaway must carry no timestamp or author: at=%v by=%v",
-			discharged.TakeawayAt, discharged.TakeawayBy)
-	}
-
-	settled, ok := tileByID(b, "tk-settled")
-	if !ok {
-		t.Fatal("tk-settled is missing from the board")
-	}
-	if settled.Takeaway == nil || *settled.Takeaway != ruling {
-		t.Errorf("a settled closed demand shows its ruling on the wire, got %v", settled.Takeaway)
+	if a := mustTile(t, b, "tk-answered"); a.Owed || a.Severity != SevLow || a.Needs != "ruled — close or extend" {
+		t.Errorf("the stand-down still fires for an ordinary answered row: owed=%v %s %q", a.Owed, a.Severity, a.Needs)
 	}
 }
 
@@ -1320,7 +1254,7 @@ func TestDispositionDueSurvivesForAPlainParkedRow(t *testing.T) {
 		Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
 		Takeaway:  "routed — nothing further needed here",
 		WaitingOn: []string{"tk-w"}, WaitingOnClosed: []string{"tk-w"}}
-	tile := BuildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}).Tiles[0]
+	tile := buildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}).Tiles[0]
 
 	if !tile.DispositionDue || tile.Severity != SevElevated {
 		t.Errorf("tk-2plde intact: disposition_due=%v severity=%s", tile.DispositionDue, tile.Severity)
@@ -1336,7 +1270,7 @@ func sit(id, status string, opened, closed time.Time) Sitting {
 	return Sitting{ID: id, Status: status, OpenedAt: opened, ClosedAt: closed}
 }
 
-// TestSittingsAreOrderedRunningFirst pins the one order both renderers spend:
+// TestSittingsAreOrderedRunningFirst pins the one order every surface spends:
 // running sittings ahead of finished ones, the longest-running first, then the
 // most recently closed.
 func TestSittingsAreOrderedRunningFirst(t *testing.T) {
@@ -1348,7 +1282,7 @@ func TestSittingsAreOrderedRunningFirst(t *testing.T) {
 		sit("running-old", "in_progress", at(4), time.Time{}),
 	}
 
-	got := BuildBoard(nil, at(10), false, nil, Facts{Sittings: in}).Sittings
+	got := buildBoard(nil, at(10), false, nil, Facts{Sittings: in}).Sittings
 
 	var ids []string
 	for _, s := range got {
@@ -1365,7 +1299,7 @@ func TestSittingsAreOrderedRunningFirst(t *testing.T) {
 func TestSittingOrderIsDeterministic(t *testing.T) {
 	at := time.Date(2026, 8, 1, 5, 0, 0, 0, time.UTC)
 	in := []Sitting{sit("b", "closed", at, at), sit("a", "closed", at, at), sit("c", "closed", at, at)}
-	got := orderSittings(in)
+	got := orderSittings(stampSittings(in, Facts{}))
 	if got[0].ID != "a" || got[1].ID != "b" || got[2].ID != "c" {
 		t.Errorf("equal stamps tie-break by id: got %v", []string{got[0].ID, got[1].ID, got[2].ID})
 	}
@@ -1375,104 +1309,87 @@ func TestSittingOrderIsDeterministic(t *testing.T) {
 	}
 }
 
-// TestCapSittingsKeepsEveryRunningOne: the cap is a bound on HISTORY. A running
-// sitting is a live conversation and is never the row that gets dropped.
-func TestCapSittingsKeepsEveryRunningOne(t *testing.T) {
-	at := func(h int) time.Time { return time.Date(2026, 8, 1, h, 0, 0, 0, time.UTC) }
-	var in []Sitting
-	for i := range 5 {
-		in = append(in, sit(fmt.Sprintf("run-%d", i), "open", at(i), time.Time{}))
-	}
-	for i := range 5 {
-		in = append(in, sit(fmt.Sprintf("done-%d", i), "closed", at(i), at(i+1)))
-	}
-
-	kept, dropped := CapSittings(orderSittings(in), 2)
-	if dropped != 3 {
-		t.Errorf("dropped = %d, want 3", dropped)
-	}
-	var running, closed int
-	for _, s := range kept {
-		if s.Status == "closed" {
-			closed++
-		} else {
-			running++
-		}
-	}
-	if running != 5 || closed != 2 {
-		t.Errorf("kept %d running and %d closed, want 5 and 2", running, closed)
-	}
-
-	if kept, dropped := CapSittings(in, 0); dropped != 0 || len(kept) != len(in) {
-		t.Errorf("maxClosed<=0 is uncapped: kept %d dropped %d", len(kept), dropped)
-	}
-}
-
 // TestBoardWithoutSittingsCarriesNone: a gather that supplied no record leaves
 // the field nil rather than an empty slice, matching how Tiles reads on the wire.
 func TestBoardWithoutSittingsCarriesNone(t *testing.T) {
-	if got := BuildBoard(nil, time.Now(), false, nil, Facts{}).Sittings; got != nil {
+	if got := buildBoard(nil, time.Now(), false, nil, Facts{}).Sittings; got != nil {
 		t.Errorf("Sittings = %v, want nil", got)
 	}
 }
 
-// TestSittingTopicAndHeadlineFallback pins the two derivations a row reads off
-// its subject: the topic is the subject's title, and the headline prefers the
-// takeaway, then a dedup close's own outcome reason, and only then the subject
-// title before it ever shows the visit bead's own generic name. Both degrade to
-// the id and the visit title only when the gather could not read the subject at
-// all.
-func TestSittingTopicAndHeadlineFallback(t *testing.T) {
+// TestSittingHeadlineFallback pins the headline a row reads off its
+// conversation and its subject. It prefers the takeaway, then the
+// conversation's close reason, then the conversation's own title, which says
+// what it asks, and shows the subject's title only when that title says nothing
+// of the ask: an empty one, or the stock title a pick off the board or a topic
+// the intake files directly leaves. It degrades to the conversation's title
+// only when the gather could not read the subject at all.
+func TestSittingHeadlineFallback(t *testing.T) {
 	const (
 		subjTitle = "the raw script path the launcher took"
-		visit     = "visit: tk-anchor — first reaction ready: accept or redirect"
+		ask       = "decide whether the launcher or the board owns the path"
+		boardPick = "operator pick from the board"
+		intake    = "operator-origin topic intake"
 		takeaway  = "routed the fix to the pool; nothing further here"
-		reason    = "moot: premise died, subject already closed"
+		reason    = "dismissed by the operator: superseded by the new plan"
 	)
 
-	// A concluded sitting: the takeaway is the headline, the subject title the topic.
-	concluded := Sitting{Subject: "tk-anchor", SubjectTitle: subjTitle, Title: visit, Takeaway: takeaway}
-	if got := concluded.Headline(); got != takeaway {
-		t.Errorf("a takeaway is the headline: got %q, want %q", got, takeaway)
+	cases := []struct {
+		name string
+		s    Sitting
+		want string
+	}{
+		{"a takeaway is the headline",
+			Sitting{SubjectTitle: subjTitle, Title: ask, Takeaway: takeaway}, takeaway},
+		{"a takeaway wins over the close reason",
+			Sitting{SubjectTitle: subjTitle, Title: ask, Takeaway: takeaway, OutcomeReason: reason}, takeaway},
+		{"with no takeaway the close reason wins over the conversation's title",
+			Sitting{SubjectTitle: subjTitle, Title: ask, OutcomeReason: reason}, reason},
+		{"with neither, the conversation's title says what it asks, not the topic",
+			Sitting{SubjectTitle: subjTitle, Title: ask}, ask},
+		{"the stock title of a pick off the board gives way to the topic",
+			Sitting{SubjectTitle: subjTitle, Title: boardPick}, subjTitle},
+		{"the stock title of a topic the intake filed directly gives way to the topic",
+			Sitting{SubjectTitle: subjTitle, Title: intake}, subjTitle},
+		{"an untitled conversation gives way to the topic",
+			Sitting{SubjectTitle: subjTitle}, subjTitle},
+		{"an unread subject keeps the conversation's title",
+			Sitting{Title: ask}, ask},
+		{"an unread subject keeps even the stock title, the last thing left to show",
+			Sitting{Title: boardPick}, boardPick},
 	}
-	if got := concluded.Topic(); got != subjTitle {
-		t.Errorf("the topic is the subject title: got %q, want %q", got, subjTitle)
+	for _, tc := range cases {
+		tc.s.Subject = "tk-anchor"
+		if got := sittingHeadline(tc.s); got != tc.want {
+			t.Errorf("%s: headline %q, want %q", tc.name, got, tc.want)
+		}
 	}
+}
 
-	// A takeaway still wins when an outcome reason is also present.
-	both := Sitting{Subject: "tk-anchor", SubjectTitle: subjTitle, Title: visit, Takeaway: takeaway, OutcomeReason: reason}
-	if got := both.Headline(); got != takeaway {
-		t.Errorf("a takeaway wins over the outcome reason: got %q, want %q", got, takeaway)
+// TestTwoAsksOnOneSubjectReadAsTwoHeadlines: two conversations filed on one
+// subject, neither concluded, carry their own asks as their headlines on the
+// wire, so the record shows two different rows rather than the topic twice.
+func TestTwoAsksOnOneSubjectReadAsTwoHeadlines(t *testing.T) {
+	const (
+		topic = "every live epic states a hypothesis or becomes ordinary flow"
+		ask1  = "the triage clusters: make their work ordinary flow, or state a hypothesis for each one kept"
+		ask2  = "the closed epics: record the close ruling each one lacks"
+	)
+	in := []Sitting{
+		{ID: "tk-conv1", Subject: "tk-subj", SubjectTitle: topic, Title: ask1, Status: "open", Assignee: assigneeHuman, OpenedAt: daysAgo(0)},
+		{ID: "tk-conv2", Subject: "tk-subj", SubjectTitle: topic, Title: ask2, Status: "open", Assignee: assigneeHuman, OpenedAt: daysAgo(0)},
 	}
-
-	// A dedup close: no takeaway, but an outcome reason — the headline is the
-	// reason, so the row reads as a decision instead of the bare topic.
-	dedup := Sitting{Subject: "tk-anchor", SubjectTitle: subjTitle, Title: visit, OutcomeReason: reason}
-	if got := dedup.Headline(); got != reason {
-		t.Errorf("no takeaway but an outcome reason: the headline is the reason: got %q, want %q", got, reason)
+	got := map[string]string{}
+	for _, s := range BuildBoard(nil, fixtureNow, false, nil, Facts{Sittings: in}).Sittings {
+		got[s.ID] = s.Headline
 	}
-
-	// No takeaway, no reason, subject read: the headline is the topic, NOT the visit title.
-	bare := Sitting{Subject: "tk-anchor", SubjectTitle: subjTitle, Title: visit}
-	if got := bare.Headline(); got != subjTitle {
-		t.Errorf("no takeaway falls back to the subject title, not the visit title: got %q, want %q", got, subjTitle)
-	}
-	if got := bare.Topic(); got != subjTitle {
-		t.Errorf("topic is the subject title: got %q, want %q", got, subjTitle)
-	}
-
-	// Subject unread: the last resorts are the visit title and the bare id.
-	unread := Sitting{Subject: "tk-anchor", Title: visit}
-	if got := unread.Headline(); got != visit {
-		t.Errorf("an unread subject falls back to the visit title: got %q, want %q", got, visit)
-	}
-	if got := unread.Topic(); got != "tk-anchor" {
-		t.Errorf("an unread subject topic falls back to the id: got %q, want %q", got, "tk-anchor")
+	if got["tk-conv1"] != ask1 || got["tk-conv2"] != ask2 {
+		t.Errorf("each conversation's headline is its own ask, not the topic: got %q", got)
 	}
 }
 
 // TestParkedChildIsNotIdleWork: an epic whose child is finished and waiting on
-// a ruling must not report that child as idle work. "Assign or visit" names the
+// a ruling must not report that child as idle work. "Assign or discuss" names the
 // wrong bead — the child is already assigned, to the operator.
 func TestParkedChildIsNotIdleWork(t *testing.T) {
 	kids := []Child{
@@ -1490,7 +1407,7 @@ func TestParkedChildIsNotIdleWork(t *testing.T) {
 		Rig: "rig-a", Prefix: "ra", Priority: ptr(1), Children: kids,
 	}}
 
-	tile, ok := tileByID(BuildBoard(anchors, fixtureNow, false, nil, Facts{}), "ra-kg9z6.1")
+	tile, ok := tileByID(buildBoard(anchors, fixtureNow, false, nil, Facts{}), "ra-kg9z6.1")
 	if !ok {
 		t.Fatal("epic tile missing")
 	}
@@ -1522,19 +1439,20 @@ func TestParkedChildIsNotIdleWork(t *testing.T) {
 }
 
 // TestAllChildrenParkedIsNotStranded: when the ONLY open children are waiting
-// on the operator, the parent has no ask of its own — the asks are on the
-// children's own rows.
+// on the operator, the parent has no ask of its own — the asks are the
+// operator's, on the children or the gates that hold them.
 func TestAllChildrenParkedIsNotStranded(t *testing.T) {
 	anchors := []Anchor{{
 		ID: "tk-epic", Title: "everything is with the operator", Kind: "epic", Source: "epic",
 		Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), Children: []Child{
 			{ID: "tk-a", Status: "open", Metadata: map[string]string{"gc.routed_to": "human"}},
-			{ID: "tk-b", Status: "open", Metadata: map[string]string{"gc.takeaway": "ruling owed"}},
+			{ID: "tk-b", Status: "open", Metadata: map[string]string{"gc.takeaway": "ruling owed"},
+				Blockers: []Blocker{{ID: "tk-gate", Title: "parked until the ruling", Status: "open", IssueType: "gate"}}},
 			{ID: "tk-c", Status: "closed"},
 		},
 	}}
 
-	tile, ok := tileByID(BuildBoard(anchors, fixtureNow, false, nil, Facts{}), "tk-epic")
+	tile, ok := tileByID(buildBoard(anchors, fixtureNow, false, nil, Facts{}), "tk-epic")
 	if !ok {
 		t.Fatal("epic tile missing")
 	}
@@ -1555,6 +1473,544 @@ func TestAllChildrenParkedIsNotStranded(t *testing.T) {
 	}
 }
 
+// TestTakeawayAloneDoesNotParkAChild: a child is parked when a person holds it,
+// not because a sitting left a takeaway on it. With no wait, no route, no arm
+// and nothing in progress, nothing will start it, so it strands its parent.
+func TestTakeawayAloneDoesNotParkAChild(t *testing.T) {
+	anchors := []Anchor{{
+		ID: "ra-epic", Title: "a sitting concluded and routed nothing", Kind: "epic", Source: "epic",
+		Rig: "rig-a", Prefix: "ra", Priority: ptr(2), Children: []Child{
+			{ID: "ra-epic.1", Status: "open", Metadata: map[string]string{"gc.takeaway": "ruled — do it after sign-up"}},
+		},
+	}}
+	tile := mustTile(t, buildBoard(anchors, fixtureNow, false, nil, Facts{}), "ra-epic")
+	if len(tile.ParkedHeads) != 0 || !equalIDs(tile.OpenHeads, []string{"ra-epic.1"}) {
+		t.Errorf("the takeaway child is stranded, not parked: parked=%v open=%v", tile.ParkedHeads, tile.OpenHeads)
+	}
+	if !tile.Stranded || tile.Severity != SevHigh {
+		t.Errorf("nothing will start it, so the epic strands: sev=%s stranded=%v", tile.Severity, tile.Stranded)
+	}
+	if tile.Frontier != "needs-review · 1 open · 0 in flight (stranded)" {
+		t.Errorf("frontier = %q", tile.Frontier)
+	}
+}
+
+// TestQueuedChildrenAreNotStranded covers an epic whose open children wait
+// their turn behind a sibling in review. Each queued child is armed, so it
+// starts by itself once the sibling lands: none of them is work nobody has
+// picked up. The sibling carries a takeaway, an open pull request whose review
+// rounds have all closed, and a conversation a live sitting holds, and it
+// reads in review.
+// Children that nothing holds and nothing will start still strand the epic.
+func TestQueuedChildrenAreNotStranded(t *testing.T) {
+	arm := "rig-a/gc-toolkit.polecat"
+	inReview := Blocker{ID: "ra-epic.1", Title: "Platform admin", Status: "open", IssueType: "task"}
+	round := Blocker{ID: "ra-rework", Title: "Rework PR #62", Status: "closed", IssueType: "task",
+		RoutedTo: "rig-a/gc-toolkit.polecat"}
+	waiting := []Child{
+		{ID: "ra-epic.1", Status: "open", Blockers: []Blocker{round},
+			Metadata: map[string]string{"gc.takeaway": "ruled; PR #62 is in rework", "merge_result": "pull_request", "pr_number": "62"}},
+		{ID: "ra-epic.2", Status: "open", Blockers: []Blocker{inReview},
+			Metadata: map[string]string{"gc.dispatch_when_ready": arm}},
+		{ID: "ra-epic.3", Status: "open", Blockers: []Blocker{inReview},
+			Metadata: map[string]string{"gc.dispatch_when_ready": arm, "gc.takeaway": "after sign-up"}},
+		{ID: "ra-epic.4", Status: "open", Blockers: []Blocker{round, inReview},
+			Metadata: map[string]string{"gc.dispatch_when_ready": arm}},
+		{ID: "ra-epic.5", Status: "closed"},
+	}
+	conv := conversationAnchor("ra-conv", "ra-epic.1", "settle the rework", sittingAlias("ra-conv"))
+	facts := withSittings([]Anchor{conv}, liveOwners(sittingAlias("ra-conv")))
+	epic := func(kids []Child) []Anchor {
+		return []Anchor{{ID: "ra-epic", Title: "Platform foundation", Kind: "epic", Source: "epic",
+			Rig: "rig-a", Prefix: "ra", Priority: ptr(2), Children: kids}, conv}
+	}
+
+	t.Run("every open child waits on something", func(t *testing.T) {
+		tile := mustTile(t, buildBoard(epic(waiting), fixtureNow, false, nil, facts), "ra-epic")
+		if tile.Stranded || tile.Severity == SevHigh {
+			t.Errorf("children waiting their turn do not strand the epic: sev=%s stranded=%v", tile.Severity, tile.Stranded)
+		}
+		if tile.Frontier != "needs-review · 1 in review · 3 queued · nothing idle" {
+			t.Errorf("frontier = %q", tile.Frontier)
+		}
+		if tile.Needs != "nothing idle — 1 in review, 3 queued" {
+			t.Errorf("needs = %q", tile.Needs)
+		}
+		if len(tile.OpenHeads) != 0 || len(tile.ParkedHeads) != 0 {
+			t.Errorf("nothing is idle or parked: open=%v parked=%v", tile.OpenHeads, tile.ParkedHeads)
+		}
+		if tile.Open != 4 {
+			t.Errorf("open = %d, want the honest total 4", tile.Open)
+		}
+	})
+
+	t.Run("children nothing will start still strand it", func(t *testing.T) {
+		kids := append(append([]Child{}, waiting...),
+			Child{ID: "ra-epic.6", Status: "open"},
+			Child{ID: "ra-epic.7", Status: "open", Metadata: map[string]string{"placement": "pending"}})
+		tile := mustTile(t, buildBoard(epic(kids), fixtureNow, false, nil, facts), "ra-epic")
+		if !tile.Stranded || tile.Severity != SevHigh {
+			t.Errorf("two children nothing will start strand the epic: sev=%s stranded=%v", tile.Severity, tile.Stranded)
+		}
+		if tile.Frontier != "needs-review · 2 open · 0 in flight (stranded) · 1 in review · 3 queued" {
+			t.Errorf("the frontier counts the stranded ones and names the rest: %q", tile.Frontier)
+		}
+		if !equalIDs(tile.OpenHeads, []string{"ra-epic.6", "ra-epic.7"}) {
+			t.Errorf("open_heads names only the stranded children: %v", tile.OpenHeads)
+		}
+	})
+}
+
+// TestNestedParentReadsItsChildren: a sub-epic carries no route and no arm of
+// its own, so read by its own bead alone it would always be stranded. Nothing
+// holds its bead, so its parent counts it by what its own children are doing:
+// queued while they wait their turn, in flight while one moves, and stranded
+// only while one is idle. The reading carries through every level.
+func TestNestedParentReadsItsChildren(t *testing.T) {
+	arm := map[string]string{"gc.dispatch_when_ready": "rig-a/gc-toolkit.polecat"}
+	sibling := Blocker{ID: "ra-x", Title: "Platform admin", Status: "open", IssueType: "task"}
+	live := liveOwners("polecat-live")
+	family := func(leaf Child) []Anchor {
+		return []Anchor{
+			{ID: "ra-top", Kind: "epic", Source: "epic", Rig: "rig-a", Prefix: "ra",
+				Children: []Child{{ID: "ra-mid", Status: "open"}, {ID: "ra-done", Status: "closed"}}},
+			{ID: "ra-mid", Kind: "epic", Source: "epic", Rig: "rig-a", Prefix: "ra",
+				Children: []Child{{ID: "ra-sub", Status: "open"}}},
+			{ID: "ra-sub", Kind: "epic", Source: "epic", Rig: "rig-a", Prefix: "ra",
+				Children: []Child{leaf}},
+		}
+	}
+	cases := []struct {
+		name          string
+		leaf          Child
+		wantStranded  bool
+		wantFrontier  string
+		wantInFlight  int
+		wantOpenHeads []string
+	}{
+		{"its children wait their turn", Child{ID: "ra-leaf", Status: "open", Metadata: arm, Blockers: []Blocker{sibling}},
+			false, "needs-review · 1 queued · nothing idle", 0, []string{}},
+		{"one of its children moves", Child{ID: "ra-leaf", Status: "in_progress", Assignee: "polecat-live"},
+			false, "needs-review · 1 open · 1 in flight", 1, []string{}},
+		{"one of its children is idle", Child{ID: "ra-leaf", Status: "open"},
+			true, "needs-review · 1 open · 0 in flight (stranded)", 0, []string{"ra-mid"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			top := mustTile(t, buildBoard(family(tc.leaf), fixtureNow, false, nil, live), "ra-top")
+			if top.Stranded != tc.wantStranded || top.Frontier != tc.wantFrontier ||
+				top.InProgressLive != tc.wantInFlight || !equalIDs(top.OpenHeads, tc.wantOpenHeads) {
+				t.Errorf("stranded=%v frontier=%q in_progress_live=%d open_heads=%v, want %v / %q / %d / %v",
+					top.Stranded, top.Frontier, top.InProgressLive, top.OpenHeads,
+					tc.wantStranded, tc.wantFrontier, tc.wantInFlight, tc.wantOpenHeads)
+			}
+		})
+	}
+
+	// A sub-epic its own bead holds keeps that state: a person parked it.
+	anchors := family(Child{ID: "ra-leaf", Status: "open"})
+	anchors[0].Children[0].Blockers = []Blocker{{ID: "ra-gate", Title: "parked for the quarter", Status: "open", IssueType: "gate"}}
+	top := mustTile(t, buildBoard(anchors, fixtureNow, false, nil, live), "ra-top")
+	if top.Stranded || !equalIDs(top.ParkedHeads, []string{"ra-mid"}) {
+		t.Errorf("a parked sub-epic is parked, whatever its children do: stranded=%v parked=%v", top.Stranded, top.ParkedHeads)
+	}
+}
+
+// TestAncestorWaitHoldsTheFamily: bd keeps a bead out of `bd ready` while it or
+// a parent-child ancestor has an open blocker, so the children of a parked epic
+// are held by the park, not stranded, and the epic names the gate that holds
+// them. Work already in flight under the park keeps running and reads so. An
+// epic waiting on open work holds its children the same way, queued behind it.
+// A convoy's members hang off it by `tracks`, which bd does not cascade, so a
+// convoy's own wait holds none of them.
+func TestAncestorWaitHoldsTheFamily(t *testing.T) {
+	gate := Blocker{ID: "ra-gate", Title: "parked while steer-by-epic lands", Status: "open", IssueType: "gate"}
+	work := Blocker{ID: "ra-w", Title: "the platform build", Status: "open", IssueType: "task"}
+	sibling := Blocker{ID: "ra-x", Title: "Platform admin", Status: "open", IssueType: "task"}
+	arm := map[string]string{"gc.dispatch_when_ready": "rig-a/gc-toolkit.polecat"}
+	live := liveOwners("polecat-live")
+	waitsOn := func(a Anchor, b Blocker) Anchor {
+		a.Blockers = []Blocker{b}
+		a.WaitingOn = []string{b.ID}
+		return a
+	}
+	epic := func(id string, kids ...Child) Anchor {
+		return Anchor{ID: id, Kind: "epic", Source: "epic", Rig: "rig-a", Prefix: "ra", Children: kids}
+	}
+
+	t.Run("a parked epic holds its children", func(t *testing.T) {
+		b := buildBoard([]Anchor{waitsOn(epic("ra-e",
+			Child{ID: "ra-e.1", Status: "open"},
+			Child{ID: "ra-e.2", Status: "open", Metadata: arm, Blockers: []Blocker{sibling}},
+		), gate)}, fixtureNow, false, nil, live)
+		tile := mustTile(t, b, "ra-e")
+		if tile.Stranded || tile.Severity == SevHigh || !equalIDs(tile.ParkedHeads, []string{"ra-e.1", "ra-e.2"}) {
+			t.Errorf("held children are parked, not stranded: sev=%s stranded=%v parked=%v", tile.Severity, tile.Stranded, tile.ParkedHeads)
+		}
+		if tile.Frontier != "needs-review · 2 parked for the operator · nothing idle" {
+			t.Errorf("frontier = %q", tile.Frontier)
+		}
+		if tile.Needs != "parked: parked while steer-by-epic lands" {
+			t.Errorf("the epic names the gate that holds it: %q", tile.Needs)
+		}
+	})
+
+	t.Run("work in flight under the park keeps running", func(t *testing.T) {
+		b := buildBoard([]Anchor{waitsOn(epic("ra-e",
+			Child{ID: "ra-e.1", Status: "open"},
+			Child{ID: "ra-e.3", Status: "in_progress", Assignee: "polecat-live"},
+			Child{ID: "ra-e.4", Status: "open", Metadata: map[string]string{"merge_result": "pull_request"}},
+		), gate)}, fixtureNow, false, nil, live)
+		tile := mustTile(t, b, "ra-e")
+		if tile.Frontier != "needs-review · 1 open · 1 in flight · 1 in review · 1 parked for the operator" {
+			t.Errorf("frontier = %q", tile.Frontier)
+		}
+	})
+
+	t.Run("the hold reaches through a nested parent", func(t *testing.T) {
+		b := buildBoard([]Anchor{
+			waitsOn(epic("ra-e", Child{ID: "ra-s", Status: "open"}), gate),
+			epic("ra-s", Child{ID: "ra-s.1", Status: "open"}),
+		}, fixtureNow, false, nil, live)
+		top, sub := mustTile(t, b, "ra-e"), mustTile(t, b, "ra-s")
+		if !equalIDs(top.ParkedHeads, []string{"ra-s"}) || top.Stranded {
+			t.Errorf("the nested parent is held: parked=%v stranded=%v", top.ParkedHeads, top.Stranded)
+		}
+		if sub.Stranded || !equalIDs(sub.ParkedHeads, []string{"ra-s.1"}) {
+			t.Errorf("its own children are held by the park above it: parked=%v stranded=%v", sub.ParkedHeads, sub.Stranded)
+		}
+		if sub.Needs != "parked: parked while steer-by-epic lands" {
+			t.Errorf("the nested parent names the gate that holds it: %q", sub.Needs)
+		}
+	})
+
+	t.Run("one gate that holds two ancestors is named once", func(t *testing.T) {
+		b := buildBoard([]Anchor{
+			waitsOn(epic("ra-e", Child{ID: "ra-s", Status: "open"}), gate),
+			waitsOn(epic("ra-s", Child{ID: "ra-s.1", Status: "open"}), gate),
+			epic("ra-s.1", Child{ID: "ra-s.1.1", Status: "open"}),
+		}, fixtureNow, false, nil, live)
+		if leaf := mustTile(t, b, "ra-s.1"); leaf.Needs != "parked: parked while steer-by-epic lands" {
+			t.Errorf("needs = %q", leaf.Needs)
+		}
+	})
+
+	t.Run("two gates above a bead are both counted", func(t *testing.T) {
+		older := Blocker{ID: "ra-gate0", Title: "parked for the quarter", Status: "open", IssueType: "gate",
+			CreatedAt: fixtureNow.Add(-2 * time.Hour)}
+		newer := Blocker{ID: "ra-gate1", Title: "parked while steer-by-epic lands", Status: "open", IssueType: "gate",
+			CreatedAt: fixtureNow.Add(-time.Hour)}
+		b := buildBoard([]Anchor{
+			waitsOn(epic("ra-e", Child{ID: "ra-s", Status: "open"}), older),
+			waitsOn(epic("ra-s", Child{ID: "ra-s.1", Status: "open"}), newer),
+			epic("ra-s.1", Child{ID: "ra-s.1.1", Status: "open"}),
+		}, fixtureNow, false, nil, live)
+		if leaf := mustTile(t, b, "ra-s.1"); leaf.Needs != "parked: parked for the quarter and 1 more" {
+			t.Errorf("needs = %q", leaf.Needs)
+		}
+	})
+
+	t.Run("an epic waiting on a swept gate holds its children queued", func(t *testing.T) {
+		timer := Blocker{ID: "ra-tg", Title: "Gate: timer", Status: "open", IssueType: "gate", AwaitType: "timer"}
+		b := buildBoard([]Anchor{waitsOn(epic("ra-e", Child{ID: "ra-e.1", Status: "open"}), timer)},
+			fixtureNow, false, nil, live)
+		tile := mustTile(t, b, "ra-e")
+		if len(tile.ParkedHeads) != 0 || tile.Frontier != "needs-review · 1 queued · nothing idle" || tile.Needs != "queued behind Gate: timer" {
+			t.Errorf("parked=%v frontier=%q needs=%q", tile.ParkedHeads, tile.Frontier, tile.Needs)
+		}
+	})
+
+	t.Run("an epic waiting on work holds its children queued", func(t *testing.T) {
+		b := buildBoard([]Anchor{waitsOn(epic("ra-e",
+			Child{ID: "ra-e.1", Status: "open"}, Child{ID: "ra-e.2", Status: "open"},
+		), work)}, fixtureNow, false, nil, live)
+		tile := mustTile(t, b, "ra-e")
+		if tile.Stranded || tile.Frontier != "needs-review · 2 queued · nothing idle" || tile.Needs != "queued behind the platform build" {
+			t.Errorf("stranded=%v frontier=%q needs=%q", tile.Stranded, tile.Frontier, tile.Needs)
+		}
+	})
+
+	t.Run("a convoy's wait does not hold its members", func(t *testing.T) {
+		cv := waitsOn(Anchor{ID: "ra-cv", Kind: "convoy", Source: "convoy", Rig: "rig-a", Prefix: "ra",
+			Children: []Child{{ID: "ra-m1", Status: "open"}}}, gate)
+		tile := mustTile(t, buildBoard([]Anchor{cv}, fixtureNow, false, nil, live), "ra-cv")
+		if !tile.Stranded || !equalIDs(tile.OpenHeads, []string{"ra-m1"}) {
+			t.Errorf("a tracked member nothing holds is stranded: stranded=%v open=%v", tile.Stranded, tile.OpenHeads)
+		}
+	})
+}
+
+// TestSweptGateQueuesItsBead: the city's gate sweep closes a timer gate, and a
+// gate on a GitHub workflow run or pull request, by itself. A child waiting on
+// one waits its turn, so its epic counts it queued and does not ask the
+// operator to release it. A gate that awaits a person, a park gate, which names
+// no await, and a gate the sweep does not check all wait for someone to close
+// them, so a child waiting on one is parked for the operator.
+func TestSweptGateQueuesItsBead(t *testing.T) {
+	cases := []struct {
+		name, await string
+		parked      bool
+	}{
+		{"a timer gate", "timer", false},
+		{"a GitHub run gate", "gh:run", false},
+		{"a GitHub pull request gate", "gh:pr", false},
+		{"a human gate", "human", true},
+		{"a park gate", "", true},
+		{"a gate the sweep does not check", "mail", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gate := Blocker{ID: "ra-g", Title: "the gate", Status: "open", IssueType: "gate", AwaitType: tc.await}
+			epic := Anchor{ID: "ra-e", Kind: "epic", Source: "epic", Rig: "rig-a", Prefix: "ra",
+				Children: []Child{{ID: "ra-e.1", Status: "open", Blockers: []Blocker{gate}}}}
+			tile := mustTile(t, buildBoard([]Anchor{epic}, fixtureNow, false, nil, Facts{}), "ra-e")
+			if tc.parked {
+				if !equalIDs(tile.ParkedHeads, []string{"ra-e.1"}) || tile.Section != SectionGate ||
+					tile.Needs != "1 parked for the operator — release or rule on them" {
+					t.Errorf("a person releases it: parked=%v section=%s needs=%q", tile.ParkedHeads, tile.Section, tile.Needs)
+				}
+				return
+			}
+			if len(tile.ParkedHeads) != 0 || tile.Section != SectionActive || tile.Stranded ||
+				tile.Frontier != "needs-review · 1 queued · nothing idle" || tile.Needs != "nothing idle — 1 queued" {
+				t.Errorf("the sweep releases it: parked=%v section=%s stranded=%v frontier=%q needs=%q",
+					tile.ParkedHeads, tile.Section, tile.Stranded, tile.Frontier, tile.Needs)
+			}
+		})
+	}
+}
+
+// TestUnderHoldKeepsWhatMovesOrAsks: an ancestor's wait holds a bead that
+// nothing else holds or moves, and parks one waiting its turn behind work while
+// a person holds the ancestor. Live work, a pull request, a conversation and a
+// person's own hold on the bead keep their state, and a bead queued behind its
+// own work under a wait on work keeps its own waits.
+func TestUnderHoldKeepsWhatMovesOrAsks(t *testing.T) {
+	gate := Blocker{ID: "ra-gate", Title: "parked while steer-by-epic lands", Status: "open", IssueType: "gate"}
+	work := Blocker{ID: "ra-w", Title: "the platform build", Status: "open", IssueType: "task"}
+	own := Blocker{ID: "ra-x", Title: "Platform admin", Status: "open", IssueType: "task"}
+	parked := hold{kind: stateParked, waits: []Blocker{gate}}
+	queued := hold{kind: stateQueued, waits: []Blocker{work}}
+	cases := []struct {
+		name      string
+		s         beadState
+		h         hold
+		want      string
+		wait      string
+		inherited bool
+	}{
+		{"nothing holds it", beadState{kind: stateStranded}, hold{}, stateStranded, "", false},
+		{"stranded under a park", beadState{kind: stateStranded}, parked, stateParked, "ra-gate", true},
+		{"stranded under a wait on work", beadState{kind: stateStranded}, queued, stateQueued, "ra-w", true},
+		{"queued under a park", beadState{kind: stateQueued, waits: []Blocker{own}}, parked, stateParked, "ra-gate", true},
+		{"queued under a wait on work", beadState{kind: stateQueued, waits: []Blocker{own}}, queued, stateQueued, "ra-x", false},
+		{"parked by its own gate", beadState{kind: stateParked, waits: []Blocker{own}}, queued, stateParked, "ra-x", false},
+		{"in flight", beadState{kind: stateInFlight}, parked, stateInFlight, "", false},
+		{"in review", beadState{kind: stateInReview}, parked, stateInReview, "", false},
+		{"in conversation", beadState{kind: stateInConversation}, parked, stateInConversation, "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := underHold(tc.s, tc.h)
+			wait := ""
+			if len(got.waits) > 0 {
+				wait = got.waits[0].ID
+			}
+			if got.kind != tc.want || wait != tc.wait || got.inherited != tc.inherited {
+				t.Errorf("state=%q wait=%q inherited=%v, want %q / %q / %v", got.kind, wait, got.inherited, tc.want, tc.wait, tc.inherited)
+			}
+		})
+	}
+}
+
+// TestAncestorWaitHoldsARowOfItsOwn: a bead under a held epic that has a row of
+// its own reads the hold on that row too, so the row and its parent's roll-up
+// give one answer. A takeaway subject whose own waits have landed, under an
+// epic parked at a gate, is parked and names that gate. It owes no
+// disposition, because the park still holds it. Under an epic waiting on work
+// it is queued behind that work. A subject in review keeps its own state.
+func TestAncestorWaitHoldsARowOfItsOwn(t *testing.T) {
+	gate := Blocker{ID: "ra-gate", Title: "parked while steer-by-epic lands", Status: "open", IssueType: "gate"}
+	work := Blocker{ID: "ra-w", Title: "the platform build", Status: "open", IssueType: "task"}
+	landed := Blocker{ID: "ra-done", Title: "the routed fix", Status: "closed", IssueType: "task"}
+	family := func(epicWait Blocker, md map[string]string) []Anchor {
+		full := map[string]string{"gc.takeaway": "routed the fix; nothing further here"}
+		for k, v := range md {
+			full[k] = v
+		}
+		return []Anchor{
+			{ID: "ra-e", Kind: "epic", Source: "epic", Rig: "rig-a", Prefix: "ra",
+				Children:  []Child{{ID: "ra-s", Status: "open", Metadata: full, Blockers: []Blocker{landed}}},
+				WaitingOn: []string{epicWait.ID}, Blockers: []Blocker{epicWait}},
+			{ID: "ra-s", Title: "the subject", Kind: "parked", Source: "parked", Rig: "rig-a", Prefix: "ra",
+				Priority: ptr(2), UpdatedAt: daysAgo(1), Metadata: full, Takeaway: full["gc.takeaway"],
+				WaitingOn: []string{landed.ID}, WaitingOnClosed: []string{landed.ID}, Blockers: []Blocker{landed}},
+		}
+	}
+
+	t.Run("under a parked epic", func(t *testing.T) {
+		b := buildBoard(family(gate, nil), fixtureNow, false, nil, Facts{})
+		row, epic := mustTile(t, b, "ra-s"), mustTile(t, b, "ra-e")
+		if !equalIDs(epic.ParkedHeads, []string{"ra-s"}) {
+			t.Errorf("the epic counts its subject parked: %v", epic.ParkedHeads)
+		}
+		if row.DispositionDue || row.Owed || row.Section == SectionGate {
+			t.Errorf("the park still holds it, so no disposition is owed: disposition_due=%v owed=%v section=%s",
+				row.DispositionDue, row.Owed, row.Section)
+		}
+		if row.Frontier != "needs-review · parked · held by an ancestor's wait" || row.Needs != "parked: parked while steer-by-epic lands" {
+			t.Errorf("the row names the hold: frontier=%q needs=%q", row.Frontier, row.Needs)
+		}
+	})
+
+	t.Run("under an epic waiting on work", func(t *testing.T) {
+		row := mustTile(t, buildBoard(family(work, nil), fixtureNow, false, nil, Facts{}), "ra-s")
+		if row.DispositionDue || row.Owed {
+			t.Errorf("disposition_due=%v owed=%v", row.DispositionDue, row.Owed)
+		}
+		if row.Frontier != "needs-review · queued · held by an ancestor's wait" || row.Needs != "queued behind the platform build" {
+			t.Errorf("frontier=%q needs=%q", row.Frontier, row.Needs)
+		}
+	})
+
+	t.Run("in review under a parked epic", func(t *testing.T) {
+		md := map[string]string{"merge_result": "pull_request", "pr_number": "62", "branch": "polecat/ra-s"}
+		row := mustTile(t, buildBoard(family(gate, md), fixtureNow, false, nil, Facts{}), "ra-s")
+		if row.DispositionDue || row.Section != SectionReview {
+			t.Errorf("a pull request in review keeps its state: disposition_due=%v section=%s", row.DispositionDue, row.Section)
+		}
+	})
+
+	t.Run("once the epic's wait lands", func(t *testing.T) {
+		closedGate := gate
+		closedGate.Status = "closed"
+		anchors := family(closedGate, nil)
+		anchors[0].WaitingOnClosed = []string{closedGate.ID}
+		row := mustTile(t, buildBoard(anchors, fixtureNow, false, nil, Facts{}), "ra-s")
+		if !row.DispositionDue || row.Needs != "blocker landed — dispose or resume" {
+			t.Errorf("nothing holds it any more, so the disposition is due: disposition_due=%v needs=%q", row.DispositionDue, row.Needs)
+		}
+	})
+}
+
+// TestInReviewBeadIsNotADisposition: a bead carrying a takeaway, every
+// recorded wait closed, an open pull request and a conversation a live sitting
+// holds is a pull request in review. Its closed waits are its finished review rounds, not
+// a park that ended, so it owes no disposition. The gather admits it twice, as
+// a merge anchor and by its takeaway, and the two rows read alike.
+func TestInReviewBeadIsNotADisposition(t *testing.T) {
+	md := map[string]string{
+		"merge_result": "pull_request", "pr_number": "62", "branch": "polecat/ra-pr",
+		"gc.takeaway": "Ruled: previews get an admin login. PR #62 is in rework so the demo can capture",
+	}
+	twin := func(kind string) Anchor {
+		return Anchor{ID: "ra-pr", Title: "Platform admin", Kind: kind, Source: kind, Rig: "rig-a", Prefix: "ra",
+			Priority: ptr(1), UpdatedAt: daysAgo(1), Metadata: md, Takeaway: md["gc.takeaway"],
+			WaitingOn: []string{"ra-r1", "ra-r2"}, WaitingOnClosed: []string{"ra-r1", "ra-r2"},
+			Blockers: []Blocker{
+				{ID: "ra-r1", Title: "Review PR #62", Status: "closed", IssueType: "task", RoutedTo: "rig-a/gc-toolkit.polecat"},
+				{ID: "ra-r2", Title: "Rework PR #62", Status: "closed", IssueType: "task", RoutedTo: "rig-a/gc-toolkit.polecat"},
+			}}
+	}
+	conv := conversationAnchor("ra-conv", "ra-pr", "settle the rework", sittingAlias("ra-conv"))
+	facts := withSittings([]Anchor{conv}, liveOwners(sittingAlias("ra-conv")))
+
+	for _, order := range [][]string{{"merge", "parked"}, {"parked", "merge"}} {
+		t.Run(strings.Join(order, " then "), func(t *testing.T) {
+			b := buildBoard([]Anchor{twin(order[0]), twin(order[1]), conv}, fixtureNow, false, nil, facts)
+			if len(b.Tiles) != 1 {
+				t.Fatalf("the twins are one bead: %d tiles", len(b.Tiles))
+			}
+			tile := b.Tiles[0]
+			if tile.Kind != order[0] {
+				t.Errorf("the twins tie, so the row the gather admits first stands: kind=%s", tile.Kind)
+			}
+			if tile.DispositionDue || tile.Needs == "blocker landed — dispose or resume" {
+				t.Errorf("a pull request in review owes no disposition: disposition_due=%v needs=%q", tile.DispositionDue, tile.Needs)
+			}
+			if tile.Section != SectionReview {
+				t.Errorf("it reads in review: section=%s", tile.Section)
+			}
+			if tile.Frontier != "needs-review · PR #62" {
+				t.Errorf("the frontier names the pull request, not a park: %q", tile.Frontier)
+			}
+			if tile.Needs != md["gc.takeaway"] {
+				t.Errorf("a merge anchor spends its takeaway as NEEDS: %q", tile.Needs)
+			}
+			if tile.Owed {
+				t.Error("nothing on the pull request is owed, and no disposition is")
+			}
+			if tile.SittingState != SittingInSession {
+				t.Errorf("the live sitting still shows: sitting_state=%q", tile.SittingState)
+			}
+		})
+	}
+}
+
+// TestTakeawayRowSpeaksItsState: a childless takeaway row says what its graph
+// says it waits on, ahead of the takeaway, which stays on the wire. It names
+// the wait it is queued or parked behind, and says when it starts by itself.
+// Once every recorded wait has landed, it reads its live state, and a
+// disposition only when nothing holds or moves it.
+func TestTakeawayRowSpeaksItsState(t *testing.T) {
+	work := Blocker{ID: "ra-1", Title: "Platform admin", Status: "open", IssueType: "task"}
+	gate := Blocker{ID: "ra-gate", Title: "parked until the design is signed", Status: "open", IssueType: "gate"}
+	landed := Blocker{ID: "ra-done", Title: "the routed fix", Status: "closed", IssueType: "task"}
+	row := func(id string, md map[string]string, blockers ...Blocker) Anchor {
+		full := map[string]string{"gc.takeaway": "the sitting's conclusion"}
+		for k, v := range md {
+			full[k] = v
+		}
+		a := Anchor{ID: id, Title: "t " + id, Kind: "parked", Source: "parked", Rig: "rig-a", Prefix: "ra",
+			Priority: ptr(2), UpdatedAt: daysAgo(1), Metadata: full, Takeaway: full["gc.takeaway"], Blockers: blockers}
+		for _, b := range blockers {
+			a.WaitingOn = append(a.WaitingOn, b.ID)
+			if b.Status == "closed" {
+				a.WaitingOnClosed = append(a.WaitingOnClosed, b.ID)
+			}
+		}
+		return a
+	}
+	arm := map[string]string{"gc.dispatch_when_ready": "rig-a/gc-toolkit.polecat"}
+	anchors := []Anchor{
+		row("ra-queued", arm, landed, work),
+		row("ra-queued-bare", nil, work),
+		row("ra-parked", arm, gate, work),
+		row("ra-talk", nil, landed),
+		row("ra-asked", nil, landed),
+		row("ra-armed", arm, landed),
+		row("ra-done", nil, landed),
+	}
+	anchors = append(anchors,
+		conversationAnchor("ra-conv", "ra-talk", "what next", sittingAlias("ra-conv")),
+		conversationAnchor("ra-conv2", "ra-asked", "close it or say why not", assigneeHuman))
+	b := buildBoard(anchors, fixtureNow, false, nil, withSittings(anchors, liveOwners(sittingAlias("ra-conv"))))
+
+	cases := []struct {
+		id, frontier, needs string
+		dispositionDue      bool
+	}{
+		{"ra-queued", "needs-review · queued · waiting on 1 · starts by itself",
+			"queued behind Platform admin — starts by itself when it lands", false},
+		{"ra-queued-bare", "needs-review · queued · waiting on 1", "queued behind Platform admin", false},
+		{"ra-parked", "needs-review · parked · waiting on 2", "parked: parked until the design is signed", false},
+		{"ra-talk", "needs-review · in conversation", "in conversation", false},
+		{"ra-asked", "needs-review · a conversation waits for you · the work is not held", "close it or say why not", false},
+		{"ra-armed", "needs-review · queued · starts by itself", "queued — starts by itself", false},
+		{"ra-done", "needs-review · blocker landed", "blocker landed — dispose or resume", true},
+	}
+	for _, tc := range cases {
+		tile := mustTile(t, b, tc.id)
+		if tile.Frontier != tc.frontier || tile.Needs != tc.needs || tile.DispositionDue != tc.dispositionDue {
+			t.Errorf("%s: frontier=%q needs=%q disposition_due=%v, want %q / %q / %v",
+				tc.id, tile.Frontier, tile.Needs, tile.DispositionDue, tc.frontier, tc.needs, tc.dispositionDue)
+		}
+		if tile.Takeaway == nil || *tile.Takeaway != "the sitting's conclusion" {
+			t.Errorf("%s: the takeaway stays on the wire: %v", tc.id, tile.Takeaway)
+		}
+	}
+}
+
 // TestParkedSplitLeavesUnparkedAnchorsUnchanged pins the no-op case: an anchor
 // with no parked children must band and read exactly as it does without the
 // split.
@@ -1572,7 +2028,7 @@ func TestParkedSplitLeavesUnparkedAnchorsUnchanged(t *testing.T) {
 			anchor: Anchor{ID: "tk-s", Kind: "epic", Source: "epic", Children: []Child{
 				{ID: "tk-s1", Status: "open"}, {ID: "tk-s2", Status: "open"},
 			}},
-			wantSev: SevHigh, frontier: "needs-review · 2 open · 0 in flight (stranded)", needs: "decomposed, idle — assign or visit",
+			wantSev: SevHigh, frontier: "needs-review · 2 open · 0 in flight (stranded)", needs: "decomposed, idle — assign or discuss",
 		},
 		{
 			name: "in flight",
@@ -1599,7 +2055,7 @@ func TestParkedSplitLeavesUnparkedAnchorsUnchanged(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			tile, ok := tileByID(BuildBoard([]Anchor{tc.anchor}, fixtureNow, false, nil, tc.facts), tc.anchor.ID)
+			tile, ok := tileByID(buildBoard([]Anchor{tc.anchor}, fixtureNow, false, nil, tc.facts), tc.anchor.ID)
 			if !ok {
 				t.Fatal("tile missing")
 			}
@@ -1629,7 +2085,7 @@ func TestParkedSplitIgnoresAMovingChild(t *testing.T) {
 				Metadata: map[string]string{"gc.takeaway": "dispatched, work routed"}},
 		},
 	}}
-	tile, ok := tileByID(BuildBoard(anchors, fixtureNow, false, nil, liveOwners("polecat-live")), "tk-epic")
+	tile, ok := tileByID(buildBoard(anchors, fixtureNow, false, nil, liveOwners("polecat-live")), "tk-epic")
 	if !ok {
 		t.Fatal("tile missing")
 	}
@@ -1641,28 +2097,82 @@ func TestParkedSplitIgnoresAMovingChild(t *testing.T) {
 	}
 }
 
-// TestHasOwnRowReadsPresenceNotTruthiness: bd round-trips an empty metadata
-// value and the decode keeps the key, so a blanked takeaway still gives the bead
-// a row. This reading must match the gather's selector, or a child is an anchor
-// on the board and idle work under its parent at the same time.
-func TestHasOwnRowReadsPresenceNotTruthiness(t *testing.T) {
+// TestDeriveStateReadsTheGraphNotTheMarkers covers each state a bead can be in,
+// read off its own waits, route, arm and live work. A takeaway, blank or not,
+// decides nothing: the state is what holds the bead, not what was said about it.
+func TestDeriveStateReadsTheGraphNotTheMarkers(t *testing.T) {
+	work := Blocker{ID: "ra-work", Title: "the sibling it waits behind", Status: "open", IssueType: "task"}
+	gate := Blocker{ID: "ra-gate", Title: "parked until the design is signed", Status: "open", IssueType: "gate"}
+	humanGate := Blocker{ID: "ra-hg", Title: "sign off the design", Status: "open", IssueType: "gate", AwaitType: "human"}
+	timerGate := Blocker{ID: "ra-tg", Title: "Gate: timer", Status: "open", IssueType: "gate", AwaitType: "timer"}
+	runGate := Blocker{ID: "ra-rg", Title: "Gate: gh:run release.yml", Status: "open", IssueType: "gate", AwaitType: "gh:run"}
+	prGate := Blocker{ID: "ra-pg", Title: "Gate: gh:pr 42", Status: "open", IssueType: "gate", AwaitType: "gh:pr"}
+	mailGate := Blocker{ID: "ra-mg", Title: "Gate: mail", Status: "open", IssueType: "gate", AwaitType: "mail"}
+	decision := Blocker{ID: "ra-dec", Title: "pick a vendor", Status: "open", IssueType: "decision"}
+	ask := Blocker{ID: "ra-ask", Title: "rule on it", Status: "open", IssueType: "task", RoutedTo: routedHuman}
+	landed := Blocker{ID: "ra-done", Title: "landed work", Status: "closed", IssueType: "task"}
+	live := liveOwners("polecat-live")
+	live.Inflight = map[string][]string{"ra-slung": {"polecat-live"}}
+	// A live sitting holds the conversations on ra-talk and ra-pr-talk, and the
+	// one on ra-asked waits in the operator's queue.
+	talks := []Anchor{
+		conversationAnchor("ra-c1", "ra-talk", "what next", sittingAlias("ra-c1")),
+		conversationAnchor("ra-c2", "ra-asked", "close it or say why not", assigneeHuman),
+		conversationAnchor("ra-c3", "ra-pr-talk", "settle the rework", sittingAlias("ra-c3")),
+	}
+	conversations := withSittings(talks, liveOwners(sittingAlias("ra-c1"), sittingAlias("ra-c3")))
+	conversations.human = indexHuman(talks, conversations)
 	cases := []struct {
-		name string
-		md   map[string]string
-		want bool
+		name      string
+		in        stateInput
+		facts     Facts
+		want      string
+		selfStart bool
 	}{
-		{"nil", nil, false},
-		{"empty", map[string]string{}, false},
-		{"routed to the operator", map[string]string{"gc.routed_to": "human"}, true},
-		{"routed to an agent", map[string]string{"gc.routed_to": "gc-toolkit/gc-toolkit.polecat"}, false},
-		{"takeaway present", map[string]string{"gc.takeaway": "held"}, true},
-		{"takeaway blanked", map[string]string{"gc.takeaway": ""}, true},
-		{"only a neighbouring key", map[string]string{"gc.takeaway_at": "2026-08-26T00:00:00Z"}, false},
+		{name: "nothing holds it", in: stateInput{id: "ra-a"}, want: stateStranded},
+		{name: "a takeaway alone", in: stateInput{id: "ra-a", metadata: map[string]string{mdTakeaway: "ruling owed"}}, want: stateStranded},
+		{name: "a blanked takeaway", in: stateInput{id: "ra-a", metadata: map[string]string{mdTakeaway: ""}}, want: stateStranded},
+		{name: "only landed waits", in: stateInput{id: "ra-a", blockers: []Blocker{landed}}, want: stateStranded},
+		{name: "waits on open work", in: stateInput{id: "ra-a", blockers: []Blocker{landed, work}}, want: stateQueued},
+		{name: "waits on open work, armed", in: stateInput{id: "ra-a", blockers: []Blocker{work},
+			metadata: map[string]string{mdDispatchWhenReady: "rig-a/gc-toolkit.polecat"}}, want: stateQueued, selfStart: true},
+		{name: "an unread wait", in: stateInput{id: "ra-a", unread: 1}, want: stateQueued},
+		{name: "routed to a pool", in: stateInput{id: "ra-a", metadata: map[string]string{mdRoutedTo: "rig-a/gc-toolkit.polecat"}},
+			want: stateQueued, selfStart: true},
+		{name: "armed with nothing open", in: stateInput{id: "ra-a", metadata: map[string]string{mdDispatchWhenReady: "rig-a/gc-toolkit.polecat"}},
+			want: stateQueued, selfStart: true},
+		{name: "assigned and not started", in: stateInput{id: "ra-a", status: "open", assignee: "rig-a/gc-toolkit.refinery"},
+			want: stateQueued, selfStart: true},
+		{name: "waits on a park gate", in: stateInput{id: "ra-a", blockers: []Blocker{gate}}, want: stateParked},
+		{name: "waits on a human gate", in: stateInput{id: "ra-a", blockers: []Blocker{humanGate}}, want: stateParked},
+		{name: "waits on a timer gate", in: stateInput{id: "ra-a", blockers: []Blocker{timerGate}}, want: stateQueued},
+		{name: "waits on a GitHub run gate", in: stateInput{id: "ra-a", blockers: []Blocker{runGate}}, want: stateQueued},
+		{name: "waits on a GitHub pull request gate", in: stateInput{id: "ra-a", blockers: []Blocker{prGate}}, want: stateQueued},
+		{name: "waits on a gate the sweep does not check", in: stateInput{id: "ra-a", blockers: []Blocker{mailGate}}, want: stateParked},
+		{name: "a person's gate outranks a swept one", in: stateInput{id: "ra-a", blockers: []Blocker{timerGate, gate}}, want: stateParked},
+		{name: "waits on a decision", in: stateInput{id: "ra-a", blockers: []Blocker{decision}}, want: stateParked},
+		{name: "waits on work routed to the operator", in: stateInput{id: "ra-a", blockers: []Blocker{ask}}, want: stateParked},
+		{name: "a gate outranks open work", in: stateInput{id: "ra-a", blockers: []Blocker{work, gate},
+			metadata: map[string]string{mdDispatchWhenReady: "rig-a/gc-toolkit.polecat"}}, want: stateParked},
+		{name: "routed to the operator", in: stateInput{id: "ra-a", metadata: map[string]string{mdRoutedTo: routedHuman}}, want: stateParked},
+		{name: "a conversation waiting for the operator", in: stateInput{id: "ra-asked"}, facts: conversations, want: stateParked},
+		{name: "a live sitting", in: stateInput{id: "ra-talk", blockers: []Blocker{work}}, facts: conversations, want: stateInConversation},
+		{name: "an open pull request", in: stateInput{id: "ra-pr", metadata: map[string]string{mdMergeResult: "pull_request"},
+			blockers: []Blocker{landed}}, want: stateInReview},
+		{name: "a pre-open gate", in: stateInput{id: "ra-pr", metadata: map[string]string{mdMergeResult: "pre_open_gate"}}, want: stateInReview},
+		{name: "a pull request outranks its conversation", in: stateInput{id: "ra-pr-talk",
+			metadata: map[string]string{mdMergeResult: "pull_request", mdTakeaway: "in rework"}, blockers: []Blocker{landed}},
+			facts: conversations, want: stateInReview},
+		{name: "an anchor parked in a human state is not in review", in: stateInput{id: "ra-parked",
+			metadata: map[string]string{mdMergeResult: "abandoned", mdRoutedTo: routedHuman}}, want: stateParked},
+		{name: "a live workflow", in: stateInput{id: "ra-slung", blockers: []Blocker{gate}}, facts: live, want: stateInFlight},
+		{name: "a live claim", in: stateInput{id: "ra-a", status: "in_progress", assignee: "polecat-live"}, facts: live, want: stateInFlight},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := hasOwnRow(tc.md); got != tc.want {
-				t.Errorf("hasOwnRow(%v) = %v, want %v", tc.md, got, tc.want)
+			got := deriveState(tc.in, tc.facts)
+			if got.kind != tc.want || got.selfStart != tc.selfStart {
+				t.Errorf("state = %q (starts by itself %v), want %q (%v)", got.kind, got.selfStart, tc.want, tc.selfStart)
 			}
 		})
 	}
@@ -1686,7 +2196,7 @@ func TestHumanRoutedTwinBandsWithItsSibling(t *testing.T) {
 			Priority: ptr(1), Metadata: md, Takeaway: md["gc.takeaway"], Children: kid, WaitingUnknown: true},
 	}
 
-	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	b := buildBoard(anchors, fixtureNow, false, nil, Facts{})
 	tile, ok := tileByID(b, "gc-sc8a8")
 	if !ok {
 		t.Fatal("tile missing")
@@ -1725,7 +2235,7 @@ func TestParkedWithoutTheHumanMarkerKeepsItsRollUp(t *testing.T) {
 		Takeaway: "routed; nothing further needed here",
 		Children: []Child{{ID: "tk-kid", Status: "open"}},
 	}}
-	tile, ok := tileByID(BuildBoard(anchors, fixtureNow, false, nil, Facts{}), "tk-gpqyyn")
+	tile, ok := tileByID(buildBoard(anchors, fixtureNow, false, nil, Facts{}), "tk-gpqyyn")
 	if !ok {
 		t.Fatal("tile missing")
 	}
@@ -1765,7 +2275,7 @@ func TestOperatorRowBeatsAHigherSeverityRow(t *testing.T) {
 			WaitingUnknown: true},
 	}
 
-	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	b := buildBoard(anchors, fixtureNow, false, nil, Facts{})
 
 	container, _ := tileByID(b, "tk-container")
 	owed, _ := tileByID(b, "tk-owed")
@@ -1820,7 +2330,7 @@ func TestOperatorQueueIsOrderedByAge(t *testing.T) {
 		human("tk-b-middle", "2026-05-01T00:00:00Z", 50),
 	}
 
-	b := BuildBoard(anchors, fixtureNow, false, nil, liveOwners("live"))
+	b := buildBoard(anchors, fixtureNow, false, nil, liveOwners("live"))
 	q := OperatorQueue(b.Tiles)
 
 	want := []string{"tk-c-ancient", "tk-b-middle", "tk-a-recent"}
@@ -1848,7 +2358,7 @@ func TestUndatedOwedRowSortsLast(t *testing.T) {
 		{ID: "tk-z-dated", Title: "asked yesterday", Kind: "human", Source: "human", Rig: "gc-toolkit", Prefix: "tk",
 			Metadata: map[string]string{mdRoutedTo: routedHuman}, UpdatedAt: daysAgo(1)},
 	}
-	q := OperatorQueue(BuildBoard(anchors, fixtureNow, false, nil, Facts{}).Tiles)
+	q := OperatorQueue(buildBoard(anchors, fixtureNow, false, nil, Facts{}).Tiles)
 	if got := ids(q); !equalIDs(got, []string{"tk-z-dated", "tk-a-undated"}) {
 		t.Errorf("queue order = %v, want the dated row first", got)
 	}
@@ -1866,7 +2376,7 @@ func TestRuledRowLeavesTheQueue(t *testing.T) {
 		{ID: "tk-asking", Title: "still asking", Kind: "human", Source: "human", Rig: "gc-toolkit", Prefix: "tk",
 			Metadata: map[string]string{mdRoutedTo: routedHuman}, UpdatedAt: fixtureNow},
 	}
-	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	b := buildBoard(anchors, fixtureNow, false, nil, Facts{})
 	answered, _ := tileByID(b, "tk-answered")
 	if answered.Severity != SevLow {
 		t.Fatalf("fixture: the answered row must be ruled/LOW, got %s", answered.Severity)
@@ -1893,7 +2403,7 @@ func TestClosedRowLeavesTheQueue(t *testing.T) {
 		{ID: "tk-asking", Title: "still asking", Kind: "human", Source: "human", Rig: "gc-toolkit", Prefix: "tk",
 			Metadata: map[string]string{mdRoutedTo: routedHuman}, UpdatedAt: daysAgo(2)},
 	}
-	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	b := buildBoard(anchors, fixtureNow, false, nil, Facts{})
 	closed, _ := tileByID(b, "tk-closed")
 	if closed.Severity != SevDone {
 		t.Fatalf("fixture: the closed row must band DONE, got %s", closed.Severity)
@@ -1949,7 +2459,7 @@ func TestCityOverviewIsRankedNotPartitioned(t *testing.T) {
 			TakeawayAt:     "2026-06-01T00:00:00Z",
 			WaitingUnknown: true},
 	}
-	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	b := buildBoard(anchors, fixtureNow, false, nil, Facts{})
 	if got := ids(b.Tiles); !equalIDs(got, []string{"tk-owed", "tk-container"}) {
 		t.Fatalf("fixture: the board is partitioned owed-first, got %v", got)
 	}
@@ -1993,7 +2503,7 @@ func TestSilentDemandNamesItsSilence(t *testing.T) {
 					Metadata: map[string]string{mdTakeaway: "ship it or say why not"},
 					Takeaway: "ship it or say why not"},
 			}
-			b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+			b := buildBoard(anchors, fixtureNow, false, nil, Facts{})
 
 			human, ok := tileByID(b, "tk-human")
 			if !ok {
@@ -2003,7 +2513,7 @@ func TestSilentDemandNamesItsSilence(t *testing.T) {
 				t.Errorf("a silent takeaway is null on the wire, not %q", *human.Takeaway)
 			}
 			if !human.Owed {
-				t.Error("a silent demand is still owed — it is the operator's move either way")
+				t.Error("a silent human route is still owed — it is the operator's move either way")
 			}
 			if human.Needs != "routed to you — no question recorded" {
 				t.Errorf("the human row names its silence: %q", human.Needs)
@@ -2106,7 +2616,7 @@ func TestDoneBandSinksBelowEveryLiveRow(t *testing.T) {
 	done := closedAnchor("tk-heavy", 0, big...)
 	quiet := Anchor{ID: "tk-quiet", Title: "empty", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk"}
 
-	b := BuildBoard([]Anchor{done, quiet}, fixtureNow, false, nil, Facts{})
+	b := buildBoard([]Anchor{done, quiet}, fixtureNow, false, nil, Facts{})
 	if b.Tiles[len(b.Tiles)-1].ID != "tk-heavy" {
 		t.Fatalf("the DONE row sorts last: got order %s, %s", b.Tiles[0].ID, b.Tiles[1].ID)
 	}
@@ -2119,7 +2629,7 @@ func TestDoneBandSinksBelowEveryLiveRow(t *testing.T) {
 // Inside the band the useful order is recency: the row the operator just
 // watched close is the one they are looking for.
 func TestDoneBandOrdersByRecency(t *testing.T) {
-	b := BuildBoard([]Anchor{
+	b := buildBoard([]Anchor{
 		closedAnchor("tk-old", 30),
 		closedAnchor("tk-new", 0),
 		closedAnchor("tk-mid", 3),
@@ -2193,9 +2703,9 @@ func dated(value, oid string, at time.Time) string {
 	return value + "@" + oid + "@" + at.Format(time.RFC3339)
 }
 
-// prPhase names what stands between a PR and landing in the same values and
-// precedence as pr-status-label.sh's derive_value; these cases mirror that
-// script's, since it stamps nothing on the bead for the board to read instead.
+// prPhase names whose move a PR is in the same values and precedence as
+// pr-status-label.sh's derive_value; these cases mirror that script's, since it
+// stamps nothing on the bead for the board to read instead.
 func TestPRPhaseMirrorsDeriveValue(t *testing.T) {
 	merge := func(md map[string]string) Anchor {
 		full := map[string]string{mdMergeResult: "pull_request"}
@@ -2213,10 +2723,12 @@ func TestPRPhaseMirrorsDeriveValue(t *testing.T) {
 		{"non-merge row has no phase", Anchor{Metadata: map[string]string{}}, 0, ""},
 		{"operator freeze needs attention", merge(map[string]string{mdMergeHold: "true"}), 0, PhaseNeedsAttention},
 		{"rebase hold needs attention", merge(map[string]string{mdRebaseHold: "true"}), 0, PhaseNeedsAttention},
-		{"approved but blocked with no rework needs attention", merge(map[string]string{mdPRPosture: "approved@abc@2026-01-01T00:00:00Z", mdPRMergeState: "BLOCKED@abc"}), 0, PhaseNeedsAttention},
-		{"approved and blocked but reworking is working", merge(map[string]string{mdPRPosture: "approved@abc", mdPRMergeState: "BLOCKED@abc"}), 1, PhaseWorking},
+		{"approved and blocked by the merge pass with no rework needs attention", merge(map[string]string{mdPRPosture: "approved@abc@2026-01-01T00:00:00Z", mdPRMachine: "blocked@abc@2026-01-01T00:00:00Z", mdPRMachineCause: "check-failed"}), 0, PhaseNeedsAttention},
+		{"approved and blocked but reworking is merging", merge(map[string]string{mdPRPosture: "approved@abc", mdPRMachine: "blocked@abc@2026-01-01T00:00:00Z", mdPRMachineCause: "check-failed"}), 1, PhaseMerging},
+		{"approved and held on the blocker cause needs attention whatever is in flight", merge(map[string]string{mdPRPosture: "approved@abc", mdPRMachine: "blocked@abc@2026-01-01T00:00:00Z", mdPRMachineCause: "blocker"}), 1, PhaseNeedsAttention},
+		{"approved while GitHub reports BLOCKED for a check still running is merging", merge(map[string]string{mdPRPosture: "approved@abc", "pr_merge_state": "BLOCKED@abc", mdPRMachine: "progressing@abc@2026-01-01T00:00:00Z"}), 0, PhaseMerging},
 		{"open rework child is working", merge(map[string]string{mdPRPosture: "review_required@abc"}), 2, PhaseWorking},
-		{"approved and mergeable is working", merge(map[string]string{mdPRPosture: "approved@abc", mdPRMergeState: "CLEAN@abc"}), 0, PhaseWorking},
+		{"approved and mergeable is merging", merge(map[string]string{mdPRPosture: "approved@abc", mdPRMachine: "settled@abc@2026-01-01T00:00:00Z"}), 0, PhaseMerging},
 		{"settled awaiting review needs review", merge(map[string]string{mdPRPosture: "review_required@abc"}), 0, PhaseNeedsReview},
 		{"falsy holds do not count", merge(map[string]string{mdMergeHold: "false", mdRebaseHold: "0", mdPRPosture: "commented@abc"}), 0, PhaseNeedsReview},
 		{"a draft the city opened is working until readied", merge(map[string]string{mdOpenedAsDraft: "abc"}), 0, PhaseWorking},
@@ -2224,22 +2736,55 @@ func TestPRPhaseMirrorsDeriveValue(t *testing.T) {
 		{"a held draft needs attention", merge(map[string]string{mdOpenedAsDraft: "abc", mdMergeHold: "true"}), 0, PhaseNeedsAttention},
 	}
 	for _, tc := range cases {
-		if got := prPhase(tc.a, Facts{}, tc.kids); got != tc.want {
+		a := tc.a
+		if isMergeAnchor(a) {
+			var kids []Child
+			for i := range tc.kids {
+				kids = append(kids, member(fmt.Sprintf("tk-x.%d", i), "rework", "open"))
+			}
+			a = withInFlight(a, kids...)
+		}
+		if got := prPhase(a); got != tc.want {
 			t.Errorf("%s: prPhase = %q, want %q", tc.name, got, tc.want)
 		}
 	}
 }
 
-// The open-rework count comes from the children the board gathers — each names
-// its anchor in anchor_bead — so an anchor with one is working even with nothing
+// A live rework row the board gathers names its anchor in anchor_bead and is in
+// the anchor's in-flight set, so an anchor with one is working even with nothing
 // else recorded.
 func TestPRPhaseCountsOpenReworkChildFromBoard(t *testing.T) {
 	anchor := mergeAnchor("tk-anc", map[string]string{mdPRPosture: "review_required@abc"})
 	kid := Anchor{ID: "tk-anc.rw", Source: kindRework, Rig: "gc-toolkit", Metadata: map[string]string{mdAnchorBead: "tk-anc"}}
 
-	b := BuildBoard([]Anchor{anchor, kid}, fixtureNow, false, nil, Facts{})
+	b := buildBoard([]Anchor{anchor, kid}, fixtureNow, false, nil, Facts{})
 	if got := mustTile(t, b, "tk-anc").PRPhase; got != PhaseWorking {
 		t.Errorf("an anchor with an open rework child is working: got %q", got)
+	}
+}
+
+// The in-flight count is the anchor's in-flight set, every live bead that names
+// it in anchor_bead, as the PR labels count it. A live review row counts as a
+// rework row does, and so does a member of the set the board shows no row for,
+// such as a validation pass or a blocked finding. An unapproved anchor
+// with any of them in flight is working, and with none it needs review.
+func TestPRPhaseCountsEveryChildInFlight(t *testing.T) {
+	anchor := func() Anchor { return mergeAnchor("tk-anc", map[string]string{mdPRPosture: "review_required@abc"}) }
+	review := Anchor{ID: "tk-anc.rv", Source: kindReview, Rig: "gc-toolkit", Metadata: map[string]string{mdAnchorBead: "tk-anc"}}
+	for _, tc := range []struct {
+		name    string
+		anchors []Anchor
+		want    string
+	}{
+		{"a live review row", []Anchor{anchor(), review}, PhaseWorking},
+		{"a validation pass", []Anchor{withInFlight(anchor(), member("tk-anc.va", "validation", "open"))}, PhaseWorking},
+		{"a blocked finding", []Anchor{withInFlight(anchor(), member("tk-anc.fi", "finding", "blocked"))}, PhaseWorking},
+		{"nothing in flight", []Anchor{anchor()}, PhaseNeedsReview},
+	} {
+		b := buildBoard(tc.anchors, fixtureNow, false, nil, Facts{})
+		if got := mustTile(t, b, "tk-anc").PRPhase; got != tc.want {
+			t.Errorf("%s: got %q, want %q", tc.name, got, tc.want)
+		}
 	}
 }
 
@@ -2251,7 +2796,7 @@ func TestDraftStageReadsWorkingOnBothAxes(t *testing.T) {
 	draft := mergeAnchor("tk-draft", map[string]string{mdOpenedAsDraft: "abc"})
 	readied := mergeAnchor("tk-ready", map[string]string{mdOpenedAsDraft: "abc", mdDraftReadied: "abc"})
 
-	b := BuildBoard([]Anchor{draft, readied}, fixtureNow, false, nil, Facts{})
+	b := buildBoard([]Anchor{draft, readied}, fixtureNow, false, nil, Facts{})
 	for _, tc := range []struct{ id, want string }{
 		{"tk-draft", PhaseWorking},
 		{"tk-ready", PhaseNeedsReview},
@@ -2263,52 +2808,67 @@ func TestDraftStageReadsWorkingOnBothAxes(t *testing.T) {
 	}
 }
 
-// An open visit on a merge anchor is a hold: the merge pass's finalize gate holds
-// the PR until the visit closes. So an approved, settled PR, which reads working
-// with the merge pass next, reads needs-attention on both axes while a visit
-// names it, and its needs line stops naming the merge pass. The visit fact is the
-// one the held marker reads, so a visit a sitting is holding, which no wrapper
-// row folds onto the anchor, holds it too. The unheld twin proves the visit is
-// what moves the row.
-func TestOpenVisitHoldsAMergeAnchorAtNeedsAttention(t *testing.T) {
+// An open human gate on a merge anchor is a hold: the merge pass refuses the
+// merge while one blocks the anchor. So an approved, settled PR, which reads
+// merging with the merge pass next, reads needs-attention on both axes while a
+// gate blocks it, and its needs line asks the gate's question instead of
+// naming the merge pass. The gate is read from the anchor's own `blocks`
+// listing and from the gate the gather admitted, and either one holds it. A
+// conversation about the anchor blocks nothing, so it holds nothing here. The
+// unheld twin proves the gate is what moves the row.
+func TestOpenHumanGateHoldsAMergeAnchorAtNeedsAttention(t *testing.T) {
+	const ask = "is this PR moot now that main rewrote the code it edits?"
 	md := map[string]string{
-		mdPRPosture:    dated(postureApproved, headLive, fixtureNow.Add(-2*time.Hour)),
-		mdPRMergeState: "DIRTY@" + headLive,
-		mdPRMachine:    dated(MachineSettled, headLive, fixtureNow.Add(-2*time.Hour)),
-		mdPRNumber:     "1162",
+		mdPRPosture: dated(postureApproved, headLive, fixtureNow.Add(-2*time.Hour)),
+		mdPRMachine: dated(MachineSettled, headLive, fixtureNow.Add(-2*time.Hour)),
+		mdPRNumber:  "1162",
 	}
-	held := mergeAnchor("tk-held", md)
-	free := mergeAnchor("tk-free", md)
+	gate := Blocker{ID: "tk-gate", Title: ask, Status: "open", IssueType: "gate", AwaitType: "human", AwaitID: "pr-moot"}
+	listed := mergeAnchor("tk-listed", md)
+	listed.Blockers = []Blocker{gate}
+	folded := mergeAnchor("tk-folded", md)
+	talked := mergeAnchor("tk-talked", md)
+	gateRow := Anchor{ID: "tk-gate2", Kind: KindGate, Source: KindGate, Rig: "gc-toolkit", Prefix: "tk",
+		Title: ask, Subjects: []string{"tk-folded"}}
+	conv := Anchor{ID: "tk-conv", Kind: KindConversation, Source: KindConversation, Rig: "gc-toolkit", Prefix: "tk",
+		Title: "talk it through", Subjects: []string{"tk-talked"}, Assignee: "human"}
 
-	b := BuildBoard([]Anchor{held, free}, fixtureNow, false, nil, Facts{Visits: map[string]bool{"tk-held": true}})
+	b := buildBoard([]Anchor{listed, folded, talked, mergeAnchor("tk-free", md), gateRow, conv}, fixtureNow, false, nil, Facts{})
 
 	fr := mustTile(t, b, "tk-free")
-	if fr.PRPhase != PhaseWorking || fr.Phase != PhaseWorking || fr.Needs != "green — waiting on the merge pass" {
-		t.Fatalf("test premise: the unheld twin is working with the merge pass next; got pr_phase=%q phase=%q needs=%q", fr.PRPhase, fr.Phase, fr.Needs)
+	if fr.PRPhase != PhaseMerging || fr.Phase != PhaseMerging || fr.Needs != "green — waiting on the merge pass" {
+		t.Fatalf("test premise: the unheld twin is merging with the merge pass next; got pr_phase=%q phase=%q needs=%q", fr.PRPhase, fr.Phase, fr.Needs)
 	}
-
-	h := mustTile(t, b, "tk-held")
-	if !h.Held {
-		t.Fatalf("test premise: the visit fact holds the row; held=%v", h.Held)
+	for _, id := range []string{"tk-listed", "tk-folded"} {
+		h := mustTile(t, b, id)
+		if h.PRPhase != PhaseNeedsAttention || h.Phase != PhaseNeedsAttention {
+			t.Errorf("%s: a PR an open human gate blocks needs attention on both axes: pr_phase=%q phase=%q", id, h.PRPhase, h.Phase)
+		}
+		if h.Frontier != "needs-attention · PR #1162" {
+			t.Errorf("%s: the frontier leads with needs-attention, not working: got %q", id, h.Frontier)
+		}
 	}
-	if h.PRPhase != PhaseNeedsAttention || h.Phase != PhaseNeedsAttention {
-		t.Errorf("a PR an open visit holds needs attention on both axes: pr_phase=%q phase=%q", h.PRPhase, h.Phase)
+	if h := mustTile(t, b, "tk-listed"); h.Needs != "asking: "+ask || h.PRConversation != ConversationAsking {
+		t.Errorf("the needs line asks the gate's question: needs=%q conversation=%q", h.Needs, h.PRConversation)
 	}
-	if h.Frontier != "needs-attention · PR #1162" {
-		t.Errorf("the frontier leads with needs-attention, not working: got %q", h.Frontier)
+	if c := mustTile(t, b, "tk-talked"); c.Phase != PhaseMerging || c.Needs != fr.Needs || !c.Held || c.WorkHeld {
+		t.Errorf("a conversation makes its bead's row held and holds neither the merge nor the work: held=%v work_held=%v phase=%q needs=%q",
+			c.Held, c.WorkHeld, c.Phase, c.Needs)
 	}
-	if h.Needs != "held by an open visit" {
-		t.Errorf("the needs line names the visit hold, not the merge pass: got %q", h.Needs)
+	if h := mustTile(t, b, "tk-folded"); !h.Held || !h.WorkHeld {
+		t.Errorf("the gate the gather admitted holds the anchor's work: held=%v work_held=%v", h.Held, h.WorkHeld)
 	}
 }
 
-// A held merge anchor's needs line says an open visit holds it at every position
-// the cadence records. The phase reads needs-attention whether the row is
-// settled, progressing or waiting on an approval, and the needs line agrees
-// instead of naming the merge pass, the cadence or a review. The unheld twin of
-// each position proves the visit is what moves the line.
-func TestHeldMergeAnchorNeedsNamesTheVisitAtEveryPosition(t *testing.T) {
+// A merge anchor's needs line asks its gate's question at every position the
+// cadence records, and names the oldest gate when two block it, because that
+// one's turn started first.
+func TestMergeAnchorAsksItsGateAtEveryPosition(t *testing.T) {
 	at := fixtureNow.Add(-2 * time.Hour)
+	older := Blocker{ID: "tk-g1", Title: "may the seed audit merge?", Status: "open", IssueType: "gate", AwaitType: "human",
+		CreatedAt: daysAgo(3)}
+	newer := Blocker{ID: "tk-g2", Title: "is this PR moot?", Status: "open", IssueType: "gate", AwaitType: "human",
+		CreatedAt: daysAgo(1)}
 	for _, pos := range []struct {
 		name, posture, machine, unheld string
 	}{
@@ -2323,56 +2883,136 @@ func TestHeldMergeAnchorNeedsNamesTheVisitAtEveryPosition(t *testing.T) {
 				mdPRMachine: dated(pos.machine, headLive, at),
 				mdPRNumber:  "1162",
 			}
-			b := BuildBoard([]Anchor{mergeAnchor("tk-held", md), mergeAnchor("tk-free", md)}, fixtureNow, false, nil,
-				Facts{Visits: map[string]bool{"tk-held": true}})
+			held := mergeAnchor("tk-held", md)
+			held.Blockers = []Blocker{newer, older}
+			b := buildBoard([]Anchor{held, mergeAnchor("tk-free", md)}, fixtureNow, false, nil, Facts{})
 			if fr := mustTile(t, b, "tk-free"); fr.Needs != pos.unheld {
 				t.Fatalf("test premise: the unheld twin reads %q; got %q", pos.unheld, fr.Needs)
 			}
 			h := mustTile(t, b, "tk-held")
-			if h.Phase != PhaseNeedsAttention || h.Needs != "held by an open visit" {
-				t.Errorf("a held row reads needs-attention and says the visit holds it: phase=%q needs=%q", h.Phase, h.Needs)
+			want := "asking: 2× — " + older.Title + " · " + newer.Title
+			if h.Phase != PhaseNeedsAttention || h.Needs != want || !h.Owed {
+				t.Errorf("a gated row reads needs-attention and asks each gate, oldest first: phase=%q needs=%q owed=%v", h.Phase, h.Needs, h.Owed)
 			}
 		})
 	}
 }
 
-// The needs line names each visit that holds the row by the question its title
-// asks, from the row's own sittings. It never asserts who owes the answer, so a
-// visit a sitting is in reads the same as one waiting for a person.
-func TestHeldNeedsNamesEachHoldingVisitByItsQuestion(t *testing.T) {
+// The row of a PR a gate on its rework holds names the gate, reads as what a
+// person owes from the gate's own age, and reads held as the label does.
+// Resolving the gate clears each of those, and a conversation changes none.
+func TestPRRowNamesAGateBehindItsRework(t *testing.T) {
+	at := fixtureNow.Add(-time.Hour)
 	md := map[string]string{
-		mdPRPosture: dated(postureApproved, headLive, fixtureNow.Add(-2*time.Hour)),
-		mdPRMachine: dated(MachineSettled, headLive, fixtureNow.Add(-2*time.Hour)),
-		mdPRNumber:  "1162",
+		mdPRPosture: dated(postureReviewRequired, headLive, at),
+		mdPRMachine: dated(MachineSettled, headLive, at),
+		mdPRNumber:  "79",
 	}
-	visit := func(id, ask, status, session string) Sitting {
-		return Sitting{ID: id, Title: "visit: tk-held — " + ask, Subject: "tk-held", Subjects: []string{"tk-held"},
-			Status: status, Session: session}
-	}
-	moot := "is this PR moot now that main rewrote the code it edits?"
-	merge := "may the seed audit merge?"
-	for _, tc := range []struct {
-		name     string
-		sittings []Sitting
-		want     string
-	}{
-		{"one visit waiting for a person", []Sitting{visit("tk-v1", moot, "open", "")},
-			"held by an open visit: " + moot},
-		{"one visit a sitting is in", []Sitting{visit("tk-v1", moot, "in_progress", "converse-1")},
-			"held by an open visit: " + moot},
-		{"two visits", []Sitting{visit("tk-v1", moot, "open", ""), visit("tk-v2", merge, "open", "")},
-			"held by 2 open visits: " + moot + " · " + merge},
-		{"a closed sitting names nothing", []Sitting{visit("tk-v1", moot, "open", ""), visit("tk-v0", merge, "closed", "")},
-			"held by an open visit: " + moot},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			b := BuildBoard([]Anchor{mergeAnchor("tk-held", md)}, fixtureNow, false, nil,
-				Facts{Visits: map[string]bool{"tk-held": true}, Sittings: tc.sittings})
-			if h := mustTile(t, b, "tk-held"); h.Needs != tc.want {
-				t.Errorf("needs = %q, want %q", h.Needs, tc.want)
-			}
-		})
-	}
+	signOff := Blocker{ID: "tk-g", Title: "sign off the release", Status: "open", IssueType: "gate", AwaitType: "human", CreatedAt: daysAgo(2)}
+	rework := Anchor{ID: "tk-rw", Title: "fix the check", Kind: kindRework, Source: kindRework, Rig: "gc-toolkit", Prefix: "tk",
+		Metadata: map[string]string{mdAnchorBead: "tk-a", mdTaskKind: kindRework}}
+
+	t.Run("an open gate", func(t *testing.T) {
+		anchors := []Anchor{heldThroughRework(md, signOff), rework, gateAnchor("tk-g", signOff.Title, "tk-rw")}
+		tile := mustTile(t, buildBoard(anchors, fixtureNow, false, nil, Facts{}), "tk-a")
+		if tile.Needs != "asking: sign off the release" {
+			t.Errorf("needs = %q, want it to name the gate", tile.Needs)
+		}
+		if !slices.Equal(tile.PRHeld, []string{string(prstatus.HeldGate)}) || tile.PRPhase != PhaseNeedsAttention {
+			t.Errorf("pr_held = %v, pr_phase = %q, want the gate's hold", tile.PRHeld, tile.PRPhase)
+		}
+		if !tile.Owed || !tile.Held || !tile.WorkHeld {
+			t.Errorf("owed=%v held=%v work_held=%v, want a row a gate holds", tile.Owed, tile.Held, tile.WorkHeld)
+		}
+		if !tile.PROwedSince.Equal(signOff.CreatedAt) {
+			t.Errorf("pr_owed_since = %v, want the gate's age %v", tile.PROwedSince, signOff.CreatedAt)
+		}
+		if tile.PRConversation != ConversationAsking {
+			t.Errorf("pr_conversation = %q, want %q", tile.PRConversation, ConversationAsking)
+		}
+		if r := mustTile(t, buildBoard(anchors, fixtureNow, false, nil, Facts{}), "tk-rw"); !r.WorkHeld {
+			t.Errorf("the rework's own row keeps the gate it folds: work_held=%v", r.WorkHeld)
+		}
+	})
+
+	t.Run("a gate resolved", func(t *testing.T) {
+		anchors := []Anchor{heldThroughRework(md), rework}
+		tile := mustTile(t, buildBoard(anchors, fixtureNow, false, nil, Facts{}), "tk-a")
+		if strings.Contains(tile.Needs, "asking") || strings.Contains(tile.Needs, "sign off the release") {
+			t.Errorf("needs = %q, want no ask once the gate has gone", tile.Needs)
+		}
+		if len(tile.PRHeld) != 0 || tile.WorkHeld || tile.Held {
+			t.Errorf("pr_held=%v work_held=%v held=%v, want nothing holding it", tile.PRHeld, tile.WorkHeld, tile.Held)
+		}
+	})
+
+	t.Run("a conversation tracking the anchor", func(t *testing.T) {
+		plain := []Anchor{heldThroughRework(md), rework}
+		talk := append(slices.Clone(plain), conversationAnchor("tk-c", "tk-a", "what holds this?", assigneeHuman))
+		before := mustTile(t, buildBoard(plain, fixtureNow, false, nil, Facts{}), "tk-a")
+		after := mustTile(t, buildBoard(talk, fixtureNow, false, nil, Facts{}), "tk-a")
+		if after.Needs != before.Needs || len(after.PRHeld) != 0 || after.WorkHeld || after.PRPhase != before.PRPhase {
+			t.Errorf("needs=%q pr_held=%v work_held=%v phase=%q, want what the row read without it: needs=%q phase=%q",
+				after.Needs, after.PRHeld, after.WorkHeld, after.PRPhase, before.Needs, before.PRPhase)
+		}
+	})
+
+	t.Run("a takeaway does not hide the gate", func(t *testing.T) {
+		a := heldThroughRework(md, signOff)
+		a.Takeaway = "routed to a polecat to fix the check"
+		tile := mustTile(t, buildBoard([]Anchor{a, rework, gateAnchor("tk-g", signOff.Title, "tk-rw")}, fixtureNow, false, nil, Facts{}), "tk-a")
+		if tile.Needs != "asking: sign off the release" {
+			t.Errorf("needs = %q, want the gate's question", tile.Needs)
+		}
+		if tile.Takeaway == nil || *tile.Takeaway != a.Takeaway {
+			t.Errorf("takeaway = %v, want it left on the wire", tile.Takeaway)
+		}
+	})
+
+	t.Run("a person's other blocker keeps its takeaway", func(t *testing.T) {
+		a := mergeAnchor("tk-a", md, Blocker{ID: "tk-d", Title: "which way?", Status: "open", IssueType: "decision"})
+		a.Takeaway = "the sitting's headline"
+		tile := mustTile(t, buildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}), "tk-a")
+		if tile.Needs != a.Takeaway {
+			t.Errorf("needs = %q, want the takeaway: only a gate outranks it", tile.Needs)
+		}
+	})
+
+	t.Run("a gate routed to a person counts once, as a gate", func(t *testing.T) {
+		routed := signOff
+		routed.RoutedTo = routedHuman
+		tile := mustTile(t, buildBoard([]Anchor{mergeAnchor("tk-a", md, routed)}, fixtureNow, false, nil, Facts{}), "tk-a")
+		if !slices.Equal(tile.PRHeld, []string{string(prstatus.HeldGate)}) {
+			t.Errorf("pr_held = %v, want the gate alone", tile.PRHeld)
+		}
+	})
+
+	t.Run("a gate listed and walked is named once", func(t *testing.T) {
+		a := mergeAnchor("tk-a", md, signOff)
+		tile := mustTile(t, buildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}), "tk-a")
+		if tile.Needs != "asking: sign off the release" {
+			t.Errorf("needs = %q, want the one gate", tile.Needs)
+		}
+	})
+
+	t.Run("a row with several gates names each, oldest first", func(t *testing.T) {
+		older := Blocker{ID: "tk-old", Title: "the older ask", Status: "open", IssueType: "gate", AwaitType: "human", CreatedAt: daysAgo(5)}
+		tile := mustTile(t, buildBoard([]Anchor{heldThroughRework(md, signOff, older)}, fixtureNow, false, nil, Facts{}), "tk-a")
+		if want := "asking: 2× — the older ask · sign off the release"; tile.Needs != want {
+			t.Errorf("needs = %q, want %q", tile.Needs, want)
+		}
+		if !tile.PROwedSince.Equal(older.CreatedAt) {
+			t.Errorf("pr_owed_since = %v, want the oldest gate's age %v", tile.PROwedSince, older.CreatedAt)
+		}
+	})
+
+	t.Run("a blocker with no date sorts behind one with a date", func(t *testing.T) {
+		undated := Blocker{ID: "tk-u", Title: "undated", Status: "open", IssueType: "gate", AwaitType: "human"}
+		tile := mustTile(t, buildBoard([]Anchor{heldThroughRework(md, undated, signOff)}, fixtureNow, false, nil, Facts{}), "tk-a")
+		if want := "asking: 2× — sign off the release · undated"; tile.Needs != want {
+			t.Errorf("needs = %q, want %q", tile.Needs, want)
+		}
+	})
 }
 
 // A pre-PR branch links to its GitHub tree view, and the repository comes from
@@ -2386,7 +3026,7 @@ func TestPRBranchLinksToGitHubViaSiblingPRURL(t *testing.T) {
 	})
 	preopen := mergeAnchor("tk-pre", nil) // branch polecat/tk-pre, no PR yet
 
-	b := BuildBoard([]Anchor{opened, preopen}, fixtureNow, false, nil, Facts{})
+	b := buildBoard([]Anchor{opened, preopen}, fixtureNow, false, nil, Facts{})
 
 	const base = "https://github.com/zookanalytics/gc-toolkit"
 	if got := mustTile(t, b, "tk-pre").PRBranchURL; got != base+"/tree/polecat/tk-pre" {
@@ -2402,7 +3042,7 @@ func TestPRBranchLinksToGitHubViaSiblingPRURL(t *testing.T) {
 // same "nothing done" resolve_origin reports on an unresolvable origin
 // (assets/scripts/pr-status-label.sh).
 func TestPRBranchStaysBareWithoutARepo(t *testing.T) {
-	b := BuildBoard([]Anchor{mergeAnchor("tk-pre", nil)}, fixtureNow, false, nil, Facts{})
+	b := buildBoard([]Anchor{mergeAnchor("tk-pre", nil)}, fixtureNow, false, nil, Facts{})
 	if got := mustTile(t, b, "tk-pre").PRBranchURL; got != "" {
 		t.Errorf("no repo known: pr_branch_url = %q, want empty", got)
 	}
@@ -2420,6 +3060,121 @@ func TestRepoBaseFromPRURL(t *testing.T) {
 		if got := repoBaseFromPRURL(in); got != want {
 			t.Errorf("repoBaseFromPRURL(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// A live merge anchor carries what holds its PR in PRHeld, the values
+// prstatus.Held names over the facts its phase reads, the same derivation the
+// held: labels come from, and any value reads PRPhase needs-attention. An open
+// human gate on the anchor holds it, and the gate folds onto the row, so Held is
+// true. A conversation on the anchor makes the row Held too, but holds nothing:
+// a person's hold is read from a human gate, never from a conversation. A
+// blocker a person owes holds it, one a pool is landing does not, and a value
+// comes off once its condition clears. A closed row and a non-merge row carry
+// none.
+func TestPRHeldNamesWhatHoldsThePR(t *testing.T) {
+	at := fixtureNow.Add(-2 * time.Hour)
+	approved := map[string]string{
+		mdPRPosture: dated(postureApproved, headLive, at),
+		mdPRMachine: dated(MachineSettled, headLive, at),
+	}
+	with := func(md map[string]string, kv ...string) map[string]string {
+		out := map[string]string{}
+		for k, v := range md {
+			out[k] = v
+		}
+		for i := 0; i+1 < len(kv); i += 2 {
+			out[kv[i]] = kv[i+1]
+		}
+		return out
+	}
+	child := func(id, kind string) Anchor {
+		return Anchor{ID: id, Title: "t " + id, Kind: kind, Source: kind, Rig: "gc-toolkit", Prefix: "tk",
+			Metadata: map[string]string{mdAnchorBead: "tk-a"}, UpdatedAt: fixtureNow}
+	}
+	closedChild := child("tk-a.rw", kindRework)
+	closedChild.ClosedAt = fixtureNow.Add(-time.Hour)
+	threads := with(approved, mdPRMachine, dated(MachineBlocked, headLive, at), mdPRMachineCause, "review-threads")
+	// An unapproved PR whose operator thread the city never answered, on a base
+	// that requires no thread resolution: the merge pass counted the thread
+	// and recorded no thread verdict.
+	unanswered := map[string]string{
+		mdPRPosture:           dated(postureReviewRequired, headLive, at),
+		mdPRMachine:           dated(MachineSettled, headLive, at),
+		mdPRUnansweredThreads: "1@" + headLive,
+	}
+	person := Blocker{ID: "tk-d", Title: "decide the flag name", Status: "open", RoutedTo: routedHuman}
+	gate := gateAnchor("tk-g", "sign off the release", "tk-a")
+	for _, tc := range []struct {
+		name     string
+		anchors  []Anchor
+		want     []string
+		wantHeld bool
+		phase    string
+	}{
+		{"nothing holds an approved PR", []Anchor{mergeAnchor("tk-a", approved)}, nil, false, PhaseMerging},
+		{"an open human gate on the anchor", []Anchor{mergeAnchor("tk-a", approved), gate}, []string{"gate"}, true, PhaseNeedsAttention},
+		{"a conversation on the anchor holds nothing", []Anchor{mergeAnchor("tk-a", approved),
+			conversationAnchor("tk-c", "tk-a", "talk the release through", assigneeHuman)}, nil, true, PhaseMerging},
+		{"a blocker routed to a person", []Anchor{mergeAnchor("tk-a", approved, person)}, []string{"blocked"}, false, PhaseNeedsAttention},
+		{"a decision blocker", []Anchor{mergeAnchor("tk-a", approved, Blocker{ID: "tk-d", Status: "open", IssueType: "decision"})},
+			[]string{"blocked"}, false, PhaseNeedsAttention},
+		{"a closed blocker routed to a person no longer holds", []Anchor{mergeAnchor("tk-a", approved,
+			Blocker{ID: "tk-d", Status: "closed", RoutedTo: routedHuman})}, nil, false, PhaseMerging},
+		{"a blocker a pool is landing is the city's", []Anchor{mergeAnchor("tk-a", approved,
+			Blocker{ID: "tk-d", Status: "open", RoutedTo: "gc-toolkit/gc-toolkit.polecat"})}, nil, false, PhaseMerging},
+		{"the merge pass's thread verdict", []Anchor{mergeAnchor("tk-a", threads)}, []string{"review"}, false, PhaseNeedsAttention},
+		{"the thread verdict beside an open review child", []Anchor{mergeAnchor("tk-a", threads), child("tk-a.rv", kindReview)},
+			nil, false, PhaseMerging},
+		{"the thread verdict beside a validation pass", []Anchor{withInFlight(mergeAnchor("tk-a", threads), member("tk-a.va", "validation", "open"))},
+			nil, false, PhaseMerging},
+		{"review feedback the city has not answered on an unapproved PR", []Anchor{mergeAnchor("tk-a", unanswered)},
+			[]string{"review"}, false, PhaseNeedsAttention},
+		{"…released once every thread is answered or resolved", []Anchor{mergeAnchor("tk-a", with(unanswered, mdPRUnansweredThreads, "0@"+headLive))},
+			nil, false, PhaseNeedsReview},
+		{"…and while a rework in flight answers it", []Anchor{withInFlight(mergeAnchor("tk-a", unanswered), member("tk-a.rw", "rework", "open")), child("tk-a.rw", kindRework)},
+			nil, false, PhaseWorking},
+		{"the merge pass's stuck-blocker verdict", []Anchor{mergeAnchor("tk-a",
+			with(approved, mdPRMachine, dated(MachineBlocked, headLive, at), mdPRMachineCause, "blocker"))},
+			[]string{"blocked"}, false, PhaseNeedsAttention},
+		{"a failed check reads needs-attention and holds nothing", []Anchor{mergeAnchor("tk-a",
+			with(approved, mdPRMachine, dated(MachineBlocked, headLive, at), mdPRMachineCause, "check-failed"))},
+			nil, false, PhaseNeedsAttention},
+		{"the merge freeze reads needs-attention and holds nothing", []Anchor{mergeAnchor("tk-a", with(approved, mdMergeHold, "true"))},
+			nil, false, PhaseNeedsAttention},
+		{"every value at once, in order", []Anchor{mergeAnchor("tk-a", threads, person), gate},
+			[]string{"gate", "review", "blocked"}, true, PhaseNeedsAttention},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b := buildBoard(tc.anchors, fixtureNow, false, nil, Facts{})
+			tile := mustTile(t, b, "tk-a")
+			if !slices.Equal(tile.PRHeld, tc.want) {
+				t.Errorf("pr_held = %v, want %v", tile.PRHeld, tc.want)
+			}
+			if tile.Held != tc.wantHeld {
+				t.Errorf("held = %v, want %v: Held is a human gate or a conversation on the row's own bead", tile.Held, tc.wantHeld)
+			}
+			if tile.PRPhase != tc.phase || tile.Phase != tc.phase {
+				t.Errorf("pr_phase=%q phase=%q, want both %q", tile.PRPhase, tile.Phase, tc.phase)
+			}
+		})
+	}
+
+	// A resolved PR carries no held value, whatever its frozen facts say, as a
+	// merged or closed PR carries no held: label.
+	closed := mergeAnchor("tk-a", map[string]string{mdMergeResult: mergeResultMerged}, person)
+	closed.ClosedAt = fixtureNow.Add(-time.Hour)
+	if got := mustTile(t, buildBoard([]Anchor{closed, gate}, fixtureNow, false, nil, Facts{}), "tk-a").PRHeld; got != nil {
+		t.Errorf("a closed merge anchor carries pr_held %v, want none", got)
+	}
+
+	// A row that is no merge anchor has no PR to hold, and a blocker a person
+	// owes does not move its own liveness, which reads as it did before.
+	plain := Anchor{ID: "tk-p", Title: "t tk-p", Kind: "task", Source: "parked", Rig: "gc-toolkit", Prefix: "tk",
+		Metadata: map[string]string{}, Blockers: []Blocker{person}, UpdatedAt: fixtureNow}
+	pt := mustTile(t, buildBoard([]Anchor{plain}, fixtureNow, false, nil, Facts{}), "tk-p")
+	if pt.PRHeld != nil || pt.Phase != PhaseNeedsReview {
+		t.Errorf("a non-merge row: pr_held=%v phase=%q, want none and needs-review", pt.PRHeld, pt.Phase)
 	}
 }
 
@@ -2482,17 +3237,15 @@ func TestClosedMergeAnchorIsNotOwed(t *testing.T) {
 // supersede or disposal — closed without merging and reads "closed". The per-bead
 // Phase stays empty on a closed row, so the frontier keeps its age phrase. The
 // live twin, with the merged anchor's identical frozen facts but still open,
-// proves closedness is the only thing moving the PR axis off working.
+// proves closedness is the only thing moving the PR axis off merging.
 func TestClosedMergeAnchorShowsResolvedPRPhase(t *testing.T) {
 	frozen := map[string]string{
-		mdPRPosture:    dated(postureApproved, headLive, fixtureNow.Add(-24*time.Hour)),
-		mdPRMergeState: "CLEAN@" + headLive,
+		mdPRPosture: dated(postureApproved, headLive, fixtureNow.Add(-24*time.Hour)),
 	}
 	merged := mergeAnchor("tk-merged", map[string]string{
-		mdPRPosture:    dated(postureApproved, headLive, fixtureNow.Add(-24*time.Hour)),
-		mdPRMergeState: "CLEAN@" + headLive,
-		mdMergeResult:  mergeResultMerged,
-		"merged_sha":   "abc123def456",
+		mdPRPosture:   dated(postureApproved, headLive, fixtureNow.Add(-24*time.Hour)),
+		mdMergeResult: mergeResultMerged,
+		"merged_sha":  "abc123def456",
 	})
 	merged.ClosedAt = fixtureNow.Add(-24 * time.Hour)
 	// Closed without merging: merge_result stays the default pull_request — a bare
@@ -2501,10 +3254,10 @@ func TestClosedMergeAnchorShowsResolvedPRPhase(t *testing.T) {
 	superseded.ClosedAt = fixtureNow.Add(-24 * time.Hour)
 	live := mergeAnchor("tk-live", frozen) // the merged anchor's facts, still open
 
-	b := BuildBoard([]Anchor{merged, superseded, live}, fixtureNow, false, nil, Facts{})
+	b := buildBoard([]Anchor{merged, superseded, live}, fixtureNow, false, nil, Facts{})
 
-	if got := mustTile(t, b, "tk-live").PRPhase; got != PhaseWorking {
-		t.Fatalf("test premise: the identical live anchor derives working; got %q", got)
+	if got := mustTile(t, b, "tk-live").PRPhase; got != PhaseMerging {
+		t.Fatalf("test premise: the identical live anchor derives merging; got %q", got)
 	}
 	if got := mustTile(t, b, "tk-merged").PRPhase; got != PhaseMerged {
 		t.Errorf("a merged (closed) anchor reads merged on the PR axis; got %q (the DONE-bead-shows-WORKING report)", got)
@@ -2519,38 +3272,21 @@ func TestClosedMergeAnchorShowsResolvedPRPhase(t *testing.T) {
 	}
 }
 
-// A closed merge anchor is not a coverage gap either, and this is the half the
-// owed test cannot cover: the queue and the coverage sentence have to empty
-// together. The closed pass fills the DONE band with rows carrying the same
-// axes as live ones, unrecorded positions among them, so counting those holds
-// the all-clear open over an empty queue for as long as the done window keeps
-// the row.
-func TestClosedMergeAnchorIsNotACoverageGap(t *testing.T) {
+// A closed merge anchor keeps its axes: the closed pass fills the DONE band with
+// rows carrying the same axes as live ones, unrecorded positions among them, and
+// a surface tells the two apart by closed_at, not by a missing axis.
+func TestClosedMergeAnchorKeepsItsAxes(t *testing.T) {
 	shut := mergeAnchor("tk-shut", nil) // nothing recorded: unknown on every axis
 	shut.ClosedAt = fixtureNow.Add(-24 * time.Hour)
 
-	done := BuildBoard([]Anchor{shut}, fixtureNow, false, nil, Facts{})
+	done := buildBoard([]Anchor{shut}, fixtureNow, false, nil, Facts{})
 	// The axes still travel — the row is closed, not unreadable.
-	if got := mustTile(t, done, "tk-shut").PRMachine; got != AxisUnknown {
-		t.Errorf("the closed row keeps its axes: pr_machine = %q", got)
+	tile := mustTile(t, done, "tk-shut")
+	if tile.PRMachine != AxisUnknown {
+		t.Errorf("the closed row keeps its axes: pr_machine = %q", tile.PRMachine)
 	}
-	if c := Coverage(done.Tiles); c.Rows != 0 || !c.Complete() {
-		t.Errorf("a board holding only finished pull requests owes the operator nothing: %+v", c)
-	}
-
-	live := mergeAnchor("tk-live", map[string]string{
-		"pr.machine": dated(MachineSettled, headLive, fixtureNow),
-		"pr_posture": dated(postureNone, headLive, fixtureNow),
-	})
-	c := Coverage(BuildBoard([]Anchor{live, shut}, fixtureNow, false, nil, Facts{}).Tiles)
-	if c.Rows != 1 {
-		t.Errorf("coverage speaks for the live rows: got %d, want 1", c.Rows)
-	}
-	if c.MachineUnknown != 0 {
-		t.Errorf("a closed row's unread position is not a gap: got %d", c.MachineUnknown)
-	}
-	if c.ConversationUnknown != 1 {
-		t.Errorf("the live row's unread conversation still is: got %d", c.ConversationUnknown)
+	if tile.ClosedAt.IsZero() {
+		t.Error("the closed row carries closed_at, which is how a surface leaves it out of what is owed")
 	}
 }
 
@@ -2565,7 +3301,7 @@ func TestPreOpenRowIsIdentifiedByBranch(t *testing.T) {
 		"check_set":    "correctness",
 	})
 	pre.UpdatedAt = fixtureNow.Add(-72 * time.Hour)
-	tile := mustTile(t, BuildBoard([]Anchor{pre}, fixtureNow, false, nil, Facts{}), "tk-pre")
+	tile := mustTile(t, buildBoard([]Anchor{pre}, fixtureNow, false, nil, Facts{}), "tk-pre")
 
 	if !tile.Owed {
 		t.Fatal("a pre-open check stalled three days is owed by the operator")
@@ -2592,7 +3328,7 @@ func TestPreOpenRowIsIdentifiedByBranch(t *testing.T) {
 // leads with its number and link either way.
 func TestStandingVetoInSettledTailIsOwed(t *testing.T) {
 	at := fixtureNow.Add(-72 * time.Hour)
-	b := BuildBoard([]Anchor{
+	b := buildBoard([]Anchor{
 		mergeAnchor("tk-veto", map[string]string{
 			"pr.machine": dated(MachineSettled, headLive, at),
 			"pr_number":  "513",
@@ -2660,7 +3396,7 @@ func TestProgressingIsNotOwed(t *testing.T) {
 		}, Blocker{ID: "tk-rew1", Title: "rework: address the findings", Status: "open",
 			RoutedTo: "gc-toolkit/gc-toolkit.polecat", IssueType: "task"}),
 	}
-	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	b := buildBoard(anchors, fixtureNow, false, nil, Facts{})
 
 	for _, id := range []string{"tk-rev", "tk-rew"} {
 		tile := mustTile(t, b, id)
@@ -2678,7 +3414,7 @@ func TestProgressingIsNotOwed(t *testing.T) {
 
 // TestBlockedAnchorIsOwedAndNamed. A green, APPROVED PR that merge.sh cannot land
 // without a person — an unresolved required review thread, a base gone BEHIND, or
-// an unrouted blocker no automated actor will reap — records `blocked` with the
+// a live blocker no automated actor holds — records `blocked` with the
 // cause in pr.machine_reason. The board owes it to the operator, phases it
 // needs-attention, and names the cause, so it stops reading as awaiting-review
 // even though the review verdict is `approved`. That approved-and-held shape is
@@ -2687,7 +3423,7 @@ func TestProgressingIsNotOwed(t *testing.T) {
 func TestBlockedAnchorIsOwedAndNamed(t *testing.T) {
 	at := fixtureNow.Add(-2 * time.Hour)
 	reason := "2 unresolved review thread(s) must be resolved before this PR can merge"
-	b := BuildBoard([]Anchor{
+	b := buildBoard([]Anchor{
 		mergeAnchor("tk-blk", map[string]string{
 			"pr.machine":        dated(MachineBlocked, headLive, at),
 			"pr.machine_reason": reason,
@@ -2720,11 +3456,149 @@ func TestBlockedAnchorIsOwedAndNamed(t *testing.T) {
 	}
 }
 
+// TestBlockedAtAnEarlierHeadIsMerging: a blocked verdict the merge pass
+// recorded at a head the PR has since left was reached about another commit, so
+// an approved PR at the new head reads merging on both axes, as its status:
+// label does, and the roll-up treats it as a row like any other. The owed queue
+// reads the verdict by the same rule, so the row is not the operator's and its
+// needs phrase does not call it blocked.
+func TestBlockedAtAnEarlierHeadIsMerging(t *testing.T) {
+	at := fixtureNow.Add(-2 * time.Hour)
+	b := buildBoard([]Anchor{
+		mergeAnchor("tk-moved", map[string]string{
+			mdPRMachine:       dated(MachineBlocked, "oldhead", at),
+			mdPRMachineCause:  "check-failed",
+			mdPRMachineReason: "required check(s) test failed at the head",
+			mdPRPosture:       dated(postureApproved, headLive, at),
+			mdPRNumber:        "877",
+		}),
+	}, fixtureNow, false, nil, Facts{})
+	tile := mustTile(t, b, "tk-moved")
+	if tile.PRPhase != PhaseMerging || tile.Phase != PhaseMerging {
+		t.Errorf("a blocked verdict at an earlier head does not hold the PR: pr_phase=%q phase=%q, want merging", tile.PRPhase, tile.Phase)
+	}
+	if tile.Owed || !tile.PROwedSince.IsZero() {
+		t.Errorf("a verdict the chip does not count owes the operator nothing: owed=%v since=%v", tile.Owed, tile.PROwedSince)
+	}
+	if strings.Contains(tile.Needs, "blocked") {
+		t.Errorf("needs must not call a merging row blocked, got %q", tile.Needs)
+	}
+	if tile.PRMachine != MachineProgressing {
+		t.Errorf("pr_machine = %q, want %q: the next merge pass replaces a verdict at another head", tile.PRMachine, MachineProgressing)
+	}
+}
+
+// TestBlockedWithReworkInFlightIsMerging: the merge pass records a cause other
+// than blocker only with nothing in flight, so an open rework child that arrives
+// afterwards is the city acting on the cause. The approved row reads merging on
+// both axes and stays out of the owed queue, whether or not a pool route marks
+// the child: a poured rework carries none.
+func TestBlockedWithReworkInFlightIsMerging(t *testing.T) {
+	at := fixtureNow.Add(-2 * time.Hour)
+	anchor := mergeAnchor("tk-fixing", map[string]string{
+		mdPRMachine:       dated(MachineBlocked, headLive, at),
+		mdPRMachineCause:  "check-failed",
+		mdPRMachineReason: "required check(s) test failed at the head",
+		mdPRPosture:       dated(postureApproved, headLive, at),
+		mdPRNumber:        "879",
+	}, Blocker{ID: "tk-fixing.rw", Title: "Rework branch polecat/tk-fixing", Status: "open", IssueType: "task"})
+	kid := Anchor{ID: "tk-fixing.rw", Title: "Rework branch polecat/tk-fixing", Kind: "rework", Source: kindRework,
+		Rig: "gc-toolkit", Prefix: "tk", Metadata: map[string]string{mdAnchorBead: "tk-fixing"}}
+
+	tile := mustTile(t, buildBoard([]Anchor{anchor, kid}, fixtureNow, false, nil, Facts{}), "tk-fixing")
+	if tile.PRPhase != PhaseMerging || tile.Phase != PhaseMerging {
+		t.Errorf("rework in flight on the cause leaves the PR the city's to land: pr_phase=%q phase=%q, want merging", tile.PRPhase, tile.Phase)
+	}
+	if tile.Owed || !tile.PROwedSince.IsZero() {
+		t.Errorf("a verdict the chip does not count owes the operator nothing: owed=%v since=%v", tile.Owed, tile.PROwedSince)
+	}
+	if strings.Contains(tile.Needs, "blocked") {
+		t.Errorf("needs must not call a merging row blocked, got %q", tile.Needs)
+	}
+}
+
+// TestBlockerCauseWithAPoolRoutedBlockerIsOwed: the blocker cause holds the PR
+// whatever is in flight, because the merge pass records it only once no
+// automated actor holds a live blocker. A pool-routed blocker that arrives
+// before the next pass does not lift that verdict: the row reads needs-attention
+// on both axes, as its status: label does, so it stays in the owed queue, named
+// blocked, until the pass replaces the verdict.
+func TestBlockerCauseWithAPoolRoutedBlockerIsOwed(t *testing.T) {
+	at := fixtureNow.Add(-2 * time.Hour)
+	b := buildBoard([]Anchor{
+		mergeAnchor("tk-held", map[string]string{
+			mdPRMachine:       dated(MachineBlocked, headLive, at),
+			mdPRMachineCause:  "blocker",
+			mdPRMachineReason: "held by unclosed rework/review bead tk-held.f (open) — a live blocker no automated actor holds",
+			mdPRPosture:       dated(postureApproved, headLive, at),
+			mdPRNumber:        "880",
+		}, Blocker{ID: "tk-held.f", Title: "fix the finding", Status: "open",
+			RoutedTo: "gc-toolkit/gc-toolkit.polecat", IssueType: "task"}),
+	}, fixtureNow, false, nil, Facts{})
+	tile := mustTile(t, b, "tk-held")
+	if tile.PRPhase != PhaseNeedsAttention || tile.Phase != PhaseNeedsAttention {
+		t.Fatalf("test premise: the blocker cause holds the chip whatever is in flight: pr_phase=%q phase=%q", tile.PRPhase, tile.Phase)
+	}
+	if !tile.Owed || !tile.PROwedSince.Equal(at) {
+		t.Errorf("a verdict the chip counts is owed from its own stamp: owed=%v since=%v, want since %v", tile.Owed, tile.PROwedSince, at)
+	}
+	if !strings.Contains(tile.Needs, "blocked:") {
+		t.Errorf("needs names the block the chip reads, got %q", tile.Needs)
+	}
+	if tile.PRMachine != MachineBlocked {
+		t.Errorf("pr_machine = %q, want %q", tile.PRMachine, MachineBlocked)
+	}
+}
+
+// TestBlockedWithAnUnnamedCauseIsOwed: a blocked verdict whose cause is outside
+// the vocabulary is a state the derivation cannot name, so the chip reads
+// needs-attention wherever the verdict was recorded and whatever is in flight.
+// The owed queue reads it by the same rule, at a head the posture has left and
+// with a rework child in flight alike: the row stays owed from the verdict's
+// own stamp, and its needs phrase names the block.
+func TestBlockedWithAnUnnamedCauseIsOwed(t *testing.T) {
+	at := fixtureNow.Add(-2 * time.Hour)
+	reason := "a cause this build has no word for"
+	moved := mergeAnchor("tk-skew-moved", map[string]string{
+		mdPRMachine:       dated(MachineBlocked, "oldhead", at),
+		mdPRMachineCause:  "mystery",
+		mdPRMachineReason: reason,
+		mdPRPosture:       dated(postureApproved, headLive, at),
+		mdPRNumber:        "881",
+	})
+	fixing := mergeAnchor("tk-skew-fixing", map[string]string{
+		mdPRMachine:       dated(MachineBlocked, headLive, at),
+		mdPRMachineCause:  "mystery",
+		mdPRMachineReason: reason,
+		mdPRPosture:       dated(postureApproved, headLive, at),
+		mdPRNumber:        "882",
+	}, Blocker{ID: "tk-skew-fixing.rw", Title: "Rework branch polecat/tk-skew-fixing", Status: "open", IssueType: "task"})
+	kid := Anchor{ID: "tk-skew-fixing.rw", Title: "Rework branch polecat/tk-skew-fixing", Kind: "rework", Source: kindRework,
+		Rig: "gc-toolkit", Prefix: "tk", Metadata: map[string]string{mdAnchorBead: "tk-skew-fixing"}}
+
+	b := buildBoard([]Anchor{moved, fixing, kid}, fixtureNow, false, nil, Facts{})
+	for _, id := range []string{"tk-skew-moved", "tk-skew-fixing"} {
+		tile := mustTile(t, b, id)
+		if tile.PRPhase != PhaseNeedsAttention || tile.Phase != PhaseNeedsAttention {
+			t.Fatalf("%s: test premise: a cause the derivation cannot name holds the chip: pr_phase=%q phase=%q", id, tile.PRPhase, tile.Phase)
+		}
+		if !tile.Owed || !tile.PROwedSince.Equal(at) {
+			t.Errorf("%s: a verdict the chip counts is owed from its own stamp: owed=%v since=%v, want since %v", id, tile.Owed, tile.PROwedSince, at)
+		}
+		if tile.Needs != "blocked: "+reason {
+			t.Errorf("%s: needs names the block the chip reads, got %q", id, tile.Needs)
+		}
+		if tile.PRMachine != MachineBlocked {
+			t.Errorf("%s: pr_machine = %q, want %q", id, tile.PRMachine, MachineBlocked)
+		}
+	}
+}
+
 // TestBlockedReasonlessStillNeedsAttention. A blocked verdict whose reason write
 // dropped still owes the row and phases it needs-attention, falling back to a
 // generic sentence rather than reading as settled.
 func TestBlockedReasonlessStillNeedsAttention(t *testing.T) {
-	b := BuildBoard([]Anchor{
+	b := buildBoard([]Anchor{
 		mergeAnchor("tk-blk0", map[string]string{
 			"pr.machine": dated(MachineBlocked, headLive, fixtureNow),
 			"pr_number":  "876",
@@ -2744,7 +3618,7 @@ func TestBlockedReasonlessStillNeedsAttention(t *testing.T) {
 // approved PR merely waiting on the merge pass (settled, not blocked) is the
 // city's move — not owed and not needs-attention.
 func TestSettledApprovedIsNotBlocked(t *testing.T) {
-	b := BuildBoard([]Anchor{
+	b := buildBoard([]Anchor{
 		mergeAnchor("tk-ok", map[string]string{
 			"pr.machine": dated(MachineSettled, headLive, fixtureNow),
 			"pr_number":  "900",
@@ -2761,9 +3635,11 @@ func TestSettledApprovedIsNotBlocked(t *testing.T) {
 	}
 }
 
-// TestAskingIsOwedAndCarriesTheDemand: the city formed a question and is waiting
-// on the answer. The hold is an open `blocks` edge to a demand bead with
-// nothing added, and closing the bead is what ends it.
+// TestAskingIsOwedAndCarriesTheQuestion: the city formed a question and is
+// waiting on the answer. The hold is an open `blocks` edge to a bead a person
+// owes — a human gate, a decision, or a bead routed to the operator — with
+// nothing added, and closing the bead is what ends it. A gate that awaits
+// something other than a person asks nobody.
 // TestPositionYieldsToTheHandSetRoute: the PR position outranks the
 // human-routed phrase only when the position is what puts the row in the queue.
 //
@@ -2784,7 +3660,7 @@ func TestPositionYieldsToTheHandSetRoute(t *testing.T) {
 		}),
 		// A human state carries merge_result and nothing else to name itself by.
 		mergeAnchor("tk-bare", map[string]string{
-			"merge_result": "held",
+			"merge_result": "abandoned",
 			"branch":       "",
 			"gc.routed_to": "human",
 		}),
@@ -2793,18 +3669,19 @@ func TestPositionYieldsToTheHandSetRoute(t *testing.T) {
 		mergeAnchor("tk-run", map[string]string{
 			"pr.machine": dated(MachineProgressing, headLive, fixtureNow),
 		}),
-		// A parked merge anchor whose every blocker has closed.
+		// The takeaway twin of a merge anchor whose every blocker has closed.
 		func() Anchor {
 			a := mergeAnchor("tk-disp", map[string]string{
 				"gc.takeaway": "waiting on the upstream fix",
 			})
 			a.Kind, a.Source = "parked", "parked"
+			a.Takeaway = a.Metadata["gc.takeaway"]
 			a.WaitingOn = []string{"tk-gone"}
 			a.WaitingOnClosed = []string{"tk-gone"}
 			return a
 		}(),
 	}
-	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	b := buildBoard(anchors, fixtureNow, false, nil, Facts{})
 
 	busy := mustTile(t, b, "tk-busy")
 	if busy.Needs != "routed to you — no question recorded" {
@@ -2827,13 +3704,17 @@ func TestPositionYieldsToTheHandSetRoute(t *testing.T) {
 		t.Errorf("needs = %q", bare.Needs)
 	}
 
-	// The disposition phrase is news the identity does not carry, so it keeps
-	// its row: a branch name in place of "a blocker landed" is a downgrade.
+	// A pull request the city is landing is in review, not a park that ended:
+	// the blockers that closed are its review rounds. The row names the pull
+	// request, and the takeaway stays its NEEDS as on every other merge anchor.
 	disp := mustTile(t, b, "tk-disp")
-	if disp.Frontier != "needs-review · parked · blocker landed" {
-		t.Errorf("frontier = %q, want the disposition phrase", disp.Frontier)
+	if disp.DispositionDue || disp.Owed {
+		t.Errorf("a pull request in review owes no disposition: disposition_due=%v owed=%v", disp.DispositionDue, disp.Owed)
 	}
-	if disp.Needs != "blocker landed — dispose or resume" {
+	if disp.Frontier != "needs-review · polecat/tk-disp" {
+		t.Errorf("frontier = %q, want the pull request's identity", disp.Frontier)
+	}
+	if disp.Needs != "waiting on the upstream fix" {
 		t.Errorf("needs = %q", disp.Needs)
 	}
 
@@ -2846,7 +3727,7 @@ func TestPositionYieldsToTheHandSetRoute(t *testing.T) {
 	}
 }
 
-func TestAskingIsOwedAndCarriesTheDemand(t *testing.T) {
+func TestAskingIsOwedAndCarriesTheQuestion(t *testing.T) {
 	askedAt := fixtureNow.Add(-30 * time.Hour)
 	anchors := []Anchor{
 		mergeAnchor("tk-ask", map[string]string{
@@ -2854,41 +3735,58 @@ func TestAskingIsOwedAndCarriesTheDemand(t *testing.T) {
 			"pr_posture": dated(postureNone, headLive, fixtureNow),
 		}, Blocker{ID: "tk-dem", Title: "Which base should this land on?", Status: "open",
 			RoutedTo: "human", IssueType: "task", CreatedAt: askedAt}),
-		// A `decision` is a demand by construction, the way the board's own
-		// decision kind is, and needs no route to say so.
+		// A `decision` asks a person by construction, the way the board's own
+		// decision kind does, and needs no route to say so.
 		mergeAnchor("tk-ask2", map[string]string{
 			"pr.machine": dated(MachineSettled, headLive, fixtureNow),
 			"pr_posture": dated(postureNone, headLive, fixtureNow),
 		}, Blocker{ID: "tk-dec", Title: "Ruling on the retarget", Status: "open",
 			IssueType: "decision", CreatedAt: askedAt}),
+		mergeAnchor("tk-ask3", map[string]string{
+			"pr.machine": dated(MachineSettled, headLive, fixtureNow),
+			"pr_posture": dated(postureNone, headLive, fixtureNow),
+		}, Blocker{ID: "tk-hg", Title: "Merge over the red check?", Status: "open",
+			IssueType: "gate", AwaitType: "human", AwaitID: "red-check", CreatedAt: askedAt}),
+		mergeAnchor("tk-ask4", map[string]string{
+			"pr.machine": dated(MachineSettled, headLive, fixtureNow),
+			"pr_posture": dated(postureNone, headLive, fixtureNow),
+		}, Blocker{ID: "tk-tg", Title: "wait an hour", Status: "open",
+			IssueType: "gate", AwaitType: "timer", CreatedAt: askedAt}),
 	}
-	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	b := buildBoard(anchors, fixtureNow, false, nil, Facts{})
 
 	ask := mustTile(t, b, "tk-ask")
 	if !ask.Owed {
 		t.Error("an anchor waiting on an answer is owed by the operator")
 	}
 	if !strings.Contains(ask.Needs, "Which base should this land on?") {
-		t.Errorf("the row carries the demand's authored headline, got %q", ask.Needs)
+		t.Errorf("the row carries the question's authored headline, got %q", ask.Needs)
 	}
-	// A demand outlives a head move, so it is dated at the bead's own instant
+	// A question outlives a head move, so it is dated at the bead's own instant
 	// rather than at a head-pinned key.
 	if !ask.PROwedSince.Equal(askedAt) {
-		t.Errorf("pr_owed_since = %v, want the demand's created_at %v", ask.PROwedSince, askedAt)
+		t.Errorf("pr_owed_since = %v, want the question's created_at %v", ask.PROwedSince, askedAt)
 	}
 	if !mustTile(t, b, "tk-ask2").Owed {
-		t.Error("a decision blocker is a demand too")
+		t.Error("a decision blocker asks a person too")
+	}
+	if g := mustTile(t, b, "tk-ask3"); !g.Owed || g.Needs != "asking: Merge over the red check?" {
+		t.Errorf("an open human gate asks a person: owed=%v needs=%q", g.Owed, g.Needs)
+	}
+	if timer := mustTile(t, b, "tk-ask4"); timer.PRConversation == ConversationAsking {
+		t.Error("a gate awaiting a timer asks nobody")
 	}
 }
 
-// TestDemandBlockerIsNotProgressing is the other half of the route
+// TestPersonOwedBlockerIsNotProgressing is the other half of the route
 // discriminator. Reading every open blocker would call an anchor busy because a
 // person has not answered it yet, which inverts the one answer the row exists
 // to give.
-func TestDemandBlockerIsNotProgressing(t *testing.T) {
+func TestPersonOwedBlockerIsNotProgressing(t *testing.T) {
 	anchors := []Anchor{
 		mergeAnchor("tk-q", nil,
 			Blocker{ID: "tk-dem", Title: "a question", Status: "open", RoutedTo: "human"},
+			Blocker{ID: "tk-hg", Title: "a gate", Status: "open", IssueType: "gate", AwaitType: "human"},
 			// An ordinary prerequisite: no route, no actor.
 			Blocker{ID: "tk-pre", Title: "land the other thing first", Status: "open"},
 			// A CLOSED pool-routed child proves nothing about now.
@@ -2896,9 +3794,9 @@ func TestDemandBlockerIsNotProgressing(t *testing.T) {
 				RoutedTo: "gc-toolkit/gc-toolkit.polecat-codex"},
 		),
 	}
-	tile := mustTile(t, BuildBoard(anchors, fixtureNow, false, nil, Facts{}), "tk-q")
+	tile := mustTile(t, buildBoard(anchors, fixtureNow, false, nil, Facts{}), "tk-q")
 	if tile.PRMachine == MachineProgressing {
-		t.Error("neither a demand, a bare prerequisite nor a closed child has an actor behind it")
+		t.Error("neither a question, a bare prerequisite nor a closed child has an actor behind it")
 	}
 	if tile.PRMachine != AxisUnknown {
 		t.Errorf("with nothing recorded the axis reads unknown, got %q", tile.PRMachine)
@@ -2934,7 +3832,7 @@ func TestApprovalClauseIsTotalOverThePosture(t *testing.T) {
 				"pr.machine": dated(MachineSettled, headLive, fixtureNow),
 				"pr_posture": dated(c.posture, headLive, at),
 			})
-			tile := mustTile(t, BuildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}), a.ID)
+			tile := mustTile(t, buildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}), a.ID)
 			if tile.PRApproval != c.approval {
 				t.Errorf("pr_approval = %q, want %q", tile.PRApproval, c.approval)
 			}
@@ -2967,7 +3865,7 @@ func TestApprovalUnknownWhenThePostureIsStaleOrAbsent(t *testing.T) {
 			"pr_posture": postureReviewRequired + "@" + headLive,
 		}),
 	}
-	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	b := buildBoard(anchors, fixtureNow, false, nil, Facts{})
 	for _, id := range []string{"tk-stale", "tk-nopost", "tk-undated"} {
 		tile := mustTile(t, b, id)
 		if tile.PRApproval != AxisUnknown {
@@ -2990,7 +3888,7 @@ func TestOwedClockHoldsAcrossPassesAndRestartsOnAHeadMove(t *testing.T) {
 	blockedAt := fixtureNow.Add(-72 * time.Hour)
 	held := dated(MachineBlocked, headLive, blockedAt)
 
-	first := mustTile(t, BuildBoard([]Anchor{
+	first := mustTile(t, buildBoard([]Anchor{
 		mergeAnchor("tk-w", map[string]string{"pr.machine": held}),
 	}, fixtureNow, false, nil, Facts{}), "tk-w")
 
@@ -3000,7 +3898,7 @@ func TestOwedClockHoldsAcrossPassesAndRestartsOnAHeadMove(t *testing.T) {
 	later := fixtureNow.Add(2 * time.Hour)
 	a := mergeAnchor("tk-w", map[string]string{"pr.machine": held})
 	a.UpdatedAt = later
-	second := mustTile(t, BuildBoard([]Anchor{a}, later, false, nil, Facts{}), "tk-w")
+	second := mustTile(t, buildBoard([]Anchor{a}, later, false, nil, Facts{}), "tk-w")
 
 	if !first.PROwedSince.Equal(second.PROwedSince) {
 		t.Errorf("the clock moved across two passes at an unchanged head: %v then %v",
@@ -3009,7 +3907,7 @@ func TestOwedClockHoldsAcrossPassesAndRestartsOnAHeadMove(t *testing.T) {
 
 	// A verdict is pinned to the head it judged, so one at the NEW head is a new
 	// turn.
-	moved := mustTile(t, BuildBoard([]Anchor{
+	moved := mustTile(t, buildBoard([]Anchor{
 		mergeAnchor("tk-w", map[string]string{
 			"pr.machine": dated(MachineBlocked, headOld, later),
 		}),
@@ -3030,18 +3928,17 @@ func TestOwedSinceTakesTheEarliestCause(t *testing.T) {
 	}, Blocker{ID: "tk-d", Title: "and a question", Status: "open",
 		RoutedTo: "human", CreatedAt: askedAt})
 
-	tile := mustTile(t, BuildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}), "tk-both")
+	tile := mustTile(t, buildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}), "tk-both")
 	if !tile.PROwedSince.Equal(blockedAt) {
 		t.Errorf("pr_owed_since = %v, want the EARLIEST cause %v", tile.PROwedSince, blockedAt)
 	}
 }
 
-// TestUnrecordedPositionIsUnknownAndCountsAgainstCoverage. A missing key means
-// the cadence has not written one yet, which is a fact about the city rather
-// than an all-clear — and the all-clear is exactly what a quiet default would
-// produce.
-func TestUnrecordedPositionIsUnknownAndCountsAgainstCoverage(t *testing.T) {
-	b := BuildBoard([]Anchor{
+// TestUnrecordedPositionIsUnknown. A missing key means the cadence has not
+// written one yet, which is a fact about the city rather than an all-clear —
+// and the all-clear is exactly what a quiet default would produce.
+func TestUnrecordedPositionIsUnknown(t *testing.T) {
+	b := buildBoard([]Anchor{
 		mergeAnchor("tk-silent", nil),
 		// It carries a branch, which every work bead does. That is what makes
 		// the axes' merge-anchor gate load-bearing rather than decorative.
@@ -3068,17 +3965,6 @@ func TestUnrecordedPositionIsUnknownAndCountsAgainstCoverage(t *testing.T) {
 	}
 	if epic.PRBranch != "" {
 		t.Errorf("a non-merge row names no pull request branch, got %q", epic.PRBranch)
-	}
-
-	c := Coverage(b.Tiles)
-	if c.Rows != 1 {
-		t.Errorf("coverage counts merge anchors only: got %d, want 1", c.Rows)
-	}
-	if c.MachineUnknown != 1 {
-		t.Errorf("the unrecorded position counts against coverage: got %d", c.MachineUnknown)
-	}
-	if c.Complete() {
-		t.Error("coverage cannot be complete while a position is unread — that is the all-clear nobody earned")
 	}
 }
 
@@ -3129,7 +4015,7 @@ func TestConversationAxisRendersTheRecordedPosition(t *testing.T) {
 	for _, c := range cases {
 		anchors = append(anchors, mergeAnchor(c.id, c.md, c.blk...))
 	}
-	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	b := buildBoard(anchors, fixtureNow, false, nil, Facts{})
 	for _, c := range cases {
 		if got := mustTile(t, b, c.id).PRConversation; got != c.want {
 			t.Errorf("%s: pr_conversation = %q, want %q", c.id, got, c.want)
@@ -3137,11 +4023,11 @@ func TestConversationAxisRendersTheRecordedPosition(t *testing.T) {
 	}
 }
 
-// TestReadableConversationIsNotACoverageGap. A recorded position is a fact, not
-// a gap: only an unread axis holds the all-clear open. A settled, quiet row whose
-// approval is met, with no demand, is genuinely nobody's move.
-func TestReadableConversationIsNotACoverageGap(t *testing.T) {
-	b := BuildBoard([]Anchor{
+// TestReadableConversationIsNobodysMove. A recorded position is a fact, not a
+// gap. A settled, quiet row whose approval is met, with no demand, is genuinely
+// nobody's move.
+func TestReadableConversationIsNobodysMove(t *testing.T) {
+	b := buildBoard([]Anchor{
 		mergeAnchor("tk-clear", map[string]string{
 			"pr.machine":      dated(MachineSettled, headLive, fixtureNow),
 			"pr.conversation": dated(ConversationQuiet, headLive, fixtureNow),
@@ -3156,27 +4042,6 @@ func TestReadableConversationIsNotACoverageGap(t *testing.T) {
 	if tile.Owed {
 		t.Error("a settled, quiet row whose approval is met is nobody's move")
 	}
-	if c := Coverage(b.Tiles); !c.Complete() || c.ConversationUnknown != 0 {
-		t.Errorf("a recorded conversation clears the gap it would otherwise hold: %+v", c)
-	}
-}
-
-// TestMachineUnknownDoesNotDoubleCountConversation. A row whose pr.machine is
-// absent reads unknown on the conversation axis too — the currency check in
-// prConversation pins to the machine head and cannot run without it — so
-// counting the conversation would report one gap as two and blame the
-// conversation for one that is the machine reference's. The machine is the gap
-// to fix; the conversation follows once it is current.
-func TestMachineUnknownDoesNotDoubleCountConversation(t *testing.T) {
-	// An open PR with neither axis recorded: both read unknown.
-	a := mergeAnchor("tk-noax", map[string]string{"pr_number": "9"})
-	c := Coverage(BuildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}).Tiles)
-	if c.MachineUnknown != 1 {
-		t.Errorf("the absent machine is the gap: MachineUnknown = %d, want 1", c.MachineUnknown)
-	}
-	if c.ConversationUnknown != 0 {
-		t.Errorf("the conversation is not counted while the machine head it pins to is unknown: got %d, want 0", c.ConversationUnknown)
-	}
 }
 
 // TestOwedPRRowLeadsTheQueue. The owed partition and its ordering are the
@@ -3185,7 +4050,7 @@ func TestMachineUnknownDoesNotDoubleCountConversation(t *testing.T) {
 func TestOwedPRRowLeadsTheQueue(t *testing.T) {
 	old := fixtureNow.Add(-96 * time.Hour)
 	recent := fixtureNow.Add(-2 * time.Hour)
-	b := BuildBoard([]Anchor{
+	b := buildBoard([]Anchor{
 		mergeAnchor("tk-new", map[string]string{"pr.machine": dated(MachineBlocked, headLive, recent)}),
 		{ID: "tk-big", Title: "a container that outranks everything", Kind: "epic", Source: "epic",
 			Rig: "gc-toolkit", Prefix: "tk", Children: func() []Child {
@@ -3235,7 +4100,7 @@ func TestHumanRoutedMergeAnchorGathersTwiceAndCollapsesToOneRow(t *testing.T) {
 	humanRow.Kind, humanRow.Source = "human", "human"
 	mergeRow := mergeAnchor("tk-w", md)
 
-	b := BuildBoard([]Anchor{humanRow, mergeRow}, fixtureNow, false, nil, Facts{})
+	b := buildBoard([]Anchor{humanRow, mergeRow}, fixtureNow, false, nil, Facts{})
 
 	if len(b.Tiles) != 1 || b.Total != 1 {
 		t.Fatalf("one bead is one row: got %d tiles (total %d)", len(b.Tiles), b.Total)
@@ -3258,18 +4123,18 @@ func TestHumanRoutedMergeAnchorGathersTwiceAndCollapsesToOneRow(t *testing.T) {
 	}
 }
 
-// TestHumanRoutedBlockerIsADemand is the one case where the demand test is
-// wider than the `decision` issue type.
+// TestHumanRoutedBlockerAsksAPerson is the one case where the person-owed test is
+// wider than the human gate and the `decision` issue type.
 //
 // The shape it is built from: an anchor blocks on a `bug` that was routed to a
-// person and left open for days. It is not a `decision` and not a visit, so a
+// person and left open for days. It is not a `decision` and not a gate, so a
 // narrow reading calls it an ordinary prerequisite and the waiting row stays
 // out of the queue — banded LOW, under a takeaway saying the work was finished
 // and only an operator could open its PR.
 //
-// The route is what makes it a demand: nothing but a person closes a bead held
-// by a person, whether or not that wait has been expressed as a decision bead.
-func TestHumanRoutedBlockerIsADemand(t *testing.T) {
+// The route is what makes a person owe it: nothing but a person closes a bead
+// held by a person, whether or not that wait has been expressed as a gate.
+func TestHumanRoutedBlockerAsksAPerson(t *testing.T) {
 	routedAt := fixtureNow.Add(-13 * 24 * time.Hour)
 	a := mergeAnchor("tk-waiter", map[string]string{"pr_number": "473"},
 		Blocker{
@@ -3277,7 +4142,7 @@ func TestHumanRoutedBlockerIsADemand(t *testing.T) {
 			// Routed to a person, no pool route, an ordinary work type.
 			RoutedTo: "human", IssueType: "bug", CreatedAt: routedAt,
 		})
-	tile := mustTile(t, BuildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}), "tk-waiter")
+	tile := mustTile(t, buildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}), "tk-waiter")
 
 	if !tile.Owed {
 		t.Error("an anchor whose only blocker no automated actor will close is waiting on a person")
@@ -3297,7 +4162,7 @@ func TestHumanRoutedBlockerIsADemand(t *testing.T) {
 		ID: "tk-rework", Title: "rework in flight", Status: "open",
 		RoutedTo: "gc-toolkit/gc-toolkit.polecat", IssueType: "bug", CreatedAt: routedAt,
 	})
-	if mustTile(t, BuildBoard([]Anchor{b}, fixtureNow, false, nil, Facts{}), "tk-busy").Owed {
+	if mustTile(t, buildBoard([]Anchor{b}, fixtureNow, false, nil, Facts{}), "tk-busy").Owed {
 		t.Error("a pool-routed blocker of the same shape is the city's move, not the operator's")
 	}
 }
@@ -3324,7 +4189,7 @@ func TestHumanGatedWithLiveMoleculeIsActive(t *testing.T) {
 		},
 		OwnerState: map[string]string{"gc-toolkit__polecat-hq-live": "active"},
 	}
-	b := BuildBoard([]Anchor{human("tk-live"), human("tk-drained"), human("tk-none"),
+	b := buildBoard([]Anchor{human("tk-live"), human("tk-drained"), human("tk-none"),
 		{ID: "tk-dec", Title: "a call to make", Kind: "decision", Source: "decision",
 			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1)}},
 		fixtureNow, false, nil, f)
@@ -3367,86 +4232,69 @@ func TestHumanGatedWithLiveMoleculeIsActive(t *testing.T) {
 	}
 }
 
-// TestDemandFoldYieldsToLiveWork covers the 2026-09-27 epic evidence: a demand
-// folded onto a subject the city is actively working must not mark it owed. The
-// live signal is the subject's own roll-up (a live child), which the demand fold
-// reads to decide whether an agent is on the subject — not child-to-parent state
-// aggregation (tk-ikpyzn.6). The demand's ask re-surfaces on its own when the work
-// drains, because the fold is re-derived every render.
-func TestDemandFoldYieldsToLiveWork(t *testing.T) {
+// TestGateOwesItsBeadWhileWorkIsInFlight: an open human gate makes each bead it
+// blocks owed even while the city works on the bead, because only a person
+// clears it and the bead's next step waits for it. The worked subject and the
+// idle one read alike: owed, in the gate section, naming the question.
+func TestGateOwesItsBeadWhileWorkIsInFlight(t *testing.T) {
+	gate := func(id, subject, ask string) Anchor {
+		return Anchor{ID: id, Title: ask, Kind: KindGate, Source: KindGate, Rig: "gc-toolkit", Prefix: "tk",
+			UpdatedAt: fixtureNow, Subjects: []string{subject}}
+	}
 	anchors := []Anchor{
 		// A subject the city is working: its child is covered by a live molecule.
 		{ID: "tk-live", Title: "worked epic", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk",
 			Priority: ptr(3), UpdatedAt: fixtureNow, Children: []Child{{ID: "tk-klive", Status: "open"}}},
-		{ID: "tk-dem-live", Title: "demand: coord open", Kind: "human", Source: "human", Rig: "gc-toolkit", Prefix: "tk",
-			Priority: ptr(2), UpdatedAt: fixtureNow,
-			Metadata: map[string]string{"gc.demand_for": "tk-live", "gc.routed_to": "human"},
-			Takeaway: "coord open; nothing owed"},
-		// The discriminator: the same shape with an IDLE child. The demand owes.
+		gate("tk-gate-live", "tk-live", "keep the coordination open?"),
 		{ID: "tk-idle", Title: "stalled epic", Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk",
 			Priority: ptr(3), UpdatedAt: fixtureNow, Children: []Child{{ID: "tk-kidle", Status: "open"}}},
-		{ID: "tk-dem-idle", Title: "demand: decide", Kind: "human", Source: "human", Rig: "gc-toolkit", Prefix: "tk",
-			Priority: ptr(2), UpdatedAt: fixtureNow,
-			Metadata: map[string]string{"gc.demand_for": "tk-idle", "gc.routed_to": "human"},
-			Takeaway: "decide the layout"},
+		gate("tk-gate-idle", "tk-idle", "decide the layout"),
 	}
 	f := Facts{
 		Inflight:   map[string][]string{"tk-klive": {"gc-toolkit__polecat-hq-live"}},
 		OwnerState: map[string]string{"gc-toolkit__polecat-hq-live": "active"},
 	}
-	b := BuildBoard(anchors, fixtureNow, false, nil, f)
+	b := buildBoard(anchors, fixtureNow, false, nil, f)
 
-	live := mustTile(t, b, "tk-live")
-	if live.Owed {
-		t.Error("a demand whose subject the city is working must not mark it owed")
+	for id, ask := range map[string]string{"tk-live": "keep the coordination open?", "tk-idle": "decide the layout"} {
+		row := mustTile(t, b, id)
+		if !row.Owed || row.Section != SectionGate || row.Needs != ask {
+			t.Errorf("%s: an open gate owes its bead whatever is in flight: owed=%v section=%s needs=%q", id, row.Owed, row.Section, row.Needs)
+		}
 	}
-	if live.Section != SectionActive {
-		t.Errorf("…so the subject bands active, not gate: got %s", live.Section)
+	for _, id := range []string{"tk-gate-live", "tk-gate-idle"} {
+		if _, ok := tileByID(b, id); ok {
+			t.Errorf("%s: the folded gate is dropped", id)
+		}
 	}
-	if live.Needs != "in flight" {
-		t.Errorf("…and it keeps its own in-flight needs, not the demand's ask: %q", live.Needs)
-	}
-	// The wrapper is folded away regardless — one attention item is one row.
-	if _, ok := tileByID(b, "tk-dem-live"); ok {
-		t.Error("the folded demand wrapper is dropped")
-	}
-
-	idle := mustTile(t, b, "tk-idle")
-	if !idle.Owed {
-		t.Error("a demand whose subject has no live work owes the operator")
-	}
-	if idle.Section != SectionGate {
-		t.Errorf("…so the subject bands gate: got %s", idle.Section)
-	}
-	if idle.Needs != "decide the layout" {
-		t.Errorf("the demand's ask becomes the subject's needs: %q", idle.Needs)
+	if live := mustTile(t, b, "tk-live"); live.InProgressLive != 1 {
+		t.Errorf("test premise: the worked epic has its child in flight: %d", live.InProgressLive)
 	}
 }
 
 // A recommendation row carries the first-reaction card to the operator's accept
-// point. When a subject is acceptable — a recommended formula plus an open,
-// un-engaged visit — its notes (the Proposal and Decision-needed an operator
-// weighs) reach the wire as Tile.Recommendation, trimmed but with the card's
-// section structure intact. Off an acceptable row the field stays null, so the
-// wire never carries every bead's notes.
+// point. When a bead is acceptable — a recommended formula and its open,
+// unassigned gate the last one blocking it — its notes (the Proposal and
+// Decision-needed an operator weighs) reach the wire as Tile.Recommendation,
+// trimmed but with the card's section structure intact. Off an acceptable row
+// the field stays null, so the wire never carries every bead's notes.
 func TestRecommendationRidesTheAcceptableRow(t *testing.T) {
 	const card = "## Proposal\nDo the thing.\n\n## Decision needed\nAccept or redirect."
-	subject := func(id string) Anchor {
+	subject := func(id string, gates ...Blocker) Anchor {
 		return Anchor{
 			ID: id, Title: id, Kind: "parked", Source: "parked",
 			Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2), UpdatedAt: daysAgo(1),
 			Metadata: map[string]string{"gc.recommended_formula": "mol-polecat-work"},
 			Notes:    "\n\n" + card + "\n\n",
+			Blockers: gates,
 		}
 	}
-	openVisit := func(id string) Facts {
-		return Facts{Sittings: []Sitting{{Subject: id, Status: "open"}}}
-	}
+	rec := Blocker{ID: "tk-g", Title: "Accept?", Status: "open", IssueType: "gate", AwaitType: "human", AwaitID: "first-reaction"}
 
 	// Acceptable row: the card reaches the wire, trimmed, structure intact.
-	tile := computeTile(subject("tk-rec"), fixtureNow, openVisit("tk-rec"))
+	tile := computeTile(subject("tk-rec", rec), fixtureNow, Facts{})
 	if !tile.Acceptable {
-		t.Fatal("precondition: a recommended formula + open un-engaged visit is acceptable")
+		t.Fatal("precondition: a recommended formula and its open, unassigned gate is acceptable")
 	}
 	if tile.Recommendation == nil {
 		t.Fatal("an acceptable row carries its first-reaction card as recommendation")
@@ -3455,15 +4303,15 @@ func TestRecommendationRidesTheAcceptableRow(t *testing.T) {
 		t.Errorf("recommendation is the notes, trimmed, card structure intact:\n got %q\nwant %q", *tile.Recommendation, card)
 	}
 
-	// Same notes, but no open visit → not acceptable → no card on the wire.
+	// Same notes, but no gate asks for an Accept → not acceptable → no card.
 	if got := computeTile(subject("tk-rec"), fixtureNow, Facts{}).Recommendation; got != nil {
 		t.Errorf("off an acceptable row the wire carries no card: got %q", *got)
 	}
 
 	// Acceptable, but whitespace-only notes → null, never an empty string.
-	empty := subject("tk-rec")
+	empty := subject("tk-rec", rec)
 	empty.Notes = "   \n"
-	if got := computeTile(empty, fixtureNow, openVisit("tk-rec")).Recommendation; got != nil {
+	if got := computeTile(empty, fixtureNow, Facts{}).Recommendation; got != nil {
 		t.Errorf("whitespace-only notes is null, not an empty recommendation: got %q", *got)
 	}
 }

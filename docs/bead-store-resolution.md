@@ -144,18 +144,13 @@ reference to a dozen live beads.
 
 ## Who asks it
 
-- `escalate.sh` pins every read and write to its subject's store by path,
-  through `escalation-rig.sh --db`, so a visit lands in the store its subject
-  lives in, the city's included, wherever the caller sits and whichever pool it
-  routes to. A pool never selects the store, so one that does not read the
-  subject's store is refused. A subject it cannot place falls back to the
-  caller's `GC_RIG` store. Without
-  `GC_RIG`, what the lookup proved decides. A subject proven to name no bead,
-  or a wisp, is filed on the standing triage subject of the store the caller
-  sits in. A subject whose store could not be read may still be a real bead,
-  so it is refused.
-- `bead-rehome.sh` places both ends of a successor pointer, so
-  `gc.superseded_by_store` names the store that actually holds the successor.
+- `converse-signoff.sh` runs a ruling's rework or retirement in the rig that
+  holds the PR's anchor, which can be another rig than the conversation's, so
+  it resolves that rig and its checkout from the anchor's id and writes nothing
+  when either cannot be resolved.
+- `bead-rehome.sh` places both ends of a disposition, so the edge it writes
+  in the origin's store names a successor that the store its prefix names
+  actually holds.
 - `mol-witness-patrol`'s cleanup step holds `git worktree remove` behind
   `--present`: a worktree whose owner cannot be placed is not an unowned one.
 - `gc-proactive.sh sling` files a reaction bead only for a subject `--present`
@@ -219,7 +214,8 @@ dance by hand. It returns, and nothing outside this:
   merged_target) when the bead carries a merge_result; the first_reaction fields;
   gc.origin; and the distilled gc.takeaway headline with its settled flag.
 - **Context edges**, shown but never gating — the parent, the relates-to edges,
-  the tracked-by visits, and a count per class.
+  the beads that track it, its conversations among them, the beads that wait
+  on it by a `blocks` or an `until` edge, and a count per class.
 - **Store** — the store that answered, and the db it read.
 
 and, each behind an opt-in flag so a caller pays only for what it needs:
@@ -273,9 +269,10 @@ context as one object; the default is a human-readable block. It reads only.
 ### What it returns, and what it leaves out
 
 The free-text body — descriptions, notes and comments, of the subject or of any
-listed bead — is never returned, and no blocker or child is carried beyond
+listed bead — is never returned. No blocker or child is carried beyond
 `{id, title, status, advance}` and, when it is stuck, the `stuck_on {id, why}`
-that names its cause. That text is unbounded, and returning it
+that names its cause, and no bead that waits on the subject beyond
+`{id, title, status, edge}`. That text is unbounded, and returning it
 proactively is the context bloat this tool exists to cut. So it complements `gc
 bd show <id>`, which the reader still runs for the one bead whose full body a
 decision turns on, and does not replace it.
@@ -284,9 +281,21 @@ decision turns on, and does not replace it.
 
 A bead's own read carries its outbound edges — the parent link, the relates-to
 edges (either the `relates-to` or the older `related` spelling), and the
-`blocks`-deps. The tracked-by visits are an inbound `tracks` edge and the direct
+`blocks`-deps. The beads that track it are an inbound `tracks` edge and the direct
 children an inbound `parent-child` edge, each stored on the other bead, so each
 is read with one reverse query the subject's own row cannot answer.
+
+Each bead that waits on the subject carries a `blocks` or an `until` edge to
+it, another inbound edge. That is how a closed design's read names the build it
+released. The subject's read asks bd for its dependents too
+(`--include-dependents`), and bd returns each one cut to its identity fields and
+the edge's type, never its body. The dependents also hold every child and every
+inbound `related` edge, the review, validation and rework beads that gather on a
+design, so the list keeps only the `blocks` and `until` ones. It names the open
+ones first, each with its edge, and at most ten of them. Its counts give how
+many wait in all and how many of those are open, since a gate can hold a hundred
+parked beads. bd reads only the subject's store, so a bead in another store that
+waits on the subject is not listed.
 
 The counts are over a bead's own edges and its direct children, never its whole
 subtree. A `parent-child` edge is stored on the child pointing up, so an epic
@@ -294,6 +303,9 @@ carries no edge per story; `--horizon` lists the direct children by the
 `--parent` query, asked for with `--all`. bd's default scope leaves out closed
 and pinned children, and a `--status` list leaves out any status it does not
 name, so with `--all` a child in any status is counted, a done one included.
+The listing also returns the closed event bead `bd set-state` files under a
+bead each time its state changes. An event records the change, not work, so it
+is not counted as a child.
 
 The subject read passes `--brief-deps`, so a listed bead's body is never fetched
 to read its status, and a same-store closed blocker's status rides the edge at no

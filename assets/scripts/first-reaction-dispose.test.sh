@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Hermetic tests for first-reaction-dispose.sh — the five exits a first reaction
+# Hermetic tests for first-reaction-dispose.sh — the exits a first reaction
 # ends in, in the reaction-bead model, the stand-down it asks before it reacts,
 # and the frozen no-reaction-bead call an in-flight mol-first-reaction molecule
 # still makes. Runs the REAL script with a
-# stubbed `gc`, a stubbed gc-helm.sh, a stubbed gc-proactive.sh and a stubbed
-# deferred-dispatch.sh (all reached through the tool-override env vars), so no
+# stubbed `gc`, a stubbed gc-helm.sh, a stubbed human-gate.sh, a stubbed
+# gc-proactive.sh and a stubbed deferred-dispatch.sh (all reached through the
+# tool-override env vars), so no
 # live city, Dolt or network is touched. What each block guards is named above it.
 set -euo pipefail
 
@@ -181,14 +182,21 @@ case "$1 ${2:-}" in
     if [ -n "${FAKE_NUDGE_FAILS:-}" ]; then echo "gc session nudge: fake nudge failure" >&2; exit 1; fi ;;
   "bd dep")
     printf 'DEP %s\n' "$*" >> "$FAKE_LOG"
-    # `dep list --json` answers with what the store holds AFTER the helm call;
-    # `dep add` is the close exit's gate edge, and FAKE_DEP_FAILS models a hold
-    # that did not land.
+    # `dep list --json` answers with what the store holds AFTER the helm call.
+    # `dep add` is the close exit's hold edge, and FAKE_DEP_FAILS models a hold
+    # that did not land. FAKE_DEP_LIST_FAILS is a list the store refuses, with
+    # nothing on stdout.
     case "${3:-}" in
-      add)  [ -n "${FAKE_DEP_FAILS:-}" ] && exit 1 ;;
-      list) printf '%s\n' "${FAKE_DEPS_JSON:-[]}" ;;
+      add)
+        [ -z "${FAKE_DEP_FAILS:-}" ] || exit 1 ;;
+      list)
+        [ -z "${FAKE_DEP_LIST_FAILS:-}" ] || exit 1
+        printf '%s\n' "${FAKE_DEPS_JSON:-[]}" ;;
     esac ;;
   "bd close") printf 'CLOSE %s\n' "$*" >> "$FAKE_LOG" ;;
+  # The real human-gate.sh, which one case runs in place of the stubbed helper,
+  # resolves a gate through this verb.
+  "bd gate") printf 'BDGATE %s\n' "$*" >> "$FAKE_LOG" ;;
   "sling "*) printf 'SLING %s\n' "$*" >> "$FAKE_LOG"
     # FAKE_SLING_RC is the exit gc sling returns: 3 is its live-workflow
     # conflict, the only code it exits on a bead a workflow already drives.
@@ -220,17 +228,6 @@ case " $* " in
       _prev="$_a"
     done ;;
 esac
-# demand files the human gate a ruling or recommend holds on, and names it the
-# way gc-helm.sh does: a `demand <id> blocks <gated> …` line on stdout.
-# FAKE_DEMAND_FAILS models a gate that did not file (gc-helm.sh exits 4);
-# FAKE_DEMAND_NOID a demand that exits 0 but names no gate.
-if [ "${1:-}" = demand ]; then
-  [ -n "${FAKE_DEMAND_FAILS:-}" ] && exit 4
-  [ -n "${FAKE_DEMAND_NOID:-}" ] && exit 0
-  printf 'blocks edge: %s depends on %s\n' "$2" "${FAKE_GATE_ID:-tk-gate1}"
-  printf 'demand %s blocks %s (by proactive): %s\n' "${FAKE_GATE_ID:-tk-gate1}" "$2" "$3"
-  exit 0
-fi
 # Model gc-helm.sh takeaway --release retiring the pour stamp. The shared-state
 # file stands in for gc.execution_routed_to; a run that does not opt in
 # (FAKE_EXEC_ROUTED_FILE unset) is unchanged. The arm does not depend on this
@@ -252,6 +249,18 @@ esac
 exit 0
 HELM
 chmod +x "$TMP/helm"
+
+# human-gate.sh files the human gate a ruling or recommend holds on and prints
+# its id on stdout, as the real helper does. FAKE_GATE_FAILS models a gate that
+# did not file. A --retract call is logged and changes nothing.
+cat > "$TMP/human-gate" <<'HG'
+#!/usr/bin/env bash
+printf 'GATE %s\n' "$*" >> "$FAKE_LOG"
+case " $* " in *" --retract "*) exit 0 ;; esac
+[ -n "${FAKE_GATE_FAILS:-}" ] && exit 1
+printf '%s\n' "${FAKE_GATE_ID:-tk-gate1}"
+HG
+chmod +x "$TMP/human-gate"
 
 cat > "$TMP/proactive" <<'PA'
 #!/usr/bin/env bash
@@ -339,7 +348,7 @@ MEMBER='"parent":"tk-epic","dependencies":[{"id":"tk-epic","dependency_type":"pa
 UNPLACED='[{"id":"tk-sub","metadata":{}}]'
 export DEFAULT_SHOW='[{"id":"tk-sub",'"$MEMBER"',"metadata":{}}]'
 export GC_HELM_TOOL="$TMP/helm" GC_DEFERRED_DISPATCH_TOOL="$TMP/deferred" \
-       GC_PROACTIVE_TOOL="$TMP/proactive"
+       GC_PROACTIVE_TOOL="$TMP/proactive" GC_HUMAN_GATE_TOOL="$TMP/human-gate"
 
 R="tk-react"   # the reaction bead the worker holds
 
@@ -407,7 +416,7 @@ LOG_ACT="$LOG"
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --waiting-on tk-other --reaction-bead "$R"
 eq "$RC" "2" "(ACT) actionable refuses the other exits' flags"
 
-# (ACTPOOL) a route to a pool nothing runs is worse than a visit: the bead
+# (ACTPOOL) a route to a pool nothing runs is worse than a human gate: the bead
 # would be open, unassigned and offered to nobody.
 has "PROACTIVE deliverable gc-toolkit/gc-toolkit.polecat tk-sub" "$LOG_ACT" \
     "(ACTPOOL) the exit asks whether the pool can claim this bead before handing over"
@@ -490,7 +499,7 @@ run tk-sub --disposition actionable --reason "r" --takeaway "t" --then-assign gc
 eq "$RC" "2" "(ASSIGNEXIT) actionable refuses --then-assign, the blocked exit's flag"
 run tk-sub --disposition close --reason "r" --takeaway "t" --assign gc-toolkit.mechanik
 eq "$RC" "2" "(ASSIGNEXIT) close refuses --assign: its closer is a pool"
-run tk-sub --disposition ruling --reason "r" --takeaway "t" --visit tk-visit1 --assign gc-toolkit.mechanik
+run tk-sub --disposition ruling --reason "r" --takeaway "t" --assign gc-toolkit.mechanik
 eq "$RC" "2" "(ASSIGNEXIT) ruling refuses --assign: it waits on the operator"
 eq "$LOG" "" "(ASSIGNEXIT) …and nothing was written"
 run tk-sub --disposition ruling --reason "r" --takeaway "t" --then-assign gc-toolkit.mechanik
@@ -555,7 +564,7 @@ run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on ra-for
 eq "$RC" "2" "(BLKCROSS) a blocker in another store is refused"
 eq "$LOG" "" "(BLKCROSS) …and nothing was written"
 has "holds nothing" "$ERR" "(BLKCROSS) …because the edge would report success and hold nothing"
-has "demand bead" "$ERR" "(BLKCROSS) …and the refusal names the remedy"
+has "store that names ra-foreign" "$ERR" "(BLKCROSS) …and the refusal names the remedy"
 
 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-sub --reaction-bead "$R"
 eq "$RC" "2" "(BLKSELF) a bead cannot wait on itself"
@@ -781,32 +790,40 @@ hasnt "HELM" "$LOG" "(BLKASSIGN) …and the bead is not released"
 unset FAKE_AGENT_GONE FAKE_DEPS_JSON
 
 # ── ruling: the human gate is the wait, filed by the exit itself ─────────────
-#   (RUL)      the exit files the gate through gc-helm.sh demand, the takeaway
-#              as its question, and holds the subject on it
-#   (RULTOPIC) the gate is filed under the topic first-reaction
+#   (RUL)      the exit files the gate through human-gate.sh, the takeaway as
+#              its title, and holds the subject on it
+#   (RULKEY)   the gate is filed under the key first-reaction, with no quiet
+#              window
 #   (RULORDER) gate, then release, then the landed proof
-#   (RULGATE)  a gate that did not file, or that demand did not name, fails
-#              the exit before the release, with nothing recorded done
+#   (RULGATE)  a gate that did not file fails the exit before the release, with
+#              nothing recorded done
 #   (RULEDGE)  a hold that did not land fails the exit
-#   (RULVISIT) --visit holds the subject on a visit the caller filed, no gate
-# The gate is the escalation's state; gate-visit-sweep files the visit that
-# resolves it, so the exit files no visit. The FAKE dep list answers with the
-# gate so the hold verification passes.
+#   (RULSUPER) an open first-reaction gate a superseded reaction filed is
+#              withdrawn before the new one, and this reaction's own is kept
+#   (RULTITLE) the gate's title line is the takeaway on one line, as the
+#              board shows it, so a re-run of a takeaway that spans lines
+#              keeps its gate; a takeaway past the 400 bytes the real helper
+#              holds a title under keeps its gate by the description's first
+#              line
+#   (RULKIDS)  a subject with open children is gated like any other bead
+#   (RULCAP)   a takeaway over the 140-character cap is refused first
+# The exit files no visit. The FAKE dep list answers with the gate so the hold
+# verification passes.
 export FAKE_DEPS_JSON='[{"id":"tk-gate1"}]'
 run tk-sub --disposition ruling --reason "the trade-off is the operator's" \
     --takeaway "needs a ruling: which default" --reaction-bead "$R"
 eq "$RC" "0" "(RUL) a ruling disposition succeeds"
-has "HELM demand tk-sub needs a ruling: which default --by proactive --topic first-reaction --body" "$LOG" \
-   "(RUL) it files the human gate, the takeaway as the gate's question"
-# gc-helm.sh demand keeps one open gate per gated bead and topic. With no topic
-# it matches on the subject alone: it refreshes a converse sitting's lone demand
-# on the subject in place, overwriting the question that sitting holds, and stops
-# on a subject that carries two. The reaction's own topic files beside them.
-has "--topic first-reaction" "$(grep '^HELM demand' "$FAKE_LOG")" \
-   "(RULTOPIC) the gate is filed under the first reaction's own topic"
-# The body spans lines, so read the demand call up to the release that follows it.
-has "the trade-off is the operator's" "$(sed -n '/^HELM demand/,/^HELM takeaway/p' "$FAKE_LOG")" \
-   "(RUL) …with the reason in the gate's body"
+has "GATE --subject tk-sub --key first-reaction --message needs a ruling: which default" "$LOG" \
+   "(RUL) it files the human gate, the takeaway as the gate's title"
+# human-gate.sh keeps one open gate per bead and key, so the reaction's own key
+# files beside any other gate on the subject and a re-run finds its own.
+has "--key first-reaction" "$(grep '^GATE ' "$FAKE_LOG")" \
+   "(RULKEY) the gate is filed under the first reaction's own key"
+hasnt "--quiet-window" "$(grep '^GATE ' "$FAKE_LOG")" \
+   "(RULKEY) …declaring no quiet window: a reaction is an event of its own"
+# The message spans lines, so read the gate call up to the release that follows it.
+has "the trade-off is the operator's" "$(sed -n '/^GATE --subject/,/^HELM takeaway/p' "$FAKE_LOG")" \
+   "(RUL) …with the reason in the gate's message"
 has "HELM takeaway tk-sub needs a ruling: which default --by proactive --release" "$LOG" \
    "(RUL) the bead is released back to the human"
 hasnt "--route" "$LOG" "(RUL) …not routed to a pool"
@@ -815,27 +832,21 @@ has "--waiting-on tk-gate1" "$LOG" "(RUL) …and held by the gate's edge"
 # is what a person owes, and --waiting-on records that wait as a blocks edge so
 # doctor/check-wait-is-an-edge reads a graph state rather than reporting prose.
 hasnt "--no-wait" "$LOG" "(RUL) …and never claims nothing is waiting"
-hasnt "CREATE" "$LOG" "(RUL) …and files no visit: gate-visit-sweep files it"
+hasnt "CREATE" "$LOG" "(RUL) …and files no visit"
 has "disposed as ruling (tk-gate1)" "$OUT" "(RUL) …and reports the gate it disposed onto"
 has "gc.reacted_by=$R" "$LOG" "(RUL) the landed proof is stamped"
 has "UPDATE bd update $R" "$LOG" "(RUL) …and the reaction bead is closed"
-before '^HELM demand' '^HELM takeaway' "(RULORDER) the gate is filed before the release"
+before '^GATE --subject' '^HELM takeaway' "(RULORDER) the gate is filed before the release"
 before '^HELM takeaway' 'gc.reacted_by' "(RULORDER) …and the landed proof follows the release"
 
-export FAKE_DEMAND_FAILS=1
+export FAKE_GATE_FAILS=1
 run tk-sub --disposition ruling --reason "r" --takeaway "t" --reaction-bead "$R"
 eq "$RC" "4" "(RULGATE) a gate that did not file fails the exit"
 hasnt "HELM takeaway" "$LOG" "(RULGATE) …and the subject is not released onto a gate that does not exist"
 has "re-run this command" "$ERR" "(RULGATE) …and the failure names the retry"
 hasnt "gc.reacted_by" "$LOG" "(RULGATE) …with no landed proof stamped"
 hasnt "UPDATE bd update $R" "$LOG" "(RULGATE) …and the reaction bead left open for the re-offer"
-unset FAKE_DEMAND_FAILS
-
-export FAKE_DEMAND_NOID=1
-run tk-sub --disposition ruling --reason "r" --takeaway "t" --reaction-bead "$R"
-eq "$RC" "4" "(RULGATE) a demand that names no gate fails the exit"
-hasnt "HELM takeaway" "$LOG" "(RULGATE) …before the release"
-unset FAKE_DEMAND_NOID
+unset FAKE_GATE_FAILS
 
 export FAKE_DEPS_JSON='[]'
 run tk-sub --disposition ruling --reason "r" --takeaway "t" --reaction-bead "$R"
@@ -843,17 +854,117 @@ eq "$RC" "4" "(RULEDGE) a gate edge that is not on the subject fails the exit"
 has "not held by tk-gate1" "$ERR" "(RULEDGE) …naming the gate it is not held by"
 hasnt "gc.reacted_by" "$LOG" "(RULEDGE) …with no landed proof stamped"
 
-export FAKE_DEPS_JSON='[{"id":"tk-visit1"}]'
-run tk-sub --disposition ruling --reason "the trade-off is the operator's" \
-    --takeaway "needs a ruling: which default" --visit tk-visit1 --reaction-bead "$R"
-eq "$RC" "0" "(RULVISIT) a ruling held on a caller's visit succeeds"
-hasnt "HELM demand" "$LOG" "(RULVISIT) …and files no gate"
-has "--waiting-on tk-visit1" "$LOG" "(RULVISIT) …and holds the subject"
-has "disposed as ruling (tk-visit1)" "$OUT" "(RULVISIT) …and reports the visit it disposed onto"
-
-run tk-sub --disposition ruling --reason "r" --takeaway "t" --visit ra-foreign --reaction-bead "$R"
-eq "$RC" "2" "(RULVISIT) a visit in another store is refused"
-eq "$LOG" "" "(RULVISIT) …and nothing was written"
+export FAKE_DEPS_JSON='[{"id":"tk-gate0","issue_type":"gate","await_type":"human","await_id":"first-reaction","status":"open","title":"an older reaction asked this"},{"id":"tk-gate1"}]'
+run tk-sub --disposition ruling --reason "r" --takeaway "needs a ruling: which default" --reaction-bead "$R"
+eq "$RC" "0" "(RULSUPER) a ruling over a superseded reaction's gate succeeds"
+has "GATE --retract --subject tk-sub --key first-reaction" "$LOG" "(RULSUPER) …withdrawing the superseded gate"
+before '^GATE --retract' '^GATE --subject tk-sub --key first-reaction --message' "(RULSUPER) …before it files its own"
+export FAKE_DEPS_JSON='[{"id":"tk-gate1","issue_type":"gate","await_type":"human","await_id":"first-reaction","status":"open","title":"needs a ruling: which default"}]'
+run tk-sub --disposition ruling --reason "r" --takeaway "needs a ruling: which default" --reaction-bead "$R"
+eq "$RC" "0" "(RULSUPER) a re-run of the same reaction succeeds"
+hasnt "--retract" "$LOG" "(RULSUPER) …and withdraws nothing: the open gate asks this reaction's question"
+# Which gates still ask is bd-lib.sh's one rule: a human gate under this key, in
+# any status but closed, whatever its case. Each gate below carries another
+# reaction's question, so only a gate the rule reads as open is withdrawn.
+# fr_gate <status> [await-id] [issue-type] -> a store whose gate is a superseded reaction's.
+fr_gate() {
+  jq -cn --arg s "$1" --arg k "${2:-first-reaction}" --arg i "${3:-gate}" \
+    '[{id: "tk-gate0", issue_type: $i, await_type: "human", await_id: $k, status: $s, title: "an older reaction asked this"}, {id: "tk-gate1"}]'
+}
+for GS in pinned in_progress; do
+  FAKE_DEPS_JSON="$(fr_gate "$GS")"; export FAKE_DEPS_JSON
+  run tk-sub --disposition ruling --reason "r" --takeaway "needs a ruling: which default" --reaction-bead "$R"
+  has "GATE --retract --subject tk-sub --key first-reaction" "$LOG" "(RULRULE) a gate at status $GS still asks, so it is withdrawn"
+done
+for GS in closed CLOSED Closed; do
+  FAKE_DEPS_JSON="$(fr_gate "$GS")"; export FAKE_DEPS_JSON
+  run tk-sub --disposition ruling --reason "r" --takeaway "needs a ruling: which default" --reaction-bead "$R"
+  eq "$RC" "0" "(RULRULE) a ruling beside a gate at status $GS succeeds"
+  hasnt "--retract" "$LOG" "(RULRULE) …and withdraws nothing: that gate asks nothing"
+done
+FAKE_DEPS_JSON="$(fr_gate open another-key)"; export FAKE_DEPS_JSON
+run tk-sub --disposition ruling --reason "r" --takeaway "needs a ruling: which default" --reaction-bead "$R"
+hasnt "--retract" "$LOG" "(RULRULE) an open gate under another key is not this reaction's to withdraw"
+FAKE_DEPS_JSON="$(fr_gate open first-reaction task)"; export FAKE_DEPS_JSON
+run tk-sub --disposition ruling --reason "r" --takeaway "needs a ruling: which default" --reaction-bead "$R"
+hasnt "--retract" "$LOG" "(RULRULE) a bead that is not a gate is not a question to withdraw"
+# A read that fails cannot say whether a gate already asks, and neither can a
+# store's answer that is not an array.
+export FAKE_DEP_LIST_FAILS=1
+run tk-sub --disposition ruling --reason "r" --takeaway "needs a ruling: which default" --reaction-bead "$R"
+eq "$RC" "4" "(RULREAD) a gate read the store refuses stops the exit"
+has "could not read the human gates of tk-sub" "$ERR" "(RULREAD) …saying so"
+hasnt "GATE " "$LOG" "(RULREAD) …and neither withdraws nor files a gate"
+unset FAKE_DEP_LIST_FAILS
+export FAKE_DEPS_JSON='{"error":"no issue found"}'
+run tk-sub --disposition ruling --reason "r" --takeaway "needs a ruling: which default" --reaction-bead "$R"
+eq "$RC" "4" "(RULREAD) a gate read that answers with something other than an array stops the exit"
+hasnt "GATE " "$LOG" "(RULREAD) …and neither withdraws nor files a gate"
+GC_BD_LIB="$TMP/no-such-bd-lib.sh" run tk-sub --disposition ruling --reason "r" --takeaway "t" --reaction-bead "$R"
+eq "$RC" "4" "(RULREAD) a script that cannot source bd-lib.sh stops as a runtime failure"
+has "cannot source bd-lib.sh" "$ERR" "(RULREAD) …naming the file"
+hasnt "GATE " "$LOG" "(RULREAD) …before it files anything"
+export FAKE_DEPS_JSON='[{"id":"tk-gate1","issue_type":"gate","await_type":"human","await_id":"first-reaction","status":"open","title":"needs a ruling: which default"}]'
+# The helper titles a gate with its message's first line. A takeaway that spans
+# lines is stored on the board as one line, and the gate's title has to be that
+# same line, or each re-run reads its own gate as a superseded reaction's.
+run tk-sub --disposition ruling --reason "r" --takeaway "needs a ruling:
+which default" --reaction-bead "$R"
+eq "$RC" "0" "(RULTITLE) a takeaway that spans lines takes the ruling exit"
+has "GATE --subject tk-sub --key first-reaction --message needs a ruling: which default" "$LOG" \
+   "(RULTITLE) …and the gate's title line is the takeaway on one line, as the board shows it"
+hasnt "--retract" "$LOG" "(RULTITLE) …so a re-run finds the gate it filed and withdraws nothing"
+# real_gate_title <message> — the title the real human-gate.sh files for the
+# message, read off its create under a gc that answers no gates and records the
+# title it is given.
+real_gate_title() {
+  mkdir -p "$TMP/real-gate/bin"
+  { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/real-gate/bin/gc" <<'RG'
+case "$1 ${2:-} ${3:-}" in
+  "bd dep list") echo '[]' ;;
+  "bd gate create")
+    while [ $# -gt 0 ]; do
+      [ "$1" = --title ] && printf '%s' "$2" > "$REAL_GATE_TITLE"
+      shift
+    done
+    echo '[{"id":"tk-real"}]' ;;
+esac
+exit 0
+RG
+  chmod +x "$TMP/real-gate/bin/gc"
+  : > "$TMP/real-gate/title"
+  PATH="$TMP/real-gate/bin:$PATH" REAL_GATE_TITLE="$TMP/real-gate/title" \
+    "$HERE/human-gate.sh" --subject tk-sub --key first-reaction --message "$1" >/dev/null 2>&1 || true
+  cat "$TMP/real-gate/title"
+}
+# 134 CJK characters are 402 bytes. The real helper files them under a title
+# cut below 400 bytes, and the description it writes holds the message whole,
+# so a re-run of the same reaction through the real helper finds that gate by
+# its description's first line and keeps it.
+CJK=$(printf '問%.0s' $(seq 1 134))
+CJK_TITLE=$(real_gate_title "$CJK")
+[ -n "$CJK_TITLE" ] && [ "$CJK_TITLE" != "$CJK" ] \
+  && ok "(RULTITLE) the real helper titles a 402-byte takeaway with a shorter line" \
+  || bad "(RULTITLE) the real helper's title for a 402-byte takeaway is '$CJK_TITLE', so the next case tests no cut"
+FAKE_DEPS_JSON="$(jq -cn --arg t "$CJK_TITLE" --arg d "$CJK
+Filed by a first reaction on tk-sub (ruling), which waits on it." \
+  '[{id: "tk-gate1", issue_type: "gate", await_type: "human", await_id: "first-reaction", status: "open", title: $t, description: $d}]')"
+export FAKE_DEPS_JSON
+GC_HUMAN_GATE_TOOL="$HERE/human-gate.sh" run tk-sub --disposition ruling --reason "r" --takeaway "$CJK" --reaction-bead "$R"
+eq "$RC" "0" "(RULTITLE) a re-run with a takeaway past 400 bytes succeeds through the real helper"
+has "disposed as ruling (tk-gate1)" "$OUT" "(RULTITLE) …onto the gate it filed before"
+hasnt "BDGATE" "$LOG" "(RULTITLE) …resolving no gate, since the gate's description leads with the takeaway"
+export FAKE_DEPS_JSON='[{"id":"tk-gate1"}]'
+export FAKE_SHOW_JSON='[{"id":"tk-sub",'"$MEMBER"',"metadata":{}},{"id":"tk-sub.1","parent":"tk-sub","status":"open"}]'
+run tk-sub --disposition ruling --reason "r" --takeaway "t" --reaction-bead "$R"
+eq "$RC" "0" "(RULKIDS) a subject with open children takes the ruling exit"
+has "GATE --subject tk-sub --key first-reaction" "$LOG" "(RULKIDS) …and its gate blocks the parent itself"
+hasnt "--parent" "$LOG" "(RULKIDS) …with no read of its children: what a gate on a parent pauses is the call site's policy"
+unset FAKE_SHOW_JSON
+LONG_TAKEAWAY="$(printf 'needs a ruling%.0s ' $(seq 1 12))"
+run tk-sub --disposition ruling --reason "r" --takeaway "$LONG_TAKEAWAY" --reaction-bead "$R"
+eq "$RC" "2" "(RULCAP) a takeaway over 140 characters is refused"
+eq "$LOG" "" "(RULCAP) …before anything is written, since it is the gate's title"
 
 : > "$FAKE_LOG"; RC=0
 OUT="$("$SCRIPT" tk-sub --disposition ruling --reason "r" --takeaway "t" --reaction-bead "$R" --dry-run 2>"$TMP/err")" || RC=$?
@@ -864,44 +975,34 @@ has "would close reaction bead $R" "$OUT" "(RULDRY) …and close the reaction be
 hasnt "HELM" "$LOG" "(RULDRY) …and files nothing"
 hasnt "UPDATE" "$LOG" "(RULDRY) …and writes nothing"
 
-# ── recommend: the gate's visit offers Accept ────────────────────────────────
+# ── recommend: the gate offers Accept ────────────────────────────────────────
 # recommend names a determinable action (converse/operator authority) and stamps
 # gc.recommended_formula on the subject. That stamp is the whole difference
-# between a plain Discuss-only ruling visit and a recommendation visit the
-# operator can Accept, and it lands before the act. recommend files and holds on
-# the same human gate ruling does, and the stamp lands before the gate is filed,
-# so the visit gate-visit-sweep files for the gate offers Accept from the start.
+# between a plain Discuss-only ruling gate and a recommendation the operator can
+# Accept. recommend files and holds on the same human gate ruling does, and the
+# stamp lands only once the gate is filed, so no recommendation is ever older
+# than the newest first-reaction gate.
 export FAKE_DEPS_JSON='[{"id":"tk-gate1"}]'
 run tk-sub --disposition recommend --reason "retire the PR, supersede its anchor — operator authority" \
     --takeaway "recommend: retire PR + supersede anchor; execute via mol-x — Accept or Discuss" \
     --recommended-formula mol-x --reaction-bead "$R"
 eq "$RC" "0" "(RECO) a recommend disposition succeeds"
 has "gc.recommended_formula=mol-x" "$LOG" "(RECO) the recommended formula is stamped on the subject"
-has "HELM demand tk-sub recommend: retire PR + supersede anchor; execute via mol-x — Accept or Discuss" "$LOG" \
+has "GATE --subject tk-sub --key first-reaction --message recommend: retire PR + supersede anchor; execute via mol-x — Accept or Discuss" "$LOG" \
    "(RECO) …it files the human gate, as ruling does"
-has "--topic first-reaction" "$(grep '^HELM demand' "$FAKE_LOG")" \
-   "(RECO) …under the first reaction's own topic"
 has "--waiting-on tk-gate1" "$LOG" "(RECO) …and the gate holds the subject, the ruling shape"
-before 'gc.recommended_formula=mol-x' '^HELM demand' "(RECO) …the recommendation lands before the gate"
-before '^HELM demand' '^HELM takeaway' "(RECO) …and the gate before the release"
+before '^GATE --subject' 'gc.recommended_formula=mol-x' "(RECO) …the recommendation lands only once the gate is filed"
+before '^GATE --subject' '^HELM takeaway' "(RECO) …and the gate before the release"
 has "gc.reacted_by=$R" "$LOG" "(RECO) the landed proof is stamped"
 has "UPDATE bd update $R" "$LOG" "(RECO) …and the reaction bead is closed"
 
 # recommend REQUIRES the flag it exists to carry: no --recommended-formula is a
 # usage error naming ruling as the flagless alternative.
 run tk-sub --disposition recommend --reason "operator authority" \
-    --takeaway "recommend: execute via <mol> — Accept or Discuss" --visit tk-visit1 --reaction-bead "$R"
+    --takeaway "recommend: execute via <mol> — Accept or Discuss" --reaction-bead "$R"
 eq "$RC" "2" "(RECO) recommend with no --recommended-formula is refused"
 eq "$LOG" "" "(RECO) …and writes nothing"
 has "is --disposition ruling" "$ERR" "(RECO) …naming ruling as the flagless alternative"
-
-# --visit holds a recommend on a visit the caller filed, the way it does a ruling.
-export FAKE_DEPS_JSON='[{"id":"tk-visit1"}]'
-run tk-sub --disposition recommend --reason "operator authority" \
-    --takeaway "recommend: execute via mol-x — Accept or Discuss" --visit tk-visit1 --recommended-formula mol-x --reaction-bead "$R"
-eq "$RC" "0" "(RECO) a recommend held on a caller's visit succeeds"
-hasnt "HELM demand" "$LOG" "(RECO) …and files no gate"
-has "--waiting-on tk-visit1" "$LOG" "(RECO) …the visit holds the subject"
 
 # A recommended formula that does not resolve is a usage error, refused before
 # anything is written: Accept slings this exact name, so a typo would stamp a live
@@ -910,7 +1011,7 @@ has "--waiting-on tk-visit1" "$LOG" "(RECO) …the visit holds the subject"
 export FAKE_FORMULA_MISSING="mol-typo"
 run tk-sub --disposition recommend --reason "operator authority" \
     --takeaway "recommend: execute via mol-typo — Accept or Discuss" \
-    --visit tk-visit1 --recommended-formula mol-typo --reaction-bead "$R"
+    --recommended-formula mol-typo --reaction-bead "$R"
 eq "$RC" "2" "(RECO) a --recommended-formula that does not resolve is refused (usage error)"
 hasnt "UPDATE" "$LOG" "(RECO) …nothing is written for an unresolved formula"
 hasnt "HELM" "$LOG" "(RECO) …and the act does not run"
@@ -922,38 +1023,41 @@ unset FAKE_FORMULA_MISSING
 # no --recommended-formula; the refusal names recommend as the disposition that
 # carries one.
 run tk-sub --disposition ruling --reason "the trade-off is the operator's" \
-    --takeaway "needs a ruling: which default" --visit tk-visit1 --recommended-formula mol-x --reaction-bead "$R"
+    --takeaway "needs a ruling: which default" --recommended-formula mol-x --reaction-bead "$R"
 eq "$RC" "2" "(RECO) ruling refuses --recommended-formula"
 eq "$LOG" "" "(RECO) …and writes nothing"
 has "use --disposition recommend" "$ERR" "(RECO) …pointing at the disposition that carries a recommendation"
 
-# A plain ruling stamps nothing, so the visit stays Discuss-only (no Accept).
+# A plain ruling stamps nothing, so the gate stays Discuss-only (no Accept).
 run tk-sub --disposition ruling --reason "the trade-off is the operator's" \
-    --takeaway "needs a ruling: which default" --visit tk-visit1 --reaction-bead "$R"
+    --takeaway "needs a ruling: which default" --reaction-bead "$R"
 eq "$RC" "0" "(RECO) a Discuss-only ruling succeeds"
-hasnt "gc.recommended_formula" "$LOG" "(RECO) …and stamps no recommendation, so the visit offers no Accept"
+hasnt "gc.recommended_formula" "$LOG" "(RECO) …and stamps no recommendation, so the gate offers no Accept"
 
 # A subject can already carry a recommendation a prior recommend stamped: the
 # stamp landed, the act did not (no landed proof), and this retry resumes it. A
 # ruling retry names no recommendation and clears that stale stamp before the
-# act, so the visit never offers Accept for an action the current disposition did
+# act, so the gate never offers Accept for an action the current disposition did
 # not recommend.
 export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.recommended_formula":"mol-old"}}]'
 run tk-sub --disposition ruling --reason "on reflection this is a plain discussion" \
-    --takeaway "needs a ruling: which default" --visit tk-visit1 --reaction-bead "$R"
+    --takeaway "needs a ruling: which default" --reaction-bead "$R"
 eq "$RC" "0" "(RECO) a ruling retry over a stale recommendation succeeds"
 has "--unset-metadata gc.recommended_formula" "$LOG" "(RECO) …and clears the stale recommendation the prior recommend left"
 hasnt "gc.recommended_formula=" "$LOG" "(RECO) …stamping no new one, so the subject states the current disposition"
 
-# The same stale stamp retried as a recommend with a different formula replaces
-# the stale one rather than clearing it — the subject always states the current
-# recommendation, whichever direction it moves.
+# The same stale stamp retried as a recommend with a different formula clears the
+# stale one before the gate is filed and stamps the new one after it, so no
+# recommendation is older than the newest first-reaction gate, and an exit that
+# stops part way never leaves its gate beside the older recommendation.
 run tk-sub --disposition recommend --reason "the newer mol is the right execution" \
     --takeaway "recommend: execute via mol-new — Accept or Discuss" \
-    --visit tk-visit1 --recommended-formula mol-new --reaction-bead "$R"
+    --recommended-formula mol-new --reaction-bead "$R"
 eq "$RC" "0" "(RECO) a retry that re-recommends succeeds"
 has "gc.recommended_formula=mol-new" "$LOG" "(RECO) …and the subject carries the new recommendation"
-hasnt "--unset-metadata gc.recommended_formula" "$LOG" "(RECO) …with no stale-clear, because the recommend names one"
+has "--unset-metadata gc.recommended_formula" "$LOG" "(RECOORDER) …clearing the older recommendation first"
+before '--unset-metadata gc.recommended_formula' '^GATE --subject' "(RECOORDER) …before the gate is filed"
+before '^GATE --subject' 'gc.recommended_formula=mol-new' "(RECOORDER) …and stamping the new one after it"
 unset FAKE_SHOW_JSON
 
 # ── The recommendation must land before the act (read-back guard) ─────────────
@@ -962,32 +1066,27 @@ unset FAKE_SHOW_JSON
 # success without proving this one key moved, so the exit reads it back, retries
 # the lone set/unset once, and refuses before the act if it is still wrong —
 # nothing else has been written, so the command re-runs.
-export FAKE_DEPS_JSON='[{"id":"tk-visit1"}]'
+export FAKE_DEPS_JSON='[{"id":"tk-gate1"}]'
 
-# A set that silently drops and never recovers: the act is withheld, so nothing
-# files a recommendation visit the operator could only Discuss.
+# A set that silently drops and never recovers: the release is withheld, so the
+# reaction is not recorded done over a gate that offers only Discuss. The gate is
+# filed before the set, and a re-run finds it and sets the recommendation again.
 export FAKE_DROP_RECO=1
 run tk-sub --disposition recommend --reason "operator authority" \
     --takeaway "recommend: execute via mol-x — Accept or Discuss" \
-    --visit tk-visit1 --recommended-formula mol-x --reaction-bead "$R"
+    --recommended-formula mol-x --reaction-bead "$R"
 eq "$RC" "4" "(RECOGUARD) a silently dropped recommendation set refuses the exit"
-hasnt "HELM" "$LOG" "(RECOGUARD) …the act is withheld, so no Discuss-only visit is filed"
+hasnt "HELM takeaway" "$LOG" "(RECOGUARD) …the release is withheld"
 has "did not land" "$ERR" "(RECOGUARD) …and the refusal names the key that did not land"
+has "The gate tk-gate1 is filed" "$ERR" "(RECOGUARD) …saying the gate is already filed"
 hasnt "UPDATE bd update $R" "$LOG" "(RECOGUARD) …and the reaction bead is left open for the re-offer"
-# The gate brings the visit, so the guard must refuse before the gate is filed:
-# a gate filed over a dropped recommendation gets a visit that offers only
-# Discuss.
-run tk-sub --disposition recommend --reason "operator authority" \
-    --takeaway "recommend: execute via mol-x — Accept or Discuss" --recommended-formula mol-x --reaction-bead "$R"
-eq "$RC" "4" "(RECOGUARD) the same drop on the gate form refuses the exit"
-hasnt "HELM demand" "$LOG" "(RECOGUARD) …before the gate is filed, so no visit can offer only Discuss"
 unset FAKE_DROP_RECO
 
 # The same drop, but the lone retry lands it: the act proceeds.
 export FAKE_DROP_RECO=once
 run tk-sub --disposition recommend --reason "operator authority" \
     --takeaway "recommend: execute via mol-x — Accept or Discuss" \
-    --visit tk-visit1 --recommended-formula mol-x --reaction-bead "$R"
+    --recommended-formula mol-x --reaction-bead "$R"
 eq "$RC" "0" "(RECOGUARD) a set that lands on the retry lets the act proceed"
 has "HELM takeaway tk-sub" "$LOG" "(RECOGUARD) …the act runs once the recommendation is confirmed"
 unset FAKE_DROP_RECO
@@ -997,11 +1096,12 @@ unset FAKE_DROP_RECO
 export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.recommended_formula":"mol-old"}}]'
 export FAKE_DROP_RECO=1
 run tk-sub --disposition ruling --reason "on reflection this is a plain discussion" \
-    --takeaway "needs a ruling: which default" --visit tk-visit1 --reaction-bead "$R"
+    --takeaway "needs a ruling: which default" --reaction-bead "$R"
 eq "$RC" "4" "(RECOGUARD) a silently dropped stale-clear refuses the exit"
 hasnt "HELM" "$LOG" "(RECOGUARD) …the act is withheld, so the superseded Accept is never left executable"
+hasnt "GATE " "$LOG" "(RECOGUARD) …and no gate is filed beside the older recommendation"
 has "did not clear" "$ERR" "(RECOGUARD) …and the refusal names the stale key that did not clear"
-unset FAKE_DROP_RECO FAKE_SHOW_JSON  # leave FAKE_DEPS_JSON: later ruling tests reuse the visit edge
+unset FAKE_DROP_RECO FAKE_SHOW_JSON  # leave FAKE_DEPS_JSON: later ruling tests reuse the gate edge
 
 # A stale-clear whose read-back is UNREADABLE — every post-write `bd show`
 # answers the non-array error object gc bd show emits for an unresolvable
@@ -1013,14 +1113,14 @@ unset FAKE_DROP_RECO FAKE_SHOW_JSON  # leave FAKE_DEPS_JSON: later ruling tests 
 export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.recommended_formula":"mol-old"}}]'
 export FAKE_SHOW_UNREADABLE_AFTER_UPDATE=1
 run tk-sub --disposition ruling --reason "on reflection this is a plain discussion" \
-    --takeaway "needs a ruling: which default" --visit tk-visit1 --reaction-bead "$R"
+    --takeaway "needs a ruling: which default" --reaction-bead "$R"
 eq "$RC" "4" "(RECOGUARD) an unreadable stale-clear read-back refuses the exit"
 hasnt "HELM" "$LOG" "(RECOGUARD) …the act is withheld, so a stale Accept cannot slip through an unreadable read"
 has "did not clear" "$ERR" "(RECOGUARD) …and the refusal names the key it could not prove cleared"
 unset FAKE_SHOW_UNREADABLE_AFTER_UPDATE FAKE_SHOW_JSON  # leave FAKE_DEPS_JSON for later ruling tests
 
 # --recommended-formula belongs to the recommend exit only: actionable, blocked,
-# and close route, hold, or hand the bead to a closer, and none gates a visit the
+# and close route, hold, or hand the bead to a closer, and none files a gate the
 # operator Accepts — so each refuses the flag (ruling's refusal is tested above).
 run tk-sub --disposition actionable --reason "r" --takeaway "t" \
     --route gc-toolkit/gc-toolkit.polecat --recommended-formula mol-x --reaction-bead "$R"
@@ -1035,13 +1135,13 @@ eq "$RC" "2" "(RECO) close refuses --recommended-formula"
 eq "$LOG" "" "(RECO) …and writes nothing"
 
 # ── Origin does not decide the exit ──────────────────────────────────────────
-# gc-visit-open stamps gc.origin=operator on a topic a human typed, but the
+# operator-intake stamps gc.origin=operator on a topic a human typed, but the
 # script does not force such a bead to the ruling exit: an operator capture is
 # triaged on its merits, so every exit is open to it. The guardrail that a fork
 # or an irreversible action still goes to a human lives in the reacting agent's
 # rubric, not here.
 export FAKE_SHOW_JSON='[{"id":"tk-sub",'"$MEMBER"',"metadata":{"gc.origin":"operator"}}]'
-export FAKE_DEPS_JSON='[{"id":"tk-blk1"},{"id":"tk-visit1"}]'
+export FAKE_DEPS_JSON='[{"id":"tk-blk1"},{"id":"tk-gate1"}]'
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
 eq "$RC" "0" "(ORIGIN) an operator-origin subject may take the actionable exit"
 has "HELM takeaway tk-sub" "$LOG" "(ORIGIN) …and is routed like any other bead"
@@ -1050,10 +1150,10 @@ hasnt "the visit IS the answer" "$ERR" "(ORIGIN) …with no operator-origin refu
 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 --reaction-bead "$R"
 eq "$RC" "0" "(ORIGIN) …the blocked exit too"
 
-run tk-sub --disposition ruling --reason "r" --takeaway "t" --visit tk-visit1 --reaction-bead "$R"
+run tk-sub --disposition ruling --reason "r" --takeaway "t" --reaction-bead "$R"
 eq "$RC" "0" "(ORIGIN) …and the ruling exit, when the agent chooses it"
-# Leave FAKE_DEPS_JSON holding tk-visit1 for the ruling-exit checks downstream.
-export FAKE_DEPS_JSON='[{"id":"tk-visit1"}]'
+# Leave FAKE_DEPS_JSON holding tk-gate1 for the ruling-exit checks downstream.
+export FAKE_DEPS_JSON='[{"id":"tk-gate1"}]'
 unset FAKE_SHOW_JSON
 
 # ── close: hand the bead to a validating closer, never close here ────────────
@@ -1077,6 +1177,7 @@ hasnt "--release" "$LOG" "(CLOSE) …and does not release it to a pool as a raw 
 has "gc.reacted_by=$R" "$LOG" "(CLOSE) …stamps the landed proof so a re-offer does not sling a second closer"
 before '^SLING' 'gc.reacted_by' "(CLOSE) …after the sling"
 hasnt "gc.proactive_reaction" "$LOG" "(CLOSE) …no legacy landed proof on the reaction-bead path"
+hasnt "held on" "$LOG" "(CLOSEBRIEF) …and a close that waits on nothing names no hold"
 has "UPDATE bd update $R" "$LOG" "(CLOSE) …and closes the reaction bead"
 hasnt "CLOSE bd close" "$LOG" "(CLOSE) …and never closes the subject itself"
 hasnt "DEFERRED" "$LOG" "(CLOSE) …with no deferred arm: nothing on the subject has to close first"
@@ -1182,6 +1283,67 @@ eq "$RC" "2" "(CLOSEDEFER) --after-workflow is refused on a non-close exit"
 GC_RIG=gc-toolkit run tk-sub --disposition close --reason "r" --takeaway "t" --after-workflow zz-root
 eq "$RC" "2" "(CLOSEDEFER) a cross-store --after-workflow is refused (the hold would hold nothing)"
 
+# ── close --waiting-on: the bead's job ends when another bead lands ──────────
+# A problem in code another bead retires is done once the retirement lands, and
+# the validating closer checks that it is. So the close exit holds the subject
+# on each bead through a blocks edge and arms the closer for when they close,
+# and a reaction bead's run may do it, since what it waits for is a bead, not
+# a workflow on the subject.
+GC_RIG=gc-toolkit run tk-sub --disposition close --reason "the file it reports on is retired whole by tk-retire" \
+    --takeaway "checked once tk-retire retires its code" --waiting-on tk-retire --reaction-bead "$R"
+eq "$RC" "0" "(CLOSEWAIT) a close that waits on the bead retiring its code succeeds"
+has "DEP bd dep add tk-sub tk-retire -t blocks" "$LOG" "(CLOSEWAIT) it holds the subject on that bead"
+before 'Close brief' '^DEP bd dep add' "(CLOSEWAIT) …with the close brief on the subject first"
+has "--append-notes ## Close brief (first reaction, held on tk-retire, " "$LOG" "(CLOSEWAIT) …naming the bead it is held on"
+has "DEFERRED arm tk-sub --target gc-toolkit/gc-toolkit.polecat --sling-arg --on --sling-arg mol-validate-close" "$LOG" \
+   "(CLOSEWAIT) …and arms the validating closer for when it closes"
+before '^DEP bd dep add' '^DEFERRED arm' "(CLOSEWAIT) …after the hold, so the arm never fires ungated"
+hasnt "SLING" "$LOG" "(CLOSEWAIT) …and slings nothing now"
+has "gc.reacted_by=$R" "$LOG" "(CLOSEWAIT) …stamps the landed proof"
+before '^DEFERRED arm' 'gc.reacted_by' "(CLOSEWAIT) …after the arm"
+has "UPDATE bd update $R" "$LOG" "(CLOSEWAIT) …and closes the reaction bead"
+hasnt "CLOSE bd close" "$LOG" "(CLOSEWAIT) …and never closes the subject itself"
+has "disposed as close (gc-toolkit/gc-toolkit.polecat once tk-retire closes)" "$OUT" "(CLOSEWAIT) …and the run reports what it waits for"
+
+GC_RIG=gc-toolkit run tk-sub --disposition close --reason "r" --takeaway "t" --waiting-on tk-a --waiting-on tk-b --reaction-bead "$R"
+eq "$RC" "0" "(CLOSEWAIT) a close that waits on two beads succeeds"
+has "DEP bd dep add tk-sub tk-a -t blocks" "$LOG" "(CLOSEWAIT) …holding the subject on the first"
+has "DEP bd dep add tk-sub tk-b -t blocks" "$LOG" "(CLOSEWAIT) …and on the second"
+eq "$(grep -c '^DEFERRED arm' "$FAKE_LOG")" "1" "(CLOSEWAIT) …and arming the closer once"
+has "--append-notes ## Close brief (first reaction, held on tk-a,tk-b, " "$LOG" "(CLOSEWAIT) …with a brief that names both"
+
+FAKE_DEP_FAILS=1 GC_RIG=gc-toolkit run tk-sub --disposition close --reason "r" --takeaway "t" --waiting-on tk-retire --reaction-bead "$R"
+eq "$RC" "4" "(CLOSEWAIT) a hold that did not land fails the exit closed"
+has "gc bd dep remove tk-sub tk-retire" "$ERR" "(CLOSEWAIT) …naming the edge of another type that would refuse it"
+hasnt "DEFERRED arm" "$LOG" "(CLOSEWAIT) …and the ungated closer is NOT armed"
+hasnt "gc.reacted_by" "$LOG" "(CLOSEWAIT) …and the landed proof is not stamped"
+unset FAKE_DEP_FAILS
+
+FAKE_DEFERRED_FAILS=1 GC_RIG=gc-toolkit run tk-sub --disposition close --reason "r" --takeaway "t" --waiting-on tk-retire --reaction-bead "$R"
+eq "$RC" "4" "(CLOSEWAIT) a failed arm is a runtime failure"
+hasnt "gc.reacted_by" "$LOG" "(CLOSEWAIT) …and the landed proof is not stamped"
+unset FAKE_DEFERRED_FAILS
+
+GC_RIG=gc-toolkit run tk-sub --disposition close --reason "r" --takeaway "t" --waiting-on tk-retire --dry-run
+eq "$RC" "0" "(CLOSEWAIT) a dry run of a close that waits succeeds"
+has "would wait tk-sub on: tk-retire, then arm a deferred dispatch to validating closer gc-toolkit/gc-toolkit.polecat (mol-validate-close)" "$OUT" \
+   "(CLOSEWAIT) …and names the wait and the closer"
+hasnt "DEP" "$LOG" "(CLOSEWAIT) …writing no edge"
+hasnt "DEFERRED" "$LOG" "(CLOSEWAIT) …and arming nothing"
+
+GC_RIG=gc-toolkit run tk-sub --disposition close --reason "r" --takeaway "t" --waiting-on ra-foreign --reaction-bead "$R"
+eq "$RC" "2" "(CLOSEWAIT) a bead in another store is refused"
+eq "$LOG" "" "(CLOSEWAIT) …and nothing was written"
+has "--disposition ruling" "$ERR" "(CLOSEWAIT) …and the refusal names a person's close as the remedy"
+GC_RIG=gc-toolkit run tk-sub --disposition close --reason "r" --takeaway "t" --waiting-on tk-sub --reaction-bead "$R"
+eq "$RC" "2" "(CLOSEWAIT) a bead cannot wait on itself"
+GC_RIG=gc-toolkit run tk-sub --disposition close --reason "r" --takeaway "t" --waiting-on tk-retire --after-workflow tk-root
+eq "$RC" "2" "(CLOSEWAIT) --waiting-on and --after-workflow together are refused"
+eq "$LOG" "" "(CLOSEWAIT) …and nothing was written"
+GC_DEFERRED_DISPATCH_TOOL="$TMP/no-such-deferred" GC_RIG=gc-toolkit run tk-sub --disposition close --reason "r" --takeaway "t" --waiting-on tk-retire --reaction-bead "$R"
+eq "$RC" "4" "(CLOSEWAIT) with no deferred-dispatch.sh, a close that waits is refused"
+eq "$LOG" "" "(CLOSEWAIT) …before anything is written"
+
 # Called by hand with no live workflow and no reaction bead, the closer is slung
 # now and the legacy landed proof stands in for gc.reacted_by.
 GC_RIG=gc-toolkit run tk-sub --disposition close --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat
@@ -1202,7 +1364,7 @@ GC_RIG=gc-toolkit run tk-sub --disposition close --reason "r" --takeaway "t" --r
 eq "$RC" "0" "(REOFFER) …the close exit too"
 hasnt "SLING" "$LOG" "(REOFFER) …which slings no second closer"
 run tk-sub --disposition ruling --reason "r" --takeaway "t" --reaction-bead "$R"
-hasnt "HELM demand" "$LOG" "(REOFFER) …and the gate form files no second gate"
+hasnt "GATE " "$LOG" "(REOFFER) …and the gate form files no second gate"
 # A marker naming a DIFFERENT reaction does not suppress this one (re-reaction).
 export FAKE_SHOW_JSON='[{"id":"tk-sub","status":"open",'"$MEMBER"',"metadata":{"gc.reacted_by":"tk-oldreact"}}]'
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
@@ -1323,7 +1485,7 @@ unset FAKE_CLOSE_FAILS
 export FAKE_DEPS_JSON='[{"id":"tk-gate1"}]'
 run tk-sub --disposition ruling --reason "r" --takeaway "t"
 eq "$RC" "0" "(LEGACY) the frozen call with no --reaction-bead still disposes"
-has "HELM demand tk-sub" "$LOG" "(LEGACY) …the act runs"
+has "GATE --subject tk-sub --key first-reaction" "$LOG" "(LEGACY) …the act runs"
 hasnt "gc.reacted_by" "$LOG" "(LEGACY) …no gc.reacted_by marker without an R to name"
 has "gc.proactive_reaction=1" "$LOG" "(LEGACY) …but the legacy landed proof is stamped so a re-offer does not re-dispose"
 before '^HELM takeaway' 'gc.proactive_reaction=1' "(LEGACY) …after the release, which no longer stamps it itself"
@@ -1360,11 +1522,11 @@ hasnt "HELM" "$LOG" "(LEGACY-REOFFER) …the subject is not re-released"
 hasnt "UPDATE" "$LOG" "(LEGACY-REOFFER) …and nothing is written"
 has "already carries a landed first reaction" "$ERR" "(LEGACY-REOFFER) …and it says so"
 run tk-sub --disposition ruling --reason "r" --takeaway "t"
-hasnt "HELM demand" "$LOG" "(LEGACY-REOFFER) …the gate form files no second gate"
+hasnt "GATE " "$LOG" "(LEGACY-REOFFER) …the gate form files no second gate"
 # bd stores `--set-metadata gc.proactive_reaction=1` as the JSON number 1, so the
 # guard must read the number the same as the string.
 export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.proactive_reaction":1}}]'
-run tk-sub --disposition ruling --reason "r" --takeaway "t" --visit tk-visit1
+run tk-sub --disposition ruling --reason "r" --takeaway "t"
 eq "$RC" "0" "(LEGACY-REOFFER) the number form bd stores is read as the landed proof too"
 hasnt "HELM" "$LOG" "(LEGACY-REOFFER) …with no re-release"
 
@@ -1384,16 +1546,14 @@ run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolk
 eq "$RC" "0" "(RESUME) a retired gc.first_reaction record does not refuse the run"
 has "HELM takeaway tk-sub" "$LOG" "(RESUME) …the act runs"
 hasnt "gc.first_reaction=" "$LOG" "(RESUME) …and the record is not rewritten"
-# A ruling whose gate already filed resumes through demand again, under the same
-# topic, which refreshes the gate the first run filed instead of filing a second.
+# A ruling whose gate already filed resumes through the helper again, under the
+# same key, which finds the gate the first run filed instead of filing a second.
 export FAKE_DEPS_JSON='[{"id":"tk-gate1"}]'
 export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{}}]'
 run tk-sub --disposition ruling --reason "r" --takeaway "t" --reaction-bead "$R"
 eq "$RC" "0" "(RESUME) the gate form resumes"
-has "HELM demand tk-sub" "$LOG" "(RESUME) …asking demand for the subject's gate again"
-has "--topic first-reaction" "$(grep '^HELM demand' "$FAKE_LOG")" \
-   "(RESUME) …under the topic the first run filed it under"
-export FAKE_DEPS_JSON='[{"id":"tk-visit1"}]'
+has "GATE --subject tk-sub --key first-reaction" "$LOG" "(RESUME) …asking the helper for the subject's gate again, under the key the first run filed it under"
+export FAKE_DEPS_JSON='[{"id":"tk-gate1"}]'
 unset FAKE_SHOW_JSON
 
 # ── The store is pinned to the subject's own rig ─────────────────────────────
@@ -1409,6 +1569,11 @@ has "DEFERRED arm tk-sub --target gc-toolkit/gc-toolkit.polecat --reason first r
     "$LOG" "(PIN) …and to the deferred dispatch it arms"
 has "UPDATE bd update $R --set-metadata gc.outcome=reacted --set-metadata gc.work_outcome=no-op --status=closed --db $TMP/rig/.beads" \
     "$LOG" "(PIN) …and to the close of the reaction bead"
+export FAKE_DEPS_JSON='[{"id":"tk-gate1"}]'
+run tk-sub --disposition ruling --reason "r" --takeaway "t" --reaction-bead "$R"
+has "DEP bd dep list tk-sub --type blocks --json --db $TMP/rig/.beads" "$LOG" \
+    "(PIN) …and to the read of the subject's human gates"
+export FAKE_DEPS_JSON='[{"id":"tk-blk1"}]'
 unset FAKE_RIG_PATH
 
 # ── The invariant that outranks every exit ───────────────────────────────────
@@ -1843,5 +2008,5 @@ has "NUDGE session nudge gc-toolkit.mechanik Ready for you: tk-sub" "$LOG" "(E2E
 unset DEFERRED_DISPATCH_STATE_DIR DEFERRED_DISPATCH_PASS_BUDGET_SECS
 
 echo ""
-echo "first-reaction-dispose (five exits, reaction-bead): $PASS passed, $FAIL failed"
+echo "first-reaction-dispose (exits, reaction-bead): $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

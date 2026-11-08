@@ -168,7 +168,7 @@ drain.
 |---|---|---|
 | `suggested_pr_title` | pr-prep finished its mechanical pass | title/body conversation → finalize (below) |
 | `conflict_questions` | the rebase loop hit a conflict it refused to guess at (`infeasible`); usually arrives with `aborted_at=rebase-loop-exhausted` | surface each blocker's `question`; offer: drive by hand from `metadata.work_dir` / skip the commit (`git rebase --skip`) / abort (`git reset --hard $backup_ref`); then clear-and-close or re-pour |
-| `aborted_at` | a step stopped for good — rebase mol: `workspace-setup`, `rebase-loop-exhausted`, `install`, `push`, `rebase-mismatch`; pr-prep: `cherry-pick`, `test`, `push-branch`; refinery overlay: `refinery-race-loss` | staleness check (below), then summarize the failure tail from bead notes and offer next moves; never re-dispatch automatically |
+| `aborted_at` | a step stopped for good — rebase mol: `workspace-setup`, `rebase-loop-exhausted`, `install`, `push`, `rebase-mismatch`; pr-prep: `workspace-setup`, `cherry-pick`, `test`, `push-branch`; refinery overlay: `refinery-race-loss` | staleness check (below), then summarize the failure tail from bead notes and offer next moves; never re-dispatch automatically |
 | `rebase_in_progress` | **legacy (rebase mol v11)**: polecat parked mid-rebase on a rework/review child (`pending_rework` / `pending_review`) | when the newer of the two child beads is **closed**, re-pour (burn-before-repour + resume token below); while it is open, do nothing — the child nudges you |
 
 Notes on the modes:

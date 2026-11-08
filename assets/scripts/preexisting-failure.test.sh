@@ -16,7 +16,7 @@
 # triage closes trackers into a batch that clears them, and the batch carries
 # no stamp, so a lookup that reads only live trackers files the red again while
 # the batch is still open. The lookup follows the most recently closed
-# tracker's gc.superseded_by to the live bead that carries the failure, and a
+# tracker's disposition edge to the live bead that carries the failure, and a
 # tracker that was fixed or ruled not needed still lets the next red file.
 set -uo pipefail
 
@@ -54,9 +54,13 @@ BIN="$TMP/bin"; mkdir -p "$BIN"
 #                      exit (non-zero, nothing on stdout), empty (exit 0,
 #                      nothing on stdout), object (an error object at exit 0)
 #                      or other (the bead's row under another bead's id)
-#   STUB_SHOW_FAIL_ID  every show of this id fails, in the same shapes
-# A show of an id the store does not hold answers bd's error object at exit 1,
-# or at STUB_SHOW_MISSING_RC.
+#   STUB_ROW_FAIL_ID   every `list --id` of this id fails, in the shape
+#                      STUB_ROW_SHAPE names: exit, empty or object, as above
+# A list --id answers that bead's row, or [] when the store does not hold it, and
+# hides a gate unless --include-gates lifts that, as bd's type suppression does
+# whatever the --id names. A show of an id the store does not hold answers bd's
+# error object at exit 1, and leaves out an edge marked "external", one onto a bead
+# in another rig's store, as bd's show does and its list does not.
 cat > "$BIN/gc" <<'STUB'
 #!/usr/bin/env bash
 set -u
@@ -70,9 +74,11 @@ case "${1:-}" in
     [ -n "${STUB_LIST_EMPTY:-}" ] && exit 0
     [ -n "${STUB_LIST_OBJECT:-}" ] && { echo '{"error":"database is locked"}'; exit 0; }
     shift
-    st=""; ty=""; tc=""; after=""; fields=()
+    st=""; ty=""; tc=""; after=""; fields=(); idf=""; gates=""
     while [ $# -gt 0 ]; do
       case "$1" in
+        --id) shift; idf="${1:-}" ;;
+        --include-gates) gates=1 ;;
         --status=*) st="${1#--status=}" ;;
         --status|-s) shift; st="${1:-}" ;;
         --type=*) ty="${1#--type=}" ;;
@@ -86,6 +92,18 @@ case "${1:-}" in
       esac
       shift || true
     done
+    if [ -n "$idf" ]; then
+      if [ "$idf" = "${STUB_ROW_FAIL_ID:-}" ]; then
+        case "${STUB_ROW_SHAPE:-exit}" in
+          exit)   echo "bd: database is locked" >&2; exit 1 ;;
+          empty)  exit 0 ;;
+          object) echo '{"error":"database is locked"}'; exit 0 ;;
+        esac
+      fi
+      jq -c --arg id "$idf" --arg gates "$gates" \
+        '[ .[] | select(.id == $id) | select($gates != "" or ((.issue_type // "") != "gate")) ]' "$STORE"
+      exit 0
+    fi
     ign="${STUB_LIST_IGNORE:-}"
     out=$(cat "$STORE")
     if [ -n "$st" ] && [ "$ign" != "status" ]; then
@@ -107,7 +125,6 @@ case "${1:-}" in
       c=$(cat "$STUB_SEQ.show" 2>/dev/null || echo 0); c=$((c + 1)); printf '%s' "$c" > "$STUB_SEQ.show"
       [ "$c" -le "$STUB_SHOW_FAILS" ] && fail=1
     fi
-    [ -n "${STUB_SHOW_FAIL_ID:-}" ] && [ "$id" = "$STUB_SHOW_FAIL_ID" ] && fail=1
     if [ -n "$fail" ]; then
       case "${STUB_SHOW_SHAPE:-exit}" in
         exit)   echo "bd: database is locked" >&2; exit 1 ;;
@@ -116,10 +133,11 @@ case "${1:-}" in
         other)  jq -c --arg id "$id" '[ .[] | select(.id == $id) | .id = "tk-elsewhere" ]' "$STORE"; exit 0 ;;
       esac
     fi
-    out=$(jq -c --arg id "$id" '[ .[] | select(.id == $id) ]' "$STORE")
+    out=$(jq -c --arg id "$id" '[ .[] | select(.id == $id)
+          | if has("dependencies") then .dependencies |= map(select(.external != true)) else . end ]' "$STORE")
     if [ "$(printf '%s' "$out" | jq 'length')" = "0" ]; then
       echo '{"error":"no issues found matching the provided IDs"}'
-      exit "${STUB_SHOW_MISSING_RC:-1}"
+      exit 1
     else
       printf '%s\n' "$out"
     fi ;;
@@ -179,18 +197,21 @@ creates() { grep -c '^bd create' "$STUB_LOG"; }
 shows() { grep -c '^bd show' "$STUB_LOG"; }
 field() { jq -r --arg id "$1" ".[] | select(.id == \$id) | $2" "$STUB_STORE"; }
 # closed <id> <closed_at> <metadata json> [<close reason>] [<notes>] — a closed
-# bead carrying the close reason and the notes bd shows for it.
+# bead carrying the close reason and the notes bd shows for it. A "ptr" member
+# of the metadata (ptr below) is the bead's disposition edge, and becomes the
+# edge on its row as `bd show` prints it: the far bead's id and the edge's type.
 closed() {
   jq -nc --arg id "$1" --arg c "$2" --argjson m "$3" --arg r "${4:-}" --arg n "${5:-}" \
-    '{id: $id, status: "closed", issue_type: "bug", title: "A closed bead", metadata: $m,
-      closed_at: $c, close_reason: $r, notes: $n}'
+    '{id: $id, status: "closed", issue_type: "bug", title: "A closed bead", metadata: ($m | del(.ptr)),
+      closed_at: $c, close_reason: $r, notes: $n}
+     + (if $m.ptr then {dependencies: [{id: $m.ptr.to, dependency_type: $m.ptr.type}]} else {} end)'
 }
-# ptr <key> <successor> — the metadata bead-rehome.sh leaves on a bead it closed
-# into <successor>, with the tracker stamp for <key> when <key> is not empty.
+# ptr <key> <successor> [<type>] — what bead-rehome.sh leaves on a bead it closed
+# into <successor>: its supersedes edge, or under <type> duplicates its
+# duplicates edge, with the tracker stamp for <key> when <key> is not empty.
 ptr() {
-  jq -nc --arg k "$1" --arg s "$2" \
-    '(if $k == "" then {} else {failure_key: $k} end)
-     + {"gc.superseded_by": $s, "gc.superseded_by_store": "rig:gc-toolkit"}'
+  jq -nc --arg k "$1" --arg s "$2" --arg t "${3:-supersedes}" \
+    '(if $k == "" then {} else {failure_key: $k} end) + {ptr: {to: $s, type: $t}}'
 }
 # reason <kind phrase> <successor> — the close reason bead-rehome.sh writes.
 reason() { printf '%s %s in rig:gc-toolkit — closed by a triage sitting' "$1" "$2"; }
@@ -351,7 +372,7 @@ store "$(closed tk-folded 2026-10-09T07:17:10Z "$(ptr "$K" tk-batch)" "$(reason 
 run find "$K"
 eq "$RC/$OUT" "0/tk-batch" "a closed twin folded into a live batch answers with the batch"
 has "$ERR" "closed tracker tk-folded moved the failure to tk-batch" "the answer names the closed tracker it came through"
-hasnt "$(cat "$STUB_LOG")" "--title-contains" "the successor is reached by its pointer, never by a title"
+hasnt "$(cat "$STUB_LOG")" "--title-contains" "the successor is reached by its edge, never by a title"
 run file "$K" --message "seen again"
 eq "$RC/$OUT/$(creates)" "0/tk-batch/0" "a closed twin with a live successor files nothing"
 has "$ERR" "tracked by tk-batch" "the filing says which bead tracks the key"
@@ -380,14 +401,14 @@ run find "$K"
 eq "$RC/$OUT" "0/" "a batch that landed ends the chain: the failure was fixed there"
 run file "$K" --message "red after the batch landed"
 eq "$RC/$(creates)" "0/1" "so a red after the batch landed is filed"
-store "$(closed tk-dup 2026-10-10T07:00:00Z "$(ptr "$K" tk-fix)" "$(reason "duplicate of" tk-fix)")" \
+store "$(closed tk-dup 2026-10-10T07:00:00Z "$(ptr "$K" tk-fix duplicates)" "$(reason "duplicate of" tk-fix)")" \
       "$(closed tk-fix 2026-10-10T06:00:00Z '{"merge_result":"merged"}' "Merged")"
 run find "$K"
 eq "$RC/$OUT" "0/" "a duplicate of a fix that merged ends at the fix: nothing tracks the key"
 store "$(closed tk-up 2026-10-10T07:00:00Z "$(ptr "$K" tk-fixpr)" "$(reason "fixed upstream by" tk-fixpr)")" \
       "$(bead tk-fixpr in_progress bug 'Quote the array reads in gc-helm.sh')"
 run find "$K"
-eq "$RC/$OUT" "0/tk-fixpr" "a fixed-upstream pointer to a fix still in flight answers with the fix"
+eq "$RC/$OUT" "0/tk-fixpr" "a fixed-upstream edge onto a fix still in flight answers with the fix"
 
 echo "# find and file: a mixed run files its new finding, one key per flagged file"
 KA="shellcheck assets/scripts/liveness-sweep-precheck.test.sh"
@@ -407,7 +428,7 @@ eq "$RC/$OUT/$(creates)" "0/tk-batch/1" "the folded finding in the same run file
 echo "# find: the most recently closed tracker decides"
 store "$(closed tk-old 2026-10-09T09:01:03Z "$(ptr "$K" tk-batch)" "$(reason "folded into" tk-batch)")" \
       "$(bead tk-batch open task 'batch: clear the pre-existing shellcheck tracker set')" \
-      "$(closed tk-new 2026-10-10T06:35:03Z "$(ptr "$K" tk-fix)" "$(reason "duplicate of" tk-fix)")" \
+      "$(closed tk-new 2026-10-10T06:35:03Z "$(ptr "$K" tk-fix duplicates)" "$(reason "duplicate of" tk-fix)")" \
       "$(closed tk-fix 2026-10-10T06:00:00Z '{"merge_result":"merged"}' "Merged")"
 run find "$K"
 eq "$RC/$OUT" "0/" "an older twin folded into a live batch does not outrank a newer twin whose fix landed"
@@ -437,11 +458,16 @@ store "$(closed tk-ruled 2026-10-10T08:00:00Z "$(ptr "$K" tk-visit)" "Closed" \
       "$(bead tk-visit open task 'visit: the gc-helm.sh shellcheck trackers' '{"task_kind":"visit"}')"
 run find "$K"
 eq "$RC/$OUT" "0/" "a ruling recorded in the note of an earlier close ends the chain too"
+store "$(closed tk-ruled 2026-10-10T08:00:00Z "$(ptr "$K" tk-visit)" "" \
+          "Disposition 2026-10-10T08:00Z: $(reason "not needed, per" tk-visit).")" \
+      "$(bead tk-visit open task 'visit: the gc-helm.sh shellcheck trackers' '{"task_kind":"visit"}')"
+run find "$K"
+eq "$RC/$OUT" "0/" "a ruling in the note its own close appended ends the chain"
 store "$(closed tk-moved 2026-10-10T08:00:00Z "$(ptr "$K" tk-batch)" "Closed" \
           "Disposition recorded 2026-10-10T09:00Z: $(reason "not needed, per" tk-other). (Pointer added after the close; the close reason above predates it.)")" \
       "$(bead tk-batch open task 'batch: clear the pre-existing shellcheck tracker set')"
 run find "$K"
-eq "$OUT" "tk-batch" "a ruling that names another bead does not end this pointer's chain"
+eq "$OUT" "tk-batch" "a ruling that names another bead does not end this edge's chain"
 
 echo "# the not-needed reading matches what bead-rehome.sh writes"
 REHOME="$HERE/bead-rehome.sh"
@@ -458,21 +484,19 @@ done
 echo "# find and file: a chain that cannot be read is unknown, one that names nothing tracks nothing"
 store "$(closed tk-folded 2026-10-09T07:17:10Z "$(ptr "$K" tk-batch)" "$(reason "folded into" tk-batch)")" \
       "$(bead tk-batch open task 'batch: clear the pre-existing shellcheck tracker set')"
-for shape in exit empty object other; do
-  STUB_SHOW_FAIL_ID=tk-batch STUB_SHOW_SHAPE=$shape run find "$K"
+for shape in exit empty object; do
+  STUB_ROW_FAIL_ID=tk-batch STUB_ROW_SHAPE=$shape run find "$K"
   eq "$RC/$OUT" "1/" "a successor read that fails ($shape) fails the lookup"
 done
 has "$ERR" "not proof the tracker is missing" "the failure says why it is not an all-clear"
-STUB_SHOW_FAIL_ID=tk-folded run find "$K"
+STUB_ROW_FAIL_ID=tk-folded run find "$K"
 eq "$RC/$OUT" "1/" "a tracker read that fails fails the lookup"
-STUB_SHOW_FAIL_ID=tk-batch run file "$K" --message "seen"
+STUB_ROW_FAIL_ID=tk-batch run file "$K" --message "seen"
 eq "$RC/$OUT/$(creates)" "1//0" "an unread chain files nothing"
 store "$(closed tk-folded 2026-10-09T07:17:10Z "$(ptr "$K" tk-gone)" "$(reason "folded into" tk-gone)")"
-for rc in 1 0; do
-  STUB_SHOW_MISSING_RC=$rc run find "$K"
-  eq "$RC/$OUT" "0/" "a pointer to a bead the store does not hold tracks nothing (bd answers at exit $rc)"
-done
-has "$ERR" "tk-folded names tk-gone in gc.superseded_by, but the store holds no such bead" "the dangling pointer is reported"
+run find "$K"
+eq "$RC/$OUT" "0/" "an edge onto a bead the store does not hold tracks nothing"
+has "$ERR" "tk-folded names tk-gone as its successor, but the store holds no such bead" "the dangling edge is reported"
 run file "$K" --message "seen"
 eq "$RC/$(creates)" "0/1" "so the red is filed"
 store "$(closed tk-a 2026-10-10T08:00:00Z "$(ptr "$K" tk-b)" "$(reason "folded into" tk-b)")" \
@@ -487,8 +511,8 @@ done
 ROWS+=("$(bead tk-c22 open task 'the end of a long chain')")
 store "${ROWS[@]}"
 run find "$K"
-eq "$RC/$OUT" "0/" "a chain past the pointer cap tracks nothing"
-has "$ERR" "runs past 20 pointers" "the cap is reported"
+eq "$RC/$OUT" "0/" "a chain past the cap tracks nothing"
+has "$ERR" "runs past 20 edges" "the cap is reported"
 ROWS=("$(closed tk-c0 2026-10-10T08:00:00Z "$(ptr "$K" tk-c1)" "$(reason "folded into" tk-c1)")")
 for i in $(seq 1 19); do
   ROWS+=("$(closed "tk-c$i" 2026-10-10T07:00:00Z "$(ptr "" "tk-c$((i + 1))")" "$(reason "folded into" "tk-c$((i + 1))")")")
@@ -497,6 +521,19 @@ ROWS+=("$(bead tk-c20 open task 'the end of a chain at the cap')")
 store "${ROWS[@]}"
 run find "$K"
 eq "$OUT" "tk-c20" "a chain of exactly the cap reaches its live bead"
+
+echo "# find and file: a fold into another rig's store, whose edge only the list row carries"
+XR=$(closed tk-xfold 2026-10-09T07:17:10Z "$(ptr "$K" xr-batch)" "$(reason "folded into" xr-batch)" \
+     | jq -c '.dependencies = [{issue_id: .id, depends_on_id: "xr-batch", type: "supersedes", external: true}]')
+store "$XR" "$(bead xr-batch open task 'batch in another rig')"
+run find "$K"
+eq "$RC/$OUT" "0/xr-batch" "a tracker folded into another rig's store answers through the bead there"
+run file "$K" --message "seen"
+eq "$RC/$OUT/$(creates)" "0/xr-batch/0" "so the red is confirmed there, and no duplicate tracker is filed"
+store "$(closed tk-gfold 2026-10-09T07:17:10Z "$(ptr "$K" tk-qgate)" "$(reason "re-homed to" tk-qgate)")" \
+      "$(bead tk-qgate open gate 'a person owes the call on this failure')"
+run find "$K"
+eq "$RC/$OUT" "0/tk-qgate" "a tracker re-homed onto a gate answers through the gate, which a plain list hides"
 
 echo "# find: a listing that dropped a filter cannot pass another bead off as the key's"
 store "$(closed tk-stranger 2026-10-11T08:00:00Z "$(ptr TestOther tk-batch)" "$(reason "folded into" tk-batch)")" \

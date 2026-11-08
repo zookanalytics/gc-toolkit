@@ -13,7 +13,8 @@
 #   (COORDS)   pr_coords: the host and owner/repo of a PR url naming the
 #              number; a url naming another number, or no PR, sets neither
 #   (PHRASE)   approval_phrase: each login once, noun and verb by count
-#   (READERS)  every reader sources this file and applies what it reads
+#   (READERS)  every reader sources this file and applies what it reads, the
+#              thread rule pr-post.sh prints among them
 #   (NO-COPY)  no other file in the pack defines the rule, applies the
 #              retirement inline, or carries the dismissers' PR-url parse or
 #              approver list
@@ -116,10 +117,12 @@ echo "# every reader sources the one definition"
 reads() { # <file> <what> <pattern>
     grep -qE -- "$3" "$ROOT/$1" && ok "(READERS) $1 $2" || bad "(READERS) $1 $2"
 }
-for r in assets/scripts/pr-facts.sh assets/scripts/approval-withdraw.sh assets/scripts/bring-current-guard.sh; do
+for r in assets/scripts/pr-facts.sh assets/scripts/approval-withdraw.sh assets/scripts/bring-current-guard.sh assets/scripts/pr-post.sh; do
     reads "$r" "sources review-dismissal.sh" '^[[:space:]]*\.[[:space:]].*review-dismissal\.sh'
 done
 reads assets/scripts/pr-facts.sh "reads the comment space through live_comments" 'REVIEW_DISMISSAL_DEF.*live_comments\(\$revs\)'
+reads assets/scripts/pr-post.sh "reads a review thread's posts through live_comments" '\$posts \| live_comments\(\$revs\)\[\]'
+reads assets/scripts/pr-post.sh "prints the definitions ahead of its thread rule" 'REVIEW_DISMISSAL_DEF".*THREAD_DEF'
 reads assets/scripts/approval-withdraw.sh "asks unrouted_comment_ids" 'unrouted_comment_ids\('
 for r in assets/scripts/approval-withdraw.sh assets/scripts/bring-current-guard.sh; do
     reads "$r" "names its PR through pr_coords" '^[[:space:]]*(if ! )?pr_coords '

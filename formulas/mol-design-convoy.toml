@@ -19,9 +19,7 @@ The molecule writes no code and needs no worktree of its own. Its one push is a
 ref push from the rig's checkout, which a converse sitting cannot make. Each step
 re-derives the subject from the input convoy ({{convoy_id}}'s one tracked member)
 in its own shell, records its result on the subject so a resume is idempotent,
-and closes its own step bead through assets/scripts/step-close.sh — resolved by
-(gc.root_bead_id, gc.step_ref), never a GC_*BEAD_ID env var, which after a
-hook-claim names a different step.
+and closes its own step bead through assets/scripts/claim-close.sh.
 
 Every PR the effort produces merges only with a standing APPROVED review from an
 account other than the city's, which counts until it is dismissed: merge.sh
@@ -40,8 +38,12 @@ formula = "mol-design-convoy"
 formula_compiler = ">=2.0.0"
 
 [vars.design_gated]
-description = "true (default): the design child is a stage, slung --merge mr, whose PR into the integration branch is the design gate, and the implementation child is held behind the design child by a blocks edge and dispatched when the design child closes, which happens when that PR merges with the operator's approval. false: design and implementation dispatch together and land on the integration branch with no PR of their own, so the subject's PR is the one the operator reviews. Every PR needs a standing APPROVED review from an account other than the city's, which counts until it is dismissed (merge.sh's universal approval rule). The value is read case-insensitively: false, 0, no, or off selects all-in-one; true, 1, yes, or on selects design-gated; an empty or unrecognized value also selects design-gated, with a warning, so a typo never drops the design gate. An Accept takes the default, because its sling passes no var. For all-in-one, the operator takes the recommendation to a sitting (Discuss) instead, and the sitting follows the work skill's steps for taking a recommendation, adding --var design_gated=false to the sling those steps run."
+description = "true (default): the design child is a stage, slung --merge mr, whose PR into the integration branch is the design gate, and the implementation child is held behind the design child by a blocks edge and dispatched when the design child closes, which happens when that PR merges with the operator's approval. false: design and implementation dispatch together and land on the integration branch with no PR of their own, so the subject's PR is the one the operator reviews. Every PR needs a standing APPROVED review from an account other than the city's, which counts until it is dismissed (merge.sh's universal approval rule). The value is read case-insensitively: false, 0, no, or off selects all-in-one; true, 1, yes, or on selects design-gated; an empty or unrecognized value also selects design-gated, with a warning, so a typo never drops the design gate. An Accept from the board takes the default, because it passes no var. For all-in-one, the operator takes the recommendation to a sitting (Discuss) instead, and the sitting's sign-off takes it with --accept --var design_gated=false, which hands the var to Accept's sling."
 default = "true"
+
+[vars.binding_prefix]
+description = "The binding the city imports the pack under, with its trailing dot. A step drops the dot to call the pack's own scripts as gc <binding> scripts-dir prints them. Gas City's sling adds it to every pour it makes; a pour that names none takes this default."
+default = "gc-toolkit."
 
 [[steps]]
 id = "load-context"
@@ -91,10 +93,7 @@ echo "design_gated resolves to $DESIGN_GATED"
 
 **Close this step bead so the graph advances.** Non-terminal, so no drain:
 ```bash
-SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
-done
-"${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.load-context --convoy {{convoy_id}} --outcome pass
+"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step mol-design-convoy.load-context
 ```
 
 **Exit criteria:** the subject and its card are read, and this step is closed.
@@ -117,8 +116,8 @@ The default branch is the one `origin/HEAD` names in the rig's checkout, or
 `main` when it names none. The push sends a ref and checks nothing out, so the
 rig's checkout never moves. Its empty lease refuses a branch that already
 exists, so a refused push after which origin carries the branch is a cut an
-earlier pass already made. The mechanik's recipe for standing an effort up by
-hand cuts with the same marked blocks, `effort-default-branch` and
+earlier pass already made. The `work` skill's recipe for standing an effort up
+by hand cuts with the same marked blocks, `effort-default-branch` and
 `effort-branch-push`, so both cut from the same branch. A subject that already
 records the branch is cut no further, and one that records another branch is not
 this run's to cut. Neither is one that lands on a branch other than the default,
@@ -169,10 +168,7 @@ esac
 
 **Close this step bead.** Non-terminal, so no drain:
 ```bash
-SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
-done
-"${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.seed-branch --convoy {{convoy_id}} --outcome pass
+"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step mol-design-convoy.seed-branch
 ```
 
 **Exit criteria:** `integration/<subject-id>` is on origin, the subject records it
@@ -276,10 +272,7 @@ WAITS=$(gc bd dep list "$SUBJECT" --direction=down -t blocks --json 2>/dev/null 
 
 **Close this step bead.** Non-terminal, so no drain:
 ```bash
-SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
-done
-"${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.file-design --convoy {{convoy_id}} --outcome pass
+"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step mol-design-convoy.file-design
 ```
 
 **Exit criteria:** the design child is filed with its target, the subject waits
@@ -391,10 +384,7 @@ fi
 
 **Close this step bead.** Non-terminal, so no drain:
 ```bash
-SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
-done
-"${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.file-implementation --convoy {{convoy_id}} --outcome pass
+"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step mol-design-convoy.file-implementation
 ```
 
 **Exit criteria:** the implementation child is filed with its target, the
@@ -453,8 +443,9 @@ has landed.
 ## Method
 The polecat doctrine's paragraph on integration branches: read the finished
 branch and each landed bead's own summary, state what the whole branch does,
-name where it departs from the description of $SUBJECT, and read the write
-back. Change no file, and write nothing else on $SUBJECT.")
+name where it departs from the description of $SUBJECT, title $SUBJECT with the
+branch's subject line, and read both writes back. Change no file, and write
+nothing else on $SUBJECT.")
   [ -z "$EPIC" ] || SUMMARY_ARGS+=(--parent "$EPIC")
   CREATE_JSON=$(gc bd create "${SUMMARY_ARGS[@]}" --json | tr -d '[:cntrl:]')
   SUMMARY_TASK=$(printf '%s' "$CREATE_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
@@ -485,10 +476,7 @@ HELD=$(gc bd dep list "$SUBJECT" --direction=down -t blocks --json 2>/dev/null |
 
 **Close this step bead.** Non-terminal, so no drain:
 ```bash
-SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
-done
-"${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.file-summary --convoy {{convoy_id}} --outcome pass
+"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step mol-design-convoy.file-summary
 ```
 
 **Exit criteria:** the summary task is filed beside the subject with no target,
@@ -549,9 +537,7 @@ case "$(printf '%s' "$DESIGN_GATED_RAW" | tr '[:upper:]' '[:lower:]' | tr -d '[:
 esac
 # <<< design-gated-resolve
 
-SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/deferred-dispatch.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/deferred-dispatch.sh" ] || SCRIPTS=""
 [ -n "$SCRIPTS" ] || { echo "deferred-dispatch.sh not found in the pack" >&2; exit 1; }
 
 POOL="${GC_RIG:+$GC_RIG/}gc-toolkit.polecat"
@@ -617,11 +603,7 @@ themselves in order) and drain. The control-dispatcher's `workflow-finalize`
 closes the `kind=workflow` root once every step is closed; never close the root,
 the subject, the summary task, or any child yourself.
 ```bash
-SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
-done
-"${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.dispatch --convoy {{convoy_id}} --outcome pass
-gc runtime drain-ack
+"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step mol-design-convoy.dispatch && gc runtime drain-ack
 ```
 
 **Exit criteria:** every target and edge of the setup read back, the subject is

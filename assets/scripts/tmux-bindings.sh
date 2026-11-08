@@ -37,21 +37,7 @@ CITY_PATH="${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}"
 
 gcmux bind-key S run-shell "$CONFIGDIR/assets/scripts/tmux-pick-session.sh --city-path $(sq "$CITY_PATH")"
 
-# Helm — the sibling of prefix+S. prefix+S answers "what's running";
-# prefix+b answers "what needs me": the operator's own queue, oldest first,
-# rendered from `helm-svc board --json`. Pick a row and it engages that bead —
-# `gc-helm engage` spawns a converse sitting on demand, which you attach from
-# prefix+S. See tmux-pick-helm.sh.
-gcmux bind-key b run-shell "$CONFIGDIR/assets/scripts/tmux-pick-helm.sh --city-path $(sq "$CITY_PATH")"
-
-# prefix+B is the city overview — every anchor ranked together. It is a separate
-# key rather than the same one because the two answer different questions, and
-# only the queue answers the one a person presses a key to ask. Same script,
-# same pick-a-row behavior, `--all` selects the wider set.
-gcmux bind-key B run-shell "$CONFIGDIR/assets/scripts/tmux-pick-helm.sh --city-path $(sq "$CITY_PATH") --all"
-
-# Operator-origin visit intake — type a message, get a durable, routed
-# conversation on it. Input handling (a `gum write` popup) lives in the
+# The operator's intake — type a message, get a durable conversation on it. Input handling (a `gum write` popup) lives in the
 # script; the key just runs it, which is the shape this binding had before
 # threads were retired. `command-prompt` held it for exactly one commit
 # and is SINGLE-LINE by construction, so the operator could file a
@@ -64,8 +50,8 @@ gcmux bind-key B run-shell "$CONFIGDIR/assets/scripts/tmux-pick-helm.sh --city-p
 # lost by backgrounding it now that the handler reads its message from a
 # per-press draft file instead of one shared paste buffer, so presses never
 # order against each other. That draft is also what
-# survives a failed intake. See tmux-visit-prompt.sh.
-gcmux bind-key a run-shell -b "$(sq "$CONFIGDIR/assets/scripts/tmux-visit-prompt.sh") $(sq "$CONFIGDIR")"
+# survives a failed intake. See tmux-intake-prompt.sh.
+gcmux bind-key a run-shell -b "$(sq "$CONFIGDIR/assets/scripts/tmux-intake-prompt.sh") $(sq "$CONFIGDIR")"
 
 # prefix+A — raise a brand-new topic and converse about it now. Capital A, the
 # sibling of prefix+a: where prefix+a files a bead for triage, this one opens a
@@ -73,7 +59,7 @@ gcmux bind-key a run-shell -b "$(sq "$CONFIGDIR/assets/scripts/tmux-visit-prompt
 # --new-subject` in a NEW window rather than a `run-shell` popup, because engage
 # is a real interactive prompt — rig, subject, model — and tmux's one-line
 # command-prompt cannot carry a subject plus a menu. The city path is baked in
-# for the same reason the pickers bake it: a key pressed outside a Gas City
+# for the same reason the session picker bakes it: a key pressed outside a Gas City
 # session's pane carries no city in its environment. See tmux-new-subject.sh.
 gcmux bind-key A new-window "$(sq "$CONFIGDIR/assets/scripts/tmux-new-subject.sh") $(sq "$CONFIGDIR") --city-path $(sq "$CITY_PATH")"
 

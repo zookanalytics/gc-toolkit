@@ -1,6 +1,6 @@
 ---
 name: review-pm
-description: The method for the PM check — the product lens on a change, reviewed by a peer to the author rather than an order-taker. Judges first whether the change is the right thing for the people the product serves (the outcome its anchor named, not a proxy), then whether the PR lets the operator decide. Grounded in established product practice; reads docs/product-goals.md first for who the product serves; enforces through findings, never edits. Use when you hold a review bead whose check is pm, or when asked whether a change is the right thing to ship and presents itself so the operator can judge.
+description: Use when you hold a review bead whose check is pm, or when asked whether a change is the right thing to ship and presents itself so the operator can judge.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 

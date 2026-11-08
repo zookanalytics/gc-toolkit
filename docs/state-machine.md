@@ -63,9 +63,10 @@ stateDiagram-v2
   merged --> [*]
 
   handed_off --> poured: rejection-repool.sh — rejection_reason, then a fresh mol-polecat-work pour
+  handed_off --> poured: await-ruling.sh — the zero-diff check could not run, then a pour once its gate is cleared
 
-  handed_off --> blocked: mol-refinery-patrol — existing_pr unusable
-  handed_off --> refused_false_completion: mol-refinery-patrol — no commits
+  handed_off --> blocked: mol-refinery-patrol — existing_pr unusable, or a convoy's zero-diff check could not run
+  handed_off --> refused_false_completion: mol-refinery-patrol — no change found
   pull_request --> abandoned: pr-facts.sh — closed unmerged, no recorded disposition
   pull_request --> [*]: pr-facts.sh — closed unmerged, disposition pre-recorded (bead-rehome.sh)
   pull_request --> retargeted: pr-facts.sh — PR base moved
@@ -75,9 +76,6 @@ stateDiagram-v2
   refused_false_completion --> [*]: human
   abandoned --> [*]: human
   retargeted --> [*]: human
-
-  UN --> held: converse-hold.sh — a sitting holds for an operator decision
-  held --> UN: the ruling landed
 ```
 
 `handed_off` is the unanchored bead after the polecat's single handoff write
@@ -102,12 +100,11 @@ there until the checkout fetches it, so the transition fetches that branch into
 `GC_RIG_ROOT`, or a target git does not accept as a branch name, it fetches
 nothing and prints one WARN line naming the landing.
 
-`held` is the one human state a sitting writes rather than the refinery, and it
-is entered only from `unanchored`. `merge.sh`, `gate-ensure.sh` and `pr-facts.sh`
-each enumerate anchors by their gating state, so moving a live anchor to `held`
-to record a conversation would drop it from all three for as long as the hold
-lasts. An anchor already carries a state and a reader; an unanchored subject
-carried neither, which is what the state exists to fix.
+A sitting that holds a bead for an operator decision writes no state. The human
+gate it files blocks the bead, so `bd ready` leaves the bead out until the gate
+is resolved, and the board reads the open gate as the bead's hold
+([human-engagement.md](human-engagement.md#the-sitting)). The bead keeps the
+state, the route and any deferred-dispatch arm it carried.
 
 `pre_open_gate` and `pull_request` are the declared *detached* states
 (`detached_states`). The merge cadence drives them and no queue offers them, so
@@ -115,8 +112,8 @@ the anchor rests unrouted and unheld, and `lifecycle.sh` writes both halves on
 entry to one: it clears `gc.routed_to`, and it clears the assignee of a bead
 still at `status=open`.
 
-The route exception is `park_route` (`human`), the sentinel a visit or an
-operator hold leaves for a person. No pool claims that value, so a transition
+The route exception is `park_route` (`human`), the sentinel that parks a bead
+for a person. No pool claims that value, so a transition
 that finds it leaves it in place. Any other route on a detached anchor is pool demand
 for work that is already in the merge queue. A worker claims it, the claim moves
 the bead out of `--status=open`, and `merge.sh` and `pr-facts.sh` both enumerate
@@ -175,15 +172,14 @@ transition into a closed state writes none.
 | pull_request draft → ready | `pr-open.sh` (cadence arm 3, draft-to-ready) | every `pre-open` and `open-as-draft` check derives `green`; `gh pr ready` surfaces it. GitHub `isDraft` flips; `merge_result` stays `pull_request` |
 | pull_request → merged | `merge.sh` (cadence arm 2) | full authorization set validated (incl. the universal approval rule; a draft PR is skipped); close + record in one call |
 | pull_request → merged | `pr-facts.sh` (cadence arm 7) | GitHub merged the PR out-of-band; record only |
-| pull_request → abandoned | `pr-facts.sh` | PR closed unmerged externally with no recorded disposition; files a rework-or-close visit |
-| pull_request → closed (disposed) | `pr-facts.sh` → `bead-rehome.sh` | PR closed unmerged carrying a pre-recorded disposition (`pr-dispose.sh`); auto-disposed through the sanctioned terminal close, no visit |
-| pull_request → retargeted | `pr-facts.sh` | PR base moved externally; files a visit |
-| handed_off → blocked | `mol-refinery-patrol` | recorded `existing_pr` unusable |
-| handed_off → refused_false_completion | `mol-refinery-patrol` | no commits on the handed-off branch, and no `direct_landing_sha` stamp the target carries |
+| pull_request → abandoned | `pr-facts.sh` | PR closed unmerged externally with no recorded disposition; files a rework-or-close human gate |
+| pull_request → closed (disposed) | `pr-facts.sh` → `bead-rehome.sh` | PR closed unmerged carrying a pre-recorded disposition (`pr-dispose.sh`); auto-disposed through the sanctioned terminal close, no gate |
+| pull_request → retargeted | `pr-facts.sh` | PR base moved externally; files a human gate |
+| handed_off → blocked | `mol-refinery-patrol` | recorded `existing_pr` unusable, or a graduated convoy's zero-diff check could not run three patrols in a row, its park held by the human gate, filed on it, that names git's error |
+| handed_off → refused_false_completion | `mol-refinery-patrol` | the zero-diff check found no change on the handed-off branch, and the target carries no `direct_landing_sha` stamp |
 | handed_off / pull_request → poured | `mol-refinery-patrol` (rejection), through `assets/scripts/rejection-repool.sh` | `rejection_reason` written and the assignee and `gc.routed_to` cleared, then a fresh `mol-polecat-work` pour dispatches the rebuild and stamps `gc.execution_routed_to` |
+| handed_off → poured | `mol-refinery-patrol` merge-push, through `assets/scripts/await-ruling.sh` | the zero-diff check could not run three patrols in a row: a human gate names git's error and blocks the bead, which waits on it unassigned and armed, until clearing the gate pours a fresh `mol-polecat-work` run on it |
 | poured → handed_off | the pour's `mol-polecat-work` submit step | push verified on the remote |
-| unanchored → held | `assets/scripts/converse-hold.sh`, a converse sitting's hold, via `lifecycle.sh` | a sitting is waiting on an operator decision; state + route in one write |
-| held → unanchored | `assets/scripts/converse-signoff.sh`, a converse sitting's sign-off, via `lifecycle.sh`; or human | the ruling landed |
 
 A request-changes verdict does NOT transition the anchor: `signoff.sh` files one
 routed rework child that blocks the anchor, with the reviewer's findings and the
@@ -303,7 +299,7 @@ approval or a change request counts whatever its body carries. The city's own
 post is one that `assets/scripts/pr-post.sh` marked, which is every post the
 pack makes —
 `signoff.sh`'s verdicts, `pr-open.sh`'s verdict replay, the write-back's
-replies and its ruled-finding comments, the visit reminder, a demo delivery,
+replies and its ruled-finding comments, the sitting reminder, a demo delivery,
 `pr-dispose.sh`'s closing comment. An unmarked post under the city's login
 after its PR's provenance cutover, described next, is feedback like a person's,
 whoever posted it. Rework hand-backs post nothing.
@@ -331,36 +327,38 @@ batch; `signoff.sh`'s rework loop answers it. A `CHANGES_REQUESTED` under the
 city's login from before the cutover is the city's own the same way. Every
 other `CHANGES_REQUESTED` is feedback, including an unmarked one under the
 city's login after the cutover, and it routes on the same terms as any other
-feedback, to a rework child or a visit, and opens a validation pass. GitHub
+feedback, to a rework child or a human gate, and opens a validation pass. GitHub
 refuses a change request from a PR's author, so on a PR the city opened only
 another login can leave one.
 
 The validator rules each finding in that batch, and every ruling ends the
-finding closed or converts it to a visit: a `must-fix` holds the merge until its
+finding closed or puts it to a person: a `must-fix` holds the merge until its
 fix lands, a `deferred` files a claimable follow-up and closes, a `declined`
 closes with an answer posted to the raiser, and a `needs-you` — a comment only
-the operator can judge — files a visit and stays open. A comment whose question
-an open visit on the anchor's feedback already carries is `needs-you` on that
-visit: the rework minted for its batch may have put the question to the operator
-before the validator ran, and `finding.sh` refuses every other ruling of the
-finding while such a visit tracks or holds that rework. Only a fix's thread is
-resolved behind its answer: the thread of a declined or deferred finding stays
+the operator can judge — files a human gate on the anchor and stays open. A
+comment whose question an open human gate on the anchor's feedback already
+carries is `needs-you` on that gate: the rework minted for its batch may have
+put the question to the operator before the validator ran, and `finding.sh`
+refuses every other ruling of the finding while such a gate blocks that rework.
+A gate on the anchor itself refuses nothing, because an anchor gathers gates
+about anything, so the validator judges whether one carries the question. Only
+a fix's thread is resolved behind its answer: the thread of a declined or
+deferred finding stays
 open for the operator to accept or overrule. A `CHANGES_REQUESTED`
 that is feedback is auto-dismissed once every finding it raised has closed and
 every answer one of them owes its raiser (a decline's reason, a deferral's
-follow-up, a `needs-you` finding's visit) is on the PR, and
+follow-up, a `needs-you` finding's gate) is on the PR, and
 its author is asked for a fresh review, unless the author is the city's own
 login, which has no review queue to return to. A `needs-you` finding holds that
-review open until the operator rules the visit holding its question and the work
-the ruling calls for lands, while the others let it clear. The ruling is
-recorded on the visit (`gc.ruling`), and a fold hands the question on to the
-visit it folds into (`gc.folded_into`), so a visit closed moot, benign,
-dismissed or cut short releases nothing. Such a finding stays open until its
-anchor closes, and the review it holds stays changes-requested until the
-operator's own approval replaces it. A sitting cut short is one such close: its
-wait moves to the subject, and the later sitting that rules on it closes a visit
-of its own, which the finding does not follow. The review the operator reads on
-the PR therefore always matches what is still owed.
+review open until the operator clears the human gate holding its question with
+a reason headed `ruled:` and the work the ruling calls for lands, while the
+others let it clear. A re-home hands the question on to the bead its
+supersedes edge names, and a gate cleared `moot:` or `benign:` releases
+nothing. Such a finding stays open until its anchor closes, and the review it
+holds stays changes-requested until the operator's own approval replaces it. A
+sitting cut short leaves the gate open, so the later sitting that rules on the
+question clears that same gate, and the finding follows it. The review the
+operator reads on the PR therefore always matches what is still owed.
 
 The review bead carries the `mol-review` formula (attached at dispatch via
 `gc sling --on`); the reviewing polecat follows its steps. The dispatch pins
@@ -436,7 +434,7 @@ non-draft anchor and read off the bead by everything downstream. Declared in
 | `pr_review_watermark` | `<id>` | highest routed `pulls/N/reviews` id |
 | `pr_comment_answered` | `<id>` | every inline comment above `pr_comment_watermark`, through this id, was answered by its thread at the last read |
 | `pr_review_answered` | `<id>` | every counted review body above `pr_review_watermark`, through this id, was answered by its threads at the last read |
-| `pr_comment_disposition` | `rework:<id>` / `visit:<id>` | what the last outstanding batch was routed to |
+| `pr_comment_disposition` | `rework:<id>` / `human:<id>` | what the last outstanding batch was routed to: a rework child, or a human gate |
 | `pr_provenance_since` | `<UTC instant>` | when `pr-facts.sh` first read the open PR; an unmarked post under the city's login from before it is the city's own |
 | `pr_finishing_settled` | `approved` / `unapproved` / `unsettled` | the rank all of the anchor's PR-finishing work was last settled at, or `unsettled` while a re-rank is owed; absent while no pass has recorded one |
 | `pr_head_oid` | `<oid>` | the PR head `pr-facts.sh` last read, a draft's included; empty once the anchor leaves `pull_request`, until a pass reads the PR again |
@@ -537,9 +535,10 @@ list does not carry, stands on its own and is counted.
 **Outstanding feedback routes to something.** It becomes a fix-pool rework
 child carrying the review bodies and inline comments verbatim in its
 description, or, when there is nowhere to route work (no fix pool, or the PR
-head branch is unresolved), one `escalate.sh` visit per batch. A hold on the
-anchor does not choose the visit. `merge_hold`, `rebase_hold`,
-`gc.routed_to=human`, a live demand bead stamped `gc.demand_for=<anchor>` and
+head branch is unresolved), one human gate per batch on the anchor, filed
+through `human-gate.sh` under the batch's `pr-comments.<num>.<review>.<comment>`
+key. A hold on the anchor does not send the batch to a person. `merge_hold`,
+`rebase_hold`, `gc.routed_to=human`, an open human gate on the anchor and
 an armed re-dispatch all leave the batch a rework child, routed like any other,
 and each keeps gating what it gates elsewhere, among them the merge, the
 stale-base merge-in and the red-check rework. The child is the batch's fix
@@ -548,49 +547,148 @@ edge on it, so a held batch with no child would leave those findings holding
 the merge with nothing acting on them. The child brings the branch current by
 merge as it answers, as every rework child does, and a conflicting branch is no
 exception: an anchor that owes feedback skips the stale-base arm and its skip
-guards entirely. Either way the filed bead holds the merge until it closes —
-the rework child through a `blocks` edge, the visit through the `pr_number`
-stamp that `merge.sh`'s in-flight-holder probe reads. The visit's hold is that
-stamp alone, so a fold moves the hold with it: `visit-close.sh --into` carries
-`pr_number` to the visit it folds into before it closes the folded one.
-`pr_comment_disposition` records which was chosen. Silence is not one of the
-options.
+guards entirely. Either way the filed bead holds the merge until it closes,
+each through its `blocks` edge onto the anchor, and nothing is stamped on the
+gate: it names the anchor through that edge. `pr_comment_disposition` records
+which was chosen. Silence is not one of the options.
 
 ## The status label (GitHub projection)
 
 Posture is recorded on the bead. Its projection onto GitHub's pull request list is
 a workflow-owned label from a mutually-exclusive `status:` group, so a person
-scanning the list sees what stands between each PR and landing without opening
-it. The group is extensible: one value is set at a time, and setting one removes
-any other `status:` value.
+scanning the list sees whose move each open PR is without opening it. An open PR
+carries exactly one value, and setting one removes any other `status:` value.
 
-| Label | What stands between the PR and landing | When |
+| Label | Whose move | When |
 |---|---|---|
-| `status: working` | only the city has work left | an open rework child stands on the anchor, a draft the city opened still waits on the checks that flip it ready, or an approved PR is merging |
-| `status: needs-review` | only a human's review verdict is left | settled at the head, no open rework: opened check-green or flipped from draft to ready, reworked and handed back, or a non-blocking review left comments |
-| `status: needs-attention` | something only a human can clear blocks the merge | a hold stands, whatever rework is in flight — an operator freeze, a rebase hold, or an open visit on the anchor — or an approved PR is wedged with no rework in flight |
+| `status: working` | the city's, changing the PR | an unapproved PR with live work on the anchor (a rework or fix child, a validation pass, a review, a finding), or a draft the city opened that still waits on the checks that flip it ready |
+| `status: merging` | the city's, landing the PR | an approved PR with no known blocker: its required checks may still be running, a merge-in rework or other city work may be in flight, or it waits for the merge pass |
+| `status: needs-review` | a human's review | an unapproved PR with nothing in flight and nothing holding it: opened check-green or flipped from draft to ready, reworked and handed back, or a non-blocking review left comments |
+| `status: needs-attention` | a person's, to clear a blocker | a blocker stands that the city will not clear on its own: an operator freeze, a rebase hold, anything a `held:` label names, a blocked verdict the merge pass recorded at the current head ([The machine axis](#the-machine-axis)), or a recorded posture, verdict or cause outside its writer's vocabulary, a state the derivation cannot name |
 
-Precedence when inputs overlap: `needs-attention` > `working` > `needs-review`.
-It follows from the middle column. A block only a human can clear stops the
-merge whatever else is in flight, city work comes before the verdict it leads
-to, and the verdict is what remains when neither stands. A hold that only a
-human can release reads `needs-attention` with no rule of its own.
+Precedence when inputs overlap: `needs-attention` > `merging` > `working` >
+`needs-review`. It follows from the middle column. A blocker the city will not
+clear holds the PR whatever else is in flight. An approved PR with nothing
+blocking it is the city's to land, whatever work is in flight on the way. City
+work on an unapproved PR comes before the verdict it leads to, and the verdict
+is what remains when neither stands. A hold that only a human can release reads
+`needs-attention` with no rule of its own.
 
-An open visit covers the anchor by the shared visit identity
-(`assets/scripts/visit-identity.sh`): the bead its tracks edge names, or its
-`gc.continuation_group` stamp when it has no tracks edge. The merge pass's
-finalize gate (`finalize-gate.sh`) reads visits by the same identity and refuses
-the merge while one covers the anchor. The label counts each open or
-`in_progress` visit that covers the anchor, a visit a sitting is in included,
-and the helm board's phase and held marker count the same ones.
+Beside the one `status:` value, a workflow-owned `held:` label names each thing
+that holds an open PR which the city will not clear on its own. Each value is a
+label of its own, so more than one can stand at once, and a PR nothing holds
+carries none.
 
-The label reads the city's own state — the refinery-computed posture and merge
-state on the anchor, its holds, any open visit on it, its draft-stage markers,
-and its rework children — not GitHub's review posture or draft flag directly.
-The `working`->`needs-review` flip rests on the rework child, which is scoped to
-the reviewed commit and closes when the fix lands, so a sticky
-`CHANGES_REQUESTED` never traps the label in `working` after a rework hands
-back.
+| Label | What holds the PR | Read from |
+|---|---|---|
+| `held: gate` | an open human gate holds the anchor: on the anchor itself, or behind a bead it waits on, such as a rework | `prstatus.HoldingGates`, which follows the anchor's `blocks` edges through every blocker that is not closed and keeps the human gates it reaches, one a person has claimed included. A conversation blocks nothing, so it never counts |
+| `held: review` | review feedback the city has not answered, or a review thread the merge waits on, and nothing in flight acts on it | the merge pass's count of review threads waiting on the city's answer (`pr.unanswered_threads`), by the rule below, or its `blocked` verdict with cause `review-threads`, as `prstatus.Blocked` counts it |
+| `held: blocked` | a live blocker holds the PR that no automated actor will clear | the merge pass's `blocked` verdict with cause `blocker`, as `prstatus.Blocked` counts it, or a live bead the anchor's `blocks` edge names that is routed to a person or is a decision. A human gate is not among them, whatever its route, because `held: gate` counts it |
+
+Any `held:` label reads `status: needs-attention`, because each names something
+a person has to act on. The merge freeze and the rebase hold carry no `held:`
+value, and neither do a failed required check, a deferred merge-in, a base gone
+`BEHIND` or a rule the merge pass cannot name: each reads `needs-attention` on
+its own. A blocker the city is landing, one an automated actor holds and no
+person owes, is no hold, and the PR keeps its status.
+
+`held: review` stands on any base, approved or not, for review feedback the city
+has not answered. On every open PR it visits that is not a draft, the merge pass
+counts the review threads that wait on the city's answer and records the count
+as `pr.unanswered_threads`, pinned to the head it read. A thread waits when it is
+unresolved and the newest of its posts that asks or answers is feedback
+(`gc_thread_awaits_answer` in `pr-post.sh`). A post not for review neither asks
+nor answers, whoever posted it. Neither does a post the city marked handled with
+the THUMBS_UP that `pr-facts.sh`'s write-back puts on a post it owes nothing
+more, which is the only answer a point declined with no reply owed gets. Nor
+does a post a dismissal retired (`live_comments` in `review-dismissal.sh`). The
+count holds the PR at the head the posture was read at, while nothing is in
+flight on the anchor, because work in flight is the city answering, and while
+no feedback waits for `pr-facts.sh` to route it (posture `commented`). A thread
+the city answered and left open for the reviewer, such as a point it declined
+or deferred, waits on the reviewer and not on the city, so the PR reads as the
+reviewer's queue: `needs-review` before approval. Where the base requires
+thread resolution, the merge pass's `review-threads` verdict holds an approved
+PR for any unresolved thread, answered or not. The merge does not read the
+count, so on a base that requires no thread resolution an approved PR still
+lands while `held: review` stands.
+
+`prstatus.Held` is the rule, and the helm board shows the same values as a row's
+`pr_held`, from the same derivation over the same facts. `prstatus.Read` gathers
+those facts for every reader: the anchor's own row, `pr.unanswered_threads`
+among it, its in-flight set, every bead carrying the anchor's `anchor_bead`, any
+`task_kind`, at a live status (`prstatus.InFlightStatuses`), the blockers its
+`blocks` edges name, and the gates its walk reaches. `gctk pr-status derive` and
+the board's beads source each hand it their own adapter onto the store, and
+neither gathers or decides any of it.
+
+A blocked machine verdict whose cause is outside its writer's vocabulary holds
+the PR wherever it was recorded, as any state the derivation cannot name does.
+Any other blocked verdict holds the PR only at the head the posture was read at,
+because a verdict at another head was reached about another commit. It holds
+only while nothing is in flight on the anchor: the merge pass records most
+causes only when no live bead holds the merge, so work that arrives afterwards
+is the city acting on the cause, and the next pass replaces the verdict. Cause
+`blocker` holds whatever is in flight, because the merge pass records it after
+weighing the live holders, and the stuck holder is often one of them, such as a
+must-fix finding no fix unit answers. `prstatus.Blocked` is that rule. The helm
+board applies it too, over the in-flight set the labels count, and by it decides
+a blocked row's phase, whether the operator's queue lists the row, and the row's
+needs phrase.
+
+`prstatus.HoldingGates` is the one reader of the gates that hold a PR, and
+`prstatus.Read` gathers through it. The label's value counts them, the board's
+row names them, and `gc-helm engage` on the PR offers each, beside every other
+reason `prstatus.Reasons` gives, through `gctk pr-status derive --json`. Each
+bead walks for itself, and the walks of one call share their reads: each bead is
+read once, and its edges a level at a time. So a PR reads the same on the board,
+which walks a rig's PRs together, as on its label and at engage, which walk it
+alone. A walk is bounded, and one that passes its bound reads as a read that did
+not answer, for that bead alone.
+
+A read that does not answer changes no label. When gctk is unavailable, or the
+anchor, its in-flight set, its blockers or the walk from them do not read,
+`pr-status-label.sh` exits 2 and leaves both families as they are. Otherwise it writes both from one
+derivation in one edit: the `status:` value and a `held:` label for each held
+value, with every other label under either prefix taken off. A `held:` label
+comes off on the first derivation after its condition clears.
+
+The labels come off when the PR merges or closes, where GitHub's own Merged or
+Closed state takes over. `pr-facts.sh` takes them off in the full pass that
+records an out-of-band merge or a close. `gctk merge` takes them off for a merge
+it made, or one whose record it recovered. Each takes them off before the write
+that records the merge or the close, because that write closes the anchor or
+moves it out of `pull_request`, and no pass enumerates it as an open PR again.
+A clear that does not land is recorded on the anchor as
+`status_label_clear_owed=<pr number>`: `gctk merge` carries the key in its
+record, and `pr-facts.sh` writes it before its record, leaving the anchor open
+for the next pass when that write does not land either. Every full pass of
+`pr-facts.sh` lists the anchors carrying the key, in any status, retries each
+clear, and unsets the key once it lands. The retry clears only the PR the
+anchor's `pr_url` names, so a write that records the key on an anchor with no
+`pr_url` records the live PR's url beside it, the one its writer validated
+against origin.
+
+An open human gate holds the anchor through its `blocks` edge onto it, read by
+`bd_human_gates` in `assets/scripts/bd-lib.sh`: the bead's `blocks` edges, kept
+to the gates whose await type is human. The merge pass's finalize gate
+(`finalize-gate.sh`) refuses the merge while one is open on the anchor, and a
+gate behind a bead the anchor waits on holds the merge through that open
+blocker. The labels count each human gate `prstatus.HoldingGates` reaches that
+is not closed, one a person has claimed included.
+A conversation about the anchor tracks it and blocks nothing, so it holds no
+label.
+
+The labels read the city's own state — the refinery-computed posture on the
+anchor, the merge cadence's machine verdict and its cause, its holds, any open
+human gate on it, the blockers its `blocks` edges name, its draft-stage
+markers, and its live work — not GitHub's review posture, merge state or draft
+flag directly. GitHub reports `BLOCKED` for a
+required check still running as it does for a wedge, and the merge pass, which
+reads the branch's rules, is what tells the two apart. The
+`working`->`needs-review` flip rests on the live work, which closes as the fix
+lands, so a sticky `CHANGES_REQUESTED` never traps the label in `working` after a
+rework hands back.
 
 The label is workflow state and never says a PR may merge: machine readiness
 rides `pr.machine`. The draft flag is a phase signal, not a merge signal — a PR
@@ -598,37 +696,37 @@ opens as a draft when its `check_set` names an `open-as-draft` check, and
 `pr-open.sh` flips it to ready once every `pre-open` and `open-as-draft` check
 derives green ([Checks](#checks)); merge readiness waits on every phase and the
 universal approval besides. A draft the city opened carries `opened_as_draft`
-and reads `working` until `pr-open.sh` records `draft_readied`, because until
-then the city still owes the checks that flip it and the flip itself. A draft
-anyone else made, or one re-drafted after the city readied it, reads like any
-other PR.
-`assets/scripts/pr-status-label.sh` is the single writer. `pr-open.sh` sets the
-label when it opens a PR and when it records a draft ready, whether it flipped
-the draft or found it already ready, and `signoff.sh`
-flips it on each of the city's own verdicts. A human's review moves it in the
-merge cadence's posture and feedback arms, in the pass that records the review.
-The posture arm re-derives the label for an anchor whose posture value it
-changes: an approval, a comment, a change request, or a dismissal. The feedback
-arm re-derives it for an anchor whose feedback batch it routes into live work. A
-head or merge state that moves under an unchanged posture value does not
-re-derive the label there. GitHub reports `UNKNOWN` while it computes a PR's
-mergeability, so those moves are most posture writes, and re-deriving on them
-would cost a derivation for dozens of open PRs at once. The full `pr-facts.sh`
-pass re-derives the label for each open PR its walk reaches, so those moves, the
-other inputs, and a missed event self-heal there. The walk is paced: it visits
+and, unless it is approved, reads `working` until `pr-open.sh` records
+`draft_readied`, because until then the city still owes the checks that flip it
+and the flip itself. A draft anyone else made, or one re-drafted after the city
+readied it, reads like any other PR.
+`assets/scripts/pr-status-label.sh` is the single writer of both families, and
+every call that derives one writes the other. `pr-open.sh` sets the labels when
+it opens a PR and when it records a draft ready, whether it flipped the draft or
+found it already ready, and `signoff.sh` re-derives them on each of the city's
+own verdicts. A human's review moves them in the merge cadence's posture and
+feedback arms, in the pass that records the review. The posture arm re-derives
+the labels for an anchor whose posture value it changes: an approval, a comment,
+a change request, or a dismissal. The feedback arm re-derives them for an anchor
+whose feedback batch it routes into live work. A head or merge state that moves
+under an unchanged posture value does not re-derive the labels there. GitHub
+reports `UNKNOWN` while it computes a PR's mergeability, so those moves are most
+posture writes, and re-deriving on them would cost a derivation for dozens of
+open PRs at once. The full `pr-facts.sh` pass re-derives the labels for each open
+PR its walk reaches, so those moves, the other inputs, and a missed event
+self-heal there. The walk is paced: it visits
 first the PRs that left the open list, owe a merge-in, or changed on GitHub
 since its last visit, then rotates through the rest until its deadline, and a
 PR it does not reach waits for a later pass.
 
-Nothing re-derives the label when a visit opens or closes, and a visit change
-does not put its anchor first in that walk. The label follows a visit on the
+Nothing re-derives the labels when a human gate or a blocker is filed or cleared,
+and such a change does not put its anchor first in that walk. The labels follow it on the
 next full pass that reaches the anchor: within one reconcile pass while the walk
 reaches every open PR, and after more passes when the deadline stops it short.
-`signoff.sh` also sets `working` on a request-changes verdict without deriving
-it, because the rework child it files is live work. On an anchor an open visit
-covers, the label then reads `working` until the next full pass that reaches the
-anchor re-derives `needs-attention`. In both windows the label trails the
-visit. Every write is pinned to the origin, and a label is not an approval.
+The labels likewise read the machine verdict and the thread count the last merge
+pass recorded, so they follow a new verdict, or a thread answered or resolved, on
+the next pass that derives them after the merge pass's visit. Every write is
+pinned to the origin, and a label is not an approval.
 
 ## The machine axis
 
@@ -644,9 +742,85 @@ ones.
 
 | Value | Meaning |
 |---|---|
-| `progressing` | some automated actor will act: a pool-routed blocker is open, or a declared lane is short of green |
+| `progressing` | some automated actor will act: one holds a live blocker, a declared lane is short of green, a required check is still running, or a conflicting branch waits on its merge-in rework |
 | `settled` | every declared check derives `green`; the cadence is done, and the PR waits on approval, on the merge pass, or on nothing |
-| `blocked` | a hold no review verdict clears: an unresolved required review thread, a base gone `BEHIND`, or a branch that conflicts with the base with no merge-in rework in flight. The cause rides `pr.machine_reason`, and the board owes it to the operator as needs-attention rather than folding it into the awaiting-review tail |
+| `blocked` | a hold no automated actor will clear and no review verdict is owed on. The cause rides `pr.machine_cause` as one of the values below and `pr.machine_reason` as a sentence, and the board and the `status:` label show it as needs-attention rather than folding it into the awaiting-review tail |
+
+The merge pass classifies an approved PR it cannot merge by what holds it, and
+records `blocked` only for a cause no automated actor will clear:
+
+| `pr.machine_cause` | Recorded when |
+|---|---|
+| `review-threads` | branch protection requires resolved review threads and one is unresolved |
+| `check-failed` | a required check's newest run failed at the head: a check run concluded `FAILURE`, `TIMED_OUT`, `CANCELLED`, `ACTION_REQUIRED` or `STARTUP_FAILURE`, or a status context reads `FAILURE` or `ERROR`; or the `UNSTABLE` arm holds the head on a superseded run that ended without passing |
+| `conflict` | the branch conflicts with its base (`DIRTY`), and something defers the merge-in rework `pr-facts.sh` would file: a `rebase_hold` on the anchor or on any bead naming its branch, or an armed re-dispatch |
+| `behind` | the base moved ahead (`BEHIND`), which no automation brings current |
+| `blocker` | a live blocker holds the anchor, no automated actor holds any of its live blockers, and no open human gate holds this one (`prstatus.HoldingGates`). A blocker a gate holds is a person's to clear, and `held: gate` names the gate |
+| `rule` | GitHub reports `BLOCKED` and the pass can name no cause: no unresolved required thread, no approval owed and no required check whose newest run failed or is still running |
+
+GitHub reports `BLOCKED` for every unmet rule, so the pass reads the branch's
+rules before it names a cause. An unresolved required thread is
+`review-threads`, an approval still owed is `settled`, and otherwise it reads the
+required checks. The check rollup lists every run on the head, so a required
+check re-run on the same head keeps its failed run beside the re-run. The pass
+judges each required check by its newest run, the one started last, and a run
+waiting to start is newer than every run that has started. A run that ended
+without starting, such as one cancelled while queued, has no start to order it
+by, so it is the newest run only when no other run of its check started or
+waits to start. A check whose newest run
+failed is `check-failed`. One whose newest run is still queued or running, or
+one that has not reported yet (GitHub shows it as Expected), is `progressing`,
+and every required check's newest run green leaves `rule`. The `UNSTABLE` arm
+holds the merge while any run of a required check on the head is not green, a
+superseded run included, and records the verdict the `BLOCKED` arm records for
+the same required checks. Where only superseded runs hold it, the hold lasts
+until a push moves the head once one of them has ended without passing, and the
+arm records `check-failed`. While each of them is still queued or running, it
+can end green and release the hold, and the arm records `progressing`. A
+conflict with nothing in flight is `progressing`, because
+`pr-facts.sh`'s conflict arm files the merge-in rework for an approved PR on its
+next pass. It is `blocked` only when something defers that merge-in: a
+`rebase_hold` on the anchor, an armed re-dispatch, or a `rebase_hold` on any bead
+naming the branch, in any status. The pass reads that last freeze by the rule the
+conflict arm applies, `pr-facts.sh`'s marked `branch-freeze` block, and
+`merge.test.sh` holds the pass and the block to one answer. A read that does
+not answer (the branch rules, the review threads, the required-check set, the
+check rollup, the beads naming the branch) records nothing, and the verdict the
+last pass recorded stands.
+
+An anchor a live blocker holds is `progressing` when an automated actor holds
+any of its live blockers. When none does, the merge pass reads who holds each
+one. A person holds a blocker that is a human gate, that is routed to a person, or
+that has an open human gate behind it (`prstatus.HoldingGates`). A blocker no
+person holds makes the verdict `blocked` with cause `blocker`, and when a person
+holds them all the anchor gets no new verdict.
+`assets/scripts/blocker-holder.sh` answers whether an actor holds one for each
+writer of the axis. An automated actor holds a blocker routed to a pool or an
+agent, one an agent has claimed, one armed to dispatch, because the
+deferred-dispatch pass slings it once nothing holds it, and one a live run works.
+A rework handed back to the refinery is claimed by it until it lands, and a
+graph.v2 pour leaves the bead it works unrouted and unassigned, so its run is the
+only mark. The `gc.execution_routed_to` stamp a pour leaves outlives the run, so
+it is not one.
+
+Once only a person holds the live blockers, the merge pass replaces a `blocker`
+verdict it recorded earlier with `settled`, because the bead that verdict names
+may have closed, and no later arm of the pass runs while the person's blocker
+stands.
+
+`gate-ensure.sh` records its own `progressing` or `settled` after the merge pass
+in the same reconcile pass. It replaces a `blocked` verdict at the same head
+only when an automated actor is due to act: a lane short of green or, for any
+cause but `blocker`, a fix unit, rework child or validation pass in flight. For
+the `blocker` cause it asks `blocker-holder.sh`, as the merge pass did, because
+quiescence counts a rework child or validation pass by its status alone. Only an
+actor holding a blocker replaces that verdict, and an answer that does not
+resolve leaves it. The merge pass records `blocked` only once every lane derives
+green, after weighing holds `gate-ensure.sh` does not read, such as a live
+blocker no automated actor holds. So its `settled` adds nothing to a `blocked`
+verdict, and neither does a `progressing` it reaches only because a must-fix
+finding has nothing answering it or a quiescence probe did not answer. A verdict
+at a head the branch has left is replaced.
 
 A standing non-city `CHANGES_REQUESTED` is not `blocked`: a review verdict is
 what it waits on. While a fix unit answering it is in flight the anchor reads
@@ -681,7 +855,7 @@ sequenceDiagram
   P->>G: git ls-remote — verify HEAD == remote
   Note over P: push unverified ⇒ abort, keep the bead
   P->>L: handoff — branch, target,<br/>assignee=RIG/refinery, in ONE atomic gc bd update
-  P->>P: step-close + drain
+  P->>P: claim-close + drain
   C->>L: gate-ensure — check_set present, every check raisable
   C->>L: merge-push → pre_open_gate (lifecycle.sh)
   C->>G: pr-open.sh — gh pr create when every check in check_set derives green
@@ -722,11 +896,23 @@ review's result set.
   (`specs/tk-ztapg/review-cycle-architecture.md`), so request-changes files a
   child every round and nothing in the cadence bounds them. One writer, one
   verdict: no second component writes a verdict.
-- **Ruling** (operator, via converse): a ruled sign-off on an open-PR subject
-  must answer whether the ruling changes what the branch must contain
-  (`converse-signoff.sh --rework` or `--no-rework`), and one that answers
-  neither is refused. On `--rework`, `converse-rework.sh` files the same fix
-  unit through `rework-child.sh`, sourced by `source_ruling_bead=<visit>` in
+- **Ruling** (operator, via converse): a ruling that reaches an open PR,
+  whether given at the sign-off or on a turn that answers a gate without
+  signing off (`--answer`), must say what it does to the PR
+  (`converse-signoff.sh --rework`, `--no-rework` or `--retire <kind>`), and one
+  that says none of them is refused. It reaches the subject when the subject
+  is an open PR, and each open PR that a gate it answers releases, such as a
+  member of an epic subject. The rework or the retirement acts on one PR,
+  which `--pr-anchor` names when the ruling reaches more than one, and each
+  other one stands. Each runs before any gate the ruling answers is resolved,
+  because a gate can be what holds the merge, and in that PR's own rig, after
+  the conversation records which PR it acts on (`gc.ruling_consequence`), so a
+  re-run of the same ruling acts on the same PR even once it has closed.
+  `--retire` records the
+  disposition and closes the PR through `pr-dispose.sh`, and `pr-facts.sh`
+  then takes the anchor through the `pull_request → closed (disposed)`
+  transition. On `--rework`, `converse-rework.sh` files the same fix
+  unit through `rework-child.sh`, sourced by `source_ruling_bead=<conversation>` in
   place of a verdict's `source_review_bead`: `task_kind=rework`, the anchor's
   branch resumed, a `blocks` edge holding the merge. A ruling on a published PR
   so becomes demand the refinery lands rather than prose nobody reads. A ruling
@@ -766,18 +952,18 @@ review's result set.
   closed child does not, so a branch still CONFLICTING with nothing in flight is
   re-dispatched, on every head it conflicts at rather than only the PR's first
   (an approved PR gone dirty after its round would otherwise wedge unseen). A
-  hold (`merge_hold`, `rebase_hold`) or a live demand bead
-  (`gc.demand_for=<anchor>`) dispatches no rework child at all: bringing the
-  branch current is routinely one horn of what such a demand asks, so a child
-  filed under one answers the question by performing it. Closing the demand is
+  hold (`merge_hold`, `rebase_hold`) or an open human gate on the anchor or on
+  its live rework child dispatches no rework child at all: bringing the branch
+  current is routinely one horn of what a person is being asked, so a child
+  filed under one answers the question by performing it. Clearing the gate is
   what releases the dispatch. A conflict that is not drift gets no child
   either. When a change that landed first deleted or rewrote code the branch
-  edits, `branch-supersession.sh` files a `rework-base-supersession` visit on the
-  anchor, because whether the branch still has work to do is the operator's
-  call. That visit holds the dispatch while it is open and its route addresses
-  somebody; one routed nowhere holds nothing until `escalate.sh` repoints it.
-  Closing it `benign` (the overlap was incidental) lets the next pass send the
-  merge-in child.
+  edits, `branch-supersession.sh` files a human gate under
+  `rework-base-supersession` on the anchor, because whether the branch still
+  has work to do is the operator's call. That gate holds the dispatch while it
+  is open. Clearing it `benign:` (the overlap was incidental) lets the next pass
+  send the merge-in child, because the call declares a quiet window that keeps
+  the answer standing.
   `pre-open-rebase.sh` applies the same guard to an anchor with no PR yet.
 - **Disposal** (`review-sweep.sh`, cadence arm 8): a review outlives its own
   subject when the anchor closes and the branch is deleted before any verdict
@@ -788,22 +974,21 @@ review's result set.
 - **Duplicate / superseded disposal** (`bead-rehome.sh`, the one evidence-gated
   close-with-successor writer): a bead that duplicates another or was fixed
   upstream closes through `bead-rehome.sh --kind duplicate|fixed-upstream`, which
-  gates its own evidence — the named successor resolves and is closed or shipped
-  in the same store AND the origin recorded no work (`work_outcome=no-op` or no
-  work-product key at all), unless the origin carries the operator's
-  pre-recorded PR-close disposition for that kind and successor — and holds on
-  anything it cannot establish. Converse and operator dispositions use the same
-  writer, and so does `duplicate-sweep.sh` (cadence arm 10). The sweep reads
-  the `duplicate_of` marker a polecat stamps when it diagnoses and parks a
-  duplicate dispatch: polecats never close work beads, so the bead has no other
-  way out. It checks the same evidence before it calls the writer. It also
-  closes an unmarked rework twin: an open rework child that was never
-  dispatched (no dispatch metadata, no convoy tracking it) whose source is
-  closed (the review it answers, or the visit a ruling's child answers) and
-  whose same-source, same-anchor sibling landed. That twin would otherwise hold
-  its anchor forever; the sweep records `gc.work_outcome=no-op` on it before the
-  close. A first reaction never closes a bead: it hands a confident no-op to the
-  validating closer (`mol-validate-close`).
+  gates its own evidence — the named successor resolves in the same store, and
+  under `fixed-upstream` it is closed or shipped, AND the origin recorded no work
+  (`work_outcome=no-op` or no work-product key at all), unless the origin carries
+  the operator's pre-recorded PR-close disposition for that kind and successor —
+  and holds on anything it cannot establish. A duplicate closes at once, whatever
+  state its canonical is in, because the canonical carries the work. While the
+  canonical has neither closed nor shipped, each open bead the duplicate blocks
+  first gains a `blocks` edge onto it, so none goes ready before the canonical
+  delivers (Disposition, below). Converse and operator dispositions use the
+  same writer, and so does a polecat whose work
+  bead duplicates another: that close is the one a polecat makes on its work
+  bead, before it declines its run. A never-dispatched rework twin, an open
+  rework child whose same-source sibling landed, holds its anchor until a person
+  or a sitting closes it the same way. A first reaction never closes a bead: it
+  hands a confident no-op to the validating closer (`mol-validate-close`).
 - **No re-gate on head move**: a new commit stales nothing. gate-ensure
   dispatches on the lane — a declared check that is neither `green` nor in
   flight gets one review bead (stamp first, then attach `mol-review` via `gc
@@ -837,7 +1022,7 @@ overlapping comment edit, an obvious composition) or `judgment` (an inferred
 intent, a side chosen on substance, something new). An edit beyond what the
 merge needed owes an entry too, and on a `merge-only` bead so does each file a
 commit of the bead's own changes. A conflict the worker cannot resolve without
-guessing is a question, not a guess: `bring-current-audit.sh ask` files a visit
+guessing is a question, not a guess: `bring-current-audit.sh ask` files a human gate
 on the anchor carrying the entries so far and the question, the merge is
 aborted, nothing is pushed, and the bead is held until a person answers.
 
@@ -865,7 +1050,7 @@ review to keep current (its anchor is gating, or a PR stands on it):
   widens an opt-out, so the guard leaves the `check_set` as it is, and no
   review weighs the round. Approval is the one merge rule the opt-out leaves,
   so nothing reopens and the approval given before the round is lifted, the
-  lift line drawn as for triage's ruling below, with no visit. The ruling is
+  lift line drawn as for triage's ruling below, with no gate. The ruling is
   stored in the record marked `by: guard`, and a re-run of the same hand-off
   carries it out again, so a lift that stopped half-way is finished.
 
@@ -913,12 +1098,12 @@ what the round needed and the ruling, then each judgment entry in full (what
 collided, what was decided and why, what to check) and each routine entry on
 one line. An item no entry covers is listed with the guard's evidence alone.
 When the ruling lifts the approval, the call it names opens the verdict and is
-the note on the dismissed approval. A lifted approval files no visit: the
+the note on the dismissed approval. A lifted approval files no gate: the
 re-request, the dismissal note and triage's posted verdict are what a person
 reads, and the PR's posture reads `review_required` until a new approval
 stands, so the board shows the approval as owed. A ruling the guard made itself
 posts no verdict, so its dismissal note tells it as the guard's, points at no
-triage comment, and names the entries itself. The one visit a round
+triage comment, and names the entries itself. The one human gate a round
 files is the question the worker could not resolve, rendered from its entries
 so far and its question.
 
@@ -930,65 +1115,68 @@ reads only from the push's own start.
 ## Disposition
 
 A close that is not a landing must say so from the store the bead lived in:
-`assets/scripts/bead-rehome.sh` closes the bead with `gc.superseded_by` +
-`gc.superseded_by_store` (and stamps the inverse `gc.supersedes*` on the
-successor), so a sound disposition and a careless false close are
-distinguishable on read. Four kinds — `re-homed`, `folded`, `fixed-upstream`,
-`duplicate` — say the work relocated, and the pointer names the bead that
-carries it now. The fifth, `not-needed`, says nothing carries it: the bead
-was not needed, and the pointer names the evidence that concluded so,
-typically the visit bead from the sitting that ruled. The pointer is required
-under every kind, because it is the whole of that distinction. The kind is
-read from the close reason, which opens with the kind's phrase and the
-successor, as in `not needed, per <successor> in <store>`. When the pointer is
-added after an earlier close, a `Disposition recorded` note carries that reason
-instead. The read side searches every store before concluding a close was
-false. Consumers: the mechanik/converse close paths
-(`template-fragments/bead-disposition.template.md`), `duplicate-sweep.sh` (the
-cadence's reader for `duplicate_of`, and the closer of never-dispatched rework
-twins), the deferred-dispatch reconcile pass (`deferred-dispatch.sh`, the closer
-of a bead its `until` dependency resolved), `preexisting-failure.sh` (a
-pre-existing-failure gate follows a closed tracker's pointer to the live bead
-that carries its failure, and a `not-needed` close ends that chain), and any
-patrol judging a closed bead.
+`assets/scripts/bead-rehome.sh` closes the bead and records its successor in
+bd's own edge from it, so a sound disposition and a careless false close are
+distinguishable on read. The edge is `duplicates` under `duplicate`, which
+`bd show` renders as DUPLICATE OF, and `supersedes` under every other kind. It
+lives in the bead's own store, and it may name a bead in another rig's store,
+which bd keeps unverified: `gc bd list --json` returns such an edge and `gc bd
+show` leaves it out, so `bd-lib.sh`'s `$DISPOSITION_JQ`, the one reading of a
+disposition, reads the list row where the far end can be another store's. Four
+kinds — `re-homed`, `folded`, `fixed-upstream`, `duplicate` — say the work
+relocated, and the edge names the bead that carries it now. The fifth,
+`not-needed`, says nothing carries it: the bead was not needed, and the edge
+names the evidence that concluded so, typically the conversation of the
+sitting that ruled, or the human gate its ruling answered. The successor is
+required under every kind, because it is the whole of that distinction. The
+kind's phrase and the successor ride the close as an appended note, as in
+`Disposition <time>: not needed, per <successor> in <store>`, because bd's
+guarded close sets no close reason; when the edge is added after an earlier
+close, a `Disposition recorded` note carries them instead. The read side
+searches every store before concluding a close was false. Consumers: the
+close paths of the `work` skill and the converse prompt, the mechanik's prompt,
+which searches every store before it reopens a closed bead, `stand-down.sh` (a
+person's ruling that work a human gate holds will not go on),
+`preexisting-failure.sh` (a pre-existing-failure gate follows a closed
+tracker's edge to the live bead that carries its failure, and a `not-needed`
+close ends that chain), the doctor's I5 and I15, the board's subject resolver,
+and any patrol judging a closed bead.
 
 `bead-rehome.sh` proves the evidence kinds itself. Under `fixed-upstream` and
-`duplicate` it re-establishes that the successor is closed or shipped in the
-same store and that the origin recorded no work, unless the origin carries the
-operator's pre-recorded PR-close disposition for that kind and successor.
+`duplicate` it re-establishes that the successor is in the same store and that
+the origin recorded no work, and under `fixed-upstream` that the successor is
+closed or shipped, unless the origin carries the operator's pre-recorded
+PR-close disposition for that kind and successor.
+Under `duplicate` it also keeps the waits on the bead in force. bd's ready rule
+follows a `blocks` edge and never a `duplicates` edge, so before a duplicate of a
+canonical that has neither closed nor shipped closes, each open bead it blocks
+gains a `blocks` edge onto the canonical, read back. The canonical itself and a
+bead it already blocks need none. A waiter that cannot take the edge refuses the
+close before anything is written: one the canonical already joins by another
+edge type, since bd keeps one edge per pair, and every waiter of a canonical in
+another store, where the edge would hold nothing. A waiter bd refuses the edge,
+for a cycle or a parent chain, refuses the close too, once the edges before it
+are written, and those stay. Every other kind ends the waits on the bead with its
+close.
 Under `re-homed`, `folded` and `not-needed` it applies only the checks every
 kind gets: the origin is not a review bead, a step bead or a workflow root, and
 no other session holds it in progress. The judgment that the bead should close
 is the caller's. A hand disposition, by the mechanik, converse or the operator,
 judges the bead itself. An automated caller proves its own case before it
 calls, and [authority-map.md](authority-map.md) records the power in its
-Close-with-successor row. The deferred-dispatch reconcile pass passes
-`folded` only for a pure wait: an open, unassigned bead whose own `until`
-targets have all closed, whose `until` edge to the successor still stands, that
-no open `blocks` blocker of its own holds, and that carries no live work as
-`assets/scripts/live-work.sh` defines it. The pass checks them on its
-pass-start listing and again on a fresh read of the bead and what depends on
-it, made just before the call under a claim the pass takes on the bead. Both
-reads take the bead's edges from its `bd list` row, because `bd show` leaves
-out an edge whose target has no row in this store, so an `until` target, a
-`blocks` blocker or a parent the store cannot read leaves its condition
-unproven. It leaves a bead that fails any of them, or that it cannot prove
-meets one, as it is and never calls `bead-rehome.sh` on it. It runs
-`bead-rehome.sh` as its claim, and reads the bead once more after the close:
-anything that landed on the bead or its edges while the pass held it makes the
-pass withdraw the disposal, reopening the bead and removing the pointer
-([deferred-dispatch.md](deferred-dispatch.md), "The resolved-by consumer").
-Whoever judges, `bead-rehome.sh` stays the one writer of the pointer and the
-close. It stamps the pointer in one write bd applies only while the bead still
-has the status and assignee its gates read, so a caller whose gates passed
-before another actor claimed the bead stamps nothing while that claim holds.
-The one other write to the pointer is the pass's withdrawal of a pointer it
-had `bead-rehome.sh` stamp under its claim: after a close its check finds
-raced, and when the close is held or fails, in the write that gives the bead
-back. Under its claim no other caller's stamp lands, and the pass marks the
-bead with the successor before `bead-rehome.sh` runs, so it removes only a
-pointer that is its own. A pointer on an open bead is live work to the pass,
-so it never disposes a bead another closer has pointed.
+Close-with-successor row. Whoever judges, `bead-rehome.sh` stays the one
+writer of the close and its edge. The edge goes on first and is read back, so
+a reader finds the writer's close with its successor, and a second caller
+finds the first one's choice on the bead, a reopened bead included, and refuses
+to name another. bd keeps one edge per pair of beads and none per bead, so two
+callers that read the bead before either wrote can each add one, and the caller
+that finds another disposition edge beside its own takes its own back. The close
+is bd's checked close, in one write bd applies only while the bead still has the
+status and assignee its gates read, so a caller whose gates passed before another
+actor claimed or closed the bead closes nothing and takes its edge back. `bd
+duplicate` and `bd supersede` write the same two things in the same order, but
+they close past an open human gate and an open child, and refuse a successor in
+another store, so the pack closes through the writer instead.
 
 A disposition ends the bead's branch, the way a merge ends a landed one
 through the repository's delete-on-merge setting. Once the close reads back,
@@ -1020,8 +1208,8 @@ routed through this same disposition close as superseded, in one
 act. The PR is closed rather than left open, so nothing is unlanded, and the
 anchor is disposed rather than bare-closed, so `check-closed-implies-landed`
 exempts it the way it exempts any disposal. `pr-facts.sh` then finds an
-already-closed anchor and files no re-ask visit, where a PR closed out-of-band
-would have driven `pull_request → abandoned` and a fresh visit. A bare close of
+already-closed anchor and files no re-ask gate, where a PR closed out-of-band
+would have driven `pull_request → abandoned` and a fresh human gate. A bare close of
 a subject still carrying a non-closed `merge_result` remains the violation
 `lifecycle.sh reopen` repairs; retiring is the sanctioned path, not an
 exception to the invariant.
@@ -1034,18 +1222,18 @@ INTENT on the still-open anchor — `assets/scripts/pr-dispose.sh` stamps
 optional `_store` naming the intended `bead-rehome.sh` invocation — and closes
 the PR. `pr-facts.sh`'s close arm reads that marker when the PR reaches CLOSED
 and runs `bead-rehome.sh` to consummate the terminal close, so `bead-rehome.sh`
-stays the sole writer of `gc.superseded_by` and the disposition reaches the
+stays the sole writer of the disposition edge and the disposition reaches the
 same terminal state through the same verb. The same consummation disposes the
 branch's parked rebase and rework children BEFORE it closes the anchor: a rework
 child holds a `blocks` edge on the anchor, so an open one refuses the anchor's
-own non-force close and would strand it open with its pointer already stamped.
+own non-force close and would strand it open.
 Each exists only to carry a branch the closed PR will never merge, so an open,
 unheld one is closed through `bead-rehome.sh` as `not-needed` against the
 anchor's successor — clearing that hold and leaving no husk to re-offer to a
 pool; a child a worker still holds (`in_progress`) or one an operator froze
 (`rebase_hold`) is left alone, and its hold then keeps the anchor open until it
 resolves. A close with no recorded disposition still transitions to `abandoned`
-and files the rework-or-close visit.
+and files the rework-or-close human gate.
 
 That drop reaches only the parked, branch-carrying children. The rest of the
 machine review scaffolding is a fix unit, the finding beads and the validation
@@ -1053,10 +1241,10 @@ pass. Each holds a `blocks` edge on the anchor, and a fix unit also blocks every
 must-fix finding it answers, so an open one refuses the anchor's close the same
 way. `scaffolding-sweep.sh` retires it. The cadence runs it as arm 9 over every
 disposed anchor, and the consummation runs it for its own anchor just before the
-close, so the close is not refused and escalated over scaffolding that arm 9
+close, so the close is not refused and put to a person over scaffolding that arm 9
 would retire later in the same pass. It closes every
 `task_kind=validation|finding|rework` bead whose `anchor_bead` names a disposed,
-non-merged anchor (`gc.superseded_by` or `gc.pr_close_disposition_kind`
+non-merged anchor (its disposition edge or `gc.pr_close_disposition_kind`
 present) as `gc.outcome=moot`, reworks before the findings they block, so no
 close is refused by a blocker still open in the same pass. A bead an operator
 froze (`rebase_hold`) is left standing, like a frozen child.
@@ -1070,33 +1258,34 @@ objection, with no `anchor_bead`, so it reaches a first reaction like any
 discovered work, and the finding closes through `bead-rehome.sh` pointed at it.
 When a finding's comment line does not read, the consummation leaves the close
 to the next pass rather than closing the anchor before the finding is judged.
-The sweep never touches `task_kind=review` (`review-sweep.sh`'s) or
-`task_kind=visit`: a disposed PR does not moot the human conversation about why
-it closed, and `finalize-gate.sh` holds the anchor's own close while a visit is
-open. Clearing the machine side is what lets that close land once the human side
-is done.
+The sweep never touches `task_kind=review` (`review-sweep.sh`'s) or the human
+side, a human gate or a conversation: a disposed PR does not moot the
+human conversation about why it closed, and `finalize-gate.sh` holds the
+anchor's own close while a human gate on it is open. Clearing the machine side
+is what lets that close land once the human side is done.
 
-The consummation also retires, before the close, the visits `pr-facts.sh`
-filed on the anchor to hold the PR's merge until a person answered: rework or
-close, a moved base, feedback nothing routed, review threads nobody engaged,
-threads branch protection requires resolved, and red checks parked to a person.
-A PR closed with a recorded disposition has no merge left to hold, and what
-those visits raised stays on the PR. Each is closed `gc.outcome=moot`. One a
-person is engaged in keeps holding the close until they conclude it. The
-exception is the rework-or-close visit: the disposition answers its question,
-and the sitting that recorded the disposition may still hold it, so it is
-retired over the claim. Every other visit on the anchor still holds the close.
+The consummation also withdraws, before the close, the human gates
+`pr-facts.sh` filed on the anchor to hold the PR's merge until a person
+answered: rework or close, a moved base, feedback nothing routed, review threads
+nobody engaged, threads branch protection requires resolved, and red checks
+parked to a person. A PR closed with a recorded disposition has no merge left to
+hold, and what those gates raised stays on the PR. Each is resolved with a
+reason headed `moot:`. One a person is assigned keeps holding the close until
+they clear it. The exception is the rework-or-close gate: the disposition
+answers its question, so it is withdrawn whoever is assigned it. Every other
+open human gate on the anchor still holds the close.
 
 When `bead-rehome.sh` refuses the close, the anchor stays open with its marker,
-and the arm files one visit under `pr-dispose-failed.<num>` naming the
-obstruction. Every later pass retries the close. That visit tracks the anchor,
+and the arm files one human gate under `pr-dispose-failed.<num>` naming the
+obstruction. Every later pass retries the close. That gate blocks the anchor,
 but it reports the arm's own failed close and asks for exactly that retry. So
-the retry names its key to `finalize-gate.sh`, which excepts every visit filed
-under that key for the anchor while nobody is engaged in it, and the arm
-retracts those visits as moot once the close lands. A visit a person has engaged
-holds the close like any other, and every other open visit on the anchor still
-holds it. When a retry is refused for a different obstruction than the one the
-visit names, the arm rewrites the description of each such visit nobody is
-engaged in to name the new one. A retract that does not land is retried by
-every full pass, which retracts an open `pr-dispose-failed.<num>` visit nobody
-is engaged in once its anchor reads closed with its `gc.superseded_by` pointer.
+the retry names its key to `bead-rehome.sh`, whose finalize gate excepts every
+gate filed under that key on the anchor that no person is assigned, and which
+withdraws those gates just before the close, once nothing else would hold it. A
+gate a person is assigned holds the close like any other, and every other open
+human gate on the anchor still holds it. When a retry is refused for a
+different obstruction than the one the gate names, the arm rewrites the
+description of each such gate no person is assigned to name the new one. A
+withdrawal that does not land leaves its gate open, and bd refuses the close
+while it is, so the anchor never closes past its own report and nothing is left
+open behind it.

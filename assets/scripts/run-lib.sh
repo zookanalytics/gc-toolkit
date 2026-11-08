@@ -30,9 +30,8 @@
 #                                   poured over <id> when it is an input
 #                                   convoy; [] for any other bead, and for one
 #                                   the store does not return
-#   run_lib map <reader> [all]      every live run in the store, or every run
-#                                   with `all`, for a caller that judges many
-#                                   beads in one pass
+#   run_lib map <reader>            every live run in the store, for a caller
+#                                   that judges many beads in one pass
 # <reader> is a command the caller defines: given bd's own arguments, it runs
 # `gc bd` or `bd` against the caller's one store, with the pinning and time
 # bound the caller needs, and exits non-zero when the read fails. A read that
@@ -48,8 +47,10 @@
 # run works, and self-review-check.sh and gascity-keeper's rebase-check.sh take
 # the bead their check loop's run works, which is the bead they certify.
 # work-tree-holder.sh takes the bead each claimed step's run works when it asks
-# whether a live session is working a tree. gate-ensure.sh takes the runs
-# poured over a review, live or not, to judge whether a pour still drives it.
+# whether a live session is working a tree, work-gate.sh takes the runs that work its
+# bead, to refuse a second run of its formula, and work-setup.sh takes the runs that
+# work a bead whose tree holds a branch, to tell a sibling from a tree left behind.
+# gate-ensure.sh takes the runs poured over a review, live or not, to judge whether a pour still drives it.
 # gc-helm.sh ends the live runs beneath an anchor it releases, and its park
 # survey applies run_rows to the listing it reads to find a bead's workflows.
 # queue-priority.sh takes the live runs that work a bead it settles, to write
@@ -66,8 +67,12 @@
 # whether its work has landed.
 # tools/gc-proactive.sh drops the beads the map's live runs work from a scan,
 # and refuses a first reaction to a bead a live run works.
-# until-resolved.sh takes the runs that work a bead it is about to dispose,
-# which live-work.sh judges.
+# blocker-holder.sh takes the runs that work each live blocker of an anchor
+# that no route or claim marks, to tell one a live run works from one nothing
+# does.
+# store-only-exit.sh takes the run whose root its session's claimed step
+# names, to confirm it is live and works the bead over the step's --convoy
+# before that root holds the validating closer it arms until the run ends.
 #
 # run-lib.test.sh runs every verb over run-lib.fixture.json, the cases a copy
 # of the rule in another language must agree with, as the Go copy in
@@ -89,7 +94,7 @@
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 
-# How many convoy ids one read of convoy rows names, so a map of every run
+# How many convoy ids one read of convoy rows names, so a map of every live run
 # never builds an argument the store refuses.
 RUN_LIB_ID_BATCH=200
 
@@ -142,8 +147,8 @@ run_lib() {
             [ -n "${3:-}" ] || { echo "run_lib $verb: no bead given" >&2; return 2; }
             "run_lib_$verb" "$reader" "$3" ;;
         map)
-            case "${3:-}" in ''|all) ;; *) echo "run_lib map: unknown scope '$3'" >&2; return 2 ;; esac
-            run_lib_map "$reader" "${3:-}" ;;
+            [ -z "${3:-}" ] || { echo "run_lib map: unexpected argument '$3'" >&2; return 2; }
+            run_lib_map "$reader" ;;
         *) echo "run_lib: unknown verb '$verb'" >&2; return 2 ;;
     esac
 }
@@ -151,18 +156,21 @@ run_lib() {
 # run_lib_read <reader> <bd args...> — one read, printed only when it is a JSON
 # array of objects. The `gc bd:` notice a store can print on stdout is dropped
 # while the newline that ends its line still stands, then the read is
-# scrubbed, as bd-lib.sh's bd_json does.
+# scrubbed, as bd-lib.sh's bd_json does. A read with no control byte and no
+# notice at its start is one line the two leave as it is.
 run_lib_read() {
     local reader="$1" raw
     shift
     raw="$("$reader" "$@" </dev/null 2>/dev/null)" || return 1
-    raw="$(printf '%s\n' "$raw" | grep -a -vE '^gc bd:' | scrub)"
+    case "$raw" in
+        *[[:cntrl:]]*|'gc bd:'*) raw="$(printf '%s\n' "$raw" | grep -a -vE '^gc bd:' | scrub)" ;;
+    esac
     printf '%s' "$raw" | jq -e 'type == "array" and all(.[]; type == "object")' >/dev/null 2>&1 || return 1
     printf '%s' "$raw"
 }
 
 # run_lib_join <array-json> <array-json> — the two arrays as one, joined on
-# stdin, since a map of every run outgrows what one argument can carry.
+# stdin, since a map of every live run can outgrow what one argument carries.
 run_lib_join() {
     { printf '%s\n' "$1"; printf '%s\n' "$2"; } | jq -cs 'add' 2>/dev/null
 }
@@ -221,18 +229,12 @@ run_lib_subject() {
     printf '%s' "$row" | jq -c --arg id "$id" "$RUN_JQ"'run_rows | map(select(.root == $id or .convoy == $id))' 2>/dev/null
 }
 
-# run_lib_map <reader> [all] — every root that names an input convoy or
-# records an issue, live or with `all` of every status, and the convoys they
-# name.
+# run_lib_map <reader> — every live root that names an input convoy or records
+# an issue, and the convoys they name.
 run_lib_map() {
-    local reader="$1" scope="${2:-}" roots legacy rows
-    if [ "$scope" = all ]; then
-        roots="$(run_lib_read "$reader" list --has-metadata-key gc.input_convoy_id --all --include-ephemeral --json --limit 0)" || return 1
-        legacy="$(run_lib_read "$reader" list --has-metadata-key gc.var.issue --all --include-ephemeral --json --limit 0)" || return 1
-    else
-        roots="$(run_lib_read "$reader" list --has-metadata-key gc.input_convoy_id --include-ephemeral --json --limit 0)" || return 1
-        legacy="$(run_lib_read "$reader" list --has-metadata-key gc.var.issue --include-ephemeral --json --limit 0)" || return 1
-    fi
+    local reader="$1" roots legacy rows
+    roots="$(run_lib_read "$reader" list --has-metadata-key gc.input_convoy_id --include-ephemeral --json --limit 0)" || return 1
+    legacy="$(run_lib_read "$reader" list --has-metadata-key gc.var.issue --include-ephemeral --json --limit 0)" || return 1
     rows="$(run_lib_join "$roots" "$legacy")" || return 1
     rows="$(run_lib_convoys "$reader" "$rows")" || return 1
     printf '%s' "$rows" | jq -c "$RUN_JQ"'run_rows' 2>/dev/null

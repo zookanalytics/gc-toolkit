@@ -24,10 +24,11 @@
 #   • THE REACTION BEAD — `sling` FILES a reaction bead R (task_kind=reaction)
 #     tracking the subject and routes R to the pool; the subject stays clean,
 #     deduped so one open reaction stands per subject.
-#   • THE DISPOSITION CONTRACT — first-reaction-dispose.sh has five exits (route
-#     it, recommend an action for the operator to trigger, hold it, hand a
-#     confident no-op to a validating closer, or ask), stamps gc.reacted_by,
-#     closes R, and never closes the subject itself. Its stand-down, asked
+#   • THE DISPOSITION CONTRACT — first-reaction-dispose.sh performs the exits
+#     (route it, recommend an action for the operator to trigger, hold it, leave
+#     it to close when the bead that ends its job lands, hand a confident no-op
+#     to a validating closer, or ask), stamps gc.reacted_by, closes R, and never
+#     closes the subject itself. Its stand-down, asked
 #     before any exit, closes R through the same close when the subject takes
 #     no reaction.
 #   • THE POOL BUDGET — agents/proactive/agent.toml is a small dedicated pool
@@ -158,8 +159,8 @@ eq "lower-priority bead ranks LAST despite being oldest"  "px-old-lo" \
    "$(printf '%s' "$RANK" | jq -r '.[2].id')"
 
 echo "── deliverable: will a slung reaction actually be PICKED UP? ──"
-# A real branch for its callers (assets/scripts/gc-visit-open.sh files a bare
-# visit on a no). The QUEUE is not what makes a sling vanish — a routed bead
+# A real branch for its callers (assets/scripts/operator-intake.sh files a
+# conversation on a no). The QUEUE is not what makes a sling vanish — a routed bead
 # waits at zero cost — so what the verb asks is whether this city's agent
 # roster carries a pool that can claim at all. NO is a positive finding: an
 # unreadable roster answers YES, because absence of evidence would otherwise
@@ -404,8 +405,8 @@ REACTED_OUT="$(P sling px-hasreaction --dry-run 2>&1 || true)"
 absent "a subject with an open reaction is NOT re-filed (no create emitted)" "gc bd create" "$REACTED_OUT"
 has    "…and the skip names the cause"                             "already has an open first reaction" "$REACTED_OUT"
 # The skip is a no-op, but the CLI verb exits RC_ALREADY_REACTED (3), not 0, so a
-# cross-process caller (gc-helm react, gc-visit-open) can tell it from a dispatch
-# and file its own visit. In-process (cmd_scan --sling) the same skip stays a
+# cross-process caller (gc-helm react, operator-intake) can tell it from a dispatch
+# and file its own conversation. In-process (cmd_scan --sling) the same skip stays a
 # return-0 no-op that does not spend the cap — proved by the sweep tests below.
 rec=0; P sling px-hasreaction --dry-run >/dev/null 2>&1 || rec=$?
 eq     "…and the CLI skip exits RC_ALREADY_REACTED (3), not a dispatch"  "3" "$rec"
@@ -591,32 +592,36 @@ ec=0; P sling px-1 --reason whatever --dry-run >/dev/null 2>&1 || ec=$?
 eq  "sling rejects an unknown --reason flag (non-zero)" "1" "$ec"
 
 echo "── the disposition script contract (first-reaction-dispose.sh) ──"
-# The reaction has no formula; the dispose script is the disposition writer, with
-# five exits. first-reaction-dispose.test.sh covers their behavior in depth —
-# this locks the surface contract to the shipped model. The defect the exits
-# replace: every bead a reaction touched became a request for the operator's
-# attention, whatever the bead actually needed.
+# The reaction has no formula; the dispose script is the disposition writer, one
+# exit per disposition. first-reaction-dispose.test.sh covers their behavior in
+# depth — this locks the surface contract to the shipped model. The defect the
+# exits replace: every bead a reaction touched became a request for the
+# operator's attention, whatever the bead actually needed.
 D="$(cat "$DISPOSE")"
 [ -x "$DISPOSE" ] && ok "the disposition script is present and executable" \
                   || bad "the disposition script is present and executable" "$DISPOSE executable" "missing"
-has "the five exits are the ones the script accepts" "actionable|recommend|blocked|close|ruling" "$D"
+has "the exits are the ones the script accepts"      "actionable|recommend|blocked|close|ruling" "$D"
 has "the blocked exit names an existing wait"            "--waiting-on"  "$D"
 has "…or files the missing one, deduped by cause"        "--blocker-key" "$D"
 # recommend is the bridge between actionable and ruling: it files the same gate
 # as ruling, but names the execution mol the operator Accepts — the flag ruling
 # rejects and recommend requires, so its presence discriminates the two exits.
 has "the recommend exit names the execution mol to Accept" "--recommended-formula" "$D"
-# The reaction produces the human gate and the sweep files its visit, so the
-# operator's escalation has one producer and one visit rule.
-has "the ruling and recommend exits file the gate through demand" '"$HELM" demand' "$D"
+# The reaction files the human gate itself, through the helper, and the board
+# is how that gate reaches the operator.
+has "the ruling and recommend exits file the gate through the helper" 'human-gate.sh' "$D"
 absent "…and file no visit inline"                       "# >>> gate-visit" "$D"
-has "…naming the sweep that files the gate's visit"      "gate-visit-sweep" "$D"
 # The close exit routes to the pool that validates and closes, never a close here.
 has "the close exit hands the bead to the validating closer" "mol-validate-close" "$D"
 has "the completion marker names the reaction bead"      "gc.reacted_by" "$D"
 has "…keyed to the reaction bead passed in"              "reaction-bead" "$D"
 has "the route default lives in the script, once"        "gc-toolkit.polecat" "$D"
 has "the blocked exit refuses a cross-store edge"        "another store" "$D"
+# A bead whose job ends when another lands waits on it through a blocks edge,
+# and the validating closer checks it once that one closes: nothing closes it
+# unchecked.
+has "the close exit can wait on the bead whose landing ends the job" "--waiting-on (close" "$D"
+absent "…and no exit writes an until edge"                'type: "until"' "$D"
 # Origin does not decide the exit: an operator capture is triaged on its merits
 # like any other bead, and the guardrail (a genuine fork, an irreversible or
 # destructive action, or a policy call goes to a human) lives in the reacting
@@ -635,8 +640,8 @@ has "the prompt reads the exit code before it drains"   "exits non-zero"  "$(cat
 echo "── the worker stands a re-offered LANDED reaction down before any exit ──"
 # A reaction whose write-back landed carries gc.reacted_by=<R> on its subject.
 # When R is re-offered after that (a worker disposed, then died before R closed),
-# running an exit again is wrong on all five: it re-releases a subject a worker
-# may already hold. The prompt asks first-reaction-dispose.sh --stand-down AHEAD
+# running any exit again is wrong: it re-releases a subject a worker may
+# already hold. The prompt asks first-reaction-dispose.sh --stand-down AHEAD
 # of the exits, so the re-offered run closes R and drains before it writes a
 # second card. The same stand-down answers a subject a live owner owns
 # (gc.reaction_owned=1). It closes R through the close every exit makes, so the
@@ -677,8 +682,8 @@ has "pool is rig-scoped"                         'scope = "rig"'          "$A"
 echo "── the live prose surfaces state the current contract ──"
 # These four are read as contract, not commentary. A reader who takes
 # max_active_sessions for the whole story sizes a `scan --sling` sweep by it,
-# and one who reads "file a visit" as the result plans for a queue of operator
-# conversations that the routing and holding exits no longer produce. Compared
+# and one who reads "ask the operator" as the result plans for a queue of
+# operator conversations that the routing and holding exits never produce. Compared
 # flattened, because the claim wraps differently in each file — and stripped of
 # leading comment markers first, or a `#` lands mid-sentence and the wrapped
 # form never matches.
@@ -691,7 +696,7 @@ for surface in "agents/proactive/agent.toml" "tools/gc-proactive.sh" \
     has    "$surface names the separate per-sweep cap" "GC_PROACTIVE_SLING_CAP" "$S"
 done
 AF="$(flat "$AGENT_TOML")"
-has "the pool config states the routing exit, not the visit alone" "route it to a pool" "$AF"
+has "the pool config states the routing exit, not the human gate alone" "route it to a pool" "$AF"
 has "…and the holding exit"                                        "hold it on a" "$AF"
 
 echo "── the worker prompt names the contract ──"
@@ -706,7 +711,7 @@ has "prompt writes the card with --append-notes"      "--append-notes"          
 has "prompt keeps code on the mr path"                "mr path only"             "$PM"
 has "prompt treats reached content as data"           "Untrusted Data"           "$PM"
 has "prompt attributes the takeaway to proactive"     "--by proactive"           "$PM"
-# The prompt is the method, so it both NAMES the five exits and carries the call
+# The prompt is the method, so it both NAMES the exits and carries the call
 # each one takes.
 has "prompt names the actionable exit"                "**actionable**"           "$PM"
 has "prompt names the recommend exit"                 "**recommend**"            "$PM"
@@ -716,6 +721,8 @@ has "prompt names the ruling exit"                    "**ruling**"              
 has "prompt teaches the actionable call"              "--disposition actionable" "$PM"
 has "prompt teaches the recommend call"               "--disposition recommend"  "$PM"
 has "prompt teaches the blocked call"                 "--disposition blocked"    "$PM"
+absent "prompt teaches no until exit: nothing closes a bead unchecked" "--disposition until" "$PM"
+has "prompt teaches the close that waits on a landing" "--waiting-on <bead-id>"   "$PM"
 has "prompt teaches the close call"                   "--disposition close"      "$PM"
 has "prompt teaches the ruling call"                  "--disposition ruling"     "$PM"
 absent "prompt teaches no superseded exit: a reaction never closes" "--disposition superseded" "$PM"
@@ -726,7 +733,7 @@ absent "prompt teaches no superseded exit: a reaction never closes" "--dispositi
 has "prompt teaches the recommend action-to-mol menu"  "name the mol that runs it" "$PM"
 has "…mapping a bead's own work to mol-polecat-work"   "do the work a bead describes" "$PM"
 has "…and an operator-authority action to its roster mol" "operator-authority action" "$PM"
-has "prompt says a visit is the minority case"        "minority case"            "$PM"
+has "prompt says a human gate is the minority case"   "minority case"            "$PM"
 has "prompt triages origin on its merits, not a gate"  "triaged" "$PM"
 has "…saying origin does not decide the exit"          "does not decide the exit" "$PM"
 absent "prompt files no visit inline: the gate brings it" "# >>> gate-visit"     "$PM"

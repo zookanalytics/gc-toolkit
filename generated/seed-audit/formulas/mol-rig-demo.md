@@ -22,9 +22,9 @@ which attaches the clip to the PR inline and uncommitted.
 
 Two inputs name the scenario, and the mol needs exactly one: demo_script is a
 ready demo:capture-format script; source_bead is a bead whose work the mol turns
-into a script by following the gc-toolkit.gc-demo-script skill. One input
-names how the rig's app is reached — serve_dir, serve_cmd, or base_url — the
-one rig-specific fact, threaded as a pour var because no rig-to-app map exists.
+into a script by following the gc-toolkit.gc-demo-script skill. One input,
+serve_dir, serve_cmd or base_url, names how the rig's app is reached. It is a
+pour var because no rig-to-app map exists.
 A per-rig default store is tracked separately; this mol reads the target from
 the pour.
 
@@ -32,28 +32,30 @@ The clip is an artifact, never a committed file: it is written outside the repo
 tree and delivered to the PR, because a user-attachments URL is the only
 inline-playable path and no .gitattributes LFS filter covers an MP4.
 
-Contract: single continuation group, run inline in one session. Derive the
-demo-request bead from the input convoy's single member; produce the script;
-capture; deliver or report; close the request bead and the step chain forward;
-drain. On any blocker, escalate.sh files one visit and run-cancel.sh cancels
-the run through gascity before the drain, so a declined demo is never a silent
-strand. A demo's pour carries its vars, so a person re-pours it rather than an
-arm re-slinging it.
+Contract: single continuation group, run in one session, which closes each step
+and takes the next with `gc hook --claim --json`. Derive the demo-request bead
+from the input convoy's single member; produce the script; capture; deliver or
+report; close the request bead and this step; drain. On any blocker, decline.sh
+files one human gate, then cancels the run through gascity and drains, so a
+declined demo is never a silent strand. A demo's pour carries its vars, so a
+person re-pours it rather than an arm re-slinging it.
 NEVER commit the MP4, NEVER close or route a delivered PR's anchor.
 
 
 Required vars:
-  {{rig_name}}: Rig whose app is demoed. Resolved to a checkout path via `gc rig list`; also the default root for a relative serve_dir.
+  {{rig_name}}: Rig whose app is demoed. Resolved to a checkout path via `gc rig list`. The app runs from a detached worktree of that checkout at its HEAD.
 
 Optional vars:
-  {{base_url}}: URL of a server already running, driven as-is. One of serve_dir / serve_cmd / base_url. (default=)
+  {{app_reads_city}}: "true" for a rig whose app reads the city, such as a rig that develops code for a city. A city sets it among the rig's [rigs.formula_vars] in city.toml, and a demo capture then refuses the rig's servers. Any value but "false" counts as "true". demo-engine-lib.sh reads it, and this formula's steps do not use it. (default=false)
+  {{base_url}}: URL of a deployed preview, or of the rig's app that a worktree of the rig serves on this host, driven as-is. A capture refuses any other server on this host, and the rig's app too when city.toml sets the rig's app_reads_city to "true". One of serve_dir / serve_cmd / base_url. (default=)
+  {{binding_prefix}}: The binding the city imports the pack under, with its trailing dot. A step drops the dot to call the pack's own scripts as gc <binding> scripts-dir prints them. Gas City's sling adds it to every pour it makes; a pour that names none takes this default. (default=gc-toolkit.)
   {{capture_mode}}: walkthrough (default, one continuous recorded take) or proof (one checked screenshot per step). (default=walkthrough)
   {{deliver_pr}}: PR number or URL to deliver the clip to, when no deliver_subject names one. Optional. (default=)
   {{deliver_subject}}: A bead whose pr_number/pr_url names the PR to deliver the clip to. Optional; with deliver_pr unset too, the mol reports the artifact path instead of delivering. (default=)
   {{demo_script}}: Path to a ready demo:capture-format markdown script. Use this OR source_bead. Absolute, or relative to the capture session's cwd. (default=)
   {{narrate}}: Narrate the clip when OPENAI_API_KEY is set. 'false' forces a silent, captioned clip. A missing key is always silent, never a failure. (default=true)
-  {{serve_cmd}}: Dev-server command the engine spawns, waits for, and tears down (e.g. 'npm run dev'). One of serve_dir / serve_cmd / base_url. (default=)
-  {{serve_dir}}: Static directory the engine serves with its built-in file server. Absolute, or relative to the rig_name checkout. One of serve_dir / serve_cmd / base_url. (default=)
+  {{serve_cmd}}: Dev-server command the engine spawns, waits for, and tears down (e.g. 'npm run dev'). It runs in a detached worktree of the rig_name checkout at its HEAD, which holds only what the rig commits, so it installs what it needs. One of serve_dir / serve_cmd / base_url. (default=)
+  {{serve_dir}}: Static directory the engine serves with its built-in file server. Absolute, or relative to a detached worktree of the rig_name checkout at its HEAD, so a relative one names a directory the rig commits. One of serve_dir / serve_cmd / base_url. (default=)
   {{serve_port}}: Port for serve_dir / serve_cmd. (default=5173)
   {{source_bead}}: A bead whose work becomes the script, generated by following the gc-toolkit.gc-demo-script skill. Use this OR demo_script. (default=)
 

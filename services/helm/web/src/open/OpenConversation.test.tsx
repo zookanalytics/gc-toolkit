@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OpenConversation } from './OpenConversation';
 
 // What this file guards is the operator's READING of the action: that a click
-// files the visit, that "filed" and "already open" do not read the same, that a
+// files the conversation, that "filed" and "already open" do not read the same, that a
 // failure says WHICH failure, and that nothing here claims to have attached the
 // operator to anything.
 //
@@ -35,8 +35,8 @@ beforeEach(() => {
     json({
       bead: BEAD_ID,
       outcome: 'filed',
-      visit: 'tk-v1s1t',
-      message: `visit tk-v1s1t filed on ${BEAD_ID} — parked on the helm board (gc.routed_to=human); no session spawned.`,
+      conversation: 'tk-v1s1t',
+      message: `conversation tk-v1s1t filed on ${BEAD_ID} — waiting in the operator's queue; no session spawned.`,
     });
   vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
@@ -51,7 +51,7 @@ afterEach(() => {
 });
 
 function clickOpen() {
-  fireEvent.click(screen.getByRole('button', { name: /file a visit/i }));
+  fireEvent.click(screen.getByRole('button', { name: /file a conversation/i }));
 }
 
 describe('OpenConversation', () => {
@@ -71,35 +71,35 @@ describe('OpenConversation', () => {
     expect((call.init?.headers as Record<string, string>)?.['X-GC-Request']).toBe('true');
   });
 
-  it('reports a filed visit without claiming to have attached the operator', async () => {
+  it('reports a filed conversation without claiming to have attached the operator', async () => {
     render(<OpenConversation beadId={BEAD_ID} />);
     clickOpen();
 
     const status = await screen.findByRole('status');
-    expect(text(status)).toContain('A visit is parked on the board.');
+    expect(text(status)).toContain('A conversation waits in your queue.');
     // The tool's own sentence survives to the browser.
-    expect(text(status)).toContain('visit tk-v1s1t filed on');
+    expect(text(status)).toContain('conversation tk-v1s1t filed on');
     // …and the one thing the tool does not say.
     expect(text(status)).toMatch(/does not attach you/i);
   });
 
-  it('says something DIFFERENT when a visit was already open', async () => {
+  it('says something DIFFERENT when a conversation already waits', async () => {
     reply = () =>
       json({
         bead: BEAD_ID,
         outcome: 'existing',
-        visit: 'tk-old99',
-        message: `visit tk-old99 is already open for ${BEAD_ID} — parked on the helm board until an operator engages it.`,
+        conversation: 'tk-old99',
+        message: `conversation tk-old99 is already open for ${BEAD_ID} — waiting in the operator's queue until an operator engages it.`,
       });
     render(<OpenConversation beadId={BEAD_ID} />);
     clickOpen();
 
     const status = await screen.findByRole('status');
-    expect(text(status)).toContain('A visit is already open on this bead.');
+    expect(text(status)).toContain('A conversation already waits on this bead.');
     expect(text(status)).toContain('tk-old99');
-    // Shown the filed line here, an operator would believe a NEW visit was just
+    // Shown the filed line here, an operator would believe a NEW conversation was just
     // parked. It was not — the tool deliberately filed nothing.
-    expect(text(status)).not.toContain('A visit is parked on the board.');
+    expect(text(status)).not.toContain('A conversation waits in your queue.');
   });
 
   // THE OPERATOR'S ACTUAL COMPLAINT: different operator moves must not render
@@ -116,24 +116,24 @@ describe('OpenConversation', () => {
       {
         reason: 'verb_failed',
         error:
-          "bead not found: 'zz-nope1' — its id prefix 'zz' matches no rig in 'gc rig list'. No visit filed.",
+          "bead not found: 'zz-nope1' — its id prefix 'zz' matches no rig in 'gc rig list'. No conversation filed.",
         status: 422,
         want: /matches no rig/i,
       },
       {
         reason: 'timeout',
         // NOT "nothing was filed" (review of PR#421, P1): the tool creates the
-        // visit before it routes and links it, so a timeout cannot prove the
+        // conversation before it reads its edge back, so a timeout cannot prove the
         // write did not land. The copy has to send the operator to look.
-        error: 'the visit tool did not finish in time',
+        error: 'the write tool did not finish in time',
         status: 504,
         want: /may still have gone through|check the bead/i,
       },
       {
         reason: 'unavailable',
-        error: 'this board cannot file visits',
+        error: 'this board cannot file conversations',
         status: 503,
-        want: /without the visit tool|unreachable/i,
+        want: /without the write tool|unreachable/i,
       },
     ];
 
@@ -164,7 +164,7 @@ describe('OpenConversation', () => {
     // handler stopped tying the subprocess to the request, a dropped connection
     // loses the RESPONSE, not necessarily the write (review of PR#421, P1).
     expect(text(alert)).toMatch(/may still have been filed/i);
-    expect(text(alert)).not.toMatch(/no visit was filed/i);
+    expect(text(alert)).not.toMatch(/no conversation was filed/i);
   });
 
   it('falls back to the status code when the body carries no message', async () => {
@@ -184,12 +184,12 @@ describe('OpenConversation', () => {
     const { rerender } = render(<OpenConversation beadId={BEAD_ID} />);
     clickOpen();
     const status = await screen.findByRole('status');
-    expect(text(status)).toContain('visit tk-v1s1t filed on');
+    expect(text(status)).toContain('conversation tk-v1s1t filed on');
 
     rerender(<OpenConversation beadId="tk-other9" />);
     expect(screen.queryByRole('status')).toBeNull();
     // …and the action is offered afresh for the new bead.
-    expect(screen.getByRole('button', { name: /file a visit/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /file a conversation/i })).toBeTruthy();
   });
 
   it('drops a failure when the panel is pointed at a different bead', async () => {
@@ -215,11 +215,11 @@ describe('OpenConversation', () => {
 
     rerender(<OpenConversation beadId="tk-other9" />);
     release(
-      json({ bead: BEAD_ID, outcome: 'filed', visit: 'tk-v1s1t', message: 'visit tk-v1s1t filed on x' }),
+      json({ bead: BEAD_ID, outcome: 'filed', conversation: 'tk-v1s1t', message: 'conversation tk-v1s1t filed on x' }),
     );
     // Give the settled promise a turn to run.
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: /file a visit/i })).toBeTruthy(),
+      expect(screen.getByRole('button', { name: /file a conversation/i })).toBeTruthy(),
     );
     expect(screen.queryByRole('status')).toBeNull();
   });
@@ -237,12 +237,12 @@ describe('OpenConversation', () => {
     const button = await screen.findByRole('button', { name: /filing…/i });
     expect((button as HTMLButtonElement).disabled).toBe(true);
 
-    // A second click while in flight must not queue a second visit.
+    // A second click while in flight must not queue a second conversation.
     fireEvent.click(button);
     expect(calls).toHaveLength(1);
 
     release(
-      json({ bead: BEAD_ID, outcome: 'filed', visit: 'tk-v', message: 'visit tk-v filed on x' }),
+      json({ bead: BEAD_ID, outcome: 'filed', conversation: 'tk-v', message: 'conversation tk-v filed on x' }),
     );
     await screen.findByRole('status');
     expect(calls).toHaveLength(1);

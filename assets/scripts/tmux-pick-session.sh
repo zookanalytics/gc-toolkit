@@ -86,6 +86,19 @@ sq() {
     printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
 }
 
+# menu_text <text> — $1 with every # doubled, so a display-menu item name or -T
+# title shows it as written. tmux expands both as formats, where #(...) runs a
+# shell command, #{...} expands and #[...] restyles, and a row's cells are text
+# other components write: session names, session titles, pane commands, and
+# pane titles, which any program running in a pane can set. A run of two or
+# more # can show shorter than written, and still nothing in it expands.
+# LC_ALL=C keeps sed byte-wise: under a UTF-8 locale BSD sed prints nothing for
+# a line holding an invalid byte, and an empty name is a separator that shifts
+# every argument after it.
+menu_text() {
+    printf '%s' "$1" | LC_ALL=C sed 's/#/##/g'
+}
+
 # Supervisor API discovery. The port honors ~/.gc/supervisor.toml (default
 # 8372). The city name is the [[cities]] entry in ~/.gc/cities.toml whose path
 # matches the city path, else that path's basename.
@@ -479,7 +492,7 @@ while IFS="$TAB" read -r row_type rig c3 c4 c5 c6 c7 c8; do
         else
             label="-  ── $rig ──  "
         fi
-        set -- "$@" "$label" "" ""
+        set -- "$@" "$(menu_text "$label")" "" ""
         menu_idx=$((menu_idx + 1))
         emitted_header=1
         continue
@@ -514,7 +527,7 @@ while IFS="$TAB" read -r row_type rig c3 c4 c5 c6 c7 c8; do
     else
         key=""
     fi
-    set -- "$@" "$label" "$key" "$cmd_str"
+    set -- "$@" "$(menu_text "$label")" "$key" "$cmd_str"
     [ "$row_type" = "S" ] && [ "$name" = "$ACTIVE" ] && ACTIVE_IDX=$menu_idx
     i=$((i+1))
     menu_idx=$((menu_idx+1))
@@ -539,7 +552,7 @@ case "$("$KEEPER_TOGGLE" ${EXPLICIT_CITY_PATH:+--city-path "$EXPLICIT_CITY_PATH"
     down) keeper_label="  [ ⚡ pin keeper ]  " ;;
     *)    keeper_label="  [ keeper… ]  " ;;
 esac
-set -- "$@" "$keeper_label" "," "run-shell -b \"$KEEPER_TOGGLE toggle$reinvoke_suffix\""
+set -- "$@" "$(menu_text "$keeper_label")" "," "run-shell -b \"$KEEPER_TOGGLE toggle$reinvoke_suffix\""
 
 if [ "$ALL" -eq 1 ]; then
     set -- "$@" "  [ show fewer ]  " "." "run-shell \"$SCRIPT$reinvoke_suffix\""
@@ -548,7 +561,7 @@ else
 fi
 
 if [ "$ACTIVE_IDX" -ge 0 ]; then
-    gcmux display-menu -T "$MENU_TITLE" -x C -y C -C "$ACTIVE_IDX" -- "$@"
+    gcmux display-menu -T "$(menu_text "$MENU_TITLE")" -x C -y C -C "$ACTIVE_IDX" -- "$@"
 else
-    gcmux display-menu -T "$MENU_TITLE" -x C -y C -- "$@"
+    gcmux display-menu -T "$(menu_text "$MENU_TITLE")" -x C -y C -- "$@"
 fi

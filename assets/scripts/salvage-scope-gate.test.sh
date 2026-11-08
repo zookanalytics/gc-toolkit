@@ -2,42 +2,42 @@
 # Hermetic test for the witness-patrol SALVAGE SCOPE GATE.
 #
 # Orphan recovery (mol-witness-patrol, step recover-orphaned-beads) salvages a
-# dead owner's worktree in part 3, checks whether its branch merged in part 4,
-# and hands the bead to orphan-dispose.sh for disposal in part 5. Salvage and
+# dead owner's worktree, checks whether its branch merged, and hands the bead to
+# orphan-dispose.sh for disposal. Salvage and
 # the merge check read metadata.work_dir and metadata.branch, which a polecat
-# stamps on the work (source) bead alone. A visit, a review, a graph.v2 step and
-# a graph.v2 root carry neither. A review's review_branch names the anchor under
+# stamps on the work (source) bead alone. A review, a graph.v2 step and a
+# graph.v2 root carry neither. A review's review_branch names the anchor under
 # review, not work of its own.
 #
 # The scope gate classifies the bead in the order orphan-dispose.sh uses: a
-# visit, then a review (both by task_kind), then a graph.v2 root, then a
-# graph.v2 step, else a source. It sets IS_WORK_BEAD=1 only for a source, and
-# salvage and the merge check run only when IS_WORK_BEAD=1. A visit, review,
-# step or root skips both checks, so salvage files no witness-salvage-refused
+# review (by task_kind), then a graph.v2 root, then a graph.v2 step, else a
+# source. It sets IS_WORK_BEAD=1 only for a source, and salvage and the merge
+# check run only when IS_WORK_BEAD=1. A review, step or root skips both checks,
+# so salvage files no witness-salvage-refused
 # for it and the merge check escalates no witness-branch-recovery-unknown. It
-# still reaches part 5, where orphan-dispose.sh releases or skips it by the same
-# class. The nothing-to-salvage gate gives the same path to a source bead that
-# carries neither a work_dir nor a branch, since it has no worktree to salvage
-# and no branch to check.
+# still reaches the disposal, where orphan-dispose.sh releases or skips it by
+# the same class. The nothing-to-salvage gate gives the same path to a source
+# bead that carries neither a work_dir nor a branch, since it has no worktree to
+# salvage and no branch to check.
 #
 # What is exercised here:
 #   * the gate EXTRACTED VERBATIM from the formula (between the salvage-scope-gate
 #     markers), run exactly as the witness runs it — BEAD_JSON from `gc bd show`,
 #     no set -e — so the test cannot drift from the shipped instruction;
-#   * IS_WORK_BEAD across the five shapes recovery hands part 3, the precedence
-#     (a visit outranks a step_ref), and the fail-safe (an unreadable bead
+#   * IS_WORK_BEAD across the five shapes recovery hands salvage, the precedence
+#     (a review outranks a step_ref), and the fail-safe (an unreadable bead
 #     defaults to the work-bead path, so a real orphan is never skipped);
 #   * CONFORMANCE: the gate and the real orphan-dispose.sh run over ONE store and
 #     must agree — class=source iff IS_WORK_BEAD=1 — so the two classifiers cannot
 #     drift apart;
 #   * the NOTHING-TO-SALVAGE gate, extracted verbatim and run over work_dir/branch
 #     combinations: a source bead with neither never had a worktree, so salvage
-#     and part 4 skip it rather than file witness-salvage-refused and escalate
-#     witness-branch-recovery-unknown for a branch that never existed;
-#   * static wiring: the salvage refuse-branch and part 4 branch on IS_WORK_BEAD
-#     and on NOTHING_TO_SALVAGE, and both gates are defined before the first
-#     salvage `git add -A`, so an edit that drops either fails here rather than
-#     silently filing the no-signal escalations;
+#     and the merge check skip it rather than file witness-salvage-refused and
+#     escalate witness-branch-recovery-unknown for a branch that never existed;
+#   * static wiring: the salvage refuse-branch and the merge check branch on
+#     IS_WORK_BEAD and on NOTHING_TO_SALVAGE, and both gates are defined before
+#     the first salvage `git add -A`, so an edit that drops either fails here
+#     rather than silently filing the no-signal escalations;
 #   * the formula parses as TOML.
 #
 # No live city, Dolt, network, or beads — stubs from test-harness.sh only.
@@ -79,10 +79,10 @@ gate_says() {
   ' "$TMP/gate.sh" 2>/dev/null
 }
 
-# --- The shapes recovery hands part 3 (as in orphan-dispose.test.sh). ----------
+# --- The shapes recovery hands salvage (as in orphan-dispose.test.sh). --------
 # The step's assignee and gc.session_id both name the dead session; the root
-# carries gc.kind/gc.formula_contract and only gc.session_name; the visit and the
-# review carry task_kind (a review's review_branch names the anchor under review,
+# carries gc.kind/gc.formula_contract and only gc.session_name; the review
+# carries task_kind (a review's review_branch names the anchor under review,
 # not work of its own); the work bead carries a branch and no kind/step markers.
 # The pre-work source bead (tk-bare) carries neither work_dir nor branch — its
 # owner died before workspace-setup — so it classifies as a source the
@@ -99,9 +99,6 @@ fixture() {
      "metadata":{"gc.kind":"workflow","gc.formula_contract":"graph.v2",
                  "gc.input_convoy_id":"tk-convoy","gc.routed_to":"gc-toolkit/gc-toolkit.polecat",
                  "gc.session_name":"polecat-2-pool"}},
-    {"id":"tk-visit","status":"in_progress","assignee":"hq-dead","title":"visit",
-     "metadata":{"task_kind":"visit","gc.routed_to":"gc-toolkit/gc-toolkit.converse",
-                 "gc.continuation_group":"cg-visit","gc.session_id":"hq-dead"}},
     {"id":"tk-review","status":"in_progress","assignee":"hq-dead","title":"Review branch polecat/tk-anc -> main: a finding",
      "metadata":{"task_kind":"review","check_name":"codex","anchor_bead":"tk-anc",
                  "review_branch":"polecat/tk-anc","review_base":"main",
@@ -121,17 +118,16 @@ echo "--- behavioral matrix ---"
 fixture
 eq "$(gate_says tk-step)"  "0" "graph.v2 step  -> not a work bead (skip salvage)"
 eq "$(gate_says tk-root)"  "0" "graph.v2 root  -> not a work bead (skip salvage)"
-eq "$(gate_says tk-visit)" "0" "visit          -> not a work bead (skip salvage)"
 eq "$(gate_says tk-review)" "0" "review         -> not a work bead (skip salvage/verify)"
 eq "$(gate_says tk-work)"  "1" "source work bead -> IS_WORK_BEAD=1 (salvage runs)"
 eq "$(gate_says tk-bare)"  "1" "pre-work source bead, no work_dir/branch -> IS_WORK_BEAD=1"
 
-# A visit that also carries step metadata is still a visit — task_kind outranks a
-# step_ref, exactly as orphan-dispose.sh's classification order does.
-store '[{"id":"tk-v2","status":"in_progress","assignee":"hq-dead","title":"visit",
-         "metadata":{"task_kind":"visit","gc.step_ref":"mol-visit.converse",
+# A review that also carries step metadata is still a review — task_kind
+# outranks a step_ref, exactly as orphan-dispose.sh's classification order does.
+store '[{"id":"tk-rv2","status":"in_progress","assignee":"hq-dead","title":"review",
+         "metadata":{"task_kind":"review","gc.step_ref":"mol-review.review",
                      "gc.routed_to":"r","gc.session_id":"hq-dead"}}]'
-eq "$(gate_says tk-v2)" "0" "task_kind=visit outranks a step_ref"
+eq "$(gate_says tk-rv2)" "0" "task_kind=review outranks a step_ref"
 
 # Fail safe: an unreadable/absent bead must default to the work-bead path so a
 # real orphan is never skipped. `gc bd show` of a missing id returns [], which
@@ -142,10 +138,10 @@ eq "$(gate_says tk-missing)" "1" "absent bead -> defaults to the work-bead path"
 echo "--- conformance: the gate and orphan-dispose.sh agree ---"
 # Both classifiers read the same store. class=source is exactly the work-bead
 # case, so IS_WORK_BEAD must be 1 there and 0 for
-# visit/review/workflow-root/workflow-step. If either classifier's precedence
+# review/workflow-root/workflow-step. If either classifier's precedence
 # drifts, this fails.
 fixture
-for id in tk-step tk-root tk-visit tk-review tk-work tk-bare; do
+for id in tk-step tk-root tk-review tk-work tk-bare; do
   CLASS="$("$SCRIPT" "$id" --json | jq -r '.class // ""')"
   GW="$(gate_says "$id")"
   WANT=$([ "$CLASS" = "source" ] && echo 1 || echo 0)
@@ -154,8 +150,8 @@ done
 
 echo "--- the nothing-to-salvage gate ---"
 # A source bead (IS_WORK_BEAD=1) with neither work_dir nor branch never reached
-# workspace-setup. The gate marks it so salvage and part 4 skip it, instead of
-# filing a no-signal witness-salvage-refused and escalating
+# workspace-setup. The gate marks it so salvage and the merge check skip it,
+# instead of filing a no-signal witness-salvage-refused and escalating
 # witness-branch-recovery-unknown for a branch that never existed. Extracted
 # verbatim and run the way the gate above is, so the test cannot drift from the
 # shipped instruction.
@@ -185,26 +181,26 @@ eq "$(nts_says 1 /tmp/wt polecat/tk-x)" "0" "source with both -> salvage and ver
 eq "$(nts_says 0 '' '')"                "0" "non-work bead -> inert (scope gate already skips it)"
 
 echo "--- static wiring: salvage and verify must honor the gate ---"
-# The gate protects anything only if the salvage refuse-branch and part 4 branch
-# on IS_WORK_BEAD. Assert both, so an edit that drops a gate fails here rather
-# than silently filing the no-signal escalations.
+# The gate protects anything only if the salvage refuse-branch and the merge
+# check branch on IS_WORK_BEAD. Assert both, so an edit that drops a gate fails
+# here rather than silently filing the no-signal escalations.
 grep -qF 'if [ "$IS_WORK_BEAD" != "1" ]; then' "$TOML" \
   && ok "salvage block short-circuits when IS_WORK_BEAD != 1" \
   || bad "salvage block must branch on IS_WORK_BEAD"
 grep -qF 'if [ "$IS_WORK_BEAD" = "1" ]; then' "$TOML" \
-  && ok "part 4 verify runs only when IS_WORK_BEAD = 1" \
-  || bad "part 4 verify must branch on IS_WORK_BEAD"
+  && ok "the merge check runs only when IS_WORK_BEAD = 1" \
+  || bad "the merge check must branch on IS_WORK_BEAD"
 
-# The nothing-to-salvage arm protects a bead only if salvage and part 4 honor it.
-# Assert both, so an edit that drops it fails here rather than silently filing
-# the no-signal escalations. The salvage arm and the verify skip carry distinct
-# strings, so neither assertion matches the other.
+# The nothing-to-salvage arm protects a bead only if salvage and the merge check
+# honor it. Assert both, so an edit that drops it fails here rather than
+# silently filing the no-signal escalations. The salvage arm and the verify skip
+# carry distinct strings, so neither assertion matches the other.
 grep -qF 'elif [ "$NOTHING_TO_SALVAGE" = "1" ]; then' "$TOML" \
   && ok "salvage block skips a nothing-to-salvage bead (no witness-salvage-refused)" \
   || bad "salvage block must branch on NOTHING_TO_SALVAGE"
 grep -qF 'BRANCH_MERGED=skip   # never had a branch' "$TOML" \
-  && ok "part 4 verify skips a nothing-to-salvage bead (no witness-branch-recovery-unknown)" \
-  || bad "part 4 verify must set BRANCH_MERGED=skip for NOTHING_TO_SALVAGE"
+  && ok "the merge check skips a nothing-to-salvage bead (no witness-branch-recovery-unknown)" \
+  || bad "the merge check must set BRANCH_MERGED=skip for NOTHING_TO_SALVAGE"
 
 # The gate must be DEFINED before the first salvage `git add -A`, or salvage
 # would run against an unset IS_WORK_BEAD. Anchor both to line start so prose

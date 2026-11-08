@@ -7,8 +7,9 @@ import (
 )
 
 // phaseLeaf is a childless tile whose per-bead phase the test drives directly:
-// needs-review by default, needs-attention with a merge hold, and working when a
-// live workflow stands over it (wired through workingFacts).
+// needs-review by default, needs-attention with a merge hold, merging with an
+// approved posture, and working when a live workflow stands over it (wired
+// through workingFacts).
 func phaseLeaf(id string, md map[string]string) Anchor {
 	return Anchor{
 		ID: id, Title: "t " + id, Kind: "human", Source: "human",
@@ -27,12 +28,14 @@ func workingFacts(ids ...string) Facts {
 }
 
 // TestAggregatePhaseUpParentChain is the precedence golden case: a parent's
-// rolled-up tri-state is working while ANY live child is, needs-attention only
-// when EVERY live child is, and needs-review otherwise. The leaves keep their
-// own per-bead phase; only the parent rolls up.
+// rolled-up state is working while ANY live child is, merging while no child is
+// working and ANY is being landed, needs-attention only when EVERY live child
+// is, and needs-review otherwise. The leaves keep their own per-bead phase; only
+// the parent rolls up.
 func TestAggregatePhaseUpParentChain(t *testing.T) {
 	const (
 		W = PhaseWorking
+		M = PhaseMerging
 		R = PhaseNeedsReview
 		A = PhaseNeedsAttention
 	)
@@ -49,6 +52,10 @@ func TestAggregatePhaseUpParentChain(t *testing.T) {
 		{"a review among attention is not all-stuck", []string{R, A}, R},
 		{"lone working child", []string{W}, W},
 		{"lone attention child", []string{A}, A},
+		{"working outranks merging", []string{W, M}, W},
+		{"merging when no child is working", []string{M, R}, M},
+		{"merging dominates attention too", []string{M, A}, M},
+		{"lone merging child", []string{M}, M},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -64,12 +71,14 @@ func TestAggregatePhaseUpParentChain(t *testing.T) {
 					working = append(working, id)
 				case A:
 					anchors = append(anchors, phaseLeaf(id, map[string]string{mdMergeHold: "true"}))
+				case M:
+					anchors = append(anchors, phaseLeaf(id, map[string]string{mdPRPosture: "approved@abc@2026-01-01T00:00:00Z"}))
 				default:
 					anchors = append(anchors, phaseLeaf(id, nil))
 				}
 			}
 			anchors = append(anchors, epicWith("tk-epic", childIDs...))
-			b := BuildBoard(anchors, fixtureNow, false, nil, workingFacts(working...))
+			b := buildBoard(anchors, fixtureNow, false, nil, workingFacts(working...))
 
 			for i, ph := range c.children {
 				if got := mustTile(t, b, childIDs[i]).Phase; got != ph {
@@ -94,7 +103,7 @@ func TestAggregatePhaseIsMultiLevel(t *testing.T) {
 		epicWith("tk-sub", "tk-w"),
 		epicWith("tk-top", "tk-sub", "tk-r"),
 	}
-	b := BuildBoard(anchors, fixtureNow, false, nil, workingFacts("tk-w"))
+	b := buildBoard(anchors, fixtureNow, false, nil, workingFacts("tk-w"))
 	if got := mustTile(t, b, "tk-sub").Phase; got != PhaseWorking {
 		t.Errorf("sub-epic over a working child rolls up to working: %q", got)
 	}
@@ -114,7 +123,7 @@ func TestAggregatePhaseNeedsAttentionPropagates(t *testing.T) {
 		epicWith("tk-sub", "tk-a1", "tk-a2"),
 		epicWith("tk-top", "tk-sub"),
 	}
-	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{})
+	b := buildBoard(anchors, fixtureNow, false, nil, Facts{})
 	if got := mustTile(t, b, "tk-sub").Phase; got != PhaseNeedsAttention {
 		t.Errorf("sub-epic whose children all need attention is needs-attention: %q", got)
 	}
@@ -123,7 +132,7 @@ func TestAggregatePhaseNeedsAttentionPropagates(t *testing.T) {
 	}
 }
 
-// TestAggregatePhaseClosedChildren proves a closed child (no live tri-state)
+// TestAggregatePhaseClosedChildren proves a closed child (no live state)
 // contributes nothing, and a parent whose children have all closed reads off its
 // own phase again.
 func TestAggregatePhaseClosedChildren(t *testing.T) {
@@ -135,7 +144,7 @@ func TestAggregatePhaseClosedChildren(t *testing.T) {
 		closed,
 		epicWith("tk-mixed", "tk-w", "tk-done"),
 	}
-	b := BuildBoard(live, fixtureNow, false, nil, workingFacts("tk-w"))
+	b := buildBoard(live, fixtureNow, false, nil, workingFacts("tk-w"))
 	if got := mustTile(t, b, "tk-done").Phase; got != "" {
 		t.Fatalf("a closed child carries no live phase: %q", got)
 	}
@@ -151,7 +160,7 @@ func TestAggregatePhaseClosedChildren(t *testing.T) {
 		otherClosed,
 		epicWith("tk-drained", "tk-done", "tk-done2"),
 	}
-	b = BuildBoard(allClosed, fixtureNow, false, nil, Facts{})
+	b = buildBoard(allClosed, fixtureNow, false, nil, Facts{})
 	if got := mustTile(t, b, "tk-drained").Phase; got != PhaseNeedsReview {
 		t.Errorf("an epic whose children have all closed keeps its own phase: %q", got)
 	}
@@ -164,7 +173,7 @@ func TestAggregatedFrontierSpeaksRolledUpPhase(t *testing.T) {
 		phaseLeaf("tk-w", nil),
 		epicWith("tk-epic", "tk-w"),
 	}
-	b := BuildBoard(anchors, fixtureNow, false, nil, workingFacts("tk-w"))
+	b := buildBoard(anchors, fixtureNow, false, nil, workingFacts("tk-w"))
 	epic := mustTile(t, b, "tk-epic")
 	if epic.Phase != PhaseWorking {
 		t.Fatalf("epic phase=%q want working", epic.Phase)
@@ -187,7 +196,7 @@ func TestAggregatePhaseLeavesMergeAnchorOnItsOwnPhase(t *testing.T) {
 	rev := Anchor{ID: "tk-rev", Title: "Review branch polecat/tk-pr -> main", Kind: "review",
 		Source: "review", Rig: "gc-toolkit", Prefix: "tk",
 		Metadata: map[string]string{mdAnchorBead: "tk-pr", "task_kind": "review"}}
-	b := BuildBoard([]Anchor{m, rev}, fixtureNow, false, nil, Facts{})
+	b := buildBoard([]Anchor{m, rev}, fixtureNow, false, nil, Facts{})
 
 	if got := mustTile(t, b, "tk-rev").GroupRoot; got != "tk-pr" {
 		t.Fatalf("the review climbs the blocked edge to its anchor (test premise): GroupRoot=%q", got)
@@ -206,7 +215,7 @@ func TestMergeAnchorWithParentChildChildDivergesPhaseFromPRPhase(t *testing.T) {
 	kid := phaseLeaf("tk-kid", nil)                                   // working, via workingFacts below
 	m := mergeAnchor("tk-pr", map[string]string{mdMergeHold: "true"}) // its own PR phase: needs-attention
 	m.Children = []Child{{ID: "tk-kid", Status: "open"}}              // a real parent-child child
-	b := BuildBoard([]Anchor{m, kid}, fixtureNow, false, nil, workingFacts("tk-kid"))
+	b := buildBoard([]Anchor{m, kid}, fixtureNow, false, nil, workingFacts("tk-kid"))
 
 	tile := mustTile(t, b, "tk-pr")
 	if got := tile.PRPhase; got != PhaseNeedsAttention {
@@ -233,7 +242,7 @@ func TestBlockedMergeAnchorWithParentChildChildStaysNeedsAttention(t *testing.T)
 		"pr.machine": dated(MachineBlocked, headLive, fixtureNow),
 	})
 	m.Children = []Child{{ID: "tk-kid", Status: "open"}} // a real parent-child child
-	b := BuildBoard([]Anchor{m, kid}, fixtureNow, false, nil, workingFacts("tk-kid"))
+	b := buildBoard([]Anchor{m, kid}, fixtureNow, false, nil, workingFacts("tk-kid"))
 
 	if got := mustTile(t, b, "tk-kid").Phase; got != PhaseWorking {
 		t.Fatalf("child phase=%q want working — test setup does not produce the intended leaf state", got)
@@ -264,7 +273,7 @@ func TestBlockedMergeAnchorWithParentChildChildStaysNeedsAttention(t *testing.T)
 // no child tiles and so keeps its own per-bead phase. This is the shape every
 // pre-existing epic test uses, which is why they are behavior-preserved.
 func TestAggregatePhaseIgnoresNonTileChildren(t *testing.T) {
-	b := BuildBoard([]Anchor{epicWith("tk-epic", "tk-a", "tk-b")}, fixtureNow, false, nil, Facts{})
+	b := buildBoard([]Anchor{epicWith("tk-epic", "tk-a", "tk-b")}, fixtureNow, false, nil, Facts{})
 	if got := mustTile(t, b, "tk-epic").Phase; got != PhaseNeedsReview {
 		t.Errorf("an epic with only roll-up (non-tile) children keeps its own phase: %q", got)
 	}

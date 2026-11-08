@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # doctor/check-blocked-work-armed — blocked work carries a dispatch path. A
-# LIVE, unassigned bead that is plainly work (not a review, step, workflow-
-# topology, or demand bead, not a standing record, and not a merge anchor) and
+# LIVE, unassigned bead that is plainly work (not a review, step or workflow-
+# topology bead, not a standing record, and not a merge anchor) and
 # is held out of `bd ready` by an open `blocks` edge must ALSO carry a way to be
 # dispatched once that edge clears: either `gc.routed_to` (a pool queue
 # consumes it, and bd's readiness gates the offer until the blocker closes) or
@@ -47,6 +47,16 @@
 # marker's own `bd list` prints, which carries one. When that listing cannot be
 # read, the candidate is reported as unverifiable and never flagged.
 #
+# So is a bead a converse sitting holds. The hold files a human gate under the
+# key `conversation.<conversation id>`, and the sitting's sign-off decides the
+# bead's dispatch once the operator rules, so arming it would send it ahead of
+# the ruling. Every other human gate keeps the rule: clearing one is the ruling
+# to proceed, and an arm is what sends the work then. `bd blocked` names each
+# blocker without saying what it is, so the store's gates are read once, only
+# when a candidate exists, and bd-lib.sh's open_human_gate, the rule every
+# reader of a gate shares, says which of them still hold. A candidate is
+# reported as unverifiable and never flagged when that listing cannot be read.
+#
 # The remedy the finding names is arming — deferred-dispatch.sh arm, which is a
 # safe universal substitute for a hand-held sling (docs/deferred-dispatch.md).
 # The complement check is doctor/check-wait-is-an-edge (I1): that one asserts
@@ -60,19 +70,27 @@
 
 set -u
 
-# The issue types a pool claims and works — so blocked-and-unrouted-and-unarmed
-# is this anti-pattern only for these. An allowlist, not the complement of an
-# exclude set: `bd` accepts many types this check must never flag as pool work,
-# and enumerating them to exclude is a list that silently admits every type it
-# forgets. `bd ready`'s own infra/topology exclusions (merge-request, gate,
-# molecule, rig, agent, role, message, session, convoy, issue-type step, spec,
-# event, convergence, ...), `decision` (a person answers it, not a pool — arming
-# it would sling a human's question at a polecat), the container types (`epic`,
-# `milestone`, `story`, whose leaf children are the routed work), and any custom
-# type a rig adds are all not-pool-work by naming what IS. A type this check has
-# never heard of is left alone rather than mistaken for work. doctor.toml names
-# the same set.
-WORK_TYPES=" bug feature task chore spike "
+# The issue types a pool claims and works, so blocked, unrouted and unarmed is
+# this anti-pattern only for these. Gas City's pool serves the beads routed or
+# assigned to it, and leaves out epic even then. This check reads beads nobody
+# routed, and its remedy arms one to be slung, so it names what IS work and
+# leaves every other type alone:
+#   - epic: Gas City's routed pool-demand query passes --exclude-type=epic
+#     (PoolDemandServeRulesForQuery), and gc sling refuses an epic. Its
+#     children are the routed work.
+#   - milestone: bd describes it as marking the completion of related issues,
+#     with no work of its own.
+#   - decision: a person settles it. bd defines it as an architecture decision
+#     record, and the pack's own agents file one as a question for a person,
+#     so arming one would sling a person's question to a polecat.
+#   - the bookkeeping types `bd ready` or Gas City's Ready() leaves out (gate,
+#     molecule, merge-request, convoy, step, session, message, ...), and the
+#     records Gas City and bd keep that neither leaves out (spec, convergence,
+#     event).
+#   - a type this list has never heard of, such as one a rig adds. A list of
+#     the types that are not work would admit every type it forgot.
+# doctor.toml names the same set.
+WORK_TYPES=" bug feature task chore spike story "
 
 # The standing kinds, from the one definition shared with the liveness sweep and
 # the proactive scan. Exposes $STANDING_KINDS_JQ. An unsourceable one warns:
@@ -101,6 +119,16 @@ WORK_TYPES=" bug feature task chore spike "
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/placement.sh" || {
     echo "cannot determine whether blocked work carries a dispatch path"
     printf '  - %s\n' "assets/scripts/placement.sh could not be sourced from this pack, so a bead waiting for placement cannot be told from stranded work."
+    exit 1
+}
+# Which human gates still hold the bead they block, from the one rule every
+# reader of a gate shares. Exposes $HUMAN_GATE_JQ. An unsourceable one warns:
+# without it a bead a converse sitting holds would read as stranded work and
+# draw the arm remedy.
+# shellcheck source=../../assets/scripts/bd-lib.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/bd-lib.sh" || {
+    echo "cannot determine whether blocked work carries a dispatch path"
+    printf '  - %s\n' "assets/scripts/bd-lib.sh could not be sourced from this pack, so a bead a converse sitting holds cannot be told from stranded work."
     exit 1
 }
 # The one reader of a run's link to the bead it works. An unsourceable one
@@ -203,8 +231,8 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         continue
     }
     # The predicate, entirely on the listing's own fields: plainly work
-    # (unassigned; not review/standing/step/workflow-topology/demand; not a
-    # merge anchor; an allowlisted work issue_type), AND carrying no dispatch
+    # (unassigned; not review/standing/step/workflow-topology; not a merge
+    # anchor; an allowlisted work issue_type, which a gate is not), AND carrying no dispatch
     # path (has_dispatch_path: no route and no arm). A candidate that reads as
     # waiting for placement on this listing is marked in the fourth column:
     # `bd blocked` prints no parent, so whether the sitting placed it is settled
@@ -218,7 +246,6 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         | select(($b | is_standing_kind) | not)
         | select(($m["gc.step_ref"] // "") == "")
         | select(($m["gc.kind"] // "") == "")
-        | select(($m["gc.demand_for"] // "") == "")
         | select(($m["merge_result"] // "") == "")
         | select($allow | contains(" " + (($b.issue_type // "") | tostring) + " "))
         | select(($b | has_dispatch_path) | not)
@@ -226,6 +253,8 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
             (($b.issue_type // "?") | tostring | gsub("[[:cntrl:]]"; " ")),
             (if (($m["gc.execution_routed_to"] // "") != "") then "1" else "0" end),
             (if ($b | awaiting_placement) then "1" else "0" end),
+            ([ ($b.blocked_by // [])[] | tostring | gsub("[^A-Za-z0-9._-]"; "") | select(. != "") ]
+             | if length == 0 then "-" else join(",") end),
             (($b.title // "") | tostring | gsub("[[:cntrl:]]"; " ") | .[0:70]) ]
         | @tsv' 2>/dev/null) || {
         warnings+=("$label: could not evaluate blocked beads in $rig_path/.beads — this store was NOT checked")
@@ -269,7 +298,25 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         fi
     fi
 
-    while IFS=$'\t' read -r id btype has_exec held title; do
+    # The gates a converse sitting's hold files: those that still hold by the
+    # shared rule (open_human_gate), under the hold's key. The listing names
+    # every live status, because bd's default scope leaves out a gate in status
+    # pinned and any gate whose pinned flag is set, and the rule counts both as
+    # holding. Left unconfirmed ($sitting_ok=0) when the listing fails, so a
+    # candidate is warned rather than flagged.
+    sittings=" "; sitting_ok=1
+    gates=$(run_bounded gc bd list --db "$rig_path/.beads" --type gate --include-gates \
+        --status open,in_progress,blocked,deferred,hooked,pinned --json --limit 0 2>/dev/null); gates_rc=$?
+    gates=$(printf '%s' "$gates" | scrub)
+    if [ "$gates_rc" -eq 0 ] && printf '%s' "$gates" | jq -e 'type == "array"' >/dev/null 2>&1 \
+        && sitting_ids=$(printf '%s' "$gates" | jq -r "$HUMAN_GATE_JQ"'.[]? | select(open_human_gate("")
+                and (((.await_id // "") | tostring) | startswith("conversation."))) | .id' 2>/dev/null); then
+        while IFS= read -r g; do [ -n "$g" ] && sittings="$sittings$g "; done <<< "$sitting_ids"
+    else
+        sitting_ok=0
+    fi
+
+    while IFS=$'\t' read -r id btype has_exec held blockers title; do
         [ -n "$id" ] || continue
         case "$worked" in *" $id "*) continue ;; esac   # a live run works it
         if [ "$has_exec" = "1" ] && [ "$liveness_ok" != "1" ]; then
@@ -280,6 +327,17 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
             case "$waiting" in *" $id "*) continue ;; esac   # waits for the placement sitting
             if [ "$placement_ok" != "1" ]; then
                 warnings+=("$label bead $id [$btype]: blocked and marked placement=pending, but whether the placement sitting placed it could not be read in $rig_path/.beads — NOT flagged, because arming a bead that still waits for the sitting would start work the operator has not placed. Check by hand whether it has a parent; if it does, arm it ($title)")
+                continue
+            fi
+        fi
+        if [ "$blockers" != "-" ]; then
+            sat=""
+            while IFS= read -r b; do
+                case "$sittings" in *" $b "*) sat=1 ;; esac
+            done <<< "$(printf '%s\n' "$blockers" | tr ',' '\n')"
+            [ -z "$sat" ] || continue                       # a sitting holds it; its ruling decides the dispatch
+            if [ "$sitting_ok" != "1" ]; then
+                warnings+=("$label bead $id [$btype]: blocked, but whether a converse sitting's gate holds it could not be read in $rig_path/.beads — NOT flagged, because arming a bead a sitting holds would send it ahead of the operator's ruling")
                 continue
             fi
         fi

@@ -23,8 +23,8 @@ the default branch, and the choice between design-gated and all-in-one.
 **Boundaries.** Which work a design-convoy fits is stated in its formula's own
 description (`formulas/mol-design-convoy.toml`), which the `work` skill's
 formula choice reads. How any integration effort is stood up, and how its beads
-branch and land, is the mechanik's dispatch doctrine
-(`agents/mechanik/prompt.template.md`). How a summary task writes its PR summary
+branch and land, is the `work` skill's effort recipe
+(`skills/work/integration-effort.md`). How a summary task writes its PR summary
 is the polecat doctrine's (`template-fragments/polecat-doctrine.template.md`).
 The merge rule the gates apply is `gctk merge`'s, which `assets/scripts/merge.sh`
 runs; this page says how the pattern meets that rule and does not define it.
@@ -90,10 +90,10 @@ task as well, so the subject and the summary task wait for every piece.
 `seed-branch` fetches origin and pushes `refs/remotes/origin/<default>` to
 `refs/heads/integration/<subject-id>` with an empty lease
 (`--force-with-lease=refs/heads/integration/<subject-id>:`). The default branch
-is the one `origin/HEAD` names, or `main` when it names none. The mechanik's
-recipe for standing an effort up by hand cuts with the same marked blocks, so
-an effort cut either way starts from, and lands on, the same branch. The push
-sends a ref and checks nothing out, so the rig's checkout never moves.
+is the one `origin/HEAD` names, or `main` when it names none. The `work`
+skill's recipe for standing an effort up by hand cuts with the same marked
+blocks, so an effort cut either way starts from, and lands on, the same branch.
+The push sends a ref and checks nothing out, so the rig's checkout never moves.
 Reconcile keeps that checkout fast-forwarded to the default branch and
 directory-imported packs build from its working tree, so a branch checkout or
 commit there would park the deploy off the default branch.
@@ -140,13 +140,15 @@ its own.
 task by `blocks` edges, and the `dispatch` step assigned it to the refinery. The
 summary task is dispatched once both children have landed, and writes the
 subject's `pr_summary` from the finished branch: what the whole branch does,
-and where the finished work departs from the subject's description. Once it
-closes, nothing the subject waits on is open. The refinery takes the subject and
-brings its branch current with the default branch, and the merge cadence opens
-the PR from the integration branch into the default branch, with the summary
-task's account as its `## Summary`. The same universal rule holds that PR until
-an operator's approval stands on it, so the operator reviews the whole unit,
-design and implementation together, before the default branch moves.
+and where the finished work departs from the subject's description. It also
+titles the subject with the branch's subject line, because the PR's title is
+composed from the subject's. Once it closes, nothing the subject waits on is
+open. The refinery takes the subject and brings its branch current with the
+default branch, and the merge cadence opens the PR from the integration branch
+into the default branch, with the summary task's account as its `## Summary`.
+The same universal rule holds that PR until an operator's approval stands on
+it, so the operator reviews the whole unit, design and implementation together,
+before the default branch moves.
 
 ## When the subject closes
 
@@ -157,16 +159,19 @@ merges, as any PR's owning bead does. Work that waits on the subject through a
 ## Design-gated versus all-in-one
 
 `design_gated` is a var, default `true`. The operator settles it per initiative
-when acting on the recommendation. Accept's sling passes no var, so an Accept
-takes the design-gated default. For all-in-one, the operator takes the
-recommendation to a sitting (Discuss) instead. The sitting follows the `work`
-skill's steps for taking a recommendation and adds `--var design_gated=false`
-to the sling those steps run. The same steps release the gate that put the
-recommendation to the operator and record the dispatch, which a bare sling
-leaves undone. The var is read case-insensitively: `false`, `0`, `no`, or `off`
-selects all-in-one, and `true`, `1`, `yes`, or `on` selects design-gated. An
-empty or unrecognized value also selects design-gated, with a warning, so a typo
-never drops the design gate.
+when acting on the recommendation. The board's Accept passes no var, so an
+Accept from the board takes the design-gated default, except when it finishes
+an acceptance a sitting's sign-off left unfinished: that sling carries the var
+the acceptance recorded on the recommendation's gate. For all-in-one, the
+operator takes the recommendation to a sitting (Discuss) instead, and the
+sitting's sign-off takes it with `--accept --var design_gated=false`. The
+sign-off hands the var to Accept's writer, which answers the gate that put the
+recommendation to the operator, slings the formula with the var under the
+bead's acceptance lock, and records the dispatch (the `work` skill). The var is
+read case-insensitively: `false`, `0`, `no`, or `off` selects all-in-one, and
+`true`, `1`, `yes`, or `on` selects design-gated. An empty or unrecognized
+value also selects design-gated, with a warning, so a typo never drops the
+design gate.
 
 - **Design-gated** (`true`): implementation waits behind gate 1, so it starts
   only after the operator approves the design. Use it when the design decision

@@ -28,8 +28,8 @@
 #               carries none. gc-helm.test.sh (DISMISS-KEY) runs this script
 #               through the real dismiss.
 #   (NOTCONV)   a Gas City session that is not a converse sitting is refused and
-#               gc-helm.sh never runs. Its own identity may hold a visit that
-#               dismiss would close all the same. A template that merely starts
+#               gc-helm.sh never runs. Its own identity may hold a conversation
+#               that dismiss would close all the same. A template that merely starts
 #               with the word is not converse either.
 #   (UNKNOWN)   a pane whose session is not in the list is refused.
 #   (CLOSEDREC) a closed record under the pane's name is a past session.
@@ -39,7 +39,7 @@
 #   (NOSESSION) a press tmux cannot place in a session is refused.
 #   (REFUSED)   a dismiss that exits non-zero reports its reason and does not
 #               claim the sitting ended.
-#   (NOOP)      a dismiss that found no open visit says so.
+#   (NOOP)      a dismiss that found no live sitting says so.
 #   (QUIET)     every path exits 0 with nothing on stdout: run-shell lays a view
 #               pane over the operator's thread when a job prints or fails.
 #   (FMT)       a # in shown text is doubled, so tmux displays it instead of
@@ -104,7 +104,7 @@ msg_has()  { grep -qF -- "$1" < <(tmux -L "$SOCKET" show-messages 2>/dev/null); 
 # must refuse: a polecat, a template that only starts with the word, a closed
 # past session, and two live records sharing a name.
 SESSIONS='{"sessions":[
- {"id":"hq-conv1","session_name":"s-hq-conv1","alias":"gc-toolkit/gc-toolkit.tk-vis1","template":"gc-toolkit/gc-toolkit.converse-opus","rig":"gc-toolkit","state":"active","closed":false,"attached":true},
+ {"id":"hq-conv1","session_name":"s-hq-conv1","alias":"gc-toolkit/gc-toolkit.tk-conv1","template":"gc-toolkit/gc-toolkit.converse-opus","rig":"gc-toolkit","state":"active","closed":false,"attached":true},
  {"id":"hq-base1","session_name":"s-hq-base1","alias":"other/gc-toolkit.tk-vis2","template":"other/gc-toolkit.converse","rig":"other","closed":false},
  {"id":"hq-noal1","session_name":"s-hq-noal1","template":"gc-toolkit/gc-toolkit.converse-fable","rig":"gc-toolkit","closed":false},
  {"id":"hq-pole1","session_name":"gc-toolkit__polecat-hq-pole1","alias":"gc-toolkit/gc-toolkit.polecat-1","template":"gc-toolkit/gc-toolkit.polecat","rig":"gc-toolkit","closed":false},
@@ -133,7 +133,7 @@ mkcfg() {               # mkcfg <dir>
 if [ -n "${FAKE_HELM_OUT+set}" ]; then
     printf '%s' "$FAKE_HELM_OUT"
 else
-    printf '%s' '{"subject":"tk-sub1","matched":[{"id":"tk-vis1","identity":"stamp"}],"closed":1,"ok":true}'
+    printf '%s' '{"subject":"tk-sub1","matched":[{"id":"tk-conv1"}],"closed":1,"ok":true}'
 fi
 exit "${FAKE_HELM_RC:-0}"
 HELMSTUB
@@ -199,9 +199,9 @@ run s-hq-conv1
 has "$HELM" "ARGS=dismiss --operator --json" "(CONVERSE) gc-helm.sh dismiss runs as the operator, with no bead named"
 has "$HELM" "GC_SESSION_NAME=s-hq-conv1" "(CONVERSE) …under the record's session name"
 has "$HELM" "GC_SESSION_ID=hq-conv1" "(CONVERSE) …its id"
-has "$HELM" "GC_ALIAS=gc-toolkit/gc-toolkit.tk-vis1" "(CONVERSE) …its alias"
+has "$HELM" "GC_ALIAS=gc-toolkit/gc-toolkit.tk-conv1" "(CONVERSE) …its alias"
 has "$HELM" "GC_RIG=gc-toolkit" "(CONVERSE) …and its rig"
-has "$SAID" "the sitting on tk-sub1 is over (visit tk-vis1 closed)" "(CONVERSE) the operator is told which subject ended"
+has "$SAID" "the sitting on tk-sub1 is over (conversation tk-conv1 closed)" "(CONVERSE) the operator is told which subject ended"
 has "$(cat "$TMP/tmux.log")" "-c /dev/pts/9" "(CONVERSE) messages go to the client that pressed the key"
 has "$HELM" "GC_CITY_PATH=/my/city" "(CITY) --city-path reaches gc-helm.sh as GC_CITY_PATH"
 quiet "converse"
@@ -258,8 +258,8 @@ has "$SAID" "tmux did not say which session" "(NOSESSION) …and it says so"
 quiet "no session"
 
 echo "# a dismiss that refuses reports its reason"
-FAKE_HELM_RC=2 FAKE_HELM_OUT="" FAKE_HELM_ERR="gc-helm: no open visit is assigned to this session (s-hq-conv1); there is no current sitting." run s-hq-conv1
-has "$SAID" "NOT dismissed — gc-helm: no open visit is assigned to this session" "(REFUSED) the reason reaches the operator"
+FAKE_HELM_RC=2 FAKE_HELM_OUT="" FAKE_HELM_ERR="gc-helm: no open conversation is assigned to this session (s-hq-conv1); there is no current sitting." run s-hq-conv1
+has "$SAID" "NOT dismissed — gc-helm: no open conversation is assigned to this session" "(REFUSED) the reason reaches the operator"
 hasnt "$SAID" "is over" "(REFUSED) …and the sitting is not claimed ended"
 quiet "refused"
 FAKE_HELM_RC=4 FAKE_HELM_OUT="" FAKE_HELM_ERR="" run s-hq-conv1
@@ -267,7 +267,7 @@ has "$SAID" "gc-helm dismiss exited 4 with no diagnostic" "(REFUSED) a silent fa
 
 echo "# a dismiss that found nothing open says so"
 FAKE_HELM_OUT='{"subject":"tk-sub1","matched":[],"closed":0,"ok":true}' run s-hq-conv1
-has "$SAID" "no open visit on tk-sub1" "(NOOP) nothing was holding a sitting"
+has "$SAID" "no live sitting on tk-sub1" "(NOOP) nothing was holding a sitting"
 
 echo "# shown text is never expanded as a tmux format"
 run 's-#(touch pwned)'
@@ -377,7 +377,7 @@ if [ -n "$LIVE_TERM" ]; then
     has "$live" "ARGS=dismiss --operator --json" "(LIVE-YES) a real press, confirmed, runs dismiss as the operator"
     eq "$(grep -c '^ARGS=' "$LIVE_CALLS")" "1" "(LIVE-YES) …exactly once"
     has "$live" "GC_SESSION_NAME=s-hq-conv1" "(LIVE-YES) …under the pressed pane's session"
-    has "$live" "GC_ALIAS=gc-toolkit/gc-toolkit.tk-vis1" "(LIVE-YES) …and its alias"
+    has "$live" "GC_ALIAS=gc-toolkit/gc-toolkit.tk-conv1" "(LIVE-YES) …and its alias"
     has "$live" "GC_CITY_PATH=$LIVE_CITY" "(LIVE-YES) …with the city path baked in at install"
     has "$(cat "$PRESS_MSGS")" "the sitting on tk-sub1 is over" "(LIVE-YES) the outcome reaches the operator"
     # View mode would open as the job exits, just after its last message, so

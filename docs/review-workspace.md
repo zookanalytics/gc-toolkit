@@ -1,17 +1,25 @@
 ---
 name: Review workspace
-description: Where a review keeps its worktree and scratch on disk, and when that directory is removed. Read it before changing where a review reads its pinned commit or runs a suite, or how review leftovers in /tmp are reclaimed.
+description: Where a review keeps its worktree and scratch on disk, and when that directory is removed. Read it before changing where a review reads its pinned commit, runs a suite or writes its findings, or how review leftovers in /tmp are reclaimed.
 ---
 
 # Review workspace
 
 A review reads its pinned commit in a detached worktree and runs there any
-suite its check calls for. The reviewer may also write logs, probe output, or a
-second worktree at the base.
+suite its check calls for. It writes its verdict body and its finding set
+beside the worktree, as `findings.md` and `findings.json`, and signoff.sh reads
+them from there. A quorum lane writes no file: the block that stores its lane
+output on its step bead takes the object inline. It needs no workspace, so a
+lane whose gather failed before making one still records its `blocked` output.
+The reviewer may also write logs, probe output, or a second worktree at the
+base.
 All of it lives in one directory named for the review bead,
 `<dir>/gc-review-<review-bead>`, where `<dir>` is `$TMPDIR`, or `/tmp` when
 `TMPDIR` is unset. `assets/scripts/review-workspace.sh` owns that directory: it
 makes the worktree, and it removes the directory when the review ends.
+None of it goes in the agent's home, where a pool session's shell starts,
+because a home that holds a file gc did not write fails its session's next
+start (`assets/scripts/worktree-setup.sh`).
 
 ## Scope
 
@@ -20,8 +28,9 @@ review gets its worktree, and when and how the directory is removed.
 
 **Boundaries:** the review lifecycle belongs to `formulas/mol-review.toml` and
 `formulas/mol-review-quorum-signoff.toml`, and what a review reads, runs and
-judges to its check's method. A polecat's per-bead worktree is
-worktree-reap's ([worktree-reclaim.md](worktree-reclaim.md)). Harness session
+judges to its check's method. A polecat's per-bead worktree goes at its
+hand-off or to the controller's closed-bead reaper
+([worktree-reclaim.md](worktree-reclaim.md)). Harness session
 scratch, and the per-uid tmpfs quota that every tenant of `/tmp` counts
 against, are described in [scratch-reclaim.md](scratch-reclaim.md).
 
@@ -42,6 +51,11 @@ Shells that run it at the same moment take turns on a lock, so each of them
 gets the one worktree. A worktree found at another commit is rebuilt at the one
 asked for. The directory is mode 0700. A name that another user or a symlink
 already holds is refused rather than used, because `/tmp` is shared.
+
+`mol-rig-demo` takes a workspace too, named for its demo-request bead, for the
+worktree its app runs from, because a capture's sandbox refuses a rig's own
+checkout (`assets/scripts/demo-engine-lib.sh`). It only adds one, and the hourly
+reap removes it once the mol closes that bead.
 
 ## When it is removed
 
@@ -81,4 +95,5 @@ Each git worktree inside the directory is removed with `git worktree remove`,
 so its registration goes with it, and then the directory is deleted.
 `review-workspace.sh` never runs `git worktree prune`, because a prune is
 repository-wide and would drop the admin `HEAD` of every other worktree whose
-directory has gone before worktree-reap pins that `HEAD` with an archive tag.
+directory has gone, which for a detached worktree can be the only ref to its
+commits.

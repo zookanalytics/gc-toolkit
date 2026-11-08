@@ -1,6 +1,6 @@
 ---
 name: review-correctness
-description: The method for the correctness check, the standing review of whether a change is correct and safe as merged. Read the whole diff, settle its test evidence, hunt with the What to check list's named angles and work the rest of the list, sweep once more with fresh eyes for what the hunt missed, give every finding its failure scenario and the angle, dimension or sweep that found it, grade it P0, P1 or P2, check each blocking one in a context that did not raise it and drop the ones that check refutes, and add the Verification line to the verdict. Use when you hold a review bead whose check is correctness, or when asked whether a change is correct and safe to merge.
+description: Use when you hold a review bead whose check is correctness, or when asked whether a change is correct and safe to merge.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
@@ -53,8 +53,7 @@ the gate calls it by that path. The `test` line is the test evidence:
 Either way you may run one targeted suite for a gap you suspect, and the run of
 each new case against the pre-change code that the Testing dimension asks for
 is yours. Run those plain, each as `bash -c '<suite>'`, because a gate call
-with another command replaces the reviewed commit's record. Every suite runs
-under the claim-lease keepalive the review formula names. A failing suite is
+with another command replaces the reviewed commit's record. A failing suite is
 not automatically a finding: check whether it fails on the base too. A
 pre-existing failure belongs in the verdict as context, not as this branch's
 defect.
@@ -159,17 +158,25 @@ that names its cause.
   the ENTIRE branch diff you just read, not one contributor's share of it. A
   summary that does not state what the whole diff does is a finding — a
   placeholder, a restatement of the dispatch, and an account of other work
-  each qualify — and so is a title that understates the scope. Where the
-  summary lives depends on the state. Post-open, read the page the review
-  formula printed from `<review_pr_url>`. Pre-open there is no page, but
-  `pr-open.sh` will publish the anchor's `pr_summary` verbatim as `## Summary`
-  once the check goes green, falling back to the dispatch description and then
-  a placeholder when it is absent. Read that pending summary among the anchor's
-  metadata, which the review formula printed, and hold it to the same standard.
-  An absent or empty pre-open summary ships the dispatch description in its
-  place — what the work was asked to do, not what the diff did — so it is a
-  finding unless that text already accounts for the whole diff; its locus is
-  `anchor <id> / pr_summary`. When the published body looks wrong, read
+  each qualify. So is a title whose type or words misname what the diff does,
+  by the skill `gc-toolkit.commit-conventions`. The title becomes the
+  squash commit's subject, so a false one blocks as a false summary does, and
+  one that is true but merely weak is a P2. `chore` is false on a diff another
+  type describes, and a type the diff could fairly take is the author's call
+  even where you would pick another. Judge what the title says, not its form.
+  Where the summary and the title live depends on the state. Post-open, read
+  the page the review formula printed from `<review_pr_url>`. Pre-open there
+  is no page, but `pr-open.sh` will publish the anchor's `pr_summary` verbatim
+  as `## Summary` once the check goes green, falling back to the dispatch
+  description and then a placeholder when it is absent. Read that pending
+  summary among the anchor's metadata, which the review formula printed, and
+  hold it to the same standard. An absent or empty pre-open summary ships the
+  dispatch description in its place — what the work was asked to do, not what
+  the diff did — so it is a finding unless that text already accounts for the
+  whole diff; its locus is `anchor <id> / pr_summary`. The pending title is
+  the anchor's title, and `pr-open.sh` gives one that opens with no type a
+  type from the bead's kind, so a task's title reads `chore: <its title>`; its
+  locus is `anchor <id> / title`. When the published body looks wrong, read
   `pr-open.sh`, among the pack's scripts the review formula printed, for the
   shape this pack's opener emits, and `pr-stack.sh` beside it for the
   delimited beads-on-this-branch section the cadence keeps current below it. A

@@ -1,4 +1,4 @@
-// The drill panel's one write action: file a visit on this bead.
+// The drill panel's one write action: file a conversation on this bead.
 //
 // It lives in the panel's `session` section because that is the section about
 // who is working the anchor, and this is how the operator causes someone to.
@@ -6,13 +6,13 @@
 // TWO THINGS IT IS CAREFUL ABOUT, both of them the operator's complaint about
 // the tmux affordance ("not enough details to really be the main action"):
 //
-//  1. It never claims more than happened. Filing a visit parks it on the helm
-//     board; it does not start a sitting or put the operator in one. Engaging
-//     the parked visit (the Discuss button beside this one) is what spawns the
-//     session, and there is no pane to attach to in a browser until the
-//     embedded ttyd can be retargeted (tk-rbf9r / tk-xlup8, unapplied). So the
-//     success copy says the visit is parked and points at Discuss — it does
-//     not say "you are in it".
+//  1. It never claims more than happened. Filing a conversation puts it in the
+//     operator's queue; it does not start a sitting or put the operator in one.
+//     Engaging the queued conversation (the Discuss button beside this one) is
+//     what spawns the session, and there is no pane to attach to in a browser
+//     until the embedded ttyd can be retargeted (tk-rbf9r / tk-xlup8,
+//     unapplied). So the success copy says the conversation waits in the queue
+//     and points at Discuss — it does not say "you are in it".
 //  2. A failure says which failure. The service returns a stable `reason` slug
 //     beside the tool's own sentence; the sentence is shown verbatim and the
 //     slug picks a next move. A button whose only failure mode is a shrug is
@@ -28,13 +28,13 @@ const NEXT_MOVE: Record<string, string> = {
   forbidden:
     'The board refused a write that did not come from its own page. Open the board directly rather than through another site.',
   environment:
-    'The city could not be read, so no visit was filed. Check the data plane (gc doctor, then dolt) and try again.',
+    'The city could not be read, so no conversation was filed. Check the data plane (gc doctor, then dolt) and try again.',
   timeout:
     'The board stopped waiting; the filing may still have gone through. Check the bead before retrying, then try again once the city is responding.',
   unavailable:
-    'This board cannot file visits — it was started without the visit tool, or the service is unreachable.',
-  usage: 'The board and the visit tool disagree about the request. That is a bug here, not something to retry.',
-  internal: 'The visit tool failed in a way the board does not recognise. Retrying is unlikely to help.',
+    'This board cannot file conversations — it was started without the write tool, or the service is unreachable.',
+  usage: 'The board and the write tool disagree about the request. That is a bug here, not something to retry.',
+  internal: 'The write tool failed in a way the board does not recognise. Retrying is unlikely to help.',
 };
 
 type State =
@@ -100,7 +100,7 @@ export function OpenConversation({ beadId }: OpenConversationProps) {
         onClick={open}
         disabled={state.phase === 'opening'}
       >
-        {state.phase === 'opening' ? 'filing…' : 'file a visit'}
+        {state.phase === 'opening' ? 'filing…' : 'file a conversation'}
       </button>
 
       {state.phase === 'done' && <OpenedNotice result={state.result} />}
@@ -132,8 +132,8 @@ function OpenedNotice({ result }: { result: OpenResult }) {
     <p className="open-conversation-result" role="status">
       <strong>
         {result.outcome === 'existing'
-          ? 'A visit is already open on this bead.'
-          : 'A visit is parked on the board.'}
+          ? 'A conversation already waits on this bead.'
+          : 'A conversation waits in your queue.'}
       </strong>{' '}
       {result.message}{' '}
       <span className="muted">

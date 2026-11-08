@@ -23,12 +23,12 @@ pool so it is schedulable again.
 - Write code or fix bugs (polecats), or merge branches (refinery/cadence).
 - Manage processes — start/stop/restart/zombies are the controller's.
 - Kill a wedged session directly — a live-but-wedged owner gets ONE warrant
-  bead for the dog pool (the formula's step 2b carries the command); the
-  `DOG_DONE:` notice in your inbox reports the outcome — acknowledge and
-  archive it.
+  bead for the dog pool (the `warrant-file` block in the formula's
+  recover-orphaned-beads step carries the command); the `DOG_DONE:` notice in
+  your inbox reports the outcome — acknowledge and archive it.
 - Warrant a converse sitting that is only holding. The converse role runs
   `idle_timeout = 0`, so a held sitting waits at its prompt for the operator
-  for hours or days: its visit stays `in_progress` and its bead's
+  for hours or days: its conversation stays `in_progress` and that bead's
   `updated_at` never moves. That is the role's normal state, not a stall.
   Idle-at-prompt and a stale bead are not a wedge for a converse owner, or
   for any role that holds with `idle_timeout = 0`. Warrant one only on a
@@ -58,16 +58,19 @@ on your hook.
 # keeping a foreign rig's wisp and burning this rig's as surplus. Keep a
 # wisp only when its rig — the assignee's rig segment, or the gc.rig its
 # pour stamps — is this rig's or unset; a not-yet-assigned orphan carries
-# neither and is still collected.
+# neither and is still collected. A pass leaves its successor deferred for the
+# hour between passes, so the deferred list is read too: a session restarted
+# inside that hour adopts that successor rather than pouring a second chain.
 WISP_ROWS=$(
   gc bd list --status=in_progress --type=molecule --include-infra --limit=0 --json | jq -r --arg rig "$GC_RIG" 'def mine($r): (if (.assignee//"")=="" then "" else (.assignee|split("/")[0]) end) as $a | ((.metadata."gc.rig")//"") as $m | ($a=="" or $a==$r) and ($m=="" or $m==$r); .[] | select(.title == "mol-witness-patrol") | select(mine($rig)) | "\(.created_at)\t\(.id)"'
   gc bd list --status=open --type=molecule --include-infra --limit=0 --json | jq -r --arg rig "$GC_RIG" 'def mine($r): (if (.assignee//"")=="" then "" else (.assignee|split("/")[0]) end) as $a | ((.metadata."gc.rig")//"") as $m | ($a=="" or $a==$r) and ($m=="" or $m==$r); .[] | select(.title == "mol-witness-patrol") | select(mine($rig)) | "\(.created_at)\t\(.id)"'
+  gc bd list --status=deferred --type=molecule --include-infra --limit=0 --json | jq -r --arg rig "$GC_RIG" 'def mine($r): (if (.assignee//"")=="" then "" else (.assignee|split("/")[0]) end) as $a | ((.metadata."gc.rig")//"") as $m | ($a=="" or $a==$r) and ($m=="" or $m==$r); .[] | select(.title == "mol-witness-patrol") | select(mine($rig)) | "\(.created_at)\t\(.id)"'
 )
 # Adopt the NEWEST wisp; burn the rest. When a completed cycle is caught
 # awaiting burn beside the fresh successor it poured, the successor is always
 # the newer created_at — a cycle pours its successor only at its terminal step.
 # Selecting by status adopts the completed (in_progress) cycle and drops the
-# fresh (open) successor.
+# fresh (open or deferred) successor.
 WISP_IDS=$(printf '%s\n' "$WISP_ROWS" | sort -r | awk -F'\t' 'NF>=2 {print $2}')
 WISP=$(printf '%s\n' "$WISP_IDS" | sed -n '1p')
 for extra in $(printf '%s\n' "$WISP_IDS" | sed '1d'); do gc bd mol burn "$extra" --force; done
@@ -84,6 +87,16 @@ empty). Then follow the formula. Never exit a wisp from an intermediate
 step: continue, or jump to next-iteration, which pours and ASSIGNS the next
 wisp before burning this one — a failed assign rolls the pour back and keeps
 the current wisp.
+
+**A pass ends at next-iteration.** That step leaves the next wisp assigned and
+deferred an hour and ends your turn, and once the hour has passed the
+controller's reassignment restart runs the next pass in a fresh session.
+Never mark your next wisp in progress or work it in the same conversation: a
+session holding in-progress work gets no restart, so it sits idle once its turn
+ends. The adopt above stays, because there a fresh session is taking its own
+wisp, and a session restarted inside the hour takes its deferred wisp early.
+When the witness-nudge order tells you your pass stopped, no restart is coming,
+so run that reconcile again and work the wisp it adopts.
 
 ## Recovery doctrine (the formula carries the mechanics)
 
@@ -103,23 +116,19 @@ the current wisp.
 - **Skip infrastructure**: dispatcher-routed control beads, graph.v2 topology
   roots (`gc.kind` workflow/scope/spec — not recoverable work; their steps carry
   the work and the control-dispatcher's `workflow-finalize` closes the root), and
-  beads owned by configured named identities are not orphans. A visit whose
-  sitting is gone is recovered too: its release keeps the route, so the visit
-  parks on the board again, and the sitting the operator engages next
-  reconstitutes the conversation from the record.
+  beads owned by configured named identities are not orphans. Nor is a
+  conversation, a task assigned to `human` or to the alias of its sitting: no
+  session carries either owner, and a new session under that alias takes it back.
 
 ## Findings
 
 A finding is a BEAD, filed through one writer that dedups repeats by
 situation key. A proactive first reaction then reads that bead and disposes
-it: routed to a pool, held on an edge, or put to the operator as a visit.
+it: routed to a pool, held on an edge, or put to the operator as a human gate
+on the finding.
 
 ```bash
-SCRIPTS=""
-for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/patrol-finding.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
-"$SCRIPTS/patrol-finding.sh" --scope witness-findings --key <situation-key> --about <bead> --title "<one line>" --message "<observation + recommendation>"
+"$(gc {{ .BindingName }} scripts-dir)/patrol-finding.sh" --scope witness-findings --key <situation-key> --about <bead> --title "<one line>" --message "<observation + recommendation>"
 ```
 
 `--about` names the bead the finding is about, and the dedup matches on it
@@ -141,12 +150,12 @@ on the operator, and every `NOTICE:` mail or request for an act you may not
 take yourself.
 
 An emergency that needs a human NOW and cannot wait for a disposition — a
-crash, data loss, corruption, a security problem — goes straight to a visit
-through `"$SCRIPTS/escalate.sh" --subject <bead> --key <situation-key>
---message "<what is wrong + recommendation>"`. Context recycling is the
-cycle-recycle Stop hook's job — never something you ask about.
+crash, data loss, corruption, a security problem — goes straight to a human
+gate on the bead it is about, through `"$(gc {{ .BindingName }} scripts-dir)/human-gate.sh"
+--subject <bead> --key <situation-key> --message "<what is wrong + recommendation>"`.
+{{ template "human-gate-holds" . }}
 
-{{ template "visit-close" . }}
+{{ template "human-gate-withdraw" . }}
 
 {{ template "heartbeat-no-consent-ui" . }}
 

@@ -1,16 +1,21 @@
 #!/usr/bin/env bash
 # Tests for review-workspace.sh against a real git repository and a synthetic
-# workspace directory. Only `gc` is stubbed: it serves the city's rigs and each
-# bead's status from a table, and logs the store every lookup was sent to.
+# workspace directory. Only `gc` is stubbed, and signoff.sh where the formulas'
+# verdict call reaches it. The gc stub serves the city's rigs and each bead's
+# status from a table, and logs every call it gets, the store each lookup was
+# sent to included.
 #
 # Covers path and its id rails; add making a detached worktree at the commit,
 # reusing it at the same commit, rebuilding it at another, re-creating one whose
 # directory was deleted by hand, and refusing an oid that is not a commit and a
 # workspace name that is a symlink; remove taking every worktree inside a
 # workspace, a nested one included, with its registration, and a read-only
-# subtree, while another worktree's stale registration is left for
-# worktree-reap; the formulas' own gather and remove lines, run as a pour fills
-# them in; and
+# subtree, while another worktree's stale registration is left in place; the
+# formulas' own gather and remove lines, run as a pour fills them in; the
+# formulas' lines that write a review's own files and hand them on,
+# run from a directory standing for the agent's home, which they leave empty;
+# each quorum lane storing the object it puts in its block, with no file
+# written, after a gather that failed before it made the workspace; and
 # reap's gates — the workspace of a closed review goes, its bead looked up in
 # the store its prefix names; a review that is not closed and a status that
 # cannot be read hold at any age; a bead the ledger no longer has, a name with no
@@ -60,6 +65,10 @@ export STUB_STATUS="$TMP/status.tsv" STUB_GC_LOG="$TMP/gc.log" STUB_ROOT="$TMP" 
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 printf '%s\n' "$*" >> "$STUB_GC_LOG"
 case "$1 $2" in
+    "gc-toolkit scripts-dir")
+        # gc names the pack it loaded for the binding the city imports it under.
+        [ -n "${STUB_PACK:-}" ] || exit 1
+        printf '%s/assets/scripts\n' "$STUB_PACK"; exit 0 ;;
     "rig list")
         [ -z "$STUB_RIGS_FAIL" ] || { echo "not in a city directory" >&2; exit 1; }
         printf '{"city_path":"%s","rigs":[{"name":"city","path":"%s","prefix":"hq","hq":true},{"name":"toolkit","path":"%s/rig-tk","prefix":"tk"},{"name":"rig-a","path":"%s/rig-ra","prefix":"ra"}]}\n' \
@@ -72,6 +81,8 @@ case "$1 $2" in
             unreadable) echo "dial tcp: connection refused" >&2; exit 1 ;;
             *) printf '[{"id":"%s","status":"%s"}]\n' "$3" "$st"; exit 0 ;;
         esac ;;
+    "bd update")
+        exit 0 ;;
 esac
 echo "stub gc: unexpected call: $*" >&2
 exit 3
@@ -155,8 +166,8 @@ g worktree add -q --detach "$WS/gc-review-tk-rm/base" "$C2"
 g worktree add -q --detach "$WT/nested" "$C2"
 mkdir -p "$WS/gc-review-tk-rm/gomod/pkg"; touch "$WS/gc-review-tk-rm/gomod/pkg/f"
 chmod -R a-w "$WS/gc-review-tk-rm/gomod"
-# Another worktree's directory deleted by hand: its registration is
-# worktree-reap's to pin and prune, never a side effect of this script.
+# Another worktree's directory deleted by hand: its registration, and the admin
+# HEAD that may be the only ref to its commits, stay. No prune here touches it.
 g worktree add -q --detach "$TMP/other" "$C1"; rm -rf "$TMP/other"
 OUT="$(run remove --review-bead tk-rm)"
 eq "$?" "0" "remove exits 0"
@@ -179,7 +190,7 @@ extract() { # <toml> <marker>
 render() {
     printf '%s\n' "$1" | sed -e "s|{{review_bead}}|$2|g" -e "s|{{reviewed_oid}}|$3|g" \
         -e 's|{{review_base}}|main|g' -e 's|{{review_branch}}|polecat/x|g' -e 's|{{anchor_bead}}|tk-anc|g' \
-        -e 's|{{check}}|correctness|g' -e 's|{{review_pr_url}}||g'
+        -e 's|{{check}}|correctness|g' -e 's|{{review_pr_url}}||g' -e 's|{{binding_prefix}}|gc-toolkit.|g'
 }
 GATHER="$(extract "$ROOT/formulas/mol-review.toml" review-gather)"
 REMOVE="$(extract "$ROOT/formulas/mol-review.toml" review-workspace-remove)"
@@ -187,9 +198,9 @@ QREMOVE="$(extract "$ROOT/formulas/mol-review-quorum-signoff.toml" quorum-review
 for v in GATHER REMOVE QREMOVE; do
     if [ -n "${!v}" ]; then ok "the formula's $v lines extract"; else bad "the formula's $v lines extract (markers missing)"; fi
 done
-# The pack holds the scripts the gather calls and the libs they source.
+# The pack gc names holds the scripts the gather calls and the libs they source.
 PACK="$TMP/pack"; mkdir -p "$PACK/assets/scripts"
-cp "$SUT" "$HERE/review-checks.sh" "$HERE/review-evidence.sh" "$HERE/bd-lib.sh" "$HERE/rig-check-lib.sh" "$PACK/assets/scripts/"
+cp "$SUT" "$HERE/review-checks.sh" "$HERE/review-evidence.sh" "$HERE/bd-lib.sh" "$HERE/rig-check-lib.sh" "$HERE/rig-root.sh" "$PACK/assets/scripts/"
 # The gather fetches the base and the branch from origin before it makes the
 # worktree, and reads the anchor.
 ORIGIN="$TMP/origin.git"; git init -q --bare "$ORIGIN"
@@ -197,19 +208,82 @@ g push -q "$ORIGIN" "$C2:refs/heads/main" "$C1:refs/heads/polecat/x"
 g remote add origin "$ORIGIN"
 status tk-anc open
 cd "$REPO" || exit 1
-# The gather refuses to run without a rig root, so each run names this
-# repository as the rig.
+# The gather resolves the rig through the pack's rig-root.sh and refuses to
+# run without a rig root, so each run names this repository as the rig.
 for n in 1 2; do
-    GOT="$(GC_PACK_DIR="$PACK" GC_RIG_ROOT="$REPO" bash -c "$(render "$GATHER" tk-fx "$C1")
+    GOT="$(STUB_PACK="$PACK" GC_RIG_ROOT="$REPO" bash -c "$(render "$GATHER" tk-fx "$C1")
 pwd -P" 2>/dev/null | tail -1)"
     eq "$GOT" "$WS/gc-review-tk-fx/wt" "block $n running the formula's gather stands in the review's worktree"
 done
 eq "$(git -C "$WS/gc-review-tk-fx/wt" rev-parse HEAD)" "$C1" "at the reviewed commit"
-SC="$PACK/assets/scripts/step-close.sh" bash -c "$(render "$REMOVE" tk-fx "$C1")" >/dev/null 2>&1
+STUB_PACK="$PACK" GC_RIG_ROOT="$REPO" bash -c "$(render "$REMOVE" tk-fx "$C1")" >/dev/null 2>&1
 if exists "$WS/gc-review-tk-fx"; then bad "the verdict step's remove line takes the workspace"; else ok "the verdict step's remove line takes the workspace"; fi
-GC_PACK_DIR="$PACK" GC_RIG_ROOT="$REPO" bash -c "$(render "$GATHER" tk-fq "$C1")" >/dev/null 2>&1
-SC="$PACK/assets/scripts/step-close.sh" bash -c "$(render "$QREMOVE" tk-fq "$C1")" >/dev/null 2>&1
+STUB_PACK="$PACK" GC_RIG_ROOT="$REPO" bash -c "$(render "$GATHER" tk-fq "$C1")" >/dev/null 2>&1
+STUB_PACK="$PACK" GC_RIG_ROOT="$REPO" bash -c "$(render "$QREMOVE" tk-fq "$C1")" >/dev/null 2>&1
 if exists "$WS/gc-review-tk-fq"; then bad "the quorum's remove line takes the workspace"; else ok "the quorum's remove line takes the workspace"; fi
+
+# --- the review's own files ----------------------------------------------------
+# A review writes its verdict body, its finding set and a quorum lane's output
+# in its workspace, and hands them on from there. Each line runs from a
+# directory standing for the agent's home, where a pool session's shell starts,
+# and the home must hold nothing once they ran. The agent writes by the
+# workspace path the gather printed, so a line that names it gets that path.
+FSET="$(extract "$ROOT/formulas/mol-review.toml" review-finding-set)"
+if [ -n "$FSET" ]; then ok "the formula's finding set lines extract"; else bad "the formula's finding set lines extract (markers missing)"; fi
+# signoff.sh as the verdict call reaches it: it records its arguments and
+# refuses a file it cannot read, as the real one does.
+cat > "$PACK/assets/scripts/signoff.sh" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$STUB_SIGNOFF_ARGS"
+while [ "$#" -gt 0 ]; do
+    case "$1" in --notes-file|--findings-file) [ -r "$2" ] || { echo "$1 '$2' is not readable" >&2; exit 1; } ;; esac
+    shift
+done
+STUB
+chmod +x "$PACK/assets/scripts/signoff.sh"
+AGENT_HOME="$TMP/agent-home"; mkdir -p "$AGENT_HOME"
+cd "$AGENT_HOME" || exit 1
+FWS="$WS/gc-review-tk-ff"
+OUT="$(STUB_PACK="$PACK" GC_RIG_ROOT="$REPO" bash -c "$(render "$GATHER" tk-ff "$C1")" 2>/dev/null)"
+eq "$(printf '%s\n' "$OUT" | sed -n "s/^== The review's workspace: //p")" "$(bash "$SUT" path --review-bead tk-ff)" "the gather prints the review's workspace, the directory path names"
+eq "$(printf '%s\n' "$OUT" | sed -n "s/^== The review's worktree: //p")" "$FWS/wt" "and the worktree in it"
+printf 'the trail\n' > "$FWS/findings.md"
+bash -c "$(render "$FSET" tk-ff "$C1" | sed "s|<workspace>|$FWS|g")" 2>/dev/null
+eq "$(jq -r '.[0].locus' "$FWS/findings.json" 2>/dev/null)" "<file>:<symbol or section>" "the finding set's block writes the set in the workspace"
+for f in mol-review mol-review-quorum-signoff; do
+    CALL="$(extract "$ROOT/formulas/$f.toml" review-verdict-call)"
+    if [ -n "$CALL" ]; then ok "$f's verdict call extracts"; else bad "$f's verdict call extracts (markers missing)"; fi
+    rm -f "$TMP/signoff.args"
+    STUB_SIGNOFF_ARGS="$TMP/signoff.args" STUB_PACK="$PACK" bash -c "$(render "$CALL" tk-ff "$C1" | sed 's/<approve|request-changes>/approve/')" 2>/dev/null
+    eq "$?" "0" "$f's verdict call hands signoff.sh files it can read"
+    eq "$(grep -A1 -x -- '--notes-file' "$TMP/signoff.args" 2>/dev/null | tail -1)" "$FWS/findings.md" "and the verdict body in the workspace"
+    eq "$(grep -A1 -x -- '--findings-file' "$TMP/signoff.args" 2>/dev/null | tail -1)" "$FWS/findings.json" "and the finding set in the workspace"
+done
+# Each lane stores the object it puts in its block, in place of the placeholder
+# line, and writes no file. So a lane whose gather failed before it made the
+# review's workspace still records its blocked output: here the gather's fetch
+# asks origin for a branch it does not have.
+QTOML="$ROOT/formulas/mol-review-quorum-signoff.toml"
+STORE_FROM='--set-metadata "gc.output_json='
+eq "$(grep -cF -- "$STORE_FROM" "$QTOML")" "2" "each of the two lanes stores its output in one command"
+STUB_PACK="$PACK" GC_RIG_ROOT="$REPO" bash -c "$(render "$GATHER" tk-fb "$C1" | sed 's|polecat/x|polecat/gone|g')" >/dev/null 2>&1
+eq "$?" "1" "a gather whose fetch fails exits 1"
+if exists "$WS/gc-review-tk-fb"; then bad "before it makes the review's workspace"; else ok "before it makes the review's workspace"; fi
+for n in 1 2; do
+    id=codex; [ "$n" = 2 ] && id=claude
+    # The object carries what the shell would expand in an unquoted body.
+    printf '{\n  "lane_id": "%s",\n  "verdict": "blocked",\n  "summary": "the gather'"'"'s `git fetch` failed in $HOME"\n}\n' "$id" > "$TMP/lane-object"
+    # The command runs from its first line to the line that closes its
+    # here-document's substitution.
+    STORE="$(awk -v want="$n" -v from="$STORE_FROM" 'index($0, from) { k++; on = (k == want) } on { print } on && $0 == ")\"" { on = 0 }' "$QTOML" \
+        | awk -v f="$TMP/lane-object" '$0 == "<your review-quorum.lane.v1 object>" { while ((getline l < f) > 0) print l; next } { print }')"
+    : > "$STUB_GC_LOG"
+    LANE_BEAD=tk-lane bash -c "$STORE" 2>/dev/null
+    eq "$(cat "$STUB_GC_LOG")" "bd update tk-lane --set-metadata gc.output_json=$(jq -c . "$TMP/lane-object")" "lane $n stores the blocked object in its block, with no workspace"
+done
+eq "$(find "$TMP" -name 'lane-*.json' | wc -l | tr -d ' ')" "0" "and neither lane writes its output to a file"
+eq "$(ls -A "$AGENT_HOME")" "" "no line a review runs leaves a file in the agent's home"
+bash "$SUT" remove --review-bead tk-ff >/dev/null 2>&1
 
 # --- reap ----------------------------------------------------------------------
 export REVIEW_WORKSPACE_DIR="$TMP/ws-reap"

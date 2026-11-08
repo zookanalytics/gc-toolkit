@@ -47,8 +47,8 @@ MSG
     exit 1
 fi
 
-# The board's one write route (POST /helm/open) files visits by running
-# gc-helm.sh's `open` verb, which sits beside THIS launcher in the pack.
+# The board's write routes (POST /helm/{open,accept,engage,dismiss}) run
+# gc-helm.sh's verbs, and gc-helm.sh sits beside THIS launcher in the pack.
 # Resolving it here rather than in Go is deliberate: this script's own location
 # is the only thing that knows which rig checkout the service was started from,
 # so pointing at a sibling keeps the binary from having to guess a rig name

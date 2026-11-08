@@ -168,7 +168,7 @@ drain.
 |---|---|---|
 | `suggested_pr_title` | pr-prep finished its mechanical pass | title/body conversation → finalize (below) |
 | `conflict_questions` | the rebase loop hit a conflict it refused to guess at (`infeasible`); usually arrives with `aborted_at=rebase-loop-exhausted` | surface each blocker's `question`; offer: drive by hand from `metadata.work_dir` / skip the commit (`git rebase --skip`) / abort (`git reset --hard $backup_ref`); then clear-and-close or re-pour |
-| `aborted_at` | a step stopped for good — rebase mol: `workspace-setup`, `rebase-loop-exhausted`, `install`, `push`, `rebase-mismatch`; pr-prep: `cherry-pick`, `test`, `push-branch`; refinery overlay: `refinery-race-loss` | staleness check (below), then summarize the failure tail from bead notes and offer next moves; never re-dispatch automatically |
+| `aborted_at` | a step stopped for good — rebase mol: `workspace-setup`, `rebase-loop-exhausted`, `install`, `push`, `rebase-mismatch`; pr-prep: `workspace-setup`, `cherry-pick`, `test`, `push-branch`; refinery overlay: `refinery-race-loss` | staleness check (below), then summarize the failure tail from bead notes and offer next moves; never re-dispatch automatically |
 | `rebase_in_progress` | **legacy (rebase mol v11)**: polecat parked mid-rebase on a rework/review child (`pending_rework` / `pending_review`) | when the newer of the two child beads is **closed**, re-pour (burn-before-repour + resume token below); while it is open, do nothing — the child nudges you |
 
 Notes on the modes:
@@ -306,63 +306,50 @@ commit is the operator running `git rebase --skip` in the worktree first.
 
 ## Addressing: pools versus named agents
 
-`gc sling` stamps `gc.routed_to` and nothing else, whatever the target.
-For a **pool** that is the whole address — polecat, polecat-codex, dog,
-proactive — because pool members run the routed tier of the work query,
-and the bead has to stay unassigned for their claim filter to offer it.
-A converse sitting is neither a pool nor a named agent: a visit parks on
-the helm board (`gc.routed_to=human`), and `gc-helm engage` spawns the
-sitting when the operator draws it off the board.
+A **pool** (polecat, polecat-codex, dog, proactive) takes a sling, which pours a
+workflow its members claim:
 
-A **named agent** is addressed by `assignee` instead: mechanik, deacon,
-witness, refinery, keeper. Its hook would also claim a bead routed to
-its own name, but the assignee is what the controller and the pack's
-notice read to give the agent a turn (docs/deferred-dispatch.md, "Work
-assigned to a named agent owes a notice"). Give them the assignee write,
-in place of the sling or straight after it, using the agent's exact
-QualifiedName — city-scoped for a city singleton (`gc-toolkit.mechanik`),
-rig-scoped otherwise (`gc-toolkit/gc-toolkit.witness`), the form
-`gc agent list` prints:
+```
+gc sling <rig>/<pool> <bead> --on <formula>
+```
+
+A **named agent** (mechanik, deacon, witness, refinery, keeper) takes an
+assignee instead, the name `gc agent list` prints. A route would reach its hook
+too, but the assignee is what the controller and the pack's notice read to give
+it a turn, and the write alone may give it none, so tell it as well:
 
 ```
 gc bd update <bead> --assignee <qualified-name>
+"$(gc <binding> scripts-dir)/deferred-dispatch.sh" notify <bead> --agent <qualified-name>
 ```
 
-Then tell the agent, since the write alone may give it no turn. The controller
-restarts a live `fresh` session onto a newly assigned bead, though not while
-the session still holds its previous one open, and it restarts no `resume`
-session, such as the mechanik's.
-`"$(gc <binding> scripts-dir)/deferred-dispatch.sh" notify <bead> --agent <qualified-name>`
-mails the agent the bead once `bd` reports the bead ready. `gc <binding> scripts-dir`
-prints the directory of the gc-toolkit pack's scripts, so a script called
-through it is the pack's own copy, whichever pack the calling agent comes from.
-`<binding>` is the name the city imports that pack under, which gc puts in
-front of its skills: `gc-toolkit` in `gc-toolkit.work`.
+`<binding>` is the name the city imports the gc-toolkit pack under, which gc puts
+in front of its skills: `gc-toolkit` in `gc-toolkit.work`. A script called through
+`gc <binding> scripts-dir` is that pack's own copy, whichever pack the calling
+agent comes from.
+
+A converse sitting is neither a pool nor a named agent: a conversation waits in
+the operator's queue, assigned to `human`, and `gc-helm engage` spawns the sitting
+when the operator engages it from the board. The `work` skill has the rest of
+sending work.
 
 ## Dispatched work is file-and-forget
 
-The default after `gc sling` is file-and-forget: the bead is the
-contract, and nothing here reads it again. A follow-up that is BLOCKED on
-another bead is the one case that needs more than a sling, and the answer is
-still an edge and a drain, never a watcher: record the blocker as a `blocks`
-edge, then ARM the follow-up so it routes itself when the blocker lands.
+The default after `gc sling` is file-and-forget: the bead is the contract, and
+nothing here reads it again. A follow-up that is BLOCKED on another bead takes an
+edge and an arm, never a watcher (the `waits` skill):
 
 ```
 "$(gc <binding> scripts-dir)/deferred-dispatch.sh" arm <bead> \
     --target <rig>/<agent> --reason "waits for <blocker>"
 ```
 
-The rig's `deferred-dispatch` order slings the armed bead once `bd`
-reports it ready (docs/deferred-dispatch.md). Arm it rather than leave it
-unrouted for someone to route later: a blocked work bead with no route and
-no arm is the debt `doctor/check-blocked-work-armed` flags, and a watch held
-in your context is a dispatch invisible to everyone else and gone when the
-session ends.
+A watch held in your context is a dispatch invisible to everyone else and gone
+when the session ends.
 
-The one sanctioned watch: a human is in THIS conversation right now,
-waiting on the outcome. Then spawn exactly one bounded terminal-status
-watch — it reports closed or not-closed, and you do not read the work
-product:
+The one sanctioned watch: a human is in THIS conversation right now, waiting on
+the outcome. Then spawn exactly one bounded terminal-status watch — it reports
+closed or not-closed, and you do not read the work product:
 
 ```
 Monitor(
@@ -430,14 +417,15 @@ worktree.
   evidence you cite discriminates. A premise inherited from a bead body, a
   design doc, or one transient measurement is an assertion, not evidence.
 
-<!-- rule:tk-b80kkz src:audit:tk-awa7hv, pr:#992:review:5402830626 (operator feedback), pr:#1045:comment:6031460436 (operator feedback), pr:#1132:comment:6066452298 adopted:2026-08-26 updated:2026-10-09 -->
+<!-- rule:tk-b80kkz src:audit:tk-awa7hv, pr:#992:review:5402830626 (operator feedback), pr:#1045:comment:6031460436 (operator feedback), pr:#1132:comment:6066452298, bead:tk-0c9csp8, bead:tk-ab9p1pk (operator) adopted:2026-08-26 updated:2026-10-15 -->
 - A rename, a re-framing, a rendering change, a sweep that closes state
-  which should not exist, or one more guard for each newly found bypass is
-  not a fix for the thing that produced the symptom. Take a report at the
+  which should not exist, an alert that fires once something has waited
+  past a set time, or one more guard for each newly found bypass is not a
+  fix for the thing that produced the symptom. Take a report at the
   severity it was filed, find what allowed it to happen, and prefer a design
   in which it cannot happen again over a patch for the instance. When a
-  sweep or a guard must still ship, the change names the cause it leaves in
-  place and why that cause cannot be fixed where it arises.
+  sweep, a timer or a guard must still ship, the change names the cause it
+  leaves in place and why that cause cannot be fixed where it arises.
 
 <!-- rule:tk-xgaeo src:audit:tk-awa7hv, pr:#465:comment:3854303400, pr:#665:comment:3942910142, pr:#858:comment:4115868945, pr:#1030:comment:4222590330 (operator feedback) adopted:2026-08-26 updated:2026-10-09 -->
 - Documentation states what is true now, in the present tense. No "replaces
@@ -464,11 +452,27 @@ worktree.
   surfaces the bead in gc hook and bd ready as live demand; a blocked-by
   edge excludes it until the blocker lands, then self-clears.
 
+<!-- rule:tk-cnzyj8p src:pr:#1269:comment:4286754857, pr:#485:comment:3867418027 (operator feedback), bead:tk-s0c1i6z, bead:tk-yqqwpp, bead:tk-irjgyll (operator) adopted:2026-10-30 -->
+- Give as the operator's only what they said: a ruling, approval, practice,
+  reason or expectation you attribute to them quotes or cites where they
+  said it, and reaches no further than those words and the case they
+  answered. Your own inference, a prior session's note, a template's text
+  and your elaboration of a ruling each name their real source, and a
+  decision you record before the operator rules on it says it is proposed.
+
+<!-- rule:tk-4uw3cg3 src:visit:tk-vijqp9x (operator feedback), bead:tk-4uw3cg3 (operator) adopted:2026-10-31 -->
+- A command, flag, key or name that the operator or a reviewer sketches in
+  passing shows what they want, not the shape it must take. Derive the
+  shape from the conventions of the surface it joins, starting with the
+  commands and names already beside it, and say where the result departs
+  from the sketch.
+
 <!-- managed by the learning distiller; every entry carries its anchor. cap: 12 -->
 <!-- Composed after work-quality-base by the system-class roles: deacon,
-     mechanik, proactive, witness, refinery, and keeper. Holds the authoring
-     standards for that class only; universal standards live in
-     work-quality-base. -->
+     proactive, witness, refinery, and keeper. The mechanik, also in this
+     class, reads this file and work-quality-base before it writes, because
+     its prime has no room for them. Holds the authoring standards for that
+     class only; universal standards live in work-quality-base. -->
 
 <!-- rule:tk-tketyk src:audit:tk-awa7hv adopted:2026-08-26 -->
 - File work as a bead in the pass that names it, and put the bead id in the

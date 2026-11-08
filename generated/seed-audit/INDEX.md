@@ -86,7 +86,6 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-upstream-gc-sync`](formulas/mol-upstream-gc-sync.md) | `gascity` |
 | [`mol-validate`](formulas/mol-validate.md) | `city` |
 | [`mol-validate-close`](formulas/mol-validate-close.md) | `city` |
-| [`mol-visit`](formulas/mol-visit.md) | `city` |
 | [`mol-witness-patrol`](formulas/mol-witness-patrol.md) | `city` |
 
 ## Resolved fragment composition

@@ -4,13 +4,14 @@
 # (blocked plainly-work bead with neither route nor arm, including one carrying
 # only gc.execution_routed_to — provenance, not a dispatch path — and one whose
 # route or arm holds only whitespace), every exemption (routed, armed, assigned,
-# worked by a live run, merge anchor, waiting for placement,
-# review/step/workflow/demand metadata, every standing kind,
+# worked by a live run, merge anchor, waiting for placement, held by a converse
+# sitting's gate, review/step/workflow metadata, every standing kind,
 # decision/epic/infra types), a marked bead placed under an epic, the per-rig
 # labelling, the remedy string, the fail-closed probes (unreadable blocked
 # listing, unreadable runs, unreadable marked listing, a marked listing that
-# fails after printing its rows, unreadable rig list), a raw control byte in a
-# listing's row, and the quiet paths (empty store, all-armed store).
+# fails after printing its rows, unreadable gate listing, unreadable rig list),
+# a raw control byte in a listing's row, and the quiet paths (empty store,
+# all-armed store).
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECK="$HERE/run.sh"
@@ -54,6 +55,25 @@ case "$sub" in
             [ "$name" = "${BD_FAIL_MARKED:-}" ] && exit 3
             f="$STORES/$name.marked.json"; if [ -f "$f" ]; then cat "$f"; else printf '[]'; fi
             if [ "$name" = "${BD_PARTIAL_MARKED:-}" ]; then exit 3; fi ;;
+          # `list --type gate` is the read of the store's gates; each one is
+          # logged, and BD_FAIL_GATES names a store whose listing fails. It
+          # answers in bd's scope: with no --status and no --all, bd leaves out
+          # status closed and pinned and every bead whose pinned flag is set;
+          # a --status set keeps the rows in it, and a flagged row only when the
+          # set names pinned or hooked.
+          *" --type gate "*)
+            printf '%s\n' "$name" >> "$STORES/gates.calls"
+            [ "$name" = "${BD_FAIL_GATES:-}" ] && exit 3
+            f="$STORES/$name.gates.json"; [ -f "$f" ] || { printf '[]'; exit 0; }
+            st=""; all=""; p=""
+            for a in "$@"; do [ "$p" = "--status" ] && st="$a"; [ "$a" = "--all" ] && all=1; p="$a"; done
+            jq -c --arg st "$st" --arg all "$all" '
+              if $all != "" then .
+              elif $st == "" then [ .[] | select((.status // "open") != "closed" and (.status // "open") != "pinned" and (.pinned // false) != true) ]
+              else ($st | split(",")) as $set
+                | [ .[] | select(((.status // "open") as $s | $set | index($s)) != null)
+                        | select(($set | index("pinned")) != null or ($set | index("hooked")) != null or (.pinned // false) != true) ]
+              end' "$f" ;;
           *) echo "stub bd: unexpected list: $*" >&2; exit 2 ;;
         esac ;;
   *) printf '[]'; exit 0 ;;
@@ -75,7 +95,14 @@ run_check() {
     RIGS_JSON="${RIGS_JSON:-$TMP/rigs.json}" GC_PACK_DIR="$TMP/pack" bash "$CHECK" 2>&1
 }
 blocked_store() { local n="$1"; shift; local IFS=,; printf '[%s]' "$*" > "$TMP/stores/$n.blocked.json"; }
-clear_stores() { rm -f "$TMP/stores/"*.json "$TMP/stores/marked.calls"; }
+clear_stores() { rm -f "$TMP/stores/"*.json "$TMP/stores/marked.calls" "$TMP/stores/gates.calls"; }
+gates_store() { local n="$1"; shift; local IFS=,; printf '[%s]' "$*" > "$TMP/stores/$n.gates.json"; }
+gate_reads() { if [ -f "$TMP/stores/gates.calls" ]; then wc -l < "$TMP/stores/gates.calls" | tr -d ' '; else echo 0; fi; }
+# hgate <id> <key> [<status>] — a human gate filed under <key>, open unless
+# <status> says otherwise. hgate_flagged <id> <key> — an open one whose pinned
+# flag is set.
+hgate() { printf '{"id":"%s","status":"%s","issue_type":"gate","await_type":"human","await_id":"%s"}' "$1" "${3:-open}" "$2"; }
+hgate_flagged() { printf '{"id":"%s","status":"open","pinned":true,"issue_type":"gate","await_type":"human","await_id":"%s"}' "$1" "$2"; }
 marked_store() { local n="$1"; shift; local IFS=,; printf '[%s]' "$*" > "$TMP/stores/$n.marked.json"; }
 marked_reads() { if [ -f "$TMP/stores/marked.calls" ]; then wc -l < "$TMP/stores/marked.calls" | tr -d ' '; else echo 0; fi; }
 
@@ -102,6 +129,49 @@ eq "$RC" "1" "a blocked plainly-work bead with no dispatch path warns (exit 1)"
 has "$OUT" "no dispatch path" "the headline names the defect"
 has "$OUT" "alpha bead a-1" "the finding names the rig and bead"
 has "$OUT" "deferred-dispatch.sh arm a-1" "the finding names the arm remedy for that bead"
+clear_stores
+
+# --- a converse sitting's hold: its ruling decides the dispatch --------------
+# The hold's gate is a human gate under conversation.<id>, and the sign-off
+# sends or keeps the bead once the operator rules, so the bead owes no arm.
+blocked_store alpha "$(bwork a-1)"; gates_store alpha "$(hgate x-0 conversation.tk-c1)"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a blocked bead a converse sitting's gate holds is not flagged"
+eq "$(gate_reads)" "1" "…judged on one read of the store's live gates"
+clear_stores
+# Any other human gate keeps the rule: clearing it is the ruling to proceed,
+# and an arm is what sends the work then.
+blocked_store alpha "$(bwork a-1)"; gates_store alpha "$(hgate x-0 polecat-blocked)"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "a blocked bead another human gate holds is flagged"
+has "$OUT" "deferred-dispatch.sh arm a-1" "…with the arm remedy"
+clear_stores
+# Which gates hold is the rule every reader of a gate shares (bd-lib.sh's
+# open_human_gate): every status but closed, pinned included. bd's default
+# scope leaves out a gate in status pinned and a gate whose pinned flag is set,
+# so the check's listing names every live status, and each such gate still
+# holds the bead.
+blocked_store alpha "$(bwork a-1)"; gates_store alpha "$(hgate x-0 conversation.tk-c1 pinned)"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a sitting's gate in status pinned holds the bead"
+clear_stores
+blocked_store alpha "$(bwork a-1)"; gates_store alpha "$(hgate_flagged x-0 conversation.tk-c1)"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a sitting's open gate whose pinned flag is set holds the bead"
+clear_stores
+# A gate listing that does not read cannot rule a sitting out, so the
+# candidate is warned as unverifiable and never flagged.
+blocked_store alpha "$(bwork a-1)"; gates_store alpha "$(hgate x-0 conversation.tk-c1)"
+OUT=$(BD_FAIL_GATES=alpha run_check); RC=$?
+eq "$RC" "1" "an unreadable gate listing warns (exit 1)"
+has "$OUT" "whether a converse sitting's gate holds it could not be read" "…naming what could not be read"
+hasnt "$OUT" "deferred-dispatch.sh arm a-1" "…and flags nothing"
+clear_stores
+# A store with no candidate reads no gates.
+blocked_store alpha "$(barmed a-1)"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "an armed blocked bead is not flagged"
+eq "$(gate_reads)" "0" "…and no gate listing is read for a store with no candidate"
 clear_stores
 
 # gc.execution_routed_to is execution provenance, not a dispatch path. When NO
@@ -160,12 +230,21 @@ has "$OUT" "no dispatch path" "and it is a stranded-work finding, not a liveness
 clear_stores
 
 # The allowlist admits every named work type, not just task (which bwork uses):
-# a blocked bug/feature/chore/spike with no dispatch path is a finding too.
-for t in bug feature chore spike; do
+# a blocked bug/feature/chore/spike/story with no dispatch path is a finding too.
+for t in bug feature chore spike story; do
     blocked_store alpha "$(btyped a-1 "$t")"
     eq "$(run_check >/dev/null; echo $?)" "1" "a blocked $t with no dispatch path is flagged (work allowlist)"
     clear_stores
 done
+
+# A story-typed bead is work like the others, so the finding reads as stranded
+# work and names the type.
+blocked_store alpha "$(btyped a-1 story)"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "a blocked, unarmed story-typed bead warns"
+has "$OUT" "alpha bead a-1 [story]: blocked with no gc.routed_to and no gc.dispatch_when_ready" "…and is reported as stranded work"
+has "$OUT" "deferred-dispatch.sh arm a-1" "…with the arm remedy"
+clear_stores
 
 # A route or an arm holding only whitespace is no dispatch path
 # (assets/scripts/dispatch-path.sh): a pool matches its route byte for byte, and
@@ -275,12 +354,18 @@ blocked_store alpha "$(bassigned a-1)"
 eq "$(run_check >/dev/null; echo $?)" "0" "an assigned blocked bead is not flagged (not unrouted-and-remember)"
 clear_stores
 
-for pair in "task_kind=review" "gc.step_ref=mol-x.step" "gc.kind=workflow" "gc.demand_for=a-9"; do
+for pair in "task_kind=review" "gc.step_ref=mol-x.step" "gc.kind=workflow"; do
     k="${pair%%=*}"; v="${pair#*=}"
     blocked_store alpha "$(bmeta a-1 "$k" "$v")"
     eq "$(run_check >/dev/null; echo $?)" "0" "a blocked bead carrying $k is not plainly work — not flagged"
     clear_stores
 done
+# A task still carrying a demand's gc.demand_for is plainly work: the key names
+# no exemption any more, and a work bead a human gate blocks needs its arm. A
+# human gate itself is a gate, which the type loop below leaves out.
+blocked_store alpha "$(bmeta a-1 gc.demand_for a-9)"
+eq "$(run_check >/dev/null; echo $?)" "1" "a blocked task carrying a leftover gc.demand_for is plainly work — flagged"
+clear_stores
 
 # A standing record is never dispatched, so blocked-and-unrouted is its resting
 # state, and the arm remedy would sling it to a pool when its blocker closed.
@@ -300,11 +385,12 @@ for k in $KINDS; do
 done
 
 # A negative list would flag any type it forgot; the allowlist exempts every
-# non-work type by naming what IS work. Topology/infra types `bd ready` excludes
-# (step, convoy, session, spec, event, convergence) and container types (epic,
-# milestone, story) must all pass — each of these is flagged by the pre-allowlist
-# negative list, so this loop fails against the old check and proves the fix.
-for t in decision epic merge-request gate molecule step convoy session spec event convergence story milestone; do
+# non-work type by naming what IS work. Types Gas City's Ready() leaves out
+# (step, convoy, session), records no ready list leaves out (spec, event,
+# convergence), and epic and milestone must all pass — each of these is flagged
+# by the pre-allowlist negative list, so this loop fails against the old check
+# and proves the fix.
+for t in decision epic merge-request gate molecule step convoy session spec event convergence milestone; do
     blocked_store alpha "$(btyped a-1 "$t")"
     eq "$(run_check >/dev/null; echo $?)" "0" "a blocked $t is not pool work — not flagged"
     clear_stores

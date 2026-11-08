@@ -4,17 +4,30 @@
 #
 #   PANE PROCESS — what the running agent actually has. A pane process carries
 #   the session env plus whatever the tmux server's global environment showed
-#   through, so it is the only place a leak is observable at all.
+#   through, so it is the only place a leak is observable at all. Linux exposes
+#   it as $PROC/<pid>/environ, and a host with no proc filesystem, such as macOS,
+#   reads it from the kernel's kern.procargs2 record. Both keep each entry whole.
+#   With System Integrity Protection on, macOS hides the environment of its own
+#   binaries, /bin/zsh and /bin/sleep among them, so a pane running one is a note
+#   on that session. When no pane can be read at all, this arm has judged nothing,
+#   so the check warns once and cannot pass.
 #   SESSION ENV — what the NEXT process in that pane will get. `respawn-pane`
 #   takes no env argument, so that process comes up with the store-scope values
 #   the session env itself sets, plus any key the server's global holds that the
 #   session neither sets nor marks removed. A value the session sets wrong is as
 #   reachable by that respawn as one it lets inherit, so both are checked.
 #
-# Scope comes from the session's own identity — GC_ALIAS's rig prefix, else the
-# `<rig>--` session-name prefix — and never from config: the proposition is
-# that a session agrees with itself, which stays checkable when the config it
-# was spawned from has since changed.
+# Scope comes from the session's own environment and never from config: the
+# proposition is that a session agrees with itself, which stays checkable when
+# the config it was spawned from has since changed. A qualified GC_ALIAS,
+# `<rig>/<binding>.<agent>`, names the session's rig, and an unqualified one
+# names a city-scoped agent. A session with no alias, such as a member of an
+# unaliased pool, takes its scope from GC_TEMPLATE: `<rig>/<binding>.<agent>`
+# on a rig-scoped session and `<binding>.<agent>` on a city-scoped one. The
+# session name is not read for scope. A pool member is named
+# `<binding>__<agent>-<id>` whichever rig imported its pack, so the name opens
+# with the pack binding, not the rig. A session carrying neither key has no
+# scope to agree with, so it warns as unverified.
 #
 # GC_BEADS_PREFIX is not judged on its own, because its correct value is a
 # property of the store rather than of the session. It never travels alone:
@@ -31,6 +44,8 @@ set -u
 
 city="${GC_CITY_PATH:-${GC_CITY:-}}"
 PROC="${GC_DOCTOR_PROC_ROOT:-/proc}"
+pane_reader="$PROC"; [ -d "$PROC" ] || pane_reader="kern.procargs2 via perl"
+PERL="${GC_DOCTOR_PERL:-/usr/bin/perl}"
 
 errors=(); warnings=(); notes=()
 sessions_checked=0; panes_read=0
@@ -70,8 +85,10 @@ budget_init
 detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
 gcmux() { run_bounded tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} "$@"; }
 
-# env_val <key> <env-text> — the value of key, empty when absent or removed.
-env_val() { printf '%s\n' "$2" | sed -n "s/^$1=//p" | head -1; }
+# env_val <key> <env-text> — the value of key, empty when absent or removed. A
+# value is any bytes, and BSD sed stops at one its locale cannot decode, which
+# would read every key after it as absent.
+env_val() { printf '%s\n' "$2" | LC_ALL=C sed -n "s/^$1=//p" | head -1; }
 # env_removed <key> <env-text> — true when tmux reports the key marked removed.
 env_removed() { printf '%s\n' "$2" | grep -qx -- "-$1"; }
 # rig_named_by <path> — the rig a path under <city>/rigs/ belongs to, else empty.
@@ -80,6 +97,64 @@ rig_named_by() {
         "$city"/rigs/*) local rest="${1#"$city"/rigs/}"; printf '%s' "${rest%%/*}" ;;
         *) : ;;
     esac
+}
+
+# env_lines — the NUL-separated environment on stdin, one KEY=value per line. A
+# newline in a value turns into a space, so a value cannot start a line that reads
+# as an entry of its own.
+env_lines() { LC_ALL=C tr '\n\0' ' \n'; }
+
+# Perl's read of kern.procargs2, for the pid it is given. The kernel's record holds
+# the argument count, the executable's path and its padding, the arguments, the
+# environment and then strings of Apple's own, each string ending in NUL. This prints
+# the environment the way /proc/<pid>/environ holds it, and nothing at all when the
+# record cannot be read or shows none. The `sysctl` command cannot read this node.
+# The perl that ships with macOS can, so the check names its path: Homebrew's is built
+# without syscall, and it comes first on PATH where it is installed. Call 202 is
+# __sysctl on Darwin and another call elsewhere, so the program stops anywhere else.
+# The kernel names the size first, because a shorter buffer cuts the record short and
+# one past kern.argmax is refused.
+#
+# The record sits in the process's own memory, and only the argument count says
+# where the environment starts. A process that overwrites its arguments with a short
+# title leaves empty strings there, which read as no environment. One whose title
+# fills their whole space leaves fewer strings than the count, so the walk skips
+# entries and can miss a store key.
+#
+# Nothing marks where the environment ends. The first of Apple's strings are zeroed
+# once a process has started, which leaves the empty string the walk stops at, so an
+# empty string handed to a process as an entry stops it too, ahead of any store key
+# after it. In a process's first moments, an environment ending on an 8-byte boundary
+# runs straight into Apple's strings. They then read as extra entries, and their
+# names, such as ptr_munge, are not store keys, so no judgment changes.
+PROCARGS2_READ='
+$^O eq "darwin" or exit 1;
+my $mib = pack("i3", 1, 49, $ARGV[0] + 0);    # CTL_KERN, KERN_PROCARGS2, the pid
+my $size = pack("Q", 0);
+syscall(202, $mib, 3, 0, $size, 0, 0) == 0 or exit 1;
+my $record = "\0" x unpack("Q", $size);
+syscall(202, $mib, 3, $record, $size, 0, 0) == 0 or exit 1;
+my $argc = unpack("i", $record);
+my @strings = split(/\0/, substr($record, 4));
+my $i = 1;
+$i++ while $i < @strings && $strings[$i] eq "";
+$i += $argc;
+print $strings[$i++], "\0" while $i < @strings && $strings[$i] ne "";
+'
+
+# pane_env <pid> — the environment <pid> was started with, one KEY=value per line
+# and empty when it cannot be read. Exit 124 is the check budget, which refused
+# the read or cut it short, so this process was NOT read.
+pane_env() {
+    local pid="$1"
+    [ -n "$pid" ] || return 0
+    if [ "$pane_reader" = "$PROC" ]; then
+        [ -r "$PROC/$pid/environ" ] && env_lines < "$PROC/$pid/environ" 2>/dev/null
+        return 0
+    fi
+    run_bounded "$PERL" -e "$PROCARGS2_READ" "$pid" 2>/dev/null | env_lines
+    [ "${PIPESTATUS[0]}" -ne 124 ] || return 124
+    return 0
 }
 
 if ! command -v tmux >/dev/null 2>&1; then
@@ -143,6 +218,12 @@ else
         fi
     }
 
+    # scan_cut <session> — the warning for a read run_bounded refused with 124.
+    scan_cut() {
+        warnings+=("store-scope scan hit the check budget before reading $1 (rc=124) — that session and any listed after it are UNVERIFIED. Not a benign skip: a still-listed session left unread can be resolving the wrong store, the exact symptom this check exists for. Raise the check budget (\`gc doctor --check-timeout\`, or GC_DOCTOR_CHECK_TIMEOUT).")
+    }
+
+    pane_unread=()
     TAB=$(printf '\t')
     while IFS= read -r row; do
         [ -n "$row" ] || continue
@@ -160,7 +241,7 @@ else
         senv=$(gcmux show-environment -t "$sess" 2>/dev/null); senv_rc=$?
         if [ "$senv_rc" -ne 0 ]; then
             if [ "$senv_rc" -eq 124 ]; then
-                warnings+=("store-scope scan hit the check budget before reading $sess (rc=124) — that session and any listed after it are UNVERIFIED. Not a benign skip: a still-listed session left unread can be resolving the wrong store, the exact symptom this check exists for. Raise the check budget (\`gc doctor --check-timeout\`, or GC_DOCTOR_CHECK_TIMEOUT).")
+                scan_cut "$sess"
                 break
             fi
             continue
@@ -169,66 +250,73 @@ else
         [ -n "$agent" ] || continue
         sess_city=$(env_val GC_CITY_PATH "$senv")
         [ -z "$sess_city" ] || [ "$sess_city" = "$city" ] || continue
-        sessions_checked=$((sessions_checked + 1))
 
-        # Rig prefix of the qualified alias when the session carries one. An
-        # aliasless session (a pool member) names its store rig as the leading
-        # segment of its own name: <rig>__<template>-<id> when it shares the
-        # store's rig, <rig>--<template> when it is bound to a rig from
-        # elsewhere. GC_RIG is that first segment either way, so split on
-        # whichever of `--` or `__` opens the name.
+        # Gas City sets GC_TEMPLATE on each session it spawns from that
+        # session's own template, over whatever the spawning process passed
+        # through, so a scope a caller leaks cannot also move the scope the
+        # session is judged against.
         alias_name=$(env_val GC_ALIAS "$senv")
-        want_rig=""
+        template=$(env_val GC_TEMPLATE "$senv")
+        want_rig=""; scope_known=1
         case "$alias_name" in
             */*) want_rig="${alias_name%%/*}" ;;
-            "")  case "$sess" in
-                     *--*) want_rig="${sess%%--*}" ;;
-                     *__*) want_rig="${sess%%__*}" ;;
+            "")  case "$template" in
+                     */*) want_rig="${template%%/*}" ;;
+                     "")  scope_known=0 ;;
                  esac ;;
         esac
         want_scope="city"; [ -n "$want_rig" ] && want_scope="rig"
         scope_desc="city-scoped"; [ -n "$want_rig" ] && scope_desc="scoped to rig $want_rig"
 
-        # --- Arm 1: the running process agrees with the session's own scope ---
-        penv=""
-        if [ -n "$pane_pid" ] && [ -r "$PROC/$pane_pid/environ" ]; then
-            penv=$(tr '\0' '\n' < "$PROC/$pane_pid/environ" 2>/dev/null)
-        fi
-        if [ -z "$penv" ]; then
-            notes+=("$sess: pane process environment unreadable (pane_pid=${pane_pid:-none}, $PROC) — what this agent actually holds was not read")
+        if [ "$scope_known" -eq 0 ]; then
+            scope_desc="of undetermined scope"
+            warnings+=("$sess carries GC_AGENT but neither GC_ALIAS nor GC_TEMPLATE, so its store scope cannot be derived and the store keys it holds are UNVERIFIED. Not a benign skip: an agent reading the wrong store writes beads no queue that wants them can see. Read its store keys by hand (\`tmux show-environment -t $sess\`). If every pool session reads this way, Gas City has stopped writing GC_TEMPLATE, and this check needs another source of scope.")
         else
-            panes_read=$((panes_read + 1))
+            sessions_checked=$((sessions_checked + 1))
+
+            # --- Arm 1: the running process agrees with the session's own scope
+            penv=$(pane_env "$pane_pid"); penv_rc=$?
+            if [ "$penv_rc" -eq 124 ]; then
+                scan_cut "$sess"
+                break
+            fi
+            if [ -z "$penv" ]; then
+                pane_unread+=("$sess: pane process environment unreadable (pane_pid=${pane_pid:-none}, $pane_reader) — what this agent actually holds was not read")
+            else
+                panes_read=$((panes_read + 1))
+                while IFS="$TAB" read -r kind key val named; do
+                    [ -n "$kind" ] || continue
+                    case "$kind" in
+                        rig-wrong)   errors+=("$sess is $scope_desc but its running process holds $key=$val — every bd call it makes reads and writes rig $val's store. Restart the session (\`gc session reset $agent\`); if it recurs, the spawn is handing out a caller's scope.") ;;
+                        rig-missing) errors+=("$sess is $scope_desc but its running process holds no GC_RIG — it resolves the city store instead of rig $want_rig's, so its work lands where that rig's queues cannot see it. Restart the session (\`gc session reset $agent\`).") ;;
+                        path-rig)    errors+=("$sess is $scope_desc but its running process holds $key=$val, which names rig $named — restart the session (\`gc session reset $agent\`) and re-read this check.") ;;
+                        path-city)   errors+=("$sess is $scope_desc but its running process holds $key=$val, the city store, not rig $want_rig's — its work lands where that rig's queues cannot see it. Restart the session (\`gc session reset $agent\`).") ;;
+                        scope-wrong) errors+=("$sess is $scope_desc but its running process holds $key=$val, not $want_scope — restart the session (\`gc session reset $agent\`).") ;;
+                    esac
+                done <<< "$(scope_disagreements "$penv")"
+            fi
+
+            # --- Arm 1b: the session environment names the session's own scope
+            # respawn-pane takes no env argument, so a store-scope value the
+            # session environment SETS is what the next process in this pane
+            # comes up with. Arm 2 cannot see it: that arm flags only keys the
+            # session leaves open for the server to fill, never a wrong value
+            # the session sets itself. The running process can still hold the
+            # right scope (Arm 1 clean) while the session env already names
+            # another store, so this is an error the same as the pane's —
+            # `gc session reset` recreates the session from its derived scope.
+            # Absence is not judged here: an unset key is Arm 2's to weigh, and
+            # one the session sets is validated at the pane above.
             while IFS="$TAB" read -r kind key val named; do
                 [ -n "$kind" ] || continue
                 case "$kind" in
-                    rig-wrong)   errors+=("$sess is $scope_desc but its running process holds $key=$val — every bd call it makes reads and writes rig $val's store. Restart the session (\`gc session reset $agent\`); if it recurs, the spawn is handing out a caller's scope.") ;;
-                    rig-missing) errors+=("$sess is $scope_desc but its running process holds no GC_RIG — it resolves the city store instead of rig $want_rig's, so its work lands where that rig's queues cannot see it. Restart the session (\`gc session reset $agent\`).") ;;
-                    path-rig)    errors+=("$sess is $scope_desc but its running process holds $key=$val, which names rig $named — restart the session (\`gc session reset $agent\`) and re-read this check.") ;;
-                    path-city)   errors+=("$sess is $scope_desc but its running process holds $key=$val, the city store, not rig $want_rig's — its work lands where that rig's queues cannot see it. Restart the session (\`gc session reset $agent\`).") ;;
-                    scope-wrong) errors+=("$sess is $scope_desc but its running process holds $key=$val, not $want_scope — restart the session (\`gc session reset $agent\`).") ;;
+                    rig-wrong)   errors+=("$sess is $scope_desc but its session environment sets $key=$val — \`respawn-pane\` takes no env argument, so the next process in this pane comes up reading rig $val's store. Reset the session (\`gc session reset $agent\`).") ;;
+                    path-rig)    errors+=("$sess is $scope_desc but its session environment sets $key=$val, which names rig $named — \`respawn-pane\` hands it to the next process in this pane. Reset the session (\`gc session reset $agent\`).") ;;
+                    path-city)   errors+=("$sess is $scope_desc but its session environment sets $key=$val, the city store, not rig $want_rig's — \`respawn-pane\` hands it to the next process in this pane. Reset the session (\`gc session reset $agent\`).") ;;
+                    scope-wrong) errors+=("$sess is $scope_desc but its session environment sets $key=$val, not $want_scope — \`respawn-pane\` hands it to the next process in this pane. Reset the session (\`gc session reset $agent\`).") ;;
                 esac
-            done <<< "$(scope_disagreements "$penv")"
+            done <<< "$(scope_disagreements "$senv")"
         fi
-
-        # --- Arm 1b: the session environment names the session's own scope ----
-        # respawn-pane takes no env argument, so a store-scope value the session
-        # environment SETS is what the next process in this pane comes up with.
-        # Arm 2 cannot see it: that arm flags only keys the session leaves open
-        # for the server to fill, never a wrong value the session sets itself. The
-        # running process can still hold the right scope (Arm 1 clean) while the
-        # session env already names another store, so this is an error the same as
-        # the pane's — `gc session reset` recreates the session from its derived
-        # scope. Absence is not judged here: an unset key is Arm 2's to weigh, and
-        # one the session sets is validated at the pane above.
-        while IFS="$TAB" read -r kind key val named; do
-            [ -n "$kind" ] || continue
-            case "$kind" in
-                rig-wrong)   errors+=("$sess is $scope_desc but its session environment sets $key=$val — \`respawn-pane\` takes no env argument, so the next process in this pane comes up reading rig $val's store. Reset the session (\`gc session reset $agent\`).") ;;
-                path-rig)    errors+=("$sess is $scope_desc but its session environment sets $key=$val, which names rig $named — \`respawn-pane\` hands it to the next process in this pane. Reset the session (\`gc session reset $agent\`).") ;;
-                path-city)   errors+=("$sess is $scope_desc but its session environment sets $key=$val, the city store, not rig $want_rig's — \`respawn-pane\` hands it to the next process in this pane. Reset the session (\`gc session reset $agent\`).") ;;
-                scope-wrong) errors+=("$sess is $scope_desc but its session environment sets $key=$val, not $want_scope — \`respawn-pane\` hands it to the next process in this pane. Reset the session (\`gc session reset $agent\`).") ;;
-            esac
-        done <<< "$(scope_disagreements "$senv")"
 
         # --- Arm 2: a respawn of this pane would not inherit a store key ------
         # The per-key test governs both scopes: a session shadows only the keys
@@ -246,6 +334,17 @@ else
             warnings+=("$sess is $scope_desc and its session environment neither sets nor removes $key, while the tmux server's global environment holds $key=$gval — \`respawn-pane\` takes no env argument, so the next process in this pane inherits it. Clear it on the server (\`tmux set-environment -gu $key\`) and restart the session.")
         done
     done <<< "$sessions"
+
+    # An unread pane among read ones is that session's own note: it may have just
+    # ended, or run a binary that hides its environment. With none read, the
+    # running-process arm has judged nothing, and one line says so for the run.
+    if [ "${#pane_unread[@]}" -ne 0 ]; then
+        if [ "$panes_read" -eq 0 ]; then
+            warnings+=("no agent session's running process could be read (${#pane_unread[@]} tried, through $pane_reader), so what these agents actually hold is UNVERIFIED. Not a benign skip: the session environment says what the next process in a pane gets, so a store leak that lives only in a running agent goes unreported.")
+        else
+            notes+=("${pane_unread[@]}")
+        fi
+    fi
 fi
 
 if [ "${#errors[@]}" -ne 0 ]; then

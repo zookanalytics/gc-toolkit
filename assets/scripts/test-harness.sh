@@ -34,11 +34,11 @@ harness_build_gctk() {
   local mod
   mod="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../services/gctk" && pwd)"
   if ! command -v go >/dev/null 2>&1; then
-    GCTK_BUILD_ERR="no Go toolchain: gctk was not built, so lifecycle.sh and merge.sh had nothing to exec in this suite"
+    GCTK_BUILD_ERR="no Go toolchain: gctk was not built, so lifecycle.sh, merge.sh and epic.sh had nothing to exec in this suite"
   elif ( cd "$mod" && go build -buildvcs=false -o "$TMP/gctk" ./cmd/gctk ) >"$GCTK_BUILD_LOG" 2>&1; then
     GCTK_BUILT="$TMP/gctk"
   else
-    GCTK_BUILD_ERR="gctk did not build, so lifecycle.sh and merge.sh had nothing to exec in this suite — $(tail -3 "$GCTK_BUILD_LOG" | tr '\n' ' ')"
+    GCTK_BUILD_ERR="gctk did not build, so lifecycle.sh, merge.sh and epic.sh had nothing to exec in this suite — $(tail -3 "$GCTK_BUILD_LOG" | tr '\n' ' ')"
   fi
 }
 
@@ -60,9 +60,9 @@ harness_init() {
   # scripts resolve a deployed `gctk` from the ambient city otherwise, and these
   # suites run from a tree INSIDE a live city, so left alone a suite would test
   # whichever binary that city last built. A suite that built nothing reaches no
-  # binary at all: lifecycle.sh and merge.sh refuse under GCTK_BIN=none, and
-  # pr-status-label.sh derives nothing. No port's shell is forced either: a
-  # suite that tests one sets GCTK_FALLBACK after harness_init.
+  # binary at all: lifecycle.sh, merge.sh and epic.sh refuse under
+  # GCTK_BIN=none, and pr-status-label.sh derives nothing. No port's shell is
+  # forced either: a suite that tests one sets GCTK_FALLBACK after harness_init.
   export GCTK_BIN="${GCTK_BUILT:-none}"
   unset GCTK_FALLBACK
   [ -z "${GCTK_BUILD_ERR:-}" ] || bad "$GCTK_BUILD_ERR"
@@ -81,7 +81,7 @@ harness_init() {
   export STUB_SESSION_LOG="$TMP/session.log"
   export STUB_ORIGIN_URL="https://github.com/zook/gc-toolkit"
   export STUB_ORIGIN_HEAD="main"
-  export STUB_SELF_LOGIN="gc-city-bot"
+  export STUB_SELF_LOGIN="gc-city-bot" STUB_SELF_LOGIN_RC=""
   export STUB_UPDATE_FAIL="" STUB_CLOSE_FAIL="" STUB_DROP_KEYS="" STUB_ENFORCE_BLOCKS=""
   export STUB_LIST_FAIL="" STUB_LIST_FAIL_ON="" STUB_SHOW_FAIL=""
   # STUB_SHOW_NOTICE: when set to a rig name, `gc bd show` leads its stdout with a
@@ -184,14 +184,12 @@ mk_sut_dir() { # <dir> <file>...
   # the same way. pr-post.sh is the single writer of the city's PR posts and the
   # owner of the provenance definition every feedback reader asks, so a SUT that
   # posts or reads feedback runs it by sibling path. work-outcome.sh is the
-  # gc.work_outcome stamp every visit closer (visit-close.sh among them) sources
-  # by sibling path. visit-identity.sh, the one definition of what a visit covers,
-  # is sourced by sibling path too (finding.sh among its readers). Copy each of
-  # them beside the SUT so those calls resolve in the private dir; cp keeps
-  # pr-post.sh's executable bit. They sit beside this harness, so they are found whatever the
+  # gc.work_outcome stamp a conversation's closers source by sibling path. Copy
+  # each of them beside the SUT so those calls resolve in the private dir; cp
+  # keeps pr-post.sh's executable bit. They sit beside this harness, so they are found whatever the
   # SUT's own directory is.
   local here lib; here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-  for lib in "$here/bd-lib.sh" "$here/pace-lib.sh" "$here/gctk-resolve.sh" "$here/pr-post.sh" "$here/work-outcome.sh" "$here/visit-identity.sh"; do
+  for lib in "$here/bd-lib.sh" "$here/pace-lib.sh" "$here/gctk-resolve.sh" "$here/pr-post.sh" "$here/work-outcome.sh"; do
     [ -f "$lib" ] && cp "$lib" "$d/"
   done
   # review-verdict.sh, the approval rule, review-dismissal.sh, what a dismissal
@@ -269,7 +267,7 @@ case "$sub" in
       reopen-source)
         [ -n "${STUB_REOPEN_SOURCE_RC:-}" ] && { echo "gc: simulated reopen-source failure" >&2; exit "${STUB_REOPEN_SOURCE_RC}"; }
         [ -n "${STUB_REOPEN_SOURCE_STALL:-}" ] && stall "$STUB_REOPEN_SOURCE_STALL"
-        tmp="$(mktemp "${S%/*}/.gc-stub.XXXXXX")"
+        tmp="${S%/*}/.gc-stub.$$"
         jq -c --arg id "$sid" 'map(if .id == $id then
               (.metadata |= (del(.workflow_id) | del(.["gc.session_affinity"]) | del(.["gc.continuation_group"])))
               | .status = "open" | .assignee = ""
@@ -313,7 +311,13 @@ case "$sub" in
           else . end)' "$S" > "$tmp" && mv "$tmp" "$S"
     exit 0 ;;
   bd) : ;;
-  *) echo "gc stub: unsupported '$sub'" >&2; exit 2 ;;
+  *)
+    # `gc <binding> scripts-dir`: gc names the pack it loaded for the binding the
+    # city imports it under. A suite names that pack in STUB_PACK.
+    if [ "$sub" = gc-toolkit ] && [ "${1:-}" = scripts-dir ] && [ -n "${STUB_PACK:-}" ]; then
+      printf '%s/assets/scripts\n' "$STUB_PACK"; exit 0
+    fi
+    echo "gc stub: unsupported '$sub'" >&2; exit 2 ;;
 esac
 verb="${1:-}"; shift || true
 # Edge rows are "A|TYPE|B" = "A <TYPE>-edges B" (A blocks B, A tracks B,
@@ -348,7 +352,19 @@ dep_put() { # <A> <TYPE> <B>: store row "A|TYPE|B" unless bd would refuse it
 case "$verb" in
   show)
     [ -n "${STUB_SHOW_FAIL:-}" ] && { echo "gc: simulated show failure" >&2; exit 1; }
-    id="${1:-}"
+    # STUB_SHOW_FAIL_ON fails only the shows naming that id, so a suite can break
+    # one read of several.
+    if [ -n "${STUB_SHOW_FAIL_ON:-}" ]; then
+      case " $* " in *" $STUB_SHOW_FAIL_ON "*) echo "gc: simulated show failure" >&2; exit 1 ;; esac
+    fi
+    # A show of several ids reads a row for each, as the walk to the human gates
+    # that hold a bead does. A row names its edges as real bd does, each edge's far
+    # bead with the type of the edge, and a row with no edges has none. A fixture
+    # edge marked "external" stands for one onto a bead in another rig's store,
+    # which bd's show leaves out and its list keeps.
+    show_ids=()
+    for a in "$@"; do case "$a" in --*) ;; *) show_ids+=("$a") ;; esac; done
+    id="${show_ids[0]:-}"
     # STUB_SHOW_HOOK: executable run before serving each show (gets the id);
     # lets a test mutate the store between reads (mid-pass write modelling).
     if [ -n "${STUB_SHOW_HOOK:-}" ] && [ -x "${STUB_SHOW_HOOK:-}" ]; then
@@ -362,7 +378,17 @@ case "$verb" in
     fi
     # Every bead bd prints carries a priority, P2 unless one was written, so a
     # fixture row that names none reads at bd's default.
-    jq -c --arg id "$id" '[ .[] | select(.id == $id) | .priority //= 2 ]' "$S"
+    jq -nc --rawfile d "$D" --slurpfile store "$S" --args '
+      ($d | split("\n") | map(select(length > 0) | split("|")
+         | if .[1] == "blocks" then {issue: .[2], on: .[0], type: "blocks"}
+           else {issue: .[0], on: .[2], type: .[1]} end)) as $edges
+      | $store[0] as $all
+      | [ $ARGS.positional[] as $id | $all[] | select(.id == $id) | .priority //= 2
+          | ([ $edges[] | select(.issue == $id) | .type as $t | .on as $o
+               | (first($all[] | select(.id == $o)) // {id: $o}) + {dependency_type: $t} ]) as $deps
+          | if ($deps | length) > 0 and (has("dependencies") | not) then . + {dependencies: $deps} else . end
+          | if has("dependencies") then .dependencies |= map(select(.external != true)) else . end ]' \
+      "${show_ids[@]}"
     ;;
   list)
     [ -n "${STUB_LIST_FAIL:-}" ] && { echo "gc: simulated list failure" >&2; exit 1; }
@@ -385,9 +411,13 @@ case "$verb" in
     if [ -n "${STUB_LIST_TRAILING:-}" ]; then
       case " $* " in *"$STUB_LIST_TRAILING"*) ltrail=1 ;; esac
     fi
-    statuses=""; fields=(); haskey=""; typ=""; excl=""; tcontains=""
+    # An --id read hides a gate unless --include-gates lifts that, as bd's type
+    # suppression does whatever the --id names.
+    statuses=""; fields=(); haskey=""; typ=""; excl=""; tcontains=""; idread=""; withgates=""
     while [ $# -gt 0 ]; do
       case "$1" in
+        --id|--id=*) idread=1 ;;
+        --include-gates) withgates=1 ;;
         --status=*) statuses="${1#--status=}" ;;
         --status) shift; statuses="${1:-}" ;;
         --metadata-field) shift; fields+=("${1:-}") ;;
@@ -405,7 +435,8 @@ case "$verb" in
     # One jq answers the whole query, the --metadata-field filters included:
     # each `k=v` is split at its first `=` (a field with no `=` keeps the whole
     # word as both, as the shell split it did) and a row must match every one.
-    jq -c --arg st "$statuses" --arg hk "$haskey" --arg ty "$typ" --arg ex "$excl" --arg tc "$tcontains" '
+    jq -c --arg st "$statuses" --arg hk "$haskey" --arg ty "$typ" --arg ex "$excl" --arg tc "$tcontains" \
+          --arg idread "$idread" --arg withgates "$withgates" '
       ($ARGS.positional | map(split("=") as $p
                                | if ($p | length) == 1 then {k: ., v: .}
                                  else {k: $p[0], v: ($p[1:] | join("="))} end)) as $fields
@@ -416,6 +447,7 @@ case "$verb" in
         | select($ty == "" or ((.issue_type // "task") == $ty))
         | select($ex == "" or ((.issue_type // "task") != $ex))
         | select($tc == "" or (((.title // "") | ascii_downcase) | contains($tc | ascii_downcase)))
+        | select($idread == "" or $withgates != "" or ((.issue_type // "") != "gate"))
         | . as $row
         | select(all($fields[]; ((($row.metadata // {})[.k]) // "" | tostring) == .v))
         | .priority //= 2 ]' \
@@ -556,9 +588,10 @@ case "$verb" in
     # edges, as it refuses a `dep` write from that id. --parent <id> rides the
     # create as bd writes it, a parent-child edge onto <id> beside .parent, and
     # -p/--priority sets the priority the row is born at; a create that names
-    # none is read at bd's default P2.
+    # none is read at bd's default P2. -t/--type sets the issue_type it is born
+    # with, bd's default task when none is named.
     title="${1:-}"; shift || true
-    body=""; cmeta="{}"; cstatus="open"; cnotes=""; cdeps=""; cparent=""; cprio=""
+    body=""; cmeta="{}"; cstatus="open"; cnotes=""; cdeps=""; cparent=""; cprio=""; ctype="task"
     while [ $# -gt 0 ]; do
       case "$1" in
         --body-file) shift; [ "${1:-}" = "-" ] && body="$(cat)" ;;
@@ -574,6 +607,8 @@ case "$verb" in
         --parent=*) cparent="${1#--parent=}" ;;
         -p|--priority) shift; cprio="${1:-}" ;;
         --priority=*) cprio="${1#--priority=}" ;;
+        -t|--type) shift; ctype="${1:-task}" ;;
+        --type=*) ctype="${1#--type=}" ;;
       esac
       shift || true
     done
@@ -587,7 +622,7 @@ case "$verb" in
     # naming the id wins, as the shell loop it replaces let the last one win).
     [ -n "$cmeta" ] || { echo "Error: invalid JSON in --metadata: must be valid JSON" >&2; exit 1; }
     out=$(jq -rc --arg t "$title" --arg b "$body" --arg st "$cstatus" --arg nt "$cnotes" \
-      --arg par "$cparent" --arg pr "$cprio" \
+      --arg par "$cparent" --arg pr "$cprio" --arg ty "$ctype" \
       --argjson m "$cmeta" --arg dk "${STUB_DROP_KEYS:-}" '
       ("new-" + ((length + 1) | tostring)) as $id
       | ([$dk | splits("[ \t\n]+")] | map(select(startswith($id + ":")))
@@ -596,7 +631,7 @@ case "$verb" in
            then ($m | with_entries(select(.key as $k | $drop | index($k) | not)))
            else $m end) as $meta
       | (if ($drop | index("status")) then "open" else $st end) as $status
-      | (. + [{id: $id, status: $status, assignee: "", title: $t, description: $b, notes: $nt, issue_type: "task", metadata: $meta}
+      | (. + [{id: $id, status: $status, assignee: "", title: $t, description: $b, notes: $nt, issue_type: $ty, metadata: $meta}
               + (if $par == "" then {} else {parent: $par} end)
               + (if $pr == "" then {} else {priority: ($pr | ltrimstr("P") | ltrimstr("p") | tonumber)} end)]),
         $id' "$S" 2>/dev/null) \
@@ -641,7 +676,7 @@ case "$verb" in
         [ "$_bst" = "closed" ] || { echo "gc: cannot close blocked issue $id (blocked by $_b)" >&2; exit 1; }
       done
     fi
-    tmp="$(mktemp "${S%/*}/.gc-stub.XXXXXX")"
+    tmp="${S%/*}/.gc-stub.$$"
     jq -c --arg id "$id" 'map(if .id == $id then .status = "closed" else . end)' "$S" > "$tmp" && mv "$tmp" "$S"
     ;;
   dep)
@@ -682,29 +717,39 @@ case "$verb" in
           esac
           shift || true
         done
-        for q in ${qids[@]+"${qids[@]}"}; do
-          jq -e --arg id "$q" 'any(.[]; .id == $id)' "$S" >/dev/null 2>&1 \
-            || { printf '{"error":"not found: issue %s","schema_version":1}\n' "$q"; exit 1; }
-        done
-        rows=$(for q in ${qids[@]+"${qids[@]}"}; do
-          awk -F'|' -v id="$q" -v dir="$dir" -v t="$dtyp" '
-            {
-              a=$1; ty=$2; b=$3
-              if (t != "" && ty != t) next
-              if (ty == "blocks") { issue=b; dep=a } else { issue=a; dep=b }
-              if (dir == "down")    { if (issue == id) print dep "|" ty "|" issue "|" dep }
-              else if (dir == "up") { if (dep == id) print issue "|" ty "|" issue "|" dep }
-              else                  { if (b == id) print a "|" ty "|" issue "|" dep }   # legacy: who names me
-            }' "$D"
-        done)
-        if [ "${#qids[@]}" -gt 1 ] && [ "$dir" = "down" ]; then
-          jq -c --arg rows "$rows" '[ $rows | split("\n")[] | select(. != "") | split("|")
-            | {issue_id: .[2], depends_on_id: .[3], type: .[1]} ]' -n || exit $?
-        else
-          jq -c --arg rows "$rows" '
-            [ $rows | split("\n")[] | select(. != "") | split("|") | {id: .[0], t: .[1]} ] as $want
-            | [ .[] | . as $b | $want[] | select(.id == $b.id) | ($b + {dependency_type: .t}) ]' "$S" || exit $?
-        fi
+        # One jq answers the read: the first id that is no bead, in the order
+        # given, else the rows. A row is "<far end>|<type>|<issue>|<depends on>"
+        # for each edge an id reaches: down follows the id's own dependency
+        # rows, up the rows depending on it, and no direction the rows naming
+        # it as their B. The dep rows reach jq as a file, never as an argument,
+        # since a long dependency list passes the 128 KiB Linux allows any one.
+        many=false; [ "${#qids[@]}" -gt 1 ] && many=true
+        out=$(jq -rc --rawfile d "$D" --arg dir "$dir" --arg t "$dtyp" --argjson many "$many" '
+            . as $store
+            | (first($ARGS.positional[] | select(. as $q | any($store[]; .id == $q) | not)) // null) as $missing
+            | if $missing != null then "missing:" + $missing
+              else
+                [ $ARGS.positional[] as $id
+                  | $d | split("\n")[] | select(. != "") | split("|")
+                  | (.[0] // "") as $a | (.[1] // "") as $ty | (.[2] // "") as $b
+                  | select($t == "" or $ty == $t)
+                  | (if $ty == "blocks" then [$b, $a] else [$a, $b] end) as [$issue, $on]
+                  | if $dir == "down" then select($issue == $id) | [$on, $ty, $issue, $on]
+                    elif $dir == "up" then select($on == $id) | [$issue, $ty, $issue, $on]
+                    else select($b == $id) | [$a, $ty, $issue, $on] end ] as $rows
+                | if $many and $dir == "down" then [ $rows[] | {issue_id: .[2], depends_on_id: .[3], type: .[1]} ]
+                  else [ $rows[] | {id: .[0], t: .[1]} ] as $want
+                    | [ $store[] | . as $row | $want[] | select(.id == $row.id) | ($row + {dependency_type: .t}) ]
+                  end
+              end' "$S" --args ${qids[@]+"${qids[@]}"}) || {
+          rc=$?
+          [ "${#qids[@]}" -eq 0 ] || { printf '{"error":"not found: issue %s","schema_version":1}\n' "${qids[0]}"; exit 1; }
+          exit "$rc"
+        }
+        case "$out" in
+          missing:*) printf '{"error":"not found: issue %s","schema_version":1}\n' "${out#missing:}"; exit 1 ;;
+        esac
+        printf '%s\n' "$out"
         [ -z "$dep_trailing" ] || echo 'gc bd dep: simulated trailing output'
         ;;
       add)
@@ -797,6 +842,41 @@ case "$verb" in
         mv "$K.tmp" "$K" ;;
       *) echo "gc bd stub: unsupported 'kv $kverb'" >&2; exit 2 ;;
     esac ;;
+  gate)
+    # gc bd gate list --json [--all]: the store's beads of type gate, the closed
+    # ones only with --all, and null when there are none, as bd prints.
+    # STUB_GATE_LIST_FAIL fails the listing.
+    # gc bd gate resolve <id> --reason <r>: closes a gate with that close reason.
+    # On a gate already closed it changes nothing, keeps the first reason and
+    # still reports success, as bd does, and it refuses a bead that is not a
+    # gate. STUB_GATE_RESOLVE_FAIL="id ..." fails the resolve for those ids,
+    # writing nothing; STUB_GATE_RESOLVE_NOOP="id ..." reports success and writes
+    # nothing.
+    gverb="${1:-}"; shift || true
+    case "$gverb" in
+      list)
+        [ -n "${STUB_GATE_LIST_FAIL:-}" ] && { echo "gc: simulated gate list failure" >&2; exit 1; }
+        gall=0; for _a in "$@"; do [ "$_a" = "--all" ] && gall=1; done
+        jq -c --argjson all "$gall" '[ .[] | select((.issue_type // "") == "gate")
+            | select($all == 1 or ((.status // "open") != "closed")) ] | if length == 0 then null else . end' "$S" ;;
+      resolve)
+        gid="${1:-}"; shift || true
+        greason=""
+        while [ $# -gt 0 ]; do
+          case "$1" in --reason) shift; greason="${1:-}" ;; --reason=*) greason="${1#--reason=}" ;; esac
+          shift || true
+        done
+        case " ${STUB_GATE_RESOLVE_FAIL:-} " in *" $gid "*) echo "gc: simulated gate resolve failure" >&2; exit 1 ;; esac
+        gtype=$(jq -r --arg id "$gid" '(.[] | select(.id == $id) | (.issue_type // "")) // "<absent>"' "$S")
+        [ "$gtype" = "gate" ] || { echo "Error: $gid is not a gate" >&2; exit 1; }
+        case " ${STUB_GATE_RESOLVE_NOOP:-} " in *" $gid "*) echo "✓ Gate resolved: $gid"; exit 0 ;; esac
+        tmp="${S%/*}/.gc-stub.$$"
+        jq -c --arg id "$gid" --arg r "$greason" \
+          'map(if .id == $id and ((.status // "open") != "closed") then .status = "closed" | .close_reason = $r else . end)' \
+          "$S" > "$tmp" && mv "$tmp" "$S"
+        echo "✓ Gate resolved: $gid" ;;
+      *) echo "gc bd stub: unsupported 'gate $gverb'" >&2; exit 2 ;;
+    esac ;;
   *) echo "gc bd stub: unsupported '$verb'" >&2; exit 2 ;;
 esac
 STUB
@@ -808,7 +888,7 @@ cat > "$BIN/gh" <<'STUB'
 set -u
 printf '%s\n' "$*" >> "${STUB_GH_LOG:?}"
 G="${STUB_GH_DIR:?}"
-san() { printf '%s' "$1" | tr '/' '_'; }
+san() { printf '%s' "${1//\//_}"; }
 sub="${1:-}"; shift || true
 case "$sub" in
   pr)
@@ -887,7 +967,7 @@ case "$sub" in
         f="$G/threads_$n.json"
         [ -s "$f" ] || exit 0
         db=$(jq '[ (.threads[]? | .comments.nodes[]?), .issue_comments[]? ] | length + 9000' "$f")
-        t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
+        t="${f%/*}/.gc-stub.$$"
         jq --arg n "$n" --argjson db "$db" --arg b "$b" --arg self "${STUB_SELF_LOGIN:-}" '
           .issue_comments = ((.issue_comments // []) + [{ id: "FI-\($n)-\($db)", databaseId: $db, author: {login: $self}, body: $b, reactionGroups: [] }])
         ' "$f" > "$t" && mv "$t" "$f"
@@ -913,9 +993,9 @@ case "$sub" in
             --body-file)
               shift
               [ -f "${1:-}" ] || { echo "gh: no such body file" >&2; exit 1; }
-              t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
+              t="${f%/*}/.gc-stub.$$"
               jq --rawfile b "$1" '.body = $b' "$f" > "$t" && mv "$t" "$f" ;;
-            --title) shift; t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
+            --title) shift; t="${f%/*}/.gc-stub.$$"
               jq --arg v "${1:-}" '.title = $v' "$f" > "$t" && mv "$t" "$f" ;;
             # Labels mutate .labels so the next `pr view` reads them back — a
             # second reconcile over an unchanged store is a no-op because the
@@ -931,7 +1011,7 @@ case "$sub" in
                 if ! jq -e --arg n "$_l" 'any(.[]?; .name == $n)' "$LBLS" >/dev/null 2>&1; then
                   echo "gh: label '$_l' not found in repo" >&2; exit 1
                 fi
-                t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
+                t="${f%/*}/.gc-stub.$$"
                 jq --arg n "$_l" '.labels = ((.labels // []) | if any(.[]?; .name == $n) then . else . + [{name: $n}] end)' "$f" > "$t" && mv "$t" "$f"
               done ;;
             --remove-label)
@@ -940,7 +1020,7 @@ case "$sub" in
               for _l in ${_rms[@]+"${_rms[@]}"}; do
                 _l="${_l#"${_l%%[![:space:]]*}"}"; _l="${_l%"${_l##*[![:space:]]}"}"
                 [ -n "$_l" ] || continue
-                t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
+                t="${f%/*}/.gc-stub.$$"
                 jq --arg n "$_l" '.labels = ((.labels // []) | map(select(.name != $n)))' "$f" > "$t" && mv "$t" "$f"
               done ;;
           esac
@@ -1019,6 +1099,15 @@ case "$sub" in
         done < <(grep -lF -- "\"$1\"" "$G"/threads_*.json 2>/dev/null)
         return 1
       }
+      # GraphQL answers only the fields a query names, so a review thread's
+      # comment keeps its review's state, which a dismissal is read from, and its
+      # reactionGroups only for a query that asks for each. asked($q) trims a
+      # list of comments to what the query $q names.
+      ASKED_JQ='def asked($q):
+        ($q | test("pullRequestReview\\s*\\{[^}]*\\bstate\\b")) as $st
+        | ($q | test("\\breactionGroups\\b")) as $rx
+        | map(if $st or (.pullRequestReview | type) != "object" then . else .pullRequestReview |= del(.state) end
+              | if $rx then . else del(.reactionGroups) end);'
       case "$gqquery" in
         *pullRequests\(states:OPEN*)
           # merge.sh's visit-order read: every open PR, served as one page from
@@ -1037,7 +1126,7 @@ case "$sub" in
           gqvar sid id
           gqvar c c
           f=$(locate "$sid" node) || { echo "gh graphql stub: no fixture holds node $sid" >&2; exit 1; }
-          t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
+          t="${f%/*}/.gc-stub.$$"
           jq --arg id "$sid" --arg c "$c" '
             def unmark: if (.id == $id) then .reactionGroups = ((.reactionGroups // []) | map(select(.content != $c))) else . end;
             .reviews = ((.reviews // []) | map(unmark))
@@ -1051,7 +1140,7 @@ case "$sub" in
           gqvar sid id
           gqvar c c
           f=$(locate "$sid" node) || { echo "gh graphql stub: no fixture holds node $sid" >&2; exit 1; }
-          t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
+          t="${f%/*}/.gc-stub.$$"
           jq --arg id "$sid" --arg c "$c" '
             def mark: if (.id == $id)
               then .reactionGroups = ((((.reactionGroups // []) | map(select(.content != $c)))) + [{content: $c, viewerHasReacted: true}])
@@ -1067,7 +1156,7 @@ case "$sub" in
           gqvar tid t
           gqvar body b
           f=$(locate "$tid" thread) || { echo "gh graphql stub: no fixture holds thread $tid" >&2; exit 1; }
-          t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
+          t="${f%/*}/.gc-stub.$$"
           # databaseId 0 and our own login keep the reply out of every react and
           # acted-on filter, exactly as a real reply of ours is kept out.
           jq --arg t "$tid" --arg b "$body" --arg self "${STUB_SELF_LOGIN:-}" '
@@ -1084,20 +1173,26 @@ case "$sub" in
           [ "${STUB_RESOLVE_RC:-0}" = "0" ] || exit "${STUB_RESOLVE_RC:-0}"
           gqvar tid t
           f=$(locate "$tid" thread) || { echo "gh graphql stub: no fixture holds thread $tid" >&2; exit 1; }
-          t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
+          t="${f%/*}/.gc-stub.$$"
           jq --arg t "$tid" '.threads = ((.threads // []) | map(if .id == $t then .isResolved = true else . end))' "$f" > "$t" && mv "$t" "$f"
           printf 'RESOLVE %s\n' "$tid" >> "${STUB_GH_LOG:?}"
           echo '{"data":{"resolveReviewThread":{"thread":{"isResolved":true}}}}'; exit 0 ;;
         *reviewThreads*)
           [ -z "${STUB_GQL_READ_FAIL:-}" ] || exit 1
           [ -s "$f" ] || { echo "gh graphql stub: no threads fixture for PR $num" >&2; exit 1; }
-          # `first: 100` is a real cap, so a thread longer than a page comes back
-          # cut to one — which is the whole reason the caller tops such a thread
-          # up. A stub handing back the full list would make that read look
-          # unnecessary and hide the resolve it gets wrong.
-          jq -c '{data: {repository: {pullRequest: {
+          # A thread's comments come back cut to the window the query names, its
+          # oldest for `first: N` and its newest for `last: N`, as the API cuts
+          # them. So a thread longer than a window comes back holding exactly one,
+          # which is the whole reason a caller reads such a thread again to its
+          # end. A stub handing back the full list would make that read look
+          # unnecessary and hide the answer it gets wrong.
+          jq -c --arg q "$gqquery" "$ASKED_JQ"'
+            (($q | capture("comments\\((?<end>first|last):(?<n>[0-9]+)")) // {end: "first", n: "100"}) as $w
+            | ($w.n | tonumber) as $n
+            | {data: {repository: {pullRequest: {
               reviewThreads: {pageInfo: {hasNextPage: false, endCursor: null},
-                nodes: [ (.threads // [])[] | .comments.nodes = ((.comments.nodes // [])[0:100]) ]}}}}}' "$f"
+                nodes: [ (.threads // [])[] | .comments.nodes = ((.comments.nodes // [])
+                  | if $w.end == "last" then .[-$n:] else .[0:$n] end | asked($q)) ]}}}}}' "$f"
           # STUB_GQL_THREADS_TAIL: raw text after the page, the stream --paginate
           # hands back when a later page came back garbled.
           [ -n "${STUB_GQL_THREADS_TAIL:-}" ] && printf '%s\n' "$STUB_GQL_THREADS_TAIL"
@@ -1109,9 +1204,9 @@ case "$sub" in
           f=$(locate "$tid" thread) || { echo "gh graphql stub: no fixture holds thread $tid" >&2; exit 1; }
           # The caller pages this one to exhaustion, so it answers with the whole
           # thread — the state the real API reaches after following its cursor.
-          jq -c --arg t "$tid" '{data: {node: {comments: {
+          jq -c --arg t "$tid" --arg q "$gqquery" "$ASKED_JQ"'{data: {node: {comments: {
               pageInfo: {hasNextPage: false, endCursor: null},
-              nodes: [ (.threads // [])[] | select(.id == $t) | (.comments.nodes // [])[] ]}}}}' "$f"
+              nodes: ([ (.threads // [])[] | select(.id == $t) | (.comments.nodes // [])[] ] | asked($q))}}}}' "$f"
           exit 0 ;;
         *commits\(first:100,after:*)
           # The PR's commits, which a fix's answer cites. Served from the PR
@@ -1169,7 +1264,7 @@ case "$sub" in
         gqvar b body
         gqvar p path
         db=$(jq '[ (.threads[]? | .comments.nodes[]?), .issue_comments[]? ] | length + 9000' "$f")
-        t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
+        t="${f%/*}/.gc-stub.$$"
         jq --arg n "$n" --argjson db "$db" --arg b "$b" --arg p "$p" --arg self "${STUB_SELF_LOGIN:-}" '
           .threads = ((.threads // []) + [{ id: "FT-\($n)-\($db)", isResolved: false, viewerCanResolve: true, path: $p,
             comments: { nodes: [{ id: "FC-\($n)-\($db)", databaseId: $db, author: {login: $self}, body: $b, reactionGroups: [] }] } }])
@@ -1207,7 +1302,7 @@ case "$sub" in
         done
         [ -n "$hit" ] || hit="$first"
         [ -n "$hit" ] || { echo "gh api stub: no fixture holds issue comment $cid" >&2; exit 1; }
-        t=$(mktemp "${hit%/*}/.gc-stub.XXXXXX")
+        t="${hit%/*}/.gc-stub.$$"
         jq --arg c "$cid" --arg b "$b" '.issue_comments = ((.issue_comments // []) | map(if ((.databaseId // 0) | tostring) == $c then .body = $b else . end))' \
           "$hit" > "$t" && mv "$t" "$hit"
         n="${hit##*/threads_}"; n="${n%.json}"
@@ -1232,7 +1327,7 @@ case "$sub" in
             && { hit="$cand"; break; }
         done
         [ -n "$hit" ] || { echo "gh api stub: no fixture holds issue comment $cid" >&2; exit 1; }
-        t=$(mktemp "${hit%/*}/.gc-stub.XXXXXX")
+        t="${hit%/*}/.gc-stub.$$"
         jq --arg c "$cid" '.issue_comments = [ (.issue_comments // [])[] | select(((.databaseId // 0) | tostring) != $c) ]' \
           "$hit" > "$t" && mv "$t" "$hit"
         n="${hit##*/threads_}"; n="${n%.json}"
@@ -1245,7 +1340,14 @@ case "$sub" in
     esac
     out=""
     case "$path" in
-      user) out="{\"login\":\"${STUB_SELF_LOGIN:-}\"}" ;;
+      user)
+        # STUB_SELF_LOGIN_RC models a failed read the way real gh answers it: the
+        # error body on STDOUT, --jq ignored, a non-zero exit.
+        if [ "${STUB_SELF_LOGIN_RC:-0}" != 0 ]; then
+          printf '{"message":"Server Error","documentation_url":"https://docs.github.com/rest","status":"502"}'
+          exit "$STUB_SELF_LOGIN_RC"
+        fi
+        out="{\"login\":\"${STUB_SELF_LOGIN:-}\"}" ;;
       */commits/*)
         br="${path##*/commits/}"
         f="$G/head_$(san "$br")"
@@ -1290,7 +1392,7 @@ case "$sub" in
         gqvar rr 'reviewers[]'
         f="$G/threads_$n.json"
         if [ -n "$rr" ] && [ -s "$f" ]; then
-          t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
+          t="${f%/*}/.gc-stub.$$"
           jq --arg r "$rr" '.review_requests = ((.review_requests // []) + [$r] | unique)' "$f" > "$t" && mv "$t" "$f"
         fi
         exit 0 ;;
@@ -1340,7 +1442,9 @@ case "$sub" in
     if [ -n "$jqexpr" ]; then printf '%s' "$out" | jq -r "$jqexpr"; else printf '%s\n' "$out"; fi ;;
   label)
     # The repo's label set, so `pr edit --add-label` can refuse one that was
-    # never created. `list` serves it (honouring -q); `create` appends if absent.
+    # never created. `list` serves it (honouring -q); `create` appends if absent;
+    # `edit` rewrites a label's description, refusing one that does not exist,
+    # as real gh does. Each keeps the description it was given.
     v="${1:-}"; shift || true
     LBLS="$G/labels.json"; [ -s "$LBLS" ] || echo '[]' > "$LBLS"
     case "$v" in
@@ -1348,15 +1452,32 @@ case "$sub" in
         lq=""
         while [ $# -gt 0 ]; do case "$1" in -q|--jq) shift; lq="${1:-}" ;; esac; shift || true; done
         if [ -n "$lq" ]; then jq -r "$lq" "$LBLS"; else cat "$LBLS"; fi ;;
-      create)
+      create|edit)
         name="${1:-}"; shift || true
-        [ "${STUB_LABEL_CREATE_RC:-0}" = "0" ] || exit "${STUB_LABEL_CREATE_RC:-0}"
-        if ! jq -e --arg n "$name" 'any(.[]?; .name == $n)' "$LBLS" >/dev/null 2>&1; then
-          t=$(mktemp "${LBLS%/*}/.gc-stub.XXXXXX")
-          jq --arg n "$name" '. + [{name: $n}]' "$LBLS" > "$t" && mv "$t" "$LBLS"
+        desc=""
+        while [ $# -gt 0 ]; do case "$1" in --description) shift; desc="${1:-}" ;; esac; shift || true; done
+        if [ "$v" = create ]; then
+          [ "${STUB_LABEL_CREATE_RC:-0}" = "0" ] || exit "${STUB_LABEL_CREATE_RC:-0}"
+          jq -e --arg n "$name" 'any(.[]?; .name == $n)' "$LBLS" >/dev/null 2>&1 && exit 0
+          t="${LBLS%/*}/.gc-stub.$$"
+          jq --arg n "$name" --arg d "$desc" '. + [{name: $n, description: $d}]' "$LBLS" > "$t" && mv "$t" "$LBLS"
+        else
+          [ "${STUB_LABEL_EDIT_RC:-0}" = "0" ] || exit "${STUB_LABEL_EDIT_RC:-0}"
+          jq -e --arg n "$name" 'any(.[]?; .name == $n)' "$LBLS" >/dev/null 2>&1 \
+            || { echo "gh: label '$name' not found" >&2; exit 1; }
+          t="${LBLS%/*}/.gc-stub.$$"
+          jq --arg n "$name" --arg d "$desc" 'map(if .name == $n then .description = $d else . end)' "$LBLS" > "$t" && mv "$t" "$LBLS"
         fi
         exit 0 ;;
       *) echo "gh label stub: unsupported '$v'" >&2; exit 2 ;;
+    esac ;;
+  run)
+    # `run rerun <id> [--failed]`, read back from the call log above.
+    # STUB_RUN_RERUN_RC models GitHub refusing the re-run.
+    v="${1:-}"; shift || true
+    case "$v" in
+      rerun) exit "${STUB_RUN_RERUN_RC:-0}" ;;
+      *) echo "gh run stub: unsupported '$v'" >&2; exit 2 ;;
     esac ;;
   *) echo "gh stub: unsupported '$sub'" >&2; exit 2 ;;
 esac

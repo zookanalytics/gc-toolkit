@@ -6,9 +6,10 @@
 # merges dispatching nothing; every branch shape brought current by merge (no
 # shape rebases or force-pushes, polecat/* and a landing bead's included) and this
 # site's agreement with pr-facts.sh's copy; the vetoes (merge_hold, rebase_hold, a
-# rebase_hold on a bead naming the branch, a live demand, no fix pool); a branch
+# rebase_hold on a bead naming the branch, a live human gate on the anchor, no
+# fix pool); a branch
 # whose edited code main deleted getting the operator's supersession decision
-# instead of a child, a pending decision holding without a second escalation, and
+# instead of a child, a pending decision holding without asking again, and
 # a decision that cannot be recorded falling through to the ordinary child; dedup on
 # branch and head against a live child, a stranded child joined to its anchor
 # and re-routed rather than buried, and a child filed with its work order, its
@@ -87,17 +88,17 @@ git clone -q "$SRC" "$WORK"
 C1_HEAD=$(git -C "$SRC" rev-parse polecat/tk-c1)
 
 SD="$TMP/scripts"
-mk_sut_dir "$SD" "$HERE/pre-open-rebase.sh" "$HERE/branch-supersession.sh" "$HERE/pool-route.sh"
+mk_sut_dir "$SD" "$HERE/pre-open-rebase.sh" "$HERE/branch-supersession.sh"
 SUT="$SD/pre-open-rebase.sh"
 POOL="mycity/gc-toolkit.polecat"
-# escalate.sh's contract for the supersession guard: one visit per subject+key,
-# stamped and routed at the board so the guard can find the visit it filed and
-# count it as asking somebody. STUB_ESC_RC models a refusal.
-cat > "$SD/escalate.sh" <<'ESC'
+# human-gate.sh as the supersession guard reads it back: one open human gate
+# per subject and key, blocking the subject, which the guard's lookup finds
+# through the subject's blocks edges. STUB_GATE_RC models a refusal.
+cat > "$SD/human-gate.sh" <<'GATE'
 #!/usr/bin/env bash
 set -u
-printf '%s\n' "$*" >> "${STUB_ESC_LOG:?}"
-[ -n "${STUB_ESC_RC:-}" ] && exit "$STUB_ESC_RC"
+printf '%s\n' "$*" >> "${STUB_GATE_LOG:?}"
+[ -n "${STUB_GATE_RC:-}" ] && exit "$STUB_GATE_RC"
 subj=""; key=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -107,14 +108,16 @@ while [ $# -gt 0 ]; do
   shift || true
 done
 [ -n "$subj" ] && [ -n "$key" ] || exit 2
-vid=$(gc bd create "visit: $subj — $key" -t task --json | jq -r '.id // empty')
-[ -n "$vid" ] || exit 1
-gc bd update "$vid" --set-metadata "escalation_key=$key" \
-  --set-metadata "gc.continuation_group=$subj" --set-metadata "task_kind=visit" \
-  --set-metadata "gc.routed_to=human" >/dev/null
-ESC
-chmod +x "$SD/escalate.sh"
-export STUB_ESC_LOG="$TMP/esc.log" STUB_ESC_RC=""; : > "$STUB_ESC_LOG"
+gid="gate-$(jq 'length' "$STUB_STORE")"
+tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-preopen-gate.XXXXXX")
+jq -c --arg id "$gid" --arg k "$key" --arg s "$subj" \
+  '. + [{id: $id, status: "open", assignee: "", notes: "", title: ("decide " + $s), issue_type: "gate", await_type: "human", await_id: $k, metadata: {}}]' \
+  "$STUB_STORE" > "$tmp" && mv "$tmp" "$STUB_STORE"
+printf '%s|blocks|%s\n' "$gid" "$subj" >> "$STUB_DEPS"
+printf '%s\n' "$gid"
+GATE
+chmod +x "$SD/human-gate.sh"
+export STUB_GATE_LOG="$TMP/gate.log" STUB_GATE_RC=""; : > "$STUB_GATE_LOG"
 
 run() { ( cd "$WORK" && "$SUT" "$@" 2>&1 ); }
 
@@ -124,12 +127,12 @@ pre() { # id branch [extra-metadata-json]
 }
 reset() { # <row-json>...
   local IFS=,; store "[$*]"
-  : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_SESSION_LOG"; : > "$STUB_ESC_LOG"
-  export STUB_DROP_KEYS="" STUB_LIST_FAIL="" STUB_ESC_RC=""
+  : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_SESSION_LOG"; : > "$STUB_GATE_LOG"
+  export STUB_DROP_KEYS="" STUB_LIST_FAIL="" STUB_GATE_RC=""
 }
 newborn() { jq -r '[ .[] | select(.id | startswith("new-")) ][0].id // "<none>"' "$STUB_STORE"; }
 newcount() { jq '[ .[] | select(.id | startswith("new-")) ] | length' "$STUB_STORE"; }
-kidcount() { jq '[ .[] | select(.id | startswith("new-")) | select((.title // "") | startswith("visit:") | not) ] | length' "$STUB_STORE"; }
+kidcount() { jq '[ .[] | select(.id | startswith("new-")) | select((.issue_type // "") != "gate") ] | length' "$STUB_STORE"; }
 
 echo "# the premise the ref guard rests on"
 ( cd "$WORK" && git merge-tree --write-tree main nosuchref >/dev/null 2>&1 ); rc=$?
@@ -214,25 +217,26 @@ eq "$rc" "1" "the superseded branch really conflicts (premise of the next checks
 reset "$(pre AM polecat/tk-moot)"
 OUT=$(run --fix-pool "$POOL")
 eq "$(kidcount)" "0" "no merge-in child is filed for a branch whose edited code main deleted"
-has "$(cat "$STUB_ESC_LOG")" "--subject AM --key rework-base-supersession" "the supersession decision is filed on the anchor instead"
+has "$(cat "$STUB_GATE_LOG")" "--subject AM --key rework-base-supersession" "the supersession decision is filed on the anchor instead"
 has "$OUT" "filed decision" "the guard's answer is in the pass log"
 has "$OUT" "held=1" "and the anchor is counted held, not skipped or reworked"
 hasnt "$(cat "$STUB_SESSION_LOG")" "wake $POOL" "the fix pool is not woken"
 
 echo "# a pending supersession decision holds without asking again"
-reset "$(pre AN polecat/tk-moot)" '{"id":"VN","status":"open","assignee":"","title":"visit","notes":"","metadata":{"escalation_key":"rework-base-supersession","gc.continuation_group":"AN","task_kind":"visit","gc.routed_to":"human"}}'
+reset "$(pre AN polecat/tk-moot)" '{"id":"VN","status":"open","assignee":"","title":"decide AN","notes":"","issue_type":"gate","await_type":"human","await_id":"rework-base-supersession","metadata":{}}'
+printf 'VN|blocks|AN\n' > "$STUB_DEPS"
 OUT=$(run --fix-pool "$POOL")
 eq "$(kidcount)" "0" "an open decision on the anchor files no child"
-eq "$(cat "$STUB_ESC_LOG")" "" "and no second escalation"
-has "$OUT" "VN is still open" "the pending decision is named"
+eq "$(cat "$STUB_GATE_LOG")" "" "and the decision is not asked again"
+has "$OUT" "open human gate VN holds it" "the pending decision is named"
 
 echo "# a supersession that cannot be recorded falls through to the ordinary child"
 reset "$(pre AO polecat/tk-moot)"
-export STUB_ESC_RC=1
+export STUB_GATE_RC=1
 OUT=$(run --fix-pool "$POOL")
-eq "$(kidcount)" "1" "with no visit behind it, the guard holds nothing and the child is filed as before"
-has "$OUT" "could not be filed" "and the pass log says why"
-export STUB_ESC_RC=""
+eq "$(kidcount)" "1" "with no decision behind it, the guard holds nothing and the child is filed as before"
+has "$OUT" "could not be asked" "and the pass log says why"
+export STUB_GATE_RC=""
 
 echo "# a branch that still merges is left alone"
 reset "$(pre A2 polecat/tk-ok)"
@@ -263,10 +267,19 @@ has "$OUT" "a hold is set (operator gate)" "and says which gate held it"
 reset "$(pre A6 polecat/tk-hold ',"rebase_hold":"true"')"
 eq "$(run --fix-pool "$POOL" >/dev/null; newcount)" "0" "rebase_hold dispatches nothing"
 
-reset "$(pre A7 polecat/tk-c1)" '{"id":"D1","status":"open","assignee":"","title":"demand","metadata":{"gc.demand_for":"A7"}}'
+reset "$(pre A7 polecat/tk-c1)" '{"id":"D1","status":"open","assignee":"","title":"keep or drop A7?","issue_type":"gate","await_type":"human","await_id":"conversation","metadata":{}}'
+printf 'D1|blocks|A7\n' > "$STUB_DEPS"
 OUT=$(run --fix-pool "$POOL")
-eq "$(newcount)" "0" "a live demand dispatches nothing — the rebase is one horn of what it asks"
-has "$OUT" "an open demand holds it" "and says so"
+eq "$(newcount)" "0" "a live human gate on the anchor dispatches nothing — the rebase is one horn of what it asks"
+has "$OUT" "open human gate D1 holds it" "and names the gate"
+reset "$(pre A7c polecat/tk-c1)" '{"id":"D2","status":"closed","assignee":"","title":"keep or drop A7c?","issue_type":"gate","await_type":"human","await_id":"conversation","close_reason":"ruled: keep it","metadata":{}}'
+printf 'D2|blocks|A7c\n' > "$STUB_DEPS"
+OUT=$(run --fix-pool "$POOL")
+eq "$(newcount)" "1" "a cleared gate holds nothing: the merge-in child is filed"
+reset "$(pre A7u polecat/tk-c1)"
+OUT=$(STUB_DEP_GARBAGE=1 run --fix-pool "$POOL")
+eq "$(newcount)" "0" "gates that will not read hold the dispatch: the read fails closed"
+has "$OUT" "(gates unreadable)" "…and the log says the gates did not read"
 
 reset "$(pre A8 polecat/tk-c1)"
 OUT=$(run)
@@ -282,7 +295,7 @@ eq "$(meta K1 task_kind)" "<absent>" "a claimed covering child is NOT re-stamped
 hasnt "$OUT" "re-stamped role marker on covering rework K1" "and no restamp is attempted on it"
 
 echo "# a covering rework child parked for a person still covers the branch"
-# converse-hold transitions an unanchored child to the `held` lifecycle state,
+# A sitting's hold moves an unanchored child to the `held` lifecycle state,
 # which stamps merge_result=held; the child still owns the branch, so the
 # merge_result test must not drop it and mint a merge-current twin every pass.
 reset "$(pre AK polecat/tk-c1)" '{"id":"H1","status":"blocked","assignee":"","title":"held rework","metadata":{"branch":"polecat/tk-c1","task_kind":"rework","anchor_bead":"AK","merge_result":"held"}}'
@@ -546,7 +559,7 @@ TA=$(fence takeaway-hold-discriminator "$HERE/pr-facts.sh")
 TB=$(fence takeaway-hold-discriminator "$HERE/pre-open-rebase.sh")
 if [ -n "$TA" ] && [ -n "$TB" ]; then ok "both takeaway-hold-discriminator fences are present and non-empty"
 else bad "a takeaway-hold-discriminator fence is missing"; fi
-eq "$TB" "$TA" "the demand discriminator is a byte-identical copy of pr-facts.sh's"
+eq "$TB" "$TA" "the human-gate discriminator is a byte-identical copy of pr-facts.sh's"
 
 echo "# pacing: --deadline stops the walk after one anchor and --cursor resumes after it"
 # Three anchors on a branch that still merges, enumerated out of id order. A

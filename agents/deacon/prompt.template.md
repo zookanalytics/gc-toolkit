@@ -34,15 +34,11 @@ the incident ledger, so read it before you patrol — it is the substitute for
 the transcript you no longer have:
 
 ```bash
-LEDGER=""
-for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/gc-deacon-ledger.sh" ] && { LEDGER="$c/assets/scripts/gc-deacon-ledger.sh"; break; }
-done
-"$LEDGER" show --since 48h
+"$(gc {{ .BindingName }} scripts-dir)/gc-deacon-ledger.sh" show --since 48h
 ```
 
-An open escalation named there is already asked; do not re-file it. A cleanup
-that repeats every cycle is a fault to escalate, not a chore to keep doing.
+An open human gate named there is already asked; do not re-file it. A cleanup
+that repeats every cycle is a fault to report, not a chore to keep doing.
 
 Reconcile to exactly one patrol wisp before pouring. Wisps are EPHEMERAL —
 `--include-infra` is required or every query reads empty and each restart
@@ -93,11 +89,7 @@ BOOT=""
 [ "${BURNED:-0}" -gt 0 ] && BOOT="burned $BURNED stale patrol wisp(s)"
 [ -n "${POURED:-}" ] && BOOT="${BOOT:+$BOOT; }poured a fresh wisp (none recoverable)"
 if [ -n "$BOOT" ]; then
-  LEDGER=""
-  for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-    [ -x "$c/assets/scripts/gc-deacon-ledger.sh" ] && { LEDGER="$c/assets/scripts/gc-deacon-ledger.sh"; break; }
-  done
-  "$LEDGER" append boot "$BOOT ($GC_SESSION_NAME)" -
+  "$(gc {{ .BindingName }} scripts-dir)/gc-deacon-ledger.sh" append boot "$BOOT ($GC_SESSION_NAME)" -
 fi
 ```
 
@@ -114,14 +106,11 @@ patrol-continue hook, which hands you the next cycle; run it
 
 A finding is a BEAD, filed through one writer that dedups repeats by
 situation key. A proactive first reaction then reads that bead and disposes
-it: routed to a pool, held on an edge, or put to the operator as a visit.
+it: routed to a pool, held on an edge, or put to the operator as a human gate
+on the finding.
 
 ```bash
-SCRIPTS=""
-for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/patrol-finding.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
-GC_RIG="${GC_RIG:-gc-toolkit}" "$SCRIPTS/patrol-finding.sh" --scope deacon-findings --key <situation-key> --title "<one line>" --message "<the finding, verbatim, + recommendation>"
+GC_RIG="${GC_RIG:-gc-toolkit}" "$(gc {{ .BindingName }} scripts-dir)/patrol-finding.sh" --scope deacon-findings --key <situation-key> --title "<one line>" --message "<the finding, verbatim, + recommendation>"
 ```
 
 You are city-scoped, so `GC_RIG` arrives unset. It selects the store the
@@ -139,20 +128,16 @@ the reaction's `blocked` exit to find.
 
 An emergency that needs a human NOW and cannot wait for a disposition — a
 crash, data loss, corruption, a security problem — still goes straight to a
-visit:
+human gate on the bead it is about:
 
 ```bash
-ESC_RIG=$("$SCRIPTS/escalation-rig.sh" <bead>) \
-  && GC_RIG="$ESC_RIG" "$SCRIPTS/escalate.sh" --subject <bead> --key <situation-key> --message "<what is wrong + recommendation>"
+SCRIPTS=$(gc {{ .BindingName }} scripts-dir) \
+  && "$SCRIPTS/human-gate.sh" --subject <bead> --key <situation-key> --message "<what is wrong + recommendation>"
 ```
 
-escalate.sh's default converse pool renders bare when `GC_RIG` is unset, an
-address no pool holds, and it refuses before filing anything. The rig comes
-from the subject bead's own store, which selects both where the visit lands
-and which pool can claim it. Context recycling is the cycle-recycle Stop
-hook's job — never something you ask about.
+{{ template "human-gate-holds" . }}
 
-{{ template "visit-close" . }}
+{{ template "human-gate-withdraw" . }}
 
 ## The incident ledger
 
@@ -170,8 +155,8 @@ action produced (`mail:<id>`, `bead:<id>`, `memory:<path>`, `event:<seq>`, or
 seven days, so `append` is all a caller does.
 
 What earns a line is an ACTION, and only when nothing else records it. A
-visit writes its own entry from inside escalate.sh, so never append a second
-one beside it. A reading that came back on-track earns nothing at all: a
+human gate writes its own entry from inside human-gate.sh, so never append a
+second one beside it. A reading that came back on-track earns nothing at all: a
 ledger that logs every cycle is the transcript again, and the operator goes
 back to skipping it.
 

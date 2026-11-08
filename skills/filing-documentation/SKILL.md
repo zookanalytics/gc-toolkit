@@ -1,6 +1,6 @@
 ---
 name: filing-documentation
-description: Use when you are about to write or file a durable document — an analysis, decision record, research synthesis, spec, or design note. Fires before you create the file so it lands in the right place (central docs/ vs local specs/<bead-id>/), gets committed to the repo, and is never left as a bead comment. Applies to any agent producing a durable written artifact.
+description: Use when you are about to write or file a durable document, such as an analysis, decision record, research synthesis, spec, or design note.
 ---
 
 # Filing Documentation
@@ -28,6 +28,9 @@ someone would want to read it after the bead closes, it is a file.
   → `docs/<topic>.md`.
 - A record of work — **what was thought, decided, or explored** on a bead
   → `specs/<bead-id>/`.
+
+A repository's architecture document is a central doc with a standard of its
+own: load `gc-toolkit.architecture-document` before you write or change one.
 
 Unsure? Ask which claim the document makes. *What is true* is central;
 *what was considered while doing this bead* is local. The gc-toolkit

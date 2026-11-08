@@ -58,9 +58,9 @@
 # to), so the guard leaves the set as it is and no review rules on the round.
 # Approval is the one merge rule the opt-out leaves, so this is the one round
 # the guard rules on itself: nothing reopens, and the approval given before the
-# round is lifted the way DECIDE lifts it, with no visit. The ruling is stored
-# in the record where triage's goes, marked by: guard, so every reader treats
-# the round as ruled.
+# round is lifted the way DECIDE lifts it, with no human gate. The ruling is
+# stored in the record where triage's goes, marked by: guard, so every reader
+# treats the round as ruled.
 #
 # A ruling the guard recorded in a round's record, marked by: guard where
 # triage's goes, is carried out again by a re-run of the same hand-off: the
@@ -97,8 +97,8 @@
 # the line where it was. The signal
 # a person gets is the re-request and the call the ruling names, which opens
 # triage's posted verdict and is the dismissal note; both render from the stored
-# record. A write GitHub refuses is noted on the anchor. A visit is filed only
-# for a conflict the worker could not resolve (bring-current-audit.sh ask).
+# record. A write GitHub refuses is noted on the anchor. A human gate is filed
+# only for a conflict the worker could not resolve (bring-current-audit.sh ask).
 #
 # Usage:
 #   bring-current-guard.sh guard --bead <id> [--to <oid>] [--from <oid>]

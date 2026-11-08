@@ -24,15 +24,13 @@ rubric holds the selection rule.
 Read-only plus bead-filing: this formula never edits a fragment, prompt, or
 skill — only an operator-merged PR changes agent behavior.
 
-Every step closes its own bead through `assets/scripts/step-close.sh --step
-<step-id>` (resolved into `$SC` at the top of each shell block) — never any
-other way, and never on an id read from the environment; the helper resolves
-by (gc.root_bead_id, gc.step_ref) and refuses when it cannot prove which
-molecule it is executing.
+Every step closes its own bead through `assets/scripts/claim-close.sh --step
+<step-id>` (resolved into `$SC` at the top of each shell block).
 No-op arms close their OWN bead and end their shell WITHOUT draining (the
 successors re-derive the gates and no-op cheaply; only the terminal step
 drains). `DISTILL_RUN` (open | gated | aborted | off-home) is session state;
-a worker waking fresh re-runs step 1 §1-§3 to rebuild it — never guesses.
+a worker waking fresh re-runs load-and-gate through its cadence gate to
+rebuild it — never guesses.
 
 Spec: specs/2026-08-learning-system/implementation-design.md §3; rulings D5-D7.
 
@@ -51,5 +49,5 @@ Variables:
 Steps (4):
   ├── mol-feedback-distiller.load-and-gate: Prime, home-rig gate, read pending observations cross-rig, apply the D7 cadence gate
   ├── mol-feedback-distiller.judge-and-cluster: Judge the pending set with the learning-distill rubric; cluster onto pattern beads; run the retirement pass [needs: mol-feedback-distiller.load-and-gate]
-  ├── mol-feedback-distiller.file-and-dispatch: File one prompt-update bead per proposal, stamp consumed observations, visit contested rules, drain [needs: mol-feedback-distiller.judge-and-cluster]
+  ├── mol-feedback-distiller.file-and-dispatch: File one prompt-update bead per proposal, stamp consumed observations, gate contested rules, drain [needs: mol-feedback-distiller.judge-and-cluster]
   └── mol-feedback-distiller.workflow-finalize: Finalize workflow [needs: mol-feedback-distiller.file-and-dispatch]

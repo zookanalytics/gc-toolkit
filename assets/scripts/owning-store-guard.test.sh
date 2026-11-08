@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Hermetic test for the witness-patrol OWNING STORE GUARD.
 #
-# The hazard: step 5 removes a worktree on the authority of the bead that owns
+# The hazard: the recover-orphaned-beads step's cleanup removes a worktree on
+# the authority of the bead that owns
 # it, and a bare `gc bd show` cannot prove that bead absent — it resolves a
 # live id from whichever store holds it, but a miss is answered by the store
 # the caller stands in, not the one the prefix names, so an id the witness
@@ -36,14 +37,23 @@ GUARD="$(awk '
   && ok "guard extracted between owning-store-guard markers" \
   || bad "guard extraction EMPTY — markers missing from $TOML"
 
-# The witness substitutes the bead it is disposing of for the <bead> placeholder.
+# The witness substitutes the bead it is disposing of for the <bead> placeholder,
+# and the pour renders {{binding_prefix}} as the binding plus a dot.
+GUARD="${GUARD//'{{binding_prefix}}'/gc-toolkit.}"
 printf '%s\n' "${GUARD//<bead>/tk-subject}" > "$TMP/guard.sh"
 bash -n "$TMP/guard.sh" \
   && ok "extracted guard is syntactically valid bash" \
   || bad "extracted guard failed bash -n"
 
-# A rig root carrying a stubbed bead-store.sh, found the way the guard looks
-# for one. STUB_RC is the verdict the real tool would return.
+# A pack carrying a stubbed bead-store.sh, which gc names for
+# `gc gc-toolkit scripts-dir`. STUB_RC is the verdict the real tool would return.
+mkdir -p "$TMP/bin"
+cat > "$TMP/bin/gc" <<'GC'
+#!/usr/bin/env bash
+[ "${1:-} ${2:-}" = "gc-toolkit scripts-dir" ] && [ -n "${STUB_PACK:-}" ] || { echo "gc: unknown command \"${1:-}\"" >&2; exit 1; }
+printf '%s/assets/scripts\n' "$STUB_PACK"
+GC
+chmod +x "$TMP/bin/gc"
 RIG="$TMP/rig"; mkdir -p "$RIG/assets/scripts"
 cat > "$RIG/assets/scripts/bead-store.sh" <<'BS'
 #!/usr/bin/env bash
@@ -55,7 +65,7 @@ export STUB_BS_LOG="$TMP/bs.log"; : > "$STUB_BS_LOG"
 
 # owned <rc> -> the OWNED value the guard settles on for that verdict.
 owned() {
-  STUB_RC="$1" GC_RIG_ROOT="$RIG" WORKTREE="$TMP/wt" bash -c '
+  STUB_RC="$1" PATH="$TMP/bin:$PATH" STUB_PACK="$RIG" GC_RIG_ROOT="" WORKTREE="$TMP/wt" bash -c '
     source "$0"
     printf "%s" "$OWNED"
   ' "$TMP/guard.sh" 2>/dev/null
@@ -72,9 +82,10 @@ eq "$(owned 2)" "0" "a usage failure refuses too — no exit code but 0 is permi
 eq "$(tail -1 "$STUB_BS_LOG")" "--present tk-subject" \
   "the guard asks --present about the bead it was given, not --absent about a directory"
 
-# A rig root with no bead-store.sh at all: the tool's absence is not a verdict.
+# A pack with no bead-store.sh at all: the tool's absence is not a verdict, and
+# the rig root's copy is not used in its place.
 NOTOOL="$TMP/notool"; mkdir -p "$NOTOOL"
-OUT=$(GC_RIG_ROOT="$NOTOOL" GC_CITY_PATH="$NOTOOL" WORKTREE="$TMP/wt" bash -c '
+OUT=$(PATH="$TMP/bin:$PATH" STUB_PACK="$NOTOOL" GC_RIG_ROOT="$RIG" GC_CITY_PATH="$NOTOOL" WORKTREE="$TMP/wt" bash -c '
   cd /
   source "$0"
   printf "%s" "$OWNED"
@@ -90,10 +101,11 @@ grep -qF 'if [ "$OWNED" = "1" ]' "$TOML" \
   && ok "the worktree removal branches on OWNED" \
   || bad "the worktree removal must branch on OWNED"
 
-# The removal must ALSO require a nonempty worktree. A visit, a graph.v2 step
-# and a graph.v2 root carry no metadata.work_dir, so WORKTREE is empty for them,
-# and `git worktree remove "" --force` exits 128, which under set -e aborts part
-# 5 before orphan-dispose.sh releases the bead.
+# The removal must ALSO require a nonempty worktree. A bead no workspace-setup
+# reached, a graph.v2 step and a graph.v2 root carry no metadata.work_dir, so
+# WORKTREE is empty for them, and `git worktree remove "" --force` exits 128,
+# which under set -e aborts the cleanup before orphan-dispose.sh releases the
+# bead.
 RM_IF=$(grep -nE '^[[:space:]]*if \[ "\$OWNED" = "1" \]' "$TOML" | head -1)
 case "$RM_IF" in
   *'-n "$WORKTREE"'*) ok "the worktree removal also requires a nonempty worktree" ;;

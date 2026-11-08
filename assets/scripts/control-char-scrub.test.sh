@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # control-char-scrub.test.sh — regression test for the one control-character
-# scrubber and every copy of it (precedent: gate-visit.test.sh).
+# scrubber and every copy of it.
 #
-# Formula bodies and pack scripts have no include mechanism, so the scrubber
-# lives as marker-delimited copies (# >>> control-char-scrub / # <<<). This
-# test extracts every copy from assets/scripts, doctor and overlays, and
-# asserts what the pack pays for when they disagree:
+# Formula bodies, skills and pack scripts have no include mechanism, so the
+# scrubber lives as marker-delimited copies (# >>> control-char-scrub / # <<<).
+# This test extracts every copy from assets/scripts, doctor, overlays, tools
+# and the skills, and asserts what the pack pays for when they disagree:
 #   - one byte set, asserted by EXECUTING the block over every C0 byte
 #     rather than by matching its text;
 #   - the rescue property doctor/check-state-space depends on: a raw TAB
@@ -48,9 +48,14 @@ hosts() {
         -name '*.sh' ! -name '*.test.sh' -type f 2>/dev/null \
         | grep -v '/lint-learned\.d/' | sort
 }
+# Every file whose copy is held to the canonical block: those shell files, and
+# the skills, whose steps carry the block into the shell that runs them.
+copy_hosts() {
+    { hosts; find "$REPO/skills" -name SKILL.md -type f 2>/dev/null; } | sort
+}
 
 echo "── 1. the canonical block ──"
-CANON_HOST="$SDIR/escalate.sh"
+CANON_HOST="$SDIR/human-gate.sh"
 BLOCK="$(extract "$CANON_HOST")"
 if [ -n "$BLOCK" ]; then ok "block present in $(basename "$CANON_HOST")"
 else bad "block present in $(basename "$CANON_HOST")" "no marked block"; fi
@@ -68,7 +73,7 @@ while IFS= read -r f; do
         DIVERGENT=$((DIVERGENT + 1))
         bad "$(basename "$f"): copy matches canonical" "block differs from $(basename "$CANON_HOST")"
     fi
-done < <(hosts)
+done < <(copy_hosts)
 [ "$DIVERGENT" -eq 0 ] && ok "all $COPIES copies identical"
 # A floor, not an equality: new hosts are expected, a host going missing is not.
 if [ "$COPIES" -ge 81 ]; then ok "copy census $COPIES ≥ 81"
@@ -165,9 +170,9 @@ scrub() { tr    -d '$KEEP_TAB'; }
 $BLOCK
 # <<< control-char-scrub"
     probe "passes a portable snippet in another fence" 0 \
-        "# >>> gate-visit
+        "# >>> liveness-lookup
 V=\$(gc bd show \"\$V\" --json | tr -d '$CNTRL')
-# <<< gate-visit"
+# <<< liveness-lookup"
     probe "passes the shape quoted in a comment" 0 \
         "# prose citing tr -d '$ALL_C0' as an example"
     probe "passes a non-control tr -d" 0 "z=\$(printf x | tr -d '[:space:]')"
@@ -191,9 +196,9 @@ $BLOCK
 rows=\$(gc bd show z --json | scrub | jq .)
 offered=\$(gc bd ready --json | $RETIRED | jq .)"
     probe "flags a retired name inside another fence" 1 \
-        "# >>> gate-visit
+        "# >>> liveness-lookup
 V=\$(gc bd show \"\$V\" --json | $RETIRED)
-# <<< gate-visit"
+# <<< liveness-lookup"
     probe "passes a retired name quoted in a comment" 0 \
         "# prose naming $RETIRED as the helper the consolidation replaced"
     probe "passes a longer identifier that merely contains one" 0 \
@@ -226,9 +231,9 @@ $BLOCK
 # <<< control-char-scrub
 x=\$(gc bd show z --json | scrub | jq .)"
     probe "passes | scrub inside another fence" 0 \
-        "# >>> gate-visit
+        "# >>> liveness-lookup
 V=\$(gc bd show \"\$V\" --json | scrub)
-# <<< gate-visit"
+# <<< liveness-lookup"
     # The detector's own canonical constant must agree with the block, or it
     # would police a byte set the pack does not use.
     DET_CANON="$(sed -n 's/^CANON="\(.*\)"$/\1/p' "$DETECTOR")"

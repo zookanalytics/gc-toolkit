@@ -6,11 +6,11 @@
 # before they hand a bead on.
 #
 # A live operator intake — gc-helm engage --new-subject — creates the subject
-# MARKED gc.reaction_owned=1, files the ONE visit, and spawns the sitting
-# itself. The proactive worker must stand down so a sweep does not file a SECOND
-# visit for a conversation already under way. Two gates are covered here, both
-# exercised through the fixture seam (GC_PROACTIVE_FIXTURE), so no live city,
-# Dolt, or gc is needed:
+# MARKED gc.reaction_owned=1, files the ONE conversation, and spawns the sitting
+# itself. The proactive worker must stand down so a sweep does not ask the
+# operator a SECOND time about a conversation already under way. Two gates are
+# covered here, both exercised through the fixture seam (GC_PROACTIVE_FIXTURE),
+# so no live city, Dolt, or gc is needed:
 #   (SCAN-DROP)  scan_precision_filter drops a marked bead from the candidate set
 #   (SCAN-KEEP)  …while an unmarked raw input bead is still a candidate
 #   (SLING-SKIP) sling refuses a marked bead as a no-op (exit RC_ALREADY_REACTED)
@@ -31,12 +31,14 @@
 #   (BOTH-READS)    on the live read path, one sweep drops both a bead with a
 #                   dispatch path and a bead a live workflow drives (INFLIGHT-*)
 # The sling holds the same line for a bead named to it directly, as gc-helm
-# react and gc-visit-open name one, because filing a reaction leaves the
+# react and operator-intake name one, because filing a reaction leaves the
 # subject's route in place and the pool serving it could hand the subject to a
 # worker mid-reaction:
 #   (PATH-SKIP)  sling refuses a bead carrying any dispatch-path key, an arm,
-#                a capped arm and the human park route (exit RC_DISPATCH_PATH)
-#   (PATH-GO)    …while blank keys and an execution stamp still proceed
+#                a capped arm, the human park route and a bead an open human
+#                gate blocks (exit RC_DISPATCH_PATH)
+#   (PATH-GO)    …while blank keys, an execution stamp, a closed gate and open
+#                work still proceed
 #   (PATH-ORDER) a routed bead with an open reaction reports the reaction (exit 3)
 #   (PATH-SWEEP) a sweep skips a bead routed after its read without spending
 #                a cap slot
@@ -161,7 +163,7 @@ OUT="$(bash "$SCRIPT" sling tk-intake 2>&1)"; RC=$?
 set -e
 eq "$RC" 3 "(SLING-SKIP) sling of a marked bead exits RC_ALREADY_REACTED (3)"
 has "$OUT" "gc.reaction_owned=1" "(SLING-SKIP) …naming the marker"
-has "$OUT" "file a second" "(SLING-SKIP) …and why (a second visit)"
+has "$OUT" "ask the operator a second time" "(SLING-SKIP) …and why (a second ask)"
 hasnt "$OUT" "would file a reaction bead" "(SLING-SKIP) …nothing dispatched"
 
 echo "# an unmarked bead still proceeds to the dispatch"
@@ -185,7 +187,7 @@ hasnt "$OUT" "would file a reaction bead" "(SUBJECT-ABSENT) …nothing dispatche
 # deferred-dispatch reconcile pass, so the arm is all that sets it apart from
 # raw input. tk-armed carries the record deferred-dispatch.sh arm writes.
 # tk-capped is an arm the reconcile pass stopped retrying at its failure cap,
-# which waits on the visit the cap filed. One more bead per dispatch-path key
+# which waits on the human gate the cap filed. One more bead per dispatch-path key
 # carries only that key. The keys are read from the shared definition, so a key
 # added there is covered here with no edit to this file. tk-blank carries every
 # key with a blank value, which names no queue and no sling target, so it is
@@ -236,7 +238,7 @@ done
 
 # --- the sling refuses a bead with a dispatch path --------------------------
 # The scan never offers a routed or armed bead, but gc-helm react and
-# gc-visit-open name a bead to the sling directly. Filing a reaction leaves the
+# operator-intake name a bead to the sling directly. Filing a reaction leaves the
 # subject's route in place, so a reaction to a routed bead races the pool that
 # serves it, and a reaction to an armed bead races the arm. The sling refuses
 # such a bead as a no-op with its own exit code. beads.json is the store: every
@@ -246,8 +248,14 @@ done
 #                       which no queue reads
 #   tk-reacting-routed  routed, and an open reaction (tk-r-reacting-routed)
 #                       already tracks it
+#   tk-gated            an open human gate blocks it, as a sitting's hold does
+#   tk-gated-closed     the human gate that blocked it is answered
+#   tk-work-blocked     open work blocks it, and no gate
 jq '(map({key: .id, value: {metadata: .metadata}}) | from_entries)
-    + {"tk-human":             {"metadata": {"gc.routed_to": "human"}},
+    + {"tk-gated":        {"metadata": {}, "dependencies": [{"id": "tk-gate-open", "dependency_type": "blocks", "issue_type": "gate", "await_type": "human", "status": "open"}]},
+       "tk-gated-closed": {"metadata": {}, "dependencies": [{"id": "tk-gate-shut", "dependency_type": "blocks", "issue_type": "gate", "await_type": "human", "status": "closed"}]},
+       "tk-work-blocked": {"metadata": {}, "dependencies": [{"id": "tk-work", "dependency_type": "blocks", "issue_type": "task", "status": "open"}]},
+       "tk-human":             {"metadata": {"gc.routed_to": "human"}},
        "tk-exec-only":         {"metadata": {"gc.execution_routed_to": "gc-toolkit/gc-toolkit.polecat"}},
        "tk-reacting-routed":   {"metadata": {"gc.routed_to": "gc-toolkit/gc-toolkit.polecat"}},
        "tk-r-reacting-routed": {"status": "open", "metadata": {"task_kind": "reaction", "gc.reaction_subject": "tk-reacting-routed"}}}' \
@@ -270,9 +278,15 @@ for b in tk-armed tk-capped tk-human; do
     hasnt "$OUT" "would file a reaction bead" "(PATH-SKIP) …nothing filed for $b"
 done
 has "$(bash "$SCRIPT" sling tk-human 2>&1 || true)" "gc.routed_to=human" "(PATH-SKIP) the human park route is named as the path"
+set +e
+OUT="$(bash "$SCRIPT" sling tk-gated 2>&1)"; RC=$?
+set -e
+eq "$RC" 5 "(PATH-SKIP) sling of a bead an open human gate blocks exits RC_DISPATCH_PATH (5)"
+has "$OUT" "waits on a person's answer (open human gate tk-gate-open)" "(PATH-SKIP) …naming the gate"
+hasnt "$OUT" "would file a reaction bead" "(PATH-SKIP) …nothing filed for tk-gated"
 
-echo "# blank keys and an execution stamp are no dispatch path"
-for b in tk-blank tk-exec-only; do
+echo "# blank keys, an execution stamp, an answered gate and open work are no dispatch path"
+for b in tk-blank tk-exec-only tk-gated-closed tk-work-blocked; do
     set +e
     OUT="$(bash "$SCRIPT" sling "$b" 2>&1)"; RC=$?
     set -e
@@ -1108,6 +1122,8 @@ case "\$*" in
   "bd show tk-path-gone --json")
       printf '{"error":"no issues found matching the provided IDs","schema_version":1}'; exit 1 ;;
   "bd show tk-path-empty --json") exit 0 ;;
+  "bd show tk-path-gated --json")
+      printf '[{"id":"tk-path-gated","metadata":{},"dependencies":[{"id":"tk-gate-live","dependency_type":"blocks","issue_type":"gate","await_type":"human","status":"open"}]}]' ;;
   "bd show tk-path-twice --json")
       printf '[{"id":"tk-path-twice","metadata":{}}]\n[{"id":"tk-path-twice","metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}}]' ;;
   "bd dep list tk-path-"*" --direction up -t tracks --json") printf '[]' ;;
@@ -1124,6 +1140,12 @@ set -e
 eq "$RC" 5 "(PATH-READS) the live path refuses a routed bead (exit 5)"
 has "$OUT" "already has a dispatch path (gc.routed_to=gc-toolkit/gc-toolkit.polecat)" "(PATH-READS) …naming its route, read through a raw control byte"
 hasnt "$OUT" "gc bd create" "(PATH-READS) …and files no reaction"
+set +e
+OUT="$(show_sling tk-path-gated)"; RC=$?
+set -e
+eq "$RC" 5 "(PATH-READS) the live path refuses a bead an open human gate blocks (exit 5)"
+has "$OUT" "waits on a person's answer (open human gate tk-gate-live)" "(PATH-READS) …naming the gate it read from the bead's row"
+hasnt "$OUT" "gc bd create" "(PATH-READS) …and files no reaction for it"
 set +e
 OUT="$(show_sling tk-path-locked)"; RC=$?
 set -e

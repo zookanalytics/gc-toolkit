@@ -4,10 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -77,100 +73,28 @@ func TestProbeTimeoutRejectsZero(t *testing.T) {
 	}
 }
 
-// The CLI's --json output has ONE consumer, assets/scripts/tmux-pick-helm.sh,
-// and the two tests below state its requirements.
-
-// pickerReads are the tile fields tmux-pick-helm.sh dereferences, read off the
-// script rather than listed here: a remembered list drifts out of step with the
-// script without failing.
-var pickerReads = regexp.MustCompile(`\.(held|visit_state|severity|id|rig|title|frontier|needs)\b`)
-
-// emittedKeys serializes one tile through the CLI's own renderer and reads the
-// real bytes rather than reflecting over the struct, so a stray omitempty is
-// visible. The anchor is fully populated for the same reason: a zero-valued
-// field would vanish and read as a missing key.
-func emittedKeys(t *testing.T) []string {
-	t.Helper()
-	prio := 2
-	owned := false
-	a := board.Anchor{
-		ID: "tk-parity", Title: "parity fixture", Kind: "convoy", Source: "convoy",
-		Rig: "gc-toolkit", Prefix: "tk", Priority: &prio,
-		UpdatedAt:   time.Date(2026, 8, 11, 15, 4, 5, 0, time.UTC),
-		Description: "blocks ra-abc12",
-		Owned:       &owned,
-		Takeaway:    "a headline", TakeawayAt: "2026-08-11T15:00:00Z", TakeawayBy: "host",
-		WaitingOn: []string{"tk-w1"}, WaitingOnClosed: []string{"tk-w1"},
-		Children: []board.Child{
-			{ID: "tk-c1", Status: "open"},
-			{ID: "tk-c2", Status: "in_progress", Assignee: "polecat-live"},
-			{ID: "tk-c3", Status: "closed"},
-			{ID: "tk-c4", Status: "open", Metadata: map[string]string{"gc.routed_to": "human"}},
-		},
-	}
-	f := board.Facts{
-		Visits:     map[string]bool{"tk-parity": true},
-		OwnerState: map[string]string{"polecat-live": "active"},
-		Prefixes:   []string{"tk", "ra"},
-		RigNames:   []string{"gc-toolkit", "rig-a"},
-	}
-	b := board.BuildBoard([]board.Anchor{a}, time.Date(2026, 8, 12, 0, 0, 0, 0, time.UTC), false, nil, f)
-
+// TestJSONOutputIsTheTilesArray pins the --json SHAPE. A caller counts the rows
+// with `jq length` and walks them with `.[]`, so the service's
+// {generated_at,total,tiles} envelope would turn every board into one row while
+// still parsing cleanly, and an empty board has to be `[]`, the legitimate
+// "nothing floats" answer, rather than a `null` that reads as a failure.
+func TestJSONOutputIsTheTilesArray(t *testing.T) {
 	var buf bytes.Buffer
-	if rc := renderJSON(&buf, &buf, b.Tiles); rc != boardExitOK {
+	if rc := renderJSON(&buf, &buf, []board.Tile{{ID: "tk-1"}}); rc != boardExitOK {
 		t.Fatalf("renderJSON exited %d: %s", rc, buf.String())
 	}
 	var rows []map[string]json.RawMessage
 	if err := json.Unmarshal(buf.Bytes(), &rows); err != nil {
-		t.Fatalf("the CLI must emit a JSON ARRAY: %v\n%s", err, buf.String())
+		t.Fatalf("--json must be a JSON ARRAY: %v\n%s", err, buf.String())
 	}
 	if len(rows) != 1 {
-		t.Fatalf("expected 1 row, got %d", len(rows))
+		t.Fatalf("want the one row, got %d", len(rows))
 	}
-	keys := make([]string, 0, len(rows[0]))
-	for k := range rows[0] {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
-	return keys
-}
-
-// TestPickerFieldsPresent: every field the picker dereferences has to be on the
-// wire. Dropping one fails silently — jq's `//` fallbacks render "?" columns
-// and nothing errors.
-func TestPickerFieldsPresent(t *testing.T) {
-	src, err := os.ReadFile("../../../../assets/scripts/tmux-pick-helm.sh")
-	if err != nil {
-		t.Fatalf("read the picker: %v", err)
-	}
-	var want []string
-	for _, m := range pickerReads.FindAllStringSubmatch(string(src), -1) {
-		if !slices.Contains(want, m[1]) {
-			want = append(want, m[1])
-		}
-	}
-	if len(want) == 0 {
-		t.Fatal("found no tile field reads in the picker — the regex or the script changed shape")
+	if _, ok := rows[0]["pack_health"]; ok || strings.Contains(buf.String(), "pack_health") {
+		t.Errorf("--json grew the envelope's pack_health key:\n%s", buf.String())
 	}
 
-	have := emittedKeys(t)
-	for _, k := range want {
-		if !slices.Contains(have, k) {
-			t.Errorf("tmux-pick-helm.sh dereferences .%s and the CLI does not emit it", k)
-		}
-	}
-	// `live` is retired and the picker no longer reads it; it must not return.
-	if slices.Contains(have, "live") {
-		t.Error("`live` is retired; see internal/board/model.go")
-	}
-}
-
-// TestCLIEmitsArrayNotEnvelope pins the SHAPE, which a field-set check cannot
-// see. The picker runs `jq 'length'` and `.[]` over this output; the service's
-// {generated_at,total,tiles} envelope would make every row invisible while
-// still parsing cleanly.
-func TestCLIEmitsArrayNotEnvelope(t *testing.T) {
-	var buf bytes.Buffer
+	buf.Reset()
 	if rc := renderJSON(&buf, &buf, nil); rc != boardExitOK {
 		t.Fatalf("renderJSON exited %d", rc)
 	}
@@ -178,13 +102,36 @@ func TestCLIEmitsArrayNotEnvelope(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &arr); err != nil {
 		t.Fatalf("an empty board must still be a JSON array: %v (%q)", err, buf.String())
 	}
-	if len(arr) != 0 {
-		t.Fatalf("want an empty array, got %d rows", len(arr))
+	if len(arr) != 0 || strings.TrimSpace(buf.String()) != "[]" {
+		t.Errorf("an empty board prints [], got %q", buf.String())
 	}
-	// `[]`, not `null`: the picker treats a null as an error and shows nothing,
-	// where an empty array is the legitimate "nothing floats" answer.
-	if strings.TrimSpace(buf.String()) == "null" {
-		t.Error("an empty board serialized as null; tmux-pick-helm.sh reads that as a failure")
+}
+
+// TestBoardWithoutJSONNamesTheWebPage: the board has no terminal view, so a
+// call without --json says where the board is and prints nothing. It answers
+// before the gather. The city path below names a directory with no bead stores,
+// where a call that reads the stores exits 3, as the --json control shows.
+func TestBoardWithoutJSONNamesTheWebPage(t *testing.T) {
+	t.Setenv("GC_HELM_CITY_PATH", t.TempDir())
+	for _, args := range [][]string{nil, {"--all"}, {"--limit=5"}} {
+		var out, errOut bytes.Buffer
+		if rc := runBoard(args, &out, &errOut); rc != boardExitUsage {
+			t.Errorf("board %v exited %d, want %d before any gather:\n%s", args, rc, boardExitUsage, errOut.String())
+		}
+		if out.Len() != 0 {
+			t.Errorf("board %v printed to stdout:\n%s", args, out.String())
+		}
+		for _, want := range []string{"no terminal view", "web page", "/svc/helm/", "--json"} {
+			if !strings.Contains(errOut.String(), want) {
+				t.Errorf("board %v must say %q:\n%s", args, want, errOut.String())
+			}
+		}
+	}
+
+	var out, errOut bytes.Buffer
+	if rc := runBoard([]string{"--json"}, &out, &errOut); rc != boardExitGather {
+		t.Errorf("control: --json reads the stores, and a city with none exits %d, got %d:\n%s",
+			boardExitGather, rc, errOut.String())
 	}
 }
 
@@ -211,8 +158,8 @@ func boardWithAnOwedRow(partial bool) board.Board {
 	return board.BuildBoard(anchors, now, partial, errs, board.Facts{})
 }
 
-// TestDefaultViewIsTheQueue: bare `helm-svc board` answers with the operator's
-// queue and nothing else, and --all is the only way to the overview. The
+// TestDefaultViewIsTheQueue: `helm-svc board --json` answers with the
+// operator's queue and nothing else, and --all is the only way to the overview. The
 // container outranks the demand, so on one globally ranked list the demand is
 // the row that gets buried.
 func TestDefaultViewIsTheQueue(t *testing.T) {
@@ -272,7 +219,7 @@ func tileIDs(tiles []board.Tile) []string {
 
 // TestEmptyQueueFromAPartialGatherIsNotAnAnswer: the rows that would have
 // contradicted "nothing is owed by you" are exactly the ones an unread store
-// was holding, so the empty queue exits 3 rather than rendering an all-clear.
+// was holding, so the empty queue exits 3 rather than printing an empty array.
 // The overview keeps its own contract — an empty --all is still an empty --all.
 func TestEmptyQueueFromAPartialGatherIsNotAnAnswer(t *testing.T) {
 	whole := board.BuildBoard(nil, time.Now(), false, nil, board.Facts{})
@@ -288,85 +235,10 @@ func TestEmptyQueueFromAPartialGatherIsNotAnAnswer(t *testing.T) {
 		t.Error("--all carries no emptiness contract of its own")
 	}
 
-	// A partial gather that still produced a queue renders it: those rows were
-	// read, and runBoard's PARTIAL line says what was not.
+	// A partial gather that still produced a queue prints it: those rows were
+	// read.
 	if selectView(boardWithAnOwedRow(true), false, 0).unprovable {
-		t.Error("a non-empty queue renders even when the gather was partial")
-	}
-}
-
-// TestEmptyQueueRendersItsCoverage: "nothing is owed by you" is a claim about
-// every store in the city, so the sentence carries what it was checked against
-// rather than leaving the surface blank.
-func TestEmptyQueueRendersItsCoverage(t *testing.T) {
-	var buf bytes.Buffer
-	b := board.BuildBoard(nil, time.Now(), false, nil, board.Facts{})
-	renderQueue(&buf, b, nil, time.Now().UTC(), 5)
-	out := buf.String()
-	for _, want := range []string{"Nothing is owed by you", "5 rigs checked", "--all"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("the empty queue must say %q:\n%s", want, out)
-		}
-	}
-}
-
-// TestEmptyQueueWithholdsTheAllClearWhileAPRPositionIsUnread.
-//
-// PR rows extend the empty-state contract rather than adding a second one, and
-// they add a way for it to go quietly wrong that beads alone did not have: an
-// axis nothing has recorded looks exactly like an axis with nothing to say.
-// Tile.Owed is a boolean and cannot carry the third value the axes do, so the
-// gap has to surface here — a board that says "nothing is owed" while a pull
-// request's position is unread has told the operator to stop looking on the
-// strength of a question it never asked.
-func TestEmptyQueueWithholdsTheAllClearWhileAPRPositionIsUnread(t *testing.T) {
-	now := time.Now().UTC()
-	head := strings.Repeat("a", 40)
-	mergeAnchor := func(id string, md map[string]string) board.Anchor {
-		full := map[string]string{"merge_result": "pull_request", "branch": "polecat/" + id}
-		for k, v := range md {
-			full[k] = v
-		}
-		return board.Anchor{ID: id, Title: id, Kind: "merge", Source: "merge",
-			Rig: "gc-toolkit", Prefix: "tk", Metadata: full}
-	}
-
-	// Nothing recorded: the cadence has not judged this pull request.
-	silent := board.BuildBoard([]board.Anchor{mergeAnchor("tk-silent", nil)}, now, false, nil, board.Facts{})
-	var buf bytes.Buffer
-	renderQueue(&buf, silent, nil, now, 5)
-	out := buf.String()
-	if !strings.Contains(out, "NOT an all-clear") {
-		t.Errorf("an unread position must withhold the all-clear:\n%s", out)
-	}
-	if !strings.Contains(out, "1 of 1 have no position recorded") {
-		t.Errorf("…and say how much was unread:\n%s", out)
-	}
-
-	// Read on the machine axis and the approval clause, but the merge cadence
-	// has recorded no conversation position for this row, so the row still holds
-	// the sentence open — and names the reason rather than letting the silence
-	// pass for an answer.
-	clear := board.BuildBoard([]board.Anchor{mergeAnchor("tk-green", map[string]string{
-		"pr.machine": "settled@" + head + "@2026-08-28T04:05:06Z",
-		"pr_posture": "none@" + head + "@2026-08-28T04:05:06Z",
-	})}, now, false, nil, board.Facts{})
-	buf.Reset()
-	renderQueue(&buf, clear, nil, now, 5)
-	out = buf.String()
-	if !strings.Contains(out, "the merge cadence has not recorded it") {
-		t.Errorf("the conversation gap has to name itself:\n%s", out)
-	}
-	if strings.Contains(out, "no position recorded") {
-		t.Errorf("the machine axis WAS read here and must not count as a gap:\n%s", out)
-	}
-
-	// With no merge anchors at all the original sentence is unchanged.
-	buf.Reset()
-	renderQueue(&buf, board.BuildBoard(nil, now, false, nil, board.Facts{}), nil, now, 5)
-	if out := buf.String(); !strings.Contains(out, "Nothing is owed by you.") ||
-		strings.Contains(out, "NOT an all-clear") {
-		t.Errorf("a city with no merge anchors keeps the plain sentence:\n%s", out)
+		t.Error("a non-empty queue prints even when the gather was partial")
 	}
 }
 
@@ -377,7 +249,7 @@ func TestBoardFlagParsing(t *testing.T) {
 		t.Fatalf("no args: %v", err)
 	}
 	if o.all {
-		t.Error("bare `board` is the queue, not the overview")
+		t.Error("`board` without --all is the queue, not the overview")
 	}
 	if o, err = parseBoardArgs([]string{"--all", "--json"}); err != nil || !o.all || !o.json {
 		t.Errorf("--all --json: all=%v json=%v err=%v", o.all, o.json, err)
@@ -412,68 +284,5 @@ func TestTheQueueAndOverviewCapDifferently(t *testing.T) {
 	// to that many whole families — here 5 of the 20.
 	if got := len(selectView(b, true, 5).rows); got != 5 {
 		t.Errorf("the overview caps whole families to its budget: kept %d, want 5", got)
-	}
-}
-
-// The picker's own behaviour is pinned in assets/scripts/tmux-pick-helm.test.sh.
-// What only this side can pin is the seam between them: the picker's failure arm
-// has to fire on the code THIS package emits, and the shell suite can only spell
-// that code as a literal.
-
-const pickerPath = "../../../../assets/scripts/tmux-pick-helm.sh"
-
-// runPicker drives the picker with a helm-svc that emits stdout and exits code,
-// and returns every tmux invocation it made, one per line.
-func runPicker(t *testing.T, stdout string, code int, args ...string) string {
-	t.Helper()
-	if _, err := exec.LookPath("jq"); err != nil {
-		t.Skip("the picker shells out to jq")
-	}
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "bin"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	calls, svc := filepath.Join(dir, "tmux-calls"), filepath.Join(dir, "svc-args")
-	write := func(path, body string) {
-		if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	write(filepath.Join(dir, "bin", "helm-svc"), fmt.Sprintf(
-		"#!/bin/sh\nprintf '%%s\\n' \"$*\" >> %q\ncat <<'JSON'\n%s\nJSON\nexit %d\n",
-		svc, stdout, code))
-	write(filepath.Join(dir, "tmux"), fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' \"$*\" >> %q\n", calls))
-
-	cmd := exec.Command("sh", append([]string{pickerPath}, args...)...)
-	cmd.Env = append(os.Environ(),
-		"PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"),
-		"GC_SERVICE_STATE_ROOT="+dir,
-	)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("picker exited %v: %s", err, out)
-	}
-	got, err := os.ReadFile(calls)
-	if err != nil {
-		t.Fatalf("the picker made no tmux call at all: %v", err)
-	}
-	if _, err := os.ReadFile(svc); err != nil {
-		t.Fatalf("the picker never ran helm-svc: %v", err)
-	}
-	return string(got)
-}
-
-// A failed gather must not reach the operator as an empty menu. The picker
-// spells the code as a literal, so nothing on its side notices if this package
-// renumbers boardExitGather; driving it with the constant is what closes that.
-func TestPickerFailureArmFiresOnTheBoardsOwnExitCode(t *testing.T) {
-	got := runPicker(t, "", boardExitGather)
-	if strings.Contains(got, "display-menu") {
-		t.Errorf("a failed gather must not open a menu:\n%s", got)
-	}
-	if !strings.Contains(got, "BOARD UNREADABLE") {
-		t.Errorf("the failure has to be named on screen:\n%s", got)
-	}
-	if strings.Contains(got, "nothing needs you") {
-		t.Errorf("a failed gather is not an all-clear:\n%s", got)
 	}
 }

@@ -10,14 +10,37 @@
 # variable after setup. Call counts come from STUB_GC_LOG, where the stub gc logs
 # every invocation one per line; a `gc bd list` logs a line starting `bd list`.
 #
-# row_meta, the metadata read the library shares with every script that sources
-# it, is pinned first; it reads no store.
+# warn and die, the report every script that sources the library makes, row_meta,
+# the metadata read it shares with them, bd_gates_open_under_key, the order
+# every writer and reader of one situation's human gates reads them in, and
+# $DISPOSITION_JQ, the one reading of a disposition, are pinned first; they read
+# no store. bd_disposed_to, its store read, follows them. The readers that judge
+# a gate by $HUMAN_GATE_JQ are checked last, for sourcing it rather than copying
+# it.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-bd-lib-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
 . "$HERE/test-harness.sh"
 harness_init
 . "$HERE/bd-lib.sh"
+
+# --- warn and die: a script's report, under its name, and die's exit status -----
+LIB="$HERE/bd-lib.sh"
+report() { # <script body> -> the script's stderr and its exit status, one line each
+  mkdir -p "$TMP/report"
+  printf '. "%s"\n%s\n' "$LIB" "$1" > "$TMP/report/thing.sh"
+  bash "$TMP/report/thing.sh" 2>&1; echo "rc=$?"
+}
+eq "$(report 'warn careful now')" "thing: careful now
+rc=0" "warn reports under the script's file name, without .sh, and every word"
+eq "$(report 'PROG=other; warn careful now')" "other: careful now
+rc=0" "…and under \$PROG when the script sets one"
+eq "$(report 'die stopped')" "thing: stopped
+rc=1" "die exits 1 by default"
+eq "$(report 'DIE_STATUS=4; die stopped')" "thing: stopped
+rc=4" "…or the script's own DIE_STATUS"
+eq "$(report 'DIE_STATUS=4; die stopped 7')" "thing: stopped
+rc=7" "…and the status a call gives wins over both"
 
 # --- row_meta: one metadata value off a show row, as a string -----------------
 ROW='[{"id":"tk-m","metadata":{"branch":"polecat/tk-m","pr_number":42,"gc.routed_to":"rig/pool"}}]'
@@ -26,6 +49,79 @@ eq "$(row_meta "$ROW" pr_number)" "42" "…a number as its string"
 eq "$(row_meta "$ROW" gc.routed_to)" "rig/pool" "…a dotted key whole"
 eq "$(row_meta "$ROW" target)" "" "…an absent key as empty"
 eq "$(row_meta '{"error":"no issues found"}' branch)" "" "…and a row that is not a show array as empty"
+
+# --- bd_gates_open_under_key: the open gates under a key, in the one order ----
+# gate_row <id> <key> <status> <created_at> — one row as bd_human_gates prints it.
+gate_row() { jq -nc --arg id "$1" --arg k "$2" --arg st "$3" --arg at "$4" \
+  '{id: $id, status: $st, issue_type: "gate", await_type: "human", await_id: $k} + (if $at == "" then {} else {created_at: $at} end)'; }
+open_ids() { bd_gates_open_under_key "$1" | jq -r '[.[].id] | join(" ")'; }
+GATES_IN="[$(gate_row g-late k open 2026-10-22T00:00:02Z),$(gate_row g-b k open 2026-10-22T00:00:01Z),$(gate_row g-a k open 2026-10-22T00:00:01Z),$(gate_row g-shut k closed 2026-10-21T00:00:00Z),$(gate_row g-other other open 2026-10-21T00:00:00Z)]"
+eq "$(printf '%s' "$GATES_IN" | open_ids k)" "g-a g-b g-late" "bd_gates_open_under_key keeps the open gates under the key, by created_at, then id"
+eq "$(printf '%s' "$GATES_IN" | open_ids none)" "" "…and is an empty array when none is open under the key"
+# created_at is read as a time. As text, '.' sorts before 'Z', so a fraction
+# would sort ahead of the whole second it follows, and an offset would sort by
+# its local clock.
+GATES_IN="[$(gate_row g-whole k open 2026-10-22T00:00:01Z),$(gate_row g-frac k open 2026-10-22T00:00:00.900Z),$(gate_row g-zero k open 2026-10-22T00:00:00Z)]"
+eq "$(printf '%s' "$GATES_IN" | open_ids k)" "g-zero g-frac g-whole" "…a fractional second sorts after the whole second it follows"
+GATES_IN="[$(gate_row g-utc k open 2026-10-22T00:00:00Z),$(gate_row g-east k open 2026-10-22T01:59:59+02:00),$(gate_row g-west k open 2026-10-21T17:59:58-06:00)]"
+eq "$(printf '%s' "$GATES_IN" | open_ids k)" "g-west g-east g-utc" "…an offset is read as the instant it names"
+GATES_IN="[$(gate_row g-none k open ""),$(gate_row g-word k open yesterday),$(gate_row g-late k open 2026-10-22T00:00:02Z),$(gate_row g-early k open 2026-10-22T00:00:01Z)]"
+eq "$(printf '%s' "$GATES_IN" | open_ids k)" "g-early g-late g-none g-word" "…a created_at that is absent or not a time sorts after every one that is, then by id"
+for bad_in in '{"error":"not found"}' ''; do
+  out=$(printf '%s' "$bad_in" | bd_gates_open_under_key k); rc=$?
+  eq "$rc" 1 "…returns 1 on input that is not an array ('$bad_in')"
+  eq "$out" "" "…and prints nothing then"
+done
+
+# --- $DISPOSITION_JQ: the successor a disposed bead names, off either row shape -
+# A `gc bd list` row names an edge's far bead by depends_on_id and its type as
+# type; a `gc bd show` row names it by the far bead's id and dependency_type.
+disp() { printf '%s' "$1" | jq -r "$DISPOSITION_JQ"'.[0] | [disposed_to, duplicate_to] | join("|")'; }
+eq "$(disp '[{"id":"a","dependencies":[{"issue_id":"a","depends_on_id":"b","type":"supersedes"}]}]')" "b|" \
+  "disposed_to reads a list row's supersedes edge, which names no canonical"
+eq "$(disp '[{"id":"a","dependencies":[{"issue_id":"a","depends_on_id":"c","type":"duplicates"}]}]')" "c|c" \
+  "…and a duplicates edge, which also names the canonical"
+eq "$(disp '[{"id":"a","dependencies":[{"id":"b","dependency_type":"supersedes"}]}]')" "b|" \
+  "…a show row's edge by the far bead's id"
+eq "$(disp '[{"id":"a","dependencies":[{"id":"p","dependency_type":"parent-child"},{"issue_id":"a","depends_on_id":"g","type":"blocks"},{"issue_id":"a","depends_on_id":"b","type":"supersedes"}]}]')" "b|" \
+  "…past the edges of other types"
+eq "$(disp '[{"id":"a","dependencies":[{"id":"p","dependency_type":"parent-child"},{"id":"t","dependency_type":"tracks"}]}]')" "|" \
+  "…and names none for a bead whose edges are all of other types"
+eq "$(disp '[{"id":"a","metadata":{"gc.superseded_by":"b"}}]')" "|" \
+  "…or for one that carries only the retired key"
+
+# --- bd_exact_row and bd_disposed_to: a bead's own list row --------------------
+# The edge onto x-1, a bead in another rig's store, rides only the list row.
+store '[{"id":"tk-d","status":"closed","metadata":{},"dependencies":[{"issue_id":"tk-d","depends_on_id":"x-1","type":"supersedes","external":true}]},
+        {"id":"tk-n","status":"closed","metadata":{}},
+        {"id":"tk-g","status":"closed","issue_type":"gate","metadata":{},"dependencies":[{"issue_id":"tk-g","depends_on_id":"tk-g2","type":"supersedes"}]}]'
+out=$(bd_exact_row tk-n); rc=$?
+eq "$rc/$(printf '%s' "$out" | jq -r 'map(.id) | join(",")')" "0/tk-n" "bd_exact_row answers the bead's own row, whatever else the listing holds"
+out=$(bd_exact_row tk-g); rc=$?
+eq "$rc/$(printf '%s' "$out" | jq -r 'map(.id) | join(",")')" "0/tk-g" "…a gate's, which a plain list hides"
+out=$(bd_exact_row tk-gone); rc=$?
+eq "$rc/$out" "0/[]" "…no row for a bead the store does not hold, at exit 0"
+out=$(STUB_LIST_FAIL=1 bd_exact_row tk-n); rc=$?
+eq "$rc/$out" "1/" "…and returns 1 for a read that fails"
+out=$(STUB_LIST_TRAILING=tk-n bd_exact_row tk-n); rc=$?
+eq "$rc/$out" "1/" "…or an answer with unreadable bytes after the listing"
+out=$(_bd_call() { printf '{"error":"database is locked"}'; }; bd_exact_row tk-n); rc=$?
+eq "$rc/$out" "1/" "…or an answer that is no listing, at exit 0"
+: > "$STUB_GC_LOG"
+out=$(bd_disposed_to tk-d); rc=$?
+eq "$rc/$out" "0/x-1" "bd_disposed_to names the successor an edge into another store records"
+has "$(cat "$STUB_GC_LOG")" "bd list --id tk-d --all --include-gates --include-infra --include-templates" "…read off the bead's list row, every type included"
+out=$(bd_disposed_to tk-g); rc=$?
+eq "$rc/$out" "0/tk-g2" "…and names a gate's successor too"
+out=$(bd_disposed_to tk-n); rc=$?
+eq "$rc/$out" "0/" "…prints nothing for a bead that names none"
+out=$(bd_disposed_to tk-gone); rc=$?
+eq "$rc/$out" "1/" "…returns 1 for a bead the store does not hold"
+out=$(STUB_LIST_FAIL=1 bd_disposed_to tk-d); rc=$?
+eq "$rc/$out" "1/" "…and for a read that fails, so 'none' and 'unread' stay apart"
+: > "$STUB_GC_LOG"
+bd_disposed_to tk-d "$TMP/other/.beads" >/dev/null
+has "$(cat "$STUB_GC_LOG")" "--db $TMP/other/.beads" "…and reads another store when named one"
 
 store '[{"id":"tk-a","status":"open","assignee":"","title":"a","notes":"","metadata":{"anchor_bead":"tk-anc"}}]'
 
@@ -110,7 +206,7 @@ LIVE=open,in_progress,blocked,deferred,hooked,pinned
 unset GC_RECONCILE_BD_CACHE
 
 # One anchor in every shape a child can take: closed children with the edge, a
-# visit joined by its tracks edge, an open review filed without the edge, a
+# validation pass joined by a tracks edge, an open review filed without the edge, a
 # closed review filed without it, a convoy tracking the anchor, and a bead moved
 # to another anchor that still carries its old edge.
 store '[
@@ -118,7 +214,7 @@ store '[
   {"id":"tk-two","status":"open","metadata":{"merge_result":"pull_request"}},
   {"id":"tk-r1","status":"closed","metadata":{"anchor_bead":"tk-anc","task_kind":"review"}},
   {"id":"tk-r2","status":"open","metadata":{"anchor_bead":"tk-anc","task_kind":"review"}},
-  {"id":"tk-vis","status":"closed","metadata":{"anchor_bead":"tk-anc","task_kind":"visit"}},
+  {"id":"tk-vis","status":"closed","metadata":{"anchor_bead":"tk-anc","task_kind":"validation"}},
   {"id":"tk-bare","status":"open","metadata":{"anchor_bead":"tk-anc","task_kind":"review"}},
   {"id":"tk-cbare","status":"closed","metadata":{"anchor_bead":"tk-anc","task_kind":"review"}},
   {"id":"tk-cv","status":"open","metadata":{}},
@@ -146,7 +242,7 @@ mark_store; reset_log
 kids=$(bd_anchor_children tk-anc "$ALL"); rc=$?
 eq "$rc" 0 "marked: bd_anchor_children reads the anchor"
 eq "$(ids_of "$kids")" "tk-bare,tk-r1,tk-r2,tk-vis" \
-  "marked: the live children whatever their edge, and the closed dependents naming the anchor (a tracks-joined visit is one; a convoy and a moved bead are not)"
+  "marked: the live children whatever their edge, and the closed dependents naming the anchor (a tracks-joined validation pass is one; a convoy and a moved bead are not)"
 eq "$(printf '%s' "$kids" | jq -r '[ .[] | select(.id == "tk-bare") | .status ] | .[0]')" "open" \
   "marked: an open review filed without the edge is read, so it holds its lane"
 eq "$(printf '%s' "$kids" | jq -r '[ .[] | select(.id == "tk-cbare") ] | length')" "0" \
@@ -226,7 +322,7 @@ store '[
   {"id":"tk-old","status":"open","metadata":{"merge_result":"pull_request"}},
   {"id":"tk-o1","status":"closed","metadata":{"anchor_bead":"tk-old","task_kind":"review"}},
   {"id":"tk-new","status":"open","metadata":{"task_kind":"rework"}},
-  {"id":"tk-vv","status":"open","metadata":{"task_kind":"visit"}}
+  {"id":"tk-vv","status":"open","metadata":{"task_kind":"validation"}}
 ]'
 printf '%s\n' 'tk-vv|tracks|tk-old' > "$STUB_DEPS"
 reset_log
@@ -274,7 +370,7 @@ store '[
   {"id":"tk-o2","status":"open","metadata":{"anchor_bead":"tk-old","task_kind":"finding"}},
   {"id":"tk-o3","status":"closed","metadata":{"anchor_bead":"tk-old","task_kind":"rework"}},
   {"id":"tk-ok","status":"closed","metadata":{"anchor_bead":"tk-old","task_kind":"review"}},
-  {"id":"tk-ov","status":"open","metadata":{"anchor_bead":"tk-old","task_kind":"visit"}},
+  {"id":"tk-ov","status":"open","metadata":{"anchor_bead":"tk-old","task_kind":"validation"}},
   {"id":"tk-cv","status":"open","metadata":{}}
 ]'
 printf '%s\n' 'tk-ok|related|tk-old' 'tk-ov|tracks|tk-old' 'tk-cv|tracks|tk-old' 'tk-o2|blocks|tk-old' > "$STUB_DEPS"
@@ -290,7 +386,7 @@ out=$(bd_anchor_backfill tk-old); rc=$?
 eq "$rc:$(printf '%s\n' "$out" | paste -sd, -)" "0:tk-o1,tk-o2,tk-o3" "backfill joins them and names them"
 eq "$(dep_adds)" 1 "…in one write"
 eq "$(edges)" "tk-cv|tracks|tk-old tk-o1|related|tk-old tk-o2|blocks|tk-old tk-o2|related|tk-old tk-o3|related|tk-old tk-ok|related|tk-old tk-ov|tracks|tk-old" \
-  "…each child on the pair once, the visit left on its tracks edge"
+  "…each child on the pair once, the one joined by tracks left on that edge"
 out=$(bd_anchor_backfill tk-old); rc=$?
 eq "$rc:$out" "0:" "a second backfill joins nothing"
 # bd refuses the one-transaction write when one pair is refused; each pair is
@@ -829,6 +925,84 @@ else
   bad "the pass fixture never started its program"
   : > "$PROG_DIR/release"; kill -9 "$PP" 2>/dev/null; wait "$PP" 2>/dev/null
 fi
+
+# --- bd_open_human_gates: one bead's open human gates, by the one rule ----------
+# A gate blocks its bead through a `blocks` edge (gate|blocks|bead). A human gate
+# holds in every status but closed, a pinned one included. A closed gate, a gate
+# of another type, and a gate that blocks some other bead are not this bead's
+# open human gates.
+store '[{"id":"hg-bead","status":"open","title":"waits","metadata":{}},
+  {"id":"tk-a","status":"open","title":"another bead","metadata":{}},
+  {"id":"hg-open","status":"open","issue_type":"gate","await_type":"human","await_id":"k1","title":"asks"},
+  {"id":"hg-pinned","status":"pinned","issue_type":"gate","await_type":"human","await_id":"k2","title":"pinned"},
+  {"id":"hg-closed","status":"closed","issue_type":"gate","await_type":"human","await_id":"k1","title":"answered","close_reason":"ruled: yes"},
+  {"id":"hg-timer","status":"open","issue_type":"gate","await_type":"timer","await_id":"k1","title":"a timer"},
+  {"id":"hg-other","status":"open","issue_type":"gate","await_type":"human","await_id":"k1","title":"blocks another bead"}]'
+printf '%s\n' "hg-open|blocks|hg-bead" "hg-pinned|blocks|hg-bead" "hg-closed|blocks|hg-bead" \
+  "hg-timer|blocks|hg-bead" "hg-other|blocks|tk-a" > "$STUB_DEPS"
+got=$(bd_open_human_gates hg-bead); rc=$?
+eq "$rc" 0 "bd_open_human_gates: a bead whose gates read answers 0"
+eq "$(printf '%s' "$got" | jq -c '[.[].id] | sort')" '["hg-open","hg-pinned"]' "…with the open human gates its blocks edges reach, a pinned one included"
+eq "$(bd_open_human_gates hg-bead k1 | jq -c '[.[].id]')" '["hg-open"]' "…and with a key, only the open ones under that key"
+eq "$(bd_open_human_gates hg-bead k9 | jq -c '.')" '[]' "…an empty array when nothing open is under the key"
+got=$(bd_open_human_gates tk-missing); rc=$?
+[ "$rc" -ne 0 ] && ok "…non-zero for a bead the store cannot find" || bad "a bead the store cannot find answered 0"
+eq "$got" "" "…and nothing printed, so no reader takes it for no gate"
+export STUB_DEP_PARTIAL=1
+got=$(bd_open_human_gates hg-bead); rc=$?
+unset STUB_DEP_PARTIAL
+[ "$rc" -ne 0 ] && [ -z "$got" ] && ok "…and the same for a gate read that fails after printing an array" \
+  || bad "a failed gate read answered rc=$rc with '$got'"
+
+# The readers rely on these fields of each row, which the read hands on whole:
+# the assignee that says a person holds the gate, the description that carries
+# its message, and the type fields the rule reads.
+store '[{"id":"hf-bead","status":"open","title":"waits","metadata":{}},
+  {"id":"hf-gate","status":"open","issue_type":"gate","await_type":"human","await_id":"k1","title":"asks",
+   "assignee":"pat","description":"the whole message\nover two lines","created_at":"2026-10-24T00:00:00Z"},
+  {"id":"hf-closed","status":"closed","issue_type":"gate","await_type":"human","await_id":"k1","title":"done",
+   "close_reason":"ruled: yes","closed_at":"2026-10-24T01:00:00Z"}]'
+printf '%s\n' "hf-gate|blocks|hf-bead" "hf-closed|blocks|hf-bead" > "$STUB_DEPS"
+row=$(bd_human_gates hf-bead | jq -c '.[] | select(.id == "hf-gate")')
+eq "$(printf '%s' "$row" | jq -r '.assignee')" "pat" "bd_human_gates: a row carries the gate's assignee"
+eq "$(printf '%s' "$row" | jq -r '.description')" "the whole message
+over two lines" "…its description whole"
+eq "$(printf '%s' "$row" | jq -r '[.issue_type, .await_type, .await_id, .status, .title, .created_at] | join(" ")')" \
+  "gate human k1 open asks 2026-10-24T00:00:00Z" "…and the fields the open-gate rule and the dedup read"
+eq "$(bd_human_gates hf-bead | jq -r '.[] | select(.id == "hf-closed") | [.close_reason, .closed_at] | join(" ")')" \
+  "ruled: yes 2026-10-24T01:00:00Z" "…and a closed gate its answer and when it came"
+eq "$(bd_open_human_gates hf-bead k1 | jq -r '.[0].assignee')" "pat" "bd_open_human_gates hands the same rows on"
+
+# The listing form of the same rule, for a reader that reads many beads at once.
+LISTING='[{"id":"g1","issue_type":"gate","await_type":"human","status":"open"},
+  {"id":"g2","issue_type":"gate","await_type":"human","status":"closed"},
+  {"id":"g3","issue_type":"gate","await_type":"timer","status":"open"},
+  {"id":"g4","issue_type":"gate","await_type":"human","status":"pinned"},
+  {"id":"w1","issue_type":"task","status":"open","dependencies":[
+     {"issue_id":"w1","depends_on_id":"g1","type":"blocks"},
+     {"issue_id":"w1","depends_on_id":"g4","type":"tracks"}]}]'
+eq "$(printf '%s' "$LISTING" | jq -c "$HUMAN_GATE_JQ"'open_human_gates')" '["g1","g4"]' "open_human_gates: the listing's open human gates, by the same rule"
+eq "$(printf '%s' "$LISTING" | jq -c "$HUMAN_GATE_JQ"'open_human_gates as $g | .[] | select(.id == "w1") | gates_blocking($g)')" '["g1"]' \
+  "gates_blocking: the open gates a row's own blocks edges reach, and no other edge type"
+eq "$(printf '%s' "$LISTING" | jq -c "$HUMAN_GATE_JQ"'open_human_gates as $g | [.[] | select(blocked_by_any($g)) | .id]')" '["w1"]' \
+  "blocked_by_any: the rows a gate holds"
+
+# The readers that judge one bead's blockers or a store's gates by this rule
+# source it, and keep to themselves only which edges they follow and which key a
+# gate is filed under. A test of a gate's await type in one of them is a second
+# definition of a human gate. Comment lines are left out, so a reader that names
+# the rule in prose but no longer applies it still fails.
+ROOT="$(cd "$HERE/../.." && pwd)"
+for r in tools/gc-proactive.sh doctor/check-blocked-work-armed/run.sh doctor/check-hq-marooned-work/run.sh; do
+  code=$(grep -vE '^[[:space:]]*#' "$ROOT/$r")
+  if grep -qE '^[[:space:]]*\.[[:space:]].*bd-lib\.sh' <<< "$code"; then ok "(READERS) $r sources bd-lib.sh"
+  else bad "(READERS) $r sources bd-lib.sh"; fi
+  if grep -q 'HUMAN_GATE_JQ' <<< "$code" && grep -q 'open_human_gate' <<< "$code"; then
+    ok "(READERS) …and judges a gate by \$HUMAN_GATE_JQ's open_human_gate"
+  else bad "(READERS) $r judges a gate by \$HUMAN_GATE_JQ's open_human_gate"; fi
+  if grep -q 'await_type' <<< "$code"; then bad "(READERS) $r tests no gate's await type itself"
+  else ok "(READERS) …and tests no gate's await type itself"; fi
+done
 
 echo
 echo "passed: $PASS  failed: $FAIL"

@@ -13,10 +13,12 @@ supervisor's API (`internal/gcbd`).
 
 | Command | What it does | Documented in |
 |---|---|---|
+| `epic` | actions taken on an epic: filing one with its contract, each field in its own key, refused when the epic has no hypothesis and its parent is not an epic | `gctk epic --help`, `internal/cli/epic.go` |
 | `lifecycle` | anchor lifecycle transitions over the state machine `lifecycle/lifecycle.toml` declares | `internal/cli/lifecycle.go`, `internal/lifecycle` |
 | `merge` | arm 2 of the merge cadence, the single writer of merged truth | `internal/cli/merge.go` |
-| `pr-status` | a PR's status tri-state (working, needs-review or needs-attention), the one derivation the `status:` label and the helm board share | `internal/cli/prstatus.go`, `prstatus` |
+| `pr-status` | a PR's status (working, merging, needs-review or needs-attention), the one derivation the `status:` label and the helm board share, and the open human gates that hold it, which `gc-helm engage` offers | `internal/cli/prstatus.go`, `prstatus` |
 | `rig` | actions taken on the rig: running its checks and recording each result against the commit | `gctk rig --help`, `internal/cli/rig.go`, `internal/rig` |
+| `session` | actions taken on a session: giving it a title its Gas City record and its terminal both show, made of the bead it is about (`--subject`), the pull request it is about (`--pr`) and its topic (`--topic`). A Claude Code or Codex terminal takes the title at the session's next boundary, a few seconds after the turn ends | `gctk session --help`, `internal/cli/session.go` |
 | `version` | the revision the binary was built from | `cmd/gctk` |
 
 Logic gctk does not hold runs as shell scripts. Among them are the rest of the
@@ -31,19 +33,24 @@ A shell script that only execs a gctk command is a bridge for callers that do
 not call gctk yet, and it goes away once they do. A bridge is not a contract
 gctk keeps: matching a script's flags and output byte for byte is not a goal,
 and neither are tests that pin usage text. `assets/scripts/lifecycle.sh` execs
-`gctk lifecycle`, and `assets/scripts/merge.sh` execs `gctk merge`. Both find
-the binary through `assets/scripts/gctk-resolve.sh`, which states the
-resolution chain, and neither has a shell fallback. With no binary to run, a
-bridge refuses the call with exit 1 and names the `gctk-build` order that
-publishes the binary. The merge cadence reads a refused transition as a failed
-one and a refused merge pass as `merge rc=1`, and retries both on its next
-pass. A fresh city has no binary until that order's first build, and a city
-whose build failed keeps serving the last good binary.
+`gctk lifecycle`, `assets/scripts/merge.sh` execs `gctk merge`, and
+`assets/scripts/epic.sh` execs `gctk epic` for the work skill, whose examples
+call every writer through the pack command. Each finds the binary through
+`assets/scripts/gctk-resolve.sh`, which states the resolution chain, and none
+has a shell fallback. With no binary to run, a bridge refuses the call with
+exit 1 and names the `gctk-build` order that publishes the binary. The merge
+cadence reads a refused transition as a failed one and a refused merge pass as
+`merge rc=1`, and retries both on its next pass. A fresh city has no binary
+until that order's first build, and a city whose build failed keeps serving the
+last good binary.
 
-`assets/scripts/pr-status-label.sh` writes the `status:` label in shell and
-takes the value from `gctk pr-status derive`. It resolves the binary the same
-way, and when there is none, or the binary is too old to carry `pr-status`, it
-leaves the label unchanged.
+`assets/scripts/pr-status-label.sh` writes the `status:` and `held:` labels in
+shell and takes their values from `gctk pr-status derive`. It resolves the
+binary the same way, and when there is none, or the binary is too old to carry
+`pr-status` or its `--json`, it leaves the labels unchanged. `gc-helm.sh` engage
+lists what holds a bead from the reasons in the same verb's `--json` answer, and
+the helm board imports the package behind it, `prstatus`, so the labels, engage
+and the board read one definition of what holds a PR.
 
 ## rig
 
@@ -114,8 +121,9 @@ prstatus/            the PR status derivation, exported for the helm board
 cd services/gctk && go test ./...          # every package
 bash assets/scripts/lifecycle.test.sh      # lifecycle through its bridge
 bash assets/scripts/merge.test.sh          # merge through its bridge
+bash assets/scripts/epic.test.sh           # epic through its bridge
 bash assets/scripts/gctk-resolve.test.sh   # which binary a bridge runs
 ```
 
-A shell suite that reaches `lifecycle.sh` or `merge.sh` builds the binary from
-the checkout itself, and fails if it cannot.
+A shell suite that reaches `lifecycle.sh`, `merge.sh` or `epic.sh` builds the
+binary from the checkout itself, and fails if it cannot.

@@ -38,7 +38,8 @@ BLOCK="$(awk '
   f' "$TOML")"
 [ -n "$BLOCK" ] && ok "notice-finding block extracted" \
   || bad "notice-finding block EMPTY — markers missing from $TOML"
-printf '%s\n' "$BLOCK" > "$TMP/block.sh"
+# The pour renders {{binding_prefix}} as the binding plus a dot, gc-toolkit. here.
+printf '%s\n' "$BLOCK" | sed 's|{{binding_prefix}}|gc-toolkit.|g' > "$TMP/block.sh"
 bash -n "$TMP/block.sh" && ok "the block is valid bash" || bad "the block failed bash -n"
 # The formula is a TOML basic string, which rewrites a backslash escape. This
 # test reads the raw file, so a backslash would make it check text that differs
@@ -60,6 +61,9 @@ case "${1:-} ${2:-}" in
     [ -n "${3:-}" ] || { echo "gc mail ${2}: beadmail get: message not found" >&2; exit 1; } ;;
 esac
 case "${1:-} ${2:-}" in
+  "gc-toolkit scripts-dir")
+    [ -n "${STUB_PACK:-}" ] || exit 1
+    printf '%s/assets/scripts\n' "$STUB_PACK" ;;
   "mail peek")
     if [ -n "${STUB_PEEK_FAIL:-}" ]; then
       echo "gc mail peek: beadmail get: message not found" >&2
@@ -112,7 +116,7 @@ run() {
   : > "$TMP/log"; rm -f "$TMP/args.json"
   { printf '%s\n' "$prelude"; cat "$TMP/block.sh"; } > "$TMP/run.sh"
   OUT=$(cd "$TMP/cwd" && env -i PATH="$BIN:$PATH" HOME="$TMP/home" STUB_LOG="$TMP/log" \
-        PF_ARGS="$TMP/args.json" REAL_PF="$REAL_PF" GC_RIG=gc-toolkit GC_RIG_ROOT="$RIG" \
+        PF_ARGS="$TMP/args.json" REAL_PF="$REAL_PF" GC_RIG=gc-toolkit STUB_PACK="$RIG" \
         GC_CITY_PATH="$TMP/nocity" STUB_MAIL="$TMP/notice.json" "$@" "${shell[@]}" "$TMP/run.sh" 2>&1); RC=$?
   LOG=$(cat "$TMP/log")
   ARGS=$(cat "$TMP/args.json" 2>/dev/null || echo '[]')
@@ -218,7 +222,7 @@ run bash "$BASE" STUB_PEEK_FAIL=1
 hasnt "$LOG" "patrol-finding" "an unreadable mail is not filed blind"
 hasnt "$LOG" "gc mail archive" "and is not archived"
 has "$OUT" "the mail is unreadable" "and the witness is told why"
-run bash "$BASE" GC_RIG_ROOT="$NORIG"
+run bash "$BASE" STUB_PACK="$NORIG"
 hasnt "$LOG" "gc mail archive" "with no patrol-finding.sh in reach, nothing is archived"
 has "$OUT" "patrol-finding.sh is not in the pack" "and the witness is told why"
 

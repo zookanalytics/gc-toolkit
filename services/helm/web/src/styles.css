@@ -50,6 +50,15 @@ h1 {
   color: #b3261e;
 }
 
+/* The board's age stays in view while the rows scroll, because a warning
+   scrolled away above the row being read warns nobody. */
+.banner {
+  background: Canvas;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
 .warn,
 /* Incomplete, not broken — the same amber as a warning rather than the red of
    an error, because a partial read still carries real data worth reading. */
@@ -114,8 +123,9 @@ th {
 }
 
 /* The attention highlight, in place: a row whose next move is the operator's, or
-   one an open visit is holding, is tinted where it already sits. wants-person is
-   the stronger signal, so its rule follows and wins when a row is both. */
+   one a human gate holds or a conversation is on, is tinted where it already
+   sits. wants-person is the stronger signal, so its rule follows and wins when a
+   row is both. */
 .row-held {
   background: rgb(128 128 128 / 10%);
 }
@@ -235,28 +245,33 @@ th {
 }
 
 /*
- * The visit marker: a visible chip on a row an open visit holds, telling a PARKED
- * visit (filed, waiting for the operator) from an ENGAGED one (a live sitting is
- * in it now) by word and colour. Parked wears the amber the board already spends
- * on the operator's own move — it is waiting for them; engaged wears teal, a live
- * conversation someone else is holding. The chip reads as interactive, and
- * hovering or focusing it reveals the details card below — not a native title,
- * which had no affordance and needed an exact hover to find.
+ * The sitting marker: a visible chip on a held row, telling a row that WAITS for
+ * the operator from one IN SESSION (a live sitting is on it now) by word and
+ * colour. Waiting wears the amber the board already spends on the operator's own
+ * move; in session wears teal, a live conversation a sitting is holding; start
+ * failed wears the board's red. The sittings table colours each state's word the
+ * same way. The chip reads as interactive, and hovering or focusing it reveals
+ * the details card below — not a native title, which had no affordance and needed
+ * an exact hover to find.
  */
-.visit-marker {
+.sitting-marker {
   display: inline-block;
   position: relative;
 }
 
-.visit-marker--parked {
+.sitting-marker--waiting {
   color: #8a6100;
 }
 
-.visit-marker--engaged {
+.sitting-marker--in-session {
   color: #0e7490;
 }
 
-.visit-chip {
+.sitting-marker--start-failed {
+  color: #b3261e;
+}
+
+.sitting-chip {
   background: color-mix(in srgb, currentColor 8%, transparent);
   border: 1px solid color-mix(in srgb, currentColor 45%, transparent);
   border-radius: 999px;
@@ -269,11 +284,17 @@ th {
   white-space: nowrap;
 }
 
-.visit-chip__icon {
+.sitting-chip__icon {
   margin-right: 0.2em;
 }
 
-.visit-card {
+/* A conversation holds nothing, so the chip of a row only a conversation is on
+   wears a dashed outline beside the solid one of a row a human gate holds. */
+.sitting-marker--conversation .sitting-chip {
+  border-style: dashed;
+}
+
+.sitting-card {
   background: Canvas;
   border: 1px solid rgb(128 128 128 / 45%);
   border-radius: 4px;
@@ -292,29 +313,35 @@ th {
 }
 
 /* Revealed on hover OR keyboard focus, so a pointer is not the only way in. */
-.visit-marker:hover .visit-card,
-.visit-marker:focus-within .visit-card {
+.sitting-marker:hover .sitting-card,
+.sitting-marker:focus-within .sitting-card {
   display: block;
 }
 
-.visit-card__heading {
+.sitting-card__heading {
   color: inherit;
   display: block;
   font-weight: 600;
   margin-bottom: 0.25rem;
 }
 
-.visit-card__sitting {
+.sitting-card__hold {
+  color: CanvasText;
+  display: block;
+  margin-bottom: 0.25rem;
+}
+
+.sitting-card__sitting {
   color: CanvasText;
   display: block;
   padding: 0.15rem 0;
 }
 
-.visit-card__sitting + .visit-card__sitting {
+.sitting-card__sitting + .sitting-card__sitting {
   border-top: 1px solid rgb(128 128 128 / 25%);
 }
 
-.visit-card__meta {
+.sitting-card__meta {
   opacity: 0.75;
 }
 
@@ -367,8 +394,9 @@ th {
 /*
  * The PR phase chip: a merge anchor's PR status. On a live row the status: value
  * says who must act next, colored so the answer reads at a glance —
- * needs-attention loudest, working quietest. On a closed row it names how the PR
- * resolved — merged or closed — in a calm terminal color, since nobody acts on it.
+ * needs-attention loudest, working quietest, merging in green since the city is
+ * landing it. On a closed row it names how the PR resolved — merged or closed —
+ * in a calm terminal color, since nobody acts on it.
  */
 .pr-phase {
   font-size: 0.8125rem;
@@ -389,12 +417,29 @@ th {
   opacity: 0.7;
 }
 
+.pr-phase--merging {
+  color: #1a7f37;
+}
+
 .pr-phase--merged {
   color: #8250df;
 }
 
 .pr-phase--closed {
   color: #6e7781;
+}
+
+/*
+ * The PR held chips: what holds a live PR that the city will not clear on its
+ * own, one per held: label. Each is a person's to act on, so it reads in the
+ * needs-attention colour, set bold, beside the phase chip it explains.
+ */
+.pr-held {
+  font-size: 0.8125rem;
+  margin-right: 0.4em;
+  white-space: nowrap;
+  color: #b3261e;
+  font-weight: 600;
 }
 
 /*
@@ -473,8 +518,8 @@ th {
   margin: 0;
 }
 
-/* A running sitting is the row an operator can still join. */
-.sitting-running td {
+/* A sitting in session is the row an operator can join now. */
+.sitting-in-session td {
   font-weight: 600;
 }
 

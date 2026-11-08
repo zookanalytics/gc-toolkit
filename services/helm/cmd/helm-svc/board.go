@@ -14,8 +14,9 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/helm/internal/source"
 )
 
-// `helm-svc board` is the CLI VIEW of the board — the second renderer over the
-// same gather and the same derivation the dashboard serves.
+// `helm-svc board --json` prints the board's rows as JSON, for agents and
+// tooling: the same gather and the same derivation the web page serves. People
+// read the board on the web page; this command has no terminal view.
 //
 // WHY IT IS THE SAME BINARY. The obvious alternative — a separate `helm-board`
 // built alongside — re-creates exactly the failure that motivated this epic:
@@ -24,48 +25,54 @@ import (
 // can go stale on its own. One build, one artifact, two entry points: `serve`
 // and `board` cannot disagree about the board because there is only one of it.
 //
-// WHY IT DOES NOT CALL THE SERVICE. `prefix+b` has to work when helm-svc is
-// down — that is most of the point of having a CLI — so this gathers directly
-// through internal/source rather than curling the sidecar. There is no daemon
-// and no cache: a cold run pays the full gather every time, which is the honest
-// cost and is still well inside the bash board's.
+// WHY IT DOES NOT CALL THE SERVICE. It gathers directly through
+// internal/source rather than asking the sidecar, so it reads the city while
+// the service is down, and a build from a working tree reads the live city
+// through that tree's gather and derivation, which is how a board change is
+// compared against the live city before it ships. There is no daemon and no
+// cache: every run pays the full gather.
 //
 // THE --json CONTRACT. The output is a ranked JSON ARRAY of tiles, not the
-// service's {generated_at,total,tiles} envelope, because that array is what
-// assets/scripts/tmux-pick-helm.sh consumes: it runs `jq 'length'` and `.[]`
-// over this output, and the envelope would make every row invisible while still
-// parsing cleanly. The fields the picker dereferences are pinned by
-// TestPickerFieldsPresent in main_test.go.
+// service's {generated_at,total,tiles} envelope: a caller counts the rows with
+// `jq length` and walks them with `.[]`, and the envelope would make every row
+// invisible while still parsing cleanly. An empty board is `[]`, never `null`.
 //
 // WHAT THE DEFAULT ANSWERS. The operator's queue (board.OperatorQueue), not the
-// city overview. The two are different questions and only one of them is asked
-// at a keystroke: the overview ranks every anchor together, where a demand owed
-// by a person carries a subtree of one and a stranded container carries
-// hundreds, so the queue is buried under the overview by construction rather
-// than by accident. `--all` is the overview, and it is the only way to it.
+// city overview. The two are different questions: the overview ranks every
+// anchor together, where a demand owed by a person carries a subtree of one and
+// a stranded container carries hundreds, so the queue is buried under the
+// overview by construction rather than by accident. `--all` is the overview,
+// and it is the only way to it.
 
 const boardUsage = `Usage:
-  helm-svc board [--all] [--json] [--limit=N] [--timeout=SECONDS]
+  helm-svc board --json [--all] [--limit=N] [--timeout=SECONDS]
 
-  What is owed by you, oldest first after any visit whose sitting failed to
-  start — the CLI view of the same gather and derivation the Helm dashboard
-  serves.
+  Print the board's rows as a JSON array: what is owed by you, oldest first
+  after any conversation whose sitting failed to start. It is the same gather
+  and derivation the Helm web page serves. People read the board on that page;
+  this command has no terminal view.
 
+  --json             Print the rows as a JSON array (stable contract). Required.
   --all              The city overview instead: every anchor, ranked together.
-  --json             Emit the rows as a JSON array (stable contract).
-  --limit=N          Show only the top N rows (0 = all/uncapped; default caps at 50).
+  --limit=N          Only the top N rows (0 = all/uncapped; default caps at 50).
   --timeout=SECONDS  Bound the whole gather (default 120).
-  --refresh          Accepted and ignored: this path has no cache to bust.
 
 Exit codes:
-  0  board rendered
-  2  usage error
+  0  rows printed
+  2  usage error, including a call without --json
   3  the gather failed, or an empty queue could not be asserted (never
-     rendered as an empty "all clear")
+     printed as an empty array)
 `
 
-// boardExit* mirror gc-helm.sh's exit codes so a caller can switch on them
-// identically whichever board it ran.
+// noTerminalView answers a call without --json: it names where the board is,
+// rather than printing it.
+const noTerminalView = `helm-svc board: the board has no terminal view. Read it on the Helm web page,
+which the supervisor serves at /v0/city/<city>/svc/helm/ (by default
+http://127.0.0.1:8372/v0/city/<city>/svc/helm/), or pass --json for its rows
+as a JSON array.
+`
+
+// boardExit* are the codes a caller switches on.
 const (
 	boardExitOK     = 0
 	boardExitUsage  = 2
@@ -85,8 +92,8 @@ type boardOpts struct {
 	timeout time.Duration
 }
 
-// parseBoardArgs accepts the gc-helm.sh flag spellings, including both
-// `--limit=N` and `--limit N`.
+// parseBoardArgs accepts both `--limit=N` and `--limit N`, and the same for
+// --timeout.
 func parseBoardArgs(args []string) (boardOpts, error) {
 	o := boardOpts{limit: -1, timeout: defaultBoardTimeout}
 
@@ -117,9 +124,6 @@ func parseBoardArgs(args []string) (boardOpts, error) {
 			o.all = true
 		case "--json":
 			o.json = true
-		case "--refresh":
-			// No cache on this path; accepted so a caller can pass the bash
-			// board's flags unchanged.
 		case "--limit":
 			n, err := intFlag("--limit", value, &args)
 			if err != nil {
@@ -156,14 +160,16 @@ func runBoard(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "helm-svc board: %v\n\n%s", err, boardUsage)
 		return boardExitUsage
 	}
+	if !opts.json {
+		// Before the gather: a call that would print nothing pays for nothing.
+		fmt.Fprint(stderr, noTerminalView)
+		return boardExitUsage
+	}
 
-	// Resolve the city once: discovery shells out to gc, and the store read and
-	// the pack-health read below must name the same city.
-	cityPath := source.DiscoverCityPath()
-	src := source.NewBeadsSource(source.WithCityPath(cityPath))
+	src := source.NewBeadsSource(source.WithCityPath(source.DiscoverCityPath()))
 	if err := src.Check(); err != nil {
 		// Fail loudly. The alternative — falling back to the supervisor HTTP
-		// API — would make `prefix+b` depend on a live sidecar, which is the
+		// API — would make this read depend on a live sidecar, which is the
 		// dependency this entry point exists to avoid, and would silently drop
 		// staleness (the API omits updated_at).
 		fmt.Fprintf(stderr, "helm-svc board: cannot read the city's bead stores: %v\n", err)
@@ -176,16 +182,14 @@ func runBoard(args []string, stdout, stderr io.Writer) int {
 
 	res, err := src.Gather(ctx)
 	if err != nil {
-		// A failed gather is NEVER rendered as an empty board: "0 anchors" and
+		// A failed gather is NEVER printed as an empty board: "0 anchors" and
 		// "we could not look" are opposite answers and only one of them means
 		// nothing needs you.
 		fmt.Fprintf(stderr, "helm-svc board: gather failed: %v\n", err)
 		return boardExitGather
 	}
 
-	now := time.Now().UTC()
-	b := board.BuildBoard(res.Anchors, now, res.Partial, res.PartialErrors, res.Facts)
-	b.PackHealth = source.GatherPackHealth(cityPath, now)
+	b := board.BuildBoard(res.Anchors, time.Now().UTC(), res.Partial, res.PartialErrors, res.Facts)
 
 	limit := opts.limit
 	if limit < 0 {
@@ -198,45 +202,34 @@ func runBoard(args []string, stdout, stderr io.Writer) int {
 			strings.Join(b.PartialErrors, "; "))
 		return boardExitGather
 	}
-
-	if opts.json {
-		return renderJSON(stdout, stderr, v.rows)
-	}
-	v.render(stdout, b, v.rows, now, len(res.Facts.RigNames))
-	if b.Partial {
-		// stderr, not stdout: the table is a contract for human eyes and the
-		// JSON is one for tooling; neither should grow a diagnostic line.
-		fmt.Fprintf(stderr, "helm-svc board: PARTIAL gather — %s\n", strings.Join(b.PartialErrors, "; "))
-	}
-	return boardExitOK
+	return renderJSON(stdout, stderr, v.rows)
 }
 
-// boardView is the rows one run renders and the renderer that lays them out.
+// boardView is the rows one run prints.
 type boardView struct {
-	rows   []board.Tile
-	render func(io.Writer, board.Board, []board.Tile, time.Time, int)
+	rows []board.Tile
 	// unprovable marks an empty QUEUE that came out of a partial gather.
-	// "Nothing is owed by you" is the most consequential sentence this surface
-	// prints, and the rows that would have contradicted it are exactly the ones
+	// "Nothing is owed by you" is the most consequential answer this command
+	// gives, and the rows that would have contradicted it are exactly the ones
 	// the unread store was holding — so its emptiness is a failure to look, and
-	// exits like one. A non-empty queue still renders: those rows were read.
+	// exits like one. A non-empty queue still prints: those rows were read.
 	unprovable bool
 }
 
 // selectView answers the flag: the operator's queue, or the city overview.
 func selectView(b board.Board, all bool, limit int) boardView {
 	if all {
-		return boardView{rows: board.CapFamilies(board.CityOverview(b.Tiles), limit, board.DefaultMaxDone), render: renderTable}
+		return boardView{rows: board.CapFamilies(board.CityOverview(b.Tiles), limit, board.DefaultMaxDone)}
 	}
 	rows := board.CapQueue(board.OperatorQueue(b.Tiles), limit)
-	return boardView{rows: rows, render: renderQueue, unprovable: len(rows) == 0 && b.Partial}
+	return boardView{rows: rows, unprovable: len(rows) == 0 && b.Partial}
 }
 
-// renderJSON writes the ranked array — the gc-helm.sh --json contract.
+// renderJSON writes the ranked array — the --json contract.
 func renderJSON(stdout, stderr io.Writer, tiles []board.Tile) int {
 	if tiles == nil {
-		// `[]`, never `null`: the picker runs `jq 'length'` over this and a null
-		// would make an empty board an error instead of a quiet one.
+		// `[]`, never `null`: a caller counts the rows with `jq length`, and a
+		// null would make an empty board an error instead of a quiet one.
 		tiles = []board.Tile{}
 	}
 	enc := json.NewEncoder(stdout)
@@ -247,612 +240,6 @@ func renderJSON(stdout, stderr io.Writer, tiles []board.Tile) int {
 		return boardExitGather
 	}
 	return boardExitOK
-}
-
-// rpad truncates to w and pads to width, counting RUNES rather than bytes.
-// gc-helm.sh's jq `rpad` measures in codepoints, and the board is full of
-// multi-byte glyphs (·, —, ●), so byte-counting would ragged every column that
-// contains one. The truncation is for the prose columns only — the ID and RIG
-// widths are derived from their contents (colWidth), so nothing in them is ever
-// long enough to lose its tail here.
-func rpad(s string, w int) string {
-	r := []rune(s)
-	if len(r) > w {
-		return string(r[:w])
-	}
-	return string(r) + strings.Repeat(" ", w-len(r))
-}
-
-// clip bounds a PROSE cell, counting runes, and marks the cut with an ellipsis
-// so a shortened cell says it was shortened. rpad already truncates the
-// fixed-width columns; this is for the last one, which has no width at all.
-func clip(s string, w int) string {
-	r := []rune(s)
-	if len(r) <= w {
-		return s
-	}
-	if w < 1 {
-		// No room even for the marker. Unreachable from the one caller, which
-		// passes a const, but a render path must not panic on arithmetic.
-		return ""
-	}
-	return string(r[:w-1]) + "…"
-}
-
-// Column widths, in the order gc-helm.sh lays them out. ID and RIG are
-// MINIMUMS rather than fixed widths — see colWidth.
-//
-// colNeedsMax is not a column width — NEEDS is last and unpadded — but a
-// bound on how much prose one row may spend. It matters because NEEDS is
-// where the LLM-authored takeaway lands: on the live board 23 takeaways
-// averaged 597 characters and one ran to 1876, which is not a wide cell but a
-// single row wrapping over every row beneath it (tk-9tbbk.1). It is the same
-// 140 gc-helm.sh's takeaway writer now enforces at write time, so a
-// conforming headline renders in full and this only fires on text stored
-// before that gate existed. --json is untouched: board.Tile.Needs keeps the
-// whole string for anything that reads the wire.
-const (
-	colHeld     = 2
-	colSeverity = 9
-	colIDMin    = 11
-	colRigMin   = 13
-	colKind     = 9
-	colNM       = 7
-	colFrontier = 36
-	colNeedsMax = 140
-	// colPackName sizes the component column of the pack-build lines, which are
-	// their own two-column layout above the table rather than part of it.
-	colPackName = 10
-)
-
-// colWidth sizes an identifier column to the widest value on THIS board plus a
-// single space of gutter, never narrower than floor.
-//
-// Identifiers cannot be truncated the way prose can, because a hierarchical
-// bead id carries its discriminator in the TAIL. At the fixed width of 11 this
-// column used to have, tk-eemvf.4.1, .2 and .9 all rendered as "tk-eemvf.4." —
-// three distinct anchors the operator could not tell apart without going to
-// another tool (tk-mtuej). Long rig names lost their tails the same way and
-// butted against the next column.
-//
-// Sizing to content rather than capping with an ellipsis keeps the guarantee
-// absolute — no two distinct ids ever render the same cell — and costs nothing
-// in layout: NEEDS is the last column and already runs to whatever length its
-// text needs, so a wide id cannot push anything off a line that was fixed.
-// floor keeps a board of ordinary ids laid out exactly as it was.
-func colWidth(floor int, tiles []board.Tile, value func(board.Tile) string) int {
-	w := floor
-	for _, t := range tiles {
-		// +1 for the gutter: the cell must not butt against the next column.
-		if n := len([]rune(value(t))) + 1; n > w {
-			w = n
-		}
-	}
-	return w
-}
-
-// closedRows is how many of the board's rows are the terminal DONE band. Every
-// header that prints a denominator subtracts it: a closed anchor keeps a row,
-// and a total that folded it in would report attention the board is not asking
-// for.
-func closedRows(tiles []board.Tile) int {
-	var n int
-	for _, t := range tiles {
-		if t.Severity == board.SevDone {
-			n++
-		}
-	}
-	return n
-}
-
-// renderQueue writes the DEFAULT view: the rows owed by the operator and no
-// others, plus the conversation record. The overview is one flag away and says
-// so on every render.
-func renderQueue(w io.Writer, b board.Board, queue []board.Tile, now time.Time, rigCount int) {
-	fmt.Fprint(w, "gc-helm — what is owed by you\n")
-	fmt.Fprintf(w, "%s · %d rigs · %d owed (of %d live anchors)\n\n",
-		now.Format("2006-01-02T15:04:05Z"), rigCount, len(queue), b.Total-closedRows(b.Tiles))
-
-	if len(queue) == 0 {
-		// Coverage, not a bare blank line. "Nothing is owed" is a claim about
-		// every store in the city, so the sentence carries what it was checked
-		// against; a partial gather never reaches here (runBoard exits 3).
-		//
-		// The PR rows extend that contract rather than adding a second one. The
-		// all-clear is withheld while any pull request's position is unreadable,
-		// because Tile.Owed is a boolean and cannot carry the third value the
-		// axes do — an unread input has to surface here rather than as a false
-		// negative on a row that never appears.
-		fmt.Fprint(w, renderCoverage(board.Coverage(b.Tiles), rigCount))
-		renderSittings(w, b.Sittings, now)
-		fmt.Fprint(w, "\nhelm-svc board --all (prefix+B in tmux) for the city overview.\n")
-		return
-	}
-
-	renderRows(w, queue)
-	fmt.Fprint(w, "\nOldest first — this queue is ordered by how long each row has been owed, not by rank; a visit whose sitting failed to start (✗) leads it\n")
-	fmt.Fprint(w, "helm-svc board --all (prefix+B in tmux) for the city overview\n")
-	renderSittings(w, b.Sittings, now)
-	renderLegend(w)
-}
-
-// renderPackHealth writes one line per compiled component the pack builds out
-// of band. The rows are unconditional — an all-current build says so rather
-// than saying nothing, because a section that appears only on trouble is a
-// section nobody learns to read.
-//
-// A city with no status files at all prints nothing: that is a city whose build
-// orders have never run, and inventing a row for it would report a state
-// nobody measured.
-func renderPackHealth(w io.Writer, rows []board.PackBuild) {
-	for _, r := range rows {
-		// colHeld+4 rather than the label's own width: "PACK" fills a 4-wide
-		// cell exactly, and a cell with no gutter butts against the band.
-		fmt.Fprintf(w, "%s%s%s%s\n", rpad("PACK", colHeld+4), rpad(string(r.Severity), colSeverity),
-			rpad(r.Component, colPackName), clip(r.Detail, colNeedsMax))
-	}
-}
-
-// renderTable writes the city overview: the header, the pack-build lines, the
-// dependency-family blocks, and the legend that says what a family and its
-// within-family bands mean.
-func renderTable(w io.Writer, b board.Board, shown []board.Tile, now time.Time, rigCount int) {
-	fmt.Fprint(w, "gc-helm — cross-rig human-attention board\n")
-	stamp := now.Format("2006-01-02T15:04:05Z")
-	// Both sides of "showing N of M" drop the DONE band, per [closedRows].
-	// CapFamilies returns the closed-anchor families on their own budget, so
-	// len(shown) is a whole board and can exceed the live count it would
-	// otherwise be printed against.
-	//
-	// The DONE families carry their own budget, so they can be capped while the
-	// live rows are not. Printing the closed TOTAL against a capped band says the
-	// whole of it is on screen, which is the completeness this band exists to stop
-	// a reader assuming — so a capped band names both numbers.
-	done := closedRows(b.Tiles)
-	var shownLive, shownDone int
-	for _, t := range shown {
-		if t.Severity == board.SevDone {
-			shownDone++
-			continue
-		}
-		shownLive++
-	}
-	live := b.Total - done
-	closedSfx := ""
-	switch {
-	case shownDone < done:
-		closedSfx = fmt.Sprintf(" · showing %d of %d closed", shownDone, done)
-	case done > 0:
-		closedSfx = fmt.Sprintf(" · %d closed", done)
-	}
-	if len(shown) < b.Total {
-		fmt.Fprintf(w, "%s · %d rigs · showing %d of %d anchors (live)%s\n", stamp, rigCount, shownLive, live, closedSfx)
-	} else {
-		fmt.Fprintf(w, "%s · %d rigs · %d anchors (live)%s\n", stamp, rigCount, live, closedSfx)
-	}
-	// Before the anchors, and before the empty-board early return: a build that
-	// failed is most worth reading on the day nothing else needs attention.
-	renderPackHealth(w, b.PackHealth)
-	fmt.Fprint(w, "\n")
-
-	if b.Total == 0 {
-		fmt.Fprint(w, "No open anchors need attention. (Nothing floats.)\n")
-		// The conversation record still prints. A board with no anchor to act
-		// on and a sitting running on it is exactly the state where the ranked
-		// table alone says nothing and the sittings say everything.
-		renderSittings(w, b.Sittings, now)
-		return
-	}
-
-	renderFamilyRows(w, shown)
-	renderSittings(w, b.Sittings, now)
-	renderFamilyLegend(w)
-}
-
-// renderRows writes the table proper — the sized header and one line per tile.
-// Shared by both views so a column can never mean two things.
-// renderCoverage is the empty queue's sentence: what the emptiness was checked
-// against, and what it could not check.
-//
-// The all-clear and the gap are two different claims and never share a line. A
-// board that says "nothing is owed" while a pull request's position is unread
-// has told the operator to stop looking on the strength of a question it did
-// not ask.
-func renderCoverage(c board.PRCoverage, rigCount int) string {
-	if c.Rows == 0 {
-		return fmt.Sprintf("Nothing is owed by you. %d rigs checked, all reachable; no open merge anchors.\n", rigCount)
-	}
-	if c.Complete() {
-		return fmt.Sprintf("Nothing is owed by you. %d rigs checked, all reachable; %d pull requests read, all with a position.\n",
-			rigCount, c.Rows)
-	}
-	var gaps []string
-	if c.MachineUnknown > 0 {
-		gaps = append(gaps, fmt.Sprintf("%d of %d have no position recorded by the merge cadence", c.MachineUnknown, c.Rows))
-	}
-	if c.ConversationUnknown > 0 {
-		gaps = append(gaps, fmt.Sprintf("%d cannot say where the conversation stands (the merge cadence has not recorded it)", c.ConversationUnknown))
-	}
-	if c.ApprovalUnanswered > 0 {
-		gaps = append(gaps, fmt.Sprintf("%d are green with no readable answer on whether GitHub wants a review", c.ApprovalUnanswered))
-	}
-	return fmt.Sprintf("Nothing readable is owed by you — but this is NOT an all-clear. %d rigs checked, all reachable; of %d pull requests, %s.\n",
-		rigCount, c.Rows, strings.Join(gaps, "; "))
-}
-
-func renderRows(w io.Writer, shown []board.Tile) {
-	// The two identifier columns are sized to what this board actually holds —
-	// once, across every section, so a column means the same width in all of
-	// them. Every other column carries prose, where a fixed width and a trimmed
-	// tail are the right trade.
-	idW := colWidth(colIDMin, shown, func(t board.Tile) string { return t.ID })
-	rigW := colWidth(colRigMin, shown, func(t board.Tile) string { return t.Rig })
-
-	fmt.Fprint(w, rpad(" ", colHeld)+rpad("SEV", colSeverity)+rpad("ID", idW)+
-		rpad("RIG", rigW)+rpad("KIND", colKind)+rpad("N/M", colNM)+
-		rpad("FRONTIER", colFrontier)+"NEEDS\n")
-	rule := func(n, w int) string { return rpad(strings.Repeat("─", n), w) }
-	fmt.Fprint(w, rule(1, colHeld)+rule(8, colSeverity)+rule(idW-1, idW)+
-		rule(rigW-1, rigW)+rule(8, colKind)+rule(6, colNM)+
-		rule(35, colFrontier)+strings.Repeat("─", 16)+"\n")
-
-	// The board is read one attention band at a time. GroupBySection owns the
-	// order and the split, so this and the dashboard cannot disagree about which
-	// band a row is in; ClusterRows owns the fold, so a template that recurs is
-	// one line here and one line there.
-	for _, g := range board.GroupBySection(shown) {
-		fmt.Fprintf(w, "\n%s\n", sectionBanner(g.Key, len(g.Tiles)))
-		for _, cr := range board.ClusterRows(g.Tiles) {
-			if len(cr.Members) > 1 {
-				renderClusterLine(w, cr, idW, rigW)
-				continue
-			}
-			renderTileLine(w, cr.Tile, idW, rigW)
-		}
-	}
-}
-
-// renderTileLine writes one anchor's row in the sized columns. Its glyph is ✗
-// on a row whose visit's sitting failed to start, ● on any other row an open
-// visit holds.
-func renderTileLine(w io.Writer, t board.Tile, idW, rigW int) {
-	glyph := " "
-	switch {
-	case t.VisitState == board.VisitStartFailed:
-		glyph = "✗"
-	case t.Held:
-		glyph = "●"
-	}
-	fmt.Fprint(w, rpad(glyph, colHeld)+rpad(string(t.Severity), colSeverity)+
-		rpad(t.ID, idW)+rpad(t.Rig, rigW)+rpad(t.Kind, colKind)+
-		rpad(nmCell(t), colNM)+rpad(t.Frontier, colFrontier)+clip(needsCell(t), colNeedsMax)+"\n")
-}
-
-// needsCell is a row's NEEDS cell: its needs behind the accept marker
-// ([acceptCell]), then where a pull request row's conversation stands
-// ([conversationNote]). NEEDS is the unpadded last column, so the note never
-// pushes another column out of line.
-func needsCell(t board.Tile) string {
-	n, c := acceptCell(t), conversationNote(t)
-	switch {
-	case c == "":
-		return n
-	case n == "":
-		return c
-	}
-	return n + " · " + c
-}
-
-// conversationNote names where a live pull request row's conversation with the
-// operator stands, in the wire's own word, which is how this board shows which
-// pull requests carry the operator's comments. A row that is not a merge anchor
-// has no conversation. An asking row already names its question in its needs.
-// A closed row's conversation is nobody's move. Each of those reads "".
-func conversationNote(t board.Tile) string {
-	if t.PRConversation == "" || t.PRConversation == board.ConversationAsking || !t.ClosedAt.IsZero() {
-		return ""
-	}
-	return "conversation " + t.PRConversation
-}
-
-// acceptCell prefixes a row's needs with a compact affordance marker when the
-// row can be Accepted — a recommendation the operator can dispatch and dismiss
-// in one order, the extra move it offers over a discuss-only gate. The marker
-// only flags the affordance; the verb is in the legend and the formula in
-// --json (Tile.AcceptFormula), since the takeaway a recommendation row carries
-// already names it at a glance.
-func acceptCell(t board.Tile) string {
-	if t.Acceptable {
-		return "accept ▸ " + t.Needs
-	}
-	return t.Needs
-}
-
-// nmCell is the "N/M" progress cell. "—" means THIS ROW has no roll-up, not that
-// its KIND never has one: a decision never does, and a human/parked bead does
-// exactly when it decomposed. Printing "—" over a real child set is what hid the
-// open children of a parked subject (tk-a9k0l); printing 0/0 for a bead that owns
-// no set at all would be a fabricated count.
-func nmCell(t board.Tile) string {
-	if t.MTotal == 0 {
-		switch t.Kind {
-		case "decision", "human", "parked":
-			return "—"
-		}
-	}
-	return fmt.Sprintf("%d/%d", t.NClosed, t.MTotal)
-}
-
-// wantsPerson reports whether a row's next move is the operator's — the review
-// and gate bands. Model C highlights these within a family with a ● glyph.
-func wantsPerson(t board.Tile) bool {
-	return t.Section == board.SectionReview || t.Section == board.SectionGate
-}
-
-// familyGlyph is the overview's leading marker: ● a row whose next move is a
-// person's (review or gate), ○ a row an open visit holds, ◉ both, and ✗ a row
-// whose visit's sitting failed to start, which wants a person whatever else it
-// is. The overview's ● is the wants-you highlight, so a visit takes its own
-// glyph here rather than colliding with it. The default queue view has no
-// wants-you axis, so there ● stays free to mean held on its own
-// (renderTileLine).
-func familyGlyph(t board.Tile) string {
-	switch {
-	case t.VisitState == board.VisitStartFailed:
-		return "✗"
-	case wantsPerson(t) && t.Held:
-		return "◉"
-	case wantsPerson(t):
-		return "●"
-	case t.Held:
-		return "○"
-	default:
-		return " "
-	}
-}
-
-// renderFamilyRows writes the city overview as dependency-family blocks: each
-// family is a header naming its root, then the members beneath it ordered by the
-// move they want (board.SectionOrder), with a ● on the rows that want a person.
-// Dependency structure is the top-level axis; the attention band orders and
-// highlights within a family.
-func renderFamilyRows(w io.Writer, shown []board.Tile) {
-	idW := colWidth(colIDMin, shown, func(t board.Tile) string { return t.ID })
-	rigW := colWidth(colRigMin, shown, func(t board.Tile) string { return t.Rig })
-
-	// One column header for the member rows; the family banner names the root.
-	// BAND replaces SEV: within a family the attention band is the axis.
-	fmt.Fprint(w, rpad(" ", colHeld)+rpad("BAND", colSeverity)+rpad("ID", idW)+
-		rpad("RIG", rigW)+rpad("KIND", colKind)+rpad("N/M", colNM)+
-		rpad("FRONTIER", colFrontier)+"NEEDS\n")
-
-	for _, fam := range board.GroupByFamily(shown) {
-		fmt.Fprintf(w, "\n%s\n", familyBanner(fam.Root))
-		for _, m := range fam.Members {
-			renderMemberLine(w, m, idW, rigW)
-		}
-	}
-}
-
-// familyBanner is the labelled divider that opens a family block: the root's id,
-// kind, roll-up, frontier and needs, with the [familyGlyph] marking when the root
-// itself wants a person, is held by an open visit, or both. The root is the
-// family header rather than a member row, so its own ask rides here.
-func familyBanner(root board.Tile) string {
-	line := fmt.Sprintf("%s ▌ %s · %s · %s · %s", familyGlyph(root), root.ID, root.Kind, nmCell(root), root.Frontier)
-	if n := needsCell(root); n != "" {
-		line += " · " + n
-	}
-	return clip(line, colHeld+2+colNeedsMax)
-}
-
-// renderMemberLine writes one family member: its within-family band, the
-// [familyGlyph] marking a person's move and/or an open visit holding it, and the
-// same columns as an anchor row.
-func renderMemberLine(w io.Writer, t board.Tile, idW, rigW int) {
-	fmt.Fprint(w, rpad(familyGlyph(t), colHeld)+rpad(t.Section, colSeverity)+
-		rpad(t.ID, idW)+rpad(t.Rig, rigW)+rpad(t.Kind, colKind)+
-		rpad(nmCell(t), colNM)+rpad(t.Frontier, colFrontier)+clip(needsCell(t), colNeedsMax)+"\n")
-}
-
-// renderFamilyLegend is the overview's trailer: what a family is, and what the
-// within-family band column and the marker glyphs mean.
-func renderFamilyLegend(w io.Writer) {
-	fmt.Fprint(w, "\nFamilies (▌) group by dependency structure: a top-level anchor and the children, blockers, reviews and rework that hang off it, so a family reads as one thing\n")
-	fmt.Fprint(w, "BAND orders each family by the move a member wants: review=a pull request · gate=a person must answer · stalled=nothing moving · active=in-flight · cleanup=finished/empty · done=closed\n")
-	fmt.Fprint(w, "● wants YOU (review, gate) · ○ an open visit holds the row · ◉ both · ✗ the sitting spawned for its visit failed to start, and NEEDS says why. A family's header names its root (id · kind · N/M · frontier · needs); the rows beneath are its members, most-pressing first\n")
-	fmt.Fprint(w, "Kinds: epic/convoy/decision are roll-up anchors · human=routed to you · parked=a conversation with a takeaway · review/rework=a gate child in flight (resume: prefix+a, then the id)\n")
-	fmt.Fprint(w, "A DONE family sinks below every live one; a row ages out of the band once it has been closed longer than GC_HELM_DONE_WINDOW (default 7d, 0 off)\n")
-	fmt.Fprint(w, "PACK rows are the out-of-band build orders: what each compiled component is serving, and whether it matches the sources\n")
-	fmt.Fprint(w, "gc-helm.sh open <id> to file a visit · react <id> to advance a takeaway-less row. Ranking is a deterministic proxy\n")
-	fmt.Fprint(w, "An \"accept ▸\" row carries a recommendation: gc-helm.sh accept <id> dispatches its formula at the subject and dismisses the visit, no sitting; engage it to Discuss instead\n")
-	fmt.Fprint(w, conversationLegend)
-}
-
-// conversationLegend says what the conversation note on a pull request row
-// ([conversationNote]) means. renderLegend and renderFamilyLegend print it.
-const conversationLegend = "A live pull request row ends with its conversation: outstanding=a comment waits on the city · answered=the reply is there to look at · quiet=nothing said · unknown=not recorded\n"
-
-// clusterMemberCap bounds how many members a folded cluster spells out before it
-// says how many more it held. Enough that an ordinary cluster is listed in full,
-// bounded so a fifty-member template does not become the whole board.
-const clusterMemberCap = 8
-
-// renderClusterLine writes a run of rows that share a deterministic template: the
-// count and the shared needs, then ONE line per member carrying its own id, rig
-// and title. A bare id list is a soup that names nothing actionable; folding
-// gathers the rows, it must not strip their context.
-func renderClusterLine(w io.Writer, cr board.ClusterRow, idW, rigW int) {
-	// The count sits where a band/severity would, so a scan down the column still
-	// finds it; the shared needs is the template.
-	fmt.Fprintf(w, "%s%s%s\n", rpad(" ", colHeld),
-		rpad(fmt.Sprintf("%d×", len(cr.Members)), colSeverity), clip(cr.Tile.Needs, colNeedsMax))
-	indent := strings.Repeat(" ", colHeld+colSeverity)
-	for i, m := range cr.Members {
-		if i >= clusterMemberCap {
-			fmt.Fprintf(w, "%s… (+%d more, all in --json)\n", indent, len(cr.Members)-clusterMemberCap)
-			break
-		}
-		// The fold shares the needs sentence, not the conversation, so a pull
-		// request member keeps its own conversation beside its title.
-		title := m.Title
-		if c := conversationNote(m); c != "" {
-			title += " · " + c
-		}
-		fmt.Fprintf(w, "%s%s%s%s\n", indent, rpad(m.ID, idW), rpad(m.Rig, rigW), clip(title, colNeedsMax))
-	}
-}
-
-// sectionBanner is the labeled divider between attention bands. It carries the
-// band's name, a one-line statement of the move it wants, and how many rows are
-// in it, so the operator reads the board as a small set of questions rather than
-// one flat list.
-func sectionBanner(key string, n int) string {
-	label, desc := sectionLabel(key)
-	return fmt.Sprintf("▌ %s · %s · %d", label, desc, n)
-}
-
-// sectionLabel gives a band its display name and the move it asks for. An
-// unknown key (a band a newer derivation added) prints itself rather than
-// vanishing.
-func sectionLabel(key string) (label, desc string) {
-	switch key {
-	case board.SectionReview:
-		return "REVIEW", "a pull request wants you"
-	case board.SectionGate:
-		return "GATE", "a person must answer"
-	case board.SectionStalled:
-		return "STALLED", "open work nothing is moving"
-	case board.SectionActive:
-		return "ACTIVE", "healthy in-flight work"
-	case board.SectionCleanup:
-		return "CLEANUP", "finished or empty — dispose of it"
-	case board.SectionDone:
-		return "DONE", "the anchor itself closed"
-	default:
-		return strings.ToUpper(key), "uncategorised"
-	}
-}
-
-// renderLegend writes the trailer that says what the bands, the kinds and the
-// held glyph mean.
-func renderLegend(w io.Writer) {
-	fmt.Fprint(w, "\nBands (▌) group by the KIND of move a row wants: REVIEW=a pull request · GATE=a person must answer · STALLED=open work nothing is moving · ACTIVE=healthy in-flight · CLEANUP=finished/empty · DONE=closed\n")
-	fmt.Fprint(w, "A \"N×\" line folds N rows that share one deterministic needs sentence; each member is listed under it with its id, rig and title. A row carrying a takeaway never folds — its sentence is per-bead\n")
-	fmt.Fprint(w, "Legend: HIGH=stranded/unowned · ELEVATED=open-decision/human/stale/stuck · NORMAL=active · LOW=empty/complete/childless-parked/ruled · DONE=the anchor itself closed\n")
-	fmt.Fprint(w, "Kinds: epic/convoy/decision are roll-up anchors · human=routed to you · parked=a conversation with a takeaway (resume: prefix+a, then the id)\n")
-	fmt.Fprint(w, "A parked row with an N/M count decomposed into children and is banded by them — the takeaway is not the whole story there\n")
-	fmt.Fprint(w, "A row reading \"ruled\" was answered and its routed work has landed — close or extend it; the ruling itself is in --json takeaway\n")
-	fmt.Fprint(w, "Held: ● an open visit holds this anchor's conversation (attach via the sessions picker) · ✗ the sitting spawned for its visit failed to start, NEEDS says why, and the row leads the queue until the visit is engaged again or closed · blank = none\n")
-	fmt.Fprint(w, "A DONE row sinks below every live band; no row leaves for being answered. A row ages out of the band once it has been closed longer than GC_HELM_DONE_WINDOW (default 7d, 0 off).\n")
-	fmt.Fprint(w, "PACK rows are the out-of-band build orders: what each compiled component is serving, and whether it matches the sources\n")
-	fmt.Fprint(w, "gc-helm.sh open <id> to file a visit · react <id> to advance a takeaway-less row. Ranking is a deterministic proxy.\n")
-	fmt.Fprint(w, "An \"accept ▸\" row carries a recommendation: gc-helm.sh accept <id> dispatches its formula at the subject and dismisses the visit, no sitting; engage it to Discuss instead\n")
-	fmt.Fprint(w, conversationLegend)
-}
-
-// Sitting column widths. SUBJECT and OUTCOME are minimums sized to content by
-// colWidth for the same reason the ID column is: a truncated bead id and a
-// truncated outcome word are both unreadable, and HEADLINE is last and unpadded
-// so a wide cell costs nothing.
-const (
-	colSubjectMin = 12
-	// colSubjectMax bounds the SUBJECT cell now that it renders the subject's
-	// TITLE (the topic) rather than the bare id: a title runs to any length, and
-	// unbounded it would push every column after it off the row. The cell is
-	// clipped with an ellipsis so a cut topic says it was cut; the full title is
-	// still on the wire, and a takeaway-less row repeats it unclipped in the
-	// HEADLINE.
-	colSubjectMax  = 44
-	colAge         = 7
-	colOutcomeMin  = 10
-	colHeadlineMax = 96
-)
-
-// renderSittings writes the conversation record under the ranked table: which
-// sittings are running, and what the recently closed ones concluded.
-//
-// The ranked table answers what needs doing. This answers what is being talked
-// about, which is a different question and deliberately not ranked against it —
-// a sitting is an event, not a demand.
-func renderSittings(w io.Writer, sittings []board.Sitting, now time.Time) {
-	if len(sittings) == 0 {
-		return
-	}
-	shown, dropped := board.CapSittings(sittings, board.DefaultMaxSittings)
-
-	var running, closed int
-	for _, s := range sittings {
-		if s.Status == "closed" {
-			closed++
-		} else {
-			running++
-		}
-	}
-
-	fmt.Fprintf(w, "\nSittings — %d running · %d closed recently\n", running, closed)
-	fmt.Fprint(w, "● still running · AGE is time since it started, or since it ended · OUTCOME is what a closed sitting closed on\n")
-
-	// Sized to content for the same reason the ranked table sizes its ID
-	// column: an id or an outcome word loses its meaning when its tail is cut.
-	idW, rigW, subjW, outW := colIDMin, colRigMin, colSubjectMin, colOutcomeMin
-	for _, s := range shown {
-		idW = max(idW, len([]rune(s.ID))+1)
-		rigW = max(rigW, len([]rune(s.Rig))+1)
-		subjW = max(subjW, len([]rune(clip(s.Topic(), colSubjectMax)))+1)
-		outW = max(outW, len([]rune(s.Outcome))+1)
-	}
-
-	fmt.Fprint(w, rpad(" ", colHeld)+rpad("ID", idW)+rpad("RIG", rigW)+
-		rpad("SUBJECT", subjW)+rpad("AGE", colAge)+rpad("OUTCOME", outW)+"HEADLINE\n")
-
-	for _, s := range shown {
-		glyph, since, outcome := " ", s.ClosedAt, s.Outcome
-		if s.Status != "closed" {
-			glyph, since = "●", s.OpenedAt
-		}
-		if outcome == "" {
-			// "—" is the same claim the N/M column makes above: this row has no
-			// such value, rather than a value that happens to be empty.
-			outcome = "—"
-		}
-		// SUBJECT is the topic — the subject bead's title, so the row says what
-		// it is about and not just which id it stands on. HEADLINE is what the
-		// sitting concluded (the takeaway), falling back to that same topic
-		// rather than the visit bead's own generic title. Both are the model's
-		// derivation, shared with the web renderer.
-		fmt.Fprint(w, rpad(glyph, colHeld)+rpad(s.ID, idW)+rpad(s.Rig, rigW)+
-			rpad(clip(s.Topic(), colSubjectMax), subjW)+rpad(shortAge(since, now), colAge)+
-			rpad(outcome, outW)+clip(s.Headline(), colHeadlineMax)+"\n")
-	}
-
-	if dropped > 0 {
-		// Never a silent truncation: an elided list that does not say so reads
-		// as the whole record.
-		fmt.Fprintf(w, "  … %d older closed sittings not shown (--json on the service carries them all)\n", dropped)
-	}
-}
-
-// shortAge renders how long ago a stamp was, in the coarsest unit that still
-// says something: minutes under an hour, then hours, then days. A zero stamp is
-// unknown rather than "just now", which is the distinction that keeps a sitting
-// whose source could not read a timestamp from reading as the freshest row.
-func shortAge(stamp, now time.Time) string {
-	if stamp.IsZero() {
-		return "?"
-	}
-	d := now.Sub(stamp)
-	if d < 0 {
-		d = 0
-	}
-	switch {
-	case d < time.Hour:
-		return fmt.Sprintf("%dm", int(d.Minutes()))
-	case d < 48*time.Hour:
-		return fmt.Sprintf("%dh", int(d.Hours()))
-	default:
-		return fmt.Sprintf("%dd", int(d.Hours())/24)
-	}
 }
 
 // boardMain is the os.Exit-calling wrapper main() dispatches to.

@@ -7,9 +7,9 @@ description: The 30,000-ft guide to gc-toolkit — the boundary between operator
 
 gc-toolkit delivers the beliefs in [foundation.md](foundation.md) by *composing
 Gas City* — the multi-agent runtime it runs on — rather than by growing bespoke
-machinery beside it. The pack is its workflows: **work, review, merge, visit,
-feedback, patrol**. Every component belongs to one of them or is a declared
-shared primitive; nothing exists because an incident once happened.
+machinery beside it. The pack is its workflows: **work, review, merge,
+engagement, feedback, patrol**. Every component belongs to one of them or is a
+declared shared primitive; nothing exists because an incident once happened.
 
 ## Scope
 
@@ -33,8 +33,8 @@ one rule for whether a bead is blocked by
 
 ## The boundary
 
-Four parties, one data plane. Lifecycle transitions, routes, waits and review
-verdicts are all written on beads.
+Four parties, one data plane. Lifecycle transitions, dispositions, routes,
+waits and review verdicts are all written on beads.
 
 ```mermaid
 flowchart LR
@@ -47,6 +47,7 @@ flowchart LR
   subgraph pack["gc-toolkit pack"]
     FORM[formulas +<br/>agent prompts]
     LIFE[lifecycle.sh<br/>the transition writer]
+    DISP[bead-rehome.sh<br/>the disposition writer]
     CAD[merge cadence]
     SIGN[signoff.sh<br/>the verdict writer]
     DOC[doctor/<br/>invariant checks]
@@ -57,13 +58,16 @@ flowchart LR
     PR[pull request]
   end
 
-  OP -->|files subject / visit| LEDGER
+  OP -->|files subject / conversation| LEDGER
   OP -.->|reads| HELM
   LEDGER --> POOL
   POOL -->|claim| FORM
   FORM -->|push| BR
   FORM -->|via lifecycle.sh| LIFE
   LIFE -->|one atomic bd update| LEDGER
+  FORM -->|disposition| DISP
+  CAD -->|disposition| DISP
+  DISP -->|successor edge, then checked close| LEDGER
   SIGN -->|verdicts on review beads| LEDGER
   ORD -->|every 60s| CAD
   CAD -->|reads + writes via lifecycle.sh| LEDGER
@@ -74,10 +78,11 @@ flowchart LR
   DOC -.->|asserts| FORM
 ```
 
-**Legend.** Solid = writes state. Dashed = reads without writing. Three write
-paths matter: `lifecycle.sh` is the only writer of lifecycle transitions,
-`signoff.sh` is the only writer of check verdicts, and the merge cadence is the
-only thing that opens or merges a PR. Everything else reads.
+**Legend.** Solid = writes state. Dashed = reads without writing. Each write
+path that matters has one writer. `lifecycle.sh` writes lifecycle transitions.
+`bead-rehome.sh` writes dispositions, the closes that name a successor.
+`signoff.sh` writes check verdicts. The merge cadence alone opens or merges a PR.
+Everything else reads.
 
 **Beside the ledger.** The pack also keeps files of its own. Some hold a run's
 progress, such as a paced cadence arm's cursor or the job directory of the
@@ -139,8 +144,19 @@ performer; the full transition table with writers is
 8. **Merge.** `merge.sh` validates the full authorization set, merges pinned to
    the validated commit, then closes the anchor and records `merged_sha` in one
    `lifecycle.sh` call.
-9. **Close propagates.** `closed` means *landed and verified* — the one signal
-   waiting parties key on ([lifecycle-composition.md](lifecycle-composition.md)).
+9. **Close propagates.** `closed` is the one signal waiting parties key on
+   ([lifecycle-composition.md](lifecycle-composition.md)). A merge closes a bead
+   as *landed and verified*. A disposition closes one that did not land, through
+   `bead-rehome.sh`, and names in bd's own `duplicates` or `supersedes` edge the
+   bead that carries its work now, or under `not-needed` the evidence that ruled
+   it out ([state-machine.md](state-machine.md#disposition)). A duplicate closes
+   at once. While its canonical has neither closed nor shipped, each open bead
+   the duplicate blocks first gains a `blocks` edge onto the canonical, so none
+   goes ready before the canonical delivers. Every other disposition ends the
+   waits on its bead with the close: `fixed-upstream` once the fix has closed or
+   shipped, or on a person's ruling, and `re-homed`, `folded` and `not-needed`
+   at once. The polecat that builds a work bead never closes it, except as the
+   duplicate of another bead, through `bead-rehome.sh`.
 
 An integration effort's beads take this pipeline through the handoff, and then
 the refinery lands each one directly on the effort's integration branch, which
@@ -153,14 +169,17 @@ the finished branch. Once they have closed, it takes steps 6 to 9 like any bead
 bound for main.
 
 External facts the pack does not write — GitHub closing or retargeting a PR, a
-session dying, a provider quota park — are handled by these reactive paths:
-`pr-facts.sh` (an arm of the cadence) records PR events and files a visit, the
-witness patrol recovers work orphaned by dead sessions, the `dog` pool is
-warrant executor for due-process recovery of wedged sessions (demand-scaled
-0-2), `quota-park-nudge.sh` nudges a session parked behind a provider limit,
-`boot-health.sh` detects a wedged deacon (report-only by design), and
+session dying, a provider quota park, a `gc` build that moves the text the seed
+audit renders — are handled by these reactive paths: `pr-facts.sh` (an arm of
+the cadence) records PR events and files a human gate, the witness patrol
+recovers work orphaned by dead sessions, the `dog` pool is warrant executor for
+due-process recovery of wedged sessions (demand-scaled 0-2),
+`quota-park-nudge.sh` nudges a session parked behind a provider limit,
+`witness-nudge.sh` gives a witness whose patrol pass stopped its next turn,
+`boot-health.sh` detects a wedged deacon (report-only by design),
 `queue-priority.sh reconcile` settles queued work after a raw priority or parent
-edit no writer saw. See
+edit no writer saw, and `seed-audit-reaudit.sh`, which the merge arm calls,
+slings the one re-render of the default branch's `generated/seed-audit`. See
 [authority-map.md](authority-map.md). There is no healer category: writers
 complete their own transitions, so nothing reconstructs pack-written state
 after the fact.
@@ -176,6 +195,11 @@ The pack supplies how work is done, such as its formulas, scripts, skills and
 agent prompts. A rig supplies the repository the work changes, along with any
 review guidance the rig keeps in it.
 
+gc-toolkit is a rig as well. A rule that binds only work on its own repository
+is the rig's, so it lives in the root [`AGENTS.md`](../AGENTS.md), which every
+session that works in a gc-toolkit worktree loads, or in one of the rig's docs
+or checks. It is never written into the pack content every rig runs.
+
 A review is where the two meet. It reads its values from the record its dispatch
 wrote, and every other piece either from the installed pack, as that checkout
 stands when the piece is read, or from the rig at the reviewed commit. The
@@ -188,7 +212,8 @@ moves it afterwards.
 | The review's values: its check, anchor, branch, base, reviewed commit and PR, and why it went out | The record `assets/scripts/gate-ensure.sh` writes on the review bead and passes to the pour as formula vars | Fixed at dispatch |
 | The check's method, the skill `gc-toolkit.review-<check>` | The reviewer's skill catalog, which links each pack skill into the installed pack. The formula names the skill under `binding_prefix`, the var `gc sling` adds to every pour. | The installed pack when the reviewer loads it |
 | The specialist stance, the skill `gc-toolkit.specialist-stance`, held by arch, demo, pm and a check of the rig's own | The reviewer's skill catalog | The installed pack when the reviewer loads it |
-| The pack's scripts, and the pack's check index | The installed pack's script directory. A skill reaches it through `gc <binding> scripts-dir`, and a formula step through a loop over candidate directories. `assets/scripts/review-checks.sh` reads the `review-checks.toml` at the root of the pack it ships in. | The installed pack when the script runs |
+| The architecture-document standard, the skill `gc-toolkit.architecture-document`, which the arch method holds the rig's architecture document to | The reviewer's skill catalog | The installed pack when the reviewer loads it |
+| The pack's scripts, and the pack's check index | The installed pack's script directory, which every caller reaches through `gc <binding> scripts-dir`: a formula step with the `binding_prefix` it is poured with, and a skill with the binding its catalog shows. `assets/scripts/review-checks.sh` reads the `review-checks.toml` at the root of the pack it ships in. | The installed pack when the script runs |
 | The rig's check index rows | The rig's `review-checks.toml`, laid over the pack's rows | The reviewed commit |
 | The rig's guidance for the check | The rig's `docs/review-<check>.md`, which the formula prints | The reviewed commit |
 | The diff, and the docs a check stewards, such as `docs/architecture.md` for arch and `docs/product-goals.md` for pm | The review's worktree ([review-workspace.md](review-workspace.md)) | The reviewed commit |
@@ -229,36 +254,60 @@ none.
   branch under review. None of them is the installed pack. So pack text names
   a skill it tells an agent to load as `gc-toolkit.<name>`, and a path in its
   place is a defect.
-- **Known limit: a formula step finds the pack's scripts only because
-  gc-toolkit is a rig of this city.** Its loop takes the first directory it
-  tries that holds the script. In gc-toolkit's own rig that is `$GC_RIG_ROOT`,
-  and in every other rig it is `$GC_CITY_PATH/rigs/gc-toolkit`. A city that
-  imports the pack from a URL rather than as a rig checkout has neither, so its
-  formula steps find no script. A skill has no such limit, because
-  `gc <binding> scripts-dir` prints the script directory of whichever pack gc
-  loaded
+- **The pack's scripts are the installed pack's wherever the pack comes
+  from.** `gc <binding> scripts-dir` prints the script directory of the pack
+  the city imports in its root `pack.toml`, so a city that imports the pack
+  from a URL runs the same scripts as one that imports a rig checkout, and no
+  step reads a script from the tree it stands in. gc registers the command for
+  that city-level import only, so a city imports the pack there as well as in
+  its rigs
   ([pack-authoring.md](pack-authoring.md#step-text-and-skills-reach-pack-scripts-at-runtime)).
 
 ## How humans engage
 
-The human surface is subject / visit / takeaway on native primitives
-([human-engagement.md](human-engagement.md) is the reference).
+The human surface is subject / human gate / conversation / takeaway on native
+primitives ([human-engagement.md](human-engagement.md) is the reference).
 
-- **A subject bead is the conversation.** Its id is the conversation's
-  identity; turns are small child beads that park on the helm board
-  (`gc.routed_to=human`) until the operator engages one. `gc-helm engage`
-  spawns a fresh `converse-<model>` sitting for each turn, which
-  reconstitutes the conversation from the record and ends its session when
-  its visit closes. The record is the durable thing; sessions are disposable.
-- **A visit is a filed turn** — `mol-visit` and `gc-visit-open.sh` are the
-  canonical entry point. Two channels carry a signal, and which applies
-  depends on who can answer it. Mail is the agent-to-agent pathway: a worker
-  mails the witness, which unblocks what it can and promotes what needs a
-  person. A visit is the human engagement: `escalate.sh` files or refreshes
-  **exactly one open visit per situation key**, parked on the helm board
-  (`gc.routed_to=human`), where the operator engages it. There is no mayor; a
-  situation that needs a human is a visit, same as any other. Patrol formulas escalate rather than mail, because a patrol sits at
-  the top of the agent tier and has no peer to mail.
+- **A subject is the bead a human gate or a conversation is about.** Its notes
+  carry the durable outcome of every conversation about it, and the resolve
+  reasons of the gates it waits on carry their answers, so whoever works it
+  next inherits what was decided. The record is the durable thing; sessions are
+  disposable.
+- **A human gate is a wait for a person.** Two channels carry a signal, and
+  which applies depends on who can answer it. Mail is the agent-to-agent
+  pathway: a worker mails the witness, which unblocks what it can and promotes
+  what needs a person. A human gate is the human engagement: Gas City's native
+  gate (`await_type=human`) on the bead that waits, which any pack, formula or
+  person files natively or through `human-gate.sh`. The helper files nothing
+  while an open gate under the call's situation key already blocks the bead,
+  though two writers in the same instant can each file one, because bd keeps
+  no idempotency at create. Each gate blocks that
+  bead, so the bead leaves `bd ready` and the pool's offer, and bd refuses its
+  close, until a person resolves the gate with the answer as its reason, headed
+  `ruled:`, `moot:` or `benign:`
+  ([component-model.md](component-model.md#4-where-each-component-sits) has the
+  helper's contract). There is no mayor; a situation that needs a human is a
+  human gate, same as any other. A patrol files a human gate on the bead a
+  situation is about, or a finding (`patrol-finding.sh`), rather than mail,
+  because a patrol sits at the top of the agent tier and has no peer to mail.
+  Every reader finds a bead's human gates the one way, through the bead's
+  `blocks` edges (`bd_human_gates` in `assets/scripts/bd-lib.sh`), and takes a
+  cleared gate's answer from its resolve reason, so a gate holds what it blocks
+  whoever filed it. The board folds each open gate onto the row of every bead
+  it blocks.
+- **A conversation is a task about one subject.** It tracks its subject,
+  replies to each human gate it answers through bd's `replies-to` edge, and
+  blocks nothing. It waits in the operator's queue, assigned to `human`, until
+  the operator engages it. `gc-helm.sh open` files one, and so do the
+  operator's intake, `operator-intake.sh`, and a caller asking about a bead with
+  open children, which a gate on the bead would pause. `gc-helm engage` takes
+  the bead's conversation, or files one, and spawns a manual `converse-<model>`
+  session under an alias that names it: the sitting. The sitting claims its
+  conversation with a plain `gc hook --claim`, holds for the operator, answers
+  each gate the operator rules on through its conversation's reply, and signs
+  off by resolving those gates and closing the conversation, which ends its
+  session. A sitting cut short hands the conversation back to the queue, and
+  the next engagement resumes it from the record.
 - **A takeaway records what a sitting concluded**, and its `--waiting-on` edge
   is what makes the wait machine-answerable
   ([lifecycle-composition.md](lifecycle-composition.md)).
@@ -276,8 +325,10 @@ The human surface is subject / visit / takeaway on native primitives
   ([steering.md](steering.md#priority)).
 - **The board is render-only.** `services/helm` (helm-svc) derives every row
   per render from the ledger. `gc-helm.sh` carries the write verbs open,
-  engage, react, takeaway, demand, dismiss, accept, park and priority, and the
-  read-only verbs resolve and unplaced. `gc-helm.sh unplaced` lists the placement
+  engage, react, takeaway, dismiss, accept, park and priority, and the
+  read-only verbs resolve and unplaced. Accept clears a first reaction's
+  recommendation gate and nothing else, under the bead's acceptance lock, and
+  is offered only while no other human gate blocks the bead. `gc-helm.sh unplaced` lists the placement
   sitting's queue ([steering.md](steering.md)). Everything works without the
   board: it spends no state, so it can never be wrong for longer than one
   render.
