@@ -227,7 +227,7 @@ bd_human_gates() {
 # block, as jq defs in the in-variable convention standing-kinds.sh describes,
 # so every reader prepends the same text. A human gate holds in every status but
 # closed, pinned included, because only its resolve clears the question it asks;
-# gctk merge and pr-status read a gate the same way. The defs:
+# gctk merge and pr status read a gate the same way. The defs:
 #   human_gate             on one row: issue_type gate and await_type human
 #   open_human_gate($k)    on one row: a human gate that still holds, and when $k
 #                          is not "", one under that situation key
