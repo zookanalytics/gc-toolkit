@@ -181,9 +181,8 @@ chmod +x "$PACK"/*.sh
 # listing shape. `bd dep list` answers the beads a bead depends on, each row
 # whole with its dependency_type, and with --type only edges of that type, as
 # bd-lib.sh's human-gate reader reads them, and `bd dep add` records one.
-# `bd unclaim --if-assignee` is bd's
-# compare-and-swap release. `bd update` refuses with exit 13 and writes nothing
-# when an --if-assignee or --if-status guard does not hold, refuses an arm's
+# `bd update` refuses with exit 13 and writes nothing when an --if-assignee or
+# --if-status guard, spaced or attached, does not hold, refuses an arm's
 # write (one setting gc.dispatch_when_ready) when FAKE_ARM_WRITE_FAIL is set and
 # an assignment when FAKE_ASSIGN_FAIL is set, and otherwise applies --status,
 # --assignee, --set-metadata, --unset-metadata and --append-notes to the work
@@ -255,19 +254,6 @@ case "$1 ${2:-}" in
         printf '%s|%s|%s\n' "${4:-}" "$t" "${5:-}" >> "$FAKE_DEPS" ;;
       *) echo "$*" >> "$FAKE_LOG" ;;
     esac ;;
-  "bd unclaim")
-    echo "$*" >> "$FAKE_LOG"
-    id="${3:-}"; want=""
-    shift 3
-    while [ $# -gt 0 ]; do
-      case "$1" in --if-assignee) shift; want="${1:-}" ;; --if-assignee=*) want="${1#*=}" ;; esac
-      shift
-    done
-    held=$(jq -r '.[0].assignee // ""' "$FAKE_META")
-    if [ "$id" != "$(work_id)" ] || [ -z "$want" ] || [ "$held" != "$want" ]; then
-      echo "Error unclaiming $id: held by \"$held\", expected \"$want\" (stub)" >&2; exit 1
-    fi
-    jq -c '.[0].status = "open" | .[0].assignee = ""' "$FAKE_META" > "$FAKE_META.new" && mv "$FAKE_META.new" "$FAKE_META" ;;
   "bd update")
     echo "$*" >> "$FAKE_LOG"
     [ "${3:-}" = "$(work_id)" ] || exit 0
@@ -282,6 +268,9 @@ case "$1 ${2:-}" in
         --if-assignee|--if-status)
           f="${args[$i]#--if-}"; i=$((i + 1))
           [ "$(jq -r --arg f "$f" '.[0][$f] // ""' "$FAKE_META")" = "${args[$i]:-}" ] || { echo "bd: the $f guard did not hold (stub)" >&2; exit 13; } ;;
+        --if-assignee=*|--if-status=*)
+          f="${args[$i]%%=*}"; f="${f#--if-}"
+          [ "$(jq -r --arg f "$f" '.[0][$f] // ""' "$FAKE_META")" = "${args[$i]#*=}" ] || { echo "bd: the $f guard did not hold (stub)" >&2; exit 13; } ;;
         --assignee) [ -z "${FAKE_ASSIGN_FAIL:-}" ] || [ -z "${args[$((i + 1))]:-}" ] || { echo "bd: refused the assignment (stub)" >&2; exit 1; } ;;
       esac
       i=$((i + 1))
@@ -521,6 +510,9 @@ eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "netzero: nothing is pushe
 echo "── a check that cannot run is retried, then waits on a human gate as a failed check, not as a branch without work ──"
 REFINERY=gc-toolkit/gc-toolkit.refinery
 POOL=gc-toolkit/gc-toolkit.polecat
+# The wait's release of the refinery's assignment: the work is open, so it is an
+# update guarded on that status and the refinery as assignee.
+RELEASE_WRITE="bd update wb --if-status=open --if-assignee=$REFINERY --assignee="
 # nocheck_fixture <dir>: a branch with work, on a bead in the shape a polecat's
 # hand-off leaves it: open, assigned to the refinery, the pool its pour ran on
 # still recorded. The prepare stages the branch, then the rig loses
@@ -625,7 +617,7 @@ kept "gate refused"
 has "$OUT" "human-gate.sh filed no gate on wb" "gate refused: the patrol says no gate was filed"
 eq "$(jq length "$D/store.json")" 0 "gate refused: no gate exists"
 eq "$(grep -c . "$D/deps.txt" || true)" 0 "gate refused: no edge is written"
-hasnt "$(cat "$D/gc.log")" "bd unclaim" "gate refused: the assignment is never released"
+hasnt "$(cat "$D/gc.log")" "$RELEASE_WRITE" "gate refused: the assignment is never released"
 
 # A pack that holds human-gate.sh and no await-ruling.sh. The block takes both
 # from one pack, so it files no gate that no wait could follow.
@@ -643,7 +635,7 @@ hasnt "$(cat "$D/gc.log")" "human-gate " "no await-ruling.sh: no gate is filed"
 third_failure "$TMP/noarm"
 nocheck_merge_push FAKE_ARM_WRITE_FAIL=1
 kept "arm refused"
-has "$(cat "$D/gc.log")" "bd unclaim wb --if-assignee $REFINERY" "arm refused: precondition, the wait released the assignment before the arm"
+has "$(cat "$D/gc.log")" "$RELEASE_WRITE" "arm refused: precondition, the wait released the assignment before the arm"
 has "$(cat "$D/gc.log")" "bd update wb --if-assignee  --if-status open --assignee $REFINERY" "arm refused: the refinery takes the released work back"
 # The next patrol fails the check again, and its wait lands.
 nocheck_merge_push
@@ -683,7 +675,7 @@ has "$(cat "$D/lc.log")" "--unset zero_diff_check_failures --takeaway the zero-d
 eq "$(grep -cxF "wb|blocks|$GATE" "$D/deps.txt")" 1 "convoy: the park is held by its gate, which blocks the convoy"
 has "$(cat "$D/gc.log")" "human-gate-quiet no" "convoy: the gate is filed with no quiet window"
 has "$(cat "$D/gc.log")" "Fix that error, then hand wb back to the refinery and clear this gate." "convoy: the gate asks for the hand-back"
-hasnt "$(cat "$D/gc.log")" "bd unclaim" "convoy: the wait that pours a run is not taken"
+hasnt "$(cat "$D/gc.log")" "$RELEASE_WRITE" "convoy: the wait that pours a run is not taken"
 eq "$(meta gc.dispatch_when_ready)" "<absent>" "convoy: no pour is armed onto the convoy"
 hasnt "$OUT" "the wait did not land" "convoy: the park lands"
 has "$(cat "$D/gc.log")" "runtime drain-ack" "convoy: the session drains"

@@ -10,9 +10,9 @@
 # directory was deleted by hand, and refusing an oid that is not a commit and a
 # workspace name that is a symlink; remove taking every worktree inside a
 # workspace, a nested one included, with its registration, and a read-only
-# subtree, while another worktree's stale registration is left for
-# worktree-reap; the formulas' own gather and remove lines, run as a pour fills
-# them in; the formulas' lines that write a review's own files and hand them on,
+# subtree, while another worktree's stale registration is left in place; the
+# formulas' own gather and remove lines, run as a pour fills them in; the
+# formulas' lines that write a review's own files and hand them on,
 # run from a directory standing for the agent's home, which they leave empty;
 # each quorum lane storing the object it puts in its block, with no file
 # written, after a gather that failed before it made the workspace; and
@@ -166,8 +166,8 @@ g worktree add -q --detach "$WS/gc-review-tk-rm/base" "$C2"
 g worktree add -q --detach "$WT/nested" "$C2"
 mkdir -p "$WS/gc-review-tk-rm/gomod/pkg"; touch "$WS/gc-review-tk-rm/gomod/pkg/f"
 chmod -R a-w "$WS/gc-review-tk-rm/gomod"
-# Another worktree's directory deleted by hand: its registration is
-# worktree-reap's to pin and prune, never a side effect of this script.
+# Another worktree's directory deleted by hand: its registration, and the admin
+# HEAD that may be the only ref to its commits, stay. No prune here touches it.
 g worktree add -q --detach "$TMP/other" "$C1"; rm -rf "$TMP/other"
 OUT="$(run remove --review-bead tk-rm)"
 eq "$?" "0" "remove exits 0"

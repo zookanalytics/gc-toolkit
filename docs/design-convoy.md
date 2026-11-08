@@ -23,8 +23,8 @@ the default branch, and the choice between design-gated and all-in-one.
 **Boundaries.** Which work a design-convoy fits is stated in its formula's own
 description (`formulas/mol-design-convoy.toml`), which the `work` skill's
 formula choice reads. How any integration effort is stood up, and how its beads
-branch and land, is the mechanik's dispatch doctrine
-(`agents/mechanik/prompt.template.md`). How a summary task writes its PR summary
+branch and land, is the `work` skill's effort recipe
+(`skills/work/integration-effort.md`). How a summary task writes its PR summary
 is the polecat doctrine's (`template-fragments/polecat-doctrine.template.md`).
 The merge rule the gates apply is `gctk merge`'s, which `assets/scripts/merge.sh`
 runs; this page says how the pattern meets that rule and does not define it.
@@ -94,10 +94,10 @@ task as well, so the subject and the summary task wait for every piece.
 `seed-branch` fetches origin and pushes `refs/remotes/origin/<default>` to
 `refs/heads/integration/<subject-id>` with an empty lease
 (`--force-with-lease=refs/heads/integration/<subject-id>:`). The default branch
-is the one `origin/HEAD` names, or `main` when it names none. The mechanik's
-recipe for standing an effort up by hand cuts with the same marked blocks, so
-an effort cut either way starts from, and lands on, the same branch. The push
-sends a ref and checks nothing out, so the rig's checkout never moves.
+is the one `origin/HEAD` names, or `main` when it names none. The `work`
+skill's recipe for standing an effort up by hand cuts with the same marked
+blocks, so an effort cut either way starts from, and lands on, the same branch.
+The push sends a ref and checks nothing out, so the rig's checkout never moves.
 Reconcile keeps that checkout fast-forwarded to the default branch and
 directory-imported packs build from its working tree, so a branch checkout or
 commit there would park the deploy off the default branch.

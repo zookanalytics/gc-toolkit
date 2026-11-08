@@ -30,8 +30,8 @@ reaches the pack's scripts by [pack-authoring.md](pack-authoring.md).
 
 ## The boundary
 
-Four parties, one data plane. Lifecycle transitions, routes, waits and review
-verdicts are all written on beads.
+Four parties, one data plane. Lifecycle transitions, dispositions, routes,
+waits and review verdicts are all written on beads.
 
 ```mermaid
 flowchart LR
@@ -44,6 +44,7 @@ flowchart LR
   subgraph pack["gc-toolkit pack"]
     FORM[formulas +<br/>agent prompts]
     LIFE[lifecycle.sh<br/>the transition writer]
+    DISP[bead-rehome.sh<br/>the disposition writer]
     CAD[merge cadence]
     SIGN[signoff.sh<br/>the verdict writer]
     DOC[doctor/<br/>invariant checks]
@@ -61,6 +62,9 @@ flowchart LR
   FORM -->|push| BR
   FORM -->|via lifecycle.sh| LIFE
   LIFE -->|one atomic bd update| LEDGER
+  FORM -->|disposition| DISP
+  CAD -->|disposition| DISP
+  DISP -->|successor edge, then checked close| LEDGER
   SIGN -->|verdicts on review beads| LEDGER
   ORD -->|every 60s| CAD
   CAD -->|reads + writes via lifecycle.sh| LEDGER
@@ -71,10 +75,11 @@ flowchart LR
   DOC -.->|asserts| FORM
 ```
 
-**Legend.** Solid = writes state. Dashed = reads without writing. Three write
-paths matter: `lifecycle.sh` is the only writer of lifecycle transitions,
-`signoff.sh` is the only writer of check verdicts, and the merge cadence is the
-only thing that opens or merges a PR. Everything else reads.
+**Legend.** Solid = writes state. Dashed = reads without writing. Each write
+path that matters has one writer. `lifecycle.sh` writes lifecycle transitions.
+`bead-rehome.sh` writes dispositions, the closes that name a successor.
+`signoff.sh` writes check verdicts. The merge cadence alone opens or merges a PR.
+Everything else reads.
 
 **Beside the ledger.** The pack also keeps files of its own. Some hold a run's
 progress, such as a paced cadence arm's cursor or the job directory of the
@@ -136,8 +141,19 @@ performer; the full transition table with writers is
 8. **Merge.** `merge.sh` validates the full authorization set, merges pinned to
    the validated commit, then closes the anchor and records `merged_sha` in one
    `lifecycle.sh` call.
-9. **Close propagates.** `closed` means *landed and verified* — the one signal
-   waiting parties key on ([lifecycle-composition.md](lifecycle-composition.md)).
+9. **Close propagates.** `closed` is the one signal waiting parties key on
+   ([lifecycle-composition.md](lifecycle-composition.md)). A merge closes a bead
+   as *landed and verified*. A disposition closes one that did not land, through
+   `bead-rehome.sh`, and names in bd's own `duplicates` or `supersedes` edge the
+   bead that carries its work now, or under `not-needed` the evidence that ruled
+   it out ([state-machine.md](state-machine.md#disposition)). A duplicate closes
+   at once. While its canonical has neither closed nor shipped, each open bead
+   the duplicate blocks first gains a `blocks` edge onto the canonical, so none
+   goes ready before the canonical delivers. Every other disposition ends the
+   waits on its bead with the close: `fixed-upstream` once the fix has closed or
+   shipped, or on a person's ruling, and `re-homed`, `folded` and `not-needed`
+   at once. The polecat that builds a work bead never closes it, except as the
+   duplicate of another bead, through `bead-rehome.sh`.
 
 An integration effort's beads take this pipeline through the handoff, and then
 the refinery lands each one directly on the effort's integration branch, which

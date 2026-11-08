@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # bd-lib.sh — the guarded reads of the bead store, shared by every script that
 # queries it, the read of a bead's human gates every reader of them makes and
-# the order its open gates under one key are read in, the read-back that gates
-# an act that cannot be undone, the checked create, metadata repair and unmake
-# that code the deletion plan retires still files through, the birth,
+# the order its open gates under one key are read in, the read of the bead a
+# disposed bead names, the read-back that gates an act that cannot be undone,
+# the checked create, metadata repair and unmake that code the deletion plan
+# retires still files through, the birth,
 # settle and route of PR-finishing work, the validation pass's work order, the
 # gating-PR read's field set, the per-rig key an order's state lives under, the
 # pass lock that lets an order run one pass at a time, and warn and die, which a
@@ -250,6 +251,61 @@ HUMAN_GATE_JQ='
       | (.depends_on_id // "") as $d | select(($ids | index($d)) != null) | $d ];
   def blocked_by_any($ids): (gates_blocking($ids) | length) > 0;
 '
+
+# $DISPOSITION_JQ — the one reading of a bead's disposition: the bead a closed
+# or disposed bead names through bd's own edge, `duplicates` onto its canonical
+# or `supersedes` onto its successor (bead-rehome.sh writes one of the two, in
+# the bead's own store). The defs read a row of either shape bd prints: a
+# `gc bd list --json` row, whose edges carry `type` and `depends_on_id`, and a
+# `gc bd show --json` row, whose edges carry `dependency_type` and the far
+# bead's `id`. Only the list row carries an edge onto a bead in another rig's
+# store: bd keeps such an edge unverified and `show` leaves it out, so a reader
+# that must follow one reads the list row (bd_exact_row below).
+#   disposition_edge   on one edge: a duplicates or supersedes edge
+#   disposed_to        on one row: the bead its first such edge names, or ""
+#   duplicate_to       on one row: the canonical its duplicates edge names, or ""
+# shellcheck disable=SC2034  # read by the scripts that source this file
+DISPOSITION_JQ='
+  def edge_type: (.dependency_type // .type // "") | tostring;
+  def edge_target: (.depends_on_id // .id // "") | tostring;
+  def disposition_edge: edge_type as $t | $t == "duplicates" or $t == "supersedes";
+  def disposed_to:
+    [ .dependencies[]? | select(disposition_edge) | edge_target | select(. != "") ]
+    | .[0] // "";
+  def duplicate_to:
+    [ .dependencies[]? | select(edge_type == "duplicates") | edge_target | select(. != "") ]
+    | .[0] // "";
+'
+
+# bd_exact_row <bead> [<db>] — the bead's own `gc bd list` row, the read for a
+# reader that follows a disposition, in a JSON array of that one row. `[]` means
+# the store holds no such bead. gc bd routes an --id read to the store the id's
+# prefix names, and <db>, a store's `.beads` path, names one outright. --all lifts
+# bd's status filter, and the other flags lift the types it hides from a listing
+# whatever the --id, so no bead reads as absent for what it is. A read that fails,
+# or answers anything but a listing, prints nothing and returns 1, so "no such
+# bead" and "could not read" stay apart.
+bd_exact_row() {
+  local raw
+  # shellcheck disable=SC2086  # ${2:+--db "$2"} expands to 0 or 2 fields
+  raw=$(_bd_call list --id "$1" --all --include-gates --include-infra --include-templates ${2:+--db "$2"} --json --limit 0 </dev/null 2>/dev/null) || return 1
+  raw=$(printf '%s' "$raw" | grep -a -vE '^gc bd:' | scrub | jq -ce --arg id "$1" '
+    if type == "array" then [ .[] | objects | select(((.id // "") | tostring) == $id) ]
+    else error("not a listing") end' 2>/dev/null) || return 1
+  printf '%s\n' "$raw"
+}
+
+# bd_disposed_to <bead> [<db>] — the bead <bead> names as its canonical or
+# successor (disposed_to above), read through bd_exact_row. Prints the id, or
+# nothing when the bead names none. A read that fails, or a bead the store does
+# not hold, prints nothing and returns 1, so "not disposed" and "could not read"
+# stay apart.
+bd_disposed_to() {
+  local row
+  row=$(bd_exact_row "$@") || return 1
+  printf '%s' "$row" | jq -er "$DISPOSITION_JQ"'
+    if length == 0 then error("absent") else (.[0] | disposed_to) end' 2>/dev/null || return 1
+}
 
 # bd_open_human_gates <bead> [<key>] — the bead's human gates that still hold it
 # (open_human_gate above), and with <key> only those under that situation key,

@@ -399,7 +399,8 @@ guard() { # <label> <jq edit of the anchor row> <expected message fragment>
 }
 guard "the anchor is closed" '.[0].status = "closed"' "status='closed', not live"
 guard "pr-dispose.sh has disposed the anchor" '.[0].metadata["gc.pr_close_disposition_kind"] = "not-needed"' "gc.pr_close_disposition_kind=not-needed"
-guard "the anchor is superseded" '.[0].metadata["gc.superseded_by"] = "anc-2"' "superseded by anc-2"
+guard "the anchor is superseded" '.[0].dependencies = [{id: "anc-2", dependency_type: "supersedes"}]' "superseded by anc-2"
+guard "the anchor is a duplicate" '.[0].dependencies = [{id: "anc-2", dependency_type: "duplicates"}]' "superseded by anc-2"
 guard "the anchor names no PR" '.[0].metadata |= del(.existing_pr, .pr_url)' "names no PR"
 
 echo "# --- no double-dispatch: a partial pour (no route stamped) refuses the bare-route fallback ---"

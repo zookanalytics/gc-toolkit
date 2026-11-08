@@ -11,6 +11,13 @@ epic closes"). It follows the landing of a Delivery under the epic, and an epic
 with no Deliveries has one whenever the operator calls a sitting on it for its
 ruling. A Delivery has landed when it has Stories and every one has closed.
 
+A ruling can also come before any work lands, as a judgment of the hypothesis
+sentence itself. An epic that carries `epic_hypothesis` and no `epic_ruling`
+has a first draft for its hypothesis, which can be the filer's own words, and
+its first ruling ends the draft (`docs/epics.md`, "The contract an epic
+carries"). The operator's yes to the sentence, as written or sharpened, is that
+ruling: a continue, unless the ruling changes the epic's course.
+
 The ruling is the operator's. You gather the evidence, frame the choice, and
 once the operator rules, make its writes in the order below. The steps keep
 their own skills: the prep, the hold, the record and the sign-off still run
@@ -40,6 +47,14 @@ measures were run at:
 gc bd show "$EPIC"
 gc bd show "$EPIC" --json | jq -r '.[0].metadata | to_entries[] | select(.key | startswith("epic_")) | "\(.key): \(.value)"'
 ```
+When that read shows `epic_hypothesis` and no `epic_ruling`, the hypothesis is
+a first draft and this sitting is the first to judge it, so test its signal.
+Could it still come out wrong once the work lands? A count the work moves by
+itself, such as lines removed or members closed, cannot, so it is a leading
+indicator and not the signal. Can it be read soon after the work lands, without
+waiting for data that does not exist yet? Where either answer is no, write the
+sharper sentence you would propose.
+
 The work under it, Deliveries and Stories alike, and then each Delivery's
 Stories with the commit and the PR each one landed. Every read of what sits
 under a bead uses its parent-child edges, the ones bd's close reads, because
@@ -96,7 +111,9 @@ The framing leads with your recommendation, continue, shift or close, and what
 each costs. Above it sit the measures with their commits, the grades the
 operator owes, each landed Delivery's aim against what it showed, and the open
 work. On a close, the framing asks the operator what becomes of each piece of
-open work.
+open work. When the hypothesis is a first draft, the framing says so, quotes
+it, says what the test of its signal found, and quotes any sharper sentence you
+propose, so that a yes approves words the operator has read.
 
 ## The writes, in order
 
@@ -226,12 +243,15 @@ close ruling, and bd refuses while anything under the bead is open or a blocker
 still holds it. Settle what the refusal names and run the line again. Never
 force a close.
 
-**4. On continue or shift, aim the next body of work.** On a shift, first
-re-aim each contract field the ruling changes
-(`gc bd update "$EPIC" --set-metadata <field>="<its new text>"`), and each
-Delivery still open whose aim the shift changes. A Delivery's aim is the
-`Aim:` line its description opens with, so read the description, then write it
-whole with the new line:
+**4. On continue or shift, aim the next body of work.** First re-aim each
+contract field the ruling changes, in its own key
+(`gc bd update "$EPIC" --set-metadata epic_hypothesis="<its new text>"`, and
+the same way `epic_handle`, `epic_boundaries`, `epic_closure_condition` and
+`epic_indicators`), such as a shift's new aim, or the sharper sentence a
+continue gives a first draft. On a shift, also re-aim each Delivery still open
+whose aim the shift changes. A Delivery's aim is the `Aim:` line its
+description opens with, so read the description, then write it whole with the
+new line:
 `gc bd update <delivery> --description "<the description, with its new Aim: and Done when: lines>"`.
 
 When the ruling aims a next Delivery, list the epic's open Deliveries first.
@@ -308,7 +328,7 @@ the close.
 
 **Last, whatever the ruling, sign off** as the settle step says, once nothing
 important is pending:
-`--ruled yes --ruling "<the ruling, one line>" --route human --no-wait`, with an
+`--ruled yes --ruling "<the ruling, one line>" --no-wait`, with an
 outcome of at most 140 characters. Its subject is no PR, so it reaches a PR only
 through a gate still open, or one closed with its own answer. Once each PR's own
 call has exited 0, every gate on a PR's anchor carries that PR's own ruling, so

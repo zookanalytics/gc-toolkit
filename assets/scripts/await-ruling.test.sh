@@ -22,13 +22,15 @@
 #   * the pool outlives the route clear: the update that clears the route keys
 #     records it as resling_target, so after an arm that is refused or whose
 #     write fails, a re-run with no --target arms to the same pool;
-#   * the claim: a bead open or in_progress under any of this session's names,
-#     or in_progress under an owner `gc session list --state all` lists under
-#     none of its names, is released with bd's compare-and-swap unclaim before
-#     the arm, its session pins dropped, and read back open and unassigned; an
-#     owner the list names, a list that cannot be read, and an open bead under
-#     another assignee are refused before the edge, and a release that does not
-#     land leaves the claim and arms nothing;
+#   * the claim: a bead in_progress under any of this session's names, or under
+#     an owner `gc session list` lists under none of its names, is released
+#     before the arm with gc bd release-if-current, and an open bead under one
+#     of this session's names with an update guarded on its status and
+#     assignee; its session pins are dropped, and it reads back open and
+#     unassigned. An owner the list names, a list that cannot be read, and an
+#     open bead under another assignee are refused before the edge, and a
+#     release that does not land, or that release-if-current answers
+#     "skipped", leaves the claim and arms nothing;
 #   * fail-closed: an unreadable bead, a parked bead, no gate, a refused edge,
 #     a refused route clear, a refused arm, no pool to re-sling to;
 #   * a closed work bead needs no wait and exits 0;
@@ -80,12 +82,17 @@ mkdir -p "$TMP/bin"
 # it answers. `bd gate resolve <id> --reason <r>` closes an open gate with that
 # reason, and on a closed gate keeps the first reason and still reports success. `bd update` applies --status,
 # --assignee, --set-metadata, --unset-metadata and --append-notes; it refuses
-# when the id is in $FAKE_UPD_FAIL, and refuses the arm's write (one that sets
-# gc.dispatch_when_ready) when $FAKE_ARM_WRITE_FAIL is set. `bd unclaim <id>
-# --if-assignee <a>` is bd's compare-and-swap release: it reopens the bead and
-# clears its assignee only while the assignee is <a>, and refuses a closed or
-# unassigned bead; $FAKE_UNCLAIM_FAIL refuses it outright, and
-# $FAKE_UNCLAIM_NOOP answers success and changes nothing. `session list` answers $FAKE_SESSIONS,
+# when the id is in $FAKE_UPD_FAIL, refuses the arm's write (one that sets
+# gc.dispatch_when_ready) when $FAKE_ARM_WRITE_FAIL is set, and refuses with
+# exit 13, writing nothing, when an --if-status= or --if-assignee= guard does
+# not hold; $FAKE_GUARDED_NOOP makes a guarded update answer success and change
+# nothing. `bd release-if-current <id> <holder>` answers as gc's own release
+# does, in the store of <id> alone: while <id> is in_progress under <holder> it
+# reopens the bead, clears its assignee and prints "released", otherwise it
+# prints "skipped", and it exits 1 for an id the store does not hold or for any
+# other argument count. $FAKE_RELEASE_FAIL makes it exit 1, $FAKE_RELEASE_SKIP
+# makes it answer "skipped", and $FAKE_RELEASE_NOOP makes it answer "released"
+# and change nothing. `session list` answers $FAKE_SESSIONS,
 # an empty session list when it is unset, and fails when $FAKE_SESSIONS_FAIL is
 # set. `runtime drain-ack` records DRAIN in $FAKE_TRACE. `gc-toolkit scripts-dir`
 # names the pack, $STUB_PACK, as gc does for the binding the city imports it under.
@@ -156,6 +163,17 @@ case "$verb" in
         case "$x" in gc.dispatch_when_ready=*) echo "bd: store fault writing $id (stub)" >&2; exit 1 ;; esac
       done
     fi
+    for x in "$@"; do
+      case "$x" in
+        --if-status=*|--if-assignee=*)
+          f="${x%%=*}"; f="${f#--if-}"
+          [ "$(jq -r --arg id "$id" --arg f "$f" '[ .[] | select(.id == $id) | if $f == "status" then (.status // "open") else (.assignee // "") end ] | .[0] // ""' "$S")" = "${x#*=}" ] \
+            || { echo "bd: the $f guard did not hold on $id (stub)" >&2; exit 13; } ;;
+      esac
+    done
+    if [ -n "${FAKE_GUARDED_NOOP:-}" ]; then
+      for x in "$@"; do case "$x" in --if-*) echo "✓ Updated issue: $id"; exit 0 ;; esac; done
+    fi
     tmp="$S.n"; cp "$S" "$tmp"
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -173,25 +191,22 @@ case "$verb" in
     done
     mv "$tmp" "$S"
     echo "✓ Updated issue: $id" ;;
-  unclaim)
-    id="${1:-}"; shift || true
-    want=""
-    while [ $# -gt 0 ]; do
-      case "$1" in --if-assignee) shift; want="${1:-}" ;; --if-assignee=*) want="${1#*=}" ;; esac
-      shift
-    done
-    [ -n "${FAKE_UNCLAIM_FAIL:-}" ] && { echo "Error unclaiming $id: store fault (stub)" >&2; exit 1; }
+  release-if-current)
+    if [ $# -ne 2 ] || [ -z "${1:-}" ] || [ -z "${2:-}" ]; then
+      echo "gc bd: usage: gc bd release-if-current <issue-id> <assignee>" >&2; exit 1
+    fi
+    id="$1"; holder="$2"
+    [ -n "${FAKE_RELEASE_FAIL:-}" ] && { echo "gc bd release-if-current: store fault (stub)" >&2; exit 1; }
     row=$(jq -c --arg id "$id" '[ .[] | select(.id == $id) ] | .[0] // empty' "$S")
-    [ -n "$row" ] || { echo "Error resolving $id (stub)" >&2; exit 1; }
-    [ "$(printf '%s' "$row" | jq -r '.status // "open"')" = closed ] && { echo "Error unclaiming $id: cannot unclaim closed issue $id" >&2; exit 1; }
-    held=$(printf '%s' "$row" | jq -r '.assignee // ""')
-    if [ -z "$want" ] || [ "$held" != "$want" ]; then
-      echo "Error unclaiming $id: assignee mismatch: $id is held by \"$held\", expected \"$want\"" >&2; exit 1
-    fi
-    if [ -z "${FAKE_UNCLAIM_NOOP:-}" ]; then
-      jq -c --arg id "$id" 'map(if .id == $id then (.status = "open" | .assignee = "") else . end)' "$S" > "$S.x" && mv "$S.x" "$S"
-    fi
-    echo "✓ Unclaimed $id" ;;
+    [ -n "$row" ] || { echo "gc bd release-if-current: bead \"$id\" is not in the rig store; nothing was released" >&2; exit 1; }
+    if [ -z "${FAKE_RELEASE_SKIP:-}" ] && [ "$(printf '%s' "$row" | jq -r '"\(.status // "open")|\(.assignee // "")"')" = "in_progress|$holder" ]; then
+      if [ -z "${FAKE_RELEASE_NOOP:-}" ]; then
+        jq -c --arg id "$id" 'map(if .id == $id then (.status = "open" | .assignee = "") else . end)' "$S" > "$S.x" && mv "$S.x" "$S"
+      fi
+      echo released
+    else
+      echo skipped
+    fi ;;
   gate)
     if [ "${1:-}" = resolve ]; then
       id="${2:-}"; reason=""; shift 2 || true
@@ -340,15 +355,26 @@ for who in pool__polecat-hq-me hq-me rig/rig.polecat me-alias; do
     eq "$(meta tk-work gc.dispatch_when_ready)" "$POOL" "$st under '$who': the re-sling is armed"
   done
 done
-eq "$(grep -c '^bd unclaim tk-work --if-assignee me-alias$' "$GC_LOG" | tr -d ' ')" 1 \
-  "the release is a compare-and-swap on the assignee the script read"
+eq "$(grep -c '^bd release-if-current tk-work me-alias$' "$GC_LOG" | tr -d ' ')" 1 \
+  "an in_progress claim is released by gc bd release-if-current, a compare-and-swap on the holder the script read"
 eq "$(meta tk-work gc.session_id)|$(meta tk-work gc.session_name)" "<absent>|<absent>" \
   "the claim's session pins are dropped, so no orphan sweep restores a pool route from them"
 eq "$(on_v1)" 1 "a released claim: the work bead still waits on its gate"
+# release-if-current releases only an in_progress claim, so an open bead claimed
+# in this session's name, as the refinery's work is, is cleared by an update.
+reset; claim open rig/rig.polecat
+OUT=$(env "${SELF[@]}" "$SCRIPT" tk-work --key "$KEY" --formula mol-polecat-work 2>&1); RC=$?
+eq "$RC" 0 "open under this session's agent address: the wait lands"
+eq "$(grep -c '^bd update tk-work --if-status=open --if-assignee=rig/rig.polecat --assignee=$' "$GC_LOG" | tr -d ' ')" 1 \
+  "an open claim is cleared by one update guarded on the status and the assignee the script read"
+eq "$(grep -c '^bd release-if-current ' "$GC_LOG" | tr -d ' ')" 0 \
+  "an open claim: release-if-current, which releases only an in_progress claim, is not asked"
+eq "$(meta tk-work gc.session_id)|$(meta tk-work gc.session_name)" "<absent>|<absent>" \
+  "an open claim: its session pins are dropped"
 
 # A foreign claim is released once the script proves its owner gone: the bead is
-# in_progress, and `gc session list --state all` lists no session under that
-# owner's name, id or agent address. No caller names the owner.
+# in_progress, and `gc session list` lists no session under that owner's name,
+# id or agent address. No caller names the owner.
 LIVE_LIST='{"sessions":[{"id":"hq-live","alias":"rig/rig.hicks","session_name":"pool__polecat-hq-live","state":"active"},{"id":"hq-nap","alias":null,"session_name":"pool__polecat-hq-nap","state":"asleep"}]}'
 reset; claim in_progress hq-dead
 OUT=$(env "${SELF[@]}" FAKE_SESSIONS="$LIVE_LIST" "$SCRIPT" tk-work --key "$KEY" --formula mol-polecat-work 2>&1); RC=$?
@@ -356,10 +382,10 @@ eq "$RC" 0 "in_progress under an owner no session lists: the wait lands"
 eq "$(field tk-work status)|$(field tk-work assignee)" "open|" "a crashed owner's claim is released"
 eq "$(meta tk-work gc.dispatch_when_ready)" "$POOL" "a crashed owner's claim: the re-sling is armed"
 eq "$(on_v1)" 1 "a crashed owner's claim: the work bead waits on the gate"
-eq "$(grep -c '^bd unclaim tk-work --if-assignee hq-dead$' "$GC_LOG" | tr -d ' ')" 1 \
-  "a crashed owner's claim: the release is a compare-and-swap on that owner"
-eq "$(grep -c '^session list --state all --json$' "$GC_LOG" | tr -d ' ')" 1 \
-  "a crashed owner: proven gone by one read of every session, asleep ones included"
+eq "$(grep -c '^bd release-if-current tk-work hq-dead$' "$GC_LOG" | tr -d ' ')" 1 \
+  "a crashed owner's claim: gc bd release-if-current releases it, a compare-and-swap on that owner"
+eq "$(grep '^session list' "$GC_LOG")" "session list --json" \
+  "a crashed owner: proven gone by one read of the default listing, every session that has not closed"
 eq "$(meta tk-work gc.session_id)|$(meta tk-work gc.session_name)" "<absent>|<absent>" \
   "a crashed owner's claim: its session pins are dropped"
 reset; claim in_progress hq-dead
@@ -412,7 +438,7 @@ eq "$(field tk-work status)" "open" "in_progress with no assignee: reopened"
 
 # The release is checked, not assumed.
 reset; claim in_progress hq-me
-OUT=$(env "${SELF[@]}" FAKE_UNCLAIM_FAIL=1 "$SCRIPT" tk-work --key "$KEY" --formula mol-polecat-work 2>&1); RC=$?
+OUT=$(env "${SELF[@]}" FAKE_RELEASE_FAIL=1 "$SCRIPT" tk-work --key "$KEY" --formula mol-polecat-work 2>&1); RC=$?
 eq "$RC" 1 "a refused release: exit 1"
 has "$OUT" "the claim of hq-me on tk-work was not released" "a refused release: said"
 eq "$(field tk-work status)|$(field tk-work assignee)" "in_progress|hq-me" "a refused release: the claim stands"
@@ -422,9 +448,28 @@ OUT=$(env "${SELF[@]}" "$SCRIPT" tk-work --key "$KEY" --formula mol-polecat-work
 eq "$RC" 0 "after a refused release: a re-run lands the wait"
 eq "$(field tk-work status)|$(field tk-work assignee)" "open|" "after a refused release: the re-run releases the claim"
 eq "$(on_v1)" 1 "after a refused release: still one edge"
+# "skipped" is gc's answer for a bead no longer in_progress under the holder, so
+# nothing was released.
+reset; claim in_progress hq-me
+OUT=$(env "${SELF[@]}" FAKE_RELEASE_SKIP=1 "$SCRIPT" tk-work --key "$KEY" --formula mol-polecat-work 2>&1); RC=$?
+eq "$RC" 1 "a release answered skipped: exit 1"
+has "$OUT" "the claim of hq-me on tk-work was not released (gc bd release-if-current exited 0 with 'skipped'" \
+  "a release answered skipped: names gc's answer"
+eq "$(field tk-work status)|$(field tk-work assignee)" "in_progress|hq-me" "a release answered skipped: the claim is left as it was"
+eq "$(meta tk-work gc.dispatch_when_ready)" "<absent>" "a release answered skipped: nothing is armed"
+reset; claim in_progress hq-me
+OUT=$(env "${SELF[@]}" FAKE_RELEASE_NOOP=1 "$SCRIPT" tk-work --key "$KEY" --formula mol-polecat-work 2>&1); RC=$?
+eq "$RC" 1 "a release that answers released and changes nothing: the wait does not land"
+eq "$(meta tk-work gc.dispatch_when_ready)" "<absent>" "a release that answers released and changes nothing: nothing is armed"
 reset; claim open hq-me
-OUT=$(env "${SELF[@]}" FAKE_UNCLAIM_NOOP=1 "$SCRIPT" tk-work --key "$KEY" --formula mol-polecat-work 2>&1); RC=$?
-eq "$RC" 1 "a release that reports success and changes nothing: the read-back fails it"
+OUT=$(env "${SELF[@]}" FAKE_UPD_FAIL=tk-work "$SCRIPT" tk-work --key "$KEY" --formula mol-polecat-work 2>&1); RC=$?
+eq "$RC" 1 "a refused update of an open claim: exit 1"
+has "$OUT" "the claim of hq-me on tk-work was not released" "a refused update of an open claim: said"
+eq "$(field tk-work status)|$(field tk-work assignee)" "open|hq-me" "a refused update of an open claim: the claim stands"
+eq "$(meta tk-work gc.dispatch_when_ready)" "<absent>" "a refused update of an open claim: nothing is armed"
+reset; claim open hq-me
+OUT=$(env "${SELF[@]}" FAKE_GUARDED_NOOP=1 "$SCRIPT" tk-work --key "$KEY" --formula mol-polecat-work 2>&1); RC=$?
+eq "$RC" 1 "an open claim's update that reports success and changes nothing: the read-back fails it"
 has "$OUT" "assignee 'hq-me'" "the read-back names the assignee it found"
 
 reset; claim in_progress hq-me

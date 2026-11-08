@@ -81,7 +81,7 @@ convoy-OTHER|A-OTHER
 convoy-FOLD|CLOSED-A-FOLD
 C
 
-# Fold dispositions: bead_id|superseded_by
+# Fold dispositions: bead_id|the successor its supersedes edge names
 cat > "$TMP/superseded" <<'S'
 CLOSED-A-FOLD|CARRIER-1
 S
@@ -102,6 +102,16 @@ case "$1 ${2:-}" in
     # Record the store this list actually read, so a lookup that searched the
     # caller's rig instead of the subject's is visible rather than silent.
     printf '%s\n' "${BEADS_DIR:-<unpinned>}" >> "$FAKE_LISTS"
+    # A folded bead's `list --id` row carries its supersedes edge onto the bead
+    # FAKE_SUPERSEDED names, as bd's list row carries every edge of the bead.
+    _lid=""; _prev=""
+    for _a in "$@"; do [ "$_prev" = "--id" ] && _lid="$_a"; _prev="$_a"; done
+    _sup=""; [ -z "$_lid" ] || _sup="$(awk -F'|' -v i="$_lid" '$1==i{print $2; exit}' "$FAKE_SUPERSEDED" 2>/dev/null || true)"
+    if [ -n "$_sup" ]; then
+      jq -n --arg i "$_lid" --arg sp "$_sup" \
+        '[{id:$i,status:"closed",dependencies:[{issue_id:$i,depends_on_id:$sp,type:"supersedes"}]}]'
+      exit 0
+    fi
     # A store that will not answer. Distinct from one that answers "none":
     # callers that read the two the same way act on an absence they never saw.
     # FAKE_LIST_RC is the non-answer that carries an exit code; FAKE_LIST_OUT
@@ -149,10 +159,6 @@ case "$1 ${2:-}" in
     # --release clears via --unset-metadata. FAKE_SNAME/FAKE_SID hold them.
     sname="$(cat "${FAKE_SNAME:-/dev/null}" 2>/dev/null || true)"
     sid="$(cat "${FAKE_SID:-/dev/null}" 2>/dev/null || true)"
-    # A folded anchor names the bead that carried its work on. The release
-    # path reads it to say which disposition it is preserving; an empty
-    # string reads the same as an absent key, which is every other bead.
-    sup="$(awk -F'|' -v i="$id" '$1==i{print $2; exit}' "$FAKE_SUPERSEDED" 2>/dev/null || true)"
     # metadata.branch is what the refinery records when work rides another bead's
     # branch; --waiting-on reads it to tell a same-branch rider from a separate
     # deliverable. Absent id -> empty, which reads the same as an absent key.
@@ -163,8 +169,8 @@ case "$1 ${2:-}" in
     asg="$(awk -F'|' -v i="$id" '$1==i{print $2; exit}' "$FAKE_ASSIGNEES" 2>/dev/null || true)"
     # FAKE_ASSIGNEE_NOW, when it holds one, is the assignee the bead reads as.
     [ -s "${FAKE_ASSIGNEE_NOW:-/dev/null}" ] && asg="$(cat "$FAKE_ASSIGNEE_NOW")"
-    if [ -n "$convoy" ]; then row=$(jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg c "$convoy" --arg rt "$routed" --arg er "$exec_routed" --arg sp "$sup" --arg sd "$settled" --arg tk "$takeaway" --arg ta "$takeaway_at" --arg tb "$takeaway_by" --arg sn "$sname" --arg si "$sid" --arg br "$br" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.superseded_by":$sp,"gc.takeaway":$tk,"gc.takeaway_at":$ta,"gc.takeaway_by":$tb,"gc.takeaway_settled":$sd,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br}}]')
-    else row=$(jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg rt "$routed" --arg er "$exec_routed" --arg sp "$sup" --arg sd "$settled" --arg tk "$takeaway" --arg ta "$takeaway_at" --arg tb "$takeaway_by" --arg sn "$sname" --arg si "$sid" --arg br "$br" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.superseded_by":$sp,"gc.takeaway":$tk,"gc.takeaway_at":$ta,"gc.takeaway_by":$tb,"gc.takeaway_settled":$sd,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br}}]'); fi
+    if [ -n "$convoy" ]; then row=$(jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg c "$convoy" --arg rt "$routed" --arg er "$exec_routed" --arg sd "$settled" --arg tk "$takeaway" --arg ta "$takeaway_at" --arg tb "$takeaway_by" --arg sn "$sname" --arg si "$sid" --arg br "$br" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.takeaway":$tk,"gc.takeaway_at":$ta,"gc.takeaway_by":$tb,"gc.takeaway_settled":$sd,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br}}]')
+    else row=$(jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg rt "$routed" --arg er "$exec_routed" --arg sd "$settled" --arg tk "$takeaway" --arg ta "$takeaway_at" --arg tb "$takeaway_by" --arg sn "$sname" --arg si "$sid" --arg br "$br" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.takeaway":$tk,"gc.takeaway_at":$ta,"gc.takeaway_by":$tb,"gc.takeaway_settled":$sd,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br}}]'); fi
     # The placement marker intake writes, and a parent-child parent: the release's
     # pour-stamp read-back judges both through placement.sh. FAKE_PLACEMENT and
     # FAKE_PARENT hold them, and an empty file leaves the key off the row, as on
@@ -1258,7 +1264,7 @@ cat > "$LIVE_STORE" <<JSON
  {"id":"L-live","status":"in_progress","assignee":"$SESSION","metadata":{"gc.step_ref":"mol-sample.advance-and-drain","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
  {"id":"L-peer","status":"open","assignee":"gc-toolkit__polecat-hq-gone","metadata":{"gc.step_ref":"mol-sample.load-bead","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
  {"id":"L-held","status":"in_progress","assignee":"gc-toolkit__polecat-hq-other","metadata":{"gc.step_ref":"mol-sample.decide","gc.root_bead_id":"root-LIVE","gc.routed_to":"gc-toolkit/gc-toolkit.proactive","gc.session_affinity":"require"}},
- {"id":"A-FOLD","status":"closed","assignee":"gc-toolkit__polecat-hq-old","metadata":{"gc.superseded_by":"A-CARRIER","gc.routed_to":"human"}},
+ {"id":"A-FOLD","status":"closed","assignee":"gc-toolkit__polecat-hq-old","dependencies":[{"issue_id":"A-FOLD","depends_on_id":"A-CARRIER","type":"supersedes"}],"metadata":{"gc.routed_to":"human"}},
  {"id":"root-FOLD","status":"in_progress","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-polecat-work","gc.input_convoy_id":"convoy-FOLD","gc.routed_to":"$POOL"}},
  {"id":"F-held","status":"in_progress","assignee":"gc-toolkit__polecat-hq-other","metadata":{"gc.step_ref":"mol-polecat-work.load-context","gc.root_bead_id":"root-FOLD","gc.routed_to":"$POOL","gc.session_affinity":"require"}},
  {"id":"F-work","status":"open","assignee":"gc-toolkit__polecat-hq-gone","metadata":{"gc.step_ref":"mol-polecat-work.workspace-setup","gc.root_bead_id":"root-FOLD","gc.routed_to":"$POOL","gc.session_affinity":"require"}}
@@ -1427,7 +1433,7 @@ eq "$(field A-FOLD gc.routed_to)" "human" \
    "(FOLDSTORE) …and its route survives the release"
 eq "$(field A-FOLD gc.proactive_reaction)" "" \
    "(FOLDSTORE) …with no fresh reaction marker over a landed disposition"
-eq "$(field A-FOLD gc.superseded_by)" "A-CARRIER" \
+eq "$(jq -r '.[] | select(.id=="A-FOLD") | [.dependencies[]? | .type + ">" + .depends_on_id] | join(",")' "$LIVE_STORE")" "supersedes>A-CARRIER" \
    "(FOLDSTORE) …and the fold record itself untouched"
 eq "$(field A-FOLD gc.takeaway)" "superseded by A-CARRIER; the pour raced the fold" \
    "(FOLDSTORE) the sitting's headline still lands on it"

@@ -12,15 +12,12 @@
 # tildes, a longer run or a capitalized language, a block a fence line inside
 # it cut short, a block inline code at a line's start hid), step text that
 # predates the rule failing because a change touched its file, a moved or
-# trimmed block read as new, a branch listed as in flight stalled by its own
-# lines, a branch built on it let through with lines of its own, and a change
-# it cannot read passing as clean (an unreadable file, a file that is not
-# TOML, no Python to decode it).
+# trimmed block read as new, and a change it cannot read passing as clean (an
+# unreadable file, a file that is not TOML, no Python to decode it).
 #
 # Hermetic: each case runs in a throwaway git repo whose main is the base the
-# change is measured from (refs/remotes/origin/main), with a copy of the lint
-# under tools/ so it reads the in-flight list beside it. A case writes the
-# formula into the working tree and runs the lint on it.
+# change is measured from (refs/remotes/origin/main). A case writes the formula
+# into the working tree and runs the lint on it from the repo's root.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -76,12 +73,11 @@ EOF
 # A fresh repo whose main, and origin/main, hold the base formula.
 fresh_repo() {
   rm -rf "$REPO"
-  mkdir -p "$REPO/formulas" "$REPO/tools"
+  mkdir -p "$REPO/formulas"
   g init -q -b main
   g config user.email t@t
   g config user.name t
   g config commit.gpgsign false
-  cp "$SUT" "$REPO/tools/lint-step-text.sh"
   base_formula > "$REPO/$F"
   printf 'readme\n' > "$REPO/README.md"
   g add -A
@@ -89,9 +85,9 @@ fresh_repo() {
   g update-ref refs/remotes/origin/main HEAD
 }
 
-# run_lint <args> — runs the repo's copy from the repo root; sets rc and OUT.
+# run_lint <args> — runs the lint from the repo root; sets rc and OUT.
 run_lint() {
-  if OUT=$(cd "$REPO" && bash tools/lint-step-text.sh "$@" 2>&1); then rc=0; else rc=$?; fi
+  if OUT=$(cd "$REPO" && bash "$SUT" "$@" 2>&1); then rc=0; else rc=$?; fi
 }
 
 # step_two_with <fenced shell> — the base formula with step two's block replaced.
@@ -442,7 +438,7 @@ mkdir -p "$TMP/nopy"
 for t in git awk mktemp rm cat tr head grep sort dirname sed; do
   p=$(command -v "$t") && ln -sf "$p" "$TMP/nopy/$t"
 done
-if OUT=$(cd "$REPO" && PATH="$TMP/nopy" "$BASH" tools/lint-step-text.sh "$F" 2>&1); then rc=0; else rc=$?; fi
+if OUT=$(cd "$REPO" && PATH="$TMP/nopy" "$BASH" "$SUT" "$F" 2>&1); then rc=0; else rc=$?; fi
 expect 2 "no Python with tomllib on PATH: exit 2" "needs a Python with tomllib"
 g checkout -q -- "$F"
 
@@ -547,34 +543,6 @@ with_step new "$(block 'a; b')" > "$REPO/packs/sub/formulas/mol-z.toml"
 g add -A
 run_lint packs/sub/formulas/mol-z.toml
 expect 1 "a new sub-pack formula's procedure: exit 1" "the new step new"
-
-# --- Work in flight. -----------------------------------------------------------
-fresh_repo
-g checkout -q -b polecat/tk-a
-with_step built "$(block 'gc bd show "$X" --json | jq -r .id')" > "$REPO/$F"
-g commit -qam "in flight"
-g update-ref refs/remotes/origin/polecat/tk-a HEAD
-printf '# a comment\npolecat/tk-a\n' > "$REPO/tools/lint-step-text.in-flight"
-run_lint "$F"
-expect 0 "a listed branch's own procedure warns: exit 0" "warning: .* in flight on origin/polecat/tk-a"
-
-rm "$REPO/tools/lint-step-text.in-flight"
-run_lint "$F"
-expect 1 "the same procedure with no list: exit 1"
-
-printf 'polecat/tk-a\n' > "$REPO/tools/lint-step-text.in-flight"
-g checkout -q -b polecat/tk-b
-with_step built "$(block 'gc bd show "$X" --json | jq -r .id
-gc runtime drain-ack')" > "$REPO/$F"
-run_lint "$F"
-expect 1 "a branch built on a listed one, adding a command of its own: exit 1" "^$F:[0-9]*: step text gains"
-
-g checkout -q -- "$F"
-g checkout -q polecat/tk-a
-g branch -q -D polecat/tk-b
-g update-ref -d refs/remotes/origin/polecat/tk-a
-run_lint "$F"
-expect 0 "a listed branch read from its local branch alone still warns: exit 0" "in flight on polecat/tk-a"
 
 # --- A change the lint cannot read fails closed. ---------------------------------
 fresh_repo

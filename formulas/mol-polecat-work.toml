@@ -12,8 +12,10 @@ whose whole product is store work has no branch to push and takes
 submit-and-exit's store-only exit instead, which releases the bead and names the
 disposition for whoever owns the close. A bead its record finishes goes to its
 validating closer, mol-validate-close.
-NEVER close the work bead: the refinery closes an anchor on a verified merge, and
-closes a rework hand-back landed-on-branch, both from merge-push. ALWAYS close
+NEVER close the work bead, except as the duplicate of another bead through
+bead-rehome.sh (the polecat doctrine): the refinery closes an anchor on a
+verified merge, and closes a rework hand-back landed-on-branch, both from
+merge-push. ALWAYS close
 your own step through assets/scripts/claim-close.sh: a graph.v2 step advances
 only by closing its own bead. workflow-finalize is the control-dispatcher's;
 never close it.
@@ -272,7 +274,7 @@ matches only the key stamped on a tracker, which a retitle leaves in place. It
 never reads a title, so a bug that merely mentions the key is not taken for its
 tracker. It reads every live status: the existing report is usually already
 `in_progress` with someone fixing it. A tracker that a fold closed still
-answers. Its `gc.superseded_by` names the live bead that carries the failure
+answers. Its supersedes edge names the live bead that carries the failure
 now, such as a batch, and the lookup returns that bead, so 3c confirms on it.
 It prints the tracker's id, or nothing when none stands.
 ```bash
@@ -429,9 +431,10 @@ the gate the same way, with `--test '<its test command>'` on the call.
 
 **4. A failure your diff did not cause.** A red check that fails the same way on
 `origin/{{base_branch}}` is pre-existing and does not hold the loop. Find or
-file its tracker as preflight-tests' step 3 does, then mark its record at this
-HEAD on the work bead; the exit condition takes the mark in place of a passing
-record while that record stands:
+file its tracker with `preexisting-failure.sh`, as preflight-tests does for a
+failure on the base, then mark its record at this HEAD on the work bead; the
+exit condition takes the mark in place of a passing record while that record
+stands:
 ```bash
 "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-check-pre-existing.sh" --bead "<the work bead>" --check "<test, lint, typecheck, setup or build: the red check>" --commit "<git rev-parse HEAD>" --trackers "<the tracker id of each failure in it, space-separated>"
 ```
@@ -516,8 +519,8 @@ the difference between a bead someone can dispose of and one that just sits:
   `assets/scripts/bead-rehome.sh --origin <bead> --successor <filed-bead>
   --kind re-homed`, plus `--successor-store rig:<name>` where the successor's
   id prefix is ambiguous. docs/authority-map.md gives that verb to converse
-  dispositions, operator re-homes and duplicate-sweep.sh, so write the exact
-  invocation into the note and mail the witness a `NOTICE:` carrying it.
+  dispositions and operator re-homes, so write the exact invocation into the
+  note and mail the witness a `NOTICE:` carrying it.
 - The bead legitimately stays open pending something else — a ruling, a
   cadence, a person. Open and unrouted IS the resting state and no close verb
   is owed. Say in the note what would close it.
@@ -606,24 +609,10 @@ printed one.
 - Exit 0: handed off and drained. You are gone.
 - Exit 3: nothing is handed off and you must not drain: it names what you owe,
   an uncommitted change or a bring-current audit entry. Finish that and re-run
-  this call.
+  this call. What the bring-current guard holds a round to, and what it reopens,
+  is docs/state-machine.md, *Bringing a branch current*.
 - Exit 1: stop. The script says why, and when the refusal is final it has already
   recorded what releases the work, cancelled the run and drained.
-
-The bring-current guard runs for every handoff and acts on a branch that
-carries a review to keep current: its anchor is gating, or a PR stands on it.
-When the push brought that branch current with its base, the round is either
-clean, because git merged it on its own and it lands quietly, or conflicted.
-A conflicted round is handed off only when your audit has an entry for every
-item the guard names, and then the guard stores the audit with its diff
-evidence on the anchor and reopens triage, which rules from your entries on
-what else reopens, and lifts the approval only when the round made a call
-that is the operator's to make. On
-an anchor whose check_set declares no triage lane, the guard adds triage to
-it, so triage rules on that round too. The none and off opt-outs are the
-exception: only a person changes one, so the guard lifts the approval itself.
-A guard that cannot finish hands nothing off: the bead stays open and still
-blocks the anchor, so nothing lands on a round nobody accounted for.
 
 **Exit criteria:** branch pushed and verified, the refinery handoff written,
 refinery signaled, this step closed, the worktree and its local branch removed,

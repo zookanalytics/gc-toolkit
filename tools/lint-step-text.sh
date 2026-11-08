@@ -38,29 +38,17 @@
 # of its delimiter is quoted. The shell then expands the body, so a command
 # substitution in it weighs as one in an argument does.
 #
-# lint-step-text.in-flight, beside this script, lists the branches whose
-# formula changes were in flight when the rule landed, each read from its origin
-# ref and from a local branch of that name. A finding prints as a warning and
-# does not fail when one of those branches adds every line the finding's step
-# gains, at least as many times as the change adds it, against the same base,
-# so the branch lands as it was built. A line is counted by its text, so how a
-# diff aligns the two sides decides nothing. Any line the list does not cover
-# fails as usual.
-#
 # Usage: lint-step-text.sh [--base REV] [FILE ...]
 #   --base REV  the revision a change is measured from (default: origin/main)
 #
-# Output: each finding as `<file>:<line>: <message>`, each in-flight warning as
-# `<file>:<line>: warning: <message>`, then one summary line.
-# Exit: 0 no finding, warnings or not; 1 a finding; 2 it could not operate (not
-#       a repository, a BASE git cannot read, a file it cannot read or parse,
-#       or no Python 3.11 or newer on PATH to decode a formula's TOML).
+# Output: each finding as `<file>:<line>: <message>`, then one summary line.
+# Exit: 0 no finding; 1 a finding; 2 it could not operate (not a repository, a
+#       BASE git cannot read, a file it cannot read or parse, or no Python 3.11
+#       or newer on PATH to decode a formula's TOML).
 
 set -uo pipefail
 
 PROG=lint-step-text
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-IN_FLIGHT_LIST="$HERE/lint-step-text.in-flight"
 BASE=origin/main
 
 usage() {
@@ -580,9 +568,8 @@ AWKEOF
 
 # JUDGE_AWK weighs each step on both sides of the change and prints each step
 # the change makes heavier as
-# `line<FS>id<FS>new|edit<FS>old commands<FS>old control<FS>commands<FS>control<FS>words<FS>code lines`,
-# where line is the first line the change adds to the step's procedures, and
-# code lines are every line of code in those procedures. A
+# `line<FS>id<FS>new|edit<FS>old commands<FS>old control<FS>commands<FS>control<FS>words`,
+# where line is the first line the change adds to the step's procedures. A
 # block whose code is unchanged, wherever it moved, is paired by its text and
 # weighs nothing. It pairs with a block of its own step before another step's,
 # so a copied procedure weighs on the step it was copied into. A block that is
@@ -623,7 +610,6 @@ END {
         if (!(s in at0)) at0[s] = p
         for (k = 1; k <= lc[p]; k++) {
             x = lat[p, k]
-            cl[s] = cl[s] " " x
             if ((x in added) && !(s in at1)) at1[s] = x
         }
     }
@@ -632,25 +618,14 @@ END {
         if (!(s in nx) || (s in told)) continue
         told[s] = 1
         if (nx[s] > ox[s] + 0 || ny[s] > oy[s] + 0)
-            print ((s in at1) ? at1[s] : at0[s]) "\034" s "\034" ((s in had) ? "edit" : "new") "\034" (ox[s] + 0) "\034" (oy[s] + 0) "\034" nx[s] "\034" ny[s] "\034" nw[s] "\034" cl[s]
+            print ((s in at1) ? at1[s] : at0[s]) "\034" s "\034" ((s in had) ? "edit" : "new") "\034" (ox[s] + 0) "\034" (oy[s] + 0) "\034" nx[s] "\034" ny[s] "\034" nw[s]
     }
 }
 AWKEOF
 ) || { echo "$PROG: could not load its judge" >&2; exit 2; }
 
-# REPORT_AWK prints each judged step as a finding, or as a warning when one
-# in-flight branch adds every line the step gains at least as many times as the
-# change does, and exits 1 on a finding. A line the change gains is a text that
-# occurs more often in the new file than in the old one.
+# REPORT_AWK prints each judged step as a finding and exits 1 on a finding.
 REPORT_AWK=$(cat <<'AWKEOF'
-FILENAME == FLIGHT {
-    split($0, f, "\034")
-    gain[f[1], f[3]] = f[2] + 0
-    if (!(f[1] in seen)) { seen[f[1]] = 1; refs[++nrefs] = f[1] }
-    next
-}
-FILENAME == OLDF { was[$0]++; next }
-FILENAME == SRC { raw[FNR] = $0; now[$0]++; next }
 function plural(n, one, many) { return n " " (n == 1 ? one : many) }
 function words(w,   n, a, i, seen, out) {
     n = split(w, a, " "); out = ""
@@ -659,54 +634,21 @@ function words(w,   n, a, i, seen, out) {
 }
 function shape(n, c, w) { return plural(n, "command", "commands") (c > 0 ? " and control flow (" words(w) ")" : "") }
 function weight(n, c) { return plural(n, "command", "commands") " and " (c > 0 ? plural(c, "control-flow construct", "control-flow constructs") : "no control flow") }
-# The in-flight branch that adds every text in want[] as often as the change
-# does, or "" when none does.
-function carrier(   r, t, ok) {
-    for (r = 1; r <= nrefs; r++) {
-        ok = 1
-        for (t in want) if (gain[refs[r], t] + 0 < want[t]) { ok = 0; break }
-        if (ok) return refs[r]
-    }
-    return ""
-}
 {
     split($0, f, "\034")
     where = (f[2] == "" ? "the formula's own text" : "step " f[2])
     if (f[3] == "new") what = "the new " where " has shell blocks that do more than call a script, with " shape(f[6], f[7], f[8])
     else if (f[4] == 0 && f[5] == 0) what = where " gains shell blocks that do more than call a script, with " shape(f[6], f[7], f[8])
     else what = "in " where ", the shell blocks that do more than call a script grow from " weight(f[4], f[5]) " to " weight(f[6], f[7])
-    msg = "step text gains a procedure: " what ". A step calls one tested script, so move the procedure into a script with its own test and call that (docs/pack-authoring.md#step-text-calls-a-tested-script)"
-    for (t in want) delete want[t]
-    n = split(f[9], at, " "); wanted = 0
-    for (i = 1; i <= n; i++) {
-        if (at[i] == "") continue
-        t = raw[at[i]]
-        if (now[t] - was[t] > 0 && !(t in want)) { want[t] = now[t] - was[t]; wanted++ }
-    }
-    by = wanted ? carrier() : ""
-    if (by != "") { print PATHNAME ":" f[1] ": warning: " msg ". Every line it adds is in flight on " by ", so it warns until that branch lands."; warned++ }
-    else { print PATHNAME ":" f[1] ": " msg; found++ }
+    print PATHNAME ":" f[1] ": step text gains a procedure: " what ". A step calls one tested script, so move the procedure into a script with its own test and call that (docs/pack-authoring.md#step-text-calls-a-tested-script)"
+    found++
 }
 END {
-    print found + 0 " " warned + 0 > COUNTS
+    print found + 0 > COUNTS
     exit (found > 0)
 }
 AWKEOF
 ) || { echo "$PROG: could not load its report" >&2; exit 2; }
-
-# In-flight branches, read once: the names in the list that resolve to a ref,
-# origin's and a local branch's both.
-in_flight_refs=()
-if [ -f "$IN_FLIGHT_LIST" ]; then
-  while IFS= read -r name || [ -n "$name" ]; do
-    name=${name%%#*}
-    name=$(printf '%s' "$name" | tr -d '[:space:]')
-    [ -n "$name" ] || continue
-    for ref in "refs/remotes/origin/$name" "refs/heads/$name"; do
-      git rev-parse -q --verify "$ref^{commit}" >/dev/null && in_flight_refs+=("$ref")
-    done
-  done < "$IN_FLIGHT_LIST"
-fi
 
 # The formulas the change renamed, as `new<TAB>old`, from one rename-aware diff.
 if ! renames=$(git diff -M --name-status --no-color --diff-filter=R "$MERGE_BASE" --); then
@@ -714,7 +656,7 @@ if ! renames=$(git diff -M --name-status --no-color --diff-filter=R "$MERGE_BASE
   exit 2
 fi
 
-found=0; warned=0; i=0
+found=0; i=0
 for f in "${formulas[@]}"; do
   i=$((i + 1))
   old="$WORK/old.$i"; new_rec="$WORK/new.$i.rec"; old_rec="$WORK/old.$i.rec"
@@ -740,37 +682,14 @@ for f in "${formulas[@]}"; do
     || { echo "$PROG: cannot judge $f" >&2; exit 2; }
   [ -s "$WORK/judged.$i" ] || continue
 
-  # What each in-flight branch adds to this formula, as `ref<FS>times<FS>line`:
-  # each line's text, and how many more times it occurs at the branch's head
-  # than at its merge base.
-  : > "$WORK/flight.$i"
-  for ref in ${in_flight_refs[@]+"${in_flight_refs[@]}"}; do
-    mb=$(git merge-base "$BASE_OID" "$ref") || continue
-    git cat-file -e "$ref:$f" 2>/dev/null || continue
-    git show "$ref:$f" > "$WORK/flight.head" || { echo "$PROG: cannot read $f at $ref" >&2; exit 2; }
-    if git cat-file -e "$mb:$f" 2>/dev/null; then
-      git show "$mb:$f" > "$WORK/flight.base" || { echo "$PROG: cannot read $f at $mb" >&2; exit 2; }
-    else
-      : > "$WORK/flight.base"
-    fi
-    awk -v r="${ref#refs/*/}" -v B="$WORK/flight.base" '
-      FILENAME == B { was[$0]++; next }
-      { now[$0]++ }
-      END { for (t in now) if (now[t] > was[t]) print r "\034" (now[t] - was[t]) "\034" t }
-    ' "$WORK/flight.base" "$WORK/flight.head" >> "$WORK/flight.$i" \
-      || { echo "$PROG: cannot count what $ref adds to $f" >&2; exit 2; }
-  done
-
-  awk -v FLIGHT="$WORK/flight.$i" -v OLDF="$old" -v SRC="$f" -v PATHNAME="$f" -v COUNTS="$WORK/counts.$i" \
-    "$REPORT_AWK" "$WORK/flight.$i" "$old" "$f" "$WORK/judged.$i"
+  awk -v PATHNAME="$f" -v COUNTS="$WORK/counts.$i" "$REPORT_AWK" "$WORK/judged.$i"
   rc=$?
   [ "$rc" -le 1 ] && [ -s "$WORK/counts.$i" ] || { echo "$PROG: cannot report on $f" >&2; exit 2; }
-  read -r nf nw < "$WORK/counts.$i"
-  found=$((found + nf)); warned=$((warned + nw))
+  read -r nf < "$WORK/counts.$i"
+  found=$((found + nf))
 done
 
 summary="$PROG: ${#formulas[@]} formula file(s)"
-[ "$warned" -eq 0 ] || summary="$summary, $warned in-flight warning(s)"
 if [ "$found" -gt 0 ]; then
   echo "$summary, $found procedure(s) added to step text"
   exit 1

@@ -23,9 +23,9 @@ pool so it is schedulable again.
 - Write code or fix bugs (polecats), or merge branches (refinery/cadence).
 - Manage processes — start/stop/restart/zombies are the controller's.
 - Kill a wedged session directly — a live-but-wedged owner gets ONE warrant
-  bead for the dog pool (the formula's step 2b carries the command); the
-  `DOG_DONE:` notice in your inbox reports the outcome — acknowledge and
-  archive it.
+  bead for the dog pool (the `warrant-file` block in the formula's
+  recover-orphaned-beads step carries the command); the `DOG_DONE:` notice in
+  your inbox reports the outcome — acknowledge and archive it.
 - Warrant a converse sitting that is only holding. The converse role runs
   `idle_timeout = 0`, so a held sitting waits at its prompt for the operator
   for hours or days: its conversation stays `in_progress` and that bead's
@@ -319,9 +319,10 @@ the threshold boundary by the cycle-recycle hook (docs/cycle-recycle.md).
 
 <!-- managed by the learning distiller; every entry carries its anchor. cap: 12 -->
 <!-- Composed after work-quality-base by the system-class roles: deacon,
-     mechanik, proactive, witness, refinery, and keeper. Holds the authoring
-     standards for that class only; universal standards live in
-     work-quality-base. -->
+     proactive, witness, refinery, and keeper. The mechanik, also in this
+     class, reads this file and work-quality-base before it writes, because
+     its prime has no room for them. Holds the authoring standards for that
+     class only; universal standards live in work-quality-base. -->
 
 <!-- rule:tk-tketyk src:audit:tk-awa7hv adopted:2026-08-26 -->
 - File work as a bead in the pass that names it, and put the bead id in the

@@ -499,7 +499,8 @@ adds. Make it self-contained, because pre-open it is the PR's opening comment,
 and note in the trail which lanes covered what and any reduced coverage.
 
 **6. Emit `findings.json`** beside it, every finding that stands for the
-quorum, exactly as `formulas/mol-review.toml`'s `review` step 5b specifies.
+quorum, exactly as the `review` step of `formulas/mol-review.toml` specifies
+its finding set.
 
 **7. One call, through the one writer.** The verdict names `{{reviewed_oid}}`,
 the commit the quorum read, and signoff.sh refuses any other. Pass every flag

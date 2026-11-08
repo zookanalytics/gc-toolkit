@@ -102,7 +102,7 @@ mkdir -p "$TMP/bin" "$TMP/store/b" "$TMP/city/.gc"
 #        inside the resolve call: a gate filed between the live read and the
 #        resolve
 #   LATE_GATE_ON_SEARCH=<gate>   file it inside the token search: between a
-#        finishing run's live read and its step 3
+#        finishing run's live read and its read-back of the bead's gates
 #   EARLIER_ANSWER=<reason>      a sitting's answer that reaches the gate inside
 #        the resolve call, before Accept's own
 #   SLING_FAIL=committed|partial|plain  the sling exits 1 after a committed pour,
@@ -579,7 +579,7 @@ eq "$(roots accept:0123456789abcdef)" 1 "(HOLD-CLEARED) …pouring one root unde
 eq "$(meta tk-anc gc.recommended_formula_dispatched)" "mol-fix" "(HOLD-CLEARED) …and recording it"
 unfinished 0123456789abcdef
 LATE_GATE_ON_SEARCH=tk-late2 run_accept tk-anc
-eq "$RC" 4 "(HOLD-LATE) a gate filed between a finishing run's live read and its step 3 exits 4"
+eq "$RC" 4 "(HOLD-LATE) a gate filed between a finishing run's live read and its read-back of the bead's gates exits 4"
 eq "$(field tk-rec status)" "open" "(HOLD-LATE) …the recommendation's gate is reopened, back on the board, owed"
 eq "$(slings)" 0 "(HOLD-LATE) …and nothing is slung"
 

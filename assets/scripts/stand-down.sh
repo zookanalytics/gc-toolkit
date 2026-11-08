@@ -33,8 +33,9 @@
 #      exits 0 only once the bead reads back closed. The bead's branch ends with
 #      the close, as any disposition's does.
 #
-# The evidence the pointer names is the gate that carries the ruling, unless
-# --successor names other evidence, such as a sitting's conversation. A gate this
+# The evidence the close names, through its supersedes edge, is the gate that
+# carries the ruling, unless --successor names other evidence, such as a
+# sitting's conversation. A gate this
 # bead leaves carries no ruling, so it cannot be the evidence.
 #
 # Nothing is written, and the exit is 1, for a bead whose close this cannot
@@ -46,16 +47,19 @@
 #     it, and an answer once this bead has closed releases the rest;
 #   * anything bead-rehome.sh --check refuses: another open human gate, a gate
 #     assigned to a person, another live blocker, an open child, a claim, or a
-#     pointer to other evidence.
+#     disposition already naming other evidence.
 #
 # A step that does not land exits 1 and names what has landed. Re-running
 # converges: the arm stays gone, an answered gate stays answered and still names
 # the evidence, and bd keeps the first answer a gate was given. A closed bead exits
-# 0 with nothing to do.
+# 0 with nothing to do. So when the writer fails after its close has landed, this
+# exits 1 and names the writer's own call, which records the edge that a re-run of
+# this command would not.
 #
 # Callers: a person or a sitting, on the ruling. A worker that declines its work
 # does not run this; it asks with human-gate.sh and await-ruling.sh.
-# exit: 0 the bead is closed · 1 it is not · 2 usage
+# exit: 0 the bead is closed · 1 it is not, or it closed and its edge may not be
+# recorded · 2 usage
 set -uo pipefail
 
 PROG="stand-down"
@@ -81,7 +85,8 @@ usage: stand-down.sh <work-bead> --key <situation-key> --ruling <why>
                 which a gate that also holds another open bead cannot be
   --dry-run     resolve and report; write nothing
 
-exit: 0 the bead is closed · 1 it is not · 2 usage
+exit: 0 the bead is closed · 1 it is not, or it closed and its edge may not be
+      recorded · 2 usage
 USAGE
 }
 
@@ -165,10 +170,8 @@ for gate in $(printf '%s' "$OPEN_GATES" | jq -r '.[].id' 2>/dev/null); do
   fi
 done
 
-# The evidence: what the caller names, then a pointer an earlier run stamped, then
-# the gate that carries the ruling, which reads closed once an earlier run or
-# another person answered it.
-[ -n "$SUCCESSOR" ] || SUCCESSOR=$(row_meta "$WORK_JSON" gc.superseded_by)
+# The evidence: what the caller names, then the gate that carries the ruling,
+# which reads closed once an earlier run or another person answered it.
 [ -n "$SUCCESSOR" ] || SUCCESSOR=$(printf '%s' "$OPEN_GATES" | jq -r '.[0].id // empty' 2>/dev/null)
 [ -n "$SUCCESSOR" ] || SUCCESSOR=$(printf '%s' "$GATES" | jq -r --arg k "$KEY" \
   '[ .[] | select(((.await_id // "") | tostring) == $k) ] | last | .id // empty' 2>/dev/null)
@@ -225,7 +228,17 @@ done
 
 work_outcome_noop "$WORK" gc bd
 
-"$REHOME" --origin "$WORK" --successor "$SUCCESSOR" --kind not-needed --note "$RULING" \
-  || stopped "the arm on $WORK is gone, its run has ended and no gate under $KEY holds it, but it did not close, or did not read back closed: bead-rehome.sh said why, above."
+if ! "$REHOME" --origin "$WORK" --successor "$SUCCESSOR" --kind not-needed --note "$RULING"; then
+  # A close can stand behind that exit, with its edge unrecorded. A re-run of this
+  # command takes a closed bead for done, so the writer's own call is the way on.
+  if [ "$(bd_json show "$WORK" | jq -r '.[0].status // ""' 2>/dev/null)" = closed ]; then
+    echo "$PROG: $WORK closed as not needed, but its edge onto $SUCCESSOR may not be recorded: bead-rehome.sh said why, above. A re-run of this command would find it closed and record nothing, so run: $REHOME --origin $WORK --successor $SUCCESSOR --kind not-needed" >&2
+    exit 1
+  fi
+  stopped "the arm on $WORK is gone, its run has ended and no gate under $KEY holds it, but it did not close: bead-rehome.sh said why, above."
+fi
+
+[ "$(bd_json show "$WORK" | jq -r '.[0].status // ""' 2>/dev/null)" = closed ] \
+  || stopped "$WORK does not read back closed."
 echo "$PROG: $WORK closed as not needed, per $SUCCESSOR; nothing re-slings it"
 exit 0

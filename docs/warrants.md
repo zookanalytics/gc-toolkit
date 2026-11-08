@@ -80,7 +80,7 @@ shares only the word ([authority-map.md](authority-map.md)).
     forced relaunch and a claimant with no poured workflow, so it adds no key and
     writes nothing to let a run through.
   - `workspace-setup` brings a rejected branch current by merge, where Gas Town's
-    rebases and force-pushes under an open PR, and waits behind a sibling.
+    rebases it under an open PR, and waits behind a sibling.
   - `preflight-tests` runs the checks through `gctk rig`, so every polecat starting
     from one base shares one recorded run, and keys a tracker on a stamp. Core's
     runs each command raw per polecat and matches trackers by title.
@@ -116,7 +116,7 @@ shares only the word ([authority-map.md](authority-map.md)).
   In `gastownhall/gascity-packs`, `gastown/formulas/mol-polecat-work.toml` overrides
   `workspace-setup`, `self-review` and `submit-and-exit`, rebases a rejected
   branch, and at the handoff detaches the tree and deletes its branch.
-- **Verified.** 2026-11-06, at `gastownhall/gascity` main bfd72756e and
+- **Verified.** 2026-11-07, at `gastownhall/gascity` main 6c9663d4c and
   `gastownhall/gascity-packs` main e3cb468bb.
 - **Retires when.** A step at a time. `load-context`: core's gate refuses finished
   and parked work and ends a run by cancelling it. `workspace-setup`: the
@@ -640,10 +640,13 @@ shares only the word ([authority-map.md](authority-map.md)).
     `session.quarantined` has no emitter (`cmd/gc/cmd_analyze_reliability.go`).
     So the script reports a home it cannot sync through `patrol-finding.sh`, one
     report per home, which the next clean start clears.
-  - The search, and each way this script differs from Gas Town's and why, is
-    [specs/tk-1tfzr71.10/gas-city-search.md](../specs/tk-1tfzr71.10/gas-city-search.md).
-- **Verified.** 2026-11-05, at `gastownhall/gascity` main 9f807760c191 and
-  `gastownhall/gascity-packs` main 796d7ecd73cf.
+  - The search, and each way this script differs from Gas Town's and why, are
+    in two records:
+    [specs/tk-1tfzr71.10/gas-city-search.md](../specs/tk-1tfzr71.10/gas-city-search.md),
+    and [specs/tk-eu1f6tm/gas-city-search.md](../specs/tk-eu1f6tm/gas-city-search.md)
+    for when the script fetches, its retry of the add and its signal traps.
+- **Verified.** 2026-11-08, at `gastownhall/gascity` main 27a4857eabd5 and
+  `gastownhall/gascity-packs` main 2a3b142e3fbd.
 - **Retires when.** Gas City provisions a tree bound to an agent, with a sync to
   the default branch, or Gas Town's agents stop running a script of their own at
   `pre_start`.

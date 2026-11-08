@@ -314,7 +314,10 @@ branch_name() {
 
 mkdir -p "$(dirname "$WT")"
 
+# The stage dir beside the home holds what the home held while git adds the
+# worktree, each move in a numbered set of its own, and SETS counts the sets.
 STAGE=""
+SETS=0
 
 merge_stage_entry() (
     SRC="$1"
@@ -346,15 +349,64 @@ merge_stage_entry() (
     mv "$SRC" "$DST"
 )
 
+# restore_stage — merges every set back into the home, the newest first, and
+# removes the stage dir once it is empty. What the home already holds wins over
+# every set, so a file the checkout brought stays, and a newer set wins over an
+# older one, because a later rewrite is gc's current content.
 restore_stage() {
     [ -n "$STAGE" ] || return 0
     mkdir -p "$WT"
-    for ENTRY in "$STAGE"/.[!.]* "$STAGE"/..?* "$STAGE"/*; do
-        [ -e "$ENTRY" ] || continue
-        merge_stage_entry "$ENTRY" "$WT/$(basename "$ENTRY")"
+    while [ "$SETS" -gt 0 ]; do
+        for ENTRY in "$STAGE/$SETS"/.[!.]* "$STAGE/$SETS"/..?* "$STAGE/$SETS"/*; do
+            [ -e "$ENTRY" ] || continue
+            merge_stage_entry "$ENTRY" "$WT/$(basename "$ENTRY")"
+        done
+        rmdir "$STAGE/$SETS" 2>/dev/null || true
+        SETS=$((SETS - 1))
     done
     rmdir "$STAGE" 2>/dev/null || true
     STAGE=""
+}
+
+# stage_home — moves what the home holds into a new set and removes the emptied
+# home, because git adds a worktree only where nothing is. Once anything is
+# staged, the run's exit restores it, and a signal ends the run, so the grace gc
+# gives a stopped pre_start goes to the restore and not to another attempt.
+stage_home() {
+    if [ -d "$WT" ] && [ -n "$(find "$WT" -mindepth 1 -maxdepth 1 | head -n 1)" ]; then
+        if [ -z "$STAGE" ]; then
+            STAGE=$(mktemp -d "$(dirname "$WT")/.gascity-worktree-stage.XXXXXX")
+            trap 'restore_stage' EXIT
+            trap 'exit 129' HUP; trap 'exit 130' INT; trap 'exit 143' TERM
+        fi
+        SETS=$((SETS + 1))
+        mkdir "$STAGE/$SETS"
+        find "$WT" -mindepth 1 -maxdepth 1 -exec mv {} "$STAGE/$SETS"/ \;
+    fi
+    rmdir "$WT" 2>/dev/null || true
+}
+
+# home_came_back — whether, after a failed add, the home is a directory again
+# with no .git, as a writer that re-creates it leaves it. An add that fails
+# after git has made the worktree leaves its .git, and is not tried again.
+home_came_back() {
+    [ -d "$WT" ] && [ ! -e "$WT/.git" ]
+}
+
+# add_worktree — adds the home on its per-target branch, which is cut from the
+# default tip when it does not exist yet. A failed add can leave the branch it
+# made, so every attempt checks for it again.
+add_worktree() {
+    if git -C "$RIG_ROOT" show-ref --verify --quiet "refs/heads/$BRANCH"; then
+        GIT_LFS_SKIP_SMUDGE=1 git -C "$RIG_ROOT" worktree add "$WT" "$BRANCH"
+        return
+    fi
+    # argv, not a command string, so paths with whitespace survive.
+    set -- worktree add "$WT" -b "$BRANCH"
+    if [ -n "$DEFAULT_REF" ]; then
+        set -- "$@" "$DEFAULT_REF"
+    fi
+    GIT_LFS_SKIP_SMUDGE=1 git -C "$RIG_ROOT" "$@"
 }
 
 # Idempotent: an existing worktree is provisioned and synced, never re-created.
@@ -364,15 +416,8 @@ if [ -d "$WT/.git" ] || [ -f "$WT/.git" ]; then
     exit 0
 fi
 
-# A non-empty target that is not yet a worktree: stage its contents aside,
-# create the worktree, then merge them back (existing files win).
-if [ -d "$WT" ] && [ "$(find "$WT" -mindepth 1 -maxdepth 1 | head -n 1)" ]; then
-    STAGE=$(mktemp -d "$(dirname "$WT")/.gascity-worktree-stage.XXXXXX")
-    find "$WT" -mindepth 1 -maxdepth 1 -exec mv {} "$STAGE"/ \;
-    trap 'restore_stage' EXIT HUP INT TERM
-fi
-
-rmdir "$WT" 2>/dev/null || true
+# What can wait on the network or a busy host runs while the home still holds
+# its files, so nothing between the home's emptying and the add waits on it.
 git -C "$RIG_ROOT" worktree prune >/dev/null 2>&1 || true
 
 BRANCH=$(branch_name)
@@ -386,33 +431,29 @@ if [ -n "$DEFAULT_REF" ]; then
     git -C "$RIG_ROOT" fetch origin "$DEFAULT_BRANCH" >/dev/null 2>&1 || true
 fi
 
-if git -C "$RIG_ROOT" show-ref --verify --quiet "refs/heads/$BRANCH"; then
-    if ! GIT_LFS_SKIP_SMUDGE=1 git -C "$RIG_ROOT" worktree add "$WT" "$BRANCH"; then
+# A home that is not yet a worktree holds what gc staged for the start. Its
+# contents move aside, git adds the worktree, and they merge back. gc writes
+# into the home each time it builds the city's desired state, so a build can
+# re-create the home before the add, and git then refuses it. What the build
+# wrote moves aside as another set, and the add runs again after a pause
+# longer than a build's writes take, up to ADD_ATTEMPTS adds in all.
+ADD_ATTEMPTS=3
+ATTEMPT=1
+stage_home
+until add_worktree; do
+    if [ "$ATTEMPT" -ge "$ADD_ATTEMPTS" ] || ! home_came_back; then
         echo "worktree-setup: failed to create worktree at $WT from $RIG_ROOT (branch $BRANCH)" >&2
         restore_stage
         exit 1
     fi
-else
-    # argv, not a command string, so paths with whitespace survive.
-    set -- worktree add "$WT" -b "$BRANCH"
-    if [ -n "$DEFAULT_REF" ]; then
-        set -- "$@" "$DEFAULT_REF"
-    fi
-    if ! GIT_LFS_SKIP_SMUDGE=1 git -C "$RIG_ROOT" "$@"; then
-        echo "worktree-setup: failed to create worktree at $WT from $RIG_ROOT (branch $BRANCH)" >&2
-        restore_stage
-        exit 1
-    fi
-fi
+    ATTEMPT=$((ATTEMPT + 1))
+    printf 'worktree-setup: %s was written to again before the add, so what it holds is staged as well and the add runs again (attempt %s of %s)\n' \
+        "$WT" "$ATTEMPT" "$ADD_ATTEMPTS" >&2
+    sleep 1
+    stage_home
+done
 
-if [ -n "$STAGE" ]; then
-    for ENTRY in "$STAGE"/.[!.]* "$STAGE"/..?* "$STAGE"/*; do
-        [ -e "$ENTRY" ] || continue
-        merge_stage_entry "$ENTRY" "$WT/$(basename "$ENTRY")"
-    done
-    rm -rf "$STAGE"
-    STAGE=""
-fi
+restore_stage
 trap - EXIT HUP INT TERM
 
 provision_worktree
