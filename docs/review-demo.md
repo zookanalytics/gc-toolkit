@@ -65,6 +65,20 @@ fixture JSON, as the script's own test suite does
 unplaced`). Keep the stub and its JSON in the review workspace beside the PNG.
 The verdict says the report shows fixture data.
 
+## The conversation form
+
+`gc-helm.sh engage` and `gc-helm.sh attach` open a terminal form, helm-svc's
+`form` command. It reads and writes only through the gc-helm.sh it is given, so
+run it against the fixture stand-in, which answers from fixture data and writes
+nothing: build `go build -o "$PWD/helm-svc" ./cmd/helm-svc` in
+`<worktree>/services/helm`, then capture
+`./helm-svc form --helm internal/form/testdata/helm-fixture.sh --models
+opus,fable,codex --subject tk-demo1` for a subject, `--rig gc-toolkit` for a new
+topic, `--subject 1446` for a PR two rigs record, or `--return` for the
+conversations to return to. A terminal capture shows the form's first frame; a
+state after keys, such as the acknowledgements after Ctrl+S, needs a recording
+that types them (`demo:capture`). The verdict says the form shows fixture data.
+
 ## Markdown the city posts
 
 Pack scripts compose the city's comments and PR bodies, so render what the

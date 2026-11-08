@@ -244,6 +244,37 @@ and how to engage it, and an engage pointed at a gate or a conversation does not
 look for others. A conversation on the bead answers no gate until it replies to
 one.
 
+**On a terminal, engage opens the conversation form.** An engage whose
+command line names no concern (`--reason`, `--template` or `--skill`) and not
+`--no-input` hands the terminal to helm-svc's `form` command
+(`services/helm/internal/form`). One screen holds the subject (a bead id, a PR
+number or URL, or empty for a new topic), a new topic's rig, the model, with
+opus shown as the default, and a multiline question, in which Enter adds a
+line. The command line fills in the fields, and typing never waits for a read.
+While the operator types, the form reads `gc-helm.sh conversations` for the
+subject: the bead it resolves to, the rig a conversation about it is held in,
+whether a sitting can start there, its open conversations and what holds it.
+It reads the city's rigs for a new topic. The screen shows where a submit would
+file before it does: a conversation on the subject in its own rig, or a new
+subject in the rig the operator chose. A new topic has no rig until the
+operator picks one, and a PR number that several live anchors record waits
+for the operator to pick the anchor. A result read for an earlier subject never
+stands in for the current one, and no result changes a rig or a conversation
+the operator chose. A conversation chosen from the list is started as it is,
+and a question typed beside it is not sent into it.
+
+Ctrl+S saves the question only once the destination is settled. `open` files
+it as a new conversation (`--allow-duplicate` on a subject, `--new-subject
+--rig` on a topic), unchanged as the conversation's ask and titled by
+`conversation_title`, and the form says it is saved. Then `engage
+<conversation> --no-input --no-attach` starts the sitting, and the form follows
+it through its readiness to ready. Enter attaches; leaving keeps everything
+running. A save that fails leaves the question in the form, and a new subject
+filed whose conversation was not becomes the subject of the next save, so a
+retry never files a second subject. A question the form did not save is kept in
+a file under `GC_HELM_DRAFT_DIR` (else `$XDG_STATE_HOME/gc/engage-drafts`, else
+`~/.local/state/gc/engage-drafts`) when it closes, and the form names the file.
+
 Engage warns when it starts a sitting while another live sitting tracks the
 bead, or replies to a gate the bead waits on. **One sitting per bead is a
 convention, not a guarantee.** The alias and the bind keep a second sitting
@@ -367,14 +398,21 @@ City's own external-messaging process.
 The intake files a topic and lets the reaction triage it: the operator gets a
 board row, not a conversation. When the operator wants to talk now about
 something that has no bead yet, `gc-helm engage --new-subject` creates the
-subject and engages it in one gesture. It files the subject bead in a chosen
-rig, files its one conversation, spawns the sitting and binds it. The
-positional text is the subject's title and, absent `--reason` or
-`--template`, its opener. `--rig` names the rig, an interactive prompt over
-the converse-capable rigs asks otherwise, and `--no-input` requires it.
-`prefix+A` is the keystroke, and it opens the interactive prompt in a new tmux
-window (`assets/scripts/tmux-new-subject.sh`), because the choice of rig,
-subject and model does not fit tmux's one-line command prompt.
+subject and engages it in one gesture. It files the subject bead in the rig
+`--rig` names, files its one conversation, spawns the sitting and binds it.
+The rig is always the operator's choice: a topic carries no id prefix to derive
+one from, and a bead filed in the wrong rig can draw public comments there. The
+positional text, or `--reason` without one, is the question. The subject's
+description keeps it unchanged, newlines included, with a provenance line after
+it, and its title is the label `conversation_title` derives from the
+question's opening, so a question longer than a bead title is filed whole.
+Absent `--reason` or `--template` the question is the conversation's opener
+too. On a terminal, `--new-subject` with no concern opens the conversation form
+on a new topic, and `prefix+A` runs it in a new tmux window
+(`assets/scripts/tmux-new-subject.sh`), because a form does not fit tmux's
+one-line command prompt. `gc-helm open --new-subject --rig <rig>` files the
+subject and its conversation without starting a sitting, which is how the form
+saves a new topic before it starts one.
 
 The subject is created marked `gc.reaction_owned=1` in the same create, so
 the proactive scan never observes it unmarked. Three gates read the marker:
@@ -385,6 +423,23 @@ closes its own reaction bead without acting
 the marker stays, so no later scan reacts. If a later step refuses the live
 spawn, a bad model or a suspended rig, the subject's one conversation still
 waits in the queue, so the topic is never lost.
+
+### Returning to a conversation
+
+`gc-helm conversations` lists every open conversation in the city's stores and
+where it stands. A conversation's readiness is queued while it waits in the
+operator's queue, starting while its sitting's session has not started,
+preparing until the sitting records its first hand-back after its session was
+created (`gc.handback_at`, which `gc-helm handback` stamps on each framing),
+ready once it has, and ended when its sitting's session has closed while the
+conversation stays open. Each row says whether a terminal is attached to the
+sitting. `gc-helm attach` opens the conversation form on that list, those no
+terminal is attached to first, by readiness and then newest first, and Enter
+attaches to the one picked. `gc-helm attach <conversation>` is engage's attach
+for a script or a shortcut: it attaches to a live sitting once it has started,
+and holds a conversation whose sitting ended, or one in the queue, in a new
+sitting first. Starting and returning are two acts of one form: Ctrl+R moves
+between them.
 
 ## The sitting
 

@@ -42,6 +42,10 @@ helm-svc board --json       print — the board's rows as JSON, for agents and
 helm-svc board --json --all print — the city overview instead.
 helm-svc probe              check — can THIS binary read the city's bead stores?
                                     See *Readability check*.
+helm-svc form --helm <gc-helm.sh>
+                            run — the terminal conversation form that
+                                    gc-helm.sh engage and attach open. See *The
+                                    conversation form*.
 ```
 
 As the sidecar:
@@ -241,6 +245,25 @@ supervisor HTTP API. In August 2026 all three read green for three days while
 `helm-svc board` exited 3 on every rig (`tk-00o34c`). `probe` is the one
 question whose answer moves with the store, and the build gate below spends it
 on every tick.
+
+### The conversation form (`helm-svc form`)
+
+```
+helm-svc form --helm <gc-helm.sh> --models opus,fable,codex [--subject <ref> | --new-subject [--rig <name>] [--question <text>]] [--model <variant>]
+helm-svc form --helm <gc-helm.sh> --return     # the conversations to return to
+```
+
+The screen `gc-helm.sh engage` and `gc-helm.sh attach` hand a terminal to,
+which they run with their own path as `--helm` and the converse variants as
+`--models`. It holds the subject, a new topic's rig, the model and a multiline
+question, reads `gc-helm.sh conversations` in the background while the operator
+types, saves with `gc-helm.sh open`, starts with `gc-helm.sh engage
+<conversation> --no-attach`, and attaches with `gc-helm.sh engage
+<conversation>`. It writes nothing itself, so what it files is what the
+command line files. [human-engagement.md](../../docs/human-engagement.md#engage)
+says what it shows and when it saves. `internal/form/testdata/helm-fixture.sh`
+answers those verbs from fixture data, so the form can be run with no city
+behind it.
 
 ### Anchor kinds
 
