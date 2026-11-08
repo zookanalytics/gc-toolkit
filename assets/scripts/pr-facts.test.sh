@@ -1005,13 +1005,13 @@ eq "$(bparents "$K1")$(bparents "$K2")" "" "…and neither filed with a parent"
 # The priority writer's own write is the one pinned to its store (--db), so a
 # route that carried a priority, or a priority the creator wrote itself, fails.
 PL=$(grep -n "^bd update $K1 --priority 0 --db " "$STUB_GC_LOG" | head -1 | cut -d: -f1)
-RL=$(grep -n "^bd update $K1 --set-metadata gc.routed_to=$FIX" "$STUB_GC_LOG" | head -1 | cut -d: -f1)
+RL=$(grep -n "^sling $FIX $K1 --no-formula --no-convoy$" "$STUB_GC_LOG" | head -1 | cut -d: -f1)
 if [ -n "$PL" ] && [ -n "$RL" ] && [ "$PL" -lt "$RL" ]; then
   ok "…its priority written by the priority writer before the route"
 else
   bad "the merge-in's priority was not written by the priority writer before its route (priority write at log line '${PL:-none}', route at '${RL:-none}')"
 fi
-hasnt "$(grep "^bd update $K1 --set-metadata gc.routed_to" "$STUB_GC_LOG")" "--priority" "…and the route written with no priority in it"
+hasnt "$(grep "^sling $FIX $K1 " "$STUB_GC_LOG")" "--priority" "…and the route written with no priority in it"
 
 echo "# …a merge-in whose priority does not settle is left unrouted, and the stranded arm routes it next pass"
 printf '#!/usr/bin/env bash\necho "queue-priority: settle: cannot compute the priority of $2" >&2\nexit 1\n' > "$TMP/qp-fail"
@@ -3183,7 +3183,7 @@ printf '[{"id":35201,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments
 out=$(run)
 CW7=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "rework") | select((.metadata.anchor_bead // "") == "WK7") | .id ] | .[0] // "<none>"' "$STUB_STORE")
 eq "$(meta "$CW7" 'gc.routed_to')|$(meta WK7 pr_comment_watermark)" "$FIX|35201" "a fresh child is routed and the mark moves"
-eq "$(awk -v c="bd show $CW7 " -v w="bd update $CW7 --set-metadata gc.routed_to" 'index($0, w) == 1 { exit } index($0, c) == 1 { n++ } END { print n + 0 }' "$STUB_GC_LOG")" "1" \
+eq "$(awk -v c="bd show $CW7 " -v w="sling $FIX $CW7 " 'index($0, w) == 1 { exit } index($0, c) == 1 { n++ } END { print n + 0 }' "$STUB_GC_LOG")" "1" \
   "…after one read of it, bd_create's own"
 
 echo "# …a comment rework an earlier two-write create left without its anchor_bead is closed before a fresh one is filed"
