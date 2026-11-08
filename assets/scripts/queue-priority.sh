@@ -5,16 +5,15 @@
 # This script writes that field:
 #   settle <bead> [--print] [--db <path>]
 #       compute the bead's priority and write it to the bead and to every live
-#       workflow poured for it (the input convoy, the root and each open step),
-#       then read it back. A writer that routes or slings a bead settles it
-#       first and writes no priority of its own. --print computes the same
-#       priority and writes nothing. It takes no lock, so no writer writes the
-#       number it prints.
+#       workflow poured for it (the input convoy, the root and each open step).
+#       A writer that routes or slings a bead settles it first and writes no
+#       priority of its own. --print computes the same priority and writes
+#       nothing. It takes no lock, so no writer writes the number it prints.
 #   move <bead> (<P0-P4> | --shift <±n>) [--dry-run] [--db <path>]
 #       the writer `gc-helm.sh priority` runs: set the bead's own input, then
 #       write every bead that follows it, directly or through others (members,
 #       the PR-finishing work of each anchor among them, and the live workflow
-#       of each), and read it all back.
+#       of each).
 #   reconcile [--dry-run] [--pool <target>] [--db <path>]
 #       one pass of orders/queue-priority.toml: read the beads `bd ready` offers
 #       the rig's polecat pool, ephemeral ones included as the pool's claim
@@ -60,7 +59,7 @@
 # work when the posture it records turns approved or stops being approved, and
 # when the anchor leaves pull_request, and on each later pass until all of that
 # work has settled at the rank the anchor's state and posture give.
-# Exit codes: 0 ok; 1 a read, a write, a read-back or the lock failed; 2 usage,
+# Exit codes: 0 ok; 1 a read, a write or the lock failed; 2 usage,
 # a move refused before anything was written, or a pass that finds no one
 # polecat pool to read.
 set -u
@@ -90,7 +89,7 @@ case "$LOCK_STALL_SECS" in ''|*[!0-9]*) LOCK_STALL_SECS=900 ;; esac
 # The pass budget, in seconds from the start of the pass (0 = unpaced). A pass
 # starts settling a bead only while one settle's allowance is left in it, and
 # leaves the rest at their old priority for the next pass, so the order's
-# timeout never kills it between a write and its read-back.
+# timeout never kills it between one settle's writes.
 # queue-priority.test.sh holds the budget below the order's timeout and the
 # stall bound above it.
 PASS_BUDGET_SECS="${QUEUE_PRIORITY_PASS_BUDGET_SECS:-240}"
@@ -125,10 +124,6 @@ mktemp_tracked() { REPLY="$(mktemp "${TMPDIR:-/tmp}/gctk-queue-priority.XXXXXX")
 # wherever it stands, and a stub gc that answers by the verb after `bd` reads
 # the same call.
 bd_() { gc bd "$@" --db "$BD_DB" 9>&-; }
-# A settle's priority writes go through `gctk bead update --verify`.
-# >>> gctk-bin
-GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
-# <<< gctk-bin
 now_epoch() { date -u +%s; }
 
 usage() {
@@ -140,8 +135,8 @@ Usage:
 
 Verbs:
   settle     Compute the bead's priority, write it to the bead and to every live
-             workflow poured for it, and read it back. Exits 1 when the priority
-             cannot be computed or does not read back. A bead that follows
+             workflow poured for it. Exits 1 when the priority cannot be
+             computed or a write fails. A bead that follows
              nothing keeps its own priority, and its workflows take it. --print
              computes the same priority, prints the number and writes nothing.
              It takes no lock, so no writer writes the number it prints: a
@@ -149,8 +144,7 @@ Verbs:
   move       The writer gc-helm.sh priority runs. A P-value sets a bead that
              follows nothing; --shift sets the shift of a bead that follows a
              parent or an anchor. It then writes every bead that follows the
-             bead, directly or through others, held beads included, and reads
-             them back. It refuses the form that does not fit the bead, and a
+             bead, directly or through others, held beads included. It refuses the form that does not fit the bead, and a
              workflow's convoy, root or step. --dry-run prints what it would
              write.
   reconcile  One pass of orders/queue-priority.toml: settle every bead the
@@ -317,12 +311,8 @@ workflow_rows() {
 }
 
 # write_priorities <plan-file> — the plan is a JSON array of {id, to}; write each
-# bead's priority, grouped by level in batches. A settle's caller routes or
-# slings the bead next, which cannot be undone, so each batch goes through
-# `gctk bead update --verify`, which reads every bead of it back at the level
-# written (docs/warrants.md, "bd write durability"). WROTE counts the beads
-# written. Returns 1 when a write fails or does not read back, saying which in
-# MISMATCH.
+# bead's priority, grouped by level in batches. WROTE counts the beads written.
+# Returns 1 when a write fails, naming it in MISMATCH.
 WROTE=0
 MISMATCH=""
 write_priorities() {
@@ -338,29 +328,16 @@ write_priorities() {
         while IFS= read -r id; do
             batch+=("$id"); i=$((i + 1))
             if [ "$i" -ge "$WRITE_BATCH" ]; then
-                write_level "$p" "${batch[@]}" || return 1
+                bd_ update "${batch[@]}" --priority "$p" >/dev/null 2>&1 || { MISMATCH="the write of P$p to ${batch[*]} failed"; return 1; }
                 WROTE=$((WROTE + i)); batch=(); i=0
             fi
         done <<< "$ids"
         if [ "$i" -gt 0 ]; then
-            write_level "$p" "${batch[@]}" || return 1
+            bd_ update "${batch[@]}" --priority "$p" >/dev/null 2>&1 || { MISMATCH="the write of P$p to ${batch[*]} failed"; return 1; }
             WROTE=$((WROTE + i))
         fi
     done
-}
-
-# write_level <priority> <id>... — one batch of write_priorities. Sets MISMATCH
-# and returns 1 when the write fails or a bead does not read back at the level.
-write_level() {
-    local p="$1" out rc=0
-    shift
-    out="$("$GCTK" bead update "$@" --priority "$p" --db "$BD_DB" --verify 9>&- 2>&1 >/dev/null)" || rc=$?
-    case "$rc" in
-        0) return 0 ;;
-        3) MISMATCH="the write of P$p to $* did not read back: $(printf '%s\n' "$out" | sed -n 's/^  //p' | tr '\n' ';' | sed 's/;$//; s/;/; /g')" ;;
-        *) MISMATCH="the write of P$p to $* failed" ;;
-    esac
-    return 1
+    return 0
 }
 
 # settle_subject <subject-row-json> <priority> <plan-file> — add to the plan

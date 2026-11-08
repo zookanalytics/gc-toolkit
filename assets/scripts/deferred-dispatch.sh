@@ -186,10 +186,6 @@ mktemp_tracked() { REPLY="$(mktemp "${TMPDIR:-/tmp}/gctk-deferred-dispatch.XXXXX
 bd_() {
     if [ -n "$BD_DB" ]; then pass_child gc bd --db "$BD_DB" "$@"; else pass_child gc bd "$@"; fi
 }
-# The disarm verb writes through `gctk bead update --verify` (disarm_bead).
-# >>> gctk-bin
-GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
-# <<< gctk-bin
 
 now_utc() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 now_epoch() { date -u +%s; }
@@ -439,22 +435,13 @@ hold_of() { # id seed_file graph_file -> summary on stdout
 # Clears the dispatch record, and each further key the caller names in the same
 # write. reconcile retires an arm through it and names none, so a notice owed on
 # the same bead outlives the arm: only its own send or retire, or the disarm
-# verb, clears it. With --verify the write goes through `gctk bead update
-# --verify`, which reads the record back gone before it returns 0
-# (docs/warrants.md, "bd write durability"). The disarm verb asks for that,
-# because its caller acts on the disarm in a way that cannot be undone, as
-# stand-down.sh closes the bead once it is unarmed.
-disarm_bead() { # [--verify] id reason [key]... -> rc
-    local -a write=(bd_ update)
-    if [ "${1:-}" = --verify ]; then
-        write=(pass_child "$GCTK" bead update); shift
-    fi
+# verb, clears it.
+disarm_bead() { # id reason [key]... -> rc
     local id="$1" reason="${2:-}"
     local -a also=()
     shift 2 || shift $#
     while [ $# -gt 0 ]; do also+=(--unset-metadata "$1"); shift; done
-    [ "${write[0]}" = bd_ ] || also+=(${BD_DB:+--db "$BD_DB"} --verify)
-    "${write[@]}" "$id" \
+    bd_ update "$id" \
         --unset-metadata "$K_TARGET" \
         --unset-metadata "$K_ARGS" \
         --unset-metadata "$K_BY" \
@@ -480,8 +467,8 @@ cmd_disarm() {
     done
     # The verb withdraws everything this script owes on the bead: the arm, and
     # any notice owed.
-    disarm_bead --verify "$bead" "${reason:-disarmed by $(actor)}" "$K_NOTIFY" || {
-        echo "$PROG: disarm: failed to clear the dispatch record on $bead, or it did not read back cleared" >&2; return 1; }
+    disarm_bead "$bead" "${reason:-disarmed by $(actor)}" "$K_NOTIFY" || {
+        echo "$PROG: disarm: failed to clear the dispatch record on $bead" >&2; return 1; }
     echo "$PROG: disarmed $bead"
 }
 
