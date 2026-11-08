@@ -218,7 +218,11 @@ these steps:
    that would start a sitting on the task waits up to
    `GC_HELM_ENGAGE_BIND_WAIT` seconds for the lock, then starts nothing and
    names the engage that holds it. Without `flock` or a city root, engage
-   starts no sitting. Under the lock it runs
+   starts no sitting. Under the lock it reads the task and the session list
+   again, and starts nothing, with exit 4, when the task is no longer as
+   engage found it before the lock, as when another engage bound the task or
+   started a session on it while this one waited. A task that closed meanwhile
+   is refused as closed. Then it runs
    `gc session new converse-<model> --alias <task> --no-attach`, under the
    prefix `c-` when the runtime refuses the bare id as an alias. A session
    still holding that alias that no longer holds the task, as a sitting cut

@@ -63,9 +63,10 @@
 #             sitting is closed, and the conversation stays closed with the
 #             holder the dismiss left
 #   (ALIAS-*, RACE-CONCURRENT) a spawn refused at the alias spawns nothing and
-#             waits for the holder's bind; two engages of one conversation reach
-#             the spawn one at a time, under its engage lock, and spawn once
-#             and bind once
+#             waits for the holder's bind; two engages of one conversation take
+#             its engage lock one at a time, and the second, reading the first's
+#             sitting under the lock, starts nothing, so they spawn once and
+#             bind once
 #   (ALIAS-RETRY) an id the runtime refuses as an alias is retried under c-
 #   (ATTACH, START-*, NOATTACH-*) the attach waits until the sitting reads
 #             active, because an attach that reaches a sitting the reconciler
@@ -83,10 +84,12 @@
 #             that wait, so a second engage that would spawn on it meanwhile
 #             starts nothing and names the holder, one that attaches to a live
 #             sitting goes on, and with no city root engage starts no sitting
-#             (LOCK-*). No gc call under the lock inherits its descriptor
-#             (LOCK-FD). A sitting not yet
-#             listed, or a listing that fails, is waited through. A sitting
-#             still unstarted at
+#             (LOCK-*). Under the lock engage reads the conversation again, and
+#             starts and closes nothing when, since its first read, another
+#             engage bound it or started a sitting on it, or it closed
+#             (LOCK-REREAD-*). No gc call under the lock inherits its
+#             descriptor (LOCK-FD). A sitting not yet listed, or a listing that
+#             fails, is waited through. A sitting still unstarted at
 #             GC_HELM_ENGAGE_WAIT_TIMEOUT, 15 minutes by default
 #             (START-BACKSTOP), is left unattached and exits 4, with the attach
 #             to run later. (START-INTERRUPT) Ctrl-C stops the wait, leaves the
@@ -590,6 +593,37 @@ case "\${1:-}" in ''|*[!0-9]*) exec "$REAL_SLEEP" "\$@" ;; esac
 echo \$(( \$(cat "\$FAKE_CLOCK") + \$1 * \${FAKE_CLOCK_SCALE:-1} )) > "\$FAKE_CLOCK"
 EOF
 chmod +x "$TMP/bin/date" "$TMP/bin/sleep"
+
+# --- flock stand-in -----------------------------------------------------------
+# $TMP/flockshim/flock runs the real flock. A case that puts it first on PATH
+# can land, just before engage takes its engage lock, what another engage did
+# after this one read tk-conv: $BEFORE_LOCK_ASSIGNEE and $BEFORE_LOCK_STATUS set
+# tk-conv's holder and status, and $BEFORE_LOCK_LIVE ("<sid>=<alias>") lists a
+# live sitting, as the other engage's spawn does. Recorded in $CALLS as
+# "before-lock". $LOCK_BARRIER holds each engage there until that many have
+# arrived, counted in $LOCK_BARRIER_DIR, so all of them have read the
+# conversation before any takes the lock.
+export REAL_FLOCK; REAL_FLOCK=$(command -v flock || true)
+mkdir -p "$TMP/flockshim"
+cat > "$TMP/flockshim/flock" <<'SHIM'
+#!/bin/sh
+if [ -n "${BEFORE_LOCK_ASSIGNEE:-}${BEFORE_LOCK_STATUS:-}${BEFORE_LOCK_LIVE:-}" ]; then
+  [ -z "${BEFORE_LOCK_ASSIGNEE:-}" ] || printf '%s' "$BEFORE_LOCK_ASSIGNEE" > "$STATE_DIR/tk-conv.assignee"
+  [ -z "${BEFORE_LOCK_STATUS:-}" ] || printf '%s' "$BEFORE_LOCK_STATUS" > "$STATE_DIR/tk-conv.status"
+  [ -z "${BEFORE_LOCK_LIVE:-}" ] || printf '%s %s\n' "${BEFORE_LOCK_LIVE%%=*}" "${BEFORE_LOCK_LIVE#*=}" >> "$STATE_DIR/live"
+  printf 'before-lock tk-conv\n' >> "$CALLS"
+fi
+if [ -n "${LOCK_BARRIER:-}" ]; then
+  _i=0
+  until mkdir "$LOCK_BARRIER_DIR/lock" 2>/dev/null; do sleep 0.02; _i=$((_i + 1)); [ "$_i" -lt 1500 ] || break; done
+  printf '%s' "$(( $(cat "$LOCK_BARRIER_DIR/arrivals" 2>/dev/null || echo 0) + 1 ))" > "$LOCK_BARRIER_DIR/arrivals"
+  rmdir "$LOCK_BARRIER_DIR/lock" 2>/dev/null || true
+  _i=0
+  while [ "$(cat "$LOCK_BARRIER_DIR/arrivals")" -lt "$LOCK_BARRIER" ] && [ "$_i" -lt 600 ]; do sleep 0.05; _i=$((_i + 1)); done
+fi
+exec "$REAL_FLOCK" "$@"
+SHIM
+chmod +x "$TMP/flockshim/flock"
 # reps <token> <n> — the token n times over, for a START_STATES walk.
 reps() { _r=""; _n=0; while [ "$_n" -lt "$2" ]; do _r="$_r $1"; _n=$((_n + 1)); done; printf '%s' "$_r"; }
 
@@ -1224,18 +1258,21 @@ has "$OUT" "could not be read" "(ALIAS-UNREAD) …saying it could not be read"
 hasnt "$OUT" "gc session close" "(ALIAS-UNREAD) …and never telling the operator to close the holder"
 unset ALIAS_HELD ALIAS_HOLDER AFTER_REFUSAL_UNREADABLE GC_HELM_ENGAGE_BIND_WAIT
 
-echo "# two concurrent engages of one conversation: they spawn one at a time, and the alias admits one"
-# A real race, not a scripted one. Both engages start together and read the
-# conversation in the queue. The engage lock lets one reach the spawn first,
-# and the other reaches it only once that one has bound the conversation and let
-# the lock go. The stub reserves the alias under one lock, as gascity does, so
-# the alias refuses the second, and it runs every bind as bd's compare-and-swap
-# under one lock too.
+echo "# two concurrent engages of one conversation: they take its engage lock one at a time, and the second starts nothing"
+# A real race, not a scripted one. Both engages start together, and the flock
+# stand-in holds each at a barrier until both have arrived, so both have read
+# the conversation in the queue and passed every guard before either takes the
+# lock. The lock then lets one through. It spawns, binds the conversation and
+# lets the lock go. The other reads the conversation again under the lock,
+# finds the first's sitting holding it, and starts nothing. The stub reserves
+# the alias under one lock, as gascity does, and runs every bind as bd's
+# compare-and-swap under one lock too.
 REG="$TMP/alias-registry"; rm -rf "$REG"; mkdir -p "$REG"
+BARRIER="$TMP/lock-barrier"; rm -rf "$BARRIER"; mkdir -p "$BARRIER"
 reset
 set +e
 for r in a b; do
-  ( ALIAS_REGISTRY="$REG" \
+  ( PATH="$TMP/flockshim:$PATH" LOCK_BARRIER=2 LOCK_BARRIER_DIR="$BARRIER" ALIAS_REGISTRY="$REG" GC_HELM_ENGAGE_BIND_WAIT=60 \
       sh "$SCRIPT" engage tk-conv --no-attach --no-input </dev/null >"$TMP/race-$r.out" 2>&1
     echo "$?" > "$TMP/race-$r.rc" ) &
 done
@@ -1243,26 +1280,21 @@ wait
 set -e
 RC_A="$(cat "$TMP/race-a.rc")"; RC_B="$(cat "$TMP/race-b.rc")"
 CALLED="$(cat "$CALLS")"
-eq "$(cat "$REG/arrivals-at-reserve" 2>/dev/null)" "1" "(RACE-CONCURRENT) the first engage reserved the alias before the second reached the spawn"
-eq "$(grep -c '^session new ' "$CALLS" || true)" "2" "(RACE-CONCURRENT) both engages attempted the spawn"
-_race_bind=$(grep -n 'bd update tk-conv --if-assignee' "$CALLS" | head -1 | cut -d: -f1)
-_race_second=$(grep -n '^session new ' "$CALLS" | sed -n 2p | cut -d: -f1)
-if [ -n "$_race_bind" ] && [ -n "$_race_second" ] && [ "$_race_bind" -lt "$_race_second" ]; then
-  ok "(RACE-CONCURRENT) …the second only once the first had bound the conversation"
-else
-  bad "(RACE-CONCURRENT) …the second only once the first had bound the conversation (bind at line ${_race_bind:-none}, second spawn at ${_race_second:-none})"
-fi
+eq "$(cat "$BARRIER/arrivals" 2>/dev/null)" "2" "(RACE-CONCURRENT) both engages had read the conversation in the queue before either took the lock"
+eq "$(grep -c '^session new ' "$CALLS" || true)" "1" "(RACE-CONCURRENT) only the engage that took the lock first reached the spawn"
 eq "$(grep -c '^spawned ' "$CALLS" || true)" "1" "(RACE-CONCURRENT) exactly one sitting was spawned"
 LOSER=""
 if [ "$RC_A" = 0 ] && [ "$RC_B" = 4 ]; then LOSER=b; elif [ "$RC_A" = 4 ] && [ "$RC_B" = 0 ]; then LOSER=a; fi
 [ -n "$LOSER" ] && ok "(RACE-CONCURRENT) one engage succeeds and the other exits 4" \
   || bad "(RACE-CONCURRENT) expected one engage to exit 0 and the other 4 (got a=$RC_A b=$RC_B)"
 eq "$(asg tk-conv)" "gc-toolkit/gc-toolkit.tk-conv" "(RACE-CONCURRENT) the conversation is bound once, to the sitting that was spawned"
-eq "$(grep -c 'bd update tk-conv --if-assignee' "$CALLS" || true)" "1" "(RACE-CONCURRENT) only the winner writes the conversation; the refused engage never reaches the bind"
+eq "$(grep -c 'bd update tk-conv --if-assignee' "$CALLS" || true)" "1" "(RACE-CONCURRENT) only the winner writes the conversation; the other never reaches the bind"
 LOSER_OUT="$(cat "$TMP/race-${LOSER:-b}.out")"
-has "$LOSER_OUT" "held by 'gc-toolkit/gc-toolkit.tk-conv'" "(RACE-CONCURRENT) the refused engage reports the winner's hold"
+has "$LOSER_OUT" "conversation tk-conv changed after this engage first read it" "(RACE-CONCURRENT) the other engage says the conversation changed after its first read"
+has "$LOSER_OUT" "Conversation tk-conv is assigned to 'gc-toolkit/gc-toolkit.tk-conv' (open), so engage left it as it is. Engage it again to attach to the sitting that holds it" \
+    "(RACE-CONCURRENT) …names the winner's hold, and the engage that attaches to its sitting"
 hasnt "$LOSER_OUT" "gc session close" "(RACE-CONCURRENT) …and never tells them to close it"
-hasnt "$CALLED" "session close" "(RACE-CONCURRENT) no sitting is closed, because none was spawned that holds nothing"
+hasnt "$CALLED" "session close" "(RACE-CONCURRENT) no sitting is closed"
 
 echo "# two conversations in the queue: engage takes the oldest"
 export HAVE_CONV=2
@@ -1575,6 +1607,49 @@ GC_CITY_PATH="" run_engage tk-conv --no-attach
 eq "$RC" 3 "(LOCK-NOROOT) with no city root to keep the lock file in, engage exits 3"
 hasnt "$CALLED" "session new" "(LOCK-NOROOT) …and starts no sitting"
 has "$OUT" "cannot take conversation tk-conv's engage lock: no city root could be named" "(LOCK-NOROOT) …saying why"
+
+echo "# an engage starts a sitting only on the conversation as it reads it under the lock"
+# What an engage read of the conversation before it held the lock is out of date
+# once another engage has bound the conversation to a sitting, or spawned one on
+# a conversation already assigned to the alias, a spawn that writes nothing to
+# the conversation. That sitting is live and need not be attached yet, and once
+# it is older than the bind wait it looks like a sitting cut short, so an engage
+# acting on its first read would close it. The flock stand-in lands the other
+# engage's work just before this one takes the lock, and each sitting
+# $STATE/live seeds reads created long ago and unattached.
+reset
+PATH="$TMP/flockshim:$PATH" run_engage tk-conv --no-attach
+eq "$RC" 0 "(LOCK-REREAD-SAME) an engage whose conversation reads under the lock as it first read it starts its sitting"
+has "$CALLED" "session new converse-opus --alias tk-conv" "(LOCK-REREAD-SAME) …spawning it as before"
+
+reset
+PATH="$TMP/flockshim:$PATH" BEFORE_LOCK_ASSIGNEE=gc-toolkit/gc-toolkit.tk-conv BEFORE_LOCK_LIVE=gc-50=gc-toolkit/gc-toolkit.tk-conv \
+  run_engage tk-conv --no-attach
+eq "$RC" 4 "(LOCK-REREAD-BOUND) an engage whose conversation another engage bound to a live sitting before the lock exits 4"
+has "$CALLED" "before-lock tk-conv" "(LOCK-REREAD-BOUND) …the bind and the sitting landing between its first read and its lock"
+hasnt "$CALLED" "session close" "(LOCK-REREAD-BOUND) …closing nothing, since that sitting holds the conversation"
+hasnt "$CALLED" "session new" "(LOCK-REREAD-BOUND) …spawning nothing"
+hasnt "$CALLED" "bd update" "(LOCK-REREAD-BOUND) …and writing nothing"
+eq "$(asg tk-conv)/$(sts tk-conv)" "gc-toolkit/gc-toolkit.tk-conv/open" "(LOCK-REREAD-BOUND) …so the other engage's binding stands"
+has "$OUT" "conversation tk-conv changed after this engage first read it" "(LOCK-REREAD-BOUND) …saying the conversation changed"
+has "$OUT" "Conversation tk-conv is assigned to 'gc-toolkit/gc-toolkit.tk-conv' (open), so engage left it as it is. Engage it again to attach to the sitting that holds it, or to start one if none does: gc-helm engage tk-conv" \
+    "(LOCK-REREAD-BOUND) …and where it is, with the engage that attaches to its sitting"
+lock_free "$LOCKF" && ok "(LOCK-REREAD-BOUND) …and the lock is free once it exits" || bad "(LOCK-REREAD-BOUND) …and the lock is free once it exits"
+
+reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
+PATH="$TMP/flockshim:$PATH" BEFORE_LOCK_LIVE=gc-50=gc-toolkit/gc-toolkit.tk-conv run_engage tk-subj --no-attach
+eq "$RC" 4 "(LOCK-REREAD-LEFT) an engage of a conversation a closed session left exits 4 when another engage started a sitting on it before the lock"
+hasnt "$CALLED" "session close" "(LOCK-REREAD-LEFT) …closing nothing, though that sitting's spawn wrote nothing to the conversation"
+hasnt "$CALLED" "session new" "(LOCK-REREAD-LEFT) …and spawning no second sitting"
+eq "$(asg tk-conv)/$(sts tk-conv)" "gc-toolkit/gc-toolkit.tk-conv/in_progress" "(LOCK-REREAD-LEFT) …so the conversation stays with that sitting"
+has "$OUT" "Conversation tk-conv is assigned to 'gc-toolkit/gc-toolkit.tk-conv' (in_progress), so engage left it as it is." "(LOCK-REREAD-LEFT) …saying where it is"
+
+reset
+PATH="$TMP/flockshim:$PATH" BEFORE_LOCK_STATUS=closed run_engage tk-conv --no-attach
+eq "$RC" 4 "(LOCK-REREAD-CLOSED) an engage whose conversation closed before the lock exits 4"
+hasnt "$CALLED" "session new" "(LOCK-REREAD-CLOSED) …spawning nothing"
+has "$OUT" "A closed conversation is not held again; engage its subject to open a fresh one: gc-helm engage tk-subj. Nothing spawned." \
+    "(LOCK-REREAD-CLOSED) …refusing it as closed, with the engage of its subject"
 
 # A sitting not listed yet may only lag the supervisor's read cache, and a
 # listing that fails says nothing about the sitting, so neither ends the wait.

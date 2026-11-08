@@ -93,7 +93,10 @@ takes, reporting the sitting's state while it waits (an interrupted wait leaves
 the sitting to start on its own, to attach later). An engage that spawns a
 sitting holds the conversation's engage lock, a flock file under the city's
 .gc/runtime/packs/gc-toolkit, from before the spawn through the bind, and one
-that waits to attach holds it until the wait ends. When the sitting it spawned
+that waits to attach holds it until the wait ends. Under the lock it reads the
+conversation again, and starts nothing (exit 4) when the conversation changed
+after engage first read it, as when another engage started a sitting on it
+meanwhile. When the sitting it spawned
 ends before the reconciler starts it, engage hands the conversation back to the
 operator's queue with a write guarded on that sitting's alias and on the
 conversation's status, and leaves one closed or reassigned since as it is. The
@@ -4839,6 +4842,34 @@ cmd_engage() {
     esac
     gc() { engage_gc "$@"; }
 
+    # What engage read of the conversation before it held the lock can be out
+    # of date by now. The engage it waited for may have bound the conversation
+    # to the sitting it spawned, or spawned one on a conversation already
+    # assigned to the alias, a spawn that writes nothing to the conversation.
+    # That sitting is live and need not be attached yet, and once it is older
+    # than the bind wait, the close of a sitting cut short below would take it
+    # for one. No other engage spawns or binds a sitting on the conversation
+    # while this one holds the lock, so engage reads the conversation again
+    # now, with the session list it reads here, and starts nothing when it is
+    # not as engage first read it. A closed one is refused as closed.
+    if ! live_now=$(live_sittings); then
+        echo "$PROG: engage: could not read 'gc session list' before starting a sitting on conversation $CONV. Nothing spawned; retry once it answers: $PROG engage $bead" >&2
+        exit 4
+    fi
+    conv_locked_row=$(row_now "$CONV")
+    conv_locked=$(printf '%s' "$conv_locked_row" | jq -r --argjson live "$live_now" "$CONVERSATION_JQ$SITTING_JQ"'
+        [ (if held_live($live) then "live" elif ((.assignee // "") | tostring) == "human" then "queue" else "left" end),
+          ((.assignee // "") | tostring), ((.status // "open") | tostring | ascii_downcase) ] | @tsv' 2>/dev/null || true)
+    if [ "$conv_locked" != "$conv_state$TAB$conv_holder$TAB$conv_status" ]; then
+        engage_release_lock
+        if [ "$(printf '%s' "$conv_locked_row" | jq -r '(.status // "") | tostring | ascii_downcase' 2>/dev/null || true)" = closed ]; then
+            engage_refuse_closed "$conv_locked_row"
+        fi
+        engage_where_now
+        echo "$PROG: engage: conversation $CONV changed after this engage first read it and before it took the conversation's engage lock, as it does when another engage starts a sitting on it, so this engage starts nothing. $hb_said" >&2
+        exit 4
+    fi
+
     # A session still in the list under this conversation's alias that does not
     # hold it keeps the alias, since only a closed session gives one up. A
     # sitting cut short leaves exactly that: its conversation back in the queue
@@ -4848,10 +4879,6 @@ cmd_engage() {
     # engage about to bind the conversation, and one the operator is attached to
     # is a pane in use, so neither is closed here: the spawn below meets its
     # alias, and engage_alias_held waits for its bind and names it.
-    if ! live_now=$(live_sittings); then
-        echo "$PROG: engage: could not read 'gc session list' before starting a sitting on conversation $CONV. Nothing spawned; retry once it answers: $PROG engage $bead" >&2
-        exit 4
-    fi
     stale_after="${GC_HELM_ENGAGE_BIND_WAIT:-20}"
     case "$stale_after" in ''|*[!0-9]*) stale_after=20 ;; esac
     for _st in $(printf '%s' "$live_now" | jq -r --arg c "$CONV" --argjson w "$stale_after" "$CONVERSATION_JQ"'
