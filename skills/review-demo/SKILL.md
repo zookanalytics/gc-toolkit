@@ -318,7 +318,7 @@ If it names a standard, work through these steps in order.
      names of their PNGs;
    - its `locus`: the file and the component, template or style that draws the
      part that is wrong.
-6. **Deliver the demo.** The PR gets the three things below, and no other
+6. **Deliver the demo.** The PR gets the items below, and no other
    capture. Deliver each one as the section Produce it and deliver it says.
    - The showcase: a visual that shows the change as a whole. Pick it as the
      section Pick the modality picks a visual. A visual the diff carries, such

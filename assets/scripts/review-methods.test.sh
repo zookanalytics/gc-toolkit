@@ -476,8 +476,8 @@ hasF "$TMP/demo.standard" 'its evidence: an example or two of the captures that 
   "…with an example or two of its captures as its evidence"
 hasF "$TMP/demo.standard" 'its `locus`: the file and the component, template or style that draws the part that is wrong' \
   "…and the source as its locus"
-hasF "$TMP/demo.standard" '**Deliver the demo.** The PR gets the three things below, and no other capture.' \
-  "…delivers three things to the PR, and no other capture"
+hasF "$TMP/demo.standard" '**Deliver the demo.** The PR gets the items below, and no other capture.' \
+  "…delivers the items it lists to the PR, and no other capture"
 hasF "$TMP/demo.standard" 'Deliver each one as the section Produce it and deliver it says.' \
   "…each the way every visual is delivered"
 hasF "$TMP/demo.standard" 'The showcase: a visual that shows the change as a whole. Pick it as the section Pick the modality picks a visual.' \
