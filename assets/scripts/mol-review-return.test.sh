@@ -6,10 +6,10 @@
 #
 # The block routes the review with `gc sling "$GC_TEMPLATE" <review>
 # --no-formula --no-convoy`. $GC_TEMPLATE is the pool the session serves, so
-# the block reads nothing from the store, and a store that does not answer
-# cannot leave the review with no route and no run. A sling that fails is
-# noted on the review, which then rests unrouted, and the session drains
-# either way. Each copy is taken from the parsed formula, as a pour renders it,
+# the block reads no pool from the store, and a read that fails cannot skip
+# the route. A sling that fails, as one against a store that does not answer
+# does, is noted on the review, which then rests unrouted, and the session
+# drains either way. Each copy is taken from the parsed formula, as a pour renders it,
 # and run against a stub gc that logs every call. No live city, store or
 # network.
 set -uo pipefail
@@ -101,7 +101,8 @@ bash -n "$TMP/return.sh" && ok "the rendered block is valid bash" || bad "the re
 
 # gc: every call is logged. A sling refuses an empty target, as gc refuses an
 # agent city.toml does not name, and STUB_SLING_ERR fails it with that message.
-# STUB_BD_DOWN fails every bd call, a store that does not answer.
+# STUB_BD_DOWN fails every bd call and leaves the sling to its own answer, so
+# a case under it shows that the block's route waits on no bd read.
 mkdir -p "$TMP/bin"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 printf '%s\n' "$*" >> "$STUB_LOG"
@@ -132,7 +133,7 @@ has "$OUT" "Slung rb to $POOL" "…printing what the sling said"
 
 ret GC_TEMPLATE="$POOL" STUB_BD_DOWN=1
 eq "$RC|$LOG" "0|sling $POOL rb --no-formula --no-convoy
-runtime drain-ack" "a store that does not answer: the return reads nothing from it, so it still slings and drains"
+runtime drain-ack" "bd calls that fail: the return makes none, so it still slings and drains"
 
 ret GC_TEMPLATE="$POOL" STUB_SLING_ERR="gc sling: refusing cross-store route"
 eq "$(printf '%s\n' "$LOG" | sed -n 1p)" "sling $POOL rb --no-formula --no-convoy" "a sling that fails: it was asked once"
