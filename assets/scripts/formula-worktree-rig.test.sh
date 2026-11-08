@@ -99,10 +99,6 @@ esac
 GCTK
 chmod +x "$BIN/gc" "$BIN/lifecycle" "$TMP/gctk"
 export PATH="$BIN:$PATH"
-# The direct-merge block stamps its landing through `gctk bead`, which
-# gctk.stub.sh stands in for, so the write reaches the fake gc. The review
-# probe passes its own GCTK_BIN.
-export GCTK_BIN="$HERE/gctk.stub.sh"
 export FAKE_ROSTER="$TMP/roster.json"
 
 extract() { awk -v m="$2" '$0 ~ ("# >>> " m "$") {f=1; next} $0 ~ ("# <<< " m "$") {f=0} f' "$1"; }

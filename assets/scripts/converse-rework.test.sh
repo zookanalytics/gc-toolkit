@@ -235,9 +235,6 @@ exec "$REAL_GIT" "$@"
 GIT
 chmod +x "$BIN/git"
 export PATH="$BIN:$PATH"
-# The scripts under test confirm a write through `gctk bead`, which
-# gctk.stub.sh stands in for, so each write reaches the fake gc.
-export GCTK_BIN="$HERE/gctk.stub.sh"
 export GC_RIG="gc-toolkit"
 # The priority writer rework-child.sh settles the child with: this tree's
 # queue-priority.sh over the stub store, named by GC_QUEUE_PRIORITY_TOOL. The

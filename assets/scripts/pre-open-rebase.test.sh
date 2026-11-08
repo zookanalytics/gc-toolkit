@@ -35,10 +35,6 @@ REAL_GIT="$(command -v git)"
 # shellcheck source=test-harness.sh
 . "$HERE/test-harness.sh"
 harness_init
-# Set after harness_init, which sets GCTK_BIN to none. The scripts under test
-# confirm a write through `gctk bead`, which gctk.stub.sh stands in for, so
-# each write reaches the fake gc.
-export GCTK_BIN="$HERE/gctk.stub.sh"
 
 # The observation this arm makes IS a git operation. The harness git stub exits
 # 0 for every command it does not recognise, so `merge-tree` under it reads

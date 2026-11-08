@@ -242,9 +242,6 @@ exit 0
 GC
 chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
-# The scripts under test confirm a write through `gctk bead`, which
-# gctk.stub.sh stands in for, so each write reaches the fake gc.
-export GCTK_BIN="$HERE/gctk.stub.sh"
 export FAKE_STORE="$TMP/store.json" FAKE_DEPS="$TMP/deps.txt" GC_LOG="$TMP/gc.log"
 
 POOL="gc-toolkit/gc-toolkit.polecat"

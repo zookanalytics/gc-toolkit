@@ -5,10 +5,9 @@
 // `gc bd show` only when that daemon is unreachable, so a read on the healthy
 // path neither forks nor opens its own Dolt connection, and the cadence still
 // answers when the daemon is down. The daemon read is cached and carries no
-// notes, so a read that must observe a write just made, appended notes
-// included, takes an authoritative `gc bd` path instead: ShowDirect, or
-// Verify (verify.go), which confirms a write's witness. Writes (Update, Write)
-// and the Show fallback shell out to `gc`
+// notes, so a read that must see the bead as it stands now, appended notes
+// included, takes the authoritative ShowDirect path instead. Writes (Update) and
+// the Show fallback shell out to `gc`
 // exactly as the shell scripts do, which keeps the observability, the stub
 // surface and the permissions surface of those paths identical across the
 // port: the same invocations appear in the same logs, and the same test stubs
@@ -211,10 +210,10 @@ func (c *Client) Show(id string) *Bead {
 
 // ShowDirect reads one bead straight from `gc bd`, never the supervisor API.
 // Show routes cold reads through the daemon's cached connection, but a read
-// that verifies a write just made must observe that write and must carry the
-// bead's notes — the daemon's cache can lag a fresh write and its bead payload
-// omits notes entirely — so a verification read-back uses this authoritative
-// path. Same decode and fail-closed contract as Show's fallback arm.
+// that decides a write or a merge from the bead's current state must observe the
+// latest write and must carry the bead's notes — the daemon's cache can lag a
+// fresh write and its bead payload omits notes entirely — so such a read uses
+// this authoritative path. Same decode and fail-closed contract as Show's fallback arm.
 func (c *Client) ShowDirect(id string) *Bead { return c.showViaExec(id) }
 
 // showViaExec reads one bead by forking `gc bd show --json`.
@@ -254,22 +253,6 @@ func (c *Client) showViaExec(id string) *Bead {
 // That is how the scripts read `gc bd show`: `jq -c '.[0] // empty'`, its exit
 // unread, prints the first array's row before it reaches what follows.
 func (c *Client) array(strict bool, args ...string) ([]Bead, bool) {
-	raw, ok := c.raw(strict, args...)
-	if !ok {
-		return nil, false
-	}
-	rdec := json.NewDecoder(bytes.NewReader(raw))
-	rdec.UseNumber()
-	var rows []Bead
-	if err := rdec.Decode(&rows); err != nil {
-		return nil, false
-	}
-	return rows, true
-}
-
-// raw runs `gc <args>` and returns the JSON array it prints, scrubbed and not
-// yet decoded into rows, under array's contract.
-func (c *Client) raw(strict bool, args ...string) (json.RawMessage, bool) {
 	out, err := exec.Command(c.bin, args...).Output()
 	if err != nil {
 		var ee *exec.ExitError
@@ -289,7 +272,13 @@ func (c *Client) raw(strict bool, args ...string) (json.RawMessage, bool) {
 			return nil, false
 		}
 	}
-	return raw, true
+	rdec := json.NewDecoder(bytes.NewReader(raw))
+	rdec.UseNumber()
+	var rows []Bead
+	if err := rdec.Decode(&rows); err != nil {
+		return nil, false
+	}
+	return rows, true
 }
 
 // showViaDaemon reads one bead over the supervisor API, returning the bead on a
