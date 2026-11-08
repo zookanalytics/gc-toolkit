@@ -565,8 +565,8 @@ shares only the word ([authority-map.md](authority-map.md)).
     report per home, which the next clean start clears.
   - The search, and each way this script differs from Gas Town's and why, is
     [specs/tk-1tfzr71.10/gas-city-search.md](../specs/tk-1tfzr71.10/gas-city-search.md).
-- **Verified.** 2026-11-05, at `gastownhall/gascity` main 9f807760c191 and
-  `gastownhall/gascity-packs` main 796d7ecd73cf.
+- **Verified.** 2026-11-08, at `gastownhall/gascity` main 27a4857eabd5 and
+  `gastownhall/gascity-packs` main 2a3b142e3fbd.
 - **Retires when.** Gas City provisions a tree bound to an agent, with a sync to
   the default branch, or Gas Town's agents stop running a script of their own at
   `pre_start`.
