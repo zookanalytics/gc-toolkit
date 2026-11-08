@@ -2605,10 +2605,10 @@ cmd_handback() {
 # conversation, printed as "<session-id> own <session-name> <state>" when it is
 # the session this verb runs in and "<session-id> other <session-name> <state>"
 # when it is not, else nothing. The session name is its tmux session's, and the
-# state is the one `gc session list` reads, "-" when either is empty. The holder is
-# the session the conversation's gc.session_id names, else the one its
-# gc.session_name or assignee names: the claim stamps both pins, and a bind the
-# sitting never claimed leaves the assignee alone. Only a converse template
+# state is the one `gc session list` reads, "-" when either is empty. The
+# holder is the session the conversation's gc.session_id names, else the one
+# its gc.session_name or assignee names: the claim stamps both pins, and a bind
+# the sitting never claimed leaves the assignee alone. Only a converse template
 # counts, so a bead some other agent holds never stops that agent, and a
 # listing that will not read names nobody.
 sitting_session_of() {
@@ -4149,12 +4149,12 @@ engage_new_subject_cleanup() {
 # conversation picked at the prompt) is a distinct dialogue, so it files a
 # fresh conversation even when the bead has one. A sitting is a manual
 # converse-<model> session named for its conversation (origin=manual, which the
-# work ladder that paces pool seats never governs). The session is spawned before the
-# bind, because its alias is the reservation: only one session that is not
-# closed can hold the alias. Then the conversation is bound to the session's
-# alias with a write guarded on the holder engage read, so of two engages only
-# one bind lands, and the session's own `gc hook --claim` adopts it. dismiss
-# ends the sitting.
+# work ladder that paces pool seats never governs). The session is spawned
+# before the bind, because its alias is the reservation: only one session that
+# is not closed can hold the alias. Then the conversation is bound to the
+# session's alias with a write guarded on the holder engage read, so of two
+# engages only one bind lands, and the session's own `gc hook --claim` adopts
+# it. dismiss ends the sitting.
 #
 # The argument is the bead the operator picked off the board. A conversation id
 # names its own conversation. A gate names the one bead still waiting on it, or,

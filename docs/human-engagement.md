@@ -573,9 +573,10 @@ replies to stays open and owed, for its filer or the next sitting. With no
 argument it infers the current sitting from the session it runs in. The close
 falls back to `--force` when bd refuses an operator closing a conversation its
 sitting holds. It then marks the tab of the converse session that held each
-conversation it closed done, and stops that session with `gc runtime
-drain-ack`: the session it runs in acks itself, last, and any other is acked as
-an operator. On a bead with no live sitting it writes nothing and says so. `prefix+X` runs the same dismiss from the keyboard
+conversation it closed done, and stops that session with
+`gc runtime drain-ack`: the session it runs in acks itself, last, and any
+other is acked as an operator. On a bead with no live sitting it writes
+nothing and says so. `prefix+X` runs the same dismiss from the keyboard
 after a y/n confirm (`assets/scripts/tmux-dismiss-sitting.sh`), under the
 pane's own session. It passes `--operator`, because the keystroke comes from
 outside the sitting, and dismiss stops the session with an operator ack. That
@@ -943,14 +944,15 @@ Three things about that path are worth knowing before trusting a pane:
   A sitting's stop event reads the same, and there it is the sitting's own
   `drain-ack`, an operator's from `gc-helm dismiss`, or its idle sleep.
 
-**What the design holds to.** A conversation is done only when the sitting's
-sign-off or the operator's dismiss closes it, and each marks the tab done. The
-agent runs while its sitting holds an open conversation or a client is
-attached, and stops otherwise: the drain-ack's stop once the tab detaches, and
-the idle sleep for a sitting that holds nothing. Attaching to a stopped sitting
-resumes its thread. Nothing copies the pane, and no pane, live or dead, stays on
-screen after its session ends, so what a tab prints is the record on the
-conversation.
+**What the design holds to.** A conversation is done when the sitting closes
+it, at its sign-off or at a moot or benign close before any framing, or when
+the operator dismisses it, and each of those marks the tab done. Neither a stop
+nor the idle sleep closes one. The agent runs while its sitting holds an open
+conversation or a client is attached, and stops otherwise: the drain-ack's
+stop once the tab detaches, and the idle sleep for a sitting that holds
+nothing. Attaching to a stopped sitting resumes its thread. Nothing copies the
+pane, and no pane, live or dead, stays on screen after its session ends, so
+what a tab prints is the record on the conversation.
 
 **What follows for the pack.** The record has to be written before the pane
 matters: what is owed recorded at hold time, the outcome appended as soon as
@@ -1024,7 +1026,7 @@ which is the point.
 
 This page states the pack's own model, so it changes with the pack's code:
 update it in the same PR as a change to a human-gate filer, `gc-helm.sh`, the
-converse prompt or skills, the sign-off, the converse templates, or the board. The Gas City
-facts it links are re-verified by the refresh procedure in
+converse prompt or skills, the sign-off, the converse templates, or the board.
+The Gas City facts it links are re-verified by the refresh procedure in
 [gascity/human-engagement.md](gascity/human-engagement.md#refresh-procedure);
 when one of them moves, re-derive the seam here that rests on it.
