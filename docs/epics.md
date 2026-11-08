@@ -86,12 +86,12 @@ contract ([Deliveries and Epic Checkpoints](#deliveries-and-epic-checkpoints)).
 
 **A first draft.** A hypothesis is a first draft until the operator's first
 ruling on its epic, so an epic that carries `epic_hypothesis` and no
-`epic_ruling` has one. The epic's row on the helm board says so, and asks
-nothing more of the operator for it. A first draft can be the filer's own
-words: whoever files an epic writes a rough sentence when the operator has
-stated none, and files the epic at once rather than asking first. A ruling can
-judge the sentence before any work lands, and the operator's yes to it, as
-written or sharpened, is recorded as a continue ruling
+`epic_ruling` has one. Until the epic closes, its row on the helm board says
+so, and asks nothing more of the operator for it. A first draft can be the
+filer's own words: whoever files an epic writes a rough sentence when the
+operator has stated none, and files the epic at once rather than asking first.
+A ruling can judge the sentence before any work lands, and the operator's yes
+to it, as written or sharpened, is recorded as a continue ruling
 ([How an epic closes](#how-an-epic-closes)). The other fields of the contract
 are recorded only as the operator states or confirms them.
 
