@@ -90,14 +90,22 @@ named for the conversation, binds the conversation to that sitting's alias
 with a write guarded on the holder it read, so the session's own claim adopts
 it, and attaches once the reconciler has started it, however long the start
 takes, reporting the sitting's state while it waits (an interrupted wait leaves
-the sitting to start on its own, to attach later). When the sitting it waits on
+the sitting to start on its own, to attach later). An engage that spawns a
+sitting holds the conversation's engage lock, a flock file under the city's
+.gc/runtime/packs/gc-toolkit, from before the spawn through the bind, and one
+that waits to attach holds it until the wait ends. When the sitting it spawned
 ends before the reconciler starts it, engage hands the conversation back to the
 operator's queue with a write guarded on that sitting's alias and on the
-conversation's status, and leaves one that another writer has taken or closed
-since as it is. Pointed at a human gate, engage takes the one bead still
-waiting on the gate and makes the conversation it lands on reply to the gate;
-with several beads waiting it names them and starts nothing, and with none it
-says nothing waits and starts nothing.
+conversation's status, and leaves one closed or reassigned since as it is. The
+lock keeps any other sitting from being spawned or bound on the conversation
+before that write. A second engage that would start a sitting there waits up to
+GC_HELM_ENGAGE_BIND_WAIT seconds for the lock and then starts nothing (exit 4),
+and without flock or a city root engage starts no sitting (exit 3). An engage
+that attaches to a sitting another engage spawned writes nothing when it ends
+before it starts, and says where the conversation is. Pointed at a human gate,
+engage takes the one bead still waiting on the gate and makes the conversation
+it lands on reply to the gate; with several beads waiting it names them and
+starts nothing, and with none it says nothing waits and starts nothing.
 Named by a conversation that has closed, engage says when it closed and the
 first line of its last hand-back after the header, before any prompt. On a
 TTY it then engages the conversation's subject, where Enter files a new
@@ -2919,6 +2927,70 @@ accept_take_lock() {
 ACCEPT_GC=""
 accept_gc() { ( "$ACCEPT_GC" "$@" 9>&-; exit "$?" ); }
 
+# ── Engage: the conversation's engage lock ───────────────────────────
+# engage_take_lock <conversation> — take the conversation's engage lock: an
+# exclusive flock on engage-<rig>-<conversation>.lock in the directory Accept's
+# lock files live in (accept_lock_dir), held on fd 7 and keyed by the
+# conversation's store and id. It waits up to
+# GC_HELM_ENGAGE_BIND_WAIT seconds for an engage that holds it, and records this
+# process and the time it took the lock in engage-<rig>-<conversation>.holder
+# as "<pid> <epoch>". Returns 0 holding it; 1 when another engage still holds
+# it at the end of the wait, and ENGAGE_LOCK_NOTE then names that engage's
+# process and how long it has held the lock; 3 when no lock can be taken, and
+# ENGAGE_LOCK_NOTE names why. Only a 0 leaves fd 7 open. As with Accept's lock,
+# the kernel frees it once no process keeps a descriptor on it, and the file
+# stays in place after the run.
+ENGAGE_LOCK_NOTE=""
+engage_take_lock() {
+    ENGAGE_LOCK_NOTE=""
+    if ! command -v flock >/dev/null 2>&1; then
+        ENGAGE_LOCK_NOTE="flock is not on PATH"; return 3
+    fi
+    _etl_dir=$(accept_lock_dir)
+    if [ -z "$_etl_dir" ]; then
+        ENGAGE_LOCK_NOTE="no city root could be named (GC_CITY_PATH, GC_CITY or GC_CITY_ROOT holding .gc, or the HQ rig gc reports), and a lock two engages could resolve to two files excludes nothing"
+        return 3
+    fi
+    _etl_key="engage-${rig:-city}-$1"
+    _etl_lock="$_etl_dir/$_etl_key.lock"; _etl_holder="$_etl_dir/$_etl_key.holder"
+    if ! mkdir -p "$_etl_dir" 2>/dev/null || ! ( : >> "$_etl_lock" ) 2>/dev/null; then
+        ENGAGE_LOCK_NOTE="cannot create $_etl_lock"; return 3
+    fi
+    _etl_wait="${GC_HELM_ENGAGE_BIND_WAIT:-20}"
+    case "$_etl_wait" in ''|*[!0-9]*) _etl_wait=20 ;; esac
+    exec 7>>"$_etl_lock"
+    if flock -w "$_etl_wait" 7; then
+        printf '%s %s\n' "$$" "$(date -u +%s)" > "$_etl_holder" 2>/dev/null || true
+        return 0
+    fi
+    exec 7>&-
+    _etl_pid=""; _etl_since=""; _etl_held=""
+    if [ -r "$_etl_holder" ]; then read -r _etl_pid _etl_since < "$_etl_holder" || true; fi
+    case "$_etl_since" in
+        ''|*[!0-9]*) ;;
+        *) _etl_held=$(( $(date -u +%s) - _etl_since )) ;;
+    esac
+    ENGAGE_LOCK_NOTE="pid ${_etl_pid:-unknown}${_etl_held:+, holding it for ${_etl_held}s}"
+    return 1
+}
+
+# engage_gc <args...> — every gc call engage makes while it holds the engage
+# lock, run the way accept_gc runs Accept's: gc starts with fd 7 closed, so
+# nothing gc starts or leaves running holds the lock against every later engage
+# of the conversation. cmd_engage defines `gc` as this once it holds the lock,
+# so the helpers it calls run the same way, and engage_release_lock puts `gc`
+# back. The gc it runs is the program's path, $ENGAGE_GC, for the reason
+# accept_gc gives.
+ENGAGE_GC=""
+engage_gc() { ( "$ENGAGE_GC" "$@" 7>&-; exit "$?" ); }
+
+# engage_release_lock — let the engage lock go, and have `gc` name the program
+# again.
+engage_release_lock() {
+    exec 7>&-
+    unset -f gc 2>/dev/null || true
+}
+
 # accept_token — a token unique to this run, which titles the root its sling
 # pours and closes the recommendation's gate, so a later run tells this
 # acceptance's dispatch from any other. Fixed length, so no token is another's
@@ -4603,40 +4675,62 @@ cmd_engage() {
         echo "$PROG: engage: stopped waiting after $(engage_dur "$start_waited"). Conversation $CONV stays held by $sname, which the reconciler goes on starting; attach once it reads active in 'gc session list': gc session attach $sid" >&2
         exit "$1"
     }
-    # engage_hand_back <holder> <status> — the wait found that the sitting
-    # holding conversation $CONV under <holder> ended before the reconciler
-    # started it, so engage puts the conversation back in the operator's
-    # queue itself. Nothing else would: the witness's orphan recovery passes
-    # over a conversation, which keeps its sitting's alias as its assignee
-    # until a sitting under that alias takes it back. <status> is the
-    # conversation's status as engage read it while the sitting held it, and
-    # the write is the one a sitting cut short makes at its sign-off, guarded
-    # on both. bd's close keeps the assignee, so a write guarded on the holder
-    # alone would reopen a conversation that a dismiss or a sign-off closed
-    # while the sitting started. A guard that misses writes nothing and exits
-    # 13, and one read then says where the conversation is: back in the queue
-    # already, closed, or held by another writer, and engage leaves it there.
-    # Leaves in hb_said what became of the conversation and what the operator
-    # runs next, the same sentences whichever sitting ended.
+    # engage_hand_back <holder> <status> — the wait found that the sitting this
+    # engage spawned and bound conversation $CONV to under <holder> ended before
+    # the reconciler started it, so engage puts the conversation back in the
+    # operator's queue itself. Nothing else would: the witness's orphan recovery
+    # passes over a conversation, which keeps its sitting's alias as its
+    # assignee until a sitting under that alias takes it back. <status> is the
+    # conversation's status as the bind's read-back found it, and the write is
+    # the one a sitting cut short makes at its sign-off, guarded on both. bd's
+    # close keeps the assignee, so a write guarded on the holder alone would
+    # reopen a conversation that a dismiss or a sign-off closed while the
+    # sitting started.
+    #
+    # The guard cannot tell this sitting's binding from another sitting's.
+    # Every sitting of a conversation is spawned under the conversation's own
+    # alias, and one spawned on a conversation already assigned to that alias
+    # takes it with no write at all. So engage makes this write only under the
+    # conversation's engage lock, which it has held since before its spawn.
+    # Every engage that spawns a sitting on the conversation takes that lock
+    # first, so no sitting has been spawned or bound on it since this one, and
+    # the write can land only on the binding this engage made. That holds when
+    # <status> is in_progress, as it is for a conversation a closed session
+    # left, because a claim that sets the alias and in_progress again needs a
+    # sitting spawned since. A guard that misses writes nothing and exits 13,
+    # and engage_where_now says where the conversation is. Leaves in hb_said
+    # what became of the conversation and what the operator runs next.
     engage_hand_back() {
-        _hb_rc=0; _hb_row=""; _hb_owner=""; _hb_status=""
+        _hb_rc=0
         gc bd update "$CONV" --if-assignee "$1" --if-status "$2" --assignee human --status open >/dev/null 2>&1 || _hb_rc=$?
-        if [ "$_hb_rc" -eq 13 ]; then
-            _hb_row=$(row_now "$CONV")
-            _hb_owner=$(printf '%s' "$_hb_row" | jq -r '.assignee // "" | tostring' 2>/dev/null || true)
-            _hb_status=$(printf '%s' "$_hb_row" | jq -r '.status // "" | tostring | ascii_downcase' 2>/dev/null || true)
-        fi
-        [ "$_hb_rc" -ne 0 ] || bust_cache
-        if [ "$_hb_rc" -eq 0 ] || { [ "$_hb_owner" = human ] && [ "$_hb_status" = open ]; }; then
+        if [ "$_hb_rc" -eq 0 ]; then
+            bust_cache
             hb_said="Conversation $CONV is back in the operator's queue. Engage it again to start a new sitting: $PROG engage $CONV"
-        elif [ "$_hb_rc" -ne 13 ]; then
+        elif [ "$_hb_rc" -eq 13 ]; then
+            engage_where_now
+        else
             hb_said="The store refused to hand conversation $CONV back to the operator's queue (gc bd update exited $_hb_rc), so it is still bound to the sitting that ended. Engage it again to start a new sitting once the store answers: $PROG engage $CONV"
+        fi
+    }
+    # engage_where_now — one read of conversation $CONV, said in hb_said as
+    # where it is and what the operator runs next: back in the queue, closed,
+    # unreadable, or assigned to a holder engage leaves it with. An engage that
+    # reused a sitting another engage spawned says this when that sitting ends,
+    # and writes nothing. It never held the engage lock that sitting's spawn
+    # took, so it cannot know whether a sitting spawned since holds the
+    # conversation under the same alias.
+    engage_where_now() {
+        _hb_row=$(row_now "$CONV")
+        _hb_owner=$(printf '%s' "$_hb_row" | jq -r '.assignee // "" | tostring' 2>/dev/null || true)
+        _hb_status=$(printf '%s' "$_hb_row" | jq -r '.status // "" | tostring | ascii_downcase' 2>/dev/null || true)
+        if [ "$_hb_owner" = human ] && [ "$_hb_status" = open ]; then
+            hb_said="Conversation $CONV is back in the operator's queue. Engage it again to start a new sitting: $PROG engage $CONV"
         elif [ "$_hb_status" = closed ]; then
             hb_said="Conversation $CONV was closed while the sitting started, so it stays closed. Engage the subject to open a fresh conversation: $PROG engage $bead"
-        elif [ -z "$_hb_row" ]; then
-            hb_said="Conversation $CONV changed while the sitting started and could not be read, so engage left it as it is. Engage it again to reach it where it is now: $PROG engage $CONV"
+        elif [ -z "$_hb_status" ]; then
+            hb_said="Conversation $CONV could not be read, so engage left it as it is. Engage it again to reach it where it is now: $PROG engage $CONV"
         else
-            hb_said="Conversation $CONV is held by '${_hb_owner:-nobody}' now (${_hb_status:-status unread}), so engage left it as it is. Engage it again to reach it where it is now: $PROG engage $CONV"
+            hb_said="Conversation $CONV is assigned to '${_hb_owner:-nobody}' ($_hb_status), so engage left it as it is. Engage it again to attach to the sitting that holds it, or to start one if none does: $PROG engage $CONV"
         fi
     }
 
@@ -4680,6 +4774,10 @@ cmd_engage() {
     # than start a second. A sitting is live from the spawn that created it, so
     # one another engage spawned with --no-attach can still be waiting for the
     # reconciler's launch, and the attach waits for it here as it does below.
+    # This engage spawns nothing, so it takes no engage lock and writes nothing
+    # to the conversation. When the sitting ends before it starts, the hand-back
+    # is the spawning engage's, made under the lock it holds, and this one says
+    # where the conversation is (engage_where_now).
     if [ "$conv_state" = live ]; then
         live_now=$(live_sittings || printf '[]')
         sid=$(printf '%s' "$live_now" | jq -r --arg a "$conv_holder" --arg c "$CONV" "$CONVERSATION_JQ"'
@@ -4701,7 +4799,7 @@ cmd_engage() {
                 0) attach_rc=0
                    gc session attach "$sid" || attach_rc=$?
                    engage_after_attach "$attach_rc" ;;
-                2) engage_hand_back "$conv_holder" "$conv_status"
+                2) engage_where_now
                    echo "$PROG: engage: the sitting $sname that holds conversation $CONV ended before the reconciler started it (its state in 'gc session list': $start_state), so there is nothing to attach. $hb_said" >&2
                    exit 4 ;;
                 *) echo "$PROG: engage: the reconciler has not started $sname after $(engage_dur "$ENGAGE_WAIT_TIMEOUT") (its state in 'gc session list': ${start_state:-unreadable}), so it was not attached; an attach now would launch it without its prompt. Attach once it reads active there: gc session attach $sid" >&2
@@ -4710,6 +4808,36 @@ cmd_engage() {
         fi
         return 0
     fi
+
+    # From here this engage spawns a sitting on the conversation, so it first
+    # takes the conversation's engage lock (engage_take_lock) and holds it
+    # through its bind and the bind's read-back. An engage that waits to attach
+    # holds it until the wait ends, and so through the hand-back when its sitting
+    # ends before it starts. The lock is what makes that hand-back safe. Every
+    # sitting of the conversation is spawned under the conversation's own alias,
+    # so the hand-back's guard cannot tell one sitting's binding from another's,
+    # and a sitting spawned on a conversation already assigned to that alias
+    # takes it with no write at all. Under the lock, no other engage spawns or
+    # binds a sitting on the conversation between this engage's spawn and its
+    # hand-back. A second engage that would start a sitting on the conversation
+    # waits up to GC_HELM_ENGAGE_BIND_WAIT seconds for the lock, then stops and
+    # names the engage that holds it. Without flock, or a city root to keep the
+    # lock file in, engage starts no sitting.
+    ENGAGE_GC=$(command -v gc 2>/dev/null || true)
+    case "$ENGAGE_GC" in
+        */*) ;;
+        *) echo "$PROG: engage: cannot name the gc program's path ('command -v gc' answered '${ENGAGE_GC}'), and a gc run under the engage lock must be a program for the lock's descriptor to close in it. Nothing spawned." >&2
+           exit 3 ;;
+    esac
+    lock_rc=0; engage_take_lock "$CONV" || lock_rc=$?
+    case "$lock_rc" in
+        0) ;;
+        1) echo "$PROG: engage: another engage of conversation $CONV holds its engage lock ($ENGAGE_LOCK_NOTE) while it starts a sitting there, so this one starts nothing. Engage it again once that one has attached or stopped: $PROG engage $CONV" >&2
+           exit 4 ;;
+        *) echo "$PROG: engage: cannot take conversation $CONV's engage lock: $ENGAGE_LOCK_NOTE. Engage starts no sitting without it, because a sitting started beside another engage's hand-back could lose the conversation to that hand-back. Nothing spawned." >&2
+           exit 3 ;;
+    esac
+    gc() { engage_gc "$@"; }
 
     # A session still in the list under this conversation's alias that does not
     # hold it keeps the alias, since only a closed session gives one up. A
@@ -4763,15 +4891,19 @@ cmd_engage() {
     # gc says WHY a spawn failed only on stderr (template not found in this rig,
     # alias already held, transport down), so it is kept for the message.
     # One spawn attempt under the alias in $1: capture the identity JSON on
-    # stdout and gc's reason on stderr (into spawn_why), then parse it.
+    # stdout and gc's reason on stderr (into spawn_why), then parse it. The
+    # spawn runs under the engage lock, so it runs the gc program with fd 7
+    # closed, as engage_gc does. It names the program itself rather than the
+    # `gc` function, because sh may keep an assignment made before a function
+    # call, and GC_DIR must reach this one command only.
     engage_spawn() {
         spawn_errf=$(mktemp "${TMPDIR:-/tmp}/gctk-engage-spawn.XXXXXX" 2>/dev/null || printf '')
         if [ -n "$spawn_errf" ]; then
-            spawn=$(GC_DIR="$path" gc session new "$template" --alias "$1" --no-attach --json 2>"$spawn_errf" | scrub)
+            spawn=$(GC_DIR="$path" "$ENGAGE_GC" session new "$template" --alias "$1" --no-attach --json 7>&- 2>"$spawn_errf" | scrub)
             spawn_why=$(tr '\n' ' ' < "$spawn_errf" 2>/dev/null | cut -c1-300 | sed 's/  */ /g; s/^ *//; s/ *$//')
             rm -f "$spawn_errf" 2>/dev/null || true
         else
-            spawn=$(GC_DIR="$path" gc session new "$template" --alias "$1" --no-attach --json 2>/dev/null | scrub)
+            spawn=$(GC_DIR="$path" "$ENGAGE_GC" session new "$template" --alias "$1" --no-attach --json 7>&- 2>/dev/null | scrub)
             spawn_why=""
         fi
         sid=$(printf '%s' "$spawn" | jq -r '.session_id // ""' 2>/dev/null || true)
@@ -4787,9 +4919,13 @@ cmd_engage() {
     # to bind the conversation, or a sitting left by an engage that stopped
     # between its spawn and its bind. Only the conversation tells them apart: a
     # concurrent engage binds it within one store write of its spawn returning.
-    # So wait up to GC_HELM_ENGAGE_BIND_WAIT seconds for its holder to change
-    # from the one this engage read, and name the session as left over only
-    # when it stayed unchanged for the whole wait. Exits 4 on every path.
+    # An engage that took the engage lock holds it through its bind, so such an
+    # engage has bound, or closed its sitting, by the time this one holds the
+    # lock, and its bind reads at the first poll. So wait up to
+    # GC_HELM_ENGAGE_BIND_WAIT seconds for its holder to change from the one
+    # this engage read, and name the session as left over only when it stayed
+    # unchanged for the whole wait. The spawn lets the engage lock go before it
+    # calls this, so the wait holds back no other engage. Exits 4 on every path.
     engage_alias_held() {
         _ah_wait="${GC_HELM_ENGAGE_BIND_WAIT:-20}"
         case "$_ah_wait" in ''|*[!0-9]*) _ah_wait=20 ;; esac
@@ -4863,7 +4999,7 @@ cmd_engage() {
     fi
     if [ -z "$sname" ] || [ -z "$sid" ]; then
         case "$spawn_why" in
-            *"session alias already exists"*) engage_alias_held ;;
+            *"session alias already exists"*) engage_release_lock; engage_alias_held ;;
         esac
         spawn_hint=""
         case "$spawn_why" in
@@ -4985,16 +5121,21 @@ cmd_engage() {
     # (engage_await_start, above), and attaches only a started sitting.
     # It waits as long as the start takes, because a start on a busy controller
     # can take minutes, and an engage that stops waiting first leaves the
-    # operator with no sitting on screen while it starts anyway.
+    # operator with no sitting on screen while it starts anyway. It holds the
+    # engage lock through the wait and lets it go once the wait ends, after the
+    # hand-back when the sitting ended first. --no-attach waits for nothing and
+    # hands nothing back, so it lets the lock go here.
     start_rc=0
     if [ "$engage_attach" = "1" ]; then
         engage_wait
         if [ "$start_rc" -eq 2 ]; then
             engage_hand_back "$salias" "$bound_status"
+            engage_release_lock
             echo "$PROG: engage: the sitting $sname ended before the reconciler started it (its state in 'gc session list': $start_state), so there is nothing to attach. $hb_said" >&2
             exit 4
         fi
     fi
+    engage_release_lock
 
     # The summary already printed the attach line; on the default path we attach
     # a started sitting. One still unstarted at the bound is left unattached,

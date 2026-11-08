@@ -317,6 +317,45 @@ shares only the word ([authority-map.md](authority-map.md)).
 - **Retires when.** A Gas City launch can refuse a second root under a caller's
   key whatever the first root's status.
 
+## Engage's lock
+
+- **Covers.** The engage lock of `assets/scripts/gc-helm.sh` engage: one
+  `flock` file per conversation, `engage-<rig>-<conversation>.lock`, under the
+  city's `.gc/runtime/packs/gc-toolkit`. An engage that spawns a sitting holds
+  it from before the spawn through the bind's read-back, and one that waits to
+  attach holds it until the wait ends, through the hand-back of a sitting that
+  ended before it started.
+- **Stands in for.** A conditional write that names the sitting a
+  conversation's binding belongs to, so the hand-back for a sitting that never
+  started cannot land on a binding a later sitting made under the same alias.
+- **Evidence.** bd 1.3.4's `update` guards only on the assignee and the status
+  (`--if-assignee` and `--if-status` in `bd update --help`), `bd batch` takes
+  no guard, and `bd merge-slot` is one slot per rig for merge conflicts. Every
+  sitting of a conversation binds under the conversation's own alias, so
+  neither guard tells two sittings apart. In `gastownhall/gascity`, the
+  primitive that covers the need is the revision fence: `BdStore.UpdateIfMatch`
+  (`internal/beads/bdstore_conditional.go` 409) writes only at the revision its
+  caller read, through bd's `--if-revision` (69), and
+  `cmd/gc/store_rollout.go` 52 says every released bd lacks that flag. The
+  alias reservation, `session.WithCitySessionAliasLock`
+  (`internal/session/names.go` 281), runs only around Gas City's own session
+  creation, and no command holds it around a caller's write. A failed create is
+  closed in the same write that marks it failed (`cmd/gc/session_beads.go`
+  413), so its alias is already free when engage reads the failure. A claim
+  adopts a bead held under any spelling of the session's identity
+  (`restampHookAdoption`, `cmd/gc/cmd_hook_claim.go` 1448-1483;
+  `session.AssigneeIdentities`, `internal/session/assignee_identities.go` 34),
+  so a bind under the sitting's own session id would make the guard exact. A
+  conversation, though, is known by its assignee alone, `human` or the alias
+  that names its own id (`assets/scripts/conversation.sh`), so one whose
+  sitting never started would stop reading as a conversation.
+- **Verified.** 2026-11-08, at `gastownhall/gascity` main fdfec4c19d and bd
+  1.3.4 (7ef2fd05e).
+- **Retires when.** A released bd accepts `--if-revision` on `update`, so the
+  hand-back can be fenced on the revision the bind's read-back found. A
+  takeover of a conversation already assigned to the alias then writes too, so
+  that taking it over changes the revision.
+
 ## Prep worktree staging record
 
 - **Covers.** The record that `stage --work` writes and `held` and `verify`

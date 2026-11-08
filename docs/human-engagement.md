@@ -210,7 +210,15 @@ these steps:
    whose sitting's session has closed, or files a new one. Pointed at a gate,
    engage makes the conversation it landed on reply to the gate and reads the
    reply back before it starts or attaches anything.
-5. **It starts the sitting:**
+5. **It starts the sitting under the task's engage lock,** an exclusive
+   `flock` on `engage-<rig>-<task>.lock` in the city's
+   `.gc/runtime/packs/gc-toolkit`. Engage takes the lock before anything else
+   in this step and holds it through the bind, and an engage that waits to
+   attach holds it until the session starts or ends (step 7). A second engage
+   that would start a sitting on the task waits up to
+   `GC_HELM_ENGAGE_BIND_WAIT` seconds for the lock, then starts nothing and
+   names the engage that holds it. Without `flock` or a city root, engage
+   starts no sitting. Under the lock it runs
    `gc session new converse-<model> --alias <task> --no-attach`, under the
    prefix `c-` when the runtime refuses the bare id as an alias. A session
    still holding that alias that no longer holds the task, as a sitting cut
@@ -228,17 +236,22 @@ these steps:
    session this engage started. Then engage waits for the reconciler to start
    the session, and attaches the operator.
 7. **A session that ends before it starts hands the task back.** When the
-   session engage waits on ends before the reconciler starts it, whether
-   engage spawned it or reused it, engage writes
-   `gc bd update <task> --if-assignee <holder> --if-status <status> --assignee
-   human --status open`, where the holder is the assignee that session holds
-   the task under and the status is the task's status as engage read it while
-   that session held it. That is the write a sitting cut short makes at its
-   sign-off. A task that another writer has taken, or that a dismiss has
-   closed, misses the guard and is left as it is. Engage then says where the
-   task is and exits 4. It names the engage of the task that takes it up
-   again, or, for a task that closed, the engage of the subject that opens a
-   fresh one.
+   session an engage spawned and waits on ends before the reconciler starts
+   it, that engage writes
+   `gc bd update <task> --if-assignee <alias> --if-status <status> --assignee
+   human --status open`, where the status is the task's status as the bind's
+   read-back found it. That is the write a sitting cut short makes at its
+   sign-off. The guard cannot tell this session's binding from another
+   session's, because every sitting of the task takes the same alias, and a
+   session spawned on a task already assigned to that alias takes it with no
+   write at all. So engage makes the write under the engage lock it has held
+   since before its spawn, when no other sitting can have been spawned or
+   bound on the task. A task that a dismiss has closed, or that a person has
+   reassigned, misses the guard and is left as it is. An engage that reused a
+   session another engage spawned writes nothing when that session ends. Either
+   engage then says where the task is and exits 4. It names the engage of the
+   task that takes it up again, or, for a task that closed, the engage of the
+   subject that opens a fresh one.
 
 **Engage offers what holds the bead.** It reads the reasons
 `gctk pr-status derive --json` gives (`prstatus.Read` and `prstatus.Reasons`),
@@ -771,14 +784,14 @@ sign-off, keeps its session running indefinitely.
 
 A conversation can also outlive its sitting: the sitting's create fails after
 `gc-helm engage` bound the conversation to it, or its session is closed while
-the conversation is still open. An engage that waits to attach hands the
-conversation back to the operator's queue when the sitting it waits on ends
-before it starts, whether that engage spawned the sitting or reused it (step 7
-of *Engage*, above). A sitting spawned without an attach, as helm-svc's engage
-route spawns one, is waited on only by a later engage that reuses it, and an
-engage stops waiting once the session starts. A conversation whose sitting no
-engage waited on keeps the alias of a sitting whose session has ended. The
-board reads it as waiting for the operator,
+the conversation is still open. The engage that spawned the sitting hands the
+conversation back to the operator's queue when the sitting ends before it
+starts, if that engage waits to attach (step 7 of *Engage*, above). A sitting
+spawned without an attach, as helm-svc's engage route spawns one, has no such
+engage: a later engage that reuses it waits on it, and writes nothing when it
+ends. A conversation whose sitting ended with no spawning engage waiting on it
+keeps the alias of a sitting whose session has ended. The board reads it as
+waiting for the operator,
 because no live sitting holds it, and `gc-helm engage` takes it up again:
 under the same alias, or bound to a fresh sitting's with a write guarded on the
 holder it read, which also drops the session pins the gone sitting's claim
