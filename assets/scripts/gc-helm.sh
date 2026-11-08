@@ -72,7 +72,7 @@ The board is `helm-svc board` (services/helm). This script renders no
 board. open, engage and react take the subject as a bead id, a PR number
 or URL, or a superseded bead id, and resolve it to the LIVE bead that owns the
 work by metadata and the graph — a PR number/URL to its anchor, a
-closed+superseded id along gc.superseded_by to its successor — never an id
+closed+superseded id along its supersedes edge to its successor — never an id
 scraped from a title. A live bead recording a PR in pr_number/pr_url stands
 for the anchor it names in anchor_bead, if any. An unresolvable or ambiguous
 reference is refused, naming what it could not resolve; nothing is filed.
@@ -478,6 +478,40 @@ need_human_gate_jq() {
     exit 3
 }
 
+# need_disposition_jq — load $DISPOSITION_JQ, the one reading of the successor a
+# disposed bead names through its duplicates or supersedes edge, from bd-lib.sh
+# the same way need_human_gate_jq loads its rule. Loaded on first use.
+DISPOSITION_JQ=""
+need_disposition_jq() {
+    [ -n "$DISPOSITION_JQ" ] && return 0
+    DISPOSITION_JQ=$(bash -c '. "$1" >/dev/null 2>&1 && printf "%s" "$DISPOSITION_JQ"' gc-helm \
+        "${GC_BD_LIB:-$SCRIPT_DIR/bd-lib.sh}" 2>/dev/null) || DISPOSITION_JQ=""
+    [ -n "$DISPOSITION_JQ" ] && return 0
+    echo "$PROG: could not read the disposition rule (\$DISPOSITION_JQ) from ${GC_BD_LIB:-$SCRIPT_DIR/bd-lib.sh}; it needs bash on PATH. Nothing was written." >&2
+    exit 3
+}
+
+# disposed_to_of <bead-id> — the bead <bead-id> names as its canonical or
+# successor, read from its `gc bd list` row in the store its id prefix names, so
+# an edge into another rig's store counts. The flags lift every type bd hides from
+# a listing, so a gate names its successor as any bead does. Prints nothing when
+# it names none. Returns 1 when the row does not read, whether the read failed,
+# answered no listing or left the row out, so "names no successor" and "could not
+# read" stay apart.
+disposed_to_of() {
+    need_disposition_jq
+    _dt_path=$(rig_path_for_bead "$1")
+    _dt_db=""; [ -n "$_dt_path" ] && [ -d "$_dt_path/.beads" ] && _dt_db="$_dt_path/.beads"
+    # shellcheck disable=SC2086  # ${_dt_db:+--db "$_dt_db"} expands to 0 or 2 space-free fields
+    _dt_raw=$(gc bd list --id "$1" --all --include-gates --include-infra --include-templates ${_dt_db:+--db "$_dt_db"} --json --limit 0 2>/dev/null) || return 1
+    printf '%s' "$_dt_raw" | grep -av '^gc bd:' | scrub \
+        | jq -er --arg b "$1" "$DISPOSITION_JQ"'
+            if type != "array" then error("not a listing") else
+              [ .[] | objects | select((.id // "") == $b) ]
+              | if length == 0 then error("no row") else (.[0] | disposed_to) end
+            end' 2>/dev/null
+}
+
 # bd_rows <gc-bd-args...> — one `gc bd` read that must answer a JSON array,
 # printed scrubbed with the `gc bd:` rig-store notice stripped. Returns 1 on a
 # read that failed or answered anything else, so "none" and "could not read"
@@ -654,7 +688,7 @@ rig_db_for_session() {
 # ── Subject resolver: an operator reference to the live bead it owns ──
 # The operator supplies a subject by reading it off whatever is in front of
 # them — a PR, a board row, a bead whose title cites its lineage. A PR/bead
-# title legitimately names OTHER beads (`gc.supersedes`), so an id scraped from
+# title legitimately names OTHER beads (the beads it superseded), so an id scraped from
 # one opens the wrong bead: the settled predecessor of a fold, or nothing. The
 # fix is a deterministic resolver keyed on structured metadata and the graph,
 # never on title text, so a PR number or a superseded id cannot open a dead
@@ -673,7 +707,7 @@ rig_db_for_session() {
 #                                            one's anchor_bead, or the bead
 #                                            itself when it names none (never a
 #                                            title)
-#   closed + gc.superseded_by            ->  followed to the live successor
+#   closed + a duplicates/supersedes edge ->  followed to the live successor
 #   live bead id                         ->  unchanged
 RESOLVED_SUBJECT=""
 resolve_live_subject() {
@@ -808,12 +842,13 @@ _resolve_pr_reference() {
 }
 
 # _resolve_superseded_reference <bead-id> — follow a settled disposition
-# (status closed + gc.superseded_by) to its live successor and set
-# RESOLVED_SUBJECT. bead-rehome.sh stamps gc.superseded_by (+ the legacy bare
-# key) alongside gc.superseded_by_store; the successor is read cross-ledger by
-# its rig-unique id, so that store hint is not needed to find it. A live bead,
-# or one that does not resolve, passes through unchanged for the caller's
-# existence gate; a cycle is refused (exit 4) rather than guessed.
+# (status closed + the duplicates or supersedes edge bead-rehome.sh records) to
+# its live successor and set RESOLVED_SUBJECT. The edge is read off the bead's
+# list row, which carries one into another rig's store, and the successor is
+# read cross-ledger by its rig-unique id. A live bead, or one that does not
+# resolve, passes through unchanged for the caller's existence gate. A cycle, and
+# a closed bead whose list row does not read, are refused (exit 4) rather than
+# guessed.
 _resolve_superseded_reference() {
     _ss_orig="$1"; _ss_cur="$1"; _ss_seen=" $1 "; _ss_hops=0
     while [ "$_ss_hops" -le 24 ]; do
@@ -824,13 +859,18 @@ _resolve_superseded_reference() {
             # The reference ITSELF does not resolve: pass it through unchanged so
             # the caller's existence gate reports a clean not-found.
             [ "$_ss_cur" = "$_ss_orig" ] && { RESOLVED_SUBJECT="$_ss_orig"; return 0; }
-            # A SUCCESSOR we followed does not resolve (a broken or cross-store
-            # pointer). Refuse — never fall back to opening the settled predecessor.
-            echo "$PROG: $_ss_orig is superseded by $_ss_cur, which does not resolve (a broken or cross-store pointer). Refusing to open the settled predecessor; pass the live bead id directly. Nothing filed." >&2
+            # A SUCCESSOR we followed does not resolve (a broken edge, or one onto
+            # a store no rig names). Refuse — never fall back to opening the
+            # settled predecessor.
+            echo "$PROG: $_ss_orig is superseded by $_ss_cur, which does not resolve (a broken edge, or one onto a store no rig names). Refusing to open the settled predecessor; pass the live bead id directly. Nothing filed." >&2
             exit 4
         fi
         _ss_status=$(printf '%s' "$_ss_this" | jq -r '.status // ""' 2>/dev/null) || _ss_status=""
-        _ss_succ=$(printf '%s' "$_ss_this" | jq -r '(.metadata["gc.superseded_by"] // .metadata.superseded_by // "")' 2>/dev/null) || _ss_succ=""
+        _ss_succ=""
+        if [ "$_ss_status" = "closed" ] && ! _ss_succ=$(disposed_to_of "$_ss_cur"); then
+            echo "$PROG: $_ss_cur is closed, and its list row did not read, so whether it names a successor is unknown. Refusing to open the settled bead; re-run once the store answers, or pass the live bead id directly. Nothing filed." >&2
+            exit 4
+        fi
         if [ "$_ss_status" = "closed" ] && [ -n "$_ss_succ" ]; then
             case "$_ss_seen" in
                 *" $_ss_succ "*)
@@ -1068,8 +1108,8 @@ cmd_takeaway() {
     # --release is two acts welded into one flag: PARK the anchor (reopen,
     # unassign, stamp the route) and END the run beneath it. The park
     # is correct for an anchor still standing and destructive for one already
-    # disposed — a bead closed by a fold carries gc.superseded_by and a
-    # close_reason naming its carrier, and `--status=open` there makes work
+    # disposed — a bead closed by a fold names its carrier through its
+    # supersedes edge, and `--status=open` there makes work
     # whose disposition landed visible as open in every reader of open beads.
     # The run's end is the half a disposed anchor still needs: a fold that lands
     # AFTER the pour leaves the run going either way, and gascity's autoclose
@@ -1096,11 +1136,7 @@ cmd_takeaway() {
         fi
         if [ "$anchor_status" = "closed" ]; then
             release_park=""
-            superseded=$(printf '%s' "$anchor_json" \
-                | jq -r --arg b "$bead" \
-                    'if type == "array"
-                     then [ .[] | select(type == "object" and (.id // "") == $b) ] | first | ((.metadata // {})["gc.superseded_by"] // "")
-                     else empty end' 2>/dev/null || true)
+            superseded=$(disposed_to_of "$bead") || superseded=""
             echo "$PROG: takeaway: $bead is closed${superseded:+, superseded by $superseded} — its disposition stands, so the release write is skipped (no reopen, no unassign, no route stamp). The run beneath it is still ended." >&2
         fi
     fi
@@ -4544,29 +4580,13 @@ cmd_engage() {
             *) printf 'is %s' "$1" ;;
         esac
     }
-    # engage_kick — a codex sitting's opening turn; a claude one gets none
-    # (see the kick's notes below).
-    engage_kick() {
-        case "$engage_model" in
-            opus|fable) ;;   # provider=claude: self-starts from the argv prompt, no kick
-            *)
-                kick="The operator engaged this sitting. Begin now: claim your conversation ($CONV), re-check its premise, prep, and post your framing, then hold for the operator."
-                _kick_opener="${engage_body:-$engage_reason}"
-                [ -n "$_kick_opener" ] && kick="$kick The operator's reason: $_kick_opener"
-                gc session nudge "$sid" "$kick" >/dev/null 2>&1 \
-                    || echo "$PROG: engage: spawned and bound $CONV, but could not send $sid its opening turn — attach and type 'begin' to start it: gc session attach $sid" >&2
-                ;;
-        esac
-    }
-    # engage_wait <kick> — the attach path's wait for the launch, under the
-    # INT, TERM and HUP trap, HUP being the terminal going away under the wait.
-    # The handler writes and closes nothing, so the binding and the start carry
-    # on without engage. With <kick> set, a codex sitting is kicked first, as on
-    # every path past the wait, so it begins once it starts. The handler
+    # engage_wait — the attach path's wait for the launch, under the INT, TERM
+    # and HUP trap, HUP being the terminal going away under the wait. The
+    # handler writes and closes nothing, so the binding and the start carry on
+    # without engage, and the sitting begins once it starts. The handler
     # disarms itself, so a second Ctrl-C ends engage at once. Leaves the wait's
     # answer in start_rc.
     engage_wait() {
-        _ew_kick="$1"
         start_rc=0; start_waited=0
         trap 'engage_wait_interrupted 130' INT
         trap 'engage_wait_interrupted 143' TERM
@@ -4576,7 +4596,6 @@ cmd_engage() {
     }
     engage_wait_interrupted() {
         trap - INT TERM HUP
-        [ -z "$_ew_kick" ] || engage_kick
         echo "$PROG: engage: stopped waiting after $(engage_dur "$start_waited"). Conversation $CONV stays held by $sname, which the reconciler goes on starting; attach once it reads active in 'gc session list': gc session attach $sid" >&2
         exit "$1"
     }
@@ -4637,7 +4656,7 @@ cmd_engage() {
         printf '  attach: gc session attach %s\n' "$sid"
         printf '[debug] conversation=%s sitting=%s holder=%s subject=%s\n' "$CONV" "$sid" "$conv_holder" "$bead" >&2
         if [ "$engage_attach" = "1" ]; then
-            engage_wait ""
+            engage_wait
             case "$start_rc" in
                 0) attach_rc=0
                    gc session attach "$sid" || attach_rc=$?
@@ -4901,50 +4920,39 @@ cmd_engage() {
     printf '[debug] conversation=%s sitting=%s (%s) alias=%s subject=%s work_dir=%s\n' \
         "$CONV" "$sid" "$sname" "$salias" "$bead" "${swork_dir:-?}" >&2
 
-    # A freshly spawned sitting self-starts from the prompt its launch delivers,
-    # and only the reconciler's launch delivers one. `gc session new --no-attach`
-    # records the sitting as start-pending. The reconciler then launches it with
-    # the rendered converse prompt on argv (every converse provider resolves to
-    # prompt_mode=arg), and that prompt's loop opens with the claim block. So a claude
-    # sitting (opus, fable) claims its conversation, re-checks the premise, preps, and
-    # posts its framing with no keystrokes. Sending it a kick as well is worse
-    # than redundant. engage would deliver the kick while that self-started turn
-    # is still running, so the harness holds it as a deferred reminder and
-    # releases it after the framing lands, and the operator reads a stale
-    # "begin now" once per engage.
+    # A freshly spawned sitting starts itself from the prompt its launch
+    # delivers, and only the reconciler's launch delivers one. `gc session new
+    # --no-attach` records the sitting as start-pending. The reconciler then
+    # launches it with the rendered converse prompt on argv: every converse
+    # provider resolves to prompt_mode=arg, and Claude Code and the codex CLI
+    # each take that argument as the session's first user turn. The prompt's
+    # loop opens with the claim block, so the sitting claims its conversation,
+    # re-checks the premise, preps, and posts its framing with no keystrokes.
+    # That holds on the --no-attach board-picker path too, so whoever attaches
+    # later finds a started sitting.
+    #
+    # engage sends the sitting no opening turn of its own. One sent now would
+    # find the sitting's first turn still running, and a nudge's default
+    # delivery, wait-idle, holds it for an idle boundary rather than enter a
+    # running turn, so it would land after the framing as a stale "begin now"
+    # and cost one more model turn. What the operator gave engage reaches the
+    # sitting through the conversation's ask: cmd_open files a --reason, a
+    # seed's body or a lens brief there, and the sitting reads the ask when it
+    # claims.
     #
     # The attach path waits for the reconciler's launch first
     # (engage_await_start, above), and attaches only a started sitting.
     # It waits as long as the start takes, because a start on a busy controller
     # can take minutes, and an engage that stops waiting first leaves the
     # operator with no sitting on screen while it starts anyway.
-    #
-    # codex is the exception to self-starting. gascity delivers its prompt the
-    # same way, but the codex CLI is not trusted to consume an argv prompt at
-    # launch: its pool slots carry no prompt template and are primed by an
-    # explicit nudge instead. A codex sitting can wake idle at its prompt, so it
-    # keeps a START directive kick. A bare poke reads as a connectivity check and
-    # does not begin the loop, so the kick names the action. An idle session takes
-    # it at once, with no in-flight turn for the harness to defer it behind. The
-    # kick follows the start wait and precedes the attach, so the operator lands
-    # on a started sitting. On the --no-attach board-picker path it starts the
-    # sitting for whoever attaches later; a kick that reaches the sitting before
-    # its launch does not launch it, because gc queues the nudge and delivers it
-    # once the reconciler has. A failed kick is not fatal: the conversation is bound, so
-    # report it and let the operator start it by hand.
-    #
-    # A --reason is filed into the conversation's ask by cmd_open, so every sitting reads
-    # it when it claims. The kick also carries it, for the one provider kicked.
     start_rc=0
     if [ "$engage_attach" = "1" ]; then
-        engage_wait kick
+        engage_wait
         if [ "$start_rc" -eq 2 ]; then
             echo "$PROG: engage: the sitting $sname ended before the reconciler started it (its state in 'gc session list': $start_state), so there is nothing to attach. Conversation $CONV is still bound to it; hand it back to the operator's queue: gc bd update $CONV --if-assignee \"$salias\" --assignee human --status open" >&2
             exit 4
         fi
     fi
-
-    engage_kick
 
     # The summary already printed the attach line; on the default path we attach
     # a started sitting. One still unstarted at the bound is left unattached,

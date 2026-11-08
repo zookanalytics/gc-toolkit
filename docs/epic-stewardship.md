@@ -44,15 +44,22 @@ gc bd update <epic> --set-metadata epic_ruling=close \
 
 The fields are registered in
 [`lifecycle/lifecycle.toml`](../lifecycle/lifecycle.toml)
-`[metadata.epic_stewardship]`. They are the operator's: stamped when the
-operator confirms a contract field or rules, the dated decision
-[epics.md](epics.md) calls for. No pack script writes them; the finalize gate and
-the doctor check read the hypothesis, the ruling, and its reason.
+`[metadata.epic_stewardship]`. The contract lands in the create that files an
+epic, which
+[`gctk epic create`](../services/gctk/internal/cli/epic.go) makes. It refuses an
+epic with no hypothesis unless the epic's parent is an epic, which makes it a
+Delivery. The hypothesis can be the filer's first draft until the
+operator's first ruling on the epic
+([epics.md](epics.md#the-contract-an-epic-carries)). The other contract fields
+and the ruling's fields are the operator's: stamped when the operator states or
+confirms a contract field or rules, the dated decision [epics.md](epics.md)
+calls for. No pack script writes the ruling's fields. The finalize gate and the
+doctor check read the hypothesis, the ruling, and its reason.
 
 | Field | Meaning |
 |---|---|
 | `epic_handle` | the 3–5 word handle |
-| `epic_hypothesis` | the one-sentence hypothesis — a floor field, and what brings an epic under the close requirement |
+| `epic_hypothesis` | the one-sentence hypothesis — a floor field, a first draft until the epic's first ruling, and what brings an epic under the close requirement |
 | `epic_boundaries` | the epic's boundaries |
 | `epic_closure_condition` | the 3–6 operator-runnable closure checks |
 | `epic_indicators` | the 1–3 leading indicators |
@@ -78,16 +85,16 @@ fixed by recording its hypothesis
 ([epics.md](epics.md#the-contract-an-epic-carries)). The pass for an incomplete
 Epic is compatibility debt
 ([built-once-target.md](built-once-target.md#compatibility-debt)). A disposed
-epic (`gc.superseded_by`, written by `bead-rehome.sh`) carries a recorded
-terminal reason and passes.
+epic (its duplicates or supersedes edge, written by `bead-rehome.sh`) carries a
+recorded terminal reason and passes.
 
 1. **The finalize-gate clause** (`finalize-gate.sh` `clause_epic_ruling_recorded`)
    refuses to finalize an epic the predicate holds, on every close path that
    runs the gate. Neither path wired today reaches an undisposed epic:
-   `merge.sh` finalizes merge anchors, and `bead-rehome.sh` records its
-   disposition before it gates. Its read-only `--check` asks the gate about the
-   epic as that record will leave it (`--as-disposed`), so `stand-down.sh` carries
-   out a person's ruling that an epic will not go on. The clause is the
+   `merge.sh` finalizes merge anchors, and `bead-rehome.sh` asks the gate about
+   the epic as its disposition will leave it (`--as-disposed`), before it writes
+   anything and in its read-only `--check`, so `stand-down.sh` carries out a
+   person's ruling that an epic will not go on. The clause is the
    precondition any gate-running close of an epic inherits, not a choke point on
    today's closes.
 2. **The doctor invariant** (I15, `doctor/check-epic-closed-implies-ruled`) sees

@@ -101,11 +101,16 @@ eq "$RC" "2" "an off-enum epic_ruling ('pending') reads as unruled"
 has "$OUT" "E4off" "the off-enum epic is named as an error"
 
 # --- 4. a disposed epic carries its own terminal state -----------------------
-store "$(epic E5 closed '{"epic_hypothesis":"for X","gc.superseded_by":"s-9"}')"
+store '{"id":"E5","issue_type":"epic","status":"closed","metadata":{"epic_hypothesis":"for X"},"dependencies":[{"issue_id":"E5","depends_on_id":"s-9","type":"supersedes"}]}'
 OUT=$(run_check); RC=$?
-eq "$RC" "0" "gc.superseded_by is the explicit disposition the check accepts"
+eq "$RC" "0" "a supersedes edge onto a successor is the explicit disposition the check accepts"
 hasnt "$OUT" "E5" "the disposed epic is not named"
-has "$OUT" "retired into a successor" "the disposal is counted"
+has "$OUT" "retired into it" "the disposal is counted"
+# The retired successor key alone records nothing a reader acts on.
+store "$(epic E5k closed '{"epic_hypothesis":"for X","gc.superseded_by":"s-9"}')"
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "an epic carrying only the retired gc.superseded_by key is judged"
+has "$OUT" "E5k" "…and named"
 
 # --- 5. a closed epic with no hypothesis, a Delivery or an incomplete Epic, is
 # exempt: it has nothing to rule on --------------------------------------------

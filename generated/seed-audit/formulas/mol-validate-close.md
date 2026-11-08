@@ -7,8 +7,9 @@ the bead when it holds or asks the operator when it does not.
 
 A polecat's store-only exit routes a work bead here the same way when the
 record its run wrote finishes the bead, such as a live check whose every check
-passed. A polecat never closes its own work bead, so this check stands between
-that record and the close, which records the bead as done.
+passed. A polecat closes its own work bead only as the duplicate of another, so
+this check stands between that record and the close, which records the bead as
+done.
 
 A bead whose whole job ended once another bead landed, such as a problem in
 code another bead retires, reaches here through the arm its wait carries, once

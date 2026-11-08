@@ -12,8 +12,10 @@ whose whole product is store work has no branch to push and takes
 submit-and-exit's store-only exit instead, which releases the bead and names the
 disposition for whoever owns the close. A bead its record finishes goes to its
 validating closer, mol-validate-close.
-NEVER close the work bead: the refinery closes an anchor on a verified merge, and
-closes a rework hand-back landed-on-branch, both from merge-push. ALWAYS close
+NEVER close the work bead, except as the duplicate of another bead through
+bead-rehome.sh (the polecat doctrine): the refinery closes an anchor on a
+verified merge, and closes a rework hand-back landed-on-branch, both from
+merge-push. ALWAYS close
 your own step through assets/scripts/claim-close.sh: a graph.v2 step advances
 only by closing its own bead. workflow-finalize is the control-dispatcher's;
 never close it.
@@ -272,7 +274,7 @@ matches only the key stamped on a tracker, which a retitle leaves in place. It
 never reads a title, so a bug that merely mentions the key is not taken for its
 tracker. It reads every live status: the existing report is usually already
 `in_progress` with someone fixing it. A tracker that a fold closed still
-answers. Its `gc.superseded_by` names the live bead that carries the failure
+answers. Its supersedes edge names the live bead that carries the failure
 now, such as a batch, and the lookup returns that bead, so 3c confirms on it.
 It prints the tracker's id, or nothing when none stands.
 ```bash
@@ -517,8 +519,8 @@ the difference between a bead someone can dispose of and one that just sits:
   `assets/scripts/bead-rehome.sh --origin <bead> --successor <filed-bead>
   --kind re-homed`, plus `--successor-store rig:<name>` where the successor's
   id prefix is ambiguous. docs/authority-map.md gives that verb to converse
-  dispositions, operator re-homes and duplicate-sweep.sh, so write the exact
-  invocation into the note and mail the witness a `NOTICE:` carrying it.
+  dispositions and operator re-homes, so write the exact invocation into the
+  note and mail the witness a `NOTICE:` carrying it.
 - The bead legitimately stays open pending something else — a ruling, a
   cadence, a person. Open and unrouted IS the resting state and no close verb
   is owed. Say in the note what would close it.

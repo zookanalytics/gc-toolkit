@@ -1,6 +1,6 @@
 ---
 name: work
-description: Use when you carry out a decision about work, such as filing it as a task in the right rig under the right parent, routing or slinging it to a pool on a formula, assigning it to a named agent, taking a recommended formula, stopping or redirecting it once dispatched, or closing a bead that needs no work or duplicates another. Not for doing the work yourself. To make work wait first, use waits; for work that is already a pull request, use prs.
+description: Use when you carry out a decision about work, such as filing it as a task or an epic in the right rig under the right parent, routing or slinging it to a pool on a formula, assigning it to a named agent, taking a recommended formula, stopping or redirecting it once dispatched, or closing a bead that needs no work or duplicates another. Not for doing the work yourself. To make work wait first, use waits; for work that is already a pull request, use prs.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
@@ -97,6 +97,38 @@ gc bd create "Delivery: <what it lands>" -t epic --parent <epic> \
   -d "Aim: <the portion of the epic's hypothesis its landing tests>
 Done when: <what lands>" --json
 ```
+
+An epic is filed with its contract (`docs/epics.md`, "The contract an epic
+carries"), each field in its own key, through the writer below. The one field
+it cannot go without is its hypothesis: one sentence that says for whom, what
+changes and the signal that shows it worked. A rough sentence that sets the
+general direction is enough. When the operator has stated none, write one
+yourself and file at once, without asking first. Wherever you report that
+filing, quote the sentence and call it a first draft: it stays one until the
+operator first rules on the epic, at a sitting that judges and sharpens it. The
+other fields are the operator's, so give one only as the operator stated or
+confirmed it, and leave out one nobody stated. A Delivery carries an `Aim:`
+line instead, and is filed as above. An area that is only ever improvable has
+no hypothesis to answer, so it is not an epic, and its work is ordinary flow
+(`docs/epics.md`, "Epics are mortal").
+
+The writer refuses an epic whose parent is not an epic when it has no
+hypothesis, and files nothing. It prints the new epic's id:
+
+```bash
+"$(gc <binding> scripts-dir)/epic.sh" create "<title>" \
+  --hypothesis "<for whom, what changes, and the signal that shows it worked>" \
+  --handle "<three to five words>" \
+  --boundaries "<the axis it is cut on, and the work beside it that it is not, with where that lives>" \
+  -d "<what the epic is about>"
+```
+
+`--closure-condition` and `--indicators` record the rest of the contract when
+it is stated, and `--parent` and `--rig` place the epic as they place any bead.
+A field stated after the create is recorded in its key:
+`gc bd update <epic> --set-metadata epic_hypothesis="<the sentence>"`, and the
+same way `epic_handle`, `epic_boundaries`, `epic_closure_condition` and
+`epic_indicators`.
 
 ## Send a bead to a pool on a formula
 
@@ -254,12 +286,21 @@ gc bd update <bead> --set-metadata gc.work_outcome=no-op \
 Name a successor under every kind. Under `not-needed` it is the evidence that
 ruled the work out, such as the conversation where it was decided. Under
 `duplicate`, `folded`, `re-homed` and `fixed-upstream` it is the bead the work
-moved to. The script records the successor on the bead, reads it back and only
-then closes the bead, so never close it by hand: a close that names no
-successor cannot be told from a careless one. On a bead already closed by hand,
-the same call adds the missing successor. An open human gate that blocks the
-bead stops the close: the script records the successor and exits 5, and the same
-call closes the bead once each such gate is cleared.
+moved to. The script records the successor in bd's own edge, `duplicates` under
+`duplicate` and `supersedes` otherwise, reads it back and only then closes the
+bead, through bd's checked close, so never close it by hand: a close that names
+no successor cannot be told from a careless one. On a bead already closed by
+hand, the same call adds the missing edge. An open human gate that blocks the
+bead stops the close: the script records nothing and exits 5, and the same call
+closes the bead once each such gate is cleared.
+
+A bead that duplicates another closes at once, whatever state its canonical is
+in, because the canonical carries the work: `--kind duplicate` needs the two in
+one store and a bead that did no work of its own. Before the close, each open
+bead it blocks comes to wait on the canonical too, so none goes ready before the
+canonical has closed or shipped, and a waiter that cannot refuses the close.
+`fixed-upstream` needs the fix closed or shipped. A duplicate close records the
+canonical, so `bd show` names it under DUPLICATE OF.
 
 Before you run it:
 

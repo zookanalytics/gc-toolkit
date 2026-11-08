@@ -122,8 +122,12 @@ status in the first place. A re-derived answer routes around a stale stored one.
 the PR lifecycle composable at all: the refinery is the single writer of merged
 truth, and it closes a bead only after verifying the merge actually carried the
 work (see [state-machine.md](state-machine.md), *The merge condition*). So
-`closed` is the one signal that means *landed and verified*, and the waiting
-side keys on it. A waiting party that watched
+`closed` is the one signal the waiting side keys on. The refinery's close means
+*landed and verified*. A disposition's close names the bead that carries the
+work now, or the evidence that it is not needed (state-machine.md,
+*Disposition*). A duplicate's waits move onto its canonical before it closes, so
+they end no earlier than the canonical delivers, and every other disposition
+ends the waits on its bead with its close. A waiting party that watched
 GitHub directly would be reading a different, earlier fact.
 
 **Fail quiet, in the direction of not acting.** A blocker counts as landed only
