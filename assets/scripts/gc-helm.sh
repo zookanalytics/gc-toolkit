@@ -1950,10 +1950,10 @@ take_bead() {
             if [ -n "$_tb_from" ]; then
                 case " $_tb_open " in
                     *" $_tb_from "*) _tb_open="$_tb_from" ;;
-                    *)  # <from> does not wait on the gate itself. The gate still
-                        # holds it only through another bead, by the read a
-                        # list of its holds comes from, and never once it has
-                        # closed.
+                    *)  # <from> does not wait on the gate itself. One that
+                        # waited and has closed is not held by it. Any other is
+                        # held only through another bead, when the read a list
+                        # of its holds comes from (holding_rows) names the gate.
                         _tb_held=""
                         case " $_tb_closed " in
                             *" $_tb_from "*) ;;
