@@ -146,6 +146,14 @@ The message is that once nothing holds this bead, it goes to this pool. The
 deferred-dispatch order's reconcile pass slings it as soon as nothing holds it,
 and retires the arm if the bead closes first.
 
+What holds a bead is the store's own answer, which `gctk bead holds <bead>`
+prints, from the gctk the city builds at
+`$GC_CITY_PATH/.gc/services/gctk/bin/gctk`. A wait of the bead's own that has
+not landed holds it, and so does one on a parent-child ancestor, such as a
+parked epic, while its work has not started. Once its work has started, only
+its own waits hold it. The answer names each wait behind it, so read it, not
+the bead's rows, to learn whether a bead still waits and on what.
+
 Writer: `"$(gc <binding> scripts-dir)/deferred-dispatch.sh" arm <bead> --target <rig>/<pool> --reason "waits for <blocker>"`.
 Add `--sling-arg --on --sling-arg <formula>` to send it on a formula other than
 the default. The bead must be open and carry no route.
