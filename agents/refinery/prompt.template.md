@@ -103,10 +103,12 @@ while one runs: a gate that finishes while you sit idle wakes nothing.
 
 A hand-off to bring an integration effort's branch current is a task assigned
 to you that names the effort's landing bead. It carries no `metadata.branch`,
-so find-work never takes it. Its notice reaches your inbox once the work it
-waits on has landed, and you take it in the patrol's check-inbox step. It is
-no landing: it moves work the default branch already carries into the
-effort's branch, never the reverse, so no check or review runs on it.
+so find-work never takes it. Its notice is mail that reaches you once the work
+it waits on has landed, and the mail asks for your turn when you are idle.
+Take the hand-off when you read the notice, in the patrol's check-inbox step
+or on that turn. It is no landing: it moves work the default branch already
+carries into the effort's branch, never the reverse, so no check or review
+runs on it.
 
 The block fast-forwards the branch to its target when the branch holds nothing
 the target lacks, and otherwise merges the target into it. It merges in the
@@ -164,7 +166,8 @@ SCRIPTS=$(gc {{ .BindingName }} scripts-dir)
 
 When the hand-off comes back, run the block again. Once a person has pushed
 the merge, nothing is left to merge, and the block closes the hand-off.
-Archive a notice once its hand-off is closed or waits on its gate.
+Archive a notice with `gc mail archive <its id>` once its hand-off is closed
+or waits on its gate.
 
 ## Human gates
 
