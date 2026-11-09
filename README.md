@@ -101,7 +101,7 @@ render's byte and token counts.
 - [docs/review-workspace.md](docs/review-workspace.md) — the directory a review works in, and its removal when the review ends
 - [docs/review-correctness.md](docs/review-correctness.md) — what the gates run on each surface this repository ships and the defects a correctness review of it hunts there, which the review formula prints for each correctness review at the commit it reviews
 - [docs/review-arch.md](docs/review-arch.md) — the divergence lens the arch check applies on this rig: when it applies, its checks, Gas City's own documentation as the evidence, and where the pack's warrants live, which the review formula prints for each arch review at the commit it reviews
-- [docs/review-triage.md](docs/review-triage.md) — the changes that make the arch check or the pm check mandatory on this rig, which the review formula prints for each triage review at the commit it reviews
+- [docs/review-triage.md](docs/review-triage.md) — the changes that make a specialist check mandatory on this rig, which the review formula prints for each triage review at the commit it reviews
 - [docs/bead-store-resolution.md](docs/bead-store-resolution.md) — which store answers for a bead id, and the proof a destructive gate owes before reading absence
 - [docs/outbound-sends.md](docs/outbound-sends.md) — a GitHub write to a repo the rig does not own is the operator's send; an agent records the problem as an upstream finding, set aside with nothing drafted and nothing asked, and the operator takes findings up from one list when ready
 - [docs/not-for-review.md](docs/not-for-review.md) — the pull-request comments the city never reads as review feedback: the no-review mark, and the third-party markers a rig declares
