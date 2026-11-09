@@ -7,8 +7,26 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 )
 
+// The store's answers as a domain reads them: the store adapter's own types and
+// edge names, so a domain tells the store's errors and edges apart through the
+// ledger and never reaches the store itself.
+type (
+	Edge          = gcbd.Edge
+	Blocking      = gcbd.Blocking
+	WaitsForError = gcbd.WaitsForError
+	ReadError     = gcbd.ReadError
+)
+
+// The edge types the store's blocked rule reads.
+const (
+	EdgeBlocks            = gcbd.EdgeBlocks
+	EdgeConditionalBlocks = gcbd.EdgeConditionalBlocks
+	EdgeWaitsFor          = gcbd.EdgeWaitsFor
+	EdgeParentChild       = gcbd.EdgeParentChild
+)
+
 // Record is one bead as a pass read it. A domain reads its keys through the
-// Keys it declared, and its status and edges through the methods here.
+// Keys it declared, and its status, type and edges through the methods here.
 type Record struct {
 	ID  string
 	row *gcbd.Bead
@@ -16,6 +34,9 @@ type Record struct {
 
 // Status is the bead's status, lower-cased, "" when the row carries none.
 func (r *Record) Status() string { return r.row.StatusLower() }
+
+// IssueType is the bead's issue type, "" when the row carries none.
+func (r *Record) IssueType() string { return r.row.IssueTypeString() }
 
 // Edges is the bead's own edges, each with its far bead's status and close time.
 func (r *Record) Edges() ([]gcbd.Edge, error) { return r.row.Edges() }
