@@ -30,6 +30,10 @@
 #             conversation's key on the anchor and the conversation's reply onto
 #             it; a live sitting it attaches to, or a subject that is no open
 #             PR, files no hold, and a hold that does not land starts nothing
+#   (GATE-OWN*) a gate under a conversation's own key stands for that
+#             conversation while it is open, so engage takes it up and no
+#             other conversation replies to the gate; once it has closed, the
+#             gate is a gate like any other
 #   (REUSE-*) a live sitting engage reuses is attached only once it reads
 #             active: one still start-pending or creating is waited on and left
 #             unattached at the bound, which exits 4, one that ends first is
@@ -305,7 +309,8 @@ case "$1 ${2:-}" in
         fi
         jq -c -n --argjson r "$(conv_row "$id" show)" '[$r]' ;;
       tk-gate)
-        jq -n '[{id:"tk-gate", title:"Approve the rollout", description:"Gate on the waiting bead.", status:"open", issue_type:"gate", await_type:"human", await_id:"rollout"}]' ;;
+        # $GATE_KEY is the gate's await id, rollout by default.
+        jq -n --arg k "${GATE_KEY:-rollout}" '[{id:"tk-gate", title:"Approve the rollout", description:"Gate on the waiting bead.", status:"open", issue_type:"gate", await_type:"human", await_id:$k}]' ;;
       *)
         # $SUBJ_STATUS is the status every other bead reads, open by default,
         # and $SUBJ_META its metadata, none by default.
@@ -1002,6 +1007,16 @@ hasnt "$CALLED" "--deps tracks:tk-gate" "(GATE-NEW) …no conversation tracks th
 has "$CALLED" "--title Approve the rollout" "(GATE-NEW) …titled with what the gate asks"
 has "$CALLED" "bd dep bd dep add tk-new tk-gate --type replies-to" "(GATE-REPLY-NEW) …and the conversation it filed replies to the gate"
 unset HAVE_CONV
+reset; GATE_KEY=conversation.tk-conv run_engage tk-gate --no-attach
+eq "$RC" 0 "(GATE-OWN) engaging a gate under a conversation's own key exits 0"
+has "$OUT" "gate tk-gate is conversation tk-conv's own hold, which only its sign-off answers, so it stands for tk-conv" "(GATE-OWN) …saying the gate stands for that conversation"
+has "$OUT" "tk-conv is a conversation on tk-subj" "(GATE-OWN) …which engage takes up"
+has "$CALLED" "session new converse-opus --alias tk-conv --no-attach --json" "(GATE-OWN) …starting that conversation's sitting"
+hasnt "$CALLED" "tk-gate --type replies-to" "(GATE-OWN) …and no conversation comes to reply to the gate"
+reset; printf 'closed' > "$STATE_DIR/tk-conv.status"
+HAVE_CONV=0 GATE_KEY=conversation.tk-conv run_engage tk-gate --no-attach
+has "$OUT" "tk-gate is a gate about tk-subj" "(GATE-OWN-CLOSED) once that conversation has closed, the gate is a gate about the bead waiting on it"
+has "$CALLED" "bd dep bd dep add tk-new tk-gate --type replies-to" "(GATE-OWN-CLOSED) …and the conversation engage files replies to it"
 export LIVE_SITTINGS="gc-50=gc-toolkit/gc-toolkit.tk-conv"
 reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
 run_engage tk-gate --no-attach

@@ -206,7 +206,10 @@ key, `conversation.<conversation id>`, and the conversation replies to it.
   `needs-attention` with `held: gate`, by the one definition its labels, the
   board and engage read
   ([state-machine.md](state-machine.md#the-status-label-github-projection)),
-  and the gate's title names the conversation. The gate holds only the merge.
+  and the gate's title names the conversation. The gate stands for the
+  conversation while it is open: engage, open or dismiss pointed at the gate
+  act on the conversation, as its id does, so no other conversation comes to
+  reply to the gate and answer it in its place. The gate holds only the merge.
   Reviews, reworks and supplements keep running: each is a bead the anchor
   waits on, which a gate on the anchor does not block, and gate-ensure's
   quiescence does not count a human gate.

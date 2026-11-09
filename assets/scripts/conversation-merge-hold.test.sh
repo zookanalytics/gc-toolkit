@@ -22,6 +22,10 @@
 #                  and leaves the review itself unblocked
 #   (OPEN-JOIN)    a second concern joins the queued conversation and files no
 #                  second gate
+#   (GATE-NAMES-CONV) open and dismiss pointed at the conversation's gate act on
+#                  the conversation, as its id does, so no other conversation
+#                  replies to the gate; once it has closed, the gate is a gate
+#                  about the anchor like any other
 #   (NOT-PR)       a subject that is no open PR, one whose anchor has merged, and
 #                  a pre-open anchor each file no gate
 #   (OPEN-UNREAD)  an anchor that does not read files nothing
@@ -452,6 +456,35 @@ eq "$(status_of tk-anc)" "needs-attention [gate]" "(OPEN-REVIEW) the PR reads ne
 run_dismiss "$C"
 eq "$RC/$(field "$G" status)" "0/closed" "(DISMISS) dismissing it withdraws the gate on the anchor"
 eq "$(status_of tk-anc)" "working []" "(DISMISS) …and the PR reads working again"
+
+echo "# a call pointed at the conversation's gate stands for the conversation"
+# replies_to <gate> — each bead that replies to the gate.
+replies_to() {
+    for f in "$STORE"/b/*.json; do
+        case "$f" in *.comments.json) continue ;; esac
+        i=$(basename "$f" .json)
+        case " $(deps_of "$i" replies-to) " in *" $1 "*) printf '%s\n' "$i" ;; esac
+    done | tr '\n' ' ' | sed 's/ $//'
+}
+pr_review; run_open tk-rev --json; C=$(opened_conv); G=$(gates_on tk-anc | awk '{print $1}')
+: > "$CALLS"
+run_open "$G" --json
+eq "$RC/$(printf '%s' "$OUT" | jq -r '"\(.conversation) \(.filed)"' 2>/dev/null)" "0/$C false" \
+    "(GATE-NAMES-CONV) open pointed at the gate joins the conversation it holds the merge for"
+has "$ERR" "gate $G is conversation $C's own hold, which only its sign-off answers, so it stands for $C" "(GATE-NAMES-CONV) …saying the gate stands for it"
+hasnt "$(cat "$CALLS")" "bd create" "(GATE-NAMES-CONV) …filing no conversation on the anchor"
+eq "$(replies_to "$G")" "$C" "(GATE-NAMES-CONV) …so only that conversation replies to the gate"
+run_dismiss "$G"
+eq "$RC/$(field "$C" status)/$(field "$G" status)" "0/closed/closed" \
+    "(GATE-NAMES-CONV) dismiss pointed at the gate closes the conversation and withdraws its gate"
+pr_review; run_open tk-rev --json; C=$(opened_conv); G=$(gates_on tk-anc | awk '{print $1}')
+jq -c '.status = "closed"' "$STORE/b/$C.json" > "$STORE/b/$C.json.tmp" && mv "$STORE/b/$C.json.tmp" "$STORE/b/$C.json"
+run_open "$G" --json
+C2=$(opened_conv)
+eq "$RC/$(printf '%s' "$OUT" | jq -r .filed 2>/dev/null)" "0/true" \
+    "(GATE-NAMES-CONV) once the conversation has closed, open pointed at its gate files a conversation"
+has "$ERR" "$G is a gate about tk-anc" "(GATE-NAMES-CONV) …about the anchor waiting on the gate"
+eq "$(deps_of "$C2" replies-to | awk '{print $1}')" "$G" "(GATE-NAMES-CONV) …which replies to that gate, to answer it"
 
 echo "# a subject that is no open PR files no gate"
 fresh; bead tk-task
