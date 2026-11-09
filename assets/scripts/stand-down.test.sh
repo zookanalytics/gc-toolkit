@@ -86,6 +86,18 @@ case "${1:-}" in
   bd) shift ;;
   *) echo "gc stub: unsupported '$*'" >&2; exit 2 ;;
 esac
+# A read the gctk under test makes answers from the same store, through the seam
+# holds-store.stub.sh keeps. STUB_LAND_AT lands its write ahead of such a read
+# as ahead of any, and the command it runs reaches this stub as a script's
+# calls do, not as gctk's.
+if [ -n "${HOLDS_STUB_READ:-}" ]; then
+  if [ -n "${STUB_LAND_AT:-}" ] && [ ! -e "$S.landed" ]; then
+    case " $* " in
+      *"$STUB_LAND_AT"*) : > "$S.landed"; env -u HOLDS_STUB_READ -u STUB_LAND_AT -u STUB_LAND -u STUB_FAIL bash -c "$STUB_LAND" >>"$S.land.log" 2>&1 ;;
+    esac
+  fi
+  HOLDS_STORE="$S" exec "${HOLDS_STUB:?}" answer "$@"
+fi
 actor="${BEADS_ACTOR:-}"
 while :; do
   case "${1:-}" in
@@ -275,6 +287,11 @@ export STUB_DEFERRED="$HERE/deferred-dispatch.sh"
 export BEADS_ACTOR=a-person GC_RUN_CANCEL_TOOL="$BIN/run-cancel" GC_BRANCH_END_TOOL="$BIN/branch-end"
 export GC_RUN_LIB="$HERE/run-lib.stub.sh" RUN_LIB_STUB_RUNS="$TMP/runs.json"
 export DEFERRED_DISPATCH_STATE_DIR="$TMP/state" DEFERRED_DISPATCH_PASS_BUDGET_SECS=0
+# The pass reads what holds the work through gctk bead holds, built from this
+# checkout and run over the stub store.
+export HOLDS_STUB="$HERE/holds-store.stub.sh" GC_NO_API=1
+GCTK_BIN="$("$HOLDS_STUB" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so no pass can read what holds the work"; exit 1; }
+export GCTK_BIN
 
 # A work bead as a declined run leaves it: open, unassigned, unrouted, armed to
 # re-sling, with a `blocks` edge onto an open human gate under polecat-x.
@@ -376,7 +393,7 @@ eq "$(slings)" 0 "…and none of those passes slings the work"
 [ -s "$STUB_STORE.pass.log" ] && ok "…and the passes did run" || bad "…and the passes did run"
 
 fresh
-STUB_LAND_AT="--ready" STUB_LAND="$SCRIPT tk-w --key polecat-x --ruling 'stop while the pass runs'" pass
+STUB_LAND_AT="where --json" STUB_LAND="$SCRIPT tk-w --key polecat-x --ruling 'stop while the pass runs'" pass
 eq "$(field tk-w status)" closed "a stand-down that lands between a pass's listing and its hold read closes the work"
 eq "$(slings)" 0 "…and that pass does not sling it"
 has "$PASS_OUT" "withdrawn tk-w" "…and says why"
@@ -560,12 +577,12 @@ eq "$(slings)" 0 "…and none of those passes, the one right after the edge goes
 [ -s "$STUB_STORE.pass.log" ] && ok "…and the passes did run" || bad "…and the passes did run"
 
 shared
-STUB_LAND_AT="--ready" STUB_LAND="$SCRIPT tk-w --key polecat-x --ruling 'stop while the pass runs' --successor tk-conv" pass
+STUB_LAND_AT="where --json" STUB_LAND="$SCRIPT tk-w --key polecat-x --ruling 'stop while the pass runs' --successor tk-conv" pass
 eq "$(field tk-w status)" closed "a shared gate's stand-down that lands while a pass runs closes the work"
 eq "$(slings)" 0 "…and that pass does not sling it"
 
 shared
-STUB_LAND_AT="--ready" STUB_LAND="STUB_FAIL='--status=closed' $SCRIPT tk-w --key polecat-x --ruling 'stop while the pass runs' --successor tk-conv" pass
+STUB_LAND_AT="where --json" STUB_LAND="STUB_FAIL='--status=closed' $SCRIPT tk-w --key polecat-x --ruling 'stop while the pass runs' --successor tk-conv" pass
 eq "$(field tk-w status)" open "a shared gate's stand-down that has taken the bead off the gate but not closed it while a pass runs leaves it open"
 eq "$(slings)" 0 "…and that pass does not sling it"
 pass

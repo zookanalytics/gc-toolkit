@@ -130,7 +130,12 @@ CITY="$TMP/city"
 PACK="$CITY/rigs/gc-toolkit/assets/scripts"
 mkdir -p "$PACK" "$TMP/bin"
 cp "$HERE/direct-merge-push.sh" "$HERE/bd-lib.sh" "$HERE/refinery-workspace.sh" "$HERE/detached-job.sh" "$HERE/rig-root.sh" \
-  "$HERE/await-ruling.sh" "$HERE/deferred-dispatch.sh" "$HERE/hold-lib.sh" "$PACK/"
+  "$HERE/await-ruling.sh" "$HERE/deferred-dispatch.sh" "$PACK/"
+# The pass reads what holds the work through gctk bead holds, built from this
+# checkout and run over the stub store the gc below keeps.
+export HOLDS_STUB="$HERE/holds-store.stub.sh" GC_NO_API=1
+GCTK_BIN="$("$HOLDS_STUB" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so no pass can read what holds the work"; exit 1; }
+export GCTK_BIN
 cat > "$PACK/lifecycle.sh" <<'LC'
 #!/usr/bin/env bash
 echo "$*" >> "$FAKE_LC_LOG"
@@ -186,7 +191,9 @@ chmod +x "$PACK"/*.sh
 # write (one setting gc.dispatch_when_ready) when FAKE_ARM_WRITE_FAIL is set and
 # an assignment when FAKE_ASSIGN_FAIL is set, and otherwise applies --status,
 # --assignee, --set-metadata, --unset-metadata and --append-notes to the work
-# bead. Every call but a read is logged. A `--db <path>` pin is dropped.
+# bead. Every call but a read is logged. A `--db <path>` pin is dropped. A read
+# the gctk under test makes answers from the same beads and edges, through the
+# seam holds-store.stub.sh keeps.
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 if [ "$1" = bd ] && [ "${2:-}" = --db ]; then set -- bd "${@:4}"; fi
@@ -197,6 +204,12 @@ rows() {
 edges() {
   { [ -n "${FAKE_DEPS:-}" ] && [ -f "$FAKE_DEPS" ] && cat "$FAKE_DEPS"; } | jq -R -s -c 'split("\n") | map(select(length > 0) | split("|") | {from: .[0], type: .[1], to: .[2]})'
 }
+if [ -n "${HOLDS_STUB_READ:-}" ] && [ "$1" = bd ]; then
+  shift
+  rows | jq -c --argjson e "$(edges)" '[ .[] | . as $b
+    | .dependencies = ((.dependencies // []) + [ $e[] | select(.from == $b.id) | {depends_on_id: .to, type: .type} ]) ]' > "$FAKE_META.holds"
+  HOLDS_STORE="$FAKE_META.holds" exec "${HOLDS_STUB:?}" answer "$@"
+fi
 case "$1 ${2:-}" in
   "gc-toolkit scripts-dir") [ -n "${STUB_PACK:-}" ] || exit 1; printf '%s/assets/scripts\n' "$STUB_PACK" ;;
   "rig list") cat "$FAKE_ROSTER" ;;
@@ -588,7 +601,7 @@ echo "── clearing the gate lets the armed pour take the work ──"
 has "$(armed_state)" "wb -> $POOL [HELD by $GATE" "nocheck, gate open: the deferred-dispatch pass holds the pour on the gate"
 jq -c --arg g "$GATE" 'map(if .id == $g then .status = "closed" else . end)' "$D/store.json" > "$D/store.json.new" \
   && mv "$D/store.json.new" "$D/store.json"
-has "$(armed_state)" "wb -> $POOL [DISPATCHABLE NOW]" "nocheck, gate cleared: the deferred-dispatch pass pours the work on its next pass"
+has "$(armed_state)" "wb -> $POOL [DISPATCHABLE NOW (in flight, carries branch" "nocheck, gate cleared: the deferred-dispatch pass pours the work on its next pass"
 
 echo "── a gate or a wait that does not land leaves the work with the refinery ──"
 # third_failure <dir>: the nocheck fixture with two failed checks counted, so
