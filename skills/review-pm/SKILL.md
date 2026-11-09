@@ -76,12 +76,13 @@ people it serves, or what it promises them:
 - the product goals, `docs/product-goals.md`. A diff that adds or changes that
   page makes this check mandatory.
 
-An edit that changes no behavior, such as a refactor, a typo fixed or a link
-mended, needs no product review. Neither does internal plumbing the people the
-product serves never meet, such as the build, CI or a dependency upgrade that
-changes nothing for them, and neither do tests and the fixtures they use. Triage
-adds nothing for them. The default check set is the baseline, `correctness,triage`,
-so under it `pm` runs only on a diff triage added it to.
+An edit that changes neither what the product does for the people it serves
+nor what it promises them, such as a refactor, a typo fixed or a link mended,
+needs no product review. Neither does internal plumbing those people never meet,
+such as the build, CI or a dependency upgrade that changes nothing for them, and
+neither do tests and the fixtures they use. Triage adds nothing for any of
+these. The default check set is the baseline, `correctness,triage`, so under it
+`pm` runs only on a diff triage added it to.
 
 ### The discipline you apply
 

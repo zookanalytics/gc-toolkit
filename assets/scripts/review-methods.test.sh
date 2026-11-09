@@ -56,12 +56,12 @@
 #   - The pm method says when triage adds it, in words that name no rig: a
 #     diff that changes what the rig's product does for the people it serves,
 #     or what it promises them, and always a diff that changes the product
-#     goals page. An edit that changes no behavior, and tests, do not warrant
-#     it. When a rig keeps no product goals, a pm review judges the change
-#     against its anchor alone and asks the change for no page. It files one
-#     request for the page under one token, and its duplicate probe counts a
-#     request that has closed. The method defines that page without the
-#     foundation doc only this repo keeps.
+#     goals page. An edit that changes neither what the product does nor what
+#     it promises, and tests, do not warrant it. When a rig keeps no product
+#     goals, a pm review judges the change against its anchor alone and asks
+#     the change for no page. It files one request for the page under one
+#     token, and its duplicate probe counts a request that has closed. The
+#     method defines that page without the foundation doc only this repo keeps.
 #   - This repo's own docs/review-triage.md, read the way a review reads it at
 #     its commit, carries the changes that make pm mandatory and the edits that
 #     do not.
@@ -568,8 +568,8 @@ hasF "$TMP/pm.triage" "Triage adds \`pm\` when the diff changes what the rig's p
   "triage adds pm for a change to what the rig's product does for the people it serves"
 hasF "$TMP/pm.triage" 'including a fix that changes how the product behaves for them' "…a fix that changes how it behaves for them included"
 hasF "$TMP/pm.triage" 'A diff that adds or changes that page makes this check mandatory.' "…and always for a change to the product goals page"
-hasF "$TMP/pm.triage" 'An edit that changes no behavior, such as a refactor, a typo fixed or a link mended, needs no product review.' \
-  "…but not for an edit that changes no behavior"
+hasF "$TMP/pm.triage" 'An edit that changes neither what the product does for the people it serves nor what it promises them, such as a refactor, a typo fixed or a link mended, needs no product review.' \
+  "…but not for an edit that changes neither what the product does for them nor what it promises them"
 hasF "$TMP/pm.triage" 'neither do tests and the fixtures they use' "…or for tests and their fixtures"
 awk '/^### A rig with no product goals$/ {f = 1; next} f && /^#/ {exit} f' "$PM" > "$TMP/pm.missing"
 hasF "$TMP/pm.missing" "judge the change against the anchor's stated problem alone" "with no product goals, a pm review judges the change against its anchor alone"
