@@ -29,6 +29,9 @@
 #     the second run dispatches nothing once a live run works the bead or the
 #     first run's arm stands, even when the park that held it has closed
 #     since, and a sling that exits 3 counts as dispatched.
+#   - a stop at the lift names the lift by hand, with each spelling of the
+#     hold and the placement's note, and not a re-run: run once the first
+#     run has ended, it finishes the placement with that one run.
 #
 # It runs the REAL gc-helm.sh via `sh` (as shipped), with the real
 # resolve-route.sh, run-lib.sh, dispatch-path.sh and bd-lib.sh, and the real
@@ -555,6 +558,25 @@ reset_store
 run_place tk-new --under tk-epic
 hasnt "$CALLS" "sling " "(STOP) after a stop at the lift, the second run slings nothing, since a live run works the bead"
 has "$OUT" "already dispatched (live run tk-wf" "(STOP) and says the earlier dispatch stands"
+
+echo "# a stop at the lift names the lift by hand, which dispatches nothing"
+# The first run's root then closes, as the run of a formula that leaves its
+# bead unclaimed, unlanded and open does, so nothing on the bead shows the
+# dispatch any more. The lift the message names still finishes the placement
+# with that one run.
+reset_store
+RC=0; STUB_UPDATE_FAIL_ON=--remove-label sh "$SCRIPT" place tk-case --standalone --on mol-feedback-miner >/dev/null 2>"$TMP/err" || RC=$?
+ERR="$(cat "$TMP/err")"
+eq "$RC" "4" "(LIFT-BY-HAND) a stop at the lift exits 4"
+has "$ERR" "Finish with the lift by hand, which dispatches nothing: gc bd update tk-case --remove-label Hold:Mayor --append-notes 'Placed at " "(LIFT-BY-HAND) …naming the lift by hand, with each spelling and the placement's note"
+hasnt "$ERR" "Re-run to finish" "(LIFT-BY-HAND) …and no re-run, which would dispatch again once that run has ended"
+jq -c 'map(if (.metadata["gc.formula_name"] // "") == "mol-feedback-miner" then .status = "closed" else . end)' "$STUB_STORE" > "$STUB_STORE.tmp" && mv "$STUB_STORE.tmp" "$STUB_STORE"
+LIFT="$(printf '%s\n' "$ERR" | sed -n 's/.*dispatches nothing: \(gc bd update tk-case .*\)\. A re-run of place.*/\1/p')"
+case "$LIFT" in "gc bd update tk-case "*" --db "*) ok "(LIFT-BY-HAND) the message carries the whole command" ;; *) bad "(LIFT-BY-HAND) the message carries the whole command (in: $ERR)" ;; esac
+eval "$LIFT" >/dev/null 2>&1 && ok "(LIFT-BY-HAND) the named lift runs as printed" || bad "(LIFT-BY-HAND) the named lift runs as printed ($LIFT)"
+eq "$(labels tk-case)" "learning" "(LIFT-BY-HAND) …lifts the hold"
+eq "$(runs tk-case)" "1" "(LIFT-BY-HAND) …with the one run the placement slung"
+has "$(row tk-case | jq -r '.notes // ""')" "Placed at" "(LIFT-BY-HAND) …and records the placement's note"
 reset_store
 (export STUB_UPDATE_FAIL_ON=--unset-metadata; sh "$SCRIPT" place tk-fixed --standalone >/dev/null 2>&1) && bad "(STOP) a route clear that fails exits non-zero" || ok "(STOP) a route clear that fails exits non-zero"
 eq "$(labels tk-fixed)" "hold:mayor" "(STOP) a route clear that fails leaves the hold on"

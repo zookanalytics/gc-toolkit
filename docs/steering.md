@@ -232,7 +232,11 @@ on its bead, and the next `place` finishes the lift. Running `place` again
 after a stop at any write finishes the placement without a second run: it
 dispatches nothing once an assignee, a `merge_result`, a live run or an arm
 shows a dispatch, and `gc sling` refuses a second live run of one formula at
-one bead.
+one bead. That holds while the run is live, or once it has claimed, landed or
+closed the bead, as the hand-off of `mol-polecat-work` does before its run
+ends. A run that ends with none of those, such as one of a formula that only
+reads its bead, leaves nothing `place` reads as the dispatch, so a stop at the
+lift names the lift by hand, which dispatches nothing, rather than a re-run.
 
 A hold also lifts these ways:
 

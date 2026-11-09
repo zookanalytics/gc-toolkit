@@ -217,7 +217,9 @@ dispatch that fails leaves the hold on, so the bead stays in the queue. A
 re-run after a stop at any write finishes the placement without a second
 run: it dispatches nothing once an assignee, a merge_result, a live run or an
 arm shows a dispatch, and gc sling refuses a second live run of one formula at
-one bead (exit 3).
+one bead (exit 3). A run that ends without claiming, landing or closing its
+bead leaves none of these, so a stop at the lift names the lift by hand, which
+dispatches nothing, rather than a re-run.
 
 dismiss is the operator's explicit "end this sitting". It closes the
 conversation a live sitting holds on the subject, with a reason naming the
@@ -369,9 +371,10 @@ EOF
     gc bd update "$_hr_bead" ${db:+--db "$db"} "$@" >/dev/null 2>&1
 }
 
-# hold_lift_cmd <bead> <spellings> — the write that lifts those spellings by
-# hand, one --remove-label each as hold_remove writes them, in the caller's
-# store pin, for a message to name.
+# hold_lift_cmd <bead> <spellings> [<note>] — the write that lifts those
+# spellings by hand, one --remove-label each as hold_remove writes them, with
+# the note appended when one is given, in the caller's store pin, for a message
+# to name.
 hold_lift_cmd() {
     _hl_cmd="gc bd update $1"
     while IFS= read -r _hl_s; do
@@ -379,7 +382,14 @@ hold_lift_cmd() {
     done <<EOF
 $2
 EOF
+    [ -z "${3:-}" ] || _hl_cmd="$_hl_cmd --append-notes $(sh_quote "$3")"
     printf '%s%s' "$_hl_cmd" "${db:+ --db $db}"
+}
+
+# sh_quote <text> — <text> in single quotes, each quote in it escaped, so a
+# command a message names pastes whole.
+sh_quote() {
+    printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
 }
 
 # lift_hold <bead> [<note>] — lift hold:mayor off the bead with the note in the
@@ -1812,7 +1822,12 @@ cmd_priority() {
 #   5. It lifts the hold with its note in one write (lift_hold).
 # The dispatch comes before the lift, so a dispatch that fails leaves the bead
 # held and in the queue. A run cut off between the two goes on with the hold
-# on its bead, and the next place finishes the lift without a second run.
+# on its bead. The next place finishes the lift without a second run while that
+# run is live, or once it has claimed, landed or closed the bead, as the
+# hand-off of mol-polecat-work does before its run ends. gc sling refuses only a
+# second live run, so a run that ends with none of those leaves nothing place
+# reads as the dispatch, and a stop at the lift names the lift by hand, which
+# dispatches nothing.
 
 # place_hold <bead> — what holds the bead's work now, as `gctk bead holds`, the
 # one definition of whether a wait holds a bead or a parent above it, answers it
@@ -2078,7 +2093,7 @@ cmd_place() {
     # Step 5: lift the hold, with the note, in one write.
     pl_note="Placed at $(iso_now)${under:+ under $under}${standalone:+ with no parent}${pl_prio:+ at P$pl_prio}: $how. hold:mayor lifted."
     if ! lift_hold "$bead" "$pl_note"; then
-        echo "$PROG: place: $bead is ${under:+under $under and }$how, but the store refused the write that lifts its hold:mayor, so it still waits in the queue, and an arm on it does not fire. Re-run to finish the lift, which dispatches nothing twice: $pl_again" >&2
+        echo "$PROG: place: $bead is ${under:+under $under and }$how, but the store refused the write that lifts its hold:mayor, so it still waits in the queue, and an arm on it does not fire. Finish with the lift by hand, which dispatches nothing: $(hold_lift_cmd "$bead" "$hold_sp" "$pl_note"). A re-run of place reads only a live run, an assignee, a merge_result or an arm as this dispatch, so once a run that leaves none of them has ended, it would dispatch $bead again." >&2
         exit 4
     fi
     bust_cache
