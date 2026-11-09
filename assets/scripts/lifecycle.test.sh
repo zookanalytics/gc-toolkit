@@ -715,6 +715,7 @@ eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "…and nothing reaches 
 store '[{"id":"p-11","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
 out="$("$SUT" transition p-11 --to retargeted --route rig/mechanik --takeaway " " 2>&1)"; rc=$?
 eq "$rc" 1 "an empty --takeaway is refused on a pool route too"
+
 # --- a record on an anchor staying in its state moves no route -------------------
 # pr-facts.sh records the rank an anchor's PR-finishing work settled at with a
 # self-transition, and a detached state's clear would drop a route the write

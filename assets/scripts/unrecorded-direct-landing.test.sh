@@ -444,9 +444,11 @@ has "$(cat "$D/lc.log")" "transition wb --to refused_false_completion" "nowork: 
 hasnt "$(cat "$D/lc.log")" "--route" "nowork: the park writes no route, since its gate is the park"
 has "$(cat "$D/gc.log")" "human-gate --subject wb --key refinery-false-completion" "nowork: the refusal files a gate on the bead"
 has "$(cat "$D/gc.log")" "runtime drain-ack" "nowork: the session drains"
+eq "$(merged_tries)" 0 "nowork: nothing is recorded as merged"
+eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "nowork: nothing is pushed"
 
 echo "── a refusal whose gate is not filed parks nothing ──"
-fixture "$TMP/nogate" nowork
+fixture "$TMP/nowork-nogate" nowork
 attempt GATE_FAIL=1
 eq "$RC" 1 "nogate: merge-push stops"
 has "$(cat "$D/gc.log")" "human-gate --subject wb --key refinery-false-completion" "nogate: the refusal asks for its gate first"
@@ -455,8 +457,7 @@ has "$OUT" "no refinery-false-completion gate was filed on wb, so it is not park
   "nogate: the block says the work stays with the refinery"
 has "$(cat "$D/gc.log")" "runtime drain-ack" "nogate: the session drains"
 eq "$(merged_tries)" 0 "nogate: nothing is recorded as merged"
-eq "$(merged_tries)" 0 "nowork: nothing is recorded as merged"
-eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "nowork: nothing is pushed"
+eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "nogate: nothing is pushed"
 
 echo "── the same, with a stamp the target does not carry ──"
 fixture "$TMP/stale" nowork
