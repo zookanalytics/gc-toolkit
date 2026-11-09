@@ -944,6 +944,23 @@ Three things about that path are worth knowing before trusting a pane:
   A sitting's stop event reads the same, and there it is the sitting's own
   `drain-ack`, an operator's from `gc-helm dismiss`, or its idle sleep.
 
+**The done mark is the tab's alone, and it renames nothing.** The title
+behind it is the sitting's own name, which the sitting sets with
+`gctk session title` as it takes up its conversation: Gas City records the
+title and types `/rename` into the agent, which draws its name as the pane's
+title, `#T`. The mark changes only the title tmux sends a client attached to
+the sitting's session. So the session record that `gc session list` and the
+board show, the agent's name and the pane's own title keep the topic, and a
+restart, which runs `session_live` again, puts back `#T`. A typed `/rename`
+cannot make the mark. Gas City types one into a running session only at its
+next boundary, and in the probe a `/rename` queued from the sign-off's own turn
+had not landed two minutes after the drain-ack
+([specs/tk-7w7qdls/idle-sleep-probe.md](../specs/tk-7w7qdls/idle-sleep-probe.md#why-the-done-mark-is-not-a-typed-rename)).
+When an attached operator has typed something in the box by then, the
+`/rename` goes onto that text and both go to the model as one message, so the
+title stays as it was. And Gas City wakes a session that is not running to
+type one into it.
+
 **What the design holds to.** A conversation is done when the sitting closes
 it, at its sign-off or at a moot or benign close before any framing, or when
 the operator dismisses it, and each of those marks the tab done. Neither a stop
