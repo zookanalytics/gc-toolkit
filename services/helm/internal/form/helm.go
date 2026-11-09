@@ -132,14 +132,17 @@ type Rig struct {
 func (r Rig) Hosts() bool { return r.Converse && !r.Suspended }
 
 // SaveRequest is a question to file as a conversation. Ref is the reference
-// the destination was verified for (the subject, or the gate the conversation
-// replies to), and Subject the subject the form showed for it; a new topic
-// leaves both empty and names its Rig.
+// the destination was verified for: the subject as the operator typed it, or
+// the gate the conversation replies to. Subject is the subject the form showed
+// for it. A new topic leaves both empty and names its Rig. Conversation is set
+// on a save again: the conversation an earlier save filed and did not complete,
+// which this save completes rather than file another.
 type SaveRequest struct {
-	Ref      string
-	Subject  string
-	Rig      string
-	Question string
+	Ref          string
+	Subject      string
+	Rig          string
+	Question     string
+	Conversation string
 }
 
 // Saved is what `gc-helm.sh open --json` answers. Filed is false when a new
@@ -276,18 +279,24 @@ func (s Script) City(ctx context.Context) (City, error) {
 // than the one the form showed. The question rides as one argv element,
 // unchanged. A new subject filed whose conversation was not comes back with the
 // error, so a retry files onto that subject, and so does a conversation filed
-// whose save then failed, so a retry completes it: open, run again on a question
-// a conversation in the queue holds as its ask, lands on that conversation.
+// whose save then failed. A save again names that conversation with
+// `--conversation <id>`, and open completes it wherever it stands, files
+// nothing, and refuses one it cannot complete.
 func (s Script) Save(ctx context.Context, req SaveRequest) (Saved, error) {
 	var sv Saved
 	args := []string{"open"}
 	switch {
+	case req.Ref == "" && req.Conversation != "":
+		return sv, fmt.Errorf("conversation %s was saved again with no subject, so the save has nothing to complete it on", req.Conversation)
 	case req.Ref == "":
 		args = append(args, "--new-subject", "--rig", req.Rig)
 	case req.Subject == "":
 		return sv, fmt.Errorf("no subject was shown for %s, so the save has nothing to file against", req.Ref)
 	default:
 		args = append(args, req.Ref, "--allow-duplicate", "--if-subject", req.Subject)
+		if req.Conversation != "" {
+			args = append(args, "--conversation", req.Conversation)
+		}
 	}
 	args = append(args, "--reason", req.Question, "--json")
 	out, err := s.run(ctx, args...)

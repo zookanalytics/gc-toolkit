@@ -3,6 +3,7 @@ package form
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -336,8 +337,8 @@ func TestAFailedSaveKeepsTheQuestion(t *testing.T) {
 
 // A save that filed the conversation and then failed, here because its reply
 // onto the gate did not read back, leaves the question saved in that
-// conversation. Nothing starts, and r sends the same save again, which open
-// completes on that conversation rather than file a second one.
+// conversation. Nothing starts, and r sends the save again naming that
+// conversation, which open completes rather than file a second one.
 func TestAConversationFiledWhoseSaveFailedIsKeptAndSavedAgainNotFiledAgain(t *testing.T) {
 	a := subjectAbout("tk-held", "gc-toolkit")
 	a.Ref, a.Gate = "tk-gate", "tk-gate"
@@ -378,11 +379,13 @@ func TestAConversationFiledWhoseSaveFailedIsKeptAndSavedAgainNotFiledAgain(t *te
 	f.saveResp, f.saveErr = Saved{Subject: "tk-held", Conversation: "tk-c1", Filed: true}, nil
 	_, cmd = m.Update(key('r'))
 	deliver(m, cmd)
-	if len(f.saves) != 3 || f.saves[2] != f.saves[0] {
-		t.Fatalf("saves = %+v, want the same request three times", f.saves)
-	}
-	if f.saves[0].Ref != "tk-gate" || f.saves[0].Subject != "tk-held" || f.saves[0].Question != "the question" {
+	if f.saves[0] != (SaveRequest{Ref: "tk-gate", Subject: "tk-held", Question: "the question"}) {
 		t.Fatalf("save request = %+v", f.saves[0])
+	}
+	again := f.saves[0]
+	again.Conversation = "tk-c1"
+	if len(f.saves) != 3 || f.saves[1] != again || f.saves[2] != again {
+		t.Fatalf("saves = %+v, want each save again to be the first naming tk-c1", f.saves)
 	}
 	if m.saveErr != "" || len(f.starts) != 1 || f.starts[0] != "tk-c1 opus" {
 		t.Fatalf("after the save completed: saveErr %q, starts %v", m.saveErr, f.starts)
@@ -489,6 +492,34 @@ func TestAnAmbiguousPRIsChosenExplicitly(t *testing.T) {
 	deliver(m, cmd)
 	if dest, ok := m.destination(); !ok || !strings.Contains(dest, "rig gascity") {
 		t.Fatalf("destination = %q, %v", dest, ok)
+	}
+	// The candidate chosen is the reference the save sends.
+	f.saveResp = Saved{Subject: "gc-b", Conversation: "gc-c", Filed: true}
+	focusOn(t, m, questionField)
+	typeText(m, "q")
+	_, cmd = m.Update(ctrl('s'))
+	deliver(m, cmd)
+	if len(f.saves) != 1 || f.saves[0].Ref != "gc-b" || f.saves[0].Subject != "gc-b" {
+		t.Fatalf("saves = %+v, want the candidate chosen", f.saves)
+	}
+}
+
+// The save sends the reference as the operator typed it, so open resolves it
+// again and its --if-subject refuses a PR whose anchor moved while the operator
+// typed. The subject is the one the screen shows.
+func TestASaveSendsTheReferenceAsTyped(t *testing.T) {
+	for _, ref := range []string{"https://github.com/o/r/pull/12", "1446"} {
+		a := subjectAbout("tk-a", "gc-toolkit")
+		a.Ref = ref
+		f := &fakeHelm{about: map[string]About{ref: a}, saveResp: Saved{Subject: "tk-a", Conversation: "tk-c", Filed: true}}
+		m := newForm(t, f, Options{Subject: ref})
+		settle(m)
+		typeText(m, "q")
+		_, cmd := m.Update(ctrl('s'))
+		deliver(m, cmd)
+		if len(f.saves) != 1 || f.saves[0].Ref != ref || f.saves[0].Subject != "tk-a" {
+			t.Fatalf("saves for %s = %+v, want the reference as typed, bound to tk-a", ref, f.saves)
+		}
 	}
 }
 
@@ -735,7 +766,7 @@ func TestLeavingWhileANewTopicIsSavedNamesTheSubjectItFiled(t *testing.T) {
 	if !strings.Contains(note, "Subject tk-new was filed, and its conversation was not.") || strings.Contains(note, "Nothing was filed") {
 		t.Fatalf("note = %q", note)
 	}
-	if !strings.Contains(note, "start it again with: gc-helm.sh engage tk-new --reason") {
+	if !strings.Contains(note, "&& gc-helm.sh engage tk-new --reason") {
 		t.Fatalf("the note does not file the question onto tk-new: %q", note)
 	}
 	files, _ := filepath.Glob(filepath.Join(dir, "engage-draft-*.txt"))
@@ -994,8 +1025,8 @@ func TestASaveRefusedForASubjectThatMovedShowsWhereItLeadsBeforeTheNextSave(t *t
 	f.saveErr, f.saveResp = nil, Saved{Subject: "gc-b", Conversation: "gc-c", Filed: true}
 	_, cmd := m.Update(ctrl('s'))
 	deliver(m, cmd)
-	if len(f.saves) != 2 || f.saves[1].Ref != "gc-b" || f.saves[1].Subject != "gc-b" {
-		t.Fatalf("second save = %+v, want one bound to gc-b, the subject now shown", f.saves)
+	if len(f.saves) != 2 || f.saves[1].Ref != "tk-a" || f.saves[1].Subject != "gc-b" {
+		t.Fatalf("second save = %+v, want tk-a as typed, bound to gc-b, the subject now shown", f.saves)
 	}
 }
 
@@ -1095,5 +1126,209 @@ func TestAModelNoVariantCarriesIsShownAndStartsNothing(t *testing.T) {
 	m = newForm(t, &fakeHelm{}, Options{Model: "fable", Models: []string{}})
 	if m.model != 0 || m.modelName() != "fable" || strings.Contains(m.composeView(), "not a configured model") {
 		t.Fatalf("model %d %q with no variants named", m.model, m.modelName())
+	}
+}
+
+// A new topic whose subject and conversation were both filed before its save
+// failed is saved again onto that subject, naming the conversation, so neither
+// is filed a second time.
+func TestANewTopicSavedAgainCompletesTheConversationItFiled(t *testing.T) {
+	f := &fakeHelm{
+		city:     rigCity(),
+		saveResp: Saved{Subject: "tk-new", Conversation: "tk-c", Filed: true},
+		saveErr:  errors.New("gc-helm.sh open: signal: killed"),
+	}
+	m := newForm(t, f, Options{Rig: "gc-toolkit"})
+	loadCity(m)
+	typeText(m, "the question")
+	_, cmd := m.Update(ctrl('s'))
+	deliver(m, cmd)
+	if m.scr != progressScreen || m.saved == nil || m.saveErr == "" || len(f.starts) != 0 {
+		t.Fatalf("after a save that filed tk-c and failed: screen %d, saved %+v, saveErr %q, starts %v", m.scr, m.saved, m.saveErr, f.starts)
+	}
+	f.saveErr = nil
+	_, cmd = m.Update(key('r'))
+	deliver(m, cmd)
+	want := SaveRequest{Ref: "tk-new", Subject: "tk-new", Question: "the question", Conversation: "tk-c"}
+	if len(f.saves) != 2 || f.saves[1] != want {
+		t.Fatalf("saves = %+v, want the save again onto tk-new naming tk-c", f.saves)
+	}
+	if m.saveErr != "" || len(f.starts) != 1 || f.starts[0] != "tk-c opus" {
+		t.Fatalf("after the save again: saveErr %q, starts %v", m.saveErr, f.starts)
+	}
+}
+
+// convs is n open conversations, tk-c00 the newest, so the return list shows
+// them in id order.
+func convs(n int) []Conversation {
+	var cs []Conversation
+	for i := range n {
+		cs = append(cs, Conversation{ID: fmt.Sprintf("tk-c%02d", i), Readiness: Ready, Title: "a question", CreatedAt: fmt.Sprintf("2026-11-08T10:%02d:00Z", 59-i)})
+	}
+	return cs
+}
+
+// onScreen is what a terminal height lines tall shows of a view: the lines past
+// its height are clipped.
+func onScreen(view string, height int) []string {
+	ls := strings.Split(view, "\n")
+	return ls[:min(len(ls), height)]
+}
+
+// marked is the line on screen that holds want, or "".
+func marked(ls []string, want string) string {
+	for _, l := range ls {
+		if strings.Contains(l, want) {
+			return l
+		}
+	}
+	return ""
+}
+
+// The return list is paged to the terminal, so ↑/↓ never moves the selection
+// past what the screen shows and Enter attaches to the row marked, through a
+// resize and through a refresh that moves the selection to another page.
+func TestTheReturnListPagesToTheTerminal(t *testing.T) {
+	f := &fakeHelm{city: City{Conversations: convs(30)}}
+	m := newForm(t, f, Options{Return: true})
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	loadCity(m)
+	for range 29 {
+		m.Update(key(tea.KeyDown))
+	}
+	if m.retSel != "tk-c29" {
+		t.Fatalf("selected %q after 29 ↓, want tk-c29", m.retSel)
+	}
+	for _, h := range []int{24, 10, 4} {
+		m.Update(tea.WindowSizeMsg{Width: 80, Height: h})
+		v := m.returnView()
+		if n := lines(v); n > h {
+			t.Fatalf("the view is %d lines on a %d-line terminal:\n%s", n, h, v)
+		}
+		if l := marked(onScreen(v, h), "› "); !strings.Contains(l, "tk-c29") {
+			t.Fatalf("on a %d-line terminal the selected conversation is not on screen:\n%s", h, v)
+		}
+		if !strings.Contains(v, "more above") || strings.Contains(v, "tk-c00") {
+			t.Fatalf("on a %d-line terminal the page does not say what it leaves out:\n%s", h, v)
+		}
+	}
+	// A refresh that sorts tk-c29 to the top moves it to the first page.
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	f.city.Conversations[29].CreatedAt = "2026-11-08T11:00:00Z"
+	loadCity(m)
+	v := m.returnView()
+	if l := marked(onScreen(v, 24), "› "); !strings.Contains(l, "tk-c29") || !strings.Contains(v, "more below") || strings.Contains(v, "more above") {
+		t.Fatalf("after the refresh the selected conversation is not on the first page:\n%s", v)
+	}
+	if _, cmd := m.Update(key(tea.KeyEnter)); cmd == nil || len(f.attaches) != 1 || f.attaches[0] != "tk-c29" {
+		t.Fatalf("attach = %v, want tk-c29, the row marked", f.attaches)
+	}
+}
+
+// The rows on a subject are paged too: the cursor's row while the list has
+// focus, and the row chosen once it has not.
+func TestTheRowsOnASubjectPageToTheTerminal(t *testing.T) {
+	a := subjectAbout("tk-a", "gc-toolkit")
+	a.Conversations = convs(30)
+	f := &fakeHelm{about: map[string]About{"tk-a": a}}
+	m := newForm(t, f, Options{Subject: "tk-a"})
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	settle(m)
+	focusOn(t, m, contextField)
+	for range 25 {
+		m.Update(key(tea.KeyDown))
+	}
+	v := m.composeView()
+	if n := lines(v); n > 30 {
+		t.Fatalf("the view is %d lines on a 30-line terminal:\n%s", n, v)
+	}
+	if l := marked(onScreen(v, 30), "› "); !strings.Contains(l, "tk-c24") || !strings.Contains(v, "more above") {
+		t.Fatalf("the cursor's row is not on screen:\n%s", v)
+	}
+	m.Update(key(tea.KeySpace))
+	if m.choice != "tk-c24" {
+		t.Fatalf("choice = %q, want tk-c24", m.choice)
+	}
+	m.cursor = 0
+	focusOn(t, m, questionField)
+	if l := marked(onScreen(m.composeView(), 30), "● "); !strings.Contains(l, "tk-c24") {
+		t.Fatalf("the row chosen is not on screen once the list has no focus:\n%s", m.composeView())
+	}
+}
+
+// A refresh that fails keeps the rows the last read gave, and the screen says
+// the list may be out of date, since when, and why the read failed.
+func TestAFailedRefreshSaysTheListMayBeOutOfDate(t *testing.T) {
+	f := &fakeHelm{city: City{Conversations: []Conversation{{ID: "tk-c1", Readiness: Preparing}}}}
+	at := time.Date(2026, 11, 8, 18, 30, 5, 0, time.Local)
+	m := newForm(t, f, Options{Return: true, Now: func() time.Time { return at }})
+	loadCity(m)
+	if v := m.returnView(); strings.Contains(v, "Not refreshed") {
+		t.Fatalf("a list just read says it is out of date:\n%s", v)
+	}
+	at = at.Add(time.Minute)
+	f.cityErr = errors.New("gc-helm: conversations: could not read 'gc session list'")
+	loadCity(m)
+	v := m.returnView()
+	if !strings.Contains(v, "tk-c1") || !strings.Contains(v, "Not refreshed since 18:30:05, so the list may be out of date: gc-helm: conversations: could not read 'gc session list'") {
+		t.Fatalf("after a failed refresh:\n%s", v)
+	}
+	f.cityErr = nil
+	loadCity(m)
+	if v := m.returnView(); strings.Contains(v, "Not refreshed") {
+		t.Fatalf("a refresh that read still says the list is out of date:\n%s", v)
+	}
+}
+
+// The command the note prints files the question exactly as it is kept, with
+// its trailing newlines, and runs nothing once the file is gone.
+func TestTheKeptDraftsCommandFilesTheQuestionWhole(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got := filepath.Join(dir, "reason")
+	stub := "#!/bin/sh\nfor a; do last=$a; done\nprintf '%s' \"$last\" > '" + got + "'\n"
+	if err := os.WriteFile(filepath.Join(bin, "gc-helm.sh"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m := newForm(t, &fakeHelm{}, Options{Subject: "tk-a", DraftDir: filepath.Join(dir, "the drafts")})
+	q := "a question\n  that ends in blank lines\n\n"
+	typeText(m, q)
+	if m.question.Value() != q {
+		t.Fatalf("question = %q", m.question.Value())
+	}
+	m.Update(key(tea.KeyEscape))
+	_, command, ok := strings.Cut(m.Note(), "start it again with: ")
+	if !ok {
+		t.Fatalf("note = %q", m.Note())
+	}
+	run := func() error {
+		c := exec.Command("sh", "-c", command)
+		c.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+		return c.Run()
+	}
+	if err := run(); err != nil {
+		t.Fatalf("%s: %v", command, err)
+	}
+	if b, _ := os.ReadFile(got); string(b) != q {
+		t.Fatalf("the command filed %q, want %q", b, q)
+	}
+	files, _ := filepath.Glob(filepath.Join(dir, "the drafts", "engage-draft-*.txt"))
+	if len(files) != 1 {
+		t.Fatalf("draft files %v", files)
+	}
+	if err := os.Remove(files[0]); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(got); err != nil {
+		t.Fatal(err)
+	}
+	if err := run(); err == nil {
+		t.Fatalf("the command succeeded with its draft gone")
+	}
+	if _, err := os.Stat(got); !os.IsNotExist(err) {
+		t.Fatalf("the command ran engage with its draft gone")
 	}
 }

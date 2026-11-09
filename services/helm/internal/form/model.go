@@ -100,7 +100,8 @@ type Model struct {
 	seq      int // edits of the subject field, so a stale debounce does nothing
 	lookups  map[string]*lookup
 	city     *City
-	cityErr  string
+	cityAt   time.Time // when city was read
+	cityErr  string    // why the last read of the city failed; city stays the last one read
 	cityBusy bool
 	ticking  bool // a refresh of the return list is scheduled
 
@@ -112,7 +113,7 @@ type Model struct {
 	cursor        int
 
 	// The progress of a submit.
-	req       SaveRequest // what the save sent, so a save again sends it unchanged
+	req       SaveRequest // what the save sent; a save again sends it with the conversation it filed
 	saving    bool
 	saved     *Saved
 	saveErr   string // why the save that filed saved's conversation did not complete
@@ -507,7 +508,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		c := msg.city
-		m.city, m.cityErr = &c, ""
+		m.city, m.cityAt, m.cityErr = &c, m.opt.Now(), ""
 		m.keepSelection()
 		return m, nil
 	case debounceMsg:
@@ -739,9 +740,12 @@ func (m *Model) submit() tea.Cmd {
 		req.Rig = m.rig
 	} else {
 		// The save files on the subject the screen shows, and open refuses it
-		// when the reference names another subject by then.
+		// when the reference names another subject by then. So the reference
+		// goes as the operator typed it, which open resolves again: a PR whose
+		// anchor moved, or a bead closed onto a successor, files nothing. A gate
+		// goes as itself, so the conversation replies to the gate shown.
 		a := m.current().about
-		req.Ref, req.Subject = a.Subject.ID, a.Subject.ID
+		req.Ref, req.Subject = m.ref(), a.Subject.ID
 		if a.Gate != "" {
 			req.Ref = a.Gate
 		}
@@ -750,10 +754,7 @@ func (m *Model) submit() tea.Cmd {
 	return m.save()
 }
 
-// save runs the save request the submit made. Run again, it sends the request
-// unchanged, and open lands on the conversation in the queue whose ask is the
-// question, so a save again completes the conversation an earlier save filed
-// rather than file a second one.
+// save runs the save request the submit made.
 func (m *Model) save() tea.Cmd {
 	m.saving = true
 	req := m.req
@@ -761,6 +762,21 @@ func (m *Model) save() tea.Cmd {
 		sv, err := m.helm.Save(m.ctx, req)
 		return savedMsg{saved: sv, err: err}
 	}
+}
+
+// saveAgain completes the conversation a save filed and did not complete. It
+// sends the save again naming that conversation, and open completes it where it
+// stands, whatever sitting has taken it since, or refuses: it never files a
+// second one. A new topic's subject was filed with it, so the save again goes
+// onto that subject and never files another.
+func (m *Model) saveAgain() tea.Cmd {
+	req := m.req
+	req.Conversation = m.saved.Conversation
+	if req.Ref == "" && m.saved.Subject != "" {
+		req.Ref, req.Subject, req.Rig = m.saved.Subject, m.saved.Subject, ""
+	}
+	m.req = req
+	return m.save()
 }
 
 // reread reads again what a refused submit was refused on, when that read can
@@ -865,7 +881,7 @@ func (m *Model) progressKey(s string) tea.Cmd {
 	case "r":
 		switch {
 		case m.saved != nil && m.saveErr != "" && !m.saving:
-			return m.save()
+			return m.saveAgain()
 		case m.saved != nil && m.startErr != "" && !m.starting:
 			return m.start()
 		}
@@ -1045,6 +1061,11 @@ func (m *Model) savedNote() string {
 // keepDraft writes the question, unchanged, to a file in the draft directory,
 // and says, after what filed says was filed, where the question is and the
 // command that files it again on the subject or rig the form was filing it on.
+// The command passes the file whole. A command substitution drops the trailing
+// newlines a question typed with Enter often ends in, and open lands a save
+// again on the conversation an earlier save filed only when the ask matches
+// exactly. So it reads the file with a mark after it, strips the mark, and runs
+// nothing when the file does not read.
 func (m *Model) keepDraft(filed string) string {
 	q := m.question.Value()
 	path, err := m.writeDraft(q)
@@ -1058,7 +1079,7 @@ func (m *Model) keepDraft(filed string) string {
 	case m.rig != "":
 		again = "gc-helm.sh engage --new-subject --rig " + shellQuote(m.rig)
 	}
-	return fmt.Sprintf("%s Your question is kept in %s; start it again with: %s --reason \"$(cat %s)\"", filed, path, again, shellQuote(path))
+	return fmt.Sprintf("%s Your question is kept in %s; start it again with: q=$(cat %s && echo .) && %s --reason \"${q%%.}\"", filed, path, shellQuote(path), again)
 }
 
 func (m *Model) writeDraft(q string) (string, error) {
@@ -1117,6 +1138,48 @@ func (m *Model) View() tea.View {
 	return v
 }
 
+// lines is how many screen lines s fills, each ended by a newline.
+func lines(s string) int { return strings.Count(s, "\n") }
+
+// listLines fits the rows of a list into room screen lines around row sel. The
+// screen holds a frame the terminal's size and clips the lines below it, so a
+// list taller than room shows the page of rows sel is on, paged as bubbles'
+// list component pages (list.Select), and a last line counts the rows above
+// and below the page. The selected row is always on screen, and so is what the
+// list leaves out. A room of 0 is a terminal whose size is not known yet, which
+// shows every row.
+func listLines(rows []string, sel, room int) []string {
+	n := len(rows)
+	if room <= 0 || n <= room {
+		return rows
+	}
+	per := max(room-1, 1)
+	sel = min(max(sel, 0), n-1)
+	start := sel / per * per
+	end := min(start+per, n)
+	out := append([]string(nil), rows[start:end]...)
+	if room > 1 {
+		var more []string
+		if start > 0 {
+			more = append(more, fmt.Sprintf("↑ %d more above", start))
+		}
+		if end < n {
+			more = append(more, fmt.Sprintf("↓ %d more below", n-end))
+		}
+		out = append(out, hintStyle.Render("  "+strings.Join(more, ", ")))
+	}
+	return out
+}
+
+// room is how many lines a list has on screen between above and below, at least
+// one. It is 0 until the terminal's size is known.
+func (m *Model) room(above, below string) int {
+	if m.height <= 0 {
+		return 0
+	}
+	return max(m.height-lines(above)-lines(below), 1)
+}
+
 func (m *Model) label(f field, text string) string {
 	if m.focus == f {
 		return focusStyle.Render(text)
@@ -1157,7 +1220,13 @@ func (m *Model) composeView() string {
 		mark = badStyle.Render("✗")
 	}
 	b.WriteString(labelStyle.Render("Files as") + "  " + mark + " " + dest + "\n")
-	if rows := m.contextRows(); len(rows) > 0 {
+	// The rows on this subject are paged to the lines left below the fields, so
+	// the row in play is on screen: the cursor's while the list has focus, and
+	// otherwise the row chosen, which is what Ctrl+S acts on.
+	var list []string
+	sel := 0
+	rows := m.contextRows()
+	if len(rows) > 0 {
 		b.WriteString("\n" + m.label(contextField, "On this subject") + hintStyle.Render("  Tab here, ↑/↓, Space chooses") + "\n")
 		for i, r := range rows {
 			cur := "  "
@@ -1167,21 +1236,33 @@ func (m *Model) composeView() string {
 			dot := "○ "
 			if (r.kind == "new" || r.kind == "conversation") && r.id == m.choice {
 				dot = "● "
+				if m.focus != contextField {
+					sel = i
+				}
 			}
 			if r.kind == "hold" || r.kind == "candidate" {
 				dot = "→ "
 			}
-			b.WriteString(cur + dot + r.label + "\n")
+			list = append(list, cur+dot+r.label)
 		}
-	} else if l := m.current(); l != nil && l.err == nil && !l.about.HoldsRead {
-		b.WriteString(hintStyle.Render("What holds the subject did not read.") + "\n")
+		if m.focus == contextField {
+			sel = m.cursor
+		}
+	}
+	var after strings.Builder
+	if l := m.current(); len(rows) == 0 && l != nil && l.err == nil && !l.about.HoldsRead {
+		after.WriteString(hintStyle.Render("What holds the subject did not read.") + "\n")
 	}
 	if l := m.current(); l != nil && l.err == nil && l.about.Closed != nil {
-		b.WriteString(hintStyle.Render(l.about.Closed.Said) + "\n")
+		after.WriteString(hintStyle.Render(l.about.Closed.Said) + "\n")
 	}
 	if m.status != "" {
-		b.WriteString("\n" + badStyle.Render(m.status) + "\n")
+		after.WriteString("\n" + badStyle.Render(m.status) + "\n")
 	}
+	for _, line := range listLines(list, sel, m.room(b.String(), after.String())) {
+		b.WriteString(line + "\n")
+	}
+	b.WriteString(after.String())
 	return b.String()
 }
 
@@ -1246,11 +1327,17 @@ func (m *Model) returnView() string {
 		}
 		return b.String()
 	}
+	if m.cityErr != "" {
+		// A read again that failed keeps the rows the last read gave, so the
+		// screen says so, and when that read was.
+		b.WriteString(badStyle.Render(fmt.Sprintf("Not refreshed since %s, so the list may be out of date: %s", m.cityAt.Format("15:04:05"), m.cityErr)) + "\n\n")
+	}
 	rows := m.returnRows()
 	if len(rows) == 0 {
 		b.WriteString("No open conversation.\n")
 	}
 	at := retIndex(rows, m.retSel)
+	var list []string
 	for i, c := range rows {
 		cur := "  "
 		if i == at {
@@ -1264,13 +1351,25 @@ func (m *Model) returnView() string {
 		if c.SubjectTitle != "" && c.SubjectTitle != c.Title {
 			topic += hintStyle.Render("  on " + c.Subject + ": " + c.SubjectTitle)
 		}
-		b.WriteString(fmt.Sprintf("%s%-22s %s  %s  %s\n", cur, mark, c.ID, hintStyle.Render(c.Rig), topic))
+		list = append(list, fmt.Sprintf("%s%-22s %s  %s  %s", cur, mark, c.ID, hintStyle.Render(c.Rig), topic))
 	}
+	var after strings.Builder
 	if at < 0 && m.retSel != "" && len(rows) > 0 {
-		b.WriteString("\n" + waitStyle.Render(m.retSel+" is no longer listed, so nothing is selected: ↑/↓ chooses another.") + "\n")
+		after.WriteString("\n" + waitStyle.Render(m.retSel+" is no longer listed, so nothing is selected: ↑/↓ chooses another.") + "\n")
 	}
 	if len(m.city.Unread) > 0 {
-		b.WriteString("\n" + badStyle.Render("Not listed: the store of "+strings.Join(m.city.Unread, ", ")+" could not be read.") + "\n")
+		after.WriteString("\n" + badStyle.Render("Not listed: the store of "+strings.Join(m.city.Unread, ", ")+" could not be read.") + "\n")
 	}
+	// The list is paged to the terminal, around the selection, or around where
+	// it was while nothing is selected, so ↑/↓ moves through rows on screen and
+	// Enter attaches to the row the operator sees marked.
+	sel := at
+	if sel < 0 {
+		sel = m.retAt
+	}
+	for _, line := range listLines(list, sel, m.room(b.String(), after.String())) {
+		b.WriteString(line + "\n")
+	}
+	b.WriteString(after.String())
 	return b.String()
 }

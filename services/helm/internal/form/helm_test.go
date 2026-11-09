@@ -147,3 +147,22 @@ func TestStartAndAttachUseEngage(t *testing.T) {
 		t.Fatalf("attach on a model = %q", got)
 	}
 }
+
+func TestASaveAgainNamesTheConversationItCompletes(t *testing.T) {
+	s, dir := stubHelm(t, `{"subject":"tk-s","conversation":"tk-c","filed":true}`, "", 0)
+	if _, err := s.Save(context.Background(), SaveRequest{Ref: "tk-g", Subject: "tk-s", Question: "q", Conversation: "tk-c"}); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"open", "tk-g", "--allow-duplicate", "--if-subject", "tk-s", "--conversation", "tk-c", "--reason", "q", "--json"}
+	if got := argv(t, dir); strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("argv = %q, want %q", got, want)
+	}
+	// A save again that names no subject would file a new topic, so it runs nothing.
+	s, dir = stubHelm(t, `{"subject":"tk-s","conversation":"tk-c","filed":true}`, "", 0)
+	if _, err := s.Save(context.Background(), SaveRequest{Rig: "gc-toolkit", Question: "q", Conversation: "tk-c"}); err == nil {
+		t.Fatal("a save again with no subject ran")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "count")); !os.IsNotExist(err) {
+		t.Fatalf("the stand-in ran: %v", err)
+	}
+}

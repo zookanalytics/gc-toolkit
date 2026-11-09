@@ -38,6 +38,10 @@
 #              back exits 4, and --json still names the conversation
 #   (ALLOWDUP-AGAIN) --allow-duplicate on a concern a queued conversation holds
 #              as its ask lands on it, completes its reply, and files nothing
+#   (CONVERSATION) --conversation completes the conversation it names, which a
+#              sitting has taken out of the queue, and files nothing; one that
+#              holds another ask or is closed files nothing, exit 4, and beside
+#              --new-subject it is refused, exit 2
 #   (IF-SUBJECT) --if-subject files only while the reference names that subject:
 #              a successor, a PR's anchor or a gate's waiter that is another
 #              bead files nothing, exit 4, and beside --new-subject it is
@@ -538,6 +542,44 @@ run_open found tk-gate1 --reason "another question" --allow-duplicate --if-subje
 grep -q '^bd create' <<< "$CALLS" \
   && ok "(ALLOWDUP-AGAIN) a concern it does not hold is filed as its own" || bad "(ALLOWDUP-AGAIN) no create for another concern (calls: $CALLS)"
 unset FAKE_CONV FAKE_CONV_DESC FAKE_WAITERS
+
+# --- (CONVERSATION) a save again completes the conversation it names -----------
+# The conversation an earlier open filed is completed by its id wherever it
+# stands. Here a sitting another terminal started has taken it out of the queue,
+# so the match on a queued ask passes it over and files a second one (the
+# control), while --conversation adds its reply onto the gate and files nothing.
+export FAKE_WAITERS='[{"id":"tk-anchor","status":"open","dependency_type":"blocks"}]'
+export FAKE_CONV=tk-conv0 FAKE_CONV_DESC="the question" FAKE_CONV_STATUS=in_progress FAKE_CONV_ASSIGNEE=c-tk-conv0
+run_open found tk-gate1 --reason "the question" --allow-duplicate --if-subject tk-anchor --json
+grep -q '^bd create' <<< "$CALLS" \
+  && ok "(CONVERSATION) control: with no --conversation, a conversation a sitting took is passed over" \
+  || bad "(CONVERSATION) control: no create without --conversation (calls: $CALLS)"
+run_open found tk-gate1 --reason "the question" --allow-duplicate --if-subject tk-anchor --conversation tk-conv0 --json
+eq "$RC" "0" "(CONVERSATION) --conversation naming the conversation a sitting took exits 0"
+grep -q '^bd create' <<< "$CALLS" \
+  && bad "(CONVERSATION) a second conversation was filed (calls: $CALLS)" || ok "(CONVERSATION) nothing new is filed"
+grep -q 'bd dep add tk-conv0 tk-gate1 --type replies-to' <<< "$CALLS" \
+  && ok "(CONVERSATION) its reply onto the gate is made" || bad "(CONVERSATION) reply (calls: $CALLS)"
+eq "$OUT" '{"subject":"tk-anchor","conversation":"tk-conv0","filed":true}' "(CONVERSATION) --json names the conversation completed"
+run_open found tk-gate1 --reason "another question" --allow-duplicate --if-subject tk-anchor --conversation=tk-conv0 --json
+eq "$RC" "4" "(CONVERSATION) a conversation that holds another ask exits 4"
+[ -z "$CALLS" ] && ok "(CONVERSATION) …writing nothing" || bad "(CONVERSATION) wrote something (calls: $CALLS)"
+grep -q 'conversation tk-conv0 on tk-anchor holds another ask than this concern' <<< "$ERR" \
+  && ok "(CONVERSATION) …and says so" || bad "(CONVERSATION) message (err: $ERR)"
+export FAKE_CONV_STATUS=closed
+run_open found tk-gate1 --reason "the question" --allow-duplicate --if-subject tk-anchor --conversation tk-conv0 --json
+eq "$RC" "4" "(CONVERSATION) a conversation closed since it was filed exits 4"
+[ -z "$CALLS" ] && ok "(CONVERSATION) …writing nothing" || bad "(CONVERSATION) wrote something (calls: $CALLS)"
+[ -z "$OUT" ] && ok "(CONVERSATION) …with no --json answer, since it completed nothing" || bad "(CONVERSATION) --json (out: $OUT)"
+grep -q 'conversation tk-conv0 is not an open conversation about tk-anchor' <<< "$ERR" \
+  && ok "(CONVERSATION) …and says so" || bad "(CONVERSATION) message (err: $ERR)"
+unset FAKE_CONV FAKE_CONV_DESC FAKE_CONV_STATUS FAKE_CONV_ASSIGNEE FAKE_WAITERS
+set +e
+OUT="$(sh "$SCRIPT" open --new-subject --rig gc-toolkit --reason "a new topic" --conversation tk-c 2>&1)"; RC=$?
+set -e
+eq "$RC" "2" "(CONVERSATION) --conversation beside --new-subject exits 2"
+grep -q -- '--conversation completes a conversation an earlier open filed' <<< "$OUT" \
+  && ok "(CONVERSATION) …saying the two cannot go together" || bad "(CONVERSATION) message (out: $OUT)"
 
 # --- (GATE) a gate names the one bead still waiting on it ---------------------
 export FAKE_WAITERS='[{"id":"tk-anchor","status":"open","dependency_type":"blocks"},{"id":"tk-done","status":"closed","dependency_type":"blocks"}]'

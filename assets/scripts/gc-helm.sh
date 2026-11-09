@@ -55,7 +55,7 @@ FIXTURE="${GC_HELM_FIXTURE:-}"              # test hook: <dir>/rigs.json replace
 usage() {
     cat >&2 <<'EOF'
 Usage:
-  gc-helm open  <bead-id> [--reason "..."] [--body "..."] [--allow-duplicate] [--if-subject <id>] [--json]  file a conversation about the bead in the operator's queue, for the operator to engage; a second concern joins the bead's conversation already in the queue unless --allow-duplicate files a fresh one, which lands instead on a conversation in the queue whose whole ask is that concern; --if-subject files only while the reference still names that subject, and a reference that names another now, through a successor, a PR's anchor or a gate's waiter, files nothing (exit 4); --json prints {subject,conversation,filed}, and names the conversation on every exit once it is filed
+  gc-helm open  <bead-id> [--reason "..."] [--body "..."] [--allow-duplicate] [--if-subject <id>] [--conversation <id>] [--json]  file a conversation about the bead in the operator's queue, for the operator to engage; a second concern joins the bead's conversation already in the queue unless --allow-duplicate files a fresh one, which lands instead on a conversation in the queue whose whole ask is that concern; --if-subject files only while the reference still names that subject, and a reference that names another now, through a successor, a PR's anchor or a gate's waiter, files nothing (exit 4); --conversation completes the conversation an earlier open filed for the concern, by its id, wherever it stands, adding the reply onto the gate that did not land, and one no longer open on the bead or holding another ask files nothing (exit 4); --json prints {subject,conversation,filed}, and names the conversation on every exit once it is filed
   gc-helm open  --new-subject --rig <name> [<question> | --reason "<question>"] [--json]  file a FRESH subject in the named rig for a topic that has no bead yet, the question unchanged in its description and its title derived from the question's opening, then its conversation in the queue; a subject filed whose conversation is not is named, filed:false in --json, for a re-run onto it
   gc-helm engage [<subject>] [--subject <id>] [--new-subject [--rig <name>]] [--model <variant>] [--skill <name>] [--reason "..." | --template <key>] [--no-input] [--no-attach]  hold a conversation about the bead in a converse sitting and attach: attach to its live sitting, or take its conversation from the queue, or file one, then spawn a sitting named for it. Pointed at a human gate it takes the one bead still waiting on the gate, and the conversation replies to the gate. On a terminal, with no --reason, --template or --skill, it opens the conversation form instead: subject, a new topic's rig, question and model on one screen, filled in from the command line; --no-input keeps the flag-driven one-shot path. --skill seeds the sitting with any skill it carries as its lens on the subject (--skill review-arch is a conversation with the Architect). --new-subject files a FRESH subject bead in the --rig rig (the positional text, or --reason, is the question; its title is derived from the question's opening) and engages it in one gesture
   gc-helm attach [<conversation>]  return to a conversation: with an id, engage's attach (a live sitting once it has started, or a new sitting on a conversation whose sitting ended or that waits in the queue); with none, on a terminal, the conversation form's list of conversations to return to, by topic and readiness
@@ -2295,6 +2295,13 @@ open_join() {
 # conversation form does: a reference that names any other bead by the time open
 # resolves it, along a disposition, to a PR's anchor or to a gate's waiter, files
 # nothing and exits 4.
+# --conversation names the conversation an earlier open filed for this concern
+# and did not complete, as the form's save again does with the id that open's
+# --json answered. open lands on that conversation and completes it where it
+# stands, whatever sitting has taken it since, adding the reply onto the gate
+# that did not land, and files nothing. A conversation that is no longer an open
+# conversation about the bead, or that holds another ask, files nothing and
+# exits 4.
 OPEN_GATE_FROM=""
 _open_new_subject_bead=""
 open_new_subject_report() {
@@ -2307,13 +2314,16 @@ open_new_subject_report() {
 }
 cmd_open() {
     bead=""; open_reason=""; open_body=""; open_allow_dup=""; open_json=""; OPEN_FILED=""
-    open_new_subject=0; open_rig=""; open_if_subject=""
+    open_new_subject=0; open_rig=""; open_if_subject=""; open_conv=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --new-subject) open_new_subject=1; shift ;;
             --if-subject=*) open_if_subject="${1#--if-subject=}"; shift ;;
             --if-subject) shift; [ $# -gt 0 ] || { echo "$PROG: open: --if-subject requires a value" >&2; exit 2; }
                         open_if_subject="$1"; shift ;;
+            --conversation=*) open_conv="${1#--conversation=}"; shift ;;
+            --conversation) shift; [ $# -gt 0 ] || { echo "$PROG: open: --conversation requires a value" >&2; exit 2; }
+                        open_conv="$1"; shift ;;
             --rig=*)    open_rig="${1#--rig=}"; shift ;;
             --rig)      shift; [ $# -gt 0 ] || { echo "$PROG: open: --rig requires a value" >&2; exit 2; }
                         open_rig="$1"; shift ;;
@@ -2336,6 +2346,10 @@ cmd_open() {
     fi
     if [ -n "$open_if_subject" ] && [ "$open_new_subject" = 1 ]; then
         echo "$PROG: open: --if-subject names an existing subject the reference must still name, and --new-subject files a new one; pass only one." >&2
+        exit 2
+    fi
+    if [ -n "$open_conv" ] && [ "$open_new_subject" = 1 ]; then
+        echo "$PROG: open: --conversation completes a conversation an earlier open filed on its subject, and --new-subject files a new subject; pass the subject that open filed instead." >&2
         exit 2
     fi
     if [ "$open_new_subject" = 1 ]; then
@@ -2416,8 +2430,9 @@ cmd_open() {
     # Already waiting in the queue? A second concern joins the conversation
     # the operator has not taken up yet, so a double click files one, not two.
     # --allow-duplicate skips the join: engage passes it for a concern of its
-    # own, which is a distinct dialogue even when the bead has one.
-    if [ -z "$open_allow_dup" ]; then
+    # own, which is a distinct dialogue even when the bead has one. So does
+    # --conversation, which names the conversation that holds the concern.
+    if [ -z "$open_allow_dup" ] && [ -z "$open_conv" ]; then
         join_note=""
         if [ -n "$open_reason$open_body" ]; then
             join_note="Another concern joined this conversation: ${open_reason:-$open_body}"
@@ -2489,8 +2504,24 @@ $gate_desc}"
     # an open run again after a run that filed the conversation and then failed,
     # because its reply onto the gate did not read back or its answer was lost,
     # completes that conversation rather than file a second one for the concern.
+    # A caller that holds the id of the conversation it filed names it with
+    # --conversation, and open completes that one by its id. A sitting another
+    # terminal started may have taken it out of the queue by then, and the reply
+    # onto the gate holds nothing, so the reply is added all the same.
     CONV=""; open_again=0
-    if [ -n "$open_allow_dup" ]; then
+    if [ -n "$open_conv" ]; then
+        _oc_row=$(printf '%s' "$open_convs" | jq -c --arg c "$open_conv" \
+            'first(.[] | select(((.id // "") | tostring) == $c)) // empty' 2>/dev/null || true)
+        if [ -z "$_oc_row" ]; then
+            echo "$PROG: open: conversation $open_conv is not an open conversation about $bead: it was closed since it was filed, or it is about another bead, so open cannot complete it. No conversation filed." >&2
+            exit 4
+        fi
+        if ! printf '%s' "$_oc_row" | jq -e --arg ask "$conv_body" '((.description // "") | tostring) == $ask' >/dev/null 2>&1; then
+            echo "$PROG: open: conversation $open_conv on $bead holds another ask than this concern, so open does not complete it with this one. No conversation filed." >&2
+            exit 4
+        fi
+        CONV="$open_conv"; open_again=1
+    elif [ -n "$open_allow_dup" ]; then
         CONV=$(printf '%s' "$open_convs" | jq -r --arg ask "$conv_body" '
             [ .[] | select(((.assignee // "") | tostring) == "human")
                   | select(((.status // "open") | tostring) == "open")

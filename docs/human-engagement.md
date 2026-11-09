@@ -271,17 +271,25 @@ it as a new conversation (`--allow-duplicate` and `--if-subject` on a subject,
 titled by `conversation_title`, and the form says it is saved. `--if-subject`
 names the subject the screen shows, and `open` refuses the save when the
 reference names another bead by then, such as a subject closed onto a successor
-in another rig, so a question is filed only where the screen said. Then `engage
+in another rig, so a question is filed only where the screen said. The reference
+goes as the operator typed it, so `open` resolves it again, and a PR whose
+anchor moved while the operator typed is refused too. A gate goes as itself, so
+the conversation replies to the gate the screen showed. Then `engage
 <conversation> --no-input --no-attach` starts the sitting, and the form follows
 it through its readiness to ready. Enter attaches; leaving keeps everything
 running. An attach holds a conversation no live sitting holds, as after a start
 that failed or a sitting that ended, in a new sitting on the model the start ran
 on. A save that files the conversation and then fails, as when its reply onto
 the gate does not read back, says the conversation holds the question and what
-did not complete, and starts nothing. r sends the same save again, and `open`
-completes that conversation rather than file a second: with `--allow-duplicate`,
-a concern that a conversation waiting in the queue holds as its whole ask lands
-on that conversation. Leaving while the save or the start still runs waits until it lands,
+did not complete, and starts nothing. r sends the save again naming that
+conversation (`--conversation`), and `open` completes it by its id rather than
+file a second, wherever it stands by then, even when a sitting another terminal
+started has taken it out of the queue. A conversation closed since, or one that
+holds another ask, is refused, and nothing is filed. A save whose answer was
+lost leaves the form without the conversation's id. For that save, with
+`--allow-duplicate`, a concern that a conversation waiting in the queue holds as
+its whole ask lands on that conversation. Leaving while the save or the start
+still runs waits until it lands,
 because a verb the form leaves behind dies at its next line of output, and a save
 cut off there can leave a new subject without its conversation. A second Ctrl+C
 leaves at once, and the form then says what it does not know. A save that fails
@@ -294,7 +302,9 @@ for the next Ctrl+S. A question the form did not save is kept in a file under
 `GC_HELM_DRAFT_DIR` (else `$XDG_STATE_HOME/gc/engage-drafts`, else
 `~/.local/state/gc/engage-drafts`) when it closes, and before the terminal goes
 to a sitting picked from the return list, and the form names the file and the
-command that files it again.
+command that files it again. The command reads the file whole, trailing newlines
+included, because engage files through `open --allow-duplicate`, which lands on
+the conversation an earlier save filed only when the ask matches exactly.
 
 Engage warns when it starts a sitting while another live sitting tracks the
 bead, or replies to a gate the bead waits on. **One sitting per bead is a
@@ -463,13 +473,18 @@ sitting. `gc-helm attach` opens the conversation form on that list, those no
 terminal is attached to first, by readiness and then newest first, and reads it
 again every ten seconds while it is on screen. What is picked is a
 conversation, so a read that re-sorts the list keeps it picked, and one that
-leaves the list leaves nothing picked until ↑/↓ picks again. Enter attaches to
-the one picked, and a sitting held anew there runs on engage's default model,
-since the list shows none. `gc-helm attach <conversation>` is engage's attach
-for a script or a shortcut: it attaches to a live sitting once it has started,
-and holds a conversation whose sitting ended, or one in the queue, in a new
-sitting first. Starting and returning are two acts of one form: Ctrl+R moves
-between them.
+leaves the list leaves nothing picked until ↑/↓ picks again. A list longer than
+the terminal shows the page the pick is on, and a last line counts the rows
+above and below, so the row picked is always on screen, through a resize and a
+read that moves it. The form's rows on a subject are paged the same way. A read
+again that fails keeps the rows the last read gave, and the screen says since
+when the list has not been refreshed, that it may be out of date, and why the
+read failed. Enter attaches to the one picked, and a sitting held anew there
+runs on engage's default model, since the list shows none.
+`gc-helm attach <conversation>` is engage's attach for a script or a shortcut:
+it attaches to a live sitting once it has started, and holds a conversation
+whose sitting ended, or one in the queue, in a new sitting first. Starting and
+returning are two acts of one form: Ctrl+R moves between them.
 
 ## The sitting
 

@@ -24,6 +24,8 @@ topic and readiness. The change adds this surface:
   before a start.
 - `gc-helm.sh open <ref> --if-subject <id>`, which files only while the
   reference still names the subject the form showed.
+- `gc-helm.sh open <ref> --conversation <id>`, which completes the conversation
+  an earlier open filed for the concern, by its id, rather than file another.
 
 Gas City read at upstream main `2264fa8108` (gastownhall/gascity, fetched
 2026-11-08). bd read as installed, 1.3.4, and its source at v1.3.2 in the Go
@@ -147,8 +149,47 @@ primitives were read for a create that a retry repeats at most once:
 
 None covers the need, so `open` uses what the store already records.
 Once the conversation is filed, `--json` names it on every exit, the failed
-reply's included, and the form keeps it as saved and starts nothing. With
-`--allow-duplicate`, a concern that a conversation waiting in the queue holds as
-its whole ask lands on that conversation. `open` already reads the subject's
-conversations before it files, so the next save completes the conversation the
-first one filed, adding the reply that did not land, rather than file a second.
+reply's included, and the form keeps it as saved and starts nothing. Its save
+again names that conversation, as the next section says. A save whose answer
+was lost names none, and for it, with `--allow-duplicate`, a concern that a
+conversation waiting in the queue holds as its whole ask lands on that
+conversation. `open` already reads the subject's conversations before it files,
+so that save completes the conversation the first one filed, adding the reply
+that did not land, rather than file a second.
+
+**Completing the conversation a save filed, by its id.** A save that files the
+conversation and then fails on its reply onto the gate leaves the form holding
+the conversation's id, from `open`'s `--json` answer. Its save again must
+complete that conversation and never file a second, even once a sitting another
+terminal started has taken the conversation out of the queue, which the match on
+a queued ask passes over. Three primitives were read for naming what a retry
+completes:
+
+- bd writes the missing piece by id already. `bd dep add <conversation> <gate>
+  --type replies-to` (`depAddCmd`, `cmd/bd/dep.go` line 253 at beads v1.3.4) is
+  the reply's write. `conversation_reply` reads the edge first and adds it only
+  when it is missing. bd itself answers a second add of an edge of the same type
+  without an error and refreshes only the edge's metadata (`addDependencyInTx`,
+  `internal/storage/issueops/dependencies.go` lines 258–277 at beads v1.3.4), so
+  running it again adds no second edge. The edge holds nothing, whatever state
+  the conversation is in. bd gives the form no way
+  to reach it, because the form writes nothing itself, and its every write is a
+  gc-helm verb.
+- bd's guarded writes, `--if-assignee` and `--if-status` on `bd update`, apply a
+  write only while the bead is in the state the caller read. The completion has
+  to apply in every state but closed, queued or held by a sitting, so a guard on
+  one state is the wrong tool, and an edge add takes none.
+- Gas City at `2264fa8108` serves a bead's dependencies read-only.
+  `GET /v0/city/{cityName}/bead/{id}/deps` (`cityGet` in
+  `internal/api/supervisor_city_routes.go` line 225) is its one dependency
+  route, and `gc bd dep add` passes through to bd
+  (`cmd/gc/bd_split_allowlist.go` line 131). Its `Idempotency-Key` keys a
+  create, and this conversation is created already.
+
+None of them names the conversation a retry completes, except through the id
+the create answered, which the caller holds. So `open --conversation <id>` takes
+that id back. `open` lands on the conversation by its id, checks that it is an
+open conversation about the subject and holds the concern as its ask, completes
+its reply onto the gate with `conversation_reply`, and files nothing. A
+conversation closed since, or one that holds another ask, is refused with exit 4,
+and nothing is written.
