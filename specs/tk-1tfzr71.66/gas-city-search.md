@@ -18,7 +18,9 @@ The need: a merge that waits for the city's own conditions. The city must have
 judged the PR's head, nothing it tracks may hold the PR, and the city must have
 read every review and comment on the PR, the approval that releases it
 included, before GitHub can merge. One verdict stands for every PR at a commit,
-and two posts of it must not leave the older reading standing.
+and two posts of it must not leave the older reading standing. A push that
+moves a PR onto a commit must not let it merge on a verdict that did not count
+it.
 
 - **Gas City.** Nothing gates a merge on approval or on required checks. The PR
   monitor classes an open PR from its draft flag, its merge state and its failed
@@ -28,7 +30,10 @@ and two posts of it must not leave the older reading standing.
   rule and no bead's waits, and it never merges. Its CLI reference names no lock
   a pack can take around a write to an outside service (`docs/reference/cli.md`).
   A drain's `member_access = "exclusive"` reserves a convoy's members for one
-  drain (`docs/reference/specs/formula-spec-v2.md`), not a write.
+  drain (`docs/reference/specs/formula-spec-v2.md`), not a write. Its git
+  package has no push (the `Git` type in `internal/git/git.go` fetches, stashes,
+  pulls with a rebase and reads status), so nothing there publishes a head
+  behind a status.
 - **Gas Town and the other packs.** `gastown/formulas/mol-refinery-patrol.toml`
   opens the PR and never merges it. No file in the packs repository names
   `reviewDecision`, `required_status_checks` or `merge_queue`. gstack's
@@ -63,6 +68,12 @@ and two posts of it must not leave the older reading standing.
   merge until its author approves or someone with write access dismisses it
   ([Approving a pull request with required
   reviews](https://docs.github.com/en/pull-requests/how-tos/review-pull-requests/approving-a-pull-request-with-required-reviews)).
+  None of the rules for a branch refuses a push onto a commit whose status
+  passes, and a status cannot be scoped to a PR. `require_last_push_approval`
+  asks for a fresh approval after every push, which the design keeps off
+  ([design](design.md), section 3). For a commit the repository does not hold,
+  the status read answers 200 with no statuses, as it does for a held commit
+  with none (read on 2026-11-09).
 
 What unit 2 composes: GitHub's required status check and auto-merge, driven by
 the pack's one definition of what holds a PR (`prstatus`), which takes the
@@ -76,7 +87,10 @@ auto-merge is on. One status
 covers every open PR at its commit, and a `flock` per repository serializes the
 posts, because the latest post wins. Auto-merge makes the merge GitHub's once
 the status passes, and the projection keeps it on only while the city reads the
-PR approved. The warrant *The city's merge status* records it.
+PR approved. Each push the pack makes onto a PR's branch publishes the head
+under the same lock: when the city's status at the commit it will push reads
+success, the projection posts pending there first, and the projection runs
+there again after the push. The warrant *The city's merge status* records it.
 `blocker-holder.sh`'s new class composes core's gate sweep: a gate it resolves
 is held by an automated actor.
 
@@ -200,6 +214,11 @@ flow the design keeps.
 - GitHub's status API takes an expected prior status, or Gas City ships a lock
   a pack can take around a write to an outside service. The status writer's
   lock then moves onto it.
+- GitHub scopes a status to a pull request, or refuses a push onto a commit
+  whose status passes. The publication's pending post then goes.
+- A ruleset can require a status check of a pull request's merge alone, and
+  leave pushes to the branch free. The city's bypass of the integration
+  branches' rules then goes.
 - The city imports a gastown release that carries `pr-merge-reconcile`. The close
   step then becomes that command.
 - Gas Town's refinery requeues through `gc sling`, keeps a branch that has a PR,

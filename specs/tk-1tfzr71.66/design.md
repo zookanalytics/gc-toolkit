@@ -26,14 +26,18 @@ status that GitHub requires on the default branch and on every integration
 branch, so a PR the city opens waits for that verdict whoever presses Merge.
 That status passes last, once the city holds nothing on the PR, everything else
 GitHub requires is in place and the city has read every review and comment, and
-GitHub's auto-merge then lands the PR. Where the branch requires an approval, a
-review that requests changes holds the merge from the moment you submit it. A
-comment or an approval's message that lands in the moments between the city's
-last read and the merge is read only once the PR has merged. Your approval
-carries across reworks, and only the city's reading of a change withdraws it.
-The new flow reaches every rig when the effort lands, and the merge moves onto
-GitHub one rig at a time, after you set that rig's rules and a sandbox PR shows
-they hold.
+GitHub's auto-merge then lands the PR. A status belongs to the commit, so before
+the city pushes a PR onto a commit whose status already passes, it marks that
+commit pending, and the PR waits for a verdict that counts it. Where the branch
+requires an approval, a review that requests changes holds the merge from the
+moment you submit it. A comment or an approval's message that lands in the
+moments between the city's last read and the merge is read only once the PR has
+merged. A push made outside the city's own steps, such as yours, onto a commit
+whose status already passes can let the PR merge on a verdict that did not count
+it. Your approval carries across reworks, and only the city's reading of a
+change withdraws it. The new flow reaches every rig when the effort lands, and
+the merge moves onto GitHub one rig at a time, after you set that rig's rules
+and a sandbox PR shows they hold.
 
 Three calls carry a cost either way:
 
@@ -89,7 +93,9 @@ the retirement bead that land after the effort does.
 
 ### The flow
 
-1. A polecat hands its bead to the rig's refinery, as it does today.
+1. A polecat hands its bead to the rig's refinery, as it does today. When its
+   branch heads an open PR, as a rework's does, its push publishes that PR's
+   new head (section 4).
 2. The refinery takes one bead assigned to it that nothing holds, by the
    answer of `gctk bead holds`, and brings its branch current by merging the
    target in.
@@ -99,11 +105,13 @@ the retirement bead that land after the effort does.
    ahead.
 5. A `direct` bead lands by a fast-forward push, and the refinery closes it. On
    an integration branch, whose rules require the city's status, the push goes
-   through a bypass that only the city's account holds (section 10).
+   through a bypass that only the city's account holds (section 10). When the
+   branch heads an open PR, the push publishes that PR's new head (section 4).
 6. For an `mr` bead, the refinery composes the PR's title and body with
    `gctk pr compose`. When the bead already owns a PR, the refinery edits that
-   PR's title and body first and then pushes the new head, so a review that the
-   push starts reads the current body. When the bead has no PR yet, the
+   PR's title and body first and then publishes the new head (section 4), so a
+   review that the push starts reads the current body. When the bead has no PR
+   yet, the
    refinery pushes the branch and then opens the PR as a draft with that title
    and body. It files a `gh:pr` gate on the bead, so the bead waits on its own
    PR's merge, and it runs the PR's projection. It opens or updates a PR only
@@ -319,9 +327,15 @@ integration branch (section 10).** GitHub requires a check to pass on the PR's
 latest commit, and a check from an earlier commit does not count
 ([Troubleshooting required status
 checks](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks)).
-So every push leaves the PR without the city's verdict, and nothing can merge it
-until the city posts one at that head, whoever presses Merge. A review that
-gates only the PR's opening would leave a later push unjudged, as the 2026-10-23
+A status belongs to the commit, though, not to the PR. A push onto a commit that
+carries no status of the city's leaves the PR without the city's verdict until
+the city posts one there, but a PR that moves onto a commit the city has already
+judged arrives with that verdict. So every push the pack makes onto a PR's
+branch publishes the head behind a pending status (below). Nothing merges a head
+before the city posts there a verdict that counts the PR, whoever presses Merge,
+unless a push that does not go through the publication, such as a person's,
+moves the PR onto a commit that already reads success. A review that gates only
+the PR's opening would leave a later push unjudged, as the 2026-10-23
 requirement says.
 
 **What the status reads.** It reads success at a head only when all of these
@@ -382,31 +396,37 @@ over its hold.
 
 So the projection posts the verdict of the commit. Before each post it reads,
 fresh from GitHub, the repository's open pull requests
-(`GET /repos/{owner}/{repo}/pulls?state=open`, every page), and keeps those
-whose head commit (`head.sha`) is that commit. That list includes a PR into
-another base, a PR from a fork and a PR that no bead owns. GitHub's list of the
-pull requests associated with a commit
-(`GET /repos/{owner}/{repo}/commits/{commit_sha}/pulls`) cannot stand in for
-it. For a commit on the default branch it returns only the merged pull request
-that introduced the commit ([Commits](https://docs.github.com/en/rest/commits/commits)),
-and it returned none for the heads of two open PRs from forks (section 13).
-The projection posts success only when each PR
-a bead owns reads success by the rule above, against its own target's rules.
-Otherwise it posts pending, and the description names the PR that holds the
-commit. A PR that no bead owns holds nothing of the city's, so a PR that someone
-else opens at the city's head cannot hold the city's merge. A clear PR waits
-while another PR at its head is held, and the description says which one.
+(`GET /repos/{owner}/{repo}/pulls?state=open`, every page) and its branch refs,
+and keeps the PRs at that commit. A PR whose head branch is in the repository is
+at the commit its branch's ref reads, because the push itself moves the ref, and
+the projection that follows a push does not depend on when GitHub moves the PR's
+recorded head (`head.sha`). A PR from a fork is at its `head.sha`. That list
+includes a PR into another base, a PR from a fork and a PR that no bead owns.
+GitHub's list of the pull requests associated with a commit
+(`GET /repos/{owner}/{repo}/commits/{commit_sha}/pulls`) cannot stand in for it.
+For a commit on the default branch it returns only the merged pull request that
+introduced the commit
+([Commits](https://docs.github.com/en/rest/commits/commits)), and it returned
+none for the heads of two open PRs from forks (section 13). The projection posts
+success only when each PR a bead owns reads success by the rule above, against
+its own target's rules. Otherwise it posts pending, and the description names
+the PR that holds the commit. A PR that no bead owns holds nothing of the
+city's, so a PR that someone else opens at the city's head cannot hold the
+city's merge. A clear PR waits while another PR at its head is held, and the
+description says which one.
 
 GitHub's status API has no compare-and-set. The latest post in a context wins,
 so a post computed from an older read could replace one computed from a newer
-read. The refinery's `mr` step, the label writer and the withdrawal writer
-each run the projection, so the projection serializes each repository's
-posts. It holds one `flock` file per repository, under the city's
-`.gc/runtime/packs/gc-toolkit`, where Accept's lock is kept. It takes the lock
-before it reads anything the verdict rests on, the open PRs at the commit and
-each one's holds, feedback and requirements, and keeps it until its post. A
-writer that finds the lock held waits for it and does not skip its post,
-because the post it would skip can be the one that carries a new hold. The
+read. The refinery's `mr` step, the label writer, the withdrawal writer and each
+publication of a head (below) run the projection, so the projection serializes
+each repository's posts. It holds one `flock` file per repository, under the
+city's `.gc/runtime/packs/gc-toolkit`, where Accept's lock is kept. It takes the
+lock before it reads anything the verdict rests on, the open PRs at the commit
+and each one's holds, feedback and requirements, and keeps it until its post. A
+publication holds the same lock from its first read through the projection after
+its push, and the posts it makes run under that hold rather than waiting for the
+lock again. A writer that finds the lock held waits for it and does not skip its
+post, because the post it would skip can be the one that carries a new hold. The
 last post at a commit then comes from the latest read, and what remains is the
 window section 3 names. The projection posts only when the state or the
 description changes, because GitHub keeps at most 1000 statuses per commit and
@@ -417,6 +437,49 @@ once the batch's routing reads back (the `[posture]` table), so the hold the
 routing makes exists first. The projection therefore reads the watermarks
 before the holds, and a watermark it reads as moved comes with the hold it
 routed to.
+
+**A head is published behind a pending status.** A PR that moves onto a commit
+where the city's status already reads success, posted there for another PR or
+for an earlier state of this one, arrives with that success. An approved PR
+keeps its approval and its auto-merge across a push from an account with write
+access (section 3), so GitHub could merge it on a verdict that did not count it,
+before any projection runs. The case needs a commit that carries work the PR's
+target lacks, such as another PR's head that a stacked branch moves onto,
+because a fast-forward onto the target's own head leaves the PR nothing to
+merge. So every writer the pack runs that pushes a branch first reads, under the
+projection's lock for the repository, the open PRs whose head is that branch.
+When there are any, it publishes the new head in this order, holding the lock
+throughout:
+
+1. It reads the city's status at the commit the push will make their head.
+   When this read or the read of the open PRs fails, it pushes nothing, and
+   retries as it does after a refused push.
+2. When that status reads success, the projection posts pending there, naming
+   the PRs the push moves.
+3. It pushes.
+4. It runs the projection at that commit, whether the push landed or not, so a
+   pending posted for a push that failed holds no other PR.
+
+No other post of the city's lands between the read and the push, because every
+projection waits for the lock. For a commit the repository does not hold, GitHub
+answers the status read with no statuses, as it does for a held commit with none
+(section 13). So a new commit reads as carrying no verdict, and GitHub merges no
+PR at it until the city posts there. A PR's first head needs no publication. The
+`mr` step opens the PR as a draft, which GitHub does not merge, and runs the
+projection before anything can mark it ready.
+
+The writers are the polecat's push at submit (`work-submit.sh`), which is how a
+rework moves its PR's head, the refinery's pushes (the `mr` step's push of a
+PR's new head, a `direct` landing onto a branch that heads an open PR, and an
+effort's bring-current), and the witness's salvage push. None of GitHub's rules
+for a branch refuses a push onto a commit whose status passes
+([Available rules for rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets)),
+and a status belongs to the commit, so none can be scoped to a PR. GitHub's
+setting that would hold the merge after any push, `require_last_push_approval`,
+asks for a fresh approval after every push, which section 3 keeps off. So a push
+that does not go through the publication, such as a person's, can still move a
+PR onto a commit that reads success, and the warrant names it as a residual
+(section 8).
 
 **The review input is the review verdict at the head.** The loop tk-1tfzr71.22
 builds runs triage on each new head. Triage reads the change itself (the ruling
@@ -531,16 +594,16 @@ registry, and the doctor checks the beads after the write.
 
 ## 7. Rework and branch currency
 
-**The refinery brings a branch current.** Its prep merges the target in. When the
-merge is clean, the refinery pushes it itself, with no polecat and no audit.
-When it conflicts, the work goes back to the pool with `rejection_reason`
-"Conflicts with `<target>` at `<sha>`". It goes back as the bead itself when the
-bead has no PR yet, and as the PR's rework child when it has one (section 1).
-The polecat merges and resolves the conflict, and writes in the merge commit's
-message what collided and what it decided. `git show --remerge-diff <merge>`
-then shows a reviewer exactly the hunks resolved by hand, and that commit is
-what triage reads at the new head. A rework or rebuild child is dispatched by
-`gc sling`, as the dispatch design has it.
+**The refinery brings a branch current.** Its prep merges the target in. When
+the merge is clean, the refinery publishes it itself (section 4), with no
+polecat and no audit. When it conflicts, the work goes back to the pool with
+`rejection_reason` "Conflicts with `<target>` at `<sha>`". It goes back as the
+bead itself when the bead has no PR yet, and as the PR's rework child when it
+has one (section 1). The polecat merges and resolves the conflict, and writes in
+the merge commit's message what collided and what it decided.
+`git show --remerge-diff <merge>` then shows a reviewer exactly the hunks
+resolved by hand, and that commit is what triage reads at the new head. A rework
+or rebuild child is dispatched by `gc sling`, as the dispatch design has it.
 
 **What this replaces.**
 - `pre-open-rebase.sh` goes, because no PR waits to be opened once every rig
@@ -624,11 +687,16 @@ Unit 3 carries whichever of the two lands second.
     the intake has routed the feedback it counts, so feedback that arrives
     after auto-merge is on is read before the merge;
   - a thread still waiting on the city's answer holds the merge where the base
-    does not require resolved threads.
+    does not require resolved threads;
+  - each push the pack makes onto a PR's branch publishes the head behind a
+    pending status, under the projection's lock, so none of them brings a PR
+    onto a verdict that did not count it (section 4).
 
-  The warrant also names the residual they leave open: a review or comment
+  The warrant also names the residuals they leave open. A review or comment
   submitted between the city's last read and GitHub's merge goes in unread
-  (section 3).
+  (section 3). A push that does not go through the publication, such as a
+  person's, can move a PR onto a commit whose status already reads success
+  (section 4).
 - **The pre-existing-failure scripts** stay, off the deletion plan. The work
   formula's pre-flight files a base failure's tracker through
   `preexisting-failure.sh`, and its self-review marks one through
@@ -742,9 +810,11 @@ so GitHub would refuse the push. So the city's account pushes there through the
 ruleset's bypass, which it alone holds, in mode `always`. Mode `pull_request`
 covers pull requests only, and a landing is a push. Mode `exempt` runs no rules
 for the account and leaves no entry in the ruleset's audit. The city posts
-nothing for a landing itself. Without the bypass, GitHub refuses the landing,
-and `direct-merge-push.sh` reads the refusal as a protected branch and promotes
-the bead to `mr`, so the work waits for a stage PR.
+nothing for a landing itself. When the branch heads an open PR, as it does once
+the effort's landing PR is open, the push publishes that PR's new head (section
+4). Without the bypass, GitHub refuses the landing, and `direct-merge-push.sh`
+reads the refusal as a protected branch and promotes the bead to `mr`, so the
+work waits for a stage PR.
 
 **Each rig's cutover** is a bead the implementation child files on the default
 branch, blocked by this initiative's landing:
@@ -779,6 +849,10 @@ branch, blocked by this initiative's landing:
    - the city's dismissal lands and turns auto-merge off;
    - a push to an approved PR keeps the approval, and the merge waits until the
      city posts at the new head;
+   - an approved PR with auto-merge on, which the city holds, pushed onto
+     another PR's head where the city's status reads success, stays unmerged
+     until the city posts there a verdict that counts it, once for a polecat's
+     push and once for the refinery's;
    - the merge gate resolves on the merge, and the refinery closes the bead;
    - a stage PR, against a copy of the integration ruleset on another
      `sandbox/**` branch: a person who holds no bypass cannot merge it while the
@@ -828,8 +902,8 @@ leaves the city working.
 | Unit | What it does | Waits on | Answers |
 |---|---|---|---|
 | 1. `gctk pr compose` and `gctk pr summary` | The PR's title, managed summary region and branch-beads section are composed in gctk from the bead that owns the PR, with the region read by its markers. `pr-summary-region.sh` is deleted, and `pr-open.sh` and `pr-stack.sh` call the verb. Go tests pin the output against today's renders. | nothing | tk-tefrxph; the gctk domain move note |
-| 2. The city's status on GitHub | `prstatus` answers whether the city holds the merge: nothing in flight, nothing held, and, by the `waits` package's answer, no wait of the anchor's own but its merge gate. It reads "waiting for your merge" on a base with no approval rule. It reads a PR's unanswered threads when it gathers the PR's facts, so the count's one writer can retire with `gctk merge`. The label writer also posts `gc-toolkit/status` at the head, success or pending and never failure. It posts success last, once every other requirement of the target is met there and no feedback on the PR is newer than the anchor's watermarks, counted by the intake's own rule. One status covers every open PR whose head is that commit, read fresh from the repository's open PRs before each post, among them a PR from a fork, a PR into another base and a PR with no anchor. Whichever writer runs the projection, it waits for a lock for the repository, reads under it everything the verdict rests on, the watermarks before the holds, and posts only when the state or description changes (section 4). For a bead that carries its merge gate, it keeps auto-merge on exactly while the city reads the PR approved on a base that requires an approving review, and turns it on before it posts success. No bead carries one before unit 3, so the toggle is inert until then. `blocker-holder.sh` reads a gate that core's gate sweep resolves as held by an automated actor. The warrant *The city's merge status* is added, covering the status, its lock and the auto-merge toggle. Tests for each, among them a review that arrives while a required check still runs, feedback the intake's rule leaves out, which holds nothing, the auto-merge toggle turning on before the success post, two open PRs at one head with one of them held, where the status reads pending for both, a PR with nothing left to merge beside a held one, a shared head on the default branch and one from a fork, a writer that waits for the lock, and two writers posting at one commit. | nothing | sections 3, 4 and 5 |
-| 3. The refinery on Gas Town's flow | `mol-refinery-patrol` is rewritten on Gas Town's steps at 3339ad104a88, with the differences in section 1, and each step calls one tested script. The scripts cover: the prep by merge in the refinery's own worktree (`refinery-workspace.sh` and its warrant go); the gate through `detached-job.sh`; the failures, through the requeue by `gc sling` or a rework child, and the pre-existing path; the direct landing; the `mr` step (compose the title and body, edit them onto a PR the bead already owns before the fast-forward push of its new head, or push and then open a new PR as a draft with them, record the PR with `opened_as_draft` so the review lanes and `pr-open.sh`'s ready flip handle it unchanged, file the merge gate with a notice to the refinery, run the projection, file a human gate in place of a PR into a target whose rules do not require `gc-toolkit/status`, and the old-path park while `github_merge_rules` is unset); the close once the merge gate resolves, with the seed re-render under call 2; the rework hand-back; and the integration-effort hand-off. `rejection-repool.sh`, `pr-stack.sh` with its arm, `check-refinery-patrol-live` and the old formula's block-extraction suites go. The polecat doctrine gains the drift rule. | units 1 and 2; tk-gmjtb2e, whichever lands second carrying the other | tk-c8hl47c, tk-ni0i48p, tk-pdc0ovc, tk-w0hkwos; section 7 |
+| 2. The city's status on GitHub | `prstatus` answers whether the city holds the merge: nothing in flight, nothing held, and, by the `waits` package's answer, no wait of the anchor's own but its merge gate. It reads "waiting for your merge" on a base with no approval rule. It reads a PR's unanswered threads when it gathers the PR's facts, so the count's one writer can retire with `gctk merge`. The label writer also posts `gc-toolkit/status` at the head, success or pending and never failure. It posts success last, once every other requirement of the target is met there and no feedback on the PR is newer than the anchor's watermarks, counted by the intake's own rule. One status covers every open PR at that commit, read fresh from the repository's open PRs and branch refs before each post: a PR from a branch in the repository is at its branch's ref, and a PR from a fork at its `head.sha`. Among them are a PR from a fork, a PR into another base and a PR with no anchor. Whichever writer runs the projection, it waits for a lock for the repository, reads under it everything the verdict rests on, the watermarks before the holds, and posts only when the state or description changes (section 4). The unit also builds the publication of a head (section 4). Under that lock, a writer that pushes a branch heading an open PR reads the city's status at the commit the push will make the head, has the projection post pending there when it reads success, pushes, and runs the projection there before it lets the lock go. The polecat's push at submit (`work-submit.sh`) and the witness's salvage push move onto it. For a bead that carries its merge gate, it keeps auto-merge on exactly while the city reads the PR approved on a base that requires an approving review, and turns it on before it posts success. No bead carries one before unit 3, so the toggle is inert until then. `blocker-holder.sh` reads a gate that core's gate sweep resolves as held by an automated actor. The warrant *The city's merge status* is added, covering the status, its lock, the publication and the auto-merge toggle. Tests for each, among them a review that arrives while a required check still runs, feedback the intake's rule leaves out, which holds nothing, the auto-merge toggle turning on before the success post, two open PRs at one head with one of them held, where the status reads pending for both, a PR with nothing left to merge beside a held one, a shared head on the default branch and one from a fork, a writer that waits for the lock, two writers posting at one commit, a publication onto a commit whose status reads success, which posts pending before its push, a publication whose push fails, which still projects there, a projection during a publication, which waits for it, and a PR whose `head.sha` still names its old commit, which is counted at its branch's ref. | nothing | sections 3, 4 and 5 |
+| 3. The refinery on Gas Town's flow | `mol-refinery-patrol` is rewritten on Gas Town's steps at 3339ad104a88, with the differences in section 1, and each step calls one tested script. The scripts cover: the prep by merge in the refinery's own worktree (`refinery-workspace.sh` and its warrant go); the gate through `detached-job.sh`; the failures, through the requeue by `gc sling` or a rework child, and the pre-existing path; the direct landing, published through unit 2's publication when the target heads an open PR; the `mr` step (compose the title and body, edit them onto a PR the bead already owns before it publishes the new head through unit 2's publication, or push and then open a new PR as a draft with them, record the PR with `opened_as_draft` so the review lanes and `pr-open.sh`'s ready flip handle it unchanged, file the merge gate with a notice to the refinery, run the projection, file a human gate in place of a PR into a target whose rules do not require `gc-toolkit/status`, and the old-path park while `github_merge_rules` is unset); the close once the merge gate resolves, with the seed re-render under call 2; the rework hand-back; and the integration-effort hand-off, whose push is published the same way. `rejection-repool.sh`, `pr-stack.sh` with its arm, `check-refinery-patrol-live` and the old formula's block-extraction suites go. The polecat doctrine gains the drift rule. | units 1 and 2; tk-gmjtb2e, whichever lands second carrying the other | tk-c8hl47c, tk-ni0i48p, tk-pdc0ovc, tk-w0hkwos; section 7 |
 | 4. The readers move | The sign-off's headline reads `prstatus`. I5 reads every closed bead with a PR. I2 reads the kept values. | unit 3 | section 6 |
 | 5. Docs, warrants and the plan | The pages that hold the merge's depth are rewritten to the flow as it stands once units 1 to 4 land: `refinery-merge-cadence.md`, `state-machine.md` (the kept values and their sentences, and the Checks vocabulary), `component-model.md` with both landing writers, `authority-map.md`, `design-convoy.md`'s gates under call 1, `gctk-architecture.md`'s rows and the merge section of `built-once-target.md`, which takes section 1's differences as that page holds the witness's. `architecture.md` states the target from this design's own change, with the old path under Debt. Unit 5 drops the Debt entry units 1 to 4 retire, the refinery push that can force, and corrects any line a unit departed from. The warrants' Covers lines move off retired paths. The plan's rows move as section 8 says. | units 1 to 4 | tk-cvffk5x, with this design's change to `architecture.md`; tk-r82qrrv |
 
@@ -938,3 +1012,7 @@ leaves the city working.
   repository](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/creating-rulesets-for-a-repository)).
   Neither that page nor the page on auto-merge says whether auto-merge waits
   for a ruleset's rules when the account that turned it on may bypass them.
+- **GitHub's status read** (`GET /repos/{owner}/{repo}/commits/{ref}/status`,
+  and `.../statuses`) answers 200 with no statuses for a commit the repository
+  does not hold, the same as for a held commit with none (read on gc-toolkit on
+  2026-11-09).
