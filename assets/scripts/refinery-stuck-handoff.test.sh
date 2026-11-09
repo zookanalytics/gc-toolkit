@@ -90,12 +90,19 @@ export HOLDS_STUB="$ROOT/assets/scripts/holds-store.stub.sh" GC_NO_API=1
 GCTK_BIN="$("$HOLDS_STUB" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so no hold can be read"; exit 1; }
 export GCTK_BIN
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'STUB'
+# >>> control-char-scrub
+# A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
+# C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
+# above 0x1F pass through raw, which JSON permits; the output feeds jq, so
+# dropping a structural LF or TAB just minifies.
+scrub() { tr -d '\000-\037'; }
+# <<< control-char-scrub
 if [ -n "${HOLDS_STUB_READ:-}" ] && [ "$1" = bd ]; then
   shift
   printf 'holds %s\n' "$*" >> "$LIST_LOG"
   [ "${HANDOFF_RC:-0}" != "0" ] && export HOLDS_FAIL=list
   export HOLDS_STORE="$QUEUE_FIXTURE.holds.json"
-  { tr -d '\000-\037' < "$QUEUE_FIXTURE"; echo; tr -d '\000-\037' < "$HANDOFF_FIXTURE"; } \
+  { scrub < "$QUEUE_FIXTURE"; echo; scrub < "$HANDOFF_FIXTURE"; } \
     | jq -s -c '[ .[] | if type == "array" then .[] else empty end ] | unique_by(.id)' > "$HOLDS_STORE" 2>/dev/null \
     || echo '[]' > "$HOLDS_STORE"
   exec "${HOLDS_STUB:?}" answer "$@"
