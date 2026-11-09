@@ -123,6 +123,17 @@ eq "$rc/$out" "1/" "…and for a read that fails, so 'none' and 'unread' stay ap
 bd_disposed_to tk-d "$TMP/other/.beads" >/dev/null
 has "$(cat "$STUB_GC_LOG")" "--db $TMP/other/.beads" "…and reads another store when named one"
 
+# --- bd_same_store: the prefix up to an id's first hyphen names its store ------
+: > "$STUB_GC_LOG"
+bd_same_store tk-a1.2 tk-b; r1=$?
+bd_same_store tk-a hq-wisp-x1; r2=$?
+bd_same_store hq-wisp-x1 hq-b; r3=$?
+bd_same_store tk-a tkx-a; r4=$?
+bd_same_store wb gate1; r5=$?
+bd_same_store tk-a gate1; r6=$?
+eq "$r1$r2$r3$r4$r5$r6/$(wc -c < "$STUB_GC_LOG" | tr -d ' ')" "010100/0" \
+  "bd_same_store: one prefix is one store, a child id and a wisp id included, a longer prefix is another store, an id with no hyphen carries no prefix to differ, as bd reads it, and it reads nothing"
+
 store '[{"id":"tk-a","status":"open","assignee":"","title":"a","notes":"","metadata":{"anchor_bead":"tk-anc"}}]'
 
 CACHE="$TMP/cache"

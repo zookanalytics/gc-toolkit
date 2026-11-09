@@ -28,8 +28,9 @@ review gets its worktree, and when and how the directory is removed.
 
 **Boundaries:** the review lifecycle belongs to `formulas/mol-review.toml` and
 `formulas/mol-review-quorum-signoff.toml`, and what a review reads, runs and
-judges to its check's method. A polecat's per-bead worktree is
-worktree-reap's ([worktree-reclaim.md](worktree-reclaim.md)). Harness session
+judges to its check's method. A polecat's per-bead worktree goes at its
+hand-off or to the controller's closed-bead reaper
+([worktree-reclaim.md](worktree-reclaim.md)). Harness session
 scratch, and the per-uid tmpfs quota that every tenant of `/tmp` counts
 against, are described in [scratch-reclaim.md](scratch-reclaim.md).
 
@@ -94,4 +95,5 @@ Each git worktree inside the directory is removed with `git worktree remove`,
 so its registration goes with it, and then the directory is deleted.
 `review-workspace.sh` never runs `git worktree prune`, because a prune is
 repository-wide and would drop the admin `HEAD` of every other worktree whose
-directory has gone before worktree-reap pins that `HEAD` with an archive tag.
+directory has gone, which for a detached worktree can be the only ref to its
+commits.

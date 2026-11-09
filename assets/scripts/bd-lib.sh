@@ -2,13 +2,12 @@
 # bd-lib.sh — the guarded reads of the bead store, shared by every script that
 # queries it, the read of a bead's human gates every reader of them makes and
 # the order its open gates under one key are read in, the read of the bead a
-# disposed bead names, the one-write create every
-# script files a stamped bead through, the metadata read-back that gates handing
-# such a bead on, the close that unmakes a bead no reader can find, the birth,
-# settle and route of PR-finishing work, the validation pass's work order, the
-# gating-PR read's field set, the per-rig key an order's state lives under, the
-# pass lock that lets an order run one pass at a time, and warn and die, which a
-# script reports through. Sourced, never executed.
+# disposed bead names, whether two bead ids name one store, the checked create,
+# metadata repair and unmake that code the deletion plan retires still files
+# through, the birth, settle and route of PR-finishing work, the validation
+# pass's work order, the gating-PR read's field set, the per-rig key an order's
+# state lives under, the pass lock that lets an order run one pass at a time,
+# and warn and die, which a script reports through. Sourced, never executed.
 #
 # A caller resolves this file beside itself and sources it:
 #   # shellcheck source=bd-lib.sh
@@ -305,6 +304,20 @@ bd_disposed_to() {
   row=$(bd_exact_row "$@") || return 1
   printf '%s' "$row" | jq -er "$DISPOSITION_JQ"'
     if length == 0 then error("absent") else (.[0] | disposed_to) end' 2>/dev/null || return 1
+}
+
+# bd_same_store <id> <id> — whether two bead ids name one store, which a writer
+# asks before it adds a blocks edge between them. An id's prefix, up to its
+# first hyphen, names the store that holds it (types.ExtractPrefix in beads).
+# bd's dep add stores a target its store cannot resolve without finding it, and
+# the edge holds nothing, when both ids carry a prefix and the two differ
+# (cmd/bd/dep.go). An id with no hyphen carries none, and bd then resolves it or
+# refuses the add itself, so only two prefixes that differ answer no. Reads
+# nothing.
+bd_same_store() {
+  case "$1" in *-*) ;; *) return 0 ;; esac
+  case "$2" in *-*) ;; *) return 0 ;; esac
+  [ "${1%%-*}" = "${2%%-*}" ]
 }
 
 # bd_open_human_gates <bead> [<key>] — the bead's human gates that still hold it
@@ -621,6 +634,11 @@ bd_live_children() {
 #      written. Prints the id. The bead carries every --select key, or some key
 #      with no --select, so the caller's next run can find it, and a caller
 #      hands it on only once bd_meta_ensure has made it whole.
+#
+# The read-back, the second write and the close serve only callers in code the
+# deletion plan retires: scripts tools/deletion-plan.tsv lists, and the part of
+# signoff.sh the review-lane migration replaces. Any other script files with
+# `gc bd create --metadata` and takes a non-zero exit as a create that failed.
 bd_create() {
   local sel="" child="" anchor="" meta db="" prev="" a reply id row got short lost="" err
   while :; do
@@ -748,9 +766,11 @@ bd_meta_readback() {
 #
 # A route or a sling makes a bead someone's work order, so a caller gates that
 # act on this check and not on the exit of the write that filed the bead:
-# bd_create prints the id of a bead whose read-back fell short (its rc 2), and
-# `gc bd update` can exit 0 without writing. The write ignores bd's claim guard,
-# so a caller runs this only on a bead nobody has taken.
+# bd_create prints the id of a bead whose read-back fell short (its rc 2). The
+# write ignores bd's claim guard, so a caller runs this only on a bead nobody
+# has taken. Like bd_create's read-back, this serves only callers in code the
+# deletion plan retires. Any other script writes once and takes a non-zero exit
+# as the failure.
 bd_meta_ensure() {
   local row="" seen="" id meta got kv sets=()
   if [ "${1:-}" = "--row" ]; then row="${2:-}"; seen=1; shift 2 || true; fi
@@ -779,8 +799,8 @@ bd_meta_ensure() {
 # reader can find, so that nothing it carries holds anything. The close carries
 # gc.outcome=abandoned and appends <note>, which names who unmade it and why.
 # The trailing arguments reach the close and its read-back, so a --db sends both
-# to that store. Returns 0 once the bead reads back closed, 1 otherwise: the
-# update's exit cannot say, because `gc bd update` can exit 0 without writing.
+# to that store. Returns 0 once the bead reads back closed, 1 otherwise. Its
+# callers are bd_create's unmake and code the deletion plan retires.
 bd_unmake() {
   local id="${1:-}" note="${2:-}" st
   shift 2 || true
@@ -855,8 +875,8 @@ pr_finishing_birth() {
 PR_FINISHING_LOCK_WAIT_SECS=30
 
 # pr_finishing_settle <bead> — the cadence's settle of a bead of PR-finishing
-# work: queue-priority.sh settle, which computes the bead's priority, writes it
-# to the bead and to every live workflow poured for it, and reads it back
+# work: queue-priority.sh settle, which computes the bead's priority and writes
+# it to the bead and to every live workflow poured for it
 # (docs/steering.md#settle), waiting for the lock PR_FINISHING_LOCK_WAIT_SECS
 # at most. The writer's narrative goes to stdout and its refusal to stderr, for
 # the caller to keep or drop. GC_QUEUE_PRIORITY_TOOL names another writer, as

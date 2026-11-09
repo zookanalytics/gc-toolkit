@@ -231,11 +231,10 @@ shares only the word ([authority-map.md](authority-map.md)).
   its molecule at its epic's priority (bd's `cmd/bd/swarm.go`). Nothing updates
   the copy when the source's priority changes. Neither one's documentation
   describes a priority that follows another bead's.
-- **Verified.** 2026-11-05, at `gastownhall/gascity` main 9f807760c,
-  `gastownhall/gascity-packs` main 796d7ecd7 and `gastownhall/beads` main
-  6d713a748 (`BuildReadyWorkOrder` in `internal/storage/sqlbuild/ready.go`
-  orders the priority policy by the bead's own priority), with bd 1.3.2
-  (9b65b9e19).
+- **Verified.** 2026-11-06, at `gastownhall/gascity` main 005135c33 and
+  `gastownhall/beads` main 8c3eb30f3 (`BuildReadyWorkOrder` in
+  `internal/storage/sqlbuild/ready.go` orders the priority policy by the bead's
+  own priority), with bd 1.3.2 (9b65b9e19).
 - **Retires when.** Gas City or bd ships an inherited or derived claim priority,
   or a work query can order by a parent's priority.
 
@@ -307,14 +306,15 @@ shares only the word ([authority-map.md](authority-map.md)).
 - **Evidence.** In `gastownhall/gascity`, a graph.v2 `gc sling <bead> --on
   <formula>` launches under a per-bead lock and refuses a second launch of the
   formula at the bead, exiting 3, only while a root an earlier launch poured is
-  live (`internal/sling/sling_core.go`, the lock at 621 and the check at 647,
-  `checkLegacySourceWorkflowConflict`, which reads the live roots at 1857; the
-  terminal-root skip in `internal/sling/sling_attachment.go` 326;
+  live (`internal/sling/sling_core.go`, the lock at 676 and the check at 702,
+  `checkLegacySourceWorkflowConflict`, which reads the live roots at 2026; the
+  terminal-root skip in `internal/sling/sling_attachment.go` 321;
   and `TestLiveConvoyTrackedWorkflowRootsSkipsTerminalRoots` in
-  `internal/sling/sling_test.go` 3639-3691). Once that root has closed, the next
+  `internal/sling/sling_test.go` 3975-4027). Once that root has closed, the next
   launch pours again. No `gc sling` flag checks an earlier root by its title or
-  by a key (`cmd/gc/cmd_sling.go` 146-161).
-- **Verified.** 2026-11-01, at `gastownhall/gascity` main ce6b62131de1.
+  by a key, and `--scope-kind` with `--scope-ref` names a city or rig scope, not
+  a caller's key (`cmd/gc/cmd_sling.go` 148-169).
+- **Verified.** 2026-11-08, at `gastownhall/gascity` main c7a45437f.
 - **Retires when.** A Gas City launch can refuse a second root under a caller's
   key whatever the first root's status.
 

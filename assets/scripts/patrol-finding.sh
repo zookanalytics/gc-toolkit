@@ -586,14 +586,6 @@ if [ -n "$ABOUT" ]; then
     || warn "could not add the tracks edge $BEAD -> $ABOUT; the finding.about stamp still names it"
 fi
 
-# The key is what makes the dedup real: unstamped, this bead is invisible to
-# every later sweep and the next one files another. Read it back.
-GOT_KEY=$(bd_json show "$BEAD" | jq -r '.[0].metadata["finding.key"] // ""' 2>/dev/null)
-if [ "$GOT_KEY" != "$KEY" ]; then
-  warn "finding.key on $BEAD read back as '$GOT_KEY', expected '$KEY' — every later sweep will file a duplicate. Repair: gc bd update $BEAD --set-metadata finding.key=$KEY"
-  exit 1
-fi
-
 if [ -n "$HELD" ]; then
   echo "$PROG: filed $BEAD for $DEDUP_SCOPE (recurrence of $HELD, held at blocked with nothing open to wait on)"
 else

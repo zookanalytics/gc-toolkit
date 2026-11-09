@@ -107,7 +107,6 @@ case "$1 $2" in
     id="$3"; shift 3
     printf 'UPDATE\n' >> "$LOG"; printf '%s %s\n' "$id" "$*" >> "$ARGS.UPDATE"
     [ "${FAKE_UPDATE_RC:-0}" = 0 ] || exit "$FAKE_UPDATE_RC"
-    [ -z "${FAKE_UPDATE_NOOP:-}" ] || exit 0
     prog='.'
     for a in "$@"; do
       case "$a" in
@@ -116,12 +115,6 @@ case "$1 $2" in
       esac
     done
     while [ $# -gt 0 ]; do
-      # FAKE_UPDATE_DROP names one edit the store loses, to model a write that
-      # exits 0 and does not land whole.
-      if [ -n "${FAKE_UPDATE_DROP:-}" ] && [ "${1%%=*}" = "$FAKE_UPDATE_DROP" ]; then
-        case "$1" in --set-metadata|--unset-metadata) shift ;; esac
-        shift; continue
-      fi
       case "$1" in
         --status=*)       prog="$prog | .[\$id].status = \"${1#*=}\"" ;;
         --assignee=*)     prog="$prog | .[\$id].assignee = \"${1#*=}\"" ;;
@@ -213,16 +206,6 @@ eq "$RC" 1 "a hand-back the store refuses: exits 1"
 no "$TRACE" "DRAIN" "and the session does not drain"
 has "$OUT" "the claim on tk-w was not handed back" "and the decline says so"
 
-FAKE_CURRENT=tk-w FAKE_UPDATE_NOOP=1 run_claim "$HELD" --step mol.x --reason why
-eq "$RC" 1 "a hand-back that exits 0 and does not read back: exits 1"
-eq "$TRACE" "UPDATE " "and the session does not drain"
-has "$OUT" "did not read back: it shows status in_progress, assignee sess-me and gc.routed_to rig/pool" "and it says what the bead shows"
-FAKE_CURRENT=tk-w FAKE_UPDATE_DROP=--set-metadata run_claim "$HELD" --step mol.x --reason why
-eq "$RC|$TRACE" "1|UPDATE " "a hand-back that reopens the bead and leaves its route: no drain"
-FAKE_CURRENT=tk-w FAKE_UPDATE_DROP=--assignee run_claim "$HELD" --step mol.x --reason why
-eq "$RC|$TRACE" "1|UPDATE " "a hand-back that reopens the bead and leaves its assignee: no drain"
-FAKE_CURRENT=tk-w FAKE_UPDATE_DROP=--status run_claim "$HELD" --step mol.x --reason why
-eq "$RC|$TRACE" "1|UPDATE " "a hand-back that clears the claim and leaves the bead in_progress: no drain"
 
 FAKE_CURRENT=tk-w run_claim "$(claim in_progress sess-me mol.x)" --step mol.x --reason why
 eq "$RC" 1 "a step whose real cancel does not land: exits 1"

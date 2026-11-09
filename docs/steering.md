@@ -90,8 +90,8 @@ Each writer that files or disposes new work follows the rule.
   queue.
 
 No held bead is ever readable without its marker. The witness and the
-distiller write it in the create, and the first reaction writes it and reads
-it back before the release.
+distiller write it in the create, and the first reaction writes it before the
+release, which waits on that write's exit.
 
 A first reaction's subject can still carry `gc.execution_routed_to`, the stamp
 a pour leaves, after the pour's workflow has ended. The queue reads that stamp
@@ -114,8 +114,8 @@ check cannot carry a routine bead past placement at P0. Every check run and
 commit status on the head is read, across all their pages. Each GitHub read is
 bounded in time, and a read that does not answer confirms nothing.
 
-A confirmed emergency is written P0, the priority is read back, and then the
-bead is routed or armed. A claim the check does not confirm, including one the
+A confirmed emergency is written P0, and once that write exits 0 the bead is
+routed or armed. A claim the check does not confirm, including one the
 check cannot run, is held for placement like any other bead, and the note it
 leaves on the bead says what the check found, naming any other check that fails
 there. A broken gate counts when it shows as a failing check on main. A latent
@@ -200,7 +200,7 @@ Naming a task parks the bead until the task closes, and naming a human gate
 parks it until a person clears the gate. A park takes one form or the other,
 never both.
 
-Either form reads the edge back off the bead before it reports success, and then
+Either form fails when bd refuses the write that makes the edge, and otherwise
 prints what the park holds and what it leaves running.
 
 `park` refuses:
@@ -389,15 +389,15 @@ follows the bead, directly or through others: the members under it, the
 PR-finishing work of each anchor among them, and the live workflow of each,
 meaning its input convoy, its root and every open step. Held beads are written
 too, so a parked epic's members take a new priority while the park holds them,
-and each is at its priority when the park is released. The move reads every
-write back. `--dry-run` prints what it would write and writes nothing. The
+and each is at its priority when the park is released. Each write the move makes
+takes its exit. `--dry-run` prints what it would write and writes nothing. The
 writer is `assets/scripts/queue-priority.sh move`.
 
 ### Settle
 
-`queue-priority.sh settle <bead-id>` computes a bead's priority, writes it to the
-bead and to every live workflow poured for it, and reads it back. It exits
-non-zero when the priority cannot be computed or does not read back. A bead
+`queue-priority.sh settle <bead-id>` computes a bead's priority and writes it to
+the bead and to every live workflow poured for it. It exits non-zero when the
+priority cannot be computed or a write fails. A bead
 that follows nothing keeps its own priority, and its workflows take it.
 
 Every writer that settles a bead before making it claimable does so in one

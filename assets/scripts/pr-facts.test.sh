@@ -2761,16 +2761,6 @@ has "$(creason SGk2)" "The anchor's park route is cleared with it." "…which th
 eq "$(bstatus SGm2)" "open" "…but not one a person is assigned"
 eq "$(bstatus SGc2)" "open" "…nor the feedback gate"
 
-echo "# …a park route that does not clear keeps its red-check gate open for the next pass"
-: > "$STUB_DEPS"
-store "[$(anchor SG5 605 ',"gc.routed_to":"human","gc.takeaway":"PR#605 parked"'), $(hgate SGn5 SG5 pr-fix-noncode.605)]"
-printf '%s' "$(prview 605 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_605.json"
-out=$(STUB_DROP_KEYS="SG5:gc.routed_to" run)
-eq "$(meta SG5 gc.routed_to)/$(bstatus SGn5)" "human/open" "the gate stays open while the route did not clear"
-has "$out" "its stale pr-fix-noncode.605 gate stays open: the anchor's park route did not clear" "…and the pass says so"
-out=$(run)
-eq "$(meta SG5 gc.routed_to)/$(bstatus SGn5)" "/closed" "the next pass clears the route and withdraws the gate"
-
 echo "# …an early arm withdraws nothing, and an unread gate list withdraws nothing"
 : > "$STUB_DEPS"
 store "[$(anchor SG4 604), $(hgate SGu4 SG4 pr-unengaged-threads.604.sha-OLD)]"
@@ -2970,19 +2960,6 @@ printf '[{"id":9301,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_
 out=$(run)
 has "$out" "review or Conversation batch history is unreadable; NOT watermarking" "the unparsable ledger is reported"
 eq "$(meta PRC pr_comment_watermark)" "<absent>" "…and the batch is not watermarked past it"
-
-echo "# …a routing that lands but does not read back re-dispatches onto the SAME child"
-store "[$(anchor W1 45)]"
-printf '%s' "$(prview 45 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_45.json"
-echo '[]' > "$GH_DIR/reviews_45.json"
-printf '[{"id":9001,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_45.json"
-out=$(STUB_DROP_KEYS="W1:pr_comment_watermark" run)
-has "$out" "watermark did NOT record" "the lost watermark is caught by the read-back"
-eq "$(meta W1 pr_comment_watermark)" "<absent>" "…the mark really did not move"
-out=$(run)
-has "$out" "already covers this batch; re-checking its route" "the next pass finds its own child"
-eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" "STILL one child — an unanswered comment never mints a twin"
-eq "$(meta W1 pr_comment_watermark)" "9001" "…and the mark lands on the retry"
 
 echo "# …a fresh child whose anchor_bead does not read back is never routed, and is closed rather than left holding the merge"
 store "[$(anchor W2 46)]"
@@ -6172,16 +6149,6 @@ eq "$(meta NC8 'gc.routed_to')" "human" "…and the approved PR parks at once"
 has "$(ncdesc 117)" "re-run of the failed jobs of run(s) 7117 at head sha-117 did not go through" "…with a gate naming the refused re-run"
 eq "$(meta NC8 pr_check_rerun)" "sha-117" "…and the head stays recorded, so no later pass at it re-runs"
 
-echo "# …a re-run record that does not land re-runs and parks nothing"
-store "[$(anchor NC9 118)]"
-printf '%s' "$(prview 118 OPEN UNSTABLE MERGEABLE ",\"statusCheckRollup\":[$(ncrow test TIMED_OUT 7118)]")" > "$GH_DIR/pr_view_118.json"
-approve 118
-: > "$STUB_ESC_LOG"; : > "$STUB_GH_LOG"
-out=$(STUB_DROP_KEYS="NC9:pr_check_rerun" run)
-has "$out" "the record of a re-run at head sha-118 did not land; nothing re-run or parked (retry next pass)" "a record that did not land is reported"
-eq "$(reruns 7118)" "0" "…and nothing is re-run without it"
-eq "$(meta NC9 'gc.routed_to')" "" "…or parked"
-
 echo "# …a run with a job still going is re-run only once it has finished"
 store "[$(anchor NC11 120)]"
 printf '%s' "$(prview 120 OPEN UNSTABLE MERGEABLE ",\"statusCheckRollup\":[$(ncrow test CANCELLED 7120),{\"name\":\"test-macos\",\"status\":\"IN_PROGRESS\",\"conclusion\":\"\",\"detailsUrl\":\"https://github.com/zook/gc-toolkit/actions/runs/7120/job/97121\"}]")" > "$GH_DIR/pr_view_120.json"
@@ -6198,15 +6165,12 @@ eq "$(reruns 7120)" "1" "…and once the run has finished, its failed jobs are r
 eq "$(meta NC11 pr_check_rerun)" "sha-120" "…recorded at that head"
 
 echo "# …a failure no re-run reaches, a timeout with no Actions run named, parks an approved PR"
-echo "#   and a park whose route does not read back files no gate and retries next pass"
 store "[$(anchor NC6 115)]"
 printf '%s' "$(prview 115 OPEN UNSTABLE MERGEABLE ',"statusCheckRollup":[{"name":"test","status":"COMPLETED","conclusion":"TIMED_OUT"}]')" > "$GH_DIR/pr_view_115.json"
 approve 115
 : > "$STUB_ESC_LOG"; : > "$STUB_GH_LOG"
-out=$(STUB_DROP_KEYS="NC6:gc.routed_to" run)
+out=$(run)
 hasnt "$(cat "$STUB_GH_LOG")" "run rerun" "a check whose URL names no Actions run is not re-run"
-has "$out" "parking the anchor to human did not land (retry next pass)" "a write that reported success without landing the route is not a park"
-hasnt "$(cat "$STUB_ESC_LOG")" "pr-fix-noncode.115" "…so no gate is filed for a park that did not happen"
 eq "$(no_rework)" "0" "…and no fixer is dispatched either"
 
 echo "# …STARTUP_FAILURE is re-run the same way, and a new head gets a re-run of its own"
@@ -6426,17 +6390,6 @@ eq "$(meta UM3 'gc.routed_to')" "" "…so the anchor stays unrouted"
 eq "$(no_rework)" "0" "…and no fixer goes to the stale head"
 out=$(run)
 eq "$(meta UM3 'gc.routed_to')" "human" "…while a pass whose re-read still names the head parks it"
-rm -f "$GH_DIR/rules_main.json"
-
-echo "# …a park whose route does not read back files no gate and retries next pass"
-reap_req
-store "[$(anchor UM4 178),$(rwchild_worked CK18 UM4 178 "$CAPHX")]"
-rcredview 178 "$CAPHX"
-: > "$STUB_ESC_LOG"
-out=$(STUB_DROP_KEYS="UM4:gc.routed_to" run)
-has "$out" "parking the anchor to human did not land (retry next pass)" "a write that reported success without landing the route is not a park"
-hasnt "$(cat "$STUB_ESC_LOG")" "pr-fix-unmoved.178" "…so no gate is filed for a park that did not happen"
-eq "$(no_rework)" "0" "…and no fixer is sent either"
 rm -f "$GH_DIR/rules_main.json"
 
 echo "# …a closed child of another arm at the current head neither parks the anchor nor stands the arm down"

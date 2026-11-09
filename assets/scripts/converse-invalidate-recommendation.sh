@@ -17,8 +17,9 @@
 # and a PR retire close the subject, and a closed bead offers no Accept. Use
 # this only where the subject stays open for Discuss.
 #
-# gc.recommended_formula has a reader, so the unset is read back and repaired: a
-# key that survives is Accept returning, the exact defect this exists to prevent.
+# gc.recommended_formula has a reader, so a strip the store refuses fails the
+# script: a key that survives is Accept returning, the exact defect this exists
+# to prevent.
 #
 # Inputs:
 #   $1       the reason: why the recommendation is no longer valid
@@ -26,7 +27,7 @@
 #   CONVERSATION  the sitting's conversation; named in the note when set
 #                 (environment, optional)
 # Exit: 0 stripped, or nothing to strip; 2 usage; 3 subject unreadable;
-#       4 the key survived the unset.
+#       4 the store refused the unset.
 set -u
 
 # >>> control-char-scrub
@@ -72,21 +73,8 @@ esac
 # The record and the act in one write: either both land or neither, so a
 # half-run never strips without its reason or records a reason without the strip.
 NOTE="recommendation invalidated${CONVERSATION:+ (conversation $CONVERSATION)}: was '${WAS:-<empty>}'. $REASON. Accept withdrawn; Discuss remains."
-gc bd update "$SUBJECT" --unset-metadata gc.recommended_formula --append-notes "$NOTE" \
-  || echo "converse-invalidate-recommendation: the strip update returned non-zero on $SUBJECT — verifying by read-back before trusting it" >&2
-
-# Read back and repair: the key has a reader, and a silent drop in a multi-field
-# update can leave it standing. A surviving non-empty value is Accept returning,
-# so retry a lone unset and refuse to report success if it is still there. An
-# unreadable read-back is not proof of a clean strip either — it fails closed.
-STILL=$(read_reco)
-if [ "$STILL" != "v:" ] && [ "${STILL#v:}" != "$STILL" ]; then
-  echo "converse-invalidate-recommendation: gc.recommended_formula read back present on $SUBJECT — repairing with a lone unset" >&2
-  gc bd update "$SUBJECT" --unset-metadata gc.recommended_formula >/dev/null 2>&1 || true
-  STILL=$(read_reco)
-fi
-if [ "$STILL" != "v:" ]; then
-  echo "converse-invalidate-recommendation: gc.recommended_formula survived the unset on $SUBJECT (read '${STILL:-<empty>}') — Accept would return; refusing to report success" >&2
+if ! gc bd update "$SUBJECT" --unset-metadata gc.recommended_formula --append-notes "$NOTE"; then
+  echo "converse-invalidate-recommendation: the store refused the strip on $SUBJECT, so gc.recommended_formula stands and Accept would return; refusing to report success" >&2
   exit 4
 fi
 echo "converse-invalidate-recommendation: stripped gc.recommended_formula (was '${WAS:-<empty>}') from $SUBJECT — Accept withdrawn; Discuss remains."

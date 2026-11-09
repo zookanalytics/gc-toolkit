@@ -36,7 +36,7 @@
 #   (y) --except-key reaches that gate, and nothing is excepted without it, and
 #       --check under it reads what would hold the close, writing nothing, with the
 #       gate asked about the origin as the close will leave it;
-#   (ad) once the close reads back, the branch the bead names in metadata.branch
+#   (ad) once the close lands, the branch the bead names in metadata.branch
 #       goes to branch-end.sh with the bead's rig and id, once, after the close;
 #   (ae) a branch-end that cannot end the branch leaves the close standing: exit
 #       0, the bead closed and named, and a WARN naming the branch and the
@@ -45,7 +45,6 @@
 #   (ag) no branch-end runs when the close is refused or held, when the bead
 #       names no branch, or on a dry run, which names the branch in its plan;
 #   (ah) the repair path ends an already-closed bead's branch too;
-#   (ai) a close that does not read back closed leaves the branch, with a WARN;
 #   (aj) end to end, through the real branch-end.sh and a bare origin: a retire
 #       ends the branch with its tip pinned, and a delete origin refuses leaves
 #       the close standing;
@@ -62,7 +61,7 @@
 #   (an) anything else that would refuse the close (another live blocker, a
 #       gate under the key a person is assigned, an open child) holds it before
 #       any gate is resolved, and so does a blocker or child read that fails;
-#   (ao) a gate that does not resolve holds the close, and a run stopped after
+#   (ao) a gate the store will not resolve holds the close, and a run stopped after
 #       the withdrawal is completed by the next one;
 #   (ap) the dry run names the withdrawal it would make;
 #   (aq) the template, the pin and the assignee an unforced close refuses hold
@@ -390,14 +389,14 @@ fi
 
 # `bd gate resolve <id> --reason <r>` closes the gate with that reason. On a
 # gate already closed it changes nothing and still reports success, as bd does.
-# FAKE_BD_GATE_RESOLVE_NOOP reports a resolve that never persisted.
+# FAKE_BD_GATE_RESOLVE_REFUSE refuses the resolve.
 if [ "$sub" = "gate" ]; then
   verb="${1:-}"; shift || true
   id="${1:-}"; shift || true
   f="$DB/$id"
   [ "$verb" = "resolve" ] && [ -f "$f" ] || exit 1
   [ -z "${FAKE_RESOLVE_LOG:-}" ] || printf '%s %s\n' "$id" "$*" >> "$FAKE_RESOLVE_LOG"
-  [ -z "${FAKE_BD_GATE_RESOLVE_NOOP:-}" ] || { echo "✓ Gate resolved: $id"; exit 0; }
+  [ -z "${FAKE_BD_GATE_RESOLVE_REFUSE:-}" ] || { echo "Error resolving gate $id: the store refused it" >&2; exit 1; }
   reason=""
   while [ $# -gt 0 ]; do
     case "$1" in --reason) reason="$2"; shift 2 ;; *) shift ;; esac
@@ -461,10 +460,8 @@ case "$sub" in
       # A move into closed is bd's checked close: it refuses a bead a live
       # blocker or an open child holds, and with FAKE_BD_ENFORCE_CLOSE_GUARDS a
       # template, a pinned bead and a bead assigned to anyone but the --actor.
-      # FAKE_BD_CLOSE_REFUSE refuses it outright, and FAKE_BD_CLOSE_NOOP reports
-      # a close that never persisted.
+      # FAKE_BD_CLOSE_REFUSE refuses it outright.
       [ -z "${FAKE_BD_CLOSE_REFUSE:-}" ] || { echo "cannot close issue assigned to other-agent (actor: someone-else)" >&2; exit 1; }
-      [ -z "${FAKE_BD_CLOSE_NOOP:-}" ] || exit 0
       if [ -n "${FAKE_BD_ENFORCE_CLOSE_GUARDS:-}" ]; then
         [ "$(sed -n 's/^is_template=//p' "$f" | tail -1)" != "true" ] \
           || { echo "Error: cannot close template $id" >&2; exit 1; }
@@ -1011,13 +1008,6 @@ eq "$(field alpha status al-wdup9)/$(edge alpha al-wdup9 al-wcanon9)" "open/" "�
 eq "$(edge alpha al-waiterA al-wcanon9)" blocks "…a waiter carried before it keeps its edge"
 has "$(cat "$TMP/err")" "same parent chain" "…bd's refusal is printed"
 has "$(cat "$TMP/err")" "al-waiterA keep the blocks edge onto al-wcanon9" "…and the edges that stay are named"
-mkbead alpha open al-wdup10
-mkbead alpha open al-wcanon10
-mkbead alpha open al-waiterC
-printf 'dep.al-wdup10=blocks\n' >> "$TMP/rigs/alpha/.beads/al-waiterC"
-rc=0; FAKE_BD_DEP_ADD_NOOP_FROM=al-waiterC run --origin al-wdup10 --successor al-wcanon10 --kind duplicate || rc=$?
-eq "$rc/$(field alpha status al-wdup10)" "4/open" "a waiter's edge that does not read back refuses the close"
-has "$(cat "$TMP/err")" "did not read back on al-waiterC" "…and names the waiter"
 # --check and the dry run name the waits that would move, and write nothing.
 mkbead alpha open al-wdup11
 mkbead alpha open al-wcanon11
@@ -1110,7 +1100,7 @@ mkbead beta open bt-br7
 rc=0; run --origin al-br7 --successor bt-br7 --kind re-homed --dry-run || rc=$?
 eq "$rc" 0 "a dry run over a branch succeeds"
 eq "$(cat "$BE_LOG")" "" "…and ends no branch"
-has "$(cat "$TMP/out")" "end polecat/al-br7 on the git remote of rig:alpha once the close reads back" "…and its plan names the branch"
+has "$(cat "$TMP/out")" "end polecat/al-br7 on the git remote of rig:alpha once the close lands" "…and its plan names the branch"
 eq "$(field alpha status al-br7)" open "…and closes nothing"
 
 # --- (ah) the repair path ends an already-closed bead's branch too ----------
@@ -1124,14 +1114,6 @@ eq "$(cat "$BE_LOG")" "--rig alpha --branch polecat/al-br8 --bead al-br8 status-
 rc=0; run --origin al-br8 --successor bt-br8 --kind re-homed || rc=$?
 eq "$(grep -c 'branch-end (stub): ended' "$TMP/rigs/alpha/.beads/al-br8")" 1 \
    "a re-run that reaches the same outcome records it once"
-
-# --- (ai) a close that does not read back closed leaves the branch ----------
-mkbranched alpha open al-br9
-mkbead beta open bt-br9
-: > "$BE_LOG"
-rc=0; FAKE_BD_CLOSE_NOOP=1 run --origin al-br9 --successor bt-br9 --kind re-homed || rc=$?
-eq "$(cat "$BE_LOG")" "" "a close that does not read back ends no branch"
-has "$(cat "$TMP/err")" "did not read back closed" "…and a WARN says why the branch was left"
 
 # --- (aj) end to end: the real branch-end.sh against a bare origin -----------
 # A rig of its own, gamma, is a git checkout whose origin is a bare repository:
@@ -1758,15 +1740,15 @@ rc=0; FAKE_BD_LIST_ID_FAIL=1 run --origin al-retry6r --successor bt-retry6r --ki
 eq "$rc" 3 "a row that does not read is refused as unknown"
 eq "$(snap alpha al-retry6r)" "$BEFORE" "…and nothing is written"
 
-# --- (ao) a gate that does not resolve, and a run stopped part way ----------
+# --- (ao) a gate the store will not resolve, and a run stopped part way ------
 mkbead alpha open al-retry7
 mkbead beta  open bt-retry7
 hgate al-g7 pr-dispose-failed.9
 printf 'dep.al-g7=blocks\n' >> "$TMP/rigs/alpha/.beads/al-retry7"
-rc=0; FAKE_BD_GATE_RESOLVE_NOOP=1 run --origin al-retry7 --successor bt-retry7 --kind not-needed --except-key pr-dispose-failed.9 || rc=$?
-eq "$rc" 5 "a gate that does not resolve holds the close"
+rc=0; FAKE_BD_GATE_RESOLVE_REFUSE=1 run --origin al-retry7 --successor bt-retry7 --kind not-needed --except-key pr-dispose-failed.9 || rc=$?
+eq "$rc" 5 "a gate the store will not resolve holds the close"
 eq "$(field alpha status al-retry7)" open "…the origin stays open"
-has "$(cat "$TMP/err")" "al-g7" "…and the refusal names the gate"
+has "$(cat "$TMP/err")" "the store refused the resolve of the gate al-g7" "…and the refusal names the gate"
 mkbead alpha open al-retry8
 mkbead beta  open bt-retry8
 hgate al-g8 pr-dispose-failed.9

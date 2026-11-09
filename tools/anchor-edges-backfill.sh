@@ -130,10 +130,9 @@ if [ "$joined" -gt 0 ]; then
   exit 3
 fi
 stamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-gc bd kv set "$ANCHOR_JOINED_KEY" "$stamp" </dev/null >/dev/null 2>&1 || true
-if GC_RECONCILE_BD_CACHE="" _bd_store_joined; then
-  echo "$PROG: marked the store joined ($ANCHOR_JOINED_KEY=$stamp)"
-  exit 0
+if ! gc bd kv set "$ANCHOR_JOINED_KEY" "$stamp" </dev/null >/dev/null 2>&1; then
+  echo "$PROG: the store refused the mark ($ANCHOR_JOINED_KEY), so it still reads closed children by anchor_bead" >&2
+  exit 1
 fi
-echo "$PROG: the mark did not land ($ANCHOR_JOINED_KEY does not read back); the store still reads closed children by anchor_bead" >&2
-exit 1
+echo "$PROG: marked the store joined ($ANCHOR_JOINED_KEY=$stamp)"
+exit 0

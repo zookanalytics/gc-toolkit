@@ -189,10 +189,9 @@ day_get() {
   [ "$(printf '%s' "$out" | jq -r '.found')" = true ] || return 3
   printf '%s' "$out" | jq -r '.value // "" | tostring'
 }
-# day_set <key> <day> returns 0 only when the day reads back.
+# day_set <key> <day> returns the write's exit.
 day_set() {
-  gc bd kv set "$1" "$2" </dev/null >/dev/null 2>&1 || return 1
-  [ "$(day_get "$1")" = "$2" ]
+  gc bd kv set "$1" "$2" </dev/null >/dev/null 2>&1
 }
 
 # --- identity ----------------------------------------------------------------
@@ -723,14 +722,11 @@ $LIST"
     gc bd update "$HOLDER" --append-notes "$NOTE" </dev/null >/dev/null 2>&1 \
       || { err "the raise landed on $HOLDER, but the note naming these posts did not, so they are not recorded as named and the next run raises them again:"; printf '%s\n' "$LIST" >&2; exit 1; }
   fi
-  jq -r '.[].record' "$DIR/raise.json" | while IFS= read -r r; do
-    gc bd kv set "$r" "named in $HOLDER" </dev/null >/dev/null 2>&1
-  done
-  kv_all "$DIR/kv.json" || echo '{}' > "$DIR/kv.json"
-  UNRECORDED=$(jq -r --slurpfile kv "$DIR/kv.json" --arg v "named in $HOLDER" '.[] | select($kv[0][.record] != $v) | "- \(.url)"' "$DIR/raise.json") \
-    || UNRECORDED=$(jq -r '.[] | "- \(.url)"' "$DIR/raise.json")
+  UNRECORDED=$(jq -r '.[] | [.record, .url] | @tsv' "$DIR/raise.json" | while IFS=$'\t' read -r r u; do
+    gc bd kv set "$r" "named in $HOLDER" </dev/null >/dev/null 2>&1 || printf -- '- %s\n' "$u"
+  done)
   if [ -n "$UNRECORDED" ]; then
-    err "$HOLDER names these posts, but the record of them did not read back, so the next run raises them again:"; printf '%s\n' "$UNRECORDED" >&2; exit 1
+    err "$HOLDER names these posts, but the store refused the record of them, so the next run raises them again:"; printf '%s\n' "$UNRECORDED" >&2; exit 1
   fi
   echo "$PROG: named $N unmarked city post(s) in $HOLDER"
   exit 0

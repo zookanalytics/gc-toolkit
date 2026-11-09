@@ -111,9 +111,11 @@ mkdir -p "$TMP/bin" "$TMP/store/b" "$TMP/rig/assets/scripts" "$TMP/cwd"
 # SHOW_DOWN=<id> fails `bd show` of that bead; SHOW_DOWN_SECOND=<id> answers the
 # first `bd show` of that bead and fails the next; DEP_UP_DOWN=<gate> fails the
 # listing of the beads that wait on that gate; GATE_STUCK=<gate> makes its
-# resolve change nothing; CLOSE_STUCK=<id> makes its close change nothing;
-# EARLIER_ANSWER=<reason> closes the gate with that reason inside the resolve
-# call, before the sign-off's own answer. A bead's comments are kept in
+# resolve change nothing; EARLIER_ANSWER=<reason> closes the gate with that
+# reason inside the resolve call, before the sign-off's own answer;
+# CLOSE_REFUSED=<id> refuses that bead's close, forced or not; and
+# REFUSE_UPDATE_MATCH=<text> refuses an update whose arguments carry that text.
+# A bead's comments are kept in
 # $STORE/b/<id>.comments.json, and each one added is logged.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 B="$STORE/b"
@@ -173,12 +175,15 @@ case "$1 ${2:-}" in
     fi ;;
   "bd close")
     log "$*"
-    [ "${CLOSE_STUCK:-}" = "$3" ] && exit 0
+    [ "${CLOSE_REFUSED:-}" = "$3" ] && { echo "Error closing $3: the store refused it" >&2; exit 1; }
     _id="$3"; _r=""; _force=""; _p=""
     for a in "$@"; do [ "$_p" = "--reason" ] && _r="$a"; [ "$a" = "--force" ] && _force=1; _p="$a"; done
     row "$_id" | jq --arg r "$_r" '.status = "closed" | .close_reason = $r' | put "$_id" ;;
   "bd update")
     log "$*"
+    if [ -n "${REFUSE_UPDATE_MATCH:-}" ]; then
+      case " $* " in *"$REFUSE_UPDATE_MATCH"*) echo "Error updating $3: the store refused it" >&2; exit 1 ;; esac
+    fi
     _id="$3"; shift 3
     _r=$(row "$_id")
     _ifa_set=0; _ifa=""; _ifs_set=0; _ifs=""
@@ -532,7 +537,7 @@ eq "$(field tk-conv status)" "in_progress" "(EPIC-PR-ANSWER) the conversation st
 # then reads closed with this ruling's answer, and the re-run must still reach
 # the member's PR, where the real converse-rework.sh adopts the child the first
 # attempt filed, rather than fall back to the epic, which it refuses.
-epic_pr; CLOSE_STUCK=tk-conv run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}" --rework
+epic_pr; CLOSE_REFUSED=tk-conv run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}" --rework
 eq "$RC" 1 "(EPIC-PR-RERUN) a sign-off whose close does not land stops short"
 eq "$(field tk-mg status)" "closed" "(EPIC-PR-RERUN) …after resolving the member's gate"
 : > "$CALLS"
@@ -543,7 +548,7 @@ hasnt "$(cat "$CALLS")" "converse-rework --anchor tk-epic" "(EPIC-PR-RERUN) …n
 eq "$(field tk-conv status)" "closed" "(EPIC-PR-RERUN) …and closes the conversation"
 # A re-run that says nothing of the PR still reaches it through the gate this
 # ruling's answer closed, so it is asked what the ruling does to that PR.
-epic_pr; CLOSE_STUCK=tk-conv run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}" --rework
+epic_pr; CLOSE_REFUSED=tk-conv run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}" --rework
 run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}"
 eq "$RC" 2 "(EPIC-PR-RERUN) a re-run saying nothing of the PR exits 2"
 has "$OUT" "reaches tk-mem at merge_result=pull_request" "(EPIC-PR-RERUN) …naming the member's PR"
@@ -604,7 +609,7 @@ esac
 has "$OUT" "the ruling leaves the branch of tk-pr2 as it stands" "(SHARED-PR) the other PR stands under the ruling"
 eq "$(acts tk-conv)" "Sent the PR of tk-anc back for rework.|Ruled: fix the retry before the merge" "(SHARED-PR) the conversation records the PR it sent back, named by its anchor where it records no number, then the ruling"
 eq "$(meta tk-pr2 gc.takeaway)" "" "(SHARED-PR) the headline stays off the other PR"
-shared_pr; CLOSE_STUCK=tk-conv run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework --pr-anchor tk-pr2
+shared_pr; CLOSE_REFUSED=tk-conv run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework --pr-anchor tk-pr2
 eq "$RC" 1 "(SHARED-PR-RERUN) a sign-off whose close does not land, after resolving the shared gate, stops short"
 : > "$CALLS"
 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework --pr-anchor tk-pr2
@@ -623,13 +628,21 @@ eq "$RC" 0 "(SHARED-OTHER-PR) --retire on that ruling exits 0"
 has "$(cat "$CALLS")" "pr-dispose --anchor tk-pr2 --successor tk-anc --kind duplicate" "(SHARED-OTHER-PR) …retiring the one open PR the ruling reaches"
 
 echo "# a re-run acts on the PR its ruling recorded, even once that PR's retirement has closed it"
+# A record of the PR the store refuses stops the sign-off before it acts on the
+# PR, with nothing else written.
+epic_pr; REFUSE_UPDATE_MATCH='gc.ruling_consequence=' run_signoff --conversation tk-conv --outcome "the member's PR moves to the new design" "${RETIRED[@]}" --retire not-needed
+eq "$RC" 1 "(RECORD-REFUSED) a record of the PR the store refuses stops the sign-off"
+has "$OUT" "could not be recorded on conversation tk-conv" "(RECORD-REFUSED) …saying so"
+hasnt "$(cat "$CALLS")" "pr-dispose" "(RECORD-REFUSED) …before the retirement acts"
+hasnt "$(cat "$CALLS")" "gate resolve" "(RECORD-REFUSED) …and before any gate is answered"
+
 # An attempt that retires the member's PR and answers its gate, then stops
 # because the conversation's close does not land, asks for a re-run. pr-facts
 # can consummate the retirement before it, closing the member's anchor, which is
 # then no open PR the ruling reaches. The re-run takes the PR from the record
 # the first attempt wrote on the conversation, finds it closed and goes on,
 # rather than falling back to the epic, which pr-dispose.sh refuses.
-epic_pr; CLOSE_STUCK=tk-conv run_signoff --conversation tk-conv --outcome "the member's PR moves to the new design" "${RETIRED[@]}" --retire not-needed
+epic_pr; CLOSE_REFUSED=tk-conv run_signoff --conversation tk-conv --outcome "the member's PR moves to the new design" "${RETIRED[@]}" --retire not-needed
 eq "$RC" 1 "(RETIRED-RERUN) a sign-off that retired the member's PR, and whose close does not land, stops short"
 eq "$(meta tk-conv gc.ruling_consequence | jq -c '.["ruled: the work moved to the new design"]')" '{"act":"retire","anchor":"tk-mem"}' "(RECORD) the conversation records the PR its ruling's --retire acts on, under the ruling's answer"
 case "$(cat "$CALLS")" in
@@ -643,7 +656,7 @@ eq "$RC" 0 "(RETIRED-RERUN) the re-run exits 0 though the retired member has clo
 has "$OUT" "tk-mem, the PR an earlier attempt of this ruling recorded for its --retire, reads closed" "(RETIRED-RERUN) …finding the PR its ruling retired closed"
 hasnt "$(cat "$CALLS")" "pr-dispose" "(RETIRED-RERUN) …disposing nothing again, and never the epic"
 eq "$(field tk-conv status)" "closed" "(RETIRED-RERUN) …and closing the conversation"
-shared_pr; CLOSE_STUCK=tk-conv run_signoff --conversation tk-conv --outcome "settled" "${RETIRED[@]}" --retire duplicate --successor tk-anc --pr-anchor tk-pr2
+shared_pr; CLOSE_REFUSED=tk-conv run_signoff --conversation tk-conv --outcome "settled" "${RETIRED[@]}" --retire duplicate --successor tk-anc --pr-anchor tk-pr2
 eq "$RC" 1 "(RETIRED-RERUN-PICK) a sign-off that retired the PR --pr-anchor names, and whose close does not land, stops short"
 setf tk-pr2 status closed; edge tk-pr2 duplicates tk-anc
 : > "$CALLS"
@@ -713,6 +726,20 @@ acceptance; TAKEAWAY_FAIL=1 run_signoff --conversation tk-conv --outcome "settle
 eq "$RC" 1 "(HEADLINE) a headline that does not land exits 1"
 eq "$(field tk-rev status)" "open" "(HEADLINE) …before any gate is resolved"
 eq "$(field tk-conv status)" "in_progress" "(HEADLINE) …or the conversation closed"
+# (HEADLINE-REFUSED) the real gc-helm.sh in place of the stub, whose headline
+# update the store refuses. takeaway exits non-zero, so the sign-off stops
+# before any gate is resolved.
+acceptance
+setm tk-anc gc.takeaway "the sitting before this one parked it"
+mv "$S/gc-helm.sh" "$TMP/gc-helm.stub"; ln -s "$HERE/gc-helm.sh" "$S/gc-helm.sh"
+REFUSE_UPDATE_MATCH='gc.takeaway=settled' TMPDIR="$TMP" run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}"
+rm -f "$S/gc-helm.sh"; mv "$TMP/gc-helm.stub" "$S/gc-helm.sh"
+eq "$RC" 1 "(HEADLINE-REFUSED) a headline update the store refuses stops the sign-off"
+has "$OUT" "could not update 'tk-anc'" "(HEADLINE-REFUSED) …after the real takeaway says so"
+hasnt "$(cat "$CALLS")" "gate resolve" "(HEADLINE-REFUSED) …so no gate is resolved"
+eq "$(field tk-rev status)" "open" "(HEADLINE-REFUSED) …the gate stays open and owed"
+hasnt "$(cat "$CALLS")" "bd close tk-conv" "(HEADLINE-REFUSED) …and the conversation is not closed"
+eq "$(meta tk-anc gc.takeaway)" "the sitting before this one parked it" "(HEADLINE-REFUSED) …while the subject still carries the earlier headline"
 
 echo "# a ruling on an armed subject leaves its arm to send it"
 acceptance; setm tk-anc gc.dispatch_when_ready gc-toolkit/gc-toolkit.polecat
@@ -942,6 +969,9 @@ if [ "$1 $2 $3" = "bd update tk-conv" ]; then
   if [ -n "${DISMISS_BEFORE_UPDATE:-}" ]; then
     jq '.status = "closed" | .close_reason = "dismissed by the operator"' "$STORE/b/$3.json" > "$STORE/b/x" && mv "$STORE/b/x" "$STORE/b/$3.json"
   fi
+  if [ -n "${RETURN_BEFORE_UPDATE:-}" ]; then
+    jq '.assignee = "human" | .status = "open"' "$STORE/b/$3.json" > "$STORE/b/x" && mv "$STORE/b/x" "$STORE/b/$3.json"
+  fi
 fi
 exec "$(dirname "$0")/gc.real" "$@"
 G2
@@ -957,6 +987,11 @@ eq "$(field tk-conv status)/$(field tk-conv assignee)" "closed/gc-toolkit/gc-too
 has "$OUT" "was closed while this sign-off ran" "(CUT-SHORT-DISMISS) …saying so"
 hasnt "$(cat "$CALLS")" "pr-sitting-comment" "(CUT-SHORT-DISMISS) …leaving the comment the dismiss drew"
 eq "$(field tk-rev status)" "open" "(CUT-SHORT-DISMISS) the gate stays open and owed"
+acceptance
+RETURN_BEFORE_UPDATE=1 run_signoff --conversation tk-conv --outcome "cut short" --ruled no
+eq "$RC" 0 "(CUT-SHORT-RETURNED) a conversation another writer put back in the queue between the sign-off's read and its hand-back exits 0"
+eq "$(field tk-conv assignee)/$(field tk-conv status)" "human/open" "(CUT-SHORT-RETURNED) …and stays in the operator's queue"
+has "$OUT" "(back in the operator's queue)" "(CUT-SHORT-RETURNED) …which the sign-off reports"
 mv "$TMP/bin/gc.real" "$TMP/bin/gc"
 # A conversation that already reads closed has ended: a dismiss or an earlier
 # sign-off closed it, and bd's close kept its assignee, so the guarded hand-back
