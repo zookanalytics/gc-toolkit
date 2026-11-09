@@ -65,8 +65,6 @@ gc.takeaway'
 # <marker>=<settled-key>: the marker holds only while the settled-key is absent
 # or empty. Same list as the declaration, same standby role.
 BUILTIN_SETTLED_KEYS='gc.takeaway=gc.takeaway_settled'
-BUILTIN_ROUTE_KEY='gc.routed_to'
-BUILTIN_PARK_ROUTE='human'
 # The terminal end of a wait — the bead others block ON. It can carry no
 # `blocks` edge of its own by construction (the gated bead blocks on it; it
 # blocks on nothing), so a marker it carries is exempt, not a finding. It is a
@@ -86,13 +84,10 @@ toml_array() { # <file> <key> — quoted strings of the first `<key> = [...]`
     awk -v k="$2" 'ok { print } $0 ~ ("^[[:space:]]*" k "[[:space:]]*=[[:space:]]*\\[") { ok = 1; print }' "$1" 2>/dev/null \
         | awk '{ print } /\]/ { exit }' | grep -o '"[^"]*"' | tr -d '"'
 }
-marker_keys=""; route_key=""; park_route=""
-settled_keys=""; severity=""; terminal_wait_type=""; declared=""
+marker_keys=""; settled_keys=""; severity=""; terminal_wait_type=""; declared=""
 if [ -f "$lifecycle" ]; then
     marker_keys=$(toml_array "$lifecycle" "marker_keys")
     settled_keys=$(toml_array "$lifecycle" "settled_keys")
-    route_key=$(toml_scalar "$lifecycle" "route_key")
-    park_route=$(toml_scalar "$lifecycle" "park_route")
     terminal_wait_type=$(toml_scalar "$lifecycle" "terminal_wait_type")
     severity=$(toml_scalar "$lifecycle" "hold_severity")
     [ -n "$marker_keys" ] && declared=yes
@@ -105,8 +100,6 @@ fi
 if [ -z "$declared" ]; then
     marker_keys="$BUILTIN_MARKER_KEYS"
     settled_keys="$BUILTIN_SETTLED_KEYS"
-    route_key="$BUILTIN_ROUTE_KEY"
-    park_route="$BUILTIN_PARK_ROUTE"
     terminal_wait_type="$BUILTIN_TERMINAL_WAIT_TYPE"
 fi
 # The posture is the exception: it is one value with a safe default, and a
@@ -224,10 +217,7 @@ def unsettled($m; $k): ($settled[$k] // "") as $sk
 | select($twtype == "" or ($b.issue_type | txt) != $twtype)
 | ( [ $m | to_entries[]
       | .key as $k | (.value | txt) as $v
-      | select(
-            (($mkeys | index($k)) != null and ($v | length) > 0 and unsettled($m; $k))
-         or ($routekey != "" and $park != "" and $k == $routekey and $v == $park)
-        )
+      | select(($mkeys | index($k)) != null and ($v | length) > 0 and unsettled($m; $k))
       | $k + "=" + ($v | clip) ] | sort ) as $marks
 | select(($marks | length) > 0)
 | ( [ ($b.dependencies // [])[]
@@ -309,7 +299,6 @@ while IFS=$'\037' read -r rig_name rig_path hq suspended; do
     rows=$(printf '%s' "$live_json" | jq -r \
         --argjson mkeys "$MKEYS_JSON" \
         --argjson settled "$SETTLED_JSON" \
-        --arg routekey "$route_key" --arg park "$park_route" \
         --arg twtype "$terminal_wait_type" \
         "$WAIT_JQ" 2>/dev/null); rows_rc=$?
     if [ "$rows_rc" -ne 0 ]; then

@@ -221,10 +221,6 @@ settled_keys = ["gc.takeaway=gc.takeaway_settled"]
 # merge_hold is not a marker_key: an operator's freeze is theirs to lift, and a
 # hold that must show as an edge asserts it through blocked_reason or
 # gc.takeaway beside it, both declared above, which carry the wait's sentence.
-# doctor/check-wait-is-an-edge holds a bead on this route key only where it
-# carries a declared park_route, and this file declares none: a person's wait
-# is a human gate, whose blocks edge is the hold.
-route_key = "gc.routed_to"
 # The terminal end of a wait is a bead of this issue type: the bead others
 # block ON, which by construction can hold no `blocks` edge of its own. A human
 # gate is filed blocking the bead that waits (human-gate.sh, or the native

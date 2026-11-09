@@ -126,13 +126,9 @@ chmod +x "$TMP/bin/gc" "$TMP/bin/bd"
 export PATH="$TMP/bin:$PATH" STORES="$TMP/stores"
 
 cat > "$TMP/pack/lifecycle/lifecycle.toml" <<'TOML'
-[machine]
-park_route = "human"
-
 [holds]
 marker_keys = ["triage.hold", "blocked_reason", "gc.takeaway"]
 settled_keys = ["gc.takeaway=gc.takeaway_settled"]
-route_key = "gc.routed_to"
 terminal_wait_type = "gate"
 hold_severity = "warn"
 TOML
@@ -210,7 +206,7 @@ notheld() { # <metadata-json> <label>
 held '{"triage.hold":"x"}'                       "triage.hold"
 held '{"blocked_reason":"a person must rule"}'  "blocked_reason"
 held '{"gc.takeaway":"needs an operator ruling"}' "gc.takeaway"
-held '{"gc.routed_to":"human"}'                  "gc.routed_to on the park route"
+notheld '{"gc.routed_to":"human"}'               "a human route"
 notheld '{"gc.routed_to":"alpha/alpha.polecat"}' "gc.routed_to on a pool"
 # merge_hold is not a marker: a hold that must show as an edge asserts it
 # through blocked_reason or gc.takeaway beside it.
@@ -267,7 +263,7 @@ has "$OUT" "bb-500 is in no store this scope can read" "the finding says the for
 reset
 
 # --- 12. the HQ store is read through --city, never as a rig --------------
-hstore '[{"id":"hh-1","status":"open","metadata":{"gc.routed_to":"human"}}]'
+hstore '[{"id":"hh-1","status":"open","metadata":{"triage.hold":"waiting on the operator"}}]'
 store '[]'
 OUT=$(run_check); RC=$?
 eq "$RC" "1" "a held bead in the HQ store is found"
@@ -279,20 +275,13 @@ reset
 # --- 13. the marker list comes from lifecycle.toml ------------------------
 mkdir -p "$TMP/pack2/lifecycle"
 cat > "$TMP/pack2/lifecycle/lifecycle.toml" <<'TOML'
-[machine]
-park_route = "parked"
-
 [holds]
 marker_keys = ["site.hold"]
-route_key = "routed"
 TOML
 store '[{"id":"aa-101","status":"open","metadata":{"site.hold":"declared only in the fixture"}}]'
 OUT=$(PACK="$TMP/pack2" run_check); RC=$?
 eq "$RC" "1" "a marker declared only in lifecycle.toml is asserted"
 has "$OUT" "site.hold" "and the finding names it"
-store '[{"id":"aa-101","status":"open","metadata":{"routed":"parked"}}]'
-OUT=$(PACK="$TMP/pack2" run_check); RC=$?
-eq "$RC" "1" "the declared route key and park_route are asserted"
 store '[{"id":"aa-101","status":"open","metadata":{"triage.hold":"x","gc.takeaway":"y"}}]'
 OUT=$(PACK="$TMP/pack2" run_check); RC=$?
 eq "$RC" "0" "a marker the declaration drops is no longer asserted"
@@ -301,9 +290,8 @@ eq "$RC" "0" "a marker the declaration drops is no longer asserted"
 # built-ins are a whole substitute for an unreadable file, never a filler for
 # fields a declaration dropped on purpose.
 mkdir -p "$TMP/pack5/lifecycle"
-{ echo '[machine]'; echo 'park_route = "human"'; echo; echo '[holds]'
-  echo 'marker_keys = ["site.hold"]'; } > "$TMP/pack5/lifecycle/lifecycle.toml"
-for m in '{"blocked_reason":"a person must rule"}' '{"gc.routed_to":"human"}'; do
+{ echo '[holds]'; echo 'marker_keys = ["site.hold"]'; } > "$TMP/pack5/lifecycle/lifecycle.toml"
+for m in '{"blocked_reason":"a person must rule"}' '{"gc.takeaway":"needs an operator ruling"}'; do
   store '[{"id":"aa-101","status":"open","metadata":'"$m"'}]'
   OUT=$(PACK="$TMP/pack5" run_check); RC=$?
   eq "$RC" "0" "a declaration that drops a marker does not inherit it: $m"
@@ -312,22 +300,15 @@ store '[{"id":"aa-101","status":"open","metadata":{"site.hold":"x"}}]'
 OUT=$(PACK="$TMP/pack5" run_check); RC=$?
 eq "$RC" "1" "...and the marker it does declare still asserts"
 
-# Each half of the route arm is required: a route key with no park route
-# declares no route hold. The value to test with is the empty string, because
-# clearing a route by setting it empty does not remove the key, so live beads
-# really do carry it.
-mkdir -p "$TMP/pack7/lifecycle"
-{ echo '[holds]'; echo 'marker_keys = ["site.hold"]'; echo 'route_key = "gc.routed_to"'; } > "$TMP/pack7/lifecycle/lifecycle.toml"
-store '[{"id":"aa-101","status":"open","metadata":{"gc.routed_to":""}}]'
-OUT=$(PACK="$TMP/pack7" run_check); RC=$?
-eq "$RC" "0" "a route key with no park route declares no route hold"
-
 # --- 14. no declaration: the built-in list, and a note that says so -------
 mkdir -p "$TMP/pack3"
 store '[{"id":"aa-101","status":"open","metadata":{"triage.hold":"x"}}]'
 OUT=$(PACK="$TMP/pack3" run_check); RC=$?
 eq "$RC" "1" "with no lifecycle.toml the built-in marker list still asserts"
 has "$OUT" "built-in list" "and the substitution is noted rather than silent"
+store '[{"id":"aa-101","status":"open","metadata":{"gc.routed_to":"human"}}]'
+OUT=$(PACK="$TMP/pack3" run_check); RC=$?
+eq "$RC" "0" "the built-in list holds no route: a human route is no hold"
 
 # --- 15. an unreadable probe warns and never passes -----------------------
 store '[{"id":"aa-101","status":"open","metadata":{}}]'
@@ -400,8 +381,7 @@ has "$OUT" "aa-106" "including the last one"
 # --- 21. the reporting posture is declared, not compiled in ---------------
 mkdir -p "$TMP/pack4/lifecycle"
 posture_pack() { # <hold_severity line>
-  { echo '[machine]'; echo 'park_route = "human"'; echo; echo '[holds]'
-    echo 'marker_keys = ["triage.hold"]'; echo "$1"; } > "$TMP/pack4/lifecycle/lifecycle.toml"
+  { echo '[holds]'; echo 'marker_keys = ["triage.hold"]'; echo "$1"; } > "$TMP/pack4/lifecycle/lifecycle.toml"
 }
 store '[{"id":"aa-101","status":"open","metadata":{"triage.hold":"held"}}]'
 posture_pack 'hold_severity = "error"'
@@ -442,8 +422,6 @@ held '{"gc.takeaway":"settled","gc.takeaway_settled":"1","triage.hold":"waiting 
      "a settled takeaway beside another marker"
 OUT=$(run_check)
 hasnt "$OUT" "gc.takeaway=settled" "and the settled marker is not listed among what holds it"
-held '{"gc.takeaway":"settled","gc.takeaway_settled":"1","gc.routed_to":"human"}' \
-     "a settled takeaway on a bead parked on the park route"
 # A settled marker is answered, not exempted: the bead is judged on every other
 # marker it carries, and one whose only marker is settled leaves the store clean
 # rather than unscanned.
@@ -493,7 +471,7 @@ eq "$RC" "0" "the built-in list carries the built-in pairing"
 gate_row() { # <issue-type> <metadata-json> — one open bead of that type
   store '[{"id":"aa-101","status":"open","issue_type":"'"$1"'","metadata":'"$2"'}]'
 }
-gate_row gate '{"gc.takeaway":"what should happen with X?","gc.routed_to":"human"}'
+gate_row gate '{"gc.takeaway":"what should happen with X?"}'
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a gate carrying a marker is exempt: it is the terminal end of its wait"
 gate_row gate '{"triage.hold":"x"}'
@@ -507,7 +485,7 @@ eq "$RC" "1" "a bead of another type is judged on its markers, gc.demand_for or 
 has "$OUT" "aa-101" "…and it names the held bead"
 # The exemption does not skip the store: a gate is not counted as a finding,
 # and a store whose only held bead is a gate reads clean and scanned.
-store '[{"id":"aa-101","status":"open","issue_type":"gate","metadata":{"gc.takeaway":"needs a ruling","gc.routed_to":"human"}}]'
+store '[{"id":"aa-101","status":"open","issue_type":"gate","metadata":{"gc.takeaway":"needs a ruling"}}]'
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a store whose only held bead is a gate passes"
 has "$OUT" "across 3 store(s)" "and the store was scanned, not skipped"
@@ -516,8 +494,7 @@ has "$OUT" "across 3 store(s)" "and the store was scanned, not skipped"
 # terminal_wait_type does not exempt the terminal end — the gate's own markers
 # still assert, which is the fail-safe an omitted field is meant to be.
 mkdir -p "$TMP/pack11/lifecycle"
-{ echo '[machine]'; echo 'park_route = "human"'; echo; echo '[holds]'
-  echo 'marker_keys = ["gc.takeaway"]'; echo 'route_key = "gc.routed_to"'; } > "$TMP/pack11/lifecycle/lifecycle.toml"
+{ echo '[holds]'; echo 'marker_keys = ["gc.takeaway"]'; } > "$TMP/pack11/lifecycle/lifecycle.toml"
 store '[{"id":"aa-101","status":"open","issue_type":"gate","metadata":{"gc.takeaway":"needs a ruling"}}]'
 OUT=$(PACK="$TMP/pack11" run_check); RC=$?
 eq "$RC" "1" "a declaration that omits terminal_wait_type does not exempt the terminal end"
