@@ -919,19 +919,31 @@ echo "── a moot or benign close settles a headline that waits on nothing ─
 # A cut-short sitting leaves its hold's headline on the subject, and the next
 # sitting's premise re-check can find the conversation moot and close it. The
 # block runs as written, its placeholders filled, under stubs: gc answers the
-# subject's row from RL_ROW and its blocks edges from RL_GATES, and exits
-# RL_SHOW_RC and RL_DEPS_RC after printing them.
+# subject's row from RL_ROW and exits RL_SHOW_RC after printing it, and gctk,
+# built from this checkout, answers what holds the subject from a store of that
+# row with a blocks edge onto each bead RL_GATES lists, and those beads. Its
+# reads fail at RL_DEPS_RC, or when RL_GATES is not a list.
 RECHECK="$REPO/skills/converse-recheck-premise/SKILL.md"
 RL="$TMP/release"
 mkdir -p "$RL/bin" "$RL/pack/assets/scripts"
+export HOLDS_STUB="$REPO/assets/scripts/holds-store.stub.sh" GC_NO_API=1
+GCTK_BIN="$("$HOLDS_STUB" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so the premise re-check cannot run"; exit 1; }
+export GCTK_BIN
 cat >"$RL/bin/gc" <<'STUB'
 #!/usr/bin/env bash
+if [ -n "${HOLDS_STUB_READ:-}" ] && [ "${1:-}" = bd ]; then
+    shift
+    printf '%s\n' "$RL_GATES" | jq -e 'type == "array"' >/dev/null 2>&1 || { echo "gc bd: simulated read failure" >&2; exit 1; }
+    [ "${RL_DEPS_RC:-0}" -eq 0 ] || { echo "gc bd: simulated read failure" >&2; exit "$RL_DEPS_RC"; }
+    jq -nc --argjson row "$RL_ROW" --argjson g "$RL_GATES" \
+        '[ ($row[0] + {_deps: [ $g[] | {id, dependency_type: "blocks"} ]}) ] + $g' >"$RL_DIR/holds.json" || exit 1
+    HOLDS_STORE="$RL_DIR/holds.json" exec "$HOLDS_STUB" answer "$@"
+fi
 printf 'gc %s\n' "$*" >>"$RL_DIR/log"
 case "$1 ${2:-} ${3:-}" in
     "bd show "*)
         [ -z "${RL_SHOW_DOWN:-}" ] || { printf '%s\n' '{"error":"no issues found matching the provided IDs"}'; exit 1; }
         printf '%s\n' "$RL_ROW"; exit "${RL_SHOW_RC:-0}" ;;
-    "bd dep list") printf '%s\n' "$RL_GATES"; exit "${RL_DEPS_RC:-0}" ;;
     "bd comment "*) [ -z "${RL_COMMENT_REFUSE:-}" ] || exit 1 ;;
 esac
 exit 0
@@ -1004,7 +1016,7 @@ for sh_ in $shells; do
         *) bad "($sh_) recheck close: an action the store will not record still closes the conversation, says so, and draws the comment" "exit $rc, calls: $calls, out: $(cat "$RL/out")" ;;
     esac
     for stop in "RL_TAKEAWAY_FAIL=1|a headline that does not land|$NONE_HOLDS" "RL_SHOW_DOWN=1|a subject that does not read|$NONE_HOLDS" \
-        "RL_NONE=1|a blocker listing that does not read|{\"error\":\"no issue found\"}"; do
+        "RL_NONE=1|a hold read that does not answer|{\"error\":\"no issue found\"}"; do
         IFS='|' read -r setting what gates <<EOF
 $stop
 EOF
@@ -1024,7 +1036,7 @@ EOF
         "$TWICE|RL_SHOW_RC=0|RL_DEPS_RC=0|a subject read that answers two rows" \
         "$OTHER|RL_SHOW_RC=0|RL_DEPS_RC=0|a subject read that answers another bead's row" \
         "$WAITING|RL_SHOW_RC=1|RL_DEPS_RC=0|a subject read that exits non-zero, whatever it printed," \
-        "$WAITING|RL_SHOW_RC=0|RL_DEPS_RC=1|a blocker listing that exits non-zero, whatever it printed,"; do
+        "$WAITING|RL_SHOW_RC=0|RL_DEPS_RC=1|a hold read that fails,"; do
         IFS='|' read -r row show_rc deps_rc what <<EOF
 $stop
 EOF
