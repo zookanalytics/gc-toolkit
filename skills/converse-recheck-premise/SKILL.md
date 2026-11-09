@@ -22,10 +22,8 @@ for g in $(gc bd list --id "$CONVERSATION" --all --json | jq -r '.[0].dependenci
 ```
 Their stated conditions ARE the premise, often bulleted literally — *"no
 `triage.hold` and no `gc.takeaway` on the root"*, *"its frontier is [...]
-UNASSIGNED"*. One gate states no premise: the conversation's own, under its key
-`conversation.<its id>`, which holds an open PR's merge while the conversation
-is open. Leave it to the conversation's close. Check each other condition
-still holds, on the subject and on whatever bead the premise is about:
+UNASSIGNED"*. Check each one still holds, on the subject and on whatever bead
+the premise is about:
 ```bash
 gc bd show "$SUBJECT" --json | jq -r '.[0].metadata
   | "hold=\(.["triage.hold"] // "") takeaway=\(.["gc.takeaway"] // "")"'
@@ -79,17 +77,12 @@ because it names a question that no longer stands. A subject a wait of its own
 still holds keeps its headline, since that wait is still owed. What holds it is
 the answer of `gctk bead holds`, the one rule for it. A read counts only when it
 exits 0 and answers in its shape: the subject's own row, alone, and its own
-answer.
-
-A conversation about an open PR, or about a bead of one such as its review or
-rework, holds the PR's merge with a gate under its own key,
-`conversation.<its id>`, on the PR's anchor, and that hold lives as long as the
-conversation. So the close withdraws it once the conversation has closed, as
-dismiss does, and it is no blocker that keeps the headline. A close that does
-not land leaves the merge held. The anchor is the subject when the subject
-carries a `merge_result`, and otherwise the bead its `anchor_bead` names. Each
-write takes its exit, the conversation closes only after them, and the hold is
-withdrawn only after the close:
+answer. A conversation on an open PR holds the PR's merge until it closes, and
+otherwise blocks nothing: the PR's anchor depends on the conversation, so on an
+anchor the conversation itself is among the subject's pending waits. The close
+below ends that wait, and frees the merge with it, so the block leaves the
+conversation out of what still holds the subject. Each write takes its exit,
+and the conversation closes only after them:
 ```bash
 # >>> gctk-bin
 GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
@@ -98,20 +91,16 @@ KIND="<moot|benign>"; WHY="<the premise, and what is true instead>"
 ACTION="<what ended the visit, in one plain sentence>"
 ROW=$(gc bd show "$SUBJECT" --json) \
   && WAITS=$(printf '%s\n' "$ROW" | jq -er --arg s "$SUBJECT" 'if type == "array" and length == 1 and .[0].id == $s then (.[0].metadata // {}) | if ((.["gc.takeaway"] // "") | tostring) != "" and ((.["gc.takeaway_settled"] // "") | tostring) == "" then "waits" else "settled" end else error("unread") end') \
-  && ANCHOR=$(printf '%s\n' "$ROW" | jq -r --arg s "$SUBJECT" '(.[0].metadata // {}) | if ((.merge_result // "") | tostring) != "" then $s else ((.anchor_bead // "") | tostring) end') \
   && HOLDS=$("$GCTK" bead holds "$SUBJECT") \
-  && OPEN=$(printf '%s\n' "$HOLDS" | jq -er 'if .error == null and (.pending | type) == "array" then [ .pending[].id ] | join(" ") else error("unread") end') \
+  && OPEN=$(printf '%s\n' "$HOLDS" | jq -er --arg c "$CONVERSATION" 'if .error == null and (.pending | type) == "array" then [ .pending[].id | select(. != $c) ] | join(" ") else error("unread") end') \
   && if [ "$WAITS" != waits ] || [ -n "$OPEN" ]; then echo "$SUBJECT keeps its headline${OPEN:+: $OPEN still holds it}"; else
        "$CONV/gc-helm.sh" takeaway "$SUBJECT" "${KIND}: ${WHY}" --by converse --no-wait \
          && echo "replaced the headline of $SUBJECT, which waited on nothing"
      fi \
   && gc bd update "$SUBJECT" --append-notes "$KIND (conversation $CONVERSATION): $WHY" \
   && gc bd update "$CONVERSATION" --set-metadata gc.work_outcome=no-op \
-  && STATE=$(gc bd show "$CONVERSATION" --json | jq -er --arg c "$CONVERSATION" 'if type == "array" and length == 1 and .[0].id == $c then (.[0].status // "") | ascii_downcase else error("unread") end') \
-  && { [ "$STATE" = closed ] || gc bd close "$CONVERSATION" --reason "${KIND}: ${WHY}" \
+  && { gc bd close "$CONVERSATION" --reason "${KIND}: ${WHY}" \
        || gc bd close "$CONVERSATION" --reason "${KIND}: ${WHY}" --force; } \
-  && { [ -z "$ANCHOR" ] || "$CONV/human-gate.sh" --retract --subject "$ANCHOR" --key "conversation.$CONVERSATION" --message "conversation $CONVERSATION closed as $KIND: $WHY" >/dev/null \
-       || { echo "$CONVERSATION is closed, but its hold on the merge of $ANCHOR did not withdraw, so that merge still waits on it"; false; }; } \
   && { gc bd comment "$CONVERSATION" "$ACTION" >/dev/null \
        || echo "the close was not recorded among the actions of $CONVERSATION"; } \
   && { "$CONV/pr-sitting-comment.sh" refresh --sitting "$CONVERSATION" || true; } \
@@ -121,16 +110,13 @@ When it prints its `closed` line, drain (the prompt's **How this thread
 ends**). **Post nothing** — no framing, no sign-off, not even "this turned out
 to be fine".
 
-No `closed` line means the close stopped short: the subject, its blockers or
-the conversation did not read, or the store refused a write. Until the close
-lands, the conversation stays open under this sitting and still holds its PR's
-merge, and a subject whose questions are answered would otherwise keep a
-headline that waits on nothing. When the close landed and the hold did not
-withdraw, the block says so, and the PR's merge then still waits on the closed
-conversation. So say in the thread what the block printed, fix what it names,
-and re-run the block, which skips the close of a conversation that reads
-closed. The gates cleared above stay cleared, and each write in the block is
-safe to repeat.
+No `closed` line means the close stopped short: the subject or its blockers
+did not read, or the store refused a write. The conversation stays open under
+this sitting, still holding an open PR's merge, and a subject whose questions
+are answered would otherwise keep a headline that waits on nothing. So say in
+the thread what the block printed, fix what it names, and re-run the block.
+The gates cleared above stay cleared, and each write in the block is safe to
+repeat.
 
 The exit is gated on being *named*: if you cannot point at the stamp
 or state that makes this benign, you hold the sitting.

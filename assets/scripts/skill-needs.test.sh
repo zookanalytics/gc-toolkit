@@ -916,8 +916,6 @@ echo "── a moot or benign close settles a headline that waits on nothing ─
 # row with an edge onto each bead RL_GATES lists, `blocks` unless the bead names
 # its `edge`, those beads, and the rows RL_MORE adds. Its reads fail at
 # RL_DEPS_RC, or when RL_GATES is not a list.
-# The conversation, tk-v, reads in RL_CONV_STATUS (in_progress unless a case
-# sets it), or not at all under RL_CONV_DOWN, and its close exits RL_CLOSE_RC.
 RECHECK="$REPO/skills/converse-recheck-premise/SKILL.md"
 RL="$TMP/release"
 mkdir -p "$RL/bin" "$RL/pack/assets/scripts"
@@ -936,10 +934,6 @@ if [ -n "${HOLDS_STUB_READ:-}" ] && [ "${1:-}" = bd ]; then
 fi
 printf 'gc %s\n' "$*" >>"$RL_DIR/log"
 case "$1 ${2:-} ${3:-}" in
-    "bd show tk-v")
-        [ -z "${RL_CONV_DOWN:-}" ] || { printf '%s\n' '{"error":"no issues found matching the provided IDs"}'; exit 1; }
-        printf '[{"id":"tk-v","status":"%s"}]\n' "${RL_CONV_STATUS:-in_progress}" ;;
-    "bd close tk-v") exit "${RL_CLOSE_RC:-0}" ;;
     "bd show "*)
         [ -z "${RL_SHOW_DOWN:-}" ] || { printf '%s\n' '{"error":"no issues found matching the provided IDs"}'; exit 1; }
         printf '%s\n' "$RL_ROW"; exit "${RL_SHOW_RC:-0}" ;;
@@ -955,13 +949,6 @@ STUB
 cat >"$RL/pack/assets/scripts/pr-sitting-comment.sh" <<'STUB'
 #!/usr/bin/env bash
 printf 'pr-sitting-comment %s\n' "$*" >>"$RL_DIR/log"
-STUB
-# human-gate.sh's withdrawal of the conversation's own hold on an open PR's
-# merge, which exits RL_RETRACT_RC.
-cat >"$RL/pack/assets/scripts/human-gate.sh" <<'STUB'
-#!/usr/bin/env bash
-printf 'human-gate %s\n' "$*" >>"$RL_DIR/log"
-exit "${RL_RETRACT_RC:-0}"
 STUB
 chmod +x "$RL/bin/gc" "$RL/pack/assets/scripts/"*.sh
 fenced_block "$RECHECK" 'replaced the headline of $SUBJECT' | fill_block >"$RL/block"
@@ -1006,6 +993,27 @@ for sh_ in $shells; do
             *) bad "($sh_) recheck close: a subject $what still holds keeps its headline" "exit $rc, calls: $calls" ;;
         esac
     done
+    # A conversation on an open PR holds the PR's merge through the anchor's
+    # blocks edge onto it, so on an anchor the conversation, tk-v, is among the
+    # subject's pending waits. The close ends that wait, so it keeps no
+    # headline, while any other wait beside it still does, and is named alone.
+    CONV_HOLDS='[{"id":"tk-v","issue_type":"task","status":"in_progress"}]'
+    rc=$(run_release "$run" "$WAITING" "$CONV_HOLDS")
+    calls=$(tr '\n' ';' <"$RL/log")
+    case "$rc:$calls" in
+        0:*"gc-helm takeaway tk-x x: x --by converse --no-wait;"*"gc bd close tk-v --reason x: x;"*)
+            ok "($sh_) recheck close: the conversation's own hold on the anchor keeps no headline, and the conversation closes" ;;
+        *) bad "($sh_) recheck close: the conversation's own hold on the anchor keeps no headline, and the conversation closes" "exit $rc, calls: $calls" ;;
+    esac
+    CONV_AND_GATE='[{"id":"tk-v","issue_type":"task","status":"in_progress"},{"id":"tk-g2","issue_type":"gate","await_type":"human","status":"open"}]'
+    rc=$(run_release "$run" "$WAITING" "$CONV_AND_GATE")
+    calls=$(tr '\n' ';' <"$RL/log")
+    case "$rc:$calls:$(cat "$RL/out")" in
+        *"gc-helm takeaway"*) bad "($sh_) recheck close: a gate beside the conversation's hold still keeps the headline" "exit $rc, calls: $calls" ;;
+        0:*"gc bd close tk-v "*"tk-x keeps its headline: tk-g2 still holds it"*)
+            ok "($sh_) recheck close: a gate beside the conversation's hold still keeps the headline, named without the conversation" ;;
+        *) bad "($sh_) recheck close: a gate beside the conversation's hold still keeps the headline" "exit $rc, calls: $calls, out: $(cat "$RL/out")" ;;
+    esac
     rc=$(run_release "$run" "$SETTLED" '[]')
     calls=$(tr '\n' ';' <"$RL/log")
     case "$rc:$calls" in
@@ -1057,72 +1065,6 @@ EOF
             *) ok "($sh_) recheck close: $what closes nothing" ;;
         esac
     done
-    # A conversation on an open PR holds the PR's merge with a gate under its
-    # key on the anchor: the subject when it carries a merge_result, else the
-    # bead its anchor_bead names. The close withdraws that gate once the
-    # conversation has closed, and the gate is no blocker that keeps the
-    # headline.
-    ANCHOR_WAITING='[{"id":"tk-x","metadata":{"merge_result":"pull_request","gc.takeaway":"holding — x","gc.takeaway_settled":""}}]'
-    OWN_HOLDS='[{"id":"tk-own","issue_type":"gate","await_type":"human","await_id":"conversation.tk-v","status":"open"}]'
-    rc=$(run_release "$run" "$ANCHOR_WAITING" "$OWN_HOLDS")
-    calls=$(tr '\n' ';' <"$RL/log")
-    case "$rc:$calls" in
-        0:*"gc-helm takeaway tk-x x: x --by converse --no-wait;"*"gc bd close tk-v --reason x: x;human-gate --retract --subject tk-x --key conversation.tk-v --message conversation tk-v closed as x: x;gc bd comment tk-v x;"*)
-            ok "($sh_) recheck close: on an open PR's anchor the conversation's own gate keeps no headline, and is withdrawn once the conversation has closed" ;;
-        *) bad "($sh_) recheck close: on an open PR's anchor the conversation's own gate keeps no headline, and is withdrawn once the conversation has closed" "exit $rc, calls: $calls" ;;
-    esac
-    REVIEW_SETTLED='[{"id":"tk-x","metadata":{"task_kind":"review","anchor_bead":"tk-anc","gc.takeaway":"ruled: x","gc.takeaway_settled":"1"}}]'
-    rc=$(run_release "$run" "$REVIEW_SETTLED" '[]')
-    calls=$(tr '\n' ';' <"$RL/log")
-    case "$rc:$calls" in
-        0:*"gc bd close tk-v "*"human-gate --retract --subject tk-anc --key conversation.tk-v "*)
-            ok "($sh_) recheck close: on a PR's review the gate is withdrawn from the anchor the review names" ;;
-        *) bad "($sh_) recheck close: on a PR's review the gate is withdrawn from the anchor the review names" "exit $rc, calls: $calls" ;;
-    esac
-    # A close the store refuses both ways leaves the gate in place, so the merge
-    # stays held while the conversation is open.
-    rc=$(run_release "$run" "$ANCHOR_WAITING" "$OWN_HOLDS" RL_CLOSE_RC=1)
-    calls=$(tr '\n' ';' <"$RL/log")
-    case "$rc:$calls" in
-        0:*|*"human-gate"*) bad "($sh_) recheck close: a close the store refuses withdraws nothing" "exit $rc, calls: $calls" ;;
-        *"gc bd close tk-v --reason x: x --force;"*) ok "($sh_) recheck close: a close the store refuses withdraws nothing" ;;
-        *) bad "($sh_) recheck close: a close the store refuses withdraws nothing" "exit $rc, calls: $calls" ;;
-    esac
-    # A conversation that does not read is neither closed nor released.
-    rc=$(run_release "$run" "$ANCHOR_WAITING" "$OWN_HOLDS" RL_CONV_DOWN=1)
-    calls=$(tr '\n' ';' <"$RL/log")
-    case "$rc:$calls" in
-        0:*|*"bd close"*|*"human-gate"*) bad "($sh_) recheck close: a conversation that does not read closes and withdraws nothing" "exit $rc, calls: $calls" ;;
-        *) ok "($sh_) recheck close: a conversation that does not read closes and withdraws nothing" ;;
-    esac
-    rc=$(run_release "$run" "$SETTLED" '[]')
-    calls=$(tr '\n' ';' <"$RL/log")
-    case "$rc:$calls" in
-        *"human-gate"*) bad "($sh_) recheck close: a subject that is no anchor withdraws nothing" "exit $rc, calls: $calls" ;;
-        0:*"gc bd close tk-v "*) ok "($sh_) recheck close: a subject that is no anchor withdraws nothing" ;;
-        *) bad "($sh_) recheck close: a subject that is no anchor withdraws nothing" "exit $rc, calls: $calls" ;;
-    esac
-    # A withdrawal that does not land after the close says so and stops short of
-    # the closed line, and the re-run reads the conversation closed, skips the
-    # close and withdraws the gate.
-    rc=$(run_release "$run" "$ANCHOR_WAITING" "$OWN_HOLDS" RL_RETRACT_RC=1)
-    calls=$(tr '\n' ';' <"$RL/log")
-    out=$(cat "$RL/out")
-    case "$rc:$calls:$out" in
-        0:*|*"gc bd comment"*|*"closed tk-v as x"*) bad "($sh_) recheck close: a withdrawal that does not land after the close says so and stops short" "exit $rc, calls: $calls, out: $out" ;;
-        *"gc bd close tk-v --reason x: x;human-gate --retract"*"tk-v is closed, but its hold on the merge of tk-x did not withdraw"*)
-            ok "($sh_) recheck close: a withdrawal that does not land after the close says so and stops short" ;;
-        *) bad "($sh_) recheck close: a withdrawal that does not land after the close says so and stops short" "exit $rc, calls: $calls, out: $out" ;;
-    esac
-    rc=$(run_release "$run" "$ANCHOR_WAITING" "$OWN_HOLDS" RL_CONV_STATUS=closed)
-    calls=$(tr '\n' ';' <"$RL/log")
-    out=$(cat "$RL/out")
-    case "$rc:$calls:$out" in
-        *"gc bd close"*) bad "($sh_) recheck close: the re-run skips the close of a conversation that reads closed and withdraws the gate" "exit $rc, calls: $calls" ;;
-        0:*"human-gate --retract --subject tk-x --key conversation.tk-v "*"gc bd comment tk-v x;"*"closed tk-v as x"*)
-            ok "($sh_) recheck close: the re-run skips the close of a conversation that reads closed and withdraws the gate" ;;
-        *) bad "($sh_) recheck close: the re-run skips the close of a conversation that reads closed and withdraws the gate" "exit $rc, calls: $calls, out: $out" ;;
-    esac
 done
 echo "── every answer to a gate settles the subject's dispatch path first ──"
 # The hold leaves the subject's arm and route in place, and the writer leaves

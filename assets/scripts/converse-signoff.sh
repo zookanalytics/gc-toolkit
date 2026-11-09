@@ -17,12 +17,11 @@
 #   2. writes the subject's headline through gc-helm.sh takeaway, and stops
 #      when takeaway refuses it;
 #   3. resolves each open gate the conversation replies to with
-#      `ruled: <ruling>`, except each one --leave names and the conversation's
-#      own hold on an open PR's merge, which step 5 answers, and reads each
-#      back. bd resolves a closed gate without changing it and reports success
-#      either way, so a close reason other than this one means another answer
-#      reached the gate first: a filer's withdrawal, an Accept, another sitting,
-#      or a person at the command line. The first answer wins, and the sign-off
+#      `ruled: <ruling>`, except each one --leave names, and reads each back. bd
+#      resolves a closed gate without changing it and reports success either
+#      way, so a close reason other than this one means another answer reached
+#      the gate first: a filer's withdrawal, an Accept, another sitting, or a
+#      person at the command line. The first answer wins, and the sign-off
 #      reports it;
 #   4. takes the subject's recommendation when the ruling takes it (--accept),
 #      through gc-helm.sh accept, the writer the board's Accept runs: under the
@@ -30,9 +29,7 @@
 #      step 3 leaves to it, dispatches the recommended formula at the subject
 #      and records the dispatch, or finishes an acceptance an earlier Accept
 #      left unfinished without dispatching it again;
-#   5. closes the conversation, and then answers its own hold on an open PR's
-#      merge, the gate under its key, conversation.<id>, that blocks the
-#      subject's anchor, so the merge stays held until the close has landed;
+#   5. closes the conversation;
 #   6. draws the comment that shows the visit on the subject's PR again, from
 #      the conversation.
 # What it does to the subject's universe is recorded on the conversation as it
@@ -62,9 +59,7 @@
 # A ruling given on a turn that does not sign off (--answer) runs steps 1 to 3
 # for the gates --answer names, and step 4 when it takes the recommendation,
 # and stops there: the conversation stays open under its sitting, and the
-# sign-off later reads each of those gates as already cleared. The
-# conversation's own hold on an open PR's merge stays open with it, even when
-# --answer names it, until the sign-off that closes the conversation.
+# sign-off later reads each of those gates as already cleared.
 #
 # Cut short (--ruled no), it writes the headline, leaves every gate the
 # conversation replies to open and owed, with its reply in place for the next
@@ -101,25 +96,20 @@
 #   --subject, when given, must be the bead the conversation tracks.
 #   --leave (with --ruled yes) names a gate the conversation replies to that the
 #   ruling leaves owed: it stays open, and its reply stays as the record that
-#   this conversation took it up. The conversation's own hold on an open PR's
-#   merge, the gate under its key, conversation.<id>, that blocks the subject's
-#   anchor, lives as long as the conversation, so --leave on it is refused.
+#   this conversation took it up.
 #   --answer names a gate the conversation replies to that the ruling answers
 #     on a turn that does not sign off. It carries a ruling, so it takes
 #     --ruling and the open-PR answer below; it releases no subject and leaves
 #     every other gate as it is, so --ruled no and --leave are refused beside
-#     it. The conversation's own hold on an open PR's merge holds that merge
-#     until the conversation closes, so --answer leaves it open and answers
-#     the other gates it names. Named, it still reaches that PR, which the
-#     open-PR answer below then answers. A ruling that lets the PR land sooner
-#     withdraws the hold, as the converse-hold skill says for a sitting that
-#     is helping the PR land.
+#     it.
 #   --rework | --no-rework | --retire <kind> (with a ruling): what the ruling
 #     does to an already-published PR it reaches: the subject at
-#     merge_result=pull_request, and each bead at merge_result=pull_request
-#     that a human gate the ruling answers releases, while the gate is open or
-#     once this ruling's own answer has closed it, so a re-run reaches the PRs
-#     an earlier attempt did. A ruling that reaches one must give one of them;
+#     merge_result=pull_request, the PR whose merge this conversation holds,
+#     the anchor that depends on the conversation through a blocks edge, and
+#     each bead at merge_result=pull_request that a human gate the ruling
+#     answers releases, while the gate is open or once this ruling's own answer
+#     has closed it, so a re-run reaches the PRs an earlier attempt did. A
+#     ruling that reaches one must give one of them;
 #     given none, it is refused with nothing written. --rework says the PR's branch must change: the rework is filed
 #     against that PR's anchor, sourced by this conversation, and refused while
 #     a rework the conversation filed for another ruling is open. --no-rework
@@ -160,10 +150,7 @@
 #     poured is recorded and not sent again, even when that Accept stopped
 #     before recording it. Refused while another open human gate that the
 #     ruling does not answer holds the subject, since the dispatch waits for
-#     every gate that holds it. The conversation's own hold on an open PR's
-#     merge holds only the merge, so it holds no dispatch: it refuses no
-#     --accept, and Accept, run with --conversation naming this conversation,
-#     does not count it either.
+#     every gate that holds it.
 #   --var <key>=<value> (with --accept, repeatable) is a var the ruling settled
 #     for the recommendation's dispatch, such as mol-design-convoy's
 #     design_gated=false. Accept passes each one to its sling. A dispatch an
@@ -175,8 +162,7 @@
 #   sign-off, or report the ruling as
 #   carried out; repair what it names and re-run, which repeats every write it
 #   made safely; 2 refused before any write: usage, a conversation that is not
-#   one, a gate it does not reply to, a --leave on the conversation's own hold
-#   on an open PR's merge, a ruling that reaches an open PR and gave
+#   one, a gate it does not reply to, a ruling that reaches an open PR and gave
 #   none of --rework, --no-rework and --retire, a --rework or --retire on a
 #   ruling that reaches more than one open PR without a --pr-anchor naming one
 #   of them, or an --accept with none of the subject's own recommendation gates
@@ -400,26 +386,25 @@ fi
 # ruling has outdated. A ruling that the PR will not land must close it before
 # any gate it answers releases the merge, or an approved PR lands first. Only
 # the sitting knows a ruling's consequence, so a ruling must answer the question
-# for each open PR it reaches: the subject when it is one, and each bead at
-# merge_result=pull_request that a human gate the ruling answers releases, such
-# as an epic member whose gate the epic's sitting answers, or the other PR behind
-# a gate about two. Such a gate is one still open, or one this ruling's own
+# for each open PR it reaches: the subject when it is one, the PR whose merge
+# the conversation holds, and each bead at merge_result=pull_request that a
+# human gate the ruling answers releases, such as an epic member whose gate the
+# epic's sitting answers, or the other PR behind a gate about two. A
+# conversation about an open PR holds its merge through the anchor's blocks
+# edge onto the conversation (gc-helm.sh, conversation_hold_merge), so the
+# beads that depend on the conversation are that PR's anchor, which a
+# conversation on the PR's review reaches through nothing else. The edge
+# stays once the conversation closes, so a re-run reaches the same PR. Such a
+# gate is one still open, or one this ruling's own
 # answer has closed: an attempt that stopped after resolving it had already
 # acted on what it released, and the re-run it asks for must act on the same PR
-# rather than fall back to the subject. The conversation's own hold on an open
-# PR's merge reaches that PR on a turn that does not sign off as well, when
-# --answer names it, though the turn leaves the hold open: the conversation is
-# about that PR, so a ruling given mid-conversation puts the PR's rework or
-# retirement in place at once. What each such gate releases is read
+# rather than fall back to the subject. What each such gate releases is read
 # here, with the other reads. A listing of a gate's beads, or the row of a bead
 # it releases, that does not read could hide an open PR, so the sign-off stops
 # before it writes anything, and a subject that will not read cannot be told
 # from an open PR either.
 PR_ANCHORS=()
 GATE_WAITERS='{}'
-OWN_ANCHOR=""
-OWN_HOLDS=""
-OWN_OPEN=""
 reaches_pr() { # <bead> — 0 when the ruling already reaches it as an open PR
   local p
   for p in "${PR_ANCHORS[@]+"${PR_ANCHORS[@]}"}"; do [ "$p" = "$1" ] && return 0; done
@@ -431,50 +416,14 @@ if [ "$RULED" = yes ]; then
     stopped "could not read $SUBJECT to tell whether it is an open PR, which decides the PR the ruling's answer acts on; nothing was written"
   fi
   [ "$(printf '%s' "$SUBJECT_ROW" | jq -r '.metadata.merge_result // ""')" = pull_request ] && PR_ANCHORS+=("$SUBJECT")
-  # A conversation about an open PR holds the PR's merge with a human gate
-  # under its own key, conversation.<id>, on the PR's anchor: the subject when
-  # it carries a merge_result, else the bead its anchor_bead names. That hold
-  # lasts exactly as long as the conversation is open, so only the sign-off
-  # that closes the conversation answers it, once the close has landed
-  # (step 5). A ruling given on a turn that does not sign off leaves it open,
-  # and --leave on it is refused: a merge that must stay held after this
-  # conversation closes takes a gate of its own under its own key. A gate under
-  # the key on an anchor that is no open PR holds no merge. It asks a question,
-  # such as whether a pre-open anchor's PR may open, which the ruling answers
-  # as it answers any gate.
-  OWN_ANCHOR=$(printf '%s' "$SUBJECT_ROW" | jq -r '(.metadata // {}) as $m
-      | if (($m.merge_result // "") | tostring) != "" then (.id // "") | tostring
-        else ($m.anchor_bead // "") | tostring end')
-  KEYED=$(printf '%s' "$GATES_JSON" | jq -r --arg k "conversation.$CONVERSATION" '.[]
-      | select((.issue_type // "") == "gate" and (.await_type // "") == "human"
-               and ((.await_id // "") | tostring) == $k) | .id')
-  if [ -n "$OWN_ANCHOR" ] && [ -n "$KEYED" ]; then
-    if [ "$OWN_ANCHOR" = "$SUBJECT" ]; then
-      ANCHOR_ROW="$SUBJECT_ROW"
-    else
-      ANCHOR_ROW=$(show_row "$OWN_ANCHOR") \
-        || stopped "$OWN_ANCHOR, the anchor $SUBJECT names, could not be read to tell whether it is an open PR whose merge this conversation holds, which decides when the ruling answers the gate under the conversation's key; nothing was written"
-    fi
-    if printf '%s' "$ANCHOR_ROW" | jq -e '((.metadata // {}).merge_result // "") == "pull_request"
-        and ((.status // "") | ascii_downcase) != "closed"' >/dev/null 2>&1; then
-      for g in $KEYED; do
-        HELD=$(gc bd dep list "$g" --direction=up --type blocks --json 2>/dev/null | grep -av '^gc bd:' | scrub \
-          | jq -re 'if type == "array" then [ .[] | objects | (.id // "") | tostring ] | join(" ") else error("unread") end' 2>/dev/null) \
-          || stopped "the beads that wait on gate $g could not be read to tell whether it is this conversation's own hold on the merge of $OWN_ANCHOR, which only the sign-off that closes the conversation answers; nothing was written"
-        case " $HELD " in
-          *" $OWN_ANCHOR "*)
-            OWN_HOLDS="${OWN_HOLDS:+$OWN_HOLDS }$g"
-            [ "$(printf '%s' "$GATES_JSON" | jq -r --arg g "$g" '.[] | select(.id == $g) | (.status // "") | ascii_downcase')" = closed ] \
-              || OWN_OPEN="${OWN_OPEN:+$OWN_OPEN }$g" ;;
-        esac
-      done
-    fi
-  fi
-  for g in "${LEAVE[@]+"${LEAVE[@]}"}"; do
-    case " $OWN_HOLDS " in
-      *" $g "*)
-        die "--leave $g names this conversation's own hold on the merge of $OWN_ANCHOR (its key is conversation.$CONVERSATION), which lives as long as the conversation is open, so the sign-off answers it once the conversation has closed; nothing was written. A merge that must stay held after this conversation closes takes a gate of its own on $OWN_ANCHOR under its own key (the prs skill, holding its merge), filed before the sign-off" ;;
-    esac
+  HELD=$(gc bd dep list "$CONVERSATION" --direction=up --type blocks --json 2>/dev/null | grep -av '^gc bd:' | scrub \
+    | jq -ce 'if type == "array" then [ .[] | objects ] else error("unread") end' 2>/dev/null) \
+    || stopped "the beads that depend on conversation $CONVERSATION could not be read, and an open PR whose merge it holds could be among them; nothing was written"
+  for b in $(printf '%s' "$HELD" | jq -r '.[] | select(((.status // "") | tostring | ascii_downcase) != "closed") | (.id // "") | select(. != "")'); do
+    reaches_pr "$b" && continue
+    BROW=$(show_row "$b") \
+      || stopped "$b, which depends on conversation $CONVERSATION, could not be read to tell whether it is an open PR whose merge the conversation holds; nothing was written"
+    [ "$(printf '%s' "$BROW" | jq -r '.metadata.merge_result // ""')" = pull_request ] && PR_ANCHORS+=("$b")
   done
   for g in $TO_ANSWER; do
     printf '%s\n' "${LEAVE[@]+"${LEAVE[@]}"}" | grep -qxF -- "$g" && continue
@@ -498,7 +447,7 @@ PR_LIST="${PR_ANCHORS[*]+"${PR_ANCHORS[*]}"}"
 if [ "$RULED" = yes ] && [ -z "$PR_ANSWER" ] && [ -n "$PR_LIST" ]; then
   [ "$PR_LIST" != "$SUBJECT" ] \
     || die "$SUBJECT is an open PR (merge_result=pull_request), so a ruling on it must say what it does to the PR; nothing was written. Re-run with --rework to file the rework its branch needs, --no-rework if the branch stands, or --retire <kind> if the PR will not land"
-  die "this ruling reaches $PR_LIST at merge_result=pull_request, as its subject, as a bead a gate it answers releases, or as the PR whose merge this conversation holds, so it must say what it does to each open PR; nothing was written. Re-run with --rework to file the rework a branch needs, --no-rework if the branch stands, or --retire <kind> if the PR will not land, and with --pr-anchor <bead> to name the one --rework or --retire acts on when it reaches more than one"
+  die "this ruling reaches $PR_LIST at merge_result=pull_request, as its subject, as the PR whose merge this conversation holds, or as a bead a gate it answers releases, so it must say what it does to each open PR; nothing was written. Re-run with --rework to file the rework a branch needs, --no-rework if the branch stands, or --retire <kind> if the PR will not land, and with --pr-anchor <bead> to name the one --rework or --retire acts on when it reaches more than one"
 fi
 # --rework and --retire act on one open PR: the one the ruling reaches, the one
 # --pr-anchor names when it reaches more than one, or else the subject, which
@@ -584,13 +533,8 @@ in_target_rig() { ( cd "$TARGET_PATH" && GC_RIG="$TARGET_RIG" GC_RIG_ROOT="$TARG
 # answers must be one this ruling answers. Accept dispatches only once no other
 # open human gate holds the subject, because a formula's sling reads no blocks
 # edge, so a gate this ruling does not answer refuses the take here, before any
-# write, rather than after step 3 has answered the others. The conversation's
-# own hold on an open PR's merge, which blocks the subject when the subject is
-# the PR's anchor, is the one exception: it holds only the merge, which no
-# dispatch reaches, and it stays open through step 4 because it lasts as long
-# as the conversation, so Accept, told the conversation, does not count it
-# either. One listing of the subject's human gates answers each of these
-# checks.
+# write, rather than after step 3 has answered the others. One listing of the
+# subject's human gates answers each of these checks.
 REC_GATES=""
 REC_FORMULA=""
 if [ -n "$ACCEPT" ]; then
@@ -621,10 +565,10 @@ if [ -n "$ACCEPT" ]; then
   [ -n "$REC_FORMULA$REC_SENT" ] \
     || die "--accept takes $SUBJECT's recommendation, and $SUBJECT carries none (no gc.recommended_formula); nothing was written. Answer its gate without --accept"
   REC_FORMULA="${REC_FORMULA:-$REC_SENT}"
-  OTHERS=$(printf '%s' "$SUBJECT_GATES" | jq -r --arg answered "$ANSWERED_GATES" --arg own "$OWN_HOLDS" "$HUMAN_GATE_JQ"'
-      ($answered | split(" ")) as $a | ($own | split(" ")) as $o
+  OTHERS=$(printf '%s' "$SUBJECT_GATES" | jq -r --arg answered "$ANSWERED_GATES" "$HUMAN_GATE_JQ"'
+      ($answered | split(" ")) as $a
       | [ .[] | select(open_human_gate("")) | select(((.await_id // "") | tostring) != "first-reaction")
-              | select(((.id // "") | tostring) as $i | ($a | index($i)) == null and ($o | index($i)) == null)
+              | select(((.id // "") | tostring) as $i | ($a | index($i)) == null)
               | "\(.id) (\(.title // "untitled"))" ] | join("; ")')
   [ -z "$OTHERS" ] \
     || die "$SUBJECT's recommendation is dispatched only once no other human gate holds it, and $OTHERS still holds it, which this ruling does not answer; nothing was written. Answer that gate in the same ruling once the operator rules on it, or leave the recommendation's gate owed until it is cleared, when Accept on the board takes the recommendation"
@@ -807,47 +751,17 @@ for p in "${STANDS[@]+"${STANDS[@]}"}"; do echo "the ruling leaves the branch of
 "$HELM" takeaway "$SUBJECT" "$OUTCOME" --by converse "${WAIT[@]+"${WAIT[@]}"}" \
   || stopped "gc-helm.sh takeaway did not finish on $SUBJECT, and its message above says which write it could not make${APPROVE_CLAUSE:+. It carries \"; $APPROVE_CLAUSE\" after --outcome, which counts toward the cap, so a shorter --outcome makes room}; no gate was resolved and the conversation is not closed"
 
-# answer_gate <gate> — resolve the gate with the ruling's answer and read it
-# back, printing what the read finds. Returns 1 when the gate still reads open.
-answer_gate() {
-  local back st why held
-  gc bd gate resolve "$1" --reason "$ANSWER" >/dev/null 2>&1 || true
-  back=$(show_row "$1") || back=""
-  st=$(printf '%s' "$back" | jq -r '(.status // "") | ascii_downcase' 2>/dev/null)
-  why=$(printf '%s' "$back" | jq -r '.close_reason // ""' 2>/dev/null)
-  if [ "$st" != closed ]; then
-    echo "GATE $1 DID NOT CLOSE — it still holds what waits on it"
-    return 1
-  fi
-  if [ "$why" != "$ANSWER" ]; then
-    echo "another answer reached gate $1 first: \"$why\". The first answer stands, and this ruling is not its answer."
-  else
-    held=$(printf '%s' "$GATE_WAITERS" | jq -r --arg g "$1" '(.[$g] // []) | join(" ")')
-    echo "resolved gate $1: $ANSWER${held:+ (it held $held)}"
-  fi
-  return 0
-}
-
 if [ "$RULED" = yes ]; then
   # 3. The gates the ruling answers: those --answer names, or else each one the
   # conversation replies to. A reply onto a bead that is no human gate holds
   # nothing to resolve. The recommendation's gate, when the ruling takes the
-  # recommendation, is step 4's to answer through Accept. The conversation's
-  # own hold on an open PR's merge holds that merge for as long as the
-  # conversation is open, so it is step 5's to answer once the close has
-  # landed, and a turn that does not sign off leaves it open.
+  # recommendation, is step 4's to answer through Accept.
   UNCLOSED=""
-  HOLD_LEFT=""
   for g in $TO_ANSWER; do
     case " $REC_GATES " in *" $g "*) continue ;; esac
     if printf '%s\n' "${LEAVE[@]+"${LEAVE[@]}"}" | grep -qxF -- "$g"; then
       echo "gate $g stays open and owed: the ruling leaves it, and this conversation's reply stays on it"
       continue
-    fi
-    if [ -n "$ANSWERING" ]; then
-      case " $OWN_OPEN " in *" $g "*) HOLD_LEFT="${HOLD_LEFT:+$HOLD_LEFT }$g"; continue ;; esac
-    else
-      case " $OWN_HOLDS " in *" $g "*) continue ;; esac
     fi
     GROW=$(printf '%s' "$GATES_JSON" | jq -c --arg g "$g" '.[] | select(.id == $g)')
     if ! printf '%s' "$GROW" | jq -e '(.issue_type // "") == "gate" and (.await_type // "") == "human"' >/dev/null 2>&1; then
@@ -858,7 +772,19 @@ if [ "$RULED" = yes ]; then
       echo "gate $g was already cleared before this sign-off: \"$(printf '%s' "$GROW" | jq -r '.close_reason // ""')\". That answer stands."
       continue
     fi
-    answer_gate "$g" || UNCLOSED="${UNCLOSED:+$UNCLOSED }$g"
+    gc bd gate resolve "$g" --reason "$ANSWER" >/dev/null 2>&1 || true
+    BACK=$(show_row "$g") || BACK=""
+    BACK_STATUS=$(printf '%s' "$BACK" | jq -r '(.status // "") | ascii_downcase' 2>/dev/null)
+    BACK_REASON=$(printf '%s' "$BACK" | jq -r '.close_reason // ""' 2>/dev/null)
+    if [ "$BACK_STATUS" != closed ]; then
+      echo "GATE $g DID NOT CLOSE — it still holds what waits on it"
+      UNCLOSED="${UNCLOSED:+$UNCLOSED }$g"
+    elif [ "$BACK_REASON" != "$ANSWER" ]; then
+      echo "another answer reached gate $g first: \"$BACK_REASON\". The first answer stands, and this ruling is not its answer."
+    else
+      RELEASED=$(printf '%s' "$GATE_WAITERS" | jq -r --arg g "$g" '(.[$g] // []) | join(" ")')
+      echo "resolved gate $g: $ANSWER${RELEASED:+ (it held $RELEASED)}"
+    fi
   done
   [ -z "$UNCLOSED" ] || stopped "the ruling did not close $UNCLOSED; the conversation is not closed, so a re-run resolves it"
   # The ruling is the answer those gates now carry, recorded in the sitting's
@@ -866,17 +792,7 @@ if [ "$RULED" = yes ]; then
   record_action "Ruled: $(printf '%s' "$ANSWER" | sed 's/^ruled: *//')"
   if [ -n "$ANSWERING" ]; then
     [ -z "$ACCEPT" ] || take_recommendation
-    ANSWERED_NOW=""
-    for g in $TO_ANSWER; do
-      case " $HOLD_LEFT " in *" $g "*) ;; *) ANSWERED_NOW="${ANSWERED_NOW:+$ANSWERED_NOW }$g" ;; esac
-    done
-    [ -z "$HOLD_LEFT" ] \
-      || echo "gate $HOLD_LEFT, this conversation's own hold on the merge of $OWN_ANCHOR, stays open until the conversation closes, and the sign-off that closes it answers it. A ruling that lets the PR land sooner withdraws it, as the converse-hold skill says for a sitting that is helping the PR land"
-    if [ -n "$ANSWERED_NOW" ]; then
-      echo "ANSWERED $ANSWERED_NOW for conversation $CONVERSATION on $SUBJECT; the conversation stays open, and its sign-off reads each of those gates as already cleared"
-    else
-      echo "ANSWERED no gate for conversation $CONVERSATION on $SUBJECT; the conversation stays open, and so does its own hold on the merge of $OWN_ANCHOR"
-    fi
+    echo "ANSWERED $TO_ANSWER for conversation $CONVERSATION on $SUBJECT; the conversation stays open, and its sign-off reads each of those gates as already cleared"
     tell_approval
     exit 0
   fi
@@ -889,29 +805,13 @@ if [ "$RULED" = yes ]; then
   # the conversation closes. The sitting holds the conversation, so a plain
   # close is the holder's own; --force covers an actor bd does not read as its
   # holder. The PR comment drawn after it cannot be taken back, so a close the
-  # store refuses both ways stops the sign-off, and the conversation's own hold
-  # on an open PR's merge then still holds that merge.
+  # store refuses both ways stops the sign-off.
   if [ "$CONV_STATUS" != closed ]; then
     work_outcome_noop "$CONVERSATION" gc bd
     gc bd close "$CONVERSATION" --reason "$OUTCOME" >/dev/null 2>&1 \
       || gc bd close "$CONVERSATION" --reason "$OUTCOME" --force >/dev/null 2>&1 \
-      || stopped "the store refused the close of conversation $CONVERSATION; every gate above is answered${OWN_OPEN:+, its own hold on the merge of $OWN_ANCHOR ($OWN_OPEN) still holds that merge as it does while the conversation is open,} and a re-run closes it"
+      || stopped "the store refused the close of conversation $CONVERSATION; every gate above is answered, and a re-run closes it"
   fi
-  # The conversation's own hold on an open PR's merge, answered with the ruling
-  # once the close has landed, as dismiss withdraws it. A hold that does not
-  # close stops the sign-off with the conversation closed and the merge still
-  # held, where the board shows the PR held. Its re-run finds the conversation
-  # closed, skips the close and answers the hold here.
-  UNCLOSED=""
-  for g in $OWN_HOLDS; do
-    GROW=$(printf '%s' "$GATES_JSON" | jq -c --arg g "$g" '.[] | select(.id == $g)')
-    if [ "$(printf '%s' "$GROW" | jq -r '(.status // "") | ascii_downcase')" = closed ]; then
-      echo "gate $g, this conversation's own hold on the merge of $OWN_ANCHOR, was already cleared before this sign-off: \"$(printf '%s' "$GROW" | jq -r '.close_reason // ""')\". That answer stands."
-      continue
-    fi
-    answer_gate "$g" || UNCLOSED="${UNCLOSED:+$UNCLOSED }$g"
-  done
-  [ -z "$UNCLOSED" ] || stopped "conversation $CONVERSATION is closed, but its own hold on the merge of $OWN_ANCHOR ($UNCLOSED) did not close, so that merge still waits on it; a re-run answers it"
   SIGNED=closed
 else
   # Cut short: the gates stay open and owed, with their replies in place, and

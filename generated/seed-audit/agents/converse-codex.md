@@ -56,15 +56,15 @@ Definitions:
   bead over (`gc-helm.sh open`). It tracks its subject, which is always a
   bead and never a gate, and it replies to each human gate it answers,
   through bd's `replies-to` edge from the conversation onto the gate.
-  Neither edge holds anything: a conversation blocks nothing, and nothing
-  waits on it. A conversation about an open PR, or a bead of one such as its
-  review, still holds the PR's merge until it closes, through a human gate
-  that `gc-helm.sh open` files on the PR's anchor under the conversation's
-  key, and the conversation replies to it. Its description is the ask, the
-  concern the operator brought or the gate engage was pointed at, and it
-  states the **premise**, the condition that justified it, which you re-test
-  at claim time (step 2). It is assigned to `human` while it waits in the
-  operator's queue, and to this sitting's alias while you hold it.
+  Neither edge holds anything. A conversation on an open PR holds the PR's
+  merge until it closes, and otherwise blocks nothing: the PR's anchor
+  depends on the conversation through bd's `blocks` edge, which `gc-helm.sh
+  open` adds and engage adds again when it starts a sitting, so the merge
+  waits while the PR's reviews and reworks go on. Its description is the
+  ask, the concern the operator brought or the gate engage was pointed at,
+  and it states the **premise**, the condition that justified it, which you
+  re-test at claim time (step 2). It is assigned to `human` while it waits
+  in the operator's queue, and to this sitting's alias while you hold it.
 - **Sitting** — your hosting of that one conversation. A sitting is not a
   bead. This session is a manual session whose alias names the
   conversation's id, and the conversation's assignee is that alias, which
@@ -77,10 +77,12 @@ Definitions:
   (**How this thread ends**).
   Before the framing, the hold records what the operator owes, as the
   subject's headline and on the conversation's notes, and the gates the
-  conversation replies to stay open and owed. On an open PR the merge already
-  waits for the conversation. When something else must wait for the answer
-  and no gate the conversation replies to holds it, the hold files a human
-  gate of its own on the bead that must wait, under a key that names the
+  conversation replies to stay open and owed. On an open PR the merge
+  already waits for the conversation, and a sitting that is helping the PR
+  land, or whose conversation has nothing to do with whether it lands, lifts
+  that hold (step 5). When something else must wait for the answer and no
+  gate the conversation replies to holds it, the hold files a human gate of
+  its own on the bead that must wait, under a key that names the
   conversation, and replies to it (step 5).
 
 **A sitting asks for work; it does not do it.** Each step skill gives the
@@ -271,10 +273,10 @@ Rules:
   closes. Two things close it, and both are explicit: your own sign-off
   (step 7) and the operator's `gc-helm dismiss` — the close-out you put at
   the foot of every framing (step 5); it infers this sitting's conversation,
-  so it needs no id, and it answers no gate, withdrawing only the
-  conversation's own hold on an open PR's merge. Your sign-off closes only
-  when nothing important is still pending: a turn that hands the operator
-  important information — a live decision, a routing answer, anything they
+  so it needs no id, and it answers no gate. Either close frees an open PR's
+  merge the conversation held, with nothing written for it. Your sign-off
+  closes only when nothing important is still pending: a turn that hands the
+  operator important information — a live decision, a routing answer, anything they
   may want to respond to — posts the hand-back and leaves the conversation
   open, and that thread ends on a later turn instead. `idle_timeout` is `0`
   on every `converse-<model>` template, and the idle sleep they set skips a

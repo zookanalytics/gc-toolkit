@@ -36,9 +36,6 @@
 #             store releases that PR, and a PR whose rig cannot be resolved
 #             stops the sign-off before any write
 #   (LEAVE)   a gate the ruling leaves owed stays open
-#   (LEAVE-OWN) --leave on the conversation's own hold on an open PR's merge,
-#             the gate under its key on the subject's anchor, is refused before
-#             any write, while one under its key on another bead is left owed
 #   (UNCLOSED, HEADLINE) a gate that does not close or a headline that does not
 #             land stops the sign-off before the conversation closes
 #   (ARMED)   a ruling on an armed subject resolves its gate, which is what
@@ -727,31 +724,6 @@ eq "$RC" 0 "(LEAVE) a sign-off that leaves one gate exits 0"
 eq "$(field tk-rev status)" "closed" "(LEAVE) the gate the ruling answers is resolved"
 eq "$(field tk-two status)" "open" "(LEAVE) the gate it leaves stays open"
 eq "$(jq -r '[.deps[] | select(.type == "replies-to") | .on] | join(" ")' "$STORE/b/tk-conv.json")" "tk-rev tk-two" "(LEAVE) …and its reply stays"
-# The conversation's own gate on its PR's anchor, as gc-helm.sh open files it,
-# for a conversation on the anchor and for one on the PR's rework.
-own_hold() { # <subject>
-    fresh; bead tk-anc; setm tk-anc merge_result pull_request
-    bead tk-rw task open ""; setm tk-rw anchor_bead tk-anc
-    gate tk-own conversation.tk-conv; edge tk-anc blocks tk-own
-    conv tk-conv "$1"; edge tk-conv replies-to tk-own
-}
-for subj in tk-anc tk-rw; do
-    own_hold "$subj"
-    run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --no-rework --leave tk-own
-    eq "$RC" 2 "(LEAVE-OWN) --leave on the conversation's own hold on the merge, the conversation on $subj, exits 2"
-    has "$OUT" "names this conversation's own hold on the merge of tk-anc" "(LEAVE-OWN) …saying the hold ends with the conversation"
-    eq "$(writes)" 0 "(LEAVE-OWN) …writing nothing"
-    eq "$(merge_held tk-anc)" held "(LEAVE-OWN) …so the gate still holds the merge"
-done
-# An epic's member whose work waits on the epic's conversation: its gate under
-# the conversation's key holds no PR's merge, so the ruling can leave it owed.
-fresh; bead tk-epic epic; bead tk-mem
-gate tk-mg conversation.tk-conv; edge tk-mem blocks tk-mg
-gate tk-eg conversation.tk-conv; edge tk-epic blocks tk-eg
-conv tk-conv tk-epic; edge tk-conv replies-to tk-mg; edge tk-conv replies-to tk-eg
-run_signoff --conversation tk-conv --outcome "settled the epic, not the member" "${RULED[@]}" --leave tk-mg
-eq "$RC" 0 "(LEAVE-OWN) a gate under the conversation's key on a bead that is no anchor can be left owed"
-eq "$(field tk-mg status)/$(field tk-eg status)" "open/closed" "(LEAVE-OWN) …so it stays open while the epic's own gate is answered"
 
 echo "# a gate that does not close, or a headline that does not land, stops the sign-off"
 acceptance; GATE_STUCK=tk-rev run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}"
@@ -821,9 +793,33 @@ run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --no-rework
 eq "$RC" 0 "(NO-REWORK) --no-rework exits 0"
 eq "$(acts tk-conv)" "Ruled: fix the retry before the merge" "(NO-REWORK) …and the ruling is the only action recorded, since the branch stands"
 
+echo "# a conversation on a PR's review reaches the PR whose merge it holds"
+# A conversation on an open PR's review holds the PR's merge through the
+# anchor's blocks edge onto the conversation (gc-helm.sh open), so its ruling
+# says what it does to that PR, which it reaches through nothing else.
+held_review() {
+    fresh; bead tk-anc; setm tk-anc merge_result pull_request; setm tk-anc pr_number 41
+    bead tk-rw; setm tk-rw task_kind review; setm tk-rw anchor_bead tk-anc
+    conv tk-conv tk-rw
+}
+held_review; edge tk-anc blocks tk-conv
+run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}"
+eq "$RC" 2 "(HELD-PR) a ruled sign-off in a conversation that holds a PR's merge, with none of --rework, --no-rework and --retire, exits 2"
+has "$OUT" "this ruling reaches tk-anc at merge_result=pull_request, as its subject, as the PR whose merge this conversation holds" "(HELD-PR) …naming the PR it holds"
+eq "$(writes)" 0 "(HELD-PR) …writing nothing"
+run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
+eq "$RC" 0 "(HELD-PR) --rework exits 0"
+has "$(cat "$CALLS")" "converse-rework --anchor tk-anc --ruling-bead tk-conv" "(HELD-PR) …filing the rework against the PR's anchor"
+eq "$(field tk-conv status)" "closed" "(HELD-PR) …and closing the conversation, whose close frees the merge"
+hasnt "$(cat "$CALLS")" "bd dep remove" "(HELD-PR) …with no write to the edge"
+held_review
+run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}"
+eq "$RC" 0 "(HELD-PR-LIFTED) once a sitting lifted the hold, the ruling reaches no PR through it and exits 0"
+eq "$(field tk-conv status)" "closed" "(HELD-PR-LIFTED) …closing the conversation"
+
 echo "# two conversations on one PR: each ruling answers its own question"
-# Each sitting's hold filed its own gate on the anchor, under a key that names
-# its conversation (skills/converse-hold), and replies to that gate alone.
+# Each conversation replies to a gate of its own on the anchor, under a key that
+# names it, and its ruling answers that gate alone.
 fresh; bead tk-anc; setm tk-anc merge_result pull_request
 gate tk-ga conversation.tk-ca; edge tk-anc blocks tk-ga
 gate tk-gb conversation.tk-cb; edge tk-anc blocks tk-gb

@@ -26,14 +26,10 @@
 #   (CONVID-REASON) --reason on an explicit conversation id is refused
 #   (LIVE)    a conversation a live sitting holds is attached to, not doubled
 #   (PR-HOLD*) a sitting engage starts on a conversation about an open PR holds
-#             the PR's merge first, through human-gate.sh under the
-#             conversation's key on the anchor and the conversation's reply onto
-#             it; a live sitting it attaches to, or a subject that is no open
-#             PR, files no hold, and a hold that does not land starts nothing
-#   (GATE-OWN*) a gate under a conversation's own key stands for that
-#             conversation while it is open, so engage takes it up and no
-#             other conversation replies to the gate; once it has closed, the
-#             gate is a gate like any other
+#             the PR's merge first, through the anchor's blocks edge onto the
+#             conversation; a live sitting it attaches to, or a subject that is
+#             no open PR, adds no edge, and an edge the store refuses starts
+#             nothing
 #   (REUSE-*) a live sitting engage reuses is attached only once it reads
 #             active: one still start-pending or creating is waited on and left
 #             unattached at the bound, which exits 4, one that ends first is
@@ -311,8 +307,7 @@ case "$1 ${2:-}" in
         fi
         jq -c -n --argjson r "$(conv_row "$id" show)" '[$r]' ;;
       tk-gate)
-        # $GATE_KEY is the gate's await id, rollout by default.
-        jq -n --arg k "${GATE_KEY:-rollout}" '[{id:"tk-gate", title:"Approve the rollout", description:"Gate on the waiting bead.", status:"open", issue_type:"gate", await_type:"human", await_id:$k}]' ;;
+        jq -n '[{id:"tk-gate", title:"Approve the rollout", description:"Gate on the waiting bead.", status:"open", issue_type:"gate", await_type:"human", await_id:"rollout"}]' ;;
       *)
         # $SUBJ_STATUS is the status every other bead reads, open by default,
         # and $SUBJ_META its metadata, none by default.
@@ -379,9 +374,15 @@ case "$1 ${2:-}" in
         esac ;;
       add)
         printf 'bd dep %s\n' "$*" >> "$CALLS"
-        # REPLY_FAIL refuses the edge, as a store that will not write it does.
-        [ -z "${REPLY_FAIL:-}" ] || { echo "Error adding dependency: the store refused it" >&2; exit 1; }
-        printf '%s %s\n' "$4" "$5" >> "$ST/replies" ;;
+        case " $* " in
+          *" --type blocks "*)
+            # HOLD_FAIL refuses the edge that holds an open PR's merge.
+            [ -z "${HOLD_FAIL:-}" ] || { echo "Error adding dependency: the store refused it" >&2; exit 1; } ;;
+          *)
+            # REPLY_FAIL refuses the edge, as a store that will not write it does.
+            [ -z "${REPLY_FAIL:-}" ] || { echo "Error adding dependency: the store refused it" >&2; exit 1; }
+            printf '%s %s\n' "$4" "$5" >> "$ST/replies" ;;
+        esac ;;
       *) printf 'bd dep %s\n' "$*" >> "$CALLS" ;;
     esac ;;
   "session new")
@@ -593,18 +594,6 @@ REC
 chmod +x "$TMP/rec-psc"
 export GC_SITTING_COMMENT_TOOL="$TMP/rec-psc" REC_PSC_LOG="$TMP/psc.log"
 
-# A stand-in for human-gate.sh, through which engage holds an open PR's merge
-# for the conversation it starts a sitting on. It logs its call and prints the
-# gate tk-hold, or fails when $HOLD_FAIL is set.
-cat > "$TMP/rec-hg" <<'HG'
-#!/usr/bin/env bash
-printf 'human-gate %s\n' "$*" >> "$CALLS"
-[ -z "${HOLD_FAIL:-}" ] || exit 1
-echo tk-hold
-HG
-chmod +x "$TMP/rec-hg"
-export GC_HUMAN_GATE_TOOL="$TMP/rec-hg"
-
 # reset — a clean store for a case: every conversation in the queue, open, no
 # reply, no live sitting but the ones $LIVE_SITTINGS seeds ("<sid>=<alias> ...").
 reset() {
@@ -784,25 +773,24 @@ hasnt "$OUT" "waiting for the reconciler" "(LIVE-ATTACH) …a started one at onc
 reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
 SUBJ_META='{"merge_result":"pull_request"}' run_engage tk-subj --no-attach
 eq "$RC" 0 "(PR-HOLD-LIVE) attaching to a live sitting on an open PR exits 0"
-hasnt "$CALLED" "human-gate" "(PR-HOLD-LIVE) …and files no hold: the live sitting holds the merge, or withdrew the hold to help the PR land"
+hasnt "$CALLED" "--type blocks" "(PR-HOLD-LIVE) …and adds no edge: the live sitting keeps the hold as it left it"
 unset LIVE_SITTINGS
 
 echo "# a sitting engage starts on an open PR holds the PR's merge first"
 reset; SUBJ_META='{"merge_result":"pull_request"}' run_engage tk-conv --no-attach
 eq "$RC" 0 "(PR-HOLD) engaging a queued conversation on an open PR's anchor exits 0"
-has "$CALLED" "human-gate --subject tk-subj --key conversation.tk-conv --message Conversation tk-conv is open on this PR" \
-    "(PR-HOLD) …holding the PR's merge with a gate under the conversation's key on the anchor"
-has "$CALLED" "bd dep bd dep add tk-conv tk-hold --type replies-to" "(PR-HOLD) …and the conversation replies to it"
-HOLD_AT=$(printf '%s\n' "$CALLED" | grep -n '^human-gate ' | head -1 | cut -d: -f1)
+has "$CALLED" "bd dep bd dep add tk-subj tk-conv --type blocks" \
+    "(PR-HOLD) …holding the PR's merge through the anchor's blocks edge onto the conversation"
+HOLD_AT=$(printf '%s\n' "$CALLED" | grep -n '^bd dep bd dep add tk-subj tk-conv --type blocks' | head -1 | cut -d: -f1)
 SPAWN_AT=$(printf '%s\n' "$CALLED" | grep -n '^session new ' | head -1 | cut -d: -f1)
 [ -n "$HOLD_AT" ] && [ -n "$SPAWN_AT" ] && [ "$HOLD_AT" -lt "$SPAWN_AT" ] \
     && ok "(PR-HOLD) …before the sitting starts" \
     || bad "(PR-HOLD) …before the sitting starts (hold at ${HOLD_AT:-none}, spawn at ${SPAWN_AT:-none})"
-has "$OUT" "conversation tk-conv holds the merge of the PR of tk-subj through gate tk-hold until it closes" "(PR-HOLD) …and engage says so"
+has "$OUT" "conversation tk-conv holds the merge of the PR of tk-subj until it closes" "(PR-HOLD) …and engage says so"
 reset; SUBJ_META='{"task_kind":"review","anchor_bead":"tk-other"}' run_engage tk-conv --no-attach
-hasnt "$CALLED" "human-gate" "(PR-HOLD-NOT-PR) a subject whose anchor is no open PR files no hold"
+hasnt "$CALLED" "--type blocks" "(PR-HOLD-NOT-PR) a subject whose anchor is no open PR adds no edge"
 reset; run_engage tk-conv --no-attach
-hasnt "$CALLED" "human-gate" "(PR-HOLD-NOT-PR) …and neither does a subject that is no anchor"
+hasnt "$CALLED" "--type blocks" "(PR-HOLD-NOT-PR) …and neither does a subject that is no anchor"
 reset; HOLD_FAIL=1 SUBJ_META='{"merge_result":"pull_request"}' run_engage tk-conv --no-attach
 eq "$RC" 4 "(PR-HOLD-FAIL) a hold that does not land exits 4"
 has "$OUT" "nothing spawned, because the sitting would talk while the PR could merge" "(PR-HOLD-FAIL) …saying why nothing spawned"
@@ -1013,16 +1001,6 @@ hasnt "$CALLED" "--deps tracks:tk-gate" "(GATE-NEW) …no conversation tracks th
 has "$CALLED" "--title Approve the rollout" "(GATE-NEW) …titled with what the gate asks"
 has "$CALLED" "bd dep bd dep add tk-new tk-gate --type replies-to" "(GATE-REPLY-NEW) …and the conversation it filed replies to the gate"
 unset HAVE_CONV
-reset; GATE_KEY=conversation.tk-conv run_engage tk-gate --no-attach
-eq "$RC" 0 "(GATE-OWN) engaging a gate under a conversation's own key exits 0"
-has "$OUT" "gate tk-gate is conversation tk-conv's own hold, which only its sign-off answers, so it stands for tk-conv" "(GATE-OWN) …saying the gate stands for that conversation"
-has "$OUT" "tk-conv is a conversation on tk-subj" "(GATE-OWN) …which engage takes up"
-has "$CALLED" "session new converse-opus --alias tk-conv --no-attach --json" "(GATE-OWN) …starting that conversation's sitting"
-hasnt "$CALLED" "tk-gate --type replies-to" "(GATE-OWN) …and no conversation comes to reply to the gate"
-reset; printf 'closed' > "$STATE_DIR/tk-conv.status"
-HAVE_CONV=0 GATE_KEY=conversation.tk-conv run_engage tk-gate --no-attach
-has "$OUT" "tk-gate is a gate about tk-subj" "(GATE-OWN-CLOSED) once that conversation has closed, the gate is a gate about the bead waiting on it"
-has "$CALLED" "bd dep bd dep add tk-new tk-gate --type replies-to" "(GATE-OWN-CLOSED) …and the conversation engage files replies to it"
 export LIVE_SITTINGS="gc-50=gc-toolkit/gc-toolkit.tk-conv"
 reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
 run_engage tk-gate --no-attach

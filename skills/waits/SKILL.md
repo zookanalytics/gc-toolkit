@@ -138,9 +138,11 @@ one: it appends your concern to that conversation's notes, where the sitting
 reads it, and a concern the conversation already carries is not appended again,
 so a call that asks on every pass leaves one copy.
 
-A conversation keeps nothing out of `bd ready`, and holds no merge and no
-close: it blocks nothing, and nothing waits on it. When work must wait for
-what the operator decides, file a human gate on that work as well (above).
+A conversation keeps no work out of `bd ready`. A conversation on an open PR
+holds the PR's merge, and with it the anchor's close, until it closes, through
+the anchor's `blocks` edge onto it, which `open` adds; it otherwise blocks
+nothing, and nothing else waits on it. When work must wait for what the
+operator decides, file a human gate on that work as well (above).
 
 ## Have work start by itself when its wait clears (an arm)
 

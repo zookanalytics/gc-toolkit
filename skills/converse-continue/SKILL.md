@@ -52,21 +52,15 @@ A ruling that sends the subject on is carried out once the answer below exits
 Then answer the ruling through the sign-off's writer with `--answer`, never
 with a bare `gc bd gate resolve`. A gate can be what holds a merge, so the
 writer puts the ruling's consequences in place before it resolves the gate.
-When the ruling reaches an open PR, the subject or one the
-gate releases, the first of them is the rework or the retirement the ruling
+When the ruling reaches an open PR, the subject, the PR whose merge this
+conversation holds or one the gate releases, the first of them is the rework or the retirement the ruling
 calls for, passed the way step 7 passes it, and the next is the subject's
 headline with each wait this turn routed. A ruling that takes the subject's
 recommendation names the recommendation's gate with `--answer` and adds
 `--accept`, so Accept's writer answers that gate and sends the formula, as at
 the sign-off (step 7). The `--answer` call resolves only the gates it
 names, leaves the conversation open, and exits non-zero when it stopped short.
-The conversation's own gate on an open PR's anchor, under its key
-`conversation.<its id>`, stays open until the conversation closes, even when
-the call names it, so the PR's merge waits for the sign-off. Naming it still
-reaches that PR, which the call's `--rework`, `--no-rework` or `--retire`
-answers at once. A ruling that lets the PR land sooner withdraws that gate, as the converse-hold step says for a
-sitting that is helping the PR land. Until the call exits 0, do not tell the
-operator the ruling is in place:
+Until it exits 0, do not tell the operator the ruling is in place:
 ```bash
 "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" --answer <gate> \
   --ruling "<the operator's ruling, one line>" \

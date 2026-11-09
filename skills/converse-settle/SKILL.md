@@ -76,9 +76,8 @@ then post the sign-off as the thread's last word. `converse-signoff.sh` writes
 the trace in one order every time: the ruling's rework or the PR's retirement,
 the subject's headline, the answer on each gate the conversation replies to,
 the subject's recommendation when the ruling takes it, the conversation's
-close, then the answer on the conversation's own hold on an open PR's merge,
-so that merge waits until the close has landed, and the comment that shows the
-visit on the subject's pull request. It
+close, which frees an open PR's merge the conversation held, and the comment
+that shows the visit on the subject's pull request. It
 records the ruling and each act it takes on the conversation as the visit's
 actions, which that comment lists once the visit ends, so the ruling reaches
 the pull request as you write it: keep other rigs and their beads out of it.
@@ -197,9 +196,11 @@ Then take the case that fits. The cases:
 
 **On a `--ruled yes` sign-off that reaches an open PR
 (`merge_result=pull_request`), answer what the ruling does to the PR.** The
-ruling reaches the subject when it is an open PR, and each open PR that a gate
-it answers releases, such as a member of an epic subject whose gate the
-epic's sitting answers, or the other PR behind a gate about two. Pass
+ruling reaches the subject when it is an open PR, the PR whose merge this
+conversation holds, which a conversation on the PR's review or rework reaches
+through nothing else, and each open PR that a gate it answers releases, such
+as a member of an epic subject whose gate the epic's sitting answers, or the
+other PR behind a gate about two. Pass
 `--rework` when it changes what the branch must contain, since the PR still
 reads review-ready against a head that predates the ruling (the `prs` skill,
 sending it back for rework). Pass `--no-rework` when the branch stands as it
@@ -217,9 +218,8 @@ answered before the PR is closed lets an approved PR merge. `--rework` and
 own rig, after the sign-off records on the conversation which PR it acts on
 and before it writes anything else. One that does not complete stops the
 sign-off there, and the script exits non-zero. No headline is written, no
-gate is answered and the conversation stays open, so the conversation's own
-gate on the PR's anchor still holds its merge. Re-run once the cause is
-repaired: the re-run
+gate is answered and the conversation stays open, so it still holds an open
+PR's merge. Re-run once the cause is repaired: the re-run
 adopts a child an earlier attempt filed, and finds a PR an earlier attempt
 closed. Given the same ruling and the same answer, it acts on the PR the
 earlier attempt recorded, even one that has closed since. A
@@ -228,13 +228,10 @@ owns one live rework, on whichever PR it was filed. While one filed for an
 earlier ruling of this conversation is open, `--rework` for another ruling is
 refused, because the open one would never carry it: give a ruling that asks
 nothing of the branch beyond it `--no-rework`, and keep the gate of one that
-asks for more open until that rework has landed, with `--leave <gate>` or by
-cutting the sitting short. The conversation's own gate on an open PR's anchor
-ends with the conversation, so `--leave` refuses it: to keep that merge held
-past the sign-off, file a gate of its own on the anchor first, under a key that
-names the rework it waits for (the `prs` skill, holding its merge). A second PR
-whose own branch must change waits the same way: keep the gate that releases it
-open until a ruling of its own is carried out. `--rework` and `--retire` apply only to an open PR. When the ruling
+asks for more open (`--leave <gate>`, or cut the sitting short) until that
+rework has landed. A second PR whose own branch must change waits the same
+way: keep the gate that releases it open until a ruling of its own is carried
+out. `--rework` and `--retire` apply only to an open PR. When the ruling
 reaches none, file and send its consequence as work (below), and re-run
 without them.
 

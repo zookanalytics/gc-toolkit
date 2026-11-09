@@ -1,86 +1,86 @@
 ---
 name: Gas City search for a conversation's hold on an open PR's merge
-description: Use when you judge how a conversation on an open PR holds the PR's merge, or whether a gate that closes itself when the conversation closes could replace the writers that answer or withdraw it.
+description: Use when you judge how a conversation on an open PR holds the PR's merge, or whether another primitive could hold it.
 ---
 
 # Gas City search for a conversation's hold on an open PR's merge
 
 Read on 2026-11-09 at `gastownhall/gascity` main 0629c3fce24f and at beads
 v1.3.4 (`steveyegge/beads`, the bd this city runs). The change makes a
-conversation whose subject is an open PR hold the PR's merge for exactly as
-long as the conversation is open. `gc-helm.sh open` files a human gate on the
-PR's anchor under the conversation's key, `conversation.<id>`. Engage files it
-when it starts a sitting on a conversation that lacks one. Every writer that
-closes the conversation answers the gate or withdraws it.
+conversation on an open PR hold the PR's merge until the conversation closes,
+and otherwise block nothing. The PR's anchor depends on the conversation
+through a plain `blocks` edge, `gc bd dep add <anchor> <conversation> --type
+blocks`. `gc-helm.sh open` adds it, engage adds it whenever it starts a
+sitting, and the converse hold step adds it when the subject's PR has opened
+since. No close path removes it. A sitting that is helping the PR land, or
+whose conversation has nothing to do with whether it lands, lifts it with
+`gc bd dep remove <anchor> <conversation>`.
 
 ## What the search looked for
 
-- **A wait a person clears, which every reader treats alike.** bd's human gate
-  (`bd gate create --type=human --blocks <bead> --await-id <key>`). It blocks
-  the bead it names, so the anchor leaves `bd ready` and its merge waits, and
-  Gas City's core pack announces it (`notify-on-human-gate-creation` in
-  [internal/bootstrap/packs/core/README.md](https://github.com/gastownhall/gascity/blob/0629c3fce24f/internal/bootstrap/packs/core/README.md)).
-  The change composes it through `assets/scripts/human-gate.sh`, which keeps
-  one open gate per bead and key and files it in the anchor's own store.
-- **A gate that closes itself when the conversation closes.** bd has one:
-  `evaluateGates` (`cmd/bd/gate.go`, beads v1.3.4) resolves an `await_type`
-  `bead` gate through `checkBeadGate` once the bead its await id names has
-  closed. Nothing runs that check here. Gas City's `gate-sweep` order checks
-  only timer and gh gates, and its script says bead-type gates are skipped
-  until beads restores cross-rig routing
+- **A hold that clears itself when the conversation closes.** bd's `blocks`
+  dependency is that hold. bd counts a bead blocked while one of its `blocks`
+  edges names a bead that is not closed (`IsBlockedInTx` in
+  `internal/storage/issueops/dependency_queries.go`, beads v1.3.4), so the
+  anchor stays blocked while the conversation is open, and the conversation's close lifts the block by
+  whatever route it closes, with no release to write. bd also refuses an
+  unforced close of a bead with a live direct blocker (`CloseIssueCheckedInTx`
+  in `internal/storage/issueops/close.go`, which `bd close` and
+  `bd update --status=closed` both take), so the anchor's close waits too. The
+  edge composes without a read first. An add of an edge bd already holds with
+  the same type is a no-op that exits 0, and a remove of an edge that is not
+  there is a no-op too (`addDependencyInTx` and `removeDependencyInTx` in
+  `internal/storage/issueops/dependencies.go`). The edge raises no cycle
+  against the conversation's `tracks` edge onto its subject, which is the
+  anchor itself when the subject is the anchor, because the cycle check walks
+  only `blocks`, `conditional-blocks` and `parent-child` edges
+  (`cycleReachabilityQuery`), and the hierarchy check reads only
+  `parent-child` ancestry (`CheckBlockingHierarchyInTx`).
+- **A human gate on the anchor.** bd's human gate
+  (`bd gate create --type=human --blocks <bead>`) holds the merge as well, but
+  it is a second bead with a lifecycle of its own. Every writer that closes the
+  conversation then has to answer or withdraw it, a close by hand leaves the
+  merge waiting on a closed conversation, and a human gate comes to mean two
+  things: a question someone must answer, and a hold that ends with a
+  conversation.
+- **A gate that closes itself when a bead closes.** bd has the `bead` gate
+  type, which `evaluateGates` (`cmd/bd/gate.go`) resolves through
+  `checkBeadGate` once the bead its await id names has closed. `bd gate create`
+  does not offer it: its types are human, timer, gh:run and gh:pr
+  (`gateCreateCmd`). Nothing in this city runs that check either. Gas City's
+  `gate-sweep` order checks only timer and gh gates, and its script says
+  bead-type gates are skipped
   ([gate-sweep.sh](https://github.com/gastownhall/gascity/blob/0629c3fce24f/internal/bootstrap/packs/core/assets/scripts/gate-sweep.sh)).
-  The formula spec says no bundled watcher resolves any gate type
-  ([formula-spec-v2.md](https://github.com/gastownhall/gascity/blob/0629c3fce24f/docs/reference/specs/formula-spec-v2.md),
-  "Gate `type` vocabulary"). A bead gate would therefore stay open after its
-  conversation closed until something the pack added checked it, and that
-  check would be a sweep of its own. Its `await_type` is not `human`, so
-  `prstatus.Holding` would not count it as a gate either, and the PR's
-  `held:` label would read nothing while the merge waited.
-- **A plain `blocks` edge from the anchor onto the conversation.** bd releases
-  that one when the conversation closes, with no writer. But the edge makes
-  the conversation the anchor's blocker, and `prstatus.Holding` counts a
-  blocker that is no gate only when a person owes its next move: it is routed
-  to a person, is a decision, or is a merge anchor waiting on a person. A
-  conversation is none of these, so the label would read the conversation as
-  work in flight, at most `held: blocked` once the merge pass's verdict names
-  the blocker, never `held: gate`. Reading it as a gate would take a rule
-  outside `prstatus`, which this work bead rules out. A conversation that
-  blocks its subject also breaks the shape the board and engage read, a task
-  that blocks nothing (`assets/scripts/conversation.sh`).
+- **A parent-child link from the conversation to the anchor.** bd refuses an
+  unforced close of a bead with open parent-child children
+  (`CloseIssueCheckedInTx`), so such a link would hold the anchor's close. But
+  bd keeps one link per pair of beads (`uk_dep_issue_target` in
+  `internal/storage/schema/cli_migrations.go`), and when the subject is the
+  anchor, the conversation's `tracks` link onto it already holds that pair.
 - **A Gas City primitive that ties a hold to a session's work.**
   `gc session wait --sleep --on-beads` sleeps a session until beads close. It
   holds the session, not another bead's merge.
-- **A gate that holds a bead's merge and not a dispatch at it.** A sitting's
-  sign-off takes a recommendation at an open PR's anchor while the
-  conversation's own gate still blocks that anchor, because the gate is
-  answered only once the conversation's close has landed. Gas City has no gate
-  scoped to a merge. A formula's gate bead blocks its step until the gate bead
-  is closed, and its type is vocabulary the parser never validates
-  ([formula-spec-v2.md](https://github.com/gastownhall/gascity/blob/0629c3fce24f/docs/reference/specs/formula-spec-v2.md),
-  "Gate `type` vocabulary"). `gc sling` takes no flag that waits on a bead's
-  blockers (`cmd/gc/cmd_sling.go` 148-169 at 0629c3fce24f), which is why
-  `gc-helm.sh accept` reads the bead's human gates itself before it slings. So
-  the change narrows that read: run with `--conversation`, on an open PR's
-  anchor, Accept does not count the one gate under that conversation's key,
-  in its live read or in its read-back after the resolve.
 
 ## How the change uses what there is
 
-The hold is the human gate, filed and withdrawn through `human-gate.sh`, whose
-`--retract` resolves the filer's own gate `moot:` once its situation has gone.
-The writers that close a conversation are the sign-off, dismiss and the premise
-re-check's moot or benign close, and each releases the gate only once the
-conversation's close has landed, so a close that does not land leaves the
-merge held. The sign-off answers the gate with the ruling. Dismiss and the
-close block withdraw the gate under the conversation's key on the subject's
-anchor. A ruling given on a turn that does not sign off leaves the gate open,
-and the sign-off refuses `--leave` on it, because the gate ends with the
-conversation.
+The hold is the `blocks` edge alone, and the readers of a PR anchor's blockers
+read it as a person's. A conversation is told by its row: a task assigned to
+`human` or to the alias that names its own id, the assignee half of the shape
+in `services/gctk/conversation` and `assets/scripts/conversation.sh`.
+`prstatus.IsPersonBlocker` counts it, so the PR reads `needs-attention` with
+`held: blocked` naming the conversation, and the board's row asks the
+operator. `blocker-holder.sh` reads it as a person's hold, neither an actor's
+nor stuck, so the merge pass records no blocked verdict for it, and the pass
+names it an open conversation when it holds the merge. The board's rule for a
+conversation's shape moved from `services/helm/internal/source` into
+`services/gctk/conversation`, beside `prstatus`, and the board imports it.
+
+Before a PR opens, its anchor is the work itself. The same edge would stop the
+pool's offer, `work-gate.sh` at load-context, the refinery's hand-off, the
+bead's close and any arm, so only an open PR's anchor takes one.
 
 ## Not built
 
-A sweep that closes a `conversation.<id>` gate whose conversation has closed.
-Each close path answers or withdraws the gate itself, after the close. One
-whose release does not land says so, and dismiss names the command that
-withdraws the gate, while a re-run of the sign-off or of the close block skips
-the close and releases it.
+A release written by any close of the conversation, and a sweep that removes
+an edge whose conversation has closed. bd lifts the block when the
+conversation closes, so the edge onto a closed conversation holds nothing.
