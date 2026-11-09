@@ -43,8 +43,8 @@ func withPRs(anchors []Anchor) []Anchor {
 }
 
 // readPR is a with the facts prstatus.Read gathers about its PR from store, and
-// the bead behind each of their reasons: one of the anchor's blockers, a gate
-// row among rows, or the gate a test hands in behind.
+// the bead behind each of their reasons: one of the anchor's blockers, a row
+// among rows, or the gate a test hands in behind.
 func readPR(a Anchor, store prstatus.Store, rows []Anchor, behind ...Blocker) Anchor {
 	facts, err := prstatus.Read([]string{a.ID}, store)
 	if err != nil {
@@ -65,7 +65,8 @@ func readPR(a Anchor, store prstatus.Store, rows []Anchor, behind ...Blocker) An
 }
 
 // blockerNamed is the bead id names as the gather reads a blocker: one of the
-// anchor's blockers or one handed in behind, or else a gate row.
+// anchor's blockers or one handed in behind, or else a row, as [rowStore] holds
+// it.
 func blockerNamed(id string, blockers, behind []Blocker, rows []Anchor) (Blocker, bool) {
 	for _, b := range slices.Concat(blockers, behind) {
 		if b.ID == id {
@@ -73,11 +74,34 @@ func blockerNamed(id string, blockers, behind []Blocker, rows []Anchor) (Blocker
 		}
 	}
 	for _, r := range rows {
-		if r.ID == id && r.Source == KindGate {
-			return Blocker{ID: r.ID, Title: r.Title, Status: "open", IssueType: "gate", AwaitType: "human"}, true
+		if r.ID == id {
+			b := rowBead(r)
+			return Blocker{ID: b.ID, Title: b.Title, Status: b.Status, IssueType: b.IssueType, AwaitType: b.AwaitType, RoutedTo: r.Metadata[mdRoutedTo]}, true
 		}
 	}
 	return Blocker{}, false
+}
+
+// rowBead is a row as the store holds its bead: open unless it closed, a human
+// gate for a gate row, a decision for a decision row and a task for any other,
+// waiting on its blockers.
+func rowBead(a Anchor) fixture.Bead {
+	b := fixture.Bead{ID: a.ID, Title: a.Title, Status: "open", Metadata: a.Metadata}
+	if !a.ClosedAt.IsZero() {
+		b.Status = "closed"
+	}
+	switch a.Source {
+	case KindGate:
+		b.IssueType, b.AwaitType = "gate", "human"
+	case "decision":
+		b.IssueType = "decision"
+	default:
+		b.IssueType = "task"
+	}
+	for _, bl := range a.Blockers {
+		b.WaitsOn = append(b.WaitsOn, bl.ID)
+	}
+	return b
 }
 
 // rowStore is the store the anchors describe: each anchor a bead waiting on its
@@ -97,22 +121,7 @@ func rowStore(anchors []Anchor, more ...fixture.Bead) *fixture.Store {
 		}
 	}
 	for _, a := range anchors {
-		b := fixture.Bead{ID: a.ID, Title: a.Title, Status: "open", Metadata: a.Metadata}
-		if !a.ClosedAt.IsZero() {
-			b.Status = "closed"
-		}
-		switch a.Source {
-		case KindGate:
-			b.IssueType, b.AwaitType = "gate", "human"
-		case "decision":
-			b.IssueType = "decision"
-		default:
-			b.IssueType = "task"
-		}
-		for _, bl := range a.Blockers {
-			b.WaitsOn = append(b.WaitsOn, bl.ID)
-		}
-		put(b)
+		put(rowBead(a))
 	}
 	for _, b := range more {
 		put(b)
