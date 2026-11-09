@@ -80,10 +80,10 @@ waits skill), or leave it for the operator to place.
 A Delivery is filed only by the decision that aims it, and that decision is the
 operator's:
 
-- the sitting that elaborates an epic and aims its first Delivery;
+- a review's continue or shift ruling that aims it, whether it is the epic's
+  first Delivery or the next one after an Epic Checkpoint;
 - the approval of a design whose units deliver it, after which the units are
-  filed as its Stories;
-- an Epic Checkpoint's continue or shift ruling that aims the next one.
+  filed as its Stories.
 
 A product area, a theme or a wish to find work on the board files none. List
 the epic's open Deliveries first, and file a new one only once the list has
@@ -103,14 +103,12 @@ carries"), each field in its own key, through the writer below. The one field
 it cannot go without is its hypothesis: one sentence that says for whom, what
 changes and the signal that shows it worked. A rough sentence that sets the
 general direction is enough. When the operator has stated none, write one
-yourself and file at once, without asking first. Wherever you report that
-filing, quote the sentence and call it a first draft: it stays one until the
-operator first rules on the epic, at a sitting that judges and sharpens it. The
-other fields are the operator's, so give one only as the operator stated or
-confirmed it, and leave out one nobody stated. A Delivery carries an `Aim:`
-line instead, and is filed as above. An area that is only ever improvable has
-no hypothesis to answer, so it is not an epic, and its work is ordinary flow
-(`docs/epics.md`, "Epics are mortal").
+yourself and file at once, without asking first, with the handle and the
+boundaries too when you can. Wherever you report the filing, quote each field
+you wrote and call it your proposal. A Delivery carries an `Aim:` line instead,
+as above. An area that is only ever improvable has no hypothesis to answer, so
+it is not an epic, and its work is ordinary flow (`docs/epics.md`, "Epics are
+mortal").
 
 The writer refuses an epic whose parent is not an epic when it has no
 hypothesis, and files nothing. It prints the new epic's id:
@@ -123,12 +121,41 @@ hypothesis, and files nothing. It prints the new epic's id:
   -d "<what the epic is about>"
 ```
 
-`--closure-condition` and `--indicators` record the rest of the contract when
-it is stated, and `--parent` and `--rig` place the epic as they place any bead.
-A field stated after the create is recorded in its key:
-`gc bd update <epic> --set-metadata epic_hypothesis="<the sentence>"`, and the
-same way `epic_handle`, `epic_boundaries`, `epic_closure_condition` and
-`epic_indicators`.
+`--closure-condition` and `--indicators` record the rest of the contract, and
+`--parent` and `--rig` place the epic as they place any bead. Once the create
+has printed the epic's id, record on the epic whose words each field is:
+
+```bash
+gc bd update <epic> --append-notes "Filed $(date -u +%Y-%m-%d) by <you>. Proposed by <you>: <each field you wrote>. Stated by the operator: <each field they stated, and where they stated it, or none>."
+```
+
+Work the epic plainly owns goes on under it meanwhile, and the epic's next
+review judges your proposals.
+
+After the filing, a field's key takes only words the operator stated or
+approved, with a note that says where they said it. This records the
+hypothesis, and `epic_handle`, `epic_boundaries`, `epic_closure_condition` and
+`epic_indicators` go the same way:
+
+```bash
+gc bd update <epic> --set-metadata epic_hypothesis="<the operator's words>" \
+  --append-notes "Stated by the operator in <where they said it>: the hypothesis."
+```
+
+A change you would make yourself is a proposal for the epic's next review:
+leave the keys as they are, and record the change with its evidence:
+
+```bash
+gc bd update <epic> --append-notes "Proposed by <you>, $(date -u +%Y-%m-%d): <the change, quoted>. Evidence: <what you read or ran>."
+```
+
+When work you must do depends on the operator's answer, file a human gate on
+that work under the key `epic-review.<epic>`, whose message names the epic and
+quotes the change with its evidence, and arm the work behind it, as the `waits`
+skill waits on a person. When nothing waits on the answer but what you found
+contradicts the contract, open a conversation on the epic whose body quotes the
+change and its evidence (the `waits` skill, "Ask the operator for a
+conversation").
 
 ## Send a bead to a pool on a formula
 

@@ -111,14 +111,15 @@ func TestEpicRefusal(t *testing.T) {
 // The refusal of a blank hypothesis is the one gate on an epic, and it sets no
 // bar on the sentence. The refusal and the usage say a rough one is enough and
 // that the filer writes it when the operator has stated none, and the refusal
-// sends the filer to no one first. Only the other fields are the operator's.
+// sends the filer to no one first. A field the filer writes is its proposal,
+// which a review of the epic judges.
 func TestEpicRoughSentenceIsEnough(t *testing.T) {
 	flat := func(s string) string { return strings.Join(strings.Fields(s), " ") }
 	why := flat(epicRefusal(epicOpts{title: "T", fields: map[string]string{}}, ""))
 	for _, s := range []string{
 		"A rough sentence that sets the general direction is enough",
 		"When the operator has stated none, write one yourself and run the create again with it, without asking first",
-		"it stays a first draft until the operator first rules on the epic",
+		"it is your proposal, and a review of the epic judges it",
 		"An area that is only ever improvable is not an epic",
 	} {
 		if !strings.Contains(why, s) {
@@ -131,8 +132,8 @@ func TestEpicRoughSentenceIsEnough(t *testing.T) {
 	usage := flat(epicUsage)
 	for _, s := range []string{
 		"A rough sentence that sets the general direction is enough",
-		"when the operator has stated none, the filer writes one and files at once, and it stays a first draft until the operator first rules on the epic",
-		"The other fields are the operator's, so give one only as the operator stated or confirmed it",
+		"when the operator has stated none, the filer writes one and files at once",
+		"A field the filer writes is its proposal, which it says on the epic, and a review of the epic judges it",
 	} {
 		if !strings.Contains(usage, s) {
 			t.Errorf("usage does not say %q", s)
