@@ -28,6 +28,7 @@ type fakeStore struct {
 	failMeta map[string]error                                // metadata key -> forced SearchIssues error
 	failDeps map[string]error                                // issue id -> forced dependency error
 	failIDs  map[string]error                                // issue id -> forced error from an ID search naming it
+	unheld   map[string]bool                                 // far end an edge names that the store holds no row for
 	kv       map[string]string                               // config table: `bd kv` keys, "kv."-prefixed
 	failKV   error                                           // forced GetConfig error
 	closed   bool
@@ -177,11 +178,13 @@ func (f *fakeStore) searchByIDs(filter beads.IssueFilter) ([]*beads.Issue, error
 	// fixtures, not in f.issues, so the batched gather's hydration — one
 	// SearchIssues over every edge's far end — must resolve them here too, the
 	// way a real store returns them from its issues table. A bead in f.issues
-	// wins a collision; a fixture does not disagree with itself.
+	// wins a collision; a fixture does not disagree with itself. A far end the
+	// fixture marks unheld has no row, as for a dangling edge or one into
+	// another store.
 	for _, embedded := range []map[string][]*beads.IssueWithDependencyMetadata{f.depsUp, f.depsDown} {
 		for _, deps := range embedded {
 			for _, d := range deps {
-				if d == nil || !want[d.Issue.ID] || found[d.Issue.ID] {
+				if d == nil || !want[d.Issue.ID] || found[d.Issue.ID] || f.unheld[d.Issue.ID] {
 					continue
 				}
 				iss := d.Issue
@@ -580,7 +583,8 @@ func init() {
 // holds whose row is not closed. A test that turns on the rule sets its own
 // answer, and TestPendingWaitsAreTheWaitsPackagesAnswer runs the production
 // read through the waits package itself. The store holds a far bead as its id
-// search finds one: in its issues, else embedded in an edge fixture.
+// search finds one: in its issues, else embedded in an edge fixture it does not
+// mark unheld.
 func storePending(stores map[string]*fakeStore) pendingReader {
 	return func(_ context.Context, beadsDir string, ids []string) (map[string][]string, error) {
 		st, ok := stores[filepath.Base(filepath.Dir(beadsDir))]
@@ -598,7 +602,7 @@ func storePending(stores map[string]*fakeStore) pendingReader {
 		for _, embedded := range []map[string][]*beads.IssueWithDependencyMetadata{st.depsUp, st.depsDown} {
 			for _, deps := range embedded {
 				for _, d := range deps {
-					if d == nil {
+					if d == nil || st.unheld[d.Issue.ID] {
 						continue
 					}
 					if _, seen := status[d.Issue.ID]; !seen {
@@ -1070,6 +1074,74 @@ func TestAWaitsForEdgeIsARecordedWait(t *testing.T) {
 		return
 	}
 	t.Fatal("tk-human/human: anchor missing")
+}
+
+// humanAnchor is the tk-human row a gather read as the human kind.
+func humanAnchor(t *testing.T, res *Result) board.Anchor {
+	t.Helper()
+	for _, a := range res.Anchors {
+		if a.ID == "tk-human" && a.Kind == "human" {
+			return a
+		}
+	}
+	t.Fatal("tk-human/human: anchor missing")
+	return board.Anchor{}
+}
+
+// TestEveryWaitTypeIsARecordedWait pins the wait types: each edge type of the
+// store's blocked rule is a wait, so a subject whose only wait is one of them
+// records it with its blocker hydrated, and it has not landed while the store's
+// answer lists it pending, as the waits package lists a waits-for spawner it
+// cannot judge yet. The edge is the subject's only one, because beside another
+// wait the store's answer would add it to the record whether or not the edge
+// read had.
+func TestEveryWaitTypeIsARecordedWait(t *testing.T) {
+	for _, typ := range []string{"blocks", "conditional-blocks", "waits-for"} {
+		t.Run(typ, func(t *testing.T) {
+			root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+			st := populatedStore()
+			st.depsDown["tk-human"] = []*beads.IssueWithDependencyMetadata{withDepType(child("tk-wt", "open", testNow, ""), typ)}
+			src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": st})
+			res, err := src.Gather(context.Background())
+			if err != nil {
+				t.Fatalf("Gather: %v", err)
+			}
+			a := humanAnchor(t, res)
+			if !slices.Equal(a.WaitingOn, []string{"tk-wt"}) || len(a.WaitingOnClosed) != 0 || a.WaitingUnknown {
+				t.Errorf("waiting_on=%v closed=%v unknown=%v; want tk-wt recorded and still pending", a.WaitingOn, a.WaitingOnClosed, a.WaitingUnknown)
+			}
+			if len(a.Blockers) != 1 || a.Blockers[0].ID != "tk-wt" || a.Blockers[0].Status != "open" || a.Blockers[0].Wait != board.WaitPending {
+				t.Errorf("blockers=%+v; want tk-wt hydrated as open and pending", a.Blockers)
+			}
+		})
+	}
+}
+
+// TestAWaitOntoABeadTheStoreDoesNotHoldIsDropped pins the one wait the source
+// does not record: one onto a bead the store holds no row for, such as one in
+// another store, whose far end no hydration returns. The store's answer would
+// read it as landed, so recording it would make a parked subject waiting only on
+// it read as owed a disposition while that work's state is unread. It is
+// dropped, as the library drops a dangling or cross-store edge, and the subject's
+// waits read as answered, not unknown.
+func TestAWaitOntoABeadTheStoreDoesNotHoldIsDropped(t *testing.T) {
+	for _, typ := range []string{"blocks", "conditional-blocks", "waits-for"} {
+		t.Run(typ, func(t *testing.T) {
+			root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+			st := populatedStore()
+			st.depsDown["tk-human"] = []*beads.IssueWithDependencyMetadata{withDepType(child("gc-far", "open", testNow, ""), typ)}
+			st.unheld = map[string]bool{"gc-far": true}
+			src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": st})
+			res, err := src.Gather(context.Background())
+			if err != nil {
+				t.Fatalf("Gather: %v", err)
+			}
+			a := humanAnchor(t, res)
+			if len(a.WaitingOn) != 0 || len(a.WaitingOnClosed) != 0 || len(a.Blockers) != 0 || a.WaitingUnknown {
+				t.Errorf("waiting_on=%v closed=%v blockers=%+v unknown=%v; want gc-far dropped and the waits answered", a.WaitingOn, a.WaitingOnClosed, a.Blockers, a.WaitingUnknown)
+			}
+		})
+	}
 }
 
 // TestPendingWaitsAreTheWaitsPackagesAnswer runs the production reader, which

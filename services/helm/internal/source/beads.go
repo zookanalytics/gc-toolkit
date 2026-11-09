@@ -730,14 +730,14 @@ func needsPR(p pendingAnchor) bool {
 	return p.anchor.ClosedAt.IsZero() && p.anchor.Metadata["merge_result"] != ""
 }
 
-// needsWaitingEdges reports the kinds whose `blocks` waits the derivation reads.
+// needsWaitingEdges reports the kinds whose waits the derivation reads.
 // The readers that spend them: board.ruled, the merge row's PR axes and
 // Accept's conditions (decision, human, parked, merge), the row's own
 // waiting_on, which names the human gate a review or rework child waits on
 // beside its anchor (a shared bring-current gate), and the dependency-family
 // grouping, which
 // climbs a tile to the anchor it blocks — so epic and convoy anchors collect
-// their `blocks` edges to join a blocked epic or convoy to the family it hangs
+// their wait edges to join a blocked epic or convoy to the family it hangs
 // off. A convoy's edges come from the same outbound read that
 // already fetches its `tracks` members; an epic's, a review's and a rework's
 // are added to that read here.
@@ -764,12 +764,12 @@ func blockedBy(recs []*beads.Dependency) []string {
 // attachEdges resolves the relations of every anchor in pending with a fixed
 // number of store reads for the whole set, never one per anchor: one batched
 // INBOUND read (parent-child children, and the closed reviews of an anchor whose
-// reviews are gathered), one batched OUTBOUND read (a convoy's `tracks`,
-// everything else's `blocks`), and one SearchIssues that hydrates every far-end
-// issue both name. A pass that gathers any anchor's reviews adds the reads
-// [BeadsSource.readReviews] makes, once for the whole set, and a pass with an
-// open child under a live anchor adds the two [BeadsSource.attachChildWaits]
-// makes. A pass that gathers a live merge anchor adds the in-flight read
+// reviews are gathered), one batched OUTBOUND read (a convoy's `tracks`, and
+// the waits of every kind that spends them, each type [waitEdge] names), and one
+// SearchIssues that hydrates every far-end issue both name. A pass that gathers
+// any anchor's reviews adds the reads [BeadsSource.readReviews] makes, once for
+// the whole set, and a pass with an open child under a live anchor adds the two
+// [BeadsSource.attachChildWaits] makes. A pass that gathers a live merge anchor adds the in-flight read
 // [BeadsSource.attachPR] makes, once for the whole set, and the two it makes per
 // level of the walk past the anchors' own edges. The read count is fixed by the
 // rig+status pass and the depth of the `blocks` graph, so it does not scale with
@@ -779,7 +779,7 @@ func blockedBy(recs []*beads.Dependency) []string {
 // roll-ups it feeds. A failed dependents read (or a failed hydration) leaves the
 // parent-child roll-ups empty, marks every gathered anchor's reviews UNKNOWN,
 // and notes partial. A failed dependencies read
-// leaves `tracks` roll-ups empty AND marks every `blocks`-spending anchor's
+// leaves `tracks` roll-ups empty AND marks every wait-spending anchor's
 // waits UNKNOWN — not empty — because board.ruled reads an empty wait set as
 // "every recorded wait has landed" and would stand a row down on a graph it
 // could not read.
@@ -818,10 +818,10 @@ func (s *BeadsSource) attachEdges(ctx context.Context, g *gatherState, st beadSt
 	}
 
 	// Hydrate the far-end issues the two reads reference — the children on the
-	// parent-child edges, the members and blockers on the tracks/blocks ones, and
-	// every dependent of an anchor whose reviews are gathered — in one
-	// SearchIssues. Only the edges actually spent are hydrated; a `related` edge
-	// into any other anchor is never fetched.
+	// parent-child edges, the members on the tracks edges, the blockers on every
+	// wait edge, and every dependent of an anchor whose reviews are gathered — in
+	// one SearchIssues. Only the edges actually spent are hydrated; a `related`
+	// edge into any other anchor is never fetched.
 	farEnds := map[string]struct{}{}
 	if depnErr == nil {
 		for target, recs := range depnRecs {
@@ -835,7 +835,7 @@ func (s *BeadsSource) attachEdges(ctx context.Context, g *gatherState, st beadSt
 	if depyErr == nil {
 		for _, recs := range depyRecs {
 			for _, d := range recs {
-				if d != nil && (string(d.Type) == "tracks" || string(d.Type) == "blocks") {
+				if d != nil && (string(d.Type) == "tracks" || waitEdge(string(d.Type))) {
 					farEnds[d.DependsOnID] = struct{}{}
 				}
 			}
@@ -873,7 +873,7 @@ func (s *BeadsSource) attachEdges(ctx context.Context, g *gatherState, st beadSt
 		if p.kind == board.KindGate && depnErr == nil {
 			p.anchor.Subjects = blockedBy(depnRecs[p.anchor.ID])
 		}
-		// The `blocks` waits come from the SAME outbound read a convoy already
+		// The waits come from the SAME outbound read a convoy already
 		// spends on its `tracks`, so a convoy gathers both from one read; an epic
 		// joins that read via needsWaitingEdges. They feed the family grouping for
 		// epic and convoy, a review or rework row's waiting_on, and board.ruled,
@@ -1341,9 +1341,15 @@ func anchorChild(iss *beads.Issue, md map[string]string) board.Child {
 // waitingFromEdges is [childrenFromEdges]'s sibling for the waits of the store's
 // blocked rule, from the same OUTBOUND read: it reports the blockers a subject
 // waits on. Which of them have landed is the store's own answer, read once per
-// rig after the gather ([BeadsSource.landWaits]). A blocker whose issue did not
-// hydrate is dropped, not counted as unknown — unknown is reserved for a READ
-// that failed, which the caller signals by not calling this at all (see
+// rig after the gather ([BeadsSource.landWaits]). Its callers hydrate the far
+// end of every edge [waitEdge] names, and a hydration either returns every
+// issue the store holds or fails, so a blocker whose issue did not hydrate is
+// one the store holds no row for, such as one in another store. It is dropped,
+// as the library drops a dangling or cross-store edge, and not counted as
+// landed: the store's answer would read it so, and a parked subject waiting only
+// on it would then read as owed a disposition while that work's state is
+// unread. Nor is it counted as unknown — unknown is reserved for a READ that
+// failed, which the caller signals by not calling this at all (see
 // attachEdges).
 func waitingFromEdges(recs []*beads.Dependency, issueByID map[string]*beads.Issue) (blockers []board.Blocker, all []string, unknown bool) {
 	for _, d := range recs {
@@ -1460,12 +1466,12 @@ func (s *BeadsSource) startWaits(ctx context.Context, sp rigSpan, anchors []boar
 // and each hydrated blocker's answer ([board.Blocker.Wait]), the anchor's and
 // its children's, from its rig's read of the store's own answer, once each
 // read is done. A recorded wait has landed when the answer does not list it
-// among the bead's own pending waits, so a pinned blocker or one in another
-// store has landed, as the store counts it, and a pending wait the edge read
-// did not hydrate is still recorded. An anchor the read did not answer, in a
-// rig whose read failed or not, reads its waits as unknown and none as landed,
-// the quiet direction, and every blocker of a bead it did not answer stays
-// unread ([board.WaitUnread]).
+// among the bead's own pending waits, so a pinned blocker has landed, as the
+// store counts it, and a pending wait the edge read missed, such as one on an
+// edge written since, is added to the record. An anchor the read did not
+// answer, in a rig whose read failed or not, reads its waits as unknown and none
+// as landed, the quiet direction, and every blocker of a bead it did not answer
+// stays unread ([board.WaitUnread]).
 func landWaits(g *gatherState, reads []*waitsRead) {
 	for _, rd := range reads {
 		<-rd.done

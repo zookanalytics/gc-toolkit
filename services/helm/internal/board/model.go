@@ -147,7 +147,9 @@ type Anchor struct {
 	// rule (`blocks`, `conditional-blocks` or `waits-for`), and WaitingOnClosed
 	// the subset of those that have landed by the store's own answer: the waits
 	// gctk's waits package does not list as the bead's pending, so a pinned
-	// blocker or one in another store has landed, as the store counts it.
+	// blocker has landed, as the store counts it. A wait onto a bead the store
+	// holds no row for, such as one in another store, is not recorded
+	// ([source.waitingFromEdges]).
 	//
 	// For a `parked` subject these are the work a converse sitting routed out
 	// of the conversation. A takeaway is one frozen string — "routed; nothing
@@ -163,13 +165,14 @@ type Anchor struct {
 	WaitingOn       []string `json:"waiting_on,omitempty"`
 	WaitingOnClosed []string `json:"waiting_on_closed,omitempty"`
 
-	// Blockers is the same `blocks` edge set as WaitingOn, carrying the fields
-	// the derivation discriminates on: the route, which separates a pool-routed
-	// rework or review child (machine `progressing`) from an ordinary
-	// prerequisite and from the human gate that makes an anchor `asking`; the
-	// title, which is the gate's question; the creation instant, which is when
-	// an unanswered gate's turn began; and a gate's await type, key and close
-	// reason, which Accept's conditions read ([readAcceptance]).
+	// Blockers is the same edge set as WaitingOn, one for each wait whose far
+	// bead hydrated, carrying the fields the derivation discriminates on: the
+	// route, which separates a pool-routed rework or review child (machine
+	// `progressing`) from an ordinary prerequisite and from the human gate that
+	// makes an anchor `asking`; the title, which is the gate's question; the
+	// creation instant, which is when an unanswered gate's turn began; and a
+	// gate's await type, key and close reason, which Accept's conditions read
+	// ([readAcceptance]).
 	//
 	// The source reads them for the kinds whose waits the derivation spends
 	// ([source.needsWaitingEdges]), a recommendation's parked bead among them,
