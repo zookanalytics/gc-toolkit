@@ -8,6 +8,118 @@
     "doc": "The source branch a work bead's change is on, which the work formula's workspace-setup writes (lifecycle/lifecycle.toml, [metadata.merge_identity]). A bead carrying it is in flight."
   },
   {
+    "name": "gc.dispatch_when_ready",
+    "type": "string",
+    "readers": [
+      "waits"
+    ],
+    "doc": "The pool or agent an armed bead is slung to once nothing holds it. Its presence is the arm."
+  },
+  {
+    "name": "gc.dispatch_when_ready_args",
+    "type": "string",
+    "readers": [
+      "waits"
+    ],
+    "doc": "The arm's extra sling arguments, as a JSON array."
+  },
+  {
+    "name": "gc.dispatch_when_ready_armed_at",
+    "type": "string",
+    "readers": [
+      "waits"
+    ],
+    "doc": "When the bead was armed, in RFC 3339 UTC."
+  },
+  {
+    "name": "gc.dispatch_when_ready_armed_by",
+    "type": "string",
+    "readers": [
+      "waits"
+    ],
+    "doc": "Who armed the bead."
+  },
+  {
+    "name": "gc.dispatch_when_ready_fail_count",
+    "type": "string",
+    "readers": [
+      "waits"
+    ],
+    "doc": "The sling attempts made on the arm, as an integer string."
+  },
+  {
+    "name": "gc.dispatch_when_ready_reason",
+    "type": "string",
+    "readers": [
+      "waits"
+    ],
+    "doc": "Why the bead was armed, as free text."
+  },
+  {
+    "name": "gc.dispatch_when_ready_slung",
+    "type": "string",
+    "readers": [
+      "waits"
+    ],
+    "doc": "The arm's sling marker: slinging@\u003ctime\u003e while an attempt is in flight, slung@\u003ctime\u003e once it is proven."
+  },
+  {
+    "name": "gc.formula_contract",
+    "type": "string",
+    "readers": [
+      "waits"
+    ],
+    "doc": "The formula contract a root was poured under. A root reading graph.v2 is a run's root."
+  },
+  {
+    "name": "gc.input_convoy_id",
+    "type": "string",
+    "readers": [
+      "waits"
+    ],
+    "doc": "The input convoy a graph.v2 workflow root was poured over. The convoy tracks the bead the run works, and the bead a live run works is in flight once the run has passed load-context. A root without it works the bead its gc.var.issue names."
+  },
+  {
+    "name": "gc.kind",
+    "type": "string",
+    "readers": [
+      "waits"
+    ],
+    "doc": "The runtime's kind of a bead. A root reading workflow is a run's root."
+  },
+  {
+    "name": "gc.notify_when_ready",
+    "type": "string",
+    "readers": [
+      "waits"
+    ],
+    "doc": "The named agent a notice is owed to once nothing holds the bead assigned to it. Its presence is the arm."
+  },
+  {
+    "name": "gc.root_bead_id",
+    "type": "string",
+    "readers": [
+      "waits"
+    ],
+    "doc": "The workflow root a step was poured under."
+  },
+  {
+    "name": "gc.step_ref",
+    "type": "string",
+    "readers": [
+      "waits"
+    ],
+    "doc": "The formula step a step bead carries out, as \u003cformula\u003e.\u003cstep\u003e. A live run with an open step whose ref ends in .load-context has not passed load-context."
+  },
+  {
+    "name": "gc.var.issue",
+    "type": "string",
+    "readers": [
+      "waits"
+    ],
+    "doc": "The bead a classic molecule's issue variable names, which a root that names no input convoy works. A root whose input convoy tracks another bead works none."
+  },
+  {
     "name": "merge_result",
     "type": "string",
     "readers": [
