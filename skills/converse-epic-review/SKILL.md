@@ -61,8 +61,9 @@ said, and write the change you propose for each gap:
   cannot, so it is a leading indicator and not the signal. The signal must also
   be readable soon after the work lands, not only once data that does not exist
   yet arrives;
-- boundaries on ground another epic owns until it closes, whatever its status:
-  `gc bd list -t epic --all --limit 0 --json | jq -r '.[] | select(.status != "closed") | "\(.id) \(.metadata.epic_boundaries // "none")"'`;
+- boundaries on ground another epic owns until it closes, whatever its status.
+  The list always includes this epic, so a run without it has not answered:
+  `gc bd list -t epic --status open,in_progress,blocked,deferred,hooked,pinned --limit 0 --json | jq -r '.[] | "\(.id) \(.metadata.epic_boundaries // "none")"'`;
 - each proposal recorded since the last review, and anything the evidence below
   contradicts.
 
@@ -243,8 +244,8 @@ Each gate on a PR's anchor takes its own call, as the section above gives it:
 ```
 A gate on work that waits for a judgment takes no call here, because its answer
 sends that work on. The sign-off answers it once every write below has landed,
-and write 5 stands down work a close retires. A gate whose judgment the ruling
-leaves open stays owed: name it with `--leave` at the sign-off.
+unless write 5 closes that work first. A gate whose judgment the ruling leaves
+open stays owed: name it with `--leave` at the sign-off.
 
 **3. At a checkpoint, close each landed Delivery.** Write 6 closes beads the
 same way, and no close is ever forced. First, nothing under the bead may be
@@ -333,6 +334,11 @@ one. Each item goes one of three ways:
   `--retire re-homed --successor <new bead>`, and otherwise it is the
   disposition writer:
   `"$CONV/bead-rehome.sh" --origin <bead> --successor <new bead> --kind re-homed --note "<the ruling, one sentence>"`.
+  The writer refuses a bead a human gate holds, and the gate's answer would
+  send that bead on in this store. So disarm and release such a bead first,
+  then answer its gate on a call of its own, as write 2 answers one, and run
+  the writer last:
+  `"$CONV/deferred-dispatch.sh" disarm <bead> --reason "<the ruling, one sentence>" && "$CONV/gc-helm.sh" takeaway <bead> "<the ruling, one sentence>" --release --no-wait`.
   A Delivery never moves whole, because its aim answers this epic's hypothesis,
   so its Stories move one by one.
 - **Work worth doing on its own moves out to ordinary flow** with no parent:

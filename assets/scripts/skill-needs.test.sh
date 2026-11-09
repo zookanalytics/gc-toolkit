@@ -1180,13 +1180,16 @@ echo "── a review of an epic gates what waits on its ruling, records it, and
 # sends the closes its ruling makes to that skill, none forced, apart from the
 # disposition writer it gives other subjects. The skill holds each landed
 # Delivery's close, and only the work that waits on the ruling, with a human
-# gate, and reads every epic not yet closed for the ground it owns. It records
+# gate, and reads every epic not yet closed for the ground it owns, in a read
+# that lists the epic itself, so an empty one is no answer. It records
 # the review under its dated heading, then the contract the ruling sets and the
 # ruling, with the gates it clears as its evidence, in one write whatever the
 # ruling. It answers the landed Deliveries' gates before any close, and leaves
 # the gates on waiting work to the sign-off, because an answer sends that work
 # on and the work must start on what the ruling wrote. A close stands down
-# waiting work it retires, which disarms it before the answer. Each bead closes
+# waiting work it retires, which disarms it before the answer, and disarms and
+# releases waiting work it closes as re-homed before answering its gate, because
+# the disposition writer refuses a bead a gate holds. Each bead closes
 # through the close gate, never forced, because bd refuses a close over an open
 # child or a live blocker. The sign-off records the PR a retirement acts on
 # under the words of its ruling, so each gate on a PR's anchor is answered under
@@ -1211,9 +1214,11 @@ have "…and is unset when it clears none" '--unset-metadata epic_ruling_evidenc
 have "the gates are answered before any close, through the sign-off's writer" \
     'converse-signoff.sh" --conversation "$CONVERSATION" --answer <gate>' "$EPIC_REVIEW"
 have "the boundary read takes every epic not yet closed, whatever its status" \
-    'gc bd list -t epic --all --limit 0 --json | jq -r '"'"'.[] | select(.status != "closed") |' "$EPIC_REVIEW"
-lacks "…never the open status alone" '-t epic --status open' "$EPIC_REVIEW" \
+    'gc bd list -t epic --status open,in_progress,blocked,deferred,hooked,pinned --limit 0 --json' "$EPIC_REVIEW"
+lacks "…never the open status alone" '-t epic --status open --' "$EPIC_REVIEW" \
     "an epic in progress, blocked or deferred still owns its ground, and a read of the open status leaves it out"
+have "…and a read that does not list the epic under review has not answered" \
+    'The list always includes this epic, so a run without it has not answered' "$EPIC_REVIEW_JOINED"
 fenced_block "$EPIC_REVIEW" 'epic_ruling=<continue|shift|close>' >"$CH/ruling-write"
 if grep -qF -- '--set-metadata epic_hypothesis=' "$CH/ruling-write" \
     && grep -qF -- '--set-metadata epic_boundaries=' "$CH/ruling-write"; then
@@ -1234,6 +1239,10 @@ have "…and a gate on waiting work is the sign-off's, once every write has land
     'A gate on work that waits for a judgment takes no call here, because its answer sends that work on. The sign-off answers it once every write below has landed' "$EPIC_REVIEW_JOINED"
 have "a close stands down waiting work it retires, which disarms it before the answer" \
     '"$CONV/stand-down.sh" <bead> --key <situation-key> --ruling "<the ruling, one sentence>" --successor "$CONVERSATION"' "$EPIC_REVIEW"
+have "…and disarms and releases waiting work it re-homes into another store before its gate is answered" \
+    '"$CONV/deferred-dispatch.sh" disarm <bead> --reason "<the ruling, one sentence>" && "$CONV/gc-helm.sh" takeaway <bead> "<the ruling, one sentence>" --release --no-wait' "$EPIC_REVIEW"
+have "…then answers that gate on its own call and runs the writer last" \
+    'then answer its gate on a call of its own, as write 2 answers one, and run the writer last' "$EPIC_REVIEW_JOINED"
 have "each gate on a PR's anchor is answered on a call of its own, under that PR's own ruling" \
     "Each gate on a PR's anchor is answered on a call of its own, under that PR's own ruling: the review's ruling and what it does to that PR, naming the PR." "$EPIC_REVIEW_JOINED"
 have "…a retirement's ruling names its PR, and --pr-anchor names it as the target" \
