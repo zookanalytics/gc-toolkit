@@ -271,28 +271,6 @@ shares only the word ([authority-map.md](authority-map.md)).
   owns every rig's origin. A token the rigs share also leaves each rig's agents
   free to write to the others' repositories, which the guard refuses.
 
-## Converse reap
-
-- **Covers.** `assets/scripts/converse-reap.sh`, `orders/converse-reap.toml`.
-- **Stands in for.** Ending a manual session that outlives the conversation it
-  held: a stop that did not take, a conversation another path closed, or one a
-  sitting cut short handed back to the operator's queue.
-- **Evidence.** In `gastownhall/gascity`, a manual session does not end when its
-  work closes. It stays until it is closed or drained, and attaching wakes one
-  that sleeps (`cmd/gc/compute_awake_set.go` 443-451, 594-605 and 679-704).
-  No closer the controller runs on its own ends one because its work closed:
-  the stale-session closers exempt a session that has started its
-  conversation (`reapStaleSessionBeads`, `reapPreBootSessionBeads` and
-  `cleanDeadRuntimeCorpse` in `cmd/gc/session_beads.go`, at 3164, 3345 and
-  3608), and the core reaper prunes a session only once it has drained
-  (`internal/bootstrap/packs/core/assets/scripts/reaper.sh` 118 and 1588-1590).
-  A sitting drains itself once its conversation closes, and `gc-helm dismiss`
-  stops the session that held the conversation it closes, so nothing in the
-  controller ends a session either of them missed.
-- **Verified.** 2026-11-05, at `gastownhall/gascity` main 9f807760c.
-- **Retires when.** Gas City ends a manual session once its claimed work has
-  closed.
-
 ## Accept's lock
 
 - **Covers.** The acceptance lock of `assets/scripts/gc-helm.sh` accept: one

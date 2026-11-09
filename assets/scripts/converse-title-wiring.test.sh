@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # converse-title-wiring.test.sh — a converse sitting's tmux session passes its
 # pane title on to the terminal of a client attached to it, so the operator's
-# tab shows the title the sitting sets with `gctk session title`.
+# tab shows the title the sitting sets with `gctk session title`, led by
+# "done · " once the sitting has drained.
 #
 # The setting rides each converse-<model> template's session_live, beside the
 # detach-on-destroy command converse-detach-wiring.test.sh covers. Gas City
@@ -13,15 +14,22 @@
 #   (WIRED) every converse-<model> template carries one session_live command
 #           that sets set-titles, the same in each, and it names the session by
 #           the {{.Session}} placeholder
-#   (SET)   the command sets set-titles on and set-titles-string #T on the
-#           sitting's session alone: a session whose name the sitting's name
-#           prefixes keeps no value of its own, even once the sitting's session
-#           has gone, and the server's global values are left as they are
+#   (SET)   the command sets set-titles on, and a set-titles-string that reads
+#           the pane's title (#T), on the sitting's session alone: a session
+#           whose name the sitting's name prefixes keeps no value of its own,
+#           even once the sitting's session has gone, and the server's global
+#           values are left as they are
 #   (AGAIN) running it again, as a re-apply does, succeeds and leaves them so
+#   (DONE)  the title leads with "done · " while the session's tmux environment
+#           holds GC_DRAIN_ACK=1, which `gc runtime drain-ack` writes there with
+#           set-environment, and reads live again once Gas City removes it
+#           (set-environment -u); another session's flag leaves it alone
 #   (CARRY) a client attached to the sitting from the pane of a second tmux
 #           server, which stands in for the operator's terminal, gives that
-#           pane the sitting's pane title, and a later title too; a client
-#           attached to a session without the setting gives it no such title
+#           pane the sitting's pane title, and a later title too, then the
+#           done title once the flag is set, with no output from the pane, and
+#           the live title once it is removed; a client attached to a session
+#           without the setting gives it no such title
 #
 # The live checks need tmux, and are skipped with a notice where it is missing.
 set -uo pipefail
@@ -128,7 +136,13 @@ run_live() {
     local expanded="${CMD//'{{.Session}}'/$1}"
     env -u TMUX -u TMUX_PANE GC_TMUX_SOCKET="$SOCK" GC_SESSION="$1" sh -c "$expanded"
 }
+# title_of <session> — the title tmux sends a client attached to the session:
+# its set-titles-string, expanded. It reads with -u for the reason outer_title
+# gives below.
+title_of() { T -u display-message -p -t "=$1:" '#{T:set-titles-string}' 2>/dev/null; }
 
+PANE_TITLE="tk-test — the sitting's pane title"
+T select-pane -t "=$SIT:" -T "$PANE_TITLE" >/dev/null 2>&1
 if run_live "$SIT" >"$TMP/set.out" 2>&1; then
     ok "(SET) the command runs clean"
 else
@@ -136,8 +150,8 @@ else
 fi
 eq "$(T show-options -t "=$SIT:" -v set-titles 2>&1)" "on" \
    "(SET) the sitting's session reads set-titles on"
-eq "$(T show-options -t "=$SIT:" -v set-titles-string 2>&1)" "#T" \
-   "(SET) the sitting's session reads set-titles-string #T, its pane's title"
+eq "$(title_of "$SIT")" "$PANE_TITLE" \
+   "(SET) the sitting's session titles a client with its pane's title"
 eq "$(T show-options -t "=$SIB:" set-titles 2>&1)$(T show-options -t "=$SIB:" set-titles-string 2>&1)" "" \
    "(SET) a session whose name the sitting's name prefixes keeps no value of its own"
 eq "$(T show-options -g -v set-titles 2>&1)" "off" \
@@ -160,8 +174,34 @@ eq "$(T show-options -t "=$SIT:" -v set-titles 2>&1)" "on" \
    "(AGAIN) …and leaves set-titles on"
 
 ###############################################################################
+# (DONE) — the drain flag Gas City writes.
+###############################################################################
+# `gc runtime drain-ack` records each ack of a session, its own or an
+# operator's, as GC_DRAIN_ACK=1 in the session's tmux environment
+# (set-environment -t <session>), and Gas City removes it with
+# set-environment -u. tmux reads a format variable that names no option or
+# format of its own from the session's environment, which is how the title
+# sees the flag.
+T set-environment -t "=$SIT" GC_DRAIN_ACK 1 >/dev/null 2>&1
+eq "$(title_of "$SIT")" "done · $PANE_TITLE" \
+   "(DONE) once the session's environment holds GC_DRAIN_ACK=1, the title leads with done"
+T set-environment -t "=$SIT" -u GC_DRAIN_ACK >/dev/null 2>&1
+eq "$(title_of "$SIT")" "$PANE_TITLE" \
+   "(DONE) …and is the pane's title alone again once the flag is removed"
+T set-environment -t "=$SIB" GC_DRAIN_ACK 1 >/dev/null 2>&1
+eq "$(title_of "$SIT")" "$PANE_TITLE" \
+   "(DONE) another session's drain flag leaves the sitting's title live"
+T set-environment -t "=$SIB" -u GC_DRAIN_ACK >/dev/null 2>&1
+
+###############################################################################
 # (CARRY) — a client's terminal, played by a pane of a second tmux server.
 ###############################################################################
+# The flag redraws nothing by itself: a client's title follows it when the pane
+# prints, or else at the client's next status refresh, which the city's server
+# runs every 15 seconds (tmux's default status-interval). This server runs it
+# every second, so a title that waits for the refresh arrives within the
+# suite's wait. A client takes the interval when it attaches.
+T set-option -g status-interval 1 >/dev/null 2>&1
 # outer <name> <session> — an outer session whose pane runs a client attached
 # to <session> on the sitting's server. The client names an xterm terminal,
 # whose terminfo every host carries and which tmux sets titles on. The command
@@ -193,6 +233,18 @@ if wait_for attached "$SIT"; then
         ok "(CARRY) …and a later title, whose PR number keeps its #"
     else
         bad "(CARRY) …and a later title, whose PR number keeps its # (got '$(outer_title on)')"
+    fi
+    T set-environment -t "=$SIT" GC_DRAIN_ACK 1 >/dev/null 2>&1
+    if wait_for outer_shows on "done · $LATER"; then
+        ok "(CARRY) …then the done title once the drain flag is set, with no output from the pane"
+    else
+        bad "(CARRY) …then the done title once the drain flag is set, with no output from the pane (got '$(outer_title on)')"
+    fi
+    T set-environment -t "=$SIT" -u GC_DRAIN_ACK >/dev/null 2>&1
+    if wait_for outer_shows on "$LATER"; then
+        ok "(CARRY) …and the live title again once the flag is removed"
+    else
+        bad "(CARRY) …and the live title again once the flag is removed (got '$(outer_title on)')"
     fi
 else
     bad "(CARRY) a client attached to the sitting"

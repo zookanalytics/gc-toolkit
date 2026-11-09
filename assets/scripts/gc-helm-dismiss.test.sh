@@ -357,12 +357,12 @@ eq "$RC/$(field tk-conv status)" "0/closed" "(INFER-RIGS-DOWN) a rig list that d
 has "$(cat "$REC_PSC_LOG")" "refresh --sitting tk-conv | " "(INFER-RIGS-DOWN) …and the comment is drawn all the same, from where dismiss runs"
 
 echo "# dismiss stops the session that held the conversation it closed"
-# A sitting must not outlive its conversation, and a session viewed in a tab is
-# not kept up by the viewing. The stop is `gc runtime drain-ack`, so the
-# controller ends the session outside the verb's process: the holder the verb
-# runs in acks itself, after every close; any other holder is acked as an
-# operator. Only a live converse session counts as a holder, and a stop that
-# fails leaves the dismiss standing and names converse-reap.
+# A sitting must not outlive its conversation. The stop is `gc runtime
+# drain-ack`, so the controller ends the session outside the verb's process,
+# once no client is attached to it: the holder the verb runs in acks itself,
+# after every close; any other holder is acked as an operator. Only a live
+# converse session counts as a holder, and a stop that fails leaves the dismiss
+# standing and names the idle sleep that stops the session instead.
 export DRAINS="$TMP/drains"
 drains() { cat "$DRAINS"; }
 fresh; : > "$DRAINS"; run_dismiss tk-subj
@@ -376,8 +376,8 @@ eq "$(drains)" "drain-ack  | self=gc-50 | closes=2" "(STOP-OWN) …and the sitti
 has "$OUT" "ending this session (gc-50), which held the sitting" "(STOP-OWN) …saying so before it does"
 fresh; : > "$DRAINS"; FAKE_DRAIN_RC=1 run_dismiss tk-subj
 eq "$RC" 0 "(STOP-FAIL) a stop that fails leaves the dismiss standing"
-has "$ERR" "could not stop session gc-50, which held the sitting; converse-reap closes it on its next pass, because its conversation is closed" \
-    "(STOP-FAIL) …and names converse-reap as what closes the session"
+has "$ERR" "could not stop session gc-50, which held the sitting; it holds no conversation now, so its idle sleep stops it once no client is attached" \
+    "(STOP-FAIL) …and names the idle sleep as what stops the session"
 # A holder that runs another template is no sitting, so the close stops nothing.
 fresh; : > "$DRAINS"
 sessions '[{"id":"gc-50","session_name":"s-gc-50","alias":"gc-toolkit/gc-toolkit.tk-conv","template":"gc-toolkit/gc-toolkit.polecat","state":"active","closed":false,"rig":"gc-toolkit"}]'
@@ -467,7 +467,7 @@ for _mode in v2-inherited v2-bare legacy-inherited; do
     eq "$KRC/$KOUT" "0/" "(KEY) [$_mode] prefix+X exits 0 with nothing on stdout"
     eq "$(drains)" "drain-ack --operator gc-50 | self= | closes=2" \
        "(KEY) [$_mode] …and the real dismiss stops the sitting with one operator ack that Gas City takes"
-    has "$(cat "$FAKE_KEY_SAID")" "the sitting on tk-subj is over (conversation tk-conv closed), and its session is ending" \
+    has "$(cat "$FAKE_KEY_SAID")" "the sitting on tk-subj is over (conversation tk-conv closed), and its session stops once this tab detaches" \
         "(KEY) [$_mode] …and tells the operator the sitting is over"
 done
 unset DRAINS FAKE_SESSION_TOKENS FAKE_KEY_SAID
