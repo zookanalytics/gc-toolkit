@@ -32,17 +32,17 @@ by its own waits.
 waits are the waits behind the status, each {"id", "type", "title",
 "status"}, where title and status are those of the bead waited on, with its
 "issue_type" and "await_type" when it has them, which tell a gate a person
-answers from work, and "ancestor" naming the ancestor whose wait it is. A waits-for wait is unjudged: the bd the city runs
-judges it by its spawner's status rather than its gate, so a caller that acts
-holds such a bead. pending is the bead's own waits that have not landed, and
-last_landed is when the last wait that applies to it landed: its own, and for
-work that has not started each live ancestor's too, "" when none has.
-in_flight says why the bead is in flight: claimed, carrying branch,
-merge_result or rejection_reason, or worked by a live workflow past
-load-context, and is "" when it is not. arm is the arm on a bead armed to
-start by itself, each value as the store holds it, and null when it carries
-none. foreign is the bead's wait edges into another store, each {"id",
-"type"}, which hold nothing.
+answers from work, and "ancestor" naming the ancestor whose wait it is. A
+waits-for wait is unjudged: the bd the city runs judges it by its spawner's
+status rather than its gate, so a caller that acts holds such a bead. pending
+is the bead's own waits that have not landed, and last_landed is when the
+last wait that applies to it landed: its own, and for work that has not
+started each live ancestor's too, "" when none has. in_flight says why the
+bead is in flight: claimed, carrying branch, merge_result or
+rejection_reason, or worked by a live workflow past load-context, and is ""
+when it is not. arm is the arm on a bead armed to start by itself, each value
+as the store holds it, and null when it carries none. foreign is the bead's
+wait edges into another store, each {"id", "type"}, which hold nothing.
 
 A bead the store could not answer prints {"id", "error"} and no status, and
 so does a bead the store does not hold.
@@ -53,9 +53,9 @@ store gc routes a read of the first bead to, as gc routes a read that names
 a bead and no store: the store gc resolves from the working directory and the
 environment (gc bd where) when its prefix begins that bead's id, else the
 store whose prefix does (gc rig list), and the resolved store when no store's
-prefix begins it or the stores do not list. Every read names that one store, so no
-read that names a bead is routed to another, and a bead named in another
-store is one this store does not hold.
+prefix begins it or the stores do not list. Every read names that one store,
+so no read that names a bead is routed to another, and a bead named in
+another store is one this store does not hold.
 
 exit: 0 every bead answered
       1 at least one bead's read failed, and its line carries the error
