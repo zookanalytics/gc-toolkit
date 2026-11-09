@@ -75,8 +75,9 @@ the retirement bead that land after the effort does.
 ### The flow
 
 1. A polecat hands its bead to the rig's refinery, as it does today.
-2. The refinery takes one bead assigned to it that nothing holds, and brings
-   its branch current by merging the target in.
+2. The refinery takes one bead assigned to it that nothing holds, by the
+   answer of `gctk bead holds`, and brings its branch current by merging the
+   target in.
 3. It runs the rig's gate.
 4. A failure the branch caused sends the work back to the polecat pool. A
    failure that is already on the target is tracked, and the landing goes
@@ -118,7 +119,7 @@ Each remaining difference names its reason and what ends it:
 | The branch is brought current by merging the target in, and every push is a fast-forward. Gas Town rebases, and in `mr` it force-pushes with a lease. | A PR under review keeps the commits its approval and its threads were given on. A fast-forward cannot overwrite a commit the branch gained after its prep, which the lease against a shared remote-tracking ref did (tk-ni0i48p). | No end is planned. This is a measured reason to differ. |
 | A bead with no PR yet goes back to the pool through `gc sling` on `mol-polecat-work`, with its branch kept. Work on a branch whose PR is open comes back as the PR's rework child, so the bead keeps its PR and its merge gate. Gas Town writes the pool route by hand, and after a failure the branch caused it deletes the branch. | Dispatch goes only through `gc sling` (the dispatch design, `specs/tk-1tfzr71.54/design.md` on `integration/tk-1tfzr71.15`). Deleting a PR's branch closes the PR, and a bead waiting on its merge gate is not workable. | Gas Town requeues through `gc sling` and keeps the PR of a bead it sends back. |
 | A failure already on the target is tracked by `preexisting-failure.sh`, keyed by its symptom. Gas Town searches open bugs by title. | Two agents title one failure two ways. The key finds the tracker after a retitle, and the work formula's pre-flight files through the same script. | Gas Town keys its tracker. |
-| Where a person must act, the refinery files a human gate on the bead. Gas Town parks the bead on the `human` route and mails the mayor. | A person's wait is a human gate on the bead it blocks (the dispatch design). | The mayor design (tk-rl8gz4b.28) rules on the mayor's role. |
+| Where a person must act, the refinery files a human gate on the bead. Gas Town parks the bead on the `human` route and mails the mayor. | A person's wait is a human gate on the bead it blocks (the dispatch design). The seat that tk-rl8gz4b.28 adds in the mayor's place, the po, owns only what a ruling gives it, and that effort's design keeps the same difference for the witness. | An operator ruling gives the po escalation handling. |
 | The PR opens as a draft, and the city posts its status on every head. Gas Town opens it ready and posts nothing. | The city's checks run on the PR before it asks you, and the merge waits for the city's verdict at each head (section 4). | No end is planned. |
 | The projection turns GitHub's auto-merge on where the target requires an approval. Gas Town never merges. | You approve rather than merge, and an approved PR merges on its own, as it does today. | No end is planned. |
 | The bead waits for its merge on a `gh:pr` gate, and the refinery's close step makes the merged checks of `pr-merge-reconcile`. Gas Town main runs `gc gastown pr-merge-reconcile` at each find-work. | That command is not in the gastown that gc bundles, and the city imports none. | The city takes a gastown release that carries it, or Gas City ships a close on a PR's merge. |
@@ -186,11 +187,11 @@ whenever the PR's diff changes, "because a contributor pushes new changes to the
 pull request branch or clicks Update branch, or because a related pull request is
 merged into the target branch", and the second setting needs a fresh approval
 after each push ([Available rules for rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets)).
-Either one would withdraw your approval at the first rework. In conversation
-tk-qimlnbz (2026-11-05) you asked for the opposite: an approval that carries
-across a rework, so the PR merges once the rework completes, "unless something
-major comes up, just lik ein a merge conflict, that required material decision
-making".
+Either one would withdraw your approval at the first rework. In tk-o9i6kp0
+(2026-11-05), which conversation tk-qimlnbz answered, you asked for the
+opposite: an approval that carries across a rework, so the PR merges once the
+rework completes, "unless something major comes up, just like in a merge
+conflict, that required material decision making" (typos fixed).
 
 **One decision, with one owner.** In conversation tk-k3g9xbi (2026-11-09) you
 said: "If the steps believe enough has changed, they are supposed to dismiss my
@@ -282,20 +283,28 @@ tk-1tfzr71.22 lands.
 
 ## 5. What holds a merge
 
-The merge asks one definition of what holds a PR. The projection posts what
-`prstatus` derives, and `prstatus` reads the PR's facts and the bead's blockers.
-Nothing in the new path computes a wait of its own. `gctk merge`'s own readers of
-holds retire with it: `inflightHolder`, the blocker walk in
+The merge asks one definition of what holds a PR and one of a bead's waits, and
+computes no wait of its own. The projection posts what `prstatus` derives. For
+the anchor's waits, `prstatus` takes the answer of the `waits` package, which
+`gctk bead holds` gives from shell
+([its contract](../../docs/gctk-architecture.md#the-bead-holds-contract)). A
+bead with an open PR is in flight, so only its own waits hold it, and an edge
+into another store holds nothing. Any wait that holds the anchor, other than its
+own merge gate, keeps the city's status pending. `prstatus`'s walk of `blocks`
+edges keeps the job it has today, which is to name the gate or the bead a person
+owes the next move on, for the label's reasons and the board. `gctk merge`'s own
+readers of holds retire with it: `inflightHolder`, the blocker walk in
 `recordBlockerVerdict`, `finalize-gate.sh`'s no-open-gate clause at merge, and
-`landsFirst`'s `isHeld`. `prstatus` reads blockers through its own store walk.
-Moving that walk onto the `waits` package, which `gctk bead holds` answers from,
-is gctk's recorded debt for the member that rewrites `prstatus`'s facts, which
-is tk-1tfzr71.21 ([gctk-architecture.md](../../docs/gctk-architecture.md#debt)).
+`landsFirst`'s `isHeld`. Moving `prstatus` under the pr domain, onto the
+ledger, is gctk's recorded debt, and it goes with tk-1tfzr71.21, which rewrites
+`prstatus`'s facts off the posture
+([gctk-architecture.md](../../docs/gctk-architecture.md#debt)).
 
 | Hold | Kept | Expressed as |
 |---|---|---|
 | The anchor's open children that work on its branch: a rework, a fix unit, a merge-in | yes | the child carries `anchor_bead`, and `prstatus` counts it in flight |
 | A bead that names the PR | no | a bead that must hold a PR blocks its anchor by a `blocks` edge, and naming the PR holds nothing |
+| A wait of the anchor's own, such as a `blocks` edge from work that must land first | yes | the `waits` answer, which `prstatus` takes |
 | An open human gate on the anchor | yes | the gate blocks the anchor |
 | An open conversation on the PR | yes | its `conversation.<id>` gate on the anchor (tk-icol3l8) |
 | A review thread | yes | GitHub's thread rule where the repository requires resolved threads, and `held: review` for a thread still waiting on the city's answer, on every base |
@@ -608,7 +617,7 @@ leaves the city working.
 | Unit | What it does | Waits on | Answers |
 |---|---|---|---|
 | 1. `gctk pr compose` and `gctk pr summary` | The PR's title, managed summary region and branch-beads section are composed in gctk from the bead that owns the PR, with the region read by its markers. `pr-summary-region.sh` is deleted, and `pr-open.sh` and `pr-stack.sh` call the verb. Go tests pin the output against today's renders. | nothing | tk-tefrxph; the gctk domain move note |
-| 2. The city's status on GitHub | `prstatus` answers whether the city holds the merge: nothing in flight, nothing held, and the bead's own merge gate excluded. It reads "waiting for your merge" on a base with no approval rule. It reads a PR's unanswered threads when it gathers the PR's facts, so the count's one writer can retire with `gctk merge`. The label writer also posts `gc-toolkit/status` at the head, success or pending and never failure. For a bead that carries its merge gate, it keeps auto-merge on exactly while the city reads the PR approved on a base that requires an approving review. No bead carries one before unit 3, so the toggle is inert until then. `blocker-holder.sh` reads a gate that core's gate sweep resolves as held by an automated actor. The warrant *The city's merge status* is added. Tests for each. | nothing | sections 3, 4 and 5 |
+| 2. The city's status on GitHub | `prstatus` answers whether the city holds the merge: nothing in flight, nothing held, and, by the `waits` package's answer, no wait of the anchor's own but its merge gate. It reads "waiting for your merge" on a base with no approval rule. It reads a PR's unanswered threads when it gathers the PR's facts, so the count's one writer can retire with `gctk merge`. The label writer also posts `gc-toolkit/status` at the head, success or pending and never failure. For a bead that carries its merge gate, it keeps auto-merge on exactly while the city reads the PR approved on a base that requires an approving review. No bead carries one before unit 3, so the toggle is inert until then. `blocker-holder.sh` reads a gate that core's gate sweep resolves as held by an automated actor. The warrant *The city's merge status* is added. Tests for each. | nothing | sections 3, 4 and 5 |
 | 3. The refinery on Gas Town's flow | `mol-refinery-patrol` is rewritten on Gas Town's steps at 3339ad104a88, with the differences in section 1, and each step calls one tested script. The scripts cover: the prep by merge in the refinery's own worktree (`refinery-workspace.sh` and its warrant go); the gate through `detached-job.sh`; the failures, through the requeue by `gc sling` or a rework child, and the pre-existing path; the direct landing; the `mr` step (fast-forward push, compose, open as a draft or update, record the PR with `opened_as_draft` so the review lanes and `pr-open.sh`'s ready flip handle it unchanged, file the merge gate with a notice to the refinery, run the projection, and the old-path park while `github_merge_rules` is unset); the close once the merge gate resolves, with the seed re-render under call 2; the rework hand-back; and the integration-effort hand-off. `rejection-repool.sh`, `pr-stack.sh` with its arm, `check-refinery-patrol-live` and the old formula's block-extraction suites go. The polecat doctrine gains the drift rule. | units 1 and 2; tk-gmjtb2e, whichever lands second carrying the other | tk-c8hl47c, tk-ni0i48p, tk-pdc0ovc, tk-w0hkwos; section 7 |
 | 4. The readers move | The sign-off's headline reads `prstatus`. I5 reads every closed bead with a PR. I2 reads the kept values. | unit 3 | section 6 |
 | 5. Docs, warrants and the plan | The pages that describe the merge are rewritten to the flow as it stands once units 1 to 4 land: `refinery-merge-cadence.md`, `state-machine.md` (the kept values and their sentences, and the Checks vocabulary), `architecture.md`'s "How work moves" with both landing paths, `component-model.md`, `authority-map.md`, `design-convoy.md`'s gates under call 1, `gctk-architecture.md`'s rows and the merge section of `built-once-target.md`. The warrants' Covers lines move off retired paths. The plan's rows move as section 8 says. | units 1 to 4 | tk-cvffk5x, tk-r82qrrv |
@@ -644,13 +653,16 @@ leaves the city working.
     bead.
 - Each moved row gets a note on the bead that now retires it, saying why.
 - Before filing, the child surveys the open branches against each unit's files
-  again, since they move. At this design's reading, three overlap:
-  - tk-gmjtb2e, which edits the refinery's prompt and the integration-effort
-    recipe, for unit 3.
-  - tk-icol3l8, in review, which files a conversation's gate on the anchor, for
-    unit 2's holds.
-  - tk-1tfzr71.11 (PR #1414), which rewrites the lifecycle writer's read-backs,
-    for the retirement bead.
+  again, since they move. At this design's reading, these overlap:
+  - tk-gmjtb2e (PR #1455), which edits the refinery's prompt and the
+    integration-effort recipe, for unit 3.
+  - tk-icol3l8 (PR #1453), in review, which files a conversation's gate on the
+    anchor and rewrites `converse-signoff.sh`, for unit 2's holds and unit 4's
+    sign-off.
+  - tk-rl8gz4b.28 (PR #1445), the po effort, which edits
+    `lifecycle/lifecycle.toml` and pages unit 5 rewrites (`architecture.md`,
+    `authority-map.md`, `built-once-target.md`, `component-model.md` and
+    `warrants.md`), for unit 5 and the retirement bead.
 
 ## 13. Facts this design rests on
 

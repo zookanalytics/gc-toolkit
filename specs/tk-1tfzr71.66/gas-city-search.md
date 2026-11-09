@@ -43,7 +43,9 @@ read the approval that releases it.
   request](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/automatically-merging-a-pull-request)).
 
 What unit 2 composes: GitHub's required status check and auto-merge, driven by
-the pack's one definition of what holds a PR (`prstatus`). The gap the
+the pack's one definition of what holds a PR (`prstatus`), which takes the
+anchor's waits from the store's own blocked set through the `waits` package,
+the one `gctk bead holds` answers from. The gap the
 primitives leave is the city's waits and its reading of the approval's message,
 which no rule reads, so a commit status carries the first and the auto-merge
 toggle the second. The warrant *The city's merge status* records it.
