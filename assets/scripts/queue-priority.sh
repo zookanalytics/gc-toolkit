@@ -5,16 +5,15 @@
 # This script writes that field:
 #   settle <bead> [--print] [--db <path>]
 #       compute the bead's priority and write it to the bead and to every live
-#       workflow poured for it (the input convoy, the root and each open step),
-#       then read it back. A writer that routes or slings a bead settles it
-#       first and writes no priority of its own. --print computes the same
-#       priority and writes nothing. It takes no lock, so no writer writes the
-#       number it prints.
+#       workflow poured for it (the input convoy, the root and each open step).
+#       A writer that routes or slings a bead settles it first and writes no
+#       priority of its own. --print computes the same priority and writes
+#       nothing. It takes no lock, so no writer writes the number it prints.
 #   move <bead> (<P0-P4> | --shift <±n>) [--dry-run] [--db <path>]
 #       the writer `gc-helm.sh priority` runs: set the bead's own input, then
 #       write every bead that follows it, directly or through others (members,
 #       the PR-finishing work of each anchor among them, and the live workflow
-#       of each), and read it all back.
+#       of each).
 #   reconcile [--dry-run] [--pool <target>] [--db <path>]
 #       one pass of orders/queue-priority.toml: read the beads `bd ready` offers
 #       the rig's polecat pool, ephemeral ones included as the pool's claim
@@ -60,7 +59,7 @@
 # work when the posture it records turns approved or stops being approved, and
 # when the anchor leaves pull_request, and on each later pass until all of that
 # work has settled at the rank the anchor's state and posture give.
-# Exit codes: 0 ok; 1 a read, a write, a read-back or the lock failed; 2 usage,
+# Exit codes: 0 ok; 1 a read, a write or the lock failed; 2 usage,
 # a move refused before anything was written, or a pass that finds no one
 # polecat pool to read.
 set -u
@@ -90,7 +89,7 @@ case "$LOCK_STALL_SECS" in ''|*[!0-9]*) LOCK_STALL_SECS=900 ;; esac
 # The pass budget, in seconds from the start of the pass (0 = unpaced). A pass
 # starts settling a bead only while one settle's allowance is left in it, and
 # leaves the rest at their old priority for the next pass, so the order's
-# timeout never kills it between a write and its read-back.
+# timeout never kills it between one settle's writes.
 # queue-priority.test.sh holds the budget below the order's timeout and the
 # stall bound above it.
 PASS_BUDGET_SECS="${QUEUE_PRIORITY_PASS_BUDGET_SECS:-240}"
@@ -136,8 +135,8 @@ Usage:
 
 Verbs:
   settle     Compute the bead's priority, write it to the bead and to every live
-             workflow poured for it, and read it back. Exits 1 when the priority
-             cannot be computed or does not read back. A bead that follows
+             workflow poured for it. Exits 1 when the priority cannot be
+             computed or a write fails. A bead that follows
              nothing keeps its own priority, and its workflows take it. --print
              computes the same priority, prints the number and writes nothing.
              It takes no lock, so no writer writes the number it prints: a
@@ -145,10 +144,9 @@ Verbs:
   move       The writer gc-helm.sh priority runs. A P-value sets a bead that
              follows nothing; --shift sets the shift of a bead that follows a
              parent or an anchor. It then writes every bead that follows the
-             bead, directly or through others, held beads included, and reads
-             them back. It refuses the form that does not fit the bead, and a
-             workflow's convoy, root or step. --dry-run prints what it would
-             write.
+             bead, directly or through others, held beads included. It
+             refuses the form that does not fit the bead, and a workflow's
+             convoy, root or step. --dry-run prints what it would write.
   reconcile  One pass of orders/queue-priority.toml: settle every bead the
              polecat pool's ready queue offers at a priority other than its own.
              It reads the queue and what each queued bead follows, never the
@@ -313,13 +311,12 @@ workflow_rows() {
 }
 
 # write_priorities <plan-file> — the plan is a JSON array of {id, to}; write each
-# bead's priority, grouped by level in batches, then read every one back.
-# WROTE counts the beads written. Returns 1 when a write fails or a bead does
-# not read back at the level written, naming each in MISMATCH.
+# bead's priority, grouped by level in batches. WROTE counts the beads written.
+# Returns 1 when a write fails, naming it in MISMATCH.
 WROTE=0
 MISMATCH=""
 write_priorities() {
-    local plan="$1" p ids n i id batch rows
+    local plan="$1" p ids n i id batch
     WROTE=0; MISMATCH=""
     n="$(jq 'length' "$plan" 2>/dev/null)" || return 1
     [ "$n" -gt 0 ] || return 0
@@ -340,13 +337,7 @@ write_priorities() {
             WROTE=$((WROTE + i))
         fi
     done
-    rows="$(qp_read "$(jq -r '[ .[].id ] | unique | join(",")' "$plan")")" || { MISMATCH="the read-back did not answer"; return 1; }
-    MISMATCH="$(printf '%s' "$rows" | scrub | jq -r --slurpfile plan "$plan" "$ROWS_JQ"' as $rows
-        | ($rows | map({key: (.id | tostring), value: .priority}) | from_entries) as $got
-        | [ $plan[0][] | select(($got[.id] // null) != .to)
-            | "\(.id) reads P\($got[.id] // "?"), not P\(.to)" ] | join("; ")' 2>/dev/null)" \
-        || { MISMATCH="the read-back did not parse"; return 1; }
-    [ -z "$MISMATCH" ]
+    return 0
 }
 
 # settle_subject <subject-row-json> <priority> <plan-file> — add to the plan
@@ -591,12 +582,6 @@ cmd_move() {
     if [ -n "$shift_n" ]; then
         bd_ update "$bead" --set-metadata "priority_shift=$shift_json" >/dev/null 2>&1 \
             || { echo "$PROG: move: the write of priority_shift=$shift_json to $bead failed. Nothing else was written." >&2; return 1; }
-        local got_shift
-        got_shift="$(qp_read "$bead" | scrub | jq -r --arg b "$bead" "$ROWS_JQ"' | [ .[] | select(.id == $b) | (.metadata // {}).priority_shift // "" | tostring ] | first // ""' 2>/dev/null)"
-        if [ "${got_shift#+}" != "$shift_json" ]; then
-            echo "$PROG: move: $bead reads priority_shift '${got_shift}', not $shift_json, after the write. Nothing else was written." >&2
-            return 1
-        fi
     fi
     if ! write_priorities "$plan"; then
         echo "$PROG: move: $bead moved to $derivation, but the work that follows it did not all settle: $MISMATCH. The queue-priority pass settles what is queued; re-run the move to finish the rest." >&2

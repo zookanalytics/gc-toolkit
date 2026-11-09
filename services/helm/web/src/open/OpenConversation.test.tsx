@@ -122,9 +122,9 @@ describe('OpenConversation', () => {
       },
       {
         reason: 'timeout',
-        // NOT "nothing was filed" (review of PR#421, P1): the tool creates the
-        // conversation before it reads its edge back, so a timeout cannot prove the
-        // write did not land. The copy has to send the operator to look.
+        // NOT "nothing was filed" (review of PR#421, P1): the tool can create the
+        // conversation before it finishes, so a timeout cannot prove the write
+        // did not land. The copy has to send the operator to look.
         error: 'the write tool did not finish in time',
         status: 504,
         want: /may still have gone through|check the bead/i,

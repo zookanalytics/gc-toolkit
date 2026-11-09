@@ -25,10 +25,13 @@ hasnt() { if hasin "$1" "$2"; then bad "$3 (found '$2')"; else ok "$3"; fi; }
 #   gate create --type=human --blocks <bead> --await-id <k> --title <t>
 #     --reason <r> --json — a gate bead blocking <bead>, its description a line
 #     naming <bead> and then the reason; a missing <bead> is an error, exit 1.
+#     The gate's id carries <bead>'s prefix, since gc bd files it in <bead>'s
+#     store, and STUB_CREATE_STORE=<prefix> files it in that store instead.
 #     STUB_CREATE_RACE=<id>|<created_at> files a second writer's gate under the
 #     same key on the same bead in the same call, as a writer racing it would.
 #   gate resolve <id> --reason <r> — closes an open gate with that reason; on a
 #     gate already closed it keeps the first reason and still reports success.
+#     STUB_RESOLVE_FAIL refuses it, exit 1.
 #   update <id> --description <d> — sets the bead's description; STUB_UPDATE_FAIL
 #     refuses it and writes nothing.
 #   show <id> --json — the bead's row; a bead it cannot find is an error object,
@@ -38,8 +41,6 @@ hasnt() { if hasin "$1" "$2"; then bad "$3 (found '$2')"; else ok "$3"; fi; }
 #     other calls.
 #   dep add <issue> <depends-on> --type <t> — records the edge, for the hold
 #     skill's reply from a conversation onto its gate.
-#   list --id <id> --all --json — the bead's row with its outgoing edges as
-#     dependencies, the read-back the hold skill makes of that reply.
 # The store is a JSON array of beads; EDGES holds `<issue>|<type>|<depends-on>`
 # lines, a waiter's `<waiter>|blocks|<gate>` among them.
 BIN="$TMP/bin"; mkdir -p "$BIN"
@@ -76,14 +77,14 @@ case "${1:-} ${2:-}" in
     [ -n "${STUB_CREATE_FAIL:-}" ] && { echo '{"error":"simulated refusal","schema_version":1}'; exit 1; }
     exists "$blocks" || { printf '{"error":"issue not found: %s","schema_version":1}\n' "$blocks"; exit 1; }
     n=$(cat "$STUB_SEQ"); n=$((n + 1)); printf '%s' "$n" > "$STUB_SEQ"
-    id="gate-$n"
+    id="${STUB_CREATE_STORE:-${blocks%%-*}}-gate$n"
     jq -c --arg id "$id" --arg t "$title" --arg k "$key" --arg ty "$typ" \
       --arg d "Ad-hoc gate blocking $blocks
 
 Reason: $reason" \
       '. + [{id: $id, title: $t, description: $d, status: "open", issue_type: "gate",
              await_type: $ty, await_id: $k, created_at: "2026-10-22T00:00:00Z"}]' "$STORE" | save
-    [ -n "${STUB_CREATE_NOEDGE:-}" ] || printf '%s|blocks|%s\n' "$blocks" "$id" >> "$EDGES"
+    printf '%s|blocks|%s\n' "$blocks" "$id" >> "$EDGES"
     if [ -n "${STUB_CREATE_RACE:-}" ]; then
       jq -c --arg id "${STUB_CREATE_RACE%%|*}" --arg at "${STUB_CREATE_RACE#*|}" --arg k "$key" --arg ty "$typ" \
         '. + [{id: $id, title: "the racing writer", status: "open", issue_type: "gate",
@@ -99,7 +100,7 @@ Reason: $reason" \
     exists "$id" || { echo "Error: gate not found: $id" >&2; exit 1; }
     [ "$(jq -r --arg id "$id" '.[] | select(.id == $id) | .issue_type' "$STORE")" = gate ] \
       || { echo "Error: $id is not a gate issue" >&2; exit 1; }
-    [ -n "${STUB_RESOLVE_NOOP:-}" ] && { echo "✓ Gate resolved: $id"; exit 0; }
+    [ -n "${STUB_RESOLVE_FAIL:-}" ] && { echo "Error: simulated refusal" >&2; exit 1; }
     # Another resolver closes the gate first, as a sitting's sign-off can.
     if [ -n "${STUB_RESOLVE_RACE:-}" ]; then
       jq -c --arg id "$id" 'map(if .id == $id and .status != "closed"
@@ -120,11 +121,6 @@ Reason: $reason" \
     exit 0 ;;
 esac
 case "${1:-}" in
-  list)
-    id=""; prev=""; for a in "$@"; do [ "$prev" = "--id" ] && id="$a"; prev="$a"; done
-    deps=$(awk -F'|' -v b="$id" '$1 == b { printf "%s{\"issue_id\":\"%s\",\"depends_on_id\":\"%s\",\"type\":\"%s\"}", (n++ ? "," : ""), $1, $3, $2 }' "$EDGES")
-    jq -c --arg id "$id" --argjson d "[$deps]" '[ .[] | select(.id == $id) | . + {dependencies: $d} ]' "$STORE"
-    exit 0 ;;
   update)
     id="${2:-}"; shift 2
     desc=""
@@ -167,7 +163,7 @@ reset() {
   printf '[%s]' "$beads" > "$STUB_STORE"
   printf '%s' "${2:-}" > "$STUB_EDGES"
   : > "$STUB_GC_LOG"; printf '0' > "$STUB_SEQ"
-  unset STUB_DEP_FAIL STUB_CREATE_FAIL STUB_CREATE_NOEDGE STUB_CREATE_RACE STUB_RESOLVE_NOOP STUB_RESOLVE_RACE STUB_SHOW_FAIL STUB_SHOW_RAW STUB_SHOW_RC STUB_UPDATE_FAIL 2>/dev/null || true
+  unset STUB_DEP_FAIL STUB_CREATE_FAIL STUB_CREATE_STORE STUB_CREATE_RACE STUB_RESOLVE_FAIL STUB_RESOLVE_RACE STUB_SHOW_FAIL STUB_SHOW_RAW STUB_SHOW_RC STUB_UPDATE_FAIL 2>/dev/null || true
 }
 field()   { jq -r --arg id "$1" --arg k "$2" '(.[] | select(.id == $id) | .[$k]) // "<absent>"' "$STUB_STORE"; }
 creates() { cat "$STUB_SEQ"; }
@@ -179,30 +175,30 @@ out=$("$SUT" --subject tk-w --key polecat-blocked --message "Blocked: the target
 err=$(cat "$TMP/err")
 eq "$rc" 0 "filing exits 0"
 eq "$(creates)" 1 "exactly one gate filed"
-eq "$out" "gate-1" "stdout is the id of the gate it filed"
-eq "$(field gate-1 issue_type)" "gate" "the bead is a gate"
-eq "$(field gate-1 await_type)" "human" "its await type is human"
-eq "$(field gate-1 await_id)" "polecat-blocked" "its await id is the situation key"
-has "$(cat "$STUB_EDGES")" "tk-w|blocks|gate-1" "it blocks the subject"
-eq "$(field gate-1 title)" "Blocked: the target branch is gone. Need: a new target." "its title is the message's first line"
-eq "$(field gate-1 description)" "Blocked: the target branch is gone. Need: a new target." "its description is the message, with no head of bd's above it"
-has "$(calls)" "[update] [gate-1] [--description] [Blocked: the target branch is gone. Need: a new target.]" "…set by a write of its own after the create"
+eq "$out" "tk-gate1" "stdout is the id of the gate it filed"
+eq "$(field tk-gate1 issue_type)" "gate" "the bead is a gate"
+eq "$(field tk-gate1 await_type)" "human" "its await type is human"
+eq "$(field tk-gate1 await_id)" "polecat-blocked" "its await id is the situation key"
+has "$(cat "$STUB_EDGES")" "tk-w|blocks|tk-gate1" "it blocks the subject"
+eq "$(field tk-gate1 title)" "Blocked: the target branch is gone. Need: a new target." "its title is the message's first line"
+eq "$(field tk-gate1 description)" "Blocked: the target branch is gone. Need: a new target." "its description is the message, with no head of bd's above it"
+has "$(calls)" "[update] [tk-gate1] [--description] [Blocked: the target branch is gone. Need: a new target.]" "…set by a write of its own after the create"
 has "$(calls)" "[gate] [create] [--type=human] [--blocks] [tk-w] [--await-id] [polecat-blocked]" "the create names the subject as its own word after --blocks"
 hasnt "$(calls)" "[--db]" "no --db pin: gc bd files the gate in the subject's own store"
 hasnt "$(calls)" "[--rig]" "no --rig either"
 hasnt "$(calls)" "[create] [-t]" "no plain bd create: no visit is filed"
-has "$err" "filed gate gate-1 on tk-w [polecat-blocked]" "it reports what it filed on stderr"
+has "$err" "filed gate tk-gate1 on tk-w [polecat-blocked]" "it reports what it filed on stderr"
 
 echo "# the title is the first line, cut at 140 characters with an ellipsis"
 long=$(printf 'word%.0s ' $(seq 1 60))
 reset "$(task tk-w)"
 "$SUT" --subject tk-w --key k --message "$long
 second line" >/dev/null 2>&1
-t=$(field gate-1 title)
+t=$(field tk-gate1 title)
 eq "$(printf '%s' "$t" | jq -Rr 'length')" "140" "an over-long first line is cut to 140 characters"
 has "$t" "…" "the cut is marked with an ellipsis"
 hasnt "$t" "second line" "only the first line becomes the title"
-eq "$(field gate-1 description)" "$long
+eq "$(field tk-gate1 description)" "$long
 second line" "the description keeps the whole message, every line"
 
 echo "# an open human gate under the key already asks: nothing more is filed"
@@ -234,7 +230,7 @@ tk-w|blocks|g-closed
 out=$("$SUT" --subject tk-w --key polecat-blocked --message m 2>/dev/null); rc=$?
 eq "$rc" 0 "exits 0"
 eq "$(creates)" 1 "a gate under another key, a gate of another await type and a closed gate leave the situation unasked"
-eq "$out" "gate-1" "and it files a new one"
+eq "$out" "tk-gate1" "and it files a new one"
 
 echo "# a human gate the subject does not wait on is not its gate"
 # The await id is read only among the subject's own blocks edges; a gate under
@@ -260,11 +256,11 @@ for race in "g-early|2026-10-21T23:59:59Z" "g-late|2026-10-22T00:00:01Z" "g-0|20
   reset "$(task tk-w)"
   out=$(STUB_CREATE_RACE="$race" "$SUT" --subject tk-w --key k --message m 2>"$TMP/err"); rc=$?
   eq "$rc" 0 "$other: exits 0"
-  eq "$out" "gate-1" "$other: stdout names the gate this call filed"
-  eq "$(field gate-1 status)" "open" "$other: this call's gate stands"
+  eq "$out" "tk-gate1" "$other: stdout names the gate this call filed"
+  eq "$(field tk-gate1 status)" "open" "$other: this call's gate stands"
   eq "$(field "$other" status)" "open" "$other: the other writer's gate stands"
   hasnt "$(calls)" "[gate] [resolve]" "$other: no gate is resolved"
-  has "$(cat "$TMP/err")" "filed gate gate-1 on tk-w [k]" "$other: it reports the gate it filed"
+  has "$(cat "$TMP/err")" "filed gate tk-gate1 on tk-w [k]" "$other: it reports the gate it filed"
 done
 
 echo "# a later call finds the two gates racing writers left and files no third"
@@ -275,7 +271,7 @@ eq "$rc" 0 "exits 0"
 eq "$out" "g-early" "it names the gate that came first"
 has "$(cat "$TMP/err")" "gate g-early already asks" "it says the person is already asked"
 eq "$(creates)" 1 "it files no third gate"
-eq "$(field gate-1 status)" "open" "it leaves both gates standing"
+eq "$(field tk-gate1 status)" "open" "it leaves both gates standing"
 hasnt "$(calls)" "[gate] [resolve]" "it resolves neither"
 
 echo "# no quiet period unless the call declares one"
@@ -357,16 +353,17 @@ echo "# a description that does not take leaves the gate filed, and names the re
 reset "$(task tk-w)"
 out=$(STUB_UPDATE_FAIL=1 "$SUT" --subject tk-w --key k --message "Needs a ruling." 2>"$TMP/err"); rc=$?
 eq "$rc" 0 "the filing still exits 0: the gate blocks the subject and asks"
-eq "$out" "gate-1" "…and its id is reported as asking"
-has "$(field gate-1 description)" "Ad-hoc gate blocking tk-w" "…its description still under bd's own head"
-has "$(cat "$TMP/err")" "repair: gc bd update gate-1 --description" "…and the warning names the write that repairs it"
+eq "$out" "tk-gate1" "…and its id is reported as asking"
+has "$(field tk-gate1 description)" "Ad-hoc gate blocking tk-w" "…its description still under bd's own head"
+has "$(cat "$TMP/err")" "repair: gc bd update tk-gate1 --description" "…and the warning names the write that repairs it"
 
-echo "# a gate that does not read back as blocking the subject is a failure"
+echo "# a gate filed in another store than the subject holds nothing, and fails"
 reset "$(task tk-w)"
-out=$(STUB_CREATE_NOEDGE=1 "$SUT" --subject tk-w --key k --message m 2>"$TMP/err"); rc=$?
+out=$(STUB_CREATE_STORE=hq "$SUT" --subject tk-w --key k --message m 2>"$TMP/err"); rc=$?
 eq "$rc" 1 "exit 1"
 eq "$out" "" "no id is reported as asking"
-has "$(cat "$TMP/err")" "repair: gc bd dep add tk-w gate-1 --type=blocks" "the repair names the missing edge"
+has "$(cat "$TMP/err")" "gc bd gate resolve hq-gate1" "the warning names the withdrawal of the stray gate"
+eq "$(grep -c -E '^CALL \[bd\] \[(show|dep)\]' "$STUB_GC_LOG")" 1 "…found from the create's reply: its one read is the dedup before it"
 
 echo "# usage"
 reset "$(task tk-w)"
@@ -405,7 +402,7 @@ eq "$rc" 0 "exit 0"
 eq "$out" "" "nothing resolved"
 has "$(cat "$TMP/err")" "nothing to withdraw" "it says so"
 
-echo "# --retract reads back each gate and reports an answer that stood"
+echo "# --retract reads each resolved gate's reason and reports an answer that stood"
 reset "$(task tk-a),$(gate g1 k open)" "tk-a|blocks|g1
 "
 err=$(STUB_RESOLVE_RACE=1 "$SUT" --retract --subject tk-a --key k --message m 2>&1 >/dev/null); rc=$?
@@ -413,12 +410,13 @@ eq "$rc" 0 "a gate another resolver closed first is no failure"
 eq "$(field g1 close_reason)" "ruled: answered in the sitting" "the first answer stands"
 has "$err" "already cleared; its answer stands: ruled: answered in the sitting" "and is reported"
 
-echo "# --retract fails when a gate does not close"
+echo "# --retract fails when the store refuses a resolve"
 reset "$(task tk-a),$(gate g1 k open)" "tk-a|blocks|g1
 "
-err=$(STUB_RESOLVE_NOOP=1 "$SUT" --retract --subject tk-a --key k --message m 2>&1 >/dev/null); rc=$?
+err=$(STUB_RESOLVE_FAIL=1 "$SUT" --retract --subject tk-a --key k --message m 2>&1 >/dev/null); rc=$?
 eq "$rc" 1 "exit 1"
 has "$err" "did not resolve" "it names the gate that stayed open"
+eq "$(field g1 status)" "open" "…which stays open for a person"
 
 echo "# --retract on an unreadable bead fails closed"
 reset "$(task tk-a)"
@@ -429,11 +427,11 @@ echo "# the old name hands a call to human-gate.sh"
 reset "$(task tk-w)"
 out=$("$OLD_NAME" --subject tk-w --key k --message "via the old name" 2>/dev/null); rc=$?
 eq "$rc" 0 "escalate.sh files through the helper"
-eq "$out" "gate-1" "with the helper's output"
-eq "$(field gate-1 await_id)" "k" "the gate carries the key"
+eq "$out" "tk-gate1" "with the helper's output"
+eq "$(field tk-gate1 await_id)" "k" "the gate carries the key"
 out=$("$OLD_NAME" --retract --subject tk-w --key k --message gone 2>/dev/null); rc=$?
 eq "$rc" 0 "a retract through the old name works too"
-eq "$(field gate-1 close_reason)" "moot: gone" "and resolves the gate"
+eq "$(field tk-gate1 close_reason)" "moot: gone" "and resolves the gate"
 "$OLD_NAME" --subject tk-w --key "bad key" --message m >/dev/null 2>&1
 eq "$?" 2 "the helper's own refusals come back through the old name"
 
@@ -441,7 +439,7 @@ echo "# the old name drops the retired --pool, so an old call still files"
 reset "$(task tk-w)"
 out=$("$OLD_NAME" --subject tk-w --key k --message m --pool gc-toolkit/gc-toolkit.converse 2>"$TMP/err"); rc=$?
 eq "$rc" 0 "a call that carries --pool exits 0"
-eq "$out" "gate-1" "and files its gate through the helper"
+eq "$out" "tk-gate1" "and files its gate through the helper"
 has "$(cat "$TMP/err")" "--pool gc-toolkit/gc-toolkit.converse dropped" "the dropped flag is reported on stderr"
 
 echo "# the old name files a call on a wisp as a patrol finding"
@@ -556,8 +554,8 @@ echo "# a row with no type is a bead that can wait, unless it carries the sessio
 reset "$(task tk-w),{\"id\":\"tk-legacy\",\"title\":\"legacy\",\"status\":\"open\"}"; : > "$STUB_PF_LOG"
 out=$("$HSUT/escalate.sh" --subject tk-legacy --key k --message m 2>/dev/null); rc=$?
 eq "$rc" 0 "a bead whose row carries no type: the helper files"
-eq "$out" "gate-1" "  ... its gate on the bead"
-has "$(cat "$STUB_EDGES")" "tk-legacy|blocks|gate-1" "  ... which blocks the bead"
+eq "$out" "tk-gate1" "  ... its gate on the bead"
+has "$(cat "$STUB_EDGES")" "tk-legacy|blocks|tk-gate1" "  ... which blocks the bead"
 eq "$(cat "$STUB_PF_LOG")" "" "  ... and no finding is filed"
 reset "$(task tk-w),{\"id\":\"hq-broken\",\"title\":\"s\",\"status\":\"open\",\"labels\":[\"agent:rig/rig.witness\",\"gc:session\"]}"; : > "$STUB_PF_LOG"
 "$HSUT/escalate.sh" --subject hq-broken --key k --message m >/dev/null 2>"$TMP/err"; rc=$?
@@ -567,7 +565,7 @@ eq "$(creates)" 0 "  ... and no gate blocks the damaged session bead"
 has "$(cat "$TMP/err")" "'hq-broken' names a session" "  ... and the translation says why"
 reset "$(task tk-w),{\"id\":\"tk-typed\",\"title\":\"t\",\"status\":\"open\",\"issue_type\":\"task\",\"labels\":[\"gc:session\"]}"; : > "$STUB_PF_LOG"
 out=$("$HSUT/escalate.sh" --subject tk-typed --key k --message m 2>/dev/null); rc=$?
-eq "$rc$out" "0gate-1" "a row whose type is not session is a bead that can wait, label or not"
+eq "$rc$out" "0tk-gate1" "a row whose type is not session is a bead that can wait, label or not"
 eq "$(cat "$STUB_PF_LOG")" "" "  ... and no finding is filed"
 
 echo "# a subject the old name cannot prove is no bead goes to the helper"
@@ -575,7 +573,7 @@ for bsrc in 0 3; do
   reset "$(task tk-w)"; : > "$STUB_PF_LOG"
   out=$(STUB_BS_RC=$bsrc "$HSUT/escalate.sh" --subject tk-w --key k --message m 2>/dev/null); rc=$?
   eq "$rc" 0 "bead-store.sh exit $bsrc on a work bead: the helper files"
-  eq "$out" "gate-1" "  ... its gate on the bead"
+  eq "$out" "tk-gate1" "  ... its gate on the bead"
   eq "$(cat "$STUB_PF_LOG")" "" "  ... and no finding is filed"
 done
 
@@ -584,7 +582,7 @@ echo "# a call about a bead costs the hand-off one read of its row"
 # asked only when the row does not read.
 reset "$(task tk-w)"; : > "$STUB_PF_LOG"; : > "$STUB_BS_LOG"
 out=$("$HSUT/escalate.sh" --subject tk-w --key k --message m 2>/dev/null); rc=$?
-eq "$rc$out" "0gate-1" "the helper files on the bead"
+eq "$rc$out" "0tk-gate1" "the helper files on the bead"
 eq "$(grep -c '\[show\] \[tk-w\]' "$STUB_GC_LOG")" "1" "  ... after one read of the bead's row"
 eq "$(cat "$STUB_BS_LOG")" "" "  ... and bead-store.sh is not asked"
 reset "$(task tk-w)"; : > "$STUB_PF_LOG"; : > "$STUB_BS_LOG"
@@ -638,20 +636,20 @@ hold() { (CONV="$HERE" CONVERSATION="$1" NEED="$2" bash "$TMP/hold-block" 2>"$TM
 reset "$(task tk-pr),$(task tk-ca),$(task tk-cb)"
 out=$(hold tk-ca "Keep the retry?"); rc=$?
 eq "$rc" 0 "the first conversation's hold exits 0"
-has "$out" "gate gate-1 holds what waits" "…filing a gate on the bead"
+has "$out" "gate tk-gate1 holds what waits" "…filing a gate on the bead"
 out=$(hold tk-cb "Ship the docs first?"); rc=$?
 eq "$rc" 0 "the second conversation's hold exits 0"
-has "$out" "gate gate-2 holds what waits" "…filing a gate of its own rather than adopting the first one's"
+has "$out" "gate tk-gate2 holds what waits" "…filing a gate of its own rather than adopting the first one's"
 eq "$(creates)" 2 "two conversations hold with two gates"
-eq "$(field gate-1 await_id) $(field gate-2 await_id)" "conversation.tk-ca conversation.tk-cb" "each under a key that names its conversation"
-eq "$(field gate-2 title)" "Ship the docs first?" "the second gate asks the second question"
-has "$(cat "$STUB_EDGES")" "tk-pr|blocks|gate-2" "both gates block the bead, so its merge waits for both rulings"
-has "$(cat "$STUB_EDGES")" "tk-cb|replies-to|gate-2" "each conversation replies to its own gate"
-hasnt "$(cat "$STUB_EDGES")" "tk-cb|replies-to|gate-1" "…and not to the other conversation's"
+eq "$(field tk-gate1 await_id) $(field tk-gate2 await_id)" "conversation.tk-ca conversation.tk-cb" "each under a key that names its conversation"
+eq "$(field tk-gate2 title)" "Ship the docs first?" "the second gate asks the second question"
+has "$(cat "$STUB_EDGES")" "tk-pr|blocks|tk-gate2" "both gates block the bead, so its merge waits for both rulings"
+has "$(cat "$STUB_EDGES")" "tk-cb|replies-to|tk-gate2" "each conversation replies to its own gate"
+hasnt "$(cat "$STUB_EDGES")" "tk-cb|replies-to|tk-gate1" "…and not to the other conversation's"
 out=$(hold tk-ca "Keep the retry?"); rc=$?
 eq "$rc" 0 "a resumed hold exits 0"
 eq "$(creates)" 2 "…filing no second gate"
-has "$out" "gate gate-1 holds what waits" "…and finding the gate it filed"
+has "$out" "gate tk-gate1 holds what waits" "…and finding the gate it filed"
 
 echo "# the deacon's filed gates reach its incident ledger"
 # The helper calls the ledger by sibling path, so it runs from a private copy
@@ -673,7 +671,7 @@ GC_AGENT=gc-toolkit.deacon "$LSUT/human-gate.sh" --subject tk-a --key dolt-backu
 eq "$rc" 0 "filing exits 0 with the ledger wired in"
 eq "$(ledger | grep -c .)" "1" "a filed gate appends exactly one ledger entry"
 has "$(ledger)" "dolt-backup-mycity: manifest is 30h old" "carrying the key and the title"
-has "$(ledger)" "bead:gate-1" "and pointing at the gate it filed"
+has "$(ledger)" "bead:tk-gate1" "and pointing at the gate it filed"
 GC_AGENT=gc-toolkit.deacon "$LSUT/human-gate.sh" --subject tk-a --key dolt-backup-mycity --message m >/dev/null 2>&1
 eq "$(ledger | grep -c .)" "1" "a dedup writes nothing more"
 reset "$(task tk-a)"; : > "$STUB_LEDGER_LOG"

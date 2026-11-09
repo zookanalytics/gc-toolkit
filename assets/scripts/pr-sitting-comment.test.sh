@@ -138,9 +138,9 @@ body_of() { jq -r --arg m "<!-- gc:sitting:$1 -->" '.[] | select(.body|contains(
 drawn() { body_of tk-conv | grep -vx '<!-- gc:city -->'; }
 OPEN_LINES="<!-- gc:sitting:tk-conv -->$nl### Visit tk-conv on tk-sub${nl}Topic: how the retry should work"
 
-echo "# post, once the title reads back as the topic, puts the open comment up"
+echo "# post puts the open comment up, showing the conversation's title"
 printf '[]' >"$STATE"; conv in_progress "how the retry should work"; acts
-rc=$(run p1 -- post --sitting tk-conv --topic "how the retry should work")
+rc=$(run p1 -- post --sitting tk-conv)
 ok "post exits 0" "[ '$rc' = 0 ]"
 GH1="$(cat "$TMPD/gh.p1.log")"
 has "pr comment 41" "$GH1" "post puts a new comment on PR 41"
@@ -149,30 +149,23 @@ same "$OPEN_LINES" "$(drawn)" "the comment names the visit, the bead it is on an
 has "<!-- gc:city -->" "$(body_of tk-conv)" "the comment carries the city's provenance mark (posted through pr-post.sh)"
 hasnt "rig list" "$(cat "$TMPD/gc.p1.log")" "…and nothing looks up the city's rigs"
 
-echo "# while the title is still the words the visit opened with, post posts nothing"
-printf '[]' >"$STATE"; conv in_progress "$OPENER"
-rc=$(run p2 -- post --sitting tk-conv --topic "how the retry should work")
-ok "post exits 0" "[ '$rc' = 0 ]"
-ok "nothing is posted" "[ \$(jq 'length' '$STATE') -eq 0 ]"
-has "does not read back as the topic" "$(cat "$TMPD/err.p2")" "…and it says the title did not read back"
-
 echo "# a new topic redraws the same comment, and the same one changes nothing"
 printf '[]' >"$STATE"; conv in_progress "how the retry should work"
-run p3a -- post --sitting tk-conv --topic "how the retry should work" >/dev/null
+run p3a -- post --sitting tk-conv >/dev/null
 conv in_progress "whether to retire it"
-rc=$(run p3 -- post --sitting tk-conv --topic "whether to retire it")
+rc=$(run p3 -- post --sitting tk-conv)
 ok "a second topic exits 0" "[ '$rc' = 0 ]"
 has "PATCH" "$(cat "$TMPD/gh.p3.log")" "the new topic edits the comment"
 hasnt "pr comment" "$(cat "$TMPD/gh.p3.log")" "…and posts no second comment"
 ok "still exactly one comment on the thread" "[ \$(jq 'length' '$STATE') -eq 1 ]"
 has "Topic: whether to retire it" "$(body_of tk-conv)" "the comment shows the new title"
-rc=$(run p4 -- post --sitting tk-conv --topic "whether to retire it")
+rc=$(run p4 -- post --sitting tk-conv)
 hasnt "PATCH" "$(cat "$TMPD/gh.p4.log")" "the same topic again edits nothing"
 has "already shows its bead" "$(cat "$TMPD/out.p4")" "…and says the comment already shows it"
 
 echo "# refresh on an open conversation keeps the open lines, whatever the bead holds for later"
 printf '[]' >"$STATE"; conv in_progress "how the retry should work"
-run r0 -- post --sitting tk-conv --topic "how the retry should work" >/dev/null
+run r0 -- post --sitting tk-conv >/dev/null
 conv in_progress "how the retry should work" "an earlier framing's hand-back"; acts "Sent work: a retry with a cap."
 rc=$(run r1 -- refresh --sitting tk-conv)
 ok "refresh exits 0" "[ '$rc' = 0 ]"
@@ -217,7 +210,7 @@ same "$OPEN_LINES$nl${nl}Conclusion: none recorded$nl${nl}Actions: none" "$(draw
 
 echo "# a topic is shown as the bead holds it, a rig's name included"
 printf '[]' >"$STATE"; conv in_progress "the same defect on rig-b"
-run t1 -- post --sitting tk-conv --topic "the same defect on rig-b" >/dev/null
+run t1 -- post --sitting tk-conv >/dev/null
 has "Topic: the same defect on rig-b" "$(body_of tk-conv)" "no filter stands between the bead and the comment"
 
 echo "# a visit that never named its topic has no comment, and its close posts nothing"
@@ -236,7 +229,7 @@ has "$OPEN_LINES" "$(body_of tk-conv)" "…and the comment shows the bead"
 
 echo "# what the comment cannot read leaves the PR as it is"
 printf '[]' >"$STATE"; conv in_progress "how the retry should work"
-run b0 -- post --sitting tk-conv --topic "how the retry should work" >/dev/null
+run b0 -- post --sitting tk-conv >/dev/null
 BEFORE="$(body_of tk-conv)"
 conv closed "how the retry should work" "$HANDBACK"; acts "Ruled: cap the retry at five tries"
 rc=$(run b1 COMMENTS_READ=fail -- refresh --sitting tk-conv)
@@ -250,39 +243,39 @@ rc=$(run b3 GH_READ=fail -- refresh --sitting tk-conv)
 ok "an unreadable thread exits 0" "[ '$rc' = 0 ]"
 hasnt "PATCH" "$(cat "$TMPD/gh.b3.log")" "…and edits nothing"
 printf '[]' >"$STATE"; conv in_progress "how the retry should work"
-rc=$(run b4 GH_READ=fail -- post --sitting tk-conv --topic "how the retry should work")
+rc=$(run b4 GH_READ=fail -- post --sitting tk-conv)
 hasnt "pr comment" "$(cat "$TMPD/gh.b4.log")" "post skips an unreadable thread rather than risk a second comment"
 
 echo "# a bead that is not a conversation is not drawn"
 jq '.dependencies = []' "$FIX/conv.json" >"$FIX/c.t" && mv "$FIX/c.t" "$FIX/conv.json"
-rc=$(run x1 -- post --sitting tk-conv --topic "how the retry should work")
+rc=$(run x1 -- post --sitting tk-conv)
 ok "it exits 0" "[ '$rc' = 0 ]"
 ok "…and nothing is posted" "[ \$(jq 'length' '$STATE') -eq 0 ]"
 
 echo "# the PR is ours to comment on only where the subject and the checkout agree"
 conv in_progress "how the retry should work"
-rc=$(PR_NUMBER="" PR_URL="" run s1 -- post --sitting tk-conv --topic "how the retry should work")
+rc=$(PR_NUMBER="" PR_URL="" run s1 -- post --sitting tk-conv)
 ok "a subject with no PR exits 0" "[ '$rc' = 0 ]"
 ok "…and makes no gh call" "[ ! -s '$TMPD/gh.s1.log' ]"
-rc=$(PR_URL="https://github.com/other/thing/pull/41" run s2 -- post --sitting tk-conv --topic "how the retry should work")
+rc=$(PR_URL="https://github.com/other/thing/pull/41" run s2 -- post --sitting tk-conv)
 ok "a PR in another repository exits 0" "[ '$rc' = 0 ]"
 hasnt "pr comment" "$(cat "$TMPD/gh.s2.log")" "…and posts nothing there"
-rc=$(PR_URL="" run s3 -- post --sitting tk-conv --topic "how the retry should work")
+rc=$(PR_URL="" run s3 -- post --sitting tk-conv)
 has "pr comment 41" "$(cat "$TMPD/gh.s3.log")" "a bare pr_number posts on the checkout's origin"
 printf '[]' >"$STATE"
-rc=$(run s4 --in "$BARE" -- post --sitting tk-conv --topic "how the retry should work")
+rc=$(run s4 --in "$BARE" -- post --sitting tk-conv)
 ok "a checkout with no GitHub origin exits 0" "[ '$rc' = 0 ]"
 ok "…and makes no gh call" "[ ! -s '$TMPD/gh.s4.log' ]"
 
 echo "# usage"
-for args in "" "close --sitting tk-conv" "post" "post --sitting tk-conv" "refresh --sitting tk-conv --topic x" \
-    "post --sitting tk-conv --topic x --subject tk-sub" "refresh tk-conv"; do
+for args in "" "close --sitting tk-conv" "post" "refresh --sitting tk-conv --topic x" \
+    "post --sitting tk-conv --topic x" "post --sitting tk-conv --subject tk-sub" "refresh tk-conv"; do
   rc=$(run u1 -- $args)
   ok "'$args' is a usage error (exit 2)" "[ '$rc' = 2 ]"
 done
 rc=$(run u2 -- refresh --help)
 ok "--help exits 0" "[ '$rc' = 0 ]"
-has "post --sitting <task> --topic <text>" "$(cat "$TMPD/out.u2")" "…and prints the usage"
+has "post --sitting <task>" "$(cat "$TMPD/out.u2")" "…and prints the usage"
 
 echo
 [ "$FAIL" -eq 0 ] && echo "pr-sitting-comment: all passed" || echo "pr-sitting-comment: FAILURES"

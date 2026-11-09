@@ -21,16 +21,15 @@ notes.
 
 **1. Record the hold on the conversation and the subject.** The
 conversation's `holding:` line is the trace step 1's restart rule reads, so
-the framing waits until it reads back:
+the framing waits until its write exits 0:
 ```bash
 NEED="<the one decision or input needed, at most 130 characters>"
 gc bd update "$CONVERSATION" --append-notes "holding: $NEED" \
-  && gc bd show "$CONVERSATION" --json | jq -e --arg n "holding: $NEED" '(.[0].notes // "") | contains($n)' >/dev/null \
   && gc bd update "$SUBJECT" --append-notes "Conversation $CONVERSATION holding: $NEED" \
   && echo "the hold is recorded"
 ```
-No "the hold is recorded" line means it did not land: do NOT post the
-framing. Raise the failure in the thread, and do not describe the subject as
+No "the hold is recorded" line means the store refused a write: do NOT post
+the framing. Raise the failure in the thread, and do not describe the subject as
 held.
 
 **2. Gate what must wait for the answer.** The gates the conversation
@@ -47,14 +46,13 @@ subject, and a PR keeps moving while you talk, which is the shepherd case a
 conversation opened to help a stuck PR wants. The key names this
 conversation, `conversation.<its id>`, so a resumed hold finds the gate it
 filed instead of filing a second, and two conversations on one bead each hold
-with a gate of their own. Reply to the gate from the conversation and read
-the reply back, so a resumed or handed-off conversation knows the gate it owes
-without a search by key:
+with a gate of their own. Reply to the gate from the conversation, so a
+resumed or handed-off conversation knows the gate it owes without a search by
+key:
 ```bash
 GATE=$("$CONV/human-gate.sh" --subject <the bead that must wait> --key "conversation.$CONVERSATION" --message "$NEED
 <what the operator owes, and what waits on it>") \
   && gc bd dep add "$CONVERSATION" "$GATE" --type replies-to \
-  && gc bd list --id "$CONVERSATION" --all --json | jq -e --arg g "$GATE" 'any(.[0].dependencies[]?; .type == "replies-to" and .depends_on_id == $g)' >/dev/null \
   && echo "gate $GATE holds what waits, and the conversation replies to it"
 ```
 A gate that blocks a bead with open children pauses every part of it that has
