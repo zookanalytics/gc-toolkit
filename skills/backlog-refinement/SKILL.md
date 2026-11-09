@@ -1,6 +1,6 @@
 ---
 name: backlog-refinement
-description: Use when you are the po in a backlog refinement sitting, working the queue of held new work (gc beads list --label hold:mayor) with the operator, such as sorting the queue into proposals, sequencing the work to place, bringing it in pieces and applying each ruling. For a portfolio sync over the epics, your prompt's levers are the method.
+description: Use when you are the po in a backlog refinement sitting, working the queue of held new work (the beads carrying hold:mayor) with the operator, such as sorting the queue into proposals, sequencing the work to place, bringing it in pieces and applying each ruling. For a portfolio sync over the epics, your prompt's levers are the method.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
@@ -25,9 +25,15 @@ states (your prompt's "The rig's target"). Then list the queue, grouped by rig,
 with each bead's priority:
 
 ```bash
-gc beads list --label hold:mayor --format=json \
-  | jq -r '(if type == "array" then . else .beads end)[] | "\(.id)\tP\(.priority // "-")\t\(.title)"' | sort
+gc beads list --format=json \
+  | jq -r '(if type == "array" then . else .beads end)[]
+      | select(any(.labels[]?; test("^[[:space:]]*hold:mayor[[:space:]]*$"; "i")))
+      | "\(.id)\tP\(.priority // "-")\t\(.title)"' | sort
 ```
+
+The read takes the label trimmed and in any case, as Gas City's hold does.
+`--label hold:mayor` matches only the exact text, so it would leave out a bead a
+person labeled `Hold:Mayor`, which no worker is served either.
 
 Read the open epics of each rig the queue reaches, with what holds each, since
 most dispositions name one (your prompt's "Reads").

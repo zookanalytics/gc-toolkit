@@ -57,8 +57,9 @@ Work that does not serve the target is a proposal to park it or leave it held.
 
 ## Reads
 
-- The queue: `gc beads list --label hold:mayor --format=json | jq -r '(if type == "array" then . else .beads end)[] | "\(.id)\tP\(.priority // "-")\t\(.title)"'`.
-  A failing store can drop its rows unannounced.
+- The queue: `gc beads list --format=json | jq -r '(if type == "array" then . else .beads end)[] | select(any(.labels[]?; test("^[[:space:]]*hold:mayor[[:space:]]*$"; "i"))) | "\(.id)\tP\(.priority // "-")\t\(.title)"'`.
+  It reads the label trimmed and in any case, as Gas City's hold does, which
+  `--label` does not. A failing store can drop its rows unannounced.
 - A bead: `gc bd --rig <rig> show <id>`.
 - The epics: `gc bd --rig <rig> list --type epic --status open --json`, and for
   each `"$(gc {{ .BindingName }} scripts-dir)/bead-context.sh" <epic> --frontier --horizon`,

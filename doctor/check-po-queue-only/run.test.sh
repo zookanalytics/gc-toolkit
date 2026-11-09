@@ -19,7 +19,9 @@
 #     either hold label and any spelling Gas City reads, read mail, a closed
 #     bead, a queued bead whose only mark is a branch, and a queued bead whose
 #     run has ended;
-#   - the queue in both shapes `gc beads list` prints;
+#   - the queue in both shapes `gc beads list` prints, and the queue is each
+#     listed bead carrying hold:mayor in any spelling Gas City reads, and no
+#     other;
 #   - a city with no po: only the queue is judged, and no store is searched;
 #   - a suspended rig's store is never read, and its queued beads are named;
 #   - fail-closed: an unreadable agent list, rig list, queue (a failed read and
@@ -72,7 +74,13 @@ case "$1 $2" in
   "agent list") rc="${AGENTS_RC:-0}"; [ "$rc" -eq 0 ] || { echo "agent list: controller down" >&2; exit "$rc"; }; cat "$AGENTS_JSON" ;;
   "rig list")   rc="${RIGS_RC:-0}"; [ "$rc" -eq 0 ] || { echo "rig list: no city" >&2; exit "$rc"; }; cat "$RIGS_JSON" ;;
   "beads list") rc="${QUEUE_RC:-0}"; [ "$rc" -eq 0 ] || { echo "beads list: a store did not answer" >&2; exit "$rc"; }
-                printf '%s\n' "$*" >> "$GC_LOG"; cat "$QUEUE_JSON" ;;
+                printf '%s\n' "$*" >> "$GC_LOG"
+                # --label keeps a bead only when one label is exactly the text
+                # asked for, as Gas City's beadHasLabel compares.
+                want=""; while [ $# -gt 0 ]; do case "$1" in --label) want="$2"; shift ;; --label=*) want="${1#--label=}" ;; esac; shift; done
+                if [ -z "$want" ]; then cat "$QUEUE_JSON"
+                else jq -c --arg w "$want" 'def keep: map(select(any(.labels[]?; . == $w)));
+                    if type == "array" then keep elif (.beads | type) == "array" then .beads |= keep else . end' "$QUEUE_JSON" 2>/dev/null || cat "$QUEUE_JSON"; fi ;;
   "mail inbox") rc="${INBOX_RC:-0}"; [ "$rc" -eq 0 ] || { echo "gc mail inbox: mail store unreachable" >&2; exit "$rc"; }
                 printf '%s\n' "$*" >> "$GC_LOG"; cat "$INBOX_JSON" ;;
   "session list") rc="${SESSIONS_RC:-0}"; [ "$rc" -eq 0 ] || { echo "gc session list: listing sessions: store down" >&2; exit "$rc"; }
@@ -145,11 +153,11 @@ OTHER='{"id":"al-other","status":"in_progress","issue_type":"task","assignee":"a
 reset
 store alpha "$POOL" "$OTHER" "$NEW1"
 store town "$NEW2"
-queue "$NEW1" "$NEW2"
+queue "$NEW1" "$NEW2" "$POOL"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a city where nothing reaches the po but its queue passes"
 has "$OUT" "OK: the po receives nothing but its queue" "the pass message is the OK line"
-has "$OUT" "2 queued bead(s)" "…and it counts the queue it read"
+has "$OUT" "2 queued bead(s)" "…and it counts the queue it read, not the bead the listing holds that no hold holds"
 LOG=$(cat "$TMP/bd.log")
 has "$LOG" "alpha list --db $TMP/alpha/.beads --metadata-field gc.routed_to=gc-toolkit.po --include-ephemeral" "the route listing asks for the po's qualified name, ephemeral rows included"
 has "$LOG" 'alpha query --db '"$TMP/alpha/.beads"' assignee="gc-toolkit.po" OR assignee="gc-toolkit.prior-po" OR assignee="gc-toolkit__po" OR assignee="hq-sess1" --json' "one assignee query names the po's alias, its earlier alias, its session's runtime name and its session id"
@@ -158,7 +166,8 @@ has "$LOG" "town list" "the town store is searched too"
 hasnt "$LOG" "gc.routed_to=gc-toolkit.repo" "an agent whose name only ends in po is not the po"
 has "$(cat "$TMP/gc.log")" "mail inbox gc-toolkit.po --json" "the mailbox is read at the po's address"
 has "$(cat "$TMP/gc.log")" "session list --template gc-toolkit.po --json" "the seat's sessions are read by its template"
-has "$(cat "$TMP/gc.log")" "beads list --label hold:mayor --format=json" "the queue is read the way the po reads it"
+has "$(cat "$TMP/gc.log")" "beads list --format=json" "the queue is read the way the po reads it"
+hasnt "$(cat "$TMP/gc.log")" "beads list --label" "…with no exact-label filter, which would miss another spelling of the hold"
 
 # --- 2. a bead routed to the po ---------------------------------------------
 reset
@@ -305,6 +314,21 @@ printf '{"beads":[%s],"_cache_age_s":4}' '{"id":"al-q1","status":"open","issue_t
 OUT=$(QUEUE_JSON="$TMP/queue-api.json" run_check); RC=$?
 eq "$RC" "2" "the queue read through the API is judged the same way"
 has "$OUT" "queued bead al-q1 carries anchor_bead=al-anchor" "…its beads are read out of the envelope"
+
+# --- 11b. the queue is each bead hold:mayor holds, in any spelling -----------
+# The listing is every open bead, and the queue is the ones Gas City holds under
+# hold:mayor however they spell it. al-s1 carries only an upper-case spelling
+# with spaces, and an assignee; al-s2 carries no hold; al-s3 carries only
+# hold:external, which holds it for an actor outside the city, not for the po.
+reset
+queue '{"id":"al-s1","status":"open","issue_type":"task","assignee":"someone","labels":[" HOLD:Mayor "],"metadata":{}}' \
+      '{"id":"al-s2","status":"open","issue_type":"task","assignee":"someone","metadata":{}}' \
+      '{"id":"al-s3","status":"open","issue_type":"task","assignee":"someone","labels":["hold:external"],"metadata":{}}'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a bead held under another spelling of hold:mayor is judged as queued"
+has "$OUT" "queued bead al-s1 is assigned to someone" "…so what already sends it is named"
+hasnt "$OUT" "al-s2" "a bead no hold holds is not in the queue"
+hasnt "$OUT" "al-s3" "…nor a bead only hold:external holds"
 
 # --- 12. a city with no po ---------------------------------------------------
 reset

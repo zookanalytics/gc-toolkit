@@ -4,13 +4,14 @@
 #
 # The po (agents/po) is the operator's prioritization partner, and it owns
 # little. What it receives is the queue of new work no epic holds, the beads
-# carrying Gas City's hold:mayor label, which a sitting reads with
-# `gc beads list --label hold:mayor`. Nothing at a writer keeps anything else
-# away from it: an assignment, a mail and `gc sling <po> --on <formula>` each
-# reach the seat whatever its config says, and any writer can set a label. So
-# this check observes the invariant after the fact, one check for every path
-# that leaves a record, and a new path shows up here within one sweep of its
-# first use. A delivered nudge leaves no record, so no check sees one.
+# carrying Gas City's hold:mayor label in any spelling Gas City reads as the
+# hold, which a sitting reads from `gc beads list`. Nothing at a writer keeps
+# anything else away from it: an assignment, a mail and `gc sling <po> --on
+# <formula>` each reach the seat whatever its config says, and any writer can
+# set a label. So this check observes the invariant after the fact, one check
+# for every path that leaves a record, and a new path shows up here within one
+# sweep of its first use. A delivered nudge leaves no record, so no check sees
+# one.
 #
 # It reports four things:
 #   - A bead that no hold holds and that is routed to the po (gc.routed_to) or
@@ -46,11 +47,15 @@
 # that configures no po has no seat to reach, so only the queue is judged
 # there.
 #
-# The queue's JSON is an array from the direct read and
-# {"beads": [...], "_cache_age_s": n} through the supervisor API, and the check
-# takes both. A queued bead lives in the rig store its id's prefix names. A
-# suspended rig's store is not read, because querying it would auto-start an
-# orphan Dolt server.
+# The queue's JSON is an array from the direct read and {"beads": [...],
+# "_cache_age_s": n} through the supervisor API, and the check takes both. The
+# queue is each open bead of that listing on which
+# dispatch_hold_spellings("hold:mayor") finds a spelling, trimmed and in any
+# case, as Gas City's hold reads it. `gc beads list --label` matches a label's
+# exact text, so it would leave out a bead a person labeled `Hold:Mayor`, which
+# Gas City holds all the same. A queued bead lives in the rig store its id's
+# prefix names. A suspended rig's store is not read, because querying it would
+# auto-start an orphan Dolt server.
 #
 # The rig map, the agent list and the queue are read at once, and the po's
 # mailbox and sessions once the agent list names it. Each store is then
@@ -205,7 +210,7 @@ one_array() { jq -e -s 'length == 1 and (.[0] | type) == "array"' "$1" >/dev/nul
 RIG_MAP="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/rig-map.sh"
 read_to "$WORK/rigs.json" "$RIG_MAP" </dev/null >/dev/null 2>&1 & rigs_pid=$!
 read_to "$WORK/agents.json" gc agent list --json </dev/null >/dev/null 2>&1 & agents_pid=$!
-read_to "$WORK/queue.json" gc beads list --label hold:mayor --format=json </dev/null >/dev/null 2>&1 & queue_pid=$!
+read_to "$WORK/queue.json" gc beads list --format=json </dev/null >/dev/null 2>&1 & queue_pid=$!
 
 # The po: each agent whose qualified name ends in the name po, and its address
 # that qualified name, which is what a route to it carries.
@@ -256,15 +261,16 @@ STORES_JSON=$(jq -c '[ .rigs[]? | objects | select((.path // "") != "" and ((.pr
     | group_by(.key) | map(select(length == 1) | .[0]) | from_entries' "$WORK/rigs.json" 2>/dev/null)
 [ "$rigs_ok" = 1 ] && [ -n "$STORES_JSON" ] || STORES_JSON='{}'
 
-# The queue, in either shape `gc beads list` prints it. An unread queue leaves
-# no queued bead to judge, and says so.
+# The queue, in either shape `gc beads list` prints it: the beads that carry
+# hold:mayor in some spelling. An unread queue leaves no queued bead to judge,
+# and says so.
 wait "$queue_pid"; queue_rc=$?
-if [ "$queue_rc" -ne 0 ] || ! jq -c -s 'if length != 1 then error("not one document") else .[0] end
+if [ "$queue_rc" -ne 0 ] || ! jq -c -s "$DISPATCH_PATH_JQ"'if length != 1 then error("not one document") else .[0] end
         | if type == "array" then . elif type == "object" and (.beads | type) == "array" then .beads
           else error("neither queue shape") end
-        | [ .[] | objects ]' "$WORK/queue.json" > "$WORK/queued.json" 2>/dev/null; then
+        | [ .[] | objects | select(dispatch_hold_spellings("hold:mayor") | length > 0) ]' "$WORK/queue.json" > "$WORK/queued.json" 2>/dev/null; then
     err=$(err_of "$WORK/queue.json")
-    warnings+=("could not read the po's queue, \`gc beads list --label hold:mayor --format=json\` (rc=$queue_rc), so no held bead was checked${err:+; stderr: $err}")
+    warnings+=("could not read the po's queue, \`gc beads list --format=json\` (rc=$queue_rc), so no held bead was checked${err:+; stderr: $err}")
     printf '[]' > "$WORK/queued.json"
 fi
 
