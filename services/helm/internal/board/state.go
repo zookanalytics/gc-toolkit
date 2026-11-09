@@ -133,8 +133,9 @@ func deriveState(in stateInput, f Facts) beadState {
 	}
 	gates, work := splitWaits(in.blockers)
 	routed := in.metadata[mdRoutedTo] == routedHuman
-	if len(gates) > 0 || routed || f.human.holds(in.id) {
-		talk := len(gates) == 0 && !routed && !f.human.holdsWork(in.id)
+	gated := f.human.parksWork(in.id, in.blockers)
+	if len(gates) > 0 || routed || gated || f.human.tracks(in.id) {
+		talk := len(gates) == 0 && !routed && !gated
 		return beadState{kind: stateParked, waits: gates, conversationOnly: talk}
 	}
 	selfStart := poolRoute(in.metadata) || in.metadata[mdDispatchWhenReady] != "" ||
@@ -148,8 +149,9 @@ func deriveState(in stateInput, f Facts) beadState {
 // splitWaits sorts the waits the store says still hold a bead ([WaitPending])
 // into the ones a person holds it at and the ones it waits its turn behind,
 // each oldest first. A wait the store did not answer is in neither, because
-// the board reads whether a wait holds from the store's answer alone, and
-// [stateInput.unread] counts it.
+// a wait the bead's blockers carry holds it by the store's answer alone, a
+// gate's own row included ([humanIndex.parksWork]), and [stateInput.unread]
+// counts it.
 func splitWaits(blockers []Blocker) (gates, work []Blocker) {
 	for _, b := range blockers {
 		switch {

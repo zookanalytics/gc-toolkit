@@ -2115,11 +2115,18 @@ func TestDeriveStateReadsTheGraphNotTheMarkers(t *testing.T) {
 	// blocker reads open on its row and holds nothing, and a waits-for spawner
 	// reads closed and still holds while its gate does. A wait the store did not
 	// answer is unread whatever its row reads, so the bead waits its turn behind
-	// it: neither a gate nor a landing is judged from the far bead's status.
+	// it: neither a gate nor a landing is judged from the far bead's status. A
+	// human gate's own row parks only a bead whose blockers do not carry its
+	// wait, so it neither parks one the store did not answer for nor one whose
+	// wait on a pinned gate the store counts as landed.
 	pinned := Blocker{ID: "ra-pin", Title: "a pinned bead", Status: "pinned", IssueType: "task", Wait: WaitLanded}
 	spawner := Blocker{ID: "ra-sp", Title: "a closed spawner its gate still holds", Status: "closed", IssueType: "task", Wait: WaitPending}
-	unreadLanded, unreadGate, unreadPinned := landed, humanGate, pinned
+	unreadLanded, unreadGate, unreadPinned, pinnedGate := landed, humanGate, pinned, humanGate
 	unreadLanded.Wait, unreadGate.Wait, unreadPinned.Wait = WaitUnread, WaitUnread, WaitUnread
+	pinnedGate.Status, pinnedGate.Wait = "pinned", WaitLanded
+	gateRow := Facts{}
+	gateRow.human = indexHuman([]Anchor{{ID: humanGate.ID, Title: humanGate.Title, Kind: KindGate, Source: KindGate,
+		Subjects: []string{"ra-a"}}}, gateRow)
 	live := liveOwners("polecat-live")
 	live.Inflight = map[string][]string{"ra-slung": {"polecat-live"}}
 	// A live sitting holds the conversations on ra-talk and ra-pr-talk, and the
@@ -2154,6 +2161,13 @@ func TestDeriveStateReadsTheGraphNotTheMarkers(t *testing.T) {
 		{name: "a wait the store did not answer, armed", in: stateInput{id: "ra-a", blockers: []Blocker{unreadLanded},
 			metadata: map[string]string{mdDispatchWhenReady: "rig-a/gc-toolkit.polecat"}}, want: stateQueued, selfStart: true},
 		{name: "a person's gate the store answered outranks a wait it did not", in: stateInput{id: "ra-a", blockers: []Blocker{unreadLanded, humanGate}}, want: stateParked},
+		{name: "a gate's own row parks a bead that carries no record of its wait", in: stateInput{id: "ra-a"}, facts: gateRow, want: stateParked},
+		{name: "a gate's own row parks nothing on a wait the store did not answer", in: stateInput{id: "ra-a", blockers: []Blocker{unreadGate}},
+			facts: gateRow, want: stateQueued},
+		{name: "a gate's own row parks nothing on a wait the store says has landed", in: stateInput{id: "ra-a", blockers: []Blocker{pinnedGate}},
+			facts: gateRow, want: stateStranded},
+		{name: "a gate's own row and the store's pending answer agree", in: stateInput{id: "ra-a", blockers: []Blocker{humanGate}},
+			facts: gateRow, want: stateParked},
 		{name: "routed to a pool", in: stateInput{id: "ra-a", metadata: map[string]string{mdRoutedTo: "rig-a/gc-toolkit.polecat"}},
 			want: stateQueued, selfStart: true},
 		{name: "armed with nothing open", in: stateInput{id: "ra-a", metadata: map[string]string{mdDispatchWhenReady: "rig-a/gc-toolkit.polecat"}},
@@ -2203,19 +2217,27 @@ func TestDeriveStateReadsTheGraphNotTheMarkers(t *testing.T) {
 // each count as a wait it could not read, so the bead waits its turn behind
 // them: queued, never stranded and never parked on a guess, and the row says
 // how many of its waits are unread. An anchor's unread waits hold its family the
-// same way.
+// same way. The gather admits an open human gate's own row whatever the waits
+// read did, and that row parks nothing either: it puts the gate's question on
+// the row it names, and the bead still reads queued.
 func TestAFailedWaitsReadIsUnread(t *testing.T) {
 	pinned := Blocker{ID: "ra-pin", Title: "a pinned bead", Status: "pinned", IssueType: "task"}
 	gate := Blocker{ID: "ra-hg", Title: "sign off the design", Status: "open", IssueType: "gate", AwaitType: "human"}
 	spawner := Blocker{ID: "ra-sp", Title: "a closed spawner", Status: "closed", IssueType: "task"}
 	takeaway := map[string]string{"gc.takeaway": "routed the fix; nothing further here"}
+	// gateRow is the gate's own row, as the gather admits one for every open
+	// human gate, with the bead that waits on it as its subject.
+	gateRow := func(subject string) Anchor {
+		return Anchor{ID: gate.ID, Title: gate.Title, Kind: KindGate, Source: KindGate, Rig: "rig-a", Prefix: "ra",
+			Priority: ptr(2), UpdatedAt: daysAgo(1), Subjects: []string{subject}}
+	}
 
 	t.Run("an anchor row", func(t *testing.T) {
-		row := mustTile(t, buildBoard([]Anchor{{ID: "ra-s", Title: "the subject", Kind: "parked", Source: "parked",
+		subject := Anchor{ID: "ra-s", Title: "the subject", Kind: "parked", Source: "parked",
 			Rig: "rig-a", Prefix: "ra", Priority: ptr(2), UpdatedAt: daysAgo(1), Metadata: takeaway,
 			Takeaway: takeaway["gc.takeaway"], WaitingUnknown: true,
-			WaitingOn: []string{pinned.ID, gate.ID, spawner.ID}, Blockers: []Blocker{pinned, gate, spawner}},
-		}, fixtureNow, false, nil, Facts{}), "ra-s")
+			WaitingOn: []string{pinned.ID, gate.ID, spawner.ID}, Blockers: []Blocker{pinned, gate, spawner}}
+		row := mustTile(t, buildBoard([]Anchor{subject}, fixtureNow, false, nil, Facts{}), "ra-s")
 		if !strings.HasSuffix(row.Frontier, "queued · waiting on 3 · 3 unread") {
 			t.Errorf("the row waits behind three waits it could not read: frontier=%q", row.Frontier)
 		}
@@ -2223,28 +2245,41 @@ func TestAFailedWaitsReadIsUnread(t *testing.T) {
 			t.Errorf("no wait is named or landed, so the takeaway answers: needs=%q disposition_due=%v owed=%v",
 				row.Needs, row.DispositionDue, row.Owed)
 		}
+		row = mustTile(t, buildBoard([]Anchor{subject, gateRow(subject.ID)}, fixtureNow, false, nil, Facts{}), "ra-s")
+		if !strings.HasSuffix(row.Frontier, "queued · waiting on 3 · 3 unread") {
+			t.Errorf("the gate's own row parks nothing on a wait the store did not answer: frontier=%q", row.Frontier)
+		}
+		if row.Needs != gate.Title || !row.Owed {
+			t.Errorf("the gate's own row puts its question on the row it names: needs=%q owed=%v", row.Needs, row.Owed)
+		}
 	})
 
 	t.Run("an epic's children", func(t *testing.T) {
-		epic := mustTile(t, buildBoard([]Anchor{{ID: "ra-e", Kind: "epic", Source: "epic", Rig: "rig-a", Prefix: "ra",
+		epic := Anchor{ID: "ra-e", Kind: "epic", Source: "epic", Rig: "rig-a", Prefix: "ra",
 			Children: []Child{
 				{ID: "ra-e.1", Status: "open", Blockers: []Blocker{spawner}},
 				{ID: "ra-e.2", Status: "open", Blockers: []Blocker{gate}},
 				{ID: "ra-e.3", Status: "open", Blockers: []Blocker{pinned}},
-			}}}, fixtureNow, false, nil, Facts{}), "ra-e")
-		if epic.Stranded || len(epic.ParkedHeads) != 0 || !strings.HasSuffix(epic.Frontier, "3 queued · nothing idle") {
-			t.Errorf("each child waits behind a wait it could not read: stranded=%v parked=%v frontier=%q",
-				epic.Stranded, epic.ParkedHeads, epic.Frontier)
+			}}
+		for _, anchors := range [][]Anchor{{epic}, {epic, gateRow("ra-e.2")}} {
+			tile := mustTile(t, buildBoard(anchors, fixtureNow, false, nil, Facts{}), "ra-e")
+			if tile.Stranded || len(tile.ParkedHeads) != 0 || !strings.HasSuffix(tile.Frontier, "3 queued · nothing idle") {
+				t.Errorf("each child waits behind a wait it could not read (%d anchors): stranded=%v parked=%v frontier=%q",
+					len(anchors), tile.Stranded, tile.ParkedHeads, tile.Frontier)
+			}
 		}
 	})
 
 	t.Run("an epic's hold on its family", func(t *testing.T) {
-		epic := mustTile(t, buildBoard([]Anchor{{ID: "ra-e", Kind: "epic", Source: "epic", Rig: "rig-a", Prefix: "ra",
+		epic := Anchor{ID: "ra-e", Kind: "epic", Source: "epic", Rig: "rig-a", Prefix: "ra",
 			WaitingUnknown: true, WaitingOn: []string{gate.ID}, Blockers: []Blocker{gate},
-			Children: []Child{{ID: "ra-e.1", Status: "open"}}}}, fixtureNow, false, nil, Facts{}), "ra-e")
-		if epic.Stranded || len(epic.ParkedHeads) != 0 || !strings.HasSuffix(epic.Frontier, "1 queued · nothing idle") {
-			t.Errorf("the epic's unread wait holds its child queued: stranded=%v parked=%v frontier=%q",
-				epic.Stranded, epic.ParkedHeads, epic.Frontier)
+			Children: []Child{{ID: "ra-e.1", Status: "open"}}}
+		for _, anchors := range [][]Anchor{{epic}, {epic, gateRow(epic.ID)}} {
+			tile := mustTile(t, buildBoard(anchors, fixtureNow, false, nil, Facts{}), "ra-e")
+			if tile.Stranded || len(tile.ParkedHeads) != 0 || !strings.HasSuffix(tile.Frontier, "1 queued · nothing idle") {
+				t.Errorf("the epic's unread wait holds its child queued (%d anchors): stranded=%v parked=%v frontier=%q",
+					len(anchors), tile.Stranded, tile.ParkedHeads, tile.Frontier)
+			}
 		}
 	})
 }

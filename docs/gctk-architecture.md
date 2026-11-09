@@ -581,8 +581,12 @@ why a reader must know it, and the work that retires it.
   rows and keys it shows, and only what holds a bead and where a PR stands
   come from the domains. One render therefore holds two reads of the store, so
   the board renders a domain's answer, or that the answer is missing, and
-  never derives its own from its rows. The board member (tk-1tfzr71.24)
-  retires that read or writes the warrant it stands on.
+  never derives its own from its rows. Human gates are where it still does.
+  An open gate's own row marks each bead it names as held by a person, and
+  parks one whose blockers carry no record of the gate's wait. A bead's phase
+  counts as its human gates the ones whose rows name it and the ones among its
+  blockers that are not closed. The board member (tk-1tfzr71.24) retires that
+  read or writes the warrant it stands on.
 - **`epic create`, `session title` and `rig` start processes outside an
   adapter.** `epic create` files the epic with its own `gc bd create`,
   `session title` runs `gc session rename` and `gc session submit`, and the
