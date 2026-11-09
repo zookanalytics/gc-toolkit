@@ -214,7 +214,9 @@ func lastJSON(stdout string, v any) error {
 }
 
 // run executes `sh <Path> <args...>`. A run that exits non-zero is an error
-// carrying the refusal gc-helm.sh printed, and the stdout it printed first.
+// carrying the refusal gc-helm.sh printed, and the stdout it printed first. So
+// is a run killed at its deadline, which comes back with the timeout and
+// whatever it printed on stdout before the kill.
 func (s Script) run(ctx context.Context, args ...string) (string, error) {
 	t := s.Timeout
 	if t <= 0 {
@@ -280,7 +282,9 @@ func (s Script) City(ctx context.Context) (City, error) {
 // than the one the form showed. The question rides as one argv element,
 // unchanged. A new subject filed whose conversation was not comes back with the
 // error, so a retry files onto that subject, and so does a conversation filed
-// whose save then failed. A save again names that conversation with
+// whose save then failed. open answers a new subject the moment it files it, so
+// a save killed at its deadline after that still comes back with the subject,
+// the last answer open printed. A save again names that conversation with
 // `--conversation <id>`, and open completes it wherever it stands, files
 // nothing, and refuses one it cannot complete.
 func (s Script) Save(ctx context.Context, req SaveRequest) (Saved, error) {

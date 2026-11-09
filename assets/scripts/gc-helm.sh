@@ -56,7 +56,7 @@ usage() {
     cat >&2 <<'EOF'
 Usage:
   gc-helm open  <bead-id> [--reason "..."] [--body "..."] [--allow-duplicate] [--if-subject <id>] [--conversation <id>] [--json]  file a conversation about the bead in the operator's queue, for the operator to engage; a second concern joins the bead's conversation already in the queue unless --allow-duplicate files a fresh one, which lands instead on a conversation in the queue whose whole ask is that concern; --if-subject files only while the reference still names that subject, and a reference that names another now, through a successor, a PR's anchor or a gate's waiter, files nothing (exit 4); --conversation completes the conversation an earlier open filed for the concern, by its id, wherever it stands, adding the reply onto the gate that did not land, and one no longer open on the bead or holding another ask files nothing (exit 4); --json prints {subject,conversation,filed}, and names the conversation on every exit once it is filed
-  gc-helm open  --new-subject --rig <name> [<question> | --reason "<question>"] [--json]  file a FRESH subject in the named rig for a topic that has no bead yet, the question unchanged in its description and its title derived from the question's opening, then its conversation in the queue; a subject filed whose conversation is not is named, filed:false in --json, for a re-run onto it
+  gc-helm open  --new-subject --rig <name> [<question> | --reason "<question>"] [--json]  file a FRESH subject in the named rig for a topic that has no bead yet, the question unchanged in its description and its title derived from the question's opening, then its conversation in the queue; --json answers the subject, filed:false, the moment it is filed, and open's last answer is the one that counts, so a subject filed whose conversation is not is named for a re-run onto it
   gc-helm engage [<subject>] [--subject <id>] [--new-subject [--rig <name>]] [--model <variant>] [--skill <name>] [--reason "..." | --template <key>] [--no-input] [--no-attach]  hold a conversation about the bead in a converse sitting and attach: attach to its live sitting, or take its conversation from the queue, or file one, then spawn a sitting named for it. Pointed at a human gate it takes the one bead still waiting on the gate, and the conversation replies to the gate. On a terminal, with no --reason, --template or --skill, it opens the conversation form instead: subject, question, a new topic's rig, model and whether to attach on one screen, filled in from the command line, where --no-attach turns attaching off; --no-input keeps the flag-driven one-shot path. --skill seeds the sitting with any skill it carries as its lens on the subject (--skill review-arch is a conversation with the Architect). --new-subject files a FRESH subject bead in the --rig rig (the positional text, or --reason, is the question; its title is derived from the question's opening) and engages it in one gesture
   gc-helm attach [<conversation>]  return to a conversation: with an id, engage's attach (a live sitting once it has started, or a new sitting on a conversation whose sitting ended or that waits in the queue); with none, on a terminal, the conversation form's list of conversations to return to, by topic and readiness
   gc-helm conversations [<ref>] [--json]  list where each open conversation stands: its sitting's readiness (queued, starting, preparing, ready, ended) and whether a terminal is attached; with a subject reference, the subject as engage resolves it, the rig a conversation about it is held in, whether a sitting can start there, its open conversations and what holds it. Read-only
@@ -2045,8 +2045,11 @@ open_join() {
 # wait on files the conversation about that bead, as engage took it (take_bead).
 # --new-subject files the subject first, in the --rig rig (create_subject): the
 # positional text, or --reason without one, is the question it is about, and the
-# conversation's ask. A subject filed whose conversation then is not leaves the
-# subject's id on stderr, and in --json's answer, for a re-run onto it.
+# conversation's ask. With --json, open answers the subject the moment it is
+# filed, before any read that can stall, so a caller that stops waiting, as the
+# conversation form does at its deadline, still knows the subject, and the last
+# answer open prints is the one that counts. A subject filed whose conversation
+# then is not is named on stderr as well, for a re-run onto it.
 # --if-subject names the subject the caller showed before it asked, as the
 # conversation form does: a reference that names any other bead by the time open
 # resolves it, along a disposition, to a PR's anchor or to a gate's waiter, files
@@ -2065,7 +2068,6 @@ open_new_subject_report() {
     [ -n "$_open_new_subject_bead" ] || return "$_onsr_rc"
     trap - EXIT
     echo "$PROG: open: subject $_open_new_subject_bead was filed, but its conversation was not. File it onto the subject, not as a new one: $PROG open $_open_new_subject_bead --reason \"<the question>\"" >&2
-    [ -z "$open_json" ] || jq -nc --arg s "$_open_new_subject_bead" '{subject: $s, conversation: "", filed: false}'
     return "$_onsr_rc"
 }
 cmd_open() {
@@ -2114,6 +2116,10 @@ cmd_open() {
         [ -n "$open_reason$open_body" ] || open_reason="$_open_text"
         _open_new_subject_bead="$bead"
         trap 'open_new_subject_report' EXIT
+        # A run killed at its caller's deadline runs no trap, so the subject is
+        # answered now, ahead of the reads below. The answer open ends with,
+        # when it gets there, comes after this one.
+        [ -z "$open_json" ] || jq -nc --arg s "$bead" '{subject: $s, conversation: "", filed: false}'
     fi
     case "$bead" in "") echo "$PROG: open needs <bead-id>" >&2; usage; exit 2 ;; esac
 

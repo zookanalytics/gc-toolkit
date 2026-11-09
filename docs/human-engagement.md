@@ -311,7 +311,11 @@ leaves at once, and the form then says what it does not know. A save that fails
 leaves the question in the form and reads the subject again, so a subject that
 names another bead now is on screen before the next Ctrl+S can file there. A new
 subject filed whose conversation was not becomes the subject of the next save,
-so a retry never files a second subject. A save refused because a read failed,
+so the retry files onto it. The form kills a verb that runs past two minutes,
+and a save killed once its subject was filed still names the subject, because
+`open` answers it the moment it is filed. A subject whose create landed but
+whose reply was lost is one the form never learns, and a retry after that files
+a second subject. A save refused because a read failed,
 or because of a refusal that can change, such as a suspended rig, reads it again
 for the next Ctrl+S. A question the form did not save is kept in a file under
 `GC_HELM_DRAFT_DIR` (else `$XDG_STATE_HOME/gc/engage-drafts`, else

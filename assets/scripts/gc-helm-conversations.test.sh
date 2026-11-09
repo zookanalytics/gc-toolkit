@@ -35,7 +35,10 @@
 #   (NEWSUBJ)     open --new-subject files the subject in the --rig rig, titled
 #                 from the question's opening, the question unchanged in its
 #                 description, marked reaction-owned, then its conversation, whose
-#                 ask is the question unchanged; --json answers both
+#                 ask is the question unchanged; --json's last answer names both
+#   (NEWSUBJ-EARLY) --json answers the subject the moment it is filed, before
+#                 open reads anything after it, so a caller that stops waiting
+#                 there still knows it
 #   (NEWSUBJ-PART) a subject filed whose conversation is not says so, names the
 #                 subject on stderr and in --json, and exits 4
 #   (NEWSUBJ-RIG) no --rig, an unknown rig and a rig that carries no converse
@@ -64,6 +67,11 @@ cat > "$TMP/bin/gc" <<'STUB'
 #!/usr/bin/env bash
 # The stub reads each store's rows from $STATE/<prefix>.json.
 printf '%s\n' "$*" | tr '\n' ' ' >> "$CALLS"; printf '\n' >> "$CALLS"
+# The first call after a new subject's create keeps what open had printed on
+# stdout by then, when the case names the file its stdout goes to.
+if [ -n "${ANSWER_FILE:-}" ] && [ -f "$STATE/subj.title" ] && [ ! -e "$STATE/answer.at-next-call" ]; then
+  cp "$ANSWER_FILE" "$STATE/answer.at-next-call"
+fi
 # A read with no --db reads the store BEADS_DIR names, as bd does.
 db_prefix() { case "${1:-${BEADS_DIR:-}}" in */rig/.beads) echo tk ;; */rig2/.beads) echo gc ;; */rig3/.beads) echo dx ;; *) echo hq ;; esac; }
 arg_after() { _want="$1"; shift; _prev=""; for a in "$@"; do [ "$_prev" = "$_want" ] && { printf '%s' "$a"; return; }; _prev="$a"; done; }
@@ -119,7 +127,7 @@ export PATH="$TMP/bin:$PATH" GCTK_BIN="$TMP/bin/gctk"
 # The city: gc-toolkit (tk) carries converse, gascity (gc) is suspended, docs
 # (dx) carries no converse, and the city's own store.
 seed() {
-  : > "$CALLS"; rm -f "$STATE"/*.unread "$STATE"/subj.* "$STATE"/conv.*
+  : > "$CALLS"; rm -f "$STATE"/*.unread "$STATE"/subj.* "$STATE"/conv.* "$STATE"/answer.*
   jq -n --arg r "$TMP/rig" --arg r2 "$TMP/rig2" --arg r3 "$TMP/rig3" --arg h "$TMP" '{rigs:[
     {name:"gc-toolkit", path:$r, prefix:"tk", suspended:false},
     {name:"gascity", path:$r2, prefix:"gc", suspended:true},
@@ -244,7 +252,8 @@ echo "# open --new-subject: the subject and its conversation, the question uncha
 Q="$(printf 'Why do sittings start slowly?\n\n  Two lines in,  with spaces  \nand a third line that runs on %s' "$(printf 'y%.0s' $(seq 1 500))")"
 seed; run open --new-subject --rig gc-toolkit --reason "$Q" --json
 eq "$RC" 0 "(NEWSUBJ) a new subject files, exit 0"
-eq "$OUT" '{"subject":"tk-newsubj","conversation":"tk-newconv","filed":true}' "(NEWSUBJ) --json answers the subject and its conversation"
+eq "$(printf '%s\n' "$OUT" | tail -n 1)" '{"subject":"tk-newsubj","conversation":"tk-newconv","filed":true}' "(NEWSUBJ) --json's last answer names the subject and its conversation"
+eq "$(printf '%s\n' "$OUT" | head -n 1)" '{"subject":"tk-newsubj","conversation":"","filed":false}' "(NEWSUBJ) …after the subject's own answer"
 eq "$(cat "$STATE/subj.db")" "$TMP/rig/.beads" "(NEWSUBJ) the subject is filed in the --rig rig's store"
 has "$(cat "$STATE/subj.metadata")" '"gc.reaction_owned":"1"' "(NEWSUBJ) …marked reaction-owned"
 has "$(cat "$STATE/subj.metadata")" '"gc.origin":"operator"' "(NEWSUBJ) …with the operator as its origin"
@@ -259,10 +268,18 @@ case "$(cat "$STATE/subj.title")" in
 esac
 eq "$(cat "$STATE/conv.title")" "$(cat "$STATE/subj.title")" "(NEWSUBJ) …and the conversation carries the same title"
 
+echo "# the subject is answered the moment it is filed, before open reads anything after it"
+seed; set +e
+ANSWER_FILE="$TMP/open.out" sh "$SCRIPT" open --new-subject --rig gc-toolkit --reason "a question" --json > "$TMP/open.out" 2>"$TMP/err"
+RC=$?; set -e
+eq "$RC" 0 "(NEWSUBJ-EARLY) the open exits 0"
+eq "$(cat "$STATE/answer.at-next-call" 2>/dev/null)" '{"subject":"tk-newsubj","conversation":"","filed":false}' "(NEWSUBJ-EARLY) the subject's answer is on stdout before open's next call"
+eq "$(tail -n 1 "$TMP/open.out")" '{"subject":"tk-newsubj","conversation":"tk-newconv","filed":true}' "(NEWSUBJ-EARLY) …and the answer open ends with comes last"
+
 echo "# a subject filed whose conversation is not is named for a re-run onto it"
 seed; CONV_CREATE_FAIL=1 run open --new-subject --rig gc-toolkit --reason "a question" --json
 eq "$RC" 4 "(NEWSUBJ-PART) a conversation that is not filed exits 4"
-eq "$OUT" '{"subject":"tk-newsubj","conversation":"","filed":false}' "(NEWSUBJ-PART) --json names the subject that was filed"
+eq "$(printf '%s\n' "$OUT" | tail -n 1)" '{"subject":"tk-newsubj","conversation":"","filed":false}' "(NEWSUBJ-PART) --json's last answer names the subject that was filed"
 has "$ERR" "subject tk-newsubj was filed, but its conversation was not" "(NEWSUBJ-PART) …and so does stderr"
 has "$ERR" "gc-helm open tk-newsubj --reason" "(NEWSUBJ-PART) …with the re-run onto it"
 

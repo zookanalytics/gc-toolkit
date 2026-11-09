@@ -198,6 +198,33 @@ its reply onto the gate with `conversation_reply`, and files nothing. A
 conversation closed since, or one that holds another ask, is refused with exit 4,
 and nothing is written.
 
+**Keeping the subject a killed save filed.** The form runs each verb under a
+deadline, and `verbs.Exec` ends a run past it by killing the run's process
+group, so no trap of `open`'s runs. `open --new-subject` printed the subject's
+id only from its exit trap until the conversation was filed, so a save killed in
+between lost the subject, and the next save filed a second one. One primitive was
+read for a retry that lands on the subject the killed run filed:
+
+- Gas City at `2264fa8108` runs `POST /v0/city/{cityName}/beads` at most once
+  per `Idempotency-Key`, as the section on saving again says, and its body
+  carries what a subject is filed with: the rig, title, description and the
+  metadata set at create time (`BeadCreateInput`,
+  `internal/api/huma_types_beads.go` lines 54–69). A save again under the killed
+  save's key would get the same subject back while the key stays in the
+  30-minute in-memory cache, which a supervisor restart forgets. Using it takes a
+  key the form makes, a new `open` flag to carry it, and a subject filed through
+  the API instead of `gc bd create`, which gc forwards to bd once it has judged
+  the bead's class (`cmd/gc/bd_split_allowlist.go` line 160).
+
+A kill does not need it, because `open` holds the subject's id as soon as
+`bd create` answers. So with `--json` it answers
+`{subject, conversation: "", filed: false}` right then, before any read that can
+stall, and the answer it ends with comes after. The form decodes the last answer
+`open` printed, so a killed save comes back with the subject and the save again
+files onto it. A create that landed and lost its reply leaves the id unknown.
+That is a case the key would cover, the form does not, and a retry after it files
+a second subject.
+
 **Attaching once the sitting starts.** `gc session new` attaches the terminal to
 the session it creates unless `--no-attach` is given (the `no-attach` flag of
 `newSessionNewCmd`, and `shouldAttachNewSession`, which attaches unless that
