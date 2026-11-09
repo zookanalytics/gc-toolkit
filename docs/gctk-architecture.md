@@ -436,11 +436,12 @@ edge's far bead by its id and the edge's type alone: one read of the beads
 named, then for each generation of ancestors one read of the far beads their
 wait and parent-child edges name, so a snapshot of any number of beads costs a
 few reads. `gc bd show` hydrates each far bead whole, at seconds per hundred
-beads. Each record's edge carries its far bead's title, status and close time
-from that bead's own row, and an edge whose far bead the read does not return
-is left out, as a show row leaves it out. A wait edge the listing has and the
-record lacks is one into another store once a read of its far bead finds the
-store does not hold it.
+beads. Each record's edge carries its far bead's title, issue type, await type,
+status and close time from that bead's own row, and an edge whose far bead the
+read does not return is left out, as a show row leaves it out. A wait edge the
+listing has and the record lacks is one into another store once a read of its
+far bead finds the store does not hold it.
+
 Every read `waits` makes names one store with bd's `--db`: the store its caller
 names, or the store gc routes a read of the first bead named to. That is the
 one `gc bd where` says gc resolves when its prefix begins the bead's id, and

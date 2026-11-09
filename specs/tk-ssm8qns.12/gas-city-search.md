@@ -22,17 +22,17 @@ store gc resolves from the working directory could be another store's.
 **The primitive.** bd's own root flag `--db`, which names the store any verb
 reads (beads 7ef2fd05e, the bd the city runs, `cmd/bd/main.go:895`,
 `rootCmd.PersistentFlags().StringVar(&dbPath, "db", ...)`). `gc bd` carries it
-ahead of the verb to bd (gascity e03752646,
-`cmd/gc/cmd_bd_show_watch_test.go`, where `--db /x show mp-1` reaches bd with
-the flag in place).
+ahead of the verb to bd (gastownhall/gascity main 9ba215cb592b,
+`cmd/gc/cmd_bd_show_watch_test.go:65-69`, where `--db /x show mp-1` reaches bd
+with the flag in place).
 
 **Why it covers the need, and what the flag adds.** The primitive is the whole
 pin. The flag only passes it on: the store adapter names the store on every
 `gc bd` call it makes, the listing, the rows, the blocked listing and the marks
 read alike. A pinned adapter also stops reading the supervisor API, because the
-supervisor's bead route (`GET /v0/city/{city}/bead/{id}`, gascity e03752646,
-`internal/api/client.go:1124`) finds a bead by the city and its id rather than
-in a store the caller names. Nothing in Gas City answers what holds a bead, in
+supervisor's bead route (`GET /v0/city/{cityName}/bead/{id}`, `GetBead` in
+`internal/api/client.go:1333` at gastownhall/gascity main 9ba215cb592b) finds a
+bead by the city and its id rather than in a store the caller names. Nothing in Gas City answers what holds a bead, in
 a named store or any other, as unit 2's search records.
 
 ### The store a read names when its caller names none
@@ -55,10 +55,12 @@ no row.
 **The primitives.**
 
 - gc's own routing of a read that names a bead and no store: by the prefix of
-  the id (`bdSubjectPrefixTarget` in `cmd/gc/cmd_bd.go:1076` at gascity
-  e03752646, "a by-id read or write routes by its subjects' prefix"), the
+  the id (`bdSubjectPrefixTarget`, defined in `cmd/gc/bd_subject_route.go:27`
+  and called at `cmd/gc/cmd_bd.go:1172` at gastownhall/gascity main
+  9ba215cb592b, "a by-id read or write routes by its subjects' prefix"), the
   longest configured prefix when several begin it (`beadPrefix` in
-  `cmd/gc/cmd_sling.go:582-589`, through `sling.BeadPrefixForCity`).
+  `cmd/gc/cmd_sling.go:630`, through `sling.BeadPrefixForCity` in
+  `internal/sling/sling.go:669`, "preferring the longest match").
 - `gc rig list --json`, which names each store the city binds, the city's own
   among them (`"hq": true`), with its prefix and its path.
 - `bd where --json`, which names the active beads location and its prefix
@@ -160,8 +162,8 @@ Its fix, `bd doctor --fix`, deletes every one of the 41, the successor records
 with them. Where the wait belongs is in the bead's own store, and nothing in
 that fix records it there. Nor does the city's doctor run the check: Gas City
 names `bd doctor` only as a repair step in its preflight
-(`internal/beads/contract/preflight_checker.go:868` and `:877` at gascity
-e03752646). The section prints the bead read's `foreign` key, which carries
+(`internal/beads/contract/preflight_checker.go:868` and `:877` at
+gastownhall/gascity main 9ba215cb592b). The section prints the bead read's `foreign` key, which carries
 wait edges only and is read for live beads only, and it names that remedy.
 
 The unjudged note is the note check-armed-dispatch-owed prints, for the reason
