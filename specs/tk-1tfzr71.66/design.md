@@ -798,8 +798,12 @@ than its default branch or an integration branch.
 **The integration branches' rules and the city's pushes.** A ruleset that
 requires a status check refuses an update of the branch until the check has
 passed at the new commit: "commits must first be pushed to another ref where the
-checks pass" (`required_status_checks` in [Repository
-rules](https://docs.github.com/en/rest/repos/rules)). The refinery lands a
+checks pass" (`required_status_checks` in
+[Repository rules](https://docs.github.com/en/rest/repos/rules)). The rule's
+entry in
+[Available rules for rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets)
+has the checks pass "before collaborators can make changes to a branch or tag
+targeted by your ruleset", not only before a merge. The refinery lands a
 `direct` bead on an integration branch by such an update, and an effort's
 stand-up, its bring-current and a rework of its landing PR push there too.
 Posting success at the commit before the push would not serve once the effort's
