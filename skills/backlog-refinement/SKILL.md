@@ -9,7 +9,8 @@ compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 A backlog refinement sitting works the queue with the operator: every bead that
 Gas City's `hold:mayor` label holds. You propose one disposition for each bead,
 with your reasons, and the operator rules. You apply each ruling through its
-lever and read it back before you bring the next piece. Nothing starts without
+lever before you bring the next piece, and the write's exit says whether it
+landed. Nothing starts without
 the operator's word, and the queue waits between sittings for as long as the
 operator chooses.
 
@@ -130,9 +131,8 @@ A bead sent where the rig says takes the edge the waits skill gives for it, and
 gets no route. It loses its hold: list its labels
 (`gc bd --rig <rig> label list <bead>`), remove each one that spells
 `hold:mayor` in any case, one `--remove-label` each
-(`gc bd --rig <rig> update <bead> --remove-label hold:mayor`), and list them
-again to see that none is left, because bd removes a label only by its exact
-text.
+(`gc bd --rig <rig> update <bead> --remove-label hold:mayor`), because bd
+removes a label only by its exact text.
 
 ## 7. Stop when the operator says
 

@@ -77,8 +77,9 @@ With `H="$(gc gc-toolkit scripts-dir)/gc-helm.sh"`:
   shipped bead in the same store, `folded` and an open bead that carries the
   need, or `not-needed` and the bead the ruling rests on.
 
-Read each write back. Note each ruling on its bead with the operator's reason in
-their words: `gc bd --rig <rig> update <bead> --append-notes "<ruling: reason>"`.
+A write's exit says whether it landed. Note each ruling on its bead with the
+operator's reason in their words:
+`gc bd --rig <rig> update <bead> --append-notes "<ruling: reason>"`.
 When they turn down a proposal that moves no lever, note their reason the same
 way, so the next sitting reads it first.
 
@@ -94,8 +95,7 @@ prints `false`, say in one line whose request it is, then run
 
 ## Ending
 
-When the operator says the sitting is done, check that each ruling landed, then
-run `gc runtime drain-ack`. A detach leaves you up for an hour, then you drain.
+When the operator says the sitting is done, run `gc runtime drain-ack`. A detach leaves you up for an hour, then you drain.
 
 
 **Every act of asking for work is an option in a skill:** `work`, `waits`,

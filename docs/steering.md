@@ -198,7 +198,7 @@ gc-helm.sh place <bead-id> --standalone [--route <rig>/<pool>] [--on <formula>]
 ```
 
 A sling reads no hold, and no write of Gas City's both sends a bead and lifts
-its hold, so `place` runs the writes in one order and reads each one back:
+its hold, so `place` runs the writes in one order, each taking its exit:
 
 1. It refuses a closed bead, PR-finishing work (`anchor_bead`), a bead that
    `hold:external` also holds, a bead whose status is not open, a parent that
@@ -221,7 +221,6 @@ its hold, so `place` runs the writes in one order and reads each one back:
 5. It lifts the hold, with a note saying where the bead went, in one write
    that removes each label spelling the hold, one `--remove-label` each:
    `gc bd update <bead> --remove-label hold:mayor --append-notes "Placed ..."`.
-   It reads the labels back and retries the removal once.
 
 The dispatch comes before the lift, so a dispatch that fails leaves the bead
 held, in the queue. A run cut off between the two goes on with the hold still
@@ -240,8 +239,8 @@ A hold also lifts these ways:
 - By hand, `gc bd update <bead> --remove-label hold:mayor` lifts it, with one
   `--remove-label` for each other spelling of the label that
   `gc bd label list <bead>` shows, such as `Hold:Mayor`, because Gas City reads
-  the label in any case and bd removes a label only by its exact text. A second
-  `gc bd label list <bead>` shows that none is left. A bead that waits on the
+  the label in any case and bd removes a label only by its exact text. A bead
+  that waits on the
   bead that retires its code, through a `blocks` edge and its validating
   closer's arm, takes this write too, because deferred dispatch fires a held
   bead's arm only once its hold lifts. A bead lifted with nothing else

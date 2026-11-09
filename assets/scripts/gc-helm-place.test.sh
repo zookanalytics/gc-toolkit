@@ -77,7 +77,7 @@ mkdir -p "$TMP/bin" "$TMP/rig-tk/.beads"
 #   bd dep list <id> --direction=up rows whose edge of -t's type lands on <id>,
 #                    --direction=down the targets of <id>'s own edges.
 #   bd dep unrelate a b  removes the relates-to edges between a and b, both
-#                    ways. STUB_UNRELATE_DROP answers 0 and writes nothing.
+#                    ways. STUB_UNRELATE_FAIL refuses it with nothing written.
 #   bd update <id>   --set-metadata, --unset-metadata, --parent (which replaces
 #                    the parent edge), --add-label, --remove-label (by exact
 #                    text), --append-notes, --priority, --status, --assignee.
@@ -213,7 +213,7 @@ case "$verb" in
         fi ;;
       unrelate)
         a="${2:-}"; b="${3:-}"
-        [ -n "${STUB_UNRELATE_DROP:-}" ] && exit 0
+        [ -n "${STUB_UNRELATE_FAIL:-}" ] && { echo "Error: the store refused the unrelate" >&2; exit 1; }
         save --arg a "$a" --arg b "$b" '
           map(if .id == $a then .deps |= map(select(.type != "relates-to" or .on != $b))
               elif .id == $b then .deps |= map(select(.type != "relates-to" or .on != $a))
@@ -545,7 +545,7 @@ stop_then_finish() { # <label> <env assignment> <args...>
   eq "$(parent tk-new)" "tk-epic" "(STOP) after a stop at $label, the parent is set"
   eq "$(runs tk-new)" "1" "(STOP) after a stop at $label, one run works the bead"
 }
-stop_then_finish "the unrelate" STUB_UNRELATE_DROP=1 tk-new --under tk-epic
+stop_then_finish "the unrelate" STUB_UNRELATE_FAIL=1 tk-new --under tk-epic
 stop_then_finish "the parent" STUB_UPDATE_FAIL_ON=--parent tk-new --under tk-epic
 stop_then_finish "the shift" STUB_QP_FAIL=move tk-new --under tk-epic --shift -1
 stop_then_finish "the settle" STUB_QP_FAIL=settle tk-new --under tk-epic

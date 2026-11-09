@@ -80,13 +80,11 @@ gate, below).
   keeps its arm until the hold lifts. Once the arm lands, lift the hold, and the
   bead waits on its blocker instead of in the queue. Gas City reads the label in
   any case, and bd removes a label only by its exact text, so list the bead's
-  labels, remove each one that spells the hold, and list them again to see that
-  none is left:
+  labels and remove each one that spells the hold:
 
   ```bash
   gc bd label list <bead>
   gc bd update <bead> --remove-label hold:mayor   # and one --remove-label for each other spelling listed, such as Hold:Mayor
-  gc bd label list <bead>
   ```
 - bd keeps one edge type per pair of beads and refuses a second, so a bead that
   already carries another edge type onto the blocker needs that edge removed

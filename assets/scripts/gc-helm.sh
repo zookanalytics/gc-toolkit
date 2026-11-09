@@ -202,8 +202,8 @@ label (docs/steering.md). A sling reads no hold, so place runs the writes in
 one order and can be run again. It clears any route, then with --under removes
 a relates-to link between the bead and the parent, sets the parent and writes
 --shift through queue-priority.sh move. It settles the bead's priority, then
-dispatches, then lifts the hold with a note in one write, and it reads each
-write back. With no --route it dispatches to the polecat pool of the bead's
+dispatches, then lifts the hold with a note in one write, and each write's
+exit decides whether it landed. With no --route it dispatches to the polecat pool of the bead's
 rig, and with no --on on that pool's default formula. While a blocker holds
 the bead or a parent above it, such as a park on the epic, it arms the
 dispatch (deferred-dispatch.sh arm) instead of slinging, so the run starts
@@ -1790,8 +1790,8 @@ cmd_priority() {
 # Places a bead held for placement, one carrying Gas City's hold:mayor label
 # (docs/steering.md#placing-a-bead). gc sling reads no hold, so a sling leaves
 # the label on, and no native write both dispatches a bead and lifts its hold.
-# So place runs the native writes in one order, reads each back, and a re-run
-# after a stop at any write finishes the placement:
+# So place runs the native writes in one order, each taking its exit, and a
+# re-run after a stop at any write finishes the placement:
 #   1. It reads the bead, its parent and the runs that work it, and refuses
 #      with nothing written: the refusals usage() lists. A bead with no
 #      hold:mayor that a live run, a route, an arm or an assignee shows
@@ -1995,9 +1995,8 @@ cmd_place() {
     if [ -z "$dispatched" ]; then
         pl_routed=$(meta_now "$bead" gc.routed_to)
         if [ -n "$pl_routed" ]; then
-            gc bd update "$bead" --db "$db" --unset-metadata gc.routed_to >/dev/null 2>&1 || true
-            if [ -n "$(meta_now "$bead" gc.routed_to)" ]; then
-                echo "$PROG: place: $bead is routed to '$pl_routed', which a held bead never carries and deferred-dispatch.sh arm refuses, and its clear did not read back. Its hold stays on. Clear it by hand, then re-run: gc bd update $bead --db $db --unset-metadata gc.routed_to && $pl_again" >&2
+            if ! gc bd update "$bead" --db "$db" --unset-metadata gc.routed_to >/dev/null 2>&1; then
+                echo "$PROG: place: $bead is routed to '$pl_routed', which a held bead never carries and deferred-dispatch.sh arm refuses, and the store refused its clear. Its hold stays on. Clear it by hand, then re-run: gc bd update $bead --db $db --unset-metadata gc.routed_to && $pl_again" >&2
                 exit 4
             fi
             echo "$PROG: place: cleared the route '$pl_routed' $bead carried while held" >&2
@@ -2008,18 +2007,14 @@ cmd_place() {
                       | select(((.dependency_type // .type // "") | tostring) == "relates-to")
                       | ((.id // .depends_on_id // "") | tostring) ] | any(.[]; . == $p)'
         if printf '%s' "$row" | jq -e --arg p "$under" "$pl_related" >/dev/null 2>&1; then
-            gc bd dep unrelate "$bead" "$under" --db "$db" >/dev/null 2>&1 || true
-            pl_back=$(row_now "$bead")
-            if [ -z "$pl_back" ] || printf '%s' "$pl_back" | jq -e --arg p "$under" "$pl_related" >/dev/null 2>&1; then
-                echo "$PROG: place: $bead's relates-to link to $under did not read back as removed, and bd refuses a parent beside it. Its hold stays on. Re-run: $pl_again" >&2
+            if ! gc bd dep unrelate "$bead" "$under" --db "$db" >/dev/null 2>&1; then
+                echo "$PROG: place: the store refused to remove $bead's relates-to link to $under, and bd refuses a parent beside it. Its hold stays on. Re-run: $pl_again" >&2
                 exit 4
             fi
         fi
         if [ "$pl_parent" != "$under" ]; then
-            gc bd update "$bead" --db "$db" --parent "$under" >/dev/null 2>&1 || true
-            pl_parent_now=$(parent_of "$(row_now "$bead")")
-            if [ "$pl_parent_now" != "$under" ]; then
-                echo "$PROG: place: $bead's parent read back as '${pl_parent_now:-none}', not $under (bd refuses a parent that sits under the bead). Its hold stays on. Re-run once the cause is fixed: $pl_again" >&2
+            if ! gc bd update "$bead" --db "$db" --parent "$under" >/dev/null 2>&1; then
+                echo "$PROG: place: the store refused $under as $bead's parent (bd refuses a parent that sits under the bead). Its hold stays on. Re-run once the cause is fixed: $pl_again" >&2
                 exit 4
             fi
         fi
@@ -2059,10 +2054,6 @@ cmd_place() {
             gc sling "$@" >&2 || _pl_rc=$?
             case "$_pl_rc" in
                 0)
-                    if [ "$(meta_now "$bead" gc.execution_routed_to)" != "$pool" ] && [ "$(meta_now "$bead" gc.routed_to)" != "$pool" ]; then
-                        echo "$PROG: place: gc sling answered for $bead, but neither its pour stamp (gc.execution_routed_to) nor its route reads $pool, so the dispatch is unproven and its hold stays on. Re-run; gc sling refuses a second live run of the formula: $pl_again" >&2
-                        exit 4
-                    fi
                     how="slung to $pool${formula:+ on $formula}" ;;
                 3)
                     how="a live run${formula:+ of $formula} already works it, and gc sling refused to start another" ;;
@@ -2076,8 +2067,8 @@ cmd_place() {
             [ -z "$formula" ] || set -- "$@" --sling-arg --on --sling-arg "$formula"
             _pl_rc=0
             "$DEFERRED_DISPATCH_TOOL" arm "$@" --db "$db" >&2 || _pl_rc=$?
-            if [ "$_pl_rc" -ne 0 ] || [ "$(meta_now "$bead" gc.dispatch_when_ready)" != "$pool" ]; then
-                echo "$PROG: place: $bead is held by $pl_why, so it is armed rather than slung, and the arm did not read back (deferred-dispatch.sh arm exited $_pl_rc). Its hold stays on, so it stays in the queue. Re-run once the cause is fixed: $pl_again" >&2
+            if [ "$_pl_rc" -ne 0 ]; then
+                echo "$PROG: place: $bead is held by $pl_why, so it is armed rather than slung, and the arm failed (deferred-dispatch.sh arm exited $_pl_rc and says why above). Its hold stays on, so it stays in the queue. Re-run once the cause is fixed: $pl_again" >&2
                 exit 4
             fi
             how="armed for $pool${formula:+ on $formula}, held by $pl_why, so its run starts once nothing holds it"
@@ -2087,7 +2078,7 @@ cmd_place() {
     # Step 5: lift the hold, with the note, in one write.
     pl_note="Placed at $(iso_now)${under:+ under $under}${standalone:+ with no parent}${pl_prio:+ at P$pl_prio}: $how. hold:mayor lifted."
     if ! lift_hold "$bead" "$pl_note"; then
-        echo "$PROG: place: $bead is ${under:+under $under and }$how, but its hold:mayor did not read back as lifted, so it still reads as waiting in the queue, and an arm on it does not fire. Re-run to finish the lift, which dispatches nothing twice: $pl_again" >&2
+        echo "$PROG: place: $bead is ${under:+under $under and }$how, but the store refused the write that lifts its hold:mayor, so it still waits in the queue, and an arm on it does not fire. Re-run to finish the lift, which dispatches nothing twice: $pl_again" >&2
         exit 4
     fi
     bust_cache
@@ -3379,7 +3370,7 @@ cmd_accept() {
         case "$root_state" in
             found\ *)
                 if ! lift_hold "$bead"; then
-                    echo "$PROG: accept: acceptance $tok already dispatched $formula at $bead (root ${root_state#found }), but its hold:mayor did not read back as lifted, so the bead still reads as waiting in the placement queue. The next Accept finishes the lift and the record without a second dispatch: $PROG accept $bead" >&2
+                    echo "$PROG: accept: acceptance $tok already dispatched $formula at $bead (root ${root_state#found }), but the store refused the write that lifts its hold:mayor, so the bead still waits in the placement queue. The next Accept finishes the lift and the record without a second dispatch: $PROG accept $bead" >&2
                     exit 4
                 fi
                 if ! accept_mark_dispatched "$bead" "$formula" "$tok"; then
@@ -3460,7 +3451,7 @@ cmd_accept() {
     # so a run that stops between the two leaves an acceptance the next Accept
     # finishes, lift included.
     if ! lift_hold "$bead"; then
-        echo "$PROG: accept: dispatched $formula at $bead (acceptance $tok), but its hold:mayor did not read back as lifted, so the bead still reads as waiting in the placement queue. The next Accept finishes the lift and the record without a second dispatch: $PROG accept $bead" >&2
+        echo "$PROG: accept: dispatched $formula at $bead (acceptance $tok), but the store refused the write that lifts its hold:mayor, so the bead still waits in the placement queue. The next Accept finishes the lift and the record without a second dispatch: $PROG accept $bead" >&2
         exit 4
     fi
     if ! accept_mark_dispatched "$bead" "$formula" "$tok"; then
