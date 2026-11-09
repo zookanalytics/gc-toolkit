@@ -227,12 +227,14 @@ func (m *Model) loadCity() tea.Cmd {
 }
 
 // lookup reads the subject ref names, once per reference while that read is
-// running or has answered. A read that failed is read again.
+// running or has answered. A read that failed is read again. A reference
+// already read selects the conversation it names, as its answer did.
 func (m *Model) lookup(ref string) tea.Cmd {
 	if ref == "" {
 		return nil
 	}
 	if l, ok := m.lookups[ref]; ok && (l.pending || l.err == nil) {
+		m.selectNamed()
 		return nil
 	}
 	m.lookups[ref] = &lookup{pending: true}
@@ -293,6 +295,21 @@ func (m *Model) current() *lookup {
 		return nil
 	}
 	return l
+}
+
+// selectNamed makes the open conversation the subject field names the choice,
+// as a conversation id typed as the subject names it, until the operator makes
+// another. It reads the field as it reads now, so the answer for an earlier
+// reference selects nothing, and a reference the field comes back to selects
+// its conversation again.
+func (m *Model) selectNamed() {
+	l := m.current()
+	if l == nil || l.err != nil || m.choiceTouched {
+		return
+	}
+	if a := l.about; a.Conversation != "" && a.Closed == nil {
+		m.choice = a.Conversation
+	}
 }
 
 // contextRow is one choosable row under the subject.
@@ -512,11 +529,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		l.pending, l.about, l.err = false, msg.about, msg.err
-		// A conversation id typed as the subject names that conversation, so it
-		// is the choice until the operator makes another.
-		if msg.err == nil && msg.ref == m.ref() && !m.choiceTouched && msg.about.Conversation != "" && msg.about.Closed == nil {
-			m.choice = msg.about.Conversation
-		}
+		m.selectNamed()
 		return m, nil
 	case cityMsg:
 		m.cityBusy = false

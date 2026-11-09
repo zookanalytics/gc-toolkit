@@ -572,6 +572,50 @@ func TestATypedConversationIdIsChosenUntilTheOperatorChooses(t *testing.T) {
 	}
 }
 
+// A conversation id edited away and typed back names that conversation again,
+// though the answer for it came before the edit and is not read again, so an
+// empty question continues it. A choice the operator made stands while the
+// field reads the same reference.
+func TestAConversationIdTypedBackIsChosenAgain(t *testing.T) {
+	a := subjectAbout("tk-a", "gc-toolkit")
+	a.Conversation = "tk-c1"
+	a.Conversations = []Conversation{{ID: "tk-c1", Readiness: Ended}}
+	typedBack := func(f *fakeHelm) *Model {
+		m := newForm(t, f, Options{Subject: "tk-c1"})
+		settle(m)
+		focusOn(t, m, subjectField)
+		m.Update(key(tea.KeyBackspace))
+		typeText(m, "1")
+		if m.ref() != "tk-c1" || m.choice != newChoice {
+			t.Fatalf("after the edit: subject %q, choice %q", m.ref(), m.choice)
+		}
+		if _, cmd := m.Update(debounceMsg{seq: m.seq}); cmd != nil {
+			t.Fatalf("tk-c1 was read again though its answer stands")
+		}
+		return m
+	}
+	f := &fakeHelm{about: map[string]About{"tk-c1": a}}
+	m := typedBack(f)
+	if m.choice != "tk-c1" {
+		t.Fatalf("choice = %q, want tk-c1, which the subject field names again", m.choice)
+	}
+	_, cmd := m.Update(ctrl('s'))
+	deliver(m, cmd)
+	if len(f.saves) != 0 || len(f.starts) != 1 || f.starts[0] != "tk-c1 opus" {
+		t.Fatalf("an empty question on tk-c1: saves %v, starts %v, status %q", f.saves, f.starts, m.status)
+	}
+
+	f = &fakeHelm{about: map[string]About{"tk-c1": a}}
+	m = typedBack(f)
+	focusOn(t, m, contextField)
+	m.Update(key(tea.KeySpace)) // the new-conversation row, under the cursor
+	focusOn(t, m, subjectField)
+	m.Update(key(tea.KeyTab))
+	if m.choice != newChoice {
+		t.Fatalf("leaving the subject field moved the operator's choice to %q", m.choice)
+	}
+}
+
 func TestAnAmbiguousPRIsChosenExplicitly(t *testing.T) {
 	f := &fakeHelm{about: map[string]About{
 		"1446": {Ref: "1446", Candidates: []Candidate{{ID: "tk-a", Rig: "gc-toolkit", Title: "one"}, {ID: "gc-b", Rig: "gascity", Title: "two"}}},
