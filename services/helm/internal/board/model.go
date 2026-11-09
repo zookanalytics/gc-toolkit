@@ -226,9 +226,12 @@ type Anchor struct {
 
 	// PRReasons is the bead behind each of the PR's reasons that names one
 	// (prstatus.Reasons): each open human gate that holds it, nearest first, then
-	// each blocker it waits on that a person has to clear, as the gather read
-	// them. The row's `asking`, its owed clock and its held gates read them. The
-	// beads source fills it beside [Anchor.PR].
+	// each bead a person owes the next move on, nearest first, on the anchor's
+	// own blockers or behind a bead it waits on, as the gather read them. The
+	// row's `asking`, its owed clock and its held gates read the gates. Of the
+	// rest, a blocker of the anchor's own asks on this row too, and any other
+	// names in NEEDS where the person's move is ([movesElsewhere]). The beads
+	// source fills it beside [Anchor.PR].
 	PRReasons []Blocker `json:"pr_reasons,omitempty"`
 
 	// Reviews is the anchor's review beads, open and closed: each carries
