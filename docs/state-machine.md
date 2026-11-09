@@ -9,9 +9,9 @@ A unit of work has exactly one **anchor** bead. Its state is
 `status` × `merge_result`, and the state space is **declared, closed, and
 single-writer**: `lifecycle/lifecycle.toml` enumerates every state, every legal
 transition, and every pack-written metadata key, and
-`assets/scripts/lifecycle.sh` is the only thing that writes a transition —
-validate, one atomic `bd update` carrying every field of the transition, read
-back. An unknown `merge_result` value is an error: every reader surfaces it via
+`assets/scripts/lifecycle.sh` is the only thing that writes a transition: it
+validates, then makes one atomic `bd update` carrying every field of the
+transition, whose exit decides whether it landed. An unknown `merge_result` value is an error: every reader surfaces it via
 `escalate.sh`, and `doctor/check-state-space` catches it. A bead closed while
 `merge_result` is a non-closed state is repaired by `lifecycle.sh reopen`
 (human-invoked; `merge_result` untouched).
@@ -1150,7 +1150,8 @@ PR-close disposition for that kind and successor.
 Under `duplicate` it also keeps the waits on the bead in force. bd's ready rule
 follows a `blocks` edge and never a `duplicates` edge, so before a duplicate of a
 canonical that has neither closed nor shipped closes, each open bead it blocks
-gains a `blocks` edge onto the canonical, read back. The canonical itself and a
+gains a `blocks` edge onto the canonical, each add taking its exit. The
+canonical itself and a
 bead it already blocks need none. A waiter that cannot take the edge refuses the
 close before anything is written: one the canonical already joins by another
 edge type, since bd keeps one edge per pair, and every waiter of a canonical in
@@ -1179,7 +1180,7 @@ they close past an open human gate and an open child, and refuse a successor in
 another store, so the pack closes through the writer instead.
 
 A disposition ends the bead's branch, the way a merge ends a landed one
-through the repository's delete-on-merge setting. Once the close reads back,
+through the repository's delete-on-merge setting. Once the close has landed,
 `bead-rehome.sh` hands the branch the bead names in `metadata.branch` to
 `assets/scripts/branch-end.sh`, which deletes it from the git remote. The
 branch stays while a live owner names it. A live owner is a bead in the rig's

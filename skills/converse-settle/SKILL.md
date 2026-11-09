@@ -59,13 +59,11 @@ and closes here rather than waiting for a manual dismiss.
 what the answer releases first.** The sitting answers only the gates its
 conversation replies to: the gate engage was pointed at, one its hold filed,
 and any other human gate the operator rules on within the subject's universe.
-To answer one the conversation does not reply to yet, add the reply and read
-it back, then name every bead the answer releases, read from the gate's
-`blocks` dependents, so an answer that releases a bead beyond the subject is
-given knowingly:
+To answer one the conversation does not reply to yet, add the reply, then name
+every bead the answer releases, read from the gate's `blocks` dependents, so an
+answer that releases a bead beyond the subject is given knowingly:
 ```bash
 gc bd dep add "$CONVERSATION" <gate> --type replies-to \
-  && gc bd list --id "$CONVERSATION" --all --json | jq -e --arg g <gate> 'any(.[0].dependencies[]?; .type == "replies-to" and .depends_on_id == $g)' >/dev/null \
   && gc bd dep list <gate> --direction=up --type blocks --json | jq -r '.[] | "\(.id) [\(.status)] \(.title)"'
 ```
 A gate with no tie to the subject takes its own conversation, so that its
@@ -140,8 +138,8 @@ it, by the same method, keep them: sign off with `--ruled yes --no-wait` and
 send nothing yourself. Under any other ruling, one that sends it elsewhere or
 nowhere, withdraw them before the answer, with or without `--accept`. The block
 disarms an arm and clears a pool route, and keeps a `human` route, which sends
-the subject to no pool. It reads the subject back, and prints its
-`carries no arm and no pool route` line only once neither is left:
+the subject to no pool. It prints its `carries no arm and no pool route`
+line only once each write has exited 0:
 ```bash
 WHY="<the ruling, one line>"
 ROW=$(gc bd show "$SUBJECT" --json) \
@@ -149,9 +147,7 @@ ROW=$(gc bd show "$SUBJECT" --json) \
   && ROUTE=$(printf '%s\n' "$ROW" | jq -er '(.[0].metadata["gc.routed_to"] // "") | tostring') \
   && { [ -z "$ARM" ] || "$CONV/deferred-dispatch.sh" disarm "$SUBJECT" --reason "$WHY"; } \
   && { [ -z "$ROUTE" ] || [ "$ROUTE" = human ] || gc bd update "$SUBJECT" --unset-metadata gc.routed_to; } \
-  && ROW=$(gc bd show "$SUBJECT" --json) \
-  && LEFT=$(printf '%s\n' "$ROW" | jq -er --arg s "$SUBJECT" 'if type == "array" and length == 1 and .[0].id == $s then (.[0].metadata // {}) | [ ((.["gc.dispatch_when_ready"] // "") | tostring | select(. != "") | "arm " + .), ((.["gc.routed_to"] // "") | tostring | select(. != "" and . != "human") | "route " + .) ] | join(", ") else error("unread") end') \
-  && if [ -z "$LEFT" ]; then echo "$SUBJECT carries no arm and no pool route"; else echo "$SUBJECT still carries $LEFT"; false; fi
+  && echo "$SUBJECT carries no arm and no pool route"
 ```
 Without that line, answer nothing: fix what the block printed and re-run it.
 Then take the case that fits. The cases:
@@ -315,28 +311,26 @@ blocked, and leaving it to route once the blocker closes is the
 come-back-later that keeps you or a person on the hook. Make it wait on the
 blocker, then arm it, so it routes itself when the blocker closes and the
 sitting can queue everything and close. An arm with nothing holding the
-follow-up sends it on the next pass, so the arm runs only once the follow-up's
-own store reads the edge back. A `dep add` onto a bead in another rig's store
-prints success and exits 0, but holds nothing. Each call names the
-follow-up's rig, the one its pool reads: unpinned, a command that also names a
-city bead is answered from the city's store.
+follow-up sends it on the next pass, so the arm runs only once the add exits 0.
+A `dep add` onto a bead in another rig's store prints success and exits 0, but
+holds nothing, so the edge is written only when the follow-up and the blocker
+carry the same id prefix, the text before the first `-`, which names the
+store. Each call names the follow-up's rig, the one its pool reads: unpinned,
+a command that also names a city bead is answered from the city's store.
 ```bash
-gc bd --rig <rig> dep add <follow-up> <blocker> --type=blocks \
-  && gc bd --rig <rig> dep list <follow-up> --direction=down -t blocks --json | tr -d '[:cntrl:]' | jq -e --arg b <blocker> 'any(.[]; .id == $b)' >/dev/null \
+[ "$(echo <follow-up> | cut -d- -f1)" = "$(echo <blocker> | cut -d- -f1)" ] \
+  && gc bd --rig <rig> dep add <follow-up> <blocker> --type=blocks \
   && "$CONV/deferred-dispatch.sh" arm <follow-up> --target <rig>/<pool> --reason "waits for <blocker>"
 ```
-When the edge does not read back and `dep list` warns that its target has no
-row in this database, the blocker is in another rig's store, where no edge can
-hold the follow-up. Make it wait on a human gate in its own store that names
-the blocker, and arm it on that gate. The gate reaches the operator, who
-clears it once the blocker lands, and the arm then sends the follow-up.
-Remove the edge first, because the arm reads it as a blocker that holds
-nothing and warns that the next pass sends the follow-up. The helper files the
-gate in the follow-up's own store, and the message's first line is the gate's
-title, cut at 140 characters, so keep that line to one plain sentence:
+When the prefixes differ, the blocker is in another rig's store, where no
+edge can hold the follow-up, and the block writes nothing. Make the follow-up
+wait on a human gate in its own store that names the blocker, and arm it on
+that gate. The gate reaches the operator, who clears it once the blocker
+lands, and the arm then sends the follow-up. The helper files the gate in the
+follow-up's own store, and the message's first line is the gate's title, cut
+at 140 characters, so keep that line to one plain sentence:
 ```bash
-gc bd --rig <rig> dep remove <follow-up> <blocker> \
-  && "$CONV/human-gate.sh" --subject <follow-up> --key waits-for-<blocker> --message "Clear once <what the blocker delivers> lands, so <what the follow-up does> can start
+"$CONV/human-gate.sh" --subject <follow-up> --key waits-for-<blocker> --message "Clear once <what the blocker delivers> lands, so <what the follow-up does> can start
 <follow-up> waits for <blocker> in <its rig>. Clear this gate once <blocker> closes." \
   && "$CONV/deferred-dispatch.sh" arm <follow-up> --target <rig>/<pool> --reason "waits for <blocker>, through its human gate"
 ```

@@ -14,7 +14,8 @@
 #      the conversation lives in, and the PR it acts on is recorded on the
 #      conversation before it acts, so a re-run of the same ruling acts on the
 #      same PR even once that PR has closed;
-#   2. writes the subject's headline (gc-helm.sh takeaway) and reads it back;
+#   2. writes the subject's headline through gc-helm.sh takeaway, and stops
+#      when takeaway refuses it;
 #   3. resolves each open gate the conversation replies to with
 #      `ruled: <ruling>`, except each one --leave names, and reads each back. bd
 #      resolves a closed gate without changing it and reports success either
@@ -677,15 +678,14 @@ take_recommendation() {
 # attempt filed, or finds the PR it closed.
 CONSEQUENCE=""
 # The PR the answer acts on is recorded first, so an attempt that stops at any
-# later write leaves its re-run that PR to act on. A record that does not read
-# back stops the sign-off with nothing else written.
+# later write leaves its re-run that PR to act on. A record the store refuses
+# stops the sign-off with nothing else written, because the act on the PR
+# cannot be undone.
 if [ -n "$PR_TARGET" ] && [ "$RECORDED_ON" != "$PR_TARGET" ]; then
   RECORD=$(printf '%s' "$CONV_ROW" | jq -c --arg a "$ANSWER" --arg act "$PR_ANSWER" --arg t "$PR_TARGET" "$CONSEQUENCE_JQ"'
     consequences + {($a): {act: $act, anchor: $t}}' 2>/dev/null)
-  [ -n "$RECORD" ] && gc bd update "$CONVERSATION" --set-metadata "gc.ruling_consequence=$RECORD" >/dev/null 2>&1
-  show_row "$CONVERSATION" | jq -e --arg a "$ANSWER" --arg act "$PR_ANSWER" --arg t "$PR_TARGET" "$CONSEQUENCE_JQ"'
-      consequences | .[$a] == {act: $act, anchor: $t}' >/dev/null 2>&1 \
-    || stopped "the PR this ruling's --$PR_ANSWER acts on ($PR_TARGET) did not read back recorded on conversation $CONVERSATION (gc.ruling_consequence), and a re-run needs it once that PR closes; nothing else was written"
+  [ -n "$RECORD" ] && gc bd update "$CONVERSATION" --set-metadata "gc.ruling_consequence=$RECORD" >/dev/null 2>&1 \
+    || stopped "the PR this ruling's --$PR_ANSWER acts on ($PR_TARGET) could not be recorded on conversation $CONVERSATION (gc.ruling_consequence), and a re-run needs it once that PR closes; nothing else was written"
 fi
 ACTING="$PR_ANSWER"
 if [ -n "$TARGET_CLOSED" ]; then
@@ -729,11 +729,10 @@ for p in "${STANDS[@]+"${STANDS[@]}"}"; do echo "the ruling leaves the branch of
 
 # 2. The headline. An ARRAY, not a string: this city runs zsh, which does not
 # word-split an unquoted parameter, so "${WAIT[@]}" is what passes each flag as
-# its own argument, and nothing when it is empty.
+# its own argument, and nothing when it is empty. The resolves, the release and
+# the close below cannot be undone, so they wait on takeaway's exit.
 "$HELM" takeaway "$SUBJECT" "$OUTCOME" --by converse "${WAIT[@]+"${WAIT[@]}"}" \
-  || stopped "the headline did not land on $SUBJECT (gc-helm.sh takeaway refused it)${APPROVE_CLAUSE:+. It carries \"; $APPROVE_CLAUSE\" after --outcome, which counts toward the cap, so a shorter --outcome makes room}; no gate was resolved and the conversation is not closed"
-show_row "$SUBJECT" | jq -e '(.metadata["gc.takeaway"] // "") != ""' >/dev/null 2>&1 \
-  || stopped "no headline reads back on $SUBJECT; no gate was resolved and the conversation is not closed"
+  || stopped "gc-helm.sh takeaway did not finish on $SUBJECT, and its message above says which write it could not make${APPROVE_CLAUSE:+. It carries \"; $APPROVE_CLAUSE\" after --outcome, which counts toward the cap, so a shorter --outcome makes room}; no gate was resolved and the conversation is not closed"
 
 if [ "$RULED" = yes ]; then
   # 3. The gates the ruling answers: those --answer names, or else each one the
@@ -788,14 +787,13 @@ if [ "$RULED" = yes ]; then
   # gc.work_outcome, stamped in a write of its own so it never decides whether
   # the conversation closes. The sitting holds the conversation, so a plain
   # close is the holder's own; --force covers an actor bd does not read as its
-  # holder. A close counts once it reads back.
+  # holder. The PR comment drawn after it cannot be taken back, so a close the
+  # store refuses both ways stops the sign-off.
   if [ "$CONV_STATUS" != closed ]; then
     work_outcome_noop "$CONVERSATION" gc bd
     gc bd close "$CONVERSATION" --reason "$OUTCOME" >/dev/null 2>&1 \
       || gc bd close "$CONVERSATION" --reason "$OUTCOME" --force >/dev/null 2>&1 \
-      || true
-    [ "$(show_row "$CONVERSATION" | jq -r '(.status // "") | ascii_downcase' 2>/dev/null)" = closed ] \
-      || stopped "conversation $CONVERSATION did not close; every gate above is answered, and a re-run closes it"
+      || stopped "the store refused the close of conversation $CONVERSATION; every gate above is answered, and a re-run closes it"
   fi
   SIGNED=closed
 else
@@ -806,21 +804,29 @@ else
   # it back from. One that reads closed has ended, by a dismiss or an earlier
   # sign-off, and bd's close keeps its assignee, so a write guarded on the
   # holder alone would reopen it: it stays closed. A dismiss that lands between
-  # the read and the write fails the status guard, and the read-back finds the
-  # conversation closed.
+  # the read and the write fails the status guard (exit 13), and a read then
+  # finds the conversation closed. A guard that misses because another writer
+  # already put the conversation back in the queue leaves it where this
+  # hand-back puts it.
   BACK_AT=""
   if [ "$CONV_STATUS" = closed ]; then
     echo "conversation $CONVERSATION already reads closed, so it stays closed and is not handed back"
   elif [ "$HOLDER" = human ]; then
     BACK_AT="human/open"
   else
-    gc bd update "$CONVERSATION" --if-assignee "$HOLDER" --if-status "$CONV_STATUS" --assignee human --status open >/dev/null 2>&1 || true
-    BACK=$(show_row "$CONVERSATION") || BACK=""
-    BACK_AT=$(printf '%s' "$BACK" | jq -r '"\(.assignee // "")/\((.status // "") | ascii_downcase)"' 2>/dev/null)
-    case "$BACK_AT" in
-      human/open) ;;
-      */closed) echo "conversation $CONVERSATION was closed while this sign-off ran, so it stays closed and is not handed back" ;;
-      *) stopped "conversation $CONVERSATION did not read back in the operator's queue (assignee human, status open) after its hand-back from $HOLDER; re-run once the store answers" ;;
+    BACK_RC=0
+    gc bd update "$CONVERSATION" --if-assignee "$HOLDER" --if-status "$CONV_STATUS" --assignee human --status open >/dev/null 2>&1 || BACK_RC=$?
+    case "$BACK_RC" in
+      0) BACK_AT="human/open" ;;
+      13)
+        BACK=$(show_row "$CONVERSATION") || BACK=""
+        BACK_AT=$(printf '%s' "$BACK" | jq -r '"\(.assignee // "")/\((.status // "") | ascii_downcase)"' 2>/dev/null)
+        case "$BACK_AT" in
+          human/open) ;;
+          */closed) echo "conversation $CONVERSATION was closed while this sign-off ran, so it stays closed and is not handed back" ;;
+          *) stopped "conversation $CONVERSATION moved while this sign-off ran (it reads ${BACK_AT:-unreadable}), so its hand-back from $HOLDER was not written; re-run to hand it back from where it is now" ;;
+        esac ;;
+      *) stopped "the store refused the hand-back of conversation $CONVERSATION from $HOLDER to the operator's queue (gc bd update exited $BACK_RC); re-run once the store answers" ;;
     esac
   fi
   SIGNED="already closed"

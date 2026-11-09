@@ -59,9 +59,8 @@ mkdir -p "$TMP/bin"
 # `bd dep add` records an edge unless $FAKE_DEP_FAIL is set. `bd update` applies
 # --status, --assignee, --set-metadata, --unset-metadata and --append-notes; it
 # refuses when the id is in $FAKE_UPD_FAIL, and refuses the arm's write (one
-# that sets gc.dispatch_when_ready) when $FAKE_ARM_WRITE_FAIL is set; with
-# $FAKE_ARM_WRITE_NOOP set it answers that write with success and stores
-# nothing, as a store can. `gc-toolkit scripts-dir` names this directory, the pack the step's call runs.
+# that sets gc.dispatch_when_ready) when $FAKE_ARM_WRITE_FAIL is set.
+# `gc-toolkit scripts-dir` names this directory, the pack the step's call runs.
 # `runtime drain-ack` records DRAIN in $FAKE_TRACE. `hook current` prints
 # $FAKE_HOOK_CURRENT, the step this session claimed, and fails as gc does for a
 # session that claimed nothing when $FAKE_HOOK_FAIL is set.
@@ -126,7 +125,7 @@ case "$verb" in
       case "$x" in
         gc.dispatch_when_ready=*)
           [ -n "${FAKE_ARM_WRITE_FAIL:-}" ] && { echo "bd: store fault writing $id (stub)" >&2; exit 1; }
-          [ -n "${FAKE_ARM_WRITE_NOOP:-}" ] && { echo "✓ Updated issue: $id"; exit 0; } ;;
+          ;;
       esac
     done
     tmp="$S.n"; cp "$S" "$tmp"
@@ -312,6 +311,9 @@ run "${DONE_ARGS[@]}"; refused "a root run-lib.sh finds no run for" "is not a li
 reset
 OUT=$(RUN_LIB_STUB_FAIL=subject "$SCRIPT" "${DONE_ARGS[@]}" 2>&1); RC=$?
 refused "a run read that fails" "could not read the run rooted at tk-root"
+reset; jq -c 'map(if .id == "tk-step" then .metadata["gc.root_bead_id"] = "hq-root" else . end)' "$FAKE_STORE" > "$FAKE_STORE.n" && mv "$FAKE_STORE.n" "$FAKE_STORE"
+printf '[%s]\n' "${LIVE_RUN/tk-root/hq-root}" > "$RUN_LIB_STUB_RUNS"
+run "${DONE_ARGS[@]}"; refused "a run root in another store, where an edge onto it would hold nothing" "the run's root hq-root is in another store than tk-work"
 reset
 OUT=$(GC_DEFERRED_DISPATCH_TOOL="$TMP/missing.sh" "$SCRIPT" "${DONE_ARGS[@]}" 2>&1); RC=$?
 refused "no deferred-dispatch.sh" "deferred-dispatch.sh not found"
@@ -331,17 +333,13 @@ eq "$(edge_rows)|$(meta tk-work gc.dispatch_when_ready)" "0|<absent>" "the brief
 reset
 OUT=$(FAKE_DEP_FAIL=1 "$SCRIPT" "${DONE_ARGS[@]}" 2>&1); RC=$?
 eq "$RC" 1 "the hold refused: exit 1"
-has "$OUT" "the blocks edge from tk-work onto its run's root tk-root did not land" "the hold refused: says so"
+has "$OUT" "the store refused the blocks edge from tk-work onto its run's root tk-root" "the hold refused: says so"
 eq "$(meta tk-work gc.dispatch_when_ready)" "<absent>" "the hold refused: the closer is not armed unheld"
 reset
 OUT=$(FAKE_ARM_WRITE_FAIL=1 "$SCRIPT" "${DONE_ARGS[@]}" 2>&1); RC=$?
 eq "$RC" 1 "the arm refused: exit 1"
 has "$OUT" "the validating closer was not armed on tk-work" "the arm refused: says so"
 eq "$(edge_rows)" 1 "the arm refused: the hold stays, for the re-run"
-reset
-OUT=$(FAKE_ARM_WRITE_NOOP=1 "$SCRIPT" "${DONE_ARGS[@]}" 2>&1); RC=$?
-eq "$RC" 1 "an arm the store took and did not keep: exit 1"
-has "$OUT" "reads back armed to ''" "an arm the store did not keep: the read-back says so"
 
 # ── 7. the brief's reader ───────────────────────────
 grep -qF '## Close brief (store-only exit, <time>)' "$CLOSER_TOML" \

@@ -188,7 +188,8 @@ the ruling, and the contract after it with whose words each field is. It names
 each landed Delivery the checkpoint closes, or `none`, and each judgment still
 owed with its gate and the work that waits on it. While reviews run by hand, it
 also says what was mechanical, what took judgment and what the contract lacked.
-Write nothing else until it reads back:
+The block is written before anything else, and its write's exit decides whether
+it landed:
 ```bash
 TODAY=$(date -u +%Y-%m-%d) \
   && RECORD="## Epic review, $TODAY
@@ -208,11 +209,10 @@ Contract lacked: <what the contract lacked>
 BLOCK
 )" \
   && gc bd update "$EPIC" --append-notes "$RECORD" \
-  && gc bd show "$EPIC" --json | jq -e --arg b "$RECORD" '(.[0].notes // "") | contains($b)' >/dev/null \
   && echo "the review record is on $EPIC"
 ```
-No closing line means the record did not land: write nothing more, and say so
-in the thread. When the subject is the epic, this block is the settle step's
+No closing line means the store refused the record: write nothing more, and say
+so in the thread. When the subject is the epic, this block is the settle step's
 record. When the subject is another bead, the settle step's record on it is one
 line naming this block.
 

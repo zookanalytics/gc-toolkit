@@ -146,8 +146,8 @@ func TestIsHumanGateReadsTheGateFields(t *testing.T) {
 
 // The scripts read `gc bd show ... | scrub | jq '.[0] // empty'` with no
 // pipefail: a payload printed beside a non-zero exit is a bead there. Show must
-// agree, or a read-back whose `gc` also warned reports as UNVERIFIED (exit 2) a
-// transition the script it replaces reported as landed.
+// agree, or a bead the scripts read as there reads as missing whenever `gc` also
+// warned.
 func TestShowReadsThePayloadWhateverGcExitsWith(t *testing.T) {
 	bin := t.TempDir()
 	stub := "#!/bin/sh\necho '[{\"id\":\"b-1\",\"status\":\"open\",\"metadata\":{\"merge_result\":\"pull_request\"}}]'\nexit 1\n"

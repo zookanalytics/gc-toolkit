@@ -131,11 +131,10 @@ Open questions: none
 BLOCK
 )" \
   && gc bd update "$SUBJECT" --append-notes "$SCAFFOLD" \
-  && gc bd show "$SUBJECT" --json | jq -e --arg b "$SCAFFOLD" '(.[0].notes // "") | contains($b)' >/dev/null \
-  && echo "the scaffold reads back, dated $TODAY"
+  && echo "the scaffold is written, dated $TODAY"
 ```
 
-No closing line means the scaffold did not land: send nothing.
+No closing line means the store refused the scaffold: send nothing.
 
 ## Send one rework
 

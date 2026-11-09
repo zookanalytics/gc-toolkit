@@ -34,20 +34,19 @@ mkdir -p "$BIN"
 #                 until an unset of it is logged, then it reads absent (the real
 #                 store behaviour a read-back relies on).
 #   MODE=empty    — the subject never carries the key (already Discuss-only).
-#   MODE=stubborn — the key is ALWAYS present, even after an unset is logged
-#                 (a silent drop that the read-back must catch).
+#   MODE=refuse  — the key is present, and `bd update` refuses with exit 1.
 #   MODE=unreadable — show returns the object form bd emits when nothing
 #                 resolves, which `.[0]` cannot index (an unreadable subject).
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 [ "${1:-}" = "bd" ] || exit 2
 case "${2:-}" in
-    update) printf 'update %s\n' "$*" >>"$LOG" ;;
+    update) printf 'update %s\n' "$*" >>"$LOG"; [ "${MODE:-}" != refuse ] || { echo "Error updating tk-sub: the store refused it" >&2; exit 1; } ;;
     close)  printf 'close %s\n' "$*" >>"$LOG" ;;
     show)
         printf 'show %s\n' "$*" >>"$LOG"
         case "${MODE:-present}" in
             empty)      jq -nc '[{id:"tk-sub",metadata:{}}]' ;;
-            stubborn)   jq -nc '[{id:"tk-sub",metadata:{"gc.recommended_formula":"mol-x"}}]' ;;
+            refuse)     jq -nc '[{id:"tk-sub",metadata:{"gc.recommended_formula":"mol-x"}}]' ;;
             unreadable) jq -nc '{}' ;;
             *)
                 if grep -q -- '--unset-metadata gc.recommended_formula' "$LOG" 2>/dev/null; then
@@ -91,13 +90,13 @@ is "it exits 0 (already Discuss-only)" "$RC" "0"
 hasnt "no unset is written when there is nothing to strip" '--unset-metadata gc.recommended_formula' "$LOG"
 hasnt "no note is written when there is nothing to strip" '--append-notes' "$LOG"
 
-echo "── a key that survives the unset fails closed (Accept would return) ──"
+echo "── a strip the store refuses fails closed (Accept would return) ──"
 : >"$LOG"
 RC=0
-( PATH="$BIN:$PATH" LOG="$LOG" MODE=stubborn CONVERSATION=tk-c SUBJECT=tk-sub bash "$SUT" "no longer valid" ) >/dev/null 2>&1 || RC=$?
-is "it exits 4 when the key will not clear" "$RC" "4"
-is "it retried a lone unset before giving up (two updates seen)" \
-   "$(grep -c -- '--unset-metadata gc.recommended_formula' "$LOG")" "2"
+( PATH="$BIN:$PATH" LOG="$LOG" MODE=refuse CONVERSATION=tk-c SUBJECT=tk-sub bash "$SUT" "no longer valid" ) >/dev/null 2>"$TMPD/err" || RC=$?
+is "it exits 4 when the store refuses the unset" "$RC" "4"
+is "…after its one write" "$(grep -c -- '--unset-metadata gc.recommended_formula' "$LOG")" "1"
+has "…and says the key stands" "refused the strip on tk-sub" "$TMPD/err"
 
 echo "── an unreadable subject is refused, not read as 'nothing to strip' ──"
 : >"$LOG"

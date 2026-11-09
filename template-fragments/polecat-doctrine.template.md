@@ -160,8 +160,9 @@ bead. This is how to write it:
 4. Stamp it on the landing bead, with the whole branch's subject line as its title
    (the skill `{{ .BindingPrefix }}commit-conventions`):
    `gc bd update <landing-bead> --title "<subject line>" --set-metadata pr_summary="$(cat <file>)"`.
-   Read both back, and write nothing else there. The formula's write-report step
-   then closes the task, which releases the landing bead to the refinery.
+   Its exit decides whether both landed. Write nothing else there. The formula's
+   write-report step then closes the task, which releases the landing bead to
+   the refinery.
 
 ## Work bead metadata contract
 

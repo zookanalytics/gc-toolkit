@@ -208,8 +208,8 @@ these steps:
    a live sitting, and engage attaches the operator to it rather than starting
    a second. Otherwise it takes the bead's conversation from the queue, or one
    whose sitting's session has closed, or files a new one. Pointed at a gate,
-   engage makes the conversation it landed on reply to the gate and reads the
-   reply back before it starts or attaches anything.
+   engage makes the conversation it landed on reply to the gate before it
+   starts or attaches anything, and a reply the store refuses starts nothing.
 5. **It starts the sitting:**
    `gc session new converse-<model> --alias <task> --no-attach`, under the
    prefix `c-` when the runtime refuses the bare id as an alias. A session
@@ -219,14 +219,15 @@ these steps:
 6. **It binds the task to the session's alias** with
    `gc bd update <task> --if-assignee <holder> --if-status <status> --assignee
    <alias>`, where the holder and the status are the ones engage read, or the
-   queue and `open` for a conversation it filed. A task already assigned to the
-   alias, as a sitting whose session closed leaves it, needs no bind. Either
-   way the task must read back assigned to the alias and not closed. A bind
-   misses when another engage or a hand-off landed first, or when a dismiss
-   closed the task, since a dismiss keeps the holder and changes the status. A
-   bind that misses, or a read-back that finds the task closed, closes the
-   session this engage started. Then engage waits for the reconciler to start
-   the session, and attaches the operator.
+   queue and `open` for a conversation it filed. A bind misses when another
+   engage or a hand-off landed first, or when a dismiss closed the task, since
+   a dismiss keeps the holder and changes the status. A task already assigned
+   to the alias, as a sitting whose session closed leaves it, needs no bind, so
+   no guarded write covers the spawn's window, and the task is read again: it
+   must still be assigned to the alias and not closed. A bind that misses, or a
+   read that finds the task taken or closed, closes the session this engage
+   started. Then engage waits for the reconciler to start the session, and
+   attaches the operator.
 
 **Engage offers what holds the bead.** It reads the reasons
 `gctk pr-status derive --json` gives (`prstatus.Read` and `prstatus.Reasons`),
@@ -449,8 +450,8 @@ conversation filed there asks that conversation's question, and its ruling
 releases the bead whether or not this one is settled. So the key names the
 conversation, `conversation.<conversation id>`: a resumed hold finds the gate
 it filed, and two conversations on one bead each hold with a gate of their
-own, so the merge waits for both rulings. The sitting replies to its gate and
-reads the reply back, so a resumed or handed-off conversation knows the gate
+own, so the merge waits for both rulings. The sitting replies to its gate, so
+a resumed or handed-off conversation knows the gate
 it owes. Without that need it files nothing: a conversation does not
 freeze its subject, and a PR keeps moving while the operator and the sitting
 talk. The gate is what holds the subject: bd reads the subject as blocked while
@@ -465,8 +466,8 @@ replies to: the gate engage was pointed at, one its hold filed, and any other
 human gate the operator rules on within the subject's universe, which the
 converse prompt defines as the subject with its dependents and related items,
 and for an epic the work under it and in flight across it. To answer a gate
-its conversation does not reply to yet, the sitting adds the reply and reads
-it back, so the graph records which conversation answered which gate. Before it
+its conversation does not reply to yet, the sitting adds the reply, so the
+graph records which conversation answered which gate. Before it
 resolves a gate, it names every bead the answer releases, read from the gate's
 `blocks` dependents, so an answer that releases a bead beyond the subject is
 given knowingly. It also settles the subject's dispatch path first, at the
@@ -517,8 +518,8 @@ never took up stays for whoever owes it, and a gate it replies to that the
 ruling leaves owed stays open with its reply in place. It reads those gates
 from the conversation's own row (`gc bd list --id <task>`), whose edges keep a
 reply onto a gate in another store. Every read it depends on runs before its
-first write, and it stops short, with nothing posted, when any write does not
-read back, so a re-run repeats each write safely. A gate can be what holds a
+first write, and it stops short, with nothing posted, when the store refuses a
+write, so a re-run repeats each write safely. A gate can be what holds a
 merge, and resolving it releases the merge, so whatever the ruling puts in the
 merge's way lands before any gate is resolved. A ruling that reaches an open
 PR must say what it does to the PR (`--rework`, `--no-rework` or `--retire`),
@@ -643,9 +644,10 @@ file per bead under `<city>/.gc/runtime/packs/gc-toolkit`, from before its live
 read of the three conditions to its last write, and refuses, writing nothing,
 while another Accept holds it. On an open gate it records the acceptance's
 dispatch input on the gate (`gc.acceptance`: its token, the formula and each
-var) and reads it back, resolves the gate with
-`ruled: accepted <formula> accept:<token>`, reads its own answer back, reads
-back that no other open human gate blocks the bead, slings the formula titled
+var), resolves the gate with `ruled: accepted <formula> accept:<token>` once
+that write has exited 0, reads its own answer back to tell it from one another
+reached first, reads that no other open human gate blocks the bead, slings the
+formula titled
 `<formula> accept:<token>`, and records the dispatch by stripping
 `gc.recommended_formula` beside `gc.recommended_formula_dispatched`. An answer
 another reached first stands, and Accept slings nothing. A gate filed in the
@@ -842,7 +844,7 @@ held and been cut short, leaving its hold's headline on the subject, waiting
 on the gates this close resolves. So the close reads the subject first. A
 headline that still waits, on a subject no open blocker holds any more, is
 replaced with the reading, settled. The conversation closes only once those
-writes read back.
+writes have exited 0.
 
 *A restart is not an ending.* A wake that reaches a session mid-hold gets its
 conversation back from `gc hook --claim` as an existing assignment. Draining

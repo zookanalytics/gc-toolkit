@@ -671,8 +671,8 @@ keys = [
 #   A later round whose ruling keeps the approval leaves it as it is. Absent
 #   means no ruling lifted the approval. Never cleared.
 # direct_landing_sha — the commit a direct landing pushes, stamped by
-#   direct-merge-push.sh and read back before the push, so a landing whose
-#   record fails stays provable to a later patrol. Read by
+#   direct-merge-push.sh before the push, which waits on the stamp's exit, so a
+#   landing whose record fails stays provable to a later patrol. Read by
 #   mol-refinery-patrol.toml's zero-diff guard: a branch with no change against
 #   a target that carries the stamp goes down the direct path instead of being
 #   refused as a false completion, and direct-merge-push.sh records the landing
@@ -1121,10 +1121,10 @@ keys = [
 #   (absent on a lint or typecheck run), commit, tree, exit_code, duration_ms,
 #   runner, recorded_at and command. gctk writes it only once the record store
 #   holds the result it copies: after recording a result, and after answering
-#   from a record. It reads the copy back once to confirm the write. No other
-#   pack path reads it. Absent means no call published that check to the bead.
-#   Never cleared: the next publish replaces it. Its commit is the one the check
-#   ran at: the head the call answered for, or, for a full-suite test pass
+#   from a record. A write the store refuses is reported and changes no exit. No
+#   other pack path reads it. Absent means no call published that check to the
+#   bead. Never cleared: the next publish replaces it. Its commit is the one the
+#   check ran at: the head the call answered for, or, for a full-suite test pass
 #   answered through the tree, an earlier commit with the same tree. A JSON
 #   object stored as a string.
 # rig_check_pre_existing.test, .lint, .typecheck, .setup, .build — a caller's
@@ -1352,7 +1352,7 @@ keys = [
 # gc.recommended_formula — the execution mol a recommend exit names, which the
 #   operator can Accept from the subject's row on the board. first-reaction-dispose.sh sets
 #   it before the act of a recommend disposition and unsets a stale one on every
-#   other disposition, reading the key back either way. gc-helm.sh
+#   other disposition, each write taking its exit. gc-helm.sh
 #   `accept` unsets it in the write that records its dispatch, and
 #   converse-invalidate-recommendation.sh unsets it when a sitting judges the
 #   recommendation no longer valid. The board's Accept derivation
@@ -1361,18 +1361,17 @@ keys = [
 #   absent and empty both mean no live recommendation, and the subject offers
 #   Discuss only. A formula name that `gc formula show` resolves.
 # gc.recommended_formula_dispatched — the formula gc-helm.sh `accept` slung,
-#   written in the update that unsets gc.recommended_formula and read back after
-#   it. `accept` reads it to resume a run that dispatched but did not finish: it
-#   completes the unset and never slings again. `accept` slings before it writes
-#   this key, so absent means no Accept has recorded a dispatch. Never cleared.
-#   A formula name.
+#   written in the update that unsets gc.recommended_formula. `accept` reads it
+#   to resume a run that dispatched but did not finish: it completes the unset
+#   and never slings again. `accept` slings before it writes this key, so absent
+#   means no Accept has recorded a dispatch. Never cleared. A formula name.
 # gc.acceptance — on the human gate under the key first-reaction, the dispatch
 #   input of the acceptance that answers it: a JSON object {token, formula,
 #   vars}, with vars the `<key>=<value>` strings its sling carries. gc-helm.sh
-#   `accept` writes it and reads it back before the resolve that names the
-#   token, and a run that finishes that acceptance slings the vars recorded
-#   under the token, so the board's Accept, which passes no --var, dispatches
-#   what the operator accepted. A record whose token no answer on the gate
+#   `accept` writes it before the resolve that names the token, and a run that
+#   finishes that acceptance slings the vars recorded under the token, so the
+#   board's Accept, which passes no --var, dispatches what the operator
+#   accepted. A record whose token no answer on the gate
 #   names, left by a run that stopped before its resolve or by an answer Accept
 #   reopened, binds nothing, and the next acceptance overwrites it. Never
 #   cleared.
@@ -1404,7 +1403,8 @@ keys = [
 keys = ["placement"]
 # placement — `pending`, the marker on a bead held for the placement sitting.
 #   Written by first-reaction-dispose.sh when intake holds its actionable route
-#   or its blocked exit's --then-route, and read back before the release; by
+#   or its blocked exit's --then-route, before the release, which waits on the
+#   write's exit; by
 #   mol-witness-patrol.toml's bug-file block, in the create of a pack-defect bug;
 #   and by mol-feedback-distiller.toml, in the create of each prompt-update and
 #   engineering bead. Read through assets/scripts/placement.sh, whose
@@ -1424,18 +1424,18 @@ keys = ["placement"]
 keys = ["priority_shift"]
 # priority_shift — the bead's shift from the bead it follows: +1 is one level
 #   later and -1 one level sooner, and each level stops at P0 and P4. Written by
-#   queue-priority.sh move, which `gc-helm.sh priority --shift` runs, and read
-#   back there. Each script that files PR-finishing work (gate-ensure.sh,
-#   pr-facts.sh, pre-open-rebase.sh, rework-child.sh and signoff.sh) also
-#   writes it, -1, in the create that files a child, through bd-lib.sh's
-#   pr_finishing_birth, and never rewrites it on a child it adopts or re-routes.
-#   Read by priority-lib.sh wherever a priority is computed: queue-priority.sh
-#   settle, its move and its reconcile pass. Read only on a
-#   bead that follows a parent or an anchor: a workflow's convoy, root and steps
-#   carry no shift, and a bead that follows nothing has nothing to shift from.
-#   Absent or empty reads as 0. A value that is not a signed integer makes the
-#   bead unreadable, and every bead that follows it, so no priority is computed
-#   from it. No pack writer clears it. A signed integer, stored as a number.
+#   queue-priority.sh move, which `gc-helm.sh priority --shift` runs. Each
+#   script that files PR-finishing work (gate-ensure.sh, pr-facts.sh,
+#   pre-open-rebase.sh, rework-child.sh and signoff.sh) also writes it, -1, in
+#   the create that files a child, through bd-lib.sh's pr_finishing_birth, and
+#   never rewrites it on a child it adopts or re-routes. Read by priority-lib.sh
+#   wherever a priority is computed: queue-priority.sh settle, its move and its
+#   reconcile pass. Read only on a bead that follows a parent or an anchor: a
+#   workflow's convoy, root and steps carry no shift, and a bead that follows
+#   nothing has nothing to shift from. Absent or empty reads as 0. A value that
+#   is not a signed integer makes the bead unreadable, and every bead that
+#   follows it, so no priority is computed from it. No pack writer clears it. A
+#   signed integer, stored as a number.
 
 [metadata.supersede]
 # RETIRED. The successor keys a disposition carried before bd's own edges
@@ -1615,18 +1615,17 @@ keys = [
 # gc.handback / gc.handback_at — on a conversation, the latest hand-back its
 #   converse sitting posted, whole (a framing or the sign-off), and when it was
 #   recorded (RFC-3339 UTC). gc-helm.sh `handback` writes both in one update,
-#   each record replacing the one before, and reads the text back. gc-helm.sh
-#   `engage` reads them once the tab's attach returns on a closed conversation,
-#   and prints the text in the operator's terminal as the sitting's last words.
-#   Absent, the tab says the sitting recorded no hand-back. Once the
-#   conversation reads closed, pr-sitting-comment.sh shows the text word for
-#   word as the visit's conclusion in its comment on the subject's PR. Never
-#   cleared. Freeform multi-line text.
+#   each record replacing the one before. gc-helm.sh `engage` reads them once
+#   the tab's attach returns on a closed conversation, and prints the text in
+#   the operator's terminal as the sitting's last words. Absent, the tab says
+#   the sitting recorded no hand-back. Once the conversation reads closed,
+#   pr-sitting-comment.sh shows the text word for word as the visit's conclusion
+#   in its comment on the subject's PR. Never cleared. Freeform multi-line text.
 # gc.ruling_consequence — on a conversation, the open PR each of its rulings'
 #   --rework or --retire acts on: a JSON object from the ruling's answer
 #   (`ruled: <ruling>`) to {act, anchor}, act `rework` or `retire` and anchor
-#   the PR's anchor bead. converse-signoff.sh writes a ruling's entry and reads
-#   it back before the rework or the retirement acts, and a re-run of that
+#   the PR's anchor bead. converse-signoff.sh writes a ruling's entry first,
+#   and the rework or retirement acts only on its zero exit. A re-run of that
 #   ruling with the same answer acts on the anchor it names, even once that
 #   anchor has closed, as a retired PR's does when pr-facts consummates its
 #   disposition. An entry binds no re-run that answers differently, which
@@ -1780,8 +1779,8 @@ keys = [
 # gc.design_armed / gc.impl_armed / gc.summary_armed — `1` once the dispatch
 #   step has dispatched that bead: the design child slung, the implementation
 #   child armed behind the design or slung, the summary task armed. The step
-#   dispatches only after every target and edge of the setup has read back and
-#   the subject is with the refinery, and stamps each marker right after its
+#   dispatches only after every target and edge of the setup is written and the
+#   subject is with the refinery, and stamps each marker right after its
 #   own dispatch. Absent means that dispatch has not happened, so a resume runs
 #   it. Not cleared. A string.
 
