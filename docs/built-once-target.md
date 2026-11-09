@@ -122,7 +122,8 @@ bead that owns it.
 
 The trade: the pack's own approval rule, the merge cadence's arms with their
 lock, cursors and crash detection, and the rework and branch-currency machinery
-give way to GitHub's rules and the refinery's rebase-or-requeue. An approval
+give way to GitHub's rules and the refinery's bring-current-or-requeue, which
+merges the target in and never rebases. An approval
 nuance GitHub cannot express keeps a residual under a warrant. Moving the
 policy onto GitHub is the operator's ruling at tk-1tfzr71.20's design.
 

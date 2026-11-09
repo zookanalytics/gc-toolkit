@@ -640,7 +640,7 @@ tk-1tfzr71.20 --direction=up`), less the members that follow it.
 |---|---|---|
 | tk-6bovoni: guards replay merges over a rewritten main | still carries it until the supersession check and the guard retire, with tk-1tfzr71.21 and .22 | Both halves sit in files whose rows move (section 8). Its edge moves onto both members. |
 | tk-c8hl47c: a pre-open rework becomes a second anchor of its PR | removes it | No pre-open round exists, and the refinery opens or updates only the PR of the branch's owner. A rework child's hand-back updates its anchor's PR and never gives the child a landing record of its own. |
-| tk-cvffk5x: the architecture references omit the direct landing writer | removes it | Unit 5 rewrites "How work moves" with both landing paths and their writers. |
+| tk-cvffk5x: the architecture references omit the direct landing writer | removes it | This design's change to `architecture.md` states both landing paths and their writer, and unit 5 rewrites `component-model.md`'s. |
 | tk-gwmqd0x: gctk's signal relay test races its trap | removes it | The test goes with `gctk lifecycle`. |
 | tk-ni0i48p: the refinery's push forces over commits gained after the prep | removes it | Every push is a fast-forward, and a push refused as non-fast-forward is retried from a fresh prep, never forced. |
 | tk-o9i6kp0: how an approval behaves across a rework | settles it in section 3 | Its validating closer checks the model against the note of 2026-11-05. |
@@ -744,7 +744,8 @@ deletes:
   `pr-facts.sh` is its last caller;
 - `review-verdict.sh`'s gctk copy and the parity cases;
 - the old `mr` branch of the refinery's step;
-- `github_merge_rules` itself.
+- `github_merge_rules` itself;
+- the old path's entry under Debt in `architecture.md`.
 
 **Rule 2.** Every step of the rewritten formula calls one tested script and holds
 no shell procedure. The suites that extract the old formula's blocks go in
@@ -762,7 +763,7 @@ leaves the city working.
 | 2. The city's status on GitHub | `prstatus` answers whether the city holds the merge: nothing in flight, nothing held, and, by the `waits` package's answer, no wait of the anchor's own but its merge gate. It reads "waiting for your merge" on a base with no approval rule. It reads a PR's unanswered threads when it gathers the PR's facts, so the count's one writer can retire with `gctk merge`. The label writer also posts `gc-toolkit/status` at the head, success or pending and never failure. It posts success last, once every other requirement of the target is met there and no feedback on the PR is newer than the anchor's watermarks, counted by the intake's own rule. One status covers every open PR whose head is that commit, read fresh from the repository's open PRs before each post, among them a PR from a fork, a PR into another base and a PR with no anchor. Whichever writer runs the projection, it waits for a lock for the repository, reads under it everything the verdict rests on, the watermarks before the holds, and posts only when the state or description changes (section 4). For a bead that carries its merge gate, it keeps auto-merge on exactly while the city reads the PR approved on a base that requires an approving review, and turns it on before it posts success. No bead carries one before unit 3, so the toggle is inert until then. `blocker-holder.sh` reads a gate that core's gate sweep resolves as held by an automated actor. The warrant *The city's merge status* is added, covering the status, its lock and the auto-merge toggle. Tests for each, among them a review that arrives while a required check still runs, feedback the intake's rule leaves out, which holds nothing, the auto-merge toggle turning on before the success post, two open PRs at one head with one of them held, where the status reads pending for both, a PR with nothing left to merge beside a held one, a shared head on the default branch and one from a fork, a writer that waits for the lock, and two writers posting at one commit. | nothing | sections 3, 4 and 5 |
 | 3. The refinery on Gas Town's flow | `mol-refinery-patrol` is rewritten on Gas Town's steps at 3339ad104a88, with the differences in section 1, and each step calls one tested script. The scripts cover: the prep by merge in the refinery's own worktree (`refinery-workspace.sh` and its warrant go); the gate through `detached-job.sh`; the failures, through the requeue by `gc sling` or a rework child, and the pre-existing path; the direct landing; the `mr` step (compose the title and body, edit them onto a PR the bead already owns before the fast-forward push of its new head, or push and then open a new PR as a draft with them, record the PR with `opened_as_draft` so the review lanes and `pr-open.sh`'s ready flip handle it unchanged, file the merge gate with a notice to the refinery, run the projection, and the old-path park while `github_merge_rules` is unset); the close once the merge gate resolves, with the seed re-render under call 2; the rework hand-back; and the integration-effort hand-off. `rejection-repool.sh`, `pr-stack.sh` with its arm, `check-refinery-patrol-live` and the old formula's block-extraction suites go. The polecat doctrine gains the drift rule. | units 1 and 2; tk-gmjtb2e, whichever lands second carrying the other | tk-c8hl47c, tk-ni0i48p, tk-pdc0ovc, tk-w0hkwos; section 7 |
 | 4. The readers move | The sign-off's headline reads `prstatus`. I5 reads every closed bead with a PR. I2 reads the kept values. | unit 3 | section 6 |
-| 5. Docs, warrants and the plan | The pages that describe the merge are rewritten to the flow as it stands once units 1 to 4 land: `refinery-merge-cadence.md`, `state-machine.md` (the kept values and their sentences, and the Checks vocabulary), `architecture.md`'s "How work moves" with both landing paths, `component-model.md`, `authority-map.md`, `design-convoy.md`'s gates under call 1, `gctk-architecture.md`'s rows and the merge section of `built-once-target.md`. The warrants' Covers lines move off retired paths. The plan's rows move as section 8 says. | units 1 to 4 | tk-cvffk5x, tk-r82qrrv |
+| 5. Docs, warrants and the plan | The pages that hold the merge's depth are rewritten to the flow as it stands once units 1 to 4 land: `refinery-merge-cadence.md`, `state-machine.md` (the kept values and their sentences, and the Checks vocabulary), `component-model.md` with both landing writers, `authority-map.md`, `design-convoy.md`'s gates under call 1, `gctk-architecture.md`'s rows and the merge section of `built-once-target.md`, which takes section 1's differences as that page holds the witness's. `architecture.md` states the target from this design's own change, with the old path under Debt. Unit 5 drops the Debt entry units 1 to 4 retire, the refinery push that can force, and corrects any line a unit departed from. The warrants' Covers lines move off retired paths. The plan's rows move as section 8 says. | units 1 to 4 | tk-cvffk5x, with this design's change to `architecture.md`; tk-r82qrrv |
 
 **What each waiting member needs.**
 
@@ -804,7 +805,9 @@ leaves the city working.
   - tk-rl8gz4b.28 (PR #1445), the po effort, which edits
     `lifecycle/lifecycle.toml` and pages unit 5 rewrites (`architecture.md`,
     `authority-map.md`, `built-once-target.md`, `component-model.md` and
-    `warrants.md`), for unit 5 and the retirement bead.
+    `warrants.md`), for unit 5 and the retirement bead. Its edits to
+    `architecture.md` and `built-once-target.md` sit beside this design's own
+    and share no line with them.
 
 ## 13. Facts this design rests on
 
