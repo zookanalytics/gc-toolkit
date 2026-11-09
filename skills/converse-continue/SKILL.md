@@ -62,8 +62,9 @@ the sign-off (step 7). The `--answer` call resolves only the gates it
 names, leaves the conversation open, and exits non-zero when it stopped short.
 The conversation's own gate on an open PR's anchor, under its key
 `conversation.<its id>`, stays open until the conversation closes, even when
-the call names it, so the PR's merge waits for the sign-off. A ruling that lets
-the PR land sooner withdraws that gate, as the converse-hold step says for a
+the call names it, so the PR's merge waits for the sign-off. Naming it still
+reaches that PR, which the call's `--rework`, `--no-rework` or `--retire`
+answers at once. A ruling that lets the PR land sooner withdraws that gate, as the converse-hold step says for a
 sitting that is helping the PR land. Until the call exits 0, do not tell the
 operator the ruling is in place:
 ```bash

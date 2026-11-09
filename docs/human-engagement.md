@@ -610,7 +610,8 @@ which runs steps 1 to 3 for the gates it names, and step 4 when the ruling
 takes the recommendation, and stops there, leaving the conversation open for
 the sign-off. The conversation's own hold on an open PR's merge stays open
 with it, even when `--answer` names it, because the merge waits for the
-conversation's close.
+conversation's close. Named, the hold still reaches that PR, so the rework or
+the retirement the ruling carries is in place at once.
 
 A ruling is not an approval. The merge counts only an Approve review on GitHub
 from an account other than the city's (the merge condition in

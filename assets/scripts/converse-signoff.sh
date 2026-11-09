@@ -110,7 +110,8 @@
 #     every other gate as it is, so --ruled no and --leave are refused beside
 #     it. The conversation's own hold on an open PR's merge holds that merge
 #     until the conversation closes, so --answer leaves it open and answers
-#     the other gates it names. A ruling that lets the PR land sooner
+#     the other gates it names. Named, it still reaches that PR, which the
+#     open-PR answer below then answers. A ruling that lets the PR land sooner
 #     withdraws the hold, as the converse-hold skill says for a sitting that
 #     is helping the PR land.
 #   --rework | --no-rework | --retire <kind> (with a ruling): what the ruling
@@ -405,7 +406,11 @@ fi
 # a gate about two. Such a gate is one still open, or one this ruling's own
 # answer has closed: an attempt that stopped after resolving it had already
 # acted on what it released, and the re-run it asks for must act on the same PR
-# rather than fall back to the subject. What each such gate releases is read
+# rather than fall back to the subject. The conversation's own hold on an open
+# PR's merge reaches that PR on a turn that does not sign off as well, when
+# --answer names it, though the turn leaves the hold open: the conversation is
+# about that PR, so a ruling given mid-conversation puts the PR's rework or
+# retirement in place at once. What each such gate releases is read
 # here, with the other reads. A listing of a gate's beads, or the row of a bead
 # it releases, that does not read could hide an open PR, so the sign-off stops
 # before it writes anything, and a subject that will not read cannot be told
@@ -473,9 +478,6 @@ if [ "$RULED" = yes ]; then
   done
   for g in $TO_ANSWER; do
     printf '%s\n' "${LEAVE[@]+"${LEAVE[@]}"}" | grep -qxF -- "$g" && continue
-    # A turn that does not sign off leaves the conversation's own hold open, so
-    # it releases nothing that waits on it.
-    [ -n "$ANSWERING" ] && case " $OWN_HOLDS " in *" $g "*) continue ;; esac
     printf '%s' "$GATES_JSON" | jq -e --arg g "$g" --arg a "$ANSWER" "$HUMAN_GATE_JQ"'any(.[]; .id == $g
         and (open_human_gate("") or (human_gate and (.close_reason // "") == $a)))' >/dev/null 2>&1 || continue
     WAITERS=$(gc bd dep list "$g" --direction=up --type blocks --json 2>/dev/null | grep -av '^gc bd:' | scrub \
@@ -496,7 +498,7 @@ PR_LIST="${PR_ANCHORS[*]+"${PR_ANCHORS[*]}"}"
 if [ "$RULED" = yes ] && [ -z "$PR_ANSWER" ] && [ -n "$PR_LIST" ]; then
   [ "$PR_LIST" != "$SUBJECT" ] \
     || die "$SUBJECT is an open PR (merge_result=pull_request), so a ruling on it must say what it does to the PR; nothing was written. Re-run with --rework to file the rework its branch needs, --no-rework if the branch stands, or --retire <kind> if the PR will not land"
-  die "this ruling reaches $PR_LIST at merge_result=pull_request, as its subject or as a bead a gate it answers releases, so it must say what it does to each open PR; nothing was written. Re-run with --rework to file the rework a branch needs, --no-rework if the branch stands, or --retire <kind> if the PR will not land, and with --pr-anchor <bead> to name the one --rework or --retire acts on when it reaches more than one"
+  die "this ruling reaches $PR_LIST at merge_result=pull_request, as its subject, as a bead a gate it answers releases, or as the PR whose merge this conversation holds, so it must say what it does to each open PR; nothing was written. Re-run with --rework to file the rework a branch needs, --no-rework if the branch stands, or --retire <kind> if the PR will not land, and with --pr-anchor <bead> to name the one --rework or --retire acts on when it reaches more than one"
 fi
 # --rework and --retire act on one open PR: the one the ruling reaches, the one
 # --pr-anchor names when it reaches more than one, or else the subject, which

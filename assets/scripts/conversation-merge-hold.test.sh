@@ -49,6 +49,9 @@
 #                  it at once
 #   (ANSWER-PRE-OPEN) a gate under the conversation's key on a pre-open anchor
 #                  holds no merge, so such a ruling answers it at once
+#   (ANSWER-OWN-REVIEW) on the PR's review, such a ruling naming the own gate
+#                  still reaches the PR, so it says what it does to the PR, and
+#                  its rework is filed against the PR's anchor at once
 #   (MOOT)        the premise re-check's moot close withdraws the gate once
 #                  the conversation's close has landed
 #   (DISMISS)      dismiss withdraws the gate, on the anchor and on the review
@@ -458,6 +461,19 @@ run_signoff --conversation "$C" --answer "$Q" --ruling "it may open now" --outco
 eq "$RC" 0 "(ANSWER-PRE-OPEN) --answer naming the conversation's gate on a pre-open anchor exits 0"
 eq "$(field "$Q" status)/$(field "$Q" close_reason)/$(field "$C" status)" "closed/ruled: it may open now/open" \
     "(ANSWER-PRE-OPEN) …answering that question at once, with the conversation still open"
+# On the PR's review the conversation's own gate is what ties the ruling to the
+# PR, so naming it still reaches the PR, and the ruling's rework is filed
+# against the PR's anchor at once while the gate stays open.
+pr_review; run_open tk-rev --json; C=$(opened_conv); G=$(gates_on tk-anc | awk '{print $1}')
+: > "$CALLS"
+run_signoff --conversation "$C" --answer "$G" --ruling "fix the retry first" --outcome "the retry is fixed first; the conversation goes on" --no-wait
+eq "$RC" 2 "(ANSWER-OWN-REVIEW) on the PR's review, --answer naming the own gate with no open-PR answer is refused"
+has "$OUT" "this ruling reaches tk-anc at merge_result=pull_request" "(ANSWER-OWN-REVIEW) …because it reaches the PR whose merge the conversation holds"
+eq "$(grep -c '' "$CALLS" 2>/dev/null || true)" "0" "(ANSWER-OWN-REVIEW) …writing nothing"
+run_signoff --conversation "$C" --answer "$G" --ruling "fix the retry first" --outcome "the retry is fixed first; the conversation goes on" --no-wait --rework
+eq "$RC" 0 "(ANSWER-OWN-REVIEW) with --rework it exits 0"
+has "$(grep '^converse-rework ' "$CALLS" || true)" "--anchor tk-anc " "(ANSWER-OWN-REVIEW) …filing the rework against the PR's anchor at once"
+eq "$(field "$G" status)/$(field "$C" status)" "open/open" "(ANSWER-OWN-REVIEW) …while the gate and the conversation stay open"
 
 echo "# a sign-off carrying --rework files the rework before it answers the gate"
 pr; run_open tk-anc --json; C=$(opened_conv); G=$(gates_on tk-anc | awk '{print $1}')
