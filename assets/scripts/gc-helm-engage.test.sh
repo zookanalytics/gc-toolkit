@@ -27,9 +27,9 @@
 #   (LIVE)    a conversation a live sitting holds is attached to, not doubled
 #   (PR-HOLD*) a sitting engage starts on a conversation about an open PR holds
 #             the PR's merge first, through the anchor's blocks edge onto the
-#             conversation; a live sitting it attaches to, or a subject that is
-#             no open PR, adds no edge, and an edge the store refuses starts
-#             nothing
+#             conversation, one whose sitting ended included; a live sitting it
+#             attaches to, or a subject that is no open PR, adds no edge, and an
+#             edge the store refuses starts nothing
 #   (REUSE-*) a live sitting engage reuses is attached only once it reads
 #             active: one still start-pending or creating is waited on and left
 #             unattached at the bound, which exits 4, one that ends first is
@@ -795,6 +795,13 @@ reset; HOLD_FAIL=1 SUBJ_META='{"merge_result":"pull_request"}' run_engage tk-con
 eq "$RC" 4 "(PR-HOLD-FAIL) a hold that does not land exits 4"
 has "$OUT" "nothing spawned, because the sitting would talk while the PR could merge" "(PR-HOLD-FAIL) …saying why nothing spawned"
 hasnt "$CALLED" "session new" "(PR-HOLD-FAIL) …and starts no sitting"
+# A conversation whose sitting's session has ended, as one whose sitting lifted
+# the hold leaves it, gets the hold back when engage starts its next sitting.
+reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
+SUBJ_META='{"merge_result":"pull_request"}' run_engage tk-conv --no-attach
+eq "$RC" 0 "(PR-HOLD-ENDED) engaging a conversation whose sitting ended exits 0"
+has "$CALLED" "bd dep bd dep add tk-subj tk-conv --type blocks" "(PR-HOLD-ENDED) …and the new sitting holds the merge again"
+has "$CALLED" "session new converse-opus --alias tk-conv" "(PR-HOLD-ENDED) …starting a sitting of its own"
 export LIVE_SITTINGS="gc-50=gc-toolkit/gc-toolkit.tk-conv"
 
 echo "# a live sitting engage reuses is attached only once the reconciler has started it"
