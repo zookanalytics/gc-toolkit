@@ -50,6 +50,7 @@ case "$1 $2" in
       | .id as $self
       | .dependencies = [ (.dependencies // [])[] | {issue_id: $self, depends_on_id: .id, type: .dependency_type} ] ]' ;;
 "bd blocked") printf '%s\n' "${STUB_BLOCKED:-[]}"; exit "${STUB_BLOCKED_RC:-0}" ;;
+"bd where") printf '%s\n' '{"path":"/stub/.beads","prefix":"st"}' ;;
 "bd sql") printf '%s\n' "${STUB_MARKS:-[]}" ;;
 *) echo "stub gc: no answer for $*" >&2; exit 2 ;;
 esac
@@ -182,25 +183,38 @@ func TestBeadHoldsUsageErrors(t *testing.T) {
 	}
 }
 
-// --db names the store every read of the command makes.
+// --db names the store every read of the command makes, and without it every
+// read names the store gc resolves, which one read of gc bd where asks first.
 func TestBeadHoldsReadsTheNamedStore(t *testing.T) {
-	log := filepath.Join(t.TempDir(), "db")
-	t.Setenv("STUB_DB_LOG", log)
-	lines, code := holds(t, "--db", "/rig/.beads", "own")
-	if code != 0 || len(lines) != 1 || lines[0]["status"] != "blocked" {
-		t.Fatalf("exit %d, lines %v; want 0 and own blocked", code, lines)
-	}
-	raw, err := os.ReadFile(log)
-	if err != nil {
-		t.Fatal(err)
-	}
-	calls := strings.Split(strings.TrimSpace(string(raw)), "\n")
-	if len(calls) < 4 {
-		t.Fatalf("the stub logged %d reads; want the listing, the rows, the blocked set and its marks at least", len(calls))
-	}
-	for i, db := range calls {
-		if db != "/rig/.beads" {
-			t.Errorf("read %d named the store %q; want /rig/.beads", i, db)
-		}
+	for _, tc := range []struct {
+		name  string
+		args  []string
+		store string
+		first string
+	}{
+		{"named", []string{"--db", "/rig/.beads", "own"}, "/rig/.beads", "/rig/.beads"},
+		{"resolved", []string{"own"}, "/stub/.beads", "-"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			log := filepath.Join(t.TempDir(), "db")
+			t.Setenv("STUB_DB_LOG", log)
+			lines, code := holds(t, tc.args...)
+			if code != 0 || len(lines) != 1 || lines[0]["status"] != "blocked" {
+				t.Fatalf("exit %d, lines %v; want 0 and own blocked", code, lines)
+			}
+			raw, err := os.ReadFile(log)
+			if err != nil {
+				t.Fatal(err)
+			}
+			calls := strings.Split(strings.TrimSpace(string(raw)), "\n")
+			if len(calls) < 5 || calls[0] != tc.first {
+				t.Fatalf("the stub logged %q; want the first read to name %s, then the listing, the rows, the blocked set and its marks", calls, tc.first)
+			}
+			for i, db := range calls[1:] {
+				if db != tc.store {
+					t.Errorf("read %d named the store %q; want %s", i+1, db, tc.store)
+				}
+			}
+		})
 	}
 }

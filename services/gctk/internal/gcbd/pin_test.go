@@ -1,6 +1,7 @@
 package gcbd
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -66,5 +67,37 @@ func TestInKeepsAStoreTheCallNames(t *testing.T) {
 	plain := &Client{bin: "gc"}
 	if plain.In("") != plain {
 		t.Error("In(\"\") returned a new client; want the same one, pinned to nothing")
+	}
+}
+
+// Where names the store gc resolves, and a reply that names none fails the read.
+func TestWhereNamesTheResolvedStore(t *testing.T) {
+	dir := t.TempDir()
+	stub := `#!/bin/sh
+case "$*" in
+"bd where --json") printf '%s\n' "$STUB_WHERE"; exit "${STUB_WHERE_RC:-0}" ;;
+esac
+echo "stub gc: no answer for $*" >&2
+exit 2
+`
+	if err := os.WriteFile(filepath.Join(dir, "gc"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	c := &Client{bin: "gc"}
+	t.Setenv("STUB_WHERE", `{"path":"/rig/.beads","prefix":"tk"}`)
+	if got, err := c.Where(); err != nil || got != "/rig/.beads" {
+		t.Errorf("Where() = %q, %v; want /rig/.beads", got, err)
+	}
+	for _, tc := range []struct{ reply, rc string }{
+		{`{"prefix":"tk"}`, "0"},
+		{`{"error":"no beads database found","schema_version":1}`, "1"},
+	} {
+		t.Setenv("STUB_WHERE", tc.reply)
+		t.Setenv("STUB_WHERE_RC", tc.rc)
+		var re *ReadError
+		if _, err := c.Where(); !errors.As(err, &re) {
+			t.Errorf("Where() on %s = %v; want a *ReadError", tc.reply, err)
+		}
 	}
 }

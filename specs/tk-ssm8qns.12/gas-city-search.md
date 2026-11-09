@@ -35,6 +35,25 @@ supervisor's bead route (`GET /v0/city/{city}/bead/{id}`, gascity e03752646,
 in a store the caller names. Nothing in Gas City answers what holds a bead, in
 a named store or any other, as unit 2's search records.
 
+### The store a read names when its caller names none
+
+**The need.** gc routes a read that names a bead and no store to the store
+that holds the bead (`gc bd list --id gc-wdqisl`, run unpinned from the
+gc-toolkit rig, answers with gascity's row, and the same read with
+`--db <gc-toolkit>/.beads` answers none). So an unpinned bead read mixes
+stores: its read of a far bead finds a bead in another rig and calls the edge
+onto it an edge its store holds, while its blocked listing, which names no
+bead, answers from the rig gc resolves.
+
+**The primitive.** `bd where --json`, which names the active beads location
+(bd 1.3.4 at 7ef2fd05e, `bd help`: "where  Show active beads location"), run
+as `gc bd where --json`, which answers from the store gc resolves for the
+working directory and the environment and prints its `.beads` path.
+
+**Why it covers the need.** The store adapter asks it once when the caller
+names no store and pins every later read to the path it prints, so the answer
+is one store's. Nothing else names the store gc resolves.
+
 ## Each wait's `title`
 
 **The need.** The callers that move name what holds a bead to a person:

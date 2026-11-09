@@ -47,7 +47,9 @@ so does a bead the store does not hold.
 
 --db names the store to read, a store's .beads directory, and every read of
 the store names it with bd's own --db flag. Without it the command reads the
-store gc resolves from the working directory and the environment.
+store gc resolves from the working directory and the environment, which it
+asks gc bd where for, so no read that names a bead is routed to another
+store.
 
 exit: 0 every bead answered
       1 at least one bead's read failed, and its line carries the error

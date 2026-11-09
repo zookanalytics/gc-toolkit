@@ -176,6 +176,29 @@ func (c *Client) In(db string) *Client {
 	return &p
 }
 
+// Where is the store gc resolves for this process, from its working directory
+// and its environment, as `gc bd where --json` names it: the store's .beads
+// directory. A read that fails or names no store returns a *ReadError. A
+// reader that must answer from one store pins to it ([Client.In]), because gc
+// routes an unpinned read that names a bead to the store holding that bead,
+// which is another rig's when the bead is.
+func (c *Client) Where() (string, error) {
+	var stderr bytes.Buffer
+	cmd := c.command("bd", "where", "--json")
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return "", &ReadError{Reason: "gc bd where did not name the store: " + failure(out, stderr.String())}
+	}
+	var where struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(Scrub(out), &where); err != nil || where.Path == "" {
+		return "", &ReadError{Reason: "gc bd where named no store"}
+	}
+	return where.Path, nil
+}
+
 // command is the `gc` command for args, a `bd` call, with a pinned client's
 // store named ahead of the verb, where bd reads its global flags. A call that
 // names its own store keeps it.

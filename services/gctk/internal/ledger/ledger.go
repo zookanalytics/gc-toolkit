@@ -39,9 +39,22 @@ type Ledger struct {
 func New(store gcbd.Store) *Ledger { return &Ledger{store: store} }
 
 // Open returns a ledger over the city's store at db, a store's .beads
-// directory, through the store adapter pinned there, or over the store gc
-// resolves when db is empty.
-func Open(db string) *Ledger { return New(gcbd.New().In(db)) }
+// directory, through the store adapter pinned there. With db empty it pins the
+// adapter to the store gc resolves for this process, so every read the ledger
+// makes answers from that one store: gc routes an unpinned read that names a
+// bead to the store holding that bead. A store gc names none of returns the
+// adapter's *ReadError.
+func Open(db string) (*Ledger, error) {
+	c := gcbd.New()
+	if db == "" {
+		where, err := c.Where()
+		if err != nil {
+			return nil, err
+		}
+		db = where
+	}
+	return New(c.In(db)), nil
+}
 
 // Write is one act on one bead: every key it sets or clears, made in one
 // update.

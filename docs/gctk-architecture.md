@@ -436,6 +436,10 @@ store does not hold, while the store's listing, `gc bd list`, keeps every edge
 with the far bead's id and the edge's type alone. `waits` reads both through
 the ledger, and a wait edge the listing has and the show row lacks is one into
 another store once a read of its far bead finds the store does not hold it.
+Every read `waits` makes names one store with bd's `--db`: the store its caller
+names, or the one `gc bd where` says gc resolves. gc routes a read that names a
+bead and no store to the store that holds the bead, so an unpinned read of a
+far bead in another rig would find it and hide the edge.
 
 The compensations retire with one repair of bd. Once the bd the city runs
 judges a `waits-for` edge by its gate and returns an error when its read of
