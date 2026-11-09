@@ -94,7 +94,7 @@ bead.
 
 | Verb | Caller class | Intent | Defense |
 |---|---|---|---|
-| `gctk bead holds <bead>...` | agent, hook, order | what holds each bead: one status, the waits behind it, its own pending waits and when the last one landed, its arm, and its wait edges into another store | It puts "is this blocked?" in one place, where [the census](../specs/tk-ssm8qns.2/blocked-census.md) finds 46 places deciding it by 27 rules, and it gives one consistent reading where the store's blocked mark, its close rule and its blocked listing disagree ([its contract](#the-bead-holds-contract)). A raw row read stays native, and any question about what holds a bead, or what its close waits on, is this verb. |
+| `gctk bead holds <bead>...` | agent, hook, order | what holds each bead: one status, the waits behind it, its own pending waits and when the last one landed, why it is in flight, its arm, and its wait edges into another store | It puts "is this blocked?" in one place, where [the census](../specs/tk-ssm8qns.2/blocked-census.md) finds 46 places deciding it by 27 rules, and it gives one consistent reading where the store's blocked mark, its close rule and its blocked listing disagree ([its contract](#the-bead-holds-contract)). A raw row read stays native, and any question about what holds a bead, or what its close waits on, is this verb. |
 | `gctk bead arm <bead>` | agent, hook | start this bead by itself once nothing holds it, on a formula if one is named | One intent over gc's lower-level sling and routing calls. The caller states what starts and on what, and the machinery performs every later step. |
 | `gctk bead disarm <bead>` | agent, hook | stop an armed bead from starting by itself | The other half of the arm's intent. |
 | `gctk bead start-armed` | order | start each armed bead that nothing holds any more: sling one armed for a pool, or send its notice to the named agent one is assigned to | Gas City slings only when asked. Its `cascade-nudge-on-blocker-close` order nudges the assignees of a closed bead's dependents and slings nothing ([warrants.md](warrants.md#deferred-dispatch-residual)). A notice takes cascade-nudge's shape with a dedup ledger. A sling rests on a mark on the arm, which lands first, unproven, in one write with the attempt count. A sling that fails takes the mark off in one write, so the next pass tries again. One that returns makes the mark proven before the arm is cleared, so a pass that finds a proven mark clears the arm without a sling, and one that finds an unproven mark slings again ([deferred-dispatch.md](deferred-dispatch.md#what-performs-it)). That leaves one window, a sling that lands before its mark is proven, where the next pass slings a second time. A pass that dies after the sling lands and before the proven mark opens it, and so does a sling that fails after it lands. Gas City's per-bead launch lock refuses a second pour of a graph.v2 formula while the first run is live, and the rest of the window is debt the deferred-dispatch member (tk-1tfzr71.16) retires in its design of this order. |
@@ -281,6 +281,18 @@ stated burden.
   store's. The risk is that the marks read repeats the query `bd blocked`
   starts from, so a change upstream to that query that the adapter does not
   follow makes the check disagree with the store.
+- **The run link.** `waits` tells which bead a live workflow run works from
+  the input convoy its root names and the bead that convoy tracks, or from a
+  classic molecule's issue variable, as `assets/scripts/run-lib.sh` defines
+  the link and Gas City's launch lock reads it. It is re-implemented because
+  Gas City serves no read of it: a run on the supervisor's run routes carries
+  no bead, and its lookup of a bead's live workflows keys on a source key that
+  a pour over an input convoy never stamps
+  ([the search](../specs/tk-ssm8qns.11/gas-city-search.md)). The goal is that
+  the link read stays the one Gas City writes, so a read Gas City adds retires
+  this copy and run-lib.sh's together. The risk is that Gas City changes how a
+  pour links its root to its bead and the copy, held to run-lib.sh's fixture,
+  keeps reading the old link.
 
 ## The layers
 
@@ -371,7 +383,9 @@ Nothing outside it parses a metadata value or spells a key's name.
   that snapshot and reads what it needs from it. A caller hands over a snapshot
   or bead ids, never facts it assembled, so every caller in one pass gets the
   same answer. A command builds a snapshot of the beads it names, and the
-  board builds one per render.
+  board builds one per render. A domain that must find beads by a key, as the
+  bead read finds the runs that work a bead, selects them through the ledger
+  by the key's declaration, so it never spells the key.
 
 ## The adapters
 
@@ -416,6 +430,12 @@ which also holds a bead whose blocker closed with `gc.work_outcome=blocked`.
 The adapter's errors are distinct types. The `waits-for` error comes from a
 bead's own edges and stands until bd's repair, and a read error says only that
 one read could not answer, so a caller tells them apart by type alone.
+
+A bead's row as `gc bd show` returns it leaves out an edge whose far bead the
+store does not hold, while the store's listing, `gc bd list`, keeps every edge
+with the far bead's id and the edge's type alone. `waits` reads both through
+the ledger, and a wait edge the listing has and the show row lacks is one into
+another store once a read of its far bead finds the store does not hold it.
 
 The compensations retire with one repair of bd. Once the bd the city runs
 judges a `waits-for` edge by its gate and returns an error when its read of
@@ -494,9 +514,11 @@ The status rests on these answers.
 No surviving intent maps to `waits`. It exists to prove that one rule can live
 in one place, so its defense is its own. `waits` computes no wait itself. It
 reads the store's blocked set with the blockers the store names on each bead,
-and the close times of the waits that have landed. It never walks the graph and
-never judges a gate, so a change in the store's rule reaches every caller at
-once, and the pack's use of that rule is one package.
+and the close times of the waits that have landed. The ancestor it names for a
+held bead is the one the store's own answers lead to, parent by parent. It
+never walks the graph to compute a hold and never judges a gate, so a change in
+the store's rule reaches every caller at once, and the pack's use of that rule
+is one package.
 
 ## The rules a domain move follows
 
