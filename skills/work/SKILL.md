@@ -75,8 +75,8 @@ skill), or leave it for the operator to place.
   confirmed by reading that check. Other critical work runs now only when the
   operator routes it. File any other bead with Gas City's `hold:mayor` label in
   its create and no route or arm: the operator decides where it goes.
-  `gc beads list --label hold:mayor` lists every bead that waits so, in every
-  rig.
+  `gc beads list --label hold:mayor` lists each bead filed so that still waits,
+  in every rig.
 
 ### File a Delivery
 

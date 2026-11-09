@@ -162,7 +162,7 @@ esac
    with Gas City's `hold:mayor` label (`gc bd set-state <id> hold=mayor`) and
    leaves unrouted, and the blocked exit's `--then-route` arms nothing for it.
    The operator's placement sitting then places it under an epic or routes it on
-   its own; `gc beads list --label hold:mayor` lists what waits for it. The scan
+   its own; `gc beads list --label hold:mayor` lists each bead held so. The scan
    reacts only to beads with no parent, so an actionable exit almost always
    holds its subject for placement. Choose the exit on the bead's merits all the
    same, and let the script apply the rule: write the card and the takeaway so
