@@ -16,8 +16,8 @@ import (
 // "The adapters"). The store's rules are the store's own: the adapter returns
 // bd's answer and computes none itself. The supervisor serves no blocked set, so
 // the adapter reads it through `gc bd blocked`, whose listing names, for each bead
-// the store marks blocked, the bead's own live waits or, when it has none, the
-// parent it is held through.
+// the store marks blocked, the bead's own live waits or, when it has none, one of
+// its parents.
 //
 // Two compensations stand in for answers bd's listing cannot give, and both go
 // once the bd the city runs judges a waits-for edge by its gate and fails its
@@ -34,6 +34,13 @@ import (
 //
 // The two reads are not one transaction, so a bead that changes between them can
 // get a *ReadError, which the next read clears.
+//
+// The marks also decide which parent a bead is held through. bd marks a bead
+// blocked when any of its parents is marked (shouldBeBlockedIDsUnionSQL in
+// internal/storage/issueops/blocked_consistency.go), while its listing names one
+// of the bead's parents by row order, which can be a parent that holds nothing
+// (loadParentIDsForChildrenInTx in internal/storage/issueops/blocked.go, both at
+// beads 7ef2fd05e). So the answer takes the parent from the marks.
 
 // marksQuery is the first read of bd's blocked listing (GetBlockedIssuesInTx in
 // internal/storage/issueops/blocked.go, beads 7ef2fd05e): the ids the store marks
@@ -139,9 +146,10 @@ func (b *Bead) Edges() ([]Edge, error) {
 }
 
 // Blocking is the store's answer for one bead: whether it holds the bead out of
-// bd ready for a wait and, when it does, what the listing names. On holds the
-// bead's own live waits. Through is the parent the bead is held through, when
-// it has none of its own.
+// bd ready for a wait and, when it does, what holds it. On holds the bead's own
+// live waits. Through is a parent the bead is held through, when it has none of
+// its own. A bead can have several parents, and the store holds it through each
+// one it marks blocked.
 type Blocking struct {
 	Blocked bool
 	On      []string
@@ -173,15 +181,23 @@ func NewBlockedSet(listed map[string][]string, marked []string) *BlockedSet {
 // set. A bead with a waits-for edge of its own gets a *WaitsForError. A bead the
 // store marks blocked that the listing leaves out gets a *ReadError, and so does
 // one the listing names as held by a bead its row does not reach, since the row
-// and the listing then disagree. Every other bead gets the listing's answer.
+// and the listing then disagree.
+//
+// A bead the listing holds through one of its parents is held through a parent
+// the store marks blocked. Its answer is the parent the listing names when the
+// store marks that one, else the first of its parents by id that the store
+// marks, and a *ReadError when the store marks none. The answer follows the
+// marks read, which leaves out a closed or pinned bead, while bd's parent rule
+// reads a parent's mark whatever the parent's status. bd recomputes a bead's
+// mark when it closes or is pinned, and clears it, so the two differ only on a
+// stale mark. Every other bead gets the listing's answer.
 func (s *BlockedSet) Answer(b *Bead) (Blocking, error) {
 	edges, err := b.Edges()
 	if err != nil {
 		return Blocking{}, &ReadError{ID: b.ID, Reason: "its edges did not decode: " + err.Error()}
 	}
-	var spawners []string
+	var spawners, parents []string
 	own := map[string]bool{}
-	parent := ""
 	for _, e := range edges {
 		switch e.Type {
 		case EdgeWaitsFor:
@@ -189,7 +205,7 @@ func (s *BlockedSet) Answer(b *Bead) (Blocking, error) {
 		case EdgeBlocks, EdgeConditionalBlocks:
 			own[e.ID] = true
 		case EdgeParentChild:
-			parent = e.ID
+			parents = append(parents, e.ID)
 		}
 	}
 	by, listed := s.listed[b.ID]
@@ -211,10 +227,17 @@ func (s *BlockedSet) Answer(b *Bead) (Blocking, error) {
 	if len(by) > 0 && !slices.ContainsFunc(by, func(id string) bool { return !own[id] }) {
 		return Blocking{Blocked: true, On: slices.Clone(by)}, nil
 	}
-	if len(by) == 1 && by[0] == parent && parent != "" {
-		return Blocking{Blocked: true, Through: parent}, nil
+	if len(by) == 1 && slices.Contains(parents, by[0]) {
+		if s.marked[by[0]] {
+			return Blocking{Blocked: true, Through: by[0]}, nil
+		}
+		slices.Sort(parents)
+		if i := slices.IndexFunc(parents, func(id string) bool { return s.marked[id] }); i >= 0 {
+			return Blocking{Blocked: true, Through: parents[i]}, nil
+		}
+		return Blocking{}, &ReadError{ID: b.ID, Reason: fmt.Sprintf("its blocked listing holds it through its parent %s, and the store marks none of its parents blocked", by[0])}
 	}
-	return Blocking{}, &ReadError{ID: b.ID, Reason: fmt.Sprintf("its blocked listing names %s, which is neither a wait of its own nor its parent", strings.Join(by, ", "))}
+	return Blocking{}, &ReadError{ID: b.ID, Reason: fmt.Sprintf("its blocked listing names %s, which is neither a wait of its own nor one of its parents", strings.Join(by, ", "))}
 }
 
 // Rows reads each bead named, with its own edges, from the store itself in one

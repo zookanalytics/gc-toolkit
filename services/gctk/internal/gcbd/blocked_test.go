@@ -43,10 +43,12 @@ exit 2
 // The rows the cases read: a bead with a blocks edge onto an open bead, one held
 // only through its blocked parent, one with a waits-for edge of its own, one
 // with a waits-for edge the listing leaves out, one the listing lost, one the
-// listing names by a bead its row does not reach, and one nothing holds.
+// listing names by a bead its row does not reach, and one nothing holds. The
+// store marks b-parked, the blocked parent, and not b-parent, which holds
+// nothing.
 const blockedRows = `[
  {"id":"b-own","status":"open","dependencies":[{"id":"b-blocker","dependency_type":"blocks","status":"in_progress"}]},
- {"id":"b-child","status":"open","dependencies":[{"id":"b-parent","dependency_type":"parent-child","status":"open"}]},
+ {"id":"b-child","status":"open","dependencies":[{"id":"b-parked","dependency_type":"parent-child","status":"open"}]},
  {"id":"b-waits","status":"open","dependencies":[{"id":"b-parent","dependency_type":"parent-child","status":"open"},{"id":"b-spawner","dependency_type":"waits-for","status":"closed","closed_at":"2026-11-08T10:00:00Z"}]},
  {"id":"b-waits-lost","status":"open","dependencies":[{"id":"b-spawner","dependency_type":"waits-for","status":"closed"}]},
  {"id":"b-lost","status":"open","dependencies":[{"id":"b-parent","dependency_type":"parent-child","status":"open"}]},
@@ -56,12 +58,12 @@ const blockedRows = `[
 
 const blockedListing = `[
  {"id":"b-own","status":"open","blocked_by":["b-blocker"],"blocked_by_count":1},
- {"id":"b-child","status":"open","blocked_by":["b-parent"],"blocked_by_count":1},
+ {"id":"b-child","status":"open","blocked_by":["b-parked"],"blocked_by_count":1},
  {"id":"b-waits","status":"open","blocked_by":["b-parent"],"blocked_by_count":1},
  {"id":"b-stranger","status":"open","blocked_by":["b-elsewhere"],"blocked_by_count":1}
 ]`
 
-const blockedMarks = `[{"id":"b-own"},{"id":"b-child"},{"id":"b-waits"},{"id":"b-waits-lost"},{"id":"b-lost"},{"id":"b-stranger"}]`
+const blockedMarks = `[{"id":"b-own"},{"id":"b-parked"},{"id":"b-child"},{"id":"b-waits"},{"id":"b-waits-lost"},{"id":"b-lost"},{"id":"b-stranger"}]`
 
 func readBlocked(t *testing.T) (map[string]*Bead, *BlockedSet, string) {
 	t.Helper()
@@ -89,7 +91,7 @@ func TestBlockedAnswersFromTheListing(t *testing.T) {
 		want Blocking
 	}{
 		{"b-own", Blocking{Blocked: true, On: []string{"b-blocker"}}},
-		{"b-child", Blocking{Blocked: true, Through: "b-parent"}},
+		{"b-child", Blocking{Blocked: true, Through: "b-parked"}},
 		{"b-clear", Blocking{}},
 	} {
 		got, err := set.Answer(rows[tc.id])
@@ -138,6 +140,51 @@ func TestBlockedListingThatLosesABeadIsAReadError(t *testing.T) {
 		if errors.As(err, &wf) {
 			t.Errorf("%s: a lost bead reads as a *WaitsForError", id)
 		}
+	}
+}
+
+// bd marks a bead blocked when any of its parents is marked, and its listing
+// names one of the bead's parents by row order, which can be one that holds
+// nothing. So a bead with several parents is held through a parent the store
+// marks: the one the listing names when the store marks it, else the first by
+// id that it marks, in either order of the bead's edges. A listing that holds
+// a bead through a parent when the store marks none of its parents is a read
+// error.
+func TestBlockedHeldThroughAParentTheStoreMarks(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		parents []string // the row's parent-child edges, in order
+		names   string   // the parent the listing names
+		marked  []string
+		through string // "" when the answer is a read error
+	}{
+		{"the listing names the blocked parent", []string{"epic", "other"}, "epic", []string{"epic"}, "epic"},
+		{"the listing names the blocked parent, the edges reversed", []string{"other", "epic"}, "epic", []string{"epic"}, "epic"},
+		{"the listing names the parent that holds nothing", []string{"epic", "other"}, "other", []string{"epic"}, "epic"},
+		{"the listing names the parent that holds nothing, the edges reversed", []string{"other", "epic"}, "other", []string{"epic"}, "epic"},
+		{"both parents are blocked, so the one the listing names", []string{"epic", "other"}, "other", []string{"epic", "other"}, "other"},
+		{"two blocked parents the listing does not name, so the first by id", []string{"other", "epic-b", "epic-a"}, "other", []string{"epic-b", "epic-a"}, "epic-a"},
+		{"the store marks none of its parents", []string{"epic", "other"}, "other", nil, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var deps []string
+			for _, p := range tc.parents {
+				deps = append(deps, `{"id":"`+p+`","dependency_type":"parent-child","status":"open"}`)
+			}
+			b := decode(t, `[{"id":"kid","status":"open","dependencies":[`+strings.Join(deps, ",")+`]}]`)
+			set := NewBlockedSet(map[string][]string{"kid": {tc.names}}, append([]string{"kid"}, tc.marked...))
+			got, err := set.Answer(b)
+			if tc.through == "" {
+				var re *ReadError
+				if !errors.As(err, &re) || re.ID != "kid" {
+					t.Fatalf("Answer = %+v, %v; want a *ReadError naming kid", got, err)
+				}
+				return
+			}
+			if err != nil || !got.Blocked || got.Through != tc.through || got.On != nil {
+				t.Fatalf("Answer = %+v, %v; want held through %s", got, err, tc.through)
+			}
+		})
 	}
 }
 

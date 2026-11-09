@@ -134,6 +134,26 @@ func (s *scratchStore) listing() map[string][]string {
 	return out
 }
 
+// parentRows is what bd's blocked listing reads for a bead's parents, in the
+// order it reads them: its own query, whose last row names the parent the
+// listing gives (loadParentIDsForChildrenInTx in
+// internal/storage/issueops/blocked.go, beads 7ef2fd05e).
+func (s *scratchStore) parentRows(id string) []string {
+	s.t.Helper()
+	var rows []struct {
+		ID string `json:"depends_on_id"`
+	}
+	query := "SELECT issue_id, COALESCE(depends_on_issue_id, depends_on_wisp_id, depends_on_external) AS depends_on_id FROM dependencies WHERE issue_id = '" + id + "' AND type = 'parent-child'"
+	if err := json.Unmarshal([]byte(s.run("sql", "--json", query)), &rows); err != nil {
+		s.t.Fatal(err)
+	}
+	var ids []string
+	for _, r := range rows {
+		ids = append(ids, r.ID)
+	}
+	return ids
+}
+
 func (s *scratchStore) ready() []string {
 	s.t.Helper()
 	var rows []struct {
@@ -184,6 +204,27 @@ func TestStoreAcceptance(t *testing.T) {
 	// An also_blocks edge on an open spawner with no open child.
 	alsoSpawner, alsoWaiter := s.create("also spawner"), s.create("also waiter")
 	s.edge(alsoWaiter, alsoSpawner, EdgeWaitsFor, `{"also_blocks":"true"}`)
+	// Two beads with two parents each, a blocked one and one that holds nothing.
+	// bd's listing names the parent its own query for a bead's parents returns
+	// last, so the blocked parent is that one under the first bead, and the
+	// other one under the second.
+	type twoParented struct{ id, blocked, free, names string }
+	var twoParents []twoParented
+	for _, blockedLast := range []bool{true, false} {
+		kid := s.create("two parents")
+		s.edge(kid, s.create("a parent"), EdgeParentChild, "")
+		s.edge(kid, s.create("another parent"), EdgeParentChild, "")
+		rows := s.parentRows(kid)
+		if len(rows) != 2 {
+			t.Fatalf("bd's parent query for %s returned %v, want its two parents", kid, rows)
+		}
+		x := twoParented{id: kid, blocked: rows[1], free: rows[0], names: rows[1]}
+		if !blockedLast {
+			x.blocked, x.free = rows[0], rows[1]
+		}
+		s.edge(x.blocked, s.create("a parent's blocker"), EdgeBlocks, "")
+		twoParents = append(twoParents, x)
+	}
 
 	// What the store itself answers.
 	listed, ready := s.listing(), s.ready()
@@ -205,6 +246,14 @@ func TestStoreAcceptance(t *testing.T) {
 			t.Errorf("bd ready offers %s (%s)", tc.id, tc.name)
 		}
 	}
+	for _, x := range twoParents {
+		if got := listed[x.id]; !slices.Equal(got, []string{x.names}) {
+			t.Errorf("bd blocked: a bead with two parents, %s blocked and %s holding nothing: got %v, want %s, the parent its query returns last", x.blocked, x.free, got, x.names)
+		}
+		if slices.Contains(ready, x.id) {
+			t.Errorf("bd ready offers %s, which its blocked parent %s holds", x.id, x.blocked)
+		}
+	}
 
 	// What the adapter answers, through the same gc bd seam the city's reads
 	// take: a gc on PATH that hands bd its arguments.
@@ -223,6 +272,9 @@ func TestStoreAcceptance(t *testing.T) {
 	t.Chdir(s.dir)
 	c := &Client{bin: "gc"}
 	ids := []string{own, child, waiter, parented, anyWaiter, alsoWaiter, parent}
+	for _, x := range twoParents {
+		ids = append(ids, x.id, x.blocked)
+	}
 	rows, err := c.Rows(ids)
 	if err != nil {
 		t.Fatal(err)
@@ -240,6 +292,14 @@ func TestStoreAcceptance(t *testing.T) {
 	}
 	if b, err := set.Answer(byID[child]); err != nil || b.Through != parent {
 		t.Errorf("adapter: held through a parent = %+v, %v; want held through %s", b, err, parent)
+	}
+	for _, x := range twoParents {
+		if b, err := set.Answer(byID[x.id]); err != nil || b.Through != x.blocked {
+			t.Errorf("adapter: a bead with two parents = %+v, %v; want held through %s, its blocked parent", b, err, x.blocked)
+		}
+		if set.marked[x.free] {
+			t.Errorf("the marks read names %s, a parent that holds nothing", x.free)
+		}
 	}
 	for _, id := range []string{waiter, parented, anyWaiter, alsoWaiter} {
 		_, err := set.Answer(byID[id])

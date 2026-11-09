@@ -407,8 +407,8 @@ The store's rules are the store's own. The store adapter asks the store whether
 a bead is blocked or ready and returns its answer, and computes none itself.
 The supervisor serves the ready set but no blocked set, so the adapter reads
 the blocked set through `gc bd blocked`. For a bead the store marks blocked,
-the listing names the bead's own waits or, when it has none, the parent it is
-held through. It judges a `waits-for` edge by its spawner's status rather
+the listing names the bead's own waits or, when it has none, one of its
+parents. It judges a `waits-for` edge by its spawner's status rather
 than by its gate, though, and bd's close rule judges it the same way. So for a
 bead with a `waits-for` edge of its own, the listing can leave the bead out,
 blame a parent that holds nothing, or name a spawner whose gate has opened. The
@@ -425,6 +425,15 @@ are not one transaction, so a bead that changes between them can get a read
 error, which the next read clears. The blocked mark on the supervisor's bead
 rows cannot stand in for that read, because it is Gas City's readiness answer,
 which also holds a bead whose blocker closed with `gc.work_outcome=blocked`.
+
+The marks also decide which parent holds a bead. A bead can have several
+parents, and bd marks a bead blocked when any of them is marked. The listing
+names one of them, the one its query for the bead's parents returns last,
+which can be a parent that holds nothing. So the adapter answers a bead the
+listing holds through a parent with a parent the store marks blocked: the one
+the listing names when the store marks it, else the first by id that the store
+marks. It answers with a read error when the store marks none of the bead's
+parents.
 
 The adapter's errors are distinct types. The `waits-for` error comes from a
 bead's own edges and stands until bd's repair, and a read error says only that
@@ -513,7 +522,7 @@ The status rests on these answers.
 
 - **Is this bead blocked, and on what?** For work that has not started, the
   answer is the store's blocked set, which names the waits on the bead itself
-  or, when it has none of its own, the parent it is held through. For work in
+  or, when it has none of its own, a parent it is held through. For work in
   flight, only the waits the store names on the bead itself count.
 - **Which of its own waits are pending?** These are the waits on the bead
   itself that have not landed. A caller that asks what a bead records it waits

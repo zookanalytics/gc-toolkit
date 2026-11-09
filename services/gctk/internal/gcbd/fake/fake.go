@@ -63,8 +63,8 @@ func (s *Store) Put(b Bead) {
 	s.rows[b.ID] = b
 }
 
-// List makes the store's blocked listing name id, held by by: its own waits,
-// or the parent it is held through.
+// List makes the store's blocked listing name id, held by by: its own waits, or
+// one of its parents, which need not be one the store marks blocked.
 func (s *Store) List(id string, by ...string) { s.listed[id] = slices.Clone(by) }
 
 // Mark makes the store mark ids blocked.
