@@ -69,9 +69,8 @@ ruling said. Wherever one of these finds a gap, write the change you propose:
   A count the work moves by itself, such as lines removed or members closed,
   cannot, so it is a leading indicator and not the signal. Can it be read soon
   after the work lands, without waiting for data that does not exist yet?
-- the boundaries, against the ones the other open epics record and the
-  deletion schedule in `docs/built-once-target.md`, either of which can own the
-  epic's ground already:
+- the boundaries, against the ones the other open epics record, since another
+  epic can own the epic's ground already:
   `gc bd list -t epic --status open --limit 0 --json | jq -r '.[] | "\(.id) \(.metadata.epic_boundaries // "none")"'`;
 - each proposal recorded since the last review;
 - what the evidence below contradicts.
