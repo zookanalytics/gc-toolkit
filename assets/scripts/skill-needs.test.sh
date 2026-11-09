@@ -1122,7 +1122,10 @@ for sh_ in $shells; do
             ok "($sh_) dispatch path: a turn's ruling that sends the subject elsewhere answers only once its old arm and pool route are gone" ;;
         *) bad "($sh_) dispatch path: a turn's ruling that sends the subject elsewhere answers only once its old arm and pool route are gone" "exit $rc/$rc2, calls: $calls" ;;
     esac
-    has "$out" "tk-x carries no arm and no pool route" "($sh_) dispatch path: …and the withdrawal says so"
+    case "$out" in
+        *"tk-x carries no arm and no pool route"*) ok "($sh_) dispatch path: …and the withdrawal says so" ;;
+        *) bad "($sh_) dispatch path: …and the withdrawal says so" "out: $out" ;;
+    esac
     dp_seed '{}'
     rc=$(run_dp "$run" "$DP/withdraw")
     calls=$(tr '\n' ';' <"$DP/log")
@@ -1136,7 +1139,10 @@ for sh_ in $shells; do
         || bad "($sh_) dispatch path: …and nothing is written to it" "row: $(cat "$DP/row.json")"
     dp_seed '{"gc.routed_to":"human"}'
     run_dp "$run" "$DP/withdraw" >/dev/null
-    eq "$(jq -r '.[0].metadata["gc.routed_to"]' "$DP/row.json")" null "($sh_) dispatch path: a human route is withdrawn as any route is"
+    got=$(jq -r '.[0].metadata["gc.routed_to"]' "$DP/row.json")
+    [ "$got" = null ] \
+        && ok "($sh_) dispatch path: a human route is withdrawn as any route is" \
+        || bad "($sh_) dispatch path: a human route is withdrawn as any route is" "gc.routed_to: $got"
     # A withdrawal the store refuses, or a subject read that is not its own
     # row alone, prints no success line and exits non-zero, so the sitting
     # answers nothing. A read that does not answer writes nothing at all.
