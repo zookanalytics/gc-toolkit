@@ -26,9 +26,9 @@ var checkKeys = map[string]ledger.Key[*Record]{
 	CheckTypecheck: ledger.Declare("rig_check."+CheckTypecheck, ledger.JSON[*Record](), checkKeyDoc),
 }
 
-// Publish copies rec onto the bead, in its check's key, as one write, and
-// returns the key it wrote. The copy is for whoever reads the bead, and nothing
-// acts on it, so it is not read back. rec is a record the store holds.
+// Publish copies rec onto the bead, in its check's key, as one write whose exit
+// says whether it landed, and returns the key it wrote. The copy is for whoever
+// reads the bead. rec is a record the store holds.
 func Publish(l *ledger.Ledger, bead string, rec *Record) (string, error) {
 	k, ok := checkKeys[rec.Check]
 	if !ok {
