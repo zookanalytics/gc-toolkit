@@ -247,7 +247,8 @@ doctor/check-blocked-work-armed/run.sh
 doctor/check-root-advancing/run.sh
 tools/gc-proactive.sh
 assets/scripts/blocker-holder.sh
-assets/scripts/store-only-exit.sh"
+assets/scripts/store-only-exit.sh
+assets/scripts/converse-signoff.sh"
 while IFS= read -r r; do
     [ -n "$r" ] || continue
     f="$ROOT/$r"

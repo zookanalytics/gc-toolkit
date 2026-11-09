@@ -92,7 +92,9 @@
 # subject only until the work closes and send it nowhere, so the arm is what
 # brings it back. The brief and the arm are written in the subject's own rig,
 # whose polecat pool runs the closer, after the headline has written those
-# edges, and before any gate is answered. No closer is armed for a subject that
+# edges, and before any gate is answered. A closer already armed, or already
+# sent and still running, is the one the ruling arms, so it is armed no second
+# time. No closer is armed for a subject that
 # something else sends on once its wait clears: an arm of another dispatch, a
 # route or an assignee, the recommendation the ruling takes, or its own merge
 # or members, when it is an anchor or an epic. Nor for one in the city's own
@@ -174,7 +176,8 @@
 #     subject's validating closer checks once the work the subject waits on
 #     lands: what that landing settles on the subject, and what to check once
 #     it has. It is required when the closer is armed, refused where it is not,
-#     and appended to the subject's notes as its close brief, once.
+#     and appended to the subject's notes as its close brief, unless the
+#     subject's latest close brief is already this one, held on the same work.
 # Exit: 0 signed off, or with --answer the named gates answered; 1 stopped
 #   short — a read failed, the rework did not file, the PR did not retire, the
 #   headline, the close brief or the closer's arm did not land, a gate did not
@@ -247,6 +250,9 @@ show_row() {
   gc bd show "$1" --json 2>/dev/null | scrub \
     | jq -ce --arg id "$1" 'if type == "array" then (.[0] | select((.id // "") == $id)) else error("unread") end' 2>/dev/null
 }
+# closer_bd <bd args...> — bd in the store of the rig that runs the subject's
+# validating closer, the reader run_lib reads the subject's runs through.
+closer_bd() { gc bd "$@" --db "$CLOSER_PATH/.beads"; }
 
 # pack_script <name> — <name> beside this script, in the copy of the pack that
 # is running. Every script this sign-off runs is found through it. Non-zero,
@@ -294,6 +300,11 @@ pr_label() {
 # How the pack reads the host and repository of a PR's url. Exposes pr_coords.
 # shellcheck source=review-dismissal.sh
 . "$HERE/review-dismissal.sh" || die "cannot source review-dismissal.sh from $HERE"
+# The one definition of the runs that work a bead. Exposes run_lib, which tells
+# whether the subject's validating closer is already running. GC_RUN_LIB points
+# a suite at run-lib.stub.sh.
+# shellcheck source=run-lib.sh
+. "${GC_RUN_LIB:-$HERE/run-lib.sh}" || die "cannot source run-lib.sh from $HERE"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -598,8 +609,8 @@ fi
 # members carry it, or an anchor (a merge_result), which the refinery closes
 # on its merge, and when it is assigned, routed, armed to another dispatch, or
 # at a status other than open, which is set deliberately. Then no closer is
-# armed. A closer an earlier attempt armed is this one, so a re-run arms it no
-# second time.
+# armed. A closer an earlier attempt armed is this one, and so is one its arm
+# has sent whose run has not ended, so neither is armed a second time.
 CLOSER_WAITS=""
 CLOSER_RIG=""
 CLOSER_PATH=""
@@ -652,8 +663,18 @@ if [ -n "$CLOSER_WAITS" ]; then
     CLOSER_PATH=$(printf '%s' "$CLOSER_ROW" | jq -r '.path // "" | tostring')
     [ -n "$CLOSER_RIG" ] && [ -n "$CLOSER_PATH" ] \
       || stopped "the rig map names no rig and path for the prefix ${SUBJECT%%-*}, so the rig whose pool runs $SUBJECT's validating closer could not be resolved; nothing was written"
-    printf '%s' "$SUBJECT_ROW" | jq -e '((.metadata // {})["gc.dispatch_when_ready_args"] // "") | tostring | contains("mol-validate-close")' >/dev/null 2>&1 \
-      && CLOSER_ARMED=yes
+    # Once the arm has sent the closer, the arm is gone and the closer's run
+    # works the subject until its root closes. Gas City pours no second run of
+    # a formula over a bead that a live run of it works, so an arm made then
+    # would fail at each pass until its retry cap asked a person.
+    if printf '%s' "$SUBJECT_ROW" | jq -e '((.metadata // {})["gc.dispatch_when_ready_args"] // "") | tostring | contains("mol-validate-close")' >/dev/null 2>&1; then
+      CLOSER_ARMED="already armed"
+    else
+      CLOSER_RUNS=$(run_lib runs closer_bd "$SUBJECT") \
+        || stopped "the runs that work $SUBJECT could not be read to tell whether its validating closer is already running; nothing was written"
+      CLOSER_RUN=$(printf '%s' "$CLOSER_RUNS" | jq -r '[ .[] | select(.live and .formula == "mol-validate-close") | .root ] | sort | .[0] // ""' 2>/dev/null)
+      [ -z "$CLOSER_RUN" ] || CLOSER_ARMED="already running (run $CLOSER_RUN)"
+    fi
   fi
 fi
 [ -z "$CLOSE_BRIEF" ] || [ -n "$CLOSER_RIG" ] \
@@ -840,16 +861,34 @@ for p in "${STANDS[@]+"${STANDS[@]}"}"; do echo "the ruling leaves the branch of
 # the subject's own rig and both before any gate is answered, so a write that
 # does not land stops the sign-off with every gate still open. A re-run finds
 # the brief and the arm an earlier attempt wrote, and writes neither again.
+# The closer checks the latest close brief in the subject's notes: the last
+# `## Close brief (` heading and the lines after it, up to the next heading.
+# The notes deferred-dispatch.sh appends end it too: the arm's own note
+# follows the brief, and the record's clearing follows that once the closer
+# is sent. So the brief counts as written only when that heading is held on
+# these same waits and its lines are this brief. The same words anywhere
+# else, such as in an older brief or in a sitting's notes, do not count,
+# because the closer would then check the older claim.
 if [ -n "$CLOSER_RIG" ]; then
-  if printf '%s' "$SUBJECT_ROW" | jq -e --arg b "$CLOSE_BRIEF" '(.notes // "") | tostring | contains($b)' >/dev/null 2>&1; then
-    echo "$SUBJECT already carries this close brief"
+  if printf '%s' "$SUBJECT_ROW" | jq -e --arg b "$CLOSE_BRIEF" --arg w "$CLOSER_WAITS" '
+      def rtrim: sub("[[:space:]]+$"; "");
+      ((.notes // "") | tostring | split("\n")) as $l
+      | ([ range(0; $l | length) | select($l[.] | startswith("## Close brief (")) ] | last) as $i
+      | if $i == null then false
+        else ([ range($i + 1; $l | length) | select($l[.] | startswith("## ") or startswith("deferred-dispatch: ")) ]
+                | first // ($l | length)) as $end
+          | ((($l[$i] | capture("^## Close brief \\(held on (?<w>[^ ]+), [^ ]+\\)$") | .w) // "")
+              | split(",") | map(select(. != "")) | unique) == ($w | split(" ") | map(select(. != "")) | unique)
+            and (($l[$i + 1:$end] | join("\n") | rtrim) == ($b | rtrim))
+        end' >/dev/null 2>&1; then
+    echo "$SUBJECT's latest close brief is already this one, held on $CLOSER_WAITS"
   else
     gc bd update "$SUBJECT" --db "$CLOSER_PATH/.beads" --append-notes "## Close brief (held on $(printf '%s' "$CLOSER_WAITS" | tr ' ' ','), $(date -u +%Y-%m-%dT%H:%M:%SZ))
 $CLOSE_BRIEF" >/dev/null 2>&1 \
       || stopped "the store refused the close brief on $SUBJECT, which its validating closer checks, so the closer was not armed; the headline is written, no gate was resolved and the conversation is not closed"
   fi
   if [ -n "$CLOSER_ARMED" ]; then
-    echo "$SUBJECT's validating closer is already armed"
+    echo "$SUBJECT's validating closer is $CLOSER_ARMED"
   else
     DD=$(pack_script deferred-dispatch.sh) \
       || stopped "no deferred-dispatch.sh beside $0, so $SUBJECT's validating closer was not armed; the headline and the close brief are written, no gate was resolved and the conversation is not closed"

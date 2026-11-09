@@ -57,8 +57,12 @@ Each was read on 2026-11-09 (UTC):
   (`cmd/gc/autoclose_sweep.go`, and `beadCloseAutoclose` in
   `cmd/gc/api_state.go`), the `core` pack's `cascade-nudge-on-blocker-close`
   order and its script (`internal/bootstrap/packs/core/orders/` and
-  `assets/scripts/`), `gc session wait` (`cmd/gc/cmd_wait.go`), and the orders
-  tutorial's trigger types (`docs/tutorials/07-orders.md`). The tree was also
+  `assets/scripts/`), `gc session wait` (`cmd/gc/cmd_wait.go`), the orders
+  tutorial's trigger types (`docs/tutorials/07-orders.md`), and the check that
+  refuses a second launch on a bead (`checkLegacySourceWorkflowConflict` in
+  `internal/sling/sling_core.go`, `liveConvoyTrackedWorkflowRoots` in
+  `internal/sling/sling_attachment.go`, and `ConflictError` in
+  `internal/sourceworkflow/sourceworkflow.go`). The tree was also
   searched for a pending or deferred sling and for a sling or pour on
   readiness.
 - bd at upstream main `3282b97145dc`: its dependency types
@@ -116,6 +120,17 @@ wakes it with a reminder note once the watched beads close. A sitting's session
 ends at its sign-off, and a pool session lives for one claim, so no session is
 there to wake when the work lands days later.
 
+**Gas City pours no second run of a formula over a bead that a live run of it
+works.** `checkLegacySourceWorkflowConflict` refuses a launch of a formula on a
+bead while a live root of the same formula works that bead through its input
+convoy, since "distinct formulas concurrently targeting one bead are
+legitimate, only relaunching the same one while its root is still live is the
+duplicate". The refusal is a `ConflictError`, which "the CLI maps ... to exit
+code 3". Once the deferred-dispatch pass has sent the closer, it retires the
+arm, and the closer's run, a root over an input convoy that tracks the subject,
+is all that records it. A second arm made then would be refused at every pass
+until the arm's retry cap asked a person.
+
 ## What the change composes
 
 - The hold is the `blocks` edge the headline already writes.
@@ -126,6 +141,9 @@ there to wake when the work lands days later.
 - The check is `mol-validate-close`, which already validates a bead held on the
   landing that ends its job, closes it with `gc.work_outcome=no-op`, and puts any
   doubt to the operator through a human gate.
+- A closer already sent is read from the run that works the subject, through
+  the pack's one reader of that link (`run-lib.sh`), so the sign-off arms no
+  second closer while a live `mol-validate-close` run works the subject.
 - The rig is the subject's own, named by the pack's one read of the rig map
   (`rig-map.sh`), since the closer's pool and the deferred-dispatch pass are per
   rig. The city's own store runs neither, so the sign-off refuses a subject there
