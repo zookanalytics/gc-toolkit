@@ -8,8 +8,10 @@ import (
 )
 
 // Query is one `gc bd list` read: the beads it names, the beads that carry a
-// metadata key, or the beads whose key holds one value. It reads wisps as well
-// as issues, and live beads alone unless Closed is set.
+// metadata key, or the beads whose key holds one value. It reads every bead the
+// query selects, wisps, gates, infrastructure beads and template molecules
+// among them, since a listing hides each of those unless asked, and live beads
+// alone unless Closed is set.
 type Query struct {
 	IDs    []string
 	HasKey string
@@ -24,7 +26,7 @@ const idBatch = 200
 
 // args is the list's arguments, less the ids.
 func (q Query) args() []string {
-	args := []string{"--include-ephemeral", "--json", "--limit", "0"}
+	args := []string{"--include-ephemeral", "--include-gates", "--include-infra", "--include-templates", "--json", "--limit", "0"}
 	if q.Closed {
 		args = append(args, "--all")
 	}

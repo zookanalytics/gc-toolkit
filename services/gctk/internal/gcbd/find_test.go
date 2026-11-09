@@ -47,8 +47,9 @@ func findCalls(t *testing.T, log string) []string {
 	return strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
 }
 
-// Each query is one `gc bd list` that reads wisps as well as issues, with no
-// row limit, and reads closed beads only when asked.
+// Each query is one `gc bd list` that reads every type a listing hides unless
+// asked, wisps, gates, infrastructure beads and templates, with no row limit,
+// and reads closed beads only when asked.
 func TestFindAsksTheListing(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -56,11 +57,11 @@ func TestFindAsksTheListing(t *testing.T) {
 		want string
 	}{
 		{"the beads that carry a key", Query{HasKey: "gc.input_convoy_id"},
-			"bd list --include-ephemeral --json --limit 0 --has-metadata-key gc.input_convoy_id"},
+			"bd list --include-ephemeral --include-gates --include-infra --include-templates --json --limit 0 --has-metadata-key gc.input_convoy_id"},
 		{"the beads whose key holds a value", Query{Key: "gc.root_bead_id", Value: "tk-root"},
-			"bd list --include-ephemeral --json --limit 0 --metadata-field gc.root_bead_id=tk-root"},
+			"bd list --include-ephemeral --include-gates --include-infra --include-templates --json --limit 0 --metadata-field gc.root_bead_id=tk-root"},
 		{"the beads named, closed ones included", Query{IDs: []string{"b-2", "b-1", "b-2"}, Closed: true},
-			"bd list --id b-1,b-2 --include-ephemeral --json --limit 0 --all"},
+			"bd list --id b-1,b-2 --include-ephemeral --include-gates --include-infra --include-templates --json --limit 0 --all"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			log := findStub(t, `[]`)
