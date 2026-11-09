@@ -203,11 +203,11 @@ one order and can be run again. It clears any route, then with --under removes
 a relates-to link between the bead and the parent, sets the parent and writes
 --shift through queue-priority.sh move. It settles the bead's priority, then
 dispatches, then lifts the hold with a note in one write, and each write's
-exit decides whether it landed. With no --route it dispatches to the polecat pool of the bead's
-rig, and with no --on on that pool's default formula. While a blocker holds
-the bead or a parent above it, such as a park on the epic, it arms the
-dispatch (deferred-dispatch.sh arm) instead of slinging, so the run starts
-once the blocker closes. It refuses a closed bead, PR-finishing work
+exit decides whether it landed. With no --route it dispatches to the polecat
+pool of the bead's rig, and with no --on on that pool's default formula. While
+a blocker holds the bead or a parent above it, such as a park on the epic, it
+arms the dispatch (deferred-dispatch.sh arm) instead of slinging, so the run
+starts once the blocker closes. It refuses a closed bead, PR-finishing work
 (anchor_bead), a bead another hold also holds, a status other than open, a
 parent that is closed or not in the bead's store, --standalone on a bead that
 has a parent, and a bead an arm already sends to another pool or on another
