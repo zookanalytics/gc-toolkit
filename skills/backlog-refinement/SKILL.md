@@ -119,11 +119,11 @@ it does.
 
 ## 6. Apply each ruling
 
-Apply the piece's rulings through your prompt's levers, read each write back, and
-only then bring the next piece. Each ruling's note gives the operator's reason in
-words. When the operator turns down a proposal that moves no lever, append their
-reason to that bead's notes, so a later sitting reads it before proposing the
-same again:
+Apply the piece's rulings through your prompt's levers, let each write's exit
+say whether it landed, and only then bring the next piece. Each ruling's note
+gives the operator's reason in words. When the operator turns down a proposal
+that moves no lever, append their reason to that bead's notes, so a later
+sitting reads it before proposing the same again:
 
 ```bash
 gc bd --rig <rig> update <bead> --append-notes "Backlog refinement: <what was proposed>; the operator declined: <their reason>."
