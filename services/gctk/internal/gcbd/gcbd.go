@@ -6,12 +6,11 @@
 // path neither forks nor opens its own Dolt connection, and the cadence still
 // answers when the daemon is down. The daemon read is cached and carries no
 // notes, so a read that must see the bead as it stands now, appended notes
-// included, takes the authoritative ShowDirect path instead. Writes (Update) and
-// the Show fallback shell out to `gc`
-// exactly as the shell scripts do, which keeps the observability, the stub
-// surface and the permissions surface of those paths identical across the
-// port: the same invocations appear in the same logs, and the same test stubs
-// serve them.
+// included, takes the authoritative ShowDirect path instead. Writes (Update)
+// and the Show fallback shell out to `gc` exactly as the shell scripts do,
+// which keeps the observability, the stub surface and the permissions surface
+// of those paths identical across the port: the same invocations appear in the
+// same logs, and the same test stubs serve them.
 //
 // The accessors mirror the jq expressions the scripts used, including their
 // corners. `(.x // "") | tostring` treats BOTH null and false as absent, so a
@@ -210,10 +209,11 @@ func (c *Client) Show(id string) *Bead {
 
 // ShowDirect reads one bead straight from `gc bd`, never the supervisor API.
 // Show routes cold reads through the daemon's cached connection, but a read
-// that decides a write or a merge from the bead's current state must observe the
-// latest write and must carry the bead's notes — the daemon's cache can lag a
-// fresh write and its bead payload omits notes entirely — so such a read uses
-// this authoritative path. Same decode and fail-closed contract as Show's fallback arm.
+// that decides a write or a merge from the bead's current state must observe
+// the latest write and must carry the bead's notes — the daemon's cache can lag
+// a fresh write and its bead payload omits notes entirely — so such a read uses
+// this authoritative path. Same decode and fail-closed contract as Show's
+// fallback arm.
 func (c *Client) ShowDirect(id string) *Bead { return c.showViaExec(id) }
 
 // showViaExec reads one bead by forking `gc bd show --json`.

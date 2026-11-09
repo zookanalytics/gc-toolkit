@@ -219,14 +219,15 @@ these steps:
 6. **It binds the task to the session's alias** with
    `gc bd update <task> --if-assignee <holder> --if-status <status> --assignee
    <alias>`, where the holder and the status are the ones engage read, or the
-   queue and `open` for a conversation it filed. A task already assigned to the
-   alias, as a sitting whose session closed leaves it, needs no bind. Either
-   way the task must read back assigned to the alias and not closed. A bind
-   misses when another engage or a hand-off landed first, or when a dismiss
-   closed the task, since a dismiss keeps the holder and changes the status. A
-   bind that misses, or a read-back that finds the task closed, closes the
-   session this engage started. Then engage waits for the reconciler to start
-   the session, and attaches the operator.
+   queue and `open` for a conversation it filed. A bind misses when another
+   engage or a hand-off landed first, or when a dismiss closed the task, since
+   a dismiss keeps the holder and changes the status. A task already assigned
+   to the alias, as a sitting whose session closed leaves it, needs no bind, so
+   no guarded write covers the spawn's window, and the task is read again: it
+   must still be assigned to the alias and not closed. A bind that misses, or a
+   read that finds the task taken or closed, closes the session this engage
+   started. Then engage waits for the reconciler to start the session, and
+   attaches the operator.
 
 **Engage offers what holds the bead.** It reads the reasons
 `gctk pr-status derive --json` gives (`prstatus.Read` and `prstatus.Reasons`),
@@ -643,9 +644,10 @@ file per bead under `<city>/.gc/runtime/packs/gc-toolkit`, from before its live
 read of the three conditions to its last write, and refuses, writing nothing,
 while another Accept holds it. On an open gate it records the acceptance's
 dispatch input on the gate (`gc.acceptance`: its token, the formula and each
-var) and reads it back, resolves the gate with
-`ruled: accepted <formula> accept:<token>`, reads its own answer back, reads
-back that no other open human gate blocks the bead, slings the formula titled
+var), resolves the gate with `ruled: accepted <formula> accept:<token>` once
+that write has exited 0, reads its own answer back to tell it from one another
+reached first, reads that no other open human gate blocks the bead, slings the
+formula titled
 `<formula> accept:<token>`, and records the dispatch by stripping
 `gc.recommended_formula` beside `gc.recommended_formula_dispatched`. An answer
 another reached first stands, and Accept slings nothing. A gate filed in the
@@ -842,7 +844,7 @@ held and been cut short, leaving its hold's headline on the subject, waiting
 on the gates this close resolves. So the close reads the subject first. A
 headline that still waits, on a subject no open blocker holds any more, is
 replaced with the reading, settled. The conversation closes only once those
-writes read back.
+writes have exited 0.
 
 *A restart is not an ending.* A wake that reaches a session mid-hold gets its
 conversation back from `gc hook --claim` as an existing assignment. Draining

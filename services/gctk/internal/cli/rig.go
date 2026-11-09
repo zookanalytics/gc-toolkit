@@ -472,10 +472,10 @@ func printRecord(w io.Writer, rec *rig.Record) {
 }
 
 // rigPublish copies rec onto the bead's rig_check.<check> key through the gcbd
-// write path, and the write's exit says whether it landed. rec is a record the store holds: one it just
-// took, or one a lookup returned. The copy is for whoever reads the bead; the
-// record in the store is what answers a later call, so a publish that fails is
-// reported and changes nothing else.
+// write path, and the write's exit says whether it landed. rec is a record the
+// store holds: one it just took, or one a lookup returned. The copy is for
+// whoever reads the bead; the record in the store is what answers a later call,
+// so a publish that fails is reported and changes nothing else.
 func rigPublish(check, bead string, rec *rig.Record, say func(string, ...any)) {
 	if bead == "" {
 		return

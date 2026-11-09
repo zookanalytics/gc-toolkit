@@ -7,11 +7,12 @@
 # It stamps three metadata keys naming the intended bead-rehome invocation —
 # gc.pr_close_disposition_kind, gc.pr_close_disposition_successor, and an
 # optional gc.pr_close_disposition_successor_store — in one update whose exit
-# decides, and closes the PR with an explaining comment (unless --no-close-pr, for an operator who
-# will close it in the UI). It does NOT close the anchor: that terminal close is
-# pr-facts's, the single consummation point, which closes it with the edge that
-# names its successor (the terminal state doctor/check-closed-implies-landed
-# accepts) and retires any rework-or-close human gate an earlier pass filed.
+# decides, and closes the PR with an explaining comment (unless --no-close-pr,
+# for an operator who will close it in the UI). It does NOT close the anchor:
+# that terminal close is pr-facts's, the single consummation point, which
+# closes it with the edge that names its successor (the terminal state
+# doctor/check-closed-implies-landed accepts) and retires any rework-or-close
+# human gate an earlier pass filed.
 #
 # The anchor must be OPEN and carrying merge_result=pull_request — the state
 # pr-facts enumerates. An anchor already disposed (its duplicates or supersedes

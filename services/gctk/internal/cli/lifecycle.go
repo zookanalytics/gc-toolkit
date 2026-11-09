@@ -655,9 +655,9 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 	// A bead already resting on the park route keeps it. No pool claims that
 	// value, and clearing it would retract a bead a person still owns. Setting
 	// routeSet puts the clear in the transition's one write, so a clear bd
-	// refuses fails the transition rather than leaving a silent pool offer. No human state is detached, so none takes this
-	// clear: the guard above set its routeSet on arguments alone, or --keep-route
-	// left its route as it was.
+	// refuses fails the transition rather than leaving a silent pool offer. No
+	// human state is detached, so none takes this clear: the guard above set its
+	// routeSet on arguments alone, or --keep-route left its route as it was.
 	if !o.routeSet && !o.keepRoute && lifecycle.IsDetachedState(o.to) {
 		if bead.Meta("gc.routed_to") != lifecycle.ParkRoute {
 			o.route, o.routeSet = "", true
@@ -731,8 +731,8 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 	}
 
 	// Resolve each dated key against the bead already in hand, appending the
-	// instant, then let it ride the ordinary --set path: one atomic write carries the
-	// whole three-component value.
+	// instant, then let it ride the ordinary --set path: one atomic write carries
+	// the whole three-component value.
 	for _, d := range o.dated {
 		dk, dwant := kv(d)
 		o.sets = append(o.sets, dk+"="+dwant+"@"+datedSince(bead.Meta(dk), dwant))

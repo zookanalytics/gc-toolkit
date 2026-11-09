@@ -875,8 +875,8 @@ pr_finishing_birth() {
 PR_FINISHING_LOCK_WAIT_SECS=30
 
 # pr_finishing_settle <bead> — the cadence's settle of a bead of PR-finishing
-# work: queue-priority.sh settle, which computes the bead's priority, writes it
-# to the bead and to every live workflow poured for it, and reads it back
+# work: queue-priority.sh settle, which computes the bead's priority and writes
+# it to the bead and to every live workflow poured for it
 # (docs/steering.md#settle), waiting for the lock PR_FINISHING_LOCK_WAIT_SECS
 # at most. The writer's narrative goes to stdout and its refusal to stderr, for
 # the caller to keep or drop. GC_QUEUE_PRIORITY_TOOL names another writer, as

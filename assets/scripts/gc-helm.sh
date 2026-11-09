@@ -147,8 +147,9 @@ conversation; engage files the one conversation itself.
 dismiss ends the sitting. react files a proactive first-reaction bead via
 tools/gc-proactive.sh (its --reason is log-only operator intent). takeaway
 stamps gc.takeaway (+_at/+_by) in one update, and exits 4 before anything
-follows it when the store refuses that update; --release also reopens/unassigns/clears the route and ends the run
-beneath the anchor through gascity's run cancel. On an anchor that is already
+follows it when the store refuses that update; --release also
+reopens/unassigns/clears the route and ends the run beneath the anchor through
+gascity's run cancel. On an anchor that is already
 CLOSED the reopen would resurrect a landed disposition, so it is skipped and
 only the run's end runs; --route <rig>/<agent> releases it TO a pool instead of
 back to the human, in the same write, and is refused on a closed anchor and on
@@ -1947,7 +1948,7 @@ open_join() {
     fi
     _oj_back=$(row_now "$_oj_c")
     if [ -z "$_oj_back" ]; then
-        echo "$PROG: open: conversation $_oj_c could not be read back after open joined it, so whether it still waits in the queue${join_note:+ carrying the new concern} cannot be told. Re-run once the store answers: $PROG open $bead" >&2
+        echo "$PROG: open: conversation $_oj_c could not be read after open joined it, so whether it still waits in the queue${join_note:+ carrying the new concern} cannot be told. Re-run once the store answers: $PROG open $bead" >&2
         return 2
     fi
     printf '%s' "$_oj_back" | jq -e "$_oj_queued" >/dev/null 2>&1 || return 1
@@ -1963,9 +1964,10 @@ open_join() {
 # bead whose conversation already waits in the queue joins it (open_join): the
 # reason and body are appended to that task's notes, once, so a concern the
 # conversation already carries writes nothing. One that leaves the queue
-# before the join reads back is passed over for the next one waiting there, or
-# for a conversation open files, and a join that cannot be written or read
-# back fails the open. --reason is the title, --body the ask
+# before the join is written, or by the time open reads it after the join, is
+# passed over for the next one waiting there, or for a conversation open files,
+# and a join the store refuses, or a read after it that does not answer, fails
+# the open. --reason is the title, --body the ask
 # the sitting reads when it claims the conversation — callers with their own
 # origin (operator-intake.sh) pass both rather than misreporting the board
 # wording. The conversation is filed in the bead's own store. It leaves the
@@ -4199,7 +4201,7 @@ cmd_engage() {
     # operator attaches, so the sitting finds the gate among its conversation's
     # replies at its next read.
     if [ -n "$pointed_gate" ] && ! conversation_reply "$CONV" "$pointed_gate"; then
-        echo "$PROG: engage: conversation the store refused conversation $CONV's reply onto gate $pointed_gate, so the sitting would not know the gate it answers. Nothing spawned. Add it by hand and re-engage: gc bd dep add $CONV $pointed_gate --type replies-to" >&2
+        echo "$PROG: engage: the store refused conversation $CONV's reply onto gate $pointed_gate, so the sitting would not know the gate it answers. Nothing spawned. Add it by hand and re-engage: gc bd dep add $CONV $pointed_gate --type replies-to" >&2
         exit 4
     fi
 

@@ -144,9 +144,9 @@ Verbs:
   move       The writer gc-helm.sh priority runs. A P-value sets a bead that
              follows nothing; --shift sets the shift of a bead that follows a
              parent or an anchor. It then writes every bead that follows the
-             bead, directly or through others, held beads included. It refuses the form that does not fit the bead, and a
-             workflow's convoy, root or step. --dry-run prints what it would
-             write.
+             bead, directly or through others, held beads included. It
+             refuses the form that does not fit the bead, and a workflow's
+             convoy, root or step. --dry-run prints what it would write.
   reconcile  One pass of orders/queue-priority.toml: settle every bead the
              polecat pool's ready queue offers at a priority other than its own.
              It reads the queue and what each queued bead follows, never the
