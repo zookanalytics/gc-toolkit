@@ -615,9 +615,9 @@ has "$OUT" "alpha bead h-9: armed and nothing has held it" "it is reported as ow
 hasnt "$OUT" "could not read" "the blocker with no row is not reported as unread"
 clear_stores
 
-# --- 23. OWED: a pinned own blocker holds nothing, as a closed one does
-#          (hold-lib.sh's hold_done, which reconcile slings on), so an arm behind
-#          it alone is owed. A pinned blocker has no close, so the window runs
+# --- 23. OWED: a pinned own blocker holds nothing, as a closed one does, as
+#          the store counts it and gctk bead holds answers, so an arm behind it
+#          alone is owed. A pinned blocker has no close, so the window runs
 #          from the arm's armed_at --------------------------------------------
 armed_store alpha "$(aedged p-1 "" pin-0)"
 edges_store alpha "$(e_blk p-1 pin-0)"

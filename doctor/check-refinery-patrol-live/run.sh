@@ -14,19 +14,19 @@
 #     GC_DOCTOR_REFINERY_PATROL_STALL_MINUTES). The queue is the set find-work
 #     selects from: open, assigned to the refinery, carrying metadata.branch,
 #     not an epic, with no merge_result, since a bead that carries one is a
-#     gating anchor the cadence drives, and with nothing holding it by
-#     assets/scripts/hold-lib.sh's definition, since find-work leaves a held
-#     bead, as a landing bead waits on its effort. A wait is aged from the later
-#     of the bead's updated_at, which any later write resets, and the close that
-#     released its last hold, so the age read is never longer than the real
-#     wait;
+#     gating anchor the cadence drives, and with nothing holding it by the
+#     answer of `gctk bead holds`, which find-work reads too, since find-work
+#     leaves a held bead, as a landing bead waits on its effort. A wait is aged
+#     from the later of the bead's updated_at, which any later write resets, and
+#     the close that landed its last wait, so the age read is never longer than
+#     the real wait;
 #   - no mol-refinery-patrol wisp assigned to it was written within that
 #     bound, or none exists. Every pour stamps a wisp's updated_at, so the
 #     newest one dates the patrol's last movement.
 # A queue whose oldest bead is younger than the bound is a note: a refinery
 # idle past the bound has not yet had the bound to take work that just arrived.
-# A held bead is a note too. One held only by a blocker the store does not
-# return warns, because find-work never takes it and nothing releases it.
+# A held bead is a note too. One whose read could not answer warns, because
+# find-work takes no bead it cannot read.
 #
 # Refineries are the agents `gc status --json` lists whose qualified name ends
 # in `.refinery`, each read from its own rig's store by --db. A suspended
@@ -86,29 +86,11 @@ scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
 
-# The rule of which human gates still hold, which the definition of a hold
-# below builds on. Unsourceable, a held bead cannot be told from a waiting one,
-# so nothing is checked.
-# shellcheck source=../../assets/scripts/bd-lib.sh
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/bd-lib.sh" || {
-    echo "refinery patrol liveness undetermined (I14) — cannot read what holds a queued bead"
-    detail "assets/scripts/bd-lib.sh could not be sourced from this pack, so a held bead cannot be told from one waiting to be taken; no refinery was checked."
-    exit 1
-}
-# The one definition of a hold, which find-work also reads. Unsourceable, a held
-# bead cannot be told from a waiting one, so nothing is checked.
-# shellcheck source=../../assets/scripts/hold-lib.sh
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/hold-lib.sh" || {
-    echo "refinery patrol liveness undetermined (I14) — cannot read what holds a queued bead"
-    detail "assets/scripts/hold-lib.sh could not be sourced from this pack, so a held bead cannot be told from one waiting to be taken; no refinery was checked."
-    exit 1
-}
-# The hold walk's reader (hold-lib.sh): the named beads in the store being
-# checked, at every status and of every class a listing hides by default, since
-# a blocker can be a gate and can be closed.
-hold_read() {
-    run_bounded gc bd list --db "$db" --id "$1" --all --include-gates --include-infra --include-templates --json --limit 0 2>/dev/null
-}
+# What holds a queued bead is the answer of `gctk bead holds`, which find-work
+# reads too, from the binary the city builds.
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 
 # A bead stamp as epoch seconds, or null when it does not parse.
 EP='def ep: (try ((tostring) | sub("\\.[0-9]+"; "") | fromdateiso8601) catch null);'
@@ -175,24 +157,39 @@ while IFS="$SEP" read -r qn rig rig_path agent_suspended rig_suspended running; 
         warnings+=("$qn: could not list its find-work queue in $db (rc=$rc), so this refinery was NOT checked")
         continue
     fi
-    judged=$(printf '%s' "$queue_rows" | hold_annotate hold_read) || judged=""
-    queue=$(printf '%s' "$judged" | jq -r "$EP"'
-        [.[] | select(.hold.state == "free")
+    # One read answers every queued bead. A read that answers none of them is the
+    # store's read failing, so the refinery is NOT checked.
+    queue_ids=$(printf '%s' "$queue_rows" | jq -r '[.[] | (.id // "") | tostring | select(. != "")] | join(" ")')
+    holds="[]"
+    if [ -n "$queue_ids" ]; then
+        holds=""
+        # shellcheck disable=SC2086  # one id per word
+        [ -x "$GCTK" ] && holds=$(run_bounded "$GCTK" bead holds --db "$db" $queue_ids 2>/dev/null | scrub | jq -s -c '.' 2>/dev/null)
+        printf '%s' "$holds" | jq -e 'type == "array" and length > 0 and any(.[]; .error == null)' >/dev/null 2>&1 || holds=""
+    fi
+    queue=""
+    [ -z "$holds" ] || queue=$({ printf '%s' "$queue_rows"; echo; printf '%s' "$holds"; } | jq -s -r "$EP"'
+        (.[1] | map({key: ((.id // "") | tostring), value: .}) | from_entries) as $h
+        | [ .[0][] | . + {holds: ($h[(.id // "") | tostring] // {error: "gctk bead holds printed no answer for it"})} ] as $b
+        | def why: (.holds.waits[0] | .id + (if (.title // "") != "" then " " + (.title | @json) else "" end)
+              + (if .type == "waits-for" then " (waits-for, unjudged)" else "" end))
+            + (if (.holds.waits | length) > 1 then " (+" + ((.holds.waits | length) - 1 | tostring) + " more)" else "" end);
+        [$b[] | select(.holds.error == null and .holds.status == "clear")
             | {id: ((.id // "?") | tostring),
-               e: ([((.updated_at // "") | ep), ((.hold.released_at // "") | ep)] | map(select(. != null)) | max)}] as $q
+               e: ([((.updated_at // "") | ep), ((.holds.last_landed // "") | ep)] | map(select(. != null)) | max)}] as $q
         | ([$q[] | select(.e != null)] | min_by(.e)) as $o
         | [($q | length), ($o.id // ""),
            (if $o == null then "" else ((now - $o.e) | floor) end),
-           ([.[] | select(.hold.state == "held") | (.id | tostring) + " waits on " + .hold.why] | join("; ")),
-           ([.[] | select(.hold.state == "unread") | (.id | tostring) + " waits on " + .hold.why] | join("; "))]
+           ([$b[] | select(.holds.error == null and .holds.status != "clear") | ((.id | tostring) + " waits on " + why)] | join("; ")),
+           ([$b[] | select(.holds.error != null) | (.id | tostring) + " (" + (.holds.error | tostring) + ")"] | join("; "))]
         | map(tostring | gsub("[[:cntrl:]]"; " ")) | join("\u001f")' 2>/dev/null)
     if [ -z "$queue" ]; then
         warnings+=("$qn: could not read what holds the beads in its find-work queue in $db, so this refinery was NOT checked")
         continue
     fi
     IFS="$SEP" read -r depth oldest_id oldest_age held unread <<< "$queue"
-    [ -z "$held" ] || notes+=("$qn: find-work leaves its held bead(s) until their blockers close: $held")
-    [ -z "$unread" ] || warnings+=("$qn: find-work will not take bead(s) held only by a blocker the store does not return, until that blocker reads back or the edge goes: $unread")
+    [ -z "$held" ] || notes+=("$qn: find-work leaves its held bead(s) until their waits land: $held")
+    [ -z "$unread" ] || warnings+=("$qn: find-work will not take bead(s) whose read could not answer, until a read does: $unread")
     if [ "$depth" -eq 0 ]; then
         if [ -n "$held$unread" ]; then
             notes+=("$qn: nothing in its find-work queue is free to take, so a resting patrol is idle")

@@ -1620,8 +1620,8 @@ cmd_takeaway() {
 #   poured  under the bead, not in flight and not armed (gc.dispatch_when_ready),
 #           with a workflow still at load-context.
 #   held    the bead, and everything else under it. An armed member is held:
-#           deferred dispatch slings an armed bead only when no blocker holds
-#           it or any of its ancestors (hold-lib.sh).
+#           deferred dispatch slings an armed bead only once `gctk bead holds`
+#           answers that nothing holds it, a park on an ancestor included.
 # Rows come in either bd shape: a listing's edges are {depends_on_id, type},
 # and a `bd show` row's are {id, dependency_type}.
 # shellcheck disable=SC2016  # jq program, single-quoted on purpose

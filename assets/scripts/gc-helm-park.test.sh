@@ -556,7 +556,8 @@ eq "$RC" "0" "(FLIGHT) a bead whose workflow waits at load-context is not in fli
 
 # --- (DEMAND) a demand gate is a bead to wait on like any other ----------------
 # A demand gate holds like any blocker, armed members included, since deferred
-# dispatch reads every open blocker on a bead's ancestors (hold-lib.sh).
+# dispatch reads what holds a bead through gctk bead holds, which counts a wait
+# on an ancestor of work that has not started.
 reset_store
 run_park tk-solo --waiting-on tk-dg
 eq "$RC" "0" "(DEMAND) parking behind a demand gate exits 0"

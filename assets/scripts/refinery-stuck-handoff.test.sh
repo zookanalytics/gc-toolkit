@@ -7,7 +7,7 @@
 # never gated, because a false gate here is the defect the block guards against.
 # The counterpart withdraws a gate only when the handoff's own row shows it left
 # the refinery; absence from the queue listing alone withdraws nothing. A bead
-# something holds (hold-lib.sh) is waiting, not stuck, as a landing bead waits
+# something holds (gctk bead holds) is waiting, not stuck, as a landing bead waits
 # on its effort, and a wait is aged from the close that released its last hold
 # when that is later than its last write. A gate that blocks several handoffs is
 # withdrawn only once every one of them has left, which a section at the end
@@ -78,11 +78,28 @@ bash -n "$TMP/block.sh" \
 # scripts-dir`, which names the stub pack), and stub human-gate.sh and
 # patrol-finding.sh in that pack, so the real pack scripts are never reached.
 # Each stub logs its arguments led by its own name. The stub pack also holds a
-# copy of the real resolver and of bd-lib.sh and hold-lib.sh.
+# copy of the real resolver and of bd-lib.sh. What holds a handoff is read
+# through the gctk this checkout builds, whose reads the stub gc answers from
+# the queue and the rows the by-id read serves, merged, through the seam
+# holds-store.stub.sh keeps. Each such read is logged to the lists log with a
+# "holds" prefix, and HANDOFF_RC fails it as it fails the by-id read.
 mkdir -p "$TMP/bin" "$TMP/rig/assets/scripts"
-cp "$ROOT/assets/scripts/resolve-route.sh" "$ROOT/assets/scripts/bd-lib.sh" "$ROOT/assets/scripts/hold-lib.sh" "$TMP/rig/assets/scripts/"
+cp "$ROOT/assets/scripts/resolve-route.sh" "$ROOT/assets/scripts/bd-lib.sh" "$TMP/rig/assets/scripts/"
 chmod +x "$TMP/rig/assets/scripts/resolve-route.sh"
+export HOLDS_STUB="$ROOT/assets/scripts/holds-store.stub.sh" GC_NO_API=1
+GCTK_BIN="$("$HOLDS_STUB" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so no hold can be read"; exit 1; }
+export GCTK_BIN
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'STUB'
+if [ -n "${HOLDS_STUB_READ:-}" ] && [ "$1" = bd ]; then
+  shift
+  printf 'holds %s\n' "$*" >> "$LIST_LOG"
+  [ "${HANDOFF_RC:-0}" != "0" ] && export HOLDS_FAIL=list
+  export HOLDS_STORE="$QUEUE_FIXTURE.holds.json"
+  { tr -d '\000-\037' < "$QUEUE_FIXTURE"; echo; tr -d '\000-\037' < "$HANDOFF_FIXTURE"; } \
+    | jq -s -c '[ .[] | if type == "array" then .[] else empty end ] | unique_by(.id)' > "$HOLDS_STORE" 2>/dev/null \
+    || echo '[]' > "$HOLDS_STORE"
+  exec "${HOLDS_STUB:?}" answer "$@"
+fi
 case "$1 $2" in
   "gc-toolkit scripts-dir")
     [ -n "${STUB_PACK:-}" ] || exit 1
@@ -371,7 +388,7 @@ LAND="$(blocked tk-land "$OLD1" tk-e1 tk-sum)"
 OPEN_BLOCKERS='[{"id":"tk-e1","status":"open","title":"effort bead","metadata":{}},{"id":"tk-sum","status":"open","title":"summary task","metadata":{}}]'
 eq "$(run "[$LAND]" "" "" "" "" "$OPEN_BLOCKERS")" "" "a held landing bead past the stuck bound files no gate"
 has "$(out)" "no stuck handoffs" "and the queue reads as churning normally"
-has "$(cat "$TMP/lists")" "--id=tk-e1,tk-sum" "its blockers are read by id"
+has "$(cat "$TMP/lists")" "holds --db /stub/.beads list --id tk-land " "what holds it is read by id, in the store gc resolves"
 HELD_AND_STUCK="$(run "[$LAND,{\"id\":\"tk-stuck\",\"updated_at\":\"$OLD2\",\"title\":\"handoff\",\"metadata\":{}}]" "" "" "" "" "$OPEN_BLOCKERS")"
 eq "$(printf '%s' "$HELD_AND_STUCK" | grep -c . || true)" "1" "an unheld handoff past the bound beside it still files one gate"
 has "$HELD_AND_STUCK" "human-gate --subject tk-stuck" "the gate is the unheld handoff's"
@@ -384,17 +401,24 @@ LONG_GONE='[{"id":"tk-e1","status":"closed","closed_at":"2020-03-01T00:00:00Z","
 LG="$(run "[$LAND]" "" "" "" "" "$LONG_GONE")"
 has "$LG" "human-gate --subject tk-land" "one released past the bound and still not taken is stuck"
 has "$LG" "since $OLD2" "and its wait is dated from the release, not its last write"
-# Held only by a blocker the store does not return: find-work never takes it,
-# so it is stuck past the bound, and the gate names the blocker.
+# An edge onto a bead the store does not hold points into another store and
+# holds nothing, so find-work takes the bead, and past the bound it is stuck.
 GHOSTED="$(run "[$(blocked tk-ghosted "$OLD1" tk-ghost)]" "" "" "" "" '[]')"
-has "$GHOSTED" "human-gate --subject tk-ghosted" "a bead held only by an unreadable blocker is gated past the bound"
-has "$GHOSTED" "waits on tk-ghost (unreadable), a blocker this store does not return" "the gate names the blocker it waits on"
+has "$GHOSTED" "human-gate --subject tk-ghosted" "a bead whose only blocker the store does not hold is gated past the bound"
+# A waits-for edge of the bead's own is one the store cannot judge yet, so the
+# bead is held, not stuck.
+WF="$(jq -nc --arg u "$OLD1" '{id: "tk-wf", updated_at: $u, title: "handoff", metadata: {branch: "polecat/tk-wf"},
+  dependencies: [{issue_id: "tk-wf", depends_on_id: "tk-spawn", type: "waits-for"}]}')"
+eq "$(run "[$WF]" "" "" "" "" '[{"id":"tk-spawn","status":"closed","closed_at":"2020-01-01T00:00:00Z","metadata":{}}]')" "" "a past-bound bead with a waits-for edge of its own files no gate"
 # A walk of the holds that cannot read blinds the monitor.
 WALK="$(HANDOFF_RC_OVERRIDE=1 run "[$LAND]" "" "" "" "" "$OPEN_BLOCKERS")"
 has "$WALK" "patrol-finding --scope witness-findings --key witness-refinery-queue-unreadable" "a hold walk that cannot read reports the blind monitor as a patrol finding"
 hasnt "$WALK" "--subject tk-" "naming no stuck bead"
 has "$(out)" "could not read what holds the handoffs past the stuck bound" "and says why"
-has "$(HANDOFF_RC_OVERRIDE=1 run "$STUCK_ONE")" "human-gate --subject tk-stuck" "a past-bound bead with no blocker needs no hold read"
+has "$(HANDOFF_RC_OVERRIDE=1 run "$STUCK_ONE")" "--key witness-refinery-queue-unreadable" "a failed read blinds the monitor whatever the past-bound beads carry"
+NOGCTK="$(GCTK_BIN="$TMP/no-gctk" run "$STUCK_ONE")"
+has "$NOGCTK" "--key witness-refinery-queue-unreadable" "with no gctk to run, the monitor reports itself blind"
+has "$NOGCTK" "no gctk binary is at $TMP/no-gctk" "and its finding names the binary it looked for"
 for PRELUDE in 'set -e' 'set -euo pipefail'; do
   eq "$(run "[$LAND]" "" "" "$PRELUDE" "" "$OPEN_BLOCKERS")" "" "$PRELUDE: a held landing bead files no gate"
   has "$(HANDOFF_RC_OVERRIDE=1 run "[$LAND]" "" "" "$PRELUDE" "" "$OPEN_BLOCKERS")" "--key witness-refinery-queue-unreadable" \
@@ -631,7 +655,7 @@ for PFX in noprefix typo; do
   eq "$NCALLS" "" "$PFX: no binding gc knows, so nothing is filed or withdrawn"
   eq "$(cat "$TMP/lists")" "" "$PFX: no queue and no gate listing is read"
   hasnt "$(out)" "no stuck handoffs" "$PFX: an unread queue is never reported clean"
-  has "$(out)" "human-gate.sh, patrol-finding.sh, resolve-route.sh, bd-lib.sh and hold-lib.sh not found in the pack" "$PFX: the stop names the scripts it could not reach"
+  has "$(out)" "human-gate.sh, patrol-finding.sh, resolve-route.sh and bd-lib.sh not found in the pack" "$PFX: the stop names the scripts it could not reach"
 done
 # A dotless prefix still names the pack, and its address is one no agent holds,
 # which reports the blind monitor.
@@ -688,15 +712,15 @@ hasnt "$NDCALLS" "--retract" "unreadable roster and a dotless prefix: a held han
 
 # --- A shared gate through the real helper ------------------------------------
 # The cases above stub human-gate.sh, so they see the calls the block makes and
-# not what a call does to a gate. Here the block runs the real human-gate.sh,
-# bd-lib.sh and hold-lib.sh, in the pack the stub gc names, against a store stub that keeps the beads, the gates and the
+# not what a call does to a gate. Here the block runs the real human-gate.sh and
+# bd-lib.sh, in the pack the stub gc names, against a store stub that keeps the beads, the gates and the
 # `blocks` edges (`<waiter>|blocks|<gate>` lines), and serves each read from
 # that state the way bd does: a gate's waiting beads from the gate's end, a
 # bead's gates from the bead's end. One gate blocks two handoffs. While one of
 # them still sits stuck in the queue, the gate stays open and that handoff stays
 # blocked; once it has left too, the gate is resolved moot.
 mkdir -p "$TMP/sbin" "$TMP/srig/assets/scripts" "$TMP/s"
-for S in human-gate.sh bd-lib.sh hold-lib.sh resolve-route.sh; do cp "$ROOT/assets/scripts/$S" "$TMP/srig/assets/scripts/"; done
+for S in human-gate.sh bd-lib.sh resolve-route.sh; do cp "$ROOT/assets/scripts/$S" "$TMP/srig/assets/scripts/"; done
 chmod +x "$TMP/srig/assets/scripts/human-gate.sh" "$TMP/srig/assets/scripts/resolve-route.sh"
 cp "$TMP/rig/assets/scripts/patrol-finding.sh" "$TMP/srig/assets/scripts/"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/sbin/gc" <<'STUB'
@@ -710,6 +734,13 @@ if [ "${1:-} ${2:-}" = "agent list" ]; then printf '%s\n' "$STUB_AGENTS"; exit 0
 if [ "${1:-} ${2:-}" = "gc-toolkit scripts-dir" ]; then [ -n "${STUB_PACK:-}" ] || exit 1; printf '%s/assets/scripts\n' "$STUB_PACK"; exit 0; fi
 [ "${1:-}" = bd ] || { echo "stub gc: unexpected call: $*" >&2; exit 99; }
 shift
+# A read the gctk under test makes answers from the same store, with its blocks
+# edges, through the seam holds-store.stub.sh keeps, whose rows read "A blocks
+# B" where these read "<waiter>|blocks|<gate>".
+if [ -n "${HOLDS_STUB_READ:-}" ]; then
+  awk -F'|' -v OFS='|' '$2 == "blocks" { print $3, $2, $1; next } { print }' "$EDGES" > "$EDGES.holds"
+  HOLDS_STORE="$STORE" HOLDS_DEPS="$EDGES.holds" exec "${HOLDS_STUB:?}" answer "$@"
+fi
 case "${1:-} ${2:-}" in
   "gate list")
     # bd lists the gates that are not closed, and prints null when there are none.
