@@ -156,8 +156,9 @@ primitives were read for a create that a retry repeats at most once:
   which a supervisor restart forgets.
 
 None covers the need, so `open` uses what the store already records.
-Once the conversation is filed, `--json` names it on every exit, the failed
-reply's included, and the form keeps it as saved and starts nothing. Its save
+Once the conversation is filed, `--json` names it before the reply is written,
+so a failed reply, or a save killed at its deadline while the reply stalls,
+still names it, and the form keeps it as saved and starts nothing. Its save
 again names that conversation, as the next section says. A save whose answer
 was lost names none, and for it, with `--allow-duplicate`, a concern that a
 conversation waiting in the queue holds as its whole ask lands on that

@@ -2068,8 +2068,9 @@ open_join() {
 # unless a conversation waiting in the queue already holds it as its whole ask:
 # open then lands on that one, so a run again after a run that filed the
 # conversation and failed completes it rather than file a second. Once the
-# conversation is filed, --json names it on every exit, a failed reply onto the
-# gate included. --reason is the title, --body the ask
+# conversation is filed, --json names it before the reply onto the gate is
+# written, so a reply the store refuses, or a run killed while the reply stalls,
+# still names it. --reason is the title, --body the ask
 # the sitting reads when it claims the conversation — callers with their own
 # origin (operator-intake.sh) pass both rather than misreporting the board
 # wording. The conversation is filed in the bead's own store. It leaves the
@@ -2360,23 +2361,25 @@ $gate_desc}"
             || { create_err=$(printf '%s' "$CONV_JSON" | scrub | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null || true)
                  echo "$PROG: open: could not create a conversation for '$bead'${create_err:+: $create_err}" >&2; exit 4; }
     fi
-    # From here the conversation is filed and holds the concern, so --json names
-    # it on every exit, and a caller that saves again knows what holds it.
+    # From here the conversation is filed and holds the concern, so --json
+    # answers it now, ahead of the reply onto the gate, which can stall. A run
+    # killed at its caller's deadline runs no trap and prints nothing more, and
+    # a caller that saves again names this conversation with --conversation.
+    # Every exit after this answers the same, so it is the last answer open
+    # prints.
     OPEN_FILED=1
     if [ -n "$_open_new_subject_bead" ]; then
         _open_new_subject_bead=""
         trap - EXIT
     fi
+    [ -z "$open_json" ] || jq -nc --arg s "$bead" --arg c "$CONV" '{subject: $s, conversation: $c, filed: true}'
     bust_cache
     if [ -n "$TAKE_GATE" ] && ! conversation_reply "$CONV" "$TAKE_GATE"; then
         echo "$PROG: open: conversation $CONV is filed on $bead, but the store refused its reply onto gate $TAKE_GATE. Add it by hand: gc bd dep add $CONV $TAKE_GATE --type replies-to" >&2
-        [ -z "$open_json" ] || jq -nc --arg s "$bead" --arg c "$CONV" '{subject: $s, conversation: $c, filed: true}'
         exit 4
     fi
 
-    if [ -n "$open_json" ]; then
-        jq -nc --arg s "$bead" --arg c "$CONV" '{subject: $s, conversation: $c, filed: true}'
-    else
+    if [ -z "$open_json" ]; then
         echo "$PROG: conversation $CONV filed on $bead — waiting in the operator's queue; no session spawned."
         echo "       Engage it when ready: $PROG engage $bead"
     fi

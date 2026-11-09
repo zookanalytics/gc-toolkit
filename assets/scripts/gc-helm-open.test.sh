@@ -34,6 +34,8 @@
 #   (ALLOWDUP) --allow-duplicate files a fresh conversation beside a queued one
 #   (REPLY-PART) a conversation filed whose reply onto the gate the store
 #              refuses exits 4, and --json still names the conversation
+#   (REPLY-EARLY) --json names the conversation before its reply onto the
+#              gate is written, and answers it once
 #   (ALLOWDUP-AGAIN) --allow-duplicate on a concern a queued conversation holds
 #              as its ask lands on it, completes its reply, and files nothing
 #   (CONVERSATION) --conversation completes the conversation it names, which a
@@ -115,6 +117,9 @@ mkdir -p "$TMP/bin"
 #     --deps named and carries the assignee it was filed with. Its replies-to
 #     edges are the ones `dep add` recorded. Under $FAKE_REPLY_REFUSED a
 #     `dep add` exits 1 and records nothing, as a store that refused the edge.
+#     Under $FAKE_REPLY_SEES, a file, `dep add` copies it to
+#     $FAKE_REPLY_SEES.at-reply first, so a case that sends open's stdout there
+#     reads what open had answered when its reply was written.
 #     An id in $FAKE_LIST_DROPS is left out, as a row the store did not return.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 ${2:-}" in
@@ -182,6 +187,9 @@ case "$1 ${2:-}" in
         esac ;;
       *)
         printf 'bd dep %s\n' "$*" >> "$FAKE_CALLS"
+        if [ "${3:-}" = add ] && [ -n "${FAKE_REPLY_SEES:-}" ]; then
+          cat "$FAKE_REPLY_SEES" > "$FAKE_REPLY_SEES.at-reply"
+        fi
         if [ "${3:-}" = add ] && [ -n "${FAKE_REPLY_REFUSED:-}" ]; then
           echo "bd dep add: the store refused the edge" >&2; exit 1
         fi
@@ -524,6 +532,24 @@ eq "$OUT" '{"subject":"tk-anchor","conversation":"tk-conv1","filed":true}' "(REP
 grep -q 'conversation tk-conv1 is filed on tk-anchor, but the store refused its reply onto gate tk-gate1' <<< "$ERR" \
   && ok "(REPLY-PART) …and stderr says the store refused its reply onto the gate" || bad "(REPLY-PART) message (err: $ERR)"
 unset FAKE_REPLY_REFUSED
+
+# --- (REPLY-EARLY) the conversation is answered before its reply ------------
+# A caller that stops waiting while the reply onto the gate stalls, as the form
+# does at its deadline, has already read which conversation holds the concern,
+# and saves again onto it by its id.
+export FAKE_REPLY_SEES="$TMP/out"
+reset_store; export FAKE_SHOW_MODE=found
+set +e
+sh "$SCRIPT" open tk-gate1 --reason "the question" --allow-duplicate --if-subject tk-anchor --json >"$TMP/out" 2>"$TMP/err"; RC=$?
+set -e
+eq "$RC" "0" "(REPLY-EARLY) a conversation filed through a gate exits 0"
+eq "$(cat "$TMP/out.at-reply" 2>/dev/null)" '{"subject":"tk-anchor","conversation":"tk-conv1","filed":true}' \
+  "(REPLY-EARLY) --json named the conversation before its reply onto the gate was written"
+eq "$(cat "$TMP/out")" '{"subject":"tk-anchor","conversation":"tk-conv1","filed":true}' "(REPLY-EARLY) …and answers it once"
+grep -q 'bd dep add tk-conv1 tk-gate1 --type replies-to' "$FAKE_CALLS" \
+  && ok "(REPLY-EARLY) …then writes the reply" || bad "(REPLY-EARLY) reply (calls: $(cat "$FAKE_CALLS"))"
+unset FAKE_REPLY_SEES
+rm -f "$TMP/out" "$TMP/out.at-reply"
 
 # --- (ALLOWDUP-AGAIN) a concern a queued conversation holds is not filed again -
 # A run again after one that filed the conversation and then failed lands on

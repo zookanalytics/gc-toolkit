@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,11 +14,14 @@ import (
 )
 
 // gcStub answers the gc calls `gc-helm.sh open` makes, from one rig's store kept
-// as rows in $STATE/rows.json, and records each call in $STATE/calls. A marker
-// file stalls one call, once, and the call it stalls writes $STATE/stalled:
-// stall.after-subject stalls the first call after the subject's create, and
-// stall.in-conversation-create stalls the conversation's create once its row is
-// written, before it answers.
+// as rows in $STATE/rows.json, and records each call in $STATE/calls. A create
+// with a --deps files the next conversation, tk-conv1 and then tk-conv2, and
+// `dep add` writes its edge onto the row. A marker file stalls one call, once,
+// and the call it stalls writes $STATE/stalled: stall.after-subject stalls the
+// first call after the subject's create, stall.in-conversation-create stalls the
+// conversation's create once its row is written, before it answers, and
+// stall.in-reply stalls the conversation's reply onto its gate before the edge
+// is written.
 const gcStub = `#!/bin/sh
 printf '%s\n' "$*" | tr '\n' ' ' >> "$STATE/calls"; echo >> "$STATE/calls"
 stall() { rm -f "$STATE/stall.$1"; : > "$STATE/stalled"; sleep 60; }
@@ -28,7 +32,7 @@ case "$1 ${2:-}" in
 "agent list") echo '{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.converse-opus"}]}' ;;
 "bd create")
 	deps=$(arg --deps "$@")
-	if [ -z "$deps" ]; then id=tk-subj1; else id=tk-conv1; fi
+	if [ -z "$deps" ]; then id=tk-subj1; else id=tk-conv$(( $(jq '[.[] | select(.id | startswith("tk-conv"))] | length' "$STATE/rows.json") + 1 )); fi
 	row=$(jq -nc --arg i "$id" --arg t "$(arg --title "$@")" --arg d "$(arg -d "$@")" --arg s "${deps#tracks:}" \
 		'{id: $i, issue_type: "task", status: "open", title: $t, description: $d}
 		 + (if $s == "" then {} else {assignee: "human", dependencies: [{type: "tracks", depends_on_id: $s}]} end)')
@@ -36,8 +40,16 @@ case "$1 ${2:-}" in
 	if [ -n "$deps" ] && [ -e "$STATE/stall.in-conversation-create" ]; then stall in-conversation-create; fi
 	printf '{"id":"%s"}\n' "$id" ;;
 "bd show") jq -c --arg i "$3" '[.[] | select(.id == $i)]' "$STATE/rows.json" ;;
-"bd dep") jq -c --arg i "$4" --arg t "$(arg --type "$@")" \
-	'[.[] | select(any(.dependencies[]?; .type == $t and .depends_on_id == $i)) | {id, status, assignee, issue_type, dependency_type: $t}]' "$STATE/rows.json" ;;
+"bd dep")
+	if [ "$3" = add ]; then
+		if [ -e "$STATE/stall.in-reply" ]; then stall in-reply; fi
+		jq --arg i "$4" --arg g "$5" --arg t "$(arg --type "$@")" \
+			'map(if .id == $i then .dependencies = ((.dependencies // []) + [{type: $t, depends_on_id: $g}]) else . end)' \
+			"$STATE/rows.json" > "$STATE/rows.new" && mv "$STATE/rows.new" "$STATE/rows.json"
+	else
+		jq -c --arg i "$4" --arg t "$(arg --type "$@")" \
+			'[.[] | select(any(.dependencies[]?; .type == $t and .depends_on_id == $i)) | {id, status, assignee, issue_type, dependency_type: $t}]' "$STATE/rows.json"
+	fi ;;
 "bd list") jq -c --arg ids "$(arg --id "$@")" '[.[] | select(.id as $i | $ids | split(",") | index($i))]' "$STATE/rows.json" ;;
 *) echo "stub gc: unhandled: $*" >&2; exit 1 ;;
 esac
@@ -171,5 +183,111 @@ func TestANewTopicSaveKilledAtItsDeadlineKeepsItsSubject(t *testing.T) {
 				t.Fatalf("the store holds %d subjects and %d conversations of %d rows, want one of each:\n%s", subjects, conversations, len(rows), b)
 			}
 		})
+	}
+}
+
+// A save onto a gate that runs past its deadline in the conversation's reply
+// onto the gate, after the conversation is filed, comes back with that
+// conversation, so the form holds it and saves again onto it by its id. By then
+// a sitting another terminal started has taken the conversation out of the
+// operator's queue, where a save that looks for a queued conversation holding
+// the same question no longer finds it. The save again completes the reply all
+// the same, and the store holds one conversation.
+func TestAGateSaveKilledInItsReplyIsSavedAgainOntoTheConversationItFiled(t *testing.T) {
+	const q = "is the rollout safe to approve?"
+	s, state := realOpen(t, 3*time.Second)
+	rows := `[{"id": "tk-gate1", "issue_type": "gate", "await_type": "human", "status": "open", "title": "Approve the rollout", "description": "Approve it or say why not."},
+		{"id": "tk-held1", "issue_type": "task", "status": "open", "title": "the rollout", "dependencies": [{"type": "blocks", "depends_on_id": "tk-gate1"}]}]`
+	for name, content := range map[string]string{"rows.json": rows, "stall.in-reply": ""} {
+		if err := os.WriteFile(filepath.Join(state, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a := subjectAbout("tk-held1", "gc-toolkit")
+	a.Ref, a.Gate = "tk-gate1", "tk-gate1"
+	h := &answers{fakeHelm: &fakeHelm{about: map[string]About{"tk-gate1": a}}, s: s}
+	m := newFormOn(t, h, Options{Subject: "tk-gate1", DraftDir: t.TempDir()})
+	settle(m)
+	typeText(m, q)
+	_, cmd := m.Update(ctrl('s'))
+	deliver(m, cmd)
+	if _, err := os.Stat(filepath.Join(state, "stalled")); err != nil {
+		calls, _ := os.ReadFile(filepath.Join(state, "calls"))
+		t.Fatalf("the save ended before the stub stalled it (%+v); its calls:\n%s", h.got, calls)
+	}
+	filed := Saved{Subject: "tk-held1", Conversation: "tk-conv1", Filed: true}
+	if len(h.got) != 1 || h.got[0].saved != filed || !errors.Is(h.got[0].err, server.ErrToolTimeout) {
+		t.Fatalf("the save killed in its reply answered %+v, want %+v and the timeout", h.got, filed)
+	}
+	if m.scr != progressScreen || m.saved == nil || m.saved.Conversation != "tk-conv1" || m.saveErr == "" || len(h.starts) != 0 {
+		t.Fatalf("after the killed save: screen %d, saved %+v, saveErr %q, starts %v", m.scr, m.saved, m.saveErr, h.starts)
+	}
+
+	// A sitting another terminal started takes the conversation.
+	b, err := os.ReadFile(filepath.Join(state, "rows.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var store []map[string]any
+	if err := json.Unmarshal(b, &store); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range store {
+		if r["id"] == "tk-conv1" {
+			r["status"], r["assignee"] = "in_progress", "c-tk-conv1"
+		}
+	}
+	if b, err = json.Marshal(store); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(state, "rows.json"), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, cmd = m.Update(key('r'))
+	deliver(m, cmd)
+	want := SaveRequest{Ref: "tk-gate1", Subject: "tk-held1", Question: q, Conversation: "tk-conv1"}
+	if len(h.saves) != 2 || h.saves[1] != want {
+		t.Fatalf("saves = %+v, want the save again onto tk-conv1", h.saves)
+	}
+	if len(h.got) != 2 || h.got[1].saved != filed || h.got[1].err != nil {
+		t.Fatalf("the save again answered %+v", h.got)
+	}
+	if len(h.starts) != 1 || h.starts[0] != "tk-conv1 opus" {
+		t.Fatalf("starts = %v, want tk-conv1", h.starts)
+	}
+	if b, err = os.ReadFile(filepath.Join(state, "rows.json")); err != nil {
+		t.Fatal(err)
+	}
+	var after []struct {
+		ID           string
+		Dependencies []struct {
+			Type        string `json:"type"`
+			DependsOnID string `json:"depends_on_id"`
+		}
+	}
+	if err := json.Unmarshal(b, &after); err != nil {
+		t.Fatal(err)
+	}
+	conversations, replied := 0, false
+	for _, r := range after {
+		for _, d := range r.Dependencies {
+			switch {
+			case d.Type == "tracks" && d.DependsOnID == "tk-held1":
+				conversations++
+			case r.ID == "tk-conv1" && d.Type == "replies-to" && d.DependsOnID == "tk-gate1":
+				replied = true
+			}
+		}
+	}
+	if conversations != 1 || !replied {
+		t.Fatalf("the store holds %d conversations on tk-held1, and tk-conv1 replies to tk-gate1: %v, want one that replies:\n%s", conversations, replied, b)
+	}
+	calls, err := os.ReadFile(filepath.Join(state, "calls"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(calls), "bd create "); n != 1 {
+		t.Fatalf("bd create ran %d times, want once:\n%s", n, calls)
 	}
 }
