@@ -471,7 +471,8 @@ has "$OUT" "OK:" "the quiet headline is printed"
 
 # --- 13. BATCH ONCE: three owed candidates cost ONE bead read, not three -----
 #          This asserts the mechanism, not merely that three findings come back:
-#          one gctk bead holds call answers the store's three candidates, and
+#          one gctk bead holds call answers the store's three candidates, one
+#          listing of them among its reads (the far beads' is another), and
 #          the check makes no read of its own past the armed listing.
 armed_store alpha "$(aarmed m-1)" "$(aarmed m-2)" "$(aarmed m-3)"
 edges_store alpha "$(e_blk m-1 x-1)" "$(e_blk m-2 x-2)" "$(e_blk m-3 x-3)"
@@ -485,7 +486,7 @@ has "$OUT" "alpha bead m-3" "the third owed candidate is reported"
 eq "$(grep -c '^alpha list-armed ' "$CALLS")" "1" "the store's armed beads are listed once"
 eq "$(grep '^alpha list-armed ' "$CALLS" | grep -c -- '--brief')" "1" "the armed listing omits the free text"
 eq "$(grep -c '^alpha dep ' "$CALLS")" "0" "the store makes no dependency read: each arm's edges come off its listing row"
-eq "$(grep -c '^alpha holds --db [^ ]* list --id ' "$CALLS")" "1" "the three arms are read in ONE gctk bead holds call, not one call per bead"
+eq "$(grep -c -E '^alpha holds --db [^ ]* list --id [^ ]*m-[123]' "$CALLS")" "1" "the three arms are read in ONE gctk bead holds call, not one call per bead"
 eq "$(grep -c '^alpha holds --db [^ ]* list --id m-1,m-2,m-3 ' "$CALLS")" "1" "that call names every candidate once"
 eq "$(grep -vc -E '^alpha (list-armed|holds) ' "$CALLS")" "0" "the check makes no other read"
 clear_stores

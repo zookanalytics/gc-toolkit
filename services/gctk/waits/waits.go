@@ -118,13 +118,14 @@ type Snapshot struct {
 }
 
 // ReadStore reads one snapshot of what holds each bead named, as Read does,
-// from the city's store at db, a store's .beads directory, or from the store gc
-// resolves when db is empty. Every read names that one store, so a bead's edge
+// from the city's store at db, a store's .beads directory, or, when db is
+// empty, from the store gc routes a read of the first bead to
+// ([ledger.Open]). Every read names that one store, so a bead's edge
 // into another store is never read as one its store holds. It is the entry for
 // a reader the ledger is internal to, the helm board among them, which names
 // each rig's store.
 func ReadStore(db string, ids ...string) (*Snapshot, error) {
-	l, err := ledger.Open(db)
+	l, err := ledger.Open(db, ids...)
 	if err != nil {
 		return nil, err
 	}
@@ -160,7 +161,7 @@ func Read(l *ledger.Ledger, ids ...string) (*Snapshot, error) {
 	if len(held) == 0 {
 		return s, nil
 	}
-	if s.ls, err = l.Read(held...); err != nil {
+	if s.ls, err = l.ReadFrom(listed, held...); err != nil {
 		return nil, err
 	}
 	if err := s.readForeign(l, held, edges); err != nil {

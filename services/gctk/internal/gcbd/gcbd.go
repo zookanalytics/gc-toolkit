@@ -34,6 +34,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
@@ -179,25 +180,83 @@ func (c *Client) In(db string) *Client {
 
 // Where is the store gc resolves for this process, from its working directory
 // and its environment, as `gc bd where --json` names it: the store's .beads
-// directory. A read that fails or names no store returns a *ReadError. A
-// reader that must answer from one store pins to it ([Client.In]), because gc
-// routes an unpinned read that names a bead to the store holding that bead,
-// which is another rig's when the bead is.
-func (c *Client) Where() (string, error) {
+// directory and its bead prefix. A read that fails or names no store returns a
+// *ReadError. A reader that must answer from one store pins to it
+// ([Client.In]), because gc routes an unpinned read that names a bead to the
+// store holding that bead, which is another rig's when the bead is.
+func (c *Client) Where() (path, prefix string, err error) {
 	var stderr bytes.Buffer
 	cmd := c.command("bd", "where", "--json")
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return "", &ReadError{Reason: "gc bd where did not name the store: " + failure(out, stderr.String())}
+		return "", "", &ReadError{Reason: "gc bd where did not name the store: " + failure(out, stderr.String())}
 	}
 	var where struct {
-		Path string `json:"path"`
+		Path   string `json:"path"`
+		Prefix string `json:"prefix"`
 	}
 	if err := json.Unmarshal(Scrub(out), &where); err != nil || where.Path == "" {
-		return "", &ReadError{Reason: "gc bd where named no store"}
+		return "", "", &ReadError{Reason: "gc bd where named no store"}
 	}
-	return where.Path, nil
+	return where.Path, where.Prefix, nil
+}
+
+// StoreOf names the store whose bead prefix begins id, the longest such prefix
+// when several do, from the stores `gc rig list --json` names, the city's
+// among them: the store gc routes a read of id to when the read names no
+// store. ok is false when no store's prefix begins id. A listing that fails
+// or does not decode returns a *ReadError.
+func (c *Client) StoreOf(id string) (path string, ok bool, err error) {
+	var stderr bytes.Buffer
+	cmd := c.command("rig", "list", "--json")
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return "", false, &ReadError{ID: id, Reason: "gc rig list did not name the stores: " + failure(out, stderr.String())}
+	}
+	var list struct {
+		Rigs []struct {
+			Prefix string `json:"prefix"`
+			Path   string `json:"path"`
+		} `json:"rigs"`
+	}
+	if err := json.Unmarshal(Scrub(out), &list); err != nil {
+		return "", false, &ReadError{ID: id, Reason: "gc rig list did not decode: " + err.Error()}
+	}
+	best := ""
+	for _, r := range list.Rigs {
+		if r.Prefix == "" || r.Path == "" || !strings.HasPrefix(id, r.Prefix+"-") {
+			continue
+		}
+		if !ok || len(r.Prefix) > len(best) {
+			best, path, ok = r.Prefix, filepath.Join(r.Path, ".beads"), true
+		}
+	}
+	return path, ok, nil
+}
+
+// Route names the store a read that names none pins to, so that every read of
+// it answers from the store gc routes the first bead to: the store gc resolves
+// for this process when no bead is named or its prefix begins the first id,
+// else the store whose prefix does ([Client.StoreOf]). The resolved store
+// answers when no store's prefix begins the id, and when the stores do not
+// list, since a read there finds only the beads that store holds: a bead it
+// does not hold is one its read cannot answer, never another store's. Only a
+// read about a bead in another store than the one resolved here pays for the
+// listing of stores.
+func (c *Client) Route(ids ...string) (string, error) {
+	path, prefix, err := c.Where()
+	if err != nil {
+		return "", err
+	}
+	if len(ids) == 0 || (prefix != "" && strings.HasPrefix(ids[0], prefix+"-")) {
+		return path, nil
+	}
+	if other, ok, err := c.StoreOf(ids[0]); err == nil && ok {
+		return other, nil
+	}
+	return path, nil
 }
 
 // command is the `gc` command for args, a `bd` call, with a pinned client's

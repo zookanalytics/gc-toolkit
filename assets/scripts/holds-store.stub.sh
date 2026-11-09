@@ -10,7 +10,10 @@
 #       environment. A suite exports that path as GCTK_BIN, and GC_NO_API=1, so
 #       the script under test runs the build and every read stays on `gc bd`.
 #       The suite's own `gc` stub sends a call made with HOLDS_STUB_READ set to
-#       `answer`, since only gctk's reads carry it. Exits 1 with the reason when
+#       `answer`, since only gctk's reads carry it. The wrapper also answers the
+#       `gc rig list --json` an unpinned read routes by, with $HOLDS_RIGS when
+#       set and else no store, so such a read stays on the store `where` names;
+#       every other call goes to the suite's `gc`. Exits 1 with the reason when
 #       there is no Go toolchain or the build fails.
 #
 #   holds-store.stub.sh answer [--db <path>] <verb> [<args>...]
@@ -53,7 +56,22 @@ case "${1:-}" in
       ( cd "$HERE/../../services/gctk" && go build -buildvcs=false -o "$dir/gctk-real" ./cmd/gctk ) > "$dir/gctk-build.log" 2>&1 || {
         echo "holds-store.stub.sh: gctk did not build: $(tail -3 "$dir/gctk-build.log" | tr '\n' ' ')" >&2; exit 1; }
     fi
-    printf '#!/bin/sh\nHOLDS_STUB_READ=1 exec %s "$@"\n' "$dir/gctk-real" > "$dir/gctk" && chmod +x "$dir/gctk" || exit 1
+    mkdir -p "$dir/shim" || exit 1
+    cat > "$dir/shim/gc" <<'SHIM' || exit 1
+#!/bin/sh
+# The stores an unpinned gctk read routes by, from the suite; every other call
+# goes to the suite's own gc, with the PATH gctk started with, so nothing that
+# call runs meets this shim.
+if [ "${1:-} ${2:-}" = "rig list" ]; then
+  if [ -n "${HOLDS_RIGS:-}" ]; then printf '%s\n' "$HOLDS_RIGS"; else printf '%s\n' '{"rigs":[]}'; fi
+  exit 0
+fi
+PATH="$HOLDS_PATH"; export PATH
+exec "$HOLDS_NEXT_GC" "$@"
+SHIM
+    chmod +x "$dir/shim/gc" || exit 1
+    printf '#!/bin/sh\nHOLDS_NEXT_GC=$(command -v gc) || HOLDS_NEXT_GC=/no-gc-on-path\nHOLDS_PATH="$PATH"\nexport HOLDS_NEXT_GC HOLDS_PATH\nPATH="%s:$PATH" HOLDS_STUB_READ=1 exec %s "$@"\n' \
+      "$dir/shim" "$dir/gctk-real" > "$dir/gctk" && chmod +x "$dir/gctk" || exit 1
     printf '%s\n' "$dir/gctk"
     exit 0 ;;
   answer) shift ;;

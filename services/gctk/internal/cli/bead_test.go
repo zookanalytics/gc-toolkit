@@ -15,8 +15,9 @@ import (
 // and `bd list` returns the rows its --id, --has-metadata-key, --metadata-field
 // and --all select, in a listing's shape, every edge kept. `bd blocked`
 // answers $STUB_BLOCKED and `bd sql` $STUB_MARKS. $STUB_BLOCKED_RC fails the
-// listing. Each call logs the store it names with bd's --db, "-" for none, to
-// $STUB_DB_LOG.
+// listing. `bd where` names /stub/.beads at prefix "st", and `rig list` names
+// that store alone, so no store's prefix begins an id here. Each call logs the
+// store it names with bd's --db, "-" for none, to $STUB_DB_LOG.
 const storeStub = `#!/bin/sh
 db=-
 if [ "$1" = bd ] && [ "$2" = --db ]; then db="$3"; shift 3; set -- bd "$@"; fi
@@ -51,6 +52,7 @@ case "$1 $2" in
       | .dependencies = [ (.dependencies // [])[] | {issue_id: $self, depends_on_id: .id, type: .dependency_type} ] ]' ;;
 "bd blocked") printf '%s\n' "${STUB_BLOCKED:-[]}"; exit "${STUB_BLOCKED_RC:-0}" ;;
 "bd where") printf '%s\n' '{"path":"/stub/.beads","prefix":"st"}' ;;
+"rig list") printf '%s\n' '{"rigs":[{"name":"stub","prefix":"st","path":"/stub"}]}' ;;
 "bd sql") printf '%s\n' "${STUB_MARKS:-[]}" ;;
 *) echo "stub gc: no answer for $*" >&2; exit 2 ;;
 esac
@@ -193,6 +195,7 @@ func TestBeadHoldsReadsTheNamedStore(t *testing.T) {
 		first string
 	}{
 		{"named", []string{"--db", "/rig/.beads", "own"}, "/rig/.beads", "/rig/.beads"},
+		// The store gc resolves, then the stores, since no prefix begins "own".
 		{"resolved", []string{"own"}, "/stub/.beads", "-"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -207,10 +210,14 @@ func TestBeadHoldsReadsTheNamedStore(t *testing.T) {
 				t.Fatal(err)
 			}
 			calls := strings.Split(strings.TrimSpace(string(raw)), "\n")
-			if len(calls) < 5 || calls[0] != tc.first {
-				t.Fatalf("the stub logged %q; want the first read to name %s, then the listing, the rows, the blocked set and its marks", calls, tc.first)
+			lead := 1
+			if tc.first == "-" {
+				lead = 2
 			}
-			for i, db := range calls[1:] {
+			if len(calls) < lead+4 || calls[0] != tc.first || calls[lead-1] != tc.first {
+				t.Fatalf("the stub logged %q; want the first %d read(s) to name %s, then the listing, the rows, the blocked set and its marks", calls, lead, tc.first)
+			}
+			for i, db := range calls[lead:] {
 				if db != tc.store {
 					t.Errorf("read %d named the store %q; want %s", i+1, db, tc.store)
 				}

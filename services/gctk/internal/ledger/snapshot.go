@@ -116,11 +116,26 @@ func heldEdge(typ string) bool {
 // does not hold is left out, as a `gc bd show` row leaves it out. A record
 // carries no edge of any other type. A read that fails returns its
 // *gcbd.ReadError, and so does a bead named that the store holds no row for.
-func (l *Ledger) Read(ids ...string) (*Snapshot, error) {
+func (l *Ledger) Read(ids ...string) (*Snapshot, error) { return l.ReadFrom(nil, ids...) }
+
+// ReadFrom is Read over the rows a caller has already listed, records Find
+// returned: a bead named whose row is among them is not listed again.
+func (l *Ledger) ReadFrom(listed []*Record, ids ...string) (*Snapshot, error) {
 	s := &Snapshot{records: map[string]*Record{}}
 	rows := map[string]*gcbd.Bead{}
+	for _, r := range listed {
+		if r != nil && r.row != nil {
+			rows[r.ID] = r.row
+		}
+	}
 	level := slices.Compact(slices.Sorted(slices.Values(ids)))
-	if err := l.listInto(rows, level); err != nil {
+	var unlisted []string
+	for _, id := range level {
+		if rows[id] == nil {
+			unlisted = append(unlisted, id)
+		}
+	}
+	if err := l.listInto(rows, unlisted); err != nil {
 		return nil, err
 	}
 	for _, id := range level {

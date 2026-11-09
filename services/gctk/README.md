@@ -14,7 +14,7 @@ through `gc bd` and the supervisor's API.
 
 | Command | What it does | Documented in |
 |---|---|---|
-| `bead holds` | what holds each bead named, from one read of the store: one status (blocked, held, unjudged or clear) with the waits behind it and whether each is the bead's own or an ancestor's, its own pending waits and when the last landed, why it is in flight, its arm, and its wait edges into another store, one JSON object per line, read from the store `--db` names or the one gc resolves | `gctk bead holds --help`, `internal/cli/bead.go`, `waits` |
+| `bead holds` | what holds each bead named, from one read of the store: one status (blocked, held, unjudged or clear) with the waits behind it and whether each is the bead's own or an ancestor's, its own pending waits and when the last landed, why it is in flight, its arm, and its wait edges into another store, one JSON object per line, read from the store `--db` names or the one gc routes the first bead to | `gctk bead holds --help`, `internal/cli/bead.go`, `waits` |
 | `epic` | actions taken on an epic: filing one with its contract, each field in its own key, refused when the epic has no hypothesis and its parent is not an epic | `gctk epic --help`, `internal/cli/epic.go` |
 | `lifecycle` | anchor lifecycle transitions over the state machine `lifecycle/lifecycle.toml` declares. It parses its own verbs and flags | `gctk lifecycle`, `internal/cli/lifecycle.go`, `internal/lifecycle` |
 | `merge` | arm 2 of the merge cadence, the single writer of merged truth | `internal/cli/merge.go` |

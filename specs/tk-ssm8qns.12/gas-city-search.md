@@ -45,14 +45,38 @@ stores: its read of a far bead finds a bead in another rig and calls the edge
 onto it an edge its store holds, while its blocked listing, which names no
 bead, answers from the rig gc resolves.
 
-**The primitive.** `bd where --json`, which names the active beads location
-(bd 1.3.4 at 7ef2fd05e, `bd help`: "where  Show active beads location"), run
-as `gc bd where --json`, which answers from the store gc resolves for the
-working directory and the environment and prints its `.beads` path.
+A caller that names no store is often not in the bead's store at all. A
+converse sitting is city-scoped, so `gc bd show tk-…` from it answers from the
+gc-toolkit store by the id's prefix, while the store it resolves is the city's
+(`gc bd where --json` there prints the city's own `<city>/.beads`, at the
+city's prefix). Pinned to the store it resolves, its read of a rig bead finds
+no row.
 
-**Why it covers the need.** The store adapter asks it once when the caller
-names no store and pins every later read to the path it prints, so the answer
-is one store's. Nothing else names the store gc resolves.
+**The primitives.**
+
+- gc's own routing of a read that names a bead and no store: by the prefix of
+  the id (`bdSubjectPrefixTarget` in `cmd/gc/cmd_bd.go:1076` at gascity
+  e03752646, "a by-id read or write routes by its subjects' prefix"), the
+  longest configured prefix when several begin it (`beadPrefix` in
+  `cmd/gc/cmd_sling.go:582-589`, through `sling.BeadPrefixForCity`).
+- `gc rig list --json`, which names each store the city binds, the city's own
+  among them (`"hq": true`), with its prefix and its path.
+- `bd where --json`, which names the active beads location and its prefix
+  (bd 1.3.4 at 7ef2fd05e, `bd help`: "where  Show active beads location"),
+  run as `gc bd where --json`, which answers from the store gc resolves for
+  the working directory and the environment.
+
+**Why they cover the need.** The store adapter asks `gc bd where` once when
+the caller names no store. It pins every later read to that store when the
+store's prefix begins the first bead's id, which is every rig-scoped caller.
+Otherwise it asks `gc rig list` for the store whose prefix begins the id, the
+longest such, as gc's routing does, and pins to it. It keeps the resolved store
+when no store's prefix begins the id, or when the listing fails, since a read
+there can only find the beads that store holds. So the answer is one store's,
+the one gc would read the bead from. The listing costs 0.6 to 1.5 s against
+0.2 s for `where`, and only a read about a bead outside the resolved store pays
+it. Nothing in Gas City names the store a bead id routes to as a read of its
+own: `gc bd where` takes no id.
 
 ## Each wait's `title`
 

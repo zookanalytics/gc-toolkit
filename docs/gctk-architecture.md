@@ -94,7 +94,7 @@ bead.
 
 | Verb | Caller class | Intent | Defense |
 |---|---|---|---|
-| `gctk bead holds [--db <path>] <bead>...` | agent, hook, order | what holds each bead, in the store `--db` names or the one gc resolves: one status, the waits behind it, its own pending waits and when the last one landed, why it is in flight, its arm, and its wait edges into another store | It puts "is this blocked?" in one place, where [the census](../specs/tk-ssm8qns.2/blocked-census.md) finds 46 places deciding it by 27 rules, and it gives one consistent reading where the store's blocked mark, its close rule and its blocked listing disagree ([its contract](#the-bead-holds-contract)). A raw row read stays native, and any question about what holds a bead, or what its close waits on, is this verb. |
+| `gctk bead holds [--db <path>] <bead>...` | agent, hook, order | what holds each bead, in the store `--db` names or the one gc routes the first bead to: one status, the waits behind it, its own pending waits and when the last one landed, why it is in flight, its arm, and its wait edges into another store | It puts "is this blocked?" in one place, where [the census](../specs/tk-ssm8qns.2/blocked-census.md) finds 46 places deciding it by 27 rules, and it gives one consistent reading where the store's blocked mark, its close rule and its blocked listing disagree ([its contract](#the-bead-holds-contract)). A raw row read stays native, and any question about what holds a bead, or what its close waits on, is this verb. |
 | `gctk bead arm <bead>` | agent, hook | start this bead by itself once nothing holds it, on a formula if one is named | One intent over gc's lower-level sling and routing calls. The caller states what starts and on what, and the machinery performs every later step. |
 | `gctk bead disarm <bead>` | agent, hook | stop an armed bead from starting by itself | The other half of the arm's intent. |
 | `gctk bead start-armed` | order | start each armed bead that nothing holds any more: sling one armed for a pool, or send its notice to the named agent one is assigned to | Gas City slings only when asked. Its `cascade-nudge-on-blocker-close` order nudges the assignees of a closed bead's dependents and slings nothing ([warrants.md](warrants.md#deferred-dispatch-residual)). A notice takes cascade-nudge's shape with a dedup ledger. A sling rests on a mark on the arm, which lands first, unproven, in one write with the attempt count. A sling that fails takes the mark off in one write, so the next pass tries again. One that returns makes the mark proven before the arm is cleared, so a pass that finds a proven mark clears the arm without a sling, and one that finds an unproven mark slings again ([deferred-dispatch.md](deferred-dispatch.md#what-performs-it)). That leaves one window, a sling that lands before its mark is proven, where the next pass slings a second time. A pass that dies after the sling lands and before the proven mark opens it, and so does a sling that fails after it lands. Gas City's per-bead launch lock refuses a second pour of a graph.v2 formula while the first run is live, and the rest of the window is debt the deferred-dispatch member (tk-1tfzr71.16) retires in its design of this order. |
@@ -442,9 +442,12 @@ is left out, as a show row leaves it out. A wait edge the listing has and the
 record lacks is one into another store once a read of its far bead finds the
 store does not hold it.
 Every read `waits` makes names one store with bd's `--db`: the store its caller
-names, or the one `gc bd where` says gc resolves. gc routes a read that names a
-bead and no store to the store that holds the bead, so an unpinned read of a
-far bead in another rig would find it and hide the edge.
+names, or the store gc routes a read of the first bead named to. That is the
+one `gc bd where` says gc resolves when its prefix begins the bead's id, and
+otherwise the one whose prefix does, from `gc rig list`. gc routes a read that
+names a bead and no store by the bead's prefix, and a read that names none to
+the store it resolves, so unpinned reads would mix stores: a read of a far bead
+in another rig would find it and hide the edge.
 
 The compensations retire with one repair of bd. Once the bd the city runs
 judges a `waits-for` edge by its gate and returns an error when its read of

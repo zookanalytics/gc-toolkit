@@ -40,18 +40,19 @@ func New(store gcbd.Store) *Ledger { return &Ledger{store: store} }
 
 // Open returns a ledger over the city's store at db, a store's .beads
 // directory, through the store adapter pinned there. With db empty it pins the
-// adapter to the store gc resolves for this process, so every read the ledger
-// makes answers from that one store: gc routes an unpinned read that names a
-// bead to the store holding that bead. A store gc names none of returns the
-// adapter's *ReadError.
-func Open(db string) (*Ledger, error) {
+// adapter to the store gc routes a read of the first of ids to
+// ([gcbd.Client.Route]), so every read the ledger makes answers from that one
+// store: gc routes an unpinned read that names a bead to the store holding
+// that bead, and one that names none to the store it resolves here. A store gc
+// names none of returns the adapter's *ReadError.
+func Open(db string, ids ...string) (*Ledger, error) {
 	c := gcbd.New()
 	if db == "" {
-		where, err := c.Where()
+		routed, err := c.Route(ids...)
 		if err != nil {
 			return nil, err
 		}
-		db = where
+		db = routed
 	}
 	return New(c.In(db)), nil
 }
