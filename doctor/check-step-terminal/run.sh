@@ -7,15 +7,21 @@
 # pool can still hand the step out. A step is offerable when its own status is
 # open, it carries a dispatch path a worker pool consumes — a gc.routed_to a
 # pool queue serves, or a gc.dispatch_when_ready arm the deferred-dispatch order
-# slings — every blocking dependency has closed, and it is not the
+# slings — the store holds it by no wait, and it is not the
 # control-dispatcher's own workflow-finalize step (routed to an order, not a
 # pool, and closed by the dispatcher once its siblings do). That is an error, in
 # two shapes because they are different defects: REOPENED carries gc.outcome, so
 # it completed and was reset, and the pool re-offers it against a dead molecule;
 # NEVER-CLOSED never completed and the molecule finalized around it. A step that
 # is parked, that carries no dispatch path (an unrouted, unarmed husk no queue
-# can reach), that is the finalize step routed to the dispatcher, or that still
-# waits on a live blocker, is inert. Nothing can offer it, so it is a note.
+# can reach), that is the finalize step routed to the dispatcher, or that the
+# store still holds by a wait, is inert. Nothing can offer it, so it is a note.
+#
+# What holds a step is the answer of `gctk bead holds`
+# (docs/gctk-architecture.md, "The bead holds contract"): the step is held
+# unless it answers clear. Its own waits pending hold it, as an ancestor's wait
+# holds work not yet started, and so does a waits-for edge, which the store
+# cannot judge yet.
 #
 # Offerability is measured, not assumed, and the listing therefore selects open
 # AND blocked. A worker that blocks its own step, as gascity's core formula does
@@ -27,8 +33,8 @@
 # Under a root that is OPEN, an offerable step untouched past the stall bound
 # (default 48h, GC_DOCTOR_STEP_STALL_HOURS) is a warning, the stalled-frontier
 # signal: a pool is routed to it, yet nothing has claimed it. A stale step no
-# pool can reach — unrouted, still waiting on a live blocker, or the
-# control-dispatcher's finalize step — is inert residue, a note, not a frontier.
+# pool can reach — unrouted, still held by a wait, or the control-dispatcher's
+# finalize step — is inert residue, a note, not a frontier.
 # A parked step is not a frontier and raises none. A root resolving nowhere in
 # this store is a note; cross-store roots are legitimate.
 #
@@ -40,10 +46,9 @@
 # twice — repeated bounded work traded for a bounded working set. Roots resolve
 # through `--status closed` plus a `bd count` existence probe, both
 # defect-shaped: a healthy window answers with an empty list and a full count,
-# and no root body is read. Blocker statuses resolve by the same id-scoped
-# lookup, for the rows whose offerability a verdict reads: those a closed root
-# condemns and the stale open steps under an open root. Peak argv is one window
-# of ids, peak memory is one window of rows, and findings are the only structure
+# and no root body is read. What holds a step is one gctk read per window, for
+# the rows whose offerability a verdict reads: those a closed root condemns and
+# the stale open steps under an open root. Peak argv is one window of ids, peak memory is one window of rows, and findings are the only structure
 # that grows, so neither the molecule count nor the step count can walk into an
 # exec limit.
 # `bd list --offset` is proxied-server-only, so the listing cannot be split at
@@ -67,10 +72,15 @@ SEP=$'\037'
 END='__probe_rc__'
 
 errors=(); warnings=(); notes=()
-declare -A root_closed=() root_missing=() window_seen=() blocker_live=()
+# What holds a step is the answer of `gctk bead holds`, from the binary the city
+# builds.
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+declare -A root_closed=() root_missing=() window_seen=() step_held=()
 declare -A f_count=() f_steps=() f_extra=()
 batch=()
-w_root=(); w_step=(); w_oc=(); w_stale=(); w_ua=(); w_ref=(); w_status=(); w_dep=(); w_route=(); w_final=()
+w_root=(); w_step=(); w_oc=(); w_stale=(); w_ua=(); w_ref=(); w_status=(); w_route=(); w_final=()
 
 # >>> doctor-budget
 # One deadline for the whole check, anchored at process start. `gc doctor
@@ -150,12 +160,10 @@ JQ_META='def m($k): (((.metadata[$k] // "") | tostring)
 
 # One row per non-terminal step, unconditionally: root, step, whether it carries
 # an outcome, whether it is past the stall bound, the two values a finding
-# quotes, and the four an offerability verdict reads — the step's own status,
-# whether it carries a dispatch path, whether it is the control-dispatcher's
-# finalize step, and the ids it is blocked by. Only `blocks` edges count; a
-# step tracks its root
-# through an edge of its own, and reading that one as a blocker would make every
-# step in the store look held. A blank root names no molecule and is dropped by
+# quotes, and the three an offerability verdict reads beside what holds the
+# step — its own status, whether it carries a dispatch path, and whether it is
+# the control-dispatcher's finalize step. A blank root names no molecule and is
+# dropped by
 # the reader rather than here, so the row count stays the count of non-terminal
 # steps — which is what tells an unreadable listing apart from an empty store.
 # Rows are rebuilt one at a time out of the parse-event stream, so the reader's
@@ -173,9 +181,6 @@ step_row_stream() {
             \$ua,
             m(\"gc.root_store_ref\"),
             (((.status // \"\") | tostring) | gsub(\"[[:cntrl:]]\"; \" \")),
-            ([ .dependencies[]? | select(((.type // \"\") | tostring) == \"blocks\")
-               | ((.depends_on_id // \"\") | tostring) | gsub(\"[[:cntrl:]]\"; \" \")
-               | select(. != \"\") ] | join(\",\")),
             (if has_dispatch_path then \"1\" else \"0\" end),
             (if m(\"gc.kind\") == \"workflow-finalize\" then \"1\" else \"0\" end) ]
         | join(\"\u001f\")" 2>/dev/null
@@ -250,16 +255,16 @@ flush_batch() {
     return 0
 }
 
-# Which of this window's blocking dependencies are still live. Asked about the
-# rows whose offerability a verdict reads: a row a closed root condemns (outside
-# its settle grace) and a stale open step under an open root. A blocker can be
-# any bead, not only a sibling step, so the store is asked rather than the
-# window: a step waiting on an ordinary open bead is held just as firmly as one
-# waiting on its own chain. An id that resolves nowhere stays out of the set — a
-# dependency that no longer exists holds nothing, and reporting its step is the
-# conservative reading.
-resolve_blockers() {   # db
-    local db="$1" i n rid ids raw out id st dep
+# Which of this window's steps the store still holds, asked of gctk bead holds
+# for the rows whose offerability a verdict reads: a row a closed root condemns
+# (outside its settle grace) and a stale open step under an open root. The
+# store is asked rather than the window, since a step waiting on an ordinary
+# open bead is held just as firmly as one waiting on its own chain, and an edge
+# onto a bead the store does not hold holds nothing. An answer short of every
+# step asked fails the window: a partial map would read held steps as loose and
+# escalate them.
+resolve_holds() {   # db
+    local db="$1" i n rid raw out id st
     n="${#w_root[@]}"
     local -A want=()
     i=0
@@ -268,37 +273,37 @@ resolve_blockers() {   # db
         # The two branches that call offerable() in classify_window, and only
         # those: a row under a closed root past its settle grace, and a stale
         # open step under an open root. A row offerable() never judges needs no
-        # blocker map, so leaving it out keeps the probe to the defect surface.
+        # read of what holds it, so leaving it out keeps the probe to the defect
+        # surface.
         if [ -n "${root_missing[$rid]:-}" ]; then
             :
         elif [ -n "${root_closed[$rid]:-}" ]; then
             if [ "${root_closed[$rid]%%"$SEP"*}" != "settle" ]; then
-                for dep in ${w_dep[$i]//,/ }; do want["$dep"]=1; done
+                want["${w_step[$i]}"]=1
             fi
         elif [ "${w_stale[$i]}" = "1" ] && [ "${w_status[$i]}" = "open" ]; then
-            for dep in ${w_dep[$i]//,/ }; do want["$dep"]=1; done
+            want["${w_step[$i]}"]=1
         fi
         i=$((i + 1))
     done
     [ "${#want[@]}" -ne 0 ] || return 0
-    ids=$( IFS=,; printf '%s' "${!want[*]}" )
-    raw=$(root_list "$db" "$ids") || return 1
-    [ -n "$raw" ] || return 1
-    out=$(printf '%s' "$raw" | scrub | jq -r "$JQ_ISSUES
-        | [ (((.id // \"\") | tostring) | gsub(\"[[:cntrl:]]\"; \" \")),
-            (((.status // \"\") | tostring) | gsub(\"[[:cntrl:]]\"; \" \")) ]
-        | join(\"\u001f\")" 2>/dev/null) || return 1
+    [ -x "$GCTK" ] || return 1
+    raw=$(run_bounded "$GCTK" bead holds --db "$db" "${!want[@]}" 2>/dev/null) || return 1
+    out=$(printf '%s' "$raw" | scrub | jq -rs --argjson n "${#want[@]}" '
+        [ .[] | select(type == "object") ] as $r
+        | if ($r | length) != $n or any($r[]; .error != null or ((.status // "") == ""))
+          then error("a step went unanswered") else $r[] | [.id, .status] | join("\u001f") end' 2>/dev/null) || return 1
     while IFS="$SEP" read -r id st; do
         [ -n "$id" ] || continue
-        [ "$st" = "closed" ] || blocker_live["$id"]=1
+        [ "$st" = "clear" ] || step_held["$id"]=1
     done < <(printf '%s\n' "$out")
     return 0
 }
 
 # A step a worker pool can still hand out: open in its own right, carrying a
 # dispatch path — a gc.routed_to a queue consumes, or a gc.dispatch_when_ready
-# arm, as assets/scripts/dispatch-path.sh defines it — with nothing live left to
-# wait on, and not the control-dispatcher's own workflow-finalize step.
+# arm, as assets/scripts/dispatch-path.sh defines it — held by no wait the
+# store counts, and not the control-dispatcher's own workflow-finalize step.
 # Everything else is residue that no pass can reach, and a finding that calls it
 # loose spends a human on a chain that cannot move. An
 # unrouted, unarmed husk is the common shape: it sits in `bd ready` forever yet
@@ -306,13 +311,11 @@ resolve_blockers() {   # db
 # other: routed to an order, not a pool, it is closed by the control-dispatcher
 # once its siblings do, so no pool ever offers it.
 offerable() {   # window index
-    local i="$1" dep
+    local i="$1"
     [ "${w_status[$i]}" = "open" ] || return 1
     [ "${w_route[$i]}" = "1" ] || return 1
     [ "${w_final[$i]}" != "1" ] || return 1
-    for dep in ${w_dep[$i]//,/ }; do
-        [ -z "${blocker_live[$dep]:-}" ] || return 1
-    done
+    [ -z "${step_held[${w_step[$i]}]:-}" ] || return 1
     return 0
 }
 
@@ -333,10 +336,10 @@ classify_window() {   # db
     local db="$1" i n rid fl ca
     n="${#w_root[@]}"
     [ "$n" -ne 0 ] || return 0
-    unset -v root_closed root_missing window_seen blocker_live
-    declare -gA root_closed=() root_missing=() window_seen=() blocker_live=()
+    unset -v root_closed root_missing window_seen step_held
+    declare -gA root_closed=() root_missing=() window_seen=() step_held=()
     flush_batch "$db" || return 1
-    resolve_blockers "$db" || return 1
+    resolve_holds "$db" || return 1
     i=0
     while [ "$i" -lt "$n" ]; do
         rid="${w_root[$i]}"
@@ -354,7 +357,7 @@ classify_window() {   # db
         fi
         i=$((i + 1))
     done
-    w_root=(); w_step=(); w_oc=(); w_stale=(); w_ua=(); w_ref=(); w_status=(); w_dep=(); w_route=(); w_final=()
+    w_root=(); w_step=(); w_oc=(); w_stale=(); w_ua=(); w_ref=(); w_status=(); w_route=(); w_final=()
     return 0
 }
 
@@ -381,21 +384,21 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         continue
     fi
 
-    unset -v root_closed root_missing window_seen blocker_live f_count f_steps f_extra
-    declare -A root_closed=() root_missing=() window_seen=() blocker_live=()
+    unset -v root_closed root_missing window_seen step_held f_count f_steps f_extra
+    declare -A root_closed=() root_missing=() window_seen=() step_held=()
     declare -A f_count=() f_steps=() f_extra=()
     batch=(); w_root=(); w_step=(); w_oc=(); w_stale=(); w_ua=(); w_ref=()
-    w_status=(); w_dep=(); w_route=(); w_final=()
+    w_status=(); w_route=(); w_final=()
     resolve_ok=1; probe_rc=""; seen_any=0
 
-    while IFS="$SEP" read -r rid sid oc stale ua ref st dep route final; do
+    while IFS="$SEP" read -r rid sid oc stale ua ref st route final; do
         case "$rid" in "$END") probe_rc="$sid"; continue ;; esac
         [ -n "$sid" ] || continue
         seen_any=1
         [ -n "$rid" ] || continue
         w_root+=("$rid"); w_step+=("$sid"); w_oc+=("$oc")
         w_stale+=("$stale"); w_ua+=("$ua"); w_ref+=("$ref")
-        w_status+=("$st"); w_dep+=("$dep"); w_route+=("$route"); w_final+=("$final")
+        w_status+=("$st"); w_route+=("$route"); w_final+=("$final")
         if [ -z "${window_seen[$rid]:-}" ]; then window_seen["$rid"]=1; batch+=("$rid"); fi
         if [ "${#w_root[@]}" -ge "$CHUNK" ]; then
             classify_window "$db" || { resolve_ok=0; break; }
@@ -406,7 +409,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     # resolution verdict is answered first — otherwise an unread trailer would
     # report the failure against the step listing, which was fine.
     if [ "$resolve_ok" -ne 1 ] || ! classify_window "$db"; then
-        warnings+=("$label: could not resolve molecule roots or step blockers in $db — this store was NOT checked")
+        warnings+=("$label: could not resolve molecule roots or what holds their steps in $db — this store was NOT checked")
         continue
     fi
     if ! stream_ok "$probe_rc"; then
@@ -431,10 +434,10 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         sids=$(printf '%s\n' ${f_steps[$key]} | LC_ALL=C sort | paste -sd',' - | sed 's/,/, /g')
         case "$cls" in
             reopened) errors+=("$label: molecule $rid is CLOSED (closed_at=${ex:-<unset>}) yet $count step(s) are offerable AND already carry gc.outcome — $sids. They completed and were RESET; the pool re-offers each one against a dead molecule.") ;;
-            stranded) errors+=("$label: molecule $rid is CLOSED (closed_at=${ex:-<unset>}) yet $count step(s) never closed — $sids. The molecule finalized around them; each is open, routed, with every blocker closed, so the pool can still offer them.") ;;
-            inert)    notes+=("$label: molecule $rid is CLOSED (closed_at=${ex:-<unset>}) with $count non-terminal step(s) — $sids. Each is parked, waiting on a live blocker, or carries no dispatch path (unrouted and unarmed), so no pool can offer them: residue to sweep, not a strand.") ;;
+            stranded) errors+=("$label: molecule $rid is CLOSED (closed_at=${ex:-<unset>}) yet $count step(s) never closed — $sids. The molecule finalized around them; each is open, routed and held by no wait, so the pool can still offer them.") ;;
+            inert)    notes+=("$label: molecule $rid is CLOSED (closed_at=${ex:-<unset>}) with $count non-terminal step(s) — $sids. Each is parked, held by a wait the store counts, or carries no dispatch path (unrouted and unarmed), so no pool can offer them: residue to sweep, not a strand.") ;;
             stall)    warnings+=("$label: molecule $rid is OPEN but $count of its open step(s), routed to a pool, have not been touched in over ${STALL_HOURS}h — $sids (last update $ex). The frontier is stalled: a worker pool is routed to them, yet nothing is claiming or advancing this workflow.") ;;
-            stall_inert) notes+=("$label: molecule $rid is OPEN with $count stale step(s) no pool can advance — $sids. Each is unrouted, held by a still-live dependency, or is the control-dispatcher's finalize step: residue, not a stalled frontier.") ;;
+            stall_inert) notes+=("$label: molecule $rid is OPEN with $count stale step(s) no pool can advance — $sids. Each is unrouted, held by a wait the store counts, or is the control-dispatcher's finalize step: residue, not a stalled frontier.") ;;
             settle)   notes+=("$label: molecule $rid closed within the ${GRACE}s settle window and still has $count non-terminal step(s) ($sids) — finalize in progress, not a strand") ;;
             orphan)   notes+=("$label: non-terminal step(s) $sids name root $rid, which resolves nowhere in $db (gc.root_store_ref=${ex:-<unset>}) — a cross-store root is legitimate, a deleted one is not; reported, not judged") ;;
         esac

@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// The cli suites drive the lifecycle and pr-status gathering paths through a
+// The cli suites drive the lifecycle and pr status gathering paths through a
 // stubbed `gc` on PATH — the same `gc bd` seam the shell acceptance exercises.
 // GC_NO_API=1 keeps the read seam on that subprocess path, so the stub answers
 // rather than a live supervisor the ambient session happens to point at; the

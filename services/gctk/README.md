@@ -3,20 +3,22 @@
 `gctk` is gc-toolkit's command-line interface, built as one Go binary: the
 documented, structured surface through which agents act on a city. Agents are
 its users. A person can run any command and it should make sense, but no
-command is shaped for ad-hoc human use. A command's usage text and its code's
-doc comments state what it does and how; this README is the map to them.
+command is shaped for ad-hoc human use. The command tree is cobra's, and a
+command's generated help (`gctk <noun> <verb> --help`) and its code's doc
+comments state what it does and how; this README is the map to them.
 
-gctk links no beads library: it reaches beads through `gc bd` and the
-supervisor's API (`internal/gcbd`).
+gctk links no beads library: its store adapter (`internal/gcbd`) reaches beads
+through `gc bd` and the supervisor's API.
 
 ## Commands
 
 | Command | What it does | Documented in |
 |---|---|---|
+| `bead holds` | what holds each bead named, from one read of the store: one status (blocked, held, unjudged or clear) with the waits behind it and whether each is the bead's own or an ancestor's, its own pending waits and when the last landed, why it is in flight, its arm, and its wait edges into another store, one JSON object per line, read from the store `--db` names or the one gc routes the first bead to | `gctk bead holds --help`, `internal/cli/bead.go`, `waits` |
 | `epic` | actions taken on an epic: filing one with its contract, each field in its own key, refused when the epic has no hypothesis and its parent is not an epic | `gctk epic --help`, `internal/cli/epic.go` |
-| `lifecycle` | anchor lifecycle transitions over the state machine `lifecycle/lifecycle.toml` declares | `internal/cli/lifecycle.go`, `internal/lifecycle` |
+| `lifecycle` | anchor lifecycle transitions over the state machine `lifecycle/lifecycle.toml` declares. It parses its own verbs and flags | `gctk lifecycle`, `internal/cli/lifecycle.go`, `internal/lifecycle` |
 | `merge` | arm 2 of the merge cadence, the single writer of merged truth | `internal/cli/merge.go` |
-| `pr-status` | a PR's status (working, merging, needs-review or needs-attention), the one derivation the `status:` label and the helm board share, and the open human gates that hold it, which `gc-helm engage` offers | `internal/cli/prstatus.go`, `prstatus` |
+| `pr status` | a PR's status (working, merging, needs-review or needs-attention), the one derivation the `status:` label and the helm board share, and the open human gates that hold it, which `gc-helm engage` offers | `gctk pr status --help`, `internal/cli/prstatus.go`, `prstatus` |
 | `rig` | actions taken on the rig: running its checks and recording each result against the commit | `gctk rig --help`, `internal/cli/rig.go`, `internal/rig` |
 | `session` | actions taken on a session: giving it a title its Gas City record and its terminal both show, made of the bead it is about (`--subject`), the pull request it is about (`--pr`) and its topic (`--topic`). A Claude Code or Codex terminal takes the title at the session's next boundary, a few seconds after the turn ends | `gctk session --help`, `internal/cli/session.go` |
 | `version` | the revision the binary was built from | `cmd/gctk` |
@@ -24,8 +26,8 @@ supervisor's API (`internal/gcbd`).
 Logic gctk does not hold runs as shell scripts. Among them are the rest of the
 merge cadence (`gate-ensure`, `pr-open`, `pr-facts`, `signoff`) and
 `refinery-reconcile.sh`, the driver that runs the cadence's arms.
-`specs/2026-08-review-gates/gctk-promotion.md` records how the merge cadence
-moves into gctk.
+[docs/gctk-architecture.md](../../docs/gctk-architecture.md) states which pack
+logic moves into gctk and the shape it takes there.
 
 ## Bridges
 
@@ -45,9 +47,9 @@ until that order's first build, and a city whose build failed keeps serving the
 last good binary.
 
 `assets/scripts/pr-status-label.sh` writes the `status:` and `held:` labels in
-shell and takes their values from `gctk pr-status derive`. It resolves the
+shell and takes their values from `gctk pr status`. It resolves the
 binary the same way, and when there is none, or the binary is too old to carry
-`pr-status` or its `--json`, it leaves the labels unchanged. `gc-helm.sh` engage
+`pr status` or its `--json`, it leaves the labels unchanged. `gc-helm.sh` engage
 lists what holds a bead from the reasons in the same verb's `--json` answer, and
 the helm board imports the package behind it, `prstatus`, so the labels, engage
 and the board read one definition of what holds a PR.
@@ -84,11 +86,11 @@ worktree of the clone shares and which outlives any one of them:
 | `gc-rig-checks/test/trees/<tree>.json` | the full-suite test pass every commit with that tree reads |
 
 `--publish-bead <bead>` copies a record onto the bead's `rig_check.<check>` key,
-which `lifecycle/lifecycle.toml` registers. A record says what a command did at
+a key rig declares through the ledger, in one write that nothing reads back. A record says what a command did at
 a commit and never whose failure it is: a caller that judges a recorded fail
 pre-existing writes that judgment on a bead with
-`assets/scripts/rig-check-pre-existing.sh`. `gctk rig --help` states the flags,
-which record answers a call, and the exit codes. `specs/tk-1hazlo2/rig-checks.md`
+`assets/scripts/rig-check-pre-existing.sh`. `gctk rig <check> --help` states the
+flags, which record answers a call, and the exit codes. `specs/tk-1hazlo2/rig-checks.md`
 records the design and its measured cost.
 
 ## Build and deploy
@@ -105,20 +107,29 @@ built from sources other than the checkout's.
 ## Layout
 
 ```
-cmd/gctk/            dispatch and `version`
-internal/cli/        the commands, each with its usage text, flags and exit codes
+cmd/gctk/            the binary's entry point, and the revision `version` prints
+internal/cli/        the command tree, each command with its help, flags and exit codes
 internal/lifecycle/  the lifecycle state machine, which lifecycle/lifecycle.toml declares
-internal/gcbd/       bead reads and writes, through `gc bd` and the supervisor API
-internal/daemon/     finding the supervisor API the gcbd reads go through
+internal/ledger/     typed bead records: each key's declaration, one write per act
+                     whose exit decides, and snapshots
+internal/gcbd/       the store adapter: bead reads and writes through `gc bd` and the
+                     supervisor API, the store's listing, and its blocked set
+internal/gcbd/fake/  the store adapter's in-memory fake, for the domains' tests
+internal/daemon/     finding the supervisor API the store adapter's reads go through
 internal/git/        the git subprocess seam: one git command per call, in a named directory
 internal/rig/        rig's runner and its commit-keyed record store
 prstatus/            the PR status derivation, exported for the helm board
+waits/               what holds a bead, from one snapshot: the rule by where the work is, the
+                     in-flight test, the run link's copy and the keys it reads, read-only
+key-registry.json    every declared key, generated from the declarations
 ```
 
 ## Running the tests
 
 ```bash
 cd services/gctk && go test ./...          # every package
+cd services/gctk && go test ./cmd/gctk -run TestKeyRegistry -update   # write key-registry.json again
+cd services/gctk && GCTK_STORE_ACCEPTANCE=1 go test ./internal/gcbd -run TestStoreAcceptance -v   # the city's bd on a scratch store
 bash assets/scripts/lifecycle.test.sh      # lifecycle through its bridge
 bash assets/scripts/merge.test.sh          # merge through its bridge
 bash assets/scripts/epic.test.sh           # epic through its bridge

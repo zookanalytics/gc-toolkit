@@ -6742,7 +6742,7 @@ eq "$(meta RC10 merge_result)" "retargeted" "the full pass retargets on the same
 # records the new posture value, and --route-comments-only routes the feedback
 # into live work on the anchor. Each re-derives the label there, so the PR list
 # shows the review without waiting for the full pass at the tail. These cases run
-# the real writer over the real derivation (gctk pr-status, from the binary
+# the real writer over the real derivation (gctk pr status, from the binary
 # harness_build_gctk built), so the label read back off the PR fixture is what
 # the shared code path decided. The scripts dir carries no label writer, so
 # elsewhere in this file pr-facts.sh's best-effort label call finds nothing to

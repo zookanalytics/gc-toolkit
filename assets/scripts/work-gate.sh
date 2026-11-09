@@ -8,14 +8,14 @@
 # route left on the bead. When both fire, two workers set up the same branch and
 # one silently destroys the other's commits. So before the workspace is touched,
 # the bead must be readable, not parked, not in flight under another live owner
-# or in another live run, not waiting on a blocker, and not finished.
+# or in another live run, not held by a wait, and not finished.
 #
 # Every refusal ends the run through decline.sh, and they split by whether a
 # person has a decision to make:
 #   * nobody decides when the bead is finished (closed, handed off, or carrying
 #     a merge_result) or another live run is building this same bead;
-#   * nobody decides when the bead waits on open blockers: it waits through a
-#     blocks edge and an armed re-sling;
+#   * nobody decides when a wait holds the bead, by the answer of
+#     `gctk bead holds`: it waits through that wait and an armed re-sling;
 #   * a person decides when the bead is parked, because nothing re-slings it when
 #     it is released;
 #   * a bead the store does not have cannot be blocked, so it files a patrol
@@ -37,8 +37,8 @@
 # reach alike from the same rows, with nothing written. A claimant with no run of
 # its own refuses any of them. Another formula's run is no duplicate, as it is none
 # to `gc sling`. A sibling on the branch is met at workspace-setup's checkout, which
-# no two runs can race past. Blockers are read first, because a bead that must wait
-# has no business meeting another run.
+# no two runs can race past. What holds the bead is read first, because a bead that
+# must wait has no business meeting another run.
 #
 # exit: 0 this run builds the bead · 1 it does not, and decline.sh or the step's
 # retry has what follows · 2 usage
@@ -178,19 +178,45 @@ case "$STATUS" in
     exit 1 ;;
 esac
 
-# `gc sling --on` pours at once and reads no blocks edges, so a blocked bead
-# reaches a polecat as an offered claim. The first open blocker carries the wait,
-# and the others hold the bead out of bd ready the same way.
-OPEN_BLOCKERS=$(printf '%s' "$WORK_ROW" | jq -r '[.[0].dependencies[]? | select((.dependency_type == "blocks") and (.status != "closed")) | .id] | join(" ")')
-if [ -n "$OPEN_BLOCKERS" ]; then
-  if "$SCRIPT_DIR/await-ruling.sh" "$WORK_ID" --blocked-by "${OPEN_BLOCKERS%% *}" --formula "$FORMULA"; then
-    gc bd update "$WORK_ID" --append-notes "bd-ready guard: refused to build $WORK_ID at load-context; open blocks-blocker(s): $OPEN_BLOCKERS. Run cancelled; a re-sling is armed to fire once the blocker(s) close." </dev/null >/dev/null 2>&1 \
-      || echo "$PROG: The refusal note did not land on $WORK_ID; the cancel reason on this step still records it." >&2
-    "$SCRIPT_DIR/decline.sh" --step "$STEP" --reason "work bead $WORK_ID has open blocks-blocker(s) $OPEN_BLOCKERS; a re-sling is armed for when they close"
+# `gc sling --on` pours at once and reads no edge, so a held bead reaches a
+# polecat as an offered claim. What holds it is the answer of `gctk bead holds`,
+# the pack's one rule (docs/gctk-architecture.md, "The bead holds contract"):
+# work that has not started is held by a wait of its own or one on a parent-child
+# ancestor, and work in flight only by its own waits. A fresh dispatch reaches
+# here unclaimed and with no branch, and this run's own load-context step is
+# still open, so the answer reads it as not started and a parked ancestor holds
+# it. A rework child carries its branch and a claimant with no poured workflow
+# its claim, so each reads in flight. The store already keeps the wait, so the
+# re-sling is armed with no new edge, and it fires once nothing holds the bead.
+# A read with no answer is no fact about the work, so the step goes back to the
+# pool.
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+[ -x "$GCTK" ] || work_outage "could not read what holds work bead $WORK_ID: no gctk binary at '$GCTK'"
+# The answer as one line: clear, or the status, the bead its first wait is on and
+# what holds it, tab-separated.
+# shellcheck disable=SC2016  # jq source; its $names are jq's
+HOLD=$("$GCTK" bead holds "$WORK_ID" </dev/null 2>/dev/null | jq -r --arg id "$WORK_ID" '
+  select(type == "object" and .id == $id)
+  | (.waits // []) as $w | ($w | map(.id | tostring) | join(", ")) as $on
+  | if .error != null then empty
+    elif .status == "clear" then "clear"
+    elif ($w | length) == 0 then empty
+    elif .status == "blocked" then "blocked\t\($w[0].id)\theld by its own wait on \($on)"
+    elif .status == "held" then "held\t\($w[0].id)\theld through its ancestor \($w[0].ancestor), which waits on \($on), and its work has not started"
+    elif .status == "unjudged" then "unjudged\t\($w[0].id)\theld by its own waits-for edge onto \($on), which the store cannot judge yet"
+    else empty end' 2>/dev/null | head -n 1)
+[ -n "$HOLD" ] || work_outage "could not read what holds work bead $WORK_ID (gctk bead holds gave no answer for it)"
+if [ "$HOLD" != clear ]; then
+  IFS="$(printf '\t')" read -r HOLD_STATUS HOLD_ON HOLD_WHAT <<< "$HOLD"
+  if "$SCRIPT_DIR/await-ruling.sh" "$WORK_ID" --held-by "$HOLD_ON" --formula "$FORMULA"; then
+    note "Held work bead; run cancelled, re-sling armed" "$HOLD_WHAT (gctk bead holds: $HOLD_STATUS). A re-sling is armed to fire once nothing holds it"
+    "$SCRIPT_DIR/decline.sh" --step "$STEP" --reason "work bead $WORK_ID is $HOLD_WHAT ($HOLD_STATUS); a re-sling is armed for when nothing holds it"
   else
-    "$SCRIPT_DIR/decline.sh" --step "$STEP" --reason "work bead $WORK_ID has open blocks-blocker(s) $OPEN_BLOCKERS" \
+    "$SCRIPT_DIR/decline.sh" --step "$STEP" --reason "work bead $WORK_ID is $HOLD_WHAT ($HOLD_STATUS)" \
       --subject "$WORK_ID" --key polecat-blocked-work \
-      --message "Formula-slung $WORK_ID reached a polecat while blocked by open blocks-dep(s): $OPEN_BLOCKERS. Its run is cancelled and no workspace was touched. The re-sling could not be armed; re-sling this work once the blocker(s) close."
+      --message "Formula-slung $WORK_ID reached a polecat while $HOLD_WHAT (gctk bead holds: $HOLD_STATUS). Its run is cancelled and no workspace was touched. The re-sling could not be armed; re-sling this work once nothing holds it, when gctk bead holds $WORK_ID answers clear."
   fi
   exit 1
 fi

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Hermetic test for doctor/check-step-terminal (I8). Stub gc/bd only.
+# Hermetic test for doctor/check-step-terminal (I8). Stub gc/bd only, and the
+# gctk built from this checkout, which reads the same stub store.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECK="$HERE/run.sh"
@@ -18,16 +19,31 @@ cat > "$TMP/rigs.json" <<EOF
 {"rigs":[{"name":"alpha","path":"$TMP/alpha"}]}
 EOF
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
+# A read the gctk under test makes answers from the store its --db names, the
+# step listing and the by-id fixture together, through the seam
+# holds-store.stub.sh keeps. BD_FAIL_STORE fails it for its store, and
+# HOLDS_READ_FAIL fails every one.
+if [ -n "${HOLDS_STUB_READ:-}" ] && [ "${1:-}" = bd ]; then
+  shift
+  hdb=""; [ "${1:-}" = --db ] && hdb="${2:-}"
+  hname=$(basename "$(dirname "$hdb")")
+  [ "$hname" = "${BD_FAIL_STORE:-}" ] && exit 3
+  [ -z "${HOLDS_READ_FAIL:-}" ] || { echo "gc bd: simulated read failure" >&2; exit 3; }
+  hs="$STORES/.holds-$hname.json"
+  { for hf in "$STORES/$hname.steps.json" "$STORES/$hname.roots.json"; do [ -s "$hf" ] && cat "$hf"; echo; done; } \
+    | jq -s -c '[ .[] | arrays | .[] ] | unique_by(.id)' > "$hs" 2>/dev/null || echo '[]' > "$hs"
+  HOLDS_STORE="$hs" exec "${HOLDS_STUB:?}" answer "$@"
+fi
 case "$1 $2" in
   "rig list") rc="${RIGS_RC:-0}"; [ "$rc" -eq 0 ] || exit "$rc"; cat "$RIGS_JSON" ;;
   "bd "*)    shift; VIA_GC_BD=1 exec "$(dirname "$0")/bd" "$@" ;;
   *) exit 0 ;;
 esac
 GC
-# Models the surface the check actually calls: the step listing, the id-scoped
+# Models the surface the check calls on its own: the step listing, the id-scoped
 # lookup (which DROPS ids it cannot resolve, exactly as bd does, so the check's
 # own id-set comparison is what has to catch them), the --status pushdown, and
-# `bd count`. Every --id argument is logged so the argv bound can be asserted
+# `bd count`. What holds a step is gctk's read, answered by the gc stub above. Every --id argument is logged so the argv bound can be asserted
 # rather than assumed, BD_STATUS_LOG records what the listing asked the store
 # for, and BD_STEPS_BODY substitutes an arbitrary payload for the listing so the
 # shapes a reader must refuse can be handed to it.
@@ -47,10 +63,6 @@ steps_f="$STORES/$name.steps.json"
 empty='{"issues":[],"meta":{"count":0},"schema_version":1}'
 if [ -n "$ids" ]; then
   [ -n "${BD_ROOTS_FAIL:-}" ] && exit 3
-  # The only id lookup carrying no --status is the blocker probe, so long as
-  # every root in the fixture resolves and the short-batch detail read stays
-  # unreached. That is what lets one probe be failed while the others answer.
-  [ -n "${BD_BLOCKER_FAIL:-}" ] && [ "$cmd" = "list" ] && [ -z "$status" ] && exit 3
   [ -n "${BD_ARGV_LOG:-}" ] && printf '%s\n' "${#ids}" >> "$BD_ARGV_LOG"
   if [ "$cmd" = "count" ]; then
     [ -n "${BD_COUNT_FAIL:-}" ] && exit 3
@@ -78,6 +90,10 @@ printf ',"meta":{}}'
 BD
 chmod +x "$TMP/bin/gc" "$TMP/bin/bd"
 export PATH="$TMP/bin:$PATH" STORES="$TMP/stores"
+# What holds a step is the answer of gctk bead holds, built from this checkout.
+export HOLDS_STUB="$HERE/../../assets/scripts/holds-store.stub.sh" GC_NO_API=1
+GCTK_BIN="$("$HOLDS_STUB" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so no hold can be read"; exit 1; }
+export GCTK_BIN
 # No case here tests the check's time budget. assets/scripts/doctor-budget.test.sh
 # tests that block, every copy of it. The scale cases run the check over thousands
 # of rows, and on a loaded host one such pass takes tens of seconds. The check's
@@ -104,7 +120,7 @@ steps()  { local IFS=,; printf '[%s]' "$*" > "$TMP/stores/alpha.steps.json"; }
 # the scale cases put tens of thousands of rows in the listing, and a stub that
 # reparsed them on every id lookup would dominate the RSS the check is measured
 # by. Every bead an id lookup must see is declared here — a molecule root, and
-# any bead some step is blocked by.
+# any bead some step is blocked by, which gctk's read sees beside the steps.
 roots()  { local IFS=,; printf '[%s]' "$*" > "$TMP/stores/alpha.roots.json"; }
 clear_fixtures() { rm -f "$TMP/stores/alpha.steps.json" "$TMP/stores/alpha.roots.json"; }
 
@@ -415,16 +431,20 @@ OUT=$(run_check); RC=$?
 eq "$RC" "2" "a step whose blocker no longer exists is offerable, so an ERROR"
 clear_fixtures
 
-# --- 23. an unreadable blocker probe warns, never passes ---------------------------
-# Offerability is part of the verdict now, so a blocker lookup that dies has to
-# skip the store like every other failed probe. A partial blocker map would read
-# held steps as loose and escalate them.
+# --- 23. an unreadable hold read warns, never passes ------------------------------
+# Offerability is part of the verdict, so a read of what holds the steps that
+# dies has to skip the store like every other failed probe. A partial map would
+# read held steps as loose and escalate them.
 steps "$(step s-x1 r-x '' "$(blocks s-x0)")"
 roots "{\"id\":\"r-x\",\"status\":\"closed\",\"closed_at\":\"$OLD\"}" \
       "{\"id\":\"s-x0\",\"status\":\"open\"}"
-OUT=$(BD_BLOCKER_FAIL=1 run_check); RC=$?
-eq "$RC" "1" "a failed blocker lookup warns — an unproven blocker map must not pass"
-has "$OUT" "NOT checked" "the failed blocker probe says the store was skipped"
+OUT=$(HOLDS_READ_FAIL=1 run_check); RC=$?
+eq "$RC" "1" "a failed hold read warns — an unproven map of what holds the steps must not pass"
+has "$OUT" "could not resolve molecule roots or what holds their steps" "and names the probe that failed"
+has "$OUT" "NOT checked" "the failed hold read says the store was skipped"
+OUT=$(GCTK_BIN="$TMP/no-gctk" run_check); RC=$?
+eq "$RC" "1" "a gctk binary that is not there warns too"
+has "$OUT" "NOT checked" "and the store is skipped rather than judged"
 clear_fixtures
 
 # --- 24. the listing selector asks for the parked frontier -------------------------
@@ -546,9 +566,9 @@ clear_fixtures
 # The open-root path reads offerable() too, and offerable() calls a step held by
 # a live dependency unreachable. A stale, routed open step whose predecessor is
 # still in progress is an ordinary graph step waiting its turn, not a frontier
-# nobody advances — inert residue, a note. resolve_blockers must probe the open
-# root's blockers for this: an empty blocker map would read the step offerable
-# and escalate every step queued behind a live sibling as a stall.
+# nobody advances — inert residue, a note. resolve_holds must read the open
+# root's stale steps for this: an empty map would read the step offerable and
+# escalate every step queued behind a live sibling as a stall.
 steps "$(step s-lb1 r-lb "$ROUTE" ",\"updated_at\":\"$STALE\"$(blocks live-b1)")"
 roots "{\"id\":\"r-lb\",\"status\":\"open\"}" \
       "{\"id\":\"live-b1\",\"status\":\"in_progress\"}"
@@ -566,6 +586,50 @@ roots "{\"id\":\"r-lb\",\"status\":\"open\"}" \
 OUT=$(run_check); RC=$?
 eq "$RC" "1" "the same step with its blocker CLOSED is a stall WARNING again"
 has "$OUT" "s-lb1" "the now-offerable frontier is named in the warning"
+clear_fixtures
+
+# --- 34. the store's rule decides what holds a step --------------------------
+# What holds a step is the store's own answer, through gctk bead holds. A pinned
+# blocker holds nothing, so the step behind it is offerable.
+steps "$(step s-pn1 r-pn "$ROUTE" "$(blocks pin-1)")"
+roots "{\"id\":\"r-pn\",\"status\":\"closed\",\"closed_at\":\"$OLD\"}" \
+      "{\"id\":\"pin-1\",\"status\":\"pinned\"}"
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a step whose only blocker is pinned is offerable, so an ERROR"
+has "$OUT" "s-pn1" "and the step is named"
+clear_fixtures
+# A conditional-blocks edge onto a live bead holds, as a blocks edge does.
+steps '{"id":"s-cb1","status":"open","dependencies":[{"type":"conditional-blocks","depends_on_id":"live-c1"}],"metadata":{"gc.root_bead_id":"r-cb","gc.routed_to":"alpha/gc-toolkit.polecat"}}'
+roots "{\"id\":\"r-cb\",\"status\":\"closed\",\"closed_at\":\"$OLD\"}" \
+      "{\"id\":\"live-c1\",\"status\":\"open\"}"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a step held by a conditional-blocks edge onto a live bead is inert, not stranded"
+has "$OUT" "residue to sweep, not a strand" "and is reported as a note"
+clear_fixtures
+# A waits-for edge is one the store cannot judge yet, so its step is held.
+steps '{"id":"s-wf1","status":"open","dependencies":[{"type":"waits-for","depends_on_id":"sp-1"}],"metadata":{"gc.root_bead_id":"r-wf","gc.routed_to":"alpha/gc-toolkit.polecat"}}'
+roots "{\"id\":\"r-wf\",\"status\":\"closed\",\"closed_at\":\"$OLD\"}" \
+      "{\"id\":\"sp-1\",\"status\":\"open\"}" \
+      "{\"id\":\"sp-1a\",\"status\":\"open\",\"parent\":\"sp-1\"}"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a step with a waits-for edge of its own is held, so inert"
+has "$OUT" "s-wf1" "and is named in the note"
+hasnt "$OUT" "can still offer" "nothing claims the pool can offer it"
+clear_fixtures
+# An ancestor's wait holds work not yet started, so the step under a parent the
+# store blocks is inert. With the parent's blocker closed it is offerable again.
+steps '{"id":"s-an1","status":"open","parent":"par-1","metadata":{"gc.root_bead_id":"r-an","gc.routed_to":"alpha/gc-toolkit.polecat"}}'
+roots "{\"id\":\"r-an\",\"status\":\"closed\",\"closed_at\":\"$OLD\"}" \
+      "{\"id\":\"par-1\",\"status\":\"open\"$(blocks live-p1)}" \
+      "{\"id\":\"live-p1\",\"status\":\"open\"}"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a step its parent's live wait holds is inert, not stranded"
+has "$OUT" "s-an1" "and is named in the note"
+roots "{\"id\":\"r-an\",\"status\":\"closed\",\"closed_at\":\"$OLD\"}" \
+      "{\"id\":\"par-1\",\"status\":\"open\"$(blocks live-p1)}" \
+      "{\"id\":\"live-p1\",\"status\":\"closed\",\"closed_at\":\"$OLD\"}"
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "the same step with its parent's blocker closed is offerable, so an ERROR"
 clear_fixtures
 
 echo

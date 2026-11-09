@@ -184,7 +184,7 @@ conv_row() {
        then {dependencies:([ $tracked[] | {id:., dependency_type:"tracks"} ] + [ $r[] | {id:., dependency_type:"replies-to"} ])}
        else {dependencies:([ $tracked[] | {issue_id:$c, depends_on_id:., type:"tracks"} ] + [ $r[] | {issue_id:$c, depends_on_id:., type:"replies-to"} ])} end)'
 }
-# The reads `gctk pr-status derive` makes, under the (HOLD-REAL) wrapper: a show
+# The reads `gctk pr status` makes, under the (HOLD-REAL) wrapper: a show
 # answers a row per id, its edges from $WALK_EDGES, a JSON object of each bead's
 # dependency rows, and the in-flight list answers $WALK_IN_FLIGHT, [] when unset.
 if [ -n "${STUB_WALK:-}" ] && [ "$1 ${2:-}" = "bd list" ] && case " $* " in *" anchor_bead="*) true ;; *) false ;; esac; then
@@ -1880,7 +1880,7 @@ unset LIVE_SITTINGS
 reset
 
 # --- what holds the bead -------------------------------------------------------
-# The stub answers `gctk pr-status derive --json` with $GCTK_REASONS as its
+# The stub answers `gctk pr status --json` with $GCTK_REASONS as its
 # reasons, the one list engage reads.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gctk-stub" <<'GCTK'
 printf '%s\n' "$*" >> "$STATE_DIR/gctk.calls"
