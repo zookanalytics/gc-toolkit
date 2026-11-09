@@ -2064,9 +2064,10 @@ func hasLiveBlocker(blockers []gcbd.Bead) bool {
 // PR's held: gate value and the board's row name the gate. A conversation that
 // holds the PR's merge is a person's to close, so blocker-holder.sh counts it as
 // neither an actor's nor stuck, and the PR's held: blocked value and the board's
-// row name it. When only a person holds the blockers, no verdict the pass can write moves them, and it replaces
-// only a blocker verdict recorded earlier, whose bead may have closed since and
-// which nothing else would replace while the person's blocker stands.
+// row name it. When only a person holds the blockers, no verdict the pass can
+// write moves them, and it replaces only a blocker verdict recorded earlier,
+// whose bead may have closed since and which nothing else would replace while
+// the person's blocker stands.
 func (m *merger) recordBlockerVerdict(anchor *gcbd.Bead, num, headOid, route string, blockers []gcbd.Bead) {
 	kind, beads, ok := m.blockerHolder(anchor.ID)
 	var stuck []string

@@ -12,12 +12,14 @@
 #                        (prstatus.HoldingGates)
 #   none                 no live blocker, or only blockers a person holds
 #
-# A person holds a blocker routed to a person (gc.routed_to=human), a human
-# gate, by bd-lib.sh's rule (human_gate), and a conversation: the gate is the
-# hold of the person who must clear it, and a conversation on an open PR holds
-# the PR's merge until a person's ruling or dismissal closes it, so neither is an
-# actor's nor stuck. A blocker reads as a conversation by its row, a task whose
-# assignee is `human` or the alias that names its own id (conversation.sh's
+# A person holds a blocker routed to a person (gc.routed_to=human), and a human
+# gate, by bd-lib.sh's rule (human_gate): the gate is the hold of the person who
+# must clear it, so it is neither an actor's nor stuck.
+#
+# A person holds a conversation as well. One on an open PR holds the PR's merge
+# until a person's ruling or dismissal closes it, so it is neither an actor's nor
+# stuck. A blocker reads as a conversation by its row, a task whose assignee is
+# `human` or the alias that names its own id (conversation.sh's
 # conversation_alias), since the listing carries no edge of the blocker's own.
 #
 # A live blocker is one whose status is open, in_progress, blocked, deferred,
@@ -88,9 +90,9 @@ marks=$(printf '%s' "$rows" | jq -r --arg live "$LIVE_STATUSES" "$HUMAN_GATE_JQ$
   | select($ls | index($st))
   | (((.metadata // {})["gc.routed_to"] // "") | tostring) as $r
   | ((.assignee // "") | tostring) as $a
+  | select(((.issue_type // "") == "task" and ($a == "human" or conversation_alias)) | not)
   | (((.metadata // {})["gc.dispatch_when_ready"] // "") | tostring) as $armed
   | select($r != "human" and (human_gate | not))
-  | select(((.issue_type // "") == "task" and ($a == "human" or conversation_alias)) | not)
   | [ ((.id // "") | tostring),
       (if $r != "" then "routed to " + $r
        elif $a != "" and $a != "human" then "claimed by " + $a

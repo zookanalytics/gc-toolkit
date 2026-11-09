@@ -364,9 +364,8 @@ type Tile struct {
 	// it, an acceptance an earlier Accept left unfinished keeps it, or an open
 	// conversation tracks it. Only the first two hold its work ([WorkHeld]); a
 	// conversation holds none, and one on an open PR holds only the PR's merge.
-	// A held anchor is never stranded, because the
-	// question or the conversation IS the attention it would be flagged for
-	// lacking.
+	// A held anchor is never stranded, because the question or the conversation
+	// IS the attention it would be flagged for lacking.
 	Held bool `json:"held"`
 	// SittingState refines Held. It is the roll-up of the [Sitting.State] of the
 	// sittings on this row, so the row and the record cannot disagree:
@@ -688,9 +687,9 @@ type Tile struct {
 	// acceptance an earlier Accept left unfinished keeps it. A Held row where it
 	// is false only has a conversation on it, which holds no work, so the work
 	// moves while the conversation waits for the operator, and only an open PR's
-	// merge waits for the conversation to close. False on
-	// every row that is not held. It is derived here rather than in the browser,
-	// so each surface tells the two kinds of held row apart from one reading.
+	// merge waits for the conversation to close. False on every row that is not
+	// held. It is derived here rather than in the browser, so each surface tells
+	// the two kinds of held row apart from one reading.
 	WorkHeld bool `json:"work_held"`
 }
 

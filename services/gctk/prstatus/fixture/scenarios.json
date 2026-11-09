@@ -209,25 +209,6 @@
     ]
   },
   {
-    "name": "a conversation tracking the anchor with no edge onto it, as once its sitting lifted the hold",
-    "anchor": "tk-a",
-    "want": {"status": "merging", "held": []},
-    "beads": [
-      {"id": "tk-a", "status": "open", "metadata": {"merge_result": "pull_request", "pr_posture": "approved@abc@2026-10-27T00:00:00Z", "pr.machine": "settled@abc@2026-10-27T00:00:00Z"}},
-      {"id": "tk-c", "status": "open", "issue_type": "task", "assignee": "human", "title": "what about this?", "tracks": ["tk-a"]}
-    ]
-  },
-  {
-    "name": "a conversation tracking the rework the anchor waits on",
-    "anchor": "tk-a",
-    "want": {"status": "working", "held": []},
-    "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"], "metadata": {"merge_result": "pull_request", "pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
-      {"id": "tk-a.rw", "status": "open", "issue_type": "task", "metadata": {"task_kind": "rework", "anchor_bead": "tk-a"}},
-      {"id": "tk-c", "status": "open", "issue_type": "task", "assignee": "human", "title": "what about this?", "tracks": ["tk-a.rw"]}
-    ]
-  },
-  {
     "name": "a conversation a sitting holds on the anchor, which holds its merge until it closes",
     "anchor": "tk-a",
     "want": {"status": "needs-attention", "held": ["blocked"]},
@@ -253,6 +234,25 @@
     "beads": [
       {"id": "tk-a", "status": "open", "waits_on": ["tk-c"], "metadata": {"merge_result": "pull_request", "pr_posture": "approved@abc@2026-10-27T00:00:00Z", "pr.machine": "settled@abc@2026-10-27T00:00:00Z"}},
       {"id": "tk-c", "status": "closed", "issue_type": "task", "assignee": "gc-toolkit/gc-toolkit.tk-c", "title": "should this land as built?", "tracks": ["tk-a"]}
+    ]
+  },
+  {
+    "name": "a conversation tracking the anchor with no edge onto it, as once its sitting lifted the hold",
+    "anchor": "tk-a",
+    "want": {"status": "merging", "held": []},
+    "beads": [
+      {"id": "tk-a", "status": "open", "metadata": {"merge_result": "pull_request", "pr_posture": "approved@abc@2026-10-27T00:00:00Z", "pr.machine": "settled@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-c", "status": "open", "issue_type": "task", "assignee": "human", "title": "what about this?", "tracks": ["tk-a"]}
+    ]
+  },
+  {
+    "name": "a conversation tracking the rework the anchor waits on",
+    "anchor": "tk-a",
+    "want": {"status": "working", "held": []},
+    "beads": [
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"], "metadata": {"merge_result": "pull_request", "pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a.rw", "status": "open", "issue_type": "task", "metadata": {"task_kind": "rework", "anchor_bead": "tk-a"}},
+      {"id": "tk-c", "status": "open", "issue_type": "task", "assignee": "human", "title": "what about this?", "tracks": ["tk-a.rw"]}
     ]
   },
   {
