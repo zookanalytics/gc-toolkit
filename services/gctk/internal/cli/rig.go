@@ -177,9 +177,11 @@ func checkRigOpts(verb string, o rigOpts) string {
 		}
 		return ""
 	}
+	// A mode is chosen by its value, so --check=false or --nothing-declared=false
+	// chooses none, as leaving the flag out would.
 	modes := 0
-	for _, f := range []string{"command", "nothing-declared", "check"} {
-		if o.given(f) {
+	for _, on := range []bool{o.command != "", o.nothing, o.check} {
+		if on {
 			modes++
 		}
 	}

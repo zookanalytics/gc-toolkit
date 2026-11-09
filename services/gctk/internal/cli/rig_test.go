@@ -720,6 +720,24 @@ func TestRigNothingDeclaredIsAPassThatRanNothing(t *testing.T) {
 	}
 }
 
+// TestRigAFalseModeFlagChoosesNoMode pins that a mode is chosen by its value:
+// --check=false or --nothing-declared=false is the flag left out. Beside a
+// command, the command runs and is recorded, and the false flag's own
+// exclusions do not apply. Alone, it is the usage error of a call that chooses
+// no mode (TestRigUsageErrors).
+func TestRigAFalseModeFlagChoosesNoMode(t *testing.T) {
+	f := newRigFixture(t)
+	for _, flag := range []string{"--check=false", "--nothing-declared=false"} {
+		if code, _, errs := f.call("lint", flag, "--command", countCmd("lint"), "--force"); code != 0 {
+			t.Fatalf("lint %s --command --force = %d:\n%s", flag, code, errs)
+		}
+	}
+	eqRuns(t, f.runs(), "lint", "lint")
+	if r := f.record(rig.CheckLint, f.head()); r == nil || r.Result != rig.ResultPass || r.Command != countCmd("lint") {
+		t.Fatalf("lint record = %+v, want the command's pass", r)
+	}
+}
+
 func TestRigLintAndTypecheckAreRecordedPerCommit(t *testing.T) {
 	f := newRigFixture(t)
 	for _, check := range []string{rig.CheckLint, rig.CheckTypecheck} {
@@ -895,6 +913,9 @@ func TestRigUsageErrors(t *testing.T) {
 		{"test", "--scope", "full", "--command", "true", "--nothing-declared"},
 		{"test", "--scope", "full", "--command", "true", "--check"},
 		{"test", "--nothing-declared", "--check"},
+		{"test", "--check=false"},
+		{"lint", "--nothing-declared=false"},
+		{"lint", "--check=false", "--nothing-declared=false"},
 		{"test", "--nothing-declared", "--scope", "full"},
 		{"test", "--nothing-declared", "--force"},
 		{"test", "--nothing-declared", "--timeout", "1m"},
