@@ -39,7 +39,7 @@ import (
 // they invoked.
 const prog = "lifecycle"
 
-const lifecycleUsage = `usage: gctk lifecycle transition <bead-id> --to <state> [--expect <state>] [--set k=v]... [--set-dated k=<value>@<oid>]... [--unset k]... [--assignee <a>] [--route <rig>/<agent>|human] [--takeaway <text>] [--close] [--append-notes <text>] [--json]
+const lifecycleUsage = `usage: gctk lifecycle transition <bead-id> --to <state> [--expect <state>] [--set k=v]... [--set-dated k=<value>@<oid>]... [--unset k]... [--assignee <a>] [--route <rig>/<agent>] [--takeaway <text>] [--close] [--append-notes <text>] [--json]
        gctk lifecycle state <bead-id>
        gctk lifecycle reopen <bead-id>   # repair a bead closed on a non-closed merge_result
        gctk lifecycle --dump-machine     # the declared machine, for the lifecycle.toml drift test
@@ -72,9 +72,7 @@ func Lifecycle(args []string, stdout, stderr io.Writer) int {
 // the comparison has to read both without a TOML parser on either side.
 func dumpMachine(stdout io.Writer) int {
 	fmt.Fprintf(stdout, "states %s\n", strings.Join(lifecycle.States, " "))
-	fmt.Fprintf(stdout, "human_states %s\n", strings.Join(lifecycle.HumanStates, " "))
 	fmt.Fprintf(stdout, "detached_states %s\n", strings.Join(lifecycle.DetachedStates, " "))
-	fmt.Fprintf(stdout, "park_route %s\n", lifecycle.ParkRoute)
 	fmt.Fprintf(stdout, "closed_states %s\n", strings.Join(lifecycle.ClosedStates, " "))
 	exits := make([]string, 0, len(lifecycle.ExitSets))
 	for _, e := range lifecycle.ExitSets {
@@ -362,9 +360,9 @@ func squeezeSpace(s string) string {
 // returning the text to write or the lines that refuse it.
 //
 // The flag's presence is not a takeaway: whitespace normalizes to nothing, and
-// an empty one writes the exact row the park guard refuses — the board renders a
-// person-routed row carrying no takeaway as having no question recorded.
-// gc-helm.sh, the other writer of that cell, refuses it the same way.
+// an empty one would overwrite the headline a bead carries with nothing, under
+// a fresh date and author. gc-helm.sh, the other writer of that cell, refuses
+// it the same way.
 //
 // Over the cap it REJECTS rather than truncating: only the author knows which
 // clause is the headline. The length is CODEPOINTS, which is what both renderers
@@ -374,7 +372,7 @@ func normalizeTakeaway(s string) (string, []string) {
 	s = squeezeSpace(s)
 	if s == "" {
 		return "", []string{
-			"--takeaway is empty; it renders as the board's NEEDS cell, and a row with an empty one reads as 'routed to you — no question recorded'",
+			"--takeaway is empty; it renders as the board's NEEDS cell, and an empty one tells the operator nothing",
 			"give it the one sentence the operator needs, or drop the flag.",
 		}
 	}
@@ -554,29 +552,15 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "%s: --keep-route and --route ask for opposite things: --keep-route leaves gc.routed_to as the bead carries it\n", prog)
 		return 1
 	}
-	// A human state is a bead waiting on a person, so it must name one. An
-	// omitted --route takes the default; an EMPTY one is the write that leaves a
-	// bead waiting on nobody — no queue holds it and no invariant can name it.
-	// --keep-route takes no default: it records on a bead already resting in the
-	// state, whose route that state's entry decided.
-	if lifecycle.IsHumanState(o.to) && !o.keepRoute {
-		if !o.routeSet {
-			o.route, o.routeSet = lifecycle.ParkRoute, true
-		}
-		if o.route == "" {
-			fmt.Fprintf(stderr, "%s: --to %s requires a route — '%s' is a human state (human_states: %s) and an empty gc.routed_to leaves the bead waiting on nobody\n",
-				prog, o.to, o.to, strings.Join(lifecycle.HumanStates, " "))
-			return 1
-		}
-	}
 	// gc.routed_to is matched as an exact string by every pool claim, so a route
-	// that is neither <rig>/<agent> nor the ParkRoute sentinel reaches no pool:
-	// the bead stays ready and is offered to nobody. Every --route caller shares
-	// this writer, so the shape is enforced here once. An empty --route clears
-	// the route and is handled above, so it is exempt.
-	if o.routeSet && o.route != "" && o.route != lifecycle.ParkRoute && !strings.Contains(o.route, "/") {
-		fmt.Fprintf(stderr, "%s: --route '%s' is not rig-qualified; gc.routed_to is matched as an exact string, so a bare name routes to nobody and the bead sits forever. Use <rig>/<agent> or '%s'.\n",
-			prog, o.route, lifecycle.ParkRoute)
+	// that is not <rig>/<agent> reaches no pool: the bead stays ready and is
+	// offered to nobody. Every --route caller shares this writer, so the shape is
+	// enforced here once. A bare name such as `human` is refused like any other:
+	// a person's wait is the human gate filed on the bead, never a route. An
+	// empty --route clears the route, so it is exempt.
+	if o.routeSet && o.route != "" && !strings.Contains(o.route, "/") {
+		fmt.Fprintf(stderr, "%s: --route '%s' is not rig-qualified; gc.routed_to is matched as an exact string, so a bare name routes to nobody and the bead sits forever. Use <rig>/<agent>, or file a human gate on the bead (human-gate.sh) for a wait on a person.\n",
+			prog, o.route)
 		return 1
 	}
 	for _, s := range append(append([]string{}, o.sets...), o.dated...) {
@@ -645,23 +629,19 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 	// A record a caller keeps on the anchor, such as the rank its PR-finishing
 	// work settled at, is bookkeeping, and a write of it should move no route.
 	// --keep-route is that write: the bead keeps the gc.routed_to it carries, and
-	// neither a state's default nor the park guard applies. It is refused on an
-	// edge into another state, because entering a state takes that state's
-	// routing.
+	// a detached state's clear does not run. It is refused on an edge into
+	// another state, because entering a state takes that state's routing.
 	if o.keepRoute && cur != o.to {
 		fmt.Fprintf(stderr, "%s: --keep-route is refused on %s -> %s for %s: it records on a bead staying in its state, and entering a state takes that state's routing\n", prog, cur, o.to, id)
 		return 1
 	}
-	// A bead already resting on the park route keeps it. No pool claims that
-	// value, and clearing it would retract a bead a person still owns. Setting
-	// routeSet puts the clear in the transition's one write, so a clear bd
-	// refuses fails the transition rather than leaving a silent pool offer. No
-	// human state is detached, so none takes this clear: the guard above set its
-	// routeSet on arguments alone, or --keep-route left its route as it was.
+	// A detached anchor rests unrouted, so the transition clears whatever route
+	// the bead carries. A person's wait on the anchor is the human gate filed on
+	// it, which holds the anchor whatever its route. Setting routeSet puts the
+	// clear in the transition's one write, so a clear bd refuses fails the
+	// transition rather than leaving a silent pool offer.
 	if !o.routeSet && !o.keepRoute && lifecycle.IsDetachedState(o.to) {
-		if bead.Meta("gc.routed_to") != lifecycle.ParkRoute {
-			o.route, o.routeSet = "", true
-		}
+		o.route, o.routeSet = "", true
 	}
 
 	// The unheld half of the same property. An anchor's assignee is the polecat
@@ -686,15 +666,15 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 	// The executor identity is the third field of the same let-go. gc.session_id
 	// and gc.session_name name the session that claimed the bead, so they belong
 	// to the assignee and go with it whenever the assignee is cleared — the
-	// repool that hands a rejected rework back to the pool, the handback that
-	// routes a bead to a human, and the detached-state clear above all reach here
-	// with an empty assignee. A survivor is residue the moment the bead next
-	// carries a route (doctor/executor-identity-residue reports it) and a stale
-	// orphan-recovery pin the runtime resolves a dead owner from. --unset-metadata
-	// bypasses bd's anti-steal guard, so no status gate is needed; if the assignee
-	// clear beside it is refused on an in_progress bead, the whole update rolls
-	// back and the pins stay with the live claim that still owns them. They
-	// ride the same write as the route and assignee arms.
+	// repool that hands a rejected rework back to the pool, the park that leaves
+	// a bead to the human gate filed on it, and the detached-state clear above
+	// all reach here with an empty assignee. A survivor is residue the moment the
+	// bead next carries a route (doctor/executor-identity-residue reports it) and
+	// a stale orphan-recovery pin the runtime resolves a dead owner from.
+	// --unset-metadata bypasses bd's anti-steal guard, so no status gate is
+	// needed; if the assignee clear beside it is refused on an in_progress bead,
+	// the whole update rolls back and the pins stay with the live claim that
+	// still owns them. They ride the same write as the route and assignee arms.
 	if o.assigneeSet && o.assignee == "" {
 		for _, pin := range []string{"gc.session_id", "gc.session_name"} {
 			has := false
@@ -707,26 +687,6 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 			if !has {
 				o.unsets = append(o.unsets, pin)
 			}
-		}
-	}
-
-	// A park must NAME what is owed. The helm board spends an anchor's
-	// gc.takeaway as its NEEDS sentence and, finding none on a row routed to a
-	// person, reports that nobody recorded a question — so a route to the park
-	// sentinel without a takeaway hands the operator a row it cannot read. The
-	// sentence rides the same atomic write as the route; a bead that already
-	// carries one satisfies this, which is the sitting that stamped its hold
-	// before transitioning. Only the WRITE is guarded: a call that names the park
-	// route a bead already rests on establishes no park, so it leaves the question
-	// with whoever asked it. Observers do exactly that — gate-ensure.sh and
-	// merge.sh pass gc.routed_to back so recording a verdict cannot clear a route
-	// they never looked at — and a wedged anchor is the park they most need to
-	// record.
-	if o.routeSet && o.route == lifecycle.ParkRoute && !o.takeawaySet {
-		if bead.Meta("gc.takeaway") == "" && bead.Meta("gc.routed_to") != lifecycle.ParkRoute {
-			fmt.Fprintf(stderr, "%s: --route %s needs --takeaway \"<text>\" — %s carries no gc.takeaway, and the board renders a person-routed row with an empty takeaway as 'routed to you — no question recorded'\n",
-				prog, lifecycle.ParkRoute, id)
-			return 1
 		}
 	}
 
@@ -748,9 +708,9 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 	// Only a pure re-assertion qualifies. --append-notes accumulates, --takeaway
 	// stamps a fresh instant, and --close and --assignee move fields this
 	// comparison does not cover, so any of them writes unconditionally. The
-	// validation above — --expect, edge legality, the park guard — has already run
-	// and is not what is being skipped: an illegal edge is still refused, and an
-	// edge that is legal but idle is what returns here.
+	// validation above — --expect and edge legality — has already run and is not
+	// what is being skipped: an illegal edge is still refused, and an edge that
+	// is legal but idle is what returns here.
 	if !o.notesSet && !o.takeawaySet && !o.closeIt && !o.assigneeSet && cur == o.to {
 		idle := true
 		for _, sv := range o.sets {

@@ -85,8 +85,10 @@ assignee and no `gc.routed_to`, only the pour's `gc.execution_routed_to`, which
 no queue reads (`assets/scripts/dispatch-path.sh`). The anchored states are the
 `merge_result` values. `merged` is the only state with
 `status = closed`, and `lifecycle.sh` refuses to enter it without a non-empty
-`merged_sha`, the landing the state names; the human states stay open, routed
-to human.
+`merged_sha`, the landing the state names. The states that park an anchor for a
+person, `abandoned`, `retargeted`, `blocked` and `refused_false_completion`, stay
+open, held by the human gate their writer files on the bead, and the
+transition into one writes no route.
 
 The write that enters `merged` also records what the landing shipped, which is
 the work record the runtime's close gate checks: `gc.work_outcome=shipped`,
@@ -112,31 +114,30 @@ the anchor rests unrouted and unheld, and `lifecycle.sh` writes both halves on
 entry to one: it clears `gc.routed_to`, and it clears the assignee of a bead
 still at `status=open`.
 
-The route exception is `park_route` (`human`), the sentinel that parks a bead
-for a person. No pool claims that value, so a transition
-that finds it leaves it in place. Any other route on a detached anchor is pool demand
-for work that is already in the merge queue. A worker claims it, the claim moves
-the bead out of `--status=open`, and `merge.sh` and `pr-facts.sh` both enumerate
-from there.
+A route on a detached anchor is pool demand for work that is already in the
+merge queue. A worker claims it, the claim moves the bead out of
+`--status=open`, and `merge.sh` and `pr-facts.sh` both enumerate from there. The
+clear has no exception, because a person's wait on an anchor is its human gate,
+which holds the anchor whatever its route.
 
 An assignee is the same anchor still sitting in the refinery's own find-work
 queue, which is assignee-keyed and flags a `merge_result`-bearing bead it finds
-there rather than taking it. There is no park sentinel on this side: no
-component holds an anchor by assignee, and the polecat handoff pointer that put
-one there is spent the moment the anchor is gated. The clear stops at
+there rather than taking it. No component holds an anchor by assignee, and the
+polecat handoff pointer that put one there is spent the moment the anchor is
+gated. The clear stops at
 `status=open` for two reasons that agree. A live claim is a hold to escalate,
 not to overwrite; and bd refuses an assignee edit on a bead another actor holds
 `in_progress`, dropping the whole atomic update with it
 ([gascity/routing-model.md](gascity/routing-model.md#clearing-an-assignee-can-be-refused-and-the-refusal-drops-the-whole-update)).
 
 A write that records on an anchor staying in its state, rather than moving it,
-passes `--keep-route`: the transition writes no route, so neither a human
-state's park default and park guard nor a detached state's route clear applies,
-and the anchor keeps the `gc.routed_to` it carries, an empty one included.
+passes `--keep-route`: the transition writes no route, so a detached state's
+route clear does not run, and the anchor keeps the `gc.routed_to` it carries, an
+empty one included.
 `lifecycle.sh` refuses it with `--route`, and on an edge into another state,
 which takes that state's routing. `pr-facts.sh` writes the rank of an anchor's
 PR-finishing work this way ([steering.md](steering.md#pr-finishing-work)), so
-recording it re-parks no anchor and drops no route a person gave one.
+recording it drops no route a person gave an anchor.
 
 A detached anchor that is nonetheless claimed or held into a non-open status —
 by a route stamped on it out of band, or a direct claim — is the residual this
@@ -175,8 +176,8 @@ transition into a closed state writes none.
 | pull_request → abandoned | `pr-facts.sh` | PR closed unmerged externally with no recorded disposition; files a rework-or-close human gate |
 | pull_request → closed (disposed) | `pr-facts.sh` → `bead-rehome.sh` | PR closed unmerged carrying a pre-recorded disposition (`pr-dispose.sh`); auto-disposed through the sanctioned terminal close, no gate |
 | pull_request → retargeted | `pr-facts.sh` | PR base moved externally; files a human gate |
-| handed_off → blocked | `mol-refinery-patrol` | recorded `existing_pr` unusable, or a graduated convoy's zero-diff check could not run three patrols in a row, its park held by the human gate, filed on it, that names git's error |
-| handed_off → refused_false_completion | `mol-refinery-patrol` | the zero-diff check found no change on the handed-off branch, and the target carries no `direct_landing_sha` stamp |
+| handed_off → blocked | `mol-refinery-patrol` | recorded `existing_pr` unusable, or a graduated convoy's zero-diff check could not run three patrols in a row. The human gate is filed first and holds the park, and the convoy's gate names git's error |
+| handed_off → refused_false_completion | `mol-refinery-patrol` | the zero-diff check found no change on the handed-off branch, and the target carries no `direct_landing_sha` stamp. The human gate is filed first and holds the park |
 | handed_off / pull_request → poured | `mol-refinery-patrol` (rejection), through `assets/scripts/rejection-repool.sh` | `rejection_reason` written and the assignee and `gc.routed_to` cleared, then a fresh `mol-polecat-work` pour dispatches the rebuild and stamps `gc.execution_routed_to` |
 | handed_off → poured | `mol-refinery-patrol` merge-push, through `assets/scripts/await-ruling.sh` | the zero-diff check could not run three patrols in a row: a human gate names git's error and blocks the bead, which waits on it unassigned and armed, until clearing the gate pours a fresh `mol-polecat-work` run on it |
 | poured → handed_off | the pour's `mol-polecat-work` submit step | push verified on the remote |

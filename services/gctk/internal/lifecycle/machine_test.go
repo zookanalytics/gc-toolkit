@@ -34,19 +34,20 @@ func TestUndeclaredEdgesAreRefused(t *testing.T) {
 	}
 }
 
-func TestHumanAndClosedStatesAreDeclaredStates(t *testing.T) {
-	for _, s := range append(append([]string{}, HumanStates...), ClosedStates...) {
+func TestDetachedAndClosedStatesAreDeclaredStates(t *testing.T) {
+	for _, s := range append(append([]string{}, DetachedStates...), ClosedStates...) {
 		if !IsState(s) {
 			t.Errorf("%q is classified but not declared", s)
 		}
 	}
 }
 
-func TestClosedStatesAreNotHumanStates(t *testing.T) {
-	// A state cannot both close the bead and route it to a human for a decision.
+func TestClosedStatesAreNotDetachedStates(t *testing.T) {
+	// A detached anchor rests open for the merge cadence, and a closed state
+	// ends the anchor's life, so no state can be both.
 	for _, c := range ClosedStates {
-		if IsHumanState(c) {
-			t.Errorf("%q is both a closed state and a human state", c)
+		if IsDetachedState(c) {
+			t.Errorf("%q is both a closed state and a detached state", c)
 		}
 	}
 }

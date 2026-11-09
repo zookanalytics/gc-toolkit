@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # Hermetic test for the anchor lifecycle — THE writer of lifecycle transitions.
 # Covers: the state verb; legal/illegal edges; --expect; the ONE atomic
-# `gc bd update` carrying every field; bd refusal (exit 1); human states
-# routing to human and detached states clearing the route, both in the same
-# call; the empty-route refusal that keeps a human state from waiting on
-# nobody; the
-# writes leaving a state makes (exit_sets), in the transition's own update; the
-# close/terminal pairing guards (--close only into a closed state, closed states
-# must --close); the non-empty merged_sha that --to merged must carry;
-# --set-dated's compare-and-preserve rule for the @<since> component; the reopen
-# repair verb; the park-route takeaway guard and its --takeaway writer, capped
-# and mirrored from gc-helm.sh; --keep-route, the self-transition that records
-# on an anchor and writes no route; the drift assertion against
-# lifecycle/lifecycle.toml; and the refusal when no gctk binary resolves.
+# `gc bd update` carrying every field; bd refusal (exit 1); a human state
+# entered with no route, since its gate is the park, and detached states
+# clearing the route in the same call; the refusal of a route that is not
+# rig-qualified, `human` included; the writes leaving a state makes
+# (exit_sets), in the transition's own update; the close/terminal pairing
+# guards (--close only into a closed state, closed states must --close); the
+# non-empty merged_sha that --to merged must carry; --set-dated's
+# compare-and-preserve rule for the @<since> component; the reopen repair verb;
+# the --takeaway writer, capped and mirrored from gc-helm.sh; --keep-route, the
+# self-transition that records on an anchor and writes no route; the drift
+# assertion against lifecycle/lifecycle.toml; and the refusal when no gctk
+# binary resolves.
 #
 # ONE IMPLEMENTATION, REACHED THROUGH THE SCRIPT. lifecycle.sh execs
 # `gctk lifecycle` (services/gctk) and has no other implementation. The suite
@@ -47,9 +47,7 @@ fi
 
 # --- lifecycle.toml, read without a TOML parser ----------------------------------
 toml_states() { awk '/^states = \[/{f=1;next} f&&/^\]/{exit} f{gsub(/[ ",]/,"");print}' "$TOML" | tr '\n' ' ' | sed 's/ $//'; }
-toml_human()  { sed -n 's/^human_states = \[\(.*\)\]/\1/p' "$TOML" | tr -d '",' | sed 's/^ *//;s/ *$//' | tr -s ' '; }
 toml_detached() { sed -n 's/^detached_states = \[\(.*\)\]/\1/p' "$TOML" | tr -d '",' | sed 's/^ *//;s/ *$//' | tr -s ' '; }
-toml_park()   { sed -n 's/^park_route = "\(.*\)"/\1/p' "$TOML"; }
 toml_closed() { sed -n 's/^closed_states = \[\(.*\)\]/\1/p' "$TOML" | tr -d '", '; }
 toml_exit_sets() { sed -n 's/^exit_sets = \[\(.*\)\]/\1/p' "$TOML" | tr -d '",' | sed 's/^ *//;s/ *$//' | tr -s ' '; }
 toml_edges()  {
@@ -65,13 +63,15 @@ echo "# drift against lifecycle.toml (gctk lifecycle --dump-machine)"
 DUMP="$("$GCTK_BUILT" lifecycle --dump-machine 2>&1)"
 [ -n "$DUMP" ] && ok "machine dumped" || bad "gctk lifecycle --dump-machine produced nothing"
 eq "$(printf '%s\n' "$DUMP" | sed -n 's/^states //p')" "$(toml_states)" "states match lifecycle.toml"
-eq "$(printf '%s\n' "$DUMP" | sed -n 's/^human_states //p')" "$(toml_human)" "human states match lifecycle.toml"
 eq "$(printf '%s\n' "$DUMP" | sed -n 's/^detached_states //p')" "$(toml_detached)" "detached states match lifecycle.toml"
-eq "$(printf '%s\n' "$DUMP" | sed -n 's/^park_route //p')" "$(toml_park)" "park route matches lifecycle.toml"
 eq "$(printf '%s\n' "$DUMP" | sed -n 's/^closed_states //p')" "$(toml_closed)" "closed states match lifecycle.toml"
 [ -n "$(toml_exit_sets)" ] && ok "exit sets declared in lifecycle.toml" || bad "exit_sets = [...] missing from lifecycle.toml"
 eq "$(printf '%s\n' "$DUMP" | sed -n 's/^exit_sets //p')" "$(toml_exit_sets)" "exit sets match lifecycle.toml"
 eq "$(printf '%s\n' "$DUMP" | sed -n 's/^transition //p' | sort)" "$(toml_edges)" "transition edges match lifecycle.toml"
+# A person's wait is the human gate filed on the bead, never a route, so
+# neither side declares a park route.
+hasnt "$DUMP" "park_route" "the port declares no park route"
+eq "$(grep -c '^park_route' "$TOML" || true)" "0" "lifecycle.toml declares no park route"
 # The cap is not in lifecycle.toml. It is a rendering bound that the board's two
 # takeaway writers share, so the port's copy is held against gc-helm.sh's.
 eq "$(printf '%s\n' "$DUMP" | sed -n 's/^takeaway_max //p')" \
@@ -211,7 +211,7 @@ eq "$(meta ex-2 pr_finishing_settled)" "unsettled" "a repool out of pull_request
 eq "$(meta ex-3 pr_finishing_settled)" "unsettled" "…and an anchor that carried no record leaves with one"
 store '[{"id":"ex-4","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr_finishing_settled":"approved"}},
         {"id":"ex-5","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr_finishing_settled":"approved","pr_head_oid":"sha-5"}},
-        {"id":"ex-6","status":"open","assignee":"","notes":"","metadata":{"merge_result":"retargeted","pr_finishing_settled":"unapproved","gc.routed_to":"human","gc.takeaway":"t"}},
+        {"id":"ex-6","status":"open","assignee":"","notes":"","metadata":{"merge_result":"retargeted","pr_finishing_settled":"unapproved","gc.takeaway":"t"}},
         {"id":"ex-7","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pre_open_gate","pr_finishing_settled":"unapproved"}}]'
 "$SUT" transition ex-4 --to merged --expect pull_request --close --set merged_sha=abc123 >/dev/null 2>&1
 eq "$(meta ex-4 pr_finishing_settled)" "approved" "a landing into the closed merged state writes no exit set"
@@ -376,8 +376,8 @@ writes_when "--append-notes always writes" \
   "{$BASE,\"metadata\":{\"merge_result\":\"pull_request\"}}" \
   n-2 --to pull_request --append-notes "another line"
 writes_when "--takeaway always writes (it stamps a fresh instant)" \
-  '{"id":"n-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","gc.routed_to":"human","gc.takeaway":"same text","gc.takeaway_at":"2026-08-28T04:05:06Z","gc.takeaway_by":"lifecycle"}}' \
-  n-2 --to pull_request --route human --takeaway "same text"
+  '{"id":"n-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","gc.takeaway":"same text","gc.takeaway_at":"2026-08-28T04:05:06Z","gc.takeaway_by":"lifecycle"}}' \
+  n-2 --to pull_request --takeaway "same text"
 # An explicit --assignee skips the detached clear, so this bead can carry the
 # assignee the flag names. The value does not change, and only the flag can
 # force the write.
@@ -432,7 +432,10 @@ eq "$rc" 1 "--set merge_result is refused (owned by --to)"
 out="$("$SUT" transition a-3 --to pull_request --set gc.routed_to=x 2>&1)"; rc=$?
 eq "$rc" 1 "--set gc.routed_to is refused (owned by --route)"
 
-# --- human states route to human in the same atomic call ------------------------
+# --- a human state writes no route: its gate is the park ------------------------
+# A transition into a state that parks an anchor for a person writes no route.
+# The human gate its caller files beside it is what holds the bead, so the
+# bead rests unrouted, keeping the route it carries.
 echo "# human states"
 store '[{"id":"a-6","status":"open","assignee":"rig/refinery","notes":"","metadata":{"merge_result":"pull_request"}}]'
 : > "$STUB_GC_LOG"
@@ -440,7 +443,8 @@ out="$("$SUT" transition a-6 --to abandoned --assignee "" \
   --set blocked_reason="PR#7 closed out-of-band" \
   --takeaway "PR#7 was closed without merging — rework it or close this bead" 2>&1)"; rc=$?
 eq "$rc" 0 "transition to abandoned exits 0"
-eq "$(meta a-6 'gc.routed_to')" "human" "abandoned routes to human automatically"
+eq "$(meta a-6 'gc.routed_to')" "<absent>" "abandoned writes no route"
+hasnt "$(grep '^bd update' "$STUB_GC_LOG")" "gc.routed_to" "…since the update names no route"
 eq "$(bassignee a-6)" "" "--assignee '' cleared the assignee"
 eq "$(meta a-6 'gc.takeaway')" "PR#7 was closed without merging — rework it or close this bead" \
   "the park names what it wants"
@@ -449,8 +453,15 @@ case "$(meta a-6 'gc.takeaway_at')" in
   ????-??-??T??:??:??Z) ok "the takeaway is dated" ;;
   *) bad "the takeaway carries no gc.takeaway_at" ;;
 esac
-eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "route + clear + reason + takeaway ride in ONE update"
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "state + clear + reason + takeaway ride in ONE update"
 eq "$(meta a-6 'gc.takeaway_settled')" "" "the park's headline carries its own disposition, not a settled one"
+
+# The entry keeps whatever route the bead carries: a transition routes no work,
+# and the gate holds the bead whatever its route.
+store '[{"id":"a-6b","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","gc.routed_to":"rig/pool"}}]'
+out="$("$SUT" transition a-6b --to retargeted --expect pull_request --takeaway "PR#7 sits on another base" 2>&1)"; rc=$?
+eq "$rc" 0 "transition to retargeted exits 0"
+eq "$(meta a-6b 'gc.routed_to')" "rig/pool" "…and the bead keeps the route it carries"
 
 store '[{"id":"a-8","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","gc.takeaway_settled":"1"}}]'
 out="$("$SUT" transition a-8 --to abandoned --takeaway "needs a ruling on the base branch" 2>&1)"; rc=$?
@@ -458,8 +469,8 @@ eq "$rc" 0 "a takeaway over an inherited settled-key exits 0"
 eq "$(meta a-8 'gc.takeaway_settled')" "" "…and clears it, leaving the park's own disposition on the bead"
 
 # --- detached states clear the route in the same atomic call --------------------
-# A detached anchor rests unrouted so that no pool offers it. Any route but the
-# park sentinel turns the resting state back into pool demand.
+# A detached anchor rests unrouted so that no pool offers it. Any route turns
+# the resting state back into pool demand.
 echo "# detached states"
 store '[{"id":"d-1","status":"open","assignee":"rig/refinery","notes":"","metadata":{"gc.routed_to":"rig/pool"}}]'
 : > "$STUB_GC_LOG"
@@ -479,10 +490,12 @@ out="$("$SUT" transition d-3 --to pull_request --route rig/human-recovery 2>&1)"
 eq "$rc" 0 "an explicit --route into a detached state exits 0"
 eq "$(meta d-3 'gc.routed_to')" "rig/human-recovery" "an explicit --route wins over the declared clear"
 
+# A `human` route is no exception: a person's wait on an anchor is its human
+# gate, which holds the anchor whatever its route.
 store '[{"id":"d-4","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pre_open_gate","gc.routed_to":"human"}}]'
 out="$("$SUT" transition d-4 --to pull_request --set pr_number=9 2>&1)"; rc=$?
-eq "$rc" 0 "a park-routed anchor transitions"
-eq "$(meta d-4 'gc.routed_to')" "human" "the park route survives the transition"
+eq "$rc" 0 "an anchor carrying a human route transitions"
+eq "$(meta d-4 'gc.routed_to')" "" "…and the detached state clears that route too"
 
 # --- detached states clear the assignee in the same atomic call ----------------
 # The unheld half of the same property. The refinery's find-work queue is
@@ -523,8 +536,8 @@ store '[{"id":"h-5","status":"open","assignee":"","notes":"","metadata":{"merge_
 "$SUT" transition h-5 --to pull_request --set pr_number=9 >/dev/null 2>&1
 hasnt "$(grep '^bd update' "$STUB_GC_LOG")" "--assignee" "an empty assignee emits no flag"
 
-# A human state is not detached: it names a person by route, and the assignee is
-# the caller's to decide.
+# A human state is not detached: the gate its caller files names the person,
+# and the assignee is the caller's to decide.
 store '[{"id":"h-6","status":"open","assignee":"rig/gc-toolkit.refinery","notes":"","metadata":{"merge_result":"pull_request"}}]'
 "$SUT" transition h-6 --to retargeted --route rig/mechanik >/dev/null 2>&1
 eq "$(bassignee h-6)" "rig/gc-toolkit.refinery" "a human state leaves the assignee alone"
@@ -581,25 +594,26 @@ hasnt "$(grep '^bd update' "$STUB_GC_LOG")" "--unset-metadata gc.session_id" "no
 
 store '[{"id":"a-7","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
 "$SUT" transition a-7 --to retargeted --route rig/mechanik >/dev/null 2>&1
-eq "$(meta a-7 'gc.routed_to')" "rig/mechanik" "an explicit --route overrides the human default"
+eq "$(meta a-7 'gc.routed_to')" "rig/mechanik" "an explicit --route into a human state is written as given"
 
-# --- a human state must NAME the person it waits on -----------------------------
-echo "# human states name a route"
-store '[{"id":"a-7b","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+# --- an empty --route into a human state clears the route ------------------------
+# A human state names no person by route, so the caller's empty --route is the
+# clear it is on any other state, and the bead rests unrouted behind its gate.
+echo "# human states take an empty route"
+store '[{"id":"a-7b","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","gc.routed_to":"rig/pool"}}]'
 : > "$STUB_GC_LOG"
 out="$("$SUT" transition a-7b --to abandoned --route "" 2>&1)"; rc=$?
-eq "$rc" 1 "an EMPTY --route into a human state exits 1"
-has "$out" "waiting on nobody" "the refusal says what an empty route leaves behind"
-has "$out" "human_states:" "the refusal names the human-state set"
-eq "$(meta a-7b merge_result)" "pull_request" "the refused transition wrote nothing"
-eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "and never reached bd"
+eq "$rc" 0 "an EMPTY --route into a human state exits 0"
+eq "$(meta a-7b merge_result)" "abandoned" "…and enters the state"
+eq "$(meta a-7b 'gc.routed_to')" "" "…with the route cleared"
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "…in the transition's one update"
 
-# --- a route names a pool by its qualified address, or the park sentinel ---------
+# --- a route names a pool by its qualified address --------------------------------
 # gc.routed_to is matched as an exact string by every pool claim, so a bare
 # token like "pool" reaches no pool: the bead stays ready and is offered to
 # nobody. This one writer, shared by every --route caller, refuses it before the
 # write rather than stranding the bead ready-but-unclaimable.
-echo "# a route is rig-qualified or the park sentinel"
+echo "# a route is rig-qualified"
 store '[{"id":"r-1","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
 : > "$STUB_GC_LOG"
 out="$("$SUT" transition r-1 --to unanchored --route pool 2>&1)"; rc=$?
@@ -616,65 +630,45 @@ out="$("$SUT" transition r-2 --to unanchored --route gc-toolkit/gc-toolkit.polec
 eq "$rc" 0 "a <rig>/<agent> route is accepted"
 eq "$(meta r-2 'gc.routed_to')" "gc-toolkit/gc-toolkit.polecat" "…and stamped verbatim"
 
-# --- a park must NAME what it waits for ------------------------------------------
-# The helm board spends gc.takeaway as a row's NEEDS sentence and, on a row
-# routed to a person with none, reports that nobody recorded a question. So
-# writing the park route without a takeaway is refused here.
-echo "# a park names what it waits for"
+# `human` is a bare name like any other. A person's wait is the human gate filed
+# on the bead, so no transition parks a bead on a route, whatever the state.
+store '[{"id":"r-3","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+: > "$STUB_GC_LOG"
+out="$("$SUT" transition r-3 --to abandoned --route human --takeaway "PR#7 was closed without merging" 2>&1)"; rc=$?
+eq "$rc" 1 "--route human into a human state exits 1"
+has "$out" "not rig-qualified" "…refused as a bare name"
+has "$out" "human gate" "…and the refusal names the gate that parks a bead for a person"
+out="$("$SUT" transition r-3 --to pull_request --expect pull_request --route human --takeaway "parked" 2>&1)"; rc=$?
+eq "$rc" 1 "--route human on a detached self-edge exits 1"
+eq "$(meta r-3 merge_result)" "pull_request" "the refused transitions wrote nothing"
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "and never reached bd"
+
+# gate-ensure.sh and gctk merge pass the anchor's own route back on every
+# verdict they record, so an anchor carrying a `human` route has that record
+# refused too, until a transition with no --route clears the route.
+store '[{"id":"r-4","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","gc.routed_to":"human"}}]'
+: > "$STUB_GC_LOG"
+out="$("$SUT" transition r-4 --to pull_request --expect pull_request --route human --set-dated "pr.machine=blocked@sha1" 2>&1)"; rc=$?
+eq "$rc" 1 "carrying a human route back exits 1"
+eq "$(meta r-4 'pr.machine')" "<absent>" "…and records nothing"
+out="$("$SUT" transition r-4 --to pull_request --expect pull_request --set-dated "pr.machine=blocked@sha1" 2>&1)"; rc=$?
+eq "$rc" 0 "the same record with no --route lands"
+eq "$(meta r-4 'gc.routed_to')" "" "…clearing the route, as a detached state's entry does"
+
+# --- --takeaway writes the board's headline --------------------------------------
+# The helm board spends gc.takeaway as a row's NEEDS sentence. A transition into
+# a human state needs none, since the gate its caller files says what is asked.
+# A caller that passes --takeaway gets the headline in the transition's one
+# update, capped, and refused when it says nothing.
+echo "# --takeaway"
 store '[{"id":"p-1","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
 : > "$STUB_GC_LOG"
 out="$("$SUT" transition p-1 --to abandoned --set blocked_reason="PR#7 closed out-of-band" 2>&1)"; rc=$?
-eq "$rc" 1 "a park with no takeaway exits 1"
-has "$out" "no question recorded" "the refusal quotes what the board would render"
-has "$out" "--takeaway" "the refusal names the flag that fixes it"
-eq "$(meta p-1 merge_result)" "pull_request" "the refused park wrote nothing"
-eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "and never reached bd"
-
-# The same refusal on an EXPLICIT --route human, whatever the state.
-store '[{"id":"p-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pre_open_gate"}}]'
-out="$("$SUT" transition p-2 --to pull_request --route human 2>&1)"; rc=$?
-eq "$rc" 1 "an explicit --route human with no takeaway exits 1"
-has "$out" "no question recorded" "the refusal is the same one"
-
-# A bead that already carries a takeaway satisfies the guard: that is the
-# converse sitting which stamped its hold before transitioning.
-store '[{"id":"p-3","status":"open","assignee":"","notes":"","metadata":{"gc.takeaway":"holding — needs a ruling on the base branch"}}]'
-out="$("$SUT" transition p-3 --to blocked 2>&1)"; rc=$?
-eq "$rc" 0 "a bead already carrying a takeaway parks"
-eq "$(meta p-3 'gc.takeaway')" "holding — needs a ruling on the base branch" "and keeps the sentence it had"
-
-# Routing anywhere but the park sentinel is not a park.
-store '[{"id":"p-4","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
-out="$("$SUT" transition p-4 --to retargeted --route rig/mechanik 2>&1)"; rc=$?
-eq "$rc" 0 "a route to a POOL needs no takeaway"
-
-# Preserving a park route this call did not set is not a park either: the
-# question stays with whoever asked it.
-store '[{"id":"p-5","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pre_open_gate","gc.routed_to":"human"}}]'
-out="$("$SUT" transition p-5 --to pull_request --set pr_number=9 2>&1)"; rc=$?
-eq "$rc" 0 "a preserved park route needs no takeaway"
-eq "$(meta p-5 'gc.routed_to')" "human" "and the route survives"
-
-# Nor is naming the route the bead already rests on. gate-ensure.sh and merge.sh
-# carry gc.routed_to back on every pr.machine write so that recording a verdict
-# cannot clear a route they never looked at, and an anchor parked on a person
-# still has its verdict recorded.
-store '[{"id":"p-5b","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","gc.routed_to":"human"}}]'
-out="$("$SUT" transition p-5b --to pull_request --route human --set-dated "pr.machine=blocked@sha1" 2>&1)"; rc=$?
-eq "$rc" 0 "carrying an existing park route back needs no takeaway"
-eq "$(meta p-5b 'gc.routed_to')" "human" "and the route is unchanged"
-case "$(meta p-5b 'pr.machine')" in
-  blocked@sha1@*) ok "…so the observer's verdict is recorded" ;;
-  *) bad "…so the observer's verdict is recorded (got '$(meta p-5b 'pr.machine')')" ;;
-esac
-
-# The narrowing is only for a route already there: the same call on a bead this
-# write would park is the refusal above.
-store '[{"id":"p-5c","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","gc.routed_to":"rig/mechanik"}}]'
-out="$("$SUT" transition p-5c --to pull_request --route human --set-dated "pr.machine=blocked@sha1" 2>&1)"; rc=$?
-eq "$rc" 1 "moving a bead ONTO the park route still needs a takeaway"
-has "$out" "no question recorded" "…with the same refusal"
-eq "$(meta p-5c 'gc.routed_to')" "rig/mechanik" "…and the route it had is untouched"
+eq "$rc" 0 "a human state entered with no takeaway exits 0"
+eq "$(meta p-1 merge_result)" "abandoned" "…and enters the state"
+eq "$(meta p-1 'gc.takeaway')" "<absent>" "…writing no headline"
+eq "$(meta p-1 'gc.routed_to')" "<absent>" "…and no route"
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "…in one update"
 
 # The takeaway triple is this flag's to write.
 store '[{"id":"p-6","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
@@ -697,38 +691,35 @@ store '[{"id":"p-8","status":"open","assignee":"","notes":"","metadata":{"merge_
 out="$("$SUT" transition p-8 --to abandoned --takeaway "$(printf 'x%.0s' $(seq 140))" 2>&1)"; rc=$?
 eq "$rc" 0 "a takeaway AT the cap is accepted"
 
-# An EMPTY takeaway is not one. The flag's presence alone must not satisfy the
-# park guard: normalization can leave nothing behind, and the park then writes
-# the empty gc.takeaway that renders as the very row the guard exists to stop.
+# An EMPTY takeaway is not one. Normalization can leave nothing behind, and
+# writing that would overwrite the headline a bead carries with nothing, under
+# a fresh date and author.
 store '[{"id":"p-9","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
 : > "$STUB_GC_LOG"
 out="$("$SUT" transition p-9 --to abandoned --takeaway "" 2>&1)"; rc=$?
 eq "$rc" 1 "an empty --takeaway exits 1"
-has "$out" "no question recorded" "the refusal quotes what the board would render"
+has "$out" "tells the operator nothing" "the refusal says what an empty headline would show"
 eq "$(meta p-9 'gc.takeaway')" "<absent>" "no empty takeaway is written"
-eq "$(meta p-9 merge_result)" "pull_request" "the refused park wrote nothing"
+eq "$(meta p-9 merge_result)" "pull_request" "the refused transition wrote nothing"
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "and never reached bd"
 
 store '[{"id":"p-10","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
 : > "$STUB_GC_LOG"
 out="$("$SUT" transition p-10 --to abandoned --takeaway "   " 2>&1)"; rc=$?
 eq "$rc" 1 "a whitespace-only --takeaway exits 1"
-has "$out" "no question recorded" "…with the same refusal"
+has "$out" "tells the operator nothing" "…with the same refusal"
 eq "$(meta p-10 'gc.takeaway')" "<absent>" "…and nothing is written"
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "…and nothing reaches bd"
 
-# The refusal belongs to the flag, not to the park: whatever the route, the
-# write itself is what the board reads.
+# The refusal belongs to the flag, whatever the route.
 store '[{"id":"p-11","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
 out="$("$SUT" transition p-11 --to retargeted --route rig/mechanik --takeaway " " 2>&1)"; rc=$?
 eq "$rc" 1 "an empty --takeaway is refused on a pool route too"
-
 # --- a record on an anchor staying in its state moves no route -------------------
 # pr-facts.sh records the rank an anchor's PR-finishing work settled at with a
-# self-transition. A human state's default would re-park an anchor whose route a
-# person cleared, or be refused by the park guard when it carries no takeaway,
-# and a detached state's clear would drop a route the write never looked at. So
-# --keep-route writes no route at all, on a self-transition only.
+# self-transition, and a detached state's clear would drop a route the write
+# never looked at. So --keep-route writes no route at all, on a self-transition
+# only.
 echo "# --keep-route records without routing"
 store '[{"id":"k-1","status":"open","assignee":"","notes":"","metadata":{"merge_result":"abandoned","gc.routed_to":""}},
         {"id":"k-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"abandoned","gc.routed_to":"","gc.takeaway":"PR#7 was closed without merging"}},
@@ -740,19 +731,19 @@ eq "$rc" 0 "a self-transition on a human state with no route and no takeaway rec
 eq "$(meta k-1 pr_finishing_settled)|$(meta k-1 'gc.routed_to')" "unapproved|" "…and the route stays empty"
 hasnt "$(grep '^bd update k-1' "$STUB_GC_LOG")" "gc.routed_to" "…since the write names no route"
 "$SUT" transition k-2 --to abandoned --expect abandoned --keep-route --set pr_finishing_settled=unapproved >/dev/null 2>&1
-eq "$(meta k-2 pr_finishing_settled)|$(meta k-2 'gc.routed_to')" "unapproved|" "…one that carries a takeaway is not re-parked"
+eq "$(meta k-2 pr_finishing_settled)|$(meta k-2 'gc.routed_to')" "unapproved|" "…and one that carries a takeaway keeps its empty route"
 "$SUT" transition k-3 --to retargeted --expect retargeted --keep-route --set pr_finishing_settled=unapproved >/dev/null 2>&1
 eq "$(meta k-3 'gc.routed_to')" "rig/gc-toolkit.mechanik" "…a route a person gave a human state is kept"
 "$SUT" transition k-4 --to pull_request --expect pull_request --keep-route --set pr_finishing_settled=approved >/dev/null 2>&1
 eq "$(meta k-4 pr_finishing_settled)|$(meta k-4 'gc.routed_to')" "approved|rig/gc-toolkit.polecat" "…and a detached state's clear does not run"
 store '[{"id":"k-5","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr_finishing_settled":"approved"}},
-        {"id":"k-6","status":"open","assignee":"","notes":"","metadata":{"merge_result":"abandoned","gc.routed_to":"human"}}]'
+        {"id":"k-6","status":"open","assignee":"","notes":"","metadata":{"merge_result":"abandoned","gc.routed_to":""}}]'
 : > "$STUB_GC_LOG"
 out="$("$SUT" transition k-5 --to retargeted --expect pull_request --keep-route --takeaway "PR#7 sits on another base" 2>&1)"; rc=$?
 eq "$rc" 1 "--keep-route on an edge into another state exits 1"
 has "$out" "entering a state takes that state's routing" "…saying why"
 eq "$(meta k-5 merge_result)" "pull_request" "…and writes nothing"
-out="$("$SUT" transition k-6 --to abandoned --expect abandoned --keep-route --route human 2>&1)"; rc=$?
+out="$("$SUT" transition k-6 --to abandoned --expect abandoned --keep-route --route rig/gc-toolkit.mechanik 2>&1)"; rc=$?
 eq "$rc" 1 "--keep-route with --route exits 1"
 has "$out" "opposite things" "…saying the two contradict"
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "…and neither refusal reaches bd"

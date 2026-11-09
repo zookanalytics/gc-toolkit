@@ -1449,13 +1449,13 @@ has "$out" "no external APPROVED review" "the approval hold fires"
 eq "$(pinned V5)" "settled@sha-84" "the cadence is done; the pull request waits on an approval"
 
 echo "# recording a verdict moves no route"
-store "[$(anchor V8 87 ',"gc.routed_to":"human"'), $(rev V8)]"
+store "[$(anchor V8 87 ',"gc.routed_to":"rig/gc-toolkit.polecat"'), $(rev V8)]"
 : > "$STUB_DEPS"
 printf '%s' "$(prview 87 OPEN CLEAN)" > "$GH_DIR/pr_view_87.json"
 echo '[]' > "$GH_DIR/reviews_87.json"
 out=$("$SUT" 2>&1)
 eq "$(pinned V8)" "settled@sha-87" "the verdict is recorded"
-eq "$(meta V8 'gc.routed_to')" "human" "…and the anchor keeps the route it carried"
+eq "$(meta V8 'gc.routed_to')" "rig/gc-toolkit.polecat" "…and the anchor keeps the route it carried"
 
 echo "# an open blocker is progressing only when an automated actor holds it, a pool among them"
 store "[$(anchor V6 85), $(rev V6),
