@@ -3,6 +3,7 @@ package form
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strings"
@@ -1178,6 +1179,83 @@ func (m *Model) View() tea.View {
 // lines is how many screen lines s fills, each ended by a newline.
 func lines(s string) int { return strings.Count(s, "\n") }
 
+// wrap breaks each line of s that is wider than the terminal, so the screen
+// shows it whole: bubbletea v2 draws the view into a frame the terminal's size
+// without wrapping it, and drops what a line holds past the frame's edge.
+func (m *Model) wrap(s string) string { return wrapAtSpaces(s, m.width) }
+
+// wrapBeside is text beside prefix, wrapped to the terminal's width with each
+// line after the first indented under the text, as the destination stands
+// beside "Files as". On a terminal too narrow to give the text as much room as
+// prefix takes, or before its size is known, it is prefix and text on one line,
+// which the view wraps as it wraps any other.
+func (m *Model) wrapBeside(prefix, text string) string {
+	w := lipgloss.Width(prefix)
+	if m.width-w < w {
+		return prefix + text
+	}
+	return prefix + strings.ReplaceAll(wrapAtSpaces(text, m.width-w), "\n", "\n"+strings.Repeat(" ", w))
+}
+
+// wrapAtSpaces breaks each line of s that is wider than width display cells
+// into lines no wider than width. It breaks only at spaces: lipgloss.Wrap
+// breaks at every hyphen too, ansi.Wrap's fixed breakpoint, which would split
+// a bead id such as tk-a1b2 or a rig such as gc-toolkit across two lines. A
+// line that fits is left as it is, and so is all of s while width is below 1,
+// as it is until the terminal's size is known.
+func wrapAtSpaces(s string, width int) string {
+	if width < 1 {
+		return s
+	}
+	ls := strings.Split(s, "\n")
+	for i, l := range ls {
+		if lipgloss.Width(l) > width {
+			ls[i] = breakAtSpaces(l, width)
+		}
+	}
+	return strings.Join(ls, "\n")
+}
+
+// breakAtSpaces is wrapAtSpaces for one line wider than width. The spaces the
+// line starts with stay on its first line, and each line after a break starts
+// at its word. A space with no room left on its line is dropped, though not a
+// style written beside it, and a style runs on across each break
+// (lipgloss.NewWrapWriter). A word wider than width is cut into lines no wider
+// than width, at a hyphen where it has one (lipgloss.Wrap).
+func breakAtSpaces(line string, width int) string {
+	var out []string
+	cur, curW := "", 0
+	filled := false // the line holds a word, not only spaces
+	for i, word := range strings.Split(line, " ") {
+		w := lipgloss.Width(word)
+		gap := 1
+		if i == 0 {
+			gap = 0
+		}
+		switch {
+		case curW+gap+w <= width || !filled && w > 0:
+			cur += strings.Repeat(" ", gap) + word
+			curW += gap + w
+		case w == 0:
+			cur += word
+		default:
+			out = append(out, cur)
+			cur, curW = word, w
+		}
+		filled = filled || w > 0
+		if curW > width {
+			cut := strings.Split(lipgloss.Wrap(cur, width, ""), "\n")
+			out, cur = append(out, cut[:len(cut)-1]...), cut[len(cut)-1]
+			curW = lipgloss.Width(cur)
+		}
+	}
+	var b strings.Builder
+	sw := lipgloss.NewWrapWriter(&b)
+	_, _ = io.WriteString(sw, strings.Join(append(out, cur), "\n"))
+	_ = sw.Close()
+	return b.String()
+}
+
 // listLines fits the rows of a list into room screen lines around row sel. The
 // screen holds a frame the terminal's size and clips the lines below it, so a
 // list taller than room shows the page of rows sel is on, paged as bubbles'
@@ -1282,7 +1360,7 @@ func (m *Model) composeView() string {
 	} else if l := m.lookups[m.subjectKey()]; (l != nil && !l.pending) || m.newTopic() {
 		mark = badStyle.Render("✗")
 	}
-	b.WriteString(labelStyle.Render("Files as") + "  " + mark + " " + dest + "\n")
+	b.WriteString(m.wrapBeside(labelStyle.Render("Files as")+"  "+mark+" ", dest) + "\n")
 	// The rows on this subject are paged to the lines left below the fields, so
 	// the row in play is on screen: the cursor's while the list has focus, and
 	// otherwise the row chosen, which is what Ctrl+S acts on.
@@ -1329,16 +1407,20 @@ func (m *Model) composeView() string {
 	if m.status != "" {
 		after.WriteString("\n" + badStyle.Render(m.status) + "\n")
 	}
-	// Two lines of the list hold the row in play and, when there are more, the
-	// line that counts the rest.
-	m.fitQuestion(lines(head.String()) + lines(b.String()) + min(len(list), 2) + lines(after.String()))
-	below := b.String()
+	// The lines around the question and the rows are wrapped to the terminal
+	// before they are counted, so the question and the rows give way to the
+	// lines the screen shows. A row stays one line, since the rows are paged by
+	// the line, so a row wider than the terminal is cut at its edge. Two lines
+	// of the list hold the row in play and, when there are more, the line that
+	// counts the rest.
+	top, below, under := m.wrap(head.String()), m.wrap(b.String()), m.wrap(after.String())
+	m.fitQuestion(lines(top) + lines(below) + min(len(list), 2) + lines(under))
 	b.Reset()
-	b.WriteString(head.String() + m.question.View() + "\n" + below)
-	for _, line := range listLines(list, sel, m.room(b.String(), after.String())) {
+	b.WriteString(top + m.question.View() + "\n" + below)
+	for _, line := range listLines(list, sel, m.room(b.String(), under)) {
 		b.WriteString(line + "\n")
 	}
-	b.WriteString(after.String())
+	b.WriteString(under)
 	return b.String()
 }
 
@@ -1397,7 +1479,7 @@ func (m *Model) progressView() string {
 	default:
 		b.WriteString("\n" + hintStyle.Render("Leaves once its sitting starts; return with gc-helm.sh attach") + "\n")
 	}
-	return b.String()
+	return m.wrap(b.String())
 }
 
 func (m *Model) returnView() string {
@@ -1410,7 +1492,7 @@ func (m *Model) returnView() string {
 		} else {
 			b.WriteString(waitStyle.Render("…") + " reading the open conversations\n")
 		}
-		return b.String()
+		return m.wrap(b.String())
 	}
 	if m.cityErr != "" {
 		// A read again that failed keeps the rows the last read gave, so the
@@ -1447,14 +1529,19 @@ func (m *Model) returnView() string {
 	}
 	// The list is paged to the terminal, around the selection, or around where
 	// it was while nothing is selected, so ↑/↓ moves through rows on screen and
-	// Enter attaches to the row the operator sees marked.
+	// Enter attaches to the row the operator sees marked. The lines above and
+	// below the rows are wrapped before they are counted, and a row stays one
+	// line, as on the compose screen.
 	sel := at
 	if sel < 0 {
 		sel = m.retAt
 	}
-	for _, line := range listLines(list, sel, m.room(b.String(), after.String())) {
+	top, under := m.wrap(b.String()), m.wrap(after.String())
+	b.Reset()
+	b.WriteString(top)
+	for _, line := range listLines(list, sel, m.room(top, under)) {
 		b.WriteString(line + "\n")
 	}
-	b.WriteString(after.String())
+	b.WriteString(under)
 	return b.String()
 }

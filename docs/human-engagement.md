@@ -509,7 +509,10 @@ conversation, so a read that re-sorts the list keeps it picked, and one that
 leaves the list leaves nothing picked until ↑/↓ picks again. A list longer than
 the terminal shows the page the pick is on, and a last line counts the rows
 above and below, so the row picked is always on screen, through a resize and a
-read that moves it. The form's rows on a subject are paged the same way. A read
+read that moves it. The form's rows on a subject are paged the same way. The
+form wraps its text at spaces to the terminal's width, so a destination, a
+refusal or a status is shown whole and the rows page around the lines it takes,
+while a row stays one line, which a narrower terminal cuts at its edge. A read
 again that fails keeps the rows the last read gave, and the screen says since
 when the list has not been refreshed, that it may be out of date, and why the
 read failed. Enter attaches to the one picked, and a sitting held anew there

@@ -7,9 +7,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -1347,7 +1349,10 @@ func TestTheReturnListPagesToTheTerminal(t *testing.T) {
 	if m.retSel != "tk-c29" {
 		t.Fatalf("selected %q after 29 ↓, want tk-c29", m.retSel)
 	}
-	for _, h := range []int{24, 10, 4} {
+	// At 80 columns the header wraps onto two lines, so five lines is the
+	// shortest terminal with room for it, the line under it, the row selected
+	// and the line that counts the rows left out.
+	for _, h := range []int{24, 10, 5} {
 		m.Update(tea.WindowSizeMsg{Width: 80, Height: h})
 		v := m.returnView()
 		if n := lines(v); n > h {
@@ -1822,5 +1827,228 @@ func TestTheKeptDraftsCommandFilesTheQuestionWhole(t *testing.T) {
 	}
 	if _, err := os.Stat(got); !os.IsNotExist(err) {
 		t.Fatalf("the command ran engage with its draft gone")
+	}
+}
+
+// sgr matches the style sequences lipgloss writes.
+var sgr = regexp.MustCompile("\x1b\\[[0-9;]*m")
+
+// screenAt is the text a terminal width columns wide and height lines tall
+// shows of a view: bubbletea v2 draws the view without wrapping it, so the
+// terminal cuts each line at its edge and drops the lines below its last.
+func screenAt(view string, width, height int) []string {
+	var out []string
+	for _, l := range onScreen(sgr.ReplaceAllString(view, ""), height) {
+		for lipgloss.Width(l) > width {
+			_, n := utf8.DecodeLastRuneInString(l)
+			l = l[:len(l)-n]
+		}
+		out = append(out, l)
+	}
+	return out
+}
+
+// reads is the text of the lines of a screen, as one line with single spaces,
+// so a sentence the screen wraps reads as it was written.
+func reads(screen []string) string {
+	return strings.Join(strings.Fields(strings.Join(screen, " ")), " ")
+}
+
+// filesAs is the destination a screen shows: the text beside "Files as" and
+// its mark, and the lines indented under that text.
+func filesAs(screen []string) string {
+	const under = "            " // as wide as "Files as  ✓ "
+	for i, l := range screen {
+		rest, ok := strings.CutPrefix(l, "Files as  ")
+		if !ok {
+			continue
+		}
+		_, text, _ := strings.Cut(rest, " ")
+		parts := []string{strings.TrimSpace(text)}
+		for _, c := range screen[i+1:] {
+			if !strings.HasPrefix(c, under) || strings.TrimSpace(c) == "" {
+				break
+			}
+			parts = append(parts, strings.TrimSpace(c))
+		}
+		return strings.Join(parts, " ")
+	}
+	return ""
+}
+
+// demoGateHelm answers as testdata/helm-fixture.sh answers for tk-demo1, a
+// subject whose title fills much of a line, and for tk-demo10, the gate it is
+// held by, which tk-demo11 waits on too: read from tk-demo1 it is about
+// tk-demo1, and read from nothing it is refused, naming both.
+func demoGateHelm() *fakeHelm {
+	subject := Subject{ID: "tk-demo1", Title: "Board: show a PR's held reason on its row", Status: "open", IssueType: "task", Rig: "gc-toolkit"}
+	asked := Conversation{ID: "tk-demo2", Readiness: Ready, Title: "why does the held label lag the gate by a cycle?"}
+	gate := Hold{Held: "gate", ID: "tk-demo10", Title: "Approve the label wording"}
+	return &fakeHelm{
+		about: map[string]About{
+			"tk-demo1": {Ref: "tk-demo1", Subject: subject, HoldsRead: true,
+				Conversations: []Conversation{asked, {ID: "tk-demo9", Readiness: Preparing, Title: "your question"}},
+				Holds:         []Hold{gate, {Held: "review", Title: "2 review threads wait on the city's answer"}}},
+			"tk-demo10 --from tk-demo1": {Ref: "tk-demo10", Subject: subject, Gate: "tk-demo10", HoldsRead: true,
+				Conversations: []Conversation{asked}, Holds: []Hold{gate}},
+		},
+		aboutErr: map[string]error{"tk-demo10": &Refusal{Code: 4, Why: "gc-helm: conversations: gate tk-demo10 is about 2 beads still waiting on it (tk-demo1 tk-demo11), " +
+			"and a conversation is about one bead. Name the one you mean: gc-helm conversations tk-demo10 --from <bead>. Nothing read."}},
+	}
+}
+
+// The destination is wrapped to the terminal beside "Files as", each line after
+// the first under its text, so a narrow terminal shows all of it before Ctrl+S:
+// the subject, its rig and the gate the conversation answers. On one line, the
+// fixture's gate chosen from tk-demo1 files a destination 128 columns wide.
+func TestTheDestinationIsShownWholeOnANarrowTerminal(t *testing.T) {
+	m := newForm(t, demoGateHelm(), Options{Subject: "tk-demo1"})
+	m.Update(tea.WindowSizeMsg{Width: 110, Height: 40})
+	settle(m)
+	chooseRow(t, m, "tk-demo10")
+	dest, ok := m.destination()
+	if !ok || !strings.HasSuffix(dest, "— in rig gc-toolkit, answering gate tk-demo10") {
+		t.Fatalf("destination = %q, %v", dest, ok)
+	}
+	for _, w := range []int{110, 80, 60, 40} {
+		m.Update(tea.WindowSizeMsg{Width: w, Height: 40})
+		v := m.composeView()
+		if got := filesAs(screenAt(v, w, 40)); got != dest {
+			t.Fatalf("at %d columns the screen shows the destination as\n%q, want\n%q:\n%s", w, got, dest, v)
+		}
+	}
+}
+
+// The rows page around the lines the destination wraps onto, so on a short
+// terminal the whole destination, the row in play, the line that counts the
+// rows left out and the status are all on screen.
+func TestTheRowsPageAroundTheLinesTheDestinationWrapsOnto(t *testing.T) {
+	f := demoGateHelm()
+	f.saveErr = errors.New("the store did not answer")
+	m := newForm(t, f, Options{Subject: "tk-demo1"})
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 22})
+	settle(m)
+	chooseRow(t, m, "tk-demo10")
+	focusOn(t, m, questionField)
+	typeText(m, "is the wording right?")
+	_, cmd := m.Update(ctrl('s'))
+	deliver(m, cmd)
+	if !strings.HasPrefix(m.status, "Not saved") {
+		t.Fatalf("status = %q", m.status)
+	}
+	focusOn(t, m, contextField)
+	for range 3 {
+		m.Update(key(tea.KeyDown))
+	}
+	dest, _ := m.destination()
+	v := m.composeView()
+	if n := lines(v); n > 22 {
+		t.Fatalf("the view is %d lines on a 22-line terminal:\n%s", n, v)
+	}
+	screen := screenAt(v, 80, 22)
+	if got := filesAs(screen); got != dest {
+		t.Fatalf("the screen shows the destination as %q, want %q:\n%s", got, dest, v)
+	}
+	if !strings.Contains(marked(screen, "› "), "tk-demo10") || marked(screen, "2 more above") == "" || marked(screen, "Not saved") == "" {
+		t.Fatalf("the cursor's row, the count of the rows left out or the status is not on screen:\n%s", strings.Join(screen, "\n"))
+	}
+}
+
+// Each screen wraps its text to the terminal, so what a refused save or a read
+// that failed says is shown whole: on the compose screen the refusal beside
+// "Files as" and the status under it, on the progress screen why the save did
+// not complete and what r does, and on the return list the rigs whose store
+// did not read, with the selected row on screen.
+func TestEveryScreenShowsWhatItSaysWhole(t *testing.T) {
+	why := "gc-helm: conversations: gate tk-demo10 is about 2 beads still waiting on it (tk-demo1 tk-demo11), " +
+		"and a conversation is about one bead. Name the one you mean: gc-helm conversations tk-demo10 --from <bead>. Nothing read."
+	m := newForm(t, demoGateHelm(), Options{Subject: "tk-demo10"})
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
+	settle(m)
+	typeText(m, "q")
+	_, cmd := m.Update(ctrl('s'))
+	deliver(m, cmd)
+	screen := screenAt(m.composeView(), 80, 30)
+	if got := filesAs(screen); got != why {
+		t.Fatalf("the screen shows the refusal as %q:\n%s", got, strings.Join(screen, "\n"))
+	}
+	if said := "Not saved: " + strings.TrimSuffix(why, ".") + ". Reading it again."; !strings.Contains(reads(screen), said) {
+		t.Fatalf("the screen does not show the status whole, %q:\n%s", said, strings.Join(screen, "\n"))
+	}
+
+	saveErr := "gc-helm: open: filed conversation tk-c on tk-a, but its reply onto gate tk-g did not write: the store did not answer within 30s"
+	f := &fakeHelm{about: map[string]About{"tk-a": subjectAbout("tk-a", "gc-toolkit")},
+		saveResp: Saved{Subject: "tk-a", Conversation: "tk-c", Filed: true}, saveErr: errors.New(saveErr)}
+	m = newForm(t, f, Options{Subject: "tk-a"})
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
+	settle(m)
+	typeText(m, "q")
+	_, cmd = m.Update(ctrl('s'))
+	deliver(m, cmd)
+	text := reads(screenAt(m.progressView(), 80, 30))
+	for _, said := range []string{
+		"✗ the save did not complete, so no sitting was started: " + saveErr,
+		"r saves it again onto conversation tk-c, which completes it or says why it cannot, and files no other.",
+	} {
+		if !strings.Contains(text, said) {
+			t.Fatalf("the progress screen does not show %q whole:\n%s", said, m.progressView())
+		}
+	}
+
+	unread := []string{"gc-toolkit", "gascity", "a-rig-whose-name-runs-long", "another-rig-with-a-long-name", "docs"}
+	f = &fakeHelm{city: City{Conversations: convs(30), Unread: unread}}
+	m = newForm(t, f, Options{Return: true})
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 12})
+	loadCity(m)
+	for range 29 {
+		m.Update(key(tea.KeyDown))
+	}
+	v := m.returnView()
+	screen = screenAt(v, 80, 12)
+	if said := "Not listed: the store of " + strings.Join(unread, ", ") + " could not be read."; !strings.Contains(reads(screen), said) {
+		t.Fatalf("the return list does not show %q whole:\n%s", said, v)
+	}
+	if n := lines(v); n > 12 || !strings.Contains(marked(screen, "› "), "tk-c29") {
+		t.Fatalf("on a 12-line terminal the view is %d lines, or the selected row is not on screen:\n%s", n, v)
+	}
+}
+
+// wrapAtSpaces breaks a line only at its spaces, measured in display cells,
+// so an id or a rig with a hyphen in it stays on one line and a wide rune
+// counts as the two columns it takes. A word wider than the line is cut, at
+// its hyphen where it has one, the spaces a line starts with stay, a style
+// carries onto each line it wraps onto, and a line that fits is left as it is.
+func TestWrapAtSpacesBreaksOnlyAtSpaces(t *testing.T) {
+	for _, c := range []struct {
+		s     string
+		width int
+		want  []string
+	}{
+		{"answering gate tk-demo10", 18, []string{"answering gate", "tk-demo10"}},
+		{"in rig gc-toolkit, answering", 11, []string{"in rig", "gc-toolkit,", "answering"}},
+		{"in rig gc-toolkit, answering", 10, []string{"in rig", "gc-", "toolkit,", "answering"}},
+		{"確認 確認 確認 tk-a1b2", 9, []string{"確認 確認", "確認", "tk-a1b2"}},
+		{"see https://example.com/a/very/long/path", 12, []string{"see", "https://exam", "ple.com/a/ve", "ry/long/path"}},
+		{"  · held: review — 2 review threads wait", 20, []string{"  · held: review — 2", "review threads wait"}},
+		{"fits\nthis one does not fit", 9, []string{"fits", "this one", "does not", "fit"}},
+	} {
+		got := strings.Split(wrapAtSpaces(c.s, c.width), "\n")
+		if strings.Join(got, "|") != strings.Join(c.want, "|") {
+			t.Errorf("wrapAtSpaces(%q, %d) = %q, want %q", c.s, c.width, got, c.want)
+		}
+		for _, l := range got {
+			if lipgloss.Width(l) > c.width {
+				t.Errorf("wrapAtSpaces(%q, %d): %q is %d cells wide", c.s, c.width, l, lipgloss.Width(l))
+			}
+		}
+	}
+	styled := badStyle.Render("Not saved: the store did not answer")
+	for _, l := range strings.Split(wrapAtSpaces(styled, 12), "\n") {
+		if text := sgr.ReplaceAllString(l, ""); l != badStyle.Render(text) {
+			t.Errorf("line %q does not carry the style on its own, as %q does", l, badStyle.Render(text))
+		}
+	}
+	if s := "a line far wider than its terminal"; wrapAtSpaces(s, 0) != s {
+		t.Errorf("a terminal whose width is not known yet wrapped %q", s)
 	}
 }
