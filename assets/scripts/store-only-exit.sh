@@ -41,12 +41,14 @@
 # assignee, so --done needs the bead open, unassigned and unrouted, the shape
 # Gas City leaves the bead a graph.v2 run works.
 #
-# Everything is read and checked before anything is written, and each write is
-# read back. The first one that does not land exits 1, and the step drains
-# without recording the exit or handing the bead back, so the step stays
-# claimed and the worker that takes it next re-takes the exit. A re-run
-# converges: an edge and an arm already in place count as landed, and the notes
-# gain a second copy of the brief.
+# Everything is read and checked before anything is written, the run's root
+# being in the bead's store among it, since bd stores an edge onto another
+# store's bead without finding it and the edge holds nothing. Each write takes
+# its exit. The first one refused exits 1, and the step drains without
+# recording the exit or handing the bead back, so the step stays claimed and
+# the worker that takes it next re-takes the exit. A re-run converges: bd takes
+# an edge already in place as a no-op, a second arm rewrites the first, and the
+# notes gain a second copy of the brief.
 #
 # Callers: work-submit.sh --store-only, which mol-polecat-work's
 # submit-and-exit step runs.
@@ -206,6 +208,10 @@ if ! printf '%s' "$RUNS" | jq -e --arg r "$ROOT" --arg b "$BEAD" --arg c "$CONVO
   echo "$PROG: the run rooted at $ROOT, which this session executes, is not a live run over $CONVOY that works $BEAD, so it cannot hold its validating closer; nothing was written" >&2
   exit 1
 fi
+if ! bd_same_store "$BEAD" "$ROOT"; then
+  echo "$PROG: the run's root $ROOT is in another store than $BEAD, so a blocks edge onto it would hold nothing; nothing was written" >&2
+  exit 1
+fi
 
 # ── The brief, the hold, the arm ─────────────────────────────────────────────
 if ! gc bd update "$BEAD" --append-notes "## Close brief (store-only exit, $(date -u +%Y-%m-%dT%H:%M:%SZ))
@@ -215,33 +221,14 @@ $DONE" </dev/null >/dev/null 2>&1; then
 fi
 
 # `dep add <bead> <blocker>` reads "<bead> is blocked by <blocker>".
-holds_on_root() {
-  bd_json dep list "$BEAD" | jq -e --arg r "$ROOT" '
-    type == "array" and any(.[]; (.id // .depends_on_id // "") == $r
-                               and ((.dependency_type // .type // "") == "blocks"))' >/dev/null 2>&1
-}
-if ! holds_on_root; then
-  gc bd dep add "$BEAD" "$ROOT" --type=blocks </dev/null >/dev/null 2>&1 || true
-  if ! holds_on_root; then
-    echo "$PROG: the blocks edge from $BEAD onto its run's root $ROOT did not land, so its validating closer was not armed" >&2
-    exit 1
-  fi
+if ! gc bd dep add "$BEAD" "$ROOT" --type=blocks </dev/null >/dev/null 2>&1; then
+  echo "$PROG: the store refused the blocks edge from $BEAD onto its run's root $ROOT, so its validating closer was not armed" >&2
+  exit 1
 fi
 
 if ! ARM_OUT=$("$DEFERRED" arm "$BEAD" --target "$POOL" --sling-arg --on --sling-arg "$CLOSER" \
     --reason "store-only exit: its record finishes it, which $CLOSER re-checks" 2>&1 </dev/null); then
   echo "$PROG: the validating closer was not armed on $BEAD: $ARM_OUT" >&2
-  exit 1
-fi
-BACK=$(bd_json show "$BEAD")
-ARMED=$(printf '%s' "$BACK" | jq -r '.[0].metadata["gc.dispatch_when_ready"] // empty' 2>/dev/null)
-ARMED_ON=$(printf '%s' "$BACK" | jq -r '(.[0].metadata["gc.dispatch_when_ready_args"] // "") | tostring' 2>/dev/null)
-case "$ARMED_ON" in
-  *"\"$CLOSER\""*) ;;
-  *) ARMED_ON="" ;;
-esac
-if [ "$ARMED" != "$POOL" ] || [ -z "$ARMED_ON" ]; then
-  echo "$PROG: $BEAD reads back armed to '$ARMED' with sling arguments that do not pour $CLOSER; its validating closer is not armed" >&2
   exit 1
 fi
 echo "$PROG: $BEAD has nothing to land, and $CLOSER is armed on $POOL, held on run $ROOT, so it re-checks the record once this run ends"

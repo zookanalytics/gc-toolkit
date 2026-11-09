@@ -8,7 +8,7 @@
 #     run cancel) and writes no step or root itself, while a run the releasing
 #     session holds a step of is left to close its own chain
 #   --release on a CLOSED anchor: the run's end without the resurrecting park
-#   --waiting-on edges
+#   --waiting-on edges, and the refusal of a wait in another store
 #   the ≤140-codepoint length gate
 #   the retired board verb refuses and names helm-svc board
 #   the rig-enumeration helper leaving no trap installed on its caller
@@ -161,27 +161,20 @@ case "$1 ${2:-}" in
     case "$id" in UNKNOWN-*) printf '{"error":"no issues found"}\n'; exit 0 ;; esac
     # CLOSED- ids answer status=closed; everything else is open. --release on a
     # closed anchor ends its run without the park.
-    st=open; case "$id" in CLOSED-*) st=closed ;; esac
+    st=open; case "$id" in CLOSED-*|A-CLOSED-*) st=closed ;; esac
     convoy=$(awk -F'|' -v r="$id" '$1==r{print $2; exit}' "$FAKE_ROOTS")
-    # What gc.routed_to reads back as. FAKE_ROUTED holds it, so a test can
-    # model the route LANDING and the route landing EMPTY (the silent drop a
-    # multi-pair --set-metadata update can produce) with the same stub.
+    # What gc.routed_to reads as: FAKE_ROUTED holds it.
     routed="$(cat "${FAKE_ROUTED:-/dev/null}" 2>/dev/null || true)"
-    # What gc.execution_routed_to reads back as: the pour stamp a --release
-    # retires. FAKE_EXEC holds it, so a test models the clear LANDING (empty)
-    # and the clear being DROPPED (the stamp still standing) with one stub.
+    # What gc.execution_routed_to reads as, the pour stamp a --release retires:
+    # FAKE_EXEC holds it.
     exec_routed="$(cat "${FAKE_EXEC:-/dev/null}" 2>/dev/null || true)"
-    # What gc.takeaway_settled reads back as. Every landed write updates it
-    # below, so the default fixture models a store that keeps what it was told;
-    # FAKE_SETTLED_DROP models the pair that silently does not land.
+    # What gc.takeaway_settled reads as. Every landed write updates it below.
     settled="$(cat "${FAKE_SETTLED:-/dev/null}" 2>/dev/null || true)"
-    # What gc.takeaway, the headline itself, reads back as. It lands below the
-    # same way gc.takeaway_settled does, and FAKE_TAKEAWAY_DROP is its silent drop.
+    # What gc.takeaway, the headline itself, reads as. It lands below the same
+    # way gc.takeaway_settled does.
     takeaway="$(cat "${FAKE_TAKEAWAY:-/dev/null}" 2>/dev/null || true)"
-    # What gc.session_name / gc.session_id read back as: the executor identity a
-    # --release clears via --unset-metadata. FAKE_SNAME/FAKE_SID hold them, so a
-    # test models the clear LANDING (empty) and being DROPPED (the pin still
-    # standing) with one stub, the way FAKE_EXEC does for the pour stamp.
+    # What gc.session_name / gc.session_id read as: the executor identity a
+    # --release clears via --unset-metadata. FAKE_SNAME/FAKE_SID hold them.
     sname="$(cat "${FAKE_SNAME:-/dev/null}" 2>/dev/null || true)"
     sid="$(cat "${FAKE_SID:-/dev/null}" 2>/dev/null || true)"
     # metadata.branch is what the refinery records when work rides another bead's
@@ -194,16 +187,6 @@ case "$1 ${2:-}" in
     asg="$(awk -F'|' -v i="$id" '$1==i{print $2; exit}' "$FAKE_ASSIGNEES" 2>/dev/null || true)"
     if [ -n "$convoy" ]; then row=$(jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg c "$convoy" --arg rt "$routed" --arg er "$exec_routed" --arg sd "$settled" --arg tk "$takeaway" --arg sn "$sname" --arg si "$sid" --arg br "$br" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.takeaway":$tk,"gc.takeaway_settled":$sd,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br}}]')
     else row=$(jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg rt "$routed" --arg er "$exec_routed" --arg sd "$settled" --arg tk "$takeaway" --arg sn "$sname" --arg si "$sid" --arg br "$br" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.takeaway":$tk,"gc.takeaway_settled":$sd,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br}}]'); fi
-    # The placement marker intake writes, and a parent-child parent: the release's
-    # pour-stamp read-back judges both through placement.sh. FAKE_PLACEMENT and
-    # FAKE_PARENT hold them, and an empty file leaves the key off the row, as on
-    # every bead intake never held.
-    pl="$(cat "${FAKE_PLACEMENT:-/dev/null}" 2>/dev/null || true)"
-    pa="$(cat "${FAKE_PARENT:-/dev/null}" 2>/dev/null || true)"
-    if [ -n "$pl$pa" ]; then
-      row=$(printf '%s' "$row" | jq --arg pl "$pl" --arg pa "$pa" \
-        '(if $pl != "" then .[0].metadata.placement = $pl else . end) | (if $pa != "" then .[0].parent = $pa else . end)')
-    fi
     printf '%s\n' "$row" ;;
   "bd close")
     printf '%s\n' "$*" >> "$FAKE_CLOSES" ;;
@@ -218,64 +201,20 @@ case "$1 ${2:-}" in
   "bd update")
     printf '%s\n' "$*" >> "$FAKE_UPDATES"
     # A store that rejects the write. NOPIN stands for every reason a write on
-    # a bead fails to land.
+    # a bead fails to land, and FAKE_UPDATE_RC refuses every update.
     case "$3" in *NOPIN*) exit 1 ;; esac
-    # gc.takeaway_settled lands here so a read-back sees what was written.
-    # FAKE_SETTLED_DROP=1 loses every one of them (no repair recovers it);
-    # =multi loses it only out of a multi-pair stamp, which is the shape a lone
-    # repair write recovers — the two halves of one silent-drop story.
-    pairs=0
-    for a in "$@"; do [ "$a" = "--set-metadata" ] && pairs=$((pairs + 1)); done
+    [ -z "${FAKE_UPDATE_RC:-}" ] || exit "$FAKE_UPDATE_RC"
+    # The keys a release writes land here, so a read of the bead sees them.
     for a in "$@"; do
       case "$a" in
-        gc.takeaway_settled=*)
-          case "${FAKE_SETTLED_DROP:-}" in
-            1)     ;;
-            multi) [ "$pairs" -le 1 ] && printf '%s' "${a#gc.takeaway_settled=}" > "$FAKE_SETTLED" ;;
-            *)     printf '%s' "${a#gc.takeaway_settled=}" > "$FAKE_SETTLED" ;;
-          esac ;;
-        # gc.takeaway, the headline, lands here too. FAKE_TAKEAWAY_DROP=1 loses
-        # every one; =once loses only the first, marked by $FAKE_TAKEAWAY.dropped,
-        # the transient drop a repair recovers. The repair re-stamps the
-        # disposition beside the headline, so it is a multi-pair write itself,
-        # and a pair-count rule like the settled key's would drop it as well.
-        gc.takeaway=*)
-          case "${FAKE_TAKEAWAY_DROP:-}" in
-            1)    ;;
-            once) if [ -e "$FAKE_TAKEAWAY.dropped" ]; then printf '%s' "${a#gc.takeaway=}" > "$FAKE_TAKEAWAY"
-                  else : > "$FAKE_TAKEAWAY.dropped"; fi ;;
-            *)    printf '%s' "${a#gc.takeaway=}" > "$FAKE_TAKEAWAY" ;;
-          esac ;;
-        # gc.execution_routed_to is CLEARED via --unset-metadata, so its token
-        # arrives bare (no =value). A landed clear empties FAKE_EXEC, so the
-        # read-back reads absent. FAKE_EXEC_DROP=1 loses every clear (the store
-        # that will not take it, no repair recovers it); =multi loses it only
-        # out of the multi-pair release write, the shape the lone repair clears.
-        gc.execution_routed_to)
-          case "${FAKE_EXEC_DROP:-}" in
-            1)     ;;
-            multi) [ "$pairs" -le 1 ] && : > "$FAKE_EXEC" ;;
-            *)     : > "$FAKE_EXEC" ;;
-          esac ;;
-        # gc.session_name / gc.session_id are CLEARED via --unset-metadata, bare
-        # like the pour stamp. A landed clear empties the pin file so the read-back
-        # reads absent. FAKE_SNAME_DROP/FAKE_SID_DROP=1 lose every clear (no repair
-        # recovers it); =multi loses it only out of the multi-pair release write,
-        # the shape the lone repair unset clears.
-        gc.session_name)
-          case "${FAKE_SNAME_DROP:-}" in
-            1)     ;;
-            multi) [ "$pairs" -le 1 ] && : > "$FAKE_SNAME" ;;
-            *)     : > "$FAKE_SNAME" ;;
-          esac ;;
-        gc.session_id)
-          case "${FAKE_SID_DROP:-}" in
-            1)     ;;
-            multi) [ "$pairs" -le 1 ] && : > "$FAKE_SID" ;;
-            *)     : > "$FAKE_SID" ;;
-          esac ;;
+        gc.takeaway_settled=*) printf '%s' "${a#gc.takeaway_settled=}" > "$FAKE_SETTLED" ;;
+        gc.takeaway=*) printf '%s' "${a#gc.takeaway=}" > "$FAKE_TAKEAWAY" ;;
+        gc.execution_routed_to) : > "$FAKE_EXEC" ;;
+        gc.session_name) : > "$FAKE_SNAME" ;;
+        gc.session_id) : > "$FAKE_SID" ;;
       esac
-    done ;;
+    done
+    ;;
   "bd dep")
     # `dep list` is a READ: it answers from a per-bead fixture and never lands
     # in FAKE_DEPS, which models the graph writes the edge assertions count.
@@ -334,7 +273,7 @@ export FAKE_STEPS_JSON="$TMP/steps.json" FAKE_ROOTS="$TMP/roots" \
        FAKE_DEPS="$TMP/deps" FAKE_CLOSES="$TMP/closes" FAKE_LISTS="$TMP/lists" \
        FAKE_ROUTED="$TMP/routed" FAKE_SUPERSEDED="$TMP/superseded" \
        FAKE_SETTLED="$TMP/settled" FAKE_TAKEAWAY="$TMP/takeaway" \
-       FAKE_EXEC="$TMP/exec" FAKE_PLACEMENT="$TMP/placement" FAKE_PARENT="$TMP/parent" \
+       FAKE_EXEC="$TMP/exec" \
        FAKE_SNAME="$TMP/sname" FAKE_SID="$TMP/sid" FAKE_DEPLISTS="$TMP/deplists" \
        FAKE_BRANCHES="$TMP/branches" FAKE_ASSIGNEES="$TMP/assignees" \
        FAKE_CONVOY_CALLS="$TMP/convoy-calls"
@@ -357,17 +296,17 @@ export GCTK_BIN
 # Teach the stub to serve it instead of failing and both probe cases go red.
 # That is what proves they pass on the unreadable path and not on an empty one.
 cat > "$TMP/deplists/A-BLOCKED.json" <<'J'
-[{"id":"w-child","status":"open","dependency_type":"blocks","metadata":{}},
+[{"id":"A-w-child","status":"open","dependency_type":"blocks","metadata":{}},
  {"id":"g-mine","status":"open","issue_type":"gate","await_type":"human","await_id":"rollout","dependency_type":"blocks","metadata":{}}]
 J
 cat > "$TMP/deplists/A-GATED.json" <<'J'
 [{"id":"g-mine","status":"open","issue_type":"gate","await_type":"human","await_id":"rollout","dependency_type":"blocks","metadata":{}}]
 J
 cat > "$TMP/deplists/A-DONEBLK.json" <<'J'
-[{"id":"w-child","status":"closed","dependency_type":"blocks","metadata":{}}]
+[{"id":"A-w-child","status":"closed","dependency_type":"blocks","metadata":{}}]
 J
 cat > "$TMP/deplists/CLOSED-A-FOLD.json" <<'J'
-[{"id":"w-child","status":"open","dependency_type":"blocks","metadata":{}}]
+[{"id":"A-w-child","status":"open","dependency_type":"blocks","metadata":{}}]
 J
 # A-PINNEDBLK a pinned blocker, which the store counts as none -> nothing waits
 # A-WAITSFOR  a waits-for edge of its own, which the store cannot judge yet ->
@@ -379,33 +318,33 @@ cat > "$TMP/deplists/A-WAITSFOR.json" <<'J'
 [{"id":"w-spawn","status":"closed","dependency_type":"waits-for","metadata":{}}]
 J
 cat > "$TMP/deplists/A-PROBEDEAD.json" <<'J'
-[{"id":"w-child","status":"open","dependency_type":"blocks","metadata":{}}]
+[{"id":"A-w-child","status":"open","dependency_type":"blocks","metadata":{}}]
 J
 cat > "$TMP/deplists/A-PROBEJUNK.json" <<'J'
-[{"id":"w-child","status":"open","dependency_type":"blocks","metadata":{}}]
+[{"id":"A-w-child","status":"open","dependency_type":"blocks","metadata":{}}]
 J
 export FAKE_RA_PATH="$TMP/rig-a"
 : > "$TMP/deps"; : > "$TMP/closes"; : > "$TMP/lists"; : > "$TMP/routed"
 : > "$TMP/settled"; : > "$TMP/takeaway"
-# metadata.branch per bead, for the --waiting-on landed-rider skip. w-same,
-# w-pend and CLOSED-w-rider all share A-ONBR's branch; w-diff rides its own and
-# w-nobr has none. A-PARKED/tk-blk* stay branchless so the edge tests above them
+# metadata.branch per bead, for the --waiting-on landed-rider skip. A-w-same,
+# A-w-pend and A-CLOSED-w-rider all share A-ONBR's branch; A-w-diff rides its own and
+# A-w-nobr has none. A-PARKED/tk-blk* stay branchless so the edge tests above them
 # keep writing edges. A shared branch alone is not landing: the proof is the
-# status/assignee below — w-same is handed off to the refinery and CLOSED-w-rider
-# has merged (both landed riders), while w-pend is still open under a pool, so its
+# status/assignee below — A-w-same is handed off to the refinery and A-CLOSED-w-rider
+# has merged (both landed riders), while A-w-pend is still open under a pool, so its
 # work is not on the branch yet and its edge stands.
 cat > "$TMP/branches" <<'BR'
 A-ONBR|polecat/A-ONBR
-w-same|polecat/A-ONBR
-w-pend|polecat/A-ONBR
-CLOSED-w-rider|polecat/A-ONBR
-w-diff|polecat/w-diff
+A-w-same|polecat/A-ONBR
+A-w-pend|polecat/A-ONBR
+A-CLOSED-w-rider|polecat/A-ONBR
+A-w-diff|polecat/A-w-diff
 BR
 # Top-level assignee per bead. The refinery is the post-push handoff that makes
-# w-same a LANDED rider; w-pend's pool assignee is work still owed, not that proof.
+# A-w-same a LANDED rider; A-w-pend's pool assignee is work still owed, not that proof.
 cat > "$TMP/assignees" <<'ASG'
-w-same|gc-toolkit/gc-toolkit.refinery
-w-pend|gc-toolkit/gc-toolkit.polecat-3
+A-w-same|gc-toolkit/gc-toolkit.refinery
+A-w-pend|gc-toolkit/gc-toolkit.polecat-3
 ASG
 unset GC_HELM_FIXTURE || true
 # GC_RIG and BEADS_DIR too: the current-sitting lookup resolves the session's
@@ -434,8 +373,7 @@ grep -q 'gc.routed_to=' <<< "$A" \
   && ok "(RELEASE) anchor route cleared" || bad "(RELEASE) anchor route cleared"
 # The pour that dispatched this bead stamped gc.execution_routed_to; a release
 # ends that pour, so the stamp is retired in the same write, and a parked or
-# re-routed bead does not linger advertising a finished pour's pool. The stamp's
-# read-back is covered with the EXEC cases below.
+# re-routed bead does not linger advertising a finished pour's pool.
 grep -q -- '--unset-metadata gc.execution_routed_to' <<< "$A" \
   && ok "(RELEASE) anchor pour stamp (gc.execution_routed_to) retired" || bad "(RELEASE) anchor execution_routed_to cleared (got: $A)"
 # The unassign takes the departing executor's identity with it: a gc.session_name
@@ -540,19 +478,19 @@ if [ -n "$ERR" ]; then printf 'note: script stderr:\n%s\n' "$ERR" >&2; fi
 #   (EDGEMANY)  repeatable; --waiting-on=<id> parses too
 #   (EDGESTAMP) the takeaway is still stamped in the same run
 #   (EDGESELF)  a bead cannot wait on itself
-#   (EDGEFAIL)  a rejected edge never loses the takeaway, and the verb exits 0
+#   (EDGEFAIL)  a rejected edge never loses the takeaway, and the verb exits 4
 #   (EDGENONE)  no flag, no edges
 : > "$TMP/updates"; : > "$TMP/deps"
 sh "$SCRIPT" takeaway A-PARKED "routed — the fix is slung" --by converse \
-   --waiting-on tk-blk1 --waiting-on=tk-blk2 >/dev/null 2>"$TMP/werr" || true
+   --waiting-on A-blk1 --waiting-on=A-blk2 >/dev/null 2>"$TMP/werr" || true
 DEPS="$(cat "$TMP/deps")"
 
-grep -qE '^bd dep add A-PARKED tk-blk1 -t blocks' <<< "$DEPS" \
-  && ok "(EDGE) the wait is written as an edge: A-PARKED depends on tk-blk1" \
-  || bad "(EDGE) no depends-on edge for tk-blk1 (got: ${DEPS:-<none>})"
-grep -qE '^bd dep add A-PARKED tk-blk2 -t blocks' <<< "$DEPS" \
+grep -qE '^bd dep add A-PARKED A-blk1 -t blocks' <<< "$DEPS" \
+  && ok "(EDGE) the wait is written as an edge: A-PARKED depends on A-blk1" \
+  || bad "(EDGE) no depends-on edge for A-blk1 (got: ${DEPS:-<none>})"
+grep -qE '^bd dep add A-PARKED A-blk2 -t blocks' <<< "$DEPS" \
   && ok "(EDGEMANY) --waiting-on repeats, and the =VALUE form parses" \
-  || bad "(EDGEMANY) tk-blk2 missing (got: ${DEPS:-<none>})"
+  || bad "(EDGEMANY) A-blk2 missing (got: ${DEPS:-<none>})"
 eq "$(grep -c '^bd dep add' <<< "$DEPS")" "2" "(EDGEMANY) exactly one edge per flag, no duplicates"
 grep -q -- '--set-metadata gc.takeaway=routed — the fix is slung' "$TMP/updates" \
   && ok "(EDGESTAMP) the takeaway itself is still stamped in the same run" \
@@ -566,17 +504,18 @@ grep -q 'bead itself' "$TMP/werr" \
   && ok "(EDGESELF) …and the refusal names the reason" \
   || bad "(EDGESELF) silent skip (stderr: $(cat "$TMP/werr"))"
 
-# (EDGEFAIL) the takeaway is written FIRST; a failed edge warns, exit stays 0.
+# (EDGEFAIL) the takeaway is written FIRST; a failed edge warns, and the exit is
+# 4, so a caller that holds on the edge does not take the wait as wired.
 : > "$TMP/updates"; : > "$TMP/deps"
 WRC=0
-sh "$SCRIPT" takeaway A-PARKED "held for review" --waiting-on NOPE >/dev/null 2>"$TMP/werr" || WRC=$?
+sh "$SCRIPT" takeaway A-PARKED "held for review" --waiting-on A-NOPE >/dev/null 2>"$TMP/werr" || WRC=$?
 grep -q -- '--set-metadata gc.takeaway=held for review' "$TMP/updates" \
   && ok "(EDGEFAIL) a rejected edge does not cost the takeaway" \
   || bad "(EDGEFAIL) the stamp was lost when the edge failed: $(cat "$TMP/updates")"
 grep -q 'could not wire' "$TMP/werr" \
   && ok "(EDGEFAIL) …and the failure is reported, not swallowed" \
   || bad "(EDGEFAIL) the failed edge was silent (stderr: $(cat "$TMP/werr"))"
-eq "$WRC" "0" "(EDGEFAIL) …and the verb still succeeds: the takeaway landed"
+eq "$WRC" "4" "(EDGEFAIL) …and the verb exits 4, the takeaway landed and the wait unwired"
 
 # (EDGENONE) the flag is opt-in; existing callers are unchanged.
 : > "$TMP/updates"; : > "$TMP/deps"
@@ -609,7 +548,7 @@ grep -q -- '--set-metadata gc.takeaway=no edges here' "$TMP/updates" \
 #   (EDGEMIX)      one rider + one separate: only the separate lands, unsettled
 : > "$TMP/updates"; : > "$TMP/deps"
 sh "$SCRIPT" takeaway A-ONBR "routed — folded onto this branch" --by converse \
-   --waiting-on w-same >/dev/null 2>"$TMP/werr" || true
+   --waiting-on A-w-same >/dev/null 2>"$TMP/werr" || true
 eq "$(grep -c '^bd dep add' "$TMP/deps" || true)" "0" \
   "(EDGERIDE) a wait that rode the subject's own branch writes no edge"
 grep -q "landed rider on A-ONBR's own branch" "$TMP/werr" \
@@ -625,7 +564,7 @@ grep -q -- '--set-metadata gc.takeaway_settled=1' "$TMP/updates" \
 # (EDGECLOSED) the other landing proof: a same-branch rider that has MERGED.
 : > "$TMP/deps"; : > "$TMP/updates"
 sh "$SCRIPT" takeaway A-ONBR "routed — the rider already merged" --by converse \
-   --waiting-on CLOSED-w-rider >/dev/null 2>&1 || true
+   --waiting-on A-CLOSED-w-rider >/dev/null 2>&1 || true
 eq "$(grep -c '^bd dep add' "$TMP/deps" || true)" "0" \
   "(EDGECLOSED) a merged same-branch rider is landed — no edge"
 grep -q -- '--set-metadata gc.takeaway_settled=1' "$TMP/updates" \
@@ -637,8 +576,8 @@ grep -q -- '--set-metadata gc.takeaway_settled=1' "$TMP/updates" \
 # the sitting must NOT settle. Dropping it would let A merge past unlanded work.
 : > "$TMP/deps"; : > "$TMP/updates"
 sh "$SCRIPT" takeaway A-ONBR "waiting on same-branch work still in flight" --by converse \
-   --waiting-on w-pend >/dev/null 2>&1 || true
-grep -qE '^bd dep add A-ONBR w-pend -t blocks' "$TMP/deps" \
+   --waiting-on A-w-pend >/dev/null 2>&1 || true
+grep -qE '^bd dep add A-ONBR A-w-pend -t blocks' "$TMP/deps" \
   && ok "(EDGEUNLANDED) a same-branch wait not yet landed keeps its edge" \
   || bad "(EDGEUNLANDED) a same-branch wait was dropped without proof it landed (got: $(cat "$TMP/deps"))"
 grep -q -- '--set-metadata gc.takeaway_settled=1' "$TMP/updates" \
@@ -646,28 +585,28 @@ grep -q -- '--set-metadata gc.takeaway_settled=1' "$TMP/updates" \
   || ok "(EDGEUNLANDED) …and the sitting stays unsettled"
 
 : > "$TMP/deps"
-sh "$SCRIPT" takeaway A-ONBR "waiting on a separate PR" --waiting-on w-diff >/dev/null 2>&1 || true
-grep -qE '^bd dep add A-ONBR w-diff -t blocks' "$TMP/deps" \
+sh "$SCRIPT" takeaway A-ONBR "waiting on a separate PR" --waiting-on A-w-diff >/dev/null 2>&1 || true
+grep -qE '^bd dep add A-ONBR A-w-diff -t blocks' "$TMP/deps" \
   && ok "(EDGESEP) a wait on its OWN branch still records its edge" \
   || bad "(EDGESEP) the separate-deliverable edge was dropped (got: $(cat "$TMP/deps"))"
 
 : > "$TMP/deps"
-sh "$SCRIPT" takeaway A-ONBR "waiting on a branchless bead" --waiting-on w-nobr >/dev/null 2>&1 || true
-grep -qE '^bd dep add A-ONBR w-nobr -t blocks' "$TMP/deps" \
+sh "$SCRIPT" takeaway A-ONBR "waiting on a branchless bead" --waiting-on A-w-nobr >/dev/null 2>&1 || true
+grep -qE '^bd dep add A-ONBR A-w-nobr -t blocks' "$TMP/deps" \
   && ok "(EDGENOBR) a wait with no branch still records its edge (fail toward keeping)" \
   || bad "(EDGENOBR) a branchless wait was dropped (got: $(cat "$TMP/deps"))"
 
 : > "$TMP/deps"
-sh "$SCRIPT" takeaway A-PARKED "branchless subject" --waiting-on w-same >/dev/null 2>&1 || true
-grep -qE '^bd dep add A-PARKED w-same -t blocks' "$TMP/deps" \
+sh "$SCRIPT" takeaway A-PARKED "branchless subject" --waiting-on A-w-same >/dev/null 2>&1 || true
+grep -qE '^bd dep add A-PARKED A-w-same -t blocks' "$TMP/deps" \
   && ok "(EDGENOSUBJ) a branchless subject never skips — the guard needs the subject's own branch" \
   || bad "(EDGENOSUBJ) a branchless subject wrongly skipped an edge (got: $(cat "$TMP/deps"))"
 
 : > "$TMP/deps"; : > "$TMP/updates"
 sh "$SCRIPT" takeaway A-ONBR "one rides, one is separate" \
-   --waiting-on w-same --waiting-on w-diff >/dev/null 2>&1 || true
+   --waiting-on A-w-same --waiting-on A-w-diff >/dev/null 2>&1 || true
 eq "$(grep -c '^bd dep add' "$TMP/deps" || true)" "1" "(EDGEMIX) exactly one edge from a rider+separate pair"
-grep -qE '^bd dep add A-ONBR w-diff -t blocks' "$TMP/deps" \
+grep -qE '^bd dep add A-ONBR A-w-diff -t blocks' "$TMP/deps" \
   && ok "(EDGEMIX) …and it is the separate deliverable, not the rider" \
   || bad "(EDGEMIX) the wrong edge survived (got: $(cat "$TMP/deps"))"
 grep -q -- '--set-metadata gc.takeaway_settled=1' "$TMP/updates" \
@@ -702,14 +641,14 @@ grep -q -- '--set-metadata gc.takeaway_settled=$' <<< "$U" \
   && ok "(UNSETTLED) a takeaway with no disposition clears the settled key" \
   || bad "(UNSETTLED) the key was left standing for the next sitting to inherit: $U"
 : > "$TMP/updates"
-sh "$SCRIPT" takeaway A-PARKED "routed — the fix is slung" --waiting-on tk-blk1 >/dev/null 2>&1 || true
+sh "$SCRIPT" takeaway A-PARKED "routed — the fix is slung" --waiting-on A-blk1 >/dev/null 2>&1 || true
 grep -q -- '--set-metadata gc.takeaway_settled=$' "$TMP/updates" \
   && ok "(UNSETTLED) …and so does a takeaway whose wait is an edge" \
   || bad "(UNSETTLED) --waiting-on left a settled key standing: $(cat "$TMP/updates")"
 
 : > "$TMP/updates"; : > "$TMP/deps"
 BRC=0
-sh "$SCRIPT" takeaway A-PARKED "both" --no-wait --waiting-on tk-blk1 >/dev/null 2>"$TMP/berr" || BRC=$?
+sh "$SCRIPT" takeaway A-PARKED "both" --no-wait --waiting-on A-blk1 >/dev/null 2>"$TMP/berr" || BRC=$?
 eq "$BRC" "2" "(BOTH) --no-wait beside --waiting-on is refused"
 eq "$(wc -c < "$TMP/updates" | tr -d ' ')" "0" "(BOTH) …before anything is written"
 eq "$(grep -c '^bd dep' "$TMP/deps" || true)" "0" "(BOTH) …and no edge is wired"
@@ -780,213 +719,6 @@ case "$U" in
   *) bad "(SETTLEDREL) the settled key is missing from the release write: $U" ;;
 esac
 
-# ── the disposition is READ BACK: a stamp that did not land is not one ───────
-# One `--set-metadata` pair in a multi-pair update can silently not land, which
-# is why the route beside it is read back. The settled-key is the pair whose
-# miss is a WRONG answer rather than a missing one: a park that inherits the
-# previous sitting's "1" reads as a wait already discharged, and
-# doctor/check-wait-is-an-edge — the one reader that would report it — skips it
-# for as long as the stamp stands. Covered:
-#   (SETTLEDOK)   a disposition that reads back is written once, exit 0
-#   (SETTLEDFIX)  a dropped clear over a stale "1" is repaired, and says so
-#   (SETTLEDDEAD) a repair that also misses is a verb failure, writes kept
-#   (SETTLEDBACK) the same guard the other way: a settled stamp that lands empty
-: > "$TMP/updates"; printf '1' > "$TMP/settled"
-ORC=0
-sh "$SCRIPT" takeaway A-PARKED "settled — the board was right" --no-wait >/dev/null 2>"$TMP/serr" || ORC=$?
-eq "$ORC" "0" "(SETTLEDOK) a disposition that reads back exits 0"
-eq "$(grep -c -- '--set-metadata gc.takeaway_settled=' "$TMP/updates" || true)" "1" \
-   "(SETTLEDOK) …and is written once, with no repair"
-eq "$(cat "$TMP/serr")" "" "(SETTLEDOK) …and says nothing about a read-back"
-
-# (SETTLEDFIX) the stale "1" of the sitting before this park, and a clear that
-# does not land: the multi-pair stamp drops it, the lone repair write carries it.
-: > "$TMP/updates"; printf '1' > "$TMP/settled"
-FRC=0
-FAKE_SETTLED_DROP=multi sh "$SCRIPT" takeaway A-PARKED "holding — needs a ruling" \
-  >/dev/null 2>"$TMP/serr" || FRC=$?
-eq "$(grep -c -- '--set-metadata gc.takeaway_settled=$' "$TMP/updates" || true)" "2" \
-   "(SETTLEDFIX) a clear that did not land is re-written"
-grep -q "gc.takeaway_settled on A-PARKED read back as '1'" "$TMP/serr" \
-  && ok "(SETTLEDFIX) …and the miss is reported with the value that stood" \
-  || bad "(SETTLEDFIX) the dropped clear was silent (stderr: $(cat "$TMP/serr"))"
-grep -q 'the disposition repair landed' "$TMP/serr" \
-  && ok "(SETTLEDFIX) …and so is the repair that fixed it" \
-  || bad "(SETTLEDFIX) the repair did not report landing (stderr: $(cat "$TMP/serr"))"
-eq "$FRC" "0" "(SETTLEDFIX) …and a repaired disposition is not a verb failure"
-eq "$(cat "$TMP/settled")" "" "(SETTLEDFIX) …the bead ends on the park's own disposition"
-
-# (SETTLEDDEAD) the store that will not take the clear at all. The headline is
-# stamped and the bead reads settled, so a zero exit would report a park that
-# no wait check will ever report.
-: > "$TMP/updates"; printf '1' > "$TMP/settled"
-DRC=0
-FAKE_SETTLED_DROP=1 sh "$SCRIPT" takeaway A-PARKED "holding — needs a ruling" \
-  >"$TMP/sout" 2>"$TMP/serr" || DRC=$?
-eq "$DRC" "4" "(SETTLEDDEAD) a disposition that will not stamp is a verb runtime failure"
-grep -q "still reads gc.takeaway_settled='1'" "$TMP/serr" \
-  && ok "(SETTLEDDEAD) …and the message names the value left standing" \
-  || bad "(SETTLEDDEAD) the persistent miss does not name the stale value (stderr: $(cat "$TMP/serr"))"
-grep -q -- '--set-metadata gc.takeaway_settled=' "$TMP/serr" \
-  && ok "(SETTLEDDEAD) …and carries the by-hand repair" \
-  || bad "(SETTLEDDEAD) no repair spelled out (stderr: $(cat "$TMP/serr"))"
-grep -q 'takeaway set on' "$TMP/sout" \
-  && bad "(SETTLEDDEAD) the verb reported success on a bead reading settled" \
-  || ok "(SETTLEDDEAD) …and does not report the takeaway as set"
-grep -q -- '--set-metadata gc.takeaway=holding — needs a ruling' "$TMP/updates" \
-  && ok "(SETTLEDDEAD) …the headline it did write is kept, not rolled back" \
-  || bad "(SETTLEDDEAD) the headline write was lost: $(cat "$TMP/updates")"
-
-# (SETTLEDBACK) the miss in the other direction costs a false finding rather
-# than a missing one, and is still a write that did not land.
-: > "$TMP/updates"; : > "$TMP/settled"
-BRC2=0
-FAKE_SETTLED_DROP=1 sh "$SCRIPT" takeaway A-PARKED "settled — nothing waits" --no-wait \
-  >/dev/null 2>"$TMP/serr" || BRC2=$?
-eq "$BRC2" "4" "(SETTLEDBACK) a settled stamp that reads back empty fails the verb too"
-grep -q "expected '1'" "$TMP/serr" \
-  && ok "(SETTLEDBACK) …and the message names what the writer asked for" \
-  || bad "(SETTLEDBACK) the refusal does not name the intended value (stderr: $(cat "$TMP/serr"))"
-: > "$TMP/settled"
-
-# ── the headline is READ BACK: a headline that did not land is not set ───────
-# The headline rides the same multi-pair write as the disposition, so the same
-# silent drop can leave it out. A headline that does not land leaves the one the
-# bead carried before: empty, or an earlier sitting's. The read-back compares
-# with the text this call wrote, so a stale headline is a miss as much as an
-# empty one. Covered:
-#   (TAKEAWAYOK)    a headline that reads back is written once, exit 0, no word
-#   (TAKEAWAYFIX)   a stale headline the stamp did not replace is re-stamped
-#                   with its disposition, exit 0
-#   (TAKEAWAYDEAD)  a repair that also misses is a verb failure, writes kept
-#   (TAKEAWAYEMPTY) a headline that reads back empty fails the verb the same way
-#   (TAKEAWAYREL)   under --release, the exit waits for the edges and the run's end
-#   (TAKEAWAYFOLD)  on a closed anchor's run end too
-#   (TAKEAWAYQUOTE) the by-hand repair, pasted into a shell, stamps the exact text
-: > "$TMP/updates"; : > "$TMP/settled"; printf 'holding — an earlier sitting' > "$TMP/takeaway"
-TORC=0
-sh "$SCRIPT" takeaway A-PARKED "settled — the board was right" --no-wait >"$TMP/tout" 2>"$TMP/terr" || TORC=$?
-eq "$TORC" "0" "(TAKEAWAYOK) a headline that reads back exits 0"
-eq "$(grep -c -- '--set-metadata gc.takeaway=' "$TMP/updates" || true)" "1" \
-   "(TAKEAWAYOK) …and is written once, with no repair"
-eq "$(cat "$TMP/terr")" "" "(TAKEAWAYOK) …and says nothing about a read-back"
-grep -q 'takeaway set on A-PARKED' "$TMP/tout" \
-  && ok "(TAKEAWAYOK) …and reports the takeaway as set" \
-  || bad "(TAKEAWAYOK) the success line is missing (stdout: $(cat "$TMP/tout"))"
-
-# (TAKEAWAYFIX) the headline of the sitting before this one, and a stamp that
-# does not replace it: the stamp drops the pair, the repair carries it.
-# Non-empty and wrong, so only an equality check sees it.
-: > "$TMP/updates"; : > "$TMP/settled"; printf 'holding — an earlier sitting' > "$TMP/takeaway"
-rm -f "$TMP/takeaway.dropped"
-TFRC=0
-FAKE_TAKEAWAY_DROP=once sh "$SCRIPT" takeaway A-PARKED "settled — the board was right" --no-wait \
-  >"$TMP/tout" 2>"$TMP/terr" || TFRC=$?
-eq "$(grep -c -- '--set-metadata gc.takeaway=settled — the board was right' "$TMP/updates" || true)" "2" \
-   "(TAKEAWAYFIX) a headline that did not land is re-written"
-# Every headline write carries its disposition (lifecycle.toml [holds]), the
-# repair included, so the repaired headline never stands beside a disposition
-# an earlier sitting left.
-eq "$(grep -cxF -- 'bd update A-PARKED --set-metadata gc.takeaway=settled — the board was right --set-metadata gc.takeaway_settled=1' "$TMP/updates" || true)" "1" \
-   "(TAKEAWAYFIX) …and the repair re-stamps this call's disposition beside it"
-grep -q "gc.takeaway on A-PARKED read back as 'holding — an earlier sitting'" "$TMP/terr" \
-  && ok "(TAKEAWAYFIX) …and the miss is reported with the stale headline that stood" \
-  || bad "(TAKEAWAYFIX) the stale headline was read as landed (stderr: $(cat "$TMP/terr"))"
-grep -q 'the headline repair landed' "$TMP/terr" \
-  && ok "(TAKEAWAYFIX) …and so is the repair that fixed it" \
-  || bad "(TAKEAWAYFIX) the repair did not report landing (stderr: $(cat "$TMP/terr"))"
-eq "$TFRC" "0" "(TAKEAWAYFIX) …and a repaired headline is not a verb failure"
-eq "$(cat "$TMP/takeaway")" "settled — the board was right" "(TAKEAWAYFIX) …the bead ends on this call's headline"
-grep -q 'takeaway set on A-PARKED' "$TMP/tout" \
-  && ok "(TAKEAWAYFIX) …and the takeaway is reported as set" \
-  || bad "(TAKEAWAYFIX) a repaired headline was not reported (stdout: $(cat "$TMP/tout"))"
-
-# (TAKEAWAYDEAD) the store that will not take the headline at all. The bead
-# still carries the earlier sitting's headline, so a zero exit would tell the
-# caller the board shows a conclusion it does not show.
-: > "$TMP/updates"; : > "$TMP/settled"; printf 'holding — an earlier sitting' > "$TMP/takeaway"
-TDRC=0
-FAKE_TAKEAWAY_DROP=1 sh "$SCRIPT" takeaway A-PARKED "settled — the board was right" --no-wait \
-  >"$TMP/tout" 2>"$TMP/terr" || TDRC=$?
-eq "$TDRC" "4" "(TAKEAWAYDEAD) a headline that will not stamp is a verb runtime failure"
-grep -q "still reads gc.takeaway='holding — an earlier sitting'" "$TMP/terr" \
-  && ok "(TAKEAWAYDEAD) …and the message names the headline left standing" \
-  || bad "(TAKEAWAYDEAD) the persistent miss does not name the stale headline (stderr: $(cat "$TMP/terr"))"
-grep -q -- "--set-metadata 'gc.takeaway=settled — the board was right' --set-metadata gc.takeaway_settled=1$" "$TMP/terr" \
-  && ok "(TAKEAWAYDEAD) …and carries the by-hand repair, the headline with its disposition" \
-  || bad "(TAKEAWAYDEAD) no repair spelled out (stderr: $(cat "$TMP/terr"))"
-grep -q 'takeaway set on' "$TMP/tout" \
-  && bad "(TAKEAWAYDEAD) the verb reported a headline as set that the bead does not carry" \
-  || ok "(TAKEAWAYDEAD) …and does not report the takeaway as set"
-eq "$(cat "$TMP/settled")" "1" "(TAKEAWAYDEAD) …the disposition written beside it is kept, not rolled back"
-
-# (TAKEAWAYEMPTY) the same miss with no earlier headline to stand in its place.
-: > "$TMP/updates"; : > "$TMP/settled"; : > "$TMP/takeaway"
-TERC=0
-FAKE_TAKEAWAY_DROP=1 sh "$SCRIPT" takeaway A-PARKED "holding — needs a ruling" \
-  >/dev/null 2>"$TMP/terr" || TERC=$?
-eq "$TERC" "4" "(TAKEAWAYEMPTY) a headline that reads back empty fails the verb too"
-grep -q "gc.takeaway on A-PARKED read back as '', expected 'holding — needs a ruling'" "$TMP/terr" \
-  && ok "(TAKEAWAYEMPTY) …and the message names what the writer asked for" \
-  || bad "(TAKEAWAYEMPTY) the miss does not name the intended headline (stderr: $(cat "$TMP/terr"))"
-
-# (TAKEAWAYREL) a park, with a wait, whose headline will not stamp. The exit
-# comes last, so the wait is still wired as an edge and the run beneath the
-# anchor still ends: only the headline is left to repair by hand.
-: > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/settled"; : > "$FAKE_CANCELS"; printf 'holding — an earlier sitting' > "$TMP/takeaway"
-TRRC=0
-FAKE_TAKEAWAY_DROP=1 sh "$SCRIPT" takeaway A-PARKED "parked — waiting on the fix" --by proactive \
-  --release --waiting-on tk-blk9 >"$TMP/tout" 2>"$TMP/terr" || TRRC=$?
-eq "$TRRC" "4" "(TAKEAWAYREL) a release whose headline will not stamp is a verb failure"
-grep -qE '^bd dep add A-PARKED tk-blk9 -t blocks' "$TMP/deps" \
-  && ok "(TAKEAWAYREL) …after the wait is wired as an edge" \
-  || bad "(TAKEAWAYREL) the failure exited before the edge (deps: $(cat "$TMP/deps"))"
-grep -q -- '--root root-PARKED' "$FAKE_CANCELS" \
-  && ok "(TAKEAWAYREL) …and after the run beneath the anchor is ended" \
-  || bad "(TAKEAWAYREL) the failure exited before ending the run beneath the anchor"
-TRL="$(grep -E "^bd update A-PARKED( |\$)" "$TMP/updates" | head -n1)"
-case "$TRL" in
-  *"--status=open"*"--assignee="*) ok "(TAKEAWAYREL) …and the release it already wrote is kept, not rolled back" ;;
-  *) bad "(TAKEAWAYREL) the release write was lost: ${TRL:-<none>}" ;;
-esac
-grep -q 'takeaway set on' "$TMP/tout" \
-  && bad "(TAKEAWAYREL) the verb reported the takeaway as set" \
-  || ok "(TAKEAWAYREL) …and success is not reported"
-
-# (TAKEAWAYFOLD) a closed anchor takes the headline and the run's end alone, and
-# its headline is read back the same way.
-: > "$TMP/updates"; : > "$TMP/settled"; : > "$FAKE_CANCELS"; printf 'holding — an earlier sitting' > "$TMP/takeaway"
-TCRC=0
-FAKE_TAKEAWAY_DROP=1 sh "$SCRIPT" takeaway CLOSED-A-FOLD "folded into CARRIER-1" --by proactive --release \
-  >"$TMP/tout" 2>"$TMP/terr" || TCRC=$?
-eq "$TCRC" "4" "(TAKEAWAYFOLD) a closed anchor's headline that will not stamp is a verb failure"
-grep -q -- '--root root-FOLD' "$FAKE_CANCELS" \
-  && ok "(TAKEAWAYFOLD) …after the folded anchor's run is ended" \
-  || bad "(TAKEAWAYFOLD) the failure exited before the run's end"
-grep -q 'anchor left closed' "$TMP/tout" \
-  && bad "(TAKEAWAYFOLD) the verb reported the run's end as a set takeaway" \
-  || ok "(TAKEAWAYFOLD) …and success is not reported"
-
-# (TAKEAWAYQUOTE) the by-hand repair is pasted into a shell, and a headline is
-# free text. Run the printed command against the store and read what it stamps.
-QTEXT="it's the operator's call: \$HOME, \`date\` and C:\\new stay literal"
-: > "$TMP/updates"; : > "$TMP/settled"; : > "$TMP/takeaway"
-TQRC=0
-FAKE_TAKEAWAY_DROP=1 sh "$SCRIPT" takeaway A-PARKED "$QTEXT" >/dev/null 2>"$TMP/terr" || TQRC=$?
-eq "$TQRC" "4" "(TAKEAWAYQUOTE) a free-text headline that will not stamp fails the verb"
-grep -qF "expected '$QTEXT' — repairing" "$TMP/terr" \
-  && ok "(TAKEAWAYQUOTE) …and the miss prints the headline exactly as written" \
-  || bad "(TAKEAWAYQUOTE) the miss rewrote the headline it reports (stderr: $(cat "$TMP/terr"))"
-QREPAIR="$(sed -n 's/.*Stamp it by hand: //p' "$TMP/terr")"
-case "$QREPAIR" in
-  "gc bd update A-PARKED --set-metadata "*) ok "(TAKEAWAYQUOTE) …and prints a by-hand repair" ;;
-  *) bad "(TAKEAWAYQUOTE) no by-hand repair to paste (stderr: $(cat "$TMP/terr"))" ;;
-esac
-sh -c "$QREPAIR" >/dev/null 2>&1 || true
-eq "$(cat "$TMP/takeaway")" "$QTEXT" \
-   "(TAKEAWAYQUOTE) …that, pasted into a shell, stamps the headline exactly"
-: > "$TMP/takeaway"
-
 # ── takeaway --release --route: release the bead TO a pool ────────────────────
 # A first reaction that concludes "this is work" hands the bead on instead of
 # back. The route rides the release write, so the disposition lands whole or
@@ -995,9 +727,10 @@ eq "$(cat "$TMP/takeaway")" "$QTEXT" \
 #   (ROUTECLR)  no --route still clears the route (the release is unchanged)
 #   (ROUTEQUAL) a bare agent name is refused before anything is written
 #   (ROUTEREL)  --route without --release is refused (the unreadable half-state)
-#   (ROUTEOK)   a route that reads back correct is not re-written
-#   (ROUTEFIX)  a route that reads back EMPTY is repaired and reported
-#   (ROUTEDEAD) a repair that also misses is a verb failure, with its writes kept
+#   (ROUTEONE)  the release is one write, whose exit decides, and says where
+#               the bead went
+#   (REFUSED)   an update the store refuses fails the verb: no success line, no
+#               edge and no run ended
 POOL="gc-toolkit/gc-toolkit.polecat"
 : > "$TMP/updates"; printf '%s' "$POOL" > "$TMP/routed"
 sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the polecat pool" \
@@ -1044,302 +777,46 @@ sh "$SCRIPT" takeaway A-PARKED "no release" --route "$POOL" >/dev/null 2>"$TMP/r
 eq "$RRC" "2" "(ROUTEREL) --route without --release is a usage error"
 eq "$(grep -c '^bd update' "$TMP/updates" || true)" "0" "(ROUTEREL) …and nothing was written"
 
-# (ROUTEOK) a landed route is verified once and left alone.
-: > "$TMP/updates"; printf '%s' "$POOL" > "$TMP/routed"
-sh "$SCRIPT" takeaway A-PARKED "landed" --release --route "$POOL" >/dev/null 2>"$TMP/rerr" || true
-eq "$(grep -cE "^bd update A-PARKED( |\$)" "$TMP/updates" || true)" "1" \
-   "(ROUTEOK) a route that reads back correct is written once (the anchor, and no step of its run)"
-
-# (ROUTEFIX) the silent drop: the stamp lands empty, so the bead is visible to
-# no pool. The verb must notice and repair rather than report success.
-: > "$TMP/updates"; : > "$TMP/routed"; : > "$FAKE_CANCELS"
-FRC=0
-sh "$SCRIPT" takeaway A-PARKED "dropped" --release --route "$POOL" >"$TMP/rout" 2>"$TMP/rerr" || FRC=$?
-eq "$(grep -c -- "--set-metadata gc.routed_to=$POOL" "$TMP/updates" || true)" "2" \
-   "(ROUTEFIX) an empty read-back is re-stamped"
-grep -q 'read back as' "$TMP/rerr" \
-  && ok "(ROUTEFIX) …and the miss is reported" \
-  || bad "(ROUTEFIX) the dropped route was silent (stderr: $(cat "$TMP/rerr"))"
-grep -q 'visible to no pool' "$TMP/rerr" \
-  && ok "(ROUTEFIX) …and a repair that also misses says what it costs" \
-  || bad "(ROUTEFIX) the persistent miss does not name its consequence (stderr: $(cat "$TMP/rerr"))"
-
-# (ROUTEDEAD) --route promises the pool can see the bead. A caller that reads a
-# zero exit as "released to that pool" would drain over a bead nothing can
-# claim, so the persistent miss is a verb failure — with every write that DID
-# land kept, and named, so a hand repair finishes it.
-eq "$FRC" "4" "(ROUTEDEAD) a route that will not stamp is a verb runtime failure"
-grep -q 'takeaway set on' "$TMP/rout" \
-  && bad "(ROUTEDEAD) the verb reported success on an unrouted bead" \
-  || ok "(ROUTEDEAD) …and it does not report the takeaway as set"
-grep -q -- '--set-metadata gc.routed_to=' "$TMP/rerr" \
-  && ok "(ROUTEDEAD) …the message carries the by-hand repair" \
-  || bad "(ROUTEDEAD) no repair spelled out (stderr: $(cat "$TMP/rerr"))"
-RD="$(grep -E "^bd update A-PARKED( |\$)" "$TMP/updates" | head -n1)"
-case "$RD" in
-  *"--status=open"*"--assignee="*) ok "(ROUTEDEAD) …the release it already wrote is kept, not rolled back" ;;
-  *) bad "(ROUTEDEAD) the release write was lost: ${RD:-<none>}" ;;
-esac
-grep -q -- '--root root-PARKED' "$FAKE_CANCELS" \
-  && ok "(ROUTEDEAD) …and the run beneath the anchor is still ended" \
-  || bad "(ROUTEDEAD) the failure exited before ending the run beneath the anchor"
-
-# A route that lands is unaffected by any of that.
-: > "$TMP/updates"; printf '%s' "$POOL" > "$TMP/routed"
+# (ROUTEONE) bd applies every pair of the release as one atomic operation, so
+# the release is one write, whose exit says whether all of it landed.
+: > "$TMP/updates"; : > "$TMP/routed"
 GRC=0
 sh "$SCRIPT" takeaway A-PARKED "landed clean" --release --route "$POOL" >"$TMP/rout" 2>/dev/null || GRC=$?
-eq "$GRC" "0" "(ROUTEDEAD) a route that stamps still exits zero"
+eq "$GRC" "0" "(ROUTEONE) a release the store takes exits zero"
+eq "$(grep -cE "^bd update A-PARKED( |\$)" "$TMP/updates" || true)" "1" \
+   "(ROUTEONE) …in one write to the anchor"
 grep -q "released to $POOL" "$TMP/rout" \
-  && ok "(ROUTEDEAD) …and says where the bead went" \
-  || bad "(ROUTEDEAD) the success line lost the route (stdout: $(cat "$TMP/rout"))"
+  && ok "(ROUTEONE) …and says where the bead went" \
+  || bad "(ROUTEONE) the success line lost the route (stdout: $(cat "$TMP/rout"))"
 
-# ── takeaway --release: the pour stamp read-back ──────────────────────────────
-# gc.execution_routed_to is the stamp a pour leaves naming the pool it dispatched
-# a bead to, and a release ends that pour, so the release clears it. No arm or
-# reconcile guard reads the stamp (reconcile keys on its own
-# gc.dispatch_when_ready_slung marker), but placement.sh reads it as a live pour,
-# which places a bead. The clear rides the multi-pair release write; a pair
-# silently dropped there leaves the stamp standing, so the release retries a lone
-# unset. If that also misses, the release fails where the stamp is all that keeps
-# a bead held for placement out of the queue, and elsewhere warns and stands.
-# Covered:
-#   (EXECOK)      a clear that reads back empty is verified once, no repair, no word
-#   (EXECFIX)     a clear dropped from the multi-pair write is retried and reported
-#   (EXECWARN)    a clear that will not land on a bead routed to a pool warns, and
-#                 the release still stands
-#   (EXECHELD)    a clear that will not land on a bead held for placement fails
-#                 the verb, because gc-helm.sh unplaced would not list the bead
-#   (EXECHELDFIX) the same held bead, its clear carried by the lone repair, exits 0
-#   (EXECPLACED)  a marked bead its parent places: the stamp hides nothing from
-#                 the queue, so the miss warns
-STAMP="gc-toolkit/gc-toolkit.proactive"
+# (REFUSED) the update's exit is the verdict on the whole stamp.
+: > "$TMP/updates"; : > "$TMP/deps"; : > "$FAKE_CANCELS"
+URC=0
+FAKE_UPDATE_RC=1 sh "$SCRIPT" takeaway A-PARKED "refused" --release --route "$POOL" \
+   --waiting-on A-w-child >"$TMP/rout" 2>"$TMP/rerr" || URC=$?
+eq "$URC" "4" "(REFUSED) an update the store refuses is a verb runtime failure"
+grep -q "could not update 'A-PARKED'" "$TMP/rerr" \
+  && ok "(REFUSED) …and says the write did not land" \
+  || bad "(REFUSED) the refusal was silent (stderr: $(cat "$TMP/rerr"))"
+grep -q 'takeaway set on' "$TMP/rout" \
+  && bad "(REFUSED) the verb reported success on a refused write" \
+  || ok "(REFUSED) …and success is not reported"
+eq "$(wc -l < "$TMP/deps" | tr -d ' ')|$(wc -l < "$FAKE_CANCELS" | tr -d ' ')" "0|0" \
+   "(REFUSED) …with no edge written and no run ended"
 
-# (EXECOK) the clear lands: the release's own unset is the only one written, and
-# a read-back that finds it gone says nothing.
-: > "$TMP/updates"; : > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
-XORC=0
-sh "$SCRIPT" takeaway A-PARKED "released clean" --by proactive --release --route "$POOL" \
-  >/dev/null 2>"$TMP/xerr" || XORC=$?
-eq "$XORC" "0" "(EXECOK) a pour stamp that reads back cleared exits 0"
-eq "$(grep -c -- '--unset-metadata gc.execution_routed_to' "$TMP/updates" || true)" "1" \
-   "(EXECOK) …and the clear is written once, with no repair"
-grep -q 'gc.execution_routed_to on' "$TMP/xerr" \
-  && bad "(EXECOK) a landed clear should say nothing (stderr: $(cat "$TMP/xerr"))" \
-  || ok "(EXECOK) …and says nothing about a read-back"
-
-# (EXECFIX) the stamp of the pour that dispatched this bead, and a clear that
-# does not land: the multi-pair release drops it, the lone repair unset carries
-# it. The stamp stood after the first write, so the read-back re-issues the clear.
-: > "$TMP/updates"; printf '%s' "$STAMP" > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
-XFRC=0
-FAKE_EXEC_DROP=multi sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the pool" \
-  --by proactive --release --route "$POOL" >/dev/null 2>"$TMP/xerr" || XFRC=$?
-eq "$(grep -c -- '--unset-metadata gc.execution_routed_to' "$TMP/updates" || true)" "2" \
-   "(EXECFIX) a clear that did not land is re-issued"
-grep -q "gc.execution_routed_to on A-PARKED read back as '$STAMP'" "$TMP/xerr" \
-  && ok "(EXECFIX) …and the miss is reported with the stamp that stood" \
-  || bad "(EXECFIX) the dropped clear was silent (stderr: $(cat "$TMP/xerr"))"
-grep -q 'execution-stamp repair landed' "$TMP/xerr" \
-  && ok "(EXECFIX) …and the repair that fixed it says so" \
-  || bad "(EXECFIX) the repair did not report landing (stderr: $(cat "$TMP/xerr"))"
-eq "$XFRC" "0" "(EXECFIX) …and a repaired stamp is not a verb failure"
-eq "$(cat "$TMP/exec")" "" "(EXECFIX) …the bead ends with the pour stamp cleared"
-
-# (EXECWARN) the store that will not take the clear at all, on a bead the release
-# routes to a pool and that nothing holds for placement. No reader misreads the
-# stamp there, so it WARNS and the release still stands (exit 0). Failing here
-# would exit 4 into first-reaction-dispose's die before its --then-route arm,
-# skipping the arm over a stamp nothing misreads.
-: > "$TMP/updates"; printf '%s' "$STAMP" > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
-XDRC=0
-FAKE_EXEC_DROP=1 sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the pool" \
-  --by proactive --release --route "$POOL" >"$TMP/xout" 2>"$TMP/xerr" || XDRC=$?
-eq "$XDRC" "0" "(EXECWARN) a pour stamp that will not clear does NOT fail the release"
-grep -q "still carries gc.execution_routed_to='$STAMP'" "$TMP/xerr" \
-  && ok "(EXECWARN) …and the warning names the stamp left standing" \
-  || bad "(EXECWARN) the persistent miss does not name the stale stamp (stderr: $(cat "$TMP/xerr"))"
-grep -q -- '--unset-metadata gc.execution_routed_to' "$TMP/xerr" \
-  && ok "(EXECWARN) …and carries the by-hand repair" \
-  || bad "(EXECWARN) no repair spelled out (stderr: $(cat "$TMP/xerr"))"
-grep -q 'takeaway set on' "$TMP/xout" \
-  && ok "(EXECWARN) …and the release still stands, reported as set" \
-  || bad "(EXECWARN) the release was not reported despite the harmless stamp (stdout: $(cat "$TMP/xout"))"
-grep -q -- '--set-metadata gc.takeaway=actionable — routed to the pool' "$TMP/updates" \
-  && ok "(EXECWARN) …the headline write is kept" \
-  || bad "(EXECWARN) the headline write was lost: $(cat "$TMP/updates")"
-
-# (EXECHELD) a first reaction's held exit: the bead carries placement=pending, the
-# release gives it no route, and the store will not take the clear. The stamp is
-# then all that places the bead, so gc-helm.sh unplaced would not list it, and the
-# release fails rather than report a hold the queue cannot see. The headline and
-# the release are kept, so the by-hand repair finishes it.
-: > "$TMP/updates"; printf '%s' "$STAMP" > "$TMP/exec"; : > "$TMP/settled"; : > "$TMP/routed"
-printf 'pending' > "$TMP/placement"; : > "$TMP/parent"
-XHRC=0
-FAKE_EXEC_DROP=1 sh "$SCRIPT" takeaway A-PARKED "held for placement" --by proactive --release --no-wait \
-  >"$TMP/xout" 2>"$TMP/xerr" || XHRC=$?
-eq "$XHRC" "4" "(EXECHELD) a pour stamp left on a bead held for placement fails the release"
-grep -q "A-PARKED is held for placement but still carries gc.execution_routed_to='$STAMP'" "$TMP/xerr" \
-  && ok "(EXECHELD) …and the failure names the hold and the stamp left standing" \
-  || bad "(EXECHELD) the failure does not name the hold and the stamp (stderr: $(cat "$TMP/xerr"))"
-grep -q 'gc-helm.sh unplaced does not list A-PARKED' "$TMP/xerr" \
-  && ok "(EXECHELD) …says the placement queue cannot see the bead" \
-  || bad "(EXECHELD) the failure does not say what the stamp hides (stderr: $(cat "$TMP/xerr"))"
-grep -q -- '--unset-metadata gc.execution_routed_to' "$TMP/xerr" \
-  && ok "(EXECHELD) …and carries the by-hand repair" \
-  || bad "(EXECHELD) no repair spelled out (stderr: $(cat "$TMP/xerr"))"
-grep -q 'takeaway set on' "$TMP/xout" \
-  && bad "(EXECHELD) a failed release still printed its success line (stdout: $(cat "$TMP/xout"))" \
-  || ok "(EXECHELD) …and prints no success line"
-grep -q -- '--set-metadata gc.takeaway=held for placement' "$TMP/updates" \
-  && ok "(EXECHELD) …the headline write is kept" \
-  || bad "(EXECHELD) the headline write was lost: $(cat "$TMP/updates")"
-
-# (EXECHELDFIX) the same held bead, its clear dropped only from the multi-pair
-# write: the lone repair carries it, so the queue lists the bead and the release
-# exits 0.
-: > "$TMP/updates"; printf '%s' "$STAMP" > "$TMP/exec"; : > "$TMP/settled"; : > "$TMP/routed"
-printf 'pending' > "$TMP/placement"; : > "$TMP/parent"
-XHFRC=0
-FAKE_EXEC_DROP=multi sh "$SCRIPT" takeaway A-PARKED "held for placement" --by proactive --release --no-wait \
-  >/dev/null 2>"$TMP/xerr" || XHFRC=$?
-eq "$XHFRC" "0" "(EXECHELDFIX) a held bead whose stamp the repair clears exits 0"
-grep -q 'execution-stamp repair landed' "$TMP/xerr" \
-  && ok "(EXECHELDFIX) …and the repair says so" \
-  || bad "(EXECHELDFIX) the repair did not report landing (stderr: $(cat "$TMP/xerr"))"
-eq "$(cat "$TMP/exec")" "" "(EXECHELDFIX) …the bead ends with the pour stamp cleared"
-
-# (EXECPLACED) the marker outlived a placement: the bead has a parent, which
-# places it whatever its stamp says. The stamp hides nothing from the queue, so a
-# clear that will not land warns, as it does on any other bead.
-: > "$TMP/updates"; printf '%s' "$STAMP" > "$TMP/exec"; : > "$TMP/settled"; : > "$TMP/routed"
-printf 'pending' > "$TMP/placement"; printf 'tk-epic' > "$TMP/parent"
-XPRC=0
-FAKE_EXEC_DROP=1 sh "$SCRIPT" takeaway A-PARKED "placed under its epic" --by proactive --release --no-wait \
-  >"$TMP/xout" 2>"$TMP/xerr" || XPRC=$?
-eq "$XPRC" "0" "(EXECPLACED) a stamp on a bead its parent places does not fail the release"
-grep -q 'A-PARKED is not held for placement' "$TMP/xerr" \
-  && ok "(EXECPLACED) …and the warning says the bead is not held" \
-  || bad "(EXECPLACED) the warning does not say why the stamp hides nothing (stderr: $(cat "$TMP/xerr"))"
-grep -q 'takeaway set on' "$TMP/xout" \
-  && ok "(EXECPLACED) …and the release stands" \
-  || bad "(EXECPLACED) the release was not reported (stdout: $(cat "$TMP/xout"))"
-: > "$TMP/exec"; : > "$TMP/placement"; : > "$TMP/parent"
-
-# ── takeaway --release: the executor-identity read-back ───────────────────────
-# The unassign takes the departing executor's identity with it, so the release
-# clears gc.session_name and gc.session_id via --unset-metadata. Both have
-# readers: a surviving gc.session_name is the residue doctor/executor-identity-
-# residue reports on the next route, and a surviving gc.session_id lets orphan
-# recovery resolve a dead owner for a bead nobody holds. So each is read back, a
-# lone unset retried, and a persistent miss is a verb failure on any bead, the way
-# the route is, where the pour stamp fails the verb only on a bead held for
-# placement. orphan-dispose.sh
-# verifies the same pair after its own release. Covered:
-#   (SNAMEOK/SIDOK)  a clear that reads back empty is verified once, no repair
-#   (SNAMEFIX/SIDFIX)  a clear dropped from the multi-pair write is retried
-#   (SNAMEDEAD/SIDDEAD)  a clear that will not land is a verb failure, writes kept
-SNAME="gc-toolkit__polecat-hq-gone"
-SID="hq-gone"
-
-# (SNAMEOK/SIDOK) both pins clear: the release's own unset is the only write for
-# each, and a read-back that finds them gone says nothing.
-: > "$TMP/updates"; : > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
-printf '%s' "$SNAME" > "$TMP/sname"; printf '%s' "$SID" > "$TMP/sid"
-IORC=0
-sh "$SCRIPT" takeaway A-PARKED "released clean" --by proactive --release --route "$POOL" \
-  >/dev/null 2>"$TMP/ierr" || IORC=$?
-eq "$IORC" "0" "(SNAMEOK) pins that read back cleared exit 0"
-eq "$(grep -c -- '--unset-metadata gc.session_name' "$TMP/updates" || true)" "1" \
-   "(SNAMEOK) …and gc.session_name is cleared once, with no repair"
-eq "$(grep -c -- '--unset-metadata gc.session_id' "$TMP/updates" || true)" "1" \
-   "(SIDOK) …and gc.session_id is cleared once, with no repair"
-grep -qE 'gc.session_name on|gc.session_id on' "$TMP/ierr" \
-  && bad "(SNAMEOK) a landed clear should say nothing (stderr: $(cat "$TMP/ierr"))" \
-  || ok "(SNAMEOK) …and says nothing about a read-back"
-
-# (SNAMEFIX) the identity clear dropped from the multi-pair release write, carried
-# by the lone repair unset. The pin stood after the first write, so the read-back
-# re-issues the clear and the release still exits 0.
-: > "$TMP/updates"; : > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
-printf '%s' "$SNAME" > "$TMP/sname"; : > "$TMP/sid"
-SFRC=0
-FAKE_SNAME_DROP=multi sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the pool" \
-  --by proactive --release --route "$POOL" >/dev/null 2>"$TMP/ierr" || SFRC=$?
-eq "$(grep -c -- '--unset-metadata gc.session_name' "$TMP/updates" || true)" "2" \
-   "(SNAMEFIX) a clear that did not land is re-issued"
-grep -q "gc.session_name on A-PARKED read back as '$SNAME'" "$TMP/ierr" \
-  && ok "(SNAMEFIX) …and the miss is reported with the pin that stood" \
-  || bad "(SNAMEFIX) the dropped clear was silent (stderr: $(cat "$TMP/ierr"))"
-grep -q 'session-name repair landed' "$TMP/ierr" \
-  && ok "(SNAMEFIX) …and the repair that fixed it says so" \
-  || bad "(SNAMEFIX) the repair did not report landing (stderr: $(cat "$TMP/ierr"))"
-eq "$SFRC" "0" "(SNAMEFIX) …and a repaired pin is not a verb failure"
-eq "$(cat "$TMP/sname")" "" "(SNAMEFIX) …the bead ends with the identity cleared"
-
-# (SNAMEDEAD) the store that will not take the clear at all. The bead is released,
-# so a zero exit would report a park still carrying the executor identity this
-# release exists to remove — the next route reproduces the residue. So the
-# persistent miss is a verb failure, with its writes kept and named.
-: > "$TMP/updates"; : > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
-printf '%s' "$SNAME" > "$TMP/sname"; : > "$TMP/sid"
-SDRC=0
-FAKE_SNAME_DROP=1 sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the pool" \
-  --by proactive --release --route "$POOL" >"$TMP/iout" 2>"$TMP/ierr" || SDRC=$?
-eq "$SDRC" "4" "(SNAMEDEAD) an identity pin that will not clear is a verb runtime failure"
-grep -q "still carries gc.session_name='$SNAME'" "$TMP/ierr" \
-  && ok "(SNAMEDEAD) …and the message names the pin left standing" \
-  || bad "(SNAMEDEAD) the persistent miss does not name the stale pin (stderr: $(cat "$TMP/ierr"))"
-grep -q -- '--unset-metadata gc.session_name' "$TMP/ierr" \
-  && ok "(SNAMEDEAD) …and carries the by-hand repair" \
-  || bad "(SNAMEDEAD) no repair spelled out (stderr: $(cat "$TMP/ierr"))"
-grep -q 'takeaway set on' "$TMP/iout" \
-  && bad "(SNAMEDEAD) the verb reported success on a bead still carrying the identity" \
-  || ok "(SNAMEDEAD) …and does not report the takeaway as set"
-IDLINE="$(grep -E "^bd update A-PARKED( |\$)" "$TMP/updates" | head -n1)"
-case "$IDLINE" in
-  *"--status=open"*"--assignee="*) ok "(SNAMEDEAD) …the release it already wrote is kept, not rolled back" ;;
-  *) bad "(SNAMEDEAD) the release write was lost: ${IDLINE:-<none>}" ;;
-esac
-: > "$TMP/sname"
-
-# (SIDFIX) the same silent drop on gc.session_id: the multi-pair write drops it,
-# the lone repair unset carries it, and the release still exits 0.
-: > "$TMP/updates"; : > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
-: > "$TMP/sname"; printf '%s' "$SID" > "$TMP/sid"
-DFRC=0
-FAKE_SID_DROP=multi sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the pool" \
-  --by proactive --release --route "$POOL" >/dev/null 2>"$TMP/ierr" || DFRC=$?
-eq "$(grep -c -- '--unset-metadata gc.session_id' "$TMP/updates" || true)" "2" \
-   "(SIDFIX) a clear that did not land is re-issued"
-grep -q "gc.session_id on A-PARKED read back as '$SID'" "$TMP/ierr" \
-  && ok "(SIDFIX) …and the miss is reported with the pin that stood" \
-  || bad "(SIDFIX) the dropped clear was silent (stderr: $(cat "$TMP/ierr"))"
-grep -q 'session-id repair landed' "$TMP/ierr" \
-  && ok "(SIDFIX) …and the repair that fixed it says so" \
-  || bad "(SIDFIX) the repair did not report landing (stderr: $(cat "$TMP/ierr"))"
-eq "$DFRC" "0" "(SIDFIX) …and a repaired pin is not a verb failure"
-eq "$(cat "$TMP/sid")" "" "(SIDFIX) …the bead ends with the pin cleared"
-
-# (SIDDEAD) the store that will not take the gc.session_id clear at all. A stale
-# pin lets orphan recovery resolve a dead owner for a released bead, so the miss
-# is a verb failure, with its writes kept and named.
-: > "$TMP/updates"; : > "$TMP/exec"; : > "$TMP/settled"; printf '%s' "$POOL" > "$TMP/routed"
-: > "$TMP/sname"; printf '%s' "$SID" > "$TMP/sid"
-DDRC=0
-FAKE_SID_DROP=1 sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the pool" \
-  --by proactive --release --route "$POOL" >"$TMP/iout" 2>"$TMP/ierr" || DDRC=$?
-eq "$DDRC" "4" "(SIDDEAD) an orphan-recovery pin that will not clear is a verb runtime failure"
-grep -q "still carries gc.session_id='$SID'" "$TMP/ierr" \
-  && ok "(SIDDEAD) …and the message names the pin left standing" \
-  || bad "(SIDDEAD) the persistent miss does not name the stale pin (stderr: $(cat "$TMP/ierr"))"
-grep -q -- '--unset-metadata gc.session_id' "$TMP/ierr" \
-  && ok "(SIDDEAD) …and carries the by-hand repair" \
-  || bad "(SIDDEAD) no repair spelled out (stderr: $(cat "$TMP/ierr"))"
-grep -q 'takeaway set on' "$TMP/iout" \
-  && bad "(SIDDEAD) the verb reported success on a bead still carrying the pin" \
-  || ok "(SIDDEAD) …and does not report the takeaway as set"
-: > "$TMP/sid"
+# ── takeaway --waiting-on in another store: refused before anything is written ─
+# An id's prefix names its store, and bd stores an edge onto another store's
+# bead without finding it, so the edge holds nothing. The wait is refused before
+# the update, so neither the headline nor an edge is written.
+: > "$TMP/updates"; : > "$TMP/deps"; : > "$FAKE_CANCELS"
+XRC=0
+sh "$SCRIPT" takeaway A-PARKED "held for the other rig's fix" --waiting-on tk-blk9 >/dev/null 2>"$TMP/xerr" || XRC=$?
+eq "$XRC" "2" "(XSTORE) a wait in another store is refused"
+grep -q -- '--waiting-on tk-blk9 lives in another store than A-PARKED' "$TMP/xerr" \
+  && ok "(XSTORE) …naming the wait and the store it is not in" \
+  || bad "(XSTORE) the refusal does not say why (stderr: $(cat "$TMP/xerr"))"
+eq "$(grep -c . "$TMP/updates" || true)" "0" "(XSTORE) …before the headline is written"
+eq "$(grep -c '^bd dep add' "$TMP/deps" || true)" "0" "(XSTORE) …and with no edge written"
 
 # ── takeaway --release on a CLOSED anchor: the run's end without the park ────
 # A fold that lands after the pour leaves a molecule routed under an anchor
@@ -1440,7 +917,7 @@ sh "$SCRIPT" takeaway A-BLOCKED "routed — the fix is slung" --by converse \
    --release --route "$POOL" >/dev/null 2>"$TMP/derr" || DRC=$?
 eq "$DRC" "2" "(DELEG) an open blocker that is no human gate makes --route a usage error"
 eq "$(wc -l < "$TMP/updates" | tr -d ' ')" "0" "(DELEG) …refused before any write: the bead is untouched"
-grep -q 'w-child' "$TMP/derr" \
+grep -q 'A-w-child' "$TMP/derr" \
   && ok "(DELEGWHY) the refusal names the blocker the work is on" \
   || bad "(DELEGWHY) the blocker is unnamed (stderr: $(cat "$TMP/derr"))"
 grep -q 'g-mine' "$TMP/derr" \
@@ -1556,15 +1033,13 @@ grep -q -- '--root root-FOLD' "$FAKE_CANCELS" \
 # so work that is its own (a town-repo edit is mechanik's) is released to it as
 # its assignee, with no route. The stub reads a bead's assignee from the
 # assignees fixture, so a row there models an assignee that landed and its
-# absence models one that did not. Covered:
+# absence one that is not there. Covered:
 #   (TOAGENT)      the assignee replaces the empty clear in the one release
 #                  write, and the route beside it stays empty
-#   (TOAGENTOK)    an assignee that reads back is written once, exit 0, and
-#                  the success line names the agent
+#   (TOAGENTOK)    the release is written once, exits 0, and the success
+#                  line names the agent
 #   (TOAGENTREL)   --assign without --release is refused
 #   (TOAGENTBOTH)  --assign beside --route is refused before any write
-#   (TOAGENTDEAD)  an assignee that will not land is re-written once, then
-#                  fails the verb with the repair spelled out
 #   (TOAGENTBLK)   an open blocker that is no human gate refuses a bare --assign
 #   (TOAGENTWAIT)  …and a call that names its waits lands, edge and all
 #   (TOAGENTFOLD)  a closed anchor is refused on its disposition, run's end kept
@@ -1592,9 +1067,9 @@ case "$ALINE" in
   *"--unset-metadata gc.session_name --unset-metadata gc.session_id"*) ok "(TOAGENT) …and the prior executor's session pins go with the old assignee" ;;
   *) bad "(TOAGENT) the assign write kept the prior executor's pins: ${ALINE:-<none>}" ;;
 esac
-eq "$ARC" "0" "(TOAGENTOK) an assignee that reads back exits 0"
+eq "$ARC" "0" "(TOAGENTOK) a release to an agent exits 0"
 eq "$(grep -cE "^bd update A-PARKED( |\$)" "$TMP/updates" || true)" "1" \
-   "(TOAGENTOK) …and is written once, with no repair"
+   "(TOAGENTOK) …and is written once"
 grep -q "released to $AGENT" "$TMP/aout" \
   && ok "(TOAGENTOK) …and the success line names the agent" \
   || bad "(TOAGENTOK) the success line lost the agent (stdout: $(cat "$TMP/aout"))"
@@ -1614,35 +1089,13 @@ grep -q 'never both' "$TMP/aerr" \
   && ok "(TOAGENTBOTH) …and the refusal says a bead takes one address" \
   || bad "(TOAGENTBOTH) the refusal does not explain itself (stderr: $(cat "$TMP/aerr"))"
 
-# A-UNASSIGNED has no assignees row, so its assignee reads back empty however
-# often it is written: the store that will not take it.
-: > "$TMP/updates"
-DRC3=0
-sh "$SCRIPT" takeaway A-UNASSIGNED "dropped" --release --assign "$AGENT" --no-wait \
-   >"$TMP/aout" 2>"$TMP/aerr" || DRC3=$?
-eq "$(grep -c -- "--assignee=$AGENT" "$TMP/updates" || true)" "2" \
-   "(TOAGENTDEAD) an assignee that read back wrong is re-written once"
-grep -q "the assignee on A-UNASSIGNED read back as ''" "$TMP/aerr" \
-  && ok "(TOAGENTDEAD) …and the miss is reported" \
-  || bad "(TOAGENTDEAD) the dropped assignee was silent (stderr: $(cat "$TMP/aerr"))"
-eq "$DRC3" "4" "(TOAGENTDEAD) an assignee that will not land is a verb runtime failure"
-grep -q 'NOT assigned' "$TMP/aerr" \
-  && ok "(TOAGENTDEAD) …and the failure says the bead reaches no agent" \
-  || bad "(TOAGENTDEAD) the persistent miss does not name its consequence (stderr: $(cat "$TMP/aerr"))"
-grep -q -- "--assignee $AGENT" "$TMP/aerr" \
-  && ok "(TOAGENTDEAD) …with the by-hand repair spelled out" \
-  || bad "(TOAGENTDEAD) no repair spelled out (stderr: $(cat "$TMP/aerr"))"
-grep -q 'takeaway set on' "$TMP/aout" \
-  && bad "(TOAGENTDEAD) the verb reported success on an unassigned bead" \
-  || ok "(TOAGENTDEAD) …and success is not reported"
-
 : > "$TMP/updates"; : > "$TMP/deps"
 KRC=0
 sh "$SCRIPT" takeaway A-BLOCKED "assigned — the fix is mechanik's" \
    --release --assign "$AGENT" --no-wait >/dev/null 2>"$TMP/aerr" || KRC=$?
 eq "$KRC" "2" "(TOAGENTBLK) an open blocker that is no human gate refuses a bare --assign"
 eq "$(wc -l < "$TMP/updates" | tr -d ' ')" "0" "(TOAGENTBLK) …before any write"
-grep -q 'w-child' "$TMP/aerr" \
+grep -q 'A-w-child' "$TMP/aerr" \
   && ok "(TOAGENTBLK) …naming the blocker the work is on" \
   || bad "(TOAGENTBLK) the blocker is unnamed (stderr: $(cat "$TMP/aerr"))"
 grep -q -- '--then-assign' "$TMP/aerr" \
@@ -1652,12 +1105,12 @@ grep -q -- '--then-assign' "$TMP/aerr" \
 : > "$TMP/updates"; : > "$TMP/deps"
 WRC3=0
 sh "$SCRIPT" takeaway A-BLOCKED "held — mechanik edits once the child lands" \
-   --release --assign "$AGENT" --waiting-on w-child >/dev/null 2>"$TMP/aerr" || WRC3=$?
+   --release --assign "$AGENT" --waiting-on A-w-child >/dev/null 2>"$TMP/aerr" || WRC3=$?
 eq "$WRC3" "0" "(TOAGENTWAIT) an --assign that names its wait lands"
 grep -qE "^bd update A-BLOCKED .*--assignee=$AGENT" "$TMP/updates" \
   && ok "(TOAGENTWAIT) …assigned to the agent" \
   || bad "(TOAGENTWAIT) the assignee was lost: $(cat "$TMP/updates")"
-grep -qE '^bd dep add A-BLOCKED w-child -t blocks' "$TMP/deps" \
+grep -qE '^bd dep add A-BLOCKED A-w-child -t blocks' "$TMP/deps" \
   && ok "(TOAGENTWAIT) …and held on the named wait, which gates the hand-off" \
   || bad "(TOAGENTWAIT) the wait edge was not written (got: $(cat "$TMP/deps"))"
 
@@ -1716,7 +1169,7 @@ grep -q -- '--set-metadata gc.takeaway=a b' "$TMP/updates" \
 
 # (CAPFIRST) a refusal must cost nothing: no park, no edge.
 : > "$TMP/updates"; : > "$TMP/deps"
-sh "$SCRIPT" takeaway A-PARKED "$T141" --release --waiting-on tk-blk1 >/dev/null 2>&1 || true
+sh "$SCRIPT" takeaway A-PARKED "$T141" --release --waiting-on A-blk1 >/dev/null 2>&1 || true
 eq "$(grep -c '^bd update' "$TMP/updates" || true)" "0" "(CAPFIRST) a refused takeaway does not park the bead"
 eq "$(grep -c '^bd dep' "$TMP/deps" || true)"       "0" "(CAPFIRST) …and writes no waiting-on edge"
 

@@ -167,7 +167,7 @@ fi
 echo "== The rig's guidance for {{check}}: docs/review-{{check}}.md at {{reviewed_oid}}, empty when it keeps none"
 "$SCRIPTS/review-checks.sh" --extension "{{check}}" --at "{{reviewed_oid}}" || exit 1
 echo "== What gctk rig recorded at {{reviewed_oid}}"
-"$SCRIPTS/review-evidence.sh" --anchor "{{anchor_bead}}" --commit "{{reviewed_oid}}" || exit 1
+"$SCRIPTS/review-evidence.sh" --anchor "{{anchor_bead}}" --commit "{{reviewed_oid}}" --worktree "$WT" || exit 1
 echo "== The pack's scripts: $SCRIPTS"
 printf '%s\n' "== The review's workspace: ${WT%/wt}" "== The review's worktree: $WT"
 # <<< review-gather

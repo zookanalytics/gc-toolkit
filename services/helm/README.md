@@ -631,7 +631,7 @@ field would be lying on a normal day.
 | `pr_conversation` | `quiet`, `outstanding`, `answered`, `asking`, `unknown` | `pr.conversation` on the anchor; `asking` from a human gate's edge |
 | `pr_approval` | `required`, `met`, `unknown` | `pr_posture` on the anchor |
 | `pr_owed_since` | RFC 3339, omitted when nothing is owed | the earliest live cause |
-| `pr_held` | any of `gate`, `review`, `blocked` in that order, or `null` | `prstatus.Held` over the facts `prstatus.Read` gathers, the derivation the `held:` labels come from: an open human gate that holds the anchor, the merge pass's count of review threads waiting on the city's answer, the blocked verdict's cause, and the anchor's blockers a person has to clear. `null` too on a PR whose facts did not read |
+| `pr_held` | any of `gate`, `review`, `blocked` in that order, or `null` | `prstatus.Held` over the facts `prstatus.Read` gathers, the derivation the `held:` labels come from: an open human gate that holds the anchor, the merge pass's count of review threads waiting on the city's answer, the blocked verdict's cause, and the beads a person owes the next move on that the anchor waits on, on its own blockers or behind a bead it waits on. `null` too on a PR whose facts did not read |
 
 **Recorded, not re-derived.** Every stage of the merge cadence reaches the
 machine axis once per pass: `assets/scripts/gate-ensure.sh` classifies each
@@ -666,6 +666,16 @@ it, so once no fix unit, review, or finding is in flight the merge pass records
 `settled` and the row is the operator's to clear by re-reviewing (`pr_approval`
 reads `required`, and `needs` names the re-review). A veto with a fix unit still
 in flight reads `progressing` and stays the city's move.
+
+A row held only by a bead a person owes the next move on, which it waits on
+through another bead, such as a decision or another PR waiting on a review that
+its rework waits for, reads `needs-attention` with `pr_held` `blocked`, as its
+label does, and is not owed: the move is on that bead, whose own row asks for it,
+and this row's `needs` names it, `your move is on <its title>`, counting any
+others. So is a row stacked directly on another PR whose next move is a
+person's. A blocker of the row's own that a person owes, such as a decision,
+still asks on the row, a row owed for a cause of its own keeps naming that cause,
+and a gate's question still wins.
 
 **Blocked, not settled.** `blocked` is a hold no automated actor will clear and
 no review verdict is owed on: an unresolved required review thread, a failed

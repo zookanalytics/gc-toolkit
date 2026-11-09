@@ -24,27 +24,29 @@
 # its create, under the subject's epic when it has one, make the subject wait on
 # it, hold the implementation behind a gated design, and file the summary task
 # under the subject's epic with no target, waiting on both children with the
-# subject waiting on it. Each write is read back. None of them assigns the
-# subject or dispatches anything, so a setup that stops between steps leaves no
-# child in flight, and no child can land while the subject waits on fewer than
-# all of them. The dispatch step reads every target and edge back, and only then
-# hands the subject to the refinery with its notice, slings the design child
+# subject waiting on it. Each create and each add takes its exit, and one that
+# exits non-zero stops its step. An edge is written only when both its ends
+# carry the subject's id prefix, which names the store that holds it. None of
+# them assigns the subject or dispatches anything, so a setup that stops between
+# steps leaves no child in flight, and no child can land while the subject waits
+# on fewer than all of them. The dispatch step reads nothing back: it hands the
+# subject to the refinery with its notice, slings the design child
 # (--merge mr when gated), arms the implementation behind the design or slings
 # it, and arms the summary task on mol-polecat-report. It stamps each marker
 # (gc.design_armed, gc.impl_armed, gc.summary_armed) right after its own
 # dispatch, because a resume skips a dispatch whose marker is set. Each failure
 # case breaks one write or read and checks that nothing downstream of it ran.
 #
-# The read-back decides whether a write landed, not its exit status. A resume
-# re-runs every add on edges the failed pass may already have written, and bd
-# refuses the duplicate, so the resume cases give each add a non-zero exit over
-# an edge that reads back and check that the step completes.
+# A resume re-runs every add on edges the failed pass may already have written,
+# and bd takes an edge it already holds as a no-op that exits 0, so the resume
+# cases run each add over an edge already there and check that the step
+# completes, the edge single.
 #
 # The work skill's recipe (skills/work/integration-effort.md) runs with its
 # placeholders filled in: it cuts from origin/HEAD's branch and records it as
 # the landing bead's target, files every bead and the summary task with their
-# waits read back before it hands the landing bead over, and dispatches only
-# after that. Its block for a bead that joins later makes the undispatched
+# waits before it hands the landing bead over, stops on a write that exits
+# non-zero, and dispatches only after that. Its block for a bead that joins later makes the undispatched
 # summary task wait on the bead, never the reverse, and refuses a summary task
 # that has been dispatched, or whose beads have all closed so that a pass may
 # already be slinging it.
@@ -172,7 +174,7 @@ eq "$(grep -c 'gc runtime drain-ack' "$TOML")" "1" "one step drains: the dispatc
 # Only the dispatch step hands the subject over or dispatches anything.
 for m in file-design-create file-design-wait file-implementation-create file-implementation-wait summary-task-create summary-task-wait; do
   if grep -qE 'gc sling|deferred-dispatch|--assignee' <<< "$(extract_copy "$m" 1)"; then
-    bad "$m hands the subject over or dispatches — only the dispatch step may, once the whole setup reads back"
+    bad "$m hands the subject over or dispatches — only the dispatch step may, once the whole setup is filed"
   else
     ok "$m neither hands the subject over nor dispatches"
   fi
@@ -244,19 +246,19 @@ done
 # one line each. A `bd --rig <rig>` call is answered from the same store. Failure
 # injection, each a space-separated list:
 #   REFUSE_EDGES  "<a>><b>" pairs whose `dep add` exits 1 and writes nothing
-#   DROP_EDGES    pairs whose `dep add`, or create --deps entry, writes nothing
-#                 while the call exits 0, as bd does for an edge onto a bead in
-#                 another store
 #   UPDATE_FAIL   "<id>:<key>" (or "<id>:assignee") whose `update` exits 1 and
 #                 writes nothing
 #   SHOW_FAIL     ids whose `show` answers nothing
-# and CREATE_FAIL (a create bd refuses), NEXT_ID (the id a create files) or
-# NEXT_IDS (the ids successive creates file, in order), SLING_RC, ROSTER_FILE
-# (what `agent list --json` prints) and ROSTER_FAIL. A create takes its title
+#   CREATE_FAIL   the ids whose create bd refuses, or 1, which refuses every
+#                 create
+# and NEXT_ID (the id a create files) or NEXT_IDS (the ids successive creates
+# file, in order), SLING_RC, ROSTER_FILE (what `agent list --json` prints) and
+# ROSTER_FAIL. A create takes its title
 # from --title or its first plain argument, and its --deps entries as bd does: a
 # bare id or <type>:<id> makes the new bead depend on it, and blocks:<id> makes
-# <id> wait on the new bead. A dep add over an edge the store already holds
-# exits 1, as bd refuses a duplicate. An update's --if-assignee is the guard bd
+# <id> wait on the new bead. A dep add over an edge of the same type the store
+# already holds is a no-op that exits 0, as bd's is, and one of another type
+# onto the same pair exits 1. An update's --if-assignee is the guard bd
 # applies, exiting 13 on a mismatch. `rig list` names the one rig, "rig", at
 # RIG_ROOT, and `<binding> scripts-dir` prints SCRIPTS. A read the gctk under
 # test makes is answered from the same store through holds-store.stub.sh, and
@@ -311,13 +313,13 @@ case "${1:-} ${2:-}" in
         *) [ -n "$title" ] || title="$1"; shift ;;
       esac
     done
-    [ -z "${CREATE_FAIL:-}" ] || { echo '{"error":"simulated refusal"}'; exit 1; }
     if [ -n "${NEXT_IDS:-}" ]; then
       n=$(( $(cat "$STORE.creates" 2>/dev/null || echo 0) + 1 )); printf '%s\n' "$n" > "$STORE.creates"
       new=$(printf '%s\n' $NEXT_IDS | sed -n "${n}p")
     else
       new="$NEXT_ID"
     fi
+    { [ "${CREATE_FAIL:-}" = 1 ] || listed "${CREATE_FAIL:-}" "$new"; } && { echo '{"error":"simulated refusal"}'; exit 1; }
     put --arg id "$new" --arg t "$title" --arg d "$desc" --argjson m "$meta" --arg p "$parent" \
       '. + [{id: $id, title: $t, issue_type: "task", status: "open", assignee: "", description: $d, metadata: $m,
              _deps: (if $p == "" then [] else [{id: $p, dependency_type: "parent-child"}] end)}]'
@@ -327,7 +329,6 @@ case "${1:-} ${2:-}" in
         *:*) a="$new"; b="${dep#*:}"; t="${dep%%:*}" ;;
         *) a="$new"; b="$dep"; t=blocks ;;
       esac
-      listed "${DROP_EDGES:-}" "$a>$b" && continue
       put --arg a "$a" --arg b "$b" --arg t "$t" 'map(if .id == $a then ._deps = ((._deps // []) + [{id: $b, dependency_type: $t}]) else . end)'
     done
     jq -nc --arg id "$new" '{id: $id}'
@@ -337,9 +338,13 @@ case "${1:-} ${2:-}" in
       add)
         a="$4"; b="$5"; t="${6#--type=}"
         listed "${REFUSE_EDGES:-}" "$a>$b" && { echo "Error: refused" >&2; exit 1; }
-        listed "${DROP_EDGES:-}" "$a>$b" && { echo "Added dependency: $a depends on $b ($t)"; exit 0; }
+        # bd takes an edge of the same type it already holds as a no-op that
+        # exits 0, and refuses one of another type onto the same pair.
+        if jq -e --arg a "$a" --arg b "$b" --arg t "$t" 'any(.[]; .id == $a and any((._deps // [])[]; .id == $b and .dependency_type == $t))' "$STORE" >/dev/null; then
+          echo "Added dependency: $a depends on $b ($t)"; exit 0
+        fi
         if jq -e --arg a "$a" --arg b "$b" 'any(.[]; .id == $a and any((._deps // [])[]; .id == $b))' "$STORE" >/dev/null; then
-          echo "Error: dependency $a -> $b already exists" >&2; exit 1
+          echo "Error: $a already depends on $b by another type" >&2; exit 1
         fi
         put --arg a "$a" --arg b "$b" --arg t "$t" 'map(if .id == $a then ._deps = ((._deps // []) + [{id: $b, dependency_type: $t}]) else . end)'
         exit 0 ;;
@@ -400,10 +405,10 @@ export SCRIPTS="$TMP/bin" RIG_ROOT="$TMP/rig" POOL="rig/gc-toolkit.polecat" REFI
 export HOLDS_STUB="$HERE/holds-store.stub.sh" GC_NO_API=1
 GCTK_BIN="$("$HOLDS_STUB" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so the late-join block cannot run"; exit 1; }
 export GCTK_BIN
-export SUBJECT="sub-1" BRANCH="integration/sub-1" INITIATIVE="Rebuild the widget"
+export SUBJECT="dz-sub" BRANCH="integration/dz-sub" INITIATIVE="Rebuild the widget"
 printf '%s\n' '{"agents":[{"qualified_name":"rig/gc-toolkit.polecat"},{"qualified_name":"rig/gc-toolkit.refinery"}]}' > "$ROSTER_FILE"
 
-# fixture [<jq edit>]: a store holding the subject sub-1 under the epic ep-1,
+# fixture [<jq edit>]: a store holding the subject dz-sub under the epic ep-1,
 # with its planned work in its description and nothing recorded on it, and the
 # design and implementation children dz-design and dz-impl, each filed with the
 # integration branch as its target. The edit, when given, changes it. Every
@@ -411,31 +416,31 @@ printf '%s\n' '{"agents":[{"qualified_name":"rig/gc-toolkit.polecat"},{"qualifie
 fixture() {
   jq -nc '[
     {id: "ep-1", title: "The widget epic", issue_type: "epic", status: "open", assignee: "", description: "", metadata: {}, _deps: []},
-    {id: "sub-1", title: "Rebuild the widget", issue_type: "task", status: "open", assignee: "",
+    {id: "dz-sub", title: "Rebuild the widget", issue_type: "task", status: "open", assignee: "",
      description: "Plan: rebuild the widget renderer and retire the old cache.", metadata: {},
      _deps: [{id: "ep-1", dependency_type: "parent-child"}]},
-    {id: "dz-design", title: "design: Rebuild the widget", issue_type: "task", status: "open", assignee: "", description: "", metadata: {target: "integration/sub-1"}, _deps: []},
-    {id: "dz-impl", title: "implement: Rebuild the widget per its design", issue_type: "task", status: "open", assignee: "", description: "", metadata: {target: "integration/sub-1"}, _deps: []}
+    {id: "dz-design", title: "design: Rebuild the widget", issue_type: "task", status: "open", assignee: "", description: "", metadata: {target: "integration/dz-sub"}, _deps: []},
+    {id: "dz-impl", title: "implement: Rebuild the widget per its design", issue_type: "task", status: "open", assignee: "", description: "", metadata: {target: "integration/dz-sub"}, _deps: []}
   ]' > "$STORE"
   [ -z "${1:-}" ] || { jq -c "$1" "$STORE" > "$STORE.new" && mv "$STORE.new" "$STORE"; }
   rm -f "$STORE.creates"
   printf 'main\n' > "$ORIGIN_REFS"
-  export ORIGIN_HEAD=main FETCH_RC=0 PUSH_FAIL="" REFUSE_EDGES="" DROP_EDGES="" UPDATE_FAIL="" SHOW_FAIL="" \
+  export ORIGIN_HEAD=main FETCH_RC=0 PUSH_FAIL="" REFUSE_EDGES="" UPDATE_FAIL="" SHOW_FAIL="" \
     CREATE_FAIL="" NEXT_ID="" NEXT_IDS="" SLING_RC=0 ARM_RC=0 NOTIFY_RC=0 ROSTER_FAIL="" \
     DESIGN_ARMED="" IMPL_ARMED="" SUMMARY_ARMED=""
   export DESIGN_CHILD="dz-design" IMPL_CHILD="dz-impl" SUMMARY_TASK=""
 }
 # subject_json: the subject as the step's derive block reads it.
 subject_json() { SUBJECT_JSON="$(PATH="$TMP/bin:$PATH" GC_LOG=/dev/null gc bd show "$SUBJECT" --json)"; export SUBJECT_JSON; }
-# The rows and edges of a whole setup: the summary task sum-1 under the epic,
+# The rows and edges of a whole setup: the summary task dz-sum under the epic,
 # waiting on both children, and the subject waiting on both children and on it.
-SUMMARY_ROW='{id: "sum-1", title: "summary: the PR for Rebuild the widget", issue_type: "task", status: "open", assignee: "", description: "", metadata: {}, _deps: [{id: "ep-1", dependency_type: "parent-child"}]}'
-WIRED='. + ['"$SUMMARY_ROW"'] | map(if .id == "sub-1" then ._deps += [{id: "dz-design", dependency_type: "blocks"}, {id: "dz-impl", dependency_type: "blocks"}, {id: "sum-1", dependency_type: "blocks"}]
-  elif .id == "sum-1" then ._deps += [{id: "dz-design", dependency_type: "blocks"}, {id: "dz-impl", dependency_type: "blocks"}]
+SUMMARY_ROW='{id: "dz-sum", title: "summary: the PR for Rebuild the widget", issue_type: "task", status: "open", assignee: "", description: "", metadata: {}, _deps: [{id: "ep-1", dependency_type: "parent-child"}]}'
+WIRED='. + ['"$SUMMARY_ROW"'] | map(if .id == "dz-sub" then ._deps += [{id: "dz-design", dependency_type: "blocks"}, {id: "dz-impl", dependency_type: "blocks"}, {id: "dz-sum", dependency_type: "blocks"}]
+  elif .id == "dz-sum" then ._deps += [{id: "dz-design", dependency_type: "blocks"}, {id: "dz-impl", dependency_type: "blocks"}]
   elif .id == "dz-impl" then ._deps += [{id: "dz-design", dependency_type: "blocks"}] else . end)
-  | map(if .id == "sub-1" then .metadata += {branch: "integration/sub-1", target: "main", "gc.design_child": "dz-design", "gc.impl_child": "dz-impl", "gc.summary_task": "sum-1"} else . end)'
+  | map(if .id == "dz-sub" then .metadata += {branch: "integration/dz-sub", target: "main", "gc.design_child": "dz-design", "gc.impl_child": "dz-impl", "gc.summary_task": "dz-sum"} else . end)'
 # wired [<jq edit>]: fixture with the whole design-gated setup in place, then the edit.
-wired() { fixture "$WIRED${1:+ | $1}"; subject_json; export SUMMARY_TASK=sum-1 DESIGN_GATED=true; }
+wired() { fixture "$WIRED${1:+ | $1}"; subject_json; export SUMMARY_TASK=dz-sum DESIGN_GATED=true; }
 
 # run_block <marker> <shell>: runs the marked block with the step's variables
 # in the environment and the stubs first on PATH. Sets RC; the call log is
@@ -484,76 +489,76 @@ for sh in "${SHELLS[@]}"; do
   fixture; subject_json
   run_block seed-branch-cut "$sh"
   eq "$RC" "0" "[$sh] seed: a fresh subject is cut and recorded"
-  logged "git -C $RIG_ROOT push origin refs/remotes/origin/main:refs/heads/integration/sub-1 --force-with-lease=refs/heads/integration/sub-1:" \
+  logged "git -C $RIG_ROOT push origin refs/remotes/origin/main:refs/heads/integration/dz-sub --force-with-lease=refs/heads/integration/dz-sub:" \
     && ok "[$sh] seed: one create-only push from the rig's checkout cuts the branch from the default branch" \
     || bad "[$sh] seed: no create-only push of the branch"
-  grep -qxF "integration/sub-1" "$ORIGIN_REFS" && ok "[$sh] seed: origin carries the branch" \
+  grep -qxF "integration/dz-sub" "$ORIGIN_REFS" && ok "[$sh] seed: origin carries the branch" \
     || bad "[$sh] seed: origin does not carry the branch"
-  eq "$(meta sub-1 branch) $(meta sub-1 target)" "integration/sub-1 main" "[$sh] seed: the subject records the branch and the default branch as its target"
+  eq "$(meta dz-sub branch) $(meta dz-sub target)" "integration/dz-sub main" "[$sh] seed: the subject records the branch and the default branch as its target"
   before "fetch --prune origin" "push origin" && ok "[$sh] seed: the cut follows a fetch of origin" \
     || bad "[$sh] seed: the push ran without a fetch before it"
 
   fixture; subject_json; export ORIGIN_HEAD=trunk; printf 'trunk\n' > "$ORIGIN_REFS"
   run_block seed-branch-cut "$sh"
-  eq "$RC $(meta sub-1 target)" "0 trunk" "[$sh] seed: the default branch is the one origin/HEAD names"
-  logged "push origin refs/remotes/origin/trunk:refs/heads/integration/sub-1" \
+  eq "$RC $(meta dz-sub target)" "0 trunk" "[$sh] seed: the default branch is the one origin/HEAD names"
+  logged "push origin refs/remotes/origin/trunk:refs/heads/integration/dz-sub" \
     && ok "[$sh] seed: …and the branch is cut from it" || bad "[$sh] seed: the branch was not cut from origin/HEAD's branch"
 
   fixture; subject_json; export ORIGIN_HEAD=""
   run_block seed-branch-cut "$sh"
-  eq "$RC $(meta sub-1 target)" "0 main" "[$sh] seed: an unreadable origin/HEAD falls back to main"
+  eq "$RC $(meta dz-sub target)" "0 main" "[$sh] seed: an unreadable origin/HEAD falls back to main"
 
   # resume: an earlier pass cut the branch and died before its record landed
-  fixture; subject_json; printf 'main\nintegration/sub-1\n' > "$ORIGIN_REFS"
+  fixture; subject_json; printf 'main\nintegration/dz-sub\n' > "$ORIGIN_REFS"
   run_block seed-branch-cut "$sh"
   eq "$RC" "0" "[$sh] seed resume: a refused push after which origin carries the branch is an earlier cut"
-  eq "$(meta sub-1 branch)" "integration/sub-1" "[$sh] seed resume: …and the branch is recorded"
+  eq "$(meta dz-sub branch)" "integration/dz-sub" "[$sh] seed resume: …and the branch is recorded"
   grep -qF "already carries" "$TMP/block.out" && ok "[$sh] seed resume: the earlier cut is reported" \
     || bad "[$sh] seed resume: the earlier cut passed silently"
 
   fixture; subject_json; export PUSH_FAIL=1
   run_block seed-branch-cut "$sh"
-  stopped && [ "$(meta sub-1 branch)" = "<absent>" ] \
+  stopped && [ "$(meta dz-sub branch)" = "<absent>" ] \
     && ok "[$sh] seed: a push that fails while origin lacks the branch stops the step with nothing recorded" \
-    || bad "[$sh] seed: a failed push was trusted (rc=$RC, branch=$(meta sub-1 branch))"
+    || bad "[$sh] seed: a failed push was trusted (rc=$RC, branch=$(meta dz-sub branch))"
 
   fixture; subject_json; export FETCH_RC=1
   run_block seed-branch-cut "$sh"
   stopped && not_logged "push origin" && ok "[$sh] seed: a failed fetch stops the step before the push" \
     || bad "[$sh] seed: the push ran after a failed fetch (rc=$RC)"
 
-  fixture '.[1].metadata = {branch: "integration/sub-1", target: "main"}'; subject_json
+  fixture '.[1].metadata = {branch: "integration/dz-sub", target: "main"}'; subject_json
   run_block seed-branch-cut "$sh"
   eq "$RC" "0" "[$sh] seed: a subject that records the branch passes"
   not_logged "git " && ok "[$sh] seed: …and is cut no further" || bad "[$sh] seed: a recorded branch was cut again"
 
-  fixture '.[1].metadata = {branch: "polecat/sub-1"}'; subject_json
+  fixture '.[1].metadata = {branch: "polecat/dz-sub"}'; subject_json
   run_block seed-branch-cut "$sh"
-  stopped && not_logged "push origin" && [ "$(meta sub-1 branch)" = "polecat/sub-1" ] && reported "not this run's to cut" \
+  stopped && not_logged "push origin" && [ "$(meta dz-sub branch)" = "polecat/dz-sub" ] && reported "not this run's to cut" \
     && ok "[$sh] seed: a subject recording another branch keeps it, nothing is cut, and the refusal says why" \
     || bad "[$sh] seed: a subject recording another branch was cut over (rc=$RC)"
 
   fixture '.[1].metadata = {target: "integration/other"}'; subject_json
   run_block seed-branch-cut "$sh"
-  stopped && not_logged "push origin" && [ "$(meta sub-1 target)" = "integration/other" ] \
+  stopped && not_logged "push origin" && [ "$(meta dz-sub target)" = "integration/other" ] \
     && ok "[$sh] seed: a subject that lands inside another branch is not cut" \
     || bad "[$sh] seed: a subject landing inside another branch was cut (rc=$RC)"
 
   fixture '.[1].metadata = {target: "main"}'; subject_json
   run_block seed-branch-cut "$sh"
-  eq "$RC $(meta sub-1 branch)" "0 integration/sub-1" "[$sh] seed: a subject that already lands on the default branch is cut"
+  eq "$RC $(meta dz-sub branch)" "0 integration/dz-sub" "[$sh] seed: a subject that already lands on the default branch is cut"
 
-  fixture; subject_json; export UPDATE_FAIL="sub-1:branch"
+  fixture; subject_json; export UPDATE_FAIL="dz-sub:branch"
   run_block seed-branch-cut "$sh"
-  stopped && reported "not filing anything" && ok "[$sh] seed: a record that does not read back stops the step" \
+  stopped && reported "not filing anything" && ok "[$sh] seed: a record the store refuses stops the step" \
     || bad "[$sh] seed: an unrecorded branch passed (rc=$RC)"
 
   # --- file-design-create ---
   fixture '.[2:] = []'; subject_json; export DESIGN_CHILD="" NEXT_ID=dz-design DESIGN_GATED=true
   run_block file-design-create "$sh"
   eq "$RC" "0" "[$sh] design create: the design child is filed"
-  eq "$(meta dz-design target)" "integration/sub-1" "[$sh] design create: its target is the integration branch, written in its create"
-  eq "$(meta sub-1 gc.design_child)" "dz-design" "[$sh] design create: gc.design_child is recorded on the subject"
+  eq "$(meta dz-design target)" "integration/dz-sub" "[$sh] design create: its target is the integration branch, written in its create"
+  eq "$(meta dz-sub gc.design_child)" "dz-design" "[$sh] design create: gc.design_child is recorded on the subject"
   says dz-design "It is a stage" && ok "[$sh] design create: design-gated, the brief says it is a stage" \
     || bad "[$sh] design create: the gated brief does not say the child is a stage"
   eq "$(parents dz-design)" "ep-1" "[$sh] design create: it is filed under the subject's epic, beside the subject"
@@ -569,7 +574,7 @@ for sh in "${SHELLS[@]}"; do
 
   fixture '.[2:] = []'; subject_json; export DESIGN_CHILD="" CREATE_FAIL=1
   run_block file-design-create "$sh"
-  stopped && reported "simulated refusal" && [ "$(meta sub-1 gc.design_child)" = "<absent>" ] \
+  stopped && reported "simulated refusal" && [ "$(meta dz-sub gc.design_child)" = "<absent>" ] \
     && ok "[$sh] design create: a refused create reports bd's reason and records nothing" \
     || bad "[$sh] design create: a refused create passed (rc=$RC)"
 
@@ -581,139 +586,135 @@ for sh in "${SHELLS[@]}"; do
   # --- file-design-wait ---
   fixture; subject_json; export DESIGN_GATED=true
   run_block file-design-wait "$sh"
-  eq "$RC" "0" "[$sh] design wait: a child whose target reads back is waited on"
-  eq "$(waits_on sub-1 dz-design)" "1" "[$sh] design wait: the subject waits on the design child"
-  ! released && [ "$(field sub-1 assignee)" = "" ] \
+  eq "$RC" "0" "[$sh] design wait: a filed child is waited on"
+  eq "$(waits_on dz-sub dz-design)" "1" "[$sh] design wait: the subject waits on the design child"
+  ! released && [ "$(field dz-sub assignee)" = "" ] \
     && ok "[$sh] design wait: the subject is not handed over and the child is not slung, so a setup that stops here leaves nothing in flight" \
     || bad "[$sh] design wait: handed over or dispatched before the rest of the setup existed"
 
-  fixture '.[2].metadata = {}'; subject_json
+  fixture; subject_json; export REFUSE_EDGES="dz-sub>dz-design"
   run_block file-design-wait "$sh"
-  stopped && not_logged "dep add" && ok "[$sh] design wait: a child that reads no target is not waited on" \
-    || bad "[$sh] design wait: a child with no target went ahead (rc=$RC)"
-
-  fixture; subject_json; export DROP_EDGES="sub-1>dz-design"
-  run_block file-design-wait "$sh"
-  stopped && reported "reads no blocks edge" && ok "[$sh] design wait: a wait that exits 0 but does not read back fails the step" \
-    || bad "[$sh] design wait: an unread wait was trusted (rc=$RC)"
-
-  fixture; subject_json; export REFUSE_EDGES="sub-1>dz-design"
-  run_block file-design-wait "$sh"
-  stopped && ok "[$sh] design wait: a refused add that reads no edge back fails the step" \
+  stopped && reported "refused the wait" && ok "[$sh] design wait: an add bd refuses fails the step" \
     || bad "[$sh] design wait: a refused add passed (rc=$RC)"
 
-  # resume: the edge is there from the failed first pass, and bd refuses the duplicate
+  fixture; subject_json; export DESIGN_CHILD=xx-design
+  run_block file-design-wait "$sh"
+  stopped && not_logged "dep add" && reported "another store" \
+    && ok "[$sh] design wait: a child in another store gets no edge, since one would hold nothing" \
+    || bad "[$sh] design wait: an edge onto another store's bead was written (rc=$RC)"
+
+  # resume: the edge is there from the failed first pass, and bd's re-add is a no-op
   fixture '.[1]._deps += [{id: "dz-design", dependency_type: "blocks"}]'; subject_json
   run_block file-design-wait "$sh"
-  eq "$RC" "0" "[$sh] design wait resume: an existing wait that reads back completes the step"
-  reported "reading the edge back" && ok "[$sh] design wait resume: the refused add is reported" \
-    || bad "[$sh] design wait resume: the refused add passed silently"
+  eq "$RC $(waits_on dz-sub dz-design)" "0 1" "[$sh] design wait resume: a wait already there completes the step, once"
 
   # --- file-implementation-create ---
   fixture '.[3:] = []'; subject_json; export IMPL_CHILD="" NEXT_ID=dz-impl DESIGN_GATED=true
   run_block file-implementation-create "$sh"
   eq "$RC" "0" "[$sh] impl create: the implementation child is filed"
-  eq "$(meta dz-impl target)" "integration/sub-1" "[$sh] impl create: its target is the integration branch, written in its create"
-  eq "$(meta sub-1 gc.impl_child)" "dz-impl" "[$sh] impl create: gc.impl_child is recorded on the subject"
+  eq "$(meta dz-impl target)" "integration/dz-sub" "[$sh] impl create: its target is the integration branch, written in its create"
+  eq "$(meta dz-sub gc.impl_child)" "dz-impl" "[$sh] impl create: gc.impl_child is recorded on the subject"
   eq "$(parents dz-impl)" "ep-1" "[$sh] impl create: it is filed under the subject's epic"
-  says dz-impl "gc.summary_task" && says dz-impl "target=integration/sub-1" \
+  says dz-impl "gc.summary_task" && says dz-impl "target=integration/dz-sub" \
     && ok "[$sh] impl create: its brief gives a bead it splits into the same writes, the summary task's wait among them" \
     || bad "[$sh] impl create: the brief does not give a split bead its writes"
 
   fixture '.[3:] = []'; subject_json; export IMPL_CHILD="" CREATE_FAIL=1
   run_block file-implementation-create "$sh"
-  stopped && [ "$(meta sub-1 gc.impl_child)" = "<absent>" ] && ok "[$sh] impl create: a refused create records nothing" \
+  stopped && [ "$(meta dz-sub gc.impl_child)" = "<absent>" ] && ok "[$sh] impl create: a refused create records nothing" \
     || bad "[$sh] impl create: a refused create passed (rc=$RC)"
 
   # --- file-implementation-wait ---
   fixture; subject_json; export DESIGN_GATED=true
   run_block file-implementation-wait "$sh"
   eq "$RC" "0" "[$sh] impl wait gated: verified waits complete the step"
-  eq "$(waits_on sub-1 dz-impl)" "1" "[$sh] impl wait: the subject waits on the implementation child"
+  eq "$(waits_on dz-sub dz-impl)" "1" "[$sh] impl wait: the subject waits on the implementation child"
   eq "$(waits_on dz-impl dz-design)" "1" "[$sh] impl wait gated: the design child blocks the implementation (operand order)"
   ! released && ok "[$sh] impl wait gated: nothing is armed or slung" || bad "[$sh] impl wait gated: dispatched before the summary task existed"
 
   fixture; subject_json; export DESIGN_GATED=false
   run_block file-implementation-wait "$sh"
-  eq "$RC" "0" "[$sh] impl wait all-in-one: a verified wait completes the step"
+  eq "$RC" "0" "[$sh] impl wait all-in-one: the subject's wait alone completes the step"
   [ "$(waits_on dz-impl dz-design)" = "0" ] && ok "[$sh] impl wait all-in-one: no design edge holds it" \
     || bad "[$sh] impl wait all-in-one: held behind the design anyway"
   ! released && ok "[$sh] impl wait all-in-one: the child is not slung before the summary task is filed" \
     || bad "[$sh] impl wait all-in-one: the implementation started before gc.summary_task existed"
 
-  fixture '.[3].metadata = {}'; subject_json; export DESIGN_GATED=true
+  fixture; subject_json; export DESIGN_GATED=true REFUSE_EDGES="dz-sub>dz-impl"
   run_block file-implementation-wait "$sh"
-  stopped && not_logged "dep add" && ok "[$sh] impl wait: a child that reads no target is not waited on" \
-    || bad "[$sh] impl wait: a child with no target went ahead (rc=$RC)"
+  stopped && not_logged "dz-impl dz-design" && ok "[$sh] impl wait: a refused wait of the subject stops before the design's edge" \
+    || bad "[$sh] impl wait: a refused wait of the subject went ahead (rc=$RC)"
 
-  fixture; subject_json; export DESIGN_GATED=true DROP_EDGES="sub-1>dz-impl"
+  fixture; subject_json; export DESIGN_GATED=true REFUSE_EDGES="dz-impl>dz-design"
   run_block file-implementation-wait "$sh"
-  stopped && not_logged "dz-impl dz-design" && ok "[$sh] impl wait: an unread wait of the subject stops before the design's edge" \
-    || bad "[$sh] impl wait: an unread wait of the subject was trusted (rc=$RC)"
+  stopped && ok "[$sh] impl wait gated: a design edge bd refuses fails the step" \
+    || bad "[$sh] impl wait gated: a refused design edge passed (rc=$RC)"
 
-  fixture; subject_json; export DESIGN_GATED=true DROP_EDGES="dz-impl>dz-design"
+  fixture; subject_json; export DESIGN_GATED=true IMPL_CHILD=xx-impl
   run_block file-implementation-wait "$sh"
-  stopped && ok "[$sh] impl wait gated: a design edge that does not read back fails the step" \
-    || bad "[$sh] impl wait gated: an unread design edge was trusted (rc=$RC)"
+  stopped && not_logged "dep add" && reported "another store" \
+    && ok "[$sh] impl wait: a child in another store gets no edge, since one would hold nothing" \
+    || bad "[$sh] impl wait: an edge onto another store's bead was written (rc=$RC)"
 
-  # resume: both edges are there from the failed first pass, bd refuses both duplicates
+  # resume: both edges are there from the failed first pass, and bd's re-adds are no-ops
   fixture '.[1]._deps += [{id: "dz-impl", dependency_type: "blocks"}] | .[3]._deps += [{id: "dz-design", dependency_type: "blocks"}]'; subject_json
   export DESIGN_GATED=true
   run_block file-implementation-wait "$sh"
-  eq "$RC" "0" "[$sh] impl wait gated resume: existing edges that read back complete the step"
-  [ "$(grep -c 'reading the edge back' "$TMP/block.err")" = "2" ] \
-    && ok "[$sh] impl wait gated resume: both refused adds are reported" || bad "[$sh] impl wait gated resume: a refused add passed silently"
+  eq "$RC $(waits_on dz-sub dz-impl) $(waits_on dz-impl dz-design)" "0 1 1" "[$sh] impl wait gated resume: edges already there complete the step, once each"
 
   # --- summary-task-create ---
-  fixture; subject_json; export NEXT_ID=sum-1
+  fixture; subject_json; export NEXT_ID=dz-sum
   run_block summary-task-create "$sh"
   eq "$RC" "0" "[$sh] summary create: the summary task is filed"
-  eq "$(parents sum-1)" "ep-1" "[$sh] summary create: it is filed under the subject's epic, beside the subject"
-  eq "$(meta sum-1 target)" "<absent>" "[$sh] summary create: it carries no target"
-  says sum-1 "pr_summary of sub-1" && ok "[$sh] summary create: its description names the subject it writes for" \
+  eq "$(parents dz-sum)" "ep-1" "[$sh] summary create: it is filed under the subject's epic, beside the subject"
+  eq "$(meta dz-sum target)" "<absent>" "[$sh] summary create: it carries no target"
+  says dz-sum "pr_summary of dz-sub" && ok "[$sh] summary create: its description names the subject it writes for" \
     || bad "[$sh] summary create: its description does not name the subject"
-  eq "$(meta sub-1 gc.summary_task)" "sum-1" "[$sh] summary create: gc.summary_task is recorded on the subject"
+  eq "$(meta dz-sub gc.summary_task)" "dz-sum" "[$sh] summary create: gc.summary_task is recorded on the subject"
 
-  fixture '.[1]._deps = []'; subject_json; export NEXT_ID=sum-1
+  fixture '.[1]._deps = []'; subject_json; export NEXT_ID=dz-sum
   run_block summary-task-create "$sh"
-  eq "$RC $(parents sum-1)" "0 " "[$sh] summary create: a subject with no epic gives the task no parent"
+  eq "$RC $(parents dz-sum)" "0 " "[$sh] summary create: a subject with no epic gives the task no parent"
 
-  fixture '.[0].issue_type = "task"'; subject_json; export NEXT_ID=sum-1
+  fixture '.[0].issue_type = "task"'; subject_json; export NEXT_ID=dz-sum
   run_block summary-task-create "$sh"
-  eq "$RC $(parents sum-1)" "0 " "[$sh] summary create: a parent that is not an epic is not the task's"
+  eq "$RC $(parents dz-sum)" "0 " "[$sh] summary create: a parent that is not an epic is not the task's"
 
   fixture; subject_json; export CREATE_FAIL=1
   run_block summary-task-create "$sh"
-  stopped && reported "simulated refusal" && [ "$(meta sub-1 gc.summary_task)" = "<absent>" ] \
+  stopped && reported "simulated refusal" && [ "$(meta dz-sub gc.summary_task)" = "<absent>" ] \
     && ok "[$sh] summary create: a refused create reports bd's reason and records nothing" || bad "[$sh] summary create: a refused create passed (rc=$RC)"
 
-  fixture; subject_json; export SUMMARY_TASK=sum-1
+  fixture; subject_json; export SUMMARY_TASK=dz-sum
   run_block summary-task-create "$sh"
   eq "$RC" "0" "[$sh] summary create: a filed task is not filed again"
   not_logged "bd create" && ok "[$sh] summary create: …and nothing is created" || bad "[$sh] summary create: a second task was filed"
 
   # --- summary-task-wait ---
-  fixture ". + [$SUMMARY_ROW]"; subject_json; export SUMMARY_TASK=sum-1
+  fixture ". + [$SUMMARY_ROW]"; subject_json; export SUMMARY_TASK=dz-sum
   run_block summary-task-wait "$sh"
-  eq "$RC" "0" "[$sh] summary wait: edges that read back complete the step"
-  eq "$(waits_on sum-1 dz-design) $(waits_on sum-1 dz-impl)" "1 1" "[$sh] summary wait: the task waits on both children"
-  eq "$(waits_on sub-1 sum-1)" "1" "[$sh] summary wait: the subject waits on the task"
+  eq "$RC" "0" "[$sh] summary wait: the three edges complete the step"
+  eq "$(waits_on dz-sum dz-design) $(waits_on dz-sum dz-impl)" "1 1" "[$sh] summary wait: the task waits on both children"
+  eq "$(waits_on dz-sub dz-sum)" "1" "[$sh] summary wait: the subject waits on the task"
   ! released && ok "[$sh] summary wait: nothing is armed, handed over or slung" || bad "[$sh] summary wait: dispatched from a filing step"
 
-  for edge in "sum-1>dz-design" "sum-1>dz-impl" "sub-1>sum-1"; do
-    fixture ". + [$SUMMARY_ROW]"; subject_json; export SUMMARY_TASK=sum-1 DROP_EDGES="$edge"
+  for edge in "dz-sum>dz-design" "dz-sum>dz-impl" "dz-sub>dz-sum"; do
+    fixture ". + [$SUMMARY_ROW]"; subject_json; export SUMMARY_TASK=dz-sum REFUSE_EDGES="$edge"
     run_block summary-task-wait "$sh"
-    stopped && ok "[$sh] summary wait: an edge $edge that does not read back fails the step" \
-      || bad "[$sh] summary wait: an unread edge $edge was trusted (rc=$RC)"
+    stopped && ok "[$sh] summary wait: an edge $edge bd refuses fails the step" \
+      || bad "[$sh] summary wait: a refused edge $edge passed (rc=$RC)"
   done
-
-  # resume: every edge is there from a failed pass, bd refuses the three duplicates
-  fixture ". + [$SUMMARY_ROW] | map(if .id == \"sub-1\" then ._deps += [{id: \"sum-1\", dependency_type: \"blocks\"}] elif .id == \"sum-1\" then ._deps += [{id: \"dz-design\", dependency_type: \"blocks\"}, {id: \"dz-impl\", dependency_type: \"blocks\"}] else . end)"
-  subject_json; export SUMMARY_TASK=sum-1
+  fixture ". + [$SUMMARY_ROW]"; subject_json; export SUMMARY_TASK=xx-sum REFUSE_EDGES=""
   run_block summary-task-wait "$sh"
-  eq "$RC" "0" "[$sh] summary wait resume: edges that already read back complete the step"
-  [ "$(grep -c 'reading the edge back' "$TMP/block.err")" = "3" ] \
-    && ok "[$sh] summary wait resume: the three refused adds are reported" || bad "[$sh] summary wait resume: a refused add passed silently"
+  stopped && not_logged "dep add" && reported "another store" \
+    && ok "[$sh] summary wait: a task in another store gets no edge, since one would hold nothing" \
+    || bad "[$sh] summary wait: an edge onto another store's bead was written (rc=$RC)"
+
+  # resume: every edge is there from a failed pass, and bd's three re-adds are no-ops
+  fixture ". + [$SUMMARY_ROW] | map(if .id == \"dz-sub\" then ._deps += [{id: \"dz-sum\", dependency_type: \"blocks\"}] elif .id == \"dz-sum\" then ._deps += [{id: \"dz-design\", dependency_type: \"blocks\"}, {id: \"dz-impl\", dependency_type: \"blocks\"}] else . end)"
+  subject_json; export SUMMARY_TASK=dz-sum
+  run_block summary-task-wait "$sh"
+  eq "$RC" "0" "[$sh] summary wait resume: edges already there complete the step"
 
   # --- a setup that stops between steps leaves nothing in flight ---
   # The filing steps one after another over one store, each from its own shell
@@ -721,28 +722,28 @@ for sh in "${SHELLS[@]}"; do
   # child is slung or armed, so nothing can land before the subject waits on
   # every bead. Then the dispatch step hands it over and dispatches.
   for gated in true false; do
-    fixture; subject_json; export DESIGN_GATED="$gated" NEXT_ID=sum-1; INFLIGHT=""
+    fixture; subject_json; export DESIGN_GATED="$gated" NEXT_ID=dz-sum; INFLIGHT=""
     for m in file-design-wait file-implementation-wait summary-task-create summary-task-wait; do
-      [ "$m" = summary-task-wait ] && export SUMMARY_TASK=sum-1
+      [ "$m" = summary-task-wait ] && export SUMMARY_TASK=dz-sum
       run_block "$m" "$sh"
-      if [ "$RC" -ne 0 ] || released || [ "$(field sub-1 assignee)" != "" ]; then INFLIGHT="$INFLIGHT $m"; fi
+      if [ "$RC" -ne 0 ] || released || [ "$(field dz-sub assignee)" != "" ]; then INFLIGHT="$INFLIGHT $m"; fi
     done
     [ -z "$INFLIGHT" ] && ok "[$sh] setup (design_gated=$gated): no filing step hands the subject over or dispatches a child" \
       || bad "[$sh] setup (design_gated=$gated): a filing step failed, handed over or dispatched:$INFLIGHT"
-    jq -c 'map(if .id == "sub-1" then .metadata += {branch: "integration/sub-1", target: "main", "gc.design_child": "dz-design", "gc.impl_child": "dz-impl", "gc.summary_task": "sum-1"} else . end)' "$STORE" > "$STORE.new" && mv "$STORE.new" "$STORE"
+    jq -c 'map(if .id == "dz-sub" then .metadata += {branch: "integration/dz-sub", target: "main", "gc.design_child": "dz-design", "gc.impl_child": "dz-impl", "gc.summary_task": "dz-sum"} else . end)' "$STORE" > "$STORE.new" && mv "$STORE.new" "$STORE"
     subject_json
     run_block setup-dispatch "$sh"
-    [ "$RC" -eq 0 ] && [ "$(field sub-1 assignee)" = "rig/gc-toolkit.refinery" ] && logged "sling rig/gc-toolkit.polecat dz-design" \
-      && ok "[$sh] setup (design_gated=$gated): once every wait reads back, the dispatch step hands the subject over and dispatches" \
+    [ "$RC" -eq 0 ] && [ "$(field dz-sub assignee)" = "rig/gc-toolkit.refinery" ] && logged "sling rig/gc-toolkit.polecat dz-design" \
+      && ok "[$sh] setup (design_gated=$gated): once every wait is filed, the dispatch step hands the subject over and dispatches" \
       || bad "[$sh] setup (design_gated=$gated): the dispatch step did not complete over the filed setup (rc=$RC)"
   done
 
   # --- setup-dispatch, design-gated ---
   wired
   run_block setup-dispatch "$sh"
-  eq "$RC" "0" "[$sh] dispatch gated: a setup that reads back is handed over and dispatched"
-  eq "$(field sub-1 assignee)" "rig/gc-toolkit.refinery" "[$sh] dispatch: the subject is assigned to the refinery"
-  logged "deferred-dispatch notify sub-1 --agent rig/gc-toolkit.refinery" \
+  eq "$RC" "0" "[$sh] dispatch gated: a filed setup is handed over and dispatched"
+  eq "$(field dz-sub assignee)" "rig/gc-toolkit.refinery" "[$sh] dispatch: the subject is assigned to the refinery"
+  logged "deferred-dispatch notify dz-sub --agent rig/gc-toolkit.refinery" \
     && ok "[$sh] dispatch: the notice the assignment owes is recorded" || bad "[$sh] dispatch: no notice"
   logged "sling rig/gc-toolkit.polecat dz-design --on mol-polecat-work --merge mr" \
     && ok "[$sh] dispatch gated: the design child is slung --merge mr, a stage" || bad "[$sh] dispatch gated: not slung as a stage"
@@ -750,14 +751,14 @@ for sh in "${SHELLS[@]}"; do
     && ok "[$sh] dispatch gated: the implementation is armed behind the design" || bad "[$sh] dispatch gated: no deferred arm of the implementation"
   not_logged "sling rig/gc-toolkit.polecat dz-impl" && ok "[$sh] dispatch gated: the implementation is not slung now" \
     || bad "[$sh] dispatch gated: the implementation was slung before the design closed"
-  logged "deferred-dispatch arm sum-1 --target rig/gc-toolkit.polecat --sling-arg --on --sling-arg mol-polecat-report" \
+  logged "deferred-dispatch arm dz-sum --target rig/gc-toolkit.polecat --sling-arg --on --sling-arg mol-polecat-report" \
     && ok "[$sh] dispatch: the summary task is armed to the polecat pool on mol-polecat-report" || bad "[$sh] dispatch: no arm on mol-polecat-report"
-  eq "$(meta sub-1 gc.design_armed) $(meta sub-1 gc.impl_armed) $(meta sub-1 gc.summary_armed)" "1 1 1" "[$sh] dispatch: the three markers are stamped"
-  all_before "bd dep list" "update sub-1 --if-assignee" && all_before "bd show dz-" "update sub-1 --if-assignee" \
-    && ok "[$sh] dispatch: every target and edge is read back before the subject is handed over" \
-    || bad "[$sh] dispatch: the subject was handed over before the whole setup read back"
-  before "update sub-1 --if-assignee" "deferred-dispatch notify" && before "deferred-dispatch notify" "gc sling" \
-    && before "gc sling" "deferred-dispatch arm dz-impl" && before "deferred-dispatch arm dz-impl" "deferred-dispatch arm sum-1" \
+  eq "$(meta dz-sub gc.design_armed) $(meta dz-sub gc.impl_armed) $(meta dz-sub gc.summary_armed)" "1 1 1" "[$sh] dispatch: the three markers are stamped"
+  not_logged "bd dep list" && not_logged "bd show dz-design" && not_logged "bd show dz-impl" \
+    && ok "[$sh] dispatch: it reads no target or edge back" \
+    || bad "[$sh] dispatch: the setup was read back"
+  before "update dz-sub --if-assignee" "deferred-dispatch notify" && before "deferred-dispatch notify" "gc sling" \
+    && before "gc sling" "deferred-dispatch arm dz-impl" && before "deferred-dispatch arm dz-impl" "deferred-dispatch arm dz-sum" \
     && ok "[$sh] dispatch: the hand-over and its notice come before any dispatch" \
     || bad "[$sh] dispatch: a dispatch ran before the subject was handed over"
 
@@ -772,27 +773,6 @@ for sh in "${SHELLS[@]}"; do
     || bad "[$sh] dispatch all-in-one: held behind the design anyway"
 
   # --- setup-dispatch refusals: nothing handed over, nothing dispatched ---
-  for edge in "sub-1>dz-design" "sub-1>dz-impl" "sub-1>sum-1" "sum-1>dz-design" "sum-1>dz-impl" "dz-impl>dz-design"; do
-    a="${edge%%>*}"; b="${edge#*>}"
-    wired "map(if .id == \"$a\" then ._deps |= map(select(.id != \"$b\")) else . end)"
-    run_block setup-dispatch "$sh"
-    stopped && ! released && [ "$(field sub-1 assignee)" = "" ] && reported "the setup is not whole" \
-      && ok "[$sh] dispatch: a missing edge $edge hands nothing over and dispatches nothing" \
-      || bad "[$sh] dispatch: went ahead without the edge $edge (rc=$RC)"
-  done
-  # The implementation starting before the summary task is wired is the case
-  # all-in-one must never meet: its splits would have no summary task to wait on.
-  wired 'map(if .id == "sum-1" then ._deps = [._deps[] | select(.dependency_type != "blocks")] else . end) | map(if .id == "dz-impl" then ._deps = [] else . end)'
-  export DESIGN_GATED=false
-  run_block setup-dispatch "$sh"
-  stopped && not_logged "sling" && ok "[$sh] dispatch all-in-one: an unwired summary task starts no implementation" \
-    || bad "[$sh] dispatch all-in-one: the implementation was slung before the summary task waited on it (rc=$RC)"
-
-  wired '.[3].metadata = {}'
-  run_block setup-dispatch "$sh"
-  stopped && ! released && ok "[$sh] dispatch: a child that reads no target hands nothing over and dispatches nothing" \
-    || bad "[$sh] dispatch: a child with no target went ahead (rc=$RC)"
-
   wired
   printf '%s\n' '{"agents":[{"qualified_name":"rig/gc-toolkit.polecat"}]}' > "$ROSTER_FILE"
   run_block setup-dispatch "$sh"
@@ -802,16 +782,16 @@ for sh in "${SHELLS[@]}"; do
 
   wired; export ROSTER_FAIL=1
   run_block setup-dispatch "$sh"
-  eq "$RC $(field sub-1 assignee)" "0 rig/gc-toolkit.refinery" "[$sh] dispatch: an unreadable roster hands over unchecked"
+  eq "$RC $(field dz-sub assignee)" "0 rig/gc-toolkit.refinery" "[$sh] dispatch: an unreadable roster hands over unchecked"
   reported "roster unreadable" && ok "[$sh] dispatch: …and says so" || bad "[$sh] dispatch: the unchecked hand-over passed silently"
 
   wired '.[1].assignee = "someone-else"'
   run_block setup-dispatch "$sh"
-  stopped && not_logged "sling" && not_logged "deferred-dispatch" && [ "$(field sub-1 assignee)" = "someone-else" ] \
+  stopped && not_logged "sling" && not_logged "deferred-dispatch" && [ "$(field dz-sub assignee)" = "someone-else" ] \
     && ok "[$sh] dispatch: a subject assigned elsewhere keeps its assignee and nothing is dispatched" \
     || bad "[$sh] dispatch: a subject assigned elsewhere was handed over (rc=$RC)"
 
-  wired; export UPDATE_FAIL="sub-1:assignee"
+  wired; export UPDATE_FAIL="dz-sub:assignee"
   run_block setup-dispatch "$sh"
   stopped && not_logged "deferred-dispatch" && not_logged "sling" \
     && ok "[$sh] dispatch: an assignment that fails neither records the notice nor dispatches" \
@@ -819,23 +799,23 @@ for sh in "${SHELLS[@]}"; do
 
   wired; export NOTIFY_RC=1
   run_block setup-dispatch "$sh"
-  stopped && not_logged "sling" && not_logged "deferred-dispatch arm" && [ "$(meta sub-1 gc.design_armed)" = "<absent>" ] \
+  stopped && not_logged "sling" && not_logged "deferred-dispatch arm" && [ "$(meta dz-sub gc.design_armed)" = "<absent>" ] \
     && ok "[$sh] dispatch: a notice that does not record stops before any dispatch" \
     || bad "[$sh] dispatch: dispatched with no notice recorded (rc=$RC)"
 
   wired; export SLING_RC=1
   run_block setup-dispatch "$sh"
-  stopped && [ "$(meta sub-1 gc.design_armed)" = "<absent>" ] && not_logged "deferred-dispatch arm" \
+  stopped && [ "$(meta dz-sub gc.design_armed)" = "<absent>" ] && not_logged "deferred-dispatch arm" \
     && ok "[$sh] dispatch: a failed sling leaves its marker unstamped and dispatches nothing after it" \
     || bad "[$sh] dispatch: a failed sling stamped the marker or went on (rc=$RC)"
 
   wired; export ARM_RC=1
   run_block setup-dispatch "$sh"
-  stopped && [ "$(meta sub-1 gc.impl_armed)" = "<absent>" ] && [ "$(meta sub-1 gc.summary_armed)" = "<absent>" ] \
+  stopped && [ "$(meta dz-sub gc.impl_armed)" = "<absent>" ] && [ "$(meta dz-sub gc.summary_armed)" = "<absent>" ] \
     && ok "[$sh] dispatch: a failed arm leaves its marker unstamped" || bad "[$sh] dispatch: a failed arm stamped a marker (rc=$RC)"
 
   for key in gc.design_armed gc.impl_armed gc.summary_armed; do
-    wired; export UPDATE_FAIL="sub-1:$key"
+    wired; export UPDATE_FAIL="dz-sub:$key"
     run_block setup-dispatch "$sh"
     stopped && ok "[$sh] dispatch: a $key that does not record fails the step" || bad "[$sh] dispatch: an unrecorded $key passed"
   done
@@ -849,9 +829,9 @@ for sh in "${SHELLS[@]}"; do
     || bad "[$sh] dispatch resume: the design child was slung a second time"
   not_logged "--if-assignee" && ok "[$sh] dispatch resume: a subject already with the refinery is not assigned again" \
     || bad "[$sh] dispatch resume: the subject was assigned again"
-  logged "deferred-dispatch arm dz-impl" && logged "deferred-dispatch arm sum-1" \
+  logged "deferred-dispatch arm dz-impl" && logged "deferred-dispatch arm dz-sum" \
     && ok "[$sh] dispatch resume: the implementation and the summary task are armed" || bad "[$sh] dispatch resume: an arm is missing"
-  eq "$(open_blockers sub-1)" "dz-impl sum-1" "[$sh] dispatch resume: the subject is still held by the implementation and the summary task"
+  eq "$(open_blockers dz-sub)" "dz-impl dz-sum" "[$sh] dispatch resume: the subject is still held by the implementation and the summary task"
 
   wired; export SUMMARY_ARMED=1
   run_block setup-dispatch "$sh"
@@ -869,7 +849,6 @@ LATE="$(fenced_block "$RECIPE_FILE" "dep add's second id is the bead that is wai
 [ -n "$LATE" ] && ok "the work skill's block for a bead that joins later is found" || bad "the work skill's late-join block is not found in $RECIPE_FILE"
 fill() {
   sed -e 's#<each bead of the effort, comma-separated>#$WORK#g' \
-      -e 's#<each bead of the effort>#"$WORK"#g' \
       -e 's#<rig>#rig#g' -e 's#<epic>#ep-1#g' -e 's#<binding>#gc-toolkit#g' \
       -e 's#<[^>]*>#x#g'
 }
@@ -877,7 +856,7 @@ fill() {
 # origin/HEAD names, ORIGIN_HEAD_FOR (default trunk).
 recipe_store() {
   fixture '.[1:] = []'
-  export ORIGIN_HEAD="${ORIGIN_HEAD_FOR:-trunk}" NEXT_IDS="land-1 work-1 sum-1"
+  export ORIGIN_HEAD="${ORIGIN_HEAD_FOR:-trunk}" NEXT_IDS="land-1 work-1 dz-sum"
   printf '%s\n' "$ORIGIN_HEAD" > "$ORIGIN_REFS"
 }
 run_recipe() { { printf '%s\n' "$RECIPE" | fill; printf 'printf "past\\n" > "%s"\n' "$TMP/past.flag"; } > "$TMP/block.sh"; run_file "$1"; }
@@ -891,28 +870,29 @@ for sh in "${SHELLS[@]}"; do
     && ok "[$sh] recipe: the branch is cut from the branch origin/HEAD names" || bad "[$sh] recipe: the branch was not cut from origin/HEAD's branch"
   eq "$(meta land-1 branch) $(meta land-1 target)" "integration/land-1 trunk" "[$sh] recipe: the landing bead records the branch and the default branch as its target"
   eq "$(meta work-1 target)" "integration/land-1" "[$sh] recipe: the bead's target is the integration branch"
-  eq "$(waits_on land-1 work-1) $(waits_on land-1 sum-1) $(waits_on sum-1 work-1)" "1 1 1" \
+  eq "$(waits_on land-1 work-1) $(waits_on land-1 dz-sum) $(waits_on dz-sum work-1)" "1 1 1" \
     "[$sh] recipe: the landing bead waits on the bead and the summary task, and the summary task on the bead"
-  eq "$(meta sum-1 target)" "<absent>" "[$sh] recipe: the summary task carries no target"
+  eq "$(meta dz-sum target)" "<absent>" "[$sh] recipe: the summary task carries no target"
   eq "$(field land-1 assignee)" "rig/gc-toolkit.refinery" "[$sh] recipe: the landing bead is handed to the refinery"
   logged "deferred-dispatch notify land-1 --agent rig/gc-toolkit.refinery" \
     && ok "[$sh] recipe: …with the notice the assignment owes" || bad "[$sh] recipe: no notice for the assignment"
-  logged "sling rig/gc-toolkit.polecat work-1" && logged "deferred-dispatch arm sum-1 --target rig/gc-toolkit.polecat --sling-arg --on --sling-arg mol-polecat-report" \
+  logged "sling rig/gc-toolkit.polecat work-1" && logged "deferred-dispatch arm dz-sum --target rig/gc-toolkit.polecat --sling-arg --on --sling-arg mol-polecat-report" \
     && ok "[$sh] recipe: the bead is slung and the summary task armed on mol-polecat-report" || bad "[$sh] recipe: the work was not dispatched"
-  all_before "dep list land-1" "update land-1 --assignee" && all_before "dep list sum-1" "update land-1 --assignee" \
-    && before "update land-1 --assignee" "gc sling" \
-    && ok "[$sh] recipe: every wait reads back before the hand-over, and the hand-over comes before the sling" \
-    || bad "[$sh] recipe: the landing bead was handed over, or the bead slung, before every wait read back"
+  all_before "rig create" "update land-1 --assignee" && before "update land-1 --assignee" "gc sling" \
+    && ok "[$sh] recipe: every wait is written before the hand-over, and the hand-over comes before the sling" \
+    || bad "[$sh] recipe: the landing bead was handed over, or the bead slung, before every wait was written"
+  not_logged "dep list" && not_logged "bd --rig rig show" && ok "[$sh] recipe: it reads no write back" \
+    || bad "[$sh] recipe: a write was read back"
 
   ORIGIN_HEAD_FOR=main recipe_store
   run_recipe "$sh"
   eq "$RC $(meta land-1 target)" "0 main" "[$sh] recipe: a rig whose default branch is main lands its effort on main"
 
-  for edge in "land-1>work-1" "sum-1>work-1" "land-1>sum-1"; do
-    recipe_store; export DROP_EDGES="$edge"
+  for fail in "UPDATE_FAIL=land-1:branch" "CREATE_FAIL=work-1" "CREATE_FAIL=dz-sum"; do
+    recipe_store; export "${fail?}"
     run_recipe "$sh"
-    stopped && ! released && ok "[$sh] recipe: a wait $edge that does not read back hands nothing over and dispatches nothing" \
-      || bad "[$sh] recipe: went ahead without the wait $edge (rc=$RC)"
+    stopped && ! released && ok "[$sh] recipe: a write the store refuses ($fail) hands nothing over and dispatches nothing" \
+      || bad "[$sh] recipe: went ahead past a refused write ($fail) (rc=$RC)"
   done
 
   recipe_store; export PUSH_FAIL=1
@@ -929,21 +909,21 @@ for sh in "${SHELLS[@]}"; do
   JOINED='map(if .id == "land-1" then ._deps += [{id: "work-2", dependency_type: "blocks"}] else . end)
     + [{id: "work-2", title: "x", issue_type: "task", status: "open", assignee: "", description: "", metadata: {target: "integration/land-1"}, _deps: []}]'
   recipe_store; run_recipe "$sh"
-  jq -c "$JOINED"' | map(if .id == "sum-1" then .metadata += {"gc.dispatch_when_ready": "rig/gc-toolkit.polecat"} else . end)' "$STORE" > "$STORE.new" && mv "$STORE.new" "$STORE"
-  export SUMMARY=sum-1 WORK=work-2
+  jq -c "$JOINED"' | map(if .id == "dz-sum" then .metadata += {"gc.dispatch_when_ready": "rig/gc-toolkit.polecat"} else . end)' "$STORE" > "$STORE.new" && mv "$STORE.new" "$STORE"
+  export SUMMARY=dz-sum WORK=work-2
   run_late "$sh"
   eq "$RC" "0" "[$sh] late join: an undispatched summary task takes the joining bead's wait"
-  eq "$(waits_on sum-1 work-2)" "1" "[$sh] late join: the summary task waits on the joining bead"
+  eq "$(waits_on dz-sum work-2)" "1" "[$sh] late join: the summary task waits on the joining bead"
   eq "$(open_blockers work-2)" "" "[$sh] late join: the joining bead waits on no summary task, so it is free to sling"
-  case " $(open_blockers sum-1) " in *" work-2 "*) ok "[$sh] late join: the summary task is held until the joining bead lands" ;;
+  case " $(open_blockers dz-sum) " in *" work-2 "*) ok "[$sh] late join: the summary task is held until the joining bead lands" ;;
     *) bad "[$sh] late join: the summary task is not held by the joining bead" ;; esac
 
   for marker in '{}' '{"gc.dispatch_when_ready": "rig/gc-toolkit.polecat", "gc.dispatch_when_ready_slung": "slinging@2026-10-26T00:00:00Z"}'; do
     recipe_store; run_recipe "$sh"
-    jq -c --arg m "$marker" "$JOINED"' | map(if .id == "sum-1" then .metadata = ($m | fromjson) else . end)' "$STORE" > "$STORE.new" && mv "$STORE.new" "$STORE"
-    export SUMMARY=sum-1 WORK=work-2
+    jq -c --arg m "$marker" "$JOINED"' | map(if .id == "dz-sum" then .metadata = ($m | fromjson) else . end)' "$STORE" > "$STORE.new" && mv "$STORE.new" "$STORE"
+    export SUMMARY=dz-sum WORK=work-2
     run_late "$sh"
-    stopped && not_logged "dep add" && [ "$(waits_on sum-1 work-2)" = "0" ] && reported "file a fresh summary task" \
+    stopped && not_logged "dep add" && [ "$(waits_on dz-sum work-2)" = "0" ] && reported "file a fresh summary task" \
       && ok "[$sh] late join: a dispatched summary task ($marker) takes no wait, and a fresh one is asked for" \
       || bad "[$sh] late join: a dispatched summary task ($marker) took the wait (rc=$RC)"
   done
@@ -951,10 +931,10 @@ for sh in "${SHELLS[@]}"; do
   # Armed with no marker, every bead it waits on closed: a pass that read it as
   # ready slings it whatever wait is added after, so it takes none either.
   recipe_store; run_recipe "$sh"
-  jq -c "$JOINED"' | map(if .id == "sum-1" then .metadata += {"gc.dispatch_when_ready": "rig/gc-toolkit.polecat"} elif .id == "work-1" then .status = "closed" else . end)' "$STORE" > "$STORE.new" && mv "$STORE.new" "$STORE"
-  export SUMMARY=sum-1 WORK=work-2
+  jq -c "$JOINED"' | map(if .id == "dz-sum" then .metadata += {"gc.dispatch_when_ready": "rig/gc-toolkit.polecat"} elif .id == "work-1" then .status = "closed" else . end)' "$STORE" > "$STORE.new" && mv "$STORE.new" "$STORE"
+  export SUMMARY=dz-sum WORK=work-2
   run_late "$sh"
-  stopped && not_logged "dep add" && [ "$(waits_on sum-1 work-2)" = "0" ] && reported "file a fresh summary task" \
+  stopped && not_logged "dep add" && [ "$(waits_on dz-sum work-2)" = "0" ] && reported "file a fresh summary task" \
     && ok "[$sh] late join: a summary task whose beads have all closed takes no wait, and a fresh one is asked for" \
     || bad "[$sh] late join: a summary task whose beads have all closed took the wait (rc=$RC)"
 
@@ -963,13 +943,13 @@ for sh in "${SHELLS[@]}"; do
   # so the task reads unjudged, which a caller that acts counts as still waiting,
   # and it takes the joining bead's wait.
   recipe_store; run_recipe "$sh"
-  jq -c "$JOINED"' | map(if .id == "sum-1" then .metadata += {"gc.dispatch_when_ready": "rig/gc-toolkit.polecat"} | ._deps += [{id: "sp-1", dependency_type: "waits-for"}] elif .id == "work-1" then .status = "closed" else . end)
+  jq -c "$JOINED"' | map(if .id == "dz-sum" then .metadata += {"gc.dispatch_when_ready": "rig/gc-toolkit.polecat"} | ._deps += [{id: "sp-1", dependency_type: "waits-for"}] elif .id == "work-1" then .status = "closed" else . end)
     + [{id: "sp-1", title: "spawner", issue_type: "task", status: "open", assignee: "", description: "", metadata: {}, _deps: []},
        {id: "sp-1a", title: "spawned", issue_type: "task", status: "open", assignee: "", description: "", metadata: {}, _deps: [{id: "sp-1", dependency_type: "parent-child"}]}]' "$STORE" > "$STORE.new" && mv "$STORE.new" "$STORE"
-  export SUMMARY=sum-1 WORK=work-2
+  export SUMMARY=dz-sum WORK=work-2
   run_late "$sh"
   eq "$RC" "0" "[$sh] late join: a summary task its own waits-for edge holds, unjudged, takes the joining bead's wait"
-  eq "$(waits_on sum-1 work-2)" "1" "[$sh] late join: ...and waits on the joining bead"
+  eq "$(waits_on dz-sum work-2)" "1" "[$sh] late join: ...and waits on the joining bead"
   unset SUMMARY WORK
 done
 

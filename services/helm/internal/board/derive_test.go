@@ -3023,6 +3023,121 @@ func TestPRRowNamesAGateBehindItsRework(t *testing.T) {
 	})
 }
 
+// The row of a PR whose live work waits on a bead a person owes the next move on
+// reads needs-attention and held blocked, as the label does, and names in NEEDS
+// where the move is. It is not owed for it: the move is asked for once, on that
+// bead's own row. A row owed for its own cause keeps naming it, a gate's
+// question still wins, and a takeaway still answers.
+func TestPRRowPointsAtAMoveHeldBehindItsRework(t *testing.T) {
+	at := fixtureNow.Add(-time.Hour)
+	// tk-a: unapproved, and its one live work is its rework, tk-rw.
+	md := map[string]string{
+		mdPRPosture: dated(postureReviewRequired, headLive, at),
+		mdPRMachine: dated(MachineProgressing, headLive, at),
+		mdPRNumber:  "18",
+	}
+	// tk-b: settled at its head with no approval, so its next move is a review.
+	other := mergeAnchor("tk-b", map[string]string{
+		mdPRPosture: dated(postureReviewRequired, headLive, at),
+		mdPRMachine: dated(MachineSettled, headLive, at),
+		mdPRNumber:  "37",
+	})
+	other.Title = "the other PR"
+	toOther := Blocker{ID: "tk-b", Title: "the other PR", Status: "open", IssueType: "task"}
+	decision := Anchor{ID: "tk-d", Title: "which design?", Kind: "decision", Source: "decision", Rig: "gc-toolkit", Prefix: "tk"}
+	toDecision := Blocker{ID: "tk-d", Title: "which design?", Status: "open", IssueType: "decision"}
+	signOff := Blocker{ID: "tk-g", Title: "sign off the release", Status: "open", IssueType: "gate", AwaitType: "human", CreatedAt: daysAgo(2)}
+	// rows is tk-a with md, its rework waiting on behind, and the rows the beads
+	// behind it have of their own.
+	rows := func(md map[string]string, behind ...Blocker) []Anchor {
+		a := mergeAnchor("tk-a", md, Blocker{ID: "tk-rw", Title: "fix the check", Status: "open", IssueType: "task"})
+		rework := Anchor{ID: "tk-rw", Title: "fix the check", Kind: kindRework, Source: kindRework, Rig: "gc-toolkit", Prefix: "tk",
+			Metadata: map[string]string{mdAnchorBead: "tk-a", mdTaskKind: kindRework}, Blockers: behind}
+		return []Anchor{a, rework, other, decision}
+	}
+
+	t.Run("behind a PR that waits on a review", func(t *testing.T) {
+		b := buildBoard(rows(md, toOther), fixtureNow, false, nil, Facts{})
+		tile := mustTile(t, b, "tk-a")
+		if tile.PRPhase != PhaseNeedsAttention || tile.Phase != PhaseNeedsAttention || !slices.Equal(tile.PRHeld, []string{string(prstatus.HeldBlocked)}) {
+			t.Errorf("pr_phase=%q phase=%q pr_held=%v, want needs-attention and held blocked, as the label reads", tile.PRPhase, tile.Phase, tile.PRHeld)
+		}
+		if tile.Needs != "your move is on the other PR" {
+			t.Errorf("needs = %q, want it to name the PR the move is on", tile.Needs)
+		}
+		if tile.Owed {
+			t.Errorf("owed = true, want the review asked for once, on the other PR's row")
+		}
+		if o := mustTile(t, b, "tk-b"); !o.Owed || o.Needs != "green, waiting on your review" {
+			t.Errorf("the other PR: owed=%v needs=%q, want the review asked for there", o.Owed, o.Needs)
+		}
+	})
+
+	t.Run("behind a decision", func(t *testing.T) {
+		b := buildBoard(rows(md, toDecision), fixtureNow, false, nil, Facts{})
+		tile := mustTile(t, b, "tk-a")
+		if tile.Needs != "your move is on which design?" || tile.Owed || !slices.Equal(tile.PRHeld, []string{string(prstatus.HeldBlocked)}) {
+			t.Errorf("needs=%q owed=%v pr_held=%v, want the decision named, no ask of its own, and held blocked", tile.Needs, tile.Owed, tile.PRHeld)
+		}
+		if d := mustTile(t, b, "tk-d"); !d.Owed {
+			t.Errorf("the decision's own row: owed=%v, want the ruling asked for there", d.Owed)
+		}
+	})
+
+	t.Run("behind work the city is doing", func(t *testing.T) {
+		tile := mustTile(t, buildBoard(rows(md), fixtureNow, false, nil, Facts{}), "tk-a")
+		if tile.PRPhase != PhaseWorking || len(tile.PRHeld) != 0 || tile.Owed || tile.Needs != "in the merge cadence" {
+			t.Errorf("pr_phase=%q pr_held=%v owed=%v needs=%q, want a row the city is working", tile.PRPhase, tile.PRHeld, tile.Owed, tile.Needs)
+		}
+	})
+
+	t.Run("behind more than one", func(t *testing.T) {
+		tile := mustTile(t, buildBoard(rows(md, toOther, toDecision), fixtureNow, false, nil, Facts{}), "tk-a")
+		if tile.Needs != "your move is on which design? and 1 more" || tile.Owed {
+			t.Errorf("needs=%q owed=%v, want the first the walk keeps named and the rest counted, with no ask of its own", tile.Needs, tile.Owed)
+		}
+	})
+
+	t.Run("a gate's question still wins", func(t *testing.T) {
+		anchors := append(rows(md, toOther, signOff), gateAnchor("tk-g", signOff.Title, "tk-rw"))
+		tile := mustTile(t, buildBoard(anchors, fixtureNow, false, nil, Facts{}), "tk-a")
+		if tile.Needs != "asking: sign off the release" || !tile.Owed {
+			t.Errorf("needs=%q owed=%v, want the gate asked for on this row", tile.Needs, tile.Owed)
+		}
+		if want := []string{string(prstatus.HeldGate), string(prstatus.HeldBlocked)}; !slices.Equal(tile.PRHeld, want) {
+			t.Errorf("pr_held = %v, want %v", tile.PRHeld, want)
+		}
+	})
+
+	t.Run("a row owed for its own review keeps asking for it", func(t *testing.T) {
+		settled := map[string]string{
+			mdPRPosture: dated(postureReviewRequired, headLive, at),
+			mdPRMachine: dated(MachineSettled, headLive, at),
+			mdPRNumber:  "18",
+		}
+		tile := mustTile(t, buildBoard([]Anchor{mergeAnchor("tk-a", settled, toOther), other}, fixtureNow, false, nil, Facts{}), "tk-a")
+		if !tile.Owed || tile.Needs != "green, waiting on your review" || !slices.Equal(tile.PRHeld, []string{string(prstatus.HeldBlocked)}) {
+			t.Errorf("owed=%v needs=%q pr_held=%v, want its own review asked for and the hold read", tile.Owed, tile.Needs, tile.PRHeld)
+		}
+	})
+
+	t.Run("a decision of its own is still asked for on the row", func(t *testing.T) {
+		tile := mustTile(t, buildBoard([]Anchor{mergeAnchor("tk-a", md, toDecision), decision}, fixtureNow, false, nil, Facts{}), "tk-a")
+		if !tile.Owed || tile.Needs != "asking: which design?" {
+			t.Errorf("owed=%v needs=%q, want the blocker of its own asked for", tile.Owed, tile.Needs)
+		}
+	})
+
+	t.Run("a takeaway still answers", func(t *testing.T) {
+		anchors := rows(md, toOther)
+		anchors[0].Takeaway = "the rework waits for the other PR"
+		tile := mustTile(t, buildBoard(anchors, fixtureNow, false, nil, Facts{}), "tk-a")
+		if tile.Needs != anchors[0].Takeaway || tile.Owed {
+			t.Errorf("needs=%q owed=%v, want the takeaway and no ask", tile.Needs, tile.Owed)
+		}
+	})
+}
+
 // A pre-PR branch links to its GitHub tree view, and the repository comes from
 // a sibling row's pull request URL rather than a GitHub call: every anchor in
 // one rig targets that rig's repository. This is the gap the branch link

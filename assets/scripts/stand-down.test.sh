@@ -71,11 +71,7 @@ BIN="$TMP/bin"; mkdir -p "$BIN" "$TMP/rig/.beads" "$TMP/state"
 # carry it writes nothing and exits 1. STUB_LAND_AT is text and STUB_LAND a command:
 # the first bd call whose arguments carry it runs the command first, a write that
 # lands between two of a script's reads. STUB_PASS_AFTER_WRITES runs a reconcile
-# pass after each write the stand-down makes. STUB_SHOW_FAILS_AFTER is text: once a
-# bd call carrying it has run, every show fails, and STUB_DEPS_FAIL_AFTER is the same
-# for every dep list. STUB_KEEP_KEY names a key a set or an unset leaves in place with
-# exit 0, a write that reports success and half lands, STUB_KEEP_EDGE has a dep remove
-# do the same, and STUB_CLOSE_NOOP has a close exit 0 and write nothing.
+# pass after each write the stand-down makes.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 set -u
 S="${STUB_STORE:?}"
@@ -128,9 +124,6 @@ verb="${1:-}"; shift || true
 case "$verb" in
   show)
     id="${1:-}"
-    if [ -n "${STUB_SHOW_FAILS_AFTER:-}" ] && grep -q -F -- "$STUB_SHOW_FAILS_AFTER" "$STUB_GC_LOG"; then
-      echo '{"error":"simulated read failure","schema_version":1}'; exit 1
-    fi
     out=$(jq -c --arg id "$id" '. as $s | [ .[] | select(.id == $id) | . as $b
         | .dependencies = [ ($b._deps // [])[] | . as $e | ($s | map(select(.id == $e.id)) | .[0]) as $t | select($t != null)
             | {id: $e.id, dependency_type: $e.dependency_type, issue_type: ($t.issue_type // "task"), status: ($t.status // "open")} ]
@@ -180,8 +173,8 @@ case "$verb" in
     while [ $# -gt 0 ]; do
       case "$1" in
         --db) shift ;;
-        --set-metadata) shift; k="${1:-}"; [ "${k%%=*}" = "${STUB_KEEP_KEY:-}" ] && { shift; continue; }; args+=("${1:-}"); prog="$prog | .metadata[(\$ARGS.positional[$((${#args[@]} - 1))] | split(\"=\")[0])] = (\$ARGS.positional[$((${#args[@]} - 1))] | split(\"=\")[1:] | join(\"=\"))" ;;
-        --unset-metadata) shift; [ "${1:-}" = "${STUB_KEEP_KEY:-}" ] && { shift; continue; }; args+=("${1:-}"); prog="$prog | (.metadata |= del(.[\$ARGS.positional[$((${#args[@]} - 1))]]))" ;;
+        --set-metadata) shift; args+=("${1:-}"); prog="$prog | .metadata[(\$ARGS.positional[$((${#args[@]} - 1))] | split(\"=\")[0])] = (\$ARGS.positional[$((${#args[@]} - 1))] | split(\"=\")[1:] | join(\"=\"))" ;;
+        --unset-metadata) shift; args+=("${1:-}"); prog="$prog | (.metadata |= del(.[\$ARGS.positional[$((${#args[@]} - 1))]]))" ;;
         --append-notes) shift; args+=("${1:-}"); prog="$prog | .notes = ((.notes // \"\") + \"\n\" + \$ARGS.positional[$((${#args[@]} - 1))])" ;;
         --status=*) args+=("${1#--status=}"); prog="$prog | .status = \$ARGS.positional[$((${#args[@]} - 1))]" ;;
         --assignee=*) args+=("${1#--assignee=}"); prog="$prog | .assignee = \$ARGS.positional[$((${#args[@]} - 1))]" ;;
@@ -197,7 +190,6 @@ case "$verb" in
     fi
     # A move into closed is bd's checked close: a live blocker refuses it.
     case " ${args[*]:-} " in *" closed "*)
-      [ -z "${STUB_CLOSE_NOOP:-}" ] || exit 0
       blocked=$(jq -r --arg id "$id" "$BLOCKERS"'. as $s | [ .[] | select(.id == $id) | live_blockers($s)[] ] | join(", ")' "$S")
       if [ -n "$blocked" ]; then
         echo "Error: cannot close blocked issue: $id is blocked by [$blocked] (use --force to override)" >&2; exit 1
@@ -209,7 +201,6 @@ case "$verb" in
   close)
     id="${1:-}"; shift || true; reason=""
     while [ $# -gt 0 ]; do case "$1" in --reason) shift; reason="${1:-}" ;; esac; shift || true; done
-    [ -z "${STUB_CLOSE_NOOP:-}" ] || exit 0
     who=$(jq -r --arg id "$id" '(.[] | select(.id == $id) | .assignee // "") // ""' "$S")
     if [ -n "$who" ] && [ "$who" != "$actor" ]; then
       echo "Error: cannot close $id: assignee is \"$who\", actor is \"$actor\"; reclaim or use --force to override" >&2; exit 1
@@ -232,9 +223,6 @@ case "$verb" in
     sub="${1:-}"; shift || true
     case "$sub" in
       list)
-        if [ -n "${STUB_DEPS_FAIL_AFTER:-}" ] && grep -q -F -- "$STUB_DEPS_FAIL_AFTER" "$STUB_GC_LOG"; then
-          echo '{"error":"simulated read failure","schema_version":1}'; exit 1
-        fi
         id="${1:-}"; shift || true; dir=down; typ=""
         while [ $# -gt 0 ]; do
           case "$1" in
@@ -256,7 +244,7 @@ case "$verb" in
               | $s[] | select(.id == $e.id) | del(._deps) + {dependency_type: $e.dependency_type} ]' "$S"
         fi ;;
       remove)
-        [ -n "${STUB_KEEP_EDGE:-}" ] || apply --arg a "${1:-}" --arg b "${2:-}" 'map(if .id == $a then ._deps = ((._deps // []) | map(select(.id != $b))) else . end)'
+        apply --arg a "${1:-}" --arg b "${2:-}" 'map(if .id == $a then ._deps = ((._deps // []) | map(select(.id != $b))) else . end)'
         wrote ;;
       add)
         a="${1:-}"; b="${2:-}"; shift 2 || true; typ=blocks
@@ -437,31 +425,6 @@ stop_case() { # <label> <text the stub refuses> <gate status after> <arm after> 
   eq "$(succ tk-w)" tk-g "stop at $1: its edge names the gate"
   eq "$(slings)" 0 "stop at $1: nothing was sent"
 }
-fresh
-STUB_KEEP_KEY="gc.dispatch_when_ready" run tk-w --key polecat-x --ruling "stop"
-eq "$RC" 1 "a disarm that reports success and leaves the arm stops the stand-down"
-has "$OUT" "does not read back unarmed" "…and says why"
-eq "$(field tk-g status)" open "…with the gate unanswered"
-eq "$(field tk-w status)" open "…and the work open"
-fresh
-STUB_SHOW_FAILS_AFTER="--unset-metadata gc.dispatch_when_ready " run tk-w --key polecat-x --ruling "stop"
-eq "$RC" 1 "an arm whose removal does not read at all stops the stand-down"
-eq "$(field tk-g status)" open "…with the gate unanswered"
-fresh; patch 'map(if .id == "tk-w" then .metadata += {"gc.routed_to":"rig/pool"} else . end)'
-STUB_KEEP_KEY="gc.routed_to" run tk-w --key polecat-x --ruling "stop"
-eq "$RC" 1 "a release that reports success and leaves the route stops the stand-down"
-has "$OUT" "does not read back unrouted" "…and says why"
-has "$OUT" "Re-run this command" "…and names the way on"
-eq "$(field tk-g status)" open "…with the gate unanswered"
-eq "$(field tk-w status)" open "…and the work open"
-run tk-w --key polecat-x --ruling "stop"
-eq "$RC" 0 "a re-run once the route clears stands it down"
-eq "$(meta tk-w gc.routed_to)" "" "…with no route left"
-eq "$(field tk-w status)" closed "…and closes it"
-fresh
-STUB_CLOSE_NOOP=1 run tk-w --key polecat-x --ruling "stop"
-eq "$RC" 1 "a close that reports success and does not land is no stand-down"
-has "$OUT" "does not read back closed" "…and it says so"
 stop_case "the disarm" "--unset-metadata gc.dispatch_when_ready " open armed "was not removed"
 stop_case "the release" "gc.takeaway=" open gone "did not end or its route did not clear"
 stop_case "the answer" "gate resolve" open gone "did not resolve"
@@ -604,21 +567,10 @@ eq "$(field tk-g status)" open "…and the gate stays open"
 eq "$(slings)" 0 "…and nothing was sent"
 
 shared
-STUB_KEEP_EDGE=1 run tk-w --key polecat-x --ruling "stop" --successor tk-conv
-eq "$RC" 1 "a removal that reports success and leaves the edge stops the stand-down"
-has "$OUT" "did not leave gate tk-g" "…and it says so"
-eq "$(field tk-w status)" open "…with the work open"
-shared
-STUB_DEPS_FAIL_AFTER="dep remove tk-w" run tk-w --key polecat-x --ruling "stop" --successor tk-conv
-eq "$RC" 1 "a removal whose result does not read stops the stand-down"
-has "$OUT" "did not leave gate tk-g" "…and it says so"
-eq "$(field tk-w status)" open "…with the work open"
-
-shared
 patch 'map(if .id == "tk-w" then .metadata += {"gc.routed_to":"rig/pool"} else . end)'
-STUB_KEEP_KEY="gc.routed_to" run tk-w --key polecat-x --ruling "stop" --successor tk-conv
-eq "$RC" 1 "a release that leaves the route stops the stand-down before the bead leaves a shared gate"
-has "$OUT" "does not read back unrouted" "…and says why"
+STUB_FAIL='gc.takeaway=' run tk-w --key polecat-x --ruling "stop" --successor tk-conv
+eq "$RC" 1 "a release the store refuses stops the stand-down before the bead leaves a shared gate"
+has "$OUT" "did not end or its route did not clear" "…and says why"
 eq "$(line_of "dep remove tk-w")" "" "…with no removal tried"
 eq "$(jq -r '[.[] | select(.id == "tk-w") | ._deps[] | select(.id == "tk-g")] | length' "$STUB_STORE")" 1 "…and the bead still on the gate"
 

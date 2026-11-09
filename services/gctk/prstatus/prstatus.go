@@ -20,22 +20,24 @@
 // row, is their only consumer.
 //
 // What holds an open PR is what the city will not clear on its own: an open
-// human gate on the PR or behind a bead it waits on, which [HoldingGates] reads,
-// review feedback the city has not answered or a review thread the merge waits
-// on, or a blocker no automated actor will clear. [Held] names these as values of
-// the `held:` label family, and more than one can stand. [Reasons] names each
-// thing behind those values: each gate and each blocker by its bead, and the
-// PR's own review threads and blocked verdict by what they say. Each names
-// something a person has to act on, so [Derive] reads needs-attention while any
-// stands.
+// human gate on the PR or behind a bead it waits on, review feedback the city has
+// not answered or a review thread the merge waits on, or a bead a person owes the
+// next move on, among the PR's blockers or behind a bead it waits on, such as
+// another PR waiting on a review that the PR's rework waits for. [Holding] reads
+// the gates and the beads a person owes through the PR's `blocks` edges. [Held]
+// names these as values of the `held:` label family, and more than one can stand.
+// [Reasons] names each thing behind those values: each gate and each bead a
+// person owes by its bead, and the PR's own review threads and blocked verdict by
+// what they say. Each names something a person has to act on, so [Derive] reads
+// needs-attention while any stands.
 //
 // The facts are state the city records: the anchor's holds
-// (merge_hold/rebase_hold), the open human gates that hold it, the blockers its
-// `blocks` edges name, the pr-facts.sh posture, the merge cadence's machine
-// verdict with its blocked cause and the sentence that names it, the merge
-// cadence's count of review threads waiting on the city's answer, the
-// draft-stage markers pr-open.sh records (opened_as_draft, draft_readied), and
-// the anchor's in-flight set — any live bead carrying anchor_bead, the same
+// (merge_hold/rebase_hold), the open human gates and the beads a person owes the
+// next move on that its `blocks` edges reach, the pr-facts.sh posture, the merge
+// cadence's machine verdict with its blocked cause and the sentence that names
+// it, the merge cadence's count of review threads waiting on the city's answer,
+// the draft-stage markers pr-open.sh records (opened_as_draft, draft_readied),
+// and the anchor's in-flight set — any live bead carrying anchor_bead, the same
 // membership test pr-facts.sh applies in its own arms. The rule reads none of
 // GitHub's state itself. It does not read GitHub's merge state:
 // GitHub reports BLOCKED for a required check still running as it does for a
@@ -123,9 +125,10 @@ const (
 	HeldReview Hold = "review"
 	// HeldBlocked: a live blocker holds the PR that no automated actor will
 	// clear. It is the merge pass's blocked verdict with cause blocker, as
-	// [Blocked] counts it, or a live blocker a person owes ([IsPersonBlocker]):
-	// one routed to a person, or a decision. A blocker the city is landing is
-	// neither.
+	// [Blocked] counts it, or a bead a person owes the next move on that the
+	// PR waits on, on its own blockers or behind a bead it waits on
+	// ([Facts.Owed]). Live work that waits on such a bead is not the city
+	// changing the PR. A blocker the city is changing or landing is neither.
 	HeldBlocked Hold = "blocked"
 )
 
@@ -140,19 +143,22 @@ type Facts struct {
 	// RebaseHold is metadata.rebase_hold: any truthy value is a rebase hold.
 	RebaseHold string
 	// Gates are the open human gates that hold the anchor, on the anchor itself
-	// or behind a bead it waits on, nearest first, as [HoldingGates] reads them.
-	// Only a person clears a human gate. While one stands the merge is refused,
-	// whether by the gate on the anchor, through the merge pass's blocker probe
-	// and its finalize gate (assets/scripts/finalize-gate.sh), or by the open
-	// blocker the gate holds, through that same probe. So a gate reads as a
-	// hold, as merge_hold and rebase_hold do, whatever work is in flight. A
-	// conversation about the anchor tracks it and blocks nothing, so it is never
-	// among them.
+	// or behind a bead it waits on, nearest first, as [Holding] reads them
+	// ([Holds.Gates]). Only a person clears a human gate. While one stands the
+	// merge is refused, whether by the gate on the anchor, through the merge
+	// pass's blocker probe and its finalize gate (assets/scripts/finalize-gate.sh),
+	// or by the open blocker the gate holds, through that same probe. So a gate
+	// reads as a hold, as merge_hold and rebase_hold do, whatever work is in
+	// flight. A conversation about the anchor tracks it and blocks nothing, so it
+	// is never among them.
 	Gates []Blocker
-	// Blockers are the far beads of the anchor's own `blocks` edges, open and
-	// closed. A live one a person owes ([IsPersonBlocker]) holds the PR, because
-	// no automated actor will clear it.
-	Blockers []Blocker
+	// Owed are the beads other than human gates that a person owes the next move
+	// on, on the anchor's own blockers or behind a bead it waits on, nearest
+	// first, as [Holding] reads them ([Holds.Owed]): a decision, a bead routed to
+	// a person, or another merge anchor whose own state is a person's to move,
+	// such as a PR waiting on a review that a rework of this one waits for. No
+	// automated actor will move any of them, so each holds the PR.
+	Owed []Blocker
 	// PRPosture is metadata.pr_posture, stored value@oid@instant. The value is
 	// read before the first '@', and the oid after it is the head the posture
 	// was read at, the current head as far as the city knows.
@@ -286,10 +292,10 @@ func Held(f Facts) []Hold {
 }
 
 // Reason is one thing that holds an open PR: the held: value it stands for, and
-// what it is. A human gate or a blocker a person owes is a bead, which ID names
-// and Title quotes, and engaging that bead is how a person acts on it. Review
-// threads and the merge pass's blocked verdict are the PR's own, so ID is empty
-// and Title says what holds it.
+// what it is. A human gate or a bead a person owes the next move on is a bead,
+// which ID names and Title quotes, and engaging that bead is how a person acts
+// on it. Review threads and the merge pass's blocked verdict are the PR's own,
+// so ID is empty and Title says what holds it.
 type Reason struct {
 	Held  Hold   `json:"held"`
 	ID    string `json:"id"`
@@ -299,9 +305,9 @@ type Reason struct {
 // Reasons returns each thing that holds the PR, in the order of the held:
 // values they stand for: each open human gate, nearest first; review threads,
 // the merge pass's verdict on them before the feedback the city has not
-// answered; then each live blocker a person owes, in the order the anchor's
-// edges name them, before the merge pass's verdict on a blocker no automated
-// actor holds. Nothing holds a PR whose list is empty.
+// answered; then each bead a person owes the next move on, nearest first, before
+// the merge pass's verdict on a blocker no automated actor holds. Nothing holds a
+// PR whose list is empty.
 func Reasons(f Facts) []Reason {
 	var out []Reason
 	for _, g := range f.Gates {
@@ -314,10 +320,8 @@ func Reasons(f Facts) []Reason {
 	if n := unansweredFeedback(f); n > 0 {
 		out = append(out, Reason{Held: HeldReview, Title: threadsAwaiting(n)})
 	}
-	for _, b := range f.Blockers {
-		if IsPersonBlocker(b) {
-			out = append(out, Reason{Held: HeldBlocked, ID: b.ID, Title: b.Title})
-		}
+	for _, b := range f.Owed {
+		out = append(out, Reason{Held: HeldBlocked, ID: b.ID, Title: b.Title})
 	}
 	if blocked && f.PRMachineCause == CauseBlocker {
 		out = append(out, Reason{Held: HeldBlocked, Title: verdictSentence(f, "a live blocker no automated actor holds")})

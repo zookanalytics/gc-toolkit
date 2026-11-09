@@ -77,7 +77,7 @@ because it names a question that no longer stands. A subject a wait of its own
 still holds keeps its headline, since that wait is still owed. What holds it is
 the answer of `gctk bead holds`, the one rule for it. A read counts only when it
 exits 0 and answers in its shape: the subject's own row, alone, and its own
-answer. Every write is read back, and the conversation closes only after them:
+answer. Each write takes its exit, and the conversation closes only after them:
 ```bash
 # >>> gctk-bin
 GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
@@ -106,7 +106,7 @@ ends**). **Post nothing** — no framing, no sign-off, not even "this turned out
 to be fine".
 
 No `closed` line means the close stopped short: the subject or its blockers
-did not read, or a write did not read back. The conversation stays open under
+did not read, or the store refused a write. The conversation stays open under
 this sitting, and a subject whose questions are answered would otherwise keep
 a headline that waits on nothing. So say in the thread what the block printed,
 fix what it names, and re-run the block. The gates cleared

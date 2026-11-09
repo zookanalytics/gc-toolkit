@@ -17,24 +17,9 @@ never pass `--notes`, which replaces them:
 ```bash
 gc bd update "$SUBJECT" --append-notes "<the decision>. <why>. <what changed>."
 ```
-When the subject is an epic and the ruling states or confirms its contract
-(`docs/epics.md`, "The contract an epic carries"), record each field in its own
-key as well, never in the description or the notes alone: the close gate, the
-doctor's I15 and the Epic Checkpoint read the keys. Give a field only as the
-operator stated or confirmed it, and leave out each line for a field the
-ruling does not settle:
-```bash
-gc bd update "$SUBJECT" --set-metadata epic_hypothesis="<the sentence: for whom, what changes, and the signal that shows it worked>" \
-  --set-metadata epic_handle="<three to five words>" \
-  --set-metadata epic_boundaries="<the axis it is cut on, and the work beside it that it is not, with where that lives>" \
-  --set-metadata epic_closure_condition="<the checks a person runs to answer the hypothesis>" \
-  --set-metadata epic_indicators="<the signals watched while it is in flight>"
-```
-The operator's yes to the epic's hypothesis, as they stated, confirmed or
-sharpened it, is a ruling on the epic, a continue, and the first ruling ends the
-sentence's first draft (`docs/epics.md`, "The contract an epic carries"). So a
-sitting that hears it is an Epic Checkpoint, and the `converse-epic-checkpoint`
-skill records the ruling.
+When the operator judged an epic's contract or its course in this sitting,
+the sitting is a review of that epic, and the `converse-epic-review` skill's
+writes record it, each field the ruling sets in its own key.
 
 When the notes have grown past a quick read, append a current-state block too.
 The newest one is the one in force, and step 4 primes from it:
@@ -74,13 +59,11 @@ and closes here rather than waiting for a manual dismiss.
 what the answer releases first.** The sitting answers only the gates its
 conversation replies to: the gate engage was pointed at, one its hold filed,
 and any other human gate the operator rules on within the subject's universe.
-To answer one the conversation does not reply to yet, add the reply and read
-it back, then name every bead the answer releases, read from the gate's
-`blocks` dependents, so an answer that releases a bead beyond the subject is
-given knowingly:
+To answer one the conversation does not reply to yet, add the reply, then name
+every bead the answer releases, read from the gate's `blocks` dependents, so an
+answer that releases a bead beyond the subject is given knowingly:
 ```bash
 gc bd dep add "$CONVERSATION" <gate> --type replies-to \
-  && gc bd list --id "$CONVERSATION" --all --json | jq -e --arg g <gate> 'any(.[0].dependencies[]?; .type == "replies-to" and .depends_on_id == $g)' >/dev/null \
   && gc bd dep list <gate> --direction=up --type blocks --json | jq -r '.[] | "\(.id) [\(.status)] \(.title)"'
 ```
 A gate with no tie to the subject takes its own conversation, so that its
@@ -155,8 +138,8 @@ it, by the same method, keep them: sign off with `--ruled yes --no-wait` and
 send nothing yourself. Under any other ruling, one that sends it elsewhere or
 nowhere, withdraw them before the answer, with or without `--accept`. The block
 disarms an arm and clears a pool route, and keeps a `human` route, which sends
-the subject to no pool. It reads the subject back, and prints its
-`carries no arm and no pool route` line only once neither is left:
+the subject to no pool. It prints its `carries no arm and no pool route`
+line only once each write has exited 0:
 ```bash
 WHY="<the ruling, one line>"
 ROW=$(gc bd show "$SUBJECT" --json) \
@@ -164,9 +147,7 @@ ROW=$(gc bd show "$SUBJECT" --json) \
   && ROUTE=$(printf '%s\n' "$ROW" | jq -er '(.[0].metadata["gc.routed_to"] // "") | tostring') \
   && { [ -z "$ARM" ] || "$CONV/deferred-dispatch.sh" disarm "$SUBJECT" --reason "$WHY"; } \
   && { [ -z "$ROUTE" ] || [ "$ROUTE" = human ] || gc bd update "$SUBJECT" --unset-metadata gc.routed_to; } \
-  && ROW=$(gc bd show "$SUBJECT" --json) \
-  && LEFT=$(printf '%s\n' "$ROW" | jq -er --arg s "$SUBJECT" 'if type == "array" and length == 1 and .[0].id == $s then (.[0].metadata // {}) | [ ((.["gc.dispatch_when_ready"] // "") | tostring | select(. != "") | "arm " + .), ((.["gc.routed_to"] // "") | tostring | select(. != "" and . != "human") | "route " + .) ] | join(", ") else error("unread") end') \
-  && if [ -z "$LEFT" ]; then echo "$SUBJECT carries no arm and no pool route"; else echo "$SUBJECT still carries $LEFT"; false; fi
+  && echo "$SUBJECT carries no arm and no pool route"
 ```
 Without that line, answer nothing: fix what the block printed and re-run it.
 Then take the case that fits. The cases:
@@ -291,18 +272,11 @@ message.
 **If this sitting ROUTED work, file and send it, then pass
 `--waiting-on <work-bead>` to the sign-off for each dependency it sent.** The
 `work` skill says which bead carries the work and how to choose its formula. An
-epic the ruling files takes that skill's epic create, which records the epic's
-contract in the create and refuses an epic with no hypothesis. When the
-operator stated or confirmed the new epic's hypothesis, that yes is its first
-ruling, a continue, so record it once the create has returned the epic's id,
-with `--set-metadata epic_ruling_evidence=<the gate>` in place of the last line
-when a human gate carried the yes:
+epic the ruling files takes that skill's epic create, then a note that says
+whose words each field is, quoting the operator for each field they stated or
+approved in this sitting:
 ```bash
-gc bd update <the new epic> --set-metadata epic_ruling=continue \
-  --set-metadata epic_ruling_reason="<what the operator said yes to, and where>" \
-  --set-metadata epic_ruling_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --set-metadata epic_ruling_by="$GC_SESSION_NAME" \
-  --unset-metadata epic_ruling_evidence
+gc bd update <the new epic> --append-notes "Filed $(date -u +%Y-%m-%d) by $GC_SESSION_NAME in conversation $CONVERSATION. Proposed by this sitting: <each field it wrote, or none>. Stated by the operator: <each field they stated or approved, quoting their words, or none>."
 ```
 The sling runs only once the create returned the bead's id:
 ```bash
@@ -337,28 +311,26 @@ blocked, and leaving it to route once the blocker closes is the
 come-back-later that keeps you or a person on the hook. Make it wait on the
 blocker, then arm it, so it routes itself when the blocker closes and the
 sitting can queue everything and close. An arm with nothing holding the
-follow-up sends it on the next pass, so the arm runs only once the follow-up's
-own store reads the edge back. A `dep add` onto a bead in another rig's store
-prints success and exits 0, but holds nothing. Each call names the
-follow-up's rig, the one its pool reads: unpinned, a command that also names a
-city bead is answered from the city's store.
+follow-up sends it on the next pass, so the arm runs only once the add exits 0.
+A `dep add` onto a bead in another rig's store prints success and exits 0, but
+holds nothing, so the edge is written only when the follow-up and the blocker
+carry the same id prefix, the text before the first `-`, which names the
+store. Each call names the follow-up's rig, the one its pool reads: unpinned,
+a command that also names a city bead is answered from the city's store.
 ```bash
-gc bd --rig <rig> dep add <follow-up> <blocker> --type=blocks \
-  && gc bd --rig <rig> dep list <follow-up> --direction=down -t blocks --json | tr -d '[:cntrl:]' | jq -e --arg b <blocker> 'any(.[]; .id == $b)' >/dev/null \
+[ "$(echo <follow-up> | cut -d- -f1)" = "$(echo <blocker> | cut -d- -f1)" ] \
+  && gc bd --rig <rig> dep add <follow-up> <blocker> --type=blocks \
   && "$CONV/deferred-dispatch.sh" arm <follow-up> --target <rig>/<pool> --reason "waits for <blocker>"
 ```
-When the edge does not read back and `dep list` warns that its target has no
-row in this database, the blocker is in another rig's store, where no edge can
-hold the follow-up. Make it wait on a human gate in its own store that names
-the blocker, and arm it on that gate. The gate reaches the operator, who
-clears it once the blocker lands, and the arm then sends the follow-up.
-Remove the edge first, because the arm reads it as a blocker that holds
-nothing and warns that the next pass sends the follow-up. The helper files the
-gate in the follow-up's own store, and the message's first line is the gate's
-title, cut at 140 characters, so keep that line to one plain sentence:
+When the prefixes differ, the blocker is in another rig's store, where no
+edge can hold the follow-up, and the block writes nothing. Make the follow-up
+wait on a human gate in its own store that names the blocker, and arm it on
+that gate. The gate reaches the operator, who clears it once the blocker
+lands, and the arm then sends the follow-up. The helper files the gate in the
+follow-up's own store, and the message's first line is the gate's title, cut
+at 140 characters, so keep that line to one plain sentence:
 ```bash
-gc bd --rig <rig> dep remove <follow-up> <blocker> \
-  && "$CONV/human-gate.sh" --subject <follow-up> --key waits-for-<blocker> --message "Clear once <what the blocker delivers> lands, so <what the follow-up does> can start
+"$CONV/human-gate.sh" --subject <follow-up> --key waits-for-<blocker> --message "Clear once <what the blocker delivers> lands, so <what the follow-up does> can start
 <follow-up> waits for <blocker> in <its rig>. Clear this gate once <blocker> closes." \
   && "$CONV/deferred-dispatch.sh" arm <follow-up> --target <rig>/<pool> --reason "waits for <blocker>, through its human gate"
 ```

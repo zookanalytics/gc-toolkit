@@ -53,8 +53,7 @@ fi
 # 3. Record the branch, and the default branch as its target, on the landing
 # bead.
 gc bd --rig <rig> update "$LANDING" --set-metadata branch="$BRANCH" --set-metadata target="$BASE" \
-  && gc bd --rig <rig> show "$LANDING" --json | jq -e --arg b "$BRANCH" --arg t "$BASE" '.[0].metadata | .branch == $b and .target == $t' >/dev/null \
-  || { echo "$LANDING does not read back its branch and target; stopping" >&2; exit 1; }
+  || { echo "$LANDING did not record its branch and target; stopping" >&2; exit 1; }
 
 # 4. File each bead of the effort with the branch as its target, in its create,
 # and the landing bead's wait on it. A bead filed without its target branches
@@ -63,10 +62,7 @@ gc bd --rig <rig> update "$LANDING" --set-metadata branch="$BRANCH" --set-metada
 # stops before step 7 leaves no bead sent to a pool.
 WORK=$(gc bd --rig <rig> create "<task>" -t task -d "<what to build>" --parent <epic> \
   --metadata "$(jq -nc --arg t "$BRANCH" '{target: $t}')" --deps "blocks:$LANDING" --json | jq -r '.id // empty')
-[ -n "$WORK" ] \
-  && gc bd --rig <rig> show "$WORK" --json | jq -e --arg b "$BRANCH" '.[0].metadata.target == $b' >/dev/null \
-  && gc bd --rig <rig> dep list "$LANDING" --direction=down -t blocks --json | tr -d '[:cntrl:]' | jq -e --arg w "$WORK" 'any(.[]; .id == $w)' >/dev/null \
-  || { echo "${WORK:-the bead} does not read back its target and the landing bead's wait; stopping" >&2; exit 1; }
+[ -n "$WORK" ] || { echo "no bead filed, with its target and the landing bead's wait; stopping" >&2; exit 1; }
 
 # 5. Once every bead of the effort is filed, the summary task: no target, under
 # the effort's epic, waiting on each bead of the effort, with the landing bead
@@ -75,17 +71,11 @@ SUMMARY=$(gc bd --rig <rig> create "summary: the PR for <what the effort deliver
   -d "Write the pr_summary of $LANDING once every bead this task waits on has landed, by the polecat doctrine's paragraph on integration branches." \
   --parent <epic> --deps "<each bead of the effort, comma-separated>,blocks:$LANDING" --json | jq -r '.id // empty')
 [ -n "$SUMMARY" ] || { echo "no summary task filed; stopping" >&2; exit 1; }
-WAITS=$(gc bd --rig <rig> dep list "$SUMMARY" --direction=down -t blocks --json | tr -d '[:cntrl:]' | jq -r '[.[].id] | join(" ")')
-for B in <each bead of the effort>; do
-  case " $WAITS " in *" $B "*) ;; *) echo "$SUMMARY does not wait on $B; stopping" >&2; exit 1 ;; esac
-done
-gc bd --rig <rig> dep list "$LANDING" --direction=down -t blocks --json | tr -d '[:cntrl:]' | jq -e --arg s "$SUMMARY" 'any(.[]; .id == $s)' >/dev/null \
-  || { echo "$LANDING does not wait on $SUMMARY; stopping" >&2; exit 1; }
 
 # 6. Assign the landing bead to the refinery, and notify it. The refinery takes
 # it once nothing it waits on is open, so assign it only after every wait above
-# has read back: then it cannot reach the default branch before every bead of
-# the effort and the summary task has closed.
+# is written: then it cannot reach the default branch before every bead of the
+# effort and the summary task has closed.
 gc bd --rig <rig> update "$LANDING" --assignee <rig>/<binding>.refinery \
   && "$(gc <binding> scripts-dir)/deferred-dispatch.sh" notify "$LANDING" --agent <rig>/<binding>.refinery \
   || { echo "$LANDING is not handed to the refinery; dispatching nothing" >&2; exit 1; }
@@ -124,8 +114,7 @@ RIG_ROOT=$(gc rig list --json | jq -r --arg r <rig> '.rigs[] | select(.name == $
 # dep add's second id is the bead that is waited on.
 "$GCTK" bead holds --db "$RIG_ROOT/.beads" "$SUMMARY" | jq -e '.error == null and (.arm.target // "") != "" and (.arm.slung // "") == "" and (.pending | length) > 0' >/dev/null \
   && gc bd --rig <rig> dep add "$SUMMARY" "$WORK" --type=blocks \
-  && gc bd --rig <rig> dep list "$SUMMARY" --direction=down -t blocks --json | tr -d '[:cntrl:]' | jq -e --arg w "$WORK" 'any(.[]; .id == $w)' >/dev/null \
-  || { echo "$SUMMARY may already be dispatched, or does not wait on $WORK; file a fresh summary task by step 5" >&2; exit 1; }
+  || { echo "$SUMMARY may already be dispatched, or the store refused its wait on $WORK; file a fresh summary task by step 5" >&2; exit 1; }
 ```
 
 Once the refinery has taken the landing bead, send work for its branch to the

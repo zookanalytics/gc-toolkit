@@ -9,7 +9,7 @@ subject the effort's landing bead: it cuts `integration/<subject-id>` and record
 it on the subject, then files a design child whose doc lands on that branch, an
 implementation child held behind the design's approval, and the summary task
 that writes the subject's PR summary once the children have landed. Only once
-every wait among them reads back does it hand the subject to the refinery and
+every wait among them is written does it hand the subject to the refinery and
 dispatch the children and the summary task. The subject's PR carries design and
 implementation to the default branch as one reviewed unit, and the subject
 closes when that PR merges, as any PR's owning bead does, so work queued behind
@@ -43,5 +43,5 @@ Steps (7):
   ├── mol-design-convoy.file-design: File the design child and wire the subject's wait on it [needs: mol-design-convoy.seed-branch]
   ├── mol-design-convoy.file-implementation: File the implementation child and wire its waits [needs: mol-design-convoy.file-design]
   ├── mol-design-convoy.file-summary: File the summary task and wire its waits [needs: mol-design-convoy.file-implementation]
-  ├── mol-design-convoy.dispatch: Read the setup back, hand the subject to the refinery, dispatch its work, and drain [needs: mol-design-convoy.file-summary]
+  ├── mol-design-convoy.dispatch: Hand the subject to the refinery, dispatch its work, and drain [needs: mol-design-convoy.file-summary]
   └── mol-design-convoy.workflow-finalize: Finalize workflow [needs: mol-design-convoy.dispatch]

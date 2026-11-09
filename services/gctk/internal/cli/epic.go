@@ -19,12 +19,12 @@ import (
 // registers for it under [metadata.epic_stewardship], in the create itself.
 // docs/epics.md makes a hypothesis the one hard gate on an epic, so an epic
 // whose parent is not an epic is refused without one, and nothing is filed.
-// The gate is that a sentence is there, never how good it is: a rough first
-// draft passes, and the operator's first ruling on the epic judges it
-// (docs/epics.md, "The contract an epic carries"). bd's create checks
-// (validation.on-create, validation.metadata) and gc bd's admission refusals
-// take no rule that holds one issue type to a metadata key, so the check runs
-// here, in the create the work skill gives for an epic.
+// The gate is that a sentence is there, never how good it is: a rough sentence
+// passes, and a review of the epic judges it (docs/epics.md, "Reviewing an
+// epic"). bd's create checks (validation.on-create, validation.metadata) and
+// gc bd's admission refusals take no rule that holds one issue type to a
+// metadata key, so the check runs here, in the create the work skill gives for
+// an epic.
 //
 // An epic whose parent is an epic and that carries no hypothesis is a
 // Delivery, a step toward its epic's hypothesis. Its description opens with
@@ -48,11 +48,10 @@ quoted argument.
 An epic needs a hypothesis to be filed (docs/epics.md), so an epic whose parent
 is not an epic is refused without --hypothesis, and nothing is filed. A rough
 sentence that sets the general direction is enough: when the operator has
-stated none, the filer writes one and files at once, and it stays a first draft
-until the operator first rules on the epic. The other fields are the
-operator's, so give one only as the operator stated or confirmed it. An empty
-field is a field not given. An area that is only ever improvable is not an
-epic, and its work is ordinary flow.
+stated none, the filer writes one and files at once. A field the filer writes
+is its proposal, which it says on the epic, and a review of the epic judges it.
+An empty field is a field not given. An area that is only ever improvable is
+not an epic, and its work is ordinary flow.
 
 An epic whose --parent is an epic and that has no --hypothesis is a Delivery, a
 step toward its epic's hypothesis. Its description opens with its Aim: and
@@ -166,7 +165,7 @@ func epicRefusal(o epicOpts, parentType string) string {
 			"for whom, what changes and the signal that shows it worked. " +
 			"A rough sentence that sets the general direction is enough. When the operator has stated none, " +
 			"write one yourself and run the create again with it, without asking first: " +
-			"it stays a first draft until the operator first rules on the epic. " +
+			"it is your proposal, and a review of the epic judges it. " +
 			"An area that is only ever improvable is not an epic, and its work is ordinary flow. " +
 			"A Delivery, a step toward an epic's hypothesis, is filed with --parent <its epic>."
 	}

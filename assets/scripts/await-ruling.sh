@@ -8,8 +8,8 @@
 #                   [--target <pool>] [--dry-run]
 #
 # --blocked-by is the same wait with no person in it: the work bead takes a
-# `blocks` edge onto <bead> unless it has one, and everything below applies, with
-# <bead> closing in place of the gate clearing.
+# `blocks` edge onto <bead>, and everything below applies, with <bead> closing in
+# place of the gate clearing.
 #
 # A worker that declines work it cannot finish without a person files the
 # question with human-gate.sh, then cancels its run (run-cancel.sh). Nothing
@@ -62,13 +62,16 @@
 # list still names may be live, a list that cannot be read proves no owner gone,
 # and an open bead under another assignee is a hand-off, not a claim.
 #
-# The edge, the release and the arm are read back. Any of them not landing exits
-# 1, and the caller does not cancel its run: a cancelled run with no recorded
-# wait leaves the work bead open, unrouted and unarmed, which nothing
-# re-offers. Re-running converges, with or without --target: an edge already in
-# place, a claim already released and an arm already recorded count as landed,
-# and after an arm that did not land, the re-run arms to the pool the earlier
-# run recorded.
+# The edge, the release and the arm each take their exit. The edge is written
+# only when the gate, or <bead>, is in the work bead's store, because bd stores
+# an edge onto another store's bead without finding it, and it holds nothing.
+# Any write refused, or an edge that would cross stores, exits 1, and the caller
+# does not cancel its run: a cancelled run with no recorded wait leaves the work
+# bead open, unrouted and unarmed, which nothing re-offers. Re-running
+# converges, with or without --target: bd takes an edge it already holds as a
+# no-op, a claim already released needs no release, and a second arm rewrites
+# the first, and after an arm that did not land, the re-run arms to the pool
+# the earlier run recorded.
 #
 # Callers: work-gate.sh and work-setup.sh, the decline arms of mol-polecat-work
 # that wait for a person or a sibling, and two arms of mol-refinery-patrol's
@@ -263,6 +266,12 @@ if [ -z "$BLOCKER" ]; then
   fi
   WAIT_ON="gate $GATE"
 fi
+# An id's prefix names its store, and the wait is a blocks edge from the work
+# bead, so the gate or <bead> it waits on must be in the work bead's store.
+if ! bd_same_store "$WORK" "$GATE"; then
+  echo "$PROG: $WAIT_ON is in another store than $WORK, so a blocks edge onto it would hold nothing; no wait was recorded" >&2
+  exit 1
+fi
 
 if [ -z "$TARGET" ]; then
   TARGET=$(printf '%s' "$WORK_JSON" | jq -r '
@@ -282,24 +291,11 @@ if [ "$DRY_RUN" = 1 ]; then
   exit 0
 fi
 
-# `dep add <bead> <blocker>` reads "<bead> is blocked by <blocker>". The edge is
-# read back from the work bead's side, the read every reader of its gates makes.
-blocks_on_gate() {
-  local gates
-  if [ -n "$BLOCKER" ]; then
-    gates=$(bd_json_array dep list "$WORK") || return 1
-    printf '%s' "$gates" | jq -e --arg g "$GATE" 'any(.[]; .id == $g and ((.dependency_type // .type // "") == "blocks"))' >/dev/null 2>&1
-    return
-  fi
-  gates=$(bd_human_gates "$WORK") || return 1
-  printf '%s' "$gates" | jq -e --arg g "$GATE" 'any(.[]; .id == $g)' >/dev/null 2>&1
-}
-if ! blocks_on_gate; then
-  gc bd dep add "$WORK" "$GATE" --type=blocks </dev/null >/dev/null 2>&1 || true
-  if ! blocks_on_gate; then
-    echo "$PROG: the blocks edge from $WORK onto $WAIT_ON did not land; no wait was recorded" >&2
-    exit 1
-  fi
+# `dep add <bead> <blocker>` reads "<bead> is blocked by <blocker>". A gate filed
+# on the work bead already blocks it, and bd takes that edge again as a no-op.
+if ! gc bd dep add "$WORK" "$GATE" --type=blocks </dev/null >/dev/null 2>&1; then
+  echo "$PROG: the store refused the blocks edge from $WORK onto $WAIT_ON; no wait was recorded" >&2
+  exit 1
 fi
 
 # The edge already keeps the bead out of `bd ready`, so releasing its claim
@@ -344,14 +340,6 @@ fi
 if ! ARM_OUT=$("$DEFERRED" arm "$WORK" --target "$TARGET" --sling-arg --on --sling-arg "$FORMULA" \
     --reason "${KEY:+waits on the ruling asked by $WAIT_ON ($KEY)}${BLOCKER:+waits on $BLOCKER}" 2>&1); then
   echo "$PROG: the re-sling was not armed on $WORK: $ARM_OUT; it waits on $WAIT_ON unarmed, and a re-run arms it to $TARGET, recorded as resling_target" >&2
-  exit 1
-fi
-BACK=$(bd_json show "$WORK")
-ARMED=$(printf '%s' "$BACK" | jq -r '.[0].metadata["gc.dispatch_when_ready"] // empty' 2>/dev/null)
-BACK_STATUS=$(printf '%s' "$BACK" | jq -r '.[0].status // empty' 2>/dev/null)
-BACK_ASSIGNEE=$(printf '%s' "$BACK" | jq -r '.[0].assignee // empty' 2>/dev/null)
-if [ "$ARMED" != "$TARGET" ] || [ "$BACK_STATUS" != open ] || [ -n "$BACK_ASSIGNEE" ]; then
-  echo "$PROG: $WORK reads back armed to '${ARMED}', status '${BACK_STATUS}', assignee '${BACK_ASSIGNEE}'; the re-sling fires only for an open, unassigned bead armed to $TARGET" >&2
   exit 1
 fi
 if [ -n "$BLOCKER" ]; then

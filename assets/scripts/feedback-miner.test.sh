@@ -726,7 +726,7 @@ fresh_dir s3
 "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" >/dev/null 2>&1
 OUT=$(STUB_KV_SET_FAIL=1 "$SUT" flag --dir "$W" 2>&1); RC=$?
 eq "$RC" "1" "(82s15) a raise whose record does not land exits 1"
-has "$OUT" "the record of them did not read back, so the next run raises them again" "(82s16) and says so"
+has "$OUT" "the store refused the record of them, so the next run raises them again" "(82s16) and says so"
 "$SUT" flag --dir "$W" >/dev/null 2>&1
 eq "$(post_record "$(key 11 review 7)")" "named in tk-find2" "(82s17) the next run records it"
 # Findings that do not read stop a raise before it starts.

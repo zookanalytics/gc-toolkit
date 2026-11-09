@@ -185,7 +185,9 @@ chmod +x "$PACK"/*.sh
 # out unless --all or a status names them, and gives each row its edges in the
 # listing shape. `bd dep list` answers the beads a bead depends on, each row
 # whole with its dependency_type, and with --type only edges of that type, as
-# bd-lib.sh's human-gate reader reads them, and `bd dep add` records one.
+# bd-lib.sh's human-gate reader reads them, and `bd dep add` records one, as
+# bd does taking an edge of the same type already there as a no-op and
+# refusing one of another type onto the same pair.
 # `bd update` refuses with exit 13 and writes nothing when an --if-assignee or
 # --if-status guard, spaced or attached, does not hold, refuses an arm's
 # write (one setting gc.dispatch_when_ready) when FAKE_ARM_WRITE_FAIL is set and
@@ -264,7 +266,9 @@ case "$1 ${2:-}" in
         echo "$*" >> "$FAKE_LOG"
         t=blocks
         for x in "$@"; do case "$x" in --type=*) t="${x#--type=}" ;; esac; done
-        printf '%s|%s|%s\n' "${4:-}" "$t" "${5:-}" >> "$FAKE_DEPS" ;;
+        had=$(awk -F'|' -v a="${4:-}" -v b="${5:-}" '$1 == a && $3 == b { print $2; exit }' "$FAKE_DEPS")
+        [ -z "$had" ] || [ "$had" = "$t" ] || { echo "bd: ${4:-} already depends on ${5:-} by $had (stub)" >&2; exit 1; }
+        [ -n "$had" ] || printf '%s|%s|%s\n' "${4:-}" "$t" "${5:-}" >> "$FAKE_DEPS" ;;
       *) echo "$*" >> "$FAKE_LOG" ;;
     esac ;;
   "bd update")
@@ -579,7 +583,7 @@ has "$(cat "$D/gc.log")" "human-gate-quiet no" "nocheck, patrol 3: the gate is f
 hasnt "$(cat "$D/gc.log")" "refinery-false-completion" "nocheck, patrol 3: the gate is not a no-change situation"
 if [ -n "$GATE" ]; then ok "nocheck, patrol 3: the gate is filed"; else bad "nocheck, patrol 3: the gate is filed" "$(cat "$D/store.json")"; fi
 eq "$(grep -cxF "wb|blocks|$GATE" "$D/deps.txt")" 1 "nocheck, patrol 3: the work is blocked by its gate"
-hasnt "$(cat "$D/gc.log")" "bd dep add" "nocheck, patrol 3: the gate's own edge is the wait, so no other edge is written"
+eq "$(grep -c '|blocks|' "$D/deps.txt")" 1 "nocheck, patrol 3: the gate's own edge is the wait, so no other edge stands"
 eq "$(field status) $(field assignee)" "open " "nocheck, patrol 3: the refinery's assignment is released, so find-work no longer offers the work"
 eq "$(meta gc.dispatch_when_ready)" "$POOL" "nocheck, patrol 3: a fresh pour is armed to the pool the work's last pour ran on"
 eq "$(meta gc.dispatch_when_ready_args)" '["--on","mol-polecat-work"]' "nocheck, patrol 3: the pour is a mol-polecat-work run"

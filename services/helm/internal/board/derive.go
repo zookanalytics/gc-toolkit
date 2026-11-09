@@ -856,7 +856,7 @@ func collapseWS(s string) string {
 // the mechanical heads (open_heads, cross_rig_refs) are --json-only so the
 // human table stays explanatory and cannot emit a raw or truncated bead id.
 func needs(a Anchor, r rollup, held bool, takeaway string, waiting, waitingOpen []string, own beadState, dispDue, isRuled, humanGatedInFlight bool,
-	machine, approval string, asks []Blocker, prIsOwed bool, stallNeeds string, deliveryLanded bool) string {
+	machine, approval string, asks, moves []Blocker, prIsOwed bool, stallNeeds string, deliveryLanded bool) string {
 	// A closed anchor outranks even the takeaway. The sentence a sitting left
 	// describes what the row wanted while it was live; a closed row wants
 	// nothing now — it ages out of the DONE band on its own once it has been
@@ -976,6 +976,12 @@ func needs(a Anchor, r rollup, held bool, takeaway string, waiting, waitingOpen 
 	// and the merge arm below says where the cadence has it.
 	case a.Source == "parked" && r.mTotal == 0 && !isMergeAnchor(a):
 		return "parked for you — no question recorded"
+	// Nobody is owed this one, and a bead a person owes the next move on holds
+	// its PR from elsewhere ([movesElsewhere]), so it names where that move is.
+	// The cadence's position would read as the city's while the work waits on
+	// a person.
+	case isMergeAnchor(a) && len(moves) > 0:
+		return "your move is on " + waitsPhrase(beadState{waits: moves})
 	// Nobody is owed this one, so it reports where the cadence has it. Ahead of
 	// the roll-up phrases below because a merge anchor does not decompose: its
 	// children are the rework and review beads the cadence files, and
@@ -1168,7 +1174,8 @@ func asksAPerson(b Blocker) bool {
 // blocked value reads, beside the human gate its held: gate value reads, so one
 // gate never counts as both, whatever its route.
 func demand(b Blocker) bool {
-	return prstatus.IsPersonBlocker(prstatus.Blocker{ID: b.ID, Status: b.Status, IssueType: b.IssueType, AwaitType: b.AwaitType, RoutedTo: b.RoutedTo})
+	return prstatus.IsPersonBlocker(prstatus.Blocker{ID: b.ID, Status: b.Status, IssueType: b.IssueType, AwaitType: b.AwaitType,
+		Metadata: map[string]string{mdRoutedTo: b.RoutedTo}})
 }
 
 // prMachine is what the merge cadence can do with this anchor on its next pass.
@@ -1289,6 +1296,35 @@ func askingBlockers(blockers ...[]Blocker) []Blocker {
 		return x.CreatedAt.Compare(y.CreatedAt)
 	})
 	return asks
+}
+
+// prGates is each human gate among the beads behind a PR's reasons
+// ([Anchor.PRReasons]): the gates that hold it, on the anchor or behind a bead
+// it waits on. Each is a question the PR's row asks.
+func prGates(reasons []Blocker) []Blocker {
+	var gates []Blocker
+	for _, b := range reasons {
+		if humanGate(b) {
+			gates = append(gates, b)
+		}
+	}
+	return gates
+}
+
+// movesElsewhere is each bead behind a PR's reasons ([Anchor.PRReasons]) that a
+// person owes the next move on and that the row does not ask for itself (asks):
+// one the anchor waits on through another bead, such as a decision behind its
+// rework, or a merge anchor whose own state is a person's to move, such as
+// another PR waiting on a review. The move is on that bead, and its own row asks
+// for it, so this row names it in NEEDS and is not owed for it.
+func movesElsewhere(reasons, asks []Blocker) []Blocker {
+	var moves []Blocker
+	for _, b := range reasons {
+		if !humanGate(b) && !slices.ContainsFunc(asks, func(x Blocker) bool { return x.ID == b.ID }) {
+			moves = append(moves, b)
+		}
+	}
+	return moves
 }
 
 // prOwed applies the owed rule to a merge anchor, and dates it.
@@ -1832,7 +1868,11 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 
 	machine := prMachine(a, a.Blockers)
 	approval := prApproval(a)
-	asks := askingBlockers(a.Blockers, a.PRReasons)
+	// The row asks for what holds its PR here: each human gate, on the anchor or
+	// behind a bead it waits on, and each blocker of its own a person owes. Any
+	// other bead a person owes the next move on is asked for on its own row.
+	asks := askingBlockers(a.Blockers, prGates(a.PRReasons))
+	moves := movesElsewhere(a.PRReasons, asks)
 	var ask *Blocker
 	if len(asks) > 0 {
 		ask = &asks[0]
@@ -1959,7 +1999,7 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		UpdatedAt: a.UpdatedAt,
 		ClosedAt:  a.ClosedAt,
 		Frontier:  frontier(a, r, held, workHeld, takeaway, waitingOpen, own, dispDue, isRuled, isRuledInFlight, humanGatedInFlight, parkedInFlight, closedDays, owedSince, now),
-		Needs:     needs(a, r, held, takeaway, waiting, waitingOpen, own, dispDue, isRuled, humanGatedInFlight, machine, approval, asks, prIsOwed, stallNeeds, deliveryLanded),
+		Needs:     needs(a, r, held, takeaway, waiting, waitingOpen, own, dispDue, isRuled, humanGatedInFlight, machine, approval, asks, moves, prIsOwed, stallNeeds, deliveryLanded),
 		RankScore: rankScore(sev, w, stale, closedDays),
 
 		PRNumber:       prNumber(a),
