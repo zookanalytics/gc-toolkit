@@ -258,9 +258,15 @@ done
 # <id> wait on the new bead. A dep add over an edge the store already holds
 # exits 1, as bd refuses a duplicate. An update's --if-assignee is the guard bd
 # applies, exiting 13 on a mismatch. `rig list` names the one rig, "rig", at
-# RIG_ROOT, and `<binding> scripts-dir` prints SCRIPTS.
+# RIG_ROOT, and `<binding> scripts-dir` prints SCRIPTS. A read the gctk under
+# test makes is answered from the same store through holds-store.stub.sh, and
+# is not logged, so the log holds only what the block itself ran.
 mkdir -p "$TMP/bin" "$TMP/rig"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'STUB'
+if [ -n "${HOLDS_STUB_READ:-}" ] && [ "${1:-}" = bd ]; then
+  shift
+  HOLDS_STORE="$STORE" exec "${HOLDS_STUB:?}" answer "$@"
+fi
 printf 'gc %s' "$*" | tr '\n' ' ' >> "$GC_LOG"; printf '\n' >> "$GC_LOG"
 listed() { case " ${1:-} " in *" $2 "*) return 0 ;; esac; return 1; }
 put() { jq -c "$@" "$STORE" > "$STORE.new" && mv "$STORE.new" "$STORE"; }
@@ -389,6 +395,11 @@ chmod +x "$TMP/bin/gc" "$TMP/bin/git" "$TMP/bin/deferred-dispatch.sh"
 
 export GC_LOG="$TMP/gc.log" STORE="$TMP/store.json" ORIGIN_REFS="$TMP/origin-refs" ROSTER_FILE="$TMP/roster.json"
 export SCRIPTS="$TMP/bin" RIG_ROOT="$TMP/rig" POOL="rig/gc-toolkit.polecat" REFINERY="rig/gc-toolkit.refinery"
+# The late-join block asks gctk bead holds what holds the summary task, from the
+# gctk built from this checkout.
+export HOLDS_STUB="$HERE/holds-store.stub.sh" GC_NO_API=1
+GCTK_BIN="$("$HOLDS_STUB" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so the late-join block cannot run"; exit 1; }
+export GCTK_BIN
 export SUBJECT="sub-1" BRANCH="integration/sub-1" INITIATIVE="Rebuild the widget"
 printf '%s\n' '{"agents":[{"qualified_name":"rig/gc-toolkit.polecat"},{"qualified_name":"rig/gc-toolkit.refinery"}]}' > "$ROSTER_FILE"
 
