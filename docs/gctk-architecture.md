@@ -98,7 +98,6 @@ bead.
 | `gctk bead arm <bead>` | agent, hook | start this bead by itself once nothing holds it, on a formula if one is named | One intent over gc's lower-level sling and routing calls. The caller states what starts and on what, and the machinery performs every later step. |
 | `gctk bead disarm <bead>` | agent, hook | stop an armed bead from starting by itself | The other half of the arm's intent. |
 | `gctk bead start-armed` | order | start each armed bead that nothing holds any more: sling one armed for a pool, or send its notice to the named agent one is assigned to | Gas City slings only when asked. Its `cascade-nudge-on-blocker-close` order nudges the assignees of a closed bead's dependents and slings nothing ([warrants.md](warrants.md#deferred-dispatch-residual)). A notice takes cascade-nudge's shape with a dedup ledger. A sling rests on a mark on the arm, which lands first, unproven, in one write with the attempt count. A sling that fails takes the mark off in one write, so the next pass tries again. One that returns makes the mark proven before the arm is cleared, so a pass that finds a proven mark clears the arm without a sling, and one that finds an unproven mark slings again ([deferred-dispatch.md](deferred-dispatch.md#what-performs-it)). That leaves one window, a sling that lands before its mark is proven, where the next pass slings a second time. A pass that dies after the sling lands and before the proven mark opens it, and so does a sling that fails after it lands. Gas City's per-bead launch lock refuses a second pour of a graph.v2 formula while the first run is live, and the rest of the window is debt the deferred-dispatch member (tk-1tfzr71.16) retires in its design of this order. |
-| `gctk bead dispose-resolved` | order | close each open, unassigned bead whose `until` targets have all closed, with a pointer to what resolved it | An `until` edge closes nothing in bd or Gas City ([warrants.md](warrants.md#deferred-dispatch-residual)). Gas City's own `convoy-autoclose-backstop` order is the precedent: a close that follows from durable state, recomputed each pass. |
 | `gctk priority shift <bead> <±n>` | agent | raise or lower a bead against what it follows, and re-rank the queue, in one act | The native surface writes only an absolute priority, which carries no intent term, so the next settle reads it as drift and overwrites it. The stored shift is that term ([steering.md](steering.md#the-rule)). Its callers are sittings and the board. |
 | `gctk priority settle <bead>` | hook | give a bead the priority of what it follows before anything claims or pours it | A pour copies a bead's priority once, so the bead carries its derived priority before the pour. The pack's own writers run it before they make a bead claimable: filing follow-up work, a sling, a release, and the board's priority verb. |
 | `gctk priority reconcile` | order | re-settle the queued beads after raw writes no writer saw | The backstop of the shape the pack ships, ported and never replaced: the settle in the pack's writers, a rig-scoped pass every fifteen minutes that reads the queue and never the whole store, one lock per store, and the stored shift ([steering.md](steering.md#the-pass)). |
@@ -124,8 +123,7 @@ bead.
 
 What each noun owns:
 
-- **`bead`:** the arm record on a bead armed to start by itself, and the mark on
-  a bead being disposed.
+- **`bead`:** the arm record on a bead armed to start by itself.
 - **`priority`:** the derivation, which is a bead's shift and the computed bd
   priority of every bead that follows another, its poured workflow's included.
   The field itself is bd's. The derivation is a feature: work takes the
@@ -519,9 +517,9 @@ The status rests on these answers.
 - **Which of its own waits are pending?** These are the waits on the bead
   itself that have not landed. A caller that asks what a bead records it waits
   on, what still holds its close, or whether its own work sits on another bead
-  asks this: a takeaway's waits and its route guard, an `until` disposal, the
-  check that a wait is an edge, and the board's ruled rows. An ancestor's park
-  answers none of them, because the work it holds is still the bead's own.
+  asks this: a takeaway's waits and its route guard, the check that a wait is
+  an edge, and the board's ruled rows. An ancestor's park answers none of
+  them, because the work it holds is still the bead's own.
 - **When did the last wait that applies to it land?** This is the latest close
   among the waits the rule for where its work is applies: its own, and for work
   that has not started each live ancestor's too. A caller that ages the time
