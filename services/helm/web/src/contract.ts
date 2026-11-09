@@ -72,7 +72,7 @@ export interface Tile {
    * The operator's side has this bead: an open human gate holds it, an
    * acceptance an earlier Accept left unfinished keeps it, or an open
    * conversation tracks it. Only the first two hold its work (`work_held`); a
-   * conversation blocks nothing.
+   * conversation holds none, and one on an open PR holds only the PR's merge.
    */
   held: boolean;
   /**
@@ -375,8 +375,9 @@ export interface Tile {
    * Refines `held`: true when the operator's answer is required before this
    * bead's work can move, because an open human gate blocks it or an acceptance
    * an earlier Accept left unfinished keeps it. A held row where it is false
-   * only has a conversation on it, which blocks nothing, so the work can move
-   * and merge. False on every row that is not held. Derived on the Go side and
+   * only has a conversation on it, which holds no work, so the work can move,
+   * and only an open PR's merge waits for the conversation to close. False on
+   * every row that is not held. Derived on the Go side and
    * read as-is here.
    */
   work_held: boolean;

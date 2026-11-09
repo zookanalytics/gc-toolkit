@@ -86,7 +86,7 @@ func blockerNamed(id string, blockers, behind []Blocker, rows []Anchor) (Blocker
 // gate for a gate row, a decision for a decision row and a task for any other,
 // waiting on its blockers.
 func rowBead(a Anchor) fixture.Bead {
-	b := fixture.Bead{ID: a.ID, Title: a.Title, Status: "open", Metadata: a.Metadata}
+	b := fixture.Bead{ID: a.ID, Title: a.Title, Status: "open", Assignee: a.Assignee, Metadata: a.Metadata}
 	if !a.ClosedAt.IsZero() {
 		b.Status = "closed"
 	}
@@ -129,7 +129,7 @@ func rowStore(anchors []Anchor, more ...fixture.Bead) *fixture.Store {
 	for _, a := range anchors {
 		for _, bl := range a.Blockers {
 			put(fixture.Bead{ID: bl.ID, Title: bl.Title, Status: bl.Status, IssueType: bl.IssueType, AwaitType: bl.AwaitType,
-				Metadata: map[string]string{"gc.routed_to": bl.RoutedTo}})
+				Assignee: bl.Assignee, Metadata: map[string]string{"gc.routed_to": bl.RoutedTo}})
 		}
 	}
 	for _, a := range anchors {

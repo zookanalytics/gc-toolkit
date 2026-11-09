@@ -363,7 +363,8 @@ type Tile struct {
 	// Held says the operator's side has this bead: an open human gate blocks
 	// it, an acceptance an earlier Accept left unfinished keeps it, or an open
 	// conversation tracks it. Only the first two hold its work ([WorkHeld]); a
-	// conversation blocks nothing. A held anchor is never stranded, because the
+	// conversation holds none, and one on an open PR holds only the PR's merge.
+	// A held anchor is never stranded, because the
 	// question or the conversation IS the attention it would be flagged for
 	// lacking.
 	Held bool `json:"held"`
@@ -685,8 +686,9 @@ type Tile struct {
 	// WorkHeld refines Held: true when the operator's answer is required before
 	// this bead's work can move, because an open human gate blocks it or an
 	// acceptance an earlier Accept left unfinished keeps it. A Held row where it
-	// is false only has a conversation on it, which blocks nothing, so the work
-	// can move and merge while the conversation waits for the operator. False on
+	// is false only has a conversation on it, which holds no work, so the work
+	// moves while the conversation waits for the operator, and only an open PR's
+	// merge waits for the conversation to close. False on
 	// every row that is not held. It is derived here rather than in the browser,
 	// so each surface tells the two kinds of held row apart from one reading.
 	WorkHeld bool `json:"work_held"`

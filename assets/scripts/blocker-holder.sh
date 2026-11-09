@@ -12,9 +12,13 @@
 #                        (prstatus.HoldingGates)
 #   none                 no live blocker, or only blockers a person holds
 #
-# A person holds a blocker routed to a person (gc.routed_to=human), and a human
-# gate, by bd-lib.sh's rule (human_gate): the gate is the hold of the person who
-# must clear it, so it is neither an actor's nor stuck.
+# A person holds a blocker routed to a person (gc.routed_to=human), a human
+# gate, by bd-lib.sh's rule (human_gate), and a conversation: the gate is the
+# hold of the person who must clear it, and a conversation on an open PR holds
+# the PR's merge until a person's ruling or dismissal closes it, so neither is an
+# actor's nor stuck. A blocker reads as a conversation by its row, a task whose
+# assignee is `human` or the alias that names its own id (conversation.sh's
+# conversation_alias), since the listing carries no edge of the blocker's own.
 #
 # A live blocker is one whose status is open, in_progress, blocked, deferred,
 # hooked or pinned, a missing status reading open. An automated actor holds it
@@ -43,6 +47,8 @@ _bh_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "${GC_RUN_LIB:-$_bh_dir/run-lib.sh}" || { echo "$PROG: cannot source run-lib.sh beside this script" >&2; exit 2; }
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$_bh_dir/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh beside this script" >&2; exit 2; }
+# shellcheck source=conversation.sh
+. "$_bh_dir/conversation.sh" || { echo "$PROG: cannot source conversation.sh beside this script" >&2; exit 2; }
 
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
@@ -75,7 +81,7 @@ printf '%s' "$rows" | jq -e 'type == "array" and all(.[]; type == "object")' >/d
 
 # One line per live blocker no person holds: its id, a tab, then the route, claim
 # or arm that marks it, or nothing when none does.
-marks=$(printf '%s' "$rows" | jq -r --arg live "$LIVE_STATUSES" "$HUMAN_GATE_JQ"'
+marks=$(printf '%s' "$rows" | jq -r --arg live "$LIVE_STATUSES" "$HUMAN_GATE_JQ$CONVERSATION_JQ"'
   ($live | split(",")) as $ls
   | .[]
   | ((.status // "open") | tostring | ascii_downcase) as $st
@@ -84,6 +90,7 @@ marks=$(printf '%s' "$rows" | jq -r --arg live "$LIVE_STATUSES" "$HUMAN_GATE_JQ"
   | ((.assignee // "") | tostring) as $a
   | (((.metadata // {})["gc.dispatch_when_ready"] // "") | tostring) as $armed
   | select($r != "human" and (human_gate | not))
+  | select(((.issue_type // "") == "task" and ($a == "human" or conversation_alias)) | not)
   | [ ((.id // "") | tostring),
       (if $r != "" then "routed to " + $r
        elif $a != "" and $a != "human" then "claimed by " + $a
