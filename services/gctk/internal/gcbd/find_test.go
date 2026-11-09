@@ -33,6 +33,20 @@ exit 2
 	return log
 }
 
+// findCalls reads the log findStub returns: each call's argv, one per line, and
+// none when nothing called the stub.
+func findCalls(t *testing.T, log string) []string {
+	t.Helper()
+	raw, err := os.ReadFile(log)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		t.Fatal(err)
+	}
+	return strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
+}
+
 // Each query is one `gc bd list` that reads wisps as well as issues, with no
 // row limit, and reads closed beads only when asked.
 func TestFindAsksTheListing(t *testing.T) {
@@ -53,7 +67,7 @@ func TestFindAsksTheListing(t *testing.T) {
 			if _, err := (&Client{bin: "gc"}).Find(tc.q); err != nil {
 				t.Fatal(err)
 			}
-			if got := calls(t, log); !slices.Equal(got, []string{tc.want}) {
+			if got := findCalls(t, log); !slices.Equal(got, []string{tc.want}) {
 				t.Errorf("calls = %q, want %q", got, tc.want)
 			}
 		})
@@ -72,7 +86,7 @@ func TestFindReadsManyIDsInBatches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := calls(t, log)
+	got := findCalls(t, log)
 	if len(got) != 2 || len(rows) != 2 {
 		t.Fatalf("%d reads returned %d rows; want 2 reads, one row each", len(got), len(rows))
 	}
