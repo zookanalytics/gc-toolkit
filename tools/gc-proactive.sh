@@ -313,8 +313,8 @@ reaction_absent_guard() {
 #
 # Returns 0 when the bead has no dispatch path or hold and no open human gate
 # blocks it, 1 when it has one or a gate blocks it, and 2 when its row cannot be
-# read. A
-# failed read is not proof that it has none, so the caller fails closed on 2.
+# read. A failed read is not proof that it has none, so the caller fails closed
+# on 2.
 # The live read takes only one JSON array holding one row as an answer, so an
 # empty answer fails it even when gc exits 0, and two answers fail it too.
 # bd's not-found error is no exception: subject_present_guard has proven the
@@ -741,8 +741,8 @@ cmd_demand() {
 # scan — the PROCESS-SCAN trigger. Find raw INPUT beads "able to be updated":
 # open, ready, unassigned, an allowlisted issue_type (GC_PROACTIVE_TYPES),
 # top-level, and not already routed, armed or held / machinery (so we never
-# react to work-in-flight or to a reaction bead). Unions the explicit per-bead opt-in
-# (gc.proactive=1) with the broader movable-forward scan, deduped and
+# react to work-in-flight or to a reaction bead). Unions the explicit per-bead
+# opt-in (gc.proactive=1) with the broader movable-forward scan, deduped and
 # precision-filtered (see scan_candidates). Read-only unless --sling. The
 # per-subject "a reaction is already open" dedup is at sling time, not here (see
 # reaction_absent_guard).
