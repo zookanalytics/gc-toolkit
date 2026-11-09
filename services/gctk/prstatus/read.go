@@ -27,7 +27,8 @@ type Store interface {
 	// it, at any of statuses.
 	Anchored(ids []string, statuses []string) (map[string][]Row, error)
 	// Blockers returns, for each id, the far bead of each of its `blocks` edges,
-	// open and closed. It is the read [HoldingGates] walks ([ReadBlockers]).
+	// open and closed, with its metadata. It is the read [Holding] walks
+	// ([ReadBlockers]).
 	Blockers(ids []string) (map[string][]Blocker, error)
 }
 
@@ -36,11 +37,11 @@ type Store interface {
 var ErrUnresolved = errors.New("the anchor does not resolve")
 
 // Read gathers the [Facts] the city records about each anchor's PR: the anchor's
-// own row, its in-flight set over [InFlightStatuses], the far beads of its
-// `blocks` edges, and the open human gates that hold it ([HoldingGates]). It is
-// the one place that decides what is read, so every reader that asks what holds
-// a PR, or where a PR stands, gives Read its own [Store] and decides from the
-// same facts.
+// own row, its in-flight set over [InFlightStatuses], and what holds it that
+// only a person moves, which [Holding] reads through its `blocks` edges: the
+// open human gates, and the beads a person owes the next move on. It is the one
+// place that decides what is read, so every reader that asks what holds a PR, or
+// where a PR stands, gives Read its own [Store] and decides from the same facts.
 //
 // The reads are batched across the anchors: one each for the rows, the
 // in-flight sets and the anchors' own edges, then one per level of the walk past
@@ -87,7 +88,7 @@ func Read(anchors []string, s Store) (map[string]Facts, error) {
 		return nil, err
 	}
 	// The walk's first level is the anchors' own edges, already read.
-	gates, err := HoldingGates(resolved, func(level []string) (map[string][]Blocker, error) {
+	holds, err := Holding(resolved, func(level []string) (map[string][]Blocker, error) {
 		out := make(map[string][]Blocker, len(level))
 		var rest []string
 		for _, id := range level {
@@ -115,12 +116,12 @@ func Read(anchors []string, s Store) (map[string]Facts, error) {
 		errs = append(errs, err)
 	}
 	for _, id := range resolved {
-		g, walked := gates[id]
+		h, walked := holds[id]
 		if !walked {
 			continue
 		}
 		f := RowFacts(rows[id].Metadata)
-		f.Gates, f.Blockers, f.InFlightCount = g, own[id], len(inFlight[id])
+		f.Gates, f.Owed, f.InFlightCount = h.Gates, h.Owed, len(inFlight[id])
 		facts[id] = f
 	}
 	return facts, errors.Join(errs...)
@@ -129,7 +130,8 @@ func Read(anchors []string, s Store) (map[string]Facts, error) {
 // RowFacts are the facts a bead's own row records, read off its metadata: its
 // holds, the posture, the machine verdict with its cause and sentence, the
 // thread count and the draft-stage markers. [Read] adds what it gathers beside
-// the row to them: the gates, the blockers and the in-flight count. The helm
+// the row to them: the gates, the beads a person owes and the in-flight count.
+// [Holding] weighs a merge anchor it reaches by its row's facts, and the helm
 // board reads a row that is no PR, or whose PR has no answer, by them alone.
 func RowFacts(md map[string]string) Facts {
 	return Facts{

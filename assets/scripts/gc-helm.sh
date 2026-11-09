@@ -102,11 +102,11 @@ and names the subject's engage. A subject that is closed too takes no new
 conversation, so that engage starts nothing either way.
 Engaging a bead or a PR names everything that holds it, by the definition the
 PR's held: labels and the board's row read (gctk pr-status derive): each open
-human gate reached through its open blocks edges, each blocker it waits on that
-a person has to clear, and the PR's own review threads or blocked verdict. The
-interactive prompt offers each gate and blocker, and picking one engages it,
-taking this bead when several wait on a gate and this is one of them; any other
-engage says how to.
+human gate reached through its open blocks edges, each bead a person owes the
+next move on that the same edges reach, such as another PR waiting on a review,
+and the PR's own review threads or blocked verdict. The interactive prompt
+offers each gate and bead, and picking one engages it, taking this bead when
+several wait on a gate and this is one of them; any other engage says how to.
 --model picks the converse variant (opus, the work tier, is the default),
 --no-attach spawns without attaching. On a TTY engage is INTERACTIVE: with no
 subject it prompts for one (id or title search), lists the subject's open
@@ -3174,8 +3174,8 @@ engage_valid_model() {
 # each, in the order of the reasons `gctk pr-status derive --json` gives: the
 # definition the PR's held: labels and the board's row read, so what engage
 # offers cannot differ from what they say. <held> is the held: value the row
-# stands for. <id> is the bead to engage, an open human gate or a blocker a
-# person has to clear, and is empty where the PR's own review threads or blocked
+# stands for. <id> is the bead to engage, an open human gate or a bead a person
+# owes the next move on, and is empty where the PR's own review threads or blocked
 # verdict hold it. Returns 1 when gctk is not there or did not answer, which says
 # nothing about what holds the bead.
 holding_rows() {
