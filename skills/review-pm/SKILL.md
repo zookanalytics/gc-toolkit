@@ -104,12 +104,14 @@ ceremony. That is the common case.
 The check index (`review-checks.toml`) carries a separate `demo` check that
 decides whether a change needs a visual to be understood, then delivers and
 grades the right one: a visual the repo already carries, a screenshot, or a
-narrated video. Triage decides whether it runs. You do neither. Your only visual
-concern is the one folded into presentation: when the change is one the operator
-must see to trust and the PR gives them nothing to look at, that is a
-presentation finding you name, pointing at the `demo` check's method
-(`gc-toolkit.review-demo`). Whether a visual that exists proves its claim is
-not your call.
+narrated video. If the rig names design or writing standards, the `demo` check
+also reviews changed screens and messages against them. Triage decides whether
+it runs. You do neither. Your only visual concern is the one folded into
+presentation: when the change is one the operator must see to trust and the PR
+gives them nothing to look at, that is a presentation finding you name, pointing
+at the `demo` check's method (`gc-toolkit.review-demo`). The `demo` check, not
+you, decides whether a visual proves its claim and whether a screen or message
+meets the rig's standards.
 
 ## What blocks
 
