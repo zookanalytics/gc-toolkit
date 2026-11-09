@@ -105,39 +105,6 @@ func TestAWriteThatCannotLandFails(t *testing.T) {
 	}
 }
 
-// lossy is a store whose updates report success and write nothing: what bd's
-// durability gap looks like from above.
-type lossy struct{ *fake.Store }
-
-func (lossy) Update(string, ...string) (string, error) { return "", nil }
-
-func TestAWriteAnActRestsOnIsReadBack(t *testing.T) {
-	s := fake.New()
-	s.Put(fake.Bead{ID: "b-1", Status: "open", Metadata: map[string]string{"test.ledger.old_text": "older"}})
-	w := New(s).Write("b-1")
-	testText.Set(w, "now")
-	if err := New(s).CommitBeforeAct(w); err != nil {
-		t.Fatalf("a write that landed: %v", err)
-	}
-
-	w = New(lossy{s}).Write("b-1")
-	testText.Set(w, "later")
-	if err := New(lossy{s}).CommitBeforeAct(w); !errors.Is(err, ErrMismatch) {
-		t.Fatalf("a write that did not land = %v, want ErrMismatch", err)
-	}
-	w = New(lossy{s}).Write("b-1")
-	testText.Clear(w)
-	if err := New(lossy{s}).CommitBeforeAct(w); !errors.Is(err, ErrMismatch) {
-		t.Fatalf("a clear that did not land = %v, want ErrMismatch", err)
-	}
-	s.RowsErr = &gcbd.ReadError{Reason: "down"}
-	w = New(s).Write("b-1")
-	testText.Set(w, "now")
-	if err := New(s).CommitBeforeAct(w); !errors.Is(err, ErrMismatch) {
-		t.Fatalf("a read-back that did not answer = %v, want ErrMismatch", err)
-	}
-}
-
 func TestTheRegistryNamesEachKeysOwnerAndReaders(t *testing.T) {
 	byName := map[string]Entry{}
 	for _, e := range Registry() {

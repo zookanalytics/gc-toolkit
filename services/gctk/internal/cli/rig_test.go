@@ -662,9 +662,8 @@ func TestRigPublishBeadUpsertsTheResultOntoTheBead(t *testing.T) {
 	if len(updates) != 1 || updates[0] != want {
 		t.Fatalf("bd update calls = %q, want [%q]", updates, want)
 	}
-	// Nothing acts on the copy, so the write is not read back.
 	if shows := f.gcCalls("bd show"); len(shows) != 0 {
-		t.Fatalf("an ordinary write was read back: %q", shows)
+		t.Fatalf("a publish read the bead back: %q", shows)
 	}
 
 	// A recorded result answers without running and is published as well.
