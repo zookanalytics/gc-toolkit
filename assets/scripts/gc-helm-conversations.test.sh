@@ -10,12 +10,17 @@
 #                 a hand-back since its session started is ready, one that has
 #                 not is preparing, one whose session has not started is
 #                 starting, one whose session closed is ended, one in the queue
-#                 is queued; a bound conversation its sitting has not claimed is
-#                 found through the sitting's alias; each row carries its
-#                 subject's title, and a task that is not a conversation is left
-#                 out; the rigs a new topic can be filed in, with whether each
-#                 carries converse and is suspended
+#                 is queued; a bound conversation its sitting has not claimed
+#                 reads starting; each row carries its subject's title, and a
+#                 task that is not a conversation is left out; the rigs a new
+#                 topic can be filed in, with whether each carries converse and
+#                 is suspended
+#   (CITY-ENDED)  a bound conversation whose sitting ended before it claimed it
+#                 is found by its own row and reads ended, as conversations
+#                 <subject> reads it
 #   (CITY-UNREAD) a store that does not answer is named, the others listed, and
+#                 the verb exits 4 after the list
+#   (CITY-NOLEDGER) a rig whose ledger is not there is named as unread too, and
 #                 the verb exits 4 after the list
 #   (CITY-TEXT)   without --json the list reads as one line per conversation
 #   (ABOUT)       a subject is resolved as engage resolves it: its rig, whether
@@ -168,11 +173,30 @@ eq "$(row tk-shutconv)" "" "(CITY) a closed conversation is not listed"
 eq "$(printf '%s' "$OUT" | jq -c '[.rigs[] | [.name, .converse, .suspended]]')" '[["gc-toolkit",true,false],["gascity",true,true],["docs",false,false]]' "(CITY) the rigs a new topic can go to, but the city's own store, with converse and suspension"
 eq "$(printf '%s' "$OUT" | jq -c '.unread')" '[]' "(CITY) …and no store unread"
 
+echo "# a bound conversation whose sitting ended before it claimed it is still listed"
+seed; jq '.sessions |= map(select(.id != "s3"))' "$STATE/sessions.json" > "$STATE/tmp.json" && mv "$STATE/tmp.json" "$STATE/sessions.json"
+run conversations --json
+eq "$RC" 0 "(CITY-ENDED) the list exits 0"
+eq "$(field tk-bound .readiness)" "ended" "(CITY-ENDED) an open conversation bound to a sitting that is gone reads ended"
+eq "$(field tk-bound .state)" "left" "(CITY-ENDED) …in engage's state left"
+run conversations tk-subj --json
+eq "$(printf '%s' "$OUT" | jq -r '.conversations[] | select(.id == "tk-bound") | .readiness')" "ended" "(CITY-ENDED) …as conversations <subject> reads it"
+
 echo "# a store that does not answer is named, and the list still prints"
 seed; : > "$STATE/gc.unread"; run conversations --json
 eq "$RC" 4 "(CITY-UNREAD) an unread store exits 4"
 eq "$(printf '%s' "$OUT" | jq -c '.unread')" '["gascity"]' "(CITY-UNREAD) …naming it"
 eq "$(field tk-ready .readiness)" "ready" "(CITY-UNREAD) …after listing the stores that answered"
+
+echo "# a rig whose ledger is not there is named as unread"
+seed; jq --arg p "$TMP/noledger" '.rigs += [{name:"vanished", path:$p, prefix:"vx", suspended:false}]' "$STATE/rigs.json" > "$STATE/tmp.json" && mv "$STATE/tmp.json" "$STATE/rigs.json"
+run conversations --json
+eq "$RC" 4 "(CITY-NOLEDGER) a rig with no ledger exits 4"
+eq "$(printf '%s' "$OUT" | jq -c '.unread')" '["vanished"]' "(CITY-NOLEDGER) …naming it"
+eq "$(field tk-ready .readiness)" "ready" "(CITY-NOLEDGER) …after listing the stores that answered"
+hasnt "$(cat "$CALLS")" "$TMP/noledger" "(CITY-NOLEDGER) …and no read is made against it"
+run conversations
+has "$ERR" "the store of vanished could not be read" "(CITY-NOLEDGER) without --json, stderr names it"
 
 echo "# without --json, one line per conversation"
 seed; run conversations

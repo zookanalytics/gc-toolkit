@@ -113,7 +113,7 @@ const (
 
 // City is `gc-helm.sh conversations --json`: every open conversation in the
 // city's stores, the rigs a new topic can be filed in, and the rigs whose store
-// did not answer.
+// could not be read, because it did not answer or its ledger is not there.
 type City struct {
 	Conversations []Conversation `json:"conversations"`
 	Rigs          []Rig          `json:"rigs"`
@@ -143,7 +143,9 @@ type SaveRequest struct {
 }
 
 // Saved is what `gc-helm.sh open --json` answers. Filed is false when a new
-// subject was filed and its conversation was not.
+// subject was filed and its conversation was not. Filed with a conversation is a
+// conversation that holds the question, even from a save that then failed, as
+// when its reply onto the gate did not read back.
 type Saved struct {
 	Subject      string `json:"subject"`
 	Conversation string `json:"conversation"`
@@ -157,8 +159,9 @@ type Helm interface {
 	Save(ctx context.Context, req SaveRequest) (Saved, error)
 	Start(ctx context.Context, conversation, model string) error
 	// AttachCommand is the command that attaches the terminal to a
-	// conversation's sitting, holding it in a new sitting first when it has none.
-	AttachCommand(conversation string) *exec.Cmd
+	// conversation's sitting, holding it in a new sitting first when it has
+	// none: on model, or on engage's default when model is empty.
+	AttachCommand(conversation, model string) *exec.Cmd
 }
 
 // Script runs gc-helm.sh at Path.
@@ -248,8 +251,8 @@ func (s Script) About(ctx context.Context, ref string) (About, error) {
 	return a, nil
 }
 
-// City runs `conversations --json`. A store that did not answer exits 4 after
-// the list, which is still the list.
+// City runs `conversations --json`. A store that could not be read exits 4
+// after the list, which is still the list.
 func (s Script) City(ctx context.Context) (City, error) {
 	var c City
 	out, err := s.run(ctx, "conversations", "--json")
@@ -272,7 +275,9 @@ func (s Script) City(ctx context.Context) (City, error) {
 // concern of its own, and open refuses a reference that names another subject
 // than the one the form showed. The question rides as one argv element,
 // unchanged. A new subject filed whose conversation was not comes back with the
-// error, so a retry files onto that subject.
+// error, so a retry files onto that subject, and so does a conversation filed
+// whose save then failed, so a retry completes it: open, run again on a question
+// a conversation in the queue holds as its ask, lands on that conversation.
 func (s Script) Save(ctx context.Context, req SaveRequest) (Saved, error) {
 	var sv Saved
 	args := []string{"open"}
@@ -306,9 +311,15 @@ func (s Script) Start(ctx context.Context, conversation, model string) error {
 	return err
 }
 
-// AttachCommand is `engage <conversation> --no-input`, engage's attach: it
-// waits for the sitting to start, attaches, and prints how the sitting ended
-// once the terminal comes back.
-func (s Script) AttachCommand(conversation string) *exec.Cmd {
-	return exec.Command("sh", s.Path, "engage", conversation, "--no-input")
+// AttachCommand is `engage <conversation> --no-input [--model <model>]`,
+// engage's attach: it waits for the sitting to start, attaches, and prints how
+// the sitting ended once the terminal comes back. engage attaches a live
+// sitting whatever its model, and spawns a conversation no live sitting holds
+// on the model, so --model decides only that spawn.
+func (s Script) AttachCommand(conversation, model string) *exec.Cmd {
+	args := []string{s.Path, "engage", conversation, "--no-input"}
+	if model != "" {
+		args = append(args, "--model", model)
+	}
+	return exec.Command("sh", args...)
 }

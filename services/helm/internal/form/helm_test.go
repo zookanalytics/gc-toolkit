@@ -119,7 +119,7 @@ func TestAboutRefusalCarriesTheScriptsSentence(t *testing.T) {
 
 func TestCityTakesAListWhoseStoreDidNotAllAnswer(t *testing.T) {
 	s, _ := stubHelm(t, `{"conversations":[{"id":"tk-c","readiness":"ready"}],"rigs":[{"name":"gc-toolkit","converse":true}],"unread":["gascity"]}`,
-		"gc-helm: conversations: the store of gascity did not answer\n", 4)
+		"gc-helm: conversations: the store of gascity could not be read, so its conversations are not listed.\n", 4)
 	c, err := s.City(context.Background())
 	if err != nil || len(c.Conversations) != 1 || len(c.Unread) != 1 || !c.Rigs[0].Hosts() {
 		t.Fatalf("City = %+v, %v", c, err)
@@ -138,8 +138,12 @@ func TestStartAndAttachUseEngage(t *testing.T) {
 	if got := argv(t, dir); strings.Join(got, " ") != "engage tk-c --no-input --no-attach --model fable" {
 		t.Fatalf("argv = %q", got)
 	}
-	cmd := s.AttachCommand("tk-c")
+	cmd := s.AttachCommand("tk-c", "")
 	if got := strings.Join(cmd.Args, " "); got != "sh "+s.Path+" engage tk-c --no-input" {
 		t.Fatalf("attach = %q", got)
+	}
+	cmd = s.AttachCommand("tk-c", "fable")
+	if got := strings.Join(cmd.Args, " "); got != "sh "+s.Path+" engage tk-c --no-input --model fable" {
+		t.Fatalf("attach on a model = %q", got)
 	}
 }

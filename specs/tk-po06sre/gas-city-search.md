@@ -1,6 +1,6 @@
 ---
 name: Gas City search for the terminal conversation form
-description: The search the arch check asks for before the pack adds the terminal conversation form (helm-svc form), the gc-helm verbs conversations and attach, and open --new-subject. What Gas City and bd ship for composing a question into work, titling it, listing sessions to return to and telling when one is ready, read at named upstream commits, and the gap each leaves that the form fills by composing them. Read it when checking whether the form, or one of its verbs, can move onto a Gas City or bd primitive.
+description: The search the arch check asks for before the pack adds the terminal conversation form (helm-svc form), the gc-helm verbs conversations and attach, and open --new-subject. What Gas City and bd ship for composing a question into work, titling it, saving it again without filing it twice, listing sessions to return to and telling when one is ready, read at named upstream commits, and the gap each leaves that the form fills by composing them. Read it when checking whether the form, or one of its verbs, can move onto a Gas City or bd primitive.
 ---
 
 # Gas City search for the terminal conversation form
@@ -112,3 +112,43 @@ that kind in `cmd/gc` guard a purge (`expect-count` and `expect-digest`,
 guards: `--if-subject <id>` files only while the reference resolves to that
 subject, and otherwise files nothing and exits 4, open's refusal code. The
 subject's id fixes its rig, since a rig is derived from the id's prefix.
+
+**Saving again without filing twice.** `open` files the conversation in one
+`bd create`, then makes its reply onto the gate it answers with `bd dep add`, a
+second write. When that reply did not read back, `open` exited 4 with nothing on
+`--json`, so the form could not tell that a conversation held the question, and
+its next save, which passes `--allow-duplicate`, filed a second one. Three
+primitives were read for a create that a retry repeats at most once:
+
+- bd's `bd create` takes no idempotency key. Its `--deps` collapses only a
+  repeated edge within one create (`dedupeDepSpecs`, `cmd/bd/create_deps.go`
+  line 65 at beads v1.3.4), and `external_ref` carries a plain index, not a
+  unique one (`idx_issues_external_ref`,
+  `internal/storage/schema/migrations/0001_create_issues.up.sql` line 59), so a
+  create run again is a second bead.
+- The reply cannot ride the create. `--deps replies-to:<gate>` is written in the
+  create's own transaction (`CreateIssuesInTxWithResult`,
+  `internal/storage/issueops/execution.go` lines 88–101), but on bd's direct
+  route `resolveDepSpecTargets` refuses a target the written store does not hold
+  (`cmd/bd/create_deps.go` lines 106–128) and nothing is created. A gate can sit
+  in another rig's store, and `bd dep add` records an edge onto it in
+  `depends_on_external` without looking the gate up (`ClassifyDepTarget`,
+  `internal/storage/issueops/dependencies.go` lines 92–100, and the existence
+  check it skips at lines 222–236).
+- Gas City at `2264fa8108` runs `POST /v0/city/{cityName}/beads` at most once
+  per `Idempotency-Key` (`withIndexedIdempotency` in `humaHandleBeadCreate`,
+  `internal/api/huma_handlers_beads.go` line 795). Its body takes no
+  dependencies (`BeadCreateInput`, `internal/api/huma_types_beads.go` lines
+  53–67), so a conversation filed there is born without the tracks edge that
+  makes it one, which `open` writes in the same create so that no reader sees
+  the task without its subject. Its keys live in a 30-minute in-memory cache
+  (`newIdempotencyCache(30 * time.Minute)`, `internal/api/server.go` line 312),
+  which a supervisor restart forgets.
+
+None covers the need, so `open` uses what the store already records.
+Once the conversation is filed, `--json` names it on every exit, the failed
+reply's included, and the form keeps it as saved and starts nothing. With
+`--allow-duplicate`, a concern that a conversation waiting in the queue holds as
+its whole ask lands on that conversation. `open` already reads the subject's
+conversations before it files, so the next save completes the conversation the
+first one filed, adding the reply that did not land, rather than file a second.

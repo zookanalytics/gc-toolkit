@@ -259,8 +259,9 @@ which they run with their own path as `--helm` and the converse variants as
 question, reads `gc-helm.sh conversations` in the background while the operator
 types, saves with `gc-helm.sh open`, starts with `gc-helm.sh engage
 <conversation> --no-attach`, and attaches with `gc-helm.sh engage
-<conversation>`. It writes nothing itself, so what it files is what the
-command line files. [human-engagement.md](../../docs/human-engagement.md#engage)
+<conversation>`, passing `--model` with the model its start ran on when the
+attach follows that start. It writes nothing itself, so what it files is what
+the command line files. [human-engagement.md](../../docs/human-engagement.md#engage)
 says what it shows and when it saves. `internal/form/testdata/helm-fixture.sh`
 answers those verbs from fixture data, so the form can be run with no city
 behind it.

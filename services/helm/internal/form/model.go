@@ -112,8 +112,10 @@ type Model struct {
 	cursor        int
 
 	// The progress of a submit.
+	req       SaveRequest // what the save sent, so a save again sends it unchanged
 	saving    bool
 	saved     *Saved
+	saveErr   string // why the save that filed saved's conversation did not complete
 	partial   string // a new subject a failed save filed without its conversation
 	existing  bool   // the conversation was chosen, not filed
 	starting  bool
@@ -744,7 +746,17 @@ func (m *Model) submit() tea.Cmd {
 			req.Ref = a.Gate
 		}
 	}
-	m.scr, m.saving, m.status = progressScreen, true, ""
+	m.scr, m.status, m.req = progressScreen, "", req
+	return m.save()
+}
+
+// save runs the save request the submit made. Run again, it sends the request
+// unchanged, and open lands on the conversation in the queue whose ask is the
+// question, so a save again completes the conversation an earlier save filed
+// rather than file a second one.
+func (m *Model) save() tea.Cmd {
+	m.saving = true
+	req := m.req
 	return func() tea.Msg {
 		sv, err := m.helm.Save(m.ctx, req)
 		return savedMsg{saved: sv, err: err}
@@ -773,38 +785,60 @@ func (m *Model) reread() tea.Cmd {
 
 func (m *Model) onSaved(msg savedMsg) tea.Cmd {
 	m.saving = false
-	if msg.err != nil || !msg.saved.Filed {
-		m.scr = composeScreen
-		why := "the save answered without filing a conversation"
+	if msg.saved.Filed && msg.saved.Conversation != "" {
+		// The conversation is filed and holds the question, so it is saved. A
+		// save that failed after filing it, as when its reply onto the gate did
+		// not read back, is not complete: nothing starts until r saves it again.
+		sv := msg.saved
+		m.saved, m.saveErr = &sv, ""
 		if msg.err != nil {
-			why = msg.err.Error()
+			m.saveErr = msg.err.Error()
+			if m.leaving {
+				return m.quit()
+			}
+			return nil
 		}
-		m.status = "Not saved: " + strings.TrimSuffix(why, ".") + ". Your question is still here."
-		var cmd tea.Cmd
-		switch {
-		case msg.saved.Subject != "" && m.newTopic():
-			// The new subject was filed and its conversation was not: the next
-			// save files the question onto that subject, never a second one.
-			m.partial = msg.saved.Subject
-			m.subject.SetValue(msg.saved.Subject)
-			m.seq++
-			m.status += fmt.Sprintf(" Subject %s was filed; saving again files your question onto it.", msg.saved.Subject)
-			cmd = m.lookup(msg.saved.Subject)
-		case !m.newTopic():
-			// What open refused can be the subject as the form read it, such as
-			// one closed onto a successor in another rig since. The subject is
-			// read again, so the next Ctrl+S files where the screen then shows.
-			delete(m.lookups, m.ref())
-			cmd = m.lookup(m.ref())
+		return m.start()
+	}
+	if m.saved != nil {
+		// A save again that did not answer leaves the question in the
+		// conversation the first save filed, still not complete.
+		m.saveErr = "the save again answered without naming its conversation"
+		if msg.err != nil {
+			m.saveErr = msg.err.Error()
 		}
 		if m.leaving {
 			return m.quit()
 		}
-		return cmd
+		return nil
 	}
-	sv := msg.saved
-	m.saved = &sv
-	return m.start()
+	m.scr = composeScreen
+	why := "the save answered without filing a conversation"
+	if msg.err != nil {
+		why = msg.err.Error()
+	}
+	m.status = "Not saved: " + strings.TrimSuffix(why, ".") + ". Your question is still here."
+	var cmd tea.Cmd
+	switch {
+	case msg.saved.Subject != "" && m.newTopic():
+		// The new subject was filed and its conversation was not: the next
+		// save files the question onto that subject, never a second one.
+		m.partial = msg.saved.Subject
+		m.subject.SetValue(msg.saved.Subject)
+		m.seq++
+		m.status += fmt.Sprintf(" Subject %s was filed; saving again files your question onto it.", msg.saved.Subject)
+		cmd = m.lookup(msg.saved.Subject)
+	case !m.newTopic():
+		// What open refused can be the subject as the form read it, such as
+		// one closed onto a successor in another rig since. The subject is
+		// read again, so the next Ctrl+S files where the screen then shows.
+		delete(m.lookups, m.ref())
+		cmd = m.lookup(m.ref())
+	}
+	if m.leaving {
+		return m.quit()
+	}
+	return cmd
 }
 
 func (m *Model) start() tea.Cmd {
@@ -825,11 +859,14 @@ func (m *Model) poll(after time.Duration) tea.Cmd {
 func (m *Model) progressKey(s string) tea.Cmd {
 	switch s {
 	case "enter":
-		if m.saved != nil && !m.saving && !m.starting {
-			return m.attach(m.saved.Conversation)
+		if m.saved != nil && m.saveErr == "" && !m.saving && !m.starting {
+			return m.attach(m.saved.Conversation, m.modelName())
 		}
 	case "r":
-		if m.saved != nil && m.startErr != "" && !m.starting {
+		switch {
+		case m.saved != nil && m.saveErr != "" && !m.saving:
+			return m.save()
+		case m.saved != nil && m.startErr != "" && !m.starting:
 			return m.start()
 		}
 	case "esc", "q":
@@ -906,7 +943,7 @@ func (m *Model) returnKey(s string) tea.Cmd {
 		m.retSel, m.retAt = rows[at].ID, at
 	case "enter":
 		if at >= 0 {
-			return m.attach(m.retSel)
+			return m.attach(m.retSel, "")
 		}
 	case "r":
 		return m.loadCity()
@@ -920,10 +957,14 @@ func (m *Model) returnKey(s string) tea.Cmd {
 
 // attach hands the terminal to conv's sitting, and the form leaves once it comes
 // back. A question the form has not saved is kept first, so neither the attach
-// nor an end of the form while the sitting holds the terminal loses it.
-func (m *Model) attach(conv string) tea.Cmd {
+// nor an end of the form while the sitting holds the terminal loses it. model is
+// what a sitting held anew runs on. The progress screen passes the model its
+// start ran on, so a start that failed or a sitting that ended is held again on
+// the model the screen showed. The return list shows no model and passes none,
+// so engage's default holds it.
+func (m *Model) attach(conv, model string) tea.Cmd {
 	m.note = m.keepUnsaved()
-	return tea.ExecProcess(m.helm.AttachCommand(conv), func(err error) tea.Msg { return attachedMsg{err: err} })
+	return tea.ExecProcess(m.helm.AttachCommand(conv, model), func(err error) tea.Msg { return attachedMsg{err: err} })
 }
 
 // quit leaves the form. While a save or a start runs, the form leaves once it
@@ -977,11 +1018,18 @@ func (m *Model) leaveNow() tea.Cmd {
 func (m *Model) savedNote() string {
 	s := m.saved
 	what := "is saved"
-	if m.existing {
+	switch {
+	case m.existing:
 		what = "was chosen"
+	case m.saving || m.saveErr != "":
+		what = "holds your question"
 	}
 	state := "its sitting is starting"
 	switch {
+	case m.saving:
+		state = "you left while it was being saved again, so whether that save completed is unknown, and no sitting was started"
+	case m.saveErr != "":
+		state = "its save did not complete (" + strings.TrimSuffix(m.saveErr, ".") + "), so no sitting was started; it waits in your queue"
 	case m.starting:
 		state = "you left while its sitting was being started, so whether it started is unknown"
 	case m.startErr != "":
@@ -1141,12 +1189,18 @@ func (m *Model) progressView() string {
 	var b strings.Builder
 	b.WriteString(labelStyle.Render("Start a conversation") + "\n\n")
 	switch {
+	case m.saving && m.saved != nil:
+		b.WriteString(waitStyle.Render("…") + fmt.Sprintf(" saving again: conversation %s on %s holds your question\n", m.saved.Conversation, m.saved.Subject))
 	case m.saving:
 		b.WriteString(waitStyle.Render("…") + " saving your question\n")
 	case m.saved != nil && m.existing:
 		b.WriteString(okStyle.Render("✓") + fmt.Sprintf(" conversation %s on %s, chosen\n", m.saved.Conversation, m.saved.Subject))
 	case m.saved != nil:
 		b.WriteString(okStyle.Render("✓") + fmt.Sprintf(" saved: conversation %s on %s holds your question\n", m.saved.Conversation, m.saved.Subject))
+	}
+	if m.saveErr != "" && !m.saving {
+		b.WriteString(badStyle.Render("✗") + " the save did not complete, so no sitting was started: " + m.saveErr + "\n")
+		b.WriteString(hintStyle.Render("  r saves it again, which completes conversation "+m.saved.Conversation+" rather than file another.") + "\n")
 	}
 	switch {
 	case m.starting:
@@ -1172,6 +1226,8 @@ func (m *Model) progressView() string {
 	switch {
 	case m.leaving:
 		b.WriteString("\n" + waitStyle.Render("Leaving once this lands, so it is not cut off midway. Ctrl+C again leaves now.") + "\n")
+	case m.saved != nil && !m.saving && m.saveErr != "":
+		b.WriteString("\n" + hintStyle.Render("q leaves it in your queue, not started") + "\n")
 	case m.saved != nil && !m.saving:
 		b.WriteString("\n" + hintStyle.Render("Enter attaches · q leaves it running; return with gc-helm.sh attach") + "\n")
 	}
@@ -1214,7 +1270,7 @@ func (m *Model) returnView() string {
 		b.WriteString("\n" + waitStyle.Render(m.retSel+" is no longer listed, so nothing is selected: ↑/↓ chooses another.") + "\n")
 	}
 	if len(m.city.Unread) > 0 {
-		b.WriteString("\n" + badStyle.Render("Not listed: the store of "+strings.Join(m.city.Unread, ", ")+" did not answer.") + "\n")
+		b.WriteString("\n" + badStyle.Render("Not listed: the store of "+strings.Join(m.city.Unread, ", ")+" could not be read.") + "\n")
 	}
 	return b.String()
 }

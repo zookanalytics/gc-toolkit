@@ -34,6 +34,10 @@
 #   (UNREAD)   a candidate whose own row does not read files nothing, exit 4
 #   (OPEN-JSON) --json prints {subject, conversation, filed}
 #   (ALLOWDUP) --allow-duplicate files a fresh conversation beside a queued one
+#   (REPLY-PART) a conversation filed whose reply onto the gate does not read
+#              back exits 4, and --json still names the conversation
+#   (ALLOWDUP-AGAIN) --allow-duplicate on a concern a queued conversation holds
+#              as its ask lands on it, completes its reply, and files nothing
 #   (IF-SUBJECT) --if-subject files only while the reference names that subject:
 #              a successor, a PR's anchor or a gate's waiter that is another
 #              bead files nothing, exit 4, and beside --new-subject it is
@@ -98,12 +102,14 @@ mkdir -p "$TMP/bin"
 #   bd dep list <gate> --direction=up --type blocks — the beads waiting on the
 #     gate: $FAKE_WAITERS, a JSON array.
 #   bd list --id <ids> — each named bead's own row, with its edges, for the
-#     comma-separated ids. $FAKE_CONV tracks the recorded bead alone, and
+#     comma-separated ids. $FAKE_CONV tracks the recorded bead alone, its
+#     ask $FAKE_CONV_DESC and its replies-to edges the ones `dep add` recorded, and
 #     $FAKE_TWO tracks it and tk-elsewhere, so it is no conversation. Any other
 #     id is the conversation a create filed, read back: a task that tracks the
 #     subject its --deps named and carries the assignee it was filed with,
 #     unless $FAKE_SHAPE_BROKEN drops the edge. Its replies-to edges are the
-#     ones `dep add` recorded. An id in $FAKE_LIST_DROPS is left out, as a row
+#     ones `dep add` recorded, which records none under $FAKE_REPLY_DROPS, as
+#     an edge that did not land. An id in $FAKE_LIST_DROPS is left out, as a row
 #     the store did not return.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 ${2:-}" in
@@ -171,7 +177,8 @@ case "$1 ${2:-}" in
         esac ;;
       *)
         printf 'bd dep %s\n' "$*" >> "$FAKE_CALLS"
-        [ "${3:-}" = add ] && printf '%s %s\n' "$4" "$5" >> "$TMP_REPLIES" ;;
+        [ "${3:-}" = add ] && [ -z "${FAKE_REPLY_DROPS:-}" ] && printf '%s %s\n' "$4" "$5" >> "$TMP_REPLIES"
+        : ;;
     esac ;;
   "bd list")
     # Each named bead's own row (--id, comma-separated).
@@ -182,9 +189,11 @@ case "$1 ${2:-}" in
     for _id in $(printf '%s' "$_ids" | tr ',' ' '); do
       case ",${FAKE_LIST_DROPS:-}," in *",$_id,"*) continue ;; esac
       if [ -n "${FAKE_CONV:-}" ] && [ "$_id" = "$FAKE_CONV" ]; then
+        _reps="$(awk -v c="$_id" '$1 == c {print $2}' "$TMP_REPLIES" 2>/dev/null | jq -Rsc --arg c "$_id" '[ split("\n")[] | select(. != "") | {issue_id:$c, depends_on_id:., type:"replies-to"} ]')"
         _row=$(jq -n --arg c "$_id" --arg a "${FAKE_CONV_ASSIGNEE:-human}" --arg st "${FAKE_CONV_STATUS:-open}" --arg s "$_tracked" \
-          '{id:$c, issue_type:"task", status:$st, assignee:$a, title:"an earlier concern", created_at:"2026-10-01T00:00:00Z",
-            dependencies:[{issue_id:$c, depends_on_id:$s, type:"tracks"}]}')
+            --arg d "${FAKE_CONV_DESC:-an earlier concern}" --argjson r "${_reps:-[]}" \
+          '{id:$c, issue_type:"task", status:$st, assignee:$a, title:"an earlier concern", description:$d, created_at:"2026-10-01T00:00:00Z",
+            dependencies:([{issue_id:$c, depends_on_id:$s, type:"tracks"}] + $r)}')
       elif [ -n "${FAKE_TWO:-}" ] && [ "$_id" = "$FAKE_TWO" ]; then
         _row=$(jq -n --arg c "$_id" --arg s "$_tracked" \
           '{id:$c, issue_type:"task", status:"open", assignee:"human", title:"a task about two beads", created_at:"2026-09-01T00:00:00Z",
@@ -502,6 +511,33 @@ grep -q 'is already open' <<< "$OUT$ERR" \
   && bad "(ALLOWDUP) still joined the queued conversation" \
   || ok "(ALLOWDUP) the join is bypassed"
 unset FAKE_CONV
+
+# --- (REPLY-PART) a conversation filed whose reply does not read back --------
+# The conversation is filed and holds the concern, so --json names it, and a
+# caller that saves again knows what holds the concern.
+export FAKE_WAITERS='[{"id":"tk-anchor","status":"open","dependency_type":"blocks"}]' FAKE_REPLY_DROPS=1
+run_open found tk-gate1 --reason "the question" --allow-duplicate --if-subject tk-anchor --json
+eq "$RC" "4" "(REPLY-PART) a reply onto the gate that does not read back exits 4"
+eq "$OUT" '{"subject":"tk-anchor","conversation":"tk-conv1","filed":true}' "(REPLY-PART) --json names the conversation it filed"
+grep -q 'conversation tk-conv1 is filed on tk-anchor, but its reply onto gate tk-gate1 did not read back' <<< "$ERR" \
+  && ok "(REPLY-PART) …and stderr says its reply onto the gate is missing" || bad "(REPLY-PART) message (err: $ERR)"
+unset FAKE_REPLY_DROPS
+
+# --- (ALLOWDUP-AGAIN) a concern a queued conversation holds is not filed again -
+# A run again after one that filed the conversation and then failed lands on
+# that conversation, completes its reply onto the gate, and files nothing new.
+export FAKE_CONV=tk-conv0 FAKE_CONV_DESC="the question"
+run_open found tk-gate1 --reason "the question" --allow-duplicate --if-subject tk-anchor --json
+eq "$RC" "0" "(ALLOWDUP-AGAIN) --allow-duplicate on a concern a queued conversation holds exits 0"
+grep -q '^bd create' <<< "$CALLS" \
+  && bad "(ALLOWDUP-AGAIN) a second conversation was filed (calls: $CALLS)" || ok "(ALLOWDUP-AGAIN) nothing new is filed"
+grep -q 'bd dep add tk-conv0 tk-gate1 --type replies-to' <<< "$CALLS" \
+  && ok "(ALLOWDUP-AGAIN) its reply onto the gate is made" || bad "(ALLOWDUP-AGAIN) reply (calls: $CALLS)"
+eq "$OUT" '{"subject":"tk-anchor","conversation":"tk-conv0","filed":true}' "(ALLOWDUP-AGAIN) --json names the conversation that holds the concern"
+run_open found tk-gate1 --reason "another question" --allow-duplicate --if-subject tk-anchor --json
+grep -q '^bd create' <<< "$CALLS" \
+  && ok "(ALLOWDUP-AGAIN) a concern it does not hold is filed as its own" || bad "(ALLOWDUP-AGAIN) no create for another concern (calls: $CALLS)"
+unset FAKE_CONV FAKE_CONV_DESC FAKE_WAITERS
 
 # --- (GATE) a gate names the one bead still waiting on it ---------------------
 export FAKE_WAITERS='[{"id":"tk-anchor","status":"open","dependency_type":"blocks"},{"id":"tk-done","status":"closed","dependency_type":"blocks"}]'

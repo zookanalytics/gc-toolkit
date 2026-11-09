@@ -274,7 +274,14 @@ reference names another bead by then, such as a subject closed onto a successor
 in another rig, so a question is filed only where the screen said. Then `engage
 <conversation> --no-input --no-attach` starts the sitting, and the form follows
 it through its readiness to ready. Enter attaches; leaving keeps everything
-running. Leaving while the save or the start still runs waits until it lands,
+running. An attach holds a conversation no live sitting holds, as after a start
+that failed or a sitting that ended, in a new sitting on the model the start ran
+on. A save that files the conversation and then fails, as when its reply onto
+the gate does not read back, says the conversation holds the question and what
+did not complete, and starts nothing. r sends the same save again, and `open`
+completes that conversation rather than file a second: with `--allow-duplicate`,
+a concern that a conversation waiting in the queue holds as its whole ask lands
+on that conversation. Leaving while the save or the start still runs waits until it lands,
 because a verb the form leaves behind dies at its next line of output, and a save
 cut off there can leave a new subject without its conversation. A second Ctrl+C
 leaves at once, and the form then says what it does not know. A save that fails
@@ -441,7 +448,12 @@ waits in the queue, so the topic is never lost.
 ### Returning to a conversation
 
 `gc-helm conversations` lists every open conversation in the city's stores and
-where it stands. A conversation's readiness is queued while it waits in the
+where it stands. It reads every task in a live status and keeps those the
+shared conversation rule (`conversation.sh`) picks out by their own rows, so a
+conversation is listed whatever its sitting's state, one bound to a sitting
+that ended before it claimed it included. A rig whose store does not answer, or
+whose ledger is not there, is named as not listed, and the list exits 4 after
+printing the rest. A conversation's readiness is queued while it waits in the
 operator's queue, starting while its sitting's session has not started,
 preparing until the sitting records its first hand-back after its session was
 created (`gc.handback_at`, which `gc-helm handback` stamps on each framing),
@@ -452,7 +464,8 @@ terminal is attached to first, by readiness and then newest first, and reads it
 again every ten seconds while it is on screen. What is picked is a
 conversation, so a read that re-sorts the list keeps it picked, and one that
 leaves the list leaves nothing picked until ↑/↓ picks again. Enter attaches to
-the one picked. `gc-helm attach <conversation>` is engage's attach
+the one picked, and a sitting held anew there runs on engage's default model,
+since the list shows none. `gc-helm attach <conversation>` is engage's attach
 for a script or a shortcut: it attaches to a live sitting once it has started,
 and holds a conversation whose sitting ended, or one in the queue, in a new
 sitting first. Starting and returning are two acts of one form: Ctrl+R moves

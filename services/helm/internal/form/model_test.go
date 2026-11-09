@@ -28,6 +28,8 @@ type fakeHelm struct {
 	saves    []SaveRequest
 	starts   []string
 	attaches []string
+	// attachArgs is the argv each attach would run, as Script builds it.
+	attachArgs []string
 }
 
 func (f *fakeHelm) About(_ context.Context, ref string) (About, error) {
@@ -45,8 +47,9 @@ func (f *fakeHelm) Start(_ context.Context, conv, model string) error {
 	f.starts = append(f.starts, conv+" "+model)
 	return f.startErr
 }
-func (f *fakeHelm) AttachCommand(conv string) *exec.Cmd {
+func (f *fakeHelm) AttachCommand(conv, model string) *exec.Cmd {
 	f.attaches = append(f.attaches, conv)
+	f.attachArgs = append(f.attachArgs, strings.Join(Script{Path: "gc-helm.sh"}.AttachCommand(conv, model).Args[1:], " "))
 	return exec.Command("true")
 }
 
@@ -331,6 +334,64 @@ func TestAFailedSaveKeepsTheQuestion(t *testing.T) {
 	}
 }
 
+// A save that filed the conversation and then failed, here because its reply
+// onto the gate did not read back, leaves the question saved in that
+// conversation. Nothing starts, and r sends the same save again, which open
+// completes on that conversation rather than file a second one.
+func TestAConversationFiledWhoseSaveFailedIsKeptAndSavedAgainNotFiledAgain(t *testing.T) {
+	a := subjectAbout("tk-held", "gc-toolkit")
+	a.Ref, a.Gate = "tk-gate", "tk-gate"
+	f := &fakeHelm{
+		about:    map[string]About{"tk-gate": a},
+		saveResp: Saved{Subject: "tk-held", Conversation: "tk-c1", Filed: true},
+		saveErr:  &Refusal{Code: 4, Why: "gc-helm: open: conversation tk-c1 is filed on tk-held, but its reply onto gate tk-gate did not read back. Add it by hand: gc bd dep add tk-c1 tk-gate --type replies-to"},
+	}
+	dir := t.TempDir()
+	m := newForm(t, f, Options{Subject: "tk-gate", DraftDir: dir})
+	settle(m)
+	typeText(m, "the question")
+	_, cmd := m.Update(ctrl('s'))
+	deliver(m, cmd)
+	if m.scr != progressScreen || m.saved == nil || m.saved.Conversation != "tk-c1" || len(f.starts) != 0 {
+		t.Fatalf("after a save that filed tk-c1 and failed: screen %d, saved %+v, starts %v", m.scr, m.saved, f.starts)
+	}
+	v := m.progressView()
+	if strings.Contains(v, "Not saved") || !strings.Contains(v, "saved: conversation tk-c1") || !strings.Contains(v, "reply onto gate tk-gate did not read back") {
+		t.Fatalf("the screen should say tk-c1 holds the question and its reply is missing:\n%s", v)
+	}
+	if _, cmd := m.Update(key(tea.KeyEnter)); cmd != nil || len(f.attaches) != 0 {
+		t.Fatalf("Enter attached %v to a conversation whose save did not complete", f.attaches)
+	}
+	if n := m.savedNote(); !strings.Contains(n, "tk-c1") || !strings.Contains(n, "did not complete") || !strings.Contains(n, "no sitting was started") {
+		t.Fatalf("note = %q", n)
+	}
+
+	// A save again that does not answer keeps the conversation the first one filed.
+	f.saveResp, f.saveErr = Saved{}, &Refusal{Code: 4, Why: "gc-helm: open: could not read the conversations on tk-held"}
+	_, cmd = m.Update(key('r'))
+	deliver(m, cmd)
+	if m.scr != progressScreen || m.saved == nil || m.saved.Conversation != "tk-c1" || !strings.Contains(m.saveErr, "could not read the conversations") {
+		t.Fatalf("after a save again that did not answer: screen %d, saved %+v, saveErr %q", m.scr, m.saved, m.saveErr)
+	}
+
+	// The next save again completes tk-c1 and starts it.
+	f.saveResp, f.saveErr = Saved{Subject: "tk-held", Conversation: "tk-c1", Filed: true}, nil
+	_, cmd = m.Update(key('r'))
+	deliver(m, cmd)
+	if len(f.saves) != 3 || f.saves[2] != f.saves[0] {
+		t.Fatalf("saves = %+v, want the same request three times", f.saves)
+	}
+	if f.saves[0].Ref != "tk-gate" || f.saves[0].Subject != "tk-held" || f.saves[0].Question != "the question" {
+		t.Fatalf("save request = %+v", f.saves[0])
+	}
+	if m.saveErr != "" || len(f.starts) != 1 || f.starts[0] != "tk-c1 opus" {
+		t.Fatalf("after the save completed: saveErr %q, starts %v", m.saveErr, f.starts)
+	}
+	if files, _ := filepath.Glob(filepath.Join(dir, "*")); len(files) != 0 {
+		t.Fatalf("a question a conversation holds was kept in a draft too: %v", files)
+	}
+}
+
 func TestANewSubjectFiledWithoutItsConversationIsSavedOntoNext(t *testing.T) {
 	f := &fakeHelm{
 		city:     rigCity(),
@@ -543,6 +604,61 @@ func TestTheModelDefaultIsShownAndOverridable(t *testing.T) {
 	deliver(m, cmd)
 	if len(f.starts) != 1 || f.starts[0] != "tk-c1 fable" {
 		t.Fatalf("starts = %v", f.starts)
+	}
+}
+
+// An attach from the progress screen can hold the conversation in a new
+// sitting, when the start failed or the sitting ended, so it runs on the model
+// the start ran on. The return list shows no model, and attaches on engage's
+// default.
+func TestAnAttachThatCanHoldANewSittingKeepsTheModelTheStartRanOn(t *testing.T) {
+	const want = "gc-helm.sh engage tk-c1 --no-input --model fable"
+
+	// The start failed, so no sitting holds the conversation.
+	f := &fakeHelm{
+		about:    map[string]About{"tk-a": subjectAbout("tk-a", "gc-toolkit")},
+		saveResp: Saved{Subject: "tk-a", Conversation: "tk-c1", Filed: true},
+		startErr: errors.New("gc-helm: engage: the reconciler is down"),
+	}
+	m := newForm(t, f, Options{Subject: "tk-a", Model: "fable"})
+	settle(m)
+	typeText(m, "q")
+	_, cmd := m.Update(ctrl('s'))
+	deliver(m, cmd)
+	if m.startErr == "" || len(f.starts) != 1 || f.starts[0] != "tk-c1 fable" {
+		t.Fatalf("start error %q, starts %v", m.startErr, f.starts)
+	}
+	if _, cmd := m.Update(key(tea.KeyEnter)); cmd == nil || len(f.attachArgs) != 1 || f.attachArgs[0] != want {
+		t.Fatalf("attach after a failed start = %v, want %q", f.attachArgs, want)
+	}
+
+	// The sitting started and then ended before it was ready.
+	f = &fakeHelm{
+		about:    map[string]About{"tk-a": subjectAbout("tk-a", "gc-toolkit")},
+		saveResp: Saved{Subject: "tk-a", Conversation: "tk-c1", Filed: true},
+	}
+	m = newForm(t, f, Options{Subject: "tk-a", Model: "fable"})
+	settle(m)
+	typeText(m, "q")
+	_, cmd = m.Update(ctrl('s'))
+	_, cmd = m.Update(cmd())
+	_, cmd = m.Update(cmd())
+	f.about["tk-c1"] = About{Subject: Subject{ID: "tk-a"}, Conversations: []Conversation{{ID: "tk-c1", Readiness: Ended}}}
+	_, cmd = m.Update(cmd())
+	m.Update(cmd())
+	if m.readiness != Ended {
+		t.Fatalf("readiness = %q, want ended", m.readiness)
+	}
+	if _, cmd := m.Update(key(tea.KeyEnter)); cmd == nil || len(f.attachArgs) != 1 || f.attachArgs[0] != want {
+		t.Fatalf("attach after an ended sitting = %v, want %q", f.attachArgs, want)
+	}
+
+	// The return list attaches on engage's default.
+	f = &fakeHelm{city: City{Conversations: []Conversation{{ID: "tk-gone", Readiness: Ended}}}}
+	m = newForm(t, f, Options{Return: true, Model: "fable"})
+	loadCity(m)
+	if _, cmd := m.Update(key(tea.KeyEnter)); cmd == nil || len(f.attachArgs) != 1 || f.attachArgs[0] != "gc-helm.sh engage tk-gone --no-input" {
+		t.Fatalf("attach from the return list = %v", f.attachArgs)
 	}
 }
 

@@ -55,7 +55,7 @@ FIXTURE="${GC_HELM_FIXTURE:-}"              # test hook: <dir>/rigs.json replace
 usage() {
     cat >&2 <<'EOF'
 Usage:
-  gc-helm open  <bead-id> [--reason "..."] [--body "..."] [--allow-duplicate] [--if-subject <id>] [--json]  file a conversation about the bead in the operator's queue, for the operator to engage; a second concern joins the bead's conversation already in the queue unless --allow-duplicate files a fresh one; --if-subject files only while the reference still names that subject, and a reference that names another now, through a successor, a PR's anchor or a gate's waiter, files nothing (exit 4); --json prints {subject,conversation,filed}
+  gc-helm open  <bead-id> [--reason "..."] [--body "..."] [--allow-duplicate] [--if-subject <id>] [--json]  file a conversation about the bead in the operator's queue, for the operator to engage; a second concern joins the bead's conversation already in the queue unless --allow-duplicate files a fresh one, which lands instead on a conversation in the queue whose whole ask is that concern; --if-subject files only while the reference still names that subject, and a reference that names another now, through a successor, a PR's anchor or a gate's waiter, files nothing (exit 4); --json prints {subject,conversation,filed}, and names the conversation on every exit once it is filed
   gc-helm open  --new-subject --rig <name> [<question> | --reason "<question>"] [--json]  file a FRESH subject in the named rig for a topic that has no bead yet, the question unchanged in its description and its title derived from the question's opening, then its conversation in the queue; a subject filed whose conversation is not is named, filed:false in --json, for a re-run onto it
   gc-helm engage [<subject>] [--subject <id>] [--new-subject [--rig <name>]] [--model <variant>] [--skill <name>] [--reason "..." | --template <key>] [--no-input] [--no-attach]  hold a conversation about the bead in a converse sitting and attach: attach to its live sitting, or take its conversation from the queue, or file one, then spawn a sitting named for it. Pointed at a human gate it takes the one bead still waiting on the gate, and the conversation replies to the gate. On a terminal, with no --reason, --template or --skill, it opens the conversation form instead: subject, a new topic's rig, question and model on one screen, filled in from the command line; --no-input keeps the flag-driven one-shot path. --skill seeds the sitting with any skill it carries as its lens on the subject (--skill review-arch is a conversation with the Architect). --new-subject files a FRESH subject bead in the --rig rig (the positional text, or --reason, is the question; its title is derived from the question's opening) and engages it in one gesture
   gc-helm attach [<conversation>]  return to a conversation: with an id, engage's attach (a live sitting once it has started, or a new sitting on a conversation whose sitting ended or that waits in the queue); with none, on a terminal, the conversation form's list of conversations to return to, by topic and readiness
@@ -2273,12 +2273,18 @@ open_join() {
 # conversation already carries writes nothing. One that leaves the queue
 # before the join reads back is passed over for the next one waiting there, or
 # for a conversation open files, and a join that cannot be written or read
-# back fails the open. --reason is the title, --body the ask
+# back fails the open. --allow-duplicate files the concern as a conversation of
+# its own, unless a conversation waiting in the queue already holds it as its
+# whole ask: open then lands on that one, so a run again after a run that filed
+# the conversation and failed completes it rather than file a second. Once the
+# conversation is filed, --json names it on every exit, a failed reply onto the
+# gate included. --reason is the title, --body the ask
 # the sitting reads when it claims the conversation — callers with their own
 # origin (operator-intake.sh) pass both rather than misreporting the board
 # wording. The conversation is filed in the bead's own store. It leaves the
-# conversation's id in CONV and OPEN_FILED at 1 when it filed it, or 0 when it
-# joined one already in the queue, for engage, which runs it in its own shell.
+# conversation's id in CONV and OPEN_FILED at 1 when the conversation holds the
+# concern as its ask, or 0 when the concern joined one already in the queue, for
+# engage, which runs it in its own shell.
 # Engage sets OPEN_GATE_FROM to the bead it settled on, so a gate several beads
 # wait on files the conversation about that bead, as engage took it (take_bead).
 # --new-subject files the subject first, in the --rig rig (create_subject): the
@@ -2478,38 +2484,58 @@ $gate_desc}"
         conv_body="Operator picked $bead off the helm board: rebuild the subject's slice, prep, hold for the operator."
     fi
 
+    # A concern of its own that a conversation waiting in the queue already
+    # holds as its whole ask is that conversation's, and is not filed again. So
+    # an open run again after a run that filed the conversation and then failed,
+    # because its reply onto the gate did not read back or its answer was lost,
+    # completes that conversation rather than file a second one for the concern.
+    CONV=""; open_again=0
+    if [ -n "$open_allow_dup" ]; then
+        CONV=$(printf '%s' "$open_convs" | jq -r --arg ask "$conv_body" '
+            [ .[] | select(((.assignee // "") | tostring) == "human")
+                  | select(((.status // "open") | tostring) == "open")
+                  | select(((.description // "") | tostring) == $ask) ]
+            | sort_by(.created_at // "") | (first // {}) | .id // empty' 2>/dev/null || true)
+        [ -z "$CONV" ] || open_again=1
+    fi
+
     # File the conversation: a task that tracks the bead, in the operator's
     # queue (assigned to `human`), in one create, so no reader ever sees a task
     # in this shape without its subject. bd create answers an ARRAY (or bare
     # object) carrying the id on success and a bare {"error":…} OBJECT on
     # failure; the id is read type-guarded so an error object never crashes jq.
-    CONV_JSON=$(gc bd create -t task --title "$conv_title" -d "$conv_body" \
-        --deps "tracks:$bead" --assignee human --json 2>/dev/null || true)
-    CONV=$(printf '%s' "$CONV_JSON" | scrub \
-        | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null || true)
-    [ -n "$CONV" ] && [ "$CONV" != "null" ] \
-        || { create_err=$(printf '%s' "$CONV_JSON" | scrub | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null || true)
-             echo "$PROG: open: could not create a conversation for '$bead'${create_err:+: $create_err}" >&2; exit 4; }
-    # The tracks edge is what makes the task a conversation about the bead, so
-    # it is read back off the task's own row. A task left without it is no
-    # conversation any reader finds, so it is closed rather than left behind.
-    if ! gc bd list --id "$CONV" --all --json 2>/dev/null | grep -av '^gc bd:' | scrub \
-            | jq -e --arg c "$CONV" --arg s "$bead" "$CONVERSATION_JQ"'
-                any(.[]? | objects | select((.id // "") == $c); conversation and conversation_subjects == [$s])' >/dev/null 2>&1; then
-        gc bd close "$CONV" --reason "not a conversation: its tracks edge onto $bead or its assignee did not land" >/dev/null 2>&1 || true
-        echo "$PROG: open: the task $CONV filed for '$bead' did not read back as a conversation (its tracks edge onto $bead or its assignee did not land), so it was closed. Re-run: $PROG open $bead" >&2
-        exit 4
+    if [ "$open_again" = 0 ]; then
+        CONV_JSON=$(gc bd create -t task --title "$conv_title" -d "$conv_body" \
+            --deps "tracks:$bead" --assignee human --json 2>/dev/null || true)
+        CONV=$(printf '%s' "$CONV_JSON" | scrub \
+            | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null || true)
+        [ -n "$CONV" ] && [ "$CONV" != "null" ] \
+            || { create_err=$(printf '%s' "$CONV_JSON" | scrub | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null || true)
+                 echo "$PROG: open: could not create a conversation for '$bead'${create_err:+: $create_err}" >&2; exit 4; }
+        # The tracks edge is what makes the task a conversation about the bead, so
+        # it is read back off the task's own row. A task left without it is no
+        # conversation any reader finds, so it is closed rather than left behind.
+        if ! gc bd list --id "$CONV" --all --json 2>/dev/null | grep -av '^gc bd:' | scrub \
+                | jq -e --arg c "$CONV" --arg s "$bead" "$CONVERSATION_JQ"'
+                    any(.[]? | objects | select((.id // "") == $c); conversation and conversation_subjects == [$s])' >/dev/null 2>&1; then
+            gc bd close "$CONV" --reason "not a conversation: its tracks edge onto $bead or its assignee did not land" >/dev/null 2>&1 || true
+            echo "$PROG: open: the task $CONV filed for '$bead' did not read back as a conversation (its tracks edge onto $bead or its assignee did not land), so it was closed. Re-run: $PROG open $bead" >&2
+            exit 4
+        fi
     fi
-    if [ -n "$TAKE_GATE" ] && ! conversation_reply "$CONV" "$TAKE_GATE"; then
-        echo "$PROG: open: conversation $CONV is filed on $bead, but its reply onto gate $TAKE_GATE did not read back. Add it by hand: gc bd dep add $CONV $TAKE_GATE --type replies-to" >&2
-        exit 4
-    fi
+    # From here the conversation is filed and holds the concern, so --json names
+    # it on every exit, and a caller that saves again knows what holds it.
     OPEN_FILED=1
     if [ -n "$_open_new_subject_bead" ]; then
         _open_new_subject_bead=""
         trap - EXIT
     fi
     bust_cache
+    if [ -n "$TAKE_GATE" ] && ! conversation_reply "$CONV" "$TAKE_GATE"; then
+        echo "$PROG: open: conversation $CONV is filed on $bead, but its reply onto gate $TAKE_GATE did not read back. Add it by hand: gc bd dep add $CONV $TAKE_GATE --type replies-to" >&2
+        [ -z "$open_json" ] || jq -nc --arg s "$bead" --arg c "$CONV" '{subject: $s, conversation: $c, filed: true}'
+        exit 4
+    fi
 
     if [ -n "$open_json" ]; then
         jq -nc --arg s "$bead" --arg c "$CONV" '{subject: $s, conversation: $c, filed: true}'
@@ -4753,8 +4779,9 @@ helm_form() {
 #                          --json prints {conversations, rigs, unread}: rigs
 #                          are the rigs a new topic can be filed in, each with
 #                          whether it carries converse and is suspended, and
-#                          unread names each rig whose store did not answer,
-#                          after which the verb exits 4.
+#                          unread names each rig whose store could not be
+#                          read, because it did not answer or its ledger is
+#                          not there, after which the verb exits 4.
 #   conversations <ref>    the subject <ref> names, resolved as engage resolves
 #                          it, and where a conversation about it would be held:
 #                          {ref, subject: {id, title, status, issue_type,
@@ -4785,22 +4812,19 @@ cmd_conversations() {
     fi
 }
 
-# conversations_in_store <rig> <db> <ids> <live> — the open conversations in one
-# rig's store as $READINESS_JQ rows, each with its subject's title. A held
-# conversation reads in_progress once its sitting claimed it, one waiting in the
-# queue reads open and assigned to `human`, and <ids> names the ones live
-# sittings hold that may not have been claimed yet. Returns 1 when a read did not
-# answer.
+# conversations_in_store <rig> <db> <live> — the open conversations in one rig's
+# store as $READINESS_JQ rows, each with its subject's title. Every task in a
+# live status is read in one listing, and the shared rule ($CONVERSATION_JQ's
+# conversation) picks the conversations out by their own rows. So a
+# conversation waiting in the queue, one its sitting claimed, and one bound to a
+# sitting that ended before it claimed it are each found, whatever the state of
+# a session. The listing is --brief, because a row is read for its assignee,
+# edges, title and metadata, never its description. Returns 1 when a read did
+# not answer.
 conversations_in_store() {
-    _cis_a=$(bd_rows list --db "$2" --status in_progress --type task --limit 0) || return 1
-    _cis_b=$(bd_rows list --db "$2" --status open --type task --assignee human --limit 0) || return 1
-    _cis_c='[]'
-    if [ -n "$3" ]; then
-        _cis_c=$(bd_rows list --db "$2" --id "$3" --all --limit 0) || return 1
-    fi
-    _cis_rows=$(printf '%s\n%s\n%s\n' "$_cis_a" "$_cis_b" "$_cis_c" | jq -cs "$CONVERSATION_JQ"'
-        add | unique_by(.id)
-        | [ .[] | objects
+    _cis_all=$(bd_rows list --db "$2" --status open,in_progress,blocked,deferred,hooked,pinned --type task --brief --limit 0) || return 1
+    _cis_rows=$(printf '%s' "$_cis_all" | jq -c "$CONVERSATION_JQ"'
+        [ .[] | objects
             | select(((.status // "open") | tostring | ascii_downcase) != "closed")
             | select(conversation) ]' 2>/dev/null) || return 1
     _cis_subj=$(printf '%s' "$_cis_rows" | jq -r "$CONVERSATION_JQ"'[ .[] | conversation_subjects[0] ] | unique | join(",")' 2>/dev/null) || return 1
@@ -4808,7 +4832,7 @@ conversations_in_store() {
     if [ -n "$_cis_subj" ]; then
         _cis_titles=$(bd_rows list --db "$2" --id "$_cis_subj" --all --limit 0) || _cis_titles='[]'
     fi
-    printf '%s' "$_cis_rows" | jq -c --arg rig "$1" --argjson live "$4" --argjson subj "$_cis_titles" \
+    printf '%s' "$_cis_rows" | jq -c --arg rig "$1" --argjson live "$3" --argjson subj "$_cis_titles" \
         "$CONVERSATION_JQ$SITTING_JQ$READINESS_JQ"'
         ([ $subj[] | objects | {key: ((.id // "") | tostring), value: ((.title // "") | tostring)} ] | from_entries) as $t
         | [ .[] | readiness_row($live; $rig) | . + {subject_title: ($t[.subject] // "")} ]' 2>/dev/null
@@ -4816,7 +4840,9 @@ conversations_in_store() {
 
 # conversations_all — `conversations` with no reference: every rig's store is
 # read at once, each in a subshell of its own, so the list costs about one
-# store's reads.
+# store's reads. A rig whose ledger is not there to read is named in unread with
+# the stores that did not answer, since a read pinned to it with --db cannot be
+# made, and a list that left it out would read as complete.
 conversations_all() {
     enumerate_rigs
     if ! _ca_live=$(live_sittings); then
@@ -4825,22 +4851,21 @@ conversations_all() {
     fi
     _ca_tmp=$(mktemp -d "${TMPDIR:-/tmp}/gc-helm-conversations.XXXXXX") \
         || { echo "$PROG: conversations: could not make a scratch directory under ${TMPDIR:-/tmp}" >&2; exit 3; }
-    # The conversation a live sitting holds is named by its alias, which gc
-    # stores qualified as <rig>/<binding>.<alias>, the alias being the
-    # conversation's id or its c- form.
-    _ca_named=$(printf '%s' "$_ca_live" | jq -r '
-        [ .[] | (.alias // "") | split("/") | last
-          | (index(".") as $i | if $i == null then . else .[($i + 1):] end) | sub("^c-"; "")
-          | select(. != "") ] | unique | .[]' 2>/dev/null || true)
-    printf '%s' "$RIGS" | jq -r '.[] | [(.name // ""), (.path // ""), (.prefix // "")] | @tsv' > "$_ca_tmp/rigs.tsv" 2>/dev/null || true
+    # One rig a line, its name and path apart by the unit separator, which read
+    # never collapses as it does a tab, so an empty name stays empty.
+    printf '%s' "$RIGS" | jq -r '.[] | [((.name // "") | gsub("[[:cntrl:]]"; " ")), (.path // "")] | join("\u001f")' > "$_ca_tmp/rigs" 2>/dev/null || true
+    _ca_us=$(printf '\037')
     _ca_i=0
-    while IFS="$TAB" read -r _ca_name _ca_path _ca_prefix; do
-        { [ -n "$_ca_name" ] && [ -d "$_ca_path/.beads" ]; } || continue
+    while IFS="$_ca_us" read -r _ca_name _ca_path; do
         _ca_i=$((_ca_i + 1))
-        _ca_ids=$(printf '%s\n' "$_ca_named" | awk -v p="$_ca_prefix-" 'p != "-" && index($0, p) == 1' | paste -s -d, - 2>/dev/null || true)
-        ( conversations_in_store "$_ca_name" "$_ca_path/.beads" "$_ca_ids" "$_ca_live" > "$_ca_tmp/$_ca_i.json" 2>/dev/null \
-            || { rm -f "$_ca_tmp/$_ca_i.json"; printf '%s\n' "$_ca_name" > "$_ca_tmp/$_ca_i.unread"; } ) &
-    done < "$_ca_tmp/rigs.tsv"
+        _ca_rig="${_ca_name:-${_ca_path:-a rig with no name}}"
+        if [ -z "$_ca_path" ] || [ ! -d "$_ca_path/.beads" ]; then
+            printf '%s\n' "$_ca_rig" > "$_ca_tmp/$_ca_i.unread"
+            continue
+        fi
+        ( conversations_in_store "$_ca_rig" "$_ca_path/.beads" "$_ca_live" > "$_ca_tmp/$_ca_i.json" 2>/dev/null \
+            || { rm -f "$_ca_tmp/$_ca_i.json"; printf '%s\n' "$_ca_rig" > "$_ca_tmp/$_ca_i.unread"; } ) &
+    done < "$_ca_tmp/rigs"
     wait
     _ca_rows=$(cat "$_ca_tmp"/*.json 2>/dev/null | jq -cs 'add // []' 2>/dev/null || printf '[]')
     _ca_unread=$(cat "$_ca_tmp"/*.unread 2>/dev/null | jq -Rsc 'split("\n") | map(select(. != ""))' 2>/dev/null || printf '[]')
@@ -4865,7 +4890,7 @@ conversations_all() {
                  | "\(.readiness)\(if .session.attached == true then " (attached)" else "" end)\t\(.id)\t\(.rig)\t\(.title)"
                    + (if .subject_title != "" and .subject_title != .title then "\t(on \(.subject): \(.subject_title))" else "\t(on \(.subject))" end)
             end'
-        [ "$_ca_unread" = "[]" ] || echo "$PROG: conversations: the store of $(printf '%s' "$_ca_unread" | jq -r 'join(", ")') did not answer, so its conversations are not listed." >&2
+        [ "$_ca_unread" = "[]" ] || echo "$PROG: conversations: the store of $(printf '%s' "$_ca_unread" | jq -r 'join(", ")') could not be read, so its conversations are not listed." >&2
     fi
     [ "$_ca_unread" = "[]" ] || exit 4
     return 0
