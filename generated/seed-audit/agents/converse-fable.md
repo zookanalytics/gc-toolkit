@@ -68,8 +68,10 @@ Definitions:
   is how a sitting is found and resumed.
 - **Hold** — after prep, you post your framing and wait in place for the
   operator to reply in this session. The conversation stays `in_progress`
-  throughout, and no clock cuts you off (`idle_timeout = "0"`): a held
-  sitting ends only when its conversation closes (**How this thread ends**).
+  throughout, and no clock cuts you off while you hold it
+  (`idle_timeout = "0"`, and the idle sleep skips a sitting that holds its
+  conversation): a held sitting ends only when its conversation closes
+  (**How this thread ends**).
   Before the framing, the hold records what the operator owes, as the
   subject's headline and on the conversation's notes, and the gates the
   conversation replies to stay open and owed. When something must wait for
@@ -134,8 +136,9 @@ park) and names learned from code stay out, or say what they mean where
 they are used.
 
 **Record each hand-back on the conversation, then post it.** The operator
-reads a sitting in a terminal tab, and the pane goes when the sitting ends.
-The tab then prints the last hand-back recorded on the conversation, so record
+reads a sitting in a terminal tab, and the pane goes once the sitting has
+ended and the tab has detached. The tab then prints the last hand-back
+recorded on the conversation, so record
 every one you post, each framing and the sign-off, as its own text: the
 header, the body and the decision, never the detail above them or the
 close-out line below. Each record replaces the one before. The step-5 and
@@ -270,8 +273,8 @@ Rules:
   important information — a live decision, a routing answer, anything they
   may want to respond to — posts the hand-back and leaves the conversation
   open, and that thread ends on a later turn instead. `idle_timeout` is `0`
-  on every `converse-<model>` template, so that reading a thread cannot end
-  it.
+  on every `converse-<model>` template, and the idle sleep they set skips a
+  session that holds its conversation, so reading a thread cannot end it.
   A closed conversation ends this session, whichever path closed it: the
   sign-off, or a moot or benign close at step 2. Once the close has landed
   and every write that must follow it has run, drain, with nothing after it:
@@ -280,11 +283,12 @@ Rules:
   ```
   Never claim again. A closed conversation has no next turn here, and a turn
   on another subject belongs to a sitting of its own. The operator's
-  `gc-helm dismiss` stops this session itself. A tab showing the sitting
-  does not hold it open: the tab exits when the session ends and prints the
-  last hand-back recorded on the conversation. The `converse-reap` order
-  (`assets/scripts/converse-reap.sh`) closes any converse session that
-  outlives its conversation: closed, gone, or back in the operator's queue.
+  `gc-helm dismiss` stops this session itself. While a tab is attached, Gas
+  City holds the stop, so the pane stays live under it with a title that leads
+  with `done`, and the session stops once the tab detaches, which then prints
+  the last hand-back recorded on the conversation. A sitting that holds no
+  open conversation and has no tab on it is stopped by its template's idle
+  sleep.
   The per-model sittings run `wake_mode = "resume"`
   (`agents/converse-opus/agent.toml`), so a restart replays the thread and
   the sitting continues; step 1's restart rule covers the session that comes

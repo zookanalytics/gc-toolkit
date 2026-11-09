@@ -88,8 +88,9 @@ this thread ends**):
 gc runtime drain-ack
 ```
 Nothing is left to claim, so never claim again. The operator's dismiss stops
-this session itself, and a tab showing the sitting exits when the session
-ends, printing the last hand-back recorded on the conversation. A new concern
+this session itself. A tab showing the sitting holds the stop until it
+detaches, with a title that leads with `done`, and then prints the last
+hand-back recorded on the conversation. A new concern
 the operator raises is a new conversation. Open it on its bead, where it waits
 in the operator's queue until they engage it:
 `"$CONV/gc-helm.sh" open <bead> --reason "<what it is about>" --body "<the ask>"`.
