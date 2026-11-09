@@ -19,15 +19,14 @@
 # nothing on the PR.
 #
 # Usage:
-#   pr-sitting-comment.sh post --sitting <task> --topic <text>
+#   pr-sitting-comment.sh post --sitting <task>
 #   pr-sitting-comment.sh refresh --sitting <task>
 #
-#   post:    draw the comment, posting it when the PR has none, once the
-#            conversation's title reads <text>, the topic its sitting has just
-#            written there. Until it reads back, the title is still the words
-#            the conversation was opened with, so nothing is posted.
-#            converse-prep's title step runs it after the premise re-check, so
-#            a conversation that closes before then posts nothing.
+#   post:    draw the comment, posting it when the PR has none. The comment
+#            shows the conversation's title, so converse-prep's title step runs
+#            it once its write of the topic as that title has exited 0, after
+#            the premise re-check, so a conversation that closes before then
+#            posts nothing.
 #   refresh: draw the comment again after a write that changes what it shows,
 #            and leave a PR alone when no comment carries this conversation's
 #            marker. The sign-off, a dismiss and the premise re-check's close
@@ -55,17 +54,13 @@ scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 # The gh REST payloads escape newlines as \n and need no scrub, and the comment
 # body must keep its newlines, so it is read UNSCRUBBED below.
-# One line, trimmed, for comparing a title with the topic a caller wrote there.
-oneline() { printf '%s' "${1:-}" | tr '\n\r\t' '   ' | sed 's/  */ /g; s/^ *//; s/ *$//'; }
-
 MODE="${1:-}"
 case "$MODE" in post|refresh) shift ;; *) echo "$PROG: first argument must be 'post' or 'refresh'" >&2; exit 2 ;; esac
 
-SITTING=""; TOPIC=""
+SITTING=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --sitting)  shift; [ $# -gt 0 ] || { echo "$PROG: --sitting needs a value" >&2; exit 2; }; SITTING="$1" ;;
-    --topic)    shift; [ $# -gt 0 ] || { echo "$PROG: --topic needs a value" >&2; exit 2; }; TOPIC="$1" ;;
     -h|--help)  sed -n '2,/^set -u$/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "$PROG: unknown flag '$1'" >&2; exit 2 ;;
     *)  echo "$PROG: unexpected argument '$1'" >&2; exit 2 ;;
@@ -74,12 +69,6 @@ while [ $# -gt 0 ]; do
 done
 
 [ -n "$SITTING" ] || { echo "$PROG: --sitting is required" >&2; exit 2; }
-TOPIC=$(oneline "$TOPIC")
-if [ "$MODE" = post ]; then
-  [ -n "$TOPIC" ] || { echo "$PROG: post needs --topic <text>, the topic just written as the conversation's title" >&2; exit 2; }
-else
-  [ -z "$TOPIC" ] || { echo "$PROG: refresh takes no --topic: the comment shows the conversation's title" >&2; exit 2; }
-fi
 
 # From here on every exit is 0: a comment must not break a sitting's prep or its close.
 for t in gh gc jq git; do command -v "$t" >/dev/null 2>&1 || exit 0; done
@@ -103,10 +92,6 @@ SUBJECT=$(printf '%s' "$CONV_ROW" | jq -r "$CONVERSATION_JQ"'conversation_subjec
 TITLE=$(printf '%s' "$CONV_ROW" | jq -r '(.title // "") | tostring | gsub("\\s+"; " ") | sub("^ "; "") | sub(" $"; "")')
 CLOSED=""
 [ "$(printf '%s' "$CONV_ROW" | jq -r '(.status // "") | tostring | ascii_downcase')" = closed ] && CLOSED=yes
-if [ "$MODE" = post ] && [ "$(oneline "$TITLE")" != "$TOPIC" ]; then
-  echo "$PROG: the title of $SITTING does not read back as the topic '$TOPIC', so it may still be the words the conversation was opened with; nothing posted" >&2
-  exit 0
-fi
 
 # The subject's PR: pr_number, else the integer after /pull/ in pr_url. Same
 # read converse-pr-conversation.sh uses.

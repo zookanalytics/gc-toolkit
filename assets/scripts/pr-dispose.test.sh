@@ -2,7 +2,7 @@
 # Hermetic test for assets/scripts/pr-dispose.sh — the sanctioned path that
 # records a deliberate PR-close disposition on the open anchor and closes the
 # PR, so pr-facts.sh consummates the terminal close through bead-rehome.sh.
-# Covers: the marker stamped and read back on an OPEN pull_request anchor;
+# Covers: the marker stamped on an OPEN pull_request anchor;
 # --no-close-pr stamping only; the PR closed through gh when the anchor is open,
 # after a closing comment posted through pr-post.sh with the city's mark, which
 # gates the close; gh view, comment and close pinned to the anchor's own pr_url
@@ -10,9 +10,7 @@
 # certified against the anchor before closing; idempotent no-op on an
 # already-disposed anchor; refusal on an anchor past the pull_request state
 # (named bead-rehome as the direct verb); refusal on an anchor with no parseable
-# pr_url; the marker read-back gate refusing to close the PR when the stamp did
-# not land — including the successor store, which a dropped write, or a stale
-# value an omitted store fails to clear, both catch; the successor store carried
+# pr_url; a marker the store refuses, which closes no PR; the successor store carried
 # through when given and cleared when omitted; the close-mode failures that
 # record the marker but exit non-zero (gh missing, an unreadable state, a
 # failed closing comment or gh close); dry-run writing nothing; and the usage refusals (bad kind, missing
@@ -75,7 +73,7 @@ anchor() { # id num [extra-metadata] [pr_url-override]
 }
 succ() { printf '{"id":"%s","status":"open","title":"successor","notes":"","metadata":{}}' "$1"; }
 
-echo "# an OPEN pull_request anchor: the marker is stamped and read back (--no-close-pr)"
+echo "# an OPEN pull_request anchor: the marker is stamped (--no-close-pr)"
 store "[$(anchor A1 70), $(succ S1)]"
 out=$("$SUT" --anchor A1 --successor S1 --kind duplicate --no-close-pr 2>&1); rc=$?
 eq "$rc" 0 "exits 0"
@@ -83,7 +81,7 @@ eq "$(meta A1 'gc.pr_close_disposition_kind')" "duplicate" "kind stamped"
 eq "$(meta A1 'gc.pr_close_disposition_successor')" "S1" "successor stamped"
 eq "$(meta A1 'gc.pr_close_disposition_successor_store')" "<absent>" "no store key when none given"
 eq "$(bstatus A1)" "open" "the anchor is NOT closed — that terminal close is pr-facts's"
-eq "$(meta A1 'gc.superseded_by')" "<absent>" "…and no gc.superseded_by is written here (bead-rehome is its sole writer)"
+eq "$(cat "$STUB_DEPS")" "" "…and no edge is written here (bead-rehome is its sole writer)"
 hasnt "$(cat "$STUB_GH_LOG")" "pr close" "--no-close-pr closes no PR"
 
 echo "# the PR is closed through gh when the anchor is open"
@@ -107,8 +105,9 @@ store "[$(anchor A3 72), $(succ S3)]"
 out=$("$SUT" --anchor A3 --successor bt-xyz --kind duplicate --successor-store rig:beta --no-close-pr 2>&1)
 eq "$(meta A3 'gc.pr_close_disposition_successor_store')" "rig:beta" "store key stamped"
 
-echo "# already disposed (gc.superseded_by set): no-op, nothing stamped, no close"
-store "[$(anchor A4 73 ',"gc.superseded_by":"S9"'), $(succ S4)]"
+echo "# already disposed (closed naming a successor): no-op, nothing stamped, no close"
+# The edge rides the row as `gc bd list` prints it, the row bd_disposed_to reads.
+store "[$(anchor A4 73 | jq -c '.status = "closed" | .dependencies = [{issue_id: "A4", depends_on_id: "S9", type: "supersedes"}]'), $(succ S4)]"
 : > "$STUB_GH_LOG"
 out=$("$SUT" --anchor A4 --successor S4 --kind duplicate 2>&1); rc=$?
 eq "$rc" 0 "exits 0 (idempotent)"
@@ -132,23 +131,13 @@ has "$out" "no parseable pr_url" "explains the missing pr_url — a bare number 
 eq "$(meta A6 'gc.pr_close_disposition_kind')" "<absent>" "no marker stamped when the PR cannot be identified"
 hasnt "$(cat "$STUB_GH_LOG")" "pr " "no gh call when the pr_url is unparseable"
 
-echo "# the read-back gate: a marker that does not stick refuses to close the PR"
+echo "# a marker the store refuses closes nothing"
 store "[$(anchor A7 75), $(succ S7)]"
 : > "$STUB_GH_LOG"
-out=$(STUB_DROP_KEYS="A7:gc.pr_close_disposition_kind,gc.pr_close_disposition_successor" "$SUT" --anchor A7 --successor S7 --kind duplicate 2>&1); rc=$?
+out=$(STUB_UPDATE_FAIL=A7 "$SUT" --anchor A7 --successor S7 --kind duplicate 2>&1); rc=$?
 eq "$rc" 1 "exits 1"
-has "$out" "did NOT stick" "reports the failed read-back"
+has "$out" "the store refused the disposition marker on A7" "reports the refused stamp"
 hasnt "$(cat "$STUB_GH_LOG")" "pr close" "the PR is NOT closed when the marker did not land"
-
-echo "# the read-back gate covers the store: a dropped --successor-store refuses to close"
-store "[$(anchor A20 90), $(succ S20)]"
-: > "$STUB_GH_LOG"
-out=$(STUB_DROP_KEYS="A20:gc.pr_close_disposition_successor_store" "$SUT" --anchor A20 --successor bt-xyz --kind duplicate --successor-store rig:beta 2>&1); rc=$?
-eq "$rc" 1 "a store that did not stick refuses to close the PR"
-has "$out" "did NOT stick" "reports the failed read-back"
-has "$out" "store='rig:beta'" "names the store the caller asked for"
-eq "$(meta A20 'gc.pr_close_disposition_successor_store')" "<absent>" "the dropped store never landed"
-hasnt "$(cat "$STUB_GH_LOG")" "pr close" "the PR is NOT closed on an incomplete marker"
 
 echo "# omitting --successor-store clears a stale store a prior attempt left"
 store "[$(anchor A21 91 ',"gc.pr_close_disposition_successor_store":"rig:stale"'), $(succ S21)]"
@@ -158,15 +147,6 @@ eq "$rc" 0 "exits 0 — the stale store was cleared and the marker is consistent
 eq "$(meta A21 'gc.pr_close_disposition_successor_store')" "<absent>" "the stale store is cleared when none is given"
 eq "$(meta A21 'gc.pr_close_disposition_kind')" "duplicate" "the new marker is stamped"
 has "$(cat "$STUB_GH_LOG")" "pr close 91" "the PR is closed after the marker is made consistent"
-
-echo "# a stale store whose clearing itself half-lands refuses to close (fail closed)"
-store "[$(anchor A22 92 ',"gc.pr_close_disposition_successor_store":"rig:stale"'), $(succ S22)]"
-: > "$STUB_GH_LOG"
-out=$(STUB_DROP_KEYS="A22:gc.pr_close_disposition_successor_store" "$SUT" --anchor A22 --successor S22 --kind duplicate 2>&1); rc=$?
-eq "$rc" 1 "a surviving stale store refuses to close the PR"
-has "$out" "did NOT stick" "reports the failed read-back"
-eq "$(meta A22 'gc.pr_close_disposition_successor_store')" "rig:stale" "the stale store survived the dropped unset"
-hasnt "$(cat "$STUB_GH_LOG")" "pr close" "the PR is NOT closed while a stale store lingers"
 
 echo "# the PR is already closed: marker stamped, no close attempted"
 store "[$(anchor A8 76), $(succ S8)]"

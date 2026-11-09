@@ -131,8 +131,8 @@ func TestShowFallsBackToBdWhenDaemonUnavailable(t *testing.T) {
 }
 
 // ShowDirect is the authoritative read: it forks `gc bd` and never consults the
-// daemon, even a healthy one, so a read-back observes the write it is verifying
-// and carries notes the daemon payload omits.
+// daemon, even a healthy one, so a read that decides a write observes the latest
+// write and carries notes the daemon payload omits.
 func TestShowDirectBypassesDaemon(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "forks")
 	srv, _ := daemonServing(t, `{"id":"b-1","metadata":{"merge_result":"from_daemon"}}`)

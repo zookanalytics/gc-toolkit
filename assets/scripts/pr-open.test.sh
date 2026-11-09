@@ -598,11 +598,13 @@ hasnt "$(cat "$HERE/../../template-fragments/polecat-doctrine.template.md")" "##
 hasnt "$(cat "$HERE/../../AGENTS.md")" "subject line" "…and neither does this rig's AGENTS.md"
 has "$(cat "$HERE/../../template-fragments/polecat-doctrine.template.md")" '{{ .BindingPrefix }}commit-conventions' \
     "an effort's summary task names the skill"
-# The rule reaches a title only through submit's step 4, and a title with no type
-# composes from the bead's kind with nothing failing, so this pins the title the
-# handoff call has the author fill in.
-step4=$(awk '/^\*\*4\. Name the branch on the anchor/{on=1} /^\*\*5\. Hand off/{on=0} on' "$HERE/../../formulas/mol-polecat-work.toml")
-has "$step4" '{{binding_prefix}}commit-conventions' "submit's step 4 loads the skill"
+# The rule reaches a title only through the submit step's paragraph that names
+# the branch on the anchor's title, and a title with no type composes from the
+# bead's kind with nothing failing, so this pins the title the handoff call has
+# the author fill in. The paragraph is found by its heading's words, whatever
+# number the step gives it.
+title_part=$(awk '/^\*\*[0-9]+[a-z]?\. Name the branch on the anchor/{on=1} /^\*\*[0-9]+[a-z]?\. Hand off/{on=0} on' "$HERE/../../formulas/mol-polecat-work.toml")
+has "$title_part" '{{binding_prefix}}commit-conventions' "submit's title paragraph loads the skill"
 title_slot=$(grep -o -E -e '--title "[^"]*"' "$HERE/../../formulas/mol-polecat-work.toml" || true)
 has "$title_slot" '--title "<type>(<scope>): ' "submit's handoff call has the author write the title with its type and scope"
 hasnt "$title_slot" '--title ""' "…and offers no empty title as the line to run"

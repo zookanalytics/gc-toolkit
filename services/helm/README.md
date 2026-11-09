@@ -132,7 +132,7 @@ owed-first. `specs/tk-492ssx/` records the family model.
 `group_parent` is the same climb's IMMEDIATE step: the id of the row's direct
 parent one anchor up, empty at a family root. Where `group_root` names the top
 of the family, `group_parent` names the next step toward it, so a surface can
-render the family as the nested containment tree it is — a sub-epic above its
+render the family as the nested containment tree it is — a Delivery above its
 own children rather than flat beside them. The web dashboard body nests each
 family by it (`flattenFamilies` in `web/src/App.tsx`).
 
@@ -250,7 +250,7 @@ conversations, by their native shape.
 
 | kind | selected by | band | why |
 |---|---|---|---|
-| `epic` | `issue_type=epic` | derived from the roll-up | durable per-rig anchor |
+| `epic` | `issue_type=epic` | derived from the roll-up; ELEVATED and owed for a landed Delivery | durable per-rig anchor |
 | `decision` | `issue_type=decision` | ELEVATED; NORMAL or LOW once *ruled* | human-gated |
 | `convoy` | `issue_type=convoy`, machine convoys dropped | derived from the roll-up | floating epic-improviser |
 | `human` | `gc.routed_to=human` | ELEVATED; NORMAL or LOW once *ruled* | the operator owns it; no agent will take it |
@@ -258,6 +258,14 @@ conversations, by their native shape.
 | `merge` | `merge_result` present | derived from the roll-up, so LOW while childless | a branch the city is trying to land — the PR round-trip's row |
 | `gate` | `issue_type=gate` with `await_type=human` | folds onto the row of every bead it blocks, read from the gate's `blocks` dependents; a row of its own only when none of them has one | a wait a person must clear |
 | `conversation` | a task that tracks one bead and is assigned to `human` or to the alias that names its own id | folds onto the row of the bead it tracks | a dialogue waiting in the operator's queue or held by a sitting |
+
+A Delivery is an `epic` row whose parent is a live epic and which carries no
+`epic_hypothesis` (`docs/epics.md`, "Deliveries and Epic Checkpoints";
+`board.deliveries`). Once its Stories have all closed, its epic's checkpoint is
+the operator's to call, so its row reads `landed — waits for its Epic
+Checkpoint` ahead of any takeaway, bands ELEVATED and is owed, and its epic's
+roll-up counts it as parked. Both backends carry an epic's metadata on its row,
+which is where the derivation reads the hypothesis.
 
 `gate` and `conversation` are WRAPPERS: each folds onto the rows of the beads
 it concerns (`board.foldWrappers`), which it marks `held`. A gate also marks
@@ -399,10 +407,11 @@ gate blocks the bead that waits on it, so the `waiting_on` edge takes and the
 disposition rule below fires for them. The child roll-up stays exactly as it is: it is what keeps the
 work already filed as a child visible, and nothing re-parents it.
 
-A roll-up whose children have ALL closed stays LOW. The row can now *say* the
-work landed (`m_total>0`, `complete`, "all N closed · 0 open"), which is what a
-sweep needs to act on it; pushing the operator at that moment is `tk-2cyxo`'s
-bead, not the board's.
+A `parked` roll-up whose children have ALL closed stays LOW, unless its bead is
+a landed Delivery, which waits for its epic's checkpoint. The row can now
+*say* the work landed (`m_total>0`, `complete`, "all N closed · 0 open"), which
+is what a sweep needs to act on it; pushing the operator at that moment is
+`tk-2cyxo`'s bead, not the board's.
 
 **Until its named wait is over.** A takeaway is one frozen string, so a sitting that
 ROUTES work out of a subject leaves it saying "routed — nothing further needed
@@ -589,8 +598,10 @@ A child that is itself a parent on the board carries no route or arm of its
 own. When nothing holds its own bead, it is counted by what its own children
 are doing, read bottom-up through every level (`board.subtreeStates`): in
 flight while one of them moves, stranded while one is idle, and otherwise in
-the state its waiting children are in. A sub-epic whose children wait their
-turn does not strand its parent.
+the state its waiting children are in. A Delivery whose Stories wait their
+turn does not strand its epic, and a landed Delivery, whose Stories have all
+closed, counts as parked, because it waits on the operator for its epic's
+checkpoint.
 
 A child is also held by its ancestors' waits, as bd holds it: bd keeps a bead
 out of `bd ready` while it or any parent-child ancestor has an open blocker
@@ -620,7 +631,7 @@ field would be lying on a normal day.
 | `pr_conversation` | `quiet`, `outstanding`, `answered`, `asking`, `unknown` | `pr.conversation` on the anchor; `asking` from a human gate's edge |
 | `pr_approval` | `required`, `met`, `unknown` | `pr_posture` on the anchor |
 | `pr_owed_since` | RFC 3339, omitted when nothing is owed | the earliest live cause |
-| `pr_held` | any of `gate`, `review`, `blocked` in that order, or `null` | `prstatus.Held` over the facts `prstatus.Read` gathers, the derivation the `held:` labels come from: an open human gate that holds the anchor, the merge pass's count of review threads waiting on the city's answer, the blocked verdict's cause, and the anchor's blockers a person has to clear. `null` too on a PR whose facts did not read |
+| `pr_held` | any of `gate`, `review`, `blocked` in that order, or `null` | `prstatus.Held` over the facts `prstatus.Read` gathers, the derivation the `held:` labels come from: an open human gate that holds the anchor, the merge pass's count of review threads waiting on the city's answer, the blocked verdict's cause, and the beads a person owes the next move on that the anchor waits on, on its own blockers or behind a bead it waits on. `null` too on a PR whose facts did not read |
 
 **Recorded, not re-derived.** Every stage of the merge cadence reaches the
 machine axis once per pass: `assets/scripts/gate-ensure.sh` classifies each
@@ -655,6 +666,16 @@ it, so once no fix unit, review, or finding is in flight the merge pass records
 `settled` and the row is the operator's to clear by re-reviewing (`pr_approval`
 reads `required`, and `needs` names the re-review). A veto with a fix unit still
 in flight reads `progressing` and stays the city's move.
+
+A row held only by a bead a person owes the next move on, which it waits on
+through another bead, such as a decision or another PR waiting on a review that
+its rework waits for, reads `needs-attention` with `pr_held` `blocked`, as its
+label does, and is not owed: the move is on that bead, whose own row asks for it,
+and this row's `needs` names it, `your move is on <its title>`, counting any
+others. So is a row stacked directly on another PR whose next move is a
+person's. A blocker of the row's own that a person owes, such as a decision,
+still asks on the row, a row owed for a cause of its own keeps naming that cause,
+and a gate's question still wins.
 
 **Blocked, not settled.** `blocked` is a hold no automated actor will clear and
 no review verdict is owed on: an unresolved required review thread, a failed
@@ -798,15 +819,23 @@ print the state's word, and none derives it. The sittings table's count line
 splits the open sittings into in session and waiting, and names failed starts
 when there are any.
 
-### The headline a sitting closed on
+### A sitting's headline
 
-A sitting's headline is its takeaway, else its close reason, else its subject's
-title (`headline` on the wire, derived by `board.sittingHeadline`), and every
-surface prints it as it stands. The close reason is the conversation task's own
-(`outcome_reason` on the wire): the headline a sign-off settled on, the
-operator's dismissal, or the reading a premise re-check closed it with. It is
-per-sitting and never rewritten, so it is attributable with no inference at
-all. An open sitting has none.
+A sitting's headline is its takeaway, else its close reason, else its
+conversation's own title (`headline` on the wire, derived by
+`board.sittingHeadline`), and every surface prints it as it stands. The title
+says what the conversation asks, while the subject cell already shows the topic,
+so two conversations on one bead read as two asks. A title that says nothing of
+the ask gives way to the subject's title: an empty one, the
+`operator pick from the board` that `gc-helm.sh open` writes when its caller
+names neither a reason nor a gate, or the `operator-origin topic intake` that
+`operator-intake.sh` gives as the reason when it files the conversation on an
+operator's topic itself, with no first reaction to frame the topic.
+
+The close reason is the conversation task's own (`outcome_reason` on the wire):
+the headline a sign-off settled on, the operator's dismissal, or the reading a
+premise re-check closed it with. It is per-sitting and never rewritten, so it
+is attributable with no inference at all. An open sitting has none.
 
 `gc.takeaway` is the harder half, and it is why `Sitting.takeaway` is not a
 copy. **The takeaway lives on the SUBJECT, and each sitting overwrites the last

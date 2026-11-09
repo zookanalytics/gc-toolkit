@@ -230,8 +230,9 @@ PF_UNRES_KEY="pr-thread-unresolvable.zook.gc-toolkit"
 pf_unres_calls() { grep -cxF "$PF_UNRES_KEY" "$STUB_PF_LOG"; }
 # bead-rehome.sh, the sanctioned terminal close pr-facts consummates a
 # pre-recorded disposition through. The contract that matters here: on success
-# it stamps gc.superseded_by and CLOSES the origin; STUB_REHOME_RC models the
-# refusals it reports without closing (4 transient, 5/6 a human is needed).
+# it CLOSES the origin and then records its duplicates or supersedes edge onto
+# the successor; STUB_REHOME_RC models the refusals it reports without closing
+# (4 transient, 5/6 a human is needed).
 # It also models the two real holds on that close, each exit 5, in the real
 # order. The finalize gate runs first, and it is the real finalize-gate.sh: an
 # open human gate on the origin holds the close, except a gate filed under the
@@ -247,19 +248,19 @@ cat > "$SD/bead-rehome.sh" <<'REHOME'
 #!/usr/bin/env bash
 set -u
 printf '%s\n' "$*" >> "${STUB_REHOME_LOG:?}"
-origin=""; succ=""; store=""; except=""
+origin=""; succ=""; kind=""; except=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --origin)          shift; origin="${1:-}" ;;
     --successor)       shift; succ="${1:-}" ;;
-    --successor-store) shift; store="${1:-}" ;;
+    --kind)            shift; kind="${1:-}" ;;
     --except-key)      shift; except="${1:-}" ;;
   esac
   shift || true
 done
 rc="${STUB_REHOME_RC:-0}"
 if [ "$rc" != "0" ]; then echo "bead-rehome (stub): refusing rc=$rc" >&2; exit "$rc"; fi
-fg=(check "$origin"); [ -n "$except" ] && fg+=(--except-key "$except")
+fg=(check "$origin" --as-disposed); [ -n "$except" ] && fg+=(--except-key "$except")
 if ! why=$("$(dirname "$0")/finalize-gate.sh" "${fg[@]}" 2>/dev/null); then
   echo "bead-rehome (stub): the close is held: $why (exit 5)" >&2
   exit 5
@@ -278,22 +279,31 @@ if [ -n "$except" ]; then
 fi
 # Real close: drop ONLY the origin->successor wait edge, then close WITHOUT
 # --force. Any OTHER open blocker (a rework child that blocks this anchor) refuses
-# the close, leaving the bead OPEN and pointed — exit 5, the shape pr-facts reads
-# as "a human is needed" and never as a clean dispose.
+# the close, leaving the bead OPEN with nothing recorded — exit 5, the shape
+# pr-facts reads as "a human is needed" and never as a clean dispose.
 gc bd dep remove "$origin" "$succ" >/dev/null 2>&1 || true
 if [ "$(gc bd dep list "$origin" --direction=down -t blocks --json 2>/dev/null \
         | jq '[ .[] | select((.status // "open") != "closed") ] | length' 2>/dev/null || echo 0)" != "0" ]; then
   echo "bead-rehome (stub): $origin has an OPEN blocker; non-force close refused (exit 5)" >&2
   exit 5
 fi
-if [ -n "$store" ]; then
-  gc bd update "$origin" --status=closed --set-metadata "gc.superseded_by=$succ" --set-metadata "gc.superseded_by_store=$store" >/dev/null 2>&1 || exit 5
-else
-  gc bd update "$origin" --status=closed --set-metadata "gc.superseded_by=$succ" >/dev/null 2>&1 || exit 5
-fi
+gc bd update "$origin" --status=closed >/dev/null 2>&1 || exit 5
+etype=supersedes; [ "$kind" = duplicate ] && etype=duplicates
+gc bd dep add "$origin" "$succ" --type "$etype" >/dev/null 2>&1 || exit 4
 exit 0
 REHOME
 chmod +x "$SD/bead-rehome.sh"
+# succ_of <id> — the bead <id> names through its own duplicates or supersedes
+# edge, or <none>.
+succ_of() { awk -F'|' -v id="$1" '$1 == id && ($2 == "supersedes" || $2 == "duplicates") { print $3; f = 1; exit } END { if (!f) print "<none>" }' "$STUB_DEPS"; }
+# carrier_of <finding> — the bug born discovered-from <finding>, or <none>.
+carrier_of() {
+  local b
+  for b in $(awk -F'|' -v f="$1" '$2 == "discovered-from" && $3 == f { print $1 }' "$STUB_DEPS"); do
+    [ "$(jq -r --arg b "$b" '.[] | select(.id == $b) | .issue_type // "task"' "$STUB_STORE")" = bug ] && { printf '%s' "$b"; return; }
+  done
+  printf '<none>'
+}
 export STUB_REHOME_LOG="$TMP/rehome.log"; : > "$STUB_REHOME_LOG"
 SUT="$SD/pr-facts.sh"
 FIX="rig/gc-toolkit.polecat"; REV="rig/gc-toolkit.polecat-codex"
@@ -475,7 +485,8 @@ out=$(run)
 has "$out" "auto-disposed (duplicate -> tk-succ)" "the disposition is consummated, not abandoned"
 has "$(cat "$STUB_REHOME_LOG")" "--origin F2a --successor tk-succ --kind duplicate" "bead-rehome got the recorded disposition"
 eq "$(bstatus F2a)" "closed" "the anchor is closed via the sanctioned terminal path"
-eq "$(meta F2a 'gc.superseded_by')" "tk-succ" "gc.superseded_by is stamped (the terminal state I5 accepts)"
+eq "$(succ_of F2a)" "tk-succ" "its duplicates edge names the successor (the terminal state I5 accepts)"
+eq "$(awk -F'|' '$1 == "F2a" { print $2 }' "$STUB_DEPS")" "duplicates" "…an edge of the kind's type"
 eq "$(meta F2a merge_result)" "pull_request" "merge_result is NOT flipped to abandoned"
 eq "$(cat "$STUB_ESC_LOG")" "" "…and NO rework-or-close gate is filed"
 
@@ -508,11 +519,11 @@ printf '%s' "$(prview 23 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_23.json"
 out=$(STUB_REHOME_RC=5 run)
 eq "$(bstatus F2c)" "open" "the anchor is left OPEN for repair"
 eq "$(meta F2c merge_result)" "pull_request" "…still enumerable, so the next pass retries"
-eq "$(meta F2c 'gc.superseded_by')" "<absent>" "nothing was disposed"
+eq "$(succ_of F2c)" "<none>" "nothing was disposed"
 has "$(cat "$STUB_ESC_LOG")" "--subject F2c --key pr-dispose-failed.23" "a gate is filed under a DISTINCT key"
 hasnt "$(cat "$STUB_ESC_LOG")" "pr-abandoned.23" "…never the generic rework-or-close gate"
 
-echo "# a disposition whose pointer would not stick (transient) -> skip, retry, no gate"
+echo "# a disposition whose write does not land (transient) -> skip, retry, no gate"
 store "[$(anchor F2d 24 ',"gc.pr_close_disposition_kind":"duplicate","gc.pr_close_disposition_successor":"tk-d"')]"
 printf '%s' "$(prview 24 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_24.json"
 : > "$STUB_ESC_LOG"
@@ -580,7 +591,7 @@ out=$(run)
 has "$out" "auto-disposed (duplicate -> tk-h)" "the anchor is disposed"
 eq "$(bstatus F2h)" "closed" "the anchor is closed"
 eq "$(bstatus K1)" "closed" "the parked child K1 is dropped"
-eq "$(meta K1 'gc.superseded_by')" "tk-h" "…superseded by the anchor's successor, the sanctioned terminal close"
+eq "$(succ_of K1)" "tk-h" "…superseded by the anchor's successor, the sanctioned terminal close"
 eq "$(bstatus K2)" "closed" "the parked child K2 is dropped too"
 has "$(cat "$STUB_REHOME_LOG")" "--origin K1 --successor tk-h --kind not-needed" "bead-rehome drops K1 as not-needed -> the successor"
 has "$(cat "$STUB_REHOME_LOG")" "--origin K2 --successor tk-h --kind not-needed" "…and K2 the same way"
@@ -615,8 +626,8 @@ has "$(cat "$STUB_REHOME_LOG")" "--origin K3 --successor ot-k --kind not-needed 
 # A rework child holds a `blocks` edge on its anchor, so the anchor's own
 # non-force close is REFUSED while the child is open. The child must be dropped
 # FIRST, in this same pass — drop it after the anchor close and the anchor can
-# never close (its blocker is what fails the close), so it strands OPEN with its
-# pointer stamped and a human has to finish it by hand. The bead-rehome stub
+# never close (its blocker is what fails the close), so it strands OPEN and a
+# human has to finish it by hand. The bead-rehome stub
 # models that open-blocker refusal, so this case fails against a dispose that
 # closes the anchor before its children.
 echo "# a blocking rework child is dropped BEFORE the anchor close, so the anchor is not stranded"
@@ -628,8 +639,8 @@ printf '%s' "$(prview 30 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_30.json"
 out=$(run)
 eq "$(bstatus RC)" "closed" "the blocking rework child is dropped"
 eq "$(bstatus F2j)" "closed" "…so the anchor's own close is no longer refused — disposed, not stranded"
-eq "$(meta F2j 'gc.superseded_by')" "tk-j" "the anchor carries its terminal pointer"
-eq "$(meta RC 'gc.superseded_by')" "tk-j" "…and the child is superseded by the anchor's successor"
+eq "$(succ_of F2j)" "tk-j" "the anchor names its successor"
+eq "$(succ_of RC)" "tk-j" "…and the child is superseded by the anchor's successor"
 has "$(cat "$STUB_REHOME_LOG")" "--origin RC --successor tk-j --kind not-needed" "the child is dropped as not-needed -> the anchor's successor"
 rc_ln=$(grep -n -- "--origin RC " "$STUB_REHOME_LOG" | head -1 | cut -d: -f1)
 an_ln=$(grep -n -- "--origin F2j " "$STUB_REHOME_LOG" | head -1 | cut -d: -f1)
@@ -684,7 +695,7 @@ printf '%s' "$(prview 136 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_136.json"
 : > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
 out=$(STUB_ENFORCE_BLOCKS=1 run)
 eq "$(bstatus F2s)" "closed" "the anchor closes on the first pass"
-eq "$(meta F2s 'gc.superseded_by')" "tk-s" "…through the sanctioned terminal close"
+eq "$(succ_of F2s)" "tk-s" "…through the sanctioned terminal close"
 eq "$(bstatus RWS)" "closed" "the claimed fix unit is retired before it"
 eq "$(meta FS 'gc.outcome')" "moot" "…the must-fix finding about this diff is mooted"
 eq "$(bstatus VPS)" "closed" "…and the validation pass is retired"
@@ -715,9 +726,9 @@ printf '%s' "$(prview 137 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_137.json"
 : > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
 out=$(run)
 eq "$(bstatus F2u)" "closed" "the anchor's close lands"
-BUGU=$(jq -r '[ .[] | select((.metadata["gc.supersedes"] // "") == "FU") | .id ] | .[0] // "<none>"' "$STUB_STORE")
+BUGU=$(carrier_of FU)
 hasnt "$BUGU" "<none>" "the finding's objection is carried by a bead of its own"
-eq "$(meta FU 'gc.superseded_by')" "$BUGU" "…the finding closes pointed at it"
+eq "$(succ_of FU)" "$BUGU" "…the finding closes naming it"
 eq "$(meta FU 'gc.outcome')" "<absent>" "…not mooted"
 eq "$(bstatus "$BUGU")" "open" "…and the carrier stays open"
 eq "$(cat "$STUB_ESC_LOG")" "" "nothing is escalated"
@@ -737,7 +748,7 @@ hasnt "$(cat "$STUB_REHOME_LOG")" "--origin F2v" "…bead-rehome is not called o
 eq "$(cat "$STUB_ESC_LOG")" "" "…and nothing is filed: the next pass retries"
 out=$(run)
 eq "$(bstatus F2v)" "closed" "the next pass, with the comments readable, closes the anchor"
-hasnt "$(jq -r '[ .[] | select((.metadata["gc.supersedes"] // "") == "FV") | .id ] | .[0] // "<none>"' "$STUB_STORE")" "<none>" "…carrying the finding forward"
+hasnt "$(carrier_of FV)" "<none>" "…carrying the finding forward"
 # A later section that reuses one of these PR numbers reads its comments as
 # feedback, so the fixtures go with the cases that wrote them.
 rm -f "$GH_DIR/comments_137.json" "$GH_DIR/comments_138.json"
@@ -760,7 +771,7 @@ printf '%s' "$(prview 120 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_120.json"
 : > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
 out=$(run)
 eq "$(bstatus F2n)" "closed" "the anchor closes once the obstruction its gate reported has cleared"
-eq "$(meta F2n 'gc.superseded_by')" "tk-n" "…through the sanctioned terminal close"
+eq "$(succ_of F2n)" "tk-n" "…through the sanctioned terminal close"
 has "$(cat "$STUB_REHOME_LOG")" "--origin F2n --successor tk-n --kind re-homed --except-key pr-dispose-failed.120" "bead-rehome is told the arm's own gates do not hold this retry"
 eq "$(bstatus VN)" "closed" "the arm's own gate is withdrawn for the close it asked for"
 has "$(creason VN)" "Withdrawn by bead-rehome.sh" "…by bead-rehome.sh, just before that close"
@@ -2750,16 +2761,6 @@ has "$(creason SGk2)" "The anchor's park route is cleared with it." "…which th
 eq "$(bstatus SGm2)" "open" "…but not one a person is assigned"
 eq "$(bstatus SGc2)" "open" "…nor the feedback gate"
 
-echo "# …a park route that does not clear keeps its red-check gate open for the next pass"
-: > "$STUB_DEPS"
-store "[$(anchor SG5 605 ',"gc.routed_to":"human","gc.takeaway":"PR#605 parked"'), $(hgate SGn5 SG5 pr-fix-noncode.605)]"
-printf '%s' "$(prview 605 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_605.json"
-out=$(STUB_DROP_KEYS="SG5:gc.routed_to" run)
-eq "$(meta SG5 gc.routed_to)/$(bstatus SGn5)" "human/open" "the gate stays open while the route did not clear"
-has "$out" "its stale pr-fix-noncode.605 gate stays open: the anchor's park route did not clear" "…and the pass says so"
-out=$(run)
-eq "$(meta SG5 gc.routed_to)/$(bstatus SGn5)" "/closed" "the next pass clears the route and withdraws the gate"
-
 echo "# …an early arm withdraws nothing, and an unread gate list withdraws nothing"
 : > "$STUB_DEPS"
 store "[$(anchor SG4 604), $(hgate SGu4 SG4 pr-unengaged-threads.604.sha-OLD)]"
@@ -2959,19 +2960,6 @@ printf '[{"id":9301,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_
 out=$(run)
 has "$out" "review or Conversation batch history is unreadable; NOT watermarking" "the unparsable ledger is reported"
 eq "$(meta PRC pr_comment_watermark)" "<absent>" "…and the batch is not watermarked past it"
-
-echo "# …a routing that lands but does not read back re-dispatches onto the SAME child"
-store "[$(anchor W1 45)]"
-printf '%s' "$(prview 45 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_45.json"
-echo '[]' > "$GH_DIR/reviews_45.json"
-printf '[{"id":9001,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_45.json"
-out=$(STUB_DROP_KEYS="W1:pr_comment_watermark" run)
-has "$out" "watermark did NOT record" "the lost watermark is caught by the read-back"
-eq "$(meta W1 pr_comment_watermark)" "<absent>" "…the mark really did not move"
-out=$(run)
-has "$out" "already covers this batch; re-checking its route" "the next pass finds its own child"
-eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" "STILL one child — an unanswered comment never mints a twin"
-eq "$(meta W1 pr_comment_watermark)" "9001" "…and the mark lands on the retry"
 
 echo "# …a fresh child whose anchor_bead does not read back is never routed, and is closed rather than left holding the merge"
 store "[$(anchor W2 46)]"
@@ -6161,16 +6149,6 @@ eq "$(meta NC8 'gc.routed_to')" "human" "…and the approved PR parks at once"
 has "$(ncdesc 117)" "re-run of the failed jobs of run(s) 7117 at head sha-117 did not go through" "…with a gate naming the refused re-run"
 eq "$(meta NC8 pr_check_rerun)" "sha-117" "…and the head stays recorded, so no later pass at it re-runs"
 
-echo "# …a re-run record that does not land re-runs and parks nothing"
-store "[$(anchor NC9 118)]"
-printf '%s' "$(prview 118 OPEN UNSTABLE MERGEABLE ",\"statusCheckRollup\":[$(ncrow test TIMED_OUT 7118)]")" > "$GH_DIR/pr_view_118.json"
-approve 118
-: > "$STUB_ESC_LOG"; : > "$STUB_GH_LOG"
-out=$(STUB_DROP_KEYS="NC9:pr_check_rerun" run)
-has "$out" "the record of a re-run at head sha-118 did not land; nothing re-run or parked (retry next pass)" "a record that did not land is reported"
-eq "$(reruns 7118)" "0" "…and nothing is re-run without it"
-eq "$(meta NC9 'gc.routed_to')" "" "…or parked"
-
 echo "# …a run with a job still going is re-run only once it has finished"
 store "[$(anchor NC11 120)]"
 printf '%s' "$(prview 120 OPEN UNSTABLE MERGEABLE ",\"statusCheckRollup\":[$(ncrow test CANCELLED 7120),{\"name\":\"test-macos\",\"status\":\"IN_PROGRESS\",\"conclusion\":\"\",\"detailsUrl\":\"https://github.com/zook/gc-toolkit/actions/runs/7120/job/97121\"}]")" > "$GH_DIR/pr_view_120.json"
@@ -6187,15 +6165,12 @@ eq "$(reruns 7120)" "1" "…and once the run has finished, its failed jobs are r
 eq "$(meta NC11 pr_check_rerun)" "sha-120" "…recorded at that head"
 
 echo "# …a failure no re-run reaches, a timeout with no Actions run named, parks an approved PR"
-echo "#   and a park whose route does not read back files no gate and retries next pass"
 store "[$(anchor NC6 115)]"
 printf '%s' "$(prview 115 OPEN UNSTABLE MERGEABLE ',"statusCheckRollup":[{"name":"test","status":"COMPLETED","conclusion":"TIMED_OUT"}]')" > "$GH_DIR/pr_view_115.json"
 approve 115
 : > "$STUB_ESC_LOG"; : > "$STUB_GH_LOG"
-out=$(STUB_DROP_KEYS="NC6:gc.routed_to" run)
+out=$(run)
 hasnt "$(cat "$STUB_GH_LOG")" "run rerun" "a check whose URL names no Actions run is not re-run"
-has "$out" "parking the anchor to human did not land (retry next pass)" "a write that reported success without landing the route is not a park"
-hasnt "$(cat "$STUB_ESC_LOG")" "pr-fix-noncode.115" "…so no gate is filed for a park that did not happen"
 eq "$(no_rework)" "0" "…and no fixer is dispatched either"
 
 echo "# …STARTUP_FAILURE is re-run the same way, and a new head gets a re-run of its own"
@@ -6415,17 +6390,6 @@ eq "$(meta UM3 'gc.routed_to')" "" "…so the anchor stays unrouted"
 eq "$(no_rework)" "0" "…and no fixer goes to the stale head"
 out=$(run)
 eq "$(meta UM3 'gc.routed_to')" "human" "…while a pass whose re-read still names the head parks it"
-rm -f "$GH_DIR/rules_main.json"
-
-echo "# …a park whose route does not read back files no gate and retries next pass"
-reap_req
-store "[$(anchor UM4 178),$(rwchild_worked CK18 UM4 178 "$CAPHX")]"
-rcredview 178 "$CAPHX"
-: > "$STUB_ESC_LOG"
-out=$(STUB_DROP_KEYS="UM4:gc.routed_to" run)
-has "$out" "parking the anchor to human did not land (retry next pass)" "a write that reported success without landing the route is not a park"
-hasnt "$(cat "$STUB_ESC_LOG")" "pr-fix-unmoved.178" "…so no gate is filed for a park that did not happen"
-eq "$(no_rework)" "0" "…and no fixer is sent either"
 rm -f "$GH_DIR/rules_main.json"
 
 echo "# …a closed child of another arm at the current head neither parks the anchor nor stands the arm down"

@@ -4,12 +4,12 @@
 #
 # THE CONTRACT this pins:
 #   (SETTLE)    settle writes a bead's computed priority to the bead and to every
-#               live workflow poured for it (input convoy, root, open steps) and
-#               reads it back; a claimed bead or step is left as it is, and so is
+#               live workflow poured for it (input convoy, root, open steps); a
+#               claimed bead or step is left as it is, and so is
 #               a closed one; a bead that follows nothing keeps its own priority
 #               and its workflows take it, and a workflow root that follows
 #               nothing writes its own steps; --print computes and writes
-#               nothing; a write that does not read back, an unreadable bead and
+#               nothing; a write the store refuses, an unreadable bead and
 #               a lock held past the wait each exit 1. A writer records itself
 #               as the lock's holder while it holds it and clears the record as
 #               it exits.
@@ -17,7 +17,7 @@
 #               and --shift sets a bead that follows a parent or an anchor; the
 #               move then writes every bead that follows it, held ones and gates
 #               included, their live workflows and their anchors' PR-finishing
-#               work, and reads them back. The moved bead's own input, a P-value or a
+#               work. The moved bead's own input, a P-value or a
 #               shift, is written even when it is claimed. A P-value on a member
 #               is refused naming the shift that lands it there; a shift on a
 #               bead that follows nothing, either form on a workflow's convoy,
@@ -128,8 +128,8 @@ mkdir -p "$TMP/bin" "$TMP/rig-tk/.beads"
 #                      write; an unknown id refuses the whole call. bd types a
 #                      --set-metadata value that reads as a JSON number, true or
 #                      false, and so does this. STUB_UPDATE_FAIL refuses every
-#                      update; STUB_DROP_PRIORITY answers 0 and writes no
-#                      priority. STUB_GATE, in the environment of one caller,
+#                      update, and STUB_UPDATE_FAIL_ID refuses one that names
+#                      that id. STUB_GATE, in the environment of one caller,
 #                      holds that caller's first priority write until the gate
 #                      file is removed, touching <gate>.reached when it arrives.
 # Any other call is refused with exit 2, so a call the scripts must not make
@@ -267,6 +267,9 @@ case "$verb" in
       shift || true
     done
     [ -n "${STUB_UPDATE_FAIL:-}" ] && { echo "gc: simulated update refusal" >&2; exit 1; }
+    if [ -n "${STUB_UPDATE_FAIL_ID:-}" ] && grep -qxF -- "$STUB_UPDATE_FAIL_ID" <<< "$(printf '%s\n' "${ids[@]}")"; then
+      echo "gc: simulated update refusal" >&2; exit 1
+    fi
     idj="$(printf '%s\n' "${ids[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')"
     jq -e --argjson ids "$idj" '. as $s | all($ids[]; . as $i | any($s[]; .id == $i))' "$S" >/dev/null \
       || { echo "Error: no issue found matching one of ${ids[*]}" >&2; exit 1; }
@@ -274,7 +277,6 @@ case "$verb" in
       : > "$STUB_GATE.reached"
       n=0; while [ -f "$STUB_GATE" ] && [ "$n" -lt 300 ]; do sleep 0.1; n=$((n + 1)); done
     fi
-    [ -n "${STUB_DROP_PRIORITY:-}" ] && pr=""
     setj="$(printf '%s\n' ${sets[@]+"${sets[@]}"} | jq -Rsc 'split("\n") | map(select(length > 0) | capture("^(?<k>[^=]+)=(?<v>.*)$")
       | .v |= (if test("^-?(0|[1-9][0-9]*)(\\.[0-9]+)?([eE][+-]?[0-9]+)?$") then tonumber
                elif . == "true" then true elif . == "false" then false else . end))')"
@@ -454,9 +456,10 @@ eq "$(prio tk-wc)" 3 "(SETTLE) a claimed member is not rewritten"
 has "$OUT" "claimed, left as it is: tk-wc (in_progress)" "(SETTLE) and settle says so"
 
 reset_store
-STUB_DROP_PRIORITY=1 qp settle tk-w1
-eq "$RC" 1 "(SETTLE) a write that does not read back exits 1"
-has "$ERR" "tk-w1 reads P2, not P1" "(SETTLE) naming the bead that did not take the write"
+STUB_UPDATE_FAIL=1 qp settle tk-w1
+eq "$RC" 1 "(SETTLE) a write the store refuses exits 1"
+has "$ERR" "tk-w1 did not settle at P1: the write of P1 to" "(SETTLE) naming the write that failed"
+has "$ERR" "tk-w1 failed" "(SETTLE) …and the beads it carried"
 
 reset_store
 jq -c 'map(if .id == "tk-w2" then .metadata.priority_shift = "soon" else . end)' "$STUB_STORE" > "$STUB_STORE.tmp" && mv "$STUB_STORE.tmp" "$STUB_STORE"
@@ -654,8 +657,8 @@ eq "$(prio tk-e1)" 1 "(MOVE) and leaves the epic as it is"
 reset_store
 CACHE="$TMP/gc-helm-cache.$(id -u 2>/dev/null || echo 0)/board2-$(printf '%s' default | cksum | cut -d' ' -f1).ndjson"
 mkdir -p "${CACHE%/*}"; : > "$CACHE"
-STUB_DROP_PRIORITY=1 helm priority tk-e1 P0
-eq "$RC" 4 "(MOVE) a move whose writes do not read back exits 4"
+STUB_UPDATE_FAIL_ID=tk-w1 helm priority tk-e1 P0
+eq "$RC" 4 "(MOVE) a move whose later writes the store refuses exits 4"
 has "$ERR" "did not all settle" "(MOVE) and says so"
 [ ! -e "$CACHE" ] && ok "(MOVE) a move that fails after writing busts the board cache" || bad "(MOVE) a move that fails after writing busts the board cache"
 : > "$CACHE"

@@ -8,8 +8,8 @@
 #                   [--target <pool>] [--dry-run]
 #
 # --blocked-by is the same wait with no person in it: the work bead takes a
-# `blocks` edge onto <bead> unless it has one, and everything below applies, with
-# <bead> closing in place of the gate clearing.
+# `blocks` edge onto <bead>, and everything below applies, with <bead> closing in
+# place of the gate clearing.
 #
 # A worker that declines work it cannot finish without a person files the
 # question with human-gate.sh, then cancels its run (run-cancel.sh). Nothing
@@ -49,23 +49,29 @@
 # in_progress one, and reconcile never slings over an assignee. So a claim the
 # work bead still carries is released after the edge lands and before the arm,
 # when no live worker holds it. That is a claim in this session's name, or an
-# in_progress claim whose owner `gc session list --state all` lists under none
-# of its names. mol-polecat-work's load-context builds over such a crashed
-# owner's claim, and this script proves the owner gone itself, so a wait asked
-# at any step of that run releases the claim without the caller naming it.
-# The release is `gc bd unclaim --if-assignee`, which reopens the bead and
-# clears its assignee in one write, and only while that claim is still the one
-# this run read. Any other claim exits 1 before anything is written: an owner
-# the list still names may be live, a list that cannot be read proves no owner
-# gone, and an open bead under another assignee is a hand-off, not a claim.
+# in_progress claim whose owner `gc session list` lists under none of its names.
+# mol-polecat-work's load-context builds over such a crashed owner's claim, and
+# this script proves the owner gone itself, so a wait asked at any step of that
+# run releases the claim without the caller naming it.
+# An in_progress claim is released with `gc bd release-if-current`, Gas City's
+# compare-and-swap release: one write that reopens the bead and clears its
+# assignee, made only while the bead is still in_progress under the holder this
+# run read. It releases nothing else, so an open bead claimed in this session's
+# name, as the refinery's work is, is cleared by an update guarded on its status
+# and assignee. Any other claim exits 1 before anything is written: an owner the
+# list still names may be live, a list that cannot be read proves no owner gone,
+# and an open bead under another assignee is a hand-off, not a claim.
 #
-# The edge, the release and the arm are read back. Any of them not landing exits
-# 1, and the caller does not cancel its run: a cancelled run with no recorded
-# wait leaves the work bead open, unrouted and unarmed, which nothing
-# re-offers. Re-running converges, with or without --target: an edge already in
-# place, a claim already released and an arm already recorded count as landed,
-# and after an arm that did not land, the re-run arms to the pool the earlier
-# run recorded.
+# The edge, the release and the arm each take their exit. The edge is written
+# only when the gate, or <bead>, is in the work bead's store, because bd stores
+# an edge onto another store's bead without finding it, and it holds nothing.
+# Any write refused, or an edge that would cross stores, exits 1, and the caller
+# does not cancel its run: a cancelled run with no recorded wait leaves the work
+# bead open, unrouted and unarmed, which nothing re-offers. Re-running
+# converges, with or without --target: bd takes an edge it already holds as a
+# no-op, a claim already released needs no release, and a second arm rewrites
+# the first, and after an arm that did not land, the re-run arms to the pool
+# the earlier run recorded.
 #
 # Callers: work-gate.sh and work-setup.sh, the decline arms of mol-polecat-work
 # that wait for a person or a sibling, and two arms of mol-refinery-patrol's
@@ -107,8 +113,8 @@ usage: await-ruling.sh <work-bead> --key <situation-key> --formula <formula>
   --dry-run       resolve and report; write nothing
 
 A claim on the work bead is released before the arm when it is this session's,
-or when the bead is in_progress under an owner `gc session list --state all`
-does not list. Any other claim is kept, and no wait is recorded.
+or when the bead is in_progress under an owner `gc session list` does not list.
+Any other claim is kept, and no wait is recorded.
 
 env: GC_SESSION_NAME, GC_SESSION_ID, GC_AGENT, GC_ALIAS name this session.
 
@@ -186,13 +192,15 @@ case "$STATUS" in
     exit 1 ;;
 esac
 
-# owner_listed <assignee> — how many sessions `gc session list --state all`
-# lists under that assignee, in any of the three forms a claim writes: the
-# session name, the session id, or the agent address, which is a session's
-# alias or the end of one. The same match decides load-context's owner check.
-# Prints nothing when the list cannot be read.
+# owner_listed <assignee> — how many sessions `gc session list` lists under
+# that assignee, in any of the three forms a claim writes: the session name,
+# the session id, or the agent address, which is a session's alias or the end
+# of one. That listing holds every session that has not closed, asleep ones
+# included. Load-context's owner check (work_owner_listed in work-lib.sh) reads
+# the same listing with the same match. Prints nothing when the list cannot be
+# read.
 owner_listed() {
-  gc session list --state all --json 2>/dev/null </dev/null | scrub | jq -r --arg o "$1" '
+  gc session list --json 2>/dev/null </dev/null | scrub | jq -r --arg o "$1" '
     if type == "object" and (.sessions | type) == "array" and all(.sessions[]; type == "object") then
       [ .sessions[] | select(((.alias // "") == $o) or ((.alias // "") | endswith($o))
                              or ((.session_name // "") == $o) or ((.id // "") == $o)) ] | length
@@ -200,19 +208,23 @@ owner_listed() {
 }
 
 # RELEASE says how the bead becomes open and unassigned before the arm:
-# `unclaim` a claim no live worker holds, `reopen` an in_progress bead that
-# names no assignee, or nothing for a bead already open and unassigned.
+# `release` an in_progress claim no live worker holds, `unassign` an open bead
+# claimed in this session's name, `reopen` an in_progress bead that names no
+# assignee, or nothing for a bead already open and unassigned.
 RELEASE=""
 if [ -n "$ASSIGNEE" ]; then
   for me in "${GC_SESSION_NAME:-}" "${GC_SESSION_ID:-}" "${GC_AGENT:-}" "${GC_ALIAS:-}"; do
-    if [ -n "$me" ] && [ "$me" = "$ASSIGNEE" ]; then RELEASE=unclaim; break; fi
+    if [ -n "$me" ] && [ "$me" = "$ASSIGNEE" ]; then
+      case "$STATUS" in open) RELEASE=unassign ;; *) RELEASE=release ;; esac
+      break
+    fi
   done
   if [ -z "$RELEASE" ]; then
     KEPT="an open bead under another assignee is a hand-off, not a claim this run can release"
     if [ "$STATUS" = in_progress ]; then
       LISTED=$(owner_listed "$ASSIGNEE")
       case "$LISTED" in
-        0)  RELEASE=unclaim ;;
+        0)  RELEASE=release ;;
         "") KEPT="gc session list could not be read, so nothing proves that owner gone" ;;
         *)  KEPT="gc session list still lists that owner, so its worker may be live" ;;
       esac
@@ -254,6 +266,12 @@ if [ -z "$BLOCKER" ]; then
   fi
   WAIT_ON="gate $GATE"
 fi
+# An id's prefix names its store, and the wait is a blocks edge from the work
+# bead, so the gate or <bead> it waits on must be in the work bead's store.
+if ! bd_same_store "$WORK" "$GATE"; then
+  echo "$PROG: $WAIT_ON is in another store than $WORK, so a blocks edge onto it would hold nothing; no wait was recorded" >&2
+  exit 1
+fi
 
 if [ -z "$TARGET" ]; then
   TARGET=$(printf '%s' "$WORK_JSON" | jq -r '
@@ -273,32 +291,30 @@ if [ "$DRY_RUN" = 1 ]; then
   exit 0
 fi
 
-# `dep add <bead> <blocker>` reads "<bead> is blocked by <blocker>". The edge is
-# read back from the work bead's side, the read every reader of its gates makes.
-blocks_on_gate() {
-  local gates
-  if [ -n "$BLOCKER" ]; then
-    gates=$(bd_json_array dep list "$WORK") || return 1
-    printf '%s' "$gates" | jq -e --arg g "$GATE" 'any(.[]; .id == $g and ((.dependency_type // .type // "") == "blocks"))' >/dev/null 2>&1
-    return
-  fi
-  gates=$(bd_human_gates "$WORK") || return 1
-  printf '%s' "$gates" | jq -e --arg g "$GATE" 'any(.[]; .id == $g)' >/dev/null 2>&1
-}
-if ! blocks_on_gate; then
-  gc bd dep add "$WORK" "$GATE" --type=blocks </dev/null >/dev/null 2>&1 || true
-  if ! blocks_on_gate; then
-    echo "$PROG: the blocks edge from $WORK onto $WAIT_ON did not land; no wait was recorded" >&2
-    exit 1
-  fi
+# `dep add <bead> <blocker>` reads "<bead> is blocked by <blocker>". A gate filed
+# on the work bead already blocks it, and bd takes that edge again as a no-op.
+if ! gc bd dep add "$WORK" "$GATE" --type=blocks </dev/null >/dev/null 2>&1; then
+  echo "$PROG: the store refused the blocks edge from $WORK onto $WAIT_ON; no wait was recorded" >&2
+  exit 1
 fi
 
 # The edge already keeps the bead out of `bd ready`, so releasing its claim
-# offers it to no pool. The unclaim is a compare-and-swap on the assignee read
-# above, so a claim that changed hands since is left alone.
+# offers it to no pool. Each release is a compare-and-swap on the status and the
+# assignee read above, so a claim that changed hands since is left alone. gc bd
+# runs both in the store of the bead they name (bdAddressedSubjects,
+# cmd/gc/bd_subject_route.go in gascity), so the holder, often a session id that
+# names a bead of the city store, never picks the store. release-if-current
+# prints "released" once it has reopened the bead and cleared its assignee, and
+# "skipped" when the bead is no longer in_progress under that holder.
 case "$RELEASE" in
-  unclaim)
-    if ! gc bd unclaim "$WORK" --if-assignee "$ASSIGNEE" </dev/null >/dev/null 2>&1; then
+  release)
+    RELEASED=$(gc bd release-if-current "$WORK" "$ASSIGNEE" </dev/null 2>/dev/null); RELEASE_RC=$?
+    if [ "$RELEASE_RC" != 0 ] || [ "$RELEASED" != released ]; then
+      echo "$PROG: the claim of $ASSIGNEE on $WORK was not released (gc bd release-if-current exited $RELEASE_RC with '${RELEASED}': bd refused it, or the claim changed hands); it waits on $WAIT_ON unarmed" >&2
+      exit 1
+    fi ;;
+  unassign)
+    if ! gc bd update "$WORK" --if-status=open --if-assignee="$ASSIGNEE" --assignee="" </dev/null >/dev/null 2>&1; then
       echo "$PROG: the claim of $ASSIGNEE on $WORK was not released (bd refused it, or the claim changed hands); it waits on $WAIT_ON unarmed" >&2
       exit 1
     fi ;;
@@ -324,14 +340,6 @@ fi
 if ! ARM_OUT=$("$DEFERRED" arm "$WORK" --target "$TARGET" --sling-arg --on --sling-arg "$FORMULA" \
     --reason "${KEY:+waits on the ruling asked by $WAIT_ON ($KEY)}${BLOCKER:+waits on $BLOCKER}" 2>&1); then
   echo "$PROG: the re-sling was not armed on $WORK: $ARM_OUT; it waits on $WAIT_ON unarmed, and a re-run arms it to $TARGET, recorded as resling_target" >&2
-  exit 1
-fi
-BACK=$(bd_json show "$WORK")
-ARMED=$(printf '%s' "$BACK" | jq -r '.[0].metadata["gc.dispatch_when_ready"] // empty' 2>/dev/null)
-BACK_STATUS=$(printf '%s' "$BACK" | jq -r '.[0].status // empty' 2>/dev/null)
-BACK_ASSIGNEE=$(printf '%s' "$BACK" | jq -r '.[0].assignee // empty' 2>/dev/null)
-if [ "$ARMED" != "$TARGET" ] || [ "$BACK_STATUS" != open ] || [ -n "$BACK_ASSIGNEE" ]; then
-  echo "$PROG: $WORK reads back armed to '${ARMED}', status '${BACK_STATUS}', assignee '${BACK_ASSIGNEE}'; the re-sling fires only for an open, unassigned bead armed to $TARGET" >&2
   exit 1
 fi
 if [ -n "$BLOCKER" ]; then

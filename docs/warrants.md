@@ -80,7 +80,7 @@ shares only the word ([authority-map.md](authority-map.md)).
     forced relaunch and a claimant with no poured workflow, so it adds no key and
     writes nothing to let a run through.
   - `workspace-setup` brings a rejected branch current by merge, where Gas Town's
-    rebases and force-pushes under an open PR, and waits behind a sibling.
+    rebases it under an open PR, and waits behind a sibling.
   - `preflight-tests` runs the checks through `gctk rig`, so every polecat starting
     from one base shares one recorded run, and keys a tracker on a stamp. Core's
     runs each command raw per polecat and matches trackers by title.
@@ -116,8 +116,8 @@ shares only the word ([authority-map.md](authority-map.md)).
   In `gastownhall/gascity-packs`, `gastown/formulas/mol-polecat-work.toml` overrides
   `workspace-setup`, `self-review` and `submit-and-exit`, rebases a rejected
   branch, and at the handoff detaches the tree and deletes its branch.
-- **Verified.** 2026-11-06, at `gastownhall/gascity` main bfd72756e and
-  `gastownhall/gascity-packs` main e3cb468bb.
+- **Verified.** 2026-11-08, at `gastownhall/gascity` main c7a45437f and
+  `gastownhall/gascity-packs` main 2a3b142e3.
 - **Retires when.** A step at a time. `load-context`: core's gate refuses finished
   and parked work and ends a run by cancelling it. `workspace-setup`: the
   refinery's rework machinery goes (`tk-1tfzr71.20`), which ends the merge resume.
@@ -230,11 +230,10 @@ shares only the word ([authority-map.md](authority-map.md)).
   its molecule at its epic's priority (bd's `cmd/bd/swarm.go`). Nothing updates
   the copy when the source's priority changes. Neither one's documentation
   describes a priority that follows another bead's.
-- **Verified.** 2026-11-05, at `gastownhall/gascity` main 9f807760c,
-  `gastownhall/gascity-packs` main 796d7ecd7 and `gastownhall/beads` main
-  6d713a748 (`BuildReadyWorkOrder` in `internal/storage/sqlbuild/ready.go`
-  orders the priority policy by the bead's own priority), with bd 1.3.2
-  (9b65b9e19).
+- **Verified.** 2026-11-06, at `gastownhall/gascity` main 005135c33 and
+  `gastownhall/beads` main 8c3eb30f3 (`BuildReadyWorkOrder` in
+  `internal/storage/sqlbuild/ready.go` orders the priority policy by the bead's
+  own priority), with bd 1.3.2 (9b65b9e19).
 - **Retires when.** Gas City or bd ships an inherited or derived claim priority,
   or a work query can order by a parent's priority.
 
@@ -273,28 +272,6 @@ shares only the word ([authority-map.md](authority-map.md)).
   owns every rig's origin. A token the rigs share also leaves each rig's agents
   free to write to the others' repositories, which the guard refuses.
 
-## Converse reap
-
-- **Covers.** `assets/scripts/converse-reap.sh`, `orders/converse-reap.toml`.
-- **Stands in for.** Ending a manual session that outlives the conversation it
-  held: a stop that did not take, a conversation another path closed, or one a
-  sitting cut short handed back to the operator's queue.
-- **Evidence.** In `gastownhall/gascity`, a manual session does not end when its
-  work closes. It stays until it is closed or drained, and attaching wakes one
-  that sleeps (`cmd/gc/compute_awake_set.go` 443-451, 594-605 and 679-704).
-  No closer the controller runs on its own ends one because its work closed:
-  the stale-session closers exempt a session that has started its
-  conversation (`reapStaleSessionBeads`, `reapPreBootSessionBeads` and
-  `cleanDeadRuntimeCorpse` in `cmd/gc/session_beads.go`, at 3164, 3345 and
-  3608), and the core reaper prunes a session only once it has drained
-  (`internal/bootstrap/packs/core/assets/scripts/reaper.sh` 118 and 1588-1590).
-  A sitting drains itself once its conversation closes, and `gc-helm dismiss`
-  stops the session that held the conversation it closes, so nothing in the
-  controller ends a session either of them missed.
-- **Verified.** 2026-11-05, at `gastownhall/gascity` main 9f807760c.
-- **Retires when.** Gas City ends a manual session once its claimed work has
-  closed.
-
 ## Accept's lock
 
 - **Covers.** The acceptance lock of `assets/scripts/gc-helm.sh` accept: one
@@ -307,14 +284,15 @@ shares only the word ([authority-map.md](authority-map.md)).
 - **Evidence.** In `gastownhall/gascity`, a graph.v2 `gc sling <bead> --on
   <formula>` launches under a per-bead lock and refuses a second launch of the
   formula at the bead, exiting 3, only while a root an earlier launch poured is
-  live (`internal/sling/sling_core.go`, the lock at 621 and the check at 647,
-  `checkLegacySourceWorkflowConflict`, which reads the live roots at 1857; the
-  terminal-root skip in `internal/sling/sling_attachment.go` 326;
+  live (`internal/sling/sling_core.go`, the lock at 676 and the check at 702,
+  `checkLegacySourceWorkflowConflict`, which reads the live roots at 2026; the
+  terminal-root skip in `internal/sling/sling_attachment.go` 321;
   and `TestLiveConvoyTrackedWorkflowRootsSkipsTerminalRoots` in
-  `internal/sling/sling_test.go` 3639-3691). Once that root has closed, the next
+  `internal/sling/sling_test.go` 3975-4027). Once that root has closed, the next
   launch pours again. No `gc sling` flag checks an earlier root by its title or
-  by a key (`cmd/gc/cmd_sling.go` 146-161).
-- **Verified.** 2026-11-01, at `gastownhall/gascity` main ce6b62131de1.
+  by a key, and `--scope-kind` with `--scope-ref` names a city or rig scope, not
+  a caller's key (`cmd/gc/cmd_sling.go` 148-169).
+- **Verified.** 2026-11-08, at `gastownhall/gascity` main c7a45437f.
 - **Retires when.** A Gas City launch can refuse a second root under a caller's
   key whatever the first root's status.
 
@@ -430,9 +408,9 @@ shares only the word ([authority-map.md](authority-map.md)).
     a reader keys on. The `gastown` pack's `pr-merge-reconcile` records a PR's
     lifecycle in `pr_state`, a key of its own.
   - The search is [specs/tk-blloeo/gas-city-search.md](../specs/tk-blloeo/gas-city-search.md).
-- **Verified.** 2026-11-06, at `gastownhall/gascity` main 74d62eb1e0c0,
-  `gastownhall/gascity-packs` main e3cb468bbc65, and `gastownhall/beads` main
-  8c3eb30f30f7.
+- **Verified.** 2026-11-08, at `gastownhall/gascity` main fdfec4c19dc4,
+  `gastownhall/gascity-packs` main 2a3b142e3fbd, and `gastownhall/beads` main
+  2edea9ced8c6.
 - **Retires when.** Gas City records a pull request's merge readiness where a
   reader of the PR's own bead finds it, and tells a required check still
   running from a block, for example once its PR monitor reads the base
@@ -511,9 +489,9 @@ shares only the word ([authority-map.md](authority-map.md)).
     findings, and its `ce-pr-comment-resolver` agent is handed a thread to fix
     or answer. Neither keeps a record of the thread.
   - The search is [specs/tk-iydyiup/gas-city-search.md](../specs/tk-iydyiup/gas-city-search.md).
-- **Verified.** 2026-11-06, at `gastownhall/gascity` main b2c0f62ae6c9 with
+- **Verified.** 2026-11-08, at `gastownhall/gascity` main fdfec4c19dc4 with
   the `gastown` pack it bundles at 66897e7132c9, `gastownhall/gascity-packs`
-  main e3cb468bbc65, and `gastownhall/beads` main 8c3eb30f30f7.
+  main 2a3b142e3fbd, and `gastownhall/beads` main 2edea9ced8c6.
 - **Retires when.** Gas City records a pull request's review threads where a
   reader of the PR's own bead finds them, for example once its readiness
   monitor reads review threads, or a webhook receiver keeps their state from
@@ -564,10 +542,13 @@ shares only the word ([authority-map.md](authority-map.md)).
     `session.quarantined` has no emitter (`cmd/gc/cmd_analyze_reliability.go`).
     So the script reports a home it cannot sync through `patrol-finding.sh`, one
     report per home, which the next clean start clears.
-  - The search, and each way this script differs from Gas Town's and why, is
-    [specs/tk-1tfzr71.10/gas-city-search.md](../specs/tk-1tfzr71.10/gas-city-search.md).
-- **Verified.** 2026-11-05, at `gastownhall/gascity` main 9f807760c191 and
-  `gastownhall/gascity-packs` main 796d7ecd73cf.
+  - The search, and each way this script differs from Gas Town's and why, are
+    in two records:
+    [specs/tk-1tfzr71.10/gas-city-search.md](../specs/tk-1tfzr71.10/gas-city-search.md),
+    and [specs/tk-eu1f6tm/gas-city-search.md](../specs/tk-eu1f6tm/gas-city-search.md)
+    for when the script fetches, its retry of the add and its signal traps.
+- **Verified.** 2026-11-08, at `gastownhall/gascity` main 27a4857eabd5 and
+  `gastownhall/gascity-packs` main 2a3b142e3fbd.
 - **Retires when.** Gas City provisions a tree bound to an agent, with a sync to
   the default branch, or Gas Town's agents stop running a script of their own at
   `pre_start`.

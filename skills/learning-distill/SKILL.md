@@ -130,9 +130,9 @@ from the set rests on a cluster, never on one member, and lands as one of two
 things: a `review-rubric` amendment, or a change to the correctness method
 itself (`skills/review-correctness/SKILL.md`), filed as an engineering bead
 held for placement (`-l hold:mayor` on its create, as the distiller formula's
-step 1b files it). It is never one tactical rule per observation. Judgment 2
-weighs a cluster's recurrence by its distinct `obs.provenance`, as it does
-any pattern's.
+file-and-dispatch step files it). It is never one tactical rule per
+observation. Judgment 2 weighs a cluster's recurrence by its distinct
+`obs.provenance`, as it does any pattern's.
 
 A member that states universal intent (`obs.directive=standing`) is also a
 standing directive, and judgment 1 applies to it as to any other.

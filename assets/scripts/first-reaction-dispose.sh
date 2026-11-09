@@ -294,9 +294,8 @@ fi
 
 # One store. `bd dep add` naming a bead in another rig's store answers "✓
 # Added dependency" and holds nothing (component-model I1), so a cross-store
-# wait is refused here rather than written and believed.
-same_store() { [ "${1%%-*}" = "${2%%-*}" ]; }
-
+# wait is refused here, by bd-lib.sh's bd_same_store, before anything is
+# written.
 case "$DISPOSITION" in
     actionable)
         [ -z "$WAITING$BLOCKER_TITLE$THEN_ROUTE$THEN_ASSIGN$AFTER_WORKFLOW$RECOMMENDED_FORMULA" ] \
@@ -346,12 +345,12 @@ case "$DISPOSITION" in
             [ -z "$REACTION_BEAD" ] \
                 || usage_die "--after-workflow names a frozen reaction molecule's root; a reaction bead ($REACTION_BEAD) is not a workflow on $BEAD, so its close slings the closer now. Drop --after-workflow."
             [ "$AFTER_WORKFLOW" != "$BEAD" ] || usage_die "--after-workflow $AFTER_WORKFLOW is the bead itself"
-            same_store "$AFTER_WORKFLOW" "$BEAD" \
+            bd_same_store "$AFTER_WORKFLOW" "$BEAD" \
                 || usage_die "--after-workflow $AFTER_WORKFLOW is in another store than $BEAD; the gating hold is a blocks edge, which holds nothing across stores (component-model I1)."
         fi
         for w in $WAITING; do
             [ "$w" != "$BEAD" ] || usage_die "--waiting-on $w is the bead itself"
-            same_store "$w" "$BEAD" \
+            bd_same_store "$w" "$BEAD" \
                 || usage_die "--waiting-on $w is in another store than $BEAD; the hold is a blocks edge, which holds nothing across stores (component-model I1), so the closer would run before $w lands. A person closes $BEAD once $w lands instead: put that to the operator with --disposition ruling."
         done
         # The arm is part of this exit's write-back when the closer waits, and
@@ -376,7 +375,7 @@ case "$DISPOSITION" in
         fi
         for w in $WAITING; do
             [ "$w" != "$BEAD" ] || usage_die "--waiting-on $w is the bead itself"
-            same_store "$w" "$BEAD" \
+            bd_same_store "$w" "$BEAD" \
                 || usage_die "--waiting-on $w is in another store than $BEAD; a cross-store edge reports success and holds nothing. File a bead in ${BEAD%%-*}'s store that names $w in its body, and wait on that."
         done
         if [ -n "$THEN_ROUTE" ]; then
@@ -870,43 +869,21 @@ fi
 # board's Accept derivation (services/helm/internal/board/derive.go tests
 # `rf != ""`), gc-helm.sh accept, and converse-invalidate-recommendation.sh — so
 # a present-but-empty key is no live recommendation, and the clear below tests
-# it the same non-empty way. An update can report success without proving the
-# key moved, and a silent drop is invisible until the operator meets the wrong
-# affordance: a dropped set leaves a recommendation gate that offers only
-# Discuss, and a dropped clear leaves a superseded Accept executable. So
-# reco_ensure writes the key, reads it back from a valid payload, retries the
-# lone set or unset once, and fails the exit when it is still wrong, or when the
-# subject cannot be read to prove the key moved. The read is tagged so an
-# unreadable subject is never mistaken for a proven clear: "v:<value>" is a
-# valid array payload (<value> empty = key absent), and "u:" is a non-array,
-# error object, empty or unparseable read, whose state is unknown. gc bd show
-# answers an error OBJECT for a subject it cannot resolve, and a bare "" would
-# collapse that onto "key absent".
-reco_now() {
-    gc_bd show "$BEAD" --json 2>/dev/null | scrub \
-        | jq -r 'if (type == "array" and length > 0) then "v:" + (((.[0].metadata // {})["gc.recommended_formula"]) // "") else "u:" end' 2>/dev/null \
-        || printf 'u:'
-}
+# it the same non-empty way. A key that did not move is invisible until the
+# operator meets the wrong affordance: a set that did not land leaves a
+# recommendation gate that offers only Discuss, and a clear that did not land
+# leaves a superseded Accept executable. So reco_ensure stops the exit when the
+# store refuses the write, because the release, the arm and the close after it
+# cannot be undone.
 reco_ensure() { # <formula, or empty to clear> <what has already landed, for the failure>
-    local want="$1" landed="$2" got
+    local want="$1" landed="$2"
     if [ -n "$want" ]; then
-        gc_bd update "$BEAD" --set-metadata "gc.recommended_formula=$want" >/dev/null 2>&1 || true
-    else
-        gc_bd update "$BEAD" --unset-metadata "gc.recommended_formula" >/dev/null 2>&1 || true
+        gc_bd update "$BEAD" --set-metadata "gc.recommended_formula=$want" >/dev/null 2>&1 \
+            || die "the store refused gc.recommended_formula=$want on $BEAD. $landed The operator's Accept reads this key, so the exit stops here rather than leave a recommendation gate that offers only Discuss. Clear the cause and re-run this command."
+        return 0
     fi
-    if [ "$(reco_now)" != "v:$want" ]; then
-        if [ -n "$want" ]; then
-            gc_bd update "$BEAD" --set-metadata "gc.recommended_formula=$want" >/dev/null 2>&1 || true
-        else
-            gc_bd update "$BEAD" --unset-metadata "gc.recommended_formula" >/dev/null 2>&1 || true
-        fi
-    fi
-    got="$(reco_now)"
-    [ "$got" = "v:$want" ] && return 0
-    if [ -n "$want" ]; then
-        die "the recommendation did not land on $BEAD: gc.recommended_formula read back as '$got' (want 'v:$want'; a 'u:' means the subject could not be read, which is not proof it landed). $landed The operator's Accept reads this key, so the exit stops here rather than leave a recommendation gate that offers only Discuss. Clear the cause and re-run this command."
-    fi
-    die "the earlier recommendation did not clear on $BEAD: gc.recommended_formula read back as '$got' (want 'v:' for a proven-absent key; a 'u:' means the subject could not be read, which is not proof it cleared). $landed A disposition must not leave a superseded Accept executable, so the exit stops here. Clear the cause and re-run this command."
+    gc_bd update "$BEAD" --unset-metadata "gc.recommended_formula" >/dev/null 2>&1 \
+        || die "the store refused the clear of the earlier recommendation on $BEAD. $landed A disposition must not leave a superseded Accept executable, so the exit stops here. Clear the cause and re-run this command."
 }
 
 # ── A recommendation already on the subject is cleared, before the act ─────
@@ -1091,17 +1068,9 @@ fi
 # in an event bead and sets the label in one write. A note beside it says what
 # intake found and names the queue's read. A confirmed emergency carries P0
 # before its route or its arm, so it is never claimable at the priority it was
-# filed at, and its note rides the same write. Each write is read back: one that
-# did not land stops the exit before the act, with no landed proof, so a re-run
-# resumes.
-# subject_now <jq-path> answers "v:<value>" from a readable subject and "u:"
-# from anything else, so an unreadable subject never reads as a write that
-# landed.
-subject_now() {
-    gc_bd show "$BEAD" --json 2>/dev/null | scrub \
-        | jq -r "if (type == \"array\" and length > 0) then \"v:\" + (((.[0] | $1) // \"\") | tostring) else \"u:\" end" 2>/dev/null \
-        || printf 'u:'
-}
+# filed at, and its note rides the same write. The release after them cannot be
+# undone, so a write the store refuses stops the exit before the act, with no
+# landed proof, and a re-run resumes.
 if [ -n "$POOL_TARGET" ]; then
     INTAKE_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     INTAKE_NOTE=""
@@ -1110,30 +1079,20 @@ if [ -n "$POOL_TARGET" ]; then
         INTAKE_NOTE="## Intake (first reaction, $INTAKE_AT)
 $HOLD_REASON The operator's placement sitting places it under an epic or routes it on its own; gc beads list --label hold:mayor lists it."
         set -- set-state "$BEAD" hold=mayor --reason "$HOLD_REASON"
-        WANT="v:true"; WHAT="the hold:mayor label"; NOW_PATH='(.labels // []) | index("hold:mayor") != null'
+        WHAT="the hold:mayor label"
     elif [ "$ADMIT" = emergency ]; then
         set -- update "$BEAD" --priority 0 --append-notes "## Intake (first reaction, $INTAKE_AT)
 Routed to $POOL_TARGET at P0 as an emergency: $ADMIT_WHY."
-        WANT="v:0"; WHAT="priority P0"; NOW_PATH=".priority"
+        WHAT="priority P0"
     else
         set --
     fi
     if [ $# -gt 0 ]; then
         gc_bd "$@" >/dev/null 2>&1 \
             || die "could not write $WHAT on $BEAD (does it exist${DB:+ in $DB}?), so it was not released. Nothing else was written by this step; clear the cause and re-run this command."
-        if [ "$(subject_now "$NOW_PATH")" != "$WANT" ]; then
-            if [ "$ADMIT" = emergency ]; then
-                gc_bd update "$BEAD" --priority 0 >/dev/null 2>&1 || true
-            else
-                gc_bd "$@" >/dev/null 2>&1 || true
-            fi
-            _got="$(subject_now "$NOW_PATH")"
-            [ "$_got" = "$WANT" ] \
-                || die "$WHAT did not land on $BEAD (it read back as '$_got', want '$WANT'; a 'u:' means the subject could not be read, which is not proof it landed). The release is withheld, so $BEAD is not left unrouted without its hold or routed at the wrong priority. Clear the cause and re-run this command."
-        fi
         if [ -n "$INTAKE_NOTE" ]; then
             gc_bd update "$BEAD" --append-notes "$INTAKE_NOTE" >/dev/null 2>&1 \
-                || die "$BEAD carries hold:mayor, but intake's note saying why did not land, so it was not released. Clear the cause and re-run this command; the hold is already set, so a re-run writes only the note."
+                || die "$BEAD carries hold:mayor, but intake's note saying why did not land, so it was not released. Clear the cause and re-run this command, which sets the hold again and writes the note."
         fi
         note "intake wrote $WHAT on $BEAD"
     fi
@@ -1171,45 +1130,26 @@ case "$DISPOSITION" in
 esac
 "$HELM" "$@" || die "gc-helm.sh takeaway failed on $BEAD; its message above names what landed and what did not. Clear the cause and re-run this command."
 
-# The edge is the hold. gc-helm.sh warns on a rejected edge and keeps going,
-# which is right for a headline but not for the exits that hold on one: a
-# blocked disposition waits on its blocker, a recommend or a ruling on its gate,
-# and any whose edge never landed leaves the bead unheld with nothing to say so.
-# A missing edge fails the whole exit before the landed proof is stamped, so the
-# reaction stops rather than recording done over a bead that is recorded as
-# waiting and is not held, and a re-run resumes it.
-HOLD_WAITS=""
-case "$DISPOSITION" in
-    blocked)          HOLD_WAITS="$WAITING" ;;
-    recommend|ruling) HOLD_WAITS="$GATE" ;;
-esac
-if [ -n "$HOLD_WAITS" ]; then
-    HELD=$(gc_bd dep list "$BEAD" --json 2>/dev/null | scrub | jq -r 'if type == "array" then (.[]?.id // empty) else empty end' 2>/dev/null || printf '')
-    MISSING=""
-    for w in $HOLD_WAITS; do
-        case " $(printf '%s' "$HELD" | tr '\n' ' ') " in
-            *" $w "*) : ;;
-            *) note "$BEAD is not held by $w — wire it by hand: gc bd dep add $BEAD $w -t blocks"
-               MISSING="$MISSING $w" ;;
-        esac
-    done
-    [ -z "$MISSING" ] \
-        || die "the $DISPOSITION disposition on $BEAD did not land. Nothing holds it on:${MISSING}, so the bead is not held — it reads as parked on prose alone, the wait this exit recorded carried by no edge. The headline and the release stand — only the hold is missing, so wire the edge above by hand, or re-run this command: no landed proof was stamped, so a re-run resumes rather than refusing."
-    # A requested arm is part of the write-back too. Held with no arm, the bead
-    # waits on its edge with nothing to route it once the wait lifts, and a
-    # closed R brings no re-offer to arm it later. So an arm that does not land
-    # fails the exit the way a missing edge does, before the landed proof. The
-    # release leaves the bead open, unassigned and unrouted, which is what the
-    # arm needs, and the arm rewrites its own record, so a re-run arms cleanly.
-    # A bead intake held for placement is armed by nothing: its dispatch is the
-    # sitting's, once it places the bead.
-    if [ "$DISPOSITION" = "blocked" ] && [ -n "$THEN_ROUTE" ] && [ -n "$ADMIT" ]; then
-        # shellcheck disable=SC2086  # $BD_DB_ARGS expands to 0 or 2 space-free fields
-        if ARM_ERR=$("$DEFERRED" arm "$BEAD" --target "$THEN_ROUTE" --reason "first reaction: $REASON" $BD_DB_ARGS 2>&1 >/dev/null); then
-            note "armed the dispatch to $THEN_ROUTE for when the wait lifts"
-        else
-            die "the blocked disposition on $BEAD did not land. The dispatch to $THEN_ROUTE for when its wait lifts was not armed (${ARM_ERR:-deferred-dispatch.sh arm exited non-zero and named no cause}), so nothing would route $BEAD once the wait lifts. The headline, the release and the hold stand. No landed proof was stamped and the reaction bead stays open, so clear the cause and re-run this command: a re-run resumes rather than refusing."
-        fi
+# The edge is the hold: a blocked disposition waits on its blocker, and a
+# recommend or a ruling on its gate. takeaway exits non-zero when an edge it was
+# asked for is refused, so the exit stops above, before the landed proof, rather
+# than record done over a bead recorded as waiting and not held, and a re-run
+# resumes it.
+#
+# A requested arm is part of the write-back too. Held with no arm, the bead
+# waits on its edge with nothing to route it once the wait lifts, and a closed R
+# brings no re-offer to arm it later. So an arm that does not land fails the
+# exit the way a refused edge does, before the landed proof. The release leaves
+# the bead open, unassigned and unrouted, which is what the arm needs, and the
+# arm rewrites its own record, so a re-run arms cleanly. A bead intake held for
+# placement is armed by nothing: its dispatch is the sitting's, once it places
+# the bead.
+if [ "$DISPOSITION" = "blocked" ] && [ -n "$THEN_ROUTE" ] && [ -n "$ADMIT" ]; then
+    # shellcheck disable=SC2086  # $BD_DB_ARGS expands to 0 or 2 space-free fields
+    if ARM_ERR=$("$DEFERRED" arm "$BEAD" --target "$THEN_ROUTE" --reason "first reaction: $REASON" $BD_DB_ARGS 2>&1 >/dev/null); then
+        note "armed the dispatch to $THEN_ROUTE for when the wait lifts"
+    else
+        die "the blocked disposition on $BEAD did not land. The dispatch to $THEN_ROUTE for when its wait lifts was not armed (${ARM_ERR:-deferred-dispatch.sh arm exited non-zero and named no cause}), so nothing would route $BEAD once the wait lifts. The headline, the release and the hold stand. No landed proof was stamped and the reaction bead stays open, so clear the cause and re-run this command: a re-run resumes rather than refusing."
     fi
 fi
 

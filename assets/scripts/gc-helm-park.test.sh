@@ -4,20 +4,21 @@
 # WHAT park DOES: it holds everything under a bead that has not started by
 # giving the bead one `blocks` edge. The text form files a gate of its own,
 # titled with the text and described by --body, and the edge lands on it;
-# --waiting-on lands the edge on an existing bead and files no gate. The edge is
-# read back off the bead before the verb reports success.
+# --waiting-on lands the edge on an existing bead and files no gate. The write's
+# exit says whether the edge landed.
 #
 # THE CONTRACT this pins:
 #   - the text form files a plain gate in the bead's own store: issue_type=gate,
 #     the text as its title, --body as its description, and no await type, no
-#     gc.demand_for and no other metadata. The bead's edge onto it reads back.
+#     gc.demand_for and no other metadata. The bead's edge onto it rides the
+#     create.
 #   - --waiting-on gives the bead an edge onto the named bead and files no gate.
 #   - a re-run of the text form files no second gate: a gate in the text form's
 #     shape that the bead already waits on under the same title is the park. A
 #     same-title gate of another kind (a demand gate, a gate with an await type,
 #     a gate carrying metadata) is not, and the park files a gate of its own.
-#     A --body on the re-run becomes the reused gate's description, read back;
-#     one that does not read back fails the verb.
+#     A --body on the re-run becomes the reused gate's description, and one the
+#     store refuses fails the verb.
 #   - refused with nothing written: text over the 140-character cap, both forms
 #     at once, neither form, --body beside --waiting-on, a bead in flight
 #     (claimed, in_progress or hooked; branch, merge_result, rejection_reason;
@@ -27,8 +28,8 @@
 #   - a workflow still at load-context is not in flight, so its bead parks. A
 #     claimed bead is in flight even when a workflow poured for it still waits
 #     at load-context: a pour never claims its bead, so the claim is a run.
-#   - an edge that never reads back fails the verb (exit 4) with the repair; a
-#     create whose answer is lost is recovered from the edge it was born with.
+#   - an edge bd refuses fails the verb (exit 4) with the repair; a create
+#     whose answer is lost is recovered from the edge it was born with.
 #   - the summary names what the park holds and what it leaves running. An
 #     armed member is held, since deferred dispatch reads its ancestors'
 #     blockers, unless it is in flight; no member is reported as armed and
@@ -78,19 +79,17 @@ mkdir -p "$TMP/bin" "$TMP/rig-tk/.beads" "$TMP/rig-ra/.beads"
 #                    {issue_id, depends_on_id, type}, the assignee only when
 #                    set. STUB_LIST_FAIL fails it.
 #   bd update <id>   `--description <text>` replaces the row's description; any
-#                    other flag is refused. STUB_UPDATE_DROP answers 0 and
-#                    writes nothing.
+#                    other flag is refused. STUB_UPDATE_FAIL refuses it.
 #   bd create        `--type --title --description --deps blocks:<id> --json`:
 #                    lands the row and, in the same write, <id>'s blocks edge
 #                    onto it, then answers {"id": ...}. The id's prefix is the
 #                    pinned store's (STUB_CREATE_PREFIX overrides it). An
 #                    unknown --deps target is refused with nothing written.
 #                    STUB_CREATE_FAIL refuses the create; STUB_CREATE_GARBAGE
-#                    lands it and answers with what no JSON reader parses;
-#                    STUB_EDGE_DROP lands the row without its edge.
+#                    lands it and answers with what no JSON reader parses.
 #   bd dep add a b   gives a an edge of -t's type onto b, once. bd refuses a
 #                    bead waiting on its own descendant, and so does this.
-#                    STUB_DEP_DROP answers 0 and writes nothing.
+#                    STUB_DEP_FAIL refuses it.
 # Any other call is refused with exit 2, so a write the verb must not make
 # fails loudly.
 cat > "$TMP/bin/gc" <<'GC'
@@ -171,7 +170,7 @@ case "$verb" in
     [ -n "$dset" ] || { echo "gc stub: update: nothing to update" >&2; exit 2; }
     jq -e --arg id "$id" 'any(.[]; .id == $id)' "$S" >/dev/null \
       || { echo "Error: no issue found matching \"$id\"" >&2; exit 1; }
-    [ -n "${STUB_UPDATE_DROP:-}" ] && exit 0
+    [ -n "${STUB_UPDATE_FAIL:-}" ] && { echo "Error updating $id: the store refused it" >&2; exit 1; }
     jq -c --arg id "$id" --arg d "$desc" 'map(if .id == $id then .description = $d else . end)' \
       "$S" > "$S.tmp" && mv "$S.tmp" "$S" ;;
   create)
@@ -206,9 +205,9 @@ case "$verb" in
       echo "Error: resolving --deps target \"$target\": no issue found" >&2
       exit 1
     fi
-    jq -c --arg id "$nid" --arg t "$title" --arg d "$desc" --arg ty "$typ" --arg bt "$target" --arg drop "${STUB_EDGE_DROP:-}" '
+    jq -c --arg id "$nid" --arg t "$title" --arg d "$desc" --arg ty "$typ" --arg bt "$target" '
       . + [{id: $id, status: "open", issue_type: $ty, title: $t, description: $d, metadata: {}, deps: []}]
-      | if $bt != "" and $drop == "" then map(if .id == $bt then .deps += [{on: $id, type: "blocks"}] else . end) else . end' \
+      | if $bt != "" then map(if .id == $bt then .deps += [{on: $id, type: "blocks"}] else . end) else . end' \
       "$S" > "$S.tmp" && mv "$S.tmp" "$S"
     if [ -n "${STUB_CREATE_GARBAGE:-}" ]; then echo "not-json"; else jq -cn --arg id "$nid" --arg t "$title" '{id: $id, title: $t}'; fi ;;
   dep)
@@ -219,7 +218,7 @@ case "$verb" in
           case "$1" in -t|--type) shift; ty="${1:-}" ;; --type=*) ty="${1#--type=}" ;; esac
           shift || true
         done
-        [ -n "${STUB_DEP_DROP:-}" ] && exit 0
+        [ -n "${STUB_DEP_FAIL:-}" ] && { echo "Error adding dependency: the store refused it" >&2; exit 1; }
         if jq -e --arg a "$a" --arg b "$b" '
              . as $all
              | def under($p): [ $all[] | select(any(.deps[]?; .type == "parent-child" and .on == $p)) | .id ] as $k
@@ -382,8 +381,8 @@ eq "$(jq -r 'has("await_type")' <<< "$G")" "false" "(TEXT) the gate carries no a
 eq "$(edges_of tk-epic)" "$GATE" "(TEXT) the epic's blocks edge lands on the gate"
 grep -q "^bd create --type=gate --title=$TEXT --description=$BODY --deps blocks:tk-epic --db $STUB_RIG_TK/.beads --json" <<< "$CALLS" \
   && ok "(TEXT) the gate is born with its edge, in the bead's own store" || bad "(TEXT) create argv (calls: $CALLS)"
-grep -q "^bd show tk-epic --db $STUB_RIG_TK/.beads --json" <<< "$(grep -A99 '^bd create' <<< "$CALLS")" \
-  && ok "(TEXT) the edge is read back off the bead after the create" || bad "(TEXT) no read-back after the create (calls: $CALLS)"
+grep -q "^bd show tk-epic" <<< "$(grep -A99 '^bd create' <<< "$CALLS")" \
+  && bad "(TEXT) the edge was read back after the create (calls: $CALLS)" || ok "(TEXT) nothing reads the edge back after the create"
 has "$OUT" "park $GATE holds tk-epic: $TEXT" "(TEXT) prints park <gate> holds <bead>"
 HELD="$(grep '^held, not started:' <<< "$OUT" || true)"
 for b in tk-epic tk-epic.1 tk-epic.3 tk-feat tk-feat.1 tk-feat.4; do has "$HELD " " $b " "(TEXT) holds $b"; done
@@ -461,9 +460,9 @@ run_park tk-solo "$TEXT"
 eq "$RC" "0" "(BODY) a re-run without --body exits 0"
 eq "$(jq -r '.description' <<< "$(row "$G")")" "$BODY2" "(BODY) a re-run without --body leaves the description"
 grep -q '^bd update' <<< "$CALLS" && bad "(BODY) an update was sent without --body (calls: $CALLS)" || ok "(BODY) no update is sent without --body"
-STUB_UPDATE_DROP=1 run_park tk-solo "$TEXT" --body "A body the store drops"
-eq "$RC" "4" "(BODY) a --body that does not read back fails (exit 4)"
-has "$ERR" "the update did not read back" "(BODY) the failure says the body did not land"
+STUB_UPDATE_FAIL=1 run_park tk-solo "$TEXT" --body "A body the store refuses"
+eq "$RC" "4" "(BODY) a --body the store refuses fails (exit 4)"
+has "$ERR" "the store refused the update" "(BODY) the failure says the body did not land"
 has "$ERR" "gc bd update $G --description" "(BODY) the failure names the command that applies it"
 hasnt "$ERR" "no second gate filed" "(BODY) the failure does not report the re-run as clean"
 eq "$(jq -r '.description' <<< "$(row "$G")")" "$BODY2" "(BODY) the gate keeps its last description"
@@ -601,23 +600,14 @@ eq "$RC" "4" "(LIST) an unreadable listing fails closed (exit 4)"
 has "$ERR" "could not list" "(LIST) the refusal names the listing"
 nothing_written "(LIST)"
 
-# --- (READBACK) an edge that does not land is a failure ------------------------
+# --- (REFUSED) an edge bd refuses is a failure ----------------------------------
 reset_store
-STUB_EDGE_DROP=1 run_park tk-solo "Parked for a reason"
-eq "$RC" "0" "(READBACK) a gate born without its edge is repaired by one dep add"
-G="$(jq -r '[ .[] | select(.issue_type == "gate" and (.id | IN("tk-dg", "tk-pg") | not)) | .id ] | .[0]' "$STUB_STORE")"
-eq "$(edges_of tk-solo)" "$G" "(READBACK) the repaired edge reads back"
-reset_store
-STUB_EDGE_DROP=1 STUB_DEP_DROP=1 run_park tk-solo "Parked for a reason"
-eq "$RC" "4" "(READBACK) an edge that never reads back fails (exit 4)"
-has "$ERR" "is NOT blocked by" "(READBACK) the failure says the bead is not held"
-has "$ERR" "gc bd dep add tk-solo" "(READBACK) the failure names the repair"
-has "$ERR" "gc bd close" "(READBACK) the failure names the close of a gate that holds nothing"
-hasnt "$OUT" "park " "(READBACK) no success line is printed"
-reset_store
-STUB_DEP_DROP=1 run_park tk-solo --waiting-on tk-task
-eq "$RC" "4" "(READBACK) a --waiting-on edge that never reads back fails (exit 4)"
-hasnt "$ERR" "gc bd close" "(READBACK) --waiting-on names no gate to close"
+STUB_DEP_FAIL=1 run_park tk-solo --waiting-on tk-task
+eq "$RC" "4" "(REFUSED) a --waiting-on edge bd refuses fails (exit 4)"
+has "$ERR" "is NOT blocked by tk-task" "(REFUSED) the failure says the bead is not held"
+has "$ERR" "gc bd dep add tk-solo tk-task -t blocks" "(REFUSED) the failure names the repair"
+hasnt "$ERR" "gc bd close" "(REFUSED) --waiting-on names no gate to close"
+hasnt "$OUT" "park " "(REFUSED) no success line is printed"
 
 # --- (RECOVER) a create whose answer is lost is recovered from its edge --------
 reset_store

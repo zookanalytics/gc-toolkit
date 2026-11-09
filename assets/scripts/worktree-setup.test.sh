@@ -28,10 +28,11 @@
 #   (m) an untracked file gc did not write fails the start, the file intact,
 #       and the report lists five such files and counts the rest;
 #   (n) a post-checkout hook that fails the add leaves a half-built worktree
-#       (git keeps it), and the re-run gives it the bead redirect and the Gas
-#       City exclude marker, so runtime files stay out of git status, and
-#       fast-forwards it, which runs no checkout hook. A detached home's move
-#       succeeds though that hook then fails the checkout that moved it;
+#       (git keeps it), over which no second add is tried, and the re-run
+#       gives it the bead redirect and the Gas City exclude marker, so runtime
+#       files stay out of git status, and fast-forwards it, which runs no
+#       checkout hook. A detached home's move succeeds though that hook then
+#       fails the checkout that moved it;
 #   (o) a re-run keeps a non-empty redirect, so a deliberate one survives, and
 #       rewrites an empty one;
 #   (p) a main checkout (.git is a directory) is never given a redirect, its
@@ -71,7 +72,21 @@
 #       that start records the clear under the report's key;
 #   (aa) a report that does not land still fails the start, and the run says
 #        so;
-#   (ab) a HEAD that names no commit fails the start.
+#   (ab) a HEAD that names no commit fails the start;
+#   (ac) a writer that re-creates the home between its emptying and the add,
+#        as gc's desired-state build does, is staged as another set, and the
+#        add runs again on the branch the failed add made. The fetch and the
+#        prune ran while the home still held its files. The home is a linked
+#        worktree on its per-target branch at the tip, tracking origin/main,
+#        and holds the rewrite's content, the files only the start staged and
+#        the file the checkout brought;
+#   (ad) a home that keeps coming back fails the start after ADD_ATTEMPTS
+#        adds, with the message a failed add gives, and the home keeps the
+#        latest rewrite and gets back the files only the start staged;
+#   (ae) a TERM during the add restores the home's files and ends the run
+#        with no further add;
+#   (af) a home written to for a while after the first add, as a build's
+#        writes take time, is added on the next attempt, after the pause.
 
 set -euo pipefail
 
@@ -127,6 +142,7 @@ stages() { local d; for d in "$1/$STAGE_PREFIX"*; do [ -e "$d" ] || continue; ec
 # is appended as "exit <rc>"
 sync_in()     { { sh "$SCRIPT" "$1" "$2" "$3" --sync >/dev/null; } 2>&1 || echo "exit $?"; }
 sync_stderr() { sync_in "$RIG" "$1" "$2"; }
+last_line()   { printf '%s\n' "$1" | tail -n 1; }
 # land one commit on the remote's main, as a merged PR would
 advance_remote() {
     echo "$1" > "$SRC/$1"; git -C "$SRC" add -A; git -C "$SRC" commit -qm "$1"
@@ -295,7 +311,9 @@ mkdir -p "$TMP/hooks"; printf '#!/bin/sh\nexit 1\n' > "$TMP/hooks/post-checkout"
 chmod +x "$TMP/hooks/post-checkout"
 git -C "$HR" config core.hooksPath "$TMP/hooks"
 P="$TMP/n"; mkdir -p "$P"; W="$P/agentN"
-eq "$(rc_of "$HR" "$W" agentN --sync)" "1"   "(n) the hook failure fails the first run"
+ERR=$(sync_in "$HR" "$W" agentN)
+eq "$(last_line "$ERR")" "exit 1"            "(n) the hook failure fails the first run"
+lacks "$ERR" "the add runs again"            "(n) with no second add, since the failed one left a worktree"
 present "$W/.git"                            "(n) git kept the worktree the failed add made"
 absent  "$W/.beads/redirect"                 "(n) the failed run left no bead redirect"
 eq "$(marker_in "$W")" "no"                  "(n) the failed run left no exclude marker"
@@ -639,6 +657,139 @@ git -C "$W" update-ref -d "refs/heads/$(branch_of "$W")"
 ERR=$(sync_stderr "$W" agentAB)
 has "$ERR" "exit 1"                          "(ab) a HEAD that names no commit fails the start"
 has "$(reported "$W" agentAB)" "a HEAD that names no commit" "(ab) which the report names"
+
+# --- (ac)-(af) gc writes into a home each time it builds the city's desired
+#     state, so a build can re-create a home that is not yet a worktree between
+#     its emptying and the add, and git then refuses the add. A git shim on
+#     PATH plays that build: it logs each call, with whether the home still
+#     holds the file only the start staged there, and the first SHIM_RECREATE
+#     adds write the home again before the real git runs. With SHIM_TERM set,
+#     the first add also sends the run a TERM, as gc does to a pre_start past
+#     its timeout, and with SHIM_BURST set, it goes on writing the home for
+#     that many microseconds, as a build's writes take a while. -------------
+REAL_GIT=$(command -v git); export REAL_GIT
+SHIM="$TMP/gitshim"; mkdir -p "$SHIM"
+cat > "$SHIM/git" <<'SHIM_EOF'
+#!/usr/bin/env bash
+argv=("$@")
+[ "${argv[0]:-}" != "-C" ] || argv=("${argv[@]:2}")
+state=empty; [ ! -e "$SHIM_HOME/.codex/hooks.json" ] || state=full
+printf '%s\t%s\n' "${argv[*]}" "$state" >> "$SHIM_LOG"
+if [ "${argv[0]:-}" = worktree ] && [ "${argv[1]:-}" = add ]; then
+    n=$(grep -c '^worktree add ' "$SHIM_LOG")
+    if [ "$n" -le "${SHIM_RECREATE:-0}" ]; then
+        mkdir -p "$SHIM_HOME/.claude" "$SHIM_HOME/.gc/tmp"
+        echo "rewrite $n" > "$SHIM_HOME/.claude/settings.json"
+        echo "snapshot $n" > "$SHIM_HOME/.gc/tmp/skill-catalog.b64"
+        echo STALE > "$SHIM_HOME/README.md"
+        [ -z "${SHIM_TERM:-}" ] || kill -TERM "$PPID"
+        if [ "$n" -eq 1 ] && [ -n "${SHIM_BURST:-}" ]; then
+            end=$(( ${EPOCHREALTIME//[!0-9]/} + SHIM_BURST ))
+            ( while [ "${EPOCHREALTIME//[!0-9]/}" -lt "$end" ]; do
+                  mkdir -p "$SHIM_HOME/.claude"; echo burst > "$SHIM_HOME/.claude/settings.json"
+              done ) </dev/null >/dev/null 2>&1 &
+            echo "$!" > "$SHIM_LOG.burst"
+        fi
+    fi
+fi
+exec "$REAL_GIT" "$@"
+SHIM_EOF
+chmod +x "$SHIM/git"
+SHIM_LOG="$TMP/shim.log"
+ADD_ATTEMPTS=$(sed -n 's/^ADD_ATTEMPTS=//p' "$SCRIPT")
+# gc_start <home> — what gc's start stages into a new home before pre_start
+gc_start() {
+    mkdir -p "$1/.claude" "$1/.gc" "$1/.codex"
+    echo start > "$1/.claude/settings.json"; echo start > "$1/.gc/settings.json"
+    echo start-only > "$1/.codex/hooks.json"
+}
+# shimmed <home> <agent> <adds to re-create the home on> [term] — the run's
+# stderr with the shim on PATH, then "exit <rc>" on a line of its own. A
+# SHIM_BURST the caller sets reaches the shim.
+shimmed() {
+    local rc=0
+    : > "$SHIM_LOG"; rm -f "$SHIM_LOG.burst"
+    { SHIM_HOME="$1" SHIM_LOG="$SHIM_LOG" SHIM_RECREATE="$3" SHIM_TERM="${4:-}" \
+        SHIM_BURST="${SHIM_BURST:-}" PATH="$SHIM:$PATH" \
+        sh "$SCRIPT" "$RIG" "$1" "$2" >/dev/null; } 2>&1 || rc=$?
+    echo "exit $rc"
+}
+# burst_done — waits until the shim's background writer has stopped
+burst_done() {
+    local pid; pid=$(cat "$SHIM_LOG.burst" 2>/dev/null) || return 0
+    while kill -0 "$pid" 2>/dev/null; do sleep 0.1; done
+}
+adds()      { grep -c '^worktree add ' "$SHIM_LOG" || true; }
+# logged <argv prefix> — whether the home held the start's file at the first
+# such call
+logged()    { awk -F'\t' -v p="$1" 'index($1, p) == 1 { print $2; exit }' "$SHIM_LOG"; }
+branch_for() { printf 'gc-%s-%s' "$2" "$(printf '%s' "$1" | git hash-object --stdin | cut -c1-12)"; }
+
+# --- (ac) the home is re-created before the first add: the rewrite is staged
+#          as another set, and the add runs again, on the branch the failed
+#          add made. ---------------------------------------------------------
+P="$TMP/ac"; mkdir -p "$P"; W="$P/agentAC"
+gc_start "$W"
+ERR=$(shimmed "$W" agentAC 1)
+eq "$(last_line "$ERR")" "exit 0"            "(ac) a home re-created before the add still starts"
+eq "$(logged 'fetch ')" "full"               "(ac) the fetch ran while the home still held its files"
+eq "$(logged 'worktree prune')" "full"       "(ac) and so did the prune"
+eq "$(logged 'worktree add ')" "empty"       "(ac) which it no longer held when git first tried the add"
+eq "$(adds)" "2"                             "(ac) the add ran once more"
+lacks "$(grep '^worktree add ' "$SHIM_LOG" | sed -n 2p)" " -b " "(ac) on the branch the failed add made"
+has "$ERR" "the add runs again (attempt 2 of $ADD_ATTEMPTS)" "(ac) which the run says"
+eq "$([ -f "$W/.git" ] && echo linked || echo no)" "linked" "(ac) the home is a linked worktree"
+eq "$(branch_of "$W"):$(head_of "$W")" "$(branch_for "$W" agentAC):$(tip)" "(ac) on its per-target branch at the tip"
+eq "$(git -C "$W" rev-parse --abbrev-ref '@{upstream}' 2>&1)" "origin/main" "(ac) which tracks origin/main"
+eq "$(cat "$W/.claude/settings.json")" "rewrite 1" "(ac) the rewrite wins over what the start staged"
+eq "$(cat "$W/.gc/tmp/skill-catalog.b64")" "snapshot 1" "(ac) a file only the rewrite wrote is there"
+eq "$(cat "$W/.codex/hooks.json"):$(cat "$W/.gc/settings.json")" "start-only:start" \
+    "(ac) and so are the files only the start staged"
+eq "$(cat "$W/README.md")" "seed"            "(ac) the file the checkout brought wins over the rewrite"
+eq "$(cat "$W/.beads/redirect" 2>/dev/null)" "$RIG/.beads" "(ac) and the home is provisioned"
+eq "$(stages "$P")" ""                       "(ac) no stage dir is left"
+
+# --- (ad) a home that keeps coming back fails the start after ADD_ATTEMPTS
+#          adds, as a failed add does, and keeps the latest rewrite, with the
+#          files only the start staged back in it. The shim stops writing
+#          after ten adds, so a run with no bound ends too. ------------------
+P="$TMP/ad"; mkdir -p "$P"; W="$P/agentAD"
+gc_start "$W"
+ERR=$(shimmed "$W" agentAD 10)
+eq "$(last_line "$ERR")" "exit 1"            "(ad) a home that keeps coming back fails the start"
+has "$ERR" "worktree-setup: failed to create worktree at $W from $RIG (branch $(branch_for "$W" agentAD))" \
+    "(ad) with the message a failed add gives"
+eq "$(adds)" "$ADD_ATTEMPTS"                 "(ad) after $ADD_ATTEMPTS adds"
+absent "$W/.git"                             "(ad) the home is not a worktree"
+eq "$(cat "$W/.claude/settings.json")" "rewrite $ADD_ATTEMPTS" "(ad) it keeps the latest rewrite"
+eq "$(cat "$W/.codex/hooks.json"):$(cat "$W/.gc/settings.json")" "start-only:start" \
+    "(ad) and gets back the files only the start staged"
+eq "$(stages "$P")" ""                       "(ad) no stage dir is left"
+
+# --- (ae) a TERM during the add, as gc sends a pre_start past its timeout,
+#          restores the home's files and ends the run, with no further add. -
+P="$TMP/ae"; mkdir -p "$P"; W="$P/agentAE"
+gc_start "$W"
+ERR=$(shimmed "$W" agentAE 1 term)
+eq "$(last_line "$ERR")" "exit 143"          "(ae) a TERM during the add ends the run"
+eq "$(adds)" "1"                             "(ae) with no further add"
+absent "$W/.git"                             "(ae) the home is not a worktree"
+eq "$(cat "$W/.claude/settings.json")" "rewrite 1" "(ae) it keeps what was written last"
+eq "$(cat "$W/.codex/hooks.json"):$(cat "$W/.gc/settings.json")" "start-only:start" \
+    "(ae) and gets back what the start staged"
+eq "$(stages "$P")" ""                       "(ae) no stage dir is left"
+
+# --- (af) a build's writes take a while, so an add run again at once would
+#          meet the same build. The shim goes on writing the home for 0.3 s
+#          after the first add, and the run waits that out and starts. -------
+P="$TMP/af"; mkdir -p "$P"; W="$P/agentAF"
+gc_start "$W"
+ERR=$(SHIM_BURST=300000 shimmed "$W" agentAF 1)
+burst_done
+eq "$(last_line "$ERR")" "exit 0"            "(af) a home written to for a while after the first add still starts"
+eq "$([ -f "$W/.git" ] && echo linked || echo no)" "linked" "(af) as a linked worktree"
+eq "$(cat "$W/.claude/settings.json")" "burst" "(af) holding what the build wrote last"
+eq "$(stages "$P")" ""                       "(af) no stage dir is left"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

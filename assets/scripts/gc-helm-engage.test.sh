@@ -16,8 +16,8 @@
 #   (CONVID)  engaging a conversation in the queue spawns converse-opus --alias
 #             <conversation> --no-attach and binds it to the sitting's alias,
 #             guarded on `human`, the holder engage read
-#   (NO-KICK, KICK-CODEX) an opus/fable sitting self-starts from its prompt and
-#             is not kicked; a codex sitting keeps the START-directive kick
+#   (NO-KICK) a sitting starts itself from the prompt its launch delivers, so
+#             engage sends it no opening turn, on opus and on codex
 #   (SUBJECT) engaging a bead takes its conversation from the queue, says so,
 #             and offers --reason; a bead with none gets one filed
 #   (JOIN-RACE) a conversation another open files in the queue after engage's
@@ -34,6 +34,17 @@
 #   (TWO-TRACKS, UNREAD) a task assigned to human that tracks the bead and
 #             another is no conversation engage takes, and a candidate whose
 #             own row does not read starts nothing
+#   (CLOSED-*) a conversation id that names a closed conversation is said to
+#             be closed, with when and the first line of its hand-back after
+#             the header, plain or in bold, before any prompt. With no input
+#             it starts nothing and names the subject's engage. On a terminal
+#             engage goes on as an engage of its subject: Enter files a new
+#             conversation whose ask names the closed one, a number takes a
+#             listed one, and the model is asked once. A closed subject starts
+#             nothing either way, and a conversation that closes while a
+#             prompt waits is refused as closed
+#   (NOT-OPEN-CONV) an id the bead's listing holds as no open conversation has
+#             a refusal of its own
 #   (CUT-SHORT) a session still holding the alias of a conversation back in
 #             the queue is closed first, so the new sitting can take the alias
 #   (GATE)    a gate names the one bead waiting on it; the conversation engage
@@ -46,7 +57,7 @@
 #             closes the sitting it spawned and overwrites nothing
 #   (DISMISSED-*) a conversation a dismiss closes while the sitting spawns, in
 #             the queue, filed by engage, or resumed under the same alias or
-#             another, fails the bind's status guard or its read-back: the
+#             another, fails the bind's status guard or the read with no bind: the
 #             sitting is closed, and the conversation stays closed with the
 #             holder the dismiss left
 #   (ALIAS-*, RACE-CONCURRENT) a spawn refused at the alias spawns nothing and
@@ -65,14 +76,16 @@
 #             (START-BACKSTOP), is left unattached and exits 4, with the attach
 #             to run later. (START-INTERRUPT) Ctrl-C stops the wait, leaves the
 #             conversation bound and the sitting open, and prints the attach,
-#             after kicking a codex sitting (INTERRUPT-KICK); a hang-up or a
+#             sending the sitting no opening turn; a hang-up or a
 #             TERM stops it the same way (INTERRUPT-HUP, INTERRUPT-TERM).
-#   (ENDED*, DETACHED, UNREAD, ATTACH-FAIL-*) once the attach returns, the
-#             conversation says what the tab prints: a closed conversation
-#             prints how it closed and the last hand-back recorded on it, its
-#             control bytes dropped; a conversation still open prints the
-#             re-attach command; an unreadable one says the ending is unknown;
-#             and a failed attach on a closed conversation reports the ending
+#   (ENDED*, QUEUED-TAB, DETACHED*, UNREAD, ATTACH-FAIL-*) once the attach
+#             returns, the conversation says what the tab prints: a closed
+#             conversation prints how it closed and the last hand-back recorded
+#             on it, its control bytes dropped; one back in the operator's queue
+#             prints that hand-back and how to take it up again; one its sitting
+#             still holds prints the re-attach command; an unreadable one says
+#             the ending is unknown; and a failed attach on a closed or queued
+#             conversation reports the ending
 #             rather than an attach to retry
 #   (SUSPENDED, CTRL-*) a suspended rig or a down controller refuses first
 #   (IA-*)    the interactive prompts: subject, conversation or starter, model,
@@ -110,7 +123,7 @@ mkdir -p "$TMP/bin" "$TMP/state"
 # One rig (prefix tk). The subject is tk-subj; its conversations are tk-conv
 # and tk-conv2, and a conversation engage files is tk-new. Each conversation's
 # assignee and status live in $STATE/<id>.assignee and $STATE/<id>.status
-# (defaults human and open), so a bind and its read-back see what the store
+# (defaults human and open), so a bind and a later read see what the store
 # would. $HAVE_CONV says which conversations track tk-subj: unset or 1 tk-conv,
 # 2 tk-conv and tk-conv2, two tk-conv and tk-two, 0 none. tk-two is an older
 # task assigned to human that tracks tk-subj and tk-elsewhere, so it is no
@@ -149,15 +162,18 @@ conv_row() {
   _title="an earlier concern"; [ "$1" = tk-conv2 ] && _title="a second concern"
   _also=""
   if [ "$1" = tk-two ]; then _created="2026-09-01T00:00:00Z"; _title="a task about two beads"; _also="tk-elsewhere"; fi
-  # $ST/<id>.meta (a JSON object) and $ST/<id>.reason seed the metadata and
-  # the close reason a closed sitting leaves, such as its hand-back.
+  # $ST/<id>.meta (a JSON object), $ST/<id>.reason and $ST/<id>.closed_at seed
+  # the metadata, the close reason and the close time a closed sitting leaves,
+  # such as its hand-back.
   _meta=$(cat "$ST/$1.meta" 2>/dev/null || true); [ -n "$_meta" ] || _meta='{}'
   jq -n --arg c "$1" --arg a "$(asg_of "$1")" --arg st "$(stat_of "$1")" --arg s "$(subj_of "$1")" \
         --arg t "$_title" --arg cr "$_created" --arg shape "$2" --arg x "$_also" --argjson r "${_reps:-[]}" \
-        --argjson md "$_meta" --arg why "$(cat "$ST/$1.reason" 2>/dev/null || true)" '
+        --argjson md "$_meta" --arg why "$(cat "$ST/$1.reason" 2>/dev/null || true)" \
+        --arg cat "$(cat "$ST/$1.closed_at" 2>/dev/null || true)" '
     ([$s] + (if $x == "" then [] else [$x] end)) as $tracked
     | {id:$c, issue_type:"task", status:$st, assignee:$a, title:$t, created_at:$cr, metadata:$md}
     + (if $why == "" then {} else {close_reason:$why} end)
+    + (if $cat == "" then {} else {closed_at:$cat} end)
     + (if $shape == "show"
        then {dependencies:([ $tracked[] | {id:., dependency_type:"tracks"} ] + [ $r[] | {id:., dependency_type:"replies-to"} ])}
        else {dependencies:([ $tracked[] | {issue_id:$c, depends_on_id:., type:"tracks"} ] + [ $r[] | {issue_id:$c, depends_on_id:., type:"replies-to"} ])} end)'
@@ -288,8 +304,9 @@ case "$1 ${2:-}" in
       tk-gate)
         jq -n '[{id:"tk-gate", title:"Approve the rollout", description:"Gate on the waiting bead.", status:"open", issue_type:"gate", await_type:"human", await_id:"rollout"}]' ;;
       *)
-        jq -n --arg i "$id" --arg t "${SUBJ_TITLE:-the subject under engagement}" \
-          '[{id:$i, title:$t, status:"open", issue_type:"task", priority:2, assignee:""}]' ;;
+        # $SUBJ_STATUS is the status every other bead reads, open by default.
+        jq -n --arg i "$id" --arg t "${SUBJ_TITLE:-the subject under engagement}" --arg st "${SUBJ_STATUS:-open}" \
+          '[{id:$i, title:$t, status:$st, issue_type:"task", priority:2, assignee:""}]' ;;
     esac ;;
   "bd list")
     _id=""; _prev=""
@@ -327,6 +344,15 @@ case "$1 ${2:-}" in
                 _n=$(( $(cat "$ST/tracks-reads" 2>/dev/null || echo 0) + 1 )); printf '%s' "$_n" > "$ST/tracks-reads"
                 [ "$_n" -le "$CONV_FILED_AFTER" ] || _ids="tk-conv"
               fi
+              # $CLOSE_AT_TRACKS_READ: a sign-off closes tk-conv just before the
+              # listing that many in answers, as one can while the operator sits
+              # at a prompt.
+              if [ -n "${CLOSE_AT_TRACKS_READ:-}" ]; then
+                _cn=$(( $(cat "$ST/close-reads" 2>/dev/null || echo 0) + 1 )); printf '%s' "$_cn" > "$ST/close-reads"
+                if [ "$_cn" -ge "$CLOSE_AT_TRACKS_READ" ]; then
+                  printf 'closed' > "$ST/tk-conv.status"; printf '2026-11-06T01:02:03Z' > "$ST/tk-conv.closed_at"
+                fi
+              fi
               _rows='[]'
               for c in $_ids; do
                 _rows=$(jq -c --argjson r "$(conv_row "$c" list)" '. + [$r | del(.dependencies) + {dependency_type:"tracks"}]' <<< "$_rows")
@@ -341,7 +367,9 @@ case "$1 ${2:-}" in
         esac ;;
       add)
         printf 'bd dep %s\n' "$*" >> "$CALLS"
-        [ -n "${REPLY_FAIL:-}" ] || printf '%s %s\n' "$4" "$5" >> "$ST/replies" ;;
+        # REPLY_FAIL refuses the edge, as a store that will not write it does.
+        [ -z "${REPLY_FAIL:-}" ] || { echo "Error adding dependency: the store refused it" >&2; exit 1; }
+        printf '%s %s\n' "$4" "$5" >> "$ST/replies" ;;
       *) printf 'bd dep %s\n' "$*" >> "$CALLS" ;;
     esac ;;
   "session new")
@@ -419,10 +447,13 @@ case "$1 ${2:-}" in
   "session attach")
     # The attach returns when the tab's client exits. $ATTACH_ENDS is tk-conv's
     # status by then: closed for a sitting that ended under the tab,
-    # in_progress for one the operator detached from. $ATTACH_UNREADABLE makes
-    # every later read of tk-conv fail, and $ATTACH_FAIL fails the attach itself.
+    # in_progress for one the operator detached from, and $ATTACH_HOLDER its
+    # assignee, human for one a sitting cut short handed back. $ATTACH_UNREADABLE
+    # makes every later read of tk-conv fail, and $ATTACH_FAIL fails the attach
+    # itself.
     printf 'session attach %s\n' "$*" >> "$CALLS"
     [ -n "${ATTACH_ENDS:-}" ] && printf '%s' "$ATTACH_ENDS" > "$ST/tk-conv.status"
+    [ -n "${ATTACH_HOLDER:-}" ] && printf '%s' "$ATTACH_HOLDER" > "$ST/tk-conv.assignee"
     [ -n "${ATTACH_UNREADABLE:-}" ] && : > "$ST/tk-conv.unread"
     [ -n "${ATTACH_FAIL:-}" ] && { echo "gc session attach: session not found" >&2; exit 1; } ;;
   "session close")
@@ -447,10 +478,7 @@ case "$1 ${2:-}" in
     # lock, as the store does: a mismatch writes nothing and exits 13.
     # $RACE_LOST makes the guard lose: another writer took the conversation in
     # the spawn window, recorded as $RACE_WINNER (empty for none) with status
-    # $RACE_STATUS. $BIND_FAIL fails it for another reason, $BIND_NOPERSIST
-    # reports success and writes nothing, $BIND_STOMP overwrites the binding
-    # just written, and $CLOSE_AFTER_BIND closes the conversation just after
-    # it, as a dismiss landing between the bind and its read-back does.
+    # $RACE_STATUS. $BIND_FAIL fails it for another reason.
     if [ "$_ifa_set" = 1 ]; then
       if [ -n "${RACE_LOST:-}" ]; then
         printf '%s' "${RACE_WINNER-gc-toolkit/gc-toolkit.tk-conv-elsewhere}" > "$ST/$_id.assignee"
@@ -458,15 +486,12 @@ case "$1 ${2:-}" in
         exit 13
       fi
       [ -n "${BIND_FAIL:-}" ] && exit 1
-      [ -n "${BIND_NOPERSIST:-}" ] && exit 0
       stub_lock "$ST/$_id.lock"
       _cur="$(cat "$ST/$_id.assignee" 2>/dev/null || printf 'human')"
       if [ "$_cur" != "$_ifa" ]; then stub_unlock "$ST/$_id.lock"; exit 13; fi
       if [ "$_ifs_set" = 1 ] && [ "$(stat_of "$_id")" != "$_ifs" ]; then stub_unlock "$ST/$_id.lock"; exit 13; fi
       [ "$_new_set" = 1 ] && printf '%s' "$_new" > "$ST/$_id.assignee"
       stub_unlock "$ST/$_id.lock"
-      [ -n "${BIND_STOMP:-}" ] && printf '%s' "$BIND_STOMP" > "$ST/$_id.assignee"
-      [ -n "${CLOSE_AFTER_BIND:-}" ] && printf 'closed' > "$ST/$_id.status"
       exit 0
     fi
     [ "$_new_set" = 1 ] && printf '%s' "$_new" > "$ST/$_id.assignee"
@@ -561,7 +586,7 @@ export GC_SITTING_COMMENT_TOOL="$TMP/rec-psc" REC_PSC_LOG="$TMP/psc.log"
 reset() {
     : > "$CALLS"; : > "$SPAWNED"; : > "$POLLS"; : > "$TMP/psc.log"
     rm -f "$ALIAS_REFUSED" "$ALIAS_REFUSED.reads"
-    find "${STATE_DIR:?}" -type f \( -name '*.assignee' -o -name '*.status' -o -name '*.subject' -o -name '*.meta' -o -name '*.reason' -o -name '*.unread' -o -name spawned-alias -o -name tracks-reads -o -name live-polls \) -delete
+    find "${STATE_DIR:?}" -type f \( -name '*.assignee' -o -name '*.status' -o -name '*.subject' -o -name '*.meta' -o -name '*.reason' -o -name '*.closed_at' -o -name '*.unread' -o -name spawned-alias -o -name tracks-reads -o -name close-reads -o -name live-polls \) -delete
     printf '1700000000' > "$TMP/clock"
     : > "$STATE_DIR/replies"; : > "$STATE_DIR/live"
     for _l in ${LIVE_SITTINGS:-}; do printf '%s %s\n' "${_l%%=*}" "${_l#*=}" >> "$STATE_DIR/live"; done
@@ -655,11 +680,10 @@ hasnt "$OUT" "took the conversation" "(CONVID) an explicit conversation id is no
 has "$OUT" "✓ converse-opus on existing conversation tk-conv for tk-subj" "(CONVID) the summary names the conversation and its bead"
 hasnt "$OUT" "visit" "(CONVID) engage's words name no visit"
 
-echo "# --model selects the tier; codex is the one provider that keeps the kick"
+echo "# --model selects the tier"
 reset; run_engage tk-conv --model codex --no-attach
 has "$CALLED" "session new converse-codex --alias tk-conv" "(MODELFLAG) --model codex spawns converse-codex"
-has "$CALLED" "session nudge gc-77" "(KICK-CODEX) a codex sitting is sent its START-directive opening turn"
-has "$CALLED" "Begin now: claim your conversation (tk-conv)" "(KICK-CODEX) …as a START directive naming its conversation"
+hasnt "$CALLED" "session nudge" "(NO-KICK) a codex sitting self-starts from its prompt too, and is not kicked"
 
 echo "# engage supplies the subject's rig context so a bare template resolves"
 reset
@@ -709,7 +733,8 @@ has "$CALLED" "-d a distinct concern" "(REASON-NEW) …and asking it"
 has "$CALLED" "session new converse-opus --alias tk-new" "(REASON-NEW) …then a sitting is spawned for it"
 hasnt "$OUT" "took the conversation" "(REASON-NEW) …no took-an-existing hint"
 reset; run_engage tk-subj --reason "a distinct concern" --model codex --no-attach
-has "$CALLED" "The operator's reason: a distinct concern" "(REASON-CODEX) the reason rides the codex opening-turn kick"
+has "$CALLED" "-d a distinct concern" "(REASON-CODEX) a codex sitting's new conversation asks the reason too, which the sitting reads at its claim"
+hasnt "$CALLED" "session nudge" "(REASON-CODEX) …and no opening turn carries it"
 
 echo "# --reason on an explicit conversation id is refused"
 reset; run_engage tk-conv --reason "some reason" --no-attach
@@ -792,9 +817,10 @@ hasnt "$CALLED" "bd update" "(LEFT) …with no bind, since it is already assigne
 eq "$(asg tk-conv)" "gc-toolkit/gc-toolkit.tk-conv" "(LEFT) …and the conversation stays assigned to the alias"
 
 echo "# a session still holding the alias of a conversation back in the queue is closed first"
-# A sitting cut short hands its conversation back to the queue and leaves its
-# session for converse-reap. A session that is not closed keeps its alias, so
-# engage closes it and reads it gone before spawning under the alias.
+# A sitting cut short hands its conversation back to the queue and drains,
+# which leaves its session open until the core reaper closes it a day later. A
+# session that is not closed keeps its alias, so engage closes it and reads it
+# gone before spawning under the alias.
 export LIVE_SITTINGS="gc-60=gc-toolkit/gc-toolkit.tk-conv"
 reset; run_engage tk-subj --no-attach
 eq "$RC" 0 "(CUT-SHORT) engaging a queued conversation beside its old session exits 0"
@@ -809,12 +835,113 @@ hasnt "$CALLED" "session new" "(CUT-SHORT-STUCK) …spawning nothing"
 has "$OUT" "gc session close gc-60" "(CUT-SHORT-STUCK) …and naming the session to close by hand"
 unset LIVE_SITTINGS
 
-echo "# a closed explicit conversation is refused without spawning"
-reset; printf 'closed' > "$STATE_DIR/tk-conv.status"
+# closed_conv <id> — seed a conversation its sitting's sign-off closed: still
+# held by the sitting's alias, closed at a known time, and carrying the
+# hand-back the sign-off recorded, a header naming the subject and then the body.
+closed_conv() {
+    printf 'gc-toolkit/gc-toolkit.%s' "$1" > "$STATE_DIR/$1.assignee"
+    printf 'closed' > "$STATE_DIR/$1.status"
+    printf '2026-11-05T06:53:09Z' > "$STATE_DIR/$1.closed_at"
+    jq -n '{"gc.handback": "tk-subj — the subject under engagement\n\nSettled: the rewording rides the queued rework.\nNothing further is owed here."}' > "$STATE_DIR/$1.meta"
+}
+
+echo "# a closed conversation is said to be closed before any prompt, and asked nothing, engage starts nothing"
+reset; closed_conv tk-conv
 run_engage tk-conv --no-attach
-eq "$RC" 4 "(CLOSED) engaging a closed conversation exits 4"
-hasnt "$CALLED" "session new" "(CLOSED) …and spawns nothing"
-has "$OUT" "is not an open conversation about tk-subj" "(CLOSED) …saying it is not open"
+eq "$RC" 4 "(CLOSED-NOINPUT) engaging a closed conversation with no input exits 4"
+has "$OUT" "tk-conv closed at 2026-11-05T06:53:09Z" "(CLOSED-NOINPUT) …saying it closed, and when"
+has "$OUT" 'its hand-back reads "Settled: the rewording rides the queued rework."' "(CLOSED-NOINPUT) …and the first line of its hand-back after the header"
+has "$OUT" "engage its subject to open a fresh one: gc-helm engage tk-subj" "(CLOSED-NOINPUT) …naming the subject's engage"
+hasnt "$OUT" "is not an open conversation" "(CLOSED-NOINPUT) …which is not the refusal of an id that is no open conversation"
+hasnt "$CALLED" "bd update" "(CLOSED-NOINPUT) …writing nothing"
+hasnt "$CALLED" "bd create" "(CLOSED-NOINPUT) …filing nothing"
+hasnt "$CALLED" "session new" "(CLOSED-NOINPUT) …and starting no sitting"
+reset; closed_conv tk-conv
+jq -n '{"gc.handback": "**tk-subj — the subject under engagement**\n\nSettled: the rewording rides the queued rework."}' > "$STATE_DIR/tk-conv.meta"
+run_engage tk-conv --no-attach
+has "$OUT" 'its hand-back reads "Settled: the rewording rides the queued rework."' "(CLOSED-BOLD) a header set in bold gives way to the line after it as well"
+hasnt "$OUT" 'reads "**' "(CLOSED-BOLD) …so the header is not the line engage prints"
+reset; closed_conv tk-conv
+jq -n '{"gc.handback": "Settled with no header.\nNothing further is owed here."}' > "$STATE_DIR/tk-conv.meta"
+run_engage tk-conv --no-attach
+has "$OUT" 'its hand-back reads "Settled with no header."' "(CLOSED-NOHEADER) a hand-back with no header shows its first line"
+reset; closed_conv tk-conv
+run_engage_tty '1\n\n\n' tk-conv --no-input --no-attach
+eq "$RC" 4 "(CLOSED-NOPROMPT) the same refusal on a terminal with --no-input exits 4"
+has "$OUT" "tk-conv closed at 2026-11-05T06:53:09Z" "(CLOSED-NOPROMPT) …saying it closed"
+hasnt "$OUT" "›" "(CLOSED-NOPROMPT) …with no prompt before it"
+
+echo "# on a terminal, a closed conversation leaves engage on its subject, and a new conversation names it"
+reset; closed_conv tk-conv
+set +e
+OUT="$(printf '\n\n\n' | GC_HELM_ASSUME_TTY=1 sh "$SCRIPT" engage tk-conv --no-attach 2>&1)"; RC=$?
+set -e
+CALLED="$(cat "$CALLS")"
+eq "$RC" 0 "(CLOSED-TTY) engaging a closed conversation on a terminal exits 0"
+case "$OUT" in
+  *"tk-conv closed at 2026-11-05T06:53:09Z"*"Enter = a new one, continuing tk-conv"*)
+    ok "(CLOSED-TTY) …saying it closed, and when, before its first prompt" ;;
+  *) bad "(CLOSED-TTY) the close should be said before the first prompt (out: $OUT)" ;;
+esac
+has "$OUT" "Engaging tk-subj instead" "(CLOSED-TTY) …and going on as an engage of its subject"
+eq "$(printf '%s\n' "$OUT" | grep -c 'Model —')" 1 "(CLOSED-TTY) …asking for the model once"
+has "$CALLED" "--deps tracks:tk-subj" "(CLOSED-TTY) Enter files a new conversation on the subject"
+has "$CALLED" "The operator engaged conversation tk-conv on tk-subj, which closed at 2026-11-05T06:53:09Z, to take it up again." "(CLOSED-TTY) …whose ask names the closed conversation"
+has "$CALLED" "gc bd show tk-conv prints its close reason" "(CLOSED-TTY) …and says how its sitting reads what that one settled"
+has "$CALLED" "session new converse-opus --alias tk-new" "(CLOSED-TTY) …and the operator lands in a sitting on it"
+eq "$(asg tk-new)" "gc-toolkit/gc-toolkit.tk-new" "(CLOSED-TTY) …bound to the new conversation"
+eq "$(cat "$STATE_DIR/tk-conv.status")" "closed" "(CLOSED-TTY) …while the closed conversation stays closed"
+reset; closed_conv tk-conv
+run_engage_tty 'lets revisit the scope\n\n\n' tk-conv --no-attach
+eq "$RC" 0 "(CLOSED-TTY-OPENER) a typed opener in place of a closed conversation exits 0"
+has "$CALLED" "--title lets revisit the scope" "(CLOSED-TTY-OPENER) …filing a new conversation titled with the opener"
+case "$CALLED" in
+  *"-d The operator engaged conversation tk-conv on tk-subj"*"lets revisit the scope --deps tracks:tk-subj"*)
+    ok "(CLOSED-TTY-OPENER) …whose ask names the closed conversation ahead of the opener" ;;
+  *) bad "(CLOSED-TTY-OPENER) the ask should name the closed conversation, then the opener (calls: $CALLED)" ;;
+esac
+export HAVE_CONV=2
+reset; closed_conv tk-conv
+run_engage_tty '\n\n\n' tk-conv --no-attach
+has "$OUT" "[1] tk-conv2" "(CLOSED-TTY-LISTED) the subject's open conversations are listed"
+hasnt "$OUT" "] tk-conv —" "(CLOSED-TTY-LISTED) …and the closed one is not among them"
+has "$OUT" "Enter = a new one, continuing tk-conv" "(CLOSED-TTY-LISTED) …with Enter still a new conversation"
+has "$CALLED" "--deps tracks:tk-subj" "(CLOSED-TTY-LISTED) …so Enter files one"
+hasnt "$CALLED" "--alias tk-conv2" "(CLOSED-TTY-LISTED) …rather than taking the listed one"
+reset; closed_conv tk-conv
+run_engage_tty '1\n\n' tk-conv --no-attach
+has "$CALLED" "session new converse-opus --alias tk-conv2" "(CLOSED-TTY-PICK) a number takes a listed conversation"
+hasnt "$CALLED" "bd create" "(CLOSED-TTY-PICK) …filing nothing"
+unset HAVE_CONV
+
+echo "# a closed conversation on a closed subject starts nothing, on a terminal or not"
+reset; closed_conv tk-conv
+SUBJ_STATUS=closed run_engage_tty '\n\n\n' tk-conv --no-attach
+eq "$RC" 4 "(CLOSED-SUBJECT) a closed conversation on a closed subject exits 4 on a terminal"
+has "$OUT" "tk-conv closed at 2026-11-05T06:53:09Z" "(CLOSED-SUBJECT) …saying the conversation closed"
+has "$OUT" "Its subject tk-subj is closed too" "(CLOSED-SUBJECT) …and that its subject is closed too"
+hasnt "$OUT" "›" "(CLOSED-SUBJECT) …before any prompt"
+hasnt "$CALLED" "bd create" "(CLOSED-SUBJECT) …filing nothing"
+reset; closed_conv tk-conv
+SUBJ_STATUS=closed run_engage tk-conv --no-attach
+eq "$RC" 4 "(CLOSED-SUBJECT-NOINPUT) …and with no input exits 4"
+hasnt "$OUT" "gc-helm engage tk-subj" "(CLOSED-SUBJECT-NOINPUT) …naming no engage of a subject that takes no new conversation"
+
+echo "# one that closes while the operator answers a prompt is refused as closed"
+reset; CLOSE_AT_TRACKS_READ=2 run_engage_tty '1\n\n' tk-subj --no-attach
+eq "$RC" 4 "(CLOSED-RACE) a picked conversation that closed before engage held it exits 4"
+has "$OUT" "tk-conv closed at 2026-11-06T01:02:03Z" "(CLOSED-RACE) …saying it closed, and when"
+has "$OUT" "engage its subject to open a fresh one: gc-helm engage tk-subj" "(CLOSED-RACE) …naming the subject's engage"
+hasnt "$CALLED" "session new" "(CLOSED-RACE) …and starting no sitting"
+
+echo "# an id that is no open conversation about the bead keeps a refusal of its own"
+export HAVE_CONV=0
+reset; run_engage tk-conv --no-attach
+eq "$RC" 4 "(NOT-OPEN-CONV) a conversation the bead's listing does not hold exits 4"
+has "$OUT" "tk-conv is not an open conversation about tk-subj" "(NOT-OPEN-CONV) …saying it is no open conversation about the bead"
+hasnt "$OUT" "closed" "(NOT-OPEN-CONV) …and nothing of a close, which it never read"
+hasnt "$CALLED" "session new" "(NOT-OPEN-CONV) …and starting no sitting"
+unset HAVE_CONV
 
 echo "# engage pointed at a gate takes the one bead still waiting on it, and the conversation replies to the gate"
 export GATE_WAITERS='[{"id":"tk-subj","status":"open","dependency_type":"blocks"},{"id":"tk-done","status":"closed","dependency_type":"blocks"}]'
@@ -843,7 +970,7 @@ has "$CALLED" "bd dep bd dep add tk-conv tk-gate --type replies-to" "(GATE-REPLY
 hasnt "$CALLED" "session new" "(GATE-LIVE) …and engage attaches to it rather than spawning"
 unset LIVE_SITTINGS
 reset; REPLY_FAIL=1 run_engage tk-gate --no-attach
-eq "$RC" 4 "(GATE-NOREPLY) a reply that does not read back exits 4"
+eq "$RC" 4 "(GATE-NOREPLY) a reply the store refuses exits 4"
 hasnt "$CALLED" "session new" "(GATE-NOREPLY) …starting no sitting that would not know its gate"
 has "$OUT" "gc bd dep add tk-conv tk-gate --type replies-to" "(GATE-NOREPLY) …and naming the edge to add by hand"
 
@@ -883,8 +1010,6 @@ eq "$RC" 4 "(NOSPAWN) a session with no identity exits 4"
 eq "$(asg tk-conv)" "human" "(NOSPAWN) …and the conversation stays in the queue"
 
 echo "# a conversation another writer takes in the spawn window is not overwritten"
-# Run on codex, the one provider engage kicks: the abort precedes the kick
-# block, so "never kicked" proves that order rather than passing vacuously.
 reset; RACE_LOST=1 RACE_WINNER="gc-toolkit/gc-toolkit.tk-conv-x" run_engage tk-conv --model codex --no-attach
 eq "$RC" 4 "(TAKEN) a bind lost to another writer exits 4"
 has "$CALLED" "session new" "(TAKEN) …the sitting did spawn: the conversation changed after engage read it"
@@ -892,39 +1017,23 @@ has "$CALLED" "bd update tk-conv --if-assignee human" "(TAKEN) …the bind is co
 eq "$(asg tk-conv)" "gc-toolkit/gc-toolkit.tk-conv-x" "(TAKEN) …the holder stays, never this engage's sitting"
 has "$CALLED" "session close gc-77" "(TAKEN) …the sitting that holds nothing is closed"
 has "$OUT" "not overwriting" "(TAKEN) …and the operator is told the holder was not overwritten"
-hasnt "$CALLED" "session nudge" "(TAKEN) …and the closed codex sitting is never kicked"
 
 echo "# a failed bind (not the race): the sitting spawned but nothing holds the conversation"
 reset; BIND_FAIL=1 run_engage tk-conv --model codex --no-attach
 eq "$RC" 4 "(BIND-FAIL) a failed bind exits 4"
 has "$CALLED" "session close gc-77" "(BIND-FAIL) …the spawned sitting is closed, not left orphaned"
 eq "$(asg tk-conv)" "human" "(BIND-FAIL) …the conversation stays in the queue"
-hasnt "$CALLED" "session nudge" "(BIND-FAIL) …and the closed codex sitting is never kicked"
-
-echo "# a bind another writer stomps: the read-back shows a different holder"
-reset; BIND_STOMP="gc-toolkit/gc-toolkit.tk-conv-y" run_engage tk-conv --no-attach
-eq "$RC" 4 "(STOMP) a stomped bind exits 4"
-has "$CALLED" "session close gc-77" "(STOMP) …the stranded sitting is closed"
-has "$OUT" "gc-toolkit/gc-toolkit.tk-conv-y" "(STOMP) …and the operator is told who holds it"
-
-echo "# a bind that does not persist: the read-back finds the conversation still in the queue"
-reset; BIND_NOPERSIST=1 run_engage tk-conv --no-attach
-eq "$RC" 4 "(NOPERSIST) a non-persisting bind exits 4"
-has "$CALLED" "session close gc-77" "(NOPERSIST) …the spawned sitting is closed"
-has "$OUT" "the bind did not persist" "(NOPERSIST) …and the operator is told the bind did not persist"
 
 echo "# a conversation a dismiss closes while the sitting spawns is not bound, and the sitting is closed"
 # bd's close keeps the assignee, so the holder engage read still holds a
-# dismissed conversation: only the status guard and the read-back tell a closed
-# conversation, which no claim adopts. Run on codex, the one provider engage
-# kicks, so "never kicked" proves the abort comes first.
+# dismissed conversation: only the bind's status guard, or the read when no bind
+# runs, tells a closed conversation, which no claim adopts.
 reset; DISMISS_ON_SPAWN=tk-conv run_engage tk-conv --model codex --no-attach
 eq "$RC" 4 "(DISMISSED-QUEUE) a queued conversation dismissed during the spawn exits 4"
 has "$CALLED" "bd update tk-conv --if-assignee human --if-status open" "(DISMISSED-QUEUE) …the bind is guarded on the status engage read, so the store rejects it (exit 13)"
 has "$OUT" "was closed while this sitting spawned" "(DISMISSED-QUEUE) …saying the conversation closed"
 has "$CALLED" "session close gc-77" "(DISMISSED-QUEUE) …closing the sitting it spawned"
 eq "$(asg tk-conv)/$(cat "$STATE_DIR/tk-conv.status")" "human/closed" "(DISMISSED-QUEUE) …and the conversation stays closed with the holder the dismiss left"
-hasnt "$CALLED" "session nudge" "(DISMISSED-QUEUE) …and the closed codex sitting is never kicked"
 hasnt "$OUT" "✓ converse-codex" "(DISMISSED-QUEUE) …never reporting a sitting"
 export HAVE_CONV=0
 reset; DISMISS_ON_SPAWN=tk-new run_engage tk-subj --no-attach
@@ -936,9 +1045,8 @@ reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
 DISMISS_ON_SPAWN=tk-conv run_engage tk-subj --model codex --no-attach
 eq "$RC" 4 "(DISMISSED-LEFT) a conversation resumed under its own alias, dismissed during the spawn, exits 4"
 hasnt "$CALLED" "bd update" "(DISMISSED-LEFT) …binding nothing, since it is already assigned to the alias"
-has "$OUT" "reads closed" "(DISMISSED-LEFT) …its read-back finding it closed"
+has "$OUT" "reads closed" "(DISMISSED-LEFT) …its read finding it closed"
 has "$CALLED" "session close gc-77" "(DISMISSED-LEFT) …and closing the sitting it spawned"
-hasnt "$CALLED" "session nudge" "(DISMISSED-LEFT) …which is never kicked"
 reset; held tk-conv gc-toolkit/gc-toolkit.c-tk-conv
 run_engage tk-subj --no-attach
 eq "$RC" 0 "(LEFT-REBIND) a conversation left under its c- alias, resumed under its bare id, exits 0"
@@ -949,10 +1057,6 @@ eq "$RC" 4 "(DISMISSED-LEFT-REBIND) that conversation dismissed during the spawn
 has "$OUT" "was closed while this sitting spawned" "(DISMISSED-LEFT-REBIND) …the status guard missing on the closed conversation"
 eq "$(asg tk-conv)/$(cat "$STATE_DIR/tk-conv.status")" "gc-toolkit/gc-toolkit.c-tk-conv/closed" "(DISMISSED-LEFT-REBIND) …which keeps the holder the dismiss left"
 has "$CALLED" "session close gc-77" "(DISMISSED-LEFT-REBIND) …and the sitting it spawned is closed"
-reset; CLOSE_AFTER_BIND=1 run_engage tk-conv --no-attach
-eq "$RC" 4 "(DISMISSED-AFTER-BIND) a conversation closed between the bind and its read-back exits 4"
-has "$OUT" "reads closed" "(DISMISSED-AFTER-BIND) …the read-back finding it closed"
-has "$CALLED" "session close gc-77" "(DISMISSED-AFTER-BIND) …and closing the sitting it spawned"
 
 echo "# a spawn whose answer names no alias reads it from the session list"
 reset; SPAWN_NO_ALIAS=1 run_engage tk-conv --no-attach
@@ -974,7 +1078,6 @@ has "$OUT" "gc-helm engage tk-conv" "(ALIAS-BOUND) …and pointing the operator 
 hasnt "$OUT" "gc session close" "(ALIAS-BOUND) …never telling them to close the sitting that won"
 hasnt "$CALLED" "bd update" "(ALIAS-BOUND) …writing nothing to the conversation"
 hasnt "$CALLED" "session close" "(ALIAS-BOUND) …closing nothing"
-hasnt "$CALLED" "session nudge" "(ALIAS-BOUND) …and kicking nothing"
 unset AFTER_REFUSAL_READS AFTER_REFUSAL_ASSIGNEE
 
 echo "# a holder that never binds is named as left over, and closing it is suggested only then"
@@ -1132,19 +1235,9 @@ hasnt "$CALLED" "session attach" "(ATTACH) --no-attach does not attach"
 run_fresh tk-conv
 has "$CALLED" "session attach gc-77" "(ATTACH) the default attaches to the captured session id"
 hasnt "$CALLED" "session nudge" "(ATTACH) …and an opus sitting is not kicked; it self-starts before the operator lands"
-
-echo "# for codex (the kicked provider), the kick precedes the attach"
-# attach is a foreground handoff to the pane: nothing after it in cmd_engage runs
-# until the operator detaches, so a codex kick sent after the attach would never
-# fire and the operator would land on a blank pane.
 run_fresh tk-conv --model codex
-nudge_line=$(printf '%s\n' "$CALLED" | grep -n "session nudge" | head -1 | cut -d: -f1)
-attach_line=$(printf '%s\n' "$CALLED" | grep -n "session attach" | head -1 | cut -d: -f1)
-if [ -n "$nudge_line" ] && [ -n "$attach_line" ] && [ "$nudge_line" -lt "$attach_line" ]; then
-  ok "(KICK-ORDER) the codex opening turn is sent before the attach"
-else
-  bad "(KICK-ORDER) expected nudge (line ${nudge_line:-none}) before attach (line ${attach_line:-none})"
-fi
+has "$CALLED" "session attach gc-77" "(ATTACH) a codex sitting is attached the same way"
+hasnt "$CALLED" "session nudge" "(ATTACH) …and is not kicked either; it self-starts before the operator lands"
 
 echo "# the attach waits for the reconciler to start the sitting"
 # `gc session attach` on a sitting the reconciler has not launched yet launches it
@@ -1255,25 +1348,6 @@ eq "$RC" 0 "(NOATTACH-NOWAIT) --no-attach on an unstarted sitting exits 0"
 polls=$(cat "$POLLS")
 eq "${polls:-0}" 0 "(NOATTACH-NOWAIT) …without reading the sitting's state"
 hasnt "$OUT" "waiting for the reconciler" "(NOATTACH-NOWAIT) …or announcing a wait"
-GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="start-pending" run_fresh tk-conv --model codex --no-attach
-has "$CALLED" "session nudge gc-77" "(NOATTACH-KICK) a codex sitting on --no-attach is kicked without a start wait"
-
-echo "# for codex, the kick follows the start wait"
-START_STATES="start-pending active" run_fresh tk-conv --model codex
-last_poll=$(printf '%s\n' "$CALLED" | grep -n '^session list' | tail -1 | cut -d: -f1 || true)
-nudge_line=$(printf '%s\n' "$CALLED" | grep -n '^session nudge' | head -1 | cut -d: -f1 || true)
-attach_line=$(printf '%s\n' "$CALLED" | grep -n '^session attach' | head -1 | cut -d: -f1 || true)
-if [ -n "$last_poll" ] && [ -n "$nudge_line" ] && [ -n "$attach_line" ] \
-   && [ "$last_poll" -lt "$nudge_line" ] && [ "$nudge_line" -lt "$attach_line" ]; then
-  ok "(KICK-AFTER-START) the codex kick reaches a started sitting and precedes the attach"
-else
-  bad "(KICK-AFTER-START) expected listing (${last_poll:-none}) < nudge (${nudge_line:-none}) < attach (${attach_line:-none})"
-fi
-GC_HELM_ENGAGE_WAIT_TIMEOUT=1 START_STATES="start-pending" run_fresh tk-conv --model codex
-has "$CALLED" "session nudge gc-77" "(TIMEOUT-KICK) a codex sitting unstarted at the bound is still kicked, so it begins once it starts"
-hasnt "$CALLED" "session attach" "(TIMEOUT-KICK) …but not attached"
-GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="start-pending gone" run_fresh tk-conv --model codex
-hasnt "$CALLED" "session nudge" "(CLOSED-NOKICK) a codex sitting that ended before it started is not kicked"
 
 echo "# Ctrl-C during the wait stops the wait and leaves the sitting starting"
 # The operator who stops waiting keeps the engage: the conversation stays
@@ -1287,15 +1361,11 @@ has "$OUT" "Conversation tk-conv stays held by s-gc-77, which the reconciler goe
 hasnt "$CALLED" "session attach" "(START-INTERRUPT) …without attaching"
 hasnt "$CALLED" "session close" "(START-INTERRUPT) …or closing the sitting"
 eq "$(asg tk-conv)" "gc-toolkit/gc-toolkit.tk-conv" "(START-INTERRUPT) …and the conversation still bound to it"
-hasnt "$CALLED" "session nudge" "(START-INTERRUPT) …and an opus sitting is not kicked"
-reset; START_STATES="start-pending" run_engage_interrupted tk-conv --model codex
-eq "$RC" 130 "(INTERRUPT-KICK) Ctrl-C during a codex sitting's wait exits 130"
-has "$CALLED" "session nudge gc-77" "(INTERRUPT-KICK) …after kicking the sitting, so it begins once it starts"
+hasnt "$CALLED" "session nudge" "(START-INTERRUPT) …and the sitting is not kicked; it begins from its prompt once it starts"
 # A terminal that goes away under the wait, and a TERM, stop it the same way.
-reset; INTERRUPT_SIG=HUP START_STATES="start-pending" run_engage_interrupted tk-conv --model codex
-eq "$RC" 129 "(INTERRUPT-HUP) a hang-up during a codex sitting's wait exits 129"
+reset; INTERRUPT_SIG=HUP START_STATES="start-pending" run_engage_interrupted tk-conv
+eq "$RC" 129 "(INTERRUPT-HUP) a hang-up during the wait exits 129"
 has "$OUT" "stopped waiting after" "(INTERRUPT-HUP) …through the same stop as Ctrl-C"
-has "$CALLED" "session nudge gc-77" "(INTERRUPT-HUP) …kicking the sitting, so it begins once it starts"
 hasnt "$CALLED" "session close" "(INTERRUPT-HUP) …and leaving it open"
 eq "$(asg tk-conv)" "gc-toolkit/gc-toolkit.tk-conv" "(INTERRUPT-HUP) …with the conversation still bound to it"
 reset; INTERRUPT_SIG=TERM START_STATES="start-pending" run_engage_interrupted tk-conv
@@ -1490,12 +1560,11 @@ eq "$RC" 0 "(IA-NEW-FREETEXT) a new conversation + free text exits 0"
 has "$CALLED" "bd create" "(IA-NEW-FREETEXT) …a new conversation is filed"
 has "$CALLED" "lets revisit the scope" "(IA-NEW-FREETEXT) …with the typed message as its body"
 
-echo "# the model prompt is a numbered choice; picking codex spawns converse-codex + kick"
+echo "# the model prompt is a numbered choice; picking codex spawns converse-codex"
 # model list = opus, codex, fable (opus first, then glob order); [2] = codex
 run_fresh_tty '2\n' tk-conv --no-attach
 eq "$RC" 0 "(IA-MODEL-PICK) picking a model exits 0"
 has "$CALLED" "session new converse-codex --alias tk-conv" "(IA-MODEL-PICK) …spawning the picked variant"
-has "$CALLED" "session nudge gc-77" "(IA-MODEL-PICK) …and codex, the kicked provider, gets its opening turn"
 
 echo "# Enter at the model prompt keeps Opus (the work-tier default)"
 run_fresh_tty '\n' tk-conv --no-attach
@@ -1679,11 +1748,12 @@ case "$CALLED" in
 esac
 has "$CALLED" "--title review-arch lens: is the split justified" "(SKILL-REASON) …and rides the title after the skill"
 
-echo "# a codex sitting is checked against codex's roster, and the brief rides its kick"
+echo "# a codex sitting is checked against codex's roster, and reads the brief from its ask"
 run_fresh tk-subj --skill review-arch --model codex --no-input --no-attach
 eq "$RC" 0 "(SKILL-CODEX) --skill with --model codex exits 0"
 has "$CALLED" "skill list --agent gc-toolkit/gc-toolkit.converse-codex" "(SKILL-CODEX) the roster read is the codex sitting's"
-has "$(printf '%s\n' "$CALLED" | grep '^session nudge')" "through the gc-toolkit.review-arch" "(SKILL-CODEX) …and the codex kick carries the lens brief"
+has "$CALLED" "look at tk-subj through the gc-toolkit.review-arch" "(SKILL-CODEX) …its new conversation's ask is the lens brief"
+hasnt "$CALLED" "session nudge" "(SKILL-CODEX) …and no opening turn carries it"
 
 echo "# a name the roster does not carry is refused before anything is filed"
 run_fresh tk-subj --skill nope --no-input --no-attach
@@ -1771,8 +1841,10 @@ has "$CALLED" "--title review-arch lens" "(IA-SKILL-FLAG) …filing the new conv
 echo "# after the attach returns, the tab says how the sitting it showed ended"
 # The attach returns once the tab's tmux client exits. A closed conversation is
 # a sitting that ended under the tab, and the tab prints how it closed and the
-# last hand-back it recorded; a conversation still open is one the operator
-# detached from, and the tab prints how to re-attach.
+# last hand-back it recorded; one back in the queue is a sitting cut short, and
+# the tab prints that hand-back and how to take it up again; one its sitting
+# still holds is one the operator detached from, and the tab prints how to
+# re-attach.
 HB_TEXT='tk-subj — the board redesign
 
 Settled: the new layout is on for the operator, and the rest wait a week.'
@@ -1808,6 +1880,27 @@ eq "$RC" 0 "(DETACHED) a tab the operator detached exits 0"
 has "$OUT" "The sitting on tk-subj is still open (conversation tk-conv). Re-attach: gc session attach gc-77" \
     "(DETACHED) a conversation still open says the sitting is still going, with the re-attach command"
 hasnt "$OUT" "$HB_TEXT" "(DETACHED) …and prints no hand-back as if it had ended"
+
+# Engage's bind leaves the status open until the sitting claims, so open alone
+# does not say the conversation went back to the queue.
+reset; ended_with "" "$HB_META"
+ATTACH_ENDS=open run_engage tk-conv
+has "$OUT" "The sitting on tk-subj is still open (conversation tk-conv). Re-attach: gc session attach gc-77" \
+    "(DETACHED-BOUND) an open conversation its sitting still holds is a sitting still going"
+
+reset; ended_with "" "$HB_META"
+ATTACH_ENDS=open ATTACH_HOLDER=human run_engage tk-conv
+eq "$RC" 0 "(QUEUED-TAB) a sitting cut short under the tab exits 0"
+has "$OUT" "The sitting on tk-subj has ended: conversation tk-conv is back in your queue. Take it up again: gc-helm engage tk-subj" \
+    "(QUEUED-TAB) the tab says the conversation is back in the queue, with the command that takes it up"
+has "$OUT" "Its last hand-back, recorded 2026-10-26T12:00:00Z:" "(QUEUED-TAB) …then introduces the last hand-back"
+has "$OUT" "$HB_TEXT" "(QUEUED-TAB) …and prints it whole"
+hasnt "$OUT" "Re-attach" "(QUEUED-TAB) …offering no re-attach to a session that no longer holds the conversation"
+
+reset; ended_with "" "$HB_META"
+ATTACH_FAIL=1 ATTACH_ENDS=open ATTACH_HOLDER=human run_engage tk-conv
+has "$OUT" "conversation tk-conv is back in your queue" "(ATTACH-FAIL-QUEUED) an attach that failed because a sitting cut short already ended reports the ending"
+hasnt "$OUT" "could not attach" "(ATTACH-FAIL-QUEUED) …instead of an attach to retry"
 
 reset; ATTACH_ENDS=in_progress ATTACH_UNREADABLE=1 run_engage tk-conv
 has "$OUT" "Could not read conversation tk-conv, so whether its sitting has ended is unknown" \
@@ -2027,6 +2120,13 @@ if ( cd "$ROOT/services/gctk" && go build -buildvcs=false -o "$TMP/gctk" ./cmd/g
   export WALK_EDGES='{"tk-subj":['"$REWORK_EDGE"','"$DECISION_EDGE"'],"tk-rework":['"$GATE_EDGE"']}'
   run_fresh tk-subj --no-attach --no-input
   has "$OUT" 'tk-subj is held by tk-dec ("keep the old flag?"), which a person has to clear.' "(HOLD-REAL) a decision the anchor waits on is offered beside the gate"
+  OTHER_PR_EDGE='{"id":"tk-other","title":"the PR the rework builds on","status":"open","issue_type":"task","metadata":{"merge_result":"pull_request","pr_posture":"review_required@h@2026-10-27T00:00:00Z","pr.machine":"settled@h@2026-10-27T00:00:00Z"},"dependency_type":"blocks"}'
+  export WALK_EDGES='{"tk-subj":['"$REWORK_EDGE"'],"tk-rework":['"$OTHER_PR_EDGE"']}'
+  run_fresh tk-subj --no-attach --no-input
+  has "$OUT" 'tk-subj is held by tk-other ("the PR the rework builds on"), which a person has to clear. To engage it: gc-helm engage tk-other' "(HOLD-REAL) another PR waiting on a review, which the rework waits on, is offered"
+  run_fresh_tty '1\n\n' tk-subj --no-attach
+  has "$OUT" '[1] tk-other — "the PR the rework builds on"  (a person has to clear it: engages it)' "(HOLD-REAL) …numbered at the prompt"
+  has "$CALLED" "--deps tracks:tk-other" "(HOLD-REAL) …and picking it engages that PR"
   export WALK_EDGES='{"tk-subj":['"$REWORK_EDGE"'],"tk-rework":[{"id":"tk-gate","status":"closed","issue_type":"gate","await_type":"human","dependency_type":"blocks"}]}'
   run_fresh tk-subj --no-attach --no-input
   hasnt "$OUT" "is held" "(HOLD-REAL) resolving the gate clears the offer"

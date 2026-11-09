@@ -148,8 +148,9 @@ reference to a dozen live beads.
   holds the PR's anchor, which can be another rig than the conversation's, so
   it resolves that rig and its checkout from the anchor's id and writes nothing
   when either cannot be resolved.
-- `bead-rehome.sh` places both ends of a successor pointer, so
-  `gc.superseded_by_store` names the store that actually holds the successor.
+- `bead-rehome.sh` places both ends of a disposition, so the edge it writes
+  in the origin's store names a successor that the store its prefix names
+  actually holds.
 - `mol-witness-patrol`'s cleanup step holds `git worktree remove` behind
   `--present`: a worktree whose owner cannot be placed is not an unowned one.
 - `gc-proactive.sh sling` files a reaction bead only for a subject `--present`

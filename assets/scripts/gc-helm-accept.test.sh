@@ -105,7 +105,7 @@ mkdir -p "$TMP/bin" "$TMP/store/b" "$TMP/city/.gc"
 #        inside the resolve call: a gate filed between the live read and the
 #        resolve
 #   LATE_GATE_ON_SEARCH=<gate>   file it inside the token search: between a
-#        finishing run's live read and its step 3
+#        finishing run's live read and its read-back of the bead's gates
 #   EARLIER_ANSWER=<reason>      a sitting's answer that reaches the gate inside
 #        the resolve call, before Accept's own
 #   SLING_FAIL=committed|partial|plain  the sling exits 1 after a committed pour,
@@ -222,7 +222,12 @@ case "$1 ${2:-}" in
     _g="$3"; lock; log "bd reopen $_g"
     row "$_g" | jq '.status = "open" | del(.close_reason) | del(.closed_at)' | put "$_g"; unlock ;;
   "bd update")
-    _id="$3"; shift 3; lock; log "bd update $_id $*"
+    _id="$3"; shift 3
+    # REFUSE_UPDATE_MATCH refuses an update whose arguments carry that text.
+    if [ -n "${REFUSE_UPDATE_MATCH:-}" ]; then
+      case " $* " in *"$REFUSE_UPDATE_MATCH"*) echo "gc: the store refused the update" >&2; exit 1 ;; esac
+    fi
+    lock; log "bd update $_id $*"
     _r=$(row "$_id")
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -424,13 +429,20 @@ eq "$RC" 2 "(DISPATCHED) an Accept run after the first one's record exits 2"
 has "$OUT" "was dispatched (mol-fix)" "(DISPATCHED) …because the recommendation is dispatched"
 eq "$(writes)" 0 "(DISPATCHED) …and writes nothing"
 
+echo "# an acceptance whose record the store refuses answers no gate and dispatches nothing"
+rec; REFUSE_UPDATE_MATCH='gc.acceptance=' run_accept tk-anc
+eq "$RC" 4 "(RECORD-REFUSED) an acceptance whose record on its gate the store refuses exits 4"
+has "$OUT" "could not record acceptance" "(RECORD-REFUSED) …saying so"
+eq "$(field tk-rec status)" "open" "(RECORD-REFUSED) …the recommendation's gate stays open"
+hasnt "$(cat "$CALLS")" "sling tk-anc" "(RECORD-REFUSED) …and nothing is slung"
+
 echo "# a gate filed after the live read stops the dispatch"
 rec; LATE_GATE_ON_RESOLVE=tk-late run_accept tk-anc
 eq "$RC" 4 "(LATE) a gate filed between the live read and the resolve exits 4"
 has "$OUT" "tk-late" "(LATE) …naming the late gate"
 eq "$(field tk-rec status)" "open" "(LATE) …and the recommendation's gate is reopened"
 eq "$(field tk-rec close_reason)" "" "(LATE) …its close and reason cleared"
-has "$OUT" "is open again, back on the board" "(LATE) …and read back as open"
+has "$OUT" "is open again, back on the board" "(LATE) …and says it is back on the board"
 eq "$(slings)" 0 "(LATE) …nothing is slung"
 eq "$(meta tk-anc gc.recommended_formula)" "mol-fix" "(LATE) …and the recommendation stays"
 
@@ -589,7 +601,7 @@ eq "$(roots accept:0123456789abcdef)" 1 "(HOLD-CLEARED) …pouring one root unde
 eq "$(meta tk-anc gc.recommended_formula_dispatched)" "mol-fix" "(HOLD-CLEARED) …and recording it"
 unfinished 0123456789abcdef
 LATE_GATE_ON_SEARCH=tk-late2 run_accept tk-anc
-eq "$RC" 4 "(HOLD-LATE) a gate filed between a finishing run's live read and its step 3 exits 4"
+eq "$RC" 4 "(HOLD-LATE) a gate filed between a finishing run's live read and its read-back of the bead's gates exits 4"
 eq "$(field tk-rec status)" "open" "(HOLD-LATE) …the recommendation's gate is reopened, back on the board, owed"
 eq "$(slings)" 0 "(HOLD-LATE) …and nothing is slung"
 

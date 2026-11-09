@@ -234,7 +234,7 @@ func (s *Server) runActuation(w http.ResponseWriter, r *http.Request, verb strin
 	// browser: a refresh, a closed tab or a dropped proxy connection cancels it,
 	// the run is SIGKILLed mid-write, and the handler reports a timeout. That is
 	// unsafe for these verbs specifically, because none is atomic — open creates
-	// the conversation before it reads its edge back; accept resolves the gate
+	// the conversation before it adds its reply onto a gate; accept resolves the gate
 	// before it slings and records; engage spawns a session before it binds. A kill
 	// inside any of those windows leaves partial state while the browser is told
 	// nothing happened, and the operator's retry then double-fires.

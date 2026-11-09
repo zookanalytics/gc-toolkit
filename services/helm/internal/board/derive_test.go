@@ -1317,48 +1317,74 @@ func TestBoardWithoutSittingsCarriesNone(t *testing.T) {
 	}
 }
 
-// TestSittingHeadlineFallback pins the headline a row reads off its subject: it
-// prefers the takeaway, then the conversation's close reason, and only then the
-// subject title before it shows the conversation's own title. It degrades to
-// the conversation's title only when the gather could not read the subject at
-// all.
+// TestSittingHeadlineFallback pins the headline a row reads off its
+// conversation and its subject. It prefers the takeaway, then the
+// conversation's close reason, then the conversation's own title, which says
+// what it asks, and shows the subject's title only when that title says nothing
+// of the ask: an empty one, or the stock title a pick off the board or a topic
+// the intake files directly leaves. It degrades to the conversation's title
+// only when the gather could not read the subject at all.
 func TestSittingHeadlineFallback(t *testing.T) {
 	const (
 		subjTitle = "the raw script path the launcher took"
-		convTitle = "operator pick from the board"
+		ask       = "decide whether the launcher or the board owns the path"
+		boardPick = "operator pick from the board"
+		intake    = "operator-origin topic intake"
 		takeaway  = "routed the fix to the pool; nothing further here"
 		reason    = "dismissed by the operator: superseded by the new plan"
 	)
 
-	// A concluded sitting: the takeaway is the headline.
-	concluded := Sitting{Subject: "tk-anchor", SubjectTitle: subjTitle, Title: convTitle, Takeaway: takeaway}
-	if got := sittingHeadline(concluded); got != takeaway {
-		t.Errorf("a takeaway is the headline: got %q, want %q", got, takeaway)
+	cases := []struct {
+		name string
+		s    Sitting
+		want string
+	}{
+		{"a takeaway is the headline",
+			Sitting{SubjectTitle: subjTitle, Title: ask, Takeaway: takeaway}, takeaway},
+		{"a takeaway wins over the close reason",
+			Sitting{SubjectTitle: subjTitle, Title: ask, Takeaway: takeaway, OutcomeReason: reason}, takeaway},
+		{"with no takeaway the close reason wins over the conversation's title",
+			Sitting{SubjectTitle: subjTitle, Title: ask, OutcomeReason: reason}, reason},
+		{"with neither, the conversation's title says what it asks, not the topic",
+			Sitting{SubjectTitle: subjTitle, Title: ask}, ask},
+		{"the stock title of a pick off the board gives way to the topic",
+			Sitting{SubjectTitle: subjTitle, Title: boardPick}, subjTitle},
+		{"the stock title of a topic the intake filed directly gives way to the topic",
+			Sitting{SubjectTitle: subjTitle, Title: intake}, subjTitle},
+		{"an untitled conversation gives way to the topic",
+			Sitting{SubjectTitle: subjTitle}, subjTitle},
+		{"an unread subject keeps the conversation's title",
+			Sitting{Title: ask}, ask},
+		{"an unread subject keeps even the stock title, the last thing left to show",
+			Sitting{Title: boardPick}, boardPick},
 	}
-
-	// A takeaway still wins when a close reason is also present.
-	both := Sitting{Subject: "tk-anchor", SubjectTitle: subjTitle, Title: convTitle, Takeaway: takeaway, OutcomeReason: reason}
-	if got := sittingHeadline(both); got != takeaway {
-		t.Errorf("a takeaway wins over the close reason: got %q, want %q", got, takeaway)
+	for _, tc := range cases {
+		tc.s.Subject = "tk-anchor"
+		if got := sittingHeadline(tc.s); got != tc.want {
+			t.Errorf("%s: headline %q, want %q", tc.name, got, tc.want)
+		}
 	}
+}
 
-	// A dismissal: no takeaway, but a close reason — the headline is the
-	// reason, so the row reads as a decision instead of the bare topic.
-	dedup := Sitting{Subject: "tk-anchor", SubjectTitle: subjTitle, Title: convTitle, OutcomeReason: reason}
-	if got := sittingHeadline(dedup); got != reason {
-		t.Errorf("no takeaway but a close reason: the headline is the reason: got %q, want %q", got, reason)
+// TestTwoAsksOnOneSubjectReadAsTwoHeadlines: two conversations filed on one
+// subject, neither concluded, carry their own asks as their headlines on the
+// wire, so the record shows two different rows rather than the topic twice.
+func TestTwoAsksOnOneSubjectReadAsTwoHeadlines(t *testing.T) {
+	const (
+		topic = "every live epic states a hypothesis or becomes ordinary flow"
+		ask1  = "the triage clusters: make their work ordinary flow, or state a hypothesis for each one kept"
+		ask2  = "the closed epics: record the close ruling each one lacks"
+	)
+	in := []Sitting{
+		{ID: "tk-conv1", Subject: "tk-subj", SubjectTitle: topic, Title: ask1, Status: "open", Assignee: assigneeHuman, OpenedAt: daysAgo(0)},
+		{ID: "tk-conv2", Subject: "tk-subj", SubjectTitle: topic, Title: ask2, Status: "open", Assignee: assigneeHuman, OpenedAt: daysAgo(0)},
 	}
-
-	// No takeaway, no reason, subject read: the headline is the topic, NOT the conversation's title.
-	bare := Sitting{Subject: "tk-anchor", SubjectTitle: subjTitle, Title: convTitle}
-	if got := sittingHeadline(bare); got != subjTitle {
-		t.Errorf("no takeaway falls back to the subject title, not the conversation's title: got %q, want %q", got, subjTitle)
+	got := map[string]string{}
+	for _, s := range BuildBoard(nil, fixtureNow, false, nil, Facts{Sittings: in}).Sittings {
+		got[s.ID] = s.Headline
 	}
-
-	// Subject unread: the last resort is the conversation's title.
-	unread := Sitting{Subject: "tk-anchor", Title: convTitle}
-	if got := sittingHeadline(unread); got != convTitle {
-		t.Errorf("an unread subject falls back to the conversation's title: got %q, want %q", got, convTitle)
+	if got["tk-conv1"] != ask1 || got["tk-conv2"] != ask2 {
+		t.Errorf("each conversation's headline is its own ask, not the topic: got %q", got)
 	}
 }
 
@@ -2985,6 +3011,121 @@ func TestPRRowNamesAGateBehindItsRework(t *testing.T) {
 		tile := mustTile(t, buildBoard([]Anchor{heldThroughRework(md, undated, signOff)}, fixtureNow, false, nil, Facts{}), "tk-a")
 		if want := "asking: 2× — sign off the release · undated"; tile.Needs != want {
 			t.Errorf("needs = %q, want %q", tile.Needs, want)
+		}
+	})
+}
+
+// The row of a PR whose live work waits on a bead a person owes the next move on
+// reads needs-attention and held blocked, as the label does, and names in NEEDS
+// where the move is. It is not owed for it: the move is asked for once, on that
+// bead's own row. A row owed for its own cause keeps naming it, a gate's
+// question still wins, and a takeaway still answers.
+func TestPRRowPointsAtAMoveHeldBehindItsRework(t *testing.T) {
+	at := fixtureNow.Add(-time.Hour)
+	// tk-a: unapproved, and its one live work is its rework, tk-rw.
+	md := map[string]string{
+		mdPRPosture: dated(postureReviewRequired, headLive, at),
+		mdPRMachine: dated(MachineProgressing, headLive, at),
+		mdPRNumber:  "18",
+	}
+	// tk-b: settled at its head with no approval, so its next move is a review.
+	other := mergeAnchor("tk-b", map[string]string{
+		mdPRPosture: dated(postureReviewRequired, headLive, at),
+		mdPRMachine: dated(MachineSettled, headLive, at),
+		mdPRNumber:  "37",
+	})
+	other.Title = "the other PR"
+	toOther := Blocker{ID: "tk-b", Title: "the other PR", Status: "open", IssueType: "task"}
+	decision := Anchor{ID: "tk-d", Title: "which design?", Kind: "decision", Source: "decision", Rig: "gc-toolkit", Prefix: "tk"}
+	toDecision := Blocker{ID: "tk-d", Title: "which design?", Status: "open", IssueType: "decision"}
+	signOff := Blocker{ID: "tk-g", Title: "sign off the release", Status: "open", IssueType: "gate", AwaitType: "human", CreatedAt: daysAgo(2)}
+	// rows is tk-a with md, its rework waiting on behind, and the rows the beads
+	// behind it have of their own.
+	rows := func(md map[string]string, behind ...Blocker) []Anchor {
+		a := mergeAnchor("tk-a", md, Blocker{ID: "tk-rw", Title: "fix the check", Status: "open", IssueType: "task"})
+		rework := Anchor{ID: "tk-rw", Title: "fix the check", Kind: kindRework, Source: kindRework, Rig: "gc-toolkit", Prefix: "tk",
+			Metadata: map[string]string{mdAnchorBead: "tk-a", mdTaskKind: kindRework}, Blockers: behind}
+		return []Anchor{a, rework, other, decision}
+	}
+
+	t.Run("behind a PR that waits on a review", func(t *testing.T) {
+		b := buildBoard(rows(md, toOther), fixtureNow, false, nil, Facts{})
+		tile := mustTile(t, b, "tk-a")
+		if tile.PRPhase != PhaseNeedsAttention || tile.Phase != PhaseNeedsAttention || !slices.Equal(tile.PRHeld, []string{string(prstatus.HeldBlocked)}) {
+			t.Errorf("pr_phase=%q phase=%q pr_held=%v, want needs-attention and held blocked, as the label reads", tile.PRPhase, tile.Phase, tile.PRHeld)
+		}
+		if tile.Needs != "your move is on the other PR" {
+			t.Errorf("needs = %q, want it to name the PR the move is on", tile.Needs)
+		}
+		if tile.Owed {
+			t.Errorf("owed = true, want the review asked for once, on the other PR's row")
+		}
+		if o := mustTile(t, b, "tk-b"); !o.Owed || o.Needs != "green, waiting on your review" {
+			t.Errorf("the other PR: owed=%v needs=%q, want the review asked for there", o.Owed, o.Needs)
+		}
+	})
+
+	t.Run("behind a decision", func(t *testing.T) {
+		b := buildBoard(rows(md, toDecision), fixtureNow, false, nil, Facts{})
+		tile := mustTile(t, b, "tk-a")
+		if tile.Needs != "your move is on which design?" || tile.Owed || !slices.Equal(tile.PRHeld, []string{string(prstatus.HeldBlocked)}) {
+			t.Errorf("needs=%q owed=%v pr_held=%v, want the decision named, no ask of its own, and held blocked", tile.Needs, tile.Owed, tile.PRHeld)
+		}
+		if d := mustTile(t, b, "tk-d"); !d.Owed {
+			t.Errorf("the decision's own row: owed=%v, want the ruling asked for there", d.Owed)
+		}
+	})
+
+	t.Run("behind work the city is doing", func(t *testing.T) {
+		tile := mustTile(t, buildBoard(rows(md), fixtureNow, false, nil, Facts{}), "tk-a")
+		if tile.PRPhase != PhaseWorking || len(tile.PRHeld) != 0 || tile.Owed || tile.Needs != "in the merge cadence" {
+			t.Errorf("pr_phase=%q pr_held=%v owed=%v needs=%q, want a row the city is working", tile.PRPhase, tile.PRHeld, tile.Owed, tile.Needs)
+		}
+	})
+
+	t.Run("behind more than one", func(t *testing.T) {
+		tile := mustTile(t, buildBoard(rows(md, toOther, toDecision), fixtureNow, false, nil, Facts{}), "tk-a")
+		if tile.Needs != "your move is on which design? and 1 more" || tile.Owed {
+			t.Errorf("needs=%q owed=%v, want the first the walk keeps named and the rest counted, with no ask of its own", tile.Needs, tile.Owed)
+		}
+	})
+
+	t.Run("a gate's question still wins", func(t *testing.T) {
+		anchors := append(rows(md, toOther, signOff), gateAnchor("tk-g", signOff.Title, "tk-rw"))
+		tile := mustTile(t, buildBoard(anchors, fixtureNow, false, nil, Facts{}), "tk-a")
+		if tile.Needs != "asking: sign off the release" || !tile.Owed {
+			t.Errorf("needs=%q owed=%v, want the gate asked for on this row", tile.Needs, tile.Owed)
+		}
+		if want := []string{string(prstatus.HeldGate), string(prstatus.HeldBlocked)}; !slices.Equal(tile.PRHeld, want) {
+			t.Errorf("pr_held = %v, want %v", tile.PRHeld, want)
+		}
+	})
+
+	t.Run("a row owed for its own review keeps asking for it", func(t *testing.T) {
+		settled := map[string]string{
+			mdPRPosture: dated(postureReviewRequired, headLive, at),
+			mdPRMachine: dated(MachineSettled, headLive, at),
+			mdPRNumber:  "18",
+		}
+		tile := mustTile(t, buildBoard([]Anchor{mergeAnchor("tk-a", settled, toOther), other}, fixtureNow, false, nil, Facts{}), "tk-a")
+		if !tile.Owed || tile.Needs != "green, waiting on your review" || !slices.Equal(tile.PRHeld, []string{string(prstatus.HeldBlocked)}) {
+			t.Errorf("owed=%v needs=%q pr_held=%v, want its own review asked for and the hold read", tile.Owed, tile.Needs, tile.PRHeld)
+		}
+	})
+
+	t.Run("a decision of its own is still asked for on the row", func(t *testing.T) {
+		tile := mustTile(t, buildBoard([]Anchor{mergeAnchor("tk-a", md, toDecision), decision}, fixtureNow, false, nil, Facts{}), "tk-a")
+		if !tile.Owed || tile.Needs != "asking: which design?" {
+			t.Errorf("owed=%v needs=%q, want the blocker of its own asked for", tile.Owed, tile.Needs)
+		}
+	})
+
+	t.Run("a takeaway still answers", func(t *testing.T) {
+		anchors := rows(md, toOther)
+		anchors[0].Takeaway = "the rework waits for the other PR"
+		tile := mustTile(t, buildBoard(anchors, fixtureNow, false, nil, Facts{}), "tk-a")
+		if tile.Needs != anchors[0].Takeaway || tile.Owed {
+			t.Errorf("needs=%q owed=%v, want the takeaway and no ask", tile.Needs, tile.Owed)
 		}
 	})
 }

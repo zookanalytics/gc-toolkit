@@ -34,11 +34,11 @@ harness_build_gctk() {
   local mod
   mod="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../services/gctk" && pwd)"
   if ! command -v go >/dev/null 2>&1; then
-    GCTK_BUILD_ERR="no Go toolchain: gctk was not built, so lifecycle.sh and merge.sh had nothing to exec in this suite"
+    GCTK_BUILD_ERR="no Go toolchain: gctk was not built, so lifecycle.sh, merge.sh and epic.sh had nothing to exec in this suite"
   elif ( cd "$mod" && go build -buildvcs=false -o "$TMP/gctk" ./cmd/gctk ) >"$GCTK_BUILD_LOG" 2>&1; then
     GCTK_BUILT="$TMP/gctk"
   else
-    GCTK_BUILD_ERR="gctk did not build, so lifecycle.sh and merge.sh had nothing to exec in this suite — $(tail -3 "$GCTK_BUILD_LOG" | tr '\n' ' ')"
+    GCTK_BUILD_ERR="gctk did not build, so lifecycle.sh, merge.sh and epic.sh had nothing to exec in this suite — $(tail -3 "$GCTK_BUILD_LOG" | tr '\n' ' ')"
   fi
 }
 
@@ -60,9 +60,9 @@ harness_init() {
   # scripts resolve a deployed `gctk` from the ambient city otherwise, and these
   # suites run from a tree INSIDE a live city, so left alone a suite would test
   # whichever binary that city last built. A suite that built nothing reaches no
-  # binary at all: lifecycle.sh and merge.sh refuse under GCTK_BIN=none, and
-  # pr-status-label.sh derives nothing. No port's shell is forced either: a
-  # suite that tests one sets GCTK_FALLBACK after harness_init.
+  # binary at all: lifecycle.sh, merge.sh and epic.sh refuse under
+  # GCTK_BIN=none, and pr-status-label.sh derives nothing. No port's shell is
+  # forced either: a suite that tests one sets GCTK_FALLBACK after harness_init.
   export GCTK_BIN="${GCTK_BUILT:-none}"
   unset GCTK_FALLBACK
   [ -z "${GCTK_BUILD_ERR:-}" ] || bad "$GCTK_BUILD_ERR"
@@ -361,7 +361,9 @@ case "$verb" in
     fi
     # A show of several ids reads a row for each, as the walk to the human gates
     # that hold a bead does. A row names its edges as real bd does, each edge's far
-    # bead with the type of the edge, and a row with no edges has none.
+    # bead with the type of the edge, and a row with no edges has none. A fixture
+    # edge marked "external" stands for one onto a bead in another rig's store,
+    # which bd's show leaves out and its list keeps.
     show_ids=()
     for a in "$@"; do case "$a" in --*) ;; *) show_ids+=("$a") ;; esac; done
     id="${show_ids[0]:-}"
@@ -386,7 +388,8 @@ case "$verb" in
       | [ $ARGS.positional[] as $id | $all[] | select(.id == $id) | .priority //= 2
           | ([ $edges[] | select(.issue == $id) | .type as $t | .on as $o
                | (first($all[] | select(.id == $o)) // {id: $o}) + {dependency_type: $t} ]) as $deps
-          | if ($deps | length) > 0 and (has("dependencies") | not) then . + {dependencies: $deps} else . end ]' \
+          | if ($deps | length) > 0 and (has("dependencies") | not) then . + {dependencies: $deps} else . end
+          | if has("dependencies") then .dependencies |= map(select(.external != true)) else . end ]' \
       "${show_ids[@]}"
     ;;
   list)
@@ -410,9 +413,13 @@ case "$verb" in
     if [ -n "${STUB_LIST_TRAILING:-}" ]; then
       case " $* " in *"$STUB_LIST_TRAILING"*) ltrail=1 ;; esac
     fi
-    statuses=""; fields=(); haskey=""; typ=""; excl=""; tcontains=""
+    # An --id read hides a gate unless --include-gates lifts that, as bd's type
+    # suppression does whatever the --id names.
+    statuses=""; fields=(); haskey=""; typ=""; excl=""; tcontains=""; idread=""; withgates=""
     while [ $# -gt 0 ]; do
       case "$1" in
+        --id|--id=*) idread=1 ;;
+        --include-gates) withgates=1 ;;
         --status=*) statuses="${1#--status=}" ;;
         --status) shift; statuses="${1:-}" ;;
         --metadata-field) shift; fields+=("${1:-}") ;;
@@ -430,7 +437,8 @@ case "$verb" in
     # One jq answers the whole query, the --metadata-field filters included:
     # each `k=v` is split at its first `=` (a field with no `=` keeps the whole
     # word as both, as the shell split it did) and a row must match every one.
-    jq -c --arg st "$statuses" --arg hk "$haskey" --arg ty "$typ" --arg ex "$excl" --arg tc "$tcontains" '
+    jq -c --arg st "$statuses" --arg hk "$haskey" --arg ty "$typ" --arg ex "$excl" --arg tc "$tcontains" \
+          --arg idread "$idread" --arg withgates "$withgates" '
       ($ARGS.positional | map(split("=") as $p
                                | if ($p | length) == 1 then {k: ., v: .}
                                  else {k: $p[0], v: ($p[1:] | join("="))} end)) as $fields
@@ -441,6 +449,7 @@ case "$verb" in
         | select($ty == "" or ((.issue_type // "task") == $ty))
         | select($ex == "" or ((.issue_type // "task") != $ex))
         | select($tc == "" or (((.title // "") | ascii_downcase) | contains($tc | ascii_downcase)))
+        | select($idread == "" or $withgates != "" or ((.issue_type // "") != "gate"))
         | . as $row
         | select(all($fields[]; ((($row.metadata // {})[.k]) // "" | tostring) == .v))
         | .priority //= 2 ]' \
@@ -581,9 +590,10 @@ case "$verb" in
     # edges, as it refuses a `dep` write from that id. --parent <id> rides the
     # create as bd writes it, a parent-child edge onto <id> beside .parent, and
     # -p/--priority sets the priority the row is born at; a create that names
-    # none is read at bd's default P2.
+    # none is read at bd's default P2. -t/--type sets the issue_type it is born
+    # with, bd's default task when none is named.
     title="${1:-}"; shift || true
-    body=""; cmeta="{}"; cstatus="open"; cnotes=""; cdeps=""; cparent=""; cprio=""
+    body=""; cmeta="{}"; cstatus="open"; cnotes=""; cdeps=""; cparent=""; cprio=""; ctype="task"
     while [ $# -gt 0 ]; do
       case "$1" in
         --body-file) shift; [ "${1:-}" = "-" ] && body="$(cat)" ;;
@@ -599,6 +609,8 @@ case "$verb" in
         --parent=*) cparent="${1#--parent=}" ;;
         -p|--priority) shift; cprio="${1:-}" ;;
         --priority=*) cprio="${1#--priority=}" ;;
+        -t|--type) shift; ctype="${1:-task}" ;;
+        --type=*) ctype="${1#--type=}" ;;
       esac
       shift || true
     done
@@ -612,7 +624,7 @@ case "$verb" in
     # naming the id wins, as the shell loop it replaces let the last one win).
     [ -n "$cmeta" ] || { echo "Error: invalid JSON in --metadata: must be valid JSON" >&2; exit 1; }
     out=$(jq -rc --arg t "$title" --arg b "$body" --arg st "$cstatus" --arg nt "$cnotes" \
-      --arg par "$cparent" --arg pr "$cprio" \
+      --arg par "$cparent" --arg pr "$cprio" --arg ty "$ctype" \
       --argjson m "$cmeta" --arg dk "${STUB_DROP_KEYS:-}" '
       ("new-" + ((length + 1) | tostring)) as $id
       | ([$dk | splits("[ \t\n]+")] | map(select(startswith($id + ":")))
@@ -621,7 +633,7 @@ case "$verb" in
            then ($m | with_entries(select(.key as $k | $drop | index($k) | not)))
            else $m end) as $meta
       | (if ($drop | index("status")) then "open" else $st end) as $status
-      | (. + [{id: $id, status: $status, assignee: "", title: $t, description: $b, notes: $nt, issue_type: "task", metadata: $meta}
+      | (. + [{id: $id, status: $status, assignee: "", title: $t, description: $b, notes: $nt, issue_type: $ty, metadata: $meta}
               + (if $par == "" then {} else {parent: $par} end)
               + (if $pr == "" then {} else {priority: ($pr | ltrimstr("P") | ltrimstr("p") | tonumber)} end)]),
         $id' "$S" 2>/dev/null) \

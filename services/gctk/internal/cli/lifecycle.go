@@ -26,7 +26,8 @@ import (
 // invoke lifecycle.sh as an opaque command.
 //
 // Exits: 0 ok; 1 illegal edge / --expect mismatch / bd refusal / usage;
-// 2 post-write verification mismatch (or unreadable bead).
+// 2 the bead could not be read before the write, or a landed transition could
+// not be reported as JSON.
 //
 // CAVEAT (docs/gascity/routing-model.md, "Clearing an assignee can be refused"):
 // clearing an assignee on a bead another actor holds in_progress is refused by
@@ -653,11 +654,10 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 	}
 	// A bead already resting on the park route keeps it. No pool claims that
 	// value, and clearing it would retract a bead a person still owns. Setting
-	// routeSet also puts gc.routed_to under the post-write verification below,
-	// so a route that fails to clear surfaces as an unverified transition rather
-	// than as a silent pool offer. No human state is detached, so none takes this
-	// clear: the guard above set its routeSet on arguments alone, or --keep-route
-	// left its route as it was.
+	// routeSet puts the clear in the transition's one write, so a clear bd
+	// refuses fails the transition rather than leaving a silent pool offer. No
+	// human state is detached, so none takes this clear: the guard above set its
+	// routeSet on arguments alone, or --keep-route left its route as it was.
 	if !o.routeSet && !o.keepRoute && lifecycle.IsDetachedState(o.to) {
 		if bead.Meta("gc.routed_to") != lifecycle.ParkRoute {
 			o.route, o.routeSet = "", true
@@ -668,8 +668,8 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 	// handoff pointer, and mol-refinery-patrol's find-work enumerates by it: a
 	// bead carrying a merge_result found in that queue is flagged, never taken,
 	// so a survivor sits there for the life of the anchor with nothing converging
-	// it. Setting assigneeSet puts the clear under the post-write read-back, the
-	// same way the route arm does.
+	// it. Setting assigneeSet puts the clear in the same write, as the route arm
+	// does.
 	//
 	// Only at status=open. That is the status every detached state declares, and
 	// it is the term of bd's anti-steal guard that decides whether the edit lands
@@ -693,8 +693,8 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 	// orphan-recovery pin the runtime resolves a dead owner from. --unset-metadata
 	// bypasses bd's anti-steal guard, so no status gate is needed; if the assignee
 	// clear beside it is refused on an in_progress bead, the whole update rolls
-	// back and the pins stay with the live claim that still owns them. The
-	// post-write read-back covers these like the route and assignee arms.
+	// back and the pins stay with the live claim that still owns them. They
+	// ride the same write as the route and assignee arms.
 	if o.assigneeSet && o.assignee == "" {
 		for _, pin := range []string{"gc.session_id", "gc.session_name"} {
 			has := false
@@ -731,8 +731,8 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 	}
 
 	// Resolve each dated key against the bead already in hand, appending the
-	// instant, then let it ride the ordinary --set path: one atomic write, and the
-	// post-write verification below checks the whole three-component value.
+	// instant, then let it ride the ordinary --set path: one atomic write carries
+	// the whole three-component value.
 	for _, d := range o.dated {
 		dk, dwant := kv(d)
 		o.sets = append(o.sets, dk+"="+dwant+"@"+datedSince(bead.Meta(dk), dwant))
@@ -740,11 +740,10 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 
 	// A transition that would change nothing performs no write. The observer arms
 	// re-assert a verdict they already recorded on most anchors of every pass, and
-	// each re-assertion costs an update plus the read-back that verifies it — two
-	// store subprocesses per anchor, on a cadence whose whole budget is store
-	// subprocesses. Skipping is safe because the comparison is made against the
-	// bead this transition already re-read: matching it is the same evidence the
-	// post-write read-back collects, gathered before the write instead of after.
+	// each re-assertion costs an update, a store subprocess per anchor, on a
+	// cadence whose whole budget is store subprocesses. Skipping is safe because
+	// the comparison is made against the bead this transition already re-read,
+	// which carries every value the write would set.
 	//
 	// Only a pure re-assertion qualifies. --append-notes accumulates, --takeaway
 	// stamps a fresh instant, and --close and --assignee move fields this
@@ -780,7 +779,7 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 	// Leaving a state writes what lifecycle.toml's exit_sets declares for it, in
 	// this same write, so no writer of a transition out of that state can leave
 	// the key behind. Into a closed state it writes none: the anchor's life ends
-	// there. The read-back below verifies each one like any other --set.
+	// there.
 	o.sets = append(o.sets, exitWrites(cur, o.to, o.sets, o.unsets)...)
 
 	// A transition into a closed state is a terminal land, and a landed bead
@@ -857,9 +856,8 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 	if o.routeSet {
 		updateArgs = append(updateArgs, "--set-metadata", "gc.routed_to="+o.route)
 	}
-	takeawayAt := ""
 	if o.takeawaySet {
-		takeawayAt = now().Format("2006-01-02T15:04:05Z")
+		takeawayAt := now().Format("2006-01-02T15:04:05Z")
 		// gc.takeaway_settled goes empty with every headline this writer stamps.
 		// A transition's takeaway names a park or an end, never a subject that
 		// settled itself while staying live, and the disposition of the sitting
@@ -880,91 +878,13 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 		updateArgs = append(updateArgs, "--append-notes", o.notes)
 	}
 
-	// ONE atomic write carrying every field of the transition.
+	// ONE atomic write carrying every field of the transition. Its exit says
+	// whether the transition landed: bd refuses a write it does not commit with a
+	// non-zero exit, and gc bd passes that exit through.
 	out, err := client.Update(id, updateArgs...)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s: %s %s -> %s refused by bd (rc=%d): %s\n", prog, id, cur, o.to, gcbd.ExitCode(err), out)
 		return 1
-	}
-
-	// Re-read and verify every written field; a write that reported success but
-	// did not land must never be reported as a transition. The read-back must
-	// observe the write just made and must carry the appended notes, so it uses
-	// the authoritative path, never the daemon's cached, notes-less read.
-	bead = client.ShowDirect(id)
-	if bead == nil {
-		fmt.Fprintf(stderr, "%s: %s %s -> %s written but the read-back failed; UNVERIFIED\n", prog, id, cur, o.to)
-		return 2
-	}
-	var bad strings.Builder
-	got := bead.Meta("merge_result")
-	if o.to == "unanchored" {
-		if got != "" {
-			fmt.Fprintf(&bad, " merge_result='%s'(want absent)", got)
-		}
-	} else if got != o.to {
-		fmt.Fprintf(&bad, " merge_result='%s'(want '%s')", got, o.to)
-	}
-	for _, s := range o.sets {
-		k, v := kv(s)
-		if g := bead.Meta(k); g != v {
-			fmt.Fprintf(&bad, " %s='%s'(want '%s')", k, g, v)
-		}
-	}
-	for _, k := range o.unsets {
-		if g := bead.Meta(k); g != "" {
-			fmt.Fprintf(&bad, " %s='%s'(want unset)", k, g)
-		}
-	}
-	if o.routeSet {
-		if g := bead.Meta("gc.routed_to"); g != o.route {
-			fmt.Fprintf(&bad, " gc.routed_to='%s'(want '%s')", g, o.route)
-		}
-	}
-	// Every field of the takeaway stamp, not just the text a person reads.
-	// The timestamp dates the wait: helm orders the operator's queue by it, and
-	// attributes a takeaway to the sitting whose span contains it, dropping one it
-	// cannot date. The writer is the provenance readers discriminate on to tell a
-	// sitting's decision from a park's own sentence. A stamp that lands in part
-	// leaves a headline the board can neither place nor attribute, so it is a
-	// failed transition and not a recorded one.
-	//
-	// The settled-key is verified CLEARED rather than merely written: a
-	// transition's takeaway names a park or an end, and a value inherited from an
-	// earlier sitting reads as this headline's own disposition, which is what
-	// doctor/check-wait-is-an-edge answers from.
-	if o.takeawaySet {
-		if g := bead.Meta("gc.takeaway"); g != o.takeaway {
-			fmt.Fprintf(&bad, " gc.takeaway='%s'(want '%s')", g, o.takeaway)
-		}
-		if g := bead.Meta("gc.takeaway_at"); g != takeawayAt {
-			fmt.Fprintf(&bad, " gc.takeaway_at='%s'(want '%s')", g, takeawayAt)
-		}
-		if g := bead.Meta("gc.takeaway_by"); g != prog {
-			fmt.Fprintf(&bad, " gc.takeaway_by='%s'(want '%s')", g, prog)
-		}
-		if g := bead.Meta("gc.takeaway_settled"); g != "" {
-			fmt.Fprintf(&bad, " gc.takeaway_settled='%s'(want cleared)", g)
-		}
-	}
-	if o.assigneeSet {
-		if g := bead.AssigneeString(); g != o.assignee {
-			fmt.Fprintf(&bad, " assignee='%s'(want '%s')", g, o.assignee)
-		}
-	}
-	if o.closeIt {
-		if g := bead.StatusLower(); g != "closed" {
-			fmt.Fprintf(&bad, " status='%s'(want closed)", g)
-		}
-	}
-	if o.notesSet && o.notes != "" {
-		if !strings.Contains(bead.NotesString(), o.notes) {
-			bad.WriteString(" notes(missing appended text)")
-		}
-	}
-	if bad.Len() > 0 {
-		fmt.Fprintf(stderr, "%s: %s %s -> %s wrote but did NOT verify:%s\n", prog, id, cur, o.to, bad.String())
-		return 2
 	}
 
 	return reportTransition(stdout, stderr, o.asJSON, id, cur, o.to)
@@ -1033,25 +953,6 @@ func cmdReopen(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintf(stderr, "%s: %s reopen refused by bd (rc=%d): %s\n", prog, id, gcbd.ExitCode(err), out)
 		return 1
-	}
-	// Same read-back discipline as transition: verify status flipped and
-	// merge_result stayed put before reporting the repair. Authoritative read,
-	// not the daemon's cache, so the just-written flip is observed.
-	bead = client.ShowDirect(id)
-	if bead == nil {
-		fmt.Fprintf(stderr, "%s: %s reopen written but the read-back failed; UNVERIFIED\n", prog, id)
-		return 2
-	}
-	var bad strings.Builder
-	if g := bead.StatusLower(); g != "open" {
-		fmt.Fprintf(&bad, " status='%s'(want open)", g)
-	}
-	if g := bead.Meta("merge_result"); g != st {
-		fmt.Fprintf(&bad, " merge_result='%s'(want '%s' unchanged)", g, st)
-	}
-	if bad.Len() > 0 {
-		fmt.Fprintf(stderr, "%s: %s reopen wrote but did NOT verify:%s\n", prog, id, bad.String())
-		return 2
 	}
 	fmt.Fprintf(stdout, "%s: %s reopened — status closed -> open, merge_result '%s' unchanged\n", prog, id, st)
 	return 0

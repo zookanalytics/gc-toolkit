@@ -11,24 +11,26 @@
 # first makes the bead ready, which is what the arm waits for. This runs the one
 # order that does end it:
 #   1. It removes the arm, and any notice owed, through deferred-dispatch.sh
-#      disarm, and reads the arm back. The reconcile pass reads an arm again just
-#      before it slings, so a pass that reads the gate closed reads the arm gone.
+#      disarm, whose exit says the arm is gone. The reconcile pass reads an arm
+#      again just before it slings, so a pass that reads the gate closed reads
+#      the arm gone, and it retires an arm it finds on a closed bead.
 #   2. It ends the run beneath the bead and clears the bead's route and session
-#      pins through gc-helm.sh takeaway --release --no-wait, and reads back that
-#      the bead has no dispatch path, because a bare release reads back no route.
-#      So nothing is still building the work and no pool is offered it once it is
-#      ready.
-#   3. It answers each gate under the key with the ruling, and reads each back.
-#      An answer releases every bead a gate blocks, so a gate that also holds
-#      another open bead takes none: this bead leaves it, and it goes on asking
-#      about the rest. Either way the bead is ready from here on, with nothing
-#      left to send it, which is why this comes after the arm and the route.
+#      pins through gc-helm.sh takeaway --release --no-wait, whose exit says the
+#      release landed, so the bead is left with no route. So nothing is still
+#      building the work and no pool is offered it once it is ready.
+#   3. It answers each gate under the key with the ruling, and reads each back
+#      to tell whose answer reached it first. An answer releases every bead a
+#      gate blocks, so a gate that also holds another open bead takes none: this
+#      bead leaves it, and it goes on asking about the rest. Either way the bead
+#      is ready from here on, with nothing left to send it, which is why this
+#      comes after the arm and the route.
 #   4. It hands the close to bead-rehome.sh, the writer of a close that is not a
-#      landing, as not-needed. The bead's branch ends with the close, as any
-#      disposition's does.
+#      landing, as not-needed, and takes bead-rehome.sh's exit as the close's.
+#      The bead's branch ends with the close, as any disposition's does.
 #
-# The evidence the pointer names is the gate that carries the ruling, unless
-# --successor names other evidence, such as a sitting's conversation. A gate this
+# The evidence the close names, through its supersedes edge, is the gate that
+# carries the ruling, unless --successor names other evidence, such as a
+# sitting's conversation. A gate this
 # bead leaves carries no ruling, so it cannot be the evidence.
 #
 # Nothing is written, and the exit is 1, for a bead whose close this cannot
@@ -40,16 +42,19 @@
 #     it, and an answer once this bead has closed releases the rest;
 #   * anything bead-rehome.sh --check refuses: another open human gate, a gate
 #     assigned to a person, another live blocker, an open child, a claim, or a
-#     pointer to other evidence.
+#     disposition already naming other evidence.
 #
 # A step that does not land exits 1 and names what has landed. Re-running
 # converges: the arm stays gone, an answered gate stays answered and still names
 # the evidence, and bd keeps the first answer a gate was given. A closed bead exits
-# 0 with nothing to do.
+# 0 with nothing to do. So when the writer fails after its close has landed, this
+# exits 1 and names the writer's own call, which records the edge that a re-run of
+# this command would not.
 #
 # Callers: a person or a sitting, on the ruling. A worker that declines its work
 # does not run this; it asks with human-gate.sh and await-ruling.sh.
-# exit: 0 the bead is closed · 1 it is not · 2 usage
+# exit: 0 the bead is closed · 1 it is not, or it closed and its edge may not be
+# recorded · 2 usage
 set -uo pipefail
 
 PROG="stand-down"
@@ -75,7 +80,8 @@ usage: stand-down.sh <work-bead> --key <situation-key> --ruling <why>
                 which a gate that also holds another open bead cannot be
   --dry-run     resolve and report; write nothing
 
-exit: 0 the bead is closed · 1 it is not · 2 usage
+exit: 0 the bead is closed · 1 it is not, or it closed and its edge may not be
+      recorded · 2 usage
 USAGE
 }
 
@@ -117,8 +123,6 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "${GC_BD_LIB:-$SCRIPT_DIR/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh beside this script" >&2; exit 1; }
 # shellcheck source=work-outcome.sh
 . "$SCRIPT_DIR/work-outcome.sh" || { echo "$PROG: cannot source work-outcome.sh beside this script" >&2; exit 1; }
-# shellcheck source=dispatch-path.sh
-. "$SCRIPT_DIR/dispatch-path.sh" || { echo "$PROG: cannot source dispatch-path.sh beside this script" >&2; exit 1; }
 DEFERRED="$SCRIPT_DIR/deferred-dispatch.sh"
 HELM="$SCRIPT_DIR/gc-helm.sh"
 REHOME="$SCRIPT_DIR/bead-rehome.sh"
@@ -157,10 +161,8 @@ for gate in $(printf '%s' "$OPEN_GATES" | jq -r '.[].id' 2>/dev/null); do
   fi
 done
 
-# The evidence: what the caller names, then a pointer an earlier run stamped, then
-# the gate that carries the ruling, which reads closed once an earlier run or
-# another person answered it.
-[ -n "$SUCCESSOR" ] || SUCCESSOR=$(row_meta "$WORK_JSON" gc.superseded_by)
+# The evidence: what the caller names, then the gate that carries the ruling,
+# which reads closed once an earlier run or another person answered it.
 [ -n "$SUCCESSOR" ] || SUCCESSOR=$(printf '%s' "$OPEN_GATES" | jq -r '.[0].id // empty' 2>/dev/null)
 [ -n "$SUCCESSOR" ] || SUCCESSOR=$(printf '%s' "$GATES" | jq -r --arg k "$KEY" \
   '[ .[] | select(((.await_id // "") | tostring) == $k) ] | last | .id // empty' 2>/dev/null)
@@ -191,19 +193,14 @@ if [ -n "$(row_meta "$WORK_JSON" gc.dispatch_when_ready)$(row_meta "$WORK_JSON" 
   "$DEFERRED" disarm "$WORK" --reason "stand-down: $RULING" >/dev/null \
     || stopped "the arm on $WORK was not removed, so no gate was answered."
 fi
-bd_json show "$WORK" | jq -e 'type == "array" and length > 0 and ((.[0].metadata["gc.dispatch_when_ready"] // "") == "")' >/dev/null 2>&1 \
-  || stopped "$WORK does not read back unarmed, so no gate was answered and nothing closed."
 
 "$HELM" takeaway "$WORK" "Stood down on a person's ruling, so nothing builds it" --release --no-wait \
   || stopped "the arm on $WORK is gone, but its run did not end or its route did not clear, so no gate was answered."
-bd_json show "$WORK" | jq -e "$DISPATCH_PATH_JQ"'type == "array" and length > 0 and (.[0] | has_dispatch_path | not)' >/dev/null 2>&1 \
-  || stopped "the arm on $WORK is gone and its run has ended, but it does not read back unrouted, so no gate was answered and it left none."
 
 for gate in $(printf '%s' "$OPEN_GATES" | jq -r '.[].id' 2>/dev/null); do
   case " $SHARED " in
     *" $gate "*)
-      gc bd dep remove "$WORK" "$gate" >/dev/null 2>&1 || true
-      bd_human_gates "$WORK" | jq -e --arg g "$gate" 'all(.[]; (.id // "") != $g)' >/dev/null 2>&1 \
+      gc bd dep remove "$WORK" "$gate" >/dev/null 2>&1 \
         || stopped "the arm on $WORK is gone and its run has ended, but it did not leave gate $gate, so nothing closed."
       echo "$PROG: $WORK left gate $gate, which stays open: $SHARED_WHY"
       continue ;;
@@ -222,10 +219,16 @@ done
 
 work_outcome_noop "$WORK" gc bd
 
-"$REHOME" --origin "$WORK" --successor "$SUCCESSOR" --kind not-needed --note "$RULING" \
-  || stopped "the arm on $WORK is gone, its run has ended and no gate under $KEY holds it, but it did not close: bead-rehome.sh said why, above."
+if ! "$REHOME" --origin "$WORK" --successor "$SUCCESSOR" --kind not-needed --note "$RULING"; then
+  # A close can stand behind a failed exit, with its edge unrecorded. A re-run of
+  # this command takes a closed bead for done, so the writer's own call is the
+  # way on, and the bead's status says which one it is.
+  if [ "$(bd_json show "$WORK" | jq -r '.[0].status // ""' 2>/dev/null)" = closed ]; then
+    echo "$PROG: $WORK closed as not needed, but its edge onto $SUCCESSOR may not be recorded: bead-rehome.sh said why, above. A re-run of this command would find it closed and record nothing, so run: $REHOME --origin $WORK --successor $SUCCESSOR --kind not-needed" >&2
+    exit 1
+  fi
+  stopped "the arm on $WORK is gone, its run has ended and no gate under $KEY holds it, but it did not close: bead-rehome.sh said why, above."
+fi
 
-[ "$(bd_json show "$WORK" | jq -r '.[0].status // ""' 2>/dev/null)" = closed ] \
-  || stopped "$WORK does not read back closed."
 echo "$PROG: $WORK closed as not needed, per $SUCCESSOR; nothing re-slings it"
 exit 0

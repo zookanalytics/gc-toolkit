@@ -14,18 +14,16 @@
 # This test runs the REAL gc-helm.sh (invoked via `sh`, as shipped) with a
 # stubbed `gc` on PATH — no live city, Dolt, network, or sessions. Covered:
 #   (EXISTS)   a resolvable bead gets a conversation: one create, a task that
-#              tracks the bead and is assigned to `human`, read back as a
-#              conversation, exit 0
+#              tracks the bead and is assigned to `human`, exit 0
 #   (QUEUED)   a conversation already waiting in the queue is joined, exit 0,
 #              nothing created; a new reason is appended to its notes in a
 #              write guarded on its waiting there, and a concern it already
 #              carries is not appended again
-#   (JOIN-*)   a join is reported only once the conversation reads back still
-#              waiting in the queue and carrying the concern: one a dismiss
+#   (JOIN-*)   a join is reported only once the conversation, read after the
+#              join's guarded append, still waits in the queue: one a dismiss
 #              closed or a sitting took, before the write or after it, is
-#              passed over and the concern filed fresh; a failed append, a note
-#              that did not land, an unread row, or a listing that does not
-#              answer again exits 4
+#              passed over and the concern filed fresh; a failed append, an
+#              unread row, or a listing that does not answer again exits 4
 #   (HELD)     a conversation a sitting holds is not joined: a fresh one is
 #              filed in the queue
 #   (TWO-TRACKS) a task assigned to human that tracks the bead and another is
@@ -37,7 +35,6 @@
 #   (GATE)     a human gate names the one bead still waiting on it, and the
 #              conversation replies to the gate; several waiting beads, or none,
 #              file nothing and say why
-#   (SHAPE)    a task whose tracks edge did not land is closed, not left behind
 #   (MISSING)  bd show's `{"error": …}` OBJECT answer -> exit 4, NOTHING filed
 #   (MISMATCH) bd show answering a DIFFERENT bead -> exit 4, nothing filed
 #   (NORIG)    an id prefix matching no rig -> exit 4 naming the prefix
@@ -86,9 +83,9 @@ mkdir -p "$TMP/bin"
 #     written on a mismatch, as bd's guard does, then appends its note.
 #     $FAKE_GUARD_MISS makes the guard miss whatever it reads, as a writer
 #     landing between open's read and its write does; $FAKE_APPEND_FAIL fails
-#     the write (exit 1); $FAKE_APPEND_DROPS answers 0 and keeps no note; and
-#     $FAKE_CLOSE_ON_APPEND closes the conversation just after the append, as a
-#     dismiss landing before open's read-back does.
+#     the write (exit 1); and $FAKE_CLOSE_ON_APPEND closes the conversation
+#     just after the append, as a dismiss landing before open reads it again
+#     does.
 #   bd dep list ... --type tracks fails from the $FAKE_TRACKS_FAIL_FROM-th
 #     listing on, when set.
 #   bd dep list <gate> --direction=up --type blocks — the beads waiting on the
@@ -96,11 +93,10 @@ mkdir -p "$TMP/bin"
 #   bd list --id <ids> — each named bead's own row, with its edges, for the
 #     comma-separated ids. $FAKE_CONV tracks the recorded bead alone, and
 #     $FAKE_TWO tracks it and tk-elsewhere, so it is no conversation. Any other
-#     id is the conversation a create filed, read back: a task that tracks the
-#     subject its --deps named and carries the assignee it was filed with,
-#     unless $FAKE_SHAPE_BROKEN drops the edge. Its replies-to edges are the
-#     ones `dep add` recorded. An id in $FAKE_LIST_DROPS is left out, as a row
-#     the store did not return.
+#     id is the conversation a create filed: a task that tracks the subject its
+#     --deps named and carries the assignee it was filed with. Its replies-to
+#     edges are the ones `dep add` recorded. An id in $FAKE_LIST_DROPS is left
+#     out, as a row the store did not return.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 ${2:-}" in
   "rig list")
@@ -189,7 +185,6 @@ case "$1 ${2:-}" in
         _subj="$(cat "$TMP_SUBJ" 2>/dev/null || true)"
         _asg="$(cat "$TMP_ASG" 2>/dev/null || true)"
         _reps="$(awk -v c="$_id" '$1 == c {print $2}' "$TMP_REPLIES" 2>/dev/null | jq -Rsc --arg c "$_id" '[ split("\n")[] | select(. != "") | {issue_id:$c, depends_on_id:., type:"replies-to"} ]')"
-        if [ -n "${FAKE_SHAPE_BROKEN:-}" ]; then _subj=""; fi
         _row=$(jq -n --arg c "$_id" --arg s "$_subj" --arg a "$_asg" --argjson r "${_reps:-[]}" \
           '{id:$c, issue_type:"task", status:"open", assignee:$a,
             dependencies:((if $s == "" then [] else [{issue_id:$c, depends_on_id:$s, type:"tracks"}] end) + $r)}')
@@ -232,7 +227,7 @@ case "$1 ${2:-}" in
       if [ "$_ifa_set$_ifs_set" != 00 ] && [ -n "${FAKE_GUARD_MISS:-}" ]; then exit 13; fi
       if [ "$_ifa_set" = 1 ] && [ "$_now_as" != "$_ifa" ]; then exit 13; fi
       if [ "$_ifs_set" = 1 ] && [ "$_now_st" != "$_ifs" ]; then exit 13; fi
-      if [ "$_note_set" = 1 ] && [ -z "${FAKE_APPEND_DROPS:-}" ]; then printf '%s\n' "$_note" >> "$TMP_NOTES"; fi
+      if [ "$_note_set" = 1 ]; then printf '%s\n' "$_note" >> "$TMP_NOTES"; fi
       [ -z "${FAKE_CLOSE_ON_APPEND:-}" ] || printf 'closed' > "$TMP_NOW_STATUS"
     fi ;;
   "bd close")
@@ -271,7 +266,7 @@ run_open() {
 # --- (EXISTS) the happy path ---------------------------------------------------
 # A positive control first: a gate that rejects everything would pass every
 # fail-closed assertion below while breaking the verb outright.
-unset FAKE_CONV FAKE_WAITERS FAKE_SHAPE_BROKEN || true
+unset FAKE_CONV FAKE_WAITERS || true
 run_open found tk-real1
 eq "$RC" "0" "(EXISTS) a resolvable bead exits 0"
 CREATE=$(grep '^bd create' <<< "$CALLS" || true)
@@ -289,8 +284,8 @@ grep -qE 'task_kind|gc\.routed_to|gc\.continuation_group' <<< "$CALLS" \
   && bad "(EXISTS) a conversation carries no pack metadata (calls: $CALLS)" \
   || ok "(EXISTS) no pack metadata is stamped"
 grep -q '^bd close' <<< "$CALLS" \
-  && bad "(EXISTS) the conversation read back and must not be closed (calls: $CALLS)" \
-  || ok "(EXISTS) the conversation reads back as one and stays open"
+  && bad "(EXISTS) the conversation it filed must not be closed (calls: $CALLS)" \
+  || ok "(EXISTS) the conversation it filed stays open"
 grep -q 'conversation tk-conv1 filed on tk-real1' <<< "$OUT" \
   && ok "(EXISTS) success names the conversation and its bead" || bad "(EXISTS) success sentence (out: $OUT)"
 grep -q "operator's queue" <<< "$OUT" \
@@ -392,24 +387,19 @@ grep -q 'conversation tk-conv1 filed on tk-real1' <<< "$OUT" \
 FAKE_CLOSE_ON_APPEND=1 run_open found tk-real1 --reason "the cost question"
 eq "$RC" "0" "(JOIN-CLOSED-AFTER) a conversation a dismiss closes after the append exits 0"
 grep -q 'conversation tk-conv1 filed on tk-real1' <<< "$OUT" \
-  && ok "(JOIN-CLOSED-AFTER) …and its read-back sends the concern to a conversation of its own" \
-  || bad "(JOIN-CLOSED-AFTER) files fresh once the read-back reads closed (out: $OUT calls: $CALLS)"
+  && ok "(JOIN-CLOSED-AFTER) …and its read after the join sends the concern to a conversation of its own" \
+  || bad "(JOIN-CLOSED-AFTER) files fresh once the read after the join reads closed (out: $OUT calls: $CALLS)"
 grep -q 'already open' <<< "$OUT" \
   && bad "(JOIN-CLOSED-AFTER) …never reporting the closed one waiting (out: $OUT)" \
   || ok "(JOIN-CLOSED-AFTER) …never reporting the closed one waiting"
 
-FAKE_APPEND_DROPS=1 run_open found tk-real1 --reason "the cost question"
-eq "$RC" "4" "(JOIN-LOST) an append that answers 0 and keeps no note exits 4"
-grep -q 'did not read back in conversation tk-conv0' <<< "$ERR" \
-  && ok "(JOIN-LOST) …saying the concern did not read back" || bad "(JOIN-LOST) names the read-back (err: $ERR)"
-
 FAKE_CONV_UNREADABLE=1 run_open found tk-real1 --reason "the cost question"
-eq "$RC" "4" "(JOIN-UNREAD) a conversation that does not read back exits 4"
+eq "$RC" "4" "(JOIN-UNREAD) a conversation that does not read after the join exits 4"
 grep -q '^bd update tk-conv0 --if-assignee human --if-status open --append-notes' <<< "$CALLS" \
   && ok "(JOIN-UNREAD) …after the guarded append, which an unread row cannot rule out" \
   || bad "(JOIN-UNREAD) the append is guarded (calls: $CALLS)"
-grep -q 'could not be read back' <<< "$ERR" \
-  && ok "(JOIN-UNREAD) …saying it could not be read back" || bad "(JOIN-UNREAD) names the read (err: $ERR)"
+grep -q 'could not be read after open joined it' <<< "$ERR" \
+  && ok "(JOIN-UNREAD) …saying it could not be read" || bad "(JOIN-UNREAD) names the read (err: $ERR)"
 
 FAKE_CONV_NOW_STATUS=closed run_open found tk-real1
 eq "$RC" "0" "(JOIN-BARE) open with no concern beside a conversation closed after the listing exits 0"
@@ -531,14 +521,6 @@ grep -q 'nothing waits on gate tk-gate1' <<< "$ERR" && grep -q 'tk-done' <<< "$E
 grep -q 'gc bd gate resolve tk-gate1' <<< "$ERR" \
   && ok "(GATE-NONE) …and how to clear the gate" || bad "(GATE-NONE) names the resolve (err: $ERR)"
 unset FAKE_WAITERS
-
-# --- (SHAPE) a task that did not land as a conversation is closed ---------------
-export FAKE_SHAPE_BROKEN=1
-run_open found tk-real1
-eq "$RC" "4" "(SHAPE) a task whose tracks edge did not land exits 4"
-grep -q 'bd close tk-conv1' <<< "$CALLS" \
-  && ok "(SHAPE) the misshapen task is closed, not left behind" || bad "(SHAPE) closed (calls: $CALLS)"
-unset FAKE_SHAPE_BROKEN
 
 # --- (MISSING) a typo must file NOTHING ----------------------------------------
 run_open missing tk-nope1
@@ -899,20 +881,30 @@ mkdir -p "$TMP/resbin"
 # resolver can pin --db for its cross-store PR search; the stub ignores the --db
 # value and answers by argv pattern. `bd show` branches on the id so a supersede
 # chain and a live bead read differently; `bd list` answers the PR search (which
-# carries `blocked` in --status) and the read-back of the conversation a create
-# filed (--id).
+# carries `blocked` in --status), a supersede chain's edge (--id of a settled
+# bead, as bd's list row carries it), and the read-back of the conversation a
+# create filed (any other --id).
+# succ_of <id> — the bead a settled fixture's supersedes edge names, or nothing.
+succ_of() {
+  case "$1" in
+    tk-pred|tk-mid) echo tk-succ ;; tk-pred2) echo tk-gone ;; tk-head) echo tk-mid ;;
+    tk-cyc1) echo tk-cyc2 ;; tk-cyc2) echo tk-cyc1 ;;
+  esac
+}
+settled() { jq -n --arg i "$1" --arg s "$(succ_of "$1")" '[{id:$i, status:"closed", metadata:{}, dependencies:[{id:$s, dependency_type:"supersedes"}]}]'; }
+# A closed gate whose successor only its list row names, the way bd's listing
+# hides a gate unless --include-gates lifts that, whatever the --id names; and
+# closed beads whose list read goes wrong after their show answered.
+closed_row() { jq -n --arg i "$1" '[{id:$i, status:"closed", metadata:{}}]'; }
 case "$1 ${2:-}" in
   "rig list")
     jq -n '{rigs:[{name:"gc-toolkit", path:env.RESRIG, prefix:"tk"}]}' ;;
   "bd show")
     case "$3" in
-      tk-pred)    jq -n '[{id:"tk-pred",   status:"closed", metadata:{"gc.superseded_by":"tk-succ","gc.superseded_by_store":"rig:gc-toolkit"}}]' ;;
-      tk-pred2)   jq -n '[{id:"tk-pred2",  status:"closed", metadata:{"gc.superseded_by":"tk-gone"}}]' ;;
-      tk-head)    jq -n '[{id:"tk-head",   status:"closed", metadata:{"gc.superseded_by":"tk-mid"}}]' ;;
-      tk-mid)     jq -n '[{id:"tk-mid",    status:"closed", metadata:{"gc.superseded_by":"tk-succ"}}]' ;;
+      tk-pred|tk-pred2|tk-head|tk-mid|tk-cyc1|tk-cyc2) settled "$3" ;;
+      tk-oldgate) jq -n '[{id:"tk-oldgate", status:"closed", issue_type:"gate", await_type:"human", metadata:{}}]' ;;
+      tk-oldinfra|tk-oldtmpl|tk-listfail|tk-listjunk|tk-listerr|tk-listgone|tk-settled) closed_row "$3" ;;
       tk-succ)    jq -n '[{id:"tk-succ",   status:"open",   title:"the live successor"}]' ;;
-      tk-cyc1)    jq -n '[{id:"tk-cyc1",   status:"closed", metadata:{"gc.superseded_by":"tk-cyc2"}}]' ;;
-      tk-cyc2)    jq -n '[{id:"tk-cyc2",   status:"closed", metadata:{"gc.superseded_by":"tk-cyc1"}}]' ;;
       tk-live1)   jq -n '[{id:"tk-live1",  status:"open",   title:"a live bead"}]' ;;
       tk-prbead)  jq -n '[{id:"tk-prbead", status:"open",   title:"the PR anchor"}]' ;;
       tk-prbead2) jq -n '[{id:"tk-prbead2",status:"open",   title:"another PR anchor"}]' ;;
@@ -924,6 +916,30 @@ case "$1 ${2:-}" in
     case " $* " in
       *" --id "*)
         _p=""; _c=""; for a in "$@"; do [ "$_p" = --id ] && _c="$a"; _p="$a"; done
+        if [ -n "$(succ_of "$_c")" ]; then
+          jq -n --arg i "$_c" --arg s "$(succ_of "$_c")" '[{id:$i, status:"closed", dependencies:[{issue_id:$i, depends_on_id:$s, type:"supersedes"}]}]'
+          exit 0
+        fi
+        case "$_c" in
+          tk-oldgate)
+            case " $* " in
+              *" --include-gates "*) jq -n '[{id:"tk-oldgate", status:"closed", issue_type:"gate", dependencies:[{issue_id:"tk-oldgate", depends_on_id:"tk-succ", type:"supersedes"}]}]' ;;
+              *) printf '[]' ;;
+            esac
+            exit 0 ;;
+          tk-oldinfra|tk-oldtmpl)
+            case "$_c:$* " in
+              tk-oldinfra:*" --include-infra "*|tk-oldtmpl:*" --include-templates "*)
+                jq -n --arg i "$_c" '[{id:$i, status:"closed", dependencies:[{issue_id:$i, depends_on_id:"tk-succ", type:"supersedes"}]}]' ;;
+              *) printf '[]' ;;
+            esac
+            exit 0 ;;
+          tk-listfail) echo "bd: database is locked" >&2; exit 1 ;;
+          tk-listjunk) printf 'not json at all'; exit 0 ;;
+          tk-listerr)  printf '{"error":"database is locked"}'; exit 0 ;;
+          tk-listgone) printf '[]'; exit 0 ;;
+          tk-settled)  closed_row tk-settled; exit 0 ;;
+        esac
         jq -n --arg c "$_c" --arg s "$(cat "$TMP_SUBJ" 2>/dev/null)" \
           '[{id:$c, issue_type:"task", status:"open", assignee:"human", dependencies:[{issue_id:$c, depends_on_id:$s, type:"tracks"}]}]'
         exit 0 ;;
@@ -1014,6 +1030,38 @@ eq "$RC" "4" "(RESOLVE-BROKEN-POINTER) an unresolvable successor exits 4"
 grep -q 'tk-gone' <<< "$ERR" \
   && ok "(RESOLVE-BROKEN-POINTER) names the successor it could not resolve" \
   || bad "(RESOLVE-BROKEN-POINTER) names the successor (err: $ERR)"
+
+# (RESOLVE-GATE) a closed gate, an infrastructure bead and a template name their
+# successor as any bead does, though a plain listing hides each of them.
+for _hidden in tk-oldgate tk-oldinfra tk-oldtmpl; do
+  set +e
+  OUT="$(PATH="$TMP/resbin:$PATH" sh "$SCRIPT" resolve "$_hidden" 2>"$TMP/err")"; RC=$?
+  set -e
+  eq "$RC/$OUT" "0/tk-succ" "(RESOLVE-GATE) superseded $_hidden resolves to its successor"
+done
+
+# (RESOLVE-SETTLED) a closed bead whose read answers and names no successor is
+# itself the answer.
+set +e
+OUT="$(PATH="$TMP/resbin:$PATH" sh "$SCRIPT" resolve tk-settled 2>"$TMP/err")"; RC=$?
+set -e
+eq "$RC/$OUT" "0/tk-settled" "(RESOLVE-SETTLED) a closed bead that names no successor resolves to itself"
+
+# (RESOLVE-UNREAD) a closed bead whose list row does not read is refused: a failed
+# read, output that is not JSON, an answer that is no listing and a listing without
+# the row each say nothing about its successor, and none of them is "it names none".
+for _unread in tk-listfail tk-listjunk tk-listerr tk-listgone; do
+  set +e
+  OUT="$(PATH="$TMP/resbin:$PATH" sh "$SCRIPT" resolve "$_unread" 2>"$TMP/err")"; RC=$?
+  set -e
+  eq "$RC/$OUT" "4/" "(RESOLVE-UNREAD) resolve refuses $_unread, and prints no id"
+  grep -q "$_unread is closed, and its list row did not read" "$TMP/err" \
+    && ok "(RESOLVE-UNREAD) the refusal says why, for $_unread" \
+    || bad "(RESOLVE-UNREAD) the refusal says why, for $_unread (err: $(cat "$TMP/err"))"
+  FAKE_PR_ROWS='[]'; run_resolve "$_unread"
+  eq "$RC" "4" "(RESOLVE-UNREAD) open refuses $_unread"
+  [ -z "$CALLS" ] && ok "(RESOLVE-UNREAD) nothing filed on $_unread" || bad "(RESOLVE-UNREAD) filed on $_unread (calls: $CALLS)"
+done
 
 # (RESOLVE-PR-NUMBER) a bare PR number resolves to the anchor recording it.
 FAKE_PR_ROWS='[{"id":"tk-prbead","status":"open","metadata":{"pr_number":"615","pr_url":"https://github.com/o/r/pull/615"}}]'
@@ -1298,7 +1346,7 @@ case "$1 ${2:-}" in
     jq -n '{rigs:[{name:"gc-toolkit", path:env.REBINRIG, prefix:"tk"}]}' ;;
   "bd show")
     case "$3" in
-      tk-pred)   jq -n '[{id:"tk-pred",   status:"closed", metadata:{"gc.superseded_by":"tk-succ"}}]' ;;
+      tk-pred)   jq -n '[{id:"tk-pred",   status:"closed", metadata:{}, dependencies:[{id:"tk-succ", dependency_type:"supersedes"}]}]' ;;
       tk-succ)   jq -n '[{id:"tk-succ",   status:"open",   title:"the live successor"}]' ;;
       tk-prbead) jq -n '[{id:"tk-prbead", status:"open",   title:"the PR anchor"}]' ;;
       tk-convE)
@@ -1315,6 +1363,8 @@ case "$1 ${2:-}" in
         if [ "$_id" = tk-convE ]; then
           _a="$(cat "$CONV_STATE" 2>/dev/null || true)"
           jq -n --arg a "${_a:-human}" --arg s "${FAKE_CONV_SUBJ:-}" '[{id:"tk-convE", issue_type:"task", status:"open", assignee:$a, title:"an earlier concern", created_at:"2026-10-01T00:00:00Z", dependencies:[{issue_id:"tk-convE", depends_on_id:$s, type:"tracks"}]}]'
+        elif [ "$_id" = tk-pred ]; then
+          jq -n '[{id:"tk-pred", status:"closed", dependencies:[{issue_id:"tk-pred", depends_on_id:"tk-succ", type:"supersedes"}]}]'
         else printf '[]'; fi ;;
     esac ;;
   "bd dep")

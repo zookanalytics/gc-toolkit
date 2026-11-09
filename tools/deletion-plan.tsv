@@ -15,9 +15,6 @@ assets/scripts/step-close.sh	tk-1tfzr71.39
 assets/scripts/step-close.test.sh	tk-1tfzr71.39
 assets/scripts/work-tree-holder.sh	tk-1tfzr71.39
 assets/scripts/work-tree-holder.test.sh	tk-1tfzr71.39
-assets/scripts/worktree-reap.sh	tk-1tfzr71.42
-assets/scripts/worktree-reap.test.sh	tk-1tfzr71.42
-orders/worktree-reap.toml	tk-1tfzr71.42
 assets/scripts/branch-context.sh	tk-1tfzr71.20
 assets/scripts/branch-context.test.sh	tk-1tfzr71.20
 assets/scripts/branch-supersession.sh	tk-1tfzr71.20
@@ -81,8 +78,6 @@ assets/scripts/review-dismissal.test.sh	tk-1tfzr71.21
 doctor/check-feedback-routing-owed/doctor.toml	tk-1tfzr71.21
 doctor/check-feedback-routing-owed/run.sh	tk-1tfzr71.21
 doctor/check-feedback-routing-owed/run.test.sh	tk-1tfzr71.21
-assets/scripts/duplicate-sweep.sh	tk-1tfzr71.13
-assets/scripts/duplicate-sweep.test.sh	tk-1tfzr71.13
 doctor/check-routed-work-claimable/doctor.toml	tk-1tfzr71.15
 doctor/check-routed-work-claimable/run.sh	tk-1tfzr71.15
 doctor/check-routed-work-claimable/run.test.sh	tk-1tfzr71.15

@@ -1152,13 +1152,15 @@ reconcile_dispatch() {
                 if printf '%s' "$children" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
                     if [ -x "$HELM" ]; then
                         pass_child "$HELM" open "$id" --reason "deferred dispatch has failed $fails times: disarm or re-arm" \
-                          --body "$cap_msg" >/dev/null 2>&1 || true
+                          --body "$cap_msg" >/dev/null 2>&1 \
+                          || echo "$PROG: WARN could not open a conversation on capped $id; it stays capped and armed, so the next pass asks again" >&2
                     else
                         echo "$PROG: WARN gc-helm.sh '$HELM' not executable — capped $id has no conversation; disarm or clear its fail count by hand" >&2
                     fi
                 elif [ -x "$HUMAN_GATE" ]; then
                     pass_child "$HUMAN_GATE" --subject "$id" --key "deferred-dispatch-sling-failed.$id" \
-                      --quiet-window "$CAP_QUIET_WINDOW" --message "$cap_msg Then clear this gate. It blocks $id, so the retry stays held while the gate is open, and a gate cleared while $id is still armed at the cap is asked again by a later pass." >/dev/null 2>&1 || true
+                      --quiet-window "$CAP_QUIET_WINDOW" --message "$cap_msg Then clear this gate. It blocks $id, so the retry stays held while the gate is open, and a gate cleared while $id is still armed at the cap is asked again by a later pass." >/dev/null 2>&1 \
+                      || echo "$PROG: WARN could not file the gate on capped $id; it stays capped and armed, so the next pass asks again" >&2
                 else
                     echo "$PROG: WARN human-gate.sh '$HUMAN_GATE' not executable — capped $id has no gate; disarm or clear its fail count by hand" >&2
                 fi
@@ -1235,7 +1237,8 @@ reconcile_dispatch() {
 
         sling_bead "$id" "$target" "$args_json"; rc=$?
         if [ "$rc" != 0 ]; then
-            [ "$DRY_RUN" = 1 ] || bd_ update "$id" --unset-metadata "$K_SLUNG" >/dev/null 2>&1 || true
+            [ "$DRY_RUN" = 1 ] || bd_ update "$id" --unset-metadata "$K_SLUNG" >/dev/null 2>&1 \
+                || echo "$PROG: WARN could not roll $K_SLUNG back on $id; the next pass reads it unconfirmed and slings again" >&2
             if [ "$rc" = 3 ]; then
                 echo "$PROG: WARN $id has a malformed $K_ARGS ('$args_json') — leaving armed" >&2
             else
@@ -1248,10 +1251,11 @@ reconcile_dispatch() {
         # Sling returned success: promote the marker to its proven "slung@" state
         # before clearing the record, so a death in the narrow window before disarm
         # recovers as a retire, not a second sling. disarm then clears the whole
-        # record, the marker included; if this promotion write is lost, disarm
-        # still clears it on this pass, and only a death before disarm falls back to
-        # a re-sling next pass.
-        bd_ update "$id" --set-metadata "$K_SLUNG=$SLUNG_DONE$(now_utc)" >/dev/null 2>&1 || true
+        # record, the marker included; if the store refuses this promotion,
+        # disarm still clears it on this pass, and only a death before disarm
+        # falls back to a re-sling next pass.
+        bd_ update "$id" --set-metadata "$K_SLUNG=$SLUNG_DONE$(now_utc)" >/dev/null 2>&1 \
+            || echo "$PROG: WARN could not promote $K_SLUNG on $id to slung; the disarm below clears it" >&2
         if disarm_bead "$id" "dispatched to $target by the deferred-dispatch reconcile pass"; then
             echo "$PROG: dispatched $id -> $target"
         else

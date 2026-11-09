@@ -31,10 +31,11 @@ it: the waiting bead stays out of `bd ready`, and once the blocker closes a
 routed bead is offered to its pool again. A waiting bead with no route needs an
 arm (below), or nothing sends it.
 
-Writer: `gc bd dep add <waiting-bead> <blocker> --type=blocks`. Read the edge
-back with `gc bd dep list <waiting-bead> --direction=down -t blocks`, because a
-link across two stores prints success and holds nothing. When it does not read
-back, the blocker is in another rig's store, so remove that edge and make the
+Writer: `gc bd dep add <waiting-bead> <blocker> --type=blocks`, its exit saying
+whether the edge landed. Write it only when both ids carry the same prefix, the
+text before the first `-`, which names the store that holds the bead, because a
+link across two stores prints success and holds nothing. When the prefixes
+differ, the blocker is in another rig's store, so write no edge and make the
 bead wait on a human gate in its own store that names the blocker (below),
 which the operator clears once the blocker lands.
 
@@ -56,20 +57,21 @@ and closes the bead, or puts it to a person when the landing did not end the
 job. Nothing closes the bead unchecked, because the blocker can close without
 the fix it promised.
 
-Writers, in order: the close brief the closer checks, the edge, its read-back,
-then the arm.
+Writers, in order: the close brief the closer checks, the edge, then the arm.
+Write the edge only when `<bead>` and `<blocker>` carry the same id prefix, as
+above.
 
 ```bash
 gc bd update <bead> --append-notes "## Close brief (held on <blocker>, $(date -u +%Y-%m-%dT%H:%M:%SZ))
 <what <blocker>'s landing fixes here, and what to check once it has>"
 gc bd dep add <bead> <blocker> --type=blocks
-gc bd dep list <bead> --direction=down -t blocks
 "$(gc <binding> scripts-dir)/deferred-dispatch.sh" arm <bead> --target <rig>/gc-toolkit.polecat --sling-arg --on --sling-arg mol-validate-close --reason "waits for <blocker>; the validating closer checks it once that closes"
 ```
 
-Arm only once the edge reads back. When it does not, the blocker is in another
-rig's store, where the edge holds nothing, so remove that edge, arm nothing, and
-ask a person to close the bead once the blocker lands (a human gate, below).
+Arm only once the add exits 0. When the prefixes differ, the blocker is in
+another rig's store, where an edge would hold nothing, so write no edge, arm
+nothing, and ask a person to close the bead once the blocker lands (a human
+gate, below).
 
 - `<rig>` is the bead's own rig, whose polecat pool runs the closer, and the
   arm needs the bead open with no route. A first reaction writes the brief, the

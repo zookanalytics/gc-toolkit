@@ -28,8 +28,8 @@
 # alone would leave the route offering the bead straight back to the pool, and
 # each new claimant would refuse it again until the run building it finishes.
 # gc.execution_routed_to stays, because await-ruling.sh re-slings from it. The
-# write is read back before the drain. A bead already closed holds no claim, so
-# nothing is handed back.
+# write's exit decides whether it landed. A bead already closed holds no claim,
+# so nothing is handed back.
 #
 # The parts run in that order because an end with no record behind it leaves work
 # nothing re-offers. A part that does not land stops the sequence and nothing after
@@ -155,11 +155,6 @@ if [ -n "$CLAIM" ]; then
   if [ -z "$SUBJECT" ] && [ "$CLAIM_STATUS" != closed ]; then
     if ! "$SCRIPT_DIR/hand-back.sh" "$CLAIM" --set-metadata gc.routed_to="" >&2; then
       echo "$PROG: the claim on $CLAIM was not handed back; $KEEP" >&2
-      exit 1
-    fi
-    IFS='|' read -r NOW_STATUS NOW_HOLDER _ NOW_ROUTE <<<"$(claim_read "$CLAIM")"
-    if [ "$NOW_STATUS" != open ] || [ -n "$NOW_HOLDER" ] || [ -n "$NOW_ROUTE" ]; then
-      echo "$PROG: the hand-back of $CLAIM did not read back: it shows status ${NOW_STATUS:-unreadable}, assignee ${NOW_HOLDER:-none} and gc.routed_to ${NOW_ROUTE:-none}; $KEEP" >&2
       exit 1
     fi
   fi

@@ -277,7 +277,7 @@ if [ -n "$looks_like_bead_id" ]; then
     [ -z "$RIG" ] || die "--rig does not apply to an existing bead ('$ARG' belongs to rig '$prefix_hit')" 2
     [ -z "$SUBJ_TYPE" ] || die "--type does not apply to an existing bead ('$ARG' already has a type)" 2
     # A settled (superseded) id redirects to its live successor before it is
-    # stamped as the subject: gc-helm's resolver follows gc.superseded_by, and a
+    # stamped as the subject: gc-helm's resolver follows its supersedes edge, and a
     # live id passes through unchanged. Recompute the rig from the successor.
     if [ -z "$FORCE_TOPIC" ]; then
         RESOLVED_SUBJECT_REF=$("$HELM" resolve "$ARG") || exit $?
