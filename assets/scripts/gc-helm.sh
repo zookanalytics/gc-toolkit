@@ -57,7 +57,7 @@ usage() {
 Usage:
   gc-helm open  <bead-id> [--reason "..."] [--body "..."] [--allow-duplicate] [--if-subject <id>] [--conversation <id>] [--json]  file a conversation about the bead in the operator's queue, for the operator to engage; a second concern joins the bead's conversation already in the queue unless --allow-duplicate files a fresh one, which lands instead on a conversation in the queue whose whole ask is that concern; --if-subject files only while the reference still names that subject, and a reference that names another now, through a successor, a PR's anchor or a gate's waiter, files nothing (exit 4); --conversation completes the conversation an earlier open filed for the concern, by its id, wherever it stands, adding the reply onto the gate that did not land, and one no longer open on the bead or holding another ask files nothing (exit 4); --json prints {subject,conversation,filed}, and names the conversation on every exit once it is filed
   gc-helm open  --new-subject --rig <name> [<question> | --reason "<question>"] [--json]  file a FRESH subject in the named rig for a topic that has no bead yet, the question unchanged in its description and its title derived from the question's opening, then its conversation in the queue; a subject filed whose conversation is not is named, filed:false in --json, for a re-run onto it
-  gc-helm engage [<subject>] [--subject <id>] [--new-subject [--rig <name>]] [--model <variant>] [--skill <name>] [--reason "..." | --template <key>] [--no-input] [--no-attach]  hold a conversation about the bead in a converse sitting and attach: attach to its live sitting, or take its conversation from the queue, or file one, then spawn a sitting named for it. Pointed at a human gate it takes the one bead still waiting on the gate, and the conversation replies to the gate. On a terminal, with no --reason, --template or --skill, it opens the conversation form instead: subject, a new topic's rig, question and model on one screen, filled in from the command line; --no-input keeps the flag-driven one-shot path. --skill seeds the sitting with any skill it carries as its lens on the subject (--skill review-arch is a conversation with the Architect). --new-subject files a FRESH subject bead in the --rig rig (the positional text, or --reason, is the question; its title is derived from the question's opening) and engages it in one gesture
+  gc-helm engage [<subject>] [--subject <id>] [--new-subject [--rig <name>]] [--model <variant>] [--skill <name>] [--reason "..." | --template <key>] [--no-input] [--no-attach]  hold a conversation about the bead in a converse sitting and attach: attach to its live sitting, or take its conversation from the queue, or file one, then spawn a sitting named for it. Pointed at a human gate it takes the one bead still waiting on the gate, and the conversation replies to the gate. On a terminal, with no --reason, --template or --skill, it opens the conversation form instead: subject, question, a new topic's rig, model and whether to attach on one screen, filled in from the command line, where --no-attach turns attaching off; --no-input keeps the flag-driven one-shot path. --skill seeds the sitting with any skill it carries as its lens on the subject (--skill review-arch is a conversation with the Architect). --new-subject files a FRESH subject bead in the --rig rig (the positional text, or --reason, is the question; its title is derived from the question's opening) and engages it in one gesture
   gc-helm attach [<conversation>]  return to a conversation: with an id, engage's attach (a live sitting once it has started, or a new sitting on a conversation whose sitting ended or that waits in the queue); with none, on a terminal, the conversation form's list of conversations to return to, by topic and readiness
   gc-helm conversations [<ref>] [--json]  list where each open conversation stands: its sitting's readiness (queued, starting, preparing, ready, ended) and whether a terminal is attached; with a subject reference, the subject as engage resolves it, the rig a conversation about it is held in, whether a sitting can start there, its open conversations and what holds it. Read-only
   gc-helm react <bead-id> [--reason "..."]  file a first reaction — a reaction bead that tracks the subject, claimed and disposed by the proactive pool
@@ -113,9 +113,10 @@ assets/scripts/gc-helm-engage-starters.sh.
 On a terminal, an engage that names no concern (--reason, --template or
 --skill) and not --no-input opens the conversation form, helm-svc's `form`
 command (helm_form). One screen holds the subject (a bead id, a PR number or
-URL, or empty for a new topic), a new topic's rig, which the operator chooses
-and is never inferred, the model, with opus shown as the default, and a
-multiline question. While the operator types, the form reads `conversations`
+URL, or empty for a new topic), a multiline question one Tab after it, a new
+topic's rig, which the operator chooses and is never inferred, the model, with
+opus shown as the default, and whether to attach, which is on unless
+--no-attach is given. While the operator types, the form reads `conversations`
 for the subject: its rig, whether a sitting can start there, its open
 conversations and what holds it, and the city's rigs for a new topic. A result
 for an earlier subject never stands in for the current one, and no result
@@ -123,10 +124,12 @@ changes the rig or a conversation the operator chose. Ctrl+S saves only once the
 destination it shows is settled: open files the question as a new conversation,
 with --allow-duplicate and --if-subject naming the subject shown on a subject,
 and --new-subject on a topic, and the form says it is saved; engage
-<conversation> --no-attach then starts its sitting, and the form follows it to
-ready. A save open refuses reads the subject again, so a subject that names
-another bead now is shown before the next Ctrl+S can file there. Enter attaches;
-leaving keeps it running. A question the form did not save is kept in a file
+<conversation> --no-attach then starts its sitting. Once it has started, the
+form attaches to it, or with attaching off leaves it to prepare and names how to
+return to it. A save open refuses reads the subject again, so a subject that
+names another bead now is shown before the next Ctrl+S can file there. After a
+start that failed, Enter attaches, holding the conversation in a new sitting.
+Leaving keeps what was saved. A question the form did not save is kept in a file
 when it closes, and before the terminal goes to a sitting. `gc-helm attach`
 opens the same form on the conversations to return to. A --model the
 configured variants do not carry is refused before the form opens.
@@ -3804,15 +3807,17 @@ cmd_engage() {
     fi
 
     # On a terminal, an engage whose command line leaves the concern open runs
-    # the conversation form (helm_form): the subject, a new topic's rig, the
-    # question and the model are fields of one screen, filled in from the
-    # command line, and the form saves and starts through this script's own open
-    # and engage. A concern on the command line (--reason, --template or
-    # --skill), --no-input, and every engage without a terminal take the
-    # flag-driven path below. GC_HELM_ASSUME_TTY is a test seam that takes the
-    # form's path when stdin is a pipe, as in a hermetic test. A --model the
-    # configured variants do not carry is refused before the form opens, as the
-    # flag-driven path refuses it, since the form's model field holds only those.
+    # the conversation form (helm_form): the subject, the question, a new
+    # topic's rig, the model and whether to attach are fields of one screen,
+    # filled in from the command line, and the form saves and starts through
+    # this script's own open and engage. --no-attach turns its attach field
+    # off, so the flag means on a terminal what it means below. A concern on the
+    # command line (--reason, --template or --skill), --no-input, and every
+    # engage without a terminal take the flag-driven path below.
+    # GC_HELM_ASSUME_TTY is a test seam that takes the form's path when stdin is
+    # a pipe, as in a hermetic test. A --model the configured variants do not
+    # carry is refused before the form opens, as the flag-driven path refuses
+    # it, since the form's model field holds only those.
     if [ "$engage_no_input" = 0 ] && [ "$engage_reason_set" = 0 ] && [ -z "$engage_template" ] \
         && [ -z "$engage_skill" ] && { [ -t 0 ] || [ -n "${GC_HELM_ASSUME_TTY:-}" ]; }; then
         [ "$engage_model_set" = 0 ] || engage_check_model
@@ -3825,6 +3830,7 @@ cmd_engage() {
             set -- --subject "$bead"
         fi
         [ "$engage_model_set" = 0 ] || set -- "$@" --model "$engage_model"
+        [ "$engage_attach" = 1 ] || set -- "$@" --no-attach
         helm_form engage "$@"
     fi
 

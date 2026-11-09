@@ -20,10 +20,10 @@ type Options struct {
 	Model    string   // the converse variant; empty takes Models[0]
 	Question string   // the question, as given
 	Models   []string // the converse variants, the default first
+	NoAttach bool     // leave once the sitting starts, rather than attach to it
 	Return   bool     // open on the return list
 	DraftDir string   // where the question of a cancelled form is kept
 	Debounce time.Duration
-	Poll     time.Duration
 	Refresh  time.Duration // how often the return list reads the city again
 	Now      func() time.Time
 }
@@ -38,11 +38,13 @@ const (
 
 type field int
 
+// The fields, in the order the screen shows them.
 const (
 	subjectField field = iota
+	questionField
 	rigField
 	modelField
-	questionField
+	attachField
 	contextField
 )
 
@@ -69,12 +71,7 @@ type (
 		saved Saved
 		err   error
 	}
-	startedMsg struct{ err error }
-	pollMsg    struct{}
-	readyMsg   struct {
-		conv Conversation
-		err  error
-	}
+	startedMsg  struct{ err error }
 	cityTickMsg struct{}
 	attachedMsg struct{ err error }
 )
@@ -104,26 +101,24 @@ type Model struct {
 	cityBusy bool
 	ticking  bool // a refresh of the return list is scheduled
 
-	rig   string // the rig a new topic is filed in, chosen by name and only by the operator
-	model int    // index into opt.Models; -1 while it is opt.Model, which no variant carries
+	rig    string // the rig a new topic is filed in, chosen by name and only by the operator
+	model  int    // index into opt.Models; -1 while it is opt.Model, which no variant carries
+	attach bool   // attach to the sitting once it starts; off, the form leaves then
 
 	choice        string // newChoice, or the conversation the operator chose
 	choiceTouched bool
 	cursor        int
 
 	// The progress of a submit.
-	req       SaveRequest // what the save sent; a save again sends it with the conversation it filed
-	saving    bool
-	saved     *Saved
-	saveErr   string // why the save that filed saved's conversation did not complete
-	partial   string // a new subject a failed save filed without its conversation
-	existing  bool   // the conversation was chosen, not filed
-	starting  bool
-	started   bool
-	startErr  string
-	readiness string
-	pollErr   string
-	leaving   bool // the operator left while a save or a start ran, so the form leaves once it lands
+	req      SaveRequest // what the save sent; a save again sends it with the conversation it filed
+	saving   bool
+	saved    *Saved
+	saveErr  string // why the save that filed saved's conversation did not complete
+	partial  string // a new subject a failed save filed without its conversation
+	existing bool   // the conversation was chosen, not filed
+	starting bool
+	startErr string
+	leaving  bool // the operator left while a save or a start ran, so the form leaves once it lands
 
 	// The return list's selection is a conversation, so a refresh that re-sorts
 	// the list leaves it on the conversation the operator picked.
@@ -141,9 +136,6 @@ func New(ctx context.Context, helm Helm, opt Options) *Model {
 	if opt.Debounce <= 0 {
 		opt.Debounce = 400 * time.Millisecond
 	}
-	if opt.Poll <= 0 {
-		opt.Poll = 3 * time.Second
-	}
 	if opt.Refresh <= 0 {
 		opt.Refresh = 10 * time.Second
 	}
@@ -158,7 +150,7 @@ func New(ctx context.Context, helm Helm, opt Options) *Model {
 			opt.Models = []string{opt.Model}
 		}
 	}
-	m := &Model{helm: helm, opt: opt, ctx: ctx, lookups: map[string]*lookup{}, rig: opt.Rig}
+	m := &Model{helm: helm, opt: opt, ctx: ctx, lookups: map[string]*lookup{}, rig: opt.Rig, attach: !opt.NoAttach}
 	if opt.Model != "" {
 		// A model no variant carries is shown as it was named, marked, and
 		// nothing starts on it until the operator picks a variant.
@@ -262,14 +254,16 @@ func (m *Model) setFocus(f field) {
 	}
 }
 
-// fields is the focus order. The rig is a field only for a new topic, and the
-// context list only when it holds something to choose.
+// fields is the focus order, which is the order the screen shows them in. The
+// subject comes first and the question one Tab after it, since those are what
+// the operator gives almost every time. The rig is a field only for a new
+// topic, and the context list only when it holds something to choose.
 func (m *Model) fields() []field {
-	fs := []field{subjectField}
+	fs := []field{subjectField, questionField}
 	if m.newTopic() {
 		fs = append(fs, rigField)
 	}
-	fs = append(fs, modelField, questionField)
+	fs = append(fs, modelField, attachField)
 	if len(m.contextRows()) > 1 {
 		fs = append(fs, contextField)
 	}
@@ -543,10 +537,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.onSaved(msg)
 	case startedMsg:
 		m.starting = false
+		m.startErr = ""
 		if msg.err != nil {
 			m.startErr = msg.err.Error()
-		} else {
-			m.started, m.startErr = true, ""
 		}
 		if m.leaving {
 			return m, m.quit()
@@ -554,34 +547,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			return m, nil
 		}
-		return m, m.poll(0)
-	case pollMsg:
-		if m.saved == nil {
-			return m, nil
+		// The sitting has started. The form attaches to it, as engage does on
+		// the command line, and with attaching off it leaves the sitting to
+		// prepare and says how to return to it. engage's attach waits for the
+		// session to start, and holds the conversation in a new sitting on the
+		// model the start ran on if this one has ended by then.
+		if m.attach {
+			return m, m.attachTo(m.saved.Conversation, m.modelName())
 		}
-		conv := m.saved.Conversation
-		return m, func() tea.Msg {
-			a, err := m.helm.About(m.ctx, conv)
-			if err != nil {
-				return readyMsg{err: err}
-			}
-			for _, c := range a.Conversations {
-				if c.ID == conv {
-					return readyMsg{conv: c}
-				}
-			}
-			return readyMsg{err: fmt.Errorf("conversation %s is no longer open", conv)}
-		}
-	case readyMsg:
-		if msg.err != nil {
-			m.pollErr = msg.err.Error()
-			return m, m.poll(m.opt.Poll)
-		}
-		m.pollErr, m.readiness = "", msg.conv.Readiness
-		if m.readiness == Ready || m.readiness == Ended {
-			return m, nil
-		}
-		return m, m.poll(m.opt.Poll)
+		return m, m.quit()
 	case cityTickMsg:
 		m.ticking = false
 		if m.scr == returnScreen {
@@ -672,6 +646,12 @@ func (m *Model) key(k tea.KeyPressMsg) tea.Cmd {
 			m.cycleModel(-1)
 		case "right", "space":
 			m.cycleModel(1)
+		}
+		return nil
+	case attachField:
+		switch s {
+		case "left", "right", "space":
+			m.attach = !m.attach
 		}
 		return nil
 	case contextField:
@@ -886,18 +866,14 @@ func (m *Model) start() tea.Cmd {
 	}
 }
 
-func (m *Model) poll(after time.Duration) tea.Cmd {
-	if after <= 0 {
-		return func() tea.Msg { return pollMsg{} }
-	}
-	return tea.Tick(after, func(time.Time) tea.Msg { return pollMsg{} })
-}
-
 func (m *Model) progressKey(s string) tea.Cmd {
 	switch s {
 	case "enter":
-		if m.saved != nil && m.saveErr == "" && !m.saving && !m.starting {
-			return m.attach(m.saved.Conversation, m.modelName())
+		// A started sitting is attached to, or left, once it starts, so Enter
+		// is the attach after a start that failed, which engage's attach holds
+		// in a new sitting.
+		if m.saved != nil && m.saveErr == "" && m.startErr != "" && !m.saving && !m.starting {
+			return m.attachTo(m.saved.Conversation, m.modelName())
 		}
 	case "r":
 		switch {
@@ -980,7 +956,7 @@ func (m *Model) returnKey(s string) tea.Cmd {
 		m.retSel, m.retAt = rows[at].ID, at
 	case "enter":
 		if at >= 0 {
-			return m.attach(m.retSel, "")
+			return m.attachTo(m.retSel, "")
 		}
 	case "r":
 		return m.loadCity()
@@ -992,14 +968,14 @@ func (m *Model) returnKey(s string) tea.Cmd {
 	return nil
 }
 
-// attach hands the terminal to conv's sitting, and the form leaves once it comes
-// back. A question the form has not saved is kept first, so neither the attach
-// nor an end of the form while the sitting holds the terminal loses it. model is
-// what a sitting held anew runs on. The progress screen passes the model its
-// start ran on, so a start that failed or a sitting that ended is held again on
-// the model the screen showed. The return list shows no model and passes none,
-// so engage's default holds it.
-func (m *Model) attach(conv, model string) tea.Cmd {
+// attachTo hands the terminal to conv's sitting, and the form leaves once it
+// comes back. A question the form has not saved is kept first, so neither the
+// attach nor an end of the form while the sitting holds the terminal loses it.
+// model is what a sitting held anew runs on. An attach after a start passes the
+// model the start ran on, so a start that failed or a sitting that ended is held
+// again on the model the screen showed. The return list shows no model and
+// passes none, so engage's default holds it.
+func (m *Model) attachTo(conv, model string) tea.Cmd {
 	m.note = m.keepUnsaved()
 	return tea.ExecProcess(m.helm.AttachCommand(conv, model), func(err error) tea.Msg { return attachedMsg{err: err} })
 }
@@ -1071,10 +1047,6 @@ func (m *Model) savedNote() string {
 		state = "you left while its sitting was being started, so whether it started is unknown"
 	case m.startErr != "":
 		state = "no sitting started (" + m.startErr + "); it waits in your queue"
-	case m.readiness == Ready:
-		state = "its sitting is ready"
-	case m.readiness != "":
-		state = "its sitting is " + m.readiness
 	}
 	return fmt.Sprintf("Conversation %s on %s %s, and %s. Return to it with: gc-helm.sh attach %s", s.Conversation, s.Subject, what, state, s.Conversation)
 }
@@ -1210,10 +1182,16 @@ func (m *Model) label(f field, text string) string {
 
 func (m *Model) composeView() string {
 	var b strings.Builder
+	act := "Ctrl+S save, start and attach"
+	if !m.attach {
+		act = "Ctrl+S save, start and leave"
+	}
 	b.WriteString(labelStyle.Render("Start a conversation"))
-	b.WriteString(hintStyle.Render("   Ctrl+S save and start · Tab next field · Ctrl+R return to a conversation · Esc cancel"))
+	b.WriteString(hintStyle.Render("   " + act + " · Tab next field · Ctrl+R return to a conversation · Esc cancel"))
 	b.WriteString("\n\n")
 	b.WriteString(m.label(subjectField, "Subject ") + "  " + m.subject.View() + "\n")
+	b.WriteString(m.label(questionField, "Question") + hintStyle.Render("  Enter adds a line") + "\n")
+	b.WriteString(m.question.View() + "\n\n")
 	if m.newTopic() {
 		rig := m.rig
 		if rig == "" {
@@ -1230,9 +1208,12 @@ func (m *Model) composeView() string {
 	case m.model == 0:
 		model += hintStyle.Render(" (default)")
 	}
-	b.WriteString(m.label(modelField, "Model   ") + "  ‹ " + model + " ›\n\n")
-	b.WriteString(m.label(questionField, "Question") + hintStyle.Render("  Enter adds a line") + "\n")
-	b.WriteString(m.question.View() + "\n\n")
+	b.WriteString(m.label(modelField, "Model   ") + "  ‹ " + model + " ›\n")
+	attach := "yes, once its sitting starts" + hintStyle.Render(" (default)")
+	if !m.attach {
+		attach = "no, leave once its sitting starts"
+	}
+	b.WriteString(m.label(attachField, "Attach  ") + "  ‹ " + attach + " ›\n\n")
 	dest, ok := m.destination()
 	mark := waitStyle.Render("…")
 	if ok {
@@ -1320,28 +1301,18 @@ func (m *Model) progressView() string {
 	case m.startErr != "":
 		b.WriteString(badStyle.Render("✗") + " no sitting started: " + m.startErr + "\n")
 		b.WriteString(hintStyle.Render("  The conversation waits in your queue. r retries the start.") + "\n")
-	case m.started:
-		switch m.readiness {
-		case Ready:
-			b.WriteString(okStyle.Render("✓") + " ready: the sitting has posted its framing\n")
-		case Ended:
-			b.WriteString(badStyle.Render("✗") + " the sitting ended before it was ready; Enter holds the conversation in a new one\n")
-		case "":
-			b.WriteString(waitStyle.Render("…") + " sitting started; reading its state\n")
-		default:
-			b.WriteString(waitStyle.Render("…") + " sitting " + m.readiness + "\n")
-		}
-		if m.pollErr != "" {
-			b.WriteString(hintStyle.Render("  its state did not read: "+m.pollErr) + "\n")
-		}
 	}
 	switch {
 	case m.leaving:
 		b.WriteString("\n" + waitStyle.Render("Leaving once this lands, so it is not cut off midway. Ctrl+C again leaves now.") + "\n")
 	case m.saved != nil && !m.saving && m.saveErr != "":
 		b.WriteString("\n" + hintStyle.Render("q leaves it in your queue, not started") + "\n")
-	case m.saved != nil && !m.saving:
-		b.WriteString("\n" + hintStyle.Render("Enter attaches · q leaves it running; return with gc-helm.sh attach") + "\n")
+	case m.saved != nil && !m.starting && m.startErr != "":
+		b.WriteString("\n" + hintStyle.Render("Enter attaches, holding it in a new sitting · q leaves it in your queue") + "\n")
+	case m.attach:
+		b.WriteString("\n" + hintStyle.Render("Attaches once its sitting starts · q leaves it to start without you") + "\n")
+	default:
+		b.WriteString("\n" + hintStyle.Render("Leaves once its sitting starts; return with gc-helm.sh attach") + "\n")
 	}
 	return b.String()
 }

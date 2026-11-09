@@ -249,18 +249,20 @@ on every tick.
 ### The conversation form (`helm-svc form`)
 
 ```
-helm-svc form --helm <gc-helm.sh> --models opus,fable,codex [--subject <ref> | --new-subject [--rig <name>] [--question <text>]] [--model <variant>]
+helm-svc form --helm <gc-helm.sh> --models opus,fable,codex [--subject <ref> | --new-subject [--rig <name>] [--question <text>]] [--model <variant>] [--no-attach]
 helm-svc form --helm <gc-helm.sh> --return     # the conversations to return to
 ```
 
 The screen `gc-helm.sh engage` and `gc-helm.sh attach` hand a terminal to,
 which they run with their own path as `--helm` and the converse variants as
-`--models`. It holds the subject, a new topic's rig, the model and a multiline
-question, reads `gc-helm.sh conversations` in the background while the operator
-types, saves with `gc-helm.sh open`, starts with `gc-helm.sh engage
-<conversation> --no-attach`, and attaches with `gc-helm.sh engage
-<conversation>`, passing `--model` with the model its start ran on when the
-attach follows that start. It writes nothing itself, so what it files is what
+`--models`. It holds the subject, a multiline question, a new topic's rig, the
+model and whether to attach, in that order, reads `gc-helm.sh conversations` in
+the background while the operator types, saves with `gc-helm.sh open`, starts
+with `gc-helm.sh engage <conversation> --no-attach`, and once the sitting has
+started attaches with `gc-helm.sh engage <conversation>`, passing `--model` with
+the model its start ran on. `--no-attach`, which engage passes on from its own
+command line, opens the form with attaching off, and the form then leaves once
+the sitting has started. It writes nothing itself, so what it files is what
 the command line files. [human-engagement.md](../../docs/human-engagement.md#engage)
 says what it shows and when it saves. `internal/form/testdata/helm-fixture.sh`
 answers those verbs from fixture data, so the form can be run with no city

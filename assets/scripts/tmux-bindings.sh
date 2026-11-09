@@ -57,7 +57,7 @@ gcmux bind-key a run-shell -b "$(sq "$CONFIGDIR/assets/scripts/tmux-intake-promp
 # sibling of prefix+a: where prefix+a files a bead for triage, this one opens a
 # conversation on a subject that has no bead yet. It runs `gc-helm engage
 # --new-subject` in a NEW window rather than a `run-shell` popup, because engage
-# opens the conversation form there — rig, question and model on one screen —
+# opens the conversation form there — question, rig and model on one screen —
 # which tmux's one-line command-prompt cannot carry. The city path is baked in
 # for the same reason the session picker bakes it: a key pressed outside a Gas City
 # session's pane carries no city in its environment. See tmux-new-subject.sh.

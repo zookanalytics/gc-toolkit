@@ -1,11 +1,12 @@
 // Package form is the terminal conversation form: the screen `gc-helm.sh
 // engage` and `gc-helm.sh attach` hand a terminal to. One screen holds the
-// subject, a new topic's rig, the model and a multiline question, while the
-// subject's details, its open conversations and the city's rigs load in the
-// background. Submitting saves the question as a conversation, starts its
-// sitting without attaching, and reports each of the two as it lands. The
-// return list shows the open conversations by topic and readiness and attaches
-// to the one picked.
+// subject, a multiline question, a new topic's rig, the model and whether to
+// attach, while the subject's details, its open conversations and the city's
+// rigs load in the background. Submitting saves the question as a conversation
+// and starts its sitting, reporting each of the two as it lands, and once the
+// sitting has started attaches to it, or with attaching off leaves it to
+// prepare. The return list shows the open conversations by topic and readiness
+// and attaches to the one picked.
 //
 // The form writes nothing itself. Every read and write is a gc-helm.sh verb
 // ([Script]), so what the form shows and files is what the command line shows

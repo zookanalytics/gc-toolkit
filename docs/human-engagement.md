@@ -250,10 +250,14 @@ on the bead answers no gate until it replies to one.
 **On a terminal, engage opens the conversation form.** An engage whose
 command line names no concern (`--reason`, `--template` or `--skill`) and not
 `--no-input` hands the terminal to helm-svc's `form` command
-(`services/helm/internal/form`). One screen holds the subject (a bead id, a PR
-number or URL, or empty for a new topic), a new topic's rig, the model, with
-opus shown as the default, and a multiline question, in which Enter adds a
-line. A tab in the question stays a tab, shown as ␉, and a line break written as
+(`services/helm/internal/form`). One screen holds, in this order, the subject
+(a bead id, a PR number or URL, or empty for a new topic), a multiline
+question, in which Enter adds a line, a new topic's rig, the model, with opus
+shown as the default, and whether to attach once the sitting starts, which is
+on unless `--no-attach` is given. Tab moves through the fields in that order,
+so the question is one Tab after the subject, and the form opens on the
+question when the command line names the subject or a new topic's rig. A tab in
+the question stays a tab, shown as ␉, and a line break written as
 LF, CR or CRLF is one line break. The field leaves out every other control
 character, such as BEL or ESC, and U+FFFD, the replacement character. It leaves
 out U+FDD0 as well, since inside the field that noncharacter stands for a tab.
@@ -282,11 +286,15 @@ in another rig, so a question is filed only where the screen said. The reference
 goes as the operator typed it, so `open` resolves it again, and a PR whose
 anchor moved while the operator typed is refused too. A gate goes as itself, so
 the conversation replies to the gate the screen showed. Then `engage
-<conversation> --no-input --no-attach` starts the sitting, and the form follows
-it through its readiness to ready. Enter attaches; leaving keeps everything
-running. An attach holds a conversation no live sitting holds, as after a start
-that failed or a sitting that ended, in a new sitting on the model the start ran
-on. A save that files the conversation and then fails, as when the store refuses
+<conversation> --no-input --no-attach` starts the sitting. Once it has started,
+the form attaches the terminal to it through `engage <conversation>
+--no-input`, which waits for the session to start, as engage does on the command
+line. With attaching off, the form leaves the sitting to prepare, and says that
+the conversation is saved and how to return to it. An attach holds a
+conversation no live sitting holds, as after a start that failed or a sitting
+that ended before the attach reached it, in a new sitting on the model the
+start ran on, and after a start that failed, Enter attaches that way. A save
+that files the conversation and then fails, as when the store refuses
 its reply onto the gate, says the conversation holds the question and what
 did not complete, and starts nothing. r sends the save again naming that
 conversation (`--conversation`), and `open` completes it by its id rather than

@@ -1591,8 +1591,10 @@ hasnt "$CALLED" "bd create" "(FORM) …and engage itself files nothing"
 hasnt "$CALLED" "session new" "(FORM) …and starts nothing"
 reset; run_engage_tty '' tk-subj
 form_argv_is "form|--helm|$SCRIPT_REAL|--models|opus,codex,fable|--subject|tk-subj" "(FORM-SUBJECT) a subject fills in the subject field"
-reset; run_engage_tty '' tk-subj --model fable --no-attach
+reset; run_engage_tty '' tk-subj --model fable
 form_argv_is "form|--helm|$SCRIPT_REAL|--models|opus,codex,fable|--subject|tk-subj|--model|fable" "(FORM-MODEL) --model fills in the model"
+reset; run_engage_tty '' tk-subj --no-attach
+form_argv_is "form|--helm|$SCRIPT_REAL|--models|opus,codex,fable|--subject|tk-subj|--no-attach" "(FORM-NOATTACH) --no-attach turns the form's attaching off, as it turns engage's off"
 reset; run_engage_tty '' tk-subj --model typo
 eq "$RC" 2 "(FORM-MODEL-BAD) a --model no variant carries is refused on a terminal too, exit 2"
 eq "$FORM_ARGV" "" "(FORM-MODEL-BAD) …before the form opens"

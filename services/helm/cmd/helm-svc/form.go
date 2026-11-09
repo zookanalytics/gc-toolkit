@@ -22,13 +22,16 @@ import (
 
 const formUsage = `Usage:
   helm-svc form --helm <gc-helm.sh> [--subject <ref>] [--new-subject] [--rig <name>]
-                [--model <variant>] [--models <a,b,...>] [--question <text>] [--return]
+                [--model <variant>] [--models <a,b,...>] [--question <text>]
+                [--no-attach] [--return]
 
 The terminal conversation form. gc-helm.sh engage runs it on a terminal when the
 command line leaves the concern open, and gc-helm.sh attach runs it with
---return. Each flag fills in its field; --return opens on the conversations to
-return to. A cancelled question is kept in a file under GC_HELM_DRAFT_DIR, else
-$XDG_STATE_HOME/gc/engage-drafts, else ~/.local/state/gc/engage-drafts.
+--return. Each flag fills in its field. Once the sitting a save starts has
+started, the form attaches to it, and --no-attach turns that field off, so the
+form leaves the sitting to prepare instead. --return opens on the conversations
+to return to. A cancelled question is kept in a file under GC_HELM_DRAFT_DIR,
+else $XDG_STATE_HOME/gc/engage-drafts, else ~/.local/state/gc/engage-drafts.
 `
 
 func formMain(args []string) {
@@ -46,6 +49,7 @@ func runForm(args []string, stdout, stderr io.Writer) int {
 	model := fs.String("model", "", "")
 	models := fs.String("models", "", "")
 	question := fs.String("question", "", "")
+	noAttach := fs.Bool("no-attach", false, "")
 	ret := fs.Bool("return", false, "")
 	if err := fs.Parse(args); err != nil {
 		if err == flag.ErrHelp {
@@ -73,6 +77,7 @@ func runForm(args []string, stdout, stderr io.Writer) int {
 		Model:    *model,
 		Question: *question,
 		Models:   variants,
+		NoAttach: *noAttach,
 		Return:   *ret,
 		DraftDir: draftDir(),
 	})

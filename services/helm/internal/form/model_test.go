@@ -79,7 +79,6 @@ func newFormOn(t *testing.T, h Helm, opt Options) *Model {
 		opt.Models = []string{"opus", "fable", "codex"}
 	}
 	opt.Debounce = time.Millisecond
-	opt.Poll = time.Millisecond
 	opt.Refresh = time.Millisecond
 	return New(context.Background(), h, opt)
 }
@@ -108,9 +107,9 @@ func typeText(m *Model, s string) {
 }
 
 // deliver runs a command and hands the form's own messages back to it, through
-// batches and ticks, the way the bubbletea runtime would. It stops at the
-// readiness poll and at runtime messages such as the cursor's blink, which
-// repeat for as long as the form runs, so a test that wants a poll runs it.
+// batches and ticks, the way the bubbletea runtime would. It stops at runtime
+// messages such as the cursor's blink, which repeat for as long as the form
+// runs, and at what only the runtime runs, such as an attach or the form's end.
 func deliver(m *Model, cmd tea.Cmd) { deliverN(m, cmd, 0) }
 
 func deliverN(m *Model, cmd tea.Cmd, depth int) {
@@ -125,7 +124,7 @@ func deliverN(m *Model, cmd tea.Cmd, depth int) {
 		return
 	}
 	switch msg.(type) {
-	case aboutMsg, cityMsg, debounceMsg, savedMsg, startedMsg, readyMsg, attachedMsg:
+	case aboutMsg, cityMsg, debounceMsg, savedMsg, startedMsg, attachedMsg:
 		_, next := m.Update(msg)
 		deliverN(m, next, depth+1)
 	}
@@ -278,7 +277,9 @@ func TestTheQuestionIsSavedExactlyAsTyped(t *testing.T) {
 	}
 }
 
-func TestSavedIsSaidBeforeTheSittingIsReady(t *testing.T) {
+// The save is said before the start runs, and once the sitting has started the
+// form attaches the terminal to it, on the model the start ran on.
+func TestSavedIsSaidBeforeTheStartAndTheSittingIsAttachedOnceItStarts(t *testing.T) {
 	f := &fakeHelm{
 		about:    map[string]About{"tk-a": subjectAbout("tk-a", "gc-toolkit")},
 		saveResp: Saved{Subject: "tk-a", Conversation: "tk-c1", Filed: true},
@@ -291,35 +292,117 @@ func TestSavedIsSaidBeforeTheSittingIsReady(t *testing.T) {
 		t.Fatalf("before the save answers the screen says:\n%s", v)
 	}
 	_, startCmd := m.Update(saveCmd())
-	if v := m.progressView(); !strings.Contains(v, "saved: conversation tk-c1") || !strings.Contains(v, "starting its sitting on opus") {
+	if v := m.progressView(); !strings.Contains(v, "saved: conversation tk-c1") || !strings.Contains(v, "starting its sitting on opus") || !strings.Contains(v, "Attaches once its sitting starts") {
 		t.Fatalf("after the save, before the start, the screen says:\n%s", v)
 	}
-	if len(f.starts) != 0 {
-		t.Fatalf("the start ran before its command did")
+	if len(f.starts) != 0 || len(f.attaches) != 0 {
+		t.Fatalf("the start or the attach ran before the start's command did: starts %v, attaches %v", f.starts, f.attaches)
 	}
-	_, pollCmd := m.Update(startCmd())
+	_, attachCmd := m.Update(startCmd())
 	if len(f.starts) != 1 || f.starts[0] != "tk-c1 opus" {
 		t.Fatalf("starts = %v", f.starts)
 	}
-	// The sitting is preparing, then ready.
-	f.about["tk-c1"] = About{Subject: Subject{ID: "tk-a"}, Conversations: []Conversation{{ID: "tk-c1", Readiness: Preparing}}}
-	_, readCmd := m.Update(pollCmd())
-	_, next := m.Update(readCmd())
-	if m.readiness != Preparing || next == nil {
-		t.Fatalf("readiness = %q, next poll %v", m.readiness, next != nil)
+	if attachCmd == nil || len(f.attachArgs) != 1 || f.attachArgs[0] != "gc-helm.sh engage tk-c1 --no-input --model opus" {
+		t.Fatalf("once the sitting started the form attached %v, want tk-c1 on opus", f.attachArgs)
 	}
-	f.about["tk-c1"] = About{Subject: Subject{ID: "tk-a"}, Conversations: []Conversation{{ID: "tk-c1", Readiness: Ready}}}
-	_, readCmd = m.Update(next())
-	_, last := m.Update(readCmd())
-	if last != nil {
-		t.Fatalf("a ready sitting is polled again")
+	// An Enter that lands before the attach takes the terminal attaches nothing
+	// more, so a detach is not followed by a second attach.
+	if _, cmd := m.Update(key(tea.KeyEnter)); cmd != nil || len(f.attaches) != 1 {
+		t.Fatalf("Enter after the sitting started attached again: %v", f.attaches)
 	}
-	if m.readiness != Ready || !strings.Contains(m.progressView(), "ready: the sitting has posted its framing") {
-		t.Fatalf("readiness = %q:\n%s", m.readiness, m.progressView())
+	_, last := m.Update(attachedMsg{})
+	if !isQuit(last) || m.Note() != "" {
+		t.Fatalf("once the attach came back: left %v, note %q", isQuit(last), m.Note())
 	}
-	m.Update(key('q'))
-	if !strings.Contains(m.Note(), "tk-c1") || !strings.Contains(m.Note(), "attach tk-c1") {
-		t.Fatalf("note on leaving = %q", m.Note())
+}
+
+// Tab goes from the subject to the question, and then to the rig, the model and
+// whether to attach, which is the order the screen shows them in.
+func TestTheQuestionIsOneTabFromTheSubject(t *testing.T) {
+	f := &fakeHelm{city: rigCity(), about: map[string]About{"tk-a": subjectAbout("tk-a", "gc-toolkit")}}
+	m := newForm(t, f, Options{})
+	if m.focus != subjectField {
+		t.Fatalf("an empty form opens on field %d, want the subject", m.focus)
+	}
+	for _, want := range []field{questionField, rigField, modelField, attachField, subjectField} {
+		m.Update(key(tea.KeyTab))
+		if m.focus != want {
+			t.Fatalf("Tab reached field %d, want %d (fields %v)", m.focus, want, m.fields())
+		}
+	}
+	m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
+	if m.focus != attachField {
+		t.Fatalf("Shift+Tab from the subject reached field %d, want the attach field", m.focus)
+	}
+	order := []string{"Subject", "Question", "Rig", "Model", "Attach", "Files as"}
+	v := m.composeView()
+	at := -1
+	for _, label := range order {
+		i := strings.Index(v, label)
+		if i <= at {
+			t.Fatalf("the screen does not show %v in that order:\n%s", order, v)
+		}
+		at = i
+	}
+	// A subject from the command line opens on the question. Enter in the
+	// subject field goes to the question too, and an existing subject has no rig
+	// field, since its rig is its own.
+	m = newForm(t, f, Options{Subject: "tk-a"})
+	settle(m)
+	if m.focus != questionField {
+		t.Fatalf("a form with its subject opens on field %d, want the question", m.focus)
+	}
+	m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
+	m.Update(key(tea.KeyEnter))
+	if m.focus != questionField {
+		t.Fatalf("Enter in the subject field reached field %d, want the question", m.focus)
+	}
+	if fs := m.fields(); len(fs) != 4 || fs[0] != subjectField || fs[1] != questionField || fs[2] != modelField || fs[3] != attachField {
+		t.Fatalf("an existing subject's fields = %v", fs)
+	}
+}
+
+// With attaching off, the form saves and starts the question's sitting, then
+// leaves it to prepare, and says how to return to it. --no-attach opens the
+// form with attaching off.
+func TestWithAttachingOffTheFormLeavesOnceTheSittingStarts(t *testing.T) {
+	f := &fakeHelm{
+		about:    map[string]About{"tk-a": subjectAbout("tk-a", "gc-toolkit")},
+		saveResp: Saved{Subject: "tk-a", Conversation: "tk-c1", Filed: true},
+	}
+	m := newForm(t, f, Options{Subject: "tk-a"})
+	settle(m)
+	if v := m.composeView(); !strings.Contains(v, "Ctrl+S save, start and attach") || !strings.Contains(v, "‹ yes, once its sitting starts") {
+		t.Fatalf("attaching is not on by default:\n%s", v)
+	}
+	focusOn(t, m, attachField)
+	m.Update(key(tea.KeySpace))
+	if v := m.composeView(); m.attach || !strings.Contains(v, "Ctrl+S save, start and leave") || !strings.Contains(v, "‹ no, leave once its sitting starts ›") {
+		t.Fatalf("Space did not turn attaching off:\n%s", v)
+	}
+	focusOn(t, m, questionField)
+	typeText(m, "a question")
+	_, saveCmd := m.Update(ctrl('s'))
+	_, startCmd := m.Update(saveCmd())
+	if v := m.progressView(); !strings.Contains(v, "Leaves once its sitting starts; return with gc-helm.sh attach") {
+		t.Fatalf("while the start runs the screen says:\n%s", v)
+	}
+	_, last := m.Update(startCmd())
+	if !isQuit(last) || len(f.starts) != 1 || len(f.attaches) != 0 {
+		t.Fatalf("once the sitting started: left %v, starts %v, attaches %v", isQuit(last), f.starts, f.attaches)
+	}
+	if n := m.Note(); n != "Conversation tk-c1 on tk-a is saved, and its sitting is starting. Return to it with: gc-helm.sh attach tk-c1" {
+		t.Fatalf("note = %q", n)
+	}
+
+	m = newForm(t, f, Options{Subject: "tk-a", NoAttach: true})
+	if m.attach || !strings.Contains(m.composeView(), "‹ no, leave once its sitting starts ›") {
+		t.Fatalf("--no-attach opened the form with attaching on:\n%s", m.composeView())
+	}
+	focusOn(t, m, attachField)
+	m.Update(key(tea.KeyRight))
+	if !m.attach {
+		t.Fatalf("→ did not turn attaching back on")
 	}
 }
 
@@ -466,8 +549,8 @@ func TestChoosingAnOpenConversationKeepsTheDraft(t *testing.T) {
 	}
 	_, cmd := m.Update(ctrl('s'))
 	deliver(m, cmd)
-	if len(f.saves) != 0 || len(f.starts) != 1 || f.starts[0] != "tk-c1 opus" {
-		t.Fatalf("continuing tk-c1: saves %v starts %v", f.saves, f.starts)
+	if len(f.saves) != 0 || len(f.starts) != 1 || f.starts[0] != "tk-c1 opus" || len(f.attaches) != 1 || f.attaches[0] != "tk-c1" {
+		t.Fatalf("continuing tk-c1: saves %v starts %v attaches %v", f.saves, f.starts, f.attaches)
 	}
 }
 
@@ -600,11 +683,14 @@ func TestAStartThatFailsIsShownAndRetried(t *testing.T) {
 	if v := m.progressView(); !strings.Contains(v, "saved: conversation tk-c1") || !strings.Contains(v, "no sitting started") {
 		t.Fatalf("screen:\n%s", v)
 	}
+	if v := m.progressView(); !strings.Contains(v, "Enter attaches, holding it in a new sitting · q leaves it in your queue") {
+		t.Fatalf("after the failed start the screen does not say what Enter and q do:\n%s", v)
+	}
 	f.startErr = nil
 	_, cmd = m.Update(key('r'))
 	deliver(m, cmd)
-	if len(f.starts) != 2 || !m.started {
-		t.Fatalf("starts %v started %v", f.starts, m.started)
+	if len(f.starts) != 2 || m.startErr != "" || len(f.attaches) != 1 || f.attaches[0] != "tk-c1" {
+		t.Fatalf("after the retried start: starts %v, start error %q, attaches %v", f.starts, m.startErr, f.attaches)
 	}
 }
 
@@ -654,10 +740,10 @@ func TestTheModelDefaultIsShownAndOverridable(t *testing.T) {
 	}
 }
 
-// An attach from the progress screen can hold the conversation in a new
-// sitting, when the start failed or the sitting ended, so it runs on the model
-// the start ran on. The return list shows no model, and attaches on engage's
-// default.
+// An attach after a start can hold the conversation in a new sitting, when the
+// start failed or the sitting ended before engage's attach reached it, so it
+// runs on the model the start ran on. The return list shows no model, and
+// attaches on engage's default.
 func TestAnAttachThatCanHoldANewSittingKeepsTheModelTheStartRanOn(t *testing.T) {
 	const want = "gc-helm.sh engage tk-c1 --no-input --model fable"
 
@@ -679,7 +765,7 @@ func TestAnAttachThatCanHoldANewSittingKeepsTheModelTheStartRanOn(t *testing.T) 
 		t.Fatalf("attach after a failed start = %v, want %q", f.attachArgs, want)
 	}
 
-	// The sitting started and then ended before it was ready.
+	// The sitting started, and the attach that follows names its model.
 	f = &fakeHelm{
 		about:    map[string]About{"tk-a": subjectAbout("tk-a", "gc-toolkit")},
 		saveResp: Saved{Subject: "tk-a", Conversation: "tk-c1", Filed: true},
@@ -688,16 +774,9 @@ func TestAnAttachThatCanHoldANewSittingKeepsTheModelTheStartRanOn(t *testing.T) 
 	settle(m)
 	typeText(m, "q")
 	_, cmd = m.Update(ctrl('s'))
-	_, cmd = m.Update(cmd())
-	_, cmd = m.Update(cmd())
-	f.about["tk-c1"] = About{Subject: Subject{ID: "tk-a"}, Conversations: []Conversation{{ID: "tk-c1", Readiness: Ended}}}
-	_, cmd = m.Update(cmd())
-	m.Update(cmd())
-	if m.readiness != Ended {
-		t.Fatalf("readiness = %q, want ended", m.readiness)
-	}
-	if _, cmd := m.Update(key(tea.KeyEnter)); cmd == nil || len(f.attachArgs) != 1 || f.attachArgs[0] != want {
-		t.Fatalf("attach after an ended sitting = %v, want %q", f.attachArgs, want)
+	deliver(m, cmd)
+	if len(f.attachArgs) != 1 || f.attachArgs[0] != want {
+		t.Fatalf("attach once the sitting started = %v, want %q", f.attachArgs, want)
 	}
 
 	// The return list attaches on engage's default.
@@ -754,8 +833,8 @@ func TestLeavingWhileTheSaveRunsWaitsForTheSaveAndTheStart(t *testing.T) {
 	if !isQuit(last) {
 		t.Fatalf("the form did not leave once the start landed")
 	}
-	if len(f.starts) != 1 || !strings.Contains(m.Note(), "Conversation tk-c1 on tk-a is saved, and its sitting is starting") {
-		t.Fatalf("starts %v, note %q", f.starts, m.Note())
+	if len(f.starts) != 1 || len(f.attaches) != 0 || !strings.Contains(m.Note(), "Conversation tk-c1 on tk-a is saved, and its sitting is starting") {
+		t.Fatalf("starts %v, attaches %v, note %q", f.starts, f.attaches, m.Note())
 	}
 	if files, _ := filepath.Glob(filepath.Join(dir, "*")); len(files) != 0 {
 		t.Fatalf("a saved question was kept as a draft too: %v", files)
@@ -983,7 +1062,8 @@ func TestAttachingFromTheReturnListKeepsTheUnsavedQuestion(t *testing.T) {
 			t.Fatalf("the question was kept more than once: %v", again)
 		}
 	}
-	// A question the form saved is not kept as a draft when the terminal goes.
+	// A question the form saved is not kept as a draft when the terminal goes to
+	// its sitting, once that sitting starts.
 	dir := t.TempDir()
 	f := &fakeHelm{
 		about:    map[string]About{"tk-a": subjectAbout("tk-a", "gc-toolkit")},
@@ -994,7 +1074,6 @@ func TestAttachingFromTheReturnListKeepsTheUnsavedQuestion(t *testing.T) {
 	typeText(m, "q")
 	_, cmd := m.Update(ctrl('s'))
 	deliver(m, cmd)
-	m.Update(key(tea.KeyEnter))
 	m.Update(attachedMsg{})
 	if files, _ := filepath.Glob(filepath.Join(dir, "*")); len(files) != 0 || len(f.attaches) != 1 {
 		t.Fatalf("after attaching a saved conversation: drafts %v, attaches %v", files, f.attaches)

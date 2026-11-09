@@ -5,16 +5,20 @@ description: The search the arch check asks for before the pack adds the termina
 
 # Gas City search for the terminal conversation form
 
-`gc-helm.sh engage` on a terminal now opens a form. The subject, a new topic's
-rig, a multiline question and the model are fields of one screen, and the
-subject's details, its open conversations and the city's rigs load while the
-operator types. Submitting saves the question as a conversation, says so, then
-starts its sitting without attaching and says where it stands.
+`gc-helm.sh engage` on a terminal now opens a form. The subject, a multiline
+question, a new topic's rig, the model and whether to attach are fields of one
+screen, in that order, and the subject's details, its open conversations and
+the city's rigs load while the operator types. Submitting saves the question as
+a conversation, says so, then starts its sitting, and once the sitting has
+started attaches to it, or with attaching off leaves it to prepare and says how
+to return to it.
 `gc-helm.sh attach` opens the same form on the conversations to return to, by
 topic and readiness. The change adds this surface:
 
 - `helm-svc form`, the Go program, a third entry point of the helm binary beside
   `board` and `probe`.
+- `helm-svc form --no-attach`, which opens the form with attaching off, and
+  which engage passes on from its own `--no-attach`.
 - `gc-helm.sh conversations [<ref>] [--json]`, a read: every open conversation
   in the city with its sitting's readiness, or the subject a reference names
   with where a conversation about it would be held.
@@ -193,3 +197,19 @@ open conversation about the subject and holds the concern as its ask, completes
 its reply onto the gate with `conversation_reply`, and files nothing. A
 conversation closed since, or one that holds another ask, is refused with exit 4,
 and nothing is written.
+
+**Attaching once the sitting starts.** `gc session new` attaches the terminal to
+the session it creates unless `--no-attach` is given (the `no-attach` flag of
+`newSessionNewCmd`, and `shouldAttachNewSession`, which attaches unless that
+flag is set or the transport is ACP, in `cmd/gc/cmd_session.go` at
+`2264fa8108`). `gc session attach` (`newSessionAttachCmd`, same file) attaches
+to a session that already exists. engage composes both with the same default:
+it attaches the sitting it starts, once the reconciler has started it, unless
+its own `--no-attach` is given. The form composes them through engage. It
+starts the sitting with `engage <conversation> --no-attach`, so the start ends
+with the save's acknowledgement still on screen, and then attaches through
+engage's attach, `engage <conversation>`. They do not cover the field itself.
+Gas City ships no terminal form, so nothing in it presets a form's field, and
+engage's `--no-attach` reaches the form only as an argument. So `helm-svc form`
+takes `--no-attach`, named for the flag it carries, and with it the attach field
+opens off and the form leaves once the sitting has started.
