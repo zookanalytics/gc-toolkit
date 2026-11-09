@@ -7,7 +7,7 @@
 #   lifecycle.sh state <bead-id>
 #   lifecycle.sh reopen <bead-id>
 # transition: validate the edge against the declared machine, perform ONE atomic
-# `gc bd update` carrying every field, re-read and verify each written field.
+# `gc bd update` carrying every field, and take its exit as the transition's.
 # --set-dated writes a key in the dated shape <value>@<oid>@<since>, appending
 # the third component under compare-and-preserve: the existing instant survives
 # while value and oid both hold, and a change to either stamps a fresh one. The
@@ -46,7 +46,8 @@
 # Callers: pr-open.sh, pr-facts.sh, mol-refinery-patrol. gctk merge runs the
 # same writer in-process.
 # Exits: 0 ok; 1 illegal edge / --expect mismatch / bd refusal / usage, or no
-# gctk binary to run; 2 post-write verification mismatch (or unreadable bead).
+# gctk binary to run; 2 the bead could not be read before the write, or a
+# landed transition could not be reported as JSON.
 # CAVEAT (docs/gascity/routing-model.md, "Clearing an assignee can be refused"):
 # clearing an assignee on a bead another actor holds in_progress is refused by
 # bd, and the refusal drops the WHOLE atomic update — a caller that passes

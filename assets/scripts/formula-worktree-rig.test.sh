@@ -10,7 +10,8 @@
 # names, or the roster entry for GC_RIG, and fail closed when neither resolves.
 # mol-review's gather also prints the reviewed commit's guidance for the
 # review's check alone and what gctk rig recorded there, read in the review's
-# worktree, and load-dispatch's refusal of a short record names the
+# worktree even by a shell that skipped the block's cd into it, and
+# load-dispatch's refusal of a short record names the
 # missing key and leaves the route empty. A control runs a bare add from the same cwd and proves cwd
 # steers it, so "landed in the rig, not cwd" is a real discrimination. No live
 # city, store, or network.
@@ -246,8 +247,9 @@ printf '[{"id":"tk-anc","title":"the change under review"}]\n' > "$TMP/anchor.js
 # gc names this checkout as the pack, so the block runs the review-workspace.sh and
 # review-checks.sh under test. The rig's origin carries the reviewed commit as
 # both main and polecat/x, which the block fetches before it makes the worktree.
+# REVIEW_SKIP_CD=1 runs the block without its cd into the worktree.
 review_case() { # <mode> [check] [guidance file]; sets RC, OID, D
-  local d="$TMP/review-$1${2:+-$2}" rc=0
+  local d="$TMP/review-$1${2:+-$2}${REVIEW_SKIP_CD:+-nocd}" rc=0
   mkdir -p "$d/probe" "$d/tmp"
   git init -q -b main "$d/rig"
   if [ -n "${3:-}" ]; then
@@ -262,7 +264,8 @@ review_case() { # <mode> [check] [guidance file]; sets RC, OID, D
   # follows cwd succeeds there instead of failing for want of the commit.
   git clone -q "$d/rig" "$d/cwd"; commit "$d/cwd" "cwd repo moves on ($1)" >/dev/null
   pick "$1" "$d/rig"
-  { review_render "$GATHER" "${2:-correctness}" "$OID"; printf '%s\n' "$PROBE_TAIL"; } > "$d/review-probe.sh"
+  { review_render "$GATHER" "${2:-correctness}" "$OID" | if [ -n "${REVIEW_SKIP_CD:-}" ]; then grep -vxF 'cd "$WT" || exit 1'; else cat; fi
+    printf '%s\n' "$PROBE_TAIL"; } > "$d/review-probe.sh"
   ( cd "$d/cwd" && TMPDIR="$d/tmp" STUB_PACK="$ROOT" GC_RIG_ROOT="$RR" GC_RIG="$GR" FAKE_META="$TMP/anchor.json" FAKE_LOG="$d/gc.log" \
       GCTK_BIN="$TMP/gctk" GCTK_LOG="$d/gctk.log" \
       PROBE="$d/probe" PROBE_RIG="$d/rig" PROBE_CWD="$d/cwd" bash "$d/review-probe.sh" ) >"$d/out" 2>&1 || rc=$?
@@ -298,6 +301,22 @@ for mode in env roster; do
   if [ -n "$WT" ] && [ ! -e "$WT" ]; then ok "review/$mode: the verdict step's remove deletes the worktree directory"
   else bad "review/$mode: the verdict step's remove deletes the worktree directory" "${WT:-<no worktree recorded>}"; fi
 done
+
+# A shell that never ran the block's cd, as a reviewer's harness can leave it,
+# still reads the records in the review's worktree, because the evidence call
+# names it.
+REVIEW_SKIP_CD=1 review_case env
+if grep -qxF 'cd "$WT" || exit 1' <<< "$GATHER" && ! grep -qxF 'cd "$WT" || exit 1' "$D/review-probe.sh"; then
+  ok "review/nocd: the block runs with its cd taken out"
+else bad "review/nocd: the block runs with its cd taken out" "the block carries no such line, or it was not taken out"; fi
+eq "$RC" 0 "review/nocd: the block runs from a foreign cwd"
+WT="$(cat "$D/probe/wt" 2>/dev/null || true)"
+eq "$(cat "$D/probe/pwd" 2>/dev/null || true)" "$D/cwd" "review/nocd: the shell stays in the foreign cwd"
+grep -qxF "test: fail, scope affected, exit 1, command: t" "$D/out" \
+  && ok "review/nocd: the block prints what gctk rig recorded at the reviewed commit" \
+  || bad "review/nocd: the block prints what gctk rig recorded at the reviewed commit" "$(tr '\n' '|' < "$D/out")"
+eq "$(cut -d'|' -f2 "$D/gctk.log" 2>/dev/null | sort -u)" "${WT:-/nonexistent}" "review/nocd: the records are read in the review's worktree"
+review_remove
 
 review_case nomatch
 [ "$RC" -ne 0 ] && ok "review/nomatch: an unresolvable rig fails closed" || bad "review/nomatch: an unresolvable rig fails closed"

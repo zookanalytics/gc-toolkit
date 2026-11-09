@@ -981,9 +981,9 @@ func (l *libraryPRStore) Anchored(ids []string, statuses []string) (map[string][
 	return out, nil
 }
 
-// Blockers answers each id's `blocks` edges, each far bead as it hydrated. An
-// edge whose far bead did not hydrate is dropped, as the library drops a
-// dangling or cross-store edge.
+// Blockers answers each id's `blocks` edges, each far bead as it hydrated, its
+// metadata whole. An edge whose far bead did not hydrate is dropped, as the
+// library drops a dangling or cross-store edge.
 func (l *libraryPRStore) Blockers(ids []string) (map[string][]prstatus.Blocker, error) {
 	recs := make(map[string][]*beads.Dependency, len(ids))
 	var unread []string
@@ -1028,7 +1028,7 @@ func (l *libraryPRStore) Blockers(ids []string) (map[string][]prstatus.Blocker, 
 					Status:    string(iss.Status),
 					IssueType: string(iss.IssueType),
 					AwaitType: iss.AwaitType,
-					RoutedTo:  decodeMetadata(iss.Metadata)["gc.routed_to"],
+					Metadata:  decodeMetadata(iss.Metadata),
 				})
 			}
 		}

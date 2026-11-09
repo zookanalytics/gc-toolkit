@@ -14,18 +14,16 @@
 # This test runs the REAL gc-helm.sh (invoked via `sh`, as shipped) with a
 # stubbed `gc` on PATH — no live city, Dolt, network, or sessions. Covered:
 #   (EXISTS)   a resolvable bead gets a conversation: one create, a task that
-#              tracks the bead and is assigned to `human`, read back as a
-#              conversation, exit 0
+#              tracks the bead and is assigned to `human`, exit 0
 #   (QUEUED)   a conversation already waiting in the queue is joined, exit 0,
 #              nothing created; a new reason is appended to its notes in a
 #              write guarded on its waiting there, and a concern it already
 #              carries is not appended again
-#   (JOIN-*)   a join is reported only once the conversation reads back still
-#              waiting in the queue and carrying the concern: one a dismiss
+#   (JOIN-*)   a join is reported only once the conversation, read after the
+#              join's guarded append, still waits in the queue: one a dismiss
 #              closed or a sitting took, before the write or after it, is
-#              passed over and the concern filed fresh; a failed append, a note
-#              that did not land, an unread row, or a listing that does not
-#              answer again exits 4
+#              passed over and the concern filed fresh; a failed append, an
+#              unread row, or a listing that does not answer again exits 4
 #   (HELD)     a conversation a sitting holds is not joined: a fresh one is
 #              filed in the queue
 #   (TWO-TRACKS) a task assigned to human that tracks the bead and another is
@@ -34,8 +32,8 @@
 #   (UNREAD)   a candidate whose own row does not read files nothing, exit 4
 #   (OPEN-JSON) --json prints {subject, conversation, filed}
 #   (ALLOWDUP) --allow-duplicate files a fresh conversation beside a queued one
-#   (REPLY-PART) a conversation filed whose reply onto the gate does not read
-#              back exits 4, and --json still names the conversation
+#   (REPLY-PART) a conversation filed whose reply onto the gate the store
+#              refuses exits 4, and --json still names the conversation
 #   (ALLOWDUP-AGAIN) --allow-duplicate on a concern a queued conversation holds
 #              as its ask lands on it, completes its reply, and files nothing
 #   (CONVERSATION) --conversation completes the conversation it names, which a
@@ -49,7 +47,6 @@
 #   (GATE)     a human gate names the one bead still waiting on it, and the
 #              conversation replies to the gate; several waiting beads, or none,
 #              file nothing and say why
-#   (SHAPE)    a task whose tracks edge did not land is closed, not left behind
 #   (MISSING)  bd show's `{"error": …}` OBJECT answer -> exit 4, NOTHING filed
 #   (MISMATCH) bd show answering a DIFFERENT bead -> exit 4, nothing filed
 #   (NORIG)    an id prefix matching no rig -> exit 4 naming the prefix
@@ -98,9 +95,9 @@ mkdir -p "$TMP/bin"
 #     written on a mismatch, as bd's guard does, then appends its note.
 #     $FAKE_GUARD_MISS makes the guard miss whatever it reads, as a writer
 #     landing between open's read and its write does; $FAKE_APPEND_FAIL fails
-#     the write (exit 1); $FAKE_APPEND_DROPS answers 0 and keeps no note; and
-#     $FAKE_CLOSE_ON_APPEND closes the conversation just after the append, as a
-#     dismiss landing before open's read-back does.
+#     the write (exit 1); and $FAKE_CLOSE_ON_APPEND closes the conversation
+#     just after the append, as a dismiss landing before open reads it again
+#     does.
 #   bd dep list ... --type tracks fails from the $FAKE_TRACKS_FAIL_FROM-th
 #     listing on, when set.
 #   bd dep list <gate> --direction=up --type blocks — the beads waiting on the
@@ -109,12 +106,11 @@ mkdir -p "$TMP/bin"
 #     comma-separated ids. $FAKE_CONV tracks the recorded bead alone, its
 #     ask $FAKE_CONV_DESC and its replies-to edges the ones `dep add` recorded, and
 #     $FAKE_TWO tracks it and tk-elsewhere, so it is no conversation. Any other
-#     id is the conversation a create filed, read back: a task that tracks the
-#     subject its --deps named and carries the assignee it was filed with,
-#     unless $FAKE_SHAPE_BROKEN drops the edge. Its replies-to edges are the
-#     ones `dep add` recorded, which records none under $FAKE_REPLY_DROPS, as
-#     an edge that did not land. An id in $FAKE_LIST_DROPS is left out, as a row
-#     the store did not return.
+#     id is the conversation a create filed: a task that tracks the subject its
+#     --deps named and carries the assignee it was filed with. Its replies-to
+#     edges are the ones `dep add` recorded. Under $FAKE_REPLY_REFUSED a
+#     `dep add` exits 1 and records nothing, as a store that refused the edge.
+#     An id in $FAKE_LIST_DROPS is left out, as a row the store did not return.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 ${2:-}" in
   "rig list")
@@ -181,7 +177,10 @@ case "$1 ${2:-}" in
         esac ;;
       *)
         printf 'bd dep %s\n' "$*" >> "$FAKE_CALLS"
-        [ "${3:-}" = add ] && [ -z "${FAKE_REPLY_DROPS:-}" ] && printf '%s %s\n' "$4" "$5" >> "$TMP_REPLIES"
+        if [ "${3:-}" = add ] && [ -n "${FAKE_REPLY_REFUSED:-}" ]; then
+          echo "bd dep add: the store refused the edge" >&2; exit 1
+        fi
+        [ "${3:-}" = add ] && printf '%s %s\n' "$4" "$5" >> "$TMP_REPLIES"
         : ;;
     esac ;;
   "bd list")
@@ -206,7 +205,6 @@ case "$1 ${2:-}" in
         _subj="$(cat "$TMP_SUBJ" 2>/dev/null || true)"
         _asg="$(cat "$TMP_ASG" 2>/dev/null || true)"
         _reps="$(awk -v c="$_id" '$1 == c {print $2}' "$TMP_REPLIES" 2>/dev/null | jq -Rsc --arg c "$_id" '[ split("\n")[] | select(. != "") | {issue_id:$c, depends_on_id:., type:"replies-to"} ]')"
-        if [ -n "${FAKE_SHAPE_BROKEN:-}" ]; then _subj=""; fi
         _row=$(jq -n --arg c "$_id" --arg s "$_subj" --arg a "$_asg" --argjson r "${_reps:-[]}" \
           '{id:$c, issue_type:"task", status:"open", assignee:$a,
             dependencies:((if $s == "" then [] else [{issue_id:$c, depends_on_id:$s, type:"tracks"}] end) + $r)}')
@@ -249,7 +247,7 @@ case "$1 ${2:-}" in
       if [ "$_ifa_set$_ifs_set" != 00 ] && [ -n "${FAKE_GUARD_MISS:-}" ]; then exit 13; fi
       if [ "$_ifa_set" = 1 ] && [ "$_now_as" != "$_ifa" ]; then exit 13; fi
       if [ "$_ifs_set" = 1 ] && [ "$_now_st" != "$_ifs" ]; then exit 13; fi
-      if [ "$_note_set" = 1 ] && [ -z "${FAKE_APPEND_DROPS:-}" ]; then printf '%s\n' "$_note" >> "$TMP_NOTES"; fi
+      if [ "$_note_set" = 1 ]; then printf '%s\n' "$_note" >> "$TMP_NOTES"; fi
       [ -z "${FAKE_CLOSE_ON_APPEND:-}" ] || printf 'closed' > "$TMP_NOW_STATUS"
     fi ;;
   "bd close")
@@ -288,7 +286,7 @@ run_open() {
 # --- (EXISTS) the happy path ---------------------------------------------------
 # A positive control first: a gate that rejects everything would pass every
 # fail-closed assertion below while breaking the verb outright.
-unset FAKE_CONV FAKE_WAITERS FAKE_SHAPE_BROKEN || true
+unset FAKE_CONV FAKE_WAITERS || true
 run_open found tk-real1
 eq "$RC" "0" "(EXISTS) a resolvable bead exits 0"
 CREATE=$(grep '^bd create' <<< "$CALLS" || true)
@@ -306,8 +304,8 @@ grep -qE 'task_kind|gc\.routed_to|gc\.continuation_group' <<< "$CALLS" \
   && bad "(EXISTS) a conversation carries no pack metadata (calls: $CALLS)" \
   || ok "(EXISTS) no pack metadata is stamped"
 grep -q '^bd close' <<< "$CALLS" \
-  && bad "(EXISTS) the conversation read back and must not be closed (calls: $CALLS)" \
-  || ok "(EXISTS) the conversation reads back as one and stays open"
+  && bad "(EXISTS) the conversation it filed must not be closed (calls: $CALLS)" \
+  || ok "(EXISTS) the conversation it filed stays open"
 grep -q 'conversation tk-conv1 filed on tk-real1' <<< "$OUT" \
   && ok "(EXISTS) success names the conversation and its bead" || bad "(EXISTS) success sentence (out: $OUT)"
 grep -q "operator's queue" <<< "$OUT" \
@@ -409,24 +407,19 @@ grep -q 'conversation tk-conv1 filed on tk-real1' <<< "$OUT" \
 FAKE_CLOSE_ON_APPEND=1 run_open found tk-real1 --reason "the cost question"
 eq "$RC" "0" "(JOIN-CLOSED-AFTER) a conversation a dismiss closes after the append exits 0"
 grep -q 'conversation tk-conv1 filed on tk-real1' <<< "$OUT" \
-  && ok "(JOIN-CLOSED-AFTER) …and its read-back sends the concern to a conversation of its own" \
-  || bad "(JOIN-CLOSED-AFTER) files fresh once the read-back reads closed (out: $OUT calls: $CALLS)"
+  && ok "(JOIN-CLOSED-AFTER) …and its read after the join sends the concern to a conversation of its own" \
+  || bad "(JOIN-CLOSED-AFTER) files fresh once the read after the join reads closed (out: $OUT calls: $CALLS)"
 grep -q 'already open' <<< "$OUT" \
   && bad "(JOIN-CLOSED-AFTER) …never reporting the closed one waiting (out: $OUT)" \
   || ok "(JOIN-CLOSED-AFTER) …never reporting the closed one waiting"
 
-FAKE_APPEND_DROPS=1 run_open found tk-real1 --reason "the cost question"
-eq "$RC" "4" "(JOIN-LOST) an append that answers 0 and keeps no note exits 4"
-grep -q 'did not read back in conversation tk-conv0' <<< "$ERR" \
-  && ok "(JOIN-LOST) …saying the concern did not read back" || bad "(JOIN-LOST) names the read-back (err: $ERR)"
-
 FAKE_CONV_UNREADABLE=1 run_open found tk-real1 --reason "the cost question"
-eq "$RC" "4" "(JOIN-UNREAD) a conversation that does not read back exits 4"
+eq "$RC" "4" "(JOIN-UNREAD) a conversation that does not read after the join exits 4"
 grep -q '^bd update tk-conv0 --if-assignee human --if-status open --append-notes' <<< "$CALLS" \
   && ok "(JOIN-UNREAD) …after the guarded append, which an unread row cannot rule out" \
   || bad "(JOIN-UNREAD) the append is guarded (calls: $CALLS)"
-grep -q 'could not be read back' <<< "$ERR" \
-  && ok "(JOIN-UNREAD) …saying it could not be read back" || bad "(JOIN-UNREAD) names the read (err: $ERR)"
+grep -q 'could not be read after open joined it' <<< "$ERR" \
+  && ok "(JOIN-UNREAD) …saying it could not be read" || bad "(JOIN-UNREAD) names the read (err: $ERR)"
 
 FAKE_CONV_NOW_STATUS=closed run_open found tk-real1
 eq "$RC" "0" "(JOIN-BARE) open with no concern beside a conversation closed after the listing exits 0"
@@ -516,16 +509,16 @@ grep -q 'is already open' <<< "$OUT$ERR" \
   || ok "(ALLOWDUP) the join is bypassed"
 unset FAKE_CONV
 
-# --- (REPLY-PART) a conversation filed whose reply does not read back --------
+# --- (REPLY-PART) a conversation filed whose reply the store refuses ---------
 # The conversation is filed and holds the concern, so --json names it, and a
 # caller that saves again knows what holds the concern.
-export FAKE_WAITERS='[{"id":"tk-anchor","status":"open","dependency_type":"blocks"}]' FAKE_REPLY_DROPS=1
+export FAKE_WAITERS='[{"id":"tk-anchor","status":"open","dependency_type":"blocks"}]' FAKE_REPLY_REFUSED=1
 run_open found tk-gate1 --reason "the question" --allow-duplicate --if-subject tk-anchor --json
-eq "$RC" "4" "(REPLY-PART) a reply onto the gate that does not read back exits 4"
+eq "$RC" "4" "(REPLY-PART) a reply onto the gate the store refuses exits 4"
 eq "$OUT" '{"subject":"tk-anchor","conversation":"tk-conv1","filed":true}' "(REPLY-PART) --json names the conversation it filed"
-grep -q 'conversation tk-conv1 is filed on tk-anchor, but its reply onto gate tk-gate1 did not read back' <<< "$ERR" \
-  && ok "(REPLY-PART) …and stderr says its reply onto the gate is missing" || bad "(REPLY-PART) message (err: $ERR)"
-unset FAKE_REPLY_DROPS
+grep -q 'conversation tk-conv1 is filed on tk-anchor, but the store refused its reply onto gate tk-gate1' <<< "$ERR" \
+  && ok "(REPLY-PART) …and stderr says the store refused its reply onto the gate" || bad "(REPLY-PART) message (err: $ERR)"
+unset FAKE_REPLY_REFUSED
 
 # --- (ALLOWDUP-AGAIN) a concern a queued conversation holds is not filed again -
 # A run again after one that filed the conversation and then failed lands on
@@ -630,14 +623,6 @@ set -e
 eq "$RC" "2" "(IF-SUBJECT-NEW) --if-subject beside --new-subject exits 2"
 grep -q -- '--if-subject names an existing subject' <<< "$OUT" \
   && ok "(IF-SUBJECT-NEW) …saying the two cannot go together" || bad "(IF-SUBJECT-NEW) message (out: $OUT)"
-
-# --- (SHAPE) a task that did not land as a conversation is closed ---------------
-export FAKE_SHAPE_BROKEN=1
-run_open found tk-real1
-eq "$RC" "4" "(SHAPE) a task whose tracks edge did not land exits 4"
-grep -q 'bd close tk-conv1' <<< "$CALLS" \
-  && ok "(SHAPE) the misshapen task is closed, not left behind" || bad "(SHAPE) closed (calls: $CALLS)"
-unset FAKE_SHAPE_BROKEN
 
 # --- (MISSING) a typo must file NOTHING ----------------------------------------
 run_open missing tk-nope1

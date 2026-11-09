@@ -148,7 +148,7 @@ type SaveRequest struct {
 // Saved is what `gc-helm.sh open --json` answers. Filed is false when a new
 // subject was filed and its conversation was not. Filed with a conversation is a
 // conversation that holds the question, even from a save that then failed, as
-// when its reply onto the gate did not read back.
+// when the store refused its reply onto the gate.
 type Saved struct {
 	Subject      string `json:"subject"`
 	Conversation string `json:"conversation"`

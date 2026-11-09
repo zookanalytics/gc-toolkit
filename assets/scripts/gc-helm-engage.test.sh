@@ -59,7 +59,7 @@
 #             closes the sitting it spawned and overwrites nothing
 #   (DISMISSED-*) a conversation a dismiss closes while the sitting spawns, in
 #             the queue, filed by engage, or resumed under the same alias or
-#             another, fails the bind's status guard or its read-back: the
+#             another, fails the bind's status guard or the read with no bind: the
 #             sitting is closed, and the conversation stays closed with the
 #             holder the dismiss left
 #   (ALIAS-*, RACE-CONCURRENT) a spawn refused at the alias spawns nothing and
@@ -123,7 +123,7 @@ mkdir -p "$TMP/bin" "$TMP/state"
 # One rig (prefix tk). The subject is tk-subj; its conversations are tk-conv
 # and tk-conv2, and a conversation engage files is tk-new. Each conversation's
 # assignee and status live in $STATE/<id>.assignee and $STATE/<id>.status
-# (defaults human and open), so a bind and its read-back see what the store
+# (defaults human and open), so a bind and a later read see what the store
 # would. $HAVE_CONV says which conversations track tk-subj: unset or 1 tk-conv,
 # 2 tk-conv and tk-conv2, two tk-conv and tk-two, 0 none. tk-two is an older
 # task assigned to human that tracks tk-subj and tk-elsewhere, so it is no
@@ -367,7 +367,9 @@ case "$1 ${2:-}" in
         esac ;;
       add)
         printf 'bd dep %s\n' "$*" >> "$CALLS"
-        [ -n "${REPLY_FAIL:-}" ] || printf '%s %s\n' "$4" "$5" >> "$ST/replies" ;;
+        # REPLY_FAIL refuses the edge, as a store that will not write it does.
+        [ -z "${REPLY_FAIL:-}" ] || { echo "Error adding dependency: the store refused it" >&2; exit 1; }
+        printf '%s %s\n' "$4" "$5" >> "$ST/replies" ;;
       *) printf 'bd dep %s\n' "$*" >> "$CALLS" ;;
     esac ;;
   "session new")
@@ -473,10 +475,7 @@ case "$1 ${2:-}" in
     # lock, as the store does: a mismatch writes nothing and exits 13.
     # $RACE_LOST makes the guard lose: another writer took the conversation in
     # the spawn window, recorded as $RACE_WINNER (empty for none) with status
-    # $RACE_STATUS. $BIND_FAIL fails it for another reason, $BIND_NOPERSIST
-    # reports success and writes nothing, $BIND_STOMP overwrites the binding
-    # just written, and $CLOSE_AFTER_BIND closes the conversation just after
-    # it, as a dismiss landing between the bind and its read-back does.
+    # $RACE_STATUS. $BIND_FAIL fails it for another reason.
     if [ "$_ifa_set" = 1 ]; then
       if [ -n "${RACE_LOST:-}" ]; then
         printf '%s' "${RACE_WINNER-gc-toolkit/gc-toolkit.tk-conv-elsewhere}" > "$ST/$_id.assignee"
@@ -484,15 +483,12 @@ case "$1 ${2:-}" in
         exit 13
       fi
       [ -n "${BIND_FAIL:-}" ] && exit 1
-      [ -n "${BIND_NOPERSIST:-}" ] && exit 0
       stub_lock "$ST/$_id.lock"
       _cur="$(cat "$ST/$_id.assignee" 2>/dev/null || printf 'human')"
       if [ "$_cur" != "$_ifa" ]; then stub_unlock "$ST/$_id.lock"; exit 13; fi
       if [ "$_ifs_set" = 1 ] && [ "$(stat_of "$_id")" != "$_ifs" ]; then stub_unlock "$ST/$_id.lock"; exit 13; fi
       [ "$_new_set" = 1 ] && printf '%s' "$_new" > "$ST/$_id.assignee"
       stub_unlock "$ST/$_id.lock"
-      [ -n "${BIND_STOMP:-}" ] && printf '%s' "$BIND_STOMP" > "$ST/$_id.assignee"
-      [ -n "${CLOSE_AFTER_BIND:-}" ] && printf 'closed' > "$ST/$_id.status"
       exit 0
     fi
     [ "$_new_set" = 1 ] && printf '%s' "$_new" > "$ST/$_id.assignee"
@@ -937,7 +933,7 @@ has "$CALLED" "bd dep bd dep add tk-conv tk-gate --type replies-to" "(GATE-REPLY
 hasnt "$CALLED" "session new" "(GATE-LIVE) …and engage attaches to it rather than spawning"
 unset LIVE_SITTINGS
 reset; REPLY_FAIL=1 run_engage tk-gate --no-attach
-eq "$RC" 4 "(GATE-NOREPLY) a reply that does not read back exits 4"
+eq "$RC" 4 "(GATE-NOREPLY) a reply the store refuses exits 4"
 hasnt "$CALLED" "session new" "(GATE-NOREPLY) …starting no sitting that would not know its gate"
 has "$OUT" "gc bd dep add tk-conv tk-gate --type replies-to" "(GATE-NOREPLY) …and naming the edge to add by hand"
 
@@ -991,22 +987,10 @@ eq "$RC" 4 "(BIND-FAIL) a failed bind exits 4"
 has "$CALLED" "session close gc-77" "(BIND-FAIL) …the spawned sitting is closed, not left orphaned"
 eq "$(asg tk-conv)" "human" "(BIND-FAIL) …the conversation stays in the queue"
 
-echo "# a bind another writer stomps: the read-back shows a different holder"
-reset; BIND_STOMP="gc-toolkit/gc-toolkit.tk-conv-y" run_engage tk-conv --no-attach
-eq "$RC" 4 "(STOMP) a stomped bind exits 4"
-has "$CALLED" "session close gc-77" "(STOMP) …the stranded sitting is closed"
-has "$OUT" "gc-toolkit/gc-toolkit.tk-conv-y" "(STOMP) …and the operator is told who holds it"
-
-echo "# a bind that does not persist: the read-back finds the conversation still in the queue"
-reset; BIND_NOPERSIST=1 run_engage tk-conv --no-attach
-eq "$RC" 4 "(NOPERSIST) a non-persisting bind exits 4"
-has "$CALLED" "session close gc-77" "(NOPERSIST) …the spawned sitting is closed"
-has "$OUT" "the bind did not persist" "(NOPERSIST) …and the operator is told the bind did not persist"
-
 echo "# a conversation a dismiss closes while the sitting spawns is not bound, and the sitting is closed"
 # bd's close keeps the assignee, so the holder engage read still holds a
-# dismissed conversation: only the status guard and the read-back tell a closed
-# conversation, which no claim adopts.
+# dismissed conversation: only the bind's status guard, or the read when no bind
+# runs, tells a closed conversation, which no claim adopts.
 reset; DISMISS_ON_SPAWN=tk-conv run_engage tk-conv --model codex --no-attach
 eq "$RC" 4 "(DISMISSED-QUEUE) a queued conversation dismissed during the spawn exits 4"
 has "$CALLED" "bd update tk-conv --if-assignee human --if-status open" "(DISMISSED-QUEUE) …the bind is guarded on the status engage read, so the store rejects it (exit 13)"
@@ -1024,7 +1008,7 @@ reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
 DISMISS_ON_SPAWN=tk-conv run_engage tk-subj --model codex --no-attach
 eq "$RC" 4 "(DISMISSED-LEFT) a conversation resumed under its own alias, dismissed during the spawn, exits 4"
 hasnt "$CALLED" "bd update" "(DISMISSED-LEFT) …binding nothing, since it is already assigned to the alias"
-has "$OUT" "reads closed" "(DISMISSED-LEFT) …its read-back finding it closed"
+has "$OUT" "reads closed" "(DISMISSED-LEFT) …its read finding it closed"
 has "$CALLED" "session close gc-77" "(DISMISSED-LEFT) …and closing the sitting it spawned"
 reset; held tk-conv gc-toolkit/gc-toolkit.c-tk-conv
 run_engage tk-subj --no-attach
@@ -1036,10 +1020,6 @@ eq "$RC" 4 "(DISMISSED-LEFT-REBIND) that conversation dismissed during the spawn
 has "$OUT" "was closed while this sitting spawned" "(DISMISSED-LEFT-REBIND) …the status guard missing on the closed conversation"
 eq "$(asg tk-conv)/$(cat "$STATE_DIR/tk-conv.status")" "gc-toolkit/gc-toolkit.c-tk-conv/closed" "(DISMISSED-LEFT-REBIND) …which keeps the holder the dismiss left"
 has "$CALLED" "session close gc-77" "(DISMISSED-LEFT-REBIND) …and the sitting it spawned is closed"
-reset; CLOSE_AFTER_BIND=1 run_engage tk-conv --no-attach
-eq "$RC" 4 "(DISMISSED-AFTER-BIND) a conversation closed between the bind and its read-back exits 4"
-has "$OUT" "reads closed" "(DISMISSED-AFTER-BIND) …the read-back finding it closed"
-has "$CALLED" "session close gc-77" "(DISMISSED-AFTER-BIND) …and closing the sitting it spawned"
 
 echo "# a spawn whose answer names no alias reads it from the session list"
 reset; SPAWN_NO_ALIAS=1 run_engage tk-conv --no-attach
@@ -1915,6 +1895,18 @@ if ( cd "$ROOT/services/gctk" && go build -buildvcs=false -o "$TMP/gctk" ./cmd/g
   export WALK_EDGES='{"tk-subj":['"$REWORK_EDGE"','"$DECISION_EDGE"'],"tk-rework":['"$GATE_EDGE"']}'
   run_fresh tk-subj --no-attach --no-input
   has "$OUT" 'tk-subj is held by tk-dec ("keep the old flag?"), which a person has to clear.' "(HOLD-REAL) a decision the anchor waits on is offered beside the gate"
+  OTHER_PR_EDGE='{"id":"tk-other","title":"the PR the rework builds on","status":"open","issue_type":"task","metadata":{"merge_result":"pull_request","pr_posture":"review_required@h@2026-10-27T00:00:00Z","pr.machine":"settled@h@2026-10-27T00:00:00Z"},"dependency_type":"blocks"}'
+  export WALK_EDGES='{"tk-subj":['"$REWORK_EDGE"'],"tk-rework":['"$OTHER_PR_EDGE"']}'
+  run_fresh tk-subj --no-attach --no-input
+  has "$OUT" 'tk-subj is held by tk-other ("the PR the rework builds on"), which a person has to clear. To engage it: gc-helm engage tk-other' "(HOLD-REAL) another PR waiting on a review, which the rework waits on, is offered"
+  # The conversation form reads the subject through the conversations verb, and
+  # lists each hold that has an id as a row whose choice makes it the subject.
+  reset; set +e
+  OUT="$(sh "$SCRIPT" conversations tk-subj --json </dev/null 2>"$TMP/err")"; RC=$?
+  set -e
+  eq "$(printf '%s' "$OUT" | jq -c '[.holds[]? | select(.id == "tk-other") | .title]' 2>/dev/null)" '["the PR the rework builds on"]' \
+    "(HOLD-REAL) …and the form's read names it as a hold, by its id"
+  eq "$RC" 0 "(HOLD-REAL) …in a read that exits 0"
   export WALK_EDGES='{"tk-subj":['"$REWORK_EDGE"'],"tk-rework":[{"id":"tk-gate","status":"closed","issue_type":"gate","await_type":"human","dependency_type":"blocks"}]}'
   run_fresh tk-subj --no-attach --no-input
   hasnt "$OUT" "is held" "(HOLD-REAL) resolving the gate clears the offer"

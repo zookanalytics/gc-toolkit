@@ -341,8 +341,8 @@ func TestAFailedSaveKeepsTheQuestion(t *testing.T) {
 	}
 }
 
-// A save that filed the conversation and then failed, here because its reply
-// onto the gate did not read back, leaves the question saved in that
+// A save that filed the conversation and then failed, here because the store
+// refused its reply onto the gate, leaves the question saved in that
 // conversation. Nothing starts, and r sends the save again naming that
 // conversation, which open completes rather than file a second one.
 func TestAConversationFiledWhoseSaveFailedIsKeptAndSavedAgainNotFiledAgain(t *testing.T) {
@@ -351,7 +351,7 @@ func TestAConversationFiledWhoseSaveFailedIsKeptAndSavedAgainNotFiledAgain(t *te
 	f := &fakeHelm{
 		about:    map[string]About{"tk-gate": a},
 		saveResp: Saved{Subject: "tk-held", Conversation: "tk-c1", Filed: true},
-		saveErr:  &Refusal{Code: 4, Why: "gc-helm: open: conversation tk-c1 is filed on tk-held, but its reply onto gate tk-gate did not read back. Add it by hand: gc bd dep add tk-c1 tk-gate --type replies-to"},
+		saveErr:  &Refusal{Code: 4, Why: "gc-helm: open: conversation tk-c1 is filed on tk-held, but the store refused its reply onto gate tk-gate. Add it by hand: gc bd dep add tk-c1 tk-gate --type replies-to"},
 	}
 	dir := t.TempDir()
 	m := newForm(t, f, Options{Subject: "tk-gate", DraftDir: dir})
@@ -363,7 +363,7 @@ func TestAConversationFiledWhoseSaveFailedIsKeptAndSavedAgainNotFiledAgain(t *te
 		t.Fatalf("after a save that filed tk-c1 and failed: screen %d, saved %+v, starts %v", m.scr, m.saved, f.starts)
 	}
 	v := m.progressView()
-	if strings.Contains(v, "Not saved") || !strings.Contains(v, "saved: conversation tk-c1") || !strings.Contains(v, "reply onto gate tk-gate did not read back") {
+	if strings.Contains(v, "Not saved") || !strings.Contains(v, "saved: conversation tk-c1") || !strings.Contains(v, "the store refused its reply onto gate tk-gate") {
 		t.Fatalf("the screen should say tk-c1 holds the question and its reply is missing:\n%s", v)
 	}
 	if _, cmd := m.Update(key(tea.KeyEnter)); cmd != nil || len(f.attaches) != 0 {

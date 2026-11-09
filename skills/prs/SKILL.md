@@ -77,14 +77,14 @@ everything the PR needs from it before it is sent to the polecat pool:
   `related:<anchor>`, and `blocks:<anchor>` makes the anchor wait on it, so
   the PR does not merge before the supplement lands.
 
-The command reads the edge back from the anchor before the sling, and slings
-nothing when the edge is missing:
+Both edges ride the create, so the command slings nothing when the create
+names no supplement:
 
 ```bash
 SUP=$(gc bd --rig <rig> create "<what the PR still needs>" -t task -d "<what to add, why, and what done looks like>" \
   --deps related:<anchor>,blocks:<anchor> \
-  --metadata '{"anchor_bead":"<anchor>","branch":"<the PR head branch>","existing_pr":"<the PR url>","target":"<the PR base branch>"}' --json | jq -r '.id') \
-  && gc bd --rig <rig> dep list <anchor> --direction=down -t blocks --json | tr -d '[:cntrl:]' | jq -e --arg s "$SUP" 'any(.[]; .id == $s)' >/dev/null \
+  --metadata '{"anchor_bead":"<anchor>","branch":"<the PR head branch>","existing_pr":"<the PR url>","target":"<the PR base branch>"}' --json | jq -r '.id // empty') \
+  && [ -n "$SUP" ] \
   && gc sling <rig>/<pool> "$SUP"
 ```
 

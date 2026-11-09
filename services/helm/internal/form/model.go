@@ -824,8 +824,8 @@ func (m *Model) onSaved(msg savedMsg) tea.Cmd {
 	m.saving = false
 	if msg.saved.Filed && msg.saved.Conversation != "" {
 		// The conversation is filed and holds the question, so it is saved. A
-		// save that failed after filing it, as when its reply onto the gate did
-		// not read back, is not complete: nothing starts until r saves it again.
+		// save that failed after filing it, as when the store refused its reply
+		// onto the gate, is not complete: nothing starts until r saves it again.
 		sv := msg.saved
 		m.saved, m.saveErr = &sv, ""
 		if msg.err != nil {

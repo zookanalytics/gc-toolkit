@@ -4,14 +4,12 @@
 # the sitting's last words in the operator's tab once the sitting has ended.
 #
 # Runs the REAL gc-helm.sh (via `sh`, as shipped) with a stubbed `gc` on PATH
-# that keeps each written metadata value, so the verb's read-back reads what
-# its own write stored. Covered:
+# that keeps each written metadata value. Covered:
 #   (RECORD)   a multi-line hand-back lands whole, as gc.handback beside
 #              gc.handback_at, in one write pinned at the conversation's rig
 #              store
 #   (REPLACE)  a second record replaces the first
-#   (REPAIR)   a write that reads back without its value is written once more
-#   (NOLAND)   a value that never reads back exits 4 and says so
+#   (REFUSED)  a write the store refuses exits 4 and says so, after one write
 #   (EMPTY)    an empty or blank stdin is refused (exit 2) and writes nothing
 #   (NOTCONV)  a bead that is not a conversation is refused (exit 2) and writes
 #              nothing
@@ -20,7 +18,7 @@
 #              verify_subject
 #   (CONCLUSION) a hand-back recorded on a closed conversation is the visit's
 #              conclusion, so the visit's PR comment is drawn again; one recorded
-#              while the conversation is open, or one that does not land, draws
+#              while the conversation is open, or one the store refuses, draws
 #              nothing
 set -u
 
@@ -43,10 +41,10 @@ export RIG_PATH="$TMP/rig"
 # --- gc stub ------------------------------------------------------------------
 # One rig (prefix tk). `bd show` answers tk-conv as a conversation (a task held
 # by its sitting's alias, tracking tk-subj) and tk-task as a plain task, each
-# carrying the metadata the stub's store holds: one file per key under $META. `bd update --set-metadata k=v` writes those files, except
-# that $DROP_WRITES (a count) makes that many writes exit 0 and store nothing,
-# the store behaviour the read-back exists for. Every update is logged, one
-# argv element per line between markers, to $CALLS.
+# carrying the metadata the stub's store holds: one file per key under $META.
+# `bd update --set-metadata k=v` writes those files, unless $REFUSE_WRITES makes
+# the update refuse with exit 1. Every update is logged, one argv element per
+# line between markers, to $CALLS.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "${1:-} ${2:-}" in
   "rig list")
@@ -70,10 +68,7 @@ case "${1:-} ${2:-}" in
     esac ;;
   "bd update")
     { echo "<<update"; printf '%s\n' "$@"; echo "update>>"; } >> "$CALLS"
-    if [ "${DROP_WRITES:-0}" -gt 0 ]; then
-      n=$(( $(cat "$DROPPED" 2>/dev/null || echo 0) + 1 )); printf '%s' "$n" > "$DROPPED"
-      [ "$n" -le "$DROP_WRITES" ] && exit 0
-    fi
+    [ -z "${REFUSE_WRITES:-}" ] || { echo "Error updating tk-conv: the store refused it" >&2; exit 1; }
     shift 2
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -87,7 +82,7 @@ GC
 chmod +x "$TMP/bin/gc"
 
 export PATH="$TMP/bin:$PATH"
-export CALLS="$TMP/calls" META="$TMP/meta" DROPPED="$TMP/dropped"
+export CALLS="$TMP/calls" META="$TMP/meta"
 # A recorder standing in for pr-sitting-comment.sh.
 cat > "$TMP/rec-psc" <<'REC'
 #!/usr/bin/env bash
@@ -101,7 +96,7 @@ export TMPDIR="$TMP"
 # run_handback <stdin-text> <args…> -> RC / OUT (stdout+stderr) / CALLED
 run_handback() {
     _in="$1"; shift
-    : > "$CALLS"; : > "$REC_PSC_LOG"; rm -f "$DROPPED"
+    : > "$CALLS"; : > "$REC_PSC_LOG"
     RC=0
     OUT="$(printf '%s' "$_in" | sh "$SCRIPT" handback "$@" 2>&1)" || RC=$?
     CALLED="$(cat "$CALLS")"
@@ -136,17 +131,12 @@ run_handback "$HB2" tk-conv
 eq "$RC" 0 "(REPLACE) the second record exits 0"
 eq "$(stored gc.handback)" "$HB2" "(REPLACE) the conversation now carries the second hand-back"
 
-echo "── the write is read back ──"
+echo "── the write's exit is its verdict ──"
 rm -f "$META"/*
-DROP_WRITES=1 run_handback "$HB1" tk-conv
-eq "$RC" 0 "(REPAIR) a write that stored nothing is repaired, and the verb exits 0"
-eq "$(printf '%s\n' "$CALLED" | grep -c '^<<update$')" "2" "(REPAIR) …by one more write"
-eq "$(stored gc.handback)" "$HB1" "(REPAIR) …and the hand-back is stored"
-rm -f "$META"/*
-DROP_WRITES=5 run_handback "$HB1" tk-conv
-eq "$RC" 4 "(NOLAND) a hand-back that never reads back exits 4"
-has "$OUT" "did not read back on tk-conv" "(NOLAND) …and says it did not land"
-eq "$(printf '%s\n' "$CALLED" | grep -c '^<<update$')" "2" "(NOLAND) …after the one repair write"
+REFUSE_WRITES=1 run_handback "$HB1" tk-conv
+eq "$RC" 4 "(REFUSED) a hand-back the store refuses exits 4"
+has "$OUT" "the store refused the hand-back on tk-conv" "(REFUSED) …and says it did not land"
+eq "$(printf '%s\n' "$CALLED" | grep -c '^<<update$')" "1" "(REFUSED) …after its one write"
 
 echo "── refusals write nothing ──"
 run_handback "" tk-conv
@@ -178,8 +168,8 @@ eq "$RC" 0 "(CONCLUSION) a hand-back on a closed conversation exits 0"
 eq "$(stored gc.handback)" "$HB2" "(CONCLUSION) …and is recorded"
 eq "$(cat "$REC_PSC_LOG")" "refresh --sitting tk-conv" "(CONCLUSION) …then the visit's PR comment is drawn again from the conversation"
 rm -f "$META"/*
-CONV_STATUS=closed DROP_WRITES=5 run_handback "$HB1" tk-conv
-eq "$RC" 4 "(CONCLUSION) a hand-back that never reads back exits 4"
+CONV_STATUS=closed REFUSE_WRITES=1 run_handback "$HB1" tk-conv
+eq "$RC" 4 "(CONCLUSION) a hand-back the store refuses exits 4"
 eq "$(cat "$REC_PSC_LOG")" "" "(CONCLUSION) …and draws nothing"
 
 echo

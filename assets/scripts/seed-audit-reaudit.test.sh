@@ -7,12 +7,12 @@
 # identity in the create, listing the files and who found them, settled before
 # it is slung on mol-polecat-work to the pool route, with the stdout line the
 # merge gate quotes; one live re-audit per base, whether dispatched, held,
-# armed to re-sling once its wait clears, or never dispatched (adopted, made
-# whole and slung), while a closed one or
+# armed to re-sling once its wait clears, or never dispatched (adopted and
+# slung), while a closed one or
 # another base's files beside it; the stops that dispatch nothing (an
-# unanswered dedup query, an unsettled priority, a pour that does not stamp),
-# each leaving what a retry adopts; and every metadata key it writes registered
-# in lifecycle.toml.
+# unanswered dedup query, a refused create, an unsettled priority, a sling that
+# fails), each leaving what a retry adopts; and every metadata key it writes
+# registered in lifecycle.toml.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -41,7 +41,7 @@ STORE="${STUB_STORE:?}"
 printf '%s\n' "$*" >> "${STUB_GC_LOG:?}"
 if [ "${1:-}" = "sling" ]; then
   # A graph.v2 pour retires gc.routed_to and stamps gc.execution_routed_to=<pool>,
-  # unless the case says the pour left no stamp.
+  # unless the case says the sling fails.
   shift; pool=""; bead=""
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -51,7 +51,7 @@ if [ "${1:-}" = "sling" ]; then
     esac
     shift || true
   done
-  [ -z "${STUB_SLING_NOSTAMP:-}" ] || exit 0
+  [ -z "${STUB_SLING_FAIL:-}" ] || { echo "gc sling: the pool refused the pour" >&2; exit 1; }
   tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-sar.XXXXXX")
   jq -c --arg id "$bead" --arg p "$pool" \
     'map(if .id == $id then (.metadata["gc.execution_routed_to"] = $p | .metadata |= del(.["gc.routed_to"])) else . end)' \
@@ -81,6 +81,7 @@ case "${1:-}" in
     done
     mv "$tmp" "$STORE"; echo "updated $id" ;;
   create)
+    [ -z "${STUB_CREATE_FAIL:-}" ] || { echo '{"error":"the store refused the create"}'; exit 1; }
     shift
     title=""; body=""; cmeta='{}'; prio=2
     while [ $# -gt 0 ]; do
@@ -127,7 +128,7 @@ export PATH="$BIN:$PATH"
 export GC_RIG="gc-toolkit"
 export GC_QUEUE_PRIORITY_TOOL="$BIN/queue-priority"
 export STUB_STORE="$TMP/store.json" STUB_GC_LOG="$TMP/gc.log" STUB_SEQ="$TMP/seq"
-unset STUB_LIST_FAIL STUB_SETTLE_RC STUB_SLING_NOSTAMP
+unset STUB_LIST_FAIL STUB_SETTLE_RC STUB_SLING_FAIL STUB_CREATE_FAIL
 
 # The checkout the writer runs in: its origin/HEAD names the default branch.
 repo() { # <dir> <default branch>
@@ -239,13 +240,19 @@ has "$OUT" "held (armed for gc-toolkit/gc-toolkit.polecat)" "…naming the arm"
 eq "$(beads)" "1" "…filing no second one"
 eq "$(calls '^sling ')" "0" "…and slinging nothing past the wait"
 
-reset '{"id":"re-9","status":"open","assignee":"","metadata":{"seed_audit_reaudit":"main"},"notes":""}'
+reset '{"id":"re-9","status":"open","assignee":"","metadata":{"seed_audit_reaudit":"main","target":"main"},"notes":""}'
 OUT=$(run --base main 2>&1); RC=$?
 eq "$RC" "0" "a re-audit filed and never dispatched is adopted"
 has "$OUT" "re-9 $ROUTE adopted" "…reporting it adopted"
 eq "$(beads)" "1" "…filing no second one"
-eq "$(meta re-9 target)" "main" "…made whole before it is slung"
 eq "$(meta re-9 gc.execution_routed_to)" "$ROUTE" "…and slung"
+
+reset '{"id":"re-9","status":"open","assignee":"","metadata":{"seed_audit_reaudit":"main"},"notes":""}'
+OUT=$(run --base main 2>&1); RC=$?
+eq "$RC" "2" "an adopted re-audit short of its identity exits 2"
+has "$OUT" "re-9 does not carry its whole identity (short: target)" "…naming the key it is short of"
+eq "$(calls '^sling ')" "0" "…and slings nothing"
+eq "$(calls '^bd update ')" "0" "…and writes nothing to repair it"
 
 reset "$(reaudit re-9 closed "" ',"gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"')" \
   '{"id":"re-8","status":"open","assignee":"","metadata":{"seed_audit_reaudit":"trunk","gc.execution_routed_to":"x"},"notes":""}'
@@ -271,10 +278,18 @@ eq "$OUT" "re-1 $ROUTE adopted" "…while a retry adopts and slings it"
 eq "$(beads)" "1" "…filing no second one"
 
 reset
-OUT=$(STUB_SLING_NOSTAMP=1 run --base main 2>&1); RC=$?
-eq "$RC" "2" "a pour that does not stamp the route exits 2"
-has "$OUT" "did not stamp gc.execution_routed_to=$ROUTE" "…saying so"
+OUT=$(STUB_SLING_FAIL=1 run --base main 2>&1); RC=$?
+eq "$RC" "2" "a sling that fails exits 2"
+has "$OUT" "sling to $ROUTE failed (gc sling: the pool refused the pour)" "…with the sling's own reason"
 eq "$(meta re-1 gc.routed_to)" "" "…and stamps no bare route in its place"
+
+reset
+OUT=$(STUB_CREATE_FAIL=1 run --base main 2>&1); RC=$?
+eq "$RC" "2" "a create the store refuses exits 2"
+has "$OUT" "the re-audit create failed: the store refused the create" "…with bd's reason"
+has "$OUT" "a retry adopts the bead by seed_audit_reaudit=main if it was written anyway" "…and what a retry does"
+eq "$(beads)|$(calls '^sling ')" "0|0" "…filing and slinging nothing"
+
 
 echo "# --- metadata-key drift against lifecycle.toml ---"
 # A key the writer stamps that nothing registers is state no audit can account
