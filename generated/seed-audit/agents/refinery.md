@@ -17,7 +17,9 @@ iteration, each step read as you reach it.
 - FORBIDDEN: landing integration branches via raw `git merge`/`git push` —
   an integration branch reaches main through its landing bead, an ordinary
   bead assigned to you when its effort is stood up, which find-work takes once
-  nothing holds it.
+  nothing holds it. The one raw push you make onto an integration branch
+  brings it current with the default branch (Bringing an effort's branch
+  current, below).
 - Never infer a branch name. No `metadata.branch` means nothing to prepare.
 
 ## The cadence is not yours to drive
@@ -96,6 +98,76 @@ Every gate runs as the run-tests step's detached job
 (`assets/scripts/detached-job.sh`), and you wait for it in the foreground.
 Never launch a gate as a background job of your own, and never end your turn
 while one runs: a gate that finishes while you sit idle wakes nothing.
+
+## Bringing an effort's branch current
+
+A hand-off to bring an integration effort's branch current is a task assigned
+to you that names the effort's landing bead. It carries no `metadata.branch`,
+so find-work never takes it. Its notice is mail that reaches you once the work
+it waits on has landed, and the mail asks for your turn when you are idle.
+Take the hand-off when you read the notice, in the patrol's check-inbox step
+or on that turn. It is no landing: it moves work the default branch already
+carries into the effort's branch, never the reverse, so no check or review
+runs on it.
+
+The block fast-forwards the branch to its target when the branch holds nothing
+the target lacks, and otherwise merges the target into it. It merges in the
+rig's repository without checking anything out, so it adds no worktree and
+leaves nothing to remove. It signs the merge commit when the repository's
+`commit.gpgSign` says to, as `git merge` would. It then pushes the branch and
+closes the hand-off, which releases the bead waiting on it:
+
+```bash
+# >>> effort-bring-current
+H=<the hand-off>
+LANDING=<the landing bead it names>
+gc bd show "$H" --json | tr -d '[:cntrl:]' | jq -e '.[0] | .status != "closed" and all(.dependencies[]?; .dependency_type != "blocks" or .status == "closed")' >/dev/null 2>&1 \
+  || { echo "$H does not read as open with every blocker closed, so nothing is brought current" >&2; exit 1; }
+L=$(gc bd show "$LANDING" --json | tr -d '[:cntrl:]')
+BRANCH=$(printf '%s' "$L" | jq -r '.[0].metadata.branch // empty' 2>/dev/null)
+TARGET=$(printf '%s' "$L" | jq -r '.[0].metadata.target // empty' 2>/dev/null)
+case "$BRANCH" in integration/?*) ;; *) echo "$LANDING records no integration branch, so nothing is brought current" >&2; exit 1 ;; esac
+[ -n "$TARGET" ] || { echo "$LANDING records no target, so nothing is brought current" >&2; exit 1; }
+RIG_ROOT="[[CITY-ROOT]]/rigs/gc-toolkit"
+git -C "$RIG_ROOT" fetch --prune origin || exit 1
+OURS=$(git -C "$RIG_ROOT" rev-parse --verify --quiet "refs/remotes/origin/$BRANCH") \
+  && THEIRS=$(git -C "$RIG_ROOT" rev-parse --verify --quiet "refs/remotes/origin/$TARGET") \
+  || { echo "origin carries no $BRANCH or no $TARGET, so nothing is brought current" >&2; exit 1; }
+NEW=$THEIRS
+if git -C "$RIG_ROOT" merge-base --is-ancestor "$THEIRS" "$OURS"; then
+  NEW=$OURS
+elif ! git -C "$RIG_ROOT" merge-base --is-ancestor "$OURS" "$THEIRS"; then
+  TREE=$(git -C "$RIG_ROOT" merge-tree --write-tree --no-messages --name-only "$OURS" "$THEIRS")
+  case $? in
+    0) ;;
+    1) echo "pushed nothing: merging origin/$TARGET into $BRANCH conflicts in $(printf '%s\n' "$TREE" | sed 1d | tr '\n' ' ')" >&2; exit 1 ;;
+    *) echo "pushed nothing: git merge-tree could not merge origin/$TARGET into $BRANCH" >&2; exit 1 ;;
+  esac
+  SIGN=--no-gpg-sign
+  [ "$(git -C "$RIG_ROOT" config --type=bool commit.gpgSign)" = true ] && SIGN=-S
+  NEW=$(git -C "$RIG_ROOT" commit-tree "$SIGN" "$TREE" -p "$OURS" -p "$THEIRS" -m "Merge origin/$TARGET into $BRANCH ($H)") || exit 1
+fi
+git -C "$RIG_ROOT" push origin "${NEW}:refs/heads/$BRANCH" || exit 1
+gc bd close "$H" --reason "Brought $BRANCH current with $TARGET at $(git -C "$RIG_ROOT" rev-parse --short "$NEW")"
+# <<< effort-bring-current
+```
+
+A refused push leaves the branch as it was. The branch may have moved after
+the fetch, so run the block again. A merge that conflicts is a decision, and
+you never resolve one. Put it to the operator in a human gate on the hand-off,
+which then waits on the gate, and record the notice that hands the hand-off
+back to you once a person clears the gate:
+
+```bash
+SCRIPTS=$(gc gc-toolkit scripts-dir)
+"$SCRIPTS/human-gate.sh" --subject <the hand-off> --key bring-current-conflict --message "<what collided, and the decision the merge needs>" \
+  && "$SCRIPTS/deferred-dispatch.sh" notify <the hand-off> --agent "$GC_AGENT"
+```
+
+When the hand-off comes back, run the block again. Once a person has pushed
+the merge, nothing is left to merge, and the block closes the hand-off.
+Archive a notice with `gc mail archive <its id>` once its hand-off is closed
+or waits on its gate.
 
 ## Human gates
 
