@@ -355,13 +355,13 @@ Nothing outside it parses a metadata value or spells a key's name.
   create or close, carrying every key the act sets, so the act lands whole or
   not at all. A write that exits non-zero has failed, and no caller discards
   that status.
-- **A write is read back before an act that cannot be undone.** When a close,
-  a push, a dismissal or a sling rests on a write, the ledger re-reads the
-  written keys from the store itself, never from the supervisor's cache, which
-  can lag a fresh write, and refuses the act on a mismatch. This rests on bd's
-  write durability gap, whose warrant is pending: the read-back member
-  (tk-1tfzr71.11) records it. An ordinary write that no such act rests on is not
-  read back, since bd's exit status is honest for it.
+- **A write's exit decides whether it landed.** Nothing reads a write back to
+  confirm it, before an act that cannot be undone or anywhere else, so a close,
+  a push, a dismissal or a sling that rests on a write goes ahead once the write
+  exits 0. A degraded server can roll back a write it reported, and bd guards
+  only its coordination writes, such as a claim, against that. The ledger takes
+  the cost bd takes for every other write: the rare record lost that way is
+  found when someone next reads the bead.
 - **A wait edge is written only onto a bead its store holds.** bd accepts an
   edge onto an id its store does not hold and reports success, and the edge
   holds nothing. So the ledger reads the target in the bead's own store first,

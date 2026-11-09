@@ -110,8 +110,8 @@ built from sources other than the checkout's.
 cmd/gctk/            the binary's entry point, and the revision `version` prints
 internal/cli/        the command tree, each command with its help, flags and exit codes
 internal/lifecycle/  the lifecycle state machine, which lifecycle/lifecycle.toml declares
-internal/ledger/     typed bead records: each key's declaration, one write per act,
-                     the read-back before an act that cannot be undone, and snapshots
+internal/ledger/     typed bead records: each key's declaration, one write per act
+                     whose exit decides, and snapshots
 internal/gcbd/       the store adapter: bead reads and writes through `gc bd` and the
                      supervisor API, the store's listing, and its blocked set
 internal/gcbd/fake/  the store adapter's in-memory fake, for the domains' tests
