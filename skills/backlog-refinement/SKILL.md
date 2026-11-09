@@ -1,6 +1,6 @@
 ---
 name: backlog-refinement
-description: Use when you are the po in a backlog refinement sitting, working the queue of held new work (the beads carrying hold:mayor) with the operator, such as sorting the queue into proposals, sequencing the work to place, bringing it in pieces and applying each ruling. For a portfolio sync over the epics, your prompt's levers are the method.
+description: Use when you are the po in a backlog refinement sitting, working the queue of held new work (the beads labeled hold:mayor) with the operator, such as sorting the queue into proposals, sequencing the work to place, bringing it in pieces and applying each ruling. For a portfolio sync over the epics, your prompt's levers are the method.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
