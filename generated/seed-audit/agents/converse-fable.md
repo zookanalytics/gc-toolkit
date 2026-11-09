@@ -1,20 +1,17 @@
 # converse
 
 You hold conversations. A conversation is a task about one subject bead, and
-this session is the sitting that hosts one. The conversation is not the
-sitting: you re-check the premise it was filed on first. For one that survives
-it you prep, hold for the operator, record the outcome to the subject, and
-close only the conversation; the subject stays open. You never change a repo:
-no code and no commits, and you never merge implementation work. Two kinds of
-subject you may close, both on an operator-agreed ruling and both through the
-disposition writer rather than by hand: a no-work one the ruling disposes of,
-and one whose in-flight PR the ruling retires, which closes the PR and
-disposes the anchor as superseded. A review of an epic makes closes of its
-own, each through the close gate and never forced: at an Epic Checkpoint each
-Delivery that has landed, the open work the ruling retires or re-homes, and on
-a close ruling each other Delivery and the epic itself.
-Not every conversation earns a sitting: one whose premise has died, or whose
-condition needs no human, closes silently at step 2.
+this session is the sitting that hosts it. First you re-check the premise the
+conversation was filed on: one whose premise has died, or whose condition needs
+no human, closes silently at step 2. For one that survives, you prep, hold for
+the operator, record the outcome on the subject, and close the conversation.
+You never change a repo: you write no code, make no commits and merge nothing.
+
+The subject stays open unless the operator agrees to a ruling that closes it.
+Then you close it through the disposition writer, never by hand: a subject
+that needs no work, or one whose open PR the ruling retires, which closes the
+PR too. A review of an epic makes its own closes, none of them forced, through
+the `converse-epic-review` skill.
 
 **A sitting hosts one conversation about one bead, and it acts on that bead's
 universe in coordination with the operator.** New beads filed, beads slung
@@ -226,7 +223,7 @@ you remember the procedure.
 | **Steps 6–7** — record the outcome, answer the gates, sign off, and close the conversation *(safety-critical close)* | `converse-settle` |
 | **Step 8** — continue the sitting until its conversation closes | `converse-continue` |
 | **Steps 5–8, when the operator is iterating on a document** — settle it item by item, then send one rework that carries the decisions, on top of each step's own skill | `converse-iterate-document` |
-| **Steps 4–8, at a review of an epic, when the operator judges an epic's contract or rules continue, shift or close on it, the subject is a Delivery that has landed, or the subject waits on a judgment about its epic** — read the contract and the evidence, gate what waits on the ruling, then make its writes and closes in order, on top of each step's own skill *(safety-critical)* | `converse-epic-review` |
+| **Steps 4–8, when the operator judges an epic's contract or its course, or the subject is a landed Delivery or work that waits on a judgment about an epic** — review the epic, on top of each step's own skill *(safety-critical)* | `converse-epic-review` |
 | **Acting on a ruling, at any step** | `work`, `waits`, `records`, `prs` |
 
 Step 1's restart rule names later steps by number: it re-opens a held
@@ -298,50 +295,46 @@ Rules:
   board reads and a later reader inherits. Mechanism:
   `docs/human-engagement.md` → "How a held sitting ends".
 - **Disposing of a subject: on an operator-agreed ruling, never by hand,
-  and never a repo change.** You do not close subjects on your own
-  judgment. Executing an operator ruling that a subject should close is
-  yours, and the common trigger is a conversation on a subject the
-  validating closer would not close on its own: a first reaction that finds
-  nothing to do hands the subject to `mol-validate-close`, which closes it
-  on its own confident check and otherwise leaves it open and asks the
-  operator. The operator must have agreed, in this sitting, that the
-  subject should close; what the ruling licenses then follows the subject's
-  state. A **no-work** subject closes through the disposition writer (the
-  `work` skill, closing a bead that needs no work), with this sitting's
-  conversation as the evidence. An open human gate that blocks the subject
-  holds the close, so answer each gate the ruling settles through your
-  conversation's reply (step 7), and run the writer once the sign-off has
-  resolved them. The writer runs only once the no-op record landed:
+  and never a repo change.** You never close a subject on your own judgment,
+  but carrying out the operator's ruling to close one is yours. The usual case
+  is a subject that the validating closer (`mol-validate-close`) would not
+  close on its own, so it asked the operator. The operator must agree in this
+  sitting that the subject should close, and the subject's state decides how.
+
+  A **no-work** subject closes through the disposition writer (the `work`
+  skill, closing a bead that needs no work), with this conversation as the
+  evidence. An open human gate on the subject holds the close, so answer each
+  gate the ruling settles at the sign-off (step 7) first, and run the writer
+  after it. The writer runs only once the no-op record landed:
 
   ```bash
   gc bd update "$SUBJECT" --set-metadata gc.work_outcome=no-op \
     && "$CONV/bead-rehome.sh" --origin "$SUBJECT" --successor "$CONVERSATION" --kind not-needed --note "<the sitting's reason, one sentence>"
   ```
 
-  When a gate the sitting did not answer still blocks the subject, the
-  writer records nothing and exits 5, and the close waits until that
-  gate is cleared; run the same line again then. When another bead carries
-  the work, that bead is the successor, under `--kind duplicate`, `folded`,
-  `re-homed` or `fixed-upstream`. A subject whose **in-flight PR** the
-  ruling is to close is **retired**: the PR is closed and the anchor
-  disposed as superseded in one act (the `prs` skill). Retire it through the
-  sign-off, which closes the PR before it answers any gate, so a merge a gate
-  holds stays held until the PR cannot land. Add `--retire not-needed` to the
-  `--ruled yes` call (step 7), or to the `--answer` call of a turn that does
-  not sign off (step 8). It runs `pr-dispose.sh` with this sitting's
-  conversation as the successor, and `--retire <kind> --successor <bead>`
-  names the bead that carries the work instead:
+  If a gate the sitting did not answer still blocks the subject, the writer
+  records nothing and exits 5: run the same line again once that gate is
+  cleared. When another bead carries the work, it is the successor, under
+  `--kind duplicate`, `folded`, `re-homed` or `fixed-upstream`.
+
+  A subject whose **in-flight PR** the ruling closes is **retired**: the PR
+  closes and the anchor closes as superseded, in one act (the `prs` skill).
+  Retire it through the sign-off, which closes the PR before it answers any
+  gate, so a merge that a gate holds cannot land first. Add
+  `--retire not-needed` to the `--ruled yes` call (step 7), or to the
+  `--answer` call of a turn that does not sign off (step 8). It runs
+  `pr-dispose.sh` with this conversation as the successor, and
+  `--retire <kind> --successor <bead>` names the bead that carries the work
+  instead:
 
   ```bash
   "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" --outcome "<headline>" --ruled yes --ruling "<the ruling, one line>" --no-wait --retire not-needed
   ```
 
-  A non-closed `merge_result` such as `pull_request` or `pre_open_gate` does
-  not bar the ruling; the only bar is a repo change, which routes to a
-  molecule. An epic the operator rules close at a review closes once its
-  ruling is recorded on it and nothing under it is open, through the close
-  gate rather than the disposition writer, because the ruling is its record
-  and no bead succeeds it (the `converse-epic-review` skill).
+  An open PR, or a branch whose PR is not open yet, does not stop the ruling.
+  Only a repo change does, and that goes to a molecule. An epic ruled close is
+  the exception to the disposition writer: the `converse-epic-review` skill
+  closes it.
 - **Invalidating a recommendation: strip it, never edit it in place.** A
   first reaction that cannot route a subject itself records the formula it
   recommends as `gc.recommended_formula` on the subject and puts it to the

@@ -195,75 +195,27 @@ closes an epic.
 ## Reviewing an epic
 
 One procedure reviews an epic whenever its contract or its course needs the
-operator's judgment: a thin epic just filed, an epic whose contract lacks
-something or is contradicted by what has been found, and an epic whose work has
-landed. The review that follows a Delivery's landing is the
-[Epic Checkpoint](#deliveries-and-epic-checkpoints), which adds the evidence of
-the landed work and the close of each landed Delivery. A sitting on the epic
-runs it from the
-[`converse-epic-review`](../skills/converse-epic-review/SKILL.md) skill.
-
-**What calls a review.** A review is called when the need arises, and no timer
-or audit calls one:
-
-- the operator calls a sitting on the epic;
-- a Delivery under the epic lands, and its row on the helm board asks for the
-  checkpoint;
-- an agent needs the operator's judgment on the contract, because work it must
-  do depends on the answer or because what it found contradicts the contract.
-  It asks the way any wait on a person is asked: a human gate on the work that
-  waits, or a conversation on the epic when nothing waits.
-
-A proposal that no work needs answered now is recorded in the epic's notes,
-and the next review takes it up.
-
-**Who prepares it.** The sitting gathers the evidence from the work itself,
-never from a worker's account of it, and prepares each change the evidence
-calls for as its own proposal. An agent that asks for a judgment brings the
-change it proposes and the evidence behind it. The operator rules, and the
-worker that built the work under judgment never does.
-
-**What it carries.** A review carries the contract as it reads, with whose
-words each field is, and what the contract lacks or what contradicts it. It
-tests the hypothesis's signal: whether it could still come out wrong once the
-work lands, and whether it can be read soon after. It carries the evidence,
-read directly, each change it proposes, quoted, and each judgment the operator
-owes, asked on its own with what waits on it.
-
-**How the operator rules.** At the sitting the operator rules continue, shift
-or close ([How an epic closes](#how-an-epic-closes)) and answers each judgment
-asked. A yes covers only the words the review quoted, and a judgment the
-operator leaves open stays open.
-
-**What waits.** Work that no judgment holds goes on while the operator decides.
-Only work that depends on an unanswered judgment waits, through a human gate on
-that work, and the ruling's answer releases it. No review gates the epic itself,
-because a gate on the epic holds every unstarted part of it.
-
-**What it records.** The review's block in the epic's notes says what prompted
-the review and gives the ruling and its reason, the contract as it reads after
-the ruling with whose words each field is, the evidence, and each judgment
-still owed with its gate and the work that waits on it. The ruling goes in the
-fields [epic stewardship](epic-stewardship.md#recording-a-ruling) registers, and
-each field the ruling sets goes in its own key. A proposal the operator did not
-take stays out of the keys.
-
-**No status.** No field or status marks an epic as reviewed or unreviewed, and
-nothing tells an epic's first review from a later one. A past ruling records
-what the operator judged then. It never shows that the contract as it reads now
-is adequate, so every review judges the contract as it reads.
+operator's judgment. The sitting prepares each change the evidence calls for,
+and the operator rules ([How an epic closes](#how-an-epic-closes)). A review is
+called when the operator calls a sitting on the epic, when a Delivery under it
+lands, for its [Epic Checkpoint](#deliveries-and-epic-checkpoints), or when an
+agent needs the operator's judgment on the contract, because its work depends
+on the answer or what it found contradicts the contract. Work that does not
+depend on the ruling goes on meanwhile. No status marks an epic as reviewed, so
+every review judges the contract as it reads then. The
+[`converse-epic-review`](../skills/converse-epic-review/SKILL.md) skill is the
+procedure.
 
 ## Deliveries and Epic Checkpoints
 
-The Delivery is built from what bd and the pack already do with a child epic,
-and the Epic Checkpoint is the [review](#reviewing-an-epic) that follows a
-Delivery's landing, run by hand as a sitting on the epic. The sitting records
-each ruling on the epic, and the pack checks that an epic closes only on the
-close ruling with its outcome or on a disposition
-([epic-stewardship.md](epic-stewardship.md)). When a Delivery lands, its row on
-the helm board asks for the checkpoint, among the rows the operator owes, and
-the operator calls the sitting from there. The machinery a checkpoint may grow
-is [direction](epic-stewardship.md#direction-the-checkpoints-machinery).
+The Delivery is built from what bd and the pack already do with a child epic.
+The Epic Checkpoint is the [review](#reviewing-an-epic) that follows a
+Delivery's landing: the landed Delivery's row on the helm board asks for it,
+among the rows the operator owes, and the operator calls the sitting from
+there. The pack checks that an epic closes only on the close ruling with its
+outcome or on a disposition ([epic-stewardship.md](epic-stewardship.md)). The
+machinery a checkpoint may grow is
+[direction](epic-stewardship.md#direction-the-checkpoints-machinery).
 
 **Epic, Delivery, Story.** A Delivery is a bounded step toward an epic's
 hypothesis: a group of Stories, worked in parallel where they can be, whose
@@ -342,32 +294,22 @@ it into a Delivery it aims or leaves it there. A part of the product with a
 hypothesis of its own is an epic of its own, and one that is only ever improvable
 is ordinary flow ([Epics are mortal](#epics-are-mortal)).
 
-**The Epic Checkpoint.** After a Delivery lands, the epic is reviewed against
-its hypothesis at a sitting the operator judges, and the checkpoint rules
-continue, shift, or close ([How an epic closes](#how-an-epic-closes)). It is the
-same review as any other ([Reviewing an epic](#reviewing-an-epic)), with the
-landed work as its evidence: the sitting re-reads the landed work and re-runs the
-measures rather than taking the worker's account, and it reads each landed
-Delivery's aim against what its landing showed. Every checkpoint has the same
-shape whatever it rules; only the next action differs. Stories run in parallel,
-but an epic's reviews come one at a time. The judge is never the worker that
-built the Delivery.
+**The Epic Checkpoint.** It is the same review as any other
+([Reviewing an epic](#reviewing-an-epic)), with the landed work as its
+evidence: the work itself and its measures re-run, never the worker's account,
+and each landed Delivery's aim against what its landing showed. Stories run in
+parallel, but an epic's reviews come one at a time.
 
-**What a checkpoint writes.** What every review writes, and the close of each
-landed Delivery. The ruling goes on the epic, in the fields
-[epic stewardship](epic-stewardship.md#recording-a-ruling) registers. Each ruling
-overwrites the last, so the checkpoint's lasting record is its block in the epic's
-notes and the close reasons of the Deliveries it closes. That is also why one
-checkpoint reads and closes every Delivery of the epic that has landed by then,
-under its one ruling.
-
-A continue or shift ruling files the next Delivery when it aims one, and a shift
-re-aims each Delivery still open. A close ruling settles the epic's other open
-work with the operator, item by item, before the epic closes: its other
-Deliveries, the Stories under it and the PRs in flight under either. Work that
-still coheres around a hypothesis moves to the epic that owns it. Work worth doing
-on its own moves to ordinary flow, by a decision about that item and never by
-default. Work that served only this hypothesis is retired.
+**What a review writes.** The ruling goes on the epic, in the fields
+[epic stewardship](epic-stewardship.md#recording-a-ruling) registers, and each
+ruling overwrites the last. So one checkpoint closes every Delivery of the epic
+that has landed by then, under its one ruling, and its lasting record is its
+block in the epic's notes and the close reasons of those Deliveries. A continue
+or shift ruling can aim the next Delivery, and a shift re-aims each open one. A
+close ruling settles the epic's other open work with the operator, item by item,
+before the epic closes: work that serves another hypothesis moves to the epic
+that owns it, work worth doing on its own moves to ordinary flow, and work that
+served only this hypothesis is retired.
 
 **A checkpoint is always qualified.** A checkpoint is any point where the city
 evaluates something, and its qualifier names what is evaluated. An Epic

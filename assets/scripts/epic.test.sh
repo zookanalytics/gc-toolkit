@@ -192,7 +192,7 @@ pin skills/work/SKILL.md '"Epics are mortal"' "...and says an area that is only 
 for k in epic_hypothesis epic_handle epic_boundaries epic_closure_condition epic_indicators; do
     pin skills/converse-epic-review/SKILL.md "--set-metadata $k=" "the review records $k in its key"
 done
-pin skills/converse-epic-review/SKILL.md 'assess the contract as it reads, whoever wrote it and whatever a past ruling said' "...judges the contract as it reads at every review"
+pin skills/converse-epic-review/SKILL.md 'Judge the contract as it reads, whoever wrote it and whatever a past ruling said' "...judges the contract as it reads at every review"
 pin skills/converse-epic-review/SKILL.md 'Could it still come out wrong once the work lands?' "...and tests its signal"
 pin skills/converse-epic-review/SKILL.md 'Quote each change you propose, as your proposal' "...and its framing quotes each change it proposes"
 pin skills/converse-settle/SKILL.md '`converse-epic-review` skill'"'"'s writes record it' "the settle step sends a review of an epic to the review's writes"

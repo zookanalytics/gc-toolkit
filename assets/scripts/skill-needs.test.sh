@@ -1177,23 +1177,23 @@ EOF
 done
 echo "── a review of an epic gates what waits on its ruling, records it, and closes through the close gate ──"
 # A sitting that reviews an epic is sent to its skill by name, and the prompt
-# names the closes its ruling makes. The skill holds each landed Delivery's
-# close, and only the work that waits on the ruling, with a human gate, records
-# the review under its dated heading and the ruling with the gates it clears as
-# its evidence,
-# answers them before any close, and closes each bead through the close gate,
-# never forced, because bd refuses a close over an open child or a live blocker.
-# The sign-off records the PR a retirement acts on under the words of its ruling,
-# so each gate on a PR's anchor is answered under that PR's own ruling, and the
-# final sign-off reaches none of those PRs. A park's gate can hold other beads,
-# so a release closes it only once nothing else waits on it, and never closes a
-# blocker that is not a park's own gate.
-have "the step table sends a sitting that reviews an epic to its skill" '**Steps 4–8, at a review of an epic, when the operator judges an epic'"'"'s contract or rules continue, shift or close on it, the subject is a Delivery that has landed, or the subject waits on a judgment about its epic**' "$PROMPT"
+# sends the closes its ruling makes to that skill, none forced, apart from the
+# disposition writer it gives other subjects. The skill holds each landed
+# Delivery's close, and only the work that waits on the ruling, with a human
+# gate, records the review under its dated heading and the ruling with the gates
+# it clears as its evidence, answers them before any close, and closes each bead
+# through the close gate, never forced, because bd refuses a close over an open
+# child or a live blocker. The sign-off records the PR a retirement acts on
+# under the words of its ruling, so each gate on a PR's anchor is answered under
+# that PR's own ruling, and the final sign-off reaches none of those PRs. A
+# park's gate can hold other beads, so a release closes it only once nothing
+# else waits on it, and never closes a blocker that is not a park's own gate.
+have "the step table sends a sitting that reviews an epic to its skill" '**Steps 4–8, when the operator judges an epic'"'"'s contract or its course, or the subject is a landed Delivery or work that waits on a judgment about an epic**' "$PROMPT"
 have "…by name" '`converse-epic-review` |' "$PROMPT"
-have "the prompt names the closes a review's ruling makes" \
-    "A review of an epic makes closes of its own, each through the close gate and never forced: at an Epic Checkpoint each Delivery that has landed, the open work the ruling retires or re-homes, and on a close ruling each other Delivery and the epic itself." "$PROMPT_JOINED"
-have "…and how an epic ruled close closes" \
-    'closes once its ruling is recorded on it and nothing under it is open, through the close gate rather than the disposition writer' "$PROMPT_JOINED"
+have "the prompt sends a review's closes to its skill, none of them forced" \
+    'A review of an epic makes its own closes, none of them forced, through the `converse-epic-review` skill.' "$PROMPT_JOINED"
+have "…and an epic ruled close is the disposition writer's exception, which that skill closes" \
+    'An epic ruled close is the exception to the disposition writer: the `converse-epic-review` skill closes it.' "$PROMPT_JOINED"
 EPIC_REVIEW_JOINED="$TMP/epic-review-squeezed"
 tr -s '[:space:]' ' ' <"$EPIC_REVIEW" >"$EPIC_REVIEW_JOINED"
 have "the hold gates each landed Delivery's close" \

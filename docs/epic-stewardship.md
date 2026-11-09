@@ -124,12 +124,11 @@ Delivery, and both layers hold it as one.
 
 ## Direction: the checkpoint's machinery
 
-A review of an epic, the Epic Checkpoint among them, runs by hand: the operator
-calls the sitting, and the sitting gathers the evidence and makes the ruling's
-writes from the
+A review of an epic, the Epic Checkpoint among them, runs by hand, as a sitting
+that follows the
 [`converse-epic-review`](../skills/converse-epic-review/SKILL.md) skill
-([epics.md](epics.md#reviewing-an-epic)). Machinery that does any of that for
-them is not built. It is designed from what those hand runs record.
+([epics.md](epics.md#reviewing-an-epic)). Machinery that does any of its work
+is not built. It is designed from what those hand runs record.
 Plausibly that is a formula that files the checkpoint sitting and gathers its
 evidence when a Delivery lands, and one verb that makes the ruling's writes. It
 is not a doctor check: doctor is already over-leveraged, and its role here stays

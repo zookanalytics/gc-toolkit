@@ -17,13 +17,9 @@ never pass `--notes`, which replaces them:
 ```bash
 gc bd update "$SUBJECT" --append-notes "<the decision>. <why>. <what changed>."
 ```
-When the subject is an epic, or work that waits on a judgment about one, and
-the operator judged the epic's contract or ruled on its course, the sitting is
-a review of the epic (`docs/epics.md`, "Reviewing an epic"), and the
-`converse-epic-review` skill's writes record it: the review's block on the
-epic, the ruling, and each field the ruling sets in its own key, never in the
-description or the notes alone. The close gate, the doctor's I15 and the next
-review read the keys.
+When the operator judged an epic's contract or its course in this sitting,
+the sitting is a review of that epic, and the `converse-epic-review` skill's
+writes record it, each field the ruling sets in its own key.
 
 When the notes have grown past a quick read, append a current-state block too.
 The newest one is the one in force, and step 4 primes from it:
@@ -280,12 +276,9 @@ message.
 **If this sitting ROUTED work, file and send it, then pass
 `--waiting-on <work-bead>` to the sign-off for each dependency it sent.** The
 `work` skill says which bead carries the work and how to choose its formula. An
-epic the ruling files takes that skill's epic create, which records the epic's
-contract in the create and refuses an epic with no hypothesis, and the note it
-writes once the create has returned the epic's id, which says whose words each
-field is. A field the operator stated or approved in this sitting is theirs,
-and the note quotes their words, so a review of the epic can tell it from this
-sitting's proposal:
+epic the ruling files takes that skill's epic create, then a note that says
+whose words each field is, quoting the operator for each field they stated or
+approved in this sitting:
 ```bash
 gc bd update <the new epic> --append-notes "Filed $(date -u +%Y-%m-%d) by $GC_SESSION_NAME in conversation $CONVERSATION. Proposed by this sitting: <each field it wrote, or none>. Stated by the operator: <each field they stated or approved, quoting their words, or none>."
 ```
