@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -574,11 +575,12 @@ func init() {
 	}
 }
 
-// storePending is the test pendingReader, the stand-in for the store's own
-// answer: each bead's waits of the store's blocked rule onto a bead the fixture
-// store holds whose status is neither closed nor pinned. The store holds a far
-// bead as its id search finds one: in its issues, else embedded in an edge
-// fixture.
+// storePending is the test pendingReader, a double for the store's answer and
+// not a copy of its rule: each recorded wait onto a bead the fixture store
+// holds whose row is not closed. A test that turns on the rule sets its own
+// answer, and TestPendingWaitsAreTheWaitsPackagesAnswer runs the production
+// read through the waits package itself. The store holds a far bead as its id
+// search finds one: in its issues, else embedded in an edge fixture.
 func storePending(stores map[string]*fakeStore) pendingReader {
 	return func(_ context.Context, beadsDir string, ids []string) (map[string][]string, error) {
 		st, ok := stores[filepath.Base(filepath.Dir(beadsDir))]
@@ -612,7 +614,7 @@ func storePending(stores map[string]*fakeStore) pendingReader {
 				if d == nil || !waitEdge(string(d.DependencyType)) {
 					continue
 				}
-				if s, held := status[d.Issue.ID]; held && s != beads.StatusClosed && s != beads.Status("pinned") {
+				if s, held := status[d.Issue.ID]; held && s != beads.StatusClosed {
 					own = append(own, d.Issue.ID)
 				}
 			}
@@ -998,9 +1000,14 @@ func TestChildBlockersCarryTheStoresAnswer(t *testing.T) {
 	stores := map[string]*fakeStore{"gc-toolkit": st}
 	fake := storePending(stores)
 	var answered map[string]bool
+	// The store's answer for tk-a: its wait on open work is pending, and its
+	// wait on the pinned bead is not, as the store counts a pinned blocker.
 	src := newBeadsTestSource(t, root, stores,
 		withPendingReader(func(ctx context.Context, dir string, ids []string) (map[string][]string, error) {
 			out, err := fake(ctx, dir, ids)
+			if _, ok := out["tk-a"]; ok {
+				out["tk-a"] = []string{"tk-aw"}
+			}
 			answered = map[string]bool{}
 			for id := range out {
 				answered[id] = true
@@ -1057,6 +1064,74 @@ func TestAWaitsForEdgeIsARecordedWait(t *testing.T) {
 		return
 	}
 	t.Fatal("tk-human/human: anchor missing")
+}
+
+// TestPendingWaitsAreTheWaitsPackagesAnswer runs the production reader, which
+// no other test reaches, through gctk's waits package over the pack's stub
+// store (assets/scripts/holds-store.stub.sh answering `gc bd`), so the board's
+// answer is the package's and no test restates the rule. A wait onto open
+// work is pending; one onto a closed bead, a pinned bead or a bead the store
+// does not hold is not; and a waits-for edge the store cannot judge yet is,
+// its spawner named.
+func TestPendingWaitsAreTheWaitsPackagesAnswer(t *testing.T) {
+	for _, tool := range []string{"bash", "jq"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skip(tool + " is not on PATH, so the stub store cannot answer")
+		}
+	}
+	stub, err := filepath.Abs(filepath.Join("..", "..", "..", "..", "assets", "scripts", "holds-store.stub.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(stub); err != nil {
+		t.Fatalf("the stub store is not at %s: %v", stub, err)
+	}
+	dir := t.TempDir()
+	rows := `[
+ {"id":"tk-open","status":"open","_deps":[{"id":"tk-work","dependency_type":"blocks"}]},
+ {"id":"tk-work","status":"open"},
+ {"id":"tk-done-dep","status":"open","_deps":[{"id":"tk-done","dependency_type":"blocks"}]},
+ {"id":"tk-done","status":"closed"},
+ {"id":"tk-pinned-dep","status":"open","_deps":[{"id":"tk-pin","dependency_type":"blocks"}]},
+ {"id":"tk-pin","status":"pinned"},
+ {"id":"tk-far-dep","status":"open","_deps":[{"id":"gc-far","dependency_type":"blocks"}]},
+ {"id":"tk-wf","status":"open","_deps":[{"id":"tk-sp","dependency_type":"waits-for"}]},
+ {"id":"tk-sp","status":"open"},
+ {"id":"tk-spc","status":"open","parent":"tk-sp"}
+]`
+	store := filepath.Join(dir, "store.json")
+	if err := os.WriteFile(store, []byte(rows), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	shim := `#!/bin/sh
+[ "$1" = bd ] || exit 2
+shift
+exec bash "$HOLDS_STUB" answer "$@"
+`
+	if err := os.WriteFile(filepath.Join(dir, "gc"), []byte(shim), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("HOLDS_STUB", stub)
+	t.Setenv("HOLDS_STORE", store)
+	t.Setenv("GC_NO_API", "1")
+	got, err := readPendingWaits(context.Background(), filepath.Join(dir, "rig", ".beads"),
+		[]string{"tk-open", "tk-done-dep", "tk-pinned-dep", "tk-far-dep", "tk-wf"})
+	if err != nil {
+		t.Fatalf("readPendingWaits: %v", err)
+	}
+	want := map[string][]string{
+		"tk-open":       {"tk-work"},
+		"tk-done-dep":   {},
+		"tk-pinned-dep": {},
+		"tk-far-dep":    {},
+		"tk-wf":         {"tk-sp"},
+	}
+	for id, w := range want {
+		if g, ok := got[id]; !ok || !slices.Equal(g, w) {
+			t.Errorf("%s: pending=%v (answered %v), want %v", id, g, ok, w)
+		}
+	}
 }
 
 // TestWaitsAreReadOncePerRigPerGather pins the cost of the read: one snapshot
