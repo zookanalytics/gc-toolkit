@@ -108,15 +108,26 @@ there or in a sitting.
 Writer: a human gate on the anchor, filed through the helper, which keeps one
 open gate per anchor and situation key:
 `"$(gc <binding> scripts-dir)/human-gate.sh" --subject <anchor> --key <situation-key> --message "<what must be settled first, at most 140 characters>"`.
-A sitting files its own with a key that names its conversation,
-`conversation.<conversation id>`, and replies to it (the converse-hold step),
-so two conversations on one PR each hold its merge. The gate is cleared with
-`gc bd gate resolve <gate> --reason "ruled: <the answer>"`, and the same call
-with `--retract` withdraws your own gate once the question has gone. A sitting
-clears a gate the operator ruled on only through its sign-off writer (the
-converse-settle and converse-continue steps), which first carries out what the
-ruling does to the PR, its rework or its retirement, so the merge never lands
-in between.
+A person clears it with
+`gc bd gate resolve <gate> --reason "ruled: <the answer>"`, and its filer
+withdraws it once the question has gone with the helper's own form,
+`"$(gc <binding> scripts-dir)/human-gate.sh" --retract --subject <anchor> --key <situation-key> --message "<why it has gone>"`,
+which resolves it `moot:`.
+
+A conversation on an open PR holds its merge from the moment it opens until it
+closes. A conversation whose subject is the anchor, or a bead whose
+`anchor_bead` names it, such as its review or rework, holds the merge with a
+gate that `gc-helm.sh open` files on the anchor under the conversation's key,
+`conversation.<conversation id>`, and the conversation replies to it. Two
+conversations on one PR each hold its merge with a gate of their own. The
+sign-off answers the gate with the operator's ruling, and only after it has
+carried out what the ruling does to the PR, its rework or its retirement, so
+the merge never lands in between. A dismiss, or the moot or benign close at a
+premise re-check, withdraws it. A sitting that is helping the PR land withdraws
+it sooner with the helper's `--retract` form under that key, and records why on
+the conversation (the converse-hold step). A hold that must outlast the
+conversation is a gate of its own on the anchor, under a key that names what it
+waits for.
 
 Every open bead the anchor waits on, and every open bead filed under it, holds
 its merge, whatever it was for. Never make an anchor wait on a follow-up that

@@ -25,6 +25,11 @@
 #   (REASON-NEW) --reason files a fresh conversation even when one waits
 #   (CONVID-REASON) --reason on an explicit conversation id is refused
 #   (LIVE)    a conversation a live sitting holds is attached to, not doubled
+#   (PR-HOLD*) a sitting engage starts on a conversation about an open PR holds
+#             the PR's merge first, through human-gate.sh under the
+#             conversation's key on the anchor and the conversation's reply onto
+#             it; a live sitting it attaches to, or a subject that is no open
+#             PR, files no hold, and a hold that does not land starts nothing
 #   (REUSE-*) a live sitting engage reuses is attached only once it reads
 #             active: one still start-pending or creating is waited on and left
 #             unattached at the bound, which exits 4, one that ends first is
@@ -302,9 +307,11 @@ case "$1 ${2:-}" in
       tk-gate)
         jq -n '[{id:"tk-gate", title:"Approve the rollout", description:"Gate on the waiting bead.", status:"open", issue_type:"gate", await_type:"human", await_id:"rollout"}]' ;;
       *)
-        # $SUBJ_STATUS is the status every other bead reads, open by default.
+        # $SUBJ_STATUS is the status every other bead reads, open by default,
+        # and $SUBJ_META its metadata, none by default.
         jq -n --arg i "$id" --arg t "${SUBJ_TITLE:-the subject under engagement}" --arg st "${SUBJ_STATUS:-open}" \
-          '[{id:$i, title:$t, status:$st, issue_type:"task", priority:2, assignee:""}]' ;;
+              --argjson md "${SUBJ_META:-"{}"}" \
+          '[{id:$i, title:$t, status:$st, issue_type:"task", priority:2, assignee:"", metadata:$md}]' ;;
     esac ;;
   "bd list")
     _id=""; _prev=""
@@ -576,6 +583,18 @@ REC
 chmod +x "$TMP/rec-psc"
 export GC_SITTING_COMMENT_TOOL="$TMP/rec-psc" REC_PSC_LOG="$TMP/psc.log"
 
+# A stand-in for human-gate.sh, through which engage holds an open PR's merge
+# for the conversation it starts a sitting on. It logs its call and prints the
+# gate tk-hold, or fails when $HOLD_FAIL is set.
+cat > "$TMP/rec-hg" <<'HG'
+#!/usr/bin/env bash
+printf 'human-gate %s\n' "$*" >> "$CALLS"
+[ -z "${HOLD_FAIL:-}" ] || exit 1
+echo tk-hold
+HG
+chmod +x "$TMP/rec-hg"
+export GC_HUMAN_GATE_TOOL="$TMP/rec-hg"
+
 # reset — a clean store for a case: every conversation in the queue, open, no
 # reply, no live sitting but the ones $LIVE_SITTINGS seeds ("<sid>=<alias> ...").
 reset() {
@@ -752,6 +771,33 @@ reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
 run_engage tk-subj
 has "$CALLED" "session attach gc-50" "(LIVE-ATTACH) the default attaches the operator to the live sitting"
 hasnt "$OUT" "waiting for the reconciler" "(LIVE-ATTACH) …a started one at once, with no wait announced"
+reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
+SUBJ_META='{"merge_result":"pull_request"}' run_engage tk-subj --no-attach
+eq "$RC" 0 "(PR-HOLD-LIVE) attaching to a live sitting on an open PR exits 0"
+hasnt "$CALLED" "human-gate" "(PR-HOLD-LIVE) …and files no hold: the live sitting holds the merge, or withdrew the hold to help the PR land"
+unset LIVE_SITTINGS
+
+echo "# a sitting engage starts on an open PR holds the PR's merge first"
+reset; SUBJ_META='{"merge_result":"pull_request"}' run_engage tk-conv --no-attach
+eq "$RC" 0 "(PR-HOLD) engaging a queued conversation on an open PR's anchor exits 0"
+has "$CALLED" "human-gate --subject tk-subj --key conversation.tk-conv --message Conversation tk-conv is open on this PR" \
+    "(PR-HOLD) …holding the PR's merge with a gate under the conversation's key on the anchor"
+has "$CALLED" "bd dep bd dep add tk-conv tk-hold --type replies-to" "(PR-HOLD) …and the conversation replies to it"
+HOLD_AT=$(printf '%s\n' "$CALLED" | grep -n '^human-gate ' | head -1 | cut -d: -f1)
+SPAWN_AT=$(printf '%s\n' "$CALLED" | grep -n '^session new ' | head -1 | cut -d: -f1)
+[ -n "$HOLD_AT" ] && [ -n "$SPAWN_AT" ] && [ "$HOLD_AT" -lt "$SPAWN_AT" ] \
+    && ok "(PR-HOLD) …before the sitting starts" \
+    || bad "(PR-HOLD) …before the sitting starts (hold at ${HOLD_AT:-none}, spawn at ${SPAWN_AT:-none})"
+has "$OUT" "conversation tk-conv holds the merge of the PR of tk-subj through gate tk-hold until it closes" "(PR-HOLD) …and engage says so"
+reset; SUBJ_META='{"task_kind":"review","anchor_bead":"tk-other"}' run_engage tk-conv --no-attach
+hasnt "$CALLED" "human-gate" "(PR-HOLD-NOT-PR) a subject whose anchor is no open PR files no hold"
+reset; run_engage tk-conv --no-attach
+hasnt "$CALLED" "human-gate" "(PR-HOLD-NOT-PR) …and neither does a subject that is no anchor"
+reset; HOLD_FAIL=1 SUBJ_META='{"merge_result":"pull_request"}' run_engage tk-conv --no-attach
+eq "$RC" 4 "(PR-HOLD-FAIL) a hold that does not land exits 4"
+has "$OUT" "nothing spawned, because the sitting would talk while the PR could merge" "(PR-HOLD-FAIL) …saying why nothing spawned"
+hasnt "$CALLED" "session new" "(PR-HOLD-FAIL) …and starts no sitting"
+export LIVE_SITTINGS="gc-50=gc-toolkit/gc-toolkit.tk-conv"
 
 echo "# a live sitting engage reuses is attached only once the reconciler has started it"
 # A sitting is live from the spawn that created it, so one an earlier

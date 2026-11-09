@@ -54,7 +54,7 @@ FIXTURE="${GC_HELM_FIXTURE:-}"              # test hook: <dir>/rigs.json replace
 usage() {
     cat >&2 <<'EOF'
 Usage:
-  gc-helm open  <bead-id> [--reason "..."] [--body "..."] [--allow-duplicate] [--json]  file a conversation about the bead in the operator's queue, for the operator to engage; a second concern joins the bead's conversation already in the queue unless --allow-duplicate files a fresh one; --json prints {subject,conversation,filed}
+  gc-helm open  <bead-id> [--reason "..."] [--body "..."] [--allow-duplicate] [--json]  file a conversation about the bead in the operator's queue, for the operator to engage; a second concern joins the bead's conversation already in the queue unless --allow-duplicate files a fresh one; a conversation about an open PR, or a bead of one, holds the PR's merge with a human gate on its anchor until the conversation closes; --json prints {subject,conversation,filed}
   gc-helm engage [<subject>] [--subject <id>] [--new-subject [--rig <name>]] [--model <variant>] [--skill <name>] [--reason "..." | --template <key>] [--no-input] [--no-attach]  hold a conversation about the bead in a converse sitting and attach: attach to its live sitting, or take its conversation from the queue, or file one, then spawn a sitting named for it. Pointed at a human gate it takes the one bead still waiting on the gate, and the conversation replies to the gate. On a TTY it prompts for subject, conversation (existing vs new), starter, model, and, for a new conversation, skill; any value on the command line pre-fills and skips its prompt, and --no-input keeps the non-interactive one-shot behavior. --skill seeds the sitting with any skill it carries as its lens on the subject (--skill review-arch is a conversation with the Architect). --new-subject files a FRESH subject bead (its title is the positional text; --rig picks the rig, prompted otherwise) and engages it in one gesture
   gc-helm react <bead-id> [--reason "..."]  file a first reaction — a reaction bead that tracks the subject, claimed and disposed by the proactive pool
   gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>... | --no-wait] [--release [--route <rig>/<agent> | --assign <named-agent>]]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
@@ -62,7 +62,7 @@ Usage:
   gc-helm park <bead-id> --waiting-on <bead-id>  the same hold behind an existing bead, filing no gate
   gc-helm priority <bead-id> <P0-P4> [--dry-run]  set the priority of a bead that follows nothing, and re-rank the work that follows it
   gc-helm priority <bead-id> --shift <±n> [--dry-run]  set the shift of a bead that follows a parent or an anchor: +1 is one level later, -1 one level sooner
-  gc-helm dismiss  [<bead-id>] [--reason "..."] [--operator] [--json]  the operator is done with this sitting: close the conversation a live sitting holds on the bead, answering no gate, and stop the session that held it; a conversation id closes that conversation (subject inferred from the current sitting when omitted); --operator stops every session as the operator, from outside it; --json prints {subject,matched,closed,ok}
+  gc-helm dismiss  [<bead-id>] [--reason "..."] [--operator] [--json]  the operator is done with this sitting: close the conversation a live sitting holds on the bead, answering no gate, withdraw the gate it held an open PR's merge with, and stop the session that held it; a conversation id closes that conversation (subject inferred from the current sitting when omitted); --operator stops every session as the operator, from outside it; --json prints {subject,matched,closed,ok}
   gc-helm handback <conversation-id> < hand-back  record the hand-back a converse sitting is posting, read from stdin, on its conversation, replacing the one before; engage prints the latest in the operator's tab once the sitting has ended
   gc-helm accept <bead-id> [--reason "..."] [--conversation <task>] [--var <key>=<value> ...]  accept a recommendation: resolve the human gate that put it to the operator, read the answer back, and dispatch the bead's gc.recommended_formula at it; refuses while another human gate blocks the bead, and finishes an acceptance an earlier Accept left unfinished (subject or conversation id). --conversation names the conversation whose sitting's sign-off runs this Accept, which it does not warn of; each --var rides the sling, a var the operator settled for this dispatch
   gc-helm resolve <bead-id|pr-number|pr-url>  print the LIVE bead a reference resolves to (a PR ref to its anchor, a superseded id to its successor); a live id or an unrecognized reference prints unchanged, an unresolvable or ambiguous PR is refused. Read-only, files nothing — operator-intake.sh uses it to route a PR reference before it becomes a topic
@@ -82,10 +82,17 @@ to `human` while it waits in the operator's queue, and to its sitting's alias,
 which names its own id, while a sitting holds it (conversation.sh holds the
 one definition of that shape). open files one in the queue, in the bead's own
 store; its --reason is the title and --body the ask the sitting reads when it
-claims the conversation. engage holds a conversation in a sitting: it attaches
-to a live sitting on the bead, or takes the bead's conversation from the
-queue, or one whose sitting's session has closed, or files a new one. It then
-spawns a manual converse-<model> sitting (origin=manual, backstop-exempt)
+claims the conversation. A conversation about an open PR, its anchor or a bead
+whose anchor_bead names it, holds the PR's merge for as long as it is open:
+open files a human gate on the anchor under the conversation's key,
+conversation.<id>, and the conversation replies to it. Its sign-off answers the
+gate, and a dismiss or a moot or benign close withdraws it. A failed read of
+that anchor files nothing, and a gate that does not land exits 4 with the
+conversation filed and the repair named. engage holds a conversation in a
+sitting: it attaches to a live sitting on the bead, or takes the bead's
+conversation from the queue, or one whose sitting's session has closed, or
+files a new one. It then spawns a manual converse-<model> sitting
+(origin=manual, backstop-exempt)
 named for the conversation, binds the conversation to that sitting's alias
 with a write guarded on the holder it read, so the session's own claim adopts
 it, and attaches once the reconciler has started it, however long the start
@@ -198,13 +205,16 @@ would write.
 dismiss is the operator's explicit "end this sitting". It closes the
 conversation a live sitting holds on the subject, with a reason naming the
 dismissal, and answers nothing: every human gate the conversation replies to
-stays open and owed, for its filer or the next sitting. It records the
-dismissal as one of the visit's actions, a comment on the conversation that
-carries no reason, and draws the comment that shows the visit on the subject's
-PR again. It then stops the converse session that held the conversation with
-`gc runtime drain-ack`, so the controller ends the session outside this
-process: the session dismiss runs in acks itself, last, and any other is acked
-as an operator. --operator says the caller is outside the sitting even when it
+stays open and owed, for its filer or the next sitting. The one gate it
+withdraws is the conversation's own hold on an open PR's merge, the gate under
+its key on the subject's anchor, once the close has landed, because that hold
+lives as long as the conversation; one that does not withdraw exits 4 naming
+the repair. It records the dismissal as one of the visit's actions, a comment
+on the conversation that carries no reason, and draws the comment that shows
+the visit on the subject's PR again. It then stops the converse session that
+held the conversation with `gc runtime drain-ack`, so the controller ends the
+session outside this process: the session dismiss runs in acks itself, last,
+and any other is acked as an operator. --operator says the caller is outside the sitting even when it
 runs under the sitting's identity to infer the subject, as prefix+X does, so
 every session is acked as an operator and none acks itself. A session that
 will not stop is left to converse-reap, which closes any converse session
@@ -400,6 +410,10 @@ ENGAGE_AGENTS_DIR="${GC_HELM_AGENTS_DIR:-$SCRIPT_DIR/../../agents}"
 # one. Best-effort and self-silencing when the subject has no PR or the visit no
 # comment; overridable so a hermetic test can point it at a fixture.
 SITTING_COMMENT_TOOL="${GC_SITTING_COMMENT_TOOL:-$SCRIPT_DIR/pr-sitting-comment.sh}"
+# Files and withdraws the human gate a conversation on an open PR holds the
+# PR's merge with (conversation_hold_merge, conversation_release_merge);
+# overridable so a hermetic test can point it at a fixture.
+HUMAN_GATE_TOOL="${GC_HUMAN_GATE_TOOL:-$SCRIPT_DIR/human-gate.sh}"
 # Ends the run beneath a released anchor through gascity's run cancel;
 # overridable so a hermetic test can point it at a fixture.
 RUN_CANCEL_TOOL="${GC_RUN_CANCEL_TOOL:-$SCRIPT_DIR/run-cancel.sh}"
@@ -1905,6 +1919,103 @@ conversation_reply() {
     gc bd dep add "$1" "$2" --type replies-to >/dev/null 2>&1
 }
 
+# ── A conversation on an open PR holds the PR's merge ────────────────
+# A conversation whose subject is an open PR holds the PR's merge for exactly as
+# long as it is open. The hold is a human gate under the conversation's own key,
+# conversation.<id>, that blocks the PR's anchor, and the conversation replies to
+# it. open files it, and engage files it when it starts a sitting on a
+# conversation that lacks it, so a conversation holds the merge however it
+# started. Every writer that closes a conversation answers the gate or withdraws
+# it: the sign-off answers each gate the conversation replies to with its
+# ruling, dismiss withdraws it here, and the premise re-check's moot or benign
+# close withdraws it. A sitting that is helping the PR land withdraws it sooner
+# (skills/converse-hold). The gate holds only the merge: a review, a rework or a
+# supplement is a bead of its own that the anchor waits on, and a gate on the
+# anchor blocks none of them.
+
+# subject_anchor <subject-row> — the anchor a conversation about the subject
+# holds the merge of: the subject itself when it is an anchor (it carries a
+# merge_result), else the bead its anchor_bead names, as a PR's review, rework or
+# supplement names it. Prints nothing for a subject that is neither. <row> is the
+# subject's own row, as row_now prints it.
+subject_anchor() {
+    printf '%s' "$1" | jq -r '(.metadata // {}) as $m
+        | if (($m.merge_result // "") | tostring) != "" then (.id // "") | tostring
+          else ($m.anchor_bead // "") | tostring end' 2>/dev/null || true
+}
+
+# conversation_pr_anchor <subject-row> — the anchor whose merge a conversation
+# about the subject holds: subject_anchor's, when that anchor is an open PR
+# (merge_result=pull_request, not closed). Prints nothing when the subject is no
+# open PR and no bead of one. Returns 1 when the anchor its anchor_bead names
+# does not read, because a PR whose state cannot be read could be one the
+# conversation must hold.
+conversation_pr_anchor() {
+    _cpa_id=$(printf '%s' "$1" | jq -r '(.id // "") | tostring' 2>/dev/null || true)
+    _cpa_anchor=$(subject_anchor "$1")
+    [ -n "$_cpa_anchor" ] || return 0
+    if [ "$_cpa_anchor" = "$_cpa_id" ]; then
+        _cpa_row="$1"
+    else
+        _cpa_row=$(row_now "$_cpa_anchor")
+        [ -n "$_cpa_row" ] || return 1
+    fi
+    printf '%s' "$_cpa_row" | jq -r '
+        if ((.metadata // {}).merge_result // "") == "pull_request"
+           and ((.status // "") | tostring | ascii_downcase) != "closed"
+        then (.id // "") | tostring else empty end' 2>/dev/null || true
+}
+
+# conversation_hold_merge <verb> <conversation> <anchor> — hold the merge of the
+# open PR <anchor> names for as long as the conversation is open: human-gate.sh
+# files the gate under the conversation's key on the anchor, or names the one
+# already open, and the conversation replies to it. Returns 0 once both writes
+# land. Otherwise it says on stderr what did not land and how to land it by
+# hand, and returns 1, because the merge is then free while the conversation is
+# open, or its close would leave the gate open.
+conversation_hold_merge() {
+    _chm_verb="$1"; _chm_conv="$2"; _chm_anchor="$3"
+    _chm_msg="Conversation $_chm_conv is open on this PR, and its merge waits until the conversation closes
+The merge waits so that the PR does not land while the question the conversation carries is open. Reviews and reworks go on meanwhile. The conversation's sign-off answers this gate with the operator's ruling, and a dismiss or a moot or benign close withdraws it. A sitting that is helping the PR land withdraws it sooner. To take the conversation up: $PROG engage $_chm_conv"
+    _chm_out=$("$HUMAN_GATE_TOOL" --subject "$_chm_anchor" --key "conversation.$_chm_conv" --message "$_chm_msg" 2>/dev/null) \
+        || _chm_out=""
+    _chm_gate=$(printf '%s\n' "$_chm_out" | sed -n '$p')
+    case "$_chm_gate" in
+        ""|*[!A-Za-z0-9._-]*)
+            echo "$PROG: $_chm_verb: conversation $_chm_conv is open on the PR of $_chm_anchor, but the human gate that holds that PR's merge did not file, so the PR can merge while the conversation is open. File it by hand: $HUMAN_GATE_TOOL --subject $_chm_anchor --key conversation.$_chm_conv --message \"Conversation $_chm_conv is open on this PR, and its merge waits until the conversation closes\", then gc bd dep add $_chm_conv <the gate it prints> --type replies-to" >&2
+            return 1 ;;
+    esac
+    if ! conversation_reply "$_chm_conv" "$_chm_gate"; then
+        echo "$PROG: $_chm_verb: gate $_chm_gate holds the merge of the PR of $_chm_anchor, but the store refused conversation $_chm_conv's reply onto it, so the conversation's sign-off would not answer the gate. Add it by hand: gc bd dep add $_chm_conv $_chm_gate --type replies-to" >&2
+        return 1
+    fi
+    echo "$PROG: $_chm_verb: conversation $_chm_conv holds the merge of the PR of $_chm_anchor through gate $_chm_gate until it closes" >&2
+    return 0
+}
+
+# conversation_release_merge <verb> <conversation> <subject> <reading> — withdraw
+# the gate a conversation that has closed held its PR's merge with: each open
+# human gate under the conversation's key on the anchor of its subject
+# (subject_anchor), resolved `moot: <reading>` by human-gate.sh, which reports
+# an answer another writer gave first. A subject with no anchor held nothing. Returns 0 once nothing under the key holds the anchor. Otherwise
+# it says on stderr how to withdraw the gate by hand and returns 1: the merge
+# then waits on a conversation that has closed.
+conversation_release_merge() {
+    _crm_verb="$1"; _crm_conv="$2"; _crm_subject="$3"; _crm_why="$4"
+    _crm_row=$(row_now "$_crm_subject")
+    if [ -z "$_crm_row" ]; then
+        echo "$PROG: $_crm_verb: conversation $_crm_conv is closed, but $_crm_subject could not be read to find the PR whose merge it held, so its gate may still hold that merge. Withdraw it by hand: $HUMAN_GATE_TOOL --retract --subject <the PR's anchor> --key conversation.$_crm_conv --message \"$_crm_why\"" >&2
+        return 1
+    fi
+    _crm_anchor=$(subject_anchor "$_crm_row")
+    [ -n "$_crm_anchor" ] || return 0
+    if ! "$HUMAN_GATE_TOOL" --retract --subject "$_crm_anchor" --key "conversation.$_crm_conv" --message "$_crm_why" >/dev/null 2>&1; then
+        echo "$PROG: $_crm_verb: conversation $_crm_conv is closed, but the gate it held the merge of the PR of $_crm_anchor with did not withdraw, so that merge still waits on it. Withdraw it by hand: $HUMAN_GATE_TOOL --retract --subject $_crm_anchor --key conversation.$_crm_conv --message \"$_crm_why\"" >&2
+        return 1
+    fi
+    return 0
+}
+
 # open_join <conversation> — join open's concern ($join_note, empty for none)
 # to a conversation waiting in the operator's queue, assigned to `human` and
 # open, which is where a sitting claims it and reads its notes. The note is
@@ -1970,7 +2081,9 @@ open_join() {
 # the open. --reason is the title, --body the ask
 # the sitting reads when it claims the conversation — callers with their own
 # origin (operator-intake.sh) pass both rather than misreporting the board
-# wording. The conversation is filed in the bead's own store. It leaves the
+# wording. The conversation is filed in the bead's own store. A conversation
+# about an open PR, filed or joined, holds the PR's merge until it closes
+# (conversation_hold_merge). It leaves the
 # conversation's id in CONV and OPEN_FILED at 1 when it filed it, or 0 when it
 # joined one already in the queue, for engage, which runs it in its own shell.
 # Engage sets OPEN_GATE_FROM to the bead it settled on, so a gate several beads
@@ -2047,6 +2160,16 @@ cmd_open() {
     fi
     # <<< open-subject-closed
 
+    # A conversation about an open PR, or about a bead of one such as its
+    # review or rework, holds the PR's merge from the moment it is filed until
+    # it closes. Which PR is read before anything is written, so a read that
+    # does not answer files nothing rather than a conversation that holds no
+    # merge.
+    if ! open_anchor=$(conversation_pr_anchor "$VS_ROW"); then
+        echo "$PROG: open: could not read $(subject_anchor "$VS_ROW"), the anchor $bead names, so whether the conversation must hold an open PR's merge cannot be told. No conversation filed." >&2
+        exit 4
+    fi
+
     if ! open_convs=$(bead_conversations "$bead"); then
         echo "$PROG: open: could not read the conversations on $bead ('gc bd dep list $bead --direction=up --type tracks', or 'gc bd list --id' of the tasks it names, did not answer). No conversation filed." >&2
         exit 4
@@ -2091,6 +2214,9 @@ $open_body"
                 *) exit 4 ;;
             esac
             CONV="$existing"; OPEN_FILED=0
+            if [ -n "$open_anchor" ]; then
+                conversation_hold_merge open "$CONV" "$open_anchor" || exit 4
+            fi
             bust_cache
             if [ -n "$open_json" ]; then
                 jq -nc --arg s "$bead" --arg c "$existing" '{subject: $s, conversation: $c, filed: false}'
@@ -2144,6 +2270,9 @@ $gate_desc}"
     if [ -n "$TAKE_GATE" ] && ! conversation_reply "$CONV" "$TAKE_GATE"; then
         echo "$PROG: open: conversation $CONV is filed on $bead, but the store refused its reply onto gate $TAKE_GATE. Add it by hand: gc bd dep add $CONV $TAKE_GATE --type replies-to" >&2
         exit 4
+    fi
+    if [ -n "$open_anchor" ]; then
+        conversation_hold_merge open "$CONV" "$open_anchor" || exit 4
     fi
     OPEN_FILED=1
     bust_cache
@@ -2393,7 +2522,10 @@ operator_drain_ack() {
 # sitting does not outlive its conversation. Dismiss answers nothing: every
 # human gate the conversation replies to stays open and owed, for its filer or
 # the next sitting, and its replies stay as the record that this conversation
-# took it up. It writes nothing to the subject.
+# took it up. The exception is the conversation's own hold on an open PR's
+# merge, which lives as long as the conversation, so it is withdrawn once the
+# close has landed (conversation_release_merge). It writes nothing to the
+# subject.
 #
 # A bead names the conversations a live sitting holds on it, and a bead with no
 # live sitting has nothing to end. A conversation id names its own
@@ -2485,7 +2617,7 @@ cmd_dismiss() {
     # it escalates to --force. Plain close first, so a conversation in the queue
     # never pays for the override and the forced case is a line the operator can
     # see. A close counts on its exit 0.
-    sitting_failed=0; closed_n=0
+    sitting_failed=0; closed_n=0; hold_failed=0
     for _c in $convs; do
         # The work-record gate the close runs wants gc.work_outcome.
         # work-outcome.sh stamps it in a write of its own, so it never decides
@@ -2505,6 +2637,12 @@ cmd_dismiss() {
         if [ -n "$_how" ]; then
             closed_n=$((closed_n + 1))
             _dmsg "$PROG: dismiss: $_how conversation $_c — the sitting on $bead ends"
+            # The gate a conversation on an open PR holds the PR's merge with
+            # lives as long as the conversation, so it is withdrawn once the
+            # close has landed. Withdrawn after the close, so a close that does
+            # not land leaves the conversation holding the merge.
+            conversation_release_merge dismiss "$_c" "$bead" "conversation $_c was dismissed, so it no longer holds this PR's merge" \
+                || hold_failed=1
             # The dismissal is one of the visit's actions, recorded on the
             # conversation without the operator's reason, which is their own
             # words. The comment that shows the visit on the subject's PR is then
@@ -2559,6 +2697,16 @@ cmd_dismiss() {
         [ -n "$dismiss_json" ] && jq -nc --arg s "$bead" --argjson m "$matched" --argjson c "$closed_n" \
             '{subject: $s, matched: $m, closed: $c, ok: false}'
         echo "$PROG: dismiss: $bead was NOT dismissed — a sitting is unaccounted for. Each conversation above says what it needs, and a re-run resumes from there." >&2
+        dismiss_stop_sittings
+        exit 4
+    fi
+    # Every conversation closed, and the gate one held a merge with did not
+    # withdraw: the sittings end as dismissed, and the run fails with the
+    # withdrawal printed above, since that merge still waits on a closed
+    # conversation.
+    if [ "$hold_failed" -ne 0 ]; then
+        [ -n "$dismiss_json" ] && jq -nc --arg s "$bead" --argjson m "$matched" --argjson c "$closed_n" \
+            '{subject: $s, matched: $m, closed: $c, ok: false}'
         dismiss_stop_sittings
         exit 4
     fi
@@ -4134,7 +4282,7 @@ cmd_engage() {
     # before engage chooses, so it never starts a second sitting beside a live
     # one it could not see. The holder and the status engage reads here are what
     # its bind is guarded on below.
-    CONV=""; conv_state=""; conv_holder=""; conv_status=""
+    CONV=""; conv_state=""; conv_holder=""; conv_status=""; conv_via_open=""
     if [ -n "$named_conv" ]; then
         CONV="$named_conv"
     elif [ "$engage_file_new" = 1 ] || [ -n "$engage_reason" ]; then
@@ -4194,6 +4342,7 @@ cmd_engage() {
         # open files a conversation, or joins one, only as it waits in the
         # queue: assigned to human, at open.
         conv_new="$OPEN_FILED"; conv_state=queue; conv_holder=human; conv_status=open
+        conv_via_open=1
     fi
 
     # Pointed at a gate, the conversation engage landed on replies to it,
@@ -4203,6 +4352,24 @@ cmd_engage() {
     if [ -n "$pointed_gate" ] && ! conversation_reply "$CONV" "$pointed_gate"; then
         echo "$PROG: engage: the store refused conversation $CONV's reply onto gate $pointed_gate, so the sitting would not know the gate it answers. Nothing spawned. Add it by hand and re-engage: gc bd dep add $CONV $pointed_gate --type replies-to" >&2
         exit 4
+    fi
+
+    # A sitting engage starts on an open PR holds the PR's merge until its
+    # conversation closes. open already held it for a conversation it filed or
+    # joined just above, and a live sitting engage attaches to is the one that
+    # held it, or withdrew it to help the PR land. Any other conversation, one
+    # taken from the queue or left by a sitting whose session closed, gets the
+    # hold before its sitting starts, so a conversation that lacks it holds the
+    # merge once it is engaged.
+    if [ -z "$conv_via_open" ] && [ "$conv_state" != live ]; then
+        if ! eng_anchor=$(conversation_pr_anchor "$bead_row"); then
+            echo "$PROG: engage: could not read $(subject_anchor "$bead_row"), the anchor $bead names, so whether the sitting must hold an open PR's merge cannot be told. Nothing spawned; re-engage once the store answers: $PROG engage $CONV" >&2
+            exit 4
+        fi
+        if [ -n "$eng_anchor" ] && ! conversation_hold_merge engage "$CONV" "$eng_anchor"; then
+            echo "$PROG: engage: nothing spawned, because the sitting would talk while the PR could merge. Re-engage once the hold lands: $PROG engage $CONV" >&2
+            exit 4
+        fi
     fi
 
     # One sitting per bead is engage's default, not a guarantee: a concern of

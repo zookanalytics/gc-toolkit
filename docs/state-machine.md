@@ -104,7 +104,12 @@ A sitting that holds a bead for an operator decision writes no state. The human
 gate it files blocks the bead, so `bd ready` leaves the bead out until the gate
 is resolved, and the board reads the open gate as the bead's hold
 ([human-engagement.md](human-engagement.md#the-sitting)). The bead keeps the
-state, the route and any deferred-dispatch arm it carried.
+state, the route and any deferred-dispatch arm it carried. A conversation about
+an open PR, its anchor or a bead whose `anchor_bead` names the anchor, holds
+the PR's merge the same way from the moment it opens until it closes: a human
+gate on the anchor under the conversation's key, which `gc-helm.sh open` files
+and every close of the conversation answers or withdraws
+([human-engagement.md](human-engagement.md#a-conversation-on-an-open-pr-holds-its-merge)).
 
 `pre_open_gate` and `pull_request` are the declared *detached* states
 (`detached_states`). The merge cadence drives them and no queue offers them, so
@@ -581,7 +586,7 @@ carries none.
 
 | Label | What holds the PR | Read from |
 |---|---|---|
-| `held: gate` | an open human gate holds the anchor: on the anchor itself, or behind a bead it waits on, such as a rework | `prstatus.Holding`, which follows the anchor's `blocks` edges through every blocker that is not closed and keeps the human gates it reaches, one a person has claimed included. A conversation blocks nothing, so it never counts |
+| `held: gate` | an open human gate holds the anchor: on the anchor itself, or behind a bead it waits on, such as a rework | `prstatus.Holding`, which follows the anchor's `blocks` edges through every blocker that is not closed and keeps the human gates it reaches, one a person has claimed included. A conversation blocks nothing, so it never counts, and the gate a conversation on an open PR holds the merge with counts as any human gate does |
 | `held: review` | review feedback the city has not answered, or a review thread the merge waits on, and nothing in flight acts on it | the merge pass's count of review threads waiting on the city's answer (`pr.unanswered_threads`), by the rule below, or its `blocked` verdict with cause `review-threads`, as `prstatus.Blocked` counts it |
 | `held: blocked` | a live blocker holds the PR that no automated actor will clear | the merge pass's `blocked` verdict with cause `blocker`, as `prstatus.Blocked` counts it, or a bead a person owes the next move on that `prstatus.Holding` reaches through the anchor's open `blocks` edges, on the anchor or behind a bead it waits on, such as its rework. That bead is routed to a person, is a decision, or is another merge anchor whose own status, by the same rule over the facts it records and its own `blocks` edges, is `needs-attention`, or `needs-review` once its PR is open. An open bead on that anchor's edges that no person moves counts as work in flight on it, so a PR the city is changing or landing holds nothing, and the gates and the beads a person owes on those edges are counted once, by the walk. Live work that waits on such a bead is not the city changing the PR, so the PR reads `needs-attention` and not `working`. A human gate is not among them, whatever its route, because `held: gate` counts it |
 
@@ -678,8 +683,10 @@ to the gates whose await type is human. The merge pass's finalize gate
 gate behind a bead the anchor waits on holds the merge through that open
 blocker. The labels count each human gate `prstatus.Holding` reaches that is
 not closed, one a person has claimed included.
-A conversation about the anchor tracks it and blocks nothing, so it holds no
-label.
+A conversation about the anchor tracks it and blocks nothing itself. While it
+is open, the gate it holds the PR's merge with blocks the anchor, so the PR
+reads `needs-attention` with `held: gate`, and once the conversation closes the
+labels read what they read before it opened.
 
 The labels read the city's own state — the refinery-computed posture on the
 anchor, the merge cadence's machine verdict and its cause, its holds, the open

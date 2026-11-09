@@ -96,7 +96,9 @@
 #   --subject, when given, must be the bead the conversation tracks.
 #   --leave (with --ruled yes) names a gate the conversation replies to that the
 #   ruling leaves owed: it stays open, and its reply stays as the record that
-#   this conversation took it up.
+#   this conversation took it up. The conversation's own hold on an open PR's
+#   merge, the gate under its key, conversation.<id>, that blocks the subject's
+#   anchor, lives as long as the conversation, so --leave on it is refused.
 #   --answer names a gate the conversation replies to that the ruling answers
 #     on a turn that does not sign off. It carries a ruling, so it takes
 #     --ruling and the open-PR answer below; it releases no subject and leaves
@@ -160,7 +162,8 @@
 #   sign-off, or report the ruling as
 #   carried out; repair what it names and re-run, which repeats every write it
 #   made safely; 2 refused before any write: usage, a conversation that is not
-#   one, a gate it does not reply to, a ruling that reaches an open PR and gave
+#   one, a gate it does not reply to, a --leave on the conversation's own hold
+#   on an open PR's merge, a ruling that reaches an open PR and gave
 #   none of --rework, --no-rework and --retire, a --rework or --retire on a
 #   ruling that reaches more than one open PR without a --pr-anchor naming one
 #   of them, or an --accept with none of the subject's own recommendation gates
@@ -408,6 +411,27 @@ if [ "$RULED" = yes ]; then
     stopped "could not read $SUBJECT to tell whether it is an open PR, which decides the PR the ruling's answer acts on; nothing was written"
   fi
   [ "$(printf '%s' "$SUBJECT_ROW" | jq -r '.metadata.merge_result // ""')" = pull_request ] && PR_ANCHORS+=("$SUBJECT")
+  # A conversation about an open PR holds the PR's merge with a gate under its
+  # own key on the anchor, the subject or the bead its anchor_bead names, and
+  # that hold lives exactly as long as the conversation is open. So a sign-off
+  # that closes the conversation answers it, and --leave on it is refused: a
+  # merge that must stay held after this conversation closes takes a gate of
+  # its own under its own key.
+  OWN_ANCHOR=$(printf '%s' "$SUBJECT_ROW" | jq -r '(.metadata // {}) as $m
+      | if (($m.merge_result // "") | tostring) != "" then (.id // "") | tostring
+        else ($m.anchor_bead // "") | tostring end')
+  for g in "${LEAVE[@]+"${LEAVE[@]}"}"; do
+    [ -n "$OWN_ANCHOR" ] || break
+    printf '%s' "$GATES_JSON" | jq -e --arg g "$g" --arg k "conversation.$CONVERSATION" \
+        'any(.[]; .id == $g and ((.await_id // "") | tostring) == $k)' >/dev/null 2>&1 || continue
+    LEFT_WAITERS=$(gc bd dep list "$g" --direction=up --type blocks --json 2>/dev/null | grep -av '^gc bd:' | scrub \
+      | jq -re 'if type == "array" then [ .[] | objects | (.id // "") | tostring ] | join(" ") else error("unread") end' 2>/dev/null) \
+      || stopped "the beads that wait on gate $g could not be read, and --leave on it is refused when it is this conversation's hold on the merge of $OWN_ANCHOR; nothing was written"
+    case " $LEFT_WAITERS " in
+      *" $OWN_ANCHOR "*)
+        die "--leave $g names this conversation's own hold on the merge of $OWN_ANCHOR (its key is conversation.$CONVERSATION), which lives as long as the conversation is open, so the sign-off answers it with the ruling; nothing was written. A merge that must stay held after this conversation closes takes a gate of its own on $OWN_ANCHOR under its own key (the prs skill, holding its merge), filed before the sign-off" ;;
+    esac
+  done
   for g in $TO_ANSWER; do
     printf '%s\n' "${LEAVE[@]+"${LEAVE[@]}"}" | grep -qxF -- "$g" && continue
     printf '%s' "$GATES_JSON" | jq -e --arg g "$g" --arg a "$ANSWER" "$HUMAN_GATE_JQ"'any(.[]; .id == $g

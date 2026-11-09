@@ -230,8 +230,9 @@ answered before the PR is closed lets an approved PR merge. `--rework` and
 own rig, after the sign-off records on the conversation which PR it acts on
 and before it writes anything else. One that does not complete stops the
 sign-off there, and the script exits non-zero. No headline is written, no
-gate is answered and the conversation stays open, so a merge hold your hold
-filed still holds the PR. Re-run once the cause is repaired: the re-run
+gate is answered and the conversation stays open, so the conversation's own
+gate on the PR's anchor still holds its merge. Re-run once the cause is
+repaired: the re-run
 adopts a child an earlier attempt filed, and finds a PR an earlier attempt
 closed. Given the same ruling and the same answer, it acts on the PR the
 earlier attempt recorded, even one that has closed since. A
@@ -240,10 +241,13 @@ owns one live rework, on whichever PR it was filed. While one filed for an
 earlier ruling of this conversation is open, `--rework` for another ruling is
 refused, because the open one would never carry it: give a ruling that asks
 nothing of the branch beyond it `--no-rework`, and keep the gate of one that
-asks for more open (`--leave <gate>`, or cut the sitting short) until that
-rework has landed. A second PR whose own branch must change waits the same
-way: keep the gate that releases it open until a ruling of its own is carried
-out. `--rework` and `--retire` apply only to an open PR. When the ruling
+asks for more open until that rework has landed, with `--leave <gate>` or by
+cutting the sitting short. The conversation's own gate on an open PR's anchor
+ends with the conversation, so `--leave` refuses it: to keep that merge held
+past the sign-off, file a gate of its own on the anchor first, under a key that
+names the rework it waits for (the `prs` skill, holding its merge). A second PR
+whose own branch must change waits the same way: keep the gate that releases it
+open until a ruling of its own is carried out. `--rework` and `--retire` apply only to an open PR. When the ruling
 reaches none, file and send its consequence as work (below), and re-run
 without them.
 

@@ -33,11 +33,13 @@ the pack uses them only in these senses.
   subject. It tracks its subject, which is always a bead and never a gate, and
   it replies to each human gate it answers, through bd's `replies-to` edge from
   the conversation onto the gate. Neither edge holds anything: a conversation
-  blocks nothing, and nothing waits on it. Its description is the ask, the
-  concern the operator brought or the gate engage was pointed at. It is
-  assigned to `human` while it waits in the operator's queue, and to its
-  sitting's alias while a sitting holds it. Two dialogues about one bead are
-  two conversations.
+  blocks nothing, and nothing waits on it. A conversation about an open PR
+  still holds the PR's merge while it is open, through a human gate of its own
+  on the PR's anchor (*A conversation on an open PR holds its merge*, below).
+  Its description is the ask, the concern the operator brought or the gate
+  engage was pointed at. It is assigned to `human` while it waits in the
+  operator's queue, and to its sitting's alias while a sitting holds it. Two
+  dialogues about one bead are two conversations.
 - **Sitting.** The live hosting of one conversation by one converse session. A
   sitting is not a bead. Its session is a manual session whose alias names its
   conversation's id, and the conversation's assignee is that alias, which is
@@ -182,6 +184,50 @@ operator's intake files one, or something asks the operator to talk a bead
 over with `gc-helm.sh open`. A conversation in the queue starts no session,
 because assigned work wakes only the session whose identity it carries and no
 session carries `human`. A sitting starts only when the operator engages.
+
+### A conversation on an open PR holds its merge
+
+A conversation whose subject is an open PR holds the PR's merge for exactly as
+long as the conversation is open. The subject counts as an open PR when it is
+the PR's anchor (`merge_result=pull_request`, not closed), or a bead whose
+`anchor_bead` names that anchor, such as the PR's review, rework or
+supplement. The hold is a human gate on the anchor under the conversation's own
+key, `conversation.<conversation id>`, and the conversation replies to it.
+
+- **Opening the conversation files the gate.** `gc-helm.sh open` files it
+  through `human-gate.sh` and adds the conversation's reply, for a conversation
+  it files and for one a second concern joins in the queue. Every way a
+  conversation starts goes through `open`, engage's included. Engage also files
+  the gate when it starts a sitting on a conversation that lacks one, such as
+  one whose subject became an open PR after the conversation was filed. A read
+  of the anchor that does not answer files nothing, and a gate that does not
+  land is reported with its repair.
+- **While the conversation is open, the PR is held.** The PR reads
+  `needs-attention` with `held: gate`, by the one definition its labels, the
+  board and engage read
+  ([state-machine.md](state-machine.md#the-status-label-github-projection)),
+  and the gate's title names the conversation. The gate holds only the merge.
+  Reviews, reworks and supplements keep running: each is a bead the anchor
+  waits on, which a gate on the anchor does not block, and gate-ensure's
+  quiescence does not count a human gate.
+- **Every writer that closes the conversation answers or withdraws the gate.**
+  The sign-off answers it with the ruling, as it answers every gate the
+  conversation replies to, after it has put in place the rework or the
+  retirement the ruling carries, so the merge never lands in between. A
+  dismiss and the premise re-check's moot or benign close withdraw it, resolved
+  `moot:`. A conversation handed back to the operator's queue is still open, so
+  it keeps the gate.
+- **A sitting that is helping the PR land withdraws the gate**, the shepherd
+  case, with `human-gate.sh --retract` under the conversation's key, and
+  records why on the conversation. The withdrawal lasts for that sitting: a
+  later sitting that engage starts on the conversation holds the merge again.
+- **A hold the operator wants to outlast the conversation** is a gate of its
+  own on the anchor, under a key that names what it waits for. The sign-off
+  refuses `--leave` on the conversation's own gate, because that gate ends with
+  the conversation.
+
+A conversation whose subject is no open PR files a gate only when something
+must wait for its answer (*The sitting*, below).
 
 ### Engage
 
@@ -427,8 +473,9 @@ reads the premise from the conversation's ask and from the title and framing
 of each gate it replies to, and checks it against live state. A gate whose
 premise has died is resolved `moot:`, and one whose premise holds but needs
 nobody `benign:`, with the reading as the answer. When the conversation's own
-ask has died with it, the sitting appends the reading to the subject's notes
-and closes the conversation with it, posting nothing and stamping no headline.
+ask has died with it, the sitting appends the reading to the subject's notes,
+withdraws the conversation's own hold on an open PR's merge, and closes the
+conversation with the reading, posting nothing and stamping no headline.
 A gate's message is written when it is filed, so the sitting runs the re-check
 command a gate names, as the liveness sweep's gate names
 `liveness-recheck.sh`, through the pack's own copy, and its census supersedes
@@ -444,18 +491,22 @@ the subject with `--waiting-on`, or says `--no-wait` when nothing holds it but
 the conversation, so `doctor/check-wait-is-an-edge` never reads an unedged
 hold. The gates the conversation replies to stay open and owed. When something
 must wait for the answer and no gate the conversation replies to holds it, as
-when the merge must not land before the operator rules, the sitting files a
-human gate through the helper on the bead that must wait: the anchor when the
-merge must wait, or the one member whose work waits. A gate another
-conversation filed there asks that conversation's question, and its ruling
-releases the bead whether or not this one is settled. So the key names the
-conversation, `conversation.<conversation id>`: a resumed hold finds the gate
-it filed, and two conversations on one bead each hold with a gate of their
-own, so the merge waits for both rulings. The sitting replies to its gate, so
-a resumed or handed-off conversation knows the gate
-it owes. Without that need it files nothing: a conversation does not
-freeze its subject, and a PR keeps moving while the operator and the sitting
-talk. The gate is what holds the subject: bd reads the subject as blocked while
+when one member's work must not start before the operator rules, the sitting
+files a human gate through the helper on the bead that must wait, such as that
+member. On an open PR the merge already waits: the gate `open` filed on the
+anchor under the conversation's key holds it, and the hold runs the same helper
+call on the anchor, which finds that gate. A gate another conversation filed
+there asks that conversation's question, and its ruling releases the bead
+whether or not this one is settled. So the key names the conversation,
+`conversation.<conversation id>`: a resumed hold finds the gate it filed, and
+two conversations on one bead each hold with a gate of their own, so the merge
+waits for both rulings. The sitting replies to its gate, so a resumed or
+handed-off conversation knows the gate it owes. Without that need it files
+nothing on a subject that is no open PR. A review or rework of an open PR keeps
+running while the operator and the sitting talk, because the conversation's
+gate holds the anchor and not the subject, so the hold's headline on such a
+subject names only a gate that holds the subject itself. The gate is what holds
+the subject: bd reads the subject as blocked while
 the gate is open, and the hold writes no lifecycle state or route, so the
 subject keeps its state, its route and any deferred-dispatch arm
 ([state-machine.md](state-machine.md#the-machine)). A hold does not use
@@ -516,7 +567,9 @@ plain words, which that comment lists as the visit's actions.
 
 It resolves no gate its conversation does not reply to: a gate the sitting
 never took up stays for whoever owes it, and a gate it replies to that the
-ruling leaves owed stays open with its reply in place. It reads those gates
+ruling leaves owed stays open with its reply in place. The conversation's own
+gate on an open PR's anchor is never left owed, because it ends with the
+conversation: the sign-off refuses `--leave` on it. It reads those gates
 from the conversation's own row (`gc bd list --id <task>`), whose edges keep a
 reply onto a gate in another store. Every read it depends on runs before its
 first write, and it stops short, with nothing posted, when the store refuses a
@@ -570,8 +623,11 @@ dismissed while the sign-off ran.
 **Dismiss** (`gc-helm dismiss`) ends a sitting. It closes the conversation a
 live sitting holds on the bead, or the conversation an id names, with a reason
 that names the dismissal, and it answers nothing: every gate the conversation
-replies to stays open and owed, for its filer or the next sitting. With no
-argument it infers the current sitting from the session it runs in. The close
+replies to stays open and owed, for its filer or the next sitting. Once the
+close has landed it withdraws the conversation's own hold on an open PR's
+merge, which ends with the conversation, and it exits 4, naming the repair,
+when that withdrawal does not land. With no argument it infers the current
+sitting from the session it runs in. The close
 falls back to `--force` when bd refuses an operator closing a conversation its
 sitting holds. It then stops the converse session that held each conversation
 it closed, with `gc runtime drain-ack`: the session it runs in acks itself,
@@ -638,7 +694,9 @@ that gate was cleared. While another gate blocks the bead, the row offers
 Discuss and names the gates that withhold Accept (`accept_withheld`), and a
 sitting answers them. A live sitting does not withhold Accept; Accept warns
 when one tracks the bead or replies to the recommendation's gate, and that
-sitting's sign-off later reports the gate already cleared.
+sitting's sign-off later reports the gate already cleared. A conversation on
+an open PR does withhold it, through the gate that holds the PR's merge, until
+the conversation closes.
 
 `gc-helm.sh accept` runs under the bead's acceptance lock, a `flock` on one
 file per bead under `<city>/.gc/runtime/packs/gc-toolkit`, from before its live

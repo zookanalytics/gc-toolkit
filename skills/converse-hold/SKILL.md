@@ -34,21 +34,32 @@ held.
 
 **2. Gate what must wait for the answer.** The gates the conversation
 replies to stay open and owed: nothing is written to them, because the
-sitting never claimed them, and the sign-off answers them (step 7). When
-something must wait for this conversation's answer and no gate the
-conversation replies to holds that bead, file a human gate on the bead that
-must wait: the anchor when the merge must not land before the operator rules,
-or the one member of an epic whose work waits. A gate that another
-conversation or anyone else filed there asks another question, and its answer
-releases the bead whether or not yours is settled, so it never stands in for
-yours. Without that need, file nothing. A conversation does not freeze its
-subject, and a PR keeps moving while you talk, which is the shepherd case a
-conversation opened to help a stuck PR wants. The key names this
-conversation, `conversation.<its id>`, so a resumed hold finds the gate it
-filed instead of filing a second, and two conversations on one bead each hold
-with a gate of their own. Reply to the gate from the conversation, so a
-resumed or handed-off conversation knows the gate it owes without a search by
-key:
+sitting never claimed them, and the sign-off answers them (step 7).
+
+**On an open PR the merge already waits.** When the subject is an open PR's
+anchor (`merge_result=pull_request`), or a bead whose `anchor_bead` names one,
+such as its review, rework or supplement, the PR's merge waits for this
+conversation from the moment it opened until it closes. `gc-helm.sh open`
+filed a human gate on the anchor under this conversation's key, and the
+conversation replies to it. The gate holds only the merge: reviews and reworks
+go on. Run the block below on that anchor each time you hold, unless this
+sitting withdrew that gate to help the PR land (below). It prints the gate, and
+files it when the conversation has none. Its message is used only when it
+files.
+
+**On any other subject,** gate only what must wait for this conversation's
+answer. When something must wait and no gate the conversation replies to holds
+that bead, file a human gate on the bead that must wait: a pre-open anchor
+whose PR must not open before the operator rules, or the one member of an epic
+whose work waits. Without that need, file nothing.
+
+A gate that another conversation or anyone else filed asks another question,
+and its answer releases the bead whether or not yours is settled, so it never
+stands in for yours. The key names this conversation, `conversation.<its id>`,
+so a resumed hold finds the gate it filed instead of filing a second, and two
+conversations on one bead each hold with a gate of their own. Reply to the gate
+from the conversation, so a resumed or handed-off conversation knows the gate
+it owes without a search by key:
 ```bash
 GATE=$("$CONV/human-gate.sh" --subject <the bead that must wait> --key "conversation.$CONVERSATION" --message "$NEED
 <what the operator owes, and what waits on it>") \
@@ -60,21 +71,43 @@ not started, so when only one member waits, gate that member. No closing
 line means the wait did not land, so the merge or the work it was to hold is
 NOT held: do NOT post the framing.
 
+**A sitting that is helping the PR land withdraws the merge's hold.** When the
+operator opened this conversation to get the PR merged, as with a stuck PR you
+are shepherding, the hold on its merge works against them. Withdraw the gate
+under this conversation's key from the anchor, and record why on the
+conversation, where the visit's comment on the PR lists it among the visit's
+actions, so write it as one plain sentence that names no other rig:
+```bash
+WHY="<why this sitting is helping the PR land, one plain sentence>"
+"$CONV/human-gate.sh" --retract --subject <the anchor of the PR> --key "conversation.$CONVERSATION" --message "$WHY" \
+  && gc bd comment "$CONVERSATION" "Released the PR's merge: $WHY" \
+  && echo "the PR's merge no longer waits for this conversation"
+```
+The withdrawal holds for this sitting: a later sitting on the conversation
+holds the merge again when engage starts it. A hold the operator wants to
+outlast the conversation is a gate of its own on the anchor, under a key that
+names what it waits for (the `prs` skill, holding its merge).
+
 **3. Write the headline.** The subject's headline says what the operator
 owes, and its wait flag says what holds the subject. Pass `--waiting-on` the
 gate that holds it, one the conversation replies to or the one step 2 filed on
 it. The gate is what holds the subject: bd reads the subject as blocked while
 the gate is open, and the hold leaves the subject's route and lifecycle state
-as they are.
+as they are. On an open PR's anchor that is the conversation's own gate, for
+as long as it is open.
 ```bash
 "$CONV/gc-helm.sh" takeaway "$SUBJECT" "holding — $NEED" --by converse --waiting-on <the gate that holds the subject>
 ```
 When no gate holds the subject, write the headline alone, with `--no-wait` in
 place of `--waiting-on`: nothing waits on it but the conversation, which the
 board shows in session on the subject's row, and a held bead must carry a live
-edge (`doctor/check-wait-is-an-edge`). When the writer refuses the headline,
-the board cannot show the hold, so do NOT post the framing. Fix what it names
-and re-run.
+edge (`doctor/check-wait-is-an-edge`). A review, rework or supplement of an
+open PR is such a subject when no gate of its own holds it: the conversation's
+gate holds the PR's anchor, not the subject, and a `--waiting-on` onto that
+gate would make the subject wait on it too, stopping the review or the rework
+the gate leaves running. When the writer refuses the headline, the board
+cannot show the hold, so do NOT post the framing. Fix what it names and
+re-run.
 
 Never park a live conversation: the writer's `--release` clears the
 assignee and route, and the only place it belongs is a ruling that
@@ -116,7 +149,8 @@ session it runs in, which is what lets the bare line stand and the
 same act sit behind a keystroke. The verb closes the conversation with
 a reason that names the dismissal and answers no gate: every gate the
 conversation replies to stays open and owed, for its filer or the next
-sitting. It falls back to `--force` when the plain close is refused,
+sitting. It withdraws only the conversation's own hold on an open PR's
+merge, which ends with the conversation. It falls back to `--force` when the plain close is refused,
 which is what a hand-written `gc bd close <conversation>` walks into: a
 held conversation is assigned to the sitting's alias, and bd closes an
 assigned bead only for its assignee. Then wait for operator input in this

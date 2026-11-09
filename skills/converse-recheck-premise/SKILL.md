@@ -22,8 +22,10 @@ for g in $(gc bd list --id "$CONVERSATION" --all --json | jq -r '.[0].dependenci
 ```
 Their stated conditions ARE the premise, often bulleted literally — *"no
 `triage.hold` and no `gc.takeaway` on the root"*, *"its frontier is [...]
-UNASSIGNED"*. Check each one still holds, on the subject and on whatever bead
-the premise is about:
+UNASSIGNED"*. One gate states no premise: the conversation's own, under its key
+`conversation.<its id>`, which holds an open PR's merge while the conversation
+is open. Leave it to the conversation's close. Check each other condition
+still holds, on the subject and on whatever bead the premise is about:
 ```bash
 gc bd show "$SUBJECT" --json | jq -r '.[0].metadata
   | "hold=\(.["triage.hold"] // "") takeaway=\(.["gc.takeaway"] // "")"'
@@ -76,21 +78,30 @@ that no open blocker holds is replaced with the reading, settled, because it
 names a question that no longer stands. A subject that another open blocker
 still holds keeps its headline, since that wait is still owed. A read counts
 only when `gc` exits 0 and answers in its shape: the subject's own row, alone,
-and a list of its blockers. Each write takes its exit, and the conversation
-closes only after them:
+and a list of its blockers.
+
+A conversation about an open PR, or about a bead of one such as its review or
+rework, holds the PR's merge with a gate under its own key,
+`conversation.<its id>`, on the PR's anchor, and that hold lives as long as the
+conversation. So the close withdraws it, just before the conversation closes,
+and it is no blocker that keeps the headline. The anchor is the subject when
+the subject carries a `merge_result`, and otherwise the bead its `anchor_bead`
+names. Each write takes its exit, and the conversation closes only after them:
 ```bash
 KIND="<moot|benign>"; WHY="<the premise, and what is true instead>"
 ACTION="<what ended the visit, in one plain sentence>"
 ROW=$(gc bd show "$SUBJECT" --json) \
   && WAITS=$(printf '%s\n' "$ROW" | jq -er --arg s "$SUBJECT" 'if type == "array" and length == 1 and .[0].id == $s then (.[0].metadata // {}) | if ((.["gc.takeaway"] // "") | tostring) != "" and ((.["gc.takeaway_settled"] // "") | tostring) == "" then "waits" else "settled" end else error("unread") end') \
+  && ANCHOR=$(printf '%s\n' "$ROW" | jq -r --arg s "$SUBJECT" '(.[0].metadata // {}) | if ((.merge_result // "") | tostring) != "" then $s else ((.anchor_bead // "") | tostring) end') \
   && DEPS=$(gc bd dep list "$SUBJECT" --type blocks --json) \
-  && OPEN=$(printf '%s\n' "$DEPS" | jq -er 'if type == "array" then [ .[] | select(((.status // "open") | ascii_downcase) != "closed") | .id ] | join(" ") else error("unread") end') \
+  && OPEN=$(printf '%s\n' "$DEPS" | jq -er --arg own "conversation.$CONVERSATION" 'if type == "array" then [ .[] | select(((.status // "open") | ascii_downcase) != "closed") | select(((.await_id // "") | tostring) != $own) | .id ] | join(" ") else error("unread") end') \
   && if [ "$WAITS" != waits ] || [ -n "$OPEN" ]; then echo "$SUBJECT keeps its headline${OPEN:+: $OPEN still holds it}"; else
        "$CONV/gc-helm.sh" takeaway "$SUBJECT" "${KIND}: ${WHY}" --by converse --no-wait \
          && echo "replaced the headline of $SUBJECT, which waited on nothing"
      fi \
   && gc bd update "$SUBJECT" --append-notes "$KIND (conversation $CONVERSATION): $WHY" \
   && gc bd update "$CONVERSATION" --set-metadata gc.work_outcome=no-op \
+  && { [ -z "$ANCHOR" ] || "$CONV/human-gate.sh" --retract --subject "$ANCHOR" --key "conversation.$CONVERSATION" --message "conversation $CONVERSATION closed as $KIND: $WHY" >/dev/null; } \
   && { gc bd close "$CONVERSATION" --reason "${KIND}: ${WHY}" \
        || gc bd close "$CONVERSATION" --reason "${KIND}: ${WHY}" --force; } \
   && { gc bd comment "$CONVERSATION" "$ACTION" >/dev/null \
