@@ -273,6 +273,7 @@ export STUB_RIG_TK="$TMP/rig-tk" STUB_RIG_RA="$TMP/rig-ra"
 #   tk-pg            another park's gate
 #   tk-task          a task to wait on
 #   tk-closed        a closed task
+#   tk-pinned        a pinned task, which the store counts as no blocker
 #   ra-x             a task in the rig-a store
 reset_store() {
   cat > "$STUB_STORE" <<'JSON'
@@ -320,6 +321,7 @@ reset_store() {
  {"id":"tk-pg","status":"open","issue_type":"gate","title":"Parked until the store answers in a second; close when it does","description":"","metadata":{},"deps":[]},
  {"id":"tk-task","status":"open","issue_type":"task","title":"Land the faster store","description":"","metadata":{},"deps":[]},
  {"id":"tk-closed","status":"closed","issue_type":"task","title":"already done","description":"","metadata":{},"deps":[]},
+ {"id":"tk-pinned","status":"pinned","issue_type":"task","title":"pinned in place","description":"","metadata":{},"deps":[]},
  {"id":"ra-x","status":"open","issue_type":"task","title":"a rig-a task","description":"","metadata":{},"deps":[]}
 ]
 JSON
@@ -574,6 +576,10 @@ run_park tk-solo --waiting-on tk-closed
 eq "$RC" "2" "(WAITS) waiting on a closed bead is refused (exit 2)"
 has "$ERR" "holds nothing" "(WAITS) the refusal says the edge would hold nothing"
 nothing_written "(WAITS) closed"
+run_park tk-solo --waiting-on tk-pinned
+eq "$RC" "2" "(WAITS) waiting on a pinned bead is refused (exit 2), as the store counts it as no blocker"
+has "$ERR" "tk-pinned is pinned, so an edge onto it holds nothing" "(WAITS) the refusal says the edge would hold nothing"
+nothing_written "(WAITS) pinned"
 run_park tk-solo --waiting-on ra-x
 eq "$RC" "2" "(WAITS) waiting on another store's bead is refused (exit 2)"
 has "$ERR" "another store" "(WAITS) the refusal names the store"
