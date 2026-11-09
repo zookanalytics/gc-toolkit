@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -94,7 +93,7 @@ type Model struct {
 	width, height int
 
 	subject  textinput.Model
-	question textarea.Model
+	question questionEditor
 	focus    field
 
 	seq      int // edits of the subject field, so a stale debounce does nothing
@@ -177,13 +176,7 @@ func New(ctx context.Context, helm Helm, opt Options) *Model {
 	m.subject.SetValue(opt.Subject)
 	m.subject.SetWidth(60)
 
-	m.question = textarea.New()
-	m.question.ShowLineNumbers = false
-	m.question.MaxHeight = 0 // a question is as long as the operator makes it
-	m.question.CharLimit = 0
-	m.question.Placeholder = "What do you want to talk about? Enter adds a line."
-	m.question.SetWidth(76)
-	m.question.SetHeight(8)
+	m.question = newQuestionEditor()
 	m.question.SetValue(opt.Question)
 
 	if opt.Return {
@@ -598,9 +591,7 @@ func (m *Model) typeInto(msg tea.Msg) tea.Cmd {
 		}
 		return cmd
 	case questionField:
-		var cmd tea.Cmd
-		m.question, cmd = m.question.Update(msg)
-		return cmd
+		return m.question.Update(msg)
 	}
 	return nil
 }

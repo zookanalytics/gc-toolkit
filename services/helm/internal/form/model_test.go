@@ -69,13 +69,19 @@ func subjectAbout(id, rig string) About {
 
 func newForm(t *testing.T, f *fakeHelm, opt Options) *Model {
 	t.Helper()
+	return newFormOn(t, f, opt)
+}
+
+// newFormOn is newForm over any Helm, such as one whose save runs a Script.
+func newFormOn(t *testing.T, h Helm, opt Options) *Model {
+	t.Helper()
 	if opt.Models == nil {
 		opt.Models = []string{"opus", "fable", "codex"}
 	}
 	opt.Debounce = time.Millisecond
 	opt.Poll = time.Millisecond
 	opt.Refresh = time.Millisecond
-	return New(context.Background(), f, opt)
+	return New(context.Background(), h, opt)
 }
 
 // isQuit says whether cmd is the one that ends the program.
@@ -1291,7 +1297,7 @@ func TestAFailedRefreshSaysTheListMayBeOutOfDate(t *testing.T) {
 }
 
 // The command the note prints files the question exactly as it is kept, with
-// its trailing newlines, and runs nothing once the file is gone.
+// its tabs and its trailing newlines, and runs nothing once the file is gone.
 func TestTheKeptDraftsCommandFilesTheQuestionWhole(t *testing.T) {
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "bin")
@@ -1304,8 +1310,11 @@ func TestTheKeptDraftsCommandFilesTheQuestionWhole(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := newForm(t, &fakeHelm{}, Options{Subject: "tk-a", DraftDir: filepath.Join(dir, "the drafts")})
-	q := "a question\n  that ends in blank lines\n\n"
-	typeText(m, q)
+	// A tab comes only in a paste, since the Tab key moves the focus.
+	q := "a question\n\tindented by a tab\n  that ends in blank lines\n\n"
+	typeText(m, "a question\n")
+	m.Update(tea.PasteMsg{Content: "\tindented by a tab\n"})
+	typeText(m, "  that ends in blank lines\n\n")
 	if m.question.Value() != q {
 		t.Fatalf("question = %q", m.question.Value())
 	}
@@ -1328,6 +1337,9 @@ func TestTheKeptDraftsCommandFilesTheQuestionWhole(t *testing.T) {
 	files, _ := filepath.Glob(filepath.Join(dir, "the drafts", "engage-draft-*.txt"))
 	if len(files) != 1 {
 		t.Fatalf("draft files %v", files)
+	}
+	if b, _ := os.ReadFile(files[0]); string(b) != q {
+		t.Fatalf("kept draft = %q, want %q", b, q)
 	}
 	if err := os.Remove(files[0]); err != nil {
 		t.Fatal(err)

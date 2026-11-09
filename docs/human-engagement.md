@@ -250,7 +250,11 @@ command line names no concern (`--reason`, `--template` or `--skill`) and not
 (`services/helm/internal/form`). One screen holds the subject (a bead id, a PR
 number or URL, or empty for a new topic), a new topic's rig, the model, with
 opus shown as the default, and a multiline question, in which Enter adds a
-line. The command line fills in the fields, and typing never waits for a read.
+line. A tab in the question stays a tab, shown as ␉, and a line break written as
+LF, CR or CRLF is one line break. The field leaves out every other control
+character, such as BEL or ESC, and U+FFFD, the replacement character. It leaves
+out U+FDD0 as well, since inside the field that noncharacter stands for a tab.
+The command line fills in the fields, and typing never waits for a read.
 A `--model` that no configured variant carries is refused before the form
 opens, as the flag-driven engage refuses it.
 While the operator types, the form reads `gc-helm.sh conversations` for the
@@ -267,7 +271,7 @@ and a question typed beside it is not sent into it.
 
 Ctrl+S saves the question only once the destination is settled. `open` files
 it as a new conversation (`--allow-duplicate` and `--if-subject` on a subject,
-`--new-subject --rig` on a topic), unchanged as the conversation's ask and
+`--new-subject --rig` on a topic), with the field's question as its ask and
 titled by `conversation_title`, and the form says it is saved. `--if-subject`
 names the subject the screen shows, and `open` refuses the save when the
 reference names another bead by then, such as a subject closed onto a successor
