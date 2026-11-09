@@ -565,11 +565,69 @@ func (f *fakeGC) Sessions(context.Context) (map[string]string, error) {
 	return f.sessions, nil
 }
 
+// No test reaches the production read of pending waits, which shells out to
+// `gc bd`: a source a test builds without a reader of its own reads every wait
+// as unknown.
+func init() {
+	defaultPendingReader = func(context.Context, string, []string) (map[string][]string, error) {
+		return nil, errors.New("the test named no pending reader")
+	}
+}
+
+// storePending is the test pendingReader, the stand-in for the store's own
+// answer: each bead's waits of the store's blocked rule onto a bead the fixture
+// store holds whose status is neither closed nor pinned. The store holds a far
+// bead as its id search finds one: in its issues, else embedded in an edge
+// fixture.
+func storePending(stores map[string]*fakeStore) pendingReader {
+	return func(_ context.Context, beadsDir string, ids []string) (map[string][]string, error) {
+		st, ok := stores[filepath.Base(filepath.Dir(beadsDir))]
+		if !ok {
+			return nil, errors.New("no fixture store for " + beadsDir)
+		}
+		status := map[string]beads.Status{}
+		for _, list := range st.issues {
+			for _, iss := range list {
+				if iss != nil {
+					status[iss.ID] = iss.Status
+				}
+			}
+		}
+		for _, embedded := range []map[string][]*beads.IssueWithDependencyMetadata{st.depsUp, st.depsDown} {
+			for _, deps := range embedded {
+				for _, d := range deps {
+					if d == nil {
+						continue
+					}
+					if _, seen := status[d.Issue.ID]; !seen {
+						status[d.Issue.ID] = d.Issue.Status
+					}
+				}
+			}
+		}
+		out := make(map[string][]string, len(ids))
+		for _, id := range ids {
+			own := []string{}
+			for _, d := range st.depsDown[id] {
+				if d == nil || !waitEdge(string(d.DependencyType)) {
+					continue
+				}
+				if s, held := status[d.Issue.ID]; held && s != beads.StatusClosed && s != beads.Status("pinned") {
+					own = append(own, d.Issue.ID)
+				}
+			}
+			out[id] = own
+		}
+		return out, nil
+	}
+}
+
 func newBeadsTestSource(t *testing.T, root string, stores map[string]*fakeStore, opts ...BeadsOption) *BeadsSource {
 	t.Helper()
 	base := []BeadsOption{
 		WithCityPath(root),
 		withGCClient(&fakeGC{}),
+		withPendingReader(storePending(stores)),
 		// A pinned clock, so a fixture's close stamp sits a fixed distance
 		// inside or outside the closed-row windows instead of drifting with
 		// the wall clock. A caller that needs another one appends its own.
@@ -860,6 +918,138 @@ func TestWaitingEdgesAreGatheredForEveryKindThatSpendsThem(t *testing.T) {
 		if len(a.WaitingOnClosed) != len(c.closed) {
 			t.Errorf("%s/%s: waiting_on_closed=%v, want %v", c.id, c.kind, a.WaitingOnClosed, c.closed)
 		}
+	}
+}
+
+// TestLandedWaitsAreTheStoresAnswer pins where a recorded wait's landing comes
+// from: the store's own answer of which waits are pending, never the far
+// bead's status on the board's row. A bead the store still lists pending has
+// not landed whatever its row says, one it lists as nothing has landed though
+// its row reads open (a pinned blocker, as the store counts it), and a pending
+// wait the edge read did not hydrate is still recorded.
+func TestLandedWaitsAreTheStoresAnswer(t *testing.T) {
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+	answer := map[string][]string{
+		"tk-dec":    {"tk-w1"},
+		"tk-parked": {"tk-w4", "tk-unhydrated"},
+	}
+	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": populatedStore()},
+		withPendingReader(func(_ context.Context, _ string, ids []string) (map[string][]string, error) {
+			out := map[string][]string{}
+			for _, id := range ids {
+				out[id] = append([]string{}, answer[id]...)
+			}
+			return out, nil
+		}))
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	for _, c := range []struct {
+		id, kind string
+		waiting  []string
+		landed   []string
+		why      string
+	}{
+		{"tk-dec", "decision", []string{"tk-w1"}, nil, "a wait the store still lists pending has not landed, though its row reads closed"},
+		{"tk-human", "human", []string{"tk-w3"}, []string{"tk-w3"}, "a wait the store lists as nothing has landed, though its row reads open"},
+		{"tk-parked", "parked", []string{"tk-w4", "tk-unhydrated"}, nil, "a pending wait the edge read did not hydrate is still recorded, and pending"},
+	} {
+		var a *board.Anchor
+		for i := range res.Anchors {
+			if res.Anchors[i].ID == c.id && res.Anchors[i].Kind == c.kind {
+				a = &res.Anchors[i]
+			}
+		}
+		if a == nil {
+			t.Errorf("%s/%s: anchor missing", c.id, c.kind)
+			continue
+		}
+		if a.WaitingUnknown {
+			t.Errorf("%s/%s: waits read as unknown, want them answered — %s", c.id, c.kind, c.why)
+		}
+		if !slices.Equal(a.WaitingOn, c.waiting) {
+			t.Errorf("%s/%s: waiting_on=%v, want %v — %s", c.id, c.kind, a.WaitingOn, c.waiting, c.why)
+		}
+		if !slices.Equal(a.WaitingOnClosed, c.landed) {
+			t.Errorf("%s/%s: waiting_on_closed=%v, want %v — %s", c.id, c.kind, a.WaitingOnClosed, c.landed, c.why)
+		}
+	}
+}
+
+// TestWaitsAreReadOncePerRigPerGather pins the cost of the read: one snapshot
+// of each rig's store per gather, over the anchors of both its passes that
+// record a wait, each named once.
+func TestWaitsAreReadOncePerRigPerGather(t *testing.T) {
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+	stores := map[string]*fakeStore{"gc-toolkit": populatedStore()}
+	var calls [][]string
+	fake := storePending(stores)
+	src := newBeadsTestSource(t, root, stores,
+		withPendingReader(func(ctx context.Context, dir string, ids []string) (map[string][]string, error) {
+			calls = append(calls, slices.Clone(ids))
+			return fake(ctx, dir, ids)
+		}))
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("the waits were read %d times, want once for the one rig: %v", len(calls), calls)
+	}
+	named := map[string]int{}
+	for _, id := range calls[0] {
+		named[id]++
+	}
+	for _, a := range res.Anchors {
+		if len(a.WaitingOn) > 0 && named[a.ID] != 1 {
+			t.Errorf("%s/%s records a wait and was named %d times in the read, want once", a.ID, a.Kind, named[a.ID])
+		}
+	}
+}
+
+// TestAFailedWaitsReadLeavesTheWaitsUnknown pins the quiet direction: a rig
+// whose read failed, or a bead the read did not answer, proves no wait landed,
+// so every recorded wait reads unknown and none closed, and a failed read is a
+// partial-gather note naming the rig.
+func TestAFailedWaitsReadLeavesTheWaitsUnknown(t *testing.T) {
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+	for _, c := range []struct {
+		name   string
+		reader pendingReader
+		note   bool
+	}{
+		{"failed", func(context.Context, string, []string) (map[string][]string, error) {
+			return nil, errors.New("gc bd did not answer")
+		}, true},
+		{"unanswered", func(context.Context, string, []string) (map[string][]string, error) {
+			return map[string][]string{}, nil
+		}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": populatedStore()}, withPendingReader(c.reader))
+			res, err := src.Gather(context.Background())
+			if err != nil {
+				t.Fatalf("Gather: %v", err)
+			}
+			seen := 0
+			for _, a := range res.Anchors {
+				if len(a.WaitingOn) == 0 {
+					continue
+				}
+				seen++
+				if !a.WaitingUnknown || len(a.WaitingOnClosed) != 0 {
+					t.Errorf("%s/%s: unknown=%v closed=%v; want unknown and nothing landed", a.ID, a.Kind, a.WaitingUnknown, a.WaitingOnClosed)
+				}
+			}
+			if seen == 0 {
+				t.Fatal("no anchor records a wait, so the case proves nothing")
+			}
+			noted := slices.ContainsFunc(res.PartialErrors, func(e string) bool { return strings.HasPrefix(e, "waits@gc-toolkit: ") })
+			if noted != c.note || (c.note && !res.Partial) {
+				t.Errorf("partial=%v errors=%v; want a waits@gc-toolkit note: %v", res.Partial, res.PartialErrors, c.note)
+			}
+		})
 	}
 }
 
@@ -1610,6 +1800,7 @@ func TestBeadsStoreHandleIsReused(t *testing.T) {
 	src := NewBeadsSource(
 		WithCityPath(root),
 		withGCClient(&fakeGC{}),
+		withPendingReader(storePending(map[string]*fakeStore{"gc-toolkit": st})),
 		withStoreOpener(func(context.Context, string) (beadStore, error) {
 			opens++
 			return st, nil
@@ -2080,6 +2271,7 @@ func TestBeadsProbeHandleIsReusedByGather(t *testing.T) {
 	src := NewBeadsSource(
 		WithCityPath(root),
 		withGCClient(&fakeGC{}),
+		withPendingReader(storePending(map[string]*fakeStore{"gc-toolkit": st})),
 		withStoreOpener(func(context.Context, string) (beadStore, error) {
 			opens++
 			return st, nil

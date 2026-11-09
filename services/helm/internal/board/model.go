@@ -143,8 +143,11 @@ type Anchor struct {
 	// affordance.
 	Notes string `json:"notes,omitempty"`
 
-	// WaitingOn is the ids this bead depends on by a `blocks` edge, and
-	// WaitingOnClosed the subset of those the source found already closed.
+	// WaitingOn is the ids this bead waits on by an edge of the store's blocked
+	// rule (`blocks`, `conditional-blocks` or `waits-for`), and WaitingOnClosed
+	// the subset of those that have landed by the store's own answer: the waits
+	// gctk's waits package does not list as the bead's pending, so a pinned
+	// blocker or one in another store has landed, as the store counts it.
 	//
 	// For a `parked` subject these are the work a converse sitting routed out
 	// of the conversation. A takeaway is one frozen string — "routed; nothing
@@ -155,8 +158,8 @@ type Anchor struct {
 	//
 	// Both are ids, not a boolean, because the source knows the blockers and
 	// the derivation must be able to say how many are still outstanding.
-	// A blocker the source could not resolve at all is simply absent from
-	// WaitingOnClosed, which reads as still-waiting — the quiet direction.
+	// A wait that answer did not settle is simply absent from WaitingOnClosed,
+	// which reads as still-waiting — the quiet direction.
 	WaitingOn       []string `json:"waiting_on,omitempty"`
 	WaitingOnClosed []string `json:"waiting_on_closed,omitempty"`
 
@@ -195,7 +198,7 @@ type Anchor struct {
 	// status ([source.SupervisorSource.metadataAnchorFor]).
 	//
 	// An unread wait set and an empty one are not interchangeable. A blocker
-	// that was read but has not closed is already handled — it is absent from
+	// that was read and is still pending is already handled — it is absent from
 	// WaitingOnClosed and so counts as outstanding, the quiet direction. An
 	// unreadable EDGE SET has no such fallback: it looks exactly like a row
 	// with no waits, which is the state [ruled] reads as "every recorded wait

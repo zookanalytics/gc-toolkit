@@ -341,9 +341,10 @@ func crossRigRefs(a Anchor, f Facts) []string {
 // waitingSplit returns an anchor's `blocks` blockers and the subset of them
 // still outstanding, mirroring gc-helm.sh's $waiting / $waiting_open.
 //
-// A blocker is discharged only on a POSITIVE closed from the source. One it
-// could not resolve — a store in another rig, an `external:` reference, a read
-// that failed — is absent from WaitingOnClosed and therefore counted open. That
+// A blocker is discharged only on the store's own answer that it no longer
+// holds the bead ([Anchor.WaitingOnClosed]). One that answer did not settle — a
+// read that failed, a bead it did not answer — is absent from WaitingOnClosed
+// and therefore counted open. That
 // is the quiet direction on purpose: a missed promotion costs a glance, while a
 // false "everything landed" invites the operator to dispose of a subject whose
 // work is still in flight.

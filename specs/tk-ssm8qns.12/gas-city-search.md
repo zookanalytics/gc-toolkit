@@ -167,3 +167,30 @@ wait edges only and is read for live beads only, and it names that remedy.
 The unjudged note is the note check-armed-dispatch-owed prints, for the reason
 its section above gives. The check now prints it for every live bead, marked
 or not, and the note goes once tk-ssm8qns.6 drops the status.
+
+## The board's read of pending waits
+
+**The need.** The helm board stands a ruled human-gated row down, holds a
+ruled row whose work is in flight, and promotes a parked row whose waits have
+landed. Each turns on which of the bead's recorded waits have landed, and the
+board decided that by its own rule: a `blocks` edge onto a bead whose status
+is not closed (the census's D25). The board reads each rig's store through the
+beads Go library, not through `gc bd`.
+
+**The primitive.** The library's `BlockedQuerier`, which the board's store
+handle offers (`beads.go:156` at steveyegge/beads
+v1.2.2-0.20260825072917-62d211937bd3, the version helm's go.mod pins).
+`IsBlocked` returns the store's denormalized `is_blocked` flag and the bead's
+open direct blockers, and `IsBlockedBatch` returns the flag for many beads.
+
+**Why it does not cover the need.** It answers with the store's mark alone.
+The bd the city runs judges a `waits-for` edge by its spawner's status rather
+than its gate ([blocked-census.md](../tk-ssm8qns.2/blocked-census.md), "The
+store's rules"), and the waits package holds such a bead as unjudged until
+tk-ssm8qns.5. A board reading the mark would be the one reader with another
+answer for that edge. So the board asks `gctk`'s `waits` package, the one
+rule, for each rig's anchors that record a wait. That is one snapshot of the
+store per rig per render, started as soon as the rig's anchors are gathered
+so it runs beside the rest of the gather. A rig whose read fails reads its
+anchors' waits as unknown and adds a `waits@<rig>` note to the partial
+gather, the board's existing channel for a read that failed.
