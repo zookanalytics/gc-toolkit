@@ -39,7 +39,7 @@ GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
 "$GCTK" session title --subject "$SUBJECT" --pr "$PR" --topic "$TOPIC"
 gc bd update "$CONVERSATION" --title "$TOPIC" \
-  && "$CONV/pr-sitting-comment.sh" post --sitting "$CONVERSATION" --topic "$TOPIC"
+  && "$CONV/pr-sitting-comment.sh" post --sitting "$CONVERSATION"
 ```
 When the subject does not read, the block stops before it titles anything and
 says so, because a subject it could not read may still have a pull request.

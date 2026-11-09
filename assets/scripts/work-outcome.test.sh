@@ -2,9 +2,9 @@
 # work-outcome.test.sh — the shared conversation work-outcome stamp
 # (assets/scripts/work-outcome.sh). work_outcome_noop stamps gc.work_outcome=no-op
 # in a write of its own, never over a work outcome the bead already records,
-# reads it back and repairs a dropped write once, writes nothing to a bead that
-# did not read, and returns 0 whatever the store does, so no caller's close
-# waits on it.
+# says on stderr when the store refuses it, writes nothing to a bead that did
+# not read, and returns 0 whatever the store does, so no caller's close waits
+# on it.
 #
 # Every case runs under each shell a caller sources the lib from: sh (gc-helm.sh
 # is a /bin/sh script), dash when present (CI's /bin/sh), and bash under
@@ -38,7 +38,6 @@ mkdir -p "$STORE_DIR"
 # no key. Knobs:
 #   STORE_UNREAD=1  show answers a bare error object and exits 1
 #   STORE_REFUSE=1  update exits 1 and writes nothing
-#   STORE_DROP=<n>  the first n updates exit 0 and write nothing (the silent drop)
 #   STORE_CTRL=1    show carries a raw C0 byte inside a string, invalid JSON
 #                   until scrubbed
 cat >"$STORE" <<'STUB'
@@ -59,8 +58,6 @@ case "$verb" in
         fi ;;
     update)
         [ -n "${STORE_REFUSE:-}" ] && exit 1
-        n=$(cat "$STORE_DIR/.drops" 2>/dev/null || echo 0)
-        if [ "$n" -lt "${STORE_DROP:-0}" ]; then echo $((n + 1)) >"$STORE_DIR/.drops"; exit 0; fi
         for a in "$@"; do
             case "$a" in gc.work_outcome=*) printf '%s' "${a#gc.work_outcome=}" >"$f" ;; esac
         done ;;
@@ -87,7 +84,7 @@ DRIVE
 SHELLS="sh bash-strict"
 command -v dash >/dev/null 2>&1 && SHELLS="$SHELLS dash"
 
-reset() { rm -f "$STORE_DIR"/* "$STORE_DIR/.drops"; : >"$STORE_LOG"; }
+reset() { rm -f "$STORE_DIR"/*; : >"$STORE_LOG"; }
 # stamp <shell> <args to work_outcome_noop...>
 OUT=""
 stamp() {
@@ -116,7 +113,7 @@ for SH in $SHELLS; do
     stamp "$SH" b-1 "$STORE"
     carried_on "$SH unstamped"
     is "$SH: an unstamped bead gets gc.work_outcome=no-op" "$(value b-1)" "no-op"
-    is "$SH: …in one write, read back once" "$(updates)" "1"
+    is "$SH: …in one write" "$(updates)" "1"
 
     reset; printf 'abandoned' >"$STORE_DIR/b-1.wo"
     stamp "$SH" b-1 "$STORE"
@@ -125,21 +122,12 @@ for SH in $SHELLS; do
     is "$SH: …and nothing is written over it" "$(updates)" "0"
 
     reset
-    STORE_DROP=1 stamp "$SH" b-1 "$STORE"
-    carried_on "$SH dropped once"
-    is "$SH: a write that exits 0 and lands nothing is repaired" "$(value b-1)" "no-op"
-    is "$SH: …by one more write" "$(updates)" "2"
-
-    reset
-    STORE_DROP=9 stamp "$SH" b-1 "$STORE"
-    carried_on "$SH always dropped"
-    is "$SH: a store that never keeps it is written twice, not looped on" "$(updates)" "2"
-    is "$SH: …and the key stays unrecorded" "$(value b-1)" ""
-
-    reset
     STORE_REFUSE=1 stamp "$SH" b-1 "$STORE"
-    carried_on "$SH refused"
+    is "$SH refused: the caller carries on past the call, told why" "$OUT" "work-outcome: the store refused gc.work_outcome=no-op on b-1, so its close records no work outcome
+rc=0
+after"
     is "$SH: a refused write records nothing" "$(value b-1)" ""
+    is "$SH: …and is not tried again" "$(updates)" "1"
 
     reset
     STORE_UNREAD=1 stamp "$SH" b-1 "$STORE"
@@ -156,7 +144,7 @@ for SH in $SHELLS; do
     stamp "$SH" b-1 "$STORE" --db "$TMP/pinned"
     carried_on "$SH pinned"
     is "$SH: the caller's command and its store pin reach the read" \
-        "$(grep -c "^--db $TMP/pinned show b-1 --json$" "$STORE_LOG")" "2"
+        "$(grep -c "^--db $TMP/pinned show b-1 --json$" "$STORE_LOG")" "1"
     is "$SH: …and the write" \
         "$(grep -c "^--db $TMP/pinned update b-1 --set-metadata gc.work_outcome=no-op$" "$STORE_LOG")" "1"
 

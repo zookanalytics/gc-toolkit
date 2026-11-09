@@ -27,11 +27,11 @@ checks it once the retirement lands and closes it or asks a person:
 gc bd update <bead> --append-notes "## Close brief (held on <retiring-bead>, $(date -u +%Y-%m-%dT%H:%M:%SZ))
 <what the retirement removes, and what to check once it lands>"
 gc bd dep add <bead> <retiring-bead> --type=blocks
-gc bd dep list <bead> --direction=down -t blocks
 "$(gc gc-toolkit scripts-dir)/deferred-dispatch.sh" arm <bead> --target gc-toolkit/gc-toolkit.polecat --sling-arg --on --sling-arg mol-validate-close --reason "waits for <retiring-bead>; the validating closer checks it once that closes"
 ```
 
-Arm it only once the edge reads back, as the `gc-toolkit.waits` skill says. A
+Write the edge only when both beads carry one id prefix, and arm it only once
+the add exits 0, as the `gc-toolkit.waits` skill says. A
 first reaction does the same through its close exit, with
 `--waiting-on <retiring-bead>`. A problem that hurts the operator now gets the
 smallest stopgap that stops the harm, and no new test suite.

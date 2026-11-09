@@ -36,7 +36,7 @@
 # blocks it, which the helm board shows to the operator. It files nothing and
 # exits 0 while that gate is open or while the quiet window below holds. It
 # exits non-zero when it could not read the bead's gates, or could not file the
-# gate and read it back.
+# gate.
 #
 # Runs as an exec order (no LLM, no agent, no wisp).
 set -euo pipefail

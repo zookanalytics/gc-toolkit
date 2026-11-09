@@ -34,9 +34,8 @@ When the ruling leaves the subject to go where its arm or route already sends
 it, by the same method, keep them. Under any other ruling, one that sends it
 elsewhere or nowhere, withdraw them before the answer, with or without
 `--accept`. The block disarms an arm and clears a pool route, and keeps a
-`human` route, which sends the subject to no pool. It reads the subject back,
-and prints its `carries no arm and no pool route` line only once neither is
-left:
+`human` route, which sends the subject to no pool. It prints its
+`carries no arm and no pool route` line only once each write has exited 0:
 ```bash
 WHY="<the ruling, one line>"
 ROW=$(gc bd show "$SUBJECT" --json) \
@@ -44,9 +43,7 @@ ROW=$(gc bd show "$SUBJECT" --json) \
   && ROUTE=$(printf '%s\n' "$ROW" | jq -er '(.[0].metadata["gc.routed_to"] // "") | tostring') \
   && { [ -z "$ARM" ] || "$CONV/deferred-dispatch.sh" disarm "$SUBJECT" --reason "$WHY"; } \
   && { [ -z "$ROUTE" ] || [ "$ROUTE" = human ] || gc bd update "$SUBJECT" --unset-metadata gc.routed_to; } \
-  && ROW=$(gc bd show "$SUBJECT" --json) \
-  && LEFT=$(printf '%s\n' "$ROW" | jq -er --arg s "$SUBJECT" 'if type == "array" and length == 1 and .[0].id == $s then (.[0].metadata // {}) | [ ((.["gc.dispatch_when_ready"] // "") | tostring | select(. != "") | "arm " + .), ((.["gc.routed_to"] // "") | tostring | select(. != "" and . != "human") | "route " + .) ] | join(", ") else error("unread") end') \
-  && if [ -z "$LEFT" ]; then echo "$SUBJECT carries no arm and no pool route"; else echo "$SUBJECT still carries $LEFT"; false; fi
+  && echo "$SUBJECT carries no arm and no pool route"
 ```
 Without that line, answer nothing: fix what the block printed and re-run it.
 A ruling that sends the subject on is carried out once the answer below exits

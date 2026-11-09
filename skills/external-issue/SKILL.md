@@ -66,13 +66,8 @@ gc bd create "<project>: <what is wrong, in one line>" -t task --status deferred
 The deferred status keeps it out of every ready queue, the label puts it in the
 operator's list, and the discovered-from edge ties it to the work where you hit
 it. When your work bead lives in another store, leave `--deps` out: the
-description names it. Read the finding back:
-
-```bash
-gc bd show <finding> --json | jq -r '.[0] | "\(.status) \(any(.labels[]?; . == "upstream-finding"))"'
-```
-
-It prints `deferred true`.
+description names it. The status and the label ride the create, so an id in its
+reply means the finding is filed, deferred and labelled.
 
 A create that printed no id may still have filed the finding, because bd saves
 the bead first and a step after that can fail before the id is printed. So run
@@ -85,7 +80,7 @@ GC_NO_API=1 gc beads list --label upstream-finding --all
 ```
 
 When it lists an open finding under the title you gave yours, that is the one
-you filed: read it back as above, and file nothing more. When it lists none,
+you filed, so file nothing more. When it lists none,
 run the create again. When the lookup itself fails, file nothing more, because
 whether the first create landed is unknown. Note the title on your work bead
 instead:

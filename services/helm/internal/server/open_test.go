@@ -314,11 +314,8 @@ func TestOpenToolFailures(t *testing.T) {
 
 // A timeout must NOT claim that nothing was filed (review of PR#421, P1). The
 // operator's next move depends on this sentence, and the sentence has to be
-// true: `gc-helm.sh open` creates the conversation before it reads its edge and
-// its assignee back, so a kill inside that window leaves a real task behind.
-// Telling the operator nothing happened sends them to retry, and the script's
-// join keys on exactly the shape that never read back — so the retry files a
-// second one.
+// true: `gc-helm.sh open` creates the conversation before its later writes, such
+// as a gate's reply, so a kill after the create leaves a real task behind.
 func TestOpenTimeoutDoesNotClaimNothingWasFiled(t *testing.T) {
 	f := &fakeActuator{err: fmt.Errorf("%w after 2m0s", ErrToolTimeout)}
 	rr := serveOpen(t, f, openReq(`{"bead":"tk-abc12"}`))
