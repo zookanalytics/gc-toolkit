@@ -45,6 +45,21 @@ old ones:
   blocker that resolves nowhere. The converted check holds all three, as the
   store does, and lists them among its notes.
 
+## A place the census predates
+
+The helm board now derives each bead's state (in flight, in review, in
+conversation, parked, queued, stranded) from what holds it
+(`services/helm/internal/board/state.go`, PR #1351, merged after the census).
+It sorted a bead's open blockers by each blocker's own status and counted
+the open waits of its ancestors, a board-side answer to what holds a bead.
+The design's Compositions rule gives that question to `bead holds`, since a
+loop also acts on it, so it moves too: the source marks each blocker it
+hydrates, an anchor's and an open child's, with the store's own answer from
+the rig's one read, and the state reads that answer, falling back to the
+blocker's status only for a bead the read did not answer. The census's D25
+places (`ruled`, `ruledInFlight` and `dispositionDue`) read the same answer
+through the anchor's landed waits.
+
 ## The prompts and skills
 
 Every agent prompt, skill, formula's prose and template fragment was searched

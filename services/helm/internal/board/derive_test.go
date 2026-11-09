@@ -2111,6 +2111,12 @@ func TestDeriveStateReadsTheGraphNotTheMarkers(t *testing.T) {
 	decision := Blocker{ID: "ra-dec", Title: "pick a vendor", Status: "open", IssueType: "decision"}
 	ask := Blocker{ID: "ra-ask", Title: "rule on it", Status: "open", IssueType: "task", RoutedTo: routedHuman}
 	landed := Blocker{ID: "ra-done", Title: "landed work", Status: "closed", IssueType: "task"}
+	// The store's own answer, when the source has one, decides whether a wait
+	// still holds: a pinned blocker reads open on its row and holds nothing, and
+	// a waits-for spawner reads closed and still holds while its gate does.
+	no, yes := false, true
+	pinned := Blocker{ID: "ra-pin", Title: "a pinned bead", Status: "pinned", IssueType: "task", Pending: &no}
+	spawner := Blocker{ID: "ra-sp", Title: "a closed spawner its gate still holds", Status: "closed", IssueType: "task", Pending: &yes}
 	live := liveOwners("polecat-live")
 	live.Inflight = map[string][]string{"ra-slung": {"polecat-live"}}
 	// A live sitting holds the conversations on ra-talk and ra-pr-talk, and the
@@ -2134,6 +2140,8 @@ func TestDeriveStateReadsTheGraphNotTheMarkers(t *testing.T) {
 		{name: "a blanked takeaway", in: stateInput{id: "ra-a", metadata: map[string]string{mdTakeaway: ""}}, want: stateStranded},
 		{name: "only landed waits", in: stateInput{id: "ra-a", blockers: []Blocker{landed}}, want: stateStranded},
 		{name: "waits on open work", in: stateInput{id: "ra-a", blockers: []Blocker{landed, work}}, want: stateQueued},
+		{name: "a wait the store says has landed holds nothing, whatever its row reads", in: stateInput{id: "ra-a", blockers: []Blocker{pinned}}, want: stateStranded},
+		{name: "a wait the store still counts holds, whatever its row reads", in: stateInput{id: "ra-a", blockers: []Blocker{spawner}}, want: stateQueued},
 		{name: "waits on open work, armed", in: stateInput{id: "ra-a", blockers: []Blocker{work},
 			metadata: map[string]string{mdDispatchWhenReady: "rig-a/gc-toolkit.polecat"}}, want: stateQueued, selfStart: true},
 		{name: "an unread wait", in: stateInput{id: "ra-a", unread: 1}, want: stateQueued},

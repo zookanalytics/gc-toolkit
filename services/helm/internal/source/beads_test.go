@@ -974,6 +974,63 @@ func TestLandedWaitsAreTheStoresAnswer(t *testing.T) {
 		if !slices.Equal(a.WaitingOnClosed, c.landed) {
 			t.Errorf("%s/%s: waiting_on_closed=%v, want %v — %s", c.id, c.kind, a.WaitingOnClosed, c.landed, c.why)
 		}
+		for _, b := range a.Blockers {
+			want := !slices.Contains(c.landed, b.ID)
+			if b.Pending == nil || *b.Pending != want {
+				t.Errorf("%s/%s: blocker %s carries pending=%v, want %v — the state reads each blocker by the store's answer", c.id, c.kind, b.ID, b.Pending, want)
+			}
+		}
+	}
+}
+
+// TestChildBlockersCarryTheStoresAnswer pins the same answer on the children a
+// roll-up counts by state: each blocker a child's edge read hydrated carries
+// whether the store still counts it, from the rig's one read, and a child the
+// read did not answer carries none.
+func TestChildBlockersCarryTheStoresAnswer(t *testing.T) {
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+	st := populatedStore()
+	// tk-a, an open child of the epic, waits on open work and on a pinned bead.
+	st.depsDown["tk-a"] = []*beads.IssueWithDependencyMetadata{
+		withDepType(child("tk-aw", "open", testNow, ""), "blocks"),
+		withDepType(child("tk-apin", "pinned", testNow, ""), "blocks"),
+	}
+	stores := map[string]*fakeStore{"gc-toolkit": st}
+	fake := storePending(stores)
+	var answered map[string]bool
+	src := newBeadsTestSource(t, root, stores,
+		withPendingReader(func(ctx context.Context, dir string, ids []string) (map[string][]string, error) {
+			out, err := fake(ctx, dir, ids)
+			answered = map[string]bool{}
+			for id := range out {
+				answered[id] = true
+			}
+			return out, err
+		}))
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if !answered["tk-a"] {
+		t.Fatalf("the read did not name tk-a, a child whose waits were read")
+	}
+	seen := 0
+	for _, a := range res.Anchors {
+		for _, c := range a.Children {
+			if c.ID != "tk-a" {
+				continue
+			}
+			for _, b := range c.Blockers {
+				seen++
+				want := b.ID == "tk-aw"
+				if b.Pending == nil || *b.Pending != want {
+					t.Errorf("child tk-a of %s: blocker %s carries pending=%v, want %v", a.ID, b.ID, b.Pending, want)
+				}
+			}
+		}
+	}
+	if seen != 2 {
+		t.Errorf("tk-a's blockers seen %d times, want its two under the epic", seen)
 	}
 }
 

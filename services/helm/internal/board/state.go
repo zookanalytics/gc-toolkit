@@ -94,7 +94,7 @@ func childInput(c Child) stateInput {
 func anchorInput(a Anchor, waitingOpen []string) stateInput {
 	read := make(map[string]bool, len(a.Blockers))
 	for _, b := range a.Blockers {
-		if b.Status != "closed" {
+		if b.holds() {
 			read[b.ID] = true
 		}
 	}
@@ -142,7 +142,7 @@ func deriveState(in stateInput, f Facts) beadState {
 func splitWaits(blockers []Blocker) (gates, work []Blocker) {
 	for _, b := range blockers {
 		switch {
-		case b.Status == "closed":
+		case !b.holds():
 		case heldByPerson(b):
 			gates = append(gates, b)
 		default:
@@ -150,6 +150,16 @@ func splitWaits(blockers []Blocker) (gates, work []Blocker) {
 		}
 	}
 	return oldestFirst(gates), oldestFirst(work)
+}
+
+// holds reports whether a wait still holds the bead that records it: the
+// store's own answer when the source has one ([Blocker.Pending]), the rule
+// gctk's waits package reads, else while its own status is not closed.
+func (b Blocker) holds() bool {
+	if b.Pending != nil {
+		return *b.Pending
+	}
+	return b.Status != "closed"
 }
 
 // stateOf names the state a bead is in. It is the bead's own state

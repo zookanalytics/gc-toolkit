@@ -1062,7 +1062,7 @@ func (l *libraryPRStore) Blockers(ids []string) (map[string][]prstatus.Blocker, 
 	return out, nil
 }
 
-// attachChildWaits reads the `blocks` waits of every open child of a live
+// attachChildWaits reads the waits of every open child of a live
 // anchor in pending, in one batched OUTBOUND read and one hydration of the
 // blockers the anchor reads did not already fetch. The board's roll-up
 // classifies each open child by them (board.deriveState): a child waiting on
@@ -1098,7 +1098,7 @@ func (s *BeadsSource) attachChildWaits(ctx context.Context, g *gatherState, st b
 	missing := map[string]struct{}{}
 	for _, list := range recs {
 		for _, d := range list {
-			if d != nil && string(d.Type) == "blocks" && issueByID[d.DependsOnID] == nil {
+			if d != nil && waitEdge(string(d.Type)) && issueByID[d.DependsOnID] == nil {
 				missing[d.DependsOnID] = struct{}{}
 			}
 		}
@@ -1428,14 +1428,20 @@ type waitsRead struct {
 }
 
 // startWaits starts the read of a rig's pending waits: one read of the store,
-// over both of the rig's passes, of the anchors that record a wait, each named
-// once. It returns nil when no anchor records one. The ids are taken here, on
-// the gather's goroutine, so the read touches no anchor.
+// over both of the rig's passes, of the anchors that record a wait and the
+// children whose waits were read, each named once. It returns nil when none
+// records one. The ids are taken here, on the gather's goroutine, so the read
+// touches no anchor.
 func (s *BeadsSource) startWaits(ctx context.Context, sp rigSpan, anchors []board.Anchor) *waitsRead {
 	var ids []string
 	for _, a := range anchors[sp.from:sp.to] {
 		if len(a.WaitingOn) > 0 && !a.WaitingUnknown {
 			ids = append(ids, a.ID)
+		}
+		for _, c := range a.Children {
+			if len(c.Blockers) > 0 {
+				ids = append(ids, c.ID)
+			}
 		}
 	}
 	if len(ids) == 0 {
@@ -1451,12 +1457,15 @@ func (s *BeadsSource) startWaits(ctx context.Context, sp rigSpan, anchors []boar
 }
 
 // landWaits fills each gathered anchor's landed waits ([board.Anchor.WaitingOnClosed])
-// from its rig's read of the store's own answer, once each read is done. A
-// recorded wait has landed when the answer does not list it among the bead's
-// own pending waits, so a pinned blocker or one in another store has landed, as
-// the store counts it, and a pending wait the edge read did not hydrate is
-// still recorded. An anchor the read did not answer, in a rig whose read failed
-// or not, reads its waits as unknown and none as landed, the quiet direction.
+// and each hydrated blocker's answer ([board.Blocker.Pending]), the anchor's
+// and its children's, from its rig's read of the store's own answer, once each
+// read is done. A recorded wait has landed when the answer does not list it
+// among the bead's own pending waits, so a pinned blocker or one in another
+// store has landed, as the store counts it, and a pending wait the edge read
+// did not hydrate is still recorded. An anchor the read did not answer, in a
+// rig whose read failed or not, reads its waits as unknown and none as landed,
+// the quiet direction, and a blocker of a bead it did not answer carries no
+// answer.
 func landWaits(g *gatherState, reads []*waitsRead) {
 	for _, rd := range reads {
 		<-rd.done
@@ -1465,6 +1474,11 @@ func landWaits(g *gatherState, reads []*waitsRead) {
 		}
 		for j := rd.span.from; j < rd.span.to; j++ {
 			a := &g.anchors[j]
+			for k := range a.Children {
+				if own, ok := rd.pending[a.Children[k].ID]; ok && rd.err == nil {
+					markPending(a.Children[k].Blockers, own)
+				}
+			}
 			if len(a.WaitingOn) == 0 || a.WaitingUnknown {
 				continue
 			}
@@ -1486,7 +1500,16 @@ func landWaits(g *gatherState, reads []*waitsRead) {
 					a.WaitingOnClosed = append(a.WaitingOnClosed, id)
 				}
 			}
+			markPending(a.Blockers, own)
 		}
+	}
+}
+
+// markPending sets each blocker's answer from the bead's own pending waits.
+func markPending(blockers []board.Blocker, own []string) {
+	for i := range blockers {
+		p := slices.Contains(own, blockers[i].ID)
+		blockers[i].Pending = &p
 	}
 }
 

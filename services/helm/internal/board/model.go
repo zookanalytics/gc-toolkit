@@ -305,6 +305,12 @@ type Blocker struct {
 	AwaitID   string `json:"await_id,omitempty"`
 	// CloseReason is the answer a closed gate was resolved with.
 	CloseReason string `json:"close_reason,omitempty"`
+	// Pending is the store's own answer for this wait of the bead that records
+	// it, read through gctk's waits package: true while the wait has not
+	// landed, false once it has, so a pinned blocker or one in another store
+	// holds nothing. Nil when the source has no answer for the bead, and the
+	// wait then holds while its own status is not closed ([Blocker.holds]).
+	Pending *bool `json:"pending,omitempty"`
 }
 
 // Tile is one rendered row of the board — the additive contract mirrored by the
