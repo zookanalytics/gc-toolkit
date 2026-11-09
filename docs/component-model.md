@@ -270,10 +270,10 @@ window is operator feedback that reads as consumed while nothing has routed it; 
 warn-only), and `doctor/check-hq-marooned-work` (no rig-workable bead sits
 unclaimed in the HQ (city) store: a city-scoped role running with GC_RIG
 unset files a bare `bd create` into the HQ store, which no pool reads, so an
-open unassigned task/bug/defect there — unrouted or routed to a pool — is
-marooned by construction; the operator-queue decisions routed to human, daily
-digests, and doctor and tech-debt advisories that legitimately live there are
-exempt).
+open unassigned task/bug/defect there, unrouted or routed anywhere but a
+city-scoped agent, is marooned by construction; a bead an open human gate
+blocks, daily digests, and doctor and tech-debt advisories that legitimately
+live there are exempt).
 Another non-invariant check, `doctor/check-demo-toolchain`, reports readiness
 rather than structure: whether the demo:capture toolchain — Node, ffmpeg,
 `OPENAI_API_KEY`, and the `gh` that delivers a clip inline — is resolvable,

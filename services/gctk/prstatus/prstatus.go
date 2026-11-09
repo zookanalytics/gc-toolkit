@@ -124,8 +124,7 @@ const (
 	// HeldBlocked: a live blocker holds the PR that no automated actor will
 	// clear. It is the merge pass's blocked verdict with cause blocker, as
 	// [Blocked] counts it, or a live blocker a person owes ([IsPersonBlocker]):
-	// one routed to a person, or a decision. A blocker the city is landing is
-	// neither.
+	// a decision. A blocker the city is landing is neither.
 	HeldBlocked Hold = "blocked"
 )
 

@@ -10,8 +10,8 @@
 #
 # Rig-workable = an OPEN, UNASSIGNED bead whose issue_type is not an infra type
 # (the INFRA_TYPES set defined below), which is neither city machinery nor
-# held-by-design, and which is unrouted or routed to a rig pool that cannot see
-# it. The exclusions carve out the legitimate HQ
+# held-by-design, and which is unrouted or routed anywhere but a city-scoped
+# agent. The exclusions carve out the legitimate HQ
 # residents: a bead routed to a city-scoped agent (resolved from `gc agent list`)
 # is reachable there; a `warrant` label marks city machinery a rig never works; a
 # standing record (a task_kind assets/scripts/standing-kinds.sh lists) is a

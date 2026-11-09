@@ -584,7 +584,7 @@ carries none.
 |---|---|---|
 | `held: gate` | an open human gate holds the anchor: on the anchor itself, or behind a bead it waits on, such as a rework | `prstatus.HoldingGates`, which follows the anchor's `blocks` edges through every blocker that is not closed and keeps the human gates it reaches, one a person has claimed included. A conversation blocks nothing, so it never counts |
 | `held: review` | review feedback the city has not answered, or a review thread the merge waits on, and nothing in flight acts on it | the merge pass's count of review threads waiting on the city's answer (`pr.unanswered_threads`), by the rule below, or its `blocked` verdict with cause `review-threads`, as `prstatus.Blocked` counts it |
-| `held: blocked` | a live blocker holds the PR that no automated actor will clear | the merge pass's `blocked` verdict with cause `blocker`, as `prstatus.Blocked` counts it, or a live bead the anchor's `blocks` edge names that is routed to a person or is a decision. A human gate is not among them, whatever its route, because `held: gate` counts it |
+| `held: blocked` | a live blocker holds the PR that no automated actor will clear | the merge pass's `blocked` verdict with cause `blocker`, as `prstatus.Blocked` counts it, or a live decision the anchor's `blocks` edge names. A human gate is not among them, because `held: gate` counts it |
 
 Any `held:` label reads `status: needs-attention`, because each names something
 a person has to act on. The merge freeze and the rebase hold carry no `held:`
@@ -791,8 +791,8 @@ last pass recorded stands.
 
 An anchor a live blocker holds is `progressing` when an automated actor holds
 any of its live blockers. When none does, the merge pass reads who holds each
-one. A person holds a blocker that is a human gate, that is routed to a person, or
-that has an open human gate behind it (`prstatus.HoldingGates`). A blocker no
+one. A person holds a blocker that is a human gate, or that has an open human
+gate behind it (`prstatus.HoldingGates`). A blocker no
 person holds makes the verdict `blocked` with cause `blocker`, and when a person
 holds them all the anchor gets no new verdict.
 `assets/scripts/blocker-holder.sh` answers whether an actor holds one for each
