@@ -21,17 +21,19 @@ import (
 // build, one artifact.
 
 const formUsage = `Usage:
-  helm-svc form --helm <gc-helm.sh> [--subject <ref>] [--new-subject] [--rig <name>]
-                [--model <variant>] [--models <a,b,...>] [--question <text>]
-                [--no-attach] [--return]
+  helm-svc form --helm <gc-helm.sh> [--subject <ref> [--from <bead>]] [--new-subject]
+                [--rig <name>] [--model <variant>] [--models <a,b,...>]
+                [--question <text>] [--no-attach] [--return]
 
 The terminal conversation form. gc-helm.sh engage runs it on a terminal when the
 command line leaves the concern open, and gc-helm.sh attach runs it with
---return. Each flag fills in its field. Once the sitting a save starts has
-started, the form attaches to it, and --no-attach turns that field off, so the
-form leaves the sitting to prepare instead. --return opens on the conversations
-to return to. A cancelled question is kept in a file under GC_HELM_DRAFT_DIR,
-else $XDG_STATE_HOME/gc/engage-drafts, else ~/.local/state/gc/engage-drafts.
+--return. Each flag fills in its field, and --from names the bead the gate
+--subject names was reached from, as engage's --from does. Once the sitting a
+save starts has started, the form attaches to it, and --no-attach turns that
+field off, so the form leaves the sitting to prepare instead. --return opens on
+the conversations to return to. A cancelled question is kept in a file under
+GC_HELM_DRAFT_DIR, else $XDG_STATE_HOME/gc/engage-drafts, else
+~/.local/state/gc/engage-drafts.
 `
 
 func formMain(args []string) {
@@ -44,6 +46,7 @@ func runForm(args []string, stdout, stderr io.Writer) int {
 	fs.Usage = func() { fmt.Fprint(stderr, formUsage) }
 	helm := fs.String("helm", "", "")
 	subject := fs.String("subject", "", "")
+	from := fs.String("from", "", "")
 	newSubject := fs.Bool("new-subject", false, "")
 	rig := fs.String("rig", "", "")
 	model := fs.String("model", "", "")
@@ -65,6 +68,10 @@ func runForm(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "helm-svc form: --subject names an existing bead and --new-subject starts a new topic; pass one")
 		return 2
 	}
+	if *from != "" && *subject == "" {
+		fmt.Fprintln(stderr, "helm-svc form: --from names the bead the --subject gate was reached from, so it needs --subject")
+		return 2
+	}
 	var variants []string
 	for _, v := range strings.Split(*models, ",") {
 		if v = strings.TrimSpace(v); v != "" {
@@ -73,6 +80,7 @@ func runForm(args []string, stdout, stderr io.Writer) int {
 	}
 	m := form.New(context.Background(), form.Script{Path: *helm}, form.Options{
 		Subject:  *subject,
+		From:     *from,
 		Rig:      *rig,
 		Model:    *model,
 		Question: *question,

@@ -108,12 +108,33 @@ func TestASubjectFiledWithoutItsConversationComesBackWithTheError(t *testing.T) 
 
 func TestAboutRefusalCarriesTheScriptsSentence(t *testing.T) {
 	s, dir := stubHelm(t, "", "gc-helm: conversations: bead not found: 'tk-x' — no rig ledger answers for that id. Nothing read.\n", 4)
-	_, err := s.About(context.Background(), "tk-x")
+	_, err := s.About(context.Background(), "tk-x", "")
 	if err == nil || !strings.Contains(err.Error(), "bead not found") {
 		t.Fatalf("err = %v", err)
 	}
 	if got := argv(t, dir); strings.Join(got, " ") != "conversations tk-x --json" {
 		t.Fatalf("argv = %q", got)
+	}
+}
+
+// A gate reached from a subject is read and saved from it: --from rides each,
+// after the reference it qualifies.
+func TestAGateReachedFromASubjectIsReadAndSavedFromIt(t *testing.T) {
+	s, dir := stubHelm(t, `{"ref":"tk-g","subject":{"id":"tk-s"},"gate":"tk-g"}`+"\n", "", 0)
+	a, err := s.About(context.Background(), "tk-g", "tk-s")
+	if err != nil || a.Subject.ID != "tk-s" || a.Gate != "tk-g" {
+		t.Fatalf("About = %+v, %v", a, err)
+	}
+	if got := argv(t, dir); strings.Join(got, " ") != "conversations tk-g --from tk-s --json" {
+		t.Fatalf("About argv = %q", got)
+	}
+	s, dir = stubHelm(t, `{"subject":"tk-s","conversation":"tk-c","filed":true}`+"\n", "", 0)
+	if _, err := s.Save(context.Background(), SaveRequest{Ref: "tk-g", Subject: "tk-s", From: "tk-s", Question: "q", Conversation: "tk-c"}); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"open", "tk-g", "--allow-duplicate", "--if-subject", "tk-s", "--from", "tk-s", "--conversation", "tk-c", "--reason", "q", "--json"}
+	if got := argv(t, dir); strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("Save argv = %q, want %q", got, want)
 	}
 }
 

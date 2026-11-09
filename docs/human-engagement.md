@@ -191,8 +191,10 @@ these steps:
 1. **It takes the bead.** Given a bead, it works on that bead. Given a gate, it
    works on the one bead still waiting on the gate, read from the gate's
    `blocks` dependents. With several still waiting, as when an anchor and its
-   rework child both wait on the anchor's bring-current gate, it names them and
-   starts nothing, so the operator engages the one they mean. With none, it
+   rework child both wait on the anchor's bring-current gate, it works on the
+   bead `--from` names when that bead is one of them. Otherwise it names them
+   and starts nothing, so the operator engages the one they mean, and a gate
+   that no longer holds the `--from` bead starts nothing either. With none, it
    says nothing waits on the gate, names any closed bead the gate was about,
    and starts nothing, and the operator clears the gate.
 2. **It reads the bead's conversations:** the open tasks that track the bead
@@ -235,14 +237,25 @@ rework or a review the anchor waits on is offered from the PR, each bead a perso
 owes the next move on that the same edges reach, such as a decision or another PR
 waiting on a review that the PR's rework waits for, and the PR's own review
 threads or blocked verdict. The conversation form lists them under the bead's
-conversations. A gate or a bead is a row, and choosing it makes it the subject,
-looked up as if it were typed, so a gate several beads wait on is refused as
-engage refuses it on the command line. The PR's own threads and
+conversations. A gate or a bead is a row, and choosing it makes it the subject.
+A gate chosen there keeps the bead it was listed under, which the screen names
+under the subject, and the form looks it up and saves it with `--from` naming
+that bead, so a gate several beads wait on is about that bead while the bead
+still waits on the gate. A gate the bead waits on only through another bead,
+such as a gate on its rework, is looked up as if it were typed: it is about the
+one bead that waits on it, and one several beads wait on is refused. A gate that
+no longer holds the bead by the time the form looks it up or saves it is
+refused, so the question is never filed on another bead in its place. A gate the
+operator types names no such bead, and neither does one whose subject the
+operator edits after choosing it, so a gate several beads wait on is refused
+there, naming them, as engage refuses it on the command line.
+The PR's own threads and
 verdict are lines that no row stands for, because engaging the PR is how a
 person acts on them. The form says when what holds the bead did not read, so a
 bead it could not read does not look like one that nothing holds. An engage
 that asks nothing, as `--no-input` and the board's route do, names each and how
-to engage it, unless it was pointed at a gate or a conversation. A conversation
+to engage it, a gate with `--from` naming the bead, unless it was pointed at a
+gate or a conversation. A conversation
 on the bead answers no gate until it replies to one.
 
 **On a terminal, engage opens the conversation form.** An engage whose
@@ -283,7 +296,10 @@ reference names another bead by then, such as a subject closed onto a successor
 in another rig, so a question is filed only where the screen said. The reference
 goes as the operator typed it, so `open` resolves it again, and a PR whose
 anchor moved while the operator typed is refused too. A gate goes as itself, so
-the conversation replies to the gate the screen showed. Then `engage
+the conversation replies to the gate the screen showed, and a chosen gate goes
+with `--from` naming the bead it was listed under, so `open` takes that bead
+among several waiting and files nothing once it has stopped waiting on the
+gate. Then `engage
 <conversation> --no-input --no-attach` starts the sitting. Once it has started,
 the form attaches the terminal to it through `engage <conversation>
 --no-input`, which waits for the session to start, as engage does on the command

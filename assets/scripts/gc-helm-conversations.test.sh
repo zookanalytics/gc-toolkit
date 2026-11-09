@@ -27,6 +27,11 @@
 #                 a sitting can start there, its open conversations and what
 #                 holds it; a conversation id names its subject and itself; a gate
 #                 names the bead waiting on it and itself
+#   (ABOUT-FROM)  a gate two beads wait on is about the one --from names, and is
+#                 refused naming both when read from nothing; a gate that holds
+#                 the --from bead only through another bead is read as without
+#                 --from, and one that no longer holds it is refused; --from with
+#                 no reference is refused, exit 2
 #   (ABOUT-REFUSE) a suspended rig, a rig with no converse and a closed subject
 #                 are said as the refusal a sitting would meet; a bead that does
 #                 not resolve exits 4
@@ -228,6 +233,30 @@ eq "$(printf '%s' "$OUT" | jq -r '.closed.id')" "tk-shutconv" "(ABOUT) a closed 
 has "$(printf '%s' "$OUT" | jq -r '.closed.said')" "closed at 2026-11-07T10:00:00Z" "(ABOUT) …and when"
 seed; run conversations tk-gate --json
 eq "$(printf '%s' "$OUT" | jq -r '.subject.id + " " + .gate')" "tk-held tk-gate" "(ABOUT) a gate names the bead waiting on it, and itself"
+
+echo "# a gate two beads wait on is about the bead it was reached from"
+seed; jq '. + [{id:"tk-held2", issue_type:"task", status:"open", title:"second held bead", dependencies:[{type:"blocks", depends_on_id:"tk-gate"}]}]' "$STATE/tk.json" > "$STATE/tmp.json" && mv "$STATE/tmp.json" "$STATE/tk.json"
+run conversations tk-gate --from tk-held2 --json
+eq "$RC" 0 "(ABOUT-FROM) a gate two beads wait on, read --from one of them, exits 0"
+eq "$(printf '%s' "$OUT" | jq -r '.subject.id + " " + .gate')" "tk-held2 tk-gate" "(ABOUT-FROM) …naming that bead, and the gate"
+run conversations tk-gate --json
+eq "$RC" 4 "(ABOUT-FROM) read from nothing, it exits 4"
+has "$ERR" "gate tk-gate is about 2 beads still waiting on it (tk-held tk-held2), and a conversation" "(ABOUT-FROM) …naming both beads"
+has "$ERR" "Name the one you mean: gc-helm conversations tk-gate --from <bead>." "(ABOUT-FROM) …and how to name one"
+run conversations tk-gate --from tk-subj --json
+eq "$RC" 4 "(ABOUT-FROM) read --from a bead the gate does not hold, it exits 4"
+has "$ERR" "tk-subj does not wait on gate tk-gate now (the beads waiting on it are tk-held tk-held2)" "(ABOUT-FROM) …saying so"
+GCTK_REASONS='[{"held":"gate","id":"tk-gate","title":"approve it"}]' run conversations tk-gate --from tk-subj --json
+eq "$RC" 4 "(ABOUT-FROM) read --from a bead it holds only through another, it exits 4 while two beads wait on it"
+has "$ERR" "is about one bead. tk-subj is not one of them. Name the one you mean" "(ABOUT-FROM) …saying the bead is not one of them"
+seed; GCTK_REASONS='[{"held":"gate","id":"tk-gate","title":"approve it"}]' run conversations tk-gate --from tk-subj --json
+eq "$(printf '%s' "$OUT" | jq -r '.subject.id + " " + .gate')" "tk-held tk-gate" "(ABOUT-FROM) a gate one bead waits on, holding the --from bead through it, is about that bead, as without --from"
+run conversations tk-gate --from tk-subj --json
+eq "$RC" 4 "(ABOUT-FROM) a gate that no longer holds the --from bead exits 4, though one bead waits on it"
+has "$ERR" "tk-subj does not wait on gate tk-gate now (the beads waiting on it are tk-held)" "(ABOUT-FROM) …so no other bead stands in for it"
+run conversations --from tk-held --json
+eq "$RC" 2 "(ABOUT-FROM) --from with no reference exits 2"
+has "$ERR" "--from names the bead a gate was reached from, so it needs the gate" "(ABOUT-FROM) …saying it needs the gate"
 
 echo "# a subject no sitting can start on is said as its refusal"
 seed; run conversations gc-b1 --json

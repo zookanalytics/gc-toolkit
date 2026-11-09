@@ -25,10 +25,10 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/helm/internal/verbs"
 )
 
-// About is `gc-helm.sh conversations <ref> --json`: the subject a reference
-// names, resolved as engage resolves it, and where a conversation about it would
-// be held. A bare PR number more than one live anchor records answers
-// Candidates instead.
+// About is `gc-helm.sh conversations <ref> [--from <bead>] --json`: the subject
+// a reference names, resolved as engage resolves it, and where a conversation
+// about it would be held. A bare PR number more than one live anchor records
+// answers Candidates instead.
 type About struct {
 	Ref           string         `json:"ref"`
 	Subject       Subject        `json:"subject"`
@@ -135,12 +135,15 @@ func (r Rig) Hosts() bool { return r.Converse && !r.Suspended }
 // SaveRequest is a question to file as a conversation. Ref is the reference
 // the destination was verified for: the subject as the operator typed it, or
 // the gate the conversation replies to. Subject is the subject the form showed
-// for it. A new topic leaves both empty and names its Rig. Conversation is set
-// on a save again: the conversation an earlier save filed and did not complete,
-// which this save completes rather than file another.
+// for it. From is the subject a gate Ref names was chosen from, which a gate
+// several beads wait on files about. A new topic leaves all three empty and
+// names its Rig. Conversation is set on a save again: the conversation an
+// earlier save filed and did not complete, which this save completes rather
+// than file another.
 type SaveRequest struct {
 	Ref          string
 	Subject      string
+	From         string
 	Rig          string
 	Question     string
 	Conversation string
@@ -158,7 +161,10 @@ type Saved struct {
 
 // Helm is what the form reads and writes, each call one gc-helm.sh verb.
 type Helm interface {
-	About(ctx context.Context, ref string) (About, error)
+	// About reads the subject ref names. from is the bead ref was reached
+	// from, as a gate chosen from what holds a subject was, and is empty for a
+	// reference as typed.
+	About(ctx context.Context, ref, from string) (About, error)
 	City(ctx context.Context) (City, error)
 	Save(ctx context.Context, req SaveRequest) (Saved, error)
 	Start(ctx context.Context, conversation, model string) error
@@ -244,10 +250,14 @@ type Refusal struct {
 
 func (r *Refusal) Error() string { return r.Why }
 
-// About runs `conversations <ref> --json`.
-func (s Script) About(ctx context.Context, ref string) (About, error) {
+// About runs `conversations <ref> [--from <from>] --json`.
+func (s Script) About(ctx context.Context, ref, from string) (About, error) {
 	var a About
-	out, err := s.run(ctx, "conversations", ref, "--json")
+	args := []string{"conversations", ref}
+	if from != "" {
+		args = append(args, "--from", from)
+	}
+	out, err := s.run(ctx, append(args, "--json")...)
 	if err != nil {
 		return a, err
 	}
@@ -277,9 +287,9 @@ func (s Script) City(ctx context.Context) (City, error) {
 
 // Save runs open: `open --new-subject --rig <rig> --reason <question> --json`
 // for a new topic, or `open <ref> --allow-duplicate --if-subject <subject>
-// --reason <question> --json`, since a question the operator brings is a
-// concern of its own, and open refuses a reference that names another subject
-// than the one the form showed. The question rides as one argv element,
+// [--from <from>] --reason <question> --json`, since a question the operator
+// brings is a concern of its own, and open refuses a reference that names
+// another subject than the one the form showed. The question rides as one argv element,
 // unchanged. A new subject filed whose conversation was not comes back with the
 // error, so a retry files onto that subject, and so does a conversation filed
 // whose save then failed. open answers a new subject the moment it files it, so
@@ -299,6 +309,9 @@ func (s Script) Save(ctx context.Context, req SaveRequest) (Saved, error) {
 		return sv, fmt.Errorf("no subject was shown for %s, so the save has nothing to file against", req.Ref)
 	default:
 		args = append(args, req.Ref, "--allow-duplicate", "--if-subject", req.Subject)
+		if req.From != "" {
+			args = append(args, "--from", req.From)
+		}
 		if req.Conversation != "" {
 			args = append(args, "--conversation", req.Conversation)
 		}

@@ -47,6 +47,11 @@
 #   (GATE)     a human gate names the one bead still waiting on it, and the
 #              conversation replies to the gate; several waiting beads, or none,
 #              file nothing and say why
+#   (FROM)     --from names the bead the gate was reached from: a gate several
+#              open beads wait on files about that one; one that holds it only
+#              through another bead is taken as without --from; one that no
+#              longer holds it, or whose holds do not read, files nothing, exit
+#              4; beside --new-subject it is refused, exit 2
 #   (MISSING)  bd show's `{"error": …}` OBJECT answer -> exit 4, NOTHING filed
 #   (MISMATCH) bd show answering a DIFFERENT bead -> exit 4, nothing filed
 #   (NORIG)    an id prefix matching no rig -> exit 4 naming the prefix
@@ -616,6 +621,62 @@ eq "$RC" "4" "(IF-SUBJECT-GATE) a gate about another bead than the one shown exi
 [ -z "$CALLS" ] && ok "(IF-SUBJECT-GATE) …filing nothing" || bad "(IF-SUBJECT-GATE) filed something (calls: $CALLS)"
 grep -q 'tk-gate1 names tk-anchor in rig gc-toolkit now, not tk-shown (--if-subject). No conversation filed.' <<< "$ERR" \
   && ok "(IF-SUBJECT-GATE) …naming the bead it names now and the one shown" || bad "(IF-SUBJECT-GATE) message (err: $ERR)"
+# (FROM) --from names the bead the gate was reached from, as the conversation
+# form names the subject whose holds listed it: a gate two open beads wait on
+# files about that bead, replying to the gate. A --from bead that does not wait
+# on the gate itself is checked against what holds it, read through gctk
+# ($FAKE_HOLDS): held through another bead, the gate is taken as it is without
+# --from, and no longer held, or closed, or unread, it files nothing.
+printf '#!/bin/sh\n[ -z "${FAKE_HOLDS_FAIL:-}" ] || exit 2\nprintf %%s "{\\"reasons\\":${FAKE_HOLDS:-[]}}"\n' > "$TMP/bin/gctk-holds"
+chmod +x "$TMP/bin/gctk-holds"
+export GCTK_BIN="$TMP/bin/gctk-holds" FAKE_HOLDS='[]'
+HELD_THROUGH='[{"held":"gate","id":"tk-gate1","title":"Approve the rollout"}]'
+export FAKE_WAITERS='[{"id":"tk-anchor","status":"open"},{"id":"tk-child","status":"in_progress"}]'
+run_open found tk-gate1 --from tk-child --if-subject tk-child --allow-duplicate --reason "is the wording right?" --json
+eq "$RC" "0" "(FROM) a gate two open beads wait on, opened --from one of them, exits 0"
+grep -q -- '--deps tracks:tk-child' <<< "$CALLS" && grep -q 'bd dep add tk-conv1 tk-gate1 --type replies-to' <<< "$CALLS" \
+  && ok "(FROM) …filing the conversation on that bead, replying to the gate" || bad "(FROM) filed on the --from bead (calls: $CALLS)"
+grep -q -- '--deps tracks:tk-anchor' <<< "$CALLS" \
+  && bad "(FROM) filed on the other bead waiting (calls: $CALLS)" || ok "(FROM) …and not on the other bead waiting"
+eq "$(printf '%s' "$OUT" | jq -c .)" '{"subject":"tk-child","conversation":"tk-conv1","filed":true}' "(FROM) --json answers the conversation on the --from bead"
+run_open found tk-gate1 --from tk-other
+eq "$RC" "4" "(FROM-NOT-WAITING) --from a bead the gate does not hold exits 4"
+[ -z "$CALLS" ] && ok "(FROM-NOT-WAITING) …filing nothing" || bad "(FROM-NOT-WAITING) filed something (calls: $CALLS)"
+grep -q 'tk-other does not wait on gate tk-gate1 now (the beads waiting on it are tk-anchor tk-child), so the gate is not tk-other'"'"'s to answer. No conversation filed.' <<< "$ERR" \
+  && ok "(FROM-NOT-WAITING) …naming the bead and the beads waiting" || bad "(FROM-NOT-WAITING) message (err: $ERR)"
+FAKE_HOLDS="$HELD_THROUGH" run_open found tk-gate1 --from tk-pr
+eq "$RC" "4" "(FROM-THROUGH-TWO) a gate two beads wait on, held on the --from bead only through another, exits 4"
+grep -q 'is about one bead. tk-pr is not one of them. Name the one you mean: gc-helm open tk-gate1 --from <bead>.' <<< "$ERR" \
+  && ok "(FROM-THROUGH-TWO) …naming --from to choose the one meant" || bad "(FROM-THROUGH-TWO) message (err: $ERR)"
+run_open found tk-gate1
+grep -q 'Name the one you mean: gc-helm open tk-gate1 --from <bead>.' <<< "$ERR" && ! grep -q 'is not one of them' <<< "$ERR" \
+  && ok "(GATE-TWO) a gate two beads wait on, opened from nothing, names --from to choose one" || bad "(GATE-TWO) names --from (err: $ERR)"
+export FAKE_WAITERS='[{"id":"tk-anchor","status":"open","dependency_type":"blocks"}]'
+FAKE_HOLDS="$HELD_THROUGH" run_open found tk-gate1 --from tk-pr --if-subject tk-anchor
+eq "$RC" "0" "(FROM-THROUGH) a gate held on the --from bead through the one bead waiting on it exits 0"
+grep -q -- '--deps tracks:tk-anchor' <<< "$CALLS" && grep -q 'bd dep add tk-conv1 tk-gate1 --type replies-to' <<< "$CALLS" \
+  && ok "(FROM-THROUGH) …filing on the bead that waits on it, as without --from" || bad "(FROM-THROUGH) filed on the waiting bead (calls: $CALLS)"
+run_open found tk-gate1 --from tk-child --if-subject tk-child
+eq "$RC" "4" "(FROM-GONE) a gate the --from bead has stopped waiting on exits 4, though another bead waits on it"
+[ -z "$CALLS" ] && ok "(FROM-GONE) …filing nothing on the bead left waiting" || bad "(FROM-GONE) filed something (calls: $CALLS)"
+grep -q 'tk-child does not wait on gate tk-gate1 now (the beads waiting on it are tk-anchor)' <<< "$ERR" \
+  && ok "(FROM-GONE) …saying so" || bad "(FROM-GONE) message (err: $ERR)"
+export FAKE_WAITERS='[{"id":"tk-anchor","status":"open"},{"id":"tk-child","status":"closed"}]'
+FAKE_HOLDS="$HELD_THROUGH" run_open found tk-gate1 --from tk-child --if-subject tk-child
+eq "$RC" "4" "(FROM-CLOSED) a --from bead that closed exits 4, whatever its holds read"
+[ -z "$CALLS" ] && ok "(FROM-CLOSED) …filing nothing" || bad "(FROM-CLOSED) filed something (calls: $CALLS)"
+grep -q 'tk-child does not wait on gate tk-gate1 now' <<< "$ERR" && ok "(FROM-CLOSED) …saying so" || bad "(FROM-CLOSED) message (err: $ERR)"
+FAKE_HOLDS_FAIL=1 run_open found tk-gate1 --from tk-other
+eq "$RC" "4" "(FROM-UNREAD) a --from bead whose holds do not read exits 4"
+[ -z "$CALLS" ] && ok "(FROM-UNREAD) …filing nothing" || bad "(FROM-UNREAD) filed something (calls: $CALLS)"
+grep -q 'what holds tk-other could not be read' <<< "$ERR" && ok "(FROM-UNREAD) …saying so" || bad "(FROM-UNREAD) message (err: $ERR)"
+unset GCTK_BIN FAKE_HOLDS
+set +e
+OUT="$(sh "$SCRIPT" open --new-subject --rig gc-toolkit --reason "a new topic" --from tk-a 2>&1)"; RC=$?
+set -e
+eq "$RC" "2" "(FROM-NEW) --from beside --new-subject exits 2"
+grep -q -- '--from names the bead a gate was reached from' <<< "$OUT" \
+  && ok "(FROM-NEW) …saying the two cannot go together" || bad "(FROM-NEW) message (out: $OUT)"
 unset FAKE_WAITERS
 set +e
 OUT="$(sh "$SCRIPT" open --new-subject --rig gc-toolkit --reason "a new topic" --if-subject tk-a 2>&1)"; RC=$?

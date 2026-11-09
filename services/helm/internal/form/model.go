@@ -16,6 +16,7 @@ import (
 // Options are what the command line fills in before the form opens.
 type Options struct {
 	Subject  string   // a subject reference: a bead, conversation or gate id, or a PR number or URL
+	From     string   // the bead the subject, a gate, was reached from, as engage's --from names it
 	Rig      string   // a new topic's rig
 	Model    string   // the converse variant; empty takes Models[0]
 	Question string   // the question, as given
@@ -49,16 +50,21 @@ const (
 )
 
 // lookup is one `conversations <ref>` read, keyed by the reference it was
-// asked for.
+// asked for and the bead that reference was reached from (lookupKey).
 type lookup struct {
 	pending bool
 	about   About
 	err     error
 }
 
+// lookupKey is what a lookup reads: the reference, and the bead it was reached
+// from, which a gate several beads wait on is about when it is one of them. A
+// reference the operator typed was reached from nothing.
+type lookupKey struct{ ref, from string }
+
 type (
 	aboutMsg struct {
-		ref   string
+		key   lookupKey
 		about About
 		err   error
 	}
@@ -94,7 +100,8 @@ type Model struct {
 	focus    field
 
 	seq      int // edits of the subject field, so a stale debounce does nothing
-	lookups  map[string]*lookup
+	lookups  map[lookupKey]*lookup
+	from     string // the subject a gate in the subject field was chosen from, until the field is edited
 	city     *City
 	cityAt   time.Time // when city was read
 	cityErr  string    // why the last read of the city failed; city stays the last one read
@@ -150,7 +157,10 @@ func New(ctx context.Context, helm Helm, opt Options) *Model {
 			opt.Models = []string{opt.Model}
 		}
 	}
-	m := &Model{helm: helm, opt: opt, ctx: ctx, lookups: map[string]*lookup{}, rig: opt.Rig, attach: !opt.NoAttach}
+	m := &Model{helm: helm, opt: opt, ctx: ctx, lookups: map[lookupKey]*lookup{}, rig: opt.Rig, attach: !opt.NoAttach}
+	if opt.Subject != "" {
+		m.from = opt.From
+	}
 	if opt.Model != "" {
 		// A model no variant carries is shown as it was named, marked, and
 		// nothing starts on it until the operator picks a variant.
@@ -191,8 +201,8 @@ func (m *Model) Note() string { return m.note }
 // it is on screen.
 func (m *Model) Init() tea.Cmd {
 	cmds := []tea.Cmd{m.loadCity()}
-	if ref := m.ref(); ref != "" {
-		cmds = append(cmds, m.lookup(ref))
+	if m.ref() != "" {
+		cmds = append(cmds, m.lookup(m.subjectKey()))
 	}
 	if m.scr == returnScreen {
 		cmds = append(cmds, m.refreshCity())
@@ -213,6 +223,10 @@ func (m *Model) refreshCity() tea.Cmd {
 
 func (m *Model) ref() string { return strings.TrimSpace(m.subject.Value()) }
 
+// subjectKey is what the subject field reads now: its reference, and the
+// subject a gate there was chosen from.
+func (m *Model) subjectKey() lookupKey { return lookupKey{ref: m.ref(), from: m.from} }
+
 func (m *Model) newTopic() bool { return m.ref() == "" }
 
 func (m *Model) loadCity() tea.Cmd {
@@ -226,21 +240,21 @@ func (m *Model) loadCity() tea.Cmd {
 	}
 }
 
-// lookup reads the subject ref names, once per reference while that read is
-// running or has answered. A read that failed is read again. A reference
-// already read selects the conversation it names, as its answer did.
-func (m *Model) lookup(ref string) tea.Cmd {
-	if ref == "" {
+// lookup reads the subject k names, once per reference and origin while that
+// read is running or has answered. A read that failed is read again. A
+// reference already read selects the conversation it names, as its answer did.
+func (m *Model) lookup(k lookupKey) tea.Cmd {
+	if k.ref == "" {
 		return nil
 	}
-	if l, ok := m.lookups[ref]; ok && (l.pending || l.err == nil) {
+	if l, ok := m.lookups[k]; ok && (l.pending || l.err == nil) {
 		m.selectNamed()
 		return nil
 	}
-	m.lookups[ref] = &lookup{pending: true}
+	m.lookups[k] = &lookup{pending: true}
 	return func() tea.Msg {
-		a, err := m.helm.About(m.ctx, ref)
-		return aboutMsg{ref: ref, about: a, err: err}
+		a, err := m.helm.About(m.ctx, k.ref, k.from)
+		return aboutMsg{key: k, about: a, err: err}
 	}
 }
 
@@ -283,14 +297,14 @@ func (m *Model) moveFocus(step int) tea.Cmd {
 	leaving := m.focus
 	m.setFocus(fs[(at+step+len(fs))%len(fs)])
 	if leaving == subjectField {
-		return m.lookup(m.ref())
+		return m.lookup(m.subjectKey())
 	}
 	return nil
 }
 
 // current is the finished lookup of the subject field as it reads now, or nil.
 func (m *Model) current() *lookup {
-	l := m.lookups[m.ref()]
+	l := m.lookups[m.subjectKey()]
 	if l == nil || l.pending {
 		return nil
 	}
@@ -316,6 +330,7 @@ func (m *Model) selectNamed() {
 type contextRow struct {
 	kind  string // "new", "conversation", "hold", "candidate"
 	id    string
+	held  string // a hold's held: value
 	label string
 }
 
@@ -344,7 +359,7 @@ func (m *Model) contextRows() []contextRow {
 		if h.ID == "" {
 			continue // no bead to choose: heldLines shows it
 		}
-		rows = append(rows, contextRow{kind: "hold", id: h.ID, label: fmt.Sprintf("%s  held: %s — %s (becomes the subject)", h.ID, h.Held, h.Title)})
+		rows = append(rows, contextRow{kind: "hold", id: h.ID, held: h.Held, label: fmt.Sprintf("%s  held: %s — %s (becomes the subject)", h.ID, h.Held, h.Title)})
 	}
 	return rows
 }
@@ -450,7 +465,7 @@ func (m *Model) destination() (string, bool) {
 		return fmt.Sprintf("a new subject in rig %s: checking the rig…", m.rig), false
 	}
 	ref := m.ref()
-	l := m.lookups[ref]
+	l := m.lookups[m.subjectKey()]
 	if l == nil || l.pending {
 		return fmt.Sprintf("looking up %s…", ref), false
 	}
@@ -524,7 +539,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case aboutMsg:
-		l := m.lookups[msg.ref]
+		l := m.lookups[msg.key]
 		if l == nil {
 			return m, nil
 		}
@@ -543,7 +558,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case debounceMsg:
 		if msg.seq == m.seq {
-			return m, m.lookup(m.ref())
+			return m, m.lookup(m.subjectKey())
 		}
 		return m, nil
 	case savedMsg:
@@ -601,8 +616,11 @@ func (m *Model) typeInto(msg tea.Msg) tea.Cmd {
 		var cmd tea.Cmd
 		m.subject, cmd = m.subject.Update(msg)
 		if m.subject.Value() != before {
+			// A reference the operator types was reached from nothing, so a gate
+			// chosen from a subject's holds loses that subject once it is edited.
 			m.seq++
 			seq := m.seq
+			m.from = ""
 			m.choice, m.choiceTouched, m.cursor = newChoice, false, 0
 			return tea.Batch(cmd, tea.Tick(m.opt.Debounce, func(time.Time) tea.Msg { return debounceMsg{seq: seq} }))
 		}
@@ -688,8 +706,10 @@ func (m *Model) key(k tea.KeyPressMsg) tea.Cmd {
 
 // choose takes the context row under the cursor. A conversation becomes the
 // choice; the new-conversation row clears it; a hold or a PR's candidate
-// becomes the subject, which is looked up in turn. Nothing else changes: the
-// question stays as typed.
+// becomes the subject, which is looked up in turn. A gate keeps the subject it
+// was chosen from as where it was reached from, through the lookup and the
+// save, so a gate several beads wait on is about that subject while it still
+// waits on it. Nothing else changes: the question stays as typed.
 func (m *Model) choose(rows []contextRow) tea.Cmd {
 	if m.cursor >= len(rows) {
 		return nil
@@ -700,10 +720,15 @@ func (m *Model) choose(rows []contextRow) tea.Cmd {
 		m.choice, m.choiceTouched = r.id, true
 		return nil
 	default:
+		from := ""
+		if l := m.resolved(); l != nil && r.kind == "hold" && r.held == "gate" {
+			from = l.about.Subject.ID
+		}
 		m.subject.SetValue(r.id)
+		m.from = from
 		m.seq++
 		m.choice, m.choiceTouched, m.cursor = newChoice, false, 0
-		return m.lookup(r.id)
+		return m.lookup(m.subjectKey())
 	}
 }
 
@@ -757,9 +782,12 @@ func (m *Model) submit() tea.Cmd {
 		// when the reference names another subject by then. So the reference
 		// goes as the operator typed it, which open resolves again: a PR whose
 		// anchor moved, or a bead closed onto a successor, files nothing. A gate
-		// goes as itself, so the conversation replies to the gate shown.
+		// goes as itself, so the conversation replies to the gate shown, and
+		// from the subject it was chosen from, so a gate several beads wait on
+		// files about the subject shown, and one that subject has stopped
+		// waiting on files nothing.
 		a := m.current().about
-		req.Ref, req.Subject = m.ref(), a.Subject.ID
+		req.Ref, req.Subject, req.From = m.ref(), a.Subject.ID, m.from
 		if a.Gate != "" {
 			req.Ref = a.Gate
 		}
@@ -804,13 +832,13 @@ func (m *Model) reread() tea.Cmd {
 		}
 		return m.loadCity()
 	}
-	ref := m.ref()
-	l := m.lookups[ref]
+	k := m.subjectKey()
+	l := m.lookups[k]
 	if l == nil || l.pending || (l.err == nil && l.about.Refusal == "") {
 		return nil
 	}
-	delete(m.lookups, ref)
-	return m.lookup(ref)
+	delete(m.lookups, k)
+	return m.lookup(k)
 }
 
 func (m *Model) onSaved(msg savedMsg) tea.Cmd {
@@ -857,13 +885,13 @@ func (m *Model) onSaved(msg savedMsg) tea.Cmd {
 		m.subject.SetValue(msg.saved.Subject)
 		m.seq++
 		m.status += fmt.Sprintf(" Subject %s was filed; saving again files your question onto it.", msg.saved.Subject)
-		cmd = m.lookup(msg.saved.Subject)
+		cmd = m.lookup(lookupKey{ref: msg.saved.Subject})
 	case !m.newTopic():
 		// What open refused can be the subject as the form read it, such as
 		// one closed onto a successor in another rig since. The subject is
 		// read again, so the next Ctrl+S files where the screen then shows.
-		delete(m.lookups, m.ref())
-		cmd = m.lookup(m.ref())
+		delete(m.lookups, m.subjectKey())
+		cmd = m.lookup(m.subjectKey())
 	}
 	if m.leaving {
 		return m.quit()
@@ -1082,6 +1110,9 @@ func (m *Model) keepDraft(filed string) string {
 	switch {
 	case !m.newTopic():
 		again = "gc-helm.sh engage " + shellQuote(m.ref())
+		if m.from != "" {
+			again += " --from " + shellQuote(m.from)
+		}
 	case m.rig != "":
 		again = "gc-helm.sh engage --new-subject --rig " + shellQuote(m.rig)
 	}
@@ -1203,6 +1234,11 @@ func (m *Model) composeView() string {
 	b.WriteString(hintStyle.Render("   " + act + " · Tab next field · Ctrl+R return to a conversation · Esc cancel"))
 	b.WriteString("\n\n")
 	b.WriteString(m.label(subjectField, "Subject ") + "  " + m.subject.View() + "\n")
+	if m.from != "" {
+		// The field pads its line to its width, so a note beside it would run
+		// off the screen.
+		b.WriteString(hintStyle.Render("          chosen from what holds "+m.from) + "\n")
+	}
 	b.WriteString(m.label(questionField, "Question") + hintStyle.Render("  Enter adds a line") + "\n")
 	b.WriteString(m.question.View() + "\n\n")
 	if m.newTopic() {
@@ -1231,7 +1267,7 @@ func (m *Model) composeView() string {
 	mark := waitStyle.Render("…")
 	if ok {
 		mark = okStyle.Render("✓")
-	} else if l := m.lookups[m.ref()]; (l != nil && !l.pending) || m.newTopic() {
+	} else if l := m.lookups[m.subjectKey()]; (l != nil && !l.pending) || m.newTopic() {
 		mark = badStyle.Render("✗")
 	}
 	b.WriteString(labelStyle.Render("Files as") + "  " + mark + " " + dest + "\n")

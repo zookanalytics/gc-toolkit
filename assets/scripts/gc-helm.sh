@@ -55,11 +55,11 @@ FIXTURE="${GC_HELM_FIXTURE:-}"              # test hook: <dir>/rigs.json replace
 usage() {
     cat >&2 <<'EOF'
 Usage:
-  gc-helm open  <bead-id> [--reason "..."] [--body "..."] [--allow-duplicate] [--if-subject <id>] [--conversation <id>] [--json]  file a conversation about the bead in the operator's queue, for the operator to engage; a second concern joins the bead's conversation already in the queue unless --allow-duplicate files a fresh one, which lands instead on a conversation in the queue whose whole ask is that concern; --if-subject files only while the reference still names that subject, and a reference that names another now, through a successor, a PR's anchor or a gate's waiter, files nothing (exit 4); --conversation completes the conversation an earlier open filed for the concern, by its id, wherever it stands, adding the reply onto the gate that did not land, and one no longer open on the bead or holding another ask files nothing (exit 4); --json prints {subject,conversation,filed}, and names the conversation on every exit once it is filed
+  gc-helm open  <bead-id> [--reason "..."] [--body "..."] [--allow-duplicate] [--if-subject <id>] [--conversation <id>] [--from <bead-id>] [--json]  file a conversation about the bead in the operator's queue, for the operator to engage; a second concern joins the bead's conversation already in the queue unless --allow-duplicate files a fresh one, which lands instead on a conversation in the queue whose whole ask is that concern; --if-subject files only while the reference still names that subject, and a reference that names another now, through a successor, a PR's anchor or a gate's waiter, files nothing (exit 4); --conversation completes the conversation an earlier open filed for the concern, by its id, wherever it stands, adding the reply onto the gate that did not land, and one no longer open on the bead or holding another ask files nothing (exit 4); --from names the bead a gate was reached from, and a gate several open beads wait on files the conversation about that bead while it is one of them, while a gate that no longer holds that bead files nothing (exit 4); --json prints {subject,conversation,filed}, and names the conversation on every exit once it is filed
   gc-helm open  --new-subject --rig <name> [<question> | --reason "<question>"] [--json]  file a FRESH subject in the named rig for a topic that has no bead yet, the question unchanged in its description and its title derived from the question's opening, then its conversation in the queue; --json answers the subject, filed:false, the moment it is filed, and open's last answer is the one that counts, so a subject filed whose conversation is not is named for a re-run onto it
-  gc-helm engage [<subject>] [--subject <id>] [--new-subject [--rig <name>]] [--model <variant>] [--skill <name>] [--reason "..." | --template <key>] [--no-input] [--no-attach]  hold a conversation about the bead in a converse sitting and attach: attach to its live sitting, or take its conversation from the queue, or file one, then spawn a sitting named for it. Pointed at a human gate it takes the one bead still waiting on the gate, and the conversation replies to the gate. On a terminal, with no --reason, --template or --skill, it opens the conversation form instead: subject, question, a new topic's rig, model and whether to attach on one screen, filled in from the command line, where --no-attach turns attaching off; --no-input keeps the flag-driven one-shot path. --skill seeds the sitting with any skill it carries as its lens on the subject (--skill review-arch is a conversation with the Architect). --new-subject files a FRESH subject bead in the --rig rig (the positional text, or --reason, is the question; its title is derived from the question's opening) and engages it in one gesture
+  gc-helm engage [<subject>] [--subject <id>] [--from <bead-id>] [--new-subject [--rig <name>]] [--model <variant>] [--skill <name>] [--reason "..." | --template <key>] [--no-input] [--no-attach]  hold a conversation about the bead in a converse sitting and attach: attach to its live sitting, or take its conversation from the queue, or file one, then spawn a sitting named for it. Pointed at a human gate it takes the one bead still waiting on the gate, or the --from bead when it is one of several waiting, and the conversation replies to the gate. On a terminal, with no --reason, --template or --skill, it opens the conversation form instead: subject, question, a new topic's rig, model and whether to attach on one screen, filled in from the command line, where --no-attach turns attaching off; --no-input keeps the flag-driven one-shot path. --skill seeds the sitting with any skill it carries as its lens on the subject (--skill review-arch is a conversation with the Architect). --new-subject files a FRESH subject bead in the --rig rig (the positional text, or --reason, is the question; its title is derived from the question's opening) and engages it in one gesture
   gc-helm attach [<conversation>]  return to a conversation: with an id, engage's attach (a live sitting once it has started, or a new sitting on a conversation whose sitting ended or that waits in the queue); with none, on a terminal, the conversation form's list of conversations to return to, by topic and readiness
-  gc-helm conversations [<ref>] [--json]  list where each open conversation stands: its sitting's readiness (queued, starting, preparing, ready, ended) and whether a terminal is attached; with a subject reference, the subject as engage resolves it, the rig a conversation about it is held in, whether a sitting can start there, its open conversations and what holds it. Read-only
+  gc-helm conversations [<ref> [--from <bead-id>]] [--json]  list where each open conversation stands: its sitting's readiness (queued, starting, preparing, ready, ended) and whether a terminal is attached; with a subject reference, the subject as engage resolves it, --from as engage takes it, the rig a conversation about it is held in, whether a sitting can start there, its open conversations and what holds it. Read-only
   gc-helm react <bead-id> [--reason "..."]  file a first reaction — a reaction bead that tracks the subject, claimed and disposed by the proactive pool
   gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>... | --no-wait] [--release [--route <rig>/<agent> | --assign <named-agent>]]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
   gc-helm park <bead-id> "<text>" [--body "..."]  hold everything under the bead that has not started: file a gate titled with why it is parked and what releases it (≤140 chars, ENFORCED), described by --body, and make the bead wait on it
@@ -96,7 +96,8 @@ it, and attaches once the reconciler has started it, however long the start
 takes, reporting the sitting's state while it waits (an interrupted wait leaves
 the sitting to start on its own, to attach later). Pointed at a human gate,
 engage takes the one bead still waiting on the gate and makes the conversation
-it lands on reply to the gate; with several beads waiting it names them and
+it lands on reply to the gate; with several beads waiting it takes the --from
+bead when that bead is one of them, and otherwise it names them and
 starts nothing, and with none it says nothing waits and starts nothing.
 Named by a conversation that has closed, engage says when it closed and the
 first line of its last hand-back after the header, starts nothing and names
@@ -118,7 +119,10 @@ topic's rig, which the operator chooses and is never inferred, the model, with
 opus shown as the default, and whether to attach, which is on unless
 --no-attach is given. While the operator types, the form reads `conversations`
 for the subject: its rig, whether a sitting can start there, its open
-conversations and what holds it, and the city's rigs for a new topic. A result
+conversations and what holds it, and the city's rigs for a new topic. A gate
+chosen from what holds the subject becomes the subject, read and saved --from
+the subject it was chosen from, so a gate several beads wait on is about that
+one. A result
 for an earlier subject never stands in for the current one, and no result
 changes the rig or a conversation the operator chose. Ctrl+S saves only once the
 destination it shows is settled: open files the question as a new conversation,
@@ -1913,8 +1917,11 @@ verify_subject() {
 # on it, since a conversation always tracks a bead and never a gate. Sets
 # TAKE_BEAD (that bead), TAKE_GATE (the human gate the id named, which the
 # conversation replies to) and TAKE_CONV (the conversation the id named). A gate
-# several open beads wait on takes <from>, the one bead engage found waiting on
-# it, when it is one of them. Otherwise it is refused, naming them, so the
+# several open beads wait on takes <from>, the bead the caller reached it from,
+# when it is one of them. A <from> that waits on the gate only through another
+# bead, such as its rework, takes the gate as it is without <from>, and one the
+# gate no longer holds (holding_rows) is refused. Otherwise a gate several open
+# beads wait on is refused, naming them, so the
 # operator names the one they mean, and so is a gate nothing waits on, naming the
 # beads it was about, because a sitting there would answer an ask that holds
 # nothing. A refusal or a read that did not answer exits 4 with <nothing-msg>.
@@ -1941,7 +1948,28 @@ take_bead() {
             _tb_open=$(printf '%s' "$_tb_waiters" | jq -r '[ .[] | select(((.status // "open") | tostring | ascii_downcase) != "closed") | .id // empty ] | join(" ")')
             _tb_closed=$(printf '%s' "$_tb_waiters" | jq -r '[ .[] | select(((.status // "open") | tostring | ascii_downcase) == "closed") | .id // empty ] | join(" ")')
             if [ -n "$_tb_from" ]; then
-                case " $_tb_open " in *" $_tb_from "*) _tb_open="$_tb_from" ;; esac
+                case " $_tb_open " in
+                    *" $_tb_from "*) _tb_open="$_tb_from" ;;
+                    *)  # <from> does not wait on the gate itself. The gate still
+                        # holds it only through another bead, by the read a
+                        # list of its holds comes from, and never once it has
+                        # closed.
+                        _tb_held=""
+                        case " $_tb_closed " in
+                            *" $_tb_from "*) ;;
+                            *)  if ! _tb_holds=$(holding_rows "$_tb_from"); then
+                                    echo "$PROG: $_tb_verb: $_tb_from does not wait on gate $_tb_id itself, and what holds $_tb_from could not be read, so whether the gate still holds it cannot be told. $_tb_nothing" >&2
+                                    exit 4
+                                fi
+                                if printf '%s\n' "$_tb_holds" | awk -F'\t' -v g="$_tb_id" '$1 == "gate" && $2 == g { f = 1 } END { exit !f }'; then
+                                    _tb_held=1
+                                fi ;;
+                        esac
+                        if [ -z "$_tb_held" ]; then
+                            echo "$PROG: $_tb_verb: $_tb_from does not wait on gate $_tb_id now${_tb_open:+ (the beads waiting on it are $_tb_open)}, so the gate is not $_tb_from's to answer. $_tb_nothing" >&2
+                            exit 4
+                        fi ;;
+                esac
             fi
             # shellcheck disable=SC2086  # split the ids into positional parameters to count them
             set -- $_tb_open
@@ -1950,7 +1978,11 @@ take_bead() {
                     [ "${_tb_kind#gate"$TAB"}" = human ] && TAKE_GATE="$_tb_id" ;;
                 0)  echo "$PROG: $_tb_verb: nothing waits on gate $_tb_id${_tb_closed:+ (it was about $_tb_closed, now closed)}, so there is no bead for a conversation to be about. Clear the gate instead: gc bd gate resolve $_tb_id --reason \"moot: <why nothing waits on it>\". $_tb_nothing" >&2
                     exit 4 ;;
-                *)  echo "$PROG: $_tb_verb: gate $_tb_id is about $# beads still waiting on it ($_tb_open), and a conversation is about one bead. Name the one you mean: $PROG $_tb_verb <bead>. $_tb_nothing" >&2
+                *)  _tb_name="$PROG $_tb_verb <bead>"
+                    case "$_tb_verb" in
+                        open|engage|conversations) _tb_name="$PROG $_tb_verb $_tb_id --from <bead>" ;;
+                    esac
+                    echo "$PROG: $_tb_verb: gate $_tb_id is about $# beads still waiting on it ($_tb_open), and a conversation is about one bead.${_tb_from:+ $_tb_from is not one of them.} Name the one you mean: $_tb_name. $_tb_nothing" >&2
                     exit 4 ;;
             esac ;;
         conversation"$TAB"*)
@@ -2065,6 +2097,12 @@ open_join() {
 # that did not land, and files nothing. A conversation that is no longer an open
 # conversation about the bead, or that holds another ask, files nothing and
 # exits 4.
+# --from names the bead the reference was reached from, as the conversation form
+# names the subject whose holds listed the gate it files through: a gate several
+# open beads wait on files the conversation about that bead while it is one of
+# them, as OPEN_GATE_FROM does for engage. A gate that holds the bead only
+# through another bead, such as its rework, is taken as it is without --from,
+# and one that no longer holds it files nothing (take_bead).
 OPEN_GATE_FROM=""
 _open_new_subject_bead=""
 open_new_subject_report() {
@@ -2076,10 +2114,13 @@ open_new_subject_report() {
 }
 cmd_open() {
     bead=""; open_reason=""; open_body=""; open_allow_dup=""; open_json=""; OPEN_FILED=""
-    open_new_subject=0; open_rig=""; open_if_subject=""; open_conv=""
+    open_new_subject=0; open_rig=""; open_if_subject=""; open_conv=""; open_from=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --new-subject) open_new_subject=1; shift ;;
+            --from=*)   open_from="${1#--from=}"; shift ;;
+            --from)     shift; [ $# -gt 0 ] || { echo "$PROG: open: --from requires a value" >&2; exit 2; }
+                        open_from="$1"; shift ;;
             --if-subject=*) open_if_subject="${1#--if-subject=}"; shift ;;
             --if-subject) shift; [ $# -gt 0 ] || { echo "$PROG: open: --if-subject requires a value" >&2; exit 2; }
                         open_if_subject="$1"; shift ;;
@@ -2112,6 +2153,10 @@ cmd_open() {
     fi
     if [ -n "$open_conv" ] && [ "$open_new_subject" = 1 ]; then
         echo "$PROG: open: --conversation completes a conversation an earlier open filed on its subject, and --new-subject files a new subject; pass the subject that open filed instead." >&2
+        exit 2
+    fi
+    if [ -n "$open_from" ] && [ "$open_new_subject" = 1 ]; then
+        echo "$PROG: open: --from names the bead a gate was reached from, and --new-subject files a new subject; pass only one." >&2
         exit 2
     fi
     if [ "$open_new_subject" = 1 ]; then
@@ -2153,7 +2198,7 @@ cmd_open() {
     verify_subject "$bead" open "No conversation filed." || exit $?
     # <<< open-subject-exists
     # A gate or a conversation id names the bead the conversation is about.
-    take_bead open "No conversation filed." "$OPEN_GATE_FROM"
+    take_bead open "No conversation filed." "${open_from:-$OPEN_GATE_FROM}"
     if [ "$TAKE_BEAD" != "$bead" ]; then
         open_what=gate; [ -n "$TAKE_CONV" ] && open_what=conversation
         echo "$PROG: open: $bead is a $open_what about $TAKE_BEAD — the conversation is about $TAKE_BEAD" >&2
@@ -3399,7 +3444,7 @@ engage_say_holds() {
         if [ -z "$_esh_id" ]; then
             echo "$PROG: engage: $1 is held (held: $_esh_held): $_esh_title"
         elif [ "$_esh_held" = gate ]; then
-            echo "$PROG: engage: $1 is held by human gate $_esh_id (\"$_esh_title\"). To answer it: $PROG engage $_esh_id"
+            echo "$PROG: engage: $1 is held by human gate $_esh_id (\"$_esh_title\"). To answer it: $PROG engage $_esh_id --from $1"
         else
             echo "$PROG: engage: $1 is held by $_esh_id (\"$_esh_title\"), which a person has to clear. To engage it: $PROG engage $_esh_id"
         fi
@@ -3441,16 +3486,17 @@ sitting_refusal() {
     return 0
 }
 
-# engage_take <id> — settle what the engage is about from a bead, a
+# engage_take <id> [<from>] — settle what the engage is about from a bead, a
 # conversation or a gate: sets bead and bead_row to the bead its conversation
 # tracks, pointed_gate to a gate the id named, which the conversation replies to,
-# and named_conv to a conversation it named. A conversation the id named is read
+# and named_conv to a conversation it named. <from> is engage's --from, the bead
+# the gate was reached from (take_bead). A conversation the id named is read
 # for its status here, before anything is filed, and a closed one goes to
 # engage_closed_conversation. A refusal exits.
 engage_take() {
     bead="$1"; _et_conv_row=""
     verify_subject "$bead" engage "Nothing spawned." || exit $?
-    take_bead engage "Nothing spawned."
+    take_bead engage "Nothing spawned." "${2:-}"
     pointed_gate="$TAKE_GATE"; named_conv="$TAKE_CONV"
     if [ "$TAKE_BEAD" != "$bead" ]; then
         if [ -n "$named_conv" ]; then
@@ -3740,7 +3786,10 @@ engage_new_subject_cleanup() {
 # written before any sitting starts, so the sitting finds the gate among its
 # conversation's replies. Engage warns when it starts a sitting while another
 # live sitting tracks the bead or replies to a gate the bead waits on: one
-# sitting per bead is engage's default, not a guarantee.
+# sitting per bead is engage's default, not a guarantee. --from names the bead
+# the gate was reached from, as engage's line for a gate that holds a bead
+# names that bead: a gate several open beads wait on is about it while it is
+# one of them, and one that no longer holds it starts nothing (take_bead).
 #
 # --model selects the tier (opus default, else fable or codex). --skill seeds
 # the sitting with a skill as its lens on the subject, any skill the sitting
@@ -3760,6 +3809,8 @@ cmd_engage() {
     # there is no id prefix yet to derive the rig from). --rig names that rig;
     # --subject names an EXISTING one, so the two are mutually exclusive.
     engage_new_subject=0; engage_rig=""; engage_subject_flag=0
+    # --from names the bead a gate was reached from (engage_take).
+    engage_from=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --model=*)   engage_model="${1#--model=}"; engage_model_set=1; shift ;;
@@ -3778,6 +3829,9 @@ cmd_engage() {
             --subject)   shift; [ $# -gt 0 ] || { echo "$PROG: engage: --subject requires a value" >&2; exit 2; }
                          [ -z "$bead" ] || { echo "$PROG: engage takes one subject" >&2; exit 2; }; bead="$1"; engage_subject_flag=1; shift ;;
             --new-subject) engage_new_subject=1; shift ;;
+            --from=*)    engage_from="${1#--from=}"; shift ;;
+            --from)      shift; [ $# -gt 0 ] || { echo "$PROG: engage: --from requires a value" >&2; exit 2; }
+                         engage_from="$1"; shift ;;
             --rig=*)     engage_rig="${1#--rig=}"; shift ;;
             --rig)       shift; [ $# -gt 0 ] || { echo "$PROG: engage: --rig requires a value" >&2; exit 2; }
                          engage_rig="$1"; shift ;;
@@ -3816,6 +3870,14 @@ cmd_engage() {
         echo "$PROG: engage: --subject names an existing bead and --new-subject creates one — pass only one." >&2
         exit 2
     fi
+    if [ "$engage_new_subject" = 1 ] && [ -n "$engage_from" ]; then
+        echo "$PROG: engage: --from names the bead a gate was reached from, and --new-subject creates a new subject — pass only one." >&2
+        exit 2
+    fi
+    if [ -n "$engage_from" ] && [ -z "$bead" ]; then
+        echo "$PROG: engage: --from names the bead a gate was reached from, so it needs the gate: $PROG engage <gate> --from <bead>." >&2
+        exit 2
+    fi
 
     # On a terminal, an engage whose command line leaves the concern open runs
     # the conversation form (helm_form): the subject, the question, a new
@@ -3839,6 +3901,7 @@ cmd_engage() {
             [ -z "$engage_rig" ] || set -- "$@" --rig "$engage_rig"
         elif [ -n "$bead" ]; then
             set -- --subject "$bead"
+            [ -z "$engage_from" ] || set -- "$@" --from "$engage_from"
         fi
         [ "$engage_model_set" = 0 ] || set -- "$@" --model "$engage_model"
         [ "$engage_attach" = 1 ] || set -- "$@" --no-attach
@@ -3890,7 +3953,7 @@ cmd_engage() {
     # bead, the way open does. A gate names the one bead still waiting on it, and
     # a conversation id names its own conversation and the bead it tracks. A
     # closed conversation is refused.
-    engage_take "$bead"
+    engage_take "$bead" "$engage_from"
 
     # --skill and --reason write a NEW conversation's ask, which is written once,
     # at filing. An open conversation's id names a conversation whose ask
@@ -4570,22 +4633,34 @@ helm_form() {
 #                          refusal, conversations, holds, holds_read}. refusal
 #                          says why no sitting can start there (sitting_refusal),
 #                          empty when one can. holds is what holds the subject
-#                          (holding_rows). A bare PR number more than one live
+#                          (holding_rows). --from names the bead the reference
+#                          was reached from, as the form names the subject whose
+#                          holds listed a gate: a gate several open beads wait
+#                          on is about that bead while it is one of them, and
+#                          one that no longer holds it is refused (take_bead).
+#                          A bare PR number more than one live
 #                          anchor records prints {ref, candidates} instead,
 #                          each anchor with its title and rig, so the person
 #                          picks one. A reference that does not resolve is
 #                          refused as engage refuses it, exit 4.
 cmd_conversations() {
-    _cv_ref=""; _cv_json=0
+    _cv_ref=""; _cv_json=0; _cv_from=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --json) _cv_json=1; shift ;;
+            --from=*) _cv_from="${1#--from=}"; shift ;;
+            --from) shift; [ $# -gt 0 ] || { echo "$PROG: conversations: --from requires a value" >&2; exit 2; }
+                    _cv_from="$1"; shift ;;
             -h|--help) usage; exit 0 ;;
             -*) echo "$PROG: conversations: unknown flag '$1'" >&2; exit 2 ;;
             *) [ -z "$_cv_ref" ] || { echo "$PROG: conversations takes one reference" >&2; exit 2; }
                _cv_ref="$1"; shift ;;
         esac
     done
+    if [ -n "$_cv_from" ] && [ -z "$_cv_ref" ]; then
+        echo "$PROG: conversations: --from names the bead a gate was reached from, so it needs the gate: $PROG conversations <gate> --from <bead>." >&2
+        exit 2
+    fi
     if [ -n "$_cv_ref" ]; then
         conversations_about "$_cv_ref"
     else
@@ -4716,7 +4791,7 @@ conversations_about() {
 
     conversations_pin "$_cb_bead"
     verify_subject "$_cb_bead" conversations "Nothing read." || exit $?
-    take_bead conversations "Nothing read."
+    take_bead conversations "Nothing read." "$_cv_from"
     _cb_gate="$TAKE_GATE"; _cb_conv="$TAKE_CONV"; _cb_closed='null'
     if [ -n "$_cb_conv" ] && [ "$(printf '%s' "$VS_ROW" | jq -r '(.status // "") | tostring | ascii_downcase' 2>/dev/null || true)" = closed ]; then
         _cb_closed=$(jq -nc --arg id "$_cb_conv" --arg said "$(engage_closed_said "$VS_ROW" "$TAKE_BEAD")" '{id: $id, said: $said}')

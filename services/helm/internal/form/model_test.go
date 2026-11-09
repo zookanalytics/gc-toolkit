@@ -12,6 +12,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // fakeHelm answers the form's reads and records its writes. A read runs only
@@ -26,6 +27,7 @@ type fakeHelm struct {
 	saveErr  error
 	startErr error
 
+	abouts   []string // each read, as about keys it
 	saves    []SaveRequest
 	starts   []string
 	attaches []string
@@ -33,11 +35,18 @@ type fakeHelm struct {
 	attachArgs []string
 }
 
-func (f *fakeHelm) About(_ context.Context, ref string) (About, error) {
-	if err := f.aboutErr[ref]; err != nil {
+// About answers a reference from about, and one reached from a bead from the
+// entry "<ref> --from <bead>".
+func (f *fakeHelm) About(_ context.Context, ref, from string) (About, error) {
+	k := ref
+	if from != "" {
+		k += " --from " + from
+	}
+	f.abouts = append(f.abouts, k)
+	if err := f.aboutErr[k]; err != nil {
 		return About{}, err
 	}
-	return f.about[ref], nil
+	return f.about[k], nil
 }
 func (f *fakeHelm) City(context.Context) (City, error) { return f.city, f.cityErr }
 func (f *fakeHelm) Save(_ context.Context, req SaveRequest) (Saved, error) {
@@ -134,9 +143,9 @@ func loadCity(m *Model) { deliver(m, m.loadCity()) }
 
 // settle looks up the subject field as it reads now and delivers the answer.
 func settle(m *Model) {
-	ref := m.ref()
-	delete(m.lookups, ref)
-	deliver(m, m.lookup(ref))
+	k := m.subjectKey()
+	delete(m.lookups, k)
+	deliver(m, m.lookup(k))
 }
 
 func focusOn(t *testing.T, m *Model, f field) {
@@ -153,7 +162,7 @@ func TestTypingIsHandledWhileLookupsRun(t *testing.T) {
 	f := &fakeHelm{about: map[string]About{"tk-a": subjectAbout("tk-a", "gc-toolkit")}}
 	m := newForm(t, f, Options{Subject: "tk-a"})
 	initCmd := m.Init() // the city read and the subject lookup, not run yet
-	if initCmd == nil || !m.lookups["tk-a"].pending || !m.cityBusy {
+	if initCmd == nil || !m.lookups[lookupKey{ref: "tk-a"}].pending || !m.cityBusy {
 		t.Fatalf("Init should start the city read and the subject lookup")
 	}
 	typeText(m, "first line\nsecond")
@@ -179,7 +188,7 @@ func TestALookupForAnEarlierSubjectSettlesNothing(t *testing.T) {
 	}}
 	m := newForm(t, f, Options{})
 	typeText(m, "tk-a")
-	staleCmd := m.lookup("tk-a") // asked for while the field read tk-a
+	staleCmd := m.lookup(lookupKey{ref: "tk-a"}) // asked for while the field read tk-a
 	for range 4 {
 		m.Update(key(tea.KeyBackspace))
 	}
@@ -560,13 +569,13 @@ func TestATypedConversationIdIsChosenUntilTheOperatorChooses(t *testing.T) {
 	a.Conversations = []Conversation{{ID: "tk-c1", Readiness: Ended}}
 	f := &fakeHelm{about: map[string]About{"tk-c1": a}}
 	m := newForm(t, f, Options{Subject: "tk-c1"})
-	deliver(m, m.lookup("tk-c1"))
+	deliver(m, m.lookup(lookupKey{ref: "tk-c1"}))
 	if m.choice != "tk-c1" {
 		t.Fatalf("choice = %q, want the conversation the subject field named", m.choice)
 	}
 	m.choice, m.choiceTouched = newChoice, true
-	delete(m.lookups, "tk-c1")
-	deliver(m, m.lookup("tk-c1"))
+	delete(m.lookups, lookupKey{ref: "tk-c1"})
+	deliver(m, m.lookup(lookupKey{ref: "tk-c1"}))
 	if m.choice != newChoice {
 		t.Fatalf("a later lookup moved the operator's choice to %q", m.choice)
 	}
@@ -995,8 +1004,8 @@ func TestARefusedSaveReadsTheSubjectAgain(t *testing.T) {
 	f.aboutErr = map[string]error{"tk-b": errors.New("timed out")}
 	m2 := newForm(t, f, Options{})
 	typeText(m2, "tk-b")
-	deliver(m2, m2.lookup("tk-b"))
-	if m2.lookups["tk-b"].err == nil || m2.lookup("tk-b") == nil {
+	deliver(m2, m2.lookup(lookupKey{ref: "tk-b"}))
+	if m2.lookups[lookupKey{ref: "tk-b"}].err == nil || m2.lookup(lookupKey{ref: "tk-b"}) == nil {
 		t.Fatalf("a failed lookup is not read again")
 	}
 }
@@ -1449,6 +1458,176 @@ func TestHoldsWithNoBeadAreShownAndNeverChosen(t *testing.T) {
 	deliver(m, cmd)
 	if len(f.saves) != 1 || f.saves[0].Ref != "tk-a" || f.saves[0].Subject != "tk-a" {
 		t.Fatalf("saves = %+v, want one on tk-a", f.saves)
+	}
+}
+
+// sharedGateHelm answers tk-a, held by gate tk-g1, which tk-a and tk-b both wait
+// on, and by decision tk-dec. Typed alone the gate names two beads and is
+// refused, as gc-helm.sh refuses it. Reached from tk-a it is about tk-a, and the
+// conversation replies to it.
+func sharedGateHelm() *fakeHelm {
+	a := heldAbout()
+	a.Holds = append(a.Holds, Hold{Held: "blocked", ID: "tk-dec", Title: "keep the old flag?"})
+	viaA := subjectAbout("tk-a", "gc-toolkit")
+	viaA.Ref, viaA.Gate = "tk-g1", "tk-g1"
+	viaA.Conversations = a.Conversations
+	return &fakeHelm{
+		about: map[string]About{"tk-a": a, "tk-g1 --from tk-a": viaA, "tk-dec": subjectAbout("tk-dec", "gc-toolkit")},
+		aboutErr: map[string]error{"tk-g1": &Refusal{Code: 4, Why: "gc-helm: conversations: gate tk-g1 is about 2 beads still waiting on it (tk-a tk-b), " +
+			"and a conversation is about one bead. Name the one you mean: gc-helm conversations tk-g1 --from <bead>. Nothing read."}},
+	}
+}
+
+// chooseRow moves the cursor to the context row whose id is id and chooses it,
+// delivering the lookup the choice starts.
+func chooseRow(t *testing.T, m *Model, id string) {
+	t.Helper()
+	focusOn(t, m, contextField)
+	for i, r := range m.contextRows() {
+		if r.id == id {
+			m.cursor = i
+			_, cmd := m.Update(key(tea.KeySpace))
+			deliver(m, cmd)
+			return
+		}
+	}
+	t.Fatalf("no row %s among %+v", id, m.contextRows())
+}
+
+// A gate chosen from what holds a subject is about that subject, read and saved
+// from it, so a gate another bead waits on too is not refused: the screen files
+// on the subject the gate was chosen from, says so, and the save names it, which
+// open checks still waits on the gate before it files the reply.
+func TestAGateSeveralBeadsWaitOnIsAboutTheSubjectItWasChosenFrom(t *testing.T) {
+	f := sharedGateHelm()
+	f.saveResp = Saved{Subject: "tk-a", Conversation: "tk-c2", Filed: true}
+	m := newForm(t, f, Options{Subject: "tk-a"})
+	m.Update(tea.WindowSizeMsg{Width: 110, Height: 40})
+	settle(m)
+	chooseRow(t, m, "tk-g1")
+	if m.ref() != "tk-g1" || f.abouts[len(f.abouts)-1] != "tk-g1 --from tk-a" {
+		t.Fatalf("subject %q, reads %v, want the gate read from tk-a", m.ref(), f.abouts)
+	}
+	if dest, ok := m.destination(); !ok || !strings.Contains(dest, "a conversation on tk-a") || !strings.Contains(dest, "answering gate tk-g1") {
+		t.Fatalf("destination = %q, %v", dest, ok)
+	}
+	// The note is on screen on a 110-column terminal, which the subject field,
+	// padded to its width, leaves no room beside it for.
+	if l := marked(strings.Split(m.composeView(), "\n"), "chosen from what holds tk-a"); l == "" || lipgloss.Width(l) > 110 {
+		t.Fatalf("the screen does not say where the gate was chosen from, within 110 columns (%d): %q\n%s", lipgloss.Width(l), l, m.composeView())
+	}
+	focusOn(t, m, questionField)
+	typeText(m, "is the wording right?")
+	_, cmd := m.Update(ctrl('s'))
+	deliver(m, cmd)
+	want := SaveRequest{Ref: "tk-g1", Subject: "tk-a", From: "tk-a", Question: "is the wording right?"}
+	if len(f.saves) != 1 || f.saves[0] != want {
+		t.Fatalf("saves = %+v, want %+v", f.saves, want)
+	}
+	if len(f.starts) != 1 || f.starts[0] != "tk-c2 opus" {
+		t.Fatalf("starts = %v, want tk-c2", f.starts)
+	}
+}
+
+// A gate the operator types was reached from nothing, so one several beads wait
+// on is refused, naming them, and nothing is filed. A gate a choice put in the
+// field is read from nothing too once the field is edited, back to the same id
+// included, and a blocker chosen from what holds a subject is a subject of its
+// own, read from nothing.
+func TestAGateSeveralBeadsWaitOnIsRefusedWithNoSubjectItWasChosenFrom(t *testing.T) {
+	f := sharedGateHelm()
+	m := newForm(t, f, Options{Subject: "tk-g1"})
+	settle(m)
+	if dest, ok := m.destination(); ok || !strings.Contains(dest, "2 beads still waiting on it (tk-a tk-b)") {
+		t.Fatalf("destination = %q, %v", dest, ok)
+	}
+	typeText(m, "q")
+	m.Update(ctrl('s'))
+	if len(f.saves) != 0 || !strings.Contains(m.status, "Not saved") {
+		t.Fatalf("saves %v status %q", f.saves, m.status)
+	}
+
+	m = newForm(t, f, Options{Subject: "tk-a"})
+	settle(m)
+	chooseRow(t, m, "tk-g1")
+	focusOn(t, m, subjectField)
+	m.Update(key(tea.KeyEnd))
+	m.Update(key(tea.KeyBackspace))
+	typeText(m, "1")
+	if m.ref() != "tk-g1" || m.from != "" {
+		t.Fatalf("after the edit: subject %q from %q, want tk-g1 from nothing", m.ref(), m.from)
+	}
+	settle(m)
+	if dest, ok := m.destination(); ok || !strings.Contains(dest, "2 beads still waiting on it") {
+		t.Fatalf("destination after the edit = %q, %v", dest, ok)
+	}
+	if strings.Contains(m.composeView(), "chosen from what holds") {
+		t.Fatalf("an edited gate still says where it was chosen from:\n%s", m.composeView())
+	}
+
+	m = newForm(t, f, Options{Subject: "tk-a"})
+	settle(m)
+	chooseRow(t, m, "tk-dec")
+	if m.ref() != "tk-dec" || m.from != "" || f.abouts[len(f.abouts)-1] != "tk-dec" {
+		t.Fatalf("a chosen blocker: subject %q from %q, reads %v", m.ref(), m.from, f.abouts)
+	}
+}
+
+// A gate that no longer holds the subject it was chosen from is refused by the
+// read, and the form shows that refusal and files nothing: it never reads the
+// gate again without the subject, which would hand it to another bead.
+func TestAGateThatNoLongerHoldsItsSubjectFilesNothing(t *testing.T) {
+	f := sharedGateHelm()
+	delete(f.about, "tk-g1 --from tk-a")
+	f.aboutErr["tk-g1 --from tk-a"] = &Refusal{Code: 4, Why: "gc-helm: conversations: tk-a does not wait on gate tk-g1 now " +
+		"(the beads waiting on it are tk-b), so the gate is not tk-a's to answer. Nothing read."}
+	m := newForm(t, f, Options{Subject: "tk-a"})
+	settle(m)
+	chooseRow(t, m, "tk-g1")
+	if dest, ok := m.destination(); ok || !strings.Contains(dest, "tk-a does not wait on gate tk-g1 now") {
+		t.Fatalf("destination = %q, %v", dest, ok)
+	}
+	focusOn(t, m, questionField)
+	typeText(m, "q")
+	_, cmd := m.Update(ctrl('s'))
+	deliver(m, cmd)
+	if len(f.saves) != 0 {
+		t.Fatalf("saves = %+v, want none", f.saves)
+	}
+	for _, k := range f.abouts {
+		if k == "tk-g1" {
+			t.Fatalf("the gate was read without the subject it was chosen from: reads %v", f.abouts)
+		}
+	}
+}
+
+// engage's --from fills in where the subject, a gate, was reached from, so the
+// form reads it from there before the operator does anything, and a --from with
+// no subject is dropped.
+func TestTheCommandLinesFromReadsTheGateFromThatSubject(t *testing.T) {
+	f := sharedGateHelm()
+	m := newForm(t, f, Options{Subject: "tk-g1", From: "tk-a"})
+	deliver(m, m.Init())
+	if dest, ok := m.destination(); !ok || !strings.Contains(dest, "a conversation on tk-a") || len(f.abouts) != 1 || f.abouts[0] != "tk-g1 --from tk-a" {
+		t.Fatalf("destination = %q, %v; reads %v", dest, ok, f.abouts)
+	}
+	if m := newForm(t, f, Options{From: "tk-a"}); m.from != "" {
+		t.Fatalf("a --from with no subject was kept: %q", m.from)
+	}
+}
+
+// The command that files a kept question again names where a gate was chosen
+// from, so it files where the form would have.
+func TestAKeptDraftOnAGateNamesTheSubjectItWasChosenFrom(t *testing.T) {
+	f := sharedGateHelm()
+	m := newForm(t, f, Options{Subject: "tk-a", DraftDir: t.TempDir()})
+	settle(m)
+	chooseRow(t, m, "tk-g1")
+	focusOn(t, m, questionField)
+	typeText(m, "q")
+	m.Update(key(tea.KeyEscape))
+	if !strings.Contains(m.Note(), "gc-helm.sh engage tk-g1 --from tk-a --reason") {
+		t.Fatalf("note = %q", m.Note())
 	}
 }
 

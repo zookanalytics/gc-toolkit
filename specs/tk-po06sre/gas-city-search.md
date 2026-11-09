@@ -30,10 +30,14 @@ topic and readiness. The change adds this surface:
   reference still names the subject the form showed.
 - `gc-helm.sh open <ref> --conversation <id>`, which completes the conversation
   an earlier open filed for the concern, by its id, rather than file another.
+- `--from <bead-id>` on `gc-helm.sh conversations <ref>`, `open <ref>` and
+  `engage <ref>`, and on `helm-svc form`, which names the bead a gate was
+  reached from, so a gate several beads wait on is about that bead.
 
 Gas City read at upstream main `2264fa8108` (gastownhall/gascity, fetched
 2026-11-08). bd read as installed, 1.3.4, and its source at v1.3.2 in the Go
-module cache.
+module cache. The search for `--from` read Gas City at upstream main
+`d12e896018` and bd's source at v1.3.4.
 
 ## What was searched, and what each leaves
 
@@ -240,3 +244,29 @@ Gas City ships no terminal form, so nothing in it presets a form's field, and
 engage's `--no-attach` reaches the form only as an argument. So `helm-svc form`
 takes `--no-attach`, named for the flag it carries, and with it the attach field
 opens off and the form leaves once the sitting has started.
+
+**Answering a gate several beads wait on, about the bead it was reached from.**
+A conversation tracks one bead and replies to each human gate it answers, and
+the form lists the gates that hold a subject. When the operator chooses one that
+another bead waits on too, the form knows which bead it was reached from, and
+the verbs it calls had no way to be told. bd stores what the answer is built
+from: `bd dep list <gate> --direction=up --type blocks` lists the beads a gate
+blocks (`depListCmd` in `cmd/bd/dep.go` at beads v1.3.4), and the `tracks` and
+`replies-to` edges (`DepTracks` and `DepRepliesTo` in `internal/types/types.go`)
+are the conversation's two edges. None of them chooses among a gate's blocked
+beads. bd's own gate waiters (`bd gate add-waiter`, `Issue.Waiters`) are mail
+addresses woken when the gate clears, not the beads it blocks, so they say
+nothing about which bead a reply is for. Gas City forwards `bd gate create`,
+`gate resolve` and `gate check` to bd (`cmd/gc/bd_split_allowlist.go` at
+`d12e896018`, lines 140 to 142). Its own readers of a human gate, the core
+pack's `notify-on-human-gate-creation.sh` and `renudge-stale-human-gates.sh`
+(`internal/bootstrap/packs/core/assets/scripts/` at `d12e896018`), mail the
+gate's addressee and read none of the beads it blocks, and Gas City has no
+conversation. Which bead the operator came from is the caller's state,
+so no store can answer it. gc-helm.sh's resolver for a gate, `take_bead`,
+already takes it, from engage's own shell, so `--from` hands it the same value
+from the command line. A gate several beads wait on is about the `--from` bead
+while that bead is one of them. A gate that holds it only through another bead,
+such as its rework, is taken as it is without `--from`, and one that no longer
+holds it is refused, by the read the form's list of holds comes from
+(`holding_rows`).

@@ -52,7 +52,10 @@
 #   (GATE)    a gate names the one bead waiting on it; the conversation engage
 #             lands on — filed, taken from the queue, or live — replies to the
 #             gate before any sitting starts; two waiting beads, or none, start
-#             nothing and say why
+#             nothing and say why, and two engaged --from one of them take that
+#             one; a gate that holds the --from bead only through another bead
+#             is taken as without --from, and one that no longer holds it starts
+#             nothing
 #   (WARN)    a second live sitting on the bead, or one replying to a gate the
 #             bead waits on, is warned about, never refused
 #   (TAKEN, BIND-FAIL, STOMP, NOPERSIST) a bind that misses or does not stick
@@ -951,6 +954,45 @@ eq "$RC" 4 "(GATE-TWO) a gate two open beads wait on exits 4"
 has "$OUT" "tk-subj tk-child" "(GATE-TWO) …naming both, so the operator engages the one they mean"
 hasnt "$CALLED" "bd create" "(GATE-TWO) …filing no conversation"
 hasnt "$CALLED" "session new" "(GATE-TWO) …and starting no session"
+has "$OUT" "Name the one you mean: gc-helm engage tk-gate --from <bead>." "(GATE-TWO) …and how to name the one meant"
+
+echo "# a gate two open beads wait on, engaged --from one of them, is about that one"
+reset; run_engage tk-gate --from tk-subj --no-attach
+eq "$RC" 0 "(GATE-FROM) a gate two open beads wait on, engaged --from one of them, exits 0"
+has "$OUT" "tk-gate is a gate about tk-subj" "(GATE-FROM) …taking that bead"
+has "$CALLED" "bd dep bd dep add tk-conv tk-gate --type replies-to" "(GATE-FROM) …whose conversation replies to the gate"
+has "$CALLED" "session new converse-opus --alias tk-conv" "(GATE-FROM) …and starting its sitting"
+export HAVE_CONV=0
+reset; run_engage tk-gate --from tk-child --reason "is the wording right?" --no-input --no-attach
+eq "$RC" 0 "(GATE-FROM-NEW) a concern engaged on the gate --from the other bead exits 0"
+has "$CALLED" "--deps tracks:tk-child" "(GATE-FROM-NEW) …filing its conversation on that bead"
+hasnt "$CALLED" "--deps tracks:tk-subj" "(GATE-FROM-NEW) …and not on the first bead waiting"
+has "$CALLED" "bd dep bd dep add tk-new tk-gate --type replies-to" "(GATE-FROM-NEW) …replying to the gate"
+unset HAVE_CONV
+# A --from bead that does not wait on the gate itself is checked against what
+# holds it, which a gctk stand-in answers here from $FROM_HOLDS.
+printf '#!/bin/sh\nprintf %%s "{\\"reasons\\":${FROM_HOLDS:-[]}}"\n' > "$TMP/bin/gctk-from"
+chmod +x "$TMP/bin/gctk-from"
+export GCTK_BIN="$TMP/bin/gctk-from"
+reset; run_engage tk-gate --from tk-other --no-attach
+eq "$RC" 4 "(GATE-FROM-NOT-WAITING) --from a bead the gate does not hold exits 4"
+has "$OUT" "tk-other does not wait on gate tk-gate now (the beads waiting on it are tk-subj tk-child)" "(GATE-FROM-NOT-WAITING) …saying so"
+hasnt "$CALLED" "session new" "(GATE-FROM-NOT-WAITING) …and starting nothing"
+export GATE_WAITERS='[{"id":"tk-subj","status":"open","dependency_type":"blocks"}]'
+reset; FROM_HOLDS='[{"held":"gate","id":"tk-gate","title":"Approve the rollout"}]' run_engage tk-gate --from tk-pr --no-attach
+eq "$RC" 0 "(GATE-FROM-THROUGH) a gate held on the --from bead through the one bead waiting on it exits 0"
+has "$OUT" "tk-gate is a gate about tk-subj" "(GATE-FROM-THROUGH) …taking that bead, as without --from"
+reset; run_engage tk-gate --from tk-child --no-attach
+eq "$RC" 4 "(GATE-FROM-GONE) a gate the --from bead has stopped waiting on exits 4, though another bead waits on it"
+has "$OUT" "tk-child does not wait on gate tk-gate now (the beads waiting on it are tk-subj)" "(GATE-FROM-GONE) …saying so"
+hasnt "$CALLED" "session new" "(GATE-FROM-GONE) …and starting nothing"
+unset GCTK_BIN
+export GATE_WAITERS='[{"id":"tk-subj","status":"open"},{"id":"tk-child","status":"in_progress"}]'
+set +e; OUT="$(sh "$SCRIPT" engage --from tk-subj --no-input </dev/null 2>&1)"; RC=$?; set -e
+eq "$RC" 2 "(GATE-FROM-ALONE) --from with no gate exits 2"
+has "$OUT" "--from names the bead a gate was reached from, so it needs the gate" "(GATE-FROM-ALONE) …saying it needs the gate"
+set +e; OUT="$(sh "$SCRIPT" engage --new-subject --rig gc-toolkit "a topic" --from tk-subj --no-input </dev/null 2>&1)"; RC=$?; set -e
+eq "$RC" 2 "(GATE-FROM-NEW-SUBJECT) --from beside --new-subject exits 2"
 export GATE_WAITERS='[{"id":"tk-subj","status":"closed"},{"id":"tk-child","status":"closed"}]'
 reset; run_engage tk-gate --no-attach
 eq "$RC" 4 "(GATE-NONE) a gate nothing waits on exits 4"
@@ -1602,6 +1644,8 @@ reset; run_engage_tty '' tk-subj --model fable
 form_argv_is "form|--helm|$SCRIPT_REAL|--models|opus,codex,fable|--subject|tk-subj|--model|fable" "(FORM-MODEL) --model fills in the model"
 reset; run_engage_tty '' tk-subj --no-attach
 form_argv_is "form|--helm|$SCRIPT_REAL|--models|opus,codex,fable|--subject|tk-subj|--no-attach" "(FORM-NOATTACH) --no-attach turns the form's attaching off, as it turns engage's off"
+reset; run_engage_tty '' tk-gate --from tk-subj
+form_argv_is "form|--helm|$SCRIPT_REAL|--models|opus,codex,fable|--subject|tk-gate|--from|tk-subj" "(FORM-FROM) --from rides with the subject, so the form reads the gate from that bead"
 reset; run_engage_tty '' tk-subj --model typo
 eq "$RC" 2 "(FORM-MODEL-BAD) a --model no variant carries is refused on a terminal too, exit 2"
 eq "$FORM_ARGV" "" "(FORM-MODEL-BAD) …before the form opens"
@@ -1867,7 +1911,7 @@ export GATE_WAITERS='[{"id":"tk-rework","status":"open","dependency_type":"block
 export GCTK_REASONS="$ONE_GATE" HAVE_CONV=1
 fresh_gctk; run_fresh tk-subj --no-attach --no-input
 eq "$RC" 0 "(HOLD-NOINPUT) --no-input on a held bead exits 0"
-has "$OUT" 'tk-subj is held by human gate tk-gate ("Approve the rollout"). To answer it: gc-helm engage tk-gate' "(HOLD-NOINPUT) …naming the gate and how to engage it"
+has "$OUT" 'tk-subj is held by human gate tk-gate ("Approve the rollout"). To answer it: gc-helm engage tk-gate --from tk-subj' "(HOLD-NOINPUT) …naming the gate and how to engage it from the bead"
 hasnt "$(cat "$TMP/err")" "is held by human gate" "(HOLD-NOINPUT) …on stdout, all the board's route returns from an engage that exits 0"
 has "$CALLED" "session new converse-opus --alias tk-conv" "(HOLD-NOINPUT) …and carrying on with the bead's conversation"
 hasnt "$CALLED" "--type replies-to" "(HOLD-NOINPUT) …which answers no gate unasked"
@@ -1923,7 +1967,7 @@ if ( cd "$ROOT/services/gctk" && go build -buildvcs=false -o "$TMP/gctk" ./cmd/g
   export HAVE_CONV=0
   export WALK_EDGES='{"tk-subj":['"$REWORK_EDGE"'],"tk-rework":['"$GATE_EDGE"']}'
   run_fresh tk-subj --no-attach --no-input
-  has "$OUT" 'tk-subj is held by human gate tk-gate ("Approve the rollout"). To answer it: gc-helm engage tk-gate' "(HOLD-REAL) a gate on the rework the anchor waits on is offered"
+  has "$OUT" 'tk-subj is held by human gate tk-gate ("Approve the rollout"). To answer it: gc-helm engage tk-gate --from tk-subj' "(HOLD-REAL) a gate on the rework the anchor waits on is offered"
   export WALK_EDGES='{"tk-subj":['"$REWORK_EDGE"','"$DECISION_EDGE"'],"tk-rework":['"$GATE_EDGE"']}'
   run_fresh tk-subj --no-attach --no-input
   has "$OUT" 'tk-subj is held by tk-dec ("keep the old flag?"), which a person has to clear.' "(HOLD-REAL) a decision the anchor waits on is offered beside the gate"
