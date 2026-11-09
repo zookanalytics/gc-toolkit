@@ -58,6 +58,7 @@ type Bead struct {
 	ID           string         `json:"id"`
 	Title        string         `json:"title"`
 	Status       *string        `json:"status"`
+	ClosedAt     any            `json:"closed_at"`
 	Assignee     any            `json:"assignee"`
 	Notes        any            `json:"notes"`
 	Metadata     map[string]any `json:"metadata"`

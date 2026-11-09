@@ -431,11 +431,16 @@ The adapter's errors are distinct types. The `waits-for` error comes from a
 bead's own edges and stands until bd's repair, and a read error says only that
 one read could not answer, so a caller tells them apart by type alone.
 
-A bead's row as `gc bd show` returns it leaves out an edge whose far bead the
-store does not hold, while the store's listing, `gc bd list`, keeps every edge
-with the far bead's id and the edge's type alone. `waits` reads both through
-the ledger, and a wait edge the listing has and the show row lacks is one into
-another store once a read of its far bead finds the store does not hold it.
+The ledger's snapshot reads the store's listing, `gc bd list`, which names each
+edge's far bead by its id and the edge's type alone: one read of the beads
+named, then for each generation of ancestors one read of the far beads their
+wait and parent-child edges name, so a snapshot of any number of beads costs a
+few reads. `gc bd show` hydrates each far bead whole, at seconds per hundred
+beads. Each record's edge carries its far bead's title, status and close time
+from that bead's own row, and an edge whose far bead the read does not return
+is left out, as a show row leaves it out. A wait edge the listing has and the
+record lacks is one into another store once a read of its far bead finds the
+store does not hold it.
 Every read `waits` makes names one store with bd's `--db`: the store its caller
 names, or the one `gc bd where` says gc resolves. gc routes a read that names a
 bead and no store to the store that holds the bead, so an unpinned read of a

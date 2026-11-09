@@ -68,10 +68,8 @@ func waitIDs(ws []waits.Wait) []string {
 // Each status the bead read answers with.
 func TestEachStatus(t *testing.T) {
 	s := parked()
-	s.Put(bead{ID: "blocker", Status: "open"})
-	titled := edge(gcbd.EdgeBlocks, "blocker", "open")
-	titled.Title = "the work it waits on"
-	s.Put(bead{ID: "own", Status: "open", Edges: []gcbd.Edge{titled}})
+	s.Put(bead{ID: "blocker", Status: "open", Title: "the work it waits on"})
+	s.Put(bead{ID: "own", Status: "open", Edges: []gcbd.Edge{edge(gcbd.EdgeBlocks, "blocker", "open")}})
 	s.List("own", "blocker")
 	s.Mark("own")
 	under(s, bead{ID: "member", Status: "open"})
@@ -418,7 +416,6 @@ func TestAReadThatFailsIsAnError(t *testing.T) {
 		name string
 		fail func(*fake.Store)
 	}{
-		{"the row read", func(s *fake.Store) { s.RowsErr = failed }},
 		{"the blocked read", func(s *fake.Store) { s.BlockedErr = failed }},
 		{"the listing read", func(s *fake.Store) { s.FindErr = failed }},
 	} {

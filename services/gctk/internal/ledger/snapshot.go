@@ -3,6 +3,7 @@ package ledger
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 )
@@ -38,10 +39,11 @@ func (r *Record) Status() string { return r.row.StatusLower() }
 // IssueType is the bead's issue type, "" when the row carries none.
 func (r *Record) IssueType() string { return r.row.IssueTypeString() }
 
-// Edges is the bead's own edges. A record a snapshot read carries each far
-// bead's status and close time, and leaves out an edge whose far bead the store
-// does not hold. A record Find returns carries every edge, with the far bead's
-// id and the edge's type alone.
+// Edges is the bead's own edges. A record a snapshot read carries its wait and
+// parent-child edges alone, each with the far bead's title, status and close
+// time, and leaves out an edge whose far bead the store does not hold. A record
+// Find returns carries every edge, with the far bead's id and the edge's type
+// alone.
 func (r *Record) Edges() ([]gcbd.Edge, error) { return r.row.Edges() }
 
 // Parent is the bead its parent-child edge names, "" when it has none.
@@ -97,35 +99,66 @@ type Snapshot struct {
 // not one the city files, so a walk that reaches it fails rather than read on.
 const maxAncestry = 32
 
+// heldEdge reports whether an edge's far bead the snapshot reads: a wait of the
+// store's blocked rule, or the parent-child edge an ancestor is reached by.
+func heldEdge(typ string) bool {
+	return typ == gcbd.EdgeBlocks || typ == gcbd.EdgeConditionalBlocks ||
+		typ == gcbd.EdgeWaitsFor || typ == gcbd.EdgeParentChild
+}
+
 // Read builds a snapshot of the beads named and every ancestor their
 // parent-child edges reach, since the store can hold a bead through any of
-// them. It reads the rows one level at a time and the blocked set once. A read
-// that fails returns its *gcbd.ReadError, and so does a bead named or reached
-// that the store reads no row for, since a snapshot without it can answer
-// neither for it nor for a bead below it.
+// them. It reads the store's listing, not a row per bead: one read of the beads
+// named, then for each generation one read of the far beads its edges name, and
+// the blocked set once. A listing names an edge's far bead by its id alone, so
+// each record's wait and parent-child edges carry the far bead's title, status
+// and close time from that bead's own row, and an edge whose far bead the store
+// does not hold is left out, as a `gc bd show` row leaves it out. A record
+// carries no edge of any other type. A read that fails returns its
+// *gcbd.ReadError, and so does a bead named that the store holds no row for.
 func (l *Ledger) Read(ids ...string) (*Snapshot, error) {
 	s := &Snapshot{records: map[string]*Record{}}
-	level := ids
+	rows := map[string]*gcbd.Bead{}
+	level := slices.Compact(slices.Sorted(slices.Values(ids)))
+	if err := l.listInto(rows, level); err != nil {
+		return nil, err
+	}
+	for _, id := range level {
+		if rows[id] == nil {
+			return nil, &gcbd.ReadError{ID: id, Reason: "the store's listing holds no row for it"}
+		}
+	}
 	for depth := 0; len(level) > 0; depth++ {
 		if depth > maxAncestry {
 			return nil, &gcbd.ReadError{Reason: fmt.Sprintf("the parent-child walk from %v passed %d levels", ids, maxAncestry)}
 		}
-		rows, err := l.store.Rows(level)
-		if err != nil {
+		edges := make(map[string][]gcbd.Edge, len(level))
+		var far []string
+		for _, id := range level {
+			e, err := rows[id].Edges()
+			if err != nil {
+				return nil, &gcbd.ReadError{ID: id, Reason: "its edges did not decode: " + err.Error()}
+			}
+			edges[id] = e
+			for _, x := range e {
+				if heldEdge(x.Type) && rows[x.ID] == nil && !slices.Contains(far, x.ID) {
+					far = append(far, x.ID)
+				}
+			}
+		}
+		if err := l.listInto(rows, far); err != nil {
 			return nil, err
 		}
 		var next []string
-		for i := range rows {
-			r := &Record{ID: rows[i].ID, row: &rows[i]}
-			s.records[r.ID] = r
+		for _, id := range level {
+			r := &Record{ID: id, row: shown(rows[id], edges[id], rows)}
+			s.records[id] = r
 			parent, err := r.Parent()
 			if err != nil {
-				return nil, &gcbd.ReadError{ID: r.ID, Reason: "its edges did not decode: " + err.Error()}
+				return nil, &gcbd.ReadError{ID: id, Reason: "its edges did not decode: " + err.Error()}
 			}
-			if parent != "" {
-				if _, read := s.records[parent]; !read {
-					next = append(next, parent)
-				}
+			if parent != "" && s.records[parent] == nil && !slices.Contains(next, parent) && !slices.Contains(level, parent) {
+				next = append(next, parent)
 			}
 		}
 		level = next
@@ -136,6 +169,43 @@ func (l *Ledger) Read(ids ...string) (*Snapshot, error) {
 	}
 	s.blocked = blocked
 	return s, nil
+}
+
+// listInto adds the listing's row of each bead named to rows, closed beads
+// included. A bead the store does not hold is left out.
+func (l *Ledger) listInto(rows map[string]*gcbd.Bead, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	got, err := l.store.Find(gcbd.Query{IDs: ids, Closed: true})
+	if err != nil {
+		return err
+	}
+	for i := range got {
+		rows[got[i].ID] = &got[i]
+	}
+	return nil
+}
+
+// shown is the row b as a snapshot reads it: its own fields, and its wait and
+// parent-child edges, each with the far bead's title, status and close time
+// from that bead's row in rows, an edge onto a bead rows does not hold left out.
+func shown(b *gcbd.Bead, edges []gcbd.Edge, rows map[string]*gcbd.Bead) *gcbd.Bead {
+	out := *b
+	deps := make([]any, 0, len(edges))
+	for _, e := range edges {
+		f := rows[e.ID]
+		if !heldEdge(e.Type) || f == nil {
+			continue
+		}
+		d := map[string]any{"id": e.ID, "dependency_type": e.Type, "status": f.StatusLower(), "title": f.Title}
+		if f.ClosedAt != nil {
+			d["closed_at"] = f.ClosedAt
+		}
+		deps = append(deps, d)
+	}
+	out.Dependencies = deps
+	return &out
 }
 
 // Record returns the bead's record, and whether the snapshot holds it.

@@ -169,9 +169,9 @@ func Read(l *ledger.Ledger, ids ...string) (*Snapshot, error) {
 	return s, nil
 }
 
-// readForeign finds each bead's wait edges into another store. A show row
-// leaves out an edge whose far bead the store does not hold, and the listing
-// keeps every edge, so an edge the listing has and the show row lacks is a
+// readForeign finds each bead's wait edges into another store. A snapshot's
+// record leaves out an edge whose far bead the store does not hold, and the
+// listing keeps every edge, so an edge the listing has and the record lacks is a
 // candidate, and one more read of the candidates' far beads names the ones the
 // store does not hold.
 func (s *Snapshot) readForeign(l *ledger.Ledger, ids []string, listed map[string][]ledger.Edge) error {
@@ -204,7 +204,7 @@ func (s *Snapshot) readForeign(l *ledger.Ledger, ids []string, listed map[string
 	return nil
 }
 
-// candidates are the wait edges the listing has that the show row lacks.
+// candidates are the wait edges the listing has that the record lacks.
 func candidates(listed, shown []ledger.Edge) []ledger.Edge {
 	var out []ledger.Edge
 	for _, e := range listed {
@@ -219,7 +219,7 @@ func candidates(listed, shown []ledger.Edge) []ledger.Edge {
 // naming the far beads it does. A candidate whose far bead the store holds is
 // not one into another store. A write between the reads made them disagree,
 // such as the edge's removal after the listing read it or the far bead's
-// creation after the show row left the edge out.
+// creation after the snapshot left the edge out.
 func foreignOf(listed, shown []ledger.Edge, held map[string]bool) []Foreign {
 	var out []Foreign
 	for _, e := range candidates(listed, shown) {

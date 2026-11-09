@@ -19,11 +19,13 @@ import (
 // Bead is a row to put in the store: what a `gc bd show --json` row carries of
 // it, with its own edges. An edge whose far bead the store does not hold is one
 // into another store: Rows leaves it out, as a show does, and Find keeps it, as
-// a listing does.
+// a listing does. ClosedAt is when a closed bead closed. An edge carries the far
+// bead's fields as a show row reports them, so a closed row that names no close
+// time takes the one an edge onto it names.
 type Bead struct {
-	ID, Title, Status, IssueType string
-	Metadata                     map[string]string
-	Edges                        []gcbd.Edge
+	ID, Title, Status, IssueType, ClosedAt string
+	Metadata                               map[string]string
+	Edges                                  []gcbd.Edge
 }
 
 // Write is one update the store took: the bead and the update's arguments.
@@ -133,7 +135,7 @@ func (s *Store) Find(q gcbd.Query) ([]gcbd.Bead, error) {
 		if v, held := b.Metadata[q.Key]; q.Key != "" && (!held || v != q.Value) {
 			continue
 		}
-		out = append(out, listed(b))
+		out = append(out, s.listing(b))
 	}
 	return out, nil
 }
@@ -213,14 +215,35 @@ func (s *Store) row(b Bead) gcbd.Bead {
 	return bead(b, deps)
 }
 
-// listed renders b as gcbd decodes a `gc bd list --json` row, whose edges name
-// the far bead and the edge's type alone, every edge included.
-func listed(b Bead) gcbd.Bead {
+// listing renders b as gcbd decodes a `gc bd list --json` row, whose edges name
+// the far bead and the edge's type alone, every edge included, and which carries
+// the bead's own close time.
+func (s *Store) listing(b Bead) gcbd.Bead {
 	deps := make([]any, 0, len(b.Edges))
 	for _, e := range b.Edges {
 		deps = append(deps, map[string]any{"issue_id": b.ID, "depends_on_id": e.ID, "type": e.Type})
 	}
-	return bead(b, deps)
+	out := bead(b, deps)
+	if at := s.closedAt(b); at != "" {
+		out.ClosedAt = at
+	}
+	return out
+}
+
+// closedAt is when b closed: its own close time, or for a closed row that names
+// none, the one an edge onto it names.
+func (s *Store) closedAt(b Bead) string {
+	if b.ClosedAt != "" || !strings.EqualFold(b.Status, "closed") {
+		return b.ClosedAt
+	}
+	for _, id := range slices.Sorted(maps.Keys(s.rows)) {
+		for _, e := range s.rows[id].Edges {
+			if e.ID == b.ID && e.ClosedAt != "" {
+				return e.ClosedAt
+			}
+		}
+	}
+	return ""
 }
 
 func bead(b Bead, deps []any) gcbd.Bead {

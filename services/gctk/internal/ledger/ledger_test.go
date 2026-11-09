@@ -235,28 +235,40 @@ func TestASnapshotWhoseReadFailsIsAReadError(t *testing.T) {
 	if _, err := New(s).Read("b-1"); !errors.As(err, &re) {
 		t.Errorf("a blocked read that fails = %v, want its read error", err)
 	}
-	s.BlockedErr, s.RowsErr = nil, &gcbd.ReadError{Reason: "gc bd show exited 1"}
+	s.BlockedErr, s.FindErr = nil, &gcbd.ReadError{Reason: "gc bd list exited 1"}
 	if _, err := New(s).Read("b-1"); !errors.As(err, &re) {
-		t.Errorf("a row read that fails = %v, want its read error", err)
+		t.Errorf("a listing read that fails = %v, want its read error", err)
 	}
 }
 
-// A bead the store reads no row for, named or reached as an ancestor, fails the
-// snapshot, since without it the snapshot can answer neither for it nor for a
-// bead below it. An ancestor's row goes unread when its lookup fails after the
-// child's row named it.
+// A bead named that the store holds no row for fails the snapshot, since
+// without it the snapshot can answer nothing for it. An edge onto a bead the
+// listing does not return, a parent among them, is left out of the record, as a
+// show row leaves it out, so the bead has no such parent. A blocked listing that
+// still names that parent disagrees with the row, and the store's answer for the
+// bead is then a read error.
 func TestASnapshotWithoutABeadItNeedsIsAReadError(t *testing.T) {
 	s := fake.New()
 	s.Put(fake.Bead{ID: "orphan", Status: "open", Edges: []gcbd.Edge{{Type: gcbd.EdgeParentChild, ID: "gone-parent", Status: "open"}}})
-	s.Put(fake.Bead{ID: "gone-parent", Status: "open"})
-	s.Lose("gone-parent")
-	for _, tc := range []struct{ name, id, missing string }{
-		{"a bead named", "gone", "gone"},
-		{"an ancestor", "orphan", "gone-parent"},
-	} {
-		var re *gcbd.ReadError
-		if snap, err := New(s).Read(tc.id); !errors.As(err, &re) || re.ID != tc.missing || snap != nil {
-			t.Errorf("%s the store does not hold = %v, %v; want a read error naming %s", tc.name, snap, err, tc.missing)
-		}
+	var re *gcbd.ReadError
+	if snap, err := New(s).Read("gone"); !errors.As(err, &re) || re.ID != "gone" || snap != nil {
+		t.Errorf("a bead named that the store does not hold = %v, %v; want a read error naming gone", snap, err)
+	}
+	snap, err := New(s).Read("orphan")
+	if err != nil {
+		t.Fatalf("a bead whose parent the listing does not return = %v; want its snapshot", err)
+	}
+	r, _ := snap.Record("orphan")
+	if parent, err := r.Parent(); err != nil || parent != "" {
+		t.Errorf("orphan's parent = %q, %v; want none, since the listing does not return it", parent, err)
+	}
+	s.List("orphan", "gone-parent")
+	s.Mark("orphan")
+	snap, err = New(s).Read("orphan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := snap.Blocking("orphan"); !errors.As(err, &re) || re.ID != "orphan" {
+		t.Errorf("a blocked listing naming a parent the row lacks = %v; want a read error naming orphan", err)
 	}
 }
