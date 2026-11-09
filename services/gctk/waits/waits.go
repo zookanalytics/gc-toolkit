@@ -80,8 +80,10 @@ type Arm struct {
 
 // Holds is what holds one bead. Waits are the waits behind its status: its own
 // for a blocked or an unjudged bead, and the waits of the one ancestor it is
-// held through for a held bead. Pending are its own waits that have not landed,
-// and LastLanded is when the last of its own waits that did landed. InFlight is
+// held through for a held bead. Pending are its own waits that have not landed.
+// LastLanded is when the last wait that applies to it landed, by the rule for
+// where its work is: its own waits, and for work that has not started the waits
+// of each live ancestor too, since they hold that work as its own do. InFlight is
 // why the bead is in flight, empty when it is not. Arm is nil when the bead
 // carries none, and Foreign lists its wait edges into another store.
 type Holds struct {
@@ -322,7 +324,7 @@ func (s *Snapshot) Holds(id string) (Holds, error) {
 		return Holds{}, &ledger.ReadError{ID: id, Reason: "its edges did not decode: " + err.Error()}
 	}
 	h := Holds{ID: id, Waits: []Wait{}, Pending: []Wait{}, InFlight: s.flight[id], Arm: armOf(r), Foreign: []Foreign{}}
-	if h.LastLanded, err = lastLanded(id, own); err != nil {
+	if h.LastLanded, err = s.lastLanded(r, own, h.InFlight == ""); err != nil {
 		return Holds{}, err
 	}
 	if f := s.foreign[id]; f != nil {
@@ -405,26 +407,59 @@ func waitsOn(edges []ledger.Edge, ids []string, ancestor string) []Wait {
 	return out
 }
 
-// lastLanded is when the last of the bead's own waits that landed did: the
-// latest close time among its blocks and conditional-blocks edges onto a closed
-// bead, empty when none has closed. A waits-for edge lands when its gate opens,
-// which no close time records, so its spawner's close is no landing.
-func lastLanded(id string, edges []ledger.Edge) (string, error) {
-	var last time.Time
-	text := ""
+// lastLanded is when the last wait that applies to the bead landed: the latest
+// close time among its own blocks and conditional-blocks edges onto a closed
+// bead and, for work that has not started, among those of each ancestor the
+// store holds it under, up to the first closed or pinned one, whose waits hold
+// nothing below it. It is empty when none has closed. A waits-for edge lands
+// when its gate opens, which no close time records, so its spawner's close is no
+// landing.
+func (s *Snapshot) lastLanded(r *ledger.Record, own []ledger.Edge, unstarted bool) (string, error) {
+	last, text, err := landedAmong(r.ID, own, time.Time{}, "")
+	if err != nil || !unstarted {
+		return text, err
+	}
+	seen := map[string]bool{r.ID: true}
+	cur, err := r.Parent()
+	for ; err == nil && cur != "" && !seen[cur]; cur, err = r.Parent() {
+		seen[cur] = true
+		var ok bool
+		if r, ok = s.record(cur); !ok {
+			return text, nil
+		}
+		if st := r.Status(); st == "closed" || st == "pinned" {
+			return text, nil
+		}
+		edges, eerr := r.Edges()
+		if eerr != nil {
+			return "", &ledger.ReadError{ID: cur, Reason: "its edges did not decode: " + eerr.Error()}
+		}
+		if last, text, err = landedAmong(cur, edges, last, text); err != nil {
+			return "", err
+		}
+	}
+	if err != nil {
+		return "", &ledger.ReadError{ID: cur, Reason: "its edges did not decode: " + err.Error()}
+	}
+	return text, nil
+}
+
+// landedAmong is the later of last, whose stored text is text, and the latest
+// close among edges' blocks and conditional-blocks waits onto a closed bead.
+func landedAmong(id string, edges []ledger.Edge, last time.Time, text string) (time.Time, string, error) {
 	for _, e := range edges {
 		if (e.Type != ledger.EdgeBlocks && e.Type != ledger.EdgeConditionalBlocks) || e.Status != "closed" {
 			continue
 		}
 		at, err := time.Parse(time.RFC3339Nano, e.ClosedAt)
 		if err != nil {
-			return "", &ledger.ReadError{ID: id, Reason: fmt.Sprintf("the close time of %s, %q, does not read as a time", e.ID, e.ClosedAt)}
+			return last, "", &ledger.ReadError{ID: id, Reason: fmt.Sprintf("the close time of %s, %q, does not read as a time", e.ID, e.ClosedAt)}
 		}
 		if text == "" || at.After(last) {
 			last, text = at, e.ClosedAt
 		}
 	}
-	return text, nil
+	return last, text, nil
 }
 
 // armOf is the bead's arm, nil when it carries neither a sling target nor an

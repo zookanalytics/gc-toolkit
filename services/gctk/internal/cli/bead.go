@@ -34,8 +34,9 @@ waits are the waits behind the status, each {"id", "type", "title",
 "ancestor" naming the ancestor whose wait it is. A waits-for wait is unjudged: the bd the city runs
 judges it by its spawner's status rather than its gate, so a caller that acts
 holds such a bead. pending is the bead's own waits that have not landed, and
-last_landed is when the last of its own waits that landed did, "" when none
-has. in_flight says why the bead is in flight: claimed, carrying branch,
+last_landed is when the last wait that applies to it landed: its own, and for
+work that has not started each live ancestor's too, "" when none has.
+in_flight says why the bead is in flight: claimed, carrying branch,
 merge_result or rejection_reason, or worked by a live workflow past
 load-context, and is "" when it is not. arm is the arm on a bead armed to
 start by itself, each value as the store holds it, and null when it carries

@@ -497,9 +497,9 @@ func TestAHeldBeadsWaitsAreItsAncestors(t *testing.T) {
 	}
 }
 
-// A bead's pending waits are its own that have not landed, and the last of its
-// own waits to land names when it did. An ancestor's park is none of them, and
-// an edge that is no wait never counts.
+// A bead's pending waits are its own that have not landed, and the last wait to
+// land names when it did. An ancestor's open park is none of them, and an edge
+// that is no wait never counts.
 func TestPendingAndTheLastLanding(t *testing.T) {
 	s := parked()
 	s.Put(bead{ID: "early", Status: "closed"})
@@ -539,6 +539,42 @@ func TestPendingAndTheLastLanding(t *testing.T) {
 	s.Mark("gated")
 	if h := holdsOf(t, s, "gated"); h.Status != waits.Unjudged || h.LastLanded != "" {
 		t.Errorf("gated = %s, last landed %q; want unjudged with no landing", h.Status, h.LastLanded)
+	}
+}
+
+// For work that has not started, an ancestor's waits hold it as its own do, so
+// the last landing counts theirs too, up to the first ancestor that is closed or
+// pinned. Work in flight counts its own waits alone.
+func TestTheLastLandingCountsAnAncestorsForWorkNotStarted(t *testing.T) {
+	s := fake.New()
+	s.Put(bead{ID: "own-blocker", Status: "closed"})
+	s.Put(bead{ID: "park", Status: "closed", IssueType: "gate"})
+	s.Put(bead{ID: "old-park", Status: "closed", IssueType: "gate"})
+	s.Put(bead{ID: "root", Status: "open", IssueType: "epic", Edges: []gcbd.Edge{landed(gcbd.EdgeBlocks, "park", "2026-11-08T12:00:00Z")}})
+	s.Put(bead{ID: "feat", Status: "open", IssueType: "feature", Edges: []gcbd.Edge{edge(gcbd.EdgeParentChild, "root", "open")}})
+	s.Put(bead{ID: "task", Status: "open", Edges: []gcbd.Edge{
+		edge(gcbd.EdgeParentChild, "feat", "open"),
+		landed(gcbd.EdgeBlocks, "own-blocker", "2026-11-02T12:00:00Z"),
+	}})
+	if h := holdsOf(t, s, "task"); h.Status != waits.Clear || h.LastLanded != "2026-11-08T12:00:00Z" {
+		t.Errorf("task = %s, last landed %q; want clear, last landed when the park two levels up closed", h.Status, h.LastLanded)
+	}
+
+	s.Put(bead{ID: "flying", Status: "in_progress", Edges: []gcbd.Edge{
+		edge(gcbd.EdgeParentChild, "feat", "open"),
+		landed(gcbd.EdgeBlocks, "own-blocker", "2026-11-02T12:00:00Z"),
+	}})
+	if h := holdsOf(t, s, "flying"); h.LastLanded != "2026-11-02T12:00:00Z" {
+		t.Errorf("flying last landed %q; want its own blocker's landing alone, since it is in flight", h.LastLanded)
+	}
+
+	s.Put(bead{ID: "done-epic", Status: "closed", IssueType: "epic", Edges: []gcbd.Edge{landed(gcbd.EdgeBlocks, "old-park", "2026-11-09T00:00:00Z")}})
+	s.Put(bead{ID: "orphan", Status: "open", Edges: []gcbd.Edge{
+		edge(gcbd.EdgeParentChild, "done-epic", "closed"),
+		landed(gcbd.EdgeBlocks, "own-blocker", "2026-11-02T12:00:00Z"),
+	}})
+	if h := holdsOf(t, s, "orphan"); h.LastLanded != "2026-11-02T12:00:00Z" {
+		t.Errorf("orphan last landed %q; want its own landing, since a closed ancestor's waits hold nothing below it", h.LastLanded)
 	}
 }
 
