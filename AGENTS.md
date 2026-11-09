@@ -61,9 +61,8 @@ and its other checks.
 
 ## A change to the pack's behavior names the foundation belief or goal it serves
 
-A change that makes the pm check mandatory
-([review-triage.md](docs/review-triage.md#when-pm-is-mandatory)), such as one
-that changes what a skill, a formula or a prompt has an agent do, names the
-belief or goal it serves in one sentence of its PR summary. That is one of the
-Core Beliefs in [foundation.md](docs/foundation.md), or one of its goals G1 to
-G3. Any other change adds no such sentence.
+This applies to a change that alters what an agent must do, or what reaches the
+operator, through a skill, a formula, an agent prompt, a template fragment or a
+doc that binds agents. Its PR summary names, in one sentence, the belief or goal
+the change serves: one of the Core Beliefs in
+[foundation.md](docs/foundation.md), or one of its goals.
