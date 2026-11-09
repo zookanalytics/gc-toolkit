@@ -4720,7 +4720,12 @@ conversations_in_store() {
 # read at once, each in a subshell of its own, so the list costs about one
 # store's reads. A rig whose ledger is not there to read is named in unread with
 # the stores that did not answer, since a read pinned to it with --db cannot be
-# made, and a list that left it out would read as complete.
+# made, and a list that left it out would read as complete. For the same reason
+# a store counts as read only once its subshell has written its list and then
+# marked it done, and this shell counts the rigs itself: a read that failed, or
+# a list or mark that could not be written, names the store in unread. A rig
+# list that cannot be written, or lists that do not put together into one,
+# list nothing and fail.
 conversations_all() {
     enumerate_rigs
     if ! _ca_live=$(live_sittings); then
@@ -4731,23 +4736,47 @@ conversations_all() {
         || { echo "$PROG: conversations: could not make a scratch directory under ${TMPDIR:-/tmp}" >&2; exit 3; }
     # One rig a line, its name and path apart by the unit separator, which read
     # never collapses as it does a tab, so an empty name stays empty.
-    printf '%s' "$RIGS" | jq -r '.[] | [((.name // "") | gsub("[[:cntrl:]]"; " ")), (.path // "")] | join("\u001f")' > "$_ca_tmp/rigs" 2>/dev/null || true
+    if ! printf '%s' "$RIGS" | jq -r '.[] | [((.name // "") | gsub("[[:cntrl:]]"; " ")), (.path // "")] | join("\u001f")' > "$_ca_tmp/rigs" 2>/dev/null; then
+        rm -rf "$_ca_tmp"
+        echo "$PROG: conversations: could not write the list of rigs under ${TMPDIR:-/tmp}, so no store was read. Nothing listed." >&2
+        exit 3
+    fi
     _ca_us=$(printf '\037')
     _ca_i=0
     while IFS="$_ca_us" read -r _ca_name _ca_path; do
         _ca_i=$((_ca_i + 1))
-        _ca_rig="${_ca_name:-${_ca_path:-a rig with no name}}"
-        if [ -z "$_ca_path" ] || [ ! -d "$_ca_path/.beads" ]; then
-            printf '%s\n' "$_ca_rig" > "$_ca_tmp/$_ca_i.unread"
-            continue
-        fi
-        ( conversations_in_store "$_ca_rig" "$_ca_path/.beads" "$_ca_live" > "$_ca_tmp/$_ca_i.json" 2>/dev/null \
-            || { rm -f "$_ca_tmp/$_ca_i.json"; printf '%s\n' "$_ca_rig" > "$_ca_tmp/$_ca_i.unread"; } ) &
+        [ -n "$_ca_path" ] && [ -d "$_ca_path/.beads" ] || continue
+        ( conversations_in_store "${_ca_name:-$_ca_path}" "$_ca_path/.beads" "$_ca_live" > "$_ca_tmp/$_ca_i.json" 2>/dev/null \
+            && : > "$_ca_tmp/$_ca_i.done" ) &
     done < "$_ca_tmp/rigs"
     wait
-    _ca_rows=$(cat "$_ca_tmp"/*.json 2>/dev/null | jq -cs 'add // []' 2>/dev/null || printf '[]')
-    _ca_unread=$(cat "$_ca_tmp"/*.unread 2>/dev/null | jq -Rsc 'split("\n") | map(select(. != ""))' 2>/dev/null || printf '[]')
+    # Each rig again, by this shell's own count: a list marked done is read,
+    # and every other rig is unread.
+    set --
+    _ca_unread_names=""
+    _ca_i=0
+    while IFS="$_ca_us" read -r _ca_name _ca_path; do
+        _ca_i=$((_ca_i + 1))
+        if [ -f "$_ca_tmp/$_ca_i.done" ]; then
+            set -- "$@" "$_ca_tmp/$_ca_i.json"
+        else
+            _ca_unread_names="$_ca_unread_names${_ca_name:-${_ca_path:-a rig with no name}}
+"
+        fi
+    done < "$_ca_tmp/rigs"
+    # Each list is one array, so a list that holds anything else, or nothing,
+    # fails the whole read.
+    _ca_rows='[]'
+    if [ $# -gt 0 ]; then
+        _ca_rows=$(jq -cs --argjson n "$#" 'if length == $n and all(.[]; type == "array") then add else error("a list did not read") end' "$@" 2>/dev/null) \
+            || _ca_rows=""
+    fi
+    _ca_unread=$(printf '%s' "$_ca_unread_names" | jq -Rsc 'split("\n") | map(select(. != ""))' 2>/dev/null) || _ca_unread=""
     rm -rf "$_ca_tmp"
+    if [ -z "$_ca_rows" ] || [ -z "$_ca_unread" ]; then
+        echo "$PROG: conversations: the lists the stores answered could not be put together into one, so the list would not be complete. Nothing listed." >&2
+        exit 4
+    fi
     if [ "$_cv_json" = 1 ]; then
         # The rigs a new topic can be filed in: every rig but the city's own
         # store, and whether a sitting can be held there (sitting_refusal's

@@ -22,6 +22,12 @@
 #                 the verb exits 4 after the list
 #   (CITY-NOLEDGER) a rig whose ledger is not there is named as unread too, and
 #                 the verb exits 4 after the list
+#   (CITY-SCRATCH) the list never reads as complete when its scratch files fail:
+#                 a store whose read failed is named unread even when no marker
+#                 of its failure could be written, and so is one whose list was
+#                 written but not marked done; a rig list that cannot be written
+#                 exits 3, and a list that holds nothing although its store
+#                 answered exits 4, each listing nothing
 #   (CITY-TEXT)   without --json the list reads as one line per conversation
 #   (ABOUT)       a subject is resolved as engage resolves it: its rig, whether
 #                 a sitting can start there, its open conversations and what
@@ -210,6 +216,44 @@ eq "$(field tk-ready .readiness)" "ready" "(CITY-NOLEDGER) …after listing the 
 hasnt "$(cat "$CALLS")" "$TMP/noledger" "(CITY-NOLEDGER) …and no read is made against it"
 run conversations
 has "$ERR" "the store of vanished could not be read" "(CITY-NOLEDGER) without --json, stderr names it"
+
+echo "# the list never reads as complete when its scratch files fail"
+# mktemp makes the city list's scratch directory, then makes each name in
+# $SPOIL_DIRS a directory there, so a write to it fails, and links each name in
+# $SPOIL_NULL to /dev/null, so a write to it succeeds and keeps nothing. The
+# rigs are numbered in the order the city lists them: gascity is 2 and
+# gc-toolkit is 1. The cases make their scratch under $SCRATCH, which each leaves
+# empty.
+SCRATCH="$TMP/scratch"; mkdir -p "$SCRATCH"
+REAL_MKTEMP="$(command -v mktemp)"
+cat > "$TMP/bin/mktemp" <<MKTEMP
+#!/bin/sh
+d=\$("$REAL_MKTEMP" "\$@") || exit \$?
+case "\$*" in *gc-helm-conversations*)
+  for n in \${SPOIL_DIRS:-}; do mkdir "\$d/\$n"; done
+  for n in \${SPOIL_NULL:-}; do ln -s /dev/null "\$d/\$n"; done ;;
+esac
+printf '%s\n' "\$d"
+MKTEMP
+chmod +x "$TMP/bin/mktemp"
+seed; : > "$STATE/gc.unread"; TMPDIR="$SCRATCH" SPOIL_DIRS="2.unread" run conversations --json
+eq "$RC" 4 "(CITY-SCRATCH) a store whose read failed exits 4 when no marker of its failure can be written"
+eq "$(printf '%s' "$OUT" | jq -c '.unread')" '["gascity"]' "(CITY-SCRATCH) …naming it"
+eq "$(field tk-ready .readiness)" "ready" "(CITY-SCRATCH) …after listing the stores that answered"
+seed; TMPDIR="$SCRATCH" SPOIL_DIRS="2.done" run conversations --json
+eq "$RC" 4 "(CITY-SCRATCH) a store whose list was not marked done exits 4"
+eq "$(printf '%s' "$OUT" | jq -c '.unread')" '["gascity"]' "(CITY-SCRATCH) …naming it"
+eq "$(row gc-q)" "" "(CITY-SCRATCH) …and lists none of its conversations"
+seed; TMPDIR="$SCRATCH" SPOIL_DIRS="rigs" run conversations --json
+eq "$RC" 3 "(CITY-SCRATCH) a rig list that cannot be written exits 3"
+eq "$OUT" "" "(CITY-SCRATCH) …listing nothing"
+has "$ERR" "could not write the list of rigs" "(CITY-SCRATCH) …and says so"
+seed; TMPDIR="$SCRATCH" SPOIL_NULL="1.json" run conversations --json
+eq "$RC" 4 "(CITY-SCRATCH) a list that holds nothing although its store answered exits 4"
+eq "$OUT" "" "(CITY-SCRATCH) …listing nothing"
+has "$ERR" "could not be put together" "(CITY-SCRATCH) …and says so"
+eq "$(find "$SCRATCH" -mindepth 1 -maxdepth 1 -name 'gc-helm-conversations.*' | head -1)" "" "(CITY-SCRATCH) …and no case leaves its scratch directory behind"
+rm -f "$TMP/bin/mktemp"
 
 echo "# without --json, one line per conversation"
 seed; run conversations
