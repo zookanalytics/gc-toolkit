@@ -31,8 +31,9 @@
 #     since, and a sling that exits 3 counts as dispatched.
 #
 # It runs the REAL gc-helm.sh via `sh` (as shipped), with the real
-# resolve-route.sh, run-lib.sh, dispatch-path.sh, bd-lib.sh and hold-lib.sh,
-# against a stateful stub `gc`: a JSON store that `bd show`, `bd list`,
+# resolve-route.sh, run-lib.sh, dispatch-path.sh and bd-lib.sh, and the real
+# `gctk bead holds` built from this checkout, against a stateful stub `gc`: a
+# JSON store that `bd show`, `bd list`,
 # `bd dep list`, `bd dep unrelate`, `bd update` and `sling` read and write in
 # the shapes bd and gc print. The priority writer and the arm are stubs that
 # log and write the keys their real counterparts write. The test floor sits
@@ -97,6 +98,12 @@ S="${STUB_STORE:?}"
 printf '%s\n' "$*" >> "${STUB_CALLS:?}"
 save() { jq -c "$@" "$S" > "$S.tmp" && mv "$S.tmp" "$S"; }
 sub="${1:-}"; shift || true
+# A read the gctk under test makes answers through the seam holds-store.stub.sh
+# keeps, from this store, each row's edges in the listing shape bd prints.
+if [ -n "${HOLDS_STUB_READ:-}" ] && [ "$sub" = bd ]; then
+  jq -c 'map(.id as $i | del(.deps) + {dependencies: [ (.deps // [])[] | {issue_id: $i, depends_on_id: .on, type: .type} ]})' "$S" > "$S.holds"
+  HOLDS_STORE="$S.holds" exec "${HOLDS_STUB:?}" answer "$@"
+fi
 case "$sub" in
   rig)
     jq -n --arg tk "$STUB_RIG_TK" '{rigs:[{name:"gc-toolkit", path:$tk, prefix:"tk"}]}'
@@ -327,6 +334,11 @@ export TMPDIR="$TMP"
 export STUB_STORE="$TMP/store.json" STUB_CALLS="$TMP/calls" STUB_RIG_TK="$TMP/rig-tk"
 export GC_QUEUE_PRIORITY_TOOL="$TMP/bin/queue-priority"
 export GC_DEFERRED_DISPATCH_TOOL="$TMP/bin/deferred-dispatch"
+# What holds a bead is the answer of gctk bead holds, built from this checkout
+# and run over the stub store.
+export HOLDS_STUB="$HERE/holds-store.stub.sh" GC_NO_API=1
+GCTK_BIN="$("$HOLDS_STUB" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so no hold can be read"; exit 1; }
+export GCTK_BIN
 
 # The store every case starts from.
 #   tk-epic     an open epic at P1

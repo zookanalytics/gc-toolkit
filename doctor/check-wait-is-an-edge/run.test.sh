@@ -31,6 +31,22 @@ EOF
 # dropping a structural LF or TAB just minifies.
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
+# A read the gctk under test makes answers from the store its --db names, the
+# whole fixture, scrubbed, through the seam holds-store.stub.sh keeps.
+# BD_FAIL_STORE and HOLDS_FAIL_STORE fail it for their store.
+if [ -n "${HOLDS_STUB_READ:-}" ] && [ "${1:-}" = bd ]; then
+  shift
+  hdb=""; [ "${1:-}" = --db ] && hdb="${2:-}"
+  hstore=$(basename "$(dirname "$hdb")")
+  { [ "$hstore" = "${BD_FAIL_STORE:-}" ] || [ "$hstore" = "${HOLDS_FAIL_STORE:-}" ]; } && { echo "gc bd: simulated read failure" >&2; exit 3; }
+  [ -z "${SHOW_FAIL:-}" ] || { echo "gc bd: simulated read failure" >&2; exit 5; }
+  # The store holds every bead its list fixture and its show fixture carry, so
+  # a bead the check's own listing misses is still one the store holds.
+  hs="$STORES/.holds-$hstore.json"
+  { for hf in "$STORES/$hstore.json" "$STORES/$hstore.show.json"; do [ -f "$hf" ] && scrub < "$hf"; echo; done; } \
+    | jq -s -c '[ .[] | arrays | .[] ] | unique_by(.id)' > "$hs" 2>/dev/null || echo '[]' > "$hs"
+  HOLDS_STORE="$hs" exec "${HOLDS_STUB:?}" answer "$@"
+fi
 city=""; rig=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -124,6 +140,11 @@ exit 7
 BD
 chmod +x "$TMP/bin/gc" "$TMP/bin/bd"
 export PATH="$TMP/bin:$PATH" STORES="$TMP/stores"
+# What holds a live bead is the answer of gctk bead holds, built from this
+# checkout and run over the stub stores above.
+export HOLDS_STUB="$HERE/../../assets/scripts/holds-store.stub.sh" GC_NO_API=1
+GCTK_BIN="$("$HOLDS_STUB" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so no hold can be read"; exit 1; }
+export GCTK_BIN
 
 cat > "$TMP/pack/lifecycle/lifecycle.toml" <<'TOML'
 [machine]
@@ -160,7 +181,7 @@ OUT=$(run_check); RC=$?
 eq "$RC" "1" "a hold marker with no blocks edge warns"
 has "$OUT" "aa-101" "the finding names the held bead"
 has "$OUT" "triage.hold=waiting for the operator" "and the marker that holds it"
-has "$OUT" "no \`blocks\` edge" "and says the graph carries nothing"
+has "$OUT" "no wait edge" "and says the graph carries nothing"
 
 # --- 3. the same marker beside a live blocks edge is clean ----------------
 store '[{"id":"aa-101","status":"open","metadata":{"triage.hold":"waiting for the operator"},
@@ -177,7 +198,7 @@ OUT=$(run_check); RC=$?
 eq "$RC" "1" "a hold whose only blocker has closed is a finding"
 has "$OUT" "aa-909 is closed" "the finding names the dead blocker and its status"
 has "$OUT" "rests on the string alone" "and says what the state now is"
-has "$OUT" "whose every \`blocks\` blocker is gone" "and is grouped apart from the unedged half"
+has "$OUT" "none of whose waits is pending" "and is grouped apart from the unedged half"
 
 # --- 5. only a blocks edge answers a hold ---------------------------------
 for t in tracks parent-child related; do
@@ -263,7 +284,7 @@ store '[{"id":"aa-101","status":"open","metadata":{"triage.hold":"held"},
 bstore '[{"id":"bb-500","status":"open","metadata":{}}]'
 OUT=$(run_check); RC=$?
 eq "$RC" "1" "a hold whose only blocker lives in another store is a finding"
-has "$OUT" "bb-500 is in no store this scope can read" "the finding says the foreign blocker resolved nowhere here"
+has "$OUT" "bb-500 is in another store, where an edge holds nothing" "the finding says the foreign blocker holds nothing here"
 reset
 
 # --- 12. the HQ store is read through --city, never as a rig --------------
@@ -346,15 +367,15 @@ OUT=$(BD_FAIL_STORE=alpha BD_EMPTY_STORE=beta BD_JUNK_STORE=hq run_check); RC=$?
 eq "$RC" "1" "with no store readable the check cannot determine the answer"
 has "$OUT" "No bead store could be examined." "and says exactly that"
 
-# --- 16. a blocker resolve that FAILS fails the store closed --------------
-# The listing is served and `show` is then refused. A partial resolve would
-# report a live blocker as a dead one, which is an invented error, and would
-# bury the real findings behind it.
+# --- 16. a bead read that FAILS fails the store closed --------------------
+# The listing is served and the read of what holds its beads is then refused. A
+# partial read would report a live blocker as a dead one, which is an invented
+# error, and would bury the real findings behind it.
 store '[{"id":"aa-101","status":"open","metadata":{"triage.hold":"held"},
          "dependencies":[{"issue_id":"aa-101","depends_on_id":"aa-909","type":"blocks"}]}]'
 OUT=$(SHOW_FAIL=1 run_check); RC=$?
-eq "$RC" "1" "a store whose blocker resolve fails is not checked"
-has "$OUT" "could not resolve the blockers" "and says which probe failed"
+eq "$RC" "1" "a store whose bead read fails is not checked"
+has "$OUT" "could not read what holds its live beads" "and says which probe failed"
 hasnt "$OUT" "aa-101" "no finding is invented from the unresolved half"
 
 # --- 17. the rig roster itself ------------------------------------------
@@ -534,6 +555,83 @@ eq "$RC" "0" "a terminal_wait_type declared only in lifecycle.toml is honored"
 store '[{"id":"aa-101","status":"open","issue_type":"gate","metadata":{"gc.takeaway":"x"}}]'
 OUT=$(PACK="$TMP/pack3" run_check); RC=$?
 eq "$RC" "0" "the built-in list carries the built-in terminal-wait type"
+
+# --- 24. the store's rule: what a wait edge holds -------------------------
+# A wait edge into another store is a finding on any live bead, marked or not,
+# and beside a live blocker too, which still answers the marker it sits by.
+store '[{"id":"aa-102","status":"open","metadata":{},
+         "dependencies":[{"issue_id":"aa-102","depends_on_id":"bb-501","type":"blocks"}]}]'
+bstore '[{"id":"bb-501","status":"open","metadata":{}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "an unmarked bead's wait edge into another store is a finding"
+has "$OUT" "1 carry a wait edge into another store" "and it is counted in its own degree"
+has "$OUT" "alpha bead aa-102: its wait edge onto bb-501 (blocks) points into another store, and holds nothing" "the finding names the bead, the far id and the edge type"
+store '[{"id":"aa-101","status":"open","metadata":{"triage.hold":"held"},
+         "dependencies":[{"issue_id":"aa-101","depends_on_id":"aa-200","type":"blocks"},
+                         {"issue_id":"aa-101","depends_on_id":"bb-501","type":"blocks"}]},
+        {"id":"aa-200","status":"open","metadata":{}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "a foreign wait edge beside a live blocker is still a finding"
+has "$OUT" "alpha bead aa-101: its wait edge onto bb-501 (blocks)" "and the foreign edge is named"
+hasnt "$OUT" "held by triage.hold" "while the hold its live blocker answers is no finding"
+reset
+
+# A pinned blocker holds nothing: the store's blocked rule counts it as none.
+store '[{"id":"aa-101","status":"open","metadata":{"triage.hold":"held"},
+         "dependencies":[{"issue_id":"aa-101","depends_on_id":"aa-300","type":"blocks"}]},
+        {"id":"aa-300","status":"pinned","metadata":{}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "a hold whose only blocker is pinned is a finding"
+has "$OUT" "alpha bead aa-101 (open): held by triage.hold=held, and aa-300 is pinned" "and the finding says the blocker is pinned"
+
+# A waits-for edge is a recorded wait that the store cannot judge yet: it
+# answers the marker beside it, and it is noted as unjudged.
+store '[{"id":"aa-101","status":"open","metadata":{"triage.hold":"held"},
+         "dependencies":[{"issue_id":"aa-101","depends_on_id":"aa-400","type":"waits-for"}]},
+        {"id":"aa-400","status":"open","metadata":{}},
+        {"id":"aa-401","status":"open","metadata":{},"parent":"aa-400"}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a hold beside a waits-for edge is answered by the edge"
+has "$OUT" "alpha bead aa-101: waits on aa-400 by a waits-for edge, which the store cannot judge yet (unjudged)" "and the edge the store cannot judge yet is noted"
+hasnt "$OUT" "held by triage.hold" "no stale or unedged finding is made of it"
+
+# One store's failed gctk read leaves that store unchecked and the rest judged.
+store '[{"id":"aa-101","status":"open","metadata":{"triage.hold":"held"}}]'
+hstore '[{"id":"hh-2","status":"open","metadata":{"triage.hold":"held"}}]'
+OUT=$(HOLDS_FAIL_STORE=alpha run_check); RC=$?
+eq "$RC" "1" "a store whose gctk read fails warns"
+has "$OUT" "alpha: could not read what holds its live beads" "and the failed store is named"
+hasnt "$OUT" "aa-101" "no finding is made from the store it could not read"
+has "$OUT" "hh-2" "the other stores are still judged"
+has "$OUT" "across 2 store(s)" "and the checked count leaves the failed store out"
+reset
+
+# A pass of the check that does not run leaves its store NOT checked, never
+# clean: the status map, the list of the beads to ask about, and the verdicts of
+# the held beads. The jq here fails the one program whose text carries
+# JQ_FAIL_ON and runs every other.
+REAL_JQ=$(command -v jq)
+mkdir -p "$TMP/jqfail"
+{ printf '#!/bin/sh\n'
+  printf 'for a in "$@"; do case "$a" in *"$JQ_FAIL_ON"*) echo "jq: simulated failure" >&2; exit 5 ;; esac; done\n'
+  printf 'exec %s "$@"\n' "$REAL_JQ"; } > "$TMP/jqfail/jq"
+chmod +x "$TMP/jqfail/jq"
+store '[{"id":"aa-101","status":"open","metadata":{"triage.hold":"held"}}]'
+OUT=$(PATH="$TMP/jqfail:$PATH" JQ_FAIL_ON='["unedged", $id' run_check); RC=$?
+eq "$RC" "1" "a verdict pass that does not run warns"
+has "$OUT" "alpha: could not judge the waits of its held beads — this store was NOT checked" "and names the store it could not judge"
+hasnt "$OUT" "aa-101" "no finding is made from that store"
+hasnt "$OUT" "OK:" "and the store never reads as clean"
+has "$OUT" "across 2 store(s)" "and the checked count leaves it out"
+OUT=$(PATH="$TMP/jqfail:$PATH" JQ_FAIL_ON='as $marked' run_check); RC=$?
+eq "$RC" "1" "a list of the beads to ask about that does not run warns"
+has "$OUT" "alpha: could not list the beads to ask what holds them — this store was NOT checked" "and names the store it could not list"
+hasnt "$OUT" "OK:" "and no store reads as clean"
+OUT=$(PATH="$TMP/jqfail:$PATH" JQ_FAIL_ON='value: ((.status' run_check); RC=$?
+eq "$RC" "1" "a status map that does not read warns"
+has "$OUT" "alpha: could not read the live beads' statuses off the listing — this store was NOT checked" "and names the store whose map did not read"
+hasnt "$OUT" "OK:" "and no store reads as clean"
+reset
 
 echo
 echo "passed: $PASS  failed: $FAIL"

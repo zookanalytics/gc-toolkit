@@ -332,6 +332,27 @@ func (ix humanIndex) holdsWork(id string) bool {
 	return len(ix.gates[id]) > 0
 }
 
+// parksWork reports whether an open human gate parks the bead through the
+// gate's own row: the gate holds the bead's work ([humanIndex.holdsWork]) and
+// the bead's own blockers do not carry its wait. A wait they carry holds the
+// bead by the store's answer alone ([splitWaits]), so a gate the store did not
+// answer for the bead ([WaitUnread]) parks nothing, and [stateInput.unread]
+// counts it.
+func (ix humanIndex) parksWork(id string, blockers []Blocker) bool {
+	for _, g := range ix.gates[id] {
+		if !slices.ContainsFunc(blockers, func(b Blocker) bool { return b.ID == g }) {
+			return true
+		}
+	}
+	return false
+}
+
+// tracks reports whether an open conversation tracks the bead, which holds
+// none of its work.
+func (ix humanIndex) tracks(id string) bool {
+	return len(ix.convs[id]) > 0
+}
+
 // inSession reports whether the conversation id is in session: a live session
 // holds it, by the state its sitting carries.
 func (ix humanIndex) inSession(id string) bool {

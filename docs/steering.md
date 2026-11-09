@@ -294,9 +294,10 @@ prints what the park holds and what it leaves running.
 
 - a bead in flight, because its own edge would hold its merge and its close
   (next section);
-- a closed bead to park or to wait on, a bead in another store to wait on, and
-  one of the bead's own parts to wait on, since each edge would hold nothing or
-  bd refuses it.
+- a closed bead to park, a closed or pinned bead to wait on, a bead in another
+  store to wait on, and one of the bead's own parts to wait on, since each edge
+  would hold nothing or bd refuses it. The store counts a pinned blocker as
+  none.
 
 ### In flight
 
@@ -332,9 +333,10 @@ A park leaves a rejected handoff running too. When the refinery rejects a
 handed-off bead, `rejection-repool.sh` records the `rejection_reason` on it and
 dispatches the rebuild as a fresh `mol-polecat-work` pour. A rejected convoy's
 reason and pour go to its rebuild child, which is born with no parent. The
-cascade does not reach a poured workflow, and load-context reads only the
-bead's own blockers, so the rebuild runs. When that sling fails, the script
-arms a retry, which deferred dispatch slings once the bead's own blockers close.
+cascade does not reach a poured workflow, and the rejected bead is in flight, so
+load-context holds it only by its own waits and the rebuild runs. When that
+sling fails, the script arms a retry, which deferred dispatch slings once the
+bead's own blockers close.
 
 ### What a park holds
 
@@ -343,21 +345,19 @@ A park holds this work that has not started, in the bead and under it:
 - the bead itself and every pool-routed member, because the pool offers only
   what `bd ready` returns;
 - a member placed under the bead later, through the same cascade;
-- an armed member, because deferred dispatch slings an armed bead only when no
-  blocker holds it or any of its ancestors (`assets/scripts/hold-lib.sh`);
-- a sling of the parked bead itself. mol-polecat-work's load-context refuses a
-  work bead that has an open blocker of its own: it holds the molecule and arms
-  a re-dispatch that fires once the bead's blockers close.
+- an armed member, because deferred dispatch slings an armed bead only when
+  `gctk bead holds` answers it clear, and a wait on any of its ancestors holds
+  work that has not started;
+- a sling of the parked bead or a member onto mol-polecat-work, made by hand or
+  poured before the park, until its run passes load-context. `gc sling --on`
+  pours without reading any edge, so the run starts, and load-context's gate
+  then asks `gctk bead holds`. It refuses a bead the answer holds, cancels the
+  run and arms a re-dispatch that fires once nothing holds the bead. `park`
+  names the poured workflows still at load-context.
 
 An armed member in flight keeps running, such as a rejected handoff armed for a
-retry: once a bead carries `branch`, `merge_result` or `rejection_reason`,
-deferred dispatch reads only its own blockers.
-
-A park does not hold a member slung by hand, or a workflow poured before the
-park, because `gc sling --on` pours without reading any edge and load-context
-reads no ancestor's blockers. `park` names the poured workflows it leaves
-unheld. A member that must not start gets a park of its own, since
-mol-polecat-work's load-context refuses a bead with an open blocker of its own.
+retry: once a bead is in flight, as the section above says, only its own waits
+hold it.
 
 ### Releasing a park
 
@@ -374,8 +374,8 @@ ancestors.
 `doctor/check-blocked-work-armed` reports a held bead as a fault. It reads
 `bd blocked`, which lists each member a park holds, and flags one that has
 neither a route nor an arm. Its remedy, arming the member, leaves the member
-held until the park is released, since deferred dispatch reads its ancestors'
-blockers.
+held until the park is released, since an ancestor's wait holds an armed bead
+that has not started.
 
 The helm board reads a park as a hold, not a fault. It reads the blockers of
 each member and of the parents above it on the board, so a member under a park

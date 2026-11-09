@@ -272,6 +272,7 @@ export STUB_RIG_TK="$TMP/rig-tk" STUB_RIG_RA="$TMP/rig-ra"
 #   tk-pg            another park's gate
 #   tk-task          a task to wait on
 #   tk-closed        a closed task
+#   tk-pinned        a pinned task, which the store counts as no blocker
 #   ra-x             a task in the rig-a store
 reset_store() {
   cat > "$STUB_STORE" <<'JSON'
@@ -319,6 +320,7 @@ reset_store() {
  {"id":"tk-pg","status":"open","issue_type":"gate","title":"Parked until the store answers in a second; close when it does","description":"","metadata":{},"deps":[]},
  {"id":"tk-task","status":"open","issue_type":"task","title":"Land the faster store","description":"","metadata":{},"deps":[]},
  {"id":"tk-closed","status":"closed","issue_type":"task","title":"already done","description":"","metadata":{},"deps":[]},
+ {"id":"tk-pinned","status":"pinned","issue_type":"task","title":"pinned in place","description":"","metadata":{},"deps":[]},
  {"id":"ra-x","status":"open","issue_type":"task","title":"a rig-a task","description":"","metadata":{},"deps":[]}
 ]
 JSON
@@ -393,7 +395,8 @@ has "$OUT" "tk-epic.4 (in_progress under gc-toolkit/gc-toolkit.crew)" "(TEXT) a 
 has "$OUT" "tk-feat.3 (workflow tk-r2 past load-context)" "(TEXT) a member whose workflow passed load-context stays in flight, two levels down"
 has "$OUT" "tk-epic.5 (rejection_reason set)" "(TEXT) an armed member in flight stays in flight: only its own blockers hold work that has started"
 hasnt "$OUT" "armed, not held" "(TEXT) no armed member is named as left unheld: deferred dispatch reads its ancestors' blockers"
-has "$OUT" "poured before the park, not held by it: tk-feat.2 (workflow tk-r1)" "(TEXT) a member poured and waiting at load-context is named as not held"
+has "$OUT" "poured before the park, waiting at load-context: tk-feat.2 (workflow tk-r1)" "(TEXT) a member poured and waiting at load-context is named"
+has "$OUT" "Load-context's gate refuses each one it has not let through yet, and arms its re-sling for the park's release." "(TEXT) …with what holds it: load-context's gate reads its ancestors' waits"
 hasnt "$(grep '^poured before the park' <<< "$OUT" || true)" "tk-feat.4" "(TEXT) an armed member whose workflow load-context held is not named as poured"
 hasnt "$OUT" "tk-done" "(TEXT) a closed member is not part of the park"
 
@@ -555,7 +558,8 @@ eq "$RC" "0" "(FLIGHT) a bead whose workflow waits at load-context is not in fli
 
 # --- (DEMAND) a demand gate is a bead to wait on like any other ----------------
 # A demand gate holds like any blocker, armed members included, since deferred
-# dispatch reads every open blocker on a bead's ancestors (hold-lib.sh).
+# dispatch reads what holds a bead through gctk bead holds, which counts a wait
+# on an ancestor of work that has not started.
 reset_store
 run_park tk-solo --waiting-on tk-dg
 eq "$RC" "0" "(DEMAND) parking behind a demand gate exits 0"
@@ -572,6 +576,10 @@ run_park tk-solo --waiting-on tk-closed
 eq "$RC" "2" "(WAITS) waiting on a closed bead is refused (exit 2)"
 has "$ERR" "holds nothing" "(WAITS) the refusal says the edge would hold nothing"
 nothing_written "(WAITS) closed"
+run_park tk-solo --waiting-on tk-pinned
+eq "$RC" "2" "(WAITS) waiting on a pinned bead is refused (exit 2), as the store counts it as no blocker"
+has "$ERR" "tk-pinned is pinned, so an edge onto it holds nothing" "(WAITS) the refusal says the edge would hold nothing"
+nothing_written "(WAITS) pinned"
 run_park tk-solo --waiting-on ra-x
 eq "$RC" "2" "(WAITS) waiting on another store's bead is refused (exit 2)"
 has "$ERR" "another store" "(WAITS) the refusal names the store"

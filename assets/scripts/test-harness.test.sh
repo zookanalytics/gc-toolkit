@@ -11,7 +11,7 @@ TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-test-harness-test.XXXXXX")"; trap 'rm -rf
 . "$HERE/test-harness.sh"
 
 # Seed the environment a polecat/agent session exports, an inherited priority
-# writer, an inherited gctk binary path and forced fallback, and the build a
+# writer, an inherited gctk binary path, and the build a
 # suite makes before harness_init (harness_build_gctk sets GCTK_BUILT pre-init
 # because the stub git must not answer the Go build).
 export GC_RIG=gc-toolkit GC_CITY_PATH=/live/city GC_CITY=mycity
@@ -19,14 +19,14 @@ export GC_AGENT=rig/gc-toolkit.polecat GC_SESSION_NAME=live-sess GC_SESSION_ID=h
 export GC_TRIGGER_BEAD_ID=tk-live GC_RIG_ROOT=/live/rigs/gc-toolkit
 export BEADS_DIR=/live/beads BEADS_ACTOR=live-actor
 export GC_QUEUE_PRIORITY_TOOL=/live/rigs/gc-toolkit/assets/scripts/queue-priority.sh
-export GCTK_BIN=/live/city/.gc/services/gctk/bin/gctk GCTK_FALLBACK=merge
+export GCTK_BIN=/live/city/.gc/services/gctk/bin/gctk
 GCTK_BUILT="$TMP/gctk"
 
 # Capture the seed before harness_init runs — it is the call under test AND it
 # resets PASS/FAIL, so every assertion has to come after it. The captures let a
 # post-init assertion prove the seed was really set, so "cleared" is a real
 # transition and not a variable that was never there.
-SEED_GC_RIG="${GC_RIG:-}"; SEED_BEADS_DIR="${BEADS_DIR:-}"; SEED_GCTK_FALLBACK="${GCTK_FALLBACK:-}"
+SEED_GC_RIG="${GC_RIG:-}"; SEED_BEADS_DIR="${BEADS_DIR:-}"
 SEED_GC_QUEUE_PRIORITY_TOOL="${GC_QUEUE_PRIORITY_TOOL:-}"
 
 harness_init
@@ -87,10 +87,6 @@ store '[]'; : > "$STUB_DEPS"; : > "$STUB_GC_LOG"
 # to that build, never to the binary an inherited GCTK_BIN names.
 eq "$GCTK_BUILT" "$TMP/gctk"  "harness_init preserves a pre-init GCTK_BUILT"
 eq "$GCTK_BIN"   "$TMP/gctk"  "harness_init pins GCTK_BIN to the suite's own build, over an inherited one"
-# An inherited GCTK_FALLBACK would put a port onto its shell in a suite that
-# meant to test the binary, so harness_init clears it.
-eq "$SEED_GCTK_FALLBACK" "merge" "seed: GCTK_FALLBACK was set before harness_init"
-eq "${GCTK_FALLBACK-<unset>}" "<unset>" "harness_init clears an inherited GCTK_FALLBACK"
 
 # A suite that built nothing reaches no binary at all: lifecycle.sh refuses
 # under GCTK_BIN=none, and that refusal is what such a suite sees.
@@ -330,15 +326,13 @@ mk_sut_dir "$TMP/sut" "$HERE/lifecycle.sh"
 [ -f "$TMP/sut/gctk-resolve.sh" ] && ok "mk_sut_dir copies gctk-resolve.sh beside the SUT" || bad "mk_sut_dir left gctk-resolve.sh out"
 out="$(GCTK_BIN=none "$TMP/sut/lifecycle.sh" state tk-blk 2>&1)"
 hasnt "$out" "cannot source gctk-resolve.sh" "a copied lifecycle.sh sources gctk-resolve.sh from its private dir"
-# A copy of deferred-dispatch.sh without hold-lib.sh or dispatch-path.sh beside
-# it exits before any verb runs.
+# A copy of deferred-dispatch.sh runs a verb from its private dir: bd-lib.sh and
+# dispatch-path.sh are the libraries it sources by sibling path.
 mk_sut_dir "$TMP/sut-dd" "$HERE/deferred-dispatch.sh"
-[ -f "$TMP/sut-dd/hold-lib.sh" ] && ok "mk_sut_dir copies hold-lib.sh beside the SUT" || bad "mk_sut_dir left hold-lib.sh out"
 [ -f "$TMP/sut-dd/dispatch-path.sh" ] && ok "mk_sut_dir copies dispatch-path.sh beside the SUT" || bad "mk_sut_dir left dispatch-path.sh out"
 out="$("$TMP/sut-dd/deferred-dispatch.sh" help 2>&1)"; rc=$?
 eq "$rc" "0" "a copied deferred-dispatch.sh runs a verb"
-hasnt "$out" "cannot source hold-lib.sh" "a copied deferred-dispatch.sh sources hold-lib.sh from its private dir"
-hasnt "$out" "cannot source dispatch-path.sh" "…and dispatch-path.sh"
+hasnt "$out" "cannot source" "a copied deferred-dispatch.sh sources its libraries from its private dir"
 # pr-facts.sh sources the priority function's reading of a PR's approval.
 mk_sut_dir "$TMP/sut-pf" "$HERE/pr-facts.sh"
 [ -f "$TMP/sut-pf/priority-lib.sh" ] && ok "mk_sut_dir copies priority-lib.sh beside the SUT" || bad "mk_sut_dir left priority-lib.sh out"

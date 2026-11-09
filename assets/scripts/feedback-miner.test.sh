@@ -107,9 +107,15 @@ chmod +x "$BIN/gh"
 # it filed in. `bd kv get|set|list` serve the key-value table from kv.json, a
 # get printing {found, key, value} and exiting 1 for an unset key and a list
 # printing the whole table with schema_version, as bd does, each recording the
-# rig it ran in.
+# rig it ran in. A read the gctk under test makes, for the real patrol-finding.sh
+# asking what a held finding still waits on, answers from the same findings
+# through the seam holds-store.stub.sh keeps, and is not logged.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 set -u
+if [ -n "${HOLDS_STUB_READ:-}" ] && [ "${1:-}" = bd ]; then
+  shift
+  HOLDS_STORE="$STUB_STORE/findings.json" exec "${HOLDS_STUB:?}" answer "$@"
+fi
 printf '%s\n' "$*" >> "$STUB_LOG/gc.log"
 [ "${1:-}" = bd ] || { echo "stub gc: unexpected call: $*" >&2; exit 1; }
 shift
@@ -282,8 +288,12 @@ chmod +x "$FAULTBIN/cat" "$FAULTBIN/jq"
 
 export PATH="$BIN:$PATH"
 export STUB_LOG="$TMP" STUB_FIX="$FIX" STUB_STORE="$STORE"
-# The flag files through the real patrol-finding.sh beside the miner.
+# The flag files through the real patrol-finding.sh beside the miner, which asks
+# the gctk built from this checkout what a held finding still waits on.
 unset GC_PATROL_FINDING_TOOL GC_BD_LIB GC_FINDING_DEFAULT_RIG
+export HOLDS_STUB="$HERE/holds-store.stub.sh" GC_NO_API=1
+GCTK_BIN="$("$HOLDS_STUB" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so a held finding's waits cannot be read"; exit 1; }
+export GCTK_BIN
 export GC_PROACTIVE_TOOL="$BIN/gc-proactive"
 export GC_RIG=fixture-rig
 # The swept checkout is the repository pr-post.sh reads the rig's declaration

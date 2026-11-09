@@ -28,11 +28,11 @@
 #      merge-push by ANY route converges on the PR it already owns instead of
 #      being re-parked to pre_open_gate.
 #
-# A bead something holds waits in the queue until its blockers close: a
-# landing bead is assigned to the refinery when its integration effort is
-# stood up, and find-work must not prepare it while the effort's beads or its
-# summary task are open. Section 1c runs the selection over a store of beads
-# with their edges, read through hold-lib.sh.
+# A bead something holds waits in the queue until its waits land: a landing
+# bead is assigned to the refinery when its integration effort is stood up,
+# and find-work must not prepare it while the effort's beads or its summary task
+# are open. Section 1c runs the selection over a store of beads with their
+# edges, read through the gctk bead holds this checkout builds.
 #
 # Both marked blocks are extracted VERBATIM from the formula and executed
 # against a fake `gc`, so they cannot drift from the shipped instruction. No
@@ -112,6 +112,20 @@ if [ "${1:-} ${2:-}" = "gc-toolkit scripts-dir" ]; then
   [ -n "${STUB_PACK:-}" ] || exit 1
   printf '%s/assets/scripts\n' "$STUB_PACK"; exit 0
 fi
+# A read the gctk under test makes answers from FAKE_STORE, or from the beads
+# FAKE_ROWS lists, through the seam holds-store.stub.sh keeps. FAKE_ID_FAIL=1
+# fails its listing.
+if [ -n "${HOLDS_STUB_READ:-}" ] && [ "${1:-}" = "bd" ]; then
+  shift
+  [ "${FAKE_ID_FAIL:-0}" = "1" ] && export HOLDS_FAIL=list
+  if [ -n "${FAKE_STORE:-}" ]; then export HOLDS_STORE="$FAKE_STORE"
+  else
+    export HOLDS_STORE="$FAKE_ROWS.store.json"
+    jq -R -s -c 'split("\n") | map(select(length > 0) | split("|")
+      | {id: .[0], status: "open", metadata: ({branch: ("polecat/" + .[0])} + (if (.[1] // "-") == "-" or .[1] == "" then {} else {merge_result: .[1]} end))})' "$FAKE_ROWS" > "$HOLDS_STORE"
+  fi
+  exec "${HOLDS_STUB:?}" answer "$@"
+fi
 [ "$1" = "bd" ] && [ "$2" = "list" ] || exit 0
 [ "${FAKE_BD_FAILS:-0}" = "1" ] && exit 0   # bd fails open: empty stdout
 # FAKE_STORE is a JSON array of beads with their edges, answered as bd answers:
@@ -171,9 +185,13 @@ chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
 export FAKE_ROWS="$TMP/rows"
 export GC_RIG="testrig" GC_AGENT="testrig/gc-toolkit.refinery"
-# The blocks find hold-lib.sh and rig-root.sh in the pack gc names, and this
-# suite's pack is the repo it tests.
+# The blocks find rig-root.sh in the pack gc names, and this suite's pack is the
+# repo it tests. find-work reads what holds a handoff through the gctk this
+# checkout builds.
 export STUB_PACK="$ROOT" GC_RIG_ROOT=""
+export HOLDS_STUB="$HERE/holds-store.stub.sh" GC_NO_API=1
+GCTK_BIN="$("$HOLDS_STUB" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so no hold can be read"; exit 1; }
+export GCTK_BIN
 
 { cat "$TMP/select.sh"; printf 'printf "%%s\\n" "$WORK"\n'; } > "$TMP/run-select.sh"
 
@@ -269,7 +287,7 @@ eq "$(select_work)" "tk-p1old" "(7e) highest priority first, oldest within the b
   printf 'tk-p1win|-|2026-06-01T00:00:00Z|1\n'; } > "$FAKE_ROWS"
 eq "$(select_work)" "tk-p1win" "(7f) a newer high-priority handoff past a full created-ordered window still wins (unbounded)"
 
-echo "── 1c. a bead something holds waits until its blockers close ──"
+echo "── 1c. a bead something holds waits until its waits land ──"
 REF="$GC_AGENT"; T0="2026-01-01T00:00:00Z"; T1="2026-02-01T00:00:00Z"
 # bead <id> <status> <assignee> <branch> <issue_type> <priority> <created_at> [blocker...]
 # prints one bead as bd lists it, with a blocks edge onto each blocker.
@@ -311,7 +329,7 @@ eq "$(select_store)" "" "(7k) a landing bead whose one open blocker is a gate is
 store "$(landing tk-e1 tk-gate)" "$(eff tk-e1 closed)" "$(eff tk-gate closed gate)"
 eq "$(select_store)" "tk-land" "(7l) once the gate closes it is taken"
 
-# A handoff is work in flight, so only a blocker of its own holds it.
+# A handoff is work in flight, so only a wait of its own holds it.
 HAND="$(bead tk-hand open "$REF" polecat/tk-hand task 2 "$T0")"
 store "$HAND"
 eq "$(select_store)" "tk-hand" "(7m) a polecat's handoff with no blocker is taken"
@@ -321,13 +339,20 @@ eq "$(select_store)" "tk-hand" "(7n) a handoff whose epic is parked is taken: a 
 store "$(bead tk-hand open "$REF" polecat/tk-hand task 2 "$T0" tk-pre)" "$(eff tk-pre open)"
 eq "$(select_store)" "" "(7o) a handoff with an open blocker of its own waits"
 
-# A hold that cannot be read takes nothing.
+# An edge onto a bead the store does not hold points into another store and
+# holds nothing, as the store judges it.
 store "$(landing tk-ghost)"
-eq "$(select_store)" "" "(7p) a bead whose blocker the store does not return is not taken"
+eq "$(select_store)" "tk-land" "(7p) a bead whose only blocker the store does not hold is taken"
+# A waits-for edge of the bead's own is one the store cannot judge yet, so the
+# bead waits.
+WAITER="$(printf '%s' "$HAND" | jq -c '.dependencies = [{issue_id: "tk-hand", depends_on_id: "tk-spawn", type: "waits-for"}]')"
+store "$WAITER" "$(eff tk-spawn closed)"
+eq "$(select_store)" "" "(7p-b) a handoff with a waits-for edge of its own waits"
 case "$(select_err)" in
-  *"tk-land waits on tk-ghost (unreadable)"*) ok "(7p-b) the unreadable blocker is named" ;;
-  *) bad "(7p-b) the unreadable blocker must be named" "got '$(select_err)'" ;;
+  *"tk-hand waits on tk-spawn"*) ok "(7p-c) and the edge is named on stderr" ;;
+  *) bad "(7p-c) the waits-for edge must be named" "got '$(select_err)'" ;;
 esac
+# A hold that cannot be read takes nothing.
 store "$(landing tk-e1)" "$(eff tk-e1 closed)" "$HAND"
 eq "$(FAKE_ID_FAIL=1 select_store)" "" "(7q) a read of the blockers that fails ends the turn with nothing taken"
 case "$(select_err)" in
@@ -335,7 +360,13 @@ case "$(select_err)" in
   *) bad "(7q-b) the failed hold read must be reported" "got '$(select_err)'" ;;
 esac
 store "$HAND"
-eq "$(FAKE_ID_FAIL=1 select_store)" "tk-hand" "(7r) a queue whose beads carry no blocker needs no hold read"
+eq "$(FAKE_ID_FAIL=1 select_store)" "" "(7r) a failed read ends the turn whatever the queue's beads carry"
+GCTK_BIN="$TMP/no-gctk" FAKE_STORE="$STORE" bash "$TMP/run-select.sh" > "$TMP/out" 2>"$TMP/err"
+eq "$(cat "$TMP/out")" "" "(7r-b) with no gctk to run, the turn ends with nothing taken"
+case "$(select_err)" in
+  *"no gctk binary at $TMP/no-gctk"*) ok "(7r-c) and names the binary it looked for" ;;
+  *) bad "(7r-c) the missing gctk must be named" "got '$(select_err)'" ;;
+esac
 
 # A held bead never crowds out free work, whatever its priority.
 store "$(bead tk-p1held open "$REF" integration/cv-2 task 1 "$T0" tk-pre)" "$(eff tk-pre open)" \
