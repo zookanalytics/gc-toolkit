@@ -360,8 +360,8 @@ Nothing outside it parses a metadata value or spells a key's name.
   a push, a dismissal or a sling that rests on a write goes ahead once the write
   exits 0. A degraded server can roll back a write it reported, and bd guards
   only its coordination writes, such as a claim, against that. The ledger takes
-  the cost bd takes for every other write: the rare record lost that way is
-  found when someone next reads the bead.
+  the cost bd takes for every other write: the rare record lost that way reads
+  as never written.
 - **A wait edge is written only onto a bead its store holds.** bd accepts an
   edge onto an id its store does not hold and reports success, and the edge
   holds nothing. So the ledger reads the target in the bead's own store first,
