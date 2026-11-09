@@ -288,7 +288,7 @@ func (c *Client) Blocked() (*BlockedSet, error) {
 func (c *Client) strictArray(args ...string) (json.RawMessage, error) {
 	what := "gc " + strings.Join(args[:min(len(args), 2)], " ")
 	var stderr bytes.Buffer
-	cmd := exec.Command(c.bin, args...)
+	cmd := c.command(args...)
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {

@@ -15,8 +15,12 @@ import (
 // and `bd list` returns the rows its --id, --has-metadata-key, --metadata-field
 // and --all select, in a listing's shape, every edge kept. `bd blocked`
 // answers $STUB_BLOCKED and `bd sql` $STUB_MARKS. $STUB_BLOCKED_RC fails the
-// listing.
+// listing. Each call logs the store it names with bd's --db, "-" for none, to
+// $STUB_DB_LOG.
 const storeStub = `#!/bin/sh
+db=-
+if [ "$1" = bd ] && [ "$2" = --db ]; then db="$3"; shift 3; set -- bd "$@"; fi
+[ -z "$STUB_DB_LOG" ] || printf '%s\n' "$db" >> "$STUB_DB_LOG"
 case "$1 $2" in
 "bd show")
   shift 2
@@ -174,6 +178,29 @@ func TestBeadHoldsUsageErrors(t *testing.T) {
 		var out, errbuf bytes.Buffer
 		if code := Run(append([]string{"bead", "holds"}, args...), "", &out, &errbuf); code != 2 || out.Len() != 0 {
 			t.Errorf("bead holds %q = exit %d, out %q; want a usage error", args, code, out.String())
+		}
+	}
+}
+
+// --db names the store every read of the command makes.
+func TestBeadHoldsReadsTheNamedStore(t *testing.T) {
+	log := filepath.Join(t.TempDir(), "db")
+	t.Setenv("STUB_DB_LOG", log)
+	lines, code := holds(t, "--db", "/rig/.beads", "own")
+	if code != 0 || len(lines) != 1 || lines[0]["status"] != "blocked" {
+		t.Fatalf("exit %d, lines %v; want 0 and own blocked", code, lines)
+	}
+	raw, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(calls) < 4 {
+		t.Fatalf("the stub logged %d reads; want the listing, the rows, the blocked set and its marks at least", len(calls))
+	}
+	for i, db := range calls {
+		if db != "/rig/.beads" {
+			t.Errorf("read %d named the store %q; want /rig/.beads", i, db)
 		}
 	}
 }

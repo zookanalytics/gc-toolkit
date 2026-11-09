@@ -10,8 +10,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
-	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
@@ -47,13 +45,18 @@ none. foreign is the bead's wait edges into another store, each {"id",
 A bead the store could not answer prints {"id", "error"} and no status, and
 so does a bead the store does not hold.
 
+--db names the store to read, a store's .beads directory, and every read of
+the store names it with bd's own --db flag. Without it the command reads the
+store gc resolves from the working directory and the environment.
+
 exit: 0 every bead answered
       1 at least one bead's read failed, and its line carries the error
       2 usage`
 
 func newBeadCmd(stdout, stderr io.Writer) *cobra.Command {
+	var db string
 	holds := &cobra.Command{
-		Use:   "holds <bead>...",
+		Use:   "holds [--db <path>] <bead>...",
 		Short: "what holds each bead: one status, the waits behind it, its own pending waits, its arm and its edges into another store",
 		Long:  beadHoldsLong,
 		Args:  cobra.MinimumNArgs(1),
@@ -68,9 +71,10 @@ func newBeadCmd(stdout, stderr io.Writer) *cobra.Command {
 					ids = append(ids, id)
 				}
 			}
-			return exit(beadHolds(ids, stdout, stderr))
+			return exit(beadHolds(db, ids, stdout, stderr))
 		},
 	}
+	holds.Flags().StringVar(&db, "db", "", "the store to read, a store's .beads directory")
 	return group("bead", "what holds a bead",
 		"A bead's waits: what holds it, read from the store.", holds)
 }
@@ -81,9 +85,10 @@ type failedLine struct {
 	Error string `json:"error"`
 }
 
-// beadHolds prints one line per bead, from one waits snapshot of them all.
-func beadHolds(ids []string, stdout, stderr io.Writer) int {
-	snap, readErr := waits.Read(ledger.New(gcbd.New()), ids...)
+// beadHolds prints one line per bead, from one waits snapshot of them all,
+// read from the store at db, or from the store gc resolves when db is empty.
+func beadHolds(db string, ids []string, stdout, stderr io.Writer) int {
+	snap, readErr := waits.ReadStore(db, ids...)
 	code := 0
 	for _, id := range ids {
 		var line any

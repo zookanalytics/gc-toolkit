@@ -111,6 +111,14 @@ type Snapshot struct {
 	flight  map[string]string
 }
 
+// ReadStore reads one snapshot of what holds each bead named, as Read does,
+// from the city's store at db, a store's .beads directory, or from the store gc
+// resolves when db is empty. It is the entry for a reader the ledger is
+// internal to, the helm board among them, which names each rig's store.
+func ReadStore(db string, ids ...string) (*Snapshot, error) {
+	return Read(ledger.Open(db), ids...)
+}
+
 // Read reads one snapshot of what holds each bead named. A bead the store does
 // not hold gets its error from Holds, and every other bead is answered. A read
 // that fails fails the snapshot with its *ledger.ReadError.

@@ -38,6 +38,11 @@ type Ledger struct {
 // New returns a ledger over store: the city's gcbd.Client, or a fake.
 func New(store gcbd.Store) *Ledger { return &Ledger{store: store} }
 
+// Open returns a ledger over the city's store at db, a store's .beads
+// directory, through the store adapter pinned there, or over the store gc
+// resolves when db is empty.
+func Open(db string) *Ledger { return New(gcbd.New().In(db)) }
+
 // Write is one act on one bead: every key it sets or clears, made in one
 // update.
 type Write struct {

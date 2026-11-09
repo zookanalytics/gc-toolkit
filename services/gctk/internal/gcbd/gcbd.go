@@ -34,6 +34,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -149,13 +150,40 @@ const maxDaemonBody = 1 << 20
 // which is what puts the test stubs in the path of every subprocess call; the
 // write path and the Show fallback fork it. httpc/baseURL/city carry the
 // supervisor-API read path and are all empty when it is off (GC_NO_API, no city
-// in the environment, or no discoverable supervisor), in which case Show reads
-// straight through bin.
+// in the environment, no discoverable supervisor, or a pinned store), in which
+// case Show reads straight through bin. db is the store a pinned client names
+// on every call ([Client.In]), empty for the store gc resolves.
 type Client struct {
 	bin     string
 	httpc   *http.Client
 	baseURL string
 	city    string
+	db      string
+}
+
+// In returns a client pinned to the bead store at db, a store's .beads
+// directory: every `gc bd` call it makes names that store with bd's own --db
+// flag, and none reads the supervisor API, whose bead route finds a bead by the
+// city and its id rather than in the store named. An empty db pins nothing and
+// returns c.
+func (c *Client) In(db string) *Client {
+	if db == "" {
+		return c
+	}
+	p := *c
+	p.db = db
+	p.httpc, p.baseURL, p.city = nil, "", ""
+	return &p
+}
+
+// command is the `gc` command for args, a `bd` call, with a pinned client's
+// store named ahead of the verb, where bd reads its global flags. A call that
+// names its own store keeps it.
+func (c *Client) command(args ...string) *exec.Cmd {
+	if c.db != "" && len(args) > 0 && args[0] == "bd" && !slices.Contains(args, "--db") {
+		args = append([]string{"bd", "--db", c.db}, args[1:]...)
+	}
+	return exec.Command(c.bin, args...)
 }
 
 // New returns a Client whose reads prefer the supervisor API when one is
@@ -251,7 +279,7 @@ func (c *Client) showViaExec(id string) *Bead {
 // That is how the scripts read `gc bd show`: `jq -c '.[0] // empty'`, its exit
 // unread, prints the first array's row before it reaches what follows.
 func (c *Client) array(strict bool, args ...string) ([]Bead, bool) {
-	out, err := exec.Command(c.bin, args...).Output()
+	out, err := c.command(args...).Output()
 	if err != nil {
 		var ee *exec.ExitError
 		if strict || !errors.As(err, &ee) {
@@ -463,7 +491,7 @@ func (c *Client) Create(meta map[string]any, sel []string, body string, args ...
 		full = append(full, "--body-file", "-")
 	}
 	full = append(full, "--metadata", string(payload), "--json")
-	cmd := exec.Command(c.bin, full...)
+	cmd := c.command(full...)
 	if body != "" {
 		cmd.Stdin = strings.NewReader(body)
 	}
@@ -683,7 +711,7 @@ func tostringText(v any) string {
 // the atomic update exists to prevent.
 func (c *Client) Update(id string, args ...string) (string, error) {
 	full := append([]string{"bd", "update", id}, args...)
-	cmd := exec.Command(c.bin, full...)
+	cmd := c.command(full...)
 	out, err := cmd.CombinedOutput()
 	return strings.TrimRight(string(out), "\n"), err
 }
