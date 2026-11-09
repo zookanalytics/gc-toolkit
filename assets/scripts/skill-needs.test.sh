@@ -1180,8 +1180,13 @@ echo "── a review of an epic gates what waits on its ruling, records it, and
 # sends the closes its ruling makes to that skill, none forced, apart from the
 # disposition writer it gives other subjects. The skill holds each landed
 # Delivery's close, and only the work that waits on the ruling, with a human
-# gate, records the review under its dated heading and the ruling with the gates
-# it clears as its evidence, answers them before any close, and closes each bead
+# gate, and reads every epic not yet closed for the ground it owns. It records
+# the review under its dated heading, then the contract the ruling sets and the
+# ruling, with the gates it clears as its evidence, in one write whatever the
+# ruling. It answers the landed Deliveries' gates before any close, and leaves
+# the gates on waiting work to the sign-off, because an answer sends that work
+# on and the work must start on what the ruling wrote. A close stands down
+# waiting work it retires, which disarms it before the answer. Each bead closes
 # through the close gate, never forced, because bd refuses a close over an open
 # child or a live blocker. The sign-off records the PR a retirement acts on
 # under the words of its ruling, so each gate on a PR's anchor is answered under
@@ -1205,6 +1210,30 @@ have "the ruling's evidence is the gates it clears, read off the conversation" \
 have "…and is unset when it clears none" '--unset-metadata epic_ruling_evidence' "$EPIC_REVIEW"
 have "the gates are answered before any close, through the sign-off's writer" \
     'converse-signoff.sh" --conversation "$CONVERSATION" --answer <gate>' "$EPIC_REVIEW"
+have "the boundary read takes every epic not yet closed, whatever its status" \
+    'gc bd list -t epic --all --limit 0 --json | jq -r '"'"'.[] | select(.status != "closed") |' "$EPIC_REVIEW"
+lacks "…never the open status alone" '-t epic --status open' "$EPIC_REVIEW" \
+    "an epic in progress, blocked or deferred still owns its ground, and a read of the open status leaves it out"
+fenced_block "$EPIC_REVIEW" 'epic_ruling=<continue|shift|close>' >"$CH/ruling-write"
+if grep -qF -- '--set-metadata epic_hypothesis=' "$CH/ruling-write" \
+    && grep -qF -- '--set-metadata epic_boundaries=' "$CH/ruling-write"; then
+    ok "every ruling records the contract it sets in the write that records the ruling"
+else
+    bad "every ruling records the contract it sets in the write that records the ruling" "the ruling's write: $(head -c 400 "$CH/ruling-write")"
+fi
+review_contract_at=$(grep -nF -- '--set-metadata epic_boundaries=' "$EPIC_REVIEW" | head -1 | cut -d: -f1)
+review_answer_at=$(grep -nF -- 'converse-signoff.sh" --conversation "$CONVERSATION" --answer <gate>' "$EPIC_REVIEW" | head -1 | cut -d: -f1)
+if [ -n "$review_contract_at" ] && [ -n "$review_answer_at" ] && [ "$review_contract_at" -lt "$review_answer_at" ]; then
+    ok "…before the gates are answered"
+else
+    bad "…before the gates are answered" "the contract's write at line ${review_contract_at:-none}, the first answer at line ${review_answer_at:-none}"
+fi
+have "the answers before the closes are the landed Deliveries' gates" \
+    '# --answer <gate> once for each gate on a landed Delivery' "$EPIC_REVIEW"
+have "…and a gate on waiting work is the sign-off's, once every write has landed" \
+    'A gate on work that waits for a judgment takes no call here, because its answer sends that work on. The sign-off answers it once every write below has landed' "$EPIC_REVIEW_JOINED"
+have "a close stands down waiting work it retires, which disarms it before the answer" \
+    '"$CONV/stand-down.sh" <bead> --key <situation-key> --ruling "<the ruling, one sentence>" --successor "$CONVERSATION"' "$EPIC_REVIEW"
 have "each gate on a PR's anchor is answered on a call of its own, under that PR's own ruling" \
     "Each gate on a PR's anchor is answered on a call of its own, under that PR's own ruling: the review's ruling and what it does to that PR, naming the PR." "$EPIC_REVIEW_JOINED"
 have "…a retirement's ruling names its PR, and --pr-anchor names it as the target" \

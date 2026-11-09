@@ -61,8 +61,8 @@ said, and write the change you propose for each gap:
   cannot, so it is a leading indicator and not the signal. The signal must also
   be readable soon after the work lands, not only once data that does not exist
   yet arrives;
-- boundaries on ground another open epic already owns:
-  `gc bd list -t epic --status open --limit 0 --json | jq -r '.[] | "\(.id) \(.metadata.epic_boundaries // "none")"'`;
+- boundaries on ground another epic owns until it closes, whatever its status:
+  `gc bd list -t epic --all --limit 0 --json | jq -r '.[] | select(.status != "closed") | "\(.id) \(.metadata.epic_boundaries // "none")"'`;
 - each proposal recorded since the last review, and anything the evidence below
   contradicts.
 
@@ -205,15 +205,24 @@ in the thread. When the subject is the epic, this block is the settle step's
 record. When the subject is another bead, the settle step's record on it is one
 line naming this block.
 
-**2. Record the ruling on the epic, then answer its gates.**
-`epic_ruling_at` is when the operator ruled, which is now, and
+**2. Record the contract and the ruling on the epic, then answer the gates the
+closes wait on.** Whatever the ruling, record each contract field it sets in its
+own key: a change the operator took, a field they stated, or a shift's new aim.
+Leave out the line of each field the ruling does not set. A proposal the
+operator did not take stays out of the keys, and the block says what became of
+it. `epic_ruling_at` is when the operator ruled, which is now, and
 `epic_ruling_evidence` names each human gate the ruling clears. Those are among
 the gates the conversation replies to, which this lists:
 ```bash
 gc bd list --id "$CONVERSATION" --all --json | jq -r '[.[0].dependencies[]? | select(.type == "replies-to") | .depends_on_id] | join(" ")'
 ```
 ```bash
-gc bd update "$EPIC" --set-metadata epic_ruling=<continue|shift|close> \
+gc bd update "$EPIC" --set-metadata epic_hypothesis="<the sentence: for whom, what changes, and the signal that shows it worked>" \
+  --set-metadata epic_handle="<three to five words>" \
+  --set-metadata epic_boundaries="<the axis it is cut on, and the work beside it that it is not, with where that lives>" \
+  --set-metadata epic_closure_condition="<the checks a person runs to answer the hypothesis>" \
+  --set-metadata epic_indicators="<the signals watched while it is in flight>" \
+  --set-metadata epic_ruling=<continue|shift|close> \
   --set-metadata epic_ruling_reason="<why; on a close, the outcome>" \
   --set-metadata epic_ruling_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --set-metadata epic_ruling_by="$GC_SESSION_NAME" \
@@ -223,19 +232,19 @@ When the ruling clears no gate, put `--unset-metadata epic_ruling_evidence` in
 place of the last line, so the last ruling's evidence does not stand for this
 one.
 
-Then answer the gates now, before any close below, through the sign-off's
-writer: the close gate refuses a bead an open human gate holds. One call
-answers, under the ruling, each gate on a landed Delivery and each gate on work
-whose judgment the ruling gave. Each gate on a PR's anchor takes its own call,
-as the section above gives it:
+Then answer, before any close below, each gate on a landed Delivery, through
+the sign-off's writer: the close gate refuses a bead an open human gate holds.
+Each gate on a PR's anchor takes its own call, as the section above gives it:
 ```bash
 "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" --answer <gate> \
   --ruling "<the ruling, one line>" \
   --outcome "<where the epic stands now, at most 140 characters>" --no-wait
-  # --answer <gate> once for each gate the ruling settles
+  # --answer <gate> once for each gate on a landed Delivery
 ```
-A gate whose judgment the ruling leaves open stays owed: answer it on no call,
-and name it with `--leave` at the sign-off.
+A gate on work that waits for a judgment takes no call here, because its answer
+sends that work on. The sign-off answers it once every write below has landed,
+and write 5 stands down work a close retires. A gate whose judgment the ruling
+leaves open stays owed: name it with `--leave` at the sign-off.
 
 **3. At a checkpoint, close each landed Delivery.** Write 6 closes beads the
 same way, and no close is ever forced. First, nothing under the bead may be
@@ -277,20 +286,9 @@ The gate refuses while a human gate holds the bead or a stewarded epic has no
 close ruling, and bd refuses while anything under the bead is open or a blocker
 holds it. Settle what the refusal names and run the line again.
 
-**4. On continue or shift, aim the next body of work.** Record each contract
-field the ruling sets in its own key: a change the operator took, a field they
-stated, or a shift's new aim. Leave out the line of each field the ruling does
-not set. A proposal the operator did not take stays out of the keys, and the
-block says what became of it:
-```bash
-gc bd update "$EPIC" --set-metadata epic_hypothesis="<the sentence: for whom, what changes, and the signal that shows it worked>" \
-  --set-metadata epic_handle="<three to five words>" \
-  --set-metadata epic_boundaries="<the axis it is cut on, and the work beside it that it is not, with where that lives>" \
-  --set-metadata epic_closure_condition="<the checks a person runs to answer the hypothesis>" \
-  --set-metadata epic_indicators="<the signals watched while it is in flight>"
-```
-On a shift, also re-aim each open Delivery whose aim the shift changes. Read
-its description, then write it back whole with the new `Aim:` line:
+**4. On continue or shift, aim the next body of work.** On a shift, re-aim
+each open Delivery whose aim the shift changes. Read its description, then
+write it back whole with the new `Aim:` line:
 `gc bd update <delivery> --description "<the description, with its new Aim: and Done when: lines>"`.
 
 When the ruling aims a next Delivery, list the epic's open Deliveries first, and
@@ -349,6 +347,10 @@ one. Each item goes one of three ways:
   gc bd update <bead> --set-metadata gc.work_outcome=no-op \
     && "$CONV/bead-rehome.sh" --origin <bead> --successor "$CONVERSATION" --kind not-needed --note "<the ruling, one sentence>"
   ```
+  A bead a human gate holds is stood down instead, with the gate's `await_id`
+  as the key. It removes the arm and ends the run before it answers the gate,
+  then closes the bead:
+  `"$CONV/stand-down.sh" <bead> --key <situation-key> --ruling "<the ruling, one sentence>" --successor "$CONVERSATION"`.
 
 **6. On close, close each other Delivery, then the epic,** as write 3 closes a
 bead, with the ruling as each close's reason. Release the epic's park first,

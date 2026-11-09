@@ -120,7 +120,7 @@ judgment never rules on them, because a worker's account of its own work is not
 evidence.
 
 A review can also come before any unit lands, such as one that judges a new
-epic's contract, and it rules the same way. A continue that sharpens the
+epic's contract, and it rules the same way. Any ruling that sharpens the
 contract records the sharper fields with it.
 
 A disproven epic's surviving work is not swept back into ordinary flow by
