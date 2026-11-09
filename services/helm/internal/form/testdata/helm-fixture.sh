@@ -32,7 +32,7 @@ JSON
  "conversations":[
   {"id":"tk-demo2","rig":"gc-toolkit","subject":"tk-demo1","title":"why does the held label lag the gate by a cycle?","status":"in_progress","state":"live","readiness":"ready","session":{"id":"s-1","name":"s-1","state":"active","attached":false,"created_at":"2026-11-08T10:00:00Z"}},
   {"id":"tk-demo9","rig":"gc-toolkit","subject":"tk-demo1","title":"your question","status":"open","state":"live","readiness":"preparing","session":{"id":"s-9","name":"s-9","state":"active","attached":false,"created_at":"2026-11-08T12:00:00Z"}}],
- "holds":[{"held":"gate","id":"tk-demo10","title":"Approve the label wording"}],"holds_read":true}
+ "holds":[{"held":"gate","id":"tk-demo10","title":"Approve the label wording"},{"held":"review","id":"","title":"2 review threads wait on the city's answer"}],"holds_read":true}
 JSON
     ;;
   "conversations 1446")

@@ -234,15 +234,16 @@ the one definition the PR's `held:` labels and the board's row read: each open
 human gate reached from the bead through its open `blocks` edges, so a gate on a
 rework or a review the anchor waits on is offered from the PR, each blocker the
 bead waits on that a person has to clear, and the PR's own review threads or
-blocked verdict. The prompt lists them under "Held by" after the bead's
-conversations. A gate or a blocker takes a number, and picking one engages it as
-if it were named, except that a gate several beads wait on takes the bead it was
-picked from when that bead is one of them. The PR's own threads and verdict take
-none, because engaging the PR is how a person acts on them. An engage that asks
-nothing, as `--no-input` and the board's route do, names each
-and how to engage it, and an engage pointed at a gate or a conversation does not
-look for others. A conversation on the bead answers no gate until it replies to
-one.
+blocked verdict. The conversation form lists them under the bead's
+conversations. A gate or a blocker is a row, and choosing it makes it the
+subject, looked up as if it were typed, so a gate several beads wait on is
+refused as engage refuses it on the command line. The PR's own threads and
+verdict are lines that no row stands for, because engaging the PR is how a
+person acts on them. The form says when what holds the bead did not read, so a
+bead it could not read does not look like one that nothing holds. An engage
+that asks nothing, as `--no-input` and the board's route do, names each and how
+to engage it, unless it was pointed at a gate or a conversation. A conversation
+on the bead answers no gate until it replies to one.
 
 **On a terminal, engage opens the conversation form.** An engage whose
 command line names no concern (`--reason`, `--template` or `--skill`) and not

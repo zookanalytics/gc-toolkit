@@ -1272,6 +1272,116 @@ func TestTheRowsOnASubjectPageToTheTerminal(t *testing.T) {
 	}
 }
 
+// heldAbout is tk-a with one conversation, held by a gate, by its PR's review
+// threads and by the merge pass's blocked verdict. The two the PR holds it by
+// carry no ID, as prstatus.Reasons gives them.
+func heldAbout() About {
+	a := subjectAbout("tk-a", "gc-toolkit")
+	a.Conversations = []Conversation{{ID: "tk-c1", Readiness: Ready, Title: "a question"}}
+	a.Holds = []Hold{
+		{Held: "gate", ID: "tk-g1", Title: "approve the wording"},
+		{Held: "review", Title: "2 review threads wait on the city's answer"},
+		{Held: "blocked", Title: "a live blocker no automated actor holds"},
+	}
+	return a
+}
+
+// What holds the subject with no bead behind it, the PR's review threads and
+// its blocked verdict, is shown under the rows, and no key reaches it: the
+// cursor stops on the last row, Space chooses only rows, and Ctrl+S files on the
+// subject.
+func TestHoldsWithNoBeadAreShownAndNeverChosen(t *testing.T) {
+	f := &fakeHelm{
+		about:    map[string]About{"tk-a": heldAbout()},
+		saveResp: Saved{Subject: "tk-a", Conversation: "tk-c2", Filed: true},
+	}
+	m := newForm(t, f, Options{Subject: "tk-a"})
+	settle(m)
+	v := m.composeView()
+	for _, want := range []string{
+		"· held: review — 2 review threads wait on the city's answer",
+		"· held: blocked — a live blocker no automated actor holds",
+	} {
+		if !strings.Contains(v, want) {
+			t.Fatalf("the screen does not show %q:\n%s", want, v)
+		}
+	}
+	if rows := m.contextRows(); len(rows) != 3 || rows[1].id != "tk-c1" || rows[2].id != "tk-g1" {
+		t.Fatalf("rows = %+v, want the new conversation, tk-c1 and the gate", rows)
+	}
+	focusOn(t, m, contextField)
+	for range 6 {
+		m.Update(key(tea.KeyDown))
+	}
+	if l := marked(strings.Split(m.composeView(), "\n"), "› "); m.cursor != 2 || !strings.Contains(l, "tk-g1") {
+		t.Fatalf("after 6 ↓ the cursor is at %d, on %q, want the gate's row, the last", m.cursor, l)
+	}
+	for range 6 {
+		m.Update(key(tea.KeyUp))
+	}
+	m.Update(key(tea.KeySpace))
+	focusOn(t, m, questionField)
+	typeText(m, "why is it held?")
+	_, cmd := m.Update(ctrl('s'))
+	deliver(m, cmd)
+	if len(f.saves) != 1 || f.saves[0].Ref != "tk-a" || f.saves[0].Subject != "tk-a" {
+		t.Fatalf("saves = %+v, want one on tk-a", f.saves)
+	}
+}
+
+// The lines under the rows take room, which the rows page around, so on a short
+// terminal the cursor's row and the held lines are both on screen.
+func TestHeldLinesStayOnScreenWithTheRowInPlay(t *testing.T) {
+	a := heldAbout()
+	a.Conversations = convs(30)
+	f := &fakeHelm{about: map[string]About{"tk-a": a}}
+	m := newForm(t, f, Options{Subject: "tk-a"})
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	settle(m)
+	focusOn(t, m, contextField)
+	for range 25 {
+		m.Update(key(tea.KeyDown))
+	}
+	v := m.composeView()
+	if n := lines(v); n > 30 {
+		t.Fatalf("the view is %d lines on a 30-line terminal:\n%s", n, v)
+	}
+	shown := onScreen(v, 30)
+	if l := marked(shown, "› "); !strings.Contains(l, "tk-c24") {
+		t.Fatalf("the cursor's row is not on screen:\n%s", v)
+	}
+	if marked(shown, "· held: review") == "" || marked(shown, "· held: blocked") == "" {
+		t.Fatalf("the held lines are not on screen:\n%s", v)
+	}
+}
+
+// A subject whose holds did not read says so beside its rows, so it does not
+// look like one nothing holds. A subject whose holds read says nothing of it,
+// and nor does a PR number's candidate list, an answer with no holds_read.
+func TestAHoldsReadThatFailedIsShown(t *testing.T) {
+	unread := subjectAbout("tk-a", "gc-toolkit")
+	unread.HoldsRead = false
+	unread.Conversations = []Conversation{{ID: "tk-c1", Readiness: Ready, Title: "a question"}}
+	f := &fakeHelm{about: map[string]About{
+		"tk-a": unread,
+		"tk-b": subjectAbout("tk-b", "gc-toolkit"),
+		"12":   {Ref: "12", Candidates: []Candidate{{ID: "tk-x", Rig: "gc-toolkit", Title: "x"}, {ID: "gc-y", Rig: "gascity", Title: "y"}}},
+	}}
+	const warning = "What holds the subject did not read"
+	m := newForm(t, f, Options{Subject: "tk-a"})
+	settle(m)
+	if v := m.composeView(); !strings.Contains(v, warning) || !strings.Contains(v, "tk-c1") {
+		t.Fatalf("a subject whose holds did not read:\n%s", v)
+	}
+	for ref, shows := range map[string]string{"tk-b": "a new conversation", "12": "tk-x"} {
+		m := newForm(t, f, Options{Subject: ref})
+		settle(m)
+		if v := m.composeView(); strings.Contains(v, warning) || !strings.Contains(v, shows) {
+			t.Fatalf("%s:\n%s", ref, v)
+		}
+	}
+}
+
 // A refresh that fails keeps the rows the last read gave, and the screen says
 // the list may be out of date, since when, and why the read failed.
 func TestAFailedRefreshSaysTheListMayBeOutOfDate(t *testing.T) {

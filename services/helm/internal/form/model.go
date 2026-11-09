@@ -331,11 +331,41 @@ func (m *Model) contextRows() []contextRow {
 	}
 	for _, h := range a.Holds {
 		if h.ID == "" {
-			continue
+			continue // no bead to choose: heldLines shows it
 		}
 		rows = append(rows, contextRow{kind: "hold", id: h.ID, label: fmt.Sprintf("%s  held: %s — %s (becomes the subject)", h.ID, h.Held, h.Title)})
 	}
 	return rows
+}
+
+// resolved is the finished lookup of the subject field when it names one
+// subject, or nil. A PR number several live anchors record names candidates
+// instead, and that answer carries no holds and no holds_read.
+func (m *Model) resolved() *lookup {
+	l := m.current()
+	if l == nil || l.err != nil || len(l.about.Candidates) > 0 {
+		return nil
+	}
+	return l
+}
+
+// heldLines are what holds the subject with no bead behind it: the PR's own
+// review threads and its blocked merge verdict, which prstatus.Reasons gives
+// with no ID. Engaging the subject is how a person acts on them, so each is a
+// line under the rows on the subject, and no row: the cursor, Space and Ctrl+S
+// never reach it. A gate or a blocker is a row (contextRows).
+func (m *Model) heldLines() []string {
+	l := m.resolved()
+	if l == nil {
+		return nil
+	}
+	var out []string
+	for _, h := range l.about.Holds {
+		if h.ID == "" {
+			out = append(out, fmt.Sprintf("  · held: %s — %s", h.Held, h.Title))
+		}
+	}
+	return out
 }
 
 // hostingRigs are the rigs a new topic can be filed in, in the city's order.
@@ -1240,9 +1270,16 @@ func (m *Model) composeView() string {
 			sel = m.cursor
 		}
 	}
+	// The lines below the rows are counted in the room the rows page into, so
+	// they stay on screen with the row in play.
 	var after strings.Builder
-	if l := m.current(); len(rows) == 0 && l != nil && l.err == nil && !l.about.HoldsRead {
-		after.WriteString(hintStyle.Render("What holds the subject did not read.") + "\n")
+	for _, line := range m.heldLines() {
+		after.WriteString(line + "\n")
+	}
+	if l := m.resolved(); l != nil && !l.about.HoldsRead {
+		// Without this line, a subject whose holds did not read looks like one
+		// that nothing holds.
+		after.WriteString(waitStyle.Render("What holds the subject did not read, so nothing that holds it is listed.") + "\n")
 	}
 	if l := m.current(); l != nil && l.err == nil && l.about.Closed != nil {
 		after.WriteString(hintStyle.Render(l.about.Closed.Said) + "\n")
