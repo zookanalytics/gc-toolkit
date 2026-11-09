@@ -209,12 +209,13 @@ stays open and owed, for its filer or the next sitting. The one gate it
 withdraws is the conversation's own hold on an open PR's merge, the gate under
 its key on the subject's anchor, once the close has landed, because that hold
 lives as long as the conversation; one that does not withdraw exits 4 naming
-the repair. It records the dismissal as one of the visit's actions, a comment
-on the conversation that carries no reason, and draws the comment that shows
-the visit on the subject's PR again. It then stops the converse session that
-held the conversation with `gc runtime drain-ack`, so the controller ends the
-session outside this process: the session dismiss runs in acks itself, last,
-and any other is acked as an operator. --operator says the caller is outside the sitting even when it
+the repair. It records the
+dismissal as one of the visit's actions, a comment on the conversation that
+carries no reason, and draws the comment that shows the visit on the subject's
+PR again. It then stops the converse session that held the conversation with
+`gc runtime drain-ack`, so the controller ends the session outside this
+process: the session dismiss runs in acks itself, last, and any other is acked
+as an operator. --operator says the caller is outside the sitting even when it
 runs under the sitting's identity to infer the subject, as prefix+X does, so
 every session is acked as an operator and none acks itself. A session that
 will not stop is left to converse-reap, which closes any converse session
