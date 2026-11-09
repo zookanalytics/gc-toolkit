@@ -14,18 +14,16 @@
 # This test runs the REAL gc-helm.sh (invoked via `sh`, as shipped) with a
 # stubbed `gc` on PATH — no live city, Dolt, network, or sessions. Covered:
 #   (EXISTS)   a resolvable bead gets a conversation: one create, a task that
-#              tracks the bead and is assigned to `human`, read back as a
-#              conversation, exit 0
+#              tracks the bead and is assigned to `human`, exit 0
 #   (QUEUED)   a conversation already waiting in the queue is joined, exit 0,
 #              nothing created; a new reason is appended to its notes in a
 #              write guarded on its waiting there, and a concern it already
 #              carries is not appended again
-#   (JOIN-*)   a join is reported only once the conversation reads back still
-#              waiting in the queue and carrying the concern: one a dismiss
+#   (JOIN-*)   a join is reported only once the conversation, read after the
+#              join's guarded append, still waits in the queue: one a dismiss
 #              closed or a sitting took, before the write or after it, is
-#              passed over and the concern filed fresh; a failed append, a note
-#              that did not land, an unread row, or a listing that does not
-#              answer again exits 4
+#              passed over and the concern filed fresh; a failed append, an
+#              unread row, or a listing that does not answer again exits 4
 #   (HELD)     a conversation a sitting holds is not joined: a fresh one is
 #              filed in the queue
 #   (TWO-TRACKS) a task assigned to human that tracks the bead and another is
@@ -85,9 +83,9 @@ mkdir -p "$TMP/bin"
 #     written on a mismatch, as bd's guard does, then appends its note.
 #     $FAKE_GUARD_MISS makes the guard miss whatever it reads, as a writer
 #     landing between open's read and its write does; $FAKE_APPEND_FAIL fails
-#     the write (exit 1); and
-#     $FAKE_CLOSE_ON_APPEND closes the conversation just after the append, as a
-#     dismiss landing before open's read-back does.
+#     the write (exit 1); and $FAKE_CLOSE_ON_APPEND closes the conversation
+#     just after the append, as a dismiss landing before open reads it again
+#     does.
 #   bd dep list ... --type tracks fails from the $FAKE_TRACKS_FAIL_FROM-th
 #     listing on, when set.
 #   bd dep list <gate> --direction=up --type blocks — the beads waiting on the
@@ -95,11 +93,10 @@ mkdir -p "$TMP/bin"
 #   bd list --id <ids> — each named bead's own row, with its edges, for the
 #     comma-separated ids. $FAKE_CONV tracks the recorded bead alone, and
 #     $FAKE_TWO tracks it and tk-elsewhere, so it is no conversation. Any other
-#     id is the conversation a create filed, read back: a task that tracks the
-#     subject its --deps named and carries the assignee it was filed with. Its
-#     replies-to edges are the
-#     ones `dep add` recorded. An id in $FAKE_LIST_DROPS is left out, as a row
-#     the store did not return.
+#     id is the conversation a create filed: a task that tracks the subject its
+#     --deps named and carries the assignee it was filed with. Its replies-to
+#     edges are the ones `dep add` recorded. An id in $FAKE_LIST_DROPS is left
+#     out, as a row the store did not return.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 ${2:-}" in
   "rig list")
@@ -287,8 +284,8 @@ grep -qE 'task_kind|gc\.routed_to|gc\.continuation_group' <<< "$CALLS" \
   && bad "(EXISTS) a conversation carries no pack metadata (calls: $CALLS)" \
   || ok "(EXISTS) no pack metadata is stamped"
 grep -q '^bd close' <<< "$CALLS" \
-  && bad "(EXISTS) the conversation read back and must not be closed (calls: $CALLS)" \
-  || ok "(EXISTS) the conversation reads back as one and stays open"
+  && bad "(EXISTS) the conversation it filed must not be closed (calls: $CALLS)" \
+  || ok "(EXISTS) the conversation it filed stays open"
 grep -q 'conversation tk-conv1 filed on tk-real1' <<< "$OUT" \
   && ok "(EXISTS) success names the conversation and its bead" || bad "(EXISTS) success sentence (out: $OUT)"
 grep -q "operator's queue" <<< "$OUT" \
@@ -390,19 +387,19 @@ grep -q 'conversation tk-conv1 filed on tk-real1' <<< "$OUT" \
 FAKE_CLOSE_ON_APPEND=1 run_open found tk-real1 --reason "the cost question"
 eq "$RC" "0" "(JOIN-CLOSED-AFTER) a conversation a dismiss closes after the append exits 0"
 grep -q 'conversation tk-conv1 filed on tk-real1' <<< "$OUT" \
-  && ok "(JOIN-CLOSED-AFTER) …and its read-back sends the concern to a conversation of its own" \
-  || bad "(JOIN-CLOSED-AFTER) files fresh once the read-back reads closed (out: $OUT calls: $CALLS)"
+  && ok "(JOIN-CLOSED-AFTER) …and its read after the join sends the concern to a conversation of its own" \
+  || bad "(JOIN-CLOSED-AFTER) files fresh once the read after the join reads closed (out: $OUT calls: $CALLS)"
 grep -q 'already open' <<< "$OUT" \
   && bad "(JOIN-CLOSED-AFTER) …never reporting the closed one waiting (out: $OUT)" \
   || ok "(JOIN-CLOSED-AFTER) …never reporting the closed one waiting"
 
 FAKE_CONV_UNREADABLE=1 run_open found tk-real1 --reason "the cost question"
-eq "$RC" "4" "(JOIN-UNREAD) a conversation that does not read back exits 4"
+eq "$RC" "4" "(JOIN-UNREAD) a conversation that does not read after the join exits 4"
 grep -q '^bd update tk-conv0 --if-assignee human --if-status open --append-notes' <<< "$CALLS" \
   && ok "(JOIN-UNREAD) …after the guarded append, which an unread row cannot rule out" \
   || bad "(JOIN-UNREAD) the append is guarded (calls: $CALLS)"
-grep -q 'could not be read back' <<< "$ERR" \
-  && ok "(JOIN-UNREAD) …saying it could not be read back" || bad "(JOIN-UNREAD) names the read (err: $ERR)"
+grep -q 'could not be read after open joined it' <<< "$ERR" \
+  && ok "(JOIN-UNREAD) …saying it could not be read" || bad "(JOIN-UNREAD) names the read (err: $ERR)"
 
 FAKE_CONV_NOW_STATUS=closed run_open found tk-real1
 eq "$RC" "0" "(JOIN-BARE) open with no concern beside a conversation closed after the listing exits 0"
