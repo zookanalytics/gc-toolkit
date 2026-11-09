@@ -1909,8 +1909,8 @@ verify_subject() {
 # on it, since a conversation always tracks a bead and never a gate. Sets
 # TAKE_BEAD (that bead), TAKE_GATE (the human gate the id named, which the
 # conversation replies to) and TAKE_CONV (the conversation the id named). A gate
-# several open beads wait on takes <from>, the bead the operator reached the gate
-# from, when it is one of them. Otherwise it is refused, naming them, so the
+# several open beads wait on takes <from>, the one bead engage found waiting on
+# it, when it is one of them. Otherwise it is refused, naming them, so the
 # operator names the one they mean, and so is a gate nothing waits on, naming the
 # beads it was about, because a sitting there would answer an ask that holds
 # nothing. A refusal or a read that did not answer exits 4 with <nothing-msg>.
