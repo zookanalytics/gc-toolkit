@@ -108,7 +108,8 @@ state, the route and any deferred-dispatch arm it carried. A conversation about
 an open PR, its anchor or a bead whose `anchor_bead` names the anchor, holds
 the PR's merge the same way from the moment it opens until it closes: a human
 gate on the anchor under the conversation's key, which `gc-helm.sh open` files
-and every close of the conversation answers or withdraws
+and every close of the conversation answers or withdraws once the close has
+landed
 ([human-engagement.md](human-engagement.md#a-conversation-on-an-open-pr-holds-its-merge)).
 
 `pre_open_gate` and `pull_request` are the declared *detached* states

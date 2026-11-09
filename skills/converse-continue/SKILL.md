@@ -60,7 +60,12 @@ recommendation names the recommendation's gate with `--answer` and adds
 `--accept`, so Accept's writer answers that gate and sends the formula, as at
 the sign-off (step 7). The `--answer` call resolves only the gates it
 names, leaves the conversation open, and exits non-zero when it stopped short.
-Until it exits 0, do not tell the operator the ruling is in place:
+The conversation's own gate on an open PR's anchor, under its key
+`conversation.<its id>`, stays open until the conversation closes, even when
+the call names it, so the PR's merge waits for the sign-off. A ruling that lets
+the PR land sooner withdraws that gate, as the converse-hold step says for a
+sitting that is helping the PR land. Until the call exits 0, do not tell the
+operator the ruling is in place:
 ```bash
 "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" --answer <gate> \
   --ruling "<the operator's ruling, one line>" \

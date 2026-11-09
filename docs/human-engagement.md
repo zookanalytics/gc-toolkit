@@ -213,13 +213,18 @@ key, `conversation.<conversation id>`, and the conversation replies to it.
   Reviews, reworks and supplements keep running: each is a bead the anchor
   waits on, which a gate on the anchor does not block, and gate-ensure's
   quiescence does not count a human gate.
-- **Every writer that closes the conversation answers or withdraws the gate.**
-  The sign-off answers it with the ruling, as it answers every gate the
-  conversation replies to, after it has put in place the rework or the
+- **Every writer that closes the conversation answers or withdraws the gate,
+  once the close has landed.** The sign-off answers it with the ruling after
+  the conversation's close, and after it has put in place the rework or the
   retirement the ruling carries, so the merge never lands in between. A
   dismiss and the premise re-check's moot or benign close withdraw it, resolved
-  `moot:`. A conversation handed back to the operator's queue is still open, so
-  it keeps the gate.
+  `moot:`, after the close as well. A close that does not land leaves the
+  conversation open and the merge held, and a release that does not land after
+  the close is reported with its repair: a re-run of the sign-off or of the
+  close block skips the close and releases the gate. A ruling the sign-off
+  records on a turn that does not sign off (`--answer`) leaves the gate open,
+  and a conversation handed back to the operator's queue is still open, so it
+  keeps the gate.
 - **A sitting that is helping the PR land withdraws the gate**, the shepherd
   case, with `human-gate.sh --retract` under the conversation's key, and
   records why on the conversation. The withdrawal lasts for that sitting: a
@@ -477,8 +482,9 @@ of each gate it replies to, and checks it against live state. A gate whose
 premise has died is resolved `moot:`, and one whose premise holds but needs
 nobody `benign:`, with the reading as the answer. When the conversation's own
 ask has died with it, the sitting appends the reading to the subject's notes,
-withdraws the conversation's own hold on an open PR's merge, and closes the
-conversation with the reading, posting nothing and stamping no headline.
+closes the conversation with the reading and then withdraws the
+conversation's own hold on an open PR's merge, posting nothing and stamping no
+headline.
 A gate's message is written when it is filed, so the sitting runs the re-check
 command a gate names, as the liveness sweep's gate names
 `liveness-recheck.sh`, through the pack's own copy, and its census supersedes
@@ -555,12 +561,15 @@ durable trace in one order every time:
    disposition and closes the PR;
 2. the subject's headline;
 3. `ruled: <the ruling>` on each open gate the conversation replies to that the
-   ruling answers, each read back, with an earlier answer reported;
+   ruling answers, each read back, with an earlier answer reported, except the
+   conversation's own hold on an open PR's merge, which step 5 answers;
 4. the subject's recommendation, when the ruling takes it (`--accept`): the
    recommendation's gate, which step 3 leaves, is answered by Accept's writer
    (below), which sends the formula once;
 5. the conversation's close, whose reason is the headline the sitting settled
-   on;
+   on, and then `ruled: <the ruling>` on the conversation's own hold on an
+   open PR's merge, read back the way step 3 reads its gates, so the merge
+   waits until the close has landed;
 6. the comment that shows the visit on the subject's PR, drawn again from the
    conversation.
 
@@ -599,7 +608,9 @@ at once, so a dismiss that ends the sitting later leaves nothing the operator
 ruled on open. It is answered through the same script with `--answer <gate>`,
 which runs steps 1 to 3 for the gates it names, and step 4 when the ruling
 takes the recommendation, and stops there, leaving the conversation open for
-the sign-off.
+the sign-off. The conversation's own hold on an open PR's merge stays open
+with it, even when `--answer` names it, because the merge waits for the
+conversation's close.
 
 A ruling is not an approval. The merge counts only an Approve review on GitHub
 from an account other than the city's (the merge condition in
@@ -698,8 +709,11 @@ Discuss and names the gates that withhold Accept (`accept_withheld`), and a
 sitting answers them. A live sitting does not withhold Accept; Accept warns
 when one tracks the bead or replies to the recommendation's gate, and that
 sitting's sign-off later reports the gate already cleared. A conversation on
-an open PR does withhold it, through the gate that holds the PR's merge, until
-the conversation closes.
+an open PR does withhold the board's Accept, through the gate that holds the
+PR's merge, until the conversation closes. That conversation's own sign-off
+takes the recommendation past that gate, because the gate holds only the
+merge, which no dispatch reaches, and stays open until the sign-off has closed
+the conversation.
 
 `gc-helm.sh accept` runs under the bead's acceptance lock, a `flock` on one
 file per bead under `<city>/.gc/runtime/packs/gc-toolkit`, from before its live
@@ -724,7 +738,11 @@ warrant is in [warrants.md](warrants.md).
 A sitting takes a recommendation through the same writer. When the operator
 rules to take it, the sign-off's `--accept` leaves the recommendation's gate
 out of its `ruled:` answers and runs `gc-helm.sh accept` once the ruling's other
-writes have landed. Under the lock, that run finishes an acceptance the
+writes have landed, naming the conversation with `--conversation`. On an open
+PR's anchor, Accept then counts no gate under that conversation's key among the
+gates that block the anchor, in its live read or in its read-back after the
+resolve, while every other gate still withholds it, another conversation's
+hold included. Under the lock, that run finishes an acceptance the
 board's Accept left unfinished instead of sending the formula again, and a
 board Accept that runs after the sitting's finds the recommendation
 dispatched. Gas City's launch lock refuses a second pour only while the first

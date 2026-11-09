@@ -64,7 +64,7 @@ Usage:
   gc-helm priority <bead-id> --shift <±n> [--dry-run]  set the shift of a bead that follows a parent or an anchor: +1 is one level later, -1 one level sooner
   gc-helm dismiss  [<bead-id>] [--reason "..."] [--operator] [--json]  the operator is done with this sitting: close the conversation a live sitting holds on the bead, answering no gate, withdraw the gate it held an open PR's merge with, and stop the session that held it; a conversation id closes that conversation (subject inferred from the current sitting when omitted); --operator stops every session as the operator, from outside it; --json prints {subject,matched,closed,ok}
   gc-helm handback <conversation-id> < hand-back  record the hand-back a converse sitting is posting, read from stdin, on its conversation, replacing the one before; engage prints the latest in the operator's tab once the sitting has ended
-  gc-helm accept <bead-id> [--reason "..."] [--conversation <task>] [--var <key>=<value> ...]  accept a recommendation: resolve the human gate that put it to the operator, read the answer back, and dispatch the bead's gc.recommended_formula at it; refuses while another human gate blocks the bead, and finishes an acceptance an earlier Accept left unfinished (subject or conversation id). --conversation names the conversation whose sitting's sign-off runs this Accept, which it does not warn of; each --var rides the sling, a var the operator settled for this dispatch
+  gc-helm accept <bead-id> [--reason "..."] [--conversation <task>] [--var <key>=<value> ...]  accept a recommendation: resolve the human gate that put it to the operator, read the answer back, and dispatch the bead's gc.recommended_formula at it; refuses while another human gate blocks the bead, and finishes an acceptance an earlier Accept left unfinished (subject or conversation id). --conversation names the conversation whose sitting's sign-off runs this Accept, which it does not warn of, and whose own hold on an open PR's merge holds no dispatch on that PR's anchor; each --var rides the sling, a var the operator settled for this dispatch
   gc-helm resolve <bead-id|pr-number|pr-url>  print the LIVE bead a reference resolves to (a PR ref to its anchor, a superseded id to its successor); a live id or an unrecognized reference prints unchanged, an unresolvable or ambiguous PR is refused. Read-only, files nothing — operator-intake.sh uses it to route a PR reference before it becomes a topic
   gc-helm unplaced [--json]  list the placement sitting's queue: every live bead in the city's stores marked placement=pending that nothing has placed since (no parent, route, arm, assignee or live pour), priority then age; --json prints one object for a caller: the rows as beads, the suspended rigs it skipped, and the rigs whose store did not answer. Read-only, files nothing; exits 4 after the list when a store did not answer
 
@@ -86,9 +86,10 @@ claims the conversation. A conversation about an open PR, its anchor or a bead
 whose anchor_bead names it, holds the PR's merge for as long as it is open:
 open files a human gate on the anchor under the conversation's key,
 conversation.<id>, and the conversation replies to it. Its sign-off answers the
-gate, and a dismiss or a moot or benign close withdraws it. A failed read of
-that anchor files nothing, and a gate that does not land exits 4 with the
-conversation filed and the repair named. engage holds a conversation in a
+gate, and a dismiss or a moot or benign close withdraws it, each once the
+conversation's close has landed. A failed read of that anchor files nothing,
+and a gate that does not land exits 4 with the conversation filed and the
+repair named. engage holds a conversation in a
 sitting: it attaches to a live sitting on the bead, or takes the bead's
 conversation from the queue, or one whose sitting's session has closed, or
 files a new one. It then spawns a manual converse-<model> sitting
@@ -269,7 +270,11 @@ only when no root carries the token, and slinging the vars the acceptance
 recorded. A sitting takes a recommendation through this verb too: its
 sign-off's --accept runs it with --conversation naming the sitting's own
 conversation, which Accept then does not warn of as a live sitting on the
-bead, and with a --var for each var the operator's ruling settled for the
+bead. On an open PR's anchor, the hold that conversation keeps on the PR's
+merge, the gate under its key, conversation.<id>, then holds no dispatch,
+since it holds only the merge and lasts until the sign-off closes the
+conversation, while every other gate still holds it. With it the sign-off
+passes a --var for each var the operator's ruling settled for the
 dispatch, such as mol-design-convoy's design_gated=false. Each --var rides
 the sling. A run that finishes an acceptance slings the vars that acceptance
 was made with and refuses a --var that differs from them, and a root an
@@ -1954,12 +1959,13 @@ conversation_reply() {
 # it. open files it, and engage files it when it starts a sitting on a
 # conversation that lacks it, so a conversation holds the merge however it
 # started. Every writer that closes a conversation answers the gate or withdraws
-# it: the sign-off answers each gate the conversation replies to with its
-# ruling, dismiss withdraws it here, and the premise re-check's moot or benign
-# close withdraws it. A sitting that is helping the PR land withdraws it sooner
-# (skills/converse-hold). The gate holds only the merge: a review, a rework or a
-# supplement is a bead of its own that the anchor waits on, and a gate on the
-# anchor blocks none of them.
+# it once the close has landed, so a close that does not land leaves the merge
+# held: the sign-off answers it with its ruling, dismiss withdraws it here, and
+# the premise re-check's moot or benign close withdraws it. A ruling on a turn
+# that does not sign off leaves it open. A sitting that is helping the PR land
+# withdraws it sooner (skills/converse-hold). The gate holds only the merge: a
+# review, a rework or a supplement is a bead of its own that the anchor waits
+# on, and a gate on the anchor blocks none of them.
 
 # subject_anchor <subject-row> — the anchor a conversation about the subject
 # holds the merge of: the subject itself when it is an anchor (it carries a
@@ -3019,7 +3025,10 @@ accept_vars_said() {
 # the recommendation's gate is open and unassigned, or closed with an
 # acceptance an earlier Accept did not finish; and no other open human gate
 # blocks the bead, since the bead's next step waits for each gate that blocks
-# it and a formula sling reads no blocks edge.
+# it and a formula sling reads no blocks edge. The one gate that does not count
+# is the hold the conversation --conversation names keeps on an open PR's
+# merge, when the bead is that PR's anchor: it holds only the merge, and it
+# stays open until that conversation's sign-off has closed it.
 #
 # Every Accept on a bead runs under the bead's acceptance lock from before its
 # live read of those conditions to its last write, so one run's search, sling
@@ -3113,8 +3122,23 @@ cmd_accept() {
         echo "$PROG: accept: could not read the human gates on $bead ('gc bd dep list $bead --type blocks' did not answer), so whether Accept may answer cannot be told. Nothing dispatched." >&2
         exit 4
     fi
-    others=$(printf '%s' "$gates" | jq -r "$HUMAN_GATE_JQ"'
+    # The calling conversation's own hold on an open PR's merge, the human gate
+    # under its key, conversation.<id>, among the gates that block the PR's
+    # anchor, holds only the merge, which no dispatch reaches. It stays open
+    # until that conversation has closed, which its sign-off does after this
+    # Accept. So under --conversation, on a bead that is an open PR's anchor,
+    # that one gate does not hold the dispatch, in this read or in the
+    # read-back after the resolve. Every other gate still does, another
+    # conversation's hold included, and the board's Accept names no
+    # conversation.
+    own_hold_key=""
+    if [ -n "$accept_conv" ] && printf '%s' "$VS_ROW" | jq -e '((.metadata // {}).merge_result // "") == "pull_request"
+            and ((.status // "") | tostring | ascii_downcase) != "closed"' >/dev/null 2>&1; then
+        own_hold_key="conversation.$accept_conv"
+    fi
+    others=$(printf '%s' "$gates" | jq -r --arg own "$own_hold_key" "$HUMAN_GATE_JQ"'
         [ .[] | select(open_human_gate("")) | select(((.await_id // "") | tostring) != "first-reaction")
+              | select($own == "" or ((.await_id // "") | tostring) != $own)
               | "\(.id) (\(.title // "untitled"))" ] | join("; ")' 2>/dev/null || true)
     if [ -n "$others" ]; then
         echo "$PROG: accept: another human gate still blocks $bead: $others. Accept answers only the recommendation, and $bead's next step waits for every gate that blocks it, so Accept waits until those are cleared. Discuss it to answer them: $PROG engage $bead. Nothing dispatched." >&2
@@ -3250,7 +3274,8 @@ cmd_accept() {
         echo "$PROG: accept: could not read back the human gates on $bead after its acceptance ($tok), so nothing is dispatched yet. The next Accept finishes it once the store answers: $PROG accept $bead" >&2
         exit 4
     fi
-    late=$(printf '%s' "$late_rows" | jq -r "$HUMAN_GATE_JQ"'[ .[] | select(open_human_gate("")) | "\(.id) (\(.title // "untitled"))" ] | join("; ")' 2>/dev/null || true)
+    late=$(printf '%s' "$late_rows" | jq -r --arg own "$own_hold_key" "$HUMAN_GATE_JQ"'[ .[] | select(open_human_gate(""))
+        | select($own == "" or ((.await_id // "") | tostring) != $own) | "\(.id) (\(.title // "untitled"))" ] | join("; ")' 2>/dev/null || true)
     if [ -n "$late" ]; then
         # shellcheck disable=SC2086  # the gate ids are space-free words
         accept_reopen "Accept stood down: another human gate blocks the bead" $rec_gates || true

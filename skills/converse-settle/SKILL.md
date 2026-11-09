@@ -76,7 +76,9 @@ then post the sign-off as the thread's last word. `converse-signoff.sh` writes
 the trace in one order every time: the ruling's rework or the PR's retirement,
 the subject's headline, the answer on each gate the conversation replies to,
 the subject's recommendation when the ruling takes it, the conversation's
-close, and the comment that shows the visit on the subject's pull request. It
+close, then the answer on the conversation's own hold on an open PR's merge,
+so that merge waits until the close has landed, and the comment that shows the
+visit on the subject's pull request. It
 records the ruling and each act it takes on the conversation as the visit's
 actions, which that comment lists once the visit ends, so the ruling reaches
 the pull request as you write it: keep other rigs and their beads out of it.

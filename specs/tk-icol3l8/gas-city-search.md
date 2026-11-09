@@ -50,19 +50,37 @@ closes the conversation answers the gate or withdraws it.
 - **A Gas City primitive that ties a hold to a session's work.**
   `gc session wait --sleep --on-beads` sleeps a session until beads close. It
   holds the session, not another bead's merge.
+- **A gate that holds a bead's merge and not a dispatch at it.** A sitting's
+  sign-off takes a recommendation at an open PR's anchor while the
+  conversation's own gate still blocks that anchor, because the gate is
+  answered only once the conversation's close has landed. Gas City has no gate
+  scoped to a merge. A formula's gate bead blocks its step until the gate bead
+  is closed, and its type is vocabulary the parser never validates
+  ([formula-spec-v2.md](https://github.com/gastownhall/gascity/blob/0629c3fce24f/docs/reference/specs/formula-spec-v2.md),
+  "Gate `type` vocabulary"). `gc sling` takes no flag that waits on a bead's
+  blockers (`cmd/gc/cmd_sling.go` 148-169 at 0629c3fce24f), which is why
+  `gc-helm.sh accept` reads the bead's human gates itself before it slings. So
+  the change narrows that read: run with `--conversation`, on an open PR's
+  anchor, Accept does not count the one gate under that conversation's key,
+  in its live read or in its read-back after the resolve.
 
 ## How the change uses what there is
 
 The hold is the human gate, filed and withdrawn through `human-gate.sh`, whose
 `--retract` resolves the filer's own gate `moot:` once its situation has gone.
 The writers that close a conversation are the sign-off, dismiss and the premise
-re-check's moot or benign close. The sign-off already answers every gate the
-conversation replies to. Dismiss and the close block withdraw the gate under
-the conversation's key on the subject's anchor. The sign-off refuses `--leave`
-on that gate, because the gate ends with the conversation.
+re-check's moot or benign close, and each releases the gate only once the
+conversation's close has landed, so a close that does not land leaves the
+merge held. The sign-off answers the gate with the ruling. Dismiss and the
+close block withdraw the gate under the conversation's key on the subject's
+anchor. A ruling given on a turn that does not sign off leaves the gate open,
+and the sign-off refuses `--leave` on it, because the gate ends with the
+conversation.
 
 ## Not built
 
 A sweep that closes a `conversation.<id>` gate whose conversation has closed.
-Each close path withdraws or answers the gate itself, and one whose withdrawal
-does not land says so with the command that withdraws it.
+Each close path answers or withdraws the gate itself, after the close. One
+whose release does not land says so, and dismiss names the command that
+withdraws the gate, while a re-run of the sign-off or of the close block skips
+the close and releases it.

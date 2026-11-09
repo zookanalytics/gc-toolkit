@@ -55,6 +55,14 @@
 #              first, stops part way, or holds the lock, and a var the
 #              sitting's ruling settled rides Accept's sling, also when the
 #              board's Accept finishes a take that stopped after its resolve
+#   (OWN-HOLD*) on an open PR's anchor, the calling conversation's own hold on
+#              the merge, a gate under its key that blocks the anchor, holds
+#              no dispatch in either of Accept's reads: the sitting's take
+#              slings, closes the conversation and then answers the hold, and a
+#              take on a turn that does not sign off leaves the hold open.
+#              Another conversation's hold, filed before the live read or
+#              after it, still refuses, the board's Accept still refuses, and
+#              so does the conversation's own gate on a bead that is no open PR
 #
 # Runs the REAL gc-helm.sh (as `sh`, as shipped) with a stubbed `gc` on PATH
 # over a file-backed store: no live city, Dolt, network or sessions. The stub's
@@ -103,6 +111,7 @@ mkdir -p "$TMP/bin" "$TMP/store/b" "$TMP/city/.gc"
 #        resolve
 #   LATE_GATE_ON_SEARCH=<gate>   file it inside the token search: between a
 #        finishing run's live read and its read-back of the bead's gates
+#   LATE_GATE_KEY=<key>          the key a late gate is filed under (late)
 #   EARLIER_ANSWER=<reason>      a sitting's answer that reaches the gate inside
 #        the resolve call, before Accept's own
 #   SLING_FAIL=committed|partial|plain  the sling exits 1 after a committed pour,
@@ -143,8 +152,8 @@ kill_run() {
 wait_for() { _i=0; until [ -e "$1" ]; do sleep 0.05; _i=$((_i + 1)); [ "$_i" -lt 1200 ] || break; done; }
 # file_gate <gate> — an open human gate blocking $BEAD (the bead the run is on).
 file_gate() {
-  jq -n --arg g "$1" --arg t "$(now)" '{id:$g, title:("A late question " + $g), status:"open", issue_type:"gate",
-        await_type:"human", await_id:"late", assignee:"", created_at:$t, updated_at:$t, metadata:{}, deps:[]}' | put "$1"
+  jq -n --arg g "$1" --arg t "$(now)" --arg k "${LATE_GATE_KEY:-late}" '{id:$g, title:("A late question " + $g), status:"open", issue_type:"gate",
+        await_type:"human", await_id:$k, assignee:"", created_at:$t, updated_at:$t, metadata:{}, deps:[]}' | put "$1"
   row "$ACC_BEAD" | jq --arg g "$1" '.deps += [{type:"blocks", on:$g}]' | put "$ACC_BEAD"
 }
 # show_row <id> / list_row <id> — a bead as `gc bd show` / `gc bd list` spell it.
@@ -834,6 +843,67 @@ eq "$(roots "accept:$TS")" 0 "(SITTING-VAR-STOP) …with nothing poured"
 run_accept tk-anc
 eq "$RC" 0 "(SITTING-VAR-STOP) the board's Accept finishes the take's acceptance"
 has "$(grep '^sling ' "$CALLS" | tail -1)" "--title mol-fix accept:$TS --var design_gated=false" "(SITTING-VAR-STOP) …slinging the var the sitting's ruling settled, so the dispatch is the one the operator ruled"
+
+# own_hold — the base fixture on an open PR's anchor, with a live sitting whose
+# conversation holds the PR's merge through a gate under its key on the
+# anchor, as gc-helm.sh open files it, and replies to it.
+own_hold() {
+    rec; sitting
+    jq '.metadata.merge_result = "pull_request"' "$STORE/b/tk-anc.json" > "$STORE/b/tk-anc.tmp" && mv "$STORE/b/tk-anc.tmp" "$STORE/b/tk-anc.json"
+    gate tk-hold conversation.tk-conv "Conversation tk-conv is open on this PR, and its merge waits until the conversation closes"
+    edge tk-anc blocks tk-hold; edge tk-conv replies-to tk-hold
+}
+# call_at <text> — the line of the first call in $CALLS that carries <text>, or
+# nothing when no call carries it.
+call_at() { { grep -n -F -- "$1" "$CALLS" || true; } | head -1 | cut -d: -f1; }
+
+echo "# a sitting's take on an open PR's anchor dispatches past its own hold on the merge, then answers the hold once the conversation has closed"
+own_hold
+run_take --no-rework
+eq "$RC" 0 "(OWN-HOLD) a sitting's take on an open PR's anchor exits 0"
+eq "$(slings)" 1 "(OWN-HOLD) …slinging the recommendation once, while the conversation's own hold on the merge is open"
+eq "$(field tk-conv status)" "closed" "(OWN-HOLD) the conversation closes"
+eq "$(field tk-hold status)/$(field tk-hold close_reason)" "closed/ruled: take the reaction's mol-fix" "(OWN-HOLD) …and its hold is answered with the ruling"
+SL_AT=$(call_at "sling tk-anc"); CL_AT=$(call_at "bd close tk-conv"); HR_AT=$(call_at "bd gate resolve tk-hold")
+[ -n "$SL_AT" ] && [ -n "$CL_AT" ] && [ -n "$HR_AT" ] && [ "$SL_AT" -lt "$CL_AT" ] && [ "$CL_AT" -lt "$HR_AT" ] \
+    && ok "(OWN-HOLD) the sling comes before the close, and the hold's answer after it" \
+    || bad "(OWN-HOLD) the sling comes before the close, and the hold's answer after it (sling $SL_AT, close $CL_AT, hold $HR_AT)"
+
+echo "# the same take on a turn that does not sign off leaves the hold and the conversation open"
+own_hold
+run_answer --no-rework
+eq "$RC" 0 "(OWN-HOLD-ANSWER) the take on a turn that does not sign off exits 0"
+eq "$(slings)" 1 "(OWN-HOLD-ANSWER) …slinging the recommendation"
+eq "$(field tk-hold status)/$(field tk-conv status)" "open/in_progress" "(OWN-HOLD-ANSWER) …while the conversation and its hold on the merge stay open"
+
+echo "# only the calling conversation's own hold is passed: another conversation's hold, or the board's Accept, still refuses"
+own_hold
+gate tk-other conversation.tk-conv2 "Conversation tk-conv2 is open on this PR, and its merge waits until the conversation closes"
+edge tk-anc blocks tk-other
+: > "$CALLS"
+run_accept tk-anc --conversation tk-conv
+eq "$RC" 4 "(OWN-HOLD-OTHER) an Accept for one conversation refuses while another conversation's hold blocks the anchor"
+has "$OUT" "tk-other (Conversation tk-conv2" "(OWN-HOLD-OTHER) …naming that hold"
+hasnt "$OUT" "tk-hold (" "(OWN-HOLD-OTHER) …and not the caller's own"
+eq "$(writes)" 0 "(OWN-HOLD-OTHER) …writing nothing"
+own_hold
+LATE_GATE_ON_RESOLVE=tk-late LATE_GATE_KEY=conversation.tk-conv2 run_accept tk-anc --conversation tk-conv
+eq "$RC" 4 "(OWN-HOLD-OTHER) another conversation's hold filed between the live read and the resolve stops the dispatch"
+has "$OUT" "tk-late" "(OWN-HOLD-OTHER) …naming the late hold"
+eq "$(slings)/$(field tk-rec status)" "0/open" "(OWN-HOLD-OTHER) …slinging nothing and putting the recommendation back on the board"
+own_hold
+: > "$CALLS"
+run_accept tk-anc
+eq "$RC" 4 "(OWN-HOLD-BOARD) the board's Accept, which names no conversation, refuses while the conversation's hold blocks the anchor"
+has "$OUT" "tk-hold (Conversation tk-conv" "(OWN-HOLD-BOARD) …naming the hold"
+eq "$(writes)" 0 "(OWN-HOLD-BOARD) …writing nothing"
+# A gate under the conversation's key on a bead that is no open PR holds no
+# merge: it asks a question, and it holds the dispatch like any other gate.
+rec; sitting
+gate tk-q conversation.tk-conv "Rule on the rollout before the fix starts"; edge tk-anc blocks tk-q
+run_accept tk-anc --conversation tk-conv
+eq "$RC" 4 "(OWN-HOLD-NOT-PR) on a bead that is no open PR, the conversation's own gate still refuses the conversation's Accept"
+has "$OUT" "tk-q (Rule on the rollout" "(OWN-HOLD-NOT-PR) …naming it"
 
 echo
 echo "gc-helm accept: $PASS passed, $FAIL failed"

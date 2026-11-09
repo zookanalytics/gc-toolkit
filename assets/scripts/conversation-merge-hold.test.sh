@@ -31,13 +31,26 @@
 #   (OPEN-UNREAD)  an anchor that does not read files nothing
 #   (HOLD-FAIL)    a gate that does not file exits 4 naming the repair, and a
 #                  re-run of open holds the merge
-#   (SIGNOFF)      the sign-off answers the gate with the ruling, and the PR
-#                  derives what it did before the conversation opened
+#   (SIGNOFF)      the sign-off answers the gate with the ruling once the
+#                  conversation's close has landed, and the PR derives what it
+#                  did before the conversation opened
 #   (SIGNOFF-REWORK, SIGNOFF-RETIRE) a sign-off carrying --rework or --retire
 #                  puts the rework child or the retirement in place before it
 #                  answers the gate, so the merge is never free in between
+#   (SIGNOFF-CLOSE-FAIL, MOOT-CLOSE-FAIL) a close the store refuses both ways
+#                  leaves the conversation and its gate open, so the merge
+#                  stays held
+#   (SIGNOFF-RELEASE-FAIL, MOOT-RELEASE-FAIL) a close that lands before the
+#                  gate's answer or withdrawal fails says so and stops short,
+#                  and the re-run skips the close and releases the gate
 #   (LEAVE-OWN)    the sign-off refuses --leave on the conversation's own gate
-#   (MOOT)         the premise re-check's moot close withdraws the gate
+#   (ANSWER-OWN)   a ruling on a turn that does not sign off leaves the
+#                  conversation's own gate open, and answers a question beside
+#                  it at once
+#   (ANSWER-PRE-OPEN) a gate under the conversation's key on a pre-open anchor
+#                  holds no merge, so such a ruling answers it at once
+#   (MOOT)        the premise re-check's moot close withdraws the gate once
+#                  the conversation's close has landed
 #   (DISMISS)      dismiss withdraws the gate, on the anchor and on the review
 #   (DISMISS-FAIL) a withdrawal that does not land exits 4 naming the repair
 set -euo pipefail
@@ -73,7 +86,8 @@ fi
 # `bd create` mints tk-c<n> and `bd gate create` tk-g<n>. Every write is
 # appended to $CALLS. Hooks: SHOW_DOWN=<id> fails a show naming that bead;
 # GATE_CREATE_FAIL refuses every gate create; GATE_RESOLVE_FAIL makes every
-# resolve fail, writing nothing.
+# resolve fail, writing nothing; CLOSE_FAIL=<id> refuses every close of that
+# bead, plain or forced, writing nothing.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 B="$STORE/b"
 log() { printf '%s\n' "$*" >> "$CALLS"; }
@@ -245,6 +259,7 @@ Reason: $_r" --arg ty "$_ty" --arg k "$_k" --arg at "$(stamp)" \
     printf '%s' "$_r" | put "$_id" ;;
   "bd close")
     log "$*"
+    [ -n "${CLOSE_FAIL:-}" ] && [ "$3" = "$CLOSE_FAIL" ] && { echo "bd close: simulated refusal of $3" >&2; exit 1; }
     _id="$3"; _r=""; _p=""
     for a in "$@"; do [ "$_p" = "--reason" ] && _r="$a"; _p="$a"; done
     row "$_id" | jq -c --arg r "$_r" '.status = "closed" | .close_reason = $r' | put "$_id" ;;
@@ -354,6 +369,13 @@ run_moot() { # <conversation> <subject>
     OUT="$(cd "$TMP/cwd" && CONV="$P" CONVERSATION="$1" SUBJECT="$2" bash "$TMP/moot-close.sh" 2>&1)"; RC=$?
     set -e
 }
+# lands_before <a> <b> — the first call in $CALLS that carries <a> was made
+# before the first that carries <b>, and both were made.
+lands_before() {
+    _la=$(grep -n -F -- "$1" "$CALLS" | head -1 | cut -d: -f1)
+    _lb=$(grep -n -F -- "$2" "$CALLS" | head -1 | cut -d: -f1)
+    [ -n "$_la" ] && [ -n "$_lb" ] && [ "$_la" -lt "$_lb" ]
+}
 
 echo "# opening a conversation on an open PR's anchor holds the PR's merge"
 pr
@@ -380,11 +402,15 @@ has "$OUT" "conversation $C is already open for tk-anc" "(OPEN-JOIN) …joining 
 hasnt "$(cat "$CALLS")" "bd gate create" "(OPEN-JOIN) …and files no second gate"
 eq "$(gates_on tk-anc | wc -l | tr -d ' ')" "1" "(OPEN-JOIN) one gate still holds the anchor"
 
-echo "# the sign-off answers the gate with the ruling"
+echo "# the sign-off answers the gate with the ruling, once the conversation has closed"
+: > "$CALLS"
 run_signoff --conversation "$C" --outcome "lands as built" --ruled yes --ruling "it lands as built" --no-wait --no-rework
 eq "$RC" 0 "(SIGNOFF) the sign-off exits 0"
 eq "$(field "$G" status)/$(field "$G" close_reason)" "closed/ruled: it lands as built" "(SIGNOFF) the conversation's gate is answered with the ruling"
 eq "$(field "$C" status)" "closed" "(SIGNOFF) …and the conversation is closed"
+lands_before "bd close $C " "bd gate resolve $G " \
+    && ok "(SIGNOFF) the gate is answered only after the conversation's close has landed" \
+    || bad "(SIGNOFF) the gate is answered only after the conversation's close has landed ($(tr '\n' ';' < "$CALLS"))"
 eq "$(status_of tk-anc)" "needs-review []" "(SIGNOFF) the PR derives what it did before the conversation opened"
 
 echo "# the sign-off refuses --leave on the conversation's own gate"
@@ -395,6 +421,43 @@ eq "$RC" 2 "(LEAVE-OWN) --leave on the conversation's own hold on the merge exit
 has "$OUT" "names this conversation's own hold on the merge of tk-anc" "(LEAVE-OWN) …saying why"
 eq "$(grep -c '' "$CALLS" 2>/dev/null || true)" "0" "(LEAVE-OWN) …writing nothing"
 eq "$(field "$G" status)" "open" "(LEAVE-OWN) …so the gate still holds the merge"
+
+echo "# a ruling on a turn that does not sign off leaves the conversation's own gate open"
+pr; run_open tk-anc --json; C=$(opened_conv); G=$(gates_on tk-anc | awk '{print $1}')
+run_signoff --conversation "$C" --answer "$G" --ruling "it lands as built" --outcome "ruled; the conversation goes on" --no-wait --no-rework
+eq "$RC" 0 "(ANSWER-OWN) --answer naming the conversation's own gate exits 0"
+eq "$(field "$G" status)/$(field "$C" status)" "open/open" "(ANSWER-OWN) …leaving the gate open, with the conversation"
+has "$OUT" "stays open until the conversation closes" "(ANSWER-OWN) …saying the gate stays until the conversation closes"
+has "$OUT" "ANSWERED no gate for conversation $C" "(ANSWER-OWN) …and that it answered no gate"
+eq "$(status_of tk-anc)" "needs-attention [gate]" "(ANSWER-OWN) the PR's merge is still held"
+# A question the conversation took up beside its own gate is answered at once.
+Q=$(cd "$TMP/cwd" && bash "$HERE/human-gate.sh" --subject tk-anc --key docs-first --message "Should the docs ship first?" 2>/dev/null | sed -n '$p')
+gc bd dep add "$C" "$Q" --type replies-to
+run_signoff --conversation "$C" --answer "$G" --answer "$Q" --ruling "ship the docs first" --outcome "the docs ship first; the conversation goes on" --no-wait --no-rework
+eq "$RC" 0 "(ANSWER-OWN) --answer naming the own gate and a question exits 0"
+eq "$(field "$Q" status)/$(field "$Q" close_reason)" "closed/ruled: ship the docs first" "(ANSWER-OWN) …answering the question at once"
+eq "$(field "$G" status)" "open" "(ANSWER-OWN) …and leaving the own gate open"
+has "$OUT" "ANSWERED $Q for conversation $C" "(ANSWER-OWN) …counting only the question as answered"
+eq "$(status_of tk-anc)" "needs-attention [gate]" "(ANSWER-OWN) the PR's merge is still held, by the own gate alone"
+eq "$(derive tk-anc | jq -r '[.reasons[] | .id] | join(" ")')" "$G" "(ANSWER-OWN) …which is the one gate the PR names"
+# A hold the sitting already withdrew, helping the PR land, reads as cleared.
+pr; run_open tk-anc --json; C=$(opened_conv); G=$(gates_on tk-anc | awk '{print $1}')
+(cd "$TMP/cwd" && bash "$HERE/human-gate.sh" --retract --subject tk-anc --key "conversation.$C" --message "the sitting is helping the PR land" >/dev/null 2>&1)
+run_signoff --conversation "$C" --answer "$G" --ruling "it lands as built" --outcome "ruled; the conversation goes on" --no-wait --no-rework
+eq "$RC/$(field "$G" status)" "0/closed" "(ANSWER-OWN) --answer naming an own gate the sitting already withdrew exits 0"
+has "$OUT" "gate $G was already cleared before this sign-off" "(ANSWER-OWN) …reading it as already cleared"
+hasnt "$OUT" "stays open until the conversation closes" "(ANSWER-OWN) …and not as a gate that stays open"
+# On a pre-open anchor a gate under the conversation's key holds no merge: the
+# hold step files it so the PR does not open before the operator rules, and the
+# ruling answers it at once.
+fresh; bead tk-pre task open '{"merge_result":"pre_open_gate"}'
+run_open tk-pre --json; C=$(opened_conv)
+Q=$(cd "$TMP/cwd" && bash "$HERE/human-gate.sh" --subject tk-pre --key "conversation.$C" --message "May the PR open before the docs land?" 2>/dev/null | sed -n '$p')
+gc bd dep add "$C" "$Q" --type replies-to
+run_signoff --conversation "$C" --answer "$Q" --ruling "it may open now" --outcome "the PR may open; the conversation goes on" --no-wait
+eq "$RC" 0 "(ANSWER-PRE-OPEN) --answer naming the conversation's gate on a pre-open anchor exits 0"
+eq "$(field "$Q" status)/$(field "$Q" close_reason)/$(field "$C" status)" "closed/ruled: it may open now/open" \
+    "(ANSWER-PRE-OPEN) …answering that question at once, with the conversation still open"
 
 echo "# a sign-off carrying --rework files the rework before it answers the gate"
 pr; run_open tk-anc --json; C=$(opened_conv); G=$(gates_on tk-anc | awk '{print $1}')
@@ -423,15 +486,70 @@ RESOLVE_AT=$(grep -n "^bd gate resolve $G " "$CALLS" | head -1 | cut -d: -f1)
     || bad "(SIGNOFF-RETIRE) the retirement lands before the gate is answered (dispose $DISPOSE_AT, resolve $RESOLVE_AT)"
 eq "$(field "$G" status)/$(field "$C" status)" "closed/closed" "(SIGNOFF-RETIRE) …then the gate is answered and the conversation closes"
 
-echo "# the premise re-check's moot close withdraws the gate"
+echo "# a sign-off whose close the store refuses leaves the merge held"
 pr; run_open tk-anc --json; C=$(opened_conv); G=$(gates_on tk-anc | awk '{print $1}')
+: > "$CALLS"
+CLOSE_FAIL="$C" run_signoff --conversation "$C" --outcome "lands as built" --ruled yes --ruling "it lands as built" --no-wait --no-rework
+eq "$RC" 1 "(SIGNOFF-CLOSE-FAIL) a sign-off whose close the store refuses both ways exits 1"
+eq "$(grep -c "^bd close $C " "$CALLS" || true)" "2" "(SIGNOFF-CLOSE-FAIL) …after trying the plain close and the forced one"
+eq "$(field "$C" status)/$(field "$G" status)" "open/open" "(SIGNOFF-CLOSE-FAIL) the conversation stays open, and so does its gate"
+eq "$(status_of tk-anc)" "needs-attention [gate]" "(SIGNOFF-CLOSE-FAIL) …so the PR's merge is still held"
+
+echo "# a sign-off whose close lands and whose answer to the gate does not stops short, and its re-run answers it"
+pr; run_open tk-anc --json; C=$(opened_conv); G=$(gates_on tk-anc | awk '{print $1}')
+GATE_RESOLVE_FAIL=1 run_signoff --conversation "$C" --outcome "lands as built" --ruled yes --ruling "it lands as built" --no-wait --no-rework
+eq "$RC" 1 "(SIGNOFF-RELEASE-FAIL) a sign-off whose answer to the gate does not land exits 1"
+has "$OUT" "conversation $C is closed, but its own hold on the merge of tk-anc ($G) did not close" "(SIGNOFF-RELEASE-FAIL) …saying the merge still waits on it"
+eq "$(field "$C" status)/$(field "$G" status)" "closed/open" "(SIGNOFF-RELEASE-FAIL) the conversation is closed, and its gate still holds the merge"
+eq "$(status_of tk-anc)" "needs-attention [gate]" "(SIGNOFF-RELEASE-FAIL) …where the PR shows it held"
+: > "$CALLS"
+run_signoff --conversation "$C" --outcome "lands as built" --ruled yes --ruling "it lands as built" --no-wait --no-rework
+eq "$RC" 0 "(SIGNOFF-RELEASE-FAIL) the re-run exits 0"
+eq "$(grep -c "^bd close $C " "$CALLS" || true)" "0" "(SIGNOFF-RELEASE-FAIL) …closing nothing again"
+eq "$(field "$G" status)/$(field "$G" close_reason)" "closed/ruled: it lands as built" "(SIGNOFF-RELEASE-FAIL) …and answering the gate with the ruling"
+eq "$(status_of tk-anc)" "needs-review []" "(SIGNOFF-RELEASE-FAIL) the PR then derives what it did before the conversation opened"
+
+echo "# the premise re-check's moot close withdraws the gate, once the conversation has closed"
+pr; run_open tk-anc --json; C=$(opened_conv); G=$(gates_on tk-anc | awk '{print $1}')
+: > "$CALLS"
 run_moot "$C" tk-anc
 eq "$RC" 0 "(MOOT) the close block exits 0"
 has "$OUT" "closed $C as moot" "(MOOT) …printing its closed line"
 eq "$(field "$G" status)/$(field "$G" close_reason)" "closed/moot: conversation $C closed as moot: the PR it asked about was answered on GitHub" \
     "(MOOT) the conversation's gate is withdrawn, moot"
 eq "$(field "$C" status)" "closed" "(MOOT) …and the conversation is closed"
+lands_before "bd close $C " "bd gate resolve $G " \
+    && ok "(MOOT) the gate is withdrawn only after the conversation's close has landed" \
+    || bad "(MOOT) the gate is withdrawn only after the conversation's close has landed ($(tr '\n' ';' < "$CALLS"))"
 eq "$(status_of tk-anc)" "needs-review []" "(MOOT) the PR derives what it did before the conversation opened"
+
+echo "# a moot close whose close the store refuses leaves the merge held"
+pr; run_open tk-anc --json; C=$(opened_conv); G=$(gates_on tk-anc | awk '{print $1}')
+: > "$CALLS"
+CLOSE_FAIL="$C" run_moot "$C" tk-anc
+[ "$RC" -ne 0 ] && ok "(MOOT-CLOSE-FAIL) a close the store refuses both ways stops the block" \
+    || bad "(MOOT-CLOSE-FAIL) a close the store refuses both ways stops the block (exit $RC)"
+hasnt "$OUT" "closed $C as moot" "(MOOT-CLOSE-FAIL) …printing no closed line"
+eq "$(grep -c "^bd close $C " "$CALLS" || true)" "2" "(MOOT-CLOSE-FAIL) …after trying the plain close and the forced one"
+eq "$(field "$C" status)/$(field "$G" status)" "open/open" "(MOOT-CLOSE-FAIL) the conversation stays open, and so does its gate"
+eq "$(status_of tk-anc)" "needs-attention [gate]" "(MOOT-CLOSE-FAIL) …so the PR's merge is still held"
+
+echo "# a moot close whose close lands and whose withdrawal does not stops short, and its re-run withdraws the gate"
+pr; run_open tk-anc --json; C=$(opened_conv); G=$(gates_on tk-anc | awk '{print $1}')
+GATE_RESOLVE_FAIL=1 run_moot "$C" tk-anc
+[ "$RC" -ne 0 ] && ok "(MOOT-RELEASE-FAIL) a withdrawal that does not land stops the block" \
+    || bad "(MOOT-RELEASE-FAIL) a withdrawal that does not land stops the block (exit $RC)"
+has "$OUT" "$C is closed, but its hold on the merge of tk-anc did not withdraw" "(MOOT-RELEASE-FAIL) …saying the merge still waits on it"
+hasnt "$OUT" "closed $C as moot" "(MOOT-RELEASE-FAIL) …printing no closed line"
+eq "$(field "$C" status)/$(field "$G" status)" "closed/open" "(MOOT-RELEASE-FAIL) the conversation is closed, and its gate still holds the merge"
+eq "$(status_of tk-anc)" "needs-attention [gate]" "(MOOT-RELEASE-FAIL) …where the PR shows it held"
+: > "$CALLS"
+run_moot "$C" tk-anc
+eq "$RC" 0 "(MOOT-RELEASE-FAIL) the re-run exits 0"
+has "$OUT" "closed $C as moot" "(MOOT-RELEASE-FAIL) …printing its closed line"
+eq "$(grep -c "^bd close $C " "$CALLS" || true)" "0" "(MOOT-RELEASE-FAIL) …closing nothing again"
+eq "$(field "$G" status)" "closed" "(MOOT-RELEASE-FAIL) …and withdrawing the gate"
+eq "$(status_of tk-anc)" "needs-review []" "(MOOT-RELEASE-FAIL) the PR then derives what it did before the conversation opened"
 
 echo "# dismiss withdraws the gate"
 pr; run_open tk-anc --json; C=$(opened_conv); G=$(gates_on tk-anc | awk '{print $1}')

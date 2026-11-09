@@ -120,12 +120,14 @@ closes. A conversation whose subject is the anchor, or a bead whose
 gate that `gc-helm.sh open` files on the anchor under the conversation's key,
 `conversation.<conversation id>`, and the conversation replies to it. Two
 conversations on one PR each hold its merge with a gate of their own. The
-sign-off answers the gate with the operator's ruling, and only after it has
-carried out what the ruling does to the PR, its rework or its retirement, so
-the merge never lands in between. A dismiss, or the moot or benign close at a
-premise re-check, withdraws it. A sitting that is helping the PR land withdraws
-it sooner with the helper's `--retract` form under that key, and records why on
-the conversation (the converse-hold step). A hold that must outlast the
+sign-off answers the gate with the operator's ruling once the conversation's
+close has landed, and only after it has carried out what the ruling does to the
+PR, its rework or its retirement, so the merge never lands in between. A ruling
+on a turn that does not sign off leaves the gate open. A dismiss, or the moot
+or benign close at a premise re-check, withdraws it once the close has landed.
+A sitting that is helping the PR land withdraws it sooner with the helper's
+`--retract` form under that key, and records why on the conversation (the
+converse-hold step). A hold that must outlast the
 conversation is a gate of its own on the anchor, under a key that names what it
 waits for.
 
