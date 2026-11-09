@@ -418,6 +418,9 @@ first. Either way the change is a decision on the record, not a drift.
   integration branches require. It passes last, once the city holds nothing on
   the PR and has routed its feedback, and everything else those rules require is
   met there. Until then it reads pending, never failure.
+- **Only the city's account may bypass an integration branch's rules,** so its
+  own pushes there, such as a `direct` landing, land while every PR into the
+  branch waits for the city's status.
 - **Each push the pack makes onto a PR's branch publishes the head behind a
   pending status,** so a PR it moves onto a commit the city already passed
   waits for a verdict that counts it.

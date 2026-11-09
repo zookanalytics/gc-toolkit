@@ -76,7 +76,7 @@ Three calls carry a cost either way:
 
 Approving as it stands ships the first option of each. Either way, each rig's
 cutover asks you, through a gate, to allow auto-merge, to require
-`gc-toolkit/status` beside the CI checks on the default branch and on every
+`gc-toolkit/status` on the default branch, beside the CI checks, and on every
 integration branch, to let the city's account alone bypass the integration
 branches' rules, and to let the city's account dismiss reviews. The bypass is
 there because the city lands work on an integration branch by pushing, and
