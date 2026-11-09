@@ -126,6 +126,31 @@ What unit 3 composes: one rig formula variable, `github_merge_rules`, read by th
 refinery's `mr` step alone. The bead's merge gate tells every other reader which
 path the bead is on. The retirement bead deletes the variable.
 
+## The rules every PR target carries (unit 3 and the cutover)
+
+The need: every PR the city opens waits for the city's verdict, whoever presses
+Merge, and the city's own pushes still land on an integration branch whose rules
+require that verdict.
+
+- **Gas City.** No Go file reads a branch's rules: neither `rules/branches` nor
+  a ruleset appears in its code, and the PR monitor classes a PR without them
+  (`classifyPullRequest`).
+- **GitHub.** A branch's rules come back from
+  `GET /repos/{owner}/{repo}/rules/branches/{branch}`. A ruleset that requires a
+  status check refuses an update of the branch until the check has passed at the
+  new commit, and its bypass list names the actors that may push past it: an
+  integration, an organization admin, a repository role, a team, a deploy key or
+  a user, in mode `always`, `pull_request` or `exempt` ([Repository
+  rules](https://docs.github.com/en/rest/repos/rules)).
+
+What unit 3 composes: the rules read that the projection already makes for the
+auto-merge toggle. The `mr` step asks the same rules whether the target requires
+`gc-toolkit/status`, and files a human gate in place of a PR when it does not.
+What the cutover composes: a ruleset on the integration branches that requires
+the status, with a bypass in mode `always` that only the city's account holds,
+so its landings, an effort's stand-up and bring-current, and a rework of a
+landing PR still push there.
+
 ## The refinery's long gate (unit 3)
 
 The need: a rig gate that outlives the ten-minute cap on one tool call.
