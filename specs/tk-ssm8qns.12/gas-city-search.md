@@ -71,3 +71,20 @@ status and close time.
 **Why it covers the need.** The title is the far bead's own field, read in the
 same row the record's status comes from, so the key costs no read and holds no
 rule. Gas City names no bead's waits at all, as unit 2's search records.
+
+## check-armed-dispatch-owed's note on an unjudged arm
+
+**The need.** An arm whose bead has a `waits-for` edge of its own is held as
+unjudged, so reconcile never slings it until the bd the city runs judges the
+gate. The check counted such an arm free or held by hold-lib.sh's rule, which
+read no `waits-for` edge, so nothing would say why the arm waits.
+
+**The primitive.** bd's own reads of the edge: `bd blocked` judges it by its
+spawner's status rather than its gate, and `bd show` and `bd ready` carry no
+gate (blocked-census.md, "The store's rules", read at beads 9b65b9e19, and the
+same at 7ef2fd05e). Gas City's doctor checks read no bead's waits.
+
+**Why it does not cover the need.** None of them says that the store cannot
+judge the edge. The bead read does, as its `unjudged` status, so the check
+prints that status as a note beside the arm, and the note goes once
+tk-ssm8qns.6 drops the status.

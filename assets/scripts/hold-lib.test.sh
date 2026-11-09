@@ -22,8 +22,7 @@
 #             listing's holds with hold_annotate
 #   (NO-COPY) no other file in the pack defines the predicate's jq defs
 # A reader with a private copy of the predicate drifts silently from this one.
-# The behavioral half lives beside each reader
-# (doctor/check-armed-dispatch-owed/run.test.sh, find-work-gating-guard.test.sh,
+# The behavioral half lives beside each reader (find-work-gating-guard.test.sh,
 # refinery-stuck-handoff.test.sh, doctor/check-refinery-patrol-live/run.test.sh).
 # Reads the repo only; no gc, no city, no network.
 #
@@ -229,8 +228,7 @@ eq "$(find "$ANN" -mindepth 1 | wc -l | tr -d ' ')" "0" "(ANNOTATE) no scratch i
 echo "# every reader sources the one definition"
 # Comment lines are left out, so a reader that names the library in prose but
 # no longer calls it still fails.
-READERS="doctor/check-armed-dispatch-owed/run.sh
-doctor/check-refinery-patrol-live/run.sh
+READERS="doctor/check-refinery-patrol-live/run.sh
 formulas/mol-refinery-patrol.toml
 formulas/mol-witness-patrol.toml"
 for r in $READERS; do
