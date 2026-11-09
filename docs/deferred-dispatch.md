@@ -439,7 +439,10 @@ pass slings the closer once nothing holds the bead. The closer checks the close
 brief in the bead's notes against what landed, then closes the bead or puts it
 to a person. The waits skill gives the steps an agent runs, the close brief
 among them, and the first reaction's close exit writes the edge and the arm
-itself when it is given `--waiting-on <blocker>`.
+itself when it is given `--waiting-on <blocker>`. A converse sign-off writes the
+brief and the arm for its subject when the ruling leaves the subject waiting on
+work the sitting sent, after its headline writes the edge
+(`--waiting-on <work> --close-brief "<brief>"`).
 
 bd also defines an `until` edge type. Nothing in the pack acts on one, so an
 `until` edge holds no bead and closes none.

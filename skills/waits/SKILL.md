@@ -81,6 +81,10 @@ gate, below).
   first with `gc bd dep remove <bead> <blocker>`.
 - bd also defines an `until` edge type. Nothing in the pack acts on one, so an
   `until` edge holds no bead and closes none.
+- A converse sign-off writes the brief and the arm for its subject when the
+  ruling leaves the subject waiting on work the sitting sent, after the
+  headline writes the edge (`--waiting-on <work> --close-brief "<…>"`, the
+  converse-settle step).
 
 ## Wait on a person
 

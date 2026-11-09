@@ -15,7 +15,8 @@
 #      conversation before it acts, so a re-run of the same ruling acts on the
 #      same PR even once that PR has closed;
 #   2. writes the subject's headline through gc-helm.sh takeaway, and stops
-#      when takeaway refuses it;
+#      when takeaway refuses it, then, when the ruling leaves the subject
+#      waiting on work, its close brief and the arm of its validating closer;
 #   3. resolves each open gate the conversation replies to with
 #      `ruled: <ruling>`, except each one --leave names, and reads each back. bd
 #      resolves a closed gate without changing it and reports success either
@@ -82,11 +83,27 @@
 # runs (converse-rework.sh, gc-helm.sh, pr-sitting-comment.sh) are
 # its siblings in the pack's assets/scripts, found through pack_script.
 #
+# A ruling that leaves the subject waiting on work, a bead in the subject's own
+# store that is no gate, also arms the subject's validating closer
+# (mol-validate-close), the waits skill's "Have a bead checked and closed once
+# other work lands". Once that work lands, the deferred-dispatch pass slings the
+# closer, which checks the close brief (--close-brief) against what landed and
+# closes the subject or puts it to a person. The headline's edges hold the
+# subject only until the work closes and send it nowhere, so the arm is what
+# brings it back. The brief and the arm are written in the subject's own rig,
+# whose polecat pool runs the closer, after the headline has written those
+# edges, and before any gate is answered. No closer is armed for a subject that
+# something else sends on once its wait clears: an arm of another dispatch, a
+# route or an assignee, the recommendation the ruling takes, or its own merge
+# or members, when it is an anchor or an epic. Nor for one in the city's own
+# store, whose closer no pool runs: a person closes that one, on a human gate
+# that names the work.
+#
 # Usage:
 #   converse-signoff.sh --conversation <task> --outcome "<headline, ≤140 chars>" \
 #     [--subject <id>] [--ruled yes|no] [--ruling "<one line>"] \
 #     [--leave <gate> ...] [--answer <gate> ...] \
-#     [--no-wait | --waiting-on <bead> ...] \
+#     [--no-wait | --waiting-on <bead> ... [--close-brief "<text>"]] \
 #     [--rework | --no-rework | --retire <kind> [--successor <bead>]] \
 #     [--pr-anchor <bead>] [--accept [--var <key>=<value> ...]]
 #   --outcome is the subject's headline, and the close reason the sittings card
@@ -153,9 +170,15 @@
 #     for the recommendation's dispatch, such as mol-design-convoy's
 #     design_gated=false. Accept passes each one to its sling. A dispatch an
 #     earlier Accept already made keeps the vars it was made with.
+#   --close-brief "<text>" (with a ruling and --waiting-on) is the claim the
+#     subject's validating closer checks once the work the subject waits on
+#     lands: what that landing settles on the subject, and what to check once
+#     it has. It is required when the closer is armed, refused where it is not,
+#     and appended to the subject's notes as its close brief, once.
 # Exit: 0 signed off, or with --answer the named gates answered; 1 stopped
 #   short — a read failed, the rework did not file, the PR did not retire, the
-#   headline did not land, a gate did not close, the recommendation was not
+#   headline, the close brief or the closer's arm did not land, a gate did not
+#   close, the recommendation was not
 #   taken, or the conversation did not close or hand back — so do NOT post the
 #   sign-off, or report the ruling as
 #   carried out; repair what it names and re-run, which repeats every write it
@@ -167,7 +190,9 @@
 #   among the gates the ruling answers, a gate Accept would answer that the
 #   ruling does not, no recommendation on the subject, or another open human
 #   gate the ruling does not answer, or a --var without --accept or not of the
-#   form <key>=<value>.
+#   form <key>=<value>, or a ruling that leaves the subject waiting on work its
+#   closer would check with no --close-brief, a --close-brief where no closer
+#   is armed, or a subject waiting on work in the city's own store.
 set -u
 
 # >>> control-char-scrub
@@ -190,6 +215,8 @@ PR_PICK=""
 ACCEPT=""
 ACCEPT_VARS=()
 WAIT=()
+WAIT_IDS=""
+CLOSE_BRIEF=""
 LEAVE=()
 ANSWER_GATES=()
 UNDONE="NOT SIGNED OFF — do NOT post the sign-off."
@@ -290,7 +317,8 @@ while [ $# -gt 0 ]; do
                     *)       die "--var takes <key>=<value>, not '$1'" ;;
                   esac ;;
     --no-wait)    WAIT+=(--no-wait) ;;
-    --waiting-on) shift; [ $# -gt 0 ] || die "--waiting-on needs a bead id"; WAIT+=(--waiting-on "$1") ;;
+    --waiting-on) shift; [ $# -gt 0 ] || die "--waiting-on needs a bead id"; WAIT+=(--waiting-on "$1"); WAIT_IDS="${WAIT_IDS:+$WAIT_IDS }$1" ;;
+    --close-brief) shift; [ -n "${1:-}" ] || die "--close-brief needs the brief's text"; CLOSE_BRIEF="$1" ;;
     -h|--help)    sed -n '2,/^set -u$/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)            die "unknown argument '$1'" ;;
   esac
@@ -318,6 +346,10 @@ else
   [ -z "$PR_ANSWER" ] || die "--rework, --no-rework and --retire require a ruling (they answer what it does to an open PR)"
   [ "${#LEAVE[@]}" -eq 0 ] || die "--leave requires --ruled yes: a cut-short sign-off leaves every gate open"
   [ -z "$ACCEPT" ] || die "--accept requires a ruling (--ruled yes, or --answer): it takes the recommendation the operator ruled to take"
+fi
+if [ -n "$CLOSE_BRIEF" ]; then
+  [ "$RULED" = yes ] || die "--close-brief requires a ruling (--ruled yes, or --answer): it is the claim the subject's validating closer checks once the work the ruling sent lands"
+  [ -n "$WAIT_IDS" ] || die "--close-brief requires --waiting-on <the work>: it is the claim the subject's validating closer checks once that work lands"
 fi
 if [ "$PR_ANSWER" = retire ]; then
   case "$RETIRE_KIND" in
@@ -556,6 +588,76 @@ if [ -n "$ACCEPT" ]; then
   [ -z "$OTHERS" ] \
     || die "$SUBJECT's recommendation is dispatched only once no other human gate holds it, and $OTHERS still holds it, which this ruling does not answer; nothing was written. Answer that gate in the same ruling once the operator rules on it, or leave the recommendation's gate owed until it is cleared, when Accept on the board takes the recommendation"
 fi
+# The subject's validating closer. A ruling that leaves the subject waiting on
+# work arms it, so the subject is checked and closed once that work lands.
+# Work is a wait in the subject's own store that is no gate: a gate is what a
+# person owes, and a wait in another store is no edge, which the headline
+# refuses. Each wait is read here, with the other reads, because one that does
+# not read could be work. Something else sends the subject on once its wait
+# clears when the ruling takes its recommendation, when it is an epic, whose
+# members carry it, or an anchor (a merge_result), which the refinery closes
+# on its merge, and when it is assigned, routed, armed to another dispatch, or
+# at a status other than open, which is set deliberately. Then no closer is
+# armed. A closer an earlier attempt armed is this one, so a re-run arms it no
+# second time.
+CLOSER_WAITS=""
+CLOSER_RIG=""
+CLOSER_PATH=""
+CLOSER_ARMED=""
+if [ "$RULED" = yes ]; then
+  for w in $WAIT_IDS; do
+    [ "$w" != "$SUBJECT" ] && [ "${w%%-*}" = "${SUBJECT%%-*}" ] || continue
+    WROW=$(show_row "$w") \
+      || stopped "$w, which this ruling leaves $SUBJECT waiting on, could not be read to tell whether it is work whose landing $SUBJECT's validating closer checks; nothing was written"
+    printf '%s' "$WROW" | jq -e '(.issue_type // "") == "gate"' >/dev/null 2>&1 \
+      || CLOSER_WAITS="${CLOSER_WAITS:+$CLOSER_WAITS }$w"
+  done
+fi
+if [ -n "$CLOSER_WAITS" ]; then
+  ELSEWHERE=$(printf '%s' "$SUBJECT_ROW" | jq -r --arg accept "$ACCEPT" '(.metadata // {}) as $m
+    | def v($k): ($m[$k] // "") | tostring;
+    if $accept != "" then "takes its recommendation, whose dispatch carries it"
+    elif (.issue_type // "") == "epic" then "is an epic, whose members carry it"
+    elif v("merge_result") != "" then "is an anchor (merge_result=\(v("merge_result"))), which the refinery closes on its merge"
+    elif ((.assignee // "") | tostring) != "" then "is assigned to \(.assignee), whose hook offers it once its wait clears"
+    elif v("gc.routed_to") != "" then "is routed to \(v("gc.routed_to")), whose pool claims it once its wait clears"
+    elif v("gc.dispatch_when_ready") != "" and (v("gc.dispatch_when_ready_args") | contains("mol-validate-close") | not)
+      then "is armed to \(v("gc.dispatch_when_ready")), which sends it once its wait clears"
+    elif ((.status // "") | ascii_downcase) != "open" then "is \(.status // "of no status"), which is set deliberately"
+    else "" end' 2>/dev/null) \
+    || stopped "$SUBJECT could not be read to tell whether anything but its validating closer sends it on once its work lands; nothing was written"
+  if [ -n "$ELSEWHERE" ]; then
+    [ -z "$CLOSE_BRIEF" ] \
+      || die "--close-brief arms $SUBJECT's validating closer, and $SUBJECT $ELSEWHERE, so no closer is armed for it; nothing was written. Drop --close-brief to leave it to that, or, when the ruling sends it to the closer instead, withdraw that first (the converse-settle step's block) and re-run"
+    echo "no validating closer is armed for $SUBJECT: it $ELSEWHERE"
+    CLOSER_WAITS=""
+  else
+    # The closer runs in the subject's own rig: its pool claims the sling, and
+    # its deferred-dispatch pass sends the arm from its store. The rig map names
+    # that rig from the subject's prefix. The city's own store has no polecat
+    # pool and no such pass, so a person closes a subject there.
+    RM=$(pack_script rig-map.sh) \
+      || stopped "no rig-map.sh beside $0, so the rig whose pool runs $SUBJECT's validating closer could not be resolved; nothing was written"
+    MAP=$("$RM" 2>&1) \
+      || stopped "the rig map did not read ($(printf '%s' "$MAP" | tr '\n' ' ')), so the rig whose pool runs $SUBJECT's validating closer could not be resolved; nothing was written"
+    CLOSER_ROW=$(printf '%s' "$MAP" | scrub | jq -c --arg p "${SUBJECT%%-*}" '[ .rigs[]? | objects | select(.prefix == $p) ] | if length == 1 then .[0] else empty end' 2>/dev/null)
+    [ -n "$CLOSER_ROW" ] \
+      || stopped "no one rig in the rig map carries the prefix ${SUBJECT%%-*}, so the rig whose pool runs $SUBJECT's validating closer could not be resolved; nothing was written"
+    if printf '%s' "$CLOSER_ROW" | jq -e '.hq == true' >/dev/null 2>&1; then
+      die "$SUBJECT is in the city's own store, where no polecat pool runs a validating closer, so nothing would check it once $CLOSER_WAITS lands; nothing was written. A person closes it then: file a human gate on $SUBJECT that asks them to close it once $CLOSER_WAITS lands (the waits skill, \"Wait on a person\"), and sign off with --waiting-on <that gate> in place of --waiting-on $CLOSER_WAITS, and no --close-brief"
+    fi
+    [ -n "$CLOSE_BRIEF" ] \
+      || die "this ruling leaves $SUBJECT waiting on work ($CLOSER_WAITS), and nothing else sends it on once that work lands, so the sign-off arms its validating closer, which checks a close brief against what landed; nothing was written. Re-run with --close-brief \"<what that work's landing settles on $SUBJECT, and what to check once it has>\""
+    CLOSER_RIG=$(printf '%s' "$CLOSER_ROW" | jq -r '.name // "" | tostring')
+    CLOSER_PATH=$(printf '%s' "$CLOSER_ROW" | jq -r '.path // "" | tostring')
+    [ -n "$CLOSER_RIG" ] && [ -n "$CLOSER_PATH" ] \
+      || stopped "the rig map names no rig and path for the prefix ${SUBJECT%%-*}, so the rig whose pool runs $SUBJECT's validating closer could not be resolved; nothing was written"
+    printf '%s' "$SUBJECT_ROW" | jq -e '((.metadata // {})["gc.dispatch_when_ready_args"] // "") | tostring | contains("mol-validate-close")' >/dev/null 2>&1 \
+      && CLOSER_ARMED=yes
+  fi
+fi
+[ -z "$CLOSE_BRIEF" ] || [ -n "$CLOSER_RIG" ] \
+  || die "--close-brief is the claim $SUBJECT's validating closer checks once the work it waits on lands, and none of --waiting-on${WAIT_IDS:+ ($WAIT_IDS)} is work in $SUBJECT's own store, a bead that is no gate, so no closer is armed; nothing was written. Drop --close-brief"
 HELM=$(pack_script gc-helm.sh) || stopped "no gc-helm.sh beside $0, so the subject's headline cannot be written; nothing was written"
 
 # gh_bounded <args...> — gh, stopped after 20 seconds. A call stopped that way exits
@@ -733,6 +835,31 @@ for p in "${STANDS[@]+"${STANDS[@]}"}"; do echo "the ruling leaves the branch of
 # the close below cannot be undone, so they wait on takeaway's exit.
 "$HELM" takeaway "$SUBJECT" "$OUTCOME" --by converse "${WAIT[@]+"${WAIT[@]}"}" \
   || stopped "gc-helm.sh takeaway did not finish on $SUBJECT, and its message above says which write it could not make${APPROVE_CLAUSE:+. It carries \"; $APPROVE_CLAUSE\" after --outcome, which counts toward the cap, so a shorter --outcome makes room}; no gate was resolved and the conversation is not closed"
+# The subject's validating closer, once the headline's edges hold the subject
+# on the work: first the close brief the closer checks, then its arm, both in
+# the subject's own rig and both before any gate is answered, so a write that
+# does not land stops the sign-off with every gate still open. A re-run finds
+# the brief and the arm an earlier attempt wrote, and writes neither again.
+if [ -n "$CLOSER_RIG" ]; then
+  if printf '%s' "$SUBJECT_ROW" | jq -e --arg b "$CLOSE_BRIEF" '(.notes // "") | tostring | contains($b)' >/dev/null 2>&1; then
+    echo "$SUBJECT already carries this close brief"
+  else
+    gc bd update "$SUBJECT" --db "$CLOSER_PATH/.beads" --append-notes "## Close brief (held on $(printf '%s' "$CLOSER_WAITS" | tr ' ' ','), $(date -u +%Y-%m-%dT%H:%M:%SZ))
+$CLOSE_BRIEF" >/dev/null 2>&1 \
+      || stopped "the store refused the close brief on $SUBJECT, which its validating closer checks, so the closer was not armed; the headline is written, no gate was resolved and the conversation is not closed"
+  fi
+  if [ -n "$CLOSER_ARMED" ]; then
+    echo "$SUBJECT's validating closer is already armed"
+  else
+    DD=$(pack_script deferred-dispatch.sh) \
+      || stopped "no deferred-dispatch.sh beside $0, so $SUBJECT's validating closer was not armed; the headline and the close brief are written, no gate was resolved and the conversation is not closed"
+    ( cd "$CLOSER_PATH" && GC_RIG="$CLOSER_RIG" GC_RIG_ROOT="$CLOSER_PATH" "$DD" arm "$SUBJECT" --db "$CLOSER_PATH/.beads" \
+        --target "$CLOSER_RIG/gc-toolkit.polecat" --sling-arg --on --sling-arg mol-validate-close \
+        --reason "waits for $CLOSER_WAITS, the work conversation $CONVERSATION's ruling sent; the validating closer checks it once that lands" ) \
+      || stopped "$SUBJECT's validating closer was not armed, and deferred-dispatch.sh's message above says why; the headline and the close brief are written, no gate was resolved and the conversation is not closed"
+  fi
+  record_action "Arranged the check that closes this once the work it waits on lands."
+fi
 
 if [ "$RULED" = yes ]; then
   # 3. The gates the ruling answers: those --answer names, or else each one the

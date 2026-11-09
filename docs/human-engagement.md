@@ -515,6 +515,22 @@ As it goes, it records the rework or the retirement, the ruling once the gates
 carry it, and the recommendation taken on the conversation, each a comment in
 plain words, which that comment lists as the visit's actions.
 
+A ruling that leaves the subject waiting on work the sitting sent also gets the
+subject checked once that work lands. Right after the headline, whose
+`--waiting-on` edges hold the subject until the work closes, the sign-off
+appends the sitting's `--close-brief` to the subject's notes and arms the
+subject's validating closer (`mol-validate-close`) in the subject's own rig,
+the waits skill's way of having a bead checked and closed once other work
+lands. Both land before any gate is answered, and either one that does not
+land stops the sign-off. Once the work closes, the deferred-dispatch pass slings
+the closer, which checks the brief against what landed and closes the subject
+or puts it to the operator. No closer is armed for a subject that something
+else sends on once its wait clears: its own arm, a route or an assignee, the
+recommendation the ruling takes, or the refinery's merge or its members, for an
+anchor or an epic. A subject in the city's own store is refused, because no
+pool runs a closer there, so a person closes it on a human gate that names the
+work.
+
 It resolves no gate its conversation does not reply to: a gate the sitting
 never took up stays for whoever owes it, and a gate it replies to that the
 ruling leaves owed stays open with its reply in place. It reads those gates
@@ -694,7 +710,9 @@ rule those scripts already apply: a `blocks` blocker, which
 and a `tracks` target reaches its own. A parked subject whose routed work has
 all landed therefore returns as an ordinary unnamed wait in the sweep's batch
 gate on the rig's triage subject, and the takeaway is never cleared: it is the
-record of what the sitting concluded.
+record of what the sitting concluded. A subject a sitting's ruling leaves
+waiting on work comes back through the validating closer the sign-off arms
+instead ([The sitting](#the-sitting)), which checks it once that work lands.
 
 **Routed work is wider than the board's disposition-due.** The board derives
 "blocker landed — dispose or resume" from the `blocks` edges

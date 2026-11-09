@@ -40,6 +40,19 @@
 #             land stops the sign-off before the conversation closes
 #   (ARMED)   a ruling on an armed subject resolves its gate, which is what
 #             lets the arm send it, writes no route and leaves the arm
+#   (CLOSER*) a ruling that leaves the subject waiting on work the sitting sent
+#             writes the subject's close brief and arms its validating closer
+#             in the subject's own rig, after the headline and before any gate
+#             is answered, on a turn that does not sign off as well; it asks
+#             for the brief before any write, a re-run writes neither again, a
+#             brief or an arm that does not land stops the sign-off with every
+#             gate open, and a wait that does not read stops it before any
+#             write; no closer is armed for a wait on a gate or in another
+#             store, or for a subject that something else sends on (an arm of
+#             another dispatch, an assignee, an epic, an open PR, the
+#             recommendation the ruling takes), where a brief is refused; a
+#             subject in the city's own store is refused, since no pool runs
+#             its closer
 #   (OPEN-PR, REWORK*, RETIRE*) a ruling on an open PR answers --rework,
 #             --no-rework or --retire; the rework or the retirement runs first,
 #             and one that fails writes nothing else, so the gate keeps holding
@@ -90,9 +103,11 @@
 # file-backed store, linked into a stub pack beside the libraries it sources and
 # stub pack scripts, from a cwd outside any checkout. The sign-off finds every
 # script it runs beside itself, so no real pack script is reached. Whether a gate still holds the
-# anchor's merge is read by the REAL finalize-gate.sh over the same store, and
-# the rig of a PR the ruling acts on by the REAL bead-store.sh over the stub's
-# rig list: rig-a carries the prefix tk and rig-b the prefix rb.
+# anchor's merge is read by the REAL finalize-gate.sh over the same store, the
+# rig of a PR the ruling acts on by the REAL bead-store.sh over the stub's rig
+# list, and the rig whose pool runs the subject's validating closer by the REAL
+# rig-map.sh over the same list: rig-a carries the prefix tk, rig-b the prefix
+# rb, and the city's own row the prefix hq.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -135,7 +150,8 @@ show_row() { row "$1" | jq -c '. + {dependencies: [ .deps[] | {id: .on, dependen
 list_row() { row "$1" | jq -c '. + {dependencies: [ .deps[] as $d | {issue_id: .id, depends_on_id: $d.on, type: $d.type} ]} | del(.deps)'; }
 case "$1 ${2:-}" in
   "rig list")
-    jq -n --arg a "$RIG_A" --arg b "$RIG_B" '{rigs: [{name: "rig-a", prefix: "tk", path: $a, hq: false},
+    jq -n --arg a "$RIG_A" --arg b "$RIG_B" --arg c "$CITY_ROOT" '{rigs: [{name: "the-city", prefix: "hq", path: $c, hq: true},
+                                                    {name: "rig-a", prefix: "tk", path: $a, hq: false},
                                                     {name: "rig-b", prefix: "rb", path: $b, hq: false}]}' ;;
   "bd show")
     [ -n "${SHOW_DOWN:-}" ] && [ "$3" = "$SHOW_DOWN" ] && { echo "bd show: data plane down" >&2; exit 1; }
@@ -325,12 +341,30 @@ printf 'pr-sitting-comment %s\n' "$*" >> "$CALLS"
 P
 # The sign-off never disarms. A sitting's own block does, before an answer that
 # sends the subject elsewhere, and (ANSWER-ROUTE) runs that block from the
-# continue step over this store.
+# continue step over this store. The sign-off arms the subject's validating
+# closer, and the arm logs the rig it ran in, as the rework does. ARM_FAIL makes
+# the arm write nothing and exit 1, as a refused arm does.
 cat > "$S/deferred-dispatch.sh" <<'DD'
 #!/usr/bin/env bash
 printf 'deferred-dispatch %s\n' "$*" >> "$CALLS"
-[ "$1" = disarm ] || exit 2
-gc bd update "$2" --unset-metadata gc.dispatch_when_ready --unset-metadata gc.dispatch_when_ready_args >/dev/null
+case "$1" in
+  disarm)
+    gc bd update "$2" --unset-metadata gc.dispatch_when_ready --unset-metadata gc.dispatch_when_ready_args >/dev/null ;;
+  arm)
+    printf 'deferred-dispatch ran in GC_RIG=%s GC_RIG_ROOT=%s PWD=%s\n' "${GC_RIG:-}" "${GC_RIG_ROOT:-}" "$PWD" >> "$CALLS"
+    [ -n "${ARM_FAIL:-}" ] && { echo "deferred-dispatch: arm: failed to write the dispatch record onto $2" >&2; exit 1; }
+    _t=""; _a=""; _p=""
+    for x in "$@"; do
+      [ "$_p" = "--target" ] && _t="$x"
+      [ "$_p" = "--sling-arg" ] && _a="$_a$x
+"
+      _p="$x"
+    done
+    gc bd update "$2" --set-metadata "gc.dispatch_when_ready=$_t" \
+      --set-metadata "gc.dispatch_when_ready_args=$(printf '%s' "$_a" | jq -Rsc 'split("\n") | map(select(length > 0))')" >/dev/null
+    echo "deferred-dispatch: armed $2 -> $_t" ;;
+  *) exit 2 ;;
+esac
 DD
 chmod +x "$S"/*.sh
 # Linked after the chmod, which would otherwise follow each link and change the
@@ -340,9 +374,9 @@ for _lib in converse-signoff.sh conversation.sh work-outcome.sh bd-lib.sh review
 done
 SCRIPT="$S/converse-signoff.sh"
 
-mkdir -p "$TMP/rig-a" "$TMP/rig-b"
-RIG_A="$(cd "$TMP/rig-a" && pwd -P)"; RIG_B="$(cd "$TMP/rig-b" && pwd -P)"
-export PATH="$TMP/bin:$PATH" STORE="$TMP/store" CALLS="$TMP/calls" GH_CALLS="$TMP/gh-calls" GC_RIG_ROOT="$TMP/rig" RIG_A RIG_B
+mkdir -p "$TMP/rig-a" "$TMP/rig-b" "$TMP/city"
+RIG_A="$(cd "$TMP/rig-a" && pwd -P)"; RIG_B="$(cd "$TMP/rig-b" && pwd -P)"; CITY_ROOT="$(cd "$TMP/city" && pwd -P)"
+export PATH="$TMP/bin:$PATH" STORE="$TMP/store" CALLS="$TMP/calls" GH_CALLS="$TMP/gh-calls" GC_RIG_ROOT="$TMP/rig" RIG_A RIG_B CITY_ROOT
 unset GC_CITY_PATH 2>/dev/null || true
 
 # --- fixtures -----------------------------------------------------------------
@@ -756,6 +790,119 @@ eq "$RC" 0 "(ARMED) the sign-off on an armed subject exits 0"
 eq "$(field tk-rev status)" "closed" "(ARMED) …resolving the gate, which is what lets the arm send the subject"
 hasnt "$(cat "$CALLS")" "gc.routed_to" "(ARMED) …writing no route"
 eq "$(meta tk-anc gc.dispatch_when_ready)" "gc-toolkit/gc-toolkit.polecat" "(ARMED) …and leaving the arm"
+
+echo "# a ruling that leaves the subject waiting on work arms its validating closer"
+# A report the sitting ruled on, its first reaction's gate, which the
+# conversation replies to, and the work the sitting sent.
+closer_case() {
+    fresh; bead tk-sub; gate tk-g first-reaction; edge tk-sub blocks tk-g
+    conv tk-conv tk-sub; edge tk-conv replies-to tk-g
+    bead tk-work
+}
+SENT=(--ruled yes --ruling "build the fix" --waiting-on tk-work)
+BRIEF="tk-work keeps what is typed in the dialog; check that a press outside it no longer drops the values"
+CLOSER_ARGS='["--on","mol-validate-close"]'
+briefs() { field "$1" notes | grep -c '## Close brief' || true; }
+closer_case
+run_signoff --conversation tk-conv --outcome "ruled — a fix is building" "${SENT[@]}"
+eq "$RC" 2 "(CLOSER-BRIEF-OWED) a ruling that leaves the subject waiting on work, with no --close-brief, exits 2"
+has "$OUT" "Re-run with --close-brief" "(CLOSER-BRIEF-OWED) …naming the brief it needs"
+eq "$(writes)" 0 "(CLOSER-BRIEF-OWED) …and writes nothing"
+closer_case
+run_signoff --conversation tk-conv --outcome "ruled — a fix is building" "${SENT[@]}" --close-brief "$BRIEF"
+eq "$RC" 0 "(CLOSER) the sign-off exits 0"
+has "$(field tk-sub notes)" "## Close brief (held on tk-work, " "(CLOSER) the subject's notes carry a close brief held on the work"
+has "$(field tk-sub notes)" "$BRIEF" "(CLOSER) …with the sitting's brief"
+eq "$(meta tk-sub gc.dispatch_when_ready)" "rig-a/gc-toolkit.polecat" "(CLOSER) the subject is armed to its own rig's polecat pool"
+eq "$(meta tk-sub gc.dispatch_when_ready_args)" "$CLOSER_ARGS" "(CLOSER) …to send it the validating closer"
+has "$(grep '^deferred-dispatch arm' "$CALLS")" "--db $RIG_A/.beads" "(CLOSER) …from its own rig's store"
+has "$(cat "$CALLS")" "deferred-dispatch ran in GC_RIG=rig-a GC_RIG_ROOT=$RIG_A PWD=$RIG_A" "(CLOSER) …with that rig pinned"
+eq "$(field tk-g status)/$(field tk-conv status)" "closed/closed" "(CLOSER) the ruling answers the gate and closes the conversation"
+has "$(acts tk-conv)" "Arranged the check that closes this once the work it waits on lands." "(CLOSER) the arm is one of the visit's actions"
+case "$(cat "$CALLS")" in
+  *"gc-helm takeaway tk-sub"*"--waiting-on tk-work"*"## Close brief"*"deferred-dispatch arm tk-sub"*"gate resolve tk-g"*"bd close tk-conv"*) ok "(CLOSER-ORDER) the headline and its edge, then the brief, then the arm, then the gate and the close" ;;
+  *) bad "(CLOSER-ORDER) the writes ran out of order: $(cat "$CALLS")" ;;
+esac
+ARMS=$(grep -c '^deferred-dispatch arm' "$CALLS" || true)
+run_signoff --conversation tk-conv --outcome "ruled — a fix is building" "${SENT[@]}" --close-brief "$BRIEF"
+eq "$RC" 0 "(CLOSER-RERUN) a re-run of the sign-off exits 0"
+eq "$(briefs tk-sub)" 1 "(CLOSER-RERUN) …writing the brief no second time"
+eq "$(grep -c '^deferred-dispatch arm' "$CALLS")" "$ARMS" "(CLOSER-RERUN) …and arming no second time"
+has "$OUT" "tk-sub's validating closer is already armed" "(CLOSER-RERUN) …saying the closer is already armed"
+
+closer_case
+run_signoff --conversation tk-conv --answer tk-g --ruling "build the fix" --outcome "ruled — a fix is building" --waiting-on tk-work --close-brief "$BRIEF"
+eq "$RC" 0 "(CLOSER-ANSWER) a ruling on a turn that does not sign off exits 0"
+eq "$(meta tk-sub gc.dispatch_when_ready_args)" "$CLOSER_ARGS" "(CLOSER-ANSWER) …arming the subject's validating closer"
+eq "$(field tk-g status)/$(field tk-conv status)" "closed/in_progress" "(CLOSER-ANSWER) …answering the gate and leaving the conversation open"
+
+closer_case
+REFUSE_UPDATE_MATCH='## Close brief' run_signoff --conversation tk-conv --outcome "x" "${SENT[@]}" --close-brief "$BRIEF"
+eq "$RC" 1 "(CLOSER-BRIEF-REFUSED) a close brief the store refuses stops the sign-off"
+hasnt "$(cat "$CALLS")" "deferred-dispatch arm" "(CLOSER-BRIEF-REFUSED) …before the arm"
+eq "$(field tk-g status)/$(field tk-conv status)" "open/in_progress" "(CLOSER-BRIEF-REFUSED) …with the gate and the conversation still open"
+closer_case
+ARM_FAIL=1 run_signoff --conversation tk-conv --outcome "x" "${SENT[@]}" --close-brief "$BRIEF"
+eq "$RC" 1 "(CLOSER-ARM-FAILS) an arm that does not land stops the sign-off"
+has "$OUT" "NOT SIGNED OFF" "(CLOSER-ARM-FAILS) …saying not to post the sign-off"
+eq "$(field tk-g status)/$(field tk-conv status)" "open/in_progress" "(CLOSER-ARM-FAILS) …before any gate is answered"
+run_signoff --conversation tk-conv --outcome "x" "${SENT[@]}" --close-brief "$BRIEF"
+eq "$RC/$(meta tk-sub gc.dispatch_when_ready_args)" "0/$CLOSER_ARGS" "(CLOSER-ARM-FAILS) the re-run arms the closer and signs off"
+eq "$(briefs tk-sub)" 1 "(CLOSER-ARM-FAILS) …keeping the one brief the first attempt wrote"
+closer_case
+SHOW_DOWN=tk-work run_signoff --conversation tk-conv --outcome "x" "${SENT[@]}" --close-brief "$BRIEF"
+eq "$RC" 1 "(CLOSER-UNREAD) a wait that does not read stops the sign-off"
+eq "$(writes)" 0 "(CLOSER-UNREAD) …before any write"
+closer_case
+TAKEAWAY_FAIL=1 run_signoff --conversation tk-conv --outcome "x" "${SENT[@]}" --close-brief "$BRIEF"
+eq "$RC" 1 "(CLOSER-HEADLINE) a headline that does not land stops the sign-off"
+eq "$(briefs tk-sub)/$(meta tk-sub gc.dispatch_when_ready)" "0/" "(CLOSER-HEADLINE) …before the brief and the arm"
+
+closer_case
+run_signoff --conversation tk-conv --outcome "x" --waiting-on tk-work --close-brief "$BRIEF"
+eq "$RC" 2 "(CLOSER-USAGE) --close-brief without a ruling exits 2"
+run_signoff --conversation tk-conv --outcome "x" --ruled yes --ruling "settled" --no-wait --close-brief "$BRIEF"
+eq "$RC" 2 "(CLOSER-USAGE) --close-brief without --waiting-on exits 2"
+eq "$(writes)" 0 "(CLOSER-USAGE) …and neither writes anything"
+closer_case; gate tk-ask decision.tk-sub
+run_signoff --conversation tk-conv --outcome "x" --ruled yes --ruling "the owner decides" --waiting-on tk-ask
+eq "$RC/$(meta tk-sub gc.dispatch_when_ready)" "0/" "(CLOSER-GATE) a wait on a gate, which a person owes, arms no closer and needs no brief"
+closer_case; gate tk-ask decision.tk-sub
+run_signoff --conversation tk-conv --outcome "x" --ruled yes --ruling "the owner decides" --waiting-on tk-ask --close-brief "$BRIEF"
+eq "$RC/$(writes)" "2/0" "(CLOSER-GATE) …and a --close-brief beside it exits 2, writing nothing"
+closer_case; bead rb-work
+run_signoff --conversation tk-conv --outcome "x" --ruled yes --ruling "build it there" --waiting-on rb-work --close-brief "$BRIEF"
+eq "$RC/$(writes)" "2/0" "(CLOSER-CROSS-STORE) a --close-brief whose only wait is in another store exits 2, writing nothing"
+
+closer_case; setm tk-sub gc.dispatch_when_ready rig-a/gc-toolkit.polecat; setm tk-sub gc.dispatch_when_ready_args '["--on","mol-polecat-work"]'
+run_signoff --conversation tk-conv --outcome "ruled — builds once tk-work lands" "${SENT[@]}"
+eq "$RC" 0 "(CLOSER-ELSEWHERE) a subject armed to another dispatch signs off with no brief"
+has "$OUT" "no validating closer is armed for tk-sub: it is armed to rig-a/gc-toolkit.polecat" "(CLOSER-ELSEWHERE) …saying why no closer is armed"
+eq "$(meta tk-sub gc.dispatch_when_ready_args)" '["--on","mol-polecat-work"]' "(CLOSER-ELSEWHERE) …and leaving that arm as it is"
+hasnt "$(cat "$CALLS")" "deferred-dispatch arm" "(CLOSER-ELSEWHERE) …arming nothing"
+closer_case; setm tk-sub gc.dispatch_when_ready rig-a/gc-toolkit.polecat; setm tk-sub gc.dispatch_when_ready_args '["--on","mol-polecat-work"]'
+run_signoff --conversation tk-conv --outcome "x" "${SENT[@]}" --close-brief "$BRIEF"
+eq "$RC/$(writes)" "2/0" "(CLOSER-ELSEWHERE) …and a --close-brief there exits 2, writing nothing"
+closer_case; setf tk-sub issue_type epic
+run_signoff --conversation tk-conv --outcome "x" "${SENT[@]}"
+eq "$RC/$(meta tk-sub gc.dispatch_when_ready)" "0/" "(CLOSER-EPIC) an epic subject, whose members carry it, gets no closer"
+closer_case; setf tk-sub assignee gc-toolkit.mechanik
+run_signoff --conversation tk-conv --outcome "x" "${SENT[@]}"
+eq "$RC/$(meta tk-sub gc.dispatch_when_ready)" "0/" "(CLOSER-ASSIGNED) an assigned subject, whose hook offers it, gets no closer"
+open_pr; bead tk-work
+run_signoff --conversation tk-conv --outcome "x" --ruled yes --ruling "land it once the fix is in" --waiting-on tk-work --no-rework
+eq "$RC/$(meta tk-anc gc.dispatch_when_ready)" "0/" "(CLOSER-PR) an open PR, which the refinery closes on its merge, gets no closer"
+closer_case; setm tk-sub gc.recommended_formula mol-fix
+run_signoff --conversation tk-conv --outcome "x" "${SENT[@]}" --accept
+eq "$RC/$(meta tk-sub gc.dispatch_when_ready)" "0/" "(CLOSER-ACCEPT) a ruling that takes the subject's recommendation arms no closer"
+has "$OUT" "it takes its recommendation" "(CLOSER-ACCEPT) …saying so"
+
+fresh; bead hq-sub; gate hq-g first-reaction; edge hq-sub blocks hq-g
+conv hq-conv hq-sub; edge hq-conv replies-to hq-g; bead hq-work
+run_signoff --conversation hq-conv --outcome "x" --ruled yes --ruling "build the fix" --waiting-on hq-work
+eq "$RC" 2 "(CLOSER-HQ) a subject in the city's own store, whose closer no pool runs, exits 2"
+has "$OUT" "city's own store" "(CLOSER-HQ) …saying a person closes it, through a human gate"
+eq "$(writes)" 0 "(CLOSER-HQ) …and writes nothing"
 
 echo "# a ruling on an open PR says whether its branch changes"
 acceptance; setm tk-anc merge_result pull_request; setm tk-anc pr_number 41
