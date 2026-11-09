@@ -468,6 +468,13 @@ PR at it until the city posts there. A PR's first head needs no publication. The
 `mr` step opens the PR as a draft, which GitHub does not merge, and runs the
 projection before anything can mark it ready.
 
+The publication sets its push no time limit of its own. A push it stopped could
+still land after the projection that follows, and that projection, which reads
+the branch's ref from before the push, would leave the moved PR at a verdict
+that did not count it. A publication that dies part way lets the lock go once
+its processes end, and a pending it posted holds the commit until the next
+projection there reads the refs.
+
 The writers are the polecat's push at submit (`work-submit.sh`), which is how a
 rework moves its PR's head, the refinery's pushes (the `mr` step's push of a
 PR's new head, a `direct` landing onto a branch that heads an open PR, and an
