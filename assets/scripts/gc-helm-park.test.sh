@@ -395,7 +395,8 @@ has "$OUT" "tk-epic.4 (in_progress under gc-toolkit/gc-toolkit.crew)" "(TEXT) a 
 has "$OUT" "tk-feat.3 (workflow tk-r2 past load-context)" "(TEXT) a member whose workflow passed load-context stays in flight, two levels down"
 has "$OUT" "tk-epic.5 (rejection_reason set)" "(TEXT) an armed member in flight stays in flight: only its own blockers hold work that has started"
 hasnt "$OUT" "armed, not held" "(TEXT) no armed member is named as left unheld: deferred dispatch reads its ancestors' blockers"
-has "$OUT" "poured before the park, not held by it: tk-feat.2 (workflow tk-r1)" "(TEXT) a member poured and waiting at load-context is named as not held"
+has "$OUT" "poured before the park, waiting at load-context: tk-feat.2 (workflow tk-r1)" "(TEXT) a member poured and waiting at load-context is named"
+has "$OUT" "Load-context's gate refuses each one it has not let through yet, and arms its re-sling for the park's release." "(TEXT) …with what holds it: load-context's gate reads its ancestors' waits"
 hasnt "$(grep '^poured before the park' <<< "$OUT" || true)" "tk-feat.4" "(TEXT) an armed member whose workflow load-context held is not named as poured"
 hasnt "$OUT" "tk-done" "(TEXT) a closed member is not part of the park"
 

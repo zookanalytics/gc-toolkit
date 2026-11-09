@@ -73,12 +73,13 @@ shares only the word ([authority-map.md](authority-map.md)).
 - **Stands in for.** Steps of core's polecat base and Gas Town's polecat formula
   that would do what the pack needs. The formula overrides five steps and inherits
   `implement`. Each override differs for a reason of its own:
-  - `load-context` refuses a bead that is finished, parked, blocked or in another
-    live run, and ends the run by cancelling it with what releases the work on the
-    work bead. Upstream's has no such gate. `gc sling` keeps one live run of a
-    formula on a bead, and the gate reads the same record for what gets past it, a
-    forced relaunch and a claimant with no poured workflow, so it adds no key and
-    writes nothing to let a run through.
+  - `load-context` refuses a bead that is finished, parked, held by a wait as
+    `gctk bead holds` answers, or in another live run, and ends the run by
+    cancelling it with what releases the work on the work bead. Upstream's has no
+    such gate. `gc sling` keeps one live run of a formula on a bead, and the gate
+    reads the same record for what gets past it, a forced relaunch and a claimant
+    with no poured workflow, so it adds no key and writes nothing to let a run
+    through.
   - `workspace-setup` brings a rejected branch current by merge, where Gas Town's
     rebases it under an open PR, and waits behind a sibling.
   - `preflight-tests` runs the checks through `gctk rig`, so every polecat starting
@@ -116,10 +117,10 @@ shares only the word ([authority-map.md](authority-map.md)).
   In `gastownhall/gascity-packs`, `gastown/formulas/mol-polecat-work.toml` overrides
   `workspace-setup`, `self-review` and `submit-and-exit`, rebases a rejected
   branch, and at the handoff detaches the tree and deletes its branch.
-- **Verified.** 2026-11-08, at `gastownhall/gascity` main c7a45437f and
-  `gastownhall/gascity-packs` main 2a3b142e3.
-- **Retires when.** A step at a time. `load-context`: core's gate refuses finished
-  and parked work and ends a run by cancelling it. `workspace-setup`: the
+- **Verified.** 2026-11-09, at `gastownhall/gascity` main d12e89601 and
+  `gastownhall/gascity-packs` main 356737249.
+- **Retires when.** A step at a time. `load-context`: core's gate refuses finished,
+  parked and held work and ends a run by cancelling it. `workspace-setup`: the
   refinery's rework machinery goes (`tk-1tfzr71.20`), which ends the merge resume.
   `preflight-tests` and `self-review`: Gas City ships a record of a check per
   commit. `submit-and-exit`: `tk-1tfzr71.20` moves the merge onto GitHub's branch

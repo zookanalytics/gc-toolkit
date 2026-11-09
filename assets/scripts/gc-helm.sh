@@ -1635,7 +1635,7 @@ cmd_park() {
     poured=$(printf '%s' "$survey" | jq -r '[ .poured[] | .id + " (workflow " + .root + ")" ] | join(", ")' 2>/dev/null || true)
     echo "held, not started: ${held:-$bead}"
     [ -z "$flight" ] || echo "in flight, keeps running: $flight"
-    [ -z "$poured" ] || echo "poured before the park, not held by it: $poured. Load-context reads no ancestor's blockers, so each workflow runs."
+    [ -z "$poured" ] || echo "poured before the park, waiting at load-context: $poured. Load-context's gate refuses each one it has not let through yet, and arms its re-sling for the park's release."
 }
 
 # ── Verb: priority ───────────────────────────────────────────────────
