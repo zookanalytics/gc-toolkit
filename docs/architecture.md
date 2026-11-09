@@ -408,18 +408,15 @@ first. Either way the change is a decision on the record, not a drift.
 
 ## Decisions
 
-- **GitHub merges every PR.** The rules of a PR's target branch decide its
-  approval and its required checks, and the pack keeps no approval rule and
-  runs no merge of its own. A PR into a branch whose rules require no
-  approving review, such as a stage PR into an integration branch, waits for a
-  person's Merge.
-- **The city's verdict at a PR's head is a required check:** the commit status
-  `gc-toolkit/status`, which a rig's branch rules require beside its CI checks.
-  It reads success last, once everything else those rules require is met at
-  that head and no feedback on the PR is newer than what the city has routed,
-  and pending until then. It never reads failure, which a reader of red checks
-  would take for a broken build. Feedback that arrives after the city's last
-  read is read after the merge.
+- **GitHub merges every PR, under its target branch's rules,** and the pack
+  keeps no approval rule or merge of its own. A PR into a branch whose rules
+  require no approving review, such as a stage PR into an integration branch,
+  waits for a person's Merge.
+- **The city's verdict at a PR's head is the commit status
+  `gc-toolkit/status`,** which a rig's branch rules require. It passes last,
+  once the city holds nothing on the PR and has routed its feedback, and
+  everything else those rules require is met there. Until then it reads
+  pending, never failure.
 - **The city keeps GitHub's auto-merge on only while it reads the PR
   approved,** on a target whose rules require an approving review.
 - **An approval stands across a push** until the city's reading of the change
@@ -428,11 +425,10 @@ first. Either way the change is a decision on the record, not a drift.
   fast-forward,** so a PR keeps the commits its approval and its threads were
   given on.
 - **A bead waits on its PR's merge through bd's own `gh:pr` gate,** which Gas
-  City's gate sweep resolves. No reader of holds counts that gate, since it is
-  the merge itself.
+  City's gate sweep resolves and the city's status never counts as a hold,
+  since the gate is the merge itself.
 - **No machine checks a landing's transitions.** Each fact about a landing has
-  one writer, which makes one write and stands on its exit, and the doctor
-  checks the beads after the write.
+  one writer, and the doctor checks the beads after the write.
 
 ## Debt
 
@@ -444,13 +440,9 @@ why a reader must know it, and the work that retires it.
   lease, and the lease can pass over a commit the branch gained after the prep.
   The merge rewrite (tk-1tfzr71.20) rebuilds the patrol so that every push is a
   fast-forward, in a unit its implementation child (tk-1tfzr71.67) files.
-- **The pack still merges each PR itself.** On a rig whose merge has not moved
-  onto GitHub, a bead bound for a PR waits at `pre_open_gate` while its
-  pre-open checks run, and `pr-open.sh` opens the PR once they pass. The merge
-  cadence's merge arm then lands it with `gctk merge`, which merges under the
-  pack's own approval rule and closes the bead. `lifecycle.sh` checks every
-  landing write against the transition machine in `lifecycle/lifecycle.toml`.
-  Every rig runs this path until its cutover. The merge rewrite's
-  implementation child (tk-1tfzr71.67) files a cutover bead for each rig, which
-  moves that rig's merge onto GitHub, and the retirement bead, which deletes
-  the path and the machine once no open bead is on the path.
+- **The pack still merges each PR itself.** Until a rig's cutover, the pack
+  merges that rig's PRs under its own approval rule and checks each landing
+  write against its transition machine, so steps 6 to 8 are not what runs
+  there today. The merge rewrite's implementation child (tk-1tfzr71.67) files a
+  cutover bead for each rig, and the retirement bead, which deletes the old path
+  once no open bead is on it.
