@@ -1186,9 +1186,13 @@ echo "── a review of an epic gates what waits on its ruling, records it, and
 # subject that is itself a PR's anchor is reached by every call, so each call
 # under the review's own ruling gives that PR's answer, the same each time, and
 # its gate waits for the sign-off unless a close retires the PR, whose bead must
-# close before the beads above it can. A park's gate can hold other beads, so a
-# release closes it only once nothing else waits on it, and never closes a
-# blocker that is not a park's own gate.
+# close before the beads above it can. A re-home into another store names the
+# new bead on each of those calls, so it is filed before the first. A call under
+# another PR's ruling leaves the subject's PR standing, so the writer adds its
+# Approve clause to that call's outcome too, and what the call prints about it
+# answers nothing. A park's gate can hold other beads, so a release closes it
+# only once nothing else waits on it, and never closes a blocker that is not a
+# park's own gate.
 have "the step table sends a sitting that reviews an epic to its skill" '**Steps 4–8, when the operator judges an epic'"'"'s contract or its course, or the subject is a landed Delivery or work that waits on a judgment about an epic**' "$PROMPT"
 have "…by name" '`converse-epic-review` |' "$PROMPT"
 have "the prompt sends a review's closes to its skill, none of them forced" \
@@ -1258,6 +1262,12 @@ have "…the same ruling and answer each time, which the first call carries out 
     'Each gives the same ruling, word for word, and the same answer, so the first carries out a rework or a retirement, and the calls after it find it done.' "$EPIC_REVIEW_JOINED"
 have "…with the subject's gate left to the sign-off, unless a close retires the PR, when write 5 answers it before the closes" \
     "The subject's gate takes no call of its own, and the sign-off answers it, unless a close retires the PR. Then write 5 answers that gate on a call of its own, as write 2 answers one" "$EPIC_REVIEW_JOINED"
+have "…and a re-home into another rig's store files the new bead before the first of those calls, each of which names it as the successor" \
+    "When that answer re-homes the PR into another rig's store, each call names the new bead as its successor, so file that bead there first, as write 5 files one." "$EPIC_REVIEW_JOINED"
+have "…while a call under another PR's ruling leaves the subject's PR standing, and what it prints about that PR is not passed on" \
+    "A call under another PR's ruling leaves it standing, and what that call prints about the subject's PR is no answer for it, so pass on only its lines about the PR it names." "$EPIC_REVIEW_JOINED"
+have "…so a retirement on its own call keeps its outcome to 95 characters too when it leaves the subject's PR standing" \
+    "--retire <kind> --outcome \"<where the epic stands now, at most 140 characters, or 95 when it leaves the subject's PR standing>\" --no-wait" "$EPIC_REVIEW"
 have "every close runs through the close gate" \
     '"$CONV/finalize-gate.sh" check <bead> && gc bd close <bead> --reason' "$EPIC_REVIEW"
 lacks "…and none is forced" '--force' "$EPIC_REVIEW" \

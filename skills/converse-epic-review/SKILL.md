@@ -146,7 +146,7 @@ that PR free to merge. A PR the ruling retires:
 ```bash
 "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" --answer <the gate on its anchor> \
   --ruling "<the ruling, one line>; it retires PR #<number> (<its anchor>)" --pr-anchor <its anchor> \
-  --retire <kind> --outcome "<where the epic stands now, at most 140 characters>" --no-wait
+  --retire <kind> --outcome "<where the epic stands now, at most 140 characters, or 95 when it leaves the subject's PR standing>" --no-wait
   # and --successor <the bead that carries the work now>, unless the kind is not-needed
 ```
 A PR the ruling leaves standing:
@@ -167,16 +167,19 @@ first, then sign off again. Never add a PR answer to the sign-off instead,
 because it would answer that gate under the review's ruling.
 
 A subject that is itself a PR's anchor is the exception, because every call
-reaches it. A call under another PR's ruling leaves it standing. Each call under
-the review's own ruling gives that PR's answer, as the settle step gives it, and
-those are write 2's answer to the Deliveries' gates, write 5's to a re-homed
-bead's gate, and the sign-off. Each gives the same ruling, word for word, and
-the same answer, so the first carries out a rework or a retirement, and the
-calls after it find it done. The subject's gate takes no call of its own, and
-the sign-off answers it, unless a close retires the PR. Then write 5 answers
-that gate on a call of its own, as write 2 answers one, because a bead above the
-PR cannot close while the PR is open, and a retired PR has nothing left to
-release.
+reaches it. A call under another PR's ruling leaves it standing, and what that
+call prints about the subject's PR is no answer for it, so pass on only its
+lines about the PR it names. Each call under the review's own ruling gives that
+PR's answer, as the settle step gives it, and those are write 2's answer to the
+Deliveries' gates, write 5's to a re-homed bead's gate, and the sign-off. Each
+gives the same ruling, word for word, and the same answer, so the first carries
+out a rework or a retirement, and the calls after it find it done. When that
+answer re-homes the PR into another rig's store, each call names the new bead
+as its successor, so file that bead there first, as write 5 files one. The
+subject's gate takes no call of its own, and the sign-off answers it, unless a
+close retires the PR. Then write 5 answers that gate on a call of its own, as
+write 2 answers one, because a bead above the PR cannot close while the PR is
+open, and a retired PR has nothing left to release.
 
 ## The writes, in order
 

@@ -57,7 +57,9 @@
 #             gives the PR's answer, the first carries out a rework or a
 #             retirement and the later ones act on the PR it recorded, and the
 #             subject's gate, which holds the merge, waits for the sign-off, or
-#             on a close that retires the PR, for a call of its own
+#             on a close that retires the PR, for a call of its own; a call
+#             under another PR's ruling leaves the subject's PR standing, and
+#             its outcome carries the subject's Approve clause
 #   (CUT-SHORT*) the hand-back is one write guarded on the holder and the
 #             status, and a conversation that reads closed, before that write or
 #             because a dismiss closed it first, stays closed
@@ -1001,6 +1003,17 @@ run_signoff --conversation tk-conv --ruled yes "${CLOSED[@]}"
 eq "$RC/$(field tk-conv status)" "0/closed" "(REVIEW-PR-RETIRE) the sign-off exits 0 once the retired PR's bead has closed"
 has "$OUT" "tk-anc, the PR an earlier attempt of this ruling recorded for its --retire, reads closed" "(REVIEW-PR-RETIRE) …finding the PR its ruling retired closed"
 hasnt "$(cat "$CALLS")" "pr-dispose" "(REVIEW-PR-RETIRE) …and disposing nothing again"
+# A PR in flight beside the subject is retired on a call of its own, under its
+# own ruling. That call reaches the subject's open PR too and leaves it
+# standing, so the writer adds the subject's Approve clause to its outcome.
+review_pr; bead tk-pr3; setm tk-pr3 merge_result pull_request; setm tk-pr3 pr_number 53
+edge tk-pr3 parent-child tk-epic; gate tk-g3 epic-review.tk-pr3; edge tk-pr3 blocks tk-g3; edge tk-conv replies-to tk-g3
+run_signoff --conversation tk-conv --answer tk-g3 --ruling "close: the hypothesis held; it retires PR #53 (tk-pr3)" \
+    --pr-anchor tk-pr3 --retire not-needed --outcome "the epic is closed" --no-wait
+eq "$RC/$(field tk-g3 status)/$(field tk-rev status)" "0/closed/open" "(REVIEW-PR-OTHER) another PR retired on its own call resolves only that PR's gate"
+has "$(cat "$CALLS")" "pr-dispose --anchor tk-pr3 --successor tk-conv --kind not-needed" "(REVIEW-PR-OTHER) …retiring the PR it names"
+has "$OUT" "the ruling leaves the branch of tk-anc as it stands" "(REVIEW-PR-OTHER) …and leaving the subject's PR standing"
+eq "$(meta tk-anc gc.takeaway)" "the epic is closed; PR #52 still needs your Approve on GitHub" "(REVIEW-PR-OTHER) …so the headline carries the subject's Approve clause after the outcome"
 
 echo "# cut short: the conversation goes back to the operator's queue"
 acceptance; run_signoff --conversation tk-conv --outcome "cut short: the rollout question is still owed" --ruled no
