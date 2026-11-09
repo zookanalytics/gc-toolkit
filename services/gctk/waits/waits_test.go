@@ -494,6 +494,58 @@ func TestAHeldBeadsWaitsAreItsAncestors(t *testing.T) {
 	}
 }
 
+// A bead can have several parents. The store holds one whose work has not
+// started through each parent it marks blocked, whichever parent its listing
+// names and in either order of the bead's edges, and work in flight is held only
+// by its own waits, so the same bead carrying a branch is clear.
+func TestABeadWithTwoParents(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		parents []string // in the order of the bead's edges
+		names   string   // the parent the listing names
+	}{
+		{"the listing names the parked parent", []string{"epic", "other"}, "epic"},
+		{"the listing names the parked parent, the edges reversed", []string{"other", "epic"}, "epic"},
+		{"the listing names the parent that holds nothing", []string{"epic", "other"}, "other"},
+		{"the listing names the parent that holds nothing, the edges reversed", []string{"other", "epic"}, "other"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := parked()
+			s.Put(bead{ID: "other", Status: "open", IssueType: "epic"})
+			for _, b := range []bead{
+				{ID: "b", Status: "open"},
+				{ID: "retry", Status: "open", Metadata: map[string]string{"branch": "polecat/retry"}},
+			} {
+				for _, p := range tc.parents {
+					b.Edges = append(b.Edges, edge(gcbd.EdgeParentChild, p, "open"))
+				}
+				s.Put(b)
+				s.List(b.ID, tc.names)
+				s.Mark(b.ID)
+			}
+			if h := holdsOf(t, s, "retry"); h.Status != waits.Clear || h.InFlight != "carries branch" || len(h.Waits) != 0 {
+				t.Errorf("retry = %s on %+v, in flight %q; want clear, in flight since it carries branch", h.Status, h.Waits, h.InFlight)
+			}
+			want := []waits.Wait{{ID: "gate", Type: "blocks", Status: "open", IssueType: "gate", Ancestor: "epic"}}
+			if h := holdsOf(t, s, "b"); h.Status != waits.Held || !reflect.DeepEqual(h.Waits, want) || len(h.Pending) != 0 {
+				t.Errorf("b = %s on %+v, pending %+v; want held on %+v", h.Status, h.Waits, h.Pending, want)
+			}
+		})
+	}
+
+	// The park is two levels up the line of the parent the listing does not name.
+	s := parked()
+	under(s, bead{ID: "story", Status: "open"})
+	s.Put(bead{ID: "other", Status: "open", IssueType: "epic"})
+	s.Put(bead{ID: "deep", Status: "open", Edges: []gcbd.Edge{edge(gcbd.EdgeParentChild, "other", "open"), edge(gcbd.EdgeParentChild, "story", "open")}})
+	s.List("deep", "other")
+	s.Mark("deep")
+	want := []waits.Wait{{ID: "gate", Type: "blocks", Status: "open", IssueType: "gate", Ancestor: "epic"}}
+	if h := holdsOf(t, s, "deep"); h.Status != waits.Held || !reflect.DeepEqual(h.Waits, want) {
+		t.Errorf("deep = %s on %+v; want held on %+v", h.Status, h.Waits, want)
+	}
+}
+
 // A bead's pending waits are its own that have not landed, and the last wait to
 // land names when it did. An ancestor's open park is none of them, and an edge
 // that is no wait never counts.
@@ -540,8 +592,9 @@ func TestPendingAndTheLastLanding(t *testing.T) {
 }
 
 // For work that has not started, an ancestor's waits hold it as its own do, so
-// the last landing counts theirs too, up to the first ancestor that is closed or
-// pinned. Work in flight counts its own waits alone.
+// the last landing counts theirs too, on each line of its ancestry up to the
+// first ancestor on that line that is closed or pinned. Work in flight counts
+// its own waits alone.
 func TestTheLastLandingCountsAnAncestorsForWorkNotStarted(t *testing.T) {
 	s := fake.New()
 	s.Put(bead{ID: "own-blocker", Status: "closed"})
@@ -572,6 +625,29 @@ func TestTheLastLandingCountsAnAncestorsForWorkNotStarted(t *testing.T) {
 	}})
 	if h := holdsOf(t, s, "orphan"); h.LastLanded != "2026-11-02T12:00:00Z" {
 		t.Errorf("orphan last landed %q; want its own landing, since a closed ancestor's waits hold nothing below it", h.LastLanded)
+	}
+
+	// A bead with two parents counts the landings on each parent's line, in
+	// either order of its edges, and a closed parent ends only its own line.
+	s.Put(bead{ID: "late-park", Status: "closed", IssueType: "gate"})
+	s.Put(bead{ID: "side", Status: "open", IssueType: "epic", Edges: []gcbd.Edge{landed(gcbd.EdgeBlocks, "late-park", "2026-11-09T06:00:00Z")}})
+	for _, tc := range []struct {
+		parents []string
+		want    string
+	}{
+		{[]string{"feat", "side"}, "2026-11-09T06:00:00Z"},
+		{[]string{"side", "feat"}, "2026-11-09T06:00:00Z"},
+		{[]string{"done-epic", "feat"}, "2026-11-08T12:00:00Z"},
+		{[]string{"feat", "done-epic"}, "2026-11-08T12:00:00Z"},
+	} {
+		edges := []gcbd.Edge{landed(gcbd.EdgeBlocks, "own-blocker", "2026-11-02T12:00:00Z")}
+		for _, p := range tc.parents {
+			edges = append(edges, edge(gcbd.EdgeParentChild, p, "open"))
+		}
+		s.Put(bead{ID: "twin", Status: "open", Edges: edges})
+		if h := holdsOf(t, s, "twin"); h.LastLanded != tc.want {
+			t.Errorf("twin under %v last landed %q; want %q", tc.parents, h.LastLanded, tc.want)
+		}
 	}
 }
 

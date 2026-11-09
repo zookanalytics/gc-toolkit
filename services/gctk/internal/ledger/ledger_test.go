@@ -186,11 +186,51 @@ func TestASnapshotReadsTheAncestryAndTheStoresAnswers(t *testing.T) {
 	if _, err := snap.Blocking("gate-not-read"); !errors.As(err, &re) {
 		t.Errorf("a bead the snapshot did not read = %v, want a read error", err)
 	}
-	if p, _ := snap.records["task"].Parent(); p != "story" {
-		t.Errorf("task's parent = %q", p)
+	if p, _ := snap.records["task"].Parents(); !slices.Equal(p, []string{"story"}) {
+		t.Errorf("task's parents = %q", p)
 	}
 	if st := snap.records["task"].Status(); st != "open" {
 		t.Errorf("task's status = %q", st)
+	}
+}
+
+// A bead can have several parents, and the snapshot reads the line of each, so
+// the store's answer can hold the bead through any of them. Here the listing
+// names the parent that holds nothing, and the store holds the bead through its
+// other parent, in either order of its edges.
+func TestASnapshotReadsEveryParentsLine(t *testing.T) {
+	for _, order := range [][]string{{"free", "story"}, {"story", "free"}} {
+		s := fake.New()
+		s.Put(fake.Bead{ID: "gate", Status: "open"})
+		s.Put(fake.Bead{ID: "epic", Status: "open", Edges: []gcbd.Edge{{Type: gcbd.EdgeBlocks, ID: "gate", Status: "open"}}})
+		s.Put(fake.Bead{ID: "story", Status: "open", Edges: []gcbd.Edge{{Type: gcbd.EdgeParentChild, ID: "epic", Status: "open"}}})
+		s.Put(fake.Bead{ID: "free-epic", Status: "open"})
+		s.Put(fake.Bead{ID: "free", Status: "open", Edges: []gcbd.Edge{{Type: gcbd.EdgeParentChild, ID: "free-epic", Status: "open"}}})
+		var edges []gcbd.Edge
+		for _, p := range order {
+			edges = append(edges, gcbd.Edge{Type: gcbd.EdgeParentChild, ID: p, Status: "open"})
+		}
+		s.Put(fake.Bead{ID: "task", Status: "open", Edges: edges})
+		s.List("epic", "gate")
+		s.List("story", "epic")
+		s.List("task", "free")
+		s.Mark("epic", "story", "task")
+		snap, err := New(s).Read("task")
+		if err != nil {
+			t.Fatalf("edges %v: %v", order, err)
+		}
+		for _, id := range []string{"task", "free", "free-epic", "story", "epic"} {
+			if _, ok := snap.Record(id); !ok {
+				t.Errorf("edges %v: the snapshot did not read %s", order, id)
+			}
+		}
+		r, _ := snap.Record("task")
+		if p, err := r.Parents(); err != nil || !slices.Equal(p, []string{"free", "story"}) {
+			t.Errorf("edges %v: task's parents = %q, %v; want both, sorted", order, p, err)
+		}
+		if b, err := snap.Blocking("task"); err != nil || !b.Blocked || b.Through != "story" {
+			t.Errorf("edges %v: task = %+v, %v; want held through story, the parent the store marks", order, b, err)
+		}
 	}
 }
 
@@ -226,8 +266,8 @@ func TestASnapshotWithoutABeadItNeedsIsAReadError(t *testing.T) {
 		t.Fatalf("a bead whose parent the listing does not return = %v; want its snapshot", err)
 	}
 	r, _ := snap.Record("orphan")
-	if parent, err := r.Parent(); err != nil || parent != "" {
-		t.Errorf("orphan's parent = %q, %v; want none, since the listing does not return it", parent, err)
+	if parents, err := r.Parents(); err != nil || len(parents) != 0 {
+		t.Errorf("orphan's parents = %q, %v; want none, since the listing does not return it", parents, err)
 	}
 	s.List("orphan", "gone-parent")
 	s.Mark("orphan")

@@ -46,18 +46,21 @@ func (r *Record) IssueType() string { return r.row.IssueTypeString() }
 // alone.
 func (r *Record) Edges() ([]gcbd.Edge, error) { return r.row.Edges() }
 
-// Parent is the bead its parent-child edge names, "" when it has none.
-func (r *Record) Parent() (string, error) {
+// Parents is every bead its parent-child edges name, sorted and each once, none
+// when it has none. The store lets a bead have several parents.
+func (r *Record) Parents() ([]string, error) {
 	edges, err := r.row.Edges()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
+	var out []string
 	for _, e := range edges {
 		if e.Type == gcbd.EdgeParentChild {
-			return e.ID, nil
+			out = append(out, e.ID)
 		}
 	}
-	return "", nil
+	slices.Sort(out)
+	return slices.Compact(out), nil
 }
 
 // value is a metadata key's stored text, and whether the row holds the key. A
@@ -168,12 +171,14 @@ func (l *Ledger) ReadFrom(listed []*Record, ids ...string) (*Snapshot, error) {
 		for _, id := range level {
 			r := &Record{ID: id, row: shown(rows[id], edges[id], rows)}
 			s.records[id] = r
-			parent, err := r.Parent()
+			parents, err := r.Parents()
 			if err != nil {
 				return nil, &gcbd.ReadError{ID: id, Reason: "its edges did not decode: " + err.Error()}
 			}
-			if parent != "" && s.records[parent] == nil && !slices.Contains(next, parent) && !slices.Contains(level, parent) {
-				next = append(next, parent)
+			for _, p := range parents {
+				if s.records[p] == nil && !slices.Contains(next, p) && !slices.Contains(level, p) {
+					next = append(next, p)
+				}
 			}
 		}
 		level = next

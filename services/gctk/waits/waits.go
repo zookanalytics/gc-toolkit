@@ -82,13 +82,14 @@ type Arm struct {
 }
 
 // Holds is what holds one bead. Waits are the waits behind its status: its own
-// for a blocked or an unjudged bead, and the waits of the one ancestor it is
-// held through for a held bead. Pending are its own waits that have not landed.
-// LastLanded is when the last wait that applies to it landed, by the rule for
-// where its work is: its own waits, and for work that has not started the waits
-// of each live ancestor too, since they hold that work as its own do. InFlight is
-// why the bead is in flight, empty when it is not. Arm is nil when the bead
-// carries none, and Foreign lists its wait edges into another store.
+// for a blocked or an unjudged bead, and for a held bead the waits of the
+// ancestor the store's answers lead to, parent by parent. Pending are its own
+// waits that have not landed. LastLanded is when the last wait that applies to
+// it landed, by the rule for where its work is: its own waits, and for work that
+// has not started the waits of each live ancestor too, since they hold that work
+// as its own do. InFlight is why the bead is in flight, empty when it is not. Arm
+// is nil when the bead carries none, and Foreign lists its wait edges into
+// another store.
 type Holds struct {
 	ID         string    `json:"id"`
 	Status     Status    `json:"status"`
@@ -414,37 +415,48 @@ func waitsOn(edges []ledger.Edge, ids []string, ancestor string) []Wait {
 
 // lastLanded is when the last wait that applies to the bead landed: the latest
 // close time among its own blocks and conditional-blocks edges onto a closed
-// bead and, for work that has not started, among those of each ancestor the
-// store holds it under, up to the first closed or pinned one, whose waits hold
-// nothing below it. It is empty when none has closed. A waits-for edge lands
-// when its gate opens, which no close time records, so its spawner's close is no
-// landing.
+// bead and, for work that has not started, among those of each live ancestor on
+// every line its parent-child edges lead up. A closed or pinned ancestor ends
+// its own line, since its waits hold nothing below it, and so does one the
+// snapshot did not read. It is empty when none has closed. A waits-for edge
+// lands when its gate opens, which no close time records, so its spawner's
+// close is no landing.
 func (s *Snapshot) lastLanded(r *ledger.Record, own []ledger.Edge, unstarted bool) (string, error) {
 	last, text, err := landedAmong(r.ID, own, time.Time{}, "")
 	if err != nil || !unstarted {
 		return text, err
 	}
 	seen := map[string]bool{r.ID: true}
-	cur, err := r.Parent()
-	for ; err == nil && cur != "" && !seen[cur]; cur, err = r.Parent() {
+	queue, err := r.Parents()
+	if err != nil {
+		return "", &ledger.ReadError{ID: r.ID, Reason: "its edges did not decode: " + err.Error()}
+	}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		if seen[cur] {
+			continue
+		}
 		seen[cur] = true
-		var ok bool
-		if r, ok = s.record(cur); !ok {
-			return text, nil
+		a, ok := s.record(cur)
+		if !ok {
+			continue
 		}
-		if st := r.Status(); st == "closed" || st == "pinned" {
-			return text, nil
+		if st := a.Status(); st == "closed" || st == "pinned" {
+			continue
 		}
-		edges, eerr := r.Edges()
-		if eerr != nil {
-			return "", &ledger.ReadError{ID: cur, Reason: "its edges did not decode: " + eerr.Error()}
+		edges, err := a.Edges()
+		if err != nil {
+			return "", &ledger.ReadError{ID: cur, Reason: "its edges did not decode: " + err.Error()}
 		}
 		if last, text, err = landedAmong(cur, edges, last, text); err != nil {
 			return "", err
 		}
-	}
-	if err != nil {
-		return "", &ledger.ReadError{ID: cur, Reason: "its edges did not decode: " + err.Error()}
+		parents, err := a.Parents()
+		if err != nil {
+			return "", &ledger.ReadError{ID: cur, Reason: "its edges did not decode: " + err.Error()}
+		}
+		queue = append(queue, parents...)
 	}
 	return text, nil
 }
