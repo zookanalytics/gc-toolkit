@@ -17,12 +17,18 @@
 #      it and the others refuse, with nothing written. A run of another formula is
 #      no duplicate, a claimant with no run of its own refuses any of them, and the
 #      gate asks for nothing Gas City's released core pack does not ship.
-#   7. WAITING: a bead with an open blocker waits on it and is armed, and a retry
-#      after any failure still knows the pool.
+#   7. WAITING: a bead something holds, by the answer of `gctk bead holds`, waits
+#      on that wait and is armed, and a retry after any failure still knows the
+#      pool. Fresh work is held through a parked ancestor, work in flight only by
+#      its own waits, and an own waits-for edge holds as unjudged, while a
+#      pinned blocker of its own holds nothing. A read with no answer asks
+#      nothing and cancels nothing.
 #
 # The siblings it calls are stubs that log, except decline.sh and work-lib.sh,
-# which are the real ones, and run-lib.stub.sh answers which runs work a bead. No
-# live city, Dolt or network.
+# which are the real ones, and run-lib.stub.sh answers which runs work a bead.
+# What holds the bead is the answer of the gctk this checkout builds, over a stub
+# store of the fixture's rows (holds-store.stub.sh). No live city, Dolt or
+# network.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -58,6 +64,12 @@ stub patrol-finding.sh FINDING FAKE_FINDING FAKE_FINDING_RC
 stub await-ruling.sh AWAIT FAKE_AWAIT FAKE_AWAIT_RC
 
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
+# A read the gctk under test makes answers from the store the run wrote, through
+# the seam holds-store.stub.sh keeps.
+if [ -n "${HOLDS_STUB_READ:-}" ] && [ "${1:-}" = bd ]; then
+  shift
+  exec "${HOLDS_STUB:?}" answer "$@"
+fi
 case "$1 $2" in
   # Gas City's released core pack has no helper this gate could ask for.
   "core scripts-dir") printf 'CORE\n' >> "$FAKE_LOG"; exit 1 ;;
@@ -85,6 +97,11 @@ exit 2
 GC
 chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
+# What holds the bead is the answer of gctk bead holds, built from this checkout
+# and run over the stub store.
+HOLDS_STUB="$HERE/holds-store.stub.sh"
+GCTK_BIN="$("$HOLDS_STUB" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so no hold can be read"; exit 1; }
+export GCTK_BIN HOLDS_STUB GC_NO_API=1
 
 SELF_NAME="hq-me-pool"; SELF_ID="sess-me"; SELF_AGENT="rig/rig.polecat"; SELF_ALIAS="me-alias"
 REFINERY="gc-toolkit/gc-toolkit.refinery"
@@ -96,16 +113,21 @@ SESS_OTHER='{"sessions":[{"session_name":"hq-other"}]}'
 row() { printf '[%s]' "$(jq -c '. + {id: "tk-work"}' <<<"$1")"; }
 
 # run <row-json> [gate args...] -> prints "<rc>|<ordered trace>"
+# The store gctk reads holds $FAKE_STORE_ROWS, the work bead's row, and a row for
+# each bead the row names an edge onto, at the status the edge reads.
 run() {
   : > "$TMP/log"; : > "$TMP/update"; : > "$TMP/cancel"; : > "$TMP/await"; : > "$TMP/gate"; : > "$TMP/finding"; : > "$TMP/run-reads"; : > "$TMP/list"
   printf '%s' "$1" > "$TMP/row.json"
+  jq -c --argjson more "${FAKE_STORE_ROWS:-[]}" '(if type == "array" then . else [] end) as $r
+    | $more + $r + [ $r[].dependencies[]? | {id, status: (.status // "open")} ] | unique_by(.id)' \
+    "$TMP/row.json" > "$TMP/holds.json" 2>/dev/null || printf '[]' > "$TMP/holds.json"
   printf '%s' "${FAKE_RUNS:-[]}" > "$TMP/runs.json"
   shift
   local rc=0
   [ "$#" -gt 0 ] || set -- --convoy cv-1
   ( cd "$TMP" || exit 97
     GC_SESSION_NAME="$SELF_NAME" GC_SESSION_ID="$SELF_ID" GC_AGENT="$SELF_AGENT" GC_ALIAS="$SELF_ALIAS" \
-    WORK_READ_WAIT=0 FAKE_ROW_FILE="$TMP/row.json" \
+    WORK_READ_WAIT=0 FAKE_ROW_FILE="$TMP/row.json" HOLDS_STORE="$TMP/holds.json" \
     GC_RUN_LIB="$PACK/run-lib.stub.sh" RUN_LIB_STUB_RUNS="$TMP/runs.json" RUN_LIB_STUB_LOG="$TMP/run-reads" FAKE_LIST="$TMP/list" \
     FAKE_LOG="$TMP/log" FAKE_UPDATE="$TMP/update" FAKE_CANCEL="$TMP/cancel" FAKE_AWAIT="$TMP/await" FAKE_GATE="$TMP/gate" FAKE_FINDING="$TMP/finding" \
     FAKE_SESSIONS="${FAKE_SESSIONS-$SESS_EMPTY}" \
@@ -275,10 +297,11 @@ eq "$(FAKE_RUNS="[$(run_of r-peer cv-0 mol-other)]" FAKE_ROOTS="$OLDER_PEER" run
 dispatch() { # <convoy> <dir>
   mkdir -p "$2"
   printf '%s' "$FREE" > "$2/row.json"
+  printf '%s' "$FREE" > "$2/holds.json"
   printf '%s' "[$MINE,$PEER]" > "$2/runs.json"
   ( cd "$TMP" || exit 97
     env GC_SESSION_NAME="$SELF_NAME" GC_SESSION_ID="$SELF_ID" GC_AGENT="$SELF_AGENT" GC_ALIAS="$SELF_ALIAS" \
-      WORK_READ_WAIT=0 FAKE_ROW_FILE="$2/row.json" GC_RUN_LIB="$PACK/run-lib.stub.sh" RUN_LIB_STUB_RUNS="$2/runs.json" \
+      WORK_READ_WAIT=0 FAKE_ROW_FILE="$2/row.json" HOLDS_STORE="$2/holds.json" GC_RUN_LIB="$PACK/run-lib.stub.sh" RUN_LIB_STUB_RUNS="$2/runs.json" \
       FAKE_LOG="$2/log" FAKE_CANCEL="$2/cancel" FAKE_SESSIONS="$SESS_EMPTY" FAKE_ROOTS="$YOUNGER_PEER" \
       "$PACK/work-gate.sh" --convoy "$1" >"$2/out" 2>&1
     echo "$?" > "$2/rc" ) &
@@ -319,19 +342,69 @@ FAKE_SESSIONS="$SESS_OTHER" run "$(row '{"status":"in_progress","assignee":"hq-o
 eq "$(cat "$TMP/run-reads")" "" "no runs read for a live owner"
 
 # --- 7. Waiting. -----------------------------------------------------------------
-BLOCKED="$(row '{"status":"open","assignee":"","metadata":{"gc.execution_routed_to":"rig/pool"},"dependencies":[{"id":"tk-blocker","dependency_type":"blocks","status":"open"},{"id":"tk-b2","dependency_type":"blocks","status":"in_progress"},{"id":"tk-done","dependency_type":"blocks","status":"closed"},{"id":"tk-rel","dependency_type":"related","status":"open"}]}')"
+BLOCKED="$(row '{"status":"open","assignee":"","metadata":{"gc.execution_routed_to":"rig/pool"},"dependencies":[{"id":"tk-blocker","dependency_type":"blocks","status":"open"},{"id":"tk-c2","dependency_type":"blocks","status":"in_progress"},{"id":"tk-done","dependency_type":"blocks","status":"closed"},{"id":"tk-rel","dependency_type":"related","status":"open"}]}')"
 eq "$(run "$BLOCKED")" "1|AWAIT;UPDATE;CANCEL;DRAIN;" "an open blocker: waits on it, notes the arm, cancels, drains"
-eq "$(cat "$TMP/await")" "tk-work --blocked-by tk-blocker --formula mol-polecat-work" "an open blocker: the wait names the first blocker and the formula"
-has "$(cat "$TMP/update")" "open blocks-blocker(s): tk-blocker tk-b2" "an open blocker: the note names only the open blocks edges"
-has "$(cat "$TMP/cancel")" "open blocks-blocker(s) tk-blocker tk-b2" "an open blocker: the reason names them"
+eq "$(cat "$TMP/await")" "tk-work --held-by tk-blocker --formula mol-polecat-work" "an open blocker: the wait names the first wait and the formula, and adds no edge"
+has "$(cat "$TMP/update")" "held by its own wait on tk-blocker, tk-c2 (gctk bead holds: blocked)" "an open blocker: the note names only the waits that hold it"
+has "$(cat "$TMP/update")" "A re-sling is armed to fire once nothing holds it" "an open blocker: the note records the arm"
+has "$(cat "$TMP/cancel")" "tk-work is held by its own wait on tk-blocker, tk-c2 (blocked)" "an open blocker: the reason names them"
 eq "$(cat "$TMP/gate")" "" "an open blocker: nothing asked when the arm lands"
 eq "$(run "$(row '{"status":"open","metadata":{},"dependencies":[{"id":"tk-x","dependency_type":"blocks","status":"closed"}]}')")" "0|" "a blocker that is closed: passes"
 eq "$(run "$(row '{"status":"open","metadata":{},"dependencies":[{"id":"tk-x","dependency_type":"related","status":"open"}]}')")" "0|" "an open dep that is not blocks: passes"
 eq "$(FAKE_AWAIT_RC=1 run "$BLOCKED")" "1|AWAIT;GATE;CANCEL;DRAIN;" "the wait does not land: no note claims an arm, a gate asks for the re-sling, then cancels"
 has "$(cat "$TMP/gate")" "--subject tk-work --key polecat-blocked-work" "the fallback gate has its own key"
-has "$(cat "$TMP/gate")" "re-sling this work once the blocker(s) close" "the fallback gate says what to do"
+has "$(cat "$TMP/gate")" "re-sling this work once nothing holds it, when gctk bead holds tk-work answers clear" "the fallback gate says what to do"
 eq "$(FAKE_AWAIT_RC=1 FAKE_GATE_RC=1 run "$BLOCKED")" "1|AWAIT;GATE;" "neither the wait nor the gate lands: no cancel, no drain"
 eq "$(FAKE_CANCEL_RC=1 run "$BLOCKED")" "1|AWAIT;UPDATE;CANCEL;" "the wait landed and the cancel did not: no drain"
+
+# Fresh work held through an ancestor: its epic is parked on an open gate. The
+# bead has no wait of its own, its work has not started, and this run's own
+# load-context step is open, so the park holds it.
+PARKED='[{"id":"tk-epic","status":"open","issue_type":"epic","dependencies":[{"id":"tk-park","dependency_type":"blocks"}]},{"id":"tk-park","status":"open","issue_type":"gate"}]'
+UNDER_PARK="$(row '{"status":"open","assignee":"","parent":"tk-epic","metadata":{"gc.execution_routed_to":"rig/pool"}}')"
+eq "$(FAKE_STORE_ROWS="$PARKED" run "$UNDER_PARK")" "1|AWAIT;UPDATE;CANCEL;DRAIN;" "fresh work under a parked epic: waits on the park, notes the arm, cancels, drains"
+eq "$(cat "$TMP/await")" "tk-work --held-by tk-park --formula mol-polecat-work" "fresh work under a parked epic: the wait names the park and writes no edge onto it"
+has "$(cat "$TMP/update")" "held through its ancestor tk-epic, which waits on tk-park, and its work has not started (gctk bead holds: held)" \
+  "fresh work under a parked epic: the note names the ancestor and its wait"
+eq "$(cat "$TMP/gate")" "" "fresh work under a parked epic: nothing asked, since the park's release re-slings it"
+eq "$(cat "$TMP/run-reads")" "" "fresh work under a parked epic: refused before the runs are read"
+
+# Work in flight is held only by its own waits, so the park leaves it running.
+eq "$(FAKE_STORE_ROWS="$PARKED" run "$(row '{"status":"open","assignee":"","parent":"tk-epic","metadata":{"branch":"polecat/tk-work"}}')")" "0|" \
+  "a rework child under a parked epic: in flight, the park does not hold it"
+eq "$(FAKE_STORE_ROWS="$PARKED" run "$(row "{\"status\":\"in_progress\",\"assignee\":\"$SELF_NAME\",\"parent\":\"tk-epic\",\"metadata\":{}}")" --bead tk-work)" "0|" \
+  "a claimant with no poured workflow under a parked epic: its claim puts it in flight, the park does not hold it"
+eq "$(FAKE_STORE_ROWS="$PARKED" run "$(row '{"status":"open","assignee":"","parent":"tk-epic","metadata":{"branch":"polecat/tk-work"},"dependencies":[{"id":"tk-sib","dependency_type":"blocks","status":"open"}]}')")" "1|AWAIT;UPDATE;CANCEL;DRAIN;" \
+  "a rework child under a parked epic with an open blocker of its own: it waits"
+eq "$(cat "$TMP/await")" "tk-work --held-by tk-sib --formula mol-polecat-work" "in flight: the wait is its own blocker, not the park"
+has "$(cat "$TMP/update")" "held by its own wait on tk-sib (gctk bead holds: blocked)" "in flight: the note names its own wait alone"
+
+# A waits-for edge of its own holds as unjudged, even with its gate open: the
+# spawner here has no live child.
+eq "$(run "$(row '{"status":"open","assignee":"","metadata":{"gc.execution_routed_to":"rig/pool"},"dependencies":[{"id":"tk-spawn","dependency_type":"waits-for","status":"open"}]}')")" "1|AWAIT;UPDATE;CANCEL;DRAIN;" \
+  "an own waits-for edge: held as unjudged, waits, cancels, drains"
+eq "$(cat "$TMP/await")" "tk-work --held-by tk-spawn --formula mol-polecat-work" "an own waits-for edge: the wait names its spawner and writes no edge"
+has "$(cat "$TMP/update")" "held by its own waits-for edge onto tk-spawn, which the store cannot judge yet (gctk bead holds: unjudged)" \
+  "an own waits-for edge: the note says the store cannot judge it"
+
+# A conditional-blocks edge onto a live bead holds, as a blocks edge does.
+eq "$(run "$(row '{"status":"open","assignee":"","metadata":{"gc.execution_routed_to":"rig/pool"},"dependencies":[{"id":"tk-cond","dependency_type":"conditional-blocks","status":"open"}]}')")" "1|AWAIT;UPDATE;CANCEL;DRAIN;" \
+  "an own conditional-blocks edge onto a live bead: it waits"
+eq "$(cat "$TMP/await")" "tk-work --held-by tk-cond --formula mol-polecat-work" "an own conditional-blocks edge: the wait names it"
+
+# A pinned blocker holds nothing, as the store counts it.
+eq "$(run "$(row '{"status":"open","assignee":"","metadata":{},"dependencies":[{"id":"tk-pin","dependency_type":"blocks","status":"pinned"}]}')")" "0|" \
+  "a pinned blocker of its own: holds nothing, passes"
+eq "$(cat "$TMP/await")" "" "a pinned blocker of its own: no wait is recorded"
+
+# A read with no answer is no fact about the work.
+eq "$(GCTK_BIN="$TMP/no-gctk" run "$UNDER_PARK")" "1|DRAIN;" "no gctk binary: asks nothing, cancels nothing, drains"
+has "$(cat "$TMP/out")" "no gctk binary at '$TMP/no-gctk'" "no gctk binary: says so"
+eq "$(cat "$TMP/await")" "" "no gctk binary: no wait is recorded"
+eq "$(HOLDS_FAIL=all FAKE_STORE_ROWS="$PARKED" run "$UNDER_PARK")" "1|DRAIN;" "a holds read that fails: asks nothing, cancels nothing, drains"
+has "$(cat "$TMP/out")" "could not read what holds work bead tk-work (gctk bead holds gave no answer for it)" "a holds read that fails: says so"
+eq "$(HOLDS_FAIL=blocked run "$BLOCKED")" "1|DRAIN;" "a failed blocked listing is no answer, never a clear one"
+eq "$(cat "$TMP/await")" "" "a failed blocked listing: no wait is recorded"
 
 # Each name a claim writes as an assignee finds the session that goes by it.
 for owner in hq-busy sess-busy rig/rig.polecat-busy rig.polecat-busy; do

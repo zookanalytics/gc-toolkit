@@ -74,11 +74,12 @@ An earlier sitting on this conversation may have held and been cut short,
 leaving its hold's headline on the subject, waiting on the gates this close
 has resolved. So the close first reads the subject and what still blocks it.
 A headline that still waits, one with no `gc.takeaway_settled`, on a subject
-that no open blocker holds is replaced with the reading, settled, because it
-names a question that no longer stands. A subject that another open blocker
-still holds keeps its headline, since that wait is still owed. A read counts
-only when `gc` exits 0 and answers in its shape: the subject's own row, alone,
-and a list of its blockers.
+none of whose own waits is pending is replaced with the reading, settled,
+because it names a question that no longer stands. A subject a wait of its own
+still holds keeps its headline, since that wait is still owed. What holds it is
+the answer of `gctk bead holds`, the one rule for it. A read counts only when it
+exits 0 and answers in its shape: the subject's own row, alone, and its own
+answer.
 
 A conversation about an open PR, or about a bead of one such as its review or
 rework, holds the PR's merge with a gate under its own key,
@@ -90,13 +91,16 @@ carries a `merge_result`, and otherwise the bead its `anchor_bead` names. Each
 write takes its exit, the conversation closes only after them, and the hold is
 withdrawn only after the close:
 ```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 KIND="<moot|benign>"; WHY="<the premise, and what is true instead>"
 ACTION="<what ended the visit, in one plain sentence>"
 ROW=$(gc bd show "$SUBJECT" --json) \
   && WAITS=$(printf '%s\n' "$ROW" | jq -er --arg s "$SUBJECT" 'if type == "array" and length == 1 and .[0].id == $s then (.[0].metadata // {}) | if ((.["gc.takeaway"] // "") | tostring) != "" and ((.["gc.takeaway_settled"] // "") | tostring) == "" then "waits" else "settled" end else error("unread") end') \
   && ANCHOR=$(printf '%s\n' "$ROW" | jq -r --arg s "$SUBJECT" '(.[0].metadata // {}) | if ((.merge_result // "") | tostring) != "" then $s else ((.anchor_bead // "") | tostring) end') \
-  && DEPS=$(gc bd dep list "$SUBJECT" --type blocks --json) \
-  && OPEN=$(printf '%s\n' "$DEPS" | jq -er --arg own "conversation.$CONVERSATION" 'if type == "array" then [ .[] | select(((.status // "open") | ascii_downcase) != "closed") | select(((.await_id // "") | tostring) != $own) | .id ] | join(" ") else error("unread") end') \
+  && HOLDS=$("$GCTK" bead holds "$SUBJECT") \
+  && OPEN=$(printf '%s\n' "$HOLDS" | jq -er 'if .error == null and (.pending | type) == "array" then [ .pending[].id ] | join(" ") else error("unread") end') \
   && if [ "$WAITS" != waits ] || [ -n "$OPEN" ]; then echo "$SUBJECT keeps its headline${OPEN:+: $OPEN still holds it}"; else
        "$CONV/gc-helm.sh" takeaway "$SUBJECT" "${KIND}: ${WHY}" --by converse --no-wait \
          && echo "replaced the headline of $SUBJECT, which waited on nothing"

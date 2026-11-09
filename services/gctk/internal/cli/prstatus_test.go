@@ -59,7 +59,7 @@ func stubGC(t *testing.T, show, list string) {
 func derive(t *testing.T, anchor string, extra ...string) (string, int) {
 	t.Helper()
 	var out, errbuf bytes.Buffer
-	code := PRStatus(append([]string{"derive", "--anchor", anchor}, extra...), &out, &errbuf)
+	code := Run(append([]string{"pr", "status", anchor}, extra...), "", &out, &errbuf)
 	return out.String(), code
 }
 
@@ -516,22 +516,19 @@ func TestPRStatusDeriveWalksToTheGate(t *testing.T) {
 }
 
 func TestPRStatusUsageErrors(t *testing.T) {
+	for _, args := range [][]string{
+		{"pr", "status"},
+		{"pr", "status", ""},
+		{"pr", "status", "tk-a", "tk-b"},
+		{"pr", "status", "tk-a", "--all"},
+	} {
+		var out, errbuf bytes.Buffer
+		if code := Run(args, "", &out, &errbuf); code != 1 {
+			t.Errorf("gctk %q = %d, want 1", args, code)
+		}
+	}
 	var out, errbuf bytes.Buffer
-	if code := PRStatus([]string{"derive"}, &out, &errbuf); code != 1 {
-		t.Errorf("derive with no --anchor = %d, want 1", code)
-	}
-	if code := PRStatus([]string{"derive", "--anchor"}, &out, &errbuf); code != 1 {
-		t.Errorf("derive with --anchor and no value = %d, want 1", code)
-	}
-	if code := PRStatus([]string{"derive", "--anchor", "tk-a", "--all"}, &out, &errbuf); code != 1 {
-		t.Errorf("derive with an unknown flag = %d, want 1", code)
-	}
-	if code := PRStatus([]string{"gates", "--anchor", "tk-a"}, &out, &errbuf); code != 1 {
-		t.Errorf("gates, a verb gctk does not have = %d, want 1", code)
-	}
-	out.Reset()
-	errbuf.Reset()
-	if code := PRStatus([]string{"bogus"}, &out, &errbuf); code != 1 {
-		t.Errorf("unknown verb = %d, want 1", code)
+	if code := Run([]string{"pr", "bogus"}, "", &out, &errbuf); code != 2 {
+		t.Errorf("a verb pr does not have = %d, want 2", code)
 	}
 }

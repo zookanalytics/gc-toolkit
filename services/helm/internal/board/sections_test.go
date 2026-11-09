@@ -65,15 +65,16 @@ func epicSubject(id string) Anchor {
 }
 
 // gateBlocker is a human gate as a bead's own `blocks` listing carries it:
-// open, under the given key.
+// open, under the given key, and pending by the store's answer.
 func gateBlocker(id, key, title string) Blocker {
 	return Blocker{ID: id, Title: title, Status: "open", IssueType: "gate", AwaitType: "human", AwaitID: key,
-		CreatedAt: daysAgo(3), UpdatedAt: daysAgo(3)}
+		CreatedAt: daysAgo(3), UpdatedAt: daysAgo(3), Wait: WaitPending}
 }
 
 // recommendationSubject is a bead a first reaction has stamped with a
 // recommended execution formula, carrying the human gates its `blocks` listing
-// names. It is the parked row the recommend exit's takeaway gives it.
+// names, each landed by the store's answer once its row reads closed. It is the
+// parked row the recommend exit's takeaway gives it.
 func recommendationSubject(id, formula string, gates ...Blocker) Anchor {
 	a := Anchor{
 		ID: id, Kind: "parked", Source: "parked", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2),
@@ -81,11 +82,13 @@ func recommendationSubject(id, formula string, gates ...Blocker) Anchor {
 		Metadata: map[string]string{"gc.takeaway": "recommend " + formula, "gc.recommended_formula": formula},
 	}
 	for _, g := range gates {
-		a.Blockers = append(a.Blockers, g)
-		a.WaitingOn = append(a.WaitingOn, g.ID)
+		g.Wait = WaitPending
 		if g.Status == "closed" {
+			g.Wait = WaitLanded
 			a.WaitingOnClosed = append(a.WaitingOnClosed, g.ID)
 		}
+		a.Blockers = append(a.Blockers, g)
+		a.WaitingOn = append(a.WaitingOn, g.ID)
 	}
 	return a
 }
@@ -682,11 +685,11 @@ func TestClosedHumanGateIsNotABlockerThatLanded(t *testing.T) {
 			Blockers: []Blocker{b}, WaitingOn: []string{b.ID}, WaitingOnClosed: []string{b.ID}}
 	}
 	gate := gateBlocker("tk-g", "bring-current", "an answered question")
-	gate.Status = "closed"
+	gate.Status, gate.Wait = "closed", WaitLanded
 	if row := mustTile(t, buildBoard([]Anchor{parked(gate)}, fixtureNow, false, nil, Facts{}), "tk-p"); row.DispositionDue || row.Owed {
 		t.Errorf("a closed human gate is not a blocker that landed: disposition_due=%v owed=%v", row.DispositionDue, row.Owed)
 	}
-	work := Blocker{ID: "tk-w", Title: "routed fix", Status: "closed", IssueType: "task", RoutedTo: "gc-toolkit/gc-toolkit.polecat"}
+	work := Blocker{ID: "tk-w", Title: "routed fix", Status: "closed", IssueType: "task", RoutedTo: "gc-toolkit/gc-toolkit.polecat", Wait: WaitLanded}
 	if row := mustTile(t, buildBoard([]Anchor{parked(work)}, fixtureNow, false, nil, Facts{}), "tk-p"); !row.DispositionDue || !row.Owed {
 		t.Errorf("routed work that landed is due a disposition: disposition_due=%v owed=%v", row.DispositionDue, row.Owed)
 	}

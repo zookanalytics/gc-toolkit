@@ -97,8 +97,8 @@ gc sling <rig>/<binding>.polecat "$WORK"
    the newest when there are several. It waits on the bead, never the reverse,
    because the summary must read the branch after the bead has landed. The
    block adds the wait only while the summary task is armed and not yet slung
-   and still waits on an open bead, because then the deferred-dispatch order
-   cannot sling it first.
+   and a wait of its own is still pending, as `gctk bead holds` answers it,
+   because then the deferred-dispatch order cannot sling it first.
 3. When the block refuses, file a fresh summary task by step 5 with the bead
    among its waits, which makes the landing bead wait on it too, and arm it as
    in step 7. A summary task that has been dispatched may already have read the
@@ -107,8 +107,12 @@ gc sling <rig>/<binding>.polecat "$WORK"
 4. Then sling the bead.
 
 ```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+RIG_ROOT=$(gc rig list --json | jq -r --arg r <rig> '.rigs[] | select(.name == $r) | .path')
 # dep add's second id is the bead that is waited on.
-gc bd --rig <rig> show "$SUMMARY" --json | tr -d '[:cntrl:]' | jq -e '.[0] | (.metadata | (.["gc.dispatch_when_ready"] // "") != "" and (.["gc.dispatch_when_ready_slung"] // "") == "") and any(.dependencies[]?; .dependency_type == "blocks" and .status != "closed")' >/dev/null \
+"$GCTK" bead holds --db "$RIG_ROOT/.beads" "$SUMMARY" | jq -e '.error == null and (.arm.target // "") != "" and (.arm.slung // "") == "" and (.pending | length) > 0' >/dev/null \
   && gc bd --rig <rig> dep add "$SUMMARY" "$WORK" --type=blocks \
   || { echo "$SUMMARY may already be dispatched, or the store refused its wait on $WORK; file a fresh summary task by step 5" >&2; exit 1; }
 ```
@@ -127,24 +131,39 @@ and arm those beads in step 7 rather than sling them.
 
 A bead of the effort that builds on work reaching the default branch after the
 branch was cut needs the branch brought current first. That is a task for the
-mechanik, the hand-off below, not a bead of the effort:
+rig's refinery, the hand-off below, and not a bead of the effort. No polecat
+builds it, so no self-review and no review check reads the default branch's
+commits as its change.
 
-1. File a task for the mechanik that waits on the outside work by a `blocks`
-   edge, assign it to the mechanik and notify it, as the work skill sends a
-   named agent a bead.
+1. File the hand-off by the block below. It names the effort's landing bead
+   and waits on the outside work by a `blocks` edge. The block assigns it to
+   the refinery and notifies it, as the work skill sends a named agent a bead.
+   It carries no `branch`, because the refinery's patrol takes a bead that
+   carries one as a branch to land.
 2. Make the bead that needs the branch current wait on the hand-off by a
    `blocks` edge, and arm it to dispatch when the hand-off closes (the waits
    skill).
-3. The mechanik, once notified, brings the branch current from a disposable
-   worktree: a fast-forward to the default branch when the branch holds nothing
-   the default branch lacks, and a merge of the default branch into it when it
-   does. It pushes the result and closes the hand-off.
-4. A merge that conflicts needs a decision. The mechanik pushes nothing and
-   puts the conflict to the operator in a human gate on the hand-off, which
-   then waits on the gate:
+3. Once the outside work has landed, deferred dispatch sends the notice, and
+   the refinery brings the branch current. It fast-forwards the branch to the
+   default branch when the branch holds nothing the default branch lacks, and
+   otherwise merges the default branch into it. It pushes the result and
+   closes the hand-off, which releases the bead.
+4. A merge that conflicts needs a decision. The refinery pushes nothing and
+   puts the conflict to the operator in a `bring-current-conflict` human gate
+   on the hand-off, which then waits on the gate. The refinery's prompt holds
+   the method of steps 3 and 4.
 
 ```bash
-"$(gc <binding> scripts-dir)/human-gate.sh" --subject <hand-off> --key bring-current-conflict --message "<what collided, and the decision the merge needs>"
+# The hand-off, under the effort's epic (drop --parent when it has none).
+LANDING=<the landing bead of the effort>
+OUTSIDE=<the bead of the outside work>
+HANDOFF=$(gc bd --rig <rig> create "Bring integration/$LANDING current once <the outside work, such as its PR> lands" -t task \
+  -d "Once $OUTSIDE has landed, bring the branch of $LANDING, the effort's landing bead, current with the target it records. <What the outside work changes that the bead waiting on this builds on.>" \
+  --parent <epic> --deps "$OUTSIDE" --json | jq -r '.id // empty')
+[ -n "$HANDOFF" ] || { echo "no hand-off filed, with its wait on the outside work; stopping" >&2; exit 1; }
+gc bd --rig <rig> update "$HANDOFF" --assignee <rig>/<binding>.refinery \
+  && "$(gc <binding> scripts-dir)/deferred-dispatch.sh" notify "$HANDOFF" --agent <rig>/<binding>.refinery \
+  || { echo "$HANDOFF is not handed to the refinery; make nothing wait on it yet" >&2; exit 1; }
 ```
 
 ## Set an effort's priority or park it

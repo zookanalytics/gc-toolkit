@@ -35,6 +35,16 @@ BIN="$TMP/bin"; mkdir -p "$BIN"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 set -u
 STORE="${STUB_STORE:?}"; DEPS="${STUB_DEPS:?}"
+# A read the gctk under test makes answers from the same store and edges,
+# through the seam holds-store.stub.sh keeps, whose blocks rows read "A blocks
+# B" where these read "A depends on B". STUB_SHOW_FAIL fails it, as it fails a
+# show.
+if [ -n "${HOLDS_STUB_READ:-}" ] && [ "${1:-}" = "bd" ]; then
+  shift
+  [ -z "${STUB_SHOW_FAIL:-}" ] || export HOLDS_FAIL=all
+  awk -F'|' -v OFS='|' '$2 == "blocks" { print $3, $2, $1; next } { print }' "$DEPS" > "$DEPS.holds"
+  HOLDS_STORE="$STORE" HOLDS_DEPS="$DEPS.holds" exec "${HOLDS_STUB:?}" answer "$@"
+fi
 printf '[%s] %s\n' "${GC_RIG:-<unset>}" "$*" >> "${STUB_GC_LOG:?}"
 [ "${1:-}" = "bd" ] || exit 0
 shift
@@ -199,6 +209,11 @@ export GC_PROACTIVE_TOOL="$BIN/gc-proactive.sh"
 export STUB_STORE="$TMP/beads.json" STUB_DEPS="$TMP/deps.txt"
 export STUB_GC_LOG="$TMP/gc.log" STUB_PROACTIVE_LOG="$TMP/pro.log"
 export STUB_SEQ="$TMP/seq"
+# What a held bead still waits on is the answer of gctk bead holds, built from
+# this checkout and run over the stub store.
+export HOLDS_STUB="$HERE/holds-store.stub.sh" GC_NO_API=1
+GCTK_BIN="$("$HOLDS_STUB" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so no held bead can be read"; exit 1; }
+export GCTK_BIN
 
 reset() {
   echo '[]' > "$STUB_STORE"; : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_PROACTIVE_LOG"
@@ -563,14 +578,36 @@ hold fnd-1 blocked fix-a fix-b
 eq "$(findings doctor-two-blockers)" "1" "(held/one of two open) still waiting, so no new bead"
 eq "$(meta fnd-1 'finding.occurrences')" "2" "(held/one of two open) the recurrence lands on it"
 
-# A blocker no read resolves is not proven closed, so the held bead may still
-# be waiting and keeps the recurrence.
+# An edge onto a bead the store does not hold points into another store and
+# holds nothing, as the store judges it, so the held bead waits on nothing and
+# the recurrence is news.
 reset
 "$SUT" --key doctor-dangling --title t --message m >/dev/null 2>&1
 hold fnd-1 blocked gone-1
 "$SUT" --key doctor-dangling --title t --message m >/dev/null 2>&1
-eq "$(findings doctor-dangling)" "1" "(held/unreadable blocker) no new bead"
-eq "$(meta fnd-1 'finding.occurrences')" "2" "(held/unreadable blocker) the recurrence lands on it"
+eq "$(findings doctor-dangling)" "2" "(held/blocker the store does not hold) a new bead is filed"
+eq "$(meta fnd-1 'finding.occurrences')" "1" "(held/blocker the store does not hold) and the held bead keeps its count"
+
+# A read of what the held bead waits on that does not answer proves nothing,
+# so the held bead may still be waiting and keeps the recurrence.
+reset
+"$SUT" --key doctor-unread --title t --message m >/dev/null 2>&1
+put_bead fix-u open
+hold fnd-1 blocked fix-u
+STUB_SHOW_FAIL=1 "$SUT" --key doctor-unread --title t --message m >/dev/null 2>&1
+eq "$(findings doctor-unread)" "1" "(held/unread) no new bead"
+eq "$(meta fnd-1 'finding.occurrences')" "2" "(held/unread) the recurrence lands on it"
+
+# A waits-for edge of the held bead's own is a wait the store cannot judge
+# yet, so the held bead may still be waiting and keeps the recurrence.
+reset
+"$SUT" --key doctor-waitsfor --title t --message m >/dev/null 2>&1
+put_bead spawn-1 closed
+jq -c 'map(if .id == "fnd-1" then .status = "blocked" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+printf 'fnd-1|waits-for|spawn-1\n' >> "$STUB_DEPS"
+"$SUT" --key doctor-waitsfor --title t --message m >/dev/null 2>&1
+eq "$(findings doctor-waitsfor)" "1" "(held/waits-for) no new bead"
+eq "$(meta fnd-1 'finding.occurrences')" "2" "(held/waits-for) the recurrence lands on it"
 
 # The tracks edge --about adds names the subject. It is not a wait, so an open
 # subject does not keep a held bead taking recurrences after its blocker closed.

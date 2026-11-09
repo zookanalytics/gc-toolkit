@@ -275,9 +275,13 @@ for that pass.
 Then release the bead from its park, if it has one. `gc-helm.sh park` gives a
 bead one `blocks` edge, onto a gate of its own or onto a bead it was parked
 behind, and other beads can be parked behind the same gate. This lists the
-bead's open blockers, its park among them:
+bead's own pending waits, as `gctk bead holds` answers them, its park among
+them:
 ```bash
-gc bd dep list <bead> --direction=down -t blocks --json | jq -r '.[] | select(.status != "closed") | "\(.id) [\(.issue_type)\(if (.await_type // "") != "" then " awaiting " + .await_type else "" end)] \(.title)"'
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" bead holds <bead> | jq -r '.pending[] | "\(.id) [\(.issue_type // "")\(if (.await_type // "") != "" then " awaiting " + .await_type else "" end)] \(.title)"'
 ```
 This lists every other bead still waiting on the park. It always prints a line,
 so a run that prints nothing has not answered: run it again before either write

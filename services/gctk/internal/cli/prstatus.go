@@ -7,22 +7,17 @@ import (
 	"io"
 	"strings"
 
+	"github.com/spf13/cobra"
+
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
 )
 
-// `gctk pr-status` is how the shell asks what holds a PR and where it stands:
-// assets/scripts/pr-status-label.sh for the PR's labels, and gc-helm.sh engage
-// for what holds the bead it engages. `derive --anchor ID` prints one of
-// working|merging|needs-review|needs-attention and exits 0; 1 on a usage error;
-// 2 when a read did not resolve, so a caller leaves the labels as they are
-// rather than flipping them blind. With --json it prints one object instead,
-// {"status": <that value>, "held": [<gate, review, blocked>], "reasons":
-// [{"held", "id", "title"}]}: the held values in prstatus.Held's order, and each
-// thing behind them in prstatus.Reasons' order, the id empty where the PR's own
-// review threads or blocked verdict hold it. Both lists are empty arrays when
-// nothing holds the PR. pr-status-label.sh and engage call this and decide
-// nothing themselves.
+// `gctk pr status <bead>` is how the shell asks what holds a PR and where it
+// stands: assets/scripts/pr-status-label.sh for the PR's labels, and gc-helm.sh
+// engage for what holds the bead it engages. It is the pr noun's status verb,
+// in the words the PR's status: label shows (docs/gctk-architecture.md, "The
+// rule that names a verb").
 //
 // prstatus.Read gathers the facts through gcbdStore and decides nothing here
 // either: the helm board asks the same package through its own store, so the
@@ -34,55 +29,45 @@ import (
 // invisible to them.
 const prStatusProg = "pr-status-label"
 
-const prStatusUsage = `usage: gctk pr-status derive --anchor <anchor-id> [--json]
-`
+const prStatusLong = `Prints where the PR the bead owns stands, in the words its status: label
+shows: working, merging, needs-review or needs-attention. The bead is the PR's
+anchor. With --json it prints one object instead:
+{"status": <that value>, "held": [<gate, review, blocked>], "reasons":
+[{"held", "id", "title"}]}. held is what holds the PR, in the order the held:
+labels take, and reasons is each thing behind it. A reason's id is empty where
+the PR's own review threads or blocked verdict hold it. Both lists are empty
+arrays when nothing holds the PR.
 
-// PRStatus dispatches the subcommand's verbs, returning a process exit code so
-// the surface stays testable in-process.
-func PRStatus(args []string, stdout, stderr io.Writer) int {
-	if len(args) > 0 && args[0] == "derive" {
-		return prStatusDerive(args[1:], stdout, stderr)
-	}
-	fmt.Fprint(stderr, prStatusUsage)
-	return 1
-}
+exit: 0 printed
+      1 usage
+      2 a read did not resolve, so nothing was derived: a caller leaves the
+        labels as they are rather than flipping them blind`
 
-// prStatusArgs reads derive's flags, --anchor and --json. It returns false after
-// saying what is wrong.
-func prStatusArgs(args []string, asJSON *bool, stderr io.Writer) (string, bool) {
-	anchor := ""
-	for i := 0; i < len(args); i++ {
-		switch {
-		case args[i] == "--anchor":
-			if i+1 == len(args) {
-				fmt.Fprintf(stderr, "%s: flag %s needs a value\n", prStatusProg, args[i])
-				return "", false
-			}
-			i++
-			anchor = args[i]
-		case args[i] == "--json":
-			*asJSON = true
-		default:
-			fmt.Fprintf(stderr, "%s: unknown argument '%s'\n", prStatusProg, args[i])
-			return "", false
-		}
-	}
-	if anchor == "" {
-		fmt.Fprintf(stderr, "%s: derive needs --anchor\n", prStatusProg)
-		return "", false
-	}
-	return anchor, true
-}
-
-// prStatusDerive prints the state prstatus.Derive returns for the facts
-// prstatus.Read gathers about the anchor, and with --json the values
-// prstatus.Held and prstatus.Reasons return beside it.
-func prStatusDerive(args []string, stdout, stderr io.Writer) int {
+func newPRCmd(stdout, stderr io.Writer) *cobra.Command {
 	asJSON := false
-	anchor, ok := prStatusArgs(args, &asJSON, stderr)
-	if !ok {
-		return 1
+	status := &cobra.Command{
+		Use:         "status <bead>",
+		Short:       "where the PR stands: working, merging, needs-review or needs-attention",
+		Long:        prStatusLong,
+		Args:        cobra.ExactArgs(1),
+		Annotations: map[string]string{usageExitKey: "1"},
+		RunE: func(_ *cobra.Command, args []string) error {
+			anchor := strings.TrimSpace(args[0])
+			if anchor == "" {
+				return errors.New("name the bead whose PR this is")
+			}
+			return exit(prStatus(anchor, asJSON, stdout, stderr))
+		},
 	}
+	status.Flags().BoolVar(&asJSON, "json", false, "print the status with what holds the PR, as one JSON object")
+	return group("pr", "a bead's pull request",
+		"The pull request a bead owns: where it stands.", status)
+}
+
+// prStatus prints the state prstatus.Derive returns for the facts prstatus.Read
+// gathers about the anchor, and with asJSON the values prstatus.Held and
+// prstatus.Reasons return beside it.
+func prStatus(anchor string, asJSON bool, stdout, stderr io.Writer) int {
 	facts, err := prstatus.Read([]string{anchor}, gcbdStore{gcbd.New()})
 	f, answered := facts[anchor]
 	if err != nil || !answered {

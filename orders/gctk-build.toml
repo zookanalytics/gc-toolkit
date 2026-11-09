@@ -7,8 +7,9 @@
 # is ahead under services/gctk, and one status write, plus an origin fetch at
 # most once per 30 minutes. There is no service to restart: a published gctk is
 # serving the moment it lands.
-# timeout 300s: the module is stdlib-only, so even a cold build is seconds —
-# the bound is for a wedged toolchain or fetch, not for the compile.
+# timeout 300s: the module's one direct dependency is cobra, and even a cold
+# build that downloads it takes seconds. The bound is for a wedged toolchain or
+# fetch, not for the compile.
 [order]
 description = "Build the gctk binary when services/gctk is newer than it"
 trigger = "cooldown"

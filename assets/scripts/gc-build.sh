@@ -581,9 +581,9 @@ if [ "$ICU" -eq 1 ]; then
 fi
 
 # A stamping component's binary carries the revision it was built from
-# (`gctk version`), stamped as its module's own subtree hash, so gctk-resolve.sh
-# and doctor/check-cadence-live compare one identity against the checkout
-# rather than a commit hash against a tree hash. A build with no revision to
+# (`gctk version`), stamped as its module's own subtree hash, so
+# doctor/check-cadence-live compares one identity against the checkout rather
+# than a commit hash against a tree hash. A build with no revision to
 # stamp falls back to the toolchain's VCS stamp.
 GO_BUILD_FLAGS=()
 if [ "$STAMP" -eq 1 ] && [ -n "$MOD_REV" ]; then

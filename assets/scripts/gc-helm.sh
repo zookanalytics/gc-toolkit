@@ -112,7 +112,7 @@ conversation whose ask names the closed one; with --no-input it starts nothing
 and names the subject's engage. A subject that is closed too takes no new
 conversation, so that engage starts nothing either way.
 Engaging a bead or a PR names everything that holds it, by the definition the
-PR's held: labels and the board's row read (gctk pr-status derive): each open
+PR's held: labels and the board's row read (gctk pr status): each open
 human gate reached through its open blocks edges, each bead a person owes the
 next move on that the same edges reach, such as another PR waiting on a review,
 and the PR's own review threads or blocked verdict. The interactive prompt
@@ -219,16 +219,20 @@ carries no reason, and draws the comment that shows the visit on the subject's
 PR again. It then stops the converse session that held the conversation with
 `gc runtime drain-ack`, so the controller ends the session outside this
 process: the session dismiss runs in acks itself, last, and any other is acked
-as an operator. --operator says the caller is outside the sitting even when it
-runs under the sitting's identity to infer the subject, as prefix+X does, so
-every session is acked as an operator and none acks itself. A session that
-will not stop is left to converse-reap, which closes any converse session
-whose conversation reads closed. The close falls back to --force when bd
-refuses an operator closing a conversation its sitting holds. A conversation
-the verb could not account for aborts the run, which exits 4. It writes
-nothing to the subject. A subject with no live sitting has nothing to end, and
-dismiss says so and writes nothing; a conversation id names its own
-conversation, which dismiss closes whoever holds it.
+as an operator. Gas City holds that stop while a client is attached, so the
+pane stays live under a tab until it detaches. The ack sets the session's
+drain flag, which the converse templates' title reads, so the tab's title
+leads with "done" by tmux's next status refresh. --operator says the caller is
+outside the sitting even when it runs under the sitting's identity to infer
+the subject, as prefix+X does, so every session is acked as an operator and
+none acks itself. A session that will not stop holds no conversation any more,
+so its template's idle sleep stops it once no client is attached. The close
+falls back to --force when bd refuses an operator closing a conversation its
+sitting holds. A conversation the verb could not account for aborts the run,
+which exits 4. It writes nothing to the subject. A subject with no live
+sitting has nothing to end, and dismiss says so and writes nothing; a
+conversation id names its own conversation, which dismiss closes whoever holds
+it.
 
 dismiss takes the subject as an OPTIONAL argument. Omit it and it infers the
 current sitting from session state: the one open conversation assigned to this
@@ -1153,13 +1157,13 @@ cmd_takeaway() {
     # fails open on the same probe where this one fails closed; a closed anchor
     # took no park (release_park cleared above); a bare headline (no --release)
     # parks nothing; a converse sitting stamps one beside a gate that holds it.
+    # The open blockers are the bead's own pending waits (helm_pending).
     if [ -n "$release_park" ] && [ -z "$route" ] && [ -z "$assign" ] && [ -z "$no_wait" ] && [ -z "$waiting_ids" ]; then
-        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
-        park_held=$(gc bd dep list "$bead" ${db:+--db "$db"} --direction=down --json 2>/dev/null | scrub \
-            | jq -er 'if type == "array" then
-                   [ .[] | select((.dependency_type // "") == "blocks")
-                         | select((.status // "") != "closed") | .id ] | join(" ")
-                 else error("not an edge array") end' 2>/dev/null) || park_held="__unreadable__"
+        if park_pending=$(helm_pending "$bead" "$db"); then
+            park_held=$(printf '%s' "$park_pending" | jq -r '[ .[].id ] | join(" ")' 2>/dev/null) || park_held="__unreadable__"
+        else
+            park_held="__unreadable__"
+        fi
         if [ "$park_held" = "__unreadable__" ]; then
             echo "$PROG: takeaway: --release parks $bead for a person, and a park states its disposition — but $bead's blockers could not be read, so an open blocker holding it beside an edge cannot be proven. Pass --waiting-on <bead> for the wait it holds on (written as a blocks edge), or --no-wait when nothing waits on it, or re-run once the store answers: a park the guard cannot clear must not stamp an unedged hold on a bead it could not inspect. Nothing was written." >&2
             exit 2
@@ -1181,14 +1185,12 @@ cmd_takeaway() {
     # headline, and the route is all the refusal costs: the board gathers a
     # parked row on gc.takeaway and bands it disposition-due once its waits have
     # all closed, so the operator is asked either way. An unreadable probe
-    # allows the route and says so. A bd that will not answer must not cost a
-    # sitting its disposition, but a route stamped over an uninspected bead is
+    # allows the route and says so. A store that will not answer must not cost
+    # a sitting its disposition, but a route stamped over an uninspected bead is
     # a weaker promise than one the guard cleared, and in silence the two read
-    # alike. Unreadable covers the payload as well as the exit code: `dep list`
-    # reports a bead it cannot resolve as a JSON error OBJECT on stdout, which
-    # a filter that answers "" on anything but an array takes for no edges at
-    # all. A cross-store edge is left out of the array entirely, invisible here
-    # as it is to every other reader of this graph. A closed anchor is not this
+    # alike. The blockers are the bead's own pending waits (helm_pending), so a
+    # wait onto a bead in another store holds nothing here, as the store judges
+    # it. A closed anchor is not this
     # refusal's case: its route is refused below on the disposition itself,
     # after the headline and the run's end a folded anchor still needs have
     # landed. An --assign takes the same guard, since a named agent offered a
@@ -1201,17 +1203,15 @@ cmd_takeaway() {
     if [ -n "$dest" ] && [ -n "$release_park" ]; then
         probe_read=1
         need_human_gate_jq
-        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
-        blocked_by=$(gc bd dep list "$bead" ${db:+--db "$db"} --direction=down --json 2>/dev/null | scrub \
-            | jq -er "$HUMAN_GATE_JQ"'if type == "array" then
-                   [ .[] | select((.dependency_type // "") == "blocks")
-                         | select((.status // "") != "closed")
-                         | select(human_gate | not)
-                         | .id ] | join(" ")
-                 else error("not an edge array") end' 2>/dev/null) || probe_read=""
+        blocked_by=""
+        if route_pending=$(helm_pending "$bead" "$db"); then
+            blocked_by=$(printf '%s' "$route_pending" | jq -r "$HUMAN_GATE_JQ"'[ .[] | select(human_gate | not) | .id ] | join(" ")' 2>/dev/null) || probe_read=""
+        else
+            probe_read=""
+        fi
         if [ -z "$probe_read" ]; then
             blocked_by=""
-            echo "$PROG: takeaway: could not read the blockers on $bead ('gc bd dep list' failed, or answered with something other than an edge array), so $dest_flag '$dest' goes UNCHECKED. If this bead's work is really on a blocker, it reaches '$dest' with no method to perform once that blocker closes. Re-run with --release alone to leave it at rest, or re-run this call once the store answers." >&2
+            echo "$PROG: takeaway: could not read the blockers on $bead ('gctk bead holds' could not answer it), so $dest_flag '$dest' goes UNCHECKED. If this bead's work is really on a blocker, it reaches '$dest' with no method to perform once that blocker closes. Re-run with --release alone to leave it at rest, or re-run this call once the store answers." >&2
         fi
         if [ -n "$blocked_by" ] && [ "$dest_flag" = "--route" ]; then
             echo "$PROG: takeaway: --route '$route' on $bead, which is blocked by $blocked_by. None of those is a human gate on $bead, so the work is on them and this bead has no method a pool can perform: routed, it waits for them to close and is then offered to '$route' forever. Re-run with --release alone, which still lands the headline and the release and leaves the bead at rest. A bead that should reach a pool once its blocker clears is first-reaction-dispose.sh --disposition blocked --then-route '$route', which routes on the unblock instead of now." >&2
@@ -1417,8 +1417,8 @@ cmd_takeaway() {
 #   poured  under the bead, not in flight and not armed (gc.dispatch_when_ready),
 #           with a workflow still at load-context.
 #   held    the bead, and everything else under it. An armed member is held:
-#           deferred dispatch slings an armed bead only when no blocker holds
-#           it or any of its ancestors (hold-lib.sh).
+#           deferred dispatch slings an armed bead only once `gctk bead holds`
+#           answers that nothing holds it, a park on an ancestor included.
 # Rows come in either bd shape: a listing's edges are {depends_on_id, type},
 # and a `bd show` row's are {id, dependency_type}.
 # shellcheck disable=SC2016  # jq program, single-quoted on purpose
@@ -1594,8 +1594,11 @@ cmd_park() {
         wait_row=$(row_now "$wait_on")
         [ -n "$wait_row" ] \
             || { echo "$PROG: park: --waiting-on '$wait_on' does not resolve${path:+ in rig $path}. Nothing was written." >&2; exit 4; }
-        if [ "$(printf '%s' "$wait_row" | jq -r '.status // ""' 2>/dev/null || true)" = closed ]; then
-            echo "$PROG: park: $wait_on is closed, so an edge onto it holds nothing. Nothing was written." >&2
+        # The store counts a blocker that is closed or pinned as none, as
+        # `gctk bead holds` answers, so an edge onto either holds nothing.
+        wait_status=$(printf '%s' "$wait_row" | jq -r '.status // ""' 2>/dev/null || true)
+        if [ "$wait_status" = closed ] || [ "$wait_status" = pinned ]; then
+            echo "$PROG: park: $wait_on is $wait_status, so an edge onto it holds nothing. Nothing was written." >&2
             exit 2
         fi
         if printf '%s' "$survey" | jq -e --arg w "$wait_on" '(.held + [.poured[].id] + [.flight[].id]) | any(.[]; . == $w)' >/dev/null 2>&1; then
@@ -1659,7 +1662,7 @@ cmd_park() {
     poured=$(printf '%s' "$survey" | jq -r '[ .poured[] | .id + " (workflow " + .root + ")" ] | join(", ")' 2>/dev/null || true)
     echo "held, not started: ${held:-$bead}"
     [ -z "$flight" ] || echo "in flight, keeps running: $flight"
-    [ -z "$poured" ] || echo "poured before the park, not held by it: $poured. Load-context reads no ancestor's blockers, so each workflow runs."
+    [ -z "$poured" ] || echo "poured before the park, waiting at load-context: $poured. Load-context's gate refuses each one it has not let through yet, and arms its re-sling for the park's release."
 }
 
 # ── Verb: priority ───────────────────────────────────────────────────
@@ -2572,8 +2575,11 @@ operator_drain_ack() {
 # killed half done. The session this verb runs in acks itself, last of all;
 # any other is acked as an operator. Under --operator the caller is outside
 # every sitting, whatever identity it runs under, so no session acks itself.
-# A session that will not stop is left to converse-reap, which closes any
-# converse session whose conversation reads closed.
+# Gas City holds that stop while a client is attached, so the pane stays live
+# under the tab until the tab detaches, and the ack's drain flag puts "done"
+# at the head of the tab's title (the converse templates' session_live). A
+# session whose stop does not take holds no conversation any more, so its
+# template's idle sleep stops it once no client is attached.
 cmd_dismiss() {
     bead=""; dismiss_reason=""; dismiss_json=""; dismiss_stop=""; dismiss_operator=""
     while [ $# -gt 0 ]; do
@@ -2715,14 +2721,14 @@ cmd_dismiss() {
             if operator_drain_ack "$_ds_id"; then
                 _dmsg "$PROG: dismiss: stopped session $_ds_id, which held the sitting"
             else
-                echo "$PROG: dismiss: could not stop session $_ds_id, which held the sitting; converse-reap closes it on its next pass, because its conversation is closed" >&2
+                echo "$PROG: dismiss: could not stop session $_ds_id, which held the sitting; it holds no conversation now, so its idle sleep stops it once no client is attached" >&2
             fi
         done
         IFS=$_ds_ifs
         if [ -n "$_ds_own" ]; then
             _dmsg "$PROG: dismiss: ending this session ($_ds_own), which held the sitting"
             gc runtime drain-ack >/dev/null 2>&1 \
-                || echo "$PROG: dismiss: could not end this session ($_ds_own); converse-reap closes it on its next pass, because its conversation is closed" >&2
+                || echo "$PROG: dismiss: could not end this session ($_ds_own); it holds no conversation now, so its idle sleep stops it once no client is attached" >&2
         fi
     }
 
@@ -3371,8 +3377,34 @@ engage_valid_model() {
     return "$_evm_ok"
 }
 
+# helm_gctk — the gctk binary the city builds: $GCTK_BIN, else the build under
+# the city root. Prints nothing and returns 1 when there is none to run.
+helm_gctk() {
+    _hg_bin="${GCTK_BIN:-}"
+    if [ -z "$_hg_bin" ]; then
+        _hg_root=$(city_root)
+        [ -n "$_hg_root" ] || return 1
+        _hg_bin="$_hg_root/.gc/services/gctk/bin/gctk"
+    fi
+    [ -x "$_hg_bin" ] || return 1
+    printf '%s' "$_hg_bin"
+}
+
+# helm_pending <bead> [<db>] — the bead's own waits that have not landed, as
+# `gctk bead holds` answers them in the store <db> names: one JSON array of
+# waits, each naming the bead waited on with its title, status, issue type and
+# await type. A wait onto a bead in another store holds nothing, so it is none
+# of them. Returns 1 and prints nothing when gctk is not there or could not
+# answer the bead, which proves nothing about its waits.
+helm_pending() {
+    _hp_bin=$(helm_gctk) || return 1
+    # shellcheck disable=SC2086  # ${2:+--db "$2"} expands to 0 or 2 space-free fields
+    "$_hp_bin" bead holds ${2:+--db "$2"} "$1" 2>/dev/null | scrub \
+        | jq -ce 'if .error == null and (.pending | type) == "array" then .pending else error("no answer") end' 2>/dev/null
+}
+
 # holding_rows <bead> — what holds the bead, one "<held>\t<id>\t<title>" row
-# each, in the order of the reasons `gctk pr-status derive --json` gives: the
+# each, in the order of the reasons `gctk pr status --json` gives: the
 # definition the PR's held: labels and the board's row read, so what engage
 # offers cannot differ from what they say. <held> is the held: value the row
 # stands for. <id> is the bead to engage, an open human gate or a bead a person
@@ -3380,14 +3412,8 @@ engage_valid_model() {
 # verdict hold it. Returns 1 when gctk is not there or did not answer, which says
 # nothing about what holds the bead.
 holding_rows() {
-    _hr_bin="${GCTK_BIN:-}"
-    if [ -z "$_hr_bin" ]; then
-        _hr_root=$(city_root)
-        [ -n "$_hr_root" ] || return 1
-        _hr_bin="$_hr_root/.gc/services/gctk/bin/gctk"
-    fi
-    [ -x "$_hr_bin" ] || return 1
-    _hr_json=$("$_hr_bin" pr-status derive --anchor "$1" --json 2>/dev/null) || return 1
+    _hr_bin=$(helm_gctk) || return 1
+    _hr_json=$("$_hr_bin" pr status "$1" --json 2>/dev/null) || return 1
     printf '%s' "$_hr_json" | jq -r '.reasons[] | [.held, (.id // ""), (.title // "")] | @tsv' 2>/dev/null
 }
 
@@ -3396,7 +3422,7 @@ holding_rows() {
 # can still be started. It writes to stdout, as engage_say_holds does, because
 # stdout is all the board's route returns from an engage that exits 0.
 engage_warn_holds_unread() {
-    echo "$PROG: engage: could not read what holds $1 ('gctk pr-status derive' did not answer), so nothing that holds it is offered."
+    echo "$PROG: engage: could not read what holds $1 ('gctk pr status' did not answer), so nothing that holds it is offered."
 }
 
 # engage_say_holds <bead> — name each thing that holds the bead, and how to
@@ -4021,12 +4047,12 @@ engage_new_subject_cleanup() {
 # conversation picked at the prompt) is a distinct dialogue, so it files a
 # fresh conversation even when the bead has one. A sitting is a manual
 # converse-<model> session named for its conversation (origin=manual, which the
-# pool execution backstop never governs). The session is spawned before the
-# bind, because its alias is the reservation: only one session that is not
-# closed can hold the alias. Then the conversation is bound to the session's
-# alias with a write guarded on the holder engage read, so of two engages only
-# one bind lands, and the session's own `gc hook --claim` adopts it. dismiss
-# ends the sitting.
+# work ladder that paces pool seats never governs). The session is spawned
+# before the bind, because its alias is the reservation: only one session that
+# is not closed can hold the alias. Then the conversation is bound to the
+# session's alias with a write guarded on the holder engage read, so of two
+# engages only one bind lands, and the session's own `gc hook --claim` adopts
+# it. dismiss ends the sitting.
 #
 # The argument is the bead the operator picked off the board. A conversation id
 # names its own conversation. A gate names the one bead still waiting on it, or,
@@ -4549,26 +4575,37 @@ cmd_engage() {
     # [detached] when the operator left it, and both exit 0, so the
     # conversation says which. A closed conversation is a sitting that ended,
     # and the tab prints how the conversation closed and the last hand-back the
-    # sitting recorded on it (cmd_handback). A conversation still open is a
-    # sitting still going, and the tab prints how to re-attach. A failed attach
-    # reads the same conversation first, because a sitting that ended before the
-    # tab reached it is reported, not offered for an attach.
+    # sitting recorded on it (cmd_handback). A conversation back in the
+    # operator's queue is a sitting cut short, which handed it back and drained,
+    # so the tab prints that hand-back and how to take the conversation up
+    # again: its session holds the conversation no more, and attaching to it
+    # would only wake it. A conversation its sitting still holds is a sitting
+    # still going, and the tab prints how to re-attach. A failed attach reads
+    # the same conversation first, because a sitting that ended before the tab
+    # reached it is reported, not offered for an attach.
+    engage_print_handback() {
+        _ph_at=$(printf '%s' "$1" | jq -r '(.metadata // {})["gc.handback_at"] // "" | tostring' 2>/dev/null || true)
+        # The text is the sitting's own, printed to the operator's terminal,
+        # so control bytes other than tab and newline are dropped.
+        _ph_text=$(printf '%s' "$1" | jq -r '(.metadata // {})["gc.handback"] // "" | tostring
+            | gsub("[\\x00-\\x08\\x0b-\\x1f\\x7f]"; "")' 2>/dev/null || true)
+        if [ -n "$_ph_text" ]; then
+            printf 'Its last hand-back%s:\n\n%s\n' "${_ph_at:+, recorded $_ph_at}" "$_ph_text"
+        else
+            printf 'It recorded no hand-back.\n'
+        fi
+    }
     engage_after_attach() {
         _aa_row=$(row_now "$CONV")
         _aa_status=$(printf '%s' "$_aa_row" | jq -r '.status // ""' 2>/dev/null || true)
+        _aa_holder=$(printf '%s' "$_aa_row" | jq -r '.assignee // ""' 2>/dev/null || true)
         if [ "$_aa_status" = "closed" ]; then
             _aa_reason=$(printf '%s' "$_aa_row" | jq -r '.close_reason // "" | tostring' 2>/dev/null || true)
-            _aa_at=$(printf '%s' "$_aa_row" | jq -r '(.metadata // {})["gc.handback_at"] // "" | tostring' 2>/dev/null || true)
-            # The text is the sitting's own, printed to the operator's terminal,
-            # so control bytes other than tab and newline are dropped.
-            _aa_text=$(printf '%s' "$_aa_row" | jq -r '(.metadata // {})["gc.handback"] // "" | tostring
-                | gsub("[\\x00-\\x08\\x0b-\\x1f\\x7f]"; "")' 2>/dev/null || true)
             printf '\nThe sitting on %s has ended: conversation %s closed%s.\n' "$bead" "$CONV" "${_aa_reason:+ ($_aa_reason)}"
-            if [ -n "$_aa_text" ]; then
-                printf 'Its last hand-back%s:\n\n%s\n' "${_aa_at:+, recorded $_aa_at}" "$_aa_text"
-            else
-                printf 'It recorded no hand-back.\n'
-            fi
+            engage_print_handback "$_aa_row"
+        elif [ "$_aa_status" = "open" ] && [ "$_aa_holder" = "human" ]; then
+            printf '\nThe sitting on %s has ended: conversation %s is back in your queue. Take it up again: %s engage %s\n' "$bead" "$CONV" "$PROG" "$bead"
+            engage_print_handback "$_aa_row"
         elif [ "$1" -ne 0 ]; then
             echo "$PROG: engage: could not attach to $sid — attach when ready: gc session attach $sid" >&2
         elif [ -z "$_aa_status" ]; then
@@ -4615,7 +4652,8 @@ cmd_engage() {
     # A session still in the list under this conversation's alias that does not
     # hold it keeps the alias, since only a closed session gives one up. A
     # sitting cut short leaves exactly that: its conversation back in the queue
-    # and its session waiting for converse-reap. So such a session is closed
+    # and its drained session open until the core reaper closes it a day after
+    # its stop. So such a session is closed
     # first and read back gone, and only then is the alias free for the new
     # sitting. A session spawned less than the bind wait ago may be a concurrent
     # engage about to bind the conversation, and one the operator is attached to
