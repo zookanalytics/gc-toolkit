@@ -48,15 +48,21 @@ and two posts of it must not leave the older reading standing.
   commit shows it, and the latest status in a context counts, with no
   compare-and-set, so the latest post wins ([Commit
   statuses](https://docs.github.com/en/rest/commits/statuses)). GitHub lists
-  the PRs associated with a commit
-  (`GET /repos/{owner}/{repo}/commits/{commit_sha}/pulls`,
-  [Commits](https://docs.github.com/en/rest/commits/commits)).
+  a repository's open PRs, each with its head commit
+  (`GET /repos/{owner}/{repo}/pulls?state=open`,
+  [Pulls](https://docs.github.com/en/rest/pulls/pulls)). Its list of the PRs
+  associated with a commit returns only the merged one for a commit on the
+  default branch (`GET /repos/{owner}/{repo}/commits/{commit_sha}/pulls`,
+  [Commits](https://docs.github.com/en/rest/commits/commits)), so it cannot
+  name every open PR at a head.
   Auto-merge merges once every requirement passes, and turns off only when
   someone without write access pushes or the base branch changes, so a review
   that arrives after it is on leaves it on ([Automatically merging a pull
   request](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/automatically-merging-a-pull-request)).
-  A review that requests changes holds the merge until its author approves
-  ([Available rules for rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets)).
+  A review that requests changes from an account with write access holds the
+  merge until its author approves or someone with write access dismisses it
+  ([Approving a pull request with required
+  reviews](https://docs.github.com/en/pull-requests/how-tos/review-pull-requests/approving-a-pull-request-with-required-reviews)).
 
 What unit 2 composes: GitHub's required status check and auto-merge, driven by
 the pack's one definition of what holds a PR (`prstatus`), which takes the
@@ -65,7 +71,8 @@ the one `gctk bead holds` answers from. The gap the primitives leave is the
 city's waits and its reading of the reviews and comments, which no rule reads.
 A commit status carries the waits and that reading. It passes last, once every other requirement is
 met and no feedback on the PR is newer than the anchor's watermarks, so a
-review that arrives after auto-merge is on is read before the merge. One status
+review the intake counts is read before the merge, even one that arrives after
+auto-merge is on. One status
 covers every open PR at its commit, and a `flock` per repository serializes the
 posts, because the latest post wins. Auto-merge makes the merge GitHub's once
 the status passes, and the projection keeps it on only while the city reads the
