@@ -308,13 +308,28 @@ type Blocker struct {
 	AwaitID   string `json:"await_id,omitempty"`
 	// CloseReason is the answer a closed gate was resolved with.
 	CloseReason string `json:"close_reason,omitempty"`
-	// Pending is the store's own answer for this wait of the bead that records
-	// it, read through gctk's waits package: true while the wait has not
-	// landed, false once it has, so a pinned blocker or one in another store
-	// holds nothing. Nil when the source has no answer for the bead, and the
-	// wait then holds while its own status is not closed ([Blocker.holds]).
-	Pending *bool `json:"pending,omitempty"`
+	// Wait is the store's own answer for this wait of the bead that records it,
+	// read through gctk's waits package. Whether the wait holds the bead is
+	// that answer alone: a pinned blocker the store counts as landed holds
+	// nothing, and a closed waits-for spawner it still counts holds.
+	Wait WaitAnswer `json:"wait,omitempty"`
 }
+
+// WaitAnswer is what the store's own answer says of one wait. Its zero value
+// is unread: the source has no answer for the bead that records the wait,
+// because its read failed or did not answer that bead, and the board counts
+// such a wait as one it could not read rather than judging it by the far
+// bead's own status.
+type WaitAnswer string
+
+const (
+	// WaitUnread is a wait the source has no answer for.
+	WaitUnread WaitAnswer = ""
+	// WaitPending is a wait the store says has not landed, which holds the bead.
+	WaitPending WaitAnswer = "pending"
+	// WaitLanded is a wait the store says has landed, which holds nothing.
+	WaitLanded WaitAnswer = "landed"
+)
 
 // Tile is one rendered row of the board — the additive contract mirrored by the
 // frontend and emitted verbatim by `helm-svc board --json`.

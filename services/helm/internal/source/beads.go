@@ -1457,15 +1457,15 @@ func (s *BeadsSource) startWaits(ctx context.Context, sp rigSpan, anchors []boar
 }
 
 // landWaits fills each gathered anchor's landed waits ([board.Anchor.WaitingOnClosed])
-// and each hydrated blocker's answer ([board.Blocker.Pending]), the anchor's
-// and its children's, from its rig's read of the store's own answer, once each
+// and each hydrated blocker's answer ([board.Blocker.Wait]), the anchor's and
+// its children's, from its rig's read of the store's own answer, once each
 // read is done. A recorded wait has landed when the answer does not list it
 // among the bead's own pending waits, so a pinned blocker or one in another
 // store has landed, as the store counts it, and a pending wait the edge read
 // did not hydrate is still recorded. An anchor the read did not answer, in a
 // rig whose read failed or not, reads its waits as unknown and none as landed,
-// the quiet direction, and a blocker of a bead it did not answer carries no
-// answer.
+// the quiet direction, and every blocker of a bead it did not answer stays
+// unread ([board.WaitUnread]).
 func landWaits(g *gatherState, reads []*waitsRead) {
 	for _, rd := range reads {
 		<-rd.done
@@ -1508,8 +1508,10 @@ func landWaits(g *gatherState, reads []*waitsRead) {
 // markPending sets each blocker's answer from the bead's own pending waits.
 func markPending(blockers []board.Blocker, own []string) {
 	for i := range blockers {
-		p := slices.Contains(own, blockers[i].ID)
-		blockers[i].Pending = &p
+		blockers[i].Wait = board.WaitLanded
+		if slices.Contains(own, blockers[i].ID) {
+			blockers[i].Wait = board.WaitPending
+		}
 	}
 }
 

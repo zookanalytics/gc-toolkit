@@ -977,9 +977,12 @@ func TestLandedWaitsAreTheStoresAnswer(t *testing.T) {
 			t.Errorf("%s/%s: waiting_on_closed=%v, want %v — %s", c.id, c.kind, a.WaitingOnClosed, c.landed, c.why)
 		}
 		for _, b := range a.Blockers {
-			want := !slices.Contains(c.landed, b.ID)
-			if b.Pending == nil || *b.Pending != want {
-				t.Errorf("%s/%s: blocker %s carries pending=%v, want %v — the state reads each blocker by the store's answer", c.id, c.kind, b.ID, b.Pending, want)
+			want := board.WaitPending
+			if slices.Contains(c.landed, b.ID) {
+				want = board.WaitLanded
+			}
+			if b.Wait != want {
+				t.Errorf("%s/%s: blocker %s carries wait=%q, want %q — the state reads each blocker by the store's answer", c.id, c.kind, b.ID, b.Wait, want)
 			}
 		}
 	}
@@ -988,7 +991,7 @@ func TestLandedWaitsAreTheStoresAnswer(t *testing.T) {
 // TestChildBlockersCarryTheStoresAnswer pins the same answer on the children a
 // roll-up counts by state: each blocker a child's edge read hydrated carries
 // whether the store still counts it, from the rig's one read, and a child the
-// read did not answer carries none.
+// read did not answer leaves its blockers unread.
 func TestChildBlockersCarryTheStoresAnswer(t *testing.T) {
 	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
 	st := populatedStore()
@@ -1029,9 +1032,12 @@ func TestChildBlockersCarryTheStoresAnswer(t *testing.T) {
 			}
 			for _, b := range c.Blockers {
 				seen++
-				want := b.ID == "tk-aw"
-				if b.Pending == nil || *b.Pending != want {
-					t.Errorf("child tk-a of %s: blocker %s carries pending=%v, want %v", a.ID, b.ID, b.Pending, want)
+				want := board.WaitLanded
+				if b.ID == "tk-aw" {
+					want = board.WaitPending
+				}
+				if b.Wait != want {
+					t.Errorf("child tk-a of %s: blocker %s carries wait=%q, want %q", a.ID, b.ID, b.Wait, want)
 				}
 			}
 		}
@@ -1167,8 +1173,9 @@ func TestWaitsAreReadOncePerRigPerGather(t *testing.T) {
 
 // TestAFailedWaitsReadLeavesTheWaitsUnknown pins the quiet direction: a rig
 // whose read failed, or a bead the read did not answer, proves no wait landed,
-// so every recorded wait reads unknown and none closed, and a failed read is a
-// partial-gather note naming the rig.
+// so every recorded wait reads unknown and none closed, every blocker of an
+// anchor or a child it did not answer stays unread whatever its row reads, and
+// a failed read is a partial-gather note naming the rig.
 func TestAFailedWaitsReadLeavesTheWaitsUnknown(t *testing.T) {
 	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
 	for _, c := range []struct {
@@ -1184,13 +1191,35 @@ func TestAFailedWaitsReadLeavesTheWaitsUnknown(t *testing.T) {
 		}, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": populatedStore()}, withPendingReader(c.reader))
+			st := populatedStore()
+			// tk-a, an open child of the epic, waits on open work, on a pinned bead
+			// and on a closed one.
+			st.depsDown["tk-a"] = []*beads.IssueWithDependencyMetadata{
+				withDepType(child("tk-aw", "open", testNow, ""), "blocks"),
+				withDepType(child("tk-apin", "pinned", testNow, ""), "blocks"),
+				withDepType(child("tk-adone", "closed", testNow, ""), "blocks"),
+			}
+			src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": st}, withPendingReader(c.reader))
 			res, err := src.Gather(context.Background())
 			if err != nil {
 				t.Fatalf("Gather: %v", err)
 			}
-			seen := 0
+			seen, anchorBlockers, childBlockers := 0, 0, 0
 			for _, a := range res.Anchors {
+				for _, b := range a.Blockers {
+					anchorBlockers++
+					if b.Wait != board.WaitUnread {
+						t.Errorf("%s/%s: blocker %s (row %s) carries wait=%q; want it unread", a.ID, a.Kind, b.ID, b.Status, b.Wait)
+					}
+				}
+				for _, k := range a.Children {
+					for _, b := range k.Blockers {
+						childBlockers++
+						if b.Wait != board.WaitUnread {
+							t.Errorf("child %s of %s: blocker %s (row %s) carries wait=%q; want it unread", k.ID, a.ID, b.ID, b.Status, b.Wait)
+						}
+					}
+				}
 				if len(a.WaitingOn) == 0 {
 					continue
 				}
@@ -1199,8 +1228,8 @@ func TestAFailedWaitsReadLeavesTheWaitsUnknown(t *testing.T) {
 					t.Errorf("%s/%s: unknown=%v closed=%v; want unknown and nothing landed", a.ID, a.Kind, a.WaitingUnknown, a.WaitingOnClosed)
 				}
 			}
-			if seen == 0 {
-				t.Fatal("no anchor records a wait, so the case proves nothing")
+			if seen == 0 || anchorBlockers == 0 || childBlockers == 0 {
+				t.Fatalf("anchors recording a wait %d, anchor blockers %d, child blockers %d: a zero proves nothing", seen, anchorBlockers, childBlockers)
 			}
 			noted := slices.ContainsFunc(res.PartialErrors, func(e string) bool { return strings.HasPrefix(e, "waits@gc-toolkit: ") })
 			if noted != c.note || (c.note && !res.Partial) {
