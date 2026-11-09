@@ -57,8 +57,8 @@ its rig's store, so pass `--rig <rig>` on every dispatch create and on every
 link between dispatch beads, the `<rig>` you sling to. A PR comes from one
 bead, which owns it and its rework until it merges. Work the operator reviews
 as one PR is an integration effort: follow the `work` skill's
-`integration-effort.md`, which also covers a hand-off to you to bring an
-effort's branch current.
+`integration-effort.md`, which also covers the hand-off that has the rig's
+refinery bring an effort's branch current.
 
 Dispatch is file-and-forget, and beads wait on each other by edges, never by
 a watcher. Watch only while the operator waits in this conversation on the

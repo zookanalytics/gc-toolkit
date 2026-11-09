@@ -49,7 +49,10 @@
 # non-zero, and dispatches only after that. Its block for a bead that joins later makes the undispatched
 # summary task wait on the bead, never the reverse, and refuses a summary task
 # that has been dispatched, or whose beads have all closed so that a pass may
-# already be slinging it.
+# already be slinging it. Its hand-off that brings the effort's branch current
+# goes to the rig's refinery with its notice, waits on the outside work, names
+# the landing bead, and carries no branch, so the refinery's patrol never takes
+# it to land.
 #
 # EXECUTES the real snippets extracted verbatim between the formula markers and
 # from the recipe's fenced blocks, so the test cannot drift from the shipped
@@ -951,6 +954,48 @@ for sh in "${SHELLS[@]}"; do
   eq "$RC" "0" "[$sh] late join: a summary task its own waits-for edge holds, unjudged, takes the joining bead's wait"
   eq "$(waits_on dz-sum work-2)" "1" "[$sh] late join: ...and waits on the joining bead"
   unset SUMMARY WORK
+done
+
+# --- the hand-off that brings an effort's branch current -----------------------
+# The recipe's block, with the landing bead land-1 and the outside work out-1
+# filled in. The store holds the epic, the landing bead and the outside work,
+# and the create files the hand-off as ho-1.
+HANDOFF="$(fenced_block "$RECIPE_FILE" "LANDING=<the landing bead of the effort>")"
+[ -n "$HANDOFF" ] && ok "the work skill's hand-off block is found" || bad "the work skill's hand-off block is not found in $RECIPE_FILE"
+handoff_store() {
+  fixture '.[1:] = [] | . + [
+    {id: "land-1", title: "Rebuild the widget", issue_type: "task", status: "open", assignee: "rig/gc-toolkit.refinery", description: "",
+     metadata: {branch: "integration/land-1", target: "main"}, _deps: [{id: "ep-1", dependency_type: "parent-child"}]},
+    {id: "out-1", title: "the outside work", issue_type: "task", status: "open", assignee: "", description: "", metadata: {}, _deps: []}]'
+  export NEXT_ID=ho-1
+}
+run_handoff() {
+  { printf '%s\n' "$HANDOFF" | sed -e 's#<the landing bead of the effort>#land-1#g' -e 's#<the bead of the outside work>#out-1#g' | fill
+    printf 'printf "past\\n" > "%s"\n' "$TMP/past.flag"; } > "$TMP/block.sh"
+  run_file "$1"
+}
+
+for sh in "${SHELLS[@]}"; do
+  handoff_store; run_handoff "$sh"
+  eq "$RC" "0" "[$sh] hand-off: the block files the hand-off and hands it over"
+  eq "$(field ho-1 assignee)" "rig/gc-toolkit.refinery" "[$sh] hand-off: the rig's refinery owns it"
+  logged "deferred-dispatch notify ho-1 --agent rig/gc-toolkit.refinery" && before "update ho-1 --assignee" "deferred-dispatch notify ho-1" \
+    && ok "[$sh] hand-off: …with the notice the assignment owes, after it" || bad "[$sh] hand-off: no notice to the refinery after the assignment"
+  eq "$(waits_on ho-1 out-1)" "1" "[$sh] hand-off: it waits on the outside work"
+  eq "$(meta ho-1 branch) $(meta ho-1 target)" "<absent> <absent>" "[$sh] hand-off: it carries no branch and no target, so the refinery's patrol never takes it to land"
+  eq "$(waits_on land-1 ho-1) $(parents ho-1)" "0 ep-1" "[$sh] hand-off: it sits under the effort's epic, and the landing bead does not wait on it"
+  says ho-1 "land-1, the effort's landing bead" && ok "[$sh] hand-off: it names the landing bead, whose branch and target the refinery reads" \
+    || bad "[$sh] hand-off: its description does not name the landing bead"
+
+  for fail in "CREATE_FAIL=ho-1" "UPDATE_FAIL=ho-1:assignee" "NOTIFY_RC=1"; do
+    handoff_store; export "${fail?}"
+    run_handoff "$sh"
+    stopped && ok "[$sh] hand-off: a refused write ($fail) stops the block" || bad "[$sh] hand-off: went ahead past a refused write ($fail) (rc=$RC)"
+  done
+  handoff_store; export UPDATE_FAIL=ho-1:assignee
+  run_handoff "$sh"
+  not_logged "deferred-dispatch notify" && ok "[$sh] hand-off: an assignment the store refuses sends no notice" \
+    || bad "[$sh] hand-off: a notice went out for a hand-off nobody owns"
 done
 
 echo

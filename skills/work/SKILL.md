@@ -214,10 +214,10 @@ Stand one up when several beads must reach the default branch as one PR the
 operator reviews. A lone bead needs none: slung to a pool, it opens its own PR.
 
 The procedure is the recipe in `integration-effort.md`, beside this file, which
-the mechanik runs. It also covers adding a bead to an existing effort and
-bringing the effort's branch current. The recipe pushes the effort's branch,
-and a converse sitting never pushes, so a sitting does not run it. A sitting
-sends the effort this way instead:
+the mechanik runs. It also covers adding a bead to an existing effort, and the
+hand-off that has the rig's refinery bring the effort's branch current. The
+recipe pushes the effort's branch, and a converse sitting never pushes, so a
+sitting does not run it. A sitting sends the effort this way instead:
 
 - When the subject's recommendation is `mol-design-convoy`, the sign-off's
   `--accept` takes it (Take a recommendation, below), and that formula's run
