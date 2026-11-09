@@ -35,7 +35,8 @@ the pass retires the arm when it slings, so the subject reads unarmed again.
 id and type, its open work blockers, its closed work blockers, its open gate
 blockers, the open conversations and input convoys that track it, and the start
 of its headline.
-Run it with `--db <rig path>/.beads` for each rig the rig map lists, the city's
+Its one argument is the store, `<rig path>/.beads`, which it reads through
+`gc bd --db`. Run it once for each rig the rig map lists, the city's
 own row included, since `--db` reaches every store and a suspended rig's store
 reads too.
 

@@ -48,9 +48,10 @@
 #             brief or an arm that does not land stops the sign-off with every
 #             gate open, and a wait that does not read stops it before any
 #             write; no closer is armed for a wait on a gate or in another
-#             store, or for a subject that something else sends on (an arm of
-#             another dispatch, an assignee, an epic, an open PR, the
-#             recommendation the ruling takes), where a brief is refused; a
+#             store, for a subject that something else sends on (an arm of
+#             another dispatch, a route, an assignee, an epic, an open PR, the
+#             recommendation the ruling takes), or for one at a status other
+#             than open, which arm refuses, where a brief is refused; a
 #             subject in the city's own store is refused, since no pool runs
 #             its closer
 #   (OPEN-PR, REWORK*, RETIRE*) a ruling on an open PR answers --rework,
@@ -889,6 +890,14 @@ eq "$RC/$(meta tk-sub gc.dispatch_when_ready)" "0/" "(CLOSER-EPIC) an epic subje
 closer_case; setf tk-sub assignee gc-toolkit.mechanik
 run_signoff --conversation tk-conv --outcome "x" "${SENT[@]}"
 eq "$RC/$(meta tk-sub gc.dispatch_when_ready)" "0/" "(CLOSER-ASSIGNED) an assigned subject, whose hook offers it, gets no closer"
+closer_case; setm tk-sub gc.routed_to rig-a/gc-toolkit.polecat
+run_signoff --conversation tk-conv --outcome "x" "${SENT[@]}"
+eq "$RC/$(meta tk-sub gc.dispatch_when_ready)" "0/" "(CLOSER-ROUTED) a routed subject, whose pool claims it and which arm refuses, gets no closer"
+has "$OUT" "no validating closer is armed for tk-sub: it is routed to rig-a/gc-toolkit.polecat" "(CLOSER-ROUTED) …saying why"
+closer_case; setf tk-sub status deferred
+run_signoff --conversation tk-conv --outcome "x" "${SENT[@]}"
+eq "$RC/$(meta tk-sub gc.dispatch_when_ready)" "0/" "(CLOSER-STATUS) a subject at a status other than open, which arm refuses, gets no closer"
+has "$OUT" "no validating closer is armed for tk-sub: it is deferred" "(CLOSER-STATUS) …saying why"
 open_pr; bead tk-work
 run_signoff --conversation tk-conv --outcome "x" --ruled yes --ruling "land it once the fix is in" --waiting-on tk-work --no-rework
 eq "$RC/$(meta tk-anc gc.dispatch_when_ready)" "0/" "(CLOSER-PR) an open PR, which the refinery closes on its merge, gets no closer"

@@ -355,7 +355,10 @@ recorded closes, the deferred-dispatch pass slings the closer the sign-off
 armed. It checks the close brief against what landed, then closes the subject
 or puts it to the operator. A subject the sign-off armed no closer for,
 because something else sends it on once its wait clears, such as its own arm,
-an assignee or the refinery's merge, goes there, and the sign-off says so.
+an assignee or the refinery's merge, goes there, and the sign-off says so. One
+that nothing sends on, such as a subject that waits only on a person's gate,
+returns through the liveness sweep (`assets/scripts/liveness-sweep.sh`) as an
+unnamed wait once every wait it records has closed.
 
 Never close a conversation by hand, and never end a held sitting without
 its sign-off: a thread that stops after a decision with no wrap-up reads as a
