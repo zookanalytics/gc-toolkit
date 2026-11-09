@@ -318,19 +318,22 @@ siblings() {
     || return 2
 }
 
-# waits_on_open <blocker-id>... -> 0 while one of the blockers is still open, 1
-# once every one of them reads closed, and 1 when there are none. A blocker
-# counts as closed only when a read shows it closed. One whose read fails, or
-# that no store answers for, is still waited on, because reading it as closed
-# would file a second bead on the strength of a failed read. `gc bd show`
-# resolves an id by its prefix in whichever rig's store holds it, so a blocker
-# filed in another rig is read where it lives.
-waits_on_open() {
-  local b
-  for b in "$@"; do
-    [ "$(bd_json show "$b" | jq -r '.[0].status // empty' 2>/dev/null)" = "closed" ] || return 0
-  done
-  return 1
+# What a bead still waits on is its own pending waits, as `gctk bead holds`
+# answers them in the store GC_RIG selects, from the binary the city builds.
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+
+# still_waits <bead> -> 0 while a wait of the bead's own has not landed, 1 once
+# none is pending. A read that does not answer is still waited on, because
+# reading it as nothing would file a second bead on the strength of a failed
+# read. An edge into another store holds nothing, as the store judges it.
+still_waits() {
+  local n
+  [ -x "$GCTK" ] || return 0
+  n=$("$GCTK" bead holds "$1" 2>/dev/null | scrub \
+    | jq -er 'if .error == null and (.pending | type) == "array" then (.pending | length) else error("no answer") end' 2>/dev/null) || return 0
+  [ "$n" -gt 0 ]
 }
 
 SCOPE_LABEL="${SCOPE:-unscoped}"
@@ -388,8 +391,7 @@ if [ -z "$EXISTING" ]; then
   fi
   while IFS=$'\t' read -r id on; do
     [ -n "$id" ] || continue
-    # shellcheck disable=SC2086  # $on is space-separated bead ids, one field each
-    if waits_on_open $on; then EXISTING="$id"; break; fi
+    if still_waits "$id"; then EXISTING="$id"; break; fi
     [ -n "$HELD" ] || { HELD="$id"; HELD_ON="$on"; }
   done <<< "$HELD_ROWS"
 fi
