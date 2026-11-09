@@ -169,7 +169,8 @@ trimmed and in any case, as Gas City's own `HasDispatchHold` does. Its readers:
   reaching it only when no hold holds it, because Gas City serves a held bead
   to no seat;
 - the proactive scan files no first reaction for a held bead, because its next
-  move is the sitting's;
+  move is the sitting's, and its sling refuses one held after the scan read it
+  or named to the sling directly;
 - the deferred-dispatch pass slings no armed bead while it is held, because a
   sling reads no hold, and `deferred-dispatch.sh list` names the label that
   holds the arm, so `doctor/check-armed-dispatch-owed` owes that arm no

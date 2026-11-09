@@ -22,16 +22,16 @@
 # react only to input that has none, and the doctor checks
 # check-blocked-work-armed, which flags blocked work that has none, and
 # check-step-terminal, which counts a step as offerable only when it has one.
-# The readers that leave a held bead alone source it too: the proactive scan,
-# which files no first reaction for one; check-blocked-work-armed, which owes one
-# no arm; deferred-dispatch.sh's reconcile, which slings no armed bead while it
-# is held, because a sling reads no hold, and check-armed-dispatch-owed, which
-# owes such an arm no dispatch for the same reason; check-po-queue-only, which
-# reads a bead routed or assigned to the po as reaching it only when no hold
-# holds it, since a held bead reaches no seat; and the liveness classifier
-# (liveness-classify.sh, which liveness-sweep.sh and its precheck compose) and
-# the re-check a liveness gate's message carries (liveness-recheck.sh), which
-# name the hold as a wait.
+# The readers that leave a held bead alone source it too: the proactive scan and
+# sling, which file no first reaction for one; check-blocked-work-armed, which
+# owes one no arm; deferred-dispatch.sh's reconcile, which slings no armed bead
+# while it is held, because a sling reads no hold, and
+# check-armed-dispatch-owed, which owes such an arm no dispatch for the same
+# reason; check-po-queue-only, which reads a bead routed or assigned to the po
+# as reaching it only when no hold holds it, since a held bead reaches no seat;
+# and the liveness classifier (liveness-classify.sh, which liveness-sweep.sh and
+# its precheck compose) and the re-check a liveness gate's message carries
+# (liveness-recheck.sh), which name the hold as a wait.
 # gc-helm.sh sources it to place a held bead: place reports a bead with no hold
 # that a route or an arm already dispatches as placed, and refuses one that
 # another hold also holds. place, and takeaway and accept when they send a bead

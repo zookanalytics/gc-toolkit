@@ -48,8 +48,9 @@ FIXTURE="${GC_PROACTIVE_FIXTURE:-}"
 REACTION_KIND="first-reaction"
 # Set by cmd_sling when it skips a bead as a no-op, else empty: "reacted" when
 # a reaction is already open for the subject or a live owner owns its reaction,
-# "dispatch-path" when the subject already has a route or an arm, or an open
-# human gate blocks it, "live-workflow" when a live workflow already drives it.
+# "dispatch-path" when the subject already has a route or an arm, a dispatch
+# hold holds it, or an open human gate blocks it, "live-workflow" when a live
+# workflow already drives it.
 # cmd_scan's --sling loop reads it in-process to keep a skip from spending the
 # cap; the `sling` CLI verb in main() translates it to RC_ALREADY_REACTED,
 # RC_DISPATCH_PATH or RC_LIVE_WORKFLOW so a cross-process caller (gc-helm
@@ -293,6 +294,12 @@ reaction_absent_guard() {
 # pool queue serves, or a deferred-dispatch arm. scan_precision_filter keeps
 # such a bead out of every sweep, and this guard holds the same line for a bead
 # named to the sling directly, the way gc-helm react and operator-intake name one.
+# A held bead (has_dispatch_hold) is refused the same way: hold:mayor keeps it
+# for the operator's placement sitting and hold:external for an actor outside
+# this store, so its next move is not a reaction's. The scan drops it too, and
+# this guard's own read refuses one held since the scan's read and one named to
+# the sling directly. A reaction would only triage it again, and its close exit
+# could hand it to a validating closer before the sitting reads it.
 # A bead an open human gate blocks is refused the same way: the person's answer
 # decides what happens to it, as a converse sitting's ruling does to the bead
 # it holds, and `bd ready` keeps every such bead out of the sweeps.
@@ -304,8 +311,9 @@ reaction_absent_guard() {
 # is no safer: the deferred-dispatch reconcile pass slings the bead once nothing
 # holds it and reads no reaction, so the bead can be dispatched twice.
 #
-# Returns 0 when the bead has no dispatch path and no open human gate blocks it,
-# 1 when it has one or a gate blocks it, and 2 when its row cannot be read. A
+# Returns 0 when the bead has no dispatch path or hold and no open human gate
+# blocks it, 1 when it has one or a gate blocks it, and 2 when its row cannot be
+# read. A
 # failed read is not proof that it has none, so the caller fails closed on 2.
 # The live read takes only one JSON array holding one row as an answer, so an
 # empty answer fails it even when gc exits 0, and two answers fail it too.
@@ -314,7 +322,7 @@ reaction_absent_guard() {
 # filed for it. The read comes from the fixture under test (beads.json), live
 # otherwise.
 sling_dispatch_path_guard() {
-    local bead="$1" row paths gates
+    local bead="$1" row paths holds gates
     local unreadable="$PROG: sling: cannot tell whether $bead already has a dispatch path (its row could not be read) — not filing a first reaction. A reaction to a routed or armed bead races the dispatch already decided for it; retry once the store answers."
     if [ -n "$FIXTURE" ]; then
         [ -f "$FIXTURE/beads.json" ] || return 0
@@ -337,6 +345,15 @@ sling_dispatch_path_guard() {
         || { log "$unreadable"; return 2; }
     if [ -n "$paths" ]; then
         log "$PROG: sling: $bead already has a dispatch path ($paths) — not filing a first reaction. Whoever routed or armed it already decided its dispatch, and a reaction would race the pool or the arm that serves it. File a conversation directly (gc-helm open), or react once that route or arm is cleared."
+        return 1
+    fi
+    # The labels named are the bead's own spellings of each hold.
+    holds="$(printf '%s' "$row" | jq -r "$DISPATCH_PATH_JQ"'
+        if has_dispatch_hold then [ dispatch_hold_labels[] as $h | dispatch_hold_spellings($h)[] ] | join(", ")
+        else "" end' 2>/dev/null)" \
+        || { log "$unreadable"; return 2; }
+    if [ -n "$holds" ]; then
+        log "$PROG: sling: $bead is held ($holds) — not filing a first reaction. A hold says no worker is its next move: hold:mayor keeps it for the operator's placement sitting, and hold:external for an actor outside this store, and a reaction would race that decision. File a conversation directly (gc-helm open), or react once the hold is lifted."
         return 1
     fi
     # `bd show` gives each blocker's own row beside the edge, so the shared rule
@@ -440,8 +457,8 @@ Usage: $PROG demand [<pool-target>]   Pool work_query: emit the routed
                                       is already open or a live owner owns it,
                                       $RC_LIVE_WORKFLOW already driven by a live
                                       workflow, $RC_DISPATCH_PATH already routed
-                                      or armed, or waiting on a person's answer
-                                      (each a no-op, nothing filed), 1
+                                      or armed, held, or waiting on a person's
+                                      answer (each a no-op, nothing filed), 1
                                       error, including a <bead> its own store
                                       does not prove present.
        $PROG deliverable [<pool-target>] [<bead>]
@@ -723,8 +740,8 @@ cmd_demand() {
 # ---------------------------------------------------------------------------
 # scan — the PROCESS-SCAN trigger. Find raw INPUT beads "able to be updated":
 # open, ready, unassigned, an allowlisted issue_type (GC_PROACTIVE_TYPES),
-# top-level, and not already routed or armed / machinery (so we never react to
-# work-in-flight or to a reaction bead). Unions the explicit per-bead opt-in
+# top-level, and not already routed, armed or held / machinery (so we never
+# react to work-in-flight or to a reaction bead). Unions the explicit per-bead opt-in
 # (gc.proactive=1) with the broader movable-forward scan, deduped and
 # precision-filtered (see scan_candidates). Read-only unless --sling. The
 # per-subject "a reaction is already open" dedup is at sling time, not here (see
@@ -796,7 +813,9 @@ cmd_demand() {
 #     feedback distiller file their beads held and unrouted, with no takeaway,
 #     so no other clause drops them. A reaction would only triage the bead again,
 #     and its close exit could close a proposal before the operator reads it.
-#     Once a write lifts the hold, the other clauses judge the bead.
+#     sling_dispatch_path_guard refuses a held bead too, so a bead held after
+#     this read still gets no reaction. Once a write lifts the hold, the other
+#     clauses judge the bead.
 scan_precision_filter() {
     local types_json markers_json
     types_json="$(printf '%s' "$PROACTIVE_TYPES" | jq -R 'split(",") | map(select(length > 0))')"
@@ -990,8 +1009,8 @@ cmd_scan() {
         # Only a genuine dispatch spends the cap. cmd_sling skips a subject that
         # already has an open reaction as a no-op and flags it in SLING_SKIPPED —
         # a reaction filed after the scan selected it, or one still running. It
-        # skips a bead routed or armed since the scan's read, and a bead a live
-        # workflow drives, the same way. Counting any of these skips is the
+        # skips a bead routed, armed or held since the scan's read, and a bead a
+        # live workflow drives, the same way. Counting any of these skips is the
         # cap-starvation bug: subjects that need no new reaction would spend the
         # whole cap every sweep while no reaction is filed.
         if cmd_sling "$id"; then
@@ -1005,7 +1024,7 @@ cmd_scan() {
     done
     local note="" uncounted=""
     if [ "$reacted" -gt 0 ]; then uncounted="$reacted already reacting"; fi
-    if [ "$routed" -gt 0 ]; then uncounted="${uncounted:+$uncounted, }$routed already routed or armed"; fi
+    if [ "$routed" -gt 0 ]; then uncounted="${uncounted:+$uncounted, }$routed already routed or armed, held, or waiting on a person"; fi
     if [ "$driven" -gt 0 ]; then uncounted="${uncounted:+$uncounted, }$driven driven by a live workflow"; fi
     if [ -n "$uncounted" ]; then note=" ($uncounted, not counted)"; fi
     if [ "$skipped" -gt 0 ]; then

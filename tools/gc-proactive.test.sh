@@ -42,8 +42,9 @@
 #   (PATH-ORDER) a routed bead with an open reaction reports the reaction (exit 3)
 #   (PATH-SWEEP) a sweep skips a bead routed after its read without spending
 #                a cap slot
-#   (PATH-READS) on the live read, a route refuses, and any failed read, bd's
-#                not-found and an empty answer included, fails the sling closed
+#   (PATH-READS) on the live read, a route, an open human gate and a hold each
+#                refuse, and any failed read, bd's not-found and an empty answer
+#                included, fails the sling closed
 # A task-typed molecule step (gc.step_ref) has no parent-child edge, so its step
 # key is all that sets it apart from raw input:
 #   (STEP-DROP)  scan_precision_filter drops a step bead, a control step included
@@ -57,6 +58,11 @@
 #                placement marker, stay candidates
 #   (HOLD-SWEEP) a scan --sling sweep reacts to raw input and never to a held
 #                bead
+#   (HOLD-SKIP)  sling refuses a held bead named to it directly, its label in
+#                any case (exit RC_DISPATCH_PATH), and the retired placement
+#                marker still proceeds
+#   (HOLD-LATE)  a sweep skips a bead held since its read without spending a
+#                cap slot
 # A failed read is not an empty ready set, and a page the filter cannot build is
 # not an empty page, so the scan fails on either rather than report no candidates:
 #   (READ-FAILCLOSED) a gc bd ready read that fails, in each shape a failed read
@@ -318,7 +324,7 @@ echo "# a sweep skips a bead routed since its read without spending a cap slot"
 OUT="$(GC_PROACTIVE_SLING_CAP=1 bash "$SCRIPT" scan --sling 2>&1)"
 hasnt "$OUT" "tracking tk-late-routed" "(PATH-SWEEP) the late-routed bead is never reacted to"
 has "$OUT" "would file a reaction bead tracking tk-raw" "(PATH-SWEEP) …the cap's one slot goes to the next candidate"
-has "$OUT" "1 already routed or armed, not counted" "(PATH-SWEEP) …and the sweep names the uncounted skip"
+has "$OUT" "1 already routed or armed, held, or waiting on a person, not counted" "(PATH-SWEEP) …and the sweep names the uncounted skip"
 
 # --- a molecule step is not a scan candidate --------------------------------
 # Most graph.v2 steps are issue_type task, and no graph.v2 step has a
@@ -408,6 +414,47 @@ eq "$RC" 0 "(HOLD-SWEEP) the sweep exits 0"
 has "$OUT" "would file a reaction bead tracking tk-raw" "(HOLD-SWEEP) the sweep files a first reaction at the raw input"
 hasnt "$OUT" "tk-held-bug" "(HOLD-SWEEP) …and none at the witness's held bug"
 hasnt "$OUT" "tk-held-proposal" "(HOLD-SWEEP) …nor at the distiller's held proposal"
+
+# gc-helm react and operator-intake name a bead to the sling directly, so the
+# sling's own read of the store refuses a held one. The store here carries each
+# bead's labels, as `bd show` gives them.
+jq 'map({key: .id, value: {metadata: .metadata, labels: (.labels // [])}}) | from_entries' "$TMP/scan.json" > "$TMP/beads.json"
+
+echo "# sling refuses a held bead as a no-op, naming the hold"
+for b in tk-held-bug:hold:mayor tk-held-proposal:hold:mayor tk-held-external:Hold:External; do
+    id="${b%%:*}" label="${b#*:}"
+    set +e
+    OUT="$(bash "$SCRIPT" sling "$id" 2>&1)"; RC=$?
+    set -e
+    eq "$RC" 5 "(HOLD-SKIP) sling of $id exits RC_DISPATCH_PATH (5)"
+    has "$OUT" "$id is held ($label)" "(HOLD-SKIP) …naming the label as $id spells it"
+    hasnt "$OUT" "would file a reaction bead" "(HOLD-SKIP) …nothing filed for $id"
+done
+set +e
+OUT="$(bash "$SCRIPT" sling tk-old-marker 2>&1)"; RC=$?
+set -e
+eq "$RC" 0 "(HOLD-SKIP) sling of a bead carrying only the retired placement marker exits 0"
+has "$OUT" "would file a reaction bead tracking tk-old-marker" "(HOLD-SKIP) …and files a reaction"
+
+# Two candidates, the late-held one oldest so it ranks first: with a cap of one,
+# the slot shows whether its skip was counted. The scan row carries no label,
+# which is the view a sweep has when the hold lands after the scan's read. The
+# guard's read at sling time finds it.
+cat > "$TMP/scan.json" <<'JSON'
+[
+  {"id":"tk-late-held", "issue_type":"task", "description":"held after the scan read", "title":"late", "created_at":"2026-01-01T00:00:00Z", "metadata":{}},
+  {"id":"tk-raw",       "issue_type":"task", "description":"a raw input bead",        "title":"raw",  "created_at":"2026-01-02T00:00:00Z", "metadata":{}}
+]
+JSON
+cat > "$TMP/beads.json" <<'JSON'
+{"tk-late-held": {"metadata":{}, "labels":["hold:mayor"]}, "tk-raw": {"metadata":{}}}
+JSON
+echo "# a sweep skips a bead held since its read without spending a cap slot"
+OUT="$(GC_PROACTIVE_SLING_CAP=1 bash "$SCRIPT" scan --sling 2>&1)"
+hasnt "$OUT" "tracking tk-late-held" "(HOLD-LATE) the late-held bead is never reacted to"
+has "$OUT" "tk-late-held is held (hold:mayor)" "(HOLD-LATE) …the sling's read names its hold"
+has "$OUT" "would file a reaction bead tracking tk-raw" "(HOLD-LATE) …the cap's one slot goes to the next candidate"
+has "$OUT" "1 already routed or armed, held, or waiting on a person, not counted" "(HOLD-LATE) …and the sweep names the uncounted skip"
 
 # --- fail closed with no rig context --------------------------------------
 # resolve_pool_target dies when GC_RIG is unset, so a sling has no pool to route
@@ -1113,6 +1160,8 @@ hasnt "$OUT" "gc bd create" "(SUBJECT-VANISHED) …and files no reaction"
 #                   no proof the bead has no path
 #   tk-path-twice   two answers to the one read, the second routed: neither is
 #                   the bead's one row
+#   tk-path-gated   an open human gate blocks it
+#   tk-path-held    held, under an upper-case spelling of hold:mayor
 # Each one's tracks-edge reads answer empty, so no guard before or after the
 # dispatch-path guard refuses it.
 SHOW="$TMP/stub-show"
@@ -1128,6 +1177,8 @@ case "\$*" in
   "bd show tk-path-empty --json") exit 0 ;;
   "bd show tk-path-gated --json")
       printf '[{"id":"tk-path-gated","metadata":{},"dependencies":[{"id":"tk-gate-live","dependency_type":"blocks","issue_type":"gate","await_type":"human","status":"open"}]}]' ;;
+  "bd show tk-path-held --json")
+      printf '[{"id":"tk-path-held","metadata":{},"labels":["learning","HOLD:MAYOR"]}]' ;;
   "bd show tk-path-twice --json")
       printf '[{"id":"tk-path-twice","metadata":{}}]\n[{"id":"tk-path-twice","metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}}]' ;;
   "bd dep list tk-path-"*" --direction up -t tracks --json") printf '[]' ;;
@@ -1150,6 +1201,12 @@ set -e
 eq "$RC" 5 "(PATH-READS) the live path refuses a bead an open human gate blocks (exit 5)"
 has "$OUT" "waits on a person's answer (open human gate tk-gate-live)" "(PATH-READS) …naming the gate it read from the bead's row"
 hasnt "$OUT" "gc bd create" "(PATH-READS) …and files no reaction for it"
+set +e
+OUT="$(show_sling tk-path-held)"; RC=$?
+set -e
+eq "$RC" 5 "(PATH-READS) the live path refuses a held bead (exit 5)"
+has "$OUT" "tk-path-held is held (HOLD:MAYOR)" "(PATH-READS) …naming the label it read from the bead's row"
+hasnt "$OUT" "gc bd create" "(PATH-READS) …and files no reaction for the held bead"
 set +e
 OUT="$(show_sling tk-path-locked)"; RC=$?
 set -e
