@@ -46,14 +46,17 @@ const (
 )
 
 // Wait is one wait: the bead waited on, the type of the edge onto it, and that
-// bead's title and status. Ancestor names the ancestor whose wait it is, and is
-// empty for a wait of the bead's own. A waits-for wait is unjudged.
+// bead's title, status, issue type and await type, which tell a gate a person
+// answers from work. Ancestor names the ancestor whose wait it is, and is empty
+// for a wait of the bead's own. A waits-for wait is unjudged.
 type Wait struct {
-	ID       string `json:"id"`
-	Type     string `json:"type"`
-	Title    string `json:"title"`
-	Status   string `json:"status"`
-	Ancestor string `json:"ancestor,omitempty"`
+	ID        string `json:"id"`
+	Type      string `json:"type"`
+	Title     string `json:"title"`
+	Status    string `json:"status"`
+	IssueType string `json:"issue_type,omitempty"`
+	AwaitType string `json:"await_type,omitempty"`
+	Ancestor  string `json:"ancestor,omitempty"`
 }
 
 // Foreign is one of a bead's wait edges onto a bead its store does not hold, an
@@ -400,7 +403,8 @@ func waitsOn(edges []ledger.Edge, ids []string, ancestor string) []Wait {
 	for _, id := range ids {
 		for _, e := range edges {
 			if e.ID == id && isWait(e) {
-				out = append(out, Wait{ID: e.ID, Type: e.Type, Title: e.Title, Status: e.Status, Ancestor: ancestor})
+				out = append(out, Wait{ID: e.ID, Type: e.Type, Title: e.Title, Status: e.Status,
+					IssueType: e.IssueType, AwaitType: e.AwaitType, Ancestor: ancestor})
 			}
 		}
 	}

@@ -84,7 +84,7 @@ func TestEachStatus(t *testing.T) {
 		waits  []waits.Wait
 	}{
 		{"own", waits.Blocked, []waits.Wait{{ID: "blocker", Type: "blocks", Title: "the work it waits on", Status: "open"}}},
-		{"member", waits.Held, []waits.Wait{{ID: "gate", Type: "blocks", Status: "open", Ancestor: "epic"}}},
+		{"member", waits.Held, []waits.Wait{{ID: "gate", Type: "blocks", Status: "open", IssueType: "gate", Ancestor: "epic"}}},
 		{"waiter", waits.Unjudged, []waits.Wait{{ID: "spawner", Type: "waits-for", Status: "closed"}}},
 		{"free", waits.Clear, []waits.Wait{}},
 	} {
@@ -460,7 +460,7 @@ func TestAHeldBeadsWaitsAreItsAncestors(t *testing.T) {
 	s.List("task", "story")
 	s.Mark("task")
 	h := holdsOf(t, s, "task")
-	if want := []waits.Wait{{ID: "gate", Type: "blocks", Status: "open", Ancestor: "epic"}}; h.Status != waits.Held || !reflect.DeepEqual(h.Waits, want) {
+	if want := []waits.Wait{{ID: "gate", Type: "blocks", Status: "open", IssueType: "gate", Ancestor: "epic"}}; h.Status != waits.Held || !reflect.DeepEqual(h.Waits, want) {
 		t.Errorf("task = %s on %+v; want held on %+v", h.Status, h.Waits, want)
 	}
 

@@ -85,16 +85,19 @@ func (e *ReadError) Error() string {
 }
 
 // Edge is one of a bead's own edges: its type, the far bead, and the far bead's
-// title, its status and, once it closed, when. A `gc bd show` row carries the far
-// bead's fields, and leaves out an edge whose far bead the store does not hold.
-// A `gc bd list` row carries every edge the bead has, with the far bead's id and
-// the edge's type alone, so its Title, Status and ClosedAt are empty.
+// title, issue type, await type, status and, once it closed, when. A `gc bd
+// show` row carries the far bead's fields, and leaves out an edge whose far bead
+// the store does not hold. A `gc bd list` row carries every edge the bead has,
+// with the far bead's id and the edge's type alone, so the far bead's fields are
+// empty.
 type Edge struct {
-	Type     string
-	ID       string
-	Title    string
-	Status   string
-	ClosedAt string
+	Type      string
+	ID        string
+	Title     string
+	IssueType string
+	AwaitType string
+	Status    string
+	ClosedAt  string
 }
 
 // Edges decodes the bead's own edges, from either row shape: a show's
@@ -115,6 +118,8 @@ func (b *Bead) Edges() ([]Edge, error) {
 		DependsOnID string `json:"depends_on_id"`
 		ListType    string `json:"type"`
 		Title       any    `json:"title"`
+		IssueType   any    `json:"issue_type"`
+		AwaitType   any    `json:"await_type"`
 		Status      any    `json:"status"`
 		ClosedAt    any    `json:"closed_at"`
 	}
@@ -127,7 +132,8 @@ func (b *Bead) Edges() ([]Edge, error) {
 		if id == "" || typ == "" {
 			return nil, fmt.Errorf("an edge of %s has no id or no type", b.ID)
 		}
-		edges = append(edges, Edge{Type: typ, ID: id, Title: jqString(d.Title), Status: jqString(d.Status), ClosedAt: jqString(d.ClosedAt)})
+		edges = append(edges, Edge{Type: typ, ID: id, Title: jqString(d.Title), IssueType: jqString(d.IssueType),
+			AwaitType: jqString(d.AwaitType), Status: jqString(d.Status), ClosedAt: jqString(d.ClosedAt)})
 	}
 	return edges, nil
 }

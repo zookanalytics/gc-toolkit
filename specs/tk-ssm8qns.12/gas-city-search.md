@@ -88,3 +88,20 @@ same at 7ef2fd05e). Gas City's doctor checks read no bead's waits.
 judge the edge. The bead read does, as its `unjudged` status, so the check
 prints that status as a note beside the arm, and the note goes once
 tk-ssm8qns.6 drops the status.
+
+## Each wait's `issue_type` and `await_type`
+
+**The need.** gc-helm's takeaway refuses to route or assign a bead whose own
+work sits on a pending wait, except a wait on a human gate, whose answer is
+what makes the bead the work. The board's disposition reads the waits a bead
+records less its human gates. Both tell a gate a person answers from work by
+the far bead's type and await type (`prstatus.IsHumanGate`), and the record
+named neither.
+
+**The primitive.** The far bead's own `issue_type` and `await_type` fields, on
+its row in bd's listing (beads 7ef2fd05e; `bd list --json` carries both on
+each row, the fields bd-lib.sh's `$HUMAN_GATE_JQ` reads).
+
+**Why it covers the need.** The snapshot already reads that row for the far
+bead's status, so the keys cost no read and hold no rule: the reader applies
+its own test, `$HUMAN_GATE_JQ`'s `human_gate` among them, to the wait.

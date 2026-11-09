@@ -188,8 +188,9 @@ func (l *Ledger) listInto(rows map[string]*gcbd.Bead, ids []string) error {
 }
 
 // shown is the row b as a snapshot reads it: its own fields, and its wait and
-// parent-child edges, each with the far bead's title, status and close time
-// from that bead's row in rows, an edge onto a bead rows does not hold left out.
+// parent-child edges, each with the far bead's title, issue type, await type,
+// status and close time from that bead's row in rows, an edge onto a bead rows
+// does not hold left out.
 func shown(b *gcbd.Bead, edges []gcbd.Edge, rows map[string]*gcbd.Bead) *gcbd.Bead {
 	out := *b
 	deps := make([]any, 0, len(edges))
@@ -198,7 +199,8 @@ func shown(b *gcbd.Bead, edges []gcbd.Edge, rows map[string]*gcbd.Bead) *gcbd.Be
 		if !heldEdge(e.Type) || f == nil {
 			continue
 		}
-		d := map[string]any{"id": e.ID, "dependency_type": e.Type, "status": f.StatusLower(), "title": f.Title}
+		d := map[string]any{"id": e.ID, "dependency_type": e.Type, "status": f.StatusLower(), "title": f.Title,
+			"issue_type": f.IssueTypeString(), "await_type": f.AwaitType}
 		if f.ClosedAt != nil {
 			d["closed_at"] = f.ClosedAt
 		}

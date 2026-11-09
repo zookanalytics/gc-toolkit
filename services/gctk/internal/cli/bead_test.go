@@ -61,7 +61,7 @@ esac
 // arm, a member a live workflow past load-context works, and a bead with a
 // waits-for edge of its own.
 const holdsStore = `[
- {"id":"gate","status":"open","issue_type":"gate","title":"park the epic"},
+ {"id":"gate","status":"open","issue_type":"gate","await_type":"human","title":"park the epic"},
  {"id":"epic","status":"open","issue_type":"epic","dependencies":[{"id":"gate","dependency_type":"blocks","title":"park the epic","status":"open"}]},
  {"id":"member","status":"open","dependencies":[{"id":"epic","dependency_type":"parent-child","status":"open"}]},
  {"id":"blocker","status":"in_progress","title":"the work it waits on"},
@@ -149,7 +149,7 @@ func TestBeadHoldsPrintsOneRecordPerBead(t *testing.T) {
 			t.Errorf("own's record %s lacks %s", raw, s)
 		}
 	}
-	if raw, _ := json.Marshal(lines[0]["waits"]); string(raw) != `[{"ancestor":"epic","id":"gate","status":"open","title":"park the epic","type":"blocks"}]` {
+	if raw, _ := json.Marshal(lines[0]["waits"]); string(raw) != `[{"ancestor":"epic","await_type":"human","id":"gate","issue_type":"gate","status":"open","title":"park the epic","type":"blocks"}]` {
 		t.Errorf("member's waits = %s; want the epic's gate", raw)
 	}
 }
