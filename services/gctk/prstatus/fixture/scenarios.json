@@ -282,6 +282,128 @@
     ]
   },
   {
+    "name": "a rework waiting on another PR that waits on a review",
+    "anchor": "tk-a",
+    "want": {"status": "needs-attention", "held": ["blocked"]},
+    "beads": [
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"], "metadata": {"merge_result": "pull_request", "pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a.rw", "status": "open", "issue_type": "task", "waits_on": ["tk-b"], "metadata": {"task_kind": "rework", "anchor_bead": "tk-a"}},
+      {"id": "tk-b", "status": "open", "issue_type": "task", "title": "the PR the rework builds on", "metadata": {"merge_result": "pull_request", "pr_posture": "review_required@def@2026-10-27T00:00:00Z", "pr.machine": "settled@def@2026-10-27T00:00:00Z"}}
+    ]
+  },
+  {
+    "name": "an approved PR whose rework waits on another PR that waits on a review",
+    "anchor": "tk-a",
+    "want": {"status": "needs-attention", "held": ["blocked"]},
+    "beads": [
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"], "metadata": {"merge_result": "pull_request", "pr_posture": "approved@abc@2026-10-27T00:00:00Z", "pr.machine": "settled@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a.rw", "status": "open", "issue_type": "task", "waits_on": ["tk-b"], "metadata": {"task_kind": "rework", "anchor_bead": "tk-a"}},
+      {"id": "tk-b", "status": "open", "issue_type": "task", "title": "the PR the rework builds on", "metadata": {"merge_result": "pull_request", "pr_posture": "review_required@def@2026-10-27T00:00:00Z", "pr.machine": "settled@def@2026-10-27T00:00:00Z"}}
+    ]
+  },
+  {
+    "name": "a rework waiting on another PR whose required check failed",
+    "anchor": "tk-a",
+    "want": {"status": "needs-attention", "held": ["blocked"]},
+    "beads": [
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"], "metadata": {"merge_result": "pull_request", "pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a.rw", "status": "open", "issue_type": "task", "waits_on": ["tk-b"], "metadata": {"task_kind": "rework", "anchor_bead": "tk-a"}},
+      {"id": "tk-b", "status": "open", "issue_type": "task", "title": "the PR the rework builds on", "metadata": {"merge_result": "pull_request", "pr_posture": "review_required@def@2026-10-27T00:00:00Z", "pr.machine": "blocked@def@2026-10-27T00:00:00Z", "pr.machine_cause": "check-failed", "pr.machine_reason": "required check(s) test failed at def"}}
+    ]
+  },
+  {
+    "name": "a rework waiting on a decision",
+    "anchor": "tk-a",
+    "want": {"status": "needs-attention", "held": ["blocked"]},
+    "beads": [
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"], "metadata": {"merge_result": "pull_request", "pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a.rw", "status": "open", "issue_type": "task", "waits_on": ["tk-d"], "metadata": {"task_kind": "rework", "anchor_bead": "tk-a"}},
+      {"id": "tk-d", "status": "open", "issue_type": "decision", "title": "keep the old flag?"}
+    ]
+  },
+  {
+    "name": "a rework waiting on a bead routed to a person",
+    "anchor": "tk-a",
+    "want": {"status": "needs-attention", "held": ["blocked"]},
+    "beads": [
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"], "metadata": {"merge_result": "pull_request", "pr_posture": "approved@abc@2026-10-27T00:00:00Z", "pr.machine": "settled@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a.rw", "status": "open", "issue_type": "task", "waits_on": ["tk-p"], "metadata": {"task_kind": "rework", "anchor_bead": "tk-a"}},
+      {"id": "tk-p", "status": "open", "issue_type": "task", "title": "pick the release window", "metadata": {"gc.routed_to": "human"}}
+    ]
+  },
+  {
+    "name": "a rework waiting on another PR the city is changing",
+    "anchor": "tk-a",
+    "want": {"status": "working", "held": []},
+    "beads": [
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"], "metadata": {"merge_result": "pull_request", "pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a.rw", "status": "open", "issue_type": "task", "waits_on": ["tk-b"], "metadata": {"task_kind": "rework", "anchor_bead": "tk-a"}},
+      {"id": "tk-b", "status": "open", "issue_type": "task", "title": "the PR the rework builds on", "waits_on": ["tk-b.rw"], "metadata": {"merge_result": "pull_request", "pr_posture": "review_required@def@2026-10-27T00:00:00Z", "pr.machine": "settled@def@2026-10-27T00:00:00Z"}},
+      {"id": "tk-b.rw", "status": "open", "issue_type": "task", "metadata": {"task_kind": "rework", "anchor_bead": "tk-b"}}
+    ]
+  },
+  {
+    "name": "a rework waiting on another PR the city is landing",
+    "anchor": "tk-a",
+    "want": {"status": "working", "held": []},
+    "beads": [
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"], "metadata": {"merge_result": "pull_request", "pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a.rw", "status": "open", "issue_type": "task", "waits_on": ["tk-b"], "metadata": {"task_kind": "rework", "anchor_bead": "tk-a"}},
+      {"id": "tk-b", "status": "open", "issue_type": "task", "title": "the PR the rework builds on", "metadata": {"merge_result": "pull_request", "pr_posture": "approved@def@2026-10-27T00:00:00Z", "pr.machine": "settled@def@2026-10-27T00:00:00Z"}}
+    ]
+  },
+  {
+    "name": "a rework waiting on another PR that has landed",
+    "anchor": "tk-a",
+    "want": {"status": "working", "held": []},
+    "beads": [
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"], "metadata": {"merge_result": "pull_request", "pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a.rw", "status": "open", "issue_type": "task", "waits_on": ["tk-b"], "metadata": {"task_kind": "rework", "anchor_bead": "tk-a"}},
+      {"id": "tk-b", "status": "closed", "issue_type": "task", "title": "the PR the rework builds on", "metadata": {"merge_result": "merged", "pr_posture": "approved@def@2026-10-27T00:00:00Z", "pr.machine": "settled@def@2026-10-27T00:00:00Z"}}
+    ]
+  },
+  {
+    "name": "a rework waiting on an anchor whose PR is not open yet",
+    "anchor": "tk-a",
+    "want": {"status": "working", "held": []},
+    "beads": [
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"], "metadata": {"merge_result": "pull_request", "pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a.rw", "status": "open", "issue_type": "task", "waits_on": ["tk-b"], "metadata": {"task_kind": "rework", "anchor_bead": "tk-a"}},
+      {"id": "tk-b", "status": "open", "issue_type": "task", "title": "the change the rework builds on", "metadata": {"merge_result": "pre_open_gate"}}
+    ]
+  },
+  {
+    "name": "a PR stacked on another PR that waits on a review",
+    "anchor": "tk-a",
+    "want": {"status": "needs-attention", "held": ["blocked"]},
+    "beads": [
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-b"], "metadata": {"merge_result": "pull_request", "pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-b", "status": "open", "issue_type": "task", "title": "the PR this one is stacked on", "metadata": {"merge_result": "pull_request", "pr_posture": "review_required@def@2026-10-27T00:00:00Z", "pr.machine": "settled@def@2026-10-27T00:00:00Z"}}
+    ]
+  },
+  {
+    "name": "a gate on another PR behind a rework counts once, as a gate",
+    "anchor": "tk-a",
+    "want": {"status": "needs-attention", "held": ["gate"]},
+    "beads": [
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"], "metadata": {"merge_result": "pull_request", "pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a.rw", "status": "open", "issue_type": "task", "waits_on": ["tk-b"], "metadata": {"task_kind": "rework", "anchor_bead": "tk-a"}},
+      {"id": "tk-b", "status": "open", "issue_type": "task", "title": "the PR the rework builds on", "waits_on": ["tk-g"], "metadata": {"merge_result": "pull_request", "pr_posture": "approved@def@2026-10-27T00:00:00Z", "pr.machine": "settled@def@2026-10-27T00:00:00Z"}},
+      {"id": "tk-g", "status": "open", "issue_type": "gate", "await_type": "human", "title": "sign off the release"}
+    ]
+  },
+  {
+    "name": "a PR waiting on a review holds beside a rework the city could start",
+    "anchor": "tk-a",
+    "want": {"status": "needs-attention", "held": ["blocked"]},
+    "beads": [
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw", "tk-a.rw2"], "metadata": {"merge_result": "pull_request", "pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a.rw", "status": "open", "issue_type": "task", "metadata": {"task_kind": "rework", "anchor_bead": "tk-a"}},
+      {"id": "tk-a.rw2", "status": "open", "issue_type": "task", "waits_on": ["tk-b"], "metadata": {"task_kind": "rework", "anchor_bead": "tk-a"}},
+      {"id": "tk-b", "status": "open", "issue_type": "task", "title": "the PR the rework builds on", "metadata": {"merge_result": "pull_request", "pr_posture": "review_required@def@2026-10-27T00:00:00Z", "pr.machine": "settled@def@2026-10-27T00:00:00Z"}}
+    ]
+  },
+  {
     "name": "the merge freeze holds with no held value",
     "anchor": "tk-a",
     "want": {"status": "needs-attention", "held": []},

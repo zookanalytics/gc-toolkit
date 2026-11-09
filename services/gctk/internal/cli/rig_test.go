@@ -15,10 +15,9 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/rig"
 )
 
-// rigGCStub answers the gc calls a publish makes. `bd update` keeps the one
-// --set-metadata pair it is given, or fails with STUB_UPDATE_RC, and `bd show`
-// answers with the pair kept, or with STUB_SHOW_VALUE as its value. Every call
-// is logged, one argv per line, and any other call fails.
+// rigGCStub answers the gc call a publish makes. `bd update` keeps the one
+// --set-metadata pair it is given, or fails with STUB_UPDATE_RC. Every call is
+// logged, one argv per line, and any other call fails.
 const rigGCStub = `#!/usr/bin/env bash
 printf '%s\n' "$*" >> "$STUB_GC_LOG"
 case "$1 $2" in
@@ -35,12 +34,6 @@ case "$1 $2" in
       fi
     done
     echo "updated $id" ;;
-  "bd show")
-    key=$(cat "$STUB_DIR/meta.key" 2>/dev/null)
-    val=$(cat "$STUB_DIR/meta.value" 2>/dev/null)
-    if [ -n "${STUB_SHOW_VALUE+x}" ]; then val=$STUB_SHOW_VALUE; fi
-    val=${val//\\/\\\\}; val=${val//\"/\\\"}
-    printf '[{"id":"%s","metadata":{"%s":"%s"}}]\n' "$3" "$key" "$val" ;;
   *) echo "unexpected gc call: $*" >&2; exit 9 ;;
 esac
 `
@@ -669,8 +662,8 @@ func TestRigPublishBeadUpsertsTheResultOntoTheBead(t *testing.T) {
 	if len(updates) != 1 || updates[0] != want {
 		t.Fatalf("bd update calls = %q, want [%q]", updates, want)
 	}
-	if shows := f.gcCalls("bd show"); len(shows) != 1 || shows[0] != "bd show tk-work --json" {
-		t.Fatalf("read-back = %q", shows)
+	if shows := f.gcCalls("bd show"); len(shows) != 0 {
+		t.Fatalf("a publish read the bead back: %q", shows)
 	}
 
 	// A recorded result answers without running and is published as well.
@@ -683,18 +676,11 @@ func TestRigPublishBeadUpsertsTheResultOntoTheBead(t *testing.T) {
 		t.Fatalf("a recorded pass was published %d times, want 1", n)
 	}
 
-	// A publish that fails, or does not read back, is reported and changes no
-	// exit.
+	// A publish the store refuses is reported and changes no exit.
 	t.Setenv("STUB_UPDATE_RC", "1")
 	code, _, errs = f.call("test", "--scope", "full", "--command", full, "--publish-bead", "tk-work")
 	if code != 0 || !strings.Contains(errs, "WARN the result was not published to tk-work") {
 		t.Fatalf("a refused publish = %d:\n%s", code, errs)
-	}
-	t.Setenv("STUB_UPDATE_RC", "0")
-	t.Setenv("STUB_SHOW_VALUE", "something else")
-	code, _, errs = f.call("test", "--scope", "full", "--command", full, "--publish-bead", "tk-work")
-	if code != 0 || !strings.Contains(errs, "did not read back as written") {
-		t.Fatalf("a publish that did not read back = %d:\n%s", code, errs)
 	}
 }
 

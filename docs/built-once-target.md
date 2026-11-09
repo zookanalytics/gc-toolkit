@@ -195,11 +195,11 @@ lane, a raw route or a dispatch arm.
 
 Shared glue is one call per series of native steps that more than one workflow
 runs: the store helpers, the human-gate helper, findings, run cancel,
-hand-back, one decline call, one read-back before an act that cannot be undone,
-PR posts with their provenance mark, the gh write guard under its warrant, and
-the seed audit.
+hand-back, one decline call, one check that a `blocks` edge's two ends share a
+store, PR posts with their provenance mark, the gh write guard under its
+warrant, and the seed audit.
 
-The trade: per-site read-backs give way to one bd-durability warrant
+The trade: per-site read-backs give way to each write's own exit
 (tk-1tfzr71.11), and step-close and the hand-off shims give way to native calls.
 The wrapper that provisions an agent's home stays under its warrant, because
 `gc worktree` binds a tree to one bead and a home outlives every bead.
@@ -335,7 +335,6 @@ convoy lands only after the operator approves its design.
 
 | Lane | Member | What it removes | Size |
 |---|---|---|---|
-| A | tk-1tfzr71.11 | per-site read-backs, about 130 blocks in 46 files | partial files |
 | A | tk-1tfzr71.20 | the merge cadence, the approval rule, rework and branch currency; the operator rules at its design | 10,920 |
 | A | tk-1tfzr71.22 | review beads, lane derivation, validation passes, machine findings | 10,924 |
 | A | tk-1tfzr71.21 | `pr-facts.sh` polling and mirroring | 15,233 |

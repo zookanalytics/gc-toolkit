@@ -10,8 +10,7 @@
 #     origin, and is recorded and closed through one lifecycle transition handed
 #     the rig as GC_RIG_ROOT, which clears the stamp, with no scratch worktree,
 #     no scratch file and no local branch moved;
-#   - a bead the stamp does not reach, or whose stamp does not read back, is
-#     not pushed;
+#   - a bead whose stamp the store refuses is not pushed;
 #   - a prepared head origin/main moved past since it was prepared lands
 #     nothing, records nothing and exits 4, whether origin/main moved before the
 #     fetch or while the landing was stamped, and one that shares no history
@@ -108,10 +107,10 @@ LC
 chmod +x "$SUT/lifecycle.sh"
 # gc answers the roster for `rig list` and the bead file for `bd show`, applies
 # each --set-metadata and --unset-metadata of a `bd update` to that file, and
-# logs every call. BD_UPDATE_DROP makes an update exit 0 and write nothing,
-# which `gc bd update` can do. BD_UPDATE_THEN names a command each update runs
-# once it has written. BD_SHOW_FAIL makes `bd show` answer with an error object
-# and exit 1, as a store that does not return the bead does.
+# logs every call. BD_UPDATE_FAIL makes an update refuse with exit 1.
+# BD_UPDATE_THEN names a command each update runs once it has written.
+# BD_SHOW_FAIL makes `bd show` answer with an error object and exit 1, as a
+# store that does not return the bead does.
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 echo "$*" >> "$FAKE_GC_LOG"
@@ -124,7 +123,7 @@ case "$1 $2" in
     fi
     cat "$FAKE_BEAD" ;;
   "bd update")
-    [ -z "${BD_UPDATE_DROP:-}" ] || exit 0
+    [ -z "${BD_UPDATE_FAIL:-}" ] || { echo "Error updating: the store refused it" >&2; exit 1; }
     shift 3
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -269,23 +268,14 @@ eq "$RC" 0 "roster: exits 0"
 eq "$(git -C "$D/origin.git" rev-parse main)" "$FEATURE" "roster: the prepared head landed on the rig's origin"
 eq "$(cat "$D/lc.log.root")" "$D/rig" "roster: the transition is handed the rig the roster named"
 
-echo "── a bead the stamp does not reach is not pushed ──"
-setup "$TMP/nostamp"
-run BD_UPDATE_DROP=1
-eq "$RC" 1 "nostamp: exits 1"
-has "$OUT" "could not stamp direct_landing_sha=$FEATURE on wb" "nostamp: it says the stamp did not land"
-eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "nostamp: nothing pushed"
-no_transition nostamp
-no_drain nostamp
-
-echo "── a stamp that does not read back is not pushed ──"
-setup "$TMP/unread-stamp"
-run BD_SHOW_FAIL=1
-eq "$RC" 1 "unread-stamp: exits 1"
-has "$OUT" "could not stamp direct_landing_sha=$FEATURE on wb (it reads back unreadable" "unread-stamp: it says the stamp did not read back"
-eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "unread-stamp: nothing pushed"
-no_transition unread-stamp
-no_drain unread-stamp
+echo "── a stamp the store refuses is not pushed ──"
+setup "$TMP/refused-stamp"
+run BD_UPDATE_FAIL=1
+eq "$RC" 1 "refused-stamp: exits 1"
+has "$OUT" "could not stamp direct_landing_sha=$FEATURE on wb (the update said: Error updating: the store refused it)" "refused-stamp: it gives the update's refusal"
+eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "refused-stamp: nothing pushed"
+no_transition refused-stamp
+no_drain refused-stamp
 
 echo "── origin/main moved past the prepared head: nothing lands, exit 4 ──"
 setup "$TMP/moved"

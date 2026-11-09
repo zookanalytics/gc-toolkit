@@ -9,9 +9,9 @@ A unit of work has exactly one **anchor** bead. Its state is
 `status` × `merge_result`, and the state space is **declared, closed, and
 single-writer**: `lifecycle/lifecycle.toml` enumerates every state, every legal
 transition, and every pack-written metadata key, and
-`assets/scripts/lifecycle.sh` is the only thing that writes a transition —
-validate, one atomic `bd update` carrying every field of the transition, read
-back. An unknown `merge_result` value is an error: every reader surfaces it via
+`assets/scripts/lifecycle.sh` is the only thing that writes a transition: it
+validates, then makes one atomic `bd update` carrying every field of the
+transition, whose exit decides whether it landed. An unknown `merge_result` value is an error: every reader surfaces it via
 `escalate.sh`, and `doctor/check-state-space` catches it. A bead closed while
 `merge_result` is a non-closed state is repaired by `lifecycle.sh reopen`
 (human-invoked; `merge_result` untouched).
@@ -581,9 +581,9 @@ carries none.
 
 | Label | What holds the PR | Read from |
 |---|---|---|
-| `held: gate` | an open human gate holds the anchor: on the anchor itself, or behind a bead it waits on, such as a rework | `prstatus.HoldingGates`, which follows the anchor's `blocks` edges through every blocker that is not closed and keeps the human gates it reaches, one a person has claimed included. A conversation blocks nothing, so it never counts |
+| `held: gate` | an open human gate holds the anchor: on the anchor itself, or behind a bead it waits on, such as a rework | `prstatus.Holding`, which follows the anchor's `blocks` edges through every blocker that is not closed and keeps the human gates it reaches, one a person has claimed included. A conversation blocks nothing, so it never counts |
 | `held: review` | review feedback the city has not answered, or a review thread the merge waits on, and nothing in flight acts on it | the merge pass's count of review threads waiting on the city's answer (`pr.unanswered_threads`), by the rule below, or its `blocked` verdict with cause `review-threads`, as `prstatus.Blocked` counts it |
-| `held: blocked` | a live blocker holds the PR that no automated actor will clear | the merge pass's `blocked` verdict with cause `blocker`, as `prstatus.Blocked` counts it, or a live bead the anchor's `blocks` edge names that is routed to a person or is a decision. A human gate is not among them, whatever its route, because `held: gate` counts it |
+| `held: blocked` | a live blocker holds the PR that no automated actor will clear | the merge pass's `blocked` verdict with cause `blocker`, as `prstatus.Blocked` counts it, or a bead a person owes the next move on that `prstatus.Holding` reaches through the anchor's open `blocks` edges, on the anchor or behind a bead it waits on, such as its rework. That bead is routed to a person, is a decision, or is another merge anchor whose own status, by the same rule over the facts it records and its own `blocks` edges, is `needs-attention`, or `needs-review` once its PR is open. An open bead on that anchor's edges that no person moves counts as work in flight on it, so a PR the city is changing or landing holds nothing, and the gates and the beads a person owes on those edges are counted once, by the walk. Live work that waits on such a bead is not the city changing the PR, so the PR reads `needs-attention` and not `working`. A human gate is not among them, whatever its route, because `held: gate` counts it |
 
 Any `held:` label reads `status: needs-attention`, because each names something
 a person has to act on. The merge freeze and the rebase hold carry no `held:`
@@ -617,8 +617,8 @@ lands while `held: review` stands.
 `pr_held`, from the same derivation over the same facts. `prstatus.Read` gathers
 those facts for every reader: the anchor's own row, `pr.unanswered_threads`
 among it, its in-flight set, every bead carrying the anchor's `anchor_bead`, any
-`task_kind`, at a live status (`prstatus.InFlightStatuses`), the blockers its
-`blocks` edges name, and the gates its walk reaches. `gctk pr-status derive` and
+`task_kind`, at a live status (`prstatus.InFlightStatuses`), and the gates and
+the beads a person owes that its walk reaches. `gctk pr-status derive` and
 the board's beads source each hand it their own adapter onto the store, and
 neither gathers or decides any of it.
 
@@ -636,9 +636,11 @@ board applies it too, over the in-flight set the labels count, and by it decides
 a blocked row's phase, whether the operator's queue lists the row, and the row's
 needs phrase.
 
-`prstatus.HoldingGates` is the one reader of the gates that hold a PR, and
-`prstatus.Read` gathers through it. The label's value counts them, the board's
-row names them, and `gc-helm engage` on the PR offers each, beside every other
+`prstatus.Holding` is the one reader of what holds a PR through its edges, the
+human gates and the beads a person owes the next move on, and `prstatus.Read`
+gathers through it. The labels count both. The board's row asks for each gate and
+each blocker of its own a person owes, and names any other bead in its needs as
+where the move is. `gc-helm engage` on the PR offers each, beside every other
 reason `prstatus.Reasons` gives, through `gctk pr-status derive --json`. Each
 bead walks for itself, and the walks of one call share their reads: each bead is
 read once, and its edges a level at a time. So a PR reads the same on the board,
@@ -674,15 +676,15 @@ An open human gate holds the anchor through its `blocks` edge onto it, read by
 to the gates whose await type is human. The merge pass's finalize gate
 (`finalize-gate.sh`) refuses the merge while one is open on the anchor, and a
 gate behind a bead the anchor waits on holds the merge through that open
-blocker. The labels count each human gate `prstatus.HoldingGates` reaches that
-is not closed, one a person has claimed included.
+blocker. The labels count each human gate `prstatus.Holding` reaches that is
+not closed, one a person has claimed included.
 A conversation about the anchor tracks it and blocks nothing, so it holds no
 label.
 
 The labels read the city's own state — the refinery-computed posture on the
-anchor, the merge cadence's machine verdict and its cause, its holds, any open
-human gate on it, the blockers its `blocks` edges name, its draft-stage
-markers, and its live work — not GitHub's review posture, merge state or draft
+anchor, the merge cadence's machine verdict and its cause, its holds, the open
+human gates and the beads a person owes that its `blocks` edges reach, its
+draft-stage markers, and its live work — not GitHub's review posture, merge state or draft
 flag directly. GitHub reports `BLOCKED` for a
 required check still running as it does for a wedge, and the merge pass, which
 reads the branch's rules, is what tells the two apart. The
@@ -1150,7 +1152,8 @@ PR-close disposition for that kind and successor.
 Under `duplicate` it also keeps the waits on the bead in force. bd's ready rule
 follows a `blocks` edge and never a `duplicates` edge, so before a duplicate of a
 canonical that has neither closed nor shipped closes, each open bead it blocks
-gains a `blocks` edge onto the canonical, read back. The canonical itself and a
+gains a `blocks` edge onto the canonical, each add taking its exit. The
+canonical itself and a
 bead it already blocks need none. A waiter that cannot take the edge refuses the
 close before anything is written: one the canonical already joins by another
 edge type, since bd keeps one edge per pair, and every waiter of a canonical in
@@ -1179,7 +1182,7 @@ they close past an open human gate and an open child, and refuse a successor in
 another store, so the pack closes through the writer instead.
 
 A disposition ends the bead's branch, the way a merge ends a landed one
-through the repository's delete-on-merge setting. Once the close reads back,
+through the repository's delete-on-merge setting. Once the close has landed,
 `bead-rehome.sh` hands the branch the bead names in `metadata.branch` to
 `assets/scripts/branch-end.sh`, which deletes it from the git remote. The
 branch stays while a live owner names it. A live owner is a bead in the rig's

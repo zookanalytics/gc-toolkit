@@ -184,8 +184,8 @@ func metadataOf(b *gcbd.Bead) map[string]string {
 	return out
 }
 
-// asBlockers projects `blocks` rows onto what the definition reads of them. A
-// row with no status reads open.
+// asBlockers projects `blocks` rows onto what the definition reads of them, the
+// far bead's metadata whole among it. A row with no status reads open.
 func asBlockers(rows []gcbd.Bead) []prstatus.Blocker {
 	out := make([]prstatus.Blocker, 0, len(rows))
 	for i := range rows {
@@ -196,7 +196,7 @@ func asBlockers(rows []gcbd.Bead) []prstatus.Blocker {
 			Status:    b.StatusLowerOr("open"),
 			IssueType: b.IssueTypeString(),
 			AwaitType: b.AwaitType,
-			RoutedTo:  b.Meta("gc.routed_to"),
+			Metadata:  metadataOf(b),
 		})
 	}
 	return out
