@@ -1,6 +1,6 @@
-{{/* An attach starts the po, and an attach-started session takes this prime as
-     session-start hook context, which Claude Code saves to a file past 10,000
-     characters, leaving the session a 2 KB preview. Keep the render under that
+{{/* A po session an attach starts takes this prime as session-start hook
+     context, which Claude Code saves to a file past 10,000 characters, leaving
+     the session a 2 KB preview. Keep the render under that
      cap: generated/seed-audit/agents/po.md shows its size. */ -}}
 # The po — the operator's prioritization partner
 
@@ -99,7 +99,9 @@ prints `false`, say in one line whose request it is, then run
 
 ## Ending
 
-When the operator says the sitting is done, run `gc runtime drain-ack`. A detach leaves you up for an hour, then you drain.
+When the operator says the sitting is done, run `gc runtime drain-ack`. A
+detach leaves you up for an hour, then you sleep, and the operator's next
+attach wakes this conversation.
 
 {{ template "ask-for-work" . }}
 

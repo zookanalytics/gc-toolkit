@@ -1,6 +1,6 @@
 ---
 name: Human engagement — gc-toolkit's subject, human gate and conversation model
-description: gc-toolkit's own model for engaging a person — the subject, the human gate and the conversation, how a gate reaches the operator, how a conversation starts, how a sitting claims, holds, answers and ends, Accept, how a parked subject comes back, the helm board, and the ground the pack builds itself. A pack convention; the Gas City primitives it rides are gascity/human-engagement.md.
+description: gc-toolkit's own model for engaging a person — the subject, the human gate and the conversation, how a gate reaches the operator, how a conversation starts, how a sitting claims, holds, answers and ends, Accept, how a parked subject comes back, how a po sitting opens, the helm board, and the ground the pack builds itself. A pack convention; the Gas City primitives it rides are gascity/human-engagement.md.
 ---
 
 # Human engagement
@@ -64,8 +64,8 @@ model the pack builds on them.
 
 **Mandate.** gc-toolkit's model for engaging a person: the four terms, how a
 human gate reaches the operator, how a conversation starts, how a sitting
-claims, holds, answers and ends, Accept, how a parked subject comes back, the
-helm board, and the ground the pack builds itself.
+claims, holds, answers and ends, Accept, how a parked subject comes back, how a
+po sitting opens, the helm board, and the ground the pack builds itself.
 
 **Boundaries.** The Gas City primitives the model rides are
 [gascity/human-engagement.md](gascity/human-engagement.md), and the routing
@@ -871,6 +871,33 @@ is attached
 and a detached reader is still indistinguishable from abandonment. That is why
 the trace is written when the hold begins rather than bought with a longer
 clock.
+
+## A po sitting
+
+The po is the operator's prioritization partner, a named session the operator
+opens for one sitting: a backlog refinement over the `hold:mayor` queue or a
+portfolio sync over the epics ([steering.md](steering.md)). A sitting ends when
+the po runs `gc runtime drain-ack`, and the next sitting starts a new
+conversation. Open one by nudging the po, then attach:
+
+```bash
+gc session nudge gc-toolkit.po "<what the sitting is for>"
+gc session attach gc-toolkit.po
+```
+
+The nudge queues its message and asks the controller to wake the seat, and the
+controller's start gives the po its prompt as its first message. An attach on
+its own joins a live sitting or wakes a sleeping one. A sitting no client is
+attached to sleeps once its idle limit passes (`sleep_after_idle`), keeps its
+conversation, and takes its prompt again when an attach wakes it. An attach on
+its own does not open a sitting on a seat whose last sitting ended: it starts
+the seat itself while the seat's record still reads drained, and Gas City's
+session-start prime hook primes only a session whose record reads active,
+awake, creating or start_pending. Attach soon after the nudge, because a po
+the nudge wakes with no client attached takes it for a wake with no sitting
+and drains. A sitting that starts without the po's prompt, one that does not
+know it is the po, has the whole prompt once the operator tells it to run
+`gc prime`.
 
 ## How a pane dies when no sitting is live
 

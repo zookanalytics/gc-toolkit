@@ -139,8 +139,9 @@ not.
 ## The queue the po works
 
 The placement sitting is the po's backlog refinement: the operator opens the
-po, the operator's prioritization partner (`gc session attach gc-toolkit.po`),
-and the two work the queue together. `gc beads list --label hold:mayor` lists
+po, the operator's prioritization partner, with a nudge and then an attach
+([human-engagement.md](human-engagement.md#a-po-sitting)), and the two work the
+queue together. `gc beads list --label hold:mayor` lists
 the queue: every bead carrying the label, in every rig's store. It writes
 nothing. A hold is lifted by a write, so
 the label alone puts a bead in the queue, and nothing is inferred from the
