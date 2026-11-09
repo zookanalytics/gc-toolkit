@@ -46,11 +46,12 @@ const (
 )
 
 // Wait is one wait: the bead waited on, the type of the edge onto it, and that
-// bead's status. Ancestor names the ancestor whose wait it is, and is empty for
-// a wait of the bead's own. A waits-for wait is unjudged.
+// bead's title and status. Ancestor names the ancestor whose wait it is, and is
+// empty for a wait of the bead's own. A waits-for wait is unjudged.
 type Wait struct {
 	ID       string `json:"id"`
 	Type     string `json:"type"`
+	Title    string `json:"title"`
 	Status   string `json:"status"`
 	Ancestor string `json:"ancestor,omitempty"`
 }
@@ -391,7 +392,7 @@ func waitsOn(edges []ledger.Edge, ids []string, ancestor string) []Wait {
 	for _, id := range ids {
 		for _, e := range edges {
 			if e.ID == id && isWait(e) {
-				out = append(out, Wait{ID: e.ID, Type: e.Type, Status: e.Status, Ancestor: ancestor})
+				out = append(out, Wait{ID: e.ID, Type: e.Type, Title: e.Title, Status: e.Status, Ancestor: ancestor})
 			}
 		}
 	}

@@ -69,7 +69,9 @@ func waitIDs(ws []waits.Wait) []string {
 func TestEachStatus(t *testing.T) {
 	s := parked()
 	s.Put(bead{ID: "blocker", Status: "open"})
-	s.Put(bead{ID: "own", Status: "open", Edges: []gcbd.Edge{edge(gcbd.EdgeBlocks, "blocker", "open")}})
+	titled := edge(gcbd.EdgeBlocks, "blocker", "open")
+	titled.Title = "the work it waits on"
+	s.Put(bead{ID: "own", Status: "open", Edges: []gcbd.Edge{titled}})
 	s.List("own", "blocker")
 	s.Mark("own")
 	under(s, bead{ID: "member", Status: "open"})
@@ -83,7 +85,7 @@ func TestEachStatus(t *testing.T) {
 		status waits.Status
 		waits  []waits.Wait
 	}{
-		{"own", waits.Blocked, []waits.Wait{{ID: "blocker", Type: "blocks", Status: "open"}}},
+		{"own", waits.Blocked, []waits.Wait{{ID: "blocker", Type: "blocks", Title: "the work it waits on", Status: "open"}}},
 		{"member", waits.Held, []waits.Wait{{ID: "gate", Type: "blocks", Status: "open", Ancestor: "epic"}}},
 		{"waiter", waits.Unjudged, []waits.Wait{{ID: "spawner", Type: "waits-for", Status: "closed"}}},
 		{"free", waits.Clear, []waits.Wait{}},

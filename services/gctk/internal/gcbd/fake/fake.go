@@ -202,6 +202,9 @@ func (s *Store) row(b Bead) gcbd.Bead {
 			continue
 		}
 		d := map[string]any{"id": e.ID, "dependency_type": e.Type, "status": e.Status}
+		if e.Title != "" {
+			d["title"] = e.Title
+		}
 		if e.ClosedAt != "" {
 			d["closed_at"] = e.ClosedAt
 		}

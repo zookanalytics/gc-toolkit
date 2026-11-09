@@ -61,12 +61,12 @@ esac
 // waits-for edge of its own.
 const holdsStore = `[
  {"id":"gate","status":"open","issue_type":"gate"},
- {"id":"epic","status":"open","issue_type":"epic","dependencies":[{"id":"gate","dependency_type":"blocks","status":"open"}]},
+ {"id":"epic","status":"open","issue_type":"epic","dependencies":[{"id":"gate","dependency_type":"blocks","title":"park the epic","status":"open"}]},
  {"id":"member","status":"open","dependencies":[{"id":"epic","dependency_type":"parent-child","status":"open"}]},
  {"id":"blocker","status":"in_progress"},
  {"id":"done","status":"closed"},
  {"id":"own","status":"open","metadata":{"gc.dispatch_when_ready":"rig/rig.polecat","gc.dispatch_when_ready_args":"[\"--on\",\"mol-polecat-work\"]"},
-  "dependencies":[{"id":"blocker","dependency_type":"blocks","status":"in_progress"},{"id":"done","dependency_type":"blocks","status":"closed","closed_at":"2026-11-02T08:00:00Z"},{"id":"xx-9","dependency_type":"blocks","status":"open"}]},
+  "dependencies":[{"id":"blocker","dependency_type":"blocks","title":"the work it waits on","status":"in_progress"},{"id":"done","dependency_type":"blocks","status":"closed","closed_at":"2026-11-02T08:00:00Z"},{"id":"xx-9","dependency_type":"blocks","status":"open"}]},
  {"id":"worked","status":"open","dependencies":[{"id":"epic","dependency_type":"parent-child","status":"open"}]},
  {"id":"cv","status":"open","issue_type":"convoy","dependencies":[{"id":"worked","dependency_type":"tracks","status":"open"}]},
  {"id":"root","status":"in_progress","metadata":{"gc.kind":"workflow","gc.formula_contract":"graph.v2","gc.input_convoy_id":"cv"}},
@@ -139,7 +139,7 @@ func TestBeadHoldsPrintsOneRecordPerBead(t *testing.T) {
 	}
 	raw, _ := json.Marshal(lines[1])
 	for _, s := range []string{
-		`"waits":[{"id":"blocker","status":"in_progress","type":"blocks"}]`,
+		`"waits":[{"id":"blocker","status":"in_progress","title":"the work it waits on","type":"blocks"}]`,
 		`"last_landed":"2026-11-02T08:00:00Z"`,
 		`"foreign":[{"id":"xx-9","type":"blocks"}]`,
 		`"target":"rig/rig.polecat"`,
@@ -148,7 +148,7 @@ func TestBeadHoldsPrintsOneRecordPerBead(t *testing.T) {
 			t.Errorf("own's record %s lacks %s", raw, s)
 		}
 	}
-	if raw, _ := json.Marshal(lines[0]["waits"]); string(raw) != `[{"ancestor":"epic","id":"gate","status":"open","type":"blocks"}]` {
+	if raw, _ := json.Marshal(lines[0]["waits"]); string(raw) != `[{"ancestor":"epic","id":"gate","status":"open","title":"park the epic","type":"blocks"}]` {
 		t.Errorf("member's waits = %s; want the epic's gate", raw)
 	}
 }

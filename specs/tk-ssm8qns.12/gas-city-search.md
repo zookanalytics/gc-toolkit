@@ -34,3 +34,21 @@ supervisor's bead route (`GET /v0/city/{city}/bead/{id}`, gascity e03752646,
 `internal/api/client.go:1124`) finds a bead by the city and its id rather than
 in a store the caller names. Nothing in Gas City answers what holds a bead, in
 a named store or any other, as unit 2's search records.
+
+## Each wait's `title`
+
+**The need.** The callers that move name what holds a bead to a person:
+deferred dispatch's `list` and its arm note say which blocker holds an arm and
+what it is, and a park's gate is titled with why the work is parked and what
+releases it. The record named a wait by its id, type and status alone.
+
+**The primitive.** bd's show row, which carries each far bead's fields beside
+the edge's type, its title among them (beads 7ef2fd05e,
+`internal/storage/issueops/dependencies.go:1189`,
+`GetDependenciesWithMetadataInTx`, which returns each far bead's issue row with
+the edge's type). The store adapter already reads that row for the far bead's
+status and close time.
+
+**Why it covers the need.** The title is the far bead's own field, read in the
+same row the record's status comes from, so the key costs no read and holds no
+rule. Gas City names no bead's waits at all, as unit 2's search records.

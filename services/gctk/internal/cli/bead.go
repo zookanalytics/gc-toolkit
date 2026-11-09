@@ -29,9 +29,9 @@ ancestor's wait holds it and its work has not started, unjudged when it has a
 waits-for edge of its own, and clear otherwise. Work in flight is held only
 by its own waits.
 
-waits are the waits behind the status, each {"id", "type", "status"}, where
-status is the status of the bead waited on, with "ancestor" naming the
-ancestor whose wait it is. A waits-for wait is unjudged: the bd the city runs
+waits are the waits behind the status, each {"id", "type", "title",
+"status"}, where title and status are those of the bead waited on, with
+"ancestor" naming the ancestor whose wait it is. A waits-for wait is unjudged: the bd the city runs
 judges it by its spawner's status rather than its gate, so a caller that acts
 holds such a bead. pending is the bead's own waits that have not landed, and
 last_landed is when the last of its own waits that landed did, "" when none
