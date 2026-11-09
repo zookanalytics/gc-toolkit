@@ -50,7 +50,7 @@ func newQuestionEditor() questionEditor {
 	ta.CharLimit = 0
 	ta.Placeholder = "What do you want to talk about? Enter adds a line."
 	ta.SetWidth(76)
-	ta.SetHeight(8)
+	ta.SetHeight(questionLines)
 	pasteKeys := ta.KeyMap.Paste.Keys()
 	ta.KeyMap.Paste.SetEnabled(false)
 	return questionEditor{ta: ta, pasteKeys: pasteKeys}
@@ -79,6 +79,11 @@ func (e *questionEditor) View() string {
 func (e *questionEditor) Focus() tea.Cmd { return e.ta.Focus() }
 func (e *questionEditor) Blur()          { e.ta.Blur() }
 func (e *questionEditor) SetWidth(w int) { e.ta.SetWidth(w) }
+func (e *questionEditor) Height() int    { return e.ta.Height() }
+
+// SetHeight shows h lines of the question. The textarea scrolls its lines to
+// keep the cursor's line in view.
+func (e *questionEditor) SetHeight(h int) { e.ta.SetHeight(h) }
 
 // Update hands msg to the textarea. A paste is held first. A typed key never
 // carries a tab or a CR, since Tab moves the focus and Enter adds a line, so

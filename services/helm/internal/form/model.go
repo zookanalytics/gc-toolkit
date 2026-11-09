@@ -1224,23 +1224,35 @@ func (m *Model) label(f field, text string) string {
 	return labelStyle.Render(text)
 }
 
+// questionLines is how many lines of the question the form shows, and
+// minQuestionLines the fewest it shows on a terminal too short for the fields
+// and the row in play beside them.
+const (
+	questionLines    = 8
+	minQuestionLines = 3
+)
+
 func (m *Model) composeView() string {
-	var b strings.Builder
+	// The question's lines are the one part of the screen that gives way, so
+	// the view is put together once the rest of it is known: the fields above
+	// and below the question, and under them the row in play and the lines
+	// below the list.
+	var head, b strings.Builder
 	act := "Ctrl+S save, start and attach"
 	if !m.attach {
 		act = "Ctrl+S save, start and leave"
 	}
-	b.WriteString(labelStyle.Render("Start a conversation"))
-	b.WriteString(hintStyle.Render("   " + act + " · Tab next field · Ctrl+R return to a conversation · Esc cancel"))
-	b.WriteString("\n\n")
-	b.WriteString(m.label(subjectField, "Subject ") + "  " + m.subject.View() + "\n")
+	head.WriteString(labelStyle.Render("Start a conversation"))
+	head.WriteString(hintStyle.Render("   " + act + " · Tab next field · Ctrl+R return to a conversation · Esc cancel"))
+	head.WriteString("\n\n")
+	head.WriteString(m.label(subjectField, "Subject ") + "  " + m.subject.View() + "\n")
 	if m.from != "" {
 		// The field pads its line to its width, so a note beside it would run
 		// off the screen.
-		b.WriteString(hintStyle.Render("          chosen from what holds "+m.from) + "\n")
+		head.WriteString(hintStyle.Render("          chosen from what holds "+m.from) + "\n")
 	}
-	b.WriteString(m.label(questionField, "Question") + hintStyle.Render("  Enter adds a line") + "\n")
-	b.WriteString(m.question.View() + "\n\n")
+	head.WriteString(m.label(questionField, "Question") + hintStyle.Render("  Enter adds a line") + "\n")
+	b.WriteString("\n")
 	if m.newTopic() {
 		rig := m.rig
 		if rig == "" {
@@ -1317,11 +1329,33 @@ func (m *Model) composeView() string {
 	if m.status != "" {
 		after.WriteString("\n" + badStyle.Render(m.status) + "\n")
 	}
+	// Two lines of the list hold the row in play and, when there are more, the
+	// line that counts the rest.
+	m.fitQuestion(lines(head.String()) + lines(b.String()) + min(len(list), 2) + lines(after.String()))
+	below := b.String()
+	b.Reset()
+	b.WriteString(head.String() + m.question.View() + "\n" + below)
 	for _, line := range listLines(list, sel, m.room(b.String(), after.String())) {
 		b.WriteString(line + "\n")
 	}
 	b.WriteString(after.String())
 	return b.String()
+}
+
+// fitQuestion shows as many of the question's lines as the terminal has room
+// for beside the compose screen's other lines, which number others, from
+// minQuestionLines up to questionLines. So a short terminal still shows the
+// fields, the row in play, which Ctrl+S acts on, what the list leaves out, and
+// the status under the list. Until the terminal's size is known, the question
+// shows questionLines.
+func (m *Model) fitQuestion(others int) {
+	h := questionLines
+	if m.height > 0 {
+		h = min(max(m.height-others, minQuestionLines), questionLines)
+	}
+	if m.question.Height() != h {
+		m.question.SetHeight(h)
+	}
 }
 
 func (m *Model) progressView() string {

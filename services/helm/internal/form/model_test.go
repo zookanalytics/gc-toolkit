@@ -1404,6 +1404,64 @@ func TestTheRowsOnASubjectPageToTheTerminal(t *testing.T) {
 	}
 }
 
+// A short terminal shows fewer lines of the question, down to a few, so the
+// fields, the row in play, the line that counts what the list leaves out and
+// the status under the list stay on screen: the cursor's row while the list has
+// focus, and the row chosen, which Ctrl+S acts on, once it has not. The
+// question keeps every line typed into it, and a terminal tall enough shows
+// all of its lines again.
+func TestAShortTerminalShowsFewerLinesOfTheQuestion(t *testing.T) {
+	a := subjectAbout("tk-a", "gc-toolkit")
+	a.Conversations = convs(3)
+	f := &fakeHelm{about: map[string]About{"tk-a": a}, saveErr: errors.New("the store did not answer")}
+	m := newForm(t, f, Options{Subject: "tk-a"})
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
+	settle(m)
+	const q = "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine"
+	typeText(m, q)
+	_, cmd := m.Update(ctrl('s'))
+	deliver(m, cmd)
+	if m.scr != composeScreen || !strings.HasPrefix(m.status, "Not saved") {
+		t.Fatalf("after the refused save: screen %d, status %q", m.scr, m.status)
+	}
+	focusOn(t, m, contextField)
+	for range 3 {
+		m.Update(key(tea.KeyDown))
+	}
+	onShort := func(mark, id string) {
+		t.Helper()
+		for _, h := range []int{20, 21, 22} {
+			m.Update(tea.WindowSizeMsg{Width: 80, Height: h})
+			v := m.composeView()
+			if n := lines(v); n > h {
+				t.Fatalf("the view is %d lines on a %d-line terminal:\n%s", n, h, v)
+			}
+			ls := onScreen(v, h)
+			if l := marked(ls, mark); !strings.Contains(l, id) {
+				t.Fatalf("on a %d-line terminal the row marked %q is not %s:\n%s", h, mark, id, v)
+			}
+			if marked(ls, "3 more above") == "" || marked(ls, "Not saved") == "" {
+				t.Fatalf("on a %d-line terminal the count of the rows left out or the status is not on screen:\n%s", h, v)
+			}
+		}
+	}
+	onShort("› ", "tk-c02")
+	m.Update(key(tea.KeySpace))
+	if m.choice != "tk-c02" {
+		t.Fatalf("choice = %q, want tk-c02", m.choice)
+	}
+	focusOn(t, m, questionField)
+	onShort("● ", "tk-c02")
+	if m.question.Value() != q {
+		t.Fatalf("question = %q, want every line typed", m.question.Value())
+	}
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 40})
+	m.composeView()
+	if h := m.question.Height(); h != questionLines {
+		t.Fatalf("on a 40-line terminal the question shows %d lines, want %d", h, questionLines)
+	}
+}
+
 // heldAbout is tk-a with one conversation, held by a gate, by its PR's review
 // threads and by the merge pass's blocked verdict. The two the PR holds it by
 // carry no ID, as prstatus.Reasons gives them.
