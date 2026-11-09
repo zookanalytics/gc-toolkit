@@ -61,8 +61,8 @@ func TestPreOpenCheckStallFires(t *testing.T) {
 		reason   string // substring the NEEDS line must carry
 	}{
 		{"tk-never", nil, "no review has run"},
-		{"tk-find", []Blocker{{ID: "tk-rw", Title: "Rework branch polecat/tk-find: address pre-open findings", Status: "open"}}, "findings open"},
-		{"tk-radv", []Blocker{{ID: "tk-rv", Title: "Review branch polecat/tk-radv -> main (correctness): fix the thing", Status: "closed"}}, "reviewed, not advanced"},
+		{"tk-find", []Blocker{{ID: "tk-rw", Title: "Rework branch polecat/tk-find: address pre-open findings", Status: "open", Wait: WaitPending}}, "findings open"},
+		{"tk-radv", []Blocker{{ID: "tk-rv", Title: "Review branch polecat/tk-radv -> main (correctness): fix the thing", Status: "closed", Wait: WaitLanded}}, "reviewed, not advanced"},
 	}
 	for _, c := range cases {
 		a := preOpenGateAnchor(c.id, 5, nil, c.blockers...)
@@ -175,6 +175,7 @@ func TestPreOpenCheckLiveVsDeadReview(t *testing.T) {
 		return Blocker{
 			ID: "tk-review", Title: "Review branch polecat/tk-gate -> main (correctness): fix the thing", Status: "open",
 			RoutedTo: "gc-toolkit/gc-toolkit.polecat-codex", Assignee: assignee,
+			Wait: WaitPending,
 		}
 	}
 
@@ -416,6 +417,7 @@ func TestPreOpenCheckStallYieldsToOpenGate(t *testing.T) {
 	gate := Blocker{
 		ID: "tk-ask", Title: "operator: which rig owns the shared fixture?",
 		Status: "open", IssueType: "gate", AwaitType: "human",
+		Wait: WaitPending,
 	}
 	a := preOpenGateAnchor("tk-gated", 5, nil, gate)
 	tile := mustTile(t, buildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}), "tk-gated")
@@ -438,7 +440,7 @@ func TestPreOpenCheckStallYieldsToOpenGate(t *testing.T) {
 // route. A live review moving a check is a healthy hold, not a stall.
 func TestPreOpenCheckLiveReviewNotRouted(t *testing.T) {
 	// No RoutedTo: the route lives on the workflow, not the child.
-	review := Blocker{ID: "tk-rev", Title: "Review branch polecat/tk-live -> main (correctness): fix the thing", Status: "open"}
+	review := Blocker{ID: "tk-rev", Title: "Review branch polecat/tk-live -> main (correctness): fix the thing", Status: "open", Wait: WaitPending}
 	a := preOpenGateAnchor("tk-live", 5, nil, review)
 	f := Facts{
 		Inflight:   map[string][]string{"tk-rev": {"gc-toolkit__polecat-codex-hq-run"}},

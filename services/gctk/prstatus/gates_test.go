@@ -437,3 +437,23 @@ func TestHoldingGatesIsHoldingsGates(t *testing.T) {
 		t.Errorf("gates of b = %v (%v), want an answer with none", ids, answered)
 	}
 }
+
+// A bead is a human gate only when it is a gate whose await type is human: a
+// gate of another await type, or of none, as park's gate declares, is not one,
+// and neither is a task. The issue type reads in any case.
+func TestIsHumanGate(t *testing.T) {
+	for _, tc := range []struct {
+		issueType, awaitType string
+		want                 bool
+	}{
+		{"gate", "human", true},
+		{"Gate", "human", true},
+		{"gate", "", false},
+		{"gate", "timer", false},
+		{"task", "human", false},
+	} {
+		if got := IsHumanGate(tc.issueType, tc.awaitType); got != tc.want {
+			t.Errorf("IsHumanGate(%q, %q) = %v, want %v", tc.issueType, tc.awaitType, got, tc.want)
+		}
+	}
+}

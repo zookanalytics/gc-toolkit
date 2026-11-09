@@ -44,6 +44,11 @@ export FAKE_GC_LOG="$TMP/gc.log"; : > "$FAKE_GC_LOG"
 export FAKE_BD_LOG="$TMP/bd.log"; : > "$FAKE_BD_LOG"
 export STUB_ROOT="$TMP"
 export STUB_PREFACE=""
+# The frontier reads what holds a bead through gctk bead holds, built from this
+# checkout and run over the fake stores.
+export HOLDS_STUB="$HERE/holds-store.stub.sh" GC_NO_API=1
+GCTK_BIN="$("$HOLDS_STUB" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so no frontier can be read"; exit 1; }
+export GCTK_BIN
 
 bead() { cat > "$1/.beads/$2.json"; }   # bead <store-repo> <id>  (object on stdin)
 
@@ -174,8 +179,27 @@ bead "$R_TK" tk-rev <<'J'
 {"id":"tk-rev","title":"review branch -> main","status":"open","issue_type":"task",
  "metadata":{"task_kind":"review","anchor_bead":"tk-inreview","gc.routed_to":"","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat-codex"}}
 J
+# tk-under: a member of a parked parent, held through it. tk-waiter: a bead
+# with a waits-for edge of its own, which the store cannot judge yet.
+bead "$R_TK" tk-parked <<'J'
+{"id":"tk-parked","title":"a parked parent","status":"open","issue_type":"epic","metadata":{},
+ "dependencies":[{"id":"tk-pgate","dependency_type":"blocks","status":"open","title":"Parked until the operator says"}]}
+J
+bead "$R_TK" tk-pgate <<'J'
+{"id":"tk-pgate","title":"Parked until the operator says","status":"open","issue_type":"gate","metadata":{"gc.routed_to":"human"}}
+J
+bead "$R_TK" tk-under <<'J'
+{"id":"tk-under","title":"a member of the parked parent","status":"open","issue_type":"task","parent":"tk-parked","metadata":{}}
+J
+bead "$R_TK" tk-spawner <<'J'
+{"id":"tk-spawner","title":"the spawner","status":"closed","issue_type":"task","metadata":{}}
+J
+bead "$R_TK" tk-waiter <<'J'
+{"id":"tk-waiter","title":"waits for its spawner","status":"open","issue_type":"task","metadata":{},
+ "dependencies":[{"id":"tk-spawner","dependency_type":"waits-for","status":"closed","title":"the spawner"}]}
+J
 # tk-failclosed: a blocks dep whose store no rig carries and which bd could not
-# embed a status for — unknown must fail closed to stuck, never read as landed.
+# embed a status for — an edge into another store, which holds nothing.
 bead "$R_TK" tk-failclosed <<'J'
 {"id":"tk-failclosed","title":"fail-closed","status":"open","issue_type":"task","metadata":{},
  "dependencies":[{"id":"zz-ghost","dependency_type":"blocks","title":"unplaceable blocker"}]}
@@ -383,6 +407,16 @@ printf '{"id":"tk-nul","title":"nul","status":"open","issue_type":"task","notes"
 # --direction=up --type tracks (reverse trackers). Every call is logged so the
 # test can prove which store was asked, not just what came back.
 set -u
+# A read the gctk under test makes answers from the store its --db names, every
+# bead file in it read one at a time, through the seam holds-store.stub.sh
+# keeps. An edge onto a bead another store holds is one into another store.
+if [ -n "${HOLDS_STUB_READ:-}" ] && [ "${1:-}" = bd ]; then
+  shift
+  hdb="$STUB_ROOT/rigs/gc-toolkit/.beads"; [ "${1:-}" = --db ] && hdb="${2:-}"
+  hs="$STUB_ROOT/holds-$(basename "$(dirname "$hdb")").json"
+  for f in "$hdb"/*.json; do [ -e "$f" ] && jq -c 'objects' "$f" 2>/dev/null; done | jq -s -c . > "$hs"
+  HOLDS_STORE="$hs" HOLDS_WHERE="$hdb" exec "${HOLDS_STUB:?}" answer "$@"
+fi
 printf '%s\n' "$*" >> "$FAKE_GC_LOG"
 preface() { [ -n "${STUB_PREFACE:-}" ] && echo 'gc bd: answering from the rig "fake" store'; }
 miss() { printf '{"error":"no issues found matching the provided IDs","schema_version":1}\n'; echo "Issue $1 not found" >&2; exit 1; }
@@ -647,11 +681,24 @@ has "$OUT" "$NO_EDGES" "a bead with no edge of any class reads (none)"
 # Default output carries no frontier; it is added only on --frontier.
 JQF='has("frontier")'  runj tk-anchor;             eq "$JQ" false "frontier is absent by default (opt-in)"
 JQF='.frontier.verdict' runj tk-anchor --frontier; eq "$JQ" ready "all blocks-blockers closed (one cross-store) reads ready"
-JQF='.frontier.blockers.closed' runj tk-anchor --frontier; eq "$JQ" 2 "both closed blockers — same-store and cross-store — are counted"
+JQF='.frontier.blockers.closed' runj tk-anchor --frontier; eq "$JQ" 1 "the same-store closed blocker is counted"
+JQF='.frontier.foreign | join(",")' runj tk-anchor --frontier; eq "$JQ" or-far "  ... and the edge into another store holds nothing, listed as foreign"
 JQF='.frontier.blockers.open'   runj tk-anchor --frontier; eq "$JQ" 0 "no open blocker"
 JQF='.frontier.open | length'   runj tk-anchor --frontier; eq "$JQ" 0 "closed blockers are counted, never listed"
-has "$(cat "$FAKE_GC_LOG")" "bd --db $R_OR/.beads list --id or-far" \
-  "the cross-store blocker's status is read from the otherrig store it lives in"
+JQF='.frontier.holds'           runj tk-anchor --frontier; eq "$JQ" clear "  ... and gctk bead holds answers clear"
+
+JQF='.frontier.verdict'          runj tk-under --frontier; eq "$JQ" stuck "a member of a parked parent is held through it, so not ready"
+JQF='.frontier.holds'            runj tk-under --frontier; eq "$JQ" held "  ... holds=held"
+JQF='.frontier.open[0] | "\(.id) \(.ancestor)"' runj tk-under --frontier; eq "$JQ" "tk-pgate tk-parked" "  ... naming the parent's gate and the parent it sits on"
+
+JQF='.frontier.verdict'          runj tk-waiter --frontier; eq "$JQ" stuck "a waits-for edge of its own is a wait the store cannot judge, so not ready"
+JQF='.frontier.holds'            runj tk-waiter --frontier; eq "$JQ" unjudged "  ... holds=unjudged"
+JQF='.frontier.open[0] | "\(.id) \(.unjudged)"' runj tk-waiter --frontier; eq "$JQ" "tk-spawner true" "  ... and the spawner is listed as unjudged"
+
+GCTK_BIN="$TMP/no-gctk" JQF='.frontier | "\(.verdict) \(.holds)"' runj tk-anchor --frontier
+eq "$JQ" "stuck unread" "a read of what holds it that cannot run fails the verdict closed"
+GCTK_BIN="$TMP/no-gctk" JQF='.frontier.unread' runj tk-anchor --frontier
+has "$JQ" "no gctk binary at $TMP/no-gctk" "  ... and says why"
 
 JQF='.frontier.verdict'          runj tk-stuck --frontier; eq "$JQ" stuck "an open unrouted blocker is stuck, so the verdict is stuck"
 JQF='.frontier.open[0].id'       runj tk-stuck --frontier; eq "$JQ" tk-op "  ... and the open blocker is named"
@@ -667,11 +714,9 @@ JQF='.frontier.open[0].advance'  runj tk-humangate --frontier; eq "$JQ" stuck " 
 JQF='.frontier.open[0].advance'  runj tk-inreview --frontier; eq "$JQ" advancing "a review bead with a pour-cleared route is machine work, so advancing not stuck"
 JQF='.frontier.verdict'          runj tk-inreview --frontier; eq "$JQ" advancing "  ... so a subject held only by a review in flight is advancing, not stuck"
 
-JQF='.frontier.open[0].advance'  runj tk-failclosed --frontier; eq "$JQ" stuck "an unplaceable blocker is unknown, so stuck (fail closed)"
-JQF='.frontier.blockers.open'    runj tk-failclosed --frontier; eq "$JQ" 1     "  ... counted as an open blocker"
-JQF='.frontier.verdict'          runj tk-failclosed --frontier; eq "$JQ" stuck "  ... so the verdict fails closed"
-JQF='.frontier.open[0].stuck_on | "\(.id) \(.why)"' runj tk-failclosed --frontier
-eq "$JQ" "zz-ghost unknown" "  ... and names itself unknown"
+JQF='.frontier.verdict'          runj tk-failclosed --frontier; eq "$JQ" ready "an edge onto a bead the store does not hold holds nothing, so the verdict is ready"
+JQF='.frontier.blockers.open'    runj tk-failclosed --frontier; eq "$JQ" 0     "  ... counted as no open blocker"
+JQF='.frontier.foreign | join(",")' runj tk-failclosed --frontier; eq "$JQ" zz-ghost "  ... and listed as foreign"
 
 # --- B2. The transitive walk --------------------------------------------------
 blkr() { jr "[.frontier.open[] | select(.id == \"$1\")][0] | \"\(.advance) \(.stuck_on.id // \"-\") \(.stuck_on.why // \"-\")\""; }
@@ -699,10 +744,8 @@ esac
 
 : > "$FAKE_GC_LOG"
 run tk-w-sub6 --frontier --json
-eq "$(jr .frontier.blockers.open)" 1 "a subject's only blocker, in another store, is counted though its show row leaves the edge out"
-eq "$(blkr or-w-mid)" "stuck tk-w-far unrouted" "a cross-store hop: the walk crosses into otherrig and back"
-has "$(cat "$FAKE_GC_LOG")" "bd --db $R_OR/.beads list --id or-w-mid" "  ... reading the middle bead from the store it lives in"
-has "$(cat "$FAKE_GC_LOG")" "bd --db $R_TK/.beads list --id tk-w-far" "  ... and the orphan beneath it from its own"
+eq "$(jr .frontier.blockers.open)" 0 "a subject's only blocker, in another store, holds nothing"
+eq "$(jr '.frontier.foreign | join(",")')" or-w-mid "  ... and is listed as foreign, not walked"
 
 run tk-w-xs --frontier --json
 eq "$(blkr tk-w-xmid)" "stuck or-w-leaf unrouted" "a walked bead's blocker in another store is read off its list row"
@@ -737,8 +780,8 @@ eq "$(blkr tk-w-v1)" "stuck tk-w-v7 budget" "  ... a seventh level is past the d
 run tk-w-sub8 --frontier --json
 eq "$(jr .frontier.verdict)" advancing "a diamond of routed beads advances"
 eq "$(logcount 'list --id.*tk-w-dshared')" 1 "  ... and the shared blocker is read once"
-eq "$(logcount 'list --id tk-w-sub8,tk-w-d1,tk-w-d2 ')" 1 \
-  "  ... the subject's blockers in one batched read of their store, the subject's own list row riding it"
+eq "$(logcount 'list --id tk-w-d1,tk-w-d2 ')" 1 \
+  "  ... the subject's waits in one batched read of their store"
 
 : > "$FAKE_GC_LOG"
 run tk-w-sub9 --frontier --json

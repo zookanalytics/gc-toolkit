@@ -279,9 +279,11 @@ for d in agents assets doctor formulas lifecycle orders overlays packs services 
 done
 eq "${COPIES# }" "" "(NO-COPY) no file outside run-lib.sh defines its own run defs"
 # The key a root names its input convoy in is read here alone. lifecycle.toml
-# registers it, and the helm board's Go copy reads it under its fixture test.
-# Tests and fixtures carry it as data.
-KEY_ALLOW=" lifecycle/lifecycle.toml services/helm/internal/source/facts.go "
+# registers it. The helm board's Go copy reads it, and so does gctk's waits
+# package, which declares it in keys.go and lists it in the key registry
+# generated from its declarations, each copy under its own fixture test. Tests
+# and fixtures carry it as data.
+KEY_ALLOW=" lifecycle/lifecycle.toml services/helm/internal/source/facts.go services/gctk/waits/keys.go services/gctk/key-registry.json "
 KEY_READS=""
 for d in agents assets commands doctor formulas lifecycle orders overlays packs services skills template-fragments tools; do
     [ -d "$ROOT/$d" ] || continue

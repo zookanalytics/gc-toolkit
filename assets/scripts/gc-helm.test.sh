@@ -88,6 +88,30 @@ S
 
 # --- gc stub ------------------------------------------------------------------
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
+# A read the gctk under test makes answers through the seam holds-store.stub.sh
+# keeps. A read naming a bead the suite gives a dep-list fixture starts the
+# store: that bead, open and carrying the fixture's edges, each far bead the
+# fixture names, and a bare open row for any other bead the read names. Every
+# later read of the same call answers from it. A-PROBEDEAD and A-PROBEJUNK fail
+# the read, as they fail the dep list.
+if [ -n "${HOLDS_STUB_READ:-}" ] && [ "${1:-}" = bd ]; then
+  shift
+  case " $* " in *A-PROBEDEAD*|*A-PROBEJUNK*) echo "gc bd: simulated read failure" >&2; exit 1 ;; esac
+  hs="$FAKE_DEPLISTS/.holds-store.json"
+  asked=$(printf '%s\n' "$@" | awk 'p { print; exit } $0 == "--id" { p = 1 }')
+  fixtures=""
+  for b in $(printf '%s' "$asked" | tr ',' ' '); do
+    [ -f "$FAKE_DEPLISTS/$b.json" ] && fixtures="$fixtures $b"
+  done
+  if [ -n "$fixtures" ] || [ ! -f "$hs" ]; then
+    { for b in $fixtures; do
+        jq -c --arg b "$b" '[{id: $b, status: "open", dependencies: [ .[] | {id, dependency_type} ]}] + [ .[] | del(.dependency_type) ]' "$FAKE_DEPLISTS/$b.json"
+      done
+      jq -nc --arg ids "$asked" '[ $ids | split(",")[] | select(. != "") | {id: ., status: "open"} ]'
+    } | jq -s -c 'add // [] | unique_by(.id)' > "$hs"
+  fi
+  HOLDS_STORE="$hs" exec "${HOLDS_STUB:?}" answer "$@"
+fi
 case "$1 ${2:-}" in
   "rig list")
     # Two rigs. gc-toolkit's path has no .beads dir, so gc-helm issues
@@ -254,6 +278,11 @@ export FAKE_STEPS_JSON="$TMP/steps.json" FAKE_ROOTS="$TMP/roots" \
        FAKE_BRANCHES="$TMP/branches" FAKE_ASSIGNEES="$TMP/assignees" \
        FAKE_CONVOY_CALLS="$TMP/convoy-calls"
 mkdir -p "$TMP/rig-a/.beads" "$TMP/deplists"
+# What holds a bead is the answer of gctk bead holds, built from this checkout
+# and run over the dep-list fixtures below.
+export HOLDS_STUB="$HERE/holds-store.stub.sh" GC_NO_API=1
+GCTK_BIN="$("$HOLDS_STUB" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so no hold can be read"; exit 1; }
+export GCTK_BIN
 : > "$TMP/convoy-calls"
 
 # Blocker fixtures, in the shape `gc bd dep list --direction=down --json`
@@ -278,6 +307,15 @@ cat > "$TMP/deplists/A-DONEBLK.json" <<'J'
 J
 cat > "$TMP/deplists/CLOSED-A-FOLD.json" <<'J'
 [{"id":"A-w-child","status":"open","dependency_type":"blocks","metadata":{}}]
+J
+# A-PINNEDBLK a pinned blocker, which the store counts as none -> nothing waits
+# A-WAITSFOR  a waits-for edge of its own, which the store cannot judge yet ->
+#             the bead waits on its spawner, unjudged
+cat > "$TMP/deplists/A-PINNEDBLK.json" <<'J'
+[{"id":"w-pin","status":"pinned","dependency_type":"blocks","metadata":{}}]
+J
+cat > "$TMP/deplists/A-WAITSFOR.json" <<'J'
+[{"id":"w-spawn","status":"closed","dependency_type":"waits-for","metadata":{}}]
 J
 cat > "$TMP/deplists/A-PROBEDEAD.json" <<'J'
 [{"id":"A-w-child","status":"open","dependency_type":"blocks","metadata":{}}]
@@ -909,6 +947,27 @@ CRC2=0
 sh "$SCRIPT" takeaway A-DONEBLK "actionable — nothing outstanding" \
    --release --route "$POOL" >/dev/null 2>"$TMP/derr" || CRC2=$?
 eq "$CRC2" "0" "(DELEGDONE) a closed blocker does not refuse the route"
+
+# (DELEGPIN) a pinned blocker holds nothing, as the store counts it, so the
+# route lands.
+: > "$TMP/updates"; printf '%s' "$POOL" > "$TMP/routed"
+CRC3=0
+sh "$SCRIPT" takeaway A-PINNEDBLK "actionable — its blocker is pinned" \
+   --release --route "$POOL" >/dev/null 2>"$TMP/derr" || CRC3=$?
+eq "$CRC3" "0" "(DELEGPIN) a pinned blocker does not refuse the route"
+
+# (DELEGWAITS) a waits-for edge of the bead's own is a wait the store cannot
+# judge yet, so the bead's work may still sit on its spawner: the route is
+# refused, and the refusal names the spawner.
+: > "$TMP/updates"; printf '%s' "$POOL" > "$TMP/routed"
+WRC=0
+sh "$SCRIPT" takeaway A-WAITSFOR "routed — it waits for its spawner" --by converse \
+   --release --route "$POOL" >/dev/null 2>"$TMP/derr" || WRC=$?
+eq "$WRC" "2" "(DELEGWAITS) a waits-for edge of its own refuses the route"
+grep -q 'w-spawn' "$TMP/derr" \
+  && ok "(DELEGWAITS) …and the refusal names the spawner" \
+  || bad "(DELEGWAITS) the spawner is unnamed (stderr: $(cat "$TMP/derr"))"
+eq "$(wc -l < "$TMP/updates" | tr -d ' ')" "0" "(DELEGWAITS) …before any write"
 
 # (DELEGBARE) the release without a route is the disposition this guard sends
 # callers back to, so it has to keep working on the very bead it refuses.

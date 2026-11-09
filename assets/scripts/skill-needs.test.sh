@@ -911,19 +911,32 @@ echo "── a moot or benign close settles a headline that waits on nothing ─
 # A cut-short sitting leaves its hold's headline on the subject, and the next
 # sitting's premise re-check can find the conversation moot and close it. The
 # block runs as written, its placeholders filled, under stubs: gc answers the
-# subject's row from RL_ROW and its blocks edges from RL_GATES, and exits
-# RL_SHOW_RC and RL_DEPS_RC after printing them.
+# subject's row from RL_ROW and exits RL_SHOW_RC after printing it, and gctk,
+# built from this checkout, answers what holds the subject from a store of that
+# row with an edge onto each bead RL_GATES lists, `blocks` unless the bead names
+# its `edge`, those beads, and the rows RL_MORE adds. Its reads fail at
+# RL_DEPS_RC, or when RL_GATES is not a list.
 RECHECK="$REPO/skills/converse-recheck-premise/SKILL.md"
 RL="$TMP/release"
 mkdir -p "$RL/bin" "$RL/pack/assets/scripts"
+export HOLDS_STUB="$REPO/assets/scripts/holds-store.stub.sh" GC_NO_API=1
+GCTK_BIN="$("$HOLDS_STUB" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so the premise re-check cannot run"; exit 1; }
+export GCTK_BIN
 cat >"$RL/bin/gc" <<'STUB'
 #!/usr/bin/env bash
+if [ -n "${HOLDS_STUB_READ:-}" ] && [ "${1:-}" = bd ]; then
+    shift
+    printf '%s\n' "$RL_GATES" | jq -e 'type == "array"' >/dev/null 2>&1 || { echo "gc bd: simulated read failure" >&2; exit 1; }
+    [ "${RL_DEPS_RC:-0}" -eq 0 ] || { echo "gc bd: simulated read failure" >&2; exit "$RL_DEPS_RC"; }
+    jq -nc --argjson row "$RL_ROW" --argjson g "$RL_GATES" --argjson more "${RL_MORE:-[]}" \
+        '[ ($row[0] + {_deps: [ $g[] | {id, dependency_type: (.edge // "blocks")} ]}) ] + $g + $more' >"$RL_DIR/holds.json" || exit 1
+    HOLDS_STORE="$RL_DIR/holds.json" exec "$HOLDS_STUB" answer "$@"
+fi
 printf 'gc %s\n' "$*" >>"$RL_DIR/log"
 case "$1 ${2:-} ${3:-}" in
     "bd show "*)
         [ -z "${RL_SHOW_DOWN:-}" ] || { printf '%s\n' '{"error":"no issues found matching the provided IDs"}'; exit 1; }
         printf '%s\n' "$RL_ROW"; exit "${RL_SHOW_RC:-0}" ;;
-    "bd dep list") printf '%s\n' "$RL_GATES"; exit "${RL_DEPS_RC:-0}" ;;
     "bd comment "*) [ -z "${RL_COMMENT_REFUSE:-}" ] || exit 1 ;;
 esac
 exit 0
@@ -956,6 +969,10 @@ SETTLED='[{"id":"tk-x","metadata":{"gc.takeaway":"ruled: x","gc.takeaway_settled
 NONE_HOLDS='[{"id":"tk-g1","issue_type":"gate","await_type":"human","status":"closed"},{"id":"tk-w","issue_type":"task","status":"closed"}]'
 GATE_HOLDS='[{"id":"tk-g2","issue_type":"gate","await_type":"human","status":"open"}]'
 WORK_HOLDS='[{"id":"tk-w","issue_type":"task","status":"open"}]'
+# A waits-for edge of the subject's own onto a spawner whose child is open: the
+# store cannot judge it yet, so the subject reads unjudged, still held.
+SPAWN_HOLDS='[{"id":"tk-sp","issue_type":"task","status":"open","edge":"waits-for"}]'
+SPAWN_CHILD='[{"id":"tk-spc","issue_type":"task","status":"open","parent":"tk-sp"}]'
 for sh_ in $shells; do
     run=$sh_
     [ "$sh_" = zsh ] && run="zsh -f"
@@ -966,9 +983,9 @@ for sh_ in $shells; do
             ok "($sh_) recheck close: a waiting headline on a subject nothing holds is settled with the reading, before the conversation closes" ;;
         *) bad "($sh_) recheck close: a waiting headline on a subject nothing holds is settled with the reading, before the conversation closes" "exit $rc, calls: $calls" ;;
     esac
-    for held_by in "$GATE_HOLDS|an open human gate" "$WORK_HOLDS|open work"; do
-        gates=${held_by%%|*}; what=${held_by#*|}
-        rc=$(run_release "$run" "$WAITING" "$gates")
+    for held_by in "$GATE_HOLDS|an open human gate|[]" "$WORK_HOLDS|open work|[]" "$SPAWN_HOLDS|a waits-for edge it cannot judge yet|$SPAWN_CHILD"; do
+        gates=${held_by%%|*}; rest=${held_by#*|}; what=${rest%%|*}; more=${rest#*|}
+        rc=$(run_release "$run" "$WAITING" "$gates" RL_MORE="$more")
         calls=$(tr '\n' ';' <"$RL/log")
         case "$rc:$calls" in
             *"gc-helm takeaway"*) bad "($sh_) recheck close: a subject $what still holds keeps its headline" "exit $rc, calls: $calls" ;;
@@ -996,7 +1013,7 @@ for sh_ in $shells; do
         *) bad "($sh_) recheck close: an action the store will not record still closes the conversation, says so, and draws the comment" "exit $rc, calls: $calls, out: $(cat "$RL/out")" ;;
     esac
     for stop in "RL_TAKEAWAY_FAIL=1|a headline that does not land|$NONE_HOLDS" "RL_SHOW_DOWN=1|a subject that does not read|$NONE_HOLDS" \
-        "RL_NONE=1|a blocker listing that does not read|{\"error\":\"no issue found\"}"; do
+        "RL_NONE=1|a hold read that does not answer|{\"error\":\"no issue found\"}"; do
         IFS='|' read -r setting what gates <<EOF
 $stop
 EOF
@@ -1016,7 +1033,7 @@ EOF
         "$TWICE|RL_SHOW_RC=0|RL_DEPS_RC=0|a subject read that answers two rows" \
         "$OTHER|RL_SHOW_RC=0|RL_DEPS_RC=0|a subject read that answers another bead's row" \
         "$WAITING|RL_SHOW_RC=1|RL_DEPS_RC=0|a subject read that exits non-zero, whatever it printed," \
-        "$WAITING|RL_SHOW_RC=0|RL_DEPS_RC=1|a blocker listing that exits non-zero, whatever it printed,"; do
+        "$WAITING|RL_SHOW_RC=0|RL_DEPS_RC=1|a hold read that fails,"; do
         IFS='|' read -r row show_rc deps_rc what <<EOF
 $stop
 EOF
