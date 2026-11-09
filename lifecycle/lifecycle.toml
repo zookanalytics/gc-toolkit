@@ -209,7 +209,7 @@ check_set_sentinel = "none"
 approval_rule = "universal-nonself-standing"
 
 # The hold markers: the metadata a live bead carries to say it is not moving.
-# I1 holds that a hold is a `blocks` edge to a live bead in the same store, so
+# I1 holds that a hold is a wait edge to a live bead in the same store, so
 # each key below records a hold the graph cannot answer, and a live bead
 # carrying one with no such blocker is what doctor/check-wait-is-an-edge
 # reports. The check reads this declaration instead of carrying its own list,
@@ -435,7 +435,8 @@ since_format = "RFC 3339 UTC"
 # "routed to you — no question recorded".
 #
 # A WAIT IS AN EDGE, never a metadata string (I1, doctor/check-wait-is-an-edge):
-# `blocks` is the one edge type bd ready honors as a hold. `parent-child` is
+# `blocks` is the edge type the pack writes for a hold, one of the three bd
+# ready honors with `conditional-blocks` and `waits-for`. `parent-child` is
 # decomposition that cascades the parent's blocked state DOWN to its children,
 # so the pack attaches a conversation or a finding with `tracks` — which
 # carries the structure without making the child unclaimable — and reserves

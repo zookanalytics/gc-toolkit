@@ -105,3 +105,41 @@ each row, the fields bd-lib.sh's `$HUMAN_GATE_JQ` reads).
 **Why it covers the need.** The snapshot already reads that row for the far
 bead's status, so the keys cost no read and hold no rule: the reader applies
 its own test, `$HUMAN_GATE_JQ`'s `human_gate` among them, to the wait.
+
+## check-wait-is-an-edge's FOREIGN section and its unjudged note
+
+**The need.** A live bead's wait edge onto a bead in another store holds
+nothing. `bd dep add` accepts the foreign id and reports success, and the
+store's blocked rule reads only the beads it holds, so the bead runs ahead of
+what it names. The census found three on the gc-toolkit store
+([census-reread.md](census-reread.md)). The check named such an edge only on a
+marked bead whose every other blocker had closed. An unmarked bead's foreign
+edge went unreported, and so did one beside a live blocker.
+
+**The primitive.** bd doctor's Orphaned Dependencies check, check 21 of a plain
+`bd doctor` (`CheckOrphanedDependencies` in `cmd/bd/doctor/validation.go` at
+beads 7ef2fd05e). It lists every dependency row, in both dependency tables,
+whose far id neither the issues nor the wisps table holds, and it leaves out
+`external:` refs.
+
+**Why it does not cover the need.** It is store-wide and does not look at the
+edge type. Its query was run read-only through `gc bd sql` on the gc-toolkit
+store at 2026-11-09T04:04Z, and it finds 41 such edges:
+
+- the three live wait edges;
+- 38 edges on closed beads, which hold nothing live. Among them are 19
+  `supersedes` edges, which record a closed bead's successor in another store
+  on purpose.
+
+Its detail is cut at 200 characters, so the three live edges need not show.
+Its fix, `bd doctor --fix`, deletes every one of the 41, the successor records
+with them. Where the wait belongs is in the bead's own store, and nothing in
+that fix records it there. Nor does the city's doctor run the check: Gas City
+names `bd doctor` only as a repair step in its preflight
+(`internal/beads/contract/preflight_checker.go:868` and `:877` at gascity
+e03752646). The section prints the bead read's `foreign` key, which carries
+wait edges only and is read for live beads only, and it names that remedy.
+
+The unjudged note is the note check-armed-dispatch-owed prints, for the reason
+its section above gives. The check now prints it for every live bead, marked
+or not, and the note goes once tk-ssm8qns.6 drops the status.
