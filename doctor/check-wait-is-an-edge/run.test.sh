@@ -606,6 +606,33 @@ has "$OUT" "hh-2" "the other stores are still judged"
 has "$OUT" "across 2 store(s)" "and the checked count leaves the failed store out"
 reset
 
+# A pass of the check that does not run leaves its store NOT checked, never
+# clean: the status map, the list of the beads to ask about, and the verdicts of
+# the held beads. The jq here fails the one program whose text carries
+# JQ_FAIL_ON and runs every other.
+REAL_JQ=$(command -v jq)
+mkdir -p "$TMP/jqfail"
+{ printf '#!/bin/sh\n'
+  printf 'for a in "$@"; do case "$a" in *"$JQ_FAIL_ON"*) echo "jq: simulated failure" >&2; exit 5 ;; esac; done\n'
+  printf 'exec %s "$@"\n' "$REAL_JQ"; } > "$TMP/jqfail/jq"
+chmod +x "$TMP/jqfail/jq"
+store '[{"id":"aa-101","status":"open","metadata":{"triage.hold":"held"}}]'
+OUT=$(PATH="$TMP/jqfail:$PATH" JQ_FAIL_ON='["unedged", $id' run_check); RC=$?
+eq "$RC" "1" "a verdict pass that does not run warns"
+has "$OUT" "alpha: could not judge the waits of its held beads — this store was NOT checked" "and names the store it could not judge"
+hasnt "$OUT" "aa-101" "no finding is made from that store"
+hasnt "$OUT" "OK:" "and the store never reads as clean"
+has "$OUT" "across 2 store(s)" "and the checked count leaves it out"
+OUT=$(PATH="$TMP/jqfail:$PATH" JQ_FAIL_ON='as $marked' run_check); RC=$?
+eq "$RC" "1" "a list of the beads to ask about that does not run warns"
+has "$OUT" "alpha: could not list the beads to ask what holds them — this store was NOT checked" "and names the store it could not list"
+hasnt "$OUT" "OK:" "and no store reads as clean"
+OUT=$(PATH="$TMP/jqfail:$PATH" JQ_FAIL_ON='value: ((.status' run_check); RC=$?
+eq "$RC" "1" "a status map that does not read warns"
+has "$OUT" "alpha: could not read the live beads' statuses off the listing — this store was NOT checked" "and names the store whose map did not read"
+hasnt "$OUT" "OK:" "and no store reads as clean"
+reset
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

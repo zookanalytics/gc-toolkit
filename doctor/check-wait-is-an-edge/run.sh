@@ -317,19 +317,33 @@ while IFS=$'\037' read -r rig_name rig_path hq suspended; do
         continue
     fi
 
+    # Each live bead's status, which the note and the verdicts below read. It and
+    # the marked rows reach jq as files, since both grow with the store and an
+    # argument past the kernel's cap fails the program. A pass below that does
+    # not run leaves the store NOT checked, since a verdict nobody computed is
+    # not a clean one.
+    statuses=$(printf '%s' "$live_json" | jq -c '[.[] | {key: ((.id // "") | tostring), value: ((.status // "") | tostring)}] | from_entries' 2>/dev/null) || statuses=""
+    if [ -z "$statuses" ]; then
+        warnings+=("$label: could not read the live beads' statuses off the listing — this store was NOT checked")
+        continue
+    fi
+
     # What holds each live bead that carries a marker or a wait edge, in one
     # read of the store: a bead with neither has no wait to be pending and none
     # to point into another store. A read that answers none of them is the
     # store's read failing, so the store is NOT checked; a bead it could not
     # answer is left out, and warned.
     holds='{}'
-    ids=$(printf '%s' "$live_json" | jq -r --arg rows "$rows" '
+    ids=$(printf '%s' "$live_json" | jq -r --rawfile rows <(printf '%s' "$rows") '
         ($rows | split("\n") | map(select(length > 0) | split("\u001f")[0])) as $marked
         | [ .[] | ((.id // "") | tostring) as $id | select($id != "")
             | select(($marked | index([$id])) != null
                      or any((.dependencies // [])[]?; ((.type // .dependency_type // "") | tostring) as $t
                             | $t == "blocks" or $t == "conditional-blocks" or $t == "waits-for"))
-            | $id ] | join(" ")' 2>/dev/null)
+            | $id ] | join(" ")' 2>/dev/null) || {
+        warnings+=("$label: could not list the beads to ask what holds them — this store was NOT checked")
+        continue
+    }
     if [ -n "$ids" ]; then
         holds=""
         # shellcheck disable=SC2086  # one id per word
@@ -342,14 +356,42 @@ while IFS=$'\037' read -r rig_name rig_path hq suspended; do
         unread=$(printf '%s' "$holds" | jq -r '[.[] | select(.error != null) | .id] | join(", ")' 2>/dev/null)
         [ -z "$unread" ] || warnings+=("$label: could not read what holds $unread — those beads were NOT checked")
     fi
+
+    # Each marked bead's verdict, in one pass over the answers: live while a wait
+    # of its own is pending, unedged with no wait edge at all, stale otherwise,
+    # naming why each wait holds nothing. A bead the read could not answer is
+    # left to the warning above.
+    verdicts=""
+    if [ -n "$rows" ]; then
+        verdicts=$(printf '%s' "$holds" | jq -r --rawfile rows <(printf '%s' "$rows") --slurpfile statuses <(printf '%s' "$statuses") '
+            ($statuses[0]) as $st | . as $h
+            | $rows | split("\n")[] | select(length > 0) | split("\u001f") as [$id, $bst, $marks, $ids]
+            | ($h[$id] // null) as $r
+            | if $r == null or $r.error != null then empty
+              elif (($r.pending // []) | length) > 0 then empty
+              elif ($ids // "") == "" then ["unedged", $id, $bst, $marks, ""]
+              else ([$r.foreign[]?.id]) as $far
+                | ["stale", $id, $bst, $marks,
+                   (($ids | split(",") | map(select(. != "")) | map(. as $w
+                      | $w + " is " + (if ($far | index([$w])) != null then "in another store, where an edge holds nothing"
+                                       elif ($st[$w] // "") == "pinned" then "pinned"
+                                       elif ($st[$w] // "") != "" then ($st[$w] + ", which the store does not count")
+                                       else "closed" end))) | join(", "))]
+              end
+            | join("\u001f")' 2>/dev/null) || {
+            warnings+=("$label: could not judge the waits of its held beads — this store was NOT checked")
+            continue
+        }
+    fi
     checked=$((checked + 1))
 
     # A pending wait the live listing did not carry is a live bead this scan
     # misses, so the listing's own reach is short of the store: the next hold on
     # such a bead is a finding this check would never raise.
-    missed=$(printf '%s' "$holds" | jq -r --argjson st "$(printf '%s' "$live_json" | jq -c '[.[] | (.id // "") | tostring]' 2>/dev/null || echo '[]')" '
-        [ .[] | select(.error == null) | (.pending // [])[] | select(.ancestor == null)
-          | select(.id as $i | ($st | index([$i])) == null) | .id + " (" + (.status // "?") + ")" ] | unique | join(", ")' 2>/dev/null)
+    missed=$(printf '%s' "$holds" | jq -r --slurpfile statuses <(printf '%s' "$statuses") '
+        ($statuses[0]) as $st
+        | [ .[] | select(.error == null) | (.pending // [])[] | select(.ancestor == null)
+          | select(.id as $i | $st | has($i) | not) | .id + " (" + (.status // "?") + ")" ] | unique | join(", ")' 2>/dev/null)
     if [ -n "$missed" ]; then
         notes+=("$label: the live listing did not carry $missed, which this store reports as not closed — the scanned status set or the category flags are short of what the store holds")
     fi
@@ -365,34 +407,12 @@ while IFS=$'\037' read -r rig_name rig_path hq suspended; do
     done < <(printf '%s' "$holds" | jq -r '.[] | select(.error == null and .status == "unjudged")
         | "\(.id): waits on " + ([.waits[] | select(.type == "waits-for") | .id] | join(", ")) + " by a waits-for edge, which the store cannot judge yet (unjudged)"' 2>/dev/null)
 
-    # Each marked bead's verdict, in one pass over the answers: live while a wait
-    # of its own is pending, unedged with no wait edge at all, stale otherwise,
-    # naming why each wait holds nothing. A bead the read could not answer is
-    # left to the warning above. The answers ride stdin and the status map an
-    # argument, which a store's status map keeps small.
-    [ -n "$rows" ] || continue
-    statuses=$(printf '%s' "$live_json" | jq -c '[.[] | {key: ((.id // "") | tostring), value: ((.status // "") | tostring)}] | from_entries' 2>/dev/null) || statuses='{}'
     while IFS=$'\037' read -r kind id st marks why; do
         case "$kind" in
             unedged) unedged+=("$label bead $id ($st): held by $marks, and carries no wait edge") ;;
             stale) stale+=("$label bead $id ($st): held by $marks, and $why") ;;
         esac
-    done < <(printf '%s' "$holds" | jq -r --arg rows "$rows" --argjson st "$statuses" '
-        . as $h
-        | $rows | split("\n")[] | select(length > 0) | split("\u001f") as [$id, $bst, $marks, $ids]
-        | ($h[$id] // null) as $r
-        | if $r == null or $r.error != null then empty
-          elif (($r.pending // []) | length) > 0 then empty
-          elif ($ids // "") == "" then ["unedged", $id, $bst, $marks, ""]
-          else ([$r.foreign[]?.id]) as $far
-            | ["stale", $id, $bst, $marks,
-               (($ids | split(",") | map(select(. != "")) | map(. as $w
-                  | $w + " is " + (if ($far | index([$w])) != null then "in another store, where an edge holds nothing"
-                                   elif ($st[$w] // "") == "pinned" then "pinned"
-                                   elif ($st[$w] // "") != "" then ($st[$w] + ", which the store does not count")
-                                   else "closed" end))) | join(", "))]
-          end
-        | join("\u001f")' 2>/dev/null)
+    done < <(printf '%s\n' "$verdicts")
 done <<SCOPE_EOF
 $scopes
 SCOPE_EOF
