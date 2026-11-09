@@ -79,7 +79,7 @@ out=$("$SUT" --mark 2>&1); rc=$?
 eq "$rc:$(marked)" "0:1" "the next --mark, finding nothing to join, marks the store"
 : > "$STUB_KV"
 STUB_KV_FAIL=1 "$SUT" --mark >/dev/null 2>&1; rc=$?
-eq "$rc" 1 "a mark that does not read back exits 1"
+eq "$rc" 1 "a mark the store refuses exits 1"
 "$SUT" --mark tk-old >/dev/null 2>&1; rc=$?
 eq "$rc" 2 "--mark names no anchor"
 "$SUT" --check --mark >/dev/null 2>&1; rc=$?

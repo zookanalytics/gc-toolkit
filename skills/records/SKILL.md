@@ -56,9 +56,11 @@ on:
 
 Pass `--no-wait` when the bead waits on nothing. When it waits, pass
 `--waiting-on <bead>` in its place, once for each bead it waits on. Each named
-wait is also written as a `blocks` edge, best-effort: an edge that fails to
-write only warns, so read it back when the wait matters (the waits skill). A
-headline with neither flag leaves the bead waiting on its text alone, which
+wait is also written as a `blocks` edge, after the headline. A wait in another
+store than the bead is refused before anything is written, because an edge
+there would hold nothing, and an edge the store refuses leaves the headline
+written and makes the call exit 4 (the waits skill). A headline with neither
+flag leaves the bead waiting on its text alone, which
 `doctor/check-wait-is-an-edge` reports unless a live `blocks` edge holds the
 bead.
 

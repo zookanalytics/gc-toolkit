@@ -41,8 +41,8 @@
 # recorded at the tip would name whatever commit landed after it and clear the
 # stamp that names the real one. The exit is 1, and a later patrol tries again.
 #
-# Before the push, the commit is stamped on the bead as direct_landing_sha and
-# read back, and a bead the stamp does not reach is not pushed. A landing whose
+# Before the push, the commit is stamped on the bead as direct_landing_sha, and
+# a bead whose stamp write fails is not pushed. A landing whose
 # record does not land therefore stays provable after the session that pushed
 # it. The next patrol's zero-diff guard finds a branch with no change against a
 # target that carries the stamped commit, and sends the bead back here, where
@@ -62,12 +62,12 @@
 # DIRECT_MERGE_PUSH_BACKOFF seconds (default 2) times the attempt between
 # tries. The transition records and closes the bead and clears the stamp. It is
 # handed this script's rig root as GC_RIG_ROOT, the checkout lifecycle.sh checks
-# the landing in. A transition can write and still fail, since lifecycle.sh
-# exits 2 when its read-back does not verify a write it made. So after each
-# failed try the bead is read, and a bead that reads merge_result=merged at
-# this merged_sha is recorded. A write that lands on the last try has no retry
-# left to record it again, and a retry of an earlier one would append a second
-# note.
+# the landing in. A transition can write and still fail, since a commit whose
+# result bd cannot tell after a lost connection exits non-zero and may have
+# landed. So after each failed try the bead is read, and a bead that reads
+# merge_result=merged at this merged_sha is recorded. A write that lands on the
+# last try has no retry left to record it again, and a retry of an earlier one
+# would append a second note.
 #
 # A push refused for branch protection (GH006, GH013, "protected branch",
 # "refusing to allow", "Changes must be made through a pull request",
@@ -184,13 +184,10 @@ if carries "$TIP" "$PREPARED"; then
   echo "origin/$TARGET at $TIP already carries the prepared head $PREPARED, so nothing is pushed; recording the landing at $MERGED_SHA"
 elif carries "$PREPARED" "$TIP"; then
   MERGED_SHA="$PREPARED"
-  # The bead is assigned to the refinery, and bd_meta_ensure is for a bead
-  # nobody has taken, so the stamp is a plain update. The read-back decides
-  # whether it landed, since an update can exit 0 without writing.
-  STAMP_OUT=$(gc bd update "$WORK" --set-metadata "direct_landing_sha=$MERGED_SHA" </dev/null 2>&1)
-  STAMPED=$(bd_meta_readback "$WORK" "$(jq -nc --arg s "$MERGED_SHA" '{direct_landing_sha: $s}')")
-  if [ "${STAMPED%%$'\t'*}" != landed ]; then
-    echo "could not stamp direct_landing_sha=$MERGED_SHA on $WORK (it reads back ${STAMPED%%$'\t'*}; the update said: ${STAMP_OUT:-nothing}), and without it a landing whose record failed would read as a branch with no work; nothing pushed"
+  # Without the stamp, a landing whose record failed would read as a branch
+  # with no work, so the push waits on the stamp's exit.
+  if ! STAMP_OUT=$(gc bd update "$WORK" --set-metadata "direct_landing_sha=$MERGED_SHA" </dev/null 2>&1); then
+    echo "could not stamp direct_landing_sha=$MERGED_SHA on $WORK (the update said: ${STAMP_OUT:-nothing}), and without it a landing whose record failed would read as a branch with no work; nothing pushed"
     exit 1
   fi
   STAMP="$MERGED_SHA"

@@ -171,9 +171,9 @@ The machine itself — states, transitions, writers, checks — is drawn once, i
   by the component that caused the change; the only reactive writers respond
   to external facts — `pr-facts.sh` to GitHub events, witness orphan recovery
   to session death.
-- **One transition writer** — `lifecycle.sh`: validate → one `bd update`
-  carrying every field of the transition → read back. A single `bd update` is
-  atomic ([gascity/routing-model.md](gascity/routing-model.md)); the old
+- **One transition writer** — `lifecycle.sh`, which validates the edge and
+  writes one `bd update` carrying every field of the transition, whose exit
+  says whether the transition landed. A single `bd update` is atomic ([gascity/routing-model.md](gascity/routing-model.md)); the old
   healer passes existed because writers split transitions across calls.
 - **One check-verdict writer** — `signoff.sh`, which closes the review bead
   with its verdict, the record a lane's green derives from. Returning a lane
@@ -526,7 +526,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/lifecycle.sh` | shared primitive | The only writer of a lifecycle transition. |
 | `assets/scripts/render-seed-audit.sh` | shared primitive | Renders the text each agent actually receives. Its `--check` mode re-renders a checkout, and its `--check-merge` mode, which renders the merge result, is what `merge.sh` gates a landing on. With `--base-stale-out` it also names the files the base is already stale in, which the merge hands to `seed-audit-reaudit.sh`. Its `--since` mode, which the pre-commit hook runs, writes only what a change moves, so text the `gc` binary moved rides in no unrelated commit. `doctor/check-seed-audit-current` reports whether the artifact is present and its hook wired. |
 | `assets/scripts/claim-close.sh` | shared primitive | A graph.v2 step advances only by closing its own bead, and every formula's steps end here: the bead `gc hook current` names, once it shows it is that step and this session's. |
-| `assets/scripts/decline.sh` | shared primitive | Ends the work this session holds with its record in place: the human gate, the wait, the end, the drain, stopping at the first part that does not land. A step's end is its run's cancel. A claim with no run, held on the work bead by a claimant with no poured workflow, cancels nothing: with no gate it is handed back with its pool route cleared, and the write is read back before the drain. |
+| `assets/scripts/decline.sh` | shared primitive | Ends the work this session holds with its record in place: the human gate, the wait, the end, the drain, stopping at the first part that does not land. A step's end is its run's cancel. A claim with no run, held on the work bead by a claimant with no poured workflow, cancels nothing: with no gate it is handed back with its pool route cleared, and the drain waits on that write's exit. |
 | `assets/scripts/step-close.sh` | shared primitive | The name that step text from an earlier version of a formula calls to close a step. It stays until no open step bead names it. |
 | `assets/scripts/lease-heartbeat.sh` | shared primitive | The name that step text from an earlier version of a formula calls to refresh a claim's lease, which nothing reads in this city. It stays until no open step bead names it. |
 | `assets/scripts/claim-context.sh` | shared primitive | The one read a pool session orients from after `gc hook --claim`. It reads the claimed bead and its input convoy and prints the claimed step's `gc.step_ref` and instructions, its workflow root, formula and input convoy, and the work bead's status, assignee, metadata, notes and description. `--no-step` leaves out the instructions when the claim result's `step_reminder` carries them. The polecat prompts' claim contract runs it, so a session working a `mol-polecat-work` step (work) and one working a `mol-review` step (review) orient from it alike. |

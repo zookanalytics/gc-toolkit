@@ -76,7 +76,7 @@ that no open blocker holds is replaced with the reading, settled, because it
 names a question that no longer stands. A subject that another open blocker
 still holds keeps its headline, since that wait is still owed. A read counts
 only when `gc` exits 0 and answers in its shape: the subject's own row, alone,
-and a list of its blockers. Every write is read back, and the conversation
+and a list of its blockers. Each write takes its exit, and the conversation
 closes only after them:
 ```bash
 KIND="<moot|benign>"; WHY="<the premise, and what is true instead>"
@@ -108,7 +108,7 @@ gc runtime drain-ack
 fine".
 
 No `closed` line means the close stopped short: the subject or its blockers
-did not read, or a write did not read back. The conversation stays open under
+did not read, or the store refused a write. The conversation stays open under
 this sitting, and a subject whose questions are answered would otherwise keep
 a headline that waits on nothing. So say in the thread what the block printed,
 fix what it names, and re-run the block. The gates cleared

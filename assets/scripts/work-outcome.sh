@@ -19,9 +19,8 @@
 #   stamp lands in the store the close does.
 #
 #   The stamp is a write of its own and never rides a caller's precondition
-#   stamp, so a store that refuses the key fails this write alone. A store can
-#   exit 0 on a --set-metadata that wrote nothing, so the value is read back and
-#   the write repaired once. Nothing here gates the close, and the function
+#   stamp, so a store that refuses the key fails this write alone, and the
+#   refusal is said on stderr. Nothing here gates the close, and the function
 #   always returns 0. By default the gate only warns, so a missing value costs
 #   the ledger one field, while a conversation held open over it strands a
 #   sitting the board could otherwise report. Where GC_WORK_RECORD_ENFORCE makes the gate
@@ -64,9 +63,7 @@ work_outcome_noop() {
     shift
     _won_now=$(work_outcome_read "$_won_bead" "$@") || return 0
     [ -z "$_won_now" ] || return 0
-    "$@" update "$_won_bead" --set-metadata gc.work_outcome=no-op >/dev/null 2>&1 || true
-    _won_now=$(work_outcome_read "$_won_bead" "$@") || _won_now=""
-    [ "$_won_now" = "no-op" ] \
-        || "$@" update "$_won_bead" --set-metadata gc.work_outcome=no-op >/dev/null 2>&1 || true
+    "$@" update "$_won_bead" --set-metadata gc.work_outcome=no-op >/dev/null 2>&1 \
+        || printf 'work-outcome: the store refused gc.work_outcome=no-op on %s, so its close records no work outcome\n' "$_won_bead" >&2
     return 0
 }

@@ -917,8 +917,8 @@ if [ "$BHRC_RC" != 0 ] && [ "$BHRC_RC" != 1 ]; then
   elif ! "$SCRIPTS/human-gate.sh" --subject "$WORK" --key refinery-zero-diff-check-failed --message "The zero-diff check of branch $BRANCH against origin/$TARGET could not run in $RIG_ROOT, $CHECK_FAILS patrols in a row. The last error: $BHRC_ERROR. It verified nothing either way, so nothing was merged or closed: this is a failed check, not a branch without work. The refinery takes $WORK off its queue to wait on this gate. Fix that error, then $HANDBACK. To drop the work instead, do not clear this gate: run $SCRIPTS/stand-down.sh $WORK --key refinery-zero-diff-check-failed --ruling '<why>'."; then
     echo "human-gate.sh filed no gate on $WORK"
   elif [ "$WORK_KIND" = convoy ]; then
-    # human-gate.sh read its gate back from the convoy's side, so the gate
-    # blocks the convoy already, and that holds the park.
+    # human-gate.sh filed its gate on the convoy, in the convoy's store, so the
+    # gate blocks the convoy already, and that holds the park.
     "$LC" transition "$WORK" --to blocked --assignee "" --route human --set "blocked_reason=the zero-diff check could not run in $RIG_ROOT, $CHECK_FAILS patrols in a row: $BHRC_ERROR" --unset zero_diff_check_failures --takeaway "the zero-diff check could not run $CHECK_FAILS patrols in a row; fix the error its gate names, then hand the convoy back" && WAITS=1
   elif "$SCRIPTS/await-ruling.sh" "$WORK" --key refinery-zero-diff-check-failed --formula mol-polecat-work; then
     WAITS=1
@@ -940,7 +940,7 @@ if [ "$BHRC_RC" != 0 ] && [ "$BHRC_RC" != 1 ]; then
   gc runtime drain-ack
   exit 1
 fi
-[ "$CHECK_FAILS" = 0 ] || gc bd update "$WORK" --unset-metadata zero_diff_check_failures >/dev/null 2>&1 || true
+[ "$CHECK_FAILS" = 0 ] || gc bd update "$WORK" --unset-metadata zero_diff_check_failures >/dev/null 2>&1 || echo "could not clear the failed-check count on $WORK, so its next failed check counts from $CHECK_FAILS"
 if [ "$BHRC_RC" = 1 ]; then
   LANDED_SHA=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.direct_landing_sha // empty')
   if [ -n "$LANDED_SHA" ] && git -C "$RIG_ROOT" merge-base --is-ancestor "$LANDED_SHA" "origin/$TARGET" 2>/dev/null; then
@@ -1311,7 +1311,7 @@ if [ -n "$EXISTING_ANCHOR" ] || [ -n "${LANDS_ON:-}" ]; then
     fi
     EXISTING_ANCHOR="$LANDS_ON"
   fi
-  gc bd update "$EXISTING_ANCHOR" --append-notes "Rework $WORK landed on $BRANCH${REWORK_SHA:+ at $REWORK_SHA}; re-gate belongs to the cadence (one-anchor-per-PR)." >/dev/null 2>&1 || true
+  gc bd update "$EXISTING_ANCHOR" --append-notes "Rework $WORK landed on $BRANCH${REWORK_SHA:+ at $REWORK_SHA}; re-gate belongs to the cadence (one-anchor-per-PR)." >/dev/null 2>&1 || echo "merge-push: could not note on $EXISTING_ANCHOR that rework $WORK landed; the landing stands"
   if "$LC" transition "$WORK" --to unanchored --unset rejection_reason; then
     if ! gc bd update "$WORK" --status=closed \
          --set-metadata gc.work_outcome=shipped --set-metadata gc.work_commit="$REMOTE_HEAD" --set-metadata gc.work_branch="$BRANCH" \
@@ -1400,7 +1400,7 @@ if [ -z "$NEXT" ]; then
   gc runtime drain-ack
   exit 1
 fi
-gc bd update "$NEXT" --set-metadata gc.rig="$GC_RIG" || true  # rig-stamp before assign so an interrupted pour leaves a rig-scoped orphan
+gc bd update "$NEXT" --set-metadata gc.rig="$GC_RIG" || echo "Could not rig-stamp $NEXT; an interrupted pour leaves it without a rig scope."  # rig-stamp before assign so an interrupted pour leaves a rig-scoped orphan
 if ! gc bd update "$NEXT" --assignee="$GC_AGENT"; then
   echo "Could not assign next refinery wisp; rolling it back and not burning."
   gc bd mol burn "$NEXT" --force || echo "Rollback burn of $NEXT failed; startup reconcile collects it."

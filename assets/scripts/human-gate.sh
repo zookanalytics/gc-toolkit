@@ -14,7 +14,8 @@
 #     session's;
 #   - it titles the gate with the message's first line, capped;
 #   - it makes the gate's description the message it was given;
-#   - it reads the gate back from the bead's side;
+#   - it stops when the gate it filed is in another store than the bead,
+#     where the gate would hold nothing;
 #   - it records a gate the deacon files in the deacon's incident ledger
 #     (gc-deacon-ledger.sh).
 #
@@ -26,8 +27,8 @@
 # already open), and with --retract the id of each gate this call resolved.
 # Everything else goes to stderr.
 # Exit: 0 filed, already open, inside a declared quiet window, or (--retract)
-# resolved or nothing open · 1 could not read the bead's gates, file, verify or
-# resolve · 2 usage, or a wisp named as the subject
+# resolved or nothing open · 1 could not read the bead's gates, file or resolve,
+# or the gate landed in another store · 2 usage, or a wisp named as the subject
 set -uo pipefail
 
 PROG="human-gate"
@@ -131,11 +132,12 @@ fi
 # >>> retract-moot
 # A gate that blocks several beads is resolved once, and every bead it held is
 # released. A sitting may be discussing the gate, and the retract clears it
-# anyway; the sitting learns it at its sign-off, which reads each gate back. bd
-# reports success on a gate another resolver closed first and keeps that
-# resolver's reason, so each gate is read back, and a reason other than ours is
-# reported as the answer that stood. A retract interrupted part way leaves gates
-# the next retract for the situation finds and resolves.
+# anyway; the sitting learns it at its sign-off. A resolve the store refuses
+# leaves the gate open for a person. bd reports success on a gate another
+# resolver closed first and keeps that resolver's reason, so each resolved
+# gate's reason is read, and a reason other than ours is reported as the answer
+# that stood. A retract interrupted part way leaves gates the next retract for
+# the situation finds and resolves.
 if [ "$RETRACT" = 1 ]; then
   REASON="moot: $MESSAGE"
   OPEN_IDS=$(printf '%s' "$GATES" | bd_gates_open_under_key "$KEY" | jq -r '.[].id' 2>/dev/null)
@@ -146,15 +148,12 @@ if [ "$RETRACT" = 1 ]; then
   RETRACT_RC=0
   while IFS= read -r GATE; do
     [ -n "$GATE" ] || continue
-    gc bd gate resolve "$GATE" --reason "$REASON" </dev/null >/dev/null 2>&1
-    ROW=$(bd_json show "$GATE")
-    GOT_STATUS=$(printf '%s' "$ROW" | jq -r 'if type == "array" then (.[0].status // "") else "" end' 2>/dev/null)
-    GOT_REASON=$(printf '%s' "$ROW" | jq -r 'if type == "array" then (.[0].close_reason // "") else "" end' 2>/dev/null)
-    if [ "$GOT_STATUS" != closed ]; then
-      warn "gate $GATE on $SUBJECT [$KEY] did not resolve (status reads '${GOT_STATUS:-unreadable}'); it stays open for a person. repair: gc bd gate resolve $GATE --reason \"$REASON\""
+    if ! gc bd gate resolve "$GATE" --reason "$REASON" </dev/null >/dev/null 2>&1; then
+      warn "gate $GATE on $SUBJECT [$KEY] did not resolve: the store refused it, so it stays open for a person. repair: gc bd gate resolve $GATE --reason \"$REASON\""
       RETRACT_RC=1
       continue
     fi
+    GOT_REASON=$(bd_json show "$GATE" | jq -r 'if type == "array" then (.[0].close_reason // "") else "" end' 2>/dev/null)
     if [ "$GOT_REASON" = "$REASON" ]; then
       warn "withdrew gate $GATE on $SUBJECT [$KEY]"
     else
@@ -235,26 +234,20 @@ fi
 # The gate's description is the whole message: what the person reads, and what
 # a filer that keeps its report current compares against. bd gate create puts a
 # head of its own above the reason it is given and takes no description, so the
-# description is set to the message in a second write, which the read-back below
-# checks. Filing is rare beside the dedup above, so the write is paid once per
-# gate.
-gc bd update "$GATE" --description "$MESSAGE" </dev/null >/dev/null 2>&1 || true
+# description is set to the message in a second write. Filing is rare beside the
+# dedup above, so the write is paid once per gate. A description the store
+# refuses still leaves a gate that asks, its message under bd's head, so the
+# filing stands and only the repair is named.
+gc bd update "$GATE" --description "$MESSAGE" </dev/null >/dev/null 2>&1 \
+  || warn "gate $GATE asks for $SUBJECT [$KEY], but the store refused its description, so bd's own head stands above the message; repair: gc bd update $GATE --description <the message>"
 
-# The gate asks only while it blocks the bead under the key, so its edge, its
-# type and its await id are read back from the bead's side, the read every other
-# reader makes.
-if ! GOT=$(bd_human_gates "$SUBJECT"); then
-  warn "gate $GATE was filed, but the human gates of $SUBJECT did not read back; check that it blocks $SUBJECT under [$KEY]: gc bd dep list $SUBJECT --type blocks --json"
+# The gate asks only while it blocks the bead, and gc bd files it in the store
+# of the bead named after --blocks. An id's prefix names its store, and an edge
+# between two stores holds nothing, so a gate whose id names another store than
+# the bead's stops the filing before a caller acts on it.
+if ! bd_same_store "$GATE" "$SUBJECT"; then
+  warn "gate $GATE was filed in another store than $SUBJECT, so it holds nothing; withdraw it (gc bd gate resolve $GATE --reason \"moot: filed in another store than $SUBJECT\") and file again from the rig that owns $SUBJECT"
   exit 1
-fi
-if ! printf '%s' "$GOT" | bd_gates_open_under_key "$KEY" | jq -e --arg g "$GATE" 'any(.[]; .id == $g)' >/dev/null 2>&1; then
-  warn "gate $GATE was filed, but it does not read back as an open human gate under [$KEY] that blocks $SUBJECT; repair: gc bd dep add $SUBJECT $GATE --type=blocks, then check its await id with gc bd show $GATE"
-  exit 1
-fi
-# A description that did not take still leaves a gate that asks, its message
-# under bd's head, so the filing stands and only the repair is named.
-if ! printf '%s' "$GOT" | jq -e --arg g "$GATE" --arg m "$MESSAGE" 'any(.[]; .id == $g and (.description // "") == $m)' >/dev/null 2>&1; then
-  warn "gate $GATE asks for $SUBJECT [$KEY], but its description did not become the message, so bd's own head stands above it; repair: gc bd update $GATE --description <the message>"
 fi
 
 # The deacon's shift record. Filing a gate is a non-routine action, and this is

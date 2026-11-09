@@ -56,7 +56,7 @@
 # A duplicate's close must not end the waits on it early, and bd's ready rule
 # follows a blocks edge but never a duplicates edge. So before a duplicate of a
 # canonical that has neither closed nor shipped closes, each open bead it blocks
-# gains a blocks edge onto the canonical, read back. One that has it already,
+# gains a blocks edge onto the canonical. One that has it already,
 # and the canonical itself, need none. A waiter that cannot take the edge
 # refuses the close before anything is written: one joined to the canonical by
 # another edge type, since bd keeps one edge per pair, and any waiter when the
@@ -94,7 +94,7 @@
 # origin still has the status and assignee this run read, the one write bd can
 # hold to that, so a reopen or a claim since the read takes the edge back and
 # records nothing on the bead someone else now holds.
-# Once the origin reads back closed, on either path, the branch it names in
+# Once the origin is closed, on either path, the branch it names in
 # metadata.branch is ended on the git remote through branch-end.sh, the way a
 # merge ends a landed branch. That remote write never gates the disposition:
 # when the branch cannot be ended the close stands, and a warning names the
@@ -125,7 +125,7 @@ BEAD_STORE="${GC_BEAD_STORE_TOOL:-$HERE/bead-store.sh}"
 # precondition merge.sh applies to a merge (docs/finalize-gate.md). Overridable
 # for a test.
 FINALIZE_GATE="${GC_FINALIZE_GATE_TOOL:-$HERE/finalize-gate.sh}"
-# Ends the retired branch on the git remote once the close reads back.
+# Ends the retired branch on the git remote once the close has landed.
 # Overridable for a test.
 BRANCH_END="${GC_BRANCH_END_TOOL:-$HERE/branch-end.sh}"
 # The rule of which human gates still hold a bead, $HUMAN_GATE_JQ, which the
@@ -617,11 +617,11 @@ carry_plan() {
 }
 
 # carry_waits — the writes carry_plan planned. Each bead in $CARRY gains its
-# blocks edge onto the canonical, and one listing reads them back, because the
-# close that follows releases those beads and cannot be taken back. A refused
-# or lost edge stops the disposition before its close. The edges added before it
-# stay: each is true while the origin duplicates the canonical, and a run that
-# closed the origin first needs them. CARRIED names them.
+# blocks edge onto the canonical. The close that follows releases those beads
+# and cannot be taken back, so an edge bd refuses stops the disposition before
+# its close. The edges added before it stay: each is true while the origin
+# duplicates the canonical, and a run that closed the origin first needs them.
+# CARRIED names them.
 CARRIED=""
 carried_left() { # the sentence a refusal after the carry ends on, or nothing
     [ -n "$CARRIED" ] || return 0
@@ -631,7 +631,7 @@ carried_left() { # the sentence a refusal after the carry ends on, or nothing
 carry_waits() {
     CARRIED=""
     [ -n "$CARRY" ] || return 0
-    local w err rows_json missing="" landed=""
+    local w err
     for w in $CARRY; do
         if ! err=$(bd_at "$ORIGIN_PATH" dep add "$w" "$SUCCESSOR" --type blocks 2>&1 >/dev/null); then
             printf '%s\n' "$err" >&2
@@ -639,20 +639,6 @@ carry_waits() {
         fi
         CARRIED="${CARRIED:+$CARRIED }$w"
     done
-    rows_json=$(list_rows "$CARRY")
-    for w in $CARRY; do
-        if printf '%s' "$rows_json" | jq -e --arg w "$w" --arg s "$SUCCESSOR" '
-                type == "array" and any(.[]; ((.id // "") | tostring) == $w
-                  and any(.dependencies[]?; ((.depends_on_id // "") | tostring) == $s and ((.type // "") | tostring) == "blocks"))' >/dev/null 2>&1; then
-            landed="${landed:+$landed }$w"
-        else
-            missing="${missing:+$missing }$w"
-        fi
-    done
-    if [ -n "$missing" ]; then
-        CARRIED="$landed"
-        die "the blocks edge onto $SUCCESSOR did not read back on $missing, so closing $ORIGIN could release it before $SUCCESSOR has delivered. Nothing is closed.$(carried_left) Re-run this close" 4
-    fi
     return 0
 }
 
@@ -733,7 +719,7 @@ if [ -n "$DRY_RUN" ]; then
     PLAN_BRANCH=$(origin_branch "$ORIGIN_JSON")
     if [ -n "$PLAN_BRANCH" ]; then
         PLAN_CMD=$(printf '%q ' "$BRANCH_END" --rig "${ORIGIN_STORE#rig:}" --branch "$PLAN_BRANCH" --bead "$ORIGIN" --dry-run)
-        BRANCH_PLAN="end $PLAN_BRANCH on the git remote of $ORIGIN_STORE once the close reads back, unless a live owner names it (${PLAN_CMD% } previews it)"
+        BRANCH_PLAN="end $PLAN_BRANCH on the git remote of $ORIGIN_STORE once the close lands, unless a live owner names it (${PLAN_CMD% } previews it)"
     else
         BRANCH_PLAN="none ($ORIGIN names no metadata.branch)"
     fi
@@ -855,7 +841,8 @@ settle_edge() {
     EDGE_ADDED=""
     case "$rc" in
         0) printf 'bead-rehome: %s is closed naming %s and its %s edge had gone, so it is back\n' "$ORIGIN" "$SUCCESSOR" "$EDGE_TYPE" ;;
-        6) bd_at "$ORIGIN_PATH" dep remove "$ORIGIN" "$SUCCESSOR" >/dev/null 2>&1 || true
+        6) bd_at "$ORIGIN_PATH" dep remove "$ORIGIN" "$SUCCESSOR" >/dev/null 2>&1 \
+               || echo "bead-rehome: WARN the $EDGE_TYPE edge it put back onto $SUCCESSOR did not come off again" >&2
            echo "bead-rehome: WARN $ORIGIN is closed naming $SUCCESSOR, but $EDGE_STOP; reconcile the two by hand" >&2 ;;
         *) echo "bead-rehome: WARN $ORIGIN is closed naming $SUCCESSOR, but $EDGE_STOP; the same call run again records it" >&2 ;;
     esac
@@ -974,11 +961,9 @@ else
     if [ -n "$EXCEPT_KEY" ]; then
         GATE_REASON="Withdrawn by bead-rehome.sh just before it retries the close this gate reported: $REASON"
         for GATE in $OWN_GATES; do
-            bd_at "$ORIGIN_PATH" gate resolve "$GATE" --reason "$GATE_REASON" >/dev/null 2>&1 || true
-            GATE_STATUS=$(bead_row "$ORIGIN_PATH" "$GATE" | jq -r '(.[0].status // "") | ascii_downcase' 2>/dev/null || true)
-            if [ "$GATE_STATUS" != "closed" ]; then
+            if ! bd_at "$ORIGIN_PATH" gate resolve "$GATE" --reason "$GATE_REASON" >/dev/null 2>&1; then
                 undo_edges
-                die "the gate $GATE [$EXCEPT_KEY] on $ORIGIN did not resolve (status reads '${GATE_STATUS:-unreadable}'), and while it is open bd refuses the close; nothing closed.$(carried_left) Re-run this close." 5
+                die "the store refused the resolve of the gate $GATE [$EXCEPT_KEY] on $ORIGIN, and while it is open bd refuses the close; nothing closed.$(carried_left) Re-run this close." 5
             fi
             printf 'bead-rehome: withdrew the gate %s [%s] on %s before the close it asked for\n' "$GATE" "$EXCEPT_KEY" "$ORIGIN"
         done
@@ -1016,41 +1001,37 @@ else
 fi
 
 # End the branch the retired bead names on the git remote, the way a merge ends
-# a landed one. Only once the bead reads back closed: until then it still owns
-# its branch. branch-end.sh holds the remote write and its guards. It keeps a
-# branch a live owner names, pins the tip, and deletes only the tip it checked.
-# The disposition is complete before this runs, so a branch it cannot end costs
-# a warning, never the close.
+# a landed one. The bead is closed by now: a close that did not land stopped the
+# run above. branch-end.sh holds the remote write and its guards. It keeps a
+# branch a live owner names, so a bead reopened since this run's read keeps its
+# branch, pins the tip, and deletes only the tip it checked. The disposition is
+# complete before this runs, so a branch it cannot end costs a warning, never
+# the close.
 RETIRED_BRANCH=$(origin_branch "$ORIGIN_JSON")
 if [ -n "$RETIRED_BRANCH" ]; then
     # Quoted for a paste: a branch name may carry shell metacharacters.
     END_CMD=$(printf '%q ' "$BRANCH_END" --rig "${ORIGIN_STORE#rig:}" --branch "$RETIRED_BRANCH" --bead "$ORIGIN")
     END_CMD="${END_CMD% }"
-    FINAL_JSON=$(bead_row "$ORIGIN_PATH" "$ORIGIN")
-    FINAL_STATUS=$(printf '%s' "$FINAL_JSON" | jq -r '(.[0].status // "") | ascii_downcase' 2>/dev/null || true)
-    if [ "$FINAL_STATUS" != "closed" ]; then
-        echo "bead-rehome: WARN $ORIGIN did not read back closed (status '${FINAL_STATUS:-unreadable}'), so its branch $RETIRED_BRANCH was left on the git remote; once it reads closed, end it with: $END_CMD" >&2
-    else
-        END_RC=0
-        END_OUT=$("$BRANCH_END" --rig "${ORIGIN_STORE#rig:}" --branch "$RETIRED_BRANCH" --bead "$ORIGIN" 2>&1) || END_RC=$?
-        END_NOTE=""
-        case "$END_RC" in
-            0|3) [ -z "$END_OUT" ] || printf '%s\n' "$END_OUT"
-                 case "$END_OUT" in *"is not on origin"*) ;; *) END_NOTE="$END_OUT" ;; esac ;;
-            *)   [ -z "$END_OUT" ] || printf '%s\n' "$END_OUT" >&2
-                 echo "bead-rehome: WARN the close stands, but branch $RETIRED_BRANCH is still on the git remote (branch-end exit $END_RC); end it with: $END_CMD" >&2
-                 END_NOTE="Branch $RETIRED_BRANCH is still on the git remote (branch-end exit $END_RC: $(printf '%s' "$END_OUT" | tail -1)). End it with: $END_CMD" ;;
+    END_RC=0
+    END_OUT=$("$BRANCH_END" --rig "${ORIGIN_STORE#rig:}" --branch "$RETIRED_BRANCH" --bead "$ORIGIN" 2>&1) || END_RC=$?
+    END_NOTE=""
+    case "$END_RC" in
+        0|3) [ -z "$END_OUT" ] || printf '%s\n' "$END_OUT"
+             case "$END_OUT" in *"is not on origin"*) ;; *) END_NOTE="$END_OUT" ;; esac ;;
+        *)   [ -z "$END_OUT" ] || printf '%s\n' "$END_OUT" >&2
+             echo "bead-rehome: WARN the close stands, but branch $RETIRED_BRANCH is still on the git remote (branch-end exit $END_RC); end it with: $END_CMD" >&2
+             END_NOTE="Branch $RETIRED_BRANCH is still on the git remote (branch-end exit $END_RC: $(printf '%s' "$END_OUT" | tail -1)). End it with: $END_CMD" ;;
+    esac
+    # The bead records what became of its branch. pr-facts.sh runs this
+    # script for its exit status and drops its output, so the note is what a
+    # later reader finds. A re-run that reaches the same outcome adds nothing,
+    # so the notes are read before the append.
+    if [ -n "$END_NOTE" ]; then
+        case "$(bead_row "$ORIGIN_PATH" "$ORIGIN" | jq -r '.[0].notes // ""' 2>/dev/null || true)" in
+            *"$END_NOTE"*) ;;
+            *) bd_at "$ORIGIN_PATH" update "$ORIGIN" --append-notes "$END_NOTE" >/dev/null 2>&1 \
+                   || echo "bead-rehome: WARN could not record the branch's outcome on $ORIGIN: $END_NOTE" >&2 ;;
         esac
-        # The bead records what became of its branch. pr-facts.sh runs this
-        # script for its exit status and drops its output, so the note is what a
-        # later reader finds. A re-run that reaches the same outcome adds nothing.
-        if [ -n "$END_NOTE" ]; then
-            case "$(printf '%s' "$FINAL_JSON" | jq -r '.[0].notes // ""' 2>/dev/null || true)" in
-                *"$END_NOTE"*) ;;
-                *) bd_at "$ORIGIN_PATH" update "$ORIGIN" --append-notes "$END_NOTE" >/dev/null 2>&1 \
-                       || echo "bead-rehome: WARN could not record the branch's outcome on $ORIGIN: $END_NOTE" >&2 ;;
-            esac
-        fi
     fi
 fi
 
