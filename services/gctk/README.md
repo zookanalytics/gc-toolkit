@@ -14,6 +14,7 @@ through `gc bd` and the supervisor's API.
 
 | Command | What it does | Documented in |
 |---|---|---|
+| `bead holds` | what holds each bead named, from one read of the store: one status (blocked, held, unjudged or clear) with the waits behind it and whether each is the bead's own or an ancestor's, its own pending waits and when the last landed, why it is in flight, its arm, and its wait edges into another store, one JSON object per line | `gctk bead holds --help`, `internal/cli/bead.go`, `waits` |
 | `epic` | actions taken on an epic: filing one with its contract, each field in its own key, refused when the epic has no hypothesis and its parent is not an epic | `gctk epic --help`, `internal/cli/epic.go` |
 | `lifecycle` | anchor lifecycle transitions over the state machine `lifecycle/lifecycle.toml` declares. It parses its own verbs and flags | `gctk lifecycle`, `internal/cli/lifecycle.go`, `internal/lifecycle` |
 | `merge` | arm 2 of the merge cadence, the single writer of merged truth | `internal/cli/merge.go` |
@@ -112,13 +113,14 @@ internal/lifecycle/  the lifecycle state machine, which lifecycle/lifecycle.toml
 internal/ledger/     typed bead records: each key's declaration, one write per act,
                      the read-back before an act that cannot be undone, and snapshots
 internal/gcbd/       the store adapter: bead reads and writes through `gc bd` and the
-                     supervisor API, and the store's blocked set
+                     supervisor API, the store's listing, and its blocked set
 internal/gcbd/fake/  the store adapter's in-memory fake, for the domains' tests
 internal/daemon/     finding the supervisor API the store adapter's reads go through
 internal/git/        the git subprocess seam: one git command per call, in a named directory
 internal/rig/        rig's runner and its commit-keyed record store
 prstatus/            the PR status derivation, exported for the helm board
-waits/               what holds a bead: the keys it reads, declared read-only
+waits/               what holds a bead, from one snapshot: the rule by where the work is, the
+                     in-flight test, the run link's copy and the keys it reads, read-only
 key-registry.json    every declared key, generated from the declarations
 ```
 
