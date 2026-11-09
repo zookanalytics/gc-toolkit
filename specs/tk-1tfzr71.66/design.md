@@ -22,11 +22,16 @@ Today the pack merges every PR itself, under its own approval rule, once a merge
 pass finds the review lanes green. Approving this design moves the merge onto
 GitHub. The refinery takes Gas Town's flow and opens each PR as a draft as soon
 as the work reaches it. The city posts its verdict on every head commit as a
-status GitHub requires, and GitHub's auto-merge lands the PR once its rules and
-that status allow. Your approval carries across reworks, and only the city's
-reading of a change withdraws it. The new flow reaches every rig when the effort
-lands, and the merge moves onto GitHub one rig at a time, after you set that
-rig's rules and a sandbox PR shows they hold.
+status GitHub requires. That status passes last, once everything else GitHub
+requires is in place and the city has read every review and comment, and
+GitHub's auto-merge then lands the PR. Where the branch requires an approval, a
+review that requests changes holds the merge from the moment you submit it. A
+comment or an approval's message that lands in the moments between the city's
+last read and the merge is read only once the PR has merged. Your approval
+carries across reworks, and only the city's reading of a change withdraws it.
+The new flow reaches every rig when the effort lands, and the merge moves onto
+GitHub one rig at a time, after you set that rig's rules and a sandbox PR shows
+they hold.
 
 Three calls carry a cost either way:
 
@@ -64,11 +69,12 @@ Three calls carry a cost either way:
 Approving as it stands ships the first option of each. Either way, each rig's
 cutover asks you, through a gate, to allow auto-merge, to require
 `gc-toolkit/status` beside the CI checks, and to let the city's account dismiss
-reviews. Until the GitHub-intake member lands, a PR lands within one pass of
-your approval, as it does today. Some of the deletion plan's rows move to the
-members whose code still calls their files (section 8). Section 11 lists the
-five units the implementation child files, and section 10 the cutover beads and
-the retirement bead that land after the effort does.
+reviews. Until the GitHub-intake member lands, a PR lands within one pass of the
+last thing it waits for, most often your approval or its CI checks, as it does
+today. Some of the deletion plan's rows move to the members whose code still
+calls their files (section 8). Section 11 lists the five units the
+implementation child files, and section 10 the cutover beads and the retirement
+bead that land after the effort does.
 
 ## 1. The target flow, and how the pack takes Gas Town's
 
@@ -92,10 +98,13 @@ the retirement bead that land after the effort does.
    PR's merge, and it runs the PR's projection.
 7. The review lanes run on the draft, and the PR turns ready when the lanes
    before that phase pass.
-8. The projection posts the city's verdict on the PR's head as the
-   `gc-toolkit/status` commit status. While the city reads the PR approved, it
-   also keeps GitHub's auto-merge on, where the target's rules require an
-   approving review.
+8. The projection posts the city's verdict at the PR's head as the
+   `gc-toolkit/status` commit status, one verdict for every open PR at that
+   commit. The status passes last. It reads success only once every other
+   requirement of the target is met there and the city has routed every review
+   and comment (section 4). While the city reads the PR approved, the
+   projection also keeps GitHub's auto-merge on, where the target's rules
+   require an approving review.
 9. GitHub merges when its rules allow: the approval, the CI checks, the city's
    status and, where the repository requires it, resolved threads.
 10. Core's gate sweep resolves the `gh:pr` gate once the PR has merged, and the
@@ -233,11 +242,33 @@ tk-o9i6kp0 checks it against that note once the initiative lands.
    pending and the merge waits for it. The approval stands across the fix's
    push unless triage withdraws it. This is a residual under the warrant this
    design adds (section 8).
-2. **An approval submitted between the comment read and the merge.** The merge
-   this design builds closes it. Auto-merge is on only while the city reads the
-   PR approved, and the city reads it approved only after it has read the
-   reviews, the approving one included. An approval that arrives with comments
-   cannot merge ahead of their reading.
+2. **An approval submitted between the comment read and the merge.** An
+   approval that turns auto-merge on is read first. Auto-merge is on only while
+   the city reads the PR approved, and the city reads it approved only after it
+   has read the reviews, the approving one included. A review that arrives once
+   auto-merge is on is a different case. GitHub turns auto-merge off only when
+   someone without write access pushes or the base branch changes, and a review
+   moves neither the head nor the status the city posted there ([Automatically
+   merging a pull request](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/automatically-merging-a-pull-request)).
+   So the city's status passes last (section 4). It reads success only once
+   every other requirement is met at the head and the city has routed every
+   review and comment the PR carries. A review that arrives while a required
+   check still runs, or while a thread the base requires resolved is still
+   open, is read before that success, and a fix it asks for keeps the status
+   pending.
+
+   This narrows the case and does not close it. GitHub merges once the city's
+   success posts, so a review or comment submitted between the city's last read
+   and that merge goes in unread. Today's merge leaves a window of the same
+   kind, between its read of the reviews and its `gh pr merge`
+   (`services/gctk/internal/cli/merge.go`). On a branch whose rules require a
+   review, a review that requests changes holds the merge from the moment it is
+   submitted, because its author must then approve before the PR can merge
+   ([Available rules for rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets)).
+   So what stays open is the message of an approving or commenting review, and
+   a plain comment. The warrant this design adds names that window as a
+   residual it leaves open (section 8), and the validating closer on
+   tk-o9i6kp0 reads it against the note.
 3. **The threads the city leaves open.** Wherever the repository requires
    resolved threads, each open thread holds its PR. The rule for the city's
    write-back (tk-1tfzr71.21): the city resolves the thread of its own post once
@@ -262,14 +293,77 @@ until the city posts one at that head, whoever presses Merge. A review that
 gates only the PR's opening would leave a later push unjudged, as the 2026-10-23
 requirement says.
 
-**What the status reads.** It reads success when the city has nothing in flight
-on the PR and nothing holding it, and pending otherwise, with what it waits on in
-the status description. It never reads failure, because every reader that acts
-on a red check would take the city's own hold for one: `pr-facts.sh`'s red-check
-arm today, and Gas City's PR monitor, which classes a PR with a failing check as
-`checks_failed` (`classifyPullRequest` in `internal/githubmonitor/monitor.go`). A
-commit status from the city's own token satisfies a required check whose
-`integration_id` is left unset ([Repository rules](https://docs.github.com/en/rest/repos/rules)).
+**What the status reads.** It reads success at a head only when all of these
+hold for each open PR at that commit that a bead owns:
+- The city has nothing in flight on the PR and nothing holding it.
+- No feedback on the PR is newer than what the city has routed. The record of
+  what it has routed is the anchor's watermarks, `pr_review_watermark`,
+  `pr_comment_watermark` and `pr_issue_comment_watermark`, each the highest id
+  routed in its own id space (the `[posture]` table of
+  `lifecycle/lifecycle.toml`). The projection is the reader that compares it.
+  At each post it reads the newest feedback on the PR in each id space, by the
+  rule the watermarks count, and compares that id with the space's watermark.
+- Every other requirement of the PR's target that can still change at that head
+  is met: the approving review the target requires, which the city has read
+  (under call 1(c), the pack's own verdict on the reviews, on every branch),
+  the other required checks, and resolved threads where the target requires
+  them.
+
+Otherwise it reads pending, with what it waits on in the status description. It
+never reads failure, because every reader that acts on a red check would take
+the city's own hold for one: `pr-facts.sh`'s red-check arm today, and Gas City's
+PR monitor, which classes a PR with a failing check as `checks_failed`
+(`classifyPullRequest` in `internal/githubmonitor/monitor.go`). A commit status
+from the city's own token satisfies a required check whose `integration_id` is
+left unset ([Repository rules](https://docs.github.com/en/rest/repos/rules)).
+
+**Why it passes last.** GitHub merges once every requirement passes, and a
+review that arrives after auto-merge is on leaves auto-merge on (section 3). A
+status that read success while a required check still ran would let such a
+review merge unread when the check finished. Posted last, the status makes
+GitHub's merge follow the city's read of the PR. The projection turns auto-merge
+on while its own status still reads pending, because GitHub shows auto-merge
+only on a PR that cannot merge at once ([Automatically merging a pull
+request](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/automatically-merging-a-pull-request)),
+and then posts success. What changes between that read and GitHub's merge is not
+in the verdict, which is the window section 3 names.
+
+**One verdict for every PR at a commit.** A commit status belongs to the
+repository and the commit, not to a PR. GitHub reflects it in every pull
+request involving that commit, and the latest status in each context is the one
+that counts ([Commit statuses](https://docs.github.com/en/rest/commits/statuses)).
+Two open PRs can share a head, such as one branch with PRs into two bases, or two
+branches at one commit. The refinery's prep can make such a pair. Merging the
+target into a branch whose commits the target already holds fast-forwards the
+branch to the target's head. When the target has an open PR of its own, such as
+an integration branch's landing PR, the two PRs then share that head, and the
+branch's own PR has nothing left to merge. In this repository one pair of PRs
+has ever shared a final head, a stacked pair in May, and no open PR shares one
+(a census of all 1,454 PRs on 2026-11-09). A status written per PR would let the
+clear PR's success replace the held PR's pending, and the held PR would merge
+over its hold.
+
+So the projection posts the verdict of the commit. Before each post it reads,
+fresh from GitHub, the pull requests GitHub associates with the commit
+(`GET /repos/{owner}/{repo}/commits/{commit_sha}/pulls`), and keeps the open
+ones whose head it is. That list includes a PR into another base, a PR from a
+fork and a PR that no bead owns. The projection posts success only when each PR
+a bead owns reads success by the rule above, against its own target's rules.
+Otherwise it posts pending, and the description names the PR that holds the
+commit. A PR that no bead owns holds nothing of the city's, so a PR that someone
+else opens at the city's head cannot hold the city's merge. A clear PR waits
+while another PR at its head is held, and the description says which one.
+
+GitHub's status API has no compare-and-set. The latest post in a context wins,
+so a post computed from an older read could replace one computed from a newer
+read. The refinery's `mr` step, the label writer and the withdrawal writer
+each run the projection, so the projection serializes each repository's
+posts. It holds one `flock` file per repository, under the city's
+`.gc/runtime/packs/gc-toolkit` as Accept's lock is kept, from its read of the
+PRs at the commit to its post. The last post at a commit then comes from the
+latest read, and what remains is the window section 3 names. The projection
+posts only when the state or the description changes, because GitHub keeps at
+most 1000 statuses per commit and context.
 
 **The review input is the review verdict at the head.** The loop tk-1tfzr71.22
 builds runs triage on each new head. Triage reads the change itself (the ruling
@@ -420,12 +514,15 @@ files the merge-in only for an approved PR. After that, the PR monitor's
 to the refinery's prep.
 
 **Landing time with 50 or more PRs open.** No pass visits every PR to land one,
-because GitHub merges an approved PR when its last requirement passes. Until
-tk-1tfzr71.21 the city still reads your approval on the posture arm. That arm
-reads only the PRs that moved, but it runs once per pass, and at 87 anchors a
-pass took about 30 minutes (the city config's override note). So a PR lands
-within one pass of its approval, as today. Once tk-1tfzr71.21 lands, the city
-reads the approval on its webhook event.
+because GitHub merges an approved PR when its last requirement, the city's
+status, passes. Until tk-1tfzr71.21 the city still reads your approval on the
+posture arm, and the label writer posts the city's status in the same pass. That
+arm reads only the PRs that moved, but it runs once per pass, and at 87 anchors
+a pass took about 30 minutes (the city config's override note). So a PR lands
+within one pass of the last of its other requirements to pass, which is most
+often your approval or its CI checks, as today. Once tk-1tfzr71.21 lands, the
+city reads the approval on its webhook event, and posts its status when a
+required check at the head completes.
 
 The closed epic's two checks, recorded in the initiative's notes of 2026-11-08,
 are a proposal, and this design proposes reading them once lane A has landed:
@@ -470,8 +567,15 @@ Unit 3 carries whichever of the two lands second.
   - the merge waits for the city's verdict at each head;
   - auto-merge waits for the city's reading of the approval, so the approval's
     own message is read first;
+  - the city's verdict passes last, once every other requirement is met and
+    every review and comment is routed, so a review that arrives after
+    auto-merge is on is read before the merge;
   - a thread still waiting on the city's answer holds the merge where the base
     does not require resolved threads.
+
+  The warrant also names the residual they leave open: a review or comment
+  submitted between the city's last read and GitHub's merge goes in unread
+  (section 3).
 - **The pre-existing-failure scripts** stay, off the deletion plan. The work
   formula's pre-flight files a base failure's tracker through
   `preexisting-failure.sh`, and its self-review marks one through
@@ -571,11 +675,19 @@ branch, blocked by this initiative's landing:
      checks and `gc-toolkit/status` with no integration ID;
    - let the city's account dismiss reviews;
    - set thread resolution as you want it.
-2. A sandbox PR shows each behavior, against a ruleset copy on a `sandbox/**`
+2. Sandbox PRs show each behavior, against a ruleset copy on a `sandbox/**`
    branch:
    - an unapproved PR does not merge;
    - an approved PR whose city status is pending does not merge;
-   - an approved PR whose city status reads success merges by auto-merge;
+   - an approved PR whose CI checks still run keeps the city's status pending,
+     and a review submitted meanwhile is read before the status turns success;
+   - in one projection run, auto-merge turns on while the city's status still
+     reads pending, the success posts after it, and the PR merges by
+     auto-merge. The sandbox also shows whether GitHub refuses to turn
+     auto-merge on for a PR it can already merge;
+   - two approved PRs at one head stay unmerged while one of them is held, and
+     the city's status names the held one. A PR with nothing left to merge
+     beside a held one is among the cases;
    - the city's dismissal lands and turns auto-merge off;
    - a push to an approved PR keeps the approval, and the merge waits until the
      city posts at the new head;
@@ -620,7 +732,7 @@ leaves the city working.
 | Unit | What it does | Waits on | Answers |
 |---|---|---|---|
 | 1. `gctk pr compose` and `gctk pr summary` | The PR's title, managed summary region and branch-beads section are composed in gctk from the bead that owns the PR, with the region read by its markers. `pr-summary-region.sh` is deleted, and `pr-open.sh` and `pr-stack.sh` call the verb. Go tests pin the output against today's renders. | nothing | tk-tefrxph; the gctk domain move note |
-| 2. The city's status on GitHub | `prstatus` answers whether the city holds the merge: nothing in flight, nothing held, and, by the `waits` package's answer, no wait of the anchor's own but its merge gate. It reads "waiting for your merge" on a base with no approval rule. It reads a PR's unanswered threads when it gathers the PR's facts, so the count's one writer can retire with `gctk merge`. The label writer also posts `gc-toolkit/status` at the head, success or pending and never failure. For a bead that carries its merge gate, it keeps auto-merge on exactly while the city reads the PR approved on a base that requires an approving review. No bead carries one before unit 3, so the toggle is inert until then. `blocker-holder.sh` reads a gate that core's gate sweep resolves as held by an automated actor. The warrant *The city's merge status* is added. Tests for each. | nothing | sections 3, 4 and 5 |
+| 2. The city's status on GitHub | `prstatus` answers whether the city holds the merge: nothing in flight, nothing held, and, by the `waits` package's answer, no wait of the anchor's own but its merge gate. It reads "waiting for your merge" on a base with no approval rule. It reads a PR's unanswered threads when it gathers the PR's facts, so the count's one writer can retire with `gctk merge`. The label writer also posts `gc-toolkit/status` at the head, success or pending and never failure. It posts success last, once every other requirement of the target is met there and no feedback on the PR is newer than the anchor's watermarks. One status covers every open PR whose head is that commit, read fresh before each post, among them a PR from a fork, a PR into another base and a PR with no anchor. Whichever writer runs the projection, it holds a lock for the repository from that read to its post, and it posts only when the state or description changes (section 4). For a bead that carries its merge gate, it keeps auto-merge on exactly while the city reads the PR approved on a base that requires an approving review, and turns it on before it posts success. No bead carries one before unit 3, so the toggle is inert until then. `blocker-holder.sh` reads a gate that core's gate sweep resolves as held by an automated actor. The warrant *The city's merge status* is added, covering the status, its lock and the auto-merge toggle. Tests for each, among them a review that arrives while a required check still runs, the auto-merge toggle turning on before the success post, two open PRs at one head with one of them held, where the status reads pending for both, a PR with nothing left to merge beside a held one, and two writers posting at one commit. | nothing | sections 3, 4 and 5 |
 | 3. The refinery on Gas Town's flow | `mol-refinery-patrol` is rewritten on Gas Town's steps at 3339ad104a88, with the differences in section 1, and each step calls one tested script. The scripts cover: the prep by merge in the refinery's own worktree (`refinery-workspace.sh` and its warrant go); the gate through `detached-job.sh`; the failures, through the requeue by `gc sling` or a rework child, and the pre-existing path; the direct landing; the `mr` step (compose the title and body, edit them onto a PR the bead already owns before the fast-forward push of its new head, or push and then open a new PR as a draft with them, record the PR with `opened_as_draft` so the review lanes and `pr-open.sh`'s ready flip handle it unchanged, file the merge gate with a notice to the refinery, run the projection, and the old-path park while `github_merge_rules` is unset); the close once the merge gate resolves, with the seed re-render under call 2; the rework hand-back; and the integration-effort hand-off. `rejection-repool.sh`, `pr-stack.sh` with its arm, `check-refinery-patrol-live` and the old formula's block-extraction suites go. The polecat doctrine gains the drift rule. | units 1 and 2; tk-gmjtb2e, whichever lands second carrying the other | tk-c8hl47c, tk-ni0i48p, tk-pdc0ovc, tk-w0hkwos; section 7 |
 | 4. The readers move | The sign-off's headline reads `prstatus`. I5 reads every closed bead with a PR. I2 reads the kept values. | unit 3 | section 6 |
 | 5. Docs, warrants and the plan | The pages that describe the merge are rewritten to the flow as it stands once units 1 to 4 land: `refinery-merge-cadence.md`, `state-machine.md` (the kept values and their sentences, and the Checks vocabulary), `architecture.md`'s "How work moves" with both landing paths, `component-model.md`, `authority-map.md`, `design-convoy.md`'s gates under call 1, `gctk-architecture.md`'s rows and the merge section of `built-once-target.md`. The warrants' Covers lines move off retired paths. The plan's rows move as section 8 says. | units 1 to 4 | tk-cvffk5x, tk-r82qrrv |
@@ -630,7 +742,7 @@ leaves the city working.
 | Member | Needs | Because |
 |---|---|---|
 | tk-1tfzr71.22, review lanes | the status placement, the approval decision's ownership, and units 2 and 4 | Its loop's verdict at each head is `prstatus`'s review input. Triage at each head owns the approval decision, through one withdrawal writer. It takes over the bring-current guard and audit (section 8). A conflict on a branch with an open PR comes to it as a rework child until its loop has a repair step for it. |
-| tk-1tfzr71.21, GitHub intake | sections 3, 5 and 7, and unit 2 | It reads an approving review's message as feedback. It resolves the city's own threads once answered. It routes the monitor's `merge_conflict` to the refinery's prep, and takes nothing from its `blocked` class, which the monitor marks actionable for every PR GitHub reads BLOCKED, one waiting on your approval or on the city's status included (`classifyPullRequest`). It moves the PR-finishing rank and `prstatus`'s facts off the posture. It deletes the cadence driver and the files whose rows move to it. |
+| tk-1tfzr71.21, GitHub intake | sections 3, 5 and 7, and unit 2 | It reads an approving review's message as feedback. It resolves the city's own threads once answered. It routes the monitor's `merge_conflict` to the refinery's prep, and takes nothing from its `blocked` class, which the monitor marks actionable for every PR GitHub reads BLOCKED, one waiting on your approval or on the city's status included (`classifyPullRequest`). It runs the projection when a required check at a PR's head completes, because the city's status passes last (section 4). It moves the PR-finishing rank and `prstatus`'s facts off the posture. It deletes the cadence driver and the files whose rows move to it. |
 | tk-1tfzr71.23, convoys | the integration-effort hand-off's place in unit 3 | Moving efforts onto `gc convoy land` ends that difference. |
 | tk-1tfzr71.25, META | the retirement bead's row list | The registry entries and parity tests of the retired machine go there. |
 
@@ -699,8 +811,13 @@ leaves the city working.
   checks.** Only gstack's land-and-deploy skill runs `gh pr merge --auto`, and
   pr-review's `mol-pr-merge-only` waits on checks and merges.
 - **GitHub** counts a commit status as a required check, and requires a check on
-  the latest commit only. Auto-merge merges once every required review and check
-  passes, and survives pushes from accounts with write access. A merge queue is
+  the latest commit only. A commit status belongs to the repository and the
+  commit, so every PR at that commit shows it. The latest status in a context
+  counts, GitHub keeps at most 1000 per commit and context, and the status API
+  has no compare-and-set. Auto-merge merges once every required review and check
+  passes. It turns off only when someone without write access pushes or the base
+  branch changes, so a review leaves it on. A review that requests changes holds
+  the merge until its author approves. A merge queue is
   available to this organization-owned public repository, but every required
   check would have to run on the queue's merge group. The city's per-head status
   cannot, so this design does not use one.

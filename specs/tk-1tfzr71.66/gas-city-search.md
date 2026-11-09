@@ -16,14 +16,19 @@ Each section names the unit of [the design](design.md) that adds the surface.
 
 The need: a merge that waits for the city's own conditions. The city must have
 judged the PR's head, nothing it tracks may hold the PR, and the city must have
-read the approval that releases it.
+read every review and comment on the PR, the approval that releases it
+included, before GitHub can merge. One verdict stands for every PR at a commit,
+and two posts of it must not leave the older reading standing.
 
 - **Gas City.** Nothing gates a merge on approval or on required checks. The PR
   monitor classes an open PR from its draft flag, its merge state and its failed
   or pending checks (`classifyPullRequest` in `internal/githubmonitor/monitor.go`),
   and records the class on a repair bead (`gc github pr backfill
   --create-repair-beads`, `cmd/gc/cmd_github.go`). It reads no review, no branch
-  rule and no bead's waits, and it never merges.
+  rule and no bead's waits, and it never merges. Its CLI reference names no lock
+  a pack can take around a write to an outside service (`docs/reference/cli.md`).
+  A drain's `member_access = "exclusive"` reserves a convoy's members for one
+  drain (`docs/reference/specs/formula-spec-v2.md`), not a write.
 - **Gas Town and the other packs.** `gastown/formulas/mol-refinery-patrol.toml`
   opens the PR and never merges it. No file in the packs repository names
   `reviewDecision`, `required_status_checks` or `merge_queue`. gstack's
@@ -39,16 +44,32 @@ read the approval that releases it.
   account with write access can post it ([Repository rules](https://docs.github.com/en/rest/repos/rules)).
   A required check counts only on the latest commit ([Troubleshooting required
   status checks](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks)).
-  Auto-merge merges once every requirement passes ([Automatically merging a pull
+  A commit status belongs to the repository and the commit, every PR at that
+  commit shows it, and the latest status in a context counts, with no
+  compare-and-set, so the latest post wins ([Commit
+  statuses](https://docs.github.com/en/rest/commits/statuses)). GitHub lists
+  the PRs associated with a commit
+  (`GET /repos/{owner}/{repo}/commits/{commit_sha}/pulls`,
+  [Commits](https://docs.github.com/en/rest/commits/commits)).
+  Auto-merge merges once every requirement passes, and turns off only when
+  someone without write access pushes or the base branch changes, so a review
+  that arrives after it is on leaves it on ([Automatically merging a pull
   request](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/automatically-merging-a-pull-request)).
+  A review that requests changes holds the merge until its author approves
+  ([Available rules for rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets)).
 
 What unit 2 composes: GitHub's required status check and auto-merge, driven by
 the pack's one definition of what holds a PR (`prstatus`), which takes the
 anchor's waits from the store's own blocked set through the `waits` package,
-the one `gctk bead holds` answers from. The gap the
-primitives leave is the city's waits and its reading of the approval's message,
-which no rule reads, so a commit status carries the first and the auto-merge
-toggle the second. The warrant *The city's merge status* records it.
+the one `gctk bead holds` answers from. The gap the primitives leave is the
+city's waits and its reading of the reviews and comments, which no rule reads.
+A commit status carries the waits and that reading. It passes last, once every other requirement is
+met and no feedback on the PR is newer than the anchor's watermarks, so a
+review that arrives after auto-merge is on is read before the merge. One status
+covers every open PR at its commit, and a `flock` per repository serializes the
+posts, because the latest post wins. Auto-merge makes the merge GitHub's once
+the status passes, and the projection keeps it on only while the city reads the
+PR approved. The warrant *The city's merge status* records it.
 `blocker-holder.sh`'s new class composes core's gate sweep: a gate it resolves
 is held by an automated actor.
 
@@ -144,6 +165,9 @@ flow the design keeps.
 - Gas City ships a merge gate that reads a bead's waits, or GitHub can hold a
   merge on a review's own message. The city's status and the auto-merge toggle
   then move onto that primitive.
+- GitHub's status API takes an expected prior status, or Gas City ships a lock
+  a pack can take around a write to an outside service. The status writer's
+  lock then moves onto it.
 - The city imports a gastown release that carries `pr-merge-reconcile`. The close
   step then becomes that command.
 - Gas Town's refinery requeues through `gc sling`, keeps a branch that has a PR,
