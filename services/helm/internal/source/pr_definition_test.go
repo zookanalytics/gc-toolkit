@@ -17,7 +17,7 @@ import (
 // each reason that names one. The answer is the definition's own, so a change to
 // it reaches the board with no edit here, and a rule the board kept for itself
 // would part from it. gctk's TestPRStatusDeriveReadsTheDefinition holds the PR's
-// labels and gc-helm.sh engage, which read `gctk pr-status derive`, to the same
+// labels and gc-helm.sh engage, which read `gctk pr status`, to the same
 // scenarios the same way.
 func TestBoardReadsTheDefinition(t *testing.T) {
 	scenarios, err := fixture.Scenarios()
