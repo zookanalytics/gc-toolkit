@@ -17,7 +17,7 @@ wake_mode = "resume"
 attach = true
 session_live = [
   'tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} set-option -t "={{.Session}}:" detach-on-destroy on',
-  'tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} set-option -t "={{.Session}}:" set-titles on \; set-option -t "={{.Session}}:" set-titles-string "#T"',
+  'tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} set-option -t "={{.Session}}:" set-titles on \; set-option -t "={{.Session}}:" set-titles-string "#{?#{GC_DRAIN_ACK},done · ,}#T"',
 ]
 nudge = ""
 idle_timeout = "0"

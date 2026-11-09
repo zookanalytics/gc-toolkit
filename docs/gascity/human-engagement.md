@@ -1,6 +1,6 @@
 ---
 name: Gas City and human engagement (platform facts)
-description: What Gas City offers for engaging a person, and how a session and its pane end, where upstream's docs leave it unsaid — human gates and the core orders that surface them, the primitives a conversation rides, where a question surfaces, the gc-roles worker contract, the idle ladder, max age, manual sessions, the stop, the no-wake-reason drain, the backstops, the claim releases that keep a bead routed to `human`, and where a failed start is recorded — each cited and dated. gc-toolkit's own model on these is human-engagement.md.
+description: What Gas City offers for engaging a person, and how a session and its pane end, where upstream's docs leave it unsaid — human gates and the core orders that surface them, the primitives a conversation rides, where a question surfaces, the gc-roles worker contract, the idle ladder, max age, manual sessions, the stop, the drain flag a drain-ack writes, the no-wake-reason drain, the backstops, the claim releases that keep a bead routed to `human`, and where a failed start is recorded — each cited and dated. gc-toolkit's own model on these is human-engagement.md.
 ---
 
 # Gas City and human engagement
@@ -343,6 +343,43 @@ read at upstream `9f807760c` on 2026-11-07; `PruneDetailed` and
 `pruneStateAllowed` (`internal/session/manager.go`), read there on 2026-11-08.
 Probed on this host on 2026-11-08, in a scratch v2 city
 ([specs/tk-7w7qdls/idle-sleep-probe.md](../../specs/tk-7w7qdls/idle-sleep-probe.md)).
+
+### A drain-ack sets `GC_DRAIN_ACK` in the session's tmux environment
+
+`gc runtime drain-ack` records each ack it lands as `GC_DRAIN_ACK=1` in the
+session's metadata, which on the tmux runtime is the session's tmux
+environment: `set-environment -t <session> GC_DRAIN_ACK 1`. It does so for the
+session's own ack and an operator's `--operator` ack alike, and under both
+reconcilers. Under v2 the flag mirrors the ack the session row records, and
+under the legacy reconciler the flag is the ack. `gc runtime undrain` removes
+it with `set-environment -u`. The legacy reconciler also sets it when it
+acknowledges a drain on a session's behalf (*A pool session with no wake
+reason is drained*, below). Under v2 that drain code does not run, so there
+only a drain-ack sets the flag. A restart starts a fresh tmux session, whose
+environment holds no flag.
+
+tmux reads a format variable that names no option or format of its own from
+the session's environment, so a session's `set-titles-string` can read the
+flag: `#{?#{GC_DRAIN_ACK},done · ,}#T` reads `done · ` and the pane's title
+while the flag is set, and the pane's title alone once it is removed. Setting
+the variable redraws nothing. An attached client's title follows it when the
+pane next prints, or else at the client's next status refresh, every
+`status-interval` seconds, which is 15 by default and on this city's server.
+
+*Evidence:* upstream's
+[CLI reference for `gc runtime drain-ack`](https://docs.gascity.com/reference/cli#gc-runtime-drain-ack),
+which says it "Sets GC_DRAIN_ACK metadata on the session".
+`providerDrainOps.setDrainAck` and `providerDrainOps.clearDrain`,
+`finishRuntimeDrainAck`, `rowAckedDrainOps` and `persistedAckDrainOps`
+(`cmd/gc/cmd_runtime_drain.go`), `Provider.SetMeta` and `Provider.RemoveMeta`
+(`internal/runtime/tmux/adapter.go`), `Tmux.SetEnvironment` and
+`Tmux.RemoveEnvironment` (`internal/runtime/tmux/tmux.go`),
+`setReconcilerDrainAckMetadata` (`cmd/gc/session_wake.go`), its one caller in
+`reconcileSessionBeadsTracedWithNamedDemand` (`cmd/gc/session_reconciler.go`),
+and the v2 phase split in `cmd/gc/city_runtime_v2.go`, read at upstream
+`9ba215cb5` on 2026-11-09, the same at the fork build `cb80c5354`. The tmux
+behaviour was probed with tmux 3.8 on this host on 2026-11-09
+([specs/tk-7w7qdls/idle-sleep-probe.md](../../specs/tk-7w7qdls/idle-sleep-probe.md#the-done-mark-on-gas-citys-drain-flag)).
 
 ### A manual session stays up until it is closed
 

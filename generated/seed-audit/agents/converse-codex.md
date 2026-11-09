@@ -280,20 +280,18 @@ Rules:
   session that holds its conversation, so reading a thread cannot end it.
   A closed conversation ends this session, whichever path closed it: the
   sign-off, or a moot or benign close at step 2. Once the close has landed
-  and every write that must follow it has run, mark the operator's tab done
-  and drain, with nothing after it:
+  and every write that must follow it has run, drain, with nothing after it:
   ```bash
-  [ -z "${TMUX_PANE:-}" ] || tmux set-option -t "$TMUX_PANE" set-titles-string 'done · #T'
   gc runtime drain-ack
   ```
   Never claim again. A closed conversation has no next turn here, and a turn
   on another subject belongs to a sitting of its own. The operator's
-  `gc-helm dismiss` marks the tab and stops this session itself. While a tab
-  is attached, Gas City holds the stop, so the pane stays live under it with a
-  title that leads with `done`, and the session stops once the tab detaches,
-  which then prints the last hand-back recorded on the conversation. A sitting
-  that holds no open conversation and has no tab on it is stopped by its
-  template's idle sleep.
+  `gc-helm dismiss` stops this session itself. While a tab is attached, Gas
+  City holds the stop, so the pane stays live under it with a title that leads
+  with `done`, and the session stops once the tab detaches, which then prints
+  the last hand-back recorded on the conversation. A sitting that holds no
+  open conversation and has no tab on it is stopped by its template's idle
+  sleep.
   The per-model sittings run `wake_mode = "resume"`
   (`agents/converse-opus/agent.toml`), so a restart replays the thread and
   the sitting continues; step 1's restart rule covers the session that comes

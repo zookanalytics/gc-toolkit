@@ -7,9 +7,8 @@
 # sitting holds on the bead, or the conversation an id names, with a reason
 # that names the dismissal. It answers nothing: every human gate the
 # conversation replies to stays open and owed, and it writes nothing to the
-# bead. It then marks the tab of the converse session that held each
-# conversation it closed done, and stops that session with
-# `gc runtime drain-ack`.
+# bead. It then stops the converse session that held each conversation it
+# closed, with `gc runtime drain-ack`.
 #
 # Covered:
 #   (SITTING, WHY, FORCE) the live sitting's conversation is closed over its
@@ -36,8 +35,6 @@
 #             close: acked as an operator from outside the sitting, by its own
 #             ack from inside it, as an operator under --operator, and never
 #             when the holder is no converse sitting or a stop fails the run
-#   (DONE-*)  before its stop, that session's tab is marked done on the city's
-#             tmux server, and a mark that does not take never fails the run
 #   (KEY)     prefix+X runs the real dismiss, which stops the sitting with one
 #             operator ack Gas City takes
 #   (ARGS)    an unknown flag is a usage error
@@ -109,11 +106,6 @@ case "$1 ${2:-}" in
         done | jq -sc '.' ;;
       *) log "$*" ;;
     esac ;;
-  "config show")
-    # The city's [session] socket, which FAKE_TMUX_SOCKET sets; unset by default.
-    jq -nc --arg s "${FAKE_TMUX_SOCKET:-}" '{config: {Session: {Socket: $s}}}' ;;
-  "status --json")
-    jq -nc --arg n "${FAKE_CITY_NAME:-testcity}" '{city_name: $n}' ;;
   "runtime drain-ack")
     # The stop dismiss sends the session that held a conversation. The log line
     # names the caller's own session id and how many closes had landed, so a
@@ -177,18 +169,6 @@ esac
 exit 0
 GC
 chmod +x "$TMP/bin/gc"
-
-# A tmux standing in for the city's server. Each call is logged to $TMUX_CALLS
-# with how many closes and drain-acks had landed by then, so a test can tell the
-# tab's mark from the close before it and the stop after it. FAKE_TMUX_RC fails
-# every call.
-{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/tmux" <<'TMUXREC'
-_c=$(grep -c '^bd close' "$CALLS" 2>/dev/null); [ -n "$_c" ] || _c=0
-_d=$(grep -c . "${DRAINS:-/dev/null}" 2>/dev/null); [ -n "$_d" ] || _d=0
-printf 'tmux %s | closes=%s | drains=%s\n' "$*" "$_c" "$_d" >> "${TMUX_CALLS:-/dev/null}"
-exit "${FAKE_TMUX_RC:-0}"
-TMUXREC
-chmod +x "$TMP/bin/tmux"
 
 # A recorder standing in for pr-sitting-comment.sh. It logs where it ran and
 # the actions the conversation it draws carries by then.
@@ -422,37 +402,6 @@ case "$(drains)" in
   *) bad "(STOP-PIN) the pinned holder was not stopped (drains: $(drains); out: $OUT $ERR)" ;;
 esac
 
-echo "# dismiss marks the tab of the session it stops done"
-# The pane stays live under an attached tab until the tab detaches, so the tab
-# is marked done first: the session's set-titles-string becomes "done · #T" on
-# the city's tmux server, named by [session] socket or else the city's name.
-export TMUX_CALLS="$TMP/tmux-calls"
-tmuxcalls() { cat "$TMUX_CALLS"; }
-fresh; : > "$DRAINS"; : > "$TMUX_CALLS"; run_dismiss tk-subj
-eq "$(tmuxcalls)" "tmux -L testcity set-option -t =s-gc-50: set-titles-string done · #T | closes=2 | drains=0" \
-   "(DONE-OTHER) the holder's tab is marked done on the city's tmux server, after the conversation's close and before its stop"
-fresh; : > "$DRAINS"; : > "$TMUX_CALLS"; GC_SESSION_ID=gc-50 run_dismiss tk-subj
-eq "$(tmuxcalls)" "tmux -L testcity set-option -t =s-gc-50: set-titles-string done · #T | closes=2 | drains=0" \
-   "(DONE-OWN) a dismiss typed into the sitting marks its own tab done before its own ack"
-fresh; : > "$DRAINS"; : > "$TMUX_CALLS"; FAKE_TMUX_SOCKET=citysock run_dismiss tk-subj
-has "$(tmuxcalls)" "tmux -L citysock set-option -t =s-gc-50: " "(DONE-SOCKET) a city whose [session] socket is set is reached on that server"
-fresh; : > "$DRAINS"; : > "$TMUX_CALLS"; FAKE_TMUX_RC=1 run_dismiss tk-subj
-eq "$RC" 0 "(DONE-FAIL) a mark that does not take leaves the dismiss standing"
-eq "$(drains)" "drain-ack --operator gc-50 | self= | closes=2" "(DONE-FAIL) …and still stops the session"
-has "$ERR" "could not mark the tab of session gc-50 done, so a tab on it keeps its live title until the session stops" \
-    "(DONE-FAIL) …and says a tab on it keeps its live title"
-# A holder that is asleep has no pane for a tab to show, so a mark that cannot
-# reach it is no news.
-fresh; : > "$DRAINS"; : > "$TMUX_CALLS"
-sessions '[{"id":"gc-50","session_name":"s-gc-50","alias":"gc-toolkit/gc-toolkit.tk-conv","template":"gc-toolkit/gc-toolkit.converse-opus","state":"asleep","closed":false,"rig":"gc-toolkit"}]'
-FAKE_TMUX_RC=1 run_dismiss tk-subj
-eq "$RC/$(field tk-conv status)" "0/closed" "(DONE-ASLEEP) a sitting whose session is asleep is dismissed"
-hasnt "$ERR" "could not mark the tab" "(DONE-ASLEEP) …and a mark that cannot reach its session says nothing"
-# A conversation waiting in the queue is held by nobody, so no tab is marked.
-fresh; : > "$DRAINS"; : > "$TMUX_CALLS"; jq '.assignee = "human" | .status = "open"' "$STORE/b/tk-conv.json" > "$STORE/b/x" && mv "$STORE/b/x" "$STORE/b/tk-conv.json"
-run_dismiss tk-conv
-eq "$(field tk-conv status)/$(tmuxcalls)" "closed/" "(DONE-NOHOLDER) a conversation held by nobody closes and marks no tab"
-
 # From here on the stub knows the sittings' tokens, so its drain-ack applies
 # every incarnation rule. A sitting's tmux environment carries its session id
 # and token, and a run-shell job inherits that environment, so a caller outside
@@ -502,9 +451,7 @@ if [ "$1" = display-message ]; then
         fi
     done
     printf '%s\n' "${!#}" >> "$FAKE_KEY_SAID"
-    exit 0
 fi
-printf 'tmux %s\n' "$*" >> "${TMUX_CALLS:-/dev/null}"
 exit 0
 TMUXSTUB
 chmod +x "$TMP/keybin/tmux"
@@ -513,19 +460,17 @@ export FAKE_KEY_SAID="$TMP/key-said"
 for _mode in v2-inherited v2-bare legacy-inherited; do
     _v2=""; case "$_mode" in v2-*) _v2=1 ;; esac
     _tok=tok-50; [ "$_mode" = v2-bare ] && _tok=""
-    fresh; : > "$DRAINS"; : > "$FAKE_KEY_SAID"; : > "$TMUX_CALLS"
+    fresh; : > "$DRAINS"; : > "$FAKE_KEY_SAID"
     KRC=0; KOUT="$(PATH="$TMP/keybin:$PATH" FAKE_DRAIN_V2="$_v2" \
         GC_SESSION_ID=gc-50 GC_SESSION_NAME=s-gc-50 GC_INSTANCE_TOKEN="$_tok" \
         sh "$HERE/tmux-dismiss-sitting.sh" "$KEY_CFG" 2>/dev/null)" || KRC=$?
     eq "$KRC/$KOUT" "0/" "(KEY) [$_mode] prefix+X exits 0 with nothing on stdout"
     eq "$(drains)" "drain-ack --operator gc-50 | self= | closes=2" \
        "(KEY) [$_mode] …and the real dismiss stops the sitting with one operator ack that Gas City takes"
-    has "$(tmuxcalls)" "tmux -L testcity set-option -t =s-gc-50: set-titles-string done · #T" \
-        "(KEY) [$_mode] …after marking its tab done"
     has "$(cat "$FAKE_KEY_SAID")" "the sitting on tk-subj is over (conversation tk-conv closed), and its session stops once this tab detaches" \
         "(KEY) [$_mode] …and tells the operator the sitting is over"
 done
-unset DRAINS FAKE_SESSION_TOKENS FAKE_KEY_SAID TMUX_CALLS
+unset DRAINS FAKE_SESSION_TOKENS FAKE_KEY_SAID
 
 echo "# argument checks"
 fresh; run_dismiss tk-subj --nope

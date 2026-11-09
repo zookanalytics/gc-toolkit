@@ -53,13 +53,16 @@ attach = true
 # Codex name its own session, and each draws that name as its terminal title,
 # which tmux keeps as the pane title (#T). set-titles is a session option too,
 # so the entry reaches the sitting's session alone and leaves the server's
-# global value as it is. Once the conversation is done, the sign-off's drain
-# block and `gc-helm dismiss` set this session's set-titles-string to
-# `done · #T`, so the tab reads done while the pane stays live under a client.
-# A restart runs this entry again and puts back `#T`.
+# global value as it is. The title leads with "done · " once the session's tmux
+# environment holds GC_DRAIN_ACK, which every `gc runtime drain-ack` of the
+# session sets, its own or an operator's, so a tab on a sitting that has
+# drained reads done while the pane stays live under it. tmux reads the flag
+# when it next draws the title: at once when the pane prints, and otherwise at
+# its next status refresh, every 15 seconds by default. A restart starts the
+# session without the flag.
 session_live = [
   'tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} set-option -t "={{.Session}}:" detach-on-destroy on',
-  'tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} set-option -t "={{.Session}}:" set-titles on \; set-option -t "={{.Session}}:" set-titles-string "#T"',
+  'tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} set-option -t "={{.Session}}:" set-titles on \; set-option -t "={{.Session}}:" set-titles-string "#{?#{GC_DRAIN_ACK},done · ,}#T"',
 ]
 # Empty on purpose, and empty is not what protects a sitting. A sitting runs as
 # a manual (spawn-on-engagement) session, never pool_managed. The work ladder,
@@ -88,8 +91,8 @@ nudge = ""
 idle_timeout = "0"
 # How a sitting ends. Its conversation is done only when the agent's sign-off
 # or the operator's bare `gc-helm dismiss` (it infers the conversation) closes
-# it, and each then marks the tab done (session_live above) and runs
-# `gc runtime drain-ack`. The v2 reconciler holds that stop while a client is
+# it, and each then runs `gc runtime drain-ack`, whose flag marks the tab done
+# (session_live above). The v2 reconciler holds that stop while a client is
 # attached, so the pane stays live while the operator watches, and stops the
 # agent within about five minutes of the detach. The record then reads drained,
 # and the core reaper closes it a day later. A sitting cut short while it holds

@@ -1,6 +1,6 @@
 ---
 name: Probe of v2's idle sleep and stop for a converse sitting
-description: Use when you need the evidence that v2's per-agent sleep_after_idle keeps a converse sitting running while it holds its conversation or a client is attached, stops it otherwise, and resumes it with its thread on attach; how a drain-ack's stop and the tab's done mark behave at the sign-off and the dismiss; and why the done mark is a tmux title format and not a typed /rename.
+description: Use when you need the evidence that v2's per-agent sleep_after_idle keeps a converse sitting running while it holds its conversation or a client is attached, stops it otherwise, and resumes it with its thread on attach; how a drain-ack's stop and the tab's done mark behave at the sign-off and the dismiss; why the done mark is a tmux title format and not a typed /rename; and how the template's title reads Gas City's drain flag, and when an attached client sees it.
 ---
 
 # v2's idle sleep and stop for a sitting: the probe
@@ -122,9 +122,60 @@ title format reaches the client at once in every case above.
   drained record is the one the core reaper's prune closes. An idle-slept
   record is never pruned, so it stays asleep, holding no process, until
   something closes it.
-- **The tab is marked done by the session's `set-titles-string`.** The agent's
-  drain block sets it on its own pane's session, and `gc-helm dismiss` sets it
-  on the holder's session on the server Gas City names.
+- **The tab is marked done by the session's `set-titles-string`.** As first
+  built, the agent's drain block set it on its own pane's session, and
+  `gc-helm dismiss` set it on the holder's session on the server Gas City
+  names. The operator ruled on 2026-11-09, in conversation tk-r2td50x, that the
+  template's title read Gas City's drain flag instead, which the next section
+  checks.
+
+## The done mark on Gas City's drain flag
+
+Run on 2026-11-09 with tmux 3.8 on this host, against private tmux servers
+started with `-f /dev/null` from a shell with every `GC_*` variable, `TMUX` and
+`TMUX_PANE` unset. The format is the one each template's `session_live` sets,
+`#{?#{GC_DRAIN_ACK},done · ,}#T`, and the flag was written the way Gas City
+writes it, `set-environment -t =<session> GC_DRAIN_ACK 1`, and removed the way
+it removes it, `set-environment -t =<session> -u GC_DRAIN_ACK`.
+
+**What the format reads.** The template's entry, run under `sh -c` with
+`GC_TMUX_SOCKET` set, as Gas City runs it, stored the format as written. With
+the pane titled `My Title`, `#{T:set-titles-string}` read:
+
+| Session environment | Title |
+|---|---|
+| no `GC_DRAIN_ACK` | `My Title` |
+| `GC_DRAIN_ACK=1` | `done · My Title` |
+| after `-u`, or marked removed with `-r` | `My Title` |
+| none of its own, `GC_DRAIN_ACK=1` in the server's global environment | `done · My Title` |
+
+A second session with the same format read its own title while the first held
+the flag. The global case cannot arise on the city's server, whose global
+environment held no `GC_DRAIN_ACK` when read on 2026-11-09.
+
+**When an attached client sees it.** A client attached in a pty, under BSD
+`script -q -t 0` with `TERM=xterm-256color`, recorded each title tmux sent it.
+
+| Status timer | What followed the flag | Done title reached the client |
+|---|---|---|
+| `status-interval 15` | nothing | after 13.45 s, and after 13.53 s in a second sample |
+| `status-interval 0`, set after the client attached | `send-keys` into `cat`, which echoes | after 0.04 s |
+| `status-interval 0`, set after the client attached | the pane setting its own title (OSC 2) | after 0.03 s |
+| `status-interval 0`, set before the client attached | a line the pane printed by itself, 4 s later | with that line, 4.2 s and 4.1 s after the flag, in two runs |
+| `status-interval 0`, set before the client attached, with `status on` and with `status off` | nothing | not within 12 s, in two samples each |
+
+So setting the flag redraws nothing. The title follows at the pane's next
+output, such as what the agent prints after its own drain-ack, and otherwise at
+the client's next status refresh. The city's server read `status on` and
+`status-interval 15`, tmux's default, on 2026-11-09, so a dismiss from outside
+a sitting shows on its tab within 15 seconds. tmux also redraws a client once
+by itself about five seconds after it attaches, so a flag set inside that window
+showed then: 1.42 s after the flag in one run and 3.2 s after it in another,
+each about five seconds after the attach. Every flag set later waited for one
+of the triggers above.
+
+`converse-title-wiring.test.sh` runs the format and the client checks on every
+test run.
 
 ## Reproducing it
 
@@ -139,3 +190,11 @@ Attach with `gc session attach` inside a second tmux server, type with
 `send-keys -t "=<session>:"`, and read the tab's title as that server's
 `#{pane_title}`. Write a bead the controller must see through `gc bd` or the
 city API.
+
+The drain-flag probe needs no city. Start a private tmux server with
+`-f /dev/null`, run the template's entry under `sh -c` with `GC_TMUX_SOCKET`
+naming that server, write and remove the flag with `set-environment`, and read
+`#{T:set-titles-string}` with `display-message -p`. To time what a client is
+sent, attach one under `script -q -t 0 <file>` fed from a pipe, and look for
+`ESC ] 0 ;` in the file. Without `-t 0`, macOS `script` flushes its file only
+every 30 seconds, which hides when each title arrived.

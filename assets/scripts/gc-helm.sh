@@ -201,22 +201,23 @@ dismissal, and answers nothing: every human gate the conversation replies to
 stays open and owed, for its filer or the next sitting. It records the
 dismissal as one of the visit's actions, a comment on the conversation that
 carries no reason, and draws the comment that shows the visit on the subject's
-PR again. It then marks the tab of the converse session that held the
-conversation done, so the title tmux sends a client attached to it leads with
-"done", and stops the session with `gc runtime drain-ack`, so the controller
-ends the session outside this process: the session dismiss runs in acks itself,
-last, and any other is acked as an operator. Gas City holds that stop while a
-client is attached, so the pane stays live under a tab until it detaches.
---operator says the caller is outside the sitting even when it runs under the
-sitting's identity to infer the subject, as prefix+X does, so every session is
-acked as an operator and none acks itself. A session that will not stop holds
-no conversation any more, so its template's idle sleep stops it once no client
-is attached. The close falls back to --force when bd
-refuses an operator closing a conversation its sitting holds. A conversation
-the verb could not account for aborts the run, which exits 4. It writes
-nothing to the subject. A subject with no live sitting has nothing to end, and
-dismiss says so and writes nothing; a conversation id names its own
-conversation, which dismiss closes whoever holds it.
+PR again. It then stops the converse session that held the conversation with
+`gc runtime drain-ack`, so the controller ends the session outside this
+process: the session dismiss runs in acks itself, last, and any other is acked
+as an operator. Gas City holds that stop while a client is attached, so the
+pane stays live under a tab until it detaches. The ack sets the session's
+drain flag, which the converse templates' title reads, so the tab's title
+leads with "done" by tmux's next status refresh. --operator says the caller is
+outside the sitting even when it runs under the sitting's identity to infer
+the subject, as prefix+X does, so every session is acked as an operator and
+none acks itself. A session that will not stop holds no conversation any more,
+so its template's idle sleep stops it once no client is attached. The close
+falls back to --force when bd refuses an operator closing a conversation its
+sitting holds. A conversation the verb could not account for aborts the run,
+which exits 4. It writes nothing to the subject. A subject with no live
+sitting has nothing to end, and dismiss says so and writes nothing; a
+conversation id names its own conversation, which dismiss closes whoever holds
+it.
 
 dismiss takes the subject as an OPTIONAL argument. Omit it and it infers the
 current sitting from session state: the one open conversation assigned to this
@@ -2345,13 +2346,11 @@ cmd_handback() {
 }
 
 # sitting_session_of <conversation-row> — the live converse session holding a
-# conversation, printed as "<session-id> own <session-name> <state>" when it is
-# the session this verb runs in and "<session-id> other <session-name> <state>"
-# when it is not, else nothing. The session name is its tmux session's, and the
-# state is the one `gc session list` reads, "-" when either is empty. The
-# holder is the session the conversation's gc.session_id names, else the one
-# its gc.session_name or assignee names: the claim stamps both pins, and a bind
-# the sitting never claimed leaves the assignee alone. Only a converse template
+# conversation, printed as "<session-id> own" when it is the session this verb
+# runs in and "<session-id> other" when it is not, else nothing. The holder is
+# the session the conversation's gc.session_id names, else the one its
+# gc.session_name or assignee names: the claim stamps both pins, and a bind the
+# sitting never claimed leaves the assignee alone. Only a converse template
 # counts, so a bead some other agent holds never stops that agent, and a
 # listing that will not read names nobody.
 sitting_session_of() {
@@ -2371,9 +2370,7 @@ sitting_session_of() {
                        or ($as != "" and ((.session_name // "") == $as or (.alias // "") == $as or (.id // "") == $as)))
               | select((.id // "") != "")
               | .id + " " + (if ([.id, .session_name, .alias] | map(select(. != null and . != "")) | any(. as $x | $mine | index($x) != null))
-                             then "own" else "other" end)
-                    + " " + ((.session_name // "") | tostring | if . == "" then "-" else . end)
-                    + " " + ((.state // "") | tostring | if . == "" then "-" else . end) ]
+                             then "own" else "other" end) ]
             | first // empty
           else empty end' 2>/dev/null || true
 }
@@ -2392,30 +2389,6 @@ operator_drain_ack() {
     ) >/dev/null 2>&1
 }
 
-# city_tmux_socket — the name of the tmux server the city's sessions run on,
-# which Gas City takes from `[session] socket` and otherwise from the city's
-# name (tmuxConfigFromSession in gastownhall/gascity cmd/gc/providers.go). Both
-# are read from gc, because the caller can be outside every tmux server, as the
-# board is. Prints nothing when neither reads.
-city_tmux_socket() {
-    _cts=$(gc config show --json 2>/dev/null | scrub | jq -r '.config.Session.Socket // "" | tostring' 2>/dev/null || true)
-    [ -n "$_cts" ] || _cts=$(gc status --json 2>/dev/null | scrub | jq -r '.city_name // "" | tostring' 2>/dev/null || true)
-    printf '%s' "$_cts"
-}
-
-# mark_sitting_done <tmux-session> — show a sitting's tab as done once its
-# conversation is. The session's set-titles-string becomes "done · #T", so the
-# title tmux sends an attached client leads with "done" while the pane stays
-# live under it, until the session stops. It sets that one session's option on
-# the city's tmux server, and a restart of the session puts back the template's
-# "#T". Returns non-zero when it marked nothing.
-mark_sitting_done() {
-    [ -n "$1" ] && [ "$1" != "-" ] || return 1
-    _msd_sock=$(city_tmux_socket)
-    [ -n "$_msd_sock" ] || return 1
-    tmux -L "$_msd_sock" set-option -t "=$1:" set-titles-string 'done · #T' >/dev/null 2>&1
-}
-
 # ── Verb: dismiss ────────────────────────────────────────────────────
 # The operator's explicit "end this sitting". converse runs with no
 # idle_timeout, so a held conversation keeps its sitting up until something
@@ -2432,14 +2405,14 @@ mark_sitting_done() {
 # one waiting in the queue. A conversation the verb could not account for
 # aborts the run. Idempotent.
 #
-# Each session that held a closed conversation first has its tab marked done
-# (mark_sitting_done), and is then stopped with `gc runtime drain-ack`, so the
-# controller ends the session outside this process: a dismiss typed into the
-# sitting's own pane is never killed half done. The session this verb runs in
-# acks itself, last of all; any other is acked as an operator. Under --operator
-# the caller is outside every sitting, whatever identity it runs under, so no
-# session acks itself. Gas City holds that stop while a client is attached, so
-# the pane stays live under the tab, marked done, until the tab detaches. A
+# The stop is `gc runtime drain-ack`, so the controller ends the session
+# outside this process: a dismiss typed into the sitting's own pane is never
+# killed half done. The session this verb runs in acks itself, last of all;
+# any other is acked as an operator. Under --operator the caller is outside
+# every sitting, whatever identity it runs under, so no session acks itself.
+# Gas City holds that stop while a client is attached, so the pane stays live
+# under the tab until the tab detaches, and the ack's drain flag puts "done"
+# at the head of the tab's title (the converse templates' session_live). A
 # session whose stop does not take holds no conversation any more, so its
 # template's idle sleep stops it once no client is attached.
 cmd_dismiss() {
@@ -2563,33 +2536,17 @@ cmd_dismiss() {
         fi
     done
 
-    # dismiss_mark_done <session-id> <tmux-session> <state> — mark a stopping
-    # sitting's tab done. A mark that does not take is said only for a session
-    # that reads active, whose pane a tab can be showing.
-    dismiss_mark_done() {
-        mark_sitting_done "$2" && return 0
-        [ "$3" = active ] || return 0
-        echo "$PROG: dismiss: could not mark the tab of session $1 done, so a tab on it keeps its live title until the session stops" >&2
-    }
-
-    # dismiss_stop_sittings — mark each session dismiss_stop names done and stop
-    # it, the one this verb runs in last, since a dismiss typed into a sitting's
-    # pane ends with that pane. Under --operator none is the one this verb runs
-    # in. Each line is "<session-id> <own|other> <tmux-session> <state>".
+    # dismiss_stop_sittings — stop each session dismiss_stop names, the one this
+    # verb runs in last, since a dismiss typed into a sitting's pane ends with
+    # that pane. Under --operator none is the one this verb runs in.
     dismiss_stop_sittings() {
-        _ds_own=""; _ds_own_name=""; _ds_own_state=""
+        _ds_own=""
         _ds_ifs=$IFS
         IFS='
 '
         for _ds_line in $dismiss_stop; do
-            _ds_id=${_ds_line%% *}; _ds_rest=${_ds_line#* }
-            _ds_who=${_ds_rest%% *}; _ds_rest=${_ds_rest#* }
-            _ds_name=${_ds_rest%% *}; _ds_state=${_ds_rest#* }
-            if [ "$_ds_who" = own ] && [ -z "$dismiss_operator" ]; then
-                _ds_own=$_ds_id; _ds_own_name=$_ds_name; _ds_own_state=$_ds_state
-                continue
-            fi
-            dismiss_mark_done "$_ds_id" "$_ds_name" "$_ds_state"
+            _ds_id=${_ds_line%% *}
+            if [ "${_ds_line#* }" = own ] && [ -z "$dismiss_operator" ]; then _ds_own=$_ds_id; continue; fi
             if operator_drain_ack "$_ds_id"; then
                 _dmsg "$PROG: dismiss: stopped session $_ds_id, which held the sitting"
             else
@@ -2598,7 +2555,6 @@ cmd_dismiss() {
         done
         IFS=$_ds_ifs
         if [ -n "$_ds_own" ]; then
-            dismiss_mark_done "$_ds_own" "$_ds_own_name" "$_ds_own_state"
             _dmsg "$PROG: dismiss: ending this session ($_ds_own), which held the sitting"
             gc runtime drain-ack >/dev/null 2>&1 \
                 || echo "$PROG: dismiss: could not end this session ($_ds_own); it holds no conversation now, so its idle sleep stops it once no client is attached" >&2

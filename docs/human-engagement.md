@@ -574,11 +574,10 @@ that names the dismissal, and it answers nothing: every gate the conversation
 replies to stays open and owed, for its filer or the next sitting. With no
 argument it infers the current sitting from the session it runs in. The close
 falls back to `--force` when bd refuses an operator closing a conversation its
-sitting holds. It then marks the tab of the converse session that held each
-conversation it closed done, and stops that session with
-`gc runtime drain-ack`: the session it runs in acks itself, last, and any
-other is acked as an operator. On a bead with no live sitting it writes
-nothing and says so. `prefix+X` runs the same dismiss from the keyboard
+sitting holds. It then stops the converse session that held each conversation
+it closed, with `gc runtime drain-ack`: the session it runs in acks itself,
+last, and any other is acked as an operator. On a bead with no live sitting it
+writes nothing and says so. `prefix+X` runs the same dismiss from the keyboard
 after a y/n confirm (`assets/scripts/tmux-dismiss-sitting.sh`), under the
 pane's own session. It passes `--operator`, because the keystroke comes from
 outside the sitting, and dismiss stops the session with an operator ack. That
@@ -589,12 +588,11 @@ whose caller names the session it stops.
 **A sitting ends its own session.** Gas City does not end a manual session
 when its work closes, so once a sitting's conversation has closed, or its
 sign-off has handed the conversation back, its last act is
-`gc runtime drain-ack`, and when the conversation is done the command before it
-marks the operator's tab done. Gas City holds that stop while a client is
-attached
+`gc runtime drain-ack`. Gas City holds that stop while a client is attached
 ([gascity/human-engagement.md](gascity/human-engagement.md#a-stop-the-v2-reconciler-makes-waits-while-a-client-is-attached)),
-so the pane stays live under the tab, with a title that leads with `done`, and
-the session stops within about five minutes of the detach. Its record then
+so the pane stays live under the tab, with a title that leads with `done`
+(*How a pane dies when no sitting is live*, below), and the session stops
+within about five minutes of the detach. Its record then
 reads drained, and the core reaper's `gc session prune --state drained --before
 24h` closes it a day later. A sitting that holds no open conversation, such as
 one whose conversation was closed by hand, is stopped by its template's idle
@@ -754,18 +752,18 @@ conversation done: the sitting's sign-off and the operator's `gc-helm dismiss`.
 The sign-off is terminal, so converse takes it only when nothing important is
 still pending. Closing the conversation ends the session too, whichever path
 closes it. The sitting's own last act is `gc runtime drain-ack`, after the
-sign-off or a moot or benign close, with the tab marked done just before it,
-and it never claims again: a closed conversation has no next turn in that
-session. `gc-helm dismiss` closes the conversation, marks the tab of the session
-that held it done and then stops that session, also through `drain-ack`, so the
-controller ends the session outside the verb's process; a dismiss typed into
-the sitting's own pane acks its own session last. Either stop waits while a
-client is attached, so a sitting the operator is watching stays live under the
-tab until it detaches (*How a pane dies when no sitting is live*, below). The
-idle sleep is the backstop for a sitting that holds no open conversation, such
-as one whose conversation was closed by hand. A sitting whose conversation is
-still open, because the operator walked away before any sign-off, keeps its
-session running indefinitely: the operator re-attaches or dismisses.
+sign-off or a moot or benign close, and it never claims again: a closed
+conversation has no next turn in that session. `gc-helm dismiss` closes the
+conversation and then stops the session that held it, also through
+`drain-ack`, so the controller ends the session outside the verb's process; a
+dismiss typed into the sitting's own pane acks its own session last. Either
+stop waits while a client is attached, so a sitting the operator is watching
+stays live under the tab until it detaches (*How a pane dies when no sitting
+is live*, below). The idle sleep is the backstop for a sitting that holds no
+open conversation, such as one whose conversation was closed by hand. A
+sitting whose conversation is still open, because the operator walked away
+before any sign-off, keeps its session running indefinitely: the operator
+re-attaches or dismisses.
 
 A conversation can also outlive its sitting: the sitting's create fails after
 `gc-helm engage` bound the conversation to it, or its session is closed while
@@ -887,31 +885,44 @@ which begins when a live session has no wake reason left, never begins for a
 sitting
 ([gascity/human-engagement.md](gascity/human-engagement.md#a-manual-session-stays-up-until-it-is-closed)).
 So a sitting ends its own session: once its conversation has closed and every
-write that must follow the close has run, it marks the operator's tab done, and
-its last act is `gc runtime drain-ack`, so the controller stops the session.
-`gc-helm dismiss` marks the tab of the session that held the conversation it
-closes and stops that session the same way. The template's idle sleep,
-`sleep_after_idle`, is the backstop for a sitting that outlives its
-conversation: it stops a session that holds no claimed or assigned work and has
-no client attached once ten minutes have passed since its last detach or
-terminal output.
+write that must follow the close has run, its last act is
+`gc runtime drain-ack`, so the controller stops the session. `gc-helm dismiss`
+stops the session that held the conversation it closes the same way. The
+template's idle sleep, `sleep_after_idle`, is the backstop for a sitting that
+outlives its conversation: it stops a session that holds no claimed or
+assigned work and has no client attached once ten minutes have passed since
+its last detach or terminal output.
 
 **Viewing a sitting holds its stop.** The v2 reconciler holds a stop while a
 client is attached to the session, the stop a drain-ack asks for included
 ([gascity/human-engagement.md](gascity/human-engagement.md#a-stop-the-v2-reconciler-makes-waits-while-a-client-is-attached)).
 So after a sign-off or a dismiss the pane stays live under the operator's tab,
-and the tab's title, which tmux carries from the pane's own (the
-`set-titles-string` a template's `session_live` sets), leads with `done`: the
-sign-off's drain block and `gc-helm dismiss` set that string to `done · #T` for
-the sitting's session. That mark renames nothing. It changes only the title
-tmux sends an attached client, so the pane's own title, the agent's own
-session name and the session record that `gc session list` and the board show
-keep the title `gctk session title` gave them, and a restart, which runs
-`session_live` again, puts back `#T`. A `/rename`, which is how
-`gctk session title` names the agent, cannot make the mark. Gas City types one
-into a running session only at its next boundary, and in the probe one that
-the sitting's own agent queued with its drain-ack had not landed two minutes
-later
+and the tab's title leads with `done`. That title is the `set-titles-string`
+each `converse-<model>` template's `session_live` sets,
+`#{?#{GC_DRAIN_ACK},done · ,}#T`, which tmux sends an attached client: the
+pane's own title, led by `done · ` while the session's tmux environment holds
+`GC_DRAIN_ACK`. Gas City sets that flag at every `gc runtime drain-ack` of the
+session, the sitting's own and an operator's alike
+([gascity/human-engagement.md](gascity/human-engagement.md#a-drain-ack-sets-gc_drain_ack-in-the-sessions-tmux-environment)),
+so nothing in the pack writes the title at the ending, and a tab reads done
+once its sitting has drained, whichever way the sitting ended: its
+conversation closed by the sign-off, a moot or benign close or a dismiss, or
+handed back to the queue by a sitting low on context. tmux reads the flag when
+it next draws the title. It does so at once when the pane prints, as the
+agent's pane does after the sitting's own drain-ack, and otherwise at the
+client's next status refresh, every 15 seconds on the city's tmux server,
+which keeps tmux's default `status-interval`. So a dismiss from outside the
+sitting shows on the tab within 15 seconds
+([specs/tk-7w7qdls/idle-sleep-probe.md](../specs/tk-7w7qdls/idle-sleep-probe.md#the-done-mark-on-gas-citys-drain-flag)).
+The mark renames nothing. It changes only the title tmux sends an attached
+client, so the pane's own title, the agent's own session name and the session
+record that `gc session list` and the board show keep the title
+`gctk session title` gave them. A restart starts a fresh tmux session, which
+holds no flag, so a restarted sitting reads live until it drains again. A
+`/rename`, which is how `gctk session title` names the agent, cannot make the
+mark. Gas City types one into a running session only at its next boundary, and
+in the probe one that the sitting's own agent queued with its drain-ack had
+not landed two minutes later
 ([specs/tk-7w7qdls/idle-sleep-probe.md](../specs/tk-7w7qdls/idle-sleep-probe.md#why-the-done-mark-is-not-a-typed-rename)).
 One that lands while an attached operator has typed in the box goes onto that
 text, and both go to the model as one message. At a dismiss, a submit to a
@@ -962,13 +973,14 @@ Three things about that path are worth knowing before trusting a pane:
 
 **What the design holds to.** A conversation is done when the sitting closes
 it, at its sign-off or at a moot or benign close before any framing, or when
-the operator dismisses it, and each of those marks the tab done. Neither a stop
-nor the idle sleep closes one. The agent runs while its sitting holds an open
-conversation or a client is attached, and stops otherwise: the drain-ack's
-stop once the tab detaches, and the idle sleep for a sitting that holds
-nothing. Attaching to a stopped sitting resumes its thread. Nothing copies the
-pane, and no pane, live or dead, stays on screen after its session ends, so
-what a tab prints is the record on the conversation.
+the operator dismisses it. Neither a stop nor the idle sleep closes one. The
+agent runs while its sitting holds an open conversation or a client is
+attached, and stops otherwise: the drain-ack's stop once the tab detaches, and
+the idle sleep for a sitting that holds nothing. A tab reads done once its
+sitting has drained, from Gas City's own drain flag. Attaching to a stopped
+sitting resumes its thread. Nothing copies the pane, and no pane, live or
+dead, stays on screen after its session ends, so what a tab prints is the
+record on the conversation.
 
 **What follows for the pack.** The record has to be written before the pane
 matters: what is owed recorded at hold time, the outcome appended as soon as
