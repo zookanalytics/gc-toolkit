@@ -69,7 +69,7 @@ func row(id string, md map[string]string) Row { return Row{ID: id, Metadata: md}
 // its in-flight set, the far beads of its own edges and the gates its walk
 // reaches.
 func TestReadGathersTheFacts(t *testing.T) {
-	person := Blocker{ID: "d", Title: "pick the release window", Status: "open", IssueType: "task", RoutedTo: "human"}
+	person := Blocker{ID: "d", Title: "pick the release window", Status: "open", IssueType: "decision"}
 	s := &store{
 		rows: map[string]Row{"a": row("a", map[string]string{
 			"merge_hold": "true", "rebase_hold": "1",
@@ -212,25 +212,23 @@ func TestReadOfNoAnchors(t *testing.T) {
 	}
 }
 
-// A person owes a live blocker routed to a person, or a live decision, and never
-// a human gate, which held: gate counts.
+// A person owes a live decision, and never a human gate, which held: gate
+// counts.
 func TestIsPersonBlocker(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		b    Blocker
 		want bool
 	}{
-		{"routed to a person", Blocker{ID: "d", Status: "open", IssueType: "task", RoutedTo: "human"}, true},
-		{"routed to a person, in progress", Blocker{ID: "d", Status: "IN_PROGRESS", RoutedTo: "human"}, true},
-		{"routed to a person, with no status", Blocker{ID: "d", RoutedTo: "human"}, true},
 		{"a decision", Blocker{ID: "d", Status: "open", IssueType: "decision"}, true},
 		{"a decision in any case", Blocker{ID: "d", Status: "open", IssueType: "Decision"}, true},
-		{"closed", Blocker{ID: "d", Status: "closed", RoutedTo: "human"}, false},
+		{"a decision in progress", Blocker{ID: "d", Status: "IN_PROGRESS", IssueType: "decision"}, true},
+		{"a decision with no status", Blocker{ID: "d", IssueType: "decision"}, true},
+		{"closed", Blocker{ID: "d", Status: "closed", IssueType: "decision"}, false},
 		{"closed in any case", Blocker{ID: "d", Status: "Closed", IssueType: "decision"}, false},
-		{"routed to a pool", Blocker{ID: "d", Status: "open", RoutedTo: "gc-toolkit/gc-toolkit.polecat"}, false},
-		{"a task nothing routes", Blocker{ID: "d", Status: "open", IssueType: "task"}, false},
-		{"a human gate routed to a person", Blocker{ID: "g", Status: "open", IssueType: "gate", AwaitType: "human", RoutedTo: "human"}, false},
-		{"a timer gate routed to a person", Blocker{ID: "g", Status: "open", IssueType: "gate", AwaitType: "timer", RoutedTo: "human"}, true},
+		{"a task", Blocker{ID: "d", Status: "open", IssueType: "task"}, false},
+		{"a human gate", Blocker{ID: "g", Status: "open", IssueType: "gate", AwaitType: "human"}, false},
+		{"a timer gate", Blocker{ID: "g", Status: "open", IssueType: "gate", AwaitType: "timer"}, false},
 	} {
 		if got := IsPersonBlocker(tc.b); got != tc.want {
 			t.Errorf("%s: IsPersonBlocker(%+v) = %v, want %v", tc.name, tc.b, got, tc.want)
@@ -245,7 +243,7 @@ func TestIsPersonBlocker(t *testing.T) {
 func TestReasons(t *testing.T) {
 	approved := Facts{PRPosture: "approved@oid@t"}
 	with := func(f Facts, edit func(*Facts)) Facts { edit(&f); return f }
-	d1 := Blocker{ID: "d1", Title: "first", Status: "open", RoutedTo: "human"}
+	d1 := Blocker{ID: "d1", Title: "first", Status: "open", IssueType: "decision"}
 	d2 := Blocker{ID: "d2", Title: "second", Status: "open", IssueType: "decision"}
 	for _, tc := range []struct {
 		name string
@@ -279,7 +277,6 @@ func TestReasons(t *testing.T) {
 		}), []Reason{{HeldBlocked, "", "a live blocker no automated actor holds"}}},
 		{"a gate among the blockers counts once, as a gate", with(approved, func(f *Facts) {
 			g := gate("g")
-			g.RoutedTo = "human"
 			f.Gates, f.Blockers = []Blocker{g}, []Blocker{g}
 		}), []Reason{{HeldGate, "g", "ask g"}}},
 		{"every value at once", with(approved, func(f *Facts) {

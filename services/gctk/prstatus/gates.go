@@ -9,15 +9,13 @@ import (
 
 // Blocker is the far end of one `blocks` edge, in the fields [HoldingGates] and
 // [IsPersonBlocker] read of it. A [Store] fills it from its own read, and passes
-// the status and the issue type as they read, in any case. RoutedTo is the far
-// bead's metadata.gc.routed_to.
+// the status and the issue type as they read, in any case.
 type Blocker struct {
 	ID        string
 	Title     string
 	Status    string
 	IssueType string
 	AwaitType string
-	RoutedTo  string
 }
 
 // open reports whether the blocker still blocks: any status but closed, a
@@ -34,17 +32,16 @@ func IsHumanGate(issueType, awaitType string) bool {
 }
 
 // IsPersonBlocker reports whether a blocker is a person's to clear and not a
-// human gate: a live blocker routed to a person (gc.routed_to=human), or a
-// decision. No automated actor will clear it, so it holds a PR as held: blocked.
-// A human gate is never one, whatever its route, because held: gate is what
-// counts it. A blocker with no status reads open, and only a closed one is not
-// live. The helm board asks it of any bead's blockers, for the rows that ask a
-// person for something.
+// human gate: a live decision. No automated actor will clear it, so it holds a
+// PR as held: blocked. A human gate is never one, because held: gate is what
+// counts it, and a route marks no blocker as a person's. A blocker with no
+// status reads open, and only a closed one is not live. The helm board asks it
+// of any bead's blockers, for the rows that ask a person for something.
 func IsPersonBlocker(b Blocker) bool {
 	if !b.open() || IsHumanGate(b.IssueType, b.AwaitType) {
 		return false
 	}
-	return b.RoutedTo == "human" || strings.EqualFold(b.IssueType, "decision")
+	return strings.EqualFold(b.IssueType, "decision")
 }
 
 // ReadBlockers answers the `blocks` edges of each bead it is given: for each id,

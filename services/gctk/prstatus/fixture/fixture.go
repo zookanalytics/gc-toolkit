@@ -143,7 +143,6 @@ func BlockerOf(b Bead) prstatus.Blocker {
 		Status:    b.Status,
 		IssueType: b.IssueType,
 		AwaitType: b.AwaitType,
-		RoutedTo:  b.Metadata["gc.routed_to"],
 	}
 }
 

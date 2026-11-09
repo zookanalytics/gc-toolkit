@@ -196,7 +196,6 @@ func asBlockers(rows []gcbd.Bead) []prstatus.Blocker {
 			Status:    b.StatusLowerOr("open"),
 			IssueType: b.IssueTypeString(),
 			AwaitType: b.AwaitType,
-			RoutedTo:  b.Meta("gc.routed_to"),
 		})
 	}
 	return out

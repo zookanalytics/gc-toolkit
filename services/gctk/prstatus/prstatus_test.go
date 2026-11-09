@@ -9,7 +9,7 @@ import (
 // it, and personOwed one live blocker of the anchor's a person owes.
 var (
 	oneGate    = []Blocker{gate("g")}
-	personOwed = []Blocker{{ID: "d", Title: "pick the release window", Status: "open", IssueType: "task", RoutedTo: "human"}}
+	personOwed = []Blocker{{ID: "d", Title: "pick the release window", Status: "open", IssueType: "decision"}}
 )
 
 // The precedence table, one row per case pr-status-label.test.sh asserts.
