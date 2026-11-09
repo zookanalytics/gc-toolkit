@@ -21,8 +21,9 @@ surface with each verb's caller class, intent and defense, the rule that names
 a verb, the rule that admits an order and what an order guarantees, the code
 that parallels Gas City's, the ledger, the adapters, how commands, orders,
 doctor checks and the helm board compose the domains, the contract of
-`bead holds`, where the one rule for what holds a bead lives, and the rules
-every domain move follows.
+`bead holds`, where the one rule for what holds a bead lives, the rules
+every domain move follows, and the debt where the built code falls short of
+that shape.
 
 **Boundaries.** Which pack logic survives at all is
 [built-once-target.md](built-once-target.md)'s, and how a feature is
@@ -562,3 +563,35 @@ is one package.
    replacement asks the domain. The one exception is a shared shell definition
    that the move deletes. Each of its call sites swaps onto the domain in the
    same change, in retiring code too, and nothing else there changes.
+
+## Debt
+
+Each entry is a place where the built code falls short of the layers above,
+why a reader must know it, and the work that retires it.
+
+- **`gctk pr status` reads around the ledger.** Its command builds the store
+  that `prstatus` reads over the store adapter and gathers the PR's facts
+  itself (`internal/cli/prstatus.go`), and `prstatus` spells the keys it
+  reads, so the key registry does not show it reading them. A new pr verb
+  takes neither shape. `prstatus` moves under the pr domain, onto the ledger,
+  with whichever of the merge member (tk-1tfzr71.20) and the GitHub-intake
+  member (tk-1tfzr71.21) rewrites its facts.
+- **The board reads the store itself.** Its source reads each rig's store
+  through the embedded beads library or the supervisor's API and decodes the
+  rows and keys it shows, and only what holds a bead and where a PR stands
+  come from the domains. One render therefore holds two reads of the store, so
+  the board renders a domain's answer, or that the answer is missing, and
+  never derives its own from its rows. The board member (tk-1tfzr71.24)
+  retires that read or writes the warrant it stands on.
+- **`epic create`, `session title` and `rig` start processes outside an
+  adapter.** `epic create` files the epic with its own `gc bd create`,
+  `session title` runs `gc session rename` and `gc session submit`, and the
+  rig domain runs a check's command itself.
+  `epic create` and `session title` also read beads through the store adapter,
+  around the ledger. No runtime or host adapter exists, so their tests stub
+  `gc` on `PATH` or run real processes, and none of them is the model for a
+  new verb. tk-ssm8qns.16 puts them behind the ledger and the adapters.
+- **`lifecycle` and `merge` reach git, GitHub, the store and the pack's
+  scripts themselves.** They retire whole with tk-1tfzr71.20
+  ([the register](#the-re-implementation-register)), so they get no layering
+  work.
