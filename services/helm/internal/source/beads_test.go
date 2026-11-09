@@ -977,6 +977,31 @@ func TestLandedWaitsAreTheStoresAnswer(t *testing.T) {
 	}
 }
 
+// TestAWaitsForEdgeIsARecordedWait pins the wait types: a waits-for edge is a
+// wait of the store's blocked rule, so the source records it beside the blocks
+// edges, and it has not landed while the store's answer lists it pending, as
+// the waits package lists a waits-for spawner it cannot judge yet.
+func TestAWaitsForEdgeIsARecordedWait(t *testing.T) {
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+	st := populatedStore()
+	st.depsDown["tk-human"] = append(st.depsDown["tk-human"], withDepType(child("tk-wf", "open", testNow, ""), "waits-for"))
+	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": st})
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	for _, a := range res.Anchors {
+		if a.ID != "tk-human" || a.Kind != "human" {
+			continue
+		}
+		if !slices.Contains(a.WaitingOn, "tk-wf") || slices.Contains(a.WaitingOnClosed, "tk-wf") || a.WaitingUnknown {
+			t.Errorf("waiting_on=%v closed=%v unknown=%v; want tk-wf recorded and still pending", a.WaitingOn, a.WaitingOnClosed, a.WaitingUnknown)
+		}
+		return
+	}
+	t.Fatal("tk-human/human: anchor missing")
+}
+
 // TestWaitsAreReadOncePerRigPerGather pins the cost of the read: one snapshot
 // of each rig's store per gather, over the anchors of both its passes that
 // record a wait, each named once.

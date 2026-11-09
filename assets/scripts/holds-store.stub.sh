@@ -27,9 +27,6 @@
 #       closes does. The verbs are the store adapter's reads:
 #         list   the rows --id, --has-metadata-key, --metadata-field and --all
 #                select, each edge in the listing shape, every edge kept
-#         show   the rows named, each edge carrying its far bead's row, an edge
-#                into another store left out, and an error object at exit 1
-#                when no row is found
 #         blocked  the store's blocked listing, by bd's rule over the rows: a
 #                live bead (neither closed nor pinned) is blocked by a blocks or
 #                conditional-blocks edge onto a live bead in this store, by a
@@ -160,20 +157,6 @@ case "$verb" in
           | .id as $self
           | .dependencies = [ ._edges[] | {issue_id: $self, depends_on_id: .id, type} ]
           | del(._edges) ]' "$store"
-    ;;
-  show)
-    want=()
-    for a in "$@"; do case "$a" in --*) ;; *) want+=("$a") ;; esac; done
-    out="$(jq -c --rawfile d "$deps" "$EDGES"'
-      rows($d) as $all
-      | ($all | map({key: .id, value: (del(._edges))}) | from_entries) as $byid
-      | [ $ARGS.positional[] as $id | $all[] | select(.id == $id)
-          | .dependencies = [ ._edges[] | select(held_in($byid; .)) | ($byid[.id] + {dependency_type: .type}) ]
-          | del(._edges) ]' "$store" --args ${want[@]+"${want[@]}"})" || exit 1
-    if [ "$(printf '%s' "$out" | jq 'length')" = "0" ]; then
-      echo '{"error":"no issues found matching the provided IDs","schema_version":1}'; exit 1
-    fi
-    printf '%s\n' "$out"
     ;;
   blocked)
     if [ -n "${HOLDS_BLOCKED:-}" ]; then printf '%s\n' "$HOLDS_BLOCKED"; exit 0; fi

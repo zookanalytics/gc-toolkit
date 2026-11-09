@@ -957,6 +957,19 @@ for sh in "${SHELLS[@]}"; do
   stopped && not_logged "dep add" && [ "$(waits_on sum-1 work-2)" = "0" ] && reported "file a fresh summary task" \
     && ok "[$sh] late join: a summary task whose beads have all closed takes no wait, and a fresh one is asked for" \
     || bad "[$sh] late join: a summary task whose beads have all closed took the wait (rc=$RC)"
+
+  # Armed with no marker, every blocks wait closed, and a waits-for edge of its
+  # own onto a spawner whose child is open: the store cannot judge that edge yet,
+  # so the task reads unjudged, which a caller that acts counts as still waiting,
+  # and it takes the joining bead's wait.
+  recipe_store; run_recipe "$sh"
+  jq -c "$JOINED"' | map(if .id == "sum-1" then .metadata += {"gc.dispatch_when_ready": "rig/gc-toolkit.polecat"} | ._deps += [{id: "sp-1", dependency_type: "waits-for"}] elif .id == "work-1" then .status = "closed" else . end)
+    + [{id: "sp-1", title: "spawner", issue_type: "task", status: "open", assignee: "", description: "", metadata: {}, _deps: []},
+       {id: "sp-1a", title: "spawned", issue_type: "task", status: "open", assignee: "", description: "", metadata: {}, _deps: [{id: "sp-1", dependency_type: "parent-child"}]}]' "$STORE" > "$STORE.new" && mv "$STORE.new" "$STORE"
+  export SUMMARY=sum-1 WORK=work-2
+  run_late "$sh"
+  eq "$RC" "0" "[$sh] late join: a summary task its own waits-for edge holds, unjudged, takes the joining bead's wait"
+  eq "$(waits_on sum-1 work-2)" "1" "[$sh] late join: ...and waits on the joining bead"
   unset SUMMARY WORK
 done
 

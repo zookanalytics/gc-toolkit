@@ -921,8 +921,9 @@ echo "── a moot or benign close settles a headline that waits on nothing ─
 # block runs as written, its placeholders filled, under stubs: gc answers the
 # subject's row from RL_ROW and exits RL_SHOW_RC after printing it, and gctk,
 # built from this checkout, answers what holds the subject from a store of that
-# row with a blocks edge onto each bead RL_GATES lists, and those beads. Its
-# reads fail at RL_DEPS_RC, or when RL_GATES is not a list.
+# row with an edge onto each bead RL_GATES lists, `blocks` unless the bead names
+# its `edge`, those beads, and the rows RL_MORE adds. Its reads fail at
+# RL_DEPS_RC, or when RL_GATES is not a list.
 RECHECK="$REPO/skills/converse-recheck-premise/SKILL.md"
 RL="$TMP/release"
 mkdir -p "$RL/bin" "$RL/pack/assets/scripts"
@@ -935,8 +936,8 @@ if [ -n "${HOLDS_STUB_READ:-}" ] && [ "${1:-}" = bd ]; then
     shift
     printf '%s\n' "$RL_GATES" | jq -e 'type == "array"' >/dev/null 2>&1 || { echo "gc bd: simulated read failure" >&2; exit 1; }
     [ "${RL_DEPS_RC:-0}" -eq 0 ] || { echo "gc bd: simulated read failure" >&2; exit "$RL_DEPS_RC"; }
-    jq -nc --argjson row "$RL_ROW" --argjson g "$RL_GATES" \
-        '[ ($row[0] + {_deps: [ $g[] | {id, dependency_type: "blocks"} ]}) ] + $g' >"$RL_DIR/holds.json" || exit 1
+    jq -nc --argjson row "$RL_ROW" --argjson g "$RL_GATES" --argjson more "${RL_MORE:-[]}" \
+        '[ ($row[0] + {_deps: [ $g[] | {id, dependency_type: (.edge // "blocks")} ]}) ] + $g + $more' >"$RL_DIR/holds.json" || exit 1
     HOLDS_STORE="$RL_DIR/holds.json" exec "$HOLDS_STUB" answer "$@"
 fi
 printf 'gc %s\n' "$*" >>"$RL_DIR/log"
@@ -976,6 +977,10 @@ SETTLED='[{"id":"tk-x","metadata":{"gc.takeaway":"ruled: x","gc.takeaway_settled
 NONE_HOLDS='[{"id":"tk-g1","issue_type":"gate","await_type":"human","status":"closed"},{"id":"tk-w","issue_type":"task","status":"closed"}]'
 GATE_HOLDS='[{"id":"tk-g2","issue_type":"gate","await_type":"human","status":"open"}]'
 WORK_HOLDS='[{"id":"tk-w","issue_type":"task","status":"open"}]'
+# A waits-for edge of the subject's own onto a spawner whose child is open: the
+# store cannot judge it yet, so the subject reads unjudged, still held.
+SPAWN_HOLDS='[{"id":"tk-sp","issue_type":"task","status":"open","edge":"waits-for"}]'
+SPAWN_CHILD='[{"id":"tk-spc","issue_type":"task","status":"open","parent":"tk-sp"}]'
 for sh_ in $shells; do
     run=$sh_
     [ "$sh_" = zsh ] && run="zsh -f"
@@ -986,9 +991,9 @@ for sh_ in $shells; do
             ok "($sh_) recheck close: a waiting headline on a subject nothing holds is settled with the reading, before the conversation closes" ;;
         *) bad "($sh_) recheck close: a waiting headline on a subject nothing holds is settled with the reading, before the conversation closes" "exit $rc, calls: $calls" ;;
     esac
-    for held_by in "$GATE_HOLDS|an open human gate" "$WORK_HOLDS|open work"; do
-        gates=${held_by%%|*}; what=${held_by#*|}
-        rc=$(run_release "$run" "$WAITING" "$gates")
+    for held_by in "$GATE_HOLDS|an open human gate|[]" "$WORK_HOLDS|open work|[]" "$SPAWN_HOLDS|a waits-for edge it cannot judge yet|$SPAWN_CHILD"; do
+        gates=${held_by%%|*}; rest=${held_by#*|}; what=${rest%%|*}; more=${rest#*|}
+        rc=$(run_release "$run" "$WAITING" "$gates" RL_MORE="$more")
         calls=$(tr '\n' ';' <"$RL/log")
         case "$rc:$calls" in
             *"gc-helm takeaway"*) bad "($sh_) recheck close: a subject $what still holds keeps its headline" "exit $rc, calls: $calls" ;;
