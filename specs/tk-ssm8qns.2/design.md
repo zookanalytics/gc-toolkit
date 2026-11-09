@@ -78,10 +78,11 @@ deleted. Approving decides six things.
   edge: tk-1tfzr71.16, .18, .20, .21, .22 and .24. This costs no time while
   the converse migration is in flight, since both lanes already wait on it. A
   member waits only if its turn comes before this Feature lands.
-- **Ten copies wait for their members.** Copies of a different rule in code
-  the deletion plan retires get no new work under built-once rule 1. Until
-  those members land, "blocked" is decided by `waits`, by the store's own
-  queries and by those ten copies, each with the member that deletes it.
+- **The copies in retiring code wait for their members.** Copies of a
+  different rule in code the deletion plan retires get no new work under
+  built-once rule 1. Until those members land, "blocked" is decided by `waits`,
+  by the store's own queries and by those copies, each with the member that
+  deletes it.
 - **The queued beads.** The pr-open and signoff ports are dropped, and the
   cobra bead folds into this Feature.
 
@@ -389,7 +390,7 @@ graph from the start and never a conflict found at merge.
   `waits-for` or `conditional-blocks` edge (none at 2026-10-27 20:12Z) and a
   bead held only by a demand gate on an ancestor (none at 18:33Z). The unit's
   PR names any it finds.
-- The 22 places the census marks "moves" ask `gctk bead holds`, or `waits`
+- The places the census marks "moves" ask `gctk bead holds`, or `waits`
   through the package from Go. `hold-lib.sh`'s five callers swap in the same
   change that deletes `hold-lib.sh`, `hold-lib.test.sh` and
   `hold-lib.fixture.json`, and the test harness stops copying it.
@@ -441,8 +442,8 @@ every caller on it, and whether a change to its rule touches only that place.
 Once unit 3 lands:
 
 - In code the deletion plan keeps, every dependency decision is `waits` or the
-  store's own query. The ten copies in retiring code are the census's rows,
-  each with its member, and their count falls to zero as those members land.
+  store's own query. The copies in retiring code are the census's rows marked
+  "retires", each with its member, and they go as those members land.
 - A change to the rule is a change to the `waits` package and its tests alone.
   Each axis is one case in unit 2's tests, and no other package names it.
 - `hold-lib.sh` is gone, and a re-run of the census at the effort's head finds

@@ -177,6 +177,7 @@ follows.
 | `agents/mechanik/prompt.template.md:197-200`, the wait on an effort's summary | D18 | moves: pending |
 | `services/helm/internal/source/beads.go:1033-1058` with `internal/board/derive.go:317-346, 635-656`, `ruled` and `ruledInFlight` | D25 | moves: pending, through the package |
 | `services/helm/internal/board/derive.go:674-677`, `dispositionDue` | D25 | moves: pending, through the package |
+| `assets/scripts/work-gate.sh:181-222`, load-context's gate, which tk-1tfzr71.12 moved out of `formulas/mol-polecat-work.toml:330-356` | D17 | moves: blocked, in this effort (tk-uxf8x9g) |
 | `assets/scripts/queue-priority.sh:718-736` | D1 | stays |
 | `doctor/check-blocked-work-armed/run.sh:189-286` | D6 | stays |
 | `doctor/check-claim-advancing/run.sh:452-475` | D1 | stays |
@@ -199,12 +200,39 @@ follows.
 | `assets/scripts/gate-ensure.sh:319-332, 399-400` | D16 | retires with tk-1tfzr71.22 |
 | `assets/scripts/pr-facts.sh:2645-2649` | D14 | retires with tk-1tfzr71.21 |
 | `services/gctk/internal/cli/merge.go:554-575, 1518-1570` | D15 | retires with tk-1tfzr71.20 |
-| `formulas/mol-polecat-work.toml:330-356`, load-context | D17 | retires with tk-1tfzr71.12, which inherits load-context from core |
 | `assets/scripts/first-reaction-dispose.sh:326, 345, 375` | D27 | retires with tk-1tfzr71.17 |
 
-So 22 places move onto `waits`, 8 already ask the store, and 16 sit in code the
-deletion plan retires. 6 of those 16 ask the store too. The other 10 are copies
-of a different rule, and each stays until its member deletes it.
+So the places marked "moves" ask `waits`, the places marked "stays" already ask
+the store, and the places marked "retires" sit in code the deletion plan
+retires. Of those, the places whose rule is one of D1 to D6 ask the store too.
+The others are copies of a different rule, and each stays until its member
+deletes it.
+
+### The re-run at the effort's head
+
+Run again on 2026-11-09 by 12:05Z, at integration/tk-ssm8qns.1's a96fe96c3 with
+the work gate's move (tk-uxf8x9g), over the same directories less the suites,
+the docs and the files `tools/deletion-plan.tsv` retires. It looked for every
+read of a bead's `blocks` edges and of `bd blocked`. No place in that code
+decides by a rule of its own whether a bead is blocked. The reads it found ask
+other questions:
+
+- which open human gate holds a bead, the census's park for a person:
+  `bd-lib.sh`'s `HUMAN_GATE_JQ`, `finalize-gate.sh`, `tools/gc-proactive.sh`'s
+  sling guard and `doctor/check-hq-marooned-work`;
+- which gate a park filed, or which beads a gate holds, the reverse of what
+  holds a bead: `gc-helm.sh`'s `park_open_gate_titled` and the helm board's
+  supervisor source;
+- what to read or name beside the store's answer: `patrol-finding.sh`, whose
+  hold is `gctk bead holds`' answer, the helm board's hydration of far ends,
+  and `doctor/check-claim-advancing`'s offer age of a step it already reads as
+  ready;
+- whether each blocker below a subject's own waits advances, a liveness
+  verdict: `bead-context.sh`'s frontier walk, whose subject's waits are
+  `gctk bead holds`' answer;
+- the store's own listing, read whole: `doctor/check-blocked-work-armed` (D6);
+- `waits` itself, its store adapter, and the suites' seam,
+  `holds-store.stub.sh`.
 
 ## Where the copies disagree, and the one rule's answer
 
@@ -252,6 +280,19 @@ counts.
   tk-7rea7j and tk-r05k0v. The check that a wait is an edge already reports
   tk-7rea7j and tk-r05k0v as holds that rest on no live edge, and it still
   does.
+- **The work gate at load-context refuses a bead slung by hand under a parked
+  parent**, since its work has not started, and arms its re-sling for the
+  park's release. It built such a bead, because it read only the bead's own
+  edges. Read again on 2026-11-09 at 11:52Z, across the seven stores, of the
+  open, unassigned beads with no `merge_result` that a sling could pour
+  `mol-polecat-work` over: 171 are held only through a parent that waits on an
+  open gate. 166 of them are in gc-toolkit's store, under 15 epics parked on one
+  gate, tk-u5t8h6x, and 5 are in two other stores. 3 of the 171 are armed, and
+  deferred dispatch already holds those by the same answer. For a rework child,
+  or any bead in flight, the answer stays its own waits. The gate's other
+  changes, a pinned blocker that holds nothing, a `conditional-blocks` edge that
+  holds and a `waits-for` edge that holds as `unjudged`, are in the next list,
+  and no bead the gate could reach had any of them.
 
 Nothing changes for deferred dispatch, the refinery's queue or the witness's
 check on it: the 99 armed beads and the 7 handoffs read the same under both
@@ -283,11 +324,6 @@ own work, which reaches the pool once the park is released
 Each of these members gets a note naming the one rule, and its replacement asks
 `waits`.
 
-- **Load-context (tk-1tfzr71.12).** A bead slung by hand under a parked epic is
-  built today, because load-context reads only the bead's own edges. Under the
-  one rule it would be refused, since its work has not started. The member
-  decides whether the pack keeps a guard at load-context once it inherits
-  core's.
 - **The merge, review and GitHub-intake members (tk-1tfzr71.20, .22, .21).**
   `merge.go`, `gate-ensure.sh` and `pr-facts.sh` count a blocker at any live
   status, a pinned one included, and `merge.go` also holds a merge on the
