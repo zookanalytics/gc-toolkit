@@ -84,8 +84,8 @@ before the ending their tabs read `✳ tk-probe #1 — sign-off probe` and
 
 | Ending | What ran | Tab title after it | Stop |
 |---|---|---|---|
-| Sign-off | C's own agent ran the drain block this change gives the prompt, from its Bash tool: `[ -z "${TMUX_PANE:-}" ] \|\| tmux set-option -t "$TMUX_PANE" set-titles-string 'done · #T'; gc runtime drain-ack` | `done · ✳ tk-probe #1 — sign-off probe` at once | Held while the tab stayed attached, 76 seconds, the session up and `draining`. Stopped 73 seconds after the tab detached. |
-| Dismiss | From a shell outside every tmux server, as the board runs it: the server named the way `gc-helm dismiss` names it (`[session] socket` from `gc config show --json`, empty, so `city_name` from `gc status --json`), then `tmux -L pp7w set-option -t "=s-gcg-3073:" set-titles-string 'done · #T'` and `gc runtime drain-ack --operator gcg-3073` | `done · ✳ tk-probe #2 — dismiss probe` at once | Held while the tab stayed attached, 55 seconds. Stopped 18 seconds after the tab detached. |
+| Sign-off | C's own agent ran the drain block as this change first built it, from its Bash tool: `[ -z "${TMUX_PANE:-}" ] \|\| tmux set-option -t "$TMUX_PANE" set-titles-string 'done · #T'; gc runtime drain-ack` | `done · ✳ tk-probe #1 — sign-off probe` at once | Held while the tab stayed attached, 76 seconds, the session up and `draining`. Stopped 73 seconds after the tab detached. |
+| Dismiss | From a shell outside every tmux server, as the board runs it: the server named the way the first build of `gc-helm dismiss` named it (`[session] socket` from `gc config show --json`, empty, so `city_name` from `gc status --json`), then `tmux -L pp7w set-option -t "=s-gcg-3073:" set-titles-string 'done · #T'` and `gc runtime drain-ack --operator gcg-3073` | `done · ✳ tk-probe #2 — dismiss probe` at once | Held while the tab stayed attached, 55 seconds. Stopped 18 seconds after the tab detached. |
 
 After each stop the record's state read `drained`, which `gc session list`
 shows as `asleep`, and the stop event read "drain acknowledged by agent", as
@@ -107,8 +107,9 @@ it both ways after a drain-ack:
 
 So a `/rename` cannot mark the tab at the sign-off, and at a dismiss it marks
 it only when the agent is idle. A dismiss of a sitting that is not running
-would also wake it, because a submit to such a session resumes it. The tmux
-title format reaches the client at once in every case above.
+would also wake it, because a submit to such a session resumes it. Setting the
+title format itself, as the first build did, reached the client at once in each
+case above.
 
 ## What it decided
 

@@ -104,8 +104,9 @@ idle_timeout = "0"
 # no claimed or assigned work and has no client attached once this long has
 # passed since its last detach or terminal output, and the record then stays
 # asleep, holding no process, until it is closed. Attaching wakes it with its
-# thread (wake_mode above). Gas City warns at every load that idle_timeout and
-# sleep_after_idle are both set, and with idle_timeout at 0 this one applies.
+# thread (wake_mode above). Gas City warns at its start and at each config
+# reload that idle_timeout and sleep_after_idle are both set, and with
+# idle_timeout at 0 this one applies.
 # A slept session stays asleep only while its recorded sleep policy matches
 # this one, so changing the value wakes every sitting it has slept, and each
 # runs its prompt's claim again. docs/human-engagement.md has the mechanics.

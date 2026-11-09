@@ -61,8 +61,13 @@ ships it as the agent's `sleep_after_idle`.
   `splitStrictConfigWarnings` (`cmd/gc/strict_warnings.go`) keeps that warning
   non-fatal under strict mode
   (`TestSplitStrictConfigWarnings_IdleSleepMaskingWarningIsNonFatal`,
-  `cmd/gc/strict_warnings_test.go`). The templates keep `idle_timeout = "0"`,
-  so the city logs that warning at each load.
+  `cmd/gc/strict_warnings_test.go`). `gc start`, each controller config
+  reload and `gc config` print it (`cmd/gc/cmd_start.go`,
+  `cmd/gc/city_runtime.go`, `cmd/gc/cmd_config.go`), and
+  `shouldEmitLoadCityConfigWarning` (`cmd/gc/cmd_agent.go`) keeps it off the
+  config load every other command runs. The templates keep
+  `idle_timeout = "0"`, so the city logs that warning at each start and config
+  reload.
 
 ## Stopping a sitting whose conversation is done: `gc runtime drain-ack`, kept
 
