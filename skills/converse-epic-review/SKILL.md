@@ -164,9 +164,19 @@ Once each PR's own call has exited 0, the sign-off reaches none of those PRs and
 takes none of `--rework`, `--no-rework` or `--retire`. When it refuses because
 it reaches an open PR, that PR's gate is still open: make the PR's own call
 first, then sign off again. Never add a PR answer to the sign-off instead,
-because it would answer that gate under the review's ruling. A subject that is
-itself a PR's anchor is the exception: its gate takes no call of its own, and
-the sign-off answers it with that PR's answer, as the settle step gives it.
+because it would answer that gate under the review's ruling.
+
+A subject that is itself a PR's anchor is the exception, because every call
+reaches it. A call under another PR's ruling leaves it standing. Each call under
+the review's own ruling gives that PR's answer, as the settle step gives it, and
+those are write 2's answer to the Deliveries' gates, write 5's to a re-homed
+bead's gate, and the sign-off. Each gives the same ruling, word for word, and
+the same answer, so the first carries out a rework or a retirement, and the
+calls after it find it done. The subject's gate takes no call of its own, and
+the sign-off answers it, unless a close retires the PR. Then write 5 answers
+that gate on a call of its own, as write 2 answers one, because a bead above the
+PR cannot close while the PR is open, and a retired PR has nothing left to
+release.
 
 ## The writes, in order
 
@@ -239,8 +249,9 @@ Each gate on a PR's anchor takes its own call, as the section above gives it:
 ```bash
 "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" --answer <gate> \
   --ruling "<the ruling, one line>" \
-  --outcome "<where the epic stands now, at most 140 characters>" --no-wait
+  --outcome "<where the epic stands now, at most 140 characters, or 95 when it leaves the subject's PR standing>" --no-wait
   # --answer <gate> once for each gate on a landed Delivery
+  # and, when the subject is a PR's anchor, that PR's answer (the section above)
 ```
 A gate on work that waits for a judgment takes no call here, because its answer
 sends that work on. The sign-off answers it once every write below has landed,
@@ -365,8 +376,9 @@ once write 2 has recorded the close ruling with its outcome.
 
 **Last, whatever the ruling, sign off** as the settle step says, once nothing
 important is pending: `--ruled yes --ruling "<the ruling, one line>" --no-wait`,
-with an outcome of at most 140 characters. Add `--leave <gate>` for each gate
-write 2 left owed: the sign-off answers every gate the conversation replies to
-that no `--leave` names, which would release the work still waiting on that
-judgment. When a gate left owed holds the subject, leave out `--no-wait` too,
-because the subject is then parked for a person. Then drain.
+with an outcome of at most 140 characters, or 95 when it leaves the subject's
+PR standing. Add `--leave <gate>` for each gate write 2 left owed: the sign-off
+answers every gate the conversation replies to that no `--leave` names, which
+would release the work still waiting on that judgment. When a gate left owed
+holds the subject, leave out `--no-wait` too, because the subject is then parked
+for a person. Then drain.

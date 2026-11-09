@@ -52,6 +52,12 @@
 #   (ANSWER-ROUTE) the writer leaves a routed, armed subject's route and arm as
 #             they are, and the continue step's own withdrawal, run before the
 #             answer, leaves none for the answer to release the subject to
+#   (REVIEW-PR*) a review whose subject is an open PR answers a landed
+#             Delivery's gate before the sign-off: each call under its ruling
+#             gives the PR's answer, the first carries out a rework or a
+#             retirement and the later ones act on the PR it recorded, and the
+#             subject's gate, which holds the merge, waits for the sign-off, or
+#             on a close that retires the PR, for a call of its own
 #   (CUT-SHORT*) the hand-back is one write guarded on the holder and the
 #             status, and a conversation that reads closed, before that write or
 #             because a dismiss closed it first, stays closed
@@ -916,6 +922,58 @@ case "$(cat "$CALLS")" in
   *) bad "(ANSWER-RETIRE) the gate was resolved before the PR was retired: $(cat "$CALLS")" ;;
 esac
 eq "$(merge_held tk-anc)" released "(ANSWER-RETIRE) …and only then does the gate release the merge"
+
+echo "# a review whose subject is an open PR answers a landed Delivery's gate first"
+# The epic review answers each landed Delivery's gate before the Delivery
+# closes, and leaves the gate on the work that waited for its ruling to the
+# sign-off. When that work, the subject, is an open PR, every call reaches it,
+# so each call under the review's ruling gives the PR's answer, the same each
+# time: the first carries out a rework or a retirement, and the later ones act
+# on the PR it recorded. A close that retires the PR answers the subject's gate
+# on a call of its own before the epic closes, and the sign-off then finds the
+# retired PR closed.
+review_pr() {
+    fresh; bead tk-epic epic; bead tk-anc; setm tk-anc merge_result pull_request; setm tk-anc pr_number 52
+    edge tk-anc parent-child tk-epic; gate tk-rev epic-review.tk-epic; edge tk-anc blocks tk-rev
+    bead tk-dl epic; edge tk-dl parent-child tk-epic; gate tk-dg epic-review.tk-dl; edge tk-dl blocks tk-dg
+    conv tk-conv tk-anc; edge tk-conv replies-to tk-rev; edge tk-conv replies-to tk-dg
+}
+REVIEWED=(--ruling "continue: PR #52 sits inside the boundaries" --outcome "the epic continues" --no-wait)
+review_pr
+run_signoff --conversation tk-conv --answer tk-dg "${REVIEWED[@]}"
+eq "$RC" 2 "(REVIEW-PR) a landed Delivery's gate answered with nothing said of the subject's open PR exits 2"
+eq "$(writes)" 0 "(REVIEW-PR) …writing nothing, so the Delivery's gate still holds its close"
+run_signoff --conversation tk-conv --answer tk-dg "${REVIEWED[@]}" --no-rework
+eq "$RC/$(field tk-dg status)/$(field tk-rev status)" "0/closed/open" "(REVIEW-PR) with the PR's answer, the call resolves the Delivery's gate and leaves the subject's"
+eq "$(merge_held tk-anc)" held "(REVIEW-PR) …so the subject's gate still holds its merge"
+run_signoff --conversation tk-conv --ruled yes "${REVIEWED[@]}" --no-rework
+eq "$RC/$(field tk-rev status)/$(field tk-conv status)" "0/closed/closed" "(REVIEW-PR) the sign-off under the same ruling and answer resolves the subject's gate last"
+has "$OUT" "gate tk-dg was already cleared before this sign-off" "(REVIEW-PR) …reading the Delivery's gate as answered"
+eq "$(merge_held tk-anc)" released "(REVIEW-PR) …and only then is the merge released"
+review_pr
+run_signoff --conversation tk-conv --answer tk-dg "${REVIEWED[@]}" --rework
+eq "$RC/$(field tk-dg status)/$(field tk-rev status)" "0/closed/open" "(REVIEW-PR-REWORK) the first call files the subject's rework and resolves only the Delivery's gate"
+has "$(cat "$CALLS")" "converse-rework --anchor tk-anc --ruling-bead tk-conv" "(REVIEW-PR-REWORK) …the rework acting on the subject's PR"
+run_signoff --conversation tk-conv --ruled yes "${REVIEWED[@]}" --rework
+eq "$RC/$(field tk-rev status)" "0/closed" "(REVIEW-PR-REWORK) the sign-off resolves the subject's gate"
+has "$OUT" "an earlier attempt of this ruling recorded tk-anc as the PR its --rework acts on" "(REVIEW-PR-REWORK) …acting on the PR the first call recorded"
+CLOSED=(--ruling "close: the hypothesis held, and PR #52 is not needed" --outcome "the epic is closed" --no-wait --retire not-needed)
+review_pr
+run_signoff --conversation tk-conv --answer tk-dg "${CLOSED[@]}"
+eq "$RC/$(field tk-dg status)/$(field tk-rev status)" "0/closed/open" "(REVIEW-PR-RETIRE) the first call retires the subject's PR and resolves only the Delivery's gate"
+case "$(cat "$CALLS")" in
+  *"pr-dispose --anchor tk-anc --successor tk-conv --kind not-needed"*"gate resolve tk-dg"*) ok "(REVIEW-PR-RETIRE) …retiring the PR before the gate is resolved" ;;
+  *) bad "(REVIEW-PR-RETIRE) the gate was resolved before the PR was retired: $(cat "$CALLS")" ;;
+esac
+run_signoff --conversation tk-conv --answer tk-rev "${CLOSED[@]}"
+eq "$RC/$(field tk-rev status)" "0/closed" "(REVIEW-PR-RETIRE) the close's own call on the subject's gate, under the same ruling, resolves it"
+has "$OUT" "an earlier attempt of this ruling recorded tk-anc as the PR its --retire acts on" "(REVIEW-PR-RETIRE) …acting on the PR the first call retired"
+setf tk-anc status closed; edge tk-anc supersedes tk-conv
+: > "$CALLS"
+run_signoff --conversation tk-conv --ruled yes "${CLOSED[@]}"
+eq "$RC/$(field tk-conv status)" "0/closed" "(REVIEW-PR-RETIRE) the sign-off exits 0 once the retired PR's bead has closed"
+has "$OUT" "tk-anc, the PR an earlier attempt of this ruling recorded for its --retire, reads closed" "(REVIEW-PR-RETIRE) …finding the PR its ruling retired closed"
+hasnt "$(cat "$CALLS")" "pr-dispose" "(REVIEW-PR-RETIRE) …and disposing nothing again"
 
 echo "# cut short: the conversation goes back to the operator's queue"
 acceptance; run_signoff --conversation tk-conv --outcome "cut short: the rollout question is still owed" --ruled no

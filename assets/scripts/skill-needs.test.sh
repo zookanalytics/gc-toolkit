@@ -1194,8 +1194,12 @@ echo "── a review of an epic gates what waits on its ruling, records it, and
 # child or a live blocker. The sign-off records the PR a retirement acts on
 # under the words of its ruling, so each gate on a PR's anchor is answered under
 # that PR's own ruling, and the final sign-off reaches none of those PRs. A
-# park's gate can hold other beads, so a release closes it only once nothing
-# else waits on it, and never closes a blocker that is not a park's own gate.
+# subject that is itself a PR's anchor is reached by every call, so each call
+# under the review's own ruling gives that PR's answer, the same each time, and
+# its gate waits for the sign-off unless a close retires the PR, whose bead must
+# close before the beads above it can. A park's gate can hold other beads, so a
+# release closes it only once nothing else waits on it, and never closes a
+# blocker that is not a park's own gate.
 have "the step table sends a sitting that reviews an epic to its skill" '**Steps 4–8, when the operator judges an epic'"'"'s contract or its course, or the subject is a landed Delivery or work that waits on a judgment about an epic**' "$PROMPT"
 have "…by name" '`converse-epic-review` |' "$PROMPT"
 have "the prompt sends a review's closes to its skill, none of them forced" \
@@ -1253,6 +1257,18 @@ have "…so the final sign-off reaches none of those PRs and takes no PR answer"
     'the sign-off reaches none of those PRs and takes none of `--rework`, `--no-rework` or `--retire`' "$EPIC_REVIEW_JOINED"
 lacks "…and gives none of the PR answers again" 'that answer took' "$EPIC_REVIEW_JOINED" \
     "a sign-off under the review's ruling would answer a gate still open under that ruling, and two retirements under one ruling share one record"
+have "a subject that is a PR's anchor is the exception, because the writer reaches it on every call" \
+    "A subject that is itself a PR's anchor is the exception, because every call reaches it." "$EPIC_REVIEW_JOINED"
+have "…so each call under the review's own ruling gives that PR's answer, write 2's answer to the Deliveries' gates among them" \
+    "Each call under the review's own ruling gives that PR's answer, as the settle step gives it, and those are write 2's answer to the Deliveries' gates, write 5's to a re-homed bead's gate, and the sign-off." "$EPIC_REVIEW_JOINED"
+have "…which write 2's call gives beside the Deliveries' gates" \
+    "# and, when the subject is a PR's anchor, that PR's answer (the section above)" "$EPIC_REVIEW"
+have "…keeping its outcome to 95 characters when it leaves that PR standing, since the writer adds that it still needs an Approve" \
+    "at most 140 characters, or 95 when it leaves the subject's PR standing>\" --no-wait" "$EPIC_REVIEW"
+have "…the same ruling and answer each time, which the first call carries out and the later ones find done" \
+    'Each gives the same ruling, word for word, and the same answer, so the first carries out a rework or a retirement, and the calls after it find it done.' "$EPIC_REVIEW_JOINED"
+have "…with the subject's gate left to the sign-off, unless a close retires the PR, when write 5 answers it before the closes" \
+    "The subject's gate takes no call of its own, and the sign-off answers it, unless a close retires the PR. Then write 5 answers that gate on a call of its own, as write 2 answers one" "$EPIC_REVIEW_JOINED"
 have "every close runs through the close gate" \
     '"$CONV/finalize-gate.sh" check <bead> && gc bd close <bead> --reason' "$EPIC_REVIEW"
 lacks "…and none is forced" '--force' "$EPIC_REVIEW" \
