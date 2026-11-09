@@ -65,3 +65,11 @@ only explains the design shows no search.
 The arch check's divergence lens sends back a change without this record.
 [review-arch.md](docs/review-arch.md) holds its method, the evidence it accepts
 and its other checks.
+
+## A change to the pack's behavior names the foundation belief or goal it serves
+
+This applies to a change that alters what an agent must do, or what reaches the
+operator, through a skill, a formula, an agent prompt, a template fragment or a
+doc that binds agents. Its PR summary names, in one sentence, the belief or goal
+the change serves: one of the Core Beliefs in
+[foundation.md](docs/foundation.md), or one of its goals.
