@@ -8,8 +8,8 @@ import (
 )
 
 // An edge the listing has and the show row lacks is into another store only
-// when the store does not hold its far bead. One the store holds was written
-// between the two reads.
+// when the store does not hold its far bead. One whose far bead the store holds
+// comes from a write between the reads.
 func TestForeignIsAnEdgeOntoABeadTheStoreDoesNotHold(t *testing.T) {
 	listed := []ledger.Edge{
 		{Type: ledger.EdgeBlocks, ID: "shown"},

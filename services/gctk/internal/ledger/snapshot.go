@@ -38,7 +38,10 @@ func (r *Record) Status() string { return r.row.StatusLower() }
 // IssueType is the bead's issue type, "" when the row carries none.
 func (r *Record) IssueType() string { return r.row.IssueTypeString() }
 
-// Edges is the bead's own edges, each with its far bead's status and close time.
+// Edges is the bead's own edges. A record a snapshot read carries each far
+// bead's status and close time, and leaves out an edge whose far bead the store
+// does not hold. A record Find returns carries every edge, with the far bead's
+// id and the edge's type alone.
 func (r *Record) Edges() ([]gcbd.Edge, error) { return r.row.Edges() }
 
 // Parent is the bead its parent-child edge names, "" when it has none.

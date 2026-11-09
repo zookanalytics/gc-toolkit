@@ -199,8 +199,10 @@ func candidates(listed, shown []ledger.Edge) []ledger.Edge {
 }
 
 // foreignOf is the candidates whose far bead the store does not hold, held
-// naming the far beads it does. A candidate the store holds is an edge written
-// between the two reads, not one into another store.
+// naming the far beads it does. A candidate whose far bead the store holds is
+// not one into another store. A write between the reads made them disagree,
+// such as the edge's removal after the listing read it or the far bead's
+// creation after the show row left the edge out.
 func foreignOf(listed, shown []ledger.Edge, held map[string]bool) []Foreign {
 	var out []Foreign
 	for _, e := range candidates(listed, shown) {
