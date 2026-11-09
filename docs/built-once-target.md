@@ -161,10 +161,12 @@ last ends with an operator ruling that gives the seat the job:
   operator's and mechanik's.
 - **No `gc handoff` and no carried memory.** A context carried from sitting to
   sitting would make the seat resident again.
-- **`sleep_after_idle = "1h"` in place of `idle_timeout = "1h"`.** An idle kill
-  keeps the conversation key, and `gc session attach` would then resume the old
-  conversation. An idle drain clears the key. This ends when
-  `gc session attach` honors `wake_mode`.
+- **`sleep_after_idle = "1h"` in place of `idle_timeout = "1h"`.** Gas City
+  applies no `idle_timeout` to an always-on seat, so the mayor's hour never
+  fires. The po is on demand, and it takes its hour as Gas City's idle sleep: a
+  sitting no client is attached to sleeps once the hour has passed and keeps its
+  conversation, and the operator's next attach wakes it into that conversation.
+  This ends if the po runs always on, as the mayor does.
 
 The trade: the first reaction stops being a bead kind of its own
 (tk-1tfzr71.17).
