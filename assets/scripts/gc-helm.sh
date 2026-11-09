@@ -3434,17 +3434,16 @@ sitting_refusal() {
     return 0
 }
 
-# engage_take <id> [<from>] — settle what the engage is about from a bead, a
+# engage_take <id> — settle what the engage is about from a bead, a
 # conversation or a gate: sets bead and bead_row to the bead its conversation
 # tracks, pointed_gate to a gate the id named, which the conversation replies to,
-# and named_conv to a conversation it named. <from> is the bead a gate was picked
-# from (take_bead). A conversation the id named is read for its status here,
-# before anything is filed, and a closed one goes to engage_closed_conversation. A
-# refusal exits.
+# and named_conv to a conversation it named. A conversation the id named is read
+# for its status here, before anything is filed, and a closed one goes to
+# engage_closed_conversation. A refusal exits.
 engage_take() {
     bead="$1"; _et_conv_row=""
     verify_subject "$bead" engage "Nothing spawned." || exit $?
-    take_bead engage "Nothing spawned." "${2:-}"
+    take_bead engage "Nothing spawned."
     pointed_gate="$TAKE_GATE"; named_conv="$TAKE_CONV"
     if [ "$TAKE_BEAD" != "$bead" ]; then
         if [ -n "$named_conv" ]; then
@@ -3729,8 +3728,7 @@ engage_new_subject_cleanup() {
 # ends the sitting.
 #
 # The argument is the bead the operator picked off the board. A conversation id
-# names its own conversation. A gate names the one bead still waiting on it, or,
-# picked from a bead's list, that bead when it is one of several waiting on it, and
+# names its own conversation. A gate names the one bead still waiting on it, and
 # the conversation engage lands on replies to the gate (bd's replies-to edge),
 # written before any sitting starts, so the sitting finds the gate among its
 # conversation's replies. Engage warns when it starts a sitting while another

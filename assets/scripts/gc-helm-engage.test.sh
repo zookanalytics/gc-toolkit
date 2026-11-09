@@ -92,15 +92,16 @@
 #             skill
 #   (NEWSUBJ*) --new-subject files a marked subject and its one conversation
 #   (SKILL*)  --skill files a new conversation whose ask is the lens brief
-#   (HOLD-*)  the open human gates that hold a bead, read through gctk: the prompt
-#             offers each on the numbers after the conversations, a pick engages
-#             it as if it were named, or takes the bead it was picked from when
-#             several wait on the gate, with a conversation to take or none, an
-#             engage that asks nothing names them, and one pointed at a gate or a
-#             conversation does not read them. A read
-#             that does not answer is said and stops nothing. (HOLD-REAL) runs the
-#             real gctk reader over the fixture of an anchor, its rework and the
-#             gate on the rework.
+#   (HOLD-*)  what holds a bead, read through gctk: an engage of the bead names
+#             each open human gate and each bead a person has to clear, with how
+#             to engage it, and the PR's own review threads, on stdout, whether
+#             it asks nothing or brings a concern of its own, then carries on
+#             with the bead's conversation, which answers no gate unasked. One
+#             pointed at a gate or a conversation does not read them. A read that
+#             does not answer, or no gctk, is said and stops nothing, and with no
+#             GCTK_BIN engage reads the gctk the city deployed. (HOLD-REAL) runs
+#             the real gctk reader over the fixture of an anchor, its rework and
+#             the gate on the rework, and the form's read names a hold by its id.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -1819,7 +1820,7 @@ ONE_GATE='[{"held":"gate","id":"tk-gate","title":"Approve the rollout"}]'
 gctk_calls() { cat "$STATE_DIR/gctk.calls" 2>/dev/null || true; }
 fresh_gctk() { rm -f "$STATE_DIR/gctk.calls"; }
 
-echo "# a blocker a person has to clear is offered beside the gate, and a pick engages it"
+echo "# a blocker a person has to clear is named beside the gate, with how to engage it"
 export GATE_WAITERS='[{"id":"tk-rework","status":"open","dependency_type":"blocks"}]'
 export GCTK_REASONS='[{"held":"gate","id":"tk-gate","title":"Approve the rollout"},{"held":"blocked","id":"tk-dec","title":"keep the old flag?"}]'
 export HAVE_CONV=0
