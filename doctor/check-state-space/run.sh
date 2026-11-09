@@ -30,10 +30,6 @@ BUILTIN_STATES="unanchored pre_open_gate pull_request merged abandoned retargete
 BUILTIN_CLOSED="merged"
 BUILTIN_DETACHED="pre_open_gate pull_request"
 lifecycle="$dir/lifecycle/lifecycle.toml"
-toml_scalar() { # <file> <key> — the quoted string of the first `<key> = "..."`
-    awk -v k="$2" '$0 ~ ("^[[:space:]]*" k "[[:space:]]*=[[:space:]]*\"") {
-        sub(/^[^"]*"/, ""); sub(/".*$/, ""); print; exit }' "$1" 2>/dev/null
-}
 toml_array() { # <file> <key> — quoted strings of the first `<key> = [...]`
     awk -v k="$2" 'ok { print } $0 ~ ("^[[:space:]]*" k "[[:space:]]*=[[:space:]]*\\[") { ok = 1; print }' "$1" 2>/dev/null \
         | awk '{ print } /\]/ { exit }' | grep -o '"[^"]*"' | tr -d '"'
