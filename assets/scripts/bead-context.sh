@@ -219,9 +219,9 @@ bd_rows() {
 #                progressing, or settled before a PR exists (the PR-open pass
 #                publishes it), or settled with a PR that needs no further review.
 #   stuck      human: a human gate (a gate whose await type is human, which
-#                carries no route), a bead routed or assigned to the reserved
-#                `human`, a decision, a finding that needs the operator, or an
-#                anchor parked in a human state.
+#                carries no route), a bead assigned to the reserved `human`, a
+#                decision, a finding that needs the operator, or an anchor
+#                parked in a human state.
 #              held: any other status. Blocked, deferred and pinned are
 #                deliberate holds no pool offers; a status a store adds is one
 #                this classifier does not know, so it fails closed.
@@ -235,8 +235,9 @@ bd_rows() {
 #              capped: an armed dispatch that hit its sling-failure cap.
 #              unrouted: open with no route, arm or assignee, so nothing picks it up.
 #
-# Where two rules apply, in-progress outranks everything and an explicit human
-# route outranks every advancing kind, so a review routed to a person stays stuck.
+# Where two rules apply, in-progress outranks everything, and a human gate, a
+# decision or a bead assigned to `human` outranks every advancing kind, so a
+# review assigned to a person stays stuck.
 # Whether a claim's or a route's session is still up is a liveness join over the
 # session list, not a fact on the row, so a stranded claim reads advancing here,
 # and a bead a poured molecule is working (its work bead, or an inline step)
@@ -269,7 +270,7 @@ def adv_own($cap):
   | (($m["merge_result"] // "") | tostring) as $mr
   | ((.assignee // "") | tostring) as $a
   | if .status == "in_progress" or .status == "hooked" then {state: "advancing"}
-    elif ($r | adv_human) or ($a | adv_human) or .issue_type == "decision"
+    elif ($a | adv_human) or .issue_type == "decision"
          or (.issue_type == "gate" and ((.await_type // "") | tostring) == "human") then {state: "stuck", why: "human"}
     elif .status != "open" then {state: "stuck", why: "held"}
     elif $mr != "" then adv_anchor($m; $mr)
