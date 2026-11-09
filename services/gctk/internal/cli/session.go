@@ -3,12 +3,15 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"strings"
 	"unicode"
+
+	"github.com/spf13/cobra"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 )
@@ -59,20 +62,10 @@ import (
 // (defaultQueuedNudgeRetryDelay in cmd/gc/cmd_nudge.go), onto that text. The
 // command cannot read the box at the moment of delivery, and accepts these cases.
 
-const sessionUsage = `usage:
-  gctk session title --topic <words> [--subject <bead-id>] [--pr <n>]
-                     [--session <id-or-alias>]
-
-Gives a session a title and shows it on the session's terminal. The title is
+// sessionTitleLong is title's help.
+const sessionTitleLong = `Gives a session a title and shows it on the session's terminal. The title is
 "<subject> #<n> — <topic>", and an item not given is left out of it:
 "<subject> — <topic>", "#<n> — <topic>", or the topic alone.
-
-  --topic <words>          what the session is on, in a few words
-  --subject <bead-id>      the bead the session is about, which leads the title
-  --pr <n>                 the number of the pull request the session is
-                           about, which follows the subject as #<n>
-  --session <id-or-alias>  the session to title; default the session this runs
-                           in ($GC_SESSION_ID)
 
 An empty --subject or --pr is an item not given, so a caller can pass what it
 read, which is empty when there is none.
@@ -110,10 +103,9 @@ by then to the model. Text it finds in the box just after that has it type the
 exit: 0 renamed; the /rename was queued, submitted, or skipped as printed
       1 the rename failed, and nothing else was done
       2 usage
-      3 renamed, but the gc session submit that sends the /rename failed
-`
+      3 renamed, but the gc session submit that sends the /rename failed`
 
-// The exit codes sessionUsage states.
+// The exit codes sessionTitleLong states.
 const (
 	sessionExitDone         = 0
 	sessionExitRenameFail   = 1
@@ -125,81 +117,54 @@ type titleOpts struct {
 	topic, subject, pr, session string
 }
 
-// Session dispatches `gctk session <verb>`, returning a process exit code so
-// the surface stays testable in-process.
-func Session(args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 {
-		fmt.Fprint(stderr, sessionUsage)
-		return sessionExitUsage
+func newSessionCmd(stdout, stderr io.Writer) *cobra.Command {
+	o := titleOpts{}
+	title := &cobra.Command{
+		Use:   "title",
+		Short: "give a session a title its record and its terminal show",
+		Long:  sessionTitleLong,
+		Args:  cobra.NoArgs,
+		RunE: func(*cobra.Command, []string) error {
+			if msg := checkTitleOpts(&o); msg != "" {
+				return errors.New(msg)
+			}
+			return exit(sessionTitle(o, stdout, stderr))
+		},
 	}
-	switch args[0] {
-	case "-h", "--help", "help":
-		fmt.Fprint(stdout, sessionUsage)
-		return sessionExitDone
-	case "title":
-	default:
-		fmt.Fprintf(stderr, "gctk session: unknown verb %q\n\n%s", args[0], sessionUsage)
-		return sessionExitUsage
-	}
-	o, msg := parseTitleArgs(args[1:])
-	if msg != "" {
-		fmt.Fprintf(stderr, "gctk session title: %s\n\n%s", msg, sessionUsage)
-		return sessionExitUsage
-	}
-	return sessionTitle(o, stdout, stderr)
+	f := title.Flags()
+	f.StringVar(&o.topic, "topic", "", "what the session is on, in a few `words`")
+	f.StringVar(&o.subject, "subject", "", "the `bead` the session is about, which leads the title")
+	f.StringVar(&o.pr, "pr", "", "the `number` of the pull request the session is about, which follows the subject as #<n>")
+	f.StringVar(&o.session, "session", "", "the session to title, by `id-or-alias`; default the session this runs in ($GC_SESSION_ID)")
+	return group("session", "actions on a session",
+		"Actions on a session: give it a title its record and its terminal show.", title)
 }
 
-// parseTitleArgs reads title's flags, or returns why they do not parse.
-func parseTitleArgs(args []string) (titleOpts, string) {
-	o := titleOpts{}
-	set := map[string]bool{}
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		switch a {
-		case "--topic", "--subject", "--pr", "--session":
-		default:
-			return o, fmt.Sprintf("unknown argument %q", a)
-		}
-		if set[a] {
-			return o, "flag " + a + " given twice"
-		}
-		set[a] = true
-		if i+1 >= len(args) {
-			return o, "flag " + a + " needs a value"
-		}
-		i++
-		v := strings.TrimSpace(args[i])
-		switch a {
-		case "--topic":
-			o.topic = v
-		case "--subject":
-			o.subject = v
-		case "--pr":
-			o.pr = v
-		case "--session":
-			o.session = v
-		}
-	}
+// checkTitleOpts trims title's flags and fills the default session, or says
+// why they do not go together.
+func checkTitleOpts(o *titleOpts) string {
+	o.topic, o.subject = strings.TrimSpace(o.topic), strings.TrimSpace(o.subject)
+	o.pr, o.session = strings.TrimSpace(o.pr), strings.TrimSpace(o.session)
 	if o.topic == "" {
-		return o, "--topic needs the words the title is made of"
+		return "--topic needs the words the title is made of"
 	}
 	if strings.Trim(o.pr, "0123456789") != "" {
-		return o, fmt.Sprintf("--pr takes the pull request's number, such as 1409, not %q", o.pr)
+		return fmt.Sprintf("--pr takes the pull request's number, such as 1409, not %q", o.pr)
 	}
 	// The title is typed into the agent's input box, where a newline sends
 	// what came before it as a message of its own.
 	for _, v := range []string{o.topic, o.subject} {
 		if strings.IndexFunc(v, unicode.IsControl) >= 0 {
-			return o, fmt.Sprintf("%q holds a control character, such as a newline, which the typed /rename cannot carry", v)
+			return fmt.Sprintf("%q holds a control character, such as a newline, which the typed /rename cannot carry", v)
 		}
 	}
 	if o.session == "" {
 		o.session = strings.TrimSpace(os.Getenv("GC_SESSION_ID"))
 	}
 	if o.session == "" {
-		return o, "no --session given, and GC_SESSION_ID names no session to default to"
+		return "no --session given, and GC_SESSION_ID names no session to default to"
 	}
-	return o, ""
+	return ""
 }
 
 // titleText is the title the options make: the subject, its pull request as

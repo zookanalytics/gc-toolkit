@@ -89,7 +89,7 @@ render's byte and token counts.
 - [docs/warrants.md](docs/warrants.md) — the warrants in force: what the pack keeps because Gas City lacks the primitive, the upstream evidence and when it was verified, and the trigger that retires each
 - [docs/state-machine.md](docs/state-machine.md) — the anchor state machine: every state, every transition, every writer
 - [docs/component-model.md](docs/component-model.md) — the primitives, and every invariant bound to its doctor check
-- [docs/epics.md](docs/epics.md) — what an epic is, the contract it carries, when it closes, the Delivery it may land through, and the Epic Checkpoint that judges a landing
+- [docs/epics.md](docs/epics.md) — what an epic is, the contract it carries, how it is reviewed and when it closes, and the Delivery it may land through
 - [docs/epic-stewardship.md](docs/epic-stewardship.md) — how an epic is held open until its hypothesis is ruled closed, what closes a Delivery, and the checkpoint machinery that is direction
 - [docs/steering.md](docs/steering.md) — how the operator steers the city's work: the intake rule that holds new work for placement, and the park, which holds work under a bead that has not started while work in flight finishes
 - [docs/install.md](docs/install.md) — wiring gc-toolkit into a city
@@ -101,7 +101,7 @@ render's byte and token counts.
 - [docs/review-workspace.md](docs/review-workspace.md) — the directory a review works in, and its removal when the review ends
 - [docs/review-correctness.md](docs/review-correctness.md) — what the gates run on each surface this repository ships and the defects a correctness review of it hunts there, which the review formula prints for each correctness review at the commit it reviews
 - [docs/review-arch.md](docs/review-arch.md) — the divergence lens the arch check applies on this rig: when it applies, its checks, Gas City's own documentation as the evidence, and where the pack's warrants live, which the review formula prints for each arch review at the commit it reviews
-- [docs/review-triage.md](docs/review-triage.md) — the changes that make the arch check mandatory on this rig, which the review formula prints for each triage review at the commit it reviews
+- [docs/review-triage.md](docs/review-triage.md) — the changes that make a specialist check mandatory on this rig, which the review formula prints for each triage review at the commit it reviews
 - [docs/bead-store-resolution.md](docs/bead-store-resolution.md) — which store answers for a bead id, and the proof a destructive gate owes before reading absence
 - [docs/outbound-sends.md](docs/outbound-sends.md) — a GitHub write to a repo the rig does not own is the operator's send; an agent records the problem as an upstream finding, set aside with nothing drafted and nothing asked, and the operator takes findings up from one list when ready
 - [docs/not-for-review.md](docs/not-for-review.md) — the pull-request comments the city never reads as review feedback: the no-review mark, and the third-party markers a rig declares

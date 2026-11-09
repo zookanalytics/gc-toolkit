@@ -75,11 +75,11 @@
 # before that root holds the validating closer it arms until the run ends.
 #
 # run-lib.test.sh runs every verb over run-lib.fixture.json, the cases a copy
-# of the rule in another language must agree with, as the Go copy in
-# services/helm/internal/source/facts.go does in its fixture test. The suite
-# fails when a reader stops sourcing this file, when a file defines the rule's
-# defs itself, and when a file outside it reads the key a root names its
-# convoy in.
+# of the rule in another language must agree with, as the Go copies in
+# services/helm/internal/source/facts.go and services/gctk/waits/run.go do in
+# their fixture tests. The suite fails when a reader stops sourcing this file,
+# when a file defines the rule's defs itself, and when a file outside it reads
+# the key a root names its convoy in.
 #
 # A caller sources it beside itself, through a variable its suite can point at
 # a stub of the verbs:

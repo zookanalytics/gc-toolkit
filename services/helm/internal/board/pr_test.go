@@ -176,7 +176,7 @@ func withInFlight(a Anchor, children ...Child) Anchor {
 // listing, and the gates among its PR's reasons, nearest first, as its walk
 // reaches them.
 func heldThroughRework(md map[string]string, gates ...Blocker) Anchor {
-	a := mergeAnchor("tk-a", md, Blocker{ID: "tk-rw", Title: "fix the check", Status: "open", IssueType: "task"})
+	a := mergeAnchor("tk-a", md, Blocker{ID: "tk-rw", Title: "fix the check", Status: "open", IssueType: "task", Wait: WaitPending})
 	rework := fixture.Bead{ID: "tk-rw", Title: "fix the check", Status: "open", IssueType: "task"}
 	var more []fixture.Bead
 	for _, g := range gates {

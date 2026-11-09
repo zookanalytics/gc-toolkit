@@ -230,7 +230,7 @@ these steps:
    attaches the operator.
 
 **Engage offers what holds the bead.** It reads the reasons
-`gctk pr-status derive --json` gives (`prstatus.Read` and `prstatus.Reasons`),
+`gctk pr status --json` gives (`prstatus.Read` and `prstatus.Reasons`),
 the one definition the PR's `held:` labels and the board's row read: each open
 human gate reached from the bead through its open `blocks` edges, so a gate on a
 rework or a review the anchor waits on is offered from the PR, each bead a person
@@ -391,11 +391,12 @@ waits in the queue, so the topic is never lost.
 ## The sitting
 
 A sitting's session is a manual session of the converse agent the operator
-chose. It is manual because the pool execution backstop drains a pool session
-that holds in-progress work and is quiet for 90 seconds, and a sitting is quiet
-whenever the operator is reading or thinking. A manual session has no such
-clock: its work closing does not end it, idleness only sleeps it, and
-attaching wakes it.
+chose. It is manual because the controller's work ladder paces a pool session
+that holds a claim, nudging one that stays quiet and then recycling it, and a
+sitting is quiet whenever the operator is reading or thinking. A manual session
+has no such clock: its work closing does not end it, idleness only sleeps it,
+and attaching wakes it. The idle sleep its template sets never reaches a sitting
+that holds its conversation or has a client attached.
 
 **The claim.** The sitting claims its conversation with a plain
 `gc hook --claim`. The default work query finds the task assigned to the
@@ -587,18 +588,19 @@ whose caller names the session it stops.
 **A sitting ends its own session.** Gas City does not end a manual session
 when its work closes, so once a sitting's conversation has closed, or its
 sign-off has handed the conversation back, its last act is
-`gc runtime drain-ack`. The `converse-reap` order
-(`assets/scripts/converse-reap.sh`, every five minutes) is the backstop: it
-closes any converse session whose conversation has closed, is gone, or is back
-in the operator's queue, attached or not, once the session is older than the
-reap's interval, which keeps it off a session engage has started and not yet
-bound. A session whose conversation closed or came back to the queue also
-waits until the conversation has taken no write for that interval, because the
-sitting records its last hand-back on the conversation on the tool call after
-its sign-off, and the operator's tab prints that record once the session ends.
-It reads the
-conversation's id from the session's alias and strips the `c-` prefix. Its
-warrant, with the trigger that retires it, is in [warrants.md](warrants.md).
+`gc runtime drain-ack`. Gas City holds that stop while a client is attached
+([gascity/human-engagement.md](gascity/human-engagement.md#a-stop-the-v2-reconciler-makes-waits-while-a-client-is-attached)),
+so the pane stays live under the tab, with a title that leads with `done`
+(*How a pane dies when no sitting is live*, below), and the session stops
+within about five minutes of the detach. Its record then
+reads drained, and the core reaper's `gc session prune --state drained --before
+24h` closes it a day later. A sitting that holds no open conversation, such as
+one whose conversation was closed by hand, is stopped by its template's idle
+sleep, `sleep_after_idle = "10m"`: Gas City sleeps a session that holds no
+claimed or assigned work and has no client attached once ten minutes have
+passed since its last detach or terminal output
+([gascity/human-engagement.md](gascity/human-engagement.md#a-manual-session-stays-up-until-it-is-closed)).
+That record stays asleep, holding no process, until something closes it.
 
 **Iterating on a document.** A sitting writes no files, so it changes a document
 by sending work, and a worker sent on a short ruling makes every call the ruling
@@ -742,23 +744,26 @@ place.
 Every `converse-<model>` template sets `idle_timeout = "0"`, which takes a
 sitting off the idle ladder entirely: Gas City never registers a template whose
 idle timeout is at or below zero with its idle tracker
-([gascity/human-engagement.md](gascity/human-engagement.md#the-idle-ladder)). A
-held sitting therefore ends when its conversation closes: the sitting's
-sign-off, or the operator's `gc-helm dismiss`. The sign-off is terminal, so
-converse takes it only when nothing important is still pending. Closing the
-conversation ends the session too, whichever path closes it. The sitting's own
-last act is `gc runtime drain-ack`, after the sign-off or a moot or benign
-close, and it never claims again: a closed conversation has no next turn in
-that session. `gc-helm dismiss` closes the conversation and then stops the
-session that held it, also through `drain-ack`, so the controller ends the
-session outside the verb's process; a dismiss typed into the sitting's own
-pane acks its own session last. The pack's `converse-reap` order
-(`assets/scripts/converse-reap.sh`) is the backstop: it closes any converse
-session whose conversation reads closed, gone or back in the operator's
-queue, whether or not anyone is attached. Viewing a sitting does not hold it
-open (*How a pane dies when no sitting is live*, below). A sitting whose
-conversation is still open, because the operator walked away before any
-sign-off, keeps its session running indefinitely.
+([gascity/human-engagement.md](gascity/human-engagement.md#the-idle-ladder)).
+Each also sets `sleep_after_idle = "10m"`, an idle sleep that skips a session
+holding claimed or assigned work, so it never reaches a held sitting. A held
+sitting therefore ends when its conversation closes, and only two things mark a
+conversation done: the sitting's sign-off and the operator's `gc-helm dismiss`.
+The sign-off is terminal, so converse takes it only when nothing important is
+still pending. Closing the conversation ends the session too, whichever path
+closes it. The sitting's own last act is `gc runtime drain-ack`, after the
+sign-off or a moot or benign close, and it never claims again: a closed
+conversation has no next turn in that session. `gc-helm dismiss` closes the
+conversation and then stops the session that held it, also through
+`drain-ack`, so the controller ends the session outside the verb's process; a
+dismiss typed into the sitting's own pane acks its own session last. Either
+stop waits while a client is attached, so a sitting the operator is watching
+stays live under the tab until it detaches (*How a pane dies when no sitting
+is live*, below). The idle sleep is the backstop for a sitting that holds no
+open conversation, such as one whose conversation was closed by hand. A
+sitting whose conversation is still open, because the operator walked away
+before any sign-off, keeps its session running indefinitely: the operator
+re-attaches or dismisses.
 
 A conversation can also outlive its sitting: the sitting's create fails after
 `gc-helm engage` bound the conversation to it, or its session is closed while
@@ -787,14 +792,11 @@ Two endings the idle setting does not own:
   ([gascity/human-engagement.md](gascity/human-engagement.md#a-manual-session-stays-up-until-it-is-closed)),
   so the `no-wake-reason` drain that collects an ended pool session in about
   a minute never reaches it. Its own `drain-ack` ends it, `gc-helm dismiss`
-  stops it, and `converse-reap` above closes one that outlives its
-  conversation anyway. See *How a pane dies when no sitting is live*, below.
+  stops it, and the idle sleep above stops one that outlives its conversation
+  anyway. See *How a pane dies when no sitting is live*, below.
 - **No max-age restart reaches a sitting.** No `converse-<model>` template
-  sets `max_session_age`, and an unset age is off. Gas City's max-age restart
-  defers while the session holds open assigned work and has no attachment
-  rung ([gascity/human-engagement.md](gascity/human-engagement.md#max_session_age)),
-  so it would fire on the first tick after the conversation closed and destroy
-  the pane and its scrollback under an attached operator.
+  sets `max_session_age`, and only the legacy reconciler reads it
+  ([gascity/human-engagement.md](gascity/human-engagement.md#max_session_age)).
 
 The cost is real: a held conversation nobody answers keeps its sitting's
 session running, where an idle clock would recycle it, and
@@ -856,24 +858,25 @@ through, so the converse prompt's restart rule reads the conversation's
 that names `gc hook --claim` alone, rather than sending the session through the
 prompt's claim block, skips that rule, so every `converse-<model>` template
 holds its `nudge` empty. Emptiness is not what protects a held sitting: a
-sitting runs as a manual session, never pool_managed, and no claim backstop
-governs a session that is not pool_managed
+sitting runs as a manual session, never pool_managed, and neither the work
+ladder nor a claim backstop governs a session that is not pool_managed
 ([gascity/human-engagement.md](gascity/human-engagement.md#the-controllers-backstops-govern-pool-sessions-only)).
 What the empty field reaches is the launch delivery, where the prompt is
 prepended to it and still arrives.
 
-Attachment is the one reading signal the runtime has, and only this city's
-gascity fork reads it: there an attached terminal defers the idle stop, a
-detached reader is still indistinguishable from abandonment, and the max-age
-restart ignores attachment altogether
-([gascity/human-engagement.md](gascity/human-engagement.md#the-idle-ladder)).
-That is why the trace is written when the hold begins rather than bought with
-a longer clock, and why no converse template sets `max_session_age`.
+Attachment is the one reading signal the runtime has. The v2 reconciler holds
+a stop it makes, an idle stop or the stop a drain-ack asks for, while a client
+is attached
+([gascity/human-engagement.md](gascity/human-engagement.md#a-stop-the-v2-reconciler-makes-waits-while-a-client-is-attached)),
+and a detached reader is still indistinguishable from abandonment. That is why
+the trace is written when the hold begins rather than bought with a longer
+clock.
 
 ## How a pane dies when no sitting is live
 
 The section above answers "what ends a **held** sitting". Once a sitting
-ends, its session goes with it, and with the session its pane.
+ends, its session goes with it as soon as no client is attached, and with the
+session its pane.
 
 **The sitting ends its own session.** A sitting is a manual session, and Gas
 City keeps a manual session desired for as long as it is neither closed nor
@@ -881,35 +884,70 @@ drained and its template is still configured, so the `no-wake-reason` drain,
 which begins when a live session has no wake reason left, never begins for a
 sitting
 ([gascity/human-engagement.md](gascity/human-engagement.md#a-manual-session-stays-up-until-it-is-closed)).
-Nothing idle-sleeps one either: that takes a `[chat_sessions] idle_timeout` or
-a `[session_sleep]` policy, and this city sets neither. So a sitting ends its
-own session: once its conversation has closed and every write that must
-follow the close has run, its last act is `gc runtime drain-ack`, and the
-controller stops the session. `gc-helm dismiss` stops the session that held
-the conversation it closes the same way. The `converse-reap` order
-(`orders/converse-reap.toml`, a five-minute cooldown) runs
-`assets/scripts/converse-reap.sh`, which closes any converse session whose
-conversation reads closed, gone or back in the operator's queue with
-`gc session close`, attached or not: the backstop for a session that outlives
-its conversation.
+So a sitting ends its own session: once its conversation has closed and every
+write that must follow the close has run, its last act is
+`gc runtime drain-ack`, so the controller stops the session. `gc-helm dismiss`
+stops the session that held the conversation it closes the same way. The
+template's idle sleep, `sleep_after_idle`, is the backstop for a sitting that
+outlives its conversation: it stops a session that holds no claimed or
+assigned work and has no client attached once ten minutes have passed since
+its last detach or terminal output.
 
-**Viewing a sitting does not hold it open.** The city's tmux server carries
-several clients at once: the operator's main connection, and a terminal tab
-on each sitting the operator opened with `gc-helm engage`. The server's
-global `detach-on-destroy` is off, which moves every client of a destroyed
-session to the most recently active other session. Each `converse-<model>`
-template sets the option on for its own session (`session_live` in its
-`agent.toml`), so a plain client on a sitting exits when the sitting's
-session ends, and tmux shows `[exited]`. A client attached with
+**Viewing a sitting holds its stop.** The v2 reconciler holds a stop while a
+client is attached to the session, the stop a drain-ack asks for included
+([gascity/human-engagement.md](gascity/human-engagement.md#a-stop-the-v2-reconciler-makes-waits-while-a-client-is-attached)).
+So after a sign-off or a dismiss the pane stays live under the operator's tab,
+and the tab's title leads with `done`. That title is the `set-titles-string`
+each `converse-<model>` template's `session_live` sets,
+`#{?#{GC_DRAIN_ACK},done · ,}#T`, which tmux sends an attached client: the
+pane's own title, led by `done · ` while the session's tmux environment holds
+`GC_DRAIN_ACK`. Gas City sets that flag at every `gc runtime drain-ack` of the
+session, the sitting's own and an operator's alike
+([gascity/human-engagement.md](gascity/human-engagement.md#a-drain-ack-sets-gc_drain_ack-in-the-sessions-tmux-environment)),
+so nothing in the pack writes the title at the ending, and a tab reads done
+once its sitting has drained, whichever way the sitting ended: its
+conversation closed by the sign-off, a moot or benign close or a dismiss, or
+handed back to the queue by a sitting low on context. tmux reads the flag when
+it next draws the title. It does so at once when the pane prints, as the
+agent's pane does after the sitting's own drain-ack, and otherwise at the
+client's next status refresh, every 15 seconds on the city's tmux server,
+which keeps tmux's default `status-interval`. So a dismiss from outside the
+sitting shows on the tab within 15 seconds
+([specs/tk-7w7qdls/idle-sleep-probe.md](../specs/tk-7w7qdls/idle-sleep-probe.md#the-done-mark-on-gas-citys-drain-flag)).
+The mark renames nothing. It changes only the title tmux sends an attached
+client, so the pane's own title, the agent's own session name and the session
+record that `gc session list` and the board show keep the title
+`gctk session title` gave them. A restart starts a fresh tmux session, which
+holds no flag, so a restarted sitting reads live until it drains again. A
+`/rename`, which is how `gctk session title` names the agent, cannot make the
+mark. Gas City types one into a running session only at its next boundary, and
+in the probe one that the sitting's own agent queued with its drain-ack had
+not landed two minutes later
+([specs/tk-7w7qdls/idle-sleep-probe.md](../specs/tk-7w7qdls/idle-sleep-probe.md#why-the-done-mark-is-not-a-typed-rename)).
+One that lands while an attached operator has typed in the box goes onto that
+text, and both go to the model as one message. At a dismiss, a submit to a
+sitting that is not running resumes it.
+The session stops within about five minutes of the
+detach, because the held stop retries with a backoff from ten seconds, doubling,
+to five minutes. The city's tmux server carries several clients at once: the
+operator's main connection, and a terminal tab on each sitting the operator
+opened with `gc-helm engage`. The server's global `detach-on-destroy` is off,
+which moves every client of a destroyed session to the most recently active
+other session. Each `converse-<model>` template sets the option on for its own
+session (`session_live` in its `agent.toml`), so a plain client on a sitting
+exits when the sitting's session is destroyed under it, and tmux shows
+`[exited]`; a detach exits it with `[detached]`. A client attached with
 `-f no-detach-on-destroy`, as the operator's main connection is, and every
 client on any other session still move on. `gc-helm engage` runs its attach
 as a child, so when the tab's client exits it reads the conversation. A
 closed conversation prints how it closed and the last hand-back the sitting
 recorded on it (`gc-helm handback`, which the sitting runs before each
-framing and its sign-off); a conversation still open prints the command that
-re-attaches. Claude draws in tmux's alternate screen with no history, so
-nothing of the pane survives to recover, and the record on the conversation
-is what the tab prints.
+framing and its sign-off). A conversation back in the operator's queue, as a
+sitting cut short leaves it, prints the same hand-back and the command that
+takes the conversation up again. A conversation its sitting still holds prints
+the command that re-attaches. Claude draws in tmux's alternate screen with no
+history, so nothing of the pane survives to recover, and the record on the
+conversation is what the tab prints.
 
 Three things about that path are worth knowing before trusting a pane:
 
@@ -931,13 +969,18 @@ Three things about that path are worth knowing before trusting a pane:
   `gc runtime drain-ack`
   ([gascity/human-engagement.md](gascity/human-engagement.md#a-pool-session-with-no-wake-reason-is-drained)).
   A sitting's stop event reads the same, and there it is the sitting's own
-  `drain-ack`.
+  `drain-ack`, an operator's from `gc-helm dismiss`, or its idle sleep.
 
-**What the design holds to.** A sitting ends its session as soon as its
-conversation closes, whichever path closes it, and nothing holds a session
-open because someone is viewing it. Nothing copies the pane, and no pane,
-live or dead, stays on screen after its session ends, so what a tab prints is
-the record on the conversation.
+**What the design holds to.** A conversation is done when the sitting closes
+it, at its sign-off or at a moot or benign close before any framing, or when
+the operator dismisses it. Neither a stop nor the idle sleep closes one. The
+agent runs while its sitting holds an open conversation or a client is
+attached, and stops otherwise: the drain-ack's stop once the tab detaches, and
+the idle sleep for a sitting that holds nothing. A tab reads done once its
+sitting has drained, from Gas City's own drain flag. Attaching to a stopped
+sitting resumes its thread. Nothing copies the pane, and no pane, live or
+dead, stays on screen after its session ends, so what a tab prints is the
+record on the conversation.
 
 **What follows for the pack.** The record has to be written before the pane
 matters: what is owed recorded at hold time, the outcome appended as soon as
@@ -1011,7 +1054,7 @@ which is the point.
 
 This page states the pack's own model, so it changes with the pack's code:
 update it in the same PR as a change to a human-gate filer, `gc-helm.sh`, the
-converse prompt or skills, the sign-off, the reap, or the board. The Gas City
-facts it links are re-verified by the refresh procedure in
+converse prompt or skills, the sign-off, the converse templates, or the board.
+The Gas City facts it links are re-verified by the refresh procedure in
 [gascity/human-engagement.md](gascity/human-engagement.md#refresh-procedure);
 when one of them moves, re-derive the seam here that rests on it.

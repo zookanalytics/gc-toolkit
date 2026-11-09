@@ -53,6 +53,18 @@
 #     method's What to check list nor any dimension of it. The correctness
 #     method is method alone: it carries no shell block and reads no record
 #     itself, because the review formula gathers what it reads.
+#   - The pm method says when triage adds it, in words that name no rig: a
+#     diff that changes what the rig's product does for the people it serves,
+#     or what it promises them, and always a diff that changes the product
+#     goals page. An edit that changes neither what the product does nor what
+#     it promises, and tests, do not warrant it. When a rig keeps no product
+#     goals, a pm review judges the change against its anchor alone and asks
+#     the change for no page. It files one request for the page under one
+#     token, and its duplicate probe counts a request that has closed. The
+#     method defines that page without the foundation doc only this repo keeps.
+#   - This repo's own docs/review-triage.md, read the way a review reads it at
+#     its commit, carries the changes that make pm mandatory and the edits that
+#     do not.
 #   - The arch skill approves no commit without a docs/architecture.md, files a
 #     gap in architecture the change does not touch without holding the change,
 #     and passes no change on a gap in architecture it does touch. This repo's
@@ -251,6 +263,9 @@ hasF "$TMP/own.arch" 'A converter is a finding on sight.' "…makes a converter 
 hasF "$TMP/own.arch" 'neither are tests or the fixtures they use' "…and leaves tests out of operational surface"
 hasF "$TMP/own.triage" '## When `arch` is mandatory' "this repo's triage guidance says when the arch check is mandatory"
 hasF "$TMP/own.triage" 'does not make `arch` mandatory' "…and that a diff of tests alone does not make it so"
+hasF "$TMP/own.triage" '## When `pm` is mandatory' "…says when the pm check is mandatory"
+hasF "$TMP/own.triage" 'does not make `pm` mandatory, and neither do tests and the fixtures they use' \
+  "…and that an edit changing no behavior, or a test, does not make it so"
 
 echo "# a region the review formulas repeat is one text in every step carrying it"
 python3 - "$ROOT/formulas/mol-review.toml" "$ROOT/formulas/mol-review-quorum-signoff.toml" > "$TMP/regions" <<'PY'
@@ -545,6 +560,23 @@ hasF "$DEMO" 'line can name another size, such as `390x844`, or a device the eng
 hasF "$DEMO" 'A `resize <width>x<height>` step changes the size from that step on.' "…as a resize step can"
 hasF "$ROOT/skills/review-pm/SKILL.md" "whether a visual proves its claim and whether a screen or message meets the rig's standards." \
   "the pm method leaves the rig's standards to the demo check"
+
+echo "# the pm method says when triage adds it, and asks a rig once for missing product goals"
+PM="$ROOT/skills/review-pm/SKILL.md"
+awk '/^### When triage adds it$/ {f = 1; next} f && /^#/ {exit} f' "$PM" > "$TMP/pm.triage"
+hasF "$TMP/pm.triage" "Triage adds \`pm\` when the diff changes what the rig's product does for the people it serves, or what it promises them" \
+  "triage adds pm for a change to what the rig's product does for the people it serves"
+hasF "$TMP/pm.triage" 'including a fix that changes how the product behaves for them' "…a fix that changes how it behaves for them included"
+hasF "$TMP/pm.triage" 'A diff that adds or changes that page makes this check mandatory.' "…and always for a change to the product goals page"
+hasF "$TMP/pm.triage" 'An edit that changes neither what the product does for the people it serves nor what it promises them, such as a refactor, a typo fixed or a link mended, needs no product review.' \
+  "…but not for an edit that changes neither what the product does for them nor what it promises them"
+hasF "$TMP/pm.triage" 'neither do tests and the fixtures they use' "…or for tests and their fixtures"
+awk '/^### A rig with no product goals$/ {f = 1; next} f && /^#/ {exit} f' "$PM" > "$TMP/pm.missing"
+hasF "$TMP/pm.missing" "judge the change against the anchor's stated problem alone" "with no product goals, a pm review judges the change against its anchor alone"
+hasF "$TMP/pm.missing" 'no finding asks the change to add it' "…asks the change for no page"
+hasF "$TMP/pm.missing" '`docs/product-goals.md: missing`' "…files one request for the page under one token"
+hasF "$TMP/pm.missing" "Add \`--all\` to that duplicate probe's \`gc bd list\`" "…whose duplicate probe counts a request that has closed"
+notF "$PM" 'reading of `docs/foundation.md`' "the pm method defines the goals page without the foundation doc only this repo keeps"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

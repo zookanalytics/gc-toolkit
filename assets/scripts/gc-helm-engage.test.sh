@@ -81,12 +81,14 @@
 #             conversation bound and the sitting open, and prints the attach,
 #             sending the sitting no opening turn; a hang-up or a
 #             TERM stops it the same way (INTERRUPT-HUP, INTERRUPT-TERM).
-#   (ENDED*, DETACHED, UNREAD, ATTACH-FAIL-*) once the attach returns, the
-#             conversation says what the tab prints: a closed conversation
-#             prints how it closed and the last hand-back recorded on it, its
-#             control bytes dropped; a conversation still open prints the
-#             re-attach command; an unreadable one says the ending is unknown;
-#             and a failed attach on a closed conversation reports the ending
+#   (ENDED*, QUEUED-TAB, DETACHED*, UNREAD, ATTACH-FAIL-*) once the attach
+#             returns, the conversation says what the tab prints: a closed
+#             conversation prints how it closed and the last hand-back recorded
+#             on it, its control bytes dropped; one back in the operator's queue
+#             prints that hand-back and how to take it up again; one its sitting
+#             still holds prints the re-attach command; an unreadable one says
+#             the ending is unknown; and a failed attach on a closed or queued
+#             conversation reports the ending
 #             rather than an attach to retry
 #   (SUSPENDED, CTRL-*) a suspended rig or a down controller refuses first
 #   (IA-*)    the interactive prompts: subject, conversation or starter, model,
@@ -179,7 +181,7 @@ conv_row() {
        then {dependencies:([ $tracked[] | {id:., dependency_type:"tracks"} ] + [ $r[] | {id:., dependency_type:"replies-to"} ])}
        else {dependencies:([ $tracked[] | {issue_id:$c, depends_on_id:., type:"tracks"} ] + [ $r[] | {issue_id:$c, depends_on_id:., type:"replies-to"} ])} end)'
 }
-# The reads `gctk pr-status derive` makes, under the (HOLD-REAL) wrapper: a show
+# The reads `gctk pr status` makes, under the (HOLD-REAL) wrapper: a show
 # answers a row per id, its edges from $WALK_EDGES, a JSON object of each bead's
 # dependency rows, and the in-flight list answers $WALK_IN_FLIGHT, [] when unset.
 if [ -n "${STUB_WALK:-}" ] && [ "$1 ${2:-}" = "bd list" ] && case " $* " in *" anchor_bead="*) true ;; *) false ;; esac; then
@@ -448,10 +450,13 @@ case "$1 ${2:-}" in
   "session attach")
     # The attach returns when the tab's client exits. $ATTACH_ENDS is tk-conv's
     # status by then: closed for a sitting that ended under the tab,
-    # in_progress for one the operator detached from. $ATTACH_UNREADABLE makes
-    # every later read of tk-conv fail, and $ATTACH_FAIL fails the attach itself.
+    # in_progress for one the operator detached from, and $ATTACH_HOLDER its
+    # assignee, human for one a sitting cut short handed back. $ATTACH_UNREADABLE
+    # makes every later read of tk-conv fail, and $ATTACH_FAIL fails the attach
+    # itself.
     printf 'session attach %s\n' "$*" >> "$CALLS"
     [ -n "${ATTACH_ENDS:-}" ] && printf '%s' "$ATTACH_ENDS" > "$ST/tk-conv.status"
+    [ -n "${ATTACH_HOLDER:-}" ] && printf '%s' "$ATTACH_HOLDER" > "$ST/tk-conv.assignee"
     [ -n "${ATTACH_UNREADABLE:-}" ] && : > "$ST/tk-conv.unread"
     [ -n "${ATTACH_FAIL:-}" ] && { echo "gc session attach: session not found" >&2; exit 1; } ;;
   "session close")
@@ -816,9 +821,10 @@ hasnt "$CALLED" "bd update" "(LEFT) …with no bind, since it is already assigne
 eq "$(asg tk-conv)" "gc-toolkit/gc-toolkit.tk-conv" "(LEFT) …and the conversation stays assigned to the alias"
 
 echo "# a session still holding the alias of a conversation back in the queue is closed first"
-# A sitting cut short hands its conversation back to the queue and leaves its
-# session for converse-reap. A session that is not closed keeps its alias, so
-# engage closes it and reads it gone before spawning under the alias.
+# A sitting cut short hands its conversation back to the queue and drains,
+# which leaves its session open until the core reaper closes it a day later. A
+# session that is not closed keeps its alias, so engage closes it and reads it
+# gone before spawning under the alias.
 export LIVE_SITTINGS="gc-60=gc-toolkit/gc-toolkit.tk-conv"
 reset; run_engage tk-subj --no-attach
 eq "$RC" 0 "(CUT-SHORT) engaging a queued conversation beside its old session exits 0"
@@ -1852,8 +1858,10 @@ has "$CALLED" "--title review-arch lens" "(IA-SKILL-FLAG) …filing the new conv
 echo "# after the attach returns, the tab says how the sitting it showed ended"
 # The attach returns once the tab's tmux client exits. A closed conversation is
 # a sitting that ended under the tab, and the tab prints how it closed and the
-# last hand-back it recorded; a conversation still open is one the operator
-# detached from, and the tab prints how to re-attach.
+# last hand-back it recorded; one back in the queue is a sitting cut short, and
+# the tab prints that hand-back and how to take it up again; one its sitting
+# still holds is one the operator detached from, and the tab prints how to
+# re-attach.
 HB_TEXT='tk-subj — the board redesign
 
 Settled: the new layout is on for the operator, and the rest wait a week.'
@@ -1890,6 +1898,27 @@ has "$OUT" "The sitting on tk-subj is still open (conversation tk-conv). Re-atta
     "(DETACHED) a conversation still open says the sitting is still going, with the re-attach command"
 hasnt "$OUT" "$HB_TEXT" "(DETACHED) …and prints no hand-back as if it had ended"
 
+# Engage's bind leaves the status open until the sitting claims, so open alone
+# does not say the conversation went back to the queue.
+reset; ended_with "" "$HB_META"
+ATTACH_ENDS=open run_engage tk-conv
+has "$OUT" "The sitting on tk-subj is still open (conversation tk-conv). Re-attach: gc session attach gc-77" \
+    "(DETACHED-BOUND) an open conversation its sitting still holds is a sitting still going"
+
+reset; ended_with "" "$HB_META"
+ATTACH_ENDS=open ATTACH_HOLDER=human run_engage tk-conv
+eq "$RC" 0 "(QUEUED-TAB) a sitting cut short under the tab exits 0"
+has "$OUT" "The sitting on tk-subj has ended: conversation tk-conv is back in your queue. Take it up again: gc-helm engage tk-subj" \
+    "(QUEUED-TAB) the tab says the conversation is back in the queue, with the command that takes it up"
+has "$OUT" "Its last hand-back, recorded 2026-10-26T12:00:00Z:" "(QUEUED-TAB) …then introduces the last hand-back"
+has "$OUT" "$HB_TEXT" "(QUEUED-TAB) …and prints it whole"
+hasnt "$OUT" "Re-attach" "(QUEUED-TAB) …offering no re-attach to a session that no longer holds the conversation"
+
+reset; ended_with "" "$HB_META"
+ATTACH_FAIL=1 ATTACH_ENDS=open ATTACH_HOLDER=human run_engage tk-conv
+has "$OUT" "conversation tk-conv is back in your queue" "(ATTACH-FAIL-QUEUED) an attach that failed because a sitting cut short already ended reports the ending"
+hasnt "$OUT" "could not attach" "(ATTACH-FAIL-QUEUED) …instead of an attach to retry"
+
 reset; ATTACH_ENDS=in_progress ATTACH_UNREADABLE=1 run_engage tk-conv
 has "$OUT" "Could not read conversation tk-conv, so whether its sitting has ended is unknown" \
     "(UNREAD) a conversation that does not read back is reported as unknown, not as ended or open"
@@ -1917,7 +1946,7 @@ unset LIVE_SITTINGS
 reset
 
 # --- what holds the bead -------------------------------------------------------
-# The stub answers `gctk pr-status derive --json` with $GCTK_REASONS as its
+# The stub answers `gctk pr status --json` with $GCTK_REASONS as its
 # reasons, the one list engage reads.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gctk-stub" <<'GCTK'
 printf '%s\n' "$*" >> "$STATE_DIR/gctk.calls"
@@ -1935,7 +1964,7 @@ export GATE_WAITERS='[{"id":"tk-rework","status":"open","dependency_type":"block
 export GCTK_REASONS="$ONE_GATE" HAVE_CONV=0
 fresh_gctk; run_fresh_tty '1\n\n' tk-subj --no-attach
 eq "$RC" 0 "(HOLD-OFFER) picking a gate that holds the bead exits 0"
-eq "$(gctk_calls)" "pr-status derive --anchor tk-subj --json" "(HOLD-OFFER) …read through the one definition"
+eq "$(gctk_calls)" "pr status tk-subj --json" "(HOLD-OFFER) …read through the one definition"
 has "$OUT" "Held by:" "(HOLD-OFFER) …listed under their own heading"
 has "$OUT" '[1] tk-gate — "Approve the rollout"  (human gate:' "(HOLD-OFFER) …numbered, with what the gate asks"
 has "$OUT" "[1-1] engage a listed gate or blocker" "(HOLD-OFFER) …and the prompt says the number engages it"

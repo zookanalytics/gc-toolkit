@@ -36,6 +36,13 @@ first reaction does the same through its close exit, with
 `--waiting-on <retiring-bead>`. A problem that hurts the operator now gets the
 smallest stopgap that stops the harm, and no new test suite.
 
+An epic is held to the plan as well. When you file an epic for this repository
+or review one, read its boundaries against the schedule, because a scheduled
+bead can already retire code the epic would change. The epic gives that code no
+new work, so its boundaries name the code as work the epic is not, along with
+the bead that retires it. At a review, boundaries that do not name such code
+are a gap, and the change you propose names it.
+
 ## A change that adds operational surface shows its Gas City search
 
 This applies to a change that adds
@@ -58,3 +65,11 @@ only explains the design shows no search.
 The arch check's divergence lens sends back a change without this record.
 [review-arch.md](docs/review-arch.md) holds its method, the evidence it accepts
 and its other checks.
+
+## A change to the pack's behavior names the foundation belief or goal it serves
+
+This applies to a change that alters what an agent must do, or what reaches the
+operator, through a skill, a formula, an agent prompt, a template fragment or a
+doc that binds agents. Its PR summary names, in one sentence, the belief or goal
+the change serves: one of the Core Beliefs in
+[foundation.md](docs/foundation.md), or one of its goals.

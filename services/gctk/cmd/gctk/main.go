@@ -1,7 +1,8 @@
 // Command gctk is gc-toolkit's command-line interface: the documented,
 // structured surface through which agents act on a city. Agents are its users.
 // A person can run any command and it should make sense, but no command is
-// shaped for ad-hoc human use.
+// shaped for ad-hoc human use. The command tree is internal/cli's, and
+// docs/gctk-architecture.md is the shape it is built to.
 //
 // SCOPE (services/gctk/README.md). gctk is where gc-toolkit's logic for acting
 // on a city belongs, and each command is built for the long-term shape of the
@@ -18,69 +19,26 @@
 // assets/scripts/epic.sh are bridges: they only exec this binary, and refuse
 // the call when there is none to run.
 // pr-status-label.sh writes the status: and held: labels in shell and takes
-// their values from `gctk pr-status`, the one derivation the labels and the helm
-// board share, so when the binary is absent or stale it leaves the labels
+// their values from `gctk pr status`, the one derivation the labels and the
+// helm board share, so when the binary is absent or stale it leaves the labels
 // unchanged rather than deriving them in shell.
 package main
 
 import (
-	"fmt"
 	"os"
 	"runtime/debug"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/cli"
 )
 
-const topUsage = `Usage:
-  gctk epic <verb> [flags]        actions on an epic: file one with its contract
-  gctk lifecycle <verb> [flags]   anchor lifecycle transitions (lifecycle/lifecycle.toml)
-  gctk merge [flags]              merge cadence arm 2 — the single writer of merged truth (assets/scripts/merge.sh)
-  gctk pr-status <verb> [flags]   PR status working|merging|needs-review|needs-attention (services/gctk/prstatus)
-  gctk rig <verb> [flags]         actions on the rig: run a check's command and record its result against the commit
-  gctk session <verb> [flags]     actions on a session: give it a title its record and its terminal show
-  gctk version                    the revision this binary was built from
-
-Run "gctk epic", "gctk lifecycle", "gctk pr-status", "gctk rig" or "gctk session" for that subcommand's verbs.
-`
-
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
-}
-
-func run(args []string, stdout, stderr *os.File) int {
-	if len(args) == 0 {
-		fmt.Fprint(stderr, topUsage)
-		return 2
-	}
-	switch args[0] {
-	case "epic":
-		return cli.Epic(args[1:], stdout, stderr)
-	case "lifecycle":
-		return cli.Lifecycle(args[1:], stdout, stderr)
-	case "merge":
-		return cli.Merge(args[1:], stdout, stderr)
-	case "pr-status":
-		return cli.PRStatus(args[1:], stdout, stderr)
-	case "rig":
-		return cli.Rig(args[1:], stdout, stderr)
-	case "session":
-		return cli.Session(args[1:], stdout, stderr)
-	case "version":
-		fmt.Fprintln(stdout, version())
-		return 0
-	case "-h", "--help", "help":
-		fmt.Fprint(stdout, topUsage)
-		return 0
-	default:
-		fmt.Fprintf(stderr, "gctk: unknown subcommand %q\n\n%s", args[0], topUsage)
-		return 2
-	}
+	os.Exit(cli.Run(os.Args[1:], version(), os.Stdout, os.Stderr))
 }
 
 // sourceRev is the identity `gc-build.sh gctk` stamps at link time: the tree
 // hash of services/gctk at the commit it built from (`git rev-parse HEAD:./`),
-// the identity gctk-resolve.sh and doctor/check-cadence-live compare against
-// the checkout. -X main.sourceRev=<hash>.
+// the identity doctor/check-cadence-live compares against the checkout.
+// -X main.sourceRev=<hash>.
 var sourceRev string
 
 // version reports the revision this binary was built from. It is what

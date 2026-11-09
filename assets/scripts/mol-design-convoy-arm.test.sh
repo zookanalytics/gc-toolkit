@@ -260,9 +260,15 @@ done
 # already holds is a no-op that exits 0, as bd's is, and one of another type
 # onto the same pair exits 1. An update's --if-assignee is the guard bd
 # applies, exiting 13 on a mismatch. `rig list` names the one rig, "rig", at
-# RIG_ROOT, and `<binding> scripts-dir` prints SCRIPTS.
+# RIG_ROOT, and `<binding> scripts-dir` prints SCRIPTS. A read the gctk under
+# test makes is answered from the same store through holds-store.stub.sh, and
+# is not logged, so the log holds only what the block itself ran.
 mkdir -p "$TMP/bin" "$TMP/rig"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'STUB'
+if [ -n "${HOLDS_STUB_READ:-}" ] && [ "${1:-}" = bd ]; then
+  shift
+  HOLDS_STORE="$STORE" exec "${HOLDS_STUB:?}" answer "$@"
+fi
 printf 'gc %s' "$*" | tr '\n' ' ' >> "$GC_LOG"; printf '\n' >> "$GC_LOG"
 listed() { case " ${1:-} " in *" $2 "*) return 0 ;; esac; return 1; }
 put() { jq -c "$@" "$STORE" > "$STORE.new" && mv "$STORE.new" "$STORE"; }
@@ -394,6 +400,11 @@ chmod +x "$TMP/bin/gc" "$TMP/bin/git" "$TMP/bin/deferred-dispatch.sh"
 
 export GC_LOG="$TMP/gc.log" STORE="$TMP/store.json" ORIGIN_REFS="$TMP/origin-refs" ROSTER_FILE="$TMP/roster.json"
 export SCRIPTS="$TMP/bin" RIG_ROOT="$TMP/rig" POOL="rig/gc-toolkit.polecat" REFINERY="rig/gc-toolkit.refinery"
+# The late-join block asks gctk bead holds what holds the summary task, from the
+# gctk built from this checkout.
+export HOLDS_STUB="$HERE/holds-store.stub.sh" GC_NO_API=1
+GCTK_BIN="$("$HOLDS_STUB" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so the late-join block cannot run"; exit 1; }
+export GCTK_BIN
 export SUBJECT="dz-sub" BRANCH="integration/dz-sub" INITIATIVE="Rebuild the widget"
 printf '%s\n' '{"agents":[{"qualified_name":"rig/gc-toolkit.polecat"},{"qualified_name":"rig/gc-toolkit.refinery"}]}' > "$ROSTER_FILE"
 
@@ -926,6 +937,19 @@ for sh in "${SHELLS[@]}"; do
   stopped && not_logged "dep add" && [ "$(waits_on dz-sum work-2)" = "0" ] && reported "file a fresh summary task" \
     && ok "[$sh] late join: a summary task whose beads have all closed takes no wait, and a fresh one is asked for" \
     || bad "[$sh] late join: a summary task whose beads have all closed took the wait (rc=$RC)"
+
+  # Armed with no marker, every blocks wait closed, and a waits-for edge of its
+  # own onto a spawner whose child is open: the store cannot judge that edge yet,
+  # so the task reads unjudged, which a caller that acts counts as still waiting,
+  # and it takes the joining bead's wait.
+  recipe_store; run_recipe "$sh"
+  jq -c "$JOINED"' | map(if .id == "dz-sum" then .metadata += {"gc.dispatch_when_ready": "rig/gc-toolkit.polecat"} | ._deps += [{id: "sp-1", dependency_type: "waits-for"}] elif .id == "work-1" then .status = "closed" else . end)
+    + [{id: "sp-1", title: "spawner", issue_type: "task", status: "open", assignee: "", description: "", metadata: {}, _deps: []},
+       {id: "sp-1a", title: "spawned", issue_type: "task", status: "open", assignee: "", description: "", metadata: {}, _deps: [{id: "sp-1", dependency_type: "parent-child"}]}]' "$STORE" > "$STORE.new" && mv "$STORE.new" "$STORE"
+  export SUMMARY=dz-sum WORK=work-2
+  run_late "$sh"
+  eq "$RC" "0" "[$sh] late join: a summary task its own waits-for edge holds, unjudged, takes the joining bead's wait"
+  eq "$(waits_on dz-sum work-2)" "1" "[$sh] late join: ...and waits on the joining bead"
   unset SUMMARY WORK
 done
 

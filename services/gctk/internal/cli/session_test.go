@@ -98,7 +98,7 @@ func (r *titleRig) calls(prefix string) []string {
 func (r *titleRig) run(args ...string) (stdout, stderr string, code int) {
 	r.t.Helper()
 	var o, e bytes.Buffer
-	code = Session(append([]string{"title"}, args...), &o, &e)
+	code = Run(append([]string{"session", "title"}, args...), "", &o, &e)
 	return o.String(), e.String(), code
 }
 
@@ -111,7 +111,6 @@ func TestSessionTitleUsage(t *testing.T) {
 		{"no topic", []string{"--subject", "tk-1"}, "tk-s1"},
 		{"blank topic", []string{"--topic", "  "}, "tk-s1"},
 		{"unknown flag", []string{"--topic", "x", "--session-id", "tk-s1"}, "tk-s1"},
-		{"flag twice", []string{"--topic", "x", "--topic", "y"}, "tk-s1"},
 		{"flag with no value", []string{"--topic"}, "tk-s1"},
 		{"newline in topic", []string{"--topic", "one\ntwo"}, "tk-s1"},
 		{"newline in subject", []string{"--topic", "x", "--subject", "tk-1\ntwo"}, "tk-s1"},
@@ -119,13 +118,12 @@ func TestSessionTitleUsage(t *testing.T) {
 		{"PR given as #<n>", []string{"--topic", "x", "--pr", "#41"}, "tk-s1"},
 		{"PR given as its link", []string{"--topic", "x", "--pr", "https://github.com/acme/widgets/pull/41"}, "tk-s1"},
 		{"PR with no value", []string{"--topic", "x", "--pr"}, "tk-s1"},
-		{"PR twice", []string{"--topic", "x", "--pr", "41", "--pr", "42"}, "tk-s1"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			r := newTitleRig(t)
 			t.Setenv("GC_SESSION_ID", tc.env)
-			if _, stderr, code := r.run(tc.args...); code != sessionExitUsage || !strings.Contains(stderr, "usage:") {
+			if _, stderr, code := r.run(tc.args...); code != sessionExitUsage || !strings.Contains(stderr, "Usage:") {
 				t.Fatalf("exit %d, stderr %q; want usage exit %d", code, stderr, sessionExitUsage)
 			}
 			if got := r.calls("gc|"); len(got) != 0 {
@@ -136,7 +134,7 @@ func TestSessionTitleUsage(t *testing.T) {
 
 	t.Run("unknown verb", func(t *testing.T) {
 		var o, e bytes.Buffer
-		if code := Session([]string{"name"}, &o, &e); code != sessionExitUsage {
+		if code := Run([]string{"session", "name"}, "", &o, &e); code != sessionExitUsage {
 			t.Fatalf("exit %d, want %d", code, sessionExitUsage)
 		}
 	})

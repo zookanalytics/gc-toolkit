@@ -3,10 +3,13 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
 	"strings"
+
+	"github.com/spf13/cobra"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 )
@@ -16,12 +19,12 @@ import (
 // registers for it under [metadata.epic_stewardship], in the create itself.
 // docs/epics.md makes a hypothesis the one hard gate on an epic, so an epic
 // whose parent is not an epic is refused without one, and nothing is filed.
-// The gate is that a sentence is there, never how good it is: a rough first
-// draft passes, and the operator's first ruling on the epic judges it
-// (docs/epics.md, "The contract an epic carries"). bd's create checks
-// (validation.on-create, validation.metadata) and gc bd's admission refusals
-// take no rule that holds one issue type to a metadata key, so the check runs
-// here, in the create the work skill gives for an epic.
+// The gate is that a sentence is there, never how good it is: a rough sentence
+// passes, and a review of the epic judges it (docs/epics.md, "Reviewing an
+// epic"). bd's create checks (validation.on-create, validation.metadata) and
+// gc bd's admission refusals take no rule that holds one issue type to a
+// metadata key, so the check runs here, in the create the work skill gives for
+// an epic.
 //
 // An epic whose parent is an epic and that carries no hypothesis is a
 // Delivery, a step toward its epic's hypothesis. Its description opens with
@@ -37,40 +40,18 @@ import (
 // before its answer was lost with the same reply and exit as a create it
 // refused. So the command says nothing was filed only when it ran no create.
 
-const epicUsage = `usage:
-  gctk epic create <title> [--hypothesis <sentence>] [--handle <words>]
-                   [--boundaries <text>] [--closure-condition <text>]
-                   [--indicators <text>] [--parent <bead-id>]
-                   [-d <text>] [--rig <rig>]
-
-Files an epic with its contract, each field in its own key on the epic, in the
-create itself:
-
-  --hypothesis <sentence>     epic_hypothesis: for whom, what changes, and the
-                              signal that shows it worked
-  --handle <words>            epic_handle: the three to five words that name
-                              the epic wherever it is shown
-  --boundaries <text>         epic_boundaries: the axis the epic is cut on, and
-                              the work beside it that it is not, with where
-                              that work lives
-  --closure-condition <text>  epic_closure_condition: the three to six checks
-                              a person can run to answer the hypothesis
-  --indicators <text>         epic_indicators: the one to three signals,
-                              watched while the epic is in flight, that say
-                              whether the hypothesis is being borne out
-  --parent <bead-id>          the bead the epic is filed under
-  -d, --description <text>    its description
-  --rig <rig>                 the rig whose store it is filed in; default this
-                              session's
+// epicCreateLong is create's help. Its flags carry the field each one records.
+const epicCreateLong = `Files an epic with its contract, each field in its own key on the epic, in the
+create itself. The title is the one argument: a title of several words is one
+quoted argument.
 
 An epic needs a hypothesis to be filed (docs/epics.md), so an epic whose parent
 is not an epic is refused without --hypothesis, and nothing is filed. A rough
 sentence that sets the general direction is enough: when the operator has
-stated none, the filer writes one and files at once, and it stays a first draft
-until the operator first rules on the epic. The other fields are the
-operator's, so give one only as the operator stated or confirmed it. An empty
-field is a field not given. An area that is only ever improvable is not an
-epic, and its work is ordinary flow.
+stated none, the filer writes one and files at once. A field the filer writes
+is its proposal, which it says on the epic, and a review of the epic judges it.
+An empty field is a field not given. An area that is only ever improvable is
+not an epic, and its work is ordinary flow.
 
 An epic whose --parent is an epic and that has no --hypothesis is a Delivery, a
 step toward its epic's hypothesis. Its description opens with its Aim: and
@@ -88,10 +69,9 @@ exit: 0 filed
         or exited 0 and named no bead. bd answers a commit it could not
         confirm with the same error as a create it refused, so look for the
         epic by its title before filing it again, with the gc bd list that
-        stderr ends with
-`
+        stderr ends with`
 
-// The exit codes epicUsage states.
+// The exit codes epicCreateLong states.
 const (
 	epicExitDone     = 0
 	epicExitNotFiled = 1
@@ -100,14 +80,14 @@ const (
 	epicExitUnknown  = 4
 )
 
-// epicFields pairs each contract flag with the key it is recorded in, in the
-// order docs/epics.md lists the contract.
-var epicFields = []struct{ flag, key string }{
-	{"--handle", "epic_handle"},
-	{"--hypothesis", "epic_hypothesis"},
-	{"--boundaries", "epic_boundaries"},
-	{"--closure-condition", "epic_closure_condition"},
-	{"--indicators", "epic_indicators"},
+// epicFields pairs each contract flag with the key it is recorded in, and what
+// the field holds, in the order docs/epics.md lists the contract.
+var epicFields = []struct{ flag, key, holds string }{
+	{"handle", "epic_handle", "epic_handle: the three to five `words` that name the epic wherever it is shown"},
+	{"hypothesis", "epic_hypothesis", "epic_hypothesis: for whom, what changes, and the signal that shows it worked, in one `sentence`"},
+	{"boundaries", "epic_boundaries", "epic_boundaries: the axis the epic is cut on, and the work beside it that it is not, with where that work lives"},
+	{"closure-condition", "epic_closure_condition", "epic_closure_condition: the three to six checks a person can run to answer the hypothesis"},
+	{"indicators", "epic_indicators", "epic_indicators: the one to three signals, watched while the epic is in flight, that say whether the hypothesis is being borne out"},
 }
 
 type epicOpts struct {
@@ -116,97 +96,53 @@ type epicOpts struct {
 	fields map[string]string
 }
 
-// Epic dispatches `gctk epic <verb>`, returning a process exit code so the
-// surface stays testable in-process.
-func Epic(args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 {
-		fmt.Fprint(stderr, epicUsage)
-		return epicExitUsage
-	}
-	switch args[0] {
-	case "-h", "--help", "help":
-		fmt.Fprint(stdout, epicUsage)
-		return epicExitDone
-	case "create":
-	default:
-		fmt.Fprintf(stderr, "gctk epic: unknown verb %q\n\n%s", args[0], epicUsage)
-		return epicExitUsage
-	}
-	if len(args) > 1 && (args[1] == "-h" || args[1] == "--help") {
-		fmt.Fprint(stdout, epicUsage)
-		return epicExitDone
-	}
-	o, msg := parseEpicCreate(args[1:])
-	if msg != "" {
-		fmt.Fprintf(stderr, "gctk epic create: %s\n\n%s", msg, epicUsage)
-		return epicExitUsage
-	}
-	return epicCreate(o, stdout, stderr)
+func newEpicCmd(stdout, stderr io.Writer) *cobra.Command {
+	create := newEpicCreateCmd(func(o epicOpts) int { return epicCreate(o, stdout, stderr) })
+	return group("epic", "actions on an epic",
+		"Actions on an epic: file one with its contract (docs/epics.md).", create)
 }
 
-// parseEpicCreate reads create's title and flags, or returns why they do not
-// parse.
-func parseEpicCreate(args []string) (epicOpts, string) {
-	o := epicOpts{fields: map[string]string{}}
-	titled := false
-	set := map[string]bool{}
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		if !strings.HasPrefix(a, "-") {
-			if titled {
-				return o, fmt.Sprintf("a second title %q: a title of several words is one quoted argument", a)
+// newEpicCreateCmd builds create, which hands the epic its flags describe to
+// file and exits with what file returns.
+func newEpicCreateCmd(file func(epicOpts) int) *cobra.Command {
+	values := make([]string, len(epicFields))
+	o := epicOpts{}
+	create := &cobra.Command{
+		Use:   "create <title>",
+		Short: "file an epic with its contract",
+		Long:  epicCreateLong,
+		Args: func(_ *cobra.Command, args []string) error {
+			switch {
+			case len(args) == 0:
+				return errors.New("no title: the epic's title is the first argument")
+			case len(args) > 1:
+				return fmt.Errorf("a second title %q: a title of several words is one quoted argument", args[1])
 			}
-			titled = true
-			o.title = strings.TrimSpace(a)
-			continue
-		}
-		name := a
-		if a == "-d" {
-			name = "--description"
-		}
-		key := epicFieldKey(name)
-		switch {
-		case key != "", name == "--parent", name == "--description", name == "--rig":
-		default:
-			return o, fmt.Sprintf("unknown argument %q", a)
-		}
-		if set[name] {
-			return o, "flag " + a + " given twice"
-		}
-		set[name] = true
-		if i+1 >= len(args) {
-			return o, "flag " + a + " needs a value"
-		}
-		i++
-		v := args[i]
-		switch {
-		case key != "":
-			if s := strings.TrimSpace(v); s != "" {
-				o.fields[key] = s
+			return nil
+		},
+		RunE: func(_ *cobra.Command, args []string) error {
+			o.title = strings.TrimSpace(args[0])
+			if o.title == "" {
+				return errors.New("no title: the epic's title is the first argument")
 			}
-		case name == "--parent":
-			o.parent = strings.TrimSpace(v)
-		case name == "--description":
-			o.description = v
-		case name == "--rig":
-			o.rig = strings.TrimSpace(v)
-		}
+			o.parent, o.rig = strings.TrimSpace(o.parent), strings.TrimSpace(o.rig)
+			o.fields = map[string]string{}
+			for i, f := range epicFields {
+				if v := strings.TrimSpace(values[i]); v != "" {
+					o.fields[f.key] = v
+				}
+			}
+			return exit(file(o))
+		},
 	}
-	if o.title == "" {
-		return o, "no title: the epic's title is the first argument"
+	fl := create.Flags()
+	for i, f := range epicFields {
+		fl.StringVar(&values[i], f.flag, "", f.holds)
 	}
-	return o, ""
-}
-
-// epicFieldKey is the key a contract flag records its field in, or "" when
-// flag is not a contract flag.
-func epicFieldKey(flag string) string {
-	for _, f := range epicFields {
-		if f.flag == flag {
-			return f.key
-		}
-	}
-	return ""
+	fl.StringVar(&o.parent, "parent", "", "the `bead` the epic is filed under")
+	fl.StringVarP(&o.description, "description", "d", "", "its description")
+	fl.StringVar(&o.rig, "rig", "", "the `rig` whose store it is filed in; default this session's")
+	return create
 }
 
 // epicRefusal says why o is refused, or "" when it may be filed. parentType is
@@ -229,14 +165,14 @@ func epicRefusal(o epicOpts, parentType string) string {
 			"for whom, what changes and the signal that shows it worked. " +
 			"A rough sentence that sets the general direction is enough. When the operator has stated none, " +
 			"write one yourself and run the create again with it, without asking first: " +
-			"it stays a first draft until the operator first rules on the epic. " +
+			"it is your proposal, and a review of the epic judges it. " +
 			"An area that is only ever improvable is not an epic, and its work is ordinary flow. " +
 			"A Delivery, a step toward an epic's hypothesis, is filed with --parent <its epic>."
 	}
 	var given []string
 	for _, f := range epicFields {
 		if o.fields[f.key] != "" {
-			given = append(given, f.flag)
+			given = append(given, "--"+f.flag)
 		}
 	}
 	if len(given) == 0 {

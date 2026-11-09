@@ -2019,7 +2019,7 @@ func (m *merger) inflightHolder(id string, byPR, children, blockers []gcbd.Bead)
 // status.
 func holderLabel(b *gcbd.Bead) string {
 	kind := "unclosed rework/review bead"
-	if b.IsHumanGate() {
+	if prstatus.IsHumanGate(b.IssueTypeString(), b.AwaitType) {
 		kind = "open human gate"
 	} else if b.Meta("task_kind") == "finding" {
 		if fd := b.Meta("finding.disposition"); fd != "" {

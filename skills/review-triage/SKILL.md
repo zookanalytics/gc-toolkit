@@ -123,11 +123,11 @@ rules bound the judgment:
   touches such a path, the check is added whatever the rest of the method would
   argue. Nothing re-derives the diff behind you, so a miss here is a check the
   anchor never gets.
-- **Adding nothing is the expected common case.** A one-file fix inside one
-  component, a test addition, a doc correction, a formula-poured mechanical
-  change — none earns a specialist review. Widening costs a cadence hop and a
-  session per anchor, and the feedback distiller watches the add-rate for exactly
-  that drift.
+- **Adding nothing is the expected common case.** A one-file fix to one
+  component's internals, a test addition, a typo fixed in a doc, a
+  formula-poured mechanical change — none earns a specialist review. Widening
+  costs a cadence hop and a session per anchor, and the feedback distiller
+  watches the add-rate for exactly that drift.
 
 A round that conflicted is also yours to rule on. Each entry says what collided
 (the two intents), what the worker decided and why, what a reviewer should
