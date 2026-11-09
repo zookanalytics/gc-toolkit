@@ -1,9 +1,9 @@
 #!/bin/sh
 # tmux-new-subject.sh — prefix+A: raise a brand-new topic and converse about it.
 # Runs `gc-helm engage --new-subject` in the fresh tmux window the binding
-# opened, where it opens the conversation form on a new topic: the rig, the
-# question and the model on one screen. The sibling prefix+a files a bead for
-# triage; this one starts a conversation.
+# opened, where it opens the conversation form on a new topic: the question, the
+# rig, the model and whether to attach on one screen. The sibling prefix+a files
+# a bead for triage; this one starts a conversation.
 #
 # Usage: tmux-new-subject.sh <config-dir> [--city-path <path>]
 #
@@ -28,9 +28,11 @@ done
 HELM="$CONFIGDIR/assets/scripts/gc-helm.sh"
 [ -f "$HELM" ] || { echo "tmux-new-subject.sh: gc-helm.sh not found at $HELM" >&2; exit 1; }
 
-# The form starts the sitting without taking over this window, and says what it
-# saved and where the sitting stands when it closes, so the window is held open
-# for a keypress rather than closing over that line. On a pipe (a hermetic test)
+# The form saves the question and starts its sitting, and attaches to the
+# sitting once it starts unless its Attach field is off. Either way its last
+# lines say what happened: engage's account of the sitting once the attach
+# returns, or the form's note of what it saved or kept. So the window is held
+# open for a keypress rather than closing over them. On a pipe (a hermetic test)
 # the read returns at once and nothing blocks.
 sh "$HELM" engage --new-subject || true
 printf '\n[new-subject: done — press Enter to close this window] '
