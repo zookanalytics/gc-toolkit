@@ -74,13 +74,11 @@ and closes here rather than waiting for a manual dismiss.
 what the answer releases first.** The sitting answers only the gates its
 conversation replies to: the gate engage was pointed at, one its hold filed,
 and any other human gate the operator rules on within the subject's universe.
-To answer one the conversation does not reply to yet, add the reply and read
-it back, then name every bead the answer releases, read from the gate's
-`blocks` dependents, so an answer that releases a bead beyond the subject is
-given knowingly:
+To answer one the conversation does not reply to yet, add the reply, then name
+every bead the answer releases, read from the gate's `blocks` dependents, so an
+answer that releases a bead beyond the subject is given knowingly:
 ```bash
 gc bd dep add "$CONVERSATION" <gate> --type replies-to \
-  && gc bd list --id "$CONVERSATION" --all --json | jq -e --arg g <gate> 'any(.[0].dependencies[]?; .type == "replies-to" and .depends_on_id == $g)' >/dev/null \
   && gc bd dep list <gate> --direction=up --type blocks --json | jq -r '.[] | "\(.id) [\(.status)] \(.title)"'
 ```
 A gate with no tie to the subject takes its own conversation, so that its

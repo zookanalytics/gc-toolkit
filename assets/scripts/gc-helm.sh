@@ -23,8 +23,8 @@
 # 4 verb runtime failure (bead not found / unverifiable / filing failed /
 # a --route, or a takeaway headline or disposition, that will not stamp / a
 # pour stamp a release leaves on a bead held for placement / an unplaced list
-# missing a store that did not answer / a priority move that did not read
-# back / an Accept refused or held by another Accept on the bead),
+# missing a store that did not answer / a priority move the store refused /
+# an Accept refused or held by another Accept on the bead),
 # 5 react no-op: the subject already has an open first reaction, or a live owner
 # owns its reaction, so nothing was filed (a first reaction happens once at a
 # time) — distinct from 4 so an intake caller files its own conversation
@@ -191,8 +191,8 @@ that would land it there; --shift sets a bead that follows a parent or an
 anchor, and is refused on a bead that follows nothing. A workflow's convoy,
 root or step takes no priority of its own. The move then writes every bead
 that follows the bead, held beads included, their live workflows and their
-anchors' PR-finishing work, leaves claimed beads as they are, and reads it
-all back (assets/scripts/queue-priority.sh move). --dry-run prints what it
+anchors' PR-finishing work, and leaves claimed beads as they are
+(assets/scripts/queue-priority.sh move). --dry-run prints what it
 would write.
 
 dismiss is the operator's explicit "end this sitting". It closes the
@@ -225,8 +225,8 @@ guess a subject, and name the explicit-id form as the fix.
 
 handback records the hand-back a converse sitting is posting, each framing and
 the sign-off, on its conversation. The text is read from stdin and stamped as
-gc.handback with gc.handback_at, replacing the one recorded before, then read
-back. A hand-back recorded once the conversation has closed is the visit's
+gc.handback with gc.handback_at, replacing the one recorded before. A
+hand-back recorded once the conversation has closed is the visit's
 conclusion, so it also draws the comment that shows the visit on the subject's
 PR again. engage runs its attach as a child, so when the tab's tmux client
 exits, engage reads the conversation. A closed conversation prints how it
@@ -1644,7 +1644,7 @@ cmd_park() {
 # priority move (docs/steering.md). queue-priority.sh move does the work under
 # the store's priority lock: it sets the bead's own input, writes every bead
 # that follows it, held ones included, their live workflows and their anchors'
-# PR-finishing work, leaves claimed beads as they are, and reads it all back.
+# PR-finishing work, and leaves claimed beads as they are.
 # This verb names the store the bead lives in and relays the answer: a refusal
 # exits 2 with nothing written, and a write that did not land exits 4. A move
 # that fails can fail after it wrote some of its beads, so every exit but a

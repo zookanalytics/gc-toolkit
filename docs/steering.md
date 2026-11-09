@@ -90,8 +90,8 @@ Each writer that files or disposes new work follows the rule.
   queue.
 
 No held bead is ever readable without its marker. The witness and the
-distiller write it in the create, and the first reaction writes it and reads
-it back before the release.
+distiller write it in the create, and the first reaction writes it before the
+release, which waits on that write's exit.
 
 A first reaction's subject can still carry `gc.execution_routed_to`, the stamp
 a pour leaves, after the pour's workflow has ended. The queue reads that stamp

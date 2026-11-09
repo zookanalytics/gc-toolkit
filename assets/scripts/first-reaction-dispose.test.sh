@@ -210,8 +210,8 @@ esac
 # clear: a plain arm lands whether or not the stamp is set. FAKE_HELM_KEEPS_STAMP
 # leaves the stamp set behind a release that exits 0, as a pour that stamps it
 # again after the release landed would. gc-helm.sh clears the stamp in the update
-# it reads back through its own headline stamp, so a release whose update did
-# not land exits 4, which FAKE_HELM_FAILS models.
+# whose exit it takes, so a release whose update the store refused
+# exits 4, which FAKE_HELM_FAILS models.
 case " $* " in
   *" --release "*)
     if [ -n "${FAKE_EXEC_ROUTED_FILE:-}" ] && [ -z "${FAKE_HELM_KEEPS_STAMP:-}" ]; then
@@ -631,8 +631,8 @@ has "armed the dispatch to gc-toolkit/gc-toolkit.polecat" "$ERR" \
 before '^DEFERRED arm' 'gc.reacted_by' "(BLKARM) …before the landed proof, which is the last write"
 
 # Control: a pour stamp still set after a release that exits 0 still lets the
-# plain arm land. gc-helm.sh takeaway --release clears the stamp in the update it
-# reads back, so a stamp set after a zero exit was written after the release
+# plain arm land. gc-helm.sh takeaway --release clears the stamp in the update
+# whose exit it takes, so a stamp set after a zero exit was written after the release
 # landed, here on a member its parent places. No arm or reconcile guard reads
 # that stamp, so dispose runs on to arm the plain dispatch.
 printf 'gc-toolkit/gc-toolkit.proactive' > "$FAKE_EXEC_ROUTED_FILE"
@@ -645,7 +645,7 @@ has "armed the dispatch to gc-toolkit/gc-toolkit.polecat" "$ERR" \
 unset FAKE_HELM_KEEPS_STAMP
 
 # Contract: the arm is downstream of a release that SUCCEEDED. A release failure,
-# gc-helm exiting non-zero because its update was refused or did not read back,
+# gc-helm exiting non-zero because the store refused its update,
 # dies before the arm, so a bead whose disposition did not land is never armed to
 # auto-resume from that state, and no landed proof or closed R says otherwise.
 export FAKE_HELM_FAILS=1
@@ -1735,7 +1735,7 @@ unset FAKE_SHOW_JSON
 # failure it is about. The claim admits a bead at P0 only when that check is
 # failing on the head of main, read from GitHub through the subject's own rig
 # checkout.
-#   (EMERG)       a confirmed emergency is written P0, read back, then routed
+#   (EMERG)       a confirmed emergency is written P0, then routed
 #   (EMERGSTATUS) a failing commit status confirms it as a failing check run does
 #   (EMERGMEMBER) an emergency outranks membership: a member is routed at P0
 #   (EMERGNO)     a green main confirms nothing, so the bead is held, and the

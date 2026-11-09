@@ -57,7 +57,7 @@
 #             closes the sitting it spawned and overwrites nothing
 #   (DISMISSED-*) a conversation a dismiss closes while the sitting spawns, in
 #             the queue, filed by engage, or resumed under the same alias or
-#             another, fails the bind's status guard or its read-back: the
+#             another, fails the bind's status guard or the read with no bind: the
 #             sitting is closed, and the conversation stays closed with the
 #             holder the dismiss left
 #   (ALIAS-*, RACE-CONCURRENT) a spawn refused at the alias spawns nothing and
@@ -121,7 +121,7 @@ mkdir -p "$TMP/bin" "$TMP/state"
 # One rig (prefix tk). The subject is tk-subj; its conversations are tk-conv
 # and tk-conv2, and a conversation engage files is tk-new. Each conversation's
 # assignee and status live in $STATE/<id>.assignee and $STATE/<id>.status
-# (defaults human and open), so a bind and its read-back see what the store
+# (defaults human and open), so a bind and a later read see what the store
 # would. $HAVE_CONV says which conversations track tk-subj: unset or 1 tk-conv,
 # 2 tk-conv and tk-conv2, two tk-conv and tk-two, 0 none. tk-two is an older
 # task assigned to human that tracks tk-subj and tk-elsewhere, so it is no
@@ -1020,8 +1020,8 @@ eq "$(asg tk-conv)" "human" "(BIND-FAIL) …the conversation stays in the queue"
 
 echo "# a conversation a dismiss closes while the sitting spawns is not bound, and the sitting is closed"
 # bd's close keeps the assignee, so the holder engage read still holds a
-# dismissed conversation: only the status guard and the read-back tell a closed
-# conversation, which no claim adopts.
+# dismissed conversation: only the bind's status guard, or the read when no bind
+# runs, tells a closed conversation, which no claim adopts.
 reset; DISMISS_ON_SPAWN=tk-conv run_engage tk-conv --model codex --no-attach
 eq "$RC" 4 "(DISMISSED-QUEUE) a queued conversation dismissed during the spawn exits 4"
 has "$CALLED" "bd update tk-conv --if-assignee human --if-status open" "(DISMISSED-QUEUE) …the bind is guarded on the status engage read, so the store rejects it (exit 13)"

@@ -174,7 +174,7 @@ eq "$(grep -c 'gc runtime drain-ack' "$TOML")" "1" "one step drains: the dispatc
 # Only the dispatch step hands the subject over or dispatches anything.
 for m in file-design-create file-design-wait file-implementation-create file-implementation-wait summary-task-create summary-task-wait; do
   if grep -qE 'gc sling|deferred-dispatch|--assignee' <<< "$(extract_copy "$m" 1)"; then
-    bad "$m hands the subject over or dispatches — only the dispatch step may, once the whole setup reads back"
+    bad "$m hands the subject over or dispatches — only the dispatch step may, once the whole setup is filed"
   else
     ok "$m neither hands the subject over nor dispatches"
   fi
@@ -723,14 +723,14 @@ for sh in "${SHELLS[@]}"; do
     subject_json
     run_block setup-dispatch "$sh"
     [ "$RC" -eq 0 ] && [ "$(field dz-sub assignee)" = "rig/gc-toolkit.refinery" ] && logged "sling rig/gc-toolkit.polecat dz-design" \
-      && ok "[$sh] setup (design_gated=$gated): once every wait reads back, the dispatch step hands the subject over and dispatches" \
+      && ok "[$sh] setup (design_gated=$gated): once every wait is filed, the dispatch step hands the subject over and dispatches" \
       || bad "[$sh] setup (design_gated=$gated): the dispatch step did not complete over the filed setup (rc=$RC)"
   done
 
   # --- setup-dispatch, design-gated ---
   wired
   run_block setup-dispatch "$sh"
-  eq "$RC" "0" "[$sh] dispatch gated: a setup that reads back is handed over and dispatched"
+  eq "$RC" "0" "[$sh] dispatch gated: a filed setup is handed over and dispatched"
   eq "$(field dz-sub assignee)" "rig/gc-toolkit.refinery" "[$sh] dispatch: the subject is assigned to the refinery"
   logged "deferred-dispatch notify dz-sub --agent rig/gc-toolkit.refinery" \
     && ok "[$sh] dispatch: the notice the assignment owes is recorded" || bad "[$sh] dispatch: no notice"

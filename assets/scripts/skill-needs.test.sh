@@ -36,7 +36,7 @@
 # gc-bd-watch.sh and human-gate.sh under the binding it is rendered with, so
 # each render reaches the pack's own copies. It pins the prs
 # skill's supplement command: filed in the PR's rig, holding the anchor's merge,
-# and slung only once that hold reads back. It pins that a formula's own
+# and slung only once its create names it. It pins that a formula's own
 # description, not a doc, says which work
 # the formula fits. It pins that a problem in software the rig does not own goes
 # through the external-issue skill, which alone holds that path's commands and
@@ -594,8 +594,8 @@ lacks "the work skill claims no scope the recipe's push breaks" 'nothing here ch
     "the effort recipe pushes the effort's branch"
 # A supplement goes to the PR's own rig, because a pool reads only its rig's
 # store, and the anchor waits on it, because the merge holds on what blocks the
-# anchor and never on a bead that only names the PR's branch. The hold is read
-# back before the sling.
+# anchor and never on a bead that only names the PR's branch. The hold rides the
+# create, and the sling runs only once the create names the supplement.
 have "the prs skill files a supplement in the PR's rig" 'SUP=$(gc bd --rig <rig> create' "$PRS_SKILL"
 have "…as a child of the anchor" '"anchor_bead":"<anchor>"' "$PRS_SKILL"
 have "…born joined to the anchor and holding its merge" '--deps related:<anchor>,blocks:<anchor>' "$PRS_SKILL"

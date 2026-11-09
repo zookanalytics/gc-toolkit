@@ -4,12 +4,12 @@
 #
 # THE CONTRACT this pins:
 #   (SETTLE)    settle writes a bead's computed priority to the bead and to every
-#               live workflow poured for it (input convoy, root, open steps) and
-#               reads it back; a claimed bead or step is left as it is, and so is
+#               live workflow poured for it (input convoy, root, open steps); a
+#               claimed bead or step is left as it is, and so is
 #               a closed one; a bead that follows nothing keeps its own priority
 #               and its workflows take it, and a workflow root that follows
 #               nothing writes its own steps; --print computes and writes
-#               nothing; a write that does not read back, an unreadable bead and
+#               nothing; a write the store refuses, an unreadable bead and
 #               a lock held past the wait each exit 1. A writer records itself
 #               as the lock's holder while it holds it and clears the record as
 #               it exits.
@@ -17,7 +17,7 @@
 #               and --shift sets a bead that follows a parent or an anchor; the
 #               move then writes every bead that follows it, held ones and gates
 #               included, their live workflows and their anchors' PR-finishing
-#               work, and reads them back. The moved bead's own input, a P-value or a
+#               work. The moved bead's own input, a P-value or a
 #               shift, is written even when it is claimed. A P-value on a member
 #               is refused naming the shift that lands it there; a shift on a
 #               bead that follows nothing, either form on a workflow's convoy,

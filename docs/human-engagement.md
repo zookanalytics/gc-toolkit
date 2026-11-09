@@ -208,8 +208,8 @@ these steps:
    a live sitting, and engage attaches the operator to it rather than starting
    a second. Otherwise it takes the bead's conversation from the queue, or one
    whose sitting's session has closed, or files a new one. Pointed at a gate,
-   engage makes the conversation it landed on reply to the gate and reads the
-   reply back before it starts or attaches anything.
+   engage makes the conversation it landed on reply to the gate before it
+   starts or attaches anything, and a reply the store refuses starts nothing.
 5. **It starts the sitting:**
    `gc session new converse-<model> --alias <task> --no-attach`, under the
    prefix `c-` when the runtime refuses the bare id as an alias. A session
@@ -450,8 +450,8 @@ conversation filed there asks that conversation's question, and its ruling
 releases the bead whether or not this one is settled. So the key names the
 conversation, `conversation.<conversation id>`: a resumed hold finds the gate
 it filed, and two conversations on one bead each hold with a gate of their
-own, so the merge waits for both rulings. The sitting replies to its gate and
-reads the reply back, so a resumed or handed-off conversation knows the gate
+own, so the merge waits for both rulings. The sitting replies to its gate, so
+a resumed or handed-off conversation knows the gate
 it owes. Without that need it files nothing: a conversation does not
 freeze its subject, and a PR keeps moving while the operator and the sitting
 talk. The gate is what holds the subject: bd reads the subject as blocked while
@@ -466,8 +466,8 @@ replies to: the gate engage was pointed at, one its hold filed, and any other
 human gate the operator rules on within the subject's universe, which the
 converse prompt defines as the subject with its dependents and related items,
 and for an epic the work under it and in flight across it. To answer a gate
-its conversation does not reply to yet, the sitting adds the reply and reads
-it back, so the graph records which conversation answered which gate. Before it
+its conversation does not reply to yet, the sitting adds the reply, so the
+graph records which conversation answered which gate. Before it
 resolves a gate, it names every bead the answer releases, read from the gate's
 `blocks` dependents, so an answer that releases a bead beyond the subject is
 given knowingly. It also settles the subject's dispatch path first, at the

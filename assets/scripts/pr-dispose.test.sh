@@ -2,7 +2,7 @@
 # Hermetic test for assets/scripts/pr-dispose.sh — the sanctioned path that
 # records a deliberate PR-close disposition on the open anchor and closes the
 # PR, so pr-facts.sh consummates the terminal close through bead-rehome.sh.
-# Covers: the marker stamped and read back on an OPEN pull_request anchor;
+# Covers: the marker stamped on an OPEN pull_request anchor;
 # --no-close-pr stamping only; the PR closed through gh when the anchor is open,
 # after a closing comment posted through pr-post.sh with the city's mark, which
 # gates the close; gh view, comment and close pinned to the anchor's own pr_url
@@ -10,9 +10,7 @@
 # certified against the anchor before closing; idempotent no-op on an
 # already-disposed anchor; refusal on an anchor past the pull_request state
 # (named bead-rehome as the direct verb); refusal on an anchor with no parseable
-# pr_url; the marker read-back gate refusing to close the PR when the stamp did
-# not land — including the successor store, which a dropped write, or a stale
-# value an omitted store fails to clear, both catch; the successor store carried
+# pr_url; a marker the store refuses, which closes no PR; the successor store carried
 # through when given and cleared when omitted; the close-mode failures that
 # record the marker but exit non-zero (gh missing, an unreadable state, a
 # failed closing comment or gh close); dry-run writing nothing; and the usage refusals (bad kind, missing
@@ -75,7 +73,7 @@ anchor() { # id num [extra-metadata] [pr_url-override]
 }
 succ() { printf '{"id":"%s","status":"open","title":"successor","notes":"","metadata":{}}' "$1"; }
 
-echo "# an OPEN pull_request anchor: the marker is stamped and read back (--no-close-pr)"
+echo "# an OPEN pull_request anchor: the marker is stamped (--no-close-pr)"
 store "[$(anchor A1 70), $(succ S1)]"
 out=$("$SUT" --anchor A1 --successor S1 --kind duplicate --no-close-pr 2>&1); rc=$?
 eq "$rc" 0 "exits 0"

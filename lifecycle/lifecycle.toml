@@ -1623,8 +1623,8 @@ keys = [
 # gc.ruling_consequence — on a conversation, the open PR each of its rulings'
 #   --rework or --retire acts on: a JSON object from the ruling's answer
 #   (`ruled: <ruling>`) to {act, anchor}, act `rework` or `retire` and anchor
-#   the PR's anchor bead. converse-signoff.sh writes a ruling's entry and reads
-#   it back before the rework or the retirement acts, and a re-run of that
+#   the PR's anchor bead. converse-signoff.sh writes a ruling's entry first,
+#   and the rework or retirement acts only on its zero exit. A re-run of that
 #   ruling with the same answer acts on the anchor it names, even once that
 #   anchor has closed, as a retired PR's does when pr-facts consummates its
 #   disposition. An entry binds no re-run that answers differently, which
