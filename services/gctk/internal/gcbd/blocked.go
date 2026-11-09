@@ -2,6 +2,7 @@ package gcbd
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -53,9 +54,13 @@ const (
 // blocked listing nor its close rule answers the bead. The answer stands until
 // the bd the city runs judges the gate, so it is not a failed read: a caller
 // that acts holds the bead, and one that reports shows the edge as unjudged.
+// Spawners are the beads its waits-for edges name, and Blocks the beads its own
+// blocks and conditional-blocks edges name that the listing names live, which
+// bd judges by their status as it judges any such wait.
 type WaitsForError struct {
 	ID       string
 	Spawners []string
+	Blocks   []string
 }
 
 func (e *WaitsForError) Error() string {
@@ -79,8 +84,11 @@ func (e *ReadError) Error() string {
 	return fmt.Sprintf("the store's read could not answer %s: %s", e.ID, e.Reason)
 }
 
-// Edge is one of a bead's own edges as a `gc bd show` row carries it: its type,
-// the far bead, and the far bead's status and, once it closed, when.
+// Edge is one of a bead's own edges: its type, the far bead, and the far bead's
+// status and, once it closed, when. A `gc bd show` row carries the far bead's
+// fields, and leaves out an edge whose far bead the store does not hold. A `gc
+// bd list` row carries every edge the bead has, with the far bead's id and the
+// edge's type alone, so its Status and ClosedAt are empty.
 type Edge struct {
 	Type     string
 	ID       string
@@ -88,8 +96,10 @@ type Edge struct {
 	ClosedAt string
 }
 
-// Edges decodes the bead's own edges. A row with no edges has none. An edge with
-// no id or no type cannot be told from any other, so it fails the decode.
+// Edges decodes the bead's own edges, from either row shape: a show's
+// {id, dependency_type} with the far bead's fields, or a listing's
+// {depends_on_id, type}. A row with no edges has none. An edge with no id or no
+// type cannot be told from any other, so it fails the decode.
 func (b *Bead) Edges() ([]Edge, error) {
 	if b.Dependencies == nil {
 		return nil, nil
@@ -99,20 +109,23 @@ func (b *Bead) Edges() ([]Edge, error) {
 		return nil, err
 	}
 	var deps []struct {
-		ID       string `json:"id"`
-		Type     string `json:"dependency_type"`
-		Status   any    `json:"status"`
-		ClosedAt any    `json:"closed_at"`
+		ID          string `json:"id"`
+		Type        string `json:"dependency_type"`
+		DependsOnID string `json:"depends_on_id"`
+		ListType    string `json:"type"`
+		Status      any    `json:"status"`
+		ClosedAt    any    `json:"closed_at"`
 	}
 	if err := json.Unmarshal(raw, &deps); err != nil {
 		return nil, err
 	}
 	edges := make([]Edge, 0, len(deps))
 	for _, d := range deps {
-		if d.ID == "" || d.Type == "" {
+		id, typ := cmp.Or(d.ID, d.DependsOnID), cmp.Or(d.Type, d.ListType)
+		if id == "" || typ == "" {
 			return nil, fmt.Errorf("an edge of %s has no id or no type", b.ID)
 		}
-		edges = append(edges, Edge{Type: d.Type, ID: d.ID, Status: jqString(d.Status), ClosedAt: jqString(d.ClosedAt)})
+		edges = append(edges, Edge{Type: typ, ID: id, Status: jqString(d.Status), ClosedAt: jqString(d.ClosedAt)})
 	}
 	return edges, nil
 }
@@ -171,10 +184,16 @@ func (s *BlockedSet) Answer(b *Bead) (Blocking, error) {
 			parent = e.ID
 		}
 	}
-	if len(spawners) > 0 {
-		return Blocking{}, &WaitsForError{ID: b.ID, Spawners: spawners}
-	}
 	by, listed := s.listed[b.ID]
+	if len(spawners) > 0 {
+		var blocks []string
+		for _, id := range by {
+			if own[id] {
+				blocks = append(blocks, id)
+			}
+		}
+		return Blocking{}, &WaitsForError{ID: b.ID, Spawners: spawners, Blocks: blocks}
+	}
 	if !listed {
 		if s.marked[b.ID] {
 			return Blocking{}, &ReadError{ID: b.ID, Reason: "the store marks it blocked, and its blocked listing leaves it out"}

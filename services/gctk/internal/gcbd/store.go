@@ -12,6 +12,12 @@ type Store interface {
 	// Blocked reads the store's blocked set once, for Answer to judge beads
 	// against. A read that fails returns a *ReadError.
 	Blocked() (*BlockedSet, error)
+	// Find reads the beads q selects, in the listing's shape: each row's own
+	// edges name the far bead and the edge's type, whether or not the store
+	// holds the far bead, and carry none of its fields. A bead q names that the
+	// store does not hold is left out, since one list query answers for every
+	// bead it names. A read that fails returns a *ReadError.
+	Find(q Query) ([]Bead, error)
 	// Update makes one `gc bd update` of id with args, returning its output.
 	// An error is a write that did not land.
 	Update(id string, args ...string) (string, error)

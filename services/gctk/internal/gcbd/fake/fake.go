@@ -17,11 +17,13 @@ import (
 )
 
 // Bead is a row to put in the store: what a `gc bd show --json` row carries of
-// it, with its own edges.
+// it, with its own edges. An edge whose far bead the store does not hold is one
+// into another store: Rows leaves it out, as a show does, and Find keeps it, as
+// a listing does.
 type Bead struct {
-	ID, Title, Status string
-	Metadata          map[string]string
-	Edges             []gcbd.Edge
+	ID, Title, Status, IssueType string
+	Metadata                     map[string]string
+	Edges                        []gcbd.Edge
 }
 
 // Write is one update the store took: the bead and the update's arguments.
@@ -33,13 +35,16 @@ type Write struct {
 // Store is an in-memory gcbd.Store.
 type Store struct {
 	rows   map[string]Bead
+	lost   map[string]bool
 	listed map[string][]string
 	marked []string
 	writes []Write
 
-	// RowsErr and BlockedErr fail the matching read when set, and UpdateErr
-	// fails every write.
-	RowsErr, BlockedErr, UpdateErr error
+	// RowsErr, BlockedErr and FindErr fail the matching read when set, and
+	// UpdateErr fails every write.
+	RowsErr, BlockedErr, FindErr, UpdateErr error
+
+	finds []gcbd.Query
 }
 
 var _ gcbd.Store = (*Store)(nil)
@@ -72,8 +77,20 @@ func (s *Store) Row(id string) (Bead, bool) {
 	return b, ok
 }
 
-// Rows returns the row of each bead named. A bead the store does not hold fails
-// the read with a *gcbd.ReadError naming it, as gcbd.Client.Rows does.
+// Lose makes a read of each bead's own row fail, as a lookup that failed does,
+// while the store still holds it as the far bead of another row's edge.
+func (s *Store) Lose(ids ...string) {
+	if s.lost == nil {
+		s.lost = map[string]bool{}
+	}
+	for _, id := range ids {
+		s.lost[id] = true
+	}
+}
+
+// Rows returns the row of each bead named. A bead the store does not hold, or
+// one Lose names, fails the read with a *gcbd.ReadError naming it, as
+// gcbd.Client.Rows does.
 func (s *Store) Rows(ids []string) ([]gcbd.Bead, error) {
 	if s.RowsErr != nil {
 		return nil, s.RowsErr
@@ -81,13 +98,48 @@ func (s *Store) Rows(ids []string) ([]gcbd.Bead, error) {
 	var out []gcbd.Bead
 	for _, id := range ids {
 		b, ok := s.rows[id]
-		if !ok {
+		if !ok || s.lost[id] {
 			return nil, &gcbd.ReadError{ID: id, Reason: "the fake store holds no row for it"}
 		}
-		out = append(out, row(b))
+		out = append(out, s.row(b))
 	}
 	return out, nil
 }
+
+// Find returns, in id order, the row of each bead q selects, in a listing's
+// shape: every edge, with the far bead's id and the edge's type alone. A bead q
+// names that the store does not hold is left out, as a listing leaves it out.
+func (s *Store) Find(q gcbd.Query) ([]gcbd.Bead, error) {
+	s.finds = append(s.finds, q)
+	if s.FindErr != nil {
+		return nil, s.FindErr
+	}
+	if len(q.IDs) == 0 && q.HasKey == "" && q.Key == "" {
+		return nil, &gcbd.ReadError{Reason: "the fake store takes no find that selects no beads"}
+	}
+	ids := slices.Sorted(maps.Keys(s.rows))
+	var out []gcbd.Bead
+	for _, id := range ids {
+		b := s.rows[id]
+		if !q.Closed && strings.EqualFold(b.Status, "closed") {
+			continue
+		}
+		if len(q.IDs) > 0 && !slices.Contains(q.IDs, id) {
+			continue
+		}
+		if _, held := b.Metadata[q.HasKey]; q.HasKey != "" && !held {
+			continue
+		}
+		if v, held := b.Metadata[q.Key]; q.Key != "" && (!held || v != q.Value) {
+			continue
+		}
+		out = append(out, listed(b))
+	}
+	return out, nil
+}
+
+// Finds returns every query Find took, in order.
+func (s *Store) Finds() []gcbd.Query { return slices.Clone(s.finds) }
 
 // Blocked returns the listing and the marks the test set.
 func (s *Store) Blocked() (*gcbd.BlockedSet, error) {
@@ -140,20 +192,43 @@ func (s *Store) Update(id string, args ...string) (string, error) {
 	return "", nil
 }
 
-// row renders b as gcbd decodes a `gc bd show --json` row.
-func row(b Bead) gcbd.Bead {
-	status := b.Status
-	meta := make(map[string]any, len(b.Metadata))
-	for k, v := range b.Metadata {
-		meta[k] = v
-	}
+// row renders b as gcbd decodes a `gc bd show --json` row, whose edges carry
+// the far bead's fields and leave out an edge whose far bead the store does not
+// hold.
+func (s *Store) row(b Bead) gcbd.Bead {
 	deps := make([]any, 0, len(b.Edges))
 	for _, e := range b.Edges {
+		if _, held := s.rows[e.ID]; !held {
+			continue
+		}
 		d := map[string]any{"id": e.ID, "dependency_type": e.Type, "status": e.Status}
 		if e.ClosedAt != "" {
 			d["closed_at"] = e.ClosedAt
 		}
 		deps = append(deps, d)
 	}
-	return gcbd.Bead{ID: b.ID, Title: b.Title, Status: &status, Metadata: meta, Dependencies: deps}
+	return bead(b, deps)
+}
+
+// listed renders b as gcbd decodes a `gc bd list --json` row, whose edges name
+// the far bead and the edge's type alone, every edge included.
+func listed(b Bead) gcbd.Bead {
+	deps := make([]any, 0, len(b.Edges))
+	for _, e := range b.Edges {
+		deps = append(deps, map[string]any{"issue_id": b.ID, "depends_on_id": e.ID, "type": e.Type})
+	}
+	return bead(b, deps)
+}
+
+func bead(b Bead, deps []any) gcbd.Bead {
+	status := b.Status
+	meta := make(map[string]any, len(b.Metadata))
+	for k, v := range b.Metadata {
+		meta[k] = v
+	}
+	out := gcbd.Bead{ID: b.ID, Title: b.Title, Status: &status, Metadata: meta, Dependencies: deps}
+	if b.IssueType != "" {
+		out.IssueType = b.IssueType
+	}
+	return out
 }

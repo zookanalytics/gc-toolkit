@@ -190,6 +190,7 @@ func TestASnapshotReadsTheAncestryAndTheStoresAnswers(t *testing.T) {
 	s.Put(fake.Bead{ID: "story", Status: "open", Edges: []gcbd.Edge{{Type: gcbd.EdgeParentChild, ID: "epic", Status: "open"}}})
 	s.Put(fake.Bead{ID: "task", Status: "open", Edges: []gcbd.Edge{{Type: gcbd.EdgeParentChild, ID: "story", Status: "open"}}})
 	s.Put(fake.Bead{ID: "waiter", Status: "open", Edges: []gcbd.Edge{{Type: gcbd.EdgeWaitsFor, ID: "spawner", Status: "closed"}}})
+	s.Put(fake.Bead{ID: "spawner", Status: "closed"})
 	s.Put(fake.Bead{ID: "gate", Status: "open"})
 	s.List("epic", "gate")
 	s.List("story", "epic")
@@ -242,10 +243,13 @@ func TestASnapshotWhoseReadFailsIsAReadError(t *testing.T) {
 
 // A bead the store reads no row for, named or reached as an ancestor, fails the
 // snapshot, since without it the snapshot can answer neither for it nor for a
-// bead below it.
+// bead below it. An ancestor's row goes unread when its lookup fails after the
+// child's row named it.
 func TestASnapshotWithoutABeadItNeedsIsAReadError(t *testing.T) {
 	s := fake.New()
 	s.Put(fake.Bead{ID: "orphan", Status: "open", Edges: []gcbd.Edge{{Type: gcbd.EdgeParentChild, ID: "gone-parent", Status: "open"}}})
+	s.Put(fake.Bead{ID: "gone-parent", Status: "open"})
+	s.Lose("gone-parent")
 	for _, tc := range []struct{ name, id, missing string }{
 		{"a bead named", "gone", "gone"},
 		{"an ancestor", "orphan", "gone-parent"},

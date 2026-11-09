@@ -60,3 +60,59 @@ func TestFakeUpdateAppliesAndRecordsTheWrite(t *testing.T) {
 		t.Error("UpdateErr did not fail the write")
 	}
 }
+
+// A show row leaves out an edge whose far bead the store does not hold, and a
+// listing row keeps it, as bd's two reads do. Find selects by id, by a key's
+// presence or by its value, and reads closed beads only when asked.
+func TestFakeFindAnswersAsTheListingDoes(t *testing.T) {
+	s := New()
+	s.Put(Bead{ID: "b-1", Status: "open", IssueType: "task", Metadata: map[string]string{"k": "v"},
+		Edges: []gcbd.Edge{{Type: gcbd.EdgeBlocks, ID: "b-2", Status: "open"}, {Type: gcbd.EdgeBlocks, ID: "xx-1", Status: "open"}}})
+	s.Put(Bead{ID: "b-2", Status: "closed", Metadata: map[string]string{"k": "w"}})
+	shown, err := s.Rows([]string{"b-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e, _ := shown[0].Edges(); len(e) != 1 || e[0].ID != "b-2" || e[0].Status != "open" {
+		t.Errorf("the show row's edges = %+v; want b-2 alone, with its status", e)
+	}
+	found, err := s.Find(gcbd.Query{IDs: []string{"b-1", "gone"}})
+	if err != nil || len(found) != 1 {
+		t.Fatalf("Find by id = %v, %v; want b-1 alone", found, err)
+	}
+	if e, _ := found[0].Edges(); len(e) != 2 || e[1].ID != "xx-1" || e[0].Status != "" {
+		t.Errorf("the listing row's edges = %+v; want both, with no far status", e)
+	}
+	if found[0].IssueTypeString() != "task" {
+		t.Errorf("issue type = %q", found[0].IssueTypeString())
+	}
+	for _, tc := range []struct {
+		name string
+		q    gcbd.Query
+		want []string
+	}{
+		{"a key's presence, live beads alone", gcbd.Query{HasKey: "k"}, []string{"b-1"}},
+		{"a key's presence, closed beads too", gcbd.Query{HasKey: "k", Closed: true}, []string{"b-1", "b-2"}},
+		{"a key's value", gcbd.Query{Key: "k", Value: "w", Closed: true}, []string{"b-2"}},
+	} {
+		rows, err := s.Find(tc.q)
+		var got []string
+		for _, r := range rows {
+			got = append(got, r.ID)
+		}
+		if err != nil || !slices.Equal(got, tc.want) {
+			t.Errorf("%s = %v, %v; want %v", tc.name, got, err, tc.want)
+		}
+	}
+	if len(s.Finds()) != 4 {
+		t.Errorf("Finds = %+v; want the four queries", s.Finds())
+	}
+	s.Lose("b-2")
+	var re *gcbd.ReadError
+	if _, err := s.Rows([]string{"b-2"}); !errors.As(err, &re) || re.ID != "b-2" {
+		t.Errorf("Rows of a lost bead = %v; want a read error naming it", err)
+	}
+	if rows, err := s.Find(gcbd.Query{IDs: []string{"b-2"}, Closed: true}); err != nil || len(rows) != 1 {
+		t.Errorf("Find of a lost bead = %v, %v; want its row, since a list is one query", rows, err)
+	}
+}
