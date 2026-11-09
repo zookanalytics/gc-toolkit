@@ -91,9 +91,10 @@ path that matters has one writer. The refinery writes landings: it lands a
 updates the PR the bead owns, records the landing and closes the bead.
 `bead-rehome.sh` writes dispositions, the closes that name a successor.
 `signoff.sh` writes check verdicts. The city's status at a PR's head has one
-writer, the projection, which the refinery and the cadence both run. GitHub
-alone merges a PR, and Gas City's gate sweep resolves the gate a bead waits on
-for that merge. Everything else reads.
+writer, the projection, which the refinery and the cadence run, as does each
+push the pack makes onto a PR's branch. GitHub alone merges a PR, and Gas City's
+gate sweep resolves the gate a bead waits on for that merge. Everything else
+reads.
 
 **Beside the ledger.** The pack also keeps files of its own. Some hold a run's
 progress, such as a paced cadence arm's cursor or the job directory of the
@@ -413,10 +414,13 @@ first. Either way the change is a decision on the record, not a drift.
   require no approving review, such as a stage PR into an integration branch,
   waits for a person's Merge.
 - **The city's verdict at a PR's head is the commit status
-  `gc-toolkit/status`,** which a rig's branch rules require. It passes last,
-  once the city holds nothing on the PR and has routed its feedback, and
-  everything else those rules require is met there. Until then it reads
-  pending, never failure.
+  `gc-toolkit/status`,** which the rules of a rig's default branch and of its
+  integration branches require. It passes last, once the city holds nothing on
+  the PR and has routed its feedback, and everything else those rules require is
+  met there. Until then it reads pending, never failure.
+- **Each push the pack makes onto a PR's branch publishes the head behind a
+  pending status,** so a PR it moves onto a commit the city already passed
+  waits for a verdict that counts it.
 - **The city keeps GitHub's auto-merge on only while it reads the PR
   approved,** on a target whose rules require an approving review.
 - **An approval stands across a push** until the city's reading of the change
