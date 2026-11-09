@@ -1281,7 +1281,10 @@ func (m *Model) progressView() string {
 	}
 	if m.saveErr != "" && !m.saving {
 		b.WriteString(badStyle.Render("✗") + " the save did not complete, so no sitting was started: " + m.saveErr + "\n")
-		b.WriteString(hintStyle.Render("  r saves it again, which completes conversation "+m.saved.Conversation+" rather than file another.") + "\n")
+		// The save again can be refused for good, once the conversation is
+		// closed or holds another ask, so the hint promises only what r does
+		// either way.
+		b.WriteString(hintStyle.Render("  r saves it again onto conversation "+m.saved.Conversation+", which completes it or says why it cannot, and files no other.") + "\n")
 	}
 	switch {
 	case m.starting:

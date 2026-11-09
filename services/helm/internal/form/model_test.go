@@ -375,6 +375,16 @@ func TestAConversationFiledWhoseSaveFailedIsKeptAndSavedAgainNotFiledAgain(t *te
 		t.Fatalf("after a save again that did not answer: screen %d, saved %+v, saveErr %q", m.scr, m.saved, m.saveErr)
 	}
 
+	// A save again refused for good, as for a conversation closed since, says
+	// why, and the hint promises only what r does either way.
+	f.saveErr = &Refusal{Code: 4, Why: "gc-helm: open: conversation tk-c1 is not an open conversation about tk-held: it was closed since it was filed"}
+	_, cmd = m.Update(key('r'))
+	deliver(m, cmd)
+	v = m.progressView()
+	if !strings.Contains(v, "it was closed since it was filed") || !strings.Contains(v, "r saves it again onto conversation tk-c1, which completes it or says why it cannot, and files no other.") || len(f.starts) != 0 {
+		t.Fatalf("after a save again refused for good, starts %v:\n%s", f.starts, v)
+	}
+
 	// The next save again completes tk-c1 and starts it.
 	f.saveResp, f.saveErr = Saved{Subject: "tk-held", Conversation: "tk-c1", Filed: true}, nil
 	_, cmd = m.Update(key('r'))
@@ -384,7 +394,7 @@ func TestAConversationFiledWhoseSaveFailedIsKeptAndSavedAgainNotFiledAgain(t *te
 	}
 	again := f.saves[0]
 	again.Conversation = "tk-c1"
-	if len(f.saves) != 3 || f.saves[1] != again || f.saves[2] != again {
+	if len(f.saves) != 4 || f.saves[1] != again || f.saves[2] != again || f.saves[3] != again {
 		t.Fatalf("saves = %+v, want each save again to be the first naming tk-c1", f.saves)
 	}
 	if m.saveErr != "" || len(f.starts) != 1 || f.starts[0] != "tk-c1 opus" {
