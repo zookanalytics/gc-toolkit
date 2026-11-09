@@ -171,9 +171,9 @@ completes:
 
 - bd writes the missing piece by id already. `bd dep add <conversation> <gate>
   --type replies-to` (`depAddCmd`, `cmd/bd/dep.go` line 253 at beads v1.3.4) is
-  the reply's write. `conversation_reply` reads the edge first and adds it only
-  when it is missing. bd itself answers a second add of an edge of the same type
-  without an error and refreshes only the edge's metadata (`addDependencyInTx`,
+  the reply's write, and `conversation_reply` makes it and returns its exit. bd
+  answers a second add of an edge of the same type without an error and
+  refreshes only the edge's metadata (`addDependencyInTx`,
   `internal/storage/issueops/dependencies.go` lines 258–277 at beads v1.3.4), so
   running it again adds no second edge. The edge holds nothing, whatever state
   the conversation is in. bd gives the form no way
