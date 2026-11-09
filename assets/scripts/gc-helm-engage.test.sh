@@ -28,7 +28,8 @@
 #   (REUSE-*) a live sitting engage reuses is attached only once it reads
 #             active: one still start-pending or creating is waited on and left
 #             unattached at the bound, which exits 4, one that ends first is
-#             reported, and --no-attach does not wait
+#             reported with the engage of its conversation, and --no-attach
+#             does not wait
 #   (LEFT)    a conversation whose sitting's session closed is resumed under
 #             the same alias, with no bind needed
 #   (TWO-TRACKS, UNREAD) a task assigned to human that tracks the bead and
@@ -70,8 +71,10 @@
 #             long the start takes (START-LONG, minutes on a fake clock), and
 #             says so when the wait opens, when the state changes, and every
 #             30s (START-PROGRESS). One that ends first exits 4 at once, early
-#             or late; a sitting not yet listed, or a listing that fails, is
-#             waited through. A sitting still unstarted at
+#             or late, writes nothing to the conversation, and names the engage
+#             of the conversation, which starts a new sitting on it with no bind
+#             (START-RERUN); a sitting not yet listed, or a listing that fails,
+#             is waited through. A sitting still unstarted at
 #             GC_HELM_ENGAGE_WAIT_TIMEOUT, 15 minutes by default
 #             (START-BACKSTOP), is left unattached and exits 4, with the attach
 #             to run later. (START-INTERRUPT) Ctrl-C stops the wait, leaves the
@@ -791,7 +794,8 @@ GC_HELM_ENGAGE_WAIT_TIMEOUT=60 LIVE_STATES="start-pending start-pending start-pe
 eq "$RC" 4 "(REUSE-ENDED) a reused sitting that ends before it starts exits 4"
 hasnt "$CALLED" "session attach" "(REUSE-ENDED) …without attaching"
 has "$OUT" "ended before the reconciler started it" "(REUSE-ENDED) …saying it ended"
-has "$OUT" "gc-helm engage tk-subj" "(REUSE-ENDED) …and pointing at the engage that starts a sitting on it"
+has "$OUT" "Re-run to start a new sitting on conversation tk-conv: gc-helm engage tk-conv" "(REUSE-ENDED) …and naming the engage of its conversation, as a new sitting's failed start does"
+hasnt "$CALLED" "bd update" "(REUSE-ENDED) …writing nothing to the conversation"
 reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
 GC_HELM_ENGAGE_WAIT_TIMEOUT=60 LIVE_STATES="start-pending" run_engage tk-subj --no-attach
 eq "$RC" 0 "(REUSE-NOATTACH) --no-attach on a reused unstarted sitting exits 0"
@@ -1334,7 +1338,11 @@ eq "$RC" 4 "(START-CLOSED) a sitting listed and then gone from the list (closed,
 hasnt "$CALLED" "session attach" "(START-CLOSED) …without attaching"
 eq "$(cat "$POLLS")" 2 "(START-CLOSED) …at the first listing it is gone from, not at the bound"
 has "$OUT" "ended before the reconciler started it (its state in 'gc session list': gone)" "(START-CLOSED) …saying the sitting ended"
-has "$OUT" "gc bd update tk-conv --if-assignee" "(START-CLOSED) …and how to hand its still-bound conversation back to the queue"
+has "$OUT" "so there is nothing to attach. Re-run to start a new sitting on conversation tk-conv: gc-helm engage tk-conv" \
+    "(START-CLOSED) …and naming the engage of the conversation, which starts a new sitting on it"
+hasnt "$OUT" "gc bd update" "(START-CLOSED) …printing no store write to run by hand"
+eq "$(grep -c '^bd update' "$CALLS" || true)" "1" "(START-CLOSED) …writing nothing to the conversation after its bind"
+eq "$(asg tk-conv)" "gc-toolkit/gc-toolkit.tk-conv" "(START-CLOSED) …so it stays bound to the sitting's alias"
 
 GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="blank" run_fresh tk-conv
 eq "$RC" 4 "(START-BLANK) a sitting listed with an empty state (closed, read from the supervisor) exits 4"
@@ -1346,6 +1354,15 @@ GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="failed-create" run_fresh tk-conv
 eq "$RC" 4 "(START-FAILED) a sitting whose create failed exits 4"
 hasnt "$CALLED" "session attach" "(START-FAILED) …without attaching"
 has "$OUT" "state in 'gc session list': failed-create" "(START-FAILED) …naming the state"
+eq "$(asg tk-conv)" "gc-toolkit/gc-toolkit.tk-conv" "(START-FAILED) …and leaving the conversation bound to the sitting's alias"
+# The engage that message names starts a new sitting from what the failure
+# left, the conversation bound to an alias no live sitting holds: it spawns
+# under that alias and takes the conversation with no bind.
+: > "$CALLS"
+START_STATES="failed-create" run_engage tk-conv --no-attach
+eq "$RC" 0 "(START-RERUN) the engage a failed start names exits 0"
+has "$CALLED" "session new converse-opus --alias tk-conv --no-attach" "(START-RERUN) …spawning a new sitting under the conversation's alias"
+hasnt "$CALLED" "bd update" "(START-RERUN) …with no bind, since the conversation is still assigned to that alias"
 
 # A sitting not listed yet may only lag the supervisor's read cache, and a
 # listing that fails says nothing about the sitting, so neither ends the wait.
