@@ -260,10 +260,11 @@ shares only the word ([authority-map.md](authority-map.md)).
     `push-branch` and `create-pr` commands write as a GitHub App installation,
     so GitHub holds those writes to the installation's repositories. It scopes
     no agent's own `gh`.
-- **Verified.** 2026-11-06, at `gastownhall/gascity` main 005135c33 and
-  `gastownhall/gascity-packs` main 796d7ecd7. The config reference's new
-  `[github]` table declares pull-request monitors and scopes no agent's writes.
-  GitHub's *Managing your personal access tokens* page was read on 2026-11-05.
+- **Verified.** 2026-11-10, at `gastownhall/gascity` main f1f75f53c and
+  `gastownhall/gascity-packs` main c6f0a9aa6. The config reference's `[github]`
+  table declares pull-request monitors, whose `authors` allow-list scopes the
+  pull requests a monitor acts on, and scopes no agent's writes. GitHub's
+  *Managing your personal access tokens* page was read on 2026-11-05.
 - **Retires when.** Gas City ships per-agent write scoping. A GitHub
   fine-grained token covers only part of the origin rule. GitHub refuses it a
   write outside its one owner's selected repositories, so a stranger's

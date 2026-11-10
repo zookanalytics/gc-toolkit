@@ -30,7 +30,7 @@ All agents are native to this pack — no gastown import.
 | `witness` | patrol | rig recovery: orphaned beads, stalled workflows |
 | `deacon` | patrol | city infra health: dolt, doctor sweep |
 | `dog` | warrant executor | due-process recovery of wedged sessions ([authority-map.md](docs/authority-map.md)); demand-scaled 0→2 |
-| `converse-opus`, `converse-fable`, `converse-codex` | conversation sitting | one per engaged conversation: `gc-helm engage` starts it on a conversation about a board row's bead, and it holds that conversation |
+| `converse-claude-opus`, `converse-claude-fable`, `converse-codex-sol`, `converse-codex-astra` | conversation sitting | one per engaged conversation: `gc-helm engage` starts it on a conversation about a board row's bead, and it holds that conversation |
 | `mechanik` | named session | city-scoped structural engineer: formulas, prompts, conventions |
 | `proactive` | optional | always-on first-reaction pass (2-slot pool) |
 

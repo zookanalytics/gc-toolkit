@@ -114,18 +114,21 @@ PR's held: labels and the board's row read (gctk pr status): each open
 human gate reached through its open blocks edges, each bead a person owes the
 next move on that the same edges reach, such as another PR waiting on a review,
 and the PR's own review threads or blocked verdict, and how to engage each.
---model picks the converse variant (opus, the work tier, is the default),
---no-attach spawns without attaching. Starter seeds and the lens brief live in
+--model picks the converse variant by the name its template carries after
+converse- (claude-opus, the work tier, is the default), and refuses a name
+engage does not offer, listing the ones it does. --no-attach spawns without
+attaching. Starter seeds and the lens brief live in
 assets/scripts/gc-helm-engage-starters.sh.
 On a terminal, an engage that names no concern (--reason, --template or
 --skill) and not --no-input opens the conversation form, helm-svc's `form`
 command (helm_form). One screen holds the subject (a bead id, a PR number or
 URL, or empty for a new topic), a multiline question one Tab after it, a new
-topic's rig, which the operator chooses and is never inferred, the model, with
-opus shown as the default, and whether to attach, which is on unless
---no-attach is given. While the operator types, the form reads `conversations`
-for the subject: its rig, whether a sitting can start there, its open
-conversations and what holds it, and the city's rigs for a new topic. A gate
+topic's rig, which the operator chooses and is never inferred, the model,
+shown with each word of its name capitalized and Claude-Opus as the default,
+and whether to attach, which is on unless --no-attach is given. While the
+operator types, the form reads `conversations` for the subject: its rig,
+whether a sitting can start there, its open conversations and what holds it,
+and the city's rigs for a new topic. A gate
 chosen from what holds the subject becomes the subject, read and saved --from
 the subject it was chosen from, so a gate several beads wait on is about that
 one. A result
@@ -532,6 +535,11 @@ DEFERRED_DISPATCH_TOOL="${GC_DEFERRED_DISPATCH_TOOL:-$SCRIPT_DIR/deferred-dispat
 # a hermetic test can point them at a fixture.
 STARTERS_TOOL="${GC_HELM_STARTERS_TOOL:-$SCRIPT_DIR/gc-helm-engage-starters.sh}"
 ENGAGE_AGENTS_DIR="${GC_HELM_AGENTS_DIR:-$SCRIPT_DIR/../../agents}"
+# The converse templates engage withdraws from its menu and its --model: each
+# stays configured only for the sittings already open on it, because Gas City's
+# reconciler wakes no session whose template is gone, and goes once none is
+# open.
+ENGAGE_WITHDRAWN_MODELS="opus fable codex"
 # Draws the comment that shows a visit on its subject's PR again from the
 # conversation, after a dismiss closes it or a hand-back is recorded on a closed
 # one. Best-effort and self-silencing when the subject has no PR or the visit no
@@ -3839,24 +3847,28 @@ cmd_accept() {
 # on a terminal the conversation form gathers what the command line leaves open
 # (helm_form), and reads what these read through `conversations`.
 
-# engage_list_models — configured converse-<model> tokens, one per line, opus
-# (the work tier) first. Enumerated from the agent dirs the templates live in,
-# so the menu tracks what `gc session new converse-<model>` can resolve.
+# engage_list_models — the converse-<model> tokens engage offers, one per line,
+# claude-opus (the work tier) first. Enumerated from the agent dirs the
+# templates live in, so the menu tracks what `gc session new converse-<model>`
+# can resolve, less the templates kept only for the sittings already open on
+# them (ENGAGE_WITHDRAWN_MODELS).
 engage_list_models() {
     _elm_all=""
     for _elm_d in "$ENGAGE_AGENTS_DIR"/converse-*; do
         [ -d "$_elm_d" ] || continue
         _elm_m=$(basename "$_elm_d"); _elm_m=${_elm_m#converse-}
         [ -n "$_elm_m" ] || continue
+        case " $ENGAGE_WITHDRAWN_MODELS " in *" $_elm_m "*) continue ;; esac
         _elm_all="$_elm_all $_elm_m"
     done
-    # Two passes so opus leads; `if` (not `&&`) keeps a false test from making the
-    # final loop iteration — and so the function — return non-zero under set -e.
+    # Two passes so claude-opus leads; `if` (not `&&`) keeps a false test from
+    # making the final loop iteration — and so the function — return non-zero
+    # under set -e.
     for _elm_m in $_elm_all; do
-        if [ "$_elm_m" = opus ]; then printf '%s\n' "$_elm_m"; fi
+        if [ "$_elm_m" = claude-opus ]; then printf '%s\n' "$_elm_m"; fi
     done
     for _elm_m in $_elm_all; do
-        if [ "$_elm_m" != opus ]; then printf '%s\n' "$_elm_m"; fi
+        if [ "$_elm_m" != claude-opus ]; then printf '%s\n' "$_elm_m"; fi
     done
 }
 
@@ -4292,16 +4304,17 @@ engage_new_subject_cleanup() {
 # names that bead: a gate several open beads wait on is about it while it is
 # one of them, and one that no longer holds it starts nothing (take_bead).
 #
-# --model selects the tier (opus default, else fable or codex). --skill seeds
-# the sitting with a skill as its lens on the subject, any skill the sitting
-# carries. The lens brief is the new conversation's ask, which a sitting on any
-# model reads when it claims the conversation, so the skill rides it across a
-# restart with no per-skill template. --no-attach spawns and binds without
+# --model selects the tier, claude-opus by default, from the ones
+# engage_list_models lists. --skill seeds the sitting with a skill as its lens
+# on the subject, any skill the sitting carries. The lens brief is the new
+# conversation's ask, which a sitting on any model reads when it claims the
+# conversation, so the skill rides it across a restart with no per-skill
+# template. --no-attach spawns and binds without
 # attaching — the board's engage route uses it, then the operator attaches from
 # the session picker. Attached (the default), the operator lands in the sitting
 # directly.
 cmd_engage() {
-    bead=""; engage_model="opus"; engage_reason=""; engage_attach=1
+    bead=""; engage_model="claude-opus"; engage_reason=""; engage_attach=1
     engage_no_input=0; engage_model_set=0; engage_reason_set=0; engage_template=""
     engage_skill=""; engage_skill_set=0
     # What the concern files, carried into the conversation choice and output below.
@@ -4485,8 +4498,8 @@ cmd_engage() {
         engage_say_holds "$bead"
     fi
 
-    # The model is the opus default or the flag, validated against the
-    # configured variants before the template binds.
+    # The model is the claude-opus default or the flag, validated against the
+    # variants engage offers before the template binds.
     engage_check_model
     template="converse-$engage_model"
 

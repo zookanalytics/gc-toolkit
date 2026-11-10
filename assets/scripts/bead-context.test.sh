@@ -176,7 +176,7 @@ bead "$R_TK" tk-convheld <<'J'
 J
 bead "$R_TK" tk-cv <<'J'
 {"id":"tk-cv","title":"should this land as built?","status":"in_progress","issue_type":"task",
- "assignee":"gc-toolkit/converse-opus.c-tk-cv","metadata":{},
+ "assignee":"gc-toolkit/converse-claude-opus.c-tk-cv","metadata":{},
  "dependencies":[{"id":"tk-convheld","dependency_type":"tracks","status":"open","title":"held by a conversation"}]}
 J
 # tk-inreview: held by a review bead the review cadence dispatched. The review

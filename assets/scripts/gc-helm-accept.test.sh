@@ -468,7 +468,7 @@ eq "$(writes)" 0 "(OTHER-BEAD) …and nothing is written or slung"
 echo "# a live sitting whose conversation replies to the recommendation's gate is warned about"
 rec; bead tk-conv; edge tk-conv tracks tk-anc; edge tk-conv replies-to tk-rec
 jq '.assignee = "gc-toolkit/gc-toolkit.tk-conv" | .status = "in_progress"' "$STORE/b/tk-conv.json" > "$STORE/b/tk-conv.tmp" && mv "$STORE/b/tk-conv.tmp" "$STORE/b/tk-conv.json"
-jq -n '[{id:"gc-50", session_name:"s-gc-50", alias:"gc-toolkit/gc-toolkit.tk-conv", template:"gc-toolkit/gc-toolkit.converse-opus", state:"active", closed:false}]' > "$STORE/sessions.json"
+jq -n '[{id:"gc-50", session_name:"s-gc-50", alias:"gc-toolkit/gc-toolkit.tk-conv", template:"gc-toolkit/gc-toolkit.converse-claude-opus", state:"active", closed:false}]' > "$STORE/sessions.json"
 run_accept tk-anc
 eq "$RC" 0 "(LIVE-SITTING) Accept beside a live sitting replying to the gate exits 0"
 has "$OUT" "warning: a live sitting holds conversation tk-conv" "(LIVE-SITTING) …warning of the sitting"
@@ -759,7 +759,7 @@ SIGNOFF="$TMP/rig/assets/scripts/converse-signoff.sh"
 sitting() {
     bead tk-conv; edge tk-conv tracks tk-anc; edge tk-conv replies-to tk-rec
     jq '.assignee = "gc-toolkit/gc-toolkit.tk-conv" | .status = "in_progress"' "$STORE/b/tk-conv.json" > "$STORE/b/tk-conv.tmp" && mv "$STORE/b/tk-conv.tmp" "$STORE/b/tk-conv.json"
-    jq -n '[{id:"gc-50", session_name:"s-gc-50", alias:"gc-toolkit/gc-toolkit.tk-conv", template:"gc-toolkit/gc-toolkit.converse-opus", state:"active", closed:false}]' > "$STORE/sessions.json"
+    jq -n '[{id:"gc-50", session_name:"s-gc-50", alias:"gc-toolkit/gc-toolkit.tk-conv", template:"gc-toolkit/gc-toolkit.converse-claude-opus", state:"active", closed:false}]' > "$STORE/sessions.json"
 }
 # run_take [<arg>...] -> RC, OUT: the sitting's sign-off on the operator's
 # ruling to take the recommendation, with any further sign-off args, from a

@@ -291,9 +291,9 @@ Rules:
   open conversation and has no tab on it is stopped by its template's idle
   sleep.
   The per-model sittings run `wake_mode = "resume"`
-  (`agents/converse-opus/agent.toml`), so a restart replays the thread and
-  the sitting continues; step 1's restart rule covers the session that comes
-  up without it. The record never lives only in the thread, and the
+  (`agents/converse-claude-opus/agent.toml`), so a restart replays the thread
+  and the sitting continues; step 1's restart rule covers the session that
+  comes up without it. The record never lives only in the thread, and the
   discipline is unchanged: the sign-off has to land before you close, not
   after; record what is owed when the hold BEGINS (step 5); and append the
   outcome as soon as a sitting settles anything (step 6). That is what the

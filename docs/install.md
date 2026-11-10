@@ -5,8 +5,9 @@
 > `gc init`.
 
 gc-toolkit ships a **native agent roster** — polecat, refinery, witness,
-deacon, mechanik, polecat-codex, proactive, and the converse-opus,
-converse-fable and converse-codex sittings — declared in its own `pack.toml`.
+deacon, mechanik, polecat-codex, proactive, and the converse-claude-opus,
+converse-claude-fable, converse-codex-sol and converse-codex-astra sittings —
+declared in its own `pack.toml`.
 It imports nothing: there are no gastown prerequisites, no transitive imports,
 and no agent patches to wire.
 
@@ -107,8 +108,9 @@ that does not import the pack itself.
 
 - **The roster** — worker pools (`polecat`, and `polecat-codex` on the
   codex provider), patrols (`refinery`, `witness`, `deacon`), conversation
-  sittings (`converse-opus`, `converse-fable`, `converse-codex`, which
-  `gc-helm engage` opens per conversation), and `proactive` (always-on, 2-slot).
+  sittings (`converse-claude-opus`, `converse-claude-fable`,
+  `converse-codex-sol`, `converse-codex-astra`, which `gc-helm engage` opens
+  per conversation), and `proactive` (always-on, 2-slot).
 - **The lifecycle** — `lifecycle/lifecycle.toml` (states, transitions,
   metadata registry) and the single transition writer
   `assets/scripts/lifecycle.sh`. The script execs the `gctk` binary that the
@@ -267,8 +269,9 @@ gc config show | grep -E '^\[\[agent\]\]|^name ='
 ```
 
 Confirm the native roster is present — `polecat`, `polecat-codex`,
-`refinery`, `witness`, `deacon`, `dog`, `converse-opus`, `converse-fable`,
-`converse-codex`, `mechanik` — with no gastown entries.
+`refinery`, `witness`, `deacon`, `dog`, `converse-claude-opus`,
+`converse-claude-fable`, `converse-codex-sol`, `converse-codex-astra`,
+`mechanik` — with no gastown entries.
 
 ### The seed audit's upkeep
 

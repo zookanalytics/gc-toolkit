@@ -71,7 +71,7 @@ hasnt() { case "$1" in *"$2"*) bad "$3 (unexpected '$2' in: $1)" ;; *) ok "$3" ;
 # The session's own city must not reach a hermetic run.
 unset GC_CITY_PATH GC_CITY GC_CITY_ROOT GC_RIG BEADS_DIR GC_HELM_FIXTURE || true
 export STATE="$TMP/state" CALLS="$TMP/calls"
-mkdir -p "$TMP/bin" "$STATE" "$TMP/.beads" "$TMP/rig/.beads" "$TMP/rig2/.beads" "$TMP/rig3/.beads" "$TMP/agents/converse-opus" "$TMP/agents/converse-fable"
+mkdir -p "$TMP/bin" "$STATE" "$TMP/.beads" "$TMP/rig/.beads" "$TMP/rig2/.beads" "$TMP/rig3/.beads" "$TMP/agents/converse-claude-opus" "$TMP/agents/converse-claude-fable"
 export GC_HELM_AGENTS_DIR="$TMP/agents"
 
 cat > "$TMP/bin/gc" <<'STUB'
@@ -144,11 +144,11 @@ seed() {
     {name:"gascity", path:$r2, prefix:"gc", suspended:true},
     {name:"docs", path:$r3, prefix:"dx", suspended:false},
     {name:"hq", path:$h, prefix:"hq", hq:true, running:true}]}' > "$STATE/rigs.json"
-  jq -n '{agents:[{qualified_name:"gc-toolkit/gc-toolkit.converse-opus"},{qualified_name:"gascity/gc-toolkit.converse-opus"}]}' > "$STATE/agents.json"
+  jq -n '{agents:[{qualified_name:"gc-toolkit/gc-toolkit.converse-claude-opus"},{qualified_name:"gascity/gc-toolkit.converse-claude-opus"}]}' > "$STATE/agents.json"
   jq -n '{sessions:[
-    {id:"s1", alias:"gc-toolkit/gc-toolkit.tk-ready", session_name:"s-s1", state:"active", attached:false, created_at:"2026-11-08T10:00:00Z", template:"gc-toolkit/gc-toolkit.converse-opus"},
-    {id:"s2", alias:"gc-toolkit/gc-toolkit.tk-prep", session_name:"s-s2", state:"active", attached:true, created_at:"2026-11-08T11:00:00Z", template:"gc-toolkit/gc-toolkit.converse-opus"},
-    {id:"s3", alias:"gc-toolkit/gc-toolkit.tk-bound", session_name:"s-s3", state:"start-pending", attached:false, created_at:"2026-11-08T12:00:00Z", template:"gc-toolkit/gc-toolkit.converse-opus"},
+    {id:"s1", alias:"gc-toolkit/gc-toolkit.tk-ready", session_name:"s-s1", state:"active", attached:false, created_at:"2026-11-08T10:00:00Z", template:"gc-toolkit/gc-toolkit.converse-claude-opus"},
+    {id:"s2", alias:"gc-toolkit/gc-toolkit.tk-prep", session_name:"s-s2", state:"active", attached:true, created_at:"2026-11-08T11:00:00Z", template:"gc-toolkit/gc-toolkit.converse-claude-opus"},
+    {id:"s3", alias:"gc-toolkit/gc-toolkit.tk-bound", session_name:"s-s3", state:"start-pending", attached:false, created_at:"2026-11-08T12:00:00Z", template:"gc-toolkit/gc-toolkit.converse-claude-opus"},
     {id:"s4", alias:"gc-toolkit/gc-toolkit.polecat-1", session_name:"s-s4", state:"active", attached:false, created_at:"2026-11-08T09:00:00Z", template:"gc-toolkit/gc-toolkit.polecat"}]}' > "$STATE/sessions.json"
   jq -n '[
     {id:"tk-subj", issue_type:"task", status:"open", title:"the subject"},

@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -157,7 +159,7 @@ func New(ctx context.Context, helm Helm, opt Options) *Model {
 	if len(opt.Models) == 0 {
 		// No variant was named, as when engage could not list them: a model the
 		// command line named stands unconfirmed, as engage's own check lets it.
-		opt.Models = []string{"opus"}
+		opt.Models = []string{"claude-opus"}
 		if opt.Model != "" {
 			opt.Models = []string{opt.Model}
 		}
@@ -515,6 +517,28 @@ func (m *Model) modelName() string {
 	return m.opt.Models[m.model]
 }
 
+// modelLabel is a variant's name as the form shows it: each word between its
+// hyphens leads with a capital, so claude-opus reads Claude-Opus. The name
+// itself is what engage's --model takes and what the form passes on.
+func modelLabel(name string) string {
+	words := strings.Split(name, "-")
+	for i, w := range words {
+		if r, size := utf8.DecodeRuneInString(w); size > 0 {
+			words[i] = string(unicode.ToUpper(r)) + w[size:]
+		}
+	}
+	return strings.Join(words, "-")
+}
+
+// modelLabels is each variant's label, in order.
+func modelLabels(names []string) []string {
+	out := make([]string, len(names))
+	for i, n := range names {
+		out[i] = modelLabel(n)
+	}
+	return out
+}
+
 // cycleModel moves the model field to the next or previous variant. From a
 // model no variant carries, → takes the first variant and ← the last.
 func (m *Model) cycleModel(step int) {
@@ -746,7 +770,7 @@ func (m *Model) submit() tea.Cmd {
 		if m.choice != newChoice {
 			what = "Not started"
 		}
-		m.status = fmt.Sprintf("%s: %s is not a configured model (%s). Tab to Model and choose one with ←/→.", what, m.opt.Model, strings.Join(m.opt.Models, ", "))
+		m.status = fmt.Sprintf("%s: %s is not a configured model (%s). Tab to Model and choose one with ←/→.", what, m.opt.Model, strings.Join(modelLabels(m.opt.Models), ", "))
 		return nil
 	}
 	dest, ok := m.destination()
@@ -1374,12 +1398,15 @@ func (m *Model) composeView() string {
 	} else if l := m.current(); l != nil && l.err == nil && l.about.Subject.Rig != "" {
 		b.WriteString(labelStyle.Render("Rig     ") + "  " + l.about.Subject.Rig + hintStyle.Render("   the subject's own") + "\n")
 	}
+	// A model no variant carries is shown as the command line named it.
 	model := m.modelName()
 	switch {
 	case m.model < 0:
 		model = badStyle.Render(model) + hintStyle.Render(" (not a configured model: ←/→ chooses one)")
 	case m.model == 0:
-		model += hintStyle.Render(" (default)")
+		model = modelLabel(model) + hintStyle.Render(" (default)")
+	default:
+		model = modelLabel(model)
 	}
 	b.WriteString(m.label(modelField, "Model   ") + "  ‹ " + model + " ›\n")
 	attach := "yes, once its sitting starts" + hintStyle.Render(" (default)")
@@ -1496,7 +1523,7 @@ func (m *Model) progressView() string {
 	}
 	switch {
 	case m.starting:
-		b.WriteString(waitStyle.Render("…") + fmt.Sprintf(" starting its sitting on %s\n", m.modelName()))
+		b.WriteString(waitStyle.Render("…") + fmt.Sprintf(" starting its sitting on %s\n", modelLabel(m.modelName())))
 	case m.startErr != "":
 		b.WriteString(badStyle.Render("✗") + " no sitting started: " + m.startErr + "\n")
 		b.WriteString(hintStyle.Render("  The conversation waits in your queue. r retries the start.") + "\n")

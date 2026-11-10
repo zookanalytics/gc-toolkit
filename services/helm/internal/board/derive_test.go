@@ -3066,7 +3066,7 @@ func TestPRRowNamesAGateBehindItsRework(t *testing.T) {
 	})
 
 	t.Run("a conversation that holds the anchor's merge", func(t *testing.T) {
-		const alias = "gc-toolkit/converse-opus.c-tk-c"
+		const alias = "gc-toolkit/converse-claude-opus.c-tk-c"
 		hold := Blocker{ID: "tk-c", Title: "should this land as built?", Status: "in_progress", IssueType: "task",
 			Assignee: alias, CreatedAt: daysAgo(1), Wait: WaitPending}
 		anchors := withPRs([]Anchor{mergeAnchor("tk-a", md, hold), conversationAnchor("tk-c", "tk-a", hold.Title, alias)})

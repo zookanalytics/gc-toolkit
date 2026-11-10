@@ -36,7 +36,11 @@ when one is named, and are not committed:
 - [`claude`](agents/claude.md)
 - [`codex`](agents/codex.md)
 - [`control-dispatcher`](agents/control-dispatcher.md)
+- [`converse-claude-fable`](agents/converse-claude-fable.md)
+- [`converse-claude-opus`](agents/converse-claude-opus.md)
 - [`converse-codex`](agents/converse-codex.md)
+- [`converse-codex-astra`](agents/converse-codex-astra.md)
+- [`converse-codex-sol`](agents/converse-codex-sol.md)
 - [`converse-fable`](agents/converse-fable.md)
 - [`converse-opus`](agents/converse-opus.md)
 - [`deacon`](agents/deacon.md)
@@ -104,7 +108,11 @@ runs to re-prime after compaction.
 | claude | `city`, `gascity`, `gc-toolkit` | 1 | _none_ |
 | codex | `city`, `gascity`, `gc-toolkit` | 1 | _none_ |
 | control-dispatcher | `city`, `gascity`, `gc-toolkit` | 1 | _none_ |
+| converse-claude-fable | `gascity`, `gc-toolkit` | 1 | _none_ |
+| converse-claude-opus | `gascity`, `gc-toolkit` | 1 | _none_ |
 | converse-codex | `gascity`, `gc-toolkit` | 1 | _none_ |
+| converse-codex-astra | `gascity`, `gc-toolkit` | 1 | _none_ |
+| converse-codex-sol | `gascity`, `gc-toolkit` | 1 | _none_ |
 | converse-fable | `gascity`, `gc-toolkit` | 1 | _none_ |
 | converse-opus | `gascity`, `gc-toolkit` | 1 | _none_ |
 | deacon | `city` | 1 | _none_ |
