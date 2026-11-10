@@ -1112,8 +1112,10 @@ asks for the start, waits for the session to run and then attaches. The start
 gives the po its prompt as its first message, and because the po wakes fresh
 (`wake_mode = "fresh"`), it opens a new conversation, so a sitting that slept
 comes back as a new one. A po still ending its last sitting is attached as it
-ends, and the next `gc-helm po` opens a new one. The operator says what a
-sitting is for in the sitting. A sitting the attach starts itself, as it does
+ends until the controller begins to stop it. While that stop runs, the attach
+fails, saying the session is stopping, and `gc-helm po` names the re-run, which
+opens a new sitting once the stop is done. The operator says what a sitting is
+for in the sitting. A sitting the attach starts itself, as it does
 while the city's controller is down, or when the po's last sitting ends
 between the attach's check that it is running and the attach itself, can come
 up without the po's prompt, and it has the whole prompt once the operator tells
