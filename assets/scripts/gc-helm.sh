@@ -680,17 +680,19 @@ bead_conversations() {
 # live_sittings — the converse sessions `gc session list` holds that have not
 # ended, one {id, alias, session_name, created_at, attached, state} object each,
 # as a JSON array. A converse session is one whose template names converse. A
-# sleeping session is listed, because attaching wakes it; a closed one is left
-# out, and so is one listed with an empty state, which is how a closed session
-# reads when gc answers from the supervisor. Returns 1 when the list did not
-# answer, which proves no sitting live and none gone.
+# sleeping session is listed, because attaching wakes it, and so is an open
+# one listed with no state, which Gas City's own wait for a new session reads
+# as a create still under way, as a sitting just spawned can read while gc
+# answers from the supervisor's read cache. A closed session and one whose
+# create failed are left out. Returns 1 when the list did not answer, which
+# proves no sitting live and none gone.
 live_sittings() {
     _ls_raw=$(gc session list --json 2>/dev/null) || return 1
     printf '%s' "$_ls_raw" | scrub | jq -ce '
         if type == "object" and ((.sessions // null) | type) == "array"
         then [ .sessions[] | objects
                | select((.closed // false) != true)
-               | select(((.state // "") | tostring) as $st | $st != "" and $st != "closed" and $st != "failed-create")
+               | select(((.state // "") | tostring) as $st | $st != "closed" and $st != "failed-create")
                | select(((.template // "") | tostring) | test("converse"))
                | {id: ((.id // "") | tostring), alias: ((.alias // "") | tostring),
                   session_name: ((.session_name // "") | tostring),
@@ -739,7 +741,7 @@ READINESS_JQ='
                        created_at: $s.created_at} end),
        readiness: (if $state == "queue" then "queued"
                    elif $state == "left" then "ended"
-                   elif ($s.state == "start-pending" or $s.state == "creating") then "starting"
+                   elif ($s.state == "start-pending" or $s.state == "creating" or $s.state == "") then "starting"
                    elif $hb != "" and $hb >= $s.created_at then "ready"
                    else "preparing" end)};
 '
@@ -4521,6 +4523,7 @@ cmd_engage() {
     # one it could not see. The holder and the status engage reads here are what
     # its bind is guarded on below.
     CONV=""; conv_state=""; conv_holder=""; conv_status=""; conv_via_open=""
+    sid=""; sname=""; start_alias=""
     if [ -n "$named_conv" ]; then
         CONV="$named_conv"
     fi
@@ -4642,17 +4645,21 @@ cmd_engage() {
     # attach, and attaches only a started sitting. --no-attach attaches
     # nothing, so it does not wait.
     #
-    # engage_await_start returns 0 once the sitting $sid's `gc session list` row
+    # engage_await_start returns 0 once the sitting's `gc session list` row
     # reads `active`, which it does only once the runtime is running; before the
     # launch it reads start-pending or creating. It returns 2 when the sitting
-    # ended first, and 1 when ENGAGE_WAIT_TIMEOUT seconds pass first. A closed
-    # sitting drops out of the list when gc reads it from the store, and stays
-    # listed with an empty state when gc reads it from the supervisor, so both a
-    # row that leaves the list and an empty state mean it ended, as does
-    # failed-create. A sitting not listed yet may only lag the supervisor's read
-    # cache, so it is waited on, and so is a listing that did not read.
-    # start_state keeps the last state read, and start_waited the seconds waited
-    # as of that read, for the messages that follow.
+    # ended first, and 1 when ENGAGE_WAIT_TIMEOUT seconds pass first. The
+    # sitting is the row whose id is $sid. With $sid empty it is the open row
+    # under the alias $start_alias, bare or qualified, a sitting that holds the
+    # conversation by its alias before the list names it, and the first row that
+    # alias matches sets $sid and $sname. A row that reads closed or failed-create has ended, and so
+    # has one that leaves the list once listed, since a listing of open sessions
+    # leaves a closed one out. A sitting not listed yet may only lag the
+    # supervisor's read cache, so it is waited on. So is one listed with no
+    # state, which Gas City's own wait for a new session reads as a create still
+    # under way, and so is a listing that did not read. start_state keeps the
+    # last state read, and start_waited the seconds waited as of that read, for
+    # the messages that follow.
     #
     # The wait reports itself on stdout, so a slow start reads as progress and
     # not as a hang: a line when it begins, a line each time the sitting's state
@@ -4663,18 +4670,37 @@ cmd_engage() {
         _start_seen=0; _start_told=0; _start_shown=""; _start_tick=30
         start_state=""; start_waited=0
         while :; do
-            start_state=$(gc session list --json 2>/dev/null | scrub | jq -r --arg id "$sid" '
+            _start_row=$(gc session list --json 2>/dev/null | scrub | jq -r --arg id "$sid" --arg al "${start_alias:-}" '
                 if type == "object" and ((.sessions // null) | type) == "array"
-                then (first(.sessions[] | select((.id // "") == $id)
-                            | if (.state // "") == "" then "closed" else .state end)
+                then (first(.sessions[] | objects
+                            | ((.state // "") | tostring) as $st
+                            | ((.alias // "") | tostring) as $a
+                            | select(if $id != "" then ((.id // "") | tostring) == $id
+                                     else $al != "" and ($a == $al or ($a | endswith("/" + $al)) or ($a | endswith("." + $al)))
+                                          and (.closed // false) != true
+                                          and $st != "closed" and $st != "failed-create" end)
+                            | [ (if (.closed // false) == true then "closed" elif $st == "" then "none" else $st end),
+                                ((.id // "") | tostring), ((.session_name // "") | tostring) ] | @tsv)
                       // "unlisted")
                 else "unreadable" end' 2>/dev/null || true)
+            case "$_start_row" in
+                *"$TAB"*)
+                    start_state=${_start_row%%"$TAB"*}
+                    if [ -z "$sid" ]; then
+                        _start_rest=${_start_row#*"$TAB"}
+                        sid=${_start_rest%%"$TAB"*}
+                        _start_name=${_start_rest#*"$TAB"}
+                        [ -z "$_start_name" ] || sname="$_start_name"
+                    fi ;;
+                *) start_state="$_start_row" ;;
+            esac
             start_waited=$(( $(date +%s) - _start_t0 ))
             _start_now=""
             case "$start_state" in
                 active) return 0 ;;
                 closed|failed-create) return 2 ;;
                 unlisted) [ "$_start_seen" = 0 ] || { start_state=gone; return 2; } ;;
+                none) _start_seen=1 ;;
                 ''|unreadable) ;;
                 *) _start_seen=1; _start_now="$start_state" ;;
             esac
@@ -4707,9 +4733,20 @@ cmd_engage() {
     engage_state_text() {
         case "$1" in
             unlisted) printf 'is not listed yet' ;;
+            none) printf 'is listed with no state yet' ;;
             ''|unreadable) printf "could not be read from 'gc session list'" ;;
             *) printf 'is %s' "$1" ;;
         esac
+    }
+    # engage_attach_later — the attach the operator runs once the sitting has
+    # started: gc's own attach of the sitting, or with the sitting not named
+    # yet, an attach of the conversation, which engages it again.
+    engage_attach_later() {
+        if [ -n "$sid" ]; then
+            printf 'gc session attach %s' "$sid"
+        else
+            printf '%s attach %s' "$PROG" "$CONV"
+        fi
     }
     # engage_wait — the attach path's wait for the launch, under the INT, TERM
     # and HUP trap, HUP being the terminal going away under the wait. The
@@ -4727,7 +4764,7 @@ cmd_engage() {
     }
     engage_wait_interrupted() {
         trap - INT TERM HUP
-        echo "$PROG: engage: stopped waiting after $(engage_dur "$start_waited"). Conversation $CONV stays held by $sname, which the reconciler goes on starting; attach once it reads active in 'gc session list': gc session attach $sid" >&2
+        echo "$PROG: engage: stopped waiting after $(engage_dur "$start_waited"). Conversation $CONV stays held by $sname, which the reconciler goes on starting; attach once it reads active in 'gc session list': $(engage_attach_later)" >&2
         exit "$1"
     }
 
@@ -4778,10 +4815,37 @@ cmd_engage() {
         fi
     }
 
-    # A live sitting holds this conversation: attach the operator to it rather
-    # than start a second. A sitting is live from the spawn that created it, so
-    # one another engage spawned with --no-attach can still be waiting for the
-    # reconciler's launch, and the attach waits for it here as it does below.
+    # engage_attach_held — attach the operator to the sitting that holds the
+    # conversation, rather than start a second: $sid, or with $sid empty the
+    # sitting under the alias $start_alias, which the session list has not
+    # named yet and the start wait names once it does. A sitting is live from
+    # the spawn that created it, so one another engage spawned with --no-attach
+    # can still be waiting for the reconciler's launch, and the attach waits for
+    # it as the attach to a sitting engage spawns does. --no-attach names the
+    # sitting and attaches nothing. Exits 4 when the sitting ended, or had not
+    # started at the wait's bound.
+    engage_attach_held() {
+        if [ -n "$sid" ]; then
+            printf '✓ the live sitting %s holds conversation %s for %s — attaching to it rather than starting a second\n' "$sid" "$CONV" "$bead"
+        else
+            printf "✓ conversation %s for %s is held by its sitting %s, which 'gc session list' does not show yet — attaching to it rather than starting a second\n" "$CONV" "$bead" "$sname"
+        fi
+        printf '  attach: %s\n' "$(engage_attach_later)"
+        printf '[debug] conversation=%s sitting=%s holder=%s subject=%s\n' "$CONV" "${sid:-$sname}" "$conv_holder" "$bead" >&2
+        [ "$engage_attach" = "1" ] || return 0
+        engage_wait
+        case "$start_rc" in
+            0) attach_rc=0
+               gc session attach "$sid" || attach_rc=$?
+               engage_after_attach "$attach_rc" ;;
+            2) echo "$PROG: engage: the sitting $sname that holds conversation $CONV ended before the reconciler started it (its state in 'gc session list': $start_state), so there is nothing to attach. Re-run to start a new sitting on conversation $CONV: $PROG attach $CONV" >&2
+               exit 4 ;;
+            *) echo "$PROG: engage: the reconciler has not started $sname after $(engage_dur "$ENGAGE_WAIT_TIMEOUT") (its state in 'gc session list': ${start_state:-unreadable}), so it was not attached; an attach now would launch it without its prompt. Attach once it reads active there: $(engage_attach_later)" >&2
+               exit 4 ;;
+        esac
+    }
+
+    # A live sitting holds this conversation: attach the operator to it.
     if [ "$conv_state" = live ]; then
         live_now=$(live_sittings || printf '[]')
         sid=$(printf '%s' "$live_now" | jq -r --arg a "$conv_holder" --arg c "$CONV" "$CONVERSATION_JQ"'
@@ -4794,21 +4858,7 @@ cmd_engage() {
         fi
         sname=$(printf '%s' "$live_now" | jq -r --arg s "$sid" '[ .[] | select(.id == $s) | .session_name | select(. != "") ] | first // empty' 2>/dev/null || true)
         [ -n "$sname" ] || sname="$sid"
-        printf '✓ the live sitting %s holds conversation %s for %s — attaching to it rather than starting a second\n' "$sid" "$CONV" "$bead"
-        printf '  attach: gc session attach %s\n' "$sid"
-        printf '[debug] conversation=%s sitting=%s holder=%s subject=%s\n' "$CONV" "$sid" "$conv_holder" "$bead" >&2
-        if [ "$engage_attach" = "1" ]; then
-            engage_wait
-            case "$start_rc" in
-                0) attach_rc=0
-                   gc session attach "$sid" || attach_rc=$?
-                   engage_after_attach "$attach_rc" ;;
-                2) echo "$PROG: engage: the sitting $sname that holds conversation $CONV ended before the reconciler started it (its state in 'gc session list': $start_state), so there is nothing to attach. Re-run to start a new sitting on conversation $CONV: $PROG attach $CONV" >&2
-                   exit 4 ;;
-                *) echo "$PROG: engage: the reconciler has not started $sname after $(engage_dur "$ENGAGE_WAIT_TIMEOUT") (its state in 'gc session list': ${start_state:-unreadable}), so it was not attached; an attach now would launch it without its prompt. Attach once it reads active there: gc session attach $sid" >&2
-                   exit 4 ;;
-            esac
-        fi
+        engage_attach_held
         return 0
     fi
 
@@ -4821,15 +4871,18 @@ cmd_engage() {
     # sitting. A session spawned less than the bind wait ago may be a concurrent
     # engage about to bind the conversation, and one the operator is attached to
     # is a pane in use, so neither is closed here: the spawn below meets its
-    # alias, and engage_alias_held waits for its bind and names it.
+    # alias, and engage_alias_held waits for its bind and names it. Nor is the
+    # session whose alias the conversation is bound to, which holds it even when
+    # the listing engage chose by did not show it.
     if ! live_now=$(live_sittings); then
         echo "$PROG: engage: could not read 'gc session list' before starting a sitting on conversation $CONV. Nothing spawned; retry once it answers: $PROG engage $bead" >&2
         exit 4
     fi
     stale_after="${GC_HELM_ENGAGE_BIND_WAIT:-20}"
     case "$stale_after" in ''|*[!0-9]*) stale_after=20 ;; esac
-    for _st in $(printf '%s' "$live_now" | jq -r --arg c "$CONV" --argjson w "$stale_after" "$CONVERSATION_JQ"'
+    for _st in $(printf '%s' "$live_now" | jq -r --arg c "$CONV" --arg h "$conv_holder" --argjson w "$stale_after" "$CONVERSATION_JQ"'
             .[] | select({id: $c, assignee: .alias} | conversation_alias)
+                | select(.alias != $h)
                 | select(.attached != true)
                 | select((.created_at | fromdateiso8601? // null) as $t | $t != null and $t < (now - $w))
                 | .id' 2>/dev/null); do
@@ -4882,16 +4935,31 @@ cmd_engage() {
         swork_dir=$(printf '%s' "$spawn" | jq -r '.work_dir // ""' 2>/dev/null || true)
     }
 
+    # engage_own_alias <assignee> — 0 when <assignee> is the alias this engage
+    # asked its spawn for, $session_alias, bare or as gc stores it qualified
+    # (<rig>/<binding>.<alias>).
+    engage_own_alias() {
+        case "$1" in
+            "$session_alias"|*/"$session_alias"|*."$session_alias") return 0 ;;
+        esac
+        return 1
+    }
+
     # The spawn was refused because a session already holds the alias, so this
-    # engage spawned nothing and must point the operator at what holds the
-    # conversation, never at a sitting to close that may be the one that won.
-    # The holder is either a concurrent engage that spawned first and is about
-    # to bind the conversation, or a sitting left by an engage that stopped
-    # between its spawn and its bind. Only the conversation tells them apart: a
+    # engage spawned nothing. A session's claim runs as its alias, so while the
+    # conversation is bound to that alias, the session holding it holds the
+    # conversation: it is the conversation's own sitting, whichever engage
+    # spawned it, even when the listing engage chose by did not show it yet,
+    # and engage_alias_held returns for the caller to attach it. Otherwise the
+    # holder is either a concurrent engage that spawned first and is about to
+    # bind the conversation, or a sitting left by an engage that stopped between
+    # its spawn and its bind. Only the conversation tells them apart: a
     # concurrent engage binds it within one store write of its spawn returning.
     # So wait up to GC_HELM_ENGAGE_BIND_WAIT seconds for its holder to change
-    # from the one this engage read, and name the session as left over only
-    # when it stayed unchanged for the whole wait. Exits 4 on every path.
+    # from the one this engage read. A bind to the alias is the conversation's
+    # own sitting again, any other holder is named, and the session is named as
+    # left over only when the holder stayed unchanged for the whole wait. Exits
+    # 4 on every path but the conversation's own sitting.
     engage_alias_held() {
         _ah_wait="${GC_HELM_ENGAGE_BIND_WAIT:-20}"
         case "$_ah_wait" in ''|*[!0-9]*) _ah_wait=20 ;; esac
@@ -4902,7 +4970,7 @@ cmd_engage() {
             _ah_owner=$(printf '%s' "$_ah_row" | jq -r '.assignee // ""' 2>/dev/null || true)
             # An unread conversation proves nothing either way, so it keeps the
             # wait going.
-            if [ -n "$_ah_status" ] && { [ "$_ah_status" = "closed" ] || [ "$_ah_owner" != "$conv_holder" ]; }; then
+            if [ -n "$_ah_status" ] && { [ "$_ah_status" = "closed" ] || [ "$_ah_owner" != "$conv_holder" ] || engage_own_alias "$_ah_owner"; }; then
                 break
             fi
             [ "$_ah_waited" -lt "$_ah_wait" ] || break
@@ -4912,6 +4980,9 @@ cmd_engage() {
         if [ "$_ah_status" = "closed" ]; then
             echo "$PROG: engage: conversation $CONV closed while this engage was spawning, so nothing was spawned." >&2
             exit 4
+        fi
+        if [ -n "$_ah_status" ] && engage_own_alias "$_ah_owner"; then
+            return 0
         fi
         if [ -n "$_ah_status" ] && [ "$_ah_owner" != "$conv_holder" ]; then
             echo "$PROG: engage: conversation $CONV is held by '${_ah_owner:-nobody}', bound while this engage was spawning, so nothing was spawned here. Attach to its sitting instead: $PROG engage $CONV" >&2
@@ -4945,6 +5016,26 @@ cmd_engage() {
         exit 4
     }
 
+    # engage_attach_own <assignee> — attach the operator to the conversation's
+    # own sitting: the session holding $session_alias, which <assignee>, the
+    # conversation's holder, names. The session list names the session when it
+    # shows it, and until it does the start wait finds it by that alias.
+    engage_attach_own() {
+        conv_holder="$1"; sname="$1"; sid=""; start_alias="$session_alias"
+        if _ao_live=$(live_sittings); then
+            _ao_row=$(printf '%s' "$_ao_live" | jq -r --arg n "$session_alias" '
+                [ .[] | ((.alias // "") | tostring) as $a
+                      | select($a == $n or ($a | endswith("/" + $n)) or ($a | endswith("." + $n)))
+                      | [(.id // "" | tostring), (.session_name // "" | tostring)] | @tsv ] | first // empty' 2>/dev/null || true)
+            if [ -n "$_ao_row" ]; then
+                sid=${_ao_row%%"$TAB"*}
+                _ao_name=${_ao_row#*"$TAB"}
+                [ -z "$_ao_name" ] || sname="$_ao_name"
+            fi
+        fi
+        engage_attach_held
+    }
+
     # Spawn under the bare conversation id first. gascity's ValidateAlias runs
     # before any session is created and refuses an alias matching the session-id
     # syntax `^gc-[0-9]+$`, the reserved `human`, an `s-` prefix, or the 64-char
@@ -4965,7 +5056,10 @@ cmd_engage() {
     fi
     if [ -z "$sname" ] || [ -z "$sid" ]; then
         case "$spawn_why" in
-            *"session alias already exists"*) engage_alias_held ;;
+            *"session alias already exists"*)
+                engage_alias_held
+                engage_attach_own "$_ah_owner"
+                return 0 ;;
         esac
         spawn_hint=""
         case "$spawn_why" in
