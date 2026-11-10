@@ -13,9 +13,8 @@ bold lead of a rule.
 
 The sections are borrowed rather than invented: the
 [arc42](https://arc42.org/overview) template, the first two levels of the
-[C4 model](https://c4model.com/), domain-driven design's
-[bounded contexts](https://martinfowler.com/bliki/BoundedContext.html), and
-[architecture decision records](https://adr.github.io/).
+[C4 model](https://c4model.com/), and domain-driven design's
+[bounded contexts](https://martinfowler.com/bliki/BoundedContext.html).
 
 ## What the document is
 
@@ -52,8 +51,8 @@ The sections are borrowed rather than invented: the
 
 The document's `## Scope` is its charter. The mandate is the architecture of
 the whole repository. Each boundary names a topic the document leaves out and
-the living doc that holds it, such as the reasoning behind each decision, held
-in its decision record. No boundary names a spec.
+the living doc that holds it, such as how a part carries out its
+responsibility, held in that part's own doc. No boundary names a spec.
 
 ## The skeleton
 
@@ -76,9 +75,10 @@ the document sits in one of them.
 4. **Cross-cutting rules.** Rules every part follows, such as how the parts
    talk to each other. (arc42 section 8)
 5. **Decisions.** Each architecture decision as a one-line fact, with a
-   one-line reason only where a reader would otherwise get it wrong, and a
-   link to its decision record when it has one, never to a spec. A part's own
-   choice is not one (The admission test). (arc42 section 9, decision records)
+   one-line reason only where a reader would otherwise get it wrong. A part's
+   own choice is not one (The admission test). A decision's reasoning stays
+   with the bead and commit that made it, so the document links nothing for
+   it. (arc42 section 9)
 6. **Debt.** Each place where what is built falls short of the architecture
    the sections above describe. An entry names the gap, why a reader must know
    it, and the work that retires it, such as the epic or bead that carries that
