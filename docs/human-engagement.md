@@ -257,7 +257,9 @@ these steps:
    a conversation already, because a distinct concern is a distinct dialogue.
 4. **Without one, it attaches first.** A conversation a live session holds is
    a live sitting, and engage attaches the operator to it rather than starting
-   a second. Otherwise it takes the bead's conversation from the queue, or one
+   a second. A session the list shows with no state is live, since Gas City's
+   own wait for a new session reads it as a create still under way. Otherwise
+   it takes the bead's conversation from the queue, or one
    whose sitting's session has closed, or files a new one. Pointed at a gate,
    engage makes the conversation it landed on reply to the gate before it
    starts or attaches anything, and a reply the store refuses starts nothing.
@@ -266,7 +268,16 @@ these steps:
    prefix `c-` when the runtime refuses the bare id as an alias. A session
    still holding that alias that no longer holds the task, as a sitting cut
    short leaves it, is closed first once it is older than the bind wait and
-   unattached.
+   unattached, and the session whose alias the task is bound to is never
+   closed. A spawn the runtime refuses because a session holds the alias spawns
+   nothing. A task bound to that alias is that session's, since the session's
+   claim runs as its alias, even while the session list does not show the
+   session: a sitting another engage started seconds before can be missing
+   from a list the supervisor answers from its read cache. Engage attaches the
+   operator to that session as to a live sitting, and finds it by its alias
+   until the list names it. A task bound to no such alias is waited on for the
+   bind of the engage that holds the alias, and the session is named as left
+   over only when no bind comes within the bind wait.
 6. **It binds the task to the session's alias** with
    `gc bd update <task> --if-assignee <holder> --if-status <status> --assignee
    <alias>`, where the holder and the status are the ones engage read, or the
@@ -352,9 +363,12 @@ with `--from` naming the bead it was listed under, so `open` takes that bead
 among several waiting and files nothing once it has stopped waiting on the
 gate. Then `engage
 <conversation> --no-input --no-attach` starts the sitting. Once it has started,
-the form attaches the terminal to it through `engage <conversation>
---no-input`, which waits for the session to start, as engage does on the command
-line. With attaching off, the form leaves the sitting to prepare, and says that
+the form leaves the terminal, and then attaches it to the sitting through
+`engage <conversation> --no-input`, which waits for the session to start, as
+engage does on the command line. The attach runs after the form's last screen,
+so all that engage prints stays on the terminal, its reason when it attaches
+nothing included, and the form exits with engage's status. With attaching off,
+the form leaves the sitting to prepare, and says that
 the conversation is saved and how to return to it. An attach holds a
 conversation no live sitting holds, as after a start that failed or a sitting
 that ended before the attach reached it, in a new sitting on the model the
