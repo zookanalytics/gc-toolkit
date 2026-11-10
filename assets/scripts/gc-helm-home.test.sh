@@ -123,15 +123,17 @@ echo "# a seat's verb takes no argument"
 reset; run po now
 eq "$RC" 2 "(PO-ARGS) an argument exits 2"
 has "$OUT" "po takes no argument" "(PO-ARGS) …saying so"
+eq "$CALLED" "" "(PO-ARGS) …and calling nothing"
 reset; run po --bogus
 eq "$RC" 2 "(PO-ARGS) an unknown flag exits 2"
 has "$OUT" "po: unknown flag '--bogus'" "(PO-ARGS) …naming the flag"
-eq "$(cat "$CALLS")" "" "(PO-ARGS) …each calling nothing"
+eq "$CALLED" "" "(PO-ARGS) …and calling nothing"
 reset; run mechanik now
 eq "$RC" 2 "(MK-ARGS) an argument exits 2"
+eq "$CALLED" "" "(MK-ARGS) …and calling nothing"
 reset; run mechanik --bogus
 eq "$RC" 2 "(MK-ARGS) an unknown flag exits 2"
-eq "$(cat "$CALLS")" "" "(MK-ARGS) …each calling nothing"
+eq "$CALLED" "" "(MK-ARGS) …and calling nothing"
 
 echo
 echo "gc-helm-home: $PASS passed, $FAIL failed"
