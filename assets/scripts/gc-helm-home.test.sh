@@ -61,7 +61,7 @@ export GC_HELM_AGENTS_DIR="$TMP/agents" TMPDIR="$TMP"
 # $SEAT_ROWS, one token per listing, the last repeating. A token is a state,
 # with :<reason> when the row carries one; "none" lists no row for the seat,
 # "broken" fails the listing, and "dup:<old>,<new>" lists two rows for the
-# seat, an older lx-old and a newer lx-new. Every listing also carries a
+# seat, an older tk-old and a newer tk-new. Every listing also carries a
 # polecat and a converse sitting, neither of them the seat.
 cat > "$TMP/bin/gc" <<'STUB'
 #!/usr/bin/env bash
@@ -85,12 +85,12 @@ case "$1 ${2:-}" in
       broken) echo "session list: data plane down" >&2; exit 1 ;;
       none) _rows='[]' ;;
       dup:*) _pair=${_tok#dup:}
-             _rows="[$(row lx-old "${_pair%%,*}" 2026-11-01T00:00:00Z),$(row lx-new "${_pair#*,}" 2026-11-09T00:00:00Z)]" ;;
-      *) _rows="[$(row lx-seat "$_tok" 2026-11-09T00:00:00Z)]" ;;
+             _rows="[$(row tk-old "${_pair%%,*}" 2026-11-01T00:00:00Z),$(row tk-new "${_pair#*,}" 2026-11-09T00:00:00Z)]" ;;
+      *) _rows="[$(row tk-seat "$_tok" 2026-11-09T00:00:00Z)]" ;;
     esac
     jq -nc --argjson seat "$_rows" '{schema_version: "1", ok: true, sessions: ($seat + [
-      {id: "lx-pc", alias: null, template: "gc-toolkit/gc-toolkit.polecat", state: "active", attached: false, created_at: "2026-11-09T01:00:00Z"},
-      {id: "lx-cv", alias: "gc-toolkit/gc-toolkit.tk-po1", template: "gc-toolkit/gc-toolkit.converse-opus", state: "asleep", reason: "idle", attached: false, created_at: "2026-11-09T02:00:00Z"}])}' ;;
+      {id: "tk-pc", alias: null, template: "gc-toolkit/gc-toolkit.polecat", state: "active", attached: false, created_at: "2026-11-09T01:00:00Z"},
+      {id: "tk-cv", alias: "gc-toolkit/gc-toolkit.tk-po1", template: "gc-toolkit/gc-toolkit.converse-opus", state: "asleep", reason: "idle", attached: false, created_at: "2026-11-09T02:00:00Z"}])}' ;;
   "session nudge") exit "${NUDGE_RC:-0}" ;;
   "session attach") exit "${ATTACH_RC:-0}" ;;
   *) echo "stub gc: unhandled: $*" >&2; exit 1 ;;
@@ -185,15 +185,15 @@ export SEAT="gc-toolkit.po"
 echo "# a live po sitting, and one its idle limit put to sleep, are attached to as they stand"
 reset; SEAT_ROWS="active" run po
 eq "$RC" 0 "(PO-LIVE) po on a live sitting exits 0"
-has "$OUT" "the po's sitting is live (session lx-seat)" "(PO-LIVE) …saying the sitting is live"
-has "$CALLED" "session attach lx-seat" "(PO-LIVE) …attaching to its session"
+has "$OUT" "the po's sitting is live (session tk-seat)" "(PO-LIVE) …saying the sitting is live"
+has "$CALLED" "session attach tk-seat" "(PO-LIVE) …attaching to its session"
 hasnt "$CALLED" "session nudge" "(PO-LIVE) …sending no nudge"
 hasnt "$CALLED" "rig list" "(PO-LIVE) …and reading no controller"
 has "$OUT" "Return to the po with: gc-helm po" "(PO-LIVE) …and naming how to return once the attach comes back"
 reset; SEAT_ROWS="asleep:idle" run po
 eq "$RC" 0 "(PO-SLEPT) po on a slept sitting exits 0"
 has "$OUT" "attaching wakes it into its conversation" "(PO-SLEPT) …saying the attach wakes it"
-has "$CALLED" "session attach lx-seat" "(PO-SLEPT) …attaching to its session"
+has "$CALLED" "session attach tk-seat" "(PO-SLEPT) …attaching to its session"
 hasnt "$CALLED" "session nudge" "(PO-SLEPT) …sending no nudge, which would start a new conversation"
 reset; SEAT_ROWS="active" run po --reason "backlog refinement"
 has "$OUT" "what it is for was not sent: say it there" "(PO-LIVE-REASON) a reason for a sitting already open is said not to be sent"
@@ -204,7 +204,7 @@ reset; SEAT_ROWS="asleep asleep creating active" run po
 eq "$RC" 0 "(PO-ENDED) po on a seat whose last sitting ended exits 0"
 has "$CALLED" "session nudge gc-toolkit.po The operator is opening a sitting with gc-helm po and attaches once you start." "(PO-ENDED) …nudging the seat, which asks the controller to start it"
 eq "$(lists_before 'session nudge')" 1 "(PO-ENDED) …once the seat has read ended"
-eq "$(lists_before 'session attach lx-seat')" 4 "(PO-ENDED) …and attaching on the listing that reads it active, never before"
+eq "$(lists_before 'session attach tk-seat')" 4 "(PO-ENDED) …and attaching on the listing that reads it active, never before"
 has "$OUT" "asked the controller to start the po" "(PO-ENDED) …saying so"
 reset; SEAT_ROWS="asleep active" run po --reason "backlog refinement"
 has "$CALLED" "and attaches once you start. It is for: backlog refinement" "(PO-REASON) the nudge says what the sitting is for"
@@ -212,12 +212,12 @@ has "$OUT" "start the po for: backlog refinement" "(PO-REASON) …and so does th
 reset; SEAT_ROWS="none none creating active" run po
 eq "$RC" 0 "(PO-NONE) po on a seat with no session exits 0"
 has "$CALLED" "session nudge gc-toolkit.po" "(PO-NONE) …nudging the seat, which makes its session"
-eq "$(lists_before 'session attach lx-seat')" 4 "(PO-NONE) …and attaching only once it runs"
+eq "$(lists_before 'session attach tk-seat')" 4 "(PO-NONE) …and attaching only once it runs"
 reset; SEAT_ROWS="creating active" run po
 has "$CALLED" "session nudge gc-toolkit.po" "(PO-STARTING) a seat the controller is starting is nudged too, its message queued for the start"
-eq "$(lists_before 'session attach lx-seat')" 2 "(PO-STARTING) …and attached once it runs"
+eq "$(lists_before 'session attach tk-seat')" 2 "(PO-STARTING) …and attached once it runs"
 reset; SEAT_ROWS="dup:active,asleep" run po
-has "$CALLED" "session attach lx-old" "(PO-PICK) the seat's active session is attached to, though a newer one is listed"
+has "$CALLED" "session attach tk-old" "(PO-PICK) the seat's active session is attached to, though a newer one is listed"
 hasnt "$CALLED" "session nudge" "(PO-PICK) …with no nudge"
 # The listings carry only sessions that are not the seat, so the start never
 # reads active, and the fake clock reaches the bound in a few listings.
@@ -230,9 +230,9 @@ reset; SEAT_ROWS="draining draining asleep creating active" run po
 eq "$RC" 0 "(PO-DRAINING) po on a draining seat exits 0"
 has "$OUT" "The po is ending its last sitting" "(PO-DRAINING) …saying it waits for the sitting to end"
 eq "$(lists_before 'session nudge')" 3 "(PO-DRAINING) …nudging only once the drain has finished"
-eq "$(lists_before 'session attach lx-seat')" 5 "(PO-DRAINING) …and attaching once the new start runs"
+eq "$(lists_before 'session attach tk-seat')" 5 "(PO-DRAINING) …and attaching once the new start runs"
 reset; SEAT_ROWS="draining asleep:idle" run po
-has "$CALLED" "session attach lx-seat" "(PO-DRAINING-SLEPT) a drain that ends in a slept sitting is attached to"
+has "$CALLED" "session attach tk-seat" "(PO-DRAINING-SLEPT) a drain that ends in a slept sitting is attached to"
 hasnt "$CALLED" "session nudge" "(PO-DRAINING-SLEPT) …with no nudge"
 
 echo "# the wait reports itself"
@@ -270,7 +270,7 @@ has "$OUT" "could not read 'gc session list'" "(PO-LIST-FAIL) …saying so"
 hasnt "$CALLED" "session nudge" "(PO-LIST-FAIL) …nudging nothing"
 reset; ATTACH_RC=1 SEAT_ROWS="active" run po
 eq "$RC" 4 "(PO-ATTACH-FAIL) an attach that fails exits 4"
-has "$OUT" "could not attach to the po's session lx-seat" "(PO-ATTACH-FAIL) …naming the session"
+has "$OUT" "could not attach to the po's session tk-seat" "(PO-ATTACH-FAIL) …naming the session"
 
 echo "# Ctrl-C stops the wait"
 # Job control puts the verb in a process group of its own, as a terminal puts
@@ -312,16 +312,16 @@ export SEAT="gc-toolkit.mechanik"
 echo "# mechanik is attached to once it runs, and never nudged"
 reset; SEAT_ROWS="active" run mechanik
 eq "$RC" 0 "(MK-LIVE) mechanik on a running session exits 0"
-has "$CALLED" "session attach lx-seat" "(MK-LIVE) …attaching to it"
+has "$CALLED" "session attach tk-seat" "(MK-LIVE) …attaching to it"
 hasnt "$CALLED" "rig list" "(MK-LIVE) …reading no controller"
 has "$OUT" "Return to mechanik with: gc-helm mechanik" "(MK-LIVE) …and naming how to return"
 reset; SEAT_ROWS="creating creating active" run mechanik
 eq "$RC" 0 "(MK-START) mechanik the controller is starting exits 0"
 has "$OUT" "the controller keeps it running, so the attach waits for it to start" "(MK-START) …saying it waits"
-eq "$(lists_before 'session attach lx-seat')" 3 "(MK-START) …attaching only once it runs"
+eq "$(lists_before 'session attach tk-seat')" 3 "(MK-START) …attaching only once it runs"
 hasnt "$CALLED" "session nudge" "(MK-START) …and nudging nothing"
 reset; SEAT_ROWS="none active" run mechanik
-eq "$(lists_before 'session attach lx-seat')" 2 "(MK-NONE) mechanik with no session listed yet is waited on, then attached"
+eq "$(lists_before 'session attach tk-seat')" 2 "(MK-NONE) mechanik with no session listed yet is waited on, then attached"
 reset; run mechanik now
 eq "$RC" 2 "(MK-ARGS) an argument exits 2"
 
