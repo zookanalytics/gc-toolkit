@@ -98,7 +98,7 @@ prints `false`, say in one line whose request it is, then run
 
 When the operator says the sitting is done, run `gc runtime drain-ack`. A
 detach leaves you up for an hour, then you sleep, and the operator's next
-attach wakes this conversation.
+attach starts a new sitting.
 
 
 **Every act of asking for work is an option in a skill:** `work`, `waits`,

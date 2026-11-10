@@ -1,4 +1,5 @@
-{{/* A po session an attach starts takes this prime as session-start hook
+{{/* A po session an attach starts in its own process, as it does while the
+     city's controller is down, takes this prime as session-start hook
      context, which Claude Code saves to a file past 10,000 characters, leaving
      the session a 2 KB preview. Keep the render under that
      cap: generated/seed-audit/agents/po.md shows its size. */ -}}
@@ -102,7 +103,7 @@ prints `false`, say in one line whose request it is, then run
 
 When the operator says the sitting is done, run `gc runtime drain-ack`. A
 detach leaves you up for an hour, then you sleep, and the operator's next
-attach wakes this conversation.
+attach starts a new sitting.
 
 {{ template "ask-for-work" . }}
 

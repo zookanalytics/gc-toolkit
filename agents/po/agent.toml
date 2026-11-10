@@ -9,11 +9,10 @@ wake_mode = "fresh"
 work_dir = ".gc/agents/po"
 max_active_sessions = 1
 # Gas Town's mayor takes idle_timeout, and the po takes the sleep instead. A
-# sitting no client is attached to sleeps once an hour has passed, keeps its
-# conversation key, and an attach wakes it into the same conversation with its
-# prompt delivered again. A sitting ends at gc runtime drain-ack, whose stop
-# replaces the key, so the next sitting, which `gc-helm po` opens through the
-# controller, starts a new conversation.
+# sitting no client is attached to sleeps once an hour has passed, and one ends
+# at gc runtime drain-ack. Either way the next sitting, which `gc-helm po` asks
+# the controller to start, starts a new conversation, because the start is
+# fresh.
 sleep_after_idle = "1h"
 # The po takes no slung work. The city's [agent_defaults] gives every agent a
 # default formula, so this explicit empty one sends a plain gc sling to
