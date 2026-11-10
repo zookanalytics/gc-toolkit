@@ -717,15 +717,17 @@ subject checked once that work lands. Right after the headline, whose
 appends the sitting's `--close-brief` to the subject's notes and arms the
 subject's validating closer (`mol-validate-close`) in the subject's own rig,
 the waits skill's way of having a bead checked and closed once other work
-lands. Both land before any gate is answered, and either one that does not
-land stops the sign-off. Once the work closes, the deferred-dispatch pass slings
-the closer, which checks the brief against what landed and closes the subject
-or puts it to the operator. No closer is armed for a subject that something
-else sends on once its wait clears: its own arm, a route or an assignee, the
-recommendation the ruling takes, or the refinery's merge or its members, for an
-anchor or an epic. A subject in the city's own store is refused, because no
-pool runs a closer there, so a person closes it on a human gate that names the
-work.
+lands. A subject held for placement then has its `hold:mayor` lifted, every
+spelling of it, because the deferred-dispatch pass sends no arm while that
+label holds the subject. Each of these writes lands before any gate is
+answered, and one that does not land stops the sign-off. Once the work closes,
+the deferred-dispatch pass slings the closer, which checks the brief against
+what landed and closes the subject or puts it to the operator. No closer is
+armed for a subject that something else sends on once its wait clears: its own
+arm, a route or an assignee, the recommendation the ruling takes, or the
+refinery's merge or its members, for an anchor or an epic. A subject in the
+city's own store is refused, because no pool runs a closer there, so a person
+closes it on a human gate that names the work.
 
 It resolves no gate its conversation does not reply to: a gate the sitting
 never took up stays for whoever owes it, and a gate it replies to that the

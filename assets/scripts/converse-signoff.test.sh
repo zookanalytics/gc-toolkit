@@ -43,10 +43,15 @@
 #   (CLOSER*) a ruling that leaves the subject waiting on work the sitting sent
 #             writes the subject's close brief and arms its validating closer
 #             in the subject's own rig, after the headline and before any gate
-#             is answered, on a turn that does not sign off as well; it asks
+#             is answered, on a turn that does not sign off as well; a subject
+#             held for placement has each spelling of hold:mayor lifted in one
+#             write there once the arm stands, still before any gate is
+#             answered, and one that carries none has no label removed; it asks
 #             for the brief before any write, a re-run writes neither again, a
-#             brief or an arm that does not land stops the sign-off with every
-#             gate open, and a wait that does not read stops it before any
+#             brief, an arm or a lift that does not land, or labels that do not
+#             read once the arm stands, stop the sign-off with every gate open,
+#             a refused lift names the lift by hand, a re-run after it lifts
+#             the hold alone, and a wait that does not read stops it before any
 #             write; the brief is appended unless the subject's latest brief,
 #             which ends at the notes the arm and its clearing append, is
 #             already this one, held on the same work, so a re-run after the
@@ -147,7 +152,7 @@ mkdir -p "$TMP/bin" "$TMP/store/b" "$TMP/rig/assets/scripts" "$TMP/cwd"
 # CLOSE_REFUSED=<id> refuses that bead's close, forced or not; and
 # REFUSE_UPDATE_MATCH=<text> refuses an update whose arguments carry that text.
 # An appended note follows the notes before it on a line of its own, as bd
-# joins them. A bead's comments are kept in
+# joins them, and a removed label goes only by its exact text, as bd removes it. A bead's comments are kept in
 # $STORE/b/<id>.comments.json, and each one added is logged.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 B="$STORE/b"
@@ -236,6 +241,7 @@ case "$1 ${2:-}" in
         --status)       _r=$(printf '%s' "$_r" | jq --arg v "$2" '.status = $v'); shift 2 ;;
         --append-notes) _r=$(printf '%s' "$_r" | jq --arg v "$2" '.notes = (if (.notes // "") == "" then $v else .notes + "\n" + $v end)'); shift 2 ;;
         --unset-metadata) _r=$(printf '%s' "$_r" | jq --arg k "$2" 'del(.metadata[$k])'); shift 2 ;;
+        --remove-label) _r=$(printf '%s' "$_r" | jq --arg v "$2" '.labels = ((.labels // []) - [$v])'); shift 2 ;;
         *) shift ;;
       esac
     done
@@ -818,6 +824,9 @@ SENT=(--ruled yes --ruling "build the fix" --waiting-on tk-work)
 BRIEF="tk-work keeps what is typed in the dialog; check that a press outside it no longer drops the values"
 CLOSER_ARGS='["--on","mol-validate-close"]'
 briefs() { field "$1" notes | grep -c '## Close brief' || true; }
+# labelled <id> <label>... — the bead carries these labels; labels <id> reads them.
+labelled() { local id="$1"; shift; jq '.labels = $ARGS.positional' "$STORE/b/$id.json" --args "$@" > "$STORE/b/x" && mv "$STORE/b/x" "$STORE/b/$id.json"; }
+labels() { jq -c '.labels // []' "$STORE/b/$1.json" 2>/dev/null; }
 # latest <id> — the bead's latest close brief, its last `## Close brief (`
 # heading and all that follows it, which the validating closer checks.
 latest() { field "$1" notes | awk '/^## Close brief \(/ { s = ""; on = 1 } on { s = s $0 "\n" } END { printf "%s", s }'; }
@@ -844,6 +853,7 @@ has "$(grep '^deferred-dispatch arm' "$CALLS")" "--db $RIG_A/.beads" "(CLOSER) �
 has "$(cat "$CALLS")" "deferred-dispatch ran in GC_RIG=rig-a GC_RIG_ROOT=$RIG_A PWD=$RIG_A" "(CLOSER) …with that rig pinned"
 eq "$(field tk-g status)/$(field tk-conv status)" "closed/closed" "(CLOSER) the ruling answers the gate and closes the conversation"
 has "$(acts tk-conv)" "Arranged the check that closes this once the work it waits on lands." "(CLOSER) the arm is one of the visit's actions"
+hasnt "$(cat "$CALLS")" "--remove-label" "(CLOSER) …and a subject that carries no hold has no label removed"
 case "$(cat "$CALLS")" in
   *"gc-helm takeaway tk-sub"*"--waiting-on tk-work"*"## Close brief"*"deferred-dispatch arm tk-sub"*"gate resolve tk-g"*"bd close tk-conv"*) ok "(CLOSER-ORDER) the headline and its edge, then the brief, then the arm, then the gate and the close" ;;
   *) bad "(CLOSER-ORDER) the writes ran out of order: $(cat "$CALLS")" ;;
@@ -936,6 +946,39 @@ run_signoff --conversation tk-conv --outcome "ruled — a fix is building" "${SE
 eq "$RC/$(meta tk-sub gc.dispatch_when_ready_args)" "0/$CLOSER_ARGS" "(CLOSER-SENT) the sign-off after the arm has sent the closer exits 0 and arms the closer again"
 eq "$(grep -c '^deferred-dispatch arm' "$CALLS")" "$((ARMS + 1))" "(CLOSER-SENT) …once"
 eq "$(briefs tk-sub)/$(field tk-conv status)" "1/closed" "(CLOSER-SENT) …keeping the one brief the answer wrote, and closing the conversation"
+
+# A subject held for placement: the deferred-dispatch pass sends no arm while
+# hold:mayor holds it, in any spelling, so the sign-off lifts every spelling
+# once the arm stands.
+closer_case; labelled tk-sub hold:mayor learning Hold:Mayor
+run_signoff --conversation tk-conv --outcome "ruled — a fix is building" "${SENT[@]}" --close-brief "$BRIEF"
+eq "$RC" 0 "(CLOSER-HOLD) the sign-off on a subject held for placement exits 0"
+eq "$(labels tk-sub)" '["learning"]' "(CLOSER-HOLD) …lifting each spelling of hold:mayor and keeping its other labels"
+eq "$(grep -c -e '--remove-label' "$CALLS")" 1 "(CLOSER-HOLD) …in one write"
+has "$(grep -e '--remove-label' "$CALLS")" "--db $RIG_A/.beads" "(CLOSER-HOLD) …in its own rig's store"
+has "$OUT" "lifted hold:mayor from tk-sub" "(CLOSER-HOLD) …saying so"
+case "$(cat "$CALLS")" in
+  *"deferred-dispatch arm tk-sub"*"--remove-label hold:mayor --remove-label Hold:Mayor"*"gate resolve tk-g"*"bd close tk-conv"*) ok "(CLOSER-HOLD) …after the arm and before any gate is answered" ;;
+  *) bad "(CLOSER-HOLD) the lift ran out of order: $(cat "$CALLS")" ;;
+esac
+closer_case; labelled tk-sub Hold:Mayor
+REFUSE_UPDATE_MATCH='--remove-label' run_signoff --conversation tk-conv --outcome "ruled — a fix is building" "${SENT[@]}" --close-brief "$BRIEF"
+eq "$RC" 1 "(CLOSER-HOLD-REFUSED) a lift the store refuses stops the sign-off"
+has "$OUT" "NOT SIGNED OFF" "(CLOSER-HOLD-REFUSED) …saying not to post the sign-off"
+has "$OUT" "gc bd update tk-sub --db $(printf '%q' "$RIG_A/.beads") --remove-label Hold:Mayor" "(CLOSER-HOLD-REFUSED) …and naming the lift by hand"
+eq "$(meta tk-sub gc.dispatch_when_ready_args)/$(labels tk-sub)" "$CLOSER_ARGS/[\"Hold:Mayor\"]" "(CLOSER-HOLD-REFUSED) …once the arm has landed, with the hold still on"
+eq "$(field tk-g status)/$(field tk-conv status)" "open/in_progress" "(CLOSER-HOLD-REFUSED) …before any gate is answered"
+hasnt "$(acts tk-conv)" "Arranged the check" "(CLOSER-HOLD-REFUSED) …and before the arrangement is recorded"
+ARMS=$(grep -c '^deferred-dispatch arm' "$CALLS" || true)
+run_signoff --conversation tk-conv --outcome "ruled — a fix is building" "${SENT[@]}" --close-brief "$BRIEF"
+eq "$RC/$(labels tk-sub)" "0/[]" "(CLOSER-HOLD-REFUSED) the re-run lifts the hold and signs off"
+eq "$(briefs tk-sub)/$(grep -c '^deferred-dispatch arm' "$CALLS")" "1/$ARMS" "(CLOSER-HOLD-REFUSED) …writing the brief and the arm no second time"
+eq "$(field tk-g status)/$(field tk-conv status)" "closed/closed" "(CLOSER-HOLD-REFUSED) …then answering the gate and closing the conversation"
+# The labels are read again once the arm stands, the subject's second read.
+closer_case; labelled tk-sub hold:mayor
+SHOW_DOWN_SECOND=tk-sub run_signoff --conversation tk-conv --outcome "ruled — a fix is building" "${SENT[@]}" --close-brief "$BRIEF"
+eq "$RC" 1 "(CLOSER-HOLD-UNREAD) labels that do not read once the arm stands stop the sign-off"
+eq "$(labels tk-sub)/$(field tk-g status)/$(field tk-conv status)" '["hold:mayor"]/open/in_progress' "(CLOSER-HOLD-UNREAD) …with the hold on and every gate open"
 
 closer_case
 run_signoff --conversation tk-conv --outcome "x" --waiting-on tk-work --close-brief "$BRIEF"

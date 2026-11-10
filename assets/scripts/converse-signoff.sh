@@ -16,7 +16,8 @@
 #      same PR even once that PR has closed;
 #   2. writes the subject's headline through gc-helm.sh takeaway, and stops
 #      when takeaway refuses it, then, when the ruling leaves the subject
-#      waiting on work, its close brief and the arm of its validating closer;
+#      waiting on work, its close brief and the arm of its validating closer,
+#      and lifts a hold:mayor that would keep that arm from sending it;
 #   3. resolves each open gate the conversation replies to with
 #      `ruled: <ruling>`, except each one --leave names, and reads each back. bd
 #      resolves a closed gate without changing it and reports success either
@@ -92,7 +93,11 @@
 # subject only until the work closes and send it nowhere, so the arm is what
 # brings it back. The brief and the arm are written in the subject's own rig,
 # whose polecat pool runs the closer, after the headline has written those
-# edges, and before any gate is answered. A closer already armed is the one the
+# edges, and before any gate is answered. A subject held for placement carries
+# Gas City's hold:mayor, and the deferred-dispatch pass sends no arm while that
+# label holds its bead, so once the arm stands the sign-off lifts every spelling
+# of it there, also before any gate is answered: the ruling places the subject,
+# and its closer is its next actor. A closer already armed is the one the
 # ruling arms, so it is armed no second time. Once its arm has sent it, a
 # ruling made while its run works the subject arms it again, and Gas City
 # refuses that second launch while the run is live. No closer is armed for a
@@ -183,7 +188,8 @@
 #     subject's latest close brief is already this one, held on the same work.
 # Exit: 0 signed off, or with --answer the named gates answered; 1 stopped
 #   short — a read failed, the rework did not file, the PR did not retire, the
-#   headline, the close brief or the closer's arm did not land, a gate did not
+#   headline, the close brief, the closer's arm or the lift of the subject's
+#   hold:mayor did not land, a gate did not
 #   close, the recommendation was not
 #   taken, or the conversation did not close or hand back — so do NOT post the
 #   sign-off, or report the ruling as
@@ -867,10 +873,11 @@ for p in "${STANDS[@]+"${STANDS[@]}"}"; do echo "the ruling leaves the branch of
 "$HELM" takeaway "$SUBJECT" "$OUTCOME" --by converse "${WAIT[@]+"${WAIT[@]}"}" \
   || stopped "gc-helm.sh takeaway did not finish on $SUBJECT, and its message above says which write it could not make${APPROVE_CLAUSE:+. It carries \"; $APPROVE_CLAUSE\" after --outcome, which counts toward the cap, so a shorter --outcome makes room}; no gate was resolved and the conversation is not closed"
 # The subject's validating closer, once the headline's edges hold the subject
-# on the work: first the close brief the closer checks, then its arm, both in
-# the subject's own rig and both before any gate is answered, so a write that
-# does not land stops the sign-off with every gate still open. A re-run finds
-# the brief and the arm an earlier attempt wrote, and writes neither again.
+# on the work: first the close brief the closer checks, then its arm, then the
+# lift of a hold that would keep the arm from sending it, all in the subject's
+# own rig and all before any gate is answered, so a write that does not land
+# stops the sign-off with every gate still open. A re-run finds the brief and
+# the arm an earlier attempt wrote, and writes neither again.
 # The closer checks the latest close brief in the subject's notes: the last
 # `## Close brief (` heading and the lines after it, up to the next heading.
 # The notes deferred-dispatch.sh appends end it too: the arm's own note
@@ -906,6 +913,31 @@ $CLOSE_BRIEF" >/dev/null 2>&1 \
         --target "$CLOSER_RIG/gc-toolkit.polecat" --sling-arg --on --sling-arg mol-validate-close \
         --reason "waits for $CLOSER_WAITS, the work conversation $CONVERSATION's ruling sent; the validating closer checks it once that lands" ) \
       || stopped "$SUBJECT's validating closer was not armed, and deferred-dispatch.sh's message above says why; the headline and the close brief are written, no gate was resolved and the conversation is not closed"
+  fi
+  # A subject held for placement carries Gas City's hold:mayor, and the
+  # deferred-dispatch pass sends no arm while a hold label holds its bead, so
+  # the closer would never be sent. The ruling places the subject: it waits on
+  # the work, and the closer is its next actor. So once the arm stands, the
+  # sign-off lifts the hold in the subject's own rig, before any gate is
+  # answered, in one write that removes each spelling of hold:mayor the subject
+  # carries, because Gas City reads the label trimmed and in any case and bd
+  # removes a label only by its exact text. The labels are read here, after
+  # the arm, so the lift removes the spellings the subject carries now. A
+  # re-run finds the brief and the arm, and lifts a hold an earlier attempt
+  # could not.
+  HOLD_ROW=$(show_row "$SUBJECT") \
+    && HOLD_SP=$(printf '%s' "$HOLD_ROW" | jq -r "$DISPATCH_PATH_JQ"'dispatch_hold_spellings("hold:mayor")[]' 2>/dev/null) \
+    || stopped "$SUBJECT's labels could not be read to tell whether hold:mayor keeps its validating closer from being sent; the headline, the close brief and the arm are written, no gate was resolved and the conversation is not closed"
+  if [ -n "$HOLD_SP" ]; then
+    HOLD_LIFT=()
+    while IFS= read -r sp; do
+      [ -z "$sp" ] || HOLD_LIFT+=(--remove-label "$sp")
+    done <<EOF
+$HOLD_SP
+EOF
+    gc bd update "$SUBJECT" --db "$CLOSER_PATH/.beads" "${HOLD_LIFT[@]}" >/dev/null 2>&1 \
+      || stopped "the store refused the write that lifts hold:mayor from $SUBJECT, and the deferred-dispatch pass sends no arm while that label holds it, so its validating closer would never be sent; the headline, the close brief and the arm are written, no gate was resolved and the conversation is not closed. A re-run lifts it, and so does this write by hand: gc bd update $SUBJECT --db $(printf '%q' "$CLOSER_PATH/.beads")$(printf ' %q' "${HOLD_LIFT[@]}")"
+    echo "lifted hold:mayor from $SUBJECT, so its validating closer is sent once $CLOSER_WAITS lands"
   fi
   record_action "Arranged the check that closes this once the work it waits on lands."
 fi

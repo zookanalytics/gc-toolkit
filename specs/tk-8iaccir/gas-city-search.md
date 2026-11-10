@@ -28,10 +28,11 @@ close exit and the waits skill already arm.
 ## The surface and the need
 
 The change adds one flag, `--close-brief "<text>"`, to `converse-signoff.sh`,
-and two writes to the sign-off: the brief, appended to the subject's notes under
+and three writes to the sign-off: the brief, appended to the subject's notes under
 `## Close brief (held on <work>, <time>)`, the heading `mol-validate-close`
-already reads, and the arm, the `gc.dispatch_when_ready` keys that
-`deferred-dispatch.sh arm` already writes. It adds no metadata key, bead kind or
+already reads; the arm, the `gc.dispatch_when_ready` keys that
+`deferred-dispatch.sh arm` already writes; and, on a subject held for placement,
+the removal of its `hold:mayor` label. It adds no metadata key, bead kind or
 lifecycle state, so it adds no pack noun and needs no warrant
 ([review-arch.md](../../docs/review-arch.md#the-checks), check 2).
 
@@ -141,6 +142,11 @@ until the arm's retry cap asked a person.
 - The check is `mol-validate-close`, which already validates a bead held on the
   landing that ends its job, closes it with `gc.work_outcome=no-op`, and puts any
   doubt to the operator through a human gate.
+- A subject held for placement carries Gas City's `hold:mayor`, and the
+  deferred-dispatch pass sends no arm while a hold label holds its bead. Once
+  the arm stands, the sign-off lifts the hold as the waits skill does once an
+  arm lands: bd's `--remove-label`, one for each spelling of the label that
+  `dispatch_hold_spellings` in `dispatch-path.sh` names, in one write.
 - A closer already sent is left to Gas City's own refusal of a second launch.
   The sign-off reads no run, so a ruling made while a `mol-validate-close` run
   works the subject arms the closer again, and Gas City refuses that launch

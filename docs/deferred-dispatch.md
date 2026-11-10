@@ -452,7 +452,8 @@ among them, and the first reaction's close exit writes the edge and the arm
 itself when it is given `--waiting-on <blocker>`. A converse sign-off writes the
 brief and the arm for its subject when the ruling leaves the subject waiting on
 work the sitting sent, after its headline writes the edge
-(`--waiting-on <work> --close-brief "<brief>"`).
+(`--waiting-on <work> --close-brief "<brief>"`), and then lifts the subject's
+`hold:mayor`, every spelling of it, so the pass can send the arm.
 
 bd also defines an `until` edge type. Nothing in the pack acts on one, so an
 `until` edge holds no bead and closes none.
