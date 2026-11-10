@@ -92,14 +92,15 @@
 # subject only until the work closes and send it nowhere, so the arm is what
 # brings it back. The brief and the arm are written in the subject's own rig,
 # whose polecat pool runs the closer, after the headline has written those
-# edges, and before any gate is answered. A closer already armed, or already
-# sent and still running, is the one the ruling arms, so it is armed no second
-# time. No closer is armed for a subject that
-# something else sends on once its wait clears: an arm of another dispatch, a
-# route or an assignee, the recommendation the ruling takes, or its own merge
-# or members, when it is an anchor or an epic. Nor for one in the city's own
-# store, whose closer no pool runs: a person closes that one, on a human gate
-# that names the work.
+# edges, and before any gate is answered. A closer already armed is the one the
+# ruling arms, so it is armed no second time. Once its arm has sent it, a
+# ruling made while its run works the subject arms it again, and Gas City
+# refuses that second launch while the run is live. No closer is armed for a
+# subject that something else sends on once its wait clears: an arm of another
+# dispatch, a route or an assignee, the recommendation the ruling takes, or its
+# own merge or members, when it is an anchor or an epic. Nor for one in the
+# city's own store, whose closer no pool runs: a person closes that one, on a
+# human gate that names the work.
 #
 # Usage:
 #   converse-signoff.sh --conversation <task> --outcome "<headline, ≤140 chars>" \
