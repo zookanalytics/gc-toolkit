@@ -102,10 +102,20 @@ stance names:
 - **Needs a broad rearchitecture** — it belongs in its own PR, not bolted onto
   this one. File it the way `mol-review` files a finding the change did not
   cause, under the token
-  `<the path of the pattern's first instance>: aggravated pattern`, so a later
-  review that adds another instance finds that bead. Its body names the
-  pattern, how many instances now exist, and the rearchitecture that would
-  resolve it.
+  `<the path of the pattern's first instance>: aggravated [<the pattern's name>]`.
+  Its body names the pattern, how many instances now exist, and the
+  rearchitecture that would resolve it. A later review that adds another
+  instance of the pattern then finds that bead, and another pattern that starts
+  in the same file gets a bead of its own. This lists the patterns already filed
+  from that file:
+
+  ```bash
+  gc bd list --type=bug --title-contains "<the path of the pattern's first instance>: aggravated ["
+  ```
+
+  When one of them is the pattern this change adds to, use the token at the end
+  of its title. Otherwise name the pattern by what its instances repeat. The
+  closing bracket ends the name, so no pattern's token matches another's title.
 
 ## What blocks
 

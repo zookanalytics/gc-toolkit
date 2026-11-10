@@ -67,7 +67,11 @@
 #     do not.
 #   - The arch skill approves no commit without a docs/architecture.md, files a
 #     gap in architecture the change does not touch without holding the change,
-#     and passes no change on a gap in architecture it does touch. This repo's
+#     and passes no change on a gap in architecture it does touch. It files an
+#     aggravated pattern's rearchitecture through mol-review's probe under a
+#     token that names the pattern, after listing the patterns already filed
+#     from the file of its first instance, so one pattern keeps one bead and
+#     another that starts in the same file keeps its own. This repo's
 #     own docs/review-arch.md and docs/review-triage.md, read the way a review
 #     reads them at its commit, carry the divergence lens and the changes that
 #     make arch mandatory, and the pack's arch skill carries none of that lens.
@@ -248,7 +252,27 @@ hasF "$ARCH_SKILL" '`docs/architecture.md: incomplete`' "…and files the rest o
 hasF "$ARCH_SKILL" 'File it the same way, and do not hold the change for it.' "…files a gap the change does not touch without holding the change for it"
 hasF "$ARCH_SKILL" 'A gap in the architecture the change does touch is no reason to pass the change' "…and passes no change on a gap in the architecture it touches"
 notF "$ARCH_SKILL" 'not a reason to pass or fail the change' "…so no missing reference lets a change through unjudged"
-hasF "$ARCH_SKILL" "first instance>: aggravated pattern\`" "…files an aggravated pattern's rearchitecture under a token too"
+# An aggravated pattern's token and listing, read from the skill and built for
+# two patterns whose first instance is one file, one name beginning the other.
+# mol-review titles the bug "<what is wrong> (<token>)", and its probe and the
+# listing take each bug whose title holds the text in any case, as bd's
+# --title-contains does.
+P_PATH="<the path of the pattern's first instance>"; P_NAME="<the pattern's name>"
+FORM=$(flat "$ARCH_SKILL" | grep -o "\`$P_PATH: aggravated[^\`]*\`" | head -n 1 | tr -d '`')
+LISTED=$(flat "$ARCH_SKILL" | grep -o -- "--title-contains \"$P_PATH: aggravated[^\"]*\"" | head -n 1 | cut -d'"' -f2)
+LISTED=${LISTED//"$P_PATH"/lib/client.ts}
+token() { local t=${FORM//"$P_PATH"/lib/client.ts}; printf '%s' "${t//"$P_NAME"/$1}"; }
+holds() { grep -qiF -- "$2" <<< "$1"; }
+ONE=$(token 'retry'); TWO=$(token 'retry loop')
+T_ONE="Three clients retry by hand ($ONE)"; T_TWO="Three clients loop on a refused call ($TWO)"
+if [ -n "$FORM" ] && ! holds "$T_TWO" "$ONE" && ! holds "$T_ONE" "$TWO"; then
+  ok "…files an aggravated pattern's rearchitecture under a token that names the pattern, so another pattern from the same file keeps its own bead"
+else bad "…files an aggravated pattern's rearchitecture under a token that names the pattern" "form '$FORM' gives '$ONE' and '$TWO'"; fi
+if [ -n "$LISTED" ] && holds "$T_ONE" "$LISTED" && holds "$T_TWO" "$LISTED"; then
+  ok "…lists the patterns already filed from that file"
+else bad "…lists the patterns already filed from that file" "listing '$LISTED'"; fi
+hasF "$ARCH_SKILL" 'When one of them is the pattern this change adds to, use the token at the end of its title.' \
+  "…and takes a listed pattern's token when the change adds to it, so one pattern keeps one bead"
 notF "$ARCH_SKILL" 'bd create' "…and files every follow-up through mol-review's probe, never a create of its own"
 notF "$ARCH_SKILL" 'divergence lens' "the pack's arch skill, which every rig's arch review loads, carries none of gc-toolkit's lens"
 # This checkout's guidance, committed in a scratch repository and read back
