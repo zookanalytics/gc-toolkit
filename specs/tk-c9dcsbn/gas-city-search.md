@@ -37,8 +37,10 @@ nothing.
 
 **Opening a named seat's sitting with its prompt, from any state.**
 `gc session attach` covers it, all but one window inside the attach that the
-next paragraph names. It attaches to a running session as it
-stands. While the city's controller runs, it asks the controller to start a
+next paragraph names. It attaches to a running session as it stands, and
+refuses one with a stop pending on its record (`startRefusal`,
+`internal/session/chat.go`), such as a po whose drain-ack stop the controller
+has begun. While the city's controller runs, it asks the controller to start a
 session whose runtime is not running, recording the wake `gc session wake`
 records, waits up to `--wait-timeout` (two minutes by default) for the session
 to run, and attaches through a runtime-only handle that never starts the
