@@ -244,6 +244,11 @@ A hold also lifts these ways:
   `gc-helm.sh accept`, lift it in the write that sends the bead on, because
   sending a held bead on is a placement and Gas City serves no bead a hold
   label holds, assigned or not.
+- `converse-signoff.sh` lifts it from a subject the operator's ruling leaves
+  waiting on work, once it has armed the subject's validating closer, because
+  the ruling places the subject and deferred dispatch fires a held bead's arm
+  only once its hold lifts. It removes every spelling in one write, before it
+  answers any gate.
 - By hand, `gc bd update <bead> --remove-label hold:mayor` lifts it, with one
   `--remove-label` for each other spelling of the label that
   `gc bd label list <bead>` shows, such as `Hold:Mayor`, because Gas City reads
