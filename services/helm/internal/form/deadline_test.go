@@ -21,7 +21,7 @@ import (
 // first call after the subject's create, stall.in-conversation-create stalls the
 // conversation's create once its row is written, before it answers, and
 // stall.in-reply stalls the conversation's reply onto its gate before the edge
-// is written.
+// is written, and lets the hold on an open PR's merge, written ahead of it, land.
 const gcStub = `#!/bin/sh
 printf '%s\n' "$*" | tr '\n' ' ' >> "$STATE/calls"; echo >> "$STATE/calls"
 stall() { rm -f "$STATE/stall.$1"; : > "$STATE/stalled"; sleep 60; }
@@ -42,7 +42,7 @@ case "$1 ${2:-}" in
 "bd show") jq -c --arg i "$3" '[.[] | select(.id == $i)]' "$STATE/rows.json" ;;
 "bd dep")
 	if [ "$3" = add ]; then
-		if [ -e "$STATE/stall.in-reply" ]; then stall in-reply; fi
+		if [ -e "$STATE/stall.in-reply" ] && [ "$(arg --type "$@")" = replies-to ]; then stall in-reply; fi
 		jq --arg i "$4" --arg g "$5" --arg t "$(arg --type "$@")" \
 			'map(if .id == $i then .dependencies = ((.dependencies // []) + [{type: $t, depends_on_id: $g}]) else . end)' \
 			"$STATE/rows.json" > "$STATE/rows.new" && mv "$STATE/rows.new" "$STATE/rows.json"
@@ -186,18 +186,21 @@ func TestANewTopicSaveKilledAtItsDeadlineKeepsItsSubject(t *testing.T) {
 	}
 }
 
-// A save onto a gate that runs past its deadline in the conversation's reply
-// onto the gate, after the conversation is filed, comes back with that
-// conversation, so the form holds it and saves again onto it by its id. By then
-// a sitting another terminal started has taken the conversation out of the
-// operator's queue, where a save that looks for a queued conversation holding
-// the same question no longer finds it. The save again completes the reply all
-// the same, and the store holds one conversation.
+// A save onto a gate on an open PR that runs past its deadline in the
+// conversation's reply onto the gate, after the conversation is filed and holds
+// the PR's merge, comes back with that conversation, so the form holds it and
+// saves again onto it by its id. By then a sitting another terminal started has
+// taken the conversation out of the operator's queue, where a save that looks
+// for a queued conversation holding the same question no longer finds it, and
+// has lifted the hold because it is helping the PR land. The save again
+// completes the reply all the same and leaves the hold lifted, and the store
+// holds one conversation.
 func TestAGateSaveKilledInItsReplyIsSavedAgainOntoTheConversationItFiled(t *testing.T) {
 	const q = "is the rollout safe to approve?"
 	s, state := realOpen(t, 3*time.Second)
 	rows := `[{"id": "tk-gate1", "issue_type": "gate", "await_type": "human", "status": "open", "title": "Approve the rollout", "description": "Approve it or say why not."},
-		{"id": "tk-held1", "issue_type": "task", "status": "open", "title": "the rollout", "dependencies": [{"type": "blocks", "depends_on_id": "tk-gate1"}]}]`
+		{"id": "tk-held1", "issue_type": "task", "status": "open", "title": "the rollout", "metadata": {"merge_result": "pull_request", "pr_number": "41"},
+		 "dependencies": [{"type": "blocks", "depends_on_id": "tk-gate1"}]}]`
 	for name, content := range map[string]string{"rows.json": rows, "stall.in-reply": ""} {
 		if err := os.WriteFile(filepath.Join(state, name), []byte(content), 0o644); err != nil {
 			t.Fatal(err)
@@ -223,7 +226,8 @@ func TestAGateSaveKilledInItsReplyIsSavedAgainOntoTheConversationItFiled(t *test
 		t.Fatalf("after the killed save: screen %d, saved %+v, saveErr %q, starts %v", m.scr, m.saved, m.saveErr, h.starts)
 	}
 
-	// A sitting another terminal started takes the conversation.
+	// A sitting another terminal started takes the conversation, and lifts the
+	// hold on the PR's merge that the killed save put on.
 	b, err := os.ReadFile(filepath.Join(state, "rows.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -232,10 +236,26 @@ func TestAGateSaveKilledInItsReplyIsSavedAgainOntoTheConversationItFiled(t *test
 	if err := json.Unmarshal(b, &store); err != nil {
 		t.Fatal(err)
 	}
+	lifted := false
 	for _, r := range store {
-		if r["id"] == "tk-conv1" {
+		switch r["id"] {
+		case "tk-conv1":
 			r["status"], r["assignee"] = "in_progress", "c-tk-conv1"
+		case "tk-held1":
+			deps, _ := r["dependencies"].([]any)
+			kept := []any{}
+			for _, d := range deps {
+				if e, _ := d.(map[string]any); e["type"] == "blocks" && e["depends_on_id"] == "tk-conv1" {
+					lifted = true
+					continue
+				}
+				kept = append(kept, d)
+			}
+			r["dependencies"] = kept
 		}
+	}
+	if !lifted {
+		t.Fatalf("the killed save put no hold on the merge of tk-held1's PR, so there was none to lift:\n%s", b)
 	}
 	if b, err = json.Marshal(store); err != nil {
 		t.Fatal(err)
@@ -269,7 +289,7 @@ func TestAGateSaveKilledInItsReplyIsSavedAgainOntoTheConversationItFiled(t *test
 	if err := json.Unmarshal(b, &after); err != nil {
 		t.Fatal(err)
 	}
-	conversations, replied := 0, false
+	conversations, replied, held := 0, false, false
 	for _, r := range after {
 		for _, d := range r.Dependencies {
 			switch {
@@ -277,11 +297,16 @@ func TestAGateSaveKilledInItsReplyIsSavedAgainOntoTheConversationItFiled(t *test
 				conversations++
 			case r.ID == "tk-conv1" && d.Type == "replies-to" && d.DependsOnID == "tk-gate1":
 				replied = true
+			case r.ID == "tk-held1" && d.Type == "blocks" && d.DependsOnID == "tk-conv1":
+				held = true
 			}
 		}
 	}
 	if conversations != 1 || !replied {
 		t.Fatalf("the store holds %d conversations on tk-held1, and tk-conv1 replies to tk-gate1: %v, want one that replies:\n%s", conversations, replied, b)
+	}
+	if held {
+		t.Fatalf("the save again put back the hold on the merge of tk-held1's PR that the sitting lifted:\n%s", b)
 	}
 	calls, err := os.ReadFile(filepath.Join(state, "calls"))
 	if err != nil {

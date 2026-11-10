@@ -221,7 +221,9 @@ conversation is open and lets it go once the conversation closes.
   should land. It removes the edge with
   `gc bd dep remove <anchor> <conversation>`, records why on the conversation
   and says so in its framing. The lift lasts for that sitting: a later sitting
-  that engage starts on the conversation holds the merge again.
+  that engage starts on the conversation holds the merge again, and the
+  conversation form's save again (`open --conversation`) leaves the hold of a
+  conversation a sitting has taken as that sitting left it.
 - **A hold the operator wants to outlast the conversation** is a gate of its
   own on the anchor, under a key that names what it waits for.
 
@@ -362,8 +364,10 @@ its reply onto the gate, says the conversation holds the question and what
 did not complete, and starts nothing. r sends the save again naming that
 conversation (`--conversation`), and `open` completes it by its id rather than
 file a second, wherever it stands by then, even when a sitting another terminal
-started has taken it out of the queue. A conversation closed since, or one that
-holds another ask, is refused, and nothing is filed. A save whose answer was
+started has taken it out of the queue. It adds the hold on an open PR's merge
+only while the conversation still waits in the queue, so a hold that such a
+sitting lifted stays lifted. A conversation closed since, or one that holds
+another ask, is refused, and nothing is filed. A save whose answer was
 lost leaves the form without the conversation's id. For that save, with
 `--allow-duplicate`, a concern that a conversation waiting in the queue holds as
 its whole ask lands on that conversation. Leaving while the save or the start

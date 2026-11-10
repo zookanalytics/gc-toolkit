@@ -53,7 +53,7 @@ FIXTURE="${GC_HELM_FIXTURE:-}"              # test hook: <dir>/rigs.json replace
 usage() {
     cat >&2 <<'EOF'
 Usage:
-  gc-helm open  <bead-id> [--reason "..."] [--body "..."] [--allow-duplicate] [--if-subject <id>] [--conversation <id>] [--from <bead-id>] [--json]  file a conversation about the bead in the operator's queue, for the operator to engage; a second concern joins the bead's conversation already in the queue unless --allow-duplicate files a fresh one, which lands instead on a conversation in the queue whose whole ask is that concern; a conversation about an open PR, or a bead of one, holds the PR's merge until it closes; --if-subject files only while the reference still names that subject, and a reference that names another now, through a successor, a PR's anchor or a gate's waiter, files nothing (exit 4); --conversation completes the conversation an earlier open filed for the concern, by its id, wherever it stands, adding the reply onto the gate that did not land, and one no longer open on the bead or holding another ask files nothing (exit 4); --from names the bead a gate was reached from, and a gate several open beads wait on files the conversation about that bead while it is one of them, while a gate that no longer holds that bead files nothing (exit 4); --json prints {subject,conversation,filed}, and names the conversation on every exit once it is filed
+  gc-helm open  <bead-id> [--reason "..."] [--body "..."] [--allow-duplicate] [--if-subject <id>] [--conversation <id>] [--from <bead-id>] [--json]  file a conversation about the bead in the operator's queue, for the operator to engage; a second concern joins the bead's conversation already in the queue unless --allow-duplicate files a fresh one, which lands instead on a conversation in the queue whose whole ask is that concern; a conversation about an open PR, or a bead of one, holds the PR's merge until it closes; --if-subject files only while the reference still names that subject, and a reference that names another now, through a successor, a PR's anchor or a gate's waiter, files nothing (exit 4); --conversation completes the conversation an earlier open filed for the concern, by its id, wherever it stands, adding the reply onto the gate that did not land, and the hold on an open PR's merge only while the conversation waits in the queue, since a sitting that has taken it keeps or lifts that hold; one no longer open on the bead or holding another ask files nothing (exit 4); --from names the bead a gate was reached from, and a gate several open beads wait on files the conversation about that bead while it is one of them, while a gate that no longer holds that bead files nothing (exit 4); --json prints {subject,conversation,filed}, and names the conversation on every exit once it is filed
   gc-helm open  --new-subject --rig <name> [<question> | --reason "<question>"] [--json]  file a FRESH subject in the named rig for a topic that has no bead yet, the question unchanged in its description and its title derived from the question's opening, then its conversation in the queue; --json answers the subject, filed:false, the moment it is filed, and open's last answer is the one that counts, so a subject filed whose conversation is not is named for a re-run onto it
   gc-helm engage [<subject>] [--subject <id>] [--from <bead-id>] [--new-subject [--rig <name>]] [--model <variant>] [--skill <name>] [--reason "..." | --template <key>] [--no-input] [--no-attach]  hold a conversation about the bead in a converse sitting and attach: attach to its live sitting, or take its conversation from the queue, or file one, then spawn a sitting named for it. Pointed at a human gate it takes the one bead still waiting on the gate, or the --from bead when it is one of several waiting, and the conversation replies to the gate. On a terminal, with no --reason, --template or --skill, it opens the conversation form instead: subject, question, a new topic's rig, model and whether to attach on one screen, filled in from the command line, where --no-attach turns attaching off; --no-input keeps the flag-driven one-shot path. --skill seeds the sitting with any skill it carries as its lens on the subject (--skill review-arch is a conversation with the Architect). --new-subject files a FRESH subject bead in the --rig rig (the positional text, or --reason, is the question; its title is derived from the question's opening) and engages it in one gesture
   gc-helm attach [<conversation>]  return to a conversation: with an id, engage's attach (a live sitting once it has started, or a new sitting on a conversation whose sitting ended or that waits in the queue); with none, on a terminal, the conversation form's list of conversations to return to, by topic and readiness
@@ -2355,15 +2355,18 @@ conversation_reply() {
 # and lets it go once the conversation closes, by whatever route it closes, the
 # sign-off, a dismiss, the premise re-check's moot or benign close or a close by
 # hand, with nothing to release. The merge pass holds a PR while an open bead
-# blocks its anchor. open adds the edge, and engage adds it whenever it starts a
+# blocks its anchor. open adds the edge to a conversation it files or finds
+# waiting in the operator's queue, and engage adds it whenever it starts a
 # sitting, so a conversation filed before its PR opened, or one whose sitting
 # lifted the hold, holds the merge again once it is engaged. A sitting that is
 # helping the PR land, or whose conversation has nothing to do with whether it
 # lands, lifts it with `gc bd dep remove <anchor> <conversation>`
-# (skills/converse-hold). The edge holds only the anchor: a review, a rework or a
-# supplement is a bead of its own that the anchor waits on, and goes on while
-# the merge waits. Before a PR opens, the anchor is the work itself, which the
-# edge would stop, so only an open PR's anchor takes one.
+# (skills/converse-hold), and the lift stands for that sitting: open, completing
+# a conversation a sitting has taken, leaves the hold as that sitting left it.
+# The edge holds only the anchor: a review, a rework or a supplement is a bead
+# of its own that the anchor waits on, and goes on while the merge waits. Before
+# a PR opens, the anchor is the work itself, which the edge would stop, so only
+# an open PR's anchor takes one.
 
 # subject_anchor <subject-row> — the anchor a conversation about the subject
 # would hold the merge of: the subject itself when it is an anchor (it carries a
@@ -2418,14 +2421,20 @@ conversation_hold_merge() {
 # open_edges <conversation> <where> — the edges open owes a conversation it
 # filed or joined: the hold on the merge of the open PR whose anchor is
 # $open_anchor, then the reply onto the gate it answers, $TAKE_GATE. Each is
-# empty for none. Each edge is written whatever the other's outcome, so a reply
-# the store refuses never leaves the PR free to merge while the conversation is
-# open, and a hold it refuses never costs the reply. <where> says where the
-# conversation stands, for the reply's refusal. Returns 0 once both are in
-# place, else 1, having said on stderr how to add each refused edge by hand.
+# empty for none. A conversation a sitting has taken out of the queue, the
+# sitting $open_sitting names, owes open no hold: engage holds the merge when it
+# starts a sitting, and from then on the hold is that sitting's to keep or lift
+# (skills/converse-hold). Each edge is written whatever the other's outcome, so
+# a reply the store refuses never leaves the PR free to merge while the
+# conversation is open, and a hold it refuses never costs the reply. <where>
+# says where the conversation stands, for the reply's refusal. Returns 0 once
+# each edge it owes is in place, else 1, having said on stderr how to add each
+# refused edge by hand.
 open_edges() {
     _oe_rc=0
-    if [ -n "$open_anchor" ]; then
+    if [ -n "$open_anchor" ] && [ -n "$open_sitting" ]; then
+        echo "$PROG: open: the sitting $open_sitting has taken conversation $1 out of the queue, so the hold on the merge of the PR of $open_anchor stays as that sitting left it" >&2
+    elif [ -n "$open_anchor" ]; then
         conversation_hold_merge open "$1" "$open_anchor" || _oe_rc=1
     fi
     if [ -n "$TAKE_GATE" ] && ! conversation_reply "$1" "$TAKE_GATE"; then
@@ -2527,7 +2536,9 @@ open_join() {
 # and did not complete, as the form's save again does with the id that open's
 # --json answered. open lands on that conversation and completes it where it
 # stands, whatever sitting has taken it since, adding the reply onto the gate
-# that did not land, and files nothing. A conversation that is no longer an open
+# that did not land, and files nothing. It holds an open PR's merge only while
+# the conversation still waits in the queue, because a sitting that has taken it
+# keeps or lifts that hold. A conversation that is no longer an open
 # conversation about the bead, or that holds another ask, files nothing and
 # exits 4.
 # --from names the bead the reference was reached from, as the conversation form
@@ -2547,7 +2558,7 @@ open_new_subject_report() {
 }
 cmd_open() {
     bead=""; open_reason=""; open_body=""; open_allow_dup=""; open_json=""; OPEN_FILED=""
-    open_new_subject=0; open_rig=""; open_if_subject=""; open_conv=""; open_from=""
+    open_new_subject=0; open_rig=""; open_if_subject=""; open_conv=""; open_from=""; open_sitting=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --new-subject) open_new_subject=1; shift ;;
@@ -2761,7 +2772,12 @@ $gate_desc}"
     # A caller that holds the id of the conversation it filed names it with
     # --conversation, and open completes that one by its id. A sitting another
     # terminal started may have taken it out of the queue by then, and the reply
-    # onto the gate holds nothing, so the reply is added all the same.
+    # onto the gate holds nothing, so the reply is added all the same. The hold
+    # on an open PR's merge is that sitting's to keep or lift by then
+    # (skills/converse-hold), and a sitting that is helping the PR land lifts
+    # it. So open adds the hold only to a conversation that its listing above
+    # still finds in the queue, assigned to `human`, and open_sitting names the
+    # sitting that has the conversation otherwise.
     CONV=""; open_again=0
     if [ -n "$open_conv" ]; then
         _oc_row=$(printf '%s' "$open_convs" | jq -c --arg c "$open_conv" \
@@ -2775,6 +2791,7 @@ $gate_desc}"
             exit 4
         fi
         CONV="$open_conv"; open_again=1
+        open_sitting=$(printf '%s' "$_oc_row" | jq -r '(.assignee // "") | tostring | select(. != "human")' 2>/dev/null || true)
     elif [ -n "$open_allow_dup" ]; then
         CONV=$(printf '%s' "$open_convs" | jq -r --arg ask "$conv_body" '
             [ .[] | select(((.assignee // "") | tostring) == "human")
@@ -2820,9 +2837,19 @@ $gate_desc}"
     bust_cache
     open_edges "$CONV" "is filed on $bead" || exit 4
 
+    # One sentence reports a conversation that holds the concern, filed by this
+    # open or by an earlier one, and it is the sentence helm-svc's board reads
+    # as filed (parseOpenStdout, which open_parity_test.go pins to these
+    # echoes). Its tail says where the conversation stands.
     if [ -z "$open_json" ]; then
-        echo "$PROG: conversation $CONV filed on $bead — waiting in the operator's queue; no session spawned."
-        echo "       Engage it when ready: $PROG engage $bead"
+        open_stands="waiting in the operator's queue; no session spawned."
+        open_next="Engage it when ready: $PROG engage $bead"
+        if [ -n "$open_sitting" ]; then
+            open_stands="the sitting $open_sitting has taken it out of the operator's queue."
+            open_next="Return to it: $PROG attach $CONV"
+        fi
+        echo "$PROG: conversation $CONV filed on $bead — $open_stands"
+        echo "       $open_next"
     fi
 }
 

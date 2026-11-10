@@ -39,9 +39,9 @@
 #   (ALLOWDUP-AGAIN) --allow-duplicate on a concern a queued conversation holds
 #              as its ask lands on it, completes its reply, and files nothing
 #   (CONVERSATION) --conversation completes the conversation it names, which a
-#              sitting has taken out of the queue, and files nothing; one that
-#              holds another ask or is closed files nothing, exit 4, and beside
-#              --new-subject it is refused, exit 2
+#              sitting has taken out of the queue, files nothing, and says the
+#              sitting has it; one that holds another ask or is closed files
+#              nothing, exit 4, and beside --new-subject it is refused, exit 2
 #   (IF-SUBJECT) --if-subject files only while the reference names that subject:
 #              a successor, a PR's anchor or a gate's waiter that is another
 #              bead files nothing, exit 4, and beside --new-subject it is
@@ -585,6 +585,14 @@ grep -q '^bd create' <<< "$CALLS" \
 grep -q 'bd dep add tk-conv0 tk-gate1 --type replies-to' <<< "$CALLS" \
   && ok "(CONVERSATION) its reply onto the gate is made" || bad "(CONVERSATION) reply (calls: $CALLS)"
 eq "$OUT" '{"subject":"tk-anchor","conversation":"tk-conv0","filed":true}' "(CONVERSATION) --json names the conversation completed"
+run_open found tk-gate1 --reason "the question" --allow-duplicate --if-subject tk-anchor --conversation tk-conv0
+eq "$RC" "0" "(CONVERSATION) without --json, the save again exits 0"
+grep -q "conversation tk-conv0 filed on tk-anchor — the sitting c-tk-conv0 has taken it out of the operator's queue" <<< "$OUT" \
+  && ok "(CONVERSATION) …saying the sitting has the conversation" || bad "(CONVERSATION) message (out: $OUT)"
+grep -q 'attach tk-conv0' <<< "$OUT" \
+  && ok "(CONVERSATION) …and how to return to it" || bad "(CONVERSATION) return hint (out: $OUT)"
+grep -q "waiting in the operator's queue" <<< "$OUT" \
+  && bad "(CONVERSATION) says a conversation a sitting took waits in the queue (out: $OUT)" || ok "(CONVERSATION) …not that it waits in the queue"
 run_open found tk-gate1 --reason "another question" --allow-duplicate --if-subject tk-anchor --conversation=tk-conv0 --json
 eq "$RC" "4" "(CONVERSATION) a conversation that holds another ask exits 4"
 [ -z "$CALLS" ] && ok "(CONVERSATION) …writing nothing" || bad "(CONVERSATION) wrote something (calls: $CALLS)"
