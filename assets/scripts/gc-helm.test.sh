@@ -185,8 +185,11 @@ case "$1 ${2:-}" in
     # as one proof a same-branch wait's work has LANDED on the branch: the handoff
     # submit-and-exit writes only after it verifies the push. Absent id -> empty.
     asg="$(awk -F'|' -v i="$id" '$1==i{print $2; exit}' "$FAKE_ASSIGNEES" 2>/dev/null || true)"
-    if [ -n "$convoy" ]; then row=$(jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg c "$convoy" --arg rt "$routed" --arg er "$exec_routed" --arg sd "$settled" --arg tk "$takeaway" --arg sn "$sname" --arg si "$sid" --arg br "$br" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.takeaway":$tk,"gc.takeaway_settled":$sd,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br}}]')
-    else row=$(jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg rt "$routed" --arg er "$exec_routed" --arg sd "$settled" --arg tk "$takeaway" --arg sn "$sname" --arg si "$sid" --arg br "$br" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.takeaway":$tk,"gc.takeaway_settled":$sd,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br}}]'); fi
+    # The bead's labels, from FAKE_LABELS (id|label, one per line): a hold a
+    # release that sends the bead on lifts. Absent id -> no labels.
+    lbl="$(awk -F'|' -v i="$id" '$1==i{print $2}' "${FAKE_LABELS:-/dev/null}" 2>/dev/null | jq -Rsc 'split("\n") | map(select(length > 0))')"
+    if [ -n "$convoy" ]; then row=$(jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg c "$convoy" --arg rt "$routed" --arg er "$exec_routed" --arg sd "$settled" --arg tk "$takeaway" --arg sn "$sname" --arg si "$sid" --arg br "$br" --argjson lb "${lbl:-[]}" '[{id:$i,status:$s,assignee:$a,labels:$lb,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.takeaway":$tk,"gc.takeaway_settled":$sd,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br}}]')
+    else row=$(jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg rt "$routed" --arg er "$exec_routed" --arg sd "$settled" --arg tk "$takeaway" --arg sn "$sname" --arg si "$sid" --arg br "$br" --argjson lb "${lbl:-[]}" '[{id:$i,status:$s,assignee:$a,labels:$lb,metadata:{"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.takeaway":$tk,"gc.takeaway_settled":$sd,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br}}]'); fi
     printf '%s\n' "$row" ;;
   "bd close")
     printf '%s\n' "$*" >> "$FAKE_CLOSES" ;;
@@ -204,6 +207,14 @@ case "$1 ${2:-}" in
     # a bead fails to land, and FAKE_UPDATE_RC refuses every update.
     case "$3" in *NOPIN*) exit 1 ;; esac
     [ -z "${FAKE_UPDATE_RC:-}" ] || exit "$FAKE_UPDATE_RC"
+    # A --remove-label lands on FAKE_LABELS, by the label's exact text.
+    _prev=""
+    for a in "$@"; do
+      if [ "$_prev" = "--remove-label" ] && [ -n "${FAKE_LABELS:-}" ]; then
+        { grep -v -F -x "$3|$a" "$FAKE_LABELS" || true; } > "$FAKE_LABELS.tmp"; mv "$FAKE_LABELS.tmp" "$FAKE_LABELS"
+      fi
+      _prev="$a"
+    done
     # The keys a release writes land here, so a read of the bead sees them.
     for a in "$@"; do
       case "$a" in
@@ -276,7 +287,7 @@ export FAKE_STEPS_JSON="$TMP/steps.json" FAKE_ROOTS="$TMP/roots" \
        FAKE_EXEC="$TMP/exec" \
        FAKE_SNAME="$TMP/sname" FAKE_SID="$TMP/sid" FAKE_DEPLISTS="$TMP/deplists" \
        FAKE_BRANCHES="$TMP/branches" FAKE_ASSIGNEES="$TMP/assignees" \
-       FAKE_CONVOY_CALLS="$TMP/convoy-calls"
+       FAKE_CONVOY_CALLS="$TMP/convoy-calls" FAKE_LABELS="$TMP/labels"
 mkdir -p "$TMP/rig-a/.beads" "$TMP/deplists"
 # What holds a bead is the answer of gctk bead holds, built from this checkout
 # and run over the dep-list fixtures below.
@@ -788,6 +799,46 @@ eq "$(grep -cE "^bd update A-PARKED( |\$)" "$TMP/updates" || true)" "1" \
 grep -q "released to $POOL" "$TMP/rout" \
   && ok "(ROUTEONE) …and says where the bead went" \
   || bad "(ROUTEONE) the success line lost the route (stdout: $(cat "$TMP/rout"))"
+
+# ── takeaway --release to a pool or an agent: the hold lifts ──────────────────
+# Sending a held bead on is a placement, and Gas City serves no bead a hold
+# label holds, so a --release with --route or --assign lifts hold:mayor in its
+# own write. Covered:
+#   (HOLDROUTE)  --route removes each spelling of hold:mayor in the release write
+#   (HOLDAGENT)  --assign does the same
+#   (HOLDPARK)   a release back to the person keeps the hold
+printf 'A-PARKED|hold:mayor\nA-PARKED|Hold:Mayor\nA-PARKED|learning\n' > "$TMP/labels"
+: > "$TMP/updates"; printf '%s' "$POOL" > "$TMP/routed"
+HRC=0
+sh "$SCRIPT" takeaway A-PARKED "placed — routed to the polecat pool" --release --route "$POOL" >"$TMP/hout" 2>"$TMP/herr" || HRC=$?
+eq "$HRC" "0" "(HOLDROUTE) a release to a pool of a held bead exits 0"
+HLINE="$(grep -E "^bd update A-PARKED( |\$)" "$TMP/updates" | head -n1)"
+case "$HLINE" in
+  *"--set-metadata gc.routed_to=$POOL"*"--remove-label hold:mayor --remove-label Hold:Mayor"*) ok "(HOLDROUTE) the release write that routes the bead also lifts each spelling of its hold" ;;
+  *) bad "(HOLDROUTE) the lift did not ride the release write (got: ${HLINE:-<none>})" ;;
+esac
+eq "$(cat "$TMP/labels")" "A-PARKED|learning" "(HOLDROUTE) the hold is gone and the other labels stay"
+grep -q 'hold:mayor lifted' "$TMP/hout" \
+  && ok "(HOLDROUTE) the success line says the hold was lifted" \
+  || bad "(HOLDROUTE) the success line does not say so: $(cat "$TMP/hout")"
+cp "$TMP/assignees" "$TMP/assignees.hold"
+printf 'A-PARKED|gc-toolkit.mechanik\n' >> "$TMP/assignees"
+printf 'A-PARKED|hold:mayor\n' > "$TMP/labels"
+: > "$TMP/updates"; : > "$TMP/routed"
+sh "$SCRIPT" takeaway A-PARKED "a city.toml edit, mechanik's" --release --assign gc-toolkit.mechanik --no-wait >/dev/null 2>&1 || true
+HLINE="$(grep -E "^bd update A-PARKED( |\$)" "$TMP/updates" | head -n1 || true)"
+grep -q -- '--remove-label hold:mayor' <<< "$HLINE" \
+  && ok "(HOLDAGENT) a release to a named agent lifts the hold in the same write" \
+  || bad "(HOLDAGENT) no lift in the release write: $(head -n1 "$TMP/updates")"
+cp "$TMP/assignees.hold" "$TMP/assignees"
+printf 'A-PARKED|hold:mayor\n' > "$TMP/labels"
+: > "$TMP/updates"; : > "$TMP/routed"
+sh "$SCRIPT" takeaway A-PARKED "back to the person" --release --no-wait >/dev/null 2>&1 || true
+grep -q -- '--remove-label' "$TMP/updates" \
+  && bad "(HOLDPARK) a release back to the person lifted the hold: $(cat "$TMP/updates")" \
+  || ok "(HOLDPARK) a release back to the person keeps the hold"
+eq "$(cat "$TMP/labels")" "A-PARKED|hold:mayor" "(HOLDPARK) …and the label stands"
+: > "$TMP/labels"; : > "$TMP/routed"
 
 # (REFUSED) the update's exit is the verdict on the whole stamp.
 : > "$TMP/updates"; : > "$TMP/deps"; : > "$FAKE_CANCELS"

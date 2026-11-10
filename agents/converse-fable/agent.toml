@@ -7,7 +7,7 @@
 # field rationale is documented on converse-opus.
 scope = "rig"
 provider = "claude"
-option_defaults = { model = "fable-5" }
+option_defaults = { model = "claude-fable-5-2" }
 prompt_template = "agents/_converse/prompt.template.md"
 work_dir = ".gc/worktrees/{{.Rig}}/converse-fable/{{.AgentBase}}"
 pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync"]

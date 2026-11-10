@@ -1,7 +1,7 @@
 # gc-toolkit — primary pack for a Gas City city. Native roster, no pack imports.
 #
 # Every agent this pack runs ships under agents/<name>/ (polecat, refinery,
-# witness, deacon, mechanik, polecat-codex, proactive, dog, demo, and the
+# witness, deacon, mechanik, po, polecat-codex, proactive, dog, demo, and the
 # converse-opus, converse-fable and converse-codex sittings). There is no
 # gastown import and there are no cross-pack prompt patches: each agent's
 # prompt.template.md is purpose-written and injects shared doctrine from
@@ -89,6 +89,10 @@ name = "mechanik"
 overlay_dir = "overlays/gh-origin-guard"
 
 [[patches.agent]]
+name = "po"
+overlay_dir = "overlays/gh-origin-guard"
+
+[[patches.agent]]
 name = "proactive"
 overlay_dir = "overlays/gh-origin-guard"
 
@@ -103,6 +107,14 @@ overlay_dir = "overlays/gh-origin-guard"
 template = "mechanik"
 scope = "city"
 mode = "always"
+
+# The po runs only while the operator holds a sitting, which a nudge and then
+# an attach open, its idle limit puts to sleep and a drain-ack ends
+# (agents/po/agent.toml).
+[[named_session]]
+template = "po"
+scope = "city"
+mode = "on_demand"
 
 [[named_session]]
 template = "refinery"

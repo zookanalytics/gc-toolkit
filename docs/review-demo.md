@@ -57,12 +57,12 @@ shows fixture data.
 ## Reports a command prints
 
 Run the reviewed commit's script from the reviewed worktree, for example
-`terminal --command "assets/scripts/gc-helm.sh unplaced" --cwd <worktree>`.
+`terminal --command "assets/scripts/deferred-dispatch.sh list" --cwd <worktree>`.
 These scripts read the city through `gc`, which a capture cannot reach, so give
 the command fixture data: put a `gc` stub first on its PATH that answers from
 fixture JSON, as the script's own test suite does
-(`assets/scripts/gc-helm-unplaced.test.sh` builds one for `gc-helm.sh
-unplaced`). Keep the stub and its JSON in the review workspace beside the PNG.
+(`assets/scripts/deferred-dispatch.test.sh` builds one for `deferred-dispatch.sh
+list`). Keep the stub and its JSON in the review workspace beside the PNG.
 The verdict says the report shows fixture data.
 
 ## Markdown the city posts

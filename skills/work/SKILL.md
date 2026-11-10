@@ -27,10 +27,11 @@ File a bead for the work. The worker reads its description to learn what to do:
 gc bd create "<title>" -t task -d "<what needs doing, why, and what done looks like>" --json
 ```
 
-Add `--parent <epic>` when an epic applies, and
-`--metadata '{"placement":"pending"}'` when the bead may not be sent yet
-(below). Filing starts nothing: afterwards, send the bead, make it wait (the
-waits skill), or leave it for the operator to place.
+Add `--parent <epic>` when an epic applies, and `--labels hold:mayor` when the
+bead may not be sent yet (below). A bead that already exists is held with
+`gc bd set-state <id> hold=mayor --reason "<why it waits for placement>"`.
+Filing starts nothing: afterwards, send the bead, make it wait (the waits
+skill), or leave it for the operator to place.
 
 - **File it in the store of the pool that will work it.** A pool reads only its
   own rig's store, so a city-scoped session names the rig:
@@ -72,8 +73,10 @@ waits skill), or leave it for the operator to place.
   operator routed in a sitting (a converse session with the operator), by hand
   or by Accept. An emergency is a check that fails on the default branch's head,
   confirmed by reading that check. Other critical work runs now only when the
-  operator routes it. File any other bead with `placement=pending` in its create
-  and no route or arm: the operator decides where it goes.
+  operator routes it. File any other bead with Gas City's `hold:mayor` label in
+  its create and no route or arm: the operator decides where it goes.
+  `gc beads list --label hold:mayor` lists each bead filed so that still waits,
+  in every rig.
 
 ### File a Delivery
 
@@ -168,6 +171,18 @@ gc sling <rig>/<pool> <bead> --on <formula>
 With no `--on`, the sling runs the pool's `default_sling_formula`, which for a
 polecat pool is `mol-polecat-work`.
 
+- **A held bead is placed, never slung.** A bead carrying `hold:mayor` waits
+  for the operator's placement, and a sling reads no hold, so it would start
+  the work with the label left on and the bead still in the queue. Once the
+  operator has placed it, carry that out with
+  `"$(gc <binding> scripts-dir)/gc-helm.sh" place <bead> --under <parent>`,
+  where the parent is the epic, or its open Delivery whose aim covers the bead,
+  or with `--standalone` for no parent. It sets the parent, settles the
+  priority, slings the bead to its rig's polecat pool, or arms it while a park
+  or a blocker holds it, and then lifts the hold. `--route <rig>/<pool>` and
+  `--on <formula>` send it elsewhere, and `--shift <±n>` ranks it against its
+  parent. Running it again after a failure finishes the placement without a
+  second run.
 - **One dispatch, never two.** A sling starts a workflow on the bead and sets
   `gc.execution_routed_to` on it. Setting `gc.routed_to=<pool>` by hand has the
   pool claim the bead itself. Arming the bead (`deferred-dispatch.sh arm`) has

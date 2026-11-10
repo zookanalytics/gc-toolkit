@@ -130,7 +130,7 @@ CITY="$TMP/city"
 PACK="$CITY/rigs/gc-toolkit/assets/scripts"
 mkdir -p "$PACK" "$TMP/bin"
 cp "$HERE/direct-merge-push.sh" "$HERE/bd-lib.sh" "$HERE/refinery-workspace.sh" "$HERE/detached-job.sh" "$HERE/rig-root.sh" \
-  "$HERE/await-ruling.sh" "$HERE/deferred-dispatch.sh" "$PACK/"
+  "$HERE/await-ruling.sh" "$HERE/deferred-dispatch.sh" "$HERE/dispatch-path.sh" "$PACK/"
 # The pass reads what holds the work through gctk bead holds, built from this
 # checkout and run over the stub store the gc below keeps.
 export HOLDS_STUB="$HERE/holds-store.stub.sh" GC_NO_API=1
