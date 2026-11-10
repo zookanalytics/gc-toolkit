@@ -419,9 +419,10 @@ first. Either way the change is a decision on the record, not a drift.
   the PR and has routed its feedback, and everything else those rules require is
   met there. Until then it reads pending, never failure. A post GitHub leaves
   unanswered is waited out, for its time limit and the ten seconds GitHub gives
-  a request, before the city posts again, so only a success that GitHub creates
-  later than that can land after a newer post of the city's, such as a pending
-  for a hold the city has read since.
+  a request, before the city reads or posts in that repository again, so only a
+  post that GitHub creates later than that can land after a newer post of the
+  city's. When such a post is a success, it can let a PR merge over a hold the
+  city has read since.
 - **Only the city's account may bypass an integration branch's rules,** so its
   own pushes there, such as a `direct` landing, land while every PR into the
   branch waits for the city's status.

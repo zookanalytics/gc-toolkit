@@ -480,8 +480,8 @@ record (below) and before it reads anything else:
    seconds more. GitHub terminates a request that it takes more than ten
    seconds to process ([Troubleshooting the REST
    API](https://docs.github.com/en/rest/using-the-rest-api/troubleshooting-the-rest-api)),
-   so a post that reached GitHub within its time limit has been created by then,
-   or never will be.
+   so a post that reached GitHub within its own time limit has been created by
+   then, or never will be, as long as GitHub keeps to its ten seconds.
 2. It runs the projection at the record's commit, which replaces a status that
    GitHub created late where it differs from the verdict there, and then
    removes the record.
