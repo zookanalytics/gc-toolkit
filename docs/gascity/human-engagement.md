@@ -589,12 +589,14 @@ supervisor. The attach also starts a runtime from its own process when the
 runtime stops between the attach's check that it runs and the attach itself. A
 session found running is attached through the session's own handle, which
 starts a runtime it finds stopped once no stop is pending on the session's
-record, and only `--no-start` attaches it through the runtime-only handle. That
-span holds the build of the handle and one read of the session's record, and
-only a stop that completes inside it makes the attach start the runtime. A
-start from the attach's own process resumes
-the provider's conversation when the session keeps a session key. A session
-that a drain-ack ended under
+record, and only `--no-start` attaches it through the runtime-only handle.
+Between the attach's first check and the attach, Gas City builds the handle and
+the command a start would run, each of which reads the session's record, reads
+the record once more, and checks again whether the runtime runs. Once that
+second check finds the runtime running, the attach starts nothing, so only a
+stop that completes in that span makes the attach start the runtime. A start
+from the attach's own process resumes the provider's conversation when the
+session keeps a session key. A session that a drain-ack ended under
 `wake_mode = "fresh"` keeps none, because the drain-ack's patch clears it, so
 the attach starts a new conversation with no first message. Its prompt can then
 reach it only as session-start hook context, and `gc prime --hook` primes only
@@ -607,14 +609,16 @@ and `attachOnceControllerStarts` (`cmd/gc/cmd_session.go`),
 `sessionStartAwaitsSupervisor` (`cmd/gc/cmd_supervisor_city.go`), `preWakePatch`
 (`cmd/gc/session_wake.go`), `PreWakePatch` and `AcknowledgeDrainPatch`
 (`internal/session/lifecycle_transition.go`), `primeHookLiveManagedSession`
-(`cmd/gc/cmd_prime.go`), `Manager.Attach` (`internal/session/manager.go`) and
-`startRefusal` and `ensureRunningOn` (`internal/session/chat.go`), read at
-upstream `8b1d799b8` on 2026-11-10. The attach
-took this shape in `64ba02c02` (#9011, 2026-11-09). The fork `cb80c5354`, the
-build the city ran that day, predates it: its attach starts a session that is
-not running from its own process whether or not a controller runs
-(`Manager.Attach` in `internal/session/manager.go`, and `ensureRunningOn` in
-`internal/session/chat.go`).
+(`cmd/gc/cmd_prime.go`), `SessionByHandle` (`internal/worker/factory.go`),
+`SessionHandle.Attach` and `startCommand`
+(`internal/worker/handle_lifecycle.go`), `Manager.Attach`
+(`internal/session/manager.go`) and `startRefusal`, `ensureRunningOn` and
+`ensureLive` (`internal/session/chat.go`), read at upstream `8b1d799b8` on
+2026-11-10. The attach took this shape in `64ba02c02` (#9011, 2026-11-09).
+The fork `cb80c5354`, the build the city ran that day, predates it: its attach
+starts a session that is not running from its own process whether or not a
+controller runs (`Manager.Attach` in `internal/session/manager.go`, and
+`ensureRunningOn` in `internal/session/chat.go`).
 
 ## Refresh procedure
 
