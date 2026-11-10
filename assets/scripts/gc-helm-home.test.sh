@@ -54,7 +54,7 @@ hasnt() { case "$1" in *"$2"*) bad "$3 (unexpected '$2' in: $1)" ;; *) ok "$3" ;
 unset GC_CITY_PATH GC_CITY GC_CITY_ROOT GC_RIG BEADS_DIR GC_HELM_FIXTURE GC_HELM_ASSUME_TTY GC_HELM_FORM_BIN || true
 unset GC_HELM_ENGAGE_WAIT_TIMEOUT FAKE_CLOCK FAKE_CLOCK_SCALE || true
 export CALLS="$TMP/calls" POLLS="$TMP/polls" STATE="$TMP/state"
-mkdir -p "$TMP/bin" "$STATE" "$TMP/agents/converse-opus"
+mkdir -p "$TMP/bin" "$STATE" "$TMP/agents/converse-claude-opus"
 export GC_HELM_AGENTS_DIR="$TMP/agents" TMPDIR="$TMP"
 
 # The stub answers `gc session list --json` with the seat $SEAT's row walking
@@ -161,7 +161,7 @@ set +e
 OUT="$(GC_HELM_ASSUME_TTY=1 GC_HELM_FORM_BIN="$TMP/bin/form-stub" sh "$SCRIPT" </dev/null 2>&1)"; RC=$?
 set -e
 eq "$RC" 0 "(HOME) a bare gc-helm on a terminal runs the form"
-eq "$(paste -s -d'|' - < "$FORM_ARGV_FILE" 2>/dev/null || true)" "form|--helm|$SCRIPT_REAL|--models|opus|--home" "(HOME) …on its home page, handed this script's path"
+eq "$(paste -s -d'|' - < "$FORM_ARGV_FILE" 2>/dev/null || true)" "form|--helm|$SCRIPT_REAL|--models|claude-opus|--home" "(HOME) …on its home page, handed this script's path"
 reset
 set +e
 OUT="$(GC_HELM_FORM_BIN="$TMP/bin/form-stub" sh "$SCRIPT" </dev/null 2>&1)"; RC=$?
