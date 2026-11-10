@@ -33,8 +33,13 @@ gc bd dep add <bead> <retiring-bead> --type=blocks
 Write the edge only when both beads carry one id prefix, and arm it only once
 the add exits 0, as the `gc-toolkit.waits` skill says. A
 first reaction does the same through its close exit, with
-`--waiting-on <retiring-bead>`. A problem that hurts the operator now gets the
-smallest stopgap that stops the harm, and no new test suite.
+`--waiting-on <retiring-bead>`. A bead that carries `hold:mayor` keeps its arm
+until the hold lifts, so once the arm lands, lift the hold: list its labels
+(`gc bd label list <bead>`) and remove each one that spells `hold:mayor` in any
+case, one `--remove-label` each
+(`gc bd update <bead> --remove-label hold:mayor`), because bd removes a label
+only by its exact text. A problem that hurts the operator now gets the smallest
+stopgap that stops the harm, and no new test suite.
 
 An epic is held to the plan as well. When you file an epic for this repository
 or review one, read its boundaries against the schedule, because a scheduled

@@ -5,8 +5,9 @@
 # at a non-open status), the narrowing exemptions (still waiting on its own open
 # blocker; dispatchable only recently, within the reconcile window; armed only
 # recently, after its blockers closed; mid-dispatch via a slung marker;
-# delivered via merge_result; closed; assigned; capped at the configured
-# sling-failure cap, which reconcile has already escalated), the fail-closed
+# delivered via merge_result; closed; assigned; held by a hold label, which
+# reconcile slings no bead past; capped at the configured sling-failure cap,
+# which reconcile has already escalated), the fail-closed
 # probes (unreadable blocker listing, unreadable or non-array armed listing,
 # unreadable rig list, an unresolvable blocker of the arm's own, a scan that
 # cannot report, no scratch directory), the stderr each failed read reports,
@@ -247,6 +248,8 @@ astatus() { printf '{"id":"%s","status":"%s","metadata":{"gc.dispatch_when_ready
 aslung()  { printf '{"id":"%s","status":"open","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_slung":"slinging@2020-01-01T00:00:00Z"}}' "$1"; }
 amr()     { printf '{"id":"%s","status":"open","metadata":{"gc.dispatch_when_ready":"rig/pool","merge_result":"pull_request"}}' "$1"; }
 aassigned() { printf '{"id":"%s","status":"open","assignee":"rig/rig.refinery","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_armed_at":"%s"}}' "$1" "${2:-2020-01-01T00:00:00Z}"; }
+# alabelled <id> <label> — an open, unassigned arm carrying that label.
+alabelled() { printf '{"id":"%s","status":"open","labels":["learning","%s"],"metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_armed_at":"2020-01-01T00:00:00Z"}}' "$1" "$2"; }
 # A capped arm: fail count defaults to the cap (3); $2 overrides it. Paired with
 # a long-closed own blocker it would read as owed-but-not-firing without the cap
 # exemption.
@@ -359,6 +362,25 @@ blockers_store alpha "$(b_closed b-0 "$OLD")"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "an assigned (HELD) arm is not owed a dispatch, not flagged"
 hasnt "$OUT" "alpha bead a-7b" "a handed-off/held arm is not reported as owed"
+clear_stores
+
+# --- 7b'. EXEMPT: an arm a hold label holds — reconcile slings no held bead ---
+# Its own blocker closed long ago, so without the label it is owed; the label
+# is Gas City's hold, in either value and any case, which no sling reads.
+for lbl in hold:mayor ' Hold:External'; do
+    armed_store alpha "$(alabelled a-7h "$lbl")"
+    edges_store alpha "$(e_blk a-7h b-0)"
+    blockers_store alpha "$(b_closed b-0 "$OLD")"
+    OUT=$(run_check); RC=$?
+    eq "$RC" "0" "an arm carrying '$lbl' is not owed a dispatch, not flagged"
+    hasnt "$OUT" "alpha bead a-7h" "…and is not reported as owed"
+    clear_stores
+done
+armed_store alpha "$(alabelled a-7h hold:po)"
+edges_store alpha "$(e_blk a-7h b-0)"
+blockers_store alpha "$(b_closed b-0 "$OLD")"
+OUT=$(run_check); RC=$?
+has "$OUT" "alpha bead a-7h" "a label that only resembles a hold leaves the arm owed"
 clear_stores
 
 # --- 7c. EXEMPT: a capped arm whose own blockers closed long ago — the reconcile

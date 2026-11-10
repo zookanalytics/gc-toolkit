@@ -51,8 +51,9 @@
 # bead, to refuse a second run of its formula, and work-setup.sh takes the runs that
 # work a bead whose tree holds a branch, to tell a sibling from a tree left behind.
 # gate-ensure.sh takes the runs poured over a review, live or not, to judge whether a pour still drives it.
-# gc-helm.sh ends the live runs beneath an anchor it releases, and its park
-# survey applies run_rows to the listing it reads to find a bead's workflows.
+# gc-helm.sh ends the live runs beneath an anchor it releases, its park
+# survey applies run_rows to the listing it reads to find a bead's workflows,
+# and its place takes a live run that works a bead as a dispatch already made.
 # queue-priority.sh takes the live runs that work a bead it settles, to write
 # their convoys, roots and steps, and priority-lib.sh follows a root to the
 # convoy it names and a convoy to the bead it tracks through run_convoy and
@@ -65,6 +66,8 @@
 # works is not reported stranded.
 # doctor/check-root-advancing takes the run of each stalled root to read
 # whether its work has landed.
+# doctor/check-po-queue-only takes the map of each store that holds a bead in
+# the po's queue, to find a held bead a live run already works.
 # tools/gc-proactive.sh drops the beads the map's live runs work from a scan,
 # and refuses a first reaction to a bead a live run works.
 # blocker-holder.sh takes the runs that work each live blocker of an anchor

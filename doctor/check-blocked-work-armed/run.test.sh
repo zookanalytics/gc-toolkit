@@ -4,14 +4,13 @@
 # (blocked plainly-work bead with neither route nor arm, including one carrying
 # only gc.execution_routed_to — provenance, not a dispatch path — and one whose
 # route or arm holds only whitespace), every exemption (routed, armed, assigned,
-# worked by a live run, merge anchor, waiting for placement, held by a converse
-# sitting's gate, review/step/workflow metadata, every standing kind,
-# decision/epic/infra types), a marked bead placed under an epic, the per-rig
-# labelling, the remedy string, the fail-closed probes (unreadable blocked
-# listing, unreadable runs, unreadable marked listing, a marked listing that
-# fails after printing its rows, unreadable gate listing, unreadable rig list),
-# a raw control byte in a listing's row, and the quiet paths (empty store,
-# all-armed store).
+# worked by a live run, merge anchor, held by either hold label in any case,
+# held by a converse sitting's gate, review/step/workflow metadata, every
+# standing kind, decision/epic/infra types), a bead carrying only the retired
+# placement marker, the per-rig labelling, the remedy string, the fail-closed
+# probes (unreadable blocked listing, unreadable runs, unreadable gate listing,
+# unreadable rig list), a raw control byte in a listing's row, and the quiet
+# paths (empty store, all-armed store).
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECK="$HERE/run.sh"
@@ -45,16 +44,9 @@ name=$(basename "$(dirname "$db")")
 case "$sub" in
   blocked) [ "$name" = "${BD_FAIL_BLOCKED:-}" ] && exit 3
            f="$STORES/$name.blocked.json"; if [ -f "$f" ]; then cat "$f"; else printf '[]'; fi ;;
-  # `list --metadata-field placement=pending` is the placement step's read of the
-  # marked beads, in the shape `bd list` prints (a parent included); each one is
-  # logged so a case can tell whether the check made it. BD_PARTIAL_MARKED names
-  # a store whose listing prints its rows and then fails.
+  # The check judges every candidate on the `bd blocked` row, a hold included,
+  # so the one listing of its own it makes is the read of the store's gates.
   list) case " $* " in
-          *" placement=pending "*)
-            printf '%s\n' "$name" >> "$STORES/marked.calls"
-            [ "$name" = "${BD_FAIL_MARKED:-}" ] && exit 3
-            f="$STORES/$name.marked.json"; if [ -f "$f" ]; then cat "$f"; else printf '[]'; fi
-            if [ "$name" = "${BD_PARTIAL_MARKED:-}" ]; then exit 3; fi ;;
           # `list --type gate` is the read of the store's gates; each one is
           # logged, and BD_FAIL_GATES names a store whose listing fails. It
           # answers in bd's scope: with no --status and no --all, bd leaves out
@@ -95,7 +87,7 @@ run_check() {
     RIGS_JSON="${RIGS_JSON:-$TMP/rigs.json}" GC_PACK_DIR="$TMP/pack" bash "$CHECK" 2>&1
 }
 blocked_store() { local n="$1"; shift; local IFS=,; printf '[%s]' "$*" > "$TMP/stores/$n.blocked.json"; }
-clear_stores() { rm -f "$TMP/stores/"*.json "$TMP/stores/marked.calls" "$TMP/stores/gates.calls"; }
+clear_stores() { rm -f "$TMP/stores/"*.json "$TMP/stores/gates.calls"; }
 gates_store() { local n="$1"; shift; local IFS=,; printf '[%s]' "$*" > "$TMP/stores/$n.gates.json"; }
 gate_reads() { if [ -f "$TMP/stores/gates.calls" ]; then wc -l < "$TMP/stores/gates.calls" | tr -d ' '; else echo 0; fi; }
 # hgate <id> <key> [<status>] — a human gate filed under <key>, open unless
@@ -103,8 +95,6 @@ gate_reads() { if [ -f "$TMP/stores/gates.calls" ]; then wc -l < "$TMP/stores/ga
 # flag is set.
 hgate() { printf '{"id":"%s","status":"%s","issue_type":"gate","await_type":"human","await_id":"%s"}' "$1" "${3:-open}" "$2"; }
 hgate_flagged() { printf '{"id":"%s","status":"open","pinned":true,"issue_type":"gate","await_type":"human","await_id":"%s"}' "$1" "$2"; }
-marked_store() { local n="$1"; shift; local IFS=,; printf '[%s]' "$*" > "$TMP/stores/$n.marked.json"; }
-marked_reads() { if [ -f "$TMP/stores/marked.calls" ]; then wc -l < "$TMP/stores/marked.calls" | tr -d ' '; else echo 0; fi; }
 
 # A blocked plainly-work bead: type task, unassigned, no route/arm — a FINDING.
 bwork()   { printf '{"id":"%s","status":"open","assignee":"","issue_type":"task","title":"do the thing","blocked_by":["x-0"],"metadata":{}}' "$1"; }
@@ -275,79 +265,50 @@ blocked_store alpha "$(barmed a-1)"
 eq "$(run_check >/dev/null; echo $?)" "0" "a blocked bead already armed (gc.dispatch_when_ready) is not flagged"
 clear_stores
 
-# A bead intake held for the operator's placement sitting gets its dispatch when
-# the sitting places it, so blocked-and-unrouted is not the anti-pattern for it,
-# and the arm remedy would start work the operator has not placed. A marker that
-# is not pending exempts nothing. `bd blocked` prints no parent, so each blocked
-# row below carries none, the way the live listing prints it; the marked beads'
-# own `bd list` row is the one that can name a parent.
-# bmarked <id> [<parent by dependency>] [<parent by .parent>] — a marked bead's
-# `bd list` row.
-bmarked() {
-    jq -nc --arg id "$1" --arg dep "${2:-}" --arg par "${3:-}" '
-        {id: $id, status: "open", assignee: "", issue_type: "task", metadata: {placement: "pending"},
-         dependencies: ([{depends_on_id: "x-0", type: "blocks"}]
-                        + (if $dep != "" then [{depends_on_id: $dep, type: "parent-child"}] else [] end))}
-        + (if $par != "" then {parent: $par} else {} end)'
-}
-blocked_store alpha "$(bmeta a-1 placement pending)"
-marked_store  alpha "$(bmarked a-1)"
+# A held bead carries one of Gas City's hold labels: intake holds new work for
+# the operator's placement sitting with hold:mayor, and its dispatch comes once
+# the sitting places it and the hold is lifted, so blocked-and-unrouted is not
+# the anti-pattern for it, and the arm remedy would start work the operator has
+# not placed. `bd blocked` prints a bead's labels, so the row it gives is the
+# one judged, and the check reads no other listing (the stub fails one).
+# bheld <id> <label> — a blocked bead carrying that label.
+bheld() { printf '{"id":"%s","status":"open","assignee":"","issue_type":"task","blocked_by":["x-0"],"labels":["learning","%s"],"metadata":{}}' "$1" "$2"; }
+blocked_store alpha "$(bheld a-1 hold:mayor)"
 OUT=$(run_check); RC=$?
-eq "$RC" "0" "a blocked bead waiting for placement (placement=pending) is not flagged"
+eq "$RC" "0" "a blocked bead held for placement (hold:mayor) is not flagged"
 hasnt "$OUT" "deferred-dispatch.sh arm a-1" "…and draws no arm remedy"
-eq "$(marked_reads)" "1" "…judged on the marked beads' own listing, read once for the store"
+hasnt "$OUT" "unexpected list" "…judged on the blocked listing's own row"
 clear_stores
-blocked_store alpha "$(bmeta a-1 placement placed)"
-eq "$(run_check >/dev/null; echo $?)" "1" "a placement marker that is not pending exempts nothing"
-eq "$(marked_reads)" "0" "…and with no marked candidate the marked beads are not read"
+blocked_store alpha "$(bheld a-1 ' Hold:External')"
+eq "$(run_check >/dev/null; echo $?)" "0" "a bead under Gas City's other hold, its label in another case, is not flagged"
 clear_stores
-# Placed under an epic, the bead is work again, marker or not: the sitting placed
-# it, and a placed bead with no route or arm strands when its blocker closes.
-# Either shape `bd list` prints a parent in places it.
-blocked_store alpha "$(bmeta a-1 placement pending)" "$(bmeta a-2 placement pending)"
-marked_store  alpha "$(bmarked a-1 "" tk-epic)" "$(bmarked a-2 tk-epic)"
+# The placement marker is retired: a bead that carries it and no hold label
+# holds nothing, so it is work like any other and owes a dispatch path.
+blocked_store alpha "$(bmeta a-1 placement pending)"
 OUT=$(run_check); RC=$?
-eq "$RC" "1" "a bead placed under an epic is flagged even with its marker left behind"
-has "$OUT" "deferred-dispatch.sh arm a-1" "…placed by .parent, it draws the arm remedy"
-has "$OUT" "deferred-dispatch.sh arm a-2" "…placed by a parent-child dependency, so does it"
+eq "$RC" "1" "a blocked bead carrying only the retired placement marker is flagged"
+has "$OUT" "deferred-dispatch.sh arm a-1" "…and draws the arm remedy"
 clear_stores
-# When the marked beads cannot be read, a marked candidate is unverifiable: it
-# may still wait for the sitting, so it is warned and NOT flagged.
-blocked_store alpha "$(bmeta a-1 placement pending)"
-OUT=$(BD_FAIL_MARKED=alpha run_check); RC=$?
-eq "$RC" "1" "an unreadable marked listing makes the pass report (exit 1)"
-has "$OUT" "could not be read" "…it says the placement could not be read"
-has "$OUT" "NOT flagged" "…and that it withheld the flag"
-hasnt "$OUT" "no dispatch path" "…as a warning, not a stranded-work finding"
-hasnt "$OUT" "deferred-dispatch.sh arm a-1" "…with no arm remedy"
-clear_stores
-# A listing that prints its rows and then fails has not answered for the store,
-# so its rows vouch for nothing: the candidate is warned, not exempted.
-blocked_store alpha "$(bmeta a-1 placement pending)"
-marked_store  alpha "$(bmarked a-1)"
-OUT=$(BD_PARTIAL_MARKED=alpha run_check); RC=$?
-eq "$RC" "1" "a marked listing that prints rows and then fails makes the pass report (exit 1)"
-has "$OUT" "could not be read" "…it says the placement could not be read, whatever the rows said"
-hasnt "$OUT" "deferred-dispatch.sh arm a-1" "…with no arm remedy"
+blocked_store alpha "$(bheld a-1 hold:po)"
+eq "$(run_check >/dev/null; echo $?)" "1" "a label that only resembles a hold exempts nothing"
 clear_stores
 
 # --- a raw control byte in one row does not void its listing -----------------
 # Each listing is scrubbed before jq first reads it, its type check included, so
 # one bead whose title carries a raw control byte leaves the rest judged: the
-# store is checked, and a marked candidate's placement is read. The runs are
-# run-lib.sh's reads, which run-lib.test.sh scrubs.
-CTL_ROW=$(printf '{"id":"a-9","status":"open","assignee":"someone/else","issue_type":"task","title":"bell\001here","metadata":{"placement":"pending"}}')
+# store is checked, and a held candidate stays exempt. The runs are run-lib.sh's
+# reads, which run-lib.test.sh scrubs.
+CTL_ROW=$(printf '{"id":"a-9","status":"open","assignee":"someone/else","issue_type":"task","title":"bell\001here","metadata":{}}')
 blocked_store alpha "$(bwork a-1)" "$CTL_ROW"
 OUT=$(run_check); RC=$?
 eq "$RC" "1" "a blocked listing with a raw control byte in a title is still judged (exit 1)"
 has "$OUT" "deferred-dispatch.sh arm a-1" "…its stranded bead is flagged"
 hasnt "$OUT" "NOT checked" "…rather than the store reported unchecked"
 clear_stores
-blocked_store alpha "$(bmeta a-1 placement pending)"
-marked_store  alpha "$(bmarked a-1)" "$CTL_ROW"
+blocked_store alpha "$(bheld a-1 hold:mayor)" "$CTL_ROW"
 OUT=$(run_check); RC=$?
-eq "$RC" "0" "a marked listing with a raw control byte in a title still judges the placement"
-hasnt "$OUT" "could not be read" "…so a bead that waits for the sitting is not warned as unverifiable"
+eq "$RC" "0" "a held bead beside a raw control byte in another row's title is still judged held"
+hasnt "$OUT" "NOT checked" "…rather than the store reported unchecked"
 clear_stores
 
 blocked_store alpha "$(bassigned a-1)"

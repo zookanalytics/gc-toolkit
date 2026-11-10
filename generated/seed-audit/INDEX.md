@@ -46,6 +46,7 @@ when one is named, and are not committed:
 - [`gemini`](agents/gemini.md)
 - [`keeper`](agents/keeper.md)
 - [`mechanik`](agents/mechanik.md)
+- [`po`](agents/po.md)
 - [`polecat`](agents/polecat.md)
 - [`polecat-codex`](agents/polecat-codex.md)
 - [`proactive`](agents/proactive.md)
@@ -112,6 +113,7 @@ runs to re-prime after compaction.
 | gemini | `city`, `gascity`, `gc-toolkit` | 1 | _none_ |
 | keeper | `gascity` | 1 | _none_ |
 | mechanik | `city` | 1 | _none_ |
+| po | `city` | 1 | _none_ |
 | polecat **DIVERGES** | `gc-toolkit` | 2 | _none_ |
 |  | `gascity` | 2 | `rebase-conventions`, `polecat-patterns` |
 | polecat-codex | `gascity`, `gc-toolkit` | 1 | _none_ |

@@ -2,9 +2,9 @@
 # Thin wiring check: every human gate the refinery patrol files goes through
 # assets/scripts/human-gate.sh (one open gate per bead and situation key), and
 # the condition it reports with no bead of its own, a session started with an
-# empty GC_AGENT, is a patrol finding: human-gate.sh refuses a session id. A
-# bare `gc mail send` in the formula dedups nothing, and there is no mayor
-# mailbox to absorb it.
+# empty GC_AGENT, is a patrol finding: human-gate.sh refuses a session id. The
+# formula carries no `gc mail send`, because the po's mailbox is not an
+# escalation channel.
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$HERE/../.."

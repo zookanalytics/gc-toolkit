@@ -69,7 +69,7 @@ pre	review	^agents/(polecat-codex|demo)/
 pre	merge	^agents/refinery/
 pre	patrol	^agents/(witness|deacon|dog)/
 pre	engagement	^agents/
-pre	engagement	^skills/(converse-|session-title/)
+pre	engagement	^skills/(converse-|session-title/|backlog-refinement/)
 pre	review	^skills/(review-|specialist-stance/|demo-capture/|gc-demo-script/)
 pre	feedback	^skills/learning-distill/
 pre	doctrine	^skills/

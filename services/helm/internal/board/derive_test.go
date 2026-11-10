@@ -1547,7 +1547,7 @@ func TestQueuedChildrenAreNotStranded(t *testing.T) {
 	t.Run("children nothing will start still strand it", func(t *testing.T) {
 		kids := append(append([]Child{}, waiting...),
 			Child{ID: "ra-epic.6", Status: "open"},
-			Child{ID: "ra-epic.7", Status: "open", Metadata: map[string]string{"placement": "pending"}})
+			Child{ID: "ra-epic.7", Status: "open"})
 		tile := mustTile(t, buildBoard(epic(kids), fixtureNow, false, nil, facts), "ra-epic")
 		if !tile.Stranded || tile.Severity != SevHigh {
 			t.Errorf("two children nothing will start strand the epic: sev=%s stranded=%v", tile.Severity, tile.Stranded)

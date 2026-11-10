@@ -790,7 +790,7 @@ export OPEN_PRS WORKED HUSK_STEPS PREOPEN_GREEN_MAP
 # human gates, conversations and standing records through more shared
 # definitions. liveness-sweep.sh sources every one of these libs before the
 # block. Supply the same defs ($HUMAN_GATE_JQ, $CONVERSATION_JQ,
-# $STANDING_KINDS_JQ, $DISPATCH_PATH_JQ, $PLACEMENT_JQ, $LIVENESS_CLASSIFY_JQ)
+# $STANDING_KINDS_JQ, $DISPATCH_PATH_JQ, $LIVENESS_CLASSIFY_JQ)
 # from the real libs so the extracted block resolves them and cannot drift.
 # shellcheck disable=SC1090,SC1091
 . "$(dirname "$SWEEP")/bd-lib.sh"
@@ -800,8 +800,6 @@ export OPEN_PRS WORKED HUSK_STEPS PREOPEN_GREEN_MAP
 . "$(dirname "$SWEEP")/standing-kinds.sh"
 # shellcheck disable=SC1090,SC1091
 . "$(dirname "$SWEEP")/dispatch-path.sh"
-# shellcheck disable=SC1090,SC1091
-. "$(dirname "$SWEEP")/placement.sh"
 # shellcheck disable=SC1090,SC1091
 . "$(dirname "$SWEEP")/liveness-classify.sh"
 # shellcheck disable=SC1090

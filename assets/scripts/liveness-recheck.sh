@@ -67,14 +67,11 @@ command -v jq >/dev/null 2>&1 || { echo "liveness-recheck: jq is required" >&2; 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=standing-kinds.sh
 . "$HERE/standing-kinds.sh" || { echo "liveness-recheck: cannot source standing-kinds.sh from $HERE" >&2; exit 1; }
-# The one definition of a bead that waits for placement, and the dispatch path
-# it reads, shared with liveness-sweep.sh and its precheck, gc-helm.sh unplaced,
-# the proactive scan and the doctor checks. Exposes $DISPATCH_PATH_JQ and
-# $PLACEMENT_JQ, which the classify block splices in.
+# The one definition of a dispatch hold, shared with liveness-sweep.sh and its
+# precheck, the proactive scan and the doctor checks. Exposes $DISPATCH_PATH_JQ,
+# which the classify block splices in.
 # shellcheck source=dispatch-path.sh
 . "$HERE/dispatch-path.sh" || { echo "liveness-recheck: cannot source dispatch-path.sh from $HERE" >&2; exit 1; }
-# shellcheck source=placement.sh
-. "$HERE/placement.sh" || { echo "liveness-recheck: cannot source placement.sh from $HERE" >&2; exit 1; }
 # The one rule of which human gates still hold the bead they block, shared with
 # every reader of a bead's gates. Exposes $HUMAN_GATE_JQ, whose open_human_gates
 # the gate read below keeps and whose gates_blocking the classify block splices
@@ -203,9 +200,9 @@ CENSUS=$(jq -n \
   # Standing-record idioms (never claimable, never close): standing_kinds,
   # from standing-kinds.sh, the list liveness-sweep.sh classifies by.
   '"$STANDING_KINDS_JQ"'
-  # awaiting_placement, from placement.sh, which asks has_dispatch_path from
-  # dispatch-path.sh: the queue gc-helm.sh unplaced lists.
-  '"$DISPATCH_PATH_JQ$PLACEMENT_JQ"'
+  # has_dispatch_hold, from dispatch-path.sh: the hold the queue
+  # `gc beads list --label hold:mayor` lists.
+  '"$DISPATCH_PATH_JQ"'
   (($beadfile[0] // []) | map({key: .id, value: .}) | from_entries) as $by
   | (if $ready == null then null
      else ($ready | map({key: ., value: true}) | from_entries) end) as $readyset
@@ -240,14 +237,14 @@ CENSUS=$(jq -n \
                           ["human gate " + (held_by($b) | join(", ")) + " is open on it — a person owes this answer"]
                         else [] end))
                     | join("  ")}
-         # Intake held it as new work for the placement sitting, and gc-helm.sh
-         # unplaced lists it there, so this gate would put the same decision
+         # Intake held it as new work for the placement sitting, and its queue
+         # lists it there, so this gate would put the same decision
          # on a second agenda. That queue lists the bead whether or not a
          # blocker holds it or a first reaction left a takeaway on it, so this
          # rule comes before the not-ready, marker, recorded and idle rules.
-         elif ($b | awaiting_placement) then
+         elif ($b | has_dispatch_hold) then
            {verdict: "awaiting-placement",
-            detail: ("placement=pending"
+            detail: ([($b.labels // [])[]? | tostring | select({labels: [.]} | has_dispatch_hold)] | join(" ")
                      + (if ($b | mv("gc.takeaway")) != "" then "  gc.takeaway=" + ($b | mv("gc.takeaway")) else "" end))}
          elif ($readyset != null and (($readyset[$id] // false) == false)) then
            {verdict: "not-ready",
@@ -325,7 +322,7 @@ printf '%s' "$CENSUS" | jq -r --argjson all "$WANT_ALL" '
     + bucket($rows; "resolved";   "resolved — closed since the pass; do NOT route"; true)
     + bucket($rows; "worked";     "now worked — someone has it"; true)
     + bucket($rows; "held";       "now held — a person owes an answer on it"; true)
-    + bucket($rows; "awaiting-placement"; "waits for placement — the placement sitting places it (gc-helm.sh unplaced lists it); do NOT route it from here"; true)
+    + bucket($rows; "awaiting-placement"; "waits for placement — the placement sitting places it (gc beads list --label hold:mayor lists it); do NOT route it from here"; true)
     + bucket($rows; "standing";   "not work — a standing record, held by design; it was never dispositionable"; true)
     + bucket($rows; "not-ready";  "no longer ready — a blocker, gate or park appeared"; true)
     end;
