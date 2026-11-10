@@ -843,6 +843,48 @@ func TestAnAttachThatCanHoldANewSittingKeepsTheModelTheStartRanOn(t *testing.T) 
 	}
 }
 
+// One attach runs. bubbletea runs a second attach queued behind the first once
+// the first comes back, so an Enter that lands before the first attach takes
+// the terminal, on the return list or after a start that failed, attaches
+// nothing more, and neither does a start that lands then.
+func TestASecondEnterBeforeTheAttachAttachesNothingMore(t *testing.T) {
+	t.Run("on the return list", func(t *testing.T) {
+		f := &fakeHelm{city: City{Conversations: []Conversation{{ID: "tk-c1", Readiness: Ready}}}}
+		m := newForm(t, f, Options{Return: true})
+		loadCity(m)
+		_, first := m.Update(key(tea.KeyEnter))
+		_, second := m.Update(key(tea.KeyEnter))
+		if first == nil || second != nil || len(f.attaches) != 1 {
+			t.Fatalf("two Enters: an attach %v, then %v; attaches %v", first != nil, second != nil, f.attaches)
+		}
+	})
+	t.Run("after a failed start", func(t *testing.T) {
+		f := &fakeHelm{
+			about:    map[string]About{"tk-a": subjectAbout("tk-a", "gc-toolkit")},
+			saveResp: Saved{Subject: "tk-a", Conversation: "tk-c1", Filed: true},
+			startErr: errors.New("gc-helm: engage: the reconciler is down"),
+		}
+		m := newForm(t, f, Options{Subject: "tk-a"})
+		settle(m)
+		typeText(m, "q")
+		_, cmd := m.Update(ctrl('s'))
+		deliver(m, cmd)
+		_, first := m.Update(key(tea.KeyEnter))
+		_, second := m.Update(key(tea.KeyEnter))
+		if first == nil || second != nil || len(f.attaches) != 1 {
+			t.Fatalf("two Enters: an attach %v, then %v; attaches %v", first != nil, second != nil, f.attaches)
+		}
+		// A retried start that lands before the attach takes the terminal
+		// starts the sitting and attaches nothing more.
+		f.startErr = nil
+		_, cmd = m.Update(key('r'))
+		deliver(m, cmd)
+		if len(f.starts) != 2 || len(f.attaches) != 1 {
+			t.Fatalf("a start landing after the attach was run: starts %v, attaches %v", f.starts, f.attaches)
+		}
+	})
+}
+
 func TestTheDestinationIsOnScreenBeforeSubmitting(t *testing.T) {
 	a := subjectAbout("tk-a", "gc-toolkit")
 	a.Gate = "tk-g"

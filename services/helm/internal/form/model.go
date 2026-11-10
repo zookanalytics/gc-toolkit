@@ -128,6 +128,9 @@ type Model struct {
 	startErr string
 	leaving  bool // the operator left while a save or a start ran, so the form leaves once it lands
 
+	// How the form leaves the terminal.
+	attaching bool // an attach has taken or will take the terminal, so no other is run
+
 	// The return list's selection is a conversation, so a refresh that re-sorts
 	// the list leaves it on the conversation the operator picked.
 	retSel string
@@ -1016,8 +1019,15 @@ func (m *Model) returnKey(s string) tea.Cmd {
 // model is what a sitting held anew runs on. An attach after a start passes the
 // model the start ran on, so a start that failed or a sitting that ended is held
 // again on the model the screen showed. The return list shows no model and
-// passes none, so engage's default holds it.
+// passes none, so engage's default holds it. One attach runs. bubbletea runs an
+// attach queued behind another once that one comes back, before the form has
+// left, so neither an Enter that lands before the first attach takes the
+// terminal nor a start that lands before the form leaves attaches again.
 func (m *Model) attachTo(conv, model string) tea.Cmd {
+	if m.attaching {
+		return nil
+	}
+	m.attaching = true
 	m.note = m.keepUnsaved()
 	return tea.ExecProcess(m.helm.AttachCommand(conv, model), func(err error) tea.Msg { return attachedMsg{err: err} })
 }
