@@ -270,9 +270,9 @@ Codex reads its hooks, and where a Codex call runs.
 
 **Where Codex reads hooks.** Codex reads a project's hooks from `.codex/hooks.json`
 at the project root, and for a linked git worktree the project root is the
-repository's main checkout, not the worktree. polecat-codex and converse-codex
-run in worktrees, so a hooks file staged into their working directory is never
-read. Every Codex session also reads the hooks file in the Codex home
+repository's main checkout, not the worktree. polecat-codex and the codex
+converse sittings run in worktrees, so a hooks file staged into their working
+directory is never read. Every Codex session also reads the hooks file in the Codex home
 (`$CODEX_HOME`, else `~/.codex`), whatever directory it runs in, so the guard is
 registered there.
 
@@ -342,8 +342,11 @@ take `overlays/gh-origin-guard`. A Codex agent reads no `.claude` overlay and ru
 |---|---|
 | `overlays/work-context` | polecat |
 | `overlays/cycle-recycle` | refinery, witness, deacon |
-| `overlays/gh-origin-guard` | converse-opus, converse-fable, mechanik, proactive, demo |
-| the Codex home, by `pre_start` | polecat-codex, converse-codex, dog |
+| `overlays/gh-origin-guard` | converse-claude-opus, converse-claude-fable, converse-opus, converse-fable, mechanik, po, proactive, demo |
+| the Codex home, by `pre_start` | polecat-codex, converse-codex-sol, converse-codex-astra, converse-codex, dog |
+
+converse-opus, converse-fable and converse-codex are the converse templates
+engage withdraws, kept configured for the sittings already open on them.
 
 Every registration runs the same command, which resolves the script from
 `$GC_RIG_ROOT` and then from `$GC_CITY_PATH/rigs/gc-toolkit`. Both are set by

@@ -200,8 +200,8 @@ fresh() {
     bead tk-other task open ""
     bead tk-oconv task in_progress gc-toolkit/gc-toolkit.tk-oconv; edge tk-oconv tracks tk-other
     bead tk-find task open ""; edge tk-find tracks tk-subj
-    sessions '[{"id":"gc-50","session_name":"s-gc-50","alias":"gc-toolkit/gc-toolkit.tk-conv","template":"gc-toolkit/gc-toolkit.converse-opus","state":"active","closed":false,"rig":"gc-toolkit"},
-               {"id":"gc-51","session_name":"s-gc-51","alias":"gc-toolkit/gc-toolkit.tk-oconv","template":"gc-toolkit/gc-toolkit.converse-opus","state":"active","closed":false,"rig":"gc-toolkit"}]'
+    sessions '[{"id":"gc-50","session_name":"s-gc-50","alias":"gc-toolkit/gc-toolkit.tk-conv","template":"gc-toolkit/gc-toolkit.converse-claude-opus","state":"active","closed":false,"rig":"gc-toolkit"},
+               {"id":"gc-51","session_name":"s-gc-51","alias":"gc-toolkit/gc-toolkit.tk-oconv","template":"gc-toolkit/gc-toolkit.converse-claude-opus","state":"active","closed":false,"rig":"gc-toolkit"}]'
 }
 # bead <id> <type> <status> <assignee>
 bead() {
@@ -250,7 +250,7 @@ has "$OUT" "no live sitting on tk-subj — nothing to end" "(IDEM) …saying the
 
 echo "# the comment is drawn from the subject's rig checkout, and a refused record still ends the sitting"
 fresh; bead ra-subj task open ""; bead ra-conv task in_progress gc-toolkit/gc-toolkit.ra-conv; edge ra-conv tracks ra-subj
-sessions '[{"id":"gc-60","session_name":"s-gc-60","alias":"gc-toolkit/gc-toolkit.ra-conv","template":"gc-toolkit/gc-toolkit.converse-opus","state":"active","closed":false,"rig":"rig-a"}]'
+sessions '[{"id":"gc-60","session_name":"s-gc-60","alias":"gc-toolkit/gc-toolkit.ra-conv","template":"gc-toolkit/gc-toolkit.converse-claude-opus","state":"active","closed":false,"rig":"rig-a"}]'
 run_dismiss ra-subj
 eq "$(field ra-conv status)" "closed" "(PRCOMMENT-RIG) a dismiss named on a bead in another rig closes its sitting's conversation"
 has "$(cat "$REC_PSC_LOG")" "refresh --sitting ra-conv | pwd=$(cd "$RA_PATH" && pwd) | " "(PRCOMMENT-RIG) …and draws the comment from that rig's checkout, whose origin is the comment's repository"
@@ -347,7 +347,7 @@ eq "$RC" 2 "(INFER-AMBIG) a session holding two conversations refuses to guess"
 has "$ERR" "more than one open conversation" "(INFER-AMBIG) …naming the ambiguity"
 eq "$(grep -c '^bd ' "$CALLS" || true)" "0" "(INFER-AMBIG) …and writing nothing"
 fresh; bead ra-subj task open ""; bead ra-conv task in_progress gc-toolkit/gc-toolkit.ra-conv; edge ra-conv tracks ra-subj
-sessions '[{"id":"gc-60","session_name":"s-gc-60","alias":"gc-toolkit/gc-toolkit.ra-conv","template":"gc-toolkit/gc-toolkit.converse-opus","state":"active","closed":false,"rig":"rig-a"}]'
+sessions '[{"id":"gc-60","session_name":"s-gc-60","alias":"gc-toolkit/gc-toolkit.ra-conv","template":"gc-toolkit/gc-toolkit.converse-claude-opus","state":"active","closed":false,"rig":"rig-a"}]'
 GC_SESSION_ID=gc-60 GC_ALIAS=gc-toolkit/gc-toolkit.ra-conv run_dismiss
 has "$(grep '^list' "$READS")" "$TMP/ra/.beads" "(INFER-RIG) the current-sitting lookup is pinned at the session's own rig"
 eq "$(field ra-conv status)" "closed" "(INFER-RIG) …and finds the conversation there"
@@ -395,7 +395,7 @@ eq "$(drains)" "" "(STOP-NOHOLDER) …and, held by nobody, stops nothing"
 # pin finds a holder whose name the assignee does not carry.
 fresh; : > "$DRAINS"
 jq '.metadata["gc.session_id"] = "gc-81" | .metadata["gc.session_name"] = "s-gc-81"' "$STORE/b/tk-conv.json" > "$STORE/b/x" && mv "$STORE/b/x" "$STORE/b/tk-conv.json"
-sessions '[{"id":"gc-81","session_name":"s-gc-81","alias":"gc-toolkit/gc-toolkit.tk-conv-other","template":"gc-toolkit/gc-toolkit.converse-fable","state":"active","closed":false,"rig":"gc-toolkit"}]'
+sessions '[{"id":"gc-81","session_name":"s-gc-81","alias":"gc-toolkit/gc-toolkit.tk-conv-other","template":"gc-toolkit/gc-toolkit.converse-claude-fable","state":"active","closed":false,"rig":"gc-toolkit"}]'
 run_dismiss tk-conv
 case "$(drains)" in
   "drain-ack --operator gc-81 "*) ok "(STOP-PIN) the conversation's gc.session_id names the holder to stop" ;;

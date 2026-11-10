@@ -79,12 +79,12 @@ printf 'C6q|blocks|A6c
 C6q|tracks|A6c
 ' > "$STUB_DEPS"
 eq "$("$SUT" --anchor A6c)" "none" "a conversation in the operator's queue answers none"
-store "[$(anchor A6s), $(conv C6s in_progress 'gc-toolkit/converse-opus.c-C6s')]"
+store "[$(anchor A6s), $(conv C6s in_progress 'gc-toolkit/converse-claude-opus.c-C6s')]"
 printf 'C6s|blocks|A6s
 C6s|tracks|A6s
 ' > "$STUB_DEPS"
 eq "$("$SUT" --anchor A6s)" "none" "a conversation a sitting holds answers none, not a claim"
-store "[$(anchor A6x), $(conv C6x in_progress 'gc-toolkit/converse-opus.c-C6x'), $(blk B6x open '')]"
+store "[$(anchor A6x), $(conv C6x in_progress 'gc-toolkit/converse-claude-opus.c-C6x'), $(blk B6x open '')]"
 printf 'C6x|blocks|A6x
 B6x|blocks|A6x
 ' > "$STUB_DEPS"

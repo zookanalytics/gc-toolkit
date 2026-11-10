@@ -123,7 +123,7 @@ if ! command -v tmux >/dev/null 2>&1; then
     [ "$FAIL" -eq 0 ]; exit
 fi
 
-SIT="gc-toolkit__converse-opus-hq-t$$"
+SIT="gc-toolkit__converse-claude-opus-hq-t$$"
 SIB="${SIT}9"
 T new-session -d -s "$SIT" -x 80 -y 24 'sleep 600' >/dev/null 2>&1
 T new-session -d -s "$SIB" -x 80 -y 24 'sleep 600' >/dev/null 2>&1
@@ -160,7 +160,7 @@ eq "$(T show-options -g -v set-titles-string 2>&1)" "$GLOBAL_STRING" \
    "(SET) the server's global set-titles-string is left as it is"
 # A run whose session has already gone must not reach the session its name
 # prefixes, which a target without the exact-match "=" would.
-GONE="gc-toolkit__converse-opus-gone-t$$"
+GONE="gc-toolkit__converse-claude-opus-gone-t$$"
 T new-session -d -s "${GONE}9" -x 80 -y 24 'sleep 600' >/dev/null 2>&1
 run_live "$GONE" >/dev/null 2>&1
 eq "$(T show-options -t "=${GONE}9:" set-titles 2>&1)" "" \

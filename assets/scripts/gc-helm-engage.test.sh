@@ -15,11 +15,11 @@
 #   (MODEL, NOARG, FORM-MODEL-BAD) an unknown --model, on the flag-driven path
 #             or before the conversation form opens, or a missing bead is
 #             refused (exit 2)
-#   (CONVID)  engaging a conversation in the queue spawns converse-opus --alias
+#   (CONVID)  engaging a conversation in the queue spawns converse-claude-opus --alias
 #             <conversation> --no-attach and binds it to the sitting's alias,
 #             guarded on `human`, the holder engage read
 #   (NO-KICK) a sitting starts itself from the prompt its launch delivers, so
-#             engage sends it no opening turn, on opus and on codex
+#             engage sends it no opening turn, on claude-opus and on codex-sol
 #   (SUBJECT) engaging a bead takes its conversation from the queue, says so,
 #             and offers --reason; a bead with none gets one filed
 #   (JOIN-RACE) a conversation another open files in the queue after engage's
@@ -298,13 +298,13 @@ case "$1 ${2:-}" in
     fi
     jq -n --arg live "$_live" --arg st "$_st" --arg sid "$SID" --arg sn "$SNAME" --arg sa "$_salias" \
           --arg holder "${ALIAS_HOLDER:-}" --arg decoys "${ALIAS_DECOYS:-}" --arg spawned "$_spawned" --arg lst "$_lst" \
-      '{sessions:([ $live | split(" ")[] | select(. != "" and $lst != "gone") | split("=") | {id:.[0], session_name:("s-" + .[0]), alias:.[1], template:"gc-toolkit/gc-toolkit.converse-opus", state:(if $lst == "blank" then "" else $lst end), closed:($lst == "closed"), created_at:"2026-10-01T00:00:00Z", attached:false} ]
+      '{sessions:([ $live | split(" ")[] | select(. != "" and $lst != "gone") | split("=") | {id:.[0], session_name:("s-" + .[0]), alias:.[1], template:"gc-toolkit/gc-toolkit.converse-claude-opus", state:(if $lst == "blank" then "" else $lst end), closed:($lst == "closed"), created_at:"2026-10-01T00:00:00Z", attached:false} ]
          + (if $st == "" or $st == "gone" then []
-            else [{id:$sid, session_name:$sn, alias:$sa, template:"gc-toolkit/gc-toolkit.converse-opus", state:(if $st == "blank" then "" else $st end), closed:($st == "closed")}] end)
-         + (if $decoys != "" then [{id:"gc-90", session_name:"s-gc-90", alias:"gc-toolkit/gc-toolkit.tk-conv2x", template:"gc-toolkit/gc-toolkit.converse-opus", state:"active", closed:false},
-                                   {id:"gc-91", session_name:"s-gc-91", alias:"gc-toolkit/gc-toolkit.tk-conv", template:"gc-toolkit/gc-toolkit.converse-opus", state:"closed", closed:true}] else [] end)
-         + (if $holder != "" then [{id:$holder, session_name:("s-" + $holder), alias:"gc-toolkit/gc-toolkit.tk-conv", template:"gc-toolkit/gc-toolkit.converse-opus", state:"creating", closed:false, created_at:(now | todate)}] else [] end)
-         + [ $spawned | split(" ")[] | select(. != "") | split("=") | {id:.[0], session_name:("s-" + .[0]), alias:("gc-toolkit/gc-toolkit." + .[1]), template:"gc-toolkit/gc-toolkit.converse-opus", state:"creating", closed:false, created_at:(now | todate)} ])}' ;;
+            else [{id:$sid, session_name:$sn, alias:$sa, template:"gc-toolkit/gc-toolkit.converse-claude-opus", state:(if $st == "blank" then "" else $st end), closed:($st == "closed")}] end)
+         + (if $decoys != "" then [{id:"gc-90", session_name:"s-gc-90", alias:"gc-toolkit/gc-toolkit.tk-conv2x", template:"gc-toolkit/gc-toolkit.converse-claude-opus", state:"active", closed:false},
+                                   {id:"gc-91", session_name:"s-gc-91", alias:"gc-toolkit/gc-toolkit.tk-conv", template:"gc-toolkit/gc-toolkit.converse-claude-opus", state:"closed", closed:true}] else [] end)
+         + (if $holder != "" then [{id:$holder, session_name:("s-" + $holder), alias:"gc-toolkit/gc-toolkit.tk-conv", template:"gc-toolkit/gc-toolkit.converse-claude-opus", state:"creating", closed:false, created_at:(now | todate)}] else [] end)
+         + [ $spawned | split(" ")[] | select(. != "") | split("=") | {id:.[0], session_name:("s-" + .[0]), alias:("gc-toolkit/gc-toolkit." + .[1]), template:"gc-toolkit/gc-toolkit.converse-claude-opus", state:"creating", closed:false, created_at:(now | todate)} ])}' ;;
   "agent list")
     # The import-resolved roster rig_carries_converse reads. Default: gc-toolkit
     # carries converse (base + variants). $NO_CONVERSE drops the converse
@@ -312,7 +312,7 @@ case "$1 ${2:-}" in
     if [ -n "${NO_CONVERSE:-}" ]; then
       jq -n '{agents:[{qualified_name:"gc-toolkit/gc-toolkit.proactive"}]}'
     else
-      jq -n '{agents:[ "gc-toolkit/gc-toolkit.converse","gc-toolkit/gc-toolkit.converse-opus","gc-toolkit/gc-toolkit.converse-fable","gc-toolkit/gc-toolkit.converse-codex" | {qualified_name:.} ]}'
+      jq -n '{agents:[ "gc-toolkit/gc-toolkit.converse","gc-toolkit/gc-toolkit.converse-claude-opus","gc-toolkit/gc-toolkit.converse-claude-fable","gc-toolkit/gc-toolkit.converse-codex-sol","gc-toolkit/gc-toolkit.converse-codex-astra" | {qualified_name:.} ]}'
     fi ;;
   "bd show")
     id="$3"
@@ -463,7 +463,7 @@ case "$1 ${2:-}" in
       exit 1
     fi
     if [ -n "${SPAWN_EMPTY:-}" ]; then
-      echo "gc session new: agent \"converse-opus\" not found in city.toml" >&2; jq -n '{ok:true}'
+      echo "gc session new: agent \"converse-claude-opus\" not found in city.toml" >&2; jq -n '{ok:true}'
     elif [ -n "${ALIAS_COLLIDE:-}" ] && case "$*" in *"--alias c-"*) false ;; *) true ;; esac; then
       # ValidateAlias refuses an alias matching the session-id syntax (a gascity
       # all-numeric bead id, gc-62297) before any session spawns, wrapping the
@@ -616,9 +616,12 @@ export TMPDIR="$TMP"
 
 # A fixture agents dir, so the converse-<model> list engage globs is hermetic —
 # independent of the repo's live agents/. A bare `converse` is present to prove
-# it is EXCLUDED from the model list.
-mkdir -p "$TMP/agents/converse-opus" "$TMP/agents/converse-fable" \
-         "$TMP/agents/converse-codex" "$TMP/agents/converse"
+# it is EXCLUDED from the model list, and so are the templates engage withdraws
+# (converse-opus, converse-fable and converse-codex), to prove it offers none.
+mkdir -p "$TMP/agents/converse-claude-opus" "$TMP/agents/converse-claude-fable" \
+         "$TMP/agents/converse-codex-sol" "$TMP/agents/converse-codex-astra" \
+         "$TMP/agents/converse" "$TMP/agents/converse-opus" \
+         "$TMP/agents/converse-fable" "$TMP/agents/converse-codex"
 export GC_HELM_AGENTS_DIR="$TMP/agents"
 
 # The subject rig's checkout. Converse CAPABILITY comes from the resolved roster
@@ -626,8 +629,8 @@ export GC_HELM_AGENTS_DIR="$TMP/agents"
 # engage — they stay only as a realistic checkout. $TMP/rig-bare is a checkout
 # with NO converse templates but a .beads ledger: the importer case proves
 # engage still proceeds from it when the roster registers converse.
-mkdir -p "$TMP/rig/agents/converse-opus" "$TMP/rig/agents/converse-fable" \
-         "$TMP/rig/agents/converse-codex" "$TMP/rig/.beads" \
+mkdir -p "$TMP/rig/agents/converse-claude-opus" "$TMP/rig/agents/converse-claude-fable" \
+         "$TMP/rig/agents/converse-codex-sol" "$TMP/rig/.beads" \
          "$TMP/rig-bare" "$TMP/rig-bare/.beads"
 export RIG_PATH="$TMP/rig"
 
@@ -734,7 +737,7 @@ eq "$RC" 2 "(NOARG) a missing bead-id exits 2"
 echo "# engaging a conversation in the queue spawns a sitting named for it and binds it"
 reset; run_engage tk-conv --no-attach
 eq "$RC" 0 "(CONVID) engaging a queued conversation exits 0"
-has "$CALLED" "session new converse-opus --alias tk-conv --no-attach --json" "(CONVID) spawns converse-opus --alias <conversation> --no-attach"
+has "$CALLED" "session new converse-claude-opus --alias tk-conv --no-attach --json" "(CONVID) spawns converse-claude-opus --alias <conversation> --no-attach"
 eq "$(asg tk-conv)" "gc-toolkit/gc-toolkit.tk-conv" "(BIND) the conversation is assigned to the sitting's qualified alias, the actor its claim runs as"
 has "$CALLED" "bd update tk-conv --if-assignee human --if-status open --unset-metadata gc.session_id --unset-metadata gc.session_name --assignee gc-toolkit/gc-toolkit.tk-conv" "(BIND) …guarded on the holder and the status engage read, the operator's queue and open"
 # Orphan recovery resolves a bead's owner from gc.session_id ahead of its
@@ -745,15 +748,27 @@ bind_write=$(printf '%s\n' "$CALLED" | grep -- '--assignee gc-toolkit/gc-toolkit
 has "$bind_write" "--unset-metadata gc.session_id --unset-metadata gc.session_name" \
     "(BIND-PINS) …and drops any session pin an earlier sitting left, in the same write"
 eq "$(cat "$TMP/psc.log")" "" "(CONVID-PRCOMMENT) engage posts no comment on the PR of the bead the conversation tracks"
-hasnt "$CALLED" "session nudge" "(NO-KICK) an opus sitting self-starts from its prompt and is not kicked"
+hasnt "$CALLED" "session nudge" "(NO-KICK) a claude-opus sitting self-starts from its prompt and is not kicked"
 hasnt "$OUT" "took the conversation" "(CONVID) an explicit conversation id is not reported as one engage chose"
-has "$OUT" "✓ converse-opus on existing conversation tk-conv for tk-subj" "(CONVID) the summary names the conversation and its bead"
+has "$OUT" "✓ converse-claude-opus on existing conversation tk-conv for tk-subj" "(CONVID) the summary names the conversation and its bead"
 hasnt "$OUT" "visit" "(CONVID) engage's words name no visit"
 
 echo "# --model selects the tier"
-reset; run_engage tk-conv --model codex --no-attach
-has "$CALLED" "session new converse-codex --alias tk-conv" "(MODELFLAG) --model codex spawns converse-codex"
+reset; run_engage tk-conv --model codex-sol --no-attach
+has "$CALLED" "session new converse-codex-sol --alias tk-conv" "(MODELFLAG) --model codex-sol spawns converse-codex-sol"
 hasnt "$CALLED" "session nudge" "(NO-KICK) a codex sitting self-starts from its prompt too, and is not kicked"
+reset; run_engage tk-conv --model codex-astra --no-attach
+has "$CALLED" "session new converse-codex-astra --alias tk-conv" "(MODELFLAG) --model codex-astra spawns converse-codex-astra"
+reset; run_engage tk-conv --model claude-fable --no-attach
+has "$CALLED" "session new converse-claude-fable --alias tk-conv" "(MODELFLAG) --model claude-fable spawns converse-claude-fable"
+
+echo "# a template engage withdraws is still configured, and engage spawns no sitting on it"
+for withdrawn in opus fable codex; do
+  reset; run_engage tk-conv --model "$withdrawn" --no-attach
+  eq "$RC" 2 "(MODEL-WITHDRAWN) --model $withdrawn exits 2 though agents/converse-$withdrawn exists"
+  hasnt "$CALLED" "session new" "(MODEL-WITHDRAWN) …and spawns nothing on converse-$withdrawn"
+  has "$OUT" "must be one of: claude-opus claude-fable codex-astra codex-sol (got '$withdrawn')" "(MODEL-WITHDRAWN) …naming the variants engage offers"
+done
 
 echo "# engage supplies the subject's rig context so a bare template resolves"
 reset
@@ -768,7 +783,7 @@ echo "# engaging a bead takes its conversation from the queue"
 reset; run_engage tk-subj --no-attach
 eq "$RC" 0 "(SUBJECT) engaging a bead with a queued conversation exits 0"
 hasnt "$CALLED" "bd create" "(SUBJECT) …files nothing"
-has "$CALLED" "session new converse-opus --alias tk-conv --no-attach --json" "(SUBJECT) …and spawns for that conversation"
+has "$CALLED" "session new converse-claude-opus --alias tk-conv --no-attach --json" "(SUBJECT) …and spawns for that conversation"
 has "$OUT" 'took the conversation "an earlier concern" already on tk-subj' "(SUBJECT) …saying which conversation it took"
 has "$OUT" "engage tk-subj --reason" "(SUBJECT) …and offering --reason to open a fresh one instead"
 
@@ -779,18 +794,18 @@ eq "$RC" 0 "(SUBJECT-NONE) engaging a bead with no conversation exits 0"
 has "$CALLED" "bd create" "(SUBJECT-NONE) …a conversation is filed"
 has "$CALLED" "--deps tracks:tk-subj" "(SUBJECT-NONE) …tracking the bead"
 has "$CALLED" "--assignee human" "(SUBJECT-NONE) …in the operator's queue"
-has "$CALLED" "session new converse-opus --alias tk-new" "(SUBJECT-NONE) …then a sitting is spawned named for it"
+has "$CALLED" "session new converse-claude-opus --alias tk-new" "(SUBJECT-NONE) …then a sitting is spawned named for it"
 eq "$(asg tk-new)" "gc-toolkit/gc-toolkit.tk-new" "(SUBJECT-NONE) …and the new conversation is bound to it"
-has "$OUT" "✓ converse-opus on new conversation tk-new for tk-subj" "(SUBJECT-NONE) the summary names it new"
+has "$OUT" "✓ converse-claude-opus on new conversation tk-new for tk-subj" "(SUBJECT-NONE) the summary names it new"
 hasnt "$OUT" "no session spawned" "(SUBJECT-NONE) open's own success chatter is not repeated"
 
 echo "# a conversation another open files after engage's listing is the one engage takes"
 reset; CONV_FILED_AFTER=1 run_engage tk-subj --no-attach
 eq "$RC" 0 "(JOIN-RACE) engaging a bead whose conversation another open filed in the meantime exits 0"
 hasnt "$CALLED" "bd create" "(JOIN-RACE) …filing no second conversation"
-has "$CALLED" "session new converse-opus --alias tk-conv --no-attach --json" "(JOIN-RACE) …and spawning the sitting for the queued one"
+has "$CALLED" "session new converse-claude-opus --alias tk-conv --no-attach --json" "(JOIN-RACE) …and spawning the sitting for the queued one"
 eq "$(asg tk-conv)" "gc-toolkit/gc-toolkit.tk-conv" "(JOIN-RACE) …bound to it"
-has "$OUT" "✓ converse-opus on existing conversation tk-conv for tk-subj" "(JOIN-RACE) the summary names it as one that already existed"
+has "$OUT" "✓ converse-claude-opus on existing conversation tk-conv for tk-subj" "(JOIN-RACE) the summary names it as one that already existed"
 unset HAVE_CONV
 
 echo "# --reason files a fresh conversation for a distinct concern, even when one waits"
@@ -800,9 +815,9 @@ eq "$(cat "$TMP/psc.log")" "" "(REASON-PRCOMMENT) engage posts nothing on the PR
 has "$CALLED" "bd create" "(REASON-NEW) …a NEW conversation is filed"
 has "$CALLED" "--title a distinct concern" "(REASON-NEW) …titled with the reason"
 has "$CALLED" "-d a distinct concern" "(REASON-NEW) …and asking it"
-has "$CALLED" "session new converse-opus --alias tk-new" "(REASON-NEW) …then a sitting is spawned for it"
+has "$CALLED" "session new converse-claude-opus --alias tk-new" "(REASON-NEW) …then a sitting is spawned for it"
 hasnt "$OUT" "took the conversation" "(REASON-NEW) …no took-an-existing hint"
-reset; run_engage tk-subj --reason "a distinct concern" --model codex --no-attach
+reset; run_engage tk-subj --reason "a distinct concern" --model codex-sol --no-attach
 has "$CALLED" "-d a distinct concern" "(REASON-CODEX) a codex sitting's new conversation asks the reason too, which the sitting reads at its claim"
 hasnt "$CALLED" "session nudge" "(REASON-CODEX) …and no opening turn carries it"
 
@@ -858,7 +873,7 @@ reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
 SUBJ_META='{"merge_result":"pull_request"}' run_engage tk-conv --no-attach
 eq "$RC" 0 "(PR-HOLD-ENDED) engaging a conversation whose sitting ended exits 0"
 has "$CALLED" "bd dep bd dep add tk-subj tk-conv --type blocks" "(PR-HOLD-ENDED) …and the new sitting holds the merge again"
-has "$CALLED" "session new converse-opus --alias tk-conv" "(PR-HOLD-ENDED) …starting a sitting of its own"
+has "$CALLED" "session new converse-claude-opus --alias tk-conv" "(PR-HOLD-ENDED) …starting a sitting of its own"
 export LIVE_SITTINGS="gc-50=gc-toolkit/gc-toolkit.tk-conv"
 
 echo "# a live sitting engage reuses is attached only once the reconciler has started it"
@@ -913,7 +928,7 @@ has "$OUT" "waiting for the reconciler to start s-gc-50 (it is listed with no st
 reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
 run_engage tk-subj --reason "another angle" --no-attach
 eq "$RC" 0 "(LIVE-CONCERN) a concern beside a live sitting still files its own conversation"
-has "$CALLED" "session new converse-opus --alias tk-new" "(LIVE-CONCERN) …and spawns its own sitting"
+has "$CALLED" "session new converse-claude-opus --alias tk-new" "(LIVE-CONCERN) …and spawns its own sitting"
 has "$OUT" "warning: another live sitting is on tk-subj already — conversation tk-conv" "(WARN-LIVE) …warning of the live sitting beside it, not refusing"
 unset LIVE_SITTINGS
 
@@ -923,7 +938,7 @@ echo "# a conversation whose sitting's session closed is resumed under the same 
 reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
 run_engage tk-subj --no-attach
 eq "$RC" 0 "(LEFT) engaging a conversation left by a closed session exits 0"
-has "$CALLED" "session new converse-opus --alias tk-conv" "(LEFT) …spawning a new sitting under the same alias"
+has "$CALLED" "session new converse-claude-opus --alias tk-conv" "(LEFT) …spawning a new sitting under the same alias"
 hasnt "$CALLED" "bd update" "(LEFT) …with no bind, since it is already assigned to that alias"
 eq "$(asg tk-conv)" "gc-toolkit/gc-toolkit.tk-conv" "(LEFT) …and the conversation stays assigned to the alias"
 
@@ -937,7 +952,7 @@ reset; run_engage tk-subj --no-attach
 eq "$RC" 0 "(CUT-SHORT) engaging a queued conversation beside its old session exits 0"
 has "$CALLED" "session close gc-60" "(CUT-SHORT) …closing the old session that holds the alias"
 case "$CALLED" in
-  *"session close gc-60"*"session new converse-opus --alias tk-conv"*) ok "(CUT-SHORT) …before spawning under it" ;;
+  *"session close gc-60"*"session new converse-claude-opus --alias tk-conv"*) ok "(CUT-SHORT) …before spawning under it" ;;
   *) bad "(CUT-SHORT) the close should precede the spawn (calls: $CALLED)" ;;
 esac
 reset; CLOSE_STICKS=1 run_engage tk-subj --no-attach
@@ -1074,7 +1089,7 @@ reset; run_engage tk-gate --from tk-subj --no-attach
 eq "$RC" 0 "(GATE-FROM) a gate two open beads wait on, engaged --from one of them, exits 0"
 has "$OUT" "tk-gate is a gate about tk-subj" "(GATE-FROM) …taking that bead"
 has "$CALLED" "bd dep bd dep add tk-conv tk-gate --type replies-to" "(GATE-FROM) …whose conversation replies to the gate"
-has "$CALLED" "session new converse-opus --alias tk-conv" "(GATE-FROM) …and starting its sitting"
+has "$CALLED" "session new converse-claude-opus --alias tk-conv" "(GATE-FROM) …and starting its sitting"
 export HAVE_CONV=0
 reset; run_engage tk-gate --from tk-child --reason "is the wording right?" --no-input --no-attach
 eq "$RC" 0 "(GATE-FROM-NEW) a concern engaged on the gate --from the other bead exits 0"
@@ -1126,7 +1141,7 @@ run_engage tk-child --no-attach
 eq "$RC" 0 "(WARN-GATE) engaging the child beside the anchor's sitting exits 0"
 has "$CALLED" "--deps tracks:tk-child" "(WARN-GATE) …filing the child's own conversation, which tracks the child alone"
 has "$OUT" "tk-conv (replies to gate tk-gate)" "(WARN-GATE) …warning that a live sitting replies to a gate the child waits on"
-has "$CALLED" "session new converse-opus --alias tk-new" "(WARN-GATE) …and still starting the child's sitting"
+has "$CALLED" "session new converse-claude-opus --alias tk-new" "(WARN-GATE) …and still starting the child's sitting"
 unset HAVE_CONV CONV_SUBJECT LIVE_SITTINGS BEAD_GATES GATE_REPLIES
 
 echo "# a spawn that yields no identity aborts without binding"
@@ -1135,7 +1150,7 @@ eq "$RC" 4 "(NOSPAWN) a session with no identity exits 4"
 eq "$(asg tk-conv)" "human" "(NOSPAWN) …and the conversation stays in the queue"
 
 echo "# a conversation another writer takes in the spawn window is not overwritten"
-reset; RACE_LOST=1 RACE_WINNER="gc-toolkit/gc-toolkit.tk-conv-x" run_engage tk-conv --model codex --no-attach
+reset; RACE_LOST=1 RACE_WINNER="gc-toolkit/gc-toolkit.tk-conv-x" run_engage tk-conv --model codex-sol --no-attach
 eq "$RC" 4 "(TAKEN) a bind lost to another writer exits 4"
 has "$CALLED" "session new" "(TAKEN) …the sitting did spawn: the conversation changed after engage read it"
 has "$CALLED" "bd update tk-conv --if-assignee human" "(TAKEN) …the bind is conditional, so the store rejects it (exit 13)"
@@ -1144,7 +1159,7 @@ has "$CALLED" "session close gc-77" "(TAKEN) …the sitting that holds nothing i
 has "$OUT" "not overwriting" "(TAKEN) …and the operator is told the holder was not overwritten"
 
 echo "# a failed bind (not the race): the sitting spawned but nothing holds the conversation"
-reset; BIND_FAIL=1 run_engage tk-conv --model codex --no-attach
+reset; BIND_FAIL=1 run_engage tk-conv --model codex-sol --no-attach
 eq "$RC" 4 "(BIND-FAIL) a failed bind exits 4"
 has "$CALLED" "session close gc-77" "(BIND-FAIL) …the spawned sitting is closed, not left orphaned"
 eq "$(asg tk-conv)" "human" "(BIND-FAIL) …the conversation stays in the queue"
@@ -1153,13 +1168,13 @@ echo "# a conversation a dismiss closes while the sitting spawns is not bound, a
 # bd's close keeps the assignee, so the holder engage read still holds a
 # dismissed conversation: only the bind's status guard, or the read when no bind
 # runs, tells a closed conversation, which no claim adopts.
-reset; DISMISS_ON_SPAWN=tk-conv run_engage tk-conv --model codex --no-attach
+reset; DISMISS_ON_SPAWN=tk-conv run_engage tk-conv --model codex-sol --no-attach
 eq "$RC" 4 "(DISMISSED-QUEUE) a queued conversation dismissed during the spawn exits 4"
 has "$CALLED" "bd update tk-conv --if-assignee human --if-status open" "(DISMISSED-QUEUE) …the bind is guarded on the status engage read, so the store rejects it (exit 13)"
 has "$OUT" "was closed while this sitting spawned" "(DISMISSED-QUEUE) …saying the conversation closed"
 has "$CALLED" "session close gc-77" "(DISMISSED-QUEUE) …closing the sitting it spawned"
 eq "$(asg tk-conv)/$(cat "$STATE_DIR/tk-conv.status")" "human/closed" "(DISMISSED-QUEUE) …and the conversation stays closed with the holder the dismiss left"
-hasnt "$OUT" "✓ converse-codex" "(DISMISSED-QUEUE) …never reporting a sitting"
+hasnt "$OUT" "✓ converse-codex-sol" "(DISMISSED-QUEUE) …never reporting a sitting"
 export HAVE_CONV=0
 reset; DISMISS_ON_SPAWN=tk-new run_engage tk-subj --no-attach
 eq "$RC" 4 "(DISMISSED-NEW) a conversation engage filed, dismissed during the spawn, exits 4"
@@ -1167,7 +1182,7 @@ has "$CALLED" "bd update tk-new --if-assignee human --if-status open" "(DISMISSE
 has "$CALLED" "session close gc-77" "(DISMISSED-NEW) …and the sitting it spawned is closed"
 unset HAVE_CONV
 reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
-DISMISS_ON_SPAWN=tk-conv run_engage tk-subj --model codex --no-attach
+DISMISS_ON_SPAWN=tk-conv run_engage tk-subj --model codex-sol --no-attach
 eq "$RC" 4 "(DISMISSED-LEFT) a conversation resumed under its own alias, dismissed during the spawn, exits 4"
 hasnt "$CALLED" "bd update" "(DISMISSED-LEFT) …binding nothing, since it is already assigned to the alias"
 has "$OUT" "reads closed" "(DISMISSED-LEFT) …its read finding it closed"
@@ -1198,9 +1213,9 @@ echo "# an engage refused at the alias waits for the winner's bind, then takes t
 # alias, so the refused engage names that sitting as a live sitting's engage
 # does, and attaches to it when it attaches.
 export ALIAS_HELD="gc-81" ALIAS_HOLDER="gc-81" AFTER_REFUSAL_READS=2 AFTER_REFUSAL_ASSIGNEE="gc-toolkit/gc-toolkit.tk-conv" GC_HELM_ENGAGE_BIND_WAIT=5
-reset; run_engage tk-conv --model codex --no-attach
+reset; run_engage tk-conv --model codex-sol --no-attach
 eq "$RC" 0 "(ALIAS-BOUND) an engage refused at the alias exits 0 once the winner's bind lands"
-has "$CALLED" "session new converse-codex --alias tk-conv" "(ALIAS-BOUND) …after its spawn was refused"
+has "$CALLED" "session new converse-codex-sol --alias tk-conv" "(ALIAS-BOUND) …after its spawn was refused"
 has "$OUT" "the live sitting gc-81 holds conversation tk-conv for tk-subj" "(ALIAS-BOUND) …naming the winner's sitting as the one that holds the conversation"
 has "$OUT" "attach: gc session attach gc-81" "(ALIAS-BOUND) …and how to attach to it"
 hasnt "$OUT" "gc session close" "(ALIAS-BOUND) …never telling them to close the sitting that won"
@@ -1290,7 +1305,7 @@ echo "# two conversations in the queue: engage takes the oldest"
 export HAVE_CONV=2
 reset; run_engage tk-subj --no-attach
 eq "$RC" 0 "(MULTI) a bead with two queued conversations exits 0"
-has "$CALLED" "session new converse-opus --alias tk-conv --no-attach" "(MULTI) …taking the oldest, the first the queue offers"
+has "$CALLED" "session new converse-claude-opus --alias tk-conv --no-attach" "(MULTI) …taking the oldest, the first the queue offers"
 unset HAVE_CONV
 
 echo "# a task assigned to human that tracks the bead and another is no conversation"
@@ -1300,7 +1315,7 @@ echo "# a task assigned to human that tracks the bead and another is no conversa
 export HAVE_CONV=two
 reset; run_engage tk-subj --no-attach
 eq "$RC" 0 "(TWO-TRACKS) a bead with a two-bead task beside its queued conversation exits 0"
-has "$CALLED" "session new converse-opus --alias tk-conv --no-attach" "(TWO-TRACKS) …taking the real conversation"
+has "$CALLED" "session new converse-claude-opus --alias tk-conv --no-attach" "(TWO-TRACKS) …taking the real conversation"
 hasnt "$CALLED" "tk-two" "(TWO-TRACKS) …and neither spawning for nor binding the two-bead task"
 unset HAVE_CONV
 
@@ -1324,8 +1339,8 @@ echo "# a conversation id the runtime refuses as an alias is retried once under 
 # bare --alias. engage retries under a c- prefix no ValidateAlias rule can match.
 reset; ALIAS_COLLIDE=1 run_engage tk-conv --no-attach
 eq "$RC" 0 "(ALIAS-RETRY) a rejected bare alias is retried and engage exits 0"
-has "$CALLED" "session new converse-opus --alias tk-conv --no-attach --json" "(ALIAS-RETRY) …the bare conversation id is tried first"
-has "$CALLED" "session new converse-opus --alias c-tk-conv --no-attach --json" "(ALIAS-RETRY) …then retried under a c- prefix"
+has "$CALLED" "session new converse-claude-opus --alias tk-conv --no-attach --json" "(ALIAS-RETRY) …the bare conversation id is tried first"
+has "$CALLED" "session new converse-claude-opus --alias c-tk-conv --no-attach --json" "(ALIAS-RETRY) …then retried under a c- prefix"
 eq "$(asg tk-conv)" "gc-toolkit/gc-toolkit.c-tk-conv" "(ALIAS-RETRY) …and the conversation binds to the retried sitting's alias"
 
 # run_fresh / run_fresh_tty — a clean store, then run_engage / run_engage_tty.
@@ -1364,7 +1379,7 @@ echo "# an importer whose CHECKOUT holds no converse template is still engageabl
 export RIG_PATH="$TMP/rig-bare"
 run_fresh tk-conv --no-attach
 eq "$RC" 0 "(IMPORTER) an importer with converse in the roster but not the checkout engages"
-has "$CALLED" "session new converse-opus --alias tk-conv" "(IMPORTER) …spawning the converse sitting"
+has "$CALLED" "session new converse-claude-opus --alias tk-conv" "(IMPORTER) …spawning the converse sitting"
 export RIG_PATH="$TMP/rig"
 
 echo "# attach behaviour: default attaches, --no-attach does not"
@@ -1372,8 +1387,8 @@ run_fresh tk-conv --no-attach
 hasnt "$CALLED" "session attach" "(ATTACH) --no-attach does not attach"
 run_fresh tk-conv
 has "$CALLED" "session attach gc-77" "(ATTACH) the default attaches to the captured session id"
-hasnt "$CALLED" "session nudge" "(ATTACH) …and an opus sitting is not kicked; it self-starts before the operator lands"
-run_fresh tk-conv --model codex
+hasnt "$CALLED" "session nudge" "(ATTACH) …and a claude-opus sitting is not kicked; it self-starts before the operator lands"
+run_fresh tk-conv --model codex-sol
 has "$CALLED" "session attach gc-77" "(ATTACH) a codex sitting is attached the same way"
 hasnt "$CALLED" "session nudge" "(ATTACH) …and is not kicked either; it self-starts before the operator lands"
 
@@ -1497,7 +1512,7 @@ eq "$(asg tk-conv)" "gc-toolkit/gc-toolkit.tk-conv" "(START-FAILED) …and leavi
 printf 'gc-50 gc-toolkit/gc-toolkit.tk-conv\n' > "$STATE_DIR/live"
 LIVE_STATES="failed-create" run_engage tk-conv --no-input
 eq "$RC" 0 "(START-RERUN) engage --no-input, the call the named attach makes, exits 0"
-has "$CALLED" "session new converse-opus --alias tk-conv --no-attach" "(START-RERUN) …spawning a new sitting under the conversation's alias"
+has "$CALLED" "session new converse-claude-opus --alias tk-conv --no-attach" "(START-RERUN) …spawning a new sitting under the conversation's alias"
 hasnt "$CALLED" "bd update" "(START-RERUN) …with no bind, since the conversation is still assigned to that alias"
 has "$CALLED" "session attach gc-77" "(START-RERUN) …and attaching the new sitting once it starts"
 hasnt "$CALLED" "session attach gc-50" "(START-RERUN) …not the one that failed"
@@ -1652,7 +1667,7 @@ export HQ_RUNNING=false STATUS_CONTROLLER=true
 run_fresh tk-conv --no-attach
 eq "$RC" 0 "(CTRL-PING-MISSED) engaging when gc status reports the controller running exits 0"
 has "$CALLED" "status --json" "(CTRL-PING-MISSED) …after asking gc status"
-has "$CALLED" "session new converse-opus --alias tk-conv" "(CTRL-PING-MISSED) …and spawns the sitting"
+has "$CALLED" "session new converse-claude-opus --alias tk-conv" "(CTRL-PING-MISSED) …and spawns the sitting"
 unset HQ_RUNNING STATUS_CONTROLLER
 
 echo "# a rig list with no HQ row reads as unknown and does not refuse"
@@ -1662,7 +1677,7 @@ echo "# a rig list with no HQ row reads as unknown and does not refuse"
 export NO_HQ_ROW=1 STATUS_CONTROLLER=false
 run_fresh tk-conv --no-attach
 eq "$RC" 0 "(NO-HQ) engaging with no HQ row in the rig list exits 0"
-has "$CALLED" "session new converse-opus --alias tk-conv" "(NO-HQ) …and spawns the sitting"
+has "$CALLED" "session new converse-claude-opus --alias tk-conv" "(NO-HQ) …and spawns the sitting"
 hasnt "$CALLED" "status --json" "(NO-HQ) …without asking gc status"
 unset NO_HQ_ROW STATUS_CONTROLLER
 
@@ -1683,7 +1698,7 @@ echo "# an idle subject rig (running=false) engages while the controller is up"
 export HQ_RUNNING=true RIG_SUSPENDED=false RIG_RUNNING=false
 run_fresh tk-conv --no-attach
 eq "$RC" 0 "(IDLE) engaging on an idle rig exits 0"
-has "$CALLED" "session new converse-opus --alias tk-conv" "(IDLE) …and spawns the sitting"
+has "$CALLED" "session new converse-claude-opus --alias tk-conv" "(IDLE) …and spawns the sitting"
 hasnt "$CALLED" "status --json" "(IDLE) …and an HQ running=true asks gc status nothing"
 unset HQ_RUNNING RIG_SUSPENDED RIG_RUNNING
 
@@ -1700,18 +1715,20 @@ echo "# an explicitly live city (controller running, rig not suspended) spawns a
 export HQ_RUNNING=true RIG_SUSPENDED=false RIG_RUNNING=true
 run_fresh tk-conv --no-attach
 eq "$RC" 0 "(LIVE) engaging on an explicitly live city exits 0"
-has "$CALLED" "session new converse-opus --alias tk-conv" "(LIVE) …and spawns the sitting"
+has "$CALLED" "session new converse-claude-opus --alias tk-conv" "(LIVE) …and spawns the sitting"
 unset HQ_RUNNING RIG_SUSPENDED RIG_RUNNING
 
 # ── Interactive TTY flow + starter/model/debug ───────────────────────
 echo
 echo "# the model set is the configured converse-* variants; bare 'converse' is excluded"
-# --model validates against the globbed variants (opus/fable/codex from the
-# fixture agents dir); the bare 'converse' pool template is not an engage variant.
+# --model validates against the globbed variants (claude-opus, claude-fable,
+# codex-astra and codex-sol from the fixture agents dir, claude-opus first);
+# the bare 'converse' pool template is not an engage variant, and the templates
+# engage withdraws are not offered.
 run_fresh tk-conv --model converse --no-attach
 eq "$RC" 2 "(IA-MODEL-SET) --model converse (the bare pool template) is not a variant, exit 2"
 hasnt "$CALLED" "session new" "(IA-MODEL-SET) …and nothing spawned"
-has "$OUT" "must be one of: opus" "(IA-MODEL-SET) …the message lists the configured variants"
+has "$OUT" "must be one of: claude-opus claude-fable codex-astra codex-sol (got 'converse')" "(IA-MODEL-SET) …the message lists the variants engage offers, claude-opus first"
 
 echo "# every success carries a ✓ summary on stdout and an always-on [debug] line"
 run_fresh tk-conv --no-attach
@@ -1719,13 +1736,13 @@ eq "$RC" 0 "(IA-DEBUG) engaging exits 0"
 has "$OUT" "[debug] conversation=tk-conv" "(IA-DEBUG) the provenance rides an always-on [debug] line"
 has "$OUT" "sitting=gc-77" "(IA-DEBUG) …carrying the sitting id"
 has "$OUT" "work_dir=/w" "(IA-DEBUG) …and the sitting work_dir"
-has "$OUT" "✓ converse-opus" "(IA-DEBUG) …and the human summary names the sitting template"
+has "$OUT" "✓ converse-claude-opus" "(IA-DEBUG) …and the human summary names the sitting template"
 
 echo "# --no-input keeps the non-interactive one-shot behavior (takes the queued conversation)"
 run_fresh tk-subj --no-input --no-attach
 eq "$RC" 0 "(IA-NOINPUT) --no-input on a bead with a queued conversation exits 0"
 hasnt "$CALLED" "bd create" "(IA-NOINPUT) …taking that conversation, filing nothing"
-has "$CALLED" "session new converse-opus --alias tk-conv" "(IA-NOINPUT) …with no prompts"
+has "$CALLED" "session new converse-claude-opus --alias tk-conv" "(IA-NOINPUT) …with no prompts"
 
 echo "# --template pre-fills the starter and skips its prompt (here under --no-input)"
 run_fresh tk-subj --template unstick-a-stall --no-input --no-attach
@@ -1758,7 +1775,7 @@ has "$(cat "$STATE_DIR/newsubj.metadata")" '"gc.origin":"operator"' "(NEWSUBJ) �
 eq "$(cat "$STATE_DIR/newsubj.db")" "$TMP/rig/.beads" "(NEWSUBJ) …in the chosen rig's store (cross-rig create)"
 eq "$(cat "$STATE_DIR/newsubj.title")" "ship the new intake flow" "(NEWSUBJ) …titled with the question, which is short"
 has "$OUT" "filed subject tk-newsubj in rig 'gc-toolkit'" "(NEWSUBJ) reports the filed subject"
-has "$CALLED" "session new converse-opus --alias tk-new --no-attach" "(NEWSUBJ) then engages the one conversation it filed"
+has "$CALLED" "session new converse-claude-opus --alias tk-new --no-attach" "(NEWSUBJ) then engages the one conversation it filed"
 # The question is the conversation's opener when no --reason/--template is
 # given: the conversation cmd_open files carries it as its ask.
 eq "$(cat "$STATE_DIR/tk-new.title")" "ship the new intake flow" "(NEWSUBJ-OPENER) the question is the conversation's opener"
@@ -1857,30 +1874,30 @@ SCRIPT_REAL="$(readlink -f "$SCRIPT" 2>/dev/null || printf '%s' "$SCRIPT")"
 form_argv_is() { eq "$(printf '%s\n' "$FORM_ARGV" | paste -s -d'|' -)" "$1" "$2"; }
 reset; run_engage_tty ''
 eq "$RC" 0 "(FORM) a bare engage on a terminal runs the form"
-form_argv_is "form|--helm|$SCRIPT_REAL|--models|opus,codex,fable" "(FORM) …handed this script's path and the converse variants, the default first"
+form_argv_is "form|--helm|$SCRIPT_REAL|--models|claude-opus,claude-fable,codex-astra,codex-sol" "(FORM) …handed this script's path and the converse variants, the default first"
 hasnt "$CALLED" "bd create" "(FORM) …and engage itself files nothing"
 hasnt "$CALLED" "session new" "(FORM) …and starts nothing"
 reset; run_engage_tty '' tk-subj
-form_argv_is "form|--helm|$SCRIPT_REAL|--models|opus,codex,fable|--subject|tk-subj" "(FORM-SUBJECT) a subject fills in the subject field"
-reset; run_engage_tty '' tk-subj --model fable
-form_argv_is "form|--helm|$SCRIPT_REAL|--models|opus,codex,fable|--subject|tk-subj|--model|fable" "(FORM-MODEL) --model fills in the model"
+form_argv_is "form|--helm|$SCRIPT_REAL|--models|claude-opus,claude-fable,codex-astra,codex-sol|--subject|tk-subj" "(FORM-SUBJECT) a subject fills in the subject field"
+reset; run_engage_tty '' tk-subj --model claude-fable
+form_argv_is "form|--helm|$SCRIPT_REAL|--models|claude-opus,claude-fable,codex-astra,codex-sol|--subject|tk-subj|--model|claude-fable" "(FORM-MODEL) --model fills in the model"
 reset; run_engage_tty '' tk-subj --no-attach
-form_argv_is "form|--helm|$SCRIPT_REAL|--models|opus,codex,fable|--subject|tk-subj|--no-attach" "(FORM-NOATTACH) --no-attach turns the form's attaching off, as it turns engage's off"
+form_argv_is "form|--helm|$SCRIPT_REAL|--models|claude-opus,claude-fable,codex-astra,codex-sol|--subject|tk-subj|--no-attach" "(FORM-NOATTACH) --no-attach turns the form's attaching off, as it turns engage's off"
 reset; run_engage_tty '' tk-gate --from tk-subj
-form_argv_is "form|--helm|$SCRIPT_REAL|--models|opus,codex,fable|--subject|tk-gate|--from|tk-subj" "(FORM-FROM) --from rides with the subject, so the form reads the gate from that bead"
+form_argv_is "form|--helm|$SCRIPT_REAL|--models|claude-opus,claude-fable,codex-astra,codex-sol|--subject|tk-gate|--from|tk-subj" "(FORM-FROM) --from rides with the subject, so the form reads the gate from that bead"
 reset; run_engage_tty '' tk-subj --model typo
 eq "$RC" 2 "(FORM-MODEL-BAD) a --model no variant carries is refused on a terminal too, exit 2"
 eq "$FORM_ARGV" "" "(FORM-MODEL-BAD) …before the form opens"
-has "$OUT" "--model must be one of: opus codex fable (got 'typo')" "(FORM-MODEL-BAD) …naming the variants, as the flag-driven path does"
+has "$OUT" "--model must be one of: claude-opus claude-fable codex-astra codex-sol (got 'typo')" "(FORM-MODEL-BAD) …naming the variants, as the flag-driven path does"
 reset; run_engage_tty '' "$(printf 'draft the plan\nwith two lines')" --new-subject --rig gc-toolkit
-form_argv_is "form|--helm|$SCRIPT_REAL|--models|opus,codex,fable|--new-subject|--question|draft the plan|with two lines|--rig|gc-toolkit" "(FORM-NEWSUBJ) --new-subject opens a new topic, the text its question and --rig its rig"
+form_argv_is "form|--helm|$SCRIPT_REAL|--models|claude-opus,claude-fable,codex-astra,codex-sol|--new-subject|--question|draft the plan|with two lines|--rig|gc-toolkit" "(FORM-NEWSUBJ) --new-subject opens a new topic, the text its question and --rig its rig"
 hasnt "$CALLED" "--metadata" "(FORM-NEWSUBJ) …and nothing is created before the form saves it"
 reset; run_engage_tty '' tk-subj --reason "a concern of its own" --no-attach
 eq "$FORM_ARGV" "" "(FORM-CONCERN) a concern on the command line opens no form"
 has "$CALLED" "bd create" "(FORM-CONCERN) …and files its conversation directly"
 reset; run_engage_tty '' tk-subj --no-input --no-attach
 eq "$FORM_ARGV" "" "(FORM-NOINPUT) --no-input opens no form on a terminal"
-has "$CALLED" "session new converse-opus --alias tk-conv" "(FORM-NOINPUT) …and takes the flag-driven path"
+has "$CALLED" "session new converse-claude-opus --alias tk-conv" "(FORM-NOINPUT) …and takes the flag-driven path"
 reset; FORM_BIN="$TMP/no-such-form" run_engage_tty '' tk-subj
 eq "$RC" 3 "(FORM-MISSING) a terminal engage with no form built exits 3"
 has "$OUT" "no helm-svc binary is built" "(FORM-MISSING) …saying the form is not built"
@@ -1894,7 +1911,7 @@ OUT="$(GC_HELM_ASSUME_TTY=1 GC_HELM_FORM_BIN="$TMP/bin/form-stub" sh "$SCRIPT" a
 set -e
 FORM_ARGV="$(cat "$FORM_ARGV_FILE" 2>/dev/null || true)"
 eq "$RC" 0 "(ATTACH-LIST) a bare attach on a terminal runs the form"
-form_argv_is "form|--helm|$SCRIPT_REAL|--models|opus,codex,fable|--return" "(ATTACH-LIST) …on its return list"
+form_argv_is "form|--helm|$SCRIPT_REAL|--models|claude-opus,claude-fable,codex-astra,codex-sol|--return" "(ATTACH-LIST) …on its return list"
 set +e
 OUT="$(sh "$SCRIPT" attach </dev/null 2>&1)"; RC=$?
 set -e
@@ -1906,7 +1923,7 @@ OUT="$(sh "$SCRIPT" attach tk-conv </dev/null 2>&1)"; RC=$?
 set -e
 CALLED="$(cat "$CALLS")"
 eq "$RC" 0 "(ATTACH-ID) attach <conversation> exits 0"
-has "$CALLED" "session new converse-opus --alias tk-conv" "(ATTACH-ID) …holding a queued conversation in a sitting, as engage does"
+has "$CALLED" "session new converse-claude-opus --alias tk-conv" "(ATTACH-ID) …holding a queued conversation in a sitting, as engage does"
 has "$CALLED" "session attach gc-77" "(ATTACH-ID) …and attaching to it"
 
 echo "# --skill files a NEW conversation whose ask is the lens brief, even with one queued"
@@ -1916,16 +1933,16 @@ echo "# --skill files a NEW conversation whose ask is the lens brief, even with 
 # spawn: its rig, and its model's converse agent.
 run_fresh tk-subj --skill review-arch --no-input --no-attach
 eq "$RC" 0 "(SKILL) --skill on a subject exits 0"
-has "$CALLED" "skill list --agent gc-toolkit/gc-toolkit.converse-opus" "(SKILL) the name is checked against the sitting's own roster (its rig and model)"
+has "$CALLED" "skill list --agent gc-toolkit/gc-toolkit.converse-claude-opus" "(SKILL) the name is checked against the sitting's own roster (its rig and model)"
 has "$CALLED" "bd create" "(SKILL) …a NEW conversation is filed, past the queued one"
 hasnt "$OUT" "already open" "(SKILL) …deliberately, past the queue's join"
 has "$CALLED" "--title review-arch lens" "(SKILL) …titled by the skill, so the board row says whose view it brings"
 has "$CALLED" "look at tk-subj through the gc-toolkit.review-arch" "(SKILL) …its ask is the lens brief, the bare name resolved to the full one"
 has "$CALLED" "Load that skill" "(SKILL) …which has the sitting load the skill"
 has "$CALLED" "then WAIT for the operator" "(SKILL) …and, with no opener, frame through the lens and wait"
-has "$CALLED" "session new converse-opus --alias tk-new" "(SKILL) …then a sitting spawns for the new conversation"
-hasnt "$CALLED" "session nudge" "(SKILL) …and the opus sitting reads the lens from its ask, unkicked"
-has "$OUT" "✓ converse-opus with review-arch on new conversation" "(SKILL) the summary names the skill the sitting was seeded with"
+has "$CALLED" "session new converse-claude-opus --alias tk-new" "(SKILL) …then a sitting spawns for the new conversation"
+hasnt "$CALLED" "session nudge" "(SKILL) …and the claude-opus sitting reads the lens from its ask, unkicked"
+has "$OUT" "✓ converse-claude-opus with review-arch on new conversation" "(SKILL) the summary names the skill the sitting was seeded with"
 
 echo "# a full skill name resolves to exactly that skill"
 run_fresh tk-subj --skill gc-toolkit.review-pm --no-input --no-attach
@@ -1951,9 +1968,9 @@ esac
 has "$CALLED" "--title review-arch lens: is the split justified" "(SKILL-REASON) …and rides the title after the skill"
 
 echo "# a codex sitting is checked against codex's roster, and reads the brief from its ask"
-run_fresh tk-subj --skill review-arch --model codex --no-input --no-attach
-eq "$RC" 0 "(SKILL-CODEX) --skill with --model codex exits 0"
-has "$CALLED" "skill list --agent gc-toolkit/gc-toolkit.converse-codex" "(SKILL-CODEX) the roster read is the codex sitting's"
+run_fresh tk-subj --skill review-arch --model codex-sol --no-input --no-attach
+eq "$RC" 0 "(SKILL-CODEX) --skill with --model codex-sol exits 0"
+has "$CALLED" "skill list --agent gc-toolkit/gc-toolkit.converse-codex-sol" "(SKILL-CODEX) the roster read is the codex sitting's"
 has "$CALLED" "look at tk-subj through the gc-toolkit.review-arch" "(SKILL-CODEX) …its new conversation's ask is the lens brief"
 hasnt "$CALLED" "session nudge" "(SKILL-CODEX) …and no opening turn carries it"
 
@@ -2135,7 +2152,7 @@ fresh_gctk; run_fresh tk-subj --no-attach --no-input
 eq "$RC" 0 "(HOLD-NOINPUT) --no-input on a held bead exits 0"
 has "$OUT" 'tk-subj is held by human gate tk-gate ("Approve the rollout"). To answer it: gc-helm engage tk-gate --from tk-subj' "(HOLD-NOINPUT) …naming the gate and how to engage it from the bead"
 hasnt "$(cat "$TMP/err")" "is held by human gate" "(HOLD-NOINPUT) …on stdout, all the board's route returns from an engage that exits 0"
-has "$CALLED" "session new converse-opus --alias tk-conv" "(HOLD-NOINPUT) …and carrying on with the bead's conversation"
+has "$CALLED" "session new converse-claude-opus --alias tk-conv" "(HOLD-NOINPUT) …and carrying on with the bead's conversation"
 hasnt "$CALLED" "--type replies-to" "(HOLD-NOINPUT) …which answers no gate unasked"
 fresh_gctk; run_fresh tk-subj --reason "a distinct concern" --no-attach
 has "$OUT" "tk-subj is held by human gate tk-gate" "(HOLD-REASON) a concern on the argv names the gate too"
@@ -2163,7 +2180,7 @@ fresh_gctk; run_fresh tk-subj --no-attach --no-input
 eq "$RC" 0 "(HOLD-UNREAD) a reader that fails does not stop the engage"
 has "$OUT" "could not read what holds tk-subj" "(HOLD-UNREAD) …which says so"
 hasnt "$(cat "$TMP/err")" "could not read what holds" "(HOLD-UNREAD) …on stdout, as what holds it is"
-has "$CALLED" "session new converse-opus --alias tk-conv" "(HOLD-UNREAD) …and goes on"
+has "$CALLED" "session new converse-claude-opus --alias tk-conv" "(HOLD-UNREAD) …and goes on"
 unset GCTK_REASONS_FAIL
 GCTK_BIN=none run_fresh tk-subj --no-attach --no-input
 has "$OUT" "could not read what holds tk-subj" "(HOLD-NOBIN) no gctk says the same"

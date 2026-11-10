@@ -71,7 +71,7 @@ for render in "$RENDERS"/*.md; do
   carries "$render" "$ATTENDED" && ok "$agent's prompt tells an attended session to capture the operator's own turns" \
     || bad "$agent's prompt carries the capture recipe without: $ATTENDED"
 done
-for agent in polecat polecat-codex converse-opus; do
+for agent in polecat polecat-codex converse-claude-opus; do
   case " $WITH_RECIPE " in
     *" $agent "*) ok "$agent's prompt carries the capture recipe" ;;
     *) bad "$agent's prompt no longer carries the capture recipe (found in:${WITH_RECIPE:- none})" ;;

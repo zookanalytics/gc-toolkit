@@ -79,7 +79,7 @@ describe('ActuateButton', () => {
 
   it('engage reports the sitting without claiming to have attached the operator', async () => {
     reply = () =>
-      json({ bead: BEAD_ID, verb: 'engage', message: '✓ converse-opus on new conversation tk-v1 for ' + BEAD_ID + '\n  attach: gc session attach gc-42' });
+      json({ bead: BEAD_ID, verb: 'engage', message: '✓ converse-claude-opus on new conversation tk-v1 for ' + BEAD_ID + '\n  attach: gc session attach gc-42' });
     render(<ActuateButton verb="engage" beadId={BEAD_ID} />);
     fireEvent.click(screen.getByRole('button', { name: /discuss/i }));
 

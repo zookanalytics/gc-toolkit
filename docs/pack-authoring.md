@@ -535,7 +535,7 @@ and both scopes ship in one pack:
 | Agents | `scope` | Identity to stamp |
 | --- | --- | --- |
 | dog, deacon, mechanik | `city` | `gc-toolkit.<role>` — no rig segment, so the deacon is `gc-toolkit.deacon` |
-| converse-opus, converse-fable, converse-codex, polecat, polecat-codex, proactive, refinery, witness | `rig` | `gc-toolkit/gc-toolkit.<role>`, so the refinery is `gc-toolkit/gc-toolkit.refinery` |
+| converse-claude-opus, converse-claude-fable, converse-codex-sol, converse-codex-astra, polecat, polecat-codex, proactive, refinery, witness | `rig` | `gc-toolkit/gc-toolkit.<role>`, so the refinery is `gc-toolkit/gc-toolkit.refinery` |
 
 Each agent declares its own `scope` in `agents/<role>/agent.toml`, and the
 `[[named_session]]` stanzas in `pack.toml` restate it for the singletons. Read

@@ -29,7 +29,7 @@ if [ -e "$STATE/stall.after-subject" ] && grep -q '"tk-subj1"' "$STATE/rows.json
 arg() { want=$1; shift; prev=; for a; do [ "$prev" = "$want" ] && { printf '%s' "$a"; return; }; prev=$a; done; }
 case "$1 ${2:-}" in
 "rig list") cat "$STATE/rigs.json" ;;
-"agent list") echo '{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.converse-opus"}]}' ;;
+"agent list") echo '{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.converse-claude-opus"}]}' ;;
 "bd create")
 	deps=$(arg --deps "$@")
 	if [ -z "$deps" ]; then id=tk-subj1; else id=tk-conv$(( $(jq '[.[] | select(.id | startswith("tk-conv"))] | length' "$STATE/rows.json") + 1 )); fi
@@ -157,7 +157,7 @@ func TestANewTopicSaveKilledAtItsDeadlineKeepsItsSubject(t *testing.T) {
 			if h.got[1].saved != (Saved{Subject: "tk-subj1", Conversation: "tk-conv1", Filed: true}) || h.got[1].err != nil {
 				t.Fatalf("the save again answered %+v", h.got[1])
 			}
-			if len(h.starts) != 1 || h.starts[0] != "tk-conv1 opus" {
+			if len(h.starts) != 1 || h.starts[0] != "tk-conv1 claude-opus" {
 				t.Fatalf("starts = %v, want tk-conv1", h.starts)
 			}
 			b, err := os.ReadFile(filepath.Join(state, "rows.json"))
@@ -273,7 +273,7 @@ func TestAGateSaveKilledInItsReplyIsSavedAgainOntoTheConversationItFiled(t *test
 	if len(h.got) != 2 || h.got[1].saved != filed || h.got[1].err != nil {
 		t.Fatalf("the save again answered %+v", h.got)
 	}
-	if len(h.starts) != 1 || h.starts[0] != "tk-conv1 opus" {
+	if len(h.starts) != 1 || h.starts[0] != "tk-conv1 claude-opus" {
 		t.Fatalf("starts = %v, want tk-conv1", h.starts)
 	}
 	if b, err = os.ReadFile(filepath.Join(state, "rows.json")); err != nil {

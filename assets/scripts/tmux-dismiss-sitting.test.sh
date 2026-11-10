@@ -104,14 +104,14 @@ msg_has()  { grep -qF -- "$1" < <(tmux -L "$SOCKET" show-messages 2>/dev/null); 
 # must refuse: a polecat, a template that only starts with the word, a closed
 # past session, and two live records sharing a name.
 SESSIONS='{"sessions":[
- {"id":"hq-conv1","session_name":"s-hq-conv1","alias":"gc-toolkit/gc-toolkit.tk-conv1","template":"gc-toolkit/gc-toolkit.converse-opus","rig":"gc-toolkit","state":"active","closed":false,"attached":true},
+ {"id":"hq-conv1","session_name":"s-hq-conv1","alias":"gc-toolkit/gc-toolkit.tk-conv1","template":"gc-toolkit/gc-toolkit.converse-claude-opus","rig":"gc-toolkit","state":"active","closed":false,"attached":true},
  {"id":"hq-base1","session_name":"s-hq-base1","alias":"other/gc-toolkit.tk-vis2","template":"other/gc-toolkit.converse","rig":"other","closed":false},
- {"id":"hq-noal1","session_name":"s-hq-noal1","template":"gc-toolkit/gc-toolkit.converse-fable","rig":"gc-toolkit","closed":false},
+ {"id":"hq-noal1","session_name":"s-hq-noal1","template":"gc-toolkit/gc-toolkit.converse-claude-fable","rig":"gc-toolkit","closed":false},
  {"id":"hq-pole1","session_name":"gc-toolkit__polecat-hq-pole1","alias":"gc-toolkit/gc-toolkit.polecat-1","template":"gc-toolkit/gc-toolkit.polecat","rig":"gc-toolkit","closed":false},
  {"id":"hq-near1","session_name":"s-hq-near1","alias":"gc-toolkit/gc-toolkit.tk-vis3","template":"gc-toolkit/gc-toolkit.conversely","rig":"gc-toolkit","closed":false},
- {"id":"hq-old1","session_name":"s-hq-old1","alias":"gc-toolkit/gc-toolkit.tk-vis0","template":"gc-toolkit/gc-toolkit.converse-opus","rig":"gc-toolkit","closed":true},
- {"id":"hq-dup1","session_name":"s-dup","template":"gc-toolkit/gc-toolkit.converse-opus","rig":"gc-toolkit","closed":false},
- {"id":"hq-dup2","session_name":"s-dup","template":"gc-toolkit/gc-toolkit.converse-opus","rig":"gc-toolkit","closed":false}
+ {"id":"hq-old1","session_name":"s-hq-old1","alias":"gc-toolkit/gc-toolkit.tk-vis0","template":"gc-toolkit/gc-toolkit.converse-claude-opus","rig":"gc-toolkit","closed":true},
+ {"id":"hq-dup1","session_name":"s-dup","template":"gc-toolkit/gc-toolkit.converse-claude-opus","rig":"gc-toolkit","closed":false},
+ {"id":"hq-dup2","session_name":"s-dup","template":"gc-toolkit/gc-toolkit.converse-claude-opus","rig":"gc-toolkit","closed":false}
 ]}'
 
 # ── Fake config dir: the script resolves gc-helm.sh under it ────────────────

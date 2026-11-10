@@ -325,17 +325,18 @@ command line names no concern (`--reason`, `--template` or `--skill`) and not
 `--no-input` hands the terminal to helm-svc's `form` command
 (`services/helm/internal/form`). One screen holds, in this order, the subject
 (a bead id, a PR number or URL, or empty for a new topic), a multiline
-question, in which Enter adds a line, a new topic's rig, the model, with opus
-shown as the default, and whether to attach once the sitting starts, which is
-on unless `--no-attach` is given. Tab moves through the fields in that order,
-so the question is one Tab after the subject, and the form opens on the
-question when the command line names the subject or a new topic's rig. A tab in
-the question stays a tab, shown as ␉, and a line break written as
+question, in which Enter adds a line, a new topic's rig, the model, shown with
+each word of its name capitalized and Claude-Opus as the default, and whether
+to attach once the sitting starts, which is on unless `--no-attach` is given.
+Tab moves through the fields in that order, so the question is one Tab after
+the subject, and the form opens on the question when the command line names
+the subject or a new topic's rig. A tab in the question stays a tab, shown as
+␉, and a line break written as
 LF, CR or CRLF is one line break. The field leaves out every other control
 character, such as BEL or ESC, and U+FFFD, the replacement character. It leaves
 out U+FDD0 as well, since inside the field that noncharacter stands for a tab.
 The command line fills in the fields, and typing never waits for a read.
-A `--model` that no configured variant carries is refused before the form
+A `--model` that names no variant engage offers is refused before the form
 opens, as the flag-driven engage refuses it.
 While the operator types, the form reads `gc-helm.sh conversations` for the
 subject: the bead it resolves to, the rig a conversation about it is held in,
@@ -348,6 +349,17 @@ for the operator to pick the anchor. A result read for an earlier subject never
 stands in for the current one, and no result changes a rig or a conversation
 the operator chose. A conversation chosen from the list is started as it is,
 and a question typed beside it is not sent into it.
+
+**The variants are the converse templates engage offers.** Each is an
+`agents/converse-*` template named `converse-<provider>-<model>`, and the name
+after `converse-` is what `--model` takes and what the form shows capitalized:
+`claude-opus` (the default), `claude-fable`, `codex-sol` and `codex-astra` read
+Claude-Opus, Claude-Fable, Codex-Sol and Codex-Astra. engage withdraws
+`converse-opus`, `converse-fable` and `converse-codex`: it offers none of them,
+and each stays configured only for the sittings already open on it. Gas City's
+reconciler wakes no session whose template is not configured, drains one that
+holds no work, and closes one whose process is gone, releasing the conversation
+it held, so a template goes only once no open sitting runs on it.
 
 Ctrl+S saves the question only once the destination is settled. `open` files
 it as a new conversation (`--allow-duplicate` and `--if-subject` on a subject,

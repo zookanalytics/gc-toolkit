@@ -91,7 +91,7 @@ func newForm(t *testing.T, f *fakeHelm, opt Options) *Model {
 func newFormOn(t *testing.T, h Helm, opt Options) *Model {
 	t.Helper()
 	if opt.Models == nil {
-		opt.Models = []string{"opus", "fable", "codex"}
+		opt.Models = []string{"claude-opus", "claude-fable", "codex-astra", "codex-sol"}
 	}
 	opt.Debounce = time.Millisecond
 	opt.Refresh = time.Millisecond
@@ -307,18 +307,18 @@ func TestSavedIsSaidBeforeTheStartAndTheSittingIsAttachedOnceItStarts(t *testing
 		t.Fatalf("before the save answers the screen says:\n%s", v)
 	}
 	_, startCmd := m.Update(saveCmd())
-	if v := m.progressView(); !strings.Contains(v, "saved: conversation tk-c1") || !strings.Contains(v, "starting its sitting on opus") || !strings.Contains(v, "Attaches once its sitting starts") {
+	if v := m.progressView(); !strings.Contains(v, "saved: conversation tk-c1") || !strings.Contains(v, "starting its sitting on Claude-Opus") || !strings.Contains(v, "Attaches once its sitting starts") {
 		t.Fatalf("after the save, before the start, the screen says:\n%s", v)
 	}
 	if len(f.starts) != 0 || len(f.attaches) != 0 {
 		t.Fatalf("the start or the attach ran before the start's command did: starts %v, attaches %v", f.starts, f.attaches)
 	}
 	_, attachCmd := m.Update(startCmd())
-	if len(f.starts) != 1 || f.starts[0] != "tk-c1 opus" {
+	if len(f.starts) != 1 || f.starts[0] != "tk-c1 claude-opus" {
 		t.Fatalf("starts = %v", f.starts)
 	}
-	if len(f.attachArgs) != 1 || f.attachArgs[0] != "gc-helm.sh engage tk-c1 --no-input --model opus" {
-		t.Fatalf("once the sitting started the form kept the attach %v, want tk-c1 on opus", f.attachArgs)
+	if len(f.attachArgs) != 1 || f.attachArgs[0] != "gc-helm.sh engage tk-c1 --no-input --model claude-opus" {
+		t.Fatalf("once the sitting started the form kept the attach %v, want tk-c1 on claude-opus", f.attachArgs)
 	}
 	// The form keeps the attach and leaves, and the attach runs once the
 	// form's program has returned, so the form draws nothing after it.
@@ -505,7 +505,7 @@ func TestAConversationFiledWhoseSaveFailedIsKeptAndSavedAgainNotFiledAgain(t *te
 	if len(f.saves) != 4 || f.saves[1] != again || f.saves[2] != again || f.saves[3] != again {
 		t.Fatalf("saves = %+v, want each save again to be the first naming tk-c1", f.saves)
 	}
-	if m.saveErr != "" || len(f.starts) != 1 || f.starts[0] != "tk-c1 opus" {
+	if m.saveErr != "" || len(f.starts) != 1 || f.starts[0] != "tk-c1 claude-opus" {
 		t.Fatalf("after the save completed: saveErr %q, starts %v", m.saveErr, f.starts)
 	}
 	if files, _ := filepath.Glob(filepath.Join(dir, "*")); len(files) != 0 {
@@ -568,7 +568,7 @@ func TestChoosingAnOpenConversationKeepsTheDraft(t *testing.T) {
 	}
 	_, cmd := m.Update(ctrl('s'))
 	deliver(m, cmd)
-	if len(f.saves) != 0 || len(f.starts) != 1 || f.starts[0] != "tk-c1 opus" || len(f.attaches) != 1 || f.attaches[0] != "tk-c1" {
+	if len(f.saves) != 0 || len(f.starts) != 1 || f.starts[0] != "tk-c1 claude-opus" || len(f.attaches) != 1 || f.attaches[0] != "tk-c1" {
 		t.Fatalf("continuing tk-c1: saves %v starts %v attaches %v", f.saves, f.starts, f.attaches)
 	}
 }
@@ -620,7 +620,7 @@ func TestAConversationIdTypedBackIsChosenAgain(t *testing.T) {
 	}
 	_, cmd := m.Update(ctrl('s'))
 	deliver(m, cmd)
-	if len(f.saves) != 0 || len(f.starts) != 1 || f.starts[0] != "tk-c1 opus" {
+	if len(f.saves) != 0 || len(f.starts) != 1 || f.starts[0] != "tk-c1 claude-opus" {
 		t.Fatalf("an empty question on tk-c1: saves %v, starts %v, status %q", f.saves, f.starts, m.status)
 	}
 
@@ -789,8 +789,8 @@ func TestTheModelDefaultIsShownAndOverridable(t *testing.T) {
 	}
 	m := newForm(t, f, Options{Subject: "tk-a"})
 	settle(m)
-	if v := m.composeView(); !strings.Contains(v, "opus") || !strings.Contains(v, "(default)") {
-		t.Fatalf("compose view does not show the default model:\n%s", v)
+	if v := m.composeView(); !strings.Contains(v, "Claude-Opus") || !strings.Contains(v, "(default)") || strings.Contains(v, "claude-opus") {
+		t.Fatalf("compose view does not show the default model by its label:\n%s", v)
 	}
 	focusOn(t, m, modelField)
 	m.Update(key(tea.KeyRight))
@@ -798,8 +798,51 @@ func TestTheModelDefaultIsShownAndOverridable(t *testing.T) {
 	typeText(m, "q")
 	_, cmd := m.Update(ctrl('s'))
 	deliver(m, cmd)
-	if len(f.starts) != 1 || f.starts[0] != "tk-c1 fable" {
+	if len(f.starts) != 1 || f.starts[0] != "tk-c1 claude-fable" {
 		t.Fatalf("starts = %v", f.starts)
+	}
+}
+
+// The model field shows each variant by its label, every word of its name
+// capitalized, in the order engage lists them, and starts the sitting on the
+// name itself, which is what engage's --model takes.
+func TestTheModelFieldShowsEachVariantByItsLabel(t *testing.T) {
+	for name, want := range map[string]string{
+		"claude-opus": "Claude-Opus", "claude-fable": "Claude-Fable",
+		"codex-sol": "Codex-Sol", "codex-astra": "Codex-Astra",
+		"opus": "Opus", "": "",
+	} {
+		if got := modelLabel(name); got != want {
+			t.Errorf("modelLabel(%q) = %q, want %q", name, got, want)
+		}
+	}
+	f := &fakeHelm{
+		about:    map[string]About{"tk-a": subjectAbout("tk-a", "gc-toolkit")},
+		saveResp: Saved{Subject: "tk-a", Conversation: "tk-c1", Filed: true},
+	}
+	m := newForm(t, f, Options{Subject: "tk-a"})
+	settle(m)
+	focusOn(t, m, modelField)
+	var shown []string
+	for range m.opt.Models {
+		v := m.composeView()
+		for _, l := range []string{"Claude-Opus", "Claude-Fable", "Codex-Astra", "Codex-Sol"} {
+			if strings.Contains(v, "‹ "+l) {
+				shown = append(shown, l)
+			}
+		}
+		m.Update(key(tea.KeyRight))
+	}
+	if got := strings.Join(shown, ", "); got != "Claude-Opus, Claude-Fable, Codex-Astra, Codex-Sol" {
+		t.Fatalf("the model field showed %s", got)
+	}
+	m.Update(key(tea.KeyLeft))
+	focusOn(t, m, questionField)
+	typeText(m, "q")
+	_, cmd := m.Update(ctrl('s'))
+	deliver(m, cmd)
+	if len(f.starts) != 1 || f.starts[0] != "tk-c1 codex-sol" {
+		t.Fatalf("starts = %v, want the sitting started on codex-sol", f.starts)
 	}
 }
 
@@ -808,7 +851,7 @@ func TestTheModelDefaultIsShownAndOverridable(t *testing.T) {
 // runs on the model the start ran on. The return list shows no model, and
 // attaches on engage's default.
 func TestAnAttachThatCanHoldANewSittingKeepsTheModelTheStartRanOn(t *testing.T) {
-	const want = "gc-helm.sh engage tk-c1 --no-input --model fable"
+	const want = "gc-helm.sh engage tk-c1 --no-input --model claude-fable"
 
 	// The start failed, so no sitting holds the conversation.
 	f := &fakeHelm{
@@ -816,12 +859,12 @@ func TestAnAttachThatCanHoldANewSittingKeepsTheModelTheStartRanOn(t *testing.T) 
 		saveResp: Saved{Subject: "tk-a", Conversation: "tk-c1", Filed: true},
 		startErr: errors.New("gc-helm: engage: the reconciler is down"),
 	}
-	m := newForm(t, f, Options{Subject: "tk-a", Model: "fable"})
+	m := newForm(t, f, Options{Subject: "tk-a", Model: "claude-fable"})
 	settle(m)
 	typeText(m, "q")
 	_, cmd := m.Update(ctrl('s'))
 	deliver(m, cmd)
-	if m.startErr == "" || len(f.starts) != 1 || f.starts[0] != "tk-c1 fable" {
+	if m.startErr == "" || len(f.starts) != 1 || f.starts[0] != "tk-c1 claude-fable" {
 		t.Fatalf("start error %q, starts %v", m.startErr, f.starts)
 	}
 	if _, cmd := m.Update(key(tea.KeyEnter)); cmd == nil || len(f.attachArgs) != 1 || f.attachArgs[0] != want {
@@ -833,7 +876,7 @@ func TestAnAttachThatCanHoldANewSittingKeepsTheModelTheStartRanOn(t *testing.T) 
 		about:    map[string]About{"tk-a": subjectAbout("tk-a", "gc-toolkit")},
 		saveResp: Saved{Subject: "tk-a", Conversation: "tk-c1", Filed: true},
 	}
-	m = newForm(t, f, Options{Subject: "tk-a", Model: "fable"})
+	m = newForm(t, f, Options{Subject: "tk-a", Model: "claude-fable"})
 	settle(m)
 	typeText(m, "q")
 	_, cmd = m.Update(ctrl('s'))
@@ -844,7 +887,7 @@ func TestAnAttachThatCanHoldANewSittingKeepsTheModelTheStartRanOn(t *testing.T) 
 
 	// The return list attaches on engage's default.
 	f = &fakeHelm{city: City{Conversations: []Conversation{{ID: "tk-gone", Readiness: Ended}}}}
-	m = newForm(t, f, Options{Return: true, Model: "fable"})
+	m = newForm(t, f, Options{Return: true, Model: "claude-fable"})
 	loadCity(m)
 	if _, cmd := m.Update(key(tea.KeyEnter)); cmd == nil || len(f.attachArgs) != 1 || f.attachArgs[0] != "gc-helm.sh engage tk-gone --no-input" {
 		t.Fatalf("attach from the return list = %v", f.attachArgs)
@@ -1292,32 +1335,32 @@ func TestAModelNoVariantCarriesIsShownAndStartsNothing(t *testing.T) {
 		t.Fatalf("compose view does not mark the model:\n%s", v)
 	}
 	m.Update(ctrl('s'))
-	if len(f.saves) != 0 || len(f.starts) != 0 || !strings.Contains(m.status, "typo is not a configured model (opus, fable, codex)") {
+	if len(f.saves) != 0 || len(f.starts) != 0 || !strings.Contains(m.status, "typo is not a configured model (Claude-Opus, Claude-Fable, Codex-Astra, Codex-Sol)") {
 		t.Fatalf("saves %v, starts %v, status %q", f.saves, f.starts, m.status)
 	}
 	focusOn(t, m, modelField)
 	m.Update(key(tea.KeyLeft))
-	if m.modelName() != "codex" {
+	if m.modelName() != "codex-sol" {
 		t.Fatalf("← from the unknown model = %q, want the last variant", m.modelName())
 	}
 	m.Update(key(tea.KeyRight))
-	if m.modelName() != "opus" {
-		t.Fatalf("→ from codex = %q", m.modelName())
+	if m.modelName() != "claude-opus" {
+		t.Fatalf("→ from codex-sol = %q", m.modelName())
 	}
 	_, cmd := m.Update(ctrl('s'))
 	deliver(m, cmd)
-	if len(f.saves) != 1 || len(f.starts) != 1 || f.starts[0] != "tk-c1 opus" {
+	if len(f.saves) != 1 || len(f.starts) != 1 || f.starts[0] != "tk-c1 claude-opus" {
 		t.Fatalf("saves %v, starts %v", f.saves, f.starts)
 	}
 	// → from the unknown model takes the first variant.
 	m = newForm(t, &fakeHelm{}, Options{Model: "typo"})
 	m.cycleModel(1)
-	if m.modelName() != "opus" {
+	if m.modelName() != "claude-opus" {
 		t.Fatalf("→ from the unknown model = %q, want the first variant", m.modelName())
 	}
 	// With no variants named, the model the command line named stands.
-	m = newForm(t, &fakeHelm{}, Options{Model: "fable", Models: []string{}})
-	if m.model != 0 || m.modelName() != "fable" || strings.Contains(m.composeView(), "not a configured model") {
+	m = newForm(t, &fakeHelm{}, Options{Model: "claude-fable", Models: []string{}})
+	if m.model != 0 || m.modelName() != "claude-fable" || strings.Contains(m.composeView(), "not a configured model") {
 		t.Fatalf("model %d %q with no variants named", m.model, m.modelName())
 	}
 }
@@ -1346,7 +1389,7 @@ func TestANewTopicSavedAgainCompletesTheConversationItFiled(t *testing.T) {
 	if len(f.saves) != 2 || f.saves[1] != want {
 		t.Fatalf("saves = %+v, want the save again onto tk-new naming tk-c", f.saves)
 	}
-	if m.saveErr != "" || len(f.starts) != 1 || f.starts[0] != "tk-c opus" {
+	if m.saveErr != "" || len(f.starts) != 1 || f.starts[0] != "tk-c claude-opus" {
 		t.Fatalf("after the save again: saveErr %q, starts %v", m.saveErr, f.starts)
 	}
 }
@@ -1630,7 +1673,7 @@ func TestAGateSeveralBeadsWaitOnIsAboutTheSubjectItWasChosenFrom(t *testing.T) {
 	if len(f.saves) != 1 || f.saves[0] != want {
 		t.Fatalf("saves = %+v, want %+v", f.saves, want)
 	}
-	if len(f.starts) != 1 || f.starts[0] != "tk-c2 opus" {
+	if len(f.starts) != 1 || f.starts[0] != "tk-c2 claude-opus" {
 		t.Fatalf("starts = %v, want tk-c2", f.starts)
 	}
 }

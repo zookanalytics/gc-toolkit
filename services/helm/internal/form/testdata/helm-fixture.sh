@@ -4,7 +4,7 @@
 # (docs/review-demo.md):
 #
 #   helm-svc form --helm services/helm/internal/form/testdata/helm-fixture.sh \
-#       --models opus,fable,codex [--subject tk-demo1 | --rig gc-toolkit | --return]
+#       --models claude-opus,claude-fable,codex-astra,codex-sol [--subject tk-demo1 | --rig gc-toolkit | --return]
 #
 # It answers the verbs the form calls: `conversations [<ref>] --json`, `open`,
 # `engage <conversation> --no-input --no-attach` and the attach,
@@ -72,7 +72,7 @@ JSON
   "engage "*)
     sleep 1
     case " $* " in
-      *" --no-attach "*) echo "✓ converse-opus on existing conversation $2 for tk-demo1" ;;
+      *" --no-attach "*) echo "✓ converse-claude-opus on existing conversation $2 for tk-demo1" ;;
       *) echo "(the fixture attaches nothing: $2)" ;;
     esac
     ;;

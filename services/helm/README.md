@@ -252,16 +252,18 @@ on every tick.
 ### The conversation form (`helm-svc form`)
 
 ```
-helm-svc form --helm <gc-helm.sh> --models opus,fable,codex [--subject <ref> [--from <bead>] | --new-subject [--rig <name>] [--question <text>]] [--model <variant>] [--no-attach]
+helm-svc form --helm <gc-helm.sh> --models claude-opus,claude-fable,codex-astra,codex-sol [--subject <ref> [--from <bead>] | --new-subject [--rig <name>] [--question <text>]] [--model <variant>] [--no-attach]
 helm-svc form --helm <gc-helm.sh> --return     # the conversations to return to
 ```
 
 The screen `gc-helm.sh engage` and `gc-helm.sh attach` hand a terminal to,
 which they run with their own path as `--helm` and the converse variants as
 `--models`. It holds the subject, a multiline question, a new topic's rig, the
-model and whether to attach, in that order, reads `gc-helm.sh conversations` in
-the background while the operator types, saves with `gc-helm.sh open`, starts
-with `gc-helm.sh engage <conversation> --no-attach`, and once the sitting has
+model, shown with each word of its name capitalized (claude-opus reads
+Claude-Opus) and passed on as named, and whether to attach, in that order. It
+reads `gc-helm.sh conversations` in the background while the operator types,
+saves with `gc-helm.sh open`, starts with
+`gc-helm.sh engage <conversation> --no-attach`, and once the sitting has
 started attaches with `gc-helm.sh engage <conversation>`, passing `--model` with
 the model its start ran on. `--no-attach`, which engage passes on from its own
 command line, opens the form with attaching off, and the form then leaves once

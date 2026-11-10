@@ -153,18 +153,18 @@ func TestCityTakesAListWhoseStoreDidNotAllAnswer(t *testing.T) {
 
 func TestStartAndAttachUseEngage(t *testing.T) {
 	s, dir := stubHelm(t, "", "", 0)
-	if err := s.Start(context.Background(), "tk-c", "fable"); err != nil {
+	if err := s.Start(context.Background(), "tk-c", "codex-astra"); err != nil {
 		t.Fatal(err)
 	}
-	if got := argv(t, dir); strings.Join(got, " ") != "engage tk-c --no-input --no-attach --model fable" {
+	if got := argv(t, dir); strings.Join(got, " ") != "engage tk-c --no-input --no-attach --model codex-astra" {
 		t.Fatalf("argv = %q", got)
 	}
 	cmd := s.AttachCommand("tk-c", "")
 	if got := strings.Join(cmd.Args, " "); got != "sh "+s.Path+" engage tk-c --no-input" {
 		t.Fatalf("attach = %q", got)
 	}
-	cmd = s.AttachCommand("tk-c", "fable")
-	if got := strings.Join(cmd.Args, " "); got != "sh "+s.Path+" engage tk-c --no-input --model fable" {
+	cmd = s.AttachCommand("tk-c", "codex-astra")
+	if got := strings.Join(cmd.Args, " "); got != "sh "+s.Path+" engage tk-c --no-input --model codex-astra" {
 		t.Fatalf("attach on a model = %q", got)
 	}
 }
