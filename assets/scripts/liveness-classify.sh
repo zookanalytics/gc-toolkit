@@ -10,11 +10,10 @@
 # Sourced (never executed). Usage follows the in-variable jq convention
 # (standing-kinds.sh): the classifier builds on open_human_gates and
 # blocked_by_any (bd-lib.sh's $HUMAN_GATE_JQ), conversation (conversation.sh),
-# standing_kinds (standing-kinds.sh) and awaiting_placement (placement.sh,
-# which asks has_dispatch_path from dispatch-path.sh), so prepend those defs,
-# then these, and call liveness_classify:
+# standing_kinds (standing-kinds.sh) and has_dispatch_hold (dispatch-path.sh),
+# so prepend those defs, then these, and call liveness_classify:
 #   jq -n --slurpfile ready R --slurpfile live L --slurpfile alive A ... \
-#     "$HUMAN_GATE_JQ$CONVERSATION_JQ$STANDING_KINDS_JQ$DISPATCH_PATH_JQ$PLACEMENT_JQ$LIVENESS_CLASSIFY_JQ"'liveness_classify'
+#     "$HUMAN_GATE_JQ$CONVERSATION_JQ$STANDING_KINDS_JQ$DISPATCH_PATH_JQ$LIVENESS_CLASSIFY_JQ"'liveness_classify'
 # It emits one {id, title, type, class} row per ready bead.
 #
 # Every input below is required, and jq refuses the program when one is
@@ -70,12 +69,10 @@
 # gate was filed: the not-closed listing, read after it, carries the bead's
 # blocks edge onto the gate.
 #
-# A bead that waits for placement (placement.sh) is a named wait too: intake
-# held it as new work for the operator's placement sitting, and
-# `gc-helm.sh unplaced` lists it there, so the sweep's triage gate would ask
-# the operator the same question a second time. The predicate reads the marker
-# and every shape that places a bead, so a marker left on a bead the sitting
-# already placed names no wait.
+# A held bead (has_dispatch_hold, dispatch-path.sh) is a named wait too: intake
+# held it as new work for the operator's placement sitting with hold:mayor, and
+# `gc beads list --label hold:mayor` lists it there, so the sweep's triage gate
+# would ask the operator the same question a second time.
 # shellcheck disable=SC2034  # read by the scripts that source this file
 LIVENESS_CLASSIFY_JQ='
   def pr_key:
@@ -156,7 +153,7 @@ LIVENESS_CLASSIFY_JQ='
            elif ((.metadata.task_kind // "") as $k | (standing_kinds | index($k)) != null) then "held-by-design"
            elif (($gateheld | index($b.id)) != null) then "held-by-design"
            elif ((.metadata["triage.hold"] // "") != "") then "held-by-design"
-           elif awaiting_placement then "awaiting-placement"
+           elif has_dispatch_hold then "awaiting-placement"
            elif ((.metadata["gc.root_bead_id"] // "") as $r | $r != "" and (($convgroups | index($r)) != null)) then "conversing"
            elif (($convgroups | index($b.id)) != null) then "conversing"
            elif (((.metadata.merge_result // "") == "pull_request")

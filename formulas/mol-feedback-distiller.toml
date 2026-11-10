@@ -451,7 +451,7 @@ has filed, and finalizes as a no-op.
 ## 1. File one bead per surviving proposal
 
 A proposal waits for the operator's placement sitting like any finding, so it
-is filed marked `placement=pending` and routed to no pool
+is filed held with Gas City's `hold:mayor` label and routed to no pool
 (docs/feedback-learning.md, *The promotion path*).
 ```bash
 BODY="## Rule
@@ -476,12 +476,12 @@ BODY="## Rule
 <the rubric's stated judgment — the D3 reviewer must be able to judge from the PR alone>"
 
 # >>> distiller-file-for-placement
-# The metadata rides the create, so the bead is never in the store without the
-# marker that puts it in the sitting's queue. target=main and merge_strategy=mr
-# are for the polecat that builds it once it is placed: they send its branch
-# through the refinery to the operator's review.
-PROPOSAL_META='{"task_kind":"prompt-update","target":"main","merge_strategy":"mr","placement":"pending"}'
-BEAD_JSON=$(gc bd create "prompt-update: <add|retire|harden> — <rule summary>" -t task -l learning -l prompt-update -d "$BODY" --metadata "$PROPOSAL_META" --json)
+# The hold rides the create, so the bead is never in the store without the label
+# that puts it in the sitting's queue. target=main and merge_strategy=mr are for
+# the polecat that builds it once it is placed: they send its branch through the
+# refinery to the operator's review.
+PROPOSAL_META='{"task_kind":"prompt-update","target":"main","merge_strategy":"mr"}'
+BEAD_JSON=$(gc bd create "prompt-update: <add|retire|harden> — <rule summary>" -t task -l learning -l prompt-update -l hold:mayor -d "$BODY" --metadata "$PROPOSAL_META" --json)
 BEAD=$(printf '%s' "$BEAD_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
 [ -n "$BEAD" ] && [ "$BEAD" != "null" ] || { CREATE_ERR=$(printf '%s' "$BEAD_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "WARN: could not create prompt-update bead for $PATTERN${CREATE_ERR:+ ($CREATE_ERR)}; skipping" >&2; continue; }
 echo "filed prompt-update $BEAD for placement (pattern $PATTERN)"
@@ -492,10 +492,9 @@ echo "filed prompt-update $BEAD for placement (pattern $PATTERN)"
 
 A route-to-engineering cluster gets ONE ordinary work bead describing the
 mechanical fix (lint / doctor check / gate / code change). It waits for
-placement the same way: `--metadata '{"placement":"pending"}'` on its create,
-and no route. It carries no task_kind=prompt-update and no bullet-cap
-accounting. Dedup on the pattern bead's `eng_bead` first (skip while it or its
-PR is live).
+placement the same way: `-l hold:mayor` on its create, and no route. It
+carries no task_kind=prompt-update and no bullet-cap accounting. Dedup on the
+pattern bead's `eng_bead` first (skip while it or its PR is live).
 Record the outcome on the pattern bead so later runs neither re-judge
 toward prose nor file a duplicate:
 ```bash

@@ -3,8 +3,8 @@
 # Dolt backup sweep — file findings through assets/scripts/patrol-finding.sh
 # (one durable bead per situation key, which a proactive first reaction then
 # disposes), and the deacon's emergency is a human gate filed with
-# assets/scripts/human-gate.sh on the bead it is about. A bare `gc mail send`
-# in the formula dedups nothing, and there is no mayor mailbox to absorb it.
+# assets/scripts/human-gate.sh on the bead it is about. The formula carries no
+# `gc mail send`, because the po's mailbox is not an escalation channel.
 #
 # A sweep re-detects its failure every cycle. A finding stays one bead per key
 # while it lives and counts each recurrence, where a human gate is one per key

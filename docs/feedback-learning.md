@@ -149,8 +149,8 @@ The distiller (`mol-feedback-distiller`, judging by the
 them onto pattern beads, and decides which clusters have earned a rule.
 Each surviving proposal becomes one `prompt-update` bead carrying the
 exact rule text, the evidence list, and the reasoning. A proposal is new
-work, so the distiller files it marked `placement=pending` and routed to
-no pool, and it waits for the operator's placement sitting
+work, so the distiller files it held with Gas City's `hold:mayor` label and
+routed to no pool, and it waits for the operator's placement sitting
 ([steering.md](steering.md)). Once the sitting places it under an epic or
 routes it on its own, a polecat builds it and the refinery opens the PR;
 **operator review of that PR is the gate**. An engineering bead from

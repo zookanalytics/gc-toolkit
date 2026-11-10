@@ -15,8 +15,8 @@
 # pool waits invisibly; today's tool always says yes), and when the subject
 # already has an open first reaction or a live owner owns it (gc-helm react
 # exit 5), a live workflow already drives it (exit 6), or it is already routed
-# or armed (exit 7), so react is a no-op that files nothing: nothing would put
-# the topic to the operator, so this does.
+# or armed, held, or waits on a person's answer (exit 7), so react is a no-op
+# that files nothing: nothing would put the topic to the operator, so this does.
 # Exit: 0 conversation queued · 2 usage · 3 environment (the rig map did not
 # read, with rig-map.sh's reason, or the city has no rigs) · 4 runtime failure.
 set -u
@@ -410,8 +410,9 @@ if [ -n "$REACT" ]; then
     # owner owns it), exit 6 the live-workflow no-op (the guard filed nothing
     # because a reaction never races work in flight), and exit 7 the
     # dispatch-path no-op (the guard filed nothing because the subject is already
-    # routed or armed), each distinct from a real failure to file: name the
-    # actual cause so the ask the converse session reads is accurate.
+    # routed or armed, held, or waits on a person's answer), each distinct from a
+    # real failure to file: name the actual cause so the ask the converse
+    # session reads is accurate.
     if [ "$REACT_RC" -eq 5 ]; then
         note "$PROG: subject $SUBJECT already has an open first reaction, or a live owner owns its reaction — no new reaction was filed; filing the conversation directly"
         REACT_WHY="no: subject already has an open first reaction or a live owner (a first reaction happens once at a time)"
@@ -419,8 +420,8 @@ if [ -n "$REACT" ]; then
         note "$PROG: a live workflow already drives subject $SUBJECT — no reaction was filed; filing the conversation directly"
         REACT_WHY="no: a live workflow already drives the subject (a first reaction never races work in flight)"
     elif [ "$REACT_RC" -eq 7 ]; then
-        note "$PROG: subject $SUBJECT is already routed or armed, or waits on a person's answer — no reaction was filed; filing the conversation directly"
-        REACT_WHY="no: the subject is already routed or armed, or waits on a person's answer (a first reaction never second-guesses a dispatch already decided)"
+        note "$PROG: subject $SUBJECT is already routed or armed, held, or waits on a person's answer — no reaction was filed; filing the conversation directly"
+        REACT_WHY="no: the subject is already routed or armed, held, or waits on a person's answer (a first reaction never second-guesses a dispatch already decided)"
     else
         note "$PROG: filing the first reaction FAILED — falling back to filing the conversation directly"
         REACT_WHY="no: filing the first reaction failed"

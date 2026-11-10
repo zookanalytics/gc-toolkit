@@ -3,9 +3,9 @@
 # assets/scripts/patrol-finding.sh (one durable bead per situation key, which a
 # proactive first reaction then disposes), and assets/scripts/human-gate.sh
 # stays available for the emergency that needs a person now, as a human gate on
-# the bead it is about. A report with no bead that can wait is a finding. A bare
-# `gc mail send` in the formula dedups nothing, and there is no mayor mailbox to
-# absorb it.
+# the bead it is about. A report with no bead that can wait is a finding. The
+# formula carries no `gc mail send`, because the po's mailbox is not an
+# escalation channel.
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$HERE/../.."

@@ -1,13 +1,12 @@
 #!/bin/sh
-# gc-helm.sh — the helm verbs: the WRITE verbs, and the read-only resolve and
-# unplaced.
+# gc-helm.sh — the helm verbs: the WRITE verbs, and the read-only resolve.
 # Job: write the operator-facing state the helm board renders, and the
 # operator's steering moves. The board itself is helm-svc's web page
 # (services/helm), and `helm-svc board --json` prints its rows; this script
 # renders nothing.
 # Verbs (full grammar and per-verb notes in usage(), `gc-helm --help`): the
-# write verbs open, engage, attach, react, takeaway, park, priority, dismiss,
-# handback, accept, and the read-only resolve, unplaced and conversations.
+# write verbs open, engage, attach, react, takeaway, park, priority, place,
+# dismiss, handback, accept, and the read-only resolve and conversations.
 # engage and attach hand a terminal to the conversation form (helm_form). open, engage and react take a
 # <subject> (a bead id, a PR number or URL, or a superseded id) and resolve it to
 # the live bead that owns the work by metadata and the graph, never a title; an
@@ -16,16 +15,15 @@
 # via GC_HELM_OPEN_TOOL (open, engage, accept, dismiss — open's stderr/stdout
 # sentences are parsed by services/helm/internal/server, guarded by
 # open_parity_test.go), converse (takeaway, handback) and the proactive worker
-# (takeaway), the placement sitting (unplaced), operators by hand (park,
-# priority).
+# (takeaway), operators by hand (park, priority, place).
 # Exit codes: 0 ok, 2 usage, 3 environment (jq/gc missing, rigs
 # unenumerable, no city root or flock for Accept's lock — each failure names
 # its own operator move),
 # 4 verb runtime failure (bead not found / unverifiable / filing failed /
 # a --route, or a takeaway headline or disposition, that will not stamp / a
-# pour stamp a release leaves on a bead held for placement / an unplaced list
-# missing a store that did not answer / a priority move the store refused /
-# an Accept refused or held by another Accept on the bead),
+# priority move the store refused / a placement whose write the store refused
+# or whose dispatch failed / an Accept refused or held by another Accept on the
+# bead),
 # 5 react no-op: the subject already has an open first reaction, or a live owner
 # owns its reaction, so nothing was filed (a first reaction happens once at a
 # time) — distinct from 4 so an intake caller files its own conversation
@@ -66,11 +64,12 @@ Usage:
   gc-helm park <bead-id> --waiting-on <bead-id>  the same hold behind an existing bead, filing no gate
   gc-helm priority <bead-id> <P0-P4> [--dry-run]  set the priority of a bead that follows nothing, and re-rank the work that follows it
   gc-helm priority <bead-id> --shift <±n> [--dry-run]  set the shift of a bead that follows a parent or an anchor: +1 is one level later, -1 one level sooner
+  gc-helm place <bead-id> --under <parent> [--shift <±n>] [--route <rig>/<pool>] [--on <formula>]  place a bead held for placement under an epic or a Delivery: set the parent, settle its priority, sling it, or arm it while a park or a blocker holds it, then lift its hold:mayor
+  gc-helm place <bead-id> --standalone [--route <rig>/<pool>] [--on <formula>]  the same with no parent, at the bead's own priority
   gc-helm dismiss  [<bead-id>] [--reason "..."] [--operator] [--json]  the operator is done with this sitting: close the conversation a live sitting holds on the bead, answering no gate, and stop the session that held it; a conversation id closes that conversation (subject inferred from the current sitting when omitted); --operator stops every session as the operator, from outside it; --json prints {subject,matched,closed,ok}
   gc-helm handback <conversation-id> < hand-back  record the hand-back a converse sitting is posting, read from stdin, on its conversation, replacing the one before; engage prints the latest in the operator's tab once the sitting has ended
   gc-helm accept <bead-id> [--reason "..."] [--conversation <task>] [--var <key>=<value> ...]  accept a recommendation: resolve the human gate that put it to the operator, read the answer back, and dispatch the bead's gc.recommended_formula at it; refuses while another human gate blocks the bead, and finishes an acceptance an earlier Accept left unfinished (subject or conversation id). --conversation names the conversation whose sitting's sign-off runs this Accept, which it does not warn of; each --var rides the sling, a var the operator settled for this dispatch
   gc-helm resolve <bead-id|pr-number|pr-url>  print the LIVE bead a reference resolves to (a PR ref to its anchor, a superseded id to its successor); a live id or an unrecognized reference prints unchanged, an unresolvable or ambiguous PR is refused. Read-only, files nothing — operator-intake.sh uses it to route a PR reference before it becomes a topic
-  gc-helm unplaced [--json]  list the placement sitting's queue: every live bead in the city's stores marked placement=pending that nothing has placed since (no parent, route, arm, assignee or live pour), priority then age; --json prints one object for a caller: the rows as beads, the suspended rigs it skipped, and the rigs whose store did not answer. Read-only, files nothing; exits 4 after the list when a store did not answer
 
 The board is `helm-svc board` (services/helm). This script renders no
 board. open, engage and react take the subject as a bead id, a PR number
@@ -184,7 +183,10 @@ a bead blocked by anything but a human gate, since the work is then on the
 blocker and a pool has nothing to perform here; --assign <named-agent> releases
 it TO a named agent instead, in the same write, as its assignee and with no
 route, because the assignee is what the controller and the pack's notice read
-to give a named agent a turn (docs/deferred-dispatch.md). --assign is refused
+to give a named agent a turn (docs/deferred-dispatch.md). Either one also
+lifts the bead's hold:mayor in the same write, because sending a held bead on
+is a placement, and Gas City serves no bead a hold label holds, assigned or
+not. --assign is refused
 beside --route and on a closed anchor, and without --waiting-on also on a bead
 blocked by anything but a human gate; with --waiting-on the named waits gate
 the hand-off, since the agent's hook offers the bead only once bd reports it
@@ -221,6 +223,30 @@ that follows the bead, held beads included, their live workflows and their
 anchors' PR-finishing work, and leaves claimed beads as they are
 (assets/scripts/queue-priority.sh move). --dry-run prints what it
 would write.
+
+place places a bead held for placement, one carrying Gas City's hold:mayor
+label (docs/steering.md). A sling reads no hold, so place runs the writes in
+one order and can be run again. It clears any route, then with --under removes
+a relates-to link between the bead and the parent, sets the parent and writes
+--shift through queue-priority.sh move. It settles the bead's priority, then
+dispatches, then lifts the hold with a note in one write, and each write's
+exit decides whether it landed. With no --route it dispatches to the polecat
+pool of the bead's rig, and with no --on on that pool's default formula. While
+a blocker holds the bead or a parent above it, such as a park on the epic, it
+arms the dispatch (deferred-dispatch.sh arm) instead of slinging, so the run
+starts once the blocker closes. It refuses a closed bead, PR-finishing work
+(anchor_bead), a bead another hold also holds, a status other than open, a
+parent that is closed or not in the bead's store, --standalone on a bead that
+has a parent, and a bead an arm already sends to another pool or on another
+formula. A bead with no hold:mayor is refused, or reported as already placed
+when a live run, a route, an arm or an assignee shows its dispatch. A
+dispatch that fails leaves the hold on, so the bead stays in the queue. A
+re-run after a stop at any write finishes the placement without a second
+run: it dispatches nothing once an assignee, a merge_result, a live run or an
+arm shows a dispatch, and gc sling refuses a second live run of one formula at
+one bead (exit 3). A run that ends without claiming, landing or closing its
+bead leaves none of these, so a stop at the lift names the lift by hand, which
+dispatches nothing, rather than a re-run.
 
 dismiss is the operator's explicit "end this sitting". It closes the
 conversation a live sitting holds on the subject, with a reason naming the
@@ -277,7 +303,8 @@ another Accept holds it. It records the acceptance's dispatch input (its
 token, the formula and each --var) on the gate, resolves the gate with
 `ruled: accepted <formula> accept:<token>`, reads its own answer back, checks
 that no open human gate blocks the bead, slings the formula titled
-`<formula> accept:<token>`, and records the dispatch by stripping
+`<formula> accept:<token>`, lifts the bead's hold:mayor, since an Accept is a
+placement, and records the dispatch by stripping
 gc.recommended_formula. An answer another reached first stands, and Accept
 slings nothing. A gate filed in the meantime, or a sling that poured no root,
 reopens the gate. A run that stopped after its resolve leaves an unfinished
@@ -326,6 +353,86 @@ row_now() {
         | jq -c --arg b "$1" \
             'if type == "array" then ([ .[] | select(type == "object" and (.id // "") == $b) ] | first // empty) else empty end' \
             2>/dev/null || true
+}
+
+# parent_of <row-json> — the bead's parent, from bd's parent field or its
+# parent-child edge, empty when it has none.
+parent_of() {
+    printf '%s' "$1" | jq -r '
+        (.parent // "") as $p
+        | if ($p | tostring) != "" then ($p | tostring)
+          else ([ (.dependencies // [])[]? | select(type == "object")
+                  | select(((.dependency_type // .type // "") | tostring) == "parent-child")
+                  | ((.id // .depends_on_id // "") | tostring) ] | map(select(. != "")) | .[0] // "") end' \
+        2>/dev/null || true
+}
+
+# ── Lifting Gas City's coordination hold ─────────────────────────────
+# A bead held for placement carries hold:mayor, and Gas City serves no work a
+# hold label holds, so a write that sends such a bead on lifts the label: place,
+# takeaway's --release to a pool or a named agent, and accept. bd removes a
+# label by its exact text, and Gas City reads the label trimmed and in any case,
+# so a lift removes every spelling of it the bead carries.
+#
+# hold_spellings <row-json> — the spellings of hold:mayor the row carries, one
+# per line (dispatch_hold_spellings in dispatch-path.sh), empty for none.
+hold_spellings() {
+    printf '%s' "$1" | jq -r "$DISPATCH_PATH_JQ"'dispatch_hold_spellings("hold:mayor")[]' 2>/dev/null || true
+}
+
+# hold_remove <bead> <spellings> [<note>] — one write that removes each
+# spelling, one per line, with the note appended when one is given. Its exit is
+# the write's: 0 once the write lands or when there is no spelling to remove,
+# non-zero when the store refuses it.
+hold_remove() {
+    _hr_bead="$1"; _hr_sp="$2"; _hr_note="${3:-}"
+    set --
+    while IFS= read -r _hr_s; do
+        [ -z "$_hr_s" ] || set -- "$@" --remove-label "$_hr_s"
+    done <<EOF
+$_hr_sp
+EOF
+    [ $# -gt 0 ] || return 0
+    [ -z "$_hr_note" ] || set -- "$@" --append-notes "$_hr_note"
+    # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+    gc bd update "$_hr_bead" ${db:+--db "$db"} "$@" >/dev/null 2>&1
+}
+
+# hold_lift_cmd <bead> <spellings> [<note>] — the write that lifts those
+# spellings by hand, one --remove-label each as hold_remove writes them, with
+# the note appended when one is given, in the caller's store pin, for a message
+# to name.
+hold_lift_cmd() {
+    _hl_cmd="gc bd update $1"
+    while IFS= read -r _hl_s; do
+        [ -z "$_hl_s" ] || _hl_cmd="$_hl_cmd --remove-label $_hl_s"
+    done <<EOF
+$2
+EOF
+    [ -z "${3:-}" ] || _hl_cmd="$_hl_cmd --append-notes $(sh_quote "$3")"
+    printf '%s%s' "$_hl_cmd" "${db:+ --db $db}"
+}
+
+# sh_quote <text> — <text> in single quotes, each quote in it escaped, so a
+# command a message names pastes whole.
+sh_quote() {
+    printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
+# lift_hold <bead> [<note>] — lift hold:mayor off the bead with the note in the
+# same write. It reads the row first to learn which spellings the bead carries,
+# and the write's exit decides whether the lift landed. Returns 0 once the write
+# lands, a bead that carries no spelling included, which is not written. Returns
+# 1 when the row will not read or the store refuses the write, so no caller
+# reports a lift the store refused. Uses the caller's store pin: $db, else
+# BEADS_DIR.
+lift_hold() {
+    _lh_bead="$1"; _lh_note="${2:-}"
+    _lh_row=$(row_now "$_lh_bead")
+    [ -n "$_lh_row" ] || return 1
+    _lh_sp=$(hold_spellings "$_lh_row")
+    [ -n "$_lh_sp" ] || return 0
+    hold_remove "$_lh_bead" "$_lh_sp" "$_lh_note" || return 1
 }
 
 # normalize_headline <raw-text> <verb> — collapse whitespace runs, trim, and
@@ -399,27 +506,26 @@ SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
 # shellcheck source=work-outcome.sh
 . "${GC_WORK_OUTCOME_LIB:-$SCRIPT_DIR/work-outcome.sh}" \
     || { echo "$PROG: cannot source work-outcome.sh from $SCRIPT_DIR" >&2; exit 3; }
-# The one definition of a bead that waits for placement, shared with the
-# liveness classifier and check-blocked-work-armed, and the dispatch path it
-# reads, shared with the proactive scan and the doctor checks: unplaced lists
-# exactly the beads that predicate admits. Expose $PLACEMENT_JQ and
-# $DISPATCH_PATH_JQ.
-# shellcheck source=dispatch-path.sh
-. "${GC_DISPATCH_PATH_LIB:-$SCRIPT_DIR/dispatch-path.sh}" \
-    || { echo "$PROG: cannot source dispatch-path.sh from $SCRIPT_DIR" >&2; exit 3; }
-# shellcheck source=placement.sh
-. "${GC_PLACEMENT_LIB:-$SCRIPT_DIR/placement.sh}" \
-    || { echo "$PROG: cannot source placement.sh from $SCRIPT_DIR" >&2; exit 3; }
 # The one reader of a run's link to the bead it works: the release finds the
 # runs beneath an anchor, and the park survey the workflows poured for a bead.
 # Exposes run_lib and $RUN_JQ.
 # shellcheck source=run-lib.sh
 . "${GC_RUN_LIB:-$SCRIPT_DIR/run-lib.sh}" \
     || { echo "$PROG: cannot source run-lib.sh from $SCRIPT_DIR" >&2; exit 3; }
+# The one definition of a dispatch path and a dispatch hold. place reads
+# whether a bead it is asked to place is already dispatched or held by another
+# hold, and every lift of hold:mayor removes the spellings it names. Exposes
+# $DISPATCH_PATH_JQ.
+# shellcheck source=dispatch-path.sh
+. "${GC_DISPATCH_PATH_LIB:-$SCRIPT_DIR/dispatch-path.sh}" \
+    || { echo "$PROG: cannot source dispatch-path.sh from $SCRIPT_DIR" >&2; exit 3; }
 PROACTIVE_TOOL="${GC_PROACTIVE_TOOL:-$SCRIPT_DIR/../../tools/gc-proactive.sh}"
 # The priority move's writer, which owns the priority function and the store's
 # priority lock.
 QUEUE_PRIORITY_TOOL="${GC_QUEUE_PRIORITY_TOOL:-$SCRIPT_DIR/queue-priority.sh}"
+# The writer of a deferred dispatch, which place runs for a bead a blocker
+# holds; overridable so a hermetic test can point it at a fixture.
+DEFERRED_DISPATCH_TOOL="${GC_DEFERRED_DISPATCH_TOOL:-$SCRIPT_DIR/deferred-dispatch.sh}"
 # engage's starter seeds live in a sibling data table; its converse-<model>
 # variants are enumerated from the agent dirs, so the model menu cannot drift
 # from what `gc session new converse-<model>` resolves. Both are overridable so
@@ -1187,6 +1293,16 @@ cmd_takeaway() {
     fi
     # <<< takeaway-release-closed-anchor
 
+    # A release that sends the bead on, to a pool or to a named agent, is a
+    # placement, so its write lifts the bead's hold:mayor. Gas City serves no bead
+    # a hold label holds, assigned or not, so the route or the assignee would
+    # reach nobody while the label stood.
+    hold_sp=""
+    if [ -n "$release_park" ] && [ -n "$route$assign" ]; then
+        hold_sp=$(hold_spellings "$(printf '%s' "$anchor_json" \
+            | jq -c --arg b "$bead" '[ .[]? | objects | select((.id // "") == $b) ] | first // empty' 2>/dev/null)")
+    fi
+
     # A park for a person states its disposition, UNLESS the bead is already held
     # by an open blocker — then the wait is an existing edge and a bare --release
     # parks it beside that edge, not a prose-only hold. --release reopens a
@@ -1341,10 +1457,8 @@ cmd_takeaway() {
     # execution provenance, not a live dispatch path: deferred-dispatch's reconcile
     # keys idempotency on its own gc.dispatch_when_ready_slung marker, and arm
     # refuses on a live route (gc.routed_to) or that marker, so neither reads
-    # gc.execution_routed_to. The placement queue does read it: placement.sh counts
-    # it as a live pour, which places a bead, so a finished pour's stamp left on a
-    # bead held for placement keeps that bead out of the queue. The release drops
-    # it.
+    # gc.execution_routed_to. No queue reads it either, a held bead's included,
+    # since a hold is its label. The release drops it.
     #
     # The park unassigns the bead, or assigns it to the --assign agent, so the
     # identity the last executor stamped goes with the old assignee:
@@ -1359,6 +1473,13 @@ cmd_takeaway() {
     [ -n "$release_park" ] && set -- "$@" --status=open --assignee="$assign" \
                --set-metadata "gc.routed_to=$route" --unset-metadata gc.execution_routed_to \
                --unset-metadata gc.session_name --unset-metadata gc.session_id
+    if [ -n "$hold_sp" ]; then
+        while IFS= read -r _hs; do
+            [ -z "$_hs" ] || set -- "$@" --remove-label "$_hs"
+        done <<EOF
+$hold_sp
+EOF
+    fi
     # What follows a zero exit cannot be taken back: the run's end below, and
     # the close a caller makes on it, as when first-reaction-dispose.sh closes
     # its reaction or converse-signoff.sh resolves gates and closes the
@@ -1419,7 +1540,7 @@ cmd_takeaway() {
     fi
     rel_note=""
     if [ -n "$release" ]; then
-        if [ -n "$release_park" ]; then rel_note=" [released${route:+ to $route}${assign:+ to $assign}]"
+        if [ -n "$release_park" ]; then rel_note=" [released${route:+ to $route}${assign:+ to $assign}${hold_sp:+; hold:mayor lifted}]"
         else rel_note=" [run ended; anchor left closed]"; fi
     fi
     echo "takeaway set on $bead (by $by)$rel_note: $text"
@@ -1746,6 +1867,312 @@ cmd_priority() {
     esac
 }
 
+# ── Verb: place ──────────────────────────────────────────────────────
+# place <bead-id> (--under <parent> [--shift <±n>] | --standalone)
+#       [--route <rig>/<pool>] [--on <formula>]
+# Places a bead held for placement, one carrying Gas City's hold:mayor label
+# (docs/steering.md#placing-a-bead). gc sling reads no hold, so a sling leaves
+# the label on, and no native write both dispatches a bead and lifts its hold.
+# So place runs the native writes in one order, each taking its exit, and a
+# re-run after a stop at any write finishes the placement:
+#   1. It reads the bead, its parent and the runs that work it, and refuses
+#      with nothing written: the refusals usage() lists. A bead with no
+#      hold:mayor that a live run, a route, an arm or an assignee shows
+#      dispatched is reported as placed.
+#   2. It clears a route, which a doctor --fix may have written and which
+#      deferred-dispatch.sh arm refuses. With --under it removes a relates-to
+#      link between the bead and the parent, since bd refuses a parent-child
+#      edge beside one on the same pair, sets the parent, and moves --shift
+#      through queue-priority.sh move.
+#   3. It settles the bead's priority (queue-priority.sh settle), because a
+#      pour copies the priority once.
+#   4. It dispatches, unless an assignee, a merge_result, a live run or an arm
+#      shows that an earlier dispatch did. A bead `gctk bead holds` finds held
+#      by a wait on it or on a parent above it, such as a park, is armed
+#      (deferred-dispatch.sh arm), so the park keeps holding it, and so is one
+#      whose holds it could not answer. Any other is slung; gc sling's exit 3
+#      says a live run of the formula already works the bead.
+#   5. It lifts the hold with its note in one write (lift_hold).
+# The dispatch comes before the lift, so a dispatch that fails leaves the bead
+# held and in the queue. A run cut off between the two goes on with the hold
+# on its bead. The next place finishes the lift without a second run while that
+# run is live, or once it has claimed, landed or closed the bead, as the
+# hand-off of mol-polecat-work does before its run ends. gc sling refuses only a
+# second live run, so a run that ends with none of those leaves nothing place
+# reads as the dispatch, and a stop at the lift names the lift by hand, which
+# dispatches nothing.
+
+# place_hold <bead> — what holds the bead's work now, as `gctk bead holds`, the
+# one definition of whether a wait holds a bead or a parent above it, answers it
+# in the store $db names: "free", or "held" followed by a tab and the first wait
+# that holds it, the bead waited on with its title and the ancestor it sits on
+# when it is not the bead's own. An unjudged waits-for wait holds it too. Prints
+# nothing when gctk is not there or could not answer the bead.
+place_hold() {
+    _ph_bin=$(helm_gctk) || return 0
+    # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+    "$_ph_bin" bead holds ${db:+--db "$db"} "$1" 2>/dev/null | scrub \
+        | jq -r 'select(type == "object" and .error == null and ((.status // "") | tostring) != "")
+            | if .status == "clear" then "free"
+              else ((.waits // [])[0]) as $w
+                | "held\t" + (if $w == null then "a hold gctk bead holds names"
+                    else ((if (($w.title // "") | tostring) != "" then "\($w.id) \"\($w.title)\"" else ($w.id | tostring) end)
+                          + (if $w.type == "waits-for" then " (waits-for, unjudged)" else "" end)
+                          + (if (($w.ancestor // "") | tostring) != "" then " on ancestor \($w.ancestor)" else "" end)) end)
+              end' 2>/dev/null || true
+}
+
+cmd_place() {
+    bead=""; under=""; standalone=""; pl_shift=""; route=""; formula=""; npos=0
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --under=*)    under="${1#--under=}"; shift ;;
+            --under)      shift; [ $# -gt 0 ] || { echo "$PROG: place: --under requires the parent's bead id" >&2; exit 2; }; under="$1"; shift ;;
+            --standalone) standalone=1; shift ;;
+            --shift=*)    pl_shift="${1#--shift=}"; shift ;;
+            --shift)      shift; [ $# -gt 0 ] || { echo "$PROG: place: --shift requires a signed integer, such as +1" >&2; exit 2; }; pl_shift="$1"; shift ;;
+            --route=*)    route="${1#--route=}"; shift ;;
+            --route)      shift; [ $# -gt 0 ] || { echo "$PROG: place: --route requires a <rig>/<pool> target" >&2; exit 2; }; route="$1"; shift ;;
+            --on=*)       formula="${1#--on=}"; shift ;;
+            --on)         shift; [ $# -gt 0 ] || { echo "$PROG: place: --on requires a formula name" >&2; exit 2; }; formula="$1"; shift ;;
+            -h|--help)    usage; exit 0 ;;
+            -*) echo "$PROG: place: unknown flag '$1'" >&2; exit 2 ;;
+            *)
+                npos=$((npos + 1))
+                [ "$npos" -eq 1 ] || { echo "$PROG: place takes one <bead-id>" >&2; exit 2; }
+                bead="$1"; shift ;;
+        esac
+    done
+    [ -n "$bead" ] || { echo "$PROG: place needs <bead-id>" >&2; usage; exit 2; }
+    if [ -n "$under" ] && [ -n "$standalone" ]; then
+        echo "$PROG: place: --under and --standalone are the two placements, and a bead takes one: a member under its parent, or a bead that follows nothing. Pass one. Nothing was written." >&2
+        exit 2
+    fi
+    if [ -z "$under" ] && [ -z "$standalone" ]; then
+        echo "$PROG: place needs --under <parent>, to place $bead as a member of an epic or a Delivery, or --standalone, to place it with no parent. Nothing was written." >&2
+        exit 2
+    fi
+    if [ -n "$pl_shift" ]; then
+        [ -n "$under" ] || { echo "$PROG: place: --shift ranks a member against its parent, and --standalone gives $bead none, so it keeps its own priority. Nothing was written." >&2; exit 2; }
+        printf '%s' "$pl_shift" | grep -Eq '^[+-]?[0-9]+$' \
+            || { echo "$PROG: place: --shift '$pl_shift' is not a signed integer, such as +1 or -1. Nothing was written." >&2; exit 2; }
+    fi
+    case "$route" in
+        ""|*/*) : ;;
+        *) echo "$PROG: place: --route '$route' is not rig-qualified; a pool's queue is matched by its exact <rig>/<pool> name, so a bare one reaches nobody. Nothing was written." >&2; exit 2 ;;
+    esac
+    if [ "$under" = "$bead" ]; then
+        echo "$PROG: place: $bead cannot be its own parent. Nothing was written." >&2
+        exit 2
+    fi
+    pl_again="$PROG place $bead${under:+ --under $under}${standalone:+ --standalone}${pl_shift:+ --shift $pl_shift}${route:+ --route $route}${formula:+ --on $formula}"
+
+    path=$(rig_path_for_bead "$bead")
+    rig=$(rig_name_for_bead "$bead")
+    if [ -z "$path" ] || [ ! -d "$path/.beads" ] || [ -z "$rig" ]; then
+        echo "$PROG: place: no rig's store holds '$bead': its prefix names no rig with a .beads store. Nothing was written." >&2
+        exit 4
+    fi
+    db="$path/.beads"
+
+    # Step 1: read, and refuse what place does not place.
+    row=$(row_now "$bead")
+    [ -n "$row" ] || { echo "$PROG: place: '$bead' does not resolve in rig $rig. Nothing was written." >&2; exit 4; }
+    pl_status=$(printf '%s' "$row" | jq -r '(.status // "") | tostring' 2>/dev/null || true)
+    if [ "$pl_status" = closed ]; then
+        echo "$PROG: place: $bead is closed, so it has no work to place. Nothing was written." >&2
+        exit 2
+    fi
+    pl_anchor=$(printf '%s' "$row" | jq -r '((.metadata // {}).anchor_bead // "") | tostring' 2>/dev/null || true)
+    if [ -n "$pl_anchor" ]; then
+        echo "$PROG: place: $bead is PR-finishing work of $pl_anchor (anchor_bead), which follows its anchor and is never a member of an epic. Nothing was written." >&2
+        exit 2
+    fi
+    pl_assignee=$(printf '%s' "$row" | jq -r '(.assignee // "") | tostring' 2>/dev/null || true)
+    pl_landing=$(printf '%s' "$row" | jq -r '((.metadata // {}).merge_result // "") | tostring' 2>/dev/null || true)
+    # shellcheck disable=SC2329,SC2086  # run_lib calls it; ${db:+--db "$db"} expands to 0 or 2 space-free fields
+    place_bd() { gc bd ${db:+--db "$db"} "$@"; }
+    if ! pl_runs=$(run_lib runs place_bd "$bead"); then
+        echo "$PROG: place: could not read the runs that work $bead, so whether an earlier dispatch already started one cannot be told. Re-run once the store answers. Nothing was written." >&2
+        exit 4
+    fi
+    pl_live=$(printf '%s' "$pl_runs" | jq -r '[ .[] | select(.live) | .root ] | join(" ")' 2>/dev/null || true)
+    dispatched=""
+    [ -z "$pl_assignee" ] || dispatched="assigned to $pl_assignee"
+    [ -z "$pl_landing" ] || dispatched="${dispatched:+$dispatched, }merge_result=$pl_landing"
+    [ -z "$pl_live" ] || dispatched="${dispatched:+$dispatched, }live run $pl_live"
+
+    hold_sp=$(hold_spellings "$row")
+    if [ -z "$hold_sp" ]; then
+        pl_path=$(printf '%s' "$row" | jq -r "$DISPATCH_PATH_JQ"'
+            if has_dispatch_path then
+              (.metadata // {}) as $m
+              | [ ($m["gc.routed_to"] // "" | tostring | select(test("[^[:space:]]")) | "routed to " + .),
+                  ($m["gc.dispatch_when_ready"] // "" | tostring | select(test("[^[:space:]]")) | "armed for " + .) ]
+              | join(", ")
+            else "" end' 2>/dev/null || true)
+        [ -z "$pl_path" ] || dispatched="${dispatched:+$dispatched, }$pl_path"
+        if [ -n "$dispatched" ]; then
+            echo "place: $bead carries no hold:mayor and is already placed ($dispatched). Nothing was written."
+            exit 0
+        fi
+        echo "$PROG: place: $bead carries no hold:mayor, so it is not in the placement queue, and nothing shows that it was dispatched. Hold it first, then place it: gc bd set-state $bead hold=mayor --reason \"<why it waits for placement>\". Nothing was written." >&2
+        exit 2
+    fi
+    if printf '%s' "$row" | jq -e "$DISPATCH_PATH_JQ"'
+            dispatch_hold_spellings("hold:mayor") as $sp
+            | .labels = [ (.labels // [])[]? | select(. as $l | any($sp[]; . == $l) | not) ]
+            | has_dispatch_hold' >/dev/null 2>&1; then
+        echo "$PROG: place: $bead also carries hold:external, Gas City's hold for a next actor outside this city, and a placement lifts only hold:mayor. Place it once that hold is lifted. Nothing was written." >&2
+        exit 2
+    fi
+    if [ "$pl_status" != open ] && [ -z "$dispatched" ]; then
+        echo "$PROG: place: $bead is $pl_status, a status set on purpose, and place dispatches only an open bead. Return it to open, then place it. Nothing was written." >&2
+        exit 2
+    fi
+    pl_parent=$(parent_of "$row")
+    if [ -n "$standalone" ] && [ -n "$pl_parent" ]; then
+        echo "$PROG: place: --standalone places $bead with no parent, and it has one, $pl_parent. Place it under that parent with --under $pl_parent, or remove the parent first: gc bd update $bead --db $db --parent \"\". Nothing was written." >&2
+        exit 2
+    fi
+    if [ -n "$under" ]; then
+        parent_row=$(row_now "$under")
+        if [ -z "$parent_row" ]; then
+            echo "$PROG: place: --under $under does not resolve in rig $rig, the store that holds $bead, and bd links a parent only within one store. Nothing was written." >&2
+            exit 4
+        fi
+        if [ "$(printf '%s' "$parent_row" | jq -r '(.status // "") | tostring' 2>/dev/null)" = closed ]; then
+            echo "$PROG: place: $under is closed, and a member of a closed epic follows nothing, so its state would never decide when $bead runs. Nothing was written." >&2
+            exit 2
+        fi
+    fi
+    pool="$route"
+    if [ -z "$pool" ]; then
+        pool=$(GC_RIG="$rig" "$SCRIPT_DIR/resolve-route.sh" polecat 2>/dev/null) && [ -n "$pool" ] || {
+            echo "$PROG: place: could not name the polecat pool of rig $rig (resolve-route.sh resolved no live agent named polecat there), so $bead has nowhere to go. Name its pool with --route <rig>/<pool>. Nothing was written." >&2
+            exit 4; }
+    fi
+    # An arm the bead already carries is a dispatch already made, such as the
+    # one an earlier place wrote before it stopped short of its lift. The
+    # deferred-dispatch pass slings it once nothing holds the bead, so a second
+    # dispatch beside it would start a second run when it fires. place keeps an
+    # arm that sends the bead where this placement would, and refuses one that
+    # sends it to another pool or on another formula. An arm for the validating
+    # closer (mol-validate-close) is a wait on another bead, which the closer
+    # checks once that bead lands (skills/waits/SKILL.md), so its refusal names
+    # the lift that lets the closer run before the disarm that would drop it.
+    pl_arm=""
+    if [ -z "$dispatched" ]; then
+        pl_arm=$(printf '%s' "$row" | jq -r '((.metadata // {})["gc.dispatch_when_ready"] // "") | tostring | select(test("[^[:space:]]"))' 2>/dev/null || true)
+    fi
+    if [ -n "$pl_arm" ]; then
+        pl_arm_args=$(printf '%s' "$row" | jq -c '((.metadata // {})["gc.dispatch_when_ready_args"] // "")
+            | if type == "string" then (if test("[^[:space:]]") then (fromjson? // [.]) else [] end) else . end' 2>/dev/null || true)
+        pl_want_args=$(jq -nc --arg f "$formula" 'if $f == "" then [] else ["--on", $f] end')
+        if [ "$pl_arm" != "$pool" ] || [ "$pl_arm_args" != "$pl_want_args" ]; then
+            if printf '%s' "$pl_arm_args" | jq -e 'type == "array" and any(.[]; tostring | test("(^|=)mol-validate-close$"))' >/dev/null 2>&1; then
+                echo "$PROG: place: $bead is armed for its validating closer (mol-validate-close) on $pl_arm: it waits on another bead to land and is checked then, so it is not new work to place. Lift its hold and keep the arm, removing each spelling of the hold it carries: $(hold_lift_cmd "$bead" "$hold_sp"). To place it as work instead, disarm it, then re-run: $DEFERRED_DISPATCH_TOOL disarm $bead --db $db && $pl_again. Nothing was written." >&2
+                exit 2
+            fi
+            echo "$PROG: place: $bead is already armed for $pl_arm with the sling args $pl_arm_args, and this placement would send it to $pool${formula:+ on $formula}. Disarm it, then re-run: $DEFERRED_DISPATCH_TOOL disarm $bead --db $db && $pl_again. Nothing was written." >&2
+            exit 2
+        fi
+    fi
+
+    # Step 2: clear the route, then give the bead its parent and its shift.
+    if [ -z "$dispatched" ]; then
+        pl_routed=$(meta_now "$bead" gc.routed_to)
+        if [ -n "$pl_routed" ]; then
+            if ! gc bd update "$bead" --db "$db" --unset-metadata gc.routed_to >/dev/null 2>&1; then
+                echo "$PROG: place: $bead is routed to '$pl_routed', which a held bead never carries and deferred-dispatch.sh arm refuses, and the store refused its clear. Its hold stays on. Clear it by hand, then re-run: gc bd update $bead --db $db --unset-metadata gc.routed_to && $pl_again" >&2
+                exit 4
+            fi
+            echo "$PROG: place: cleared the route '$pl_routed' $bead carried while held" >&2
+        fi
+    fi
+    if [ -n "$under" ]; then
+        pl_related='[ (.dependencies // [])[]? | objects
+                      | select(((.dependency_type // .type // "") | tostring) == "relates-to")
+                      | ((.id // .depends_on_id // "") | tostring) ] | any(.[]; . == $p)'
+        if printf '%s' "$row" | jq -e --arg p "$under" "$pl_related" >/dev/null 2>&1; then
+            if ! gc bd dep unrelate "$bead" "$under" --db "$db" >/dev/null 2>&1; then
+                echo "$PROG: place: the store refused to remove $bead's relates-to link to $under, and bd refuses a parent beside it. Its hold stays on. Re-run: $pl_again" >&2
+                exit 4
+            fi
+        fi
+        if [ "$pl_parent" != "$under" ]; then
+            if ! gc bd update "$bead" --db "$db" --parent "$under" >/dev/null 2>&1; then
+                echo "$PROG: place: the store refused $under as $bead's parent (bd refuses a parent that sits under the bead). Its hold stays on. Re-run once the cause is fixed: $pl_again" >&2
+                exit 4
+            fi
+        fi
+        if [ -n "$pl_shift" ]; then
+            _pl_rc=0
+            "$QUEUE_PRIORITY_TOOL" move "$bead" --shift "$pl_shift" --db "$db" >&2 || _pl_rc=$?
+            if [ "$_pl_rc" -ne 0 ]; then
+                echo "$PROG: place: the shift $pl_shift on $bead did not land (queue-priority.sh move exited $_pl_rc and says why above). $bead is under $under, and its hold stays on. Re-run to finish: $pl_again" >&2
+                exit 4
+            fi
+        fi
+    fi
+
+    # Step 3: settle the priority the pour will copy.
+    _pl_rc=0
+    "$QUEUE_PRIORITY_TOOL" settle "$bead" --db "$db" >&2 || _pl_rc=$?
+    if [ "$_pl_rc" -ne 0 ]; then
+        echo "$PROG: place: $bead did not settle at its priority (queue-priority.sh settle exited $_pl_rc and says why above). A pour copies the priority once, so nothing is dispatched and its hold stays on. Re-run once it can settle: $pl_again" >&2
+        exit 4
+    fi
+    pl_prio=$(row_now "$bead" | jq -r '(.priority // "") | tostring' 2>/dev/null || true)
+
+    # Step 4: dispatch, unless an earlier dispatch shows.
+    if [ -n "$dispatched" ]; then
+        how="already dispatched ($dispatched)"
+    elif [ -n "$pl_arm" ]; then
+        how="already armed for $pl_arm${formula:+ on $formula}, so its run starts once nothing holds it"
+    else
+        pl_hold=$(place_hold "$bead")
+        pl_state="${pl_hold%%"$TAB"*}"
+        pl_why=""
+        [ "$pl_hold" = "$pl_state" ] || pl_why="${pl_hold#*"$TAB"}"
+        if [ "$pl_state" = free ]; then
+            set -- --rig "$rig" "$pool" "$bead"
+            [ -z "$formula" ] || set -- "$@" --on "$formula"
+            _pl_rc=0
+            gc sling "$@" >&2 || _pl_rc=$?
+            case "$_pl_rc" in
+                0)
+                    how="slung to $pool${formula:+ on $formula}" ;;
+                3)
+                    how="a live run${formula:+ of $formula} already works it, and gc sling refused to start another" ;;
+                *)
+                    echo "$PROG: place: gc sling exited $_pl_rc for $bead and says why above, so nothing is dispatched and its hold stays on: $bead stays in the queue. Re-run once the cause is fixed: $pl_again" >&2
+                    exit 4 ;;
+            esac
+        else
+            [ -n "$pl_why" ] || pl_why="a hold that could not be read"
+            set -- "$bead" --target "$pool" --reason "placed${under:+ under $under}, held by $pl_why"
+            [ -z "$formula" ] || set -- "$@" --sling-arg --on --sling-arg "$formula"
+            _pl_rc=0
+            "$DEFERRED_DISPATCH_TOOL" arm "$@" --db "$db" >&2 || _pl_rc=$?
+            if [ "$_pl_rc" -ne 0 ]; then
+                echo "$PROG: place: $bead is held by $pl_why, so it is armed rather than slung, and the arm failed (deferred-dispatch.sh arm exited $_pl_rc and says why above). Its hold stays on, so it stays in the queue. Re-run once the cause is fixed: $pl_again" >&2
+                exit 4
+            fi
+            how="armed for $pool${formula:+ on $formula}, held by $pl_why, so its run starts once nothing holds it"
+        fi
+    fi
+
+    # Step 5: lift the hold, with the note, in one write.
+    pl_note="Placed at $(iso_now)${under:+ under $under}${standalone:+ with no parent}${pl_prio:+ at P$pl_prio}: $how. hold:mayor lifted."
+    if ! lift_hold "$bead" "$pl_note"; then
+        echo "$PROG: place: $bead is ${under:+under $under and }$how, but the store refused the write that lifts its hold:mayor, so it still waits in the queue, and an arm on it does not fire. Finish with the lift by hand, which dispatches nothing: $(hold_lift_cmd "$bead" "$hold_sp" "$pl_note"). A re-run of place reads only a live run, an assignee, a merge_result or an arm as this dispatch, so once a run that leaves none of them has ended, it would dispatch $bead again." >&2
+        exit 4
+    fi
+    bust_cache
+    echo "place: $bead placed${under:+ under $under}${standalone:+ with no parent}${pl_prio:+ at P$pl_prio}: $how; hold:mayor lifted"
+}
+
 # ── Verb: resolve ────────────────────────────────────────────────────
 # resolve <reference> — print the LIVE bead a reference resolves to, the same
 # way open/engage/react resolve their subject: a PR number/URL to its anchor,
@@ -1768,95 +2195,6 @@ cmd_resolve() {
     case "$resolve_ref" in "") echo "$PROG: resolve needs <bead-id|pr-number|pr-url>" >&2; usage; exit 2 ;; esac
     resolve_live_subject "$resolve_ref"
     printf '%s\n' "$RESOLVED_SUBJECT"
-}
-
-# ── Verb: unplaced (read-only) ───────────────────────────────────────
-# The placement sitting's queue: every live bead in the city's stores that waits
-# for placement, by placement.sh's one definition. Intake marks such a bead
-# placement=pending when it holds new work for the operator (docs/steering.md),
-# and a parent, a route, an arm, an assignee or a live pour each places it,
-# whether or not its marker was cleared. Like resolve it files nothing. Rows come
-# in the order bd offers ready work, priority then age. A suspended rig's store
-# is skipped and named, because reading it would start its Dolt server. A store
-# that does not answer is named on stderr and the verb exits 4 after printing
-# the rest, so a partial queue never reads as the whole one. --json prints one
-# object: the rows as beads, the suspended rigs it skipped, and the rigs whose
-# store did not answer. A skip exits 0, because a suspended rig is the
-# operator's choice and not a failure, so a caller learns of it from skipped.
-UNPLACED_ROW_JQ='
-  select(awaiting_placement)
-  | {id, rig: $rig, title: (.title // ""), type: (.issue_type // ""),
-     priority: (.priority // 2), status: (.status // ""), created_at: (.created_at // ""),
-     takeaway: ((.metadata // {})["gc.takeaway"] // "")}'
-cmd_unplaced() {
-    up_json=""
-    while [ $# -gt 0 ]; do
-        case "$1" in
-            --json) up_json=1; shift ;;
-            -h|--help) usage; exit 0 ;;
-            *) echo "$PROG: unplaced: unknown argument '$1' (usage: gc-helm unplaced [--json])" >&2; exit 2 ;;
-        esac
-    done
-    enumerate_rigs
-    # up_skipped and up_unread hold one rig per line.
-    up_lines=""; up_unread=""; up_skipped=""
-    up_scopes=$(printf '%s' "$RIGS" | jq -r '.[] | select((.path // "") != "")
-        | [((.name // "") | gsub("[[:cntrl:]]"; " ")), .path, ((.suspended // false) | tostring)] | join("\u001f")' 2>/dev/null || true)
-    up_us=$(printf '\037')
-    while IFS="$up_us" read -r up_name up_path up_susp; do
-        [ -n "$up_path" ] || continue
-        [ -d "$up_path/.beads" ] || continue
-        if [ "$up_susp" = "true" ]; then
-            echo "$PROG: unplaced: rig ${up_name:-$up_path} is suspended, so its store was not read; any bead waiting there is not listed" >&2
-            up_skipped="$up_skipped${up_name:-$up_path}
-"
-            continue
-        fi
-        # bd's own exit status, not scrub's: a read that prints an array and then
-        # fails has not answered for its store.
-        up_rc=0
-        up_raw=$(gc bd list --db "$up_path/.beads" --metadata-field placement=pending \
-            --status=open,in_progress,blocked,deferred,hooked,pinned --json --limit 0 2>/dev/null) || up_rc=$?
-        up_raw=$(printf '%s' "$up_raw" | scrub)
-        if [ "$up_rc" -ne 0 ] || ! printf '%s' "$up_raw" | jq -e 'type == "array"' >/dev/null 2>&1; then
-            echo "$PROG: unplaced: the store of rig ${up_name:-$up_path} ($up_path/.beads) did not answer, so its beads are missing from this list" >&2
-            up_unread="$up_unread${up_name:-$up_path}
-"
-            continue
-        fi
-        up_rig_lines=$(printf '%s' "$up_raw" | jq -c --arg rig "$up_name" "$DISPATCH_PATH_JQ$PLACEMENT_JQ"'.[] | '"$UNPLACED_ROW_JQ" 2>/dev/null) || {
-            echo "$PROG: unplaced: the beads of rig ${up_name:-$up_path} could not be read as rows, so they are missing from this list" >&2
-            up_unread="$up_unread${up_name:-$up_path}
-"
-            continue
-        }
-        [ -n "$up_rig_lines" ] && up_lines="$up_lines$up_rig_lines
-"
-    done <<EOF
-$up_scopes
-EOF
-    up_rows=$(printf '%s' "$up_lines" | jq -cs 'sort_by(.priority, .created_at, .id)' 2>/dev/null) || up_rows='[]'
-    if [ -n "$up_json" ]; then
-        printf '%s' "$up_rows" | jq -c --arg skipped "$up_skipped" --arg unread "$up_unread" '
-            def rigs: split("\n") | map(select(. != ""));
-            {beads: ., skipped: ($skipped | rigs), unread: ($unread | rigs)}' \
-            || { echo "$PROG: unplaced: the queue could not be printed as JSON" >&2; exit 4; }
-    else
-        up_n=$(printf '%s' "$up_rows" | jq 'length' 2>/dev/null || echo 0)
-        if [ "$up_n" -eq 0 ]; then
-            echo "unplaced: no bead waits for placement"
-        else
-            echo "unplaced: $up_n bead(s) wait for placement"
-            printf '%s' "$up_rows" | jq -r '.[]
-                | "\(.id)\tP\(.priority)\t\(.type)\t\(.rig)\t\(.created_at | .[0:10])\t\(.title)"
-                  + (if .takeaway != "" then "\n\t\(.takeaway)" else "" end)'
-        fi
-    fi
-    if [ -n "$up_unread" ]; then
-        echo "$PROG: unplaced: this list is partial; unread: $(printf '%s' "$up_unread" | tr '\n' ' ' | sed 's/ $//')" >&2
-        exit 4
-    fi
-    return 0
 }
 
 # verify_subject <bead-id> <verb> <nothing-clause> [<subject-ref>] — resolve a
@@ -2538,8 +2876,8 @@ cmd_react() {
     # open reaction bead already tracking this subject, or a live owner owning its
     # reaction, 4 (RC_LIVE_WORKFLOW) when its live-workflow guard skipped a bead a
     # live workflow already drives, and 5 (RC_DISPATCH_PATH) when its
-    # dispatch-path guard skipped a bead that is already routed or armed, or
-    # that an open human gate blocks. Each is
+    # dispatch-path guard skipped a bead that is already routed or armed, that a
+    # dispatch hold holds, or that an open human gate blocks. Each is
     # a no-op, not a failure, and NO new reaction was filed. Re-raise them as exit
     # 5, exit 6 and exit 7 so an intake caller (operator-intake.sh) files its own
     # conversation, naming the cause, instead of waiting for a reaction that is already
@@ -2557,7 +2895,7 @@ cmd_react() {
             exit 6
         fi
         if [ "$sling_rc" -eq 5 ]; then
-            echo "$PROG: react: $bead is already routed or armed, or waits on a person's answer — nothing filed (a first reaction never second-guesses a dispatch already decided). Open a conversation directly, or react once that route, arm or gate is cleared." >&2
+            echo "$PROG: react: $bead is already routed or armed, held, or waits on a person's answer — nothing filed (a first reaction never second-guesses a dispatch already decided). Open a conversation directly, or react once that route, arm, hold or gate is cleared." >&2
             exit 7
         fi
         echo "$PROG: react: gc-proactive.sh sling '$bead' failed" >&2
@@ -3375,6 +3713,10 @@ cmd_accept() {
         root_state=$(accept_token_root "$tok")
         case "$root_state" in
             found\ *)
+                if ! lift_hold "$bead"; then
+                    echo "$PROG: accept: acceptance $tok already dispatched $formula at $bead (root ${root_state#found }), but the store refused the write that lifts its hold:mayor, so the bead still waits in the placement queue. The next Accept finishes the lift and the record without a second dispatch: $PROG accept $bead" >&2
+                    exit 4
+                fi
                 if ! accept_mark_dispatched "$bead" "$formula" "$tok"; then
                     echo "$PROG: accept: acceptance $tok already dispatched $formula at $bead (root ${root_state#found }), but the store refused the record. The next Accept finishes the record without a second dispatch: $PROG accept $bead" >&2
                     exit 4
@@ -3448,7 +3790,14 @@ cmd_accept() {
         esac
     fi
 
-    # Step 5: record the dispatch, withdrawing the recommendation.
+    # Step 5: lift the bead's hold:mayor, since an Accept is a placement, then
+    # record the dispatch, withdrawing the recommendation. The lift comes first,
+    # so a run that stops between the two leaves an acceptance the next Accept
+    # finishes, lift included.
+    if ! lift_hold "$bead"; then
+        echo "$PROG: accept: dispatched $formula at $bead (acceptance $tok), but the store refused the write that lifts its hold:mayor, so the bead still waits in the placement queue. The next Accept finishes the lift and the record without a second dispatch: $PROG accept $bead" >&2
+        exit 4
+    fi
     if ! accept_mark_dispatched "$bead" "$formula" "$tok"; then
         echo "$PROG: accept: dispatched $formula at $bead (acceptance $tok), but the store refused the record. The next Accept finishes the record without a second dispatch: $PROG accept $bead" >&2
         exit 4
@@ -5075,10 +5424,10 @@ case "${1:-}" in
     engage)        shift; cmd_engage "$@" ;;
     react)         shift; cmd_react "$@" ;;
     resolve)       shift; cmd_resolve "$@" ;;
-    unplaced)      shift; cmd_unplaced "$@" ;;
     takeaway)      shift; cmd_takeaway "$@" ;;
     park)          shift; cmd_park "$@" ;;
     priority)      shift; cmd_priority "$@" ;;
+    place)         shift; cmd_place "$@" ;;
     dismiss)       shift; cmd_dismiss "$@" ;;
     handback)      shift; cmd_handback "$@" ;;
     accept)        shift; cmd_accept "$@" ;;
@@ -5086,5 +5435,5 @@ case "${1:-}" in
     attach)        shift; cmd_attach "$@" ;;
     board)         echo "$PROG: the board moved to 'helm-svc board' (services/helm)" >&2; exit 2 ;;
     -h|--help|help) usage; exit 0 ;;
-    *)             echo "$PROG: unknown verb '${1:-}' (try: open, engage, attach, conversations, react, accept, takeaway, park, priority, dismiss, handback, resolve, unplaced, help; the board is 'helm-svc board')" >&2; usage; exit 2 ;;
+    *)             echo "$PROG: unknown verb '${1:-}' (try: open, engage, attach, conversations, react, accept, takeaway, park, priority, place, dismiss, handback, resolve, help; the board is 'helm-svc board')" >&2; usage; exit 2 ;;
 esac

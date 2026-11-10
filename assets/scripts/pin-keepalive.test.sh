@@ -6,11 +6,13 @@
 # 0 runs the exec, non-zero does not. This file pins:
 #
 #   1. THE PREDICATE. A target is conversational (provider match) AND a
-#      configured named singleton (configured_named_session=true) AND unpinned.
-#      The claude-watch singletons (deacon/witness/refinery), the ephemeral
-#      claude pool workers (empty alias / no configured_named_session), and an
-#      already-pinned session are each excluded — and a converse sitting that
-#      becomes a named conversational session is picked up with no code change.
+#      configured named singleton (configured_named_session=true) whose mode is
+#      "always" or unrecorded AND unpinned. The claude-watch singletons
+#      (deacon/witness/refinery), the ephemeral claude pool workers (empty
+#      alias / no configured_named_session), an on-demand named seat (the po),
+#      and an already-pinned session are each excluded — and a converse sitting
+#      that becomes a named conversational session is picked up with no code
+#      change.
 #   2. FAIL-OPEN. An unreadable roster or session bead RUNS the pass; only
 #      verified reads can reach SKIP.
 #   3. THE COOLDOWN. A condition trigger has no interval; the cadence is the
@@ -208,6 +210,21 @@ set_bead s-conv1 '{"configured_named_session":"true","session_origin":"named"}'
 run_check
 eq "$RC" "0" "a newly-named converse conversational session makes the pass run"
 has "$OUT" "gc-toolkit.converse-1" "and it is named a target with no code change"
+
+echo "── an on-demand named seat is not standing — excluded ──"
+# The po is a configured named claude session in on_demand mode. A pin would
+# hold off the idle drain that ends its sitting, so it is never a target.
+reset_fix
+cat > "$FIX/sessions.json" <<'JSON'
+{"sessions":[
+  {"id":"s-mech","alias":"gc-toolkit.mechanik","provider":"claude","state":"active"},
+  {"id":"s-po","alias":"gc-toolkit.po","provider":"claude","state":"active"}
+]}
+JSON
+set_bead s-po '{"configured_named_session":"true","session_origin":"named","configured_named_mode":"on_demand"}'
+run_check
+eq "$RC" "1" "an unpinned on-demand named claude session does not make the pass run"
+hasnt "$OUT" "gc-toolkit.po" "and the po is never named a target"
 
 # ============================================================================
 # 2. FAIL-OPEN (check mode) — only verified reads reach SKIP
