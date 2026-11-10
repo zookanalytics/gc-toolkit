@@ -367,7 +367,8 @@ the form leaves the terminal, and then attaches it to the sitting through
 `engage <conversation> --no-input`, which waits for the session to start, as
 engage does on the command line. The attach runs after the form's last screen,
 so all that engage prints stays on the terminal, its reason when it attaches
-nothing included, and the form exits with engage's status. With attaching off, the form leaves the sitting to prepare, and says that
+nothing included, and the form exits with engage's status. With attaching off,
+the form leaves the sitting to prepare, and says that
 the conversation is saved and how to return to it. An attach holds a
 conversation no live sitting holds, as after a start that failed or a sitting
 that ended before the attach reached it, in a new sitting on the model the

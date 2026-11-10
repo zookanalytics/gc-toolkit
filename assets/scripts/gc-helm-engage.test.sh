@@ -97,8 +97,8 @@
 #             of the conversation, which starts a new sitting on it with no bind
 #             (START-RERUN); a sitting not yet listed, one listed with no state
 #             (START-BLANK), or a listing that fails, is waited through, and one
-#             listed closed has ended (START-CLOSED-ROW). A sitting still unstarted at
-#             GC_HELM_ENGAGE_WAIT_TIMEOUT, 15 minutes by default
+#             listed closed has ended (START-CLOSED-ROW). A sitting still
+#             unstarted at GC_HELM_ENGAGE_WAIT_TIMEOUT, 15 minutes by default
 #             (START-BACKSTOP), is left unattached and exits 4, with the attach
 #             to run later. (START-INTERRUPT) Ctrl-C stops the wait, leaves the
 #             conversation bound and the sitting open, and prints the attach,

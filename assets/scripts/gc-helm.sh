@@ -4652,14 +4652,14 @@ cmd_engage() {
     # sitting is the row whose id is $sid. With $sid empty it is the open row
     # under the alias $start_alias, bare or qualified, a sitting that holds the
     # conversation by its alias before the list names it, and the first row that
-    # alias matches sets $sid and $sname. A row that reads closed or failed-create has ended, and so
-    # has one that leaves the list once listed, since a listing of open sessions
-    # leaves a closed one out. A sitting not listed yet may only lag the
-    # supervisor's read cache, so it is waited on. So is one listed with no
-    # state, which Gas City's own wait for a new session reads as a create still
-    # under way, and so is a listing that did not read. start_state keeps the
-    # last state read, and start_waited the seconds waited as of that read, for
-    # the messages that follow.
+    # alias matches sets $sid and $sname. A row that reads closed or
+    # failed-create has ended, and so has one that leaves the list once listed,
+    # since a listing of open sessions leaves a closed one out. A sitting not
+    # listed yet may only lag the supervisor's read cache, so it is waited on.
+    # So is one listed with no state, which Gas City's own wait for a new
+    # session reads as a create still under way, and so is a listing that did
+    # not read. start_state keeps the last state read, and start_waited the
+    # seconds waited as of that read, for the messages that follow.
     #
     # The wait reports itself on stdout, so a slow start reads as progress and
     # not as a hang: a line when it begins, a line each time the sitting's state

@@ -126,11 +126,14 @@ func runProgram(p *tea.Program, m *form.Model, stdout, stderr io.Writer) int {
 // form's program has let go: this process's input and the output the form
 // printed its note on. It runs after the form's last screen, so nothing the
 // form draws can cover what the attach prints, such as engage's reason when it
-// attaches nothing. It returns the attach's exit status. An interrupt, a
-// termination or a hang-up the terminal sends reaches the attach as it reaches
-// this process, and engage answers each itself, saying what it leaves behind,
-// so this process waits for the attach to end rather than end first and hand
-// the shell back while engage still prints.
+// attaches nothing. It returns the attach's exit status. An interrupt or a
+// hang-up from the terminal, and a termination sent to the form's process
+// group, reach the attach as they reach this process, and engage answers each
+// itself, saying what it leaves behind, so this process waits for the attach
+// to end rather than end first and hand the shell back while engage still
+// prints. An interrupt, a termination or a hang-up sent to this process alone
+// does not reach the attach, and this process waits for the attach all the
+// same.
 func runAttach(c *exec.Cmd, stdout, stderr io.Writer) int {
 	if c.Stdin == nil {
 		c.Stdin = os.Stdin
