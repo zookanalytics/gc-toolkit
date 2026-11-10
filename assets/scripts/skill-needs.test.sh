@@ -993,6 +993,27 @@ for sh_ in $shells; do
             *) bad "($sh_) recheck close: a subject $what still holds keeps its headline" "exit $rc, calls: $calls" ;;
         esac
     done
+    # A conversation on an open PR holds the PR's merge through the anchor's
+    # blocks edge onto it, so on an anchor the conversation, tk-v, is among the
+    # subject's pending waits. The close ends that wait, so it keeps no
+    # headline, while any other wait beside it still does, and is named alone.
+    CONV_HOLDS='[{"id":"tk-v","issue_type":"task","status":"in_progress"}]'
+    rc=$(run_release "$run" "$WAITING" "$CONV_HOLDS")
+    calls=$(tr '\n' ';' <"$RL/log")
+    case "$rc:$calls" in
+        0:*"gc-helm takeaway tk-x x: x --by converse --no-wait;"*"gc bd close tk-v --reason x: x;"*)
+            ok "($sh_) recheck close: the conversation's own hold on the anchor keeps no headline, and the conversation closes" ;;
+        *) bad "($sh_) recheck close: the conversation's own hold on the anchor keeps no headline, and the conversation closes" "exit $rc, calls: $calls" ;;
+    esac
+    CONV_AND_GATE='[{"id":"tk-v","issue_type":"task","status":"in_progress"},{"id":"tk-g2","issue_type":"gate","await_type":"human","status":"open"}]'
+    rc=$(run_release "$run" "$WAITING" "$CONV_AND_GATE")
+    calls=$(tr '\n' ';' <"$RL/log")
+    case "$rc:$calls:$(cat "$RL/out")" in
+        *"gc-helm takeaway"*) bad "($sh_) recheck close: a gate beside the conversation's hold still keeps the headline" "exit $rc, calls: $calls" ;;
+        0:*"gc bd close tk-v "*"tk-x keeps its headline: tk-g2 still holds it"*)
+            ok "($sh_) recheck close: a gate beside the conversation's hold still keeps the headline, named without the conversation" ;;
+        *) bad "($sh_) recheck close: a gate beside the conversation's hold still keeps the headline" "exit $rc, calls: $calls, out: $(cat "$RL/out")" ;;
+    esac
     rc=$(run_release "$run" "$SETTLED" '[]')
     calls=$(tr '\n' ';' <"$RL/log")
     case "$rc:$calls" in

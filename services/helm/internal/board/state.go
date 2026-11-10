@@ -30,7 +30,7 @@ const (
 	// stateParked: the bead waits on a person. It waits on an open gate a
 	// person releases or on a demand, which holds its work, it is routed to the
 	// operator, or a conversation about it waits in the operator's queue, which
-	// holds nothing.
+	// holds none of its work.
 	stateParked = "parked"
 	// stateQueued: the bead waits its turn. It waits on open work or on a gate
 	// the city resolves by itself, or it carries a pool route, an arm or an
@@ -118,7 +118,8 @@ func anchorInput(a Anchor, waitingOpen []string) stateInput {
 // deriveState names the state a bead is in by itself, read off its own graph
 // and live work. Live work comes first, because it is what moves the bead
 // whatever else holds it. A pull request comes before a conversation, because
-// the conversation about a pull request does not stop the city landing it. A
+// the conversation about a pull request holds only its merge, while its review
+// and its reworks go on, and the PR's own row names that hold. A
 // person's hold comes before open work, because the work cannot start the bead
 // while a person holds it.
 func deriveState(in stateInput, f Facts) beadState {
@@ -471,7 +472,7 @@ func oldestFirst(bs []Blocker) []Blocker {
 // and a queued row that starts by itself says that. With no wait to count and
 // no ancestor holding it, a takeaway row waits on a person through a human
 // gate, which holds its work, or through a conversation waiting in the
-// operator's queue, which holds nothing, and the phrase says which: a row
+// operator's queue, which holds none of it, and the phrase says which: a row
 // routed to the operator takes [frontier]'s human-gated phrases instead.
 func rowFrontier(s beadState, nOpen int) string {
 	if s.kind == stateParked && nOpen == 0 && !s.inherited {

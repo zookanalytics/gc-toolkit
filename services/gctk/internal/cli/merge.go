@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/conversation"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
 )
@@ -2016,11 +2017,14 @@ func (m *merger) inflightHolder(id string, byPR, children, blockers []gcbd.Bead)
 }
 
 // holderLabel names a bead that holds the merge: its kind, its id and its
-// status.
+// status. A conversation on an open PR holds the merge until it closes, and its
+// row tells it ([conversation.IsCandidate]).
 func holderLabel(b *gcbd.Bead) string {
 	kind := "unclosed rework/review bead"
 	if prstatus.IsHumanGate(b.IssueTypeString(), b.AwaitType) {
 		kind = "open human gate"
+	} else if conversation.IsCandidate(b.IssueTypeString(), b.AssigneeString(), b.ID) {
+		kind = "open conversation"
 	} else if b.Meta("task_kind") == "finding" {
 		if fd := b.Meta("finding.disposition"); fd != "" {
 			kind = fd + " finding"
@@ -2057,10 +2061,13 @@ func hasLiveBlocker(blockers []gcbd.Bead) bool {
 // An automated actor holding one is progressing. A blocker nothing the city runs
 // will clear is blocked, and the reason names it, unless an open human gate holds
 // it: that blocker is a person's to clear, as a gate on the anchor is, and the
-// PR's held: gate value and the board's row name the gate. When only a person
-// holds the blockers, no verdict the pass can write moves them, and it replaces
-// only a blocker verdict recorded earlier, whose bead may have closed since and
-// which nothing else would replace while the person's blocker stands.
+// PR's held: gate value and the board's row name the gate. A conversation that
+// holds the PR's merge is a person's to close, so blocker-holder.sh counts it as
+// neither an actor's nor stuck, and the PR's held: blocked value and the board's
+// row name it. When only a person holds the blockers, no verdict the pass can
+// write moves them, and it replaces only a blocker verdict recorded earlier,
+// whose bead may have closed since and which nothing else would replace while
+// the person's blocker stands.
 func (m *merger) recordBlockerVerdict(anchor *gcbd.Bead, num, headOid, route string, blockers []gcbd.Bead) {
 	kind, beads, ok := m.blockerHolder(anchor.ID)
 	var stuck []string

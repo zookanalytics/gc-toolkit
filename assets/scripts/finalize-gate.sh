@@ -20,8 +20,10 @@
 # live blocker, so the clause states the gate's hold as an explicit
 # precondition: a close path that passes --force skips bd's refusal. A gate
 # blocks only the beads whose edges reach it, so the clause holds this bead
-# alone and reads nothing of its children. A conversation tracks its bead and
-# blocks nothing, so it holds nothing here.
+# alone and reads nothing of its children. A conversation is no human gate, so
+# the clause leaves it out: one on an open PR blocks the PR's anchor until it
+# closes, and bd's refusal and gctk merge's hold on a live blocker hold the
+# merge on it.
 #
 # One exception, named by the caller: --except-key <situation-key> is the key
 # under which that caller files, through human-gate.sh, its report of a refused

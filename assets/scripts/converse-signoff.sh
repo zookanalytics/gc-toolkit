@@ -104,10 +104,12 @@
 #     it.
 #   --rework | --no-rework | --retire <kind> (with a ruling): what the ruling
 #     does to an already-published PR it reaches: the subject at
-#     merge_result=pull_request, and each bead at merge_result=pull_request
-#     that a human gate the ruling answers releases, while the gate is open or
-#     once this ruling's own answer has closed it, so a re-run reaches the PRs
-#     an earlier attempt did. A ruling that reaches one must give one of them;
+#     merge_result=pull_request, the PR whose merge this conversation holds,
+#     the anchor that depends on the conversation through a blocks edge, and
+#     each bead at merge_result=pull_request that a human gate the ruling
+#     answers releases, while the gate is open or once this ruling's own answer
+#     has closed it, so a re-run reaches the PRs an earlier attempt did. A
+#     ruling that reaches one must give one of them;
 #     given none, it is refused with nothing written. --rework says the PR's branch must change: the rework is filed
 #     against that PR's anchor, sourced by this conversation, and refused while
 #     a rework the conversation filed for another ruling is open. --no-rework
@@ -384,10 +386,16 @@ fi
 # ruling has outdated. A ruling that the PR will not land must close it before
 # any gate it answers releases the merge, or an approved PR lands first. Only
 # the sitting knows a ruling's consequence, so a ruling must answer the question
-# for each open PR it reaches: the subject when it is one, and each bead at
-# merge_result=pull_request that a human gate the ruling answers releases, such
-# as an epic member whose gate the epic's sitting answers, or the other PR behind
-# a gate about two. Such a gate is one still open, or one this ruling's own
+# for each open PR it reaches: the subject when it is one, the PR whose merge
+# the conversation holds, and each bead at merge_result=pull_request that a
+# human gate the ruling answers releases, such as an epic member whose gate the
+# epic's sitting answers, or the other PR behind a gate about two. A
+# conversation about an open PR holds its merge through the anchor's blocks
+# edge onto the conversation (gc-helm.sh, conversation_hold_merge), so the
+# beads that depend on the conversation are that PR's anchor, which a
+# conversation on the PR's review reaches through nothing else. The edge
+# stays once the conversation closes, so a re-run reaches the same PR. Such a
+# gate is one still open, or one this ruling's own
 # answer has closed: an attempt that stopped after resolving it had already
 # acted on what it released, and the re-run it asks for must act on the same PR
 # rather than fall back to the subject. What each such gate releases is read
@@ -408,6 +416,15 @@ if [ "$RULED" = yes ]; then
     stopped "could not read $SUBJECT to tell whether it is an open PR, which decides the PR the ruling's answer acts on; nothing was written"
   fi
   [ "$(printf '%s' "$SUBJECT_ROW" | jq -r '.metadata.merge_result // ""')" = pull_request ] && PR_ANCHORS+=("$SUBJECT")
+  HELD=$(gc bd dep list "$CONVERSATION" --direction=up --type blocks --json 2>/dev/null | grep -av '^gc bd:' | scrub \
+    | jq -ce 'if type == "array" then [ .[] | objects ] else error("unread") end' 2>/dev/null) \
+    || stopped "the beads that depend on conversation $CONVERSATION could not be read, and an open PR whose merge it holds could be among them; nothing was written"
+  for b in $(printf '%s' "$HELD" | jq -r '.[] | select(((.status // "") | tostring | ascii_downcase) != "closed") | (.id // "") | select(. != "")'); do
+    reaches_pr "$b" && continue
+    BROW=$(show_row "$b") \
+      || stopped "$b, which depends on conversation $CONVERSATION, could not be read to tell whether it is an open PR whose merge the conversation holds; nothing was written"
+    [ "$(printf '%s' "$BROW" | jq -r '.metadata.merge_result // ""')" = pull_request ] && PR_ANCHORS+=("$b")
+  done
   for g in $TO_ANSWER; do
     printf '%s\n' "${LEAVE[@]+"${LEAVE[@]}"}" | grep -qxF -- "$g" && continue
     printf '%s' "$GATES_JSON" | jq -e --arg g "$g" --arg a "$ANSWER" "$HUMAN_GATE_JQ"'any(.[]; .id == $g
@@ -430,7 +447,7 @@ PR_LIST="${PR_ANCHORS[*]+"${PR_ANCHORS[*]}"}"
 if [ "$RULED" = yes ] && [ -z "$PR_ANSWER" ] && [ -n "$PR_LIST" ]; then
   [ "$PR_LIST" != "$SUBJECT" ] \
     || die "$SUBJECT is an open PR (merge_result=pull_request), so a ruling on it must say what it does to the PR; nothing was written. Re-run with --rework to file the rework its branch needs, --no-rework if the branch stands, or --retire <kind> if the PR will not land"
-  die "this ruling reaches $PR_LIST at merge_result=pull_request, as its subject or as a bead a gate it answers releases, so it must say what it does to each open PR; nothing was written. Re-run with --rework to file the rework a branch needs, --no-rework if the branch stands, or --retire <kind> if the PR will not land, and with --pr-anchor <bead> to name the one --rework or --retire acts on when it reaches more than one"
+  die "this ruling reaches $PR_LIST at merge_result=pull_request, as its subject, as the PR whose merge this conversation holds, or as a bead a gate it answers releases, so it must say what it does to each open PR; nothing was written. Re-run with --rework to file the rework a branch needs, --no-rework if the branch stands, or --retire <kind> if the PR will not land, and with --pr-anchor <bead> to name the one --rework or --retire acts on when it reaches more than one"
 fi
 # --rework and --retire act on one open PR: the one the ruling reaches, the one
 # --pr-anchor names when it reaches more than one, or else the subject, which

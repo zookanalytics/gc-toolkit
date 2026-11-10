@@ -209,7 +209,35 @@
     ]
   },
   {
-    "name": "a conversation tracking the anchor",
+    "name": "a conversation a sitting holds on the anchor, which holds its merge until it closes",
+    "anchor": "tk-a",
+    "want": {"status": "needs-attention", "held": ["blocked"]},
+    "beads": [
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-c"], "metadata": {"merge_result": "pull_request", "pr_posture": "approved@abc@2026-10-27T00:00:00Z", "pr.machine": "settled@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-c", "status": "in_progress", "issue_type": "task", "assignee": "gc-toolkit/gc-toolkit.tk-c", "title": "should this land as built?", "tracks": ["tk-a"]}
+    ]
+  },
+  {
+    "name": "a conversation in the operator's queue on the PR's review, which holds the anchor's merge",
+    "anchor": "tk-a",
+    "want": {"status": "needs-attention", "held": ["blocked"]},
+    "beads": [
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-c"], "metadata": {"merge_result": "pull_request", "pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a.rv", "status": "open", "issue_type": "task", "title": "arch review", "metadata": {"task_kind": "review", "anchor_bead": "tk-a", "gc.routed_to": "gc-toolkit/gc-toolkit.polecat"}},
+      {"id": "tk-c", "status": "open", "issue_type": "task", "assignee": "human", "title": "is this review stuck?", "tracks": ["tk-a.rv"]}
+    ]
+  },
+  {
+    "name": "a conversation that has closed holds nothing",
+    "anchor": "tk-a",
+    "want": {"status": "merging", "held": []},
+    "beads": [
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-c"], "metadata": {"merge_result": "pull_request", "pr_posture": "approved@abc@2026-10-27T00:00:00Z", "pr.machine": "settled@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-c", "status": "closed", "issue_type": "task", "assignee": "gc-toolkit/gc-toolkit.tk-c", "title": "should this land as built?", "tracks": ["tk-a"]}
+    ]
+  },
+  {
+    "name": "a conversation tracking the anchor with no edge onto it, as once its sitting lifted the hold",
     "anchor": "tk-a",
     "want": {"status": "merging", "held": []},
     "beads": [

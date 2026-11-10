@@ -413,6 +413,9 @@ func storeRow(sc fixture.Scenario, b fixture.Bead) map[string]any {
 				if far.AwaitType != "" {
 					dep["await_type"] = far.AwaitType
 				}
+				if far.Assignee != "" {
+					dep["assignee"] = far.Assignee
+				}
 				deps = append(deps, dep)
 			}
 		}

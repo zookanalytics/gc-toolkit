@@ -48,9 +48,10 @@ bd already refuses an unforced close of a bead an open gate blocks, and the merg
 holds on a live blocker of the anchor. The clause states the same hold as an
 explicit precondition, because a close path that passes `--force` skips bd's
 refusal. A gate blocks only the beads whose edges reach it, so the clause holds
-this bead alone and never reads its children. A conversation tracks the bead it
-is about and blocks nothing, so it holds nothing here, and neither does any
-other `tracks` edge.
+this bead alone and never reads its children. A conversation is no human gate,
+so it holds nothing here: one on an open PR blocks the PR's anchor until it
+closes, and bd's refusal and gctk merge's hold on a live blocker hold the merge
+on it. No `tracks` edge holds anything here.
 
 ### The caller's own report
 

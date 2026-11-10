@@ -1054,6 +1054,7 @@ func (l *libraryPRStore) Blockers(ids []string) (map[string][]prstatus.Blocker, 
 					Status:    string(iss.Status),
 					IssueType: string(iss.IssueType),
 					AwaitType: iss.AwaitType,
+					Assignee:  iss.Assignee,
 					Metadata:  decodeMetadata(iss.Metadata),
 				})
 			}
