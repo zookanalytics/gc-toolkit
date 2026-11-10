@@ -581,9 +581,13 @@ not run within the wait. `--no-start` attaches only to a session already
 running and starts nothing.
 
 The attach starts a runtime from its own process in two cases: a session no
-configured agent runs, which the controller never starts, and any session while
-no controller runs. That start resumes the provider's conversation when the
-session keeps a session key. A session that a drain-ack ended under
+configured agent runs, which the controller never starts, and a session while
+no controller runs. The second case leaves out a session still waiting for the
+reconciler's start, in a city registered with the supervisor while the
+supervisor does not run either: there the attach starts nothing, exits non-zero
+and says to start the supervisor. A start from the attach's own process resumes
+the provider's conversation when the session keeps a session key. A session
+that a drain-ack ended under
 `wake_mode = "fresh"` keeps none, because the drain-ack's patch clears it, so
 the attach starts a new conversation with no first message. Its prompt can then
 reach it only as session-start hook context, and `gc prime --hook` primes only
@@ -591,7 +595,9 @@ a session whose record reads active, awake, creating or start_pending, so that
 session comes up with no prompt.
 
 *Evidence:* `newSessionAttachCmd`, `cmdSessionAttachWith`, `sessionAttach.run`
-and `attachOnceControllerStarts` (`cmd/gc/cmd_session.go`), `preWakePatch`
+and `attachOnceControllerStarts` (`cmd/gc/cmd_session.go`),
+`pendingStartAwaitsSupervisor` (`cmd/gc/control_plane.go`),
+`sessionStartAwaitsSupervisor` (`cmd/gc/cmd_supervisor_city.go`), `preWakePatch`
 (`cmd/gc/session_wake.go`), `PreWakePatch` and `AcknowledgeDrainPatch`
 (`internal/session/lifecycle_transition.go`) and `primeHookLiveManagedSession`
 (`cmd/gc/cmd_prime.go`), read at upstream `8b1d799b8` on 2026-11-10. The attach
