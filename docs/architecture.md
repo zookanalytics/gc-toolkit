@@ -273,7 +273,7 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   and a new ownership is the operator's ruling
   ([authority-map.md](authority-map.md)).
   - **The po**, the operator's prioritization partner, is a session the
-    operator opens for a sitting with a nudge and then an attach, which starts
+    operator opens for a sitting from `gc-helm`'s home page, which starts
     fresh each time ([human-engagement.md](human-engagement.md#a-po-sitting)).
     Its backlog refinement works the queue
     of new work no epic holds, and its portfolio sync works the epics, their

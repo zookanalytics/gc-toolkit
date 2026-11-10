@@ -139,9 +139,9 @@ not.
 ## The queue the po works
 
 The placement sitting is the po's backlog refinement: the operator opens the
-po, the operator's prioritization partner, with a nudge and then an attach
-([human-engagement.md](human-engagement.md#a-po-sitting)), and the two work the
-queue together. The queue is every bead in every rig's store that carries
+po, the operator's prioritization partner, from `gc-helm`'s home page or with
+`gc-helm po` ([human-engagement.md](human-engagement.md#a-po-sitting)), and the
+two work the queue together. The queue is every bead in every rig's store that carries
 `hold:mayor` in a spelling Gas City reads as the hold, trimmed and in any case.
 The po reads it from `gc beads list --format=json`, keeping each bead with such
 a label, because `--label hold:mayor` matches only the exact text and would

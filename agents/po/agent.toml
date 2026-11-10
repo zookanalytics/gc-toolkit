@@ -12,8 +12,8 @@ max_active_sessions = 1
 # sitting no client is attached to sleeps once an hour has passed, keeps its
 # conversation key, and an attach wakes it into the same conversation with its
 # prompt delivered again. A sitting ends at gc runtime drain-ack, whose stop
-# replaces the key, so the next sitting, which a nudge opens, starts a new
-# conversation.
+# replaces the key, so the next sitting, which `gc-helm po` opens through the
+# controller, starts a new conversation.
 sleep_after_idle = "1h"
 # The po takes no slung work. The city's [agent_defaults] gives every agent a
 # default formula, so this explicit empty one sends a plain gc sling to

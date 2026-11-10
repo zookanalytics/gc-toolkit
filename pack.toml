@@ -108,8 +108,8 @@ template = "mechanik"
 scope = "city"
 mode = "always"
 
-# The po runs only while the operator holds a sitting, which a nudge and then
-# an attach open, its idle limit puts to sleep and a drain-ack ends
+# The po runs only while the operator holds a sitting, which `gc-helm po`
+# opens, its idle limit puts to sleep and a drain-ack ends
 # (agents/po/agent.toml).
 [[named_session]]
 template = "po"

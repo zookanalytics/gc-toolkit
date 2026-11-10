@@ -1,6 +1,6 @@
 ---
 name: Human engagement — gc-toolkit's subject, human gate and conversation model
-description: gc-toolkit's own model for engaging a person — the subject, the human gate and the conversation, how a gate reaches the operator, how a conversation starts, how a sitting claims, holds, answers and ends, Accept, how a parked subject comes back, how a po sitting opens, the helm board, and the ground the pack builds itself. A pack convention; the Gas City primitives it rides are gascity/human-engagement.md.
+description: gc-toolkit's own model for engaging a person — the subject, the human gate and the conversation, how a gate reaches the operator, the home page the operator comes in through, how a conversation starts, how a sitting claims, holds, answers and ends, Accept, how a parked subject comes back, how a po sitting opens, the helm board, and the ground the pack builds itself. A pack convention; the Gas City primitives it rides are gascity/human-engagement.md.
 ---
 
 # Human engagement
@@ -64,9 +64,10 @@ model the pack builds on them.
 ## Scope
 
 **Mandate.** gc-toolkit's model for engaging a person: the four terms, how a
-human gate reaches the operator, how a conversation starts, how a sitting
-claims, holds, answers and ends, Accept, how a parked subject comes back, how a
-po sitting opens, the helm board, and the ground the pack builds itself.
+human gate reaches the operator, the home page the operator comes in through,
+how a conversation starts, how a sitting claims, holds, answers and ends,
+Accept, how a parked subject comes back, how a po sitting opens, the helm
+board, and the ground the pack builds itself.
 
 **Boundaries.** The Gas City primitives the model rides are
 [gascity/human-engagement.md](gascity/human-engagement.md), and the routing
@@ -175,6 +176,26 @@ the operator, Accept clears it. A gate none of whose beads has a live row keeps
 a row of its own that states what it asks, so no open gate is off the board.
 Nothing re-mails, and no session claims a gate, so a gate a sitting is
 discussing is still open and unassigned until the sitting answers it.
+
+## The home page
+
+The operator comes in through `gc-helm`. A bare `gc-helm` on a terminal opens
+its home page, the conversation form on a screen of its own, with four entries:
+
+- **The po** opens a sitting with the po (*A po sitting*, below).
+- **Mechanik** attaches to mechanik's session, waiting while the controller
+  starts it.
+- **Start a conversation** is engage's form (*Engage*, below).
+- **Return to a conversation** is attach's list (*Returning to a conversation*,
+  below).
+
+Each entry is also a command of its own, for a script or a shortcut: `gc-helm
+po`, `gc-helm mechanik`, `gc-helm engage` and `gc-helm attach`. Esc on the start
+or the return screen goes back to the page, and Esc on the page leaves it. An
+entry that hands the terminal to a session, the po's, mechanik's or a
+conversation's sitting, leaves the page once the terminal comes back, as the
+form does after an attach. A bare `gc-helm` without a terminal prints its usage
+and exits 2, so no script blocks on a page.
 
 ## How a conversation starts
 
@@ -1079,26 +1100,34 @@ The po is the operator's prioritization partner, a named session the operator
 opens for one sitting: a backlog refinement over the `hold:mayor` queue or a
 portfolio sync over the epics ([steering.md](steering.md)). A sitting ends when
 the po runs `gc runtime drain-ack`, and the next sitting starts a new
-conversation. Open one by nudging the po, then attach:
+conversation. The po entry of the home page opens one, and so does `gc-helm po`,
+which takes `--reason "<what the sitting is for>"` for the po to hear as the
+sitting starts.
 
-```bash
-gc session nudge gc-toolkit.po "<what the sitting is for>"
-gc session attach gc-toolkit.po
-```
+It opens a sitting from whatever state the seat is in, with no other command.
+A live sitting is attached to as it stands. A sitting no client is attached to
+sleeps once its idle limit passes (`sleep_after_idle`) and keeps its
+conversation, and the attach wakes it into that conversation with its prompt
+handed over again. A po still ending its last sitting is waited on until it has
+stopped. Every other seat, one whose last sitting ended or that has no session,
+is started through the controller: `gc-helm po` nudges the po with what the
+sitting is for, the nudge asks the controller to start the seat, and the
+controller's start gives the po its prompt as its first message. It then waits
+for the start, reporting the session's state while it does, and attaches the
+moment the session runs. A sitting already open does not take the `--reason`,
+so the operator says it there.
 
-The nudge queues its message and asks the controller to wake the seat, and the
-controller's start gives the po its prompt as its first message. An attach on
-its own joins a live sitting or wakes a sleeping one. A sitting no client is
-attached to sleeps once its idle limit passes (`sleep_after_idle`), keeps its
-conversation, and takes its prompt again when an attach wakes it. An attach on
-its own does not open a sitting on a seat whose last sitting ended: it starts
-the seat itself while the seat's record still reads drained, and Gas City's
-session-start prime hook primes only a session whose record reads active,
-awake, creating or start_pending. Attach soon after the nudge, because a po
-the nudge wakes with no client attached takes it for a wake with no sitting
-and drains. A sitting that starts without the po's prompt, one that does not
-know it is the po, has the whole prompt once the operator tells it to run
-`gc prime`.
+The waits close two timing edges. An attach on its own to a seat whose last
+sitting ended starts the seat outside the controller, with no prompt
+([gascity/human-engagement.md](gascity/human-engagement.md#an-attach-starts-a-session-that-is-not-running)),
+so the po entry attaches only to a running session or a slept one. And a po a
+nudge wakes with no client attached takes it for a wake with no sitting and
+drains, so the po entry attaches the moment the start lands. It reads the
+seat's sleep from its row in `gc session list --json`, whose reason reads
+`idle` while the city's API serves the read. A read without the reason takes a
+slept seat for an ended one, and starts a new sitting with its prompt. A
+sitting that starts without the po's prompt anyway, one that does not know it
+is the po, has the whole prompt once the operator tells it to run `gc prime`.
 
 ## How a pane dies when no sitting is live
 
@@ -1218,6 +1247,12 @@ operator's *own* unsent words.
 
 ## Watch items — moving now, re-verify before building on them
 
+- **An attach that asks the controller for the start.** Upstream Gas City's
+  attach records a wake and lets the controller start a session that is not
+  running, which the city's gc does not do yet
+  ([gascity/human-engagement.md](gascity/human-engagement.md#an-attach-starts-a-session-that-is-not-running)).
+  Once the city's gc carries it, the po entry's start can reduce to the
+  attach.
 - **The roles pack's growth** — every new upstream role is a standing
   question against a hand-authored one here. When upstream ships a role
   covering something the pack hand-authors, re-argue adoption for that role
