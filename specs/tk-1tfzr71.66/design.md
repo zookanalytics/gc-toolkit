@@ -412,8 +412,10 @@ fresh from GitHub, the repository's open pull requests
 and keeps the PRs at that commit. A PR whose head branch is in the repository is
 at the commit its branch's ref reads, because the push itself moves the ref, and
 the projection that follows a push does not depend on when GitHub moves the PR's
-recorded head (`head.sha`). A PR from a fork is at its `head.sha`. That list
-includes a PR into another base, a PR from a fork and a PR that no bead owns.
+recorded head (`head.sha`). A PR from a fork is at its `head.sha`. A PR that a
+push git has not answered for would move counts at that push's new head as
+well, until the push is settled (below). That list includes a PR into another
+base, a PR from a fork and a PR that no bead owns.
 GitHub's list of the pull requests associated with a commit
 (`GET /repos/{owner}/{repo}/commits/{commit_sha}/pulls`) cannot stand in for it.
 For a commit on the default branch it returns only the merged pull request that
@@ -530,9 +532,9 @@ throughout:
 3. When the status it read is success, the projection posts pending at the new
    head, naming the PRs the push moves.
 4. It pushes, as a fast-forward.
-5. Once git answers for the branch, it runs the projection at the new head and
-   at the commit the branch held, whether the push landed or not, and then
-   removes the record. At the new head, a pending posted for a push that failed
+5. Once git answers for the branch, it removes the record, and then runs the
+   projection at the new head and at the commit the branch held, whether the
+   push landed or not. At the new head, a pending posted for a push that failed
    holds no other PR. At the commit the branch held, a PR that is still there
    stops waiting on the PRs that moved away.
 
@@ -549,25 +551,25 @@ city posts there. A PR's first head needs no publication. The `mr` step opens
 the PR as a draft, which GitHub does not merge, and runs the projection before
 anything can mark it ready.
 
-**A push that git has not answered for is settled before the city posts again.**
-The server checks that the branch still holds the commit the push read there,
-updates the branch, and only then reports `ok` or `ng` for it
-([gitprotocol-pack](https://git-scm.com/docs/gitprotocol-pack)). So a push whose
-report never reached its writer, because the connection dropped, a time limit
-stopped it or the writer died, may already have landed, or may land after a
-projection has read the branch at its old commit. Nothing in git's protocol asks
-the server about such a push. Its record stands for it, and each holder of the
-lock, a publication or a projection, settles a record it finds before it reads
-anything else, once it has waited out any unanswered post (above). It reads the
-branch on GitHub:
+**Until a push that git has not answered for is settled, the PRs it would move
+count at its new head.** The server checks that the branch still holds the
+commit the push read there, updates the branch, and only then reports `ok` or
+`ng` for it ([gitprotocol-pack](https://git-scm.com/docs/gitprotocol-pack)). So
+a push whose report never reached its writer, because the connection dropped, a
+time limit stopped it or the writer died, may already have landed, or may land
+after a projection has read the branch at its old commit. Nothing in git's
+protocol asks the server about such a push, and a new head that GitHub does not
+hold shows only that the push has not landed yet. Its record stands for it.
+While the record stands, every projection at its new head counts the open PRs
+whose head is the record's branch among the PRs at that commit, as it does once
+the push lands. Step 3 runs before the push, so the push found no success there
+when it was sent, and while the record stands, the city posts success there
+only on a verdict that counts those PRs. Each holder of the lock, a publication
+or a projection, tries to settle each record it finds before it reads anything
+else, once it has waited out any unanswered post (above). It reads the branch
+on GitHub:
 
 - When the branch holds the new head, the push landed.
-- When GitHub answers that it does not hold the new head, no PR is at that
-  commit and it carries no status of the city's, so whatever push brings it
-  there, GitHub merges no PR at it before the city posts there. The record is
-  settled as it stands, and the holder does not project there. A projection
-  there could read the branch before the unanswered push lands and post once it
-  has, with a verdict that does not count the PRs the push moved.
 - When the branch is gone, or holds a commit the new head does not descend
   from, another push has moved it off the commit the unanswered push read, and
   that push cannot land while the branch stays off it. git's client sends a
@@ -577,31 +579,45 @@ branch on GitHub:
   still holds that commit, since it validates "that it hasn't changed while the
   request was being processed (the obj-id is still the same as the old-id)".
 - When the branch holds a commit the new head descends from, the commit the
-  record names among them, the holder finishes the publication. It posts pending
-  at the new head when the city's status there reads success. Once GitHub has
-  created that pending, or when none was needed, it pushes the new head as a
-  fast-forward and reads the branch again once git answers. When GitHub refuses
-  that post or leaves it unanswered, the holder pushes nothing, settles an
-  unanswered post as above, and leaves the record to a later holder. Once the
-  branch holds the new head, by either push, the unanswered push cannot land
-  while the branch stays off the commit that push read. When the server refuses
-  the holder's push for one of the branch's rules and the branch has not moved,
-  the unanswered push, the same update from the city, meets the same rule, or it
-  names a commit the branch has left, so the record is settled. Any other
-  refusal leaves the record to a later holder.
+  record names among them, the holder finishes the publication, whether GitHub
+  holds the new head or not. It posts pending at the new head when the city's
+  status there reads success, which it never does at a commit GitHub does not
+  hold (above). Once GitHub has created that pending, or when none was needed,
+  it pushes the new head as a fast-forward and reads the branch again once git
+  answers. When GitHub refuses that post or leaves it unanswered, the holder
+  pushes nothing, and settles an unanswered post as above. Once the branch holds
+  the new head, by either push, the unanswered push cannot land while the
+  branch stays off the commit that push read. When the server refuses the
+  holder's push for one of the branch's rules and the branch has not moved, the
+  unanswered push, the same update from the city, meets the same rule, or it
+  names a commit the branch has left, so the record is settled.
 
-The holder then runs the projection at the commit the record names, and at the
-new head where GitHub holds it, and removes the record. A holder that cannot
-settle a record, because GitHub or git does not answer, leaves it and posts
-nothing. So while a record stands, the city posts no success at the new head,
-and a push that was sent found none there, since step 3 runs before the push. A
-writer whose own push git did not answer for settles it the same way in place of
-step 5, so the publication can set its push a time limit. A writer that dies
-leaves its record to the next holder of the lock, such as the retry of its own
-step. git compares the branch with the commit the push read, not with the
-branch's history, so a push that takes the branch back to that commit, such as a
-person's forced push, lets the unanswered push land after its record is settled.
-Section 8 names it among the residuals.
+The holder reads the new head's history, and pushes the new head, in the rig's
+repository, which held the new head when its writer pushed it. Every writer of a
+rig works in a worktree linked to that repository, and a linked worktree shares
+its repository's objects. git keeps an object that a ref or a reflog reaches,
+and one that nothing reaches until it is two weeks old, by default (section 13).
+So the holder that settles a record, most often the next to take the lock, finds
+the new head there. A holder that does not find it there can neither tell
+whether the new head descends from the branch's commit nor push it, so it
+settles the record only when the branch holds the new head or is gone.
+
+A record that the holder does not settle stands, and it holds nothing but the
+verdict at its new head. The holder goes on with its own reads and posts, and
+each later holder tries again to settle it. A record stands when its holder
+does not find the new head, when GitHub refuses the holder's pending or does
+not answer, when git does not answer the holder's push, or when the server
+refuses that push for a reason other than the branch's rules. A standing record
+whose branch heads no open PR counts nothing. Once a record is settled, the
+holder removes it, and then runs the projection at the commit the record names,
+and at the new head where GitHub holds it. A writer whose own push git did not
+answer for settles it the same way in place of step 5, so the publication can
+set its push a time limit. A writer that dies leaves its record to the next
+holder of the lock, such as the retry of its own step. git compares the branch
+with the commit the push read, not with the branch's history, so a push that
+takes the branch back to that commit, such as a person's forced push, lets the
+unanswered push land after its record is settled. Section 8 names it among the
+residuals.
 
 **A PR that leaves a commit has that commit projected again.** A held PR that
 leaves a commit it shared with a clear one would otherwise leave the clear PR
@@ -840,10 +856,11 @@ Unit 3 carries whichever of the two lands second.
   - a thread still waiting on the city's answer holds the merge where the base
     does not require resolved threads;
   - each push the pack makes onto a PR's branch publishes the head behind a
-    pending status, under the projection's lock, and a push that git has not
-    answered for is settled before the city posts again, so none of them
-    brings a PR onto a verdict that did not count it unless another push takes
-    its branch back to the commit an unanswered one read (section 4);
+    pending status, under the projection's lock, and until a push that git has
+    not answered for is settled, the PRs it would move count at its new head,
+    so none of them brings a PR onto a verdict that did not count it unless
+    another push takes its branch back to the commit an unanswered one read
+    (section 4);
   - a post that GitHub leaves unanswered is waited out, for its time limit and
     GitHub's ten-second limit on a request, before the projection reads again in
     that repository, and the projection compares with the status GitHub holds,
@@ -1074,7 +1091,7 @@ leaves the city working.
 | Unit | What it does | Waits on | Answers |
 |---|---|---|---|
 | 1. `gctk pr compose` and `gctk pr summary` | The PR's title, managed summary region and branch-beads section are composed in gctk from the bead that owns the PR, with the region read by its markers. `pr-summary-region.sh` is deleted, and `pr-open.sh` and `pr-stack.sh` call the verb. Go tests pin the output against today's renders. | nothing | tk-tefrxph; the gctk domain move note |
-| 2. The city's status on GitHub | `prstatus` answers whether the city holds the merge: nothing in flight, nothing held, and, by the `waits` package's answer, no wait of the anchor's own but its merge gate. It reads "waiting for your merge" on a base with no approval rule. It reads a PR's unanswered threads when it gathers the PR's facts, so the count's one writer can retire with `gctk merge`. The label writer also posts `gc-toolkit/status` at the head, success or pending and never failure. It posts success last, once every other requirement of the target is met there and no feedback on the PR is newer than the anchor's watermarks, counted by the intake's own rule. One status covers every open PR at that commit, read fresh from the repository's open PRs and branch refs before each post: a PR from a branch in the repository is at its branch's ref, and a PR from a fork at its `head.sha`. Among them are a PR from a fork, a PR into another base and a PR with no anchor. Whichever writer runs the projection, it waits for a lock for the repository, reads under it everything the verdict rests on, the watermarks before the holds, and posts only where GitHub's status at the commit differs from its verdict, compared with what GitHub returns and never with its own last post (section 4). The unit also builds the publication of a head (section 4). Under that lock, a writer that pushes a branch heading an open PR reads the city's status at the commit the push will make the head, records the publication in a file beside the lock, has the projection post pending there when it reads success, pushes as a fast-forward, and once git answers, runs the projection there and at the commit the branch held, then removes the record. Each holder of the lock first settles a record it finds: it reads the branch, finishes the publication with a fast-forward push while the branch holds a commit the new head descends from, runs no projection at a new head GitHub does not hold, and posts nothing while GitHub or git does not answer. Before each post, the projection records it beside the lock, with the time from which its 30-second time limit counts, and removes the record once GitHub answers with a created status or a refusal. Each holder of the lock settles an unanswered post's record before a publication's: it waits until the record is older than the time limit and ten seconds more, then projects at the record's commit. A writer settles its own unanswered post before it lets go of the lock, and only a dead writer, or one GitHub stops answering, leaves its record to the next holder. The polecat's push at submit (`work-submit.sh`) and the witness's salvage push move onto it. For a bead that carries its merge gate, it keeps auto-merge on exactly while the city reads the PR approved on a base that requires an approving review, and turns it on before it posts success. No bead carries one before unit 3, so the toggle is inert until then. `blocker-holder.sh` reads a gate that core's gate sweep resolves as held by an automated actor. The warrant *The city's merge status* is added, covering the status, its lock, the wait on an unanswered post, the publication with its record, and the auto-merge toggle. Tests for each, among them a review that arrives while a required check still runs, feedback the intake's rule leaves out, which holds nothing, the auto-merge toggle turning on before the success post, two open PRs at one head with one of them held, where the status reads pending for both, a PR with nothing left to merge beside a held one, a shared head on the default branch and one from a fork, a writer that waits for the lock, two writers posting at one commit, a publication onto a commit whose status reads success, which posts pending before its push, a publication whose push fails, which still projects there, a projection during a publication, which waits for it, a PR whose `head.sha` still names its old commit, which is counted at its branch's ref, a held PR published off a head it shared with a clear PR, where the clear PR's status turns success with no further event on it, a publication killed after it sends its push and a push that reports failure and lands afterwards, each with a projection run in between, where the moved PR stays unmerged until a verdict counts it, a success post that reaches its time limit, one answered with a 5xx and a writer killed after sending one, each followed by a hold that the next projection reads, where that projection waits out the record before it reads and its pending lands after the success GitHub creates late, a writer that settles its own unanswered post before it lets go of the lock, a late pending at a clear PR's commit, which the next projection replaces because it compares with GitHub's status, and a record settled when the branch holds the new head, is gone, holds a commit the new head does not descend from or one it descends from, when GitHub does not hold the new head, where the push lands just after the settle and the moved PR stays unmerged until a verdict counts it, and when the branch's rules refuse the push that finishes it. | nothing | sections 3, 4 and 5 |
+| 2. The city's status on GitHub | `prstatus` answers whether the city holds the merge: nothing in flight, nothing held, and, by the `waits` package's answer, no wait of the anchor's own but its merge gate. It reads "waiting for your merge" on a base with no approval rule. It reads a PR's unanswered threads when it gathers the PR's facts, so the count's one writer can retire with `gctk merge`. The label writer also posts `gc-toolkit/status` at the head, success or pending and never failure. It posts success last, once every other requirement of the target is met there and no feedback on the PR is newer than the anchor's watermarks, counted by the intake's own rule. One status covers every open PR at that commit, read fresh from the repository's open PRs and branch refs before each post: a PR from a branch in the repository is at its branch's ref, and a PR from a fork at its `head.sha`. Among them are a PR from a fork, a PR into another base and a PR with no anchor. Whichever writer runs the projection, it waits for a lock for the repository, reads under it everything the verdict rests on, the watermarks before the holds, and posts only where GitHub's status at the commit differs from its verdict, compared with what GitHub returns and never with its own last post (section 4). The unit also builds the publication of a head (section 4). Under that lock, a writer that pushes a branch heading an open PR reads the city's status at the commit the push will make the head, records the publication in a file beside the lock, has the projection post pending there when it reads success, pushes as a fast-forward, and once git answers, removes the record, then runs the projection there and at the commit the branch held. While a record stands, every projection at its new head counts the open PRs on its branch there. Each holder of the lock first tries to settle a record it finds. It reads the branch, and while the branch holds a commit the new head descends from, it finishes the publication with a fast-forward push from the rig's repository, whether GitHub holds the new head or not. A record it cannot settle stands, such as one whose new head the rig's repository lacks or whose finishing push git does not answer, and the holder goes on with its own reads and posts. Before each post, the projection records it beside the lock, with the time from which its 30-second time limit counts, and removes the record once GitHub answers with a created status or a refusal. Each holder of the lock settles an unanswered post's record before a publication's: it waits until the record is older than the time limit and ten seconds more, then projects at the record's commit. A writer settles its own unanswered post before it lets go of the lock, and only a dead writer, or one GitHub stops answering, leaves its record to the next holder. The polecat's push at submit (`work-submit.sh`) and the witness's salvage push move onto it. For a bead that carries its merge gate, it keeps auto-merge on exactly while the city reads the PR approved on a base that requires an approving review, and turns it on before it posts success. No bead carries one before unit 3, so the toggle is inert until then. `blocker-holder.sh` reads a gate that core's gate sweep resolves as held by an automated actor. The warrant *The city's merge status* is added, covering the status, its lock, the wait on an unanswered post, the publication with its record, and the auto-merge toggle. Tests for each, among them a review that arrives while a required check still runs, feedback the intake's rule leaves out, which holds nothing, the auto-merge toggle turning on before the success post, two open PRs at one head with one of them held, where the status reads pending for both, a PR with nothing left to merge beside a held one, a shared head on the default branch and one from a fork, a writer that waits for the lock, two writers posting at one commit, a publication onto a commit whose status reads success, which posts pending before its push, a publication whose push fails, which still projects there, a projection during a publication, which waits for it, a PR whose `head.sha` still names its old commit, which is counted at its branch's ref, a held PR published off a head it shared with a clear PR, where the clear PR's status turns success with no further event on it, a publication killed after it sends its push and a push that reports failure and lands afterwards, each with a projection run in between, where the moved PR stays unmerged until a verdict counts it, a success post that reaches its time limit, one answered with a 5xx and a writer killed after sending one, each followed by a hold that the next projection reads, where that projection waits out the record before it reads and its pending lands after the success GitHub creates late, a writer that settles its own unanswered post before it lets go of the lock, a late pending at a clear PR's commit, which the next projection replaces because it compares with GitHub's status, a record settled when the branch holds the new head, is gone, holds a commit the new head does not descend from, or holds one it descends from, with the new head on GitHub and without it, the latter followed by another branch's publication at the new head, where the moved PR stays unmerged until a verdict counts it, and when the branch's rules refuse the push that finishes it, and a record that stands, because the rig's repository lacks the new head or git does not answer the push that finishes it, the latter followed by another branch's publication at the new head and then the unanswered push landing, where the moved PR stays unmerged until a verdict counts it and posts at other commits go on. | nothing | sections 3, 4 and 5 |
 | 3. The refinery on Gas Town's flow | `mol-refinery-patrol` is rewritten on Gas Town's steps at 3339ad104a88, with the differences in section 1, and each step calls one tested script. The scripts cover: the prep by merge in the refinery's own worktree (`refinery-workspace.sh` and its warrant go); the gate through `detached-job.sh`; the failures, through the requeue by `gc sling` or a rework child, and the pre-existing path; the direct landing, published through unit 2's publication when the target heads an open PR; the `mr` step (compose the title and body, edit them onto a PR the bead already owns before it publishes the new head through unit 2's publication, or push and then open a new PR as a draft with them, record the PR with `opened_as_draft` so the review lanes and `pr-open.sh`'s ready flip handle it unchanged, file the merge gate with a notice to the refinery, run the projection, file a human gate in place of a PR into a target whose rules do not require `gc-toolkit/status`, and the old-path park while `github_merge_rules` is unset); the close once the merge gate resolves, with the seed re-render under call 2; the rework hand-back; and the integration-effort hand-off, whose push is published the same way. `rejection-repool.sh`, `pr-stack.sh` with its arm, `check-refinery-patrol-live` and the old formula's block-extraction suites go. The polecat doctrine gains the drift rule. | units 1 and 2; tk-gmjtb2e, whichever lands second carrying the other | tk-c8hl47c, tk-ni0i48p, tk-pdc0ovc, tk-w0hkwos; section 7 |
 | 4. The readers move | The sign-off's headline reads `prstatus`. I5 reads every closed bead with a PR. I2 reads the kept values. | unit 3 | section 6 |
 | 5. Docs, warrants and the plan | The pages that hold the merge's depth are rewritten to the flow as it stands once units 1 to 4 land: `refinery-merge-cadence.md`, `state-machine.md` (the kept values and their sentences, and the Checks vocabulary), `component-model.md` with both landing writers, `authority-map.md`, `design-convoy.md`'s gates under call 1, `gctk-architecture.md`'s rows and the merge section of `built-once-target.md`, which takes section 1's differences as that page holds the witness's. `architecture.md` states the target from this design's own change, with the old path under Debt. Unit 5 drops the Debt entry units 1 to 4 retire, the refinery push that can force, and corrects any line a unit departed from. The warrants' Covers lines move off retired paths. The plan's rows move as section 8 says. | units 1 to 4 | tk-cvffk5x, with this design's change to `architecture.md`; tk-r82qrrv |
@@ -1204,3 +1221,13 @@ leaves the city working.
   it is forced ([git-push](https://git-scm.com/docs/git-push)). The design
   takes GitHub's push to follow the protocol, and its timing for a push whose
   client has gone was not reproduced.
+- **A rig's worktrees and git's garbage collection.** A linked worktree shares
+  everything with its repository except files of its own, such as `HEAD` and
+  the index ([git-worktree](https://git-scm.com/docs/git-worktree)). Every
+  worktree of the gc-toolkit rig, the refinery's, the witness's and each
+  polecat's, is linked to the rig's repository (`git worktree list`, read on
+  2026-11-10), and `work-setup.sh` adds a bead's worktree there with
+  `git -C "$RIG_ROOT" worktree add`. `git gc` keeps every object that a ref or a
+  reflog reaches, and prunes an object that nothing reaches only once it is
+  older than `gc.pruneExpire`, two weeks by default
+  ([git-gc](https://git-scm.com/docs/git-gc)).

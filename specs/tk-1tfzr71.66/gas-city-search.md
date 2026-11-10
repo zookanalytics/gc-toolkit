@@ -108,9 +108,12 @@ pending there first, and once git answers, the projection runs there and at the
 commit the branch held. A push whose report never came is settled from git's own
 check of the commit the push read. The next holder of the lock reads the branch,
 and while the branch holds a commit the new head descends from, it pushes that
-head as a fast-forward, after which the earlier push cannot land while the
-branch stays off the commit it read. The publication's record of what it moves
-is how that holder learns of such a push, and it sits beside the lock. A status
+head as a fast-forward from the rig's repository, where git's garbage
+collection keeps the commit while a ref or a reflog reaches it. The earlier
+push then cannot land while the branch stays off the commit it read. The
+publication's record of what it moves is how that holder learns of such a push,
+and it sits beside the lock. Until a holder settles the record, the projection
+counts the PRs that push would move at its new head. A status
 post whose answer never came has a record there too, and the next holder waits
 until the post's time limit and GitHub's ten seconds have passed before it
 reads, then projects at that commit again, because no condition on the post and

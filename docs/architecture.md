@@ -427,9 +427,10 @@ first. Either way the change is a decision on the record, not a drift.
   own pushes there, such as a `direct` landing, land while every PR into the
   branch waits for the city's status.
 - **Each push the pack makes onto a PR's branch publishes the head behind a
-  pending status,** and the city posts no success there until it knows where
-  the push left the branch, so a PR it moves onto a commit the city already
-  passed waits for a verdict that counts it.
+  pending status,** and until the city knows where the push left the branch,
+  its verdict at that head counts the PRs the push would move there, so a PR it
+  moves onto a commit the city already passed waits for a verdict that counts
+  it.
 - **The city keeps GitHub's auto-merge on only while it reads the PR
   approved,** on a target whose rules require an approving review.
 - **An approval stands across a push** until the city's reading of the change
