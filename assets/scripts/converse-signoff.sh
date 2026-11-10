@@ -189,8 +189,7 @@
 # Exit: 0 signed off, or with --answer the named gates answered; 1 stopped
 #   short — a read failed, the rework did not file, the PR did not retire, the
 #   headline, the close brief, the closer's arm or the lift of the subject's
-#   hold:mayor did not land, a gate did not
-#   close, the recommendation was not
+#   hold:mayor did not land, a gate did not close, the recommendation was not
 #   taken, or the conversation did not close or hand back — so do NOT post the
 #   sign-off, or report the ruling as
 #   carried out; repair what it names and re-run, which repeats every write it

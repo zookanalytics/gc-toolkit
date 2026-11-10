@@ -94,7 +94,7 @@ gate, below).
 - A converse sign-off writes the brief and the arm for its subject when the
   ruling leaves the subject waiting on work the sitting sent, after the
   headline writes the edge (`--waiting-on <work> --close-brief "<…>"`, the
-  converse-settle step).
+  converse-settle step), and then lifts the subject's `hold:mayor` itself.
 
 ## Wait on a person
 

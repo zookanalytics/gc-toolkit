@@ -152,8 +152,9 @@ mkdir -p "$TMP/bin" "$TMP/store/b" "$TMP/rig/assets/scripts" "$TMP/cwd"
 # CLOSE_REFUSED=<id> refuses that bead's close, forced or not; and
 # REFUSE_UPDATE_MATCH=<text> refuses an update whose arguments carry that text.
 # An appended note follows the notes before it on a line of its own, as bd
-# joins them, and a removed label goes only by its exact text, as bd removes it. A bead's comments are kept in
-# $STORE/b/<id>.comments.json, and each one added is logged.
+# joins them, and a removed label goes only by its exact text, as bd removes
+# it. A bead's comments are kept in $STORE/b/<id>.comments.json, and each one
+# added is logged.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 B="$STORE/b"
 row() { cat "$B/$1.json" 2>/dev/null; }
@@ -824,7 +825,8 @@ SENT=(--ruled yes --ruling "build the fix" --waiting-on tk-work)
 BRIEF="tk-work keeps what is typed in the dialog; check that a press outside it no longer drops the values"
 CLOSER_ARGS='["--on","mol-validate-close"]'
 briefs() { field "$1" notes | grep -c '## Close brief' || true; }
-# labelled <id> <label>... — the bead carries these labels; labels <id> reads them.
+# labelled <id> <label>... — the bead carries these labels.
+# labels <id> — the bead's labels, as a JSON array.
 labelled() { local id="$1"; shift; jq '.labels = $ARGS.positional' "$STORE/b/$id.json" --args "$@" > "$STORE/b/x" && mv "$STORE/b/x" "$STORE/b/$id.json"; }
 labels() { jq -c '.labels // []' "$STORE/b/$1.json" 2>/dev/null; }
 # latest <id> — the bead's latest close brief, its last `## Close brief (`
@@ -978,6 +980,7 @@ eq "$(field tk-g status)/$(field tk-conv status)" "closed/closed" "(CLOSER-HOLD-
 closer_case; labelled tk-sub hold:mayor
 SHOW_DOWN_SECOND=tk-sub run_signoff --conversation tk-conv --outcome "ruled — a fix is building" "${SENT[@]}" --close-brief "$BRIEF"
 eq "$RC" 1 "(CLOSER-HOLD-UNREAD) labels that do not read once the arm stands stop the sign-off"
+has "$OUT" "tk-sub's labels could not be read" "(CLOSER-HOLD-UNREAD) …saying the labels did not read"
 eq "$(labels tk-sub)/$(field tk-g status)/$(field tk-conv status)" '["hold:mayor"]/open/in_progress' "(CLOSER-HOLD-UNREAD) …with the hold on and every gate open"
 
 closer_case
