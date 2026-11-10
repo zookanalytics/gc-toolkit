@@ -6,8 +6,10 @@
 # renders nothing.
 # Verbs (full grammar and per-verb notes in usage(), `gc-helm --help`): the
 # write verbs open, engage, attach, react, takeaway, park, priority, place,
-# dismiss, handback, accept, and the read-only resolve and conversations.
-# engage and attach hand a terminal to the conversation form (helm_form). open, engage and react take a
+# dismiss, handback, accept, the read-only resolve and conversations, and po
+# and mechanik, which attach to the two seats the operator sits with. A bare
+# gc-helm, engage and attach hand a terminal to the conversation form
+# (helm_form), the bare one on its home page. open, engage and react take a
 # <subject> (a bead id, a PR number or URL, or a superseded id) and resolve it to
 # the live bead that owns the work by metadata and the graph, never a title; an
 # unresolvable or ambiguous reference is refused and nothing is filed.
@@ -15,7 +17,9 @@
 # via GC_HELM_OPEN_TOOL (open, engage, accept, dismiss — open's stderr/stdout
 # sentences are parsed by services/helm/internal/server, guarded by
 # open_parity_test.go), converse (takeaway, handback) and the proactive worker
-# (takeaway), operators by hand (park, priority, place).
+# (takeaway), operators by hand (park, priority, place), and helm-svc's
+# conversation form on the operator's terminal (conversations, open, engage,
+# and from its home page po and mechanik).
 # Exit codes: 0 ok, 2 usage, 3 environment (jq/gc missing, rigs
 # unenumerable, no city root or flock for Accept's lock — each failure names
 # its own operator move),
@@ -53,6 +57,9 @@ FIXTURE="${GC_HELM_FIXTURE:-}"              # test hook: <dir>/rigs.json replace
 usage() {
     cat >&2 <<'EOF'
 Usage:
+  gc-helm  on a terminal, the home page: the po, mechanik, starting a conversation and returning to one; without a terminal, this usage and exit 2
+  gc-helm po [--reason "<what the sitting is for>"]  open a sitting with the po and attach, whatever state its seat is in: a live sitting, or one its idle limit put to sleep, is attached to as it stands, and any other is started through the controller with what the sitting is for, then attached the moment it runs
+  gc-helm mechanik  attach to mechanik, waiting while the controller starts it
   gc-helm open  <bead-id> [--reason "..."] [--body "..."] [--allow-duplicate] [--if-subject <id>] [--conversation <id>] [--from <bead-id>] [--json]  file a conversation about the bead in the operator's queue, for the operator to engage; a second concern joins the bead's conversation already in the queue unless --allow-duplicate files a fresh one, which lands instead on a conversation in the queue whose whole ask is that concern; a conversation about an open PR, or a bead of one, holds the PR's merge until it closes; --if-subject files only while the reference still names that subject, and a reference that names another now, through a successor, a PR's anchor or a gate's waiter, files nothing (exit 4); --conversation completes the conversation an earlier open filed for the concern, by its id, wherever it stands, adding the reply onto the gate that did not land, and the hold on an open PR's merge only while the conversation waits in the queue, since a sitting that has taken it keeps or lifts that hold; one no longer open on the bead or holding another ask files nothing (exit 4); --from names the bead a gate was reached from, and a gate several open beads wait on files the conversation about that bead while it is one of them, while a gate that no longer holds that bead files nothing (exit 4); --json prints {subject,conversation,filed}, and names the conversation on every exit once it is filed
   gc-helm open  --new-subject --rig <name> [<question> | --reason "<question>"] [--json]  file a FRESH subject in the named rig for a topic that has no bead yet, the question unchanged in its description and its title derived from the question's opening, then its conversation in the queue; --json answers the subject, filed:false, the moment it is filed, and open's last answer is the one that counts, so a subject filed whose conversation is not is named for a re-run onto it
   gc-helm engage [<subject>] [--subject <id>] [--from <bead-id>] [--new-subject [--rig <name>]] [--model <variant>] [--skill <name>] [--reason "..." | --template <key>] [--no-input] [--no-attach]  hold a conversation about the bead in a converse sitting and attach: attach to its live sitting, or take its conversation from the queue, or file one, then spawn a sitting named for it. Pointed at a human gate it takes the one bead still waiting on the gate, or the --from bead when it is one of several waiting, and the conversation replies to the gate. On a terminal, with no --reason, --template or --skill, it opens the conversation form instead: subject, question, a new topic's rig, model and whether to attach on one screen, filled in from the command line, where --no-attach turns attaching off; --no-input keeps the flag-driven one-shot path. --skill seeds the sitting with any skill it carries as its lens on the subject (--skill review-arch is a conversation with the Architect). --new-subject files a FRESH subject bead in the --rig rig (the positional text, or --reason, is the question; its title is derived from the question's opening) and engages it in one gesture
@@ -170,6 +177,26 @@ conversation_title derives from its opening, and absent --reason or
 gc.reaction_owned=1 so the async first-reaction/proactive worker stands down
 rather than file a second conversation; engage files the one conversation
 itself.
+
+A bare gc-helm on a terminal opens the form on its home page, whose entries
+are the po, mechanik, starting a conversation and returning to one, and Esc on
+the start or the return screen goes back to it. The po and mechanik entries run
+`gc-helm po` and `gc-helm mechanik`, which hand the terminal to the seat's
+session, and the page leaves once the terminal comes back. po attaches to a
+live po sitting, and to one its idle limit put to sleep, which the attach wakes
+into its conversation. A po whose sitting is ending is waited on until it has
+stopped. Any other po, one whose last sitting ended or that has no session, is
+started through the controller by a nudge saying what the sitting is for, so
+the po takes its prompt as its first message, and po attaches the moment its
+session runs, reporting its state while it waits. An attach to a session that
+is not running starts it outside the controller, which brings up a po whose
+last sitting ended with no prompt, and a po a nudge wakes ends its sitting when
+no client is attached, so po attaches only a running session or a slept one,
+and attaches at once. mechanik attaches to mechanik's session once it runs,
+waiting while the controller starts it again. Neither waits on a city
+controller that is down, refusing instead; a wait stops at
+GC_HELM_ENGAGE_WAIT_TIMEOUT, and Ctrl-C stops it, writing nothing.
+
 dismiss ends the sitting. react files a proactive first-reaction bead via
 tools/gc-proactive.sh (its --reason is log-only operator intent). takeaway
 stamps gc.takeaway (+_at/+_by) in one update, and exits 4 before anything
@@ -541,15 +568,24 @@ SITTING_COMMENT_TOOL="${GC_SITTING_COMMENT_TOOL:-$SCRIPT_DIR/pr-sitting-comment.
 # overridable so a hermetic test can point it at a fixture.
 RUN_CANCEL_TOOL="${GC_RUN_CANCEL_TOOL:-$SCRIPT_DIR/run-cancel.sh}"
 # The longest engage waits, in seconds, for the reconciler to start the sitting
-# it spawned before attaching to it. The wait stops once the sitting reads
+# it spawned before attaching to it, and the longest po and mechanik wait for
+# the controller to start their seat. The wait stops once the session reads
 # active or has ended, so this bound is a backstop for a controller that has
-# stopped working the sitting, and it sits above the controller's own limits.
+# stopped working the session, and it sits above the controller's own limits.
 # Gas City rolls back a sitting it has not started 10 minutes after creating it
 # (pendingCreateNeverStartedTimeout), and one start runs for at most the city's
 # [session] startup_timeout (60s unless the city raises it). 900 clears the two
 # together. Overridable, so a hermetic test can reach the bound.
 ENGAGE_WAIT_TIMEOUT="${GC_HELM_ENGAGE_WAIT_TIMEOUT:-900}"
 case "$ENGAGE_WAIT_TIMEOUT" in ''|*[!0-9]*) ENGAGE_WAIT_TIMEOUT=900 ;; esac
+# engage_dur <seconds> — a wait as the operator reads it: 45s, 2m05s.
+engage_dur() {
+    if [ "$1" -lt 60 ]; then
+        printf '%ss' "$1"
+    else
+        printf '%sm%02ds' "$(($1 / 60))" "$(($1 % 60))"
+    fi
+}
 TAB=$(printf '\t')
 
 # Bust the retired bash board's gather cache so a straggler reader never
@@ -4694,14 +4730,6 @@ cmd_engage() {
             sleep 1
         done
     }
-    # engage_dur <seconds> — a wait as the operator reads it: 45s, 2m05s.
-    engage_dur() {
-        if [ "$1" -lt 60 ]; then
-            printf '%ss' "$1"
-        else
-            printf '%sm%02ds' "$(($1 / 60))" "$(($1 % 60))"
-        fi
-    }
     # engage_state_text <state> — a start_state read, as the verb phrase that
     # follows the sitting in a progress line.
     engage_state_text() {
@@ -5123,14 +5151,15 @@ cmd_engage() {
 # ── The conversation form ────────────────────────────────────────────
 # helm_form <verb> [<form-arg>...] — hand the terminal to the conversation form,
 # helm-svc's `form` command (services/helm/internal/form). engage runs it on a
-# terminal when the command line leaves the concern open, and attach runs it to
-# find a conversation to return to. The form reads and writes through this
-# script, at the path it is given, so what it shows and what it files are the
-# verbs' own: it reads `conversations`, saves with `open`, starts with `engage
-# --no-attach` and attaches with `engage`. GC_HELM_FORM_BIN names the binary,
-# which defaults to the one the helm-build order publishes under the city's
-# .gc/services/helm. With no binary there, the verb names the flag-driven form
-# of the same act and exits 3.
+# terminal when the command line leaves the concern open, attach runs it to
+# find a conversation to return to, and a bare gc-helm runs it on its home page.
+# The form reads and writes through this script, at the path it is given, so
+# what it shows and what it files are the verbs' own: it reads `conversations`,
+# saves with `open`, starts with `engage --no-attach`, attaches with `engage`,
+# and opens the seats with `po` and `mechanik`. GC_HELM_FORM_BIN names the
+# binary, which defaults to the one the helm-build order publishes under the
+# city's .gc/services/helm. With no binary there, the verb names the
+# flag-driven form of the same act and exits 3.
 helm_form() {
     _hf_verb="$1"; shift
     _hf_bin="${GC_HELM_FORM_BIN:-}"
@@ -5139,7 +5168,9 @@ helm_form() {
         [ -z "$_hf_root" ] || _hf_bin="$_hf_root/.gc/services/helm/bin/helm-svc"
     fi
     if [ -z "$_hf_bin" ] || [ ! -x "$_hf_bin" ]; then
-        echo "$PROG: $_hf_verb: the conversation form is helm-svc's, and no helm-svc binary is built${_hf_bin:+ at $_hf_bin}. Build it with \"\$(gc gc-toolkit scripts-dir)/gc-build.sh\" helm, or name everything on the command line: $PROG engage <subject> --reason \"<question>\" --no-input to start, $PROG attach <conversation> to return." >&2
+        _hf_seats=""
+        [ "$_hf_verb" != home ] || _hf_seats="$PROG po to open the po, $PROG mechanik to attach to mechanik, "
+        echo "$PROG: $_hf_verb: the conversation form is helm-svc's, and no helm-svc binary is built${_hf_bin:+ at $_hf_bin}. Build it with \"\$(gc gc-toolkit scripts-dir)/gc-build.sh\" helm, or name everything on the command line: $_hf_seats$PROG engage <subject> --reason \"<question>\" --no-input to start, $PROG attach <conversation> to return." >&2
         exit 3
     fi
     exec "$_hf_bin" form --helm "$SCRIPT_PATH" --models "$(engage_list_models | paste -s -d, - 2>/dev/null || true)" "$@"
@@ -5452,6 +5483,265 @@ cmd_attach() {
     exit 2
 }
 
+# ── The seats: po and mechanik ───────────────────────────────────────
+# The two seats the operator sits with, each opened in one step, each an entry
+# of the home page and each a command of its own. The po, the operator's
+# prioritization partner, is an on-demand named session: the operator opens a
+# sitting with it, an hour with no client attached puts it to sleep, and its
+# drain-ack ends the sitting. Mechanik, the operator's standing conversation,
+# is a named session the controller keeps running. A seat's session is found
+# in `gc session list --json` by its alias or its template.
+PO_SEAT="gc-toolkit.po"
+MECHANIK_SEAT="gc-toolkit.mechanik"
+
+# seat_row <seat> — the seat's open session in `gc session list --json`, as
+# "<id><TAB><state><TAB><reason>": its active session when it has one, else its
+# newest. reason is the session's lifecycle reason, idle on one its idle limit
+# put to sleep, which the list carries when the city's API serves the read and
+# leaves out of a local read. Prints nothing when no open session is the
+# seat's, and returns 1 when the list did not read.
+seat_row() {
+    gc session list --json 2>/dev/null | scrub | jq -er --arg s "$1" '
+        if type == "object" and ((.sessions // null) | type) == "array" then
+          [ .sessions[] | objects | select((.closed // false) != true)
+            | select((.alias // "") == $s or (.template // "") == $s) ] as $rows
+          | (first($rows[] | select((.state // "") == "active"))
+             // ($rows | sort_by(.created_at // "") | last))
+          | if . == null then ""
+            else [(.id // ""), (.state // ""), (.reason // "")] | map(tostring) | join("\t") end
+        else error("not a session list") end' 2>/dev/null
+}
+
+# seat_fields <row> — a seat_row line as SEAT_ID, SEAT_STATE and SEAT_REASON.
+seat_fields() {
+    SEAT_ID=$(printf '%s' "$1" | cut -f1)
+    SEAT_STATE=$(printf '%s' "$1" | cut -f2)
+    SEAT_REASON=$(printf '%s' "$1" | cut -f3)
+}
+
+# seat_state_text — SEAT_STATE and SEAT_REASON as the verb phrase that follows
+# the seat in a line the operator reads.
+seat_state_text() {
+    case "$SEAT_STATE" in
+        unlisted) printf 'has no session listed yet' ;;
+        unreadable) printf "could not be read from 'gc session list'" ;;
+        *) printf 'is %s%s' "$SEAT_STATE" "${SEAT_REASON:+ ($SEAT_REASON)}" ;;
+    esac
+}
+
+# seat_await <seat> <name> [<state>] — wait until the seat's session reads
+# active in `gc session list`, which it does only once its runtime runs, or,
+# given a state, until it reads that state no more. The wait reports itself on
+# stdout, so a slow start reads as progress and not as a hang: a line when it
+# opens, a line each time the state changes, and one every 30 seconds. A
+# session not listed yet, or a list that did not read, is waited through.
+# Returns 0 then, with SEAT_ID, SEAT_STATE and SEAT_REASON from the last row
+# read; 1 once ENGAGE_WAIT_TIMEOUT seconds pass first; and 2, waiting for
+# active, when the session reads failed-create, quarantined or suspended,
+# states the controller does not start it from. SEAT_WAITED is the seconds
+# waited as of the last read.
+seat_await() {
+    _sa_t0=$(date +%s); _sa_told=0; _sa_shown=""; _sa_tick=30
+    SEAT_WAITED=0
+    while :; do
+        if _sa_row=$(seat_row "$1"); then
+            seat_fields "$_sa_row"
+            [ -n "$_sa_row" ] || SEAT_STATE=unlisted
+        else
+            SEAT_ID=""; SEAT_STATE=unreadable; SEAT_REASON=""
+        fi
+        SEAT_WAITED=$(( $(date +%s) - _sa_t0 ))
+        if [ -n "${3:-}" ]; then
+            case "$SEAT_STATE" in "$3"|unreadable) ;; *) return 0 ;; esac
+        else
+            case "$SEAT_STATE" in
+                active) return 0 ;;
+                failed-create|quarantined|suspended) return 2 ;;
+            esac
+        fi
+        [ "$SEAT_WAITED" -lt "$ENGAGE_WAIT_TIMEOUT" ] || return 1
+        if [ "$_sa_told" = 0 ]; then
+            if [ -n "${3:-}" ]; then
+                printf '  waiting for %s to stop (it %s); Ctrl-C stops the wait\n' "$2" "$(seat_state_text)"
+            else
+                printf '  waiting for the controller to start %s (it %s), then attaching; Ctrl-C stops the wait\n' "$2" "$(seat_state_text)"
+            fi
+            _sa_told=1
+        elif [ "$SEAT_STATE" != unreadable ] && [ "$SEAT_STATE" != "$_sa_shown" ]; then
+            printf '  %s %s, after %s\n' "$2" "$(seat_state_text)" "$(engage_dur "$SEAT_WAITED")"
+        elif [ "$SEAT_WAITED" -ge "$_sa_tick" ]; then
+            printf '  still waiting after %s: %s %s\n' "$(engage_dur "$SEAT_WAITED")" "$2" "$(seat_state_text)"
+        fi
+        [ "$SEAT_STATE" = unreadable ] || _sa_shown="$SEAT_STATE"
+        while [ "$_sa_tick" -le "$SEAT_WAITED" ]; do _sa_tick=$((_sa_tick + 30)); done
+        sleep 1
+    done
+}
+
+# seat_wait <seat> <name> <stopped> [<state>] — seat_await under the INT, TERM
+# and HUP trap, HUP being the terminal going away under the wait. Stopping the
+# wait writes nothing: the handler prints <stopped>, what goes on without the
+# wait, and exits. It disarms itself, so a second Ctrl-C ends the verb at once.
+# Leaves the wait's answer in SEAT_RC.
+seat_wait() {
+    SEAT_RC=0; SEAT_STOPPED="$3"
+    trap 'seat_wait_interrupted 130' INT
+    trap 'seat_wait_interrupted 143' TERM
+    trap 'seat_wait_interrupted 129' HUP
+    seat_await "$1" "$2" "${4:-}" || SEAT_RC=$?
+    trap - INT TERM HUP
+}
+seat_wait_interrupted() {
+    trap - INT TERM HUP
+    echo "$PROG: stopped waiting after $(engage_dur "$SEAT_WAITED"). $SEAT_STOPPED" >&2
+    exit "$1"
+}
+
+# seat_controller_check <verb> <name> — refuse, exit 4, when the city's
+# controller is not running, since only it starts a seat's session. One that
+# cannot be told running or not is not refused (city_controller_state).
+seat_controller_check() {
+    enumerate_rigs
+    city_controller_state
+    if [ "$CONTROLLER_RUNNING" = "false" ]; then
+        echo "$PROG: $1: the city controller did not answer ($CONTROLLER_SEEN), so nothing would start $2. Check 'gc status' and 'gc supervisor status', then re-run: $PROG $1" >&2
+        exit 4
+    fi
+}
+
+# seat_attach <verb> <name> — attach the terminal to the session SEAT_ID names,
+# and once it comes back, name how to return. A failed attach exits 4.
+seat_attach() {
+    _sat_rc=0
+    gc session attach "$SEAT_ID" || _sat_rc=$?
+    if [ "$_sat_rc" -ne 0 ]; then
+        echo "$PROG: $1: could not attach to $2's session $SEAT_ID (gc session attach exited $_sat_rc). Re-run: $PROG $1" >&2
+        exit 4
+    fi
+    printf '\nReturn to %s with: %s %s\n' "$2" "$PROG" "$1"
+}
+
+# ── Verb: po ─────────────────────────────────────────────────────────
+# Open a sitting with the po from whatever state its seat is in, and attach
+# (docs/human-engagement.md, "A po sitting"). A live sitting is attached to as
+# it stands, and so is one its idle limit put to sleep, which the attach wakes
+# into its conversation. A seat whose sitting is ending is waited on until it
+# has stopped. Every other seat, one whose last sitting ended, one the
+# controller is starting, or one with no session at all, is started through
+# the controller by a nudge saying what the sitting is for: the nudge asks the
+# controller to start the seat, the start hands the po its prompt as its first
+# message, and the nudge reaches it after that. The verb then waits for the
+# start, however long it takes, and attaches the moment the session runs.
+#
+# Each wait closes a timing edge. `gc session attach` on a session that is not
+# running starts its runtime itself. On a slept session that resumes its
+# conversation, and Gas City hands the agent its prompt again. On a seat whose
+# last sitting ended it starts a new conversation that only Gas City's
+# session-start prime hook could prime, and the hook primes only a session
+# whose record reads active, awake, creating or start_pending, so that sitting
+# would come up with no prompt. And a po a nudge wakes reads whether a client
+# is attached, and with none ends its sitting, so the attach follows the start
+# at once. Upstream Gas City's attach asks the controller to start a session
+# that is not running; once the city's gc carries that, the start here can
+# reduce to the attach.
+cmd_po() {
+    _po_reason=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --reason) shift; [ $# -gt 0 ] || { echo "$PROG: po: --reason requires a value" >&2; exit 2; }
+                      _po_reason="$1"; shift ;;
+            -h|--help) usage; exit 0 ;;
+            -*) echo "$PROG: po: unknown flag '$1'" >&2; exit 2 ;;
+            *) echo "$PROG: po takes no argument; say what the sitting is for with --reason \"...\"" >&2; exit 2 ;;
+        esac
+    done
+    if ! _po_row=$(seat_row "$PO_SEAT"); then
+        echo "$PROG: po: could not read 'gc session list', so the state of the po's seat is unknown. Nothing was started; re-run once it answers: $PROG po" >&2
+        exit 4
+    fi
+    seat_fields "$_po_row"
+
+    # A nudge to a session still running reaches it in place, and a draining po
+    # would end with it unread and no start asked for, so the drain finishes
+    # first.
+    if [ "$SEAT_STATE" = draining ]; then
+        seat_controller_check po "the po"
+        printf 'The po is ending its last sitting (session %s); the new one starts once it has stopped.\n' "$SEAT_ID"
+        seat_wait "$PO_SEAT" "the po" "Its last sitting goes on ending; open a new one once it has: $PROG po" draining
+        if [ "$SEAT_RC" -ne 0 ]; then
+            echo "$PROG: po: the po's last sitting has not stopped after $(engage_dur "$ENGAGE_WAIT_TIMEOUT") (its state in 'gc session list': $SEAT_STATE), so no new sitting was started. Re-run once it has: $PROG po" >&2
+            exit 4
+        fi
+    fi
+
+    _po_open=""
+    case "$SEAT_STATE" in
+        active) _po_open="✓ the po's sitting is live (session $SEAT_ID) — attaching to it" ;;
+        asleep) [ "$SEAT_REASON" != idle ] || _po_open="✓ the po's sitting is asleep (session $SEAT_ID) — attaching wakes it into its conversation" ;;
+    esac
+    if [ -n "$_po_open" ]; then
+        printf '%s\n' "$_po_open"
+        [ -z "$_po_reason" ] || printf '  The sitting is open already, so what it is for was not sent: say it there.\n'
+        seat_attach po "the po"
+        return 0
+    fi
+
+    seat_controller_check po "the po"
+    _po_msg="The operator is opening a sitting with gc-helm po and attaches once you start."
+    [ -z "$_po_reason" ] || _po_msg="$_po_msg It is for: $_po_reason"
+    _po_nudge_rc=0
+    _po_nudge_out=$(gc session nudge "$PO_SEAT" "$_po_msg" 2>&1) || _po_nudge_rc=$?
+    if [ "$_po_nudge_rc" -ne 0 ]; then
+        echo "$PROG: po: gc session nudge exited $_po_nudge_rc, so the controller was not asked to start the po and nothing was attached: $(printf '%s' "$_po_nudge_out" | scrub | tail -c 300). Re-run: $PROG po" >&2
+        exit 4
+    fi
+    printf '✓ asked the controller to start the po%s\n' "${_po_reason:+ for: $_po_reason}"
+    seat_wait "$PO_SEAT" "the po" "The controller goes on starting the po, and a po that starts with nobody attached ends its sitting; open one again with: $PROG po"
+    case "$SEAT_RC" in
+        0) seat_attach po "the po" ;;
+        2) echo "$PROG: po: the po's session $SEAT_ID $(seat_state_text), a state the controller does not start it from, so nothing was attached. 'gc session list' says why; once it can start, re-run: $PROG po" >&2
+           exit 4 ;;
+        *) echo "$PROG: po: the controller has not started the po after $(engage_dur "$ENGAGE_WAIT_TIMEOUT") (it $(seat_state_text)), so it was not attached; an attach now would bring it up without its prompt. Re-run once the controller answers: $PROG po" >&2
+           exit 4 ;;
+    esac
+}
+
+# ── Verb: mechanik ───────────────────────────────────────────────────
+# Attach to mechanik, the operator's standing conversation. The controller
+# keeps its session running, so the verb attaches to it once it reads active,
+# and while it does not, waits for the controller to start it again: an attach
+# to a session that is not running starts its runtime itself, outside the
+# controller, as cmd_po says.
+cmd_mechanik() {
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -h|--help) usage; exit 0 ;;
+            -*) echo "$PROG: mechanik: unknown flag '$1'" >&2; exit 2 ;;
+            *) echo "$PROG: mechanik takes no argument" >&2; exit 2 ;;
+        esac
+    done
+    if ! _mk_row=$(seat_row "$MECHANIK_SEAT"); then
+        echo "$PROG: mechanik: could not read 'gc session list', so whether mechanik runs is unknown. Nothing was attached; re-run once it answers: $PROG mechanik" >&2
+        exit 4
+    fi
+    seat_fields "$_mk_row"
+    [ -n "$_mk_row" ] || SEAT_STATE=unlisted
+    if [ "$SEAT_STATE" != active ]; then
+        seat_controller_check mechanik mechanik
+        printf 'Mechanik %s, and the controller keeps it running, so the attach waits for it to start.\n' "$(seat_state_text)"
+        seat_wait "$MECHANIK_SEAT" mechanik "The controller goes on starting mechanik; attach once it runs: $PROG mechanik"
+        case "$SEAT_RC" in
+            0) ;;
+            2) echo "$PROG: mechanik: mechanik's session $SEAT_ID $(seat_state_text), a state the controller does not start it from, so nothing was attached. 'gc session list' says why; once it can start, re-run: $PROG mechanik" >&2
+               exit 4 ;;
+            *) echo "$PROG: mechanik: the controller has not started mechanik after $(engage_dur "$ENGAGE_WAIT_TIMEOUT") (it $(seat_state_text)), so it was not attached. Re-run once it runs: $PROG mechanik" >&2
+               exit 4 ;;
+        esac
+    fi
+    printf '✓ attaching to mechanik (session %s)\n' "$SEAT_ID"
+    seat_attach mechanik mechanik
+}
+
 # ── Dispatch ─────────────────────────────────────────────────────────
 case "${1:-}" in
     open)          shift; cmd_open "$@" ;;
@@ -5467,7 +5757,15 @@ case "${1:-}" in
     accept)        shift; cmd_accept "$@" ;;
     conversations) shift; cmd_conversations "$@" ;;
     attach)        shift; cmd_attach "$@" ;;
+    po)            shift; cmd_po "$@" ;;
+    mechanik)      shift; cmd_mechanik "$@" ;;
     board)         echo "$PROG: the board moved to 'helm-svc board' (services/helm)" >&2; exit 2 ;;
     -h|--help|help) usage; exit 0 ;;
-    *)             echo "$PROG: unknown verb '${1:-}' (try: open, engage, attach, conversations, react, accept, takeaway, park, priority, place, dismiss, handback, resolve, help; the board is 'helm-svc board')" >&2; usage; exit 2 ;;
+    # A bare gc-helm on a terminal opens the home page. Without a terminal it
+    # names the verbs and exits 2, so no script blocks on a page.
+    "")            if [ -t 0 ] || [ -n "${GC_HELM_ASSUME_TTY:-}" ]; then
+                       helm_form home --home
+                   fi
+                   echo "$PROG: name a verb (try: po, mechanik, engage, attach, conversations, open, react, accept, takeaway, park, priority, place, dismiss, handback, resolve, help); on a terminal, a bare $PROG opens the home page" >&2; usage; exit 2 ;;
+    *)             echo "$PROG: unknown verb '${1:-}' (try: po, mechanik, open, engage, attach, conversations, react, accept, takeaway, park, priority, place, dismiss, handback, resolve, help; the board is 'helm-svc board')" >&2; usage; exit 2 ;;
 esac
