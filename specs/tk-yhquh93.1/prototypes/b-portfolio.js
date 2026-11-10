@@ -24,16 +24,19 @@
     view.area = h.get('area');
     view.item = h.get('item');
   }
+  // go renders at once rather than on hashchange, which fires later, so a
+  // second key pressed before it still reads where the first one went.
   function go(area, item) {
     const h = new URLSearchParams();
     if (area) h.set('area', area);
     if (item) h.set('item', item);
     location.hash = h.toString();
+    render();
   }
 
   function glance() {
     const s = model.stats;
-    const p1 = model.tiles.filter((t) => t.owed && t.kind !== 'epic' && t.priority === 1).length;
+    const p1 = model.tiles.filter((t) => t.owed && t.priority === 1).length;
     return `<div class="glance">
       <div class="g you"><small>Needs you</small><b class="num">${s.needsYou}</b><span>in ${s.asks} asks · ${p1} at P1</span></div>
       <div class="g talks" data-talks tabindex="0" style="cursor:pointer"><small>With you</small><b class="num">${s.withYou}</b><span>in session · ${s.waitingForYou} conversations wait for you</span></div>
@@ -202,8 +205,10 @@
   }
 
   let shownArea = undefined;
+  let renderedHash = null;
   function render() {
     readHash();
+    renderedHash = location.hash;
     const a = view.area && findArea(view.area);
     $('main').innerHTML = a ? focus(a) : overview();
     if (shownArea !== view.area) $('main').scrollTop = 0;
@@ -223,6 +228,7 @@
   let nextIdx = -1;
   function nextForYou() {
     const order = model.asks.flatMap((ask) => ask.rows);
+    if (!order.length) return;
     nextIdx = (nextIdx + 1) % order.length;
     openAsk(order[nextIdx].id);
   }
@@ -237,7 +243,7 @@
     if (!el) return;
     if (el.dataset.talks !== undefined) {
       view.talks = true;
-      return go(null, null) || render();
+      return go(null, null);
     }
     if (el.dataset.closeTalks !== undefined) {
       view.talks = false;
@@ -245,7 +251,7 @@
     }
     if (el.dataset.home !== undefined) {
       view.talks = false;
-      return go(null, null) || render();
+      return go(null, null);
     }
     if (el.dataset.closeItem !== undefined) return go(view.area, null);
     if (el.dataset.fold) {
@@ -305,6 +311,7 @@
     placeCursor();
     all[cursor] && all[cursor].scrollIntoView({ block: 'nearest' });
   });
-  window.addEventListener('hashchange', render);
+  // The back and forward buttons change the hash without go.
+  window.addEventListener('hashchange', () => location.hash !== renderedHash && render());
   render();
 })();

@@ -39,8 +39,10 @@
   const areaName = (a) => (a.loose ? `Not in an epic · ${a.rig}` : a.title);
 
   // The actions are today's write routes: accept on a row that can be
-  // accepted; Discuss (engage) and Dismiss on any item, as the drill panel
-  // offers them; the pull request is a link. Rejoin attaches the terminal.
+  // accepted; file a conversation (open), Discuss (engage) and Dismiss on any
+  // item, as the drill panel offers them; the pull request is a link. Rejoin
+  // attaches the terminal.
+  const CONVERSATION_ACTIONS = ['File a conversation', 'Discuss', 'Dismiss'];
   function primaryAction(t) {
     if (t.verb === 'approve') return `Open PR #${t.pr_number}`;
     if (t.acceptable) return 'Accept';
@@ -48,10 +50,8 @@
     return 'Discuss';
   }
   function secondaryActions(t) {
-    if (t.attention.key === 'live') return [];
-    if (t.verb === 'approve') return ['Discuss'];
-    if (t.acceptable) return ['Discuss', 'Dismiss'];
-    return ['Dismiss'];
+    const first = primaryAction(t);
+    return CONVERSATION_ACTIONS.filter((a) => a !== first);
   }
 
   function terminalText(t, live) {
@@ -83,8 +83,7 @@
     return [
       `no session holds ${id} right now`,
       '',
-      'Going live starts a conversation about it,',
-      'or attaches to the session working it.',
+      'Discuss starts a conversation about it.',
     ].join('\n');
   }
 

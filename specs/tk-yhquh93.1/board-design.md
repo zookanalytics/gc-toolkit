@@ -190,8 +190,10 @@ its reference for layout and behavior, and this section is its specification.
 ### The queue
 
 - It lists every owed item, most important first (priority, then the longest
-  owed). This follows the hypothesis of "What needs you": "If the board shows
-  everything but makes what really needs you stand out, most important first".
+  owed). An epic the operator owes an answer on is one of them, so its own ask
+  sits in the queue beside its children's and opens like any item. This
+  follows the hypothesis of "What needs you": "If the board shows everything
+  but makes what really needs you stand out, most important first".
 - Rows sharing a `cluster_key` fold into one entry that names the count, how
   many are P1, the oldest wait and how many areas they span. A click shows
   each.
@@ -220,10 +222,10 @@ its reference for layout and behavior, and this section is its specification.
   accepted, its facts (state, how long it has waited, attention, pull request
   and what holds it, progress for an epic, what is next, id, rig and kind), its
   conversations, and the terminal.
-- The actions are today's, unchanged: Accept on an item that can be accepted,
-  Discuss and Dismiss on any item as the drill panel offers them today, and a
-  link to the pull request. A blocker that landed has no one-click route of its
-  own: Discuss opens the conversation that rules it.
+- The actions are today's, unchanged: Accept on an item that can be accepted;
+  file a conversation, Discuss and Dismiss on any item, as the drill panel
+  offers them today; and a link to the pull request. A blocker that landed has
+  no one-click route of its own: Discuss opens the conversation that rules it.
 - The terminal follows the selected item. It rests as a peek and goes live on a
   click. A conversation's terminal attaches to its sitting's session, and any
   other item's attaches to the session the supervisor names as working it.

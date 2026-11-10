@@ -288,6 +288,7 @@
   };
   const fitAll = () => fly(fitTarget(all, 1));
   function next() {
+    if (!asks.length) return;
     nextIdx = (nextIdx + 1) % asks.length;
     document.querySelectorAll('.j.on').forEach((el) => el.classList.remove('on'));
     const j = document.querySelector(`[data-jump="${nextIdx}"]`);

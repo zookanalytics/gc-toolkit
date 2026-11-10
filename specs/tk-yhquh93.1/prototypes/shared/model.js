@@ -178,9 +178,9 @@
     top.forEach((a) => setDepth(a, 0));
     const loose = [...looseByRig.values()].sort((x, y) => x.rig.localeCompare(y.rig));
 
-    // The asks: every owed row, most important first, then oldest. Rows that
-    // share a cluster_key fold into one entry.
-    const owed = tiles.filter((t) => t.owed && t.kind !== 'epic');
+    // The asks: every owed row, an epic's own ask included, most important
+    // first, then oldest. Rows that share a cluster_key fold into one entry.
+    const owed = tiles.filter((t) => t.owed);
     const byImportance = (x, y) => (x.priority ?? 4) - (y.priority ?? 4) || y.owedMs - x.owedMs;
     owed.sort(byImportance);
     const asks = [];
@@ -203,7 +203,6 @@
       a.priority = a.lead.priority ?? 4;
       a.topCount = a.rows.filter((r) => (r.priority ?? 4) === a.priority).length;
     }
-    // Epic-level asks (an epic parked for the operator) stay on their area.
     const sittings = board.sittings || [];
     const stats = {
       needsYou: owed.length,
