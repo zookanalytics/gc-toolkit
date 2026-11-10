@@ -96,17 +96,18 @@ the status passes, and the projection keeps it on only while the city reads the
 PR approved. Each push the pack makes onto a PR's branch publishes the head
 under the same lock: when the city's status at the commit it will push reads
 success, the projection posts pending there first, and once git answers, the
-projection runs there again. A push whose report never came is settled from
-git's own check of the commit the push read. The next holder of the lock reads
-the branch, and while the branch holds a commit the new head descends from, it
-pushes that head as a fast-forward, after which the earlier push can no longer
-land. The publication's record of what it moves is how that holder learns of
-such a push, and it sits beside the lock. Gas City's operation journal records
-the requests a session receives (`OpsConfig` in `docs/reference/config.md`), and
-no command records an entry in it (`gc event emit` in `docs/reference/cli.md`),
-so a pack has no journal of its own writes to keep the record in. The warrant
-*The city's merge status* records it. `blocker-holder.sh`'s new class composes
-core's gate sweep: a gate it resolves is held by an automated actor.
+projection runs there and at the commit the branch held. A push whose report
+never came is settled from git's own check of the commit the push read. The next
+holder of the lock reads the branch, and while the branch holds a commit the new
+head descends from, it pushes that head as a fast-forward, after which the
+earlier push can no longer land. The publication's record of what it moves is
+how that holder learns of such a push, and it sits beside the lock. Gas City's
+operation journal records the requests a session receives (`OpsConfig` in
+`docs/reference/config.md`), and no command records an entry in it
+(`gc event emit` in `docs/reference/cli.md`), so a pack has no journal of its
+own writes to keep the record in. The warrant *The city's merge status* records
+it. `blocker-holder.sh`'s new class composes core's gate sweep: a gate it
+resolves is held by an automated actor.
 
 ## The bead's wait for its PR's merge, and its close (unit 3)
 
