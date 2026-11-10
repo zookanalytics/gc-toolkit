@@ -130,6 +130,7 @@ type Model struct {
 
 	// How the form leaves the terminal.
 	attaching bool // an attach has taken or will take the terminal, so no other is run
+	left      bool // the form has left by its own path, so the note is what it says
 
 	// The return list's selection is a conversation, so a refresh that re-sorts
 	// the list leaves it on the conversation the operator picked.
@@ -600,6 +601,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.note = strings.TrimSpace(fmt.Sprintf("The attach did not run: %v\n%s", msg.err, m.note))
 		}
+		m.left = true
 		return m, tea.Quit
 	case tea.PasteMsg:
 		return m, m.typeInto(msg)
@@ -1048,6 +1050,7 @@ func (m *Model) quit() tea.Cmd {
 	} else {
 		m.note = m.keepUnsaved()
 	}
+	m.left = true
 	return tea.Quit
 }
 
@@ -1069,15 +1072,36 @@ func (m *Model) keepUnsaved() string {
 	return m.kept
 }
 
-// leaveNow leaves at once, on a second Ctrl+C while a save or a start runs.
-// What that run did is unknown, so the note says so and keeps the question.
+// leaveNow leaves at once while a save or a start runs: on a second Ctrl+C, or
+// once something else has ended the program (Leave). What that run did is
+// unknown, so the note says so and keeps the question.
 func (m *Model) leaveNow() tea.Cmd {
 	if m.saved != nil {
 		m.note = m.savedNote()
 	} else {
-		m.note = m.keepDraft("You left while your question was being saved, so whether it was filed is unknown: gc-helm.sh conversations lists the open conversations.")
+		m.note = m.keepDraft("The form closed while your question was being saved, so whether it was filed is unknown: gc-helm.sh conversations lists the open conversations.")
 	}
+	m.left = true
 	return tea.Quit
+}
+
+// Leave is what the form says once its program has returned, whatever ended
+// it. A form that left by its own path made its note as it left, and that note
+// stands. Something else can end the program first: bubbletea turns an
+// interrupt or a termination into a message of its own that never reaches
+// Update, and it stops when its input or the terminal fails. A form ended that
+// way leaves here as leaveNow does while a save or a start runs, and as quit
+// does otherwise, so a question it did not save is kept in a file. Call it once
+// Run has returned, so no Update runs beside it.
+func (m *Model) Leave() string {
+	if !m.left {
+		if m.saving || m.starting {
+			m.leaveNow()
+		} else {
+			m.quit()
+		}
+	}
+	return m.note
 }
 
 func (m *Model) savedNote() string {
@@ -1092,11 +1116,11 @@ func (m *Model) savedNote() string {
 	state := "its sitting is starting"
 	switch {
 	case m.saving:
-		state = "you left while it was being saved again, so whether that save completed is unknown, and no sitting was started"
+		state = "the form closed while it was being saved again, so whether that save completed is unknown, and no sitting was started"
 	case m.saveErr != "":
 		state = "its save did not complete (" + strings.TrimSuffix(m.saveErr, ".") + "), so no sitting was started; it waits in your queue"
 	case m.starting:
-		state = "you left while its sitting was being started, so whether it started is unknown"
+		state = "the form closed while its sitting was being started, so whether it started is unknown"
 	case m.startErr != "":
 		state = "no sitting started (" + m.startErr + "); it waits in your queue"
 	}

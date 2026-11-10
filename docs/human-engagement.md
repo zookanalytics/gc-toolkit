@@ -374,7 +374,12 @@ its whole ask lands on that conversation. Leaving while the save or the start
 still runs waits until it lands,
 because a verb the form leaves behind dies at its next line of output, and a save
 cut off there can leave a new subject without its conversation. A second Ctrl+C
-leaves at once, and the form then says what it does not know. A save that fails
+leaves at once, and the form then says what it does not know. A form that
+something else ends, such as an interrupt, a termination or a terminal that
+fails, leaves as a second Ctrl+C does while a save or a start runs, and as Esc
+does otherwise, so it keeps a question it did not save. A hangup, as when the
+terminal's window closes, ends the form before it can keep anything.
+A save that fails
 leaves the question in the form and reads the subject again, so a subject that
 names another bead now is on screen before the next Ctrl+S can file there. A new
 subject filed whose conversation was not becomes the subject of the next save,

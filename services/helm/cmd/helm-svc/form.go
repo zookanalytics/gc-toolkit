@@ -89,15 +89,25 @@ func runForm(args []string, stdout, stderr io.Writer) int {
 		Return:   *ret,
 		DraftDir: draftDir(),
 	})
-	if _, err := tea.NewProgram(m).Run(); err != nil {
+	return runProgram(tea.NewProgram(m), m, stdout, stderr)
+}
+
+// runProgram runs p, the program over the form m, and then prints what the form
+// says once it has left, which Leave gives whatever ended the program: on stderr
+// after the program's error when it failed, as an interrupt fails it, and on
+// stdout otherwise, as when a termination quits it.
+func runProgram(p *tea.Program, m *form.Model, stdout, stderr io.Writer) int {
+	_, err := p.Run()
+	note := m.Leave()
+	if err != nil {
 		fmt.Fprintf(stderr, "helm-svc form: %v\n", err)
-		if n := m.Note(); n != "" {
-			fmt.Fprintln(stderr, n)
+		if note != "" {
+			fmt.Fprintln(stderr, note)
 		}
 		return 1
 	}
-	if n := m.Note(); n != "" {
-		fmt.Fprintln(stdout, n)
+	if note != "" {
+		fmt.Fprintln(stdout, note)
 	}
 	return 0
 }

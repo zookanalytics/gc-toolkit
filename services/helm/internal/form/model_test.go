@@ -322,8 +322,8 @@ func TestSavedIsSaidBeforeTheStartAndTheSittingIsAttachedOnceItStarts(t *testing
 		t.Fatalf("Enter after the sitting started attached again: %v", f.attaches)
 	}
 	_, last := m.Update(attachedMsg{})
-	if !isQuit(last) || m.Note() != "" {
-		t.Fatalf("once the attach came back: left %v, note %q", isQuit(last), m.Note())
+	if !isQuit(last) || m.Note() != "" || m.Leave() != "" {
+		t.Fatalf("once the attach came back: left %v, note %q, then %q", isQuit(last), m.Note(), m.Leave())
 	}
 }
 
@@ -1002,8 +1002,14 @@ func TestASecondCtrlCLeavesAtOnceAndSaysTheSaveIsUnknown(t *testing.T) {
 	if !isQuit(cmd) {
 		t.Fatalf("the second Ctrl+C did not leave")
 	}
-	if !strings.Contains(m.Note(), "whether it was filed is unknown") {
-		t.Fatalf("note = %q", m.Note())
+	note := m.Note()
+	if !strings.Contains(note, "whether it was filed is unknown") {
+		t.Fatalf("note = %q", note)
+	}
+	// The program ends once the form has left, and what the form says then is
+	// what it said as it left.
+	if again := m.Leave(); again != note {
+		t.Fatalf("once the program ended the note was %q, not %q", again, note)
 	}
 	if files, _ := filepath.Glob(filepath.Join(dir, "engage-draft-*.txt")); len(files) != 1 {
 		t.Fatalf("draft files %v", files)
