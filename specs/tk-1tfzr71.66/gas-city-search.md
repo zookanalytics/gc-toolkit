@@ -44,25 +44,34 @@ it, even when the push's outcome never reached the writer that sent it.
   in `cmd/bd/gate.go`). It holds a bead until a merge, never a merge until a
   bead.
 - **GitHub.** Rulesets require approving reviews, resolved threads and status
-  checks ([Available rules for rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets)).
+  checks ([Available rules for
+  rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets)).
   A required check can be a commit status, and with no `integration_id` any
-  account with write access can post it ([Repository rules](https://docs.github.com/en/rest/repos/rules)).
-  A required check counts only on the latest commit ([Troubleshooting required
-  status checks](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks)).
+  account with write access can post it ([Repository
+  rules](https://docs.github.com/en/rest/repos/rules)). A required check counts
+  only on the latest commit ([Troubleshooting required status
+  checks](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks)).
   A commit status belongs to the repository and the commit, every PR at that
   commit shows it, and the latest status in a context counts, with no
-  compare-and-set, so the latest post wins ([Commit
-  statuses](https://docs.github.com/en/rest/commits/statuses)). GitHub lists
-  a repository's open PRs, each with its head commit
+  compare-and-set, so the latest post wins. The create takes a state, a target
+  URL, a description and a context, with no condition or idempotency key
+  ([Commit statuses](https://docs.github.com/en/rest/commits/statuses)). GitHub
+  terminates a request that it takes more than ten seconds to process, reserves
+  the right to change that window, and does not say whether a terminated request
+  took effect ([Troubleshooting the REST
+  API](https://docs.github.com/en/rest/using-the-rest-api/troubleshooting-the-rest-api),
+  read on 2026-11-10). So a post whose answer never came can still be created
+  after a later one, and no read shows that a post not yet created never will
+  be. GitHub lists a repository's open PRs, each with its head commit
   (`GET /repos/{owner}/{repo}/pulls?state=open`,
   [Pulls](https://docs.github.com/en/rest/pulls/pulls)). Its list of the PRs
   associated with a commit returns only the merged one for a commit on the
   default branch (`GET /repos/{owner}/{repo}/commits/{commit_sha}/pulls`,
-  [Commits](https://docs.github.com/en/rest/commits/commits)), so it cannot
-  name every open PR at a head.
-  Auto-merge merges once every requirement passes, and turns off only when
-  someone without write access pushes or the base branch changes, so a review
-  that arrives after it is on leaves it on ([Automatically merging a pull
+  [Commits](https://docs.github.com/en/rest/commits/commits)), so it cannot name
+  every open PR at a head. Auto-merge merges once every requirement passes, and
+  turns off only when someone without write access pushes or the base branch
+  changes, so a review that arrives after it is on leaves it on ([Automatically
+  merging a pull
   request](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/automatically-merging-a-pull-request)).
   A review that requests changes from an account with write access holds the
   merge until its author approves or someone with write access dismisses it
@@ -83,27 +92,30 @@ it, even when the push's outcome never reached the writer that sent it.
 
 What unit 2 composes: GitHub's required status check and auto-merge, driven by
 the pack's one definition of what holds a PR (`prstatus`), which takes the
-anchor's waits from the store's own blocked set through the `waits` package,
-the one `gctk bead holds` answers from. The gap the primitives leave is the
-city's waits and its reading of the reviews and comments, which no rule reads.
-A commit status carries the waits and that reading. It passes last, once every other requirement is
-met and no feedback on the PR is newer than the anchor's watermarks, so a
-review the intake counts is read before the merge, even one that arrives after
-auto-merge is on. One status
-covers every open PR at its commit, and a `flock` per repository serializes the
-posts, because the latest post wins. Auto-merge makes the merge GitHub's once
-the status passes, and the projection keeps it on only while the city reads the
-PR approved. Each push the pack makes onto a PR's branch publishes the head
-under the same lock: when the city's status at the commit it will push reads
-success, the projection posts pending there first, and once git answers, the
-projection runs there and at the commit the branch held. A push whose report
-never came is settled from git's own check of the commit the push read. The next
-holder of the lock reads the branch, and while the branch holds a commit the new
-head descends from, it pushes that head as a fast-forward, after which the
-earlier push cannot land while the branch stays off the commit it read. The
-publication's record of what it moves is how that holder learns of such a push,
-and it sits beside the lock. Gas City's operation journal records the requests a
-session receives (`OpsConfig` in `docs/reference/config.md`), and no command
+anchor's waits from the store's own blocked set through the `waits` package, the
+one `gctk bead holds` answers from. The gap the primitives leave is the city's
+waits and its reading of the reviews and comments, which no rule reads. A commit
+status carries the waits and that reading. It passes last, once every other
+requirement is met and no feedback on the PR is newer than the anchor's
+watermarks, so a review the intake counts is read before the merge, even one
+that arrives after auto-merge is on. One status covers every open PR at its
+commit, and a `flock` per repository serializes the posts, because the latest
+post wins. Auto-merge makes the merge GitHub's once the status passes, and the
+projection keeps it on only while the city reads the PR approved. Each push the
+pack makes onto a PR's branch publishes the head under the same lock: when the
+city's status at the commit it will push reads success, the projection posts
+pending there first, and once git answers, the projection runs there and at the
+commit the branch held. A push whose report never came is settled from git's own
+check of the commit the push read. The next holder of the lock reads the branch,
+and while the branch holds a commit the new head descends from, it pushes that
+head as a fast-forward, after which the earlier push cannot land while the
+branch stays off the commit it read. The publication's record of what it moves
+is how that holder learns of such a push, and it sits beside the lock. A status
+post whose answer never came has a record there too, and the next holder waits
+until the post's time limit and GitHub's ten seconds have passed before it
+reads, then projects at that commit again, because no condition on the post and
+no read can settle it sooner. Gas City's operation journal records the requests
+a session receives (`OpsConfig` in `docs/reference/config.md`), and no command
 records an entry of a pack's own in it. The command that records an event a pack
 names, `gc event emit`, writes the city's event log best effort, and the event
 bus does not acknowledge that the event persisted (`docs/reference/cli.md`). So
@@ -236,6 +248,9 @@ flow the design keeps.
   whose status passes. The publication's pending post then goes.
 - git's protocol or GitHub answers whether a push it received can still land.
   The publication's record and its settling then go.
+- GitHub's status create takes an expected prior state, or GitHub answers
+  whether a post it received can still be created. The record of an unanswered
+  post and its wait then go.
 - A ruleset can require a status check of a pull request's merge alone, and
   leave pushes to the branch free. The city's bypass of the integration
   branches' rules then goes.
