@@ -115,7 +115,8 @@ stance names:
 
   When one of them is the pattern this change adds to, use the token at the end
   of its title. Otherwise name the pattern by what its instances repeat. The
-  closing bracket ends the name, so no pattern's token matches another's title.
+  closing bracket ends the name, so no pattern's token matches the title of
+  another that starts in the same file.
 
 ## What blocks
 
