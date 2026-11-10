@@ -1,12 +1,14 @@
 // Package form is the terminal conversation form: the screen `gc-helm.sh
-// engage` and `gc-helm.sh attach` hand a terminal to. One screen holds the
-// subject, a multiline question, a new topic's rig, the model and whether to
-// attach, while the subject's details, its open conversations and the city's
-// rigs load in the background. Submitting saves the question as a conversation
-// and starts its sitting, reporting each of the two as it lands, and once the
-// sitting has started attaches to it, or with attaching off leaves it to
-// prepare. The return list shows the open conversations by topic and readiness
-// and attaches to the one picked.
+// engage`, `gc-helm.sh attach` and a bare `gc-helm.sh` hand a terminal to. One
+// screen holds the subject, a multiline question, a new topic's rig, the model
+// and whether to attach, while the subject's details, its open conversations
+// and the city's rigs load in the background. Submitting saves the question as
+// a conversation and starts its sitting, reporting each of the two as it lands,
+// and once the sitting has started attaches to it, or with attaching off leaves
+// it to prepare. The return list shows the open conversations by topic and
+// readiness and attaches to the one picked. The home page, which a bare
+// `gc-helm.sh` opens on, offers the po, mechanik, starting a conversation and
+// returning to one.
 //
 // The form writes nothing itself. Every read and write is a gc-helm.sh verb
 // ([Script]), so what the form shows and files is what the command line shows
@@ -172,6 +174,9 @@ type Helm interface {
 	// conversation's sitting, holding it in a new sitting first when it has
 	// none: on model, or on engage's default when model is empty.
 	AttachCommand(conversation, model string) *exec.Cmd
+	// SeatCommand is the command that opens the seat, po or mechanik, and
+	// attaches the terminal to its session.
+	SeatCommand(seat string) *exec.Cmd
 }
 
 // Script runs gc-helm.sh at Path.
@@ -349,4 +354,11 @@ func (s Script) AttachCommand(conversation, model string) *exec.Cmd {
 		args = append(args, "--model", model)
 	}
 	return exec.Command("sh", args...)
+}
+
+// SeatCommand is `<seat>`, the verb that opens the seat, po or mechanik: it
+// starts the seat's session through the controller when it must, waits for it
+// to run, and attaches.
+func (s Script) SeatCommand(seat string) *exec.Cmd {
+	return exec.Command("sh", s.Path, seat)
 }

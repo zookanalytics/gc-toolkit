@@ -44,8 +44,9 @@ helm-svc probe              check — can THIS binary read the city's bead store
                                     See *Readability check*.
 helm-svc form --helm <gc-helm.sh>
                             run — the terminal conversation form that
-                                    gc-helm.sh engage and attach open. See *The
-                                    conversation form*.
+                                    gc-helm.sh engage and attach open, and a
+                                    bare gc-helm.sh opens on its home page. See
+                                    *The conversation form*.
 ```
 
 As the sidecar:
@@ -254,6 +255,7 @@ on every tick.
 ```
 helm-svc form --helm <gc-helm.sh> --models opus,fable,codex [--subject <ref> [--from <bead>] | --new-subject [--rig <name>] [--question <text>]] [--model <variant>] [--no-attach]
 helm-svc form --helm <gc-helm.sh> --return     # the conversations to return to
+helm-svc form --helm <gc-helm.sh> --home       # the home page
 ```
 
 The screen `gc-helm.sh engage` and `gc-helm.sh attach` hand a terminal to,
@@ -266,8 +268,11 @@ started attaches with `gc-helm.sh engage <conversation>`, passing `--model` with
 the model its start ran on. `--no-attach`, which engage passes on from its own
 command line, opens the form with attaching off, and the form then leaves once
 the sitting has started. `--from`, which engage passes on too, names the bead a
-`--subject` gate was reached from. It writes nothing itself, so what it files is what
-the command line files. [human-engagement.md](../../docs/human-engagement.md#engage)
+`--subject` gate was reached from. `--home`, which a bare `gc-helm.sh` on a
+terminal passes, opens the home page, whose entries run `gc-helm.sh po` and
+`gc-helm.sh mechanik`, each of which hands the terminal to the seat's session,
+and open the start and the return screens, from which Esc goes back to it. It
+writes nothing itself, so what it files is what the command line files. [human-engagement.md](../../docs/human-engagement.md#engage)
 says what it shows and when it saves. `internal/form/testdata/helm-fixture.sh`
 answers those verbs from fixture data, so the form can be run with no city
 behind it.

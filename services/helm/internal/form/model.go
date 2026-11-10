@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"sort"
 	"strings"
 	"time"
@@ -24,6 +25,7 @@ type Options struct {
 	Models   []string // the converse variants, the default first
 	NoAttach bool     // leave once the sitting starts, rather than attach to it
 	Return   bool     // open on the return list
+	Home     bool     // open on the home page, which the start and return screens go back to
 	DraftDir string   // where the question of a cancelled form is kept
 	Debounce time.Duration
 	Refresh  time.Duration // how often the return list reads the city again
@@ -36,7 +38,23 @@ const (
 	composeScreen screen = iota
 	progressScreen
 	returnScreen
+	homeScreen
 )
+
+// The home page's entries, in the order it shows them.
+const (
+	poEntry = iota
+	mechanikEntry
+	startEntry
+	returnEntry
+)
+
+var homeLabels = [...]string{
+	poEntry:       "The po",
+	mechanikEntry: "Mechanik",
+	startEntry:    "Start a conversation",
+	returnEntry:   "Return to a conversation",
+}
 
 type field int
 
@@ -129,8 +147,11 @@ type Model struct {
 	leaving  bool // the operator left while a save or a start ran, so the form leaves once it lands
 
 	// How the form leaves the terminal.
-	attaching bool // an attach has taken or will take the terminal, so no other is run
-	left      bool // the form has left by its own path, so the note is what it says
+	attaching bool   // an attach has taken or will take the terminal, so no other is run
+	handFail  string // what the note leads with when the command the terminal went to fails
+	left      bool   // the form has left by its own path, so the note is what it says
+
+	homeAt int // the home page's entry under the cursor
 
 	// The return list's selection is a conversation, so a refresh that re-sorts
 	// the list leaves it on the conversation the operator picked.
@@ -189,6 +210,9 @@ func New(ctx context.Context, helm Helm, opt Options) *Model {
 	if opt.Return {
 		m.scr = returnScreen
 	}
+	if opt.Home {
+		m.scr = homeScreen
+	}
 	if opt.Subject != "" || opt.Rig != "" {
 		m.setFocus(questionField)
 	} else {
@@ -203,8 +227,12 @@ func (m *Model) Note() string { return m.note }
 
 // Init starts the background reads: the city's conversations and rigs, and the
 // subject the command line named. The return list reads the city again while
-// it is on screen.
+// it is on screen. The home page reads nothing: each entry reads what it needs
+// as it opens.
 func (m *Model) Init() tea.Cmd {
+	if m.scr == homeScreen {
+		return nil
+	}
 	cmds := []tea.Cmd{m.loadCity()}
 	if m.ref() != "" {
 		cmds = append(cmds, m.lookup(m.subjectKey()))
@@ -596,10 +624,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case attachedMsg:
-		// The note already says where attach kept a question the form had not
-		// saved.
+		// The note already says where the hand-off kept a question the form had
+		// not saved.
 		if msg.err != nil {
-			m.note = strings.TrimSpace(fmt.Sprintf("The attach did not run: %v\n%s", msg.err, m.note))
+			m.note = strings.TrimSpace(fmt.Sprintf("%s: %v\n%s", m.handFail, msg.err, m.note))
 		}
 		m.left = true
 		return m, tea.Quit
@@ -650,10 +678,12 @@ func (m *Model) key(k tea.KeyPressMsg) tea.Cmd {
 		return m.progressKey(s)
 	case returnScreen:
 		return m.returnKey(s)
+	case homeScreen:
+		return m.homeKey(s)
 	}
 	switch s {
 	case "esc":
-		return m.quit()
+		return m.back()
 	case "ctrl+s":
 		return m.submit()
 	case "ctrl+r":
@@ -1010,28 +1040,94 @@ func (m *Model) returnKey(s string) tea.Cmd {
 	case "ctrl+r", "ctrl+n":
 		m.scr = composeScreen
 	case "esc", "q":
+		return m.back()
+	}
+	return nil
+}
+
+func (m *Model) homeKey(s string) tea.Cmd {
+	switch s {
+	case "up":
+		if m.homeAt > 0 {
+			m.homeAt--
+		}
+	case "down":
+		if m.homeAt < len(homeLabels)-1 {
+			m.homeAt++
+		}
+	case "enter":
+		return m.openEntry()
+	case "esc", "q":
 		return m.quit()
 	}
 	return nil
 }
 
+// openEntry opens the home page's entry under the cursor. A seat hands the
+// terminal to its verb, which opens the seat's session and attaches to it, and
+// the form leaves once the terminal comes back, as it does after an attach to
+// a conversation. Starting and returning are the form's own screens, which
+// read the city as they open, as Ctrl+R does between them.
+func (m *Model) openEntry() tea.Cmd {
+	switch m.homeAt {
+	case poEntry:
+		return m.openSeat("po", "The po did not open")
+	case mechanikEntry:
+		return m.openSeat("mechanik", "Mechanik did not open")
+	case startEntry:
+		m.scr = composeScreen
+		return m.loadCity()
+	case returnEntry:
+		m.scr = returnScreen
+		return tea.Batch(m.loadCity(), m.refreshCity())
+	}
+	return nil
+}
+
+// back leaves the start or the return screen: for the home page when the form
+// opened on it, and otherwise out of the form, as quit does.
+func (m *Model) back() tea.Cmd {
+	if !m.opt.Home {
+		return m.quit()
+	}
+	m.scr = homeScreen
+	return nil
+}
+
 // attachTo hands the terminal to conv's sitting, and the form leaves once it
-// comes back. A question the form has not saved is kept first, so neither the
-// attach nor an end of the form while the sitting holds the terminal loses it.
-// model is what a sitting held anew runs on. An attach after a start passes the
-// model the start ran on, so a start that failed or a sitting that ended is held
-// again on the model the screen showed. The return list shows no model and
-// passes none, so engage's default holds it. One attach runs. bubbletea runs an
-// attach queued behind another once that one comes back, before the form has
-// left, so neither an Enter that lands before the first attach takes the
-// terminal nor a start that lands before the form leaves attaches again.
+// comes back (handOff). model is what a sitting held anew runs on. An attach
+// after a start passes the model the start ran on, so a start that failed or a
+// sitting that ended is held again on the model the screen showed. The return
+// list shows no model and passes none, so engage's default holds it. One
+// attach runs. bubbletea runs an attach queued behind another once that one
+// comes back, before the form has left, so neither an Enter that lands before
+// the first attach takes the terminal nor a start that lands before the form
+// leaves attaches again.
 func (m *Model) attachTo(conv, model string) tea.Cmd {
 	if m.attaching {
 		return nil
 	}
-	m.attaching = true
+	return m.handOff(m.helm.AttachCommand(conv, model), "The attach did not run")
+}
+
+// openSeat hands the terminal to the seat's verb, po or mechanik, and the form
+// leaves once it comes back (handOff). One hand-off runs, as attachTo says.
+// fail leads the note when the verb fails, after it has said why.
+func (m *Model) openSeat(seat, fail string) tea.Cmd {
+	if m.attaching {
+		return nil
+	}
+	return m.handOff(m.helm.SeatCommand(seat), fail)
+}
+
+// handOff gives the terminal to cmd, and the form leaves once it comes back. A
+// question the form has not saved is kept first, so neither the hand-off nor an
+// end of the form while cmd holds the terminal loses it. fail leads the note
+// when cmd fails.
+func (m *Model) handOff(cmd *exec.Cmd, fail string) tea.Cmd {
+	m.attaching, m.handFail = true, fail
 	m.note = m.keepUnsaved()
-	return tea.ExecProcess(m.helm.AttachCommand(conv, model), func(err error) tea.Msg { return attachedMsg{err: err} })
+	return tea.ExecProcess(cmd, func(err error) tea.Msg { return attachedMsg{err: err} })
 }
 
 // quit leaves the form. While a save or a start runs, the form leaves once it
@@ -1202,6 +1298,8 @@ func (m *Model) View() tea.View {
 		s = m.progressView()
 	case returnScreen:
 		s = m.returnView()
+	case homeScreen:
+		s = m.homeView()
 	default:
 		s = m.composeView()
 	}
@@ -1354,8 +1452,12 @@ func (m *Model) composeView() string {
 	if !m.attach {
 		act = "Ctrl+S save, start and leave"
 	}
+	esc := "Esc cancel"
+	if m.opt.Home {
+		esc = "Esc back"
+	}
 	head.WriteString(labelStyle.Render("Start a conversation"))
-	head.WriteString(hintStyle.Render("   " + act + " · Tab next field · Ctrl+R return to a conversation · Esc cancel"))
+	head.WriteString(hintStyle.Render("   " + act + " · Tab next field · Ctrl+R return to a conversation · " + esc))
 	head.WriteString("\n\n")
 	head.WriteString(m.label(subjectField, "Subject ") + "  " + m.subject.View() + "\n")
 	if m.from != "" {
@@ -1518,8 +1620,12 @@ func (m *Model) progressView() string {
 
 func (m *Model) returnView() string {
 	var b strings.Builder
+	esc := "Esc leaves"
+	if m.opt.Home {
+		esc = "Esc back"
+	}
 	b.WriteString(labelStyle.Render("Return to a conversation"))
-	b.WriteString(hintStyle.Render("   ↑/↓ choose · Enter attaches · r refreshes · Ctrl+R start one · Esc leaves") + "\n\n")
+	b.WriteString(hintStyle.Render("   ↑/↓ choose · Enter attaches · r refreshes · Ctrl+R start one · "+esc) + "\n\n")
 	if m.city == nil {
 		if m.cityErr != "" {
 			b.WriteString(badStyle.Render("The conversations did not read: "+m.cityErr) + "\n")
@@ -1578,4 +1684,20 @@ func (m *Model) returnView() string {
 	}
 	b.WriteString(under)
 	return b.String()
+}
+
+// homeView is the home page: one line for each entry, the one under the cursor
+// marked.
+func (m *Model) homeView() string {
+	var b strings.Builder
+	b.WriteString(labelStyle.Render("gc-helm"))
+	b.WriteString(hintStyle.Render("   ↑/↓ choose · Enter opens · Esc leaves") + "\n\n")
+	for i, label := range homeLabels {
+		cur := "  "
+		if i == m.homeAt {
+			cur = "› "
+		}
+		b.WriteString(cur + label + "\n")
+	}
+	return m.wrap(b.String())
 }

@@ -169,6 +169,17 @@ func TestStartAndAttachUseEngage(t *testing.T) {
 	}
 }
 
+// A seat opens through its own verb, po or mechanik, which attaches the
+// terminal once the seat's session runs.
+func TestASeatOpensThroughItsVerb(t *testing.T) {
+	s := Script{Path: "/pack/gc-helm.sh"}
+	for _, seat := range []string{"po", "mechanik"} {
+		if got := strings.Join(s.SeatCommand(seat).Args, " "); got != "sh /pack/gc-helm.sh "+seat {
+			t.Fatalf("%s = %q", seat, got)
+		}
+	}
+}
+
 func TestASaveAgainNamesTheConversationItCompletes(t *testing.T) {
 	s, dir := stubHelm(t, `{"subject":"tk-s","conversation":"tk-c","filed":true}`, "", 0)
 	if _, err := s.Save(context.Background(), SaveRequest{Ref: "tk-g", Subject: "tk-s", Question: "q", Conversation: "tk-c"}); err != nil {

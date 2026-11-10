@@ -4,11 +4,12 @@
 # (docs/review-demo.md):
 #
 #   helm-svc form --helm services/helm/internal/form/testdata/helm-fixture.sh \
-#       --models opus,fable,codex [--subject tk-demo1 | --rig gc-toolkit | --return]
+#       --models opus,fable,codex [--subject tk-demo1 | --rig gc-toolkit | --return | --home]
 #
 # It answers the verbs the form calls: `conversations [<ref>] --json`, `open`,
 # `engage <conversation> --no-input --no-attach` and the attach,
-# `engage <conversation> --no-input`. A save and a start each take a second, as
+# `engage <conversation> --no-input`, and the home page's seats, `po` and
+# `mechanik`. A save and a start each take a second, as
 # the real verbs take a few, so each acknowledgement can be seen landing. It
 # writes nothing.
 case "${1:-} ${2:-}" in
@@ -75,6 +76,10 @@ JSON
       *" --no-attach "*) echo "✓ converse-opus on existing conversation $2 for tk-demo1" ;;
       *) echo "(the fixture attaches nothing: $2)" ;;
     esac
+    ;;
+  "po "|"mechanik ")
+    sleep 1
+    echo "(the fixture opens no seat: $1)"
     ;;
   *)
     echo "helm-fixture: no answer for: $*" >&2

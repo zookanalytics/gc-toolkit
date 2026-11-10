@@ -35,6 +35,9 @@ type fakeHelm struct {
 	attaches []string
 	// attachArgs is the argv each attach would run, as Script builds it.
 	attachArgs []string
+	seats      []string
+	// seatArgs is the argv each seat's verb would run, as Script builds it.
+	seatArgs []string
 }
 
 // About answers a reference from about, and one reached from a bead from the
@@ -62,6 +65,11 @@ func (f *fakeHelm) Start(_ context.Context, conv, model string) error {
 func (f *fakeHelm) AttachCommand(conv, model string) *exec.Cmd {
 	f.attaches = append(f.attaches, conv)
 	f.attachArgs = append(f.attachArgs, strings.Join(Script{Path: "gc-helm.sh"}.AttachCommand(conv, model).Args[1:], " "))
+	return exec.Command("true")
+}
+func (f *fakeHelm) SeatCommand(seat string) *exec.Cmd {
+	f.seats = append(f.seats, seat)
+	f.seatArgs = append(f.seatArgs, strings.Join(Script{Path: "gc-helm.sh"}.SeatCommand(seat).Args[1:], " "))
 	return exec.Command("true")
 }
 

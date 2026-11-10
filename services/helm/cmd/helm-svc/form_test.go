@@ -69,3 +69,15 @@ func TestAFormSomethingElseEndsPrintsWhereItKeptTheQuestion(t *testing.T) {
 		})
 	}
 }
+
+// The form opens on one screen, so --return and --home together are refused
+// before anything opens.
+func TestTheFormOpensOnOneScreen(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := runForm([]string{"--helm", "gc-helm.sh", "--return", "--home"}, &stdout, &stderr); code != 2 {
+		t.Fatalf("--return with --home exited %d", code)
+	}
+	if !strings.Contains(stderr.String(), "pass one") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
