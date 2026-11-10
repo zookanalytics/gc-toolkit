@@ -107,8 +107,8 @@ city's status at the commit it will push reads success, the projection posts
 pending there first, and once git answers, the projection runs there and at the
 commit the branch held. A push whose report never came is settled from git's own
 check of the commit the push read. The next holder of the lock reads the branch,
-and while the branch holds a commit the new head descends from, it pushes that
-head as a fast-forward from the rig's repository, where git's garbage
+and while the branch holds the commit the push read, it pushes that head as a
+fast-forward from the rig's repository, where git's garbage
 collection keeps the commit while a ref or a reflog reaches it. The earlier
 push then cannot land while the branch stays off the commit it read. The
 publication's record of what it moves is how that holder learns of such a push,
