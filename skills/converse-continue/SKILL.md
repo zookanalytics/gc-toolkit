@@ -68,6 +68,7 @@ Until it exits 0, do not tell the operator the ruling is in place:
   # when the ruling reaches an open PR, add --rework, --no-rework or --retire <kind> (step 7)
   # when it takes the subject's recommendation, --answer its gate and add --accept (step 7)
   # --waiting-on <bead> for each bead this turn routed work into, or --no-wait
+  # --close-brief "<what that work's landing settles here, and what to check once it has>" beside a --waiting-on on work (step 7)
 ```
 An answer that reached the gate first stands, and the writer prints it: tell
 the operator. It also prints a line for each open PR the ruling leaves standing
