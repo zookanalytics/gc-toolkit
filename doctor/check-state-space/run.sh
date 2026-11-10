@@ -74,6 +74,10 @@ HEALER_RE='^(check_set_healed|merge_result_healed|reopened_not_landed|anchorless
 # before bd's own edges carried it: a disposed bead closes with a duplicates or
 # supersedes edge, so a live bead still carrying one is a close that never
 # landed. gc.supersedes, the successor's inert back-pointer, is not among them.
+# placement is intake's retired marker on new work it holds for placement.
+# Intake holds that work with Gas City's hold:mayor label, and the po's queue
+# reads only the label, so a live bead carrying the marker and no hold waits in
+# no queue.
 RETIRED_KEYS=(
     stall_root escalation_raised_by escalation.recurrences escalation.recurrence_last
     gc.hold_demand gc.pr_visit_summary gc.pr_visit_actions gc.outcome_reason
@@ -82,8 +86,9 @@ RETIRED_KEYS=(
     finding.visit finding.ruling_visit
     gc.superseded_by gc.superseded_by_store superseded_by superseded_by_store
     duplicate_of duplicate_of_store
+    placement
 )
-retired_consequence() { # <key> <value>
+retired_consequence() { # <key> <value> <bead>
     local inert="so nothing writes or reads the key; it holds nothing back, and a live bead carrying it means a retired writer stamped it. Find that writer, then clear the key"
     case "$1" in
         stall_root) printf '%s' "a sitting that read it may have filed its hold's demand (a human gate that blocks $2) and takeaway on $2, and no sign-off reads the key back to discharge them. Discharge that by hand, then clear the key" ;;
@@ -103,6 +108,8 @@ retired_consequence() { # <key> <value>
             printf '%s' "a duplicate closes at once with a duplicates edge, and no sweep closes a parked one, so its close is owed. Close it with bead-rehome.sh --successor $2 --kind duplicate, or clear the key" ;;
         gc.superseded_by_store|superseded_by_store|duplicate_of_store)
             printf '%s' "the store half of a retired successor key, read beside it and nowhere else. Settle the bead's successor key first, then clear this one" ;;
+        placement)
+            printf '%s' "intake holds new work with Gas City's hold:mayor label and nothing writes this marker, so a retired writer stamped it. The po's queue reads only the label, so a bead carrying the marker and no hold:mayor waits in no queue. Unless a parent, a route, an arm, an assignee or a live run shows it placed, hold it with gc bd set-state $3 hold=mayor --reason \"<why it waits for placement>\", then clear the key" ;;
         *) printf '%s' "nothing reads it. Clear the key" ;;
     esac
 }
@@ -278,7 +285,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         if printf '%s\n' "$rrows" > "$ENUM_TMP/retired"; then
             while IFS=$'\037' read -r id st rk val; do
                 [ -n "$id" ] || continue
-                errors+=("$label bead $id (status=$st): carries the retired key $rk=\"$val\" — lifecycle/lifecycle.toml retired it with every reader: $(retired_consequence "$rk" "$val"): gc bd update $id --unset-metadata $rk")
+                errors+=("$label bead $id (status=$st): carries the retired key $rk=\"$val\" — lifecycle/lifecycle.toml retired it with every reader: $(retired_consequence "$rk" "$val" "$id"): gc bd update $id --unset-metadata $rk")
             done < "$ENUM_TMP/retired"
         else
             warnings+=("$label: could not stage the retired-key enumeration (temp-file write failed — e.g. /tmp under disk pressure) — the retired-key check did NOT run for this store")
