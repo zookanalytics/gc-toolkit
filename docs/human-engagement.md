@@ -339,16 +339,16 @@ stands in for the current one, and no result changes a rig or a conversation
 the operator chose. A conversation chosen from the list is started as it is,
 and a question typed beside it is not sent into it.
 
-**The variants are the converse templates.** Each `agents/converse-*` template
-is named `converse-<provider>-<model>`, and the name after `converse-` is what
-`--model` takes and what the form shows capitalized: `claude-opus` (the
-default), `claude-fable`, `codex-sol` and `codex-astra` read Claude-Opus,
-Claude-Fable, Codex-Sol and Codex-Astra. engage withdraws `converse-opus`,
-`converse-fable` and `converse-codex`: it offers none of them, and each stays
-configured only for the sittings already open on it. Gas City's reconciler
-wakes no session whose template is not configured, drains one that holds no
-work, and closes one whose process is gone, releasing the conversation it
-held, so a template goes only once no open sitting runs on it.
+**The variants are the converse templates engage offers.** Each is an
+`agents/converse-*` template named `converse-<provider>-<model>`, and the name
+after `converse-` is what `--model` takes and what the form shows capitalized:
+`claude-opus` (the default), `claude-fable`, `codex-sol` and `codex-astra` read
+Claude-Opus, Claude-Fable, Codex-Sol and Codex-Astra. engage withdraws
+`converse-opus`, `converse-fable` and `converse-codex`: it offers none of them,
+and each stays configured only for the sittings already open on it. Gas City's
+reconciler wakes no session whose template is not configured, drains one that
+holds no work, and closes one whose process is gone, releasing the conversation
+it held, so a template goes only once no open sitting runs on it.
 
 Ctrl+S saves the question only once the destination is settled. `open` files
 it as a new conversation (`--allow-duplicate` and `--if-subject` on a subject,

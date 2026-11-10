@@ -83,10 +83,11 @@ as `gc-build.sh` and `tools/lint.sh` do:
 Then capture it with `--cwd <worktree>/services/helm`:
 `terminal --command "<workspace>/helm-svc form --helm
 internal/form/testdata/helm-fixture.sh --models
-claude-opus,claude-fable,codex-astra,codex-sol --subject tk-demo1"` for a subject, `--rig gc-toolkit` for a new topic, `--subject 1446`
-for a PR two rigs record, `--subject tk-demo10` for a gate two beads wait on,
-which the form reads from tk-demo1 once it is chosen among what holds tk-demo1,
-or `--return` for the conversations to return to. A
+claude-opus,claude-fable,codex-astra,codex-sol --subject tk-demo1"` for a
+subject, `--rig gc-toolkit` for a new topic, `--subject 1446` for a PR two rigs
+record, `--subject tk-demo10` for a gate two beads wait on, which the form reads
+from tk-demo1 once it is chosen among what holds tk-demo1, or `--return` for the
+conversations to return to. A
 terminal capture shows the form's first frame, drawn before the fixture answers
 its reads a second later. What those reads fill in, such as tk-demo1's
 conversations and what holds it, a gate and the PR's own review threads, and a
