@@ -20,7 +20,7 @@ read every review and comment on the PR, the approval that releases it
 included, before GitHub can merge. One verdict stands for every PR at a commit,
 and two posts of it must not leave the older reading standing. A push that
 moves a PR onto a commit must not let it merge on a verdict that did not count
-it.
+it, even when the push's outcome never reached the writer that sent it.
 
 - **Gas City.** Nothing gates a merge on approval or on required checks. The PR
   monitor classes an open PR from its draft flag, its merge state and its failed
@@ -74,6 +74,12 @@ it.
   ([design](design.md), section 3). For a commit the repository does not hold,
   the status read answers 200 with no statuses, as it does for a held commit
   with none (read on 2026-11-09).
+- **git.** A push names, for each ref, the commit the client read there, and
+  the server updates the ref only while it still holds that commit, then
+  reports `ok` or `ng` for it
+  ([gitprotocol-pack](https://git-scm.com/docs/gitprotocol-pack)). The protocol
+  has no request that asks about an update sent earlier, so a push whose report
+  never came leaves nothing to read but the ref itself.
 
 What unit 2 composes: GitHub's required status check and auto-merge, driven by
 the pack's one definition of what holds a PR (`prstatus`), which takes the
@@ -89,10 +95,18 @@ posts, because the latest post wins. Auto-merge makes the merge GitHub's once
 the status passes, and the projection keeps it on only while the city reads the
 PR approved. Each push the pack makes onto a PR's branch publishes the head
 under the same lock: when the city's status at the commit it will push reads
-success, the projection posts pending there first, and the projection runs
-there again after the push. The warrant *The city's merge status* records it.
-`blocker-holder.sh`'s new class composes core's gate sweep: a gate it resolves
-is held by an automated actor.
+success, the projection posts pending there first, and once git answers, the
+projection runs there again. A push whose report never came is settled from
+git's own check of the commit the push read. The next holder of the lock reads
+the branch, and while the branch holds a commit the new head descends from, it
+pushes that head as a fast-forward, after which the earlier push can no longer
+land. The publication's record of what it moves is how that holder learns of
+such a push, and it sits beside the lock. Gas City's operation journal records
+the requests a session receives (`OpsConfig` in `docs/reference/config.md`), and
+no command records an entry in it (`gc event emit` in `docs/reference/cli.md`),
+so a pack has no journal of its own writes to keep the record in. The warrant
+*The city's merge status* records it. `blocker-holder.sh`'s new class composes
+core's gate sweep: a gate it resolves is held by an automated actor.
 
 ## The bead's wait for its PR's merge, and its close (unit 3)
 
@@ -216,6 +230,8 @@ flow the design keeps.
   lock then moves onto it.
 - GitHub scopes a status to a pull request, or refuses a push onto a commit
   whose status passes. The publication's pending post then goes.
+- git's protocol or GitHub answers whether a push it received can still land.
+  The publication's record and its settling then go.
 - A ruleset can require a status check of a pull request's merge alone, and
   leave pushes to the branch free. The city's bypass of the integration
   branches' rules then goes.
