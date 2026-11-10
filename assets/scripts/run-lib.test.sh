@@ -248,8 +248,7 @@ doctor/check-root-advancing/run.sh
 doctor/check-po-queue-only/run.sh
 tools/gc-proactive.sh
 assets/scripts/blocker-holder.sh
-assets/scripts/store-only-exit.sh
-assets/scripts/converse-signoff.sh"
+assets/scripts/store-only-exit.sh"
 while IFS= read -r r; do
     [ -n "$r" ] || continue
     f="$ROOT/$r"

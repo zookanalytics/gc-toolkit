@@ -141,9 +141,14 @@ until the arm's retry cap asked a person.
 - The check is `mol-validate-close`, which already validates a bead held on the
   landing that ends its job, closes it with `gc.work_outcome=no-op`, and puts any
   doubt to the operator through a human gate.
-- A closer already sent is read from the run that works the subject, through
-  the pack's one reader of that link (`run-lib.sh`), so the sign-off arms no
-  second closer while a live `mol-validate-close` run works the subject.
+- A closer already sent is left to Gas City's own refusal of a second launch.
+  The sign-off reads no run, so a ruling made while a `mol-validate-close` run
+  works the subject arms the closer again, and Gas City refuses that launch
+  while the run is live. The deferred-dispatch pass reads the refusal's exit 3
+  as a malformed sling and counts it toward its retry cap, so an arm still
+  refused at the cap is put to a person. The operator's ruling in conversation
+  tk-5s13g3h dropped the sign-off's read of the subject's runs and leaves the
+  fix for that misread to the pass's rewrite (tk-1tfzr71.16).
 - The rig is the subject's own, named by the pack's one read of the rig map
   (`rig-map.sh`), since the closer's pool and the deferred-dispatch pass are per
   rig. The city's own store runs neither, so the sign-off refuses a subject there

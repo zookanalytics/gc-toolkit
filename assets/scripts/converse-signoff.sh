@@ -252,9 +252,6 @@ show_row() {
   gc bd show "$1" --json 2>/dev/null | scrub \
     | jq -ce --arg id "$1" 'if type == "array" then (.[0] | select((.id // "") == $id)) else error("unread") end' 2>/dev/null
 }
-# closer_bd <bd args...> — bd in the store of the rig that runs the subject's
-# validating closer, the reader run_lib reads the subject's runs through.
-closer_bd() { gc bd "$@" --db "$CLOSER_PATH/.beads"; }
 
 # pack_script <name> — <name> beside this script, in the copy of the pack that
 # is running. Every script this sign-off runs is found through it. Non-zero,
@@ -302,11 +299,6 @@ pr_label() {
 # How the pack reads the host and repository of a PR's url. Exposes pr_coords.
 # shellcheck source=review-dismissal.sh
 . "$HERE/review-dismissal.sh" || die "cannot source review-dismissal.sh from $HERE"
-# The one definition of the runs that work a bead. Exposes run_lib, which tells
-# whether the subject's validating closer is already running. GC_RUN_LIB points
-# a suite at run-lib.stub.sh.
-# shellcheck source=run-lib.sh
-. "${GC_RUN_LIB:-$HERE/run-lib.sh}" || die "cannot source run-lib.sh from $HERE"
 # The one definition of a dispatch path, the route or the arm that sends a bead
 # on once nothing holds it. Exposes $DISPATCH_PATH_JQ.
 # shellcheck source=dispatch-path.sh
@@ -632,8 +624,10 @@ fi
 # arm of another dispatch, as dispatch-path.sh defines one), or is at a status
 # other than open, which is set deliberately. Then no closer is armed. The
 # closer's own arm is no other dispatch path. A closer an earlier attempt armed
-# is this one, and so is one its arm has sent whose run has not ended, so
-# neither is armed a second time.
+# is this one, so a re-run arms it no second time. Once the arm has sent the
+# closer, the arm is gone, so a ruling made while the closer's run works the
+# subject arms it again. Gas City refuses that second launch while the run is
+# live.
 CLOSER_WAITS=""
 CLOSER_RIG=""
 CLOSER_PATH=""
@@ -688,18 +682,8 @@ if [ -n "$CLOSER_WAITS" ]; then
     CLOSER_PATH=$(printf '%s' "$CLOSER_ROW" | jq -r '.path // "" | tostring')
     [ -n "$CLOSER_RIG" ] && [ -n "$CLOSER_PATH" ] \
       || stopped "the rig map names no rig and path for the prefix ${SUBJECT%%-*}, so the rig whose pool runs $SUBJECT's validating closer could not be resolved; nothing was written"
-    # Once the arm has sent the closer, the arm is gone and the closer's run
-    # works the subject until its root closes. Gas City pours no second run of
-    # a formula over a bead that a live run of it works, so an arm made then
-    # would fail at each pass until its retry cap asked a person.
-    if printf '%s' "$SUBJECT_ROW" | jq -e '((.metadata // {})["gc.dispatch_when_ready_args"] // "") | tostring | contains("mol-validate-close")' >/dev/null 2>&1; then
-      CLOSER_ARMED="already armed"
-    else
-      CLOSER_RUNS=$(run_lib runs closer_bd "$SUBJECT") \
-        || stopped "the runs that work $SUBJECT could not be read to tell whether its validating closer is already running; nothing was written"
-      CLOSER_RUN=$(printf '%s' "$CLOSER_RUNS" | jq -r '[ .[] | select(.live and .formula == "mol-validate-close") | .root ] | sort | .[0] // ""' 2>/dev/null)
-      [ -z "$CLOSER_RUN" ] || CLOSER_ARMED="already running (run $CLOSER_RUN)"
-    fi
+    printf '%s' "$SUBJECT_ROW" | jq -e '((.metadata // {})["gc.dispatch_when_ready_args"] // "") | tostring | contains("mol-validate-close")' >/dev/null 2>&1 \
+      && CLOSER_ARMED=yes
   fi
 fi
 [ -z "$CLOSE_BRIEF" ] || [ -n "$CLOSER_RIG" ] \
@@ -913,7 +897,7 @@ $CLOSE_BRIEF" >/dev/null 2>&1 \
       || stopped "the store refused the close brief on $SUBJECT, which its validating closer checks, so the closer was not armed; the headline is written, no gate was resolved and the conversation is not closed"
   fi
   if [ -n "$CLOSER_ARMED" ]; then
-    echo "$SUBJECT's validating closer is $CLOSER_ARMED"
+    echo "$SUBJECT's validating closer is already armed"
   else
     DD=$(pack_script deferred-dispatch.sh) \
       || stopped "no deferred-dispatch.sh beside $0, so $SUBJECT's validating closer was not armed; the headline and the close brief are written, no gate was resolved and the conversation is not closed"

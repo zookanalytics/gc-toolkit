@@ -53,18 +53,14 @@
 #             arm landed writes it no second time, and the same words in a
 #             sitting's notes, in a brief held on other work, under a later
 #             brief or at the start of a longer one do not stand for it; a
-#             closer the arm has sent is armed no
-#             second time while its run, read in the subject's own rig, is
-#             live, and is armed again once that
-#             run has ended, a live run of another formula does not stand for
-#             it, and runs that do not read stop the sign-off before any
-#             write; no closer is armed for a wait on a gate or in another
-#             store, for a subject that something else sends on (an arm of
-#             another dispatch, a route, an assignee, an epic, an open PR, the
-#             recommendation the ruling takes), or for one at a status other
-#             than open, which arm refuses, where a brief is refused; a
-#             subject in the city's own store is refused, since no pool runs
-#             its closer
+#             ruling made once the arm has sent the closer arms it again,
+#             reading no run, and writes no second brief; no closer is armed
+#             for a wait on a gate or in another store, for a subject that
+#             something else sends on (an arm of another dispatch, a route, an
+#             assignee, an epic, an open PR, the recommendation the ruling
+#             takes), or for one at a status other than open, which arm
+#             refuses, where a brief is refused; a subject in the city's own
+#             store is refused, since no pool runs its closer
 #   (OPEN-PR, REWORK*, RETIRE*) a ruling on an open PR answers --rework,
 #             --no-rework or --retire; the rework or the retirement runs first,
 #             and one that fails writes nothing else, so the gate keeps holding
@@ -119,9 +115,7 @@
 # rig of a PR the ruling acts on by the REAL bead-store.sh over the stub's rig
 # list, and the rig whose pool runs the subject's validating closer by the REAL
 # rig-map.sh over the same list: rig-a carries the prefix tk, rig-b the prefix
-# rb, and the city's own row the prefix hq. The runs that work a bead come from
-# run-lib.stub.sh, over $STORE/runs.json, which a case writes when it needs a
-# run.
+# rb, and the city's own row the prefix hq.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -154,12 +148,9 @@ mkdir -p "$TMP/bin" "$TMP/store/b" "$TMP/rig/assets/scripts" "$TMP/cwd"
 # REFUSE_UPDATE_MATCH=<text> refuses an update whose arguments carry that text.
 # An appended note follows the notes before it on a line of its own, as bd
 # joins them. A bead's comments are kept in
-# $STORE/b/<id>.comments.json, and each one added is logged. Every call, a read
-# or a write, is also appended to $STORE/gc-args, so a case can check the store
-# a read asked.
+# $STORE/b/<id>.comments.json, and each one added is logged.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 B="$STORE/b"
-printf '%s\n' "$*" >> "$STORE/gc-args"
 row() { cat "$B/$1.json" 2>/dev/null; }
 put() { cat > "$B/$1.json.tmp" && mv "$B/$1.json.tmp" "$B/$1.json"; }
 log() { printf '%s\n' "$*" >> "$CALLS"; }
@@ -393,7 +384,7 @@ DD
 chmod +x "$S"/*.sh
 # Linked after the chmod, which would otherwise follow each link and change the
 # mode of the pack's own file.
-for _lib in converse-signoff.sh conversation.sh work-outcome.sh bd-lib.sh review-verdict.sh review-dismissal.sh bead-store.sh rig-map.sh run-lib.sh run-lib.stub.sh dispatch-path.sh; do
+for _lib in converse-signoff.sh conversation.sh work-outcome.sh bd-lib.sh review-verdict.sh review-dismissal.sh bead-store.sh rig-map.sh dispatch-path.sh; do
     ln -s "$HERE/$_lib" "$S/$_lib"
 done
 SCRIPT="$S/converse-signoff.sh"
@@ -401,8 +392,7 @@ SCRIPT="$S/converse-signoff.sh"
 mkdir -p "$TMP/rig-a" "$TMP/rig-b" "$TMP/city"
 RIG_A="$(cd "$TMP/rig-a" && pwd -P)"; RIG_B="$(cd "$TMP/rig-b" && pwd -P)"; CITY_ROOT="$(cd "$TMP/city" && pwd -P)"
 export PATH="$TMP/bin:$PATH" STORE="$TMP/store" CALLS="$TMP/calls" GH_CALLS="$TMP/gh-calls" GC_RIG_ROOT="$TMP/rig" RIG_A RIG_B CITY_ROOT
-export GC_RUN_LIB="$S/run-lib.stub.sh" RUN_LIB_STUB_RUNS="$TMP/store/runs.json" RUN_LIB_STUB_LOG="$TMP/store/run-reads"
-unset GC_CITY_PATH RUN_LIB_STUB_CMD RUN_LIB_STUB_FAIL 2>/dev/null || true
+unset GC_CITY_PATH 2>/dev/null || true
 
 # --- fixtures -----------------------------------------------------------------
 fresh() { rm -rf "$STORE"; mkdir -p "$STORE/b"; : > "$CALLS"; : > "$GH_CALLS"; }
@@ -831,14 +821,12 @@ briefs() { field "$1" notes | grep -c '## Close brief' || true; }
 # latest <id> — the bead's latest close brief, its last `## Close brief (`
 # heading and all that follows it, which the validating closer checks.
 latest() { field "$1" notes | awk '/^## Close brief \(/ { s = ""; on = 1 } on { s = s $0 "\n" } END { printf "%s", s }'; }
-# sent_closer <live> [formula] — the deferred-dispatch pass has sent the
-# subject's closer: it retired the arm with the note the real pass appends, and
-# the closer's run works the subject, live until its root closes.
+# sent_closer — the deferred-dispatch pass has sent the subject's closer: it
+# retired the arm with the note the real pass appends.
 sent_closer() {
     jq 'del(.metadata["gc.dispatch_when_ready"], .metadata["gc.dispatch_when_ready_args"])
         | .notes = ((.notes // "") + "\ndeferred-dispatch: dispatch record cleared at 2026-11-09T13:00:00Z — dispatched to rig-a/gc-toolkit.polecat by the deferred-dispatch reconcile pass")' \
         "$STORE/b/tk-sub.json" > "$STORE/b/x" && mv "$STORE/b/x" "$STORE/b/tk-sub.json"
-    jq -n --argjson live "$1" --arg f "${2:-mol-validate-close}" '[{root: "tk-root", convoy: "tk-cv", bead: "tk-sub", formula: $f, live: $live}]' > "$STORE/runs.json"
 }
 closer_case
 run_signoff --conversation tk-conv --outcome "ruled — a fix is building" "${SENT[@]}"
@@ -937,36 +925,17 @@ eq "$RC/$(briefs tk-sub)" "0/2" "(CLOSER-BRIEF-WAITS) the same brief held on oth
 has "$(latest tk-sub)" "## Close brief (held on tk-work,tk-more, " "(CLOSER-BRIEF-WAITS) …held on all the work this ruling leaves it waiting on"
 
 # The arm an answer made has sent the closer, the work has closed, and the
-# sitting signs off while the closer still runs.
+# sitting signs off while the closer still runs. The sign-off reads no run, so
+# it arms the closer again, and Gas City refuses that second launch while the
+# run is live.
 closer_case
 run_signoff --conversation tk-conv --answer tk-g --ruling "build the fix" --outcome "ruled — a fix is building" --waiting-on tk-work --close-brief "$BRIEF"
-setf tk-work status closed; sent_closer true
+setf tk-work status closed; sent_closer
 ARMS=$(grep -c '^deferred-dispatch arm' "$CALLS" || true)
 run_signoff --conversation tk-conv --outcome "ruled — a fix is building" "${SENT[@]}" --close-brief "$BRIEF"
-eq "$RC" 0 "(CLOSER-RUNNING) the sign-off after the arm has sent the closer exits 0"
-eq "$(grep -c '^deferred-dispatch arm' "$CALLS")" "$ARMS" "(CLOSER-RUNNING) …arming no second closer while that one runs"
-eq "$(meta tk-sub gc.dispatch_when_ready)" "" "(CLOSER-RUNNING) …so the subject carries no arm that each pass would fail to send"
-has "$OUT" "tk-sub's validating closer is already running (run tk-root)" "(CLOSER-RUNNING) …saying the closer is already running"
-has "$(cat "$STORE/run-reads")" "runs closer_bd tk-sub" "(CLOSER-RUNNING) …read through the subject's own store"
-eq "$(briefs tk-sub)/$(field tk-conv status)" "1/closed" "(CLOSER-RUNNING) …keeping the one brief the answer wrote, and closing the conversation"
-closer_case
-run_signoff --conversation tk-conv --outcome "ruled — a fix is building" "${SENT[@]}" --close-brief "$BRIEF"
-sent_closer false
-ARMS=$(grep -c '^deferred-dispatch arm' "$CALLS" || true)
-run_signoff --conversation tk-conv --outcome "ruled — a fix is building" "${SENT[@]}" --close-brief "$BRIEF"
-eq "$RC/$(meta tk-sub gc.dispatch_when_ready_args)" "0/$CLOSER_ARGS" "(CLOSER-RUN-ENDED) a closer whose run has ended is armed again"
-eq "$(grep -c '^deferred-dispatch arm' "$CALLS")" "$((ARMS + 1))" "(CLOSER-RUN-ENDED) …once"
-closer_case; jq -n '[{root: "tk-root", convoy: "tk-cv", bead: "tk-sub", formula: "mol-polecat-work", live: true}]' > "$STORE/runs.json"
-run_signoff --conversation tk-conv --outcome "ruled — a fix is building" "${SENT[@]}" --close-brief "$BRIEF"
-eq "$RC/$(meta tk-sub gc.dispatch_when_ready_args)" "0/$CLOSER_ARGS" "(CLOSER-RUN-OTHER) a live run of another formula, which Gas City lets run beside the closer, does not stand for it"
-closer_case
-RUN_LIB_STUB_FAIL=runs run_signoff --conversation tk-conv --outcome "x" "${SENT[@]}" --close-brief "$BRIEF"
-eq "$RC" 1 "(CLOSER-RUNS-UNREAD) runs that do not read stop the sign-off"
-eq "$(writes)" 0 "(CLOSER-RUNS-UNREAD) …before any write"
-closer_case
-GC_RUN_LIB="$S/run-lib.sh" run_signoff --conversation tk-conv --outcome "x" "${SENT[@]}" --close-brief "$BRIEF"
-eq "$RC/$(meta tk-sub gc.dispatch_when_ready_args)" "0/$CLOSER_ARGS" "(CLOSER-RUNS-STORE) through the real run-lib.sh, a subject no run works gets its closer"
-has "$(grep -e 'dep list tk-sub ' "$STORE/gc-args" | grep -e '-t tracks')" "--db $RIG_A/.beads" "(CLOSER-RUNS-STORE) …its runs read in its own rig's store"
+eq "$RC/$(meta tk-sub gc.dispatch_when_ready_args)" "0/$CLOSER_ARGS" "(CLOSER-SENT) the sign-off after the arm has sent the closer exits 0 and arms the closer again"
+eq "$(grep -c '^deferred-dispatch arm' "$CALLS")" "$((ARMS + 1))" "(CLOSER-SENT) …once"
+eq "$(briefs tk-sub)/$(field tk-conv status)" "1/closed" "(CLOSER-SENT) …keeping the one brief the answer wrote, and closing the conversation"
 
 closer_case
 run_signoff --conversation tk-conv --outcome "x" --waiting-on tk-work --close-brief "$BRIEF"
