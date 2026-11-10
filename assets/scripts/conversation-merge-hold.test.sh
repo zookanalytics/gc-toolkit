@@ -41,8 +41,13 @@
 #   (NOT-PR)       a subject that is no open PR, one whose anchor has merged, a
 #                  pre-open anchor and a review of one each take no edge
 #   (OPEN-UNREAD)  an anchor that does not read files nothing
-#   (HOLD-FAIL)    an edge the store refuses exits 4 naming the repair, and a
-#                  re-run of open holds the merge
+#   (HOLD-FAIL)    an edge the store refuses exits 4 naming the repair, the reply
+#                  onto a gate open was pointed at is written all the same, and
+#                  a re-run of open holds the merge
+#   (REPLY-FAIL)   a reply onto the gate that the store refuses, for a
+#                  conversation open files through a human gate on an open PR
+#                  or joins in the queue, exits 4 with the merge held, and the
+#                  PR stays held once the gate is answered elsewhere
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -80,9 +85,9 @@ fi
 # `bd create` mints tk-c<n>, and `bd gate resolve` closes a gate. Every write is
 # appended to $CALLS. A read gctk makes with HOLDS_STUB_READ set is answered by
 # holds-store.stub.sh over this store's rows. Hooks: SHOW_DOWN=<id> fails a
-# show naming that bead; DEP_ADD_FAIL refuses every `blocks` edge add, writing
-# nothing; CLOSE_FAIL=<id> refuses every close of that bead, plain or forced,
-# writing nothing.
+# show naming that bead; DEP_ADD_FAIL refuses every `blocks` edge add, and
+# REPLY_FAIL every `replies-to` edge add, writing nothing; CLOSE_FAIL=<id>
+# refuses every close of that bead, plain or forced, writing nothing.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 B="$STORE/b"
 log() { printf '%s\n' "$*" >> "$CALLS"; }
@@ -178,6 +183,7 @@ case "$1 ${2:-}" in
         for a in "$@"; do { [ "$_p" = "--type" ] || [ "$_p" = "-t" ]; } && _t="$a"; case "$a" in --type=*) _t="${a#--type=}" ;; esac; _p="$a"; done
         [ -f "$B/$_a.json" ] && [ -f "$B/$_b.json" ] || { echo "Error: issue not found" >&2; exit 1; }
         [ -n "${DEP_ADD_FAIL:-}" ] && [ "$_t" = blocks ] && { echo "Error adding dependency: simulated refusal" >&2; exit 1; }
+        [ -n "${REPLY_FAIL:-}" ] && [ "$_t" = replies-to ] && { echo "Error adding dependency: simulated refusal" >&2; exit 1; }
         add_dep "$_a" "$_t" "$_b" ;;
       remove)
         log "$*"
@@ -317,6 +323,13 @@ acts() { jq -r '[.[].text] | join("|")' "$STORE/b/$1.comments.json" 2>/dev/null;
 # An open PR's anchor, and the PR's review in flight.
 pr() { fresh; bead tk-anc task open '{"merge_result":"pull_request","pr_number":"41"}'; }
 pr_review() { pr; bead tk-rev task open '{"task_kind":"review","anchor_bead":"tk-anc"}'; }
+# gate_on <bead> <gate> — an open human gate the bead waits on.
+gate_on() {
+    bead "$2" gate open; setf "$2" await_type human; setf "$2" await_id "review-needs-you.$2"
+    setf "$2" title "should this land as built?"; edge "$1" blocks "$2"
+}
+# filed_on <bead> — the conversation that tracks the bead, read from the store.
+filed_on() { jq -r --arg b "$1" 'objects | select((.deps // []) | any(.type == "tracks" and .on == $b)) | .id' "$STORE"/b/*.json | head -1; }
 derive() { (cd "$TMP/cwd" && "$GCTK" pr status "$1" --json 2>/dev/null) || echo "derive-failed"; }
 status_of() { derive "$1" | jq -r '"\(.status) [\(.held | join(","))]"' 2>/dev/null; }
 # holds_of <bead> — what holds the bead by gctk bead holds, the rule the work
@@ -564,12 +577,47 @@ echo "# an edge the store refuses is reported, and a re-run of open holds the me
 pr
 DEP_ADD_FAIL=1 run_open tk-anc --json
 eq "$RC" 4 "(HOLD-FAIL) an edge the store refuses exits 4"
-C=$(jq -r 'select((.deps // []) | any(.type == "tracks" and .on == "tk-anc")) | .id' "$STORE"/b/*.json | head -1)
+C=$(filed_on tk-anc)
 [ -n "$C" ] && ok "(HOLD-FAIL) …with the conversation filed" || bad "(HOLD-FAIL) …with the conversation filed"
 has "$ERR" "gc bd dep add tk-anc $C --type blocks" "(HOLD-FAIL) …naming the edge to add by hand"
 eq "$(deps_of tk-anc blocks)" "" "(HOLD-FAIL) …and no edge holds the anchor yet"
 run_open tk-anc --json
 eq "$RC/$(deps_of tk-anc blocks)" "0/$C" "(HOLD-FAIL) a re-run of open joins that conversation and holds the merge"
+pr; gate_on tk-anc tk-q
+DEP_ADD_FAIL=1 run_open tk-q --json
+eq "$RC" 4 "(HOLD-FAIL) an edge the store refuses on a conversation open files through a gate exits 4"
+C=$(filed_on tk-anc)
+has "$ERR" "gc bd dep add tk-anc $C --type blocks" "(HOLD-FAIL) …naming the edge to add by hand"
+eq "$(deps_of "$C" replies-to)" "tk-q" "(HOLD-FAIL) …and the conversation replies to the gate all the same"
+
+echo "# a reply onto the gate that the store refuses leaves the merge held"
+pr; gate_on tk-anc tk-q
+REPLY_FAIL=1 run_open tk-q --json
+eq "$RC" 4 "(REPLY-FAIL) open through a gate whose reply the store refuses exits 4"
+C=$(filed_on tk-anc)
+[ -n "$C" ] && ok "(REPLY-FAIL) …with the conversation filed on the bead the gate holds" \
+    || bad "(REPLY-FAIL) …with the conversation filed on the bead the gate holds"
+has "$ERR" "gc bd dep add $C tk-q --type replies-to" "(REPLY-FAIL) …naming the reply to add by hand"
+eq "$(deps_of tk-anc blocks)" "$C tk-q" "(REPLY-FAIL) the anchor depends on the conversation all the same"
+lands_before "bd dep add tk-anc $C --type blocks" "bd dep add $C tk-q --type replies-to" \
+    && ok "(REPLY-FAIL) …through a hold written before the reply" \
+    || bad "(REPLY-FAIL) …through a hold written before the reply ($(tr '\n' ';' < "$CALLS"))"
+gc bd gate resolve tk-q --reason "answered in another sitting" >/dev/null
+eq "$(status_of tk-anc)" "needs-attention [blocked]" "(REPLY-FAIL) once another sitting answers the gate, the PR stays held"
+eq "$(holds_of tk-anc)" "blocked $C" "(REPLY-FAIL) …by the conversation, which is still open"
+# A conversation filed before its PR opened holds no merge until open joins it.
+fresh; bead tk-anc task open '{"merge_result":"pre_open_gate"}'
+run_open tk-anc --json; C=$(opened_conv)
+setm tk-anc merge_result pull_request; setm tk-anc pr_number 41; gate_on tk-anc tk-q
+: > "$CALLS"
+REPLY_FAIL=1 run_open tk-q --reason "and should it wait for the gate?" --json
+eq "$RC" 4 "(REPLY-FAIL) joining a queued conversation through a gate whose reply the store refuses exits 4"
+has "$ERR" "conversation $C waits in the queue for tk-anc, but the store refused its reply onto gate tk-q" \
+    "(REPLY-FAIL) …saying the joined conversation's reply was refused"
+hasnt "$(cat "$CALLS")" "bd create" "(REPLY-FAIL) …filing no second conversation"
+eq "$(deps_of tk-anc blocks)" "$C tk-q" "(REPLY-FAIL) the conversation it joined holds the merge all the same"
+gc bd gate resolve tk-q --reason "answered in another sitting" >/dev/null
+eq "$(status_of tk-anc)" "needs-attention [blocked]" "(REPLY-FAIL) …so the PR stays held once the gate is answered"
 
 echo
 echo "conversation-merge-hold: $PASS passed, $FAIL failed"

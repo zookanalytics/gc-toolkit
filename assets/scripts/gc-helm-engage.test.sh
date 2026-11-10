@@ -30,6 +30,9 @@
 #             conversation, one whose sitting ended included; a live sitting it
 #             attaches to, or a subject that is no open PR, adds no edge, and an
 #             edge the store refuses starts nothing
+#   (GATE-NOREPLY-PR, GATE-NOHOLD) engage pointed at a gate on an open PR
+#             writes the hold before the reply, and writes each when the store
+#             refuses the other, starting nothing
 #   (REUSE-*) a live sitting engage reuses is attached only once it reads
 #             active: one still start-pending or creating is waited on and left
 #             unattached at the bound, which exits 4, one that ends first is
@@ -1019,6 +1022,20 @@ reset; REPLY_FAIL=1 run_engage tk-gate --no-attach
 eq "$RC" 4 "(GATE-NOREPLY) a reply the store refuses exits 4"
 hasnt "$CALLED" "session new" "(GATE-NOREPLY) …starting no sitting that would not know its gate"
 has "$OUT" "gc bd dep add tk-conv tk-gate --type replies-to" "(GATE-NOREPLY) …and naming the edge to add by hand"
+reset; REPLY_FAIL=1 SUBJ_META='{"merge_result":"pull_request"}' run_engage tk-gate --no-attach
+eq "$RC" 4 "(GATE-NOREPLY-PR) a reply the store refuses on a conversation about an open PR exits 4"
+has "$CALLED" "bd dep bd dep add tk-subj tk-conv --type blocks" "(GATE-NOREPLY-PR) …having held the PR's merge all the same"
+case "$CALLED" in
+  *"--type blocks"*"--type replies-to"*) ok "(GATE-NOREPLY-PR) …with the hold written before the reply" ;;
+  *) bad "(GATE-NOREPLY-PR) the hold should precede the reply (calls: $CALLED)" ;;
+esac
+hasnt "$CALLED" "session new" "(GATE-NOREPLY-PR) …and starting no sitting"
+reset; HOLD_FAIL=1 SUBJ_META='{"merge_result":"pull_request"}' run_engage tk-gate --no-attach
+eq "$RC" 4 "(GATE-NOHOLD) a hold the store refuses on a conversation pointed at a gate exits 4"
+has "$CALLED" "bd dep bd dep add tk-conv tk-gate --type replies-to" \
+    "(GATE-NOHOLD) …having written the reply all the same, which re-engaging the conversation would not write"
+has "$OUT" "nothing spawned, because the sitting would talk while the PR could merge" "(GATE-NOHOLD) …saying why nothing spawned"
+hasnt "$CALLED" "session new" "(GATE-NOHOLD) …and starting no sitting"
 
 echo "# a gate two open beads wait on starts nothing and names both"
 export GATE_WAITERS='[{"id":"tk-subj","status":"open"},{"id":"tk-child","status":"in_progress"}]'

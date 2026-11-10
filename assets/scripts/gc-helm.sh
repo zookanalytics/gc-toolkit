@@ -1983,16 +1983,37 @@ conversation_hold_merge() {
     return 0
 }
 
+# open_edges <conversation> <where> — the edges open owes a conversation it
+# filed or joined: the hold on the merge of the open PR whose anchor is
+# $open_anchor, then the reply onto the gate it answers, $TAKE_GATE. Each is
+# empty for none. Each edge is written whatever the other's outcome, so a reply
+# the store refuses never leaves the PR free to merge while the conversation is
+# open, and a hold it refuses never costs the reply. <where> says where the
+# conversation stands, for the reply's refusal. Returns 0 once both are in
+# place, else 1, having said on stderr how to add each refused edge by hand.
+open_edges() {
+    _oe_rc=0
+    if [ -n "$open_anchor" ]; then
+        conversation_hold_merge open "$1" "$open_anchor" || _oe_rc=1
+    fi
+    if [ -n "$TAKE_GATE" ] && ! conversation_reply "$1" "$TAKE_GATE"; then
+        echo "$PROG: open: conversation $1 $2, but the store refused its reply onto gate $TAKE_GATE. Add it by hand: gc bd dep add $1 $TAKE_GATE --type replies-to" >&2
+        _oe_rc=1
+    fi
+    return "$_oe_rc"
+}
+
 # open_join <conversation> — join open's concern ($join_note, empty for none)
 # to a conversation waiting in the operator's queue, assigned to `human` and
 # open, which is where a sitting claims it and reads its notes. The note is
 # appended once, in a write guarded on that queue state, so a conversation a
 # sitting took or a dismiss closed after open's listing takes no note, and the
-# write's exit says whether the note landed. A pointed gate ($TAKE_GATE) gets
-# the conversation's reply. The row is then read to tell that it still waits in
-# the queue. Returns 0 once it does; 1 when the conversation is no longer in the
-# queue, so it cannot receive the concern and the caller moves on to the next
-# one; and 2 when a write or that read failed, which it says on stderr.
+# write's exit says whether the note landed. The conversation then takes the
+# hold on an open PR's merge and the reply onto a pointed gate (open_edges). The
+# row is then read to tell that it still waits in the queue. Returns 0 once it
+# does; 1 when the conversation is no longer in the queue, so it cannot receive
+# the concern and the caller moves on to the next one; and 2 when a write or
+# that read failed, which it says on stderr.
 open_join() {
     _oj_c="$1"; _oj_ask="${open_body:-$open_reason}"
     # $1 is a row_now answer: a row in the queue carries the concern when it is
@@ -2020,10 +2041,7 @@ open_join() {
             esac
         fi
     fi
-    if [ -n "$TAKE_GATE" ] && ! conversation_reply "$_oj_c" "$TAKE_GATE"; then
-        echo "$PROG: open: conversation $_oj_c waits in the queue for $bead, but the store refused its reply onto gate $TAKE_GATE. Add it by hand: gc bd dep add $_oj_c $TAKE_GATE --type replies-to" >&2
-        return 2
-    fi
+    open_edges "$_oj_c" "waits in the queue for $bead" || return 2
     _oj_back=$(row_now "$_oj_c")
     if [ -z "$_oj_back" ]; then
         echo "$PROG: open: conversation $_oj_c could not be read after open joined it, so whether it still waits in the queue${join_note:+ carrying the new concern} cannot be told. Re-run once the store answers: $PROG open $bead" >&2
@@ -2181,9 +2199,6 @@ $open_body"
                 *) exit 4 ;;
             esac
             CONV="$existing"; OPEN_FILED=0
-            if [ -n "$open_anchor" ]; then
-                conversation_hold_merge open "$CONV" "$open_anchor" || exit 4
-            fi
             bust_cache
             if [ -n "$open_json" ]; then
                 jq -nc --arg s "$bead" --arg c "$existing" '{subject: $s, conversation: $c, filed: false}'
@@ -2234,13 +2249,7 @@ $gate_desc}"
     [ "$CONV_RC" = 0 ] && [ -n "$CONV" ] \
         || { create_err=$(printf '%s' "$CONV_JSON" | scrub | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null || true)
              echo "$PROG: open: could not create a conversation for '$bead'${create_err:+: $create_err}" >&2; exit 4; }
-    if [ -n "$TAKE_GATE" ] && ! conversation_reply "$CONV" "$TAKE_GATE"; then
-        echo "$PROG: open: conversation $CONV is filed on $bead, but the store refused its reply onto gate $TAKE_GATE. Add it by hand: gc bd dep add $CONV $TAKE_GATE --type replies-to" >&2
-        exit 4
-    fi
-    if [ -n "$open_anchor" ]; then
-        conversation_hold_merge open "$CONV" "$open_anchor" || exit 4
-    fi
+    open_edges "$CONV" "is filed on $bead" || exit 4
     OPEN_FILED=1
     bust_cache
 
@@ -4316,15 +4325,6 @@ cmd_engage() {
         conv_via_open=1
     fi
 
-    # Pointed at a gate, the conversation engage landed on replies to it,
-    # whichever it is, and the reply is written before a sitting starts or the
-    # operator attaches, so the sitting finds the gate among its conversation's
-    # replies at its next read.
-    if [ -n "$pointed_gate" ] && ! conversation_reply "$CONV" "$pointed_gate"; then
-        echo "$PROG: engage: the store refused conversation $CONV's reply onto gate $pointed_gate, so the sitting would not know the gate it answers. Nothing spawned. Add it by hand and re-engage: gc bd dep add $CONV $pointed_gate --type replies-to" >&2
-        exit 4
-    fi
-
     # A sitting engage starts on a conversation about an open PR holds the PR's
     # merge until the conversation closes. open held it already for a
     # conversation it filed or joined just above, and a live sitting engage
@@ -4333,16 +4333,32 @@ cmd_engage() {
     # closed, takes the hold before its sitting starts, so a conversation filed
     # before its PR opened, or one whose sitting lifted the hold, holds the
     # merge again once it is engaged.
+    #
+    # Pointed at a gate, the conversation engage landed on replies to it,
+    # whichever it is, and the reply is written before a sitting starts or the
+    # operator attaches, so the sitting finds the gate among its conversation's
+    # replies at its next read.
+    #
+    # The hold goes on first, and each of the two is written whatever the
+    # other's outcome. A reply the store refuses then never leaves the PR free
+    # to merge while the conversation is open, and a hold that does not land
+    # never costs the reply, which a re-engage of the conversation does not
+    # write. Either one failing starts nothing.
+    eng_unready=""
     if [ -z "$conv_via_open" ] && [ "$conv_state" != live ]; then
         if ! eng_anchor=$(conversation_pr_anchor "$bead_row"); then
             echo "$PROG: engage: could not read $(subject_anchor "$bead_row"), the anchor $bead names, so whether the sitting must hold an open PR's merge cannot be told. Nothing spawned; re-engage once the store answers: $PROG engage $CONV" >&2
-            exit 4
-        fi
-        if [ -n "$eng_anchor" ] && ! conversation_hold_merge engage "$CONV" "$eng_anchor"; then
+            eng_unready=1
+        elif [ -n "$eng_anchor" ] && ! conversation_hold_merge engage "$CONV" "$eng_anchor"; then
             echo "$PROG: engage: nothing spawned, because the sitting would talk while the PR could merge. Re-engage once the hold lands: $PROG engage $CONV" >&2
-            exit 4
+            eng_unready=1
         fi
     fi
+    if [ -n "$pointed_gate" ] && ! conversation_reply "$CONV" "$pointed_gate"; then
+        echo "$PROG: engage: the store refused conversation $CONV's reply onto gate $pointed_gate, so the sitting would not know the gate it answers. Nothing spawned. Add it by hand and re-engage: gc bd dep add $CONV $pointed_gate --type replies-to" >&2
+        eng_unready=1
+    fi
+    [ -z "$eng_unready" ] || exit 4
 
     # One sitting per bead is engage's default, not a guarantee: a concern of
     # its own, two engages racing on a bead with no conversation, or a gate
