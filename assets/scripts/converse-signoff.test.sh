@@ -393,7 +393,7 @@ DD
 chmod +x "$S"/*.sh
 # Linked after the chmod, which would otherwise follow each link and change the
 # mode of the pack's own file.
-for _lib in converse-signoff.sh conversation.sh work-outcome.sh bd-lib.sh review-verdict.sh review-dismissal.sh bead-store.sh rig-map.sh run-lib.sh run-lib.stub.sh; do
+for _lib in converse-signoff.sh conversation.sh work-outcome.sh bd-lib.sh review-verdict.sh review-dismissal.sh bead-store.sh rig-map.sh run-lib.sh run-lib.stub.sh dispatch-path.sh; do
     ln -s "$HERE/$_lib" "$S/$_lib"
 done
 SCRIPT="$S/converse-signoff.sh"
@@ -987,7 +987,7 @@ eq "$RC/$(writes)" "2/0" "(CLOSER-CROSS-STORE) a --close-brief whose only wait i
 closer_case; setm tk-sub gc.dispatch_when_ready rig-a/gc-toolkit.polecat; setm tk-sub gc.dispatch_when_ready_args '["--on","mol-polecat-work"]'
 run_signoff --conversation tk-conv --outcome "ruled — builds once tk-work lands" "${SENT[@]}"
 eq "$RC" 0 "(CLOSER-ELSEWHERE) a subject armed to another dispatch signs off with no brief"
-has "$OUT" "no validating closer is armed for tk-sub: it is armed to rig-a/gc-toolkit.polecat" "(CLOSER-ELSEWHERE) …saying why no closer is armed"
+has "$OUT" "no validating closer is armed for tk-sub: it has a dispatch path (gc.dispatch_when_ready=rig-a/gc-toolkit.polecat)" "(CLOSER-ELSEWHERE) …saying why no closer is armed"
 eq "$(meta tk-sub gc.dispatch_when_ready_args)" '["--on","mol-polecat-work"]' "(CLOSER-ELSEWHERE) …and leaving that arm as it is"
 hasnt "$(cat "$CALLS")" "deferred-dispatch arm" "(CLOSER-ELSEWHERE) …arming nothing"
 closer_case; setm tk-sub gc.dispatch_when_ready rig-a/gc-toolkit.polecat; setm tk-sub gc.dispatch_when_ready_args '["--on","mol-polecat-work"]'
@@ -1002,7 +1002,7 @@ eq "$RC/$(meta tk-sub gc.dispatch_when_ready)" "0/" "(CLOSER-ASSIGNED) an assign
 closer_case; setm tk-sub gc.routed_to rig-a/gc-toolkit.polecat
 run_signoff --conversation tk-conv --outcome "x" "${SENT[@]}"
 eq "$RC/$(meta tk-sub gc.dispatch_when_ready)" "0/" "(CLOSER-ROUTED) a routed subject, whose pool claims it and which arm refuses, gets no closer"
-has "$OUT" "no validating closer is armed for tk-sub: it is routed to rig-a/gc-toolkit.polecat" "(CLOSER-ROUTED) …saying why"
+has "$OUT" "no validating closer is armed for tk-sub: it has a dispatch path (gc.routed_to=rig-a/gc-toolkit.polecat)" "(CLOSER-ROUTED) …saying why"
 closer_case; setf tk-sub status deferred
 run_signoff --conversation tk-conv --outcome "x" "${SENT[@]}"
 eq "$RC/$(meta tk-sub gc.dispatch_when_ready)" "0/" "(CLOSER-STATUS) a subject at a status other than open, which arm refuses, gets no closer"

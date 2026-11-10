@@ -46,7 +46,7 @@ git -C "$REPO" remote add origin https://github.com/acme/widgets.git
 # The pack the sign-off runs from: the real scripts it composes, and stubs for
 # the headline writer, the rework's filer and the store resolver.
 SR="$TMPD/pack/assets/scripts"; mkdir -p "$SR"
-for f in converse-signoff.sh pr-sitting-comment.sh pr-post.sh bd-lib.sh conversation.sh work-outcome.sh review-verdict.sh review-dismissal.sh run-lib.sh; do
+for f in converse-signoff.sh pr-sitting-comment.sh pr-post.sh bd-lib.sh conversation.sh work-outcome.sh review-verdict.sh review-dismissal.sh run-lib.sh dispatch-path.sh; do
   ln -s "$HERE/$f" "$SR/$f"
 done
 cat > "$SR/gc-helm.sh" <<'H'

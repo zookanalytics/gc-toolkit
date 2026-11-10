@@ -305,6 +305,10 @@ pr_label() {
 # a suite at run-lib.stub.sh.
 # shellcheck source=run-lib.sh
 . "${GC_RUN_LIB:-$HERE/run-lib.sh}" || die "cannot source run-lib.sh from $HERE"
+# The one definition of a dispatch path, the route or the arm that sends a bead
+# on once nothing holds it. Exposes $DISPATCH_PATH_JQ.
+# shellcheck source=dispatch-path.sh
+. "$HERE/dispatch-path.sh" || die "cannot source dispatch-path.sh from $HERE"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -607,10 +611,12 @@ fi
 # not read could be work. Something else sends the subject on once its wait
 # clears when the ruling takes its recommendation, when it is an epic, whose
 # members carry it, or an anchor (a merge_result), which the refinery closes
-# on its merge, and when it is assigned, routed, armed to another dispatch, or
-# at a status other than open, which is set deliberately. Then no closer is
-# armed. A closer an earlier attempt armed is this one, and so is one its arm
-# has sent whose run has not ended, so neither is armed a second time.
+# on its merge, and when it is assigned, has a dispatch path (a route, or an
+# arm of another dispatch, as dispatch-path.sh defines one), or is at a status
+# other than open, which is set deliberately. Then no closer is armed. The
+# closer's own arm is no other dispatch path. A closer an earlier attempt armed
+# is this one, and so is one its arm has sent whose run has not ended, so
+# neither is armed a second time.
 CLOSER_WAITS=""
 CLOSER_RIG=""
 CLOSER_PATH=""
@@ -625,15 +631,17 @@ if [ "$RULED" = yes ]; then
   done
 fi
 if [ -n "$CLOSER_WAITS" ]; then
-  ELSEWHERE=$(printf '%s' "$SUBJECT_ROW" | jq -r --arg accept "$ACCEPT" '(.metadata // {}) as $m
+  ELSEWHERE=$(printf '%s' "$SUBJECT_ROW" | jq -r --arg accept "$ACCEPT" "$DISPATCH_PATH_JQ"'(.metadata // {}) as $m
     | def v($k): ($m[$k] // "") | tostring;
-    if $accept != "" then "takes its recommendation, whose dispatch carries it"
+    (if v("gc.dispatch_when_ready_args") | contains("mol-validate-close")
+       then .metadata |= del(.["gc.dispatch_when_ready"]) else . end) as $other
+    | ($other.metadata // {}) as $o
+    | if $accept != "" then "takes its recommendation, whose dispatch carries it"
     elif (.issue_type // "") == "epic" then "is an epic, whose members carry it"
     elif v("merge_result") != "" then "is an anchor (merge_result=\(v("merge_result"))), which the refinery closes on its merge"
     elif ((.assignee // "") | tostring) != "" then "is assigned to \(.assignee), whose hook offers it once its wait clears"
-    elif v("gc.routed_to") != "" then "is routed to \(v("gc.routed_to")), whose pool claims it once its wait clears"
-    elif v("gc.dispatch_when_ready") != "" and (v("gc.dispatch_when_ready_args") | contains("mol-validate-close") | not)
-      then "is armed to \(v("gc.dispatch_when_ready")), which sends it once its wait clears"
+    elif ($other | has_dispatch_path)
+      then "has a dispatch path (\([ dispatch_path_keys[] as $k | select({metadata: {($k): $o[$k]}} | has_dispatch_path) | "\($k)=\($o[$k])" ] | join(", "))), which sends it on once its wait clears"
     elif ((.status // "") | ascii_downcase) != "open" then "is \(.status // "of no status"), which is set deliberately"
     else "" end' 2>/dev/null) \
     || stopped "$SUBJECT could not be read to tell whether anything but its validating closer sends it on once its work lands; nothing was written"
