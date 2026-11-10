@@ -203,7 +203,9 @@ Sign off by the case that fits (the converse-settle step):
   formula is the one the subject recommends, add `--accept` to the same sign-off
   and send nothing yourself (Take a recommendation, below).
 - **A new bead is the work, and the subject waits for it.** File the work, send
-  it, and sign off with `--ruled yes --waiting-on <the work>`.
+  it, and sign off with `--ruled yes --waiting-on <the work> --close-brief "<…>"`.
+  The sign-off arms the subject's validating closer, which checks the brief
+  once the work lands and closes the subject or asks the operator.
 - **New work decomposes an epic subject.** File it as the subject's member,
   with `--parent <subject>`, send it, and sign off with `--ruled yes --no-wait`.
   Leave it out of `--waiting-on`, which names a dependency only: the epic

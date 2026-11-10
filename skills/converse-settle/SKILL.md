@@ -90,14 +90,17 @@ conversation back to the operator's queue, which is the low-context path in
 the prompt's Rules. What is waiting on the subject is yours to state: one
 `--waiting-on <bead>` per dependency this sitting ROUTED work into, or the gate
 still holding it, `--no-wait` when it settled the subject and nothing is
-waiting, and NEITHER where the subject is parked for a person. It exits
-non-zero when it stopped short, and then you must NOT post the sign-off:
+waiting, and NEITHER where the subject is parked for a person. A subject that
+waits on work also takes `--close-brief`, the claim its validating closer
+checks once that work lands (the case **New work carries it**, below). It
+exits non-zero when it stopped short, and then you must NOT post the sign-off:
 ```bash
 if "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" \
      --outcome "<outcome> — <what this sitting settled or needs next, at most 140 characters, or 95 when the ruling leaves an open PR standing>" \
      --ruled yes --ruling "<the ruling, one line>" --no-wait
      # --leave <gate>, once for each gate the ruling leaves owed
      # --waiting-on <bead> [--waiting-on <bead> ...] in place of --no-wait
+     # --close-brief "<what that work's landing settles here, and what to check once it has>" beside a --waiting-on on work
      # --rework, --no-rework or --retire <kind>: one is required when the ruling reaches an open PR
      # --pr-anchor <bead> names the PR --rework or --retire acts on, when it reaches more than one
      # --accept when the ruling takes the subject's recommendation (below)
@@ -188,11 +191,22 @@ Then take the case that fits. The cases:
   non-zero, repair what it printed and re-run before you sign off. An open PR is
   retired instead (below).
 - **New work carries it.** File and send that work (below), then sign off
-  with `--ruled yes --waiting-on <the work>`.
+  with `--ruled yes --waiting-on <the work> --close-brief "<…>"`. The
+  sign-off appends the brief to the subject's notes and arms the subject's
+  validating closer in the subject's own rig, so once the work lands the closer
+  checks the brief against what landed, then closes the subject or puts it to
+  the operator. Write the brief as the claim the closer tests: what the work's
+  landing settles on the subject, and what to check once it has. A subject in
+  the city's own store has no pool to run its closer, so the sign-off refuses
+  it: put its close to the operator through a human gate that names the work
+  (the `waits` skill), and sign off with `--waiting-on <that gate>` in its
+  place.
 - **New work decomposes an epic subject.** File it as the subject's member and
   send it (below), then sign off with `--ruled yes --no-wait`,
   or with `--waiting-on` naming only the dependencies the sitting also sent.
-  A member takes no `--waiting-on`, because bd refuses that edge.
+  A member takes no `--waiting-on`, because bd refuses that edge. An epic takes
+  no `--close-brief`, because its members carry it, and the sign-off arms no
+  closer for it.
 
 **On a `--ruled yes` sign-off that reaches an open PR
 (`merge_result=pull_request`), answer what the ruling does to the PR.** The
@@ -273,7 +287,8 @@ HANDBACK
 The sign-off already closed the conversation, so nothing is said after this
 message.
 **If this sitting ROUTED work, file and send it, then pass
-`--waiting-on <work-bead>` to the sign-off for each dependency it sent.** The
+`--waiting-on <work-bead>` to the sign-off for each dependency it sent, with
+the `--close-brief` its validating closer checks.** The
 `work` skill says which bead carries the work and how to choose its formula. An
 epic the ruling files takes that skill's epic create, then a note that says
 whose words each field is, quoting the operator for each field they stated or
@@ -338,10 +353,15 @@ at 140 characters, so keep that line to one plain sentence:
   && "$CONV/deferred-dispatch.sh" arm <follow-up> --target <rig>/<pool> --reason "waits for <blocker>, through its human gate"
 ```
 
-**A recorded wait is also the return trip.** Once every recorded wait
-closes, the subject returns through the liveness sweep
-(`assets/scripts/liveness-sweep.sh`) as an unnamed wait; it reads
-those edges AND children, so legacy work stays visible.
+**The validating closer is the return trip.** Once every wait the sign-off
+recorded closes, the deferred-dispatch pass slings the closer the sign-off
+armed. It checks the close brief against what landed, then closes the subject
+or puts it to the operator. A subject the sign-off armed no closer for,
+because something else sends it on once its wait clears, such as its own arm,
+an assignee or the refinery's merge, goes there, and the sign-off says so. One
+that nothing sends on, such as a subject that waits only on a person's gate,
+returns through the liveness sweep (`assets/scripts/liveness-sweep.sh`) as an
+unnamed wait once every wait it records has closed.
 
 Never close a conversation by hand, and never end a held sitting without
 its sign-off: a thread that stops after a decision with no wrap-up reads as a
