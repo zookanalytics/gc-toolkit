@@ -1100,34 +1100,22 @@ The po is the operator's prioritization partner, a named session the operator
 opens for one sitting: a backlog refinement over the `hold:mayor` queue or a
 portfolio sync over the epics ([steering.md](steering.md)). A sitting ends when
 the po runs `gc runtime drain-ack`, and the next sitting starts a new
-conversation. The po entry of the home page opens one, and so does `gc-helm po`,
-which takes `--reason "<what the sitting is for>"` for the po to hear as the
-sitting starts.
+conversation. The po entry of the home page opens one from whatever state the
+seat is in, with no other command, and so does `gc-helm po`.
 
-It opens a sitting from whatever state the seat is in, with no other command.
-A live sitting is attached to as it stands. A sitting no client is attached to
-sleeps once its idle limit passes (`sleep_after_idle`) and keeps its
-conversation, and the attach wakes it into that conversation with its prompt
-handed over again. A po still ending its last sitting is waited on until it has
-stopped. Every other seat, one whose last sitting ended or that has no session,
-is started through the controller: `gc-helm po` nudges the po with what the
-sitting is for, the nudge asks the controller to start the seat, and the
-controller's start gives the po its prompt as its first message. It then waits
-for the start, reporting the session's state while it does, and attaches the
-moment the session runs. A sitting already open does not take the `--reason`,
-so the operator says it there.
-
-The waits close two timing edges. An attach on its own to a seat whose last
-sitting ended starts the seat outside the controller, with no prompt
-([gascity/human-engagement.md](gascity/human-engagement.md#an-attach-starts-a-session-that-is-not-running)),
-so the po entry attaches only to a running session or a slept one. And a po a
-nudge wakes with no client attached takes it for a wake with no sitting and
-drains, so the po entry attaches the moment the start lands. It reads the
-seat's sleep from its row in `gc session list --json`, whose reason reads
-`idle` while the city's API serves the read. A read without the reason takes a
-slept seat for an ended one, and starts a new sitting with its prompt. A
-sitting that starts without the po's prompt anyway, one that does not know it
-is the po, has the whole prompt once the operator tells it to run `gc prime`.
+Both are Gas City's attach on the po's seat, `gc session attach gc-toolkit.po`
+([gascity/human-engagement.md](gascity/human-engagement.md#what-an-attach-does-to-a-session-that-is-not-running)).
+A live sitting is attached to as it stands. Any other seat, one whose sitting
+ended, one whose sitting slept once its idle limit passed (`sleep_after_idle`)
+or one with no session yet, is started by the city's controller: the attach
+asks for the start, waits for the session to run and then attaches. The start
+gives the po its prompt as its first message, and because the po wakes fresh
+(`wake_mode = "fresh"`), it opens a new conversation, so a sitting that slept
+comes back as a new one. A po still ending its last sitting is attached as it
+ends, and the next `gc-helm po` opens a new one. The operator says what a
+sitting is for in the sitting. A sitting the attach starts itself, as it does
+while the city's controller is down, can come up without the po's prompt, and
+it has the whole prompt once the operator tells it to run `gc prime`.
 
 ## How a pane dies when no sitting is live
 
@@ -1247,12 +1235,6 @@ operator's *own* unsent words.
 
 ## Watch items — moving now, re-verify before building on them
 
-- **An attach that asks the controller for the start.** Upstream Gas City's
-  attach records a wake and lets the controller start a session that is not
-  running, which the city's gc does not do yet
-  ([gascity/human-engagement.md](gascity/human-engagement.md#an-attach-starts-a-session-that-is-not-running)).
-  Once the city's gc carries it, the po entry's start can reduce to the
-  attach.
 - **The roles pack's growth** — every new upstream role is a standing
   question against a hand-authored one here. When upstream ships a role
   covering something the pack hand-authors, re-argue adoption for that role

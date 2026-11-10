@@ -1,6 +1,6 @@
 ---
 name: Gas City search for gc-helm's home page and its seats
-description: The search the arch check asks for before the pack adds gc-helm's home page (a bare gc-helm on a terminal, helm-svc form --home) and the seat verbs gc-helm po and gc-helm mechanik. What Gas City ships for choosing among sessions, opening a named seat's sitting from any state with its prompt, waiting for a start and telling a slept seat from an ended one, read at a named upstream commit, and the gap each leaves that the verbs fill by composing them. Read it when checking whether the home page or a seat verb can move onto a Gas City primitive, such as once the city's gc carries upstream's attach that asks the controller for the start.
+description: The search the arch check asks for before the pack adds gc-helm's home page (a bare gc-helm on a terminal, helm-svc form --home) and the seat verbs gc-helm po and gc-helm mechanik. What Gas City ships for choosing among sessions and for opening a named seat's sitting with its prompt from any state, read at a named upstream commit; why each seat verb is that attach alone; and the deployed-version prerequisite the change waits on, because the city's gc predates the attach it composes. Read it when checking whether the home page or a seat verb can move onto a Gas City primitive, or what the change waits on before it lands.
 ---
 
 # Gas City search for gc-helm's home page and its seats
@@ -13,15 +13,14 @@ this surface:
   on its home page. Without a terminal it keeps its usage and exit 2.
 - `helm-svc form --home`, which opens the form on the home page. Esc on the
   start or the return screen goes back to it.
-- `gc-helm.sh po [--reason "<what the sitting is for>"]`, which opens a sitting
-  with the po from whatever state its seat is in and attaches.
-- `gc-helm.sh mechanik`, which attaches to mechanik's session once it runs.
+- `gc-helm.sh po` and `gc-helm.sh mechanik`, each of which attaches the
+  terminal to its seat's session from whatever state the seat is in.
 
-Gas City read at upstream main `9aaf32449` (gastownhall/gascity, fetched
+Gas City read at upstream main `8b1d799b8` (gastownhall/gascity, fetched
 2026-11-10). The city runs a fork build, `cb80c5354`, whose last common commit
 with upstream is `9f807760c`. That build is not evidence of a primitive. It is
-read only for the one fact the search turns on: it does not carry upstream's
-attach change, `64ba02c02`.
+read only for the one fact the change's timing turns on: it does not carry
+upstream's attach change, `64ba02c02`.
 
 ## What was searched, and what each leaves
 
@@ -36,56 +35,57 @@ whose search is [specs/tk-po06sre/gas-city-search.md](../tk-po06sre/gas-city-sea
 and each entry runs a gc-helm verb, so the page itself starts, reads and writes
 nothing.
 
-**Opening a named seat's sitting with its prompt.** Four primitives start or
-reach a session, and none covers the seat in every state:
+**Opening a named seat's sitting with its prompt, from any state.**
+`gc session attach` covers it whole. It attaches to a running session as it
+stands. While the city's controller runs, it asks the controller to start a
+session whose runtime is not running, recording the wake `gc session wake`
+records, waits up to `--wait-timeout` (two minutes by default) for the session
+to run, and attaches through a runtime-only handle that never starts the
+runtime itself (`cmdSessionAttachWith`, `sessionAttach.run` and
+`attachOnceControllerStarts`, `cmd/gc/cmd_session.go`, from `64ba02c02`,
+#9011). A configured named session with no open session is materialized first
+(`resolveSessionIDMaterializingNamed`). The controller's start hands the agent
+its prompt as its first message, so a po whose last sitting ended, one whose
+sitting slept, and one with no session yet each come up prompted, and a wake
+the controller will not act on, or a start that has not run within the wait,
+fails the attach with its reason. Each seat verb is therefore that attach on
+the seat's name and nothing else: it reads no session state, sends no nudge,
+records no wake of its own and runs no wait. The verb adds only what the attach
+does not print, the line that names how to return once the terminal comes back
+and the re-run once an attach fails.
 
-- `gc session attach` at upstream asks the controller to start a session that
-  is not running, the same wake `gc session wake` records, waits up to
-  `--wait-timeout` for it to run, and attaches only a running runtime
-  (`cmdSessionAttachWith`, from `64ba02c02`, #9011). That covers a seat whose
-  last sitting ended, because a controller start hands the agent its prompt as
-  its first message. The city's gc predates it: there the attach starts the
-  runtime from its own process, so a po that a drain-ack ended under
-  `wake_mode = "fresh"`, which keeps no conversation key, comes up as a new
-  conversation whose prompt only the session-start hook could deliver, and
-  `primeHookLiveManagedSession` (`cmd/gc/cmd_prime.go`) primes only a session
-  whose record reads active, awake, creating or start_pending. That is the
-  cause the po verb names, and the reason it starts such a seat itself. Once
-  the city's gc carries `64ba02c02`, the po verb's start can reduce to the
-  attach.
-- `gc session wake` asks the controller to start a session, creating a
-  configured named session that has none (`newSessionWakeCmd`,
-  `cmd/gc/cmd_session_wake.go`). It attaches nothing and carries no message.
-- `gc session nudge` to a managed session that is not running queues its
-  message and asks the controller for the start, materializing a configured
-  named session with no row (`queueManagedSessionNudgeWake` and
-  `resolveNudgeTargetInStore`, `cmd/gc/cmd_nudge.go`). It attaches nothing. To
-  a session still running, a draining one included, it delivers the message in
-  place and asks for no start (`shouldQueueManagedNudgeWake`). The po verb uses
-  it for the start, because it carries what the sitting is for, and waits out a
-  drain before it nudges.
-- `gc session submit` decides itself whether to wake, inject or queue a
-  message, and attaches nothing (`newSessionSubmitCmd`).
+The po wakes fresh (`wake_mode = "fresh"`), and the controller's start clears a
+fresh session's key before it starts it (`preWakePatch`, `cmd/gc/session_wake.go`,
+and `PreWakePatch`, `internal/session/lifecycle_transition.go`), so a po
+sitting that slept comes back as a new sitting. The pack's docs and the po's
+prompt say so.
 
-So `gc-helm.sh po` composes them: it reads the seat's row, attaches to a
-running or slept session, waits out a drain, and otherwise nudges and attaches
-once the session runs. `gc-helm.sh mechanik` composes `gc session list` and
-`gc session attach`, and waits while the controller starts the seat, since
-mechanik is a named session the controller keeps running and is never nudged.
+The attach carries no message, so neither verb carries one. The operator says
+what a sitting is for in the sitting.
 
-**Waiting for the start.** `gc session wait` registers a dependency wait that
-wakes a session when beads close, which is a wait for the session, not for the
-caller. A session row's state says when its runtime runs (`start-pending`,
-`creating`, then `active`). The verbs poll that state, as engage already does
-before its own attach, under the same bound, `GC_HELM_ENGAGE_WAIT_TIMEOUT`.
-Upstream's attach `--wait-timeout` is the same wait, and arrives with
-`64ba02c02`.
+The other primitives were read for the same need, and each leaves part of it:
+`gc session wake` asks the controller to start a session and attaches nothing
+(`newSessionWakeCmd`, `cmd/gc/cmd_session_wake.go`); `gc session nudge` to a
+managed session that is not running queues its message and asks the controller
+for the start, attaching nothing, and to a session still running, a draining one
+included, delivers it in place (`queueManagedSessionNudgeWake` and
+`shouldQueueManagedNudgeWake`, `cmd/gc/cmd_nudge.go`); `gc session submit`
+decides itself whether to wake, inject or queue a message and attaches nothing
+(`newSessionSubmitCmd`).
 
-**Telling a slept seat from an ended one.** `gc session list --json` reads
-`asleep` for both. A row the city's API serves carries the session's
-lifecycle reason, the sleep reason for an asleep session, and `idle` for one
-its idle limit put to sleep (`Reason` on `sessionListJSONRow`, set only on an
-API-served read, from `sessionListReasonParts`, `cmd/gc/cmd_session.go`). The
-po verb reads that reason. A local read carries none, so the verb takes a
-slept seat for an ended one and starts a new sitting with its prompt, which
-costs the slept sitting's conversation and never a prompt.
+## The deployed-version prerequisite
+
+The city's gc, the fork build `cb80c5354`, predates `64ba02c02`. Its
+`gc session attach` has no `--wait-timeout` or `--no-start`, and it starts a
+session that is not running from its own process whether or not a controller
+runs (`Manager.Attach`, `internal/session/manager.go`, and `ensureRunningOn`,
+`internal/session/chat.go`). There a po whose last sitting a drain-ack ended
+keeps no session key, so the attach starts a new conversation with no first
+message, and `gc prime --hook` primes only a session whose record reads active,
+awake, creating or start_pending (`primeHookLiveManagedSession`,
+`cmd/gc/cmd_prime.go`), so that sitting comes up with no prompt. That is a
+deployment lag, not a missing primitive. The change therefore lands only once
+the city's gc carries `64ba02c02`, which arrives with the next upstream sync of
+the fork: a human gate on the change's anchor holds its merge until the synced
+build runs. The verbs pass no flag to the attach, so either build accepts the
+call, and the gate alone decides when the verbs ship.

@@ -565,39 +565,41 @@ fork `e03752646`, the build the city runs, and at upstream `adae2e678` on
 timeout, two setup timeouts and a never-started rollback each read as
 described.
 
-## An attach starts a session that is not running
+## What an attach does to a session that is not running
 
-In the city's gc, `gc session attach` on a session whose runtime is not running
-starts the runtime from its own process: `cmdSessionAttach` calls the worker
-handle's `Attach`, whose `Manager.Attach` runs `ensureRunning` before it
-attaches. The runtime resumes the provider's conversation when the session
-keeps a session key, as a session its idle limit put to sleep does, and Gas
-City hands the agent its prompt again (*A manual session stays up until it is
-closed*, above). A session that a drain-ack ended under `wake_mode = "fresh"`
-keeps no key, because the drain-ack's patch writes `state=drained` and clears
-the key, so the attach starts a new conversation with no first message. Its
-prompt can then reach it only as session-start hook context, and `gc prime
---hook` primes only a session whose record reads active, awake, creating or
-start_pending, so that session comes up with no prompt. A start the controller
-makes hands the agent its prompt as its first message, and a nudge to a managed
-session that is not running queues its message and asks the controller for
-that start.
+`gc session attach` attaches to a running session as it stands. While the
+city's controller runs, it asks the controller to start a session whose
+runtime is not running: it records the wake `gc session wake` records, waits up
+to `--wait-timeout`, two minutes by default, for the session to run, and then
+attaches through a handle that attaches only to a running runtime and never
+starts one. A start the controller makes hands the agent its prompt as its
+first message. Under `wake_mode = "fresh"` the start clears the session key
+first, so it opens a new conversation, for a session its idle limit put to
+sleep too. A wake the controller will not act on, such as one for a suspended
+agent, fails the attach with the wake's reason, and so does a start that has
+not run within the wait. `--no-start` attaches only to a session already
+running and starts nothing.
 
-Upstream main's attach no longer starts the runtime itself while the city's
-controller runs. It records the same wake `gc session wake` records, waits up
-to `--wait-timeout` for the session to run, and attaches only to a running
-runtime. A session no configured agent runs is still resumed in the attach's
-own process, and `--no-start` attaches only to a session already running.
+The attach starts a runtime from its own process in two cases: a session no
+configured agent runs, which the controller never starts, and any session while
+no controller runs. That start resumes the provider's conversation when the
+session keeps a session key. A session that a drain-ack ended under
+`wake_mode = "fresh"` keeps none, because the drain-ack's patch clears it, so
+the attach starts a new conversation with no first message. Its prompt can then
+reach it only as session-start hook context, and `gc prime --hook` primes only
+a session whose record reads active, awake, creating or start_pending, so that
+session comes up with no prompt.
 
-*Evidence:* `cmdSessionAttach` (`cmd/gc/cmd_session.go`), `Manager.Attach`
-(`internal/session/manager.go`), `ensureRunningOn`
-(`internal/session/chat.go`), `AcknowledgeDrainPatch` and `SleepPatch`
+*Evidence:* `newSessionAttachCmd`, `cmdSessionAttachWith`, `sessionAttach.run`
+and `attachOnceControllerStarts` (`cmd/gc/cmd_session.go`), `preWakePatch`
+(`cmd/gc/session_wake.go`), `PreWakePatch` and `AcknowledgeDrainPatch`
 (`internal/session/lifecycle_transition.go`) and `primeHookLiveManagedSession`
-(`cmd/gc/cmd_prime.go`), read at the fork `cb80c5354`, the build the city runs,
-on 2026-11-10. Upstream changed the attach in `64ba02c02` (#9011, 2026-11-09):
-`cmdSessionAttachWith` (`cmd/gc/cmd_session.go`), read with
-`primeHookLiveManagedSession` and `queueManagedSessionNudgeWake`
-(`cmd/gc/cmd_nudge.go`) at upstream `9aaf32449` on 2026-11-10.
+(`cmd/gc/cmd_prime.go`), read at upstream `8b1d799b8` on 2026-11-10. The attach
+took this shape in `64ba02c02` (#9011, 2026-11-09). The fork `cb80c5354`, the
+build the city ran that day, predates it: its attach starts a session that is
+not running from its own process whether or not a controller runs
+(`Manager.Attach` in `internal/session/manager.go`, and `ensureRunningOn` in
+`internal/session/chat.go`).
 
 ## Refresh procedure
 
