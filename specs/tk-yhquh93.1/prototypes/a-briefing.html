@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>helm · A · Briefing</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="shared/base.css">
+<style>
+  .top { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 14px; padding: 10px 28px; background: rgba(244, 243, 239, 0.92); backdrop-filter: blur(6px); border-bottom: 1px solid var(--line); }
+  .brand { font-weight: 700; letter-spacing: 0.02em; }
+  .brand small { font-weight: 500; color: var(--ink-3); margin-left: 8px; }
+  .top input { margin-left: auto; width: 260px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--surface); font: inherit; }
+  .rigs { display: flex; gap: 4px; }
+  .rigs button { border: 0; background: transparent; padding: 3px 9px; border-radius: 8px; font-size: 12.5px; color: var(--ink-2); cursor: pointer; }
+  .rigs button[aria-pressed='true'] { background: var(--ink); color: #fff; }
+  .page { max-width: 1120px; margin: 0 auto; padding: 22px 28px 80px; }
+  .glance h1 { font-size: 26px; margin: 4px 0 6px; letter-spacing: -0.01em; }
+  .glance h1 em { font-style: normal; color: var(--you); }
+  .glance p { margin: 0 0 10px; color: var(--ink-2); font-size: 15px; }
+  .glance p b { color: var(--ink); }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-2); margin: 30px 0 10px; display: flex; gap: 10px; align-items: baseline; }
+  h2 span { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--ink-3); }
+  .group { background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 12px; overflow: hidden; }
+  .group > h3 { margin: 0; padding: 9px 16px; font-size: 13px; display: flex; gap: 8px; align-items: center; border-bottom: 1px solid var(--line); background: var(--surface-2); }
+  .group > h3 small { font-weight: 400; color: var(--ink-3); }
+  .row { display: grid; grid-template-columns: 34px minmax(0, 1fr) 190px 170px 46px 150px; align-items: center; gap: 12px; padding: 9px 16px; border-top: 1px solid var(--line); cursor: pointer; }
+  .group > .row:first-of-type, .group > h3 + .row { border-top: 0; }
+  .row:hover, .row.cursor { background: #fbf7f0; }
+  .row.cursor { box-shadow: inset 3px 0 0 var(--focus); }
+  .row .main { min-width: 0; }
+  .row .t { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .s { color: var(--ink-2); font-size: 13px; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+  .row .age { color: var(--ink-3); font-size: 12px; text-align: right; }
+  .row .go { justify-self: end; }
+  .row .chip { max-width: 190px; overflow: hidden; text-overflow: ellipsis; }
+  .row.cluster .t::before { content: '▸'; display: inline-block; width: 14px; color: var(--ink-3); transition: transform 0.15s; }
+  .row.cluster.open .t::before { transform: rotate(90deg); }
+  .members { display: none; background: var(--surface-2); }
+  .members.open { display: block; }
+  .members .row { padding-left: 40px; grid-template-columns: 34px minmax(0, 1fr) 190px 170px 46px 150px; }
+  .area { background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 8px; overflow: hidden; }
+  .area-head { display: grid; grid-template-columns: 6px 34px minmax(0, 220px) 200px 70px 120px minmax(0, 1fr) 40px; gap: 12px; align-items: center; padding: 10px 16px 10px 0; cursor: pointer; }
+  .area-head:hover, .area-head.cursor { background: #fbf7f0; }
+  .area-head.cursor { box-shadow: inset 3px 0 0 var(--focus); }
+  .stripe { align-self: stretch; }
+  .area-head .t { font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .area-head .t::before { content: '▸'; display: inline-block; width: 14px; color: var(--ink-3); transition: transform 0.15s; }
+  .area.open > .area-head .t::before { transform: rotate(90deg); }
+  .area-head .h { color: var(--ink-2); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .area-head .n { font-size: 12px; color: var(--ink-3); }
+  .area-body { display: none; border-top: 1px solid var(--line); padding: 4px 0 8px; background: var(--surface-2); }
+  .area.open > .area-body { display: block; }
+  .area-body h4 { margin: 10px 16px 4px 22px; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--ink-3); display: flex; align-items: center; gap: 7px; }
+  .item { display: grid; grid-template-columns: 12px minmax(0, 1fr) 170px 46px; gap: 10px; align-items: center; padding: 5px 16px 5px 22px; cursor: pointer; font-size: 13px; }
+  .item:hover, .item.cursor { background: #f3efe6; }
+  .item .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .item .t small { color: var(--ink-3); margin-left: 8px; }
+  .item .age { color: var(--ink-3); font-size: 12px; text-align: right; }
+  .area-body .area { margin: 6px 16px 6px 22px; box-shadow: inset 0 0 0 1px var(--line); }
+  .more { margin: 2px 22px; font-size: 12px; color: var(--focus); background: none; border: 0; cursor: pointer; padding: 3px 0; }
+  .talk { display: grid; grid-template-columns: 150px minmax(0, 1fr) 60px; gap: 12px; padding: 7px 16px; border-top: 1px solid var(--line); font-size: 13px; }
+  .talk:first-of-type { border-top: 0; }
+  .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: 460px; background: var(--surface); box-shadow: -10px 0 30px rgba(20, 22, 26, 0.12); transform: translateX(105%); transition: transform 0.22s ease; z-index: 40; overflow: auto; padding: 18px 22px 40px; }
+  .drawer.open { transform: none; }
+  .drawer .close { position: absolute; top: 12px; right: 14px; }
+  .hit { background: #fff3c4; border-radius: 3px; }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand">helm <small>A · Briefing</small></div>
+  <div class="rigs" id="rigs"></div>
+  <input id="q" type="search" placeholder="Search titles and asks   /" aria-label="search">
+</header>
+<main class="page">
+  <section class="glance" id="glance"></section>
+  <section id="needs"></section>
+  <section id="stand"></section>
+  <section id="loose"></section>
+  <section id="talks"></section>
+</main>
+<aside class="drawer" id="drawer" aria-label="detail"><button class="btn small close" id="close">Close · Esc</button><div id="drawer-body"></div></aside>
+<div class="proto-note">Prototype on a sample board · actions are inert</div>
+<script src="shared/sample-board.js"></script>
+<script src="shared/model.js"></script>
+<script src="shared/ui.js"></script>
+<script src="a-briefing.js"></script>
+</body>
+</html>

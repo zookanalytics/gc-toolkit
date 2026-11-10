@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>helm · B · Portfolio</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="shared/base.css">
+<style>
+  body { overflow: hidden; }
+  .top { display: flex; align-items: center; gap: 14px; padding: 10px 24px; border-bottom: 1px solid var(--line); background: var(--bg); height: 52px; }
+  .brand { font-weight: 700; letter-spacing: 0.02em; }
+  .brand small { font-weight: 500; color: var(--ink-3); margin-left: 8px; }
+  .top input { width: 240px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--surface); font: inherit; }
+  .app { display: grid; grid-template-columns: minmax(0, 1fr) 370px; height: calc(100vh - 52px); }
+  #main { overflow: auto; padding: 18px 24px 60px; }
+  #rail { overflow: auto; border-left: 1px solid var(--line); background: var(--surface); padding: 14px 18px 40px; }
+  .glance { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
+  .g { background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); padding: 12px 14px; }
+  .g b { display: block; font-size: 28px; line-height: 1.1; letter-spacing: -0.01em; }
+  .g span { color: var(--ink-2); font-size: 12.5px; }
+  .g.you b { color: var(--you); }
+  .g.you { box-shadow: var(--shadow), inset 0 0 0 1px var(--you-line); }
+  .g small { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--ink-3); margin-bottom: 4px; }
+  .sec { display: flex; align-items: baseline; gap: 10px; margin: 6px 0 10px; }
+  .sec h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-2); margin: 0; }
+  .sec span { color: var(--ink-3); font-size: 12.5px; }
+  .sec .legend { margin-left: auto; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 12px; margin-bottom: 22px; }
+  .card { position: relative; background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); padding: 13px 14px 11px; cursor: pointer; display: flex; flex-direction: column; gap: 8px; border-top: 4px solid var(--hue); transition: box-shadow 0.15s, transform 0.15s; min-height: 168px; }
+  .card:hover, .card.lit { box-shadow: var(--shadow-lift); transform: translateY(-1px); }
+  .card.lit { outline: 2px solid var(--you); outline-offset: 1px; }
+  .card.wants { box-shadow: var(--shadow), inset 0 0 0 1px var(--you-line); }
+  .card .hd { display: flex; align-items: center; gap: 8px; }
+  .card .t { font-weight: 650; font-size: 14.5px; line-height: 1.25; flex: 1; min-width: 0; }
+  .card .rig { font-size: 11.5px; color: var(--ink-3); }
+  .card .mid { display: flex; justify-content: space-between; align-items: center; font-size: 12.5px; color: var(--ink-2); }
+  .card .hl { font-size: 13px; color: var(--ink-2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 2.9em; }
+  .card .ft { display: flex; gap: 10px; font-size: 11.5px; color: var(--ink-3); margin-top: auto; align-items: center; }
+  .card .ft .age { margin-left: auto; }
+  .card .subs { display: flex; flex-wrap: wrap; gap: 5px; }
+  .card .subs .chip { font-size: 11.5px; }
+  .card.loose { --hue: #cdd2da; border-top-style: dashed; }
+  .card.dim { opacity: 0.35; }
+  /* focus view */
+  .crumb { display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--ink-3); margin-bottom: 10px; }
+  .crumb button { border: 0; background: none; color: var(--focus); cursor: pointer; padding: 0; font: inherit; }
+  .fhead { background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); padding: 16px 18px 14px; border-top: 5px solid var(--hue); margin-bottom: 14px; }
+  .fhead .row1 { display: flex; align-items: center; gap: 10px; }
+  .fhead h1 { margin: 0; font-size: 22px; letter-spacing: -0.01em; }
+  .fhead .hl { margin: 8px 0 12px; color: var(--ink-2); font-size: 14.5px; max-width: 900px; }
+  .fhead .legend { margin-top: 8px; }
+  .subrow { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 14px; }
+  .subrow button { border: 0; cursor: pointer; background: var(--surface); box-shadow: var(--shadow); border-radius: 9px; padding: 7px 11px; display: flex; gap: 10px; align-items: center; font-size: 13px; border-left: 4px solid var(--hue); }
+  .lanes { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; align-items: start; }
+  .lane { background: rgba(255, 255, 255, 0.5); border-radius: var(--radius); padding: 8px; min-height: 120px; box-shadow: inset 0 0 0 1px var(--line); }
+  .lane h3 { margin: 2px 4px 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--ink-2); display: flex; align-items: center; gap: 7px; }
+  .lane h3 .num { margin-left: auto; color: var(--ink-3); }
+  .lane.you { background: #fff8ef; box-shadow: inset 0 0 0 1px var(--you-line); }
+  .k { background: var(--surface); border-radius: 8px; box-shadow: var(--shadow); padding: 8px 10px; margin-bottom: 7px; cursor: pointer; font-size: 13px; }
+  .k:hover, .k.sel { box-shadow: var(--shadow-lift); }
+  .k.sel { outline: 2px solid var(--focus); }
+  .k .t { font-weight: 600; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .k.stuck { box-shadow: var(--shadow), inset 3px 0 0 var(--stuck); }
+  .k .s { color: var(--ink-2); font-size: 12.5px; margin-top: 3px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .k .m { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; margin-top: 6px; font-size: 11.5px; color: var(--ink-3); }
+  .k .m .chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+  .unlisted { font-size: 12px; color: var(--ink-3); padding: 6px 4px; border-top: 1px dashed var(--line-2); margin-top: 4px; }
+  /* rail */
+  .rail-h { display: flex; align-items: baseline; gap: 8px; margin: 2px 0 10px; }
+  .rail-h h2 { margin: 0; font-size: 16px; }
+  .rail-h span { color: var(--ink-3); font-size: 12.5px; }
+  .q { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 4px 8px; padding: 9px 8px; border-radius: 9px; cursor: pointer; }
+  .q + .q { border-top: 1px solid var(--line); }
+  .q:hover, .q.cursor { background: #fbf7f0; }
+  .q.cursor { box-shadow: inset 3px 0 0 var(--focus); }
+  .q .t { font-weight: 600; font-size: 13.5px; line-height: 1.3; }
+  .q .s { grid-column: 2; color: var(--ink-2); font-size: 12.5px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .q .m { grid-column: 2; display: flex; gap: 8px; align-items: center; font-size: 11.5px; color: var(--ink-3); flex-wrap: wrap; }
+  .q.cluster .t::after { content: ' ▾'; color: var(--ink-3); font-weight: 400; }
+  .q-members { padding-left: 38px; display: none; }
+  .q-members.open { display: block; }
+  .q-members .q { grid-template-columns: 0 minmax(0, 1fr); padding: 6px 8px; }
+  .g.talks:hover { box-shadow: var(--shadow-lift); }
+  kbd { font: 11px var(--mono); background: var(--surface); border-radius: 4px; padding: 0 4px; box-shadow: inset 0 0 0 1px var(--line-2); }
+  .back { border: 0; background: none; color: var(--focus); cursor: pointer; padding: 0; margin-bottom: 10px; font: inherit; font-size: 13px; }
+  .fade-in { animation: fi 0.18s ease; }
+  @keyframes fi { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand">helm <small>B · Portfolio</small></div>
+  <span class="muted" style="margin-left:auto;font-size:12px"><kbd>n</kbd> next for you · <kbd>/</kbd> search · <kbd>Esc</kbd> back</span>
+  <input id="q" type="search" placeholder="Search   /" aria-label="search" style="margin-left:12px">
+</header>
+<div class="app">
+  <main id="main"></main>
+  <aside id="rail" aria-label="needs you"></aside>
+</div>
+<div class="proto-note">Prototype on a sample board · actions are inert</div>
+<script src="shared/sample-board.js"></script>
+<script src="shared/model.js"></script>
+<script src="shared/ui.js"></script>
+<script src="b-portfolio.js"></script>
+</body>
+</html>
