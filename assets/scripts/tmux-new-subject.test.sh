@@ -3,7 +3,7 @@
 # opens `gc-helm engage --new-subject` in a fresh tmux window. gc-helm.sh is
 # stubbed, so no live city or gc is needed; the test proves the wrapper hands
 # engage the right verb and flags and wires the city env the binding baked in.
-#   (RUN)    it invokes gc-helm.sh engage --new-subject --no-attach
+#   (RUN)    it invokes gc-helm.sh engage --new-subject, which opens the form
 #   (CITY)   it exports the baked --city-path as GC_CITY_PATH for gc
 #   (NOCITY) with no --city-path it still runs (gc falls back to its own default)
 #   (NOCFG)  a missing config-dir is refused (exit 1)
@@ -38,14 +38,15 @@ echo "ARGS=$*"
 STUB
 chmod +x "$CFG/assets/scripts/gc-helm.sh"
 
-echo "# it runs engage --new-subject --no-attach, exporting the baked city path"
+echo "# it runs engage --new-subject, exporting the baked city path"
 OUT="$(sh "$SCRIPT" "$CFG" --city-path /my/city </dev/null 2>&1)"
-has "$OUT" "ARGS=engage --new-subject --no-attach" "(RUN) invokes gc-helm engage --new-subject --no-attach"
+has "$OUT" "ARGS=engage --new-subject" "(RUN) invokes gc-helm engage --new-subject"
+hasnt "$OUT" "--no-attach" "(RUN) …with no flag of its own: the form decides whether to attach"
 has "$OUT" "CITY=/my/city" "(CITY) exports --city-path as GC_CITY_PATH for gc"
 
 echo "# with no --city-path it still runs (gc uses its own default)"
 OUT="$(sh "$SCRIPT" "$CFG" </dev/null 2>&1)"
-has "$OUT" "ARGS=engage --new-subject --no-attach" "(NOCITY) still invokes engage"
+has "$OUT" "ARGS=engage --new-subject" "(NOCITY) still invokes engage"
 has "$OUT" "CITY=<unset>" "(NOCITY) leaves GC_CITY_PATH unset rather than exporting an empty one"
 
 echo "# a missing config-dir is refused"

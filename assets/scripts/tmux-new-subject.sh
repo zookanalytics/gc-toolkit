@@ -1,10 +1,9 @@
 #!/bin/sh
-# tmux-new-subject.sh — prefix+A: raise a brand-new topic and converse about it
-# now. Runs `gc-helm engage --new-subject` as a REAL interactive prompt (rig,
-# subject, model) in the fresh tmux window the binding opened. tmux's one-line
-# command-prompt cannot carry a subject line plus a menu, so the prompt needs a
-# full terminal; the sibling prefix+a files a bead for triage, this one opens a
-# conversation.
+# tmux-new-subject.sh — prefix+A: raise a brand-new topic and converse about it.
+# Runs `gc-helm engage --new-subject` in the fresh tmux window the binding
+# opened, where it opens the conversation form on a new topic: the question, the
+# rig, the model and whether to attach on one screen. The sibling prefix+a files
+# a bead for triage; this one starts a conversation.
 #
 # Usage: tmux-new-subject.sh <config-dir> [--city-path <path>]
 #
@@ -29,11 +28,12 @@ done
 HELM="$CONFIGDIR/assets/scripts/gc-helm.sh"
 [ -f "$HELM" ] || { echo "tmux-new-subject.sh: gc-helm.sh not found at $HELM" >&2; exit 1; }
 
-# --no-attach spawns and binds the sitting without taking over this window — the
-# operator cycles to it from prefix+S, the way they work. engage prints the
-# spawn summary (or any refusal) on exit, so hold the window open for a keypress
-# rather than let it close over the one line that says what happened. On a pipe
-# (a hermetic test) the read returns at once and nothing blocks.
-sh "$HELM" engage --new-subject --no-attach || true
+# The form saves the question and starts its sitting, and attaches to the
+# sitting once it starts unless its Attach field is off. Either way its last
+# lines say what happened: engage's account of the sitting once the attach
+# returns, or the form's note of what it saved or kept. So the window is held
+# open for a keypress rather than closing over them. On a pipe (a hermetic test)
+# the read returns at once and nothing blocks.
+sh "$HELM" engage --new-subject || true
 printf '\n[new-subject: done — press Enter to close this window] '
 read -r _ || true
