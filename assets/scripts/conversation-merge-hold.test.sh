@@ -298,7 +298,7 @@ printf 'pr-sitting-comment %s\n' "$*" >> "$CALLS"
 C
 chmod +x "$P"/*.sh
 for _s in converse-signoff.sh gc-helm.sh human-gate.sh conversation.sh work-outcome.sh bd-lib.sh \
-          review-verdict.sh review-dismissal.sh bead-store.sh rig-map.sh; do
+          review-verdict.sh review-dismissal.sh bead-store.sh rig-map.sh dispatch-path.sh; do
     ln -s "$HERE/$_s" "$P/$_s"
 done
 
