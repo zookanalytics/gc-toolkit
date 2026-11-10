@@ -5,20 +5,25 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/zookanalytics/gc-toolkit/services/gctk/conversation"
 )
 
 // Blocker is the far end of one `blocks` edge, in the fields [Holding] and
 // [IsPersonBlocker] read of it. A [Store] fills it from its own read, and passes
-// the status and the issue type as they read, in any case. Metadata is the far
-// bead's metadata whole, each value as [Row.Metadata] renders it, so the
-// definition decides which keys it reads: the route of any blocker, and the
-// facts a merge anchor records about its own PR.
+// the status and the issue type as they read, in any case. Assignee is the far
+// bead's assignee as it reads, which tells a conversation by its row
+// ([conversation.IsCandidate]). Metadata is the far bead's metadata whole, each
+// value as [Row.Metadata] renders it, so the definition decides which keys it
+// reads: the route of any blocker, and the facts a merge anchor records about
+// its own PR.
 type Blocker struct {
 	ID        string
 	Title     string
 	Status    string
 	IssueType string
 	AwaitType string
+	Assignee  string
 	Metadata  map[string]string
 }
 
@@ -36,17 +41,22 @@ func IsHumanGate(issueType, awaitType string) bool {
 }
 
 // IsPersonBlocker reports whether a blocker is a person's to clear and not a
-// human gate: a live blocker routed to a person (gc.routed_to=human), or a
-// decision. No automated actor will clear it, so it holds a PR as held: blocked.
-// A human gate is never one, whatever its route, because held: gate is what
-// counts it. A blocker with no status reads open, and only a closed one is not
-// live. The helm board asks it of any bead's blockers, for the rows that ask a
-// person for something.
+// human gate: a live blocker routed to a person (gc.routed_to=human), a
+// decision, or a conversation. A conversation on an open PR holds the PR's
+// merge through the anchor's `blocks` edge onto it, and a blocker reads as one
+// by its row ([conversation.IsCandidate]): a task in the operator's queue or
+// held by a sitting, which a person's ruling or dismissal closes. No automated
+// actor will clear any of them, so each holds a PR as held: blocked. A human
+// gate is never one, whatever its route, because held: gate is what counts it.
+// A blocker with no status reads open, and only a closed one is not live. The
+// helm board asks it of any bead's blockers, for the rows that ask a person for
+// something.
 func IsPersonBlocker(b Blocker) bool {
 	if !b.open() || IsHumanGate(b.IssueType, b.AwaitType) {
 		return false
 	}
-	return b.Metadata["gc.routed_to"] == "human" || strings.EqualFold(b.IssueType, "decision")
+	return b.Metadata["gc.routed_to"] == "human" || strings.EqualFold(b.IssueType, "decision") ||
+		conversation.IsCandidate(strings.ToLower(b.IssueType), b.Assignee, b.ID)
 }
 
 // mergeResultPullRequest is the merge_result of a merge anchor whose pull
@@ -110,9 +120,10 @@ type Holds struct {
 	// them.
 	Gates []Blocker
 	// Owed is every other open bead the walk reaches that a person owes the next
-	// move on: a blocker a person has to clear ([IsPersonBlocker]), or a merge
-	// anchor whose own state is a person's to move ([awaitsPerson]), such as
-	// another pull request that waits on a review. A merge anchor is weighed once
+	// move on: a blocker a person has to clear ([IsPersonBlocker]), such as a
+	// conversation that holds a pull request's merge, or a merge anchor whose own
+	// state is a person's to move ([awaitsPerson]), such as another pull request
+	// that waits on a review. A merge anchor is weighed once
 	// the walk has read its own edges, so it comes after the other beads at its
 	// depth.
 	Owed []Blocker
@@ -125,8 +136,9 @@ type Holds struct {
 // itself, and by another pull request that rework waits on while that pull
 // request waits on a person.
 //
-// It reads only the edges read returns, so a conversation, which tracks its bead
-// and blocks nothing, never counts. An edge onto a closed blocker is not
+// It reads only the edges read returns. A conversation tracks its bead and
+// blocks nothing but an open PR's anchor, whose merge it holds, so it counts
+// only there, as a bead a person owes. An edge onto a closed blocker is not
 // followed, so nothing behind it holds anything. A bead that holds the root but
 // waits on another is followed too, so what it waits on is named beside it.
 //

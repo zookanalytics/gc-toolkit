@@ -149,15 +149,16 @@ type Facts struct {
 	// pass's blocker probe and its finalize gate (assets/scripts/finalize-gate.sh),
 	// or by the open blocker the gate holds, through that same probe. So a gate
 	// reads as a hold, as merge_hold and rebase_hold do, whatever work is in
-	// flight. A conversation about the anchor tracks it and blocks nothing, so it
-	// is never among them.
+	// flight. A conversation is no human gate, so it is never among them: one
+	// that holds the anchor's merge is among Owed.
 	Gates []Blocker
 	// Owed are the beads other than human gates that a person owes the next move
 	// on, on the anchor's own blockers or behind a bead it waits on, nearest
 	// first, as [Holding] reads them ([Holds.Owed]): a decision, a bead routed to
-	// a person, or another merge anchor whose own state is a person's to move,
-	// such as a PR waiting on a review that a rework of this one waits for. No
-	// automated actor will move any of them, so each holds the PR.
+	// a person, a conversation that holds the PR's merge until it closes, or
+	// another merge anchor whose own state is a person's to move, such as a PR
+	// waiting on a review that a rework of this one waits for. No automated
+	// actor will move any of them, so each holds the PR.
 	Owed []Blocker
 	// PRPosture is metadata.pr_posture, stored value@oid@instant. The value is
 	// read before the first '@', and the oid after it is the head the posture

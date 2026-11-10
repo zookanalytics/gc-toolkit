@@ -3006,7 +3006,9 @@ func TestMergeAnchorAsksItsGateAtEveryPosition(t *testing.T) {
 
 // The row of a PR a gate on its rework holds names the gate, reads as what a
 // person owes from the gate's own age, and reads held as the label does.
-// Resolving the gate clears each of those, and a conversation changes none.
+// Resolving the gate clears each of those, and a conversation that only tracks
+// the anchor changes none. One that holds the PR's merge, through the anchor's
+// blocks edge onto it, asks the operator and holds no work.
 func TestPRRowNamesAGateBehindItsRework(t *testing.T) {
 	at := fixtureNow.Add(-time.Hour)
 	md := map[string]string{
@@ -3060,6 +3062,26 @@ func TestPRRowNamesAGateBehindItsRework(t *testing.T) {
 		if after.Needs != before.Needs || len(after.PRHeld) != 0 || after.WorkHeld || after.PRPhase != before.PRPhase {
 			t.Errorf("needs=%q pr_held=%v work_held=%v phase=%q, want what the row read without it: needs=%q phase=%q",
 				after.Needs, after.PRHeld, after.WorkHeld, after.PRPhase, before.Needs, before.PRPhase)
+		}
+	})
+
+	t.Run("a conversation that holds the anchor's merge", func(t *testing.T) {
+		const alias = "gc-toolkit/converse-opus.c-tk-c"
+		hold := Blocker{ID: "tk-c", Title: "should this land as built?", Status: "in_progress", IssueType: "task",
+			Assignee: alias, CreatedAt: daysAgo(1), Wait: WaitPending}
+		anchors := withPRs([]Anchor{mergeAnchor("tk-a", md, hold), conversationAnchor("tk-c", "tk-a", hold.Title, alias)})
+		tile := mustTile(t, buildBoard(anchors, fixtureNow, false, nil, Facts{}), "tk-a")
+		if tile.Needs != "asking: should this land as built?" {
+			t.Errorf("needs = %q, want it to name the conversation", tile.Needs)
+		}
+		if !slices.Equal(tile.PRHeld, []string{string(prstatus.HeldBlocked)}) || tile.PRPhase != PhaseNeedsAttention {
+			t.Errorf("pr_held = %v, pr_phase = %q, want the PR held: blocked, needs-attention", tile.PRHeld, tile.PRPhase)
+		}
+		if !tile.Held || tile.WorkHeld {
+			t.Errorf("held=%v work_held=%v, want a row the operator's side has with its work free", tile.Held, tile.WorkHeld)
+		}
+		if !tile.Owed || !tile.PROwedSince.Equal(hold.CreatedAt) {
+			t.Errorf("owed=%v pr_owed_since=%v, want it owed from the conversation's age %v", tile.Owed, tile.PROwedSince, hold.CreatedAt)
 		}
 	})
 

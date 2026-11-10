@@ -95,8 +95,11 @@ held row, and empty on a row nothing holds. `work_held` refines `held`: it is
 true when an open human gate holds the bead or an acceptance an earlier Accept
 left unfinished keeps it, so the operator's answer is required before the work
 can move. A held row where it is false only has a conversation on it, which
-blocks nothing, and the board marks it apart with a chip reading
-`conversation` rather than `gate`. `acceptable` reads
+holds no work, and the board marks it apart with a chip reading
+`conversation` rather than `gate`. A conversation on an open PR holds only the
+PR's merge, through the anchor's `blocks` edge onto it, and the PR's row reads
+it as a bead a person owes: NEEDS reads `asking: <its title>` and the PR is
+`held: blocked`. `acceptable` reads
 Accept's three conditions (`docs/human-engagement.md`, "Accept").
 `accept_withheld` is set on a row that
 meets the first two and fails the third: it names the open human gates that
@@ -297,7 +300,7 @@ which is where the derivation reads the hypothesis.
 `gate` and `conversation` are WRAPPERS: each folds onto the rows of the beads
 it concerns (`board.foldWrappers`), which it marks `held`. A gate also marks
 them `work_held`, because it holds their work until a person clears it, and a
-conversation does not, because it blocks nothing. An open gate makes each bead
+conversation does not, because it holds no work. An open gate makes each bead
 it blocks owed, even while work on the bead is in flight, and NEEDS names the
 gate's title, or `N× — a · b` over several. A conversation not in session makes
 its bead owed, one in the operator's queue or one whose sitting's session has
