@@ -954,7 +954,7 @@ echo "# the session a conversation is bound to is not closed as cut short, even 
 # hands engage that sitting to attach.
 export LIVE_SITTINGS="gc-60=gc-toolkit/gc-toolkit.tk-conv" ALIAS_HELD=gc-60
 reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
-LIVE_STATES="gone active" run_engage tk-subj
+FAKE_CLOCK="$TMP/clock" GC_HELM_ENGAGE_WAIT_TIMEOUT=60 LIVE_STATES="gone active" run_engage tk-subj
 eq "$RC" 0 "(CUT-SHORT-OWN) engaging a conversation whose sitting the first listing missed exits 0"
 hasnt "$CALLED" "session close" "(CUT-SHORT-OWN) …closing nothing, not the sitting the conversation is bound to"
 has "$CALLED" "session attach gc-60" "(CUT-SHORT-OWN) …and attaching that sitting"
