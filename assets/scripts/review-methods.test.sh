@@ -248,6 +248,8 @@ hasF "$ARCH_SKILL" '`docs/architecture.md: incomplete`' "…and files the rest o
 hasF "$ARCH_SKILL" 'File it the same way, and do not hold the change for it.' "…files a gap the change does not touch without holding the change for it"
 hasF "$ARCH_SKILL" 'A gap in the architecture the change does touch is no reason to pass the change' "…and passes no change on a gap in the architecture it touches"
 notF "$ARCH_SKILL" 'not a reason to pass or fail the change' "…so no missing reference lets a change through unjudged"
+hasF "$ARCH_SKILL" "first instance>: aggravated pattern\`" "…files an aggravated pattern's rearchitecture under a token too"
+notF "$ARCH_SKILL" 'bd create' "…and files every follow-up through mol-review's probe, never a create of its own"
 notF "$ARCH_SKILL" 'divergence lens' "the pack's arch skill, which every rig's arch review loads, carries none of gc-toolkit's lens"
 # This checkout's guidance, committed in a scratch repository and read back
 # through --extension at that commit, the read load-dispatch makes for a review.

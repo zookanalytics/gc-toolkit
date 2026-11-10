@@ -59,12 +59,15 @@ pass the change, and the questions below judge it as they would anywhere else.
 2. **Does the change move the architecture?** A change moves it when it changes
    what a section of the standard's skeleton states: it adds or removes a domain
    or gives a domain another's job, changes what the system talks to or where
-   its boundary lies, adds or changes a cross-cutting rule or a decision, or
-   takes on or retires debt. If it does, is the move justified, weighed against
-   the quality goals the document ranks, and is it reflected in the architecture
-   document in this same PR? An architecture change the document does not
-   record is unfinished; an architecture change a design fitting the current
-   architecture would not have needed is a finding to address.
+   its boundary lies, adds or changes a cross-cutting rule or an architecture
+   decision, or takes on or retires debt. A part's own choice moves none of
+   them, however its design weighed it (gc-toolkit.architecture-document: The
+   admission test). When the change does move it, is the move justified,
+   weighed against the quality goals the document ranks, and is it reflected in
+   the architecture document in this same PR? An architecture change the
+   document does not record is unfinished; an architecture change a design
+   fitting the current architecture would not have needed is a finding to
+   address.
 3. **Does the document meet the standard?** Hold each line the change adds to
    the architecture document, or changes in it, to the standard: the line sits
    in the section that holds its subject, passes the admission test, has the
@@ -76,7 +79,8 @@ Every finding on the architecture document, and every finding that asks for a
 line in it, names the part of the standard it rules from: a section's heading
 or a rule's bold lead, as in `(gc-toolkit.architecture-document: Decisions)`.
 A finding asks for nothing the standard rules out, such as a link to a spec,
-mechanism a reader learns from the code, or a reason no reader would get wrong.
+mechanism a reader learns from the code, a part's own choice, or a reason no
+reader would get wrong.
 When the document leans on a spec for standing practice, such as how the system
 is set up, the finding asks the document to drop the link. Moving that practice
 into a living doc is a follow-up, filed the way `mol-review` files a finding the
@@ -95,14 +99,13 @@ stance names:
 
 - **Low impact, a simple refactor** — make it a finding to fix in this PR, and
   `request-changes` carries it.
-- **Needs a broad rearchitecture** — file a followup bead; it belongs in its own
-  PR, not bolted onto this one.
-
-```bash
-gc bd create "arch: <the issue and why it is followup, not this PR's>" -t task \
-  -d "Found during the arch review of <anchor_bead>. <what the pattern is, how many
-instances now exist, and the rearchitecture that would resolve it>"
-```
+- **Needs a broad rearchitecture** — it belongs in its own PR, not bolted onto
+  this one. File it the way `mol-review` files a finding the change did not
+  cause, under the token
+  `<the path of the pattern's first instance>: aggravated pattern`, so a later
+  review that adds another instance finds that bead. Its body names the
+  pattern, how many instances now exist, and the rearchitecture that would
+  resolve it.
 
 ## What blocks
 

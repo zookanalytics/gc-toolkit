@@ -30,10 +30,12 @@ The sections are borrowed rather than invented: the
   around the gap, and Debt names the gap.
 - **The big picture first.** It opens on what the system is for and the
   domains it is made of, such as its schemas, before any one part's detail.
-- **The architecture's altitude.** A line states a fact at the level where it
-  holds. A rule for a class of things is stated for the class, with a library
-  or a component named only as an instance of it. A fact about one part names
-  that part, and no part stands for the whole.
+- **The architecture's altitude.** The document goes down to its parts and
+  stops there: what a part is responsible for is the document's, and how the
+  part carries it out is the part's own. A line states a fact at the level
+  where it holds. A rule for a class of things is stated for the class, with a
+  library or a component named only as an instance of it. A fact about one part
+  names that part, and no part stands for the whole.
 - **Facts, not explanation.** A decision is stated as a fact, and the line
   stops there. A reason appears only where a reader would otherwise get it
   wrong, in one short line.
@@ -73,10 +75,10 @@ the document sits in one of them.
    bounded contexts)
 4. **Cross-cutting rules.** Rules every part follows, such as how the parts
    talk to each other. (arc42 section 8)
-5. **Decisions.** Each decision as a one-line fact, with a one-line reason
-   only where a reader would otherwise get it wrong, and a link to its
-   decision record when it has one, never to a spec. (arc42 section 9,
-   decision records)
+5. **Decisions.** Each architecture decision as a one-line fact, with a
+   one-line reason only where a reader would otherwise get it wrong, and a
+   link to its decision record when it has one, never to a spec. A part's own
+   choice is not one (The admission test). (arc42 section 9, decision records)
 6. **Debt.** Each place where what is built falls short of the architecture
    the sections above describe. An entry names the gap, why a reader must know
    it, and the work that retires it, such as the epic or bead that carries that
@@ -90,11 +92,18 @@ glossary fold into the sections above.
 
 ## The admission test
 
-A line belongs only if it shapes more than one part or would be costly to
-reverse, and a reader could not learn it from the code. Anything else goes in
-the code, in that part's own doc, or nowhere. A component's behavior, a
-script's guards and a suite's coverage are all learned from the code, so none
-of them passes.
+A line belongs only if it shapes more than one part, or the system as a whole,
+and a reader could not learn it from the code. Anything else goes in the code,
+in that part's own doc, or nowhere. A component's behavior, a script's guards
+and a suite's coverage are all learned from the code, so none of them passes.
+
+A decision is held to the same test. A choice about how one part carries out
+its own responsibility, such as the mechanism or the vendor feature it does the
+job with, is that part's own choice: reversing it would change that part alone.
+It fails even when its design weighed alternatives, reversing it would be
+costly, or its reason is one the code cannot show, and its home is that part's
+own doc. What the choice changes at the architecture's altitude stays, such as a
+responsibility the part takes on or data a boundary must keep out.
 
 ## Entry shape and budget
 
