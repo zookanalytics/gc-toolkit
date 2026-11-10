@@ -36,7 +36,8 @@ and each entry runs a gc-helm verb, so the page itself starts, reads and writes
 nothing.
 
 **Opening a named seat's sitting with its prompt, from any state.**
-`gc session attach` covers it whole. It attaches to a running session as it
+`gc session attach` covers it, all but one window inside the attach that the
+next paragraph names. It attaches to a running session as it
 stands. While the city's controller runs, it asks the controller to start a
 session whose runtime is not running, recording the wake `gc session wake`
 records, waits up to `--wait-timeout` (two minutes by default) for the session
@@ -53,6 +54,20 @@ the seat's name and nothing else: it reads no session state, sends no nudge,
 records no wake of its own and runs no wait. The verb adds only what the attach
 does not print, the line that names how to return once the terminal comes back
 and the re-run once an attach fails.
+
+The window is a stop that completes inside the attach. A seat that runs at the
+attach's own check (`a.sp.IsRunning` in `sessionAttach.run`) is attached through
+the session's handle, whose `Manager.Attach` (`internal/session/manager.go`)
+starts the runtime from the attach's process when it has stopped since that
+check and no stop is pending on the seat's record (`startRefusal` and
+`ensureRunningOn`, `internal/session/chat.go`). So a po whose sitting ends in
+the span between the check and the attach comes up without the controller's
+start. The pack has no primitive that closes it. `--no-start` attaches through
+the runtime-only handle, which never starts a seat, so a seat that is not running
+would need the pack's own start again. A state read before the attach leaves a
+wider window of the same kind, and an attach with `--no-start` followed by a
+plain attach once it refuses leaves this one in the second call. The window is
+Gas City's to close, and it is recorded as upstream finding tk-dmqcnln.
 
 The po wakes fresh (`wake_mode = "fresh"`), and the controller's start clears a
 fresh session's key before it starts it (`preWakePatch`, `cmd/gc/session_wake.go`,

@@ -580,12 +580,19 @@ agent, fails the attach with the wake's reason, and so does a start that has
 not run within the wait. `--no-start` attaches only to a session already
 running and starts nothing.
 
-The attach starts a runtime from its own process in two cases: a session no
-configured agent runs, which the controller never starts, and a session while
-no controller runs. The second case leaves out a session still waiting for the
-reconciler's start, in a city registered with the supervisor while the
-supervisor does not run either: there the attach starts nothing, exits non-zero
-and says to start the supervisor. A start from the attach's own process resumes
+The attach starts a runtime from its own process for a session no configured
+agent runs, which the controller never starts, and for a session while no
+controller runs. A session still waiting for the reconciler's start, in a city
+registered with the supervisor while the supervisor does not run either, is the
+exception: there the attach starts nothing, exits non-zero and says to start the
+supervisor. The attach also starts a runtime from its own process when the
+runtime stops between the attach's check that it runs and the attach itself. A
+session found running is attached through the session's own handle, which
+starts a runtime it finds stopped once no stop is pending on the session's
+record, and only `--no-start` attaches it through the runtime-only handle. That
+span holds the build of the handle and one read of the session's record, and
+only a stop that completes inside it makes the attach start the runtime. A
+start from the attach's own process resumes
 the provider's conversation when the session keeps a session key. A session
 that a drain-ack ended under
 `wake_mode = "fresh"` keeps none, because the drain-ack's patch clears it, so
@@ -599,8 +606,10 @@ and `attachOnceControllerStarts` (`cmd/gc/cmd_session.go`),
 `pendingStartAwaitsSupervisor` (`cmd/gc/control_plane.go`),
 `sessionStartAwaitsSupervisor` (`cmd/gc/cmd_supervisor_city.go`), `preWakePatch`
 (`cmd/gc/session_wake.go`), `PreWakePatch` and `AcknowledgeDrainPatch`
-(`internal/session/lifecycle_transition.go`) and `primeHookLiveManagedSession`
-(`cmd/gc/cmd_prime.go`), read at upstream `8b1d799b8` on 2026-11-10. The attach
+(`internal/session/lifecycle_transition.go`), `primeHookLiveManagedSession`
+(`cmd/gc/cmd_prime.go`), `Manager.Attach` (`internal/session/manager.go`) and
+`startRefusal` and `ensureRunningOn` (`internal/session/chat.go`), read at
+upstream `8b1d799b8` on 2026-11-10. The attach
 took this shape in `64ba02c02` (#9011, 2026-11-09). The fork `cb80c5354`, the
 build the city ran that day, predates it: its attach starts a session that is
 not running from its own process whether or not a controller runs
