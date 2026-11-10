@@ -97,12 +97,13 @@ and a reader could not learn it from the code. Anything else goes in the code,
 in that part's own doc, or nowhere. A component's behavior, a script's guards
 and a suite's coverage are all learned from the code, so none of them passes.
 
-A decision is held to the same test. A choice about how one part carries out
-its own responsibility, such as the mechanism or the vendor feature it does the
-job with, is that part's own choice: reversing it would change that part alone.
-It fails even when its design weighed alternatives, reversing it would be
-costly, or its reason is one the code cannot show, and its home is that part's
-own doc. What the choice changes at the architecture's altitude stays, such as a
+A decision is held to the same test. How a part carries out a responsibility
+the document gives it, such as the mechanism or the vendor feature it does the
+job with, is that part's own choice. It stays the part's own when another
+part's code calls it or another system keeps what it records, and it fails the
+test even when its design weighed alternatives, reversing it would be costly,
+or its reason is one the code cannot show. Its home is that part's own doc.
+What the choice changes at the architecture's altitude stays, such as a
 responsibility the part takes on or data a boundary must keep out.
 
 ## Entry shape and budget
