@@ -164,14 +164,23 @@ func (o *Actuator) Run(ctx context.Context, verb, bead string) (server.ToolResul
 		// A wiring fault, not a tool failure: the handlers pass fixed verbs.
 		return server.ToolResult{}, fmt.Errorf("unknown helm write verb %q", verb)
 	}
+	return Exec(ctx, o.script, o.dir, o.timeout, args...)
+}
 
-	ctx, cancel := context.WithTimeout(ctx, o.timeout)
+// Exec runs `<script> <args...>` under timeout and returns its result, the one
+// way this module runs gc-helm.sh: the board's write routes through Run, and the
+// terminal conversation form for every verb it reads and writes through
+// (internal/form). A non-empty dir is the city the run works in. A non-zero exit
+// is a result, not an error; the errors are [server.ErrToolTimeout] and
+// [server.ErrToolUnavailable].
+func Exec(ctx context.Context, script, dir string, timeout time.Duration, args ...string) (server.ToolResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, o.script, args...)
-	if o.dir != "" {
-		cmd.Dir = o.dir
-		cmd.Env = append(os.Environ(), "GC_CITY_PATH="+o.dir)
+	cmd := exec.CommandContext(ctx, script, args...)
+	if dir != "" {
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GC_CITY_PATH="+dir)
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -212,7 +221,7 @@ func (o *Actuator) Run(ctx context.Context, verb, bead string) (server.ToolResul
 	// as a signal-shaped ExitError whose code would otherwise be mapped as if
 	// the script had chosen it.
 	if ctx.Err() != nil {
-		return res, fmt.Errorf("%w after %s", server.ErrToolTimeout, o.timeout)
+		return res, fmt.Errorf("%w after %s", server.ErrToolTimeout, timeout)
 	}
 	var ee *exec.ExitError
 	if errors.As(err, &ee) {
@@ -220,5 +229,5 @@ func (o *Actuator) Run(ctx context.Context, verb, bead string) (server.ToolResul
 		return res, nil
 	}
 	// Could not start at all: not executable, vanished since resolution.
-	return res, fmt.Errorf("%w: %s: %v", server.ErrToolUnavailable, o.script, err)
+	return res, fmt.Errorf("%w: %s: %v", server.ErrToolUnavailable, script, err)
 }

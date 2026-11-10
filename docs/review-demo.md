@@ -65,6 +65,34 @@ fixture JSON, as the script's own test suite does
 list`). Keep the stub and its JSON in the review workspace beside the PNG.
 The verdict says the report shows fixture data.
 
+## The conversation form
+
+`gc-helm.sh engage` and `gc-helm.sh attach` open a terminal form, helm-svc's
+`form` command. It reads and writes only through the gc-helm.sh it is given, so
+run it against the fixture stand-in, which answers from fixture data and writes
+nothing. Build helm-svc into the review workspace, beside the capture, since no
+ignore rule covers a binary in the worktree. Every compile of `services/helm`
+needs ICU's cgo flags on macOS, so pass it the flags `icu4c_cgo_flags` works out,
+as `gc-build.sh` and `tools/lint.sh` do:
+
+```bash
+. <worktree>/assets/scripts/icu4c-cgo.sh && icu4c_cgo_flags review-demo
+(cd <worktree>/services/helm && CGO_CPPFLAGS="$ICU4C_CGO_CPPFLAGS" CGO_LDFLAGS="$ICU4C_CGO_LDFLAGS" go build -o <workspace>/helm-svc ./cmd/helm-svc)
+```
+
+Then capture it with `--cwd <worktree>/services/helm`:
+`terminal --command "<workspace>/helm-svc form --helm
+internal/form/testdata/helm-fixture.sh --models opus,fable,codex --subject
+tk-demo1"` for a subject, `--rig gc-toolkit` for a new topic, `--subject 1446`
+for a PR two rigs record, `--subject tk-demo10` for a gate two beads wait on,
+which the form reads from tk-demo1 once it is chosen among what holds tk-demo1,
+or `--return` for the conversations to return to. A
+terminal capture shows the form's first frame, drawn before the fixture answers
+its reads a second later. What those reads fill in, such as tk-demo1's
+conversations and what holds it, a gate and the PR's own review threads, and a
+state after keys, such as the acknowledgements after Ctrl+S, need a recording
+(`demo:capture`). The verdict says the form shows fixture data.
+
 ## Markdown the city posts
 
 Pack scripts compose the city's comments and PR bodies, so render what the

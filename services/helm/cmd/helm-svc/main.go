@@ -77,6 +77,9 @@ func main() {
 		case "probe":
 			probeMain(os.Args[2:])
 			return
+		case "form":
+			formMain(os.Args[2:])
+			return
 		case "serve":
 			os.Args = append(os.Args[:1], os.Args[2:]...)
 		case "-h", "--help", "help":
@@ -95,6 +98,7 @@ const topUsage = `Usage:
   helm-svc [serve]               run the Attention Canvas backend sidecar (needs GC_SERVICE_SOCKET)
   helm-svc board --json [flags]  print the cross-rig attention board's rows as JSON
   helm-svc probe [flags]         report whether this binary can read the city's bead stores
+  helm-svc form --helm <script>  the terminal conversation form gc-helm.sh engage and attach open
 
 The sidecar's web page and "board --json" share one gather and one ranking. Run
 "helm-svc board --help" for the board's flags, or "helm-svc probe --help" for

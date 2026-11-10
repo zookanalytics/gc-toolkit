@@ -48,6 +48,13 @@
 #                  conversation open files through a human gate on an open PR
 #                  or joins in the queue, exits 4 with the merge held, and the
 #                  PR stays held once the gate is answered elsewhere
+#   (SAVE-AGAIN)   the conversation form's save again (--conversation) after a
+#                  save whose reply the store refused completes the reply and
+#                  files nothing. Once a sitting has taken the conversation, it
+#                  leaves the hold as that sitting left it: lifted, the PR is
+#                  free to merge once the gate is answered; kept, it stays held.
+#                  One still in the queue, whose hold the store refused, takes
+#                  the hold
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -330,6 +337,9 @@ gate_on() {
 }
 # filed_on <bead> — the conversation that tracks the bead, read from the store.
 filed_on() { jq -r --arg b "$1" 'objects | select((.deps // []) | any(.type == "tracks" and .on == $b)) | .id' "$STORE"/b/*.json | head -1; }
+# conversations_on <bead> — every conversation that tracks the bead, read from
+# the store, sorted and space-separated.
+conversations_on() { jq -r --arg b "$1" 'objects | select((.deps // []) | any(.type == "tracks" and .on == $b)) | .id' "$STORE"/b/*.json | sort | paste -sd ' ' -; }
 derive() { (cd "$TMP/cwd" && "$GCTK" pr status "$1" --json 2>/dev/null) || echo "derive-failed"; }
 status_of() { derive "$1" | jq -r '"\(.status) [\(.held | join(","))]"' 2>/dev/null; }
 # holds_of <bead> — what holds the bead by gctk bead holds, the rule the work
@@ -618,6 +628,55 @@ hasnt "$(cat "$CALLS")" "bd create" "(REPLY-FAIL) …filing no second conversati
 eq "$(deps_of tk-anc blocks)" "$C tk-q" "(REPLY-FAIL) the conversation it joined holds the merge all the same"
 gc bd gate resolve tk-q --reason "answered in another sitting" >/dev/null
 eq "$(status_of tk-anc)" "needs-attention [blocked]" "(REPLY-FAIL) …so the PR stays held once the gate is answered"
+
+echo "# a save again leaves the hold as the sitting that took the conversation left it"
+# The conversation form's save files the question through the gate on the PR as
+# a concern of its own, and the store refuses its reply onto the gate.
+Q="should the rollout wait for the load test?"
+pr; gate_on tk-anc tk-q
+REPLY_FAIL=1 run_open tk-q --allow-duplicate --if-subject tk-anc --reason "$Q" --json
+eq "$RC" 4 "(SAVE-AGAIN) a save whose reply onto the gate the store refuses exits 4"
+C=$(opened_conv)
+eq "$(deps_of tk-anc blocks)" "$C tk-q" "(SAVE-AGAIN) …with the conversation filed and holding the merge"
+# Another terminal's sitting takes the conversation out of the queue, as
+# engage's bind does, and lifts the hold because it is helping the PR land.
+gc bd update "$C" --if-assignee human --if-status open --assignee "c-$C" >/dev/null
+run_block "$TMP/hold-lift.sh" "$C" tk-anc
+eq "$RC/$(deps_of tk-anc blocks)" "0/tk-q" "(SAVE-AGAIN) the sitting that took the conversation lifts the hold"
+: > "$CALLS"
+run_open tk-q --allow-duplicate --if-subject tk-anc --conversation "$C" --reason "$Q" --json
+eq "$RC" 0 "(SAVE-AGAIN) the save again naming the conversation exits 0"
+eq "$(opened_conv)" "$C" "(SAVE-AGAIN) …answering that conversation"
+eq "$(deps_of "$C" replies-to)" "tk-q" "(SAVE-AGAIN) …which now replies to the gate"
+hasnt "$(cat "$CALLS")" "bd create" "(SAVE-AGAIN) …and files no second conversation"
+eq "$(conversations_on tk-anc)" "$C" "(SAVE-AGAIN) one conversation tracks the anchor"
+eq "$(deps_of tk-anc blocks)" "tk-q" "(SAVE-AGAIN) the anchor does not depend on the conversation again"
+hasnt "$(cat "$CALLS")" "bd dep add tk-anc" "(SAVE-AGAIN) …since the save again adds no hold"
+has "$ERR" "the sitting c-$C has taken conversation $C out of the queue, so the hold on the merge of the PR of tk-anc stays as that sitting left it" \
+    "(SAVE-AGAIN) …which open says"
+eq "$(holds_of tk-anc)" "blocked tk-q" "(SAVE-AGAIN) only the gate the conversation answers holds the anchor"
+gc bd gate resolve tk-q --reason "answered in the sitting" >/dev/null
+eq "$(status_of tk-anc)" "needs-review []" "(SAVE-AGAIN) …so once the sitting answers it, the PR is free to merge"
+# A sitting that keeps the hold keeps it through the save again.
+pr; gate_on tk-anc tk-q
+REPLY_FAIL=1 run_open tk-q --allow-duplicate --if-subject tk-anc --reason "$Q" --json
+C=$(opened_conv)
+gc bd update "$C" --if-assignee human --if-status open --assignee "c-$C" >/dev/null
+: > "$CALLS"
+run_open tk-q --allow-duplicate --if-subject tk-anc --conversation "$C" --reason "$Q" --json
+eq "$RC/$(deps_of "$C" replies-to)" "0/tk-q" "(SAVE-AGAIN) a save again on a conversation whose sitting kept the hold completes the reply"
+eq "$(deps_of tk-anc blocks)" "$C tk-q" "(SAVE-AGAIN) …and the conversation still holds the merge"
+no_release && ok "(SAVE-AGAIN) …with nothing removed" || bad "(SAVE-AGAIN) …with nothing removed ($(tr '\n' ';' < "$CALLS"))"
+# One still in the queue, whose hold the store refused, takes the hold.
+pr; gate_on tk-anc tk-q
+DEP_ADD_FAIL=1 run_open tk-q --allow-duplicate --if-subject tk-anc --reason "$Q" --json
+eq "$RC" 4 "(SAVE-AGAIN) a save whose hold the store refuses exits 4"
+C=$(opened_conv)
+eq "$(deps_of tk-anc blocks)/$(deps_of "$C" replies-to)" "tk-q/tk-q" "(SAVE-AGAIN) …with the reply written and no hold on the merge"
+run_open tk-q --allow-duplicate --if-subject tk-anc --conversation "$C" --reason "$Q" --json
+eq "$RC" 0 "(SAVE-AGAIN) a save again on the conversation still in the queue exits 0"
+eq "$(deps_of tk-anc blocks)" "$C tk-q" "(SAVE-AGAIN) …and holds the merge"
+eq "$(conversations_on tk-anc)" "$C" "(SAVE-AGAIN) …on the one conversation"
 
 echo
 echo "conversation-merge-hold: $PASS passed, $FAIL failed"

@@ -221,7 +221,9 @@ conversation is open and lets it go once the conversation closes.
   should land. It removes the edge with
   `gc bd dep remove <anchor> <conversation>`, records why on the conversation
   and says so in its framing. The lift lasts for that sitting: a later sitting
-  that engage starts on the conversation holds the merge again.
+  that engage starts on the conversation holds the merge again, and the
+  conversation form's save again (`open --conversation`) leaves the hold of a
+  conversation a sitting has taken as that sitting left it.
 - **A hold the operator wants to outlast the conversation** is a gate of its
   own on the anchor, under a key that names what it waits for.
 
@@ -240,12 +242,12 @@ these steps:
 1. **It takes the bead.** Given a bead, it works on that bead. Given a gate, it
    works on the one bead still waiting on the gate, read from the gate's
    `blocks` dependents. With several still waiting, as when an anchor and its
-   rework child both wait on the anchor's bring-current gate, it names them and
-   starts nothing, so the operator engages the one they mean. With none, it
+   rework child both wait on the anchor's bring-current gate, it works on the
+   bead `--from` names when that bead is one of them. Otherwise it names them
+   and starts nothing, so the operator engages the one they mean, and a gate
+   that no longer holds the `--from` bead starts nothing either. With none, it
    says nothing waits on the gate, names any closed bead the gate was about,
    and starts nothing, and the operator clears the gate.
-   Picked from the gates offered on a bead (below), the gate takes that bead
-   when it is one of those waiting.
 2. **It reads the bead's conversations:** the open tasks that track the bead
    in the conversation shape, with the session list saying which of their
    sittings are live.
@@ -285,15 +287,115 @@ human gate reached from the bead through its open `blocks` edges, so a gate on a
 rework or a review the anchor waits on is offered from the PR, each bead a person
 owes the next move on that the same edges reach, such as a decision or another PR
 waiting on a review that the PR's rework waits for, and the PR's own review
-threads or blocked verdict. The prompt lists them under "Held by" after the
-bead's conversations. A gate or a bead takes a number, and picking one engages it
-as if it were named, except that a gate several beads wait on takes the bead it
-was picked from when that bead is one of them. The PR's own threads and verdict take
-none, because engaging the PR is how a person acts on them. An engage that asks
-nothing, as `--no-input` and the board's route do, names each
-and how to engage it, and an engage pointed at a gate or a conversation does not
-look for others. A conversation on the bead answers no gate until it replies to
-one.
+threads or blocked verdict. The conversation form lists them under the bead's
+conversations. A gate or a bead is a row, and choosing it makes it the subject.
+A gate chosen there keeps the bead it was listed under, which the screen names
+under the subject, and the form looks it up and saves it with `--from` naming
+that bead, so a gate several beads wait on is about that bead while the bead
+still waits on the gate. A gate the bead waits on only through another bead,
+such as a gate on its rework, is looked up as if it were typed: it is about the
+one bead that waits on it, and one several beads wait on is refused. A gate that
+no longer holds the bead by the time the form looks it up or saves it is
+refused, so the question is never filed on another bead in its place. A gate the
+operator types names no such bead, and neither does one whose subject the
+operator edits after choosing it, so a gate several beads wait on is refused
+there, naming them, as engage refuses it on the command line.
+The PR's own threads and
+verdict are lines that no row stands for, because engaging the PR is how a
+person acts on them. The form says when what holds the bead did not read, so a
+bead it could not read does not look like one that nothing holds. An engage
+that asks nothing, as `--no-input` and the board's route do, names each and how
+to engage it, a gate with `--from` naming the bead, unless it was pointed at a
+gate or a conversation. A conversation
+on the bead answers no gate until it replies to one.
+
+**On a terminal, engage opens the conversation form.** An engage whose
+command line names no concern (`--reason`, `--template` or `--skill`) and not
+`--no-input` hands the terminal to helm-svc's `form` command
+(`services/helm/internal/form`). One screen holds, in this order, the subject
+(a bead id, a PR number or URL, or empty for a new topic), a multiline
+question, in which Enter adds a line, a new topic's rig, the model, with opus
+shown as the default, and whether to attach once the sitting starts, which is
+on unless `--no-attach` is given. Tab moves through the fields in that order,
+so the question is one Tab after the subject, and the form opens on the
+question when the command line names the subject or a new topic's rig. A tab in
+the question stays a tab, shown as ␉, and a line break written as
+LF, CR or CRLF is one line break. The field leaves out every other control
+character, such as BEL or ESC, and U+FFFD, the replacement character. It leaves
+out U+FDD0 as well, since inside the field that noncharacter stands for a tab.
+The command line fills in the fields, and typing never waits for a read.
+A `--model` that no configured variant carries is refused before the form
+opens, as the flag-driven engage refuses it.
+While the operator types, the form reads `gc-helm.sh conversations` for the
+subject: the bead it resolves to, the rig a conversation about it is held in,
+whether a sitting can start there, its open conversations and what holds it.
+It reads the city's rigs for a new topic. The screen shows where a submit would
+file before it does: a conversation on the subject in its own rig, or a new
+subject in the rig the operator chose. A new topic has no rig until the
+operator picks one, and a PR number that several live anchors record waits
+for the operator to pick the anchor. A result read for an earlier subject never
+stands in for the current one, and no result changes a rig or a conversation
+the operator chose. A conversation chosen from the list is started as it is,
+and a question typed beside it is not sent into it.
+
+Ctrl+S saves the question only once the destination is settled. `open` files
+it as a new conversation (`--allow-duplicate` and `--if-subject` on a subject,
+`--new-subject --rig` on a topic), with the field's question as its ask and
+titled by `conversation_title`, and the form says it is saved. `--if-subject`
+names the subject the screen shows, and `open` refuses the save when the
+reference names another bead by then, such as a subject closed onto a successor
+in another rig, so a question is filed only where the screen said. The reference
+goes as the operator typed it, so `open` resolves it again, and a PR whose
+anchor moved while the operator typed is refused too. A gate goes as itself, so
+the conversation replies to the gate the screen showed, and a chosen gate goes
+with `--from` naming the bead it was listed under, so `open` takes that bead
+among several waiting and files nothing once it has stopped waiting on the
+gate. Then `engage
+<conversation> --no-input --no-attach` starts the sitting. Once it has started,
+the form attaches the terminal to it through `engage <conversation>
+--no-input`, which waits for the session to start, as engage does on the command
+line. With attaching off, the form leaves the sitting to prepare, and says that
+the conversation is saved and how to return to it. An attach holds a
+conversation no live sitting holds, as after a start that failed or a sitting
+that ended before the attach reached it, in a new sitting on the model the
+start ran on, and after a start that failed, Enter attaches that way. A save
+that files the conversation and then fails, as when the store refuses
+its reply onto the gate, says the conversation holds the question and what
+did not complete, and starts nothing. r sends the save again naming that
+conversation (`--conversation`), and `open` completes it by its id rather than
+file a second, wherever it stands by then, even when a sitting another terminal
+started has taken it out of the queue. It adds the hold on an open PR's merge
+only while the conversation still waits in the queue, so a hold that such a
+sitting lifted stays lifted. A conversation closed since, or one that holds
+another ask, is refused, and nothing is filed. A save whose answer was
+lost leaves the form without the conversation's id. For that save, with
+`--allow-duplicate`, a concern that a conversation waiting in the queue holds as
+its whole ask lands on that conversation. Leaving while the save or the start
+still runs waits until it lands,
+because a verb the form leaves behind dies at its next line of output, and a save
+cut off there can leave a new subject without its conversation. A second Ctrl+C
+leaves at once, and the form then says what it does not know. A form that
+something else ends, such as an interrupt, a termination or a terminal that
+fails, leaves as a second Ctrl+C does while a save or a start runs, and as Esc
+does otherwise, so it keeps a question it did not save. A hangup, as when the
+terminal's window closes, ends the form before it can keep anything.
+A save that fails
+leaves the question in the form and reads the subject again, so a subject that
+names another bead now is on screen before the next Ctrl+S can file there. A new
+subject filed whose conversation was not becomes the subject of the next save,
+so the retry files onto it. The form kills a verb that runs past two minutes,
+and a save killed once its subject was filed still names the subject, because
+`open` answers it the moment it is filed. A subject whose create landed but
+whose reply was lost is one the form never learns, and a retry after that files
+a second subject. A save refused because a read failed,
+or because of a refusal that can change, such as a suspended rig, reads it again
+for the next Ctrl+S. A question the form did not save is kept in a file under
+`GC_HELM_DRAFT_DIR` (else `$XDG_STATE_HOME/gc/engage-drafts`, else
+`~/.local/state/gc/engage-drafts`) when it closes, and before the terminal goes
+to a sitting picked from the return list, and the form names the file and the
+command that files it again. The command reads the file whole, trailing newlines
+included, because engage files through `open --allow-duplicate`, which lands on
+the conversation an earlier save filed only when the ask matches exactly.
 
 Engage warns when it starts a sitting while another live sitting tracks the
 bead, or replies to a gate the bead waits on. **One sitting per bead is a
@@ -418,14 +520,21 @@ City's own external-messaging process.
 The intake files a topic and lets the reaction triage it: the operator gets a
 board row, not a conversation. When the operator wants to talk now about
 something that has no bead yet, `gc-helm engage --new-subject` creates the
-subject and engages it in one gesture. It files the subject bead in a chosen
-rig, files its one conversation, spawns the sitting and binds it. The
-positional text is the subject's title and, absent `--reason` or
-`--template`, its opener. `--rig` names the rig, an interactive prompt over
-the converse-capable rigs asks otherwise, and `--no-input` requires it.
-`prefix+A` is the keystroke, and it opens the interactive prompt in a new tmux
-window (`assets/scripts/tmux-new-subject.sh`), because the choice of rig,
-subject and model does not fit tmux's one-line command prompt.
+subject and engages it in one gesture. It files the subject bead in the rig
+`--rig` names, files its one conversation, spawns the sitting and binds it.
+The rig is always the operator's choice: a topic carries no id prefix to derive
+one from, and a bead filed in the wrong rig can draw public comments there. The
+positional text, or `--reason` without one, is the question. The subject's
+description keeps it unchanged, newlines included, with a provenance line after
+it, and its title is the label `conversation_title` derives from the
+question's opening, so a question longer than a bead title is filed whole.
+Absent `--reason` or `--template` the question is the conversation's opener
+too. On a terminal, `--new-subject` with no concern opens the conversation form
+on a new topic, and `prefix+A` runs it in a new tmux window
+(`assets/scripts/tmux-new-subject.sh`), because a form does not fit tmux's
+one-line command prompt. `gc-helm open --new-subject --rig <rig>` files the
+subject and its conversation without starting a sitting, which is how the form
+saves a new topic before it starts one.
 
 The subject is created marked `gc.reaction_owned=1` in the same create, so
 the proactive scan never observes it unmarked. Three gates read the marker:
@@ -436,6 +545,40 @@ closes its own reaction bead without acting
 the marker stays, so no later scan reacts. If a later step refuses the live
 spawn, a bad model or a suspended rig, the subject's one conversation still
 waits in the queue, so the topic is never lost.
+
+### Returning to a conversation
+
+`gc-helm conversations` lists every open conversation in the city's stores and
+where it stands. It reads every task in a live status and keeps those the
+shared conversation rule (`conversation.sh`) picks out by their own rows, so a
+conversation is listed whatever its sitting's state, one bound to a sitting
+that ended before it claimed it included. A rig whose store does not answer, or
+whose ledger is not there, is named as not listed, and the list exits 4 after
+printing the rest. A conversation's readiness is queued while it waits in the
+operator's queue, starting while its sitting's session has not started,
+preparing until the sitting records its first hand-back after its session was
+created (`gc.handback_at`, which `gc-helm handback` stamps on each framing),
+ready once it has, and ended when its sitting's session has closed while the
+conversation stays open. Each row says whether a terminal is attached to the
+sitting. `gc-helm attach` opens the conversation form on that list, those no
+terminal is attached to first, by readiness and then newest first, and reads it
+again every ten seconds while it is on screen. What is picked is a
+conversation, so a read that re-sorts the list keeps it picked, and one that
+leaves the list leaves nothing picked until ↑/↓ picks again. A list longer than
+the terminal shows the page the pick is on, and a last line counts the rows
+above and below, so the row picked is always on screen, through a resize and a
+read that moves it. The form's rows on a subject are paged the same way. The
+form wraps its text at spaces to the terminal's width, so a destination, a
+refusal or a status is shown whole and the rows page around the lines it takes,
+while a row stays one line, which a narrower terminal cuts at its edge. A read
+again that fails keeps the rows the last read gave, and the screen says since
+when the list has not been refreshed, that it may be out of date, and why the
+read failed. Enter attaches to the one picked, and a sitting held anew there
+runs on engage's default model, since the list shows none.
+`gc-helm attach <conversation>` is engage's attach for a script or a shortcut:
+it attaches to a live sitting once it has started, and holds a conversation
+whose sitting ended, or one in the queue, in a new sitting first. Starting and
+returning are two acts of one form: Ctrl+R moves between them.
 
 ## The sitting
 
