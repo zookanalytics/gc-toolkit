@@ -33,8 +33,10 @@ type fakeHelm struct {
 	saves    []SaveRequest
 	starts   []string
 	attaches []string
-	// attachArgs is the argv each attach would run, as Script builds it.
+	// attachArgs is the argv each attach would run, as Script builds it, and
+	// attachCmds the command each one returned.
 	attachArgs []string
+	attachCmds []*exec.Cmd
 }
 
 // About answers a reference from about, and one reached from a bead from the
@@ -62,7 +64,9 @@ func (f *fakeHelm) Start(_ context.Context, conv, model string) error {
 func (f *fakeHelm) AttachCommand(conv, model string) *exec.Cmd {
 	f.attaches = append(f.attaches, conv)
 	f.attachArgs = append(f.attachArgs, strings.Join(Script{Path: "gc-helm.sh"}.AttachCommand(conv, model).Args[1:], " "))
-	return exec.Command("true")
+	c := exec.Command("true")
+	f.attachCmds = append(f.attachCmds, c)
+	return c
 }
 
 func rigCity() City {
@@ -120,7 +124,7 @@ func typeText(m *Model, s string) {
 // deliver runs a command and hands the form's own messages back to it, through
 // batches and ticks, the way the bubbletea runtime would. It stops at runtime
 // messages such as the cursor's blink, which repeat for as long as the form
-// runs, and at what only the runtime runs, such as an attach or the form's end.
+// runs, and at the form's end, which only the runtime acts on.
 func deliver(m *Model, cmd tea.Cmd) { deliverN(m, cmd, 0) }
 
 func deliverN(m *Model, cmd tea.Cmd, depth int) {
@@ -135,7 +139,7 @@ func deliverN(m *Model, cmd tea.Cmd, depth int) {
 		return
 	}
 	switch msg.(type) {
-	case aboutMsg, cityMsg, debounceMsg, savedMsg, startedMsg, attachedMsg:
+	case aboutMsg, cityMsg, debounceMsg, savedMsg, startedMsg:
 		_, next := m.Update(msg)
 		deliverN(m, next, depth+1)
 	}
@@ -289,7 +293,7 @@ func TestTheQuestionIsSavedExactlyAsTyped(t *testing.T) {
 }
 
 // The save is said before the start runs, and once the sitting has started the
-// form attaches the terminal to it, on the model the start ran on.
+// form leaves to attach the terminal to it, on the model the start ran on.
 func TestSavedIsSaidBeforeTheStartAndTheSittingIsAttachedOnceItStarts(t *testing.T) {
 	f := &fakeHelm{
 		about:    map[string]About{"tk-a": subjectAbout("tk-a", "gc-toolkit")},
@@ -313,17 +317,21 @@ func TestSavedIsSaidBeforeTheStartAndTheSittingIsAttachedOnceItStarts(t *testing
 	if len(f.starts) != 1 || f.starts[0] != "tk-c1 claude-opus" {
 		t.Fatalf("starts = %v", f.starts)
 	}
-	if attachCmd == nil || len(f.attachArgs) != 1 || f.attachArgs[0] != "gc-helm.sh engage tk-c1 --no-input --model claude-opus" {
-		t.Fatalf("once the sitting started the form attached %v, want tk-c1 on claude-opus", f.attachArgs)
+	if len(f.attachArgs) != 1 || f.attachArgs[0] != "gc-helm.sh engage tk-c1 --no-input --model claude-opus" {
+		t.Fatalf("once the sitting started the form kept the attach %v, want tk-c1 on claude-opus", f.attachArgs)
 	}
-	// An Enter that lands before the attach takes the terminal attaches nothing
-	// more, so a detach is not followed by a second attach.
+	// The form keeps the attach and leaves, and the attach runs once the
+	// form's program has returned, so the form draws nothing after it.
+	if !isQuit(attachCmd) || m.Attach() == nil || m.Attach() != f.attachCmds[0] {
+		t.Fatalf("once the sitting started: left %v, attach kept %v", isQuit(attachCmd), m.Attach() != nil)
+	}
+	// An Enter that lands before the form's program ends keeps no second
+	// attach.
 	if _, cmd := m.Update(key(tea.KeyEnter)); cmd != nil || len(f.attaches) != 1 {
 		t.Fatalf("Enter after the sitting started attached again: %v", f.attaches)
 	}
-	_, last := m.Update(attachedMsg{})
-	if !isQuit(last) || m.Note() != "" || m.Leave() != "" {
-		t.Fatalf("once the attach came back: left %v, note %q, then %q", isQuit(last), m.Note(), m.Leave())
+	if m.Note() != "" || m.Leave() != "" {
+		t.Fatalf("the form left to attach saying %q, then %q", m.Note(), m.Leave())
 	}
 }
 
@@ -886,10 +894,10 @@ func TestAnAttachThatCanHoldANewSittingKeepsTheModelTheStartRanOn(t *testing.T) 
 	}
 }
 
-// One attach runs. bubbletea runs a second attach queued behind the first once
-// the first comes back, so an Enter that lands before the first attach takes
-// the terminal, on the return list or after a start that failed, attaches
-// nothing more, and neither does a start that lands then.
+// One attach runs. The form leaves once it keeps an attach, and a key its
+// program reads before it ends does nothing, so an Enter that lands then, on
+// the return list or after a start that failed, keeps no second attach, and an
+// r starts nothing.
 func TestASecondEnterBeforeTheAttachAttachesNothingMore(t *testing.T) {
 	t.Run("on the return list", func(t *testing.T) {
 		f := &fakeHelm{city: City{Conversations: []Conversation{{ID: "tk-c1", Readiness: Ready}}}}
@@ -917,13 +925,9 @@ func TestASecondEnterBeforeTheAttachAttachesNothingMore(t *testing.T) {
 		if first == nil || second != nil || len(f.attaches) != 1 {
 			t.Fatalf("two Enters: an attach %v, then %v; attaches %v", first != nil, second != nil, f.attaches)
 		}
-		// A retried start that lands before the attach takes the terminal
-		// starts the sitting and attaches nothing more.
 		f.startErr = nil
-		_, cmd = m.Update(key('r'))
-		deliver(m, cmd)
-		if len(f.starts) != 2 || len(f.attaches) != 1 {
-			t.Fatalf("a start landing after the attach was run: starts %v, attaches %v", f.starts, f.attaches)
+		if _, cmd := m.Update(key('r')); cmd != nil || len(f.starts) != 1 || len(f.attaches) != 1 {
+			t.Fatalf("r after the form left to attach: a command %v, starts %v, attaches %v", cmd != nil, f.starts, f.attaches)
 		}
 	})
 }
@@ -1170,59 +1174,50 @@ func TestTheKeptDraftNamesTheCommandThatFilesItAgain(t *testing.T) {
 }
 
 func TestAttachingFromTheReturnListKeepsTheUnsavedQuestion(t *testing.T) {
-	for _, attachErr := range []error{nil, errors.New("exit status 1")} {
-		dir := t.TempDir()
-		f := &fakeHelm{
-			about: map[string]About{"tk-a": subjectAbout("tk-a", "gc-toolkit")},
-			city:  City{Conversations: []Conversation{{ID: "tk-c1", Readiness: Ready}}},
-		}
-		m := newForm(t, f, Options{Subject: "tk-a", DraftDir: dir})
-		settle(m)
-		loadCity(m)
-		typeText(m, "a question\n  on two lines ")
-		m.Update(ctrl('r'))
-		_, cmd := m.Update(key(tea.KeyEnter))
-		if cmd == nil || len(f.attaches) != 1 || f.attaches[0] != "tk-c1" {
-			t.Fatalf("attach = %v", f.attaches)
-		}
-		// The question is in a file before the terminal goes to the sitting.
-		files, _ := filepath.Glob(filepath.Join(dir, "engage-draft-*.txt"))
-		if len(files) != 1 {
-			t.Fatalf("draft files while the attach runs: %v", files)
-		}
-		if b, _ := os.ReadFile(files[0]); string(b) != "a question\n  on two lines " {
-			t.Fatalf("kept draft = %q", b)
-		}
-		_, last := m.Update(attachedMsg{err: attachErr})
-		if !isQuit(last) {
-			t.Fatalf("the form did not leave once the attach came back (err %v)", attachErr)
-		}
-		note := m.Note()
-		if !strings.Contains(note, files[0]) || !strings.Contains(note, "Nothing was filed.") || !strings.Contains(note, "gc-helm.sh engage tk-a --reason") {
-			t.Fatalf("note after the attach (err %v) = %q", attachErr, note)
-		}
-		if attachErr != nil && !strings.HasPrefix(note, "The attach did not run: exit status 1") {
-			t.Fatalf("note after a failed attach = %q", note)
-		}
-		if again, _ := filepath.Glob(filepath.Join(dir, "engage-draft-*.txt")); len(again) != 1 {
-			t.Fatalf("the question was kept more than once: %v", again)
-		}
-	}
-	// A question the form saved is not kept as a draft when the terminal goes to
-	// its sitting, once that sitting starts.
 	dir := t.TempDir()
 	f := &fakeHelm{
-		about:    map[string]About{"tk-a": subjectAbout("tk-a", "gc-toolkit")},
-		saveResp: Saved{Subject: "tk-a", Conversation: "tk-c1", Filed: true},
+		about: map[string]About{"tk-a": subjectAbout("tk-a", "gc-toolkit")},
+		city:  City{Conversations: []Conversation{{ID: "tk-c1", Readiness: Ready}}},
 	}
 	m := newForm(t, f, Options{Subject: "tk-a", DraftDir: dir})
 	settle(m)
+	loadCity(m)
+	typeText(m, "a question\n  on two lines ")
+	m.Update(ctrl('r'))
+	_, cmd := m.Update(key(tea.KeyEnter))
+	if !isQuit(cmd) || m.Attach() == nil || len(f.attaches) != 1 || f.attaches[0] != "tk-c1" {
+		t.Fatalf("left %v, attach kept %v, attaches %v", isQuit(cmd), m.Attach() != nil, f.attaches)
+	}
+	// The question is in a file before the terminal goes to the sitting, and
+	// the note, printed before the attach runs, says where.
+	files, _ := filepath.Glob(filepath.Join(dir, "engage-draft-*.txt"))
+	if len(files) != 1 {
+		t.Fatalf("draft files once the form left to attach: %v", files)
+	}
+	if b, _ := os.ReadFile(files[0]); string(b) != "a question\n  on two lines " {
+		t.Fatalf("kept draft = %q", b)
+	}
+	note := m.Leave()
+	if !strings.Contains(note, files[0]) || !strings.Contains(note, "Nothing was filed.") || !strings.Contains(note, "gc-helm.sh engage tk-a --reason") {
+		t.Fatalf("note once the form left to attach = %q", note)
+	}
+	if again, _ := filepath.Glob(filepath.Join(dir, "engage-draft-*.txt")); len(again) != 1 {
+		t.Fatalf("the question was kept more than once: %v", again)
+	}
+	// A question the form saved is not kept as a draft when the form leaves to
+	// attach its sitting, once that sitting starts.
+	dir = t.TempDir()
+	f = &fakeHelm{
+		about:    map[string]About{"tk-a": subjectAbout("tk-a", "gc-toolkit")},
+		saveResp: Saved{Subject: "tk-a", Conversation: "tk-c1", Filed: true},
+	}
+	m = newForm(t, f, Options{Subject: "tk-a", DraftDir: dir})
+	settle(m)
 	typeText(m, "q")
-	_, cmd := m.Update(ctrl('s'))
+	_, cmd = m.Update(ctrl('s'))
 	deliver(m, cmd)
-	m.Update(attachedMsg{})
-	if files, _ := filepath.Glob(filepath.Join(dir, "*")); len(files) != 0 || len(f.attaches) != 1 {
-		t.Fatalf("after attaching a saved conversation: drafts %v, attaches %v", files, f.attaches)
+	if files, _ := filepath.Glob(filepath.Join(dir, "*")); len(files) != 0 || len(f.attaches) != 1 || m.Leave() != "" {
+		t.Fatalf("after attaching a saved conversation: drafts %v, attaches %v, note %q", files, f.attaches, m.Leave())
 	}
 }
 

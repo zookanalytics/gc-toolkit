@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"sort"
 	"strings"
 	"time"
@@ -82,7 +83,6 @@ type (
 	}
 	startedMsg  struct{ err error }
 	cityTickMsg struct{}
-	attachedMsg struct{ err error }
 )
 
 // newChoice is the context row that files the question as a new conversation.
@@ -131,8 +131,9 @@ type Model struct {
 	leaving  bool // the operator left while a save or a start ran, so the form leaves once it lands
 
 	// How the form leaves the terminal.
-	attaching bool // an attach has taken or will take the terminal, so no other is run
-	left      bool // the form has left by its own path, so the note is what it says
+	attaching bool      // the form has kept an attach, so it keeps no other
+	attachCmd *exec.Cmd // the attach the form left to run (Attach)
+	left      bool      // the form has left by its own path, so the note is what it says
 
 	// The return list's selection is a conversation, so a refresh that re-sorts
 	// the list leaves it on the conversation the operator picked.
@@ -619,14 +620,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(m.loadCity(), m.refreshCity())
 		}
 		return m, nil
-	case attachedMsg:
-		// The note already says where attach kept a question the form had not
-		// saved.
-		if msg.err != nil {
-			m.note = strings.TrimSpace(fmt.Sprintf("The attach did not run: %v\n%s", msg.err, m.note))
-		}
-		m.left = true
-		return m, tea.Quit
 	case tea.PasteMsg:
 		return m, m.typeInto(msg)
 	case tea.KeyPressMsg:
@@ -662,6 +655,11 @@ func (m *Model) typeInto(msg tea.Msg) tea.Cmd {
 }
 
 func (m *Model) key(k tea.KeyPressMsg) tea.Cmd {
+	// A form that has left takes no key: one its program reads before it ends
+	// would act on a screen that is gone.
+	if m.left {
+		return nil
+	}
 	s := k.String()
 	if s == "ctrl+c" {
 		if m.leaving {
@@ -1039,24 +1037,33 @@ func (m *Model) returnKey(s string) tea.Cmd {
 	return nil
 }
 
-// attachTo hands the terminal to conv's sitting, and the form leaves once it
-// comes back. A question the form has not saved is kept first, so neither the
-// attach nor an end of the form while the sitting holds the terminal loses it.
-// model is what a sitting held anew runs on. An attach after a start passes the
-// model the start ran on, so a start that failed or a sitting that ended is held
-// again on the model the screen showed. The return list shows no model and
-// passes none, so engage's default holds it. One attach runs. bubbletea runs an
-// attach queued behind another once that one comes back, before the form has
-// left, so neither an Enter that lands before the first attach takes the
-// terminal nor a start that lands before the form leaves attaches again.
+// attachTo leaves the form so the terminal can go to conv's sitting. The form
+// keeps the attach and quits, and the attach runs once the form's program has
+// returned (Attach), so the form draws nothing after what the attach prints. A
+// question the form has not saved is kept first, so leaving for the attach
+// does not lose it. model is what a sitting held anew runs on. An attach after
+// a start passes the model the start ran on, so a start that failed or a
+// sitting that ended is held again on the model the screen showed. The return
+// list shows no model and passes none, so engage's default holds it. The form
+// keeps one attach, and a start that lands after it has left keeps no other.
 func (m *Model) attachTo(conv, model string) tea.Cmd {
 	if m.attaching {
 		return nil
 	}
 	m.attaching = true
+	m.attachCmd = m.helm.AttachCommand(conv, model)
 	m.note = m.keepUnsaved()
-	return tea.ExecProcess(m.helm.AttachCommand(conv, model), func(err error) tea.Msg { return attachedMsg{err: err} })
+	m.left = true
+	return tea.Quit
 }
+
+// Attach is the attach the form left to run, nil when it left without one. It
+// is engage's attach: it waits for the sitting to start, attaches the
+// terminal, and once the terminal comes back says how the sitting ended. It
+// runs once the form's program has returned and the note is printed, on the
+// terminal the program let go, so all it prints, a refusal included, comes
+// after the last screen the form drew.
+func (m *Model) Attach() *exec.Cmd { return m.attachCmd }
 
 // quit leaves the form. While a save or a start runs, the form leaves once it
 // lands instead. The verb's process outlives the form, and once the form's

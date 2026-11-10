@@ -39,7 +39,8 @@
 #             active: one still start-pending or creating is waited on and left
 #             unattached at the bound, which exits 4, one that ends first is
 #             reported with the attach of its conversation, and --no-attach
-#             does not wait
+#             does not wait. (LIVE-BLANK) one listed with no state is live, a
+#             create still under way, and is waited on the same way
 #   (LEFT)    a conversation whose sitting's session closed is resumed under
 #             the same alias, with no bind needed
 #   (TWO-TRACKS, UNREAD) a task assigned to human that tracks the bead and
@@ -57,7 +58,10 @@
 #   (NOT-OPEN-CONV) an id the bead's listing holds as no open conversation has
 #             a refusal of its own
 #   (CUT-SHORT) a session still holding the alias of a conversation back in
-#             the queue is closed first, so the new sitting can take the alias
+#             the queue is closed first, so the new sitting can take the alias.
+#             (CUT-SHORT-OWN) the session whose alias the conversation is bound
+#             to holds it, so it is not closed, even when the first listing
+#             missed it, and engage attaches it
 #   (GATE)    a gate names the one bead waiting on it; the conversation engage
 #             lands on — filed, taken from the queue, or live — replies to the
 #             gate before any sitting starts; two waiting beads, or none, start
@@ -75,8 +79,13 @@
 #             sitting is closed, and the conversation stays closed with the
 #             holder the dismiss left
 #   (ALIAS-*, RACE-CONCURRENT) a spawn refused at the alias spawns nothing and
-#             waits for the holder's bind; two engages of one conversation spawn
-#             once and bind once
+#             waits for the holder's bind. A conversation bound to the refused
+#             alias belongs to the sitting holding it, which engage names, or
+#             attaches once it starts, found by its alias while the list does
+#             not show it (ALIAS-BOUND, ALIAS-OWN-*); one another alias takes is
+#             named (ALIAS-OTHER). Two engages of one conversation spawn once and
+#             bind once, and the second names the first one's sitting
+#             (RACE-CONCURRENT)
 #   (ALIAS-RETRY) an id the runtime refuses as an alias is retried under c-
 #   (ATTACH, START-*, NOATTACH-*) the attach waits until the sitting reads
 #             active, because an attach that reaches a sitting the reconciler
@@ -86,14 +95,19 @@
 #             30s (START-PROGRESS). One that ends first exits 4 at once, early
 #             or late, writes nothing to the conversation, and names the attach
 #             of the conversation, which starts a new sitting on it with no bind
-#             (START-RERUN); a sitting not yet listed, or a listing that fails,
-#             is waited through. A sitting still unstarted at
-#             GC_HELM_ENGAGE_WAIT_TIMEOUT, 15 minutes by default
+#             (START-RERUN); a sitting not yet listed, one listed with no state
+#             (START-BLANK), or a listing that fails, is waited through, and one
+#             listed closed has ended (START-CLOSED-ROW). A sitting still
+#             unstarted at GC_HELM_ENGAGE_WAIT_TIMEOUT, 15 minutes by default
 #             (START-BACKSTOP), is left unattached and exits 4, with the attach
 #             to run later. (START-INTERRUPT) Ctrl-C stops the wait, leaves the
 #             conversation bound and the sitting open, and prints the attach,
 #             sending the sitting no opening turn; a hang-up or a
 #             TERM stops it the same way (INTERRUPT-HUP, INTERRUPT-TERM).
+#   (FORM-ATTACH-*) the conversation form's attach right after its start
+#             reaches the sitting the start spawned, while the list does not
+#             show it yet or shows it with no state, spawning nothing more and
+#             closing nothing
 #   (ENDED*, QUEUED-TAB, DETACHED*, UNREAD, ATTACH-FAIL-*) once the attach
 #             returns, the conversation says what the tab prints: a closed
 #             conversation prints how it closed and the last hand-back recorded
@@ -242,9 +256,11 @@ case "$1 ${2:-}" in
     # spawned one, that sitting's own row, which engage's start wait reads. Its
     # state walks $START_STATES, one entry per listing after the spawn, the last
     # repeating: "active" (the default), start-pending, creating, or a token.
-    # "gone" lists no row, the way a closed session reads from the store;
-    # "blank" lists an empty state, the way it reads from the supervisor; and
-    # "broken" fails the listing. $SESSION_LIST_BROKEN fails every listing.
+    # "gone" lists no row, the way a listing of open sessions leaves a closed
+    # one out; "closed" lists the row closed, as gc lists a closed session;
+    # "blank" lists it open with no state, as a sitting just spawned can read
+    # while gc answers from the supervisor's read cache; and "broken" fails the
+    # listing. $SESSION_LIST_BROKEN fails every listing.
     printf 'session list\n' >> "$CALLS"
     if [ -n "${SESSION_LIST_BROKEN:-}" ]; then echo "session list: data plane down" >&2; exit 1; fi
     _st=""
@@ -282,9 +298,9 @@ case "$1 ${2:-}" in
     fi
     jq -n --arg live "$_live" --arg st "$_st" --arg sid "$SID" --arg sn "$SNAME" --arg sa "$_salias" \
           --arg holder "${ALIAS_HOLDER:-}" --arg decoys "${ALIAS_DECOYS:-}" --arg spawned "$_spawned" --arg lst "$_lst" \
-      '{sessions:([ $live | split(" ")[] | select(. != "" and $lst != "gone") | split("=") | {id:.[0], session_name:("s-" + .[0]), alias:.[1], template:"gc-toolkit/gc-toolkit.converse-claude-opus", state:(if $lst == "blank" then "" else $lst end), closed:false, created_at:"2026-10-01T00:00:00Z", attached:false} ]
+      '{sessions:([ $live | split(" ")[] | select(. != "" and $lst != "gone") | split("=") | {id:.[0], session_name:("s-" + .[0]), alias:.[1], template:"gc-toolkit/gc-toolkit.converse-claude-opus", state:(if $lst == "blank" then "" else $lst end), closed:($lst == "closed"), created_at:"2026-10-01T00:00:00Z", attached:false} ]
          + (if $st == "" or $st == "gone" then []
-            else [{id:$sid, session_name:$sn, alias:$sa, template:"gc-toolkit/gc-toolkit.converse-claude-opus", state:(if $st == "blank" then "" else $st end)}] end)
+            else [{id:$sid, session_name:$sn, alias:$sa, template:"gc-toolkit/gc-toolkit.converse-claude-opus", state:(if $st == "blank" then "" else $st end), closed:($st == "closed")}] end)
          + (if $decoys != "" then [{id:"gc-90", session_name:"s-gc-90", alias:"gc-toolkit/gc-toolkit.tk-conv2x", template:"gc-toolkit/gc-toolkit.converse-claude-opus", state:"active", closed:false},
                                    {id:"gc-91", session_name:"s-gc-91", alias:"gc-toolkit/gc-toolkit.tk-conv", template:"gc-toolkit/gc-toolkit.converse-claude-opus", state:"closed", closed:true}] else [] end)
          + (if $holder != "" then [{id:$holder, session_name:("s-" + $holder), alias:"gc-toolkit/gc-toolkit.tk-conv", template:"gc-toolkit/gc-toolkit.converse-claude-opus", state:"creating", closed:false, created_at:(now | todate)}] else [] end)
@@ -436,6 +452,14 @@ case "$1 ${2:-}" in
       # Scripted: the session $ALIAS_HELD already holds the alias.
       : > "$ALIAS_REFUSED"
       echo "gc session new: session alias already exists: \"gc-toolkit/gc-toolkit.tk-conv\" already belongs to $ALIAS_HELD" >&2
+      exit 1
+    fi
+    if [ -n "${ALIAS_KEEPS:-}" ] && [ -s "$SPAWNED" ] && [ "$(cat "$ST/spawned-alias" 2>/dev/null)" = "gc-toolkit/gc-toolkit.$_al" ]; then
+      # $ALIAS_KEEPS: the sitting an earlier spawn made is open and keeps its
+      # alias, so a second spawn under that alias is refused, as gascity
+      # refuses an alias an open session holds.
+      : > "$ALIAS_REFUSED"
+      echo "gc session new: session alias already exists: \"gc-toolkit/gc-toolkit.$_al\" already belongs to $(cat "$SPAWNED")" >&2
       exit 1
     fi
     if [ -n "${SPAWN_EMPTY:-}" ]; then
@@ -895,6 +919,13 @@ hasnt "$OUT" "waiting for the reconciler" "(REUSE-NOATTACH) …without waiting, 
 hasnt "$CALLED" "session attach" "(REUSE-NOATTACH) …and attaches nothing"
 
 reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
+FAKE_CLOCK="$TMP/clock" LIVE_STATES="blank blank blank blank active" run_engage tk-subj
+eq "$RC" 0 "(LIVE-BLANK) a conversation whose sitting is listed with no state reads live, and the engage exits 0"
+hasnt "$CALLED" "session new" "(LIVE-BLANK) …spawning no second sitting"
+has "$CALLED" "session attach gc-50" "(LIVE-BLANK) …attaching the sitting once it reads active"
+has "$OUT" "waiting for the reconciler to start s-gc-50 (it is listed with no state yet)" "(LIVE-BLANK) …saying what the listing showed"
+
+reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
 run_engage tk-subj --reason "another angle" --no-attach
 eq "$RC" 0 "(LIVE-CONCERN) a concern beside a live sitting still files its own conversation"
 has "$CALLED" "session new converse-claude-opus --alias tk-new" "(LIVE-CONCERN) …and spawns its own sitting"
@@ -929,6 +960,21 @@ eq "$RC" 4 "(CUT-SHORT-STUCK) an old session that will not close exits 4"
 hasnt "$CALLED" "session new" "(CUT-SHORT-STUCK) …spawning nothing"
 has "$OUT" "gc session close gc-60" "(CUT-SHORT-STUCK) …and naming the session to close by hand"
 unset LIVE_SITTINGS
+
+echo "# the session a conversation is bound to is not closed as cut short, even when the first listing missed it"
+# The listing engage chose by can miss the sitting that holds the conversation,
+# as one the supervisor answers from its read cache can. Bound to that
+# sitting's alias, the conversation is the sitting's, so the session is no
+# sitting cut short: engage closes nothing, and the spawn its alias refuses
+# hands engage that sitting to attach.
+export LIVE_SITTINGS="gc-60=gc-toolkit/gc-toolkit.tk-conv" ALIAS_HELD=gc-60
+reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
+FAKE_CLOCK="$TMP/clock" GC_HELM_ENGAGE_WAIT_TIMEOUT=60 LIVE_STATES="gone active" run_engage tk-subj
+eq "$RC" 0 "(CUT-SHORT-OWN) engaging a conversation whose sitting the first listing missed exits 0"
+hasnt "$CALLED" "session close" "(CUT-SHORT-OWN) …closing nothing, not the sitting the conversation is bound to"
+has "$CALLED" "session attach gc-60" "(CUT-SHORT-OWN) …and attaching that sitting"
+hasnt "$CALLED" "bd update" "(CUT-SHORT-OWN) …writing nothing to the conversation"
+unset LIVE_SITTINGS ALIAS_HELD
 
 # closed_conv <id> — seed a conversation its sitting's sign-off closed: still
 # held by the sitting's alias, closed at a known time, and carrying the
@@ -1157,21 +1203,33 @@ reset; SPAWN_NO_ALIAS=1 run_engage tk-conv --no-attach
 eq "$RC" 0 "(NOALIAS-JSON) a spawn with no alias in its answer still binds"
 eq "$(asg tk-conv)" "gc-toolkit/gc-toolkit.tk-conv" "(NOALIAS-JSON) …to the alias the session list reports"
 
-echo "# an engage refused at the alias waits for the winner's bind, then points at it"
+echo "# an engage refused at the alias waits for the winner's bind, then takes the winner's sitting"
 # Of two engages of one conversation the second is refused at `gc session new`
 # having spawned nothing. Its alias holder is the engage that won, about to bind
 # the conversation. The refused engage waits for that bind; the bind lands on the
 # second read, so an engage that read the conversation once would name the
-# winner as left over and tell the operator to close it.
+# winner as left over and tell the operator to close it. Bound to the alias the
+# spawn was refused for, the conversation belongs to the sitting holding that
+# alias, so the refused engage names that sitting as a live sitting's engage
+# does, and attaches to it when it attaches.
 export ALIAS_HELD="gc-81" ALIAS_HOLDER="gc-81" AFTER_REFUSAL_READS=2 AFTER_REFUSAL_ASSIGNEE="gc-toolkit/gc-toolkit.tk-conv" GC_HELM_ENGAGE_BIND_WAIT=5
 reset; run_engage tk-conv --model codex-sol --no-attach
-eq "$RC" 4 "(ALIAS-BOUND) an engage refused at the alias exits 4"
+eq "$RC" 0 "(ALIAS-BOUND) an engage refused at the alias exits 0 once the winner's bind lands"
 has "$CALLED" "session new converse-codex-sol --alias tk-conv" "(ALIAS-BOUND) …after its spawn was refused"
-has "$OUT" "held by 'gc-toolkit/gc-toolkit.tk-conv', bound while this engage was spawning" "(ALIAS-BOUND) …reporting the winner once its bind lands"
-has "$OUT" "gc-helm engage tk-conv" "(ALIAS-BOUND) …and pointing the operator at engaging it, which attaches"
+has "$OUT" "the live sitting gc-81 holds conversation tk-conv for tk-subj" "(ALIAS-BOUND) …naming the winner's sitting as the one that holds the conversation"
+has "$OUT" "attach: gc session attach gc-81" "(ALIAS-BOUND) …and how to attach to it"
 hasnt "$OUT" "gc session close" "(ALIAS-BOUND) …never telling them to close the sitting that won"
 hasnt "$CALLED" "bd update" "(ALIAS-BOUND) …writing nothing to the conversation"
 hasnt "$CALLED" "session close" "(ALIAS-BOUND) …closing nothing"
+unset AFTER_REFUSAL_READS AFTER_REFUSAL_ASSIGNEE
+
+echo "# a holder that binds the conversation to another alias is named, not taken"
+export AFTER_REFUSAL_READS=2 AFTER_REFUSAL_ASSIGNEE="gc-toolkit/gc-toolkit.c-tk-conv"
+reset; run_engage tk-conv --no-attach
+eq "$RC" 4 "(ALIAS-OTHER) an engage refused at the alias whose conversation another alias takes exits 4"
+has "$OUT" "held by 'gc-toolkit/gc-toolkit.c-tk-conv', bound while this engage was spawning" "(ALIAS-OTHER) …naming the holder"
+has "$OUT" "gc-helm engage tk-conv" "(ALIAS-OTHER) …and pointing the operator at engaging it, which attaches"
+hasnt "$OUT" "gc session close" "(ALIAS-OTHER) …never telling them to close a sitting"
 unset AFTER_REFUSAL_READS AFTER_REFUSAL_ASSIGNEE
 
 echo "# a holder that never binds is named as left over, and closing it is suggested only then"
@@ -1231,14 +1289,15 @@ CALLED="$(cat "$CALLS")"
 eq "$(cat "$REG/arrivals-at-reserve" 2>/dev/null)" "2" "(RACE-CONCURRENT) both engages had passed the pre-spawn guards when the first reserved the alias"
 eq "$(grep -c '^session new ' "$CALLS" || true)" "2" "(RACE-CONCURRENT) both engages attempted the spawn"
 eq "$(grep -c '^spawned ' "$CALLS" || true)" "1" "(RACE-CONCURRENT) exactly one sitting was spawned"
+[ "$RC_A" = 0 ] && [ "$RC_B" = 0 ] && ok "(RACE-CONCURRENT) both engages exit 0: one spawned the sitting, and the other found the conversation bound to it" \
+  || bad "(RACE-CONCURRENT) expected both engages to exit 0 (got a=$RC_A b=$RC_B)"
 LOSER=""
-if [ "$RC_A" = 0 ] && [ "$RC_B" = 4 ]; then LOSER=b; elif [ "$RC_A" = 4 ] && [ "$RC_B" = 0 ]; then LOSER=a; fi
-[ -n "$LOSER" ] && ok "(RACE-CONCURRENT) one engage succeeds and the other exits 4" \
-  || bad "(RACE-CONCURRENT) expected one engage to exit 0 and the other 4 (got a=$RC_A b=$RC_B)"
+if grep -q 'holds conversation tk-conv' "$TMP/race-a.out"; then LOSER=a; elif grep -q 'holds conversation tk-conv' "$TMP/race-b.out"; then LOSER=b; fi
 eq "$(asg tk-conv)" "gc-toolkit/gc-toolkit.tk-conv" "(RACE-CONCURRENT) the conversation is bound once, to the sitting that was spawned"
 eq "$(grep -c 'bd update tk-conv --if-assignee' "$CALLS" || true)" "1" "(RACE-CONCURRENT) only the winner writes the conversation; the refused engage never reaches the bind"
 LOSER_OUT="$(cat "$TMP/race-${LOSER:-b}.out")"
-has "$LOSER_OUT" "held by 'gc-toolkit/gc-toolkit.tk-conv'" "(RACE-CONCURRENT) the refused engage reports the winner's hold"
+[ -n "$LOSER" ] && ok "(RACE-CONCURRENT) the refused engage names the winner's sitting as the one that holds the conversation" \
+  || bad "(RACE-CONCURRENT) neither engage named the winner's sitting (a: $(cat "$TMP/race-a.out") b: $(cat "$TMP/race-b.out"))"
 hasnt "$LOSER_OUT" "gc session close" "(RACE-CONCURRENT) …and never tells them to close it"
 hasnt "$CALLED" "session close" "(RACE-CONCURRENT) no sitting is closed, because none was spawned that holds nothing"
 
@@ -1420,11 +1479,24 @@ hasnt "$OUT" "gc bd update" "(START-CLOSED) …printing no store write to run by
 eq "$(grep -c '^bd update' "$CALLS" || true)" "1" "(START-CLOSED) …writing nothing to the conversation after its bind"
 eq "$(asg tk-conv)" "gc-toolkit/gc-toolkit.tk-conv" "(START-CLOSED) …so it stays bound to the sitting's alias"
 
-GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="blank" run_fresh tk-conv
-eq "$RC" 4 "(START-BLANK) a sitting listed with an empty state (closed, read from the supervisor) exits 4"
-hasnt "$CALLED" "session attach" "(START-BLANK) …without attaching"
-eq "$(cat "$POLLS")" 1 "(START-BLANK) …at the first listing"
-has "$OUT" "state in 'gc session list': closed" "(START-BLANK) …naming it closed"
+GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="closed" run_fresh tk-conv
+eq "$RC" 4 "(START-CLOSED-ROW) a sitting listed closed, as gc lists a closed session, exits 4"
+hasnt "$CALLED" "session attach" "(START-CLOSED-ROW) …without attaching"
+eq "$(cat "$POLLS")" 1 "(START-CLOSED-ROW) …at the first listing"
+has "$OUT" "state in 'gc session list': closed" "(START-CLOSED-ROW) …naming it closed"
+
+# An open sitting listed with no state is a create still under way, as Gas
+# City's own wait for a new session reads it, so it is waited on like one
+# start-pending.
+FAKE_CLOCK="$TMP/clock" START_STATES="blank blank active" run_fresh tk-conv
+eq "$RC" 0 "(START-BLANK) a sitting listed with no state is waited on, not read as closed"
+eq "$(cat "$POLLS")" 3 "(START-BLANK) …read until it reads active"
+has "$CALLED" "session attach gc-77" "(START-BLANK) …and attached then"
+has "$OUT" "waiting for the reconciler to start s-gc-77 (it is listed with no state yet)" "(START-BLANK) …saying what the listing showed"
+FAKE_CLOCK="$TMP/clock" START_STATES="blank gone" run_fresh tk-conv
+eq "$RC" 4 "(START-BLANK-GONE) a sitting listed with no state that then leaves the list has ended, and exits 4"
+eq "$(cat "$POLLS")" 2 "(START-BLANK-GONE) …at the listing it is gone from"
+hasnt "$CALLED" "session attach" "(START-BLANK-GONE) …without attaching"
 
 GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="failed-create" run_fresh tk-conv
 eq "$RC" 4 "(START-FAILED) a sitting whose create failed exits 4"
@@ -1453,6 +1525,71 @@ has "$CALLED" "session attach gc-77" "(START-UNLISTED) …and attached once it r
 GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="broken active" run_fresh tk-conv
 eq "$RC" 0 "(START-UNREADABLE) a listing that fails is waited through"
 has "$CALLED" "session attach gc-77" "(START-UNREADABLE) …and the sitting attached once a listing reads it active"
+
+echo "# an attach right after a start reaches the sitting the start spawned, listed or not"
+# The conversation form starts a conversation with `engage <conversation>
+# --no-input --no-attach`, which spawns the sitting and binds the conversation
+# to the sitting's alias, and then attaches with `engage <conversation>
+# --no-input`. That second engage can run while `gc session list`, which the
+# supervisor answers from its read cache, does not list the new sitting yet, or
+# lists it with no state. The conversation is bound to its own sitting's alias
+# then, so that sitting holds it: the attach waits for it to start and attaches
+# it, spawning no second sitting, closing nothing and writing nothing.
+# $ALIAS_KEEPS has the stub refuse a spawn under the alias the first sitting
+# holds, as gascity refuses an alias an open session holds.
+export ALIAS_KEEPS=1 GC_HELM_ENGAGE_BIND_WAIT=3
+for window in unlisted blank; do
+  reset
+  run_engage tk-conv --no-input --no-attach
+  eq "$RC" 0 "(FORM-ATTACH-${window}) the start spawns the sitting and binds the conversation to its alias"
+  : > "$CALLS"; : > "$POLLS"
+  case "$window" in
+    unlisted) states="gone gone gone gone start-pending active" ;;
+    blank)    states="blank blank blank blank start-pending active" ;;
+  esac
+  FAKE_CLOCK="$TMP/clock" GC_HELM_ENGAGE_WAIT_TIMEOUT=600 START_STATES="$states" run_engage tk-conv --no-input
+  eq "$RC" 0 "(FORM-ATTACH-${window}) the attach that follows exits 0"
+  has "$CALLED" "session attach gc-77" "(FORM-ATTACH-${window}) …attaching the sitting the start spawned"
+  attach_at=$(printf '%s\n' "$CALLED" | grep -n '^session attach' | head -1 | cut -d: -f1 || true)
+  polls_before=$(printf '%s\n' "$CALLED" | head -n "${attach_at:-0}" | grep -c '^session list' || true)
+  [ -n "$attach_at" ] && [ "$polls_before" -ge 6 ] \
+    && ok "(FORM-ATTACH-${window}) …only once a listing reads it active" \
+    || bad "(FORM-ATTACH-${window}) …only once a listing reads it active (attach at ${attach_at:-none}, listings before it ${polls_before:-0})"
+  hasnt "$CALLED" "session close" "(FORM-ATTACH-${window}) …closing nothing"
+  hasnt "$OUT" "gc session close" "(FORM-ATTACH-${window}) …and never telling the operator to close the sitting that holds the conversation"
+  hasnt "$CALLED" "bd update" "(FORM-ATTACH-${window}) …writing nothing to the conversation"
+  eq "$(asg tk-conv)" "gc-toolkit/gc-toolkit.tk-conv" "(FORM-ATTACH-${window}) …which stays bound to the sitting's alias"
+done
+
+# With --no-attach the engage names the sitting that holds the conversation and
+# attaches nothing. While the list does not show the sitting it names it by its
+# alias, and the attach to run is the conversation's.
+reset
+run_engage tk-conv --no-input --no-attach
+: > "$CALLS"; : > "$POLLS"
+FAKE_CLOCK="$TMP/clock" START_STATES="gone" run_engage tk-conv --no-input --no-attach
+eq "$RC" 0 "(ALIAS-OWN-NOATTACH) a second --no-attach engage while the list does not show the sitting exits 0"
+has "$OUT" "conversation tk-conv for tk-subj is held by its sitting gc-toolkit/gc-toolkit.tk-conv, which 'gc session list' does not show yet" \
+    "(ALIAS-OWN-NOATTACH) …naming the sitting by its alias"
+has "$OUT" "attach: gc-helm attach tk-conv" "(ALIAS-OWN-NOATTACH) …and the attach of the conversation to run"
+hasnt "$CALLED" "session attach" "(ALIAS-OWN-NOATTACH) …attaching nothing"
+hasnt "$CALLED" "session close" "(ALIAS-OWN-NOATTACH) …closing nothing"
+hasnt "$CALLED" "bd update" "(ALIAS-OWN-NOATTACH) …writing nothing"
+
+# A sitting the list never shows within the wait is not attached, since an
+# attach to a sitting the reconciler has not started launches it without its
+# prompt.
+reset
+run_engage tk-conv --no-input --no-attach
+: > "$CALLS"; : > "$POLLS"
+FAKE_CLOCK="$TMP/clock" GC_HELM_ENGAGE_WAIT_TIMEOUT=5 START_STATES="gone" run_engage tk-conv --no-input
+eq "$RC" 4 "(ALIAS-OWN-UNLISTED) an attach whose sitting the list never shows within the wait exits 4"
+hasnt "$CALLED" "session attach" "(ALIAS-OWN-UNLISTED) …attaching nothing"
+has "$OUT" "the reconciler has not started gc-toolkit/gc-toolkit.tk-conv after 5s (its state in 'gc session list': unlisted)" \
+    "(ALIAS-OWN-UNLISTED) …naming the sitting by its alias and what the list showed"
+has "$OUT" "Attach once it reads active there: gc-helm attach tk-conv" "(ALIAS-OWN-UNLISTED) …and the attach of the conversation"
+hasnt "$OUT" "gc session close" "(ALIAS-OWN-UNLISTED) …never telling them to close it"
+unset ALIAS_KEEPS GC_HELM_ENGAGE_BIND_WAIT
 
 echo "# --no-attach has no attach to gate, so it does not wait"
 GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="start-pending" run_fresh tk-conv --no-attach
