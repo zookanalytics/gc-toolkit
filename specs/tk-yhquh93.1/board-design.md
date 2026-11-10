@@ -76,7 +76,10 @@ field it carries is a field of today's board contract
 `services/helm/cmd/helm-fixture --board` and today's page draws the same
 board. The three share one visual language (`prototypes/shared/base.css`), so
 they differ in structure and behavior, not in paint. Each has a narrated clip,
-recorded from the scripts in `prototypes/demo/` with the demo-capture skill.
+recorded with the demo-capture skill from its script in `prototypes/demo/`.
+The scripts are in the capture engine's demo-script format and are named
+`.demo`, not `.md`, because the engine reads every line above the title as the
+clip's cover text, so a script cannot open with a spec page's frontmatter.
 
 ### A, Briefing
 
