@@ -438,7 +438,8 @@ first. Either way the change is a decision on the record, not a drift.
   withdraws it, and GitHub's stale-review dismissal stays off.
 - **A branch is brought current by merging its target in, and every push is a
   fast-forward,** so a PR keeps the commits its approval and its threads were
-  given on.
+  given on. A push under git's lease is a fast-forward too, because the city
+  checks first that the new head descends from the commit the lease names.
 - **A bead waits on its PR's merge through bd's own `gh:pr` gate,** which Gas
   City's gate sweep resolves and the city's status never counts as a hold,
   since the gate is the merge itself.
