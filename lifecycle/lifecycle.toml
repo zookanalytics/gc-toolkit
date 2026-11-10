@@ -1386,17 +1386,6 @@ keys = [
 #   bead, and a validating closer reads _reason as the close brief of a reaction
 #   that ran before reaction beads.
 
-[metadata.placement]
-# The marker intake wrote on new work it held for the placement sitting.
-keys = ["placement"]
-# placement — RETIRED. `pending` on a bead intake held for the placement sitting.
-#   Intake holds new work with Gas City's hold:mayor label (docs/steering.md):
-#   first-reaction-dispose.sh, mol-witness-patrol.toml's bug-file block and
-#   mol-feedback-distiller.toml write it, and assets/scripts/dispatch-path.sh's
-#   has_dispatch_hold reads it. Nothing writes or reads this key. Registered so
-#   that residue on a pre-retirement bead reads as known, not as a stray. A
-#   string.
-
 [metadata.priority]
 # The priority flow (docs/steering.md): a bead's priority is the priority of the
 # bead it follows plus its own shift, computed by assets/scripts/priority-lib.sh,
