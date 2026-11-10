@@ -100,14 +100,17 @@ projection runs there and at the commit the branch held. A push whose report
 never came is settled from git's own check of the commit the push read. The next
 holder of the lock reads the branch, and while the branch holds a commit the new
 head descends from, it pushes that head as a fast-forward, after which the
-earlier push can no longer land. The publication's record of what it moves is
-how that holder learns of such a push, and it sits beside the lock. Gas City's
-operation journal records the requests a session receives (`OpsConfig` in
-`docs/reference/config.md`), and no command records an entry in it
-(`gc event emit` in `docs/reference/cli.md`), so a pack has no journal of its
-own writes to keep the record in. The warrant *The city's merge status* records
-it. `blocker-holder.sh`'s new class composes core's gate sweep: a gate it
-resolves is held by an automated actor.
+earlier push cannot land while the branch stays off the commit it read. The
+publication's record of what it moves is how that holder learns of such a push,
+and it sits beside the lock. Gas City's operation journal records the requests a
+session receives (`OpsConfig` in `docs/reference/config.md`), and no command
+records an entry of a pack's own in it. The command that records an event a pack
+names, `gc event emit`, writes the city's event log best effort, and the event
+bus does not acknowledge that the event persisted (`docs/reference/cli.md`). So
+Gas City holds no record of a pack's own write that a later holder can count on
+finding. The warrant *The city's merge status* records it. `blocker-holder.sh`'s
+new class composes core's gate sweep: a gate it resolves is held by an automated
+actor.
 
 ## The bead's wait for its PR's merge, and its close (unit 3)
 
