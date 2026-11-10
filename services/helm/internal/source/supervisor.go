@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/conversation"
 	"github.com/zookanalytics/gc-toolkit/services/helm/internal/board"
 	"golang.org/x/sync/errgroup"
 )
@@ -718,7 +719,7 @@ func (s *SupervisorSource) gatherMetadataAnchors(ctx context.Context, g *gatherS
 			a.Subjects = uniqueStrings(blockedBy[b.ID])
 			g.anchors = append(g.anchors, a)
 			continue
-		case b.IssueType == "task" && conversationAssignee(b.Assignee, b.ID):
+		case b.IssueType == conversation.IssueType && conversation.IsAssignee(b.Assignee, b.ID):
 			if subject, replies, ok := apiConversationEdges(b.Deps); ok {
 				a := s.metadataAnchorFor(g, b, md, board.KindConversation, nil)
 				a.Subjects, a.RepliesTo, a.Assignee = []string{subject}, replies, b.Assignee
@@ -736,21 +737,13 @@ func (s *SupervisorSource) gatherMetadataAnchors(ctx context.Context, g *gatherS
 	}
 }
 
-// apiConversationEdges is [conversationEdges] over a scan row's own edges.
+// apiConversationEdges is [conversation.Shape] over a scan row's own edges.
 func apiConversationEdges(deps []apiBeadDep) (subject string, replies []string, ok bool) {
-	var tracked []string
+	edges := make([]conversation.Edge, 0, len(deps))
 	for _, d := range deps {
-		switch d.Type {
-		case "tracks":
-			tracked = append(tracked, d.DependsOnID)
-		case "replies-to":
-			replies = append(replies, d.DependsOnID)
-		}
+		edges = append(edges, conversation.Edge{Type: d.Type, DependsOnID: d.DependsOnID})
 	}
-	if tracked = uniqueStrings(tracked); len(tracked) != 1 {
-		return "", nil, false
-	}
-	return tracked[0], uniqueStrings(replies), true
+	return conversation.Shape(edges)
 }
 
 // anchorCandidate reports whether a bead may be admitted under a METADATA-keyed

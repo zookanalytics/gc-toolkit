@@ -587,8 +587,8 @@ why a reader must know it, and the work that retires it.
   member (tk-1tfzr71.21) rewrites its facts.
 - **The board reads the store itself.** Its source reads each rig's store
   through the embedded beads library or the supervisor's API and decodes the
-  rows and keys it shows, and only what holds a bead and where a PR stands
-  come from the domains. One render therefore holds two reads of the store, so
+  rows and keys it shows, and only what holds a bead, where a PR stands and
+  the shape of a conversation come from the domains. One render therefore holds two reads of the store, so
   the board renders a domain's answer, or that the answer is missing, and
   never derives its own from its rows. Human gates are where it still does.
   An open gate's own row marks each bead it names as held by a person, and

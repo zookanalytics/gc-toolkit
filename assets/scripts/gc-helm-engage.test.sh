@@ -25,6 +25,14 @@
 #   (REASON-NEW) --reason files a fresh conversation even when one waits
 #   (CONVID-REASON) --reason on an explicit conversation id is refused
 #   (LIVE)    a conversation a live sitting holds is attached to, not doubled
+#   (PR-HOLD*) a sitting engage starts on a conversation about an open PR holds
+#             the PR's merge first, through the anchor's blocks edge onto the
+#             conversation, one whose sitting ended included; a live sitting it
+#             attaches to, or a subject that is no open PR, adds no edge, and an
+#             edge the store refuses starts nothing
+#   (GATE-NOREPLY-PR, GATE-NOHOLD) engage pointed at a gate on an open PR
+#             writes the hold before the reply, and writes each when the store
+#             refuses the other, starting nothing
 #   (REUSE-*) a live sitting engage reuses is attached only once it reads
 #             active: one still start-pending or creating is waited on and left
 #             unattached at the bound, which exits 4, one that ends first is
@@ -304,9 +312,11 @@ case "$1 ${2:-}" in
       tk-gate)
         jq -n '[{id:"tk-gate", title:"Approve the rollout", description:"Gate on the waiting bead.", status:"open", issue_type:"gate", await_type:"human", await_id:"rollout"}]' ;;
       *)
-        # $SUBJ_STATUS is the status every other bead reads, open by default.
+        # $SUBJ_STATUS is the status every other bead reads, open by default,
+        # and $SUBJ_META its metadata, none by default.
         jq -n --arg i "$id" --arg t "${SUBJ_TITLE:-the subject under engagement}" --arg st "${SUBJ_STATUS:-open}" \
-          '[{id:$i, title:$t, status:$st, issue_type:"task", priority:2, assignee:""}]' ;;
+              --argjson md "${SUBJ_META:-"{}"}" \
+          '[{id:$i, title:$t, status:$st, issue_type:"task", priority:2, assignee:"", metadata:$md}]' ;;
     esac ;;
   "bd list")
     _id=""; _prev=""
@@ -367,9 +377,15 @@ case "$1 ${2:-}" in
         esac ;;
       add)
         printf 'bd dep %s\n' "$*" >> "$CALLS"
-        # REPLY_FAIL refuses the edge, as a store that will not write it does.
-        [ -z "${REPLY_FAIL:-}" ] || { echo "Error adding dependency: the store refused it" >&2; exit 1; }
-        printf '%s %s\n' "$4" "$5" >> "$ST/replies" ;;
+        case " $* " in
+          *" --type blocks "*)
+            # HOLD_FAIL refuses the edge that holds an open PR's merge.
+            [ -z "${HOLD_FAIL:-}" ] || { echo "Error adding dependency: the store refused it" >&2; exit 1; } ;;
+          *)
+            # REPLY_FAIL refuses the edge, as a store that will not write it does.
+            [ -z "${REPLY_FAIL:-}" ] || { echo "Error adding dependency: the store refused it" >&2; exit 1; }
+            printf '%s %s\n' "$4" "$5" >> "$ST/replies" ;;
+        esac ;;
       *) printf 'bd dep %s\n' "$*" >> "$CALLS" ;;
     esac ;;
   "session new")
@@ -757,6 +773,39 @@ reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
 run_engage tk-subj
 has "$CALLED" "session attach gc-50" "(LIVE-ATTACH) the default attaches the operator to the live sitting"
 hasnt "$OUT" "waiting for the reconciler" "(LIVE-ATTACH) …a started one at once, with no wait announced"
+reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
+SUBJ_META='{"merge_result":"pull_request"}' run_engage tk-subj --no-attach
+eq "$RC" 0 "(PR-HOLD-LIVE) attaching to a live sitting on an open PR exits 0"
+hasnt "$CALLED" "--type blocks" "(PR-HOLD-LIVE) …and adds no edge: the live sitting keeps the hold as it left it"
+unset LIVE_SITTINGS
+
+echo "# a sitting engage starts on an open PR holds the PR's merge first"
+reset; SUBJ_META='{"merge_result":"pull_request"}' run_engage tk-conv --no-attach
+eq "$RC" 0 "(PR-HOLD) engaging a queued conversation on an open PR's anchor exits 0"
+has "$CALLED" "bd dep bd dep add tk-subj tk-conv --type blocks" \
+    "(PR-HOLD) …holding the PR's merge through the anchor's blocks edge onto the conversation"
+HOLD_AT=$(printf '%s\n' "$CALLED" | grep -n '^bd dep bd dep add tk-subj tk-conv --type blocks' | head -1 | cut -d: -f1)
+SPAWN_AT=$(printf '%s\n' "$CALLED" | grep -n '^session new ' | head -1 | cut -d: -f1)
+[ -n "$HOLD_AT" ] && [ -n "$SPAWN_AT" ] && [ "$HOLD_AT" -lt "$SPAWN_AT" ] \
+    && ok "(PR-HOLD) …before the sitting starts" \
+    || bad "(PR-HOLD) …before the sitting starts (hold at ${HOLD_AT:-none}, spawn at ${SPAWN_AT:-none})"
+has "$OUT" "conversation tk-conv holds the merge of the PR of tk-subj until it closes" "(PR-HOLD) …and engage says so"
+reset; SUBJ_META='{"task_kind":"review","anchor_bead":"tk-other"}' run_engage tk-conv --no-attach
+hasnt "$CALLED" "--type blocks" "(PR-HOLD-NOT-PR) a subject whose anchor is no open PR adds no edge"
+reset; run_engage tk-conv --no-attach
+hasnt "$CALLED" "--type blocks" "(PR-HOLD-NOT-PR) …and neither does a subject that is no anchor"
+reset; HOLD_FAIL=1 SUBJ_META='{"merge_result":"pull_request"}' run_engage tk-conv --no-attach
+eq "$RC" 4 "(PR-HOLD-FAIL) a hold that does not land exits 4"
+has "$OUT" "nothing spawned, because the sitting would talk while the PR could merge" "(PR-HOLD-FAIL) …saying why nothing spawned"
+hasnt "$CALLED" "session new" "(PR-HOLD-FAIL) …and starts no sitting"
+# A conversation whose sitting's session has ended, as one whose sitting lifted
+# the hold leaves it, gets the hold back when engage starts its next sitting.
+reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
+SUBJ_META='{"merge_result":"pull_request"}' run_engage tk-conv --no-attach
+eq "$RC" 0 "(PR-HOLD-ENDED) engaging a conversation whose sitting ended exits 0"
+has "$CALLED" "bd dep bd dep add tk-subj tk-conv --type blocks" "(PR-HOLD-ENDED) …and the new sitting holds the merge again"
+has "$CALLED" "session new converse-opus --alias tk-conv" "(PR-HOLD-ENDED) …starting a sitting of its own"
+export LIVE_SITTINGS="gc-50=gc-toolkit/gc-toolkit.tk-conv"
 
 echo "# a live sitting engage reuses is attached only once the reconciler has started it"
 # A sitting is live from the spawn that created it, so one an earlier
@@ -973,6 +1022,20 @@ reset; REPLY_FAIL=1 run_engage tk-gate --no-attach
 eq "$RC" 4 "(GATE-NOREPLY) a reply the store refuses exits 4"
 hasnt "$CALLED" "session new" "(GATE-NOREPLY) …starting no sitting that would not know its gate"
 has "$OUT" "gc bd dep add tk-conv tk-gate --type replies-to" "(GATE-NOREPLY) …and naming the edge to add by hand"
+reset; REPLY_FAIL=1 SUBJ_META='{"merge_result":"pull_request"}' run_engage tk-gate --no-attach
+eq "$RC" 4 "(GATE-NOREPLY-PR) a reply the store refuses on a conversation about an open PR exits 4"
+has "$CALLED" "bd dep bd dep add tk-subj tk-conv --type blocks" "(GATE-NOREPLY-PR) …having held the PR's merge all the same"
+case "$CALLED" in
+  *"--type blocks"*"--type replies-to"*) ok "(GATE-NOREPLY-PR) …with the hold written before the reply" ;;
+  *) bad "(GATE-NOREPLY-PR) the hold should precede the reply (calls: $CALLED)" ;;
+esac
+hasnt "$CALLED" "session new" "(GATE-NOREPLY-PR) …and starting no sitting"
+reset; HOLD_FAIL=1 SUBJ_META='{"merge_result":"pull_request"}' run_engage tk-gate --no-attach
+eq "$RC" 4 "(GATE-NOHOLD) a hold the store refuses on a conversation pointed at a gate exits 4"
+has "$CALLED" "bd dep bd dep add tk-conv tk-gate --type replies-to" \
+    "(GATE-NOHOLD) …having written the reply all the same, which re-engaging the conversation would not write"
+has "$OUT" "nothing spawned, because the sitting would talk while the PR could merge" "(GATE-NOHOLD) …saying why nothing spawned"
+hasnt "$CALLED" "session new" "(GATE-NOHOLD) …and starting no sitting"
 
 echo "# a gate two open beads wait on starts nothing and names both"
 export GATE_WAITERS='[{"id":"tk-subj","status":"open"},{"id":"tk-child","status":"in_progress"}]'

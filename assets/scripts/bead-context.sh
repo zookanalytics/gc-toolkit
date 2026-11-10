@@ -98,6 +98,8 @@ scrub() { tr -d '\000-\037'; }
 _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
+# shellcheck source=conversation.sh
+. "$_bd_lib_dir/conversation.sh" || { echo "cannot source conversation.sh beside this script" >&2; exit 1; }
 
 usage() {
   cat >&2 <<'U'
@@ -228,8 +230,11 @@ bd_rows() {
 #                publishes it), or settled with a PR that needs no further review.
 #   stuck      human: a human gate (a gate whose await type is human, which
 #                carries no route), a bead routed or assigned to the reserved
-#                `human`, a decision, a finding that needs the operator, or an
-#                anchor parked in a human state.
+#                `human`, a decision, a finding that needs the operator, an
+#                anchor parked in a human state, or a conversation
+#                (conversation.sh), which holds an open PR's merge until a
+#                person's ruling or dismissal closes it, in the queue or held
+#                by its sitting.
 #              held: any other status. Blocked, deferred and pinned are
 #                deliberate holds no pool offers; a status a store adds is one
 #                this classifier does not know, so it fails closed.
@@ -243,14 +248,16 @@ bd_rows() {
 #              capped: an armed dispatch that hit its sling-failure cap.
 #              unrouted: open with no route, arm or assignee, so nothing picks it up.
 #
-# Where two rules apply, in-progress outranks everything and an explicit human
-# route outranks every advancing kind, so a review routed to a person stays stuck.
+# Where two rules apply, a conversation outranks everything, so its sitting's
+# claim reads as the person's it is, in-progress outranks everything else, and an
+# explicit human route outranks every advancing kind, so a review routed to a
+# person stays stuck.
 # Whether a claim's or a route's session is still up is a liveness join over the
 # session list, not a fact on the row, so a stranded claim reads advancing here,
 # and a bead a poured molecule is working (its work bead, or an inline step)
 # carries no route of its own and reads unrouted. gc.execution_routed_to is a
 # pour's provenance, not a live route, and is not read.
-ADV='
+ADV="$CONVERSATION_JQ"'
 def adv_truthy: ((. // "") | tostring) as $s
   | ($s == "" or $s == "false" or $s == "False" or $s == "FALSE" or $s == "0" or $s == "null") | not;
 def adv_human: . == "human" or endswith("/human");
@@ -276,7 +283,8 @@ def adv_own($cap):
   | (($m["task_kind"] // "") | tostring) as $tk
   | (($m["merge_result"] // "") | tostring) as $mr
   | ((.assignee // "") | tostring) as $a
-  | if .status == "in_progress" or .status == "hooked" then {state: "advancing"}
+  | if conversation then {state: "stuck", why: "human"}
+    elif .status == "in_progress" or .status == "hooked" then {state: "advancing"}
     elif ($r | adv_human) or ($a | adv_human) or .issue_type == "decision"
          or (.issue_type == "gate" and ((.await_type // "") | tostring) == "human") then {state: "stuck", why: "human"}
     elif .status != "open" then {state: "stuck", why: "held"}

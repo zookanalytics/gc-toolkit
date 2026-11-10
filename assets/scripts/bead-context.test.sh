@@ -167,6 +167,18 @@ bead "$R_TK" tk-hg <<'J'
 {"id":"tk-hg","title":"human-gated blocker","status":"open","issue_type":"task",
  "metadata":{"gc.routed_to":"human"}}
 J
+# tk-convheld: held by a conversation its sitting holds, in progress under the
+# alias that names its own id, as one on an open PR holds the PR's merge. It is a
+# person's, so it reads stuck, not advancing.
+bead "$R_TK" tk-convheld <<'J'
+{"id":"tk-convheld","title":"held by a conversation","status":"open","issue_type":"task","metadata":{"merge_result":"pull_request"},
+ "dependencies":[{"id":"tk-cv","dependency_type":"blocks","status":"in_progress","title":"should this land as built?"}]}
+J
+bead "$R_TK" tk-cv <<'J'
+{"id":"tk-cv","title":"should this land as built?","status":"in_progress","issue_type":"task",
+ "assignee":"gc-toolkit/converse-opus.c-tk-cv","metadata":{},
+ "dependencies":[{"id":"tk-convheld","dependency_type":"tracks","status":"open","title":"held by a conversation"}]}
+J
 # tk-inreview: held by a review bead the review cadence dispatched. The review
 # bead's live route is CLEARED by the pour (gc.routed_to="") and its status is not
 # in_progress, so it looks like an unrouted stuck blocker — but it is machine work
@@ -710,6 +722,9 @@ JQF='.frontier.open[0].advance'  runj tk-adv --frontier; eq "$JQ" advancing "  .
 
 JQF='.frontier.verdict'          runj tk-humangate --frontier; eq "$JQ" stuck "a blocker routed to the human gate is stuck, not advancing"
 JQF='.frontier.open[0].advance'  runj tk-humangate --frontier; eq "$JQ" stuck "  ... advance=stuck for a human-routed blocker"
+
+JQF='.frontier.open[0] | "\(.id) \(.advance)"' runj tk-convheld --frontier; eq "$JQ" "tk-cv stuck" "a conversation its sitting holds is a person's, so stuck, not advancing"
+JQF='.frontier.verdict'          runj tk-convheld --frontier; eq "$JQ" stuck "  ... and so is the subject it holds"
 
 JQF='.frontier.open[0].advance'  runj tk-inreview --frontier; eq "$JQ" advancing "a review bead with a pour-cleared route is machine work, so advancing not stuck"
 JQF='.frontier.verdict'          runj tk-inreview --frontier; eq "$JQ" advancing "  ... so a subject held only by a review in flight is advancing, not stuck"

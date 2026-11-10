@@ -1058,9 +1058,33 @@ run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --no-rework
 eq "$RC" 0 "(NO-REWORK) --no-rework exits 0"
 eq "$(acts tk-conv)" "Ruled: fix the retry before the merge" "(NO-REWORK) …and the ruling is the only action recorded, since the branch stands"
 
+echo "# a conversation on a PR's review reaches the PR whose merge it holds"
+# A conversation on an open PR's review holds the PR's merge through the
+# anchor's blocks edge onto the conversation (gc-helm.sh open), so its ruling
+# says what it does to that PR, which it reaches through nothing else.
+held_review() {
+    fresh; bead tk-anc; setm tk-anc merge_result pull_request; setm tk-anc pr_number 41
+    bead tk-rw; setm tk-rw task_kind review; setm tk-rw anchor_bead tk-anc
+    conv tk-conv tk-rw
+}
+held_review; edge tk-anc blocks tk-conv
+run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}"
+eq "$RC" 2 "(HELD-PR) a ruled sign-off in a conversation that holds a PR's merge, with none of --rework, --no-rework and --retire, exits 2"
+has "$OUT" "this ruling reaches tk-anc at merge_result=pull_request, as its subject, as the PR whose merge this conversation holds" "(HELD-PR) …naming the PR it holds"
+eq "$(writes)" 0 "(HELD-PR) …writing nothing"
+run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
+eq "$RC" 0 "(HELD-PR) --rework exits 0"
+has "$(cat "$CALLS")" "converse-rework --anchor tk-anc --ruling-bead tk-conv" "(HELD-PR) …filing the rework against the PR's anchor"
+eq "$(field tk-conv status)" "closed" "(HELD-PR) …and closing the conversation, whose close frees the merge"
+hasnt "$(cat "$CALLS")" "bd dep remove" "(HELD-PR) …with no write to the edge"
+held_review
+run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}"
+eq "$RC" 0 "(HELD-PR-LIFTED) once a sitting lifted the hold, the ruling reaches no PR through it and exits 0"
+eq "$(field tk-conv status)" "closed" "(HELD-PR-LIFTED) …closing the conversation"
+
 echo "# two conversations on one PR: each ruling answers its own question"
-# Each sitting's hold filed its own gate on the anchor, under a key that names
-# its conversation (skills/converse-hold), and replies to that gate alone.
+# Each conversation replies to a gate of its own on the anchor, under a key that
+# names it, and its ruling answers that gate alone.
 fresh; bead tk-anc; setm tk-anc merge_result pull_request
 gate tk-ga conversation.tk-ca; edge tk-anc blocks tk-ga
 gate tk-gb conversation.tk-cb; edge tk-anc blocks tk-gb

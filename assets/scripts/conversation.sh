@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
-# conversation.sh — the single definition of a conversation's shape
-# (specs/tk-0ur8r9p/design.md section 1). A conversation is an ordinary task
-# that tracks the one bead it is about. It is assigned to `human` while it
-# waits in the operator's queue, and to its sitting's alias while a sitting
-# holds it. That alias names the task's own id, or its `c-` fallback when the
-# runtime refuses the bare id, and a claim records it qualified by the
-# session's rig and template binding (`<rig>/<binding>.<alias>`), so a held
-# conversation is known by its assignee alone, even once its session has
-# closed. Work a person owes is assigned to that person and tracks nothing,
-# so the shape tells the two apart.
+# conversation.sh — the shell definition of a conversation's shape
+# (specs/tk-0ur8r9p/design.md section 1), the rule the Go one in
+# services/gctk/conversation holds for the board and the PR's facts. A
+# conversation is an ordinary task that tracks the one bead it is about. It is
+# assigned to `human` while it waits in the operator's queue, and to its
+# sitting's alias while a sitting holds it. That alias names the task's own id,
+# or its `c-` fallback when the runtime refuses the bare id, and a claim records
+# it qualified by the session's rig and template binding
+# (`<rig>/<binding>.<alias>`), so a held conversation is known by its assignee
+# alone, even once its session has closed. Work a person owes is assigned to
+# that person and tracks nothing, so the shape tells the two apart. A
+# conversation on an open PR holds the PR's merge until it closes, and
+# otherwise blocks nothing: the PR's anchor depends on it through a `blocks`
+# edge (gc-helm.sh, conversation_hold_merge).
 #
 # Sourced (never executed). Two forms of the one rule:
 #   $CONVERSATION_JQ        jq defs, the in-variable convention (standing-kinds.sh):

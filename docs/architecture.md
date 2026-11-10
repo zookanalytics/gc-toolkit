@@ -297,7 +297,8 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   it blocks.
 - **A conversation is a task about one subject.** It tracks its subject,
   replies to each human gate it answers through bd's `replies-to` edge, and
-  blocks nothing. It waits in the operator's queue, assigned to `human`, until
+  blocks nothing but an open PR's anchor, whose merge it holds until it closes.
+  It waits in the operator's queue, assigned to `human`, until
   the operator engages it. `gc-helm.sh open` files one, and so do the
   operator's intake, `operator-intake.sh`, and a caller asking about a bead with
   open children, which a gate on the bead would pause. `gc-helm engage` takes

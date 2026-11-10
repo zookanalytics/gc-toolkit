@@ -2759,32 +2759,6 @@ func TestGatherAdmitsOpenConversationsAsAnchors(t *testing.T) {
 	}
 }
 
-// TestConversationShapeIsTheAssigneeAndOneTracksEdge pins the assignee half of
-// the shape conversation.sh defines: `human`, or the alias that names the
-// task's own id, bare, as its `c-` fallback, or qualified by a session's rig and
-// binding.
-func TestConversationShapeIsTheAssigneeAndOneTracksEdge(t *testing.T) {
-	for _, tc := range []struct {
-		assignee string
-		want     bool
-	}{
-		{"human", true},
-		{"tk-c1", true},
-		{"c-tk-c1", true},
-		{"gc-toolkit/gc-toolkit.tk-c1", true},
-		{"gc-toolkit/gc-toolkit.c-tk-c1", true},
-		{"converse.tk-c1", true},
-		{"", false},
-		{"alice", false},
-		{"gc-toolkit/gc-toolkit.tk-c2", false},
-		{"tk-c11", false},
-	} {
-		if got := conversationAssignee(tc.assignee, "tk-c1"); got != tc.want {
-			t.Errorf("conversationAssignee(%q) = %v, want %v", tc.assignee, got, tc.want)
-		}
-	}
-}
-
 // TestSittingTakeawayIsAttributedBySpan is the reason the takeaway is not simply
 // copied off the subject: three sittings share one subject, and only the one
 // that was running when the takeaway was stamped may claim it.
