@@ -427,10 +427,11 @@ first. Either way the change is a decision on the record, not a drift.
   own pushes there, such as a `direct` landing, land while every PR into the
   branch waits for the city's status.
 - **Each push the pack makes onto a PR's branch publishes the head behind a
-  pending status,** and until the city knows where the push left the branch,
-  its verdict at that head counts the PRs the push would move there, so a PR it
-  moves onto a commit the city already passed waits for a verdict that counts
-  it.
+  pending status,** under git's lease on the commit the city read on the
+  branch, so git applies the push only from that commit. Until the city knows
+  where the push left the branch, its verdict at that head counts the PRs the
+  push would move there, so a PR it moves onto a commit the city already
+  passed waits for a verdict that counts it.
 - **The city keeps GitHub's auto-merge on only while it reads the PR
   approved,** on a target whose rules require an approving review.
 - **An approval stands across a push** until the city's reading of the change
@@ -451,7 +452,9 @@ why a reader must know it, and the work that retires it.
 
 - **A refinery push can still force over a commit.** When a branch is not an
   ancestor of the head the refinery prepared, its merge-push step pushes with a
-  lease, and the lease can pass over a commit the branch gained after the prep.
+  lease that names no commit, which git checks against the remote-tracking ref
+  every worktree's fetch moves, so the lease can pass over a commit the branch
+  gained after the prep.
   The merge rewrite (tk-1tfzr71.20) rebuilds the patrol so that every push is a
   fast-forward, in a unit its implementation child (tk-1tfzr71.67) files.
 - **The pack still merges each PR itself.** Until a rig's cutover, the pack

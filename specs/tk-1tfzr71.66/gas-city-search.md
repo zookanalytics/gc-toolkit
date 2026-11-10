@@ -88,7 +88,11 @@ it, even when the push's outcome never reached the writer that sent it.
   reports `ok` or `ng` for it
   ([gitprotocol-pack](https://git-scm.com/docs/gitprotocol-pack)). The protocol
   has no request that asks about an update sent earlier, so a push whose report
-  never came leaves nothing to read but the ref itself.
+  never came leaves nothing to read but the ref itself. The client reads the
+  ref when it pushes, and git's lease, `--force-with-lease=<ref>:<expect>`,
+  makes it send the update only when the ref still holds the commit its caller
+  names ([git-push](https://git-scm.com/docs/git-push)), so a caller can bind
+  the update to a commit it read earlier.
 
 What unit 2 composes: GitHub's required status check and auto-merge, driven by
 the pack's one definition of what holds a PR (`prstatus`), which takes the
@@ -105,10 +109,13 @@ projection keeps it on only while the city reads the PR approved. Each push the
 pack makes onto a PR's branch publishes the head under the same lock: when the
 city's status at the commit it will push reads success, the projection posts
 pending there first, and once git answers, the projection runs there and at the
-commit the branch held. A push whose report never came is settled from git's own
+commit the branch held. The push goes under git's lease on the commit the
+publication read on the branch, once the writer has checked that the head
+descends from it, so the push stays a fast-forward and git sends it only from
+that commit. A push whose report never came is settled from git's own
 check of the commit the push read. The next holder of the lock reads the branch,
-and while the branch holds the commit the push read, it pushes that head as a
-fast-forward from the rig's repository, where git's garbage
+and while the branch holds the commit the push read, it pushes that head under
+the same lease from the rig's repository, where git's garbage
 collection keeps the commit while a ref or a reflog reaches it. The earlier
 push then cannot land while the branch stays off the commit it read. The
 publication's record of what it moves is how that holder learns of such a push,
