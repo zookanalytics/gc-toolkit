@@ -4803,7 +4803,7 @@ cmd_engage() {
                 0) attach_rc=0
                    gc session attach "$sid" || attach_rc=$?
                    engage_after_attach "$attach_rc" ;;
-                2) echo "$PROG: engage: the sitting $sname that holds conversation $CONV ended before the reconciler started it (its state in 'gc session list': $start_state), so there is nothing to attach. Re-run to start a sitting on it: $PROG engage $bead" >&2
+                2) echo "$PROG: engage: the sitting $sname that holds conversation $CONV ended before the reconciler started it (its state in 'gc session list': $start_state), so there is nothing to attach. Re-run to start a new sitting on conversation $CONV: $PROG attach $CONV" >&2
                    exit 4 ;;
                 *) echo "$PROG: engage: the reconciler has not started $sname after $(engage_dur "$ENGAGE_WAIT_TIMEOUT") (its state in 'gc session list': ${start_state:-unreadable}), so it was not attached; an attach now would launch it without its prompt. Attach once it reads active there: gc session attach $sid" >&2
                    exit 4 ;;
@@ -5087,11 +5087,18 @@ cmd_engage() {
     # It waits as long as the start takes, because a start on a busy controller
     # can take minutes, and an engage that stops waiting first leaves the
     # operator with no sitting on screen while it starts anyway.
+    #
+    # A sitting that ends before it starts leaves the conversation bound to its
+    # alias, and engage writes nothing to it. The message names an attach of
+    # the conversation, which engages it again. That engage spawns under the
+    # same alias and takes the conversation with no bind. The board's
+    # start-failed mark joins the failed session to the conversation by the
+    # session's alias, not by the conversation's assignee.
     start_rc=0
     if [ "$engage_attach" = "1" ]; then
         engage_wait
         if [ "$start_rc" -eq 2 ]; then
-            echo "$PROG: engage: the sitting $sname ended before the reconciler started it (its state in 'gc session list': $start_state), so there is nothing to attach. Conversation $CONV is still bound to it; hand it back to the operator's queue: gc bd update $CONV --if-assignee \"$salias\" --assignee human --status open" >&2
+            echo "$PROG: engage: the sitting $sname ended before the reconciler started it (its state in 'gc session list': $start_state), so there is nothing to attach. Re-run to start a new sitting on conversation $CONV: $PROG attach $CONV" >&2
             exit 4
         fi
     fi
