@@ -225,14 +225,21 @@ func New(ctx context.Context, helm Helm, opt Options) *Model {
 // question was kept, or where the conversation it saved stands.
 func (m *Model) Note() string { return m.note }
 
-// Init starts the background reads: the city's conversations and rigs, and the
-// subject the command line named. The return list reads the city again while
-// it is on screen. The home page reads nothing: each entry reads what it needs
-// as it opens.
+// Init starts the background reads of the screen the form opens on
+// (loadScreen). The home page reads nothing: each entry starts its screen's
+// reads as it opens.
 func (m *Model) Init() tea.Cmd {
 	if m.scr == homeScreen {
 		return nil
 	}
+	return m.loadScreen()
+}
+
+// loadScreen starts the reads the start and the return screens show, whether
+// the form opens on one or the home page opens it: the city's conversations
+// and rigs, and the subject the subject field names. The return list reads the
+// city again while it is on screen.
+func (m *Model) loadScreen() tea.Cmd {
 	cmds := []tea.Cmd{m.loadCity()}
 	if m.ref() != "" {
 		cmds = append(cmds, m.lookup(m.subjectKey()))
@@ -1066,8 +1073,9 @@ func (m *Model) homeKey(s string) tea.Cmd {
 // openEntry opens the home page's entry under the cursor. A seat hands the
 // terminal to its verb, which opens the seat's session and attaches to it, and
 // the form leaves once the terminal comes back, as it does after an attach to
-// a conversation. Starting and returning are the form's own screens, which
-// read the city as they open, as Ctrl+R does between them.
+// a conversation. Starting and returning are the form's own screens, and each
+// starts the reads it shows as it opens (loadScreen), as it does when the form
+// opens on it.
 func (m *Model) openEntry() tea.Cmd {
 	switch m.homeAt {
 	case poEntry:
@@ -1076,10 +1084,10 @@ func (m *Model) openEntry() tea.Cmd {
 		return m.openSeat("mechanik", "Mechanik did not open")
 	case startEntry:
 		m.scr = composeScreen
-		return m.loadCity()
+		return m.loadScreen()
 	case returnEntry:
 		m.scr = returnScreen
-		return tea.Batch(m.loadCity(), m.refreshCity())
+		return m.loadScreen()
 	}
 	return nil
 }

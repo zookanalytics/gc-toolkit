@@ -93,6 +93,50 @@ func TestTheHomePageOpensEachEntry(t *testing.T) {
 	}
 }
 
+// A subject the command line named is read as the start or the return screen
+// opens from the home page, as it is when the form opens on one, so the start
+// screen settles where the question goes and Ctrl+S saves it. Ctrl+R from the
+// return list reaches a start screen whose subject has been read, and opening
+// an entry again reads the subject no more.
+func TestAnEntryReadsTheSubjectTheCommandLineNamed(t *testing.T) {
+	for _, entry := range []int{startEntry, returnEntry} {
+		f := &fakeHelm{
+			city:     rigCity(),
+			about:    map[string]About{"tk-a": subjectAbout("tk-a", "gc-toolkit")},
+			saveResp: Saved{Subject: "tk-a", Conversation: "tk-c", Filed: true},
+		}
+		m := newForm(t, f, Options{Home: true, Subject: "tk-a", Question: "a question"})
+		if cmd := m.Init(); cmd != nil || len(f.abouts) != 0 {
+			t.Fatalf("%s: the home page read the subject before an entry opened: %v", homeLabels[entry], f.abouts)
+		}
+		open := func() {
+			homeOn(m, entry)
+			_, cmd := m.Update(key(tea.KeyEnter))
+			deliver(m, cmd)
+			if entry == returnEntry {
+				m.Update(ctrl('r'))
+			}
+		}
+		open()
+		if m.scr != composeScreen || strings.Join(f.abouts, " ") != "tk-a" {
+			t.Fatalf("%s: on screen %d, the subject reads were %v", homeLabels[entry], m.scr, f.abouts)
+		}
+		if d, ok := m.destination(); !ok || !strings.Contains(d, "a conversation on tk-a") {
+			t.Fatalf("%s: the start screen's destination = %q, settled %v", homeLabels[entry], d, ok)
+		}
+		m.Update(key(tea.KeyEscape))
+		open()
+		if len(f.abouts) != 1 {
+			t.Fatalf("%s: opening it again read the subject again: %v", homeLabels[entry], f.abouts)
+		}
+		_, cmd := m.Update(ctrl('s'))
+		deliver(m, cmd)
+		if len(f.saves) != 1 || f.saves[0].Ref != "tk-a" || f.saves[0].Subject != "tk-a" {
+			t.Fatalf("%s: saves = %+v, want one onto tk-a (status %q)", homeLabels[entry], f.saves, m.status)
+		}
+	}
+}
+
 // Without the home page, Esc leaves the start and the return screens as it
 // always has, and their hints say so.
 func TestWithoutTheHomePageEscStillLeaves(t *testing.T) {
