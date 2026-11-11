@@ -1437,9 +1437,13 @@ those rows' ids. Its read time sits beside it (`read_at`), not in it.
 (`internal/source/gccli.go`'s seam), never the beads library:
 `gc bd list --include-gates` for every open bead and gate, one
 `gc bd list --parent <epic> --status closed` per open epic and Delivery for its
-closed members (kept only when the bead's own parent-child edge names the epic),
-and the far ends of `blocks` edges the walk below reaches. Every state is the
-answer of one of the pack's shared readers, asked once per gather:
+closed members, and the far ends of `blocks` edges the walk below reaches. A
+closed epic among those members, such as a Delivery that landed while its epic
+stays open, gets the same read for its own closed members. A member is kept
+only when its own parent-child edge names the parent. Closed work beneath a
+bead that is not an epic is not read, since that would take one call per
+parent. Every state is the answer of one of the pack's shared readers, asked
+once per gather:
 
 | Reader | What the read takes from it |
 |---|---|

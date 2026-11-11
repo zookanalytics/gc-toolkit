@@ -85,5 +85,7 @@ where those readers answer differently, the board shows their answer.
 tk-yhquh93.4, listing every child of an epic on its page by title and state, is
 folded into this build. The Epics page lists each epic's Deliveries and its
 work at any depth by title and state, in the four groups. The closed work it
-lists is what sits directly under an open epic or Delivery, the members the
-read gathers closed.
+lists is the closed members of each open epic and Delivery and of each closed
+epic among them, such as a Delivery that landed while its epic stays open. The
+read gathers no closed work beneath a bead that is not an epic, since that would
+take one store call per parent, so the page neither lists nor counts it.

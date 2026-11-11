@@ -186,7 +186,8 @@ type gathered struct {
 	rig string
 	// open is every bead the store lists by default and every gate, closed
 	// beads aside. closed is the closed members of each open epic and
-	// Delivery. far is every other bead the walk of blocks edges read.
+	// Delivery, and of each closed epic beneath one (readClosedMembers). far
+	// is every other bead the walk of blocks edges read.
 	open   []bead
 	closed []bead
 	far    map[string]bead
@@ -282,9 +283,11 @@ func gather(ctx context.Context, gc GC, rig Rig, readHolds HoldsReader) (*gather
 	return g, nil
 }
 
-// readClosedMembers reads the closed members of each open epic and Delivery.
-// The store's --parent filter also returns a bead whose parent-child edge has
-// moved elsewhere, so a member is a bead whose own edge names the parent.
+// readClosedMembers reads the closed members of each open epic and Delivery,
+// then the closed members of each closed epic among them, such as a Delivery
+// that landed while its epic stays open, and so on until a round reads no
+// closed epic it had not read. Closed work beneath a bead that is not an epic
+// stays unread, since reading it would take one call per parent.
 func readClosedMembers(ctx context.Context, gc GC, rig Rig, open []bead) ([]bead, error) {
 	var parents []string
 	for _, b := range open {
@@ -292,7 +295,40 @@ func readClosedMembers(ctx context.Context, gc GC, rig Rig, open []bead) ([]bead
 			parents = append(parents, b.ID)
 		}
 	}
-	sort.Strings(parents)
+	asked := map[string]bool{}
+	seen := map[string]bool{}
+	var out []bead
+	for len(parents) > 0 {
+		for _, p := range parents {
+			asked[p] = true
+		}
+		rows, err := readClosedChildren(ctx, gc, rig, parents)
+		if err != nil {
+			return nil, err
+		}
+		var next []string
+		for _, r := range rows {
+			if seen[r.ID] {
+				continue
+			}
+			seen[r.ID] = true
+			out = append(out, r)
+			if r.issueType() == "epic" && !asked[r.ID] {
+				next = append(next, r.ID)
+			}
+		}
+		parents = next
+	}
+	return out, nil
+}
+
+// readClosedChildren reads the closed children of each parent, at most
+// closedReadLimit reads at once, in the parents' order. The store's --parent
+// filter also returns a bead whose parent-child edge has moved elsewhere, so a
+// child is a bead whose own edge names the parent. A read that fails fails the
+// whole read.
+func readClosedChildren(ctx context.Context, gc GC, rig Rig, parents []string) ([]bead, error) {
+	parents = slices.Sorted(slices.Values(parents))
 	results := make([][]bead, len(parents))
 	errs := make([]error, len(parents))
 	sem := make(chan struct{}, closedReadLimit)
@@ -319,15 +355,9 @@ func readClosedMembers(ctx context.Context, gc GC, rig Rig, open []bead) ([]bead
 	if err := errors.Join(errs...); err != nil {
 		return nil, err
 	}
-	seen := map[string]bool{}
 	var out []bead
 	for _, rows := range results {
-		for _, r := range rows {
-			if !seen[r.ID] {
-				seen[r.ID] = true
-				out = append(out, r)
-			}
-		}
+		out = append(out, rows...)
 	}
 	return out, nil
 }

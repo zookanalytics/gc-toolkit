@@ -111,7 +111,10 @@ export interface Row {
   pull_request?: PullRequest;
   /**
    * Counts are an epic's or a Delivery's work at any depth beneath it, by
-   * group. Gates, conversations and decisions are not counted.
+   * group. Gates, conversations and decisions are not counted. Closed work
+   * counts as far as the read gathers it: the closed members of each open
+   * epic and Delivery and of each closed epic among them, and none beneath a
+   * bead that is not an epic.
    */
   counts?: Counts;
   /**

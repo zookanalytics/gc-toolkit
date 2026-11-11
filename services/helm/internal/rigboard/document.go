@@ -85,7 +85,10 @@ type Row struct {
 	// PullRequest is the facts of the bead's pull request, when it has one.
 	PullRequest *PullRequest `json:"pull_request,omitempty"`
 	// Counts are an epic's or a Delivery's work at any depth beneath it, by
-	// group. Gates, conversations and decisions are not counted.
+	// group. Gates, conversations and decisions are not counted. Closed work
+	// counts as far as the read gathers it: the closed members of each open
+	// epic and Delivery and of each closed epic among them, and none beneath a
+	// bead that is not an epic.
 	Counts *Counts `json:"counts,omitempty"`
 	// Contract is an epic's contract and its latest ruling.
 	Contract *Contract `json:"contract,omitempty"`
