@@ -38,8 +38,8 @@ form never matches to a rig or a seat, and --from names the bead the gate
 --subject names was reached from, as engage's --from does. Once the sitting a
 save starts has started, the form attaches to it, and --no-attach turns that
 field off, so the form leaves the sitting to prepare instead. A seat typed as
-the subject, <rig>/po for a rig's po or mechanik, is opened by gc-helm.sh po
---rig <rig> or gc-helm.sh mechanik, and takes no question. --return opens on
+the subject, <rig>/po for a rig's Product Owner or mechanik, is opened by
+gc-helm.sh po --rig <rig> or gc-helm.sh mechanik, and takes no question. --return opens on
 the conversations to return to. The attach, or the seat's verb, runs once the
 form has left the terminal, and its exit status is the form's. A cancelled
 question is kept in a

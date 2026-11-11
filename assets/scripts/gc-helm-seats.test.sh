@@ -17,7 +17,8 @@
 #                 listing, no nudge and no wake of its own; once the attach
 #                 comes back it names how to return
 #   (PO-RIG)      po needs --rig, the rig by its exact name, and refuses a rig
-#                 the city has not or a suspended one, attaching nothing
+#                 the city has not, the city's HQ or a suspended rig, attaching
+#                 nothing
 #   (PO-ATTACH-FAIL, MK-ATTACH-FAIL) an attach that fails exits 4, naming the
 #                 re-run and no return
 #   (PO-ARGS, MK-ARGS) an argument or a flag the verb does not take exits 2 and
@@ -70,7 +71,8 @@ export PATH="$TMP/bin:$PATH"
 # The city's rigs, as gc-helm reads them through its fixture seam.
 mkdir -p "$TMP/fixture"
 cat > "$TMP/fixture/rigs.json" <<'RIGS'
-[{"name":"gc-toolkit","path":"/rigs/gc-toolkit","prefix":"tk","hq":false,"suspended":false},
+[{"name":"town","path":"/city","prefix":"hq","hq":true,"suspended":false},
+ {"name":"gc-toolkit","path":"/rigs/gc-toolkit","prefix":"tk","hq":false,"suspended":false},
  {"name":"paused","path":"/rigs/paused","prefix":"pz","hq":false,"suspended":true}]
 RIGS
 
@@ -101,7 +103,7 @@ set -e
 eq "$RC" 2 "(BARE-NOTTY) a bare gc-helm without a terminal exits 2"
 has "$OUT" "name a verb" "(BARE-NOTTY) …asking for a verb"
 has "$OUT" "a bare gc-helm opens engage's form" "(BARE-NOTTY) …saying what it does on a terminal"
-has "$OUT" "gc-helm po --rig <name>  attach to the rig's po" "(BARE-NOTTY) …and printing the usage, the seats included"
+has "$OUT" "gc-helm po --rig <name>  attach to the rig's Product Owner" "(BARE-NOTTY) …and printing the usage, the seats included"
 eq "$(cat "$FORM_ARGV_FILE" 2>/dev/null || true)" "" "(BARE-NOTTY) …opening no form"
 reset
 set +e
@@ -109,7 +111,7 @@ OUT="$(GC_HELM_ASSUME_TTY=1 GC_HELM_FORM_BIN="$TMP/no-such-form" sh "$SCRIPT" </
 set -e
 eq "$RC" 3 "(BARE-MISSING) with no form built a bare gc-helm exits 3"
 has "$OUT" "no helm-svc binary is built" "(BARE-MISSING) …saying the form is not built"
-has "$OUT" "gc-helm po --rig <name> to open a rig's po, gc-helm mechanik to attach to mechanik" "(BARE-MISSING) …naming the seats' commands"
+has "$OUT" "gc-helm po --rig <name> to open a rig's Product Owner, gc-helm mechanik to attach to mechanik" "(BARE-MISSING) …naming the seats' commands"
 has "$OUT" "gc-helm attach <conversation> to return" "(BARE-MISSING) …and the conversations' commands"
 
 echo "# a seat's verb is Gas City's attach on the seat, and nothing else"
@@ -117,7 +119,7 @@ export GC_HELM_FIXTURE="$TMP/fixture"
 reset; run po --rig gc-toolkit
 eq "$RC" 0 "(PO) po exits 0 once the attach comes back"
 eq "$CALLED" "session attach gc-toolkit/gc-toolkit.po " "(PO) …having made one call, the attach on the rig's po"
-has "$OUT" "Return to the po of gc-toolkit with: gc-helm po --rig gc-toolkit" "(PO) …and naming how to return"
+has "$OUT" "Return to the Product Owner of gc-toolkit with: gc-helm po --rig gc-toolkit" "(PO) …and naming how to return"
 reset; run po --rig=gc-toolkit
 eq "$CALLED" "session attach gc-toolkit/gc-toolkit.po " "(PO) --rig=<name> names the rig too"
 reset; run mechanik
@@ -128,13 +130,18 @@ has "$OUT" "Return to mechanik with: gc-helm mechanik" "(MK) …and naming how t
 echo "# po names its rig, one the city has and that runs"
 reset; run po
 eq "$RC" 2 "(PO-RIG) po without --rig exits 2"
-has "$OUT" "each rig has its own po, so name the rig: gc-helm po --rig <name>" "(PO-RIG) …saying so"
+has "$OUT" "each rig has its own Product Owner, so name the rig: gc-helm po --rig <name>" "(PO-RIG) …saying so"
 eq "$CALLED" "" "(PO-RIG) …and calling nothing"
 reset; run po --rig
 eq "$RC" 2 "(PO-RIG) --rig with no value exits 2"
 reset; run po --rig tk
 eq "$RC" 4 "(PO-RIG) a rig named by its prefix, not its name, exits 4"
-has "$OUT" "--rig 'tk' matches no rig in 'gc rig list' (known: gc-toolkit, paused). Nothing attached." "(PO-RIG) …naming the rigs there are"
+has "$OUT" "--rig 'tk' matches no rig in 'gc rig list' (known: gc-toolkit, paused). Nothing attached." "(PO-RIG) …naming the rigs there are, the HQ left out"
+eq "$CALLED" "" "(PO-RIG) …and attaching nothing"
+reset; run po --rig town
+eq "$RC" 4 "(PO-RIG) the city's HQ exits 4, since Gas City runs no rig's po there"
+has "$OUT" "'town' is the city's HQ in 'gc rig list', not a rig" "(PO-RIG) …saying so"
+has "$OUT" "so the HQ has no Product Owner. Name a rig: gc-toolkit, paused. Nothing attached." "(PO-RIG) …naming the rigs to choose from"
 eq "$CALLED" "" "(PO-RIG) …and attaching nothing"
 reset; run po --rig paused
 eq "$RC" 4 "(PO-RIG) a suspended rig exits 4"
@@ -146,7 +153,7 @@ echo "# an attach that fails exits 4"
 reset; ATTACH_RC=1 run po --rig gc-toolkit
 eq "$RC" 4 "(PO-ATTACH-FAIL) an attach that fails exits 4"
 has "$OUT" "did not start within 2m0s" "(PO-ATTACH-FAIL) …leaving gc's reason in view"
-has "$OUT" "gc session attach gc-toolkit/gc-toolkit.po exited 1, so the po of gc-toolkit was not attached. Re-run: gc-helm po --rig gc-toolkit" "(PO-ATTACH-FAIL) …and naming the re-run"
+has "$OUT" "gc session attach gc-toolkit/gc-toolkit.po exited 1, so the Product Owner of gc-toolkit was not attached. Re-run: gc-helm po --rig gc-toolkit" "(PO-ATTACH-FAIL) …and naming the re-run"
 hasnt "$OUT" "Return to" "(PO-ATTACH-FAIL) …and no return"
 reset; ATTACH_RC=1 run mechanik
 eq "$RC" 4 "(MK-ATTACH-FAIL) mechanik's attach that fails exits 4"

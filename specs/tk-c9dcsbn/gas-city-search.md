@@ -83,7 +83,11 @@ the seat's name and nothing else: it reads no session state, sends no nudge,
 records no wake of its own and runs no wait. The verb adds only what the attach
 does not print, the line that names how to return once the terminal comes back
 and the re-run once an attach fails, and `po` checks that its rig is one of the
-city's and runs, since Gas City starts no session in a suspended rig.
+city's configured rigs and runs. `gc rig list` lists the city's HQ, the city
+itself, beside its rigs (`RigListItem.HQ`, built ahead of the `cfg.Rigs` loop in
+`cmd/gc/cmd_rig.go`), and `ExpandGenericRigNamedSessions` stamps a session only
+for each of `cfg.Rigs`, both at `6bd609f5bf`, so the HQ has no po. Gas City starts no session in a
+suspended rig.
 
 One start is the attach's own while the controller runs, after a stop that
 completes inside the attach. A seat that runs at the attach's own check

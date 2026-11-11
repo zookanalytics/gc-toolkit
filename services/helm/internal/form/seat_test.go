@@ -57,7 +57,7 @@ func TestTheScreenSaysWhatASeatOpens(t *testing.T) {
 	loadCity(m)
 	typeText(m, "tk/po")
 	v := m.composeView()
-	for _, want := range []string{"Ctrl+S attach to the po", "Opens", "the po of rig gc-toolkit", "give the sitting its purpose once you are in it", "the seat's own", "yes, to the seat's session"} {
+	for _, want := range []string{"Ctrl+S attach to the Product Owner", "Opens", "the Product Owner of rig gc-toolkit", "give the sitting its purpose once you are in it", "the seat's own", "yes, to the seat's session"} {
 		if !strings.Contains(v, want) {
 			t.Fatalf("the screen does not say %q:\n%s", want, v)
 		}
@@ -81,7 +81,7 @@ func TestTheScreenSaysWhatASeatOpens(t *testing.T) {
 // An empty subject's line names the seats beside a subject and a rig.
 func TestAnEmptySubjectNamesTheSeats(t *testing.T) {
 	m := newForm(t, &fakeHelm{}, Options{})
-	if d, st := m.where(); st != refused || !strings.Contains(d, "<rig>/po for a rig's po, or mechanik") {
+	if d, st := m.where(); st != refused || !strings.Contains(d, "<rig>/po for a rig's Product Owner, or mechanik") {
 		t.Fatalf("an empty subject's line = %q", d)
 	}
 }
@@ -94,7 +94,7 @@ func TestARigsPoIsOpenedOnceTheRigIsKnownAndRuns(t *testing.T) {
 	m := newForm(t, f, Options{})
 	read := m.Init() // the city's rigs, read as the form opens and not yet answered
 	typeText(m, "tk/po")
-	if _, cmd := m.Update(ctrl('s')); cmd != nil || len(f.seats) != 0 || m.status != "Not opened: the po of rig tk: checking the rig…" {
+	if _, cmd := m.Update(ctrl('s')); cmd != nil || len(f.seats) != 0 || m.status != "Not opened: the Product Owner of rig tk: checking the rig…" {
 		t.Fatalf("Ctrl+S before the rigs read: seats %v, status %q", f.seats, m.status)
 	}
 	deliver(m, read)
@@ -107,7 +107,7 @@ func TestARigsPoIsOpenedOnceTheRigIsKnownAndRuns(t *testing.T) {
 	for _, c := range []struct{ typed, why string }{
 		{"nowhere/po", "rig nowhere is not a rig of this city"},
 		{"hb/po", "hb names more than one rig (harbor, hb)"},
-		{"paused/po", "rig paused is suspended, so its po cannot start until the rig resumes (gc rig resume paused)"},
+		{"paused/po", "rig paused is suspended, so its Product Owner cannot start until the rig resumes (gc rig resume paused)"},
 	} {
 		f := &fakeHelm{city: city}
 		m := newForm(t, f, Options{})

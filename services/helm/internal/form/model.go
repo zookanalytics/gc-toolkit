@@ -354,7 +354,7 @@ func (m *Model) seatWhere() (seat, string, standing) {
 		if m.cityErr != "" {
 			return seat{}, fmt.Sprintf("the rigs did not read (%s), so rig %s cannot be checked", m.cityErr, rig), refused
 		}
-		return seat{}, fmt.Sprintf("the po of rig %s: checking the rig…", rig), reading
+		return seat{}, fmt.Sprintf("the Product Owner of rig %s: checking the rig…", rig), reading
 	}
 	var rs []Rig
 	var named []string
@@ -369,9 +369,9 @@ func (m *Model) seatWhere() (seat, string, standing) {
 	case len(rs) > 1:
 		return seat{}, fmt.Sprintf("%s names more than one rig (%s): name the one you mean by a name or prefix only it has", rig, strings.Join(named, ", ")), refused
 	case rs[0].Suspended:
-		return seat{}, fmt.Sprintf("rig %s is suspended, so its po cannot start until the rig resumes (gc rig resume %s)", rs[0].Name, rs[0].Name), refused
+		return seat{}, fmt.Sprintf("rig %s is suspended, so its Product Owner cannot start until the rig resumes (gc rig resume %s)", rs[0].Name, rs[0].Name), refused
 	}
-	return seat{name: poSeat, rig: rs[0].Name}, "the po of rig " + rs[0].Name + purpose, settled
+	return seat{name: poSeat, rig: rs[0].Name}, "the Product Owner of rig " + rs[0].Name + purpose, settled
 }
 
 // topicRig is the one rig the subject field names, which a new topic is filed
@@ -632,7 +632,7 @@ func (m *Model) destination() (string, bool) {
 func (m *Model) where() (string, standing) {
 	ref := m.ref()
 	if ref == "" {
-		return "name the subject: a bead id, a PR number or URL, or a rig's name or prefix, which starts a new topic in that rig. Or name a seat to sit with: <rig>/po for a rig's po, or mechanik", refused
+		return "name the subject: a bead id, a PR number or URL, or a rig's name or prefix, which starts a new topic in that rig. Or name a seat to sit with: <rig>/po for a rig's Product Owner, or mechanik", refused
 	}
 	if m.isSeat() {
 		_, d, st := m.seatWhere()
@@ -1725,7 +1725,7 @@ func (m *Model) composeView() string {
 	act := "Ctrl+S save, start and attach"
 	switch {
 	case seatName == poSeat:
-		act = "Ctrl+S attach to the po"
+		act = "Ctrl+S attach to the Product Owner"
 	case seatName == mechanikSeat:
 		act = "Ctrl+S attach to mechanik"
 	case suspended != "":
@@ -1748,7 +1748,7 @@ func (m *Model) composeView() string {
 	if r, ok := m.topicRig(); ok {
 		b.WriteString(labelStyle.Render("Rig     ") + "  " + r.Name + hintStyle.Render("   a new topic in this rig") + "\n")
 	} else if s, _, st := m.seatWhere(); isSeat && st == settled && s.rig != "" {
-		b.WriteString(labelStyle.Render("Rig     ") + "  " + s.rig + hintStyle.Render("   the po's own") + "\n")
+		b.WriteString(labelStyle.Render("Rig     ") + "  " + s.rig + hintStyle.Render("   the Product Owner's own") + "\n")
 	} else if l := m.current(); l != nil && l.err == nil && l.about.Subject.Rig != "" {
 		b.WriteString(labelStyle.Render("Rig     ") + "  " + l.about.Subject.Rig + hintStyle.Render("   the subject's own") + "\n")
 	}
