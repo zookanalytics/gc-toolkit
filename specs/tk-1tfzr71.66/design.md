@@ -114,13 +114,18 @@ cutover beads and the retirement bead that land after the effort does.
 6. For an `mr` bead, the refinery composes the PR's title and body with
    `gctk pr compose`. When the bead owns an open PR, the refinery edits that
    PR's title and body, then pushes the new head under git's lease on the commit
-   it read on the branch (section 4). When the bead has no PR yet, it pushes the
-   branch and opens the PR as a draft. Either way it then writes the pending
-   record with `gctk pr record`. The bead goes to `blocked`, stays assigned to
-   the refinery, and records `merge_result=pull_request_pending` with the PR's
-   identity, its intended target and the head the refinery validated
-   (section 6). For a rework child, the record it writes is its anchor's, and it
-   then closes the child as landed on its anchor's branch.
+   it read on the branch (section 4). When the bead records no PR, the refinery
+   first looks on GitHub for a PR open from the bead's branch in the rig's
+   repository into its target. It adopts one it finds and handles it as a PR the
+   bead owns, as Gas Town's merge-push takes the PR open for its branch when
+   `gh pr create` fails, so one branch never gets a second PR. When none is
+   open, it pushes the branch and opens the PR as a draft. Either way it then
+   writes the pending record with `gctk pr record`. The bead goes to `blocked`,
+   stays assigned to the refinery, and records
+   `merge_result=pull_request_pending` with the PR's identity, its intended
+   target and the head the refinery validated (section 6). For a rework child,
+   the record it writes is its anchor's, and it then closes the child as landed
+   on its anchor's branch.
 7. The review lanes run on the draft, and the PR turns ready for review once
    the lanes before that phase pass.
 8. The landing order runs `gctk pr reconcile` on a cooldown. Each run takes the
@@ -868,9 +873,9 @@ branch, blocked by this initiative's landing and by tk-1tfzr71.22:
    dismiss a review there, since a material change's withdrawal depends on it
    (section 3). Where it cannot, a human gate on the bead asks you to let it.
 2. The mechanik sets `pending_through_merge` in the rig's config.
-3. The rig's open beads that own an open PR move onto the record. Each PR is
-   read on GitHub first, and the bead's old record is appended to its notes, so
-   no history is lost:
+3. The rig's open beads that own an open PR, or that wait at `pre_open_gate`
+   for one, move onto the new path. Each bead's PR is read on GitHub first, and
+   the bead's old record is appended to its notes, so no history is lost:
    - A bead whose open PR still matches its number, repository, branch and base
      goes to `pull_request_head_changed`, open and assigned to the refinery,
      with `existing_pr` and the live head as `observed_pr_head_sha`. The
@@ -881,10 +886,39 @@ branch, blocked by this initiative's landing and by tk-1tfzr71.22:
      record, takes the matching exception, behind a human gate.
    - A bead whose PR has merged is left to the old path's record of a merge made
      outside the city (`pr-facts.sh`), which closes it as landed, as today.
-   - A bead parked at `pre_open_gate` stays as it is, and the refinery's next
-     `mr` step publishes it on the new path.
+   - A bead parked at `pre_open_gate` has no assignee and no route, so the new
+     find-work, which takes only a bead assigned to the refinery, never reaches
+     it, while `pr-open.sh`, which lists open beads by that value alone, would
+     still open its PR on the old path. So the bead moves to the refinery,
+     unless a PR on its branch has merged. Such a bead stays parked, where
+     `pr-open.sh` adopts the merged PR untouched and `pr-facts.sh` closes the
+     bead as landed, as today. The move is one write. It takes the transition
+     machine's edge from `pre_open_gate` to no record, expecting the bead still
+     to read `pre_open_gate`, assigns the bead to the refinery with no route,
+     as a polecat's hand-off does, and appends its old record to its notes:
+     `lifecycle.sh transition <bead> --to unanchored --expect pre_open_gate --assignee <refinery> --append-notes <old record>`.
+     The refinery is then woken and nudged, as after a hand-off. Its find-work
+     takes the bead, and its `mr` step adopts the PR open on the bead's branch
+     or opens one as a draft (section 1), then writes the pending record.
    - A closed bead keeps the value it closed with. `merged` stays the record of
      a landing the old path verified, and every reader takes it as landed.
+
+   Which opener owns a parked bead, at each point of the cutover:
+   - Until step 2 sets the switch, the refinery parks beads at `pre_open_gate`,
+     and `pr-open.sh` opens their PRs, as today.
+   - From step 2 until a bead moves, the refinery parks no new bead there, and
+     `pr-open.sh` still owns each bead parked before. A bead it opens in that
+     time carries `pull_request`, so the move, which expects `pre_open_gate`,
+     refuses it, and the bead moves by the first bullet instead.
+   - The moves run under the lock that the merge cadence's driver holds for
+     each pass on the rig while its arms run (`bd-lib.sh`'s `take_pass_lock` on
+     the driver's `pass.lock`), and `pr-open.sh` runs only as one of those arms.
+     So no run of `pr-open.sh` is opening or recording a PR while a bead moves.
+   - From its move, the bead is the refinery's. `pr-open.sh` lists only
+     `pre_open_gate`, and its record of an opened PR expects that value, so it
+     never lists the bead or records a PR on it again. A PR that an earlier run
+     of `pr-open.sh` opened without recording it, because the run failed after
+     `gh pr create` and left the bead parked, is the PR the `mr` step adopts.
 4. The mechanik watches the rig's first PRs through to their close.
 
 **The old path finishes** once every rig's cutover bead has closed, since each
@@ -933,6 +967,10 @@ these, and the first rig's cutover shows them on its first PRs:
   dismissed.
 - A rework child handed back is taken before its anchor, and the merge request
   never waits on the close of the bead that owns the PR.
+- A bead parked at `pre_open_gate` when its rig cuts over moves to the
+  refinery in one write, `pr-open.sh` opens nothing for it after, and the
+  refinery publishes it on the new path, on the PR already open on its branch
+  when there is one, never on a second.
 - Under load, each run reaches the records it checked least recently, and two
   runs that overlap act on one record one after the other.
 
@@ -951,7 +989,7 @@ leaves the city working.
 | 1. `gctk pr compose` and `gctk pr summary` | The PR's title, managed summary region and branch-beads section are composed in gctk from the bead that owns the PR, with the region read by its markers. `pr-summary-region.sh` is deleted, and `pr-open.sh` and `pr-stack.sh` call the verb. Go tests pin the output against today's renders. | nothing | tk-tefrxph; the gctk domain move note |
 | 2. The evaluator | One function of gctk's pr domain answers whether a PR is ready for its current revision, with the head and the target it judged or the conditions not met. It reads the bead's own waits through `waits`, the open beads whose `anchor_bead` names it until their writers add the edge, `merge_hold` and `rebase_hold`, the review results for the live head and target, GitHub's live facts (open, not a draft, the record's identity and base, the validated head, merge state `CLEAN`, and the approval by section 2's eligibility, read from each review's `authorCanPushToRepository`), and the feedback receipts (the watermarks, counted by the intake's own rule, and the answered marks). `prstatus` renders it, and `gctk pr status` prints the conditions not met. It reads a PR's unanswered threads when it gathers the PR's facts, so the count's one writer can retire with `gctk merge`. Tests for each condition, among them an approval through the city's account on a PR another account opened, an approval and a request for changes from an account that cannot push, an approval followed by a review that only comments, which still counts, a dismissed approval, a review result for another head and one for another base, a head other than the validated one, each merge state, a wait of the bead's own, an `anchor_bead` child, and feedback newer than a watermark beside feedback the intake's rule leaves out, which holds nothing. | nothing | sections 2 to 5 |
 | 3. The record and the landing order | `gctk pr record` writes the pending record in Gas Town's two writes. `gctk pr reconcile` takes a bounded number of pending records, the least recently checked first, and reads each PR from GitHub by its number. An identity that no longer matches is `pull_request_reconcile_invalid`. An open PR at another head is requeued as `pull_request_head_changed`. An open PR at the validated head goes to the evaluator, and a ready one is merged with its head pinned, or added to the merge queue with it where the target requires one. A merged PR at the validated head whose merge commit is on the fetched target records `mr_merged` and closes. The other ends are the exceptions, each with its human gate, and a failed lookup or fetch is retried. A rig-scoped cooldown exec order, `pr-reconcile`, runs it. Each run handles each record under the store's record lock, from its read of the record to its last write of it, and waits for the lock while another run holds it (section 4). Tests follow `pr-merge-reconcile`'s cases at 7f86098c04ea, and add the pack's: a ready PR merged with its head pinned; a push between the answer and the request, which GitHub refuses and the next run requeues; a request left unanswered and read again; a merge queue that takes the PR and one that drops it; a PR merged into another base; a requeue written from a record the refinery has since replaced, which costs one validation; a run still going when the watchdog closes its tracking bead and the next cooldown starts a second run, which acts on the record the first holds only once the first has written it, and from what it wrote; a run stopped at its time limit, which leaves the lock free and its unread records to the next run; and the order of records across runs under load. | unit 2 | sections 4 and 6 |
-| 4. The refinery on Gas Town's flow | `mol-refinery-patrol` is rewritten on Gas Town's steps at 7f86098c04ea, with the differences in section 1, and each step calls one tested script. The scripts cover: find-work, which skips a held bead or a branch another open bead works on, and takes a rework child before its anchor; the prep by merge in the refinery's own worktree (`refinery-workspace.sh` and its warrant go); the gate through `detached-job.sh`; the failures, through the requeue by `gc sling` or a rework child, and the pre-existing path; the direct landing; the `mr` step (compose the title and body; edit them onto a PR the bead already owns before it pushes the new head under the lease, or push and then open a new PR as a draft with them; record the PR with `opened_as_draft`, so the review lanes and `pr-open.sh`'s ready flip handle it unchanged; write the pending record with `gctk pr record`; and the old-path park while `pending_through_merge` is unset); the rework hand-back, which writes the anchor's record and closes the child; and the integration-effort hand-off (tk-gmjtb2e), whose push takes the same lease. The polecat's push at submit (`work-submit.sh`) and the witness's salvage push take the lease too. `rejection-repool.sh`, `pr-stack.sh` with its arm, `check-refinery-patrol-live` and the old formula's block-extraction suites go. The polecat doctrine gains the drift rule. | units 1 and 3 | tk-c8hl47c, tk-ni0i48p, tk-pdc0ovc, tk-w0hkwos; section 7 |
+| 4. The refinery on Gas Town's flow | `mol-refinery-patrol` is rewritten on Gas Town's steps at 7f86098c04ea, with the differences in section 1, and each step calls one tested script. The scripts cover: find-work, which skips a held bead or a branch another open bead works on, and takes a rework child before its anchor; the prep by merge in the refinery's own worktree (`refinery-workspace.sh` and its warrant go); the gate through `detached-job.sh`; the failures, through the requeue by `gc sling` or a rework child, and the pre-existing path; the direct landing; the `mr` step (compose the title and body; edit them onto a PR the bead already owns, or onto the PR open from its branch into its target, which it adopts when the bead records none, before it pushes the new head under the lease, or, when no PR is open, push and then open a new PR as a draft with them; record the PR with `opened_as_draft`, so the review lanes and `pr-open.sh`'s ready flip handle it unchanged; write the pending record with `gctk pr record`; and the old-path park while `pending_through_merge` is unset); the rework hand-back, which writes the anchor's record and closes the child; and the integration-effort hand-off (tk-gmjtb2e), whose push takes the same lease. The polecat's push at submit (`work-submit.sh`) and the witness's salvage push take the lease too. `rejection-repool.sh`, `pr-stack.sh` with its arm, `check-refinery-patrol-live` and the old formula's block-extraction suites go. The polecat doctrine gains the drift rule. | units 1 and 3 | tk-c8hl47c, tk-ni0i48p, tk-pdc0ovc, tk-w0hkwos; section 7 |
 | 5. The readers move | Every reader that takes `pull_request` as "owns an open PR" also reads `pull_request_pending` and `pull_request_head_changed` (section 6), `pr-facts.sh`'s feedback, conflict and posture arms among them, while its arms that record a merge, a close without one or a moved base keep to `pull_request`. The sign-off's headline reads `prstatus`. I5 reads every closed bead with a PR, with `mr_merged` and `merged` as landed. I2 reads the kept values. `check-one-anchor-per-pr` counts the values of an open PR. | unit 4 | section 6 |
 | 6. Docs, warrants and the plan | The pages that hold the merge's depth are rewritten to the flow as it stands once units 1 to 5 land: `refinery-merge-cadence.md`, `state-machine.md` (the record's values and their sentences, and the Checks vocabulary), `component-model.md` with both landing writers, `authority-map.md`, `design-convoy.md`'s gates, `gctk-architecture.md`'s rows and the merge section of `built-once-target.md`, which takes section 1's differences as that page holds the witness's. `architecture.md` states the target from this design's own change, with the old path under Debt. Unit 6 drops the Debt entry that units 1 to 5 retire, the refinery push that can force, and corrects any line a unit departed from. The warrants' Covers lines move off retired paths. The plan's rows move as section 8 says. | units 1 to 5 | tk-cvffk5x, with this design's change to `architecture.md`; tk-r82qrrv |
 
