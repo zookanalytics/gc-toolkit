@@ -1,23 +1,28 @@
 ---
-name: Gas City search for gc-helm's home page and its seats
-description: The search the arch check asks for before the pack adds gc-helm's home page (a bare gc-helm on a terminal, helm-svc form --home) and the seat verbs gc-helm po and gc-helm mechanik. What Gas City ships for choosing among sessions and for opening a named seat's sitting with its prompt from any state, read at named upstream commits; why each seat verb is that attach alone; and the Gas City build the city runs, which carries the attach the verbs compose. Read it when checking whether the home page or a seat verb can move onto a Gas City primitive, or which Gas City build the seat verbs need.
+name: Gas City search for Engage's seats and a po for each rig
+description: The search the arch check asks for before the pack makes Engage the way in to gc-helm, with its subject taking a rig's po or mechanik, adds the seat verbs gc-helm po --rig and gc-helm mechanik, and makes the po a named session of each rig. What Gas City ships for choosing among sessions, for a session of each rig and the name an attach gives one, and for opening a named seat's sitting with its prompt from any state, read at named upstream commits; why each seat verb is that attach alone; and the Gas City build the city runs, which carries the attach the verbs compose. Read it when checking whether a seat or the po's rig scope can move onto a Gas City primitive, or which Gas City build the seat verbs need.
 ---
 
-# Gas City search for gc-helm's home page and its seats
+# Gas City search for Engage's seats and a po for each rig
 
-A bare `gc-helm` on a terminal now opens a home page with four entries: the
-po, mechanik, starting a conversation and returning to one. The change adds
+Engage is the way in to `gc-helm`, and each rig has its own po. The change adds
 this surface:
 
-- A bare `gc-helm.sh` on a terminal hands the terminal to the conversation form
-  on its home page. Without a terminal it keeps its usage and exit 2.
-- `helm-svc form --home`, which opens the form on the home page. Esc on the
-  start or the return screen goes back to it.
-- `gc-helm.sh po` and `gc-helm.sh mechanik`, each of which attaches the
-  terminal to its seat's session from whatever state the seat is in.
+- A bare `gc-helm.sh` on a terminal runs engage, which opens the conversation
+  form on starting a conversation. Without a terminal it keeps its usage and
+  exit 2.
+- The form's subject takes a seat typed there, `<rig>/po` for a rig's po, the
+  rig by a name or prefix, or `mechanik`, and once the form has left the
+  terminal it runs the seat's verb.
+- `gc-helm.sh po --rig <name>` and `gc-helm.sh mechanik`, each of which
+  attaches the terminal to its seat's session from whatever state the seat is
+  in.
+- The po is a named session of each rig: its agent and its `[[named_session]]`
+  in `pack.toml` take `scope = "rig"`, as the witness and the refinery do.
 
 Gas City read at upstream main `8b1d799b8` (gastownhall/gascity, fetched
-2026-11-10), and the attach's paths read again at upstream `f14384642` on
+2026-11-10), the attach's paths read again at upstream `f14384642` on
+2026-11-11, and the named session's rig scope read at upstream `6bd609f5bf` on
 2026-11-11. The city runs a fork build, `36ad5186a`, whose last common commit
 with upstream is `f14384642`. That build is not evidence of a primitive. It is
 read only for what the city runs (*The deployed version*, below).
@@ -29,11 +34,33 @@ with its alias, template, state and whether a terminal is attached
 (`sessionListJSONRow`, `cmd/gc/cmd_session.go`), and `gc session attach`
 attaches to the one session it names (`newSessionAttachCmd`, `cobra.ExactArgs(1)`).
 No `gc session` subcommand offers a choice among sessions, and upstream's
-`go.mod` carries no terminal UI library. `gc dashboard` is a web page. So the
-page is an entry of the terminal form the pack already ships (helm-svc form,
+`go.mod` carries no terminal UI library. `gc dashboard` is a web page. So a
+seat is a subject of the terminal form the pack already ships (helm-svc form,
 whose search is [specs/tk-po06sre/gas-city-search.md](../tk-po06sre/gas-city-search.md)),
-and each entry runs a gc-helm verb, so the page itself starts, reads and writes
-nothing.
+and the form runs a gc-helm verb for it, so the form starts, reads and writes
+nothing for a seat itself.
+
+**A session of each rig, and the name an attach gives one.** Gas City ships
+it. A `[[named_session]]` with `scope = "rig"` and no `dir` is a generic
+declaration, which config composition stamps once for each of the city's rigs
+after packs are expanded (`ExpandGenericRigNamedSessions`,
+`internal/config/config.go`, called from `internal/config/compose.go`, at
+`6bd609f5bf`). A stamped session's identity is its rig, a slash and its
+binding-qualified name (`NamedSession.QualifiedName`), so a rig's po is
+`<rig>/gc-toolkit.po`, the shape the city lists today for the pack's witness
+and refinery (`gc session list`, `gc-toolkit/gc-toolkit.witness`). `gc session
+attach <rig>/gc-toolkit.po` names that identity: the attach resolves its target
+through `resolveSessionIDMaterializingNamed` (`cmd/gc/session_resolve.go`),
+which finds the configured named session the target names
+(`session.FindNamedSessionSpecForTarget` and `config.FindNamedSession`) and
+materializes it when it has no open session. A rig-scoped agent's prompt
+renders its rig's name, root and bead prefix (`RigName`, `RigRoot` and
+`IssuePrefix` of `PromptContext`, `cmd/gc/prompt.go`, the prefix from
+`findRigPrefix`), so the po's reads name its own rig with no lookup of their
+own. A relative `work_dir` resolves under the city root and is created when it
+is missing (`resolveAgentDir`, `cmd/gc/cmd_start.go`), so each rig's po gets a
+directory of its own with no setup step. The pack adds no session of its own
+for a rig: the po is the platform's rig-scoped named session.
 
 **Opening a named seat's sitting with its prompt, from any state.**
 `gc session attach` covers it. It attaches to a running session as it stands,
@@ -54,7 +81,8 @@ fails the attach with its reason. Each seat verb is therefore that attach on
 the seat's name and nothing else: it reads no session state, sends no nudge,
 records no wake of its own and runs no wait. The verb adds only what the attach
 does not print, the line that names how to return once the terminal comes back
-and the re-run once an attach fails.
+and the re-run once an attach fails, and `po` checks that its rig is one of the
+city's and runs, since Gas City starts no session in a suspended rig.
 
 One start is the attach's own while the controller runs, after a stop that
 completes inside the attach. A seat that runs at the attach's own check
@@ -84,8 +112,8 @@ and `PreWakePatch`, `internal/session/lifecycle_transition.go`), so a po
 sitting that slept comes back as a new sitting. The pack's docs and the po's
 prompt say so.
 
-The attach carries no message, so neither verb carries one. The operator says
-what a sitting is for in the sitting.
+The attach carries no message, so neither verb carries one, and the form takes
+no question for a seat. The operator says what a sitting is for in the sitting.
 
 The other primitives were read for the same need, and each leaves part of it:
 `gc session wake` asks the controller to start a session and attaches nothing
@@ -106,4 +134,8 @@ common commit with upstream is `f14384642`, so it carries `64ba02c02` and
 attach runs through (`85751fbe1`, `5028a000f`, `51055e7d3` and `b9ffe10ea`)
 change other session commands, a nudge's bead reference, a transcript lookup
 and what a start records about a task's work directory, and none of the paths
-above. So each seat verb runs on the city's gc as this page reads it.
+above. The city's sessions show the rig-scoped named session's identity on
+that build: the pack's witness and refinery run as
+`<rig>/gc-toolkit.witness` and `<rig>/gc-toolkit.refinery` in every rig. So
+each seat verb, and a po for each rig, run on the city's gc as this page reads
+it.

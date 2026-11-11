@@ -136,18 +136,21 @@ converse skills and the po's refinement skill, the operator's intake and the
 terminal surfaces.
 
 New work no epic holds is owed to nobody. It carries Gas City's `hold:mayor`,
-and the po, a fresh on-demand session chartered as the operator's
+and its rig's po, a fresh on-demand session chartered as the operator's
 prioritization partner, works that queue with the operator. A hold is the next
 actor's queue, and a gate is an answer someone owes.
 
-The po takes the agent shape of Gas Town's mayor: `scope = "city"`,
-`wake_mode = "fresh"`, `work_dir = ".gc/agents/po"` and
-`max_active_sessions = 1`. Each difference names its reason, and each but the
-last ends with an operator ruling that gives the seat the job:
+The po takes the agent shape of Gas Town's mayor, `wake_mode = "fresh"` and
+`max_active_sessions = 1`, once for each rig: `scope = "rig"` and
+`work_dir = ".gc/agents/<rig>/po"`. Each difference names its reason, and each
+but the last ends with an operator ruling that gives the seat the job:
 
 - **Named `po`, not `mayor`.** Gas City's defaults and Gas Town's roles aim at
   the name `mayor`, so a seat that answers to it takes their sends. SAFe's word
   names the job.
+- **One for each rig, where Gas Town's mayor is one for the city.** A rig's
+  queue and its epics are weighed against that rig's target, so each rig's po
+  works its own, one sitting at a time.
 - **The operator's prioritization partner, not the human's point of contact.**
   It works backlog refinement and portfolio sync, by the operator's charter.
 - **It places, parks and moves priority once the operator agrees in a sitting,

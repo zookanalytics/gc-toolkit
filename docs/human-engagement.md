@@ -1,6 +1,6 @@
 ---
 name: Human engagement — gc-toolkit's subject, human gate and conversation model
-description: gc-toolkit's own model for engaging a person — the subject, the human gate and the conversation, how a gate reaches the operator, the home page the operator comes in through, how a conversation starts, how a sitting claims, holds, answers and ends, Accept, how a parked subject comes back, how a po sitting opens, the helm board, and the ground the pack builds itself. A pack convention; the Gas City primitives it rides are gascity/human-engagement.md.
+description: gc-toolkit's own model for engaging a person — the subject, the human gate and the conversation, how a gate reaches the operator, the way in through Engage, how a conversation starts, how a sitting claims, holds, answers and ends, Accept, how a parked subject comes back, how a po sitting opens, the helm board, and the ground the pack builds itself. A pack convention; the Gas City primitives it rides are gascity/human-engagement.md.
 ---
 
 # Human engagement
@@ -64,8 +64,8 @@ model the pack builds on them.
 ## Scope
 
 **Mandate.** gc-toolkit's model for engaging a person: the four terms, how a
-human gate reaches the operator, the home page the operator comes in through,
-how a conversation starts, how a sitting claims, holds, answers and ends,
+human gate reaches the operator, the way in through Engage, how a conversation
+starts, how a sitting claims, holds, answers and ends,
 Accept, how a parked subject comes back, how a po sitting opens, the helm
 board, and the ground the pack builds itself.
 
@@ -177,26 +177,27 @@ a row of its own that states what it asks, so no open gate is off the board.
 Nothing re-mails, and no session claims a gate, so a gate a sitting is
 discussing is still open and unassigned until the sitting answers it.
 
-## The home page
+## The way in
 
-The operator comes in through `gc-helm`. A bare `gc-helm` on a terminal opens
-its home page, the conversation form on a screen of its own, with four entries:
+The operator comes in through Engage. A bare `gc-helm` on a terminal opens
+engage's form on starting a conversation (*Engage*, below), and Ctrl+R moves to
+the conversations to return to (*Returning to a conversation*, below). The
+form's subject names what the operator is there for: a bead, a gate or a rig
+for a new topic, or a person to sit with in the city:
 
-- **The po** opens a sitting with the po (*A po sitting*, below).
-- **Mechanik** attaches to mechanik's session, waiting while the controller
-  starts it.
-- **Start a conversation** is engage's form (*Engage*, below).
-- **Return to a conversation** is attach's list (*Returning to a conversation*,
+- **A rig's po**, typed `<rig>/po` with the rig by a name or prefix as a new
+  topic's rig is typed, opens a sitting with that rig's po (*A po sitting*,
   below).
+- **Mechanik**, typed `mechanik`, attaches to mechanik's session, waiting while
+  the controller starts it. The city has one.
 
-Each entry is also a command of its own, for a script or a shortcut: `gc-helm
-po`, `gc-helm mechanik`, `gc-helm engage` and `gc-helm attach`. Esc on the start
-or the return screen goes back to the page, and Esc on the page leaves it. An
-entry that hands the terminal to a session, the po's, mechanik's or a
-conversation's sitting, leaves the page and then runs, as the form's attach
-does, so all it prints stays on the terminal and its exit status is the page's.
-A bare `gc-helm` without a terminal prints its usage and exits 2, so no script
-blocks on a page.
+Each seat is also a command of its own: `gc-helm po --rig <name>` and `gc-helm
+mechanik`. The form leaves the terminal and then runs the seat's command, as it
+runs a conversation's attach, so all the command prints stays on the terminal
+and its exit status is the form's. Gas City's attach carries no message, so a
+seat takes no question from the form, and the sitting's purpose is given in the
+sitting. A bare `gc-helm` without a terminal prints its usage and exits 2, so no
+script blocks on a form.
 
 ## How a conversation starts
 
@@ -1174,14 +1175,16 @@ clock.
 
 ## A po sitting
 
-The po is the operator's prioritization partner, a named session the operator
-opens for one sitting: a backlog refinement over the `hold:mayor` queue or a
-portfolio sync over the epics ([steering.md](steering.md)). A sitting ends when
+Each rig has its own po, the operator's prioritization partner for that rig's
+work: a named session of the rig, which the operator opens for one sitting at a
+time, a backlog refinement over the rig's `hold:mayor` queue or a portfolio
+sync over the rig's epics ([steering.md](steering.md)). A sitting ends when
 the po runs `gc runtime drain-ack`, and the next sitting starts a new
-conversation. The po entry of the home page opens one from whatever state the
-seat is in, with no other command, and so does `gc-helm po`.
+conversation. `<rig>/po` in Engage's form opens one from whatever state the
+seat is in, with no other command, and so does `gc-helm po --rig <rig>`.
 
-Both are Gas City's attach on the po's seat, `gc session attach gc-toolkit.po`
+Both are Gas City's attach on the rig's po, `gc session attach
+<rig>/gc-toolkit.po`, Gas City's name for a rig's named session
 ([gascity/human-engagement.md](gascity/human-engagement.md#what-an-attach-does-to-a-session-that-is-not-running)).
 A live sitting is attached to as it stands. Any other seat, one whose sitting
 ended, one whose sitting slept once its idle limit passed (`sleep_after_idle`)
@@ -1191,7 +1194,7 @@ gives the po its prompt as its first message, and because the po wakes fresh
 (`wake_mode = "fresh"`), it opens a new conversation, so a sitting that slept
 comes back as a new one. A po still ending its last sitting is attached as it
 ends until the controller begins to stop it. While that stop runs, the attach
-fails, saying the session is stopping, and `gc-helm po` names the re-run, which
+fails, saying the session is stopping, and `gc-helm po --rig <rig>` names the re-run, which
 opens a new sitting once the stop is done. The operator says what a sitting is
 for in the sitting. A sitting the attach starts itself, as it does
 while the city's controller is down, or when the po's last sitting ends
