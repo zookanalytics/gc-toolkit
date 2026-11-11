@@ -205,10 +205,14 @@ func build(g *gathered) Document {
 		if conv != "" {
 			convAssignee = ix.beads[conv].Assignee
 		}
+		// An epic's or a Delivery's members are the work, the Deliveries and
+		// the child epics its children's parent-child edges place under it. A
+		// child epic with a hypothesis of its own reads as an epic, not a
+		// Delivery, and while it is open its parent is not done.
 		members, open := 0, 0
 		if k == KindEpic || k == KindDelivery {
 			for _, c := range ix.children[id] {
-				if ck := ix.kinds[c]; ck == KindWork || ck == KindDelivery {
+				if ck := ix.kinds[c]; ck == KindWork || ck == KindDelivery || ck == KindEpic {
 					members++
 					if isOpen(ix.beads[c]) {
 						open++

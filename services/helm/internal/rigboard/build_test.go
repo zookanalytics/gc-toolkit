@@ -235,6 +235,52 @@ func TestWorkUnderTwoParents(t *testing.T) {
 	})
 }
 
+// TestAChildEpicIsAMember holds an epic's ruling to a child epic that carries
+// a hypothesis of its own. It reads as an epic, not a Delivery, and it is a
+// member all the same: its parent asks for no ruling while it is open, and
+// asks for one once it has closed with the rest.
+func TestAChildEpicIsAMember(t *testing.T) {
+	under := []listing.Edge{{ID: "tk-e", Type: "parent-child"}}
+	epic := bead{ID: "tk-e", Title: "Epic", Status: "open", Priority: 1, IssueType: "epic", Epic: listing.Epic{Hypothesis: "it works"}, CreatedAt: "2026-01-01"}
+	done := bead{ID: "tk-e.1", Title: "done", Status: "closed", Priority: 2, IssueType: "task", Edges: under, CreatedAt: "2026-01-02"}
+	childEpic := func(status string) bead {
+		return bead{ID: "tk-e.2", Title: "Child epic", Status: status, Priority: 2, IssueType: "epic",
+			Epic: listing.Epic{Hypothesis: "its part works"}, Edges: under, CreatedAt: "2026-01-03"}
+	}
+	read := func(members ...bead) Document {
+		g := &gathered{rig: "gc-toolkit", holds: map[string]waits.Holds{}, unread: map[string]error{},
+			holding: map[string]prstatus.Holds{}, unwalked: map[string]bool{}, facts: map[string]prstatus.Facts{}, noFacts: map[string]bool{}}
+		for _, b := range append([]bead{epic}, members...) {
+			if !isOpen(b) {
+				g.closed = append(g.closed, b)
+				continue
+			}
+			g.open = append(g.open, b)
+			g.holds[b.ID] = waits.Holds{ID: b.ID, Status: waits.Clear}
+		}
+		return build(g)
+	}
+
+	t.Run("an open child epic keeps its parent from a ruling", func(t *testing.T) {
+		doc := read(done, childEpic("open"))
+		if k := doc.Rows["tk-e.2"].Kind; k != KindEpic {
+			t.Fatalf("the child epic reads as %q, want an epic", k)
+		}
+		if r := doc.Rows["tk-e"]; r.Ask != "" || r.Group == GroupWaitingOnYou {
+			t.Errorf("tk-e asks %q in group %q while its child epic is open, want no ask", r.Ask, r.Group)
+		}
+		if n := doc.NeedsYou.Count; n != 0 {
+			t.Errorf("Needs you counts %d while the child epic is open, want 0", n)
+		}
+	})
+
+	t.Run("a closed child epic is a closed member", func(t *testing.T) {
+		if r := read(childEpic("closed")).Rows["tk-e"]; r.Ask != AskRuling || r.Signal != signalNeedsRuling {
+			t.Errorf("tk-e asks %q and reads %q once its only member closed, want a ruling", r.Ask, r.Signal)
+		}
+	})
+}
+
 // TestAParentCycleEndsItsPath walks parent-child edges that come back to a
 // bead the walk has passed: tk-c1 and tk-c2 name each other as parents, and
 // tk-c2 also names epic tk-a. The walk ends, and tk-a lists each of them once.
