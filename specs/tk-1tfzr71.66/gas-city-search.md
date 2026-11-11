@@ -192,14 +192,19 @@ with every pack writer of the fields the order writes
 What units 3 and 4 compose: the store's record lock from the landing order's
 section, owned by gctk's pr domain and taken by both verbs. `gctk pr reconcile`
 holds it for one record at a time, and `gctk pr record` holds it across both of
-Gas Town's writes, which stay unconditional, as `record_handoff` writes them. In
-unit 4 the refinery writes a pending record only through `gctk pr record`. A
-writer of the record's keys on a bead that carries no `pr_reconcile_pending`,
-such as the direct landing, takes no lock, because a run acts only on a bead
-that it reads under the lock as carrying that marker. A disposition that closes
-a bead still carrying the marker, a stand-down's close among them, takes the
-lock too in unit 3, and its close clears the marker, so no run reopens the bead
-it closed.
+Gas Town's writes. bd's guards cannot see a record replaced under the same
+status and assignee, but they do see a close, and a release that unassigns the
+bead, such as a stand-down's. So each of `gctk pr record`'s writes carries them,
+on the status and assignee it read under the lock, and a bead that closed or
+left the refinery first gets no record, whichever writer moved it. Gas Town's
+`record_handoff` writes unconditionally, and its second write would reopen such
+a bead as `blocked`. In unit 4 the refinery writes a pending record only through
+`gctk pr record`. A writer of the record's keys on a bead that carries no
+`pr_reconcile_pending`, such as the direct landing, takes no lock, because a run
+acts only on a bead that it reads under the lock as carrying that marker. A
+disposition's close, a stand-down's among them, takes the lock too in unit 3,
+whatever the bead carries, and its close clears any marker, so no run reopens
+the bead it closed.
 
 ## The requeue (unit 4)
 
@@ -312,9 +317,10 @@ carries `pr_number`, with `mr_merged` and `merged` as landed.
 
 ## What the answers change on
 
-- The city imports a gastown release that carries `pr-merge-reconcile`. The
-  record and the close then become that command, and the pack keeps the
-  readiness check and the merge request.
+- The city imports a gastown release that carries `pr-merge-reconcile`, and
+  its record refuses a bead that a close or a release reached first. The record
+  and the close then become that command, and the pack keeps the readiness
+  check and the merge request.
 - Gas City or Gas Town ships a merge gate that reads a bead's waits and a PR's
   reviews. The evaluator then moves onto that primitive.
 - GitHub can hold a merge on a rule that a branch without rulesets carries, or
