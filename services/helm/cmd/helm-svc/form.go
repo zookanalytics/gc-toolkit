@@ -2,12 +2,16 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -27,15 +31,18 @@ const formUsage = `Usage:
 
 The terminal conversation form. gc-helm.sh engage runs it on a terminal when the
 command line leaves the concern open, gc-helm.sh attach runs it with --return,
-and a bare gc-helm.sh runs it with --home. Each flag fills in its field, and
---from names the bead the gate --subject names was reached from, as engage's
---from does. Once the sitting a save starts has started, the form attaches to
-it, and --no-attach turns that field off, so the form leaves the sitting to
-prepare instead. --return opens on the conversations to return to. --home opens
-on the home page, whose entries open the po (gc-helm.sh po), mechanik
-(gc-helm.sh mechanik), the start screen and the return list, and Esc on either
-screen goes back to it. A cancelled question is kept in a file under
-GC_HELM_DRAFT_DIR, else $XDG_STATE_HOME/gc/engage-drafts, else
+and a bare gc-helm.sh runs it with --home. Each flag fills in its field, --rig
+fills in the subject with a new topic's rig, named exactly, --subject with a
+reference the form never matches to a rig, and --from names the bead the gate
+--subject names was reached from, as engage's --from does. Once the sitting a
+save starts has started, the form attaches to it, and --no-attach turns that
+field off, so the form leaves the sitting to prepare instead. --return opens on
+the conversations to return to. --home opens on the home page, whose entries
+open the po (gc-helm.sh po), mechanik (gc-helm.sh mechanik), the start screen
+and the return list, and Esc on either screen goes back to it. An attach, or a
+seat's verb, runs once the form has left the terminal, and its exit status is
+the form's. A cancelled question is kept in a file under GC_HELM_DRAFT_DIR,
+else $XDG_STATE_HOME/gc/engage-drafts, else
 ~/.local/state/gc/engage-drafts.
 `
 
@@ -104,7 +111,9 @@ func runForm(args []string, stdout, stderr io.Writer) int {
 // runProgram runs p, the program over the form m, and then prints what the form
 // says once it has left, which Leave gives whatever ended the program: on stderr
 // after the program's error when it failed, as an interrupt fails it, and on
-// stdout otherwise, as when a termination quits it.
+// stdout otherwise, as when a termination quits it. A form that left to attach
+// to a sitting has its attach run then, after the note, and the attach's exit
+// status is the form's.
 func runProgram(p *tea.Program, m *form.Model, stdout, stderr io.Writer) int {
 	_, err := p.Run()
 	note := m.Leave()
@@ -118,7 +127,50 @@ func runProgram(p *tea.Program, m *form.Model, stdout, stderr io.Writer) int {
 	if note != "" {
 		fmt.Fprintln(stdout, note)
 	}
+	if c := m.Attach(); c != nil {
+		return runAttach(c, stdout, stderr)
+	}
 	return 0
+}
+
+// runAttach runs c, the attach the form left to run, on the terminal the
+// form's program has let go: this process's input and the output the form
+// printed its note on. It runs after the form's last screen, so nothing the
+// form draws can cover what the attach prints, such as engage's reason when it
+// attaches nothing. It returns the attach's exit status. An interrupt or a
+// hang-up from the terminal, and a termination sent to the form's process
+// group, reach the attach as they reach this process, and engage answers each
+// itself, saying what it leaves behind, so this process waits for the attach
+// to end rather than end first and hand the shell back while engage still
+// prints. An interrupt, a termination or a hang-up sent to this process alone
+// does not reach the attach, and this process waits for the attach all the
+// same.
+func runAttach(c *exec.Cmd, stdout, stderr io.Writer) int {
+	if c.Stdin == nil {
+		c.Stdin = os.Stdin
+	}
+	if c.Stdout == nil {
+		c.Stdout = stdout
+	}
+	if c.Stderr == nil {
+		c.Stderr = stderr
+	}
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	defer signal.Stop(sigs)
+	err := c.Run()
+	if err == nil {
+		return 0
+	}
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		if ws, ok := exit.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
+			return 128 + int(ws.Signal())
+		}
+		return exit.ExitCode()
+	}
+	fmt.Fprintf(stderr, "helm-svc form: the attach did not run: %v\n", err)
+	return 1
 }
 
 // draftDir is where a cancelled question is kept: on disk that outlives a

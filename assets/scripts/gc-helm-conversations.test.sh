@@ -13,8 +13,8 @@
 #                 is queued; a bound conversation its sitting has not claimed
 #                 reads starting; each row carries its subject's title, and a
 #                 task that is not a conversation is left out; the rigs a new
-#                 topic can be filed in, with whether each carries converse and
-#                 is suspended
+#                 topic can be filed in, each with its prefix, whether it
+#                 carries converse and whether it is suspended
 #   (CITY-ENDED)  a bound conversation whose sitting ended before it claimed it
 #                 is found by its own row and reads ended, as conversations
 #                 <subject> reads it
@@ -38,9 +38,12 @@
 #                 the --from bead only through another bead is read as without
 #                 --from, and one that no longer holds it is refused; --from with
 #                 no reference is refused, exit 2
-#   (ABOUT-REFUSE) a suspended rig, a rig with no converse and a closed subject
-#                 are said as the refusal a sitting would meet; a bead that does
-#                 not resolve exits 4
+#   (ABOUT-SUSPENDED) a subject in a suspended rig reads with rig_suspended
+#                 and no refusal, and the text says it waits until the rig
+#                 resumes
+#   (ABOUT-REFUSE) a rig with no converse and a closed subject are said as the
+#                 refusal a sitting would meet; a bead that does not resolve
+#                 exits 4
 #   (ABOUT-PR)    a bare PR number two live anchors record answers both as
 #                 candidates, and one that one anchor records resolves to it
 #   (NEWSUBJ)     open --new-subject files the subject in the --rig rig, titled
@@ -71,7 +74,7 @@ hasnt() { case "$1" in *"$2"*) bad "$3 (unexpected '$2' in: $1)" ;; *) ok "$3" ;
 # The session's own city must not reach a hermetic run.
 unset GC_CITY_PATH GC_CITY GC_CITY_ROOT GC_RIG BEADS_DIR GC_HELM_FIXTURE || true
 export STATE="$TMP/state" CALLS="$TMP/calls"
-mkdir -p "$TMP/bin" "$STATE" "$TMP/.beads" "$TMP/rig/.beads" "$TMP/rig2/.beads" "$TMP/rig3/.beads" "$TMP/agents/converse-opus" "$TMP/agents/converse-fable"
+mkdir -p "$TMP/bin" "$STATE" "$TMP/.beads" "$TMP/rig/.beads" "$TMP/rig2/.beads" "$TMP/rig3/.beads" "$TMP/agents/converse-claude-opus" "$TMP/agents/converse-claude-fable"
 export GC_HELM_AGENTS_DIR="$TMP/agents"
 
 cat > "$TMP/bin/gc" <<'STUB'
@@ -144,11 +147,11 @@ seed() {
     {name:"gascity", path:$r2, prefix:"gc", suspended:true},
     {name:"docs", path:$r3, prefix:"dx", suspended:false},
     {name:"hq", path:$h, prefix:"hq", hq:true, running:true}]}' > "$STATE/rigs.json"
-  jq -n '{agents:[{qualified_name:"gc-toolkit/gc-toolkit.converse-opus"},{qualified_name:"gascity/gc-toolkit.converse-opus"}]}' > "$STATE/agents.json"
+  jq -n '{agents:[{qualified_name:"gc-toolkit/gc-toolkit.converse-claude-opus"},{qualified_name:"gascity/gc-toolkit.converse-claude-opus"}]}' > "$STATE/agents.json"
   jq -n '{sessions:[
-    {id:"s1", alias:"gc-toolkit/gc-toolkit.tk-ready", session_name:"s-s1", state:"active", attached:false, created_at:"2026-11-08T10:00:00Z", template:"gc-toolkit/gc-toolkit.converse-opus"},
-    {id:"s2", alias:"gc-toolkit/gc-toolkit.tk-prep", session_name:"s-s2", state:"active", attached:true, created_at:"2026-11-08T11:00:00Z", template:"gc-toolkit/gc-toolkit.converse-opus"},
-    {id:"s3", alias:"gc-toolkit/gc-toolkit.tk-bound", session_name:"s-s3", state:"start-pending", attached:false, created_at:"2026-11-08T12:00:00Z", template:"gc-toolkit/gc-toolkit.converse-opus"},
+    {id:"s1", alias:"gc-toolkit/gc-toolkit.tk-ready", session_name:"s-s1", state:"active", attached:false, created_at:"2026-11-08T10:00:00Z", template:"gc-toolkit/gc-toolkit.converse-claude-opus"},
+    {id:"s2", alias:"gc-toolkit/gc-toolkit.tk-prep", session_name:"s-s2", state:"active", attached:true, created_at:"2026-11-08T11:00:00Z", template:"gc-toolkit/gc-toolkit.converse-claude-opus"},
+    {id:"s3", alias:"gc-toolkit/gc-toolkit.tk-bound", session_name:"s-s3", state:"start-pending", attached:false, created_at:"2026-11-08T12:00:00Z", template:"gc-toolkit/gc-toolkit.converse-claude-opus"},
     {id:"s4", alias:"gc-toolkit/gc-toolkit.polecat-1", session_name:"s-s4", state:"active", attached:false, created_at:"2026-11-08T09:00:00Z", template:"gc-toolkit/gc-toolkit.polecat"}]}' > "$STATE/sessions.json"
   jq -n '[
     {id:"tk-subj", issue_type:"task", status:"open", title:"the subject"},
@@ -190,6 +193,7 @@ eq "$(field gc-q .rig)" "gascity" "(CITY) a suspended rig's conversations are li
 eq "$(row tk-work)" "" "(CITY) a task held by a session that does not name it is no conversation"
 eq "$(row tk-shutconv)" "" "(CITY) a closed conversation is not listed"
 eq "$(printf '%s' "$OUT" | jq -c '[.rigs[] | [.name, .converse, .suspended]]')" '[["gc-toolkit",true,false],["gascity",true,true],["docs",false,false]]' "(CITY) the rigs a new topic can go to, but the city's own store, with converse and suspension"
+eq "$(printf '%s' "$OUT" | jq -c '[.rigs[] | .prefix]')" '["tk","gc","dx"]' "(CITY) …each with its prefix, so the form can match one typed by it"
 eq "$(printf '%s' "$OUT" | jq -c '.unread')" '[]' "(CITY) …and no store unread"
 
 echo "# a bound conversation whose sitting ended before it claimed it is still listed"
@@ -302,10 +306,16 @@ run conversations --from tk-held --json
 eq "$RC" 2 "(ABOUT-FROM) --from with no reference exits 2"
 has "$ERR" "--from names the bead a gate was reached from, so it needs the gate" "(ABOUT-FROM) …saying it needs the gate"
 
-echo "# a subject no sitting can start on is said as its refusal"
+echo "# a subject in a suspended rig is said as suspended, which refuses nothing"
 seed; run conversations gc-b1 --json
-eq "$RC" 0 "(ABOUT-REFUSE) a subject in a suspended rig still reads, exit 0"
-has "$(printf '%s' "$OUT" | jq -r '.refusal')" "rig 'gascity' is suspended" "(ABOUT-REFUSE) …saying the rig is suspended"
+eq "$RC" 0 "(ABOUT-SUSPENDED) a subject in a suspended rig reads, exit 0"
+eq "$(printf '%s' "$OUT" | jq -c '[.rig_suspended, .refusal]')" '[true,""]' "(ABOUT-SUSPENDED) …as rig_suspended, with no refusal"
+seed; run conversations tk-subj --json
+eq "$(printf '%s' "$OUT" | jq -c '[.rig_suspended, .refusal]')" '[false,""]' "(ABOUT-SUSPENDED) a subject in a rig that runs reads rig_suspended false"
+seed; run conversations gc-b1
+has "$OUT" "is suspended, and a conversation filed now waits in the queue until it resumes" "(ABOUT-SUSPENDED) the text says a conversation waits until the rig resumes"
+
+echo "# a subject no sitting can start on is said as its refusal"
 seed; run conversations dx-1 --json
 has "$(printf '%s' "$OUT" | jq -r '.refusal')" "carries no converse template" "(ABOUT-REFUSE) a rig with no converse is said"
 seed; run conversations tk-shut --json

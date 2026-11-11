@@ -141,9 +141,10 @@ SURFACE_FILES=(
     "$HERE/../assets/scripts/gc-helm.sh"
     "$HERE/../agents/_converse/prompt.template.md"
     "$HERE/../agents/_converse/PROVENANCE.md"
-    "$HERE/../agents/converse-opus/agent.toml"
-    "$HERE/../agents/converse-fable/agent.toml"
-    "$HERE/../agents/converse-codex/agent.toml"
+    "$HERE/../agents/converse-claude-opus/agent.toml"
+    "$HERE/../agents/converse-claude-fable/agent.toml"
+    "$HERE/../agents/converse-codex-sol/agent.toml"
+    "$HERE/../agents/converse-codex-astra/agent.toml"
 )
 phantom=""
 missing=""

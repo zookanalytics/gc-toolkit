@@ -42,7 +42,7 @@ func TestIsCandidateIsATaskAConversationsAssigneeHolds(t *testing.T) {
 		want                bool
 	}{
 		{"task", "human", true},
-		{"task", "gc-toolkit/converse-opus.c-tk-c1", true},
+		{"task", "gc-toolkit/converse-claude-opus.c-tk-c1", true},
 		{"task", "alice", false},
 		{"task", "", false},
 		{"gate", "human", false},

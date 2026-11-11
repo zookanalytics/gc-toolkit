@@ -1,7 +1,6 @@
 package form
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,8 +20,8 @@ func homeOn(m *Model, entry int) {
 }
 
 // The home page shows its four entries and reads nothing until one opens. The
-// po and mechanik hand the terminal to their own verbs, and the form leaves
-// once it comes back. Start and return open the form's own screens, each
+// po and mechanik hand the terminal to their own verbs once the form has left.
+// Start and return open the form's own screens, each
 // reading the city as it opens, and Esc on either comes back to the page,
 // where Esc leaves the form.
 func TestTheHomePageOpensEachEntry(t *testing.T) {
@@ -51,11 +50,11 @@ func TestTheHomePageOpensEachEntry(t *testing.T) {
 		m := newForm(t, f, Options{Home: true})
 		homeOn(m, c.entry)
 		_, cmd := m.Update(key(tea.KeyEnter))
-		if cmd == nil || strings.Join(f.seats, " ") != c.seat || f.seatArgs[0] != "gc-helm.sh "+c.seat {
+		if strings.Join(f.seats, " ") != c.seat || f.seatArgs[0] != "gc-helm.sh "+c.seat {
 			t.Fatalf("opening %s ran seats %v (argv %v)", c.seat, f.seats, f.seatArgs)
 		}
-		if _, last := m.Update(attachedMsg{}); !isQuit(last) || m.Note() != "" {
-			t.Fatalf("the form did not leave quietly once %s's terminal came back (note %q)", c.seat, m.Note())
+		if !isQuit(cmd) || m.Attach() == nil || m.Leave() != "" {
+			t.Fatalf("the form did not leave quietly to run %s's verb (note %q)", c.seat, m.Note())
 		}
 	}
 
@@ -157,8 +156,8 @@ func TestWithoutTheHomePageEscStillLeaves(t *testing.T) {
 }
 
 // A question typed on the start screen and left there by going back is kept in
-// a file before the terminal goes to a seat, and a seat's verb that fails is
-// named after what it printed, ahead of where the question is.
+// a file before the terminal goes to a seat, and the note, printed before the
+// seat's verb runs, says where.
 func TestASeatOpenedAfterAnUnsavedQuestionKeepsIt(t *testing.T) {
 	dir := t.TempDir()
 	f := &fakeHelm{}
@@ -169,20 +168,18 @@ func TestASeatOpenedAfterAnUnsavedQuestionKeepsIt(t *testing.T) {
 	typeText(m, "a thought for later")
 	m.Update(key(tea.KeyEscape))
 	homeOn(m, poEntry)
-	if _, cmd := m.Update(key(tea.KeyEnter)); cmd == nil || len(f.seats) != 1 {
-		t.Fatalf("the po did not open: seats %v", f.seats)
+	if _, cmd := m.Update(key(tea.KeyEnter)); !isQuit(cmd) || m.Attach() == nil || len(f.seats) != 1 {
+		t.Fatalf("the form did not leave to open the po: seats %v", f.seats)
 	}
 	files, _ := filepath.Glob(filepath.Join(dir, "engage-draft-*.txt"))
 	if len(files) != 1 {
-		t.Fatalf("draft files while the po holds the terminal: %v", files)
+		t.Fatalf("draft files once the form left for the po: %v", files)
 	}
 	if b, _ := os.ReadFile(files[0]); string(b) != "a thought for later" {
 		t.Fatalf("kept draft = %q", b)
 	}
-	_, last := m.Update(attachedMsg{err: errors.New("exit status 4")})
-	note := m.Note()
-	if !isQuit(last) || !strings.HasPrefix(note, "The po did not open: exit status 4") || !strings.Contains(note, files[0]) {
-		t.Fatalf("note after the po's verb failed = %q", note)
+	if note := m.Leave(); !strings.Contains(note, files[0]) {
+		t.Fatalf("note once the form left for the po = %q", note)
 	}
 }
 

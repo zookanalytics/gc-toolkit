@@ -13,9 +13,8 @@ bold lead of a rule.
 
 The sections are borrowed rather than invented: the
 [arc42](https://arc42.org/overview) template, the first two levels of the
-[C4 model](https://c4model.com/), domain-driven design's
-[bounded contexts](https://martinfowler.com/bliki/BoundedContext.html), and
-[architecture decision records](https://adr.github.io/).
+[C4 model](https://c4model.com/), and domain-driven design's
+[bounded contexts](https://martinfowler.com/bliki/BoundedContext.html).
 
 ## What the document is
 
@@ -30,10 +29,12 @@ The sections are borrowed rather than invented: the
   around the gap, and Debt names the gap.
 - **The big picture first.** It opens on what the system is for and the
   domains it is made of, such as its schemas, before any one part's detail.
-- **The architecture's altitude.** A line states a fact at the level where it
-  holds. A rule for a class of things is stated for the class, with a library
-  or a component named only as an instance of it. A fact about one part names
-  that part, and no part stands for the whole.
+- **The architecture's altitude.** The document goes down to its parts and
+  stops there: what a part is responsible for is the document's, and how the
+  part carries it out is the part's own. A line states a fact at the level
+  where it holds. A rule for a class of things is stated for the class, with a
+  library or a component named only as an instance of it. A fact about one part
+  names that part, and no part stands for the whole.
 - **Facts, not explanation.** A decision is stated as a fact, and the line
   stops there. A reason appears only where a reader would otherwise get it
   wrong, in one short line.
@@ -50,8 +51,8 @@ The sections are borrowed rather than invented: the
 
 The document's `## Scope` is its charter. The mandate is the architecture of
 the whole repository. Each boundary names a topic the document leaves out and
-the living doc that holds it, such as the reasoning behind each decision, held
-in its decision record. No boundary names a spec.
+the living doc that holds it, such as how a part carries out its
+responsibility, held in that part's own doc. No boundary names a spec.
 
 ## The skeleton
 
@@ -73,10 +74,11 @@ the document sits in one of them.
    bounded contexts)
 4. **Cross-cutting rules.** Rules every part follows, such as how the parts
    talk to each other. (arc42 section 8)
-5. **Decisions.** Each decision as a one-line fact, with a one-line reason
-   only where a reader would otherwise get it wrong, and a link to its
-   decision record when it has one, never to a spec. (arc42 section 9,
-   decision records)
+5. **Decisions.** Each architecture decision as a one-line fact, with a
+   one-line reason only where a reader would otherwise get it wrong. A part's
+   own choice is not one (The admission test). A decision's reasoning stays
+   with the bead and commit that made it, so the document links nothing for
+   it. (arc42 section 9)
 6. **Debt.** Each place where what is built falls short of the architecture
    the sections above describe. An entry names the gap, why a reader must know
    it, and the work that retires it, such as the epic or bead that carries that
@@ -90,11 +92,19 @@ glossary fold into the sections above.
 
 ## The admission test
 
-A line belongs only if it shapes more than one part or would be costly to
-reverse, and a reader could not learn it from the code. Anything else goes in
-the code, in that part's own doc, or nowhere. A component's behavior, a
-script's guards and a suite's coverage are all learned from the code, so none
-of them passes.
+A line belongs only if it shapes more than one part, or the system as a whole,
+and a reader could not learn it from the code. Anything else goes in the code,
+in that part's own doc, or nowhere. A component's behavior, a script's guards
+and a suite's coverage are all learned from the code, so none of them passes.
+
+A decision is held to the same test. How a part carries out a responsibility
+the document gives it, such as the mechanism or the vendor feature it does the
+job with, is that part's own choice. It stays the part's own when another
+part's code calls it or another system keeps what it records, and it fails the
+test even when its design weighed alternatives, reversing it would be costly,
+or its reason is one the code cannot show. Its home is that part's own doc.
+What the choice changes at the architecture's altitude stays, such as a
+responsibility the part takes on or data a boundary must keep out.
 
 ## Entry shape and budget
 

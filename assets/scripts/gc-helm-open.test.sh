@@ -1616,7 +1616,7 @@ chmod +x "$TMP/rebin/gc-proactive.sh"
 # also refuses up front a rig whose checkout carries no converse template
 # (agents/converse-*), so the fixture carries one; without it engage exits 4
 # before it resolves and binds.
-mkdir -p "$TMP/rebinrig/.beads" "$TMP/rebinrig/agents/converse-opus"
+mkdir -p "$TMP/rebinrig/.beads" "$TMP/rebinrig/agents/converse-claude-opus"
 export REBINRIG="$TMP/rebinrig"
 export FAKE_SLING="$TMP/slung" CONV_STATE="$TMP/conv_state"
 

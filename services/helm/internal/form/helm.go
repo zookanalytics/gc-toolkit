@@ -1,14 +1,15 @@
 // Package form is the terminal conversation form: the screen `gc-helm.sh
 // engage`, `gc-helm.sh attach` and a bare `gc-helm.sh` hand a terminal to. One
-// screen holds the subject, a multiline question, a new topic's rig, the model
-// and whether to attach, while the subject's details, its open conversations
-// and the city's rigs load in the background. Submitting saves the question as
-// a conversation and starts its sitting, reporting each of the two as it lands,
-// and once the sitting has started attaches to it, or with attaching off leaves
-// it to prepare. The return list shows the open conversations by topic and
-// readiness and attaches to the one picked. The home page, which a bare
-// `gc-helm.sh` opens on, offers the po, mechanik, starting a conversation and
-// returning to one.
+// screen holds the subject, which names a bead, a PR or a new topic's rig, a
+// multiline question, the model and whether to attach, while the subject's
+// details, its open conversations and the city's rigs load in the background.
+// Submitting saves the question as a conversation and starts its sitting,
+// reporting each of the two as it lands, and once the sitting has started
+// attaches to it, or with attaching off leaves it to prepare. In a suspended
+// rig it saves the question and starts nothing. The return list shows the open
+// conversations by topic and readiness and attaches to the one picked. The
+// home page, which a bare `gc-helm.sh` opens on, offers the po, mechanik,
+// starting a conversation and returning to one.
 //
 // The form writes nothing itself. Every read and write is a gc-helm.sh verb
 // ([Script]), so what the form shows and files is what the command line shows
@@ -30,7 +31,9 @@ import (
 // About is `gc-helm.sh conversations <ref> [--from <bead>] --json`: the subject
 // a reference names, resolved as engage resolves it, and where a conversation
 // about it would be held. A bare PR number more than one live anchor records
-// answers Candidates instead.
+// answers Candidates instead. RigSuspended says the subject's rig is suspended,
+// which refuses nothing: no sitting starts there, and a conversation filed
+// waits in the operator's queue until the rig resumes.
 type About struct {
 	Ref           string         `json:"ref"`
 	Subject       Subject        `json:"subject"`
@@ -38,6 +41,7 @@ type About struct {
 	Conversation  string         `json:"conversation"`
 	Closed        *Closed        `json:"closed"`
 	Refusal       string         `json:"refusal"`
+	RigSuspended  bool           `json:"rig_suspended"`
 	Conversations []Conversation `json:"conversations"`
 	Holds         []Hold         `json:"holds"`
 	HoldsRead     bool           `json:"holds_read"`
@@ -123,16 +127,14 @@ type City struct {
 	Unread        []string       `json:"unread"`
 }
 
-// Rig is a rig a new topic could be filed in.
+// Rig is a rig a new topic could be filed in, which the subject names by its
+// name or its prefix.
 type Rig struct {
 	Name      string `json:"name"`
+	Prefix    string `json:"prefix"`
 	Converse  bool   `json:"converse"`
 	Suspended bool   `json:"suspended"`
 }
-
-// Hosts says whether a sitting can be held in the rig: it carries a converse
-// template and is not suspended.
-func (r Rig) Hosts() bool { return r.Converse && !r.Suspended }
 
 // SaveRequest is a question to file as a conversation. Ref is the reference
 // the destination was verified for: the subject as the operator typed it, or

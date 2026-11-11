@@ -4,7 +4,7 @@
 # (docs/review-demo.md):
 #
 #   helm-svc form --helm services/helm/internal/form/testdata/helm-fixture.sh \
-#       --models opus,fable,codex [--subject tk-demo1 | --rig gc-toolkit | --return]
+#       --models claude-opus,claude-fable,codex-astra,codex-sol [--subject tk-demo1 | --rig gc-toolkit | --return]
 #
 # It answers the verbs the form calls: `conversations [<ref>] --json`, `open`,
 # `engage <conversation> --no-input --no-attach` and the attach,
@@ -20,9 +20,9 @@ case "${1:-} ${2:-}" in
 {"conversations":[
  {"id":"tk-demo2","rig":"gc-toolkit","subject":"tk-demo1","subject_title":"Board: show a PR's held reason on its row","title":"why does the held label lag the gate by a cycle?","status":"in_progress","state":"live","readiness":"ready","created_at":"2026-11-08T10:00:00Z","session":{"id":"s-1","name":"s-1","state":"active","attached":false,"created_at":"2026-11-08T10:00:00Z"}},
  {"id":"tk-demo3","rig":"gc-toolkit","subject":"tk-demo4","subject_title":"Refinery: land siblings independently","title":"what would it take to land siblings on their own?","status":"open","state":"live","readiness":"starting","created_at":"2026-11-08T11:00:00Z","session":{"id":"s-2","name":"s-2","state":"start-pending","attached":false,"created_at":"2026-11-08T11:00:00Z"}},
- {"id":"tk-demo5","rig":"gascity","subject":"gc-demo6","subject_title":"Upstream: session wake on assignment","title":"is the wake path worth an upstream issue?","status":"in_progress","state":"left","readiness":"ended","created_at":"2026-11-07T15:00:00Z","session":null},
+ {"id":"tk-demo5","rig":"harbor","subject":"hb-demo6","subject_title":"Upstream: session wake on assignment","title":"is the wake path worth an upstream issue?","status":"in_progress","state":"left","readiness":"ended","created_at":"2026-11-07T15:00:00Z","session":null},
  {"id":"tk-demo7","rig":"gc-toolkit","subject":"tk-demo8","subject_title":"Intake: multi-line questions","title":"operator pick from the board","status":"open","state":"queue","readiness":"queued","created_at":"2026-11-08T09:00:00Z","session":null}],
- "rigs":[{"name":"gc-toolkit","converse":true,"suspended":false},{"name":"gascity","converse":true,"suspended":false},{"name":"paused","converse":true,"suspended":true}],
+ "rigs":[{"name":"gc-toolkit","prefix":"tk","converse":true,"suspended":false},{"name":"harbor","prefix":"hb","converse":true,"suspended":false},{"name":"paused","prefix":"pz","converse":true,"suspended":true}],
  "unread":[]}
 JSON
     ;;
@@ -60,7 +60,7 @@ JSON
     ;;
   "conversations 1446")
     sleep 2
-    echo '{"ref":"1446","candidates":[{"id":"tk-demo1","rig":"gc-toolkit","title":"Board: show a PR'"'"'s held reason on its row","status":"open"},{"id":"gc-demo6","rig":"gascity","title":"Upstream: session wake on assignment","status":"open"}]}'
+    echo '{"ref":"1446","candidates":[{"id":"tk-demo1","rig":"gc-toolkit","title":"Board: show a PR'"'"'s held reason on its row","status":"open"},{"id":"hb-demo6","rig":"harbor","title":"Upstream: session wake on assignment","status":"open"}]}'
     ;;
   "conversations "*)
     sleep 1
@@ -74,7 +74,7 @@ JSON
   "engage "*)
     sleep 1
     case " $* " in
-      *" --no-attach "*) echo "✓ converse-opus on existing conversation $2 for tk-demo1" ;;
+      *" --no-attach "*) echo "✓ converse-claude-opus on existing conversation $2 for tk-demo1" ;;
       *) echo "(the fixture attaches nothing: $2)" ;;
     esac
     ;;

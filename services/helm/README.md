@@ -253,26 +253,35 @@ on every tick.
 ### The conversation form (`helm-svc form`)
 
 ```
-helm-svc form --helm <gc-helm.sh> --models opus,fable,codex [--subject <ref> [--from <bead>] | --new-subject [--rig <name>] [--question <text>]] [--model <variant>] [--no-attach]
+helm-svc form --helm <gc-helm.sh> --models claude-opus,claude-fable,codex-astra,codex-sol [--subject <ref> [--from <bead>] | --new-subject [--rig <name>] [--question <text>]] [--model <variant>] [--no-attach]
 helm-svc form --helm <gc-helm.sh> --return     # the conversations to return to
 helm-svc form --helm <gc-helm.sh> --home       # the home page
 ```
 
 The screen `gc-helm.sh engage` and `gc-helm.sh attach` hand a terminal to,
 which they run with their own path as `--helm` and the converse variants as
-`--models`. It holds the subject, a multiline question, a new topic's rig, the
-model and whether to attach, in that order, reads `gc-helm.sh conversations` in
-the background while the operator types, saves with `gc-helm.sh open`, starts
-with `gc-helm.sh engage <conversation> --no-attach`, and once the sitting has
+`--models`. It holds the subject, a multiline question, the model, shown with
+each word of its name capitalized (claude-opus reads Claude-Opus) and passed on
+as named, and whether to attach, in that order. The subject is a bead, a PR, or
+a rig's whole name or prefix typed there, which starts a new topic in that rig,
+and a line under it shows the rig it names or the bead's own rig. `--rig` fills
+in the subject with the name of the rig it names exactly, and `--subject` with
+a reference the form looks up and never matches to a rig. ↑ and ↓ move between
+the fields at a field's first and last row. It reads `gc-helm.sh conversations`
+in the background while the operator types, the city's rigs with their
+prefixes included, saves with `gc-helm.sh open`, starts with
+`gc-helm.sh engage <conversation> --no-attach`, and once the sitting has
 started attaches with `gc-helm.sh engage <conversation>`, passing `--model` with
 the model its start ran on. `--no-attach`, which engage passes on from its own
 command line, opens the form with attaching off, and the form then leaves once
-the sitting has started. `--from`, which engage passes on too, names the bead a
-`--subject` gate was reached from. `--home`, which a bare `gc-helm.sh` on a
-terminal passes, opens the home page, whose entries run `gc-helm.sh po` and
-`gc-helm.sh mechanik`, each of which hands the terminal to the seat's session,
-and open the start and the return screens, from which Esc goes back to it. It
-writes nothing itself, so what it files is what the command line files. [human-engagement.md](../../docs/human-engagement.md#engage)
+the sitting has started. In a suspended rig attaching is off whatever the
+operator chose, and the form saves the question, starts no sitting and leaves.
+`--from`, which engage passes on too, names the bead a `--subject` gate was
+reached from. `--home`, which a bare `gc-helm.sh` on a terminal passes, opens
+the home page, whose entries run `gc-helm.sh po` and `gc-helm.sh mechanik`,
+each of which hands the terminal to the seat's session, and open the start and
+the return screens, from which Esc goes back to it. It writes nothing itself,
+so what it files is what the command line files. [human-engagement.md](../../docs/human-engagement.md#engage)
 says what it shows and when it saves. `internal/form/testdata/helm-fixture.sh`
 answers those verbs from fixture data, so the form can be run with no city
 behind it.

@@ -40,7 +40,7 @@ func metaJSON(kv ...string) string {
 // <alias>` leaves one in the city store: a manual session whose alias and agent
 // name are the qualified alias. closed nil is a session that is still open.
 func sessionBead(id, alias, state string, created time.Time, closed *time.Time) *beads.Issue {
-	i := issue(id, "gc-toolkit/gc-toolkit.converse-opus", "session", 2, created, metaJSON(
+	i := issue(id, "gc-toolkit/gc-toolkit.converse-claude-opus", "session", 2, created, metaJSON(
 		"alias", alias, "agent_name", alias, "session_name", "s-"+id,
 		"session_origin", "manual", "state", state))
 	i.CreatedAt = created

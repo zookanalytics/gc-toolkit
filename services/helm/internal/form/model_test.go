@@ -33,8 +33,10 @@ type fakeHelm struct {
 	saves    []SaveRequest
 	starts   []string
 	attaches []string
-	// attachArgs is the argv each attach would run, as Script builds it.
+	// attachArgs is the argv each attach would run, as Script builds it, and
+	// attachCmds the command each one returned.
 	attachArgs []string
+	attachCmds []*exec.Cmd
 	seats      []string
 	// seatArgs is the argv each seat's verb would run, as Script builds it.
 	seatArgs []string
@@ -65,7 +67,9 @@ func (f *fakeHelm) Start(_ context.Context, conv, model string) error {
 func (f *fakeHelm) AttachCommand(conv, model string) *exec.Cmd {
 	f.attaches = append(f.attaches, conv)
 	f.attachArgs = append(f.attachArgs, strings.Join(Script{Path: "gc-helm.sh"}.AttachCommand(conv, model).Args[1:], " "))
-	return exec.Command("true")
+	c := exec.Command("true")
+	f.attachCmds = append(f.attachCmds, c)
+	return c
 }
 func (f *fakeHelm) SeatCommand(seat string) *exec.Cmd {
 	f.seats = append(f.seats, seat)
@@ -75,10 +79,10 @@ func (f *fakeHelm) SeatCommand(seat string) *exec.Cmd {
 
 func rigCity() City {
 	return City{Rigs: []Rig{
-		{Name: "gc-toolkit", Converse: true},
-		{Name: "gascity", Converse: true},
-		{Name: "paused", Converse: true, Suspended: true},
-		{Name: "docs", Converse: false},
+		{Name: "gc-toolkit", Prefix: "tk", Converse: true},
+		{Name: "harbor", Prefix: "hb", Converse: true},
+		{Name: "paused", Prefix: "pz", Converse: true, Suspended: true},
+		{Name: "docs", Prefix: "dx", Converse: false},
 	}}
 }
 
@@ -95,7 +99,7 @@ func newForm(t *testing.T, f *fakeHelm, opt Options) *Model {
 func newFormOn(t *testing.T, h Helm, opt Options) *Model {
 	t.Helper()
 	if opt.Models == nil {
-		opt.Models = []string{"opus", "fable", "codex"}
+		opt.Models = []string{"claude-opus", "claude-fable", "codex-astra", "codex-sol"}
 	}
 	opt.Debounce = time.Millisecond
 	opt.Refresh = time.Millisecond
@@ -128,7 +132,7 @@ func typeText(m *Model, s string) {
 // deliver runs a command and hands the form's own messages back to it, through
 // batches and ticks, the way the bubbletea runtime would. It stops at runtime
 // messages such as the cursor's blink, which repeat for as long as the form
-// runs, and at what only the runtime runs, such as an attach or the form's end.
+// runs, and at the form's end, which only the runtime acts on.
 func deliver(m *Model, cmd tea.Cmd) { deliverN(m, cmd, 0) }
 
 func deliverN(m *Model, cmd tea.Cmd, depth int) {
@@ -143,7 +147,7 @@ func deliverN(m *Model, cmd tea.Cmd, depth int) {
 		return
 	}
 	switch msg.(type) {
-	case aboutMsg, cityMsg, debounceMsg, savedMsg, startedMsg, attachedMsg:
+	case aboutMsg, cityMsg, debounceMsg, savedMsg, startedMsg:
 		_, next := m.Update(msg)
 		deliverN(m, next, depth+1)
 	}
@@ -197,6 +201,7 @@ func TestALookupForAnEarlierSubjectSettlesNothing(t *testing.T) {
 		"gc-b": subjectAbout("gc-b", "gascity"),
 	}}
 	m := newForm(t, f, Options{})
+	loadCity(m) // the city's rigs, which name neither reference
 	typeText(m, "tk-a")
 	staleCmd := m.lookup(lookupKey{ref: "tk-a"}) // asked for while the field read tk-a
 	for range 4 {
@@ -225,51 +230,232 @@ func TestALookupForAnEarlierSubjectSettlesNothing(t *testing.T) {
 	}
 }
 
-func TestANewTopicNeedsARigTheOperatorChose(t *testing.T) {
+// A new topic names its rig in the subject field: an empty subject files
+// nothing, and asks for a bead, a PR or a rig's name or prefix.
+func TestANewTopicNeedsTheRigTheOperatorNames(t *testing.T) {
 	f := &fakeHelm{city: rigCity()}
 	m := newForm(t, f, Options{})
+	if !strings.Contains(m.subject.Placeholder, "a rig's name or prefix for a new topic") {
+		t.Fatalf("placeholder = %q", m.subject.Placeholder)
+	}
+	if w := lipgloss.Width(m.subject.Placeholder); w > 60 {
+		t.Fatalf("the placeholder is %d cells, and the field cuts it at 60", w)
+	}
 	focusOn(t, m, questionField)
 	typeText(m, "a new topic")
+	loadCity(m)
 	m.Update(ctrl('s'))
-	if len(f.saves) != 0 {
-		t.Fatalf("saved with the rigs unread: %+v", f.saves)
+	if dest, ok := m.destination(); ok || len(f.saves) != 0 || !strings.Contains(dest, "a rig's name or prefix, which starts a new topic") {
+		t.Fatalf("an empty subject: destination %q, %v, saves %+v", dest, ok, f.saves)
 	}
+	if !strings.HasPrefix(m.status, "Not saved: name the subject") {
+		t.Fatalf("status = %q", m.status)
+	}
+}
+
+// A rig's whole name or prefix typed as the subject, in any case and with
+// spaces around it, names the rig a new topic is filed in. The Rig line shows
+// it, nothing looks it up as a bead, and the save files a new subject there as
+// open --new-subject --rig does. Part of a name names nothing and is looked up
+// as typed.
+func TestARigTypedAsTheSubjectIsANewTopicInThatRig(t *testing.T) {
+	for _, typed := range []string{"tk", "gc-toolkit", " TK ", "GC-Toolkit"} {
+		t.Run(typed, func(t *testing.T) {
+			f := &fakeHelm{city: rigCity(), saveResp: Saved{Subject: "tk-new", Conversation: "tk-conv", Filed: true}}
+			m := newForm(t, f, Options{})
+			loadCity(m)
+			typeText(m, typed)
+			if _, cmd := m.Update(debounceMsg{seq: m.seq}); cmd != nil {
+				t.Fatalf("%q was looked up once the typing stopped", typed)
+			}
+			_, cmd := m.Update(key(tea.KeyTab))
+			deliver(m, cmd)
+			if len(f.abouts) != 0 || m.focus != questionField {
+				t.Fatalf("leaving the subject: lookups %v, focus %d", f.abouts, m.focus)
+			}
+			if dest, ok := m.destination(); !ok || dest != "a new subject in rig gc-toolkit" {
+				t.Fatalf("destination = %q, %v", dest, ok)
+			}
+			v := m.composeView()
+			if marked(strings.Split(v, "\n"), "Rig") == "" || !strings.Contains(marked(strings.Split(v, "\n"), "Rig"), "gc-toolkit") || !strings.Contains(v, "a new subject in rig gc-toolkit") {
+				t.Fatalf("the screen does not show the rig the subject names:\n%s", v)
+			}
+			typeText(m, "a question")
+			_, cmd = m.Update(ctrl('s'))
+			deliver(m, cmd)
+			if len(f.saves) != 1 || f.saves[0] != (SaveRequest{Rig: "gc-toolkit", Question: "a question"}) {
+				t.Fatalf("saves = %+v, want one new subject in gc-toolkit", f.saves)
+			}
+			if len(f.starts) != 1 || f.starts[0] != "tk-conv claude-opus" {
+				t.Fatalf("starts = %v", f.starts)
+			}
+		})
+	}
+	f := &fakeHelm{city: rigCity(), aboutErr: map[string]error{"gc-tool": &Refusal{Code: 4, Why: "gc-helm: conversations: bead not found: 'gc-tool'"}}}
+	m := newForm(t, f, Options{})
 	loadCity(m)
-	if _, ok := m.destination(); ok {
-		t.Fatalf("a rig was chosen without the operator")
+	typeText(m, "gc-tool")
+	settle(m)
+	if dest, ok := m.destination(); ok || m.newTopic() || !strings.Contains(dest, "bead not found") || len(f.abouts) != 1 {
+		t.Fatalf("part of a rig's name: new topic %v, destination %q, %v, lookups %v", m.newTopic(), dest, ok, f.abouts)
 	}
-	focusOn(t, m, rigField)
-	m.Update(key(tea.KeyRight))
-	if m.rig != "gc-toolkit" {
-		t.Fatalf("rig after one → = %q", m.rig)
+	if strings.Contains(m.composeView(), "Rig     ") {
+		t.Fatalf("part of a rig's name showed a rig:\n%s", m.composeView())
 	}
-	m.Update(key(tea.KeyRight))
-	m.Update(key(tea.KeyRight)) // paused and docs cannot host a sitting, so it wraps
-	if m.rig != "gc-toolkit" {
-		t.Fatalf("rig after three → = %q, want a hosting rig", m.rig)
-	}
-	m.Update(key(tea.KeyRight))
-	// A later read of the city with the rigs in another order leaves the choice.
-	f.city = City{Rigs: []Rig{{Name: "gascity", Converse: true}, {Name: "gc-toolkit", Converse: true}}}
+}
+
+// A name or prefix more than one rig carries names none of them: the
+// destination says so, and nothing is saved.
+func TestANameSeveralRigsCarryNamesNone(t *testing.T) {
+	f := &fakeHelm{city: City{Rigs: []Rig{
+		{Name: "gc-toolkit", Prefix: "tk", Converse: true},
+		{Name: "tk", Prefix: "tq", Converse: true},
+	}}}
+	m := newForm(t, f, Options{})
 	loadCity(m)
-	if m.rig != "gascity" {
-		t.Fatalf("a city reload changed the chosen rig to %q", m.rig)
-	}
-	f.saveResp = Saved{Subject: "gc-new", Conversation: "gc-conv", Filed: true}
+	typeText(m, "tk")
+	focusOn(t, m, questionField)
+	typeText(m, "a question")
 	_, cmd := m.Update(ctrl('s'))
-	deliver(m, cmd)
-	if len(f.saves) != 1 || f.saves[0].Rig != "gascity" || f.saves[0].Ref != "" {
-		t.Fatalf("saves = %+v, want one new subject in gascity", f.saves)
+	if cmd != nil || len(f.saves) != 0 || len(f.abouts) != 0 {
+		t.Fatalf("an ambiguous name: a read %v, saves %+v, lookups %v", cmd != nil, f.saves, f.abouts)
+	}
+	if !strings.Contains(m.status, "tk names more than one rig (gc-toolkit, tk)") || strings.Contains(m.status, "Reading it again") {
+		t.Fatalf("status = %q", m.status)
+	}
+	m.subject.SetValue("tq")
+	if dest, ok := m.destination(); !ok || dest != "a new subject in rig tk" {
+		t.Fatalf("the prefix only one rig has: destination %q, %v", dest, ok)
 	}
 }
 
 func TestAPreFilledRigThatCannotHostIsRefused(t *testing.T) {
 	f := &fakeHelm{city: rigCity()}
-	m := newForm(t, f, Options{Rig: "paused"})
+	m := newForm(t, f, Options{Rig: "docs"})
 	loadCity(m)
 	typeText(m, "question")
-	if dest, ok := m.destination(); ok || !strings.Contains(dest, "suspended") {
+	if dest, ok := m.destination(); ok || !strings.Contains(dest, "carries no converse template") {
 		t.Fatalf("destination = %q, %v", dest, ok)
+	}
+	m = newForm(t, f, Options{Rig: "gone"})
+	loadCity(m)
+	if dest, ok := m.destination(); ok || dest != "rig gone is not a rig of this city" || len(f.abouts) != 0 {
+		t.Fatalf("a rig the city lacks: destination %q, %v, lookups %v", dest, ok, f.abouts)
+	}
+}
+
+// --rig fills in the subject with the rig's name and opens on the question. It
+// names a rig before the city's rigs are read, so nothing looks it up, and the
+// rig is checked once they are.
+func TestTheCommandLinesRigFillsInTheSubject(t *testing.T) {
+	f := &fakeHelm{city: rigCity()}
+	m := newForm(t, f, Options{Rig: "gc-toolkit"})
+	if m.ref() != "gc-toolkit" || m.focus != questionField || !m.newTopic() {
+		t.Fatalf("--rig: subject %q, focus %d, new topic %v", m.ref(), m.focus, m.newTopic())
+	}
+	initCmd := m.Init()
+	if dest, ok := m.destination(); ok || dest != "a new subject in rig gc-toolkit: checking the rig…" {
+		t.Fatalf("before the rigs are read: destination %q, %v", dest, ok)
+	}
+	deliver(m, initCmd)
+	if dest, ok := m.destination(); !ok || dest != "a new subject in rig gc-toolkit" || len(f.abouts) != 0 {
+		t.Fatalf("once the rigs are read: destination %q, %v, lookups %v", dest, ok, f.abouts)
+	}
+}
+
+// --rig names a rig as open --new-subject --rig does, by its exact name, so a
+// rig whose prefix it is does not stand in for the rig of that name, and a
+// prefix or a name in another case names no rig there. Once the operator
+// edits the subject, it is typed text, which names each rig whose whole name
+// or prefix it is, ignoring case.
+func TestTheCommandLinesRigIsTheRigOfThatExactName(t *testing.T) {
+	both := City{Rigs: []Rig{
+		{Name: "gc-toolkit", Prefix: "tk", Converse: true},
+		{Name: "tk", Prefix: "tq", Converse: true},
+	}}
+	f := &fakeHelm{city: both, saveResp: Saved{Subject: "tq-new", Conversation: "tq-conv", Filed: true}}
+	m := newForm(t, f, Options{Rig: "tk"})
+	loadCity(m)
+	if dest, ok := m.destination(); !ok || dest != "a new subject in rig tk" {
+		t.Fatalf("--rig tk beside a rig whose prefix is tk: destination %q, %v", dest, ok)
+	}
+	typeText(m, "a question")
+	_, cmd := m.Update(ctrl('s'))
+	deliver(m, cmd)
+	if len(f.saves) != 1 || f.saves[0] != (SaveRequest{Rig: "tk", Question: "a question"}) {
+		t.Fatalf("saves = %+v, want a new subject in rig tk", f.saves)
+	}
+
+	one := City{Rigs: []Rig{{Name: "gc-toolkit", Prefix: "tk", Converse: true}}}
+	for _, rig := range []string{"tk", "GC-Toolkit"} {
+		f := &fakeHelm{city: one}
+		m := newForm(t, f, Options{Rig: rig})
+		loadCity(m)
+		typeText(m, "a question")
+		m.Update(ctrl('s'))
+		if want := "rig " + rig + " is not a rig of this city"; len(f.saves) != 0 || len(f.abouts) != 0 || !strings.HasPrefix(m.status, "Not saved: "+want) {
+			t.Fatalf("--rig %s where no rig has that name: saves %+v, lookups %v, status %q", rig, f.saves, f.abouts, m.status)
+		}
+	}
+
+	m = newForm(t, &fakeHelm{city: both}, Options{Rig: "tk"})
+	loadCity(m)
+	focusOn(t, m, subjectField)
+	m.Update(key(tea.KeyBackspace))
+	typeText(m, "k")
+	if dest, ok := m.destination(); ok || !strings.Contains(dest, "tk names more than one rig (gc-toolkit, tk)") {
+		t.Fatalf("--rig tk edited back to tk: destination %q, %v", dest, ok)
+	}
+}
+
+// A reference typed before the city's rigs are read can be a rig's name, so a
+// lookup no bead answers is marked as still being read, and the rigs decide. A
+// name the rigs stop carrying is looked up once they are read again.
+func TestARigTypedBeforeTheRigsAreReadIsCheckedOnceTheyAre(t *testing.T) {
+	f := &fakeHelm{city: rigCity(), aboutErr: map[string]error{
+		"hb": &Refusal{Code: 4, Why: "gc-helm: conversations: bead not found: 'hb'"},
+	}}
+	m := newForm(t, f, Options{})
+	typeText(m, "hb")
+	settle(m)
+	if dest, ok := m.destination(); ok || dest != "gc-helm: conversations: bead not found: 'hb'" {
+		t.Fatalf("before the rigs are read: destination %q, %v", dest, ok)
+	}
+	if v := sgr.ReplaceAllString(m.composeView(), ""); !strings.Contains(v, "Files as  … gc-helm: conversations: bead not found") {
+		t.Fatalf("the destination is not marked as still being read:\n%s", v)
+	}
+	loadCity(m)
+	if dest, ok := m.destination(); !ok || dest != "a new subject in rig harbor" {
+		t.Fatalf("once the rigs are read: destination %q, %v", dest, ok)
+	}
+
+	m = newForm(t, f, Options{})
+	loadCity(m)
+	f.abouts = nil
+	typeText(m, "hb")
+	if _, cmd := m.Update(debounceMsg{seq: m.seq}); cmd != nil {
+		t.Fatalf("hb was looked up while it named harbor")
+	}
+	noHarbor := City{Rigs: []Rig{{Name: "gc-toolkit", Prefix: "tk", Converse: true}}}
+	f.city = noHarbor
+	loadCity(m)
+	if len(f.abouts) != 0 {
+		t.Fatalf("a read of the rigs looked up %v while the operator was in the subject field", f.abouts)
+	}
+	f.city = rigCity()
+	loadCity(m)
+	_, cmd := m.Update(key(tea.KeyTab))
+	deliver(m, cmd)
+	if len(f.abouts) != 0 || m.focus != questionField {
+		t.Fatalf("leaving hb while it named harbor: lookups %v, focus %d", f.abouts, m.focus)
+	}
+	f.city = noHarbor
+	loadCity(m)
+	if dest, ok := m.destination(); ok || !strings.Contains(dest, "bead not found: 'hb'") || len(f.abouts) != 1 {
+		t.Fatalf("once harbor is gone: destination %q, %v, lookups %v", dest, ok, f.abouts)
+	}
+	if v := sgr.ReplaceAllString(m.composeView(), ""); !strings.Contains(v, "Files as  ✗ gc-helm: conversations: bead not found") {
+		t.Fatalf("a lookup the rigs leave standing is not marked refused:\n%s", v)
 	}
 }
 
@@ -297,7 +483,7 @@ func TestTheQuestionIsSavedExactlyAsTyped(t *testing.T) {
 }
 
 // The save is said before the start runs, and once the sitting has started the
-// form attaches the terminal to it, on the model the start ran on.
+// form leaves to attach the terminal to it, on the model the start ran on.
 func TestSavedIsSaidBeforeTheStartAndTheSittingIsAttachedOnceItStarts(t *testing.T) {
 	f := &fakeHelm{
 		about:    map[string]About{"tk-a": subjectAbout("tk-a", "gc-toolkit")},
@@ -311,27 +497,31 @@ func TestSavedIsSaidBeforeTheStartAndTheSittingIsAttachedOnceItStarts(t *testing
 		t.Fatalf("before the save answers the screen says:\n%s", v)
 	}
 	_, startCmd := m.Update(saveCmd())
-	if v := m.progressView(); !strings.Contains(v, "saved: conversation tk-c1") || !strings.Contains(v, "starting its sitting on opus") || !strings.Contains(v, "Attaches once its sitting starts") {
+	if v := m.progressView(); !strings.Contains(v, "saved: conversation tk-c1") || !strings.Contains(v, "starting its sitting on Claude-Opus") || !strings.Contains(v, "Attaches once its sitting starts") {
 		t.Fatalf("after the save, before the start, the screen says:\n%s", v)
 	}
 	if len(f.starts) != 0 || len(f.attaches) != 0 {
 		t.Fatalf("the start or the attach ran before the start's command did: starts %v, attaches %v", f.starts, f.attaches)
 	}
 	_, attachCmd := m.Update(startCmd())
-	if len(f.starts) != 1 || f.starts[0] != "tk-c1 opus" {
+	if len(f.starts) != 1 || f.starts[0] != "tk-c1 claude-opus" {
 		t.Fatalf("starts = %v", f.starts)
 	}
-	if attachCmd == nil || len(f.attachArgs) != 1 || f.attachArgs[0] != "gc-helm.sh engage tk-c1 --no-input --model opus" {
-		t.Fatalf("once the sitting started the form attached %v, want tk-c1 on opus", f.attachArgs)
+	if len(f.attachArgs) != 1 || f.attachArgs[0] != "gc-helm.sh engage tk-c1 --no-input --model claude-opus" {
+		t.Fatalf("once the sitting started the form kept the attach %v, want tk-c1 on claude-opus", f.attachArgs)
 	}
-	// An Enter that lands before the attach takes the terminal attaches nothing
-	// more, so a detach is not followed by a second attach.
+	// The form keeps the attach and leaves, and the attach runs once the
+	// form's program has returned, so the form draws nothing after it.
+	if !isQuit(attachCmd) || m.Attach() == nil || m.Attach() != f.attachCmds[0] {
+		t.Fatalf("once the sitting started: left %v, attach kept %v", isQuit(attachCmd), m.Attach() != nil)
+	}
+	// An Enter that lands before the form's program ends keeps no second
+	// attach.
 	if _, cmd := m.Update(key(tea.KeyEnter)); cmd != nil || len(f.attaches) != 1 {
 		t.Fatalf("Enter after the sitting started attached again: %v", f.attaches)
 	}
-	_, last := m.Update(attachedMsg{})
-	if !isQuit(last) || m.Note() != "" || m.Leave() != "" {
-		t.Fatalf("once the attach came back: left %v, note %q, then %q", isQuit(last), m.Note(), m.Leave())
+	if m.Note() != "" || m.Leave() != "" {
+		t.Fatalf("the form left to attach saying %q, then %q", m.Note(), m.Leave())
 	}
 }
 
@@ -343,7 +533,11 @@ func TestTheQuestionIsOneTabFromTheSubject(t *testing.T) {
 	if m.focus != subjectField {
 		t.Fatalf("an empty form opens on field %d, want the subject", m.focus)
 	}
-	for _, want := range []field{questionField, rigField, modelField, attachField, subjectField} {
+	// The rig a new topic is filed in is named in the subject, so it is no
+	// field of its own, whatever the subject names.
+	loadCity(m)
+	typeText(m, "tk")
+	for _, want := range []field{questionField, modelField, attachField, subjectField} {
 		m.Update(key(tea.KeyTab))
 		if m.focus != want {
 			t.Fatalf("Tab reached field %d, want %d (fields %v)", m.focus, want, m.fields())
@@ -364,8 +558,7 @@ func TestTheQuestionIsOneTabFromTheSubject(t *testing.T) {
 		at = i
 	}
 	// A subject from the command line opens on the question. Enter in the
-	// subject field goes to the question too, and an existing subject has no rig
-	// field, since its rig is its own.
+	// subject field goes to the question too.
 	m = newForm(t, f, Options{Subject: "tk-a"})
 	settle(m)
 	if m.focus != questionField {
@@ -378,6 +571,327 @@ func TestTheQuestionIsOneTabFromTheSubject(t *testing.T) {
 	}
 	if fs := m.fields(); len(fs) != 4 || fs[0] != subjectField || fs[1] != questionField || fs[2] != modelField || fs[3] != attachField {
 		t.Fatalf("an existing subject's fields = %v", fs)
+	}
+}
+
+// A rig's name wins over a lookup that answered for the same typed text before
+// the rigs were read: its rows, its rig and a conversation it named stand
+// aside, and the save files a new topic in the rig.
+func TestARigsNameWinsOverALookupThatAnsweredFirst(t *testing.T) {
+	a := subjectAbout("hb", "elsewhere")
+	a.Conversation = "hb-c1"
+	a.Conversations = []Conversation{{ID: "hb-c1", Readiness: Queued, Title: "an open question"}}
+	f := &fakeHelm{city: rigCity(), about: map[string]About{"hb": a}, saveResp: Saved{Subject: "hb-new", Conversation: "hb-conv", Filed: true}}
+	m := newForm(t, f, Options{})
+	typeText(m, "hb")
+	settle(m)
+	focusOn(t, m, questionField)
+	if m.choice != "hb-c1" || len(m.contextRows()) != 2 {
+		t.Fatalf("before the rigs are read: choice %q, rows %d", m.choice, len(m.contextRows()))
+	}
+	loadCity(m)
+	if len(m.contextRows()) != 0 || strings.Contains(m.composeView(), "elsewhere") {
+		t.Fatalf("once hb names harbor the lookup's rows or rig still show:\n%s", m.composeView())
+	}
+	typeText(m, "a question")
+	_, cmd := m.Update(ctrl('s'))
+	deliver(m, cmd)
+	if len(f.saves) != 1 || f.saves[0] != (SaveRequest{Rig: "harbor", Question: "a question"}) || f.starts[0] != "hb-conv claude-opus" {
+		t.Fatalf("saves %+v, starts %v, want a new topic in harbor", f.saves, f.starts)
+	}
+}
+
+// Typed text settles only once the city's rigs have been read, because until
+// then it can still be a rig's name or prefix, which wins over a bead of the
+// same id. A bead's lookup that answers first reads as still being checked,
+// and Ctrl+S files nothing, so the text files the same way whichever read
+// answers first. Text no rig carries settles once the rigs say so, and rigs
+// that did not read refuse it until a Ctrl+S reads them again.
+func TestTypedTextSettlesOnlyOnceTheRigsAreRead(t *testing.T) {
+	city := rigCity()
+	city.Rigs = append(city.Rigs, Rig{Name: "tk-a", Prefix: "ta", Converse: true})
+	about := map[string]About{"tk-a": subjectAbout("tk-a", "gc-toolkit"), "tk-b": subjectAbout("tk-b", "gc-toolkit")}
+	for _, rigsFirst := range []bool{false, true} {
+		f := &fakeHelm{city: city, about: about, saveResp: Saved{Subject: "ta-new", Conversation: "ta-conv", Filed: true}}
+		m := newForm(t, f, Options{})
+		typeText(m, "tk-a")
+		if rigsFirst {
+			loadCity(m)
+		}
+		settle(m)
+		focusOn(t, m, questionField)
+		typeText(m, "a question")
+		if !rigsFirst {
+			if v := sgr.ReplaceAllString(m.composeView(), ""); !strings.Contains(v, "Files as  … a conversation on tk-a — the subject tk-a — in rig gc-toolkit, unless tk-a names a rig: checking the rigs…") {
+				t.Fatalf("a bead's lookup that answered before the rigs is not marked as still being checked:\n%s", v)
+			}
+			_, cmd := m.Update(ctrl('s'))
+			deliver(m, cmd)
+			if len(f.saves) != 0 || !strings.HasPrefix(m.status, "Not saved: a conversation on tk-a") {
+				t.Fatalf("Ctrl+S before the rigs answered: saves %+v, status %q", f.saves, m.status)
+			}
+			loadCity(m)
+		}
+		_, cmd := m.Update(ctrl('s'))
+		deliver(m, cmd)
+		if len(f.saves) != 1 || f.saves[0] != (SaveRequest{Rig: "tk-a", Question: "a question"}) {
+			t.Fatalf("the rigs read first %v: saves %+v, want a new topic in rig tk-a", rigsFirst, f.saves)
+		}
+	}
+
+	f := &fakeHelm{city: city, about: about, cityErr: errors.New("gc rig list timed out"), saveResp: Saved{Subject: "tk-b", Conversation: "tk-c", Filed: true}}
+	m := newForm(t, f, Options{})
+	typeText(m, "tk-b")
+	settle(m)
+	focusOn(t, m, questionField)
+	typeText(m, "q")
+	loadCity(m)
+	_, cmd := m.Update(ctrl('s'))
+	if len(f.saves) != 0 || !strings.HasSuffix(m.status, "unless tk-b names a rig: the rigs did not read (gc rig list timed out), so that cannot be checked. Reading it again.") {
+		t.Fatalf("the rigs did not read: saves %+v, status %q", f.saves, m.status)
+	}
+	f.cityErr = nil
+	deliver(m, cmd)
+	if dest, ok := m.destination(); !ok || dest != "a conversation on tk-b — the subject tk-b — in rig gc-toolkit" {
+		t.Fatalf("once the rigs read and name no tk-b: destination %q, %v", dest, ok)
+	}
+	_, cmd = m.Update(ctrl('s'))
+	deliver(m, cmd)
+	if len(f.saves) != 1 || f.saves[0] != (SaveRequest{Ref: "tk-b", Subject: "tk-b", Question: "q"}) {
+		t.Fatalf("saves = %+v, want one onto tk-b", f.saves)
+	}
+}
+
+// ↑ and ↓ move between the fields once the cursor is at a field's first or
+// last row, and stop at the form's first and last field, where Tab wraps
+// around. Leaving the subject with ↓ looks it up, as Tab does. On Model and
+// Attach ←/→ still change the value, and in the rows on a subject ↑ on the
+// first row goes to the field above.
+func TestUpAndDownMoveBetweenTheFields(t *testing.T) {
+	a := subjectAbout("tk-a", "gc-toolkit")
+	a.Conversations = []Conversation{{ID: "tk-c1", Readiness: Queued, Title: "an open question"}}
+	f := &fakeHelm{about: map[string]About{"tk-a": a}}
+	m := newForm(t, f, Options{})
+	if _, cmd := m.Update(key(tea.KeyUp)); cmd != nil || m.focus != subjectField {
+		t.Fatalf("↑ in the first field moved the focus to %d", m.focus)
+	}
+	typeText(m, "tk-a")
+	_, cmd := m.Update(key(tea.KeyDown))
+	deliver(m, cmd)
+	if m.focus != questionField || len(f.abouts) != 1 || f.abouts[0] != "tk-a" {
+		t.Fatalf("↓ from the subject: focus %d, lookups %v", m.focus, f.abouts)
+	}
+	typeText(m, "one\ntwo")
+	steps := []struct {
+		k     rune
+		focus field
+		what  string
+	}{
+		{tea.KeyUp, questionField, "↑ on the question's last line moves to its first"},
+		{tea.KeyUp, subjectField, "↑ on the question's first line goes to the subject"},
+		{tea.KeyDown, questionField, "↓ from the subject goes to the question"},
+		{tea.KeyDown, questionField, "↓ on the question's first line moves to its second"},
+		{tea.KeyDown, modelField, "↓ on the question's last line goes to the model"},
+		{tea.KeyRight, modelField, "→ on the model changes the model"},
+		{tea.KeyDown, attachField, "↓ from the model goes to attach"},
+		{tea.KeySpace, attachField, "Space on attach turns it off"},
+		{tea.KeyDown, contextField, "↓ from attach goes to the rows on the subject"},
+		{tea.KeyDown, contextField, "↓ in the rows moves the cursor"},
+		{tea.KeyDown, contextField, "↓ on the last row of the last field stays"},
+		{tea.KeyUp, contextField, "↑ below the first row moves the cursor"},
+		{tea.KeyUp, attachField, "↑ on the first row goes to the field above"},
+		{tea.KeyUp, modelField, "↑ from attach goes to the model"},
+		{tea.KeyUp, questionField, "↑ from the model goes to the question"},
+	}
+	for _, st := range steps {
+		m.Update(key(st.k))
+		if m.focus != st.focus {
+			t.Fatalf("%s: focus %d, want %d", st.what, m.focus, st.focus)
+		}
+	}
+	if m.modelName() != "claude-fable" || m.attach || m.cursor != 0 {
+		t.Fatalf("after the walk: model %q, attach %v, cursor %d", m.modelName(), m.attach, m.cursor)
+	}
+	focusOn(t, m, contextField)
+	m.Update(key(tea.KeyDown))
+	if m.Update(key(tea.KeyTab)); m.focus != subjectField {
+		t.Fatalf("Tab from the last field reached field %d, want the subject", m.focus)
+	}
+	// ↓ enters the rows on their first row, wherever Tab left the cursor.
+	m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
+	if m.Update(key(tea.KeyDown)); m.focus != contextField || m.cursor != 0 {
+		t.Fatalf("↓ from attach: focus %d, cursor %d", m.focus, m.cursor)
+	}
+	// With no rows to choose, attach is the last field, and ↓ stops there.
+	m = newForm(t, &fakeHelm{}, Options{Subject: "tk-a"})
+	focusOn(t, m, attachField)
+	if m.Update(key(tea.KeyDown)); m.focus != attachField {
+		t.Fatalf("↓ on the last field moved the focus to %d", m.focus)
+	}
+}
+
+// The question's rows are counted as the screen shows them, so a line that
+// wraps is walked row by row before ↑ or ↓ leaves the question.
+func TestALineThatWrapsIsWalkedRowByRowBeforeTheQuestionIsLeft(t *testing.T) {
+	m := newForm(t, &fakeHelm{}, Options{Subject: "tk-a"})
+	m.Update(tea.WindowSizeMsg{Width: 44, Height: 30})
+	typeText(m, strings.TrimSpace(strings.Repeat("word ", 30)))
+	rows := m.question.ta.LineInfo().Height
+	if m.question.ta.LineCount() != 1 || rows < 3 || !m.question.atLastRow() {
+		t.Fatalf("one line of 149 cells wraps onto %d rows of a 40-cell field, the cursor on its last %v", rows, m.question.atLastRow())
+	}
+	presses := func(k rune, from field) int {
+		n := 0
+		for m.focus == from && n < 20 {
+			m.Update(key(k))
+			n++
+		}
+		return n
+	}
+	if n := presses(tea.KeyUp, questionField); n != rows || m.focus != subjectField {
+		t.Fatalf("↑ left the question after %d presses for %d rows, to field %d", n, rows, m.focus)
+	}
+	m.Update(key(tea.KeyDown))
+	if n := presses(tea.KeyDown, questionField); n != rows || m.focus != modelField {
+		t.Fatalf("↓ left the question after %d presses for %d rows, to field %d", n, rows, m.focus)
+	}
+}
+
+// A suspended rig typed as the subject files the question as any rig does,
+// with attaching off and the reason beside it, since Gas City starts no session
+// in a suspended rig. The save is all that runs: the form leaves once it lands,
+// and says the conversation waits until the rig resumes. Once the subject names
+// a rig that runs, attaching is the operator's own choice again.
+func TestASuspendedRigSavesWithAttachingOffAndStartsNoSitting(t *testing.T) {
+	const off = "no — rig paused is suspended, so no sitting starts until it resumes"
+	for _, attach := range []bool{true, false} {
+		m := newForm(t, &fakeHelm{city: rigCity()}, Options{NoAttach: !attach})
+		loadCity(m)
+		typeText(m, "pz")
+		if dest, ok := m.destination(); !ok || dest != "a new subject in rig paused" {
+			t.Fatalf("destination = %q, %v", dest, ok)
+		}
+		if v := m.composeView(); !strings.Contains(v, off) || !strings.Contains(v, "Ctrl+S save and leave") {
+			t.Fatalf("the screen does not say attaching is off and why:\n%s", v)
+		}
+		focusOn(t, m, attachField)
+		for _, k := range []rune{tea.KeyLeft, tea.KeyRight, tea.KeySpace} {
+			m.Update(key(k))
+		}
+		if v := m.composeView(); m.attach != attach || !strings.Contains(v, off) {
+			t.Fatalf("a key on attach in a suspended rig changed it (operator's choice %v, now %v):\n%s", attach, m.attach, v)
+		}
+		focusOn(t, m, subjectField)
+		m.Update(key(tea.KeyBackspace))
+		m.Update(key(tea.KeyBackspace))
+		typeText(m, "hb")
+		want := "‹ yes, once its sitting starts"
+		if !attach {
+			want = "‹ no, leave once its sitting starts ›"
+		}
+		if v := m.composeView(); !strings.Contains(v, want) || strings.Contains(v, "suspended") {
+			t.Fatalf("named a rig that runs, attaching is not the operator's choice %v:\n%s", attach, v)
+		}
+	}
+
+	f := &fakeHelm{city: rigCity(), saveResp: Saved{Subject: "pz-new", Conversation: "pz-conv", Filed: true}}
+	m := newForm(t, f, Options{Rig: "paused", DraftDir: t.TempDir()})
+	loadCity(m)
+	typeText(m, "a question")
+	_, saveCmd := m.Update(ctrl('s'))
+	if v := m.progressView(); !strings.Contains(v, "Leaves once it is saved: no sitting starts while rig paused is suspended") {
+		t.Fatalf("while the save runs the screen says:\n%s", v)
+	}
+	_, last := m.Update(saveCmd())
+	if !isQuit(last) || len(f.starts) != 0 || len(f.attaches) != 0 || m.Attach() != nil {
+		t.Fatalf("once the save landed: left %v, starts %v, attaches %v", isQuit(last), f.starts, f.attaches)
+	}
+	if len(f.saves) != 1 || f.saves[0] != (SaveRequest{Rig: "paused", Question: "a question"}) {
+		t.Fatalf("saves = %+v", f.saves)
+	}
+	if n := m.Note(); n != "Conversation pz-conv on pz-new is saved, and no sitting was started: rig paused is suspended, so it waits in your queue until the rig resumes (gc rig resume paused). Once the rig resumes, return to it with: gc-helm.sh attach pz-conv" {
+		t.Fatalf("note = %q", n)
+	}
+}
+
+// A bead whose own rig is suspended is treated as a suspended rig typed as the
+// subject: its question saves with attaching off, and no sitting starts, nor
+// one for an open conversation chosen there.
+func TestABeadInASuspendedRigSavesWithAttachingOffAndStartsNoSitting(t *testing.T) {
+	a := subjectAbout("pz-a", "paused")
+	a.RigSuspended = true
+	a.Conversations = []Conversation{{ID: "pz-c0", Readiness: Queued, Title: "an open question"}}
+	f := &fakeHelm{about: map[string]About{"pz-a": a}, saveResp: Saved{Subject: "pz-a", Conversation: "pz-c1", Filed: true}}
+	m := newForm(t, f, Options{Subject: "pz-a"})
+	settle(m)
+	if dest, ok := m.destination(); !ok || !strings.Contains(dest, "a conversation on pz-a") {
+		t.Fatalf("destination = %q, %v", dest, ok)
+	}
+	if v := m.composeView(); !strings.Contains(v, "no — rig paused is suspended, so no sitting starts until it resumes") || !strings.Contains(v, "Ctrl+S save and leave") {
+		t.Fatalf("the screen does not say attaching is off and why:\n%s", v)
+	}
+	focusOn(t, m, contextField)
+	m.Update(key(tea.KeyDown))
+	m.Update(key(tea.KeySpace))
+	_, cmd := m.Update(ctrl('s'))
+	if len(f.starts) != 0 || m.status != "Not started: rig paused is suspended, so no sitting can start there. Start conversation pz-c0 once the rig resumes (gc rig resume paused). Reading the subject again." {
+		t.Fatalf("choosing pz-c0 in a suspended rig: starts %v, status %q", f.starts, m.status)
+	}
+	deliver(m, cmd) // the rig is still suspended
+	m.Update(key(tea.KeyUp))
+	m.Update(key(tea.KeySpace))
+	focusOn(t, m, questionField)
+	typeText(m, "a question")
+	_, cmd = m.Update(ctrl('s'))
+	deliver(m, cmd)
+	if len(f.saves) != 1 || len(f.starts) != 0 || m.Attach() != nil || !m.left {
+		t.Fatalf("saves %+v, starts %v, left %v", f.saves, f.starts, m.left)
+	}
+	if n := m.Note(); !strings.Contains(n, "Conversation pz-c1 on pz-a is saved, and no sitting was started: rig paused is suspended") {
+		t.Fatalf("note = %q", n)
+	}
+}
+
+// An open conversation chosen in a suspended rig is not started, and the
+// subject is read again while its rows and the choice stay on screen, so once
+// the rig has resumed the next Ctrl+S starts that conversation, with no need
+// to open the form again.
+func TestAConversationChosenInASuspendedRigStartsOnceTheRigResumes(t *testing.T) {
+	a := subjectAbout("pz-a", "paused")
+	a.RigSuspended = true
+	a.Conversations = []Conversation{{ID: "pz-c0", Readiness: Queued, Title: "an open question"}}
+	f := &fakeHelm{about: map[string]About{"pz-a": a}}
+	m := newForm(t, f, Options{Subject: "pz-a"})
+	settle(m)
+	focusOn(t, m, contextField)
+	m.Update(key(tea.KeyDown))
+	m.Update(key(tea.KeySpace))
+	_, readAgain := m.Update(ctrl('s'))
+	if readAgain == nil || len(f.starts) != 0 || !strings.HasSuffix(m.status, "(gc rig resume paused). Reading the subject again.") {
+		t.Fatalf("Ctrl+S in a suspended rig: a read %v, starts %v, status %q", readAgain != nil, f.starts, m.status)
+	}
+	if _, cmd := m.Update(ctrl('s')); cmd != nil || !strings.HasSuffix(m.status, "Reading the subject again.") {
+		t.Fatalf("Ctrl+S while the subject is read again: another read %v, status %q", cmd != nil, m.status)
+	}
+	if v := m.composeView(); m.choice != "pz-c0" || m.cursor != 1 || m.focus != contextField || !strings.Contains(v, "● pz-c0") {
+		t.Fatalf("while the subject is read again: choice %q, cursor %d, focus %d:\n%s", m.choice, m.cursor, m.focus, v)
+	}
+	deliver(m, readAgain) // the rig is still suspended
+	if _, readAgain = m.Update(ctrl('s')); readAgain == nil || len(f.starts) != 0 {
+		t.Fatalf("Ctrl+S once that read said the rig is still suspended: a read %v, starts %v", readAgain != nil, f.starts)
+	}
+	resumed := a
+	resumed.RigSuspended = false
+	f.about["pz-a"] = resumed
+	deliver(m, readAgain)
+	if l := marked(strings.Split(m.composeView(), "\n"), "Attach"); m.choice != "pz-c0" || !strings.Contains(l, "‹ yes, once its sitting starts") {
+		t.Fatalf("once the read says the rig runs: choice %q, attach line %q", m.choice, l)
+	}
+	_, cmd := m.Update(ctrl('s'))
+	deliver(m, cmd)
+	if len(f.starts) != 1 || f.starts[0] != "pz-c0 claude-opus" || len(f.abouts) != 3 {
+		t.Fatalf("starts %v, reads %v, want pz-c0 started after two reads again", f.starts, f.abouts)
 	}
 }
 
@@ -505,7 +1019,7 @@ func TestAConversationFiledWhoseSaveFailedIsKeptAndSavedAgainNotFiledAgain(t *te
 	if len(f.saves) != 4 || f.saves[1] != again || f.saves[2] != again || f.saves[3] != again {
 		t.Fatalf("saves = %+v, want each save again to be the first naming tk-c1", f.saves)
 	}
-	if m.saveErr != "" || len(f.starts) != 1 || f.starts[0] != "tk-c1 opus" {
+	if m.saveErr != "" || len(f.starts) != 1 || f.starts[0] != "tk-c1 claude-opus" {
 		t.Fatalf("after the save completed: saveErr %q, starts %v", m.saveErr, f.starts)
 	}
 	if files, _ := filepath.Glob(filepath.Join(dir, "*")); len(files) != 0 {
@@ -568,7 +1082,7 @@ func TestChoosingAnOpenConversationKeepsTheDraft(t *testing.T) {
 	}
 	_, cmd := m.Update(ctrl('s'))
 	deliver(m, cmd)
-	if len(f.saves) != 0 || len(f.starts) != 1 || f.starts[0] != "tk-c1 opus" || len(f.attaches) != 1 || f.attaches[0] != "tk-c1" {
+	if len(f.saves) != 0 || len(f.starts) != 1 || f.starts[0] != "tk-c1 claude-opus" || len(f.attaches) != 1 || f.attaches[0] != "tk-c1" {
 		t.Fatalf("continuing tk-c1: saves %v starts %v attaches %v", f.saves, f.starts, f.attaches)
 	}
 }
@@ -602,6 +1116,7 @@ func TestAConversationIdTypedBackIsChosenAgain(t *testing.T) {
 	typedBack := func(f *fakeHelm) *Model {
 		m := newForm(t, f, Options{Subject: "tk-c1"})
 		settle(m)
+		loadCity(m) // the city's rigs, which settle the typed id as no rig's
 		focusOn(t, m, subjectField)
 		m.Update(key(tea.KeyBackspace))
 		typeText(m, "1")
@@ -620,7 +1135,7 @@ func TestAConversationIdTypedBackIsChosenAgain(t *testing.T) {
 	}
 	_, cmd := m.Update(ctrl('s'))
 	deliver(m, cmd)
-	if len(f.saves) != 0 || len(f.starts) != 1 || f.starts[0] != "tk-c1 opus" {
+	if len(f.saves) != 0 || len(f.starts) != 1 || f.starts[0] != "tk-c1 claude-opus" {
 		t.Fatalf("an empty question on tk-c1: saves %v, starts %v, status %q", f.saves, f.starts, m.status)
 	}
 
@@ -736,7 +1251,7 @@ func TestAStartThatFailsIsShownAndRetried(t *testing.T) {
 	f := &fakeHelm{
 		about:    map[string]About{"tk-a": subjectAbout("tk-a", "gc-toolkit")},
 		saveResp: Saved{Subject: "tk-a", Conversation: "tk-c1", Filed: true},
-		startErr: errors.New("gc-helm: engage: rig 'gc-toolkit' is suspended"),
+		startErr: errors.New("gc-helm: engage: the city controller did not answer"),
 	}
 	m := newForm(t, f, Options{Subject: "tk-a"})
 	settle(m)
@@ -789,8 +1304,8 @@ func TestTheModelDefaultIsShownAndOverridable(t *testing.T) {
 	}
 	m := newForm(t, f, Options{Subject: "tk-a"})
 	settle(m)
-	if v := m.composeView(); !strings.Contains(v, "opus") || !strings.Contains(v, "(default)") {
-		t.Fatalf("compose view does not show the default model:\n%s", v)
+	if v := m.composeView(); !strings.Contains(v, "Claude-Opus") || !strings.Contains(v, "(default)") || strings.Contains(v, "claude-opus") {
+		t.Fatalf("compose view does not show the default model by its label:\n%s", v)
 	}
 	focusOn(t, m, modelField)
 	m.Update(key(tea.KeyRight))
@@ -798,8 +1313,51 @@ func TestTheModelDefaultIsShownAndOverridable(t *testing.T) {
 	typeText(m, "q")
 	_, cmd := m.Update(ctrl('s'))
 	deliver(m, cmd)
-	if len(f.starts) != 1 || f.starts[0] != "tk-c1 fable" {
+	if len(f.starts) != 1 || f.starts[0] != "tk-c1 claude-fable" {
 		t.Fatalf("starts = %v", f.starts)
+	}
+}
+
+// The model field shows each variant by its label, every word of its name
+// capitalized, in the order engage lists them, and starts the sitting on the
+// name itself, which is what engage's --model takes.
+func TestTheModelFieldShowsEachVariantByItsLabel(t *testing.T) {
+	for name, want := range map[string]string{
+		"claude-opus": "Claude-Opus", "claude-fable": "Claude-Fable",
+		"codex-sol": "Codex-Sol", "codex-astra": "Codex-Astra",
+		"opus": "Opus", "": "",
+	} {
+		if got := modelLabel(name); got != want {
+			t.Errorf("modelLabel(%q) = %q, want %q", name, got, want)
+		}
+	}
+	f := &fakeHelm{
+		about:    map[string]About{"tk-a": subjectAbout("tk-a", "gc-toolkit")},
+		saveResp: Saved{Subject: "tk-a", Conversation: "tk-c1", Filed: true},
+	}
+	m := newForm(t, f, Options{Subject: "tk-a"})
+	settle(m)
+	focusOn(t, m, modelField)
+	var shown []string
+	for range m.opt.Models {
+		v := m.composeView()
+		for _, l := range []string{"Claude-Opus", "Claude-Fable", "Codex-Astra", "Codex-Sol"} {
+			if strings.Contains(v, "‹ "+l) {
+				shown = append(shown, l)
+			}
+		}
+		m.Update(key(tea.KeyRight))
+	}
+	if got := strings.Join(shown, ", "); got != "Claude-Opus, Claude-Fable, Codex-Astra, Codex-Sol" {
+		t.Fatalf("the model field showed %s", got)
+	}
+	m.Update(key(tea.KeyLeft))
+	focusOn(t, m, questionField)
+	typeText(m, "q")
+	_, cmd := m.Update(ctrl('s'))
+	deliver(m, cmd)
+	if len(f.starts) != 1 || f.starts[0] != "tk-c1 codex-sol" {
+		t.Fatalf("starts = %v, want the sitting started on codex-sol", f.starts)
 	}
 }
 
@@ -808,7 +1366,7 @@ func TestTheModelDefaultIsShownAndOverridable(t *testing.T) {
 // runs on the model the start ran on. The return list shows no model, and
 // attaches on engage's default.
 func TestAnAttachThatCanHoldANewSittingKeepsTheModelTheStartRanOn(t *testing.T) {
-	const want = "gc-helm.sh engage tk-c1 --no-input --model fable"
+	const want = "gc-helm.sh engage tk-c1 --no-input --model claude-fable"
 
 	// The start failed, so no sitting holds the conversation.
 	f := &fakeHelm{
@@ -816,12 +1374,12 @@ func TestAnAttachThatCanHoldANewSittingKeepsTheModelTheStartRanOn(t *testing.T) 
 		saveResp: Saved{Subject: "tk-a", Conversation: "tk-c1", Filed: true},
 		startErr: errors.New("gc-helm: engage: the reconciler is down"),
 	}
-	m := newForm(t, f, Options{Subject: "tk-a", Model: "fable"})
+	m := newForm(t, f, Options{Subject: "tk-a", Model: "claude-fable"})
 	settle(m)
 	typeText(m, "q")
 	_, cmd := m.Update(ctrl('s'))
 	deliver(m, cmd)
-	if m.startErr == "" || len(f.starts) != 1 || f.starts[0] != "tk-c1 fable" {
+	if m.startErr == "" || len(f.starts) != 1 || f.starts[0] != "tk-c1 claude-fable" {
 		t.Fatalf("start error %q, starts %v", m.startErr, f.starts)
 	}
 	if _, cmd := m.Update(key(tea.KeyEnter)); cmd == nil || len(f.attachArgs) != 1 || f.attachArgs[0] != want {
@@ -833,7 +1391,7 @@ func TestAnAttachThatCanHoldANewSittingKeepsTheModelTheStartRanOn(t *testing.T) 
 		about:    map[string]About{"tk-a": subjectAbout("tk-a", "gc-toolkit")},
 		saveResp: Saved{Subject: "tk-a", Conversation: "tk-c1", Filed: true},
 	}
-	m = newForm(t, f, Options{Subject: "tk-a", Model: "fable"})
+	m = newForm(t, f, Options{Subject: "tk-a", Model: "claude-fable"})
 	settle(m)
 	typeText(m, "q")
 	_, cmd = m.Update(ctrl('s'))
@@ -844,17 +1402,17 @@ func TestAnAttachThatCanHoldANewSittingKeepsTheModelTheStartRanOn(t *testing.T) 
 
 	// The return list attaches on engage's default.
 	f = &fakeHelm{city: City{Conversations: []Conversation{{ID: "tk-gone", Readiness: Ended}}}}
-	m = newForm(t, f, Options{Return: true, Model: "fable"})
+	m = newForm(t, f, Options{Return: true, Model: "claude-fable"})
 	loadCity(m)
 	if _, cmd := m.Update(key(tea.KeyEnter)); cmd == nil || len(f.attachArgs) != 1 || f.attachArgs[0] != "gc-helm.sh engage tk-gone --no-input" {
 		t.Fatalf("attach from the return list = %v", f.attachArgs)
 	}
 }
 
-// One attach runs. bubbletea runs a second attach queued behind the first once
-// the first comes back, so an Enter that lands before the first attach takes
-// the terminal, on the return list or after a start that failed, attaches
-// nothing more, and neither does a start that lands then.
+// One attach runs. The form leaves once it keeps an attach, and a key its
+// program reads before it ends does nothing, so an Enter that lands then, on
+// the return list or after a start that failed, keeps no second attach, and an
+// r starts nothing.
 func TestASecondEnterBeforeTheAttachAttachesNothingMore(t *testing.T) {
 	t.Run("on the return list", func(t *testing.T) {
 		f := &fakeHelm{city: City{Conversations: []Conversation{{ID: "tk-c1", Readiness: Ready}}}}
@@ -882,13 +1440,9 @@ func TestASecondEnterBeforeTheAttachAttachesNothingMore(t *testing.T) {
 		if first == nil || second != nil || len(f.attaches) != 1 {
 			t.Fatalf("two Enters: an attach %v, then %v; attaches %v", first != nil, second != nil, f.attaches)
 		}
-		// A retried start that lands before the attach takes the terminal
-		// starts the sitting and attaches nothing more.
 		f.startErr = nil
-		_, cmd = m.Update(key('r'))
-		deliver(m, cmd)
-		if len(f.starts) != 2 || len(f.attaches) != 1 {
-			t.Fatalf("a start landing after the attach was run: starts %v, attaches %v", f.starts, f.attaches)
+		if _, cmd := m.Update(key('r')); cmd != nil || len(f.starts) != 1 || len(f.attaches) != 1 {
+			t.Fatalf("r after the form left to attach: a command %v, starts %v, attaches %v", cmd != nil, f.starts, f.attaches)
 		}
 	})
 }
@@ -1042,13 +1596,13 @@ func TestARefusedSaveReadsTheSubjectAgain(t *testing.T) {
 	if _, ok := m.destination(); !ok {
 		t.Fatalf("the read again did not settle the destination")
 	}
-	// A refusal that can change, such as a suspended rig, is read again too.
+	// A refusal that can change, such as a downed controller, is read again too.
 	a := subjectAbout("tk-a", "gc-toolkit")
-	a.Refusal = "rig 'gc-toolkit' is suspended."
+	a.Refusal = "the city controller did not answer, so nothing would launch a spawned converse sitting."
 	f.about["tk-a"] = a
 	settle(m)
 	_, cmd = m.Update(ctrl('s'))
-	if len(f.saves) != 0 || !strings.HasSuffix(m.status, "is suspended. Reading it again.") {
+	if len(f.saves) != 0 || !strings.HasSuffix(m.status, "converse sitting. Reading it again.") {
 		t.Fatalf("saves %v, status %q", f.saves, m.status)
 	}
 	f.about["tk-a"] = subjectAbout("tk-a", "gc-toolkit")
@@ -1068,14 +1622,16 @@ func TestARefusedSaveReadsTheSubjectAgain(t *testing.T) {
 	}
 }
 
+// A rig named before the rigs read is checked once they do, and a submit while
+// they did not read reads them again: for a rig --rig named, and for a typed
+// reference no bead answers, which can be a rig's name.
 func TestANewTopicReadsTheRigsAgainWhenTheyDidNotRead(t *testing.T) {
 	f := &fakeHelm{city: rigCity(), cityErr: errors.New("gc rig list timed out"), saveResp: Saved{Subject: "tk-new", Conversation: "tk-c", Filed: true}}
-	m := newForm(t, f, Options{})
+	m := newForm(t, f, Options{Rig: "gc-toolkit"})
 	loadCity(m)
-	if dest, ok := m.destination(); ok || !strings.Contains(dest, "did not read (gc rig list timed out)") {
+	if dest, ok := m.destination(); ok || dest != "the rigs did not read (gc rig list timed out), so rig gc-toolkit cannot be checked" {
 		t.Fatalf("destination = %q, %v", dest, ok)
 	}
-	focusOn(t, m, questionField)
 	typeText(m, "a new topic")
 	_, cmd := m.Update(ctrl('s'))
 	if cmd == nil || !strings.Contains(m.status, "Reading it again") {
@@ -1083,12 +1639,31 @@ func TestANewTopicReadsTheRigsAgainWhenTheyDidNotRead(t *testing.T) {
 	}
 	f.cityErr = nil
 	deliver(m, cmd)
-	focusOn(t, m, rigField)
-	m.Update(key(tea.KeyRight))
 	_, cmd = m.Update(ctrl('s'))
 	deliver(m, cmd)
 	if len(f.saves) != 1 || f.saves[0].Rig != "gc-toolkit" {
 		t.Fatalf("saves = %+v", f.saves)
+	}
+
+	f = &fakeHelm{city: rigCity(), cityErr: errors.New("gc rig list timed out"),
+		aboutErr: map[string]error{"tk": &Refusal{Code: 4, Why: "gc-helm: conversations: bead not found: 'tk'"}}}
+	m = newForm(t, f, Options{})
+	loadCity(m)
+	typeText(m, "tk")
+	settle(m)
+	if dest, ok := m.destination(); ok || dest != "gc-helm: conversations: bead not found: 'tk'" {
+		t.Fatalf("destination = %q, %v", dest, ok)
+	}
+	focusOn(t, m, questionField)
+	typeText(m, "a new topic")
+	_, cmd = m.Update(ctrl('s'))
+	if cmd == nil || !strings.Contains(m.status, "Reading it again") {
+		t.Fatalf("a read %v, status %q", cmd != nil, m.status)
+	}
+	f.cityErr = nil
+	deliver(m, cmd)
+	if dest, ok := m.destination(); !ok || dest != "a new subject in rig gc-toolkit" {
+		t.Fatalf("once the rigs read: destination %q, %v", dest, ok)
 	}
 }
 
@@ -1135,59 +1710,50 @@ func TestTheKeptDraftNamesTheCommandThatFilesItAgain(t *testing.T) {
 }
 
 func TestAttachingFromTheReturnListKeepsTheUnsavedQuestion(t *testing.T) {
-	for _, attachErr := range []error{nil, errors.New("exit status 1")} {
-		dir := t.TempDir()
-		f := &fakeHelm{
-			about: map[string]About{"tk-a": subjectAbout("tk-a", "gc-toolkit")},
-			city:  City{Conversations: []Conversation{{ID: "tk-c1", Readiness: Ready}}},
-		}
-		m := newForm(t, f, Options{Subject: "tk-a", DraftDir: dir})
-		settle(m)
-		loadCity(m)
-		typeText(m, "a question\n  on two lines ")
-		m.Update(ctrl('r'))
-		_, cmd := m.Update(key(tea.KeyEnter))
-		if cmd == nil || len(f.attaches) != 1 || f.attaches[0] != "tk-c1" {
-			t.Fatalf("attach = %v", f.attaches)
-		}
-		// The question is in a file before the terminal goes to the sitting.
-		files, _ := filepath.Glob(filepath.Join(dir, "engage-draft-*.txt"))
-		if len(files) != 1 {
-			t.Fatalf("draft files while the attach runs: %v", files)
-		}
-		if b, _ := os.ReadFile(files[0]); string(b) != "a question\n  on two lines " {
-			t.Fatalf("kept draft = %q", b)
-		}
-		_, last := m.Update(attachedMsg{err: attachErr})
-		if !isQuit(last) {
-			t.Fatalf("the form did not leave once the attach came back (err %v)", attachErr)
-		}
-		note := m.Note()
-		if !strings.Contains(note, files[0]) || !strings.Contains(note, "Nothing was filed.") || !strings.Contains(note, "gc-helm.sh engage tk-a --reason") {
-			t.Fatalf("note after the attach (err %v) = %q", attachErr, note)
-		}
-		if attachErr != nil && !strings.HasPrefix(note, "The attach did not run: exit status 1") {
-			t.Fatalf("note after a failed attach = %q", note)
-		}
-		if again, _ := filepath.Glob(filepath.Join(dir, "engage-draft-*.txt")); len(again) != 1 {
-			t.Fatalf("the question was kept more than once: %v", again)
-		}
-	}
-	// A question the form saved is not kept as a draft when the terminal goes to
-	// its sitting, once that sitting starts.
 	dir := t.TempDir()
 	f := &fakeHelm{
-		about:    map[string]About{"tk-a": subjectAbout("tk-a", "gc-toolkit")},
-		saveResp: Saved{Subject: "tk-a", Conversation: "tk-c1", Filed: true},
+		about: map[string]About{"tk-a": subjectAbout("tk-a", "gc-toolkit")},
+		city:  City{Conversations: []Conversation{{ID: "tk-c1", Readiness: Ready}}},
 	}
 	m := newForm(t, f, Options{Subject: "tk-a", DraftDir: dir})
 	settle(m)
+	loadCity(m)
+	typeText(m, "a question\n  on two lines ")
+	m.Update(ctrl('r'))
+	_, cmd := m.Update(key(tea.KeyEnter))
+	if !isQuit(cmd) || m.Attach() == nil || len(f.attaches) != 1 || f.attaches[0] != "tk-c1" {
+		t.Fatalf("left %v, attach kept %v, attaches %v", isQuit(cmd), m.Attach() != nil, f.attaches)
+	}
+	// The question is in a file before the terminal goes to the sitting, and
+	// the note, printed before the attach runs, says where.
+	files, _ := filepath.Glob(filepath.Join(dir, "engage-draft-*.txt"))
+	if len(files) != 1 {
+		t.Fatalf("draft files once the form left to attach: %v", files)
+	}
+	if b, _ := os.ReadFile(files[0]); string(b) != "a question\n  on two lines " {
+		t.Fatalf("kept draft = %q", b)
+	}
+	note := m.Leave()
+	if !strings.Contains(note, files[0]) || !strings.Contains(note, "Nothing was filed.") || !strings.Contains(note, "gc-helm.sh engage tk-a --reason") {
+		t.Fatalf("note once the form left to attach = %q", note)
+	}
+	if again, _ := filepath.Glob(filepath.Join(dir, "engage-draft-*.txt")); len(again) != 1 {
+		t.Fatalf("the question was kept more than once: %v", again)
+	}
+	// A question the form saved is not kept as a draft when the form leaves to
+	// attach its sitting, once that sitting starts.
+	dir = t.TempDir()
+	f = &fakeHelm{
+		about:    map[string]About{"tk-a": subjectAbout("tk-a", "gc-toolkit")},
+		saveResp: Saved{Subject: "tk-a", Conversation: "tk-c1", Filed: true},
+	}
+	m = newForm(t, f, Options{Subject: "tk-a", DraftDir: dir})
+	settle(m)
 	typeText(m, "q")
-	_, cmd := m.Update(ctrl('s'))
+	_, cmd = m.Update(ctrl('s'))
 	deliver(m, cmd)
-	m.Update(attachedMsg{})
-	if files, _ := filepath.Glob(filepath.Join(dir, "*")); len(files) != 0 || len(f.attaches) != 1 {
-		t.Fatalf("after attaching a saved conversation: drafts %v, attaches %v", files, f.attaches)
+	if files, _ := filepath.Glob(filepath.Join(dir, "*")); len(files) != 0 || len(f.attaches) != 1 || m.Leave() != "" {
+		t.Fatalf("after attaching a saved conversation: drafts %v, attaches %v, note %q", files, f.attaches, m.Leave())
 	}
 }
 
@@ -1305,32 +1871,32 @@ func TestAModelNoVariantCarriesIsShownAndStartsNothing(t *testing.T) {
 		t.Fatalf("compose view does not mark the model:\n%s", v)
 	}
 	m.Update(ctrl('s'))
-	if len(f.saves) != 0 || len(f.starts) != 0 || !strings.Contains(m.status, "typo is not a configured model (opus, fable, codex)") {
+	if len(f.saves) != 0 || len(f.starts) != 0 || !strings.Contains(m.status, "typo is not a configured model (Claude-Opus, Claude-Fable, Codex-Astra, Codex-Sol)") {
 		t.Fatalf("saves %v, starts %v, status %q", f.saves, f.starts, m.status)
 	}
 	focusOn(t, m, modelField)
 	m.Update(key(tea.KeyLeft))
-	if m.modelName() != "codex" {
+	if m.modelName() != "codex-sol" {
 		t.Fatalf("← from the unknown model = %q, want the last variant", m.modelName())
 	}
 	m.Update(key(tea.KeyRight))
-	if m.modelName() != "opus" {
-		t.Fatalf("→ from codex = %q", m.modelName())
+	if m.modelName() != "claude-opus" {
+		t.Fatalf("→ from codex-sol = %q", m.modelName())
 	}
 	_, cmd := m.Update(ctrl('s'))
 	deliver(m, cmd)
-	if len(f.saves) != 1 || len(f.starts) != 1 || f.starts[0] != "tk-c1 opus" {
+	if len(f.saves) != 1 || len(f.starts) != 1 || f.starts[0] != "tk-c1 claude-opus" {
 		t.Fatalf("saves %v, starts %v", f.saves, f.starts)
 	}
 	// → from the unknown model takes the first variant.
 	m = newForm(t, &fakeHelm{}, Options{Model: "typo"})
 	m.cycleModel(1)
-	if m.modelName() != "opus" {
+	if m.modelName() != "claude-opus" {
 		t.Fatalf("→ from the unknown model = %q, want the first variant", m.modelName())
 	}
 	// With no variants named, the model the command line named stands.
-	m = newForm(t, &fakeHelm{}, Options{Model: "fable", Models: []string{}})
-	if m.model != 0 || m.modelName() != "fable" || strings.Contains(m.composeView(), "not a configured model") {
+	m = newForm(t, &fakeHelm{}, Options{Model: "claude-fable", Models: []string{}})
+	if m.model != 0 || m.modelName() != "claude-fable" || strings.Contains(m.composeView(), "not a configured model") {
 		t.Fatalf("model %d %q with no variants named", m.model, m.modelName())
 	}
 }
@@ -1359,7 +1925,7 @@ func TestANewTopicSavedAgainCompletesTheConversationItFiled(t *testing.T) {
 	if len(f.saves) != 2 || f.saves[1] != want {
 		t.Fatalf("saves = %+v, want the save again onto tk-new naming tk-c", f.saves)
 	}
-	if m.saveErr != "" || len(f.starts) != 1 || f.starts[0] != "tk-c opus" {
+	if m.saveErr != "" || len(f.starts) != 1 || f.starts[0] != "tk-c claude-opus" {
 		t.Fatalf("after the save again: saveErr %q, starts %v", m.saveErr, f.starts)
 	}
 }
@@ -1643,7 +2209,7 @@ func TestAGateSeveralBeadsWaitOnIsAboutTheSubjectItWasChosenFrom(t *testing.T) {
 	if len(f.saves) != 1 || f.saves[0] != want {
 		t.Fatalf("saves = %+v, want %+v", f.saves, want)
 	}
-	if len(f.starts) != 1 || f.starts[0] != "tk-c2 opus" {
+	if len(f.starts) != 1 || f.starts[0] != "tk-c2 claude-opus" {
 		t.Fatalf("starts = %v, want tk-c2", f.starts)
 	}
 }
@@ -1747,6 +2313,84 @@ func TestAKeptDraftOnAGateNamesTheSubjectItWasChosenFrom(t *testing.T) {
 	m.Update(key(tea.KeyEscape))
 	if !strings.Contains(m.Note(), "gc-helm.sh engage tk-g1 --from tk-a --reason") {
 		t.Fatalf("note = %q", m.Note())
+	}
+}
+
+// A reference the field was given is looked up, and never read as a rig,
+// though a rig of the city carries its text as a name: a gate chosen from what
+// holds a typed subject, which the save sends as itself and from that subject,
+// an anchor chosen for a typed PR number, a subject a save filed without its
+// conversation, and the subject the command line names, which the flag-driven
+// engage reads as a subject too.
+func TestAReferenceTheFieldWasGivenIsNeverARig(t *testing.T) {
+	city := rigCity()
+	city.Rigs = append(city.Rigs,
+		Rig{Name: "tk-g1", Prefix: "g1", Converse: true},
+		Rig{Name: "hb-b", Prefix: "bb", Converse: true},
+		Rig{Name: "tk-new", Prefix: "nw", Converse: true},
+	)
+
+	f := sharedGateHelm()
+	f.city, f.saveResp = city, Saved{Subject: "tk-a", Conversation: "tk-c2", Filed: true}
+	m := newForm(t, f, Options{})
+	loadCity(m)
+	typeText(m, "tk-a")
+	settle(m)
+	chooseRow(t, m, "tk-g1")
+	if m.newTopic() || f.abouts[len(f.abouts)-1] != "tk-g1 --from tk-a" {
+		t.Fatalf("the gate chosen: new topic %v, reads %v", m.newTopic(), f.abouts)
+	}
+	focusOn(t, m, questionField)
+	typeText(m, "is the wording right?")
+	_, cmd := m.Update(ctrl('s'))
+	deliver(m, cmd)
+	if want := (SaveRequest{Ref: "tk-g1", Subject: "tk-a", From: "tk-a", Question: "is the wording right?"}); len(f.saves) != 1 || f.saves[0] != want {
+		t.Fatalf("the gate chosen: saves %+v, want %+v", f.saves, want)
+	}
+
+	f = &fakeHelm{city: city, about: map[string]About{
+		"1446": {Ref: "1446", Candidates: []Candidate{{ID: "tk-a", Rig: "gc-toolkit", Title: "one"}, {ID: "hb-b", Rig: "harbor", Title: "two"}}},
+		"hb-b": subjectAbout("hb-b", "harbor"),
+	}, saveResp: Saved{Subject: "hb-b", Conversation: "hb-c", Filed: true}}
+	m = newForm(t, f, Options{})
+	loadCity(m)
+	typeText(m, "1446")
+	settle(m)
+	chooseRow(t, m, "hb-b")
+	focusOn(t, m, questionField)
+	typeText(m, "q")
+	_, cmd = m.Update(ctrl('s'))
+	deliver(m, cmd)
+	if len(f.saves) != 1 || f.saves[0] != (SaveRequest{Ref: "hb-b", Subject: "hb-b", Question: "q"}) {
+		t.Fatalf("the anchor chosen for a PR: saves %+v", f.saves)
+	}
+
+	f = &fakeHelm{
+		city:     city,
+		about:    map[string]About{"tk-new": subjectAbout("tk-new", "gc-toolkit")},
+		saveResp: Saved{Subject: "tk-new"},
+		saveErr:  &Refusal{Code: 4, Why: "gc-helm: open: subject tk-new was filed, but its conversation was not"},
+	}
+	m = newForm(t, f, Options{Rig: "gc-toolkit"})
+	loadCity(m)
+	typeText(m, "the question")
+	_, cmd = m.Update(ctrl('s'))
+	deliver(m, cmd)
+	f.saveResp, f.saveErr = Saved{Subject: "tk-new", Conversation: "tk-c", Filed: true}, nil
+	_, cmd = m.Update(ctrl('s'))
+	deliver(m, cmd)
+	if len(f.saves) != 2 || f.saves[1] != (SaveRequest{Ref: "tk-new", Subject: "tk-new", Question: "the question"}) {
+		t.Fatalf("the subject a save filed: saves %+v", f.saves)
+	}
+
+	f = &fakeHelm{city: city, about: map[string]About{"tk-new": subjectAbout("tk-new", "gc-toolkit")}, saveResp: Saved{Subject: "tk-new", Conversation: "tk-c", Filed: true}}
+	m = newForm(t, f, Options{Subject: "tk-new"})
+	deliver(m, m.Init())
+	typeText(m, "q")
+	_, cmd = m.Update(ctrl('s'))
+	deliver(m, cmd)
+	if len(f.saves) != 1 || f.saves[0] != (SaveRequest{Ref: "tk-new", Subject: "tk-new", Question: "q"}) {
+		t.Fatalf("the command line's subject: saves %+v", f.saves)
 	}
 }
 

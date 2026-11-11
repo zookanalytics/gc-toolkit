@@ -193,9 +193,10 @@ Each entry is also a command of its own, for a script or a shortcut: `gc-helm
 po`, `gc-helm mechanik`, `gc-helm engage` and `gc-helm attach`. Esc on the start
 or the return screen goes back to the page, and Esc on the page leaves it. An
 entry that hands the terminal to a session, the po's, mechanik's or a
-conversation's sitting, leaves the page once the terminal comes back, as the
-form does after an attach. A bare `gc-helm` without a terminal prints its usage
-and exits 2, so no script blocks on a page.
+conversation's sitting, leaves the page and then runs, as the form's attach
+does, so all it prints stays on the terminal and its exit status is the page's.
+A bare `gc-helm` without a terminal prints its usage and exits 2, so no script
+blocks on a page.
 
 ## How a conversation starts
 
@@ -278,7 +279,9 @@ these steps:
    a conversation already, because a distinct concern is a distinct dialogue.
 4. **Without one, it attaches first.** A conversation a live session holds is
    a live sitting, and engage attaches the operator to it rather than starting
-   a second. Otherwise it takes the bead's conversation from the queue, or one
+   a second. A session the list shows with no state is live, since Gas City's
+   own wait for a new session reads it as a create still under way. Otherwise
+   it takes the bead's conversation from the queue, or one
    whose sitting's session has closed, or files a new one. Pointed at a gate,
    engage makes the conversation it landed on reply to the gate before it
    starts or attaches anything, and a reply the store refuses starts nothing.
@@ -287,7 +290,16 @@ these steps:
    prefix `c-` when the runtime refuses the bare id as an alias. A session
    still holding that alias that no longer holds the task, as a sitting cut
    short leaves it, is closed first once it is older than the bind wait and
-   unattached.
+   unattached, and the session whose alias the task is bound to is never
+   closed. A spawn the runtime refuses because a session holds the alias spawns
+   nothing. A task bound to that alias is that session's, since the session's
+   claim runs as its alias, even while the session list does not show the
+   session: a sitting another engage started seconds before can be missing
+   from a list the supervisor answers from its read cache. Engage attaches the
+   operator to that session as to a live sitting, and finds it by its alias
+   until the list names it. A task bound to no such alias is waited on for the
+   bind of the engage that holds the alias, and the session is named as left
+   over only when no bind comes within the bind wait.
 6. **It binds the task to the session's alias** with
    `gc bd update <task> --if-assignee <holder> --if-status <status> --assignee
    <alias>`, where the holder and the status are the ones engage read, or the
@@ -333,31 +345,74 @@ on the bead answers no gate until it replies to one.
 **On a terminal, engage opens the conversation form.** An engage whose
 command line names no concern (`--reason`, `--template` or `--skill`) and not
 `--no-input` hands the terminal to helm-svc's `form` command
-(`services/helm/internal/form`). One screen holds, in this order, the subject
-(a bead id, a PR number or URL, or empty for a new topic), a multiline
-question, in which Enter adds a line, a new topic's rig, the model, with opus
-shown as the default, and whether to attach once the sitting starts, which is
-on unless `--no-attach` is given. Tab moves through the fields in that order,
-so the question is one Tab after the subject, and the form opens on the
-question when the command line names the subject or a new topic's rig. A tab in
-the question stays a tab, shown as ␉, and a line break written as
+(`services/helm/internal/form`). One screen holds, in this order, the subject,
+a multiline question, in which Enter adds a line, the model, shown with each
+word of its name capitalized and Claude-Opus as the default, and whether to
+attach once the sitting starts, which is on unless `--no-attach` is given. The
+subject is a bead id, a PR number or URL, or a rig's whole name or prefix, such
+as `gc-toolkit` or `tk`, matched ignoring case and the spaces around it, which
+starts a new topic in that rig. Part of a name names no rig, and the form
+completes none. Only text the operator types in the subject is matched to a
+rig. The subject the command line names is a reference, as the flag-driven
+engage reads it, and so is a bead the form puts there, such as a gate chosen
+from what holds a subject, so each is looked up even when a rig carries the
+same name. `--rig` fills in the subject with the rig's name, which names the
+rig of exactly that name, as `open --new-subject --rig` does, until the
+operator edits it. A line under the subject shows the rig it names, or a
+bead's own rig, and is not a field. Tab moves through the fields in that
+order, so the question is one Tab after the subject, and wraps around at
+either end. ↑ and ↓ move between the fields once the cursor is on a field's
+first or last row, with the question's rows counted as the screen shows them,
+and stop at the first and last field. The form opens on the question when the
+command line names the subject or a new topic's rig. A tab in the question
+stays a tab, shown as ␉, and a line break written as
 LF, CR or CRLF is one line break. The field leaves out every other control
 character, such as BEL or ESC, and U+FFFD, the replacement character. It leaves
 out U+FDD0 as well, since inside the field that noncharacter stands for a tab.
 The command line fills in the fields, and typing never waits for a read.
-A `--model` that no configured variant carries is refused before the form
+A `--model` that names no variant engage offers is refused before the form
 opens, as the flag-driven engage refuses it.
 While the operator types, the form reads `gc-helm.sh conversations` for the
 subject: the bead it resolves to, the rig a conversation about it is held in,
 whether a sitting can start there, its open conversations and what holds it.
-It reads the city's rigs for a new topic. The screen shows where a submit would
-file before it does: a conversation on the subject in its own rig, or a new
-subject in the rig the operator chose. A new topic has no rig until the
-operator picks one, and a PR number that several live anchors record waits
-for the operator to pick the anchor. A result read for an earlier subject never
-stands in for the current one, and no result changes a rig or a conversation
-the operator chose. A conversation chosen from the list is started as it is,
-and a question typed beside it is not sent into it.
+It reads the city's rigs with each one's prefix, so a rig's name or prefix
+typed as the subject is known as the rig and is not looked up as a bead. A
+rig's name wins over a bead of the same id, so typed text settles only once
+the rigs are read: until then the screen marks where it would file as still
+being checked, whatever its lookup answered, and Ctrl+S files nothing. When
+the rigs did not read, Ctrl+S reads them again. The screen shows where a
+submit would file before it does: a conversation on the subject in its own
+rig, or a new subject in the rig the subject names. A name or prefix that more
+than one rig carries names none of them, and a PR number that several live
+anchors record waits for the operator to pick the anchor. A result read for an
+earlier subject never stands in for the current one, and no result changes a
+conversation the operator chose. A conversation chosen from the list is
+started as it is, and a question typed beside it is not sent into it.
+
+**A suspended rig turns attaching off.** Gas City starts no session for an
+agent in a suspended rig, so no sitting can start there. In a suspended rig,
+whether the subject names it or it is a bead's own rig, the destination is
+still settled, Attach reads no with the reason beside it, and no key turns it
+on. Ctrl+S saves the question and leaves, starting no sitting, and the form
+says the conversation waits in the operator's queue until the rig resumes
+(`gc rig resume <rig>`). An open conversation chosen there is not started:
+Ctrl+S reads the subject again, keeping the conversation chosen, and once a
+read finds the rig resumed, the next Ctrl+S starts it. Once the subject names
+a rig that is not suspended, attaching is the operator's own choice again.
+`conversations <ref>` says a subject's rig is suspended as `rig_suspended`,
+which refuses nothing, and engage on the command line still refuses to start a
+sitting in a suspended rig.
+
+**The variants are the converse templates engage offers.** Each is an
+`agents/converse-*` template named `converse-<provider>-<model>`, and the name
+after `converse-` is what `--model` takes and what the form shows capitalized:
+`claude-opus` (the default), `claude-fable`, `codex-sol` and `codex-astra` read
+Claude-Opus, Claude-Fable, Codex-Sol and Codex-Astra. engage withdraws
+`converse-opus`, `converse-fable` and `converse-codex`: it offers none of them,
+and each stays configured only for the sittings already open on it. Gas City's
+reconciler wakes no session whose template is not configured, drains one that
+holds no work, and closes one whose process is gone, releasing the conversation
+it held, so a template goes only once no open sitting runs on it.
 
 Ctrl+S saves the question only once the destination is settled. `open` files
 it as a new conversation (`--allow-duplicate` and `--if-subject` on a subject,
@@ -373,9 +428,12 @@ with `--from` naming the bead it was listed under, so `open` takes that bead
 among several waiting and files nothing once it has stopped waiting on the
 gate. Then `engage
 <conversation> --no-input --no-attach` starts the sitting. Once it has started,
-the form attaches the terminal to it through `engage <conversation>
---no-input`, which waits for the session to start, as engage does on the command
-line. With attaching off, the form leaves the sitting to prepare, and says that
+the form leaves the terminal, and then attaches it to the sitting through
+`engage <conversation> --no-input`, which waits for the session to start, as
+engage does on the command line. The attach runs after the form's last screen,
+so all that engage prints stays on the terminal, its reason when it attaches
+nothing included, and the form exits with engage's status. With attaching off,
+the form leaves the sitting to prepare, and says that
 the conversation is saved and how to return to it. An attach holds a
 conversation no live sitting holds, as after a start that failed or a sitting
 that ended before the attach reached it, in a new sitting on the model the
@@ -409,7 +467,7 @@ and a save killed once its subject was filed still names the subject, because
 `open` answers it the moment it is filed. A subject whose create landed but
 whose reply was lost is one the form never learns, and a retry after that files
 a second subject. A save refused because a read failed,
-or because of a refusal that can change, such as a suspended rig, reads it again
+or because of a refusal that can change, such as a downed controller, reads it again
 for the next Ctrl+S. A question the form did not save is kept in a file under
 `GC_HELM_DRAFT_DIR` (else `$XDG_STATE_HOME/gc/engage-drafts`, else
 `~/.local/state/gc/engage-drafts`) when it closes, and before the terminal goes
@@ -732,6 +790,24 @@ As it goes, it records the rework or the retirement, the ruling once the gates
 carry it, and the recommendation taken on the conversation, each a comment in
 plain words, which that comment lists as the visit's actions.
 
+A ruling that leaves the subject waiting on work the sitting sent also gets the
+subject checked once that work lands. Right after the headline, whose
+`--waiting-on` edges hold the subject until the work closes, the sign-off
+appends the sitting's `--close-brief` to the subject's notes and arms the
+subject's validating closer (`mol-validate-close`) in the subject's own rig,
+the waits skill's way of having a bead checked and closed once other work
+lands. A subject held for placement then has its `hold:mayor` lifted, every
+spelling of it, because the deferred-dispatch pass sends no arm while that
+label holds the subject. Each of these writes lands before any gate is
+answered, and one that does not land stops the sign-off. Once the work closes,
+the deferred-dispatch pass slings the closer, which checks the brief against
+what landed and closes the subject or puts it to the operator. No closer is
+armed for a subject that something else sends on once its wait clears: its own
+arm, a route or an assignee, the recommendation the ruling takes, or the
+refinery's merge or its members, for an anchor or an epic. A subject in the
+city's own store is refused, because no pool runs a closer there, so a person
+closes it on a human gate that names the work.
+
 It resolves no gate its conversation does not reply to: a gate the sitting
 never took up stays for whoever owes it, and a gate it replies to that the
 ruling leaves owed stays open with its reply in place. It reads those gates
@@ -916,7 +992,9 @@ rule those scripts already apply: a `blocks` blocker, which
 and a `tracks` target reaches its own. A parked subject whose routed work has
 all landed therefore returns as an ordinary unnamed wait in the sweep's batch
 gate on the rig's triage subject, and the takeaway is never cleared: it is the
-record of what the sitting concluded.
+record of what the sitting concluded. A subject a sitting's ruling leaves
+waiting on work comes back through the validating closer the sign-off arms
+instead ([The sitting](#the-sitting)), which checks it once that work lands.
 
 **Routed work is wider than the board's disposition-due.** The board derives
 "blocker landed — dispose or resume" from the `blocks` edges

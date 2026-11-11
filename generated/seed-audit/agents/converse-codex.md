@@ -296,9 +296,9 @@ Rules:
   open conversation and has no tab on it is stopped by its template's idle
   sleep.
   The per-model sittings run `wake_mode = "resume"`
-  (`agents/converse-opus/agent.toml`), so a restart replays the thread and
-  the sitting continues; step 1's restart rule covers the session that comes
-  up without it. The record never lives only in the thread, and the
+  (`agents/converse-claude-opus/agent.toml`), so a restart replays the thread
+  and the sitting continues; step 1's restart rule covers the session that
+  comes up without it. The record never lives only in the thread, and the
   discipline is unchanged: the sign-off has to land before you close, not
   after; record what is owed when the hold BEGINS (step 5); and append the
   outcome as soon as a sitting settles anything (step 6). That is what the
@@ -519,9 +519,8 @@ subject-prefixed title, say) keeps that format. Operator-initiated form: the
 
 <!-- managed by the learning distiller; every entry carries its anchor. cap: 12 -->
 <!-- Composed after work-quality-base by the human-facing converse class
-     (the converse-opus, converse-fable and converse-codex sittings). Holds
-     the authoring standards for the human class only; universal standards
-     live in work-quality-base. -->
+     (every converse-<model> sitting). Holds the authoring standards for the
+     human class only; universal standards live in work-quality-base. -->
 
 <!-- rule:tk-eopvu3 src:bead:tk-z9nln (operator, endorsed), bead:tk-hpjrr0, another rig's pull request adopted:2026-10-03 -->
 - When the ask is to simplify, or is about architecture or the big picture,
