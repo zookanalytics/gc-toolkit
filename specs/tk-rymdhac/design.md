@@ -93,6 +93,10 @@ Whatever the ruling, a sitting never:
 
 - holds more than one change in flight per conversation, so a second waits
   until the first is handed off or dropped;
+- changes a repository other than its own rig's, the rig its conversation is
+  filed in. The hold (section 2) is a `blocks` edge, which holds only between
+  two beads in one store (the waits skill), so a change to another rig's
+  repository is sent to that rig's pool;
 - edits in its home, whose start syncs it to the default branch and refuses a
   start that finds an edit or a commit there (`sync_worktree` in
   `assets/scripts/worktree-setup.sh`);
@@ -119,13 +123,14 @@ ways, and each write's exit decides whether it landed:
 ## 2. Where the change lives
 
 **Which bead is the change.** When the subject is itself work the line covers,
-not built, not routed and with no live run, the subject is the change's bead.
-Otherwise the sitting files the bead as it files work for a pool (the work
-skill, "File new work"), in the store of the rig whose repository it changes,
-with its target in the create: the default branch, or the integration branch of
-an effort the change belongs to. It carries no route and no `hold:mayor`,
-because the operator routed it in the sitting. The subject waits on it as it
-waits on any work a sitting sends (the waits skill).
+and no pool, live run or refinery holds it, the subject is the change's bead. A
+change an earlier sitting left in flight is such a subject (below). Otherwise
+the sitting files the bead as it files work for a pool (the work skill, "File
+new work"), in its own rig's store, since section 1 keeps a sitting's changes to
+its own rig's repository, with its target in the create: the default branch,
+or the integration branch of an effort the change belongs to. It carries no
+route and no `hold:mayor`, because the operator routed it in the sitting. The
+subject waits on it as it waits on any work a sitting sends (the waits skill).
 
 **The tree.** Work's setup cuts the tree at `<the sitting's home>/worktrees/<bead>`,
 on the bead's branch cut fresh from its target, and records `work_dir` and
@@ -181,8 +186,10 @@ close ends its effect, so nothing else writes a release.
   makes a fresh tree from origin's branch.
 - When the operator drops a change, the sitting closes its bead through the
   disposition writer as not needed, with the conversation as the evidence, and
-  then removes the tree and its local branch with git. The edit skill gives the
-  commands.
+  then removes the tree and its local branch with git. Naming the conversation
+  is also what lets the close land: bd refuses to close a bead that an open bead
+  blocks, and the writer gives a `blocks` edge onto the bead it names way to its
+  own edge (`bead-rehome.sh`). The edit skill gives the commands.
 - A tree whose sitting ended before either is left on its branch, and Gas City's
   reaper removes it once its bead closes, as it does a polecat's
   (`auto_reap_closed_bead_worktrees`).
@@ -235,23 +242,28 @@ So both writers take `--held-by <conversation>` beside `--bead`:
   the anchor's summary and title, the three hand-off writes, the refinery's wake,
   and the removal of the tree with its local branch.
 
+The hand-off removes the tree from under the sitting's home, so the edit skill
+runs it in a subshell that enters the tree, and the sitting's own shell stays in
+its home.
+
 So the polecat's submit and the sitting's hand-off are one writer, as the
 sitting proposed, and a fix to either is a fix to both. The sitting never brings
 its branch current: the refinery's prep merges the target in, and a conflict
 goes back to the pool (section 4). That keeps the bring-current guard, which the
 deletion plan retires, a no-op on a sitting's branch.
 
-**Commits, signatures and the push.** The tree is a worktree of the rig's clone,
-so its commits are signed with the key the clone's own config names, as a
-polecat's are, and the sitting commits with no identity flags. gc-toolkit's
-rules require verified signatures on its work branches and on `main` (read
-2026-11-11), so an unsigned commit is refused at the push, and the hand-off
-reports the refused push. To find a missing key at the first commit rather than
-at the hand-off, the edit skill has the sitting read the first commit's
-signature status (`git log -1 --format=%G?` reads `G`). A new change's branch heads no PR, so
-the hand-off's plain push and its check of origin's ref are the whole push, and
-the merge member's publication, which a push onto a PR's branch will need, does
-not apply to it.
+**Commits, signatures and the push.** The sitting's commits are signed by its
+session's own git configuration, as a polecat's are: each agent home's
+`.gitconfig` turns signing on and names the key and the identity, and the rig's
+clone sets none of them (read 2026-11-11). So the sitting commits with no
+identity flags. gc-toolkit's rules require verified signatures on every branch,
+`main` included (read 2026-11-11), so an unsigned commit is refused at the
+push, and the hand-off reports the refused push. To find a missing key at the
+first commit rather than at the hand-off, the edit skill has the sitting read
+the first commit's signature status (`git log -1 --format=%G?` reads `G`). A
+new change's branch heads no PR, so the hand-off's plain push and its check of
+origin's ref are the whole push, and the merge member's publication, which a
+push onto a PR's branch will need, does not apply to it.
 
 **The summary and the title.** The sitting writes the PR's summary, because it
 holds the rulings, to the standard a polecat's submit writes it to, and it
@@ -444,6 +456,16 @@ before where the table says so.
   ends each refusal with `gc runtime drain-ack` or a gate and a cancel
   (`work_stop_with_gate`), and removes the tree with its local branch after the
   hand-off (`release_tree`).
+- **One store per edge.** A `blocks` edge holds only between two beads in one
+  store, and a link across two stores prints success and holds nothing
+  (`skills/waits/SKILL.md`). A conversation is filed in its subject's rig
+  (`docs/human-engagement.md`, Engage). Gas City's reaper lists a rig's trees
+  from the rig's own repository and acts only on those under
+  `.gc/worktrees/<rig>/` (`reapClosedBeadWorktrees`), so it would never reap a
+  tree of another rig's repository under a sitting's home either.
+- **The disposition writer** gives a `blocks` edge onto the bead it names way
+  to its own edge just before the close, because bd refuses to close a bead
+  that an open bead blocks (`bead-rehome.sh`).
 - **The refinery's strategy.** `merge-strategy-resolve` in
   `formulas/mol-refinery-patrol.toml` turns a direct strategy on a bead whose
   target is the rig's default branch into the PR pipeline.

@@ -71,9 +71,12 @@ routing, is the line's own (design, section 1).
   the operator engages on a conversation, and its change is held off every
   pool's offer, so there is nothing for that path to route.
 - **The reapers.** `auto_reap_closed_bead_worktrees` removes a per-bead
-  worktree under the city's `.gc/worktrees/` once its bead closes, when the
-  tree is clean and removing it orphans no commit (`docs/reference/config.md`,
-  line 377; `reapClosedBeadWorktrees` in `cmd/gc/bead_worktree_reaper.go`).
+  worktree once its bead closes, when the tree is clean and removing it orphans
+  no commit (`docs/reference/config.md`, line 377). It lists a rig's trees from
+  the rig's own repository, acts only on those under `.gc/worktrees/<rig>/` at
+  any depth, and names a tree's bead by its directory
+  (`reapClosedBeadWorktrees` in `cmd/gc/bead_worktree_reaper.go`), so it finds
+  a tree under a sitting's home as it finds one under a polecat's.
   `auto_prune_worker_dir` removes a pool session's worker dir once its session
   closes (`docs/reference/config.md`, line 382), and a sitting is not a pool
   session.
@@ -133,9 +136,9 @@ the pack's.
   origin of its own.
 - **Publication.** A service's `publication` declares its visibility and a
   hostname label, and "the platform decides whether and how that intent
-  becomes a public route" (`docs/reference/config.md`,
-  ServicePublicationConfig, line 863). It applies to declared services, not to
-  a process a sitting starts.
+  becomes a public route" (`docs/reference/config.md`, Service's
+  `publication` at line 850, and ServicePublicationConfig at line 863). It
+  applies to declared services, not to a process a sitting starts.
 - **Session runtimes and images.** Gas City runs sessions in pods, over SSH or
   in an exec sandbox, a runtime "selected city-wide via the `[session]` block"
   (`docs/guides/configuring-an-agent.md`, "Axis 5 — Runtime", lines 285-299),
