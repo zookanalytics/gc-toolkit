@@ -1,6 +1,6 @@
 ---
 name: Architecture — how gc-toolkit composes Gas City to deliver its beliefs
-description: The 30,000-ft guide to gc-toolkit — the boundary between operator, runtime, pack, and GitHub; how a piece of work moves from filed to landed; what a review reads from the installed pack and what from the rig under review; how humans engage; how lessons compound; and the consistency test a new capability must pass to belong. Read it to know what the system is, to place a new capability, or to check an existing one.
+description: The 30,000-ft guide to gc-toolkit — the boundary between operator, runtime, pack, and GitHub; how a piece of work moves from filed to landed; what a review reads from the installed pack and what from the rig under review; how humans engage; how lessons compound; the consistency test a new capability must pass to belong; the decisions the architecture rests on; and the debt where what is built falls short of it. Read it to know what the system is, to place a new capability, or to check an existing one.
 ---
 
 # Architecture
@@ -16,7 +16,8 @@ declared shared primitive; nothing exists because an incident once happened.
 **Mandate.** How gc-toolkit composes Gas City's primitives to deliver
 foundation: the system boundary, how work moves end to end, what the installed
 pack supplies and what a rig supplies, how humans engage, how lessons compound,
-and the test that keeps new work grounded.
+the test that keeps new work grounded, the decisions the architecture rests on,
+and the debt where what is built falls short of it.
 
 **Boundaries.** It works at altitude. The anchor lifecycle's states, writers,
 and check mechanics are owned by [state-machine.md](state-machine.md); the merge
@@ -169,6 +170,13 @@ the effort's beads and on its summary task, which writes the PR's summary from
 the finished branch. Once they have closed, it takes steps 6 to 9 like any bead
 bound for main.
 
+A converse sitting can take steps 4 and 5 itself, on the operator's ruling in
+the sitting, for a change whose next step is the operator's reaction. It edits
+the change with them in a per-bead tree of its own, its conversation holds the
+bead through a `blocks` edge while it does, and it hands the change off through
+the same writer a polecat's submit runs, so the change takes every step after
+the hand-off as a polecat's does.
+
 External facts the pack does not write — GitHub closing or retargeting a PR, a
 session dying, a provider quota park, a `gc` build that moves the text the seed
 audit renders — are handled by these reactive paths: `pr-facts.sh` (an arm of
@@ -194,7 +202,9 @@ fast-forwarded to `main`
 ([pack-authoring.md](pack-authoring.md#a-landed-pack-change-is-confirmed-on-the-deployed-checkout)).
 The pack supplies how work is done, such as its formulas, scripts, skills and
 agent prompts. A rig supplies the repository the work changes, along with any
-review guidance the rig keeps in it.
+review guidance the rig keeps in it. Its demo guidance also names how to serve
+its UI from a worktree on fixture data, which is how a sitting runs a copy of
+that UI with the operator, and a rig whose guidance names none offers no copy.
 
 gc-toolkit is a rig as well. A rule that binds only work on its own repository
 is the rig's, so it lives in the root [`AGENTS.md`](../AGENTS.md), which every
@@ -314,7 +324,8 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   it blocks.
 - **A conversation is a task about one subject.** It tracks its subject,
   replies to each human gate it answers through bd's `replies-to` edge, and
-  blocks nothing but an open PR's anchor, whose merge it holds until it closes.
+  blocks nothing but an open PR's anchor, whose merge it holds until it closes,
+  and the change its sitting makes, which it holds until the hand-off.
   It waits in the operator's queue, assigned to `human`, until
   the operator engages it. `gc-helm.sh open` files one, and so do the
   operator's intake, `operator-intake.sh`, and a caller asking about a bead with
@@ -324,8 +335,10 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   conversation with a plain `gc hook --claim`, holds for the operator, answers
   each gate the operator rules on through its conversation's reply, and signs
   off by resolving those gates and closing the conversation, which ends its
-  session. A sitting cut short hands the conversation back to the queue, and
-  the next engagement resumes it from the record.
+  session. On the operator's ruling it also makes a change with them and hands
+  it off ([How work moves](#how-work-moves)). A sitting cut short hands the
+  conversation back to the queue, and the next engagement resumes it, and any
+  change in flight, from the record.
 - **A takeaway records what a sitting concluded**, and its `--waiting-on` edge
   is what makes the wait machine-answerable
   ([lifecycle-composition.md](lifecycle-composition.md)).
@@ -405,3 +418,30 @@ one of two ways: the capability is miscast and should be recast onto the
 primitives, or the model must move deliberately — and because architecture
 derives from foundation, sometimes the belief upstream is what has to move
 first. Either way the change is a decision on the record, not a drift.
+
+## Decisions
+
+- **A converse sitting changes a repository only on the operator's ruling in
+  that sitting,** and only a change whose next step is their reaction, such as
+  a document's wording, a screen's look or a small fix agreed there. Work whose
+  spec can be written down goes to a pool.
+- **A sitting's change takes the pipeline a polecat's work takes:** the same
+  hand-off writer, the refinery's gate, the review checks, CI and the
+  operator's approval. The sitting is not one of its checks.
+- **A copy of a rig's UI runs on fixture data at an origin of its own,** never
+  under the supervisor's, because the board's page reads the live city from
+  the origin it is served on. The operator sees it as a page the city
+  publishes on that origin, through commands the city sets, and as screenshots
+  where the city sets none.
+
+## Debt
+
+- **A sitting cannot change a repository yet.** Its prompt says it never does,
+  and Work's writers serve only a run, so no sitting that runs today works as
+  the decisions above describe. The effort that lets a sitting edit a change
+  (tk-bvw8j5t) retires it through its implementation (tk-rbasce7).
+- **A sitting does not edit an open PR's branch.** A ruling on an open PR still
+  files a rework a polecat runs, because the branch's one writer is the rework
+  child the review machinery keys on. A unit that waits on the review-lanes
+  member (tk-1tfzr71.22) and the merge member (tk-1tfzr71.20) retires it, and
+  that effort's implementation files the unit.
