@@ -1,4 +1,5 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import golden from '../../../internal/rigboard/testdata/gc-toolkit.board.json';
 import { Page } from './Board';
@@ -116,6 +117,29 @@ describe('the address', () => {
     expect(link.getAttribute('href')).toBe('?rig=gc-toolkit');
     expect(screen.getByRole('link', { name: 'example-rig' }).getAttribute('href')).toBe('?rig=example-rig');
     expect(calls.map((c) => c.url)).toEqual(['helm/rigs']);
+  });
+
+  // StrictMode mounts the list, leaves it and mounts it again, as a dev build
+  // does, and the read the first mount dropped is no failure of the service.
+  it('says nothing of a rig list read it dropped on leaving', async () => {
+    window.history.replaceState({}, '', '/');
+    vi.stubGlobal(
+      'fetch',
+      (_input: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new DOMException('The read was dropped.', 'AbortError')));
+        }),
+    );
+    render(
+      <StrictMode>
+        <Page />
+      </StrictMode>,
+    );
+    await screen.findByText("Reading the city's rigs…");
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('reads the rig the address names, and only that rig', async () => {

@@ -18,8 +18,6 @@ export interface RigDocumentState {
   last?: RigResponse;
   /** The latest read's failure. The next read that gives a document clears it. */
   failure?: Failure;
-  /** True until the first read answers. */
-  loading: boolean;
 }
 
 /**
@@ -29,7 +27,7 @@ export interface RigDocumentState {
  * failed. The returned refresh reads again at once, as after a write.
  */
 export function useRigDocument(rig: string): [RigDocumentState, () => void] {
-  const [state, setState] = useState<RigDocumentState>({ loading: true });
+  const [state, setState] = useState<RigDocumentState>({});
   const inFlight = useRef<AbortController | null>(null);
 
   const load = useCallback(
@@ -48,7 +46,7 @@ export function useRigDocument(rig: string): [RigDocumentState, () => void] {
       }, READ_TIMEOUT_MS);
       readRig(rig, ctl.signal)
         .then((doc) => {
-          if (inFlight.current === ctl) setState({ last: doc, loading: false });
+          if (inFlight.current === ctl) setState({ last: doc });
         })
         .catch((cause: unknown) => {
           // A read a newer one replaced reports nothing.
@@ -58,7 +56,7 @@ export function useRigDocument(rig: string): [RigDocumentState, () => void] {
             : cause instanceof Error
               ? cause.message
               : String(cause);
-          setState((prev) => ({ last: prev.last, failure: { message, at: new Date() }, loading: false }));
+          setState((prev) => ({ last: prev.last, failure: { message, at: new Date() } }));
         })
         .finally(() => {
           window.clearTimeout(timer);

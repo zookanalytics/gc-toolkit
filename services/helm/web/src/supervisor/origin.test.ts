@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cityUrl, parseMountPath, resolveSupervisorOrigin } from './origin';
+import { parseMountPath, resolveSupervisorOrigin } from './origin';
 
 // The page's supervisor read hangs off this parse: get the city wrong and every
 // request addresses the wrong city; get the origin wrong and the CSP
@@ -78,20 +78,5 @@ describe('resolveSupervisorOrigin', () => {
         pathname: '/v0/city/mycity/svc/helm/',
       }),
     ).toEqual({ baseUrl: 'http://127.0.0.1:8372', city: 'mycity' });
-  });
-});
-
-describe('cityUrl', () => {
-  it('builds a city-scoped supervisor url', () => {
-    const origin = { baseUrl: 'https://gc-host.tail1234.ts.net', city: 'mycity' };
-    expect(cityUrl(origin, '/events/stream')).toBe(
-      'https://gc-host.tail1234.ts.net/v0/city/mycity/events/stream',
-    );
-  });
-
-  it('escapes a city name that needs it', () => {
-    expect(cityUrl({ baseUrl: '', city: 'my city' }, '/pending')).toBe(
-      '/v0/city/my%20city/pending',
-    );
   });
 });

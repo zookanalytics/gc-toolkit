@@ -114,8 +114,3 @@ export function resolveSupervisorOrigin(location: LocationLike): SupervisorOrigi
   }
   return null;
 }
-
-/** Absolute-on-this-origin URL for a city-scoped supervisor path. */
-export function cityUrl(origin: SupervisorOrigin, path: string): string {
-  return `${origin.baseUrl}/v0/city/${encodeURIComponent(origin.city)}${path}`;
-}

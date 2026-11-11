@@ -42,15 +42,23 @@ function RigList() {
   useEffect(() => {
     document.title = 'helm';
     const ctl = new AbortController();
-    const timer = window.setTimeout(() => ctl.abort(), READ_TIMEOUT_MS);
+    let timedOut = false;
+    const timer = window.setTimeout(() => {
+      timedOut = true;
+      ctl.abort();
+    }, READ_TIMEOUT_MS);
     readRigs(ctl.signal)
       .then((r) => setState({ rigs: r.rigs }))
       .catch((cause: unknown) => {
-        if (ctl.signal.aborted) {
-          setState({ failure: 'the board service did not answer within a minute' });
-          return;
-        }
-        setState({ failure: cause instanceof Error ? cause.message : String(cause) });
+        // A read the page dropped on leaving reports nothing.
+        if (ctl.signal.aborted && !timedOut) return;
+        setState({
+          failure: timedOut
+            ? 'the board service did not answer within a minute'
+            : cause instanceof Error
+              ? cause.message
+              : String(cause),
+        });
       })
       .finally(() => window.clearTimeout(timer));
     return () => {
