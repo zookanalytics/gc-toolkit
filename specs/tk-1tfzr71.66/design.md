@@ -32,15 +32,19 @@ and on an integration branch only the pack's rule does.
 Approving this design sets one contract for every PR the city opens, into the
 default branch or an integration branch alike, and for every push onto such a
 PR, yours included. A PR the city did not open, such as Dependabot's, a
-person's or one from a fork, stays outside it. You approve the PR. The city
-finishes the fixes and checks still owed, then merges it, and you press no
-Merge. GitHub's rules still apply wherever a branch has them, and a branch
-without an approval rule still needs your approval. You may approve through
-the city's account (zook-bot) wherever GitHub accepts that review. GitHub
-refuses an approval from a PR's own author, and the city's account opens every
-PR the city files. Your approval carries across ordinary rework. When triage
-reads a new head as a material change, the city dismisses the earlier approval,
-and the PR waits until GitHub shows it dismissed and you approve again.
+person's or one from a fork, stays outside it. The city knows its PRs by the
+account that opened them. When another account has already opened a PR from a
+work's branch, the city takes neither that PR nor a second one, and asks you,
+through a gate, to close that PR or stand the work down. You approve the PR.
+The city finishes the fixes and checks still owed, then merges it, and you
+press no Merge. GitHub's rules still apply wherever a branch has them, and a
+branch without an approval rule still needs your approval. The city bars no
+account from approving, its own (zook-bot) included, but GitHub refuses an
+approval from a PR's own author, and the city's account opens every PR in this
+contract, so your approval comes from another account. Your approval carries
+across ordinary rework. When triage reads a new head as a material change, the
+city dismisses the earlier approval, and the PR waits until GitHub shows it
+dismissed and you approve again.
 
 The work's bead stays open from the moment its PR is published until the merge
 is verified on the target, on the record Gas Town's refinery keeps for the same
@@ -126,6 +130,19 @@ cutover beads and the retirement bead that land after the effort does.
    target and the head the refinery validated (section 6). For a rework child,
    the record it writes is its anchor's, and it then closes the child as landed
    on its anchor's branch.
+
+   The step takes a PR, one the bead records or one it finds open on the
+   branch, only when the city's account opened it: the PR's author is the login
+   the city's `gh` acts as (`pr-post.sh acting-login`), matched exactly, the
+   test `pr-open.sh` already uses to tell its own drafts. A PR that another
+   account opened stays outside the contract. The step edits nothing on it,
+   pushes nothing, opens no second PR, and parks the bead behind a human gate
+   that names the PR (section 6). The person closes that PR, and the refinery
+   opens the city's own once the gate clears, or the person stands the work
+   down. A step that cannot read the PR's author or the city's login takes no
+   PR and tries again on its next pass. GitHub changes no PR's author once the
+   PR is open (`updatePullRequest` takes none), so a record, which names only a
+   PR the city's account opened, needs no later check of it.
 7. The review lanes run on the draft, and the PR turns ready for review once
    the lanes before that phase pass.
 8. The landing order runs `gctk pr reconcile` on a cooldown. Each run takes the
@@ -173,6 +190,7 @@ Each remaining difference names its reason and what ends it:
 | Where a person must act, the pack files a human gate on the bead, keyed by the case: the refinery's park, and each exception the landing order finds (section 6). Gas Town routes the bead to `human` and mails the mayor, and its reconcile blocks the bead and mails the mayor. | A person's wait is a human gate on the bead it blocks (the dispatch design). The seat that tk-rl8gz4b.28 adds in the mayor's place, the po, owns only what a ruling gives it, and that effort's design keeps the same difference for the witness. | An operator ruling gives the po escalation handling. |
 | The PR opens as a draft. Gas Town opens it ready. | The city's checks run on the PR before it asks you. | No end is planned. |
 | The city merges the PR: the landing order asks GitHub to merge the head the refinery validated, once the evaluator finds the PR ready. Gas Town never merges, and a person does. | You approve, and the city lands the PR, on every target (the ruling of 2026-11-11). | No end is planned. |
+| The `mr` step takes a PR only when the city's account opened it, and parks the bead behind a gate when another account opened the PR on its branch. Gas Town's merge-push takes the PR that `gh pr view <branch>` returns when `gh pr create` fails, and checks the PR's state, branch, head, base and repository, never its author. | The city merges every PR it takes, and its contract covers only the PRs it opens (the ruling of 2026-11-11). Gas Town merges none, so a PR it takes still waits for a person's Merge. | No end is planned. |
 | The pack writes Gas Town's pending-through-merge record itself (`gctk pr record`, `gctk pr reconcile`), from a landing order rather than from the refinery's find-work, and its reconcile also decides readiness and requests the merge. The record then has two writers, the refinery and the order, so both verbs take the store's record lock (section 4). Gas Town main runs `gc gastown pr-merge-reconcile` once per find-work, and its witness wakes the refinery when a pending check is due, so its one refinery session makes every write. | No gastown release carries the command, and the city imports none. An order needs no agent, so a PR that waits on your approval or on its checks occupies no session. | The city takes a gastown release that carries `pr-merge-reconcile`. The record and the close then become that command, and the pack keeps the readiness check and the merge request. |
 | find-work skips a bead that something holds, or whose branch another open bead is working on, and takes a rework child before its anchor. Gas Town lists the beads assigned to the refinery, open or in progress, and reads no wait. | A bead assigned to the refinery can still wait on work that edits its branch, such as a rework child, and two writers on one branch would overwrite each other's work. | Gas Town's find-work reads waits. |
 | An already-merged branch records `merged`, at the target commit that holds it. Gas Town records `already_merged`. | Every reader that asks whether a `direct` landing happened asks one value (section 6). | No end is planned. |
@@ -221,10 +239,10 @@ takes GitHub's own eligibility:
 - An approval counts when it is the latest review that approves or requests
   changes from an account that can push to the repository, the approval GitHub
   counts toward a required review. A later review that only comments leaves it
-  standing. No account is excluded for being a bot, an app or the city's own, so
-  your approval through the city's account counts wherever GitHub accepts it,
-  which is on a PR that another account opened. No step tells an agent to
-  approve.
+  standing. No account is excluded for being a bot, an app or the city's own.
+  GitHub refuses an approval from a PR's author, though, and the city's account
+  opens every PR in the contract (section 1), so an approval through that
+  account never stands on one. No step tells an agent to approve.
 - A request for changes that is such an account's latest review of those two
   kinds holds the PR until its author approves or it is dismissed.
 - A dismissed review counts for nothing. Nothing else ends an approval: no time
@@ -235,8 +253,8 @@ Where the target's rules require an approving review, GitHub enforces its own
 count as well, and the evaluator reads GitHub's merge state too, so the
 stricter of the two holds.
 
-This departs from the ruling of 2026-10-02 in two ways. An approval through the
-city's account counts, as the ruling of 2026-11-11 asks: "I am not really
+This departs from the ruling of 2026-10-02 in two ways. The city's account is
+no longer excluded, as the ruling of 2026-11-11 asks: "I am not really
 concerned about that nor the risk that zook-bot could go rogue and approve in
 GitHub itself" (typo fixed). And a review from an account that cannot push to
 the repository counts for nothing. Today's rule counts it, and on a public
@@ -632,8 +650,11 @@ PR was published, which is what the release the city bundles writes as it
 closes the bead. `abandoned` and `retargeted` retire into the exceptions above,
 and `unanchored` into the absent key. `blocked` and `refused_false_completion`
 keep the meanings Gas Town's refinery gives them, a park for a missing target
-branch or for an `existing_pr` it cannot reuse, and a branch that carries no
-change, each with a human gate.
+branch or for a PR it cannot reuse, and a branch that carries no change, each
+with a human gate. A PR it cannot reuse is an `existing_pr` that no longer
+matches, as in Gas Town, or a PR that another account opened (section 1),
+whose gate is keyed `refinery-pr-not-city-opened` and names the PR and the
+account that opened it.
 
 **No transition machine.** The lifecycle audit, folded into the initiative's
 notes from tk-z014p6b, found that the writer checks its arguments, not the bead
@@ -798,6 +819,9 @@ It is a difference from Gas Town until the convoys member lands (section 1).
   - A run that reads a PR's old head from GitHub after the refinery has
     recorded the new one requeues the record once more, which costs one more
     validation (section 4).
+  - The city knows a PR as its own by the account that opened it (section 1),
+    so a PR that someone opens through the city's account from a work's branch
+    is taken as the city's.
 - **The pre-existing-failure scripts** stay, off the deletion plan. The work
   formula's pre-flight files a base failure's tracker through
   `preexisting-failure.sh`, and its self-review marks one through
@@ -904,7 +928,9 @@ branch, blocked by this initiative's landing and by tk-1tfzr71.22:
      with `existing_pr` and the live head as `observed_pr_head_sha`. The
      refinery validates that head and records it pending, and triage runs there
      before anything merges, because no review result of the old path names a
-     head.
+     head. `pr-open.sh` adopts a PR open on a bead's branch whoever opened it,
+     so an old-path bead can own a PR that another account opened. Its `mr`
+     step parks such a bead behind a gate instead (section 1).
    - A bead whose PR closed without merging, or whose PR no longer matches its
      record, takes the matching exception, behind a human gate.
    - A bead whose PR has merged is left to the old path's record of a merge made
@@ -922,7 +948,9 @@ branch, blocked by this initiative's landing and by tk-1tfzr71.22:
      `lifecycle.sh transition <bead> --to unanchored --expect pre_open_gate --assignee <refinery> --append-notes <old record>`.
      The refinery is then woken and nudged, as after a hand-off. Its find-work
      takes the bead, and its `mr` step adopts the PR open on the bead's branch
-     or opens one as a draft (section 1), then writes the pending record.
+     when the city's account opened it, or opens one as a draft when none is
+     open, then writes the pending record. A PR open there that another
+     account opened parks the bead behind a gate (section 1).
    - A closed bead keeps the value it closed with. `merged` stays the record of
      a landing the old path verified, and every reader takes it as landed.
 
@@ -942,7 +970,8 @@ branch, blocked by this initiative's landing and by tk-1tfzr71.22:
      `pre_open_gate`, and its record of an opened PR expects that value, so it
      never lists the bead or records a PR on it again. A PR that an earlier run
      of `pr-open.sh` opened without recording it, because the run failed after
-     `gh pr create` and left the bead parked, is the PR the `mr` step adopts.
+     `gh pr create` and left the bead parked, is the PR the `mr` step adopts,
+     because `pr-open.sh` opens a PR through the city's account.
 4. The mechanik watches the rig's first PRs through to their close.
 
 **The old path finishes** once every rig's cutover bead has closed, since each
@@ -984,8 +1013,8 @@ these, and the first rig's cutover shows them on its first PRs:
   or merged into another base keeps the bead open behind its exception's gate.
 - The evaluator reads not ready for each condition that is not met, and a
   review result for another head or target counts for nothing.
-- An approval through the city's account counts where GitHub accepted it, and
-  an approval from an account that cannot push to the repository counts for
+- An approval from the city's account counts like any other account's, and an
+  approval from an account that cannot push to the repository counts for
   nothing.
 - A material change holds the PR until GitHub shows the earlier approvals
   dismissed.
@@ -994,7 +1023,10 @@ these, and the first rig's cutover shows them on its first PRs:
 - A bead parked at `pre_open_gate` when its rig cuts over moves to the
   refinery in one write, `pr-open.sh` opens nothing for it after, and the
   refinery publishes it on the new path, on the PR already open on its branch
-  when there is one, never on a second.
+  when the city's account opened one, never on a second.
+- A PR that another account opened on a work's branch is never taken. The
+  `mr` step parks the bead behind a gate, leaves the PR as it is and opens no
+  second PR, whether the step found the PR or an old-path record named it.
 - Under load, each run reaches the records it checked least recently, and two
   runs that overlap, or a run and the refinery's record write, act on one
   record one after the other.
@@ -1012,9 +1044,9 @@ leaves the city working.
 | Unit | What it does | Waits on | Answers |
 |---|---|---|---|
 | 1. `gctk pr compose` and `gctk pr summary` | The PR's title, managed summary region and branch-beads section are composed in gctk from the bead that owns the PR, with the region read by its markers. `pr-summary-region.sh` is deleted, and `pr-open.sh` and `pr-stack.sh` call the verb. Go tests pin the output against today's renders. | nothing | tk-tefrxph; the gctk domain move note |
-| 2. The evaluator | One function of gctk's pr domain answers whether a PR is ready for its current revision, with the head and the target it judged or the conditions not met. It reads the bead's own waits through `waits`, the open beads whose `anchor_bead` names it until their writers add the edge, `merge_hold` and `rebase_hold`, the review results for the live head and target, GitHub's live facts (open, not a draft, the record's identity and base, the validated head, merge state `CLEAN`, and the approval by section 2's eligibility, read from each review's `authorCanPushToRepository`), and the feedback receipts (the watermarks, counted by the intake's own rule, and the answered marks). `prstatus` renders it, and `gctk pr status` prints the conditions not met. It reads a PR's unanswered threads when it gathers the PR's facts, so the count's one writer can retire with `gctk merge`. Tests for each condition, among them an approval through the city's account on a PR another account opened, an approval and a request for changes from an account that cannot push, an approval followed by a review that only comments, which still counts, a dismissed approval, a review result for another head and one for another base, a head other than the validated one, each merge state, a wait of the bead's own, an `anchor_bead` child, and feedback newer than a watermark beside feedback the intake's rule leaves out, which holds nothing. | nothing | sections 2 to 5 |
+| 2. The evaluator | One function of gctk's pr domain answers whether a PR is ready for its current revision, with the head and the target it judged or the conditions not met. It reads the bead's own waits through `waits`, the open beads whose `anchor_bead` names it until their writers add the edge, `merge_hold` and `rebase_hold`, the review results for the live head and target, GitHub's live facts (open, not a draft, the record's identity and base, the validated head, merge state `CLEAN`, and the approval by section 2's eligibility, read from each review's `authorCanPushToRepository`), and the feedback receipts (the watermarks, counted by the intake's own rule, and the answered marks). `prstatus` renders it, and `gctk pr status` prints the conditions not met. It reads a PR's unanswered threads when it gathers the PR's facts, so the count's one writer can retire with `gctk merge`. Tests for each condition, among them an approval from the city's account, which counts like any other account's, an approval and a request for changes from an account that cannot push, an approval followed by a review that only comments, which still counts, a dismissed approval, a review result for another head and one for another base, a head other than the validated one, each merge state, a wait of the bead's own, an `anchor_bead` child, and feedback newer than a watermark beside feedback the intake's rule leaves out, which holds nothing. | nothing | sections 2 to 5 |
 | 3. The record and the landing order | The store's record lock is built in gctk's pr domain, and both verbs take it (section 4). `gctk pr record` writes the pending record in Gas Town's two writes, holding the lock across both. `bead-rehome.sh` takes the lock too when it closes a bead that still carries `pr_reconcile_pending`, and its close clears the marker. `gctk pr reconcile` takes a bounded number of pending records, the least recently checked first, and reads each PR from GitHub by its number. An identity that no longer matches is `pull_request_reconcile_invalid`. An open PR at another head is requeued as `pull_request_head_changed`. An open PR at the validated head goes to the evaluator, and a ready one is merged with its head pinned, or added to the merge queue with it where the target requires one. A merged PR at the validated head whose merge commit is on the fetched target records `mr_merged` and closes. The other ends are the exceptions, each with its human gate, and a failed lookup or fetch is retried. A rig-scoped cooldown exec order, `pr-reconcile`, runs it. Each run handles each record under the lock, from its read of the record to its last write of it, waits for the lock while another holder has it, and acts only on a bead it reads there as carrying `pr_reconcile_pending`. Tests follow `pr-merge-reconcile`'s cases at 7f86098c04ea, and add the pack's: a ready PR merged with its head pinned; a push between the answer and the request, which GitHub refuses and the next run requeues; a request left unanswered and read again; a merge queue that takes the PR and one that drops it; a PR merged into another base; a record write that waits while a run holds the lock and lands after the run's last write; a run that waits while a record write holds the lock and then reads the whole record, so it requeues nothing the refinery has just validated; a disposition's close of a bead that carries the marker, which waits while a run holds the lock, clears the marker, and stays closed through every later run; a run still going when the watchdog closes its tracking bead and the next cooldown starts a second run, which acts on the record the first holds only once the first has written it, and from what it wrote; a run stopped at its time limit, which leaves the lock free and its unread records to the next run; and the order of records across runs under load. | unit 2 | sections 4 and 6 |
-| 4. The refinery on Gas Town's flow | `mol-refinery-patrol` is rewritten on Gas Town's steps at 7f86098c04ea, with the differences in section 1, and each step calls one tested script. The scripts cover: find-work, which skips a held bead or a branch another open bead works on, and takes a rework child before its anchor; the prep by merge in the refinery's own worktree (`refinery-workspace.sh` and its warrant go); the gate through `detached-job.sh`; the failures, through the requeue by `gc sling` or a rework child, and the pre-existing path; the direct landing; the `mr` step (compose the title and body; edit them onto a PR the bead already owns, or onto the PR open from its branch into its target, which it adopts when the bead records none, before it pushes the new head under the lease, or, when no PR is open, push and then open a new PR as a draft with them; record the PR with `opened_as_draft`, so the review lanes and `pr-open.sh`'s ready flip handle it unchanged; write the pending record with `gctk pr record`; and the old-path park while `pending_through_merge` is unset); the rework hand-back, which writes the anchor's record with `gctk pr record` and closes the child; and the integration-effort hand-off (tk-gmjtb2e), whose push takes the same lease. The refinery writes a pending record only through `gctk pr record`, so each of its record writes takes the store's record lock (section 4). The polecat's push at submit (`work-submit.sh`) and the witness's salvage push take the lease too. `rejection-repool.sh`, `pr-stack.sh` with its arm, `check-refinery-patrol-live` and the old formula's block-extraction suites go. The polecat doctrine gains the drift rule. | units 1 and 3 | tk-c8hl47c, tk-ni0i48p, tk-pdc0ovc, tk-w0hkwos; section 7 |
+| 4. The refinery on Gas Town's flow | `mol-refinery-patrol` is rewritten on Gas Town's steps at 7f86098c04ea, with the differences in section 1, and each step calls one tested script. The scripts cover: find-work, which skips a held bead or a branch another open bead works on, and takes a rework child before its anchor; the prep by merge in the refinery's own worktree (`refinery-workspace.sh` and its warrant go); the gate through `detached-job.sh`; the failures, through the requeue by `gc sling` or a rework child, and the pre-existing path; the direct landing; the `mr` step (compose the title and body; edit them onto a PR the bead already owns, or onto the PR open from its branch into its target, which it adopts when the bead records none, before it pushes the new head under the lease, or, when no PR is open, push and then open a new PR as a draft with them; take a PR, recorded or found, only when the city's account opened it, and park the bead behind a gate, with no edit, no push and no second PR, when another account opened it; record the PR with `opened_as_draft`, so the review lanes and `pr-open.sh`'s ready flip handle it unchanged; write the pending record with `gctk pr record`; and the old-path park while `pending_through_merge` is unset); the rework hand-back, which writes the anchor's record with `gctk pr record` and closes the child; and the integration-effort hand-off (tk-gmjtb2e), whose push takes the same lease. The refinery writes a pending record only through `gctk pr record`, so each of its record writes takes the store's record lock (section 4). The polecat's push at submit (`work-submit.sh`) and the witness's salvage push take the lease too. `rejection-repool.sh`, `pr-stack.sh` with its arm, `check-refinery-patrol-live` and the old formula's block-extraction suites go. The polecat doctrine gains the drift rule. The `mr` step's tests include a PR open on the branch that the city's account opened and never recorded, which it adopts; one that another account opened, which parks the bead and opens no second PR; and an old-path record of a PR that another account opened, which parks the bead the same way. | units 1 and 3 | tk-c8hl47c, tk-ni0i48p, tk-pdc0ovc, tk-w0hkwos; section 7 |
 | 5. The readers move | Every reader that takes `pull_request` as "owns an open PR" also reads `pull_request_pending` and `pull_request_head_changed` (section 6), `pr-facts.sh`'s feedback, conflict and posture arms among them, while its arms that record a merge, a close without one or a moved base keep to `pull_request`. The sign-off's headline reads `prstatus`. I5 reads every closed bead with a PR, with `mr_merged` and `merged` as landed. I2 reads the kept values. `check-one-anchor-per-pr` counts the values of an open PR. | unit 4 | section 6 |
 | 6. Docs, warrants and the plan | The pages that hold the merge's depth are rewritten to the flow as it stands once units 1 to 5 land: `refinery-merge-cadence.md`, `state-machine.md` (the record's values and their sentences, and the Checks vocabulary), `component-model.md` with both landing writers, `authority-map.md`, `design-convoy.md`'s gates, `gctk-architecture.md`'s rows and the merge section of `built-once-target.md`, which takes section 1's differences as that page holds the witness's. `architecture.md` states the target from this design's own change, with the old path under Debt. Unit 6 drops the Debt entry that units 1 to 5 retire, the refinery push that can force, and corrects any line a unit departed from. The warrants' Covers lines move off retired paths. The plan's rows move as section 8 says. | units 1 to 5 | tk-cvffk5x, with this design's change to `architecture.md`; tk-r82qrrv |
 

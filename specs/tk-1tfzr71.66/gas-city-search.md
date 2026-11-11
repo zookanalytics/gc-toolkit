@@ -229,6 +229,35 @@ What unit 4 composes: Gas Town's selection, then the bead's waits through
 `gctk bead holds` and the open beads on the branch, with a rework child taken
 before its anchor.
 
+## The PR the refinery takes (unit 4)
+
+The need: the refinery takes into the contract only a PR the city opened, so a
+PR that a person or another account opened from a work's branch is never merged
+under it, and one branch never gets a second PR.
+
+- **Gas Town's** merge-push opens the PR with `gh pr create` and, when that
+  fails, takes the PR that `gh pr view <branch>` returns
+  (`mol-refinery-patrol.toml` at 7f86098c04ea). It checks that PR's state,
+  branch, head, base and repository, and parks a bead whose `existing_pr` fails
+  those checks with `merge_result=blocked` (`block_existing_pr`). It never reads
+  the PR's author. A person merges every PR there, so a PR it takes still waits
+  for that person's Merge.
+- **Gas City's** PR monitor evaluates only the PRs whose author login matches
+  an allow-list exactly, when the monitor or `gc github pr backfill --author`
+  names one, and skips a PR whose author it cannot read
+  (`EvaluatePullRequestsWithAllowedAuthors` in `internal/githubmonitor`). It
+  records nothing on a bead, and nothing runs it on a schedule, so the
+  refinery cannot read its answer.
+- **GitHub** reports a PR's `author`, and `updatePullRequest` takes no author,
+  so the author a PR opens with is the one it keeps (the GraphQL schema, read on
+  2026-11-11).
+
+What unit 4 composes: Gas Town's adoption, with the monitor's test on the
+author: the PR's author must be the login the city's `gh` acts as, which
+`pr-post.sh acting-login` reads and `pr-open.sh` already compares a draft's
+author with. A PR that another account opened takes Gas Town's park for a PR the
+refinery cannot reuse, with a human gate in place of the mayor's mail.
+
 ## The per-rig switch (unit 4)
 
 The need: the refinery publishes onto the new record only on a rig that has
