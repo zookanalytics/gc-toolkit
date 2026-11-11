@@ -234,7 +234,8 @@ export interface GroupList {
 export interface NeedsYou {
   count: number /* int */;
   /**
-   * InConversation is every ask a conversation answers.
+   * InConversation is every ask a conversation answers, under an epic or
+   * not.
    */
   in_conversation: string[];
   /**
@@ -244,8 +245,8 @@ export interface NeedsYou {
    */
   no_conversation_yet: EpicAsks[];
   /**
-   * NoEpic is the asks that hold or concern no work under an epic. They are
-   * not counted.
+   * NoEpic is the asks no conversation answers that hold or concern no work
+   * under an epic. No ask under no epic is counted, in conversation or not.
    */
   no_epic: string[];
 }

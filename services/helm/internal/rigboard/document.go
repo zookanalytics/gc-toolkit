@@ -183,14 +183,15 @@ type GroupList struct {
 // under an epic, each counted once, and it reaches zero when none does.
 type NeedsYou struct {
 	Count int `json:"count"`
-	// InConversation is every ask a conversation answers.
+	// InConversation is every ask a conversation answers, under an epic or
+	// not.
 	InConversation []string `json:"in_conversation"`
 	// NoConversationYet is the other asks under each epic they hold or
 	// concern work under, epics in priority order. An ask under two epics is
 	// listed under each.
 	NoConversationYet []EpicAsks `json:"no_conversation_yet"`
-	// NoEpic is the asks that hold or concern no work under an epic. They are
-	// not counted.
+	// NoEpic is the asks no conversation answers that hold or concern no work
+	// under an epic. No ask under no epic is counted, in conversation or not.
 	NoEpic []string `json:"no_epic"`
 }
 
