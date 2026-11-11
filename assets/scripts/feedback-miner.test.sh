@@ -707,7 +707,7 @@ has "$OUT" "already named in a finding under unmarked-city-post" "(82s8) the sam
 eq "$(f_field tk-find2 '.metadata["finding.occurrences"]')" "2" "(82s9) so the open finding counts no third occurrence"
 set_status closed
 "$SUT" flag --dir "$W" >/dev/null 2>&1
-eq "$(findings_n)" "2" "(82s10) and once it closes, no new finding reports that its fix did not hold"
+eq "$(findings_n)" "2" "(82s10) and once it closes, no new finding is filed as its recurrence"
 # The rest of the section raises onto tk-find2, open again.
 set_status open tk-find2
 # A note that does not land records nothing, so the next run names the post.

@@ -546,8 +546,8 @@ that bead before re-deriving the cause."
 elif [ -n "$PRIOR" ]; then
   BODY="$BODY
 
-This finding fired again after $PRIOR was closed, so the earlier fix did not
-hold. Read that bead before re-deriving the cause."
+This finding fired again after $PRIOR was closed, and its cause may differ.
+Read that bead before re-deriving the cause."
 fi
 
 # Every stamp rides the create. A bead whose finding.key landed in a second

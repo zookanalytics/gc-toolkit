@@ -197,7 +197,7 @@ What makes a good scope:
 
 | | `description` (frontmatter) | `## Scope` (body) |
 |---|---|---|
-| Job | discovery / index summary | the doc's charter |
+| Job | discovery: when to use it | the doc's charter |
 | Answers | "is this the doc I want?" | "what does this doc own, and where are its edges?" |
 
 A scope is **stable but not frozen**: it changes only when the doc is
