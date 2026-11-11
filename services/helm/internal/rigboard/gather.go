@@ -323,10 +323,10 @@ func readClosedMembers(ctx context.Context, gc GC, rig Rig, open []bead) ([]bead
 }
 
 // readClosedChildren reads the closed children of each parent, at most
-// closedReadLimit reads at once, in the parents' order. The store's --parent
-// filter also returns a bead whose parent-child edge has moved elsewhere, so a
-// child is a bead whose own edge names the parent. A read that fails fails the
-// whole read.
+// closedReadLimit reads at once, and returns them in the order of the parents'
+// ids. The store's --parent filter also returns a bead whose parent-child edge
+// has moved elsewhere, so a child is a bead whose own edge names the parent. A
+// read that fails fails the whole read.
 func readClosedChildren(ctx context.Context, gc GC, rig Rig, parents []string) ([]bead, error) {
 	parents = slices.Sorted(slices.Values(parents))
 	results := make([][]bead, len(parents))
