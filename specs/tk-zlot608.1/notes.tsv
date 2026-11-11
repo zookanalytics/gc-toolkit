@@ -1106,7 +1106,7 @@ refused-false-completion-rehand-to-refinery-recipe	note	91223668f20c	none	recipe
 regen-merge-refinery-assigned-merge-in-child	note	65ee633460e7	1	superseded: Its PR closed unlanded by ruling; design replaced by a redesign; the script never reached main.	sitting tk-i97zv31	
 rejection-reason-cleared-at-merge-conclusion-reader-audit	note	7f42c2f7d55a	none	recipe: Reader audit to redo when changing the rejection_reason lifecycle; the fix merged, one small follow-up bug remains open.		
 rejection-resume-needs-force-push	note	d9b0fd59ea95	none	recipe: Two-case push rejection recipe: lease form for detached head, range-diff replay proof; not in pack.		
-removal-bead-for-a-kept-path-is-pending-not-armed	note	9faebe6e3d96	2	W-06: Rule tk-qenzk6e says removal bead is armed, contradicting the intake rule that holds non-epic beads for placement.		
+removal-bead-for-a-kept-path-is-pending-not-armed	note	9faebe6e3d96	live	tk-xg1i3gc: Rule tk-qenzk6e arms a removal bead the intake rule holds; the open prompt-update drops that clause.		
 rename-sweep-branch-merge-of-main-owes-rename-on-mains-new-lines	note	b94e60124de2	none	recipe: Durable recipe for merging main into a rename branch: grep main's added lines for old names, control-run suites.		
 renamed-log-string-makes-old-hasnt-assertions-vacuous	note	130a78538644	none	unwritten-rule: Standing test-hygiene rule: rewording an emitted string makes old negative assertions pass vacuously; no pack instruction carries it.		
 rendered-command-var-goes-in-a-quoted-heredoc-argument	note	58f9d33859c7	none	recipe: Durable how-to for passing a multi-line formula var to a script through a quoted here-document, with shell-version limits.		

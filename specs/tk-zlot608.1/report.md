@@ -18,12 +18,20 @@ three questions the operator gave in conversation tk-1amy8sd on 2026-11-11:
    where we are balancing scope of fix against severity, since the claim here
    is something that is off."
 
-It changes nothing in the store or the pack. Merging it releases two beads
-that wait on it: tk-zlot608.3 removes the whole notes listed under
-[Point-in-time notes](#point-in-time-notes), after it copies the store, and
-tk-zlot608.4 applies the [wording fixes](#wording-fixes). The answer each
-question needs follows the reading the filing sitting gave on the work bead,
-which is open to the operator's review.
+It changes nothing in the store or the pack. Merging it releases the beads
+that wait on it:
+
+- tk-zlot608.3 removes the whole notes listed under
+  [Point-in-time notes](#point-in-time-notes), after it copies the store.
+- tk-zlot608.4 applies the [wording fixes](#wording-fixes).
+- tk-zlot608.2 designs the standing triage, with this record as its worked
+  example.
+- tk-ljv34vu, the operator's audit request, goes to the validating closer. It
+  checks this record and the epic against the request's close brief, and
+  closes the request or puts it to the operator.
+
+The answer each question needs follows the reading the filing sitting gave on
+the work bead, which is open to the operator's review.
 
 ## Summary
 
@@ -38,8 +46,8 @@ only and is not sorted.
 | Answer | Whole notes | Entries of collection notes | All units |
 |---|---:|---:|---:|
 | Point-in-time (question 1) | 413 | 116 | 529 |
-| Live work | 86 | 34 | 120 |
-| Wording fix (question 2) | 7 | 0 | 7 |
+| Live work | 87 | 34 | 121 |
+| Wording fix (question 2) | 6 | 0 | 6 |
 | Structural (question 3) | 61 | 70 | 131 |
 | Fits none | 853 | 521 | 1,374 |
 | All | 1,420 | 741 | 2,161 |
@@ -524,7 +532,7 @@ collection note as it is, and editing them belongs to the standing triage
 
 ### Live work
 
-These 120 units are about work that is still open, so they are not
+These 121 units are about work that is still open, so they are not
 point-in-time yet. Each one waits on the bead given. A learned rule's pattern
 bead stays open while the rule stands, so a unit that names only a pattern
 bead is not waiting on it.
@@ -604,6 +612,7 @@ bead is not waiting on it.
 | `reaper-cutover-rollout-tk-1tfzr71-10-state` | tk-6lctp3w |
 | `refinery-findwork-exact-assignee-newest-first-starvation` | tk-h9qdbqk |
 | `refinery-in-polecat-worktree-is-gascity-drain-source-cwd-bug` | tk-fryy9y |
+| `removal-bead-for-a-kept-path-is-pending-not-armed` | tk-xg1i3gc |
 | `review-body-rework-twin-block-on-inline-rework` | tk-5nwi2pz |
 | `review-coverage-epic-elaboration-tk-qjdt90g` | tk-qjdt90g |
 | `review-evidence-worktree-tk-x2tytm6-state` | tk-zmk32nr |
@@ -719,15 +728,6 @@ any whose words have changed since.
 - **Replace with:** `# 1. Claim the reaction bead R once (assigned first, then routed proactive demand).`
 - **Size change:** +1 word.
 - **Shown by:** `proactive-reclaim-mid-reaction-claims-a-second-reaction-bead`.
-
-### W-06: `template-fragments/work-quality-polecats.template.md`
-
-- **Section:** learned rule tk-qenzk6e (its last sentence) (the words wrap across two lines in the file).
-- **What is wrong:** The rule says to arm the removal bead, while the work skill holds a bead filed outside an epic for placement and a doctor check reports a held bead that an arm sends.
-- **Current words:** `blocked by what retires the case and armed to dispatch when it lands.`
-- **Replace with:** `blocked by what retires the case and held for placement, which arms it.`
-- **Size change:** no words.
-- **Shown by:** `removal-bead-for-a-kept-path-is-pending-not-armed`.
 
 ### Retired in place of a fix
 
@@ -965,7 +965,10 @@ Together the fixes change the instructions by +2 words.
 5. The wording fixes were checked by hand at main. Four proposals added 10 to
    17 words. Three were cut to two words or fewer, and the fourth is a
    structural finding, because its instruction was silent rather than
-   misleading.
+   misleading. Open beads that name each fix's file, and open pull requests
+   that change it, were then read for a change to the same sentence. One had
+   it: prompt-update tk-xg1i3gc already rewrites the last sentence of learned
+   rule tk-qenzk6e, so the note behind that fix is live work on that bead.
 6. One pass grouped the structural units into findings. It sent
    42 units back as not structural.
 7. An operator mark is kept only where the unit's own text names the operator.
