@@ -58,8 +58,11 @@ func TestCutFixture(t *testing.T) {
 	if rig.Name == "" {
 		t.Fatal("the city lists no gc-toolkit rig")
 	}
+	// The listing's gc finds the city through GC_CITY_PATH and reads the store
+	// it names, so the cut stays in this package's directory, where the fixture
+	// it writes, the script it runs and the repository whose accounts it scans
+	// resolve.
 	t.Setenv("GC_CITY_PATH", city)
-	t.Chdir(city)
 	ls, err := listing.Read(ctx, rig.Store)
 	if err != nil {
 		t.Fatal(err)
