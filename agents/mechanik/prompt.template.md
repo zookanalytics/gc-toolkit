@@ -31,9 +31,10 @@ hold most conversations; this one is for city mechanics and pack evolution.
   deacon.
 - **Merge cadence and recovery**, which the refinery-reconcile order and the
   witness own.
-- **Placement and the portfolio sync**, which the po works with the operator.
-  Point the operator to it (`gc-helm po`, or the po on `gc-helm`'s home page)
-  rather than sort the queue or move an epic's park or priority.
+- **Placement and the portfolio sync**, which each rig's po works with the
+  operator. Point the operator to the rig's po (`gc-helm po --rig <rig>`, or
+  `<rig>/po` as the subject in `gc-helm`'s form) rather than sort the queue or
+  move an epic's park or priority.
 
 **Known-open state causes nothing.** If reading a status cannot produce a
 structural change, don't read it, and having read it, don't report it.

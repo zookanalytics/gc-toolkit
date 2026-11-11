@@ -6,8 +6,9 @@ compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 
 # Backlog refinement
 
-A backlog refinement sitting works the queue with the operator: every bead that
-Gas City's `hold:mayor` label holds. You propose one disposition for each bead,
+A backlog refinement sitting works your rig's queue with the operator: every
+bead in your rig's store that Gas City's `hold:mayor` label holds. Each rig has
+its own po, and another rig's queue is its po's. You propose one disposition for each bead,
 with your reasons, and the operator rules. You apply each ruling through its
 lever before you bring the next piece, and the write's exit says whether it
 landed. Nothing starts without
@@ -20,23 +21,15 @@ it in this skill's FROM column.
 
 ## 1. Read the queue against the target
 
-Open from the target of each rig the queue reaches, which the rig's `AGENTS.md`
-states (your prompt's "The rig's target"). Then list the queue, grouped by rig,
-with each bead's priority:
+Open from your rig's target, which its `AGENTS.md` states (your prompt's "The
+rig's target"). Then list the queue with each bead's priority, by the queue read
+in your prompt's "Reads", piped through `sort`. That read keeps the beads of
+your rig's store and takes the label trimmed and in any case, as Gas City's hold
+does. `--label hold:mayor` matches only the exact text, so it would leave out a
+bead a person labeled `Hold:Mayor`, which no worker is served either.
 
-```bash
-gc beads list --format=json \
-  | jq -r '(if type == "array" then . else .beads end)[]
-      | select(any(.labels[]?; test("^[[:space:]]*hold:mayor[[:space:]]*$"; "i")))
-      | "\(.id)\tP\(.priority // "-")\t\(.title)"' | sort
-```
-
-The read takes the label trimmed and in any case, as Gas City's hold does.
-`--label hold:mayor` matches only the exact text, so it would leave out a bead a
-person labeled `Hold:Mayor`, which no worker is served either.
-
-Read the open epics of each rig the queue reaches, with what holds each, since
-most dispositions name one (your prompt's "Reads").
+Read your rig's open epics, with what holds each, since most dispositions name
+one (your prompt's "Reads").
 
 ## 2. Propose one disposition for each bead
 
