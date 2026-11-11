@@ -330,15 +330,20 @@ attach once the sitting starts, which is on unless `--no-attach` is given. The
 subject is a bead id, a PR number or URL, or a rig's whole name or prefix, such
 as `gc-toolkit` or `tk`, matched ignoring case and the spaces around it, which
 starts a new topic in that rig. Part of a name names no rig, and the form
-completes none. A line under the subject shows the rig it names, or a bead's
-own rig, and is not a field. Tab moves through the fields in that order, so the
-question is one Tab after the subject, and wraps around at either end. ↑ and ↓
-move between the fields once the cursor is on a field's first or last row,
-with the question's rows counted as the screen shows them, and stop at the
-first and last field. The form opens on the question when the command line
-names the subject, or a new topic's rig with `--rig`, which fills in the
-subject with the rig's name. A tab in the question stays a tab, shown as
-␉, and a line break written as
+completes none. Only text the operator types in the subject is matched to a
+rig. The subject the command line names is a reference, as the flag-driven
+engage reads it, and so is a bead the form puts there, such as a gate chosen
+from what holds a subject, so each is looked up even when a rig carries the
+same name. `--rig` fills in the subject with the rig's name, which names the
+rig of exactly that name, as `open --new-subject --rig` does, until the
+operator edits it. A line under the subject shows the rig it names, or a
+bead's own rig, and is not a field. Tab moves through the fields in that
+order, so the question is one Tab after the subject, and wraps around at
+either end. ↑ and ↓ move between the fields once the cursor is on a field's
+first or last row, with the question's rows counted as the screen shows them,
+and stop at the first and last field. The form opens on the question when the
+command line names the subject or a new topic's rig. A tab in the question
+stays a tab, shown as ␉, and a line break written as
 LF, CR or CRLF is one line break. The field leaves out every other control
 character, such as BEL or ESC, and U+FFFD, the replacement character. It leaves
 out U+FDD0 as well, since inside the field that noncharacter stands for a tab.
@@ -348,8 +353,12 @@ opens, as the flag-driven engage refuses it.
 While the operator types, the form reads `gc-helm.sh conversations` for the
 subject: the bead it resolves to, the rig a conversation about it is held in,
 whether a sitting can start there, its open conversations and what holds it.
-It reads the city's rigs with each one's prefix, so a rig's name or prefix is
-known as the rig and is not looked up as a bead. The screen shows where a
+It reads the city's rigs with each one's prefix, so a rig's name or prefix
+typed as the subject is known as the rig and is not looked up as a bead. A
+rig's name wins over a bead of the same id, so typed text settles only once
+the rigs are read: until then the screen marks where it would file as still
+being checked, whatever its lookup answered, and Ctrl+S files nothing. When
+the rigs did not read, Ctrl+S reads them again. The screen shows where a
 submit would file before it does: a conversation on the subject in its own
 rig, or a new subject in the rig the subject names. A name or prefix that more
 than one rig carries names none of them, and a PR number that several live

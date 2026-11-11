@@ -261,12 +261,13 @@ which they run with their own path as `--helm` and the converse variants as
 `--models`. It holds the subject, a multiline question, the model, shown with
 each word of its name capitalized (claude-opus reads Claude-Opus) and passed on
 as named, and whether to attach, in that order. The subject is a bead, a PR, or
-a rig's whole name or prefix, which starts a new topic in that rig, and a line
-under it shows the rig it names or the bead's own rig. `--rig` fills in the
-subject with the rig's name. ↑ and ↓ move between the fields at a field's first
-and last row. It reads `gc-helm.sh conversations` in the background while the
-operator types, the city's rigs with their prefixes included, saves with
-`gc-helm.sh open`, starts with
+a rig's whole name or prefix typed there, which starts a new topic in that rig,
+and a line under it shows the rig it names or the bead's own rig. `--rig` fills
+in the subject with the name of the rig it names exactly, and `--subject` with
+a reference the form looks up and never matches to a rig. ↑ and ↓ move between
+the fields at a field's first and last row. It reads `gc-helm.sh conversations`
+in the background while the operator types, the city's rigs with their
+prefixes included, saves with `gc-helm.sh open`, starts with
 `gc-helm.sh engage <conversation> --no-attach`, and once the sitting has
 started attaches with `gc-helm.sh engage <conversation>`, passing `--model` with
 the model its start ran on. `--no-attach`, which engage passes on from its own

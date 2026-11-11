@@ -19,9 +19,9 @@ import (
 
 // Options are what the command line fills in before the form opens.
 type Options struct {
-	Subject  string   // a subject reference: a bead, conversation or gate id, a PR number or URL, or a rig's name or prefix
+	Subject  string   // a subject reference, as engage takes one: a bead, conversation or gate id, or a PR number or URL
 	From     string   // the bead the subject, a gate, was reached from, as engage's --from names it
-	Rig      string   // a new topic's rig, which fills in an empty subject
+	Rig      string   // a new topic's rig, by its name, which fills in an empty subject
 	Model    string   // the converse variant; empty takes Models[0]
 	Question string   // the question, as given
 	Models   []string // the converse variants, the default first
@@ -59,6 +59,26 @@ type lookup struct {
 	about   About
 	err     error
 }
+
+// source is where the subject field's text came from, which decides how the
+// form reads it.
+type source int
+
+const (
+	// typed is text the operator typed. A rig's whole name or prefix,
+	// ignoring case, names that rig, and other text is a subject to look up.
+	// The city's rigs tell the two apart, so typed text settles only once
+	// they have been read.
+	typed source = iota
+	// rigFlag is the rig --rig named, by its exact name, as open
+	// --new-subject --rig takes it.
+	rigFlag
+	// given is a reference engage's command line named as the subject, or a
+	// bead the form put in the field: a gate or a bead chosen from what holds
+	// a subject, an anchor chosen for a PR, or a subject a save filed. It is
+	// looked up, and never read as a rig.
+	given
+)
 
 // lookupKey is what a lookup reads: the reference, and the bead it was reached
 // from, which a gate several beads wait on is about when it is one of them. A
@@ -98,6 +118,7 @@ type Model struct {
 	width, height int
 
 	subject  textinput.Model
+	src      source // where the subject field's text came from; an edit makes it typed
 	question questionEditor
 	focus    field
 
@@ -110,9 +131,8 @@ type Model struct {
 	cityBusy bool
 	ticking  bool // a refresh of the return list is scheduled
 
-	rig    string // the rig --rig named: the subject field names it while it reads that name, before the city's rigs are read too
-	model  int    // index into opt.Models; -1 while it is opt.Model, which no variant carries
-	attach bool   // the operator's choice to attach to the sitting once it starts; off, the form leaves then
+	model  int  // index into opt.Models; -1 while it is opt.Model, which no variant carries
+	attach bool // the operator's choice to attach to the sitting once it starts; off, the form leaves then
 
 	choice        string // newChoice, or the conversation the operator chose
 	choiceTouched bool
@@ -165,7 +185,7 @@ func New(ctx context.Context, helm Helm, opt Options) *Model {
 			opt.Models = []string{opt.Model}
 		}
 	}
-	m := &Model{helm: helm, opt: opt, ctx: ctx, lookups: map[lookupKey]*lookup{}, rig: strings.TrimSpace(opt.Rig), attach: !opt.NoAttach}
+	m := &Model{helm: helm, opt: opt, ctx: ctx, lookups: map[lookupKey]*lookup{}, attach: !opt.NoAttach}
 	if opt.Subject != "" {
 		m.from = opt.From
 	}
@@ -185,9 +205,16 @@ func New(ctx context.Context, helm Helm, opt Options) *Model {
 	// The field is 60 cells wide until the terminal's size is known, and the
 	// placeholder is cut at the field's edge.
 	m.subject.Placeholder = "a bead id or PR, or a rig's name or prefix for a new topic"
-	m.subject.SetValue(opt.Subject)
-	if opt.Subject == "" {
-		m.subject.SetValue(m.rig)
+	// The command line's subject is a reference, as the flag-driven engage
+	// takes it, and --rig names a rig as open --new-subject --rig does. Each is
+	// read that way until the operator edits the field.
+	switch rig := strings.TrimSpace(opt.Rig); {
+	case opt.Subject != "":
+		m.subject.SetValue(opt.Subject)
+		m.src = given
+	case rig != "":
+		m.subject.SetValue(rig)
+		m.src = rigFlag
 	}
 	m.subject.SetWidth(60)
 
@@ -240,47 +267,40 @@ func (m *Model) ref() string { return strings.TrimSpace(m.subject.Value()) }
 // subject a gate there was chosen from.
 func (m *Model) subjectKey() lookupKey { return lookupKey{ref: m.ref(), from: m.from} }
 
-// rigsNamed are the rigs of the city whose name or prefix is ref, ignoring
-// case. It is nil until the city's rigs have been read. Only a whole name or
-// prefix names a rig: part of one names nothing, and the form completes none.
-func (m *Model) rigsNamed(ref string) []Rig {
+// namedRigs are the rigs of the city the subject field names, as its source
+// reads it. Text the operator typed names each rig whose whole name or prefix
+// it is, ignoring case: part of one names nothing, and the form completes
+// none. The rig --rig named is the rig of that exact name. A reference the
+// field was given names no rig. It is nil until the city's rigs have been read.
+func (m *Model) namedRigs() []Rig {
+	ref := m.ref()
 	if m.city == nil || ref == "" {
 		return nil
 	}
 	var rs []Rig
 	for _, r := range m.city.Rigs {
-		if strings.EqualFold(ref, r.Name) || (r.Prefix != "" && strings.EqualFold(ref, r.Prefix)) {
+		switch {
+		case m.src == rigFlag && r.Name == ref,
+			m.src == typed && (strings.EqualFold(ref, r.Name) || (r.Prefix != "" && strings.EqualFold(ref, r.Prefix))):
 			rs = append(rs, r)
 		}
 	}
 	return rs
 }
 
-// namesRig says whether ref names a rig, which starts a new topic there, rather
-// than a subject to look up: a rig of the city, or the rig --rig named, which
-// the form takes for a rig before the city's rigs have been read.
-func (m *Model) namesRig(ref string) bool {
-	if ref == "" {
-		return false
-	}
-	return (m.rig != "" && strings.EqualFold(ref, m.rig)) || len(m.rigsNamed(ref)) > 0
-}
-
-// newTopic says whether the subject field names a new topic's rig.
-func (m *Model) newTopic() bool { return m.namesRig(m.ref()) }
+// newTopic says whether the subject field names a new topic's rig rather than
+// a subject to look up: the rig --rig named, before the city's rigs have been
+// read too, or typed text the rigs say is a rig's name or prefix.
+func (m *Model) newTopic() bool { return m.src == rigFlag || len(m.namedRigs()) > 0 }
 
 // topicRig is the one rig the subject field names, which a new topic is filed
 // in. Until the city's rigs have been read, it is the rig --rig named, by that
 // name and not yet checked.
 func (m *Model) topicRig() (Rig, bool) {
-	ref := m.ref()
-	if m.city == nil {
-		if m.rig != "" && strings.EqualFold(ref, m.rig) {
-			return Rig{Name: m.rig}, true
-		}
-		return Rig{}, false
+	if m.src == rigFlag && m.city == nil {
+		return Rig{Name: m.ref()}, true
 	}
-	if rs := m.rigsNamed(ref); len(rs) == 1 {
+	if rs := m.namedRigs(); len(rs) == 1 {
 		return rs[0], true
 	}
 	return Rig{}, false
@@ -318,11 +338,11 @@ func (m *Model) loadCity() tea.Cmd {
 // lookup reads the subject k names, once per reference and origin while that
 // read is running or has answered. A read that failed is read again. A
 // reference already read selects the conversation it names, as its answer did.
-// A rig's name or prefix is no subject to read, so it is not looked up, though
-// a reference typed before the city's rigs have been read is, and its answer
-// stands aside once they say it names a rig.
+// A subject field that names a rig holds no subject to read, so it is not
+// looked up. Text typed before the city's rigs have been read is looked up,
+// and its answer stands aside once they say it names a rig.
 func (m *Model) lookup(k lookupKey) tea.Cmd {
-	if k.ref == "" || m.namesRig(k.ref) {
+	if k.ref == "" || (k == m.subjectKey() && m.newTopic()) {
 		return nil
 	}
 	if l, ok := m.lookups[k]; ok && (l.pending || l.err == nil) {
@@ -532,10 +552,12 @@ func (m *Model) where() (string, standing) {
 	if l == nil || l.pending {
 		return fmt.Sprintf("looking up %s…", ref), reading
 	}
+	// Until the city's rigs have been read, typed text can still be a rig's
+	// name or prefix, which wins over whatever its lookup answered, so the
+	// rigs settle it.
+	unread := m.src == typed && m.city == nil
 	if l.err != nil {
-		// Until the city's rigs have been read, a reference no bead answers to
-		// can still be a rig's name or prefix, which they settle.
-		if m.city == nil && m.cityErr == "" {
+		if unread && m.cityErr == "" {
 			return l.err.Error(), reading
 		}
 		return l.err.Error(), refused
@@ -551,11 +573,16 @@ func (m *Model) where() (string, standing) {
 	if a.Gate != "" {
 		d += fmt.Sprintf(", answering gate %s", a.Gate)
 	}
+	switch {
+	case unread && m.cityErr != "":
+		return fmt.Sprintf("%s, unless %s names a rig: the rigs did not read (%s), so that cannot be checked", d, ref, m.cityErr), refused
+	case unread:
+		return fmt.Sprintf("%s, unless %s names a rig: checking the rigs…", d, ref), reading
+	}
 	return d, settled
 }
 
-// topicWhere is where a new topic is filed: the rig ref names, by its name or
-// its prefix.
+// topicWhere is where a new topic is filed: the rig the subject field names.
 func (m *Model) topicWhere(ref string) (string, standing) {
 	if m.city == nil {
 		if m.cityErr != "" {
@@ -563,7 +590,7 @@ func (m *Model) topicWhere(ref string) (string, standing) {
 		}
 		return fmt.Sprintf("a new subject in rig %s: checking the rig…", ref), reading
 	}
-	rs := m.rigsNamed(ref)
+	rs := m.namedRigs()
 	switch {
 	case len(rs) == 0:
 		return fmt.Sprintf("rig %s is not a rig of this city", ref), refused
@@ -740,9 +767,10 @@ func (m *Model) typeInto(msg tea.Msg) tea.Cmd {
 		if m.subject.Value() != before {
 			// A reference the operator types was reached from nothing, so a gate
 			// chosen from a subject's holds loses that subject once it is edited.
+			// Whatever filled the field in, an edit makes it typed text.
 			m.seq++
 			seq := m.seq
-			m.from = ""
+			m.src, m.from = typed, ""
 			m.choice, m.choiceTouched, m.cursor = newChoice, false, 0
 			return tea.Batch(cmd, tea.Tick(m.opt.Debounce, func(time.Time) tea.Msg { return debounceMsg{seq: seq} }))
 		}
@@ -855,10 +883,11 @@ func (m *Model) key(k tea.KeyPressMsg) tea.Cmd {
 
 // choose takes the context row under the cursor. A conversation becomes the
 // choice; the new-conversation row clears it; a hold or a PR's candidate
-// becomes the subject, which is looked up in turn. A gate keeps the subject it
-// was chosen from as where it was reached from, through the lookup and the
-// save, so a gate several beads wait on is about that subject while it still
-// waits on it. Nothing else changes: the question stays as typed.
+// becomes the subject, which is looked up in turn as the bead it is, whatever
+// rig shares its id. A gate keeps the subject it was chosen from as where it
+// was reached from, through the lookup and the save, so a gate several beads
+// wait on is about that subject while it still waits on it. Nothing else
+// changes: the question stays as typed.
 func (m *Model) choose(rows []contextRow) tea.Cmd {
 	if m.cursor >= len(rows) {
 		return nil
@@ -874,7 +903,7 @@ func (m *Model) choose(rows []contextRow) tea.Cmd {
 			from = l.about.Subject.ID
 		}
 		m.subject.SetValue(r.id)
-		m.from = from
+		m.src, m.from = given, from
 		m.seq++
 		m.choice, m.choiceTouched, m.cursor = newChoice, false, 0
 		return m.lookup(m.subjectKey())
@@ -980,16 +1009,15 @@ func (m *Model) saveAgain() tea.Cmd {
 // reread reads again what a refused submit was refused on, when that read can
 // answer differently now: a subject lookup that failed or named a refusal,
 // such as a downed controller, or the city's rigs for a rig the subject names
-// or for a reference that can be a rig's name while they did not read. Nothing
+// or for typed text that can be a rig's name while they did not read. Nothing
 // is filed, and the next Ctrl+S reads the new answer. A name several rigs
 // carry reads the same way again, so it is not read.
 func (m *Model) reread() tea.Cmd {
-	ref := m.ref()
 	switch {
-	case ref == "":
+	case m.ref() == "":
 		return nil
 	case m.newTopic():
-		if len(m.rigsNamed(ref)) > 1 {
+		if len(m.namedRigs()) > 1 {
 			return nil
 		}
 		return m.loadCity()
@@ -1050,9 +1078,11 @@ func (m *Model) onSaved(msg savedMsg) tea.Cmd {
 	switch {
 	case msg.saved.Subject != "" && m.newTopic():
 		// The new subject was filed and its conversation was not: the next
-		// save files the question onto that subject, never a second one.
+		// save files the question onto that subject, never a second one,
+		// whatever rig shares its id.
 		m.partial = msg.saved.Subject
 		m.subject.SetValue(msg.saved.Subject)
+		m.src = given
 		m.seq++
 		m.status += fmt.Sprintf(" Subject %s was filed; saving again files your question onto it.", msg.saved.Subject)
 		cmd = m.lookup(lookupKey{ref: msg.saved.Subject})
