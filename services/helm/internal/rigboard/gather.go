@@ -113,32 +113,19 @@ type gathered struct {
 
 // Read reads one rig's store once, through a gctk listing, and builds its
 // document. A read that fails returns its error and no document, so a caller
-// never draws a board from a read that did not happen. The listing takes no
-// context, so a read that runs out leaves it to finish on its own.
+// never draws a board from a read that did not happen. Every store call the
+// read makes ends when ctx does, the processes it started killed with it, so a
+// read that runs out has stopped them all when it returns.
 func Read(ctx context.Context, rig Rig) (Document, error) {
-	type answer struct {
-		g   *gathered
-		err error
+	ls, err := listing.Read(ctx, rig.Store)
+	if err != nil {
+		return Document{}, fmt.Errorf("list the beads of %s: %w", rig.Name, err)
 	}
-	ch := make(chan answer, 1)
-	go func() {
-		ls, err := listing.Read(rig.Store)
-		if err != nil {
-			ch <- answer{err: fmt.Errorf("list the beads of %s: %w", rig.Name, err)}
-			return
-		}
-		g, err := gather(ls, rig.Name)
-		ch <- answer{g: g, err: err}
-	}()
-	select {
-	case a := <-ch:
-		if a.err != nil {
-			return Document{}, a.err
-		}
-		return build(a.g), nil
-	case <-ctx.Done():
-		return Document{}, ctx.Err()
+	g, err := gather(ls, rig.Name)
+	if err != nil {
+		return Document{}, err
 	}
+	return build(g), nil
 }
 
 // gather asks each shared reader its question of the listing's rows.

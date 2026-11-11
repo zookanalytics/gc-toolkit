@@ -60,7 +60,7 @@ func TestCutFixture(t *testing.T) {
 	}
 	t.Setenv("GC_CITY_PATH", city)
 	t.Chdir(city)
-	ls, err := listing.Read(rig.Store)
+	ls, err := listing.Read(ctx, rig.Store)
 	if err != nil {
 		t.Fatal(err)
 	}

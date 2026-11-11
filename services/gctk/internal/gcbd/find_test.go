@@ -1,13 +1,17 @@
 package gcbd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 // findStub puts a `gc` on PATH that answers each `bd list` with $STUB_LIST and
@@ -200,5 +204,79 @@ func TestTheWaitsForErrorNamesTheListedBlocks(t *testing.T) {
 				t.Errorf("Answer = %v; want the waits-for error naming spawner and blocks %v", err, tc.blocks)
 			}
 		})
+	}
+}
+
+// TestAStoppedCallEndsEveryProcessItStarted reads through a client with a
+// context over a gc that does what `gc bd` does: it starts a child that holds
+// the call's output, as gc runs bd, and waits on it. Once the context is done
+// the read returns the context's error without waiting out the child, and the
+// call's whole process group, the child among it, is gone.
+func TestAStoppedCallEndsEveryProcessItStarted(t *testing.T) {
+	dir := t.TempDir()
+	group := filepath.Join(dir, "group")
+	stub := "#!/bin/sh\nsleep 30 &\necho $$ > \"$STUB_GROUP\"\nwait\n"
+	if err := os.WriteFile(filepath.Join(dir, "gc"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("STUB_GROUP", group)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := (&Client{bin: "gc"}).WithContext(ctx).Find(Query{Every: true})
+		done <- err
+	}()
+	pid := stubGroup(t, group)
+	cancel()
+	stop := time.Now()
+	select {
+	case err := <-done:
+		// A stop that killed gc alone would leave the child holding the
+		// call's output, and the read would wait out stopGrace for it.
+		if took := time.Since(stop); took >= stopGrace {
+			t.Errorf("the read returned %s after the stop, as late as a wait on a child left running", took)
+		}
+		var re *ReadError
+		if !errors.As(err, &re) || !errors.Is(err, context.Canceled) {
+			t.Errorf("Find = %v, want a *ReadError carrying the context's error", err)
+		}
+	case <-time.After(stopGrace + 10*time.Second):
+		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		t.Fatal("the read did not return once its context was done")
+	}
+	groupGone(t, pid)
+}
+
+// stubGroup is the process group a stub gc wrote to path, which it leads, as a
+// call the client stops runs in a group of its own.
+func stubGroup(t *testing.T, path string) int {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		raw, _ := os.ReadFile(path)
+		if pid, err := strconv.Atoi(strings.TrimSpace(string(raw))); err == nil && pid > 0 {
+			return pid
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the stub gc never started")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// groupGone waits for every process in group pid to be gone. A member killed
+// outright stays in the group until it is reaped.
+func groupGone(t *testing.T, pid int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for syscall.Kill(-pid, 0) == nil {
+		if time.Now().After(deadline) {
+			_ = syscall.Kill(-pid, syscall.SIGKILL)
+			t.Fatalf("the call's process group %d outlived the stop", pid)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

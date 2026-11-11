@@ -16,7 +16,9 @@ import (
 // GET /helm/rigs/{rig} answers one rig's document. Each answer is cached whole
 // by the same rule the board's cache keeps: a time to live, one gather of a
 // key at a time, and every key dropped when a write route succeeds, since a
-// write changes what the store answers.
+// write changes what the store answers. The drop also lets the next request
+// gather beside a gather that began before the write, whose answer stays out
+// of the cache.
 
 // RigBoardTTL is how long one rig's document is served before the next read
 // gathers again. One read of the gc-toolkit rig, the city's largest store,
@@ -164,7 +166,8 @@ func (c *keyedCache[T]) fresh(key string) (T, bool) {
 // get answers key from the cache while it is fresh, and otherwise gathers it.
 // The gather runs on a context detached from the request's, so one client
 // leaving does not cancel the gather the others wait on, and gatherTimeout
-// bounds it.
+// bounds it. A rig's read stops its store calls when that bound runs out
+// (rigboard.Read), so a gather that has returned leaves none running.
 func (c *keyedCache[T]) get(ctx context.Context, key string, gather func(context.Context) (T, error)) (T, error) {
 	if v, ok := c.fresh(key); ok {
 		return v, nil

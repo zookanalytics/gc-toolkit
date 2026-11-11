@@ -1468,9 +1468,14 @@ rather than the supervisor's bead routes.
 is cached whole per rig, by the rule the board's cache keeps: a minute's time to
 live (`server.RigBoardTTL`, from a measured 2.9 s read of gc-toolkit), one
 gather of a rig at a time however many requests wait on it, and every rig
-dropped when a write route succeeds. A failed read answers 502 with the
-failure, never a document, so the page keeps its last good document and says
-the read failed.
+dropped when a write route succeeds. The drop also lets the next request gather
+at once, beside a gather that began before the write, and that gather's answer
+stays out of the cache. A gather has thirty seconds. When they run out, the read
+stops every store call it made, with the processes each call started, `bd`
+among them, and only then does the request answer its failure, so polls that
+come while the store hangs do not pile up reads on it. A failed read answers
+502 with the failure, never a document, so the page keeps its last good
+document and says the read failed.
 
 **The page's types are generated.** `web/src/rigboard/document.gen.ts` comes
 from `internal/rigboard/document.go` and `table.go`, through tygo, and nobody

@@ -13,6 +13,7 @@
 package listing
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
@@ -100,9 +101,11 @@ type Listing struct {
 
 // Read lists the store at db, a store's .beads directory, once: every live
 // bead it holds. With db empty it reads the store gc resolves. A read that
-// fails returns its error and no listing.
-func Read(db string) (*Listing, error) {
-	l, err := ledger.Open(db)
+// fails returns its error and no listing. Every read of the store the listing
+// makes, then and for each question asked of it later, ends when ctx does, and
+// the processes it started end with it.
+func Read(ctx context.Context, db string) (*Listing, error) {
+	l, err := ledger.OpenContext(ctx, db)
 	if err != nil {
 		return nil, err
 	}

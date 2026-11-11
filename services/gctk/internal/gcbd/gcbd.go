@@ -26,6 +26,7 @@ package gcbd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -37,6 +38,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/daemon"
@@ -209,13 +211,34 @@ const maxDaemonBody = 1 << 20
 // supervisor-API read path and are all empty when it is off (GC_NO_API, no city
 // in the environment, no discoverable supervisor, or a pinned store), in which
 // case Show reads straight through bin. db is the store a pinned client names
-// on every call ([Client.In]), empty for the store gc resolves.
+// on every call ([Client.In]), empty for the store gc resolves. ctx ends every
+// call the client forks ([Client.WithContext]), and is nil for a client whose
+// calls run to their end.
 type Client struct {
 	bin     string
 	httpc   *http.Client
 	baseURL string
 	city    string
 	db      string
+	ctx     context.Context
+}
+
+// stopGrace is how long a call stopped by its context may hold its output open
+// before the wait for it gives up. The stop kills every process the call
+// started, so only one that left the call's process group can hold it that
+// long.
+const stopGrace = 2 * time.Second
+
+// WithContext returns a client whose every forked `gc` call ends when ctx
+// does. Each call runs in a process group of its own, and once ctx is done the
+// whole group is killed. gc runs bd as a child that writes to the call's own
+// output, so a stop that killed gc alone would leave bd reading the store and
+// the call waiting on it. A call that has not started by then does not start.
+// The supervisor-API read is not a forked call and keeps its own timeout.
+func (c *Client) WithContext(ctx context.Context) *Client {
+	p := *c
+	p.ctx = ctx
+	return &p
 }
 
 // In returns a client pinned to the bead store at db, a store's .beads
@@ -316,12 +339,30 @@ func (c *Client) Route(ids ...string) (string, error) {
 
 // command is the `gc` command for args, a `bd` call, with a pinned client's
 // store named ahead of the verb, where bd reads its global flags. A call that
-// names its own store keeps it.
+// names its own store keeps it. A client with a context runs the call in its
+// own process group and kills the group once the context is done
+// ([Client.WithContext]).
 func (c *Client) command(args ...string) *exec.Cmd {
 	if c.db != "" && len(args) > 0 && args[0] == "bd" && !slices.Contains(args, "--db") {
 		args = append([]string{"bd", "--db", c.db}, args[1:]...)
 	}
-	return exec.Command(c.bin, args...)
+	if c.ctx == nil {
+		return exec.Command(c.bin, args...)
+	}
+	cmd := exec.CommandContext(c.ctx, c.bin, args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	cmd.WaitDelay = stopGrace
+	return cmd
+}
+
+// stopped is why the client's context stopped its calls, and nil while the
+// context runs.
+func (c *Client) stopped() error {
+	if c.ctx == nil || c.ctx.Err() == nil {
+		return nil
+	}
+	return context.Cause(c.ctx)
 }
 
 // New returns a Client whose reads prefer the supervisor API when one is

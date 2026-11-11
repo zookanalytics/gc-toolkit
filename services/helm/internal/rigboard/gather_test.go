@@ -3,8 +3,15 @@ package rigboard
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
 	"slices"
+	"strconv"
+	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 // TestReadGathersALandedDelivery reads, through the read itself, a Delivery
@@ -95,5 +102,54 @@ func TestReadPlacesWorkUnderEveryEpicItSitsUnder(t *testing.T) {
 	}
 	if n.Count != 1 || !slices.Equal(under, []string{"tk-e1", "tk-e2"}) {
 		t.Errorf("Needs you counts %d and lists tk-q under %v, want 1 and both epics", n.Count, under)
+	}
+}
+
+// TestReadThatRunsOutStopsItsStoreCalls reads through a gc that does what
+// `gc bd` does when the store hangs: it starts a child that holds the call's
+// output, as gc runs bd, and waits on it. Read returns the deadline's error
+// soon after the deadline, and the call's whole process group, the child
+// among it, is gone when it does, so the next read starts beside nothing.
+func TestReadThatRunsOutStopsItsStoreCalls(t *testing.T) {
+	dir := t.TempDir()
+	group := filepath.Join(dir, "group")
+	stub := "#!/bin/sh\nsleep 30 &\necho $$ > \"$STUB_GROUP\"\nwait\n"
+	if err := os.WriteFile(filepath.Join(dir, "gc"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("STUB_GROUP", group)
+	t.Setenv("GC_NO_API", "1")
+
+	const deadline = 500 * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), deadline)
+	defer cancel()
+	start := time.Now()
+	_, err := Read(ctx, Rig{Name: "gc-toolkit", Store: "/fixture/gc-toolkit/.beads"})
+	took := time.Since(start)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("Read = %v, want the deadline's error", err)
+	}
+	// A stop that killed gc alone would leave the child holding the call's
+	// output, and the read would wait out the store client's grace for it.
+	if took > deadline+1500*time.Millisecond {
+		t.Errorf("Read returned %s after it began, past its %s deadline", took, deadline)
+	}
+	raw, err := os.ReadFile(group)
+	if err != nil {
+		return // the deadline came before the stub started, so no call ran
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil {
+		t.Fatalf("the stub wrote %q as its process group", raw)
+	}
+	// A member killed outright stays in the group until it is reaped.
+	gone := time.Now().Add(5 * time.Second)
+	for syscall.Kill(-pid, 0) == nil {
+		if time.Now().After(gone) {
+			_ = syscall.Kill(-pid, syscall.SIGKILL)
+			t.Fatalf("the call's process group %d outlived the read", pid)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
