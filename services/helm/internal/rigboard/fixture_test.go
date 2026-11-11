@@ -20,7 +20,7 @@ import (
 // decisions and edges, and every bead the readers read about them.
 // testdata/gc-toolkit.board.json is the document the read builds from it.
 var (
-	fixturePath = filepath.Join("testdata", "gc-toolkit.json")
+	fixturePath = filepath.Join("testdata", "gc-toolkit.fixture.json")
 	goldenPath  = filepath.Join("testdata", "gc-toolkit.board.json")
 )
 

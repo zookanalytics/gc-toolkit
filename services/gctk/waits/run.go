@@ -35,9 +35,25 @@ func str(k ledger.Key[string], r *ledger.Record) string {
 // isRoot reports whether r is a run's root, as run-lib.sh's run_is_root reads
 // one: a graph.v2 root as the runtime marks it, or a classic molecule.
 func isRoot(r *ledger.Record) bool {
-	return strings.EqualFold(str(kindKey, r), "workflow") ||
-		strings.EqualFold(str(formulaContractKey, r), "graph.v2") ||
-		r.IssueType() == "molecule"
+	return rootBy(r.IssueType(), str(kindKey, r), str(formulaContractKey, r))
+}
+
+// rootBy is isRoot's rule over a bead's issue type, the runtime's kind of it and
+// the formula contract it was poured under.
+func rootBy(issueType, kind, contract string) bool {
+	return strings.EqualFold(strings.TrimSpace(kind), "workflow") ||
+		strings.EqualFold(strings.TrimSpace(contract), "graph.v2") ||
+		issueType == "molecule"
+}
+
+// IsRootOrStep reports whether a bead is one of a run's own, given its issue
+// type and its metadata as `bd list --json` renders them: a run's root, as
+// isRoot reads one, or a step poured under a root, which names that root. It is
+// the run rule for a reader that holds listed rows rather than the ledger's
+// records, the helm board's rig read among them.
+func IsRootOrStep(issueType string, metadata map[string]string) bool {
+	return rootBy(issueType, metadata[kindKey.Name()], metadata[formulaContractKey.Name()]) ||
+		strings.TrimSpace(metadata[rootBeadKey.Name()]) != ""
 }
 
 // liveRuns reads every live run in the store, in root order, as run-lib.sh's

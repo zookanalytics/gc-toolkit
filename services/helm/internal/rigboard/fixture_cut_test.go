@@ -18,7 +18,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/conversation"
 )
 
-// TestCutFixture cuts testdata/gc-toolkit.json from the city's store, through
+// TestCutFixture cuts testdata/gc-toolkit.fixture.json from the city's store, through
 // the read's own gather. It runs only when RIGBOARD_CUT_CITY names the city
 // root:
 //

@@ -1532,6 +1532,7 @@ answer of one of the pack's shared readers, asked once per gather:
 | Reader | What the read takes from it |
 |---|---|
 | `services/gctk/waits` (`ReadStore`, `Snapshot.Holds`) | what holds each bead, the waits behind it, whether it is in flight, its arm |
+| `services/gctk/waits` (`IsRootOrStep`) | whether a bead is a run's root or a step poured under one, which is no row of its own |
 | `services/gctk/prstatus` (`Holding`) | what a person owes on a bead through its `blocks` edges |
 | `services/gctk/prstatus` (`Read`, `Derive`, `Held`, `Reasons`) | where an open pull request stands and what holds it |
 | `services/gctk/conversation` | what a conversation is, what it tracks and replies to |
@@ -1559,7 +1560,7 @@ cd services/helm
 go test ./internal/rigboard -run TestPageTypesAreCurrent -update   # writes it again
 ```
 
-**Real data for tests and demos.** `internal/rigboard/testdata/gc-toolkit.json`
+**Real data for tests and demos.** `internal/rigboard/testdata/gc-toolkit.fixture.json`
 is real gc-toolkit beads, three epics and their graph, cut from the store by the
 read's own gather and scanned for other rigs, host paths, emails and accounts;
 its `about` block says what was cut and replaced. `TestFixtureBoard` builds the

@@ -13,21 +13,12 @@ import (
 // ownRow reports whether a bead is a row of its own. A bead that carries
 // anchor_bead (a review, a rework, a validation, a finding) is not: its
 // anchor's pull request speaks for it, and the anchor's Details lists it. Nor
-// is a bead a workflow run keeps for itself: its root, which names its input
-// convoy, each step poured under it, which names the root, and the convoy, a
-// type bd keeps for grouping. The bead the run works speaks for the run, since
-// the order workers take things is detail a working system does not expose.
+// is a run's root or a step poured under it, as waits reads one, or a convoy,
+// a type bd keeps for grouping, such as the input convoy a run is poured over.
+// The bead the run works speaks for the run, since the order workers take
+// things is detail a working system does not expose.
 func ownRow(b bead) bool {
-	switch b.issueType() {
-	case "convoy", "molecule":
-		return false
-	}
-	for _, k := range []string{"anchor_bead", "gc.root_bead_id", "gc.input_convoy_id"} {
-		if b.meta(k) != "" {
-			return false
-		}
-	}
-	return true
+	return b.issueType() != "convoy" && b.meta("anchor_bead") == "" && !waits.IsRootOrStep(b.IssueType, b.metadata())
 }
 
 // index is the gathered beads by id, with what each is.

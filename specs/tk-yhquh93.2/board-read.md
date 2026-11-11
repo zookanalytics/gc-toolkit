@@ -19,6 +19,7 @@ removal, is tk-yhquh93.9.
 - **One read per rig** (`services/helm/internal/rigboard`). It gathers the
   rig's store through the gc command and asks each of the pack's shared
   readers once: `waits` for what holds a bead and whether it is in flight,
+  and for which beads are a run's root or a step under one,
   `prstatus.Holding` for what a person owes through `blocks` edges,
   `prstatus.Read` for each open pull request, and `conversation` for a
   conversation's shape. `table.go` turns their answers into a row's group and
@@ -32,7 +33,7 @@ removal, is tk-yhquh93.9.
   over 837 beads. A failed read answers 502 with the failure.
 - **Generated types.** `services/helm/web/src/rigboard/document.gen.ts` is
   generated from the Go types by tygo, and a test fails when it is stale.
-- **Real data.** `internal/rigboard/testdata/gc-toolkit.json` is the three
+- **Real data.** `internal/rigboard/testdata/gc-toolkit.fixture.json` is the three
   epics the export was drawn from (tk-wmwcdlc, tk-ssm8qns, tk-yhquh93) and
   their graph, cut through the read's own gather, every string scanned against
   the city's other rigs, host paths, emails and the repository's accounts. The
