@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { cityUrl, parseMountPath, resolveSupervisorOrigin } from './origin';
 
-// The whole drill plane hangs off this parse: get the city wrong and every
+// The page's supervisor read hangs off this parse: get the city wrong and every
 // request addresses the wrong city; get the origin wrong and the CSP
 // (connect-src 'self') refuses the request outright.
 describe('parseMountPath', () => {
@@ -51,7 +51,7 @@ describe('parseMountPath', () => {
 
 describe('resolveSupervisorOrigin', () => {
   // The reachability requirement, as a test: whatever origin the operator
-  // loaded the board from is the origin the drill plane talks to. A hardcoded
+  // loaded the board from is the origin the page talks to. A hardcoded
   // 127.0.0.1 would be the operator's own laptop when the board is opened over
   // tailscale, and would be refused by connect-src 'self' besides.
   it('addresses the same origin the document was served from', () => {

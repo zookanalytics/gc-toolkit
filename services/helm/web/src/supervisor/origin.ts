@@ -1,4 +1,4 @@
-// Where the drill plane's supervisor requests go.
+// Where the page's supervisor requests go.
 //
 // THE SHORT ANSWER: same origin as the document, always. Never an absolute
 // http://127.0.0.1:8372.
@@ -20,14 +20,14 @@
 //     origin is refused by the browser before it leaves the page — including
 //     from loopback, whenever the document origin differs.
 //
-// So the plane addresses `/v0/city/<city>/...` relative to the document, and
+// So the page addresses `/v0/city/<city>/...` relative to the document, and
 // the only thing it must discover is the CITY NAME. That is recoverable from
 // the mount path, because the supervisor mounts services at a path that carries
 // it: /v0/city/<city>/svc/helm/. The server cannot read its own external prefix
 // (the proxy strips it before helm-svc sees the request — see the normalizer in
 // index.html), but the browser can: it is sitting in location.pathname.
 
-/** The supervisor coordinates the drill plane resolved from the document. */
+/** The supervisor coordinates the page resolved from the document. */
 export interface SupervisorOrigin {
   /**
    * Absolute base every `/v0/...` path hangs off — the DOCUMENT'S OWN origin,
@@ -92,7 +92,7 @@ export function parseMountPath(pathname: string): MountPath | null {
 }
 
 /**
- * The drill plane's supervisor coordinates for the running document.
+ * The page's supervisor coordinates for the running document.
  *
  * In a production bundle this is exactly {@link parseMountPath}: resolve, or
  * fail honestly. The dev-server fallback is compiled out of production builds —
