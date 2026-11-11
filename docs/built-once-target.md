@@ -115,17 +115,21 @@ in the loop. A person's finding on a PR stays a record the operator rules on.
 
 ### Merge
 
-Gas Town's refinery flow lands a branch, directly or through a PR whose
-approval and required checks GitHub's branch rules enforce. The pack adds the
-PR's managed summary and title, and the step that takes a GitHub event to the
-bead that owns it.
+Gas Town's refinery flow lands a branch, directly or through a PR, and Gas
+Town's pending-through-merge record keeps the work's bead open until the merge
+is verified on the target. The pack adds one approval contract for every PR the
+city opens, on any target, in one evaluator of the PR's readiness that the
+board and the merge read, a merge request pinned to the head the evaluator
+judged, the PR's managed summary and title, and the step that takes a GitHub
+event to the bead that owns it.
 
-The trade: the pack's own approval rule, the merge cadence's arms with their
-lock, cursors and crash detection, and the rework and branch-currency machinery
-give way to GitHub's rules and the refinery's bring-current-or-requeue, which
-merges the target in and never rebases. An approval
-nuance GitHub cannot express keeps a residual under a warrant. Moving the
-policy onto GitHub is the operator's ruling at tk-1tfzr71.20's design.
+The trade: the pack's transition machine, its second copy of the approval
+rule, the merge cadence's arms with their lock, cursors and crash detection,
+and the rework and branch-currency machinery give way to Gas Town's record,
+the refinery's bring-current-or-requeue, which merges the target in and never
+rebases, and one landing order. The approval behavior stays the pack's, because
+no rule of GitHub's covers an integration branch, and the operator ruled at
+tk-1tfzr71.20's design that the city requires an approval on every target.
 
 ### Human engagement
 

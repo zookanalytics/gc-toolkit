@@ -60,24 +60,24 @@ flowchart LR
   end
 
   OP -->|files subject / conversation| LEDGER
-  OP -->|reviews / merges| PR
+  OP -->|reviews / approves| PR
   OP -.->|reads| HELM
   LEDGER --> POOL
   POOL -->|claim| FORM
   FORM -->|push| BR
   FORM -->|hand-off| REF
   REF -->|direct landing| BR
-  REF -->|opens as draft, city's status| PR
-  REF -->|landing record, then close| LEDGER
+  REF -->|opens as draft / edits| PR
+  REF -->|pending record| LEDGER
   FORM -->|disposition| DISP
   CAD -->|disposition| DISP
   DISP -->|successor edge, then checked close| LEDGER
   SIGN -->|verdicts on review beads| LEDGER
   ORD -->|every 60s| CAD
-  ORD -->|gate sweep| LEDGER
-  ORD -.->|reads the merge| PR
+  ORD -->|landing order: merge request| PR
+  ORD -->|landing order: record, then close| LEDGER
   CAD -->|reads + writes| LEDGER
-  CAD -->|labels, city's status| PR
+  CAD -->|labels| PR
   BR --> PR
   PR -->|GitHub merges| BR
   HELM -.->|derives per render| LEDGER
@@ -87,14 +87,13 @@ flowchart LR
 
 **Legend.** Solid = writes state. Dashed = reads without writing. Each write
 path that matters has one writer. The refinery writes landings: it lands a
-`direct` bead by a fast-forward push, opens an `mr` bead's PR as a draft or
-updates the PR the bead owns, records the landing and closes the bead.
-`bead-rehome.sh` writes dispositions, the closes that name a successor.
-`signoff.sh` writes check verdicts. The city's status at a PR's head has one
-writer, the projection, which the refinery and the cadence run, as does each
-push the pack makes onto a PR's branch. GitHub alone merges a PR, and Gas City's
-gate sweep resolves the gate a bead waits on for that merge. Everything else
-reads.
+`direct` bead by a fast-forward push and closes it, and it opens an `mr` bead's
+PR as a draft or updates the PR the bead owns, then writes the bead's pending
+record. The landing order writes each later step of that record: it asks GitHub
+to merge a ready PR at the head the refinery validated, and closes the bead once
+the merge commit is on the target. `bead-rehome.sh` writes dispositions, the
+closes that name a successor. `signoff.sh` writes check verdicts. Everything
+else reads.
 
 **Beside the ledger.** The pack also keeps files of its own. Some hold a run's
 progress, such as a paced cadence arm's cursor or the job directory of the
@@ -148,22 +147,29 @@ performer; the full transition table with writers is
    or the complete post-handoff state, never a half. The bead carries no
    landing record yet, and the refinery writes its first.
 6. **Land.** The refinery follows Gas Town's refinery flow. It takes a bead
-   handed to it once nothing holds the bead, brings the branch current by
-   merging the target in, and runs the rig's gate. A failure the branch caused
-   sends the work back to the polecat pool through `gc sling`. A failure
-   already on the target is tracked, and the landing goes ahead. A `direct`
-   bead lands by a fast-forward push. For an `mr` bead the refinery opens the
-   PR as a draft, or moves the PR the bead owns to the new head, and the bead
-   waits on that PR's merge through a `gh:pr` gate.
+   handed to it once nothing holds the bead and no other open bead is working
+   on its branch, brings the branch current by merging the target in, and runs
+   the rig's gate. A failure the branch caused sends the work back to the
+   polecat pool through `gc sling`. A failure already on the target is tracked,
+   and the landing goes ahead. A `direct` bead lands by a fast-forward push.
+   For an `mr` bead the refinery opens the PR as a draft, or moves the PR the
+   bead owns to the new head, and writes Gas Town's pending record: the bead
+   stays open, blocked and assigned to the refinery, naming the PR and the head
+   the refinery validated, until its merge is verified.
 7. **Review.** The merge cadence's gate-ensure arm makes every declared check
    raisable; a review bead is routed to the polecat-codex pool; the reviewer's
    single call to `signoff.sh` records the verdict on the review bead and, on
    request-changes, files one rework child. The PR leaves draft once every
    check gated before `ready-for-review` derives green.
-8. **Merge.** GitHub merges the PR once the rules of its target branch pass,
-   the city's status at the PR's head among them. Gas City's gate sweep then
-   resolves the bead's `gh:pr` gate, and the refinery checks that the merge
-   commit is on the target, records `merged_sha` and closes the bead.
+8. **Merge.** The landing order reads each pending PR on a cooldown. One
+   evaluator decides whether the PR is ready: the operator's approval, on every
+   target, the bead's waits, the review results at the PR's head, the feedback
+   the city has handled, and the merge state GitHub reports. When it is ready,
+   the order asks GitHub to merge exactly the head the refinery validated, and
+   once the merge commit is on the target, it records `merged_sha` and closes
+   the bead. A PR at a head the refinery has not validated goes back to the
+   refinery, and a PR closed without merging, merged at another head or moved
+   to another base keeps the bead open behind a gate for a person.
 9. **Close propagates.** `closed` is the one signal waiting parties key on
    ([lifecycle-composition.md](lifecycle-composition.md)). A landing closes a
    bead as *landed and verified*. A disposition closes one that did not land, through
@@ -409,40 +415,46 @@ first. Either way the change is a decision on the record, not a drift.
 
 ## Decisions
 
-- **GitHub merges every PR, under its target branch's rules,** and the pack
-  keeps no approval rule or merge of its own. A PR into a branch whose rules
-  require no approving review, such as a stage PR into an integration branch,
-  waits for a person's Merge.
-- **The city's verdict at a PR's head is the commit status
-  `gc-toolkit/status`,** which the rules of a rig's default branch and of its
-  integration branches require. It passes last, once the city holds nothing on
-  the PR and has routed its feedback, and everything else those rules require is
-  met there. Until then it reads pending, never failure. A post GitHub leaves
-  unanswered is waited out, for its time limit and the ten seconds GitHub gives
-  a request, before the city reads or posts in that repository again, so only a
-  post that GitHub creates later than that can land after a newer post of the
-  city's. When such a post is a success, it can let a PR merge over a hold the
-  city has read since.
-- **Only the city's account may bypass an integration branch's rules,** so its
-  own pushes there, such as a `direct` landing, land while every PR into the
-  branch waits for the city's status.
-- **Each push the pack makes onto a PR's branch publishes the head behind a
-  pending status,** under git's lease on the commit the city read on the
-  branch, so git applies the push only from that commit. Until the city knows
-  where the push left the branch, its verdict at that head counts the PRs the
-  push would move there, so a PR it moves onto a commit the city already
-  passed waits for a verdict that counts it.
-- **The city keeps GitHub's auto-merge on only while it reads the PR
-  approved,** on a target whose rules require an approving review.
-- **An approval stands across a push** until the city's reading of the change
-  withdraws it, and GitHub's stale-review dismissal stays off.
+- **One approval contract covers every PR the city opens,** on the default
+  branch and on an integration branch alike. The operator approves, and the
+  city finishes the fixes and checks still owed and merges the PR, with no
+  Merge from the operator. GitHub's rules still apply where a branch has them,
+  and a branch without an approval rule still needs the operator's approval.
+  An approval counts when GitHub would count it toward a required review, from
+  an account that can push to the repository, whatever the account's type, the
+  city's own included where GitHub accepts its review.
+- **The work's bead stays open until its merge is verified.** It keeps Gas
+  Town's pending-through-merge record, with Gas Town's values and their
+  meanings: `pull_request_pending` from the PR's publication, assigned to the
+  refinery, `pull_request_head_changed` when the PR is at a head the refinery
+  has not validated, and `mr_merged` once the merge commit is on the target. A
+  PR closed without merging, merged at a head the refinery did not validate or
+  moved to another base keeps the bead open behind a human gate. The pack adds
+  no state of its own beside the record.
+- **One evaluator decides whether a PR is ready,** for its current revision:
+  the operator's approval, the bead's own waits, the review results for the
+  PR's live head and target, the feedback the city has handled, and the merge
+  state GitHub reports. The board and the merge read it, and it is computed per
+  PR at each read and stored nowhere.
+- **The city merges by asking GitHub to merge exactly the head it judged,** on
+  an answer the evaluator gave in the same run, and turns on no auto-merge. A
+  push that lands first makes GitHub refuse. The request binds nothing but the
+  head, so a review, a comment, a hold or a change of base that arrives between
+  the read and the merge is not part of the decision, and a request GitHub
+  leaves unanswered can merge over a hold the city reads after it.
+- **One landing order is the path that admits work on a pending record,** a
+  cooldown order with no agent that reads each record's PR by its number, the
+  least recently checked first. Gas City runs one of its runs at a time, and no
+  webhook fires it, since an order a webhook fires skips that gate.
+- **An approval stands across a push** until triage reads the change as
+  material. The withdrawal is work that holds the PR until GitHub shows the
+  earlier approvals dismissed, and GitHub's stale-review dismissal stays off.
 - **A branch is brought current by merging its target in, and every push is a
   fast-forward,** so a PR keeps the commits its approval and its threads were
-  given on. A push under git's lease is a fast-forward too, because the city
-  checks first that the new head descends from the commit the lease names.
-- **A bead waits on its PR's merge through bd's own `gh:pr` gate,** which Gas
-  City's gate sweep resolves and the city's status never counts as a hold,
-  since the gate is the merge itself.
+  given on. A push onto a PR's branch goes under git's lease on the commit the
+  writer read there, and the writer checks first that the new head descends
+  from that commit, so the lease never forces, and a push someone else made is
+  refused, never overwritten.
 - **No machine checks a landing's transitions.** Each fact about a landing has
   one writer, and the doctor checks the beads after the write.
 
@@ -458,9 +470,12 @@ why a reader must know it, and the work that retires it.
   gained after the prep.
   The merge rewrite (tk-1tfzr71.20) rebuilds the patrol so that every push is a
   fast-forward, in a unit its implementation child (tk-1tfzr71.67) files.
-- **The pack still merges each PR itself.** Until a rig's cutover, the pack
-  merges that rig's PRs under its own approval rule and checks each landing
-  write against its transition machine, so steps 6 to 8 are not what runs
-  there today. The merge rewrite's implementation child (tk-1tfzr71.67) files a
-  cutover bead for each rig, and the retirement bead, which deletes the old path
+- **The pack still merges each PR itself, and closes on its own record.** Until
+  a rig's cutover, the pack merges that rig's PRs under its own approval rule,
+  which skips the city's account and counts a review from an account that
+  cannot push to the repository, records an open PR as `pull_request`, and
+  checks each landing write against its transition machine, so steps 6 to 8
+  are not what runs there today. The merge rewrite's implementation child
+  (tk-1tfzr71.67) files a cutover bead for each rig, which waits on the review
+  loop (tk-1tfzr71.22), and the retirement bead, which deletes the old path
   once no open bead is on it.
