@@ -1,7 +1,9 @@
 // The one row structure every object and every heading is drawn with:
 //
 //   line 1: chevron, priority, a marker or tag, the title, then three fixed
-//           columns on the right: the signal, Details and the bead id;
+//           columns on the right: the signal, Details and the bead id. In a
+//           narrow board (board.css) the title takes line 1 whole, and the
+//           three flow beneath it;
 //   line 2: one longer sentence where the row has one, clipped to two lines;
 //   line 3: short facts and actions where the row has any.
 //
