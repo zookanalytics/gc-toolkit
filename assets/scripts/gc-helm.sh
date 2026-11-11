@@ -4407,10 +4407,11 @@ cmd_engage() {
     fi
 
     # On a terminal, an engage whose command line leaves the concern open runs
-    # the conversation form (helm_form): the subject, the question, a new
-    # topic's rig, the model and whether to attach are fields of one screen,
-    # filled in from the command line, and the form saves and starts through
-    # this script's own open and engage. --no-attach turns its attach field
+    # the conversation form (helm_form): the subject, which names a bead, a PR
+    # or a new topic's rig, the question, the model and whether to attach are
+    # fields of one screen, filled in from the command line, where --rig fills
+    # in the subject, and the form saves and starts through this script's own
+    # open and engage. --no-attach turns its attach field
     # off, so the flag means on a terminal what it means below. A concern on the
     # command line (--reason, --template or --skill), --no-input, and every
     # engage without a terminal take the flag-driven path below.
