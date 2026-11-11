@@ -27,6 +27,9 @@ let rigReads: (() => Response)[];
 let engageReply: () => Response;
 let openReply: () => Response;
 let beadReply: (id: string) => Response;
+/** Each scrollIntoView call, in turn. jsdom lays nothing out and has no
+ *  scrollIntoView of its own, so the page's calls land here. */
+let scrolls: { el: Element; arg: unknown }[];
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -42,6 +45,14 @@ function headersOf(init?: RequestInit, req?: Request): Record<string, string> {
 
 beforeEach(() => {
   calls = [];
+  scrolls = [];
+  Object.defineProperty(Element.prototype, 'scrollIntoView', {
+    configurable: true,
+    writable: true,
+    value(this: Element, arg?: unknown) {
+      scrolls.push({ el: this, arg });
+    },
+  });
   rigReads = [() => json({ read_at: READ_AT, board })];
   engageReply = () =>
     json({
@@ -79,6 +90,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  Reflect.deleteProperty(Element.prototype, 'scrollIntoView');
 });
 
 function text(el: Element | null): string {
@@ -312,6 +324,45 @@ describe('the Needs you page', () => {
     const panel = await screen.findByRole('complementary', { name: 'Conversation' });
     const alert = await within(panel).findByRole('alert');
     expect(text(alert)).toContain('the gate holds two beads');
+  });
+
+  // Where the page places the panel below the board, opening it must bring it
+  // into view. jsdom lays nothing out, so this holds the calls: one
+  // scrollIntoView each time the panel opens or turns to another bead or kind,
+  // none for the answer an engage writes into it afterwards, and focus inside
+  // it each time.
+  it('brings the side panel into view once each time it opens or turns, and moves focus into it', async () => {
+    render(<Page />);
+    await loaded();
+    tab(/Needs you/);
+    const start = () => within(rowOf('tk-78qg2my')).getByRole('button', { name: 'Start the conversation' });
+    start().focus();
+    fireEvent.click(start());
+    const panel = await screen.findByRole('complementary', { name: 'Conversation' });
+    await within(panel).findByText(/discuss on new conversation tk-c0nv1/);
+    expect(scrolls).toHaveLength(1);
+    expect(scrolls[0].el).toBe(panel);
+    expect(scrolls[0].arg).toEqual({ block: 'nearest' });
+    expect(document.activeElement).toBe(panel);
+
+    fireEvent.click(within(rowOf('tk-v94mnsx')).getByRole('button', { name: 'Details' }));
+    const discuss = screen.getByRole('button', { name: 'Discuss' });
+    discuss.focus();
+    fireEvent.click(discuss);
+    const form = screen.getByRole('complementary', { name: 'Discuss' });
+    expect(scrolls).toHaveLength(2);
+    expect(scrolls[1].el).toBe(form);
+    expect(document.activeElement).toBe(form);
+
+    fireEvent.click(within(form).getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('complementary')).toBeNull();
+    start().focus();
+    fireEvent.click(start());
+    const again = await screen.findByRole('complementary', { name: 'Conversation' });
+    await waitFor(() => expect(calls.filter((c) => c.url === 'helm/engage')).toHaveLength(2));
+    await within(again).findByText(/discuss on new conversation tk-c0nv1/);
+    expect(scrolls).toHaveLength(3);
+    expect(document.activeElement).toBe(again);
   });
 });
 

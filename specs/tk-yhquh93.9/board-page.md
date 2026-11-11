@@ -93,6 +93,10 @@ The export has no Accept or Dismiss, and neither has the page. The routes and
 - A section's count on a heading is the number of rows its list holds, and the
   "holds up N beads" on an ask drawn under work is the length of its list of
   holds. Neither decides anything.
+- The side panel sits beside the board where the two fit, and after the board
+  below about 1080px. When it opens or turns to another bead or kind, it
+  scrolls into view and focus moves into it, and an engage's answer that
+  arrives later moves nothing.
 
 ## What this build leaves out
 

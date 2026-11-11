@@ -3,7 +3,7 @@
 // conversation answered, with the command to run and a copy control, or
 // Discuss's form for filing a conversation on a bead.
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { attachCommand } from '../actuate/client';
 import { OpenConversation } from '../open/OpenConversation';
 import type { EngageAnswer, PanelState } from './view';
@@ -35,8 +35,19 @@ export function SidePanel({
   onWrote: () => void;
 }) {
   const heading = panel.kind === 'engage' ? 'Conversation' : 'Discuss';
+  // Below about 1080px the panel sits after the whole board. When it opens or
+  // turns to another bead or kind, it scrolls into view, which moves the page
+  // only where the panel is out of sight, and focus moves into it. The answer
+  // an engage writes into an open panel moves nothing.
+  const aside = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const el = aside.current;
+    if (el === null) return;
+    el.scrollIntoView({ block: 'nearest' });
+    el.focus({ preventScroll: true });
+  }, [panel.kind, panel.bead]);
   return (
-    <aside className="panel" aria-label={heading}>
+    <aside ref={aside} className="panel" aria-label={heading} tabIndex={-1}>
       <div className="panel-head">
         <span className="panel-titles">
           <span className="panel-title">{heading}</span>
