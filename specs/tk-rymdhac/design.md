@@ -27,14 +27,14 @@ weighed below, and the design adopts the line and the hand-off it proposed.
 Today a sitting never changes a repository, so a wording, a look or a small fix
 agreed with you goes to a polecat, and you see the result a review round later.
 Approving this design lets a sitting make such a change itself, while you
-watch, once you rule in the sitting that it should. The change lives in a tree
-of its own beside the sitting's home, waits on the conversation while the
-sitting edits it, and leaves through the same hand-off a polecat's work uses, so
-the refinery's tests, the review checks, CI and your approval are its checks,
-as you ruled. Work whose spec can be written down still goes to a polecat. A
-change to a PR that is already open waits for the review-lanes member, which
-decides how a PR's branch takes another writer, and until then a ruling on an
-open PR still sends a rework.
+watch, once you rule in the sitting that it should. The change lives in a
+working copy of its own, waits on the conversation while the sitting edits it,
+and leaves through the same hand-off a polecat's work uses, so the refinery's
+tests, the review checks, CI and your approval are its checks, as you ruled.
+Work whose spec can be written down still goes to a polecat. A change to a PR
+that is already open waits for the review-lanes member, which decides how a
+PR's branch takes another writer, and until then a ruling on an open PR still
+sends a rework.
 
 Two calls carry a cost either way:
 
