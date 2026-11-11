@@ -29,9 +29,7 @@ measured.
 **Boundaries.** The design rationale and decision record live in
 `specs/2026-08-learning-system/`. The judgment content of the promotion
 rubric — what makes an observation promotable — lives in
-`skills/learning-distill/SKILL.md`, not here. Doc-keeper's
-brief-maintenance is an adjacent, separate loop: it keeps documentation
-current; this loop changes standing agent behavior.
+`skills/learning-distill/SKILL.md`, not here.
 
 ## The observation bead
 
