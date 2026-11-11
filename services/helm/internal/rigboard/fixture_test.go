@@ -50,10 +50,10 @@ func loadFixture(t *testing.T) []json.RawMessage {
 
 // fakeGC answers the read's gc calls from rows, as the store would: the open
 // listing with the gates, a parent's closed members, beads by id, and the one
-// rig the fixture holds.
+// rig the fixture holds. The read calls it from several goroutines at once, so
+// it only reads rows.
 type fakeGC struct {
-	rows  []bead
-	calls [][]string
+	rows []bead
 }
 
 func newFakeGC(t *testing.T, raw []json.RawMessage) *fakeGC {
@@ -79,7 +79,6 @@ func flagValue(args []string, name string) (string, bool) {
 }
 
 func (f *fakeGC) JSON(_ context.Context, out any, args ...string) error {
-	f.calls = append(f.calls, slices.Clone(args))
 	if len(args) >= 2 && args[0] == "rig" && args[1] == "list" {
 		return remarshal(map[string]any{"rigs": []map[string]string{{"name": "gc-toolkit", "path": "/fixture/gc-toolkit"}}}, out)
 	}
