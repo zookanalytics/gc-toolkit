@@ -74,11 +74,14 @@ pass the change, and the questions below judge it as they would anywhere else.
    in the section that holds its subject, passes the admission test, has the
    entry shape, and keeps to what the document is. Then read the document
    whole and judge it by the standard's sufficiency test, as far as the change
-   reaches: the whole document when the change adds or rewrites it, and
-   otherwise each part the change adds, changes or moves, which a reader must
-   still be able to place among the others. A shortfall beyond that reach,
-   such as quality goals the document already lacked, is a gap the change does
-   not touch.
+   reaches. A change that rewrites the document reaches all of it. A change
+   that adds the first document reaches the part the change covers. That
+   document still frames the whole repository and opens on its big picture,
+   and the rest of the architecture is the follow-up that What it reads files,
+   never a reason to hold the change. Any other change reaches each part it
+   adds, changes or moves, which a reader must still be able to place among
+   the others. A shortfall beyond that reach, such as quality goals the
+   document already lacked, is a gap the change does not touch.
 
 ### Citing the standard
 
