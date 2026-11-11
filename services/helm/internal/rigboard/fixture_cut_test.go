@@ -140,6 +140,28 @@ func TestCutFixture(t *testing.T) {
 	t.Logf("wrote %s: %d records, %d fields with text replaced", fixturePath, len(rows), len(replaced))
 }
 
+// TestRigPrivacy holds the cut's scan to the rigs the city has: with none but
+// gc-toolkit it leaves gc-toolkit's own text and edges as they are, and with
+// another rig it still replaces that rig's name.
+func TestRigPrivacy(t *testing.T) {
+	local := "tk-abc1 blocks the epic"
+	if got := rigPrivacy(nil, nil).scrub(local); got != local {
+		t.Errorf("with no other rig the cut scrubbed %q to %q", local, got)
+	}
+	b := bead{ID: "tk-abc1.2", Title: "Build the page", Status: "closed",
+		Dependencies: []edge{{DependsOnID: "tk-abc1", Type: "parent-child"}}}
+	rec, fields := fixtureRecord(b, rigPrivacy(nil, nil))
+	if len(fields) > 0 || rec["title"] != b.Title {
+		t.Errorf("with no other rig the cut replaced text in %v, and the title reads %q", fields, rec["title"])
+	}
+	if deps, _ := rec["dependencies"].([]map[string]string); len(deps) != 1 {
+		t.Errorf("with no other rig the cut kept the edges %v, want the one onto tk-abc1", rec["dependencies"])
+	}
+	if got := rigPrivacy([]Rig{{Name: "far-rig"}}, []string{"fr"}).scrub("the far_rig store"); got != "the [another rig] store" {
+		t.Errorf("with another rig the cut scrubbed the text to %q", got)
+	}
+}
+
 // rigMentions runs the pack's rig-mentions.sh, the check self-review runs on a
 // branch, over the cut's text as gc-toolkit's change, from the city root so it
 // reads that city's rigs. Its exit 0 is a nil error: the text names no other
@@ -325,7 +347,8 @@ func fixtureRecord(b bead, p *privacy) (map[string]any, []string) {
 // privacy is what the cut never writes: the city's other rigs by name, with a
 // name's separators written any way or left out as rig-mentions.sh matches it,
 // and by their beads' ids, host paths, email addresses, and the accounts git
-// and gh name on this host, the repository's collaborators among them.
+// and gh name on this host, the repository's collaborators among them. names
+// and idShapes are nil when the city has no other rig to match.
 type privacy struct {
 	names    *regexp.Regexp
 	ids      map[string]bool
@@ -336,15 +359,6 @@ type privacy struct {
 
 func newPrivacy(t *testing.T, ctx context.Context, gc GC, others []Rig) *privacy {
 	t.Helper()
-	p := &privacy{ids: map[string]bool{}}
-	var names, prefixes []string
-	for _, r := range others {
-		parts := nameSeparator.Split(r.Name, -1)
-		for i, part := range parts {
-			parts[i] = regexp.QuoteMeta(part)
-		}
-		names = append(names, strings.Join(parts, nameSeparator.String()+"?"))
-	}
 	var payload struct {
 		Rigs []struct {
 			Name, Prefix string
@@ -353,14 +367,13 @@ func newPrivacy(t *testing.T, ctx context.Context, gc GC, others []Rig) *privacy
 	if err := gc.JSON(ctx, &payload, "rig", "list", "--json"); err != nil {
 		t.Fatal(err)
 	}
+	var prefixes []string
 	for _, r := range payload.Rigs {
 		if r.Name != "gc-toolkit" && r.Prefix != "" {
-			prefixes = append(prefixes, regexp.QuoteMeta(r.Prefix))
-			p.prefixes = append(p.prefixes, r.Prefix)
+			prefixes = append(prefixes, r.Prefix)
 		}
 	}
-	p.names = regexp.MustCompile(`(?i)\b(` + strings.Join(names, "|") + `)\b`)
-	p.idShapes = regexp.MustCompile(`\b(` + strings.Join(prefixes, "|") + `)-[a-z0-9]{3,}(-[a-z0-9]+)*(\.[0-9]+)*\b`)
+	p := rigPrivacy(others, prefixes)
 	accounts := [][]string{{"git", "config", "user.name"}, {"git", "config", "user.email"},
 		{"gh", "api", "user", "--jq", ".login"}, {"gh", "api", "repos/{owner}/{repo}/collaborators", "--jq", ".[].login"}}
 	for _, args := range accounts {
@@ -381,11 +394,41 @@ func newPrivacy(t *testing.T, ctx context.Context, gc GC, others []Rig) *privacy
 	return p
 }
 
+// rigPrivacy is the part of privacy the city's other rigs make: the pattern of
+// their names and the pattern of ids with their bead prefixes. A pattern is
+// built only from a list that names something, because an empty alternation
+// matches at every word boundary and would scrub every word of gc-toolkit's own
+// text.
+func rigPrivacy(others []Rig, prefixes []string) *privacy {
+	p := &privacy{ids: map[string]bool{}, prefixes: prefixes}
+	var names, quoted []string
+	for _, r := range others {
+		parts := nameSeparator.Split(r.Name, -1)
+		for i, part := range parts {
+			parts[i] = regexp.QuoteMeta(part)
+		}
+		names = append(names, strings.Join(parts, nameSeparator.String()+"?"))
+	}
+	for _, pre := range prefixes {
+		quoted = append(quoted, regexp.QuoteMeta(pre))
+	}
+	if len(names) > 0 {
+		p.names = regexp.MustCompile(`(?i)\b(` + strings.Join(names, "|") + `)\b`)
+	}
+	if len(quoted) > 0 {
+		p.idShapes = regexp.MustCompile(`\b(` + strings.Join(quoted, "|") + `)-[a-z0-9]{3,}(-[a-z0-9]+)*(\.[0-9]+)*\b`)
+	}
+	return p
+}
+
 // learnIDs asks each other rig's store which of the tokens in texts shaped
 // like its bead ids it holds, since such a token names a bead only when a
 // store holds it, or when it is a wisp (isWisp).
 func (p *privacy) learnIDs(t *testing.T, ctx context.Context, gc GC, others []Rig, texts []string) {
 	t.Helper()
+	if p.idShapes == nil {
+		return
+	}
 	var cands []string
 	for _, s := range texts {
 		for _, m := range p.idShapes.FindAllString(s, -1) {
@@ -428,13 +471,17 @@ func (p *privacy) isWisp(token string) bool {
 func (p *privacy) scrub(s string) string {
 	s = hostPath.ReplaceAllString(s, "[a host path]")
 	s = emailAddress.ReplaceAllString(s, "[an email address]")
-	s = p.idShapes.ReplaceAllStringFunc(s, func(m string) string {
-		if p.ids[m] || p.isWisp(m) {
-			return "[another rig's bead]"
-		}
-		return m
-	})
-	s = p.names.ReplaceAllString(s, "[another rig]")
+	if p.idShapes != nil {
+		s = p.idShapes.ReplaceAllStringFunc(s, func(m string) string {
+			if p.ids[m] || p.isWisp(m) {
+				return "[another rig's bead]"
+			}
+			return m
+		})
+	}
+	if p.names != nil {
+		s = p.names.ReplaceAllString(s, "[another rig]")
+	}
 	for _, a := range p.accounts {
 		s = regexp.MustCompile(`(?i)`+regexp.QuoteMeta(a)).ReplaceAllString(s, "[an account]")
 	}
