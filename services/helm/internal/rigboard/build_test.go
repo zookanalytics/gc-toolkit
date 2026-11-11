@@ -169,6 +169,72 @@ func TestPages(t *testing.T) {
 	})
 }
 
+// TestWorkUnderTwoParents builds work whose parent-child edges name two
+// parents, in the order the row gives them, and holds each epic to the work it
+// sits under, listed and counted once.
+func TestWorkUnderTwoParents(t *testing.T) {
+	parent := func(p string) listing.Edge { return listing.Edge{ID: p, Type: "parent-child"} }
+	epic := func(id string, p int) bead {
+		return bead{ID: id, Title: "Epic " + id, Status: "open", Priority: p, IssueType: "epic", Epic: listing.Epic{Hypothesis: "it works"}, CreatedAt: "2026-01-01"}
+	}
+	clear := func(id string) waits.Holds { return waits.Holds{ID: id, Status: waits.Clear} }
+	empty := func(open, closed []bead, holds map[string]waits.Holds) *gathered {
+		return &gathered{rig: "gc-toolkit", open: open, closed: closed, holds: holds, unread: map[string]error{},
+			holding: map[string]prstatus.Holds{}, unwalked: map[string]bool{}, facts: map[string]prstatus.Facts{}, noFacts: map[string]bool{}}
+	}
+	listed := func(doc Document, e string) []GroupList {
+		for _, x := range doc.Epics {
+			if x.ID == e {
+				return x.Groups
+			}
+		}
+		return nil
+	}
+	same := func(a, b []GroupList) bool {
+		return slices.EqualFunc(a, b, func(x, y GroupList) bool { return x.Group == y.Group && slices.Equal(x.IDs, y.IDs) })
+	}
+
+	t.Run("a member whose first parent is a convoy sits under its epic", func(t *testing.T) {
+		g := empty([]bead{epic("tk-e", 1)}, []bead{
+			{ID: "tk-cv", Title: "input convoy", Status: "closed", IssueType: "convoy"},
+			{ID: "tk-e.1", Title: "landed", Status: "closed", Priority: 2, IssueType: "task", Edges: []listing.Edge{parent("tk-cv"), parent("tk-e")}, CreatedAt: "2026-01-02"},
+		}, map[string]waits.Holds{"tk-e": clear("tk-e")})
+		doc := build(g)
+		if got, want := listed(doc, "tk-e"), []GroupList{{Group: GroupClosed, IDs: []string{"tk-e.1"}}}; !same(got, want) {
+			t.Errorf("tk-e lists %+v, want %+v", got, want)
+		}
+		if c := doc.Rows["tk-e"].Counts; c == nil || *c != (Counts{Closed: 1}) {
+			t.Errorf("tk-e counts %+v, want 1 closed", c)
+		}
+	})
+
+	t.Run("work under two epics that waits on a person is counted and asked under each", func(t *testing.T) {
+		wq := waits.Wait{ID: "tk-q", Type: "blocks", Title: "which way?", Status: "open", IssueType: "gate", AwaitType: "human"}
+		g := empty([]bead{
+			epic("tk-e1", 1), epic("tk-e2", 2),
+			{ID: "tk-q", Title: "which way?", Status: "open", Priority: 1, IssueType: "gate", AwaitType: "human", CreatedAt: "2026-01-02"},
+			{ID: "tk-w", Title: "work under both", Status: "open", Priority: 2, IssueType: "task",
+				Edges: []listing.Edge{parent("tk-e1"), parent("tk-e2"), {ID: "tk-q", Type: "blocks"}}, CreatedAt: "2026-01-03"},
+		}, nil, map[string]waits.Holds{"tk-e1": clear("tk-e1"), "tk-e2": clear("tk-e2"), "tk-q": clear("tk-q"),
+			"tk-w": {ID: "tk-w", Status: waits.Blocked, Waits: []waits.Wait{wq}}})
+		g.holding["tk-w"] = prstatus.Holds{Gates: []prstatus.Blocker{{ID: "tk-q", Title: "which way?", Status: "open", IssueType: "gate", AwaitType: "human"}}}
+		doc := build(g)
+		for _, e := range []string{"tk-e1", "tk-e2"} {
+			if got, want := listed(doc, e), []GroupList{{Group: GroupWaitingOnYou, IDs: []string{"tk-w"}}}; !same(got, want) {
+				t.Errorf("%s lists %+v, want %+v", e, got, want)
+			}
+			if c := doc.Rows[e].Counts; c == nil || *c != (Counts{WaitingOnYou: 1}) {
+				t.Errorf("%s counts %+v, want 1 waiting on you", e, c)
+			}
+		}
+		n := doc.NeedsYou
+		want := []EpicAsks{{Epic: "tk-e1", Asks: []string{"tk-q"}}, {Epic: "tk-e2", Asks: []string{"tk-q"}}}
+		if n.Count != 1 || !slices.EqualFunc(n.NoConversationYet, want, func(x, y EpicAsks) bool { return x.Epic == y.Epic && slices.Equal(x.Asks, y.Asks) }) {
+			t.Errorf("Needs you counts %d and lists %+v, want 1 and the question under both epics", n.Count, n.NoConversationYet)
+		}
+	})
+}
+
 // TestAParentCycleEndsItsPath walks parent-child edges that come back to a
 // bead the walk has passed: tk-c1 and tk-c2 name each other as parents, and
 // tk-c2 also names epic tk-a. The walk ends, and tk-a lists each of them once.
