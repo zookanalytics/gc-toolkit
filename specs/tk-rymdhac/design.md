@@ -39,33 +39,32 @@ that is already open waits for the review-lanes member, which decides how a
 PR's branch takes another writer, and until then a ruling on an open PR still
 sends a rework.
 
-Two calls carry a cost either way:
+How you see a copy of a rig's UI while a sitting changes it is decided. You
+open the copy as a live page at an address of its own, which exists for exactly
+as long as the copy runs, and any number of copies run at once. The tailnet lets
+your devices reach every port on this host, but a copy listens only on the host
+itself, so the city publishes it. It cannot go under the supervisor's address,
+because the board's page reads the live city from whatever address it is served
+on. It needs a publisher the city sets, a serve command the rig declares, and
+one pack script. In a city that sets no publisher, the sitting shows you
+screenshots instead. It captures each look and reads it, and you see the images
+on the change's PR once it has one.
 
-1. **How you see a copy of a rig's UI while the sitting changes it.** From your
-   phone or laptop, your browser reaches this host only through the
-   supervisor's address, and a copy cannot be served there, because the board's
-   page reads the live city from whatever address it is served on.
-   - (a) A page on an address of its own, which the city publishes while the
-     copy runs and withdraws when it stops (here, a port on the tailnet, which
-     the mechanik sets up once). You open the link the sitting prints and click
-     through the copy on fixture data. It costs a city setting, one pack script,
-     and a mapping on the host for as long as each copy runs.
-   - (b) Screenshots only. The sitting captures each look and reads it, and you
-     see the images on the change's PR once it has one. It costs nothing new,
-     and you get no live look before the hand-off.
-2. **Who takes a check's send-back while the sitting is still open.**
-   - (a) The pool, as for any change. A check's finding is written down, which
-     is the line's own test for polecat work. A send-back about a look then
-     waits a polecat cycle, and you are not in it.
-   - (b) The open sitting. It keeps you in the loop on feedback about a look,
-     and it waits for the review-lanes member, because the writer that files a
-     send-back today is one that member deletes.
+One call is left, the send-back call, and it costs something either way. **Who
+takes a check's send-back while the sitting is still open:**
 
-Approving as it stands ships the first option of each, with screenshots in a
-city that sets no publisher. Merging this design's PR releases the
-implementation, whose first four units land on the effort's branch, the
-doctrine after the writers it names. The fifth, a sitting editing an open PR's
-branch, is filed to wait for the review-lanes and merge members.
+- (a) The pool, as for any change. A check's finding is written down, which
+  is the line's own test for polecat work. A send-back about a look then
+  waits a polecat cycle, and you are not in it.
+- (b) The open sitting. It keeps you in the loop on feedback about a look,
+  and it waits for the review-lanes member, because the writer that files a
+  send-back today is one that member deletes.
+
+Approving as it stands ships (a), the pool taking a send-back. Merging this
+design's PR releases the implementation, whose first four units land on the
+effort's branch, the doctrine after the writers it names. The fifth, a sitting
+editing an open PR's branch, is filed to wait for the review-lanes and merge
+members.
 
 The design serves the Core Belief "Human attention is the budget"
 ([foundation.md](../../docs/foundation.md)), with the mandate's high-bandwidth
@@ -323,33 +322,50 @@ without them.
 
 ## 4. A check's send-back
 
-Under call 2(a), a send-back goes where any change's goes. A failure the branch
-caused at the refinery's gate sends the bead back to the polecat pool with its
-branch kept and its `rejection_reason`, and a review that requests changes files
-a rework child the pool runs (`signoff.sh` through `rework-child.sh` today, and
-the review-lanes member's loop once it lands). The sitting is not in that path.
+Under option (a) of the send-back call, a send-back goes where any change's
+goes. A failure the branch caused at the refinery's gate sends the bead back to
+the polecat pool with its branch kept and its `rejection_reason`, and a review
+that requests changes files a rework child the pool runs (`signoff.sh` through
+`rework-child.sh` today, and the review-lanes member's loop once it lands). The
+sitting is not in that path.
 A finding is written down, which is the line's own test for polecat work, and a
 polecat resumes the sitting's branch because `metadata.branch` is authoritative
 to Work's setup. When the operator wants to react to a send-back live, they
 engage the change, and a sitting edits it as an open PR once unit 5 has landed.
 
-Under call 2(b), an open sitting on the change takes its send-backs. Routing a
+Under option (b), an open sitting on the change takes its send-backs. Routing a
 send-back to a sitting is new work on the rework writer that tk-1tfzr71.22
 retires, so unit 5 would carry it, and the sitting would stay open, holding the
 operator, until the change lands.
 
 ## 5. A copy of a rig's UI
 
-**The per-rig declaration.** A rig's demo guidance, its `docs/review-demo.md`,
-which the demo check reads at the reviewed commit, says how to capture each of
-the rig's visual surfaces, and for an app page that can be a command that
-serves it from a worktree on fixture data with no city behind it. A rig offers
-live UI work in a sitting only when its demo guidance names such a command.
-That restricts the set to the rigs that can run an isolated copy, which is the
-restriction the operator's concern offered, and it adds no declaration of its
-own. gc-toolkit's board qualifies: `go run ./cmd/helm-fixture` from
-`services/helm`, listening on loopback at `$PORT`
-([review-demo.md](../../docs/review-demo.md#the-helm-board)).
+**The per-rig declaration.** A rig declares how to serve its UI as a serve
+command, `ui_serve_command`, among the commands the city's config sets for the
+rig beside its lint and test commands, which are the rig's `[rigs.formula_vars]`
+in `city.toml`. The copy script reads it as the demo engine reads
+`app_reads_city`: `gc formula show <formula> --rig <rig> --json`, then the var's
+`rig_default` (`assets/scripts/demo-engine-lib.sh:479-493`; that var is declared
+at `formulas/mol-rig-demo.toml:95`). `mol-rig-demo` declares the serve command
+beside it, along with the city's two values that Publishing describes, so one
+call reads all three. The serve command is a var of its own and not
+`mol-rig-demo`'s `serve_cmd`, because a rig's value is the default for every
+pour of that formula, and its capture step declines a pour that names
+`serve_cmd` beside a `serve_dir` or a `base_url`.
+
+The declared command, run from the tree it is given, serves the rig's UI on
+fixture data with no city behind it, listens on loopback at `$PORT`, and takes
+nothing that two copies would share. It is one value for every branch of the
+rig, so it names an entry point every branch carries. A rig that declares none
+offers no live copy. That restricts live UI work to the rigs that can run an
+isolated copy, which is the restriction the operator's concern offered. The
+rig's demo guidance, its `docs/review-demo.md`, refers to the declared command
+where it tells a capture what to serve, so the command has one home, and how
+`demo-screenshot.sh` takes its command does not change. gc-toolkit's value runs
+`go run ./cmd/helm-fixture` from `services/helm`
+([review-demo.md](../../docs/review-demo.md#the-helm-board)). gc-toolkit sets
+`app_reads_city = "true"`, so its declared command is the fixture server and
+never the helm service.
 
 **Isolation.** A copy runs from the change's tree, so it shows the change. It
 listens on a free loopback port, chosen as `demo-screenshot.sh` turns
@@ -358,37 +374,123 @@ data with nothing live behind it. And it keeps an origin of its own: it is never
 mounted under the supervisor as a Gas City service, because a page there shares
 the supervisor's origin, and the board's own client reads the supervisor's API
 relative to the page's origin (`services/helm/web/src/drill/origin.ts`), so a
-copy mounted there would read the live city. A copy lives no longer than its
-sitting: the sitting stops it at the hand-off, at a drop and at the sign-off,
-and a copy whose sitting has ended stops itself.
+copy mounted there would read the live city. A copy ends when the session that
+started it stops it, or by Gas City's orphan sweep once that session has ended
+(Cleanup, below).
 
-**How the operator sees it.** From a phone or a laptop, the operator's browser
-reaches this host only through the tailnet's serve mapping of `/` to the
-supervisor (read 2026-11-11),
-and the board's client notes that the operator opens the board from a phone or
-a laptop that is not the city host (`drill/origin.ts`). A copy on loopback is
-out of their reach until something publishes it.
+**Reach.** The tailnet lets the operator's devices reach every port on this
+host. What their browser can open is decided on the host, first by the address
+each program listens on, and then by the host's application firewall. The
+firewall admits the programs on its list and software signed with a valid
+certificate, and nobody is at the host's screen to approve another. Everything
+the city runs listens on loopback, and the one thing published is the
+supervisor, which `tailscale serve` maps to the host's HTTPS name. The board's
+client notes that the operator opens the board from a phone or a laptop that is
+not the city host (`drill/origin.ts`). So a copy on loopback is out of the
+operator's reach until something publishes its port. A copy is published on a
+port of its own and does not listen on the tailnet address itself, for the
+reasons the operator agreed to in conversation tk-mfwgu1a. `tailscaled`, which
+the firewall admits, takes the connection and hands it to the copy on loopback,
+so publishing works for any rig's UI with nobody at the host's screen. The copy
+never listens on a network address. And it gets an origin of its own.
 
-- **(a) A page the city publishes.** The city names a command that publishes a
-  local port on an origin of its own and a command that withdraws it, set as an
-  environment value on the converse templates, which the mechanik owns. Here the
-  pair maps a tailnet HTTPS port to the copy's loopback port with
-  `tailscale serve`, and removes the mapping. The pack's copy script starts a
-  copy, publishes it, prints the address the operator opens, and withdraws and
-  stops it. The copy itself stays on loopback, because the host's application
-  firewall is on (read 2026-11-11), and a fresh `go run` binary listening on the
-  tailnet address would meet it on every build. With no publisher set, a copy is
-  reachable only at the host, and the sitting falls back to (b).
-- **(b) Screenshots.** The sitting captures each look from the tree with
-  `demo-screenshot.sh`, inside the sandbox where the live city cannot be
-  reached, and reads the image itself. The operator sees the images on GitHub
-  once the change has a PR, attached by `demo-deliver.sh`.
-- **Containers stay out.** Gas City runs a city's sessions in pods or sandboxes,
-  chosen for the whole city (`[session] provider`), and has no primitive that
-  runs one isolated app instance ([gas-city-search.md](gas-city-search.md)). A
-  rig whose UI cannot run
-  on fixtures is not offered live UI work, and its own design takes containers
-  up once it needs them.
+**The copy script.** One pack script runs a copy, and any session of a rig can
+call it. The operator asked in conversation tk-mfwgu1a for a helper, or
+configuration and a helper, that lets an agent run a local instance of a rig's
+UI and learn the local port and the address to give them. This design gives it
+one caller, the sitting, through `converse-edit`. The script does these things:
+
+- **Start.** From a tree the caller names, it reads the rig's declared serve
+  command, picks a free loopback port with `demo_engine_free_port`
+  (`assets/scripts/demo-engine-lib.sh:226-231`), as `demo-screenshot.sh
+  --port 0` does, runs the command there and prints the local port.
+- **An address on request.** When the caller asks for one, it also publishes the
+  port and prints the address to give the operator. A copy a session runs for
+  its own checks takes no address.
+- **Stop.** It ends a copy.
+- **State.** It tells a caller whether a copy is running and whether it still
+  has its address, because a publisher can end alone.
+- **Output.** It prints the local port and the address so that a caller reads
+  each without parsing prose.
+- **No publisher.** Where the city sets none, it runs the copy, prints the port
+  and says that no address can be given, and the sitting shows screenshots.
+- **No cap.** Each copy has a port of its own, so any number run at once.
+
+Its verbs, flags and value names follow the pack's scripts and the names beside
+them in `[rigs.formula_vars]`.
+
+**Publishing.** The city sets a publish command, `ui_publish_command`, and an
+address pattern, `ui_address_pattern`. The publish command takes a copy's local
+port and publishes it at an origin of its own for exactly as long as the command
+runs. The address pattern gives the address for a port. There is no withdraw
+command. The script runs the publish command in the copy's process group and
+ties the two together. When the copy or the publish command ends, the script
+ends the other, so no address outlives its copy, and a copy whose publisher
+ended reads as having no address until the script publishes it again. A publish
+the publisher refuses because another client was changing its config is tried
+again, and a port refused as taken gets another free port.
+
+In this city the publish command is `tailscale serve --yes --https=<port>
+http://127.0.0.1:<port>`, run in the foreground, and the address is
+`https://<the host's tailnet name>:<port>/`. `tailscaled` keeps such a mapping
+under the command's own session and deletes it when that session ends, however
+the command died. It refuses a port any mapping holds, so a copy cannot take the
+supervisor's port. The city's publish command never runs `tailscale serve
+reset`, which drops every mapping, the supervisor's included.
+
+The city's two values are read by the call that reads the serve command, so any
+session of the rig reads them, and the mechanik sets them. They are not an
+environment value on the converse templates, which would reach only a sitting.
+Gas City's config sets a formula var only for a rig and has no value set once
+for a whole city (section 10), so the mechanik sets the two among the formula
+vars of each rig that offers a live copy.
+
+A copy on another port of the host's name shares the cookie jar of the
+supervisor's host name, because cookies ignore ports. The supervisor and the
+board set no cookie today, and a cookie added to either would reach every copy.
+
+**Cleanup.** Stopping a copy ends its process group, which ends the publish
+command with it. The sitting stops its copy at the hand-off, at a drop and at the
+sign-off. A copy whose session has ended is ended by Gas City's orphan sweep,
+which the design composes and does not rebuild. The sweep ends a process that
+left its session's terminal, carries the session's `GC_SESSION_ID` and
+`GC_CITY_PATH` and has been reparented to PID 1, once the session is closed, or
+stopped with no live pane, and it kills that process's group. For a stopped
+session it also needs the process's `GC_RUNTIME_EPOCH` and a start before the
+stop. While the session runs, the sweep leaves the process alone, because a
+process whose `GC_SESSION_ID` names a running session counts as that session's.
+So the copy's leading process keeps the session's `GC_SESSION_ID`,
+`GC_CITY_PATH` and `GC_RUNTIME_EPOCH`. It leads a process group of its own that
+holds the copy and its publish command. And it is a program whose environment
+macOS lets `ps` read, which an Apple platform binary such as `/bin/sh`,
+`/bin/bash` or `/usr/bin/perl` is not.
+
+The script cannot compose `detached-job.sh start` as it stands, because that
+script removes `GC_SESSION_ID` from the job's environment to survive this sweep
+(`assets/scripts/detached-job.sh:321`), and a `/bin/sh` wrapper leads its job.
+In its place the script detaches the copy as that script does, through perl's or
+python3's `setsid()`, keeps the three values, and leads the group with a program
+whose environment `ps` reads, such as the Homebrew bash the pack's scripts run
+under on this host.
+
+A copy also ends when its session sleeps or is stopped. A held sitting does not
+sleep, and the script's start is safe to repeat after a wake. No watcher inside
+a copy polls for its sitting. Unit 4's first act is the proof on the host that
+the sweep ends a copy started this way on the city's running gc. If it does not,
+the fallback the operator accepted in conversation tk-mfwgu1a is that the
+script's next start ends each copy whose session has ended, for which the
+script then records each copy's session.
+
+**Screenshots.** Where the script can give no address, the sitting captures each
+look from the tree with `demo-screenshot.sh`, inside the sandbox where the live
+city cannot be reached, and reads the image itself. The operator sees the images
+on GitHub once the change has a PR, attached by `demo-deliver.sh`.
+
+**Containers stay out.** Gas City runs a city's sessions in pods or sandboxes,
+chosen for the whole city (`[session] provider`), and has no primitive that runs
+one isolated app instance ([gas-city-search.md](gas-city-search.md)). A rig whose
+UI cannot run on fixtures is not offered live UI work, and its own design takes
+containers up once it needs them.
 
 ## 6. The doctrine and text that change
 
@@ -447,8 +549,8 @@ before where the table says so.
 | 1 | Work's writers serve a sitting | `--held-by <conversation>` on `work-setup.sh` and `work-submit.sh`: the proof, refusals that end nothing, and the hand-off's release of the edge as its last write, after the refinery assignment, with a refusal after the release that says the refinery holds the bead. Tests in `work-setup.test.sh` and `work-submit.test.sh`: a sitting's setup and its re-entry to a recorded tree, a hand-off that assigns the refinery and then releases the edge, a hand-off stopped before the release, by a refused write or a failed release, that a second run completes with nothing written beyond what the first did not reach and its note appended again, a run after the release refused with the refinery named as the holder and nothing written, a missing edge and a hook that names another bead, each refused with nothing written, and a refusal that drains nothing. The `component-model.md` rows. The commit cites the search record. | nothing |
 | 2 | One home for the PR summary's standard | The submit step's "Compose the PR summary" moves into the commit-conventions skill, whose description gains the summary. The submit step loads the skill and keeps its calls, and `formula-step-size.test.sh` holds. | nothing |
 | 3 | The doctrine and the edit skill | Every row of section 6 except the UI section of `converse-edit`, and the first Debt entry of `architecture.md` removed. | units 1 and 2 |
-| 4 | A copy of a rig's UI | Under call 1(a): the pack's copy script (start, publish, stop, a lifetime bound by the sitting), `converse-edit`'s section on a copy, the live-copy command in gc-toolkit's `docs/review-demo.md`, and a bead for the mechanik to set the city's publish and withdraw commands on the converse templates. Under call 1(b): `converse-edit`'s section on screenshots alone. | unit 3 |
-| 5 | A sitting edits an open PR's branch | Built on tk-1tfzr71.22's rework in its loop and tk-1tfzr71.20's publication of a head, following whatever tk-1tfzr71.22's design settles. Under call 2(b), it also routes a send-back to an open sitting. It removes the second Debt entry. | tk-1tfzr71.22 and tk-1tfzr71.20 |
+| 4 | A copy of a rig's UI | The copy script, which starts a copy with or without an address, stops it and reports its state, and its tests, which stub the publish command so that no suite touches Tailscale. The serve command's declaration and the city's publish command and address pattern, as the three vars `mol-rig-demo` declares and the script reads. `converse-edit`'s section on a copy, which calls the script, gives the operator the address it prints and shows screenshots where it prints none. gc-toolkit's `docs/review-demo.md` pointed at the declared command. A bead for the mechanik to set gc-toolkit's serve command, which runs `go run ./cmd/helm-fixture` from `services/helm`, and the city's two values in the city's config. Its first act is the proof under Cleanup in section 5. | unit 3 |
+| 5 | A sitting edits an open PR's branch | Built on tk-1tfzr71.22's rework in its loop and tk-1tfzr71.20's publication of a head, following whatever tk-1tfzr71.22's design settles. Under option (b) of the send-back call, it also routes a send-back to an open sitting. It removes the second Debt entry. | tk-1tfzr71.22 and tk-1tfzr71.20 |
 
 ## 9. Edges and notes the implementation child adds
 
@@ -465,11 +567,12 @@ before where the table says so.
   which unit 1 gives a sitting's caller, and whichever lands second carries the
   other.
 - A note on tk-1tfzr71.22: its design decides how an open PR's branch takes a
-  writer other than a rework child's polecat, which unit 5 waits on, and call 2
-  is the operator's ruling on whether an open sitting takes a send-back.
-- Under call 1(a), the mechanik's bead from unit 4 goes to the mechanik and no
-  bead of the effort waits on it, since a city with no publisher falls back to
-  screenshots.
+  writer other than a rework child's polecat, which unit 5 waits on, and the
+  send-back call is the operator's ruling on whether an open sitting takes a
+  send-back.
+- The mechanik's bead from unit 4 goes to the mechanik, and no bead of the
+  effort waits on it, since a rig with no declared serve command offers no live
+  copy and a city with no publisher shows screenshots.
 
 ## 10. Facts this design rests on
 
@@ -511,15 +614,90 @@ before where the table says so.
 - **The rules.** gc-toolkit requires verified signatures on every branch, and on
   `main` also a PR, linear history and status checks
   (`gh api repos/<owner>/<repo>/rules/branches/<branch>`, read 2026-11-11).
-- **The operator's reach.** `tailscale serve status` on the host maps only `/`
-  to `http://127.0.0.1:8372`, the supervisor (read 2026-11-11). The board's
-  drill plane reads `/v0/city/<city>/...` relative to the page's origin, under a
+- **The operator's reach** (read on the host 2026-11-11, each with its command
+  in tk-rymdhac's notes of that date). The packet filter this node received
+  allows every tailnet peer every port, TCP and UDP (`tailscale debug netmap`).
+  `tailscaled` runs as root on a utun interface, so a loopback listener is not
+  reachable on the tailnet address. `tailscale serve status` maps only `/` on
+  the host's HTTPS name to `http://127.0.0.1:8372`, the supervisor. Every TCP
+  listener of the city's user is on loopback (`lsof`). The application firewall
+  is on, in stealth mode, and admits built-in and downloaded signed software on
+  its own (`socketfilterfw --getglobalstate` and `--getallowsigned`). Its list
+  allows node, sshd-auth, mosh-server, tailscaled, `/usr/bin/python3` and
+  `/usr/bin/ruby` beside Apple's own services, and blocks Homebrew's Python.app
+  (`socketfilterfw --listapps`). Whether it blocks a fresh `go run` build
+  listening on the tailnet address was not tested. Such a build carries only an
+  ad-hoc signature with no certificate (`codesign -dv` on a Go build of the
+  city's), and no list names it, so the inference is that it would wait for an
+  approval at the host's screen. The board's drill plane reads
+  `/v0/city/<city>/...` relative to the page's origin, under a
   `connect-src 'self'` policy, because the operator opens the board from a phone
-  or a laptop (`services/helm/web/src/drill/origin.ts`). The host's application
-  firewall is on (`socketfilterfw --getglobalstate`, read 2026-11-11).
+  or a laptop (`services/helm/web/src/drill/origin.ts`).
+- **The city's publisher.** `tailscaled`'s prefs name the city's user as its
+  operator (`tailscale debug prefs`), and Tailscale's CLI reference says "The
+  operator can manage Serve and Funnel port targets, but serving a file,
+  directory, or Unix socket still requires root" (tailscale.com/kb/1080/cli).
+  Its Serve reference says that with `--bg` a serve "runs persistently in the
+  background until you disable it" (tailscale.com/kb/1242/tailscale-serve).
+  Tailscale's source is read at `tailscale/tailscale` tag v1.104.5, the host
+  daemon's version. A foreground `tailscale serve` stores its mapping under
+  `ServeConfig.Foreground`, keyed by the CLI's session and valid for that
+  session's life (`ipn/serve.go`, lines 70-76). The daemon deletes it when that
+  session ends (`ipn/ipnlocal/local.go`, `WatchNotificationsAs`, the deferred
+  `DeleteForegroundSession` at line 3938), and it refuses a port that is taken
+  (`ipn/ipnlocal/serve.go`, `validateServeConfigUpdate`, lines 1851-1888, and
+  the comment at line 345). Exercised on the host as the city's user with no
+  sudo and no terminal: a mapping appeared and its address answered, three
+  coexisted, a second claim on a mapped port was refused, one of two starts in
+  the same instant was told to try again, a `kill -9` of the command removed its
+  mapping within three seconds, and the supervisor's mapping was unchanged
+  throughout. The operator then opened a page published this way from their own
+  device ("Yes, that worked", conversation tk-mfwgu1a).
+- **Cookies.** The supervisor and the board set no cookie on `/`, `/health`, the
+  city's status route or the board's page, and `services/helm` has no cookie
+  code.
+- **Gas City's orphan sweep** (`gastownhall/gascity` 34485296). gc scans the
+  host's process table for a session's leftover processes, as it does for tmux
+  sessions: "a process that left the agent's process group and outlived its
+  terminal, carrying the session's `GC_SESSION_ID` and `GC_CITY_PATH`. The
+  orphan sweep ends such a process once its session is closed, or stopped with
+  no live box under its name, and a session's start ends its own stopped
+  incarnation's leftovers first" (`docs/reference/exec-session-provider.md`,
+  lines 637-643). In code, `sweepProcessTableOrphans` takes only a root that is
+  untracked and reparented to PID 1 (`processRootReapable`), and
+  `processRootIncarnationOver` ends it once its session's row is closed or
+  absent, or open and stopped with no live pane, which also needs the root's
+  `GC_RUNTIME_EPOCH` and a start before the stop (all in
+  `cmd/gc/session_beads.go`). The tmux provider counts a root as tracked while
+  its `GC_SESSION_ID` names a running session (`FindRuntimesBySessionID` in
+  `internal/runtime/tmux/adapter.go`). A start runs `Manager.killExistingOrphans`
+  (`internal/session/manager.go`). The kill signals the root's process group,
+  TERM then KILL (`internal/runtime/proctable/kill_unix.go`). On macOS the scan
+  reads each process's environment as `ps` does
+  (`internal/runtime/proctable/scan_darwin_records.go`), and macOS withholds an
+  Apple platform binary's environment from every other process
+  (`internal/pidutil/environ_darwin.go`). On the host, `ps` read no environment
+  for `/bin/sh`, `/bin/bash`, `/bin/sleep` or `/usr/bin/perl`, and read it for
+  Homebrew's bash, including one that perl's `setsid()` started. The sweep was
+  not exercised on this host for a copy, which is unit 4's proof.
+- **A rig's declared commands.** Gas City gives a formula var a value per rig,
+  in `formula_vars` on a rig and on a rig patch, and its config has no formula
+  var set once for a whole city: the City table carries none, and
+  `[defaults.rig]` seeds only a rig's imports (`docs/reference/config.md` at
+  `gastownhall/gascity` 34485296, Rig's `formula_vars` at line 821 and
+  RigPatch's at line 837; `Rig.FormulaVars` in `internal/config/config.go`). A
+  rig's value is the default for a var a formula declares, and a session reads
+  it through `gc formula show <formula> --rig <rig> --json`, as the var's
+  `rig_default` (`rigFormulaVarsForScope` in `cmd/gc/cmd_formula.go`).
+  gc-toolkit's `[rigs.formula_vars]` set `lint_command`, `run_tests`,
+  `affected_tests_command` and `app_reads_city`. `mol-rig-demo`'s capture step
+  declines a pour that names more than one of `serve_dir`, `serve_cmd` and
+  `base_url` ("Resolve the app target" in `formulas/mol-rig-demo.toml`).
 - **The fixture board.** `helm-fixture` listens on loopback at `$PORT`, which
-  `demo-screenshot.sh --port 0` fills with a free port
-  (`services/helm/cmd/helm-fixture/main.go`; [review-demo.md](../../docs/review-demo.md#the-helm-board)).
+  `demo-screenshot.sh --port 0` fills with a free port from
+  `demo_engine_free_port`, and it refuses a `--addr` that is not a loopback
+  address (`services/helm/cmd/helm-fixture/main.go:86-91`;
+  [review-demo.md](../../docs/review-demo.md#the-helm-board)).
   `demo-deliver.sh` attaches a file to a PR through `gh pr comment --attach`,
   so an image reaches GitHub only through a PR.
 - **The pipeline's checks** (read 2026-11-11). The refinery's run-tests step

@@ -202,9 +202,10 @@ fast-forwarded to `main`
 ([pack-authoring.md](pack-authoring.md#a-landed-pack-change-is-confirmed-on-the-deployed-checkout)).
 The pack supplies how work is done, such as its formulas, scripts, skills and
 agent prompts. A rig supplies the repository the work changes, along with any
-review guidance the rig keeps in it. Its demo guidance also names how to serve
-its UI from a worktree on fixture data, which is how a sitting runs a copy of
-that UI with the operator, and a rig whose guidance names none offers no copy.
+review guidance the rig keeps in it. A rig declares how to serve its UI from a
+worktree on fixture data among the commands the city's config sets for it, which
+is how a session runs a copy of that UI with the operator, and a rig that
+declares none offers no copy.
 
 gc-toolkit is a rig as well. A rule that binds only work on its own repository
 is the rig's, so it lives in the root [`AGENTS.md`](../AGENTS.md), which every
@@ -430,9 +431,9 @@ first. Either way the change is a decision on the record, not a drift.
   operator's approval. The sitting is not one of its checks.
 - **A copy of a rig's UI runs on fixture data at an origin of its own,** never
   under the supervisor's, because the board's page reads the live city from
-  the origin it is served on. The operator sees it as a page the city
-  publishes on that origin, through commands the city sets, and as screenshots
-  where the city sets none.
+  the origin it is served on. The operator sees a copy as a page at that
+  origin, published for exactly as long as the copy runs by a command the city
+  sets, and as screenshots where the city sets none.
 
 ## Debt
 

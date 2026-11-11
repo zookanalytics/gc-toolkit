@@ -13,8 +13,11 @@ The surface the design adds:
 
 - `--held-by <conversation>` on `work-setup.sh` and `work-submit.sh` (unit 1), a
   mode on two existing scripts.
-- Under call 1(a), the pack's script that starts, publishes and stops a copy of
-  a rig's UI, and the city's two environment values it calls (unit 4).
+- The pack's copy script, which starts a copy of a rig's UI, publishes it on
+  request, stops it and reports its state, and the three formula vars it reads,
+  which `mol-rig-demo` declares: `ui_serve_command`, the rig's serve command,
+  and `ui_publish_command` and `ui_address_pattern`, the city's publish command
+  and address pattern (unit 4).
 
 The design adds no metadata key, bead kind, lifecycle state, order or formula
 step. The skill and the prompt text are not surface.
@@ -138,7 +141,7 @@ the pack's.
   hostname label, and "the platform decides whether and how that intent
   becomes a public route" (`docs/reference/config.md`, Service's
   `publication` at line 850, and ServicePublicationConfig at line 863). It
-  applies to declared services, not to a process a sitting starts.
+  applies to declared services, not to a process a session starts.
 - **Session runtimes and images.** Gas City runs sessions in pods, over SSH or
   in an exec sandbox, a runtime "selected city-wide via the `[session]` block"
   (`docs/guides/configuring-an-agent.md`, "Axis 5 — Runtime", lines 285-299),
@@ -147,15 +150,49 @@ the pack's.
   session runs.
 - **An agent's environment.** An agent's `env` sets environment variables for
   its process, and a city patches it per agent (`docs/reference/config.md`,
-  Agent at line 109 and AgentPatch).
+  Agent at line 109 and AgentPatch). The design does not compose it, because
+  the city's publish command and address pattern must reach any session of a
+  rig that runs a copy, and an agent's `env` reaches only the sessions of the
+  agents it is set on, such as the converse templates. The workspace's `env`
+  reaches every managed session (`docs/reference/config.md`, Workspace at line
+  1110), and the design keeps the two values with the serve command instead, so
+  that the call that reads the serve command reads them too.
+- **A rig's declared commands.** A rig's `formula_vars` set the rig's defaults
+  for the vars a formula declares, and a city's rig patch adds to them
+  (`docs/reference/config.md`, Rig's `formula_vars` at line 821 and RigPatch's
+  at line 837; `Rig.FormulaVars` in `internal/config/config.go`). A session
+  reads a rig's value through `gc formula show <formula> --rig <rig> --json`,
+  as the var's `rig_default` (`rigFormulaVarsForScope` in
+  `cmd/gc/cmd_formula.go`). The config has no formula var set once for a whole
+  city: the City table carries none, and `[defaults.rig]` seeds only a rig's
+  imports.
+- **The orphan sweep.** gc scans the host's process table for a session's
+  leftover processes, "a process that left the agent's process group and
+  outlived its terminal, carrying the session's `GC_SESSION_ID` and
+  `GC_CITY_PATH`", and ends one "once its session is closed, or stopped with no
+  live box under its name" (`docs/reference/exec-session-provider.md`, lines
+  637-643). In code it is `sweepProcessTableOrphans` and
+  `processRootIncarnationOver` in `cmd/gc/session_beads.go`, which also need a
+  stopped session's leftover to carry its `GC_RUNTIME_EPOCH`, and the kill of
+  the leftover's process group in `internal/runtime/proctable/kill_unix.go`.
 
-**Composed.** The agent's `env` carries the city's publish and withdraw
-commands to the converse templates. The pack's demo tools pick a copy's free
-port (`demo-screenshot.sh --port 0`) and capture screenshots in a sandbox where
-the live city cannot be reached.
+**Composed.** A rig's formula vars carry the serve command, and the city's
+publish command and address pattern beside it. Gas City offers no formula var
+set once for a city, so the mechanik sets the two among the formula vars of each
+rig that offers a live copy, and `mol-rig-demo` declares the three as it
+declares `app_reads_city`. Gas City's orphan sweep ends a copy whose session has
+ended. The pack's demo tools pick a copy's free port (`demo_engine_free_port`,
+as `demo-screenshot.sh --port 0` does) and capture screenshots in a sandbox
+where the live city cannot be reached.
 
 **Why the script.** No primitive starts one app instance from a worktree on a
-free port, publishes it on an origin of its own and stops it with the session
-that started it, so unit 4's script does that, and nothing more. The
-publication itself is the city's command, because how an operator reaches a
-host is the city's, here a `tailscale serve` HTTPS port.
+free port and publishes it at an origin of its own, so unit 4's script does
+that, and nothing more. Stopping a copy with its session is the sweep's, so the
+script does not claim it. The publication is the city's command, here a
+foreground `tailscale serve`, whose mapping lives as long as the command.
+
+The ways to publish a copy that were set aside, with tk-rymdhac's notes of
+2026-11-11 as the evidence: a fixed set of mapped ports, which caps the copies
+and which the operator turned down at one port per rig; a mapping added at start
+and removed at stop, which leaves a stale mapping after a crash; a hostname per
+copy; a TLS forwarder beside the copy; and Tailscale Services.
