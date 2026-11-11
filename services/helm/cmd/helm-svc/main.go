@@ -162,8 +162,8 @@ func serve() {
 // spaHandler builds the embedded single-page app's handler, or returns nil to
 // serve the board JSON alone.
 //
-// A broken bundle must not take the service down. The board is the load-bearing
-// contract — the operator curls it and the frontend units consume it — while
+// A broken bundle must not take the service down. The JSON routes are the
+// load-bearing contract, which the operator curls and the app reads, while
 // the app is additive, so an unreadable bundle is logged loudly and the service
 // keeps serving JSON exactly as it did before the app existed. The embed itself
 // is checked at compile time, so this only fires on a dist/ that built badly.

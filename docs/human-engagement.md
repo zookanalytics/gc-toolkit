@@ -1306,16 +1306,19 @@ operator's *own* unsent words.
   plumbing. The supervisor API carries no `await_type`, so a board built on it
   alone folds no human gate ([gascity/human-engagement.md](gascity/human-engagement.md#where-a-question-surfaces)).
 - **One board, and its verbs in gc-helm.sh.** The web page that
-  `services/helm/` serves is the board's one view for people, and
-  `helm-svc board --json` prints the same rows for agents. Both run the one
+  `services/helm/` serves is the board's one view for people, and it reads
+  one document per rig (*The rig board* in
+  [services/helm/README.md](../services/helm/README.md)).
+  `helm-svc board --json` prints the board model's rows for agents, and the
+  sidecar's `/helm` answer serves the same model. Both run the one
   `internal/source` gather and the one `internal/board` derivation, so a
-  change to the gather, the ranking or the anchor kinds reaches the page and
-  the JSON together. A new tile field also owes the page's TypeScript mirror,
-  `web/src/contract.ts`, which `services/helm/web/contract_parity_test.go`
-  holds equal to the Go contract. `gc-helm.sh` keeps the write verbs (`open`,
-  `engage`, `react`, `takeaway`, `dismiss`, `accept`, `park`, `priority`) that
-  have no Go equivalent, and helm-svc's POST routes run `open`, `engage`,
-  `accept` and `dismiss`.
+  change to the gather, the ranking or the anchor kinds reaches the JSON and
+  the `/helm` answer together, and not the page. A new tile field also owes
+  the model's TypeScript mirror, `web/src/contract.ts`, which
+  `services/helm/web/contract_parity_test.go` holds equal to the Go contract.
+  `gc-helm.sh` keeps the write verbs (`open`, `engage`, `react`, `takeaway`,
+  `dismiss`, `accept`, `park`, `priority`) that have no Go equivalent, and
+  helm-svc's POST routes run `open`, `engage`, `accept` and `dismiss`.
 
 ## What upstream does not ship (the pack's actual seam)
 

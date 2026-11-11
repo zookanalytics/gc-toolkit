@@ -246,9 +246,10 @@ func rollUpBy(a Anchor, f Facts, state func(Child) string) rollup {
 	// which is whatever order the store returned the dependency rows in — so
 	// the bash board's own output for these three fields is not stable run to
 	// run, and neither would a port of it be. Sorting makes THIS board's wire
-	// bytes deterministic, which is what a golden test and a polling frontend
-	// both need. Parity against the bash board on these fields is therefore by
-	// SET, not by sequence; every other field matches element for element.
+	// bytes deterministic, which is what a golden test and a comparison of two
+	// reads both need. Parity against the bash board on these fields is
+	// therefore by SET, not by sequence; every other field matches element for
+	// element.
 	sort.Strings(r.liveHeads)
 	sort.Strings(r.deadOwnerHeads)
 	sort.Strings(r.inFlightHeads)

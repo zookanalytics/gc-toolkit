@@ -284,9 +284,8 @@ then checks that `git status --porcelain -- dist` prints nothing.
   `go test ./internal/rigboard -run TestPageTypesAreCurrent -update`, which
   fails without `-update` when the file is stale. Nobody writes it by hand.
 - **The contract is a hand-written mirror.** `src/contract.ts` mirrors the Go
-  wire structs by hand, because the board's `/svc/` surface is not in the
-  supervisor's OpenAPI document, and a Go field renamed without its mirror
-  reads `undefined` in the browser with nothing failing.
+  wire structs of the `/helm` answer by hand, because the board's `/svc/`
+  surface is not in the supervisor's OpenAPI document. No page code reads it.
   `web/contract_parity_test.go` compares the two in both directions, and
   `src/contract.fixture.ts` fails `npm run build` when the committed wire
   sample stops matching the type. `go test ./web -run TestBoardFixture -update`

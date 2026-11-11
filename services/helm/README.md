@@ -1383,8 +1383,9 @@ terminal of their own.
 ## The board contract
 
 `web/src/contract.ts` is the TypeScript mirror of the Go structs in
-`internal/board/model.go` — the body of `GET <mount>/helm`, and the one shape
-the frontend is allowed to assume. It is **hand-written**: the `/svc/` surface
+`internal/board/model.go`, the body of `GET <mount>/helm`. No page code reads
+it: the page reads the rig document, whose types are generated (see *Web UI*).
+It is **hand-written**: the `/svc/` surface
 is not in the supervisor's OpenAPI document, so there is no generated client to
 hang a type off.
 

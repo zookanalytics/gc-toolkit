@@ -26,8 +26,9 @@
 // conversations the gather admits as anchors of their own ([KindGate],
 // [KindConversation]), which the board folds onto the beads they concern.
 //
-// The struct tags are an additive contract: the TypeScript frontend mirrors
-// them, so fields may be added but never renamed or removed.
+// The struct tags are an additive contract: `helm-svc board --json`'s callers
+// read them and web/src/contract.ts mirrors them, so fields may be added but
+// never renamed or removed.
 package board
 
 import (
@@ -334,8 +335,8 @@ const (
 	WaitLanded WaitAnswer = "landed"
 )
 
-// Tile is one rendered row of the board — the additive contract mirrored by the
-// frontend and emitted verbatim by `helm-svc board --json`.
+// Tile is one rendered row of the board — the additive contract mirrored by
+// web/src/contract.ts and emitted verbatim by `helm-svc board --json`.
 //
 // FIELD ORDER IS PART OF THE CONTRACT. encoding/json emits struct fields in
 // declaration order, so the sequence below is what every consumer sees.
@@ -688,8 +689,8 @@ type Tile struct {
 	// is false only has a conversation on it, which holds no work, so the work
 	// moves while the conversation waits for the operator, and only an open PR's
 	// merge waits for the conversation to close. False on every row that is not
-	// held. It is derived here rather than in the browser, so each surface tells
-	// the two kinds of held row apart from one reading.
+	// held. It is derived here, so each reader of the row tells the two kinds of
+	// held row apart from one reading.
 	WorkHeld bool `json:"work_held"`
 }
 
