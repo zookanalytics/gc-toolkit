@@ -5,214 +5,195 @@ description: The Gas City, Gas Town, bd and GitHub primitives searched for each 
 
 # Gas City search for the merge design's surface
 
-Read on 2026-11-09 at `gastownhall/gascity` main 862ee37e4570,
-`gastownhall/gascity-packs` main 3339ad104a88 and at 66897e7132c9, the gastown
-release that gc 1.4.3 bundles (`PublicGastownPackVersion` in
-`internal/config/public_packs.go`), and `gastownhall/beads` v1.3.4
-(7ef2fd05eb0c). GitHub's behavior was read from its documentation the same day.
+Read on 2026-11-11 at `gastownhall/gascity` main 6bd609f5bfb4, which reads the
+same as 862ee37e4570 for everything cited here except a formula check's attempt
+count, at `gastownhall/gascity-packs` main 7f86098c04ea and at 66897e7132c9,
+gastown 0.1.13, the release that Gas City main and the city's gc 1.4.3 bundle
+(`PublicGastownPackVersion` in `internal/config/public_packs.go`), and at
+`gastownhall/beads` v1.3.4 (7ef2fd05eb0c). GitHub's behavior was read from its
+documentation, its GraphQL schema and the manual of gh 2.103.3 the same day.
 Each section names the unit of [the design](design.md) that adds the surface.
 
-## The city's merge verdict on GitHub (unit 2)
+## The work's record from publication to the verified merge (unit 3)
 
-The need: a merge that waits for the city's own conditions. The city must have
-judged the PR's head, nothing it tracks may hold the PR, and the city must have
-read every review and comment on the PR, the approval that releases it
-included, before GitHub can merge. One verdict stands for every PR at a commit,
-and two posts of it must not leave the older reading standing. A push that
-moves a PR onto a commit must not let it merge on a verdict that did not count
-it, even when the push's outcome never reached the writer that sent it.
-
-- **Gas City.** Nothing gates a merge on approval or on required checks. The PR
-  monitor classes an open PR from its draft flag, its merge state and its failed
-  or pending checks (`classifyPullRequest` in `internal/githubmonitor/monitor.go`),
-  and records the class on a repair bead (`gc github pr backfill
-  --create-repair-beads`, `cmd/gc/cmd_github.go`). It reads no review, no branch
-  rule and no bead's waits, and it never merges. Its CLI reference names no lock
-  a pack can take around a write to an outside service (`docs/reference/cli.md`).
-  A drain's `member_access = "exclusive"` reserves a convoy's members for one
-  drain (`docs/reference/specs/formula-spec-v2.md`), not a write. Its git
-  package has no push (the `Git` type in `internal/git/git.go` fetches, stashes,
-  pulls with a rebase and reads status), so nothing there publishes a head
-  behind a status.
-- **Gas Town and the other packs.** `gastown/formulas/mol-refinery-patrol.toml`
-  opens the PR and never merges it. No file in the packs repository names
-  `reviewDecision`, `required_status_checks` or `merge_queue`. gstack's
-  `land-and-deploy` skill tells an agent to run `gh pr merge --auto`, and
-  pr-review's `mol-pr-merge-only` waits on `gh pr checks` and then runs
-  `gh pr merge --squash`, with no review step. Neither waits on a bead.
-- **bd.** A `gh:pr` gate resolves on the PR's state alone (`checkGHPRWithRunner`
-  in `cmd/bd/gate.go`). It holds a bead until a merge, never a merge until a
-  bead.
-- **GitHub.** Rulesets require approving reviews, resolved threads and status
-  checks ([Available rules for
-  rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets)).
-  A required check can be a commit status, and with no `integration_id` any
-  account with write access can post it ([Repository
-  rules](https://docs.github.com/en/rest/repos/rules)). A required check counts
-  only on the latest commit ([Troubleshooting required status
-  checks](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks)).
-  A commit status belongs to the repository and the commit, every PR at that
-  commit shows it, and the latest status in a context counts, with no
-  compare-and-set, so the latest post wins. The create takes a state, a target
-  URL, a description and a context, with no condition or idempotency key
-  ([Commit statuses](https://docs.github.com/en/rest/commits/statuses)). GitHub
-  terminates a request that it takes more than ten seconds to process, reserves
-  the right to change that window, and does not say whether a terminated request
-  took effect ([Troubleshooting the REST
-  API](https://docs.github.com/en/rest/using-the-rest-api/troubleshooting-the-rest-api),
-  read on 2026-11-10). So a post whose answer never came can still be created
-  after a later one, and no read shows that a post not yet created never will
-  be. GitHub lists a repository's open PRs, each with its head commit
-  (`GET /repos/{owner}/{repo}/pulls?state=open`,
-  [Pulls](https://docs.github.com/en/rest/pulls/pulls)). Its list of the PRs
-  associated with a commit returns only the merged one for a commit on the
-  default branch (`GET /repos/{owner}/{repo}/commits/{commit_sha}/pulls`,
-  [Commits](https://docs.github.com/en/rest/commits/commits)), so it cannot name
-  every open PR at a head. Auto-merge merges once every requirement passes, and
-  turns off only when someone without write access pushes or the base branch
-  changes, so a review that arrives after it is on leaves it on ([Automatically
-  merging a pull
-  request](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/automatically-merging-a-pull-request)).
-  A review that requests changes from an account with write access holds the
-  merge until its author approves or someone with write access dismisses it
-  ([Approving a pull request with required
-  reviews](https://docs.github.com/en/pull-requests/how-tos/review-pull-requests/approving-a-pull-request-with-required-reviews)).
-  None of the rules for a branch refuses a push onto a commit whose status
-  passes, and a status cannot be scoped to a PR. `require_last_push_approval`
-  asks for a fresh approval after every push, which the design keeps off
-  ([design](design.md), section 3). For a commit the repository does not hold,
-  the status read answers 200 with no statuses, as it does for a held commit
-  with none (read on 2026-11-09).
-- **git.** A push names, for each ref, the commit the client read there, and
-  the server updates the ref only while it still holds that commit, then
-  reports `ok` or `ng` for it
-  ([gitprotocol-pack](https://git-scm.com/docs/gitprotocol-pack)). The protocol
-  has no request that asks about an update sent earlier, so a push whose report
-  never came leaves nothing to read but the ref itself. The client reads the
-  ref when it pushes, and git's lease, `--force-with-lease=<ref>:<expect>`,
-  makes it send the update only when the ref still holds the commit its caller
-  names ([git-push](https://git-scm.com/docs/git-push)), so a caller can bind
-  the update to a commit it read earlier.
-
-What unit 2 composes: GitHub's required status check and auto-merge, driven by
-the pack's one definition of what holds a PR (`prstatus`), which takes the
-anchor's waits from the store's own blocked set through the `waits` package, the
-one `gctk bead holds` answers from. The gap the primitives leave is the city's
-waits and its reading of the reviews and comments, which no rule reads. A commit
-status carries the waits and that reading. It passes last, once every other
-requirement is met and no feedback on the PR is newer than the anchor's
-watermarks, so a review the intake counts is read before the merge, even one
-that arrives after auto-merge is on. One status covers every open PR at its
-commit, and a `flock` per repository serializes the posts, because the latest
-post wins. Auto-merge makes the merge GitHub's once the status passes, and the
-projection keeps it on only while the city reads the PR approved. Each push the
-pack makes onto a PR's branch publishes the head under the same lock: when the
-city's status at the commit it will push reads success, the projection posts
-pending there first, and once git answers, the projection runs there and at the
-commit the branch held. The push goes under git's lease on the commit the
-publication read on the branch, once the writer has checked that the head
-descends from it, so the push stays a fast-forward and git sends it only from
-that commit. A push whose report never came is settled from git's own
-check of the commit the push read. The next holder of the lock reads the branch,
-and while the branch holds the commit the push read, it pushes that head under
-the same lease from the rig's repository, where git's garbage
-collection keeps the commit while a ref or a reflog reaches it. The earlier
-push then cannot land while the branch stays off the commit it read. The
-publication's record of what it moves is how that holder learns of such a push,
-and it sits beside the lock. Until a holder settles the record, the projection
-counts the PRs that push would move at its new head. A status
-post whose answer never came has a record there too, and the next holder waits
-until the post's time limit and GitHub's ten seconds have passed before it
-reads, then projects at that commit again, because no condition on the post and
-no read can settle it sooner. Gas City's operation journal records the requests
-a session receives (`OpsConfig` in `docs/reference/config.md`), and no command
-records an entry of a pack's own in it. The command that records an event a pack
-names, `gc event emit`, writes the city's event log best effort, and the event
-bus does not acknowledge that the event persisted (`docs/reference/cli.md`). So
-Gas City holds no record of a pack's own write that a later holder can count on
-finding. The warrant *The city's merge status* records it. `blocker-holder.sh`'s
-new class composes core's gate sweep: a gate it resolves is held by an automated
-actor.
-
-## The bead's wait for its PR's merge, and its close (unit 3)
-
-The need: the bead stays open while its PR is open, and closes once GitHub has
-merged it onto the target.
+The need: the bead the work was filed as stays open from the PR's publication
+until its merge is verified on the target, so the work that waits on it starts
+only on code that has landed. A push someone else makes onto the PR reuses the
+same bead and PR, and the city validates it before anything merges. A PR closed
+without merging, merged at a head the city did not validate, or moved to
+another base is not a delivery.
 
 - **Gas Town.** `gc gastown pr-merge-reconcile`
-  (`gastown/commands/pr-merge-reconcile/run.sh` at 3339ad104a88) keeps the bead
-  blocked until GitHub reports the PR merged and the merge commit is on the
-  target. It is not in the bundled release, whose `gastown/commands` holds only
-  `status` and whose merge-push closes an `mr` bead at publication. The city
-  imports no gastown pack.
-- **bd and Gas City.** A `gh:pr` gate resolves when `gh pr view` reports MERGED
-  (`checkGHPRWithRunner`, `cmd/bd/gate.go` at v1.3.4). Core's `gate-sweep`
-  order checks the gates of the city store and of every rig store that is not
-  suspended, every 30s (`internal/bootstrap/packs/core/orders/gate-sweep.toml`,
-  `assets/scripts/gate-sweep.sh`).
+  (`gastown/commands/pr-merge-reconcile/run.sh` at 7f86098c04ea) is that record.
+  `record` leaves the bead `blocked` and assigned to the refinery with
+  `merge_result=pull_request_pending`, the PR's identity and the validated head.
+  Each reconcile reads one PR by its URL, requeues a changed head as
+  `pull_request_head_changed`, and closes the bead as `mr_merged` only once the
+  merge commit is on a freshly fetched target. Closed, contradictory and
+  unvalidated ends block the bead and mail the mayor. The refinery runs the
+  reconcile once per find-work, and the witness wakes the refinery when a
+  pending check is due (`gastown/README.md`). No release carries it: gastown
+  0.1.13, the last the packs registry lists, closes an `mr` bead at publication
+  with `merge_result=pull_request`, and its `gastown/commands` holds only
+  `status`. The city imports no gastown pack.
+- **bd.** A `gh:pr` gate resolves when `gh pr view` reports MERGED, and on
+  CLOSED it escalates through `gt escalate`, which the city does not have, and
+  stays open (`checkGHPRWithRunner` in `cmd/bd/gate.go`). It holds a bead until
+  a merge, and it neither checks the merged head nor finds the merge commit on
+  the target.
+- **Gas City.** Convoy progress counts closed members and reads no PR
+  (`ConvoyProgress` in `internal/convoy/convoy.go`), so a convoy's completion is
+  no merge check. A workflow's finalize closes the `gc.source_bead_id` chain on
+  a pass and leaves it open on a failure or a cancel (`processWorkflowFinalize`
+  in `internal/dispatch/runtime.go`).
 
-What unit 3 composes: a `gh:pr` gate on the bead, which core's sweep resolves,
-and a close step that makes pr-merge-reconcile's merged checks. The command
-itself is out of reach until the city takes a gastown release that carries it.
+What unit 3 composes: Gas Town's record, with its values and their meanings,
+written by `gctk pr record` and `gctk pr reconcile`, because no release the
+city can import carries the command. It adds no state beside the record. Its
+differences are that the exceptions file a human gate in place of the mayor's
+mail, and that no artifact cleanup follows the close, so the reconcile clears
+`pr_reconcile_pending` at the close. The pack's work runs name no source bead,
+so finalize closes none of the work's beads.
 
-## The requeue (unit 3)
+## The decision to merge (units 2 and 3)
+
+The need: one decision, for each PR's current revision, that the city's
+contract holds. Your approval stands, nothing the city tracks holds the PR, the
+review results name the PR's current head and target, every review and comment
+the city counts has been handled, and everything else the target requires is
+met. Then the city merges exactly the head it judged, on the default branch and
+on an integration branch alike, with no Merge from you and no permission that
+outlives the decision.
+
+- **Gas City.** No Go code merges a PR or reads a review decision (no
+  `mergePullRequest`, `gh pr merge` or `reviewDecision` in its Go). The PR
+  monitor (`gc github pr backfill`, `internal/githubmonitor`) reads each open
+  PR's draft flag, merge state and first 100 check contexts, and no review or
+  comment, and it lists open PRs only under one 45-second limit for the whole
+  scan. `classifyPullRequest` marks a PR that GitHub reports `BLOCKED`
+  actionable, one waiting on an approval included, and
+  `--create-repair-beads` files a repair bead per PR head for such a PR. So
+  the monitor is neither a decision to merge nor a record of the city's PRs.
+- **Gas Town and the other packs.** `gastown/formulas/mol-refinery-patrol.toml`
+  opens the PR and never merges it. gstack's `land-and-deploy` skill tells an
+  agent to run `gh pr merge`, with `--auto` or `--squash`, and after any failed
+  exit to read the PR's state rather than run the merge again. pr-review's
+  `mol-pr-merge-only` has a polecat squash-merge with no review step. None of
+  them waits on a bead or reads a review.
+- **bd.** A `gh:pr` gate holds a bead until a merge, never a merge until a bead.
+- **GitHub.** Rulesets require approving reviews, resolved threads and status
+  checks on the branches they cover, and gc-toolkit's integration branches
+  carry none of them ([Available rules for
+  rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets)).
+  A review records whether its author can push to the repository
+  (`authorCanPushToRepository`), the access GitHub requires of an approval it
+  counts toward a required review ([Approving a pull request with required
+  reviews](https://docs.github.com/en/pull-requests/how-tos/review-pull-requests/approving-a-pull-request-with-required-reviews)).
+  A PR's merge state (`mergeStateStatus`) reports a conflict, a check that is
+  not passing and the target's unmet rules. `mergePullRequest` merges only
+  while the PR's head is the `expectedHeadOid` it names, which
+  `gh pr merge --match-head-commit` sets, and `enqueuePullRequest` takes an
+  expected head too. On a target that requires a merge queue, `gh pr merge`
+  turns on auto-merge when the required checks have not passed (gh's manual).
+
+**The alternative evaluated, and the one taken.** The design's earlier draft
+let GitHub's auto-merge make the merge, held by a required commit status the
+city posted at each head. That needed the status on every target's rules, a
+verdict for every PR that shares a commit, a lock around each post, a pending
+status before each push, a record and a wait for every post or push GitHub left
+unanswered, and a bypass of the integration branches' rules for the city's own
+pushes. A commit status belongs to a commit, not to a PR, and the status API
+has no compare-and-set ([Commit
+statuses](https://docs.github.com/en/rest/commits/statuses)), which is where
+that machinery came from. The head-conditional merge request needs none of it:
+the evaluator answers for one PR at a time, the request names the head it
+judged, and GitHub refuses it once the head has moved. It costs the window
+between the evaluator's read and GitHub's merge, which today's merge has too,
+since `gctk merge` already merges with `--match-head-commit`
+(`services/gctk/internal/cli/merge.go`), and it leaves a person's own Merge on
+GitHub outside the city's holds.
+
+What units 2 and 3 compose: GitHub's head-conditional merge, and its enqueue on
+a target that requires a merge queue, driven by one evaluator of the pack's,
+which reads the bead's waits through the `waits` package that `gctk bead holds`
+answers from, the review results at the head, GitHub's reviews and merge state,
+and the anchor's feedback receipts. The gap the primitives leave is the
+approval on a branch with no rule, the bead's waits and the city's reading of
+the feedback, which no rule reads. `gctk pr status` grows the conditions not
+met in its output, so the board shows what the merge reads.
+
+## The landing order (unit 3)
+
+The need: every pending record is read on a schedule, so a PR that waits on
+your approval or on its checks lands once it is ready, with no agent waiting on
+it, no two runs at once, and a bound on how long any record waits to be read.
+
+- **Gas City.** An exec order runs a command with no agent, on a cooldown that
+  counts from a run's start, under a 300-second limit by default
+  (`TimeoutOrDefault` in `internal/orders`). The dispatcher starts no run while
+  the order's tracking bead or the work it started is open, and an order fails
+  closed when those gates time out unless it is marked `idempotent`
+  (`cmd/gc/order_dispatch.go`). An order that a webhook fires skips both gates
+  (`memoryOrderDispatcher.Dispatch`), and the webhook intake drops a repeated
+  delivery from an in-memory set for 30 minutes, with no serialization per PR.
+  Nothing in Gas City runs the PR monitor on a schedule.
+- **Gas Town.** The refinery reconciles one record per find-work, and its
+  witness wakes it when a pending check is due, so the refinery's session waits
+  on the merge.
+
+What unit 3 composes: a rig-scoped cooldown exec order, `pr-reconcile`, that
+runs `gctk pr reconcile` over a bounded number of records, the least recently
+checked first, under the dispatcher's own gates. No webhook fires it, since a
+webhook-fired order skips them.
+
+## The requeue (unit 4)
 
 The need: work the refinery cannot land goes back to the polecat pool.
 
-- **Gas Town** writes `gc.routed_to` to the pool by hand (merge-push's rebase and
-  handle-failures paths at 3339ad104a88).
+- **Gas Town** writes `gc.routed_to` to the pool by hand (the rebase and
+  handle-failures paths at 7f86098c04ea).
 - **Gas City** dispatches through `gc sling`, which accepts the merge strategies
   `direct`, `mr` and `local` (`cmd/gc/cmd_sling.go`; `merge_strategy` in
   `internal/beadmeta/keys.go`).
 
-What unit 3 composes: `gc sling` on `mol-polecat-work`, as the dispatch design
+What unit 4 composes: `gc sling` on `mol-polecat-work`, as the dispatch design
 (tk-1tfzr71.54) requires for every pool dispatch.
 
-## The per-rig switch (unit 3)
+## The refinery's selection of work (unit 4)
 
-The need: the refinery opens PRs on the new path only for a rig whose GitHub
-rules are in place.
+The need: the refinery prepares a branch only when nothing holds the bead and
+no other open bead is working on the branch.
+
+- **Gas Town's** find-work lists the beads assigned to the refinery, open or in
+  progress, that carry a branch (`mol-refinery-patrol.toml` at 7f86098c04ea),
+  and reads no wait.
+- **Gas City** claims a bead and changes only the bead (`BdStore.Claim`), and
+  nothing in it locks a branch.
+
+What unit 4 composes: Gas Town's selection, then the bead's waits through
+`gctk bead holds` and the open beads on the branch, with a rework child taken
+before its anchor.
+
+## The per-rig switch (unit 4)
+
+The need: the refinery publishes onto the new record only on a rig that has
+moved to it.
 
 - **Gas City** gives a rig defaults for formula variables (`FormulaVars` on
   `Rig` in `internal/config/config.go`), which the rig's pours read.
 
-What unit 3 composes: one rig formula variable, `github_merge_rules`, read by the
-refinery's `mr` step alone. The bead's merge gate tells every other reader which
-path the bead is on. The retirement bead deletes the variable.
+What unit 4 composes: one rig formula variable, `pending_through_merge`, read
+by the refinery's `mr` step alone. The record's value tells every other reader
+which path a bead is on. The retirement bead deletes the variable.
 
-## The rules every PR target carries (unit 3 and the cutover)
-
-The need: every PR the city opens waits for the city's verdict, whoever presses
-Merge, and the city's own pushes still land on an integration branch whose rules
-require that verdict.
-
-- **Gas City.** No Go file reads a branch's rules: neither `rules/branches` nor
-  a ruleset appears in its code, and the PR monitor classes a PR without them
-  (`classifyPullRequest`).
-- **GitHub.** A branch's rules come back from
-  `GET /repos/{owner}/{repo}/rules/branches/{branch}`. A ruleset that requires a
-  status check refuses an update of the branch until the check has passed at the
-  new commit, and its bypass list names the actors that may push past it: an
-  integration, an organization admin, a repository role, a team, a deploy key or
-  a user, in mode `always`, `pull_request` or `exempt` ([Repository
-  rules](https://docs.github.com/en/rest/repos/rules)).
-
-What unit 3 composes: the rules read that the projection already makes for the
-auto-merge toggle. The `mr` step asks the same rules whether the target requires
-`gc-toolkit/status`, and files a human gate in place of a PR when it does not.
-What the cutover composes: a ruleset on the integration branches that requires
-the status, with a bypass in mode `always` that only the city's account holds,
-so its landings, an effort's stand-up and bring-current, and a rework of a
-landing PR still push there.
-
-## The refinery's long gate (unit 3)
+## The refinery's long gate (unit 4)
 
 The need: a rig gate that outlives the ten-minute cap on one tool call.
 
 - **Gas Town's** run-tests step runs each configured command inline
-  (`mol-refinery-patrol.toml` at 3339ad104a88).
+  (`mol-refinery-patrol.toml` at 7f86098c04ea).
 - **Gas City's** formula check runs a script in the orchestrator, outside the
-  agent's session, bounded by its own timeout (`[steps.check]` in
+  agent's session, up to its `max_attempts` (`[steps.check]` in
   `docs/reference/specs/formula-spec-v2.md`). It needs a materialized step bead,
   and the refinery's patrol is a root-only wisp whose steps are not
   materialized.
@@ -226,45 +207,37 @@ The need: a PR titled with a conventional-commit type, and a summary of what the
 finished diff does that stays current through reworks.
 
 - **Gas Town** titles the PR with its bead's title and writes the body once, at
-  `gh pr create` (merge-push at 3339ad104a88).
+  `gh pr create` (merge-push at 7f86098c04ea).
 - **Gas City's** PR concept has no managed region of a PR body.
 
 What unit 1 builds: `gctk pr compose` and `gctk pr summary`, whose defense is in
 [gctk-architecture.md](../../docs/gctk-architecture.md#the-surface). The change
 deletes the shell it replaces (`pr-summary-region.sh`).
 
-## The doctor's closed-bead check (unit 4)
+## The doctor's closed-bead check (unit 5)
 
 The need: every closed bead that opened a PR either landed or carries a
 disposition.
 
 - **Gas City.** No check in `internal/doctor` or in core's pack names
-  `merge_result`, `merged_sha` or `pr_number` at 862ee37e4570. The doctor runs a
-  pack's own checks from their `doctor.toml`.
+  `merge_result`, `merged_sha` or `pr_number`. The doctor runs a pack's own
+  checks from their `doctor.toml`.
 
-What unit 4 grows: the pack's existing check (I5) to read every closed bead that
-carries `pr_number`. The landing record it reads is the pack's, under the merge
-flow the design keeps.
+What unit 5 grows: the pack's existing check (I5) to read every closed bead that
+carries `pr_number`, with `mr_merged` and `merged` as landed.
 
 ## What the answers change on
 
-- Gas City ships a merge gate that reads a bead's waits, or GitHub can hold a
-  merge on a review's own message. The city's status and the auto-merge toggle
-  then move onto that primitive.
-- GitHub's status API takes an expected prior status, or Gas City ships a lock
-  a pack can take around a write to an outside service. The status writer's
-  lock then moves onto it.
-- GitHub scopes a status to a pull request, or refuses a push onto a commit
-  whose status passes. The publication's pending post then goes.
-- git's protocol or GitHub answers whether a push it received can still land.
-  The publication's record and its settling then go.
-- GitHub's status create takes an expected prior state, or GitHub answers
-  whether a post it received can still be created. The record of an unanswered
-  post and its wait then go.
-- A ruleset can require a status check of a pull request's merge alone, and
-  leave pushes to the branch free. The city's bypass of the integration
-  branches' rules then goes.
-- The city imports a gastown release that carries `pr-merge-reconcile`. The close
-  step then becomes that command.
-- Gas Town's refinery requeues through `gc sling`, keeps a branch that has a PR,
-  or keys its pre-existing trackers. Each matching difference then ends.
+- The city imports a gastown release that carries `pr-merge-reconcile`. The
+  record and the close then become that command, and the pack keeps the
+  readiness check and the merge request.
+- Gas City or Gas Town ships a merge gate that reads a bead's waits and a PR's
+  reviews. The evaluator then moves onto that primitive.
+- GitHub can hold a merge on a rule that a branch without rulesets carries, or
+  on a review's own message. The evaluator's approval and feedback conditions
+  then move onto GitHub.
+- Gas City's webhook dispatch keeps an order's gates. A webhook can then make
+  the landing order's next run come sooner.
+- Gas Town's find-work reads waits, Gas Town's refinery requeues through
+  `gc sling`, keeps a branch that has a PR, or keys its pre-existing trackers.
+  Each matching difference then ends.
