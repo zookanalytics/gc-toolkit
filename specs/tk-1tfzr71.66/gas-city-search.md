@@ -196,7 +196,10 @@ Gas Town's writes, which stay unconditional, as `record_handoff` writes them. In
 unit 4 the refinery writes a pending record only through `gctk pr record`. A
 writer of the record's keys on a bead that carries no `pr_reconcile_pending`,
 such as the direct landing, takes no lock, because a run acts only on a bead
-that it reads under the lock as carrying that marker.
+that it reads under the lock as carrying that marker. A disposition that closes
+a bead still carrying the marker, a stand-down's close among them, takes the
+lock too in unit 3, and its close clears the marker, so no run reopens the bead
+it closed.
 
 ## The requeue (unit 4)
 
@@ -290,8 +293,8 @@ carries `pr_number`, with `mr_merged` and `merged` as landed.
   then move onto GitHub.
 - Gas City's webhook dispatch keeps an order's gates. A webhook can then make
   the landing order's next run come sooner.
-- bd guards a write on a metadata value. The two verbs then write the record
-  under that guard, and the record lock goes.
+- bd guards a write on a metadata value. The record's writers then write under
+  that guard, and the record lock goes.
 - Gas Town's find-work reads waits, Gas Town's refinery requeues through
   `gc sling`, keeps a branch that has a PR, or keys its pre-existing trackers.
   Each matching difference then ends.
