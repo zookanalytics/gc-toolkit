@@ -1188,8 +1188,8 @@ func demand(b Blocker) bool {
 // flight is acting on, is the next merge pass's to replace. A closed row's
 // recorded verdict travels unchanged, and a live PR whose facts have no answer
 // cannot tell, so its recorded verdict reads unknown. The owed rule and the
-// needs phrase read this axis, so a row's place in the operator's queue and its
-// chip come from the one rule.
+// needs phrase read this axis, so a row's place in the operator's queue, its
+// needs and its phase come from the one rule.
 //
 // Any other verdict is read off the bead, with ONE live upgrade: an open
 // pool-routed blocker means an actor is due to act whatever the last gate pass
@@ -1769,8 +1769,7 @@ const (
 // Review and gate are the operator's own moves and lead; stalled is the loudest
 // health signal under them; active is the city working normally; cleanup and
 // done are the quiet tail. A surface reads the bands in this order, never in an
-// ad-hoc one: the dashboard mirrors it, and [sectionRank] orders a family's
-// members by it.
+// ad-hoc one, and [sectionRank] orders a family's members by it.
 var SectionOrder = []string{
 	SectionReview, SectionGate, SectionStalled, SectionActive, SectionCleanup, SectionDone,
 }
@@ -2737,8 +2736,8 @@ func tagClusters(tiles []Tile) {
 // A family is one top-level anchor and every tile that hangs off it by a
 // parent-child or a `blocks` edge. Grouping by family is the board's primary
 // axis; the attention band orders and highlights WITHIN a family. The grouping
-// key is derived once here, so the dashboard does not invent its own split —
-// exactly as [Section] is.
+// key is derived once here, so no surface invents its own split, exactly as
+// [Section] is.
 
 // assignGroupRoots stamps [Tile.GroupRoot] and [Tile.GroupParent] on every tile.
 // GroupRoot is the id of the top-most tile its edges climb to, or its own id when

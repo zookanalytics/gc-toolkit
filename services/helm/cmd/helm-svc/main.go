@@ -6,8 +6,8 @@
 //
 // They share the gather (internal/source) and the ranking (internal/board)
 // rather than reimplementing either, so the rows `board --json` prints are the
-// rows the web page shows. Keeping them in one binary also keeps them from
-// going stale independently — see the comment atop board.go.
+// rows the sidecar's GET /helm serves. Keeping them in one binary also keeps
+// them from going stale independently — see the comment atop board.go.
 //
 // As the sidecar, it runs as a
 // Gas City `proxy_process` workspace-service: the supervisor spawns it, hands it
@@ -103,9 +103,9 @@ const topUsage = `Usage:
   helm-svc probe [flags]         report whether this binary can read the city's bead stores
   helm-svc form --helm <script>  the terminal conversation form gc-helm.sh engage and attach open
 
-The sidecar's web page and "board --json" share one gather and one ranking. Run
-"helm-svc board --help" for the board's flags, or "helm-svc probe --help" for
-the readability check.
+The sidecar's /helm answer and "board --json" share one gather and one
+ranking. Run "helm-svc board --help" for the board's flags, or "helm-svc probe
+--help" for the readability check.
 `
 
 func serve() {

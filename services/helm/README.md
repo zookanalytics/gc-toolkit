@@ -96,9 +96,9 @@ held row, and empty on a row nothing holds. `work_held` refines `held`: it is
 true when an open human gate holds the bead or an acceptance an earlier Accept
 left unfinished keeps it, so the operator's answer is required before the work
 can move. A held row where it is false only has a conversation on it, which
-holds no work, and the board marks it apart with a chip reading
-`conversation` rather than `gate`. A conversation on an open PR holds only the
-PR's merge, through the anchor's `blocks` edge onto it, and the PR's row reads
+holds no work. The field rides the `/helm` answer and `helm-svc board --json`,
+and the rig board's page does not draw it. A conversation on an open PR holds
+only the PR's merge, through the anchor's `blocks` edge onto it, and the PR's row reads
 it as a bead a person owes: NEEDS reads `asking: <its title>` and the PR is
 `held: blocked`. `acceptable` reads
 Accept's three conditions (`docs/human-engagement.md`, "Accept").
@@ -163,10 +163,9 @@ a row none of the three can date sorts last. A merge anchor has no takeaway and
 is touched by every reconcile pass, so on those rows only the first of the three
 dates the turn rather than the last look at it.
 
-| surface | default | the overview |
-|---|---|---|
-| dashboard | the *owed by you* section, at the top of the page | the ranked table under it |
-| `helm-svc board --json` | the queue, oldest first | `--all` |
+`helm-svc board --json` prints the queue, oldest first, and `--all` prints the
+overview. The rig board's page draws neither: its Needs you page lists the
+rig's asks from its own document (see *The rig board*).
 
 The wire arrives partitioned, so the overview sorts itself back to `rank_score`
 before it is capped (`board.CityOverview`). Reading the partitioned slice as if
@@ -175,7 +174,7 @@ sit behind, and the cap then drops whatever the hoisted rows pushed past the
 limit.
 
 In the queue the row's HEADLINE is what it asks — the `needs` sentence — and the
-bead title is secondary; the *owed by you* table reads it that way. The overview
+bead title is secondary. The overview
 asks what the city's shape is, so it leads with the object and its frontier.
 
 **The empty queue is a CLAIM, and it is the most consequential sentence the
@@ -727,8 +726,9 @@ cannot tell, so its recorded `blocked` reads `unknown`. A cause outside the
 vocabulary holds wherever it was
 recorded, because the derivation cannot name it. Any other recorded `blocked`
 reads `progressing`, because the next merge pass replaces it, so the row is not
-owed and its `needs` does not call it blocked. The row's phase reads the verdict
-by the same rule, so the owed queue and the phase chip cannot disagree about it.
+owed and its `needs` does not call it blocked. The row's `phase` reads the
+verdict by the same rule, so the owed queue and the phase cannot disagree
+about it.
 
 **Stalled at a pre-open check.** A merge anchor parked at `pre_open_gate` is owed
 once it has held past three days (`preOpenStaleThresholdDays`) with a check not
@@ -782,18 +782,18 @@ is current only at the head `pr.machine` was last resolved at; pinned to any
 other head it reads `unknown`, which is a rendered value and never a fallback to
 the quiet end.
 
-**Every live PR row shows its conversation.** The row is where the operator sees
-which pull requests carry their comments. The dashboard puts a `💬 <value>` chip
-beside the PR link, colored for `outstanding`, `answered` and `asking`, with the
-value's meaning on hover, and the legend says what each value means. It shows
-none on a closed row, since nobody acts on a finished pull request's
-conversation.
+**Every PR row carries its conversation.** `pr_conversation` rides each PR row
+of the `/helm` answer and `helm-svc board --json`, which is where a reader of
+the rows sees which pull requests carry their comments. The rig board's page
+does not draw it: a pull request's row there shows its number, its state and
+what holds it.
 
 **The empty state.** `owed` is a boolean and cannot carry the third value the
 axes do, so an unread position surfaces as coverage rather than as a false
-negative on a row nobody sees. The section withholds "Nothing is owed by you"
-while any PR row's position, conversation or approval clause is unreadable, and
-says which.
+negative on a row nobody sees: the axis reads `unknown` on the row. The rig
+board's page does not draw the queue, and `helm-svc board --json` withholds an
+empty one only when the gather was partial (*The empty queue is a CLAIM*,
+above).
 
 ## Converse sittings (`tk-ghlg1e.1`)
 
@@ -842,10 +842,9 @@ disagree.
 The task's own status cannot say this, because a session that ends without
 handing the conversation back leaves it `in_progress` under the sitting's alias.
 So the status and the assignee are inputs to the derivation and stay off the
-wire. The web row marker and its hover card and the web sittings table each
-print the state's word, and none derives it. The sittings table's count line
-splits the open sittings into in session and waiting, and names failed starts
-when there are any.
+wire. A reader of the record prints the state's word and derives none of it.
+The rig board's page does not draw the record or the row's `sitting_state`
+(see *Where it shows up*).
 
 ### A sitting's headline
 
@@ -928,10 +927,11 @@ and `never started` when Gas City recorded no cause.
 | `needs` | `start failed (<reason>): <the ask>` |
 | `owed`, `severity` | owed, and at least `ELEVATED` |
 
-The row leads the operator's queue, ahead of every row owed longer, and the web
-chip reads `start failed`, with the reason in its card. The mark shows as soon as Gas City
-records the failure and stays until the conversation is engaged again or
-closed. A failed start outranks a live sitting on the same row, because each
+The row leads the operator's queue, ahead of every row owed longer. The mark
+rides the row on the `/helm` answer and `helm-svc board --json`, and the rig
+board's page does not draw it. The row carries the mark from the moment Gas
+City records the failure until the conversation is engaged again or closed.
+A failed start outranks a live sitting on the same row, because each
 conversation on a subject is a conversation of its own. A sitting never
 withholds Accept, so a failed start does not either.
 
@@ -1275,14 +1275,14 @@ cannot reach degrades to a stale gap rather than a failed build.
 `internal/source.GatherPackHealth` reads every
 `<city>/.gc/services/*/build-status.json` — helm's own, gctk's, anything else
 the pack builds out of band — and `board.DerivePackHealth` bands each row once,
-in the model, so the dashboard renders what the derivation says. The rows ride
-the envelope as `pack_health`, and the dashboard shows them as a "pack builds"
-section. `helm-svc board --json` carries none: it stays the ranked tiles array
-its callers count with `jq length`.
+in the model, so a reader prints what the derivation says. The rows ride the
+`/helm` answer's envelope as `pack_health`, and the rig board's page does not
+draw them. `helm-svc board --json` carries none: it stays the ranked tiles
+array its callers count with `jq length`.
 
-Rows are unconditional whenever a record exists — a strip that appears only on
-trouble is a strip nobody learns to read. A city whose build orders have never
-run renders no section at all, rather than an all-clear nobody measured.
+A record that reads makes a row whatever its band, so a quiet build reads as
+one rather than as nothing. A city whose build orders have never run has no
+rows at all, rather than an all-clear nobody measured.
 
 ## Web UI
 

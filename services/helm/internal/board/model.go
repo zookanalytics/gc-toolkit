@@ -11,8 +11,8 @@
 // board's `--json` emits, in the same order, inside the envelope
 // {generated_at, total, tiles}.
 //
-// PARITY (tk-134d7). The board is ONE model, which the web dashboard renders
-// and `helm-svc board --json` prints, so the field set here is the whole
+// PARITY (tk-134d7). The board is ONE model, which the sidecar's GET /helm
+// serves and `helm-svc board --json` prints, so the field set here is the whole
 // of gc-helm.sh's `--json` contract rather than the spike subset. Everything
 // the bash board computes is computed here: the full rank weight (subtree size
 // + priority + a capped cross-rig-ref count), the takeaway-driven NEEDS
@@ -544,9 +544,9 @@ type Tile struct {
 
 	// --- the attention-type band and the cluster key -----------------------
 	//
-	// Two derived classifications the dashboard groups by, on the wire for the
+	// Two derived classifications a surface groups by, on the wire for the
 	// same reason [Owed] is: the split is not recoverable from the coarse
-	// [Severity] band, and putting it here is what keeps the dashboard from
+	// [Severity] band, and putting it here is what keeps a surface from
 	// inventing its own client-side split.
 
 	// Section is the KIND of attention a row wants, orthogonal to Severity's
@@ -570,7 +570,7 @@ type Tile struct {
 	// GroupRoot is the id of the family this row belongs to — the top-most anchor
 	// its parent-child and blocked edges climb to, equal to the row's OWN id when
 	// it climbs to nothing. Every tile carries one, so a surface buckets families
-	// the way the dashboard already buckets [Section]. Dependency structure is the
+	// the way it buckets [Section]. Dependency structure is the
 	// board's primary grouping axis and the attention band orders and highlights
 	// WITHIN a family; [GroupByFamily] is that partition.
 	GroupRoot string `json:"group_root"`
