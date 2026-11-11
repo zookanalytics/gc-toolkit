@@ -263,7 +263,7 @@ dispose-timeout-writes-already-landed	note	47fd7de4e6fc	1	removed: About the qui
 disposition-cutover-rerun-tk-1tfzr71-53-state	note	480a0f455418	1	finished: State of a submitted cut-over re-run whose bead is closed; residue counts are a snapshot.		
 disposition-native-edges-tk-1tfzr71-13-state	note	41b13b5e3e1f	none	tool-fact: Holds bd facts: unchecked duplicate close, cross-store edges visible only in list rows, readiness-affecting edge kinds; pack lacks them.		
 distiller-gascity-review-index-gap-flood	note	5063262abcf0	live	tk-ymhd3o4: Routing instruction for index-gap observations while the fixing bead is open.	none named	
-distiller-live-noop-routes-agent-guidance-pack-lookup-bd-stub	note	c5f1638a315b	live	tk-9t1wmrd: Running routing table sending observation classes onto pattern beads, all still open.	conversation tk-lt7ymu3	
+distiller-live-noop-routes-agent-guidance-pack-lookup-bd-stub	note	c5f1638a315b	none	reference: The distiller's running map from observation classes to the beads it NOOPs them onto, re-checked each run; it waits on no one bead, and a pattern bead stays open while its rule stands.	conversation tk-lt7ymu3	
 distiller-outside-review-set-read-method-and-levers	note	8243db4a0c11	none	recipe: How to read a large outside-review back-fill: provenance repeats, row labels, post dates, voice.		
 distiller-pack-fragment-proposals-must-be-rig-agnostic	note	2e9e768e21bb	none	unwritten-rule: Standing rule that gc-toolkit-only learnings never go into pack carriers, with how to route them.	PR #1303 review	
 distiller-prvea-contract-clause-missed-next-lever-author-side	note	e4bbfcaada6b	live	tk-tayv80f: Tracks levers for the copy-instead-of-share pattern; lever bead and decision still open.		
@@ -1474,9 +1474,9 @@ hub-doctor-checks#1	hub entry	f835930e6ab8	none	recipe: How to time a changed do
 hub-doctor-checks#2	hub entry	8edbaaae69b5	none	recipe: Recipe for running a tmux-reading check live under a stripped environment; hermetic stubs miss it.		
 hub-doctor-checks#3	hub entry	a7a0c3498140	none	recipe: Method: replace a refuted reader rather than guard text, and run mutants to pin cases.		
 hub-duplicates-and-rework-holds#prose1	hub entry	e4b1eb6f0b3f	1	snapshot: Old copy of an index line, moved out of the index; the hub itself holds the content.		
-hub-feedback-learning-distiller-and-miner#1	hub entry	80b62ac67b33	live	tk-b80kkz: Tracks measured probe of open rule tk-b80kkz and its pending landing review.		
-hub-feedback-learning-distiller-and-miner#2	hub entry	d6de629d2347	live	tk-karx6a2: Tracks probe results for open naming rule tk-karx6a2 and the open decision on its carrier.		
-hub-feedback-learning-distiller-and-miner#3	hub entry	dd1961069b01	live	tk-4uw3cg3: Tracks probe results for open sketch-is-intent rule tk-4uw3cg3 awaiting adoption.		
+hub-feedback-learning-distiller-and-miner#1	hub entry	80b62ac67b33	none	design-record: The measured reach of rule tk-b80kkz's alert clause, which a distiller reads before counting a recurrence; the build it tracked landed in #1379, and the pattern bead stays open while its rule stands.		
+hub-feedback-learning-distiller-and-miner#2	hub entry	d6de629d2347	none	design-record: Probe results for naming rule tk-karx6a2 by reviewer provider, which a reviewer probe and a recurrence count read; the build it tracked landed in #1379, and the pattern bead stays open while its rule stands.		
+hub-feedback-learning-distiller-and-miner#3	hub entry	dd1961069b01	none	design-record: Probe results for rule tk-4uw3cg3 (a passing sketch is intent), which a recurrence count reads; the build it tracked landed in #1379, and the pattern bead stays open while its rule stands.		
 hub-first-reaction-and-proactive#1	hub entry	d558f777e6cf	1	finished: Stale-seed audit finding tied to a 10-24 rebuild; its carrying bead is closed.		
 hub-first-reaction-and-proactive#2	hub entry	fac1a2f86c29	none	platform-fact: Durable fact: reaction claims carry a 5-minute lease renewed by heartbeat from the holder.		
 hub-first-reaction-and-proactive#3	hub entry	c52cfe3c7cd4	none	recipe: Recipe for tracing a stray untracked file's writer through session transcripts by mtime.		

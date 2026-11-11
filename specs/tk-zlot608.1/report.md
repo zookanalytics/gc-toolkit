@@ -38,10 +38,10 @@ only and is not sorted.
 | Answer | Whole notes | Entries of collection notes | All units |
 |---|---:|---:|---:|
 | Point-in-time (question 1) | 413 | 116 | 529 |
-| Live work | 87 | 37 | 124 |
+| Live work | 86 | 34 | 120 |
 | Wording fix (question 2) | 7 | 0 | 7 |
 | Structural (question 3) | 61 | 70 | 131 |
-| Fits none | 852 | 518 | 1,370 |
+| Fits none | 853 | 521 | 1,374 |
 | All | 1,420 | 741 | 2,161 |
 
 - **Live work** is a note about work that is still open. It is not question 1
@@ -72,6 +72,8 @@ These 413 whole notes are point-in-time knowledge that can go away.
 Each one is a record of finished work, says what no longer holds, repeats an
 instruction the pack already carries, or records one moment's state. Their
 rows in [notes.tsv](notes.tsv) say which, and why. tk-zlot608.3 removes them.
+57 of them record a ruling the note attributes to the operator, and their rows
+give the source each one claims.
 The `sha256` column holds the first 12 hex characters of each file's hash at
 the copy, so a note whose hash differs now has changed since and is skipped.
 
@@ -522,8 +524,10 @@ collection note as it is, and editing them belongs to the standing triage
 
 ### Live work
 
-These 124 units are about work that is still open, so they are not
-point-in-time yet. Each one waits on the bead given.
+These 120 units are about work that is still open, so they are not
+point-in-time yet. Each one waits on the bead given. A learned rule's pattern
+bead stays open while the rule stands, so a unit that names only a pattern
+bead is not waiting on it.
 
 | Unit | Waits on |
 |---|---|
@@ -553,7 +557,6 @@ point-in-time yet. Each one waits on the bead given.
 | `design-pr-states-target-in-architecture-md-same-pr` | tk-jughjuk.5 |
 | `dispatch-design-tk-1tfzr71-54-state` | tk-1tfzr71.15 |
 | `distiller-gascity-review-index-gap-flood` | tk-ymhd3o4 |
-| `distiller-live-noop-routes-agent-guidance-pack-lookup-bd-stub` | tk-9t1wmrd |
 | `distiller-prvea-contract-clause-missed-next-lever-author-side` | tk-tayv80f |
 | `doctor-skill-dangling-sink-after-pack-skill-deletion` | tk-ujz8d10 |
 | `doctor-sweep-killed-by-deacon-cycle-restart-in-handback-turn` | tk-1tfzr71.19 |
@@ -614,9 +617,6 @@ point-in-time yet. Each one waits on the bead given.
 | `witness-refinery-queue-recurring-can-mask-pr-awaiting-operator-approval` | tk-q3rr8q1 |
 | `work-formula-rewrite-tk-1tfzr71-12-state` | tk-1tfzr71.39 |
 | `zsh-reads-home-zshenv-codex-home-red-pool-home-green` | tk-vzecgfx |
-| `hub-feedback-learning-distiller-and-miner#1` | tk-b80kkz |
-| `hub-feedback-learning-distiller-and-miner#2` | tk-karx6a2 |
-| `hub-feedback-learning-distiller-and-miner#3` | tk-4uw3cg3 |
 | `hub-first-reaction-and-proactive#4` | tk-t9fl9ss |
 | `hub-helm-board-and-anchor-membership#17` | tk-yhquh93 |
 | `hub-helm-board-and-anchor-membership#2` | tk-1tfzr71.24 |
@@ -699,7 +699,7 @@ any whose words have changed since.
 - **What is wrong:** A finding's key names the check, not the fault, so the same key can return with a new cause, and the text tells the reader the old fix regressed.
 - **Current words:** `This finding fired again after $PRIOR was closed, so the earlier fix did not hold.`
 - **Replace with:** `This finding fired again after $PRIOR was closed, and its cause may differ.`
-- **Size change:** -3 words.
+- **Size change:** -2 words.
 - **Shown by:** `finding-key-recurrence-may-be-a-different-cause`.
 
 ### W-04: `docs/component-model.md`
@@ -733,7 +733,7 @@ any whose words have changed since.
 
 `mol-validate-read-review-bead-notes-for-reviewer-repro` shows a gap in `formulas/mol-validate.toml`, which tk-1tfzr71.22 retires, so it gets no fix (AGENTS.md).
 
-Together the fixes change the instructions by +1 word.
+Together the fixes change the instructions by +2 words.
 
 ## Structural findings
 
@@ -936,7 +936,7 @@ Together the fixes change the instructions by +1 word.
 
 ## Notes that fit none
 
-1,370 units answer none of the three questions. They hold knowledge that is still true and that the pack does not carry, so none of them is point-in-time, and none points at a wording fault or a structural one. What happens to them is the standing triage's design (tk-zlot608.2).
+1,374 units answer none of the three questions. They hold knowledge that is still true and that the pack does not carry, so none of them is point-in-time, and none points at a wording fault or a structural one. What happens to them is the standing triage's design (tk-zlot608.2).
 
 | Kind | Units | What it is |
 |---|---:|---|
@@ -944,8 +944,8 @@ Together the fixes change the instructions by +1 word.
 | tool-fact | 342 | Durable behaviour of a tool the pack does not own, such as bd, gh, git, jq, a shell, Claude Code or Codex. |
 | platform-fact | 164 | Durable Gas City behaviour. |
 | unwritten-rule | 159 | A standing rule for agents that no pack instruction carries, and that a rewording cannot add. |
-| reference | 33 | A durable pointer or map. |
-| design-record | 27 | The reasoning behind a design that still stands. |
+| reference | 34 | A durable pointer or map. |
+| design-record | 30 | The reasoning behind a design that still stands. |
 | host-fact | 14 | A fact about this machine or its environment. |
 | other | 4 | Anything else. |
 
@@ -970,6 +970,11 @@ Together the fixes change the instructions by +1 word.
    42 units back as not structural.
 7. An operator mark is kept only where the unit's own text names the operator.
    9 marks were dropped by that rule.
+8. Self-review read the current state of every bead a live-work unit waits on,
+   and of every bead named in a point-in-time note's name. The first were all
+   open and the second all closed. Four live-work units waited only on a
+   learned rule's pattern bead, which stays open while its rule stands, so
+   they were sorted again as fitting none.
 
 Limits:
 
