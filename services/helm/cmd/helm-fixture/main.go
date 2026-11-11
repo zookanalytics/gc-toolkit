@@ -1,6 +1,7 @@
 // Command helm-fixture serves the Helm board on fixture data: the app this
-// commit embeds, a board answer read from a file, and canned answers for the
-// write verbs (see package fixture). A demo capture of the board passes it to
+// commit embeds, a board answer read from a file, one rig's document read from a
+// file at the rig board's routes, and canned answers for the write verbs (see
+// package fixture). A demo capture of the board passes it to
 // demo-screenshot.sh as its --serve command, as docs/review-demo.md shows, so the
 // capture shows the board the reviewed commit builds and never reaches the live
 // city.
@@ -14,7 +15,7 @@
 //
 // Usage:
 //
-//	helm-fixture [--board <file>] [--answers <dir>] [--addr <host:port>]
+//	helm-fixture [--board <file>] [--rig-board <file>] [--answers <dir>] [--addr <host:port>]
 //
 // Exit: 0 after a clean shutdown on SIGTERM or SIGINT, 1 when the fixture cannot
 // start or serve, 2 bad arguments.
@@ -41,6 +42,10 @@ import (
 // relative to the module root, the directory the command runs from.
 const defaultBoard = "web/src/board.fixture.json"
 
+// defaultRigBoard is the document the rig read builds from the committed
+// gc-toolkit fixture, which TestFixtureBoard holds, relative to the module root.
+const defaultRigBoard = "internal/rigboard/testdata/gc-toolkit.board.json"
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
@@ -56,6 +61,8 @@ func run(ctx context.Context, args []string, getenv func(string) string, stderr 
 	flags.SetOutput(stderr)
 	board := flags.String("board", defaultBoard,
 		"the board answer to serve at /helm, in the shape web/src/contract.ts names")
+	rigBoard := flags.String("rig-board", defaultRigBoard,
+		"one rig's document to serve at /helm/rigs/{rig}, in the shape web/src/rigboard/document.gen.ts names")
 	answersDir := flags.String("answers", "",
 		"a directory of canned write answers: <verb>.json answers that verb with 200, <verb>.<status>.json with that status")
 	addr := flags.String("addr", "",
@@ -95,6 +102,11 @@ func run(ctx context.Context, args []string, getenv func(string) string, stderr 
 		logger.Printf("read the board answer: %v", err)
 		return 1
 	}
+	rig, err := os.ReadFile(*rigBoard)
+	if err != nil {
+		logger.Printf("read the rig document: %v", err)
+		return 1
+	}
 	answers := map[string]fixture.Answer{}
 	if *answersDir != "" {
 		if answers, err = fixture.LoadAnswers(*answersDir); err != nil {
@@ -107,9 +119,9 @@ func run(ctx context.Context, args []string, getenv func(string) string, stderr 
 		logger.Printf("the embedded app: %v", err)
 		return 1
 	}
-	h, err := fixture.Handler(body, answers, spa)
+	h, err := fixture.Handler(body, rig, answers, spa)
 	if err != nil {
-		logger.Printf("%s: %v", *board, err)
+		logger.Printf("%s, %s: %v", *board, *rigBoard, err)
 		return 1
 	}
 
@@ -121,7 +133,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stderr 
 	srv := &http.Server{Handler: h, ReadHeaderTimeout: 5 * time.Second}
 	served := make(chan error, 1)
 	go func() { served <- srv.Serve(ln) }()
-	logger.Printf("serving %s with %d canned answer(s) on http://%s", *board, len(answers), ln.Addr())
+	logger.Printf("serving %s and %s with %d canned answer(s) on http://%s", *board, *rigBoard, len(answers), ln.Addr())
 	if ready != nil {
 		ready <- ln.Addr().String()
 	}
