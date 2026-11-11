@@ -157,8 +157,8 @@ an open PR's merge while a conversation on the PR is open
 and it asks nothing of the platform. That page gives a pre-open anchor no such
 edge, because the edge would stop the pool that builds it. Here the sitting
 builds it, and keeping the pool off is the point. The hand-off removes the edge
-before it assigns the bead to the refinery (section 3), and a conversation's
-close ends its effect, so nothing else writes a release.
+as its last write, once it has assigned the bead to the refinery (section 3),
+and a conversation's close ends its effect, so nothing else writes a release.
 
 **Sleep, restarts and the next sitting.**
 
@@ -235,11 +235,27 @@ So both writers take `--held-by <conversation>` beside `--bead`:
 
 - **The proof.** `gc hook current` names that conversation, and the bead has a
   `blocks` edge onto it. Either missing refuses, with nothing written.
-- **No run control.** Every refusal exits non-zero with its reason, and writes
-  no gate, cancels nothing, closes no step and drains nothing, because the
-  operator is in the sitting to hear it.
-- **The release.** The hand-off removes the edge onto the conversation before
-  it assigns the bead to the refinery, so the refinery finds nothing holding it.
+- **No run control.** Every refusal, a hand-off write bd refuses among them,
+  exits non-zero with its reason, and writes no gate, cancels nothing, closes no
+  step and drains nothing, because the operator is in the sitting to hear it.
+- **The release, last.** The hand-off removes the edge onto the conversation as
+  its last write: after the three hand-off writes have assigned the bead to the
+  refinery, and before the refinery's wake. The refinery's queue leaves an
+  assigned bead that a wait of its own holds until the wait clears (find-work in
+  `formulas/mol-refinery-patrol.toml`), so the assignment starts nothing while
+  the edge stands.
+- **A hand-off cut short.** One that stops before the release, on a refused
+  write, a release that does not land or a call cut off, leaves the edge in
+  place, so the proof still holds and the sitting runs the hand-off again. The
+  second run writes nothing the first did not reach, beyond the hand-off's note
+  appended again: a head the first run pushed is already on origin, the
+  bring-current guard holds nothing on a branch with no PR, and the other writes
+  set the values they set before. Once the release lands, the change is the
+  refinery's, and a call that stops after it has missed only the refinery's wake
+  and the removal of the tree. A run after the release is refused by the proof,
+  its refusal says that the refinery holds the change, and the sitting then
+  wakes the refinery as the hand-off does. The reaper removes the tree once the
+  bead closes.
 - **Everything else is the same code:** the branch gate, the target, the
   uncommitted check, the push and its verification, the bring-current guard,
   the anchor's summary and title, the three hand-off writes, the refinery's wake,
@@ -385,7 +401,7 @@ here; its name follows [skills.md](../../docs/skills.md) when it is filed.
 | the same, "A sitting is not a unit of work" and "asks for work; it does not do it" | No files, no commits; a repo change is the one line a sitting does not cross. | A sitting asks for work. The one exception is a change the operator rules it make with them, which it hands off as a polecat's work is handed off. |
 | the same, Rules: a sitting's universe; disposing a subject | "What you never do is change a repository"; "never a repo change"; "Only a repo change does, and that goes to a molecule." | The rule states the line, the limits in section 1 and the edit skill, and keeps the reason that work a spec can carry is a molecule's. |
 | the same, the step table | No row for an edit. | A row: steps 5 to 8, when the operator rules that the sitting make a change with them, load `converse-edit`. |
-| `skills/converse-edit/SKILL.md` (new) | none | The line; the record; choosing or filing the change's bead; the hold edge; Work's setup and hand-off with `--held-by`; reading the polecat class's standards from their fragments before the first edit (`work-quality-polecats`, `learned-conventions-polecat`), as the mechanik reads its own; committing without identity flags and reading the first signature; a commit per agreed step; the rig's tests through `gctk rig`; the summary; each refusal; dropping a change; a change in flight at a hand-back, a restart or a dismiss; a UI copy (unit 4); an open PR, which sends a rework until unit 5. |
+| `skills/converse-edit/SKILL.md` (new) | none | The line; the record; choosing or filing the change's bead; the hold edge; Work's setup and hand-off with `--held-by`; reading the polecat class's standards from their fragments before the first edit (`work-quality-polecats`, `learned-conventions-polecat`), as the mechanik reads its own; committing without identity flags and reading the first signature; a commit per agreed step; the rig's tests through `gctk rig`; the summary; each refusal; a hand-off cut short, which it runs again until the release lands, and the refinery's wake when a refusal says the refinery already holds the change; dropping a change; a change in flight at a hand-back, a restart or a dismiss; a UI copy (unit 4); an open PR, which sends a rework until unit 5. |
 | `skills/converse-iterate-document/SKILL.md` | "A sitting writes no files, so it changes a document by sending work." | Two ends: the operator rules the sitting edit the document itself (`converse-edit`), or the scaffold and one rework, which stays the way to change an open PR until unit 5. |
 | `skills/records/SKILL.md` | A sitting writes no files, so it files a bead for a document. | A sitting writes a document only as a change the operator ruled it make, and otherwise files a bead for it. |
 | `skills/work/SKILL.md`, "Stand up an integration effort", and `skills/work/integration-effort.md` | "a converse sitting never pushes, so a sitting does not run it" | A sitting pushes only the branch of a change the operator ruled it make, through Work's hand-off, so the effort's branch is cut by the recipe's runner or `mol-design-convoy`. |
@@ -428,7 +444,7 @@ before where the table says so.
 
 | # | Unit | What it builds | Waits on |
 |---|---|---|---|
-| 1 | Work's writers serve a sitting | `--held-by <conversation>` on `work-setup.sh` and `work-submit.sh`: the proof, refusals that end nothing, and the hand-off's release of the edge before the refinery assignment. Tests in `work-setup.test.sh` and `work-submit.test.sh`: a sitting's setup and its re-entry to a recorded tree, a hand-off that releases the edge and assigns the refinery, a missing edge and a hook that names another bead, each refused with nothing written, and a refusal that drains nothing. The `component-model.md` rows. The commit cites the search record. | nothing |
+| 1 | Work's writers serve a sitting | `--held-by <conversation>` on `work-setup.sh` and `work-submit.sh`: the proof, refusals that end nothing, and the hand-off's release of the edge as its last write, after the refinery assignment, with a refusal after the release that says the refinery holds the bead. Tests in `work-setup.test.sh` and `work-submit.test.sh`: a sitting's setup and its re-entry to a recorded tree, a hand-off that assigns the refinery and then releases the edge, a hand-off stopped before the release, by a refused write or a failed release, that a second run completes with nothing written beyond what the first did not reach and its note appended again, a run after the release refused with the refinery named as the holder and nothing written, a missing edge and a hook that names another bead, each refused with nothing written, and a refusal that drains nothing. The `component-model.md` rows. The commit cites the search record. | nothing |
 | 2 | One home for the PR summary's standard | The submit step's "Compose the PR summary" moves into the commit-conventions skill, whose description gains the summary. The submit step loads the skill and keeps its calls, and `formula-step-size.test.sh` holds. | nothing |
 | 3 | The doctrine and the edit skill | Every row of section 6 except the UI section of `converse-edit`, and the first Debt entry of `architecture.md` removed. | units 1 and 2 |
 | 4 | A copy of a rig's UI | Under call 1(a): the pack's copy script (start, publish, stop, a lifetime bound by the sitting), `converse-edit`'s section on a copy, the live-copy command in gc-toolkit's `docs/review-demo.md`, and a bead for the mechanik to set the city's publish and withdraw commands on the converse templates. Under call 1(b): `converse-edit`'s section on screenshots alone. | unit 3 |
