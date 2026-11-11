@@ -952,7 +952,7 @@ and `rigboard <- server`:
 | `internal/board` | The MODEL. Pure, I/O-free: severity, counts, frontier/needs, `rank_score`, sort+dedup. Ported field-for-field from `gc-helm.sh`. |
 | `internal/source` | The data-access **seam**. `Source` interface + two backends: `BeadsSource` (in-process beads library, the default) and `SupervisorSource` (HTTP client against the supervisor API). |
 | `internal/server` | HTTP routes + a server-side TTL cache of the computed board, and of each rig's board document. |
-| `internal/rigboard` | The rig board's read: one gather of a rig's store through the gc command, the pack's shared readers asked once, and the one table that names each row's group and signal. See *The rig board*, below. |
+| `internal/rigboard` | The rig board's read: one gctk listing of a rig's store, the pack's shared readers asked of its rows, and the one table that names each row's group and signal. See *The rig board*, below. |
 | `internal/verbs` | Runs a `gc-helm.sh` write verb for the server's POST routes, under a deadline that kills the run's whole process group. It owns no verb logic. |
 | `web` | The operator's web app (Vite + React + TS) and the `go:embed` that compiles its built bundle into the binary. |
 | `cmd/helm-svc` | Entrypoint: listen on the `GC_SERVICE_SOCKET` unix socket, wire source→server, graceful SIGTERM. |
@@ -1434,35 +1434,39 @@ answers one rig's board: a document holding every row the four pages draw, once
 each, and the Epics, Needs you, Work queue and Unprioritized pages as lists of
 those rows' ids. Its read time sits beside it (`read_at`), not in it.
 
-**What it reads.** One gather of the rig's store, through the gc command
-(`internal/source/gccli.go`'s seam), never the beads library:
-`gc bd list --include-gates` for every open bead and gate, one
-`gc bd list --parent <epic> --status closed` per open epic and Delivery for its
-closed members, and the far ends of `blocks` edges the walk below reaches. A
-closed epic among those members, such as a Delivery that landed while its epic
-stays open, gets the same read for its own closed members. A member is kept
-only when its own parent-child edge names the parent. Closed work beneath a
-bead that is not an epic is not read, since that would take one call per
-parent. Every state is the answer of one of the pack's shared readers, asked
-once per gather:
+**What it reads.** One read of the rig's store through gctk's listing
+(`services/gctk/listing`), a ledger pass, never the beads library: one
+`gc bd list` of every live bead, gates, wisps, infrastructure beads and
+templates among them, one `gc bd list --parent <epic> --all` per open epic and
+Delivery for its closed members, and each bead the readers need beyond those,
+such as a closed bead a wait names, read once. A closed epic among those
+members, such as a Delivery that landed while its epic stays open, gets the
+same read for its own closed members. A member is kept only when its own
+parent-child edge names the parent. Closed work beneath a bead that is not an
+epic is not read, since that would take one call per parent. Every reader is
+asked of the listing's rows, so one document never mixes two reads of a bead:
 
 | Reader | What the read takes from it |
 |---|---|
-| `services/gctk/waits` (`ReadStore`, `Snapshot.Holds`) | what holds each bead, the waits behind it, whether it is in flight, its arm |
-| `services/gctk/waits` (`IsRootOrStep`) | whether a bead is a run's root or a step poured under one, which is no row of its own |
-| `services/gctk/prstatus` (`Holding`) | what a person owes on a bead through its `blocks` edges |
-| `services/gctk/prstatus` (`Read`, `Derive`, `Held`, `Reasons`) | where an open pull request stands and what holds it |
+| `services/gctk/listing` | each bead's fields and the keys the page shows, decoded through the listing's declarations; whether a bead is a run's root or a step poured under one (`waits.IsRootOrStep`), a person's to clear (`prstatus.IsPersonBlocker`), or a row of the store's ephemeral plane |
+| `services/gctk/waits` (`Listing.Holds`) | what holds each bead, the waits behind it, whether it is in flight, its arm |
+| `services/gctk/prstatus` (`Holding` over `Listing.Blockers`) | what a person owes on a bead through its `blocks` edges |
+| `services/gctk/prstatus` (`Read` over the listing, `Derive`, `Held`, `Reasons`) | where an open pull request stands and what holds it |
 | `services/gctk/conversation` | what a conversation is, what it tracks and replies to |
 
-`internal/rigboard/table.go` is the one table that turns those answers into a
-row's group and signal, first match wins, and the only place those words are
-chosen. The read adds no rule about what holds a bead, whose move it is or
-whether work is moving. `specs/tk-yhquh93.2/gas-city-search.md` says why it
-reads through `gc bd list` rather than the supervisor's bead routes.
+The listing reads the store's ephemeral plane and its templates because waits
+reads every run, and a row is a bead bd's own listing shows: the board leaves
+out a wisp, a row stored with no history, such as an order run's tracking bead,
+and a template molecule. `internal/rigboard/table.go` is the one table that
+turns the readers' answers into a row's group and signal, first match wins,
+and the only place those words are chosen. The read adds no rule about what
+holds a bead, whose move it is or whether work is moving.
+`specs/tk-yhquh93.2/gas-city-search.md` says why it reads through `gc bd list`
+rather than the supervisor's bead routes.
 
 **How it is cached.** The document depends on the store's answers alone, so it
 is cached whole per rig, by the rule the board's cache keeps: a minute's time to
-live (`server.RigBoardTTL`, from a measured 5.5 s gather of gc-toolkit), one
+live (`server.RigBoardTTL`, from a measured 2.9 s read of gc-toolkit), one
 gather of a rig at a time however many requests wait on it, and every rig
 dropped when a write route succeeds. A failed read answers 502 with the
 failure, never a document, so the page keeps its last good document and says
@@ -1481,8 +1485,8 @@ go test ./internal/rigboard -run TestPageTypesAreCurrent -update   # writes it a
 is real gc-toolkit beads, three epics and their graph, cut from the store by the
 read's own gather and scanned for other rigs, host paths, emails and accounts;
 its `about` block says what was cut and replaced. `TestFixtureBoard` builds the
-document from it through the real waits package over the pack's stub store
-(`assets/scripts/holds-store.stub.sh`) and holds it to
+document from it through the read itself, gctk's listing over the pack's stub
+store (`assets/scripts/holds-store.stub.sh`), and holds it to
 `internal/rigboard/testdata/gc-toolkit.board.json`. Cut it again from a city
 with `RIGBOARD_CUT_CITY=<city root> go test ./internal/rigboard -run TestCutFixture`,
 then write the golden with `go test ./internal/rigboard -run TestFixtureBoard -update`.
