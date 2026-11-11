@@ -13,14 +13,17 @@
 // Gas City `proxy_process` workspace-service: the supervisor spawns it, hands it
 // a unix socket path in GC_SERVICE_SOCKET, dials that socket as a reverse proxy,
 // and reaches GET /helm (the board), GET /healthz (liveness), the write routes
-// POST /helm/{open,accept,engage,dismiss} (actuate a board recommendation) and
-// the embedded web app (the mount root, plus its assets) over it. Requests arrive
-// already path-stripped.
+// POST /helm/{open,accept,engage,dismiss} (actuate a board recommendation), the
+// rig board's GET /helm/rigs and GET /helm/rigs/{rig}, and the embedded web app
+// (the mount root, plus its assets) over it. Requests arrive already
+// path-stripped.
 //
-// The service reads all bead state through the internal/source.Source seam —
+// The board reads all bead state through the internal/source.Source seam —
 // either the in-process beads library or the supervisor's loopback HTTP API,
 // both Gas City interfaces, never raw Dolt — and serves a ranked board ported
 // from assets/scripts/gc-helm.sh. See selectSource for which backend runs when.
+// The rig board reads each rig's store through the gc command
+// (internal/rigboard).
 package main
 
 import (
@@ -122,6 +125,7 @@ func serve() {
 		server.WithSPA(spaHandler()),
 		server.WithActuator(selectActuator(cityPath)),
 		server.WithCityPath(cityPath),
+		server.WithRigBoard(source.NewGC(cityPath), server.RigBoardTTL),
 	)
 
 	// The supervisor removes any stale socket before spawning us, so we own
