@@ -36,11 +36,14 @@ type index struct {
 	answeredBy map[string]string
 	// children are the rows whose parent-child edge names each bead.
 	children map[string][]string
+	// within is the epics and Deliveries each row sits under nearest
+	// (containers).
+	within map[string][]string
 }
 
 func newIndex(g *gathered) *index {
 	ix := &index{g: g, beads: map[string]bead{}, kinds: map[string]Kind{}, subject: map[string]string{},
-		answeredBy: map[string]string{}, children: map[string][]string{}}
+		answeredBy: map[string]string{}, children: map[string][]string{}, within: map[string][]string{}}
 	for _, list := range [][]bead{g.open, g.closed} {
 		for _, b := range list {
 			if _, dup := ix.beads[b.ID]; dup || !ownRow(b) {
@@ -52,6 +55,9 @@ func newIndex(g *gathered) *index {
 	}
 	for _, id := range ix.rows {
 		ix.kinds[id] = ix.kindOf(ix.beads[id])
+	}
+	for _, id := range ix.rows {
+		ix.within[id] = ix.containers(id)
 	}
 	for _, id := range ix.rows {
 		b := ix.beads[id]
@@ -112,39 +118,54 @@ func (ix *index) openHumanGate(id string) bool {
 	return ok && isOpen(b) && prstatus.IsHumanGate(b.IssueType, b.AwaitType)
 }
 
-// container is the epic or Delivery a row sits under: the nearest one its
-// parent-child edges reach through other work. It is empty for a row under
-// none.
-func (ix *index) container(id string) string {
+// containers are the epics and Deliveries a row sits under nearest. Its
+// parent-child edges, and each parent's in turn, are followed through other
+// rows, every parent a bead names, and each path stops at the first epic or
+// Delivery it reaches. A path also stops at a parent the read did not gather
+// and at a bead the walk has passed, so a cycle ends and a parent missing from
+// the read costs only its own path. Each container is named once, and a row
+// under none has none.
+func (ix *index) containers(id string) []string {
+	var out []string
 	seen := map[string]bool{id: true}
-	cur := id
-	for {
-		ps := parents(ix.beads[cur])
-		if len(ps) == 0 {
-			return ""
+	for next := []string{id}; len(next) > 0; {
+		var more []string
+		for _, cur := range next {
+			for _, p := range parents(ix.beads[cur]) {
+				if seen[p] {
+					continue
+				}
+				seen[p] = true
+				if _, ok := ix.beads[p]; !ok {
+					continue
+				}
+				switch ix.kinds[p] {
+				case KindEpic, KindDelivery:
+					out = append(out, p)
+				default:
+					more = append(more, p)
+				}
+			}
 		}
-		p := ps[0]
-		if seen[p] {
-			return ""
-		}
-		seen[p] = true
-		if _, ok := ix.beads[p]; !ok {
-			return ""
-		}
-		switch ix.kinds[p] {
-		case KindEpic, KindDelivery:
-			return p
-		}
-		cur = p
+		next = more
 	}
+	return out
 }
 
-// ancestors are every epic and Delivery a row sits under at any depth, nearest
-// first.
+// ancestors are every epic and Delivery a row sits under at any depth, through
+// every container above it, each once and nearest first.
 func (ix *index) ancestors(id string) []string {
 	var out []string
-	for c := ix.container(id); c != "" && !slices.Contains(out, c); c = ix.container(c) {
-		out = append(out, c)
+	for next := ix.within[id]; len(next) > 0; {
+		var more []string
+		for _, c := range next {
+			if c == id || slices.Contains(out, c) {
+				continue
+			}
+			out = append(out, c)
+			more = append(more, ix.within[c]...)
+		}
+		next = more
 	}
 	return out
 }
@@ -412,7 +433,7 @@ func (bt *built) linkAsks() {
 }
 
 // count makes each epic's and Delivery's counts: the work under it at any
-// depth, by group.
+// depth, by group, each row once however many paths lead to it.
 func (bt *built) count() {
 	ix := bt.ix
 	counts := map[string]*Counts{}
@@ -456,13 +477,13 @@ func (bt *built) sortIDs(ids []string) {
 
 var groupOrder = []Group{GroupWaitingOnYou, GroupQueued, GroupNotMoving, GroupClosed}
 
-// groupsOf splits the work rows a container holds into its groups, and the
-// rows no group holds.
+// groupsOf splits the work rows a container holds nearest into its groups, and
+// the rows no group holds. A row under two containers is in both.
 func (bt *built) groupsOf(container string) ([]GroupList, []string) {
 	by := map[Group][]string{}
 	unread := []string{}
 	for _, id := range bt.ix.rows {
-		if bt.ix.kinds[id] != KindWork || bt.ix.container(id) != container {
+		if bt.ix.kinds[id] != KindWork || !slices.Contains(bt.ix.within[id], container) {
 			continue
 		}
 		if g := bt.rows[id].Group; g != "" {
@@ -495,7 +516,7 @@ func (bt *built) epicsPage() []EpicEntry {
 		entry := EpicEntry{ID: e, Asks: bt.rows[e].Asks, Deliveries: []DeliveryEntry{}}
 		var dels []string
 		for _, id := range bt.ix.rows {
-			if bt.ix.kinds[id] == KindDelivery && bt.ix.container(id) == e {
+			if bt.ix.kinds[id] == KindDelivery && slices.Contains(bt.ix.within[id], e) {
 				dels = append(dels, id)
 			}
 		}

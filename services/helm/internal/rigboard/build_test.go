@@ -169,6 +169,34 @@ func TestPages(t *testing.T) {
 	})
 }
 
+// TestAParentCycleEndsItsPath walks parent-child edges that come back to a
+// bead the walk has passed: tk-c1 and tk-c2 name each other as parents, and
+// tk-c2 also names epic tk-a. The walk ends, and tk-a lists each of them once.
+func TestAParentCycleEndsItsPath(t *testing.T) {
+	g := graph()
+	parent := func(p string) listing.Edge { return listing.Edge{ID: p, Type: "parent-child"} }
+	g.open = append(g.open,
+		bead{ID: "tk-c1", Title: "one half", Status: "open", Priority: 2, IssueType: "task",
+			Edges: []listing.Edge{parent("tk-c2")}, CreatedAt: "2026-01-11"},
+		bead{ID: "tk-c2", Title: "other half", Status: "open", Priority: 2, IssueType: "task",
+			Edges: []listing.Edge{parent("tk-c1"), parent("tk-a")}, CreatedAt: "2026-01-12"},
+	)
+	for _, id := range []string{"tk-c1", "tk-c2"} {
+		g.holds[id] = waits.Holds{ID: id, Status: waits.Clear}
+	}
+	doc := build(g)
+	var listed []string
+	for _, gl := range doc.Epics[0].Groups {
+		listed = append(listed, gl.IDs...)
+	}
+	listed = append(listed, doc.Epics[0].Unread...)
+	for _, id := range []string{"tk-c1", "tk-c2"} {
+		if n := len(slices.DeleteFunc(slices.Clone(listed), func(x string) bool { return x != id })); n != 1 {
+			t.Errorf("tk-a lists %s %d times, want once: %v", id, n, listed)
+		}
+	}
+}
+
 // TestAConversationAnsweringTwoQuestions holds one store to one document: a
 // conversation that answers two questions stands in the first of them.
 func TestAConversationAnsweringTwoQuestions(t *testing.T) {

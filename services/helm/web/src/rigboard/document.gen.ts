@@ -200,7 +200,8 @@ export interface Contract {
 }
 /**
  * EpicEntry is one epic on the Epics page: its own asks, its Deliveries, and
- * the work under it that no Delivery holds, in the four groups.
+ * the work that reaches it through no Delivery, in the four groups. Work whose
+ * parent-child edges reach more than one epic or Delivery is listed under each.
  */
 export interface EpicEntry {
   id: string;
@@ -213,8 +214,8 @@ export interface EpicEntry {
   unread: string[];
 }
 /**
- * DeliveryEntry is one Delivery under its epic: its own asks and its work in
- * the four groups.
+ * DeliveryEntry is one Delivery under an epic it sits under: its own asks and
+ * its work in the four groups.
  */
 export interface DeliveryEntry {
   id: string;
