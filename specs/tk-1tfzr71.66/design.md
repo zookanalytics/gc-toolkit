@@ -446,14 +446,35 @@ whatever head results with the head the refinery validated.
 **What still needs ordering.** The commit status, its lock, its records and its
 waits are gone, and these questions of order remain:
 
-- **One run of the landing order at a time.** Gas City starts a cooldown order
-  only when the tracking bead of its last run has closed and no work it started
-  is open (the open-tracking and open-work gates in `cmd/gc/order_dispatch.go`),
-  and an order fails closed when those gates time out unless it is marked
-  `idempotent`. An order that a webhook fires skips both gates
-  (`memoryOrderDispatcher.Dispatch` goes straight to `launchResolvedDispatch`),
-  so no webhook fires the landing order, and its cooldown is how soon a change
-  on GitHub is read.
+- **Two runs of the landing order on one record.** Gas City starts a cooldown
+  order only when the tracking bead of its last run has closed and no work it
+  started is open (the open-tracking and open-work gates in
+  `cmd/gc/order_dispatch.go`), and an order fails closed when those gates time
+  out unless it is marked `idempotent`. Upstream, those gates do not keep one
+  run at a time. The controller's watchdog closes every tracking bead created
+  two minutes earlier or more, whether or not its run is still going, an exec
+  order may run for 300 seconds by default, and a cooldown counts from the last
+  run's start, so the next tick can start a second run while the first still
+  works (section 13). The gc this city runs carries a fork change that keeps a
+  running run's tracking bead until two minutes past its time limit, and the
+  design rests on neither build. A run handles each record under one lock per
+  store, a `flock` on `pr-record.lock` in the store's `.beads` directory, on the
+  model of the priority lock ([steering.md](../../docs/steering.md#the-lock)).
+  The run takes the lock before it reads the record, waiting while another run
+  holds it, and keeps it until its last write of that record, never for a whole
+  run. Two runs that overlap therefore act on one record one after the other,
+  the second from the record as the first left it. The kernel releases the lock
+  when the process that holds it ends, so a run that dies, or that its time
+  limit stops, holds nothing. This form is taken because it holds on either
+  build and asks no run to finish inside a window that Gas City sets in its
+  code. A run limit under two minutes would hold too, but every run would have
+  to fit its GitHub reads and its merge requests, each of which GitHub can take
+  ten seconds to answer, inside that window, and the limit would have to follow
+  the window wherever Gas City moves it. An order that a webhook fires skips
+  both gates (`memoryOrderDispatcher.Dispatch` goes straight to
+  `launchResolvedDispatch`), so each event would start a run of its own. No
+  webhook fires the landing order, and its cooldown is how soon a change on
+  GitHub is read.
 - **Two writers of one record.** The refinery writes a record for the bead it
   holds, and the order writes each transition from the record it read. A
   transition written from a record that the refinery has since replaced can
@@ -468,7 +489,9 @@ waits are gone, and these questions of order remain:
 records, the ones it checked least recently (`pr_last_checked_at`), and every
 record it reads gets a new check time. So a record waits at most as many runs
 as the open records take to cycle, and each run ends within an exec order's time
-limit, 300 seconds by default (`TimeoutOrDefault`). A PR that waits on your
+limit, 300 seconds by default (`TimeoutOrDefault`). Gas City stops a run's whole
+process group at that limit, which releases the lock, and the records the run
+did not reach wait for the next run. A PR that waits on your
 approval or on its checks occupies no agent. A finite loop, such as a review
 check that retries up to its `max_attempts`, finishes with a result and never
 waits for an approval or for CI, because that wait is the landing order's next
@@ -910,8 +933,8 @@ these, and the first rig's cutover shows them on its first PRs:
   dismissed.
 - A rework child handed back is taken before its anchor, and the merge request
   never waits on the close of the bead that owns the PR.
-- Under load, each run reaches the records it checked least recently, and no
-  run overlaps another.
+- Under load, each run reaches the records it checked least recently, and two
+  runs that overlap act on one record one after the other.
 
 **Rule 2.** Every step of the rewritten formula calls one tested script and holds
 no shell procedure. The suites that extract the old formula's blocks go in
@@ -927,7 +950,7 @@ leaves the city working.
 |---|---|---|---|
 | 1. `gctk pr compose` and `gctk pr summary` | The PR's title, managed summary region and branch-beads section are composed in gctk from the bead that owns the PR, with the region read by its markers. `pr-summary-region.sh` is deleted, and `pr-open.sh` and `pr-stack.sh` call the verb. Go tests pin the output against today's renders. | nothing | tk-tefrxph; the gctk domain move note |
 | 2. The evaluator | One function of gctk's pr domain answers whether a PR is ready for its current revision, with the head and the target it judged or the conditions not met. It reads the bead's own waits through `waits`, the open beads whose `anchor_bead` names it until their writers add the edge, `merge_hold` and `rebase_hold`, the review results for the live head and target, GitHub's live facts (open, not a draft, the record's identity and base, the validated head, merge state `CLEAN`, and the approval by section 2's eligibility, read from each review's `authorCanPushToRepository`), and the feedback receipts (the watermarks, counted by the intake's own rule, and the answered marks). `prstatus` renders it, and `gctk pr status` prints the conditions not met. It reads a PR's unanswered threads when it gathers the PR's facts, so the count's one writer can retire with `gctk merge`. Tests for each condition, among them an approval through the city's account on a PR another account opened, an approval and a request for changes from an account that cannot push, an approval followed by a review that only comments, which still counts, a dismissed approval, a review result for another head and one for another base, a head other than the validated one, each merge state, a wait of the bead's own, an `anchor_bead` child, and feedback newer than a watermark beside feedback the intake's rule leaves out, which holds nothing. | nothing | sections 2 to 5 |
-| 3. The record and the landing order | `gctk pr record` writes the pending record in Gas Town's two writes. `gctk pr reconcile` takes a bounded number of pending records, the least recently checked first, and reads each PR from GitHub by its number. An identity that no longer matches is `pull_request_reconcile_invalid`. An open PR at another head is requeued as `pull_request_head_changed`. An open PR at the validated head goes to the evaluator, and a ready one is merged with its head pinned, or added to the merge queue with it where the target requires one. A merged PR at the validated head whose merge commit is on the fetched target records `mr_merged` and closes. The other ends are the exceptions, each with its human gate, and a failed lookup or fetch is retried. A rig-scoped cooldown exec order, `pr-reconcile`, runs it. Tests follow `pr-merge-reconcile`'s cases at 7f86098c04ea, and add the pack's: a ready PR merged with its head pinned; a push between the answer and the request, which GitHub refuses and the next run requeues; a request left unanswered and read again; a merge queue that takes the PR and one that drops it; a PR merged into another base; a requeue written from a record the refinery has since replaced, which costs one validation; and the order of records across runs under load. | unit 2 | sections 4 and 6 |
+| 3. The record and the landing order | `gctk pr record` writes the pending record in Gas Town's two writes. `gctk pr reconcile` takes a bounded number of pending records, the least recently checked first, and reads each PR from GitHub by its number. An identity that no longer matches is `pull_request_reconcile_invalid`. An open PR at another head is requeued as `pull_request_head_changed`. An open PR at the validated head goes to the evaluator, and a ready one is merged with its head pinned, or added to the merge queue with it where the target requires one. A merged PR at the validated head whose merge commit is on the fetched target records `mr_merged` and closes. The other ends are the exceptions, each with its human gate, and a failed lookup or fetch is retried. A rig-scoped cooldown exec order, `pr-reconcile`, runs it. Each run handles each record under the store's record lock, from its read of the record to its last write of it, and waits for the lock while another run holds it (section 4). Tests follow `pr-merge-reconcile`'s cases at 7f86098c04ea, and add the pack's: a ready PR merged with its head pinned; a push between the answer and the request, which GitHub refuses and the next run requeues; a request left unanswered and read again; a merge queue that takes the PR and one that drops it; a PR merged into another base; a requeue written from a record the refinery has since replaced, which costs one validation; a run still going when the watchdog closes its tracking bead and the next cooldown starts a second run, which acts on the record the first holds only once the first has written it, and from what it wrote; a run stopped at its time limit, which leaves the lock free and its unread records to the next run; and the order of records across runs under load. | unit 2 | sections 4 and 6 |
 | 4. The refinery on Gas Town's flow | `mol-refinery-patrol` is rewritten on Gas Town's steps at 7f86098c04ea, with the differences in section 1, and each step calls one tested script. The scripts cover: find-work, which skips a held bead or a branch another open bead works on, and takes a rework child before its anchor; the prep by merge in the refinery's own worktree (`refinery-workspace.sh` and its warrant go); the gate through `detached-job.sh`; the failures, through the requeue by `gc sling` or a rework child, and the pre-existing path; the direct landing; the `mr` step (compose the title and body; edit them onto a PR the bead already owns before it pushes the new head under the lease, or push and then open a new PR as a draft with them; record the PR with `opened_as_draft`, so the review lanes and `pr-open.sh`'s ready flip handle it unchanged; write the pending record with `gctk pr record`; and the old-path park while `pending_through_merge` is unset); the rework hand-back, which writes the anchor's record and closes the child; and the integration-effort hand-off (tk-gmjtb2e), whose push takes the same lease. The polecat's push at submit (`work-submit.sh`) and the witness's salvage push take the lease too. `rejection-repool.sh`, `pr-stack.sh` with its arm, `check-refinery-patrol-live` and the old formula's block-extraction suites go. The polecat doctrine gains the drift rule. | units 1 and 3 | tk-c8hl47c, tk-ni0i48p, tk-pdc0ovc, tk-w0hkwos; section 7 |
 | 5. The readers move | Every reader that takes `pull_request` as "owns an open PR" also reads `pull_request_pending` and `pull_request_head_changed` (section 6), `pr-facts.sh`'s feedback, conflict and posture arms among them, while its arms that record a merge, a close without one or a moved base keep to `pull_request`. The sign-off's headline reads `prstatus`. I5 reads every closed bead with a PR, with `mr_merged` and `merged` as landed. I2 reads the kept values. `check-one-anchor-per-pr` counts the values of an open PR. | unit 4 | section 6 |
 | 6. Docs, warrants and the plan | The pages that hold the merge's depth are rewritten to the flow as it stands once units 1 to 5 land: `refinery-merge-cadence.md`, `state-machine.md` (the record's values and their sentences, and the Checks vocabulary), `component-model.md` with both landing writers, `authority-map.md`, `design-convoy.md`'s gates, `gctk-architecture.md`'s rows and the merge section of `built-once-target.md`, which takes section 1's differences as that page holds the witness's. `architecture.md` states the target from this design's own change, with the old path under Debt. Unit 6 drops the Debt entry that units 1 to 5 retire, the refinery push that can force, and corrects any line a unit departed from. The warrants' Covers lines move off retired paths. The plan's rows move as section 8 says. | units 1 to 5 | tk-cvffk5x, with this design's change to `architecture.md`; tk-r82qrrv |
@@ -1049,14 +1072,22 @@ leaves the city working.
   monitor (`gc config show`, 2026-11-11). A monitor names its base branches
   exactly and can filter by author, and `--all` lifts neither filter.
 - **Gas City's orders** (`cmd/gc/order_dispatch.go`, `internal/orders`). A
-  cooldown counts from a run's start. A run writes its tracking bead before it
-  starts and closes it at its end, and the dispatcher starts no run while an
-  order's tracking bead or the work it started is open. `no_work_gate` skips
+  cooldown counts from a run's start (`checkCooldown`). A run writes its
+  tracking bead before it starts and closes it at its end, and the dispatcher
+  starts no run while an order's tracking bead or the work it started is open.
+  Every 30 seconds the controller's watchdog closes each open or in-progress
+  tracking bead created two minutes earlier or more, chosen by its creation
+  time alone, whether or not its run is still going
+  (`orderTrackingSweepWatchdogStaleAfter`, `staleRuns`). `no_work_gate` skips
   those gates, and `idempotent` makes a gate that times out fail open; both are
-  off by default. An exec order runs a command with no agent, under a
-  300-second limit by default (`TimeoutOrDefault`). An order that a webhook
+  off by default. An exec order runs a command with no agent, in a process
+  group of its own that Gas City stops at the order's time limit, 300 seconds
+  by default (`TimeoutOrDefault`, `shellExecRunner`). An order that a webhook
   fires skips both gates (`memoryOrderDispatcher.Dispatch`), and the webhook
-  intake drops a repeated delivery from an in-memory set for 30 minutes.
+  intake drops a repeated delivery from an in-memory set for 30 minutes. The gc
+  this city runs, 1.4.3 built at 36ad5186a2, carries fork commit 8a8feef354,
+  which keeps a run's tracking bead until two minutes past the time limit the
+  run was launched with. Upstream main 6bd609f5bfb4 does not carry it.
 - **Gas City's workflows, convoys and claims.** Finalize closes the
   `gc.source_bead_id` chain only on a pass (`processWorkflowFinalize`). A
   formula check (`[steps.check]`) retries up to its `max_attempts`, which main

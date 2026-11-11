@@ -444,8 +444,9 @@ first. Either way the change is a decision on the record, not a drift.
   leaves unanswered can merge over a hold the city reads after it.
 - **One landing order is the path that admits work on a pending record,** a
   cooldown order with no agent that reads each record's PR by its number, the
-  least recently checked first. Gas City runs one of its runs at a time, and no
-  webhook fires it, since an order a webhook fires skips that gate.
+  least recently checked first. Two of its runs never act on one record at
+  once, and no webhook fires it, since an order a webhook fires skips the gates
+  Gas City puts on an order's runs.
 - **An approval stands across a push** until triage reads the change as
   material. The withdrawal is work that holds the PR until GitHub shows the
   earlier approvals dismissed, and GitHub's stale-review dismissal stays off.

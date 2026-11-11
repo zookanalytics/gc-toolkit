@@ -130,25 +130,38 @@ met in its output, so the board shows what the merge reads.
 
 The need: every pending record is read on a schedule, so a PR that waits on
 your approval or on its checks lands once it is ready, with no agent waiting on
-it, no two runs at once, and a bound on how long any record waits to be read.
+it, no two runs acting on one record at once, and a bound on how long any record
+waits to be read.
 
 - **Gas City.** An exec order runs a command with no agent, on a cooldown that
   counts from a run's start, under a 300-second limit by default
   (`TimeoutOrDefault` in `internal/orders`). The dispatcher starts no run while
   the order's tracking bead or the work it started is open, and an order fails
   closed when those gates time out unless it is marked `idempotent`
-  (`cmd/gc/order_dispatch.go`). An order that a webhook fires skips both gates
+  (`cmd/gc/order_dispatch.go`). Those gates hold a run for two minutes at most:
+  the controller's watchdog closes every tracking bead created two minutes
+  earlier or more, whether or not its run is still going
+  (`orderTrackingSweepWatchdogStaleAfter`, and `staleRuns` in
+  `internal/orders/store_reads.go`, which chooses by creation time alone). An
+  order that a webhook fires skips both gates
   (`memoryOrderDispatcher.Dispatch`), and the webhook intake drops a repeated
   delivery from an in-memory set for 30 minutes, with no serialization per PR.
   Nothing in Gas City runs the PR monitor on a schedule.
+- **bd** guards a write only on the bead's status and assignee (`--if-status`,
+  `--if-assignee`). A run that records its check of a pending record leaves
+  both as they were, so neither guard tells a second run that the record moved.
 - **Gas Town.** The refinery reconciles one record per find-work, and its
   witness wakes it when a pending check is due, so the refinery's session waits
   on the merge.
 
 What unit 3 composes: a rig-scoped cooldown exec order, `pr-reconcile`, that
 runs `gctk pr reconcile` over a bounded number of records, the least recently
-checked first, under the dispatcher's own gates. No webhook fires it, since a
-webhook-fired order skips them.
+checked first, under the dispatcher's own gates. Each run handles each record
+under one lock per store, a `flock` on `pr-record.lock` in the store's `.beads`
+directory on the model of the pack's priority lock, held from its read of the
+record to its last write of it, so two runs that the gates let overlap act on
+one record one after the other. No webhook fires the order, since a
+webhook-fired order skips the gates and each event would start a run.
 
 ## The requeue (unit 4)
 
