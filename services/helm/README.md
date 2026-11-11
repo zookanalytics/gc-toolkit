@@ -957,13 +957,15 @@ sittings, so it shows no failed start either.
 
 ## Architecture
 
-Three packages, a clean dependency line `board <- source <- server <- cmd`:
+The packages, with clean dependency lines `board <- source <- server <- cmd`
+and `rigboard <- server`:
 
 | Package | Responsibility |
 |---|---|
 | `internal/board` | The MODEL. Pure, I/O-free: severity, counts, frontier/needs, `rank_score`, sort+dedup. Ported field-for-field from `gc-helm.sh`. |
 | `internal/source` | The data-access **seam**. `Source` interface + two backends: `BeadsSource` (in-process beads library, the default) and `SupervisorSource` (HTTP client against the supervisor API). |
-| `internal/server` | HTTP routes + a server-side TTL cache of the computed board. |
+| `internal/server` | HTTP routes + a server-side TTL cache of the computed board, and of each rig's board document. |
+| `internal/rigboard` | The rig board's read: one gather of a rig's store through the gc command, the pack's shared readers asked once, and the one table that names each row's group and signal. See *The rig board*, below. |
 | `internal/verbs` | Runs a `gc-helm.sh` write verb for the server's POST routes, under a deadline that kills the run's whole process group. It owns no verb logic. |
 | `web` | The operator's web app (Vite + React + TS) and the `go:embed` that compiles its built bundle into the binary. |
 | `cmd/helm-svc` | Entrypoint: listen on the `GC_SERVICE_SOCKET` unix socket, wire source→server, graceful SIGTERM. |
@@ -1511,6 +1513,61 @@ nullable — narrow them (`board.tiles ?? []`) before iterating.
 
 Reasoning and rejected alternatives (codegen, a TS test runner, a `.ts`
 fixture): `specs/tk-eemvf.2/decisions.md`.
+
+## The rig board (`GET <mount>/helm/rigs/{rig}`)
+
+`GET <mount>/helm/rigs` lists the city's rigs, and `GET <mount>/helm/rigs/{rig}`
+answers one rig's board: a document holding every row the four pages draw, once
+each, and the Epics, Needs you, Work queue and Unprioritized pages as lists of
+those rows' ids. Its read time sits beside it (`read_at`), not in it.
+
+**What it reads.** One gather of the rig's store, through the gc command
+(`internal/source/gccli.go`'s seam), never the beads library:
+`gc bd list --include-gates` for every open bead and gate, one
+`gc bd list --parent <epic> --status closed` per open epic and Delivery for its
+closed members (kept only when the bead's own parent-child edge names the epic),
+and the far ends of `blocks` edges the walk below reaches. Every state is the
+answer of one of the pack's shared readers, asked once per gather:
+
+| Reader | What the read takes from it |
+|---|---|
+| `services/gctk/waits` (`ReadStore`, `Snapshot.Holds`) | what holds each bead, the waits behind it, whether it is in flight, its arm |
+| `services/gctk/prstatus` (`Holding`) | what a person owes on a bead through its `blocks` edges |
+| `services/gctk/prstatus` (`Read`, `Derive`, `Held`, `Reasons`) | where an open pull request stands and what holds it |
+| `services/gctk/conversation` | what a conversation is, what it tracks and replies to |
+
+`internal/rigboard/table.go` is the one table that turns those answers into a
+row's group and signal, first match wins, and the only place those words are
+chosen. The read adds no rule about what holds a bead, whose move it is or
+whether work is moving. `specs/tk-yhquh93.2/gas-city-search.md` says why it
+reads through `gc bd list` rather than the supervisor's bead routes.
+
+**How it is cached.** The document depends on the store's answers alone, so it
+is cached whole per rig, by the rule the board's cache keeps: a minute's time to
+live (`server.RigBoardTTL`, from a measured 5.5 s gather of gc-toolkit), one
+gather of a rig at a time however many requests wait on it, and every rig
+dropped when a write route succeeds. A failed read answers 502 with the
+failure, never a document, so the page keeps its last good document and says
+the read failed.
+
+**The page's types are generated.** `web/src/rigboard/document.gen.ts` comes
+from `internal/rigboard/document.go` and `table.go`, through tygo, and nobody
+writes it by hand. `TestPageTypesAreCurrent` fails when it is stale:
+
+```bash
+cd services/helm
+go test ./internal/rigboard -run TestPageTypesAreCurrent -update   # writes it again
+```
+
+**Real data for tests and demos.** `internal/rigboard/testdata/gc-toolkit.json`
+is real gc-toolkit beads, three epics and their graph, cut from the store by the
+read's own gather and scanned for other rigs, host paths, emails and accounts;
+its `about` block says what was cut and replaced. `TestFixtureBoard` builds the
+document from it through the real waits package over the pack's stub store
+(`assets/scripts/holds-store.stub.sh`) and holds it to
+`internal/rigboard/testdata/gc-toolkit.board.json`. Cut it again from a city
+with `RIGBOARD_CUT_CITY=<city root> go test ./internal/rigboard -run TestCutFixture`,
+then write the golden with `go test ./internal/rigboard -run TestFixtureBoard -update`.
 
 ## Actuating from the board (`POST <mount>/helm/{open,accept,engage,dismiss}`)
 
