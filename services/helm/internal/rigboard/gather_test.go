@@ -108,8 +108,9 @@ func TestReadPlacesWorkUnderEveryEpicItSitsUnder(t *testing.T) {
 // TestReadThatRunsOutStopsItsStoreCalls reads through a gc that does what
 // `gc bd` does when the store hangs: it starts a child that holds the call's
 // output, as gc runs bd, and waits on it. Read returns the deadline's error
-// soon after the deadline, and the call's whole process group, the child
-// among it, is gone when it does, so the next read starts beside nothing.
+// soon after the deadline, the stub gc has ended by the time it does, and the
+// call's whole process group, the child among it, is gone, so the next read
+// starts beside nothing.
 func TestReadThatRunsOutStopsItsStoreCalls(t *testing.T) {
 	dir := t.TempDir()
 	group := filepath.Join(dir, "group")
@@ -143,7 +144,13 @@ func TestReadThatRunsOutStopsItsStoreCalls(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the stub wrote %q as its process group", raw)
 	}
-	// A member killed outright stays in the group until it is reaped.
+	// Read waits on the call it made, so the stub gc has ended and been waited
+	// on by the time Read returns. A Read that returned at the deadline while
+	// its call was still being stopped would find it there.
+	if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
+		t.Errorf("the stub gc %d had not ended when Read returned (signal 0: %v)", pid, err)
+	}
+	// The child it started stays in the group until it is reaped.
 	gone := time.Now().Add(5 * time.Second)
 	for syscall.Kill(-pid, 0) == nil {
 		if time.Now().After(gone) {
