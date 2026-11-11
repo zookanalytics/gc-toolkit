@@ -19,9 +19,9 @@ import (
 
 // Options are what the command line fills in before the form opens.
 type Options struct {
-	Subject  string   // a subject reference: a bead, conversation or gate id, or a PR number or URL
+	Subject  string   // a subject reference: a bead, conversation or gate id, a PR number or URL, or a rig's name or prefix
 	From     string   // the bead the subject, a gate, was reached from, as engage's --from names it
-	Rig      string   // a new topic's rig
+	Rig      string   // a new topic's rig, which fills in an empty subject
 	Model    string   // the converse variant; empty takes Models[0]
 	Question string   // the question, as given
 	Models   []string // the converse variants, the default first
@@ -47,7 +47,6 @@ type field int
 const (
 	subjectField field = iota
 	questionField
-	rigField
 	modelField
 	attachField
 	contextField
@@ -111,9 +110,9 @@ type Model struct {
 	cityBusy bool
 	ticking  bool // a refresh of the return list is scheduled
 
-	rig    string // the rig a new topic is filed in, chosen by name and only by the operator
+	rig    string // the rig --rig named: the subject field names it while it reads that name, before the city's rigs are read too
 	model  int    // index into opt.Models; -1 while it is opt.Model, which no variant carries
-	attach bool   // attach to the sitting once it starts; off, the form leaves then
+	attach bool   // the operator's choice to attach to the sitting once it starts; off, the form leaves then
 
 	choice        string // newChoice, or the conversation the operator chose
 	choiceTouched bool
@@ -121,6 +120,7 @@ type Model struct {
 
 	// The progress of a submit.
 	req      SaveRequest // what the save sent; a save again sends it with the conversation it filed
+	waits    string      // the suspended rig the save files in, where no sitting starts, or ""
 	saving   bool
 	saved    *Saved
 	saveErr  string // why the save that filed saved's conversation did not complete
@@ -165,7 +165,7 @@ func New(ctx context.Context, helm Helm, opt Options) *Model {
 			opt.Models = []string{opt.Model}
 		}
 	}
-	m := &Model{helm: helm, opt: opt, ctx: ctx, lookups: map[lookupKey]*lookup{}, rig: opt.Rig, attach: !opt.NoAttach}
+	m := &Model{helm: helm, opt: opt, ctx: ctx, lookups: map[lookupKey]*lookup{}, rig: strings.TrimSpace(opt.Rig), attach: !opt.NoAttach}
 	if opt.Subject != "" {
 		m.from = opt.From
 	}
@@ -182,8 +182,13 @@ func New(ctx context.Context, helm Helm, opt Options) *Model {
 
 	m.subject = textinput.New()
 	m.subject.Prompt = ""
-	m.subject.Placeholder = "a bead id, PR number or URL — empty for a new topic"
+	// The field is 60 cells wide until the terminal's size is known, and the
+	// placeholder is cut at the field's edge.
+	m.subject.Placeholder = "a bead id or PR, or a rig's name or prefix for a new topic"
 	m.subject.SetValue(opt.Subject)
+	if opt.Subject == "" {
+		m.subject.SetValue(m.rig)
+	}
 	m.subject.SetWidth(60)
 
 	m.question = newQuestionEditor()
@@ -235,7 +240,69 @@ func (m *Model) ref() string { return strings.TrimSpace(m.subject.Value()) }
 // subject a gate there was chosen from.
 func (m *Model) subjectKey() lookupKey { return lookupKey{ref: m.ref(), from: m.from} }
 
-func (m *Model) newTopic() bool { return m.ref() == "" }
+// rigsNamed are the rigs of the city whose name or prefix is ref, ignoring
+// case. It is nil until the city's rigs have been read. Only a whole name or
+// prefix names a rig: part of one names nothing, and the form completes none.
+func (m *Model) rigsNamed(ref string) []Rig {
+	if m.city == nil || ref == "" {
+		return nil
+	}
+	var rs []Rig
+	for _, r := range m.city.Rigs {
+		if strings.EqualFold(ref, r.Name) || (r.Prefix != "" && strings.EqualFold(ref, r.Prefix)) {
+			rs = append(rs, r)
+		}
+	}
+	return rs
+}
+
+// namesRig says whether ref names a rig, which starts a new topic there, rather
+// than a subject to look up: a rig of the city, or the rig --rig named, which
+// the form takes for a rig before the city's rigs have been read.
+func (m *Model) namesRig(ref string) bool {
+	if ref == "" {
+		return false
+	}
+	return (m.rig != "" && strings.EqualFold(ref, m.rig)) || len(m.rigsNamed(ref)) > 0
+}
+
+// newTopic says whether the subject field names a new topic's rig.
+func (m *Model) newTopic() bool { return m.namesRig(m.ref()) }
+
+// topicRig is the one rig the subject field names, which a new topic is filed
+// in. Until the city's rigs have been read, it is the rig --rig named, by that
+// name and not yet checked.
+func (m *Model) topicRig() (Rig, bool) {
+	ref := m.ref()
+	if m.city == nil {
+		if m.rig != "" && strings.EqualFold(ref, m.rig) {
+			return Rig{Name: m.rig}, true
+		}
+		return Rig{}, false
+	}
+	if rs := m.rigsNamed(ref); len(rs) == 1 {
+		return rs[0], true
+	}
+	return Rig{}, false
+}
+
+// suspendedRig is the suspended rig a save would file in, or "": the rig the
+// subject field names, or the rig of the bead it names. Gas City starts no
+// session for an agent in a suspended rig, so a conversation saved there
+// starts no sitting, and it waits in the operator's queue until the rig
+// resumes.
+func (m *Model) suspendedRig() string {
+	if m.newTopic() {
+		if r, ok := m.topicRig(); ok && r.Suspended {
+			return r.Name
+		}
+		return ""
+	}
+	if l := m.resolved(); l != nil && l.about.RigSuspended {
+		return l.about.Subject.Rig
+	}
+	return ""
+}
 
 func (m *Model) loadCity() tea.Cmd {
 	if m.cityBusy {
@@ -251,8 +318,11 @@ func (m *Model) loadCity() tea.Cmd {
 // lookup reads the subject k names, once per reference and origin while that
 // read is running or has answered. A read that failed is read again. A
 // reference already read selects the conversation it names, as its answer did.
+// A rig's name or prefix is no subject to read, so it is not looked up, though
+// a reference typed before the city's rigs have been read is, and its answer
+// stands aside once they say it names a rig.
 func (m *Model) lookup(k lookupKey) tea.Cmd {
-	if k.ref == "" {
+	if k.ref == "" || m.namesRig(k.ref) {
 		return nil
 	}
 	if l, ok := m.lookups[k]; ok && (l.pending || l.err == nil) {
@@ -280,30 +350,54 @@ func (m *Model) setFocus(f field) {
 
 // fields is the focus order, which is the order the screen shows them in. The
 // subject comes first and the question one Tab after it, since those are what
-// the operator gives almost every time. The rig is a field only for a new
-// topic, and the context list only when it holds something to choose.
+// the operator gives almost every time. The rig the subject names is shown,
+// not a field, and the context list is a field only when it holds something to
+// choose.
 func (m *Model) fields() []field {
-	fs := []field{subjectField, questionField}
-	if m.newTopic() {
-		fs = append(fs, rigField)
-	}
-	fs = append(fs, modelField, attachField)
+	fs := []field{subjectField, questionField, modelField, attachField}
 	if len(m.contextRows()) > 1 {
 		fs = append(fs, contextField)
 	}
 	return fs
 }
 
-func (m *Model) moveFocus(step int) tea.Cmd {
-	fs := m.fields()
-	at := 0
+// focusAt is where the focus is in fs.
+func (m *Model) focusAt(fs []field) int {
 	for i, f := range fs {
 		if f == m.focus {
-			at = i
+			return i
 		}
 	}
+	return 0
+}
+
+// moveFocus moves the focus step fields along, as Tab and Shift+Tab do, and
+// wraps around at either end.
+func (m *Model) moveFocus(step int) tea.Cmd {
+	fs := m.fields()
+	return m.focusOn(fs[(m.focusAt(fs)+step+len(fs))%len(fs)])
+}
+
+// moveFocusArrow moves the focus to the field above or below, as ↑ and ↓ do at
+// a field's first or last row, and stops at the form's first and last field.
+// ↓ enters the context list on its first row.
+func (m *Model) moveFocusArrow(step int) tea.Cmd {
+	fs := m.fields()
+	to := m.focusAt(fs) + step
+	if to < 0 || to >= len(fs) {
+		return nil
+	}
+	if fs[to] == contextField {
+		m.cursor = 0
+	}
+	return m.focusOn(fs[to])
+}
+
+// focusOn gives f the focus. Leaving the subject field looks up the subject it
+// names, however the focus leaves it.
+func (m *Model) focusOn(f field) tea.Cmd {
 	leaving := m.focus
-	m.setFocus(fs[(at+step+len(fs))%len(fs)])
+	m.setFocus(f)
 	if leaving == subjectField {
 		return m.lookup(m.subjectKey())
 	}
@@ -311,7 +405,12 @@ func (m *Model) moveFocus(step int) tea.Cmd {
 }
 
 // current is the finished lookup of the subject field as it reads now, or nil.
+// A field that names a rig has none: a lookup made before the city's rigs said
+// so stands aside.
 func (m *Model) current() *lookup {
+	if m.newTopic() {
+		return nil
+	}
 	l := m.lookups[m.subjectKey()]
 	if l == nil || l.pending {
 		return nil
@@ -402,96 +501,84 @@ func (m *Model) heldLines() []string {
 	return out
 }
 
-// hostingRigs are the rigs a new topic can be filed in, in the city's order.
-func (m *Model) hostingRigs() []Rig {
-	if m.city == nil {
-		return nil
-	}
-	var rs []Rig
-	for _, r := range m.city.Rigs {
-		if r.Hosts() {
-			rs = append(rs, r)
-		}
-	}
-	return rs
-}
+// standing is how far a destination is from a save that files there.
+type standing int
 
-// cycleRig moves the new topic's rig to the next or previous rig that can host
-// a sitting. Only the operator's key moves it.
-func (m *Model) cycleRig(step int) {
-	rs := m.hostingRigs()
-	if len(rs) == 0 {
-		return
-	}
-	at := -1
-	for i, r := range rs {
-		if r.Name == m.rig {
-			at = i
-		}
-	}
-	if at < 0 {
-		if step > 0 {
-			at = -1
-		} else {
-			at = 0
-		}
-	}
-	m.rig = rs[(at+step+len(rs))%len(rs)].Name
-}
+const (
+	refused standing = iota // a save files nothing there as the form reads it now
+	reading                 // a read that settles it is still running
+	settled                 // a save files there
+)
 
 // destination is where a submit would file the question, and whether it is
+// settled.
+func (m *Model) destination() (string, bool) {
+	d, st := m.where()
+	return d, st == settled
+}
+
+// where is where a submit would file the question, and how far that is
 // settled. It reads only what was verified for the subject field as it reads
 // now, so a result for an earlier reference never stands in for it.
-func (m *Model) destination() (string, bool) {
-	if m.newTopic() {
-		if m.rig == "" {
-			if m.city == nil && m.cityErr == "" {
-				return "a new topic: loading the rigs it can be filed in…", false
-			}
-			if m.city == nil {
-				return fmt.Sprintf("a new topic: the rigs it can be filed in did not read (%s)", m.cityErr), false
-			}
-			return "a new topic: choose its rig (Tab to Rig, then ←/→)", false
-		}
-		if m.city != nil {
-			for _, r := range m.city.Rigs {
-				if r.Name == m.rig {
-					if !r.Converse {
-						return fmt.Sprintf("rig %s carries no converse template, so no sitting can start there", m.rig), false
-					}
-					if r.Suspended {
-						return fmt.Sprintf("rig %s is suspended, so no sitting can start there", m.rig), false
-					}
-					return fmt.Sprintf("a new subject in rig %s", m.rig), true
-				}
-			}
-			return fmt.Sprintf("rig %s is not a rig of this city", m.rig), false
-		}
-		if m.cityErr != "" {
-			return fmt.Sprintf("the rigs did not read (%s), so rig %s cannot be checked", m.cityErr, m.rig), false
-		}
-		return fmt.Sprintf("a new subject in rig %s: checking the rig…", m.rig), false
-	}
+func (m *Model) where() (string, standing) {
 	ref := m.ref()
+	if ref == "" {
+		return "name the subject: a bead id, a PR number or URL, or a rig's name or prefix, which starts a new topic in that rig", refused
+	}
+	if m.newTopic() {
+		return m.topicWhere(ref)
+	}
 	l := m.lookups[m.subjectKey()]
 	if l == nil || l.pending {
-		return fmt.Sprintf("looking up %s…", ref), false
+		return fmt.Sprintf("looking up %s…", ref), reading
 	}
 	if l.err != nil {
-		return l.err.Error(), false
+		// Until the city's rigs have been read, a reference no bead answers to
+		// can still be a rig's name or prefix, which they settle.
+		if m.city == nil && m.cityErr == "" {
+			return l.err.Error(), reading
+		}
+		return l.err.Error(), refused
 	}
 	a := l.about
 	if len(a.Candidates) > 0 {
-		return fmt.Sprintf("%s is recorded by more than one live bead: choose the one you mean below", ref), false
+		return fmt.Sprintf("%s is recorded by more than one live bead: choose the one you mean below", ref), refused
 	}
 	if a.Refusal != "" {
-		return a.Refusal, false
+		return a.Refusal, refused
 	}
 	d := fmt.Sprintf("a conversation on %s — %s — in rig %s", a.Subject.ID, a.Subject.Title, a.Subject.Rig)
 	if a.Gate != "" {
 		d += fmt.Sprintf(", answering gate %s", a.Gate)
 	}
-	return d, true
+	return d, settled
+}
+
+// topicWhere is where a new topic is filed: the rig ref names, by its name or
+// its prefix.
+func (m *Model) topicWhere(ref string) (string, standing) {
+	if m.city == nil {
+		if m.cityErr != "" {
+			return fmt.Sprintf("the rigs did not read (%s), so rig %s cannot be checked", m.cityErr, ref), refused
+		}
+		return fmt.Sprintf("a new subject in rig %s: checking the rig…", ref), reading
+	}
+	rs := m.rigsNamed(ref)
+	switch {
+	case len(rs) == 0:
+		return fmt.Sprintf("rig %s is not a rig of this city", ref), refused
+	case len(rs) > 1:
+		var named []string
+		for _, r := range rs {
+			named = append(named, r.Name)
+		}
+		return fmt.Sprintf("%s names more than one rig (%s): name the one you mean by a name or prefix only it has", ref, strings.Join(named, ", ")), refused
+	}
+	r := rs[0]
+	if !r.Converse {
+		return fmt.Sprintf("rig %s carries no converse template, so no sitting can start there", r.Name), refused
+	}
+	return fmt.Sprintf("a new subject in rig %s", r.Name), settled
 }
 
 // chosen is the open conversation the operator chose, when it is still one of
@@ -585,6 +672,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		c := msg.city
 		m.city, m.cityAt, m.cityErr = &c, m.opt.Now(), ""
 		m.keepSelection()
+		// A new topic has no conversations to choose among, so a choice a
+		// lookup made before the rigs said the subject names a rig is cleared.
+		if m.newTopic() {
+			m.choice, m.choiceTouched, m.cursor = newChoice, false, 0
+		}
+		// A reference not looked up because it named a rig is looked up once
+		// the rigs say it names none. While the operator is in the subject
+		// field, the pause in typing or leaving the field looks it up, so a
+		// reference typed halfway is not read.
+		if k := m.subjectKey(); m.focus != subjectField && m.lookups[k] == nil {
+			return m, m.lookup(k)
+		}
 		return m, nil
 	case debounceMsg:
 		if msg.seq == m.seq {
@@ -686,31 +785,51 @@ func (m *Model) key(k tea.KeyPressMsg) tea.Cmd {
 	case "shift+tab":
 		return m.moveFocus(-1)
 	}
+	// ↑ and ↓ move between the fields at a field's first and last row, and
+	// stop at the form's first and last field, where Tab wraps around.
 	switch m.focus {
 	case subjectField:
-		if s == "enter" {
-			return m.moveFocus(1)
-		}
-	case rigField:
 		switch s {
-		case "left":
-			m.cycleRig(-1)
-		case "right", "space":
-			m.cycleRig(1)
+		case "enter":
+			return m.moveFocus(1)
+		case "down":
+			return m.moveFocusArrow(1)
+		case "up":
+			return nil
 		}
-		return nil
+	case questionField:
+		// The question's rows are counted as the screen shows them, so ↑ and ↓
+		// walk a line that wraps row by row before they leave the question.
+		switch {
+		case s == "up" && m.question.atFirstRow():
+			return m.moveFocusArrow(-1)
+		case s == "down" && m.question.atLastRow():
+			return m.moveFocusArrow(1)
+		}
 	case modelField:
 		switch s {
 		case "left":
 			m.cycleModel(-1)
 		case "right", "space":
 			m.cycleModel(1)
+		case "up":
+			return m.moveFocusArrow(-1)
+		case "down":
+			return m.moveFocusArrow(1)
 		}
 		return nil
 	case attachField:
 		switch s {
 		case "left", "right", "space":
-			m.attach = !m.attach
+			// No sitting starts in a suspended rig, so attaching stays off
+			// there, and the operator's choice stands for any other rig.
+			if m.suspendedRig() == "" {
+				m.attach = !m.attach
+			}
+		case "up":
+			return m.moveFocusArrow(-1)
+		case "down":
+			return m.moveFocusArrow(1)
 		}
 		return nil
 	case contextField:
@@ -719,6 +838,8 @@ func (m *Model) key(k tea.KeyPressMsg) tea.Cmd {
 		case "up":
 			if m.cursor > 0 {
 				m.cursor--
+			} else {
+				return m.moveFocusArrow(-1)
 			}
 		case "down":
 			if m.cursor < len(rows)-1 {
@@ -792,6 +913,10 @@ func (m *Model) submit() tea.Cmd {
 			m.status = "Not started: your question is not sent into an existing conversation. Choose \"a new conversation\" to file it, or clear it to continue " + c.ID + "."
 			return nil
 		}
+		if r := m.suspendedRig(); r != "" {
+			m.status = fmt.Sprintf("Not started: rig %s is suspended, so no sitting can start there. Start conversation %s once the rig resumes (gc rig resume %s).", r, c.ID, r)
+			return nil
+		}
 		sub := m.current().about.Subject.ID
 		m.saved = &Saved{Subject: sub, Conversation: c.ID}
 		m.existing = true
@@ -804,7 +929,8 @@ func (m *Model) submit() tea.Cmd {
 	}
 	req := SaveRequest{Question: q}
 	if m.newTopic() {
-		req.Rig = m.rig
+		r, _ := m.topicRig()
+		req.Rig = r.Name
 	} else {
 		// The save files on the subject the screen shows, and open refuses it
 		// when the reference names another subject by then. So the reference
@@ -820,7 +946,9 @@ func (m *Model) submit() tea.Cmd {
 			req.Ref = a.Gate
 		}
 	}
-	m.scr, m.status, m.req = progressScreen, "", req
+	// In a suspended rig the save is all that runs: the form starts no sitting
+	// there, and leaves once the question is saved.
+	m.scr, m.status, m.req, m.waits = progressScreen, "", req, m.suspendedRig()
 	return m.save()
 }
 
@@ -851,22 +979,31 @@ func (m *Model) saveAgain() tea.Cmd {
 
 // reread reads again what a refused submit was refused on, when that read can
 // answer differently now: a subject lookup that failed or named a refusal,
-// such as a suspended rig, or the city's rigs for a new topic. Nothing is
-// filed, and the next Ctrl+S reads the new answer.
+// such as a downed controller, or the city's rigs for a rig the subject names
+// or for a reference that can be a rig's name while they did not read. Nothing
+// is filed, and the next Ctrl+S reads the new answer. A name several rigs
+// carry reads the same way again, so it is not read.
 func (m *Model) reread() tea.Cmd {
-	if m.newTopic() {
-		if m.rig == "" && m.cityErr == "" {
+	ref := m.ref()
+	switch {
+	case ref == "":
+		return nil
+	case m.newTopic():
+		if len(m.rigsNamed(ref)) > 1 {
 			return nil
 		}
 		return m.loadCity()
 	}
-	k := m.subjectKey()
-	l := m.lookups[k]
-	if l == nil || l.pending || (l.err == nil && l.about.Refusal == "") {
-		return nil
+	var cmds []tea.Cmd
+	if m.city == nil && m.cityErr != "" {
+		cmds = append(cmds, m.loadCity())
 	}
-	delete(m.lookups, k)
-	return m.lookup(k)
+	k := m.subjectKey()
+	if l := m.lookups[k]; l != nil && !l.pending && (l.err != nil || l.about.Refusal != "") {
+		delete(m.lookups, k)
+		cmds = append(cmds, m.lookup(k))
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m *Model) onSaved(msg savedMsg) tea.Cmd {
@@ -883,6 +1020,11 @@ func (m *Model) onSaved(msg savedMsg) tea.Cmd {
 				return m.quit()
 			}
 			return nil
+		}
+		if m.waits != "" {
+			// No sitting starts in a suspended rig, so the form leaves the
+			// conversation in the queue and says so.
+			return m.quit()
 		}
 		return m.start()
 	}
@@ -1150,12 +1292,18 @@ func (m *Model) savedNote() string {
 		state = "the form closed while it was being saved again, so whether that save completed is unknown, and no sitting was started"
 	case m.saveErr != "":
 		state = "its save did not complete (" + strings.TrimSuffix(m.saveErr, ".") + "), so no sitting was started; it waits in your queue"
+	case m.waits != "":
+		state = fmt.Sprintf("no sitting was started: rig %s is suspended, so it waits in your queue until the rig resumes (gc rig resume %s)", m.waits, m.waits)
 	case m.starting:
 		state = "the form closed while its sitting was being started, so whether it started is unknown"
 	case m.startErr != "":
 		state = "no sitting started (" + m.startErr + "); it waits in your queue"
 	}
-	return fmt.Sprintf("Conversation %s on %s %s, and %s. Return to it with: gc-helm.sh attach %s", s.Conversation, s.Subject, what, state, s.Conversation)
+	ret := "Return to it with"
+	if m.waits != "" {
+		ret = "Once the rig resumes, return to it with"
+	}
+	return fmt.Sprintf("Conversation %s on %s %s, and %s. %s: gc-helm.sh attach %s", s.Conversation, s.Subject, what, state, ret, s.Conversation)
 }
 
 // keepDraft writes the question, unchanged, to a file in the draft directory,
@@ -1174,13 +1322,15 @@ func (m *Model) keepDraft(filed string) string {
 	}
 	again := "gc-helm.sh engage --new-subject --rig <rig>"
 	switch {
-	case !m.newTopic():
+	case m.newTopic():
+		if r, ok := m.topicRig(); ok {
+			again = "gc-helm.sh engage --new-subject --rig " + shellQuote(r.Name)
+		}
+	case m.ref() != "":
 		again = "gc-helm.sh engage " + shellQuote(m.ref())
 		if m.from != "" {
 			again += " --from " + shellQuote(m.from)
 		}
-	case m.rig != "":
-		again = "gc-helm.sh engage --new-subject --rig " + shellQuote(m.rig)
 	}
 	return fmt.Sprintf("%s Your question is kept in %s; start it again with: q=$(cat %s && echo .) && %s --reason \"${q%%.}\"", filed, path, shellQuote(path), again)
 }
@@ -1381,8 +1531,12 @@ func (m *Model) composeView() string {
 	// and below the question, and under them the row in play and the lines
 	// below the list.
 	var head, b strings.Builder
+	suspended := m.suspendedRig()
 	act := "Ctrl+S save, start and attach"
-	if !m.attach {
+	switch {
+	case suspended != "":
+		act = "Ctrl+S save and leave"
+	case !m.attach:
 		act = "Ctrl+S save, start and leave"
 	}
 	head.WriteString(labelStyle.Render("Start a conversation"))
@@ -1396,12 +1550,9 @@ func (m *Model) composeView() string {
 	}
 	head.WriteString(m.label(questionField, "Question") + hintStyle.Render("  Enter adds a line") + "\n")
 	b.WriteString("\n")
-	if m.newTopic() {
-		rig := m.rig
-		if rig == "" {
-			rig = "none chosen"
-		}
-		b.WriteString(m.label(rigField, "Rig     ") + "  ‹ " + rig + " ›" + hintStyle.Render("   a new topic names its rig") + "\n")
+	// The rig is shown, not chosen here: the subject names it.
+	if r, ok := m.topicRig(); ok {
+		b.WriteString(labelStyle.Render("Rig     ") + "  " + r.Name + hintStyle.Render("   a new topic in this rig") + "\n")
 	} else if l := m.current(); l != nil && l.err == nil && l.about.Subject.Rig != "" {
 		b.WriteString(labelStyle.Render("Rig     ") + "  " + l.about.Subject.Rig + hintStyle.Render("   the subject's own") + "\n")
 	}
@@ -1416,16 +1567,21 @@ func (m *Model) composeView() string {
 		model = modelLabel(model)
 	}
 	b.WriteString(m.label(modelField, "Model   ") + "  ‹ " + model + " ›\n")
-	attach := "yes, once its sitting starts" + hintStyle.Render(" (default)")
-	if !m.attach {
-		attach = "no, leave once its sitting starts"
+	attach := "‹ yes, once its sitting starts" + hintStyle.Render(" (default)") + " ›"
+	switch {
+	case suspended != "":
+		// Shown without ‹ ›, since no key turns it on there.
+		attach = "no — rig " + suspended + " is suspended, so no sitting starts until it resumes"
+	case !m.attach:
+		attach = "‹ no, leave once its sitting starts ›"
 	}
-	b.WriteString(m.label(attachField, "Attach  ") + "  ‹ " + attach + " ›\n\n")
-	dest, ok := m.destination()
+	b.WriteString(m.label(attachField, "Attach  ") + "  " + attach + "\n\n")
+	dest, st := m.where()
 	mark := waitStyle.Render("…")
-	if ok {
+	switch st {
+	case settled:
 		mark = okStyle.Render("✓")
-	} else if l := m.lookups[m.subjectKey()]; (l != nil && !l.pending) || m.newTopic() {
+	case refused:
 		mark = badStyle.Render("✗")
 	}
 	b.WriteString(m.wrapBeside(labelStyle.Render("Files as")+"  "+mark+" ", dest) + "\n")
@@ -1542,6 +1698,8 @@ func (m *Model) progressView() string {
 		b.WriteString("\n" + hintStyle.Render("q leaves it in your queue, not started") + "\n")
 	case m.saved != nil && !m.starting && m.startErr != "":
 		b.WriteString("\n" + hintStyle.Render("Enter attaches, holding it in a new sitting · q leaves it in your queue") + "\n")
+	case m.waits != "":
+		b.WriteString("\n" + hintStyle.Render("Leaves once it is saved: no sitting starts while rig "+m.waits+" is suspended") + "\n")
 	case m.attach:
 		b.WriteString("\n" + hintStyle.Render("Attaches once its sitting starts · q leaves it to start without you") + "\n")
 	default:

@@ -85,6 +85,19 @@ func (e *questionEditor) Height() int    { return e.ta.Height() }
 // keep the cursor's line in view.
 func (e *questionEditor) SetHeight(h int) { e.ta.SetHeight(h) }
 
+// atFirstRow says whether the cursor is on the question's first row as the
+// screen shows it: the first row its first line wraps onto.
+func (e *questionEditor) atFirstRow() bool {
+	return e.ta.Line() == 0 && e.ta.LineInfo().RowOffset == 0
+}
+
+// atLastRow says whether the cursor is on the question's last row as the
+// screen shows it: the last row its last line wraps onto.
+func (e *questionEditor) atLastRow() bool {
+	li := e.ta.LineInfo()
+	return e.ta.Line() == e.ta.LineCount()-1 && li.RowOffset+1 >= li.Height
+}
+
 // Update hands msg to the textarea. A paste is held first. A typed key never
 // carries a tab or a CR, since Tab moves the focus and Enter adds a line, so
 // typing goes to the textarea as it comes.

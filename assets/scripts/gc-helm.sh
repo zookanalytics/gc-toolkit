@@ -55,7 +55,7 @@ usage() {
 Usage:
   gc-helm open  <bead-id> [--reason "..."] [--body "..."] [--allow-duplicate] [--if-subject <id>] [--conversation <id>] [--from <bead-id>] [--json]  file a conversation about the bead in the operator's queue, for the operator to engage; a second concern joins the bead's conversation already in the queue unless --allow-duplicate files a fresh one, which lands instead on a conversation in the queue whose whole ask is that concern; a conversation about an open PR, or a bead of one, holds the PR's merge until it closes; --if-subject files only while the reference still names that subject, and a reference that names another now, through a successor, a PR's anchor or a gate's waiter, files nothing (exit 4); --conversation completes the conversation an earlier open filed for the concern, by its id, wherever it stands, adding the reply onto the gate that did not land, and the hold on an open PR's merge only while the conversation waits in the queue, since a sitting that has taken it keeps or lifts that hold; one no longer open on the bead or holding another ask files nothing (exit 4); --from names the bead a gate was reached from, and a gate several open beads wait on files the conversation about that bead while it is one of them, while a gate that no longer holds that bead files nothing (exit 4); --json prints {subject,conversation,filed}, and names the conversation on every exit once it is filed
   gc-helm open  --new-subject --rig <name> [<question> | --reason "<question>"] [--json]  file a FRESH subject in the named rig for a topic that has no bead yet, the question unchanged in its description and its title derived from the question's opening, then its conversation in the queue; --json answers the subject, filed:false, the moment it is filed, and open's last answer is the one that counts, so a subject filed whose conversation is not is named for a re-run onto it
-  gc-helm engage [<subject>] [--subject <id>] [--from <bead-id>] [--new-subject [--rig <name>]] [--model <variant>] [--skill <name>] [--reason "..." | --template <key>] [--no-input] [--no-attach]  hold a conversation about the bead in a converse sitting and attach: attach to its live sitting, or take its conversation from the queue, or file one, then spawn a sitting named for it. Pointed at a human gate it takes the one bead still waiting on the gate, or the --from bead when it is one of several waiting, and the conversation replies to the gate. On a terminal, with no --reason, --template or --skill, it opens the conversation form instead: subject, question, a new topic's rig, model and whether to attach on one screen, filled in from the command line, where --no-attach turns attaching off; --no-input keeps the flag-driven one-shot path. --skill seeds the sitting with any skill it carries as its lens on the subject (--skill review-arch is a conversation with the Architect). --new-subject files a FRESH subject bead in the --rig rig (the positional text, or --reason, is the question; its title is derived from the question's opening) and engages it in one gesture
+  gc-helm engage [<subject>] [--subject <id>] [--from <bead-id>] [--new-subject [--rig <name>]] [--model <variant>] [--skill <name>] [--reason "..." | --template <key>] [--no-input] [--no-attach]  hold a conversation about the bead in a converse sitting and attach: attach to its live sitting, or take its conversation from the queue, or file one, then spawn a sitting named for it. Pointed at a human gate it takes the one bead still waiting on the gate, or the --from bead when it is one of several waiting, and the conversation replies to the gate. On a terminal, with no --reason, --template or --skill, it opens the conversation form instead: subject (a bead, a PR, or a rig's name or prefix for a new topic in that rig), question, model and whether to attach on one screen, filled in from the command line, where --rig fills in the subject and --no-attach turns attaching off; --no-input keeps the flag-driven one-shot path. --skill seeds the sitting with any skill it carries as its lens on the subject (--skill review-arch is a conversation with the Architect). --new-subject files a FRESH subject bead in the --rig rig (the positional text, or --reason, is the question; its title is derived from the question's opening) and engages it in one gesture
   gc-helm attach [<conversation>]  return to a conversation: with an id, engage's attach (a live sitting once it has started, or a new sitting on a conversation whose sitting ended or that waits in the queue); with none, on a terminal, the conversation form's list of conversations to return to, by topic and readiness
   gc-helm conversations [<ref> [--from <bead-id>]] [--json]  list where each open conversation stands: its sitting's readiness (queued, starting, preparing, ready, ended) and whether a terminal is attached; with a subject reference, the subject as engage resolves it, --from as engage takes it, the rig a conversation about it is held in, whether a sitting can start there, its open conversations and what holds it. Read-only
   gc-helm react <bead-id> [--reason "..."]  file a first reaction — a reaction bead that tracks the subject, claimed and disposed by the proactive pool
@@ -121,25 +121,32 @@ attaching. Starter seeds and the lens brief live in
 assets/scripts/gc-helm-engage-starters.sh.
 On a terminal, an engage that names no concern (--reason, --template or
 --skill) and not --no-input opens the conversation form, helm-svc's `form`
-command (helm_form). One screen holds the subject (a bead id, a PR number or
-URL, or empty for a new topic), a multiline question one Tab after it, a new
-topic's rig, which the operator chooses and is never inferred, the model,
-shown with each word of its name capitalized and Claude-Opus as the default,
-and whether to attach, which is on unless --no-attach is given. While the
-operator types, the form reads `conversations` for the subject: its rig,
+command (helm_form). One screen holds the subject, a multiline question one
+Tab after it, the model, shown with each word of its name capitalized and
+Claude-Opus as the default, and whether to attach, which is on unless
+--no-attach is given. The subject is a bead id, a PR number or URL, or a rig's
+whole name or prefix, matched ignoring case, which starts a new topic in that
+rig, so the rig is the operator's choice and is never inferred; part of a name
+names nothing. The rig the subject names, or a bead's own rig, shows on a line
+below it, and --rig fills in the subject. Up and down move between the fields
+at a field's first and last row, and stop at the first and last field. While
+the operator types, the form reads `conversations` for the subject: its rig,
 whether a sitting can start there, its open conversations and what holds it,
-and the city's rigs for a new topic. A gate
+and the city's rigs with their prefixes. A gate
 chosen from what holds the subject becomes the subject, read and saved --from
 the subject it was chosen from, so a gate several beads wait on is about that
 one. A result
 for an earlier subject never stands in for the current one, and no result
-changes the rig or a conversation the operator chose. Ctrl+S saves only once the
+changes a conversation the operator chose. Ctrl+S saves only once the
 destination it shows is settled: open files the question as a new conversation,
 with --allow-duplicate and --if-subject naming the subject shown on a subject,
-and --new-subject on a topic, and the form says it is saved; engage
+and --new-subject --rig on a topic, and the form says it is saved; engage
 <conversation> --no-attach then starts its sitting. Once it has started, the
 form attaches to it, or with attaching off leaves it to prepare and names how to
-return to it. A save open refuses reads the subject again, so a subject that
+return to it. In a suspended rig, named or a bead's own, attaching is off and
+says why, and Ctrl+S saves the question and leaves, starting no sitting: the
+conversation waits in the queue until the rig resumes (gc rig resume <rig>).
+A save open refuses reads the subject again, so a subject that
 names another bead now is shown before the next Ctrl+S can file there. After a
 start that failed, Enter attaches, holding the conversation in a new sitting.
 Leaving keeps what was saved. A question the form did not save is kept in a file
@@ -3968,8 +3975,11 @@ engage_say_holds() {
 
 # sitting_refusal <bead> <rig> <path> — 0 when a converse sitting can start on
 # the bead in its rig; otherwise 1, with SITTING_REFUSAL saying why and naming
-# the fix, which engage refuses with before it files anything and which
-# `conversations` reports for the form. A rig that carries no converse template
+# the fix, which engage refuses with before it files anything.
+# SITTING_SUSPENDED is true when the reason is the rig's suspension, which
+# `conversations` reports to the form as rig_suspended rather than as its
+# refusal, because a question can still be filed there and wait in the queue
+# until the rig resumes. A rig that carries no converse template
 # can host no converse sitting, and an HQ / city-store bead resolves to the city
 # root, which carries none. A spawned converse sitting is launched and sustained
 # by the RECONCILER, the city controller's loop — a converse slot sets nudge=""
@@ -3982,14 +3992,15 @@ engage_say_holds() {
 # enumerate_rigs already read, and city_controller_state asks gc status before
 # an HQ running=false counts (city-liveness.sh). A gc that reports neither flag
 # leaves them empty, which reads as unknown and does not refuse.
-SITTING_REFUSAL=""
+SITTING_REFUSAL=""; SITTING_SUSPENDED=false
 sitting_refusal() {
-    SITTING_REFUSAL=""
+    SITTING_REFUSAL=""; SITTING_SUSPENDED=false
     if ! rig_carries_converse "$2"; then
         SITTING_REFUSAL="converse is not available for '$1': its rig '${2:-?}' ($3) carries no converse template. HQ/city-store beads are not converse-engageable. Nothing filed, nothing spawned."
         return 1
     fi
     if [ "$(rig_suspended "$2")" = "true" ]; then
+        SITTING_SUSPENDED=true
         SITTING_REFUSAL="rig '${2:-?}' is suspended, so the reconciler skips its agents and a spawned converse sitting would never come up. Resume the rig, then re-engage: gc rig resume ${2:-<rig>}"
         return 1
     fi
@@ -5264,19 +5275,25 @@ helm_form() {
 #                          operator's queue, each with its subject's title.
 #                          --json prints {conversations, rigs, unread}: rigs
 #                          are the rigs a new topic can be filed in, each with
-#                          whether it carries converse and is suspended, and
-#                          unread names each rig whose store could not be
-#                          read, because it did not answer or its ledger is
-#                          not there, after which the verb exits 4.
+#                          its name and prefix, whether it carries converse
+#                          and whether it is suspended, and unread names each
+#                          rig whose store could not be read, because it did
+#                          not answer or its ledger is not there, after which
+#                          the verb exits 4.
 #   conversations <ref>    the subject <ref> names, resolved as engage resolves
 #                          it, and where a conversation about it would be held:
 #                          {ref, subject: {id, title, status, issue_type,
 #                          priority, rig}, gate, conversation, closed,
-#                          refusal, conversations, holds, holds_read}. refusal
-#                          says why no sitting can start there (sitting_refusal),
-#                          empty when one can. holds is what holds the subject
-#                          (holding_rows). --from names the bead the reference
-#                          was reached from, as the form names the subject whose
+#                          refusal, rig_suspended, conversations, holds,
+#                          holds_read}. refusal says why no sitting can start
+#                          there, so nothing is to be filed (sitting_refusal),
+#                          and is empty otherwise. rig_suspended says the
+#                          subject's rig is suspended, which is no refusal:
+#                          no sitting starts there, and a conversation filed
+#                          waits in the queue until the rig resumes. holds is
+#                          what holds the subject (holding_rows). --from names
+#                          the bead the reference was reached from, as the
+#                          form names the subject whose
 #                          holds listed a gate: a gate several open beads wait
 #                          on is about that bead while it is one of them, and
 #                          one that no longer holds it is refused (take_bead).
@@ -5399,14 +5416,15 @@ conversations_all() {
     fi
     if [ "$_cv_json" = 1 ]; then
         # The rigs a new topic can be filed in: every rig but the city's own
-        # store, and whether a sitting can be held there (sitting_refusal's
-        # two rig checks).
+        # store, with the prefix `gc rig list` gives it, so the form can match
+        # a rig typed by its prefix, and sitting_refusal's two rig checks.
         _ca_rigs='[]'
         for _ca_r in $(printf '%s' "$RIGS" | jq -r '.[] | select((.hq // false) | not) | .name // empty' 2>/dev/null); do
             _ca_conv=false; _ca_susp=false
             if rig_carries_converse "$_ca_r"; then _ca_conv=true; fi
             if [ "$(rig_suspended "$_ca_r")" = "true" ]; then _ca_susp=true; fi
-            _ca_rigs=$(printf '%s' "$_ca_rigs" | jq -c --arg n "$_ca_r" --argjson c "$_ca_conv" --argjson s "$_ca_susp" '. + [{name: $n, converse: $c, suspended: $s}]')
+            _ca_pfx=$(printf '%s' "$RIGS" | jq -r --arg n "$_ca_r" 'first(.[] | select(.name == $n) | .prefix // "") // ""' 2>/dev/null || true)
+            _ca_rigs=$(printf '%s' "$_ca_rigs" | jq -c --arg n "$_ca_r" --arg p "$_ca_pfx" --argjson c "$_ca_conv" --argjson s "$_ca_susp" '. + [{name: $n, prefix: $p, converse: $c, suspended: $s}]')
         done
         jq -nc --argjson c "$_ca_rows" --argjson r "$_ca_rigs" --argjson u "$_ca_unread" '{conversations: $c, rigs: $r, unread: $u}'
     else
@@ -5473,11 +5491,19 @@ conversations_about() {
         verify_subject "$_cb_bead" conversations "Nothing read." || exit $?
     fi
     _cb_row="$VS_ROW"
-    _cb_refusal=""
+    _cb_refusal=""; _cb_suspended=false
     if [ "$(printf '%s' "$_cb_row" | jq -r '(.status // "") | tostring | ascii_downcase' 2>/dev/null || true)" = closed ]; then
         _cb_refusal="$_cb_bead is closed — a settled item on the DONE band, which takes no new conversation. To act on it, re-open it or file fresh work."
     elif ! sitting_refusal "$_cb_bead" "$rig" "$path"; then
-        _cb_refusal="$SITTING_REFUSAL"
+        # A suspended rig starts no sitting, and a conversation filed there
+        # waits in the queue until the rig resumes, so the suspension is said
+        # on its own and refuses nothing. A rig suspended with its controller
+        # down reads only as suspended, since no sitting is started there.
+        if [ "$SITTING_SUSPENDED" = true ]; then
+            _cb_suspended=true
+        else
+            _cb_refusal="$SITTING_REFUSAL"
+        fi
     fi
     if ! _cb_convs=$(bead_conversations "$_cb_bead") || ! _cb_live=$(live_sittings); then
         echo "$PROG: conversations: could not read the conversations on $_cb_bead or 'gc session list'." >&2
@@ -5494,12 +5520,13 @@ conversations_about() {
     fi
     _cb_out=$(jq -nc --arg ref "$_cb_ref" --arg rig "$rig" --argjson row "$_cb_row" --arg gate "$_cb_gate" \
         --arg conv "$_cb_conv" --argjson closed "$_cb_closed" --arg refusal "$_cb_refusal" \
+        --argjson suspended "$_cb_suspended" \
         --argjson convs "$_cb_rows" --argjson holds "$_cb_holds" --argjson holds_read "$_cb_holds_read" '
         {ref: $ref,
          subject: {id: (($row.id // "") | tostring), title: (($row.title // "") | tostring),
                    status: (($row.status // "") | tostring), issue_type: (($row.issue_type // "") | tostring),
                    priority: ($row.priority // null), rig: $rig},
-         gate: $gate, conversation: $conv, closed: $closed, refusal: $refusal,
+         gate: $gate, conversation: $conv, closed: $closed, refusal: $refusal, rig_suspended: $suspended,
          conversations: $convs, holds: $holds, holds_read: $holds_read}')
     if [ "$_cv_json" = 1 ]; then
         printf '%s\n' "$_cb_out"
@@ -5508,6 +5535,7 @@ conversations_about() {
     printf '%s' "$_cb_out" | jq -r '
         "\(.subject.id) in rig \(.subject.rig) (\(.subject.issue_type) · \(.subject.status)) — \(.subject.title)",
         (if .refusal != "" then "  no sitting can start: \(.refusal)" else empty end),
+        (if .rig_suspended then "  no sitting can start while rig \(.subject.rig) is suspended, and a conversation filed now waits in the queue until it resumes: gc rig resume \(.subject.rig)" else empty end),
         (if .closed != null then "  \(.closed.said)" else empty end),
         (if (.conversations | length) == 0 then "  no open conversation"
          else (.conversations[] | "  \(.readiness)\(if .session.attached == true then " (attached)" else "" end)\t\(.id)\t\(.title)") end),

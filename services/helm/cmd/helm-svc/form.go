@@ -31,8 +31,9 @@ const formUsage = `Usage:
 
 The terminal conversation form. gc-helm.sh engage runs it on a terminal when the
 command line leaves the concern open, and gc-helm.sh attach runs it with
---return. Each flag fills in its field, and --from names the bead the gate
---subject names was reached from, as engage's --from does. Once the sitting a
+--return. Each flag fills in its field, --rig fills in the subject with a new
+topic's rig, and --from names the bead the gate --subject names was reached
+from, as engage's --from does. Once the sitting a
 save starts has started, the form attaches to it, and --no-attach turns that
 field off, so the form leaves the sitting to prepare instead. --return opens on
 the conversations to return to. The attach runs once the form has left the

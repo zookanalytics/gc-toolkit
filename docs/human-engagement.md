@@ -323,14 +323,21 @@ on the bead answers no gate until it replies to one.
 **On a terminal, engage opens the conversation form.** An engage whose
 command line names no concern (`--reason`, `--template` or `--skill`) and not
 `--no-input` hands the terminal to helm-svc's `form` command
-(`services/helm/internal/form`). One screen holds, in this order, the subject
-(a bead id, a PR number or URL, or empty for a new topic), a multiline
-question, in which Enter adds a line, a new topic's rig, the model, shown with
-each word of its name capitalized and Claude-Opus as the default, and whether
-to attach once the sitting starts, which is on unless `--no-attach` is given.
-Tab moves through the fields in that order, so the question is one Tab after
-the subject, and the form opens on the question when the command line names
-the subject or a new topic's rig. A tab in the question stays a tab, shown as
+(`services/helm/internal/form`). One screen holds, in this order, the subject,
+a multiline question, in which Enter adds a line, the model, shown with each
+word of its name capitalized and Claude-Opus as the default, and whether to
+attach once the sitting starts, which is on unless `--no-attach` is given. The
+subject is a bead id, a PR number or URL, or a rig's whole name or prefix, such
+as `gc-toolkit` or `tk`, matched ignoring case and the spaces around it, which
+starts a new topic in that rig. Part of a name names no rig, and the form
+completes none. A line under the subject shows the rig it names, or a bead's
+own rig, and is not a field. Tab moves through the fields in that order, so the
+question is one Tab after the subject, and wraps around at either end. ↑ and ↓
+move between the fields once the cursor is on a field's first or last row,
+with the question's rows counted as the screen shows them, and stop at the
+first and last field. The form opens on the question when the command line
+names the subject, or a new topic's rig with `--rig`, which fills in the
+subject with the rig's name. A tab in the question stays a tab, shown as
 ␉, and a line break written as
 LF, CR or CRLF is one line break. The field leaves out every other control
 character, such as BEL or ESC, and U+FFFD, the replacement character. It leaves
@@ -341,14 +348,27 @@ opens, as the flag-driven engage refuses it.
 While the operator types, the form reads `gc-helm.sh conversations` for the
 subject: the bead it resolves to, the rig a conversation about it is held in,
 whether a sitting can start there, its open conversations and what holds it.
-It reads the city's rigs for a new topic. The screen shows where a submit would
-file before it does: a conversation on the subject in its own rig, or a new
-subject in the rig the operator chose. A new topic has no rig until the
-operator picks one, and a PR number that several live anchors record waits
-for the operator to pick the anchor. A result read for an earlier subject never
-stands in for the current one, and no result changes a rig or a conversation
-the operator chose. A conversation chosen from the list is started as it is,
-and a question typed beside it is not sent into it.
+It reads the city's rigs with each one's prefix, so a rig's name or prefix is
+known as the rig and is not looked up as a bead. The screen shows where a
+submit would file before it does: a conversation on the subject in its own
+rig, or a new subject in the rig the subject names. A name or prefix that more
+than one rig carries names none of them, and a PR number that several live
+anchors record waits for the operator to pick the anchor. A result read for an
+earlier subject never stands in for the current one, and no result changes a
+conversation the operator chose. A conversation chosen from the list is
+started as it is, and a question typed beside it is not sent into it.
+
+**A suspended rig turns attaching off.** Gas City starts no session for an
+agent in a suspended rig, so no sitting can start there. In a suspended rig,
+whether the subject names it or it is a bead's own rig, the destination is
+still settled, Attach reads no with the reason beside it, and no key turns it
+on. Ctrl+S saves the question and leaves, starting no sitting, and the form
+says the conversation waits in the operator's queue until the rig resumes
+(`gc rig resume <rig>`). An open conversation chosen there is not started.
+Once the subject names a rig that is not suspended, attaching is the
+operator's own choice again. `conversations <ref>` says a subject's rig is
+suspended as `rig_suspended`, which refuses nothing, and engage on the command
+line still refuses to start a sitting in a suspended rig.
 
 **The variants are the converse templates engage offers.** Each is an
 `agents/converse-*` template named `converse-<provider>-<model>`, and the name
@@ -414,7 +434,7 @@ and a save killed once its subject was filed still names the subject, because
 `open` answers it the moment it is filed. A subject whose create landed but
 whose reply was lost is one the form never learns, and a retry after that files
 a second subject. A save refused because a read failed,
-or because of a refusal that can change, such as a suspended rig, reads it again
+or because of a refusal that can change, such as a downed controller, reads it again
 for the next Ctrl+S. A question the form did not save is kept in a file under
 `GC_HELM_DRAFT_DIR` (else `$XDG_STATE_HOME/gc/engage-drafts`, else
 `~/.local/state/gc/engage-drafts`) when it closes, and before the terminal goes
