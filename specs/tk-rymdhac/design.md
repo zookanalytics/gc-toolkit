@@ -424,9 +424,9 @@ address pattern, `ui_address_pattern`. The publish command takes a copy's local
 port and publishes it at an origin of its own for exactly as long as the command
 runs. The address pattern gives the address for a port. There is no withdraw
 command. The script runs the publish command in the copy's process group and
-ties the two together. When the copy or the publish command ends, the script
-ends the other, so no address outlives its copy, and a copy whose publisher
-ended reads as having no address until the script publishes it again. A publish
+ties it to the copy. When the copy ends, the script ends the publish command, so
+no address outlives its copy. When the publish command ends alone, the copy runs
+on and reads as having no address until the script publishes it again. A publish
 the publisher refuses because another client was changing its config is tried
 again, and a port refused as taken gets another free port.
 
@@ -475,7 +475,7 @@ under on this host.
 
 A copy also ends when its session sleeps or is stopped. A held sitting does not
 sleep, and the script's start is safe to repeat after a wake. No watcher inside
-a copy polls for its sitting. Unit 4's first act is the proof on the host that
+a copy polls for its session. Unit 4's first act is the proof on the host that
 the sweep ends a copy started this way on the city's running gc. If it does not,
 the fallback the operator accepted in conversation tk-mfwgu1a is that the
 script's next start ends each copy whose session has ended, for which the
