@@ -142,12 +142,27 @@ func TestCityTakesAListWhoseStoreDidNotAllAnswer(t *testing.T) {
 	s, _ := stubHelm(t, `{"conversations":[{"id":"tk-c","readiness":"ready"}],"rigs":[{"name":"gc-toolkit","converse":true}],"unread":["gascity"]}`,
 		"gc-helm: conversations: the store of gascity could not be read, so its conversations are not listed.\n", 4)
 	c, err := s.City(context.Background())
-	if err != nil || len(c.Conversations) != 1 || len(c.Unread) != 1 || !c.Rigs[0].Hosts() {
+	if err != nil || len(c.Conversations) != 1 || len(c.Unread) != 1 || c.Rigs[0].Name != "gc-toolkit" || !c.Rigs[0].Converse {
 		t.Fatalf("City = %+v, %v", c, err)
 	}
 	s, _ = stubHelm(t, "", "gc-helm: conversations: could not read 'gc session list'\n", 4)
 	if _, err := s.City(context.Background()); err == nil {
 		t.Fatal("a refusal with no list read as a list")
+	}
+}
+
+// A rig's prefix, which the subject can name it by, and a subject's suspended
+// rig are read from the verbs' answers.
+func TestARigsPrefixAndASubjectsSuspendedRigAreRead(t *testing.T) {
+	s, _ := stubHelm(t, `{"conversations":[],"rigs":[{"name":"gc-toolkit","prefix":"tk","converse":true,"suspended":true}],"unread":[]}`+"\n", "", 0)
+	c, err := s.City(context.Background())
+	if err != nil || len(c.Rigs) != 1 || c.Rigs[0] != (Rig{Name: "gc-toolkit", Prefix: "tk", Converse: true, Suspended: true}) {
+		t.Fatalf("City = %+v, %v", c, err)
+	}
+	s, _ = stubHelm(t, `{"ref":"tk-a","subject":{"id":"tk-a","rig":"gc-toolkit"},"refusal":"","rig_suspended":true}`+"\n", "", 0)
+	a, err := s.About(context.Background(), "tk-a", "")
+	if err != nil || !a.RigSuspended || a.Refusal != "" || a.Subject.Rig != "gc-toolkit" {
+		t.Fatalf("About = %+v, %v", a, err)
 	}
 }
 
