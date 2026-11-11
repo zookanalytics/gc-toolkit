@@ -29,8 +29,11 @@ agreed with you goes to a polecat, and you see the result a review round later.
 Approving this design lets a sitting make such a change itself, while you
 watch, once you rule in the sitting that it should. The change lives in a
 working copy of its own, waits on the conversation while the sitting edits it,
-and leaves through the same hand-off a polecat's work uses, so the refinery's
-tests, the review checks, CI and your approval are its checks, as you ruled.
+and leaves through the same hand-off a polecat's work uses, so the PR checks are
+its checks, as you ruled. In this rig those checks test it as they test a
+polecat's change: the refinery's gate lints it, the correctness check reads or
+runs the tests its files select, and CI runs the whole suite on the PR that
+takes it to `main`, so neither change meets the whole suite before review.
 Work whose spec can be written down still goes to a polecat. A change to a PR
 that is already open waits for the review-lanes member, which decides how a
 PR's branch takes another writer, and until then a ruling on an open PR still
@@ -273,14 +276,34 @@ moves it into the commit-conventions skill, which the submit step and the edit
 skill both load, so it has one home. The summary quotes the ruling and says
 that the change was made in a sitting.
 
-**The checks.** The sitting runs no self-review loop. The refinery's gate runs
-the full suite, lint and typecheck before any review, the review checks follow,
-CI runs on the PR, and the operator approves it (the evidence on tk-w1qqeoh's
-notes). Before the hand-off, the sitting runs the rig's tests for the files it
-changed through `gctk rig`. That is not a check, since the gate runs everything
-again. Tests in this rig pin some prompt and skill text, so a wording change can
-break a suite, and the operator is in the sitting to decide whether the pin or
-the wording changes, where a polecat fixing it later would decide without them.
+**The checks.** The sitting runs no self-review loop. The PR checks are the
+change's checks, as the operator ruled, and each runs what the rig declares for
+it (section 10):
+
+- The refinery's gate runs the checks the rig sets for `mol-refinery-patrol`.
+  gc-toolkit sets a lint command and `run_tests = false`, and no test or
+  typecheck command, so its gate runs lint and no tests.
+- The correctness review takes a pass that `gctk rig` recorded at the commit it
+  reviews, of the whole suite or of the suites the diff selects, as its test
+  evidence. With none recorded there, it runs the suites the diff touches
+  itself.
+- CI runs the whole suite on a PR to `main`, and on no PR into another branch,
+  and main's rules hold the merge until the suite passes on Linux and macOS. A
+  change bound for `main` meets CI on its own PR. A change in an effort lands on
+  the effort's branch with no CI run, and meets CI on the effort's landing PR.
+- The operator approves the PR.
+
+Before the hand-off, the sitting runs the suites its diff selects through
+`gctk rig`, with the affected-tests command the rig declares for a polecat's
+self-review, so the pass is recorded at the head it hands off. That record is
+the test evidence a polecat's self-review records, and the correctness review
+reads it as it reads a polecat's. So in gc-toolkit a sitting's change reaches
+review linted and tested as a polecat's change does, and neither meets the whole
+suite before review. The design relies on no such run, so it names none as a
+prerequisite. Tests in this rig pin some prompt and skill text, so a wording
+change can break a suite, and the operator is in the sitting to decide whether
+the pin or the wording changes, where a polecat fixing it later would decide
+without them.
 
 ## 4. A check's send-back
 
@@ -483,10 +506,26 @@ before where the table says so.
   (`services/helm/cmd/helm-fixture/main.go`; [review-demo.md](../../docs/review-demo.md#the-helm-board)).
   `demo-deliver.sh` attaches a file to a PR through `gh pr comment --attach`,
   so an image reaches GitHub only through a PR.
-- **The pipeline's checks** (tk-w1qqeoh's notes, read at main 126b66747): the
-  refinery's run-tests step runs the full suite, lint and typecheck before any
-  review, the correctness review runs the suites a diff touches when nothing is
-  recorded, and CI runs the tests on every PR to `main`.
+- **The pipeline's checks** (read 2026-11-11). The refinery's run-tests step
+  takes each check from the rig's own value where the rig sets one, and runs
+  `test_command` only when `run_tests` is true (the rig-check-commands block of
+  `formulas/mol-refinery-patrol.toml`). gc-toolkit sets `lint_command` and
+  `run_tests = false`, and no test or typecheck command
+  (`gc formula show mol-refinery-patrol --rig gc-toolkit --json`), so its gate
+  runs lint only, as `docs/review-correctness.md` says under "Where the gates
+  run". A polecat's self-review runs the rig's `lint_command` and its
+  `affected_tests_command`, `tools/run-tests.sh --affected origin/main`, through
+  `gctk rig` (`gc formula show mol-polecat-work --rig gc-toolkit --json`). The
+  correctness review takes a full or affected pass recorded at the reviewed
+  commit as its evidence, and runs the suites the diff touches when none is
+  recorded (`skills/review-correctness/SKILL.md`, "Settle the test evidence").
+  CI runs the whole `*.test.sh` suite on Linux and macOS, and vets and tests the
+  Go modules, on pull requests to `main` and pushes to it, and on no pull
+  request into another branch (`.github/workflows/tests.yml`). Main's rules
+  require the two suite jobs, `test` and `test-macos`
+  (`gh api repos/<owner>/<repo>/rules/branches/main`). tk-w1qqeoh's notes say
+  the gate runs the full suite and typecheck, which holds only for a rig that
+  sets those checks.
 - **The merge member's design** (tk-1tfzr71.66 at 07a6cd0be): a polecat hands
   its bead to the refinery as it does today; each push onto a PR's branch
   publishes the head through its unit 2; one worker per branch, a branch with an
