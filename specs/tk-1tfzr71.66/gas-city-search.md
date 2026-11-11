@@ -163,6 +163,41 @@ record to its last write of it, so two runs that the gates let overlap act on
 one record one after the other. No webhook fires the order, since a
 webhook-fired order skips the gates and each event would start a run.
 
+## The record's two writers (units 3 and 4)
+
+The need: the refinery and the landing order both write one bead's record, and
+a run never writes a transition over a record that the refinery has replaced
+since the run read it. The rule that admits an order asks for one lock shared
+with every pack writer of the fields the order writes
+([gctk-architecture.md](../../docs/gctk-architecture.md#the-rule-that-admits-an-order)).
+
+- **bd** guards a write only on the bead's status and assignee (`--if-status`,
+  `--if-assignee`), and a write whose guard no longer holds writes nothing and
+  exits 13 (`ExitGuardMismatch` in `cmd/bd/update.go`). The refinery writes a
+  pending record again with the bead still `blocked` and assigned to the
+  refinery, so neither guard sees the replacement. `bd batch` runs its lines in
+  one transaction, but its `update` takes only status, priority, title and
+  assignee (`cmd/bd/batch.go`), so it cannot carry the record.
+- **Gas City.** The open-tracking and open-work gates order an order's runs only
+  with each other (`cmd/gc/order_dispatch.go`), so the refinery's write passes
+  them by. Gas City takes its own file locks inside `gc`
+  (`internal/platform/filelock`), and its CLI offers a pack no lock.
+- **Gas Town** needs no guard. Its refinery reconciles in its own find-work and
+  writes the record at merge-push (`gastown/formulas/mol-refinery-patrol.toml`
+  at 7f86098c04ea), and it runs one session at a time
+  (`max_active_sessions = 1` in `gastown/agents/refinery/agent.toml`), so one
+  session makes every write. The landing order is the second writer, which this
+  design adds.
+
+What units 3 and 4 compose: the store's record lock from the landing order's
+section, owned by gctk's pr domain and taken by both verbs. `gctk pr reconcile`
+holds it for one record at a time, and `gctk pr record` holds it across both of
+Gas Town's writes, which stay unconditional, as `record_handoff` writes them. In
+unit 4 the refinery writes a pending record only through `gctk pr record`. A
+writer of the record's keys on a bead that carries no `pr_reconcile_pending`,
+such as the direct landing, takes no lock, because a run acts only on a bead
+that it reads under the lock as carrying that marker.
+
 ## The requeue (unit 4)
 
 The need: work the refinery cannot land goes back to the polecat pool.
@@ -255,6 +290,8 @@ carries `pr_number`, with `mr_merged` and `merged` as landed.
   then move onto GitHub.
 - Gas City's webhook dispatch keeps an order's gates. A webhook can then make
   the landing order's next run come sooner.
+- bd guards a write on a metadata value. The two verbs then write the record
+  under that guard, and the record lock goes.
 - Gas Town's find-work reads waits, Gas Town's refinery requeues through
   `gc sling`, keeps a branch that has a PR, or keys its pre-existing trackers.
   Each matching difference then ends.
