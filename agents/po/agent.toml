@@ -7,9 +7,12 @@ scope = "rig"
 # Each sitting starts in a new conversation, so no sitting inherits another's
 # context.
 wake_mode = "fresh"
-# A directory of the rig's own, so no two rigs' po share a working directory.
-# The po changes no repo, so it needs no worktree.
-work_dir = ".gc/agents/{{.Rig}}/po"
+# A rig worktree, as the witness's is, so the po's bare gh and git, such as its
+# read of the rig's open PRs, resolve to the rig it serves and not to the city
+# repo the .gc tree sits in. The po changes no repo. One tree per rig (no
+# {{.AgentBase}}): each rig has one po.
+work_dir = ".gc/worktrees/{{.Rig}}/po"
+pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync"]
 # One sitting at a time for each rig.
 max_active_sessions = 1
 # Gas Town's mayor takes idle_timeout, and the po takes the sleep instead. A

@@ -141,8 +141,8 @@ prioritization partner, works that queue with the operator. A hold is the next
 actor's queue, and a gate is an answer someone owes.
 
 The po takes the agent shape of Gas Town's mayor, `wake_mode = "fresh"` and
-`max_active_sessions = 1`, once for each rig: `scope = "rig"` and
-`work_dir = ".gc/agents/<rig>/po"`. Each difference names its reason, and each
+`max_active_sessions = 1`, once for each rig: `scope = "rig"` and a rig
+worktree, `work_dir = ".gc/worktrees/<rig>/po"`. Each difference names its reason, and each
 but the last ends with an operator ruling that gives the seat the job:
 
 - **Named `po`, not `mayor`.** Gas City's defaults and Gas Town's roles aim at

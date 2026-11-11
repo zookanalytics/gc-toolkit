@@ -57,10 +57,11 @@ materializes it when it has no open session. A rig-scoped agent's prompt
 renders its rig's name, root and bead prefix (`RigName`, `RigRoot` and
 `IssuePrefix` of `PromptContext`, `cmd/gc/prompt.go`, the prefix from
 `findRigPrefix`), so the po's reads name its own rig with no lookup of their
-own. A relative `work_dir` resolves under the city root and is created when it
-is missing (`resolveAgentDir`, `cmd/gc/cmd_start.go`), so each rig's po gets a
-directory of its own with no setup step. The pack adds no session of its own
-for a rig: the po is the platform's rig-scoped named session.
+own. Its working directory is a worktree of its rig, which the pack's
+`worktree-setup.sh` makes at the session's `pre_start`, as it makes the
+witness's, so the po's bare `gh` and `git` resolve to its rig. The pack adds no
+session of its own for a rig: the po is the platform's rig-scoped named
+session.
 
 **Opening a named seat's sitting with its prompt, from any state.**
 `gc session attach` covers it. It attaches to a running session as it stands,
