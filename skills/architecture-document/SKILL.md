@@ -1,6 +1,6 @@
 ---
 name: architecture-document
-description: Use when you write, change or review a repository's architecture document, such as its docs/architecture.md, or decide whether something belongs in one.
+description: Use when you write, change or review a repository's architecture document, such as its docs/architecture.md, direct its text through a brief such as a rework's, or decide whether something belongs in one.
 ---
 
 # The architecture document
@@ -10,6 +10,11 @@ repository in concise form. Its writers hold every line to this standard, and
 the arch check holds every change to the document to it, both by judgment. A
 finding cites the part of the standard it rules from: a heading below, or the
 bold lead of a rule.
+
+The author of a brief that directs what the document says, such as one that
+settles what a rework writes, holds each line it directs to this standard as a
+writer holds the document's own lines, because the worker may carry a directed
+line into the document word for word.
 
 The sections are borrowed rather than invented: the
 [arc42](https://arc42.org/overview) template, the first two levels of the
@@ -27,6 +32,15 @@ The sections are borrowed rather than invented: the
   including any part not built yet. Where the implementation has not caught
   up, the document still describes that design, not the system as it works
   around the gap, and Debt names the gap.
+- **What a change owes the document.** A change that moves the architecture,
+  a design included, changes the document by the smallest statement of what
+  moved at the architecture's altitude: a responsibility a part takes on or
+  gives up, data a boundary must keep out, a cross-cutting rule, or an
+  architecture decision. Each is stated once, in the section that holds it,
+  and the part not built yet is named under Debt. A boundary is stated by the
+  data it keeps out. How a part will carry out the move, including where or how
+  it keeps a boundary's data out, stays in the design's record until the part
+  is built, and then lives in the part's own doc.
 - **The big picture first.** It opens on what the system is for and the
   domains it is made of, such as its schemas, before any one part's detail.
 - **The architecture's altitude.** The document goes down to its parts and
@@ -96,6 +110,14 @@ A line belongs only if it shapes more than one part, or the system as a whole,
 and a reader could not learn it from the code. Anything else goes in the code,
 in that part's own doc, or nowhere. A component's behavior, a script's guards
 and a suite's coverage are all learned from the code, so none of them passes.
+The test reads each fact a line states, not the line as a whole: a fact it
+admits does not carry in the clauses around it, and a clause that says how a
+part carries out a responsibility fails in any section, as the next paragraph
+says. A part not built yet is judged as though it were, so what its code will
+show once it is built fails now, even when a design states it as a requirement
+the part must meet. A fact passes once, in the section that holds it: stated
+again in another section, it tells a reader nothing the first statement did
+not.
 
 A decision is held to the same test. How a part carries out a responsibility
 the document gives it, such as the mechanism or the vendor feature it does the

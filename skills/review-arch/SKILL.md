@@ -64,8 +64,13 @@ pass the change, and the questions below judge it as they would anywhere else.
    them, however its design weighed it (gc-toolkit.architecture-document: The
    admission test). When the change does move it, is the move justified,
    weighed against the quality goals the document ranks, and is it reflected in
-   the architecture document in this same PR? An architecture change the
-   document does not record is unfinished; an architecture change a design
+   the architecture document in this same PR, by what the standard says a
+   change owes it (gc-toolkit.architecture-document: What a change owes the
+   document)? An architecture change the document does not record is
+   unfinished, and a record that says more than what moved is a finding as
+   readily. Read the record fact by fact and as a whole, since one entry can
+   carry a responsibility beside how the part will carry it out, and a fact
+   stated in two sections passes in each alone. An architecture change a design
    fitting the current architecture would not have needed is a finding to
    address.
 3. **Does the document meet the standard?** Hold each line the change adds to
@@ -128,6 +133,9 @@ approve is a precondition of approval, and a change that has not met it earns
 - It moves the architecture but the matching doc update is not in this PR. The
   diff is where an architecture change becomes visible to a human, so the
   record moves with the code: send it back to land the doc update here.
+- It moves the architecture and the doc update says more than what moved: how
+  a part will carry the move out, or a fact it states again in another section.
+  Send back each such line or clause, as readily as a missing record.
 - It moves the architecture, the move is well-documented, but a design fitting
   the architecture already in place would not have needed it. Send it back to
   the drawing board.
