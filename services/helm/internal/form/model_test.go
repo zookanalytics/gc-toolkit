@@ -37,9 +37,9 @@ type fakeHelm struct {
 	// attachCmds the command each one returned.
 	attachArgs []string
 	attachCmds []*exec.Cmd
-	seats      []string
-	// seatArgs is the argv each seat's verb would run, as Script builds it.
-	seatArgs []string
+	// seats is the argv after the script's path of each seat's verb the form
+	// asked for, as Script builds it.
+	seats []string
 }
 
 // About answers a reference from about, and one reached from a bead from the
@@ -71,9 +71,9 @@ func (f *fakeHelm) AttachCommand(conv, model string) *exec.Cmd {
 	f.attachCmds = append(f.attachCmds, c)
 	return c
 }
-func (f *fakeHelm) SeatCommand(seat string) *exec.Cmd {
-	f.seats = append(f.seats, seat)
-	f.seatArgs = append(f.seatArgs, strings.Join(Script{Path: "gc-helm.sh"}.SeatCommand(seat).Args[1:], " "))
+
+func (f *fakeHelm) SeatCommand(seat, rig string) *exec.Cmd {
+	f.seats = append(f.seats, strings.Join(Script{Path: "gc-helm.sh"}.SeatCommand(seat, rig).Args[2:], " "))
 	return exec.Command("true")
 }
 

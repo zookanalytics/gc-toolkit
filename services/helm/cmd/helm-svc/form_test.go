@@ -87,7 +87,7 @@ func (h attachHelm) Save(context.Context, form.SaveRequest) (form.Saved, error) 
 }
 func (h attachHelm) Start(context.Context, string, string) error { return errors.New("no start here") }
 func (h attachHelm) AttachCommand(string, string) *exec.Cmd      { return h.attach }
-func (h attachHelm) SeatCommand(string) *exec.Cmd                { return h.attach }
+func (h attachHelm) SeatCommand(string, string) *exec.Cmd        { return h.attach }
 
 // A form that leaves to attach to a sitting runs the attach once its program
 // has returned, so what the attach prints, such as engage's reason when it
@@ -130,17 +130,5 @@ func TestAnAttachThatDoesNotEndByItselfSaysHow(t *testing.T) {
 	stderr.Reset()
 	if code := runAttach(exec.Command("sh", "-c", "kill -TERM $$"), &stdout, &stderr); code != 143 || stderr.Len() != 0 {
 		t.Fatalf("an attach a TERM ended: exit %d, want 143; stderr %q", code, stderr.String())
-	}
-}
-
-// The form opens on one screen, so --return and --home together are refused
-// before anything opens.
-func TestTheFormOpensOnOneScreen(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	if code := runForm([]string{"--helm", "gc-helm.sh", "--return", "--home"}, &stdout, &stderr); code != 2 {
-		t.Fatalf("--return with --home exited %d", code)
-	}
-	if !strings.Contains(stderr.String(), "pass one") {
-		t.Fatalf("stderr = %q", stderr.String())
 	}
 }

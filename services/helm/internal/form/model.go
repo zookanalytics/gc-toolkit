@@ -27,7 +27,6 @@ type Options struct {
 	Models   []string // the converse variants, the default first
 	NoAttach bool     // leave once the sitting starts, rather than attach to it
 	Return   bool     // open on the return list
-	Home     bool     // open on the home page, which the start and return screens go back to
 	DraftDir string   // where the question of a cancelled form is kept
 	Debounce time.Duration
 	Refresh  time.Duration // how often the return list reads the city again
@@ -40,23 +39,7 @@ const (
 	composeScreen screen = iota
 	progressScreen
 	returnScreen
-	homeScreen
 )
-
-// The home page's entries, in the order it shows them.
-const (
-	poEntry = iota
-	mechanikEntry
-	startEntry
-	returnEntry
-)
-
-var homeLabels = [...]string{
-	poEntry:       "The po",
-	mechanikEntry: "Mechanik",
-	startEntry:    "Start a conversation",
-	returnEntry:   "Return to a conversation",
-}
 
 type field int
 
@@ -173,8 +156,6 @@ type Model struct {
 	attachCmd *exec.Cmd // the command the form left to run (Attach): an attach, or a seat's verb
 	left      bool      // the form has left by its own path, so the note is what it says
 
-	homeAt int // the home page's entry under the cursor
-
 	// The return list's selection is a conversation, so a refresh that re-sorts
 	// the list leaves it on the conversation the operator picked.
 	retSel string
@@ -244,9 +225,6 @@ func New(ctx context.Context, helm Helm, opt Options) *Model {
 	if opt.Return {
 		m.scr = returnScreen
 	}
-	if opt.Home {
-		m.scr = homeScreen
-	}
 	if opt.Subject != "" || opt.Rig != "" {
 		m.setFocus(questionField)
 	} else {
@@ -259,21 +237,10 @@ func New(ctx context.Context, helm Helm, opt Options) *Model {
 // question was kept, or where the conversation it saved stands.
 func (m *Model) Note() string { return m.note }
 
-// Init starts the background reads of the screen the form opens on
-// (loadScreen). The home page reads nothing: each entry starts its screen's
-// reads as it opens.
+// Init starts the background reads: the city's conversations and rigs, and the
+// subject the command line named. The return list reads the city again while
+// it is on screen.
 func (m *Model) Init() tea.Cmd {
-	if m.scr == homeScreen {
-		return nil
-	}
-	return m.loadScreen()
-}
-
-// loadScreen starts the reads the start and the return screens show, whether
-// the form opens on one or the home page opens it: the city's conversations
-// and rigs, and the subject the subject field names. The return list reads the
-// city again while it is on screen.
-func (m *Model) loadScreen() tea.Cmd {
 	cmds := []tea.Cmd{m.loadCity()}
 	if m.ref() != "" {
 		cmds = append(cmds, m.lookup(m.subjectKey()))
@@ -315,17 +282,97 @@ func (m *Model) namedRigs() []Rig {
 	for _, r := range m.city.Rigs {
 		switch {
 		case m.src == rigFlag && r.Name == ref,
-			m.src == typed && (strings.EqualFold(ref, r.Name) || (r.Prefix != "" && strings.EqualFold(ref, r.Prefix))):
+			m.src == typed && namesRig(ref, r):
 			rs = append(rs, r)
 		}
 	}
 	return rs
 }
 
+// namesRig says whether typed text names r: its whole name or prefix, ignoring
+// case.
+func namesRig(text string, r Rig) bool {
+	return strings.EqualFold(text, r.Name) || (r.Prefix != "" && strings.EqualFold(text, r.Prefix))
+}
+
 // newTopic says whether the subject field names a new topic's rig rather than
-// a subject to look up: the rig --rig named, before the city's rigs have been
-// read too, or typed text the rigs say is a rig's name or prefix.
-func (m *Model) newTopic() bool { return m.src == rigFlag || len(m.namedRigs()) > 0 }
+// a subject to look up or a seat: the rig --rig named, before the city's rigs
+// have been read too, or typed text the rigs say is a rig's name or prefix.
+func (m *Model) newTopic() bool {
+	return !m.isSeat() && (m.src == rigFlag || len(m.namedRigs()) > 0)
+}
+
+// The seats the subject field takes, the people the operator sits with in the
+// city. Gas City names a rig's agent <rig>/<agent>, so the field takes a rig's
+// po as <rig>/po, its rig by a name or prefix as a new topic's rig is typed,
+// and mechanik, of which the city has one, by its name alone.
+const (
+	poSeat       = "po"
+	mechanikSeat = "mechanik"
+)
+
+// seat is a seat the subject field names, its rig by its name: the rig's po,
+// or mechanik, with no rig.
+type seat struct{ name, rig string }
+
+// typedSeat reads text the operator typed as a seat, ignoring case: mechanik,
+// or <rig>/po, where rig is the rig as typed. A reference the field was given,
+// or the rig --rig named, is never a seat.
+func (m *Model) typedSeat() (name, rig string, ok bool) {
+	if m.src != typed {
+		return "", "", false
+	}
+	ref := m.ref()
+	if strings.EqualFold(ref, mechanikSeat) {
+		return mechanikSeat, "", true
+	}
+	if r, s, found := strings.Cut(ref, "/"); found && strings.TrimSpace(r) != "" && strings.EqualFold(strings.TrimSpace(s), poSeat) {
+		return poSeat, strings.TrimSpace(r), true
+	}
+	return "", "", false
+}
+
+// isSeat says whether the subject field names a seat, which is opened rather
+// than looked up or filed in.
+func (m *Model) isSeat() bool {
+	_, _, ok := m.typedSeat()
+	return ok
+}
+
+// seatWhere is the seat Ctrl+S opens and what the screen says of it, and how
+// far that is settled: mechanik at once, and a rig's po once the city's rigs
+// say which rig the field names and that the rig runs, since Gas City starts
+// no session in a suspended rig. Gas City's attach carries no message, so the
+// line says the sitting's purpose is given in the sitting.
+func (m *Model) seatWhere() (seat, string, standing) {
+	const purpose = ". The attach carries no message, so give the sitting its purpose once you are in it."
+	name, rig, _ := m.typedSeat()
+	if name == mechanikSeat {
+		return seat{name: mechanikSeat}, "mechanik, the city's standing conversation" + purpose, settled
+	}
+	if m.city == nil {
+		if m.cityErr != "" {
+			return seat{}, fmt.Sprintf("the rigs did not read (%s), so rig %s cannot be checked", m.cityErr, rig), refused
+		}
+		return seat{}, fmt.Sprintf("the po of rig %s: checking the rig…", rig), reading
+	}
+	var rs []Rig
+	var named []string
+	for _, r := range m.city.Rigs {
+		if namesRig(rig, r) {
+			rs, named = append(rs, r), append(named, r.Name)
+		}
+	}
+	switch {
+	case len(rs) == 0:
+		return seat{}, fmt.Sprintf("rig %s is not a rig of this city", rig), refused
+	case len(rs) > 1:
+		return seat{}, fmt.Sprintf("%s names more than one rig (%s): name the one you mean by a name or prefix only it has", rig, strings.Join(named, ", ")), refused
+	case rs[0].Suspended:
+		return seat{}, fmt.Sprintf("rig %s is suspended, so its po cannot start until the rig resumes (gc rig resume %s)", rs[0].Name, rs[0].Name), refused
+	}
+	return seat{name: poSeat, rig: rs[0].Name}, "the po of rig " + rs[0].Name + purpose, settled
+}
 
 // topicRig is the one rig the subject field names, which a new topic is filed
 // in. Until the city's rigs have been read, it is the rig --rig named, by that
@@ -346,6 +393,9 @@ func (m *Model) topicRig() (Rig, bool) {
 // starts no sitting, and it waits in the operator's queue until the rig
 // resumes.
 func (m *Model) suspendedRig() string {
+	if m.isSeat() {
+		return ""
+	}
 	if m.newTopic() {
 		if r, ok := m.topicRig(); ok && r.Suspended {
 			return r.Name
@@ -372,11 +422,11 @@ func (m *Model) loadCity() tea.Cmd {
 // lookup reads the subject k names, once per reference and origin while that
 // read is running or has answered. A read that failed is read again. A
 // reference already read selects the conversation it names, as its answer did.
-// A subject field that names a rig holds no subject to read, so it is not
-// looked up. Text typed before the city's rigs have been read is looked up,
+// A subject field that names a rig or a seat holds no subject to read, so it
+// is not looked up. Text typed before the city's rigs have been read is looked up,
 // and its answer stands aside once they say it names a rig.
 func (m *Model) lookup(k lookupKey) tea.Cmd {
-	if k.ref == "" || (k == m.subjectKey() && m.newTopic()) {
+	if k.ref == "" || (k == m.subjectKey() && (m.newTopic() || m.isSeat())) {
 		return nil
 	}
 	if l, ok := m.lookups[k]; ok && (l.pending || l.err == nil) {
@@ -406,8 +456,13 @@ func (m *Model) setFocus(f field) {
 // subject comes first and the question one Tab after it, since those are what
 // the operator gives almost every time. The rig the subject names is shown,
 // not a field, and the context list is a field only when it holds something to
-// choose.
+// choose. A seat runs on its own model and is attached to, so with a seat in
+// the subject field the model and the attach are shown, not fields, and the
+// question stays one, so a question typed there can be cleared.
 func (m *Model) fields() []field {
+	if m.isSeat() {
+		return []field{subjectField, questionField}
+	}
 	fs := []field{subjectField, questionField, modelField, attachField}
 	if len(m.contextRows()) > 1 {
 		fs = append(fs, contextField)
@@ -462,7 +517,7 @@ func (m *Model) focusOn(f field) tea.Cmd {
 // A field that names a rig has none: a lookup made before the city's rigs said
 // so stands aside.
 func (m *Model) current() *lookup {
-	if m.newTopic() {
+	if m.newTopic() || m.isSeat() {
 		return nil
 	}
 	l := m.lookups[m.subjectKey()]
@@ -577,7 +632,11 @@ func (m *Model) destination() (string, bool) {
 func (m *Model) where() (string, standing) {
 	ref := m.ref()
 	if ref == "" {
-		return "name the subject: a bead id, a PR number or URL, or a rig's name or prefix, which starts a new topic in that rig", refused
+		return "name the subject: a bead id, a PR number or URL, or a rig's name or prefix, which starts a new topic in that rig. Or name a seat to sit with: <rig>/po for a rig's po, or mechanik", refused
+	}
+	if m.isSeat() {
+		_, d, st := m.seatWhere()
+		return d, st
 	}
 	if m.newTopic() {
 		return m.topicWhere(ref)
@@ -833,12 +892,10 @@ func (m *Model) key(k tea.KeyPressMsg) tea.Cmd {
 		return m.progressKey(s)
 	case returnScreen:
 		return m.returnKey(s)
-	case homeScreen:
-		return m.homeKey(s)
 	}
 	switch s {
 	case "esc":
-		return m.back()
+		return m.quit()
 	case "ctrl+s":
 		return m.submit()
 	case "ctrl+r":
@@ -949,6 +1006,9 @@ func (m *Model) choose(rows []contextRow) tea.Cmd {
 // submit files the question, or starts the conversation chosen, once the
 // destination is settled. Nothing is written before then.
 func (m *Model) submit() tea.Cmd {
+	if m.isSeat() {
+		return m.submitSeat()
+	}
 	if m.model < 0 {
 		what := "Not saved"
 		if m.choice != newChoice {
@@ -1024,6 +1084,27 @@ func (m *Model) submit() tea.Cmd {
 	return m.save()
 }
 
+// submitSeat opens the seat the subject field names, once that is settled. A
+// seat takes no question from the form, because Gas City's attach carries no
+// message, so a question typed is refused rather than dropped, as one typed
+// for an open conversation is.
+func (m *Model) submitSeat() tea.Cmd {
+	s, dest, st := m.seatWhere()
+	if st != settled {
+		m.status = "Not opened: " + dest
+		if cmd := m.reread(); cmd != nil {
+			m.status = strings.TrimSuffix(m.status, ".") + ". Reading it again."
+			return cmd
+		}
+		return nil
+	}
+	if strings.TrimSpace(m.question.Value()) != "" {
+		m.status = "Not opened: a seat takes no question from the form, because the attach carries no message. Clear the question, and give the sitting its purpose once you are in it."
+		return nil
+	}
+	return m.openSeat(s)
+}
+
 // save runs the save request the submit made.
 func (m *Model) save() tea.Cmd {
 	m.saving = true
@@ -1059,6 +1140,8 @@ func (m *Model) reread() tea.Cmd {
 	switch {
 	case m.ref() == "":
 		return nil
+	case m.isSeat():
+		return m.loadCity()
 	case m.newTopic():
 		if len(m.namedRigs()) > 1 {
 			return nil
@@ -1264,57 +1347,8 @@ func (m *Model) returnKey(s string) tea.Cmd {
 	case "ctrl+r", "ctrl+n":
 		m.scr = composeScreen
 	case "esc", "q":
-		return m.back()
-	}
-	return nil
-}
-
-func (m *Model) homeKey(s string) tea.Cmd {
-	switch s {
-	case "up":
-		if m.homeAt > 0 {
-			m.homeAt--
-		}
-	case "down":
-		if m.homeAt < len(homeLabels)-1 {
-			m.homeAt++
-		}
-	case "enter":
-		return m.openEntry()
-	case "esc", "q":
 		return m.quit()
 	}
-	return nil
-}
-
-// openEntry opens the home page's entry under the cursor. A seat hands the
-// terminal to its verb, which opens the seat's session and attaches to it,
-// once the form has left, as an attach to a conversation does. Starting and
-// returning are the form's own screens, and each starts the reads it shows as
-// it opens (loadScreen), as it does when the form opens on it.
-func (m *Model) openEntry() tea.Cmd {
-	switch m.homeAt {
-	case poEntry:
-		return m.openSeat("po")
-	case mechanikEntry:
-		return m.openSeat("mechanik")
-	case startEntry:
-		m.scr = composeScreen
-		return m.loadScreen()
-	case returnEntry:
-		m.scr = returnScreen
-		return m.loadScreen()
-	}
-	return nil
-}
-
-// back leaves the start or the return screen: for the home page when the form
-// opened on it, and otherwise out of the form, as quit does.
-func (m *Model) back() tea.Cmd {
-	if !m.opt.Home {
-		return m.quit()
-	}
-	m.scr = homeScreen
 	return nil
 }
 
@@ -1331,19 +1365,20 @@ func (m *Model) attachTo(conv, model string) tea.Cmd {
 	return m.handOff(m.helm.AttachCommand(conv, model))
 }
 
-// openSeat leaves the form so the terminal can go to the seat's verb, po or
-// mechanik (handOff). The form keeps one hand-off, as attachTo says.
-func (m *Model) openSeat(seat string) tea.Cmd {
+// openSeat leaves the form so the terminal can go to s's verb (handOff), which
+// attaches it to the seat's session. The form keeps one hand-off, as attachTo
+// says.
+func (m *Model) openSeat(s seat) tea.Cmd {
 	if m.attaching {
 		return nil
 	}
-	return m.handOff(m.helm.SeatCommand(seat))
+	return m.handOff(m.helm.SeatCommand(s.name, s.rig))
 }
 
 // handOff keeps cmd and quits, and cmd runs once the form's program has
 // returned (Attach), so the form draws nothing after what cmd prints, such as
-// its reason when it opens nothing. A question the form has not saved is kept
-// first, so leaving for cmd does not lose it.
+// its reason when it attaches nothing. A question the form has not saved is
+// kept first, so leaving for cmd does not lose it.
 func (m *Model) handOff(cmd *exec.Cmd) tea.Cmd {
 	m.attaching = true
 	m.attachCmd = cmd
@@ -1355,7 +1390,7 @@ func (m *Model) handOff(cmd *exec.Cmd) tea.Cmd {
 // Attach is the command the form left to run, nil when it left without one:
 // engage's attach, which waits for the sitting to start, attaches the
 // terminal, and once the terminal comes back says how the sitting ended, or a
-// seat's verb, which opens the seat's session and attaches to it. It runs once
+// seat's verb, which attaches the terminal to the seat's session. It runs once
 // the form's program has returned and the note is printed, on the terminal the
 // program let go, so all it prints, a refusal included, comes after the last
 // screen the form drew.
@@ -1537,8 +1572,6 @@ func (m *Model) View() tea.View {
 		s = m.progressView()
 	case returnScreen:
 		s = m.returnView()
-	case homeScreen:
-		s = m.homeView()
 	default:
 		s = m.composeView()
 	}
@@ -1688,19 +1721,20 @@ func (m *Model) composeView() string {
 	// below the list.
 	var head, b strings.Builder
 	suspended := m.suspendedRig()
+	seatName, _, isSeat := m.typedSeat()
 	act := "Ctrl+S save, start and attach"
 	switch {
+	case seatName == poSeat:
+		act = "Ctrl+S attach to the po"
+	case seatName == mechanikSeat:
+		act = "Ctrl+S attach to mechanik"
 	case suspended != "":
 		act = "Ctrl+S save and leave"
 	case !m.attach:
 		act = "Ctrl+S save, start and leave"
 	}
-	esc := "Esc cancel"
-	if m.opt.Home {
-		esc = "Esc back"
-	}
 	head.WriteString(labelStyle.Render("Start a conversation"))
-	head.WriteString(hintStyle.Render("   " + act + " · Tab next field · Ctrl+R return to a conversation · " + esc))
+	head.WriteString(hintStyle.Render("   " + act + " · Tab next field · Ctrl+R return to a conversation · Esc cancel"))
 	head.WriteString("\n\n")
 	head.WriteString(m.label(subjectField, "Subject ") + "  " + m.subject.View() + "\n")
 	if m.from != "" {
@@ -1713,12 +1747,17 @@ func (m *Model) composeView() string {
 	// The rig is shown, not chosen here: the subject names it.
 	if r, ok := m.topicRig(); ok {
 		b.WriteString(labelStyle.Render("Rig     ") + "  " + r.Name + hintStyle.Render("   a new topic in this rig") + "\n")
+	} else if s, _, st := m.seatWhere(); isSeat && st == settled && s.rig != "" {
+		b.WriteString(labelStyle.Render("Rig     ") + "  " + s.rig + hintStyle.Render("   the po's own") + "\n")
 	} else if l := m.current(); l != nil && l.err == nil && l.about.Subject.Rig != "" {
 		b.WriteString(labelStyle.Render("Rig     ") + "  " + l.about.Subject.Rig + hintStyle.Render("   the subject's own") + "\n")
 	}
 	// A model no variant carries is shown as the command line named it.
 	model := m.modelName()
 	switch {
+	case isSeat:
+		// Shown without ‹ ›, since a seat runs on the model its config names.
+		model = "the seat's own"
 	case m.model < 0:
 		model = badStyle.Render(model) + hintStyle.Render(" (not a configured model: ←/→ chooses one)")
 	case m.model == 0:
@@ -1726,9 +1765,16 @@ func (m *Model) composeView() string {
 	default:
 		model = modelLabel(model)
 	}
-	b.WriteString(m.label(modelField, "Model   ") + "  ‹ " + model + " ›\n")
+	if isSeat {
+		b.WriteString(m.label(modelField, "Model   ") + "  " + model + "\n")
+	} else {
+		b.WriteString(m.label(modelField, "Model   ") + "  ‹ " + model + " ›\n")
+	}
 	attach := "‹ yes, once its sitting starts" + hintStyle.Render(" (default)") + " ›"
 	switch {
+	case isSeat:
+		// Opening a seat is attaching to it, so no key turns it off.
+		attach = "yes, to the seat's session, starting it when it is not running"
 	case suspended != "":
 		// Shown without ‹ ›, since no key turns it on there.
 		attach = "no — rig " + suspended + " is suspended, so no sitting starts until it resumes"
@@ -1744,7 +1790,11 @@ func (m *Model) composeView() string {
 	case refused:
 		mark = badStyle.Render("✗")
 	}
-	b.WriteString(m.wrapBeside(labelStyle.Render("Files as")+"  "+mark+" ", dest) + "\n")
+	lead := "Files as"
+	if isSeat {
+		lead = "Opens   "
+	}
+	b.WriteString(m.wrapBeside(labelStyle.Render(lead)+"  "+mark+" ", dest) + "\n")
 	// The rows on this subject are paged to the lines left below the fields, so
 	// the row in play is on screen: the cursor's while the list has focus, and
 	// otherwise the row chosen, which is what Ctrl+S acts on.
@@ -1870,12 +1920,8 @@ func (m *Model) progressView() string {
 
 func (m *Model) returnView() string {
 	var b strings.Builder
-	esc := "Esc leaves"
-	if m.opt.Home {
-		esc = "Esc back"
-	}
 	b.WriteString(labelStyle.Render("Return to a conversation"))
-	b.WriteString(hintStyle.Render("   ↑/↓ choose · Enter attaches · r refreshes · Ctrl+R start one · "+esc) + "\n\n")
+	b.WriteString(hintStyle.Render("   ↑/↓ choose · Enter attaches · r refreshes · Ctrl+R start one · Esc leaves") + "\n\n")
 	if m.city == nil {
 		if m.cityErr != "" {
 			b.WriteString(badStyle.Render("The conversations did not read: "+m.cityErr) + "\n")
@@ -1934,20 +1980,4 @@ func (m *Model) returnView() string {
 	}
 	b.WriteString(under)
 	return b.String()
-}
-
-// homeView is the home page: one line for each entry, the one under the cursor
-// marked.
-func (m *Model) homeView() string {
-	var b strings.Builder
-	b.WriteString(labelStyle.Render("gc-helm"))
-	b.WriteString(hintStyle.Render("   ↑/↓ choose · Enter opens · Esc leaves") + "\n\n")
-	for i, label := range homeLabels {
-		cur := "  "
-		if i == m.homeAt {
-			cur = "› "
-		}
-		b.WriteString(cur + label + "\n")
-	}
-	return m.wrap(b.String())
 }

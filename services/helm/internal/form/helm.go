@@ -1,15 +1,15 @@
 // Package form is the terminal conversation form: the screen `gc-helm.sh
-// engage`, `gc-helm.sh attach` and a bare `gc-helm.sh` hand a terminal to. One
-// screen holds the subject, which names a bead, a PR or a new topic's rig, a
-// multiline question, the model and whether to attach, while the subject's
-// details, its open conversations and the city's rigs load in the background.
-// Submitting saves the question as a conversation and starts its sitting,
-// reporting each of the two as it lands, and once the sitting has started
-// attaches to it, or with attaching off leaves it to prepare. In a suspended
-// rig it saves the question and starts nothing. The return list shows the open
-// conversations by topic and readiness and attaches to the one picked. The
-// home page, which a bare `gc-helm.sh` opens on, offers the po, mechanik,
-// starting a conversation and returning to one.
+// engage`, which a bare `gc-helm.sh` runs, and `gc-helm.sh attach` hand a
+// terminal to. One screen holds the subject, which names a bead, a PR, a new
+// topic's rig or a seat to sit with, a multiline question, the model and
+// whether to attach, while the subject's details, its open conversations and
+// the city's rigs load in the background. Submitting saves the question as a
+// conversation and starts its sitting, reporting each of the two as it lands,
+// and once the sitting has started attaches to it, or with attaching off
+// leaves it to prepare. In a suspended rig it saves the question and starts
+// nothing. A seat, a rig's po or mechanik, is opened by its own verb once the
+// form has left the terminal. The return list shows the open conversations by
+// topic and readiness and attaches to the one picked.
 //
 // The form writes nothing itself. Every read and write is a gc-helm.sh verb
 // ([Script]), so what the form shows and files is what the command line shows
@@ -176,9 +176,9 @@ type Helm interface {
 	// conversation's sitting, holding it in a new sitting first when it has
 	// none: on model, or on engage's default when model is empty.
 	AttachCommand(conversation, model string) *exec.Cmd
-	// SeatCommand is the command that opens the seat, po or mechanik, and
-	// attaches the terminal to its session.
-	SeatCommand(seat string) *exec.Cmd
+	// SeatCommand is the command that attaches the terminal to a seat's
+	// session: the po of rig, or mechanik, whose rig is empty.
+	SeatCommand(seat, rig string) *exec.Cmd
 }
 
 // Script runs gc-helm.sh at Path.
@@ -358,9 +358,14 @@ func (s Script) AttachCommand(conversation, model string) *exec.Cmd {
 	return exec.Command("sh", args...)
 }
 
-// SeatCommand is `<seat>`, the verb that opens the seat, po or mechanik: it
-// starts the seat's session through the controller when it must, waits for it
-// to run, and attaches.
-func (s Script) SeatCommand(seat string) *exec.Cmd {
-	return exec.Command("sh", s.Path, seat)
+// SeatCommand is the seat's verb: `po --rig <rig>` for a rig's po, and
+// `mechanik`. Each is Gas City's attach on the seat's session, which asks the
+// city's controller to start a seat that is not running and waits for it to
+// run before it attaches.
+func (s Script) SeatCommand(seat, rig string) *exec.Cmd {
+	args := []string{s.Path, seat}
+	if rig != "" {
+		args = append(args, "--rig", rig)
+	}
+	return exec.Command("sh", args...)
 }

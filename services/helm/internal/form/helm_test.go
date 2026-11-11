@@ -184,13 +184,16 @@ func TestStartAndAttachUseEngage(t *testing.T) {
 	}
 }
 
-// A seat opens through its own verb, po or mechanik, which attaches the
-// terminal once the seat's session runs.
+// A seat opens through its own verb: a rig's po through po --rig, and mechanik
+// through mechanik.
 func TestASeatOpensThroughItsVerb(t *testing.T) {
 	s := Script{Path: "/pack/gc-helm.sh"}
-	for _, seat := range []string{"po", "mechanik"} {
-		if got := strings.Join(s.SeatCommand(seat).Args, " "); got != "sh /pack/gc-helm.sh "+seat {
-			t.Fatalf("%s = %q", seat, got)
+	for _, c := range []struct{ seat, rig, want string }{
+		{"po", "gc-toolkit", "sh /pack/gc-helm.sh po --rig gc-toolkit"},
+		{"mechanik", "", "sh /pack/gc-helm.sh mechanik"},
+	} {
+		if got := strings.Join(s.SeatCommand(c.seat, c.rig).Args, " "); got != c.want {
+			t.Fatalf("%s = %q, want %q", c.seat, got, c.want)
 		}
 	}
 }

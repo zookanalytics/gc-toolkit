@@ -8,9 +8,9 @@
 #
 # It answers the verbs the form calls: `conversations [<ref>] --json`, `open`,
 # `engage <conversation> --no-input --no-attach` and the attach,
-# `engage <conversation> --no-input`, and the home page's seats, `po` and
-# `mechanik`. `--home` in place of the bracket opens the form on that page. A
-# save and a start each take a second, as
+# `engage <conversation> --no-input`, and the seats' verbs, `po --rig <rig>`
+# and `mechanik`, which the form runs for a seat typed as the subject. A save
+# and a start each take a second, as
 # the real verbs take a few, so each acknowledgement can be seen landing. It
 # writes nothing.
 case "${1:-} ${2:-}" in
@@ -78,9 +78,9 @@ JSON
       *) echo "(the fixture attaches nothing: $2)" ;;
     esac
     ;;
-  "po "|"mechanik ")
+  "po --rig"|"mechanik ")
     sleep 1
-    echo "(the fixture opens no seat: $1)"
+    echo "(the fixture opens no seat: $*)"
     ;;
   *)
     echo "helm-fixture: no answer for: $*" >&2
