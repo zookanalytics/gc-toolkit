@@ -4,6 +4,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/listing"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
@@ -12,32 +13,32 @@ import (
 // gate holding work under both epics, a park gate, and the Product Owner's
 // desk.
 func graph() *gathered {
-	parent := func(p string) []edge { return []edge{{DependsOnID: p, Type: "parent-child"}} }
-	blocks := func(id string) edge { return edge{DependsOnID: id, Type: "blocks"} }
+	parent := func(p string) []listing.Edge { return []listing.Edge{{ID: p, Type: "parent-child"}} }
+	blocks := func(id string) listing.Edge { return listing.Edge{ID: id, Type: "blocks"} }
 	open := []bead{
-		{ID: "tk-a", Title: "Epic A", Status: "open", Priority: 1, IssueType: "epic", Metadata: md("epic_hypothesis", "A works"), CreatedAt: "2026-01-01"},
-		{ID: "tk-b", Title: "Epic B", Status: "open", Priority: 2, IssueType: "epic", Metadata: md("epic_hypothesis", "B works"), CreatedAt: "2026-01-02"},
-		{ID: "tk-a.1", Title: "Delivery: one", Status: "open", Priority: 1, IssueType: "epic", Description: "Aim: land one\nDone when: it lands", Dependencies: parent("tk-a"), CreatedAt: "2026-01-03"},
-		{ID: "tk-a.1.1", Title: "story under the delivery", Status: "open", Priority: 2, IssueType: "task", Dependencies: append(parent("tk-a.1"), blocks("tk-q")), CreatedAt: "2026-01-04"},
-		{ID: "tk-b.1", Title: "story under B", Status: "open", Priority: 2, IssueType: "task", Dependencies: append(parent("tk-b"), blocks("tk-q")), CreatedAt: "2026-01-05"},
-		{ID: "tk-b.2", Title: "behind B's story", Status: "open", Priority: 2, IssueType: "task", Dependencies: append(parent("tk-b"), blocks("tk-b.1")), CreatedAt: "2026-01-06"},
-		{ID: "tk-loose", Title: "parked work", Status: "open", Priority: 3, IssueType: "bug", Dependencies: []edge{blocks("tk-park")}, CreatedAt: "2026-01-07"},
-		{ID: "tk-loose2", Title: "more parked work", Status: "open", Priority: 2, IssueType: "bug", Dependencies: []edge{blocks("tk-park")}, CreatedAt: "2026-01-08"},
+		{ID: "tk-a", Title: "Epic A", Status: "open", Priority: 1, IssueType: "epic", Epic: listing.Epic{Hypothesis: "A works"}, CreatedAt: "2026-01-01"},
+		{ID: "tk-b", Title: "Epic B", Status: "open", Priority: 2, IssueType: "epic", Epic: listing.Epic{Hypothesis: "B works"}, CreatedAt: "2026-01-02"},
+		{ID: "tk-a.1", Title: "Delivery: one", Status: "open", Priority: 1, IssueType: "epic", Description: "Aim: land one\nDone when: it lands", Edges: parent("tk-a"), CreatedAt: "2026-01-03"},
+		{ID: "tk-a.1.1", Title: "story under the delivery", Status: "open", Priority: 2, IssueType: "task", Edges: append(parent("tk-a.1"), blocks("tk-q")), CreatedAt: "2026-01-04"},
+		{ID: "tk-b.1", Title: "story under B", Status: "open", Priority: 2, IssueType: "task", Edges: append(parent("tk-b"), blocks("tk-q")), CreatedAt: "2026-01-05"},
+		{ID: "tk-b.2", Title: "behind B's story", Status: "open", Priority: 2, IssueType: "task", Edges: append(parent("tk-b"), blocks("tk-b.1")), CreatedAt: "2026-01-06"},
+		{ID: "tk-loose", Title: "parked work", Status: "open", Priority: 3, IssueType: "bug", Edges: []listing.Edge{blocks("tk-park")}, CreatedAt: "2026-01-07"},
+		{ID: "tk-loose2", Title: "more parked work", Status: "open", Priority: 2, IssueType: "bug", Edges: []listing.Edge{blocks("tk-park")}, CreatedAt: "2026-01-08"},
 		{ID: "tk-desk1", Title: "new idea", Status: "open", Priority: 2, IssueType: "task", Labels: []string{" Hold:Mayor "}, CreatedAt: "2026-01-09"},
 		{ID: "tk-desk2", Title: "newer idea", Status: "open", Priority: 2, IssueType: "task", Labels: []string{"hold:mayor"}, CreatedAt: "2026-01-10"},
 		{ID: "tk-q", Title: "which way?", Description: "which way?\nthe whole question", Status: "open", Priority: 1, IssueType: "gate", AwaitType: "human", CreatedAt: "2026-01-02"},
 		{ID: "tk-park", Title: "parked", Status: "open", Priority: 2, IssueType: "gate", CreatedAt: "2026-01-02"},
-		{ID: "tk-review", Title: "review", Status: "open", IssueType: "task", Metadata: md("anchor_bead", "tk-b.1"), CreatedAt: "2026-01-02"},
+		{ID: "tk-review", Title: "review", Status: "open", IssueType: "task", Anchor: "tk-b.1", CreatedAt: "2026-01-02"},
 	}
 	closed := []bead{
-		{ID: "tk-b.0", Title: "done under B", Status: "closed", Priority: 2, IssueType: "task", Dependencies: parent("tk-b"), Metadata: md("gc.work_outcome", "shipped")},
+		{ID: "tk-b.0", Title: "done under B", Status: "closed", Priority: 2, IssueType: "task", Edges: parent("tk-b"), WorkOutcome: "shipped"},
 	}
 	wq := waits.Wait{ID: "tk-q", Type: "blocks", Title: "which way?", Status: "open", IssueType: "gate", AwaitType: "human"}
 	wpark := waits.Wait{ID: "tk-park", Type: "blocks", Title: "parked", Status: "open", IssueType: "gate"}
 	q := prstatus.Blocker{ID: "tk-q", Title: "which way?", Status: "open", IssueType: "gate", AwaitType: "human"}
 	clear := func(id string) waits.Holds { return waits.Holds{ID: id, Status: waits.Clear} }
 	return &gathered{
-		rig: "gc-toolkit", open: open, closed: closed, far: map[string]bead{},
+		rig: "gc-toolkit", open: open, closed: closed,
 		holds: map[string]waits.Holds{
 			"tk-a": clear("tk-a"), "tk-b": clear("tk-b"), "tk-a.1": clear("tk-a.1"),
 			"tk-a.1.1":  {ID: "tk-a.1.1", Status: waits.Blocked, Waits: []waits.Wait{wq}},
@@ -174,10 +175,10 @@ func TestAConversationAnsweringTwoQuestions(t *testing.T) {
 	g := graph()
 	g.open = append(g.open,
 		bead{ID: "tk-b.3", Title: "talked about", Status: "open", Priority: 2, IssueType: "task",
-			Dependencies: []edge{{DependsOnID: "tk-b", Type: "parent-child"}}, CreatedAt: "2026-01-11"},
+			Edges: []listing.Edge{{ID: "tk-b", Type: "parent-child"}}, CreatedAt: "2026-01-11"},
 		bead{ID: "tk-q2", Title: "and which?", Status: "open", Priority: 1, IssueType: "gate", AwaitType: "human", CreatedAt: "2026-01-11"},
 		bead{ID: "tk-c", Title: "talk it through", Status: "open", Priority: 1, IssueType: "task", Assignee: "human", CreatedAt: "2026-01-11",
-			Dependencies: []edge{{DependsOnID: "tk-b.3", Type: "tracks"}, {DependsOnID: "tk-q2", Type: "replies-to"}, {DependsOnID: "tk-q", Type: "replies-to"}}},
+			Edges: []listing.Edge{{ID: "tk-b.3", Type: "tracks"}, {ID: "tk-q2", Type: "replies-to"}, {ID: "tk-q", Type: "replies-to"}}},
 	)
 	for _, id := range []string{"tk-b.3", "tk-q2", "tk-c"} {
 		g.holds[id] = waits.Holds{ID: id, Status: waits.Clear}

@@ -1,0 +1,49 @@
+package listing
+
+import "github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
+
+// The keys a listing decodes onto a Bead. No domain owns any of them: shell
+// and the runtime write them, so each is declared read-only here and its
+// definition stays in lifecycle/lifecycle.toml. The change that moves a
+// writer into a domain takes its key's declaration over.
+var (
+	anchorKey = ledger.ReadOnly("anchor_bead", ledger.String,
+		"The merge anchor a review, rework, finding or validation child names (lifecycle/lifecycle.toml, "+
+			"[metadata.gates]). A listing names it on each bead, and prstatus's in-flight set reads it.")
+	routedToKey = ledger.ReadOnly("gc.routed_to", ledger.String,
+		"The pool, agent or person a bead is routed to, written by lifecycle.sh's --route and by the script or "+
+			"formula that owns the bead's dispatch (lifecycle/lifecycle.toml, ROUTE and [metadata.runtime_owned]).")
+	workOutcomeKey = ledger.ReadOnly("gc.work_outcome", ledger.String,
+		"A work bead's self-reported disposition, no-op or shipped, whose meaning is the runtime's "+
+			"(lifecycle/lifecycle.toml, [metadata.runtime_owned]).", ledger.Alias("work_outcome"))
+	mergeResultKey = ledger.ReadOnly("merge_result", ledger.String,
+		"A listing names it on each bead, so a reader tells an anchor whose pull request is open.")
+	prNumberKey = ledger.ReadOnly("pr_number", ledger.String,
+		"The number of the anchor's open pull request, which pr-open.sh writes when it opens and pr-facts.sh "+
+			"copies onto rework children (lifecycle/lifecycle.toml, [metadata.merge_identity]).")
+	prURLKey = ledger.ReadOnly("pr_url", ledger.String,
+		"The URL of the anchor's open pull request, written with pr_number "+
+			"(lifecycle/lifecycle.toml, [metadata.merge_identity]).")
+)
+
+// An epic's contract and its latest ruling (lifecycle/lifecycle.toml,
+// [metadata.epic_stewardship]). `gctk epic create` writes the contract into
+// the create that files an epic, and the operator's ruling stamps the rest.
+var (
+	epicHandleKey = ledger.ReadOnly("epic_handle", ledger.String,
+		"An epic's 3-5 word handle (docs/epics.md).")
+	epicHypothesisKey = ledger.ReadOnly("epic_hypothesis", ledger.String,
+		"An epic's one-sentence hypothesis (docs/epics.md). An epic under an epic that carries none is a Delivery.")
+	epicBoundariesKey = ledger.ReadOnly("epic_boundaries", ledger.String,
+		"What an epic's work is not (docs/epics.md).")
+	epicClosureKey = ledger.ReadOnly("epic_closure_condition", ledger.String,
+		"An epic's closure checks (docs/epics.md).")
+	epicIndicatorsKey = ledger.ReadOnly("epic_indicators", ledger.String,
+		"An epic's leading indicators (docs/epics.md).")
+	epicRulingKey = ledger.ReadOnly("epic_ruling", ledger.String,
+		"The latest ruling on an epic's hypothesis: continue, shift or close (docs/epics.md).")
+	epicRulingReasonKey = ledger.ReadOnly("epic_ruling_reason", ledger.String,
+		"Why the latest ruling on an epic was made, written with it.")
+	epicRulingAtKey = ledger.ReadOnly("epic_ruling_at", ledger.String,
+		"When the operator made the latest ruling on an epic.")
+)

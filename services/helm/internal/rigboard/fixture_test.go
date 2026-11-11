@@ -9,14 +9,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"sort"
-	"strings"
 	"testing"
 )
 
 // The fixture is real gc-toolkit beads, cut from the store in the shape the
-// read gathers: three epics with their members, gates, conversations,
+// listing reads: three epics with their members, gates, conversations,
 // decisions and edges, and every bead the readers read about them.
 // testdata/gc-toolkit.board.json is the document the read builds from it.
 var (
@@ -48,79 +46,11 @@ func loadFixture(t *testing.T) []json.RawMessage {
 	return f.Rows
 }
 
-// fakeGC answers the read's gc calls from rows, as the store would: the open
-// listing with the gates, a parent's closed members, beads by id, and the one
-// rig the fixture holds. The read calls it from several goroutines at once, so
-// it only reads rows.
-type fakeGC struct {
-	rows []bead
-}
-
-func newFakeGC(t *testing.T, raw []json.RawMessage) *fakeGC {
-	t.Helper()
-	f := &fakeGC{}
-	for _, r := range raw {
-		var b bead
-		if err := json.Unmarshal(r, &b); err != nil {
-			t.Fatal(err)
-		}
-		f.rows = append(f.rows, b)
-	}
-	return f
-}
-
-func flagValue(args []string, name string) (string, bool) {
-	for i, a := range args {
-		if a == name && i+1 < len(args) {
-			return args[i+1], true
-		}
-	}
-	return "", false
-}
-
-func (f *fakeGC) JSON(_ context.Context, out any, args ...string) error {
-	if len(args) >= 2 && args[0] == "rig" && args[1] == "list" {
-		return remarshal(map[string]any{"rigs": []map[string]string{{"name": "gc-toolkit", "path": "/fixture/gc-toolkit"}}}, out)
-	}
-	if len(args) < 4 || args[0] != "bd" || args[3] != "list" {
-		return fmt.Errorf("the fake gc answers no %v", args)
-	}
-	var rows []bead
-	ids, byID := flagValue(args, "--id")
-	parent, byParent := flagValue(args, "--parent")
-	status, _ := flagValue(args, "--status")
-	all := slices.Contains(args, "--all")
-	for _, b := range f.rows {
-		switch {
-		case byID:
-			if slices.Contains(strings.Split(ids, ","), b.ID) {
-				rows = append(rows, b)
-			}
-		case byParent:
-			if slices.Contains(b.parents(), parent) && (status == "" || b.status() == status) {
-				rows = append(rows, b)
-			}
-		case all || b.open():
-			if b.issueType() != "gate" || slices.Contains(args, "--include-gates") {
-				rows = append(rows, b)
-			}
-		}
-	}
-	return remarshal(rows, out)
-}
-
-func remarshal(v, out any) error {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(b, out)
-}
-
-// stubHolds runs the waits package over the fixture through the pack's stub
-// store (assets/scripts/holds-store.stub.sh answering gctk's `gc bd` reads),
-// so the fixture's answers are the package's and no test restates its rule.
-func stubHolds(t *testing.T, raw []json.RawMessage) HoldsReader {
+// stubStore puts a gc on PATH that answers every read gctk's listing makes
+// from rows, through the pack's stub store (assets/scripts/holds-store.stub.sh),
+// so the board is read as the service reads it and no test restates a reader's
+// rule. It returns the rig the rows are the store of.
+func stubStore(t *testing.T, rows []json.RawMessage) Rig {
 	t.Helper()
 	for _, tool := range []string{"bash", "jq"} {
 		if _, err := exec.LookPath(tool); err != nil {
@@ -132,12 +62,12 @@ func stubHolds(t *testing.T, raw []json.RawMessage) HoldsReader {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	rows, err := json.Marshal(raw)
+	raw, err := json.Marshal(rows)
 	if err != nil {
 		t.Fatal(err)
 	}
 	store := filepath.Join(dir, "store.json")
-	if err := os.WriteFile(store, rows, 0o644); err != nil {
+	if err := os.WriteFile(store, raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	shim := "#!/bin/sh\n[ \"$1\" = bd ] || exit 2\nshift\nexec bash \"$HOLDS_STUB\" answer \"$@\"\n"
@@ -148,21 +78,15 @@ func stubHolds(t *testing.T, raw []json.RawMessage) HoldsReader {
 	t.Setenv("HOLDS_STUB", stub)
 	t.Setenv("HOLDS_STORE", store)
 	t.Setenv("GC_NO_API", "1")
-	return ReadHolds
+	return Rig{Name: "gc-toolkit", Store: "/fixture/gc-toolkit/.beads"}
 }
 
-// TestFixtureBoard builds the document from the fixture through the read's
-// own gather, and holds it to the golden document. `go test
-// ./internal/rigboard -run TestFixtureBoard -update` writes the golden again.
+// TestFixtureBoard builds the document from the fixture through the read
+// itself, and holds it to the golden document. `go test ./internal/rigboard
+// -run TestFixtureBoard -update` writes the golden again.
 func TestFixtureBoard(t *testing.T) {
-	raw := loadFixture(t)
-	gc := newFakeGC(t, raw)
-	readHolds := stubHolds(t, raw)
-	rigs, err := ReadRigs(context.Background(), gc)
-	if err != nil {
-		t.Fatal(err)
-	}
-	doc, err := Read(context.Background(), gc, rigs[0], readHolds)
+	rig := stubStore(t, loadFixture(t))
+	doc, err := Read(context.Background(), rig)
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}

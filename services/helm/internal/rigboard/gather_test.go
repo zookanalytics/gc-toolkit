@@ -2,28 +2,23 @@ package rigboard
 
 import (
 	"context"
+	"encoding/json"
 	"slices"
 	"testing"
-
-	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
-// TestReadGathersALandedDelivery reads, through the read's own gather, a
-// Delivery that landed while its epic stays open, the lifecycle docs/epics.md
-// gives under "How a Delivery ends". The story under the Delivery is read, the
-// Epics page lists it in the Delivery's closed group, and it counts as closed
-// in both the Delivery and the epic.
+// TestReadGathersALandedDelivery reads, through the read itself, a Delivery
+// that landed while its epic stays open, the lifecycle docs/epics.md gives
+// under "How a Delivery ends". The story under the Delivery is read, the Epics
+// page lists it in the Delivery's closed group, and it counts as closed in
+// both the Delivery and the epic.
 func TestReadGathersALandedDelivery(t *testing.T) {
-	parent := func(p string) []edge { return []edge{{DependsOnID: p, Type: "parent-child"}} }
-	gc := &fakeGC{rows: []bead{
-		{ID: "tk-e", Title: "Epic", Status: "open", Priority: 1, IssueType: "epic", Metadata: md("epic_hypothesis", "it works"), CreatedAt: "2026-01-01"},
-		{ID: "tk-e.1", Title: "Delivery: one", Status: "closed", Priority: 1, IssueType: "epic", Description: "Aim: land one", Dependencies: parent("tk-e"), CreatedAt: "2026-01-02"},
-		{ID: "tk-e.1.1", Title: "story under the delivery", Status: "closed", Priority: 2, IssueType: "task", Dependencies: parent("tk-e.1"), CreatedAt: "2026-01-03"},
-	}}
-	noHolds := func(context.Context, string, []string) (map[string]waits.Holds, map[string]error, error) {
-		return map[string]waits.Holds{}, map[string]error{}, nil
+	rows := []json.RawMessage{
+		json.RawMessage(`{"id":"tk-e","title":"Epic","status":"open","priority":1,"issue_type":"epic","metadata":{"epic_hypothesis":"it works"},"created_at":"2026-01-01"}`),
+		json.RawMessage(`{"id":"tk-e.1","title":"Delivery: one","status":"closed","priority":1,"issue_type":"epic","description":"Aim: land one","dependencies":[{"issue_id":"tk-e.1","depends_on_id":"tk-e","type":"parent-child"}],"created_at":"2026-01-02"}`),
+		json.RawMessage(`{"id":"tk-e.1.1","title":"story under the delivery","status":"closed","priority":2,"issue_type":"task","dependencies":[{"issue_id":"tk-e.1.1","depends_on_id":"tk-e.1","type":"parent-child"}],"created_at":"2026-01-03"}`),
 	}
-	doc, err := Read(context.Background(), gc, Rig{Name: "gc-toolkit", Store: "/fixture/gc-toolkit/.beads"}, noHolds)
+	doc, err := Read(context.Background(), stubStore(t, rows))
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}

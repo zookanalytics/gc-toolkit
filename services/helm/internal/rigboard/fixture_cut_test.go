@@ -16,10 +16,12 @@ import (
 	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/conversation"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/listing"
 )
 
-// TestCutFixture cuts testdata/gc-toolkit.fixture.json from the city's store, through
-// the read's own gather. It runs only when RIGBOARD_CUT_CITY names the city
+// TestCutFixture cuts testdata/gc-toolkit.fixture.json from the city's store:
+// the read's own gather picks the beads, and the cut writes each one's row as
+// the store holds it. It runs only when RIGBOARD_CUT_CITY names the city
 // root:
 //
 //	RIGBOARD_CUT_CITY=<city root> go test ./internal/rigboard -run TestCutFixture
@@ -56,20 +58,25 @@ func TestCutFixture(t *testing.T) {
 	if rig.Name == "" {
 		t.Fatal("the city lists no gc-toolkit rig")
 	}
-	g, err := gather(ctx, gc, rig, ReadHolds)
+	t.Setenv("GC_CITY_PATH", city)
+	t.Chdir(city)
+	ls, err := listing.Read(rig.Store)
 	if err != nil {
 		t.Fatal(err)
 	}
-	all := map[string]bead{}
+	g, err := gather(ls, rig.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var read []string
 	for _, list := range [][]bead{g.open, g.closed} {
 		for _, b := range list {
-			all[b.ID] = b
+			read = append(read, b.ID)
 		}
 	}
-	for id, b := range g.far {
-		if _, ok := all[id]; !ok {
-			all[id] = b
-		}
+	all, err := readRows(ctx, gc, rig, read)
+	if err != nil {
+		t.Fatal(err)
 	}
 	keep := cutGraph(all)
 	priv := newPrivacy(t, ctx, gc, others)
@@ -148,8 +155,8 @@ func TestRigPrivacy(t *testing.T) {
 	if got := rigPrivacy(nil, nil).scrub(local); got != local {
 		t.Errorf("with no other rig the cut scrubbed %q to %q", local, got)
 	}
-	b := bead{ID: "tk-abc1.2", Title: "Build the page", Status: "closed",
-		Dependencies: []edge{{DependsOnID: "tk-abc1", Type: "parent-child"}}}
+	b := row{ID: "tk-abc1.2", Title: "Build the page", Status: "closed",
+		Dependencies: []rowEdge{{DependsOnID: "tk-abc1", Type: "parent-child"}}}
 	rec, fields := fixtureRecord(b, rigPrivacy(nil, nil))
 	if len(fields) > 0 || rec["title"] != b.Title {
 		t.Errorf("with no other rig the cut replaced text in %v, and the title reads %q", fields, rec["title"])
@@ -189,6 +196,75 @@ func listOrNone(xs []string) string {
 	return strings.Join(xs, "; ")
 }
 
+// row is one row of `gc bd list --json` as the store holds it, which the cut
+// writes into the fixture whole, its metadata among it.
+type row struct {
+	ID           string                     `json:"id"`
+	Title        string                     `json:"title"`
+	Description  string                     `json:"description"`
+	Status       string                     `json:"status"`
+	Priority     int                        `json:"priority"`
+	IssueType    string                     `json:"issue_type"`
+	Assignee     string                     `json:"assignee"`
+	Labels       []string                   `json:"labels"`
+	Metadata     map[string]json.RawMessage `json:"metadata"`
+	CreatedAt    string                     `json:"created_at"`
+	ClosedAt     string                     `json:"closed_at"`
+	AwaitType    string                     `json:"await_type"`
+	Dependencies []rowEdge                  `json:"dependencies"`
+}
+
+// rowEdge is one of a row's own edges, as the listing prints it.
+type rowEdge struct {
+	DependsOnID string `json:"depends_on_id"`
+	Type        string `json:"type"`
+}
+
+// meta is the value of a metadata key as `(.metadata[k] // "") | tostring`
+// renders it, for the cut's own scan of what it writes.
+func (b row) meta(k string) string {
+	raw := bytes.TrimSpace(b.Metadata[k])
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s
+	}
+	return string(raw)
+}
+
+func (b row) issueType() string { return strings.ToLower(strings.TrimSpace(b.IssueType)) }
+func (b row) open() bool        { return strings.ToLower(strings.TrimSpace(b.Status)) != "closed" }
+func (b row) parents() []string { return b.edgesOf("parent-child") }
+
+func (b row) edgesOf(typ string) []string {
+	var out []string
+	for _, e := range b.Dependencies {
+		if e.Type == typ && e.DependsOnID != "" && !slices.Contains(out, e.DependsOnID) {
+			out = append(out, e.DependsOnID)
+		}
+	}
+	return out
+}
+
+// readRows reads the row of each bead named from the rig's store, as the store
+// holds it, closed beads and every type included.
+func readRows(ctx context.Context, gc GC, rig Rig, ids []string) (map[string]row, error) {
+	out := map[string]row{}
+	for batch := range slices.Chunk(ids, 200) {
+		var rows []row
+		if err := gc.JSON(ctx, &rows, "bd", "--db", rig.Store, "list", "--id", strings.Join(batch, ","), "--all",
+			"--include-gates", "--include-infra", "--include-ephemeral", "--include-templates", "--json", "--limit", "0", "--flat"); err != nil {
+			return nil, err
+		}
+		for _, r := range rows {
+			out[r.ID] = r
+		}
+	}
+	return out, nil
+}
+
 // cityGC runs gc from the city root.
 type cityGC struct{ root string }
 
@@ -210,7 +286,7 @@ func (c cityGC) JSON(ctx context.Context, out any, args ...string) error {
 // waits name, the gates their conversations reply to, and the runs that work
 // them. A bead beyond the members is kept without its parents, so it sits
 // under no epic, and no other epic is kept with only some of its members.
-func cutGraph(all map[string]bead) map[string]bool {
+func cutGraph(all map[string]row) map[string]bool {
 	keep := map[string]bool{}
 	add := func(id string) bool {
 		b, ok := all[id]
@@ -298,7 +374,7 @@ var readKeys = regexp.MustCompile(`^(anchor_bead|task_kind|merge_result|pr_numbe
 
 // fixtureRecord is a bead as the fixture keeps it, with the fields whose text
 // the privacy scan replaced.
-func fixtureRecord(b bead, p *privacy) (map[string]any, []string) {
+func fixtureRecord(b row, p *privacy) (map[string]any, []string) {
 	var fields []string
 	clean := func(name, s string) string {
 		out := p.scrub(s)
@@ -441,7 +517,7 @@ func (p *privacy) learnIDs(t *testing.T, ctx context.Context, gc GC, others []Ri
 		return
 	}
 	for _, r := range others {
-		var rows []bead
+		var rows []row
 		if err := gc.JSON(ctx, &rows, "bd", "--db", r.Store, "list", "--id", strings.Join(cands, ","), "--all",
 			"--include-gates", "--include-infra", "--include-ephemeral", "--include-templates", "--json", "--limit", "0", "--flat"); err != nil {
 			t.Fatalf("ask %s which tokens are its beads: %v", r.Name, err)

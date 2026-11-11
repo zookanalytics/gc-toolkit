@@ -128,30 +128,31 @@ func TestPastLoadContextReadsTheRunsOpenSteps(t *testing.T) {
 	}
 }
 
-// IsRootOrStep reads a listed row as the record read reads it: over the run-lib
-// fixture's store, a row is one of a run's own exactly when isRoot reads its
-// record as a root or the record names the root it was poured under.
-func TestIsRootOrStepAgreesWithTheRecordRead(t *testing.T) {
-	s, fx := fixtureStore(t)
-	l := ledger.New(s)
-	roots, steps := 0, 0
-	for _, b := range fx.Beads {
-		recs, err := l.Find(ledger.ByID(b.ID).WithClosed())
-		if err != nil || len(recs) != 1 {
-			t.Fatalf("read %s: %v (%d records)", b.ID, err, len(recs))
-		}
-		root, step := isRoot(recs[0]), str(rootBeadKey, recs[0]) != ""
-		if root {
-			roots++
-		}
-		if step {
-			steps++
-		}
-		if got := IsRootOrStep(b.IssueType, b.Metadata); got != (root || step) {
-			t.Errorf("%s: IsRootOrStep = %v, want %v", b.ID, got, root || step)
+// IsRootOrStep reads a run's root, as isRoot reads one, and a step poured
+// under a root as a run's own beads, and no other bead.
+func TestIsRootOrStepReadsARunsOwnBeads(t *testing.T) {
+	s := fake.New()
+	for _, b := range []fake.Bead{
+		{ID: "graph", Status: "open", IssueType: "task", Metadata: map[string]string{"gc.formula_contract": "graph.v2"}},
+		{ID: "flow", Status: "open", IssueType: "task", Metadata: map[string]string{"gc.kind": "workflow"}},
+		{ID: "mol", Status: "open", IssueType: "molecule"},
+		{ID: "step", Status: "open", IssueType: "task", Metadata: map[string]string{"gc.root_bead_id": "graph"}},
+		{ID: "work", Status: "open", IssueType: "task", Metadata: map[string]string{"gc.routed_to": "human"}},
+		{ID: "convoy", Status: "open", IssueType: "convoy"},
+	} {
+		s.Put(b)
+	}
+	recs, err := ledger.New(s).Find(ledger.Every())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var own []string
+	for _, r := range recs {
+		if IsRootOrStep(r) {
+			own = append(own, r.ID)
 		}
 	}
-	if roots == 0 || steps == 0 {
-		t.Fatalf("the fixture holds %d roots and %d steps, so the agreement proves nothing", roots, steps)
+	if want := []string{"flow", "graph", "mol", "step"}; !slices.Equal(own, want) {
+		t.Errorf("a run's own beads = %v, want %v", own, want)
 	}
 }

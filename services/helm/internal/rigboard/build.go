@@ -10,15 +10,17 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
-// ownRow reports whether a bead is a row of its own. A bead that carries
-// anchor_bead (a review, a rework, a validation, a finding) is not: its
-// anchor's pull request speaks for it, and the anchor's Details lists it. Nor
-// is a run's root or a step poured under it, as waits reads one, or a convoy,
-// a type bd keeps for grouping, such as the input convoy a run is poured over.
-// The bead the run works speaks for the run, since the order workers take
-// things is detail a working system does not expose.
+// ownRow reports whether a bead is a row of its own. A child of a merge anchor
+// (a review, a rework, a validation, a finding) is not: its anchor's pull
+// request speaks for it, and the anchor's Details lists it. Nor is a run's
+// root or a step poured under it, as waits reads one, or a convoy, a type bd
+// keeps for grouping, such as the input convoy a run is poured over. The bead
+// the run works speaks for the run, since the order workers take things is
+// detail a working system does not expose. Nor is a bead bd's listing leaves
+// out unless asked: a row of the store's ephemeral plane, such as an order
+// run's tracking bead, or a template molecule.
 func ownRow(b bead) bool {
-	return b.issueType() != "convoy" && b.meta("anchor_bead") == "" && !waits.IsRootOrStep(b.IssueType, b.metadata())
+	return issueType(b) != "convoy" && b.Anchor == "" && !b.Run && !b.EphemeralPlane && !b.Template
 }
 
 // index is the gathered beads by id, with what each is.
@@ -53,10 +55,10 @@ func newIndex(g *gathered) *index {
 	}
 	for _, id := range ix.rows {
 		b := ix.beads[id]
-		for _, p := range b.parents() {
+		for _, p := range parents(b) {
 			ix.children[p] = append(ix.children[p], id)
 		}
-		if ix.kinds[id] != KindConversation || !b.open() {
+		if ix.kinds[id] != KindConversation || !isOpen(b) {
 			continue
 		}
 		subj, replies, _ := conversation.Shape(conversationEdges(b))
@@ -71,9 +73,9 @@ func newIndex(g *gathered) *index {
 }
 
 func conversationEdges(b bead) []conversation.Edge {
-	out := make([]conversation.Edge, 0, len(b.Dependencies))
-	for _, e := range b.Dependencies {
-		out = append(out, conversation.Edge{Type: e.Type, DependsOnID: e.DependsOnID})
+	out := make([]conversation.Edge, 0, len(b.Edges))
+	for _, e := range b.Edges {
+		out = append(out, conversation.Edge{Type: e.Type, DependsOnID: e.ID})
 	}
 	return out
 }
@@ -82,22 +84,22 @@ func conversationEdges(b bead) []conversation.Edge {
 // which carries no hypothesis (docs/epics.md, "What a Delivery is as a bead").
 // A conversation is a task in the shape conversation.Shape reads.
 func (ix *index) kindOf(b bead) Kind {
-	switch b.issueType() {
+	switch issueType(b) {
 	case "gate":
 		return KindGate
 	case "decision":
 		return KindDecision
 	case "epic":
-		if b.meta("epic_hypothesis") == "" {
-			for _, p := range b.parents() {
-				if pb, ok := ix.beads[p]; ok && pb.issueType() == "epic" {
+		if b.Epic.Hypothesis == "" {
+			for _, p := range parents(b) {
+				if pb, ok := ix.beads[p]; ok && issueType(pb) == "epic" {
 					return KindDelivery
 				}
 			}
 		}
 		return KindEpic
 	}
-	if conversation.IsCandidate(b.issueType(), b.Assignee, b.ID) {
+	if conversation.IsCandidate(issueType(b), b.Assignee, b.ID) {
 		if _, _, ok := conversation.Shape(conversationEdges(b)); ok {
 			return KindConversation
 		}
@@ -107,7 +109,7 @@ func (ix *index) kindOf(b bead) Kind {
 
 func (ix *index) openHumanGate(id string) bool {
 	b, ok := ix.beads[id]
-	return ok && b.open() && prstatus.IsHumanGate(b.IssueType, b.AwaitType)
+	return ok && isOpen(b) && prstatus.IsHumanGate(b.IssueType, b.AwaitType)
 }
 
 // container is the epic or Delivery a row sits under: the nearest one its
@@ -117,7 +119,7 @@ func (ix *index) container(id string) string {
 	seen := map[string]bool{id: true}
 	cur := id
 	for {
-		ps := ix.beads[cur].parents()
+		ps := parents(ix.beads[cur])
 		if len(ps) == 0 {
 			return ""
 		}
@@ -187,7 +189,7 @@ func build(g *gathered) Document {
 			for _, c := range ix.children[id] {
 				if ck := ix.kinds[c]; ck == KindWork || ck == KindDelivery {
 					members++
-					if ix.beads[c].open() {
+					if isOpen(ix.beads[c]) {
 						open++
 					}
 				}
@@ -259,7 +261,7 @@ func (bt *built) row(id string) Row {
 	b := ix.beads[id]
 	k := ix.kinds[id]
 	v := bt.verdict[id]
-	r := Row{ID: id, Kind: k, Priority: b.Priority, Title: b.Title, Status: b.status(), CreatedAt: b.CreatedAt,
+	r := Row{ID: id, Kind: k, Priority: b.Priority, Title: b.Title, Status: status(b), CreatedAt: b.CreatedAt,
 		Assignee: b.Assignee, Signal: v.signal, Note: v.note, Group: v.group, Line2: line2(b, k), Line3: v.line3,
 		Waits: []Ref{}, WaitedOnBy: []Ref{}, Asks: []string{}, Holds: []string{}}
 	if a := bt.asks[id]; a != nil {
@@ -282,7 +284,7 @@ func (bt *built) row(id string) Row {
 		r.Conversation = ix.answeredBy[id]
 	}
 	for _, o := range ix.g.open {
-		if o.meta("anchor_bead") == id {
+		if o.Anchor == id {
 			r.Anchored = append(r.Anchored, Ref{ID: o.ID, Title: o.Title})
 		}
 	}
@@ -295,7 +297,7 @@ func (bt *built) row(id string) Row {
 func line2(b bead, k Kind) string {
 	switch k {
 	case KindEpic:
-		return strings.TrimSpace(b.meta("epic_hypothesis"))
+		return strings.TrimSpace(b.Epic.Hypothesis)
 	case KindDelivery:
 		for _, l := range strings.Split(b.Description, "\n") {
 			if l = strings.TrimSpace(l); strings.HasPrefix(l, "Aim:") {
@@ -315,15 +317,16 @@ func line2(b bead, k Kind) string {
 }
 
 func contractOf(b bead) *Contract {
+	e := b.Epic
 	return &Contract{
-		Handle:           b.meta("epic_handle"),
-		Hypothesis:       b.meta("epic_hypothesis"),
-		Boundaries:       b.meta("epic_boundaries"),
-		ClosureCondition: b.meta("epic_closure_condition"),
-		Indicators:       b.meta("epic_indicators"),
-		Ruling:           b.meta("epic_ruling"),
-		RulingReason:     b.meta("epic_ruling_reason"),
-		RulingAt:         b.meta("epic_ruling_at"),
+		Handle:           e.Handle,
+		Hypothesis:       e.Hypothesis,
+		Boundaries:       e.Boundaries,
+		ClosureCondition: e.ClosureCondition,
+		Indicators:       e.Indicators,
+		Ruling:           e.Ruling,
+		RulingReason:     e.RulingReason,
+		RulingAt:         e.RulingAt,
 	}
 }
 
@@ -482,7 +485,7 @@ func (bt *built) groupsOf(container string) ([]GroupList, []string) {
 func (bt *built) epicsPage() []EpicEntry {
 	var epics []string
 	for _, id := range bt.ix.rows {
-		if bt.ix.kinds[id] == KindEpic && bt.ix.beads[id].open() {
+		if bt.ix.kinds[id] == KindEpic && isOpen(bt.ix.beads[id]) {
 			epics = append(epics, id)
 		}
 	}
@@ -512,7 +515,7 @@ func (bt *built) needsYouPage(epics []EpicEntry) NeedsYou {
 	ix := bt.ix
 	var asks []string
 	for _, id := range ix.rows {
-		if bt.asks[id] != nil && ix.beads[id].open() {
+		if bt.asks[id] != nil && isOpen(ix.beads[id]) {
 			asks = append(asks, id)
 		}
 	}
@@ -584,7 +587,7 @@ func (bt *built) workQueuePage() []Section {
 	gates := map[string][]string{}
 	for _, id := range ix.rows {
 		b := ix.beads[id]
-		if ix.kinds[id] != KindWork || !b.open() || carriesHoldMayor(b) {
+		if ix.kinds[id] != KindWork || !isOpen(b) || carriesHoldMayor(b) {
 			continue
 		}
 		v := bt.verdict[id]
@@ -654,7 +657,7 @@ func carriesHoldMayor(b bead) bool {
 func (bt *built) unprioritizedPage() []PriorityGroup {
 	by := map[int][]string{}
 	for _, id := range bt.ix.rows {
-		if b := bt.ix.beads[id]; b.open() && carriesHoldMayor(b) {
+		if b := bt.ix.beads[id]; isOpen(b) && carriesHoldMayor(b) {
 			by[b.Priority] = append(by[b.Priority], id)
 		}
 	}

@@ -1,22 +1,13 @@
 package rigboard
 
 import (
-	"encoding/json"
 	"slices"
 	"testing"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/listing"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
-
-func md(kv ...string) map[string]json.RawMessage {
-	out := map[string]json.RawMessage{}
-	for i := 0; i+1 < len(kv); i += 2 {
-		raw, _ := json.Marshal(kv[i+1])
-		out[kv[i]] = raw
-	}
-	return out
-}
 
 func noOwed(prstatus.Blocker) string { return "" }
 
@@ -55,7 +46,7 @@ func TestTableRows(t *testing.T) {
 		line3  []string
 	}{
 		{name: "closed reads how it closed",
-			in:  tableInput{b: bead{ID: "tk-w", Status: "closed", Metadata: md("gc.work_outcome", "shipped")}, kind: KindWork},
+			in:  tableInput{b: bead{ID: "tk-w", Status: "closed", WorkOutcome: "shipped"}, kind: KindWork},
 			out: outClosed, group: GroupClosed, signal: "Closed", note: "shipped"},
 		{name: "an ask reads its words before anything holds it",
 			in:  tableInput{b: work, kind: KindWork, ask: &askAnswer{kind: AskRoutedToYou, words: "Routed to you"}, holds: blockedOn(workWait)},
@@ -103,14 +94,14 @@ func TestTableRows(t *testing.T) {
 			in:  tableInput{b: bead{ID: "tk-w", Status: "in_progress", Assignee: "gc-toolkit/gc-toolkit.polecat-1"}, kind: KindWork, holds: &waits.Holds{Status: waits.Clear, InFlight: "status in_progress"}},
 			out: outInFlight, group: GroupQueued, signal: "In flight", note: "gc-toolkit/gc-toolkit.polecat-1"},
 		{name: "in flight with an open pull request names it and where it stands",
-			in: tableInput{b: bead{ID: "tk-w", Status: "open", Metadata: md("merge_result", "pull_request", "pr_number", "12")}, kind: KindWork,
+			in: tableInput{b: bead{ID: "tk-w", Status: "open", MergeResult: "pull_request", PRNumber: "12"}, kind: KindWork,
 				holds: &waits.Holds{Status: waits.Clear, InFlight: "carries merge_result"}, facts: &prstatus.Facts{InFlightCount: 1}},
 			out: outPullRequest, group: GroupQueued, signal: "Pull request #12", note: "working"},
 		{name: "armed and clear is queued",
 			in:  tableInput{b: work, kind: KindWork, holds: &waits.Holds{Status: waits.Clear, Arm: &waits.Arm{Target: "gc-toolkit/gc-toolkit.polecat"}}},
 			out: outQueued, group: GroupQueued, signal: "Queued"},
 		{name: "routed and held behind work names each wait",
-			in: tableInput{b: bead{ID: "tk-w", Status: "open", Metadata: md("gc.routed_to", "gc-toolkit/gc-toolkit.polecat")}, kind: KindWork,
+			in: tableInput{b: bead{ID: "tk-w", Status: "open", RoutedTo: "gc-toolkit/gc-toolkit.polecat"}, kind: KindWork,
 				holds: blockedOn(workWait), owedSignal: noOwed},
 			out: outQueuedBehind, group: GroupQueued, signal: "Waits on tk-other"},
 		{name: "assigned to an agent is queued",
@@ -167,18 +158,18 @@ func TestAsks(t *testing.T) {
 			want: &askAnswer{kind: AskQuestion, words: "Question"}},
 		{name: "a human gate a conversation answers reads the conversation", b: bead{ID: "tk-g", Status: "open", IssueType: "gate", AwaitType: "human"}, kind: KindGate,
 			conv: "tk-c", convA: "human", want: &askAnswer{kind: AskQuestion, words: "Conversation waits for you"}},
-		{name: "a gate no person answers is never an ask", b: bead{ID: "tk-p", Status: "open", IssueType: "gate", Metadata: md("gc.routed_to", "human")}, kind: KindGate},
+		{name: "a gate no person answers is never an ask", b: bead{ID: "tk-p", Status: "open", IssueType: "gate", RoutedTo: "human", PersonBlocker: true}, kind: KindGate},
 		{name: "a decision is a question", b: bead{ID: "tk-d", Status: "open", IssueType: "decision"}, kind: KindDecision,
 			want: &askAnswer{kind: AskQuestion, words: "Question"}},
 		{name: "a conversation is its own ask", b: bead{ID: "tk-c", Status: "open", IssueType: "task", Assignee: "human"}, kind: KindConversation,
 			gateOpen: noGate, want: &askAnswer{kind: AskConversation, words: "Conversation waits for you"}},
 		{name: "a conversation that replies to an open human gate belongs to its ask",
-			b:    bead{ID: "tk-c", Status: "open", IssueType: "task", Assignee: "human", Dependencies: []edge{{DependsOnID: "tk-g", Type: "replies-to"}}},
+			b:    bead{ID: "tk-c", Status: "open", IssueType: "task", Assignee: "human", Edges: []listing.Edge{{ID: "tk-g", Type: "replies-to"}}},
 			kind: KindConversation, gateOpen: openGate},
 		{name: "a pull request needing review is an ask in prstatus's words", b: bead{ID: "tk-w", Status: "open"}, kind: KindWork,
 			facts: needsReview, want: &askAnswer{kind: AskPullRequest, words: "needs-review"}},
 		{name: "a pull request the city is changing is no ask", b: bead{ID: "tk-w", Status: "open"}, kind: KindWork, facts: working},
-		{name: "work routed to a person is routed to you", b: bead{ID: "tk-w", Status: "open", Metadata: md("gc.routed_to", "human")}, kind: KindWork,
+		{name: "work routed to a person is routed to you", b: bead{ID: "tk-w", Status: "open", RoutedTo: "human", PersonBlocker: true}, kind: KindWork,
 			want: &askAnswer{kind: AskRoutedToYou, words: "Routed to you"}},
 		{name: "an epic whose members all closed needs a ruling", b: bead{ID: "tk-e", Status: "open", IssueType: "epic"}, kind: KindEpic,
 			open: 0, all: 3, want: &askAnswer{kind: AskRuling, words: "Needs a ruling"}},

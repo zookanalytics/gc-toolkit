@@ -139,8 +139,8 @@ type tableInput struct {
 
 func table(in tableInput) verdict {
 	b := in.b
-	if !b.open() {
-		return verdict{out: outClosed, group: GroupClosed, signal: "Closed", note: b.meta("gc.work_outcome")}
+	if !isOpen(b) {
+		return verdict{out: outClosed, group: GroupClosed, signal: "Closed", note: b.WorkOutcome}
 	}
 	if in.prUnread {
 		return verdict{out: outUnread, signal: signalUnread}
@@ -160,7 +160,7 @@ func table(in tableInput) verdict {
 			return verdict{out: outHeldByGate, group: GroupNotMoving, signal: "Held by a gate", note: w.Title, gate: w.ID}
 		}
 	}
-	switch st := b.status(); st {
+	switch st := status(b); st {
 	case "open", "in_progress", "hooked":
 	case "deferred":
 		return verdict{out: outNotOpen, group: GroupNotMoving, signal: "Deferred"}
@@ -174,14 +174,14 @@ func table(in tableInput) verdict {
 		return verdict{out: outNone}
 	}
 	if h.InFlight != "" {
-		if in.facts != nil && b.meta("pr_number") != "" {
-			return verdict{out: outPullRequest, group: GroupQueued, signal: "Pull request #" + b.meta("pr_number"),
+		if in.facts != nil && b.PRNumber != "" {
+			return verdict{out: outPullRequest, group: GroupQueued, signal: "Pull request #" + b.PRNumber,
 				note: string(prstatus.Derive(*in.facts))}
 		}
 		return verdict{out: outInFlight, group: GroupQueued, signal: "In flight", note: b.Assignee}
 	}
 	waitRefs := refsOf(h.Waits)
-	if (h.Arm != nil && h.Arm.Target != "") || strings.TrimSpace(b.meta("gc.routed_to")) != "" || strings.TrimSpace(b.Assignee) != "" {
+	if (h.Arm != nil && h.Arm.Target != "") || strings.TrimSpace(b.RoutedTo) != "" || strings.TrimSpace(b.Assignee) != "" {
 		if h.Status == waits.Clear {
 			return verdict{out: outQueued, group: GroupQueued, signal: "Queued"}
 		}
@@ -259,13 +259,14 @@ func joinIDs(refs []Ref) string {
 //     ask, as its conversation.
 //   - Pull request: a bead whose pull request reads needs-review or
 //     needs-attention, in those words.
-//   - Routed to you: any other open bead prstatus.IsPersonBlocker counts.
+//   - Routed to you: any other open bead prstatus.IsPersonBlocker counts, as
+//     the listing answers it for the bead.
 //   - Ruling: an epic with members and none open, or a landed Delivery.
 //
 // A gate that is no human gate is never an ask.
 func askOf(b bead, k Kind, answeredBy string, answeredByAssignee string, openQuestionGate func(string) bool,
 	facts *prstatus.Facts, membersOpen, members int) *askAnswer {
-	if !b.open() {
+	if !isOpen(b) {
 		return nil
 	}
 	switch k {
@@ -277,7 +278,7 @@ func askOf(b bead, k Kind, answeredBy string, answeredByAssignee string, openQue
 	case KindDecision:
 		return questionAsk("", "")
 	case KindConversation:
-		for _, g := range b.edgesOf("replies-to") {
+		for _, g := range edgesOf(b, "replies-to") {
 			if openQuestionGate(g) {
 				return nil
 			}
@@ -296,7 +297,7 @@ func askOf(b bead, k Kind, answeredBy string, answeredByAssignee string, openQue
 			return &askAnswer{kind: AskPullRequest, words: string(st)}
 		}
 	}
-	if prstatus.IsPersonBlocker(blockerOf(b)) {
+	if b.PersonBlocker {
 		return &askAnswer{kind: AskRoutedToYou, words: string(AskRoutedToYou)}
 	}
 	return nil
@@ -311,20 +312,14 @@ func questionAsk(answeredBy, assignee string) *askAnswer {
 	return &askAnswer{kind: AskQuestion, words: string(AskQuestion)}
 }
 
-// blockerOf is a bead in the fields prstatus reads of a blocker.
-func blockerOf(b bead) prstatus.Blocker {
-	return prstatus.Blocker{ID: b.ID, Title: b.Title, Status: b.Status, IssueType: b.IssueType,
-		AwaitType: b.AwaitType, Assignee: b.Assignee, Metadata: b.metadata()}
-}
-
 // pullRequestOf is a bead's pull request in the pack's words, nil when it
 // records none.
 func pullRequestOf(b bead, facts *prstatus.Facts) *PullRequest {
-	n := b.meta("pr_number")
+	n := b.PRNumber
 	if n == "" {
 		return nil
 	}
-	pr := &PullRequest{Number: n, URL: b.meta("pr_url")}
+	pr := &PullRequest{Number: n, URL: b.PRURL}
 	if facts != nil {
 		pr.State = string(prstatus.Derive(*facts))
 		for _, h := range prstatus.Held(*facts) {

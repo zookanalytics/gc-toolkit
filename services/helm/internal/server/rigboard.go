@@ -19,20 +19,21 @@ import (
 // write changes what the store answers.
 
 // RigBoardTTL is how long one rig's document is served before the next read
-// gathers again. One gather of the gc-toolkit rig, the city's largest store,
-// measured 5.5 s, 3.7 s of it the waits snapshot over 837 beads, so a minute
-// keeps the read under a tenth of the time while a page is open.
+// gathers again. One read of the gc-toolkit rig, the city's largest store,
+// measured 2.9 s, so a minute keeps the read under a tenth of the time while a
+// page is open.
 const RigBoardTTL = 60 * time.Second
 
 // errNoRig answers a rig the city does not list.
 var errNoRig = errors.New("the city lists no such rig")
 
-// rigBoard is the rig board's reads and their cache.
+// rigBoard is the rig board's reads and their cache: gc lists the rigs, and
+// read reads one rig's store and builds its document.
 type rigBoard struct {
-	gc        rigboard.GC
-	readHolds rigboard.HoldsReader
-	rigs      *keyedCache[rigList]
-	docs      *keyedCache[rigboard.Response]
+	gc   rigboard.GC
+	read func(ctx context.Context, rig rigboard.Rig) (rigboard.Document, error)
+	rigs *keyedCache[rigList]
+	docs *keyedCache[rigboard.Response]
 }
 
 // rigList is the city's rigs as one read gave them, and when.
@@ -53,15 +54,16 @@ func (s *Server) rigList(ctx context.Context) (rigList, error) {
 	})
 }
 
-// WithRigBoard enables the rig board's routes, reading each rig's store
-// through gc. A nil gc leaves them answering 503.
+// WithRigBoard enables the rig board's routes, listing the city's rigs
+// through gc and reading each rig's store through gctk's listing. A nil gc
+// leaves them answering 503.
 func WithRigBoard(gc rigboard.GC, ttl time.Duration) Option {
 	return func(s *Server) {
 		if gc == nil {
 			return
 		}
 		now := func() time.Time { return s.now() }
-		s.rigBoard = &rigBoard{gc: gc, readHolds: rigboard.ReadHolds,
+		s.rigBoard = &rigBoard{gc: gc, read: rigboard.Read,
 			rigs: newKeyedCache[rigList](ttl, now), docs: newKeyedCache[rigboard.Response](ttl, now)}
 	}
 }
@@ -99,7 +101,7 @@ func (s *Server) handleRig(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, rig := range list.rigs {
 			if rig.Name == name {
-				board, err := rigboard.Read(ctx, rb.gc, rig, rb.readHolds)
+				board, err := rb.read(ctx, rig)
 				if err != nil {
 					return rigboard.Response{}, err
 				}
