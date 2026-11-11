@@ -7,8 +7,9 @@ board MODEL in `assets/scripts/gc-helm.sh` (the bash PoC, which this replaces �
 the bash dies).
 
 > **The bash board is gone; the bash verbs are what is left.**
-> The board's one view for people is the web page this binary serves, and
-> `helm-svc board --json` prints the same rows for agents. `gc-helm.sh` renders
+> The board's one view for people is the web page this binary serves, which
+> reads one document per rig (see *The rig board*), and
+> `helm-svc board --json` prints the board model's rows for agents. `gc-helm.sh` renders
 > no board at all: it carries the write and read-only verbs that
 > `gc-helm --help` lists, and `gc-helm.sh --json` exits 2 with `unknown verb`.
 > Its own usage text points at `helm-svc board`. Retiring the remaining verbs
@@ -129,10 +130,8 @@ how-badly.
 `group_root` is the board's PRIMARY grouping axis, and every tile carries one:
 the id of the dependency family the row belongs to — the top-most anchor its
 parent-child and `blocks` edges climb to, its own id when it climbs to nothing
-(`board.assignGroupRoots`). The city overview groups by it: the web page
-renders one block per family, the root as the header and its members beneath it
-in `board.SectionOrder`, and `helm-svc board --json --all` caps the overview by
-whole families (`board.CapFamilies`, over `board.GroupByFamily`); there
+(`board.assignGroupRoots`). The city overview groups by it:
+`helm-svc board --json --all` caps the overview by whole families (`board.CapFamilies`, over `board.GroupByFamily`); there
 `section` is the within-family band. The operator's queue stays flat and
 owed-first. `specs/tk-492ssx/` records the family model.
 
@@ -140,13 +139,11 @@ owed-first. `specs/tk-492ssx/` records the family model.
 parent one anchor up, empty at a family root. Where `group_root` names the top
 of the family, `group_parent` names the next step toward it, so a surface can
 render the family as the nested containment tree it is — a Delivery above its
-own children rather than flat beside them. The web dashboard body nests each
-family by it (`flattenFamilies` in `web/src/App.tsx`).
+own children rather than flat beside them.
 
 `cluster_key` is the shared `needs` of a run of at least three same-section rows
 that are one template (a run of rows held by gates with one title, a run of
-PRs green and waiting on review); the web page folds them into one entry while the wire keeps every
-member. `specs/tk-9tbbk.4/` records the band taxonomy and the wrapper fold.
+PRs green and waiting on review). The wire keeps every member. `specs/tk-9tbbk.4/` records the band taxonomy and the wrapper fold.
 
 ### The two questions, and why they are two surfaces
 
@@ -182,8 +179,7 @@ bead title is secondary; the *owed by you* table reads it that way. The overview
 asks what the city's shape is, so it leads with the object and its frontier.
 
 **The empty queue is a CLAIM, and it is the most consequential sentence the
-board states.** So it never renders blank: the web page states what it checked,
-or the error, and an empty queue out of a PARTIAL gather is not an answer at
+board states.** So an empty queue out of a PARTIAL gather is not an answer at
 all. `helm-svc board --json` exits `3` on one rather than print an empty array,
 because the rows that would have contradicted it are exactly the ones the
 unread store was holding. `--all` keeps its own contract: an empty overview is
@@ -412,8 +408,7 @@ gather does. The relation belongs to the bead, not to the kind, and it is
 load-bearing for `parked` in particular — see *Until its work is done* below.
 
 **`parked` is deliberately not an attention item.** It is LOW so it can never
-compete for rank with a stranded epic, and the web app lists it in a section of
-its own below the ranked table rather than as a row inside it. What the operator
+compete for rank with a stranded epic. What the operator
 needs from these is not triage but recall: an open bead whose sitting ended
 with a takeaway is already resumable — typing a bare bead id into the `prefix+a`
 popup runs the operator's intake on that bead
@@ -515,11 +510,6 @@ The blocker statuses are read **outside the gather cache**, in the same class as
 session liveness: a cached "still waiting" is exactly the answer this exists to
 stop serving. The read is skipped entirely when no anchor carries an edge, so a
 city whose sittings have not written any yet pays nothing.
-
-The disposition-due row is one of two `parked` shapes the web app lifts OUT of
-the quiet section and into the ranked table — the other is a row with open
-children. Leaving either below would re-hide the row the distinction exists to
-surface.
 
 ### Until it is answered — the stand-down (`tk-b3rga`)
 
@@ -803,8 +793,7 @@ conversation.
 axes do, so an unread position surfaces as coverage rather than as a false
 negative on a row nobody sees. The section withholds "Nothing is owed by you"
 while any PR row's position, conversation or approval clause is unreadable, and
-says which. The web page counts it from the rows (`prCoverage` in
-`web/src/App.tsx`).
+says which.
 
 ## Converse sittings (`tk-ghlg1e.1`)
 
@@ -815,9 +804,9 @@ the open half is the same read that folds conversations onto their beads and
 produces `held`.
 
 Sittings are **not tiles and are not ranked against them**. A tile is an anchor
-that wants something; a sitting is an event. The web app gives them a section of
-their own below the parked one, for the same reason parked conversations get a
-section: putting an event in a queue of asks answers a question nobody asked.
+that wants something; a sitting is an event. They ride the envelope as a record
+of their own, apart from the tiles: putting an event in a queue of asks answers
+a question nobody asked.
 
 | | gathered | shown |
 |---|---|---|
@@ -892,11 +881,9 @@ narrower, not wrong — and marks the gather partial.
 
 ### Where it shows up
 
-The web app renders the record in the board's order — open first, longest-open
-first, then most recently closed — and drills in on a sitting's SUBJECT, since that is the
-anchor the drill plane knows how to open. Because `POST /helm/open` already
-invalidates the cached board, a conversation filed from the drill panel appears
-in this section on the next read rather than after the TTL.
+The service's `/helm` answer carries the record in the board's order: open
+first, longest-open first, then most recently closed. The rig board's page does
+not draw it; a conversation reaches the page as an ask on Needs you.
 
 `helm-svc board --json` prints the tiles alone. The record rides the service's
 envelope as `sittings`, because a second shape in the bare array would break
@@ -1048,8 +1035,8 @@ Measured on the live city, the same gather went from 28 tiles to 81.
 
 The **sittings** record is absent on this backend, and not for either of those
 reasons: its closed half needs the closed conversations, and the scan reads
-`open`. Under `GC_HELM_SOURCE=supervisor` the envelope's `sittings` is `null` and
-the web page renders no sittings section. Two narrowings follow from the same scan. A
+`open`. Under `GC_HELM_SOURCE=supervisor` the envelope's `sittings` is `null`.
+Two narrowings follow from the same scan. A
 held conversation is `in_progress`, so the backend sees a conversation only
 while it is `open`, and with no sitting to read a state from, that conversation
 reads `waiting` whoever it is assigned to. And the supervisor's bead carries no
@@ -1299,21 +1286,45 @@ run renders no section at all, rather than an all-clear nobody measured.
 
 ## Web UI
 
-`web/` is a Vite + React + TypeScript app — the operator's board surface —
-embedded in the binary and served at the service mount. This is the U5 scaffold
-(`tk-eemvf.1`): **structure only**. It renders the board contract as a plain
-readable table. The spatial canvas, and the visual direction it implements, are
-U6 and land on top of this.
+`web/` is a Vite + React + TypeScript app, the operator's board, embedded in the
+binary and served at the service mount. It is one page per rig, with the rig in
+the address (`?rig=<name>`); with no rig there, it lists the city's rigs from
+`GET <mount>/helm/rigs` as links. Nothing rolls up across rigs.
 
-It renders the board as **two** tables. The ranked one is the board proper;
-below it, when the gather found any, a *parked conversations* section lists the
-QUIET `parked` tiles — id, rig, title, staleness, and how to resume. They are
-split because they answer different questions, and mixing them would put a
-thread that wants nothing in the same ranking as work that is stuck
-(`tk-2v08m`). A `parked` tile that is owed a disposition (`tk-2plde`) or has
-open children (`tk-a9k0l`) is not quiet and stays in the ranked table. The
-parked table drops the progress columns: every row that reaches it has an empty
-open frontier, so `open/wip` reads the same answerless `0` on all of them.
+**What it reads.** One rig's document, `GET <mount>/helm/rigs/{rig}` (see *The
+rig board*), which it lays out as four pages: Epics, Needs you, Work queue and
+Unprioritized. The document decides every group, signal, count, ask, section
+and order; the page lays it out, folds it and filters it, and derives no state
+of its own. Its types are `src/rigboard/document.gen.ts`, generated from the Go
+types. It reads the document again every half minute, whenever the tab is shown
+again, and after a write it sends. A read that fails keeps the last good
+document on screen, with the time it was read and the failure beside it, and a
+failed read with no document before it shows the failure alone, never an empty
+list.
+
+**How it draws.** Every object, from an epic to a gate, is drawn with one row
+structure (`src/rigboard/Line.tsx`), whose look follows the operator's Claude
+Design export. A page decides only what nests under a row: on Epics and the Work
+queue a bead is the row and the asks that stop it are its children, and on
+Needs you the ask is the row and the work it holds is its children. Details
+opens in place under a row: the bead's whole description, formatted, which the
+page reads from the supervisor when Details opens (see *The page's supervisor
+read*), an epic's contract and last ruling, the pull request's facts with its
+link, what the bead waits on and what waits on it. Search runs over the loaded
+document. A bead id copies on a click, and a referenced id's "show" fills search
+with it.
+
+**What it writes.** Start the conversation and Rejoin the conversation call the
+engage route, and the side panel, where the export draws its terminal, shows the
+route's answer and the command that attaches to the sitting, with a control
+that copies it. Discuss, in every row's Details, opens the open route's form
+(`src/open/`). See *Actuating from the board*.
+
+**Its fonts are bundled.** IBM Plex Sans and IBM Plex Mono come from the
+`@fontsource` packages (`src/fonts.css`) and are served from the page's own
+origin, the only origin `web/handler.go`'s content policy admits for a font.
+The build writes each package's licence beside the page, as
+`dist/fonts/IBM-Plex-Sans-LICENSE.txt` and `dist/fonts/IBM-Plex-Mono-LICENSE.txt`.
 
 Four things about it are load-bearing.
 
@@ -1350,11 +1361,11 @@ bundle-only change still triggers a rebuild of the binary that embeds it.
 JSON, and the app has to live at that same path because a workspace-service
 gets exactly one mount. So the representation follows the request: a browser
 navigation (`Accept: text/html`) gets the app, everything else — curl, `fetch`,
-any script — gets the JSON it always got. `/helm` is JSON unconditionally; that
-is the contract U7 mirrors and U8/U9 consume, and no Accept header changes it.
+any script — gets the JSON it always got. `/helm` is JSON unconditionally, and no
+Accept header changes it.
 
 ```bash
-npm run dev        # http://127.0.0.1:5175, proxying the board fetch to the city GC_CITY names
+npm run dev        # http://127.0.0.1:5175/?rig=<rig>, proxying its reads to the city GC_CITY names
 HELM_DEV_MOUNT=http://127.0.0.1:8372/v0/city/<city>/svc/helm npm run dev
 ```
 
@@ -1363,110 +1374,11 @@ and the dev proxy refuses to send traffic off-host.
 
 ## Terminal
 
-`web/src/terminal/` embeds a live terminal in the board (U9, `tk-eemvf.4`): a
-peek at rest, a live terminal on focus. It attaches to the city's **existing**
-ttyd — this service owns no PTY and spawns no process.
-
-```
-ttyd -i 127.0.0.1 -p 7681 -b /terminal -W -a <guard script>   # -> gc session attach <session>
-```
-
-Four things about it are load-bearing.
-
-**It works because a tailscale mapping makes it same-origin.** ttyd is
-published by its own `tailscale serve` mapping, separate from the supervisor's:
-
-```
-https://<host>/terminal  ->  http://127.0.0.1:7681/terminal    (ttyd)
-https://<host>/v0        ->  http://127.0.0.1:8372/v0          (supervisor, and the board under it)
-```
-
-So on the published origin the board and ttyd share an origin, and the socket is
-admitted by this app's own strict `connect-src 'self'` CSP with **no widening**
-and no CORS. That is a property of the tailscale mapping, not of the supervisor:
-reach the board directly on `127.0.0.1:8372` instead and ttyd is a different
-port, a different origin, and the terminal cannot connect there. The app says so
-rather than hanging — see the reachability check below.
-
-**The reachability check is a content-type check, not a status check.** The
-supervisor serves a SPA at its root with a catch-all that answers *every*
-unmatched path with `200 text/html`. On an origin that does not route ttyd,
-`GET /terminal/token` therefore looks perfectly healthy:
-
-```bash
-curl -si http://127.0.0.1:8372/terminal/token | head -2   # 200, text/html  <- NOT ttyd
-curl -si http://127.0.0.1:7681/terminal/token | head -2   # 200, application/json
-```
-
-A status-only probe reports a working terminal and the operator finds out when
-the socket dies. The tile requires `application/json` before opening a socket,
-so a misrouted origin produces a sentence instead of a silent failure.
-
-**Closing a tile detaches; it never kills the session.** ttyd runs one
-`gc session attach` per connected client, and that process is a *tmux client* of
-a session that outlives it. Teardown therefore closes the socket and writes
-**nothing** — an `exit`, a `^C` or a `^D` written on the way out is
-indistinguishable from the operator typing it and would end a live agent's
-session. `session.ts` holds the invariant, `session.test.ts` asserts it, and it
-was verified end-to-end against a real ttyd wrapping a throwaway tmux session:
-after a clean close the session, its shell, and its ability to run commands all
-survived. See `specs/tk-eemvf.4/decisions.md`.
-
-**One terminal, any session.** The attach target is chosen per connection, not
-baked into the systemd unit (`tk-rbf9r`). ttyd runs with `-a/--url-arg`, which
-appends each `arg` in the socket's query string to the argv of the command it
-spawns, so `…/terminal/ws?arg=<session>` selects what gets attached:
-
-```
-ttyd -i 127.0.0.1 -p 7681 -b /terminal -W -a \
-  <rig>/assets/scripts/gc-terminal-attach.sh
-```
-
-`?session=<name>` on the board's own URL is what puts it there — an operator
-knob in the same family as `?terminal=`, accepting anything `gc session attach`
-names: an id (`hq-k7r38`), an alias (`gc-toolkit/gc-toolkit.witness`), or a
-session name. Naming nothing sends no `arg` and lands on the city default,
-`gc-toolkit.mayor`, which is exactly what this terminal did before.
-
-**`-a` means the URL chooses argv, so a guard is load-bearing.**
-`assets/scripts/gc-terminal-attach.sh` is the only thing between the query
-string and `gc`. It takes at most one argument (ttyd appends *every* `arg=`, so
-a second one is an injection attempt, not a typo), refuses a leading `-`, `..`,
-whitespace and shell metacharacters, and then — the part that actually decides
-— requires an exact match in the live `gc session list`. A name that is
-well-formed but not live is refused. A name that fails anything is refused
-outright rather than quietly falling back to the mayor: `gc session attach`
-runs tmux, tmux clears the screen on attach, so a "that was rejected" notice
-would be wiped and the operator would be typing into the mayor believing it was
-something else. `assets/scripts/gc-terminal-attach.test.sh` covers this
-hermetically, driving the real script against a stub `gc` with the hostile
-inputs that ttyd 1.7.7 was measured to deliver.
-
-The guard `exec`s the attach rather than forking it, so ttyd's close-time
-SIGHUP lands on the tmux client itself — that is the deployment half of the
-detach invariant above.
-
-**What this widens.** Any client that can reach the terminal could already open
-a writable mayor terminal, so this does not change *whether* write is possible;
-it changes *which* sessions are reachable, from one to every live session. That
-is real. It is bounded by the tailnet (there is no new port and no new
-`tailscale serve` mapping), and by the allowlist, which can only ever name
-sessions that already exist.
-
-**Still one terminal — that part is now layout, not wiring.** How many
-terminals a board should show at once, and how a tile maps to a session, are
-the open questions; the board contract carries no session for a tile, so
-drill-target → session is deliberately not guessed here. Deferred to the design
-handoff, tracked as `tk-mw9qz`.
-
-The tile reports at least 80x24 to ttyd however small it is rendered, because
-tmux sizes a window to fit its clients and a tile reporting its own size would
-reflow a terminal the operator is also attached to.
-
-For dev, the vite server proxies `/terminal` (with `ws: true`) to ttyd's
-loopback port, reproducing the same-origin shape the tailscale mapping provides
-in deployment; override with `HELM_DEV_TTYD`, which is loopback-checked exactly
-like `HELM_DEV_MOUNT`.
+The page mounts no terminal. Start the conversation and Rejoin the conversation
+spawn the sitting through the engage route, which runs `gc-helm.sh engage` with
+`--no-attach`, and the side panel shows the command the answer names to attach
+to it, with a control that copies it. The operator runs that command in a
+terminal of their own.
 
 ## The board contract
 
@@ -1588,11 +1500,11 @@ is a read. Each shells out to the matching `gc-helm.sh` verb:
 - **dismiss** ends the sitting: it closes the conversation a live sitting holds,
   and answers no gate.
 
-Where they surface: **Accept** renders on the board row itself, when the wire
-says the row is `acceptable`. **Discuss**, **Dismiss** and **open** are the drill
-panel's per-bead conversation actions. Each is also a `gc-helm.sh <verb>` a
-person or an agent can run by hand, and the web board is the operator's surface
-for all of them.
+Where they surface: the page sends two of them. **Start the conversation** and
+**Rejoin the conversation** call engage, on a question and on a conversation,
+and **Discuss**, in every row's Details, opens open's form for the bead. accept
+and dismiss have no control on the page. Each verb is also a `gc-helm.sh <verb>`
+a person or an agent can run by hand.
 
 **They own no verb logic.** Each verb lives once, in `gc-helm.sh`, and these
 routes *shell out to it* exactly as `assets/scripts/operator-intake.sh` does —
@@ -1609,12 +1521,10 @@ curl -X POST http://127.0.0.1:8372/v0/city/<city>/svc/helm/helm/accept \
 ```
 
 **What open and engage do not do: attach.** In tmux, `open` reattaches the
-caller and `engage` attaches the spawned sitting. In a browser there is no pane
-to attach to until the embedded ttyd can be retargeted at the new session
-(tk-rbf9r, whose city-repo half tk-xlup8 is written but unapplied). So the web
-`open` *files* the conversation and the web `engage` *spawns* the sitting with
-`--no-attach`; the panel copy is explicit that neither attached you. That is a
-follow-on, not a reason to hold this. accept and dismiss have no sitting to
+caller and `engage` attaches the spawned sitting. The page mounts no terminal,
+so the web `open` *files* the conversation and the web `engage` *spawns* the
+sitting with `--no-attach`. The page says that neither attached you, and shows
+the attach command engage's answer names. accept and dismiss have no sitting to
 attach.
 
 ### What the operator is told
@@ -1653,11 +1563,9 @@ degrading every open to an unclassified outcome.
 
 helm-svc is published to the tailnet by tailscale-serve, so reaching this route
 already requires being on the tailnet — the same boundary that admits the
-board's reads and the ttyd terminal. **This route does not widen it**, and adds
-no login or token: the service has no session concept, and inventing one here
-would be a second, weaker authentication story beside tailscale's (the same
-reasoning `web/src/terminal/endpoint.ts` gives for not re-checking the ttyd
-session name in the browser).
+board's reads. **This route does not widen it**, and adds no login or token: the
+service has no session concept, and inventing one here would be a second,
+weaker authentication story beside tailscale's.
 
 What POST adds over GET is not reachability but **CSRF** — the operator's
 browser is *on* the tailnet, so any page they visit could otherwise write here
@@ -1692,12 +1600,11 @@ leaves a child holding the inherited stdout pipe — measured, that made a 50ms
 deadline return after a full 5s, which is precisely the wedged-data-plane case
 the bound exists for.
 
-## Drill-in plane (`web/src/drill/`, U8)
+## The page's supervisor read (`web/src/supervisor/`)
 
-Clicking a tile's id opens live detail for that anchor: the bead, the session
-working it (with its `?peek` output snapshot), and an activity feed. It reads
-the **supervisor's** typed API — not `/helm` — and keeps itself current off the
-supervisor's SSE stream. A live terminal is U9.
+The rig's document carries no piece of work's description, so a row's Details
+reads that one bead from the **supervisor's** typed API when it opens:
+`GET /v0/city/{city}/bead/{id}`, which answers a bead of any rig in the city.
 
 **It addresses the supervisor same-origin.** Not `127.0.0.1:8372`. helm-svc is
 reverse-proxied *by* the supervisor, so the app and the API already share an
@@ -1705,34 +1612,16 @@ origin, and two things make that the only workable target: the board is read
 over tailscale from machines where `127.0.0.1` is the *reader's* host, and the
 app is served under `connect-src 'self'` (`web/handler.go`), which refuses
 cross-origin requests before they leave the page. The one value discovered at
-runtime is the city name, parsed from the mount path by `src/drill/origin.ts`.
+runtime is the city name, parsed from the mount path by `src/supervisor/origin.ts`.
 `npm run dev` proxies `/v0` to the loopback supervisor so the same code path
-works there, taking its city from `HELM_DEV_MOUNT`.
-
-**It never states an incomplete read as a complete one.** The board aggregates
-across every rig, and a rig store that does not answer is normal: the supervisor
-returns 200 with `partial: true` and a reason per store. Every list read here
-therefore carries that envelope (`ListResult` in `src/drill/client.ts`), a read
-that failed outright is expressed as the maximally partial one, and counts come
-from the supervisor's `total` rather than the page it returned. Under a partial
-read the panel says it could not tell whether an agent is working the anchor —
-never "no agent is working this anchor" — and the signals strip states floors
-("at least 3") with the stores' own reasons beside them.
-
-**Its event stream resumes where it left off.** A dropped stream is reconnected
-with capped backoff to a URL carrying `after_seq=<highest seq delivered>`. The
-browser resends `Last-Event-ID` only for its own reconnect of the same
-`EventSource` object, so a replacement built from the bare URL would start at the
-current city head and silently lose the outage — and since the panel refetches
-only on a delivered event, it would then show stale state under a "live"
-indicator. Where no cursor exists yet (the drop preceded the first event), the
-hooks refetch on the way back to `open` instead.
+works there, taking its city from `HELM_DEV_MOUNT`. Served anywhere else, as
+`helm-fixture` serves it, the page says it cannot read the description.
 
 **Its types are generated, not hand-written.** The supervisor API is in the
-OpenAPI spec, so `src/drill/gen/supervisor.d.ts` is generated from it — pruned
-to the eight operations this plane calls, because the full spec generates ~23k
-lines for a spec owned by another repo (the gascity rig). Regenerate after any
-supervisor API change, and commit the result:
+OpenAPI spec, so `src/supervisor/gen/supervisor.d.ts` is generated from it,
+pruned to the one operation the page calls, because the full spec generates
+~23k lines for a spec owned by another repo (the gascity rig). Regenerate after
+any supervisor API change, and commit the result:
 
 ```bash
 cd services/helm/web
@@ -1745,8 +1634,7 @@ npm test                                     # vitest; no city needed
 Adding an endpoint means adding it to `OPERATIONS` in
 `scripts/gen-supervisor-types.mjs` and regenerating — `tsc` rejects a call to
 any path missing from the generated types, so the two cannot drift apart
-silently. The hand-written contract mirror in U7 is for the board JSON only,
-which is absent from the supervisor spec; do not hand-write supervisor shapes.
+silently. Do not hand-write supervisor shapes.
 
 ## Build / run / test
 
@@ -1755,7 +1643,7 @@ cd services/helm
 go test ./...                 # unit tests (model golden cases + mock-supervisor source + server/cache + the embedded app)
 go build ./cmd/helm-svc  # or: assets/scripts/gc-build.sh helm
 
-cd web && npm test            # the app's own tests: ttyd protocol, endpoint check, detach invariant
+cd web && npm test            # the page's own tests, on the rig read's fixture document
 
 # Run standalone against the live supervisor (no [[service]] needed):
 GC_SERVICE_SOCKET=/tmp/helm.sock \
@@ -1808,22 +1696,30 @@ it under a real service mount) and leave `GC_HELM_SOURCE` unset.
 ## The board on fixture data (`helm-fixture`)
 
 `cmd/helm-fixture` serves the app this commit embeds with no city behind it.
-`/helm` answers a board file as JSON, and `POST /helm/<verb>` answers a canned
-answer, so nothing it serves reads or writes a city. A demo capture of the board
-runs it as its `--serve` command (`docs/review-demo.md`).
+`/helm` answers a board file as JSON, `GET /helm/rigs` and
+`GET /helm/rigs/{rig}` answer one rig's document, and `POST /helm/<verb>`
+answers a canned answer, so nothing it serves reads or writes a city. A demo
+capture of the board runs it as its `--serve` command (`docs/review-demo.md`).
 
 ```bash
 cd services/helm
-PORT=5199 go run ./cmd/helm-fixture        # the contract sample, on 127.0.0.1:5199
-go run ./cmd/helm-fixture --addr 127.0.0.1:5199 --board <file> --answers <dir>
+PORT=5199 go run ./cmd/helm-fixture        # the gc-toolkit fixture, on 127.0.0.1:5199/?rig=gc-toolkit
+go run ./cmd/helm-fixture --addr 127.0.0.1:5199 --rig-board <file> --answers <dir>
 ```
 
-- `--board` is the board answer, in the shape `web/src/contract.ts` names. The
-  default is `web/src/board.fixture.json`, the contract sample `TestBoardFixture`
-  writes, which carries every key of the board contract.
-- `--answers` is a directory of canned write answers. `dismiss.json` is the 200
-  answer to `POST /helm/dismiss`, in the shape `web/src/actuate/client.ts` reads
-  (`web/src/open/client.ts` for `open`). `dismiss.409.json` answers with status
+- `--rig-board` is one rig's document, in the shape
+  `web/src/rigboard/document.gen.ts` names, which the page reads. The default is
+  `internal/rigboard/testdata/gc-toolkit.board.json`, the document the rig read
+  builds from the committed gc-toolkit fixture. The rig list names the one rig
+  the document names, and both routes give the time the fixture started as the
+  read time.
+- `--board` is the answer at `/helm`, in the shape `web/src/contract.ts` names.
+  The default is `web/src/board.fixture.json`, the contract sample
+  `TestBoardFixture` writes, which carries every key of the board contract. The
+  page does not read it.
+- `--answers` is a directory of canned write answers. `engage.json` is the 200
+  answer to `POST /helm/engage`, in the shape `web/src/actuate/client.ts` reads
+  (`web/src/open/client.ts` for `open`). `engage.409.json` answers with status
   409 instead, which the app reads as a refusal. A verb with no answer is refused
   with 503 and reason `unavailable`, as helm-svc refuses a write when it has no
   write tool.
@@ -1853,7 +1749,7 @@ unit tests over the model and a mock supervisor.
 
 **Delivered since** (tk-eemvf.1, the U5 scaffold): a mount-prefix-safe Vite +
 React + TS app embedded in the binary and served at the mount, alongside the
-JSON the mount already served. Structure only — see *Web UI*.
+JSON the mount already served. See *Web UI*.
 
 **Delivered since** (tk-2v08m, the metadata-keyed anchor kinds): the board
 gathers `human` (`gc.routed_to=human`) and `parked` (`gc.takeaway` present)
@@ -1862,11 +1758,6 @@ that its issue type is `task`. See *Anchor kinds*. This is the first consumer to
 spend the metadata tk-x89rn widened the seam to carry. `internal/board` reads it
 too: `humanGated` keys the human-gate rules off `gc.routed_to`, and
 `deriveState` reads a child's route and arm off its metadata.
-
-**Delivered since** (tk-eemvf.4, the U9 terminal embed): an xterm.js terminal
-attached to the city's existing ttyd, peek at rest and live on focus, with the
-same-origin reachability confirmed and detach-not-kill verified — see
-*Terminal*.
 
 **Delivered since** (tk-134d7, the completed model port):
 

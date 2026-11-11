@@ -3,11 +3,11 @@
 # surface: the WRITE verbs (open, react, takeaway) and the contract that the
 # operator's entry point is this runnable script, not a `gc helm` subcommand.
 #
-# The board itself — its render, ranking, severity bands, and the held glyph —
-# is helm-svc's web page (services/helm). Its derivation is proven by
-# services/helm/internal/board (derive_test.go), its render by services/helm/web
-# (App.test.tsx), and the rows `helm-svc board --json` prints by
-# services/helm/cmd/helm-svc (main_test.go); none of it is driven from here.
+# The board itself is helm-svc's web page (services/helm). Its rig read is
+# proven by services/helm/internal/rigboard, its page by services/helm/web
+# (src/rigboard/Board.test.tsx), and the rows `helm-svc board --json` prints by
+# services/helm/internal/board (derive_test.go) and services/helm/cmd/helm-svc
+# (main_test.go); none of it is driven from here.
 #
 # What this fixture locks down:
 #
