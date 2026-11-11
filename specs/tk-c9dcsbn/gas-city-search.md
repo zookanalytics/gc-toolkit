@@ -1,6 +1,6 @@
 ---
 name: Gas City search for gc-helm's home page and its seats
-description: The search the arch check asks for before the pack adds gc-helm's home page (a bare gc-helm on a terminal, helm-svc form --home) and the seat verbs gc-helm po and gc-helm mechanik. What Gas City ships for choosing among sessions and for opening a named seat's sitting with its prompt from any state, read at a named upstream commit; why each seat verb is that attach alone; and the deployed-version prerequisite the change waits on, because the city's gc predates the attach it composes. Read it when checking whether the home page or a seat verb can move onto a Gas City primitive, or what the change waits on before it lands.
+description: The search the arch check asks for before the pack adds gc-helm's home page (a bare gc-helm on a terminal, helm-svc form --home) and the seat verbs gc-helm po and gc-helm mechanik. What Gas City ships for choosing among sessions and for opening a named seat's sitting with its prompt from any state, read at named upstream commits; why each seat verb is that attach alone; and the Gas City build the city runs, which carries the attach the verbs compose. Read it when checking whether the home page or a seat verb can move onto a Gas City primitive, or which Gas City build the seat verbs need.
 ---
 
 # Gas City search for gc-helm's home page and its seats
@@ -17,10 +17,10 @@ this surface:
   terminal to its seat's session from whatever state the seat is in.
 
 Gas City read at upstream main `8b1d799b8` (gastownhall/gascity, fetched
-2026-11-10). The city runs a fork build, `cb80c5354`, whose last common commit
-with upstream is `9f807760c`. That build is not evidence of a primitive. It is
-read only for the one fact the change's timing turns on: it does not carry
-upstream's attach change, `64ba02c02`.
+2026-11-10), and the attach's paths read again at upstream `f14384642` on
+2026-11-11. The city runs a fork build, `36ad5186a`, whose last common commit
+with upstream is `f14384642`. That build is not evidence of a primitive. It is
+read only for what the city runs (*The deployed version*, below).
 
 ## What was searched, and what each leaves
 
@@ -36,9 +36,8 @@ and each entry runs a gc-helm verb, so the page itself starts, reads and writes
 nothing.
 
 **Opening a named seat's sitting with its prompt, from any state.**
-`gc session attach` covers it, all but one window inside the attach that the
-next paragraph names. It attaches to a running session as it stands, and
-refuses one with a stop pending on its record (`startRefusal`,
+`gc session attach` covers it. It attaches to a running session as it stands,
+and refuses one with a stop pending on its record (`startRefusal`,
 `internal/session/chat.go`), such as a po whose drain-ack stop the controller
 has begun. While the city's controller runs, it asks the controller to start a
 session whose runtime is not running, recording the wake `gc session wake`
@@ -57,19 +56,27 @@ records no wake of its own and runs no wait. The verb adds only what the attach
 does not print, the line that names how to return once the terminal comes back
 and the re-run once an attach fails.
 
-The window is a stop that completes inside the attach. A seat that runs at the
-attach's own check (`a.sp.IsRunning` in `sessionAttach.run`) is attached through
-the session's handle, whose `Manager.Attach` (`internal/session/manager.go`)
-starts the runtime from the attach's process when it has stopped since that
-check and no stop is pending on the seat's record (`startRefusal` and
-`ensureRunningOn`, `internal/session/chat.go`). So a po whose sitting ends in
-the span between the check and the attach comes up without the controller's
-start. The pack has no primitive that closes it. `--no-start` attaches through
-the runtime-only handle, which never starts a seat, so a seat that is not running
-would need the pack's own start again. A state read before the attach leaves a
-wider window of the same kind, and an attach with `--no-start` followed by a
-plain attach once it refuses leaves this one in the second call. The window is
-Gas City's to close, and it is recorded as upstream finding tk-dmqcnln.
+One start is the attach's own while the controller runs, after a stop that
+completes inside the attach. A seat that runs at the attach's own check
+(`a.sp.IsRunning` in `sessionAttach.run`) is attached
+through the session's handle, whose `Manager.Attach`
+(`internal/session/manager.go`) starts the runtime from the attach's process
+when it has stopped since that check and no stop is pending on the seat's
+record (`startRefusal` and `ensureRunningOn`, `internal/session/chat.go`). So a
+po whose sitting ends in the span between the check and the attach is started
+by the attach, not the controller. It still comes up with its prompt. The
+session's handle takes its runtime from the worker factory's resolver, which
+renders the agent's prompt into the start's startup nudge and marks the launch
+as having delivered it (`sessionFromRecord`, `internal/worker/factory.go`,
+`resolvedWorkerRuntimeWithConfigAndMetadata`, `cmd/gc/worker_handle.go`, and
+`startupPromptCity.applyTo`, `cmd/gc/session_startup_prompt.go`, from
+`4a4921a60`, #8465), as for an attach while no controller runs. The pack has no
+primitive that moves this start to the controller. `--no-start` attaches
+through the runtime-only handle, which never starts a seat, so a seat that is
+not running would need the pack's own start again, and a state read before the
+attach leaves a wider span of the same kind. The comment on `sessionAttach.run`
+says a viewer never starts a runtime while the controller runs, and upstream
+finding tk-dmqcnln records this start against it.
 
 The po wakes fresh (`wake_mode = "fresh"`), and the controller's start clears a
 fresh session's key before it starts it (`preWakePatch`, `cmd/gc/session_wake.go`,
@@ -90,19 +97,13 @@ included, delivers it in place (`queueManagedSessionNudgeWake` and
 decides itself whether to wake, inject or queue a message and attaches nothing
 (`newSessionSubmitCmd`).
 
-## The deployed-version prerequisite
+## The deployed version
 
-The city's gc, the fork build `cb80c5354`, predates `64ba02c02`. Its
-`gc session attach` has no `--wait-timeout` or `--no-start`, and it starts a
-session that is not running from its own process whether or not a controller
-runs (`Manager.Attach`, `internal/session/manager.go`, and `ensureRunningOn`,
-`internal/session/chat.go`). There a po whose last sitting a drain-ack ended
-keeps no session key, so the attach starts a new conversation with no first
-message, and `gc prime --hook` primes only a session whose record reads active,
-awake, creating or start_pending (`primeHookLiveManagedSession`,
-`cmd/gc/cmd_prime.go`), so that sitting comes up with no prompt. That is a
-deployment lag, not a missing primitive. The change therefore lands only once
-the city's gc carries `64ba02c02`, which arrives with the next upstream sync of
-the fork: a human gate on the change's anchor holds its merge until the synced
-build runs. The verbs pass no flag to the attach, so either build accepts the
-call, and the gate alone decides when the verbs ship.
+The city's gc is the fork build `36ad5186a`, read on 2026-11-11, whose last
+common commit with upstream is `f14384642`, so it carries `64ba02c02` and
+`4a4921a60`. Its `gc session attach --help` documents the controller's start,
+`--wait-timeout` and `--no-start`. The fork's own commits in the files the
+attach runs through (`85751fbe1`, `5028a000f`, `51055e7d3` and `b9ffe10ea`)
+change other session commands, a nudge's bead reference, a transcript lookup
+and what a start records about a task's work directory, and none of the paths
+above. So each seat verb runs on the city's gc as this page reads it.

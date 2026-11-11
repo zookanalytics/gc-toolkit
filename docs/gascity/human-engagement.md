@@ -604,10 +604,14 @@ still runs, the attach fails, saying the session is stopping. A start from the
 attach's own process resumes the provider's conversation when the session keeps
 a session key. A session that a drain-ack ended under `wake_mode = "fresh"`
 keeps none, because the controller's patch that finishes the drain-ack's stop
-clears it, so the attach starts a new conversation with no first message. Its
-prompt can then reach it only as session-start hook context, and
-`gc prime --hook` primes only a session whose record reads active, awake,
-creating or start_pending, so that session comes up with no prompt.
+clears it, so the attach starts a new conversation. Either way the attach
+renders the agent's prompt, sends it as the start's startup nudge, which the
+session receives once its runtime runs, and marks the launch as having
+delivered it, so a session the attach starts comes up with its prompt, as one
+the controller starts does. Session-start hook context carries a prompt only
+for a start that delivered none, such as one on a runtime gc cannot send a
+startup prompt to, and `gc prime --hook` primes only a session whose record
+reads active, awake, creating or start_pending.
 
 *Evidence:* `newSessionAttachCmd`, `cmdSessionAttachWith`, `sessionAttach.run`
 and `attachOnceControllerStarts` (`cmd/gc/cmd_session.go`),
@@ -618,17 +622,24 @@ and `attachOnceControllerStarts` (`cmd/gc/cmd_session.go`),
 (`internal/session/lifecycle_transition.go`), `runtimeDrainAck`,
 `finishRuntimeDrainAck` and `drainAckRowPatch` (`cmd/gc/cmd_runtime_drain.go`),
 `armAck` (`cmd/gc/reconcile_arms_drain.go`), `finalizePatch`
-(`cmd/gc/reconcile_finalize.go`), `primeHookLiveManagedSession`
-(`cmd/gc/cmd_prime.go`), `SessionByHandle` (`internal/worker/factory.go`),
-`SessionHandle.Attach` and `startCommand`
-(`internal/worker/handle_lifecycle.go`), `Manager.Attach`
+(`cmd/gc/reconcile_finalize.go`), `primeHookLiveManagedSession` and
+`managedSessionHookPromptAlreadyDelivered` (`cmd/gc/cmd_prime.go`),
+`SessionByHandle` and `sessionFromRecord` (`internal/worker/factory.go`),
+`resolvedWorkerRuntimeWithConfigAndMetadata` (`cmd/gc/worker_handle.go`),
+`startupPromptCity.applyTo` (`cmd/gc/session_startup_prompt.go`),
+`planStartupPrompt`, `resumeStartupPromptPlan` and `startupPromptPlan.applyTo`
+(`cmd/gc/startup_prompt_delivery.go`), `restartPromptNudge`
+(`cmd/gc/session_lifecycle_parallel.go`), `SessionHandle.Attach` and
+`startCommand` (`internal/worker/handle_lifecycle.go`), `Manager.Attach`
 (`internal/session/manager.go`) and `startRefusal`, `ensureRunningOn` and
 `ensureLive` (`internal/session/chat.go`), read at upstream `8b1d799b8` on
-2026-11-10. The attach took this shape in `64ba02c02` (#9011, 2026-11-09). The
-fork `cb80c5354`, the build the city ran that day, predates it: its attach
-starts a session that is not running from its own process whether or not a
-controller runs (`Manager.Attach` in `internal/session/manager.go`, and
-`ensureRunningOn` in `internal/session/chat.go`).
+2026-11-10 and at upstream `f14384642` on 2026-11-11. The attach took this shape
+in `64ba02c02` (#9011, 2026-11-09), and its own start has sent the agent's
+prompt since `4a4921a60` (#8465, 2026-10-29). The city's gc on 2026-11-11 is
+the fork `36ad5186a`, whose last common commit with upstream is `f14384642`.
+The fork's own commits in these files change other session commands, a
+nudge's bead reference, a transcript lookup and what a start records about a
+task's work directory, and none of the paths this section reads.
 
 ## Refresh procedure
 

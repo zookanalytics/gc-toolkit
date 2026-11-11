@@ -1195,9 +1195,8 @@ fails, saying the session is stopping, and `gc-helm po` names the re-run, which
 opens a new sitting once the stop is done. The operator says what a sitting is
 for in the sitting. A sitting the attach starts itself, as it does
 while the city's controller is down, or when the po's last sitting ends
-between the attach's check that it is running and the attach itself, can come
-up without the po's prompt, and it has the whole prompt once the operator tells
-it to run `gc prime`.
+between the attach's check that it is running and the attach itself, gets the
+po's prompt too, which the attach sends once the session runs.
 
 ## How a pane dies when no sitting is live
 
