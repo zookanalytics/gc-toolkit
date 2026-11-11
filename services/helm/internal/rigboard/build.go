@@ -337,12 +337,13 @@ func contractOf(b bead) *Contract {
 }
 
 // askID is the ask a bead stands in: a conversation that answers a gate stands
-// in the gate's ask, and any other ask stands in its own. It is empty for a
-// bead that is no ask.
+// in the gate's ask, the first of its replies when it answers more than one,
+// and any other ask stands in its own. It is empty for a bead that is no ask.
 func (bt *built) askID(id string) string {
 	if bt.ix.kinds[id] == KindConversation {
-		for g, c := range bt.ix.answeredBy {
-			if c == id {
+		_, replies, _ := conversation.Shape(conversationEdges(bt.ix.beads[id]))
+		for _, g := range replies {
+			if bt.ix.answeredBy[g] == id {
 				return g
 			}
 		}

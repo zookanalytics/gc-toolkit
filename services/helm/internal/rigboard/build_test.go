@@ -167,3 +167,24 @@ func TestPages(t *testing.T) {
 		}
 	})
 }
+
+// TestAConversationAnsweringTwoQuestions holds one store to one document: a
+// conversation that answers two questions stands in the first of them.
+func TestAConversationAnsweringTwoQuestions(t *testing.T) {
+	g := graph()
+	g.open = append(g.open,
+		bead{ID: "tk-b.3", Title: "talked about", Status: "open", Priority: 2, IssueType: "task",
+			Dependencies: []edge{{DependsOnID: "tk-b", Type: "parent-child"}}, CreatedAt: "2026-01-11"},
+		bead{ID: "tk-q2", Title: "and which?", Status: "open", Priority: 1, IssueType: "gate", AwaitType: "human", CreatedAt: "2026-01-11"},
+		bead{ID: "tk-c", Title: "talk it through", Status: "open", Priority: 1, IssueType: "task", Assignee: "human", CreatedAt: "2026-01-11",
+			Dependencies: []edge{{DependsOnID: "tk-b.3", Type: "tracks"}, {DependsOnID: "tk-q2", Type: "replies-to"}, {DependsOnID: "tk-q", Type: "replies-to"}}},
+	)
+	for _, id := range []string{"tk-b.3", "tk-q2", "tk-c"} {
+		g.holds[id] = waits.Holds{ID: id, Status: waits.Clear}
+	}
+	for range 20 {
+		if got := build(g).Rows["tk-b.3"].Asks; !slices.Equal(got, []string{"tk-q"}) {
+			t.Fatalf("tk-b.3's asks = %v, want the first question its conversation answers", got)
+		}
+	}
+}
