@@ -62,6 +62,10 @@ func TestFindAsksTheListing(t *testing.T) {
 			"bd list --include-ephemeral --include-gates --include-infra --include-templates --json --limit 0 --metadata-field gc.root_bead_id=tk-root"},
 		{"the beads named, closed ones included", Query{IDs: []string{"b-2", "b-1", "b-2"}, Closed: true},
 			"bd list --id b-1,b-2 --include-ephemeral --include-gates --include-infra --include-templates --json --limit 0 --all"},
+		{"every live bead", Query{Every: true},
+			"bd list --include-ephemeral --include-gates --include-infra --include-templates --json --limit 0"},
+		{"the beads under a parent, closed ones included", Query{Parent: "tk-e", Closed: true},
+			"bd list --include-ephemeral --include-gates --include-infra --include-templates --json --limit 0 --all --parent tk-e"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			log := findStub(t, `[]`)
@@ -113,6 +117,33 @@ func TestFindReadsTheListingsEdges(t *testing.T) {
 	}
 	if rows[0].IssueTypeString() != "convoy" {
 		t.Errorf("issue type = %q", rows[0].IssueTypeString())
+	}
+}
+
+// A listing row's own fields read through their accessors: a whole-number
+// priority, the labels that are strings, and the description, creation and
+// close times as text. A row that carries none of them reads empty.
+func TestFindReadsTheRowsFields(t *testing.T) {
+	findStub(t, `[{"id":"w-1","status":"closed","priority":2,"labels":["hold:mayor",7,"b"],"description":"the whole text","created_at":"2026-11-01T00:00:00Z","closed_at":"2026-11-02T00:00:00Z"},{"id":"w-2","priority":1.5},{"id":"w-3","ephemeral":true},{"id":"w-4","no_history":true,"is_template":true}]`)
+	rows, err := (&Client{bin: "gc"}).Find(Query{Every: true, Closed: true})
+	if err != nil || len(rows) != 4 {
+		t.Fatalf("Find = %v, %v", rows, err)
+	}
+	b := rows[0]
+	if b.PriorityInt() != 2 || !slices.Equal(b.LabelStrings(), []string{"hold:mayor", "b"}) || b.DescriptionString() != "the whole text" ||
+		b.CreatedAtString() != "2026-11-01T00:00:00Z" || b.ClosedAtString() != "2026-11-02T00:00:00Z" {
+		t.Errorf("w-1 reads priority %d, labels %q, description %q, created %q, closed %q", b.PriorityInt(), b.LabelStrings(),
+			b.DescriptionString(), b.CreatedAtString(), b.ClosedAtString())
+	}
+	e := rows[1]
+	if e.PriorityInt() != 0 || e.LabelStrings() != nil || e.DescriptionString() != "" || e.CreatedAtString() != "" || e.ClosedAtString() != "" {
+		t.Errorf("w-2 reads priority %d, labels %q, description %q, created %q, closed %q", e.PriorityInt(), e.LabelStrings(),
+			e.DescriptionString(), e.CreatedAtString(), e.ClosedAtString())
+	}
+	if b.InEphemeralPlane() || b.Template() || !rows[2].InEphemeralPlane() || rows[2].Template() ||
+		!rows[3].InEphemeralPlane() || !rows[3].Template() {
+		t.Errorf("the ephemeral plane reads %v %v %v, templates %v %v %v", b.InEphemeralPlane(), rows[2].InEphemeralPlane(),
+			rows[3].InEphemeralPlane(), b.Template(), rows[2].Template(), rows[3].Template())
 	}
 }
 

@@ -8,9 +8,10 @@ import (
 )
 
 // Selection is the beads one Find reads: the beads named, the beads that carry a
-// declared key, or the beads whose key holds one value. It reads live beads
-// alone unless WithClosed widens it. A key's selection matches its current
-// spelling, not its legacy aliases.
+// declared key, the beads whose key holds one value, the beads the store lists
+// under a parent, or every bead. It reads live beads alone unless WithClosed
+// widens it. A key's selection matches its current spelling, not its legacy
+// aliases.
 type Selection struct {
 	q    gcbd.Query
 	none bool
@@ -20,6 +21,16 @@ type Selection struct {
 // ByID selects the beads named.
 func ByID(ids ...string) Selection {
 	return Selection{q: gcbd.Query{IDs: slices.Clone(ids)}, none: len(ids) == 0}
+}
+
+// Every selects every bead the store holds.
+func Every() Selection { return Selection{q: gcbd.Query{Every: true}} }
+
+// Under selects the beads the store lists under parent. The store's filter can
+// return a bead whose own parent-child edge names another parent, so a domain
+// keeps a child by its record's Parents.
+func Under(parent string) Selection {
+	return Selection{q: gcbd.Query{Parent: parent}, none: parent == ""}
 }
 
 // Carrying selects the beads that carry k.
