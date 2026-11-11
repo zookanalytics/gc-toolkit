@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
@@ -29,7 +30,9 @@ import (
 // city now and never written down, and against host paths, email addresses
 // and the accounts git and gh name here, the repository's collaborators among
 // them. Such text is replaced in place with a
-// bracketed note, and the file's about block lists each field it touched.
+// bracketed note, and the file's about block lists each field it touched. The
+// cut writes nothing when the pack's rig-mentions.sh still names another rig
+// in it.
 func TestCutFixture(t *testing.T) {
 	city := os.Getenv("RIGBOARD_CUT_CITY")
 	if city == "" {
@@ -128,10 +131,33 @@ func TestCutFixture(t *testing.T) {
 		fmt.Fprintf(&buf, "  %s%s\n", r, sep)
 	}
 	buf.WriteString(" ]\n}\n")
+	if out, err := rigMentions(t, city, buf.Bytes()); err != nil {
+		t.Fatalf("rig-mentions.sh read the cut and %v, so nothing was written:\n%s", err, out)
+	}
 	if err := os.WriteFile(fixturePath, buf.Bytes(), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	t.Logf("wrote %s: %d records, %d fields with text replaced", fixturePath, len(rows), len(replaced))
+}
+
+// rigMentions runs the pack's rig-mentions.sh, the check self-review runs on a
+// branch, over the cut's text as gc-toolkit's change, from the city root so it
+// reads that city's rigs. Its exit 0 is a nil error: the text names no other
+// rig. Exit 1 prints each mention, and exit 2 says why nothing was checked.
+func rigMentions(t *testing.T, city string, text []byte) ([]byte, error) {
+	t.Helper()
+	script, err := filepath.Abs(filepath.Join("..", "..", "..", "..", "assets", "scripts", "rig-mentions.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := filepath.Join(t.TempDir(), filepath.Base(fixturePath))
+	if err := os.WriteFile(f, text, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("bash", script, "--rig", "gc-toolkit", "--file", f)
+	cmd.Dir = city
+	cmd.Env = append(os.Environ(), "GC_CITY_PATH="+city)
+	return cmd.CombinedOutput()
 }
 
 func listOrNone(xs []string) string {
@@ -296,13 +322,15 @@ func fixtureRecord(b bead, p *privacy) (map[string]any, []string) {
 	return rec, fields
 }
 
-// privacy is what the cut never writes: the city's other rigs by name and by
-// their beads' ids, host paths, email addresses, and the accounts git and gh
-// name on this host, the repository's collaborators among them.
+// privacy is what the cut never writes: the city's other rigs by name, with a
+// name's separators written any way or left out as rig-mentions.sh matches it,
+// and by their beads' ids, host paths, email addresses, and the accounts git
+// and gh name on this host, the repository's collaborators among them.
 type privacy struct {
 	names    *regexp.Regexp
 	ids      map[string]bool
 	idShapes *regexp.Regexp
+	prefixes []string
 	accounts []string
 }
 
@@ -311,7 +339,11 @@ func newPrivacy(t *testing.T, ctx context.Context, gc GC, others []Rig) *privacy
 	p := &privacy{ids: map[string]bool{}}
 	var names, prefixes []string
 	for _, r := range others {
-		names = append(names, regexp.QuoteMeta(r.Name))
+		parts := nameSeparator.Split(r.Name, -1)
+		for i, part := range parts {
+			parts[i] = regexp.QuoteMeta(part)
+		}
+		names = append(names, strings.Join(parts, nameSeparator.String()+"?"))
 	}
 	var payload struct {
 		Rigs []struct {
@@ -324,6 +356,7 @@ func newPrivacy(t *testing.T, ctx context.Context, gc GC, others []Rig) *privacy
 	for _, r := range payload.Rigs {
 		if r.Name != "gc-toolkit" && r.Prefix != "" {
 			prefixes = append(prefixes, regexp.QuoteMeta(r.Prefix))
+			p.prefixes = append(p.prefixes, r.Prefix)
 		}
 	}
 	p.names = regexp.MustCompile(`(?i)\b(` + strings.Join(names, "|") + `)\b`)
@@ -350,7 +383,7 @@ func newPrivacy(t *testing.T, ctx context.Context, gc GC, others []Rig) *privacy
 
 // learnIDs asks each other rig's store which of the tokens in texts shaped
 // like its bead ids it holds, since such a token names a bead only when a
-// store holds it.
+// store holds it, or when it is a wisp (isWisp).
 func (p *privacy) learnIDs(t *testing.T, ctx context.Context, gc GC, others []Rig, texts []string) {
 	t.Helper()
 	var cands []string
@@ -376,14 +409,27 @@ func (p *privacy) learnIDs(t *testing.T, ctx context.Context, gc GC, others []Ri
 	}
 }
 
+// isWisp reports whether a token shaped like another rig's bead id is one of
+// that rig's wisps. A store purges a wisp once it closes, as it does an ended
+// session's, so it no longer holds one the fixture's text still names, such
+// as the session that armed a bead.
+func (p *privacy) isWisp(token string) bool {
+	for _, pre := range p.prefixes {
+		if strings.HasPrefix(token, pre+"-wisp-") {
+			return true
+		}
+	}
+	return false
+}
+
 // scrub replaces each piece of private text in s with a bracketed note: a
 // host path to its end, an email address, another rig's name, a bead id
-// another rig's store holds, and an account.
+// another rig's store holds or a wisp id of another rig, and an account.
 func (p *privacy) scrub(s string) string {
 	s = hostPath.ReplaceAllString(s, "[a host path]")
 	s = emailAddress.ReplaceAllString(s, "[an email address]")
 	s = p.idShapes.ReplaceAllStringFunc(s, func(m string) string {
-		if p.ids[m] {
+		if p.ids[m] || p.isWisp(m) {
 			return "[another rig's bead]"
 		}
 		return m
@@ -398,4 +444,6 @@ func (p *privacy) scrub(s string) string {
 var (
 	hostPath     = regexp.MustCompile(`(/Users/|/private/|/home/)[^\s"'),]*`)
 	emailAddress = regexp.MustCompile(`[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}`)
+	// nameSeparator is a separator inside a rig's name.
+	nameSeparator = regexp.MustCompile(`[-_. ]`)
 )
