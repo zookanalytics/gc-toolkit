@@ -55,9 +55,10 @@ const (
 // lookup is one `conversations <ref>` read, keyed by the reference it was
 // asked for and the bead that reference was reached from (lookupKey).
 type lookup struct {
-	pending bool
-	about   About
-	err     error
+	pending    bool
+	refreshing bool // read again while its answer stays on screen (refresh)
+	about      About
+	err        error
 }
 
 // source is where the subject field's text came from, which decides how the
@@ -687,7 +688,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if l == nil {
 			return m, nil
 		}
-		l.pending, l.about, l.err = false, msg.about, msg.err
+		l.pending, l.refreshing, l.about, l.err = false, false, msg.about, msg.err
 		m.selectNamed()
 		return m, nil
 	case cityMsg:
@@ -943,8 +944,15 @@ func (m *Model) submit() tea.Cmd {
 			return nil
 		}
 		if r := m.suspendedRig(); r != "" {
+			// The rig can resume while the form is open, so the subject is read
+			// again, and the next Ctrl+S starts the conversation once that read
+			// says the rig runs.
 			m.status = fmt.Sprintf("Not started: rig %s is suspended, so no sitting can start there. Start conversation %s once the rig resumes (gc rig resume %s).", r, c.ID, r)
-			return nil
+			cmd := m.refresh()
+			if m.lookups[m.subjectKey()].refreshing {
+				m.status += " Reading the subject again."
+			}
+			return cmd
 		}
 		sub := m.current().about.Subject.ID
 		m.saved = &Saved{Subject: sub, Conversation: c.ID}
@@ -1032,6 +1040,23 @@ func (m *Model) reread() tea.Cmd {
 		cmds = append(cmds, m.lookup(k))
 	}
 	return tea.Batch(cmds...)
+}
+
+// refresh reads the subject field's subject again while its answer stays on
+// screen, so the rows on the subject, the cursor and the conversation chosen
+// among them stay as they are until the new answer lands. A refresh already
+// running is not run again.
+func (m *Model) refresh() tea.Cmd {
+	k := m.subjectKey()
+	l := m.lookups[k]
+	if l == nil || l.pending || l.refreshing {
+		return nil
+	}
+	l.refreshing = true
+	return func() tea.Msg {
+		a, err := m.helm.About(m.ctx, k.ref, k.from)
+		return aboutMsg{key: k, about: a, err: err}
+	}
 }
 
 func (m *Model) onSaved(msg savedMsg) tea.Cmd {

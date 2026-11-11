@@ -826,20 +826,64 @@ func TestABeadInASuspendedRigSavesWithAttachingOffAndStartsNoSitting(t *testing.
 	focusOn(t, m, contextField)
 	m.Update(key(tea.KeyDown))
 	m.Update(key(tea.KeySpace))
-	if _, cmd := m.Update(ctrl('s')); cmd != nil || len(f.starts) != 0 || m.status != "Not started: rig paused is suspended, so no sitting can start there. Start conversation pz-c0 once the rig resumes (gc rig resume paused)." {
+	_, cmd := m.Update(ctrl('s'))
+	if len(f.starts) != 0 || m.status != "Not started: rig paused is suspended, so no sitting can start there. Start conversation pz-c0 once the rig resumes (gc rig resume paused). Reading the subject again." {
 		t.Fatalf("choosing pz-c0 in a suspended rig: starts %v, status %q", f.starts, m.status)
 	}
+	deliver(m, cmd) // the rig is still suspended
 	m.Update(key(tea.KeyUp))
 	m.Update(key(tea.KeySpace))
 	focusOn(t, m, questionField)
 	typeText(m, "a question")
-	_, cmd := m.Update(ctrl('s'))
+	_, cmd = m.Update(ctrl('s'))
 	deliver(m, cmd)
 	if len(f.saves) != 1 || len(f.starts) != 0 || m.Attach() != nil || !m.left {
 		t.Fatalf("saves %+v, starts %v, left %v", f.saves, f.starts, m.left)
 	}
 	if n := m.Note(); !strings.Contains(n, "Conversation pz-c1 on pz-a is saved, and no sitting was started: rig paused is suspended") {
 		t.Fatalf("note = %q", n)
+	}
+}
+
+// An open conversation chosen in a suspended rig is not started, and the
+// subject is read again while its rows and the choice stay on screen, so once
+// the rig has resumed the next Ctrl+S starts that conversation, with no need
+// to open the form again.
+func TestAConversationChosenInASuspendedRigStartsOnceTheRigResumes(t *testing.T) {
+	a := subjectAbout("pz-a", "paused")
+	a.RigSuspended = true
+	a.Conversations = []Conversation{{ID: "pz-c0", Readiness: Queued, Title: "an open question"}}
+	f := &fakeHelm{about: map[string]About{"pz-a": a}}
+	m := newForm(t, f, Options{Subject: "pz-a"})
+	settle(m)
+	focusOn(t, m, contextField)
+	m.Update(key(tea.KeyDown))
+	m.Update(key(tea.KeySpace))
+	_, readAgain := m.Update(ctrl('s'))
+	if readAgain == nil || len(f.starts) != 0 || !strings.HasSuffix(m.status, "(gc rig resume paused). Reading the subject again.") {
+		t.Fatalf("Ctrl+S in a suspended rig: a read %v, starts %v, status %q", readAgain != nil, f.starts, m.status)
+	}
+	if _, cmd := m.Update(ctrl('s')); cmd != nil || !strings.HasSuffix(m.status, "Reading the subject again.") {
+		t.Fatalf("Ctrl+S while the subject is read again: another read %v, status %q", cmd != nil, m.status)
+	}
+	if v := m.composeView(); m.choice != "pz-c0" || m.cursor != 1 || m.focus != contextField || !strings.Contains(v, "● pz-c0") {
+		t.Fatalf("while the subject is read again: choice %q, cursor %d, focus %d:\n%s", m.choice, m.cursor, m.focus, v)
+	}
+	deliver(m, readAgain) // the rig is still suspended
+	if _, readAgain = m.Update(ctrl('s')); readAgain == nil || len(f.starts) != 0 {
+		t.Fatalf("Ctrl+S once that read said the rig is still suspended: a read %v, starts %v", readAgain != nil, f.starts)
+	}
+	resumed := a
+	resumed.RigSuspended = false
+	f.about["pz-a"] = resumed
+	deliver(m, readAgain)
+	if l := marked(strings.Split(m.composeView(), "\n"), "Attach"); m.choice != "pz-c0" || !strings.Contains(l, "‹ yes, once its sitting starts") {
+		t.Fatalf("once the read says the rig runs: choice %q, attach line %q", m.choice, l)
+	}
+	_, cmd := m.Update(ctrl('s'))
+	deliver(m, cmd)
+	if len(f.starts) != 1 || f.starts[0] != "pz-c0 claude-opus" || len(f.abouts) != 3 {
+		t.Fatalf("starts %v, reads %v, want pz-c0 started after two reads again", f.starts, f.abouts)
 	}
 }
 

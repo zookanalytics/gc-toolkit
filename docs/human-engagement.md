@@ -373,11 +373,13 @@ whether the subject names it or it is a bead's own rig, the destination is
 still settled, Attach reads no with the reason beside it, and no key turns it
 on. Ctrl+S saves the question and leaves, starting no sitting, and the form
 says the conversation waits in the operator's queue until the rig resumes
-(`gc rig resume <rig>`). An open conversation chosen there is not started.
-Once the subject names a rig that is not suspended, attaching is the
-operator's own choice again. `conversations <ref>` says a subject's rig is
-suspended as `rig_suspended`, which refuses nothing, and engage on the command
-line still refuses to start a sitting in a suspended rig.
+(`gc rig resume <rig>`). An open conversation chosen there is not started:
+Ctrl+S reads the subject again, keeping the conversation chosen, and once a
+read finds the rig resumed, the next Ctrl+S starts it. Once the subject names
+a rig that is not suspended, attaching is the operator's own choice again.
+`conversations <ref>` says a subject's rig is suspended as `rig_suspended`,
+which refuses nothing, and engage on the command line still refuses to start a
+sitting in a suspended rig.
 
 **The variants are the converse templates engage offers.** Each is an
 `agents/converse-*` template named `converse-<provider>-<model>`, and the name
