@@ -11,10 +11,8 @@ the arch check holds every change to the document to it, both by judgment. A
 finding cites the part of the standard it rules from: a heading below, or the
 bold lead of a rule.
 
-The author of a brief that directs what the document says, such as one that
-settles what a rework writes, holds each line it directs to this standard as a
-writer holds the document's own lines, because the worker may carry a directed
-line into the document word for word.
+A brief that directs the document's text, such as a rework's, is held to this
+standard as the document's own lines are.
 
 The sections are borrowed rather than invented: the
 [arc42](https://arc42.org/overview) template, the first two levels of the
@@ -34,13 +32,13 @@ The sections are borrowed rather than invented: the
   around the gap, and Debt names the gap.
 - **What a change owes the document.** A change that moves the architecture,
   a design included, changes the document by the smallest statement of what
-  moved at the architecture's altitude: a responsibility a part takes on or
-  gives up, data a boundary must keep out, a cross-cutting rule, or an
-  architecture decision. Each is stated once, in the section that holds it,
-  and the part not built yet is named under Debt. A boundary is stated by the
-  data it keeps out. How a part will carry out the move, including where or how
-  it keeps a boundary's data out, stays in the design's record until the part
-  is built, and then lives in the part's own doc.
+  moved at the architecture's altitude: a domain added or removed, a
+  responsibility a part takes on or gives up, what the system talks to or where
+  its boundary lies, data a boundary must keep out, a cross-cutting rule, an
+  architecture decision, or debt taken on or retired. A boundary is stated by
+  the data it keeps out. How a part will carry out the move, including where or
+  how it keeps a boundary's data out, stays in the design's record until the
+  part is built.
 - **The big picture first.** It opens on what the system is for and the
   domains it is made of, such as its schemas, before any one part's detail.
 - **The architecture's altitude.** The document goes down to its parts and
@@ -111,13 +109,11 @@ and a reader could not learn it from the code. Anything else goes in the code,
 in that part's own doc, or nowhere. A component's behavior, a script's guards
 and a suite's coverage are all learned from the code, so none of them passes.
 The test reads each fact a line states, not the line as a whole: a fact it
-admits does not carry in the clauses around it, and a clause that says how a
-part carries out a responsibility fails in any section, as the next paragraph
-says. A part not built yet is judged as though it were, so what its code will
-show once it is built fails now, even when a design states it as a requirement
-the part must meet. A fact passes once, in the section that holds it: stated
-again in another section, it tells a reader nothing the first statement did
-not.
+admits does not carry in the clauses around it. A part not built yet is judged
+as though it were, so what its code will show once it is built fails now, even
+when a design states it as a requirement the part must meet. A fact passes
+once, in the section that holds it: stated again in another section, it tells
+a reader nothing the first statement did not.
 
 A decision is held to the same test. How a part carries out a responsibility
 the document gives it, such as the mechanism or the vendor feature it does the
