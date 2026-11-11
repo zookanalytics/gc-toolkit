@@ -35,8 +35,10 @@
 # nothing re-offers. A part that does not land stops the sequence and nothing after
 # it runs, so the session does not drain. A step then stays claimed, and the next
 # worker it goes to retries. A claim with no run stays with this session, which
-# can run this again. Gas City's run cancel interrupts the session that holds the
-# step, so this call can end as an interrupted tool call once the cancel has landed.
+# can run this again. Gas City's run cancel interrupts the turn of each session
+# that holds a started step of the run. run-cancel.sh puts this session's step
+# back to not started before it sends the cancel, so this call is not among them
+# and goes on to the drain.
 #
 # Callers: mol-polecat-work's step scripts (work-lib.sh's callers); the decline
 # arms of mol-rig-demo and mol-review's short-record refusal; the polecat

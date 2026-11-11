@@ -8,10 +8,18 @@
 # cancel. A run that should not continue is cancelled through gascity's run
 # cancel, `POST /v0/city/<city>/runs/<root>/cancel` on the supervisor API. The
 # cancel closes the root and every member that is not closed, a `blocked` one
-# included, with gc.outcome=canceled, blockers first, and runs none of them. A
-# session mid-step finishes that step and idles. This script writes no member of
-# the molecule. In --step mode, once the run has ended, it appends the reason to
-# the step this session holds, which is the one bead a worker writes.
+# included, with gc.outcome=canceled, blockers first, and runs none of them. It
+# also interrupts the current turn of each live session that holds an
+# in_progress member of the run, which ends the tool call that turn is running.
+# Gas City finds those sessions by the assignees of the run's in_progress
+# members. So in --step mode, before it sends the cancel, the script puts the
+# step this session holds back to not started: one write, guarded on this
+# session's claim, sets the step's status to open and keeps its assignee and
+# session pins. The step stays in this session's name, where no other session's
+# claim can take it, and the cancel finds no started step of this session to
+# interrupt, so the call that sent it runs on. Once the run has ended, the script
+# appends the reason to that step. The step this session holds is the one bead a
+# worker writes, and the script writes no other member of the molecule.
 #
 # --step names the run by the step this shell is executing: the bead `gc hook
 # current` names, when it verifies as this session's bead for that gc.step_ref,
@@ -32,7 +40,8 @@
 #
 # The cancel is retried on a 5xx answer or a failed connection. When it still
 # does not land the script exits 1, and the caller does not drain: its step
-# stays claimed, so whichever worker the step goes to next retries the cancel.
+# stays in this session's name, not started, so whichever worker the step goes
+# to next retries the cancel, this session at its next claim included.
 #
 # Callers: decline.sh; mol-review's failed gather and mol-validate's decline
 # arms; molecule-hold.sh (--step, for step text that names that script);
@@ -58,7 +67,8 @@ usage: run-cancel.sh --step <formula.step-id> --reason "<text>" [--bead <id>] [-
   --step     the gc.step_ref of the step this shell is executing, e.g.
              mol-polecat-work.load-context, or a check loop's name, e.g.
              self-review, for one of its iterations. The run is that step's
-             molecule.
+             molecule. Before the cancel, a step this session has started goes
+             back to not started, still in this session's name.
   --root     the run's root bead, for a caller that holds no step of it.
   --reason   why the run ends; appended to the held step in --step mode once
              the run has ended, and printed on the result line (required)
@@ -272,9 +282,19 @@ if [ "$ENDED" = 1 ] && [ "$ROOT_CLOSED" = 0 ]; then
   exit 2
 fi
 
+# The held step as it reads now: the cancel interrupts this session only while
+# the step reads in_progress, so only then is it put back to not started.
+HELD_STATUS=""; HELD_BY=""
+if [ -n "$TARGET" ]; then
+  HELD_STATUS=$(printf '%s' "$TARGET_JSON" | jq -r '.[0].status // ""' 2>/dev/null)
+  HELD_BY=$(printf '%s' "$TARGET_JSON" | jq -r '.[0].assignee // ""' 2>/dev/null)
+fi
+
 if [ "$DRY_RUN" = "1" ]; then
   if [ "$ROOT_CLOSED" = 1 ]; then
     echo "$PROG: DRY RUN: run $ROOT has ended; would close any member it left open: $REASON"
+  elif [ "$HELD_STATUS" = in_progress ]; then
+    echo "$PROG: DRY RUN: would put step $TARGET ($STEP) back to not started, then cancel run $ROOT: $REASON"
   else
     echo "$PROG: DRY RUN: would cancel run $ROOT${TARGET:+, whose step $TARGET ($STEP) this session holds}: $REASON"
   fi
@@ -289,6 +309,15 @@ note_step() { # <what happened to the run>
   # shellcheck disable=SC2086  # ${DB:+--db "$DB"} expands to 0 or 2 space-free fields
   gc bd update "$TARGET" ${DB:+--db "$DB"} --append-notes "Declined at $STEP by $WHO: $REASON. $1" >/dev/null 2>&1 \
     || echo "$PROG: NOTE: the reason did not land on $TARGET; the result line still records it" >&2
+}
+
+# not_ended <why>: the cancel did not end the run. A step put back to not started
+# stays in this session's name, and the caller is told so.
+UNSTARTED=0
+not_ended() {
+  echo "$PROG: $1" >&2
+  [ "$UNSTARTED" = 0 ] || echo "$PROG: $TARGET ($STEP) is back to not started, still in this session's name" >&2
+  exit 1
 }
 
 # The address the supervisor serves, derived as gctk's internal/daemon derives
@@ -350,6 +379,24 @@ if [ "$TERMINAL" = 0 ]; then
   BODY=$(mktemp "${TMPDIR:-/tmp}/gctk-run-cancel.XXXXXX") || { echo "$PROG: could not create a temp file for the answer; run $ROOT is not cancelled" >&2; exit 1; }
   trap 'rm -f "$BODY"' EXIT
 
+  # The held step goes back to not started before the cancel is sent, as the
+  # header says. The write is guarded on the status and assignee read above, so
+  # a claim or a close that lands after that read refuses it whole.
+  if [ "$HELD_STATUS" = in_progress ]; then
+    if ! grep -qxF -- "$HELD_BY" <<< "$IDENTITIES"; then
+      echo "$PROG: $TARGET ($STEP) now reads in_progress under '${HELD_BY:-nobody}', which is not this session; nothing was cancelled" >&2
+      exit 2
+    fi
+    RC=0
+    # shellcheck disable=SC2086  # ${DB:+--db "$DB"} expands to 0 or 2 space-free fields
+    gc bd update "$TARGET" ${DB:+--db "$DB"} --if-status=in_progress --if-assignee="$HELD_BY" --status=open >/dev/null || RC=$?
+    if [ "$RC" -ne 0 ]; then
+      echo "$PROG: $TARGET ($STEP) was not put back to not started (gc bd update exited $RC$([ "$RC" = 13 ] && printf ': it changed after it was read')), and a cancel now would interrupt this call; run $ROOT is not cancelled" >&2
+      exit 1
+    fi
+    UNSTARTED=1
+  fi
+
   attempt=1
   while :; do
     : > "$BODY"
@@ -369,29 +416,24 @@ if [ "$TERMINAL" = 0 ]; then
         # below. Any other 409 leaves the run as it is.
         # shellcheck disable=SC2086  # ${DB:+--db "$DB"} expands to 0 or 2 space-free fields
         if ! AGAIN=$(bd_json_array show "$ROOT" ${DB:+--db "$DB"}); then
-          echo "$PROG: the supervisor answered 409 ${DETAIL:+($DETAIL) }and root $ROOT could not be read again, so the run is not proven over; it is not cancelled, and nothing was closed" >&2
-          exit 1
+          not_ended "the supervisor answered 409 ${DETAIL:+($DETAIL) }and root $ROOT could not be read again, so the run is not proven over; it is not cancelled, and nothing was closed"
         fi
         AGAIN_STATUS=$(printf '%s' "$AGAIN" | jq -r '.[0].status // ""' 2>/dev/null)
         if [ "$AGAIN_STATUS" != closed ]; then
-          echo "$PROG: the supervisor answered 409 ${DETAIL:+($DETAIL) }but root $ROOT still reads '${AGAIN_STATUS:-unreadable}', so the run is not proven over; it is not cancelled, and nothing was closed" >&2
-          exit 1
+          not_ended "the supervisor answered 409 ${DETAIL:+($DETAIL) }but root $ROOT still reads '${AGAIN_STATUS:-unreadable}', so the run is not proven over; it is not cancelled, and nothing was closed"
         fi
         TERMINAL=1
         break ;;
       404)
-        echo "$PROG: gascity knows no run $ROOT (${DETAIL:-404 from $URL}); it is not cancelled" >&2
-        exit 1 ;;
+        not_ended "gascity knows no run $ROOT (${DETAIL:-404 from $URL}); it is not cancelled" ;;
       5*|000)
         if [ "$attempt" -ge "$ATTEMPTS" ]; then
-          echo "$PROG: run $ROOT is not cancelled: the supervisor answered ${CODE/#000/no connection} ${DETAIL:+($DETAIL) }on each of $ATTEMPTS attempts at $URL" >&2
-          exit 1
+          not_ended "run $ROOT is not cancelled: the supervisor answered ${CODE/#000/no connection} ${DETAIL:+($DETAIL) }on each of $ATTEMPTS attempts at $URL"
         fi
         sleep $((WAIT * attempt))
         attempt=$((attempt + 1)) ;;
       *)
-        echo "$PROG: run $ROOT is not cancelled: the supervisor answered $CODE ${DETAIL:+($DETAIL) }at $URL" >&2
-        exit 1 ;;
+        not_ended "run $ROOT is not cancelled: the supervisor answered $CODE ${DETAIL:+($DETAIL) }at $URL" ;;
     esac
   done
 fi
