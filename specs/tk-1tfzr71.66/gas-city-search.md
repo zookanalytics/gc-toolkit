@@ -72,8 +72,12 @@ outlives the decision.
   comment, and it lists open PRs only under one 45-second limit for the whole
   scan. `classifyPullRequest` marks a PR that GitHub reports `BLOCKED`
   actionable, one waiting on an approval included, and
-  `--create-repair-beads` files a repair bead per PR head for such a PR. So
-  the monitor is neither a decision to merge nor a record of the city's PRs.
+  `--create-repair-beads` files a repair bead per PR head for such a PR,
+  routed to the monitor's `repair_route` with the monitor's `repair_workflow`
+  poured on it, `mol-polecat-work` on the PR's branch by default. So the
+  monitor is neither a decision to merge nor a record of the city's PRs, and a
+  repair bead it files starts a writer unless the monitor names a workflow that
+  starts none.
 - **Gas Town and the other packs.** `gastown/formulas/mol-refinery-patrol.toml`
   opens the PR and never merges it. gstack's `land-and-deploy` skill tells an
   agent to run `gh pr merge`, with `--auto` or `--squash`, and after any failed

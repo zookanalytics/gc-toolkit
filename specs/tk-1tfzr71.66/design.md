@@ -37,10 +37,10 @@ finishes the fixes and checks still owed, then merges it, and you press no
 Merge. GitHub's rules still apply wherever a branch has them, and a branch
 without an approval rule still needs your approval. You may approve through
 the city's account (zook-bot) wherever GitHub accepts that review. GitHub
-refuses a review from a PR's own author, and the city's account opens every PR
-the city files. Your approval carries across ordinary rework. When triage reads
-a new head as a material change, the city dismisses the earlier approval, and
-the PR waits until GitHub shows it dismissed and you approve again.
+refuses an approval from a PR's own author, and the city's account opens every
+PR the city files. Your approval carries across ordinary rework. When triage
+reads a new head as a material change, the city dismisses the earlier approval,
+and the PR waits until GitHub shows it dismissed and you approve again.
 
 The work's bead stays open from the moment its PR is published until the merge
 is verified on the target, on the record Gas Town's refinery keeps for the same
@@ -182,8 +182,9 @@ sitting tk-kwmyg3, makes approval a universal merge rule in the city's merge
 logic. Every PR needs an APPROVED review from an account other than the city's,
 and "GitHub branch protection remains an extra enforcement layer only, not the
 mechanism". `gctk merge` applies the rule (`reviewVerdict` in
-`services/gctk/internal/cli/merge.go`): each account's latest review counts, a
-standing CHANGES_REQUESTED vetoes, and no approval given at or before
+`services/gctk/internal/cli/merge.go`). Each account's latest review that
+approves or requests changes counts, and a review that only comments changes
+nothing. A standing CHANGES_REQUESTED vetoes, and no approval given at or before
 `bring_current_lifted_at` counts. It skips the city's own account, and it counts
 a review from any other account, whatever that account's access to the
 repository. `review-verdict.sh` holds a second copy, which `pr-facts.sh`,
@@ -212,13 +213,15 @@ and "It applies on main or an integration branch." The evaluator applies the
 rule at each decision (section 4). It reads the reviews fresh from GitHub, and
 takes GitHub's own eligibility:
 
-- An approval counts when it is the latest review of an account that can push
-  to the repository, the approval GitHub counts toward a required review. No
-  account is excluded for being a bot, an app or the city's own, so your
-  approval through the city's account counts wherever GitHub accepts it, which
-  is on a PR that another account opened. No step tells an agent to approve.
-- A request for changes that is the latest review of such an account holds the
-  PR until its author approves or it is dismissed.
+- An approval counts when it is the latest review that approves or requests
+  changes from an account that can push to the repository, the approval GitHub
+  counts toward a required review. A later review that only comments leaves it
+  standing. No account is excluded for being a bot, an app or the city's own, so
+  your approval through the city's account counts wherever GitHub accepts it,
+  which is on a PR that another account opened. No step tells an agent to
+  approve.
+- A request for changes that is such an account's latest review of those two
+  kinds holds the PR until its author approves or it is dismissed.
 - A dismissed review counts for nothing. Nothing else ends an approval: no time
   of the city's own, such as `bring_current_lifted_at`, counts against an
   approval that GitHub still shows.
@@ -481,15 +484,23 @@ refinery's find-work keeps two writers off one branch. tk-1tfzr71.21 moves
 feedback routing into the order's run, so that a webhook, the PR monitor or a
 cadence arm never starts a writer on a branch the order does not know of. Gas
 City's PR monitor is no record of the city's PRs. It reads no review or comment
-(`classifyPullRequest`), it lists open PRs only, and it files a repair bead per
-PR head only for a PR it reads as needing action, every PR GitHub reports
-`BLOCKED` among them, such as one that waits on your approval
-(`ensureGitHubPRRepairBead`). Where a rig runs it, the intake joins each repair
-bead for a city PR to the bead that owns the PR, once the PR's repository and
-number, read on GitHub, match that bead's record, as work that blocks that
-bead, and routes it through the order rather than as a second writer. The
-repair bead stays the monitor's, keyed by its head, and the pack keeps no list
-of PRs beside the records.
+(`classifyPullRequest`), and it lists open PRs only. Run with
+`--create-repair-beads`, it files a repair bead per PR head only for a PR it
+reads as needing action, every PR GitHub reports `BLOCKED` among them, such as
+one that waits on your approval. It routes that bead to the monitor's
+`repair_route` and pours the monitor's `repair_workflow` on it, which is
+`mol-polecat-work` on the PR's branch unless the monitor names another
+(`ensureGitHubPRRepairBead`), so the repair bead is a writer of its own from
+the moment it is filed. No rig declares a monitor today. A rig that runs one
+with repair beads names the intake's join as the monitor's `repair_workflow`,
+so the monitor starts no writer. The join, which tk-1tfzr71.21 builds, ties
+each repair bead for a city PR to the bead that owns the PR, once the PR's
+repository and number, read on GitHub, match that bead's record, as work that
+blocks that bead, and the order routes the repair. The join ties nothing of the
+monitor's `blocked` class: a repair bead filed because a PR waits on your
+approval would still hold that PR once you approved, since nothing in Gas City
+closes a repair bead. The repair bead stays the monitor's, keyed by its head,
+and the pack keeps no list of PRs beside the records.
 
 ## 5. What holds a merge
 
@@ -915,7 +926,7 @@ leaves the city working.
 | Unit | What it does | Waits on | Answers |
 |---|---|---|---|
 | 1. `gctk pr compose` and `gctk pr summary` | The PR's title, managed summary region and branch-beads section are composed in gctk from the bead that owns the PR, with the region read by its markers. `pr-summary-region.sh` is deleted, and `pr-open.sh` and `pr-stack.sh` call the verb. Go tests pin the output against today's renders. | nothing | tk-tefrxph; the gctk domain move note |
-| 2. The evaluator | One function of gctk's pr domain answers whether a PR is ready for its current revision, with the head and the target it judged or the conditions not met. It reads the bead's own waits through `waits`, the open beads whose `anchor_bead` names it until their writers add the edge, `merge_hold` and `rebase_hold`, the review results for the live head and target, GitHub's live facts (open, not a draft, the record's identity and base, the validated head, merge state `CLEAN`, and the approval by section 2's eligibility, read from each review's `authorCanPushToRepository`), and the feedback receipts (the watermarks, counted by the intake's own rule, and the answered marks). `prstatus` renders it, and `gctk pr status` prints the conditions not met. It reads a PR's unanswered threads when it gathers the PR's facts, so the count's one writer can retire with `gctk merge`. Tests for each condition, among them an approval through the city's account on a PR another account opened, an approval and a request for changes from an account that cannot push, a dismissed approval, a review result for another head and one for another base, a head other than the validated one, each merge state, a wait of the bead's own, an `anchor_bead` child, and feedback newer than a watermark beside feedback the intake's rule leaves out, which holds nothing. | nothing | sections 2 to 5 |
+| 2. The evaluator | One function of gctk's pr domain answers whether a PR is ready for its current revision, with the head and the target it judged or the conditions not met. It reads the bead's own waits through `waits`, the open beads whose `anchor_bead` names it until their writers add the edge, `merge_hold` and `rebase_hold`, the review results for the live head and target, GitHub's live facts (open, not a draft, the record's identity and base, the validated head, merge state `CLEAN`, and the approval by section 2's eligibility, read from each review's `authorCanPushToRepository`), and the feedback receipts (the watermarks, counted by the intake's own rule, and the answered marks). `prstatus` renders it, and `gctk pr status` prints the conditions not met. It reads a PR's unanswered threads when it gathers the PR's facts, so the count's one writer can retire with `gctk merge`. Tests for each condition, among them an approval through the city's account on a PR another account opened, an approval and a request for changes from an account that cannot push, an approval followed by a review that only comments, which still counts, a dismissed approval, a review result for another head and one for another base, a head other than the validated one, each merge state, a wait of the bead's own, an `anchor_bead` child, and feedback newer than a watermark beside feedback the intake's rule leaves out, which holds nothing. | nothing | sections 2 to 5 |
 | 3. The record and the landing order | `gctk pr record` writes the pending record in Gas Town's two writes. `gctk pr reconcile` takes a bounded number of pending records, the least recently checked first, and reads each PR from GitHub by its number. An identity that no longer matches is `pull_request_reconcile_invalid`. An open PR at another head is requeued as `pull_request_head_changed`. An open PR at the validated head goes to the evaluator, and a ready one is merged with its head pinned, or added to the merge queue with it where the target requires one. A merged PR at the validated head whose merge commit is on the fetched target records `mr_merged` and closes. The other ends are the exceptions, each with its human gate, and a failed lookup or fetch is retried. A rig-scoped cooldown exec order, `pr-reconcile`, runs it. Tests follow `pr-merge-reconcile`'s cases at 7f86098c04ea, and add the pack's: a ready PR merged with its head pinned; a push between the answer and the request, which GitHub refuses and the next run requeues; a request left unanswered and read again; a merge queue that takes the PR and one that drops it; a PR merged into another base; a requeue written from a record the refinery has since replaced, which costs one validation; and the order of records across runs under load. | unit 2 | sections 4 and 6 |
 | 4. The refinery on Gas Town's flow | `mol-refinery-patrol` is rewritten on Gas Town's steps at 7f86098c04ea, with the differences in section 1, and each step calls one tested script. The scripts cover: find-work, which skips a held bead or a branch another open bead works on, and takes a rework child before its anchor; the prep by merge in the refinery's own worktree (`refinery-workspace.sh` and its warrant go); the gate through `detached-job.sh`; the failures, through the requeue by `gc sling` or a rework child, and the pre-existing path; the direct landing; the `mr` step (compose the title and body; edit them onto a PR the bead already owns before it pushes the new head under the lease, or push and then open a new PR as a draft with them; record the PR with `opened_as_draft`, so the review lanes and `pr-open.sh`'s ready flip handle it unchanged; write the pending record with `gctk pr record`; and the old-path park while `pending_through_merge` is unset); the rework hand-back, which writes the anchor's record and closes the child; and the integration-effort hand-off (tk-gmjtb2e), whose push takes the same lease. The polecat's push at submit (`work-submit.sh`) and the witness's salvage push take the lease too. `rejection-repool.sh`, `pr-stack.sh` with its arm, `check-refinery-patrol-live` and the old formula's block-extraction suites go. The polecat doctrine gains the drift rule. | units 1 and 3 | tk-c8hl47c, tk-ni0i48p, tk-pdc0ovc, tk-w0hkwos; section 7 |
 | 5. The readers move | Every reader that takes `pull_request` as "owns an open PR" also reads `pull_request_pending` and `pull_request_head_changed` (section 6), `pr-facts.sh`'s feedback, conflict and posture arms among them, while its arms that record a merge, a close without one or a moved base keep to `pull_request`. The sign-off's headline reads `prstatus`. I5 reads every closed bead with a PR, with `mr_merged` and `merged` as landed. I2 reads the kept values. `check-one-anchor-per-pr` counts the values of an open PR. | unit 4 | section 6 |
@@ -926,7 +937,7 @@ leaves the city working.
 | Member | Needs | Because |
 |---|---|---|
 | tk-1tfzr71.22, review lanes | the evaluator's review input, the approval decision's ownership, and units 2 and 5 | Its loop runs triage at every new head, a requeued one included, and records each result with the head and the target it judged, which the evaluator reads, so every rig's cutover waits on it. Triage at each head owns the approval decision. A material change's withdrawal is work the loop owns: it blocks the bead that owns the PR, dismisses the earlier approvals and finishes only once GitHub shows them dismissed, behind a human gate when GitHub refuses. The loop's review and repair work blocks that bead through a `blocks` edge, never waits on it, and never names it as a workflow's source. Its checks are finite loops that finish with a result, and none of them waits for an approval or for CI. It takes over the bring-current guard and audit (section 8). A conflict on a branch with an open PR comes to it as a rework child until its loop has a repair step for it. |
-| tk-1tfzr71.21, GitHub intake | sections 3 to 7, and units 2 and 3 | It reads an approving review's message as feedback, and resolves the city's own threads once answered. It moves feedback routing into the landing order's run, so the order stays the one path that admits work on a pending record, and files each piece of work with a `blocks` edge onto the bead that owns the PR. Once no writer files work without that edge, the evaluator's `anchor_bead` reading goes. Where a rig runs Gas City's PR monitor, the intake joins each repair bead for a city PR to the bead that owns the PR, by the PR's repository and number, as work that blocks that bead, and takes nothing from the monitor's `blocked` class, which the monitor marks actionable for every PR that GitHub reads BLOCKED, one waiting on your approval included (`classifyPullRequest`). It moves the PR-finishing rank and `prstatus`'s facts off the posture, replaces `pr-facts.sh`, and deletes the cadence driver and the files whose rows move to it. |
+| tk-1tfzr71.21, GitHub intake | sections 3 to 7, and units 2 and 3 | It reads an approving review's message as feedback, and resolves the city's own threads once answered. It moves feedback routing into the landing order's run, so the order stays the one path that admits work on a pending record, and files each piece of work with a `blocks` edge onto the bead that owns the PR. Once no writer files work without that edge, the evaluator's `anchor_bead` reading goes. It builds the join that a rig running Gas City's PR monitor with repair beads names as the monitor's `repair_workflow`, because the monitor routes each repair bead and pours that workflow on it as it files the bead. The join starts no writer: it ties each repair bead for a city PR to the bead that owns the PR, by the PR's repository and number, as work that blocks that bead, routes the repair through the landing order, and ties nothing of the monitor's `blocked` class, which the monitor marks actionable for every PR that GitHub reads BLOCKED, one waiting on your approval included (`classifyPullRequest`). It moves the PR-finishing rank and `prstatus`'s facts off the posture, replaces `pr-facts.sh`, and deletes the cadence driver and the files whose rows move to it. |
 | tk-1tfzr71.23, convoys | the integration-effort hand-off's place in unit 4 | Moving efforts onto `gc convoy land` ends that difference. |
 | tk-1tfzr71.25, META | the retirement bead's row list | The registry entries and parity tests of the retired machine go there. |
 
@@ -1028,8 +1039,14 @@ leaves the city working.
   classes a PR draft, failed, conflicted, behind, blocked, pending, unknown or
   clean, and marks failed, conflicted, behind and blocked actionable.
   `--create-repair-beads` files a repair bead only for an actionable PR, keyed
-  by its repository, number and head commit. Nothing in Gas City closes a repair
-  bead or runs the monitor on a schedule. A monitor names its base branches
+  by its repository, number and head commit, routes it to the monitor's
+  `repair_route`, which a monitor must name, and pours the monitor's
+  `repair_workflow` on it, `mol-polecat-work` with the PR's head branch as
+  `branch` when the monitor names none (`ensureGitHubPRRepairBead`,
+  `RepairWorkflowOrDefault`). An open repair bead for the same head is refreshed
+  instead, and its assignee nudged. Nothing in Gas City closes a repair bead or
+  runs the monitor on a schedule, and the city's resolved config declares no
+  monitor (`gc config show`, 2026-11-11). A monitor names its base branches
   exactly and can filter by author, and `--all` lifts neither filter.
 - **Gas City's orders** (`cmd/gc/order_dispatch.go`, `internal/orders`). A
   cooldown counts from a run's start. A run writes its tracking bead before it
