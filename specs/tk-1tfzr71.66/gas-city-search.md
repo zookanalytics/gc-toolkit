@@ -198,13 +198,17 @@ bead, such as a stand-down's. So each of `gctk pr record`'s writes carries them,
 on the status and assignee it read under the lock, and a bead that closed or
 left the refinery first gets no record, whichever writer moved it. Gas Town's
 `record_handoff` writes unconditionally, and its second write would reopen such
-a bead as `blocked`. In unit 4 the refinery writes a pending record only through
-`gctk pr record`. A writer of the record's keys on a bead that carries no
-`pr_reconcile_pending`, such as the direct landing, takes no lock, because a run
-acts only on a bead that it reads under the lock as carrying that marker. A
-disposition's close, a stand-down's among them, takes the lock too in unit 3,
-whatever the bead carries, and its close clears any marker, so no run reopens
-the bead it closed.
+a bead as `blocked`. `gctk pr reconcile` acts on a marked bead that is not
+closed only while it is still assigned to the refinery, guards its writes the
+same way, and clears the marker of a bead that a release took, where Gas Town's
+reconcile assigns a bead to the refinery in each write that records a check or a
+transition, and so would take it back. In unit 4 the refinery writes a pending
+record only through `gctk pr record`. A writer of the record's keys on a bead
+that carries no `pr_reconcile_pending`, such as the direct landing, takes no
+lock, because a run acts only on a bead that it reads under the lock as carrying
+that marker. A disposition's close, a stand-down's among them, takes the lock
+too in unit 3, whatever the bead carries, and its close clears any marker, so no
+run reopens the bead it closed.
 
 ## The requeue (unit 4)
 
@@ -247,12 +251,14 @@ under it, and one branch never gets a second PR.
   those checks with `merge_result=blocked` (`block_existing_pr`). It never reads
   the PR's author. A person merges every PR there, so a PR it takes still waits
   for that person's Merge.
-- **Gas City's** PR monitor evaluates only the PRs whose author login matches
-  an allow-list exactly, when the monitor or `gc github pr backfill --author`
-  names one, and skips a PR whose author it cannot read
+- **Gas City's** PR monitor evaluates only the PRs whose author login matches an
+  allow-list exactly, when the monitor or `gc github pr backfill --author` names
+  one, and skips a PR whose author it cannot read
   (`EvaluatePullRequestsWithAllowedAuthors` in `internal/githubmonitor`). It
-  records nothing on a bead, and nothing runs it on a schedule, so the
-  refinery cannot read its answer.
+  writes nothing on the work's bead, and files only a repair bead, for a PR it
+  marks actionable, when `--create-repair-beads` asks (the decision to merge,
+  above). Nothing runs it on a schedule, so the refinery has no answer of the
+  monitor's to read.
 - **GitHub** reports a PR's `author`, and `updatePullRequest` takes no author,
   so the author a PR opens with is the one it keeps (the GraphQL schema, read on
   2026-11-11).
@@ -317,10 +323,11 @@ carries `pr_number`, with `mr_merged` and `merged` as landed.
 
 ## What the answers change on
 
-- The city imports a gastown release that carries `pr-merge-reconcile`, and
-  its record refuses a bead that a close or a release reached first. The record
-  and the close then become that command, and the pack keeps the readiness
-  check and the merge request.
+- The city imports a gastown release that carries `pr-merge-reconcile`, its
+  record refuses a bead that a close or a release reached first, and its
+  reconcile leaves a bead that a release took. The record and the close then
+  become that command, and the pack keeps the readiness check and the merge
+  request.
 - Gas City or Gas Town ships a merge gate that reads a bead's waits and a PR's
   reviews. The evaluator then moves onto that primitive.
 - GitHub can hold a merge on a rule that a branch without rulesets carries, or
