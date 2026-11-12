@@ -250,8 +250,8 @@ export interface NeedsYou {
  * bd graph's execution layers, what can go now first, and within a layer in
  * the order the pool claims ready work, priority, then oldest, then id.
  * NotScheduled comes after it, in the same order: work the city takes none of
- * as things stand, since nobody has scheduled it or a hold label holds it
- * (queue.Scheduled), and work that waits on such work. Unread is the work a
+ * as things stand, since nobody has scheduled it or a hold label holds it, as
+ * queue reads its row, and work that waits on such work. Unread is the work a
  * reader could not answer, in priority order and then oldest first.
  */
 export interface WorkQueue {

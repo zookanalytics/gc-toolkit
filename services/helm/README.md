@@ -1477,7 +1477,7 @@ asked of the listing's rows, so one document never mixes two reads of a bead:
 | `services/gctk/prstatus` (`Holding` over `Listing.Blockers`) | what a person owes on a bead through its `blocks` edges |
 | `services/gctk/prstatus` (`Read` over the listing, `Derive`, `Held`, `Reasons`) | where an open pull request stands and what holds it |
 | `services/gctk/conversation` | what a conversation is, what it tracks and replies to |
-| `services/gctk/queue` (`Order`, `Waiting`, `Scheduled`) | the order the rig's work is expected to land in, from waits' answers, and whether the city takes each piece as things stand |
+| `services/gctk/queue` (`Order` over the listing) | the order the rig's open work is expected to land in, which `queue` reads from the listing's rows and waits' answers, and whether the city takes each piece as things stand |
 
 The listing reads the store's ephemeral plane and its templates because waits
 reads every run, and a row is a bead bd's own listing shows: the board leaves
@@ -1489,10 +1489,11 @@ holds a bead, whose move it is or whether work is moving.
 `specs/tk-yhquh93.2/gas-city-search.md` says why it reads through `gc bd list`
 rather than the supervisor's bead routes.
 
-**How it orders work.** The read places the rig's open work once, through
-`services/gctk/queue`, and every Work queue view lists its rows in that one
-order. Nothing sits above what it waits on: bd graph's execution layers put what
-can go now first, and each layer goes in the order the pool claims ready work,
+**How it orders work.** The read asks `services/gctk/queue` once for the
+order of the rig's open work, naming the work and handing over the listing, and
+every Work queue view lists its rows in that one order. Nothing sits above what
+it waits on: bd graph's execution layers put what can go now first, and each
+layer goes in the order the pool claims ready work,
 priority, then oldest, then id. Work nobody has scheduled comes after the queue.
 So does work that one of Gas City's hold labels keeps from dispatch, unless it
 is in flight, and so does work that waits on either. Work held for the Product

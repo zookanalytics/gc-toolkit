@@ -89,21 +89,28 @@ func conversationEdges(b bead) []conversation.Edge {
 
 // kindOf is what a bead is. A Delivery is an epic whose parent is an epic and
 // which carries no hypothesis (docs/epics.md, "What a Delivery is as a bead").
-// A conversation is a task in the shape conversation.Shape reads.
 func (ix *index) kindOf(b bead) Kind {
+	k := ownKind(b)
+	if k == KindEpic && b.Epic.Hypothesis == "" {
+		for _, p := range parents(b) {
+			if pb, ok := ix.beads[p]; ok && issueType(pb) == "epic" {
+				return KindDelivery
+			}
+		}
+	}
+	return k
+}
+
+// ownKind is what a bead is by its own row, an epic and a Delivery alike
+// reading as an epic. A conversation is a task in the shape
+// conversation.Shape reads.
+func ownKind(b bead) Kind {
 	switch issueType(b) {
 	case "gate":
 		return KindGate
 	case "decision":
 		return KindDecision
 	case "epic":
-		if b.Epic.Hypothesis == "" {
-			for _, p := range parents(b) {
-				if pb, ok := ix.beads[p]; ok && issueType(pb) == "epic" {
-					return KindDelivery
-				}
-			}
-		}
 		return KindEpic
 	}
 	if conversation.IsCandidate(issueType(b), b.Assignee, b.ID) {
@@ -112,6 +119,20 @@ func (ix *index) kindOf(b bead) Kind {
 		}
 	}
 	return KindWork
+}
+
+// openWork is every open piece of work among the live beads that is a row of
+// its own, work held for the Product Owner included, by id. It is the work the
+// read asks queue to place.
+func openWork(live []bead) []string {
+	var out []string
+	for _, b := range live {
+		if ownRow(b) && isOpen(b) && ownKind(b) == KindWork {
+			out = append(out, b.ID)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 func (ix *index) openHumanGate(id string) bool {
@@ -245,9 +266,18 @@ func build(g *gathered) Document {
 			bt.asks[id] = a
 		}
 	}
+	places := map[string]queue.Place{}
+	for _, list := range [][]queue.Place{g.order.Queue, g.order.NotScheduled} {
+		for _, p := range list {
+			places[p.ID] = p
+		}
+	}
 	for _, id := range ix.rows {
 		in := tableInput{b: ix.beads[id], kind: ix.kinds[id], ask: bt.asks[id], facts: factsOf(g, id),
 			prUnread: g.noFacts[id]}
+		if p, ok := places[id]; ok {
+			in.place = &p
+		}
 		if h, ok := g.holds[id]; ok {
 			in.holds = &h
 			if root := rootOf(id, h); root != "" {
@@ -406,50 +436,33 @@ func (bt *built) forProductOwner(id string) bool {
 	return bt.ix.kinds[id] == KindWork && isOpen(b) && carriesHoldMayor(b)
 }
 
-// place puts the rig's open work in the Work queue's order once, through
-// services/gctk/queue, so every view lists work in that one order: the queue,
-// then the work after it. A piece of work waits on what waits says holds it,
-// less a review or a rework anchored to it, whose work is its own. Work held
-// for the Product Owner is placed with the rest, so the work behind it comes
-// after the queue as the city takes it, and is then left out of the order,
-// since no view lists it. Work a reader could not answer has no place and is
-// listed apart.
+// place lists the rig's open work in the Work queue's order once, the order
+// services/gctk/queue gave the read, so every view lists work in that one
+// order: the queue, then the work after it. The read asked for the order of
+// every open piece of work, work held for the Product Owner included, so the
+// work behind held work comes after the queue as the city takes it. Held work
+// is then left out of the order, since no view lists it. Work a reader could
+// not answer has no place in it and is listed apart.
 func (bt *built) place() {
-	ix := bt.ix
-	anchorOf := map[string]string{}
-	for _, b := range ix.g.open {
-		if b.Anchor != "" {
-			anchorOf[b.ID] = b.Anchor
-		}
-	}
-	var items []queue.Item
-	for _, id := range ix.rows {
-		if !bt.isWork(id) && !bt.forProductOwner(id) {
-			continue
-		}
+	for _, id := range bt.ix.rows {
 		if bt.isWork(id) && bt.verdict[id].out == outUnread {
 			bt.unread = append(bt.unread, id)
-			continue
 		}
-		b, h := ix.beads[id], ix.g.holds[id]
-		items = append(items, queue.Item{ID: id, Priority: b.Priority, CreatedAt: b.CreatedAt, Status: b.Status,
-			Waits:     queue.Waiting(h, func(x string) string { return anchorOf[x] }),
-			Scheduled: queue.Scheduled(h, b.RoutedTo, b.Assignee, b.Labels)})
 	}
-	o := queue.Order(items)
-	for _, p := range o.Queue {
-		if bt.isWork(p.ID) {
+	list := func(places []queue.Place, after bool) {
+		for _, p := range places {
+			if !bt.isWork(p.ID) || bt.verdict[p.ID].out == outUnread {
+				continue
+			}
 			bt.pos[p.ID] = len(bt.order)
 			bt.order = append(bt.order, p.ID)
+			if after {
+				bt.after[p.ID] = true
+			}
 		}
 	}
-	for _, p := range o.NotScheduled {
-		if bt.isWork(p.ID) {
-			bt.pos[p.ID] = len(bt.order)
-			bt.order = append(bt.order, p.ID)
-			bt.after[p.ID] = true
-		}
-	}
+	list(bt.ix.g.order.Queue, false)
+	list(bt.ix.g.order.NotScheduled, true)
 	bt.sortIDs(bt.unread)
 }
 

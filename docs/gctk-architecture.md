@@ -491,11 +491,11 @@ tests run on the fake.
   questions the commands ask, against one snapshot per render, so it shows what
   the loops act on. Its rig page reads each rig's store through `listing`, one
   pass that lists the store once, decodes each key the page shows through the
-  listing's declarations, and answers `waits` and `prstatus` from those rows.
-  The page lists work in the order `queue` places it from waits' answers, the
-  order the work is expected to land in, so any other reader of that order
-  lists it the same way. Its ranking, bands and grouping are its own. A
-  question that a loop also acts on belongs to a domain, not to the board.
+  listing's declarations, and answers `waits`, `prstatus` and `queue` from those
+  rows. The page lists work in the order `queue` gives for the open work the
+  page names, the order the work is expected to land in. Its ranking, bands and
+  grouping are its own. A question that a loop also acts on belongs to a domain,
+  not to the board.
 
 ## The `bead holds` contract
 

@@ -24,9 +24,19 @@ views are.
   the pool's claim order, priority, then oldest, then id. Work nobody has
   scheduled comes after the queue, and so does work that waits on it. Whether
   work is scheduled is the board's existing test, armed, routed or assigned, or
-  in flight, now held once in `queue.Scheduled`, and a bead that one of Gas
-  City's hold labels holds is not scheduled unless it is in flight. The search
-  behind these rules is [gas-city-search.md](gas-city-search.md).
+  in flight, now held once in `queue`, and a bead that one of Gas City's hold
+  labels holds is not scheduled unless it is in flight. The search behind these
+  rules is [gas-city-search.md](gas-city-search.md).
+- **Who gathers the order's inputs.** The read names every open piece of work,
+  held work and work a reader could not answer included, and hands `queue` the
+  ids with the listing, which implements `queue.Store`. `queue` reads each
+  bead's row, what holds it and the anchors of the beads it waits on from that
+  one read, as docs/gctk-architecture.md's rule "An owner gathers its own
+  inputs" asks, so any reader that names the same work in one read gets the
+  same order. The board then lists the order less what no view shows: held
+  work, and work a reader could not answer, which it lists apart. Each place
+  also says whether the city takes that bead itself, which is what the table's
+  row 7 reads.
 - **The document.** Each epic and each Delivery carries its Needs you, its Work
   queue and its closed work, over the rows it holds nearest. The Needs you page
   carries every need in the rig, and the Work queue page every open piece of

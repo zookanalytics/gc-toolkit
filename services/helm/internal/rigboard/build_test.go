@@ -1,11 +1,13 @@
 package rigboard
 
 import (
+	"errors"
 	"slices"
 	"testing"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/listing"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/queue"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
@@ -63,6 +65,46 @@ func graph() *gathered {
 	}
 }
 
+// readOf is queue's read of a test's beads and what holds them, as the listing
+// gives it from its rows: a bead with no answer about what holds it is one
+// waits could not answer.
+type readOf struct{ g *gathered }
+
+func (r readOf) Rows(ids []string) (map[string]queue.Row, error) {
+	out := map[string]queue.Row{}
+	for _, b := range append(slices.Clone(r.g.open), r.g.closed...) {
+		if _, dup := out[b.ID]; !dup && slices.Contains(ids, b.ID) {
+			out[b.ID] = queue.Row{ID: b.ID, Status: b.Status, Priority: b.Priority, CreatedAt: b.CreatedAt,
+				RoutedTo: b.RoutedTo, Assignee: b.Assignee, Labels: b.Labels, Anchor: b.Anchor}
+		}
+	}
+	return out, nil
+}
+
+func (r readOf) Holds(ids []string) (map[string]waits.Holds, map[string]error, error) {
+	holds, failed := map[string]waits.Holds{}, map[string]error{}
+	for _, id := range ids {
+		if h, ok := r.g.holds[id]; ok {
+			holds[id] = h
+		} else {
+			failed[id] = errors.New("waits could not answer it")
+		}
+	}
+	return holds, failed, nil
+}
+
+// boardOf builds the document from a test's read, with the order the read asks
+// queue for.
+func boardOf(t *testing.T, g *gathered) Document {
+	t.Helper()
+	o, err := queue.Order(openWork(g.open), readOf{g})
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.order = o
+	return build(g)
+}
+
 func sameNeed(a, b Need) bool { return a.ID == b.ID && slices.Equal(a.Holds, b.Holds) }
 
 func sameQueue(a, b WorkQueue) bool {
@@ -70,7 +112,7 @@ func sameQueue(a, b WorkQueue) bool {
 }
 
 func TestPages(t *testing.T) {
-	doc := build(graph())
+	doc := boardOf(t, graph())
 
 	t.Run("the work queue lists the rig's work but the desk, the queue first and in layers", func(t *testing.T) {
 		want := WorkQueue{Queue: []string{"tk-b.1", "tk-loose", "tk-b.2"}, NotScheduled: []string{"tk-a.1.1", "tk-loose2"}, Unread: []string{}}
@@ -97,7 +139,7 @@ func TestPages(t *testing.T) {
 			h.Status, h.Waits = waits.Clear, nil
 			g.holds[id] = h
 		}
-		n := build(g).NeedsYou
+		n := boardOf(t, g).NeedsYou
 		if n.Count != 0 || !slices.EqualFunc(n.Needs, []Need{{ID: "tk-q", Holds: []string{}}}, sameNeed) {
 			t.Errorf("count = %d, needs = %+v; want 0 and the gate listed, holding nothing", n.Count, n.Needs)
 		}
@@ -162,6 +204,28 @@ func TestPages(t *testing.T) {
 	})
 }
 
+// TestWorkAReaderCouldNotAnswer lists work whose pull request prstatus could
+// not answer apart from the order, while the work behind it is placed as queue
+// places it, behind that work. In graph, armed tk-b.2 waits on armed tk-b.1,
+// which waits on question tk-q, and routed tk-loose waits on a park gate.
+func TestWorkAReaderCouldNotAnswer(t *testing.T) {
+	g := graph()
+	for i := range g.open {
+		if g.open[i].ID == "tk-b.1" {
+			g.open[i].MergeResult, g.open[i].PRNumber = "pull_request", "12"
+		}
+	}
+	g.noFacts["tk-b.1"] = true
+	doc := boardOf(t, g)
+	want := WorkQueue{Queue: []string{"tk-loose", "tk-b.2"}, NotScheduled: []string{"tk-a.1.1", "tk-loose2"}, Unread: []string{"tk-b.1"}}
+	if !sameQueue(doc.WorkQueue, want) {
+		t.Errorf("work queue = %+v, want %+v: tk-b.2 sits a layer past tk-b.1, which is listed apart", doc.WorkQueue, want)
+	}
+	if got := doc.Rows["tk-b.1"].Signal; got != signalUnread {
+		t.Errorf("tk-b.1 reads %q, want %q", got, signalUnread)
+	}
+}
+
 // TestWorkForTheProductOwner holds work that carries hold:mayor to the
 // Unprioritized page while the work behind it still waits on it. In graph,
 // tk-b.1 is armed and waits on question tk-q, and armed tk-b.2 waits on tk-b.1.
@@ -186,7 +250,7 @@ func TestWorkForTheProductOwner(t *testing.T) {
 	t.Run("work behind it comes after the queue, though it and the work are armed", func(t *testing.T) {
 		g := graph()
 		hold(g, "tk-b.1")
-		doc := build(g)
+		doc := boardOf(t, g)
 		want := WorkQueue{Queue: []string{"tk-loose"}, NotScheduled: []string{"tk-a.1.1", "tk-loose2", "tk-b.2"}, Unread: []string{}}
 		if !sameQueue(doc.WorkQueue, want) {
 			t.Errorf("work queue = %+v, want %+v: tk-b.2 waits on work the city takes only once it is placed", doc.WorkQueue, want)
@@ -211,7 +275,7 @@ func TestWorkForTheProductOwner(t *testing.T) {
 		g.open = append(g.open, bead{ID: "tk-c", Title: "talk about B's story", Status: "open", Priority: 1, IssueType: "task",
 			Assignee: "human", Edges: []listing.Edge{{ID: "tk-b.1", Type: "tracks"}}, CreatedAt: "2026-01-11"})
 		g.holds["tk-c"] = waits.Holds{ID: "tk-c", Status: waits.Clear}
-		doc := build(g)
+		doc := boardOf(t, g)
 		if got := doc.Rows["tk-q"].Holds; !slices.Equal(got, []string{"tk-a.1.1"}) {
 			t.Errorf("tk-q holds %v, want tk-a.1.1 alone", got)
 		}
@@ -238,7 +302,7 @@ func TestWorkForTheProductOwner(t *testing.T) {
 					g.open[i].PersonBlocker = true
 				}
 			}
-			return build(g)
+			return boardOf(t, g)
 		}
 		if a := routedToYou(false).Rows["tk-b.1"].Ask; a != AskRoutedToYou {
 			t.Fatalf("unheld, tk-b.1 asks %q, want %q, so the case is not built", a, AskRoutedToYou)
@@ -305,7 +369,7 @@ func TestNeedOrder(t *testing.T) {
 		},
 		unwalked: map[string]bool{}, facts: map[string]prstatus.Facts{"tk-pr": {}}, noFacts: map[string]bool{},
 	}
-	doc := build(g)
+	doc := boardOf(t, g)
 
 	if got := doc.WorkQueue.Queue; !slices.Equal(got, []string{"tk-pr", "tk-w2", "tk-w1"}) {
 		t.Errorf("queue = %v, want the pull request first: its own rework puts nothing ahead of it", got)
@@ -360,7 +424,7 @@ func TestWorkUnderTwoParents(t *testing.T) {
 			{ID: "tk-cv", Title: "input convoy", Status: "closed", IssueType: "convoy"},
 			{ID: "tk-e.1", Title: "landed", Status: "closed", Priority: 2, IssueType: "task", Edges: []listing.Edge{parent("tk-cv"), parent("tk-e")}, CreatedAt: "2026-01-02"},
 		}, map[string]waits.Holds{"tk-e": clear("tk-e")})
-		doc := build(g)
+		doc := boardOf(t, g)
 		if got := entry(doc, "tk-e").Closed; !slices.Equal(got, []string{"tk-e.1"}) {
 			t.Errorf("tk-e lists closed %v, want tk-e.1", got)
 		}
@@ -379,7 +443,7 @@ func TestWorkUnderTwoParents(t *testing.T) {
 		}, nil, map[string]waits.Holds{"tk-e1": clear("tk-e1"), "tk-e2": clear("tk-e2"), "tk-q": clear("tk-q"),
 			"tk-w": {ID: "tk-w", Status: waits.Blocked, Waits: []waits.Wait{wq}}})
 		g.holding["tk-w"] = prstatus.Holds{Gates: []prstatus.Blocker{{ID: "tk-q", Title: "which way?", Status: "open", IssueType: "gate", AwaitType: "human"}}}
-		doc := build(g)
+		doc := boardOf(t, g)
 		for _, e := range []string{"tk-e1", "tk-e2"} {
 			x := entry(doc, e)
 			if !slices.Equal(x.Queue.NotScheduled, []string{"tk-w"}) || !slices.EqualFunc(x.Needs, []Need{{ID: "tk-q", Holds: []string{"tk-w"}}}, sameNeed) {
@@ -418,7 +482,7 @@ func TestAChildEpicIsAMember(t *testing.T) {
 			g.open = append(g.open, b)
 			g.holds[b.ID] = waits.Holds{ID: b.ID, Status: waits.Clear}
 		}
-		return build(g)
+		return boardOf(t, g)
 	}
 
 	t.Run("an open child epic keeps its parent from a ruling", func(t *testing.T) {
@@ -456,7 +520,7 @@ func TestAParentCycleEndsItsPath(t *testing.T) {
 	for _, id := range []string{"tk-c1", "tk-c2"} {
 		g.holds[id] = waits.Holds{ID: id, Status: waits.Clear}
 	}
-	doc := build(g)
+	doc := boardOf(t, g)
 	q := doc.Epics[0].Queue
 	listed := append(append(append([]string{}, q.Queue...), q.NotScheduled...), q.Unread...)
 	for _, id := range []string{"tk-c1", "tk-c2"} {
@@ -485,7 +549,7 @@ func TestAConversationAnsweringTwoQuestions(t *testing.T) {
 	g.holds["tk-b.3"] = waits.Holds{ID: "tk-b.3", Status: waits.Blocked, Waits: []waits.Wait{{ID: "tk-c", Type: "blocks", Status: "open", IssueType: "task"}}}
 	g.holding["tk-b.3"] = prstatus.Holds{Owed: []prstatus.Blocker{conv}}
 	for range 20 {
-		doc := build(g)
+		doc := boardOf(t, g)
 		if !slices.Contains(doc.Rows["tk-q"].Holds, "tk-b.3") || slices.Contains(doc.Rows["tk-q2"].Holds, "tk-b.3") {
 			t.Fatalf("tk-q holds %v and tk-q2 holds %v, want tk-b.3 under the first question its conversation answers",
 				doc.Rows["tk-q"].Holds, doc.Rows["tk-q2"].Holds)

@@ -30,8 +30,9 @@ import (
 //  6. waits says it is in flight. With an open pull request: "Pull request
 //     #<n>", with where it stands. Otherwise "In flight", with its assignee.
 //     Group Queued.
-//  7. It is armed, routed to a pool or assigned to an agent, and no dispatch
-//     hold holds it (queue.Scheduled): "Queued" when nothing holds it, and
+//  7. The city takes it as things stand, as its place in queue's order says
+//     (queue.Place): it is armed, routed to a pool or assigned to an agent,
+//     and no dispatch hold holds it. "Queued" when nothing holds it, and
 //     "Waits on <id>" naming each wait when one does. Group Queued.
 //  8. Otherwise: "Not scheduled", with line 3 naming each wait when one holds
 //     it. Group Not moving.
@@ -131,6 +132,9 @@ type tableInput struct {
 	// request, and prUnread is true when it has one prstatus could not answer.
 	facts    *prstatus.Facts
 	prUnread bool
+	// place is the row's place in queue's order, nil when queue placed it
+	// nowhere.
+	place *queue.Place
 }
 
 func table(in tableInput) verdict {
@@ -176,8 +180,11 @@ func table(in tableInput) verdict {
 		}
 		return verdict{out: outInFlight, group: GroupQueued, signal: "In flight", note: b.Assignee}
 	}
+	if in.place == nil {
+		return verdict{out: outUnread, signal: signalUnread}
+	}
 	waitRefs := refsOf(h.Waits)
-	if queue.Scheduled(h, b.RoutedTo, b.Assignee, b.Labels) {
+	if in.place.Scheduled {
 		if h.Status == waits.Clear {
 			return verdict{out: outQueued, group: GroupQueued, signal: "Queued"}
 		}

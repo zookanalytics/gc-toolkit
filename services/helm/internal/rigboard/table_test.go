@@ -6,6 +6,7 @@ import (
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/listing"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/queue"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
@@ -30,6 +31,10 @@ func TestTableRows(t *testing.T) {
 	pr := prstatus.Blocker{ID: "tk-pr", Title: "land the change", Status: "open", IssueType: "task",
 		Metadata: map[string]string{"merge_result": "pull_request", "pr_number": "7"}}
 	prWait := waits.Wait{ID: "tk-pr", Type: "blocks", Title: "land the change", Status: "open", IssueType: "task"}
+	// Where queue placed the bead: in a place the city takes as things stand,
+	// and in one it does not.
+	taken := &queue.Place{ID: "tk-w", Layer: 1, Scheduled: true}
+	untaken := &queue.Place{ID: "tk-w", Layer: 1}
 
 	cases := []struct {
 		name   string
@@ -100,22 +105,25 @@ func TestTableRows(t *testing.T) {
 				holds: &waits.Holds{Status: waits.Clear, InFlight: "carries merge_result"}, facts: &prstatus.Facts{InFlightCount: 1}},
 			out: outPullRequest, group: GroupQueued, signal: "Pull request #12", note: "working"},
 		{name: "armed and clear is queued",
-			in:  tableInput{b: work, kind: KindWork, holds: &waits.Holds{Status: waits.Clear, Arm: &waits.Arm{Target: "gc-toolkit/gc-toolkit.polecat"}}},
+			in:  tableInput{b: work, kind: KindWork, holds: &waits.Holds{Status: waits.Clear, Arm: &waits.Arm{Target: "gc-toolkit/gc-toolkit.polecat"}}, place: taken},
 			out: outQueued, group: GroupQueued, signal: "Queued"},
 		{name: "routed and held behind work names each wait",
 			in: tableInput{b: bead{ID: "tk-w", Status: "open", RoutedTo: "gc-toolkit/gc-toolkit.polecat"}, kind: KindWork,
-				holds: blockedOn(workWait)},
+				holds: blockedOn(workWait), place: taken},
 			out: outQueuedBehind, group: GroupQueued, signal: "Waits on tk-other"},
 		{name: "assigned to an agent is queued",
-			in:  tableInput{b: bead{ID: "tk-w", Status: "open", Assignee: "gc-toolkit.mechanik"}, kind: KindWork, holds: clear},
+			in:  tableInput{b: bead{ID: "tk-w", Status: "open", Assignee: "gc-toolkit.mechanik"}, kind: KindWork, holds: clear, place: taken},
 			out: outQueued, group: GroupQueued, signal: "Queued"},
 		{name: "nobody scheduled it, and line 3 names what it waits on",
-			in:  tableInput{b: work, kind: KindWork, holds: blockedOn(workWait)},
+			in:  tableInput{b: work, kind: KindWork, holds: blockedOn(workWait), place: untaken},
 			out: outNotScheduled, group: GroupNotMoving, signal: "Not scheduled", line3: []string{"tk-other"}},
-		{name: "armed but held by a hold label is not scheduled",
+		{name: "armed, in a place the city does not take, is not scheduled",
 			in: tableInput{b: bead{ID: "tk-w", Status: "open", Labels: []string{"hold:external"}}, kind: KindWork,
-				holds: &waits.Holds{Status: waits.Clear, Arm: &waits.Arm{Target: "gc-toolkit/gc-toolkit.polecat"}}},
+				holds: &waits.Holds{Status: waits.Clear, Arm: &waits.Arm{Target: "gc-toolkit/gc-toolkit.polecat"}}, place: untaken},
 			out: outNotScheduled, group: GroupNotMoving, signal: "Not scheduled"},
+		{name: "work that queue placed nowhere is unread",
+			in:  tableInput{b: bead{ID: "tk-w", Status: "open", RoutedTo: "gc-toolkit/gc-toolkit.polecat"}, kind: KindWork, holds: clear},
+			out: outUnread, signal: "unread"},
 		{name: "rows 6 to 8 never apply to an epic",
 			in:  tableInput{b: bead{ID: "tk-e", Status: "open", IssueType: "epic", Assignee: "gc-toolkit.mechanik"}, kind: KindEpic, holds: clear},
 			out: outNone},
