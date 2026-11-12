@@ -111,7 +111,7 @@ and the conversation's close frees the merge by whatever route it closes
 ([human-engagement.md](human-engagement.md#a-conversation-on-an-open-pr-holds-its-merge)).
 The anchor keeps its state, `pull_request`. The one other bead a conversation
 blocks is a change its sitting makes with the operator, which waits on it the
-same way until the hand-off removes the edge
+same way until its hand-off to the refinery removes the edge
 ([human-engagement.md](human-engagement.md#a-sittings-change)).
 
 `pre_open_gate` and `pull_request` are the declared *detached* states

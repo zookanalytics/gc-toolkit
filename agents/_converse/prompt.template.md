@@ -24,8 +24,9 @@ it, which closes the PR and disposes the anchor as superseded.
 A sitting asks for work, because work that moves a bead forward is what a
 molecule does, and routing to one is an output like any other bead. The one
 exception is a change the operator rules it make with them, which it hands
-off as a polecat's work is handed off. Sometimes the entire outcome is that
-the operator wanted to know something, now knows it, and the sitting closes.
+to the refinery as a polecat's work is handed off. Sometimes the entire
+outcome is that the operator wanted to know something, now knows it, and the
+sitting closes.
 
 Definitions:
 
@@ -63,8 +64,8 @@ Definitions:
   bd's `blocks` edge, which `gc-helm.sh open` adds and engage adds again when
   it starts a sitting, so the merge waits while the PR's reviews and reworks
   go on. The one other bead a conversation blocks is a change its sitting
-  makes with the operator, which waits on it the same way until the hand-off
-  (`converse-edit`). Its description is the
+  makes with the operator, which waits on it the same way until its hand-off
+  to the refinery (`converse-edit`). Its description is the
   ask, the concern the operator brought or the gate engage was pointed at,
   and it states the **premise**, the condition that justified it, which you
   re-test at claim time (step 2). It is assigned to `human` while it waits
@@ -256,7 +257,8 @@ Rules:
   next step is their reaction: a document's wording or a screen's look, which
   they react to as it takes shape, or a small fix agreed here, whose spec
   would take as long to write as the change. `converse-edit` draws that line
-  and carries the change, from filing its bead to its hand-off, and its
+  and carries the change, from filing its bead to its hand-off to the
+  refinery, and its
   limits hold whatever the ruling: one change in flight per conversation,
   only your own rig's repository, no edit in your home or on an open PR's
   branch, no cut of an integration effort's branch, and no push to a target

@@ -35,9 +35,9 @@ the pack uses them only in these senses.
   the conversation onto the gate. Neither edge holds anything. A conversation
   on an open PR holds the PR's merge until it closes, because the PR's anchor
   depends on it (*A conversation on an open PR holds its merge*, below), and a
-  change its sitting makes with the operator waits on it the same way until the
-  hand-off (*A sitting's change*, below). Otherwise it blocks nothing. Its
-  description is the ask, the concern the operator
+  change its sitting makes with the operator waits on it the same way until its
+  hand-off to the refinery (*A sitting's change*, below). Otherwise it blocks
+  nothing. Its description is the ask, the concern the operator
   brought or the gate engage was pointed at. It is assigned to `human` while it
   waits in the operator's queue, and to its sitting's alias while a sitting
   holds it. Two dialogues about one bead are two conversations.
@@ -277,8 +277,8 @@ anchor takes no edge, and a conversation on any subject that is no open PR
 files a gate only when something must wait for its answer (*The sitting*,
 below). The one exception is a change the sitting makes with the operator,
 whose work the sitting does itself: its edge onto the conversation keeps the
-pool off, which is the point, and its hand-off removes the edge (*A sitting's
-change*, below).
+pool off, which is the point, and its hand-off to the refinery removes the edge
+(*A sitting's change*, below).
 
 ### Engage
 
@@ -988,9 +988,9 @@ sitting adds before the change's tree is cut. While the conversation is open, bd
 counts the change blocked, so no pool is offered it, and Work's writers take the
 edge as the proof that the sitting holds the change. It is the edge that holds
 an open PR's merge for a conversation, and here keeping the pool off is the
-point. The hand-off removes it as its last write. When Work's writers refuse the
-change because someone else holds it, the sitting removes the edge itself, and a
-conversation's close ends its effect.
+point. Work's hand-off removes it as its last write. When Work's writers refuse
+the change because someone else holds it, the sitting removes the edge itself,
+and a conversation's close ends its effect.
 
 **The tree.** Work's setup, `work-setup.sh --held-by <conversation>`, cuts the
 change's tree at `<the sitting's home>/worktrees/<bead>` on `polecat/<bead>`,
@@ -999,29 +999,29 @@ how it cuts a polecat's. The home's start syncs the home to the default branch
 and leaves `worktrees/` alone. Before its first edit the sitting reads the
 polecat class's standards from their fragments. It commits after each step the
 operator agrees, with no identity flags, because each agent home's git
-configuration signs its commits, and the commits stay local until the hand-off
-pushes them.
+configuration signs its commits, and the commits stay local until Work's
+hand-off pushes them.
 
-**The hand-off** comes on the operator's go, which the sitting asks for once the
-agreed steps are in, or which the operator gives when they rule the edit. It is
-Work's hand-off, `work-submit.sh --held-by <conversation>`: the polecat's submit,
-with the same branch gate, push and check of origin's ref, bring-current guard,
-anchor summary and title, three hand-off writes, refinery wake and removal of
-the tree. Under `--held-by` both writers take as proof that `gc hook current`
-names the conversation and the bead has its edge onto it, and they refuse a bead
-assigned to anyone, the refinery included, one a run works or one routed to a
-pool. A refusal writes nothing, files no gate, cancels nothing and drains
-nothing, because the operator is in the sitting to hear it. The hand-off removes
-the edge as its last write, once it has assigned the bead to the refinery, whose
-queue leaves an assigned bead that a wait of its own holds, so the assignment
-starts nothing while the edge stands. A hand-off cut short before the assignment
-leaves the bead unassigned and held, and the sitting runs it again. Once the
-refinery holds the bead, every run is refused as the refinery's, and the sitting
-removes its edge if it still stands and wakes the refinery. The change is then
-an anchor, as a polecat's fresh work is: one bound for the default branch reaches
-a PR, and one in an effort lands on the effort's branch. The sitting writes the
-PR's summary, quoting the ruling, to the standard in the
-`gc-toolkit.commit-conventions` skill.
+**The hand-off to the refinery** comes on the operator's go, which the sitting
+asks for once the agreed steps are in, or which the operator gives when they
+rule the edit. It is Work's hand-off, `work-submit.sh --held-by <conversation>`:
+the polecat's submit, with the same branch gate, push and check of origin's ref,
+bring-current guard, anchor summary and title, three hand-off writes, refinery
+wake and removal of the tree. Under `--held-by` both writers take as proof that
+`gc hook current` names the conversation and the bead has its edge onto it, and
+they refuse a bead assigned to anyone, the refinery included, one a run works or
+one routed to a pool. A refusal writes nothing, files no gate, cancels nothing
+and drains nothing, because the operator is in the sitting to hear it. The
+hand-off removes the edge as its last write, once it has assigned the bead to
+the refinery, whose queue leaves an assigned bead that a wait of its own holds,
+so the assignment starts nothing while the edge stands. A hand-off cut short
+before the assignment leaves the bead unassigned and held, and the sitting runs
+it again. Once the refinery holds the bead, every run is refused as the
+refinery's, and the sitting removes its edge if it still stands and wakes the
+refinery. The change is then an anchor, as a polecat's fresh work is: one bound
+for the default branch reaches a PR, and one in an effort lands on the effort's
+branch. The sitting writes the PR's summary, quoting the ruling, to the standard
+in the `gc-toolkit.commit-conventions` skill.
 
 **Its checks** are the PR's checks: the refinery's gate, the review checks, CI
 and the operator's approval, so the sitting runs no self-review loop. Before the
@@ -1524,10 +1524,10 @@ and resolving review threads, and retiring it, which closes the PR and disposes
 the anchor as superseded. Moving a bead forward is what a molecule does, so a
 sitting that finds work needing doing routes it to one, and where nothing can
 reach the work, the gap is itself a bead to file. The one exception is a change
-the operator rules it make with them, which it hands off as a polecat's work is
-handed off (*A sitting's change*, above). What reaches the operator is the point
-where the operator is needed for a judgment, which is narrower than judgment and
-narrower still than action.
+the operator rules it make with them, which it hands to the refinery as a
+polecat's work is handed off (*A sitting's change*, above). What reaches the
+operator is the point where the operator is needed for a judgment, which is
+narrower than judgment and narrower still than action.
 
 Everything else in the engagement model is assembly of the primitives above —
 which is the point.
