@@ -21,6 +21,8 @@ through `gc bd` and the supervisor's API.
 | `pr compose` | a PR's title and body as the bead that owns it says they should be: its title with the conventional-commit type a repository's title check requires, and its body's managed summary region and branch-beads section, each read by its markers and kept current while the text people add stays as it is | `gctk pr compose --help`, `internal/cli/prcompose.go`, `pr` |
 | `pr summary` | the account of what a change does, for its PR: the bead's PR summary and the change's subject line as its title, recorded in one write whose exit decides, or the summary recorded, printed for a reader of the PR's text | `gctk pr summary --help`, `internal/cli/prsummary.go`, `pr` |
 | `pr status` | a PR's status (working, merging, needs-review or needs-attention), the one derivation the `status:` label and the helm board share, and the open human gates that hold it, which `gc-helm engage` offers; for a PR on Gas Town's pending record, the pr domain's evaluator decides it, and each condition not met follows it | `gctk pr status --help`, `internal/cli/prstatus.go`, `prstatus`, `pr` |
+| `pr record` | the refinery's record of the PR a bead owns as pending until its merge is verified, in Gas Town's two writes under the store's record lock, each guarded on the status and assignee it read, so a bead that a close or a release reached first gets no record | `gctk pr record --help`, `internal/cli/prland.go`, `pr`, `pr/record` |
+| `pr reconcile` | one run of the landing order over the store's pending records, the least recently checked first, each under the store's record lock: a ready PR merged with its head pinned, a bead closed once its merge commit is on the target, a changed head sent back to the refinery, and each exception kept blocked behind a human gate | `gctk pr reconcile --help`, `internal/cli/prland.go`, `pr`, `pr/record` |
 | `rig` | actions taken on the rig: running its checks and recording each result against the commit | `gctk rig --help`, `internal/cli/rig.go`, `internal/rig` |
 | `session` | actions taken on a session: giving it a title its Gas City record and its terminal both show, made of the bead it is about (`--subject`), the pull request it is about (`--pr`) and its topic (`--topic`). A Claude Code or Codex terminal takes the title at the session's next boundary, a few seconds after the turn ends | `gctk session --help`, `internal/cli/session.go` |
 | `version` | the revision the binary was built from | `cmd/gctk` |
@@ -61,6 +63,11 @@ and the board read one definition of what holds a PR.
 Each finds the binary through `gctk-resolve.sh`'s `gctk_path`, and with no
 binary, or one too old to carry the verb, it opens no PR and edits no body or
 title that pass.
+
+`assets/scripts/pr-reconcile.sh`, the landing order's script
+(`orders/pr-reconcile.toml`), names the rig's refinery from the roster and execs
+`gctk pr reconcile` through `gctk-resolve.sh`. With no binary to run, it refuses
+the run with exit 1, and the order's next run tries again.
 
 ## rig
 
