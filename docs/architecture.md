@@ -94,6 +94,10 @@ ready PR at the head the refinery validated, and closes the bead once the merge
 commit is on the target. `bead-rehome.sh` writes dispositions, the closes that
 name a successor. `signoff.sh` writes check verdicts. Everything else reads.
 
+**The PRs the city lands.** A PR another account opened, such as a person's,
+Dependabot's or one from a fork, stays outside the city's landing, even when it
+is open from a work bead's branch.
+
 **Beside the ledger.** The pack also keeps files of its own. Some hold a run's
 progress, such as a paced cadence arm's cursor or the job directory of the
 refinery's merge gate. `gctk rig`'s check records differ, because a later call
@@ -423,10 +427,9 @@ first. Either way the change is a decision on the record, not a drift.
   out the merge request after it.
 - **The landing order is the one path that admits work on a pending record.**
 - **An approval stands across a push until triage reads the change as
-  material,** so GitHub's own dismissal of stale approvals stays off.
-- **A PR's branch is brought current by merging, and no city push rewrites or
-  overwrites its commits,** so the PR keeps the commits its approval and its
-  threads were given on.
+  material.**
+- **No city push rewrites or overwrites a PR's commits,** so the PR keeps the
+  commits its approval and its threads were given on.
 - **No machine checks a landing's transitions,** and the doctor checks the
   beads after they are written.
 
@@ -443,8 +446,9 @@ why a reader must know it, and the work that retires it.
   (tk-1tfzr71.67) files.
 - **The pack still merges each PR itself, and closes on its own record.** Until
   a rig's cutover, the pack merges that rig's PRs under its own approval rule,
-  keeps its own record of an open PR, and checks each landing write against its
-  transition machine, so steps 6 to 8 are not what runs there today. The merge
+  takes a PR open on a work bead's branch whoever opened it, keeps its own
+  record of an open PR, and checks each landing write against its transition
+  machine, so steps 6 to 8 are not what runs there today. The merge
   rewrite's implementation child (tk-1tfzr71.67) files a cutover bead for each
   rig, which waits on the review loop (tk-1tfzr71.22), and the retirement bead,
   which deletes the old path once no open bead is on it.
