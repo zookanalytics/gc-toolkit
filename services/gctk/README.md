@@ -58,8 +58,9 @@ lists what holds a bead from the reasons in the same verb's `--json` answer, and
 the helm board imports the package behind it, `prstatus`, so the labels, engage
 and the board read one definition of what holds a PR.
 
-`assets/scripts/pr-open.sh` and `pr-stack.sh` take a PR's title and body from
-`gctk pr compose`, so an opened PR and a post-open refresh read one composer.
+`assets/scripts/pr-open.sh` and the refinery's merge-push step
+(`refinery-publish.sh`, `refinery-land.sh`) take a PR's title and body from
+`gctk pr compose`, so an opened PR and a later refresh read one composer.
 Each finds the binary through `gctk-resolve.sh`'s `gctk_path`, and with no
 binary, or one too old to carry the verb, it opens no PR and edits no body or
 title that pass.

@@ -531,9 +531,9 @@ eq "$(bassignee h-6)" "rig/gc-toolkit.refinery" "a human state leaves the assign
 
 # --- unassigning takes the executor identity with it ----------------------------
 # gc.session_id and gc.session_name name the session that claimed the bead, so
-# they are the third field of the same let-go as the route and the assignee. The
-# refinery's rejection repool (rejection-repool.sh) hands a rejected bead back to
-# the pool with --assignee ""; a stamp that survives is
+# they are the third field of the same let-go as the route and the assignee. A
+# transition can hand a bead back to the pool with --assignee "", and a stamp
+# that survives it is
 # doctor/executor-identity-residue's report the moment the bead next carries a
 # route, and the runtime's stale orphan-recovery pin. So the clear rides the same
 # atomic update as the unassign.

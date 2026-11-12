@@ -3,8 +3,8 @@
 # path, so the session's cwd never chooses it.
 #
 # The marked blocks of mol-review and mol-review-quorum-signoff (the review's
-# gather), mol-refinery-patrol (the conflict reason), mol-upstream-gc-rebase
-# and mol-upstream-gc-pr-prep (the gascity worktree setup) and
+# gather), mol-upstream-gc-rebase and mol-upstream-gc-pr-prep (the gascity
+# worktree setup) and
 # mol-feedback-miner (the repository mined) are extracted verbatim and run from
 # a WRONG cwd against real git repos. Each must act on the rig GC_RIG_ROOT
 # names, or the roster entry for GC_RIG (for the keeper formulas, the roster
@@ -12,17 +12,15 @@
 # refusal drains only once its hand-back to the keeper is written. The wrong
 # cwd is a clone of the same origin wherever that makes a cwd-steered call
 # succeed, so "read the rig, not cwd" discriminates. Controls prove that a bare
-# git call and an empty `git -C ""` both follow cwd. The refinery's zero-diff
-# check and its recorded-PR lookup are proven the same way in the suites that
-# run those blocks (unrecorded-direct-landing and find-work-gating-guard). No
-# live city, store, or network.
+# git call and an empty `git -C ""` both follow cwd. The refinery patrol's
+# steps each call a script, which names its repository with -C (its own
+# suites). No live city, store, or network.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 REVIEW_TOML="$ROOT/formulas/mol-review.toml"
 QUORUM_TOML="$ROOT/formulas/mol-review-quorum-signoff.toml"
-PATROL_TOML="$ROOT/formulas/mol-refinery-patrol.toml"
 MINER_TOML="$ROOT/formulas/mol-feedback-miner.toml"
 REBASE_TOML="$ROOT/packs/gascity-keeper/formulas/mol-upstream-gc-rebase.toml"
 PRPREP_TOML="$ROOT/packs/gascity-keeper/formulas/mol-upstream-gc-pr-prep.toml"
@@ -42,7 +40,7 @@ hasnt() { case "$1" in *"$2"*) bad "$3" "found '$2' in: $1" ;; *) ok "$3" ;; esa
 
 command -v jq  >/dev/null 2>&1 || { echo "jq is required"  >&2; exit 1; }
 command -v git >/dev/null 2>&1 || { echo "git is required" >&2; exit 1; }
-for f in "$REVIEW_TOML" "$QUORUM_TOML" "$PATROL_TOML" "$MINER_TOML" "$REBASE_TOML" "$PRPREP_TOML" "$SYNC_TOML"; do
+for f in "$REVIEW_TOML" "$QUORUM_TOML" "$MINER_TOML" "$REBASE_TOML" "$PRPREP_TOML" "$SYNC_TOML"; do
   [ -s "$f" ] || { echo "formula not found: $f" >&2; exit 1; }
 done
 
@@ -266,48 +264,6 @@ GATHER_UNPUSHED=1 gather_case env missing
   || bad "gather/missing: a reviewed commit the rig cannot fetch stops the review"
 eq "$WT" "" "gather/missing: no worktree is made"
 
-# --- 3. mol-refinery-patrol: the conflict reason. -------------------------------
-echo "── mol-refinery-patrol: rejection-conflict-reason ──"
-block "$PATROL_TOML" rejection-conflict-reason "$TMP/reason.sh"
-eq "$(bare_git "$TMP/reason.sh")" "" "reason: every git call in the block names its repo with -C"
-printf 'printf "REASON=%%s\\n" "$REJECT_REASON"\n' >> "$TMP/reason.sh"
-
-reason_case() { # <mode>; sets RC, D, RIG_HEAD, CWD_HEAD
-  local d="$TMP/reason-$1" rc=0
-  mkdir -p "$d"
-  git init -q --bare -b main "$d/origin.git"
-  git init -q -b main "$d/seed"
-  commit "$d/seed" "rig base ($1)" >/dev/null
-  git -C "$d/seed" push -q "$d/origin.git" main
-  git clone -q "$d/origin.git" "$d/rig"
-  RIG_HEAD=$(ref "$d/rig" origin/main)
-  # The cwd repo has an origin/main of its own, so a head read that follows
-  # cwd succeeds there and names another repository's commit.
-  git init -q --bare -b main "$d/foreign.git"
-  git init -q -b main "$d/cwd"; commit "$d/cwd" "foreign ($1)" >/dev/null
-  git -C "$d/cwd" remote add origin "$d/foreign.git"
-  git -C "$d/cwd" push -q origin main
-  git -C "$d/cwd" fetch -q origin
-  CWD_HEAD=$(ref "$d/cwd" origin/main)
-  FAKE_ROSTER="$d/roster.json"; pick "$1" "$d/rig"
-  ( cd "$d/cwd" && GC_RIG_ROOT="$RR" GC_RIG="$GR" FAKE_ROSTER="$d/roster.json" FAKE_LOG="$d/gc.log" \
-      TARGET=main PREPARE_MODE=merge bash "$TMP/reason.sh" ) >"$d/out" 2>&1 || rc=$?
-  RC=$rc; D=$d
-}
-
-for mode in env roster; do
-  reason_case "$mode"
-  eq "$RC" 0 "reason/$mode: the block runs from a foreign cwd"
-  has "$(cat "$D/out")" "REASON=Conflicts with main at $RIG_HEAD; resume in prepare_mode=merge" "reason/$mode: the reason names the rig's origin/main"
-  hasnt "$(cat "$D/out")" "$CWD_HEAD" "reason/$mode: the reason does not name the cwd repo's origin/main"
-done
-reason_case nomatch
-eq "$RC" 1 "reason/nomatch: an unresolvable rig fails closed"
-grep -qxF 'runtime drain-ack ' "$D/gc.log" 2>/dev/null \
-  && ok "reason/nomatch: the refinery drains, leaving the work to retry before the workflow is retired" \
-  || bad "reason/nomatch: the refinery drains, leaving the work to retry before the workflow is retired"
-hasnt "$(cat "$D/out")" "REASON=" "reason/nomatch: no reason is composed"
-
 # --- 4. mol-upstream-gc-rebase: the gascity worktree. ---------------------------
 # The keeper formulas name the gascity rig by its roster entry, so the pool the
 # run was slung to never picks the repository: GC_RIG_ROOT here names the cwd
@@ -502,17 +458,15 @@ has "$(cat "$MN/gc.log")" "runtime drain-ack" "miner/mine-and-file: the session 
 # rig-root.sh beside them. rig-root.test.sh proves the lookup, and
 # pack-self-location.test.sh how a block reaches the script.
 echo "── one rig-root lookup ──"
-for f in "$REVIEW_TOML" "$QUORUM_TOML" "$PATROL_TOML" "$MINER_TOML" "$REBASE_TOML" "$PRPREP_TOML" "$SYNC_TOML"; do
+for f in "$REVIEW_TOML" "$QUORUM_TOML" "$MINER_TOML" "$REBASE_TOML" "$PRPREP_TOML" "$SYNC_TOML"; do
   eq "$(grep -c 'rig list --json[[:space:]]*|' "$f" || true)" 0 "${f##*/}: no block reads the roster for a rig's path itself"
 done
-for b in gather reason rebase prprep miner-1 miner-2; do
+for b in gather rebase prprep miner-1 miner-2; do
   grep -qF '/rig-root.sh"' "$TMP/$b.sh" && ok "$b: the block resolves its rig through rig-root.sh" \
     || bad "$b: the block resolves its rig through rig-root.sh"
 done
-for s in direct-merge-push.sh refinery-workspace.sh; do
-  eq "$(grep -c 'rig list --json' "$HERE/$s" || true)" 0 "$s: reads no roster itself"
-  eq "$(grep -c '"$SCRIPTS_DIR/rig-root.sh"' "$HERE/$s" || true)" 1 "$s: resolves the rig through the rig-root.sh beside it"
-done
+eq "$(grep -c 'rig list --json' "$HERE/direct-merge-push.sh" || true)" 0 "direct-merge-push.sh: reads no roster itself"
+eq "$(grep -c '"$SCRIPTS_DIR/rig-root.sh"' "$HERE/direct-merge-push.sh" || true)" 1 "direct-merge-push.sh: resolves the rig through the rig-root.sh beside it"
 
 echo "-----"
 echo "formula-git-rig: $PASS passed, $FAIL failed"

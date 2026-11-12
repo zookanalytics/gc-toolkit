@@ -178,8 +178,8 @@ that names its cause.
   type from the bead's kind, so a task's title reads `chore: <its title>`; its
   locus is `anchor <id> / title`. When the published body looks wrong, read
   `pr-open.sh`, among the pack's scripts the review formula printed, for the
-  shape this pack's opener emits, and `pr-stack.sh` beside it for the
-  delimited beads-on-this-branch section the cadence keeps current below it. A
+  shape this pack's opener emits, and `gctk pr compose --help` for the
+  delimited beads-on-this-branch section the refinery keeps current below it. A
   section naming more than the anchor means the branch carries work from more
   than one bead, and your verdict covers every one of them. Pre-open, your
   verdict becomes the PR's opening comment.

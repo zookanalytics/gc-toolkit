@@ -34,15 +34,8 @@ assets/scripts/preexisting-failure.test.sh	tk-1tfzr71.20
 assets/scripts/record-failure-cap.sh	tk-1tfzr71.20
 assets/scripts/refinery-reconcile.sh	tk-1tfzr71.20
 assets/scripts/refinery-reconcile.test.sh	tk-1tfzr71.20
-assets/scripts/refinery-workspace.sh	tk-1tfzr71.20
-assets/scripts/refinery-workspace.test.sh	tk-1tfzr71.20
-assets/scripts/rejection-repool.sh	tk-1tfzr71.20
-assets/scripts/rejection-repool.test.sh	tk-1tfzr71.20
 assets/scripts/rig-check-pre-existing.sh	tk-1tfzr71.20
 assets/scripts/rig-check-pre-existing.test.sh	tk-1tfzr71.20
-doctor/check-refinery-patrol-live/doctor.toml	tk-1tfzr71.20
-doctor/check-refinery-patrol-live/run.sh	tk-1tfzr71.20
-doctor/check-refinery-patrol-live/run.test.sh	tk-1tfzr71.20
 orders/refinery-reconcile.toml	tk-1tfzr71.20
 assets/scripts/approval-withdraw.sh	tk-1tfzr71.22
 assets/scripts/approval-withdraw.test.sh	tk-1tfzr71.22

@@ -298,59 +298,11 @@ shares only the word ([authority-map.md](authority-map.md)).
 - **Retires when.** A Gas City launch can refuse a second root under a caller's
   key whatever the first root's status.
 
-## Prep worktree staging record
-
-- **Covers.** The record that `stage --work` writes and `held` and `verify`
-  read in `assets/scripts/refinery-workspace.sh`, a `gc-refinery-staged` file
-  in the prep worktree's private git dir, and its readers: the
-  `prep-staged-work` block of `formulas/mol-refinery-patrol.toml`, which takes
-  the bead and branch the merge-push step acts for from it, and the prep
-  worktree check in `assets/scripts/direct-merge-push.sh`.
-- **Stands in for.** A worktree's ownership record, naming the bead and the
-  branch that the refinery's detached prep worktree was staged for.
-- **Evidence.**
-  - In `gastownhall/gascity`, `gc worktree` records a worktree's bead and branch
-    in its private git dir, and `gc worktree verify` checks them, only for a
-    worktree with the bead's branch checked out on an attached HEAD, never
-    detached, at a direct child of a per-rig root (`gc worktree` in
-    `docs/reference/cli.md`). `Spec.validate` in `internal/worktree/worktree.go`
-    also refuses a path inside a registered worktree, and the prep worktree
-    lives in the rig checkout's git dir.
-  - `gc worktree cleanup` refuses a dirty worktree and a HEAD not merged into
-    its base, removes only the attempt whose id it is given, and has no force
-    mode (`gc worktree cleanup` in `docs/reference/cli.md`). The refinery
-    removes its prep worktree after a gate that can leave files in it and after
-    a landing on the target, and it clears a leftover of an interrupted
-    iteration without knowing which bead staged it.
-  - With `auto_reap_closed_bead_worktrees`, the reconciler removes a per-bead
-    worktree once its work bead is closed. With `auto_prune_worker_dir`, it
-    removes a pool session's `worker_dir` once the session bead is closed
-    (`DaemonConfig` in `docs/reference/config.md`). Each removal refuses a
-    worktree with uncommitted changes or a stash, and each acts only under the
-    city's `.gc/worktrees/` tree, where the reaper takes a worktree's bead from
-    its directory name (`reapClosedBeadWorktrees` in
-    `cmd/gc/bead_worktree_reaper.go`). Neither reaches the prep worktree.
-  - No formula or order in Gas City's bundled `core` pack calls `gc worktree`.
-    No pack in `gastownhall/gascity-packs` calls it either, and the gastown
-    pack's `mol-refinery-patrol` stages every bead on one local `temp` branch
-    and records nothing about which bead that branch holds.
-  - In `gastownhall/beads`, `bd worktree create` checks out a branch in the
-    worktree it adds and records no bead.
-- **Verified.** 2026-10-27, at `gastownhall/gascity` main f11f48825520,
-  `gastownhall/gascity-packs` main dac12a4a802c and `gastownhall/beads` main
-  5011528b3ad5. The gastown pack was also read at 66c672b5ed00, the release
-  Gas City pins (`PublicGastownPackVersion` in
-  `internal/config/public_packs.go`).
-- **Retires when.** Gas City can bind a detached worktree to a bead and remove
-  the attempt that created it whatever state it is in, for example through
-  `gc worktree`. The record's readers then move onto that primitive, and the
-  record goes.
-
 ## Main lands only through a PR
 
-- **Covers.** The rule in the `merge-strategy-resolve` block of
-  `formulas/mol-refinery-patrol.toml` that resolves a bead which would land
-  `direct` on the default branch to `mr`.
+- **Covers.** The rule in `assets/scripts/refinery-land.sh`, the refinery's
+  merge-push step, that resolves a bead which would land `direct` on the
+  default branch to `mr`.
 - **Stands in for.** A merge strategy set per target branch. With one, the
   default branch would take work only through a PR, whether or not its GitHub
   ruleset is on, while an integration branch takes its work `direct`.

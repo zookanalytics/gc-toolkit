@@ -12,7 +12,7 @@
 # When there is no binary to run, it names what is missing and exits 1, so it
 # never returns. GCTK_BIN=none names no binary and is refused like a missing
 # one. A script that reads a command's answer and goes on (pr-open.sh,
-# pr-stack.sh) asks gctk_path for the binary instead.
+# refinery-publish.sh) asks gctk_path for the binary instead.
 #
 # Resolution is EXPLICIT: $GCTK_BIN, else the city named by GC_CITY_PATH,
 # GC_CITY or GC_CITY_ROOT — the same precedence boot-health.sh, doctor-sweep.sh

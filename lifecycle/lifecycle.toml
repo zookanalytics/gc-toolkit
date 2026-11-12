@@ -105,27 +105,27 @@ meaning = "the zero-diff check found no change on the branch; routed to human"
 [[transition]]
 from = "unanchored"
 to = "pre_open_gate"
-writer = "formulas/mol-refinery-patrol.toml merge-push (via lifecycle.sh)"
+writer = "assets/scripts/refinery-land.sh, the refinery's merge-push step on a rig whose pending_through_merge is unset (via lifecycle.sh)"
 
 [[transition]]
 from = "unanchored"
 to = "pull_request"
-writer = "formulas/mol-refinery-patrol.toml merge-push, post-open path (via lifecycle.sh)"
+writer = "assets/scripts/refinery-land.sh, the refinery's merge-push step on a rig whose pending_through_merge is unset, for a bead that records an open PR (via lifecycle.sh)"
 
 [[transition]]
 from = "unanchored"
 to = "merged"
-writer = "formulas/mol-refinery-patrol.toml merge-push, direct strategy (via lifecycle.sh): FF push verified, record + close in one call"
+writer = "assets/scripts/direct-merge-push.sh, which the refinery's merge-push step runs for the direct strategy (via lifecycle.sh): FF push verified, record + close in one call"
 
 [[transition]]
 from = "unanchored"
 to = "blocked"
-writer = "formulas/mol-refinery-patrol.toml (existing_pr unusable, or a graduated convoy's zero-diff check could not run three patrols in a row; via lifecycle.sh)"
+writer = "the refinery's parks, a guarded gc bd update after the park's human gate: refinery-prep.sh (a target or branch origin does not carry), refinery-land.sh (an unsupported strategy) and refinery-publish.sh (a recorded PR it cannot reuse, or one another account opened)"
 
 [[transition]]
 from = "unanchored"
 to = "refused_false_completion"
-writer = "formulas/mol-refinery-patrol.toml (the zero-diff check found no change on the branch; via lifecycle.sh)"
+writer = "refinery-land.sh's park, a guarded gc bd update after its human gate (the zero-diff check found no change on the branch)"
 
 [[transition]]
 from = "pre_open_gate"
@@ -135,7 +135,7 @@ writer = "assets/scripts/pr-open.sh"
 [[transition]]
 from = "pre_open_gate"
 to = "unanchored"
-writer = "assets/scripts/rejection-repool.sh (via lifecycle.sh), run from the rebase and handle-failures arms of formulas/mol-refinery-patrol.toml: a rejection back to the polecat pool, which a fresh mol-polecat-work pour rebuilds. Or formulas/mol-refinery-patrol.toml merge-push (via lifecycle.sh): a rework hand-back leaving the anchor class before it closes landed-on-branch. signoff.sh never transitions the anchor: request-changes clears the marker and files a blocking rework child instead."
+writer = "the move of a parked bead to the refinery at its rig's cutover (via lifecycle.sh; specs/tk-1tfzr71.66/design.md, section 10). signoff.sh never transitions the anchor: request-changes clears the marker and files a blocking rework child instead."
 
 [[transition]]
 from = "pull_request"
@@ -155,7 +155,7 @@ writer = "assets/scripts/pr-facts.sh"
 [[transition]]
 from = "pull_request"
 to = "unanchored"
-writer = "assets/scripts/rejection-repool.sh (via lifecycle.sh), run from the rebase and handle-failures arms of formulas/mol-refinery-patrol.toml: a rejection back to the polecat pool, which a fresh mol-polecat-work pour rebuilds. Or formulas/mol-refinery-patrol.toml merge-push (via lifecycle.sh): a rework hand-back leaving the anchor class before it closes landed-on-branch. signoff.sh never transitions the anchor: request-changes clears the marker and files a blocking rework child instead."
+writer = "human. The refinery's find-work leaves a bead at pull_request to the merge cadence, and signoff.sh never transitions the anchor: request-changes clears the marker and files a blocking rework child instead."
 
 [[transition]]
 from = "abandoned"
@@ -175,12 +175,12 @@ writer = "human"
 [[transition]]
 from = "blocked"
 to = "unanchored"
-writer = "human"
+writer = "human; or refinery-land.sh, on a rig whose pending_through_merge is unset, for a bead its gate's clearing handed back, before the old path parks it again (via lifecycle.sh)"
 
 [[transition]]
 from = "refused_false_completion"
 to = "unanchored"
-writer = "human"
+writer = "human; or refinery-land.sh, on a rig whose pending_through_merge is unset, for a bead its gate's clearing handed back, before the old path parks it again (via lifecycle.sh)"
 
 [gates]
 # check_set: comma list of check names on the anchor. Default stamped by
@@ -587,8 +587,8 @@ keys = [
 #   by the record that lands.
 # fold_target — the branch a bead's work was folded directly onto, stamped by
 #   the polecat that folds one bead's fix onto another's branch instead of
-#   opening its own PR. pr-stack.sh reads it (`--metadata-field fold_target`) to
-#   count that bead in the branch's PR-body ledger as work already on the branch.
+#   opening its own PR. `gctk pr compose` reads it to count that bead in the
+#   branch's PR-body ledger as work already on the branch.
 #   No pack script writes it. Absent means nothing was folded. Never cleared. A
 #   branch name.
 # artifact_url — the delivered artifact a rework fix unit lands instead of a
@@ -1868,8 +1868,8 @@ keys = [
 #   first-reaction-dispose.sh on the reaction bead it closes,
 #   mol-validate-close, work-outcome.sh on every conversation close, the
 #   observation-filing recipes, and converse by hand. bead-rehome.sh reads it
-#   to confirm a no-op origin is disposable, pr-stack.sh drops a no-op row from
-#   a branch's ledger, and each falls back to the legacy bare `work_outcome`
+#   to confirm a no-op origin is disposable, `gctk pr compose` drops a no-op row
+#   from a branch's ledger, and each falls back to the legacy bare `work_outcome`
 #   alias. Absent leaves the
 #   disposition unstated. Never cleared.
 # configured_named_session — on a session bead, the authoritative "standing

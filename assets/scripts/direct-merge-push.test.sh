@@ -2,8 +2,10 @@
 # Hermetic test for direct-merge-push.sh, the refinery's direct-mode landing.
 #
 # Runs the real script against real git repositories: a bare origin, the rig
-# cloned from it, and the prep worktree the rebase step leaves at
-# <rig git dir>/gc-refinery-prep. lifecycle.sh and gc are stubs that log their
+# cloned from it, the refinery's home, a worktree of the rig, and the tree the
+# rebase step leaves for the bead at <home>/worktrees/<bead>, which names the
+# branch it read in refs/worktree/refinery/<branch>. lifecycle.sh and gc are
+# stubs that log their
 # calls, and gc keeps the bead in a file its updates write. Proves:
 #   - a prepared head that fast-forwards origin/main is stamped on the bead as
 #     direct_landing_sha before the push, lands by commit id, is read back from
@@ -30,12 +32,13 @@
 #     recorded, and one whose target cannot be fetched again exits 1 and keeps
 #     its stamp for the next patrol;
 #   - a push refused for branch protection promotes the bead to
-#     merge_strategy=pr and clears the stamp in one write, and exits 3, and any
+#     merge_strategy=mr and clears the stamp in one write, and exits 3, and any
 #     other refused push, or a push origin does not read back, exits 1;
 #   - a pause with a leading zero is read in base 10;
 #   - an unresolvable rig and a missing prepared head land nothing;
-#   - a prep worktree that records another bead's staging, another branch, or
-#     no staging, lands, stamps and records nothing, before any store call;
+#   - a bead with no tree of its own, a tree that holds another branch, or a
+#     tree that names no branch, lands, stamps and records nothing, before any
+#     store call;
 #   - with --delete-branch, a recorded landing deletes origin/<branch>, whether
 #     it pushed the landing or found it already there, and only after the
 #     transition; a delete origin refuses leaves the landing standing at exit
@@ -64,9 +67,9 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR 2
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 
-# The script under test, the bd-lib.sh it sources, the rig-root.sh it
-# resolves the rig through and the refinery-workspace.sh it checks the prep
-# worktree's record with, beside a stub lifecycle.sh that logs each
+# The script under test, the bd-lib.sh and refinery-lib.sh it sources and the
+# rig-root.sh it resolves the rig through, beside a stub lifecycle.sh that logs
+# each
 # transition and the GC_RIG_ROOT it was handed. The
 # stub refuses every call when LC_FAIL is set, and the first LC_FAIL_TIMES calls
 # when that is set. With LC_WRITE_RC set, a call it does not refuse writes the
@@ -75,7 +78,7 @@ export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER
 # what it wrote.
 SUT="$TMP/sut"
 mkdir -p "$SUT" "$TMP/bin" "$TMP/gitshim" "$TMP/sleepshim"
-cp "$HERE/direct-merge-push.sh" "$HERE/bd-lib.sh" "$HERE/rig-root.sh" "$HERE/refinery-workspace.sh" "$SUT/"
+cp "$HERE/direct-merge-push.sh" "$HERE/bd-lib.sh" "$HERE/refinery-lib.sh" "$HERE/rig-root.sh" "$SUT/"
 chmod +x "$SUT/direct-merge-push.sh"
 cat > "$SUT/lifecycle.sh" <<'LC'
 #!/usr/bin/env bash
@@ -178,9 +181,23 @@ wt_count() { git -C "$1" worktree list --porcelain | grep -c '^worktree '; }
 stamp() { jq -r '.[0].metadata.direct_landing_sha // "none"' "$D/bead.json"; }
 transitions() { if [ -s "$D/lc.log" ]; then wc -l < "$D/lc.log" | tr -d ' '; else echo 0; fi; }
 
+# stage_tree [<bead>] [<branch>]: the refinery's tree for <bead> (default wb),
+# as the rebase step leaves it: detached at origin/<branch> (default
+# polecat/wb), with refs/worktree/refinery/<branch> naming that commit. Sets
+# PREP to its path.
+stage_tree() {
+  local bead="${1:-wb}" branch="${2:-polecat/wb}"
+  PREP="$D/home/worktrees/$bead"
+  [ ! -e "$PREP" ] || git -C "$D/home" worktree remove --force --force "$PREP"
+  git -C "$D/rig" fetch -q origin
+  mkdir -p "$D/home/worktrees"
+  git -C "$D/home" worktree add -q --detach "$PREP" "origin/$branch"
+  git -C "$PREP" update-ref "refs/worktree/refinery/$branch" "$(git -C "$D/rig" rev-parse "origin/$branch")"
+}
+
 # setup <dir>: origin with main and polecat/wb one commit ahead, the rig
-# cloned from it, the prep worktree staged for wb at polecat/wb, and the bead.
-# Sets D, BASE, FEATURE and PREP.
+# cloned from it, the refinery's home and its tree staged for wb at polecat/wb,
+# and the bead. Sets D, BASE, FEATURE and PREP.
 setup() {
   D="$1"
   mkdir -p "$D/tmp"
@@ -193,8 +210,8 @@ setup() {
   git -C "$D/seed" push -q "$D/origin.git" polecat/wb
   git -C "$D/seed" checkout -q main
   git clone -q "$D/origin.git" "$D/rig"
-  PREP="$(git -C "$D/rig" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
-  "$SUT/refinery-workspace.sh" stage --rig-root "$D/rig" --branch polecat/wb --work wb >/dev/null 2>&1
+  git -C "$D/rig" worktree add -q --detach "$D/home" origin/main
+  stage_tree
   printf '{"rigs":[{"name":"myrig","path":"%s"}]}\n' "$D/rig" > "$D/roster.json"
   printf '%s\n' '[{"id":"wb","status":"in_progress","metadata":{"branch":"polecat/wb","target":"main"}}]' > "$D/bead.json"
   : > "$D/gc.log"; : > "$D/lc.log"
@@ -207,18 +224,17 @@ setup() {
 DEFAULT_ARGS=(--work wb --branch polecat/wb --target main)
 DMP_ARGS=("${DEFAULT_ARGS[@]}")
 run() {
-  OUT=$(cd "$D/tmp" && env TMPDIR="$D/tmp" GC_RIG_ROOT="$D/rig" GC_RIG=myrig FAKE_ROSTER="$D/roster.json" \
+  OUT=$(cd "$D/tmp" && env TMPDIR="$D/tmp" GC_DIR="$D/home" GC_RIG_ROOT="$D/rig" GC_RIG=myrig FAKE_ROSTER="$D/roster.json" \
     FAKE_GC_LOG="$D/gc.log" FAKE_LC_LOG="$D/lc.log" FAKE_BEAD="$D/bead.json" DIRECT_MERGE_PUSH_BACKOFF=0 \
     "$@" "$SUT/direct-merge-push.sh" "${DMP_ARGS[@]}" 2>&1)
   RC=$?
 }
 on_origin() { if git -C "$D/origin.git" rev-parse -q --verify "refs/heads/$1" >/dev/null; then echo yes; else echo no; fi; }
 # next_patrol: what the next patrol's rebase step does before it lands again:
-# fetch, stage the prep worktree at origin/polecat/wb, and merge origin/main in.
+# fetch, stage the tree at origin/polecat/wb, and merge origin/main in.
 # The logs start over, so each attempt's assertions read only its own calls.
 next_patrol() {
-  git -C "$D/rig" fetch -q origin
-  "$SUT/refinery-workspace.sh" stage --rig-root "$D/rig" --branch polecat/wb --work wb >/dev/null 2>&1
+  stage_tree
   git -C "$PREP" merge -q --no-edit origin/main
   : > "$D/gc.log"; : > "$D/lc.log"; : > "$D/lc.log.root"
 }
@@ -254,7 +270,7 @@ eq "$(git -C "$D/rig" rev-parse origin/main)" "$FEATURE" "ff: the rig's origin/m
 recorded_at ff "$FEATURE"
 eq "$(transitions)" 1 "ff: exactly one transition"
 eq "$(cat "$D/lc.log.root")" "$D/rig" "ff: the transition is handed the rig as GC_RIG_ROOT"
-eq "$(wt_count "$D/rig")" 2 "ff: no worktree is added; the rig and its prep worktree remain"
+eq "$(wt_count "$D/rig")" 3 "ff: no worktree is added; the rig, the home and its tree remain"
 eq "$(ls -A "$D/tmp" | wc -l | tr -d ' ')" 0 "ff: nothing is written under TMPDIR"
 eq "$(git -C "$D/rig" rev-parse HEAD)" "$RIG_HEAD_BEFORE" "ff: the rig's HEAD does not move"
 eq "$(git -C "$D/rig" for-each-ref --format='%(refname)' refs/heads/ | tr '\n' ' ')" "refs/heads/main " "ff: no local branch is created"
@@ -375,7 +391,7 @@ eq "$(on_origin polecat/wb)" yes "delete-refused: origin/polecat/wb stays"
 
 echo "── --delete-branch never deletes the target ──"
 setup "$TMP/delete-target"
-"$SUT/refinery-workspace.sh" stage --rig-root "$D/rig" --branch main --work wb >/dev/null 2>&1
+stage_tree wb main
 DMP_ARGS=(--work wb --branch main --target main --delete-branch)
 run
 eq "$RC" 0 "delete-target: exits 0"
@@ -409,8 +425,8 @@ HOOK
 chmod +x "$D/origin.git/hooks/pre-receive"
 run
 eq "$RC" 3 "protected: exits 3"
-has "$(cat "$D/gc.log")" "bd update wb --set-metadata merge_strategy=pr --unset-metadata direct_landing_sha" "protected: one write promotes the bead to merge_strategy=pr and clears the stamp"
-eq "$(jq -r '.[0].metadata.merge_strategy // "none"' "$D/bead.json")/$(stamp)" "pr/none" "protected: the bead reads merge_strategy=pr and no stamp"
+has "$(cat "$D/gc.log")" "bd update wb --set-metadata merge_strategy=mr --unset-metadata direct_landing_sha" "protected: one write promotes the bead to merge_strategy=mr and clears the stamp"
+eq "$(jq -r '.[0].metadata.merge_strategy // "none"' "$D/bead.json")/$(stamp)" "mr/none" "protected: the bead reads merge_strategy=mr and no stamp"
 eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "protected: origin/main is untouched"
 no_transition protected
 no_drain protected
@@ -427,7 +443,7 @@ run
 eq "$RC" 1 "refused: exits 1"
 has "$OUT" "Push failed:" "refused: it says the push failed"
 has "$OUT" "the remote is read-only today" "refused: it prints what the remote said"
-case "$(cat "$D/gc.log")" in *"merge_strategy=pr"*) bad "refused: the bead is not promoted" ;; *) ok "refused: the bead is not promoted" ;; esac
+case "$(cat "$D/gc.log")" in *"merge_strategy=mr"*) bad "refused: the bead is not promoted" ;; *) ok "refused: the bead is not promoted" ;; esac
 no_transition refused
 no_drain refused
 
@@ -609,31 +625,32 @@ no_drain nomatch
 
 echo "── no prepared head lands nothing ──"
 setup "$TMP/noprep"
-git -C "$D/rig" worktree remove --force "$PREP"
+git -C "$D/home" worktree remove --force "$PREP"
 run
 eq "$RC" 1 "noprep: exits 1"
-has "$OUT" "no prep worktree is staged at $PREP" "noprep: it says why"
+has "$OUT" "no prepared branch for wb in $PREP" "noprep: it says why"
 eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "noprep: nothing pushed"
 no_transition noprep
 
-echo "── a prep worktree staged for another bead lands nothing ──"
+echo "── a tree staged for another bead lands nothing ──"
 setup "$TMP/otherbead"
-"$SUT/refinery-workspace.sh" stage --rig-root "$D/rig" --branch polecat/wb --work other >/dev/null 2>&1
+git -C "$D/home" worktree remove --force "$PREP"
+stage_tree other
 run
 eq "$RC" 1 "otherbead: exits 1"
-has "$OUT" "holds polecat/wb for other, not polecat/wb for wb; nothing landed" "otherbead: it names the bead the prep worktree holds, and says nothing landed"
+has "$OUT" "no prepared branch for wb in $D/home/worktrees/wb, so nothing is written for wb; nothing landed" "otherbead: it says wb has no tree, and that nothing landed"
 eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "otherbead: nothing pushed"
 eq "$(stamp)" none "otherbead: no stamp is written"
 eq "$(wc -l < "$D/gc.log" | tr -d ' ')" 0 "otherbead: the check comes before any store call"
 no_transition otherbead
 no_drain otherbead
 
-echo "── a prep worktree staged from another branch lands nothing ──"
+echo "── a tree staged from another branch lands nothing ──"
 setup "$TMP/otherbranch"
 DMP_ARGS=(--work wb --branch polecat/other --target main --delete-branch)
 run
 eq "$RC" 1 "otherbranch: exits 1"
-has "$OUT" "holds polecat/wb for wb, not polecat/other for wb; nothing landed" "otherbranch: it names the branch the prep worktree holds, and says nothing landed"
+has "$OUT" "the tree for wb holds polecat/wb, not wb's branch polecat/other, so nothing is written for wb; nothing landed" "otherbranch: it names the branch the tree holds, and says nothing landed"
 eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "otherbranch: nothing pushed"
 eq "$(stamp)" none "otherbranch: no stamp is written"
 eq "$(wc -l < "$D/gc.log" | tr -d ' ')" 0 "otherbranch: the check comes before any store call"
@@ -641,13 +658,13 @@ eq "$(on_origin polecat/wb)" yes "otherbranch: no branch is deleted"
 no_transition otherbranch
 DMP_ARGS=("${DEFAULT_ARGS[@]}")
 
-echo "── a prep worktree that records nothing lands nothing ──"
+echo "── a tree that names no branch lands nothing ──"
 setup "$TMP/norecord"
-git -C "$D/rig" worktree remove --force --force "$PREP"
-git -C "$D/rig" worktree add -q -f --detach "$PREP" origin/polecat/wb
+git -C "$D/home" worktree remove --force --force "$PREP"
+git -C "$D/home" worktree add -q -f --detach "$PREP" origin/polecat/wb
 run
 eq "$RC" 1 "norecord: exits 1"
-has "$OUT" "records no bead and branch" "norecord: it says why"
+has "$OUT" "no prepared branch for wb" "norecord: it says why"
 eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "norecord: nothing pushed"
 eq "$(stamp)" none "norecord: no stamp is written"
 no_transition norecord

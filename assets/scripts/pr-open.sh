@@ -74,8 +74,9 @@ PR_STATUS_LABEL="$SCRIPTS_DIR/pr-status-label.sh"
 # superseded notice go through it so they carry the city's mark, which is what
 # keeps pr-facts.sh from reading them back as feedback.
 PR_POST="$SCRIPTS_DIR/pr-post.sh"
-# The PR's title and body are composed by `gctk pr compose`, which pr-stack.sh
-# asks too, so an opened PR and a post-open refresh never diverge. The binary is
+# The PR's title and body are composed by `gctk pr compose`, which the
+# refinery's merge-push step asks too, so an opened PR and a later refresh never
+# diverge. The binary is
 # the one gctk-resolve.sh's chain names, read once a pass needs it.
 # shellcheck source=gctk-resolve.sh
 . "$SCRIPTS_DIR/gctk-resolve.sh" || { echo "$PROG: cannot source gctk-resolve.sh beside this script" >&2; exit 1; }

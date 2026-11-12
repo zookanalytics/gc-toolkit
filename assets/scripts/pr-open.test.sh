@@ -2,8 +2,8 @@
 # Hermetic test for assets/scripts/pr-open.sh — pre_open_gate -> pull_request.
 # Covers: adopting an existing OPEN or MERGED PR (one lifecycle transition, never
 # a twin) and refreshing an OPEN PR's body from the anchor's current pr_summary
-# before the flip (the marked region re-spliced, operator text and pr-stack's
-# section kept, a failed edit holding the anchor, a pre-markers body having its
+# before the flip (the marked region re-spliced, operator text and the
+# branch-beads section kept, a failed edit holding the anchor, a pre-markers body having its
 # region established over the legacy prefix, a body with no managed region,
 # whether hand-written or a malformed marker shape, adopted as it stands rather
 # than rewritten);
@@ -102,7 +102,7 @@ echo "# adopting an OPEN PR refreshes its stale body from the current pr_summary
 # A rework restamped pr_summary and the anchor returned to pre_open_gate with the
 # original PR still open. The body the create wrote carries the OLD summary
 # between its markers; adoption re-splices the current one before the flip and
-# leaves text outside the markers — an operator note, pr-stack's own section —
+# leaves text outside the markers — an operator note, the branch-beads section —
 # in place.
 store "[$(pre RF1 polecat/rf1 ',"pr_summary":"NEW: the republished summary after the rework."')]"
 STALE1=$(printf '%s\n' \
@@ -119,7 +119,7 @@ newbody=$(jq -r '.body' "$GH_DIR/pr_view_71.json")
 has "$newbody" "NEW: the republished summary after the rework." "the current pr_summary reached the published body"
 hasnt "$newbody" "OLD: the summary from before the rework." "…and the stale summary is gone"
 has "$newbody" "Operator note: keep this line." "operator text outside the markers is preserved"
-has "$newbody" "## Beads on this branch" "pr-stack's appended section is preserved"
+has "$newbody" "## Beads on this branch" "the branch-beads section is preserved"
 has "$(cat "$STUB_GH_LOG")" "pr edit 71" "the body was edited in place, not re-created"
 hasnt "$(cat "$STUB_GH_LOG")" "pr create" "no twin PR"
 
@@ -599,29 +599,6 @@ has "$title_part" '{{binding_prefix}}commit-conventions' "submit's title paragra
 title_slot=$(grep -o -E -e '--title "[^"]*"' "$HERE/../../formulas/mol-polecat-work.toml" || true)
 has "$title_slot" '--title "<type>(<scope>): ' "submit's handoff call has the author write the title with its type and scope"
 hasnt "$title_slot" '--title ""' "…and offers no empty title as the line to run"
-
-echo "# a title the create opened with is one pr-stack keeps"
-# Once a PR is open, pr-stack.sh composes its title from the anchor and edits a PR
-# whose title differs. Each create above, carried by its PR once the anchor reaches
-# pull_request, must already read current there, or every PR this arm opens is
-# retitled on the next pass.
-cp "$HERE/pr-stack.sh" "$SD/pr-stack.sh"
-agree_n=0
-while IFS=$'\t' read -r tid ttitle; do
-  [ -n "${tid:-}" ] || continue
-  agree_n=$((agree_n + 1)); anum=$((400 + agree_n))
-  jq --arg id "$tid" --arg n "$anum" \
-    'map(if .id == $id then .metadata.merge_result = "pull_request" | .metadata.pr_number = $n else . end)' \
-    "$STUB_STORE" > "$TMP/x" && mv "$TMP/x" "$STUB_STORE"
-  jq -n --argjson n "$anum" --arg b "polecat/$tid" --arg t "$ttitle" \
-    '{number: $n, state: "OPEN", headRefName: $b, headRefOid: "sha-agree", title: $t, body: ""}' \
-    > "$GH_DIR/pr_view_$anum.json"
-done < <(sed -n 's/.* --head polecat\/\([^ ]*\) --title \(.*\) --body-file .*/\1\t\2/p' <<<"$tlog")
-eq "$agree_n" "9" "every create's title was read off its logged create"
-: > "$STUB_GH_LOG"
-aout=$("$SD/pr-stack.sh" 2>&1)
-hasnt "$(cat "$STUB_GH_LOG")" "--title" "pr-stack finds every created title current and retitles none"
-has "$aout" "0 retitled" "…and reports none"
 
 # The label writer pr-open delegates to. It is absent from the SUT dir above, where
 # the reconcile calls are best-effort and silently no-op without it (no earlier

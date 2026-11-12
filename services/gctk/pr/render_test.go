@@ -13,10 +13,9 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 )
 
-// The goldens under testdata are the renders the shell composer
-// (assets/scripts/pr-summary-region.sh and pr-stack.sh) produced for each case
-// when this package replaced it. -update rewrites them from the code, for a
-// change that means to move a render.
+// The goldens under testdata are the renders the shell composer produced for
+// each case when this package replaced it. -update rewrites them from the code,
+// for a change that means to move a render.
 var update = flag.Bool("update", false, "rewrite the golden renders under testdata from the code")
 
 func golden(t *testing.T, path, got string) {

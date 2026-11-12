@@ -105,11 +105,9 @@ fi
 # inside a quiet window the call declares, and the wait needs an open gate. So
 # the filing each await-ruling.sh call follows declares no --quiet-window, or is
 # bring-current-audit.sh's ask, which declares none itself
-# (bring-current-audit.test.sh holds it to that). The refinery's patrol is read
-# too: merge-push makes a convoy's rebuild child, and work whose zero-diff check
-# cannot run, wait on a gate.
+# (bring-current-audit.test.sh holds it to that).
 if TOML_PY="$(tomllib_python)"; then
-  for f in mol-validate mol-rig-demo mol-refinery-patrol; do
+  for f in mol-validate mol-rig-demo; do
     out=$("$TOML_PY" - "$ROOT/formulas/$f.toml" <<'PY'
 import re, sys, tomllib
 d = tomllib.load(open(sys.argv[1], "rb"))
@@ -174,43 +172,6 @@ skill_has converse-settle 'add `--leave <gate>` to the sign-off' "the converse-s
 OWN_WAITS=$(git -C "$ROOT" grep -n -E 'await-ruling\.sh" "\$[A-Z_]+" --key ' \
   -- 'assets/scripts/work-*.sh' ':!assets/scripts/*.test.sh' 2>/dev/null | grep -v -F -- '--key "bring-current-question.' || true)
 eq "$OWN_WAITS" "" "mol-polecat-work's scripts arm a gate's re-sling only through decline.sh, apart from the bring-current question"
-if TOML_PY="$(tomllib_python)"; then
-  f=mol-refinery-patrol
-  out=$("$TOML_PY" - "$ROOT/formulas/$f.toml" <<'PY'
-import re, sys, tomllib
-d = tomllib.load(open(sys.argv[1], "rb"))
-text = "\n".join(st.get("description", "") for st in d.get("steps", []))
-checked, bad = 0, []
-def judge(key, message):
-    global checked
-    checked += 1
-    if not re.search(r"stand-down\.sh \$[A-Z_]+ --key " + re.escape(key) + r" --ruling ", message):
-        bad.append(key)
-for key in set(re.findall(r'await-ruling\.sh" "\$[A-Z_]+" --key (\S+) ', text)):
-    # The GATE_MESSAGE loop below judges the first. bring-current-audit.sh composes
-    # the second's text, which asks how to resolve a conflict: a stand-down leaves
-    # that gate open while it also holds the anchor.
-    if key == '"$GATE_KEY"' or key.startswith('"bring-current-question.'):
-        continue
-    messages = [l for l in text.split("\n") if "--key %s --message" % key in l]
-    if not messages:
-        bad.append(key + " has no message")
-    for message in messages:
-        judge(key, message)
-for key, message in re.findall(r'GATE_KEY=([a-z-]+)\n\s*AWAIT=1\n\s*GATE_MESSAGE="([^\n]*)', text):
-    judge(key, message)
-print("%d|%s" % (checked, "; ".join(bad)))
-PY
-)
-  case "$out" in
-    0\|*) bad "$f: no gate that arms a re-sling was found" ;;
-    *\|) ok "$f: the ${out%%|*} gate messages that offer a stop name stand-down.sh under their own keys" ;;
-    *) bad "$f: a gate that arms a re-sling does not name stand-down.sh under its own key: ${out#*|}" ;;
-  esac
-else
-  echo "skip - stand-down wiring check: $TOML_PY"
-fi
-
 echo
 echo "decline-wiring.test.sh: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
