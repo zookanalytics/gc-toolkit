@@ -13,8 +13,12 @@
 # pattern_defer_days (90).
 #
 # A pattern needs a decision when `bd ready` lists it, which leaves out one
-# already closed, deferred or waiting. Each one is decided by the first rule that
-# fits:
+# already closed, deferred or waiting. A pattern with a follow-up that could not
+# be read, or that is open in another store, where an edge would hold nothing,
+# is reported and left for the distiller's next run, even when another
+# follow-up is open in its own store: an edge onto that one alone would release
+# the pattern while the other is still open. Any other is decided by the first
+# rule that fits:
 #   1. waiting: a follow-up it spawned (proposal_bead, eng_bead) is open in its
 #      own store. It gets a blocks edge onto each such follow-up.
 #   2. resolved: its id is in the adopted-rule inventory on origin/main, or every
@@ -23,8 +27,6 @@
 #      distiller judged not to be feedback. It closes as dismissed.
 #   4. held: it gathers evidence. It is deferred until --defer-days after its
 #      last_seen, or dismissed when that date has passed.
-# A pattern whose open follow-up sits in another store, or whose follow-up could
-# not be read, is reported and left for the distiller's next run.
 #
 # Every close stamps gc.work_outcome=no-op first, because a pattern ships no
 # commit of its own and the runtime's work-record gate reads that key.
@@ -41,7 +43,7 @@ while [ $# -gt 0 ]; do
     --rig)        RIG="${2:?--rig needs a name}"; shift 2 ;;
     --repo)       REPO="${2:?--repo needs a path}"; shift 2 ;;
     --defer-days) DAYS="${2:?--defer-days needs a number}"; shift 2 ;;
-    -h|--help)    sed -n '2,33p' "$0"; exit 0 ;;
+    -h|--help)    sed -n '2,35p' "$0"; exit 0 ;;
     *) echo "migrate: unknown argument '$1'" >&2; exit 64 ;;
   esac
 done
@@ -107,16 +109,17 @@ PLAN=$(printf '%s' "$READY" | jq -r --argjson adopted "$ADOPTED" --argjson statu
      | map(select(. != "")) | unique) as $f
   | ([$f[] | select($status[.] == null)]) as $unread
   | ([$f[] | select(($status[.] // "closed") != "closed")]) as $open
-  | ([$open[] | select(prefix == $pre)]) as $here
+  | ([$open[] | select(prefix != $pre)]) as $there
   | (($m.last_seen // "") | tostring) as $last
   | (if ($last | length) >= 10
      then ((($last[0:10]) + "T00:00:00Z") | fromdateiso8601) + $days * 86400 else null end) as $until
   | if ($unread | length) > 0 then
       [$p.id, "left", "-", "-", ("a follow-up could not be read: " + ($unread | join(",")))]
-    elif ($here | length) > 0 then
-      [$p.id, "waiting", ($here | join(",")), "-", ("waits on " + ($here | join(", ")))]
+    elif ($there | length) > 0 then
+      [$p.id, "left", "-", "-", ("its open follow-ups are " + ($open | join(", "))
+        + "; in another store, where an edge would hold nothing: " + ($there | join(", ")))]
     elif ($open | length) > 0 then
-      [$p.id, "left", "-", "-", ("its open follow-up is in another store: " + ($open | join(",")))]
+      [$p.id, "waiting", ($open | join(",")), "-", ("waits on " + ($open | join(", ")))]
     elif $adopted[$p.id] != null then
       [$p.id, "resolved", "-", "-", ("resolved: rule adopted in " + $adopted[$p.id])]
     elif ($f | length) > 0 then

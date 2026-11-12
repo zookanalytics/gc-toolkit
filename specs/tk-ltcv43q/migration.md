@@ -17,7 +17,14 @@ record supports, by the same rules.
 The script reads the patterns `bd ready` lists in the gc-toolkit store, the
 adopted-rule inventory on origin/main (`learning-recurrence.sh --inventory`),
 and the status of each follow-up a pattern spawned (`proposal_bead`,
-`eng_bead`), each read in its own store. The first rule that fits decides:
+`eng_bead`), each read in its own store.
+
+A pattern with a follow-up that cannot be read, or that is open in another
+store, where an edge would hold nothing, is printed as `left` and decided by the
+distiller's next run. That holds even when another of its follow-ups is open in
+its own store, because an edge onto that one alone would release the pattern
+while the other is still open. For every other pattern, the first rule that
+fits decides:
 
 1. **Waiting.** A follow-up is still open in the pattern's own store: the
    pattern gets a `blocks` edge onto each one. A pattern whose rule is adopted
@@ -37,10 +44,8 @@ and the status of each follow-up a pattern spawned (`proposal_bead`,
    defers a hold from the run that judges it. When that window has already
    passed, it went by with no recurrence, and the pattern closes as dismissed.
 
-A pattern whose open follow-up sits in another store, where an edge would hold
-nothing, or whose follow-up cannot be read, is printed as `left` and decided by
-the distiller's next run. Every close first stamps `gc.work_outcome=no-op`,
-because a pattern ships no commit of its own.
+Every close first stamps `gc.work_outcome=no-op`, because a pattern ships no
+commit of its own.
 
 ## When it runs
 
