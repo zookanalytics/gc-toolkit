@@ -899,27 +899,22 @@ fi
 # which names no work yet. Every later write of the stay follows it, so the
 # sitting's entry reads a stay that stops anywhere as one, never as a hold that
 # stands or as a sitting that held nothing, which would send it to frame the
-# ruling again or to the premise re-check. A re-run keeps the line that already
-# records this stay: this one, or the line step 5 writes, while that line names
-# each bead this call waits on. A stay with more work, such as a second stay
-# from a sitting woken early, records itself again.
-NEWEST_MARK=$(printf '%s' "$CONV_ROW" | jq -r '[ (.notes // "") | split("\n")[] | select(startswith("holding:") or startswith("staying:")) ] | last // ""')
+# ruling again or to the premise re-check. A re-run keeps that line while it is
+# newest, because the call that wrote it has not finished, and the re-run
+# finishes it. A line that names work ends a call that reached step 5, this one
+# run again or an earlier stay with the same text, and nothing in it says
+# which: it names no ruling, and a --rework stay does not know all its own work
+# until step 1 files the child. Taken as this call's own, an earlier stay's
+# line would leave a call that stops before step 5 reading as that stay's wait
+# or return. So any other call records itself again, and step 5 names its work
+# again, which on a re-run of a stay that had named its work repeats two lines
+# of the same record.
 if [ -n "$STAY" ]; then
   STAY_MARK="staying: $STAY"
-  STAY_KEPT=""
-  case "$NEWEST_MARK" in
-    "$STAY_MARK") STAY_KEPT=yes ;;
-    "$STAY_MARK (waits on "*")")
-      STAY_NAMED=" $(printf '%s' "${NEWEST_MARK#"$STAY_MARK (waits on "}" | sed 's/)$//; s/, / /g') "
-      STAY_KEPT=yes
-      for w in $STAY_ON; do
-        case "$STAY_NAMED" in *" $w "*) ;; *) STAY_KEPT="" ;; esac
-      done ;;
-  esac
-  if [ -z "$STAY_KEPT" ]; then
+  NEWEST_MARK=$(printf '%s' "$CONV_ROW" | jq -r '[ (.notes // "") | split("\n")[] | select(startswith("holding:") or startswith("staying:")) ] | last // ""')
+  if [ "$NEWEST_MARK" != "$STAY_MARK" ]; then
     gc bd update "$CONVERSATION" --append-notes "$STAY_MARK" >/dev/null 2>&1 \
       || stopped "the store refused the staying: line that records the stay on conversation $CONVERSATION before its other writes; nothing was written"
-    NEWEST_MARK="$STAY_MARK"
   fi
 fi
 
@@ -1140,13 +1135,11 @@ if [ "$RULED" = yes ]; then
     # from a sitting woken early, the write changes nothing, and its guard is
     # what finds a dismiss that closed the conversation while this call ran.
     STAY_LINE="staying: $STAY (waits on $(printf '%s' "$STAY_ON" | sed 's/ /, /g'))"
-    if [ "$NEWEST_MARK" != "$STAY_LINE" ]; then
-      gc bd update "$CONVERSATION" --append-notes "$STAY_LINE" >/dev/null 2>&1 \
-        || stopped "the store refused the staying: line that names the work conversation $CONVERSATION waits on, which the sitting's entry reads to tell a stay that stopped short from one whose work is out; every gate above is answered, the conversation is still claimed, and a re-run writes it"
-    fi
+    gc bd update "$CONVERSATION" --append-notes "$STAY_LINE" >/dev/null 2>&1 \
+      || stopped "the store refused the staying: line that names the work conversation $CONVERSATION waits on, which the sitting's entry reads to tell a stay that stopped short from one whose work is out; every gate above is answered, the conversation is not yet left to wait, and a re-run writes it"
     for w in $STAY_ON; do
       gc bd dep add "$CONVERSATION" "$w" --type blocks >/dev/null 2>&1 \
-        || stopped "the store refused the edge that makes conversation $CONVERSATION wait on $w, so it would not wake its sitting when $w closes; every gate above is answered, its staying: line names the work, the conversation is still claimed, and a re-run writes the edge"
+        || stopped "the store refused the edge that makes conversation $CONVERSATION wait on $w, so it would not wake its sitting when $w closes; every gate above is answered, its staying: line names the work, the conversation is not yet left to wait, and a re-run writes the edge"
     done
     STAY_RC=0
     gc bd update "$CONVERSATION" --if-assignee "$HOLDER" --if-status "$CONV_STATUS" --status open >/dev/null 2>&1 || STAY_RC=$?

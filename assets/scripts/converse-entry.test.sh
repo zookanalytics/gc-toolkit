@@ -5,8 +5,9 @@
 # names next and the values it hands on: a fresh conversation, a restart while
 # the hold stands or before it, a stay woken early while its work is out, a
 # stay that stopped short in each window its writes leave, with its work open
-# and with it closed, the return of the work, no conversation at all, and each
-# way the state can fail to read, which is never an answer to drain on.
+# and with it closed, a second stay with an earlier stay's text, the return of
+# the work, no conversation at all, and each way the state can fail to read,
+# which is never an answer to drain on.
 #
 # Hermetic: stubs gc and gctk, reads the repo only; no city, no network.
 
@@ -241,6 +242,20 @@ staying: keep the API and add the flag" tracks:tk-s blocks:tk-w1; holds tk-c tk-
 assigned "$FIXDIR/row-tk-c.json"
 enter >/dev/null
 is "a second stay from a sitting woken early, stopped there, is interrupted, not waiting" "$(line ENTRY | cut -d: -f1)" "ENTRY interrupted"
+is "…which the stay's skill runs again" "$(line NEXT=)" "NEXT=converse-stay"
+# A second stay with an earlier stay's text writes its own first line too, so
+# a stop there reads as that stay, whether the earlier stay's work has closed
+# or is still out.
+fresh; hook work existing_assignment tk-c; conv tk-c in_progress "staying: keep the API (waits on tk-w1)
+staying: keep the API" tracks:tk-s blocks:tk-w1; holds tk-c
+enter >/dev/null
+is "a second stay with the same text, stopped there after the first stay's work closed, is interrupted" "$(line ENTRY | cut -d: -f1)" "ENTRY interrupted"
+hasnt "…and is no return of that work" "$(line ENTRY)" "returned"
+fresh; hook drain; conv tk-c open "staying: keep the API (waits on tk-w1)
+staying: keep the API" tracks:tk-s blocks:tk-w1; holds tk-c tk-w1
+assigned "$FIXDIR/row-tk-c.json"
+enter >/dev/null
+is "…and with that work still out, it is interrupted, not waiting" "$(line ENTRY | cut -d: -f1)" "ENTRY interrupted"
 is "…which the stay's skill runs again" "$(line NEXT=)" "NEXT=converse-stay"
 #
 # After the line that names the work, before its edge. The claim serves the

@@ -111,9 +111,12 @@
 #             close or PR comment; a stay that stops after a gate or at an edge
 #             leaves the line that tells the entry where it stopped, one whose
 #             first write the store refuses writes nothing else, a --stay that
-#             ends as the line naming the work does is refused, a second stay
-#             with more work records itself again, a re-run writes neither line
-#             a second time, a
+#             ends as the line naming the work does is refused, a re-run keeps
+#             the first line of a call that has not named its work, and every
+#             other call records itself again: a second stay with more work, a
+#             re-run of one that named its work, and a second stay with the
+#             same text, whether the earlier stay's rework has returned or its
+#             work is still out; a
 #             dismiss that closes an open conversation while the call runs
 #             fails that write and stops the stay, the call less --stay, with
 #             --no-wait for its waits and brief and --no-rework for a --rework,
@@ -357,13 +360,14 @@ esac
 exit 0
 H
 # The rework and the retirement stand-ins each log the rig they ran in: GC_RIG,
-# GC_RIG_ROOT and the working directory.
+# GC_RIG_ROOT and the working directory. The rework names the child it filed,
+# tk-child, or REWORK_CHILD.
 cat > "$S/converse-rework.sh" <<'R'
 #!/usr/bin/env bash
 printf 'converse-rework %s\n' "$*" >> "$CALLS"
 printf 'converse-rework ran in GC_RIG=%s GC_RIG_ROOT=%s PWD=%s\n' "${GC_RIG:-}" "${GC_RIG_ROOT:-}" "$PWD" >> "$CALLS"
 [ -n "${REWORK_FAIL:-}" ] && { echo "rework refused: anchor has no branch"; exit 2; }
-echo "tk-child gc-toolkit/gc-toolkit.polecat filed"
+echo "${REWORK_CHILD:-tk-child} gc-toolkit/gc-toolkit.polecat filed"
 R
 # RETIRE_FAIL models pr-dispose.sh recording the disposition and then failing
 # to close the PR, which leaves it open.
@@ -1831,7 +1835,7 @@ esac
 eq "$(field tk-conv notes | grep '^staying:' | tr '\n' '|')" "staying: the dialog keeps what is typed|staying: the dialog keeps what is typed (waits on tk-work)|" "(STAY-LINES-TWO) …leaving the stay's two lines in its notes, the second newest"
 run_signoff --conversation tk-conv --outcome "staying — waits on tk-work" "${STAYING[@]}"
 eq "$RC" 0 "(STAY-RERUN) a re-run of the stay exits 0"
-eq "$(field tk-conv notes | grep -c '^staying:')" 2 "(STAY-RERUN) …writing neither staying: line a second time"
+eq "$(field tk-conv notes | grep '^staying:' | tr '\n' '|')" "staying: the dialog keeps what is typed|staying: the dialog keeps what is typed (waits on tk-work)|staying: the dialog keeps what is typed|staying: the dialog keeps what is typed (waits on tk-work)|" "(STAY-RERUN) …recording the stay again and naming its work again, since a line that names work can be an earlier stay's"
 eq "$(field tk-conv status)" "open" "(STAY-RERUN) …and the conversation stays open"
 # The work has landed, and the deferred-dispatch pass has sent the closer the
 # stay armed, before the return signs off.
@@ -1897,6 +1901,30 @@ has "$OUT" "Sign off without --stay to end at the hand-off" "(STAY-REWORK-UNREAD
 hasnt "$(cat "$CALLS")" "bd dep add tk-conv" "(STAY-REWORK-UNREAD) …with no edge written"
 eq "$(field tk-conv status)" "in_progress" "(STAY-REWORK-UNREAD) …and the conversation still claimed"
 
+# A second stay with the text of an earlier one is a call of its own: it
+# records itself again before its writes, so one that stops before it names
+# its work leaves its own first line newest, which the sitting's entry reads as
+# a stay that stopped short. Here the earlier stay's rework has returned, and
+# the return goes on to a second rework on the same comparison, with the
+# conversation claimed again, as the return's claim leaves it.
+open_pr; bead tk-child; setm tk-child source_ruling_bead tk-conv
+run_signoff --conversation tk-conv --outcome "staying — the retry is reworked" --ruled yes --ruling "fix the retry" --rework --no-wait --stay "the retry backs off"
+setf tk-child status closed; setf tk-conv status in_progress
+bead tk-child2; setm tk-child2 source_ruling_bead tk-conv
+REWORK_CHILD=tk-child2 TAKEAWAY_FAIL=1 run_signoff --conversation tk-conv --outcome "staying — the timeout is reworked" --ruled yes --ruling "fix the timeout too" --rework --no-wait --stay "the retry backs off"
+eq "$RC" 1 "(STAY-AGAIN-RETURNED) a second rework stay with the same text, stopped before it names its work, exits 1"
+has "$(cat "$CALLS")" "converse-rework --anchor tk-anc --ruling-bead tk-conv --ruling fix the timeout too" "(STAY-AGAIN-RETURNED) …once it has filed its rework"
+eq "$(field tk-conv notes | grep -E '^(holding|staying):' | tail -n 1)" "staying: the retry backs off" "(STAY-AGAIN-RETURNED) …leaving its own first line newest, not the earlier stay's line that names the returned rework"
+# Here the earlier stay's work is still out, and a sitting woken early stays
+# again with a rework beside it.
+open_pr; bead tk-work
+run_signoff --conversation tk-conv --outcome "staying — waits on tk-work" --ruled yes --ruling "land it once the fix is in" --waiting-on tk-work --no-rework --stay "the retry backs off"
+eq "$(field tk-conv status)" "open" "(STAY-AGAIN-BESIDE) the earlier stay leaves the conversation open, waiting on its work"
+bead tk-child2; setm tk-child2 source_ruling_bead tk-conv
+REWORK_CHILD=tk-child2 TAKEAWAY_FAIL=1 run_signoff --conversation tk-conv --outcome "staying — waits on tk-work and its rework" --ruled yes --ruling "rework the retry as well" --waiting-on tk-work --rework --stay "the retry backs off"
+eq "$RC" 1 "(STAY-AGAIN-BESIDE) a second stay with the same text, beside that work and with a rework, stopped before it names its work, exits 1"
+eq "$(field tk-conv notes | grep -E '^(holding|staying):' | tail -n 1)" "staying: the retry backs off" "(STAY-AGAIN-BESIDE) …leaving its own first line newest, not the earlier line that names only the earlier work"
+
 # A stay that stops after its first write leaves that line newest, which the
 # sitting's entry reads as a stay whose sign-off has not finished, whether its
 # work is open or has closed by the restart: here a gate does not close.
@@ -1908,6 +1936,9 @@ eq "$(meta tk-sub gc.dispatch_when_ready_args)" "$CLOSER_ARGS" "(STAY-STOPS-SHOR
 hasnt "$(field tk-conv notes)" "(waits on" "(STAY-STOPS-SHORT) …naming no work"
 hasnt "$(cat "$CALLS")" "bd dep add tk-conv" "(STAY-STOPS-SHORT) …with no edge written"
 eq "$(field tk-conv status)" "in_progress" "(STAY-STOPS-SHORT) …and the conversation still claimed"
+run_signoff --conversation tk-conv --outcome "staying — waits on tk-work" "${STAYING[@]}"
+eq "$RC" 0 "(STAY-STOPS-SHORT) the re-run stays"
+eq "$(field tk-conv notes | grep '^staying:' | tr '\n' '|')" "staying: the dialog keeps what is typed|staying: the dialog keeps what is typed (waits on tk-work)|" "(STAY-STOPS-SHORT) …keeping the first line, which the unfinished call wrote, and naming the work once"
 # One that stops at its edge has named its work, which the entry checks the
 # edges and the work's status against.
 closer_case
@@ -1918,7 +1949,7 @@ eq "$(field tk-conv notes | grep -E '^(holding|staying):' | tail -n 1)" "staying
 eq "$(field tk-conv status)" "in_progress" "(STAY-EDGE-REFUSED) …and the conversation still claimed"
 run_signoff --conversation tk-conv --outcome "staying — waits on tk-work" "${STAYING[@]}"
 eq "$RC" 0 "(STAY-EDGE-REFUSED) the re-run stays"
-eq "$(field tk-conv notes | grep -c '^staying:')" 2 "(STAY-EDGE-REFUSED) …writing neither staying: line a second time"
+eq "$(field tk-conv notes | grep -E '^(holding|staying):' | tail -n 1)" "staying: the dialog keeps what is typed (waits on tk-work)" "(STAY-EDGE-REFUSED) …naming the work again in its newest line"
 eq "$(field tk-conv status)" "open" "(STAY-EDGE-REFUSED) …and leaving the conversation open"
 closer_case
 REFUSE_UPDATE_MATCH="--append-notes staying:" run_signoff --conversation tk-conv --outcome "staying — waits on tk-work" "${STAYING[@]}"
