@@ -74,10 +74,10 @@ resolves "the explicit --merge value the caller passed" ahead of the
 `merge_strategy` when a v2 formula is slung. The pack's refinery lands a bead
 stamped `direct` whose target is not the default branch as a fast-forward of
 that target, so the polecat's merge commit reaches the effort's branch with
-the target as its second parent. Without the flag, a rig whose default is `mr`
-would have its task stamped `mr` and landed through a pull request, which
-`gctk merge` merges by squash, and the hand-off would meet the same conflict
-again.
+the effort's target as its second parent. Without the flag, a rig whose
+default is `mr` would have its task stamped `mr` and landed through a pull
+request, which `gctk merge` merges by squash, and the hand-off would meet the
+same conflict again.
 
 **Bringing the hand-off back once the task lands: the hand-off's notice.**
 Existing pack surface, unchanged. The recipe records the notice
