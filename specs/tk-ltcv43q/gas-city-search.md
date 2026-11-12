@@ -1,6 +1,6 @@
 ---
 name: Gas City search for the feedback pattern's lifecycle
-description: What tk-ltcv43q looked for in bd and Gas City before moving the feedback pattern from a standing record onto bd's own work states, which primitives the distiller composes for each state (deferred with a date, a blocks edge onto the follow-up, close, reopen, the ready read), why the pattern stays a task with a task_kind and not a kind of its own, and why check-blocked-work-armed exempts a pattern instead of asking it for an arm. Read it when judging the feedback-pattern warrant, a change to the distiller's pattern states, or a proposal to move patterns onto another bead kind.
+description: What tk-ltcv43q looked for in bd and Gas City before moving the feedback pattern from a standing record onto bd's own work states, which primitives the distiller composes for each state (deferred with a date, a blocks edge onto the follow-up, close, reopen, the ready read), what neither ships for the decision a pattern carries, and why check-blocked-work-armed exempts a pattern instead of asking it for an arm. Read it when judging the feedback-pattern warrant, a change to the distiller's pattern states, or a proposal to move patterns onto another bead kind.
 ---
 
 # Gas City search for the feedback pattern's lifecycle
@@ -8,7 +8,9 @@ description: What tk-ltcv43q looked for in bd and Gas City before moving the fee
 bd was read at `gastownhall/beads` v1.3.4 (7ef2fd05eb0c, the build the city's
 `bd` reports as `1.3.4 (7ef2fd05e+patched)`) and at main 125c62063406. Gas City
 was read at `gastownhall/gascity` main 6bd609f5bfb4. The gc-toolkit store was
-read on 2026-11-12 between 18:30Z and 19:00Z.
+read on 2026-11-12 between 18:30Z and 19:00Z. What neither provides was read on
+2026-11-12 at `gastownhall/gascity` main 1f0c10495b1c, `gastownhall/beads` main
+e51a90036718 and `gastownhall/gascity-packs` main 1f6d8e41c5b0.
 
 The operator ruled in conversation tk-2pvj50q that the city keeps no standing
 records, so a feedback pattern becomes backlog work that closes once resolved.
@@ -27,24 +29,37 @@ those primitives. Nothing new is built for a state.
 
 ## What neither provides
 
-- **A kind for knowledge kept apart from work.** Every bd status is a work
-  state (`AllStatuses` in `internal/types/types.go`). The `pinned` status,
-  "Persistent bead that stays open indefinitely", is a record that never
-  closes, the shape the ruling turned down, and Gas City folds every bd status
-  but closed and in_progress into open (the `SourceStatus` comment in
-  `internal/beads/beads.go`), so a pinned pattern reads as open work to gc. bd's
-  Memory Beads proposal (`gastownhall/beads` issue #5877, open) would be that
-  kind: a Memory Bead never becomes ready, blocked, claimed, completed or
-  closed, and a derived-from field lists the beads it was written from. No
-  memory type is in `internal/types/types.go` at v1.3.4 or at main.
-- **A way for a pack to keep its own type out of the ready view.** Gas City's
-  ready view leaves out a fixed list of types and a fixed list of labels
-  (`readyExcludeTypes` and `HasReadyExcludedLabel` in
-  `internal/beads/beads.go`), and a pack can add to neither.
+- **A loop that decides agents' recurring feedback.** No order or formula of
+  Gas City's bundled `core` pack reads agent feedback: its `orders/` and
+  `formulas/` directories under `internal/bootstrap/packs/core/` hold none.
+  `gc prompt synth`, which writes a role's prompt, renders a meta-prompt from
+  the role, the provider, the rig and a baseline template, and takes no
+  feedback (`docs/reference/cli.md`, and its formula `mol-prompt-synth.toml`).
+  The packs in `gastownhall/gascity-packs` that capture learnings keep one
+  record per learning. compound-engineering's `ce-compound` skill writes a
+  solution doc under `docs/solutions/`, or updates the one that covers the same
+  problem, and gstack's skills log each learning to a per-project
+  `learnings.jsonl` through `gstack-learnings-log`. contributing-to-gascity's
+  `fine-tune` skill keeps the review findings that recur most as a fixed list
+  in its own text (Stage 2a). None of them counts how often a piece of feedback
+  recurs or decides whether it becomes a standing rule.
+- **A bead that holds the decision.** What bd ships or proposes for knowledge
+  holds a rule, not the decision to adopt it. `bd remember` stores a text that
+  `bd prime` injects into each session (`rememberCmd` in `cmd/bd/memory.go`).
+  The Memory Beads proposal (`gastownhall/beads` issue #5877, open, at its
+  Revision 4) would add a Memory Bead, which never becomes ready, blocked,
+  claimed, completed or closed (R1), keeps evidence and confidence as an
+  application's metadata (R3), and leaves judging whether its content is true,
+  duplicated or contradictory to tools outside bd (R30). No memory type is in
+  `internal/types/types.go` at v1.3.4 or at main. bd's `decision` type is an
+  architecture decision record: its template asks for the decision, the
+  rationale and the alternatives considered (`RequiredSections` in
+  `internal/types/types.go`), and nothing in bd fills one from evidence.
 
 So a pattern stays a task bead named by `task_kind=feedback-pattern`, the pack
-noun [docs/warrants.md](../../docs/warrants.md) warrants until a knowledge kind
-ships, and its lifecycle is the composition above.
+noun [docs/warrants.md](../../docs/warrants.md) warrants until Gas City ships a
+loop that decides agents' recurring feedback as work, with the evidence each
+decision rests on. Its lifecycle is the composition above.
 
 ## Why check-blocked-work-armed exempts a pattern
 
