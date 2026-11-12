@@ -233,7 +233,8 @@ operator reviews. A lone bead needs none: slung to a pool, it opens its own PR.
 The procedure is the recipe in `integration-effort.md`, beside this file, which
 the mechanik runs. It also covers adding a bead to an existing effort, and the
 hand-off that has the rig's refinery bring the effort's branch current. The
-recipe pushes the effort's branch, and a converse sitting never pushes, so a
+recipe pushes the effort's branch, and a converse sitting pushes only the
+branch of a change the operator rules it make, through Work's hand-off, so a
 sitting does not run it. A sitting sends the effort this way instead:
 
 - When the subject's recommendation is `mol-design-convoy`, the sign-off's
