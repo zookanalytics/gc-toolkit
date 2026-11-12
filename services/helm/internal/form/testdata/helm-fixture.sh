@@ -8,9 +8,10 @@
 #
 # It answers the verbs the form calls: `conversations [<ref>] --json`, `open`,
 # `engage <conversation> --no-input --no-attach` and the attach,
-# `engage <conversation> --no-input`. A save and a start each take a second, as
-# the real verbs take a few, so each acknowledgement can be seen landing. It
-# writes nothing.
+# `engage <conversation> --no-input`, and the seats' verbs, `po --rig <rig>`
+# and `mechanik`, which the form runs for the seat picked on its People page. A
+# save and a start each take a second, as the real verbs take a few, so each
+# acknowledgement can be seen landing. It writes nothing.
 case "${1:-} ${2:-}" in
   "conversations --json")
     sleep 1
@@ -21,6 +22,11 @@ case "${1:-} ${2:-}" in
  {"id":"tk-demo5","rig":"harbor","subject":"hb-demo6","subject_title":"Upstream: session wake on assignment","title":"is the wake path worth an upstream issue?","status":"in_progress","state":"left","readiness":"ended","created_at":"2026-11-07T15:00:00Z","session":null},
  {"id":"tk-demo7","rig":"gc-toolkit","subject":"tk-demo8","subject_title":"Intake: multi-line questions","title":"operator pick from the board","status":"open","state":"queue","readiness":"queued","created_at":"2026-11-08T09:00:00Z","session":null}],
  "rigs":[{"name":"gc-toolkit","prefix":"tk","converse":true,"suspended":false},{"name":"harbor","prefix":"hb","converse":true,"suspended":false},{"name":"paused","prefix":"pz","converse":true,"suspended":true}],
+ "seats":[
+ {"seat":"mechanik","rig":"","session":{"id":"s-m","name":"gc-toolkit__mechanik","state":"active","attached":false,"created_at":"2026-08-31T04:11:47Z"}},
+ {"seat":"po","rig":"gc-toolkit","session":null},
+ {"seat":"po","rig":"harbor","session":{"id":"s-h","name":"harbor--gc-toolkit__po","state":"asleep","attached":false,"created_at":"2026-11-08T08:00:00Z"}},
+ {"seat":"po","rig":"paused","session":null}],
  "unread":[]}
 JSON
     ;;
@@ -75,6 +81,10 @@ JSON
       *" --no-attach "*) echo "✓ converse-claude-opus on existing conversation $2 for tk-demo1" ;;
       *) echo "(the fixture attaches nothing: $2)" ;;
     esac
+    ;;
+  "po --rig"|"mechanik ")
+    sleep 1
+    echo "(the fixture opens no seat: $*)"
     ;;
   *)
     echo "helm-fixture: no answer for: $*" >&2
