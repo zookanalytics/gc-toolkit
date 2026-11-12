@@ -38,7 +38,7 @@ git config --file "$GIT_CONFIG_GLOBAL" advice.detachedHead false
 PACK="$TMP/pack"; BIN="$TMP/bin"; mkdir -p "$PACK" "$BIN"
 cp "$HERE/work-submit.sh" "$HERE/work-lib.sh" "$HERE/decline.sh" "$HERE/claim-close.sh" "$HERE/bd-lib.sh" \
    "$HERE/hand-back.sh" "$HERE/store-only-exit.sh" "$HERE/run-lib.sh" "$HERE/deferred-dispatch.sh" "$PACK/" 2>/dev/null
-export REAL_GIT REAL_FIND LOG="$TMP/log" STORE="$TMP/store.json"
+export REAL_GIT REAL_FIND PACK LOG="$TMP/log" STORE="$TMP/store.json"
 
 # git: push and ls-remote can be made to fail, and a push, a worktree's removal
 # and a branch's delete are logged, whatever directory -C names.
@@ -73,6 +73,7 @@ SH
 cat > "$BIN/gc" <<'SH'
 #!/usr/bin/env bash
 case "${1:-} ${2:-}" in
+  "gc-toolkit scripts-dir") printf '%s\n' "$PACK"; exit 0 ;;
   "runtime drain-ack") printf 'drain\n' >> "$LOG"; exit 0 ;;
   "hook current")
     [ -n "${HOOK_CURRENT:-}" ] || { echo "no claim" >&2; exit 1; }
@@ -329,6 +330,56 @@ eq "$(g "$C/cache/deep/co" rev-parse HEAD 2>/dev/null)" "$CLONE_SHA" "(2i) the c
 eq "$(cat "$C/cache/deep/co/local.txt" 2>/dev/null)" "local" "(2i) and its file"
 eq "$(grep -cE '^(remove|release) ' "$LOG" | tr -d ' ')" 0 "(2i) nothing is removed or deleted"
 has "$OUT" "holds the checkout at $C/cache/deep/co," "(2i) and names the checkout that keeps it"
+
+echo "# the step's hand-off call, from inside the tree it removes"
+# The step enters work_dir before it hands off, so the agent's shell stands in the
+# tree the call removes. Claude Code runs each command as `eval '<command>' &&
+# pwd -P`, and pwd -P fails in bash once its directory is gone, so these cases run
+# the step's own call, as a pour renders it, the way that harness does.
+awk '
+  /^```bash$/ {buf = ""; f = 1; next}
+  /^```$/ {if (f && buf ~ /work-submit\.sh" --convoy/) {printf "%s", buf; exit} f = 0; next}
+  f {buf = buf $0 "\n"}' "$HERE/../../formulas/mol-polecat-work.toml" > "$TMP/handoff.tmpl"
+HANDOFF_SUM="$TMP/handoff-summary.md"
+CALL=$(sed -e 's/{{binding_prefix}}/gc-toolkit./g' -e 's/{{convoy_id}}/cv-1/g' -e 's/{{base_branch}}/main/g' \
+  -e 's/ --anchor "<[^"]*>"//' -e "s|--summary-file \"<[^\"]*>\"|--summary-file \"$HANDOFF_SUM\"|" \
+  -e 's/--title "<[^"]*>"/--title "fix(work): what the branch does"/' "$TMP/handoff.tmpl")
+has "$CALL" 'work-submit.sh" --convoy cv-1 --base main' "(2j) the step's hand-off call extracts"
+case "$CALL" in *'{{'*|*'"<'*) bad "(2j) the call renders whole" "$CALL" ;; *) ok "(2j) the call renders whole" ;; esac
+# harness <call> <shell...> : the call run as WRAP runs it, by default the way
+# Claude Code does, in a shell standing in the tree.
+harness() {
+  local call="$1"; shift
+  OUT=$(cd "$C" && env PATH="$BIN:$PATH" WORK_READ_WAIT=0 GC_SESSION_ID=sess-me GC_RIG=gc-toolkit HOOK_CURRENT=st-submit \
+    GC_DIR="$TMP/home-$N" "$@" -c "${WRAP:-eval \"\$1\" && pwd -P}" _ "$call" 2>&1); RC=$?
+}
+SHELLS="bash"; command -v zsh >/dev/null 2>&1 && SHELLS="bash zsh"
+for sh in $SHELLS; do
+  prepare polecat/tk-w "$FRESH"
+  printf 'the summary\n' > "$HANDOFF_SUM"
+  if [ "$sh" = zsh ]; then harness "$CALL" zsh -f; else harness "$CALL" bash; fi
+  eq "$RC" 0 "(2j) $sh: a hand-off that worked returns a call that did not fail: $OUT"
+  eq "$(printf '%s\n' "$OUT" | tail -n 1)" "$TMP/home-$N" "(2j) $sh: the shell ends in the session's own directory"
+  [ ! -e "$C" ] && ok "(2j) $sh: the tree is removed" || bad "(2j) $sh: the tree is removed"
+  [ "$(grep -n '^remove ' "$LOG" | cut -d: -f1)" -lt "$(grep -n '^drain' "$LOG" | cut -d: -f1)" ] 2>/dev/null \
+    && ok "(2j) $sh: before the session drains" || bad "(2j) $sh: before the session drains"
+  eq "$(field assignee)" "gc-toolkit/gc-toolkit.refinery" "(2j) $sh: the hand-off stands"
+  eq "$(meta pr_summary)" "the summary" "(2j) $sh: with the summary the call passed"
+done
+prepare polecat/tk-w "$FRESH"
+printf 'loose\n' > "$C/loose.txt"
+harness "$CALL" bash
+eq "$RC" 3 "(2k) a hand-off that fails reads as failed, with its own exit"
+[ -d "$C" ] && ok "(2k) the tree stays" || bad "(2k) the tree stays"
+WRAP='eval "$1"; pwd -P' harness "$CALL" bash
+eq "$(printf '%s\n' "$OUT" | tail -n 1)" "$C" "(2k) and the shell stays in it, where the commit the hand-off asks for is made"
+prepare polecat/tk-w "$FRESH"
+SUFFIX=' && cd "$GC_DIR"'
+case "$CALL" in *"$SUFFIX") ok "(2l) the call ends in the session's own directory" ;; *) bad "(2l) the call ends in the session's own directory" "$CALL" ;; esac
+harness "${CALL%"$SUFFIX"}" bash
+eq "$RC" 1 "(2l) without that, a hand-off that worked fails the call"
+has "$OUT" "pwd: " "(2l) at the shell's read of a directory that is gone"
+eq "$(field assignee)" "gc-toolkit/gc-toolkit.refinery" "(2l) though the hand-off stands"
 
 echo "# a rework child stands on the reviewed branch, and a caller's target wins"
 prepare polecat/tk-anchor '{"branch":"polecat/tk-anchor","target":"integration/x"}'
