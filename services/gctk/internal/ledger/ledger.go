@@ -11,7 +11,8 @@
 // from them, and a test fails when it is stale.
 //
 // A verb's change of state is one Write, which Commit makes as one `gc bd
-// update` carrying every key the act sets, so the act lands whole or not at all.
+// update` carrying every key the act sets, and the title when the act gives
+// the bead one, so the act lands whole or not at all.
 // The update's exit decides whether the write landed: a write that exits
 // non-zero has failed, and nothing reads a write back to confirm it. A Snapshot
 // is one pass's read of the beads a question needs.
@@ -67,10 +68,11 @@ func open(c *gcbd.Client, db string, ids ...string) (*Ledger, error) {
 	return New(c.In(db)), nil
 }
 
-// Write is one act on one bead: every key it sets or clears, made in one
-// update.
+// Write is one act on one bead: every key it sets or clears, and the title it
+// gives the bead, made in one update.
 type Write struct {
 	id     string
+	title  string
 	sets   []string // key=value, in the order set
 	unsets []string
 	err    error
@@ -97,9 +99,16 @@ func (w *Write) unset(name string) {
 	}
 }
 
-// args is the update's arguments: every set, then every removal.
+// Title gives the bead title in the same write. The title is the row's own
+// field, which no key declares, so the act that sets it says what it means.
+func (w *Write) Title(title string) { w.title = title }
+
+// args is the update's arguments: the title, every set, then every removal.
 func (w *Write) args() []string {
 	var args []string
+	if w.title != "" {
+		args = append(args, "--title", w.title)
+	}
 	for _, s := range w.sets {
 		args = append(args, "--set-metadata", s)
 	}

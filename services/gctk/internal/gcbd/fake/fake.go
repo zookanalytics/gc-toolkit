@@ -197,9 +197,9 @@ func (s *Store) Blocked() (*gcbd.BlockedSet, error) {
 	return gcbd.NewBlockedSet(s.listed, s.marked), nil
 }
 
-// Update applies one update's --set-metadata, --unset-metadata and --status to
-// the row, and records it. A bead the store does not hold refuses the write, as
-// bd does.
+// Update applies one update's --set-metadata, --unset-metadata, --status and
+// --title to the row, and records it. A bead the store does not hold refuses
+// the write, as bd does.
 func (s *Store) Update(id string, args ...string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -233,6 +233,8 @@ func (s *Store) Update(id string, args ...string) (string, error) {
 			delete(b.Metadata, value)
 		case "--status":
 			b.Status = value
+		case "--title":
+			b.Title = value
 		default:
 			return "", fmt.Errorf("fake store: update takes no %s", name)
 		}

@@ -51,6 +51,34 @@ func TestOneActIsOneWrite(t *testing.T) {
 	}
 }
 
+func TestAnActThatTitlesTheBeadTitlesItInTheSameWrite(t *testing.T) {
+	s := fake.New()
+	s.Put(fake.Bead{ID: "b-1", Title: "filed before the work", Status: "open"})
+	l := New(s)
+	w := l.Write("b-1")
+	w.Title("fix: name what the work became")
+	testText.Set(w, "now")
+	if err := l.Commit(w); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"--title", "fix: name what the work became", "--set-metadata", "test.ledger.text=now"}
+	if writes := s.Writes(); len(writes) != 1 || !slices.Equal(writes[0].Args, want) {
+		t.Fatalf("writes = %+v, want one update %q", writes, want)
+	}
+	if row, _ := s.Row("b-1"); row.Title != "fix: name what the work became" || row.Metadata["test.ledger.text"] != "now" {
+		t.Errorf("row = %+v", row)
+	}
+
+	w = l.Write("b-1")
+	w.Title("fix: a title alone")
+	if err := l.Commit(w); err != nil {
+		t.Errorf("a write that only titles the bead = %v", err)
+	}
+	if writes := s.Writes(); len(writes) != 2 || !slices.Equal(writes[1].Args, []string{"--title", "fix: a title alone"}) {
+		t.Errorf("writes = %+v", writes)
+	}
+}
+
 func TestAKeyReadsItsAliasAndClearsBoth(t *testing.T) {
 	s := fake.New()
 	s.Put(fake.Bead{ID: "b-1", Status: "open", Metadata: map[string]string{"test.ledger.old_text": "older", "test.ledger.record": "{not json"}})
