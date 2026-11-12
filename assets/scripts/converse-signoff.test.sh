@@ -108,9 +108,10 @@
 #             onto each bead of work it sent, a rework the call files included,
 #             then its staying: line, then the guarded status write, and no
 #             close or PR comment; a re-run writes the line no second time, the
-#             call less --stay, with --no-wait for its waits and brief, closes
-#             it on the return and arms no second closer once the arm has sent
-#             one, and a stay with no work, beside --answer or with no ruling,
+#             call less --stay, with --no-wait for its waits and brief and
+#             --no-rework for a --rework, closes it on the return, arming no
+#             second closer once the arm has sent one and filing no second
+#             rework, and a stay with no work, beside --answer or with no ruling,
 #             on work in another store, on a gate alone, on work that waits on
 #             the conversation or on a conversation in the queue is refused
 #             before any write, as a rework child that does not read stops it
@@ -1833,6 +1834,15 @@ eq "$RC" 0 "(STAY-REWORK) a stay on a ruling that reworks the PR exits 0"
 has "$(cat "$CALLS")" "bd dep add tk-conv tk-child --type blocks" "(STAY-REWORK) …waiting on the rework the call filed"
 has "$(field tk-conv notes)" "(waits on tk-child)" "(STAY-REWORK) …which its staying: line names"
 eq "$(field tk-conv status)" "open" "(STAY-REWORK) …with the conversation open"
+# The rework has landed on the PR's branch, and the PR is still open, so the
+# return answers it with --no-rework in place of the stay's --rework.
+setf tk-child status closed
+REWORKS=$(grep -c '^converse-rework ' "$CALLS" || true)
+run_signoff --conversation tk-conv --outcome "landed as agreed" --ruled yes --ruling "fix the retry" --no-rework --no-wait
+eq "$RC" 0 "(STAY-REWORK-RETURN) the return of a rework stay, its call less --stay with --no-rework in place of its --rework, exits 0"
+has "$OUT" "the ruling leaves the branch of tk-anc as it stands" "(STAY-REWORK-RETURN) …leaving the reworked branch as it stands"
+eq "$(grep -c '^converse-rework ' "$CALLS" || true)" "$REWORKS" "(STAY-REWORK-RETURN) …filing no second rework"
+eq "$(field tk-conv status)" "closed" "(STAY-REWORK-RETURN) …and closing the conversation"
 open_pr
 run_signoff --conversation tk-conv --outcome "staying — the retry is reworked" --ruled yes --ruling "fix the retry" --rework --no-wait --stay "the retry backs off"
 eq "$RC" 1 "(STAY-REWORK-UNREAD) a rework child that does not read as this conversation's stops the stay"

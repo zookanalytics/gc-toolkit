@@ -44,7 +44,10 @@
 # It runs each example whose second step depends on its first
 # under a gc that refuses the first step, and fails if anything after it runs.
 # It runs the settle step's arm under a gc that answers a dep add as bd does for
-# a blocker in another store, and fails if the arm runs. It runs the premise
+# a blocker in another store, and fails if the arm runs. It runs the settle
+# step's stay call, and the rework and return calls the settle and continue
+# steps derive from it, through the real sign-off's parser, and fails if the
+# parser refuses one. It runs the premise
 # re-check's moot or benign close under stubs, and fails unless the close
 # settles a headline that still waits on a subject nothing holds any more,
 # leaves one that an open blocker holds, and closes the conversation only once
@@ -889,6 +892,58 @@ for sh_ in $shells; do
         bad "($sh_) converse-settle: a gate that did not land arms nothing" "exit $rc, calls: $(tr '\n' ';' <"$CH/log")"
     fi
 done
+echo "── the stay example, and each call the skills derive from it, passes the sign-off's parser ──"
+# The settle skill gives one stay call and says how its rework form differs from
+# it, and the continue skill says how the return's call differs from the stay's.
+# Each form is built from the example's own arguments the way those skills word
+# it, then run through the real sign-off under a gc that answers nothing. A form
+# the parser takes reaches the conversation read and stops there (exit 1). One
+# it refuses exits 2 before that read.
+have "the stay example's rework form takes --rework --no-wait in place of the wait and its brief" \
+    '# --rework --no-wait in place of --waiting-on and --close-brief when the work is the PR'"'"'s rework' "$SETTLE"
+SV="$TMP/stay-forms"
+mkdir -p "$SV/bin" "$SV/pack"
+printf '#!/bin/sh\nexit 1\n' >"$SV/bin/gc"
+printf '#!/bin/sh\nprintf "%%s\\n" "$@" >"$STAY_ARGV"\n' >"$SV/pack/converse-signoff.sh"
+chmod +x "$SV/bin/gc" "$SV/pack/converse-signoff.sh"
+fenced_block "$SETTLE" '--stay "<what the operator agreed' | sed 's#<[^>]*>#x#g' >"$SV/block"
+# drop_args <file> <flag>... — the arguments in <file>, one per line, less each
+# named flag and the value after it.
+drop_args() {
+    f=$1
+    shift
+    awk -v drop=" $* " 'skip { skip = 0; next } index(drop, " " $0 " ") { skip = 1; next } { print }' "$f"
+}
+if [ ! -s "$SV/block" ]; then
+    bad "converse-settle: the stay example is found" "no fenced bash block holds its --stay in $SETTLE"
+else
+    for sh_ in $shells; do
+        run=$sh_
+        [ "$sh_" = zsh ] && run="zsh -f"
+        rm -f "$SV/stay"
+        (cd "$TMP/away" && env -u BASH_ENV -u ENV STAY_ARGV="$SV/stay" CONV="$SV/pack" CONVERSATION=tk-v \
+            $run "$SV/block" </dev/null >/dev/null 2>&1)
+        { drop_args "$SV/stay" --waiting-on --close-brief; printf '%s\n' --rework --no-wait; } >"$SV/rework"
+        { drop_args "$SV/stay" --stay --waiting-on --close-brief; printf '%s\n' --no-wait; } >"$SV/return"
+        drop_args "$SV/rework" --stay | sed 's/^--rework$/--no-rework/' >"$SV/rework-return"
+        while IFS='|' read -r form label; do
+            args=()
+            while IFS= read -r a; do args+=("$a"); done <"$SV/$form"
+            out=$(cd "$TMP/away" && env -u BASH_ENV -u ENV PATH="$SV/bin:$PATH" \
+                bash "$ROOT/assets/scripts/converse-signoff.sh" ${args[@]+"${args[@]}"} 2>&1)
+            rc=$?
+            case "$rc:$out" in
+                1:*"conversation tk-v could not be read"*) ok "($sh_) $label" ;;
+                *) bad "($sh_) $label" "exit $rc on: ${args[*]+"${args[*]}"}: $out" ;;
+            esac
+        done <<FORMS
+stay|the stay example's call passes the sign-off's parser
+rework|…as does its rework form, with --rework --no-wait in place of --waiting-on and --close-brief
+return|…the return's call, the stay's less --stay with --no-wait in place of its waits and brief
+rework-return|…and the return of a rework stay, with --no-rework in place of its --rework
+FORMS
+    done
+fi
 echo "── a sitting iterating on a document writes one scaffold and names it in the ruling ──"
 have "the step table sends a sitting iterating on a document to its skill" '**Steps 5–8, when the operator is iterating on a document**' "$PROMPT"
 have "…by name" '`converse-iterate-document` |' "$PROMPT"

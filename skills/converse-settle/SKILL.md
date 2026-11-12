@@ -388,7 +388,7 @@ if "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" \
      --ruled yes --ruling "<the ruling, one line>" --waiting-on <the work> \
      --close-brief "<what that work's landing settles here, and what to check once it has>" \
      --stay "<what the operator agreed, which the return compares the work with, one line>"
-     # --rework in place of --waiting-on when the work is the PR's rework, and the other flags as the sign-off above takes them
+     # --rework --no-wait in place of --waiting-on and --close-brief when the work is the PR's rework, and the other flags as the sign-off above takes them
 then
   : # staying — record the hand-back, post it, and end the turn with no drain
 else
