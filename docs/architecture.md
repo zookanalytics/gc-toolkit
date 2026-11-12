@@ -198,8 +198,11 @@ bound for main.
 
 External facts the pack does not write — GitHub closing or retargeting a PR, a
 session dying, a provider quota park, a `gc` build that moves the text the seed
-audit renders — are handled by these reactive paths: `pr-facts.sh` (an arm of
-the cadence) records PR events and files a human gate, the witness patrol
+audit renders — are handled by these reactive paths: the landing order files a
+human gate on the bead when GitHub closes a PR on the pending record without
+merging it, merges another head or moves it to another base, `pr-facts.sh` (an
+arm of the cadence) records the other PR events and files a human gate, the
+witness patrol
 recovers work orphaned by dead sessions, the `dog` pool is warrant executor for
 due-process recovery of wedged sessions (demand-scaled 0-2),
 `quota-park-nudge.sh` nudges a session parked behind a provider limit,
@@ -457,17 +460,19 @@ first. Either way the change is a decision on the record, not a drift.
 Each entry is a place where what is built falls short of the sections above,
 why a reader must know it, and the work that retires it.
 
-- **A refinery push can still force over a commit.** When a branch is not an
-  ancestor of the head the refinery prepared, its merge-push step pushes with a
-  lease that names no commit, so the push can pass over a commit the branch
-  gained after the prep. The merge rewrite (tk-1tfzr71.20) rebuilds the patrol
-  so that no city push overwrites a commit, in a unit its implementation child
-  (tk-1tfzr71.67) files.
 - **The pack still merges each PR itself, and closes on its own record.** Until
   a rig's cutover, the pack merges that rig's PRs under its own approval rule,
   takes a PR open on a work bead's branch whoever opened it, keeps its own
   record of an open PR, and checks each landing write against its transition
-  machine, so steps 6 to 8 are not what runs there today. The merge
-  rewrite's implementation child (tk-1tfzr71.67) files a cutover bead for each
-  rig, which waits on the review loop (tk-1tfzr71.22), and the retirement bead,
-  which deletes the old path once no open bead is on it.
+  machine, so steps 6 to 8 are not what runs there today. Each rig's cutover
+  bead moves the rig onto the pending record once the review loop
+  (tk-1tfzr71.22) lands, along with the board's phase of a pending PR by the
+  evaluator's answer (tk-1tfzr71.88) and a sitting's retirement of one
+  (tk-1tfzr71.89). The retirement bead (tk-1tfzr71.70), which waits on every
+  cutover, deletes the old path once no open bead is on it.
+- **The merge cadence still admits work on a pending record.** The
+  `pr-facts.sh` arms that route a PR's feedback and its conflicts read a PR on
+  the pending record too, so they file rework for its feedback and a merge-in
+  for its conflict, beside the landing order's requeue of a changed head. The
+  refinery's find-work keeps the two off one branch. The GitHub intake
+  (tk-1tfzr71.21) moves that routing into the landing order's run.
