@@ -1307,7 +1307,9 @@ list.
 operator's review, work routed to them, a ruling), with every bead the need
 holds beneath it in the Work queue's order. The Work queue is the work in the
 order it is expected to land, with the work nobody has scheduled after it,
-folded under Not scheduled. The Epics page shows both for each epic and each
+folded under Not scheduled. Work that carries hold:mayor waits for the Product
+Owner: the Unprioritized page lists it, and neither view lists it or counts it.
+The Epics page shows both for each epic and each
 Delivery, over the work each holds nearest, with its closed work folded beneath,
 and each line leads with how many needs hold it. The Needs you and Work queue
 pages show the same views across the rig. Every object, from an epic to a gate,
@@ -1481,11 +1483,14 @@ rather than the supervisor's bead routes.
 `services/gctk/queue`, and every Work queue view lists its rows in that one
 order. Nothing sits above what it waits on: bd graph's execution layers put what
 can go now first, and each layer goes in the order the pool claims ready work,
-priority, then oldest, then id. Work nobody has scheduled comes after the queue,
-and so does work that waits on it. A need sorts by the first bead it holds in
-that order, or by its own place when it is work itself, so the top need holds
-up the front of the queue. The Needs you page counts the needs that hold or
-concern work under an epic, so its count reaches zero as the operator acts.
+priority, then oldest, then id. Work nobody has scheduled comes after the queue.
+So does work that one of Gas City's hold labels keeps from dispatch, unless it
+is in flight, and so does work that waits on either. Work held for the Product
+Owner is placed with the rest, so the work behind it comes after the queue, and
+then no view lists it. A need sorts by the first bead it holds in that order,
+or by its own place when it is work itself, so the top need holds up the front
+of the queue. The Needs you page counts the needs that hold or concern work
+under an epic, so its count reaches zero as the operator acts.
 `specs/tk-yhquh93.13/gas-city-search.md` cites the rules the order composes,
 and `specs/tk-yhquh93.13/board-views.md` records the board's two views.
 

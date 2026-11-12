@@ -24,15 +24,17 @@ views are.
   the pool's claim order, priority, then oldest, then id. Work nobody has
   scheduled comes after the queue, and so does work that waits on it. Whether
   work is scheduled is the board's existing test, armed, routed or assigned, or
-  in flight, now held once in `queue.Scheduled`. The search behind both rules is
-  [gas-city-search.md](gas-city-search.md).
+  in flight, now held once in `queue.Scheduled`, and a bead that one of Gas
+  City's hold labels holds is not scheduled unless it is in flight. The search
+  behind these rules is [gas-city-search.md](gas-city-search.md).
 - **The document.** Each epic and each Delivery carries its Needs you, its Work
   queue and its closed work, over the rows it holds nearest. The Needs you page
   carries every need in the rig, and the Work queue page every open piece of
   work that does not carry hold:mayor. A need's entry lists the beads it holds
   through any chain of waits, as `prstatus.Holding` answers it, in the Work
-  queue's order. A container's counts lead with its needs, then its queue, the
-  work nobody scheduled, and its closed work, at any depth beneath it.
+  queue's order, less work held for the Product Owner. A container's counts
+  lead with its needs, then its queue, the work nobody scheduled, and its closed
+  work, at any depth beneath it.
 - **The words of a bead behind a person's move.** A bead whose own wait is
   another bead's pull request reads "Waits on" that bead, and never that bead's
   words. One whose own wait is a decision reads "Waits on your answer", as one
@@ -71,7 +73,8 @@ epic too, in their place in the order, uncounted.
 | A bead that waits on another bead's pull request says "Waits on <that bead>" | Also a bead that waits on a decision reads "Waits on your answer" | A decision is a question, and a bead waiting on one owes no words of the decision's own either |
 | A need is drawn as one on every page | A need's line 3 counts the beads it holds up wherever it is drawn, across the rig | One rendering. Under an epic the count can exceed the beads listed beneath it, which are the epic's alone |
 | (none) | A bead on a Work queue nests nothing, and the asks no longer nest under work. "Held by a gate" is a row's signal, with the gate's title, and the gate is no longer drawn above the work it holds | The Needs you view beside each Work queue lists what holds each bead, and the queue is one list with no sections |
-| hold:mayor work stays on the Unprioritized tab, out of the queue | It is out of every epic's and Delivery's views and counts too, where the Epics page listed it under its epic before. In the fixture, the Board UI epic (tk-yhquh93) lists three of its seven open beads, and its four units that carry hold:mayor (tk-yhquh93.5 to .8) are on the Unprioritized tab alone | An epic's views are the Work queue's, grouped by epic, and the Work queue holds no hold:mayor work, which the city takes none of until the Product Owner places it. Reaching the epics' views is this build's reading of the bead's call |
+| hold:mayor work stays on the Unprioritized tab, out of the queue | It is out of every epic's and Delivery's views and counts too, where the Epics page listed it under its epic before, and no need lists it beneath it on any page. A need that holds such work, or a conversation about it, reaches an epic's views and counts only through other work. In the fixture, the Board UI epic (tk-yhquh93) lists three of its seven open beads, and its four units that carry hold:mayor (tk-yhquh93.5 to .8) are on the Unprioritized tab alone | An epic's views are the Work queue's and the Needs you tab's, grouped by epic, and neither lists hold:mayor work, which the city takes none of until the Product Owner places it. Reaching the epics' views and a need's list is this build's reading of the bead's call |
+| (none) | Work that carries hold:mayor is placed with the rest before the views leave it out, so the work behind it comes after the queue, under Not scheduled. A bead that hold:mayor or hold:external holds is not scheduled, whatever routes, arms or assigns it, unless it is in flight | Gas City serves a held bead to no worker, and the deferred-dispatch pass slings no armed bead while a hold label holds it, so the work behind it waits for the hold to lift |
 | (none) | A Delivery that is itself a need, such as one that landed and waits for its ruling, is listed in its epic's Needs you, and its band is drawn below with its own views | The need row is the need, listed as the epic's other needs are, and the band is the container |
 
 ## The live board

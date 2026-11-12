@@ -28,6 +28,7 @@ The upstream code below was read on 2026-11-12, at the commits the city runs:
 | The pool's claim order: `routedReadyTierCommand` in Gas City's `internal/config/workquery.go`, and `SortBeadsReadyOrder` in its `internal/beads/query.go` | A pool worker claims routed ready work in "the reader's canonical (priority, created_at, id) default order", bd ready's default `--sort priority` | The rule, yes, and `queue` orders each layer by it. The reader, no. bd ready answers only the work nothing holds, and the queue lists the held work too, layer by layer |
 | bd ready's sort (`BuildReadyWorkOrder` in beads' `internal/storage/sqlbuild/ready.go`) | `ORDER BY priority ASC, created ASC, id ASC` for the priority policy, bd ready's default | The same order as the claim order above, cited at the bd the city runs |
 | bd ready's status rule (`BuildReadyWorkWhere` in the same file) | Ready work is at status open or in_progress, and a bead deferred to a later time is left out | Yes, as the test for what can go now. A bead whose status bd's ready set does not admit, such as deferred, sits in layer 1 at least, though no wait is ahead of it. A claim Gas City records as hooked goes as in_progress does, as the board's table already reads it |
+| Gas City's dispatch holds, `DispatchHoldLabels` and `HasDispatchHold` in its `internal/beadmeta/hold_labels.go` | The two hold labels, `hold:mayor` and `hold:external`, and how a label is compared, trimmed and in any case. Its comment answers "Is this bead WORK for whoever is asking?" with "always no", and every path that serves a bead to an agent as work leaves a held bead out, the assigned-ready tier and the `gc hook --claim` result among them | The rule, yes: `queue.Scheduled` takes no armed, routed or assigned bead that a hold label holds, unless it is in flight, so the work behind held work comes after the queue. The function, no: it sits under Gas City's `internal/`, which Go lets no other module import, so `queue` compares the labels the board's read already holds the same way |
 | `gc ready` (Gas City's federated ready reader, `gcReadyCommand` in `internal/config/workquery.go`) | The ready set across stores, in the same canonical order | No, for the reason bd ready does not: it lists ready work alone |
 | The supervisor's bead routes, `GET /v0/city/{cityName}/beads` and `GET /v0/city/{cityName}/beads/graph/{rootID}` (`collectBeadGraph` in `internal/api/handler_beads.go`) | A rig's beads, and one root's parent-child closure | No. Neither gives a layer or an order, and unit 1's search found their rows carry no await type and fold a deferred or blocked status into open ([specs/tk-yhquh93.2/gas-city-search.md](../tk-yhquh93.2/gas-city-search.md)) |
 
@@ -40,7 +41,10 @@ question, counts as one on a bead in layer 0, as `computeLayout` places a bead
 with no dependencies. Work nobody has scheduled comes after the queue, and so
 does the work that waits on it, so nothing sits above what it waits on. Whether
 work is scheduled is the board's existing test, armed, routed or assigned, or
-in flight by waits' answer, now held once in `queue.Scheduled`.
+in flight by waits' answer, now held once in `queue.Scheduled`. A bead that a
+hold label holds is not scheduled unless it is in flight, as Gas City serves it
+to no worker. Work held for the Product Owner is placed with the rest, so the
+work behind it comes after the queue, and then no view lists it.
 
 ## What holds a bead, and what a need is
 
