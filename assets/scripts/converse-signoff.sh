@@ -224,7 +224,12 @@
 #     "(waits on ...)" is refused. Each bead of that work must be in the
 #     conversation's own store, and none may wait on the conversation itself,
 #     as the anchor of an open PR whose merge the conversation holds does,
-#     since then neither could close.
+#     since then neither could close. When the work is the subject itself, as
+#     when the ruling sends the subject or takes its recommendation, the stay
+#     names it with --waiting-on and no --close-brief: the conversation waits
+#     on it, and the headline takes the other waits, or reads settled when
+#     none is left, because the subject never waits on itself. Without --stay,
+#     a --waiting-on that names the subject is refused.
 #     It is refused on a conversation no sitting holds, and with nothing to
 #     wait on. The sitting signs off on its return with the same call less
 #     --stay, with --no-wait in place of its --waiting-on and --close-brief,
@@ -249,7 +254,8 @@
 #   gate the ruling does not answer, or a --var without --accept or not of the
 #   form <key>=<value>, or a ruling that leaves the subject waiting on work its
 #   closer would check with no --close-brief, a --close-brief where no closer
-#   is armed, or a subject waiting on work in the city's own store.
+#   is armed, a subject waiting on work in the city's own store, or a
+#   --waiting-on that names the subject on a sign-off that does not stay.
 set -u
 
 # >>> control-char-scrub
@@ -452,6 +458,29 @@ if [ -n "$SUBJECT" ] && [ "$SUBJECT" != "$TRACKED" ]; then
   die "--subject $SUBJECT is not the bead conversation $CONVERSATION tracks ($TRACKED), and its record goes on that bead alone; nothing was written"
 fi
 SUBJECT="$TRACKED"
+# The subject never waits on itself. When the work is the subject, because the
+# ruling sends the subject itself or takes its recommendation, a stay names it
+# with --waiting-on for the conversation to wait on, and the headline takes the
+# other waits, or --no-wait when none is left, so it reads settled rather than
+# as a wait no edge holds. A sign-off that does not stay has nothing to wait on
+# the subject, so it is refused there.
+case " $WAIT_IDS " in
+  *" $SUBJECT "*)
+    [ -n "$STAY" ] \
+      || die "--waiting-on $SUBJECT names the subject itself, which waits on nothing of its own; nothing was written. A ruling that sends the subject itself as the work, or takes its recommendation, signs off with --no-wait, and only a stay names the subject, for the conversation to wait on"
+    HEAD_WAIT=()
+    i=0
+    while [ "$i" -lt "${#WAIT[@]}" ]; do
+      if [ "${WAIT[$i]}" = --waiting-on ] && [ "${WAIT[$((i + 1))]}" = "$SUBJECT" ]; then
+        i=$((i + 2))
+        continue
+      fi
+      HEAD_WAIT+=("${WAIT[$i]}")
+      i=$((i + 1))
+    done
+    [ "${#HEAD_WAIT[@]}" -gt 0 ] || HEAD_WAIT=(--no-wait)
+    WAIT=("${HEAD_WAIT[@]}") ;;
+esac
 CONV_STATUS=$(printf '%s' "$CONV_ROW" | jq -r '(.status // "") | ascii_downcase')
 HOLDER=$(printf '%s' "$CONV_ROW" | jq -r '(.assignee // "") | tostring')
 REPLIES=$(printf '%s' "$CONV_ROW" | jq -r '[ .dependencies[]? | objects
@@ -750,7 +779,7 @@ if [ -n "$CLOSER_WAITS" ]; then
   fi
 fi
 [ -z "$CLOSE_BRIEF" ] || [ -n "$CLOSER_RIG" ] \
-  || die "--close-brief is the claim $SUBJECT's validating closer checks once the work it waits on lands, and none of --waiting-on${WAIT_IDS:+ ($WAIT_IDS)} is work in $SUBJECT's own store, a bead that is no gate, so no closer is armed; nothing was written. Drop --close-brief"
+  || die "--close-brief is the claim $SUBJECT's validating closer checks once the work it waits on lands, and none of --waiting-on${WAIT_IDS:+ ($WAIT_IDS)} is work it checks, a bead in $SUBJECT's own store that is no gate and not $SUBJECT itself, so no closer is armed; nothing was written. Drop --close-brief"
 HELM=$(pack_script gc-helm.sh) || stopped "no gc-helm.sh beside $0, so the subject's headline cannot be written; nothing was written"
 
 # gh_bounded <args...> — gh, stopped after 20 seconds. A call stopped that way exits

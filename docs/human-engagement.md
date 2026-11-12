@@ -1287,7 +1287,10 @@ alias, which drops the claim. Gas City does the rest with what it already has
   asks for leaves an asleep sitting asleep.
 - **What the record keeps.** The subject's wait, its close brief and its
   validating closer's arm are written at the stay, as at a hand-off, so the
-  subject's next steps stand whether or not the sitting comes back. A sitting
+  subject's next steps stand whether or not the sitting comes back. When the
+  work is the subject itself, sent on a formula or taking its recommendation,
+  the conversation waits on the subject, whose headline reads settled, and no
+  closer is armed. A sitting
   that cannot come back, because its session was closed, leaves its
   conversation open, and once the work closes the next engagement takes up
   the return from the record.
