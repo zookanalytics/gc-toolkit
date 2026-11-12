@@ -50,14 +50,21 @@
 #              conversation replies to the gate; none waiting files nothing and
 #              says why
 #   (GATE-TWO) a gate two open beads wait on files about the one whose wait on
-#              it is oldest, and the ask, a question's included, ends naming the
-#              other bead, as does the note a concern leaves on a conversation
-#              it joins, while a join onto a conversation whose ask already
-#              names it notes nothing; a caller that showed the other bead, or
-#              a read of the waits that answers without a bead, files nothing,
-#              exit 4
+#              it is oldest, its ask what is asked, a question's included, and
+#              a note on the create naming the other bead, as a concern leaves
+#              one on a conversation it joins, while a join onto a conversation
+#              whose note already names it notes nothing; a caller that showed
+#              the other bead, or a read of the waits that answers without a
+#              bead, files nothing, exit 4
+#   (GATE-TWO-SAME-ASK) a conversation that asks the question already and names
+#              no other bead, joined through the gate, takes the note naming
+#              the other bead and no copy of the question
+#   (RETRY-WAITERS) a save again finds the conversation a failed save filed by
+#              its question, with --conversation and with no id, after the beads
+#              waiting on the gate change, and notes the ones it holds now;
+#              another question is refused, exit 4
 #   (FROM)     --from names the bead the gate was reached from: a gate several
-#              open beads wait on files about that one, its ask naming the
+#              open beads wait on files about that one, with a note naming the
 #              other; one that holds it only through another bead is taken as
 #              without --from; one that no longer holds it, or whose holds do
 #              not read, files nothing, exit 4; beside --new-subject it is
@@ -131,6 +138,8 @@ mkdir -p "$TMP/bin"
 #     An id in $FAKE_LIST_DROPS is left out, as a row the store did not return,
 #     and an id $FAKE_WAITER_ROWS (a JSON object) keys answers that row, as a
 #     bead waiting on a gate, its blocks edge carrying when the wait began.
+#   bd create — files tk-conv1, keeping its ask (-d) in $TMP_CREATE_DESC and
+#     its note (--notes) in $TMP_CREATE_NOTES, so a case reads each whole.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 ${2:-}" in
   "rig list")
@@ -249,6 +258,8 @@ case "$1 ${2:-}" in
       case "$_prev" in
         --deps) printf '%s' "${a#tracks:}" > "$TMP_SUBJ" ;;
         --assignee) printf '%s' "$a" > "$TMP_ASG" ;;
+        -d) printf '%s' "$a" > "$TMP_CREATE_DESC" ;;
+        --notes) printf '%s' "$a" > "$TMP_CREATE_NOTES" ;;
       esac
       _prev="$a"
     done
@@ -285,15 +296,18 @@ chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
 export FAKE_CALLS="$TMP/calls" TMP_SUBJ="$TMP/subj" TMP_ASG="$TMP/asg" TMP_REPLIES="$TMP/replies" TMP_TRACKED="$TMP/tracked"
 export TMP_NOTES="$TMP/notes" TMP_NOW_STATUS="$TMP/now-status" TMP_TRACKS_READS="$TMP/tracks-reads"
+export TMP_CREATE_DESC="$TMP/create-desc" TMP_CREATE_NOTES="$TMP/create-notes"
 # Neutralize any inherited helm fixture hook so enumerate_rigs uses the stub.
 unset GC_HELM_FIXTURE || true
 # Keep the cache out of the operator's real cache dir.
 export TMPDIR="$TMP"
 
-# reset_store — forget the conversation an earlier case filed, the notes an
-# update appended, a close an update made, and the listings counted.
+# reset_store — forget the conversation an earlier case filed, with the ask and
+# the note its create carried, the notes an update appended, a close an update
+# made, and the listings counted.
 reset_store() {
     : > "$FAKE_CALLS"; rm -f "$TMP_SUBJ" "$TMP_ASG" "$TMP_TRACKED" "$TMP_NOTES" "$TMP_NOW_STATUS" "$TMP_TRACKS_READS"
+    rm -f "$TMP_CREATE_DESC" "$TMP_CREATE_NOTES"
     : > "$TMP_REPLIES"
 }
 
@@ -641,9 +655,10 @@ grep -q -- '--title Approve the rollout' <<< "$CALLS" \
 grep -q 'Answer the human gate tk-gate1' <<< "$CALLS" \
   && ok "(GATE) its ask names the gate" || bad "(GATE) ask names the gate (calls: $CALLS)"
 # (GATE-TWO) a gate two open beads wait on files about the one whose wait on it
-# is oldest: tk-child here, though its id sorts after tk-anchor's. The ask names
-# the other bead, so the sitting sees each bead the answer reaches, and so does
-# the note a concern leaves on a conversation it joins.
+# is oldest: tk-child here, though its id sorts after tk-anchor's. A note names
+# the other bead, filed with the conversation or left on one the concern joins,
+# so the sitting sees each bead the answer reaches, and the ask stays what is
+# asked.
 export FAKE_WAITERS='[{"id":"tk-anchor","status":"open"},{"id":"tk-child","status":"in_progress"}]'
 export FAKE_WAITER_ROWS='{
   "tk-anchor": {"id":"tk-anchor","issue_type":"task","status":"open","dependencies":[{"issue_id":"tk-anchor","depends_on_id":"tk-gate1","type":"blocks","created_at":"2026-11-06T07:42:23Z"}]},
@@ -653,17 +668,16 @@ eq "$RC" "0" "(GATE-TWO) a gate two open beads wait on exits 0"
 grep -q -- '--deps tracks:tk-child' <<< "$CALLS" && grep -q 'bd dep add tk-conv1 tk-gate1 --type replies-to' <<< "$CALLS" \
   && ok "(GATE-TWO) …filing on the bead whose wait on it is oldest, replying to the gate" \
   || bad "(GATE-TWO) filed on the bead that has waited longest (calls: $CALLS)"
-grep -q 'Answer the human gate tk-gate1 on tk-child' <<< "$CALLS" && grep -qx 'Gate tk-gate1 also holds tk-anchor, which waits on the same answer. --deps tracks:tk-child --assignee human --json' <<< "$CALLS" \
-  && ok "(GATE-TWO) …asking what the gate asks, and closing the ask with the other bead it holds" \
-  || bad "(GATE-TWO) the ask names the other bead (calls: $CALLS)"
+eq "$(cat "$TMP_CREATE_DESC" 2>/dev/null)" "$(printf 'Answer the human gate tk-gate1 on tk-child: Approve the rollout.\n\nGate on the waiting bead. Approve it or say why not.')" \
+  "(GATE-TWO) …asking what the gate asks, and only that"
+eq "$(cat "$TMP_CREATE_NOTES" 2>/dev/null)" 'Gate tk-gate1 also holds tk-anchor, which waits on the same answer.' "(GATE-TWO) …in a conversation filed with a note naming the other bead the gate holds"
 grep -q 'tk-gate1 is a gate about tk-child and tk-anchor — the conversation is about tk-child, which has waited on it longest' <<< "$ERR" \
   && ok "(GATE-TWO) …saying which bead it took, and why" || bad "(GATE-TWO) names the bead it took (err: $ERR)"
 run_open found tk-gate1 --if-subject tk-child --allow-duplicate --reason "is the wording right?" --json
 eq "$RC" "0" "(GATE-TWO) a question for the bead the caller showed files, exit 0"
 eq "$(printf '%s' "$OUT" | jq -c .)" '{"subject":"tk-child","conversation":"tk-conv1","filed":true}' "(GATE-TWO) …answering the conversation on that bead"
-grep -q -- '-d is the wording right?' <<< "$CALLS" && grep -qx 'Gate tk-gate1 also holds tk-anchor, which waits on the same answer. --deps tracks:tk-child --assignee human --json' <<< "$CALLS" \
-  && ok "(GATE-TWO) …its ask the question, then the other bead the gate holds" \
-  || bad "(GATE-TWO) a question's ask names the other bead (calls: $CALLS)"
+eq "$(cat "$TMP_CREATE_DESC" 2>/dev/null)" "is the wording right?" "(GATE-TWO) …its ask the question alone"
+eq "$(cat "$TMP_CREATE_NOTES" 2>/dev/null)" 'Gate tk-gate1 also holds tk-anchor, which waits on the same answer.' "(GATE-TWO) …and its note the other bead the gate holds"
 run_open found tk-gate1 --if-subject tk-anchor
 eq "$RC" "4" "(GATE-TWO) a caller that showed the other bead files nothing, exit 4"
 [ -z "$CALLS" ] && ok "(GATE-TWO) …nothing filed" || bad "(GATE-TWO) filed something (calls: $CALLS)"
@@ -673,12 +687,40 @@ eq "$RC" "0" "(GATE-TWO) the gate opened while the bead's conversation waits in 
 grep -q 'bd update tk-conv0 --if-assignee human --if-status open --append-notes Gate tk-gate1 also holds tk-anchor, which waits on the same answer.' <<< "$CALLS" \
   && ok "(GATE-TWO) …joining it with a note naming the other bead the gate holds" || bad "(GATE-TWO) the join's note (calls: $CALLS)"
 grep -q 'bd create' <<< "$CALLS" && bad "(GATE-TWO) filed a second conversation (calls: $CALLS)" || ok "(GATE-TWO) …and filing none"
-FAKE_CONV_DESC="$(printf 'Answer the human gate tk-gate1 on tk-child: Approve the rollout.\n\nGate on the waiting bead. Approve it or say why not.\n\nGate tk-gate1 also holds tk-anchor, which waits on the same answer.')" \
+FAKE_CONV_DESC="$(printf 'Answer the human gate tk-gate1 on tk-child: Approve the rollout.\n\nGate on the waiting bead. Approve it or say why not.')" \
+FAKE_CONV_NOTES='Gate tk-gate1 also holds tk-anchor, which waits on the same answer.' \
   run_open found tk-gate1
 eq "$RC" "0" "(GATE-TWO) the gate opened again onto the conversation an earlier open filed there exits 0"
-grep -q -- '--append-notes' <<< "$CALLS" && bad "(GATE-TWO) noted the other bead its ask already names (calls: $CALLS)" \
-  || ok "(GATE-TWO) …noting nothing, since its ask already names the other bead"
+grep -q -- '--append-notes' <<< "$CALLS" && bad "(GATE-TWO) noted the other bead its note already names (calls: $CALLS)" \
+  || ok "(GATE-TWO) …noting nothing, since its note already names the other bead"
 grep -q 'bd create' <<< "$CALLS" && bad "(GATE-TWO) filed a second conversation (calls: $CALLS)" || ok "(GATE-TWO) …and filing none"
+# (GATE-TWO-SAME-ASK) a conversation filed on the bead itself asks the question
+# and names no other bead. Asked again through the gate, the question joins it:
+# the conversation takes the note naming the other bead the gate holds, and no
+# copy of the question it already asks.
+FAKE_CONV_DESC="is the wording right?" run_open found tk-gate1 --reason "is the wording right?"
+eq "$RC" "0" "(GATE-TWO-SAME-ASK) the question asked through the gate of a conversation that asks it exits 0"
+[ "$(grep -c '^bd update' <<< "$CALLS" || true)" = 1 ] \
+  && grep -qx 'bd update tk-conv0 --if-assignee human --if-status open --append-notes Gate tk-gate1 also holds tk-anchor, which waits on the same answer.' <<< "$CALLS" \
+  && ok "(GATE-TWO-SAME-ASK) …joining it with one guarded note naming the other bead the gate holds" \
+  || bad "(GATE-TWO-SAME-ASK) the join's note (calls: $CALLS)"
+grep -q 'Another concern joined' <<< "$CALLS" \
+  && bad "(GATE-TWO-SAME-ASK) noted the question the conversation asks (calls: $CALLS)" \
+  || ok "(GATE-TWO-SAME-ASK) …and no copy of the question it asks"
+grep -q 'bd dep add tk-conv0 tk-gate1 --type replies-to' <<< "$CALLS" \
+  && ok "(GATE-TWO-SAME-ASK) …replying to the gate" || bad "(GATE-TWO-SAME-ASK) reply (calls: $CALLS)"
+grep -q 'bd create' <<< "$CALLS" && bad "(GATE-TWO-SAME-ASK) filed a second conversation (calls: $CALLS)" || ok "(GATE-TWO-SAME-ASK) …filing none"
+FAKE_CONV_DESC="is the wording right?" FAKE_CONV_NOTES='Gate tk-gate1 also holds tk-anchor, which waits on the same answer.' \
+  run_open found tk-gate1 --reason "is the wording right?"
+eq "$RC" "0" "(GATE-TWO-SAME-ASK) the same question again exits 0"
+grep -q -- '--append-notes' <<< "$CALLS" && bad "(GATE-TWO-SAME-ASK) noted what the conversation carries (calls: $CALLS)" \
+  || ok "(GATE-TWO-SAME-ASK) …noting nothing once the conversation carries the note"
+FAKE_CONV_DESC="is the wording right?" run_open found tk-gate1 --reason "and the cost?"
+[ "$(grep -c '^bd update' <<< "$CALLS" || true)" = 1 ] \
+  && grep -q '^bd update tk-conv0 --if-assignee human --if-status open --append-notes Another concern joined this conversation: and the cost?$' <<< "$CALLS" \
+  && grep -qx 'Gate tk-gate1 also holds tk-anchor, which waits on the same answer.' <<< "$CALLS" \
+  && ok "(GATE-TWO-SAME-ASK) another question joined through the gate leaves one note: the concern, then the other bead" \
+  || bad "(GATE-TWO-SAME-ASK) one note carrying both (calls: $CALLS)"
 unset FAKE_CONV
 FAKE_LIST_DROPS=tk-child run_open found tk-gate1
 eq "$RC" "4" "(GATE-TWO) a read of the waits that answers without a bead's row exits 4"
@@ -722,8 +764,7 @@ grep -q -- '--deps tracks:tk-child' <<< "$CALLS" && grep -q 'bd dep add tk-conv1
   && ok "(FROM) …filing the conversation on that bead, replying to the gate" || bad "(FROM) filed on the --from bead (calls: $CALLS)"
 grep -q -- '--deps tracks:tk-anchor' <<< "$CALLS" \
   && bad "(FROM) filed on the other bead waiting (calls: $CALLS)" || ok "(FROM) …and not on the other bead waiting"
-grep -qx 'Gate tk-gate1 also holds tk-anchor, which waits on the same answer. --deps tracks:tk-child --assignee human --json' <<< "$CALLS" \
-  && ok "(FROM) …its ask naming the other bead the gate holds" || bad "(FROM) the ask names the other bead (calls: $CALLS)"
+eq "$(cat "$TMP_CREATE_NOTES" 2>/dev/null)" 'Gate tk-gate1 also holds tk-anchor, which waits on the same answer.' "(FROM) …with a note naming the other bead the gate holds"
 eq "$(printf '%s' "$OUT" | jq -c .)" '{"subject":"tk-child","conversation":"tk-conv1","filed":true}' "(FROM) --json answers the conversation on the --from bead"
 run_open found tk-gate1 --from tk-other
 eq "$RC" "4" "(FROM-NOT-WAITING) --from a bead the gate does not hold exits 4"
@@ -768,6 +809,54 @@ set -e
 eq "$RC" "2" "(IF-SUBJECT-NEW) --if-subject beside --new-subject exits 2"
 grep -q -- '--if-subject names an existing subject' <<< "$OUT" \
   && ok "(IF-SUBJECT-NEW) …saying the two cannot go together" || bad "(IF-SUBJECT-NEW) message (out: $OUT)"
+
+# --- (RETRY-WAITERS) a save again finds its conversation as the waits change --
+# A save through a gate two beads wait on files the question as the
+# conversation's ask and the other bead in its note, and the store refuses its
+# reply onto the gate. The save again finds that conversation by the question,
+# by its id and with no id, after the other bead stops waiting, and after a
+# third starts, when the conversation takes the note naming the beads the gate
+# holds now; another question is still refused. Each save again reads the
+# conversation the first save filed, its ask and its note as the create
+# carried them.
+export FAKE_WAITERS='[{"id":"tk-anchor","status":"open"},{"id":"tk-child","status":"in_progress"}]'
+export FAKE_WAITER_ROWS='{
+  "tk-anchor": {"id":"tk-anchor","issue_type":"task","status":"open","dependencies":[{"issue_id":"tk-anchor","depends_on_id":"tk-gate1","type":"blocks","created_at":"2026-11-06T07:42:23Z"}]},
+  "tk-child":  {"id":"tk-child","issue_type":"task","status":"in_progress","dependencies":[{"issue_id":"tk-child","depends_on_id":"tk-gate1","type":"blocks","created_at":"2026-11-01T11:35:20Z"}]},
+  "tk-third":  {"id":"tk-third","issue_type":"task","status":"open","dependencies":[{"issue_id":"tk-third","depends_on_id":"tk-gate1","type":"blocks","created_at":"2026-11-09T09:00:00Z"}]}}'
+FAKE_REPLY_REFUSED=1 run_open found tk-gate1 --allow-duplicate --if-subject tk-child --reason "is the wording right?" --json
+eq "$RC" "4" "(RETRY-WAITERS) a save through the gate whose reply the store refuses exits 4"
+eq "$OUT" '{"subject":"tk-child","conversation":"tk-conv1","filed":true}' "(RETRY-WAITERS) …naming the conversation it filed"
+FAKE_CONV_DESC=$(cat "$TMP_CREATE_DESC" 2>/dev/null) || true
+FAKE_CONV_NOTES=$(cat "$TMP_CREATE_NOTES" 2>/dev/null) || true
+export FAKE_CONV=tk-conv1 FAKE_CONV_DESC FAKE_CONV_NOTES
+export FAKE_WAITERS='[{"id":"tk-anchor","status":"closed"},{"id":"tk-child","status":"in_progress"}]'
+run_open found tk-gate1 --allow-duplicate --if-subject tk-child --conversation tk-conv1 --reason "is the wording right?" --json
+eq "$RC" "0" "(RETRY-WAITERS) the save again by its id, once the other bead stopped waiting, exits 0"
+eq "$OUT" '{"subject":"tk-child","conversation":"tk-conv1","filed":true}' "(RETRY-WAITERS) …naming that conversation"
+grep -q '^bd create' <<< "$CALLS" && bad "(RETRY-WAITERS) filed a second conversation (calls: $CALLS)" || ok "(RETRY-WAITERS) …filing none"
+grep -q 'bd dep add tk-conv1 tk-gate1 --type replies-to' <<< "$CALLS" \
+  && ok "(RETRY-WAITERS) …and completing its reply onto the gate" || bad "(RETRY-WAITERS) reply (calls: $CALLS)"
+grep -q -- '--append-notes' <<< "$CALLS" && bad "(RETRY-WAITERS) noted beads the gate no longer holds (calls: $CALLS)" \
+  || ok "(RETRY-WAITERS) …adding no note, since the gate holds no other bead now"
+run_open found tk-gate1 --allow-duplicate --if-subject tk-child --reason "is the wording right?" --json
+eq "$RC" "0" "(RETRY-WAITERS) the save again with no id exits 0"
+eq "$OUT" '{"subject":"tk-child","conversation":"tk-conv1","filed":true}' "(RETRY-WAITERS) …landing on that conversation"
+grep -q '^bd create' <<< "$CALLS" && bad "(RETRY-WAITERS) filed a second conversation with no id (calls: $CALLS)" || ok "(RETRY-WAITERS) …filing none"
+grep -q 'bd dep add tk-conv1 tk-gate1 --type replies-to' <<< "$CALLS" \
+  && ok "(RETRY-WAITERS) …and completing its reply" || bad "(RETRY-WAITERS) reply with no id (calls: $CALLS)"
+run_open found tk-gate1 --allow-duplicate --if-subject tk-child --conversation tk-conv1 --reason "another question" --json
+eq "$RC" "4" "(RETRY-WAITERS) another question saved again onto that conversation exits 4"
+[ -z "$CALLS" ] && ok "(RETRY-WAITERS) …writing nothing" || bad "(RETRY-WAITERS) wrote something (calls: $CALLS)"
+grep -q 'conversation tk-conv1 on tk-child holds another ask than this concern' <<< "$ERR" \
+  && ok "(RETRY-WAITERS) …and saying it holds another ask" || bad "(RETRY-WAITERS) message (err: $ERR)"
+export FAKE_WAITERS='[{"id":"tk-anchor","status":"open"},{"id":"tk-child","status":"in_progress"},{"id":"tk-third","status":"open"}]'
+run_open found tk-gate1 --allow-duplicate --if-subject tk-child --conversation tk-conv1 --reason "is the wording right?" --json
+eq "$RC" "0" "(RETRY-WAITERS) the save again by its id, once a third bead waits too, exits 0"
+grep -q '^bd create' <<< "$CALLS" && bad "(RETRY-WAITERS) filed a second conversation (calls: $CALLS)" || ok "(RETRY-WAITERS) …filing none"
+grep -qx 'bd update tk-conv1 --append-notes Gate tk-gate1 also holds tk-anchor and tk-third, which wait on the same answer.' <<< "$CALLS" \
+  && ok "(RETRY-WAITERS) …and noting the beads the gate holds now" || bad "(RETRY-WAITERS) the note (calls: $CALLS)"
+unset FAKE_CONV FAKE_CONV_DESC FAKE_CONV_NOTES FAKE_WAITERS FAKE_WAITER_ROWS
 
 # --- (MISSING) a typo must file NOTHING ----------------------------------------
 run_open missing tk-nope1

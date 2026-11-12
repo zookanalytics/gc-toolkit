@@ -67,8 +67,9 @@
 #             gate before any sitting starts; none waiting starts nothing and
 #             says why; of two waiting, engage takes the one whose wait on the
 #             gate is oldest, and a conversation it files there, a concern's
-#             included, names the other in its ask, while one the bead already
-#             has takes a note naming it, once (GATE-TWO, GATE-TWO-NEW),
+#             included, is filed with a note naming the other and its ask left
+#             the question, while one the bead already has takes that note,
+#             once (GATE-TWO, GATE-TWO-NEW),
 #             and two engaged --from one of them take that one; a gate that
 #             holds the --from bead only through another bead is taken as
 #             without --from, and one that no longer holds it starts nothing
@@ -570,6 +571,7 @@ case "$1 ${2:-}" in
             --assignee) printf '%s' "$a" > "$ST/tk-new.assignee" ;;
             --title) printf '%s' "$a" > "$ST/tk-new.title" ;;
             -d) printf '%s' "$a" > "$ST/tk-new.description" ;;
+            --notes) printf '%s\n' "$a" > "$ST/tk-new.notes" ;;
           esac
           _p="$a"
         done
@@ -1108,12 +1110,14 @@ export HAVE_CONV=0
 reset; run_engage tk-gate --no-input --no-attach
 eq "$RC" 0 "(GATE-TWO-NEW) the gate engaged while that bead has no conversation exits 0"
 has "$CALLED" "--deps tracks:tk-subj" "(GATE-TWO-NEW) …filing one on that bead"
-eq "$(tail -n 1 "$STATE_DIR/tk-new.description")" "Gate tk-gate also holds tk-child, which waits on the same answer." "(GATE-TWO-NEW) …whose ask ends naming the other bead the gate holds"
+eq "$(cat "$STATE_DIR/tk-new.notes")" "Gate tk-gate also holds tk-child, which waits on the same answer." "(GATE-TWO-NEW) …filed with a note naming the other bead the gate holds"
+eq "$(cat "$STATE_DIR/tk-new.description")" "$(printf 'Answer the human gate tk-gate on tk-subj: Approve the rollout.\n\nGate on the waiting bead.')" "(GATE-TWO-NEW) …its ask what the gate asks, and only that"
 hasnt "$CALLED" "--append-notes" "(GATE-TWO-NEW) …and no note repeating it"
 reset; run_engage tk-gate --reason "is the wording right?" --no-input --no-attach
 eq "$RC" 0 "(GATE-TWO-NEW) a concern engaged on the gate exits 0"
 has "$CALLED" "--deps tracks:tk-subj" "(GATE-TWO-NEW) …filing its conversation on that bead"
-eq "$(cat "$STATE_DIR/tk-new.description")" "$(printf 'is the wording right?\n\nGate tk-gate also holds tk-child, which waits on the same answer.')" "(GATE-TWO-NEW) …its ask the concern, then the other bead the gate holds"
+eq "$(cat "$STATE_DIR/tk-new.description")" "is the wording right?" "(GATE-TWO-NEW) …its ask the concern alone"
+eq "$(cat "$STATE_DIR/tk-new.notes")" "Gate tk-gate also holds tk-child, which waits on the same answer." "(GATE-TWO-NEW) …and its note the other bead the gate holds"
 has "$CALLED" "bd dep bd dep add tk-new tk-gate --type replies-to" "(GATE-TWO-NEW) …replying to the gate"
 unset HAVE_CONV WAITER_ROWS
 

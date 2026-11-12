@@ -250,9 +250,12 @@ these steps:
    the same bead and finds the conversation filed there, and since
    `gc bd gate create --blocks` writes a gate with its first edge, that bead is
    normally the one the question was asked about. A conversation filed on the
-   question names the other beads it holds in its ask, and one engage lands on
-   that the bead already has takes the same sentence as a note, once, so the
-   sitting sees each bead its answer reaches. `accept`, `dismiss` and
+   question carries a note naming the other beads the gate holds, and one that
+   `open` or engage lands on that does not name them as they stand takes the
+   same note, once, so the sitting sees each bead its answer reaches. The note
+   stays out of the conversation's ask, because the beads waiting on a gate
+   change while the question does not, and a save again finds its conversation
+   by the ask. `accept`, `dismiss` and
    `handback` refuse such a gate, naming its beads, because a pick there would
    act on a bead nobody named. With none waiting, engage says nothing waits on
    the gate, names any closed bead the gate was about, and starts nothing, and

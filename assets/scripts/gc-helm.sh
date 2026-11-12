@@ -53,7 +53,7 @@ FIXTURE="${GC_HELM_FIXTURE:-}"              # test hook: <dir>/rigs.json replace
 usage() {
     cat >&2 <<'EOF'
 Usage:
-  gc-helm open  <bead-id> [--reason "..."] [--body "..."] [--allow-duplicate] [--if-subject <id>] [--conversation <id>] [--from <bead-id>] [--json]  file a conversation about the bead in the operator's queue, for the operator to engage; a second concern joins the bead's conversation already in the queue unless --allow-duplicate files a fresh one, which lands instead on a conversation in the queue whose whole ask is that concern; a conversation about an open PR, or a bead of one, holds the PR's merge until it closes; --if-subject files only while the reference still names that subject, and a reference that names another now, through a successor, a PR's anchor or a gate's waiter, files nothing (exit 4); --conversation completes the conversation an earlier open filed for the concern, by its id, wherever it stands, adding the reply onto the gate that did not land, and the hold on an open PR's merge only while the conversation waits in the queue, since a sitting that has taken it keeps or lifts that hold; one no longer open on the bead or holding another ask files nothing (exit 4); a gate several open beads wait on files the conversation about the one whose wait on it is oldest, naming the others in its ask; --from names the bead a gate was reached from, and such a gate files the conversation about that bead while it is one of them, while a gate that no longer holds that bead files nothing (exit 4); --json prints {subject,conversation,filed}, and names the conversation on every exit once it is filed
+  gc-helm open  <bead-id> [--reason "..."] [--body "..."] [--allow-duplicate] [--if-subject <id>] [--conversation <id>] [--from <bead-id>] [--json]  file a conversation about the bead in the operator's queue, for the operator to engage; a second concern joins the bead's conversation already in the queue unless --allow-duplicate files a fresh one, which lands instead on a conversation in the queue whose whole ask is that concern; a conversation about an open PR, or a bead of one, holds the PR's merge until it closes; --if-subject files only while the reference still names that subject, and a reference that names another now, through a successor, a PR's anchor or a gate's waiter, files nothing (exit 4); --conversation completes the conversation an earlier open filed for the concern, by its id, wherever it stands, adding the reply onto the gate that did not land, and the hold on an open PR's merge only while the conversation waits in the queue, since a sitting that has taken it keeps or lifts that hold; one no longer open on the bead or holding another ask files nothing (exit 4); a gate several open beads wait on files the conversation about the one whose wait on it is oldest, with a note naming the others; --from names the bead a gate was reached from, and such a gate files the conversation about that bead while it is one of them, while a gate that no longer holds that bead files nothing (exit 4); --json prints {subject,conversation,filed}, and names the conversation on every exit once it is filed
   gc-helm open  --new-subject --rig <name> [<question> | --reason "<question>"] [--json]  file a FRESH subject in the named rig for a topic that has no bead yet, the question unchanged in its description and its title derived from the question's opening, then its conversation in the queue; --json answers the subject, filed:false, the moment it is filed, and open's last answer is the one that counts, so a subject filed whose conversation is not is named for a re-run onto it
   gc-helm engage [<subject>] [--subject <id>] [--from <bead-id>] [--new-subject [--rig <name>]] [--model <variant>] [--skill <name>] [--reason "..." | --template <key>] [--no-input] [--no-attach]  hold a conversation about the bead in a converse sitting and attach: attach to its live sitting, or take its conversation from the queue, or file one, then spawn a sitting named for it. Pointed at a human gate it takes the one bead still waiting on the gate, or of several waiting the --from bead when it is one of them and otherwise the one whose wait on it is oldest, and the conversation replies to the gate. On a terminal, with no --reason, --template or --skill, it opens the conversation form instead: subject (a bead or a PR, or a rig's name or prefix typed there for a new topic in that rig), question, model and whether to attach on one screen, filled in from the command line, where --rig fills in the subject and --no-attach turns attaching off; --no-input keeps the flag-driven one-shot path. --skill seeds the sitting with any skill it carries as its lens on the subject (--skill review-arch is a conversation with the Architect). --new-subject files a FRESH subject bead in the --rig rig (the positional text, or --reason, is the question; its title is derived from the question's opening) and engages it in one gesture
   gc-helm attach [<conversation>]  return to a conversation: with an id, engage's attach (a live sitting once it has started, or a new sitting on a conversation whose sitting ended or that waits in the queue); with none, on a terminal, the conversation form's list of conversations to return to, by topic and readiness
@@ -104,9 +104,9 @@ the sitting to start on its own, to attach later). Pointed at a human gate,
 engage takes the one bead still waiting on the gate and makes the conversation
 it lands on reply to the gate; with several beads waiting it takes the --from
 bead when that bead is one of them, and otherwise the one whose wait on the gate
-is oldest, so engaging the question again lands on the same bead, and the
-conversation names the others, in its ask when engage files it and in a note
-written once when the bead already has it; with none it says nothing waits and
+is oldest, so engaging the question again lands on the same bead, and a note
+on the conversation names the others, filed with it when engage files it and
+written once onto one the bead already has; with none it says nothing waits and
 starts nothing.
 Named by a conversation that has closed, engage says when it closed and the
 first line of its last hand-back after the header, starts nothing and names
@@ -2326,13 +2326,38 @@ gate_pick() {
 # gate_others_line — the sentence a conversation that answers a gate several
 # open beads wait on carries about the other beads (TAKE_OTHERS), so its sitting
 # sees each bead the answer reaches. Empty when the conversation answers no gate
-# or the gate holds no other bead.
+# or the gate holds no other bead. The sentence rides in the conversation's
+# notes and never in its ask: the beads waiting on a gate change while the
+# question stays the same, and the ask is what a run again matches the
+# conversation by.
 gate_others_line() {
     [ -n "$TAKE_GATE" ] && [ -n "$TAKE_OTHERS" ] || return 0
     # shellcheck disable=SC2086  # one word per bead
     set -- $TAKE_OTHERS
     _gol_waits="wait"; [ $# -gt 1 ] || _gol_waits="waits"
     printf 'Gate %s also holds %s, which %s on the same answer.' "$TAKE_GATE" "$(words_and "$@")" "$_gol_waits"
+}
+
+# conversation_carries <row> <text> — 0 iff the conversation's row, a row_now
+# answer, holds the text in its ask or its notes. A row that did not read holds
+# nothing.
+conversation_carries() {
+    printf '%s' "$1" | jq -e --arg n "$2" '((.description // "") + "\n" + (.notes // "")) | contains($n)' >/dev/null 2>&1
+}
+
+# conversation_note_others <verb> <conversation> <sentence> <gate> — give a
+# conversation that open or engage lands on, and did not file this run, the
+# sentence naming the other open beads the gate holds now (gate_others_line) as
+# a note, unless it carries that sentence already, so its sitting sees each bead
+# the answer reaches. A row that does not read proves nothing, so the note is
+# written. The conversation's reply onto the gate names the gate to its sitting,
+# so a note the store refuses costs a warning.
+conversation_note_others() {
+    [ -n "$3" ] || return 0
+    conversation_carries "$(row_now "$2")" "$3" && return 0
+    gc bd update "$2" --append-notes "$3" >/dev/null 2>&1 \
+        || echo "$PROG: $1: warning: the store refused the note on conversation $2 naming the other beads gate $4 holds; they are listed by: gc bd dep list $4 --direction=up --type blocks" >&2
+    return 0
 }
 
 # take_bead <verb> <nothing-msg> [<from>] — settle which bead a conversation is about,
@@ -2537,42 +2562,54 @@ open_edges() {
     return "$_oe_rc"
 }
 
-# open_join <conversation> — join open's concern ($join_note, empty for none)
-# to a conversation waiting in the operator's queue, assigned to `human` and
-# open, which is where a sitting claims it and reads its notes. The note is
-# appended once, in a write guarded on that queue state, so a conversation a
-# sitting took or a dismiss closed after open's listing takes no note, and the
-# write's exit says whether the note landed. The conversation then takes the
-# hold on an open PR's merge and the reply onto a pointed gate (open_edges). The
-# row is then read to tell that it still waits in the queue. Returns 0 once it
-# does; 1 when the conversation is no longer in the queue, so it cannot receive
-# the concern and the caller moves on to the next one; and 2 when a write or
-# that read failed, which it says on stderr.
+# open_join <conversation> — join open's concern ($join_concern, empty for none)
+# and the sentence naming the other open beads the gate holds ($open_others,
+# empty for none) to a conversation waiting in the operator's queue, assigned to
+# `human` and open, which is where a sitting claims it and reads its notes. What
+# the conversation does not carry yet is appended in one note, in a write
+# guarded on that queue state, so a conversation a sitting took or a dismiss
+# closed after open's listing takes no note, and the write's exit says whether
+# the note landed. The conversation then takes the hold on an open PR's merge
+# and the reply onto a pointed gate (open_edges). The row is then read to tell
+# that it still waits in the queue. Returns 0 once it does; 1 when the
+# conversation is no longer in the queue, so it cannot receive the note and the
+# caller moves on to the next one; and 2 when a write or that read failed,
+# which it says on stderr.
 open_join() {
-    _oj_c="$1"; _oj_ask="${open_body:-$open_reason}"
-    # $1 is a row_now answer: a row in the queue carries the concern when it is
-    # the conversation's own ask, or when its ask or a note an earlier join
-    # appended already holds the note, as the ask open files on a gate holds
-    # the sentence naming the other beads the gate holds.
+    _oj_c="$1"; _oj_ask="${open_body:-$open_reason}"; _oj_note=""
     _oj_queued='((.assignee // "") | tostring) == "human" and ((.status // "") | tostring | ascii_downcase) == "open"'
-    _oj_carries='((.description // "") == $ask) or ((.description // "") | contains($n)) or ((.notes // "") | contains($n))'
-    if [ -n "$join_note" ]; then
+    if [ -n "$join_concern$open_others" ]; then
         _oj_row=$(row_now "$_oj_c")
         if [ -n "$_oj_row" ] && ! printf '%s' "$_oj_row" | jq -e "$_oj_queued" >/dev/null 2>&1; then
             return 1
         fi
-        # A concern the conversation already carries is no second concern, so
-        # nothing is written for it. A caller that asks again on every pass
-        # while its condition stands, as deferred dispatch's capped arm does,
-        # would otherwise grow the notes by a copy a pass. A row that does not
-        # read proves nothing, so the guarded write decides.
-        if [ -z "$_oj_row" ] || ! printf '%s' "$_oj_row" | jq -e --arg ask "$_oj_ask" --arg n "$join_note" "$_oj_carries" >/dev/null 2>&1; then
+        # The concern and the sentence are each written unless the
+        # conversation carries it already, and each is checked on its own: the
+        # concern is carried when it is the conversation's own ask or a note an
+        # earlier join appended, and the sentence when the conversation holds
+        # it (conversation_carries). So a conversation whose ask is this very
+        # question still takes the beads the gate holds, and a caller that asks
+        # again on every pass while its condition stands, as deferred
+        # dispatch's capped arm does, does not grow the notes by a copy a pass.
+        # A row that does not read proves nothing, so both are written and the
+        # guarded write decides.
+        _oj_what="the note naming the other beads gate $TAKE_GATE holds"
+        if [ -n "$join_concern" ] && ! printf '%s' "$_oj_row" | jq -e --arg ask "$_oj_ask" --arg n "$join_concern" \
+                '((.description // "") == $ask) or ((.notes // "") | contains($n))' >/dev/null 2>&1; then
+            _oj_note="$join_concern"; _oj_what="the new concern"
+        fi
+        if [ -n "$open_others" ] && ! conversation_carries "$_oj_row" "$open_others"; then
+            _oj_note="${_oj_note:+$_oj_note
+
+}$open_others"
+        fi
+        if [ -n "$_oj_note" ]; then
             _oj_rc=0
-            gc bd update "$_oj_c" --if-assignee human --if-status open --append-notes "$join_note" >/dev/null 2>&1 || _oj_rc=$?
+            gc bd update "$_oj_c" --if-assignee human --if-status open --append-notes "$_oj_note" >/dev/null 2>&1 || _oj_rc=$?
             case "$_oj_rc" in
                 0) ;;
                 13) return 1 ;;
-                *) echo "$PROG: open: could not append the new concern to conversation $_oj_c's notes (gc bd update exited $_oj_rc), so it did not join and nothing records it. Re-run once the store answers: $PROG open $bead" >&2
+                *) echo "$PROG: open: could not append $_oj_what to conversation $_oj_c's notes (gc bd update exited $_oj_rc), so it did not join and nothing records it. Re-run once the store answers: $PROG open $bead" >&2
                    return 2 ;;
             esac
         fi
@@ -2580,7 +2617,7 @@ open_join() {
     open_edges "$_oj_c" "waits in the queue for $bead" || return 2
     _oj_back=$(row_now "$_oj_c")
     if [ -z "$_oj_back" ]; then
-        echo "$PROG: open: conversation $_oj_c could not be read after open joined it, so whether it still waits in the queue${join_note:+ carrying the new concern} cannot be told. Re-run once the store answers: $PROG open $bead" >&2
+        echo "$PROG: open: conversation $_oj_c could not be read after open joined it, so whether it still waits in the queue${_oj_note:+ carrying the note open appended} cannot be told. Re-run once the store answers: $PROG open $bead" >&2
         return 2
     fi
     printf '%s' "$_oj_back" | jq -e "$_oj_queued" >/dev/null 2>&1 || return 1
@@ -2593,10 +2630,11 @@ open_join() {
 # operator engages it. The bead must RESOLVE first so a typo cannot manufacture
 # one. A human gate names a bead still waiting on it, and the conversation
 # replies to that gate. Of several open beads waiting, it names the one --from
-# names, or else the one that has waited longest (gate_pick), and the
-# conversation names the others in its ask, or in its note when the concern
-# joins one, so its sitting sees each bead the answer reaches. With no --reason
-# or --body, the ask is what the gate asks. Without --allow-duplicate, a concern on a
+# names, or else the one that has waited longest (gate_pick), and a note on the
+# conversation names the others, filed with a conversation open files and
+# appended once to one it lands on, so its sitting sees each bead the answer
+# reaches. With no --reason or --body, the ask is what the gate asks.
+# Without --allow-duplicate, a concern on a
 # bead whose conversation already waits in the queue joins it (open_join): the
 # reason and body are appended to that task's notes, once, so a concern the
 # conversation already carries writes nothing. One that leaves the queue
@@ -2742,7 +2780,7 @@ cmd_open() {
     # <<< open-subject-exists
     # A gate or a conversation id names the bead the conversation is about. A
     # gate that holds other open beads as well has them named to the sitting,
-    # in the ask of a conversation open files and in the note of one it joins.
+    # in a note on the conversation open files or lands on.
     take_bead open "No conversation filed." "${open_from:-$OPEN_GATE_FROM}"
     open_others=$(gate_others_line)
     if [ "$TAKE_BEAD" != "$bead" ]; then
@@ -2805,19 +2843,14 @@ cmd_open() {
     # own, which is a distinct dialogue even when the bead has one. So does
     # --conversation, which names the conversation that holds the concern.
     if [ -z "$open_allow_dup" ] && [ -z "$open_conv" ]; then
-        join_note=""
+        join_concern=""
         if [ -n "$open_reason$open_body" ]; then
-            join_note="Another concern joined this conversation: ${open_reason:-$open_body}"
+            join_concern="Another concern joined this conversation: ${open_reason:-$open_body}"
             if [ -n "$open_reason" ] && [ -n "$open_body" ]; then
-                join_note="$join_note
+                join_concern="$join_concern
 
 $open_body"
             fi
-        fi
-        if [ -n "$open_others" ]; then
-            join_note="${join_note:+$join_note
-
-}$open_others"
         fi
         # A conversation that left the queue while open joined it is passed
         # over, and the bead's conversations are read again, so open joins the
@@ -2875,11 +2908,6 @@ $gate_desc}"
     else
         conv_body="Operator picked $bead off the helm board: rebuild the subject's slice, prep, hold for the operator."
     fi
-    if [ -n "$open_others" ]; then
-        conv_body="$conv_body
-
-$open_others"
-    fi
 
     # A concern of its own that a conversation waiting in the queue already
     # holds as its whole ask is that conversation's, and is not filed again. So
@@ -2894,7 +2922,11 @@ $open_others"
     # (skills/converse-hold), and a sitting that is helping the PR land lifts
     # it. So open adds the hold only to a conversation that its listing above
     # still finds in the queue, assigned to `human`, and open_sitting names the
-    # sitting that has the conversation otherwise.
+    # sitting that has the conversation otherwise. The ask holds the question
+    # alone (gate_others_line), so the match holds when the beads waiting on a
+    # gate have changed since the conversation was filed, and the conversation
+    # takes the sentence naming them as they stand now when it does not carry
+    # it (conversation_note_others).
     CONV=""; open_again=0
     if [ -n "$open_conv" ]; then
         _oc_row=$(printf '%s' "$open_convs" | jq -c --arg c "$open_conv" \
@@ -2920,8 +2952,9 @@ $open_others"
 
     # File the conversation: a task that tracks the bead, in the operator's
     # queue (assigned to `human`), in one create, so no reader ever sees a task
-    # in this shape without its subject. The tracks edge is what makes the task
-    # a conversation about the bead, and the bead can sit in another store,
+    # in this shape without its subject, nor one on a shared gate without the
+    # note naming the other beads it holds. The tracks edge is what makes the
+    # task a conversation about the bead, and the bead can sit in another store,
     # where bd stores the edge without finding its target and the task's own
     # `gc bd list` row still carries it.
     # bd create answers an ARRAY (or bare object) carrying the id on success and
@@ -2929,7 +2962,7 @@ $open_others"
     # error object never crashes jq.
     if [ "$open_again" = 0 ]; then
         CONV_RC=0
-        CONV_JSON=$(gc bd create -t task --title "$conv_title" -d "$conv_body" \
+        CONV_JSON=$(gc bd create -t task --title "$conv_title" -d "$conv_body" ${open_others:+--notes "$open_others"} \
             --deps "tracks:$bead" --assignee human --json 2>/dev/null) || CONV_RC=$?
         CONV=$(printf '%s' "$CONV_JSON" | scrub \
             | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null || true)
@@ -2953,6 +2986,7 @@ $open_others"
     [ -z "$open_json" ] || jq -nc --arg s "$bead" --arg c "$CONV" '{subject: $s, conversation: $c, filed: true}'
     bust_cache
     open_edges "$CONV" "is filed on $bead" || exit 4
+    [ "$open_again" = 0 ] || conversation_note_others open "$CONV" "$open_others" "$TAKE_GATE"
 
     # One sentence reports a conversation that holds the concern, filed by this
     # open or by an earlier one, and it is the sentence helm-svc's board reads
@@ -4748,14 +4782,12 @@ cmd_engage() {
     fi
     [ -z "$eng_unready" ] || exit 4
     # A conversation open did not file or join this run, on a gate that holds
-    # other open beads too, takes the sentence naming them as a note, once, as
-    # one open files carries it in its ask, so its sitting sees each bead the
-    # answer reaches. The reply above already names the gate to the sitting,
-    # so a note the store refuses costs a warning and starts nothing less.
-    if [ -n "$pointed_others" ] && [ -z "$conv_via_open" ] \
-        && ! row_now "$CONV" | jq -e --arg n "$pointed_others" '((.description // "") + "\n" + (.notes // "")) | contains($n)' >/dev/null 2>&1; then
-        gc bd update "$CONV" --append-notes "$pointed_others" >/dev/null 2>&1 \
-            || echo "$PROG: engage: warning: the store refused the note on conversation $CONV naming the other beads gate $pointed_gate holds; they are listed by: gc bd dep list $pointed_gate --direction=up --type blocks" >&2
+    # other open beads too, takes the sentence naming them as a note when it
+    # does not carry it, as one open files or joins does, so its sitting sees
+    # each bead the answer reaches. A note the store refuses starts nothing
+    # less.
+    if [ -z "$conv_via_open" ]; then
+        conversation_note_others engage "$CONV" "$pointed_others" "$pointed_gate"
     fi
 
     # One sitting per bead is engage's default, not a guarantee: a concern of
