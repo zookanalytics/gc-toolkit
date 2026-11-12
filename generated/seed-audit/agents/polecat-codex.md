@@ -334,7 +334,6 @@ GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 | `branch` | you (workspace-setup) | source branch; the refinery merges exactly this |
 | `target` | you (submit) / caller | landing branch; a caller-set target wins, and `work-submit.sh` resolves it once |
 | PR summary (`gctk pr summary`) | you (submit), or an effort's summary task | what the diff does; the PR's `## Summary`, absent falls back to the dispatch text. Recorded on the ANCHOR, which on a child is not the bead you claimed; a summary task records it on its landing bead |
-| `prepare_mode` | refinery | `merge`: the branch is brought current by merging its base in, never by a rebase |
 | `rejection_reason` | refinery | why the last attempt bounced; resume, don't redo |
 | `existing_pr` | caller/refinery | PR to reuse — leave for the refinery to validate |
 
@@ -348,6 +347,12 @@ without them, and every message a person reads about the merge is composed
 from them. A conflict you cannot resolve without guessing is a question for a
 person: push nothing and ask. The formula's workspace-setup step carries the
 exact blocks.
+
+A conflict in code the base removed is drift, not a superseded branch, when the
+branch's edits inside that code are a small share of its change: resolve it,
+and keep the rest of the work, which still applies. A branch whose purpose the
+base already removed is a falsified premise, which you decline with a gate, as
+Blocked work and human gates says.
 
 ## The claimed bead and the anchor
 

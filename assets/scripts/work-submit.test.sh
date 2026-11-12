@@ -38,7 +38,8 @@ git config --file "$GIT_CONFIG_GLOBAL" advice.detachedHead false
 
 PACK="$TMP/pack"; BIN="$TMP/bin"; mkdir -p "$PACK" "$BIN"
 cp "$HERE/work-submit.sh" "$HERE/work-lib.sh" "$HERE/decline.sh" "$HERE/claim-close.sh" "$HERE/bd-lib.sh" \
-   "$HERE/hand-back.sh" "$HERE/store-only-exit.sh" "$HERE/run-lib.sh" "$HERE/deferred-dispatch.sh" "$PACK/" 2>/dev/null
+   "$HERE/hand-back.sh" "$HERE/store-only-exit.sh" "$HERE/run-lib.sh" "$HERE/deferred-dispatch.sh" \
+   "$HERE/branch-push.sh" "$PACK/" 2>/dev/null
 export REAL_GIT REAL_FIND LOG="$TMP/log" STORE="$TMP/store.json"
 
 # git: push and ls-remote can be made to fail, and a push, a worktree's removal

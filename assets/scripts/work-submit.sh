@@ -24,8 +24,8 @@
 # the witness both act on a released bead that still carries a session pin.
 #
 # The bead the summary and a retitle belong on is the anchor: the open bead that
-# carries a merge_result for this branch, which pr-open.sh, pr-stack.sh and merge.sh
-# read. On fresh work that is this bead. A convoy's rebuild child, a rework that
+# carries a merge_result for this branch, which pr-open.sh, the refinery and
+# merge.sh read. On fresh work that is this bead. A convoy's rebuild child, a rework that
 # answers no review and no ruling, has the convoy it names, as merge-push resolves
 # it. A rework child's metadata.anchor_bead answers when the branch list cannot.
 # The summary and a retitle go onto the anchor in one write, `gctk pr summary`,
@@ -348,10 +348,15 @@ if [ "$(printf '%s' "$WORK_ROW" | jq -r '.[0].metadata | if has("auto_push") the
   exit 0
 fi
 
-# Where the bring-current guard starts reading when no resume recorded a start.
+# The commit origin's branch holds as this run reads it: the push goes under the
+# lease on it (branch-push.sh), so a push someone made after this read is never
+# overwritten, and it is where the bring-current guard starts reading when no
+# resume recorded a start. No branch on origin is a branch that must not exist.
 PRE_PUSH_HEAD=$(git ls-remote origin "refs/heads/$CURRENT_BRANCH" 2>/dev/null | awk '{print $1}')
-if ! git push origin HEAD; then
-  echo "PUSH FAILED: $WORK_ID stays with this run. A non-fast-forward rejection means the branch moved under you; re-fetch, MERGE origin in, and retry. Never force-push: branches are brought current by merge, never rebase." >&2
+LEASE=(--new)
+[ -z "$PRE_PUSH_HEAD" ] || LEASE=(--from "$PRE_PUSH_HEAD")
+if ! "$SCRIPT_DIR/branch-push.sh" --repo "$PWD" --branch "$CURRENT_BRANCH" --head HEAD "${LEASE[@]}"; then
+  echo "PUSH FAILED: $WORK_ID stays with this run. A branch that moved under you, or a head that does not hold it, means: re-fetch, MERGE origin in, and retry. Never force-push: branches are brought current by merge, never rebase." >&2
   gc runtime drain-ack
   exit 1
 fi
