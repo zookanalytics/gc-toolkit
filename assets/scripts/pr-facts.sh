@@ -1129,8 +1129,11 @@ dated_value() {
 # once the anchor has moved. At a value of Gas Town's record it is one plain
 # metadata write of the same keys, guarded on the <status> and <assignee> the
 # pass read, which bd checks inside the write. So it moves no merge_result,
-# assignee or route, and it lands nothing once a writer of the record has moved
-# the bead. A dated key there takes its instant by dated_value, against the
+# assignee or route, and it lands nothing once a writer of the record has
+# changed the bead's status or assignee. A move from pull_request_pending to
+# one of the record's exceptions changes neither, since it keeps the bead
+# blocked and the refinery's, so a write made after one still lands what the
+# arm read. A dated key there takes its instant by dated_value, against the
 # value the bead carries when the write is made. The exit is the write's, and a
 # write it cannot make exits 1.
 anchor_write() {
