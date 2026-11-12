@@ -218,7 +218,6 @@ The pack's checks, and what a failure means:
 |---|---|---|
 | `check-wait-is-an-edge` | every live bead carrying a declared hold marker also carries a pending wait edge onto a live bead in the same store — a wait is an edge, not prose or a bare marker (I1) — and no live bead's wait edge points into another store | a hold left as a marker or note with no wait edge filed, one whose waits all landed or name another store, or a wait edge into another store, which holds nothing |
 | `check-state-space` | every `merge_result`/status combo is declared in `lifecycle.toml`, and a detached state rests unheld and offered to no pool (I2) | a writer minted an undeclared state, or something routed a parked anchor back into pool demand |
-| `check-routed-work-claimable` | every route and assignee names a live target; routed work is in `bd ready` or in `bd blocked`; rig-scoped orders bound (I3) | a pool renamed, an order missing its rig registration, or routed work stranded outside both queues |
 | `check-one-anchor-per-pr` | one open owning anchor per PR (I4) | duplicate anchors filed for one branch |
 | `check-closed-implies-landed` | closed anchor ⇒ `merged` + `merged_sha`, or explicit terminal (I5) | something closed a bead out-of-band |
 | `check-gate-integrity` | gating anchors declare a non-empty `check_set` or the `none` opt-out (I6) | an anchor normalized by no gate-ensure pass, or a `check_set` written empty by hand |
