@@ -458,15 +458,17 @@ shows its measured net instead.
 ### 3. The lanes
 
 Each member is armed behind the one before it, and at most two migrations are
-in flight at once, on disjoint subsystems. A member whose method is a design
-convoy lands only after the operator approves its design.
+in flight at once, on disjoint subsystems. The old merge path's retirement
+(tk-1tfzr71.70), last in lane A, is the exception: it is armed behind every
+rig's cutover, and each cutover waits on tk-1tfzr71.22. A member whose method
+is a design convoy lands only after the operator approves its design.
 
 | Lane | Member | What it removes | Size |
 |---|---|---|---|
 | A | tk-1tfzr71.22 | review beads, lane derivation, validation passes, machine findings, the bring-current guard and audit | 13,703 |
-| A | tk-1tfzr71.70 | the old merge path, once every rig's cutover has moved its PRs onto the pending record: `gctk merge` and the transition machine, `pr-open.sh`'s create, `pre-open-rebase.sh`, `merge-tail-report.sh` | 1,288, and the rows it adds |
 | A | tk-1tfzr71.21 | `pr-facts.sh` polling and mirroring, the merge cadence's driver and its pacing, the failure cap and the supersession check | 17,981 |
 | A | tk-1tfzr71.23 | the membership readers on parent-child | partial files |
+| A | tk-1tfzr71.70 | the old merge path, once every rig's cutover has moved its PRs onto the pending record: `gctk merge` and the transition machine, `pr-open.sh`'s create, `pre-open-rebase.sh`, `merge-tail-report.sh` | 1,288, and the rows it adds |
 | B | tk-1tfzr71.15 | raw route stamps and the checks that police them | 1,175 |
 | B | tk-1tfzr71.16 | deferred dispatch's notify path, lock, budget and crash marker | partial files |
 | B | tk-1tfzr71.17 | the reaction bead and the intake converters | 189, plus partial files |
@@ -488,7 +490,7 @@ Each item is carried by the bead it names.
 
 | # | Item | Extent | Carried by | Waits on |
 |---|---|---|---|---|
-| P4 | Rule 2: step text calls tested scripts, and the block-extraction tests go with the blocks they extract | 3.7k lines of shell in step text, 47 tests of 16.4k lines | tk-1tfzr71.19 and .20, each applying it to the formulas it rewrites | each bead's place in its lane |
+| P4 | Rule 2: step text calls tested scripts, and the block-extraction tests go with the blocks they extract | 3.7k lines of shell in step text, 47 tests of 16.4k lines | tk-1tfzr71.19, applying it to the formulas it rewrites | its place in its lane |
 | P5 | Each Go port (tk-ssm8qns) carries only the migration map's surviving intents and deletes the shell it replaces in the same change, and rule 3's size line shows its net | the port's contract | a note on tk-ssm8qns | the port's blockers |
 
 ## The rules
