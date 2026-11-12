@@ -21,10 +21,13 @@ TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-pr-stack-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 # shellcheck source=test-harness.sh
 . "$HERE/test-harness.sh"
+# pr-stack.sh asks `gctk pr compose` for each PR's title and body, so the suite
+# builds gctk from this tree.
+harness_build_gctk
 harness_init
 
 SD="$TMP/scripts"
-mk_sut_dir "$SD" "$HERE/pr-stack.sh" "$HERE/pr-summary-region.sh" "$HERE/review-checks.sh"
+mk_sut_dir "$SD" "$HERE/pr-stack.sh" "$HERE/review-checks.sh"
 SUT="$SD/pr-stack.sh"
 
 # An open anchor: carries merge_result, a branch and a pr_number.
@@ -37,19 +40,16 @@ rider() { # id key value created title [status]
   printf '{"id":"%s","status":"%s","title":"%s","created_at":"%s","metadata":{"%s":"%s"}}' \
     "$1" "${6:-closed}" "$5" "$4" "$2" "$3"
 }
-# The title pr-open.sh opened PR <num> with: the store's anchor recording that
-# pr_number, composed by the shared cc_title and suffixed with its id. A PR with
-# no anchor in the store keeps a plain placeholder.
-# shellcheck source=pr-summary-region.sh
-. "$SD/pr-summary-region.sh"
+# The title pr-open.sh opened PR <num> with: the one `gctk pr compose` composes
+# for the store's anchor recording that pr_number. A PR with no anchor in the
+# store keeps a plain placeholder.
 opened_title() { # num
-  local row
-  row=$(jq -c --arg n "$1" '[ .[]
+  local id
+  id=$(jq -r --arg n "$1" '[ .[]
       | select((((.metadata // {}).merge_result // "") | tostring) != "")
-      | select((((.metadata // {}).pr_number // "") | tostring) == $n) ] | .[0] // empty' "$STUB_STORE")
-  if [ -z "$row" ]; then printf 'PR %s' "$1"; return 0; fi
-  printf '%s (%s)' "$(cc_title "$(jq -r '.title // ""' <<<"$row")" "$(jq -r '.issue_type // ""' <<<"$row")")" \
-    "$(jq -r '.id' <<<"$row")"
+      | select((((.metadata // {}).pr_number // "") | tostring) == $n) ] | .[0].id // empty' "$STUB_STORE")
+  if [ -z "$id" ]; then printf 'PR %s' "$1"; return 0; fi
+  "$GCTK_BIN" pr compose "$id" --sections branch-beads --body-file /dev/null 2>/dev/null | jq -r '.title'
 }
 # The PR the anchor points at. It carries the title it was opened with unless a
 # scenario names another, so a pass over a PR nobody retitled has no title to write.
@@ -380,18 +380,15 @@ hasnt "$out" "summary region refreshed" "…and reports no refresh"
 
 echo "# the opened-region fixture is byte-for-byte what pr-open's composer writes at open"
 # The no-churn case below, and the stale-region cases around it, model a PR as
-# pr-open.sh opened it, so the model is pinned to the shared composer: an
-# open-mode wording this fixture does not carry fails here instead of leaving
+# pr-open.sh opened it, so the model is pinned to the composer pr-open.sh asks:
+# an open-mode wording this fixture does not carry fails here instead of leaving
 # those cases testing a body no writer produces. The gates are resolved first and
 # handed to the composer, as pr-open.sh does, against the fixed index above.
-# shellcheck source=pr-summary-region.sh
-composed_open=$(. "$SD/pr-summary-region.sh" && phased=$(prs_resolve_phased 'correctness' abcdef1234567890) && {
-  printf '%s\n' "$PRS_MARK_OPEN"
-  compose_managed 'CURRENT: the summary.' '' X polecat/X main 'correctness' abcdef1234567890 '' '' open "$phased"
-  printf '%s\n' "$PRS_MARK_CLOSE"
-})
+store "[$(anchor_sum X polecat/X 205 'correctness' 'CURRENT: the summary.')]"
+phased=$("$SD/review-checks.sh" --resolve --check-set correctness --through open-as-draft --with-phase --at abcdef1234567890)
+composed_open=$("$GCTK_BIN" pr compose X --head abcdef1234567890 --opening --gates "$phased" --sections summary | jq -r '.body')
 eq "$(opened_region X polecat/X 'correctness' 'CURRENT: the summary.' 'abcdef12')" "$composed_open" \
-   "the fixture matches compose_managed's open mode"
+   "the fixture matches the composer's opening region"
 hasnt "$composed_open" 'opened green' "…and the open-mode bullet states no CI result"
 has "$composed_open" '- Gates `correctness` signed off pre-open at `abcdef12`. For CI status, see the PR checks.' \
     "…naming the gates' sign-off and pointing to the PR checks for CI"
@@ -452,31 +449,6 @@ before_q=$(body 280)
 out=$("$SUT" 2>&1)
 hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "a quoted claim is not read as the region's own"
 eq "$(body 280)" "$before_q" "the body is byte-identical"
-
-echo "# the green-claim check reads only the bullets under the region's last handoff heading"
-# Each body quotes the claim where a reader might mistake it for the region's own:
-# in a region with no handoff block, under a handoff heading a summary wrote
-# above the composed one, and below the markers, bare or under a handoff heading
-# of its own. The last body carries it as the region's own bullet, the positive
-# control that also proves the library sourced.
-# shellcheck source=pr-summary-region.sh
-claim_of() { ( . "$SD/pr-summary-region.sh" && prs_region_says_opened_green "$1" ) && echo claim || echo none; }
-PB="$TMP/claim-body"
-OG='- Gates `correctness` signed off pre-open at `7777cccc`; PR opened green.'
-printf '%s\n' '<!-- gc:pr-summary -->' '## Summary' '' 'S.' '' "$OG" '<!-- /gc:pr-summary -->' > "$PB"
-eq "$(claim_of "$PB")" none "a region with no handoff block carries no claim, whatever its summary quotes"
-printf '%s\n' '<!-- gc:pr-summary -->' '## Summary' '' 'S.' '' '## Refinery handoff' '' "$OG" '' \
-  '## Refinery handoff' '' '- Issue: `P`' '<!-- /gc:pr-summary -->' > "$PB"
-eq "$(claim_of "$PB")" none "only the block under the last handoff heading is the composed one"
-printf '%s\n' '<!-- gc:pr-summary -->' '## Summary' '' 'S.' '' '## Refinery handoff' '' '- Issue: `P`' \
-  '<!-- /gc:pr-summary -->' '' "$OG" > "$PB"
-eq "$(claim_of "$PB")" none "a claim below the markers is not the region's"
-printf '%s\n' '<!-- gc:pr-summary -->' '## Summary' '' 'S.' '' '## Refinery handoff' '' '- Issue: `P`' \
-  '<!-- /gc:pr-summary -->' '' '## Refinery handoff' '' "$OG" > "$PB"
-eq "$(claim_of "$PB")" none "…nor is one under a handoff heading of its own below them"
-printf '%s\n' '<!-- gc:pr-summary -->' '## Summary' '' 'S.' '' '## Refinery handoff' '' '- Issue: `P`' "$OG" \
-  '<!-- /gc:pr-summary -->' > "$PB"
-eq "$(claim_of "$PB")" claim "the region's own handoff bullet is the claim"
 
 echo "# a rework moved the head but left the summary unchanged; the stale handoff line is refreshed"
 # The region's summary already matches the anchor, so the text comparison alone

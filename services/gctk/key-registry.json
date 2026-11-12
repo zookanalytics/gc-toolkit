@@ -21,7 +21,15 @@
       "pr",
       "waits"
     ],
-    "doc": "The source branch a work bead's change is on, which the work formula's workspace-setup writes (lifecycle/lifecycle.toml, [metadata.merge_identity]). A bead carrying it is in flight. The pr evaluator and the landing order hold a PR whose head branch is not this one."
+    "doc": "The source branch a work bead's change is on, which the work formula's workspace-setup writes (lifecycle/lifecycle.toml, [metadata.merge_identity]). A bead carrying it is in flight. The pr evaluator and the landing order hold a PR whose head branch is not this one. A composition reads it for the PR's source branch, and finds the beads whose work the branch carries by it."
+  },
+  {
+    "name": "check_set",
+    "type": "string",
+    "readers": [
+      "pr"
+    ],
+    "doc": "The review checks a bead's change is gated by, as a comma list (lifecycle/lifecycle.toml, [metadata.gates]). A composition names it when no pre-open gate resolves from it."
   },
   {
     "name": "epic_boundaries",
@@ -92,6 +100,14 @@
     "type": "string",
     "owner": "pr/record",
     "doc": "The PR the refinery reuses rather than open another, a PR's URL: armed with the marker before the record's second write, and set by a requeue. A publication clears it."
+  },
+  {
+    "name": "fold_target",
+    "type": "string",
+    "readers": [
+      "pr"
+    ],
+    "doc": "The branch a bead's work was folded onto by a polecat (lifecycle/lifecycle.toml, [metadata.merge_identity]). A bead carrying it has its work on that branch."
   },
   {
     "name": "gc.dispatch_when_ready",
@@ -193,9 +209,10 @@
     "name": "gc.routed_to",
     "type": "string",
     "readers": [
-      "listing"
+      "listing",
+      "pr"
     ],
-    "doc": "The pool, agent or person a bead is routed to, written by lifecycle.sh's --route and by the script or formula that owns the bead's dispatch (lifecycle/lifecycle.toml, ROUTE and [metadata.runtime_owned])."
+    "doc": "The pool, agent or person a bead is routed to (lifecycle/lifecycle.toml, ROUTE and [metadata.runtime_owned]). A bead on a branch that a pool still holds has not pushed its work. The pool, agent or person a bead is routed to, written by lifecycle.sh's --route and by the script or formula that owns the bead's dispatch (lifecycle/lifecycle.toml, ROUTE and [metadata.runtime_owned])."
   },
   {
     "name": "gc.step_ref",
@@ -217,12 +234,13 @@
     "name": "gc.work_outcome",
     "type": "string",
     "readers": [
-      "listing"
+      "listing",
+      "pr"
     ],
     "aliases": [
       "work_outcome"
     ],
-    "doc": "A work bead's self-reported disposition, no-op or shipped, whose meaning is the runtime's (lifecycle/lifecycle.toml, [metadata.runtime_owned])."
+    "doc": "A work bead's self-reported disposition (lifecycle/lifecycle.toml, [metadata.runtime_owned]). A bead reading no-op put no work on its branch. A work bead's self-reported disposition, no-op or shipped, whose meaning is the runtime's (lifecycle/lifecycle.toml, [metadata.runtime_owned])."
   },
   {
     "name": "merge_hold",
@@ -236,7 +254,7 @@
     "name": "merge_result",
     "type": "string",
     "owner": "pr/record",
-    "doc": "Where the work a bead carries stands on its way to its target. On Gas Town's pending record it reads pull_request_pending, pull_request_head_changed, mr_merged, pull_request_record_incomplete or one of the exceptions, pull_request_reconcile_invalid, pull_request_closed_unmerged, pull_request_merged_unvalidated_head, pull_request_merge_evidence_contradiction and pull_request_legacy_closed_unverified, each of which keeps the bead blocked behind a human gate keyed by its value. Absent, the bead has not landed and owns no open PR. The old path's values are lifecycle/lifecycle.toml's [states]."
+    "doc": "Where the work a bead carries stands on its way to its target. On Gas Town's pending record it reads pull_request_pending, pull_request_head_changed, mr_merged, pull_request_record_incomplete or one of the exceptions, pull_request_reconcile_invalid, pull_request_closed_unmerged, pull_request_merged_unvalidated_head, pull_request_merge_evidence_contradiction and pull_request_legacy_closed_unverified, each of which keeps the bead blocked behind a human gate keyed by its value. Absent, the bead has not landed and owns no open PR. The old path's values are lifecycle/lifecycle.toml's [states]. A PR's composition reads a bead on its branch that carries one as the branch's anchor, and one that reads merged as having landed its work on its merged_target."
   },
   {
     "name": "merged_sha",
@@ -248,7 +266,7 @@
     "name": "merged_target",
     "type": "string",
     "owner": "pr/record",
-    "doc": "The branch the bead's PR is to merge into, the base its PR must name, and once it lands the branch it landed on."
+    "doc": "The branch the bead's PR is to merge into, the base its PR must name, and once it lands the branch it landed on. A PR's composition names it as the PR's target."
   },
   {
     "name": "observed_pr_head_sha",
@@ -353,6 +371,14 @@
     "doc": "The PR's state as the landing order last read it: open, merged, or the state a read that could not decide or an exception left, such as lookup_failed, merge_unreachable or closed_unmerged."
   },
   {
+    "name": "pr_summary",
+    "type": "string",
+    "readers": [
+      "pr"
+    ],
+    "doc": "The account of what a change does, which the polecat writes on the anchor at submit and an integration effort's summary task writes on its landing bead (lifecycle/lifecycle.toml, [metadata.merge_identity]). The PR's managed summary region carries it, and the dispatch text stands in while it is absent or blank."
+  },
+  {
     "name": "pr_url",
     "type": "string",
     "owner": "pr/record",
@@ -397,5 +423,13 @@
     "type": "json",
     "owner": "internal/rig",
     "doc": "The published copy of a recorded check's result, which `gctk rig \u003ccheck\u003e --publish-bead \u003cbead\u003e` writes on the bead its caller names: the record the call answered with, as one JSON object of check, result, scope (absent on a lint or typecheck run), commit, tree, exit_code, duration_ms, runner, recorded_at and command. gctk writes it only once the record store holds the result it copies, after recording a result or answering from a record. No pack path reads it: the record under the rig clone's git common directory answers a later call. Absent means no call published that check to the bead. Never cleared: the next publish replaces it. Its commit is the one the check ran at: the head the call answered for, or, for a full-suite test pass answered through the tree, an earlier commit with the same tree."
+  },
+  {
+    "name": "target",
+    "type": "string",
+    "readers": [
+      "pr"
+    ],
+    "doc": "The branch a bead's work lands on, which the polecat records at submit and a caller can set first (lifecycle/lifecycle.toml, [metadata.merge_identity]). A composition names it as the PR's target when merged_target is absent."
   }
 ]

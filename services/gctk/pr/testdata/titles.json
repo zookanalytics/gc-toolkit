@@ -1,0 +1,170 @@
+[
+  {
+    "title": "feat: add x",
+    "kind": "task",
+    "id": "tk-a1",
+    "want": "feat: add x (tk-a1)"
+  },
+  {
+    "title": "feat(api): add x",
+    "kind": "task",
+    "id": "tk-a1",
+    "want": "feat(api): add x (tk-a1)"
+  },
+  {
+    "title": "fix!: drop y",
+    "kind": "bug",
+    "id": "tk-a1",
+    "want": "fix!: drop y (tk-a1)"
+  },
+  {
+    "title": "refactor(core)!: z",
+    "kind": "",
+    "id": "tk-a1",
+    "want": "refactor(core)!: z (tk-a1)"
+  },
+  {
+    "title": "Add x",
+    "kind": "task",
+    "id": "tk-a1",
+    "want": "chore: Add x (tk-a1)"
+  },
+  {
+    "title": "Add x",
+    "kind": "bug",
+    "id": "tk-a1",
+    "want": "fix: Add x (tk-a1)"
+  },
+  {
+    "title": "Add x",
+    "kind": "feature",
+    "id": "tk-a1",
+    "want": "feat: Add x (tk-a1)"
+  },
+  {
+    "title": "Add x",
+    "kind": "feat",
+    "id": "tk-a1",
+    "want": "feat: Add x (tk-a1)"
+  },
+  {
+    "title": "Add x",
+    "kind": "docs",
+    "id": "tk-a1",
+    "want": "docs: Add x (tk-a1)"
+  },
+  {
+    "title": "Add x",
+    "kind": "epic",
+    "id": "tk-a1",
+    "want": "chore: Add x (tk-a1)"
+  },
+  {
+    "title": "Add x",
+    "kind": "",
+    "id": "tk-a1",
+    "want": "chore: Add x (tk-a1)"
+  },
+  {
+    "title": "Feat: x",
+    "kind": "task",
+    "id": "tk-a1",
+    "want": "chore: Feat: x (tk-a1)"
+  },
+  {
+    "title": "feat:x",
+    "kind": "task",
+    "id": "tk-a1",
+    "want": "chore: feat:x (tk-a1)"
+  },
+  {
+    "title": "feat(): x",
+    "kind": "task",
+    "id": "tk-a1",
+    "want": "chore: feat(): x (tk-a1)"
+  },
+  {
+    "title": "  feat:  spaced   words ",
+    "kind": "task",
+    "id": "tk-a1",
+    "want": "chore: feat: spaced words (tk-a1)"
+  },
+  {
+    "title": "multi\nline title",
+    "kind": "task",
+    "id": "tk-a1",
+    "want": "chore: multi line title (tk-a1)"
+  },
+  {
+    "title": "",
+    "kind": "task",
+    "id": "tk-a1",
+    "want": ""
+  },
+  {
+    "title": "   ",
+    "kind": "task",
+    "id": "tk-a1",
+    "want": ""
+  },
+  {
+    "title": "security: patch",
+    "kind": "task",
+    "id": "tk-a1",
+    "want": "security: patch (tk-a1)"
+  },
+  {
+    "title": "ops(deploy): roll",
+    "kind": "",
+    "id": "tk-a1",
+    "want": "ops(deploy): roll (tk-a1)"
+  },
+  {
+    "title": "test: t",
+    "kind": "bug",
+    "id": "tk-a1",
+    "want": "test: t (tk-a1)"
+  },
+  {
+    "title": "build(x)!: y",
+    "kind": "task",
+    "id": "tk-a1",
+    "want": "build(x)!: y (tk-a1)"
+  },
+  {
+    "title": "feat(a)(b): x",
+    "kind": "task",
+    "id": "tk-a1",
+    "want": "chore: feat(a)(b): x (tk-a1)"
+  },
+  {
+    "title": "chore: ",
+    "kind": "task",
+    "id": "tk-a1",
+    "want": "chore: (tk-a1)"
+  },
+  {
+    "title": "revert: \"feat: x\"",
+    "kind": "task",
+    "id": "tk-a1",
+    "want": "revert: \"feat: x\" (tk-a1)"
+  },
+  {
+    "title": "style(css):  two  spaces",
+    "kind": "task",
+    "id": "tk-a1",
+    "want": "style(css): two spaces (tk-a1)"
+  },
+  {
+    "title": "perf(x):tight",
+    "kind": "task",
+    "id": "tk-a1",
+    "want": "chore: perf(x):tight (tk-a1)"
+  },
+  {
+    "title": "docs(readme)!:x",
+    "kind": "docs",
+    "id": "tk-a1",
+    "want": "docs: docs(readme)!:x (tk-a1)"
+  }
+]

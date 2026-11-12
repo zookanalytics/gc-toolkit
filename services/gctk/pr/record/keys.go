@@ -20,7 +20,9 @@ var (
 			Pending+", "+HeadChanged+", "+Merged+", "+Incomplete+" or one of the exceptions, "+Invalid+", "+
 			ClosedUnmerged+", "+MergedUnvalidatedHead+", "+EvidenceContradiction+" and "+LegacyClosed+
 			", each of which keeps the bead blocked behind a human gate keyed by its value. Absent, the bead "+
-			"has not landed and owns no open PR. The old path's values are lifecycle/lifecycle.toml's [states].")
+			"has not landed and owns no open PR. The old path's values are lifecycle/lifecycle.toml's [states]. "+
+			"A PR's composition reads a bead on its branch that carries one as the branch's anchor, and one "+
+			"that reads merged as having landed its work on its merged_target.")
 	prURLKey = ledger.Declare("pr_url", ledger.String,
 		"The URL of the PR the record names, https://<host>/<owner>/<repo>/pull/<number>.")
 	prNumberKey = ledger.Declare("pr_number", ledger.String,
@@ -41,7 +43,7 @@ var (
 			"records it checked least recently first.")
 	mergedTargetKey = ledger.Declare("merged_target", ledger.String,
 		"The branch the bead's PR is to merge into, the base its PR must name, and once it lands the branch "+
-			"it landed on.")
+			"it landed on. A PR's composition names it as the PR's target.")
 	mergedSHAKey = ledger.Declare("merged_sha", ledger.String,
 		"The merge commit the landing order found on the target when it closed the bead.")
 	mergedAtKey = ledger.Declare("pr_merged_at", ledger.String,
@@ -73,7 +75,12 @@ var (
 	PRURL     = prURLKey.View()
 	PRNumber  = prNumberKey.View()
 	Rejection = rejectionReasonKey.View()
+	Target    = mergedTargetKey.View()
 )
+
+// OnTarget selects the beads whose merged_target is branch: the ones whose PR
+// is to merge into it, and the ones whose work landed on it.
+func OnTarget(branch string) ledger.Selection { return ledger.Matching(mergedTargetKey, branch) }
 
 // prURL is a PR's URL: https, its host, its repository and its number.
 var prURL = regexp.MustCompile(`^https://([^/]+)/([^/]+/[^/]+)/pull/([0-9]+)$`)

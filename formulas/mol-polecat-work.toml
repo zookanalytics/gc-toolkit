@@ -553,9 +553,7 @@ decide. Leave out what does not apply, so a small change's brief can be a
 sentence or two.
 
 The account of the diff follows the brief. Anything that would take the open
-text past one screen goes in a collapsed section, opened on one line as
-`<details><summary>what it holds</summary>`, because `pr-stack.sh` reads the
-published summary only up to a bare `<details>` line.
+text past one screen goes in a collapsed section.
 
 Write the brief, then the account of the diff (the behavior before, the behavior
 now, and the shape of the change, in a short paragraph or a few bullets of

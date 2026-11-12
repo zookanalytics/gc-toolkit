@@ -1621,13 +1621,12 @@ func preOpenCheckStall(a Anchor, blockers []Blocker, stale int, f Facts) (stalle
 	return true, a.UpdatedAt, lane, preOpenStallReason(blockers)
 }
 
-// checkLanes returns the review lanes a check_set declares, in declared order,
-// by the rule merge.sh and pr-open.sh apply (lanes_of, and the gates_of
-// pr-summary-region.sh defines): split on commas, strip every whitespace
-// character, and drop the tokens that name no lane. none and off are the
-// checkless opt-out, and approval is met by a GitHub review, which cannot exist
-// before the PR does. The drop is case-insensitive; a surviving name keeps its
-// case, because it names a lane and the check_name its reviews carry.
+// checkLanes returns the review lanes a check_set declares, in declared order:
+// split on commas, strip every whitespace character, and drop the tokens that
+// name no lane. none and off are the checkless opt-out, and approval is met by
+// a GitHub review, which cannot exist before the PR does. The drop is
+// case-insensitive; a surviving name keeps its case, because it names a lane
+// and the check_name its reviews carry.
 func checkLanes(checkSet string) []string {
 	var lanes []string
 	for _, tok := range strings.Split(checkSet, ",") {

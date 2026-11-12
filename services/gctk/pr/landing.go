@@ -145,8 +145,8 @@ func (l Landing) Record(bead string, p record.Publication) error {
 	return nil
 }
 
-// Outcome is what a run did with one record: the bead, the action and why.
-type Outcome struct {
+// RunOutcome is what a run did with one record: the bead, the action and why.
+type RunOutcome struct {
 	Bead, Action, Detail string
 }
 
@@ -201,7 +201,7 @@ type Options struct {
 // write of it, waiting while another writer holds the lock. It reports each
 // record's outcome to report as it goes, and returns an error when the listing
 // or a lock did not answer, or when a record's outcome failed.
-func (l Landing) Reconcile(o Options, report func(Outcome)) error {
+func (l Landing) Reconcile(o Options, report func(RunOutcome)) error {
 	ids, err := l.due(o.Count)
 	if err != nil {
 		return err
@@ -210,7 +210,7 @@ func (l Landing) Reconcile(o Options, report func(Outcome)) error {
 	failed := 0
 	for i, id := range ids {
 		if !o.Deadline.IsZero() && !time.Now().Before(o.Deadline) {
-			report(Outcome{Bead: id, Action: ActSkipped,
+			report(RunOutcome{Bead: id, Action: ActSkipped,
 				Detail: fmt.Sprintf("the run reached its deadline; %d records wait for the next run", len(ids)-i)})
 			break
 		}
@@ -295,29 +295,29 @@ type state struct {
 }
 
 // one reads one record under the lock and makes the writes it owes.
-func (u *run) one(id string) (Outcome, error) {
+func (u *run) one(id string) (RunOutcome, error) {
 	release, err := record.Lock(u.Dir, u.Wait)
 	if err != nil {
-		return Outcome{}, err
+		return RunOutcome{}, err
 	}
 	defer release()
 	r, err := u.read(id)
 	if err != nil {
-		return Outcome{Bead: id, Action: ActFailed, Detail: "the bead did not read: " + err.Error()}, nil
+		return RunOutcome{Bead: id, Action: ActFailed, Detail: "the bead did not read: " + err.Error()}, nil
 	}
 	if r == nil {
-		return Outcome{Bead: id, Action: ActSkipped, Detail: "the store no longer holds the bead"}, nil
+		return RunOutcome{Bead: id, Action: ActSkipped, Detail: "the store no longer holds the bead"}, nil
 	}
 	rec, err := record.Read(r)
 	if err != nil {
-		return Outcome{Bead: id, Action: ActFailed, Detail: "the record did not read: " + err.Error()}, nil
+		return RunOutcome{Bead: id, Action: ActFailed, Detail: "the record did not read: " + err.Error()}, nil
 	}
 	if !rec.Marked {
-		return Outcome{Bead: id, Action: ActSkipped, Detail: "the bead no longer carries the marker"}, nil
+		return RunOutcome{Bead: id, Action: ActSkipped, Detail: "the bead no longer carries the marker"}, nil
 	}
 	branch, _, err := branchKey.Get(r)
 	if err != nil {
-		return Outcome{Bead: id, Action: ActFailed, Detail: "the branch did not read: " + err.Error()}, nil
+		return RunOutcome{Bead: id, Action: ActFailed, Detail: "the branch did not read: " + err.Error()}, nil
 	}
 	s := state{id: id, status: r.Status(), assignee: r.Assignee(), branch: strings.TrimSpace(branch), rec: rec,
 		now: u.stamp()}
@@ -331,19 +331,19 @@ func (u *run) one(id string) (Outcome, error) {
 	case s.status == "blocked":
 		return u.blocked(s), nil
 	}
-	return Outcome{Bead: id, Action: ActSkipped, Detail: "the bead's status " + s.status + " is none the record knows"}, nil
+	return RunOutcome{Bead: id, Action: ActSkipped, Detail: "the bead's status " + s.status + " is none the record knows"}, nil
 }
 
 // commit makes w, guarded on what the run read, and names the outcome: done
 // when it landed, moved when bd's guard refused it, failed otherwise.
-func (u *run) commit(s state, w *ledger.Write, done Outcome) Outcome {
+func (u *run) commit(s state, w *ledger.Write, done RunOutcome) RunOutcome {
 	w.Guard(s.status, s.assignee)
 	if err := u.Ledger.Commit(w); err != nil {
 		if errors.Is(err, ledger.ErrGuard) {
-			return Outcome{Bead: s.id, Action: ActMoved,
+			return RunOutcome{Bead: s.id, Action: ActMoved,
 				Detail: "the bead moved since this run read it, so nothing landed: " + done.Detail}
 		}
-		return Outcome{Bead: s.id, Action: ActFailed, Detail: done.Detail + ", but the write did not land: " + err.Error()}
+		return RunOutcome{Bead: s.id, Action: ActFailed, Detail: done.Detail + ", but the write did not land: " + err.Error()}
 	}
 	return done
 }
@@ -351,14 +351,14 @@ func (u *run) commit(s state, w *ledger.Write, done Outcome) Outcome {
 // released clears the marker of a bead a release took from the refinery, and
 // names the PR in a note, writing nothing else, so the bead stays where the
 // release left it.
-func (u *run) released(s state) Outcome {
+func (u *run) released(s state) RunOutcome {
 	pr := firstOf(s.rec.URL, s.rec.ExistingPR, "the pull request it recorded")
 	note := fmt.Sprintf("The landing order found %s %s and assigned to %s, not to the refinery, while it carried "+
 		"the pending record of %s, so it cleared the record's marker and left the bead as it stands (%s).",
 		s.id, s.status, nobody(s.assignee), pr, s.now)
 	w := u.Ledger.Write(s.id)
 	record.Unmark(w, note)
-	return u.commit(s, w, Outcome{Bead: s.id, Action: ActReleased,
+	return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActReleased,
 		Detail: fmt.Sprintf("assigned to %s, not to the refinery: the marker is cleared and %s is named in a note", nobody(s.assignee), pr)})
 }
 
@@ -366,11 +366,11 @@ func (u *run) released(s state) Outcome {
 // verified merge owes nothing more, and its marker clears. Any other is a close
 // that took no lock and reached the bead with no verified merge, which a run
 // reopens as blocked, behind a gate.
-func (u *run) closed(s state) Outcome {
+func (u *run) closed(s state) RunOutcome {
 	if s.rec.Result == record.Merged && mergeEvidence(s.rec) {
 		w := u.Ledger.Write(s.id)
 		record.Unmark(w, "")
-		return u.commit(s, w, Outcome{Bead: s.id, Action: ActSettled,
+		return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActSettled,
 			Detail: "closed on a verified merge at " + s.rec.MergedSHA + ": the marker is cleared"})
 	}
 	pr := firstOf(s.rec.URL, s.rec.ExistingPR, "its pull request")
@@ -386,17 +386,17 @@ func (u *run) closed(s state) Outcome {
 // the refinery, and its marker clears. A whole record whose second write landed
 // moves to blocked and is read on. Anything else is a record a dead writer left
 // half written, which goes back to the refinery for its full validation.
-func (u *run) open(s state) Outcome {
+func (u *run) open(s state) RunOutcome {
 	switch {
 	case s.rec.Result == record.HeadChanged:
 		w := u.Ledger.Write(s.id)
 		record.Settle(w)
-		return u.commit(s, w, Outcome{Bead: s.id, Action: ActSettled,
+		return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActSettled,
 			Detail: "its changed head already waits on the refinery's validation: the marker is cleared"})
 	case s.rec.Result == record.Pending && len(gaps(s.rec, s.branch)) == 0:
 		w := u.Ledger.Write(s.id)
 		record.Block(w)
-		done := u.commit(s, w, Outcome{Bead: s.id, Action: ActBlocked, Detail: "the whole record had landed on an open bead"})
+		done := u.commit(s, w, RunOutcome{Bead: s.id, Action: ActBlocked, Detail: "the whole record had landed on an open bead"})
 		if done.Action != ActBlocked {
 			return done
 		}
@@ -405,7 +405,7 @@ func (u *run) open(s state) Outcome {
 	}
 	w := u.Ledger.Write(s.id)
 	record.Revalidate(w, "Interrupted PR handoff record is incomplete; full refinery validation is required", s.now)
-	return u.commit(s, w, Outcome{Bead: s.id, Action: ActRevalidate,
+	return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActRevalidate,
 		Detail: "the record was half written: the bead goes back to the refinery, and no merge is requested"})
 }
 
@@ -428,7 +428,7 @@ func gaps(r record.Record, branch string) []string {
 // blocked handles a blocked bead the refinery holds: the record must be whole
 // and must read pending, or a verified merge whose close did not land. Its PR is
 // read from GitHub by its number.
-func (u *run) blocked(s state) Outcome {
+func (u *run) blocked(s state) RunOutcome {
 	r := s.rec
 	switch r.Result {
 	case record.Pending:
@@ -446,13 +446,13 @@ func (u *run) blocked(s state) Outcome {
 		return u.invalid(s, fmt.Sprintf("a blocked bead with a pending marker reads merge_result %q, not %s", r.Result, record.Pending))
 	}
 	// A retry of a recorded merge keeps the state it verified.
-	retry := func(state, why string) Outcome {
+	retry := func(state, why string) RunOutcome {
 		if r.Result == record.Merged {
 			state = ""
 		}
 		w := u.Ledger.Write(s.id)
 		record.Retry(w, state, why, s.now)
-		return u.commit(s, w, Outcome{Bead: s.id, Action: ActRetry, Detail: why})
+		return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActRetry, Detail: why})
 	}
 	host, _, number, _ := record.ParseURL(r.URL)
 	if why := u.originDiffers(host, r.Repo); why != "" {
@@ -478,7 +478,7 @@ func (u *run) blocked(s state) Outcome {
 			reason := fmt.Sprintf("PR head changed after refinery validation (%s -> %s); quality gates must run again", r.Head, p.HeadRefOid)
 			w := u.Ledger.Write(s.id)
 			record.Requeue(w, r.URL, p.HeadRefOid, reason, s.now)
-			return u.commit(s, w, Outcome{Bead: s.id, Action: ActRequeued, Detail: reason})
+			return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActRequeued, Detail: reason})
 		}
 		return u.decide(s, hub, p.ID, p.InMergeQueue, p.MergeQueueEnabled, retry)
 	case "CLOSED":
@@ -497,11 +497,11 @@ func (u *run) blocked(s state) Outcome {
 // or to add it to its base's merge queue where the base requires one. A PR
 // already in the queue has its merge requested. Whatever GitHub answers, the
 // next run reads the PR again by its number.
-func (u *run) decide(s state, hub Hub, nodeID string, inQueue, queue bool, retry func(string, string) Outcome) Outcome {
-	checked := func(detail string) Outcome {
+func (u *run) decide(s state, hub Hub, nodeID string, inQueue, queue bool, retry func(string, string) RunOutcome) RunOutcome {
+	checked := func(detail string) RunOutcome {
 		w := u.Ledger.Write(s.id)
 		record.Checked(w, "open", s.now)
-		return u.commit(s, w, Outcome{Bead: s.id, Action: ActChecked, Detail: detail})
+		return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActChecked, Detail: detail})
 	}
 	if inQueue {
 		return checked("the PR is in its base's merge queue, which holds its merge request")
@@ -534,7 +534,7 @@ func (u *run) decide(s state, hub Hub, nodeID string, inQueue, queue bool, retry
 		return retry("lookup_failed", "the bead did not read again before the merge request; will retry: "+err.Error())
 	}
 	if now == nil || now.Status() != s.status || now.Assignee() != s.assignee {
-		return Outcome{Bead: s.id, Action: ActMoved,
+		return RunOutcome{Bead: s.id, Action: ActMoved,
 			Detail: "the bead moved during the run's reads, so no merge was requested; the next run reads it as it stands"}
 	}
 	method, ask := "merge", hub.MergePullRequest
@@ -545,11 +545,11 @@ func (u *run) decide(s state, hub Hub, nodeID string, inQueue, queue bool, retry
 		w := u.Ledger.Write(s.id)
 		why := fmt.Sprintf("the %s request at %s was refused or not answered; the next run reads the PR again: %v", method, ans.Head, err)
 		record.Retry(w, "open", why, s.now)
-		return u.commit(s, w, Outcome{Bead: s.id, Action: ActRetry, Detail: why})
+		return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActRetry, Detail: why})
 	}
 	w := u.Ledger.Write(s.id)
 	record.Checked(w, "open", s.now)
-	return u.commit(s, w, Outcome{Bead: s.id, Action: ActRequested,
+	return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActRequested,
 		Detail: fmt.Sprintf("ready: the %s is requested at %s into %s", method, ans.Head, ans.Target)})
 }
 
@@ -557,7 +557,7 @@ func (u *run) decide(s state, hub Hub, nodeID string, inQueue, queue bool, retry
 // commit is on a freshly fetched target. A merge of another head is an
 // exception, and a merge whose commit the target does not reach yet is read
 // again by the next run.
-func (u *run) merged(s state, head, commit, at string, retry func(string, string) Outcome) Outcome {
+func (u *run) merged(s state, head, commit, at string, retry func(string, string) RunOutcome) RunOutcome {
 	r := s.rec
 	if head != r.Head {
 		return u.except(s, record.MergedUnvalidatedHead, "merged_unvalidated_head",
@@ -590,7 +590,7 @@ func (u *run) merged(s state, head, commit, at string, retry func(string, string
 	w := u.Ledger.Write(s.id)
 	record.Land(w, record.Landing{MergedSHA: commit, Target: r.Target, MergedAt: at}, s.now,
 		fmt.Sprintf("PR #%s merged to %s at %s (%s).", number, r.Target, short(commit), r.URL))
-	done := u.commit(s, w, Outcome{Bead: s.id, Action: ActLanded,
+	done := u.commit(s, w, RunOutcome{Bead: s.id, Action: ActLanded,
 		Detail: fmt.Sprintf("PR #%s merged to %s at %s: the bead is closed", number, r.Target, short(commit))})
 	if done.Action == ActFailed {
 		// bd refused the close, such as for a live blocker or an open child, and
@@ -604,7 +604,7 @@ func (u *run) merged(s state, head, commit, at string, retry func(string, string
 }
 
 // invalid keeps a record that no longer reads as one blocked behind its gate.
-func (u *run) invalid(s state, why string) Outcome {
+func (u *run) invalid(s state, why string) RunOutcome {
 	return u.except(s, record.Invalid, "invalid", why,
 		fmt.Sprintf("The pending record on %s no longer matches its pull request: %s. %s stays blocked, and what "+
 			"waits on it stays held. Correct the record or the pull request, or stand the work down.", s.id, why, s.id))
@@ -612,7 +612,7 @@ func (u *run) invalid(s state, why string) Outcome {
 
 // contradiction keeps a recorded merge GitHub's facts contradict blocked behind
 // its gate.
-func (u *run) contradiction(s state, why string) Outcome {
+func (u *run) contradiction(s state, why string) RunOutcome {
 	return u.except(s, record.EvidenceContradiction, "merge_evidence_contradiction", why,
 		fmt.Sprintf("GitHub's merge facts contradict the merge recorded on %s: %s. %s stays blocked, and what waits "+
 			"on it stays held. Check what merged into %s before closing it.", s.id, why, s.id, firstOf(s.rec.Target, "the target")))
@@ -621,16 +621,16 @@ func (u *run) contradiction(s state, why string) Outcome {
 // except files the human gate keyed by the exception, then records the
 // exception with the bead blocked and the marker cleared. A gate that does not
 // file leaves the record as it was, for the next run to try again.
-func (u *run) except(s state, result, prState, reason, message string) Outcome {
+func (u *run) except(s state, result, prState, reason, message string) RunOutcome {
 	if err := u.Gates.File(s.id, result, message); err != nil {
 		w := u.Ledger.Write(s.id)
 		why := fmt.Sprintf("%s: the human gate did not file; will retry: %v", result, err)
 		record.Retry(w, "", why, s.now)
-		return u.commit(s, w, Outcome{Bead: s.id, Action: ActRetry, Detail: why})
+		return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActRetry, Detail: why})
 	}
 	w := u.Ledger.Write(s.id)
 	record.Except(w, result, prState, reason, s.now)
-	return u.commit(s, w, Outcome{Bead: s.id, Action: ActExcepted, Detail: result + ": " + reason})
+	return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActExcepted, Detail: result + ": " + reason})
 }
 
 // OriginError is a PR outside the rig's own repository, the one the clone's
@@ -694,22 +694,4 @@ func nobody(a string) string {
 		return "nobody"
 	}
 	return a
-}
-
-// firstOf is the first value that is not empty.
-func firstOf(vs ...string) string {
-	for _, v := range vs {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
-}
-
-// short is a commit's first twelve characters.
-func short(c string) string {
-	if len(c) > 12 {
-		return c[:12]
-	}
-	return c
 }

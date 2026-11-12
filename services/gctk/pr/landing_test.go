@@ -137,18 +137,18 @@ func (d *land) row(t *testing.T) fake.Bead {
 }
 
 // reconcile runs the landing order once and returns each outcome.
-func (d *land) reconcile(t *testing.T, o pr.Options) []pr.Outcome {
+func (d *land) reconcile(t *testing.T, o pr.Options) []pr.RunOutcome {
 	t.Helper()
-	var out []pr.Outcome
+	var out []pr.RunOutcome
 	var mu sync.Mutex
-	if err := d.l.Reconcile(o, func(x pr.Outcome) { mu.Lock(); out = append(out, x); mu.Unlock() }); err != nil {
+	if err := d.l.Reconcile(o, func(x pr.RunOutcome) { mu.Lock(); out = append(out, x); mu.Unlock() }); err != nil {
 		t.Fatalf("Reconcile: %v (outcomes %+v)", err, out)
 	}
 	return out
 }
 
 // once runs the landing order and returns the bead's one outcome.
-func (d *land) once(t *testing.T) pr.Outcome {
+func (d *land) once(t *testing.T) pr.RunOutcome {
 	t.Helper()
 	out := d.reconcile(t, pr.Options{Count: 10})
 	if len(out) != 1 {
@@ -157,7 +157,7 @@ func (d *land) once(t *testing.T) pr.Outcome {
 	return out[0]
 }
 
-func is(t *testing.T, o pr.Outcome, action string) {
+func is(t *testing.T, o pr.RunOutcome, action string) {
 	t.Helper()
 	if o.Action != action {
 		t.Fatalf("outcome %s (%s), want %s", o.Action, o.Detail, action)
@@ -414,7 +414,7 @@ func TestAMergedValidatedHeadOnItsTargetCloses(t *testing.T) {
 	meta(t, b, map[string]string{"merge_result": record.Merged, "merged_sha": merged, "merged_target": "main",
 		"pr_state": "merged", "pr_merged_at": "2026-11-12T08:30:00Z", "pr_head_sha": head, "branch": branch,
 		"pr_reconcile_pending": "<absent>", "blocked_reason": "<absent>"})
-	if !strings.Contains(b.Notes, "merged to main at "+merged[:12]) {
+	if !strings.Contains(b.Notes, "merged to main at "+merged[:8]) {
 		t.Fatalf("the close names no merge: %q", b.Notes)
 	}
 	// The marker is gone, so no later run reads the bead again.
@@ -677,7 +677,7 @@ func TestARecordWriteWaitsWhileARunHoldsTheLockAndLandsAfterItsLastWrite(t *test
 	d.pr.Reviews = nil
 	there, goOn := pause(d.github)
 	ran := make(chan error, 1)
-	go func() { ran <- d.l.Reconcile(pr.Options{Count: 10}, func(pr.Outcome) {}) }()
+	go func() { ran <- d.l.Reconcile(pr.Options{Count: 10}, func(pr.RunOutcome) {}) }()
 	<-there
 	recorded := make(chan error, 1)
 	go func() { recorded <- d.l.Record(bead, publication(other)) }()
@@ -713,8 +713,8 @@ func TestARunWaitsWhileARecordWriteHoldsTheLockThenReadsTheWholeRecord(t *testin
 	go func() { recorded <- d.l.Record(bead, publication(other)) }()
 	<-between
 	ran := make(chan error, 1)
-	var out []pr.Outcome
-	go func() { ran <- d.l.Reconcile(pr.Options{Count: 10}, func(o pr.Outcome) { out = append(out, o) }) }()
+	var out []pr.RunOutcome
+	go func() { ran <- d.l.Reconcile(pr.Options{Count: 10}, func(o pr.RunOutcome) { out = append(out, o) }) }()
 	waits(t, ran, "the run")
 	close(goOn)
 	if err := <-recorded; err != nil {
@@ -733,7 +733,7 @@ func TestADispositionsCloseWaitsWhileARunHoldsTheLockAndClearsTheMarker(t *testi
 	d.pr.Reviews = nil
 	there, goOn := pause(d.github)
 	ran := make(chan error, 1)
-	go func() { ran <- d.l.Reconcile(pr.Options{Count: 10}, func(pr.Outcome) {}) }()
+	go func() { ran <- d.l.Reconcile(pr.Options{Count: 10}, func(pr.RunOutcome) {}) }()
 	<-there
 	disposed := make(chan error, 1)
 	go func() { disposed <- dispose(d) }()
@@ -893,15 +893,15 @@ func TestASecondRunActsOnARecordOnlyOnceTheFirstHasWrittenIt(t *testing.T) {
 	d.pr.Facts.HeadRefOid = other
 	there, goOn := pause(d.github)
 	first, second := make(chan error, 1), make(chan error, 1)
-	var firstOut, secondOut []pr.Outcome
+	var firstOut, secondOut []pr.RunOutcome
 	go func() {
-		first <- d.l.Reconcile(pr.Options{Count: 10}, func(o pr.Outcome) { firstOut = append(firstOut, o) })
+		first <- d.l.Reconcile(pr.Options{Count: 10}, func(o pr.RunOutcome) { firstOut = append(firstOut, o) })
 	}()
 	<-there
 	// The watchdog closed the first run's tracking bead, and the next cooldown
 	// started a second run while the first still holds the record.
 	go func() {
-		second <- d.l.Reconcile(pr.Options{Count: 10}, func(o pr.Outcome) { secondOut = append(secondOut, o) })
+		second <- d.l.Reconcile(pr.Options{Count: 10}, func(o pr.RunOutcome) { secondOut = append(secondOut, o) })
 	}()
 	waits(t, second, "the second run")
 	close(goOn)

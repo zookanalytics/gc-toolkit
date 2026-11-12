@@ -195,7 +195,7 @@ func prReconcile(refinery, db string, count int, budget time.Duration, stdout, s
 	}
 	l.Yield = runYield
 	read := 0
-	err = l.Reconcile(pr.Options{Count: count, Deadline: time.Now().Add(budget)}, func(o pr.Outcome) {
+	err = l.Reconcile(pr.Options{Count: count, Deadline: time.Now().Add(budget)}, func(o pr.RunOutcome) {
 		read++
 		fmt.Fprintf(stdout, "%s %s: %s\n", o.Bead, o.Action, o.Detail)
 	})

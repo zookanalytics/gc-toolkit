@@ -7,10 +7,17 @@ import "github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 // read-only here: shell writes the branch, the holds, the feedback receipts and
 // the anchor link, and their definitions stay in lifecycle/lifecycle.toml.
 
+// reading is a key's read, through its own declaration or through the reading
+// face the key's owner exports.
+type reading interface {
+	Get(*ledger.Record) (string, bool, error)
+}
+
 // The branch the work is on, which the work formula's workspace-setup writes
 // (lifecycle/lifecycle.toml, [metadata.merge_identity]).
 var branchKey = ledger.ReadOnly("branch", ledger.String,
-	"The pr evaluator and the landing order hold a PR whose head branch is not this one.")
+	"The pr evaluator and the landing order hold a PR whose head branch is not this one. A composition reads "+
+		"it for the PR's source branch, and finds the beads whose work the branch carries by it.")
 
 // The holds a person sets by hand (lifecycle/lifecycle.toml, [holds] and
 // [metadata.holds]).

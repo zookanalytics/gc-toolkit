@@ -39,7 +39,7 @@ harness_init
 export GC_REVIEW_CHECKS_INDEX="$TMP/no-such-index.toml"
 
 SD="$TMP/scripts"
-mk_sut_dir "$SD" "$HERE/pr-open.sh" "$HERE/pr-summary-region.sh" "$HERE/lifecycle.sh" \
+mk_sut_dir "$SD" "$HERE/pr-open.sh" "$HERE/lifecycle.sh" \
   "$HERE/lane-state.sh" "$HERE/finding.sh" "$HERE/review-checks.sh"
 SUT="$SD/pr-open.sh"
 
@@ -570,19 +570,10 @@ has "$tlog" "--title ci: pin the actions (ttci) --body-file" \
     "an author's ci type is recognized, not double-prefixed"
 hasnt "$tlog" "chore: ci:" "…and no derived type is prepended to it"
 
-echo "# every type the commit-conventions skill's table offers is one the composer keeps"
-# An author who follows the table must never read `chore: <type>: ...`, which is
-# what a type the composer does not recognize composes to.
+echo "# the commit-conventions skill has the author write the title the composer keeps"
+# That the composer keeps every type the skill's table offers is pinned beside it
+# (services/gctk/pr, TestTitleKeepsEveryTypeTheSkillOffers).
 CONVENTIONS_SKILL="$HERE/../../skills/commit-conventions/SKILL.md"
-skill_types=$(awk -F'`' '/^\| `/ { print $2 }' "$CONVENTIONS_SKILL")
-has "$skill_types" "fix" "the table is read: it offers fix"
-has "$skill_types" "chore" "…and chore"
-while IFS= read -r dtype; do
-  eq "$( . "$HERE/pr-summary-region.sh"; cc_title "$dtype: name the change" task)" \
-     "$dtype: name the change" "the composer keeps the skill's $dtype"
-  eq "$( . "$HERE/pr-summary-region.sh"; cc_title "$dtype(api): name the change" task)" \
-     "$dtype(api): name the change" "…and that type with a scope"
-done <<<"$skill_types"
 conventions=$(tr '\n' ' ' < "$CONVENTIONS_SKILL")
 has "$conventions" "**The scope says where in the system" "the skill has the author decide the scope"
 has "$conventions" "never coin a name of your own" "…and coin no scope where the rig names none"

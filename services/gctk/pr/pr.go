@@ -6,12 +6,20 @@
 // met, and it is computed at each read and stored nowhere, so no answer stands
 // as a permission on a commit another PR shares.
 //
-// It reads the bead's own waits through waits, the open beads whose anchor_bead
-// names the bead, the holds set by hand, the review loop's results for the PR's
-// live head and target, GitHub's live facts about the PR, and the receipts of
-// the feedback the intake has handled. A read that fails returns an error and no
-// answer, since a decision made on part of the facts is a decision about
-// another PR.
+// The evaluator reads the bead's own waits through waits, the open beads whose
+// anchor_bead names the bead, the holds set by hand, the review loop's results
+// for the PR's live head and target, GitHub's live facts about the PR, and the
+// receipts of the feedback the intake has handled. A read that fails returns an
+// error and no answer, since a decision made on part of the facts is a decision
+// about another PR.
+//
+// Its composition, [Compose], is what the PR says of the bead. Gas Town's
+// refinery opens a PR with its bead's title and writes the body once. A
+// composition gives the title the conventional-commit type a repository's title
+// check requires, and keeps two marked sections of the body current while it
+// leaves the text people add: the managed summary region, which says what the
+// change does and how it reached the refinery, and the branch-beads section,
+// which names every bead whose work the branch carries.
 package pr
 
 import (
