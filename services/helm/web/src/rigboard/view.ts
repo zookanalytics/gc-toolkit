@@ -1,7 +1,7 @@
 // What every part of the page shares: the document, the page's own view state
-// (what is open, what search holds, which id was just copied), and the moves a
-// row can make. The document decides every group, signal, count, need and
-// order; the view decides only what is folded and what is shown.
+// (what is open, what search holds, which bead id control just copied), and
+// the moves a row can make. The document decides every group, signal, count,
+// need and order; the view decides only what is folded and what is shown.
 
 import { createContext, useContext } from 'react';
 import type { ActuateError, ActuateResult } from '../actuate/client';
@@ -27,8 +27,11 @@ export interface View {
   flip(key: string, def: boolean): void;
   /** Set several parts at once, as a count's click opens one view. */
   setOpen(parts: Record<string, boolean>): void;
-  copy(id: string): void;
-  /** The id copied last, for a moment after its click. */
+  /** Copy an id to the clipboard for the bead id control whose key is from
+   *  (useCopy, CopyButton). */
+  copy(id: string, from: string): void;
+  /** The key of the bead id control whose copy shows its success, for a
+   *  moment once the clipboard has taken it. */
   copied: string | null;
   /** Fill search with an id, which lists the rows that match it. */
   show(id: string): void;

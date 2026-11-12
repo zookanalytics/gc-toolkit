@@ -97,10 +97,19 @@ function text(el: Element | null): string {
   return el?.textContent ?? '';
 }
 
+/** What a control reads: its text, less a reading it holds unseen. */
+function reading(el: Element | null): string {
+  if (el === null) return '';
+  return [...el.childNodes]
+    .filter((n) => !(n instanceof Element && n.getAttribute('aria-hidden') === 'true'))
+    .map((n) => n.textContent ?? '')
+    .join('');
+}
+
 /** Every row drawn for a bead: each line whose own id reads id. */
 function rowsOf(id: string): HTMLElement[] {
   return [...document.querySelectorAll('.line .bead-slot .bead-id')]
-    .filter((b) => text(b) === id)
+    .filter((b) => reading(b) === id)
     .map((b) => b.closest('.line'))
     .filter((l): l is HTMLElement => l instanceof HTMLElement);
 }
@@ -114,7 +123,7 @@ function rowOf(id: string): HTMLElement {
 
 /** The rows drawn, by their own ids, in page order. */
 function rowIds(): string[] {
-  return [...document.querySelectorAll('.line .bead-slot .bead-id')].map((b) => text(b));
+  return [...document.querySelectorAll('.line .bead-slot .bead-id')].map((b) => reading(b));
 }
 
 function headings(): string[] {
@@ -449,15 +458,178 @@ describe('search', () => {
     expect((screen.getByRole('searchbox', { name: 'Search this rig' }) as HTMLInputElement).value).toBe(ref);
     expect(rowIds()).toContain(ref);
   });
+});
 
-  it('copies a bead id on a click', async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
+// A bead id and the side panel's attach command copy through one hook
+// (useCopy.test.ts holds its timers); these hold what each control reads when
+// the browser takes the write, refuses it, or has no clipboard at all.
+describe('copying', () => {
+  /** A clipboard whose writes answer as answer says. */
+  function clipboard(answer: () => Promise<void>) {
+    const writeText = vi.fn((_text: string) => answer());
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+    return writeText;
+  }
+
+  function refused(): Promise<void> {
+    return Promise.reject(new DOMException('Write permission denied.', 'NotAllowedError'));
+  }
+
+  /** Lets every answer already due reach the page. */
+  async function settle() {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  }
+
+  async function attachPanel(): Promise<HTMLElement> {
+    tab(/Needs you/);
+    fireEvent.click(within(rowOf('tk-q4dd6mk')).getByRole('button', { name: 'Start the conversation' }));
+    const panel = await screen.findByRole('complementary', { name: 'Conversation' });
+    await within(panel).findByText('gc session attach tk-s1tt1ng');
+    return panel;
+  }
+
+  it('says a bead id was copied only once the clipboard has taken it', async () => {
+    let take = () => {};
+    const writeText = clipboard(
+      () =>
+        new Promise<void>((resolve) => {
+          take = resolve;
+        }),
+    );
     render(<Page />);
     await loaded();
     fireEvent.click(screen.getByRole('button', { name: 'tk-wmwcdlc' }));
     expect(writeText).toHaveBeenCalledWith('tk-wmwcdlc');
-    expect(screen.getByRole('button', { name: 'copied' })).toBeTruthy();
+    await settle();
+    expect(screen.queryByRole('button', { name: 'copied' })).toBeNull();
+    take();
+    expect(await screen.findByRole('button', { name: 'copied' })).toBeTruthy();
+  });
+
+  it('says a bead id was copied only where it was clicked, though the page draws it in more than one place', async () => {
+    const writeText = clipboard(() => Promise.resolve());
+    render(<Page />);
+    await loaded();
+    tab(/Needs you/);
+    // Needs you draws a bead once for each row that names it.
+    const readings = screen.getAllByTitle('Copy the bead ID').map((b) => reading(b));
+    const id = readings.find((r, i) => readings.indexOf(r) !== i);
+    if (id === undefined) throw new Error('Needs you draws no bead id twice');
+    const drawn = screen.getAllByRole('button', { name: id });
+    const clicked = drawn[drawn.length - 1];
+    fireEvent.click(clicked);
+    expect(writeText).toHaveBeenCalledWith(id);
+    expect(await screen.findAllByRole('button', { name: 'copied' })).toEqual([clicked]);
+    expect(screen.getAllByRole('button', { name: id })).toEqual(drawn.filter((b) => b !== clicked));
+    // The clicked id stays laid out under its word, unseen, so the control
+    // keeps the id's size and nothing beside it moves.
+    expect(text(clicked.querySelector('[aria-hidden="true"]'))).toBe(id);
+  });
+
+  it('says copied in one place on the board at a time: a later bead id takes the word from an earlier one', async () => {
+    clipboard(() => Promise.resolve());
+    render(<Page />);
+    await loaded();
+    tab(/Needs you/);
+    // Two ids the page draws once each, so only the one slot is in question.
+    const controls = screen.getAllByTitle('Copy the bead ID');
+    const [first, second] = controls.filter((b) => controls.filter((c) => reading(c) === reading(b)).length === 1);
+    fireEvent.click(first);
+    expect(await screen.findAllByRole('button', { name: 'copied' })).toEqual([first]);
+    fireEvent.click(second);
+    expect(await screen.findAllByRole('button', { name: 'copied' })).toEqual([second]);
+  });
+
+  it('keeps a bead id on screen, and claims no copy, when the browser refuses the write', async () => {
+    const writeText = clipboard(refused);
+    render(<Page />);
+    await loaded();
+    fireEvent.click(screen.getByRole('button', { name: 'tk-wmwcdlc' }));
+    await settle();
+    expect(writeText).toHaveBeenCalledWith('tk-wmwcdlc');
+    expect(screen.queryByRole('button', { name: 'copied' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'tk-wmwcdlc' })).toBeTruthy();
+  });
+
+  it('keeps a bead id on screen, and claims no copy, on a page with no clipboard', async () => {
+    vi.stubGlobal('navigator', { ...navigator, clipboard: undefined });
+    render(<Page />);
+    await loaded();
+    fireEvent.click(screen.getByRole('button', { name: 'tk-wmwcdlc' }));
+    await settle();
+    expect(screen.queryByRole('button', { name: 'copied' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'tk-wmwcdlc' })).toBeTruthy();
+  });
+
+  it('says the attach command was copied once the clipboard has taken it', async () => {
+    const writeText = clipboard(() => Promise.resolve());
+    render(<Page />);
+    await loaded();
+    const panel = await attachPanel();
+    fireEvent.click(within(panel).getByRole('button', { name: 'Copy' }));
+    expect(writeText).toHaveBeenCalledWith('gc session attach tk-s1tt1ng');
+    const copied = await within(panel).findByRole('button', { name: 'Copied' });
+    // Copy stays laid out under Copied, unseen, so the control keeps one size.
+    expect(text(copied.querySelector('[aria-hidden="true"]'))).toBe('Copy');
+  });
+
+  it('leaves the attach command to select by hand, and claims no copy, when the browser refuses the write', async () => {
+    const writeText = clipboard(refused);
+    render(<Page />);
+    await loaded();
+    const panel = await attachPanel();
+    fireEvent.click(within(panel).getByRole('button', { name: 'Copy' }));
+    await settle();
+    expect(writeText).toHaveBeenCalledWith('gc session attach tk-s1tt1ng');
+    expect(within(panel).queryByRole('button', { name: 'Copied' })).toBeNull();
+    expect(within(panel).getByRole('button', { name: 'Copy' })).toBeTruthy();
+    expect(text(panel.querySelector('.command code'))).toBe('gc session attach tk-s1tt1ng');
+  });
+});
+
+// The row and its Details draw a pull request in markup of their own, and
+// read its state and what holds it in the same words.
+describe('a pull request', () => {
+  /** The row whose own bead id reads id, as search lists it. */
+  function found(id: string): HTMLElement {
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search this rig' }), { target: { value: id } });
+    const line = [...document.querySelectorAll('.line')].find((l) => reading(l.querySelector('.bead-slot .bead-id')) === id);
+    if (!(line instanceof HTMLElement)) throw new Error(`no row for ${id}`);
+    return line;
+  }
+
+  /** What the row's pull request bit reads, and what Details' Pull request
+   *  field reads once Details is open. */
+  function readings(id: string): { row: string; details: string } {
+    const line = found(id);
+    const row = text(line.querySelector('.bit--mono'));
+    fireEvent.click(within(line).getByRole('button', { name: 'Details' }));
+    const block = line.nextElementSibling;
+    if (block === null || !block.classList.contains('details-block')) throw new Error(`no Details for ${id}`);
+    const field = [...block.querySelectorAll('.field')].find((f) => text(f.querySelector('.field-key')) === 'Pull request');
+    return { row, details: text(field?.querySelector('.field-value') ?? null) };
+  }
+
+  it('reads its state and every reason it is held the same on its row and in Details', async () => {
+    const doc = structuredClone(board);
+    const held = doc.rows['tk-1tfzr71.66'];
+    held.pull_request = { ...held.pull_request!, state: 'needs-attention', held: ['gate', 'review'] };
+    rigReads = [() => json({ read_at: READ_AT, board: doc })];
+    render(<Page />);
+    await loaded();
+    expect(readings('tk-1tfzr71.66')).toEqual({
+      row: '#1459 · needs-attention · held: gate, review',
+      details: '#1459 needs-attention · held: gate, review',
+    });
+  });
+
+  it('reads a state with nothing held, and a number alone, the same way in both', async () => {
+    render(<Page />);
+    await loaded();
+    expect(readings('tk-c9dcsbn')).toEqual({ row: '#1464 · working', details: '#1464 working' });
+    expect(readings('tk-1hazlo2')).toEqual({ row: '#1256', details: '#1256' });
   });
 });
 
