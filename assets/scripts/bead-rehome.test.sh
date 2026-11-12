@@ -97,6 +97,14 @@
 #       moves once the close has landed. One that cannot move leaves the close
 #       standing, exit 4, a WARN and a note, and does not hold back one that can.
 #       Another kind and a delivered canonical read no waiters after the close;
+#   (ax) the close takes the store's record lock, the flock on pr-record.lock in
+#       the origin store's .beads directory that gctk's two writers of a PR's
+#       pending record take: it waits while another writer holds it, reads the
+#       origin only once it holds it, so a marker a publication wrote meanwhile
+#       is read, and clears that marker, pr_reconcile_pending, in the close's
+#       own update. An origin without the marker gets no such flag. --check and
+#       --dry-run take no lock, and a lock that does not come within
+#       PR_RECORD_LOCK_WAIT_SECS writes nothing (exit 5);
 #   (aw) with no identity of its own the writer compares an assignee with the actor
 #       bd itself defaults to, read off a create's preview that writes nothing, and
 #       passes that actor on its writes. It asks only when the origin has an
@@ -484,6 +492,7 @@ case "$sub" in
     while [ $# -gt 0 ]; do
       case "$1" in
         --set-metadata) printf 'm.%s\n' "$2" >> "$f"; shift 2 ;;
+        --unset-metadata) awk -v p="m.$2=" 'index($0, p) != 1' "$f" > "$f.unset"; mv "$f.unset" "$f"; shift 2 ;;
         --append-notes) printf 'notes=%s\n' "$2" >> "$f"; shift 2 ;;
         --status=*) printf 'status=%s\n' "${1#--status=}" >> "$f"; shift ;;
         *) shift ;;
@@ -547,6 +556,16 @@ export GC_BRANCH_END_TOOL="$BE_STUB" BE_LOG="$TMP/branch-end.log" FAKE_RIGS_ROOT
 : > "$BE_LOG"
 
 run() { "$SCRIPT" "$@" >"$TMP/out" 2>"$TMP/err"; }
+
+# The race cases' second writers take no lock (racer), through a flock on PATH
+# that takes nothing. Every other run takes the real lock, and a wait for it is
+# bounded here, so a run that waits on a lock this suite forgot to free fails
+# in seconds rather than at the writer's own bound.
+NOLOCK="$TMP/nolock"
+mkdir -p "$NOLOCK"
+printf '#!/bin/sh\nexit 0\n' > "$NOLOCK/flock"
+chmod +x "$NOLOCK/flock"
+export PR_RECORD_LOCK_WAIT_SECS=20
 # A bead's whole record, to prove a refused run wrote nothing.
 snap() { cat "$TMP/rigs/$1/.beads/$2"; }
 
@@ -1239,10 +1258,15 @@ eq "$(field alpha notes al-race)" "" "…and no note"
 
 # --- (as) the edge goes on before the close, so two callers cannot both name one
 # racer <name> <bead-rehome args...> — write a script that makes a second caller's
-# whole run, and print its path. The run's exit lands in racer.<name>.rc.
+# whole run, and print its path. The run's exit lands in racer.<name>.rc. A second
+# run of this writer waits for the store's record lock while the first holds it
+# (ax), so it cannot land inside the first's pause. The racer stands for a writer
+# that takes no lock, such as a person's own `bd duplicate` or `bd close`, which
+# can, so it runs with a flock that takes nothing.
 racer() {
   local name="$1"; shift
-  { printf '%q ' "$SCRIPT" "$@"; printf '>%q 2>&1; echo $? >%q\n' "$TMP/racer.$name.out" "$TMP/racer.$name.rc"; } > "$TMP/racer.$name.sh"
+  { printf 'PATH=%q:"$PATH" ' "$NOLOCK"; printf '%q ' "$SCRIPT" "$@"
+    printf '>%q 2>&1; echo $? >%q\n' "$TMP/racer.$name.out" "$TMP/racer.$name.rc"; } > "$TMP/racer.$name.sh"
   printf '%s' "$TMP/racer.$name.sh"
 }
 racer_rc() { cat "$TMP/racer.$1.rc" 2>/dev/null || printf 'did not run'; }
@@ -1385,7 +1409,7 @@ HOLD
   cat > "$TMP/$n.claim.sh" <<CLAIM
 printf 'status=in_progress\nassignee=holder-b\n' >> "$ALPHA/$o"
 rm -f "$ALPHA/.raced.BEFORE_CLOSE.$o"
-( export BEADS_ACTOR=holder-b FAKE_RACE_BEFORE_CLOSE="$TMP/$n.held.sh"
+( export BEADS_ACTOR=holder-b FAKE_RACE_BEFORE_CLOSE="$TMP/$n.held.sh" PATH="$NOLOCK:\$PATH"
   "$SCRIPT" --origin "$o" --successor "$su" --kind folded >"$TMP/$n.out" 2>&1
   echo \$? >"$TMP/$n.rc" ) >/dev/null 2>&1 </dev/null &
 until [ -e "$TMP/$n.reached" ]; do sleep 0.05; done
@@ -1860,6 +1884,75 @@ printf 'assignee=%s\n' "$BEADS_ACTOR" >> "$ALPHA/al-wg"
 rc=0; FAKE_CALL_LOG="$TMP/wg.calls" run --origin al-wg --successor al-wg-1 --kind folded || rc=$?
 eq "$rc/$(grep -c '^create' "$TMP/wg.calls" || true)" "0/0" "(aw) a caller with an identity of its own needs no preview"
 unset FAKE_BD_ENFORCE_CLOSE_GUARDS
+
+# --- (ax) the close takes the store's record lock -----------------------------
+LOCK="$TMP/rigs/alpha/.beads/pr-record.lock"
+# hold_lock — a writer of the record holds the lock until release_lock; HELD
+# exists once it does. With $1 set, it marks that bead while it holds the lock,
+# as a publication's first write does.
+hold_lock() {
+    rm -f "$TMP/held" "$TMP/go"; mkfifo "$TMP/go"
+    flock "$LOCK" bash -c '
+        [ -z "$1" ] || printf "m.pr_reconcile_pending=true\n" >> "$2/$1"
+        : > "$3/held"; read -r _ < "$3/go"' _ "${1:-}" "$TMP/rigs/alpha/.beads" "$TMP" &
+    HOLDER=$!
+    for _ in $(seq 50); do [ -e "$TMP/held" ] && break; sleep 0.1; done
+}
+release_lock() { echo go > "$TMP/go"; wait "$HOLDER" 2>/dev/null || true; }
+
+mkbead alpha open al-lock1
+mkbead alpha open al-lock-succ
+hold_lock
+"$SCRIPT" --origin al-lock1 --successor al-lock-succ --kind re-homed >"$TMP/out" 2>"$TMP/err" &
+CLOSER=$!
+sleep 1
+eq "$(field alpha status al-lock1)" open "(ax) the close waits while another writer holds the record lock"
+release_lock
+rc=0; wait "$CLOSER" || rc=$?
+eq "$rc" 0 "(ax) …and goes ahead once the lock is free"
+eq "$(field alpha status al-lock1)" closed "(ax) …the origin is closed"
+
+# A publication marks the bead while the close waits: the close reads the bead
+# under the lock, so it sees the marker and clears it.
+mkbead alpha open al-lock2
+mkbead alpha open al-lock-succ2
+export FAKE_UPDATE_LOG="$TMP/updates.log"; : > "$FAKE_UPDATE_LOG"
+hold_lock al-lock2
+"$SCRIPT" --origin al-lock2 --successor al-lock-succ2 --kind re-homed >"$TMP/out" 2>"$TMP/err" &
+CLOSER=$!
+sleep 0.5
+release_lock
+rc=0; wait "$CLOSER" || rc=$?
+eq "$rc" 0 "(ax) a close that waited on a publication goes ahead"
+eq "$(field alpha status al-lock2)" closed "(ax) …the origin is closed"
+eq "$(field alpha m.pr_reconcile_pending al-lock2)" "" "(ax) …and the marker the publication wrote is cleared"
+CLOSE_LINE=$(grep -- '--status=closed' "$FAKE_UPDATE_LOG" | grep '^al-lock2 ' || true)
+has "$CLOSE_LINE" "--unset-metadata pr_reconcile_pending" "(ax) the marker clears in the close's own update"
+: > "$FAKE_UPDATE_LOG"
+mkbead alpha open al-lock3
+mkbead alpha open al-lock-succ3
+rc=0; run --origin al-lock3 --successor al-lock-succ3 --kind re-homed || rc=$?
+CLOSE_LINE=$(grep -- '--status=closed' "$FAKE_UPDATE_LOG" | grep '^al-lock3 ' || true)
+eq "$rc" 0 "(ax) an unmarked origin closes"
+case "$CLOSE_LINE" in *--unset-metadata*) bad "(ax) …and its close clears no marker it does not carry" ;;
+    *) ok "(ax) …and its close clears no marker it does not carry" ;; esac
+unset FAKE_UPDATE_LOG
+
+# --check and --dry-run write nothing and take no lock; a held lock bounds the
+# close's wait, and the close writes nothing then.
+mkbead alpha open al-lock4
+mkbead alpha open al-lock-succ4
+hold_lock
+rc=0; timeout 10 "$SCRIPT" --origin al-lock4 --successor al-lock-succ4 --kind re-homed --check >"$TMP/out" 2>"$TMP/err" || rc=$?
+eq "$rc" 0 "(ax) --check answers while the lock is held"
+rc=0; timeout 10 "$SCRIPT" --origin al-lock4 --successor al-lock-succ4 --kind re-homed --dry-run >"$TMP/out" 2>"$TMP/err" || rc=$?
+eq "$rc" 0 "(ax) --dry-run answers while the lock is held"
+BEFORE=$(snap alpha al-lock4)
+rc=0; PR_RECORD_LOCK_WAIT_SECS=1 run --origin al-lock4 --successor al-lock-succ4 --kind re-homed || rc=$?
+eq "$rc" 5 "(ax) a lock that does not come within the wait holds the close (exit 5)"
+eq "$(snap alpha al-lock4)" "$BEFORE" "(ax) …and nothing is written"
+has "$(cat "$TMP/err")" "record lock" "(ax) …and the refusal names the lock"
+release_lock
 
 echo "---"
 echo "bead-rehome.test: $PASS passed, $FAIL failed"

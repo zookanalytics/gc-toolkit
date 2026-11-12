@@ -17,6 +17,22 @@
 # first, and a close any of these holds writes nothing. bd's update sets no close
 # reason, so the disposition's prose rides the close as an appended note.
 #
+# The close takes the store's record lock, a flock on pr-record.lock in the
+# origin store's .beads directory, which gctk's pr domain names and its two
+# writers of a PR's pending record take: `gctk pr record` across both of its
+# writes, and the landing order's run for each record it reads
+# (specs/tk-1tfzr71.66/design.md, section 4). The lock is taken before the
+# origin is read, whatever the origin carries, because a publication can mark
+# the bead after a read made without it, and it is held through the close. So
+# the close lands before a publication takes the lock, or after both of its
+# writes, and never between a run's read of the record and its write. The close
+# clears the record's marker, pr_reconcile_pending, in its own write when the
+# origin carries it, so no later run of the landing order reopens the closed
+# bead. --check and --dry-run write nothing and take no lock. Every gc call made
+# while the lock is held runs with its descriptor closed, so no process a call
+# starts, such as a Dolt server, keeps the lock after this script ends, and the
+# lock is freed once the close has landed, before the branch is ended.
+#
 # The edge goes on just before the close, the order `bd duplicate` and
 # `bd supersede` write the two in. So this writer's close names its
 # successor, and a second caller finds the first one's choice on the bead, a
@@ -175,6 +191,12 @@ since the read refuses it, and then the edge comes back off, and nothing stays
 written but the edges a duplicate's waiters gained, which the refusal names, and
 the gates a retry resolved, as below.
 
+The close takes the store's record lock (pr-record.lock in the origin store's
+.beads directory) before it reads the origin, waiting up to
+$PR_RECORD_LOCK_WAIT_SECS (300) while a writer of a PR's pending record holds
+it, and clears the landing order's marker, pr_reconcile_pending, in its own
+write when the origin carries it.
+
 --check evaluates that evidence and a duplicate's waiters, and exits 0
 (eligible) or non-zero (refused, reason on stderr) without writing anything.
 With --except-key it also reads what would hold the close.
@@ -286,11 +308,28 @@ ACTOR="${BEADS_ACTOR:-${GC_SESSION_NAME:-${GC_AGENT:-}}}"
 bd_at() {
     local db="$1"; shift
     if [ -n "$ACTOR" ]; then
-        gc bd --db "$db/.beads" --actor "$ACTOR" "$@"
+        gc bd --db "$db/.beads" --actor "$ACTOR" "$@" 9>&-
     else
-        gc bd --db "$db/.beads" "$@"
+        gc bd --db "$db/.beads" "$@" 9>&-
     fi
 }
+
+# The store's record lock (the header's rule), taken on fd 9 before the origin
+# is read and held through the close. PR_RECORD_LOCK_WAIT_SECS bounds the wait:
+# a run of the landing order holds the lock for one record at a time, and its
+# order's 300-second time limit frees it at the latest.
+RECORD_LOCK_WAIT="${PR_RECORD_LOCK_WAIT_SECS:-300}"
+case "$RECORD_LOCK_WAIT" in ''|*[!0-9]*) RECORD_LOCK_WAIT=300 ;; esac
+take_record_lock() {
+    local lock="$ORIGIN_PATH/.beads/pr-record.lock"
+    command -v flock >/dev/null 2>&1 \
+        || die "flock is not on PATH, so the store's record lock ($lock) cannot be taken; nothing written, $ORIGIN untouched" 5
+    exec 9>>"$lock" \
+        || die "the store's record lock ($lock) does not open; nothing written, $ORIGIN untouched" 5
+    flock -w "$RECORD_LOCK_WAIT" 9 \
+        || die "another writer of a PR's pending record held the store's record lock ($lock) for ${RECORD_LOCK_WAIT}s; nothing written, $ORIGIN untouched. Re-run this close" 5
+}
+release_record_lock() { exec 9>&-; }
 
 # bead_row <repo-path> <id> — the bead's `gc bd list` row as a one-element
 # array, the shape every read below takes. The list row, unlike `show`, carries
@@ -309,9 +348,15 @@ SUCC_JSON=$(bead_row "$SUCCESSOR_PATH" "$SUCCESSOR")
 [ -n "$SUCC_JSON" ] \
     || die "successor $SUCCESSOR does not exist in $SUCCESSOR_STORE ($SUCCESSOR_PATH/.beads) — nothing written, origin $ORIGIN untouched" 3
 
+[ -n "$CHECK$DRY_RUN" ] || take_record_lock
 ORIGIN_JSON=$(bead_row "$ORIGIN_PATH" "$ORIGIN")
 [ -n "$ORIGIN_JSON" ] \
     || die "origin $ORIGIN does not exist in $ORIGIN_STORE ($ORIGIN_PATH/.beads) — nothing written" 3
+# The landing order's marker, which the close clears in its own write.
+CLEAR_MARKER=()
+if printf '%s' "$ORIGIN_JSON" | jq -e '(.[0].metadata // {}) | has("pr_reconcile_pending")' >/dev/null 2>&1; then
+    CLEAR_MARKER=(--unset-metadata pr_reconcile_pending)
+fi
 
 ORIGIN_STATUS=$(printf '%s' "$ORIGIN_JSON" | jq -r '(.[0].status // "") | ascii_downcase' 2>/dev/null || true)
 # The status and assignee the gates below judge, as the store holds them. The
@@ -693,7 +738,9 @@ if [ -n "$DRY_RUN" ]; then
     if [ "$ORIGIN_STATUS" = "closed" ]; then
         CLOSE_PLAN="already closed — edge + note only, the close left as it is"
     else
-        CLOSE_PLAN="bd's checked close while $ORIGIN is still ${JUDGED_STATUS:-?} and ${JUDGED_ASSIGNEE:-unassigned}, noting \"$REASON\""
+        MARKER_PLAN=""
+        [ "${#CLEAR_MARKER[@]}" -eq 0 ] || MARKER_PLAN=", clearing the landing order's pr_reconcile_pending marker in the same write, under the store's record lock"
+        CLOSE_PLAN="bd's checked close while $ORIGIN is still ${JUDGED_STATUS:-?} and ${JUDGED_ASSIGNEE:-unassigned}, noting \"$REASON\"$MARKER_PLAN"
     fi
     if [ -n "$EDGE_STANDS" ]; then
         EDGE_PLAN="none ($ORIGIN already names $SUCCESSOR)"
@@ -896,6 +943,7 @@ if [ "$ORIGIN_STATUS" = "closed" ]; then
         # reopen or a claim since the read leaves that holder's bead as they have it.
         if ! bd_at "$ORIGIN_PATH" update "$ORIGIN" \
                 --if-status="$JUDGED_STATUS" --if-assignee="$JUDGED_ASSIGNEE" \
+                ${CLEAR_MARKER[@]+"${CLEAR_MARKER[@]}"} \
                 --append-notes "Disposition recorded $(date -u +%Y-%m-%dT%H:%MZ): $REASON. (Recorded after the close.)" \
                 >/dev/null 2>&1; then
             undo_edges
@@ -913,7 +961,7 @@ else
     # then re-run this close.
     FG_ARGS=(check "$ORIGIN" --as-disposed)
     if [ -n "$EXCEPT_KEY" ]; then FG_ARGS+=(--except-key "$EXCEPT_KEY"); fi
-    if ! FG_REASON=$("$FINALIZE_GATE" "${FG_ARGS[@]}" 2>/dev/null); then
+    if ! FG_REASON=$("$FINALIZE_GATE" "${FG_ARGS[@]}" 2>/dev/null 9>&-); then
         die "the close of $ORIGIN is held: ${FG_REASON:-finalize gate refused (fail-closed)}. Nothing is recorded; clear what holds it, then re-run this close" 5
     fi
     GUARD=$(close_guard "$ORIGIN_JSON")
@@ -978,6 +1026,7 @@ else
     CLOSE_RC=0; CLOSE_ERR=""
     CLOSE_ERR=$(bd_at "$ORIGIN_PATH" update "$ORIGIN" \
         --if-status="$JUDGED_STATUS" --if-assignee="$JUDGED_ASSIGNEE" --status=closed \
+        ${CLEAR_MARKER[@]+"${CLEAR_MARKER[@]}"} \
         --append-notes "Disposition $(date -u +%Y-%m-%dT%H:%MZ): $REASON.${CARRIED:+ What waited on it waits on $SUCCESSOR now: $CARRIED.}" 2>&1 >/dev/null) || CLOSE_RC=$?
     if [ "$CLOSE_RC" = 13 ]; then
         # A close naming this same successor is what beat this one: the edge is
@@ -1007,6 +1056,7 @@ fi
 # branch, pins the tip, and deletes only the tip it checked. The disposition is
 # complete before this runs, so a branch it cannot end costs a warning, never
 # the close.
+release_record_lock
 RETIRED_BRANCH=$(origin_branch "$ORIGIN_JSON")
 if [ -n "$RETIRED_BRANCH" ]; then
     # Quoted for a paste: a branch name may carry shell metacharacters.
