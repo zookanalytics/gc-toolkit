@@ -119,7 +119,8 @@ Its gate is then answered like any gate the operator rules on.
 
 Post the framing as a hand-back whose decision leads with your recommendation,
 and record it on the conversation first (the prompt's hand-back). When the
-recommendation sends work, say whether you recommend the sitting end at its
+recommendation sends work, the decision names the formula it goes on, chosen
+as the `work` skill says, and whether you recommend the sitting end at its
 hand-off or stay for the work's return, and why (the prompt's End or stay).
 
 Then offer the close-out as the last line, the only thing below the hand-back.
