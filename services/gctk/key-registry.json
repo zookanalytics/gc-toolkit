@@ -11,9 +11,18 @@
     "name": "branch",
     "type": "string",
     "readers": [
+      "pr",
       "waits"
     ],
-    "doc": "The source branch a work bead's change is on, which the work formula's workspace-setup writes (lifecycle/lifecycle.toml, [metadata.merge_identity]). A bead carrying it is in flight."
+    "doc": "The branch a bead's work is on. A composition reads it for the PR's source branch and finds the beads whose work the branch carries by it. The source branch a work bead's change is on, which the work formula's workspace-setup writes (lifecycle/lifecycle.toml, [metadata.merge_identity]). A bead carrying it is in flight."
+  },
+  {
+    "name": "check_set",
+    "type": "string",
+    "readers": [
+      "pr"
+    ],
+    "doc": "The review checks a bead's change is gated by, as a comma list (lifecycle/lifecycle.toml, [metadata.gates]). A composition names it when no pre-open gate resolves from it."
   },
   {
     "name": "epic_boundaries",
@@ -78,6 +87,14 @@
       "listing"
     ],
     "doc": "Why the latest ruling on an epic was made, written with it."
+  },
+  {
+    "name": "fold_target",
+    "type": "string",
+    "readers": [
+      "pr"
+    ],
+    "doc": "The branch a bead's work was folded onto by a polecat (lifecycle/lifecycle.toml, [metadata.merge_identity]). A bead carrying it has its work on that branch."
   },
   {
     "name": "gc.dispatch_when_ready",
@@ -179,9 +196,10 @@
     "name": "gc.routed_to",
     "type": "string",
     "readers": [
-      "listing"
+      "listing",
+      "pr"
     ],
-    "doc": "The pool, agent or person a bead is routed to, written by lifecycle.sh's --route and by the script or formula that owns the bead's dispatch (lifecycle/lifecycle.toml, ROUTE and [metadata.runtime_owned])."
+    "doc": "The pool, agent or person a bead is routed to (lifecycle/lifecycle.toml, ROUTE and [metadata.runtime_owned]). A bead on a branch that a pool still holds has not pushed its work. The pool, agent or person a bead is routed to, written by lifecycle.sh's --route and by the script or formula that owns the bead's dispatch (lifecycle/lifecycle.toml, ROUTE and [metadata.runtime_owned])."
   },
   {
     "name": "gc.step_ref",
@@ -203,21 +221,31 @@
     "name": "gc.work_outcome",
     "type": "string",
     "readers": [
-      "listing"
+      "listing",
+      "pr"
     ],
     "aliases": [
       "work_outcome"
     ],
-    "doc": "A work bead's self-reported disposition, no-op or shipped, whose meaning is the runtime's (lifecycle/lifecycle.toml, [metadata.runtime_owned])."
+    "doc": "A work bead's self-reported disposition (lifecycle/lifecycle.toml, [metadata.runtime_owned]). A bead reading no-op put no work on its branch. A work bead's self-reported disposition, no-op or shipped, whose meaning is the runtime's (lifecycle/lifecycle.toml, [metadata.runtime_owned])."
   },
   {
     "name": "merge_result",
     "type": "string",
     "readers": [
       "listing",
+      "pr",
       "waits"
     ],
-    "doc": "The anchor's lifecycle state, which lifecycle.sh, through gctk lifecycle, writes on every transition (lifecycle/lifecycle.toml, [machine] and [states]). A bead carrying it is in flight. A listing names it on each bead, so a reader tells an anchor whose pull request is open."
+    "doc": "The anchor's lifecycle state (lifecycle/lifecycle.toml, [machine] and [states]). A bead on a branch that carries it is the branch's anchor, and one landed on another branch reads merged. The anchor's lifecycle state, which lifecycle.sh, through gctk lifecycle, writes on every transition (lifecycle/lifecycle.toml, [machine] and [states]). A bead carrying it is in flight. A listing names it on each bead, so a reader tells an anchor whose pull request is open."
+  },
+  {
+    "name": "merged_target",
+    "type": "string",
+    "readers": [
+      "pr"
+    ],
+    "doc": "Where a bead's work actually lands (lifecycle/lifecycle.toml, [metadata.merge_identity]). A composition names it as the PR's target, and a bead carrying it with merge_result=merged has its work on that branch."
   },
   {
     "name": "pr_number",
@@ -226,6 +254,14 @@
       "listing"
     ],
     "doc": "The number of the anchor's open pull request, which pr-open.sh writes when it opens and pr-facts.sh copies onto rework children (lifecycle/lifecycle.toml, [metadata.merge_identity])."
+  },
+  {
+    "name": "pr_summary",
+    "type": "string",
+    "readers": [
+      "pr"
+    ],
+    "doc": "The account of what a change does, which the polecat writes on the anchor at submit and an integration effort's summary task writes on its landing bead (lifecycle/lifecycle.toml, [metadata.merge_identity]). The PR's managed summary region carries it, and the dispatch text stands in while it is absent or blank."
   },
   {
     "name": "pr_url",
@@ -260,5 +296,13 @@
     "type": "json",
     "owner": "internal/rig",
     "doc": "The published copy of a recorded check's result, which `gctk rig \u003ccheck\u003e --publish-bead \u003cbead\u003e` writes on the bead its caller names: the record the call answered with, as one JSON object of check, result, scope (absent on a lint or typecheck run), commit, tree, exit_code, duration_ms, runner, recorded_at and command. gctk writes it only once the record store holds the result it copies, after recording a result or answering from a record. No pack path reads it: the record under the rig clone's git common directory answers a later call. Absent means no call published that check to the bead. Never cleared: the next publish replaces it. Its commit is the one the check ran at: the head the call answered for, or, for a full-suite test pass answered through the tree, an earlier commit with the same tree."
+  },
+  {
+    "name": "target",
+    "type": "string",
+    "readers": [
+      "pr"
+    ],
+    "doc": "The branch a bead's work lands on, which the polecat records at submit and a caller can set first (lifecycle/lifecycle.toml, [metadata.merge_identity]). A composition names it as the PR's target when merged_target is absent."
   }
 ]

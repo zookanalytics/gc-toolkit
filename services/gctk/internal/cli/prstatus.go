@@ -61,7 +61,8 @@ func newPRCmd(stdout, stderr io.Writer) *cobra.Command {
 	}
 	status.Flags().BoolVar(&asJSON, "json", false, "print the status with what holds the PR, as one JSON object")
 	return group("pr", "a bead's pull request",
-		"The pull request a bead owns: where it stands.", status)
+		"The pull request a bead owns: where it stands, and what its title and body say.",
+		status, newPRComposeCmd(stdout, stderr))
 }
 
 // prStatus prints the state prstatus.Derive returns for the facts prstatus.Read
