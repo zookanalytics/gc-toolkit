@@ -239,7 +239,7 @@ stateDiagram-v2
   pull_request_head_changed --> pull_request_pending: the refinery validates the new head
   pull_request_pending --> mr_merged: landing order — merged at the validated head, the commit on the target
   mr_merged --> [*]
-  pull_request_pending --> pull_request_record_incomplete: landing order — a record left half written
+  [*] --> pull_request_record_incomplete: landing order — a publication stopped between its two writes
   pull_request_record_incomplete --> pull_request_pending: the refinery validates it again
   pull_request_pending --> exception: landing order — see the table
   exception --> [*]: a person, through the exception's gate
@@ -990,7 +990,7 @@ sequenceDiagram
   R->>G: mr — edit the PR's title and body, push the head under the lease,<br/>or push and open it as a draft
   R->>L: gctk pr record — pull_request_pending, blocked, assigned to the refinery
   O->>G: read the PR by its number; the evaluator decides it is ready
-  O->>G: merge --match-head-commit the validated head
+  O->>G: mergePullRequest, pinned to the validated head (expectedHeadOid)
   O->>L: mr_merged + close, once the merge commit is on the fetched target
 ```
 
