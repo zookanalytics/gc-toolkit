@@ -50,7 +50,6 @@ show)
     sep=""
     [ -n "$MD_WORK_DIR" ]    && { printf '%s"work_dir":"%s"' "$sep" "$MD_WORK_DIR"; sep=","; }
     [ -n "$MD_BRANCH" ]      && { printf '%s"branch":"%s"' "$sep" "$MD_BRANCH"; sep=","; }
-    [ -n "$MD_GATE" ]        && { printf '%s"self_review_passed_sha":"%s"' "$sep" "$MD_GATE"; sep=","; }
     [ -n "$MD_ROUTE" ]       && { printf '%s"gc.execution_routed_to":"%s"' "$sep" "$MD_ROUTE"; sep=","; }
     [ -n "$MD_ABORTED_AT" ]  && { printf '%s"aborted_at":"%s"' "$sep" "$MD_ABORTED_AT"; sep=","; }
     # A pre-existing mark is JSON kept as a string, as bd keeps it.
@@ -191,7 +190,6 @@ MD_ROOT_ISSUE="${MD_ROOT_ISSUE-$issue_id}"
 GC_COLD="${GC_COLD-0}"
 MD_WORK_DIR="${MD_WORK_DIR-$WT}"
 MD_BRANCH="${MD_BRANCH-polecat/gc-issue}"
-MD_GATE="${MD_GATE-}"
 MD_ROUTE="${MD_ROUTE-gc-toolkit/gc-toolkit.polecat}"
 MD_ABORTED_AT="${MD_ABORTED_AT-}"
 MD_MAX_ATTEMPTS="${MD_MAX_ATTEMPTS-3}"
@@ -249,7 +247,7 @@ assert_out() {
 
 reset_env() {
   unset ROOT_ID ISSUE_ID MD_ROOT_ISSUE RUN_BEAD RUN_FAILS GC_COLD
-  unset MD_WORK_DIR MD_BRANCH MD_GATE MD_ROUTE MD_ABORTED_AT MD_MAX_ATTEMPTS MD_SUBJECT_MAX
+  unset MD_WORK_DIR MD_BRANCH MD_ROUTE MD_ABORTED_AT MD_MAX_ATTEMPTS MD_SUBJECT_MAX
   unset UPDATE_FAILS ITERATION MD_PRE_LINT MD_PRE_TEST MD_SETUP_BUILD MD_PRE_BUILD GCTK
   unset VAR_BASE VAR_SETUP VAR_TYPECHECK VAR_LINT VAR_BUILD VAR_AFFECTED VAR_TEST
   clear_records
@@ -532,30 +530,13 @@ run_case "FAIL when the block ran over uncommitted changes, beside records that 
 assert_out "…because the block noted no setup and build" "nothing recorded at $HEAD_SHA for: setup build"
 
 # --- 3e. some checks recorded, one not ----------------------------------------
-reset_env; MD_GATE="$HEAD_SHA"; write_state
+reset_env; write_state
 record "$WT" test --scope affected --command true
 record "$WT" lint --command true
-run_case "FAIL when a check has no record, even beside a stamp naming HEAD" 1
+run_case "FAIL when a check has no record" 1
 assert_out "names the check with no record" "nothing recorded at $HEAD_SHA for: typecheck"
 
-# --- 3f. a run poured before its checks were recorded --------------------------
-# Such a run notes no setup and build either; its stamp certified them.
-reset_env; MD_GATE="$HEAD_SHA"; MD_SETUP_BUILD=""; write_state
-run_case "PASS on a stamp naming HEAD when nothing is recorded" 0
-assert_out "says the stamp stood in" "by the stamp of a run poured before its checks were recorded"
-reset_env; MD_GATE="$OLD_SHA"; MD_SETUP_BUILD=""; write_state
-run_case "FAIL on a stamp naming an older HEAD when nothing is recorded" 1
-reset_env; MD_GATE="$HEAD_SHA"; MD_SETUP_BUILD=""; write_state; green
-run_case "PASS on a stamp naming HEAD in place of the setup and build note, beside records that pass" 0
-# Records of runs the step does not declare say nothing about its own, so the
-# stamp still stands in where they are all that HEAD holds.
-reset_env; MD_GATE="$HEAD_SHA"; MD_SETUP_BUILD=""; write_state
-record "$WT" test --scope full --command true; record "$WT" lint --command 'printf other'
-run_case "PASS on a stamp naming HEAD where only records of other runs are" 0
-reset_env; MD_GATE="$HEAD_SHA"; MD_SETUP_BUILD=$(noted "$HEAD_SHA" none fail); write_state; green
-run_case "FAIL when the note at HEAD says the build failed, even beside a stamp naming HEAD" 1
-
-# --- 3g. no gctk binary ------------------------------------------------------
+# --- 3f. no gctk binary ------------------------------------------------------
 reset_env; GCTK=none; write_state; green
 run_case "FAIL (fail-closed) with no gctk binary to read the records" 1
 assert_out "names the missing binary" "no gctk binary"
@@ -618,7 +599,7 @@ refute_call "resolution must not shell out to gc convoy" "gc convoy"
 # --- 12. exhaustion handback -------------------------------------------------
 # The last failing attempt (GC_ITERATION >= gc.max_attempts) hands the work bead
 # back itself, because nothing runs after the budget is spent.
-reset_env; MD_GATE=""; ITERATION=3; MD_MAX_ATTEMPTS=3; write_state
+reset_env; ITERATION=3; MD_MAX_ATTEMPTS=3; write_state
 run_case "FAIL on the last attempt with nothing recorded" 1
 assert_call "last attempt stamps aborted_at=self-review-exhausted" "aborted_at=self-review-exhausted"
 assert_call "last attempt reassigns to the witness (derived from the pool route)" "gc-toolkit/gc-toolkit.witness"
@@ -629,17 +610,17 @@ assert_call "last attempt nudges the witness (best effort)" "gc session nudge gc
 # --- 13. exhaustion is idempotent --------------------------------------------
 # A work bead already carrying aborted_at is left alone: a retried exec of the
 # same attempt must not append a second handback.
-reset_env; MD_GATE=""; ITERATION=3; MD_MAX_ATTEMPTS=3; MD_ABORTED_AT="self-review-exhausted"; write_state
+reset_env; ITERATION=3; MD_MAX_ATTEMPTS=3; MD_ABORTED_AT="self-review-exhausted"; write_state
 run_case "FAIL on the last attempt when already aborted" 1
 refute_call "does not re-stamp an already-aborted bead" "aborted_at=self-review-exhausted"
 
 # --- 14. no handback before the budget is spent ------------------------------
-reset_env; MD_GATE=""; ITERATION=2; MD_MAX_ATTEMPTS=3; write_state
+reset_env; ITERATION=2; MD_MAX_ATTEMPTS=3; write_state
 run_case "FAIL mid-budget with nothing recorded" 1
 refute_call "no handback before the last attempt" "aborted_at=self-review-exhausted"
 
 # --- 15. budget read from the subject bead when carried there ----------------
-reset_env; MD_GATE=""; ITERATION=3; MD_MAX_ATTEMPTS=""; MD_SUBJECT_MAX=3; write_state
+reset_env; ITERATION=3; MD_MAX_ATTEMPTS=""; MD_SUBJECT_MAX=3; write_state
 run_case "FAIL on the last attempt with the budget on the subject bead" 1
 assert_call "resolves the budget from the subject when the control list is empty" "aborted_at=self-review-exhausted"
 

@@ -427,24 +427,7 @@ else
 	done
 fi
 [ -z "$FAILED" ] || incomplete "not green at $HEAD_SHA:$FAILED; another iteration is needed"
-
-# A molecule poured before its self-review ran the checks through gctk rig
-# keeps step text that records nothing and stamps self_review_passed_sha on the
-# work bead once every declared check, setup and build included, has passed.
-# That stamp naming HEAD stands in for the setup and build outcome such a run
-# never notes, and for the records when none of the three declared runs has one
-# there, so such a run still converges.
-if [ -n "$UNRECORDED" ]; then
-	LEGACY_SHA=$(printf '%s' "$ISSUE_JSON" | jq -r '.[0].metadata.self_review_passed_sha // empty')
-	if [ "$LEGACY_SHA" = "$HEAD_SHA" ]; then
-		UNRECORDED="${UNRECORDED% setup build}"
-		if [ "$UNRECORDED" = " test lint typecheck" ]; then
-			note "PASS: self-review green at $HEAD_SHA, by the stamp of a run poured before its checks were recorded"
-			exit 0
-		fi
-	fi
-	[ -z "$UNRECORDED" ] || incomplete "nothing recorded at $HEAD_SHA for:$UNRECORDED by the runs the step declares, so another iteration is needed"
-fi
+[ -z "$UNRECORDED" ] || incomplete "nothing recorded at $HEAD_SHA for:$UNRECORDED by the runs the step declares, so another iteration is needed"
 
 note "PASS: self-review green at $HEAD_SHA"
 exit 0
