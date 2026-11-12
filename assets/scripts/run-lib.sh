@@ -50,6 +50,8 @@
 # whether a live session is working a tree, work-gate.sh takes the runs that work its
 # bead, to refuse a second run of its formula, and work-setup.sh takes the runs that
 # work a bead whose tree holds a branch, to tell a sibling from a tree left behind.
+# work-lib.sh takes the runs that work a converse sitting's change, so that
+# work-setup.sh and work-submit.sh refuse under --held-by a change a run works.
 # gate-ensure.sh takes the runs poured over a review, live or not, to judge whether a pour still drives it.
 # gc-helm.sh ends the live runs beneath an anchor it releases, its park
 # survey applies run_rows to the listing it reads to find a bead's workflows,

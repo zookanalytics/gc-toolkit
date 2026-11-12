@@ -588,6 +588,85 @@ eq "$RC" "0" "(45) a run that made its own tree adopts the one holding the branc
 eq "$(last_line)" "$PEER2" "(45) and enters it"
 [ ! -e "$OWN" ] && ok "(45) the empty tree it made is gone" || bad "(45) the empty tree it made is gone"
 
+echo "# a sitting sets its change up under --held-by"
+# The change a sitting filed: open, unassigned and unrouted, its target the base,
+# with a blocks edge onto the conversation tk-conv, which the sitting's hook names.
+SIT="$TMP/sitting-home"; CTREE="$SIT/worktrees/tk-c"; mkdir -p "$SIT"
+change() { # [<jq edit of the row>]
+  jq -nc --arg t "$BASE" '[{id: "tk-c", status: "open", assignee: "", metadata: {target: $t},
+    dependencies: [{id: "tk-conv", dependency_type: "blocks"}]}]' | jq -c "map(${1:-.})"
+}
+sitting() { # [<VAR=value>...] — work-setup.sh --held-by, from the sitting's home
+  : > "$CALLS"
+  OUT=$(cd "$SIT" && env PATH="$BIN:$PATH" WORK_READ_WAIT=0 GC_SESSION_ID=sess-sit GC_DIR="$SIT" HOOK_CURRENT=tk-conv "$@" \
+    "$PACK/work-setup.sh" --bead tk-c --held-by tk-conv 2>"$TMP/err"); RC=$?
+}
+ended() { grep -cE '^(drain|gate|await|cancel)( |$)' "$CALLS" | tr -d ' '; }
+printf '[]' > "$RUNS"
+printf '%s' '[{"root":"root-9","convoy":"cv-9","bead":"tk-c","formula":"mol-polecat-work","live":true}]' > "$TMP/runs-c.json"
+for case in edge hook no-hook holder refinery run route target; do
+  envs=(); edit="."
+  case "$case" in
+    edge)     edit='.dependencies = []'; want="no blocks edge onto tk-conv" ;;
+    hook)     envs=(HOOK_CURRENT=tk-other); want="gc hook current names tk-other, not tk-conv" ;;
+    no-hook)  envs=(HOOK_CURRENT=); want="gc hook current names no bead, not tk-conv" ;;
+    holder)   edit='.assignee = "sess-other"'; want="assigned to sess-other" ;;
+    refinery) edit='.assignee = "gc-toolkit/gc-toolkit.refinery"'; want="assigned to gc-toolkit/gc-toolkit.refinery" ;;
+    run)      envs=("RUN_LIB_STUB_RUNS=$TMP/runs-c.json"); want="a run works it (root-9)" ;;
+    route)    edit='.metadata["gc.routed_to"] = "gc-toolkit/gc-toolkit.polecat"'; want="routed to gc-toolkit/gc-toolkit.polecat" ;;
+    target)   edit='.metadata = {}'; want="records no target" ;;
+  esac
+  change "$edit" > "$STORE"; cp "$STORE" "$TMP/store-before"
+  sitting ${envs[@]+"${envs[@]}"}
+  eq "$RC" "1" "(60) $case: refused"
+  has "$(cat "$TMP/err")" "$want" "(60) $case: the refusal says so"
+  { cmp -s "$STORE" "$TMP/store-before" && ! grep -q '^gc bd update' "$CALLS"; } \
+    && ok "(60) $case: nothing is written" || bad "(60) $case: nothing is written"
+  [ ! -e "$CTREE" ] && ok "(60) $case: no tree is made" || bad "(60) $case: no tree is made"
+  eq "$(ended)" "0" "(60) $case: nothing gates, waits, cancels or drains"
+done
+change > "$STORE"
+sitting SHOW_DOWN=1
+eq "$RC" "1" "(61) a store that does not answer: stops"
+has "$(cat "$TMP/err")" "The store did not answer" "(61) says so"
+eq "$(ended)" "0" "(61) and nothing gates, cancels or drains"
+sitting RUN_LIB_STUB_FAIL=all
+eq "$RC $(ended)" "1 0" "(61) the runs cannot be read: stops, and nothing is ended"
+
+change > "$STORE"
+sitting
+eq "$RC" "0" "(62) a sitting's setup exits 0"
+eq "$(last_line)" "$CTREE" "(62) it prints the tree, under the sitting's home"
+eq "$(g "$CTREE" branch --show-current)" "polecat/tk-c" "(62) on polecat/<bead>"
+eq "$(g "$CTREE" rev-parse HEAD)" "$BASE_TIP" "(62) cut from the bead's target"
+eq "$(meta branch) $(meta work_dir)" "polecat/tk-c $CTREE" "(62) the branch and the tree are recorded"
+eq "$(ended)" "0" "(62) nothing gates, waits, cancels or drains"
+commit_in "$CTREE" agreed.txt "agreed" "a step the operator agreed"
+AGREED="$(g "$CTREE" rev-parse HEAD)"
+sitting
+eq "$RC" "0" "(63) the sitting's next run exits 0"
+eq "$(last_line)" "$CTREE" "(63) it re-enters the tree the bead records"
+eq "$(g "$CTREE" branch --show-current) $(g "$CTREE" rev-parse HEAD)" "polecat/tk-c $AGREED" "(63) on its branch, with the commit it holds"
+eq "$(ended)" "0" "(63) and ends nothing"
+
+# A sibling in flight that records the same tree: a polecat's call waits on it
+# (49), and a sitting's is refused with no wait written.
+PEERC="$TMP/peer-c"; mkdir -p "$PEERC"
+jq -nc --arg p "$PEERC" --arg t "$BASE" '[{id: "tk-c", status: "open", assignee: "", metadata: {target: $t, branch: "polecat/tk-c", work_dir: $p},
+    dependencies: [{id: "tk-conv", dependency_type: "blocks"}]},
+  {id: "tk-sib", status: "open", assignee: "", metadata: {branch: "polecat/tk-c", work_dir: $p}}]' > "$STORE"
+printf '%s' '[{"root":"r","convoy":"c","bead":"tk-sib","formula":"mol-polecat-work","live":true}]' > "$RUNS"
+sitting
+eq "$RC" "1" "(64) a sibling in flight in the tree the change records: stops"
+has "$(cat "$TMP/err")" "where tk-sib is in flight" "(64) names the sibling"
+eq "$(ended)" "0" "(64) no wait is written, and nothing cancels or drains"
+jq -nc --arg t "$BASE" '[{id: "tk-c", status: "open", assignee: "", metadata: {target: $t, branch: "polecat/never-existed"},
+    dependencies: [{id: "tk-conv", dependency_type: "blocks"}]}]' > "$STORE"
+printf '[]' > "$RUNS"
+sitting GC_DIR="$TMP/sitting-home-2"
+eq "$RC" "1" "(65) a recorded branch that exists nowhere: stops"
+eq "$(ended)" "0" "(65) no gate is filed, and nothing cancels or drains"
+
 echo "# the store"
 clone polecat/w1
 setup_run "$(bead polecat/w1)" SHOW_DOWN=1
@@ -602,6 +681,10 @@ tool --bead a --convoy b --base x; eq "$RC" "2" "both named: usage error"
 tool --bead a; eq "$RC" "2" "no --base: usage error"
 tool --stop-merge --bead a --path p; eq "$RC" "2" "--stop-merge without its question: usage error"
 tool --nope; eq "$RC" "2" "an unknown flag: usage error"
+tool --bead a --held-by c --base x; eq "$RC" "2" "--held-by with --base: usage error"
+tool --convoy a --held-by c; eq "$RC" "2" "--held-by with --convoy: usage error"
+tool --conclude-merge --bead a --held-by c; eq "$RC" "2" "--held-by with --conclude-merge: usage error"
+tool --stop-merge --bead a --held-by c --path p --collided c --question q; eq "$RC" "2" "--held-by with --stop-merge: usage error"
 
 echo
 echo "work-setup: $PASS passed, $FAIL failed"

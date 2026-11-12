@@ -4,11 +4,12 @@
 #
 # It runs against a real git repository with a real bare origin, a gc stub over a
 # JSON store that its reads serve and its writes change, and the real work-lib.sh,
-# decline.sh, claim-close.sh, hand-back.sh and store-only-exit.sh. The guard, the
-# gate, the wait and the cancel are stubs that record their calls, except in the
-# cases that run the real bring-current guard over a reviewed anchor. Everything
-# goes into one log, in order, so a case can read what landed before what. No live
-# city, Dolt, network, or PRs.
+# run-lib.sh, decline.sh, claim-close.sh, hand-back.sh and store-only-exit.sh. The
+# guard, the gate, the wait and the cancel are stubs that record their calls,
+# except in the cases that run the real bring-current guard over a reviewed anchor,
+# and run-lib.stub.sh answers which runs work a bead in the cases that need a run.
+# Everything goes into one log, in order, so a case can read what landed before
+# what. No live city, Dolt, network, or PRs.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -69,7 +70,9 @@ cat > "$BIN/find" <<'SH'
 exec "$REAL_FIND" "$@"
 SH
 # gc over the store. A write whose arguments contain UPDATE_FAIL is refused. A list
-# fails while LIST_DOWN is set, and a show while SHOW_DOWN is set.
+# fails while LIST_DOWN is set, and a show while SHOW_DOWN is set. A dependency's
+# removal drops the edge from the row's dependencies, the shape a show prints, and
+# is refused while DEP_REMOVE_FAIL is set.
 cat > "$BIN/gc" <<'SH'
 #!/usr/bin/env bash
 case "${1:-} ${2:-}" in
@@ -103,7 +106,15 @@ case "$verb" in
     while [ $# -gt 0 ]; do case "$1" in --metadata-field) field="$2"; shift 2 ;; *) shift ;; esac; done
     jq -c --arg b "${field#branch=}" '[.[] | select((.status // "") != "closed") | select((.metadata.branch // "") == $b)]' "$STORE" ;;
   dep)
-    [ "${3:-}" = list ] && { printf '[]\n'; exit 0; } ;;
+    case "${3:-}" in
+      list) printf '[]\n'; exit 0 ;;
+      remove)
+        printf 'dep-remove %s %s\n' "${4:-}" "${5:-}" >> "$LOG"
+        [ -z "${DEP_REMOVE_FAIL:-}" ] || { echo "bd: refused (stub)" >&2; exit 1; }
+        jq -c --arg id "${4:-}" --arg on "${5:-}" \
+          'map(if .id == $id then .dependencies = [(.dependencies // [])[] | select(.id != $on)] else . end)' \
+          "$STORE" > "$STORE.new" && mv "$STORE.new" "$STORE" ;;
+    esac ;;
   update)
     all="$*"
     case " $all " in *"${UPDATE_FAIL:-@@never@@}"*) echo "bd: refused (stub)" >&2; exit 1 ;; esac
@@ -791,12 +802,163 @@ eq "$RC" 1 "(47) --convoy with a plain current claim: stops, as a step's close d
 has "$OUT" "this step is not closed" "(47) says so"
 eq "$(grep -c '^drain' "$LOG" | tr -d ' ')" 0 "(47) no drain"
 
+echo "# a sitting hands its change off under --held-by"
+# The change a sitting filed: open, unassigned and unrouted, its target main, with
+# a blocks edge onto the conversation tk-conv, which the sitting's hook names.
+SIT_META='{"target":"main"}'
+sit_edge() {
+  jq -c 'map(if .id == "tk-w" then .dependencies = [{id: "tk-conv", dependency_type: "blocks"}] else . end)' "$STORE" > "$STORE.n" && mv "$STORE.n" "$STORE"
+}
+set_row() { # <jq edit of the change's row>
+  jq -c "map(if .id == \"tk-w\" then $1 else . end)" "$STORE" > "$STORE.n" && mv "$STORE.n" "$STORE"
+}
+sit() { # [<VAR=value>...]
+  submit HOOK_CURRENT=tk-conv "$@" -- --bead tk-w --held-by tk-conv --notes "Handed off from the sitting." \
+    --summary-file "$SUM" --title "feat: the change"
+}
+edge() { jq -r '.[] | select(.id == "tk-w") | [.dependencies[]? | .id] | join(",")' "$STORE"; }
+ended() { grep -cE '^(drain|gate|await|cancel) ?' "$LOG" | tr -d ' '; }
+final_row() { jq -cS '.[] | select(.id == "tk-w") | del(.notes)' "$STORE"; }
+note_count() { field notes | grep -o 'Handed off from the sitting\.' | wc -l | tr -d ' '; }
+# held_refused <label> : exit 1, with nothing pushed, written, removed or ended,
+# and the store as $TMP/store-before holds it.
+held_refused() {
+  eq "$RC" 1 "$1: exit 1"
+  eq "$(pushed)" 0 "$1: nothing is pushed"
+  eq "$(grep -cE '^(update|dep-remove|drain|gate|await|cancel|guard|session|remove|release) ?' "$LOG" | tr -d ' ')" 0 \
+    "$1: nothing is written, removed or ended"
+  cmp -s "$STORE" "$TMP/store-before" && ok "$1: the store is as it was" || bad "$1: the store is as it was"
+}
+before() { cp "$STORE" "$TMP/store-before"; : > "$LOG"; }
+
+prepare polecat/tk-w "$SIT_META"; sit_edge
+printf 'the summary\n' > "$SUM"
+sit
+eq "$RC" 0 "(50) a sitting's hand-off exits 0: $OUT"
+eq "$(ON_ORIGIN polecat/tk-w)" "$HEAD_SHA" "(50) the branch is on origin at HEAD"
+eq "$(field status) $(field assignee)" "open gc-toolkit/gc-toolkit.refinery" "(50) the change is the refinery's, and open"
+eq "$(meta target) $(meta branch)" "main polecat/tk-w" "(50) its target stands and its branch is recorded"
+eq "$(meta pr_summary) | $(field title)" "the summary | feat: the change" "(50) the change is its own anchor: the summary and the title land on it"
+eq "$(note_count)" 1 "(50) the notes are appended"
+eq "$(edge)" "" "(50) its edge onto the conversation is removed"
+eq "$(sed -n '1,/^session wake/p' "$LOG" | grep -E '^(update|dep-remove) ' | tail -n 1 | awk '{print $1}')" "dep-remove" \
+  "(50) the removal is the last write before the refinery's wake"
+[ "$(grep -n '^update tk-w --assignee=' "$LOG" | cut -d: -f1)" -lt "$(grep -n '^dep-remove tk-w tk-conv$' "$LOG" | cut -d: -f1)" ] \
+  && ok "(50) and comes after the assignment" || bad "(50) and comes after the assignment"
+eq "$(closed_step)" "in_progress" "(50) no step is written"
+eq "$(ended)" 0 "(50) nothing gates, cancels or drains"
+[ ! -e "$C" ] && ok "(50) the tree is removed" || bad "(50) the tree is removed"
+eq "$(meta work_dir)" "<absent>" "(50) and work_dir cleared"
+REF_ROW=$(final_row)
+
+echo "# a hand-off cut short before the assignment is finished by the call run again"
+for piece in "--append-notes" "--status=open" "--assignee=gc-toolkit"; do
+  prepare polecat/tk-w "$SIT_META"; sit_edge
+  printf 'the summary\n' > "$SUM"
+  sit "UPDATE_FAIL=$piece"
+  eq "$RC" 1 "(51) $piece refused: stops"
+  has "$OUT" "this call run again finishes the hand-off" "(51) $piece refused: says the call run again finishes it"
+  eq "$(field assignee) $(edge)" " tk-conv" "(51) $piece refused: the change is unassigned, and its edge stands"
+  eq "$(ended)" 0 "(51) $piece refused: nothing gates, cancels or drains"
+  : > "$LOG"
+  sit
+  eq "$RC" 0 "(51) $piece refused, then run again: exits 0: $OUT"
+  eq "$(final_row)" "$REF_ROW" "(51) $piece refused, then run again: the change ends as one hand-off leaves it"
+  [ "$piece" = --append-notes ] && want=1 || want=2
+  eq "$(note_count)" "$want" "(51) $piece refused, then run again: the note is on it $want time(s)"
+  eq "$(ON_ORIGIN polecat/tk-w)" "$HEAD_SHA" "(51) $piece refused, then run again: origin holds the head the first run pushed"
+  eq "$(ended)" 0 "(51) $piece refused, then run again: nothing gates, cancels or drains"
+done
+
+echo "# once the refinery holds the change, every run is refused as the refinery's"
+prepare polecat/tk-w "$SIT_META"; sit_edge
+printf 'the summary\n' > "$SUM"
+sit DEP_REMOVE_FAIL=1
+eq "$RC" 1 "(52) the removal refused: stops"
+eq "$(field assignee) $(edge)" "gc-toolkit/gc-toolkit.refinery tk-conv" "(52) the change is the refinery's, and its edge stands"
+has "$OUT" "gc bd dep remove tk-w tk-conv" "(52) it names the removal still owed"
+has "$OUT" "gc session wake gc-toolkit/gc-toolkit.refinery" "(52) and the wake"
+eq "$(ended)" 0 "(52) nothing gates, cancels or drains"
+before
+sit
+held_refused "(52) run again with the removal not landed"
+has "$OUT" "assigned to gc-toolkit/gc-toolkit.refinery" "(52) the refusal names the refinery as the holder"
+
+prepare polecat/tk-w "$SIT_META"; sit_edge
+printf 'the summary\n' > "$SUM"
+sit
+before
+sit
+held_refused "(52b) run again after the whole hand-off"
+has "$OUT" "assigned to gc-toolkit/gc-toolkit.refinery" "(52b) the refusal names the refinery as the holder"
+has "$OUT" "no blocks edge onto tk-conv" "(52b) beside the edge already gone"
+
+prepare polecat/tk-w "$SIT_META"; sit_edge
+set_row '.assignee = "gc-toolkit/gc-toolkit.refinery"'
+before
+sit
+held_refused "(52c) a change the refinery took before this conversation's edge was added"
+has "$OUT" "assigned to gc-toolkit/gc-toolkit.refinery" "(52c) the refusal names the refinery as the holder"
+
+echo "# a bead the sitting does not hold is refused with nothing written"
+printf '%s' '[{"root":"root-9","convoy":"cv-9","bead":"tk-w","formula":"mol-polecat-work","live":true}]' > "$TMP/runs.json"
+for case in edge hook no-hook holder run route target; do
+  prepare polecat/tk-w "$SIT_META"; sit_edge
+  envs=()
+  case "$case" in
+    edge)    set_row '.dependencies = []'; want="no blocks edge onto tk-conv" ;;
+    hook)    envs=(HOOK_CURRENT=tk-other); want="gc hook current names tk-other, not tk-conv" ;;
+    no-hook) envs=(HOOK_CURRENT=); want="gc hook current names no bead, not tk-conv" ;;
+    holder)  set_row '.assignee = "sess-other"'; want="assigned to sess-other" ;;
+    run)     envs=("GC_RUN_LIB=$HERE/run-lib.stub.sh" "RUN_LIB_STUB_RUNS=$TMP/runs.json"); want="a run works it (root-9)" ;;
+    route)   set_row '.metadata["gc.routed_to"] = "gc-toolkit/gc-toolkit.polecat"'; want="routed to gc-toolkit/gc-toolkit.polecat" ;;
+    target)  set_row '.metadata |= del(.target)'; want="records no target" ;;
+  esac
+  before
+  sit ${envs[@]+"${envs[@]}"}
+  held_refused "(53) $case"
+  has "$OUT" "$want" "(53) $case: the refusal says so"
+done
+prepare polecat/tk-w "$SIT_META"; sit_edge
+sit "GC_RUN_LIB=$HERE/run-lib.stub.sh" "RUN_LIB_STUB_RUNS=$TMP/runs.json" RUN_LIB_STUB_FAIL=all
+eq "$RC" 1 "(53b) the runs cannot be read: stops"
+has "$OUT" "The store did not answer" "(53b) says so"
+eq "$(pushed) $(ended)" "0 0" "(53b) nothing is pushed or ended"
+
+echo "# a sitting's stop ends nothing"
+prepare polecat/tk-w "$SIT_META"; sit_edge
+sit PUSH_FAIL=1
+eq "$RC" 1 "(54) a refused push: stops"
+has "$OUT" "PUSH FAILED" "(54) says so"
+eq "$(field assignee) $(edge)" " tk-conv" "(54) the change stays unassigned and held"
+eq "$(ended)" 0 "(54) nothing gates, cancels or drains"
+prepare polecat/tk-w "$SIT_META"; sit_edge
+sit SHOW_DOWN=1
+eq "$RC" 1 "(54b) a store that does not answer: stops"
+has "$OUT" "The store did not answer" "(54b) says so"
+eq "$(ended)" 0 "(54b) nothing gates, cancels or drains"
+prepare polecat/stray '{"target":"main","branch":"polecat/tk-w"}'; sit_edge
+sit
+eq "$RC" 1 "(54c) on another branch: stops"
+has "$OUT" "BRANCH SHAPE GATE FAILED" "(54c) says so"
+eq "$(pushed) $(ended)" "0 0" "(54c) nothing is pushed, and no gate is filed, nothing cancelled or drained"
+prepare polecat/tk-w "$SIT_META"; sit_edge
+printf 'loose\n' > "$C/loose.txt"
+sit
+eq "$RC" 3 "(54d) an uncommitted change exits 3"
+eq "$(pushed) $(ended)" "0 0" "(54d) nothing is pushed or ended"
+
 echo "# usage"
 submit -- ; eq "$RC" 2 "no work named: usage error"
 submit -- --bead a --convoy b --base x --notes n; eq "$RC" 2 "both named: usage error"
 submit -- --bead a --base x; eq "$RC" 2 "no --notes: usage error"
 submit -- --bead a --notes n; eq "$RC" 2 "no --base: usage error"
 submit -- --nope; eq "$RC" 2 "an unknown flag: usage error"
+submit -- --bead a --held-by c --base x --notes n; eq "$RC" 2 "--held-by with --base: usage error"
+submit -- --convoy a --held-by c --notes n; eq "$RC" 2 "--held-by with --convoy: usage error"
+submit -- --bead a --held-by c --store-only x --notes n; eq "$RC" 2 "--held-by with --store-only: usage error"
+submit -- --anchor-only --bead a --held-by c; eq "$RC" 2 "--held-by with --anchor-only: usage error"
+submit -- --bead a --held-by c; eq "$RC" 2 "--held-by with no --notes: usage error"
 
 echo
 echo "work-submit: $PASS passed, $FAIL failed"
