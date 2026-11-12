@@ -37,9 +37,9 @@ itself, the rig-unqualified form of one (`gc-toolkit.polecat`), a form
 carrying a qualifier the identity does not (`gc-toolkit/gc-toolkit.dog`), or a
 bare role (`refinery`).
 
-Stamp what it prints, and file nothing when it prints nothing:
+Route to what it prints, and file nothing when it prints nothing:
   ROUTE=$(resolve-route.sh gc-toolkit.dog) || true
-  [ -n "$ROUTE" ] && gc bd update <bead> --set-metadata gc.routed_to="$ROUTE"
+  [ -n "$ROUTE" ] && gc sling "$ROUTE" <bead> --no-formula --no-convoy
 
 `|| true`, not `|| ROUTE=""`: only a refusal prints nothing, and an
 unverified name arrives on stdout with a non-zero status that the second
