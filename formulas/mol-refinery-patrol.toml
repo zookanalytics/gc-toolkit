@@ -123,7 +123,9 @@ description = """
 It lists the beads assigned to you, open or in progress, that carry a branch,
 and leaves a bead something holds, a bead whose branch another open bead works
 on, and a bead the old path's cadence drives; its stderr names each one left.
-Among the rest it takes a rework child handed back before its anchor.
+A rework child an earlier requeue filed and never sent on is neither a hold nor
+a writer, so its bead is taken, and the rebase step sends the child on. Among
+the rest it takes a rework child handed back before its anchor.
 
 Exit 0: the one line it printed is the bead this iteration acts for. Note it
 and close this step. Exit 3: no work. Write `IDLE: no work, exiting turn.` and
@@ -147,7 +149,9 @@ under your own worktree. A branch is never rebased.
 - Exit 3: the merge conflicted, and the work went back to the pool with the
   reason "Conflicts with <target> at <commit>": the bead itself through
   `gc sling` when it records no open PR, or its PR's rework child when it does.
-  Or the bead had left you before the requeue wrote. Jump to next-iteration.
+  Or the bead's rework child, filed by an earlier requeue and never sent on,
+  was sent on, or the bead had left you before the requeue wrote. Jump to
+  next-iteration.
 - Exit 4: the target or the branch is not on origin, so the bead waits behind
   a human gate. Jump to next-iteration.
 - Exit 1: nothing prepared, and the bead stays with you. End the session with

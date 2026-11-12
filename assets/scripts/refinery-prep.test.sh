@@ -11,6 +11,9 @@
 #   - a merge that conflicts is aborted and sent back to the pool through the
 #     requeue, with the reason "Conflicts with <target> at <commit>", and the
 #     tree is removed;
+#   - a bead with a rework child the requeue filed and never sent on is not
+#     merged: the requeue sends the child on, and the tree is removed, while a
+#     rework child a review filed leaves the prep as it is;
 #   - a target or a branch origin does not carry parks the bead behind a human
 #     gate, with merge_result=blocked, still assigned to the refinery;
 #   - a tree an earlier iteration left is removed before the next is staged;
@@ -99,6 +102,29 @@ work g polecat/gone
 run --bead g
 eq "$RC" 4 "the prep parks (exit 4)"
 has "$(logged scripts)" "human-gate --subject g --key refinery-branch-missing" "the gate is keyed refinery-branch-missing"
+
+echo "# a bead with an unsent rework child has the child sent on and is not merged"
+fresh
+READ=$(branch_with polecat/u u.txt)
+work u polecat/u '{"merge_result":"pull_request_head_changed"}'
+put '{"id":"u-kid","title":"Rework","status":"open","assignee":"","issue_type":"task","notes":"","metadata":{"task_kind":"rework","anchor_bead":"u","branch":"polecat/u","rejection_reason":"lint fails"}}'
+echo "u u-kid" > "$STUB_HOLDS"
+main_with later.txt >/dev/null
+run --bead u
+eq "$RC" 3 "the prep sends the child on instead (exit 3)"
+has "$OUT" "u's rework child u-kid was filed and never sent on" "it says why the bead is not merged"
+has "$(logged scripts)" "queue-priority settle u-kid" "the requeue settles the child"
+has "$(logged gc)" "rig-a/gc-toolkit.polecat u-kid --on mol-polecat-work" "…and slings it"
+[ ! -e "$HOME_DIR/worktrees/u" ] && rt_ok "the tree is removed" || rt_bad "the tree is removed"
+eq "$(tip polecat/u)" "$READ" "the branch is as it was"
+fresh
+branch_with polecat/r r.txt >/dev/null
+work r polecat/r '{"merge_result":"pull_request_head_changed"}'
+put '{"id":"r-kid","title":"Rework","status":"open","assignee":"","issue_type":"task","notes":"","metadata":{"task_kind":"rework","anchor_bead":"r","branch":"polecat/r","source_review_bead":"rv-1"}}'
+main_with later.txt >/dev/null
+run --bead r
+eq "$RC" 0 "a rework child a review filed leaves the prep as it is"
+hasnt "$(logged gc)" "sling" "…and is not slung"
 
 echo "# a tree an earlier iteration left is removed before the next is staged"
 fresh

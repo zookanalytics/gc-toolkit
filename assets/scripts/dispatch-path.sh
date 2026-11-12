@@ -22,6 +22,8 @@
 # react only to input that has none, and the doctor checks
 # check-blocked-work-armed, which flags blocked work that has none, and
 # check-step-terminal, which counts a step as offerable only when it has one.
+# refinery-lib.sh asks both questions of a rework child the refinery's requeue
+# filed: one with no dispatch path and no hold is one the patrol sends on.
 # The readers that leave a held bead alone source it too: the proactive scan and
 # sling, which file no first reaction for one; check-blocked-work-armed, which
 # owes one no arm; deferred-dispatch.sh's reconcile, which slings no armed bead

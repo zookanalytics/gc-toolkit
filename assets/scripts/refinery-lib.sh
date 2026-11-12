@@ -1,7 +1,8 @@
 # shellcheck shell=bash
 # refinery-lib.sh — what the refinery patrol's scripts share. Sourced by
-# sibling path. It sources bd-lib.sh beside it for the store reads, and
-# otherwise defines functions and sets nothing.
+# sibling path. It sources bd-lib.sh beside it for the store reads and
+# dispatch-path.sh for what dispatches a bead, and otherwise defines functions
+# and sets only its constants.
 #
 # The refinery prepares one bead's branch at a time, in a tree of its own: a
 # git worktree at <refinery home>/worktrees/<bead>, where the home is the
@@ -21,8 +22,36 @@
 _refinery_lib_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$_refinery_lib_dir/bd-lib.sh}" || return 1
+# shellcheck source=dispatch-path.sh
+. "$_refinery_lib_dir/dispatch-path.sh" || return 1
 
 REFINERY_READ_NS="refs/worktree/refinery"
+
+# A rework child the requeue filed and never sent on. refinery-requeue.sh files
+# a bead's rework child whole, with its blocks edge onto the bead in the create,
+# then settles and slings it, and a settle or a sling can still fail after the
+# create, or the run can end there. The child it leaves is open on the bead's
+# branch, with no assignee, no pour and no dispatch path or dispatch hold
+# (dispatch-path.sh), so no one works it. find-work counts such a child,
+# once nothing holds it, as neither a wait on the bead nor a writer of its
+# branch, and the bead's prep runs the requeue again, which sends the child on.
+# A child carrying a review's or a ruling's source key was filed by
+# rework-child.sh, and a re-run of its filer adopts it and sends it on, so it
+# is never one of these.
+#   jq "$REFINERY_UNSENT_JQ"' map(select(refinery_unsent($bead; $branch))) '
+# shellcheck disable=SC2034  # read by the scripts that source this file
+REFINERY_UNSENT_JQ="$DISPATCH_PATH_JQ"'
+  def refinery_unsent($anchor; $branch):
+    (.metadata // {}) as $m
+    | ((.status // "") | tostring) == "open"
+      and (($m.task_kind // "") | tostring) == "rework"
+      and (($m.anchor_bead // "") | tostring) == $anchor
+      and (($m.branch // "") | tostring) == $branch
+      and ((.assignee // "") | tostring) == ""
+      and ([ "gc.execution_routed_to", "source_review_bead", "source_ruling_bead" ]
+           | all(. as $k | (($m[$k] // "") | tostring) == ""))
+      and ((has_dispatch_path or has_dispatch_hold) | not);
+'
 
 # refinery_home — the refinery's own worktree, from GC_DIR, printed as a
 # physical path. Non-zero, with a line on stderr, when GC_DIR is unset or is not

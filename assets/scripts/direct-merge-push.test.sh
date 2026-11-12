@@ -67,8 +67,9 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR 2
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 
-# The script under test, the bd-lib.sh and refinery-lib.sh it sources and the
-# rig-root.sh it resolves the rig through, beside a stub lifecycle.sh that logs
+# The script under test, the bd-lib.sh and refinery-lib.sh it sources, the
+# dispatch-path.sh refinery-lib.sh sources and the rig-root.sh it resolves the
+# rig through, beside a stub lifecycle.sh that logs
 # each
 # transition and the GC_RIG_ROOT it was handed. The
 # stub refuses every call when LC_FAIL is set, and the first LC_FAIL_TIMES calls
@@ -78,7 +79,7 @@ export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER
 # what it wrote.
 SUT="$TMP/sut"
 mkdir -p "$SUT" "$TMP/bin" "$TMP/gitshim" "$TMP/sleepshim"
-cp "$HERE/direct-merge-push.sh" "$HERE/bd-lib.sh" "$HERE/refinery-lib.sh" "$HERE/rig-root.sh" "$SUT/"
+cp "$HERE/direct-merge-push.sh" "$HERE/bd-lib.sh" "$HERE/refinery-lib.sh" "$HERE/dispatch-path.sh" "$HERE/rig-root.sh" "$SUT/"
 chmod +x "$SUT/direct-merge-push.sh"
 cat > "$SUT/lifecycle.sh" <<'LC'
 #!/usr/bin/env bash

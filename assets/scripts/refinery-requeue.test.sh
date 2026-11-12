@@ -10,10 +10,19 @@
 #   - a half-written record, the marker and existing_pr, goes back the same way,
 #     unassigned, so a run of the landing order that read it writes nothing;
 #   - a bead that records an open PR keeps it and comes back as its rework
-#     child: a task with the work order, joined to the bead and blocking it,
-#     settled and slung, while the bead stays with the refinery;
+#     child: a task with the work order, joined to the bead and blocking it
+#     through edges in its create, settled and slung, while the bead stays with
+#     the refinery;
+#   - a child that does not settle is not slung, and the next patrol sends it
+#     on: find-work takes the bead, and its prep runs the requeue again, which
+#     settles the child before its sling. A child left without its blocks edge
+#     is sent on the same way, with the edge written first. A create the store
+#     refuses files nothing, so find-work takes the bead as it was, and a create
+#     whose reply was lost is found among the bead's children and sent on;
 #   - an open rework child already on the branch takes the reason in its notes
-#     and nothing else is filed, and one that was never dispatched is slung;
+#     and nothing else is filed, and an unsent one is sent on, its blocks edge
+#     and its priority made whole first. When that fails, a gate on the child
+#     asks a person, and find-work leaves the bead until the gate clears;
 #   - a rework child handed back goes back itself, and its anchor is untouched;
 #   - a write whose guard no longer holds writes nothing (exit 3), and a write
 #     the store fails is no move of the bead: it stops (exit 1);
@@ -33,7 +42,16 @@ fresh() {
   rm -rf "${TMP:?}"/*
   rt_init refinery-requeue.sh
 }
+# The fixture for the patrol after a requeue: find-work, then the prep, which
+# runs the requeue again.
+fresh_patrol() {
+  rm -rf "${TMP:?}"/*
+  rt_init refinery-requeue.sh refinery-find-work.sh refinery-prep.sh detached-job.sh
+}
 run() { OUT=$("$SUT/refinery-requeue.sh" "$@" 2>&1); RC=$?; }
+find_work() { NAMED=$("$SUT/refinery-find-work.sh" 2>"$TMP/fw-err"); FW_RC=$?; FW_ERR=$(cat "$TMP/fw-err"); }
+prep() { PREP_OUT=$("$SUT/refinery-prep.sh" "$@" 2>&1); PREP_RC=$?; }
+kid() { jq -r '[ .[] | select(.metadata.task_kind == "rework") ][0].id // ""' "$STORE"; }
 
 echo "# a bead with no record goes back itself, unassigned, in one guarded write"
 fresh
@@ -77,10 +95,75 @@ eq "$(meta "$CHILD" existing_pr)" "https://github.com/zook/rig/pull/7" "…keepi
 eq "$(meta "$CHILD" rejection_reason)" "Conflicts with main at abc" "…with the reason"
 has "$(logged gc)" "create Rework polecat/p for p: Conflicts with main at abc -t task --metadata" "it is created as a task"
 has "$(logged gc)" "--deps related:p" "…joined to the bead"
-has "$(logged gc)" "dep $CHILD --blocks p" "…and blocking it"
+has "$(logged gc)" "--deps blocks:p" "…and blocking it, through edges in its create"
+hasnt "$(logged gc)" "bd dep " "…so no edge is a write of its own that could fail after the create"
+eq "$(cat "$STUB_HOLDS")" "p $CHILD" "the bead waits on its child"
 has "$(logged scripts)" "queue-priority settle $CHILD" "it is settled at its priority before the sling"
 has "$(logged gc)" "rig-a/gc-toolkit.polecat $CHILD --on mol-polecat-work" "the child is slung"
 eq "$(bstatus p) $(bassignee p) $(meta p merge_result)" "open rig-a/gc-toolkit.refinery pull_request_head_changed" "the bead keeps its record and stays with the refinery"
+
+echo "# a child that does not settle is not slung, and the next patrol sends it on"
+fresh_patrol
+branch_with polecat/p p.txt >/dev/null
+work p polecat/p '{"merge_result":"pull_request_head_changed","existing_pr":"https://github.com/zook/rig/pull/7"}'
+prepared p polecat/p
+STUB_QUEUE_PRIORITY_RC=1 run --bead p --reason "test TestX fails"
+eq "$RC" 1 "a child that does not settle stops the requeue (exit 1)"
+CHILD=$(kid)
+eq "$(bstatus "$CHILD") $(bassignee "$CHILD") $(meta "$CHILD" rejection_reason)" "open  test TestX fails" "the child is filed whole and left open, unassigned"
+eq "$(cat "$STUB_HOLDS")" "p $CHILD" "…blocking the bead"
+hasnt "$(logged gc)" "sling" "it is not slung, since a pour copies the priority it finds"
+hasnt "$(logged scripts)" "deferred-dispatch" "…nor armed"
+has "$OUT" "the refinery's next patrol sends it on" "the requeue says what sends it on"
+reset_logs
+find_work
+eq "$FW_RC $NAMED" "0 p" "the next patrol's find-work takes the bead its unsent child holds"
+has "$FW_ERR" "p's rework child $CHILD was filed and never sent on" "…and says its prep sends the child on"
+prep --bead p
+eq "$PREP_RC" 3 "the prep sends the child on instead of preparing the bead (exit 3)"
+has "$PREP_OUT" "p's rework child $CHILD was filed and never sent on" "…and says so"
+has "$(logged scripts)" "queue-priority settle $CHILD" "the child is settled at its priority"
+has "$(logged gc)" "sling --rig rig-a rig-a/gc-toolkit.polecat $CHILD --on mol-polecat-work" "…then slung"
+hasnt "$(logged gc)" "bd dep $CHILD --blocks" "…keeping the blocks edge it was filed with"
+hasnt "$(logged gc)" "bd create" "no second child is filed"
+[ ! -e "$HOME_DIR/worktrees/p" ] && rt_ok "the prep removes its tree" || rt_bad "the prep removes its tree"
+
+echo "# a child left without its blocks edge is sent on by the next patrol, the edge written first"
+fresh_patrol
+branch_with polecat/e e.txt >/dev/null
+work e polecat/e '{"merge_result":"pull_request_head_changed"}'
+put '{"id":"e-kid","title":"Rework","status":"open","assignee":"","issue_type":"task","notes":"","created_at":"2026-11-12T01:00:00Z","metadata":{"task_kind":"rework","anchor_bead":"e","branch":"polecat/e","rejection_reason":"lint fails"}}'
+find_work
+eq "$FW_RC $NAMED" "0 e" "find-work takes the bead whose branch only its unsent child is on"
+prep --bead e
+eq "$PREP_RC" 3 "the prep sends the child on (exit 3)"
+has "$(logged gc)" "bd dep e-kid --blocks e" "the child gets its blocks edge"
+has "$(logged scripts)" "queue-priority settle e-kid" "…is settled"
+has "$(logged gc)" "rig-a/gc-toolkit.polecat e-kid --on mol-polecat-work" "…and is slung"
+
+echo "# a create the store refuses files nothing, and the bead is taken as it was"
+fresh_patrol
+branch_with polecat/f f.txt >/dev/null
+work f polecat/f '{"merge_result":"pull_request_head_changed"}'
+prepared f polecat/f
+STUB_BD_CREATE_FAIL=1 run --bead f --reason "lint fails"
+eq "$RC" 1 "a refused create stops the requeue (exit 1)"
+has "$OUT" "so none was filed" "it says no child was filed"
+eq "$(kid)$(cat "$STUB_HOLDS")" "" "no child and no edge stand"
+find_work
+eq "$FW_RC $NAMED" "0 f" "the next patrol takes the bead again"
+
+echo "# a create whose reply was lost is found among the bead's children and sent on"
+fresh
+branch_with polecat/l l.txt >/dev/null
+work l polecat/l '{"merge_result":"pull_request_head_changed"}'
+prepared l polecat/l
+STUB_CREATE_REPLY_LOST=1 run --bead l --reason "lint fails"
+eq "$RC" 0 "the requeue exits 0"
+CHILD=$(kid)
+has "$OUT" "$CHILD is the unsent rework child it filed" "it finds the child the create filed"
+has "$(logged scripts)" "queue-priority settle $CHILD" "…settles it"
+has "$(logged gc)" "rig-a/gc-toolkit.polecat $CHILD --on mol-polecat-work" "…and slings it"
 
 echo "# an open rework child already on the branch takes the reason, and nothing else is filed"
 fresh
@@ -100,8 +183,61 @@ put '{"id":"u-kid","title":"Rework","status":"open","assignee":"","issue_type":"
 prepared u polecat/u
 run --bead u --reason "lint fails"
 eq "$RC" 0 "the requeue exits 0"
-has "$(logged gc)" "rig-a/gc-toolkit.polecat u-kid --on mol-polecat-work" "a child filed and never dispatched is slung"
+has "$(logged gc)" "bd dep u-kid --blocks u" "an unsent child that lacks its blocks edge gets it"
+has "$(logged scripts)" "queue-priority settle u-kid" "…is settled at its priority"
+has "$(logged gc)" "rig-a/gc-toolkit.polecat u-kid --on mol-polecat-work" "…and is slung"
 hasnt "$(logged gc)" "bd create" "…and no second child is filed"
+fresh
+branch_with polecat/u u.txt >/dev/null
+work u polecat/u '{"merge_result":"pull_request_head_changed"}'
+put '{"id":"u-kid","title":"Rework","status":"open","assignee":"","issue_type":"task","notes":"","metadata":{"task_kind":"rework","anchor_bead":"u","branch":"polecat/u"}}'
+echo "u u-kid" > "$STUB_HOLDS"
+prepared u polecat/u
+run --bead u --reason "lint fails"
+hasnt "$(logged gc)" "bd dep u-kid --blocks" "an unsent child that carries its blocks edge gets no second one"
+for k in '"source_review_bead":"rv-1"' '"gc.dispatch_when_ready":"rig-a/gc-toolkit.polecat"'; do
+  fresh
+  branch_with polecat/u u.txt >/dev/null
+  work u polecat/u '{"merge_result":"pull_request_head_changed"}'
+  put "{\"id\":\"u-kid\",\"title\":\"Rework\",\"status\":\"open\",\"assignee\":\"\",\"issue_type\":\"task\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"rework\",\"anchor_bead\":\"u\",\"branch\":\"polecat/u\",$k}}"
+  prepared u polecat/u
+  run --bead u --reason "lint fails"
+  eq "$RC" 0 "the requeue exits 0 ($k)"
+  hasnt "$(logged gc)" "sling" "a child a review filed, or one armed, is its filer's or its arm's to send ($k)"
+done
+
+echo "# an unsent child that cannot be sent on asks a person, and the bead waits for the gate"
+fresh_patrol
+branch_with polecat/u u.txt >/dev/null
+work u polecat/u '{"merge_result":"pull_request_head_changed"}'
+put '{"id":"u-kid","title":"Rework","status":"open","assignee":"","issue_type":"task","notes":"","metadata":{"task_kind":"rework","anchor_bead":"u","branch":"polecat/u"}}'
+echo "u u-kid" > "$STUB_HOLDS"
+prepared u polecat/u
+printf '#!/usr/bin/env bash\necho "queue-priority $*" >> "$LOGS/scripts.log"\necho "queue-priority: the priority lock is held by pid 4242" >&2\nexit 1\n' > "$TMP/qp-refuses"
+chmod +x "$TMP/qp-refuses"
+GC_QUEUE_PRIORITY_TOOL="$TMP/qp-refuses" run --bead u --reason "lint fails"
+eq "$RC" 1 "an unsent child that does not settle stops the requeue (exit 1)"
+has "$(logged scripts)" "human-gate --subject u-kid --key refinery-requeue-failed" "a gate on the child asks a person"
+has "$(logged scripts)" "did not settle at its priority (queue-priority: the priority lock is held by pid 4242)" "…saying what refused the settle"
+has "$(logged scripts)" "queue-priority.sh settle u-kid, then gc sling rig-a/gc-toolkit.polecat u-kid --on mol-polecat-work" "…naming how to send it on by hand"
+hasnt "$(logged gc)" "sling" "the child is not slung"
+echo "u-kid gate-u" >> "$STUB_HOLDS"
+find_work
+eq "$FW_RC" 3 "while the gate holds the child, find-work leaves the bead"
+has "$FW_ERR" "u waits on u-kid" "…and names the child it waits on"
+grep -v '^u-kid gate-u$' "$STUB_HOLDS" > "$STUB_HOLDS.n" && mv "$STUB_HOLDS.n" "$STUB_HOLDS"
+find_work
+eq "$FW_RC $NAMED" "0 u" "once the gate clears, find-work takes the bead again"
+fresh
+branch_with polecat/u u.txt >/dev/null
+work u polecat/u '{"merge_result":"pull_request_head_changed"}'
+put '{"id":"u-kid","title":"Rework","status":"open","assignee":"","issue_type":"task","notes":"","metadata":{"task_kind":"rework","anchor_bead":"u","branch":"polecat/u"}}'
+prepared u polecat/u
+STUB_DEP_RC=1 run --bead u --reason "lint fails"
+eq "$RC" 1 "an unsent child whose blocks edge does not land stops the requeue (exit 1)"
+has "$(logged scripts)" "human-gate --subject u-kid --key refinery-requeue-failed" "…and a gate on the child asks a person"
+hasnt "$(logged scripts)" "queue-priority settle" "…before any settle"
+hasnt "$(logged gc)" "sling" "…and it is not slung"
 
 echo "# a rework child handed back goes back itself, and its anchor is untouched"
 fresh

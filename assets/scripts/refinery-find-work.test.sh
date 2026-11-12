@@ -12,6 +12,10 @@
 #     is gone, while the anchor a bead names is no writer of its branch;
 #   - a rework child handed back is taken before its anchor, then the highest
 #     priority, then the oldest;
+#   - a rework child the requeue filed and never sent on, which nothing holds,
+#     neither holds its bead nor works its branch, so the bead is taken and the
+#     child named; one in flight, assigned, armed, labeled with a hold, held,
+#     or filed for a review still does, and so does any other wait on the bead;
 #   - a bead the old path's cadence drives is left, and named;
 #   - no work exits 3, and a read that does not answer exits 1.
 set -uo pipefail
@@ -84,6 +88,46 @@ eq "$OUT" "urgent" "the highest priority goes first"
 jq 'map(select(.id != "urgent"))' "$STORE" > "$STORE.n" && mv "$STORE.n" "$STORE"
 run
 eq "$OUT" "early" "within a priority, the oldest goes first"
+
+echo "# a rework child filed and never sent on is no wait and no writer"
+unsent_kid() { put "$(jq -nc --argjson m "${1:-{\}}" --arg a "${2:-}" --argjson l "${3:-[]}" '{id: "c", title: "Rework", status: "open", assignee: $a, issue_type: "task", notes: "", labels: $l,
+  metadata: ({task_kind: "rework", anchor_bead: "p", branch: "polecat/p"} + $m)}')"; }
+fresh
+work p polecat/p '{"merge_result":"pull_request_head_changed"}'
+unsent_kid
+echo "p c" > "$STUB_HOLDS"
+run
+eq "$RC $OUT" "0 p" "the bead its unsent child holds, on the child's branch, is taken"
+has "$ERR" "p's rework child c was filed and never sent on" "…naming the child its prep sends on"
+fresh
+work p polecat/p '{"merge_result":"pull_request_head_changed"}'
+unsent_kid
+run
+eq "$RC $OUT" "0 p" "…and so is one whose unsent child has no blocks edge"
+for v in '{"gc.execution_routed_to":"rig-a/gc-toolkit.polecat"}|' '{}|rig-a/gc-toolkit.polecat-1' '{"gc.dispatch_when_ready":"rig-a/gc-toolkit.polecat"}|' \
+         '{"source_review_bead":"rv-1"}|' '{}||["hold:mayor"]'; do
+  IFS='|' read -r m a l <<< "$v"
+  fresh
+  work p polecat/p '{"merge_result":"pull_request_head_changed"}'
+  unsent_kid "$m" "$a" "${l:-[]}"
+  echo "p c" > "$STUB_HOLDS"
+  run
+  eq "$RC" 3 "a child that is not unsent still holds its bead ($v)"
+  has "$ERR" "p waits on c" "…and is named ($v)"
+done
+fresh
+work p polecat/p '{"merge_result":"pull_request_head_changed"}'
+unsent_kid
+printf 'p c\nc gate-1\n' > "$STUB_HOLDS"
+run
+eq "$RC" 3 "an unsent child something holds still holds its bead"
+fresh
+work p polecat/p '{"merge_result":"pull_request_head_changed"}'
+unsent_kid
+printf 'p c\np gate-2\n' > "$STUB_HOLDS"
+run
+eq "$RC" 3 "a bead another wait holds is left beside its unsent child"
+has "$ERR" "p waits on gate-2" "…and names that wait"
 
 echo "# a bead the old path's cadence drives is left and named"
 fresh

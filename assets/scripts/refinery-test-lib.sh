@@ -11,7 +11,11 @@
 #     proves (human-gate.sh, deferred-dispatch.sh, patrol-finding.sh,
 #     pool-route.sh, lifecycle.sh, preexisting-failure.sh,
 #     rig-check-pre-existing.sh, stand-down.sh), each logging its argv;
-#   - fake gc, gh and gctk on PATH, over a JSON bead store ($STORE).
+#   - fake gc, gh and gctk on PATH, over a JSON bead store ($STORE). Its wait
+#     edges are lines of $STUB_HOLDS, "<bead> <what it waits on>": a blocks
+#     edge a create or `gc bd dep` writes is added there, `gc bd dep list`
+#     reads them, and `gctk bead holds` answers from the ones whose far bead
+#     the store does not hold closed.
 # No live city, store, GitHub or network.
 
 PASS=0; FAIL=0
@@ -31,7 +35,7 @@ rt_init() {
   here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
   SUT="$TMP/sut"; BIN="$TMP/bin"; GH_DIR="$TMP/gh"; LOGS="$TMP/logs"
   mkdir -p "$SUT" "$BIN" "$GH_DIR" "$LOGS"
-  for f in bd-lib.sh refinery-lib.sh gctk-resolve.sh branch-push.sh pr-post.sh "$@"; do
+  for f in bd-lib.sh refinery-lib.sh dispatch-path.sh gctk-resolve.sh branch-push.sh pr-post.sh "$@"; do
     cp "$here/$f" "$SUT/"; chmod +x "$SUT/$f"
   done
   for f in human-gate deferred-dispatch patrol-finding lifecycle preexisting-failure rig-check-pre-existing stand-down pool-route queue-priority; do
@@ -215,17 +219,31 @@ case "$verb" in
     done
     st --arg id "$id" "map(if .id == \$id then $prog else . end)" ;;
   create)
-    title="$1"; shift; meta='{}'; type=task
+    [ -z "${STUB_BD_CREATE_FAIL:-}" ] || { echo "create refused" >&2; exit 1; }
+    title="$1"; shift; meta='{}'; type=task; waiters=""
     while [ $# -gt 0 ]; do
-      case "$1" in --metadata) meta="$2"; shift ;; -t) type="$2"; shift ;; esac
+      case "$1" in
+        --metadata) meta="$2"; shift ;;
+        -t) type="$2"; shift ;;
+        --deps) case "$2" in blocks:*) waiters="$waiters ${2#blocks:}" ;; esac; shift ;;
+      esac
       shift
     done
     n=$(jq 'length' "$STORE")
     id="rw-$n"
     st --arg id "$id" --arg t "$title" --arg ty "$type" --argjson m "$meta" \
       '. + [{id: $id, title: $t, status: "open", assignee: "", issue_type: $ty, priority: 2, created_at: "2026-11-12T01:00:00Z", notes: "", metadata: $m}]'
-    printf '{"id":"%s"}\n' "$id" ;;
-  dep) exit 0 ;;
+    for w in $waiters; do echo "$w $id" >> "$STUB_HOLDS"; done
+    # A create whose reply is lost lands whole and prints nothing.
+    [ -n "${STUB_CREATE_REPLY_LOST:-}" ] || printf '{"id":"%s"}\n' "$id" ;;
+  dep)
+    if [ "$1" = list ]; then
+      awk -v i="$2" '$1 == i { print $2 }' "$STUB_HOLDS" | jq -Rsc 'split("\n") | map(select(. != "") | {id: .})'
+      exit 0
+    fi
+    [ "${STUB_DEP_RC:-0}" = 0 ] || exit "$STUB_DEP_RC"
+    [ "$2" = --blocks ] && echo "$3 $1" >> "$STUB_HOLDS"
+    exit 0 ;;
   close)
     id="$1"
     st --arg id "$id" 'map(if .id == $id then .status = "closed" else . end)' ;;
@@ -301,9 +319,10 @@ case "$1 $2" in
   "bead holds")
     shift 2
     for id in "$@"; do
-      by=$(awk -v i="$id" '$1 == i { print $2 }' "$STUB_HOLDS")
-      if [ -n "$by" ]; then
-        printf '{"id":"%s","status":"held","waits":[{"id":"%s"}]}\n' "$id" "$by"
+      waits=$(awk -v i="$id" '$1 == i { print $2 }' "$STUB_HOLDS" | jq -Rsc --slurpfile s "$STORE" \
+        '[ split("\n")[] | select(. != "") | . as $w | select(any($s[0][]; .id == $w and .status == "closed") | not) | {id: .} ]')
+      if [ "$waits" != "[]" ]; then
+        printf '{"id":"%s","status":"held","waits":%s}\n' "$id" "$waits"
       else
         printf '{"id":"%s","status":"clear","waits":[]}\n' "$id"
       fi

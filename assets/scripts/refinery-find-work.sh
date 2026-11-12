@@ -7,7 +7,7 @@
 # Gas Town's selection: the beads assigned to this refinery ($GC_AGENT), open
 # or in progress, that carry a branch, epics left out, in this rig's store. A
 # bead the publication left blocked on its PR's pending record is not open, so
-# it is not listed. Then the pack's two differences:
+# it is not listed. Then the pack's differences:
 #
 #   - A bead something holds waits until its waits land. What holds it is the
 #     answer of `gctk bead holds`, the pack's one rule.
@@ -16,6 +16,10 @@
 #     anchor, unless that bead is waiting here too. Among the beads that wait
 #     here, a rework child handed back is taken before its anchor, then the
 #     highest priority, then the oldest.
+#   - A rework child the requeue filed and never sent on (refinery-lib.sh)
+#     works nothing. Once nothing holds it, it is neither a wait on its bead
+#     nor a writer of the bead's branch, so the bead is taken as if the child
+#     were not there, and the bead's prep sends the child on.
 #
 # A bead on the old path's cadence, merge_result pull_request or
 # pre_open_gate, is the cadence's to drive, never this queue's, so it is named
@@ -31,6 +35,8 @@ PROG="refinery-find-work"
 HERE="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$HERE/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh beside this script" >&2; exit 1; }
+# shellcheck source=refinery-lib.sh
+. "$HERE/refinery-lib.sh" || { echo "$PROG: cannot source refinery-lib.sh beside this script" >&2; exit 1; }
 # shellcheck source=gctk-resolve.sh
 . "$HERE/gctk-resolve.sh" || { echo "$PROG: cannot source gctk-resolve.sh beside this script" >&2; exit 1; }
 
@@ -54,33 +60,64 @@ CANDS=$(printf '%s' "$ROWS" | jq -c '[ .[] | select(((.metadata.merge_result // 
 [ "$(printf '%s' "$CANDS" | jq 'length')" != 0 ] || exit 3
 
 gctk=$(gctk_path) || unread "no gctk binary to read what holds the beads with"
+# judge <rows> <holds>: each row with the answer `gctk bead holds` gave for it,
+# as .holds. Nothing is printed unless every row has an answer.
+judge() {
+  { printf '%s\n' "$1"; printf '%s\n' "$2"; } | jq -sc '.[0] as $c | (.[1:] | map({key: .id, value: .}) | from_entries) as $h
+    | if all($c[]; $h[.id] != null and $h[.id].error == null) then [ $c[] | . + {holds: $h[.id]} ] else empty end' 2>/dev/null
+}
 IDS=$(printf '%s' "$CANDS" | jq -r '.[].id')
 # shellcheck disable=SC2086  # one argument per bead id
 HOLDS=$("$gctk" bead holds $IDS </dev/null 2>/dev/null) || unread "gctk bead holds did not answer for every bead"
-JUDGED=$({ printf '%s\n' "$CANDS"; printf '%s\n' "$HOLDS"; } | jq -sc '.[0] as $c | (.[1:] | map({key: .id, value: .}) | from_entries) as $h
-  | if all($c[]; $h[.id] != null and $h[.id].error == null) then [ $c[] | . + {holds: $h[.id]} ] else empty end' 2>/dev/null)
+JUDGED=$(judge "$CANDS" "$HOLDS")
 printf '%s' "$JUDGED" | jq -e 'type == "array"' >/dev/null 2>&1 || unread "gctk bead holds did not answer for every bead"
-HELD=$(printf '%s' "$JUDGED" | jq -r '[ .[] | select(.holds.status != "clear") | .id + " waits on " + ((.holds.waits[0].id // "?") | tostring) ] | join("; ")')
-[ -z "$HELD" ] || echo "$PROG: leaving held bead(s) until what holds them lands: $HELD" >&2
-CLEAR=$(printf '%s' "$JUDGED" | jq -c '[ .[] | select(.holds.status == "clear") ]')
 
-# The open beads on each branch a clear bead carries, read once per branch.
+# The open beads on each bead's branch, read once per branch.
 BUSY='[]'
-for BRANCH in $(printf '%s' "$CLEAR" | jq -r '[ .[].metadata.branch ] | unique | .[]'); do
+for BRANCH in $(printf '%s' "$JUDGED" | jq -r '[ .[].metadata.branch ] | unique | .[]'); do
   ON=$(bd_json list ${GC_RIG:+--rig="$GC_RIG"} --metadata-field "branch=$BRANCH" --status="$LIVE" --limit=0) \
     || unread "the open beads on $BRANCH did not list"
   printf '%s' "$ON" | jq -e 'type == "array"' >/dev/null 2>&1 || unread "the open beads on $BRANCH did not parse"
   BUSY=$(printf '%s\n%s' "$BUSY" "$ON" | jq -sc '.[0] + .[1]')
 done
+
+# A bead's unsent rework children (refinery-lib.sh) that nothing holds, as
+# .unsent: no one works them, so they neither hold the bead nor work its
+# branch, and the bead's prep sends them on.
+SENDS=$(printf '%s\n%s' "$JUDGED" "$BUSY" | jq -sc "$REFINERY_UNSENT_JQ"'.[0] as $j
+  | [ .[1][] | . as $k | ([ $j[] | select(. as $b | $k | refinery_unsent($b.id; (($b.metadata.branch // "") | tostring))) | .id ][0]) as $a
+      | select($a != null) | {id: $k.id, anchor: $a} ] | unique_by(.id)' 2>/dev/null)
+printf '%s' "$SENDS" | jq -e 'type == "array"' >/dev/null 2>&1 || unread "the rework children on the beads' branches could not be weighed"
+UNSENT='[]'
+if [ "$(printf '%s' "$SENDS" | jq 'length')" != 0 ]; then
+  KIDS=$(printf '%s' "$SENDS" | jq -r '.[].id')
+  # shellcheck disable=SC2086  # one argument per bead id
+  KHOLDS=$("$gctk" bead holds $KIDS </dev/null 2>/dev/null) \
+    || unread "gctk bead holds did not answer for every unsent rework child"
+  UNSENT=$(judge "$SENDS" "$KHOLDS" | jq -c '[ .[] | select(.holds.status == "clear") | {id, anchor} ]' 2>/dev/null)
+  printf '%s' "$UNSENT" | jq -e 'type == "array"' >/dev/null 2>&1 || unread "gctk bead holds did not answer for every unsent rework child"
+fi
+JUDGED=$(printf '%s\n%s' "$JUDGED" "$UNSENT" | jq -sc '.[1] as $u | [ .[0][] | .id as $id
+  | ([ $u[] | select(.anchor == $id) | .id ]) as $mine
+  | ([ (.holds.waits // [])[] | ((.id // "") | tostring) | select(. as $w | ($mine | index($w)) == null) ]) as $other
+  | . + {unsent: $mine, held: (.holds.status != "clear" and (((.holds.waits // []) | length) == 0 or ($other | length) > 0)),
+         waits_on: ($other[0] // "?")} ]' 2>/dev/null)
+printf '%s' "$JUDGED" | jq -e 'type == "array"' >/dev/null 2>&1 || unread "what holds the beads could not be weighed"
+HELD=$(printf '%s' "$JUDGED" | jq -r '[ .[] | select(.held) | .id + " waits on " + .waits_on ] | join("; ")')
+[ -z "$HELD" ] || echo "$PROG: leaving held bead(s) until what holds them lands: $HELD" >&2
+CLEAR=$(printf '%s' "$JUDGED" | jq -c '[ .[] | select(.held | not) ]')
+
 WAITING=$(printf '%s' "$JUDGED" | jq -c '[ .[].id ]')
-# A writer of a bead's branch is any open bead on it but the bead itself and
-# the one it names as its anchor, unless the bead waits here too.
+# A writer of a bead's branch is any open bead on it but the bead itself, the
+# one it names as its anchor and its unsent rework children, unless the bead
+# waits here too.
 RANKED=$(printf '%s\n%s\n%s' "$CLEAR" "$BUSY" "$WAITING" | jq -sc '
   .[0] as $clear | .[1] as $busy | .[2] as $waiting
   | [ $clear[] | . as $b
       | ((.metadata.anchor_bead // "") | tostring) as $anchor
       | ([ $busy[] | select(((.metadata.branch // "") | tostring) == (($b.metadata.branch // "") | tostring))
            | select(.id != $b.id and .id != $anchor)
+           | select(.id as $i | ($b.unsent | index($i)) == null)
            | select(.id as $i | ($waiting | index($i)) == null) | .id ] | unique) as $writers
       | . + {writers: $writers,
              rank: (if ((.metadata.task_kind // "") | tostring) == "rework" and $anchor != "" then 0 else 1 end)} ]' 2>/dev/null)
@@ -90,4 +127,6 @@ BUSY_NOTE=$(printf '%s' "$RANKED" | jq -r '[ .[] | select(.writers | length > 0)
 WORK=$(printf '%s' "$RANKED" | jq -r '[ .[] | select(.writers | length == 0) ]
   | sort_by(.rank, (.priority // 2), (.created_at // .id)) | .[0].id // empty')
 [ -n "$WORK" ] || exit 3
+SEND_NOTE=$(printf '%s' "$RANKED" | jq -r --arg w "$WORK" '[ .[] | select(.id == $w and (.unsent | length) > 0) | .unsent | join(", ") ] | .[0] // empty')
+[ -z "$SEND_NOTE" ] || echo "$PROG: $WORK's rework child $SEND_NOTE was filed and never sent on, and its prep sends it on" >&2
 printf '%s\n' "$WORK"

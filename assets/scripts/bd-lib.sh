@@ -868,8 +868,10 @@ pr_finishing_birth() {
 # gate-ensure.sh, pr-facts.sh, pre-open-rebase.sh and refinery-requeue.sh. The
 # cadence and the patrol each run their arms one after another, so a longer wait
 # holds every arm after it. A bead whose settle times out in the cadence is
-# settled by a later pass, and refinery-requeue.sh leaves the work with the
-# refinery, whose next pass files nothing new and slings the child it filed.
+# settled by a later pass. A rework child whose settle times out in
+# refinery-requeue.sh is left unsent (refinery-lib.sh), and the refinery's next
+# patrol sends it on: find-work takes its bead, and the bead's prep runs the
+# requeue again, which settles the child before its sling.
 # queue-priority.sh's own default wait is longer, and
 # rework-child.sh, which runs in a review or converse session rather than in the
 # cadence, keeps it.

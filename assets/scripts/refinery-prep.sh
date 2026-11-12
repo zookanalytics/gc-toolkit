@@ -21,18 +21,21 @@
 # It then adds the tree for the bead (refinery-lib.sh) detached at the commit
 # it read on the branch, and records that commit in the tree's
 # refs/worktree/refinery/<branch>, the commit every later push onto the branch
-# leases on. When the target is already in the branch, the branch is the
-# prepared head as it stands, with its merges kept. Otherwise the target is
-# merged in, and a merge that conflicts is aborted and sent back to the pool
-# through refinery-requeue.sh with the reason "Conflicts with <target> at
-# <commit>", and the tree is removed. A branch is never rebased.
+# leases on. A bead with a rework child an earlier requeue filed and never sent
+# on (refinery-lib.sh) is prepared no further: refinery-requeue.sh sends the
+# child on, and the tree is removed. When the target is already in the branch,
+# the branch is the prepared head as it stands, with its merges kept. Otherwise
+# the target is merged in, and a merge that conflicts is aborted and sent back
+# to the pool through refinery-requeue.sh with the reason "Conflicts with
+# <target> at <commit>", and the tree is removed. A branch is never rebased.
 #
 # Exit: 0 prepared: the next step runs the gate in the tree
 #       1 nothing prepared, and the work stays with the refinery to retry; the
 #         output says why
 #       2 usage
-#       3 the merge conflicted, and the work went back to the pool, or the bead
-#         left the refinery before it could
+#       3 the merge conflicted, and the work went back to the pool, or the
+#         bead's unsent rework child was sent on, or the bead left the refinery
+#         before the requeue wrote
 #       4 the bead is parked behind a human gate
 set -uo pipefail
 
@@ -119,6 +122,25 @@ if ! OUT=$(git -C "$HOME_DIR" worktree add -q --detach "$TREE" "$READ" 2>&1); th
   stop "the tree $TREE was not added: $(printf '%s' "$OUT" | tr -s '[:space:]' ' ')"
 fi
 git -C "$TREE" update-ref "$REFINERY_READ_NS/$BRANCH" "$READ" || stop "the commit read on $BRANCH was not recorded in $TREE"
+
+# A rework child an earlier requeue filed for the bead and never sent on
+# (refinery-lib.sh) holds the bead until it lands, so the bead is taken no
+# further than sending it on. The requeue finds it on the branch and makes it
+# whole, its blocks edge and its priority, before its sling.
+KIDS=$(bd_json list ${GC_RIG:+--rig="$GC_RIG"} --metadata-field "anchor_bead=$BEAD" --status=open --limit=0) || KIDS=""
+printf '%s' "$KIDS" | jq -e 'type == "array"' >/dev/null 2>&1 || stop "the open beads that name $BEAD as their anchor did not read"
+UNSENT=$(printf '%s' "$KIDS" | jq -r --arg a "$BEAD" --arg b "$BRANCH" "$REFINERY_UNSENT_JQ"'[ .[] | select(refinery_unsent($a; $b)) | .id ] | join(", ")')
+if [ -n "$UNSENT" ]; then
+  echo "$PROG: $BEAD's rework child $UNSENT was filed and never sent on, so it is sent on, and $BRANCH is not merged" >&2
+  "$HERE/refinery-requeue.sh" --bead "$BEAD" --reason "its rework child was filed and never sent on" --pool "$POOL"
+  RQ=$?
+  refinery_teardown "$HOME_DIR" "$BEAD" || echo "$PROG: the next prep removes the tree for $BEAD" >&2
+  case "$RQ" in
+    0|3) exit 3 ;;
+    *) echo "$PROG: $BEAD's unsent rework child was not sent on (refinery-requeue.sh exit $RQ, its output above says why)" >&2
+       exit 1 ;;
+  esac
+fi
 
 if git -C "$TREE" merge-base --is-ancestor "$TIP" "$READ"; then
   echo "$PROG: prepared $BEAD: $BRANCH at $READ already carries $TARGET at $TIP, so it is the prepared head as it stands"
