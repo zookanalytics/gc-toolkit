@@ -147,7 +147,8 @@ refuses a `--close-brief` for one (`converse-signoff.sh`).
 
 At the sign-off, the sitting names the same wait, `--waiting-on <the change>`
 with the brief's own text as `--close-brief`, and the sign-off writes none of it
-a second time. bd keeps one edge when the headline adds the same edge again
+a second time. The subject's headline, which the sign-off writes through
+`gc-helm.sh takeaway`, adds the same edge again, and bd keeps one edge
 (`AddDependencyInTx`, bd 1.3.4). The sign-off appends no brief while the
 subject's latest close brief is held on the same change with the same text, and
 it arms no closer that is already armed (`converse-signoff.sh`). So the subject
@@ -601,13 +602,13 @@ the same way.
 ## 8. The units
 
 The implementation child (tk-rbasce7) files these, each in order behind the one
-before where the table says so. Units 1 to 4 build now, and unit 5 waits on
-tk-1tfzr71.22 and tk-1tfzr71.20, filed outside the effort (operator,
+before where the table says so. Units 1 to 4 build now, and unit 5, filed
+outside the effort, waits on tk-1tfzr71.22 and tk-1tfzr71.20 (operator,
 conversation tk-16d2j3q: "yes, build the rest").
 
 | # | Unit | What it builds | Waits on |
 |---|---|---|---|
-| 1 | Work's writers serve a sitting | `--held-by <conversation>` on `work-setup.sh` and `work-submit.sh`: the proof, with its refusal of a bead someone else holds or is queued to take, refusals that end nothing, and the hand-off's release of the edge as its last write, after the refinery assignment, with a refusal after the release that says the refinery holds the bead. Tests in `work-setup.test.sh` and `work-submit.test.sh`: a sitting's setup and its re-entry to a recorded tree, a bead assigned to another holder, one a run works and one with a pool route, each refused with nothing written, and the hand-off run again after it assigned the refinery, which the refusal lets through to complete its release, a hand-off that assigns the refinery and then releases the edge, a hand-off stopped before the release, by a refused write or a failed release, that a second run completes with nothing written beyond what the first did not reach and its note appended again, a run after the release refused with the refinery named as the holder and nothing written, a missing edge and a hook that names another bead, each refused with nothing written, and a refusal that drains nothing. The `component-model.md` rows. The commit cites the search record. | nothing |
+| 1 | Work's writers serve a sitting | `--held-by <conversation>` on `work-setup.sh` and `work-submit.sh`: the proof, with its refusal of a bead someone else holds or is queued to take, refusals that end nothing, and the hand-off's release of the edge as its last write, after the refinery assignment, with a refusal after the release that says the refinery holds the bead. Tests in `work-setup.test.sh` and `work-submit.test.sh`: a sitting's setup and its re-entry to a recorded tree, a hand-off that assigns the refinery and then releases the edge, a hand-off stopped before the release, by a refused write or a failed release, that a second run completes with nothing written beyond what the first did not reach and its note appended again, the hand-off run again after it assigned the refinery, which the refusal lets through to complete its release, a run after the release refused with the refinery named as the holder and nothing written, a missing edge, a hook that names another bead, a bead assigned to another holder, one a run works and one with a pool route, each refused with nothing written, and a refusal that drains nothing. The `component-model.md` rows. The commit cites the search record. | nothing |
 | 2 | One home for the PR summary's standard | The submit step's "Compose the PR summary" moves into the commit-conventions skill, whose description gains the summary. The submit step loads the skill and keeps its calls, and `formula-step-size.test.sh` holds. | nothing |
 | 3 | The doctrine and the edit skill | Every row of section 6 except the UI section of `converse-edit`, and the first Debt entry of `architecture.md` removed. | units 1 and 2 |
 | 4 | A copy of a rig's UI | The copy script, which starts a copy with or without an address, stops it and reports its state, and its tests, which stub the publish command so that no suite touches Tailscale. The serve command's declaration and the city's publish command and address pattern, as the three vars `mol-rig-demo` declares and the script reads. `converse-edit`'s section on a copy, which calls the script, gives the operator the address it prints and shows screenshots where it prints none. gc-toolkit's `docs/review-demo.md` pointed at the declared command. A bead for the mechanik to set gc-toolkit's serve command, which runs `go run ./cmd/helm-fixture` from `services/helm`, and the city's two values in the city's config. Its first act is the proof under Cleanup in section 5. | unit 3 |
