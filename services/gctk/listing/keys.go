@@ -24,6 +24,10 @@ var (
 	prURLKey = ledger.ReadOnly("pr_url", ledger.String,
 		"The URL of the anchor's open pull request, written with pr_number "+
 			"(lifecycle/lifecycle.toml, [metadata.merge_identity]).")
+	taskKindKey = ledger.ReadOnly("task_kind", ledger.String,
+		"The bead's role, which the writer of each of the pack's kinds sets at creation "+
+			"(lifecycle/lifecycle.toml, [metadata.gates]). A listing reads it for whether the bead is a standing "+
+			"record (services/gctk/standing).")
 )
 
 // An epic's contract and its latest ruling (lifecycle/lifecycle.toml,

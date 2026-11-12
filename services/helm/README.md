@@ -1448,7 +1448,7 @@ asked of the listing's rows, so one document never mixes two reads of a bead:
 
 | Reader | What the read takes from it |
 |---|---|
-| `services/gctk/listing` | each bead's fields and the keys the page shows, decoded through the listing's declarations; whether a bead is a run's root or a step poured under one (`waits.IsRootOrStep`), a person's to clear (`prstatus.IsPersonBlocker`), or a row of the store's ephemeral plane |
+| `services/gctk/listing` | each bead's fields and the keys the page shows, decoded through the listing's declarations; whether a bead is a run's root or a step poured under one (`waits.IsRootOrStep`), a person's to clear (`prstatus.IsPersonBlocker`), a standing record (`standing.Is`), or a row of the store's ephemeral plane |
 | `services/gctk/waits` (`Listing.Holds`) | what holds each bead, the waits behind it, whether it is in flight, its arm |
 | `services/gctk/prstatus` (`Holding` over `Listing.Blockers`) | what a person owes on a bead through its `blocks` edges |
 | `services/gctk/prstatus` (`Read` over the listing, `Derive`, `Held`, `Reasons`) | where an open pull request stands and what holds it |
@@ -1457,7 +1457,12 @@ asked of the listing's rows, so one document never mixes two reads of a bead:
 The listing reads the store's ephemeral plane and its templates because waits
 reads every run, and a row is a bead bd's own listing shows: the board leaves
 out a wisp, a row stored with no history, such as an order run's tracking bead,
-and a template molecule. `internal/rigboard/table.go` is the one table that
+and a template molecule. It also leaves out a standing record, a bead open by
+design that no worker claims and that never closes, such as a learning-loop
+pattern, since it is neither work nor an ask. The listing tells one by its
+`task_kind`, which it reads against the standing kinds' one definition
+(`services/gctk/standing/kinds.json`), the file the pack's shell readers read
+too. `internal/rigboard/table.go` is the one table that
 turns the readers' answers into a row's group and signal, first match wins,
 and the only place those words are chosen. The read adds no rule about what
 holds a bead, whose move it is or whether work is moving.

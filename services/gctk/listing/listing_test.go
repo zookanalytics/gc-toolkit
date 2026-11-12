@@ -1,6 +1,7 @@
 package listing
 
 import (
+	"fmt"
 	"slices"
 	"testing"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/standing"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
@@ -78,7 +80,8 @@ func TestListingDecodesEachLiveBead(t *testing.T) {
 	story := by["tk-e.2"]
 	if story.MergeResult != "pull_request" || story.PRNumber != "12" || story.PRURL != "https://example.test/pull/12" ||
 		story.RoutedTo != "gc-toolkit/gc-toolkit.polecat" || story.Priority != 2 || !slices.Equal(story.Labels, []string{"hold:mayor"}) ||
-		!slices.Equal(story.Edges, []Edge{{ID: "tk-e", Type: "parent-child"}, {ID: "tk-q", Type: "blocks"}}) || story.Run || story.PersonBlocker {
+		!slices.Equal(story.Edges, []Edge{{ID: "tk-e", Type: "parent-child"}, {ID: "tk-q", Type: "blocks"}}) || story.Run || story.PersonBlocker ||
+		story.Standing {
 		t.Errorf("the story reads %+v", story)
 	}
 	if e := by["tk-e"].Epic; e.Hypothesis != "it works" || e.Handle != "the board" || e.Ruling != "continue" {
@@ -98,6 +101,40 @@ func TestListingDecodesEachLiveBead(t *testing.T) {
 	}
 	if q := by["tk-q"]; q.AwaitType != "human" || q.Assignee != "human" || q.Description != "which way?\nthe whole question" {
 		t.Errorf("the gate reads %+v", q)
+	}
+}
+
+// A bead whose task_kind is one of the standing kinds reads as a standing
+// record, each kind the definition names, and a bead of any other kind, or of
+// none, does not.
+func TestListingNamesAStandingRecord(t *testing.T) {
+	s := fake.New()
+	var want []string
+	for i, k := range standing.Kinds() {
+		id := fmt.Sprintf("tk-s%d", i)
+		want = append(want, id)
+		s.Put(fake.Bead{ID: id, Title: "a standing record", Status: "open", IssueType: "task",
+			Metadata: map[string]string{"task_kind": k}})
+		s.Put(fake.Bead{ID: fmt.Sprintf("tk-n%d", i), Title: "a near miss", Status: "open", IssueType: "task",
+			Metadata: map[string]string{"task_kind": k + "s"}})
+	}
+	s.Put(fake.Bead{ID: "tk-obs", Title: "an observation", Status: "open", IssueType: "task",
+		Metadata: map[string]string{"task_kind": "observation"}})
+	s.Put(fake.Bead{ID: "tk-work", Title: "work", Status: "open", IssueType: "task"})
+	ls, err := read(ledger.New(s))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, b := range ls.Live() {
+		if b.Standing {
+			got = append(got, b.ID)
+		}
+	}
+	slices.Sort(got)
+	slices.Sort(want)
+	if len(want) == 0 || !slices.Equal(got, want) {
+		t.Errorf("standing records = %v, want %v, one for each standing kind", got, want)
 	}
 }
 

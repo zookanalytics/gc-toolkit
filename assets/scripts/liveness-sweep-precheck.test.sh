@@ -494,17 +494,20 @@ echo "── an abort BEFORE the decision runs the pass ──"
 # crash, a signal, a bad edit. Injected into a COPY so the production script
 # keeps no test-only backdoor, and placed after the trap is armed, which is the
 # code actually under test.
-sed 's|^trap on_exit EXIT$|trap on_exit EXIT\nexit 3|' "$SCRIPT" > "$TMP/aborting.sh"
-chmod +x "$TMP/aborting.sh"
+A="$TMP/pack/assets/scripts"; mkdir -p "$A" "$TMP/pack/services/gctk/standing"
+cp "$ROOT/services/gctk/standing/kinds.json" "$TMP/pack/services/gctk/standing/"
+sed 's|^trap on_exit EXIT$|trap on_exit EXIT\nexit 3|' "$SCRIPT" > "$A/aborting.sh"
+chmod +x "$A/aborting.sh"
 # The copy sources its sibling libraries by $0-relative path, so every one the
-# script sources has to travel with it into the temp dir.
+# script sources has to travel with it, into a tree of the pack's shape that
+# holds the standing kinds' definition where standing-kinds.sh reads it.
 for lib in $(sed -n 's|^\. "\$HERE/\([^"]*\)".*|\1|p' "$SCRIPT"); do
-    cp "$(dirname "$SCRIPT")/$lib" "$TMP/$lib"
+    cp "$(dirname "$SCRIPT")/$lib" "$A/$lib"
 done
-grep -qx 'exit 3' "$TMP/aborting.sh" && ok "abort injection landed" \
+grep -qx 'exit 3' "$A/aborting.sh" && ok "abort injection landed" \
     || bad "abort injection landed" "the trap line moved — this test is checking nothing"
 rm -rf "$LIVENESS_SWEEP_STATE_DIR"
-OUT="$("$TMP/aborting.sh" 2>&1)"; RC=$?
+OUT="$("$A/aborting.sh" 2>&1)"; RC=$?
 eq "$RC" "0" "an abort before deciding RUNS the pass"
 has "$OUT" "ABORTED before deciding" "it says it aborted"
 has "$OUT" "NOT an empty board" "and refuses to be read as an empty board"

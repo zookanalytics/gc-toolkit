@@ -21,6 +21,7 @@ import (
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/standing"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
@@ -70,6 +71,10 @@ type Bead struct {
 	// PersonBlocker is true for a bead only a person clears and that is no
 	// human gate ([prstatus.IsPersonBlocker]).
 	PersonBlocker bool
+	// Standing is true for a standing record, a bead open by design that no
+	// worker claims and that never closes: its task_kind is one of the
+	// standing kinds ([standing.Is]).
+	Standing bool
 }
 
 // Edge is one of a bead's own edges: the far bead and the edge's type.
@@ -172,7 +177,8 @@ func beadOf(r *ledger.Record) (Bead, error) {
 			ClosureCondition: text(epicClosureKey, r), Indicators: text(epicIndicatorsKey, r), Ruling: text(epicRulingKey, r),
 			RulingReason: text(epicRulingReasonKey, r), RulingAt: text(epicRulingAtKey, r),
 		},
-		Run: waits.IsRootOrStep(r), PersonBlocker: prstatus.IsPersonBlocker(blockerOf(r))}
+		Run: waits.IsRootOrStep(r), PersonBlocker: prstatus.IsPersonBlocker(blockerOf(r)),
+		Standing: standing.Is(text(taskKindKey, r))}
 	for _, e := range edges {
 		b.Edges = append(b.Edges, Edge{ID: e.ID, Type: e.Type})
 	}

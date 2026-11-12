@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/zookanalytics/gc-toolkit/services/gctk/standing"
 )
 
 // TestReadGathersALandedDelivery reads, through the read itself, a Delivery
@@ -102,6 +104,71 @@ func TestReadPlacesWorkUnderEveryEpicItSitsUnder(t *testing.T) {
 	}
 	if n.Count != 1 || !slices.Equal(under, []string{"tk-e1", "tk-e2"}) {
 		t.Errorf("Needs you counts %d and lists tk-q under %v, want 1 and both epics", n.Count, under)
+	}
+}
+
+// TestReadLeavesOutStandingRecords reads two standing records of each kind the
+// one definition names (services/gctk/standing): one that waits on nothing,
+// which the Work queue would list as not scheduled, and one that waits on a
+// park gate, as a triage subject waits on the beads in its pile. Beside them
+// are work that is not scheduled, work of a kind that only resembles a
+// standing kind, and work the gate holds. No standing record is a row: the
+// Work queue lists the work and not the records, and the gate holds and is
+// waited on by the work alone.
+func TestReadLeavesOutStandingRecords(t *testing.T) {
+	row := func(id, kind, edges string) json.RawMessage {
+		meta := ""
+		if kind != "" {
+			meta = `,"metadata":{"task_kind":` + strconv.Quote(kind) + `}`
+		}
+		return json.RawMessage(`{"id":"` + id + `","title":"` + id + `","status":"open","priority":2,"issue_type":"task","created_at":"2026-01-02"` +
+			meta + `,"dependencies":[` + edges + `]}`)
+	}
+	onPark := func(id string) string {
+		return `{"issue_id":"` + id + `","depends_on_id":"tk-park","type":"blocks"}`
+	}
+	rows := []json.RawMessage{
+		json.RawMessage(`{"id":"tk-park","title":"parked","status":"open","priority":2,"issue_type":"gate","created_at":"2026-01-01"}`),
+		row("tk-work", "", ""),
+		row("tk-held", "", onPark("tk-held")),
+	}
+	var records, notScheduled []string
+	for i, k := range standing.Kinds() {
+		n := strconv.Itoa(i)
+		records = append(records, "tk-s"+n, "tk-sp"+n)
+		notScheduled = append(notScheduled, "tk-near"+n)
+		rows = append(rows, row("tk-s"+n, k, ""), row("tk-sp"+n, k, onPark("tk-sp"+n)), row("tk-near"+n, k+"s", ""))
+	}
+	if len(records) == 0 {
+		t.Fatal("the definition names no standing kind")
+	}
+	doc, err := Read(context.Background(), stubStore(t, rows))
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	for _, id := range records {
+		if _, ok := doc.Rows[id]; ok {
+			t.Errorf("standing record %s is a row", id)
+		}
+	}
+	listed, holds := map[string][]string{}, map[string][]string{}
+	for _, s := range doc.WorkQueue {
+		for _, e := range s.Rows {
+			listed[s.Name] = append(listed[s.Name], e.ID)
+			holds[e.ID] = e.Children
+		}
+	}
+	notScheduled = append(notScheduled, "tk-work")
+	slices.Sort(notScheduled)
+	slices.Sort(listed[sectionNotScheduled])
+	if !slices.Equal(listed[sectionNotScheduled], notScheduled) {
+		t.Errorf("not scheduled lists %v, want %v", listed[sectionNotScheduled], notScheduled)
+	}
+	if !slices.Equal(listed[sectionHeldByGate], []string{"tk-park"}) || !slices.Equal(holds["tk-park"], []string{"tk-held"}) {
+		t.Errorf("held by a gate lists %v holding %v, want tk-park holding tk-held alone", listed[sectionHeldByGate], holds["tk-park"])
+	}
+	if got := doc.Rows["tk-park"].WaitedOnBy; len(got) != 1 || got[0].ID != "tk-held" {
+		t.Errorf("tk-park is waited on by %+v, want tk-held alone", got)
 	}
 }
 

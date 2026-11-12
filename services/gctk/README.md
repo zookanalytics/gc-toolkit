@@ -122,6 +122,8 @@ prstatus/            the PR status derivation, exported for the helm board
 listing/             one pass's read of a store for the helm board: every live bead, the
                      closed beads under a parent, the keys it decodes, and waits' and
                      prstatus's answers from the same rows
+standing/            the standing kinds' one definition, kinds.json, which the pack's
+                     shell readers read too, and whether a task_kind is one of them
 waits/               what holds a bead, from one snapshot: the rule by where the work is, the
                      in-flight test, the run link's copy and the keys it reads, read-only
 key-registry.json    every declared key, generated from the declarations

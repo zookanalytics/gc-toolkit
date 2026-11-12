@@ -18,9 +18,11 @@ import (
 // the run works speaks for the run, since the order workers take things is
 // detail a working system does not expose. Nor is a bead bd's listing leaves
 // out unless asked: a row of the store's ephemeral plane, such as an order
-// run's tracking bead, or a template molecule.
+// run's tracking bead, or a template molecule. Nor is a standing record, a bead
+// open by design that no worker claims and that never closes, such as a
+// learning-loop pattern: it is neither work nor an ask, so no page draws it.
 func ownRow(b bead) bool {
-	return issueType(b) != "convoy" && b.Anchor == "" && !b.Run && !b.EphemeralPlane && !b.Template
+	return issueType(b) != "convoy" && b.Anchor == "" && !b.Run && !b.EphemeralPlane && !b.Template && !b.Standing
 }
 
 // index is the gathered beads by id, with what each is.
