@@ -122,8 +122,7 @@ eq "$(lifted "[$(rv 1 human1 DISMISSED 2026-08-20T00:00:00Z)]" "$LIFT")" '{"veto
 echo "# every reader sources the one definition"
 READERS="assets/scripts/pr-facts.sh
 assets/scripts/bring-current-guard.sh
-assets/scripts/approval-withdraw.sh
-assets/scripts/converse-signoff.sh"
+assets/scripts/approval-withdraw.sh"
 for r in $READERS; do
     f="$ROOT/$r"
     if [ ! -f "$f" ]; then bad "(READERS) $r exists"; continue; fi

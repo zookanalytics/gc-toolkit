@@ -822,14 +822,14 @@ the sign-off.
 A ruling is not an approval. The merge counts only an Approve review on GitHub
 from an account other than the city's (the merge condition in
 [state-machine.md](state-machine.md)), and nothing the sign-off writes is one.
-So when a ruling leaves an open PR standing with no such review, the headline
-ends by saying the PR still needs the operator's Approve on GitHub, and keeps
-saying so after the operator approves, until the PR merges or another headline
-replaces it. The sitting also passes on a line the sign-off prints with the
-PR's link. A PR whose reviews cannot be read counts as needing one, and on a
-host with neither `timeout` nor `gtimeout` no PR's reviews can be. A PR with an
-approval and a standing request for changes needs no Approve, and its line
-names whose request holds the merge.
+So when a ruling leaves standing an open PR whose status reads needs-review
+(`gctk pr status`, the status its `status:` label shows), the headline ends by
+saying the PR still needs the operator's Approve on GitHub, and keeps saying so
+after the operator approves, until the PR merges or another headline replaces
+it. The sitting also passes on a line the sign-off prints with the PR's link. A
+PR the city is still changing or landing, or one a person must clear first,
+asks for no Approve yet. A PR whose status cannot be read counts as needing
+one, and on a host with neither `timeout` nor `gtimeout` no PR's status can be.
 
 **A sitting cut short** writes its record, signs off with `--ruled no`, which
 leaves every gate its conversation replies to open and owed with its reply in
