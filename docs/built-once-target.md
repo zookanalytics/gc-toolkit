@@ -382,8 +382,8 @@ convoy lands only after the operator approves its design.
 | B | tk-1tfzr71.24 | the board's second data plane and pack-stamped rows, verbs that only call Gas City | partial files |
 | B | tk-1tfzr71.25 | registry entries, wrapper lint rules, parity tests, the `board` stub verb | 1,488 |
 
-The whole files that the migration members name come to 57k of
-the 202k between the baseline and the built-once estimate. Their partial
+The whole files that tk-1tfzr71.39 and the migration members name come to 57k
+of the 202k between the baseline and the built-once estimate. Their partial
 rewrites carry more, chiefly the board, `gc-helm.sh`, the work and patrol
 formulas, deferred dispatch and the sign-off. The page's own items below carry
 the step-text tests.
