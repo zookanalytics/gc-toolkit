@@ -281,14 +281,15 @@ the cadence — the arms run whether or not any refinery session is awake.
    refinery's to flip only when the city opened it as a draft and nobody has
    re-drafted it since. Any other draft is adopted without that claim and stays
    with whoever parked it.
-   The body's `## Summary` is the anchor's `pr_summary`, written by an actor
-   that has read the diff: the polecat at its handoff, or, on a landing bead,
-   its effort's summary task once the effort's work has landed. The anchor's
+   The body's `## Summary` is the anchor's PR summary, which an actor that has
+   read the diff records through `gctk pr summary`: the polecat at its handoff,
+   or, on a landing bead, its effort's summary task once the effort's work has
+   landed. The anchor's
    description is dispatch text, demoted to a collapsed section and standing
    in as the summary only when no summary was written. The region writes that heading
-   itself, so a `pr_summary` opening with one of its own is de-duplicated. The
+   itself, so a summary opening with one of its own is de-duplicated. The
    composed body lives between `gc:pr-summary` markers, so adopting an OPEN PR
-   re-splices it from the anchor's current `pr_summary` — a rework's restamp
+   re-splices it from the anchor's current PR summary — a rework's restamp
    reaches the published merge surface — while text an operator or `pr-stack.sh`
    added outside the markers stays. A body a create wrote before these markers
    is the same stale-body case: the region is established over its legacy
@@ -681,7 +682,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    and splices the list into a delimited section. A branch carrying one bead
    publishes nothing here, because arm 3 already named it.
 
-   The `gc:pr-summary` region: a rework restamps the anchor's `pr_summary`, but
+   The `gc:pr-summary` region: a rework restamps the anchor's PR summary, but
    arm 3 composes that region only at `pre_open_gate` and an open anchor never
    returns there, so the published `## Summary` — the merge surface, and the
    squash commit message — would otherwise keep describing superseded work. When

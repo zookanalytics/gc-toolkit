@@ -166,14 +166,14 @@ that names its cause.
   even where you would pick another. Judge what the title says, not its form.
   Where the summary and the title live depends on the state. Post-open, read
   the page the review formula printed from `<review_pr_url>`. Pre-open there
-  is no page, but `pr-open.sh` will publish the anchor's `pr_summary` verbatim
+  is no page, but `pr-open.sh` will publish the anchor's PR summary verbatim
   as `## Summary` once the check goes green, falling back to the dispatch
   description and then a placeholder when it is absent. Read that pending
   summary among the anchor's metadata, which the review formula printed, and
   hold it to the same standard. An absent or empty pre-open summary ships the
   dispatch description in its place — what the work was asked to do, not what
   the diff did — so it is a finding unless that text already accounts for the
-  whole diff; its locus is `anchor <id> / pr_summary`. The pending title is
+  whole diff; its locus is `anchor <id> / PR summary`. The pending title is
   the anchor's title, and `pr-open.sh` gives one that opens with no type a
   type from the bead's kind, so a task's title reads `chore: <its title>`; its
   locus is `anchor <id> / title`. When the published body looks wrong, read

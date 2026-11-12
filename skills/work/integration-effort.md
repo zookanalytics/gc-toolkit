@@ -5,8 +5,8 @@ land on one integration branch, each with no PR of its own, and reach the
 default branch together through one PR the operator reviews. The landing bead
 records the branch, and the refinery opens that PR from it. A stage is a bead
 of the effort the operator asks to review on its own: slung `--merge mr`, its
-PR goes into the branch. The summary task writes the landing bead's
-`pr_summary` once the effort's beads have landed.
+PR goes into the branch. The summary task records the landing bead's PR
+summary once the effort's beads have landed.
 
 A converse sitting does not run the recipe: step 2 is a push from the rig's
 checkout, which a sitting never makes. The work skill says where a sitting
@@ -68,7 +68,7 @@ WORK=$(gc bd --rig <rig> create "<task>" -t task -d "<what to build>" --parent <
 # the effort's epic, waiting on each bead of the effort, with the landing bead
 # waiting on it.
 SUMMARY=$(gc bd --rig <rig> create "summary: the PR for <what the effort delivers>" -t task \
-  -d "Write the pr_summary of $LANDING once every bead this task waits on has landed, by the polecat doctrine's paragraph on integration branches." \
+  -d "Write the PR summary of $LANDING once every bead this task waits on has landed, by the polecat doctrine's paragraph on integration branches." \
   --parent <epic> --deps "<each bead of the effort, comma-separated>,blocks:$LANDING" --json | jq -r '.id // empty')
 [ -n "$SUMMARY" ] || { echo "no summary task filed; stopping" >&2; exit 1; }
 
@@ -86,7 +86,7 @@ gc bd --rig <rig> update "$LANDING" --assignee <rig>/<binding>.refinery \
 # takes the landing bead and opens the PR with the summary it wrote.
 gc sling <rig>/<binding>.polecat "$WORK"
 "$(gc <binding> scripts-dir)/deferred-dispatch.sh" arm "$SUMMARY" --target <rig>/<binding>.polecat \
-  --sling-arg --on --sling-arg mol-polecat-report --reason "writes the pr_summary of $LANDING once the effort's beads land"
+  --sling-arg --on --sling-arg mol-polecat-report --reason "writes the PR summary of $LANDING once the effort's beads land"
 ```
 
 ## Add a bead to an existing effort

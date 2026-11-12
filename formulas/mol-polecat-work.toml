@@ -534,7 +534,7 @@ the difference between a bead someone can dispose of and one that just sits:
   state, then closes the bead as done, or asks the operator when the record
   does not hold. The note says its validating closer closes it.
 
-**3. Compose the PR summary.** `pr-open.sh` publishes `metadata.pr_summary`
+**3. Compose the PR summary.** `pr-open.sh` publishes the anchor's PR summary
 as the PR's `## Summary`, and falls back to the anchor's description: the
 dispatch text, written before the diff existed and addressed to you, not to a
 reviewer. You are the only actor that has read the diff, so say what changed

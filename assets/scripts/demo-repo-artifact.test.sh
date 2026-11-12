@@ -8,7 +8,8 @@
 # that only it decides. The script runs under `env -i` with a PATH of a stub gh
 # and gc plus a symlink farm of the tools it calls, so `deliver` goes through
 # the real demo-deliver.sh and pr-post.sh and stops at the stub gh, which keeps
-# a copy of every file it is asked to attach.
+# a copy of every file it is asked to attach. The anchor's PR summary is read
+# through gctk built from this checkout, over the same stub gc.
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -58,10 +59,20 @@ chmod +x "$STUBS/gh"
 
 # gc stub: `gc rig list` names no rig, so the origin comes from GC_RIG_ROOT;
 # `gc bd show` answers one bead whose description is $STUB_DESC and whose
-# pr_number is 77, or fails when $STUB_SHOW_FAIL is set.
+# pr_number is 77, or fails when $STUB_SHOW_FAIL is set; `gc bd list`, gctk's
+# read, answers the bead --id names with $STUB_SUM as its PR summary, or fails
+# when $STUB_LIST_FAIL is set.
 cat >"$STUBS/gc" <<'STUB'
 #!/usr/bin/env bash
 if [ "${1:-}" = "rig" ] && [ "${2:-}" = "list" ]; then echo '{"rigs":[]}'; exit 0; fi
+if [ "${1:-}" = "bd" ] && [ "${2:-}" = "list" ]; then
+  [ -n "${STUB_LIST_FAIL:-}" ] && { echo "stub gc: list failed" >&2; exit 1; }
+  id=""
+  while [ $# -gt 0 ]; do [ "$1" = "--id" ] && id="${2:-}"; shift; done
+  jq -nc --arg id "$id" --arg s "${STUB_SUM:-}" \
+    '[{id:$id, title:"the anchor", status:"open", metadata:({pr_number:"77"} + (if $s == "" then {} else {pr_summary:$s} end))}]'
+  exit 0
+fi
 if [ "${1:-}" = "bd" ] && [ "${2:-}" = "show" ]; then
   [ -n "${STUB_SHOW_FAIL:-}" ] && { echo "stub gc: no such bead" >&2; exit 1; }
   jq -nc --arg id "${3:-}" --arg d "${STUB_DESC:-}" \
@@ -71,6 +82,12 @@ fi
 exit 0
 STUB
 chmod +x "$STUBS/gc"
+
+# gctk, built from this checkout, reads the anchor's PR summary through the stub gc.
+command -v go >/dev/null 2>&1 || { echo "go is required for this test: the anchor's PR summary is read through gctk" >&2; exit 2; }
+( cd "$HERE/../../services/gctk" && go build -buildvcs=false -o "$TMPD/gctk" ./cmd/gctk ) >"$TMPD/gctk-build.log" 2>&1 \
+  || { echo "gctk did not build: $(tail -3 "$TMPD/gctk-build.log")" >&2; exit 2; }
+GCTK_BUILT="$TMPD/gctk"
 
 # A broken awk, on PATH only for the case that asks for it: it fails the call
 # that ranks the candidates, the one handed a visfile, and passes every other
@@ -193,11 +210,13 @@ GHLOG="$TMPD/gh.log"
 # Combined stdout and stderr are returned. Each call starts with an empty gh
 # log, an empty capture dir and an empty TMPDIR.
 run() {
-  local desc="" showfail="" ghfail="" rankfail="" logfail=""
+  local desc="" showfail="" ghfail="" rankfail="" logfail="" sum="" listfail=""
   while [ $# -gt 0 ]; do
     case "$1" in
       STUB_DESC=*)      desc="${1#*=}" ;;
       STUB_SHOW_FAIL=*) showfail="${1#*=}" ;;
+      STUB_SUM=*)       sum="${1#*=}" ;;
+      STUB_LIST_FAIL=*) listfail="${1#*=}" ;;
       GH_STUB_FAIL=*)   ghfail="${1#*=}" ;;
       RANK_FAIL=*)      rankfail="${1#*=}" ;;
       LOG_FAIL=*)       logfail="${1#*=}" ;;
@@ -210,7 +229,7 @@ run() {
   ( cd "$REPO" && env -i \
       PATH="${rankfail:+$BROKEN:}${logfail:+$NOLOG:}$STUBS:$FARM" HOME="$HOMEDIR" GC_RIG_ROOT="$REPO" TMPDIR="$RUNTMP" \
       GHLOG="$GHLOG" CAPTURE="$CAPTURE" STUB_DESC="$desc" STUB_SHOW_FAIL="$showfail" \
-      GH_STUB_FAIL="$ghfail" \
+      GH_STUB_FAIL="$ghfail" GCTK_BIN="$GCTK_BUILT" STUB_SUM="$sum" STUB_LIST_FAIL="$listfail" \
       bash "$SUT" "$@" 2>&1 )
 }
 lines() { printf '%s\n' "$@"; }
@@ -243,6 +262,15 @@ out="$(run -- candidates --base main --oid "$FEATURE")"; rc=$?
 eq "$rc" 0 "candidates without --anchor exits 0"
 has "near${TAB}named/rel.png" "$out" "without the anchor, named/rel.png is only near"
 hasnt "named${TAB}named/rel.png" "$out" "…and is not named"
+
+echo "# the anchor's PR summary is a source of named visuals"
+out="$(run STUB_SUM="Shows named/rel.png in the board." -- candidates --base main --oid "$FEATURE" --anchor tk-anchor)"; rc=$?
+eq "$rc" 0 "candidates with a summary that names a visual exits 0"
+has "named${TAB}named/rel.png" "$out" "the summary names named/rel.png"
+out="$(run STUB_LIST_FAIL=1 STUB_DESC="The board now shows named/rel.png." -- candidates --base main --oid "$FEATURE" --anchor tk-anchor)"; rc=$?
+eq "$rc" 0 "a summary that cannot be read still exits 0"
+has "could not read the PR summary of anchor tk-anchor" "$out" "it says the summary was not searched"
+has "named${TAB}named/rel.png" "$out" "the anchor's other text is still searched"
 
 echo "# an anchor that cannot be read is said, and the rest of the search stands"
 out="$(run STUB_SHOW_FAIL=1 -- candidates --base main --oid "$FEATURE" --anchor tk-anchor)"; rc=$?
