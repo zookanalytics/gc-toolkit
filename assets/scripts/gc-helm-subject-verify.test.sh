@@ -35,7 +35,7 @@ mkdir -p "$TMP/bin"
 # engage refuses a rig that carries no converse template before it reaches the
 # subject check, so the fixture rig must carry one for engage to exercise
 # verify_subject at all.
-mkdir -p "$TMP/rig/agents/converse-opus" "$TMP/rig/agents/converse-codex"
+mkdir -p "$TMP/rig/agents/converse-claude-opus" "$TMP/rig/agents/converse-codex-sol"
 export RIG_PATH="$TMP/rig"
 
 # --- gc stub ------------------------------------------------------------------
@@ -144,7 +144,7 @@ check_verb() {
 }
 
 check_verb OPEN    "No conversation filed." open tk-real1
-check_verb ENGAGE  "Nothing spawned."  engage  tk-real1 --no-attach --model codex
+check_verb ENGAGE  "Nothing spawned."  engage  tk-real1 --no-attach --model codex-sol
 check_verb DISMISS "Nothing was written." dismiss tk-real1
 check_verb ACCEPT  "Nothing dispatched." accept  tk-real1
 

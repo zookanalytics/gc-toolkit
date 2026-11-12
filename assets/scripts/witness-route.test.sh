@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Hermetic test for the two witness-patrol blocks that file work: warrant-file,
 # which stamps the dog pool's address, and bug-file, which stamps none, because
-# a pack defect is new work and waits for the operator's placement. It also
+# a pack defect is new work and waits, held, for the operator's placement. It also
 # holds every step of the formula to the rule that no address is built without
 # the resolver; refinery-stuck-handoff.test.sh runs the queue read that
 # resolves.
@@ -53,7 +53,7 @@ stray() { printf '%s\n' "$1" | unpack | grep -n '{{binding_prefix}}' \
   | grep -v 'resolve-route.sh' | grep -vE '^[0-9]+: *echo ' || true; }
 has "$WARRANT" 'resolve-route.sh' "warrant-file resolves its address"
 eq "$(stray "$WARRANT")" "" "warrant-file renders no address it does not resolve"
-# A pack defect is filed for placement, so the bug block names no pool at all:
+# A pack defect is held for placement, so the bug block names no pool at all:
 # routing it is the placement sitting's move.
 hasnt "$BUG" '{{binding_prefix}}' "bug-file renders no address"
 hasnt "$BUG" 'gc.routed_to' "bug-file stamps no route"
@@ -171,30 +171,30 @@ export STUB_AGENTS='{"agents":[{"qualified_name":"gc-toolkit.dog"},
 run "$TMP/bug.sh" "$BUG_PRELUDE"
 has "$LOG" 'bd create' "a reported pack defect is filed as a bug"
 has "$LOG" '-t bug' "typed as one"
-has "$LOG" '"placement":"pending"' "marked placement=pending, so the placement sitting's queue lists it"
+has "$LOG" '--labels hold:mayor' "held with hold:mayor, so the placement sitting's queue lists it"
+hasnt "$LOG" 'placement' "with no placement marker"
 hasnt "$LOG" 'gc.routed_to' "and routed to no pool: new work reaches one only once it is placed"
 hasnt "$LOG" 'agent list' "so no roster is read for an address it never stamps"
-printf '%s\n' "$LOG" | grep -F 'bd create' | sed 's/^.*--metadata //;s/ --json.*$//' | jq -e . >/dev/null 2>&1 \
-  && ok "the create metadata is parseable JSON" || bad "the metadata payload did not survive"
 has "$OUT" "waits for placement" "and the step says where it went"
 
-# The marker is a field of the create, not a write that follows it: a bug that
-# exists before it is marked is an open, unrouted bead in no queue, and a write
+# The hold is a field of the create, not a write that follows it: a bug that
+# exists before it is held is an open, unrouted bead in no queue, and a write
 # that fails leaves it that way.
-hasnt "$LOG" 'bd update' "the marker is not a second write that can fail behind a success message"
+hasnt "$LOG" 'bd update' "the hold is not a second write that can fail behind a success message"
+hasnt "$LOG" 'set-state' "…nor a set-state after the create"
 
 echo "# a city with no live polecat pool still files the bug"
 export STUB_AGENTS='{"agents":[{"qualified_name":"gc-toolkit.dog"}]}'
 run "$TMP/bug.sh" "$BUG_PRELUDE"
-has "$LOG" '"placement":"pending"' "filing for placement needs no pool to exist"
+has "$LOG" '--labels hold:mayor' "holding for placement needs no pool to exist"
 eq "$RC" 0 "and the step keeps running"
 
-echo "# a create that returns no id is reported, and what it may have filed is marked"
+echo "# a create that returns no id is reported, and what it may have filed is held"
 export STUB_CREATE='{}'
 run "$TMP/bug.sh" "$BUG_PRELUDE"
 has "$OUT" "reported no id" "the failure is reported"
-has "$OUT" "gc-helm.sh unplaced" "and names where to look before filing again"
-has "$LOG" '"placement":"pending"' "and the one call that was made already carried the marker"
+has "$OUT" "gc beads list --label hold:mayor" "and names where to look before filing again"
+has "$LOG" '--labels hold:mayor' "and the one call that was made already carried the hold"
 unset STUB_CREATE
 
 echo "# a create that fails outright files nothing and says so"
@@ -210,7 +210,7 @@ run "$TMP/warrant.sh" "$WARRANT_PRELUDE"
 has "$LOG" '"gc.routed_to":"gc-toolkit.dog"' "the warrant goes out on the rendered address"
 has "$OUT" "UNVERIFIED" "marked unproven"
 run "$TMP/bug.sh" "$BUG_PRELUDE"
-has "$LOG" '"placement":"pending"' "and the bug is filed for placement, which reads no roster"
+has "$LOG" '--labels hold:mayor' "and the bug is held for placement, which reads no roster"
 unset STUB_AGENTS_FAIL
 
 echo

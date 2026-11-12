@@ -1,4 +1,10 @@
-// Package gcbd reads and writes beads for the cadence.
+// Package gcbd is gctk's store adapter: the one package that reaches the bead
+// store (docs/gctk-architecture.md, "The adapters"). It uses `gc bd` for writes,
+// for reads that must see a fresh write and for the blocked set, and the
+// supervisor API for other reads. The ledger reaches it through [Store], which
+// gcbd/fake implements in memory for the domains' tests. The commands that
+// predate the ledger, lifecycle and merge among them, still call [Client]
+// directly.
 //
 // A bead READ (Show) goes through the running supervisor's pooled,
 // process-lifetime Dolt connection over HTTP and falls back to forking
@@ -20,6 +26,7 @@ package gcbd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,12 +34,14 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/daemon"
-	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
 )
 
 // Bead is one row of `gc bd show --json`, decoded far enough for the fields the
@@ -42,14 +51,18 @@ import (
 // distinction too. Dependencies keeps its JSON shape as well, so a row shape no
 // reader expects still decodes the bead, and so does IssueType, which
 // IssueTypeString reads as jq's tostring. IssueType, AwaitType and AwaitID are
-// the fields that make a bead a human gate (IsHumanGate); `gc bd dep list`
+// the fields that make a bead a human gate (prstatus.IsHumanGate); `gc bd dep list`
 // carries them on each far bead's row, and bd leaves a field out of a row when
 // its value is empty. DependencyType is the edge a `gc bd show` row's
-// dependency was reached by, and is empty on any other row.
+// dependency was reached by, and is empty on any other row. Description,
+// Priority, Labels and CreatedAt keep their JSON shapes too, each read through
+// its accessor, and so do Ephemeral, NoHistory and IsTemplate, the columns
+// that put a row in the store's ephemeral plane or make it a template.
 type Bead struct {
 	ID           string         `json:"id"`
 	Title        string         `json:"title"`
 	Status       *string        `json:"status"`
+	ClosedAt     any            `json:"closed_at"`
 	Assignee     any            `json:"assignee"`
 	Notes        any            `json:"notes"`
 	Metadata     map[string]any `json:"metadata"`
@@ -57,6 +70,13 @@ type Bead struct {
 	IssueType    any            `json:"issue_type"`
 	AwaitType    string         `json:"await_type"`
 	AwaitID      string         `json:"await_id"`
+	Description  any            `json:"description"`
+	Priority     any            `json:"priority"`
+	Labels       any            `json:"labels"`
+	CreatedAt    any            `json:"created_at"`
+	Ephemeral    any            `json:"ephemeral"`
+	NoHistory    any            `json:"no_history"`
+	IsTemplate   any            `json:"is_template"`
 
 	DependencyType string `json:"dependency_type"`
 }
@@ -107,14 +127,6 @@ func (b *Bead) Meta(key string) string {
 	return jqString(b.Metadata[key])
 }
 
-// IsHumanGate reports whether b is a human gate: Gas City's native bead for a
-// wait a person must clear (issue_type gate, await_type human). A reader of a
-// bead's `blocks` blockers keeps these rows to find the bead's human gates, by
-// the rule [prstatus.IsHumanGate] states.
-func (b *Bead) IsHumanGate() bool {
-	return b != nil && prstatus.IsHumanGate(b.IssueTypeString(), b.AwaitType)
-}
-
 // AssigneeString returns `.assignee // "" | tostring`.
 func (b *Bead) AssigneeString() string { return jqString(b.Assignee) }
 
@@ -123,6 +135,53 @@ func (b *Bead) NotesString() string { return jqString(b.Notes) }
 
 // IssueTypeString returns `.issue_type // "" | tostring`.
 func (b *Bead) IssueTypeString() string { return jqString(b.IssueType) }
+
+// ClosedAtString returns `.closed_at // "" | tostring`.
+func (b *Bead) ClosedAtString() string { return jqString(b.ClosedAt) }
+
+// DescriptionString returns `.description // "" | tostring`.
+func (b *Bead) DescriptionString() string { return jqString(b.Description) }
+
+// CreatedAtString returns `.created_at // "" | tostring`.
+func (b *Bead) CreatedAtString() string { return jqString(b.CreatedAt) }
+
+// PriorityInt returns the bead's priority, 0 when the row carries none or one
+// that is not a whole number.
+func (b *Bead) PriorityInt() int {
+	switch t := b.Priority.(type) {
+	case json.Number:
+		if n, err := t.Int64(); err == nil {
+			return int(n)
+		}
+	case float64:
+		if t == float64(int(t)) {
+			return int(t)
+		}
+	}
+	return 0
+}
+
+// InEphemeralPlane reports whether the store keeps the bead in its ephemeral
+// plane, bd's wisps table: a wisp, or a row stored with no history. bd's
+// listing leaves that plane out unless asked.
+func (b *Bead) InEphemeralPlane() bool { return b.Ephemeral == true || b.NoHistory == true }
+
+// Template reports whether the bead is a template molecule, which bd's listing
+// leaves out unless asked.
+func (b *Bead) Template() bool { return b.IsTemplate == true }
+
+// LabelStrings returns the bead's labels, in the row's order, leaving out a
+// label that is not a string.
+func (b *Bead) LabelStrings() []string {
+	list, _ := b.Labels.([]any)
+	var out []string
+	for _, l := range list {
+		if s, ok := l.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
 
 // StatusLower returns `.status // "" | tostring | ascii_downcase`.
 func (b *Bead) StatusLower() string { return b.StatusLowerOr("") }
@@ -150,13 +209,160 @@ const maxDaemonBody = 1 << 20
 // which is what puts the test stubs in the path of every subprocess call; the
 // write path and the Show fallback fork it. httpc/baseURL/city carry the
 // supervisor-API read path and are all empty when it is off (GC_NO_API, no city
-// in the environment, or no discoverable supervisor), in which case Show reads
-// straight through bin.
+// in the environment, no discoverable supervisor, or a pinned store), in which
+// case Show reads straight through bin. db is the store a pinned client names
+// on every call ([Client.In]), empty for the store gc resolves. ctx ends every
+// call the client forks ([Client.WithContext]), and is nil for a client whose
+// calls run to their end.
 type Client struct {
 	bin     string
 	httpc   *http.Client
 	baseURL string
 	city    string
+	db      string
+	ctx     context.Context
+}
+
+// stopGrace is how long a call stopped by its context may hold its output open
+// before the wait for it gives up. The stop kills every process the call
+// started, so only one that left the call's process group can hold it that
+// long.
+const stopGrace = 2 * time.Second
+
+// WithContext returns a client whose every forked `gc` call ends when ctx
+// does. Each call runs in a process group of its own, and once ctx is done the
+// whole group is killed. gc runs bd as a child that writes to the call's own
+// output, so a stop that killed gc alone would leave bd reading the store and
+// the call waiting on it. A call that has not started by then does not start.
+// The supervisor-API read is not a forked call and keeps its own timeout.
+func (c *Client) WithContext(ctx context.Context) *Client {
+	p := *c
+	p.ctx = ctx
+	return &p
+}
+
+// In returns a client pinned to the bead store at db, a store's .beads
+// directory: every `gc bd` call it makes names that store with bd's own --db
+// flag, and none reads the supervisor API, whose bead route finds a bead by the
+// city and its id rather than in the store named. An empty db pins nothing and
+// returns c.
+func (c *Client) In(db string) *Client {
+	if db == "" {
+		return c
+	}
+	p := *c
+	p.db = db
+	p.httpc, p.baseURL, p.city = nil, "", ""
+	return &p
+}
+
+// Where is the store gc resolves for this process, from its working directory
+// and its environment, as `gc bd where --json` names it: the store's .beads
+// directory and its bead prefix. A read that fails or names no store returns a
+// *ReadError. A reader that must answer from one store pins to it
+// ([Client.In]), because gc routes an unpinned read that names a bead to the
+// store holding that bead, which is another rig's when the bead is.
+func (c *Client) Where() (path, prefix string, err error) {
+	var stderr bytes.Buffer
+	cmd := c.command("bd", "where", "--json")
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return "", "", &ReadError{Reason: "gc bd where did not name the store: " + failure(out, stderr.String())}
+	}
+	var where struct {
+		Path   string `json:"path"`
+		Prefix string `json:"prefix"`
+	}
+	if err := json.Unmarshal(Scrub(out), &where); err != nil || where.Path == "" {
+		return "", "", &ReadError{Reason: "gc bd where named no store"}
+	}
+	return where.Path, where.Prefix, nil
+}
+
+// StoreOf names the store whose bead prefix begins id, the longest such prefix
+// when several do, from the stores `gc rig list --json` names, the city's
+// among them: the store gc routes a read of id to when the read names no
+// store. ok is false when no store's prefix begins id. A listing that fails
+// or does not decode returns a *ReadError.
+func (c *Client) StoreOf(id string) (path string, ok bool, err error) {
+	var stderr bytes.Buffer
+	cmd := c.command("rig", "list", "--json")
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return "", false, &ReadError{ID: id, Reason: "gc rig list did not name the stores: " + failure(out, stderr.String())}
+	}
+	var list struct {
+		Rigs []struct {
+			Prefix string `json:"prefix"`
+			Path   string `json:"path"`
+		} `json:"rigs"`
+	}
+	if err := json.Unmarshal(Scrub(out), &list); err != nil {
+		return "", false, &ReadError{ID: id, Reason: "gc rig list did not decode: " + err.Error()}
+	}
+	best := ""
+	for _, r := range list.Rigs {
+		if r.Prefix == "" || r.Path == "" || !strings.HasPrefix(id, r.Prefix+"-") {
+			continue
+		}
+		if !ok || len(r.Prefix) > len(best) {
+			best, path, ok = r.Prefix, filepath.Join(r.Path, ".beads"), true
+		}
+	}
+	return path, ok, nil
+}
+
+// Route names the store a read that names none pins to, so that every read of
+// it answers from the store gc routes the first bead to: the store gc resolves
+// for this process when no bead is named or its prefix begins the first id,
+// else the store whose prefix does ([Client.StoreOf]). The resolved store
+// answers when no store's prefix begins the id, and when the stores do not
+// list, since a read there finds only the beads that store holds: a bead it
+// does not hold is one its read cannot answer, never another store's. Only a
+// read about a bead in another store than the one resolved here pays for the
+// listing of stores.
+func (c *Client) Route(ids ...string) (string, error) {
+	path, prefix, err := c.Where()
+	if err != nil {
+		return "", err
+	}
+	if len(ids) == 0 || (prefix != "" && strings.HasPrefix(ids[0], prefix+"-")) {
+		return path, nil
+	}
+	if other, ok, err := c.StoreOf(ids[0]); err == nil && ok {
+		return other, nil
+	}
+	return path, nil
+}
+
+// command is the `gc` command for args, a `bd` call, with a pinned client's
+// store named ahead of the verb, where bd reads its global flags. A call that
+// names its own store keeps it. A client with a context runs the call in its
+// own process group and kills the group once the context is done
+// ([Client.WithContext]).
+func (c *Client) command(args ...string) *exec.Cmd {
+	if c.db != "" && len(args) > 0 && args[0] == "bd" && !slices.Contains(args, "--db") {
+		args = append([]string{"bd", "--db", c.db}, args[1:]...)
+	}
+	if c.ctx == nil {
+		return exec.Command(c.bin, args...)
+	}
+	cmd := exec.CommandContext(c.ctx, c.bin, args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	cmd.WaitDelay = stopGrace
+	return cmd
+}
+
+// stopped is why the client's context stopped its calls, and nil while the
+// context runs.
+func (c *Client) stopped() error {
+	if c.ctx == nil || c.ctx.Err() == nil {
+		return nil
+	}
+	return context.Cause(c.ctx)
 }
 
 // New returns a Client whose reads prefer the supervisor API when one is
@@ -251,7 +457,7 @@ func (c *Client) showViaExec(id string) *Bead {
 // That is how the scripts read `gc bd show`: `jq -c '.[0] // empty'`, its exit
 // unread, prints the first array's row before it reaches what follows.
 func (c *Client) array(strict bool, args ...string) ([]Bead, bool) {
-	out, err := exec.Command(c.bin, args...).Output()
+	out, err := c.command(args...).Output()
 	if err != nil {
 		var ee *exec.ExitError
 		if strict || !errors.As(err, &ee) {
@@ -408,7 +614,7 @@ func (b *Bead) blocksEdges() (edges []Bead, ok bool) {
 // the atomic update exists to prevent.
 func (c *Client) Update(id string, args ...string) (string, error) {
 	full := append([]string{"bd", "update", id}, args...)
-	cmd := exec.Command(c.bin, full...)
+	cmd := c.command(full...)
 	out, err := cmd.CombinedOutput()
 	return strings.TrimRight(string(out), "\n"), err
 }

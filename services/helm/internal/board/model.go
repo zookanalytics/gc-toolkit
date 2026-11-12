@@ -11,8 +11,8 @@
 // board's `--json` emits, in the same order, inside the envelope
 // {generated_at, total, tiles}.
 //
-// PARITY (tk-134d7). The board is ONE model, which the web dashboard renders
-// and `helm-svc board --json` prints, so the field set here is the whole
+// PARITY (tk-134d7). The board is ONE model, which the sidecar's GET /helm
+// serves and `helm-svc board --json` prints, so the field set here is the whole
 // of gc-helm.sh's `--json` contract rather than the spike subset. Everything
 // the bash board computes is computed here: the full rank weight (subtree size
 // + priority + a capped cross-rig-ref count), the takeaway-driven NEEDS
@@ -26,8 +26,9 @@
 // conversations the gather admits as anchors of their own ([KindGate],
 // [KindConversation]), which the board folds onto the beads they concern.
 //
-// The struct tags are an additive contract: the TypeScript frontend mirrors
-// them, so fields may be added but never renamed or removed.
+// The struct tags are an additive contract: `helm-svc board --json`'s callers
+// read them and web/src/contract.ts mirrors them, so fields may be added but
+// never renamed or removed.
 package board
 
 import (
@@ -143,8 +144,13 @@ type Anchor struct {
 	// affordance.
 	Notes string `json:"notes,omitempty"`
 
-	// WaitingOn is the ids this bead depends on by a `blocks` edge, and
-	// WaitingOnClosed the subset of those the source found already closed.
+	// WaitingOn is the ids this bead waits on by an edge of the store's blocked
+	// rule (`blocks`, `conditional-blocks` or `waits-for`), and WaitingOnClosed
+	// the subset of those that have landed by the store's own answer: the waits
+	// gctk's waits package does not list as the bead's pending, so a pinned
+	// blocker has landed, as the store counts it. A wait onto a bead the store
+	// holds no row for, such as one in another store, is not recorded
+	// ([source.waitingFromEdges]).
 	//
 	// For a `parked` subject these are the work a converse sitting routed out
 	// of the conversation. A takeaway is one frozen string — "routed; nothing
@@ -155,18 +161,19 @@ type Anchor struct {
 	//
 	// Both are ids, not a boolean, because the source knows the blockers and
 	// the derivation must be able to say how many are still outstanding.
-	// A blocker the source could not resolve at all is simply absent from
-	// WaitingOnClosed, which reads as still-waiting — the quiet direction.
+	// A wait that answer did not settle is simply absent from WaitingOnClosed,
+	// which reads as still-waiting — the quiet direction.
 	WaitingOn       []string `json:"waiting_on,omitempty"`
 	WaitingOnClosed []string `json:"waiting_on_closed,omitempty"`
 
-	// Blockers is the same `blocks` edge set as WaitingOn, carrying the fields
-	// the derivation discriminates on: the route, which separates a pool-routed
-	// rework or review child (machine `progressing`) from an ordinary
-	// prerequisite and from the human gate that makes an anchor `asking`; the
-	// title, which is the gate's question; the creation instant, which is when
-	// an unanswered gate's turn began; and a gate's await type, key and close
-	// reason, which Accept's conditions read ([readAcceptance]).
+	// Blockers is the same edge set as WaitingOn, one for each wait whose far
+	// bead hydrated, carrying the fields the derivation discriminates on: the
+	// route, which separates a pool-routed rework or review child (machine
+	// `progressing`) from an ordinary prerequisite and from the human gate that
+	// makes an anchor `asking`; the title, which is the gate's question; the
+	// creation instant, which is when an unanswered gate's turn began; and a
+	// gate's await type, key and close reason, which Accept's conditions read
+	// ([readAcceptance]).
 	//
 	// The source reads them for the kinds whose waits the derivation spends
 	// ([source.needsWaitingEdges]), a recommendation's parked bead among them,
@@ -195,7 +202,7 @@ type Anchor struct {
 	// status ([source.SupervisorSource.metadataAnchorFor]).
 	//
 	// An unread wait set and an empty one are not interchangeable. A blocker
-	// that was read but has not closed is already handled — it is absent from
+	// that was read and is still pending is already handled — it is absent from
 	// WaitingOnClosed and so counts as outstanding, the quiet direction. An
 	// unreadable EDGE SET has no such fallback: it looks exactly like a row
 	// with no waits, which is the state [ruled] reads as "every recorded wait
@@ -226,9 +233,12 @@ type Anchor struct {
 
 	// PRReasons is the bead behind each of the PR's reasons that names one
 	// (prstatus.Reasons): each open human gate that holds it, nearest first, then
-	// each blocker it waits on that a person has to clear, as the gather read
-	// them. The row's `asking`, its owed clock and its held gates read them. The
-	// beads source fills it beside [Anchor.PR].
+	// each bead a person owes the next move on, nearest first, on the anchor's
+	// own blockers or behind a bead it waits on, as the gather read them. The
+	// row's `asking`, its owed clock and its held gates read the gates. Of the
+	// rest, a blocker of the anchor's own asks on this row too, and any other
+	// names in NEEDS where the person's move is ([movesElsewhere]). The beads
+	// source fills it beside [Anchor.PR].
 	PRReasons []Blocker `json:"pr_reasons,omitempty"`
 
 	// Reviews is the anchor's review beads, open and closed: each carries
@@ -302,10 +312,31 @@ type Blocker struct {
 	AwaitID   string `json:"await_id,omitempty"`
 	// CloseReason is the answer a closed gate was resolved with.
 	CloseReason string `json:"close_reason,omitempty"`
+	// Wait is the store's own answer for this wait of the bead that records it,
+	// read through gctk's waits package. Whether the wait holds the bead is
+	// that answer alone: a pinned blocker the store counts as landed holds
+	// nothing, and a closed waits-for spawner it still counts holds.
+	Wait WaitAnswer `json:"wait,omitempty"`
 }
 
-// Tile is one rendered row of the board — the additive contract mirrored by the
-// frontend and emitted verbatim by `helm-svc board --json`.
+// WaitAnswer is what the store's own answer says of one wait. Its zero value
+// is unread: the source has no answer for the bead that records the wait,
+// because its read failed or did not answer that bead, and the board counts
+// such a wait as one it could not read rather than judging it by the far
+// bead's own status.
+type WaitAnswer string
+
+const (
+	// WaitUnread is a wait the source has no answer for.
+	WaitUnread WaitAnswer = ""
+	// WaitPending is a wait the store says has not landed, which holds the bead.
+	WaitPending WaitAnswer = "pending"
+	// WaitLanded is a wait the store says has landed, which holds nothing.
+	WaitLanded WaitAnswer = "landed"
+)
+
+// Tile is one rendered row of the board — the additive contract mirrored by
+// web/src/contract.ts and emitted verbatim by `helm-svc board --json`.
 //
 // FIELD ORDER IS PART OF THE CONTRACT. encoding/json emits struct fields in
 // declaration order, so the sequence below is what every consumer sees.
@@ -333,9 +364,9 @@ type Tile struct {
 	// Held says the operator's side has this bead: an open human gate blocks
 	// it, an acceptance an earlier Accept left unfinished keeps it, or an open
 	// conversation tracks it. Only the first two hold its work ([WorkHeld]); a
-	// conversation blocks nothing. A held anchor is never stranded, because the
-	// question or the conversation IS the attention it would be flagged for
-	// lacking.
+	// conversation holds none, and one on an open PR holds only the PR's merge.
+	// A held anchor is never stranded, because the question or the conversation
+	// IS the attention it would be flagged for lacking.
 	Held bool `json:"held"`
 	// SittingState refines Held. It is the roll-up of the [Sitting.State] of the
 	// sittings on this row, so the row and the record cannot disagree:
@@ -514,9 +545,9 @@ type Tile struct {
 
 	// --- the attention-type band and the cluster key -----------------------
 	//
-	// Two derived classifications the dashboard groups by, on the wire for the
+	// Two derived classifications a surface groups by, on the wire for the
 	// same reason [Owed] is: the split is not recoverable from the coarse
-	// [Severity] band, and putting it here is what keeps the dashboard from
+	// [Severity] band, and putting it here is what keeps a surface from
 	// inventing its own client-side split.
 
 	// Section is the KIND of attention a row wants, orthogonal to Severity's
@@ -540,7 +571,7 @@ type Tile struct {
 	// GroupRoot is the id of the family this row belongs to — the top-most anchor
 	// its parent-child and blocked edges climb to, equal to the row's OWN id when
 	// it climbs to nothing. Every tile carries one, so a surface buckets families
-	// the way the dashboard already buckets [Section]. Dependency structure is the
+	// the way it buckets [Section]. Dependency structure is the
 	// board's primary grouping axis and the attention band orders and highlights
 	// WITHIN a family; [GroupByFamily] is that partition.
 	GroupRoot string `json:"group_root"`
@@ -655,10 +686,11 @@ type Tile struct {
 	// WorkHeld refines Held: true when the operator's answer is required before
 	// this bead's work can move, because an open human gate blocks it or an
 	// acceptance an earlier Accept left unfinished keeps it. A Held row where it
-	// is false only has a conversation on it, which blocks nothing, so the work
-	// can move and merge while the conversation waits for the operator. False on
-	// every row that is not held. It is derived here rather than in the browser,
-	// so each surface tells the two kinds of held row apart from one reading.
+	// is false only has a conversation on it, which holds no work, so the work
+	// moves while the conversation waits for the operator, and only an open PR's
+	// merge waits for the conversation to close. False on every row that is not
+	// held. It is derived here, so each reader of the row tells the two kinds of
+	// held row apart from one reading.
 	WorkHeld bool `json:"work_held"`
 }
 

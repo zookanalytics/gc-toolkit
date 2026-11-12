@@ -16,6 +16,7 @@ import (
 
 	"github.com/steveyegge/beads"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 	"github.com/zookanalytics/gc-toolkit/services/helm/internal/board"
 )
 
@@ -71,6 +72,11 @@ type BeadsSource struct {
 	// `gc` CLI. Injectable for the same reason openStore is. See gccli.go for
 	// why this is a third sanctioned backend rather than a contract violation.
 	gc gcClient
+
+	// pending reads which of each anchor's recorded waits are still pending, the
+	// store's own answer through gctk's waits package. Injectable for the same
+	// reason openStore is: the production read shells out to `gc bd`.
+	pending pendingReader
 
 	// now is the gather's clock. Both closed-row windows are measured from it,
 	// so it is injectable for the same reason the stores are: a test that had to
@@ -129,6 +135,12 @@ func withClock(now func() time.Time) BeadsOption {
 	return func(s *BeadsSource) { s.now = now }
 }
 
+// withPendingReader overrides how an anchor's pending waits are read (used by
+// tests).
+func withPendingReader(f pendingReader) BeadsOption {
+	return func(s *BeadsSource) { s.pending = f }
+}
+
 // NewBeadsSource builds a source over the city's per-rig bead stores. With no
 // WithCityPath override it discovers the city root itself (see DiscoverCityPath).
 func NewBeadsSource(opts ...BeadsOption) *BeadsSource {
@@ -152,8 +164,16 @@ func NewBeadsSource(opts ...BeadsOption) *BeadsSource {
 	if s.now == nil {
 		s.now = time.Now
 	}
+	if s.pending == nil {
+		s.pending = defaultPendingReader
+	}
 	return s
 }
+
+// defaultPendingReader is the read a source uses unless an option names
+// another. It is a variable so that the package's tests can make it refuse:
+// the production read shells out to `gc bd`, which no test may reach.
+var defaultPendingReader pendingReader = readPendingWaits
 
 // openLibraryStore is the production opener: the beads library's own
 // config-respecting entry point, which honours the rig's dolt server-mode
@@ -443,13 +463,18 @@ func (s *BeadsSource) Gather(ctx context.Context) (*Result, error) {
 	var roots []workflowRoot
 	var hq beadStore
 	var hqRig rigRef
+	var reads []*waitsRead
 	for _, r := range rigs {
 		st, err := s.store(ctx, r)
 		if err != nil {
 			g.note(true, []string{"rig " + r.name + ": " + err.Error()})
 			continue
 		}
+		from := len(g.anchors)
 		s.gatherRig(ctx, g, st, r, now)
+		if rd := s.startWaits(ctx, rigSpan{rig: r, from: from, to: len(g.anchors)}, g.anchors); rd != nil {
+			reads = append(reads, rd)
+		}
 		convs, sits := s.rigConversations(ctx, st, r, g, now)
 		g.anchors = append(g.anchors, convs...)
 		sittings = append(sittings, sits...)
@@ -472,6 +497,7 @@ func (s *BeadsSource) Gather(ctx context.Context) (*Result, error) {
 
 	owners := sessionStates(ctx, s.gc, g)
 	inflight := resolveInflight(roots, owners)
+	landWaits(g, reads)
 
 	return &Result{
 		Anchors:       g.anchors,
@@ -704,14 +730,14 @@ func needsPR(p pendingAnchor) bool {
 	return p.anchor.ClosedAt.IsZero() && p.anchor.Metadata["merge_result"] != ""
 }
 
-// needsWaitingEdges reports the kinds whose `blocks` waits the derivation reads.
+// needsWaitingEdges reports the kinds whose waits the derivation reads.
 // The readers that spend them: board.ruled, the merge row's PR axes and
 // Accept's conditions (decision, human, parked, merge), the row's own
 // waiting_on, which names the human gate a review or rework child waits on
 // beside its anchor (a shared bring-current gate), and the dependency-family
 // grouping, which
 // climbs a tile to the anchor it blocks — so epic and convoy anchors collect
-// their `blocks` edges to join a blocked epic or convoy to the family it hangs
+// their wait edges to join a blocked epic or convoy to the family it hangs
 // off. A convoy's edges come from the same outbound read that
 // already fetches its `tracks` members; an epic's, a review's and a rework's
 // are added to that read here.
@@ -738,12 +764,12 @@ func blockedBy(recs []*beads.Dependency) []string {
 // attachEdges resolves the relations of every anchor in pending with a fixed
 // number of store reads for the whole set, never one per anchor: one batched
 // INBOUND read (parent-child children, and the closed reviews of an anchor whose
-// reviews are gathered), one batched OUTBOUND read (a convoy's `tracks`,
-// everything else's `blocks`), and one SearchIssues that hydrates every far-end
-// issue both name. A pass that gathers any anchor's reviews adds the reads
-// [BeadsSource.readReviews] makes, once for the whole set, and a pass with an
-// open child under a live anchor adds the two [BeadsSource.attachChildWaits]
-// makes. A pass that gathers a live merge anchor adds the in-flight read
+// reviews are gathered), one batched OUTBOUND read (a convoy's `tracks`, and
+// the waits of every kind that spends them, each type [waitEdge] names), and one
+// SearchIssues that hydrates every far-end issue both name. A pass that gathers
+// any anchor's reviews adds the reads [BeadsSource.readReviews] makes, once for
+// the whole set, and a pass with an open child under a live anchor adds the two
+// [BeadsSource.attachChildWaits] makes. A pass that gathers a live merge anchor adds the in-flight read
 // [BeadsSource.attachPR] makes, once for the whole set, and the two it makes per
 // level of the walk past the anchors' own edges. The read count is fixed by the
 // rig+status pass and the depth of the `blocks` graph, so it does not scale with
@@ -753,7 +779,7 @@ func blockedBy(recs []*beads.Dependency) []string {
 // roll-ups it feeds. A failed dependents read (or a failed hydration) leaves the
 // parent-child roll-ups empty, marks every gathered anchor's reviews UNKNOWN,
 // and notes partial. A failed dependencies read
-// leaves `tracks` roll-ups empty AND marks every `blocks`-spending anchor's
+// leaves `tracks` roll-ups empty AND marks every wait-spending anchor's
 // waits UNKNOWN — not empty — because board.ruled reads an empty wait set as
 // "every recorded wait has landed" and would stand a row down on a graph it
 // could not read.
@@ -792,10 +818,10 @@ func (s *BeadsSource) attachEdges(ctx context.Context, g *gatherState, st beadSt
 	}
 
 	// Hydrate the far-end issues the two reads reference — the children on the
-	// parent-child edges, the members and blockers on the tracks/blocks ones, and
-	// every dependent of an anchor whose reviews are gathered — in one
-	// SearchIssues. Only the edges actually spent are hydrated; a `related` edge
-	// into any other anchor is never fetched.
+	// parent-child edges, the members on the tracks edges, the blockers on every
+	// wait edge, and every dependent of an anchor whose reviews are gathered — in
+	// one SearchIssues. Only the edges actually spent are hydrated; a `related`
+	// edge into any other anchor is never fetched.
 	farEnds := map[string]struct{}{}
 	if depnErr == nil {
 		for target, recs := range depnRecs {
@@ -809,7 +835,7 @@ func (s *BeadsSource) attachEdges(ctx context.Context, g *gatherState, st beadSt
 	if depyErr == nil {
 		for _, recs := range depyRecs {
 			for _, d := range recs {
-				if d != nil && (string(d.Type) == "tracks" || string(d.Type) == "blocks") {
+				if d != nil && (string(d.Type) == "tracks" || waitEdge(string(d.Type))) {
 					farEnds[d.DependsOnID] = struct{}{}
 				}
 			}
@@ -847,7 +873,7 @@ func (s *BeadsSource) attachEdges(ctx context.Context, g *gatherState, st beadSt
 		if p.kind == board.KindGate && depnErr == nil {
 			p.anchor.Subjects = blockedBy(depnRecs[p.anchor.ID])
 		}
-		// The `blocks` waits come from the SAME outbound read a convoy already
+		// The waits come from the SAME outbound read a convoy already
 		// spends on its `tracks`, so a convoy gathers both from one read; an epic
 		// joins that read via needsWaitingEdges. They feed the family grouping for
 		// epic and convoy, a review or rework row's waiting_on, and board.ruled,
@@ -856,7 +882,7 @@ func (s *BeadsSource) attachEdges(ctx context.Context, g *gatherState, st beadSt
 		// included, is read here.
 		if needsWaitingEdges(p.kind) {
 			if dependenciesOK {
-				p.anchor.Blockers, p.anchor.WaitingOn, p.anchor.WaitingOnClosed, p.anchor.WaitingUnknown =
+				p.anchor.Blockers, p.anchor.WaitingOn, p.anchor.WaitingUnknown =
 					waitingFromEdges(depyRecs[p.anchor.ID], issueByID)
 			} else {
 				p.anchor.WaitingUnknown = true
@@ -981,9 +1007,9 @@ func (l *libraryPRStore) Anchored(ids []string, statuses []string) (map[string][
 	return out, nil
 }
 
-// Blockers answers each id's `blocks` edges, each far bead as it hydrated. An
-// edge whose far bead did not hydrate is dropped, as the library drops a
-// dangling or cross-store edge.
+// Blockers answers each id's `blocks` edges, each far bead as it hydrated, its
+// metadata whole. An edge whose far bead did not hydrate is dropped, as the
+// library drops a dangling or cross-store edge.
 func (l *libraryPRStore) Blockers(ids []string) (map[string][]prstatus.Blocker, error) {
 	recs := make(map[string][]*beads.Dependency, len(ids))
 	var unread []string
@@ -1028,6 +1054,8 @@ func (l *libraryPRStore) Blockers(ids []string) (map[string][]prstatus.Blocker, 
 					Status:    string(iss.Status),
 					IssueType: string(iss.IssueType),
 					AwaitType: iss.AwaitType,
+					Assignee:  iss.Assignee,
+					Metadata:  decodeMetadata(iss.Metadata),
 				})
 			}
 		}
@@ -1035,7 +1063,7 @@ func (l *libraryPRStore) Blockers(ids []string) (map[string][]prstatus.Blocker, 
 	return out, nil
 }
 
-// attachChildWaits reads the `blocks` waits of every open child of a live
+// attachChildWaits reads the waits of every open child of a live
 // anchor in pending, in one batched OUTBOUND read and one hydration of the
 // blockers the anchor reads did not already fetch. The board's roll-up
 // classifies each open child by them (board.deriveState): a child waiting on
@@ -1071,7 +1099,7 @@ func (s *BeadsSource) attachChildWaits(ctx context.Context, g *gatherState, st b
 	missing := map[string]struct{}{}
 	for _, list := range recs {
 		for _, d := range list {
-			if d != nil && string(d.Type) == "blocks" && issueByID[d.DependsOnID] == nil {
+			if d != nil && waitEdge(string(d.Type)) && issueByID[d.DependsOnID] == nil {
 				missing[d.DependsOnID] = struct{}{}
 			}
 		}
@@ -1092,7 +1120,7 @@ func (s *BeadsSource) attachChildWaits(ctx context.Context, g *gatherState, st b
 		kids := pending[i].anchor.Children
 		for j := range kids {
 			if seen[kids[j].ID] {
-				kids[j].Blockers, _, _, _ = waitingFromEdges(recs[kids[j].ID], blockerByID)
+				kids[j].Blockers, _, _ = waitingFromEdges(recs[kids[j].ID], blockerByID)
 			}
 		}
 	}
@@ -1311,14 +1339,22 @@ func anchorChild(iss *beads.Issue, md map[string]string) board.Child {
 	}
 }
 
-// waitingFromEdges is [childrenFromEdges]'s sibling for the `blocks` waits, from
-// the same OUTBOUND read: it reports the blockers a subject waits on and which
-// of them have closed. A blocker whose issue did not hydrate is dropped, not
-// counted as unknown — unknown is reserved for a READ that failed, which the
-// caller signals by not calling this at all (see attachEdges).
-func waitingFromEdges(recs []*beads.Dependency, issueByID map[string]*beads.Issue) (blockers []board.Blocker, all, closed []string, unknown bool) {
+// waitingFromEdges is [childrenFromEdges]'s sibling for the waits of the store's
+// blocked rule, from the same OUTBOUND read: it reports the blockers a subject
+// waits on. Which of them have landed is the store's own answer, read once per
+// rig after the gather ([BeadsSource.landWaits]). Its callers hydrate the far
+// end of every edge [waitEdge] names, and a hydration either returns every
+// issue the store holds or fails, so a blocker whose issue did not hydrate is
+// one the store holds no row for, such as one in another store. It is dropped,
+// as the library drops a dangling or cross-store edge, and not counted as
+// landed: the store's answer would read it so, and a parked subject waiting only
+// on it would then read as owed a disposition while that work's state is
+// unread. Nor is it counted as unknown — unknown is reserved for a READ that
+// failed, which the caller signals by not calling this at all (see
+// attachEdges).
+func waitingFromEdges(recs []*beads.Dependency, issueByID map[string]*beads.Issue) (blockers []board.Blocker, all []string, unknown bool) {
 	for _, d := range recs {
-		if d == nil || string(d.Type) != "blocks" {
+		if d == nil || !waitEdge(string(d.Type)) {
 			continue
 		}
 		iss, ok := issueByID[d.DependsOnID]
@@ -1326,12 +1362,164 @@ func waitingFromEdges(recs []*beads.Dependency, issueByID map[string]*beads.Issu
 			continue
 		}
 		all = append(all, iss.ID)
-		if iss.Status == beads.StatusClosed {
-			closed = append(closed, iss.ID)
-		}
 		blockers = append(blockers, blockerOf(iss))
 	}
-	return blockers, all, closed, false
+	return blockers, all, false
+}
+
+// waitEdge reports whether an edge type is a wait of the store's blocked rule,
+// the three types gctk's waits package reads as one.
+func waitEdge(typ string) bool {
+	return typ == "blocks" || typ == "conditional-blocks" || typ == "waits-for"
+}
+
+// rigSpan is the run of g.anchors one rig's gather appended.
+type rigSpan struct {
+	rig      rigRef
+	from, to int
+}
+
+// pendingReader answers, for each bead named in the store at beadsDir, the ids
+// of its own waits still pending. A bead the read could not answer is absent
+// from the map, and a read that failed returns its error.
+type pendingReader func(ctx context.Context, beadsDir string, ids []string) (map[string][]string, error)
+
+// readPendingWaits is the production pendingReader: one snapshot of the store
+// through gctk's waits package, the one rule for what holds a bead, bounded by
+// the gather's context. The read takes no context, so a gather that runs out
+// leaves it to finish on its own and reads the anchors' waits as unknown.
+func readPendingWaits(ctx context.Context, beadsDir string, ids []string) (map[string][]string, error) {
+	type answer struct {
+		pending map[string][]string
+		err     error
+	}
+	ch := make(chan answer, 1)
+	go func() {
+		snap, err := waits.ReadStore(beadsDir, ids...)
+		if err != nil {
+			ch <- answer{err: err}
+			return
+		}
+		out := make(map[string][]string, len(ids))
+		for _, id := range ids {
+			h, err := snap.Holds(id)
+			if err != nil {
+				continue
+			}
+			own := make([]string, 0, len(h.Pending))
+			for _, w := range h.Pending {
+				if w.Ancestor == "" {
+					own = append(own, w.ID)
+				}
+			}
+			out[id] = own
+		}
+		ch <- answer{pending: out}
+	}()
+	select {
+	case a := <-ch:
+		return a.pending, a.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// waitsRead is one rig's read of its anchors' pending waits, started as soon as
+// the rig's anchors are gathered so that it runs beside the rest of the gather,
+// and landed once the gather is done.
+type waitsRead struct {
+	span    rigSpan
+	pending map[string][]string
+	err     error
+	done    chan struct{}
+}
+
+// startWaits starts the read of a rig's pending waits: one read of the store,
+// over both of the rig's passes, of the anchors that record a wait and the
+// children whose waits were read, each named once. It returns nil when none
+// records one. The ids are taken here, on the gather's goroutine, so the read
+// touches no anchor.
+func (s *BeadsSource) startWaits(ctx context.Context, sp rigSpan, anchors []board.Anchor) *waitsRead {
+	var ids []string
+	for _, a := range anchors[sp.from:sp.to] {
+		if len(a.WaitingOn) > 0 && !a.WaitingUnknown {
+			ids = append(ids, a.ID)
+		}
+		for _, c := range a.Children {
+			if len(c.Blockers) > 0 {
+				ids = append(ids, c.ID)
+			}
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rd := &waitsRead{span: sp, done: make(chan struct{})}
+	ids = uniqueStrings(ids)
+	go func() {
+		defer close(rd.done)
+		rd.pending, rd.err = s.pending(ctx, sp.rig.beadsDir, ids)
+	}()
+	return rd
+}
+
+// landWaits fills each gathered anchor's landed waits ([board.Anchor.WaitingOnClosed])
+// and each hydrated blocker's answer ([board.Blocker.Wait]), the anchor's and
+// its children's, from its rig's read of the store's own answer, once each
+// read is done. A recorded wait has landed when the answer does not list it
+// among the bead's own pending waits, so a pinned blocker has landed, as the
+// store counts it, and a pending wait the edge read missed, such as one on an
+// edge written since, is added to the record. An anchor the read did not
+// answer, in a rig whose read failed or not, reads its waits as unknown and none
+// as landed, the quiet direction, and every blocker of a bead it did not answer
+// stays unread ([board.WaitUnread]).
+func landWaits(g *gatherState, reads []*waitsRead) {
+	for _, rd := range reads {
+		<-rd.done
+		if rd.err != nil {
+			g.note(true, []string{"waits@" + rd.span.rig.name + ": " + rd.err.Error()})
+		}
+		for j := rd.span.from; j < rd.span.to; j++ {
+			a := &g.anchors[j]
+			for k := range a.Children {
+				if own, ok := rd.pending[a.Children[k].ID]; ok && rd.err == nil {
+					markPending(a.Children[k].Blockers, own)
+				}
+			}
+			if len(a.WaitingOn) == 0 || a.WaitingUnknown {
+				continue
+			}
+			own, ok := rd.pending[a.ID]
+			if rd.err != nil || !ok {
+				a.WaitingUnknown, a.WaitingOnClosed = true, nil
+				continue
+			}
+			pend := make(map[string]bool, len(own))
+			for _, id := range own {
+				pend[id] = true
+				if !slices.Contains(a.WaitingOn, id) {
+					a.WaitingOn = append(a.WaitingOn, id)
+				}
+			}
+			a.WaitingOnClosed = nil
+			for _, id := range a.WaitingOn {
+				if !pend[id] {
+					a.WaitingOnClosed = append(a.WaitingOnClosed, id)
+				}
+			}
+			markPending(a.Blockers, own)
+		}
+	}
+}
+
+// markPending sets each blocker's answer from the bead's own pending waits.
+func markPending(blockers []board.Blocker, own []string) {
+	for i := range blockers {
+		blockers[i].Wait = board.WaitLanded
+		if slices.Contains(own, blockers[i].ID) {
+			blockers[i].Wait = board.WaitPending
+		}
+	}
 }
 
 // blockerOf projects one hydrated `blocks` far end onto the shape the board reads.

@@ -28,8 +28,7 @@ set -uo pipefail
 # definitions it builds on: a conversation's shape ($CONVERSATION_JQ) and the
 # human-gate rule over a listing (bd-lib.sh's $HUMAN_GATE_JQ), which the guard
 # on the subject reads as well through $LIVENESS_WAIT_JQ, the standing kinds
-# ($STANDING_KINDS_JQ), and a bead that waits for placement ($PLACEMENT_JQ,
-# which reads $DISPATCH_PATH_JQ).
+# ($STANDING_KINDS_JQ), and a held bead ($DISPATCH_PATH_JQ's has_dispatch_hold).
 HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=conversation.sh
 . "$HERE/conversation.sh" || { echo "liveness-sweep-precheck: cannot source conversation.sh from $HERE" >&2; exit 2; }
@@ -37,8 +36,6 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 . "$HERE/standing-kinds.sh" || { echo "liveness-sweep-precheck: cannot source standing-kinds.sh from $HERE" >&2; exit 2; }
 # shellcheck source=dispatch-path.sh
 . "$HERE/dispatch-path.sh" || { echo "liveness-sweep-precheck: cannot source dispatch-path.sh from $HERE" >&2; exit 2; }
-# shellcheck source=placement.sh
-. "$HERE/placement.sh" || { echo "liveness-sweep-precheck: cannot source placement.sh from $HERE" >&2; exit 2; }
 # shellcheck source=liveness-classify.sh
 . "$HERE/liveness-classify.sh" || { echo "liveness-sweep-precheck: cannot source liveness-classify.sh from $HERE" >&2; exit 2; }
 # shellcheck source=bd-lib.sh
@@ -278,7 +275,7 @@ if [ "$READS_OK" -eq 1 ] && [ -n "$SUBJECT" ]; then
       --argjson unreadable_liveness_covers false \
       --argjson openprs '[]' --argjson worked '[]' --argjson husks '[]' \
       --argjson preopen_green '{}' \
-      "$HUMAN_GATE_JQ$CONVERSATION_JQ$STANDING_KINDS_JQ$DISPATCH_PATH_JQ$PLACEMENT_JQ$LIVENESS_CLASSIFY_JQ"'
+      "$HUMAN_GATE_JQ$CONVERSATION_JQ$STANDING_KINDS_JQ$DISPATCH_PATH_JQ$LIVENESS_CLASSIFY_JQ"'
       [ liveness_classify[] | select(.class == "unnamed") | .id ]' 2>/dev/null)
     if printf '%s' "$SURVIVORS" | jq -e 'type == "array"' >/dev/null 2>&1; then
         NEW_IDS=$(printf '%s' "$SURVIVORS" | jq -c --arg seen "$BASELINE" '

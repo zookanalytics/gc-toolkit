@@ -18,10 +18,14 @@
 #      first, at most AWAITED_CAP named), and a count per class.
 #   E. Store — the store that answered, and the db it read.
 # and, each behind its own opt-in flag:
-#   B. --frontier — the blockers. A verdict over {ready, advancing, stuck}: ready
-#      with no open blocker, else the worst open blocker's advance. Each open
-#      blocks-dep is named {id, title, status, advance}, plus stuck_on {id, why}
-#      when it is stuck; closed blockers are a count.
+#   B. --frontier — what holds it. A verdict over {ready, advancing, stuck}:
+#      ready when `gctk bead holds` answers that nothing holds it, else the worst
+#      advance of the waits behind that answer. Each is named {id, title,
+#      status, advance}, plus stuck_on {id, why} when it is stuck, ancestor when
+#      it is an ancestor's wait, and unjudged when it is a waits-for wait the
+#      store cannot judge yet. The answer's status is holds, an edge into another
+#      store, which holds nothing, is listed under foreign, and the bead's own
+#      landed blockers are a count.
 #   C. --horizon — the direct children. The epic-health snapshot
 #      {total, open, closed, advancing, stuck}; open children named
 #      {id, title, status, advance} (plus stuck_on when stuck); done children
@@ -37,11 +41,15 @@
 # each reason). The walk reads level by level, one batched read per store, and
 # stops descending at the first stuck bead on a branch.
 #
-# `gc bd show` leaves out an edge whose far end lives in another rig's store, so
-# a blocker's edges come from its list row, which keeps them, and each blocker is
-# read from the store its prefix binds — the binding assets/scripts/bead-store.sh
-# proves. A blocker whose store no rig carries reads unknown and fails the verdict
-# closed. Three `gc bd --json` quirks are handled so the read never dies on live
+# What holds the subject is the answer of `gctk bead holds` in the subject's own
+# store, the one rule (docs/gctk-architecture.md, "The bead holds contract"): a
+# wait of its own, or for work not started one on a parent-child ancestor, and
+# never an edge into another store. A read that does not answer fails the
+# verdict closed. Below the subject, `gc bd show` leaves out an edge whose far end
+# lives in another rig's store, so a blocker's edges come from its list row,
+# which keeps them, and each blocker is read from the store its prefix binds —
+# the binding assets/scripts/bead-store.sh proves. A blocker whose store no rig
+# carries reads unknown and fails its advance closed. Three `gc bd --json` quirks are handled so the read never dies on live
 # data: a leading `gc bd:` notice line is stripped; raw C0 control bytes are
 # scrubbed before jq; and the ARRAY-when-resolved versus `{"error":…}`-OBJECT-
 # when-not payloads are told apart on type, not the exit code they share.
@@ -90,6 +98,8 @@ scrub() { tr -d '\000-\037'; }
 _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
+# shellcheck source=conversation.sh
+. "$_bd_lib_dir/conversation.sh" || { echo "cannot source conversation.sh beside this script" >&2; exit 1; }
 
 usage() {
   cat >&2 <<'U'
@@ -220,8 +230,10 @@ bd_rows() {
 #                publishes it), or settled with a PR that needs no further review.
 #   stuck      human: a human gate (a gate whose await type is human, which
 #                carries no route), a bead assigned to the reserved `human`, a
-#                decision, a finding that needs the operator, or an anchor
-#                parked in a human state.
+#                decision, a finding that needs the operator, an anchor parked
+#                in a human state, or a conversation (conversation.sh), which
+#                holds an open PR's merge until a person's ruling or dismissal
+#                closes it, in the queue or held by its sitting.
 #              held: any other status. Blocked, deferred and pinned are
 #                deliberate holds no pool offers; a status a store adds is one
 #                this classifier does not know, so it fails closed.
@@ -235,15 +247,16 @@ bd_rows() {
 #              capped: an armed dispatch that hit its sling-failure cap.
 #              unrouted: open with no route, arm or assignee, so nothing picks it up.
 #
-# Where two rules apply, in-progress outranks everything, and a human gate, a
-# decision or a bead assigned to `human` outranks every advancing kind, so a
-# review assigned to a person stays stuck.
+# Where two rules apply, a conversation outranks everything, so its sitting's
+# claim reads as the person's it is, in-progress outranks everything else, and a
+# human gate, a decision or a bead assigned to `human` outranks every advancing
+# kind, so a review assigned to a person stays stuck.
 # Whether a claim's or a route's session is still up is a liveness join over the
 # session list, not a fact on the row, so a stranded claim reads advancing here,
 # and a bead a poured molecule is working (its work bead, or an inline step)
 # carries no route of its own and reads unrouted. gc.execution_routed_to is a
 # pour's provenance, not a live route, and is not read.
-ADV='
+ADV="$CONVERSATION_JQ"'
 def adv_truthy: ((. // "") | tostring) as $s
   | ($s == "" or $s == "false" or $s == "False" or $s == "FALSE" or $s == "0" or $s == "null") | not;
 def adv_human: . == "human" or endswith("/human");
@@ -269,7 +282,8 @@ def adv_own($cap):
   | (($m["task_kind"] // "") | tostring) as $tk
   | (($m["merge_result"] // "") | tostring) as $mr
   | ((.assignee // "") | tostring) as $a
-  | if .status == "in_progress" or .status == "hooked" then {state: "advancing"}
+  | if conversation then {state: "stuck", why: "human"}
+    elif .status == "in_progress" or .status == "hooked" then {state: "advancing"}
     elif ($a | adv_human) or .issue_type == "decision"
          or (.issue_type == "gate" and ((.await_type // "") | tostring) == "human") then {state: "stuck", why: "human"}
     elif .status != "open" then {state: "stuck", why: "held"}
@@ -482,6 +496,21 @@ EDGES_JSON=$(printf '%s' "$SUBJ" | jq -c --argjson tracked "$TRACKED_BY" --argjs
 # not work, so it is left out and never counted as a child. The listing carries
 # each child's own row, so only its blockers are read, and only while its own
 # state advances.
+# The frontier asks what holds the subject once, through the binary the city
+# builds, pinned to the store the subject was read from.
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+HOLDS='{"status":"unread","error":"the frontier was not asked for","waits":[],"foreign":[]}'
+if [ -n "$WANT_FRONTIER" ]; then
+  if [ -x "$GCTK" ]; then
+    HOLDS=$("$GCTK" bead holds ${DB:+--db "$DB"} "$(printf '%s' "$SUBJ" | jq -r '.id')" 2>/dev/null | scrub \
+      | jq -c 'if .error == null and (.status // "") != "" then . else {status: "unread", error: (.error // "gctk bead holds gave no status"), waits: [], foreign: []} end' 2>/dev/null)
+    [ -n "$HOLDS" ] || HOLDS='{"status":"unread","error":"gctk bead holds did not answer","waits":[],"foreign":[]}'
+  else
+    HOLDS=$(jq -nc --arg g "$GCTK" '{status: "unread", error: ("no gctk binary at " + $g), waits: [], foreign: []}')
+  fi
+fi
 FRONTIER_JSON=""; HORIZON_JSON=""
 if [ -n "$WANT_FRONTIER" ] || [ -n "$WANT_HORIZON" ]; then
   CHILDREN='[]'
@@ -492,10 +521,10 @@ if [ -n "$WANT_FRONTIER" ] || [ -n "$WANT_HORIZON" ]; then
                else [] end' 2>/dev/null)
     [ -n "$CHILDREN" ] || CHILDREN='[]'
   fi
-  WALK=$(printf '%s\n%s\n' "$SUBJ" "$CHILDREN" | jq -sc --arg f "$WANT_FRONTIER" "$WALK_JQ"'
+  WALK=$(printf '%s\n%s\n%s\n' "$SUBJ" "$CHILDREN" "$HOLDS" | jq -sc --arg f "$WANT_FRONTIER" "$WALK_JQ"'
     .[0] as $s | [.[1][] | select(.status != "closed")] as $open
-    | (if $f == "" then [] else [$s | walk_blocks[] | select(.status != "closed") | .id] end) as $direct
-    | {subject: $s.id, relist: (if $f == "" then [] else [$s.id] end),
+    | (if $f == "" then [] else [.[2].waits[]?.id] | unique end) as $direct
+    | {subject: $s.id, relist: [],
        rows: ((if $f == "" then {} else {($s.id): $s} end) + ([$open[] | {key: .id, value: .}] | from_entries)),
        req: {}, roots: ($direct + [$open[].id]),
        forced: ([$direct[] | {key: ., value: true}] | from_entries)}' 2>/dev/null)
@@ -582,23 +611,30 @@ if [ -n "$WANT_FRONTIER" ] || [ -n "$WANT_HORIZON" ]; then
     def named($v): {advance: (if $v.state == "advancing" then "advancing" else "stuck" end)}
       + (if $v.state == "advancing" then {} else {stuck_on: $v.on} end);'
 
-  # B. The frontier: ready with no open blocker, else the worst open blocker's
-  # advance. An unreadable blocker stays open with status unknown.
+  # B. The frontier: ready when nothing holds the subject, else the worst
+  # advance of the waits behind the answer. A read of what holds it that did not
+  # answer is stuck, and says why. An unreadable wait stays open with status
+  # unknown.
   if [ -n "$WANT_FRONTIER" ]; then
-    FRONTIER_JSON=$(printf '%s\n%s\n%s\n' "$SUBJ" "$WALK" "$RES" | jq -sc "$WALK_JQ$VERDICT_OF"'
-      .[1].rows as $rows | .[2] as $res
-      | (($rows[.[1].subject] // .[0]) | walk_blocks) as $all
-      | [$all[] | select(.status != "closed") | select(($res[.id].state // "") != "closed")] as $open
-      | {verdict: (if ($open | length) == 0 then "ready"
-                   elif any($open[]; verdict_of($res; .id).state != "advancing") then "stuck"
+    FRONTIER_JSON=$(printf '%s\n%s\n%s\n%s\n' "$SUBJ" "$WALK" "$RES" "$HOLDS" | jq -sc "$WALK_JQ$VERDICT_OF"'
+      .[1].rows as $rows | .[2] as $res | .[3] as $h
+      | (($rows[.[1].subject] // .[0]) | walk_blocks) as $own
+      | [$h.waits[]?] as $waits
+      | {verdict: (if $h.status == "clear" then "ready"
+                   elif $h.status == "unread" or any($waits[]; verdict_of($res; .id).state != "advancing") then "stuck"
                    else "advancing" end),
-         blockers: {open: ($open | length), closed: (($all | length) - ($open | length))},
-         open: [$open[] | . as $d | ($rows[$d.id] // {}) as $row
-           | {id: $d.id,
-              title: ((if ($d.title // "") != "" then $d.title else ($row.title // "") end) | if . == "" then null else . end),
-              status: ($row.status // "unknown")}
-             + named(verdict_of($res; $d.id))]}' 2>/dev/null)
-    [ -n "$FRONTIER_JSON" ] || FRONTIER_JSON='{"verdict":"stuck","blockers":{"open":0,"closed":0},"open":[]}'
+         holds: $h.status,
+         blockers: {open: ($waits | length), closed: ([$own[] | select(.status == "closed")] | length)},
+         open: [$waits[] | . as $w | ($rows[$w.id] // {}) as $row
+           | {id: $w.id,
+              title: ((if ($w.title // "") != "" then $w.title else ($row.title // "") end) | if . == "" then null else . end),
+              status: (if ($w.status // "") != "" then $w.status else ($row.status // "unknown") end)}
+             + (if ($w.ancestor // "") != "" then {ancestor: $w.ancestor} else {} end)
+             + (if $w.type == "waits-for" then {unjudged: true} else {} end)
+             + named(verdict_of($res; $w.id))]}
+        + (if $h.status == "unread" then {unread: $h.error} else {} end)
+        + (if ([$h.foreign[]?] | length) > 0 then {foreign: [$h.foreign[].id]} else {} end)' 2>/dev/null)
+    [ -n "$FRONTIER_JSON" ] || FRONTIER_JSON='{"verdict":"stuck","holds":"unread","blockers":{"open":0,"closed":0},"open":[],"unread":"the frontier did not compose"}'
   fi
 
   # C. The horizon: done children counted only, open children named.
@@ -694,9 +730,12 @@ fi
 
 if [ -n "$WANT_FRONTIER" ]; then
   printf '\n  Frontier\n'
-  printf '    verdict     %s\n' "$(g '.frontier.verdict')"
+  printf '    verdict     %s (%s)\n' "$(g '.frontier.verdict')" "$(g '.frontier.holds')"
+  [ "$(g '.frontier.unread // ""')" = "" ] || printf '    unread      %s\n' "$(g '.frontier.unread')"
   printf '    blockers    %s open · %s closed\n' "$(g '.frontier.blockers.open')" "$(g '.frontier.blockers.closed')"
-  g "$ADV_TEXT"'.frontier.open[]? | "    open        \(.id)  \(.title // "") (\(.status), \(adv_text))"'
+  g "$ADV_TEXT"'.frontier.open[]? | "    open        \(.id)  \(.title // "") (\(.status), \(adv_text))"
+    + (if .ancestor then " on ancestor \(.ancestor)" else "" end) + (if .unjudged then ", waits-for, unjudged" else "" end)'
+  [ "$(g '.frontier.foreign // [] | length')" = "0" ] || printf '    foreign     %s (edges into another store, which hold nothing)\n' "$(g '.frontier.foreign | join(", ")')"
 fi
 
 if [ -n "$WANT_HORIZON" ]; then

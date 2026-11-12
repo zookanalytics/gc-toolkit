@@ -107,9 +107,15 @@ chmod +x "$BIN/gh"
 # it filed in. `bd kv get|set|list` serve the key-value table from kv.json, a
 # get printing {found, key, value} and exiting 1 for an unset key and a list
 # printing the whole table with schema_version, as bd does, each recording the
-# rig it ran in.
+# rig it ran in. A read the gctk under test makes, for the real patrol-finding.sh
+# asking what a held finding still waits on, answers from the same findings
+# through the seam holds-store.stub.sh keeps, and is not logged.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 set -u
+if [ -n "${HOLDS_STUB_READ:-}" ] && [ "${1:-}" = bd ]; then
+  shift
+  HOLDS_STORE="$STUB_STORE/findings.json" exec "${HOLDS_STUB:?}" answer "$@"
+fi
 printf '%s\n' "$*" >> "$STUB_LOG/gc.log"
 [ "${1:-}" = bd ] || { echo "stub gc: unexpected call: $*" >&2; exit 1; }
 shift
@@ -282,8 +288,12 @@ chmod +x "$FAULTBIN/cat" "$FAULTBIN/jq"
 
 export PATH="$BIN:$PATH"
 export STUB_LOG="$TMP" STUB_FIX="$FIX" STUB_STORE="$STORE"
-# The flag files through the real patrol-finding.sh beside the miner.
+# The flag files through the real patrol-finding.sh beside the miner, which asks
+# the gctk built from this checkout what a held finding still waits on.
 unset GC_PATROL_FINDING_TOOL GC_BD_LIB GC_FINDING_DEFAULT_RIG
+export HOLDS_STUB="$HERE/holds-store.stub.sh" GC_NO_API=1
+GCTK_BIN="$("$HOLDS_STUB" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so a held finding's waits cannot be read"; exit 1; }
+export GCTK_BIN
 export GC_PROACTIVE_TOOL="$BIN/gc-proactive"
 export GC_RIG=fixture-rig
 # The swept checkout is the repository pr-post.sh reads the rig's declaration
@@ -662,7 +672,7 @@ eq "$(f_field tk-find1 '.metadata["finding.occurrences"]')" "1" "(82b) a post th
 eq "$(cat "$TMP/kv.rig" 2>/dev/null)" "fixture-rig" "(82c) the record is read in the swept rig's store"
 set_status closed
 "$SUT" flag --dir "$W" >/dev/null 2>&1
-eq "$(findings_n)" "1" "(82d) nor once its finding is closed, where a raise would file a fix that did not hold"
+eq "$(findings_n)" "1" "(82d) nor once its finding is closed, where a raise would file a recurrence of it"
 STUB_KV_BROKEN=1 "$SUT" flag --dir "$W" >/dev/null 2>&1; RC=$?
 eq "$RC" "1" "(82e) a record that does not read stops the flag"
 eq "$(findings_n)" "1" "(82f) and it raises nothing"
@@ -697,7 +707,7 @@ has "$OUT" "already named in a finding under unmarked-city-post" "(82s8) the sam
 eq "$(f_field tk-find2 '.metadata["finding.occurrences"]')" "2" "(82s9) so the open finding counts no third occurrence"
 set_status closed
 "$SUT" flag --dir "$W" >/dev/null 2>&1
-eq "$(findings_n)" "2" "(82s10) and once it closes, no new finding reports that its fix did not hold"
+eq "$(findings_n)" "2" "(82s10) and once it closes, no new finding is filed as its recurrence"
 # The rest of the section raises onto tk-find2, open again.
 set_status open tk-find2
 # A note that does not land records nothing, so the next run names the post.

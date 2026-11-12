@@ -1,26 +1,16 @@
-// Filing a conversation from the board — the client half of POST <mount>/helm/open.
+// Filing a conversation from the page: the client half of POST <mount>/helm/open,
+// which Discuss's form calls.
 //
-// WHY THIS IS NOT IN drill/client.ts. That file is the SUPERVISOR client: every
-// type in it comes from gen/supervisor.d.ts, generated from the supervisor's
-// own OpenAPI document, and a path missing from those types fails to compile.
-// This route is not on the supervisor at all — it is helm-svc's own, and the
-// supervisor spec declares `post?: never` on all eight of its paths. So this is
-// a plain `fetch`, exactly like the board read in App.tsx.
-//
-// WHY THE TYPES ARE NOT IN contract.ts. That file mirrors the BOARD contract,
-// and web/contract_parity_test.go enforces a two-way match between its
-// `export interface`s and the Go structs reachable from board.Board — an
-// interface added there for this route fails that test with nothing to pair
-// with. The two shapes below are therefore mirrored here, beside the fetch that
-// reads them, and are deliberately small and flat so hand-mirroring stays
-// cheap. Their Go originals are openResponse and the error body in
-// internal/server/actuate.go.
+// The route is helm-svc's own, not on the supervisor's OpenAPI, so there is no
+// generated client: this is a plain `fetch`, like the page's own reads. Its two
+// shapes are mirrored here by hand, beside the fetch that reads them, small and
+// flat so hand-mirroring stays cheap. Their Go originals are openResponse and the
+// error body in internal/server/actuate.go.
 
 import { SVC_WRITE_HEADERS } from '../svcWrite';
 
-/** Document-relative, for the same reason the board read is (see App.tsx): the
- *  app is served under a runtime-city-named prefix, so an absolute '/helm/open'
- *  would address the supervisor root and 404. */
+/** Document-relative: the page is served under a runtime-city-named prefix, so
+ *  an absolute '/helm/open' would address the supervisor root and 404. */
 const OPEN_URL = 'helm/open';
 
 /**
@@ -48,8 +38,8 @@ export interface OpenResult {
  *
  * Branch on this, never on the message text: the message is the tool's own
  * sentence and is expected to get MORE specific over time (gc-helm.sh's exit 3
- * currently collapses three distinct environment failures — tk-lzdty half 2 —
- * and this surface is built so that when the script separates them, the browser
+ * currently collapses three distinct environment failures, and this surface
+ * is built so that when the script separates them, the browser
  * separates with it and nothing here changes).
  */
 export type OpenReason =
@@ -86,11 +76,10 @@ interface OpenErrorBody {
  * until an operator engages it.
  *
  * NOTE WHAT THIS DOES NOT DO: it neither starts a sitting nor attaches the
- * operator to one. Engaging the queued conversation (the drill panel's Discuss action,
- * or `gc-helm engage`) is what spawns the session; in a browser there is no
- * pane to attach to regardless, until the embedded ttyd can be retargeted at
- * the session (tk-rbf9r / tk-xlup8, unapplied). Callers must say so rather than
- * implying a conversation is on screen.
+ * operator to one. Engaging the queued conversation (Rejoin the conversation on
+ * the page, or `gc-helm engage`) is what spawns the sitting, and the page
+ * mounts no terminal. Callers must say so rather than implying a conversation
+ * is on screen.
  */
 export async function openConversation(bead: string, signal?: AbortSignal): Promise<OpenResult> {
   let res: Response;

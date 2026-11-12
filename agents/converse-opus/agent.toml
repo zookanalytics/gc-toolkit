@@ -1,100 +1,24 @@
-# converse-opus — a converse sitting on the Opus work tier, and the default of
-# the per-model converse templates (converse-*). They share the converse role
-# and prompt and differ only in provider and model; this one carries the longer
-# per-field documentation the others point back to. `gc-helm engage` opens one
-# with `gc session new converse-opus --alias <conversation> --no-attach`: the
-# alias is the conversation task's id (`c-<id>` where the runtime refuses the
-# bare id), and the conversation's assignee is that alias, which is how its
-# claim finds it, through the default work query, so the template needs no work
-# query of its own. That is an origin=manual session, which is not pool_managed,
-# so the pool execution backstop never governs it and a pane held open for a
-# conversation is not reaped by a no-nudge drain.
-# Session-ending mechanics (what ends a held sitting when no clock does, and how
-# its session ends with its conversation) are documented in docs/human-engagement.md,
-# which links the Gas City facts beneath them; read that before tuning.
+# converse-opus — kept for the sittings already open on it. engage does not
+# offer it, and opens converse-claude-opus for the same model. Gas City's
+# reconciler wakes no session whose template is not configured, drains one
+# that holds no work, and closes one whose process is gone, releasing the
+# conversation it held, so this template stays until no open sitting runs on
+# it. Its fields are the ones its sittings started on, documented on
+# converse-claude-opus.
 scope = "rig"
 provider = "claude"
 option_defaults = { model = "claude-opus-5-5" }
-# Share the converse role's prompt rather than carry a copy; a variant differs
-# from its siblings only in provider and model. The prompt lives in
-# agents/_converse/, which defines no agent: the pack loader skips a directory
-# under agents/ whose name starts with `_`. Retiring any one variant is then a
-# plain directory delete that leaves the prompt the others read in place.
 prompt_template = "agents/_converse/prompt.template.md"
-# A rig worktree, not a plain dir under the city tree: the sitting shells gh/git
-# to inspect the rig's PRs and branches, and those tools resolve the repo from
-# the working directory. Under .gc/agents/ that resolves to the city repo the
-# .gc tree sits in, not the rig this sitting serves. worktree-setup.sh cuts the
-# checkout from the rig root, as the polecat/proactive/refinery pools already do.
 work_dir = ".gc/worktrees/{{.Rig}}/converse-opus/{{.AgentBase}}"
 pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync"]
-# resume carries the conversation across suspend, pin, and every wake; a fresh
-# session per conversation is what makes each sitting new, so the thread lives
-# here.
 wake_mode = "resume"
-# The operator attaches to the sitting.
 attach = true
-# A client attached to the sitting exits when the sitting's session ends,
-# instead of moving to another session. detach-on-destroy is a tmux session
-# option, so this sets it for the sitting's session alone and leaves the
-# server's global value as it is: a client attached with
-# `-f no-detach-on-destroy`, and every client on any other session, still moves
-# on. `gc-helm engage` runs its attach as a child, so once the client exits it
-# prints the sitting's last hand-back below tmux's `[exited]`. Gas City runs
-# session_live after every start of the session with GC_TMUX_SOCKET naming the
-# city's tmux server, and re-applies a changed value without a restart. The
-# `=<name>:` target matches the session exactly.
-# The second entry passes the sitting's pane title on to the terminal of a
-# client attached to it, so the operator's tab shows the sitting's title. The
-# sitting sets that title with `gctk session title`, which has Claude Code or
-# Codex name its own session, and each draws that name as its terminal title,
-# which tmux keeps as the pane title (#T). set-titles is a session option too,
-# so the entry reaches the sitting's session alone and leaves the server's
-# global value as it is.
 session_live = [
   'tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} set-option -t "={{.Session}}:" detach-on-destroy on',
-  'tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} set-option -t "={{.Session}}:" set-titles on \; set-option -t "={{.Session}}:" set-titles-string "#T"',
+  'tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} set-option -t "={{.Session}}:" set-titles on \; set-option -t "={{.Session}}:" set-titles-string "#{?#{GC_DRAIN_ACK},done · ,}#T"',
 ]
-# Empty on purpose, and empty is not what protects a sitting. A sitting runs as
-# a manual (spawn-on-engagement) session, never pool_managed, and all three
-# claim backstops gate governs() on pool_managed (gascity idle_nudge.go,
-# execution_backstop.go), so none of them fires against a held sitting whatever
-# this field holds. The manual origin is the exemption. Empty is also not a
-# uniform "skip": the three claim backstops split on an empty nudge. Only the
-# execution backstop drains on it: gascity's shared empty-content path
-# (nudge_backstop.go) runs its exhausted action, the tracked drain that
-# releases the claim. The pool-claim backstop substitutes a default claim nudge
-# and re-delivers instead. The continuation backstop's exhausted action is a
-# no-op. Neither of those drains. So for a pool_managed session emptiness
-# drains only through the execution backstop, and a sitting, never
-# pool_managed, is reached by none of it.
-# Nothing is lost at launch. The launch delivers the rendered prompt, and that
-# prompt's loop opens with the claim block, so a fresh sitting claims with no
-# keystrokes. A provider that takes no prompt argument gets the prompt prepended
-# to this field, and prepending to an empty field still delivers it, so the
-# precondition is the prompt rather than prompt_mode. A prompt that stops
-# opening with the claim block leaves nothing to start the turn.
-# Non-empty text does not arm a backstop here; it feeds that launch delivery.
-# The text must then send the session back through the prompt's claim block
-# rather than name `gc hook --claim` alone: the block's restart rule, which
-# reads an existing assignment as a sitting to resume rather than one to drain
-# or work to a close, is what stops a nudge from ending a live sitting, and it
-# is read there and nowhere else. Keep it at peer length; fixes go in the
-# prompt.
 nudge = ""
-# 0 keeps this template off the idle reap; any positive value re-arms it. Idle
-# is measured from terminal output, and an operator reading a held thread
-# produces none. A sitting ends when its conversation closes, and its session
-# with it: the agent's own sign-off ends in its drain-ack, and the operator's
-# bare `gc-helm dismiss` (it infers the conversation) stops the session that
-# held it. A sitting cut short hands its conversation back to the operator's
-# queue and drains. The `converse-reap` order closes any converse session that
-# outlives its conversation, attached or not. Why, and the ending this does not
-# reach (an OPEN conversation the operator walked away from):
-# docs/human-engagement.md.
 idle_timeout = "0"
-# Sittings are opened by hand, never spawned by demand: min 0 starts nothing.
-# max_active_sessions does not ration them: `gc session new` checks no session
-# count, and the pool's scale-down drop paths skip a manual session.
+sleep_after_idle = "10m"
 min_active_sessions = 0
 max_active_sessions = 8

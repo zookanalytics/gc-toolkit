@@ -16,10 +16,13 @@ import (
 // reader rule bd-lib.sh's HUMAN_GATE_JQ applies. It blocks each bead that waits
 // on it, and only a person clears it, by resolving it with an answer.
 //
-// A conversation is a task that tracks the one bead it is about
-// (assets/scripts/conversation.sh). It is assigned to `human` while it waits in
-// the operator's queue and to its sitting's alias while a sitting holds it. It
-// replies to each human gate it answers, and it blocks nothing.
+// A conversation is a task that tracks the one bead it is about (the gctk
+// conversation package, and assets/scripts/conversation.sh for the scripts). It
+// is assigned to `human` while it waits in the operator's queue and to its
+// sitting's alias while a sitting holds it. It replies to each human gate it
+// answers. It holds no work: a conversation on an open PR holds only the PR's
+// merge, through the anchor's `blocks` edge onto it, which the PR's row reads as
+// a bead a person owes ([demand]).
 //
 // Each is a wrapper on the beads it concerns. The fold drops its row and moves
 // what it asks onto the rows of those beads, and keeps its row only when none
@@ -327,9 +330,30 @@ func (ix humanIndex) holds(id string) bool {
 }
 
 // holdsWork reports whether an open human gate holds the bead, so its work
-// cannot move until the operator answers. A conversation blocks nothing.
+// cannot move until the operator answers. A conversation holds no work.
 func (ix humanIndex) holdsWork(id string) bool {
 	return len(ix.gates[id]) > 0
+}
+
+// parksWork reports whether an open human gate parks the bead through the
+// gate's own row: the gate holds the bead's work ([humanIndex.holdsWork]) and
+// the bead's own blockers do not carry its wait. A wait they carry holds the
+// bead by the store's answer alone ([splitWaits]), so a gate the store did not
+// answer for the bead ([WaitUnread]) parks nothing, and [stateInput.unread]
+// counts it.
+func (ix humanIndex) parksWork(id string, blockers []Blocker) bool {
+	for _, g := range ix.gates[id] {
+		if !slices.ContainsFunc(blockers, func(b Blocker) bool { return b.ID == g }) {
+			return true
+		}
+	}
+	return false
+}
+
+// tracks reports whether an open conversation tracks the bead, which holds
+// none of its work.
+func (ix humanIndex) tracks(id string) bool {
+	return len(ix.convs[id]) > 0
 }
 
 // inSession reports whether the conversation id is in session: a live session

@@ -12,7 +12,7 @@ harness_init
 SUT="$HERE/pr-status-label.sh"
 REPO="github.com/zook/gc-toolkit"
 
-# The derivation is `gctk pr-status` (services/gctk); this script
+# The derivation is `gctk pr status` (services/gctk); this script
 # reaches it and computes nothing itself, so the derive and reconcile cases
 # below exercise the binary. Build it and point GCTK_BIN at it, overriding the
 # harness's GCTK_BIN=none. gctk shells out to the same stubbed `gc`, so the
@@ -23,7 +23,7 @@ GCTK_BUILD_LOG="$TMP/gctk-build.log"
 if command -v go >/dev/null 2>&1 && ( cd "$ROOT/services/gctk" && go build -buildvcs=false -o "$TMP/gctk" ./cmd/gctk ) >"$GCTK_BUILD_LOG" 2>&1; then
   export GCTK_BIN="$TMP/gctk"
 else
-  bad "gctk did not build; pr-status derive is gctk-only and was NOT exercised — $(tail -3 "$GCTK_BUILD_LOG" 2>/dev/null | tr '\n' ' ')"
+  bad "gctk did not build; pr status is gctk-only and was NOT exercised — $(tail -3 "$GCTK_BUILD_LOG" 2>/dev/null | tr '\n' ' ')"
 fi
 
 pv() { # <num> <labels-json-array> — a pr_view fixture carrying those labels
@@ -214,19 +214,19 @@ RW_ROW='{"id":"tk-rw","status":"open","metadata":{"task_kind":"rework","anchor_b
 UNAPPROVED='{"id":"tk-a","status":"open","metadata":{"pr_posture":"review_required@abc@t"}}'
 store "[$UNAPPROVED, $RW_ROW, $GATE]"
 printf 'tk-rw|blocks|tk-a\ntk-g|blocks|tk-rw\n' > "$STUB_DEPS"
-eq "$("$GCTK_BIN" pr-status derive --anchor tk-a --json)" '{"status":"needs-attention","held":["gate"],"reasons":[{"held":"gate","id":"tk-g","title":"answer the review"}]}' "an open gate on the rework the anchor waits on holds the PR, and names the gate"
+eq "$("$GCTK_BIN" pr status tk-a --json)" '{"status":"needs-attention","held":["gate"],"reasons":[{"held":"gate","id":"tk-g","title":"answer the review"}]}' "an open gate on the rework the anchor waits on holds the PR, and names the gate"
 store "[$UNAPPROVED, $RW_ROW, {\"id\":\"tk-t\",\"status\":\"open\",\"metadata\":{}}, $GATE]"
 printf 'tk-rw|blocks|tk-a\ntk-t|blocks|tk-rw\ntk-g|blocks|tk-t\n' > "$STUB_DEPS"
-eq "$("$GCTK_BIN" pr-status derive --anchor tk-a --json)" '{"status":"needs-attention","held":["gate"],"reasons":[{"held":"gate","id":"tk-g","title":"answer the review"}]}' "…however far behind it the gate sits"
+eq "$("$GCTK_BIN" pr status tk-a --json)" '{"status":"needs-attention","held":["gate"],"reasons":[{"held":"gate","id":"tk-g","title":"answer the review"}]}' "…however far behind it the gate sits"
 store "[$UNAPPROVED, $RW_ROW, {\"id\":\"tk-g\",\"status\":\"closed\",\"issue_type\":\"gate\",\"await_type\":\"human\",\"metadata\":{}}]"
 printf 'tk-rw|blocks|tk-a\ntk-g|blocks|tk-rw\n' > "$STUB_DEPS"
-eq "$("$GCTK_BIN" pr-status derive --anchor tk-a --json)" '{"status":"working","held":[],"reasons":[]}' "resolving the gate clears the hold"
+eq "$("$GCTK_BIN" pr status tk-a --json)" '{"status":"working","held":[],"reasons":[]}' "resolving the gate clears the hold"
 store "[$UNAPPROVED, {\"id\":\"tk-rw\",\"status\":\"closed\",\"metadata\":{\"task_kind\":\"rework\",\"anchor_bead\":\"tk-a\"}}, $GATE]"
 printf 'tk-rw|blocks|tk-a\ntk-g|blocks|tk-rw\n' > "$STUB_DEPS"
-eq "$("$GCTK_BIN" pr-status derive --anchor tk-a --json)" '{"status":"needs-review","held":[],"reasons":[]}' "a gate behind a closed blocker holds nothing"
+eq "$("$GCTK_BIN" pr status tk-a --json)" '{"status":"needs-review","held":[],"reasons":[]}' "a gate behind a closed blocker holds nothing"
 store "[$UNAPPROVED, $RW_ROW, {\"id\":\"tk-c\",\"status\":\"open\",\"assignee\":\"human\",\"metadata\":{}}]"
 printf 'tk-rw|blocks|tk-a\ntk-c|tracks|tk-rw\ntk-c|tracks|tk-a\n' > "$STUB_DEPS"
-eq "$("$GCTK_BIN" pr-status derive --anchor tk-a --json)" '{"status":"working","held":[],"reasons":[]}' "a conversation tracking the rework or the anchor holds nothing"
+eq "$("$GCTK_BIN" pr status tk-a --json)" '{"status":"working","held":[],"reasons":[]}' "a conversation tracking the rework or the anchor holds nothing"
 store "[$UNAPPROVED, $RW_ROW, $GATE]"
 printf 'tk-rw|blocks|tk-a\ntk-g|blocks|tk-rw\n' > "$STUB_DEPS"
 out=$(STUB_SHOW_FAIL_ON=tk-rw "$SUT" derive --anchor tk-a 2>/dev/null); rc=$?

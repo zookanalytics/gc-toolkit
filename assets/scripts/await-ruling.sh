@@ -6,10 +6,15 @@
 #                   [--subject <bead>] [--target <pool>] [--dry-run]
 #   await-ruling.sh <work-bead> --blocked-by <bead> --formula <formula>
 #                   [--target <pool>] [--dry-run]
+#   await-ruling.sh <work-bead> --held-by <bead> --formula <formula>
+#                   [--target <pool>] [--dry-run]
 #
 # --blocked-by is the same wait with no person in it: the work bead takes a
 # `blocks` edge onto <bead>, and everything below applies, with <bead> closing in
-# place of the gate clearing.
+# place of the gate clearing. --held-by is a wait the store already keeps: a
+# wait on <bead>, the bead's own or one on a parent-child ancestor, holds the
+# work bead, as `gctk bead holds` answers. No edge is written, and everything
+# else below applies, with the re-sling firing once nothing holds the bead.
 #
 # A worker that declines work it cannot finish without a person files the
 # question with human-gate.sh, then cancels its run (run-cancel.sh). Nothing
@@ -74,8 +79,8 @@
 # the earlier run recorded.
 #
 # Callers: work-gate.sh and work-setup.sh, the decline arms of mol-polecat-work
-# that wait for a person or a sibling, and two arms of mol-refinery-patrol's
-# merge-push: the zero-diff guard, which makes
+# that wait for what already holds the work bead, a person or a sibling, and two
+# arms of mol-refinery-patrol's merge-push: the zero-diff guard, which makes
 # work whose check could not run three patrols in a row wait on a human gate,
 # and the arm that makes a convoy's rebuild child wait when no bead can carry
 # its PR. That work is assigned to the refinery, so the release is of a claim in
@@ -100,10 +105,15 @@ usage: await-ruling.sh <work-bead> --key <situation-key> --formula <formula>
                        [--subject <bead>] [--target <pool>] [--dry-run]
        await-ruling.sh <work-bead> --blocked-by <bead> --formula <formula>
                        [--target <pool>] [--dry-run]
+       await-ruling.sh <work-bead> --held-by <bead> --formula <formula>
+                       [--target <pool>] [--dry-run]
 
   <work-bead>     the bead the declined run was poured for
   --key           the situation key human-gate.sh filed the gate under
   --blocked-by    the bead the work waits on when no person is asked anything
+  --held-by       the bead a wait the store already keeps is on, the work
+                  bead's own or an ancestor's, as gctk bead holds answers; no
+                  edge is written
   --formula       the formula the re-sling pours, e.g. mol-polecat-work
                   (required)
   --subject       the bead the gate was filed on; default the work bead
@@ -127,16 +137,17 @@ require_value() {
     echo "$PROG: $1 requires a value" >&2; usage; exit 2
   fi
   case "$2" in
-    --key|--blocked-by|--formula|--subject|--target|--dry-run|-h|--help)
+    --key|--blocked-by|--held-by|--formula|--subject|--target|--dry-run|-h|--help)
       echo "$PROG: $1 requires a value, but the next argument is the option '$2'" >&2; usage; exit 2 ;;
   esac
 }
 
-WORK=""; KEY=""; BLOCKER=""; FORMULA=""; SUBJECT=""; TARGET=""; DRY_RUN=0
+WORK=""; KEY=""; BLOCKER=""; HELD_BY=""; FORMULA=""; SUBJECT=""; TARGET=""; DRY_RUN=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --key)     require_value "$@"; KEY="$2";     shift 2 ;;
     --blocked-by) require_value "$@"; BLOCKER="$2"; shift 2 ;;
+    --held-by) require_value "$@"; HELD_BY="$2"; shift 2 ;;
     --formula) require_value "$@"; FORMULA="$2"; shift 2 ;;
     --subject) require_value "$@"; SUBJECT="$2"; shift 2 ;;
     --target)  require_value "$@"; TARGET="$2";  shift 2 ;;
@@ -148,20 +159,20 @@ while [ $# -gt 0 ]; do
       WORK="$1"; shift ;;
   esac
 done
-if [ -z "$WORK" ] || [ -z "$FORMULA" ] || { [ -z "$KEY" ] && [ -z "$BLOCKER" ]; }; then
-  echo "$PROG: a work bead, --formula, and --key or --blocked-by are all required" >&2; usage; exit 2
+if [ -z "$WORK" ] || [ -z "$FORMULA" ] || { [ -z "$KEY" ] && [ -z "$BLOCKER" ] && [ -z "$HELD_BY" ]; }; then
+  echo "$PROG: a work bead, --formula, and one of --key, --blocked-by and --held-by are all required" >&2; usage; exit 2
 fi
-if [ -n "$BLOCKER" ] && { [ -n "$KEY" ] || [ -n "$SUBJECT" ]; }; then
-  echo "$PROG: --blocked-by names the wait itself, so --key and --subject do not apply" >&2; usage; exit 2
+if [ -n "$BLOCKER$HELD_BY" ] && { [ -n "$KEY" ] || [ -n "$SUBJECT" ] || { [ -n "$BLOCKER" ] && [ -n "$HELD_BY" ]; }; }; then
+  echo "$PROG: --blocked-by and --held-by each name the wait itself, so neither takes --key, --subject or the other" >&2; usage; exit 2
 fi
 [ -n "$SUBJECT" ] || SUBJECT="$WORK"
-case "$WORK$KEY$BLOCKER$FORMULA$SUBJECT" in
+case "$WORK$KEY$BLOCKER$HELD_BY$FORMULA$SUBJECT" in
   *'{{'*|*'}}'*)
-    echo "$PROG: an argument was passed unsubstituted ('$WORK' '$KEY' '$BLOCKER' '$FORMULA' '$SUBJECT'); the pour did not render it" >&2; exit 2 ;;
+    echo "$PROG: an argument was passed unsubstituted ('$WORK' '$KEY' '$BLOCKER' '$HELD_BY' '$FORMULA' '$SUBJECT'); the pour did not render it" >&2; exit 2 ;;
 esac
-case "$WORK$KEY$BLOCKER$FORMULA$SUBJECT" in
+case "$WORK$KEY$BLOCKER$HELD_BY$FORMULA$SUBJECT" in
   *[!A-Za-z0-9._-]*)
-    echo "$PROG: the work bead, --key, --blocked-by, --formula and --subject must contain only [A-Za-z0-9._-]" >&2; exit 2 ;;
+    echo "$PROG: the work bead, --key, --blocked-by, --held-by, --formula and --subject must contain only [A-Za-z0-9._-]" >&2; exit 2 ;;
 esac
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
@@ -249,7 +260,9 @@ open_gate_under_key() { # <bead> -> the id, or nothing; non-zero on a failed rea
 }
 GATE="$BLOCKER"
 WAIT_ON="$BLOCKER"
-if [ -z "$BLOCKER" ]; then
+if [ -n "$HELD_BY" ]; then
+  WAIT_ON="$HELD_BY"
+elif [ -z "$BLOCKER" ]; then
   if ! GATE=$(open_gate_under_key "$SUBJECT"); then
     echo "$PROG: could not read the human gates of $SUBJECT; no wait was recorded" >&2
     exit 1
@@ -267,8 +280,9 @@ if [ -z "$BLOCKER" ]; then
   WAIT_ON="gate $GATE"
 fi
 # An id's prefix names its store, and the wait is a blocks edge from the work
-# bead, so the gate or <bead> it waits on must be in the work bead's store.
-if ! bd_same_store "$WORK" "$GATE"; then
+# bead, so the gate or <bead> it waits on must be in the work bead's store. A
+# wait the store already keeps (--held-by) takes no edge.
+if [ -z "$HELD_BY" ] && ! bd_same_store "$WORK" "$GATE"; then
   echo "$PROG: $WAIT_ON is in another store than $WORK, so a blocks edge onto it would hold nothing; no wait was recorded" >&2
   exit 1
 fi
@@ -293,13 +307,15 @@ fi
 
 # `dep add <bead> <blocker>` reads "<bead> is blocked by <blocker>". A gate filed
 # on the work bead already blocks it, and bd takes that edge again as a no-op.
-if ! gc bd dep add "$WORK" "$GATE" --type=blocks </dev/null >/dev/null 2>&1; then
+if [ -z "$HELD_BY" ] && ! gc bd dep add "$WORK" "$GATE" --type=blocks </dev/null >/dev/null 2>&1; then
   echo "$PROG: the store refused the blocks edge from $WORK onto $WAIT_ON; no wait was recorded" >&2
   exit 1
 fi
 
-# The edge already keeps the bead out of `bd ready`, so releasing its claim
-# offers it to no pool. Each release is a compare-and-swap on the status and the
+# The edge already keeps the bead out of `bd ready`, and so does the wait
+# --held-by names, so releasing its claim offers it to no pool. A waits-for edge
+# whose gate has opened is the exception, and the route keys cleared below leave
+# no pool to offer it to. Each release is a compare-and-swap on the status and the
 # assignee read above, so a claim that changed hands since is left alone. gc bd
 # runs both in the store of the bead they name (bdAddressedSubjects,
 # cmd/gc/bd_subject_route.go in gascity), so the holder, often a session id that
@@ -337,11 +353,13 @@ if ! gc bd update "$WORK" --set-metadata gc.routed_to="" --set-metadata gc.execu
   exit 1
 fi
 if ! ARM_OUT=$("$DEFERRED" arm "$WORK" --target "$TARGET" --sling-arg --on --sling-arg "$FORMULA" \
-    --reason "${KEY:+waits on the ruling asked by $WAIT_ON ($KEY)}${BLOCKER:+waits on $BLOCKER}" 2>&1); then
+    --reason "${KEY:+waits on the ruling asked by $WAIT_ON ($KEY)}${BLOCKER:+waits on $BLOCKER}${HELD_BY:+held by a wait on $HELD_BY}" 2>&1); then
   echo "$PROG: the re-sling was not armed on $WORK: $ARM_OUT; it waits on $WAIT_ON unarmed, and a re-run arms it to $TARGET, recorded as resling_target" >&2
   exit 1
 fi
-if [ -n "$BLOCKER" ]; then
+if [ -n "$HELD_BY" ]; then
+  echo "$PROG: $WORK is held by a wait on $HELD_BY; once nothing holds it, it re-slings to $TARGET --on $FORMULA"
+elif [ -n "$BLOCKER" ]; then
   echo "$PROG: $WORK waits on $BLOCKER; its close re-slings it to $TARGET --on $FORMULA"
 else
   echo "$PROG: $WORK waits on gate $GATE ($KEY); clearing the gate re-slings it to $TARGET --on $FORMULA"

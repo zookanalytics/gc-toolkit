@@ -51,8 +51,7 @@ harness_init() {
   # on the operator's shell rather than on the code. Clear both namespaces so the
   # harness owns the environment; a suite that wants a rig exports it after
   # harness_init returns. GCTK_* is left out of that sweep, because GCTK_BUILT
-  # carries the binary harness_build_gctk left; GCTK_BIN and GCTK_FALLBACK are
-  # pinned just below.
+  # carries the binary harness_build_gctk left; GCTK_BIN is pinned just below.
   unset "${!GC_@}" "${!BEADS_@}" 2>/dev/null || true
   BIN="$TMP/bin"; GH_DIR="$TMP/gh"
   mkdir -p "$BIN" "$GH_DIR"
@@ -61,10 +60,8 @@ harness_init() {
   # suites run from a tree INSIDE a live city, so left alone a suite would test
   # whichever binary that city last built. A suite that built nothing reaches no
   # binary at all: lifecycle.sh, merge.sh and epic.sh refuse under
-  # GCTK_BIN=none, and pr-status-label.sh derives nothing. No port's shell is
-  # forced either: a suite that tests one sets GCTK_FALLBACK after harness_init.
+  # GCTK_BIN=none, and pr-status-label.sh derives nothing.
   export GCTK_BIN="${GCTK_BUILT:-none}"
-  unset GCTK_FALLBACK
   [ -z "${GCTK_BUILD_ERR:-}" ] || bad "$GCTK_BUILD_ERR"
   # Pin the gctk read seam to the stubbed `gc` for the same reason: `gctk`'s
   # bead reads prefer the running supervisor's API, and these suites run inside
@@ -184,26 +181,28 @@ mk_sut_dir() { # <dir> <file>...
   # the same way. pr-post.sh is the single writer of the city's PR posts and the
   # owner of the provenance definition every feedback reader asks, so a SUT that
   # posts or reads feedback runs it by sibling path. work-outcome.sh is the
-  # gc.work_outcome stamp a conversation's closers source by sibling path. Copy
+  # gc.work_outcome stamp a conversation's closers source by sibling path, and
+  # conversation.sh the one shell definition of a conversation, which
+  # blocker-holder.sh sources the same way. Copy
   # each of them beside the SUT so those calls resolve in the private dir; cp
   # keeps pr-post.sh's executable bit. They sit beside this harness, so they are found whatever the
   # SUT's own directory is.
   local here lib; here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-  for lib in "$here/bd-lib.sh" "$here/pace-lib.sh" "$here/gctk-resolve.sh" "$here/pr-post.sh" "$here/work-outcome.sh"; do
+  for lib in "$here/bd-lib.sh" "$here/pace-lib.sh" "$here/gctk-resolve.sh" "$here/pr-post.sh" "$here/work-outcome.sh" "$here/conversation.sh"; do
     [ -f "$lib" ] && cp "$lib" "$d/"
   done
   # review-verdict.sh, the approval rule, review-dismissal.sh, what a dismissal
   # retires, review-answer.sh, what the living answer to a review shows,
-  # hold-lib.sh, the one definition of a hold, which deferred-dispatch.sh
-  # sources, priority-lib.sh, the priority function, whose reading of a PR's
-  # approval pr-facts.sh sources, git-lib.sh, the one read of a branch's head on
-  # origin, which gate-ensure.sh and signoff.sh source, and run-lib.sh, the one
-  # reader of a run's link to its bead, are sourced by sibling path the same
-  # way.
+  # dispatch-path.sh, the one definition of a dispatch path and a label hold,
+  # which deferred-dispatch.sh sources, priority-lib.sh, the priority function,
+  # whose reading of a PR's approval pr-facts.sh sources, git-lib.sh, the one
+  # read of a branch's head on origin, which gate-ensure.sh and signoff.sh
+  # source, and run-lib.sh, the one reader of a run's link to its bead, are
+  # sourced by sibling path the same way.
   [ -f "$here/review-verdict.sh" ] && cp "$here/review-verdict.sh" "$d/"
   [ -f "$here/review-dismissal.sh" ] && cp "$here/review-dismissal.sh" "$d/"
   [ -f "$here/review-answer.sh" ] && cp "$here/review-answer.sh" "$d/"
-  [ -f "$here/hold-lib.sh" ] && cp "$here/hold-lib.sh" "$d/"
+  [ -f "$here/dispatch-path.sh" ] && cp "$here/dispatch-path.sh" "$d/"
   [ -f "$here/priority-lib.sh" ] && cp "$here/priority-lib.sh" "$d/"
   [ -f "$here/git-lib.sh" ] && cp "$here/git-lib.sh" "$d/"
   [ -f "$here/run-lib.sh" ] && cp "$here/run-lib.sh" "$d/"

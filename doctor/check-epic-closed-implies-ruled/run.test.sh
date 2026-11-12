@@ -46,14 +46,17 @@ epic() { printf '{"id":"%s","issue_type":"epic","status":"%s","metadata":%s}' "$
 store() { local IFS=,; printf '[%s]' "$*" > "$TMP/stores/alpha.json"; }
 
 # --- 1. a closed epic ruled close passes, and the query is scoped to epics ----
+# The close ruling with its outcome is read before the hypothesis, so an Epic
+# ruled closed with no hypothesis (E2) passes too.
 store "$(epic E1 closed '{"epic_hypothesis":"for X","epic_ruling":"close","epic_ruling_reason":"held"}')" \
-      "$(epic E2 closed '{"epic_ruling":"close"}')"
+      "$(epic E2 closed '{"epic_ruling":"close","epic_ruling_reason":"its work is ordinary flow"}')"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "closed epics ruled close pass"
 has "$OUT" "OK:" "the pass message is the OK line"
 ARGS=$(cat "$BD_ARGS")
 has "$ARGS" "--type=epic" "the scan asks only for epics"
-has "$ARGS" "--status closed" "the scan asks only for closed epics"
+has "$ARGS" "--all" "the scan reads open epics too, since a closed Delivery's parent may be open"
+hasnt "$ARGS" "--status" "…with no status filter that would hide that parent"
 has "$ARGS" "--limit 0" "the scan is not truncated by a default limit"
 
 # --- 2. a STEWARDED (has a hypothesis) closed epic with no ruling is an ERROR -
@@ -112,28 +115,72 @@ OUT=$(run_check); RC=$?
 eq "$RC" "2" "an epic carrying only the retired gc.superseded_by key is judged"
 has "$OUT" "E5k" "…and named"
 
-# --- 5. a closed epic with no hypothesis, a Delivery or an incomplete Epic, is
-# exempt: it has nothing to rule on --------------------------------------------
+# --- 5. a closed top-level epic with no hypothesis is an incomplete Epic: an
+# ERROR whose remedy records the hypothesis and the close ruling ---------------
 store "$(epic E5b closed '{}')"
 OUT=$(run_check); RC=$?
-eq "$RC" "0" "a closed epic with no hypothesis is exempt, not an error"
-hasnt "$OUT" "E5b" "the epic with no hypothesis is not named"
-has "$OUT" "Deliveries, or incomplete Epics that owed one" "the exemption is counted"
+eq "$RC" "2" "a closed top-level epic with no hypothesis is an ERROR"
+has "$OUT" "epic E5b" "the incomplete Epic is named"
+has "$OUT" "incomplete Epic" "…as an incomplete Epic"
+has "$OUT" "update E5b --set-metadata epic_hypothesis=\"<hypothesis>\" --set-metadata epic_ruling=close --set-metadata epic_ruling_reason=" "the remedy records its hypothesis and the close ruling with its outcome"
+has "$OUT" "reopen E5b" "the remedy offers reopening it"
+# A close ruling with no outcome, or a ruling that keeps an epic open, does not
+# stand in for the hypothesis either.
+for m in '{"epic_ruling":"close"}' '{"epic_ruling":"continue"}'; do
+  store "$(epic E5n closed "$m")"
+  OUT=$(run_check); RC=$?
+  eq "$RC" "2" "a closed epic carrying $m and no hypothesis is an ERROR"
+  has "$OUT" "incomplete Epic" "…as an incomplete Epic"
+done
+
+# --- 5a. a closed Delivery, an epic with no hypothesis whose parent-child edge
+# reaches an epic of the store, open or closed, passes and is counted ----------
+delivery() { printf '{"id":"%s","issue_type":"epic","status":"closed","metadata":{},"dependencies":[{"issue_id":"%s","depends_on_id":"%s","type":"parent-child"}]}' "$1" "$1" "$2"; }
+for ps in open closed; do
+  store "$(epic P5 "$ps" '{"epic_hypothesis":"for X","epic_ruling":"close","epic_ruling_reason":"held"}')" "$(delivery D5 P5)"
+  OUT=$(run_check); RC=$?
+  eq "$RC" "0" "a closed Delivery whose epic is $ps passes"
+  hasnt "$OUT" "epic D5" "…and is not named"
+  has "$OUT" "1 closed Delivery epic(s)" "…and is counted"
+done
+
+# --- 5b. under a parent that is not an epic of the store, an epic with no
+# hypothesis is no Delivery: an ERROR ------------------------------------------
+store "$(delivery D5t T5)"
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a closed epic with no hypothesis under a parent that is not an epic is an ERROR"
+has "$OUT" "epic D5t" "…naming it"
+has "$OUT" "incomplete Epic" "…as an incomplete Epic"
+
+# --- 5c. a disposed epic with no hypothesis passes ------------------------------
+store '{"id":"E5d","issue_type":"epic","status":"closed","metadata":{},"dependencies":[{"issue_id":"E5d","depends_on_id":"s-9","type":"supersedes"}]}'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a disposed top-level epic with no hypothesis passes"
+hasnt "$OUT" "epic E5d" "…and is not named"
+has "$OUT" "retired into it" "…and is counted as disposed"
+
+# --- 5d. a closed child epic with a hypothesis of its own is an epic, not a
+# Delivery, so it is judged as one ---------------------------------------------
+store "$(epic P5h open '{"epic_hypothesis":"for X"}')" \
+      '{"id":"C5h","issue_type":"epic","status":"closed","metadata":{"epic_hypothesis":"its own"},"dependencies":[{"issue_id":"C5h","depends_on_id":"P5h","type":"parent-child"}]}'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a closed child epic with its own hypothesis and no ruling is an ERROR"
+has "$OUT" "epic C5h" "…naming it"
 
 # --- 6. an open epic is out of scope (only closed epics are judged) -----------
 store "$(epic E6 open '{"epic_hypothesis":"for X"}')"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "an open, unruled epic is not a finding — the ruling is owed only at close"
 
-# --- 7. mixed: only the stewarded unruled one is reported --------------------
+# --- 7. mixed: only the unruled one is reported -------------------------------
 store "$(epic E7 closed '{"epic_hypothesis":"for X","epic_ruling":"close","epic_ruling_reason":"disproven"}')" \
       "$(epic E8 closed '{"epic_hypothesis":"for X"}')" \
-      "$(epic E9 closed '{}')"
+      "$(delivery E9 E7)"
 OUT=$(run_check); RC=$?
-eq "$RC" "2" "a mix flags the stewarded unruled epic"
+eq "$RC" "2" "a mix flags the unruled epic"
 has "$OUT" "E8" "the unruled epic is named"
 hasnt "$OUT" "epic E7" "the ruled epic is not named"
-hasnt "$OUT" "epic E9" "the epic with no hypothesis is not flagged as an error"
+hasnt "$OUT" "epic E9" "the Delivery is not flagged as an error"
 
 # --- 7. fail-CLOSED ----------------------------------------------------------
 OUT=$(RIGS_RC=1 run_check); RC=$?

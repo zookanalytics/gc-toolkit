@@ -72,19 +72,27 @@ An earlier sitting on this conversation may have held and been cut short,
 leaving its hold's headline on the subject, waiting on the gates this close
 has resolved. So the close first reads the subject and what still blocks it.
 A headline that still waits, one with no `gc.takeaway_settled`, on a subject
-that no open blocker holds is replaced with the reading, settled, because it
-names a question that no longer stands. A subject that another open blocker
-still holds keeps its headline, since that wait is still owed. A read counts
-only when `gc` exits 0 and answers in its shape: the subject's own row, alone,
-and a list of its blockers. Each write takes its exit, and the conversation
-closes only after them:
+none of whose own waits is pending is replaced with the reading, settled,
+because it names a question that no longer stands. A subject a wait of its own
+still holds keeps its headline, since that wait is still owed. What holds it is
+the answer of `gctk bead holds`, the one rule for it. A read counts only when it
+exits 0 and answers in its shape: the subject's own row, alone, and its own
+answer. A conversation on an open PR holds the PR's merge until it closes, and
+otherwise blocks nothing: the PR's anchor depends on the conversation, so on an
+anchor the conversation itself is among the subject's pending waits. The close
+below ends that wait, and frees the merge with it, so the block leaves the
+conversation out of what still holds the subject. Each write takes its exit,
+and the conversation closes only after them:
 ```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 KIND="<moot|benign>"; WHY="<the premise, and what is true instead>"
 ACTION="<what ended the visit, in one plain sentence>"
 ROW=$(gc bd show "$SUBJECT" --json) \
   && WAITS=$(printf '%s\n' "$ROW" | jq -er --arg s "$SUBJECT" 'if type == "array" and length == 1 and .[0].id == $s then (.[0].metadata // {}) | if ((.["gc.takeaway"] // "") | tostring) != "" and ((.["gc.takeaway_settled"] // "") | tostring) == "" then "waits" else "settled" end else error("unread") end') \
-  && DEPS=$(gc bd dep list "$SUBJECT" --type blocks --json) \
-  && OPEN=$(printf '%s\n' "$DEPS" | jq -er 'if type == "array" then [ .[] | select(((.status // "open") | ascii_downcase) != "closed") | .id ] | join(" ") else error("unread") end') \
+  && HOLDS=$("$GCTK" bead holds "$SUBJECT") \
+  && OPEN=$(printf '%s\n' "$HOLDS" | jq -er --arg c "$CONVERSATION" 'if .error == null and (.pending | type) == "array" then [ .pending[].id | select(. != $c) ] | join(" ") else error("unread") end') \
   && if [ "$WAITS" != waits ] || [ -n "$OPEN" ]; then echo "$SUBJECT keeps its headline${OPEN:+: $OPEN still holds it}"; else
        "$CONV/gc-helm.sh" takeaway "$SUBJECT" "${KIND}: ${WHY}" --by converse --no-wait \
          && echo "replaced the headline of $SUBJECT, which waited on nothing"
@@ -104,10 +112,11 @@ to be fine".
 
 No `closed` line means the close stopped short: the subject or its blockers
 did not read, or the store refused a write. The conversation stays open under
-this sitting, and a subject whose questions are answered would otherwise keep
-a headline that waits on nothing. So say in the thread what the block printed,
-fix what it names, and re-run the block. The gates cleared
-above stay cleared, and each write in the block is safe to repeat.
+this sitting, still holding an open PR's merge, and a subject whose questions
+are answered would otherwise keep a headline that waits on nothing. So say in
+the thread what the block printed, fix what it names, and re-run the block.
+The gates cleared above stay cleared, and each write in the block is safe to
+repeat.
 
 The exit is gated on being *named*: if you cannot point at the stamp
 or state that makes this benign, you hold the sitting.

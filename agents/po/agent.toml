@@ -1,0 +1,35 @@
+# po — the operator's prioritization partner for one rig: a named on-demand
+# session of each rig (stanza in pack.toml) the operator opens for a sitting,
+# backlog refinement over the rig's hold:mayor queue or a portfolio sync over
+# the rig's epics. Its shape is Gas Town's mayor's, and
+# docs/built-once-target.md names each difference.
+scope = "rig"
+# Each sitting starts in a new conversation, so no sitting inherits another's
+# context.
+wake_mode = "fresh"
+# A rig worktree, as the witness's is, so the po's bare gh and git, such as its
+# read of the rig's open PRs, resolve to the rig it serves and not to the city
+# repo the .gc tree sits in. The po changes no repo. One tree per rig (no
+# {{.AgentBase}}): each rig has one po.
+work_dir = ".gc/worktrees/{{.Rig}}/po"
+pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync"]
+# One sitting at a time for each rig.
+max_active_sessions = 1
+# Gas Town's mayor takes idle_timeout, and the po takes the sleep instead. A
+# sitting no client is attached to sleeps once an hour has passed, and one ends
+# at gc runtime drain-ack. Either way the next sitting, which `gc-helm po
+# --rig <rig>` asks the controller to start, starts a new conversation, because
+# the start is fresh.
+sleep_after_idle = "1h"
+# The po takes no slung work. The city's [agent_defaults] gives every agent a
+# default formula, so this explicit empty one sends a plain gc sling to
+# sling_query, which refuses it at the caller. A graph.v2 pour, by --on or a
+# default formula, never runs sling_query.
+default_sling_formula = ""
+sling_query = 'echo "the po takes no slung work: send {} to a work pool with gc sling, or hold it for the po with gc bd set-state {} hold=mayor --reason <why>" >&2; exit 1'
+
+[env]
+# A memory file would carry one sitting's context into the next by another
+# route. What a later sitting needs is in the rig's AGENTS.md, which changes
+# through reviewed PRs, and in bead notes.
+CLAUDE_CODE_DISABLE_AUTO_MEMORY = "1"

@@ -5,12 +5,12 @@ description: Use when you rule on or close an epic, close a Delivery, or extend 
 
 # Epic Stewardship
 
-Epic stewardship holds an epic to its contract. An epic that carries a
-hypothesis stays open until the operator rules it closed and records the
-outcome, or until a disposition closes it ([epics.md](epics.md)). The pack
-enforces that with a finalize-gate clause and a doctor invariant. Neither holds a
-Delivery, the level under an epic that SAFe calls a Feature, and the Epic
-Checkpoint closes it ([Closing a Delivery](#closing-a-delivery)). The pack does
+Epic stewardship holds an epic to its contract. An epic stays open until the
+operator rules it closed and records the outcome, or until a disposition closes
+it ([epics.md](epics.md)). The pack enforces that with a finalize-gate clause and
+a doctor invariant. Neither holds a Delivery, the level under an epic that SAFe
+calls a Feature, and the Epic Checkpoint closes it
+([Closing a Delivery](#closing-a-delivery)). The pack does
 not yet prompt the rulings themselves: the machinery that will is direction,
 described at the end of this doc.
 
@@ -28,7 +28,8 @@ catalog ([component-model.md](component-model.md)).
 
 ## Recording a ruling
 
-The operator rules at a sitting on the epic, and the ruling is recorded on the
+The operator rules at a review of the epic
+([epics.md](epics.md#reviewing-an-epic)), and the ruling is recorded on the
 epic bead as metadata: `epic_ruling` is `continue`, `shift`, or `close`, and
 `epic_ruling_reason` says why. On a close ruling the reason is the outcome (the
 hypothesis held, was disproven, cannot be met as stated, stalled, or ran past
@@ -48,24 +49,24 @@ The fields are registered in
 epic, which
 [`gctk epic create`](../services/gctk/internal/cli/epic.go) makes. It refuses an
 epic with no hypothesis unless the epic's parent is an epic, which makes it a
-Delivery. The hypothesis can be the filer's first draft until the
-operator's first ruling on the epic
-([epics.md](epics.md#the-contract-an-epic-carries)). The other contract fields
-and the ruling's fields are the operator's: stamped when the operator states or
-confirms a contract field or rules, the dated decision [epics.md](epics.md)
-calls for. No pack script writes the ruling's fields. The finalize gate and the
-doctor check read the hypothesis, the ruling, and its reason.
+Delivery. A field the filer writes is its proposal, and the epic's notes say
+whose words each field is ([epics.md](epics.md#the-contract-an-epic-carries)).
+After the filing, a contract field takes only words the operator stated or
+approved, and the ruling's fields are stamped at a review when the operator
+rules, with the review's block in the epic's notes as the dated record. No pack
+script writes the ruling's fields. The finalize gate and the doctor check read
+the hypothesis, the ruling, and its reason.
 
 | Field | Meaning |
 |---|---|
 | `epic_handle` | the 3–5 word handle |
-| `epic_hypothesis` | the one-sentence hypothesis — a floor field, a first draft until the epic's first ruling, and what brings an epic under the close requirement |
+| `epic_hypothesis` | the one-sentence hypothesis — a floor field. An epic whose parent is an epic and that carries none is a Delivery, which the close requirement does not hold |
 | `epic_boundaries` | the epic's boundaries |
 | `epic_closure_condition` | the 3–6 operator-runnable closure checks |
 | `epic_indicators` | the 1–3 leading indicators |
 | `epic_ruling` | the latest ruling: `continue`, `shift`, or `close` |
 | `epic_ruling_reason` | why the latest ruling was made; on `close`, the outcome |
-| `epic_ruling_at` / `epic_ruling_by` / `epic_ruling_evidence` | when, who, and the human gate whose resolve carried the ruling |
+| `epic_ruling_at` / `epic_ruling_by` / `epic_ruling_evidence` | when the operator ruled, who recorded it, and the human gate whose resolve carried the ruling |
 
 ## Closing an epic: the before-close enforcement
 
@@ -76,33 +77,32 @@ auto-close" discipline ([epics.md](epics.md)) is a guardrail against building
 such a cascade, and an epic reaches closed only through an explicit act, such
 as a bare `gc bd close` or `bead-rehome.sh`'s close-with-successor.
 
-Two layers enforce the ruling, and they apply one predicate. An epic that
-carries a hypothesis may close only once it is ruled close with its outcome
-recorded. A continue or shift ruling holds it as an absent ruling does. An epic
-with no hypothesis has nothing to rule on, so it passes. It is a Delivery
-([Closing a Delivery](#closing-a-delivery)), or an incomplete Epic, which is
-fixed by recording its hypothesis
-([epics.md](epics.md#the-contract-an-epic-carries)). The pass for an incomplete
-Epic is compatibility debt
-([built-once-target.md](built-once-target.md#compatibility-debt)). A disposed
-epic (its duplicates or supersedes edge, written by `bead-rehome.sh`) carries a
-recorded terminal reason and passes.
+Two layers enforce the ruling, and they apply one predicate. An epic may close
+only once it is ruled close with its outcome recorded. A continue or shift
+ruling holds it as an absent ruling does. A disposed epic (its duplicates or
+supersedes edge, written by `bead-rehome.sh`) carries a recorded terminal reason
+and passes. A Delivery passes too ([Closing a Delivery](#closing-a-delivery)).
+Any other epic with no hypothesis is an incomplete Epic, which is fixed by
+recording its hypothesis ([epics.md](epics.md#the-contract-an-epic-carries)),
+and both layers hold it until it is ruled close.
 
 1. **The finalize-gate clause** (`finalize-gate.sh` `clause_epic_ruling_recorded`)
    refuses to finalize an epic the predicate holds, on every close path that
-   runs the gate. Neither path wired today reaches an undisposed epic:
-   `merge.sh` finalizes merge anchors, and `bead-rehome.sh` asks the gate about
-   the epic as its disposition will leave it (`--as-disposed`), before it writes
-   anything and in its read-only `--check`, so `stand-down.sh` carries out a
-   person's ruling that an epic will not go on. The clause is the
-   precondition any gate-running close of an epic inherits, not a choke point on
-   today's closes.
+   runs the gate. A review of an epic runs it on each Delivery it closes and,
+   once it has recorded the close ruling, on the epic. `merge.sh` finalizes
+   merge anchors, and `bead-rehome.sh` asks the gate about the epic as its
+   disposition will leave it (`--as-disposed`), before it writes anything and
+   in its read-only `--check`, so `stand-down.sh` carries out a person's ruling
+   that an epic will not go on. The clause is the precondition any
+   gate-running close of an epic inherits, not a choke point on today's
+   closes.
 2. **The doctor invariant** (I15, `doctor/check-epic-closed-implies-ruled`) sees
    every close after the fact. A closed epic the predicate would have held is an
    error, whatever path closed it. A bare `gc bd close` is the ordinary way an
    epic closes, and I15 is what reports one closed without its ruling. Its
-   remedy is to record the ruling on the closed epic, or to reopen the epic
-   (`gc bd reopen`) when it should go on.
+   remedy is to record the ruling on the closed epic, and an incomplete Epic's
+   hypothesis with it, or to reopen the epic (`gc bd reopen`) when it should go
+   on.
 
 ## Closing a Delivery
 
@@ -123,11 +123,11 @@ Delivery, and both layers hold it as one.
 
 ## Direction: the checkpoint's machinery
 
-An Epic Checkpoint runs by hand: the operator calls the sitting, and the sitting
-gathers the evidence and makes the ruling's writes from the
-[`converse-epic-checkpoint`](../skills/converse-epic-checkpoint/SKILL.md) skill
-([epics.md](epics.md#deliveries-and-epic-checkpoints)). Machinery that does any of
-that for them is not built. It is designed from what those hand runs record.
+A review of an epic, the Epic Checkpoint among them, runs by hand, as a sitting
+that follows the
+[`converse-epic-review`](../skills/converse-epic-review/SKILL.md) skill
+([epics.md](epics.md#reviewing-an-epic)). Machinery that does any of its work
+is not built. It is designed from what those hand runs record.
 Plausibly that is a formula that files the checkpoint sitting and gathers its
 evidence when a Delivery lands, and one verb that makes the ruling's writes. It
 is not a doctor check: doctor is already over-leveraged, and its role here stays
@@ -137,8 +137,9 @@ gate and I15 read.
 Until it lands, nothing files the checkpoint sitting. A landed Delivery's row on
 the helm board asks for the checkpoint, among the rows the operator owes, and the
 operator calls the sitting from there. An epic with no Deliveries whose work has
-landed waits for the operator to call a sitting on it, so an answered or stalled
-epic stays open until someone looks. A Delivery that stalls before it lands is
+landed is reviewed only when a review is called
+([epics.md](epics.md#reviewing-an-epic)), so an answered or stalled epic stays
+open until someone looks. A Delivery that stalls before it lands is
 inspected only by such a sitting, and the machinery may add a nudge on a
 Delivery's age.
 

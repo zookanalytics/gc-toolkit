@@ -26,19 +26,21 @@
 #     is RE-SLUNG, so a crash mid-dispatch never silently loses the work; recovery
 #     reads this one owned marker, not any lane-specific stamp, and the pre-sling
 #     stamp is the unproven state so a crash there recovers as a re-sling;
-#   * every OTHER arm that must NOT sling: held by a blocker on it or on an
-#     ancestor (hold-lib.sh), assigned, sling failed, an arm disarmed after the
-#     pass listed it, and one whose re-read does not answer;
-#   * the hold: an armed child of a parked epic, one two levels down, one whose
-#     epic waits on a task and one whose epic waits on a human gate are held and
-#     named with the blocker's title in list, and the pass log names each such
-#     hold once with the arms it keeps; an arm its own blocker holds is counted
-#     there, not named. One in flight under a parked epic is slung, since only
-#     an open blocker of its own holds it. A held arm stays intact and fires
-#     once its hold releases. A blocker of its own the store
-#     does not return holds it, while an ancestor, or a blocker on an ancestor,
-#     the store does not return holds nothing. A backslash in a title prints
-#     as stored;
+#   * every OTHER arm that must NOT sling: held by a wait on it or on an
+#     ancestor (gctk bead holds), assigned, sling failed, an arm disarmed after
+#     the pass listed it, and one whose re-read does not answer;
+#   * the hold, read through the gctk this checkout builds: an armed child of a
+#     parked epic, one two levels down, one whose epic waits on a task and one
+#     whose epic waits on a human gate are held and named with the wait's title
+#     in list, and the pass log names each such hold once with the arms it
+#     keeps; an arm its own wait holds is counted there, not named. One with a
+#     waits-for edge of its own is held as unjudged. One in flight under a
+#     parked epic is slung, since only its own waits hold it. A held arm stays
+#     intact and fires once its hold releases. A pinned blocker, a human gate
+#     included, holds nothing, and neither does an edge onto a bead the store
+#     does not hold, an ancestor it does not return, or a blocker on such an
+#     ancestor. A read that fails leaves the arm armed and fails the pass. A
+#     backslash in a title prints as stored;
 #   * list --json prints the listing alone, with no hold walk;
 #   * notify, the dispatch a named agent's work owes: a mail at once when bd
 #     reports the bead ready, otherwise a notice recorded for the pass; it
@@ -92,7 +94,8 @@
 #     its timeout is bounded by the budget below it and the stall bound above;
 #   * SCRATCH CLEANUP — every verb that stages a temp file leaves none behind.
 #
-# No live city, Dolt, network, gc or bd — only jq, stubs, and a tmpdir.
+# No live city, Dolt, network, gc or bd — only jq, stubs, a tmpdir, and the
+# gctk this checkout builds, which reads the stub store.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -109,6 +112,13 @@ has() { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3 (missing '$2' in: $1)" ;; esa
 hasnt() { case "$1" in *"$2"*) bad "$3 (found '$2' in: $1)" ;; *) ok "$3" ;; esac; }
 
 [ -x "$SUT" ] || chmod +x "$SUT" 2>/dev/null
+
+# What holds an arm is the answer of gctk bead holds, so the suite builds gctk
+# from this checkout and the script runs it over the fixture store below.
+HOLDS_STUB="$HERE/holds-store.stub.sh"
+GCTK_BIN="$("$HOLDS_STUB" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so no hold can be read"; exit 1; }
+export GCTK_BIN HOLDS_STUB GC_NO_API=1
+export STUB_GCTK_LOG="$TMP/gctk-reads.log"
 
 # --- stubs -------------------------------------------------------------------
 # $TMP/beads.json is the store: an array of beads, each carrying an extra
@@ -331,6 +341,23 @@ if [ -n "${STUB_GC_DAEMON:-}" ] && [ ! -e "$STUB_GC_DAEMON" ]; then
 fi
 if [ "${1:-}" = "bd" ]; then
     shift
+    # A read the gctk under test makes answers from the same fixture, through
+    # the seam holds-store.stub.sh keeps, so the real binary reads this store. A
+    # by-id listing set to fail fails each of its reads.
+    if [ -n "${HOLDS_STUB_READ:-}" ]; then
+        printf '%s\n' "$*" >> "${STUB_GCTK_LOG:-/dev/null}"
+        # STUB_RACE_AT lands its write before a read of gctk's as before any.
+        if [ -n "${STUB_RACE_AT:-}" ] && [ ! -e "${STUB_RACE_FIRED:?}" ]; then
+            case " $* " in
+                *"$STUB_RACE_AT"*)
+                    : > "$STUB_RACE_FIRED"
+                    jq -c "${STUB_RACE_JQ:?}" "$STUB_STORE" > "$STUB_STORE.race" && mv "$STUB_STORE.race" "$STUB_STORE" ;;
+            esac
+        fi
+        [ -z "${STUB_BD_LIST_ID_FAIL:-}" ] || export HOLDS_FAIL=all
+        [ -z "${STUB_BD_LIST_FAIL:-}" ] || export HOLDS_FAIL=list
+        HOLDS_STORE="$STUB_STORE" exec "${HOLDS_STUB:?}" answer "$@"
+    fi
     printf '%s\n' "$*" >> "${STUB_BD_LOG:-/dev/null}"
     # The bd stub runs in this process rather than a second bash's.
     export VIA_GC_BD=1
@@ -503,6 +530,9 @@ nudges() { wc -l < "$STUB_NUDGE_LOG" | tr -d ' '; }
 # listing, plus bd's readiness when a notice is owed; a bound on the other
 # half's reads leaves those out.
 arm_list_reads() { grep '^list' "$STUB_BD_LOG" | grep -c -v -F -e 'gc.notify_when_ready'; }
+# How many times the pass ran gctk bead holds: each run asks gc which store it
+# resolves once, ahead of its reads.
+gctk_runs() { grep -c '^where --json' "$STUB_GCTK_LOG"; }
 notice_list_reads() { grep '^list' "$STUB_BD_LOG" | grep -c -F -e 'gc.notify_when_ready'; }
 escalations() { wc -l < "$ESC_CALLS" | tr -d ' '; }
 conversations() { wc -l < "$HELM_CALLS" | tr -d ' '; }
@@ -551,27 +581,33 @@ has "$out" 'b-1 is HELD by park "Parked until the operator unparks it" on ancest
 
 echo "# arm warns on a cross-store blocker it cannot resolve"
 # bd resolves dependencies within one store, so a `blocks` edge to a bead in
-# another rig (here ra-x, which has no row in this store) holds nothing: bd
-# reports the bead ready (_ready) and `bd list --ready` sees no blocker. arm's
-# hint would then say nothing holds the bead while the blocker is open, so arm
-# must name the unresolvable blocker instead, the one
-# place a human can redirect the sequencing. Another store holds ra-x, and this
-# run is unpinned, so `gc bd` would answer a read naming ra-x from that store
-# and find its row: the check must ask only about b-1's own edges.
+# another rig (here ra-x, which has no row in this store) holds nothing, and the
+# bead read lists it as an edge into another store. arm's hint would then say
+# nothing holds the bead while the blocker is open, so arm must name the
+# unresolvable blocker instead, the one place a human can redirect the
+# sequencing. Another store holds ra-x, and this run is unpinned, so `gc bd`
+# would answer a read naming ra-x from that store and find its row: every read
+# gctk makes after asking where the store is names that store.
 store '[{"id":"b-1","status":"open","assignee":"","metadata":{},"notes":"","_ready":true,"_deps":[{"id":"ra-x","dependency_type":"blocks","status":"open"}]}]'
 printf '%s' '[{"id":"ra-x","status":"open","assignee":"","metadata":{},"notes":""}]' > "$TMP/foreign.json"
+: > "$STUB_GCTK_LOG"
 out="$(STUB_FOREIGN_STORE="$TMP/foreign.json" "$SUT" arm b-1 --target rig/pool 2>&1)"; rc=$?
 eq "$rc" 0 "arm still records the dispatch on a cross-store-blocked bead"
 eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "the dispatch record is written"
 has "$out" "ra-x" "arm names the unresolvable cross-store blocker"
 has "$out" "no row in this store" "arm says why that blocker holds nothing here"
 hasnt "$out" "nothing holds b-1" "arm does NOT claim the cross-store-blocked bead is unblocked"
+eq "$(sed -n '1p' "$STUB_GCTK_LOG")" "where --json" "the unpinned read first asks gc which store it resolves"
+eq "$(sed '1d' "$STUB_GCTK_LOG" | grep -c -v '^--db /stub/.beads ')" "0" "and every read after it names that store"
+: > "$STUB_GCTK_LOG"
 
 # The same arm pinned with --db: no routing, and the same answer.
 store '[{"id":"b-1","status":"open","assignee":"","metadata":{},"notes":"","_ready":true,"_deps":[{"id":"ra-x","dependency_type":"blocks","status":"open"}]}]'
 out="$(STUB_FOREIGN_STORE="$TMP/foreign.json" "$SUT" arm b-1 --target rig/pool --db "$TMP/rig/.beads" 2>&1)"
-has "$out" "has a 'blocks' edge to ra-x" "a pinned arm names the cross-store blocker too"
+has "$out" "has a wait edge to ra-x" "a pinned arm names the cross-store blocker too"
 hasnt "$out" "nothing holds b-1" "and does not claim the bead is unblocked"
+eq "$(grep -c -v "^--db $TMP/rig/.beads " "$STUB_GCTK_LOG")" "0" "every read of a pinned arm names the store --db names"
+: > "$STUB_GCTK_LOG"
 
 echo "# arm does not mistake an in-store gate blocker for a cross-store one"
 # A gate is hidden from a listing that does not ask for gates, but it has a row
@@ -593,30 +629,27 @@ eq "$rc" 0 "arm exits 0 with an in-store blocker"
 hasnt "$out" "no row in this store" "an in-store blocker triggers no cross-store warning"
 hasnt "$out" "nothing holds b-1" "and the in-store-blocked bead is not announced ready"
 
-echo "# arm does not announce 'no blocker' when the cross-store enumeration itself fails"
-# own_blocks_unresolved_ids fails closed (non-zero) when its own `bd list --id`
-# read fails, while dep list still reads the bead cleared (no in-store blocker,
-# _ready true). cmd_arm must not collapse that enumeration failure into "no
-# cross-store blocker": the check is unproven, so the immediate-dispatch hint
-# must not stand on it. A read that folded the failure into "none found" would
-# print the all-clear here, which the two trailing assertions catch.
+echo "# arm does not announce 'no blocker' when the bead read itself fails"
+# The bead read fails closed when its listing fails, while show still reads the
+# bead. cmd_arm must not collapse that failure into "nothing holds it": the
+# answer is unproven, so the immediate-dispatch hint must not stand on it. A
+# read that folded the failure into "none found" would print the all-clear
+# here, which the two trailing assertions catch.
 store '[{"id":"b-1","status":"open","assignee":"","metadata":{},"notes":"","_ready":true}]'
 out="$(STUB_BD_LIST_FAIL=1 "$SUT" arm b-1 --target rig/pool 2>&1)"; rc=$?
-eq "$rc" 0 "arm still records the dispatch when the cross-store probe read fails"
+eq "$rc" 0 "arm still records the dispatch when the bead read fails"
 eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "the dispatch record is written"
-hasnt "$out" "nothing holds b-1" "arm does NOT announce an unblocked bead when the cross-store check could not be proven"
-has "$out" "could not enumerate" "arm warns the cross-store check could not be proven"
+hasnt "$out" "nothing holds b-1" "arm does NOT announce an unblocked bead when the bead read could not answer"
+has "$out" "could not read what holds it" "arm warns that what holds it is unproven"
 
-echo "# arm does not announce 'no blocker' when its listing carries no row for the bead"
-# The listing read succeeds but answers no row for g-1: bd hides a gate bead
-# from a listing that does not ask for gates. An empty answer proves nothing
-# about g-1's edges, so it must read as unproven, not as "no cross-store
-# blocker", even though dep list reads the bead cleared.
+echo "# arm reads a gate bead's own edges"
+# bd hides a gate bead from a listing that does not ask for gates. The bead read
+# asks for every hidden type, so a gate armed for dispatch is answered as any
+# bead is: nothing holds this one.
 store '[{"id":"g-1","status":"open","issue_type":"gate","assignee":"","metadata":{},"notes":"","_ready":true}]'
 out="$("$SUT" arm g-1 --target rig/pool 2>&1)"; rc=$?
-eq "$rc" 0 "arm still records the dispatch when its listing has no row for the bead"
-hasnt "$out" "nothing holds g-1" "arm does NOT announce an unblocked bead whose edges it never read"
-has "$out" "could not enumerate" "arm warns the cross-store check could not be proven"
+eq "$rc" 0 "arm records the dispatch on a gate bead"
+has "$out" "nothing holds g-1 right now" "arm answers a gate bead from its own edges"
 
 echo "# arm accepts the doctor-flagged shape"
 # gc.execution_routed_to is provenance, not a live queue, so a blocked bead
@@ -649,16 +682,15 @@ store '[{"id":"b-3","status":"closed","assignee":"","metadata":{},"notes":"","_r
 out="$("$SUT" arm b-3 --target rig/pool 2>&1)"; rc=$?
 eq "$rc" 1 "arm refuses a closed bead"
 
-# `bd list --ready` answers OPEN beads only — it excludes on status before it
-# looks at deps at all. So a hold recorded on any other live status can never
-# fire, and nothing re-derives status from the dep graph: the arm would sit in
-# the queue reading as held by a blocker for as long as the status stands.
+# reconcile slings OPEN beads only. So an arm recorded on any other live status
+# can never fire, and nothing re-derives status from the dep graph: the arm
+# would sit in the queue reading as held for as long as the status stands.
 for HELD in blocked deferred hooked pinned; do
   store '[{"id":"b-h","status":"'"$HELD"'","assignee":"","metadata":{},"notes":"","_ready":false}]'
   out="$("$SUT" arm b-h --target rig/pool 2>&1)"; rc=$?
   eq "$rc" 1 "arm refuses a $HELD bead"
   eq "$(meta b-h gc.dispatch_when_ready)" "<absent>" "a refused $HELD arm writes nothing"
-  has "$out" "answers open beads only" "the $HELD refusal names the ready predicate"
+  has "$out" "slings open beads only" "the $HELD refusal says reconcile slings open beads only"
 done
 
 store '[{"id":"b-4","status":"open","assignee":"","metadata":{},"notes":"","_ready":true}]'
@@ -703,6 +735,31 @@ eq "$(slings)" "0" "a blocked armed bead is NOT slung"
 eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "a blocked armed bead keeps its record"
 hasnt "$out" "HELD by b-0" "an arm its own blocker holds gets no line of its own in the pass log"
 has "$out" "1 held" "summary counts it as held"
+
+# A hold label is Gas City's: the bead's next actor is not a worker, and bd's
+# readiness does not read the label, so the bead reports ready. A sling reads no
+# hold either, so the pass must leave the arm for when a write lifts the label.
+# arm still accepts the bead, because placing one arms it and then lifts the hold.
+echo "# reconcile withholds a bead a hold label holds"
+store '[{"id":"b-1","status":"open","assignee":"","labels":["learning","hold:mayor"],"metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true}]'
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "an armed bead a hold label holds is not an error"
+eq "$(slings)" "0" "a ready bead carrying hold:mayor is NOT slung, since no sling reads a hold"
+eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "…and it keeps its record for when the hold is lifted"
+has "$out" "1 held" "summary counts it as held"
+out="$("$SUT" list 2>&1)"
+has "$out" 'b-1 -> rig/pool [HELD by its hold:mayor label]' "list names the label that holds the arm"
+store '[{"id":"b-1","status":"open","assignee":"","labels":[" Hold:External"],"metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true}]'
+"$SUT" reconcile >/dev/null 2>&1
+eq "$(slings)" "0" "Gas City's other hold label, in another case, holds the arm too"
+store '[{"id":"b-1","status":"open","assignee":"","labels":["hold:mayor"],"metadata":{},"notes":"","_ready":true}]'
+out="$("$SUT" arm b-1 --target rig/pool 2>&1)"; rc=$?
+eq "$rc" 0 "arm accepts a bead a hold label holds"
+eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "…and records its dispatch"
+has "$out" "b-1 is HELD by its hold:mayor label" "…naming the label it waits on, not an all-clear"
+store '[{"id":"b-1","status":"open","assignee":"","labels":["learning","hold:po"],"metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true}]'
+"$SUT" reconcile >/dev/null 2>&1
+eq "$(slings)" "1" "a bead whose hold is lifted, or whose label only resembles one, is slung"
 
 store '[{"id":"b-1","status":"open","assignee":"someone/else","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true}]'
 out="$("$SUT" reconcile 2>&1)"; rc=$?
@@ -792,10 +849,9 @@ eq "$(meta b-1 gc.dispatch_when_ready)" "<absent>" "a closed armed bead's record
 has "$out" "1 retired" "summary counts the retire"
 
 # --- RECONCILE: a hold on the bead or an ancestor ----------------------------
-# bd's is_blocked flag cascades DOWN parent-child edges, so an armed child of a
-# blocked epic never enters `bd list --ready`. reconcile asks hold-lib.sh whether
-# anything holds such a bead: an open `blocks` blocker on it or on any ancestor
-# does. A held arm is left intact and named with its blocker.
+# reconcile asks gctk bead holds what holds each open armed bead, and the answer
+# is the store's: a wait of its own, or one on a parent-child ancestor of work
+# that has not started. A held arm is left intact and named with its wait.
 A1='"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"'
 
 # A human gate on an epic is a wait of the whole. It holds the epic's armed work
@@ -897,32 +953,37 @@ has "$out" "1 held" "the summary counts it as held"
 out="$("$SUT" list 2>&1)"
 has "$out" 'b-1 -> rig/pool [HELD by dg "Decide b-1"]' "list names the human gate that holds it"
 
-# A human gate holds until a person resolves it, pinned included (bd-lib.sh's
-# rule), while bd counts a pinned blocker as none and reports the bead ready.
-# The ready answer is no way past the gate, on the bead or on its epic.
-echo "# reconcile holds an arm bd reports ready behind a pinned human gate"
+# The store counts a pinned blocker as none, a human gate included, and the
+# answer is the store's, so a pinned gate on the bead or on its epic holds
+# nothing.
+echo "# reconcile slings an arm behind a pinned human gate"
 store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":true,"_deps":[{"id":"dg","dependency_type":"blocks"}]},
  {"id":"dg","status":"pinned","issue_type":"gate","title":"Decide b-1","assignee":"","await_type":"human","await_id":"decide-b-1","metadata":{},"notes":""},
  {"id":"b-2","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":true,"_deps":[{"id":"epic","dependency_type":"parent-child"}]},
  {"id":"epic","status":"open","issue_type":"epic","assignee":"","metadata":{},"notes":"","_deps":[{"id":"eg","dependency_type":"blocks"}]},
  {"id":"eg","status":"pinned","issue_type":"gate","title":"Decide whether the epic goes on","assignee":"","await_type":"human","await_id":"epic-goes-on","metadata":{},"notes":""}]'
-out="$("$SUT" reconcile 2>&1)"; rc=$?
-eq "$rc" 0 "holding arms behind pinned human gates is a clean pass"
-eq "$(slings)" "0" "neither arm is slung, though bd reports both ready"
-has "$out" "2 held" "the summary counts both as held"
-has "$out" 'HELD by eg "Decide whether the epic goes on" on ancestor epic: b-2' "the pass log names the pinned gate on the epic"
-eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "the arm behind its own pinned gate keeps its record"
-eq "$(meta b-2 gc.dispatch_when_ready)" "rig/pool" "the arm under the gated epic keeps its record"
 out="$("$SUT" list 2>&1)"
-has "$out" 'b-1 -> rig/pool [HELD by dg "Decide b-1"]' "list names the pinned gate on the bead, not DISPATCHABLE"
-has "$out" 'b-2 -> rig/pool [HELD by eg "Decide whether the epic goes on" on ancestor epic]' "list names the pinned gate on the epic"
-echo "# the arms fire once their pinned gates are resolved"
-jq -c 'map(if .id == "dg" or .id == "eg" then .status = "closed" else . end)' "$STUB_STORE" > "$TMP/resolved.json" && mv "$TMP/resolved.json" "$STUB_STORE"
+has "$out" 'b-1 -> rig/pool [DISPATCHABLE NOW]' "list shows the arm behind its own pinned gate as dispatchable"
+has "$out" 'b-2 -> rig/pool [DISPATCHABLE NOW]' "and the arm under the epic whose gate is pinned"
 out="$("$SUT" reconcile 2>&1)"; rc=$?
-eq "$(slings)" "2" "both arms are slung on the first pass after their gates close"
+eq "$rc" 0 "slinging arms behind pinned human gates is a clean pass"
+eq "$(slings)" "2" "both arms are slung"
+hasnt "$out" "HELD by" "the pass log names no pinned gate as a hold"
 
-# Any other pinned blocker holds nothing, as bd counts it: the ready answer
-# stands, and the arm is slung.
+# A waits-for edge of the bead's own is one the store cannot judge yet, so the
+# bead read answers it unjudged, and the pass holds the arm.
+echo "# reconcile holds an arm with a waits-for edge of its own"
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":true,"_deps":[{"id":"spawn","dependency_type":"waits-for"}]},
+ {"id":"spawn","status":"closed","title":"The spawner","assignee":"","metadata":{},"notes":""}]'
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "holding an unjudged arm is a clean pass"
+eq "$(slings)" "0" "an arm with a waits-for edge of its own is NOT slung"
+has "$out" "1 held" "the summary counts it as held"
+eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "it keeps its record"
+out="$("$SUT" list 2>&1)"
+has "$out" 'b-1 -> rig/pool [HELD by spawn "The spawner" (waits-for, unjudged)]' "list names the waits-for wait as unjudged"
+
+# Any other pinned blocker holds nothing either, as the store counts it.
 echo "# a pinned blocker that is not a human gate holds no ready arm"
 store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":true,"_deps":[{"id":"pin","dependency_type":"blocks"}]},
  {"id":"pin","status":"pinned","issue_type":"task","title":"A pinned bead","assignee":"","metadata":{},"notes":""},
@@ -931,24 +992,24 @@ store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"
 out="$("$SUT" reconcile 2>&1)"; rc=$?
 eq "$(slings)" "2" "an arm whose only blocker is a pinned task or a pinned gate of another type is slung"
 
-# A hold holds work that has not started. A bead in flight carries a branch, a
-# merge_result or a rejection_reason, and only a blocker of its own holds it, so
-# a re-dispatch of work already begun, such as a rejected handoff's rebuild,
-# fires under a parked epic. The walk reads none of its ancestors.
+# A wait on an ancestor holds work that has not started. A bead in flight, one
+# carrying a branch, a merge_result or a rejection_reason among the rest, is
+# held only by its own waits, so a re-dispatch of work already begun, such as a
+# rejected handoff's rebuild, fires under a parked epic.
 FLIGHT='"branch":"polecat/b-1","rejection_reason":"a test failed"'
 echo "# reconcile dispatches an arm in flight under a parked epic"
 store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"','"$FLIGHT"'},"notes":"","_ready":false,"_deps":[{"id":"epic","dependency_type":"parent-child"},{"id":"b-0","dependency_type":"blocks"}]},
  {"id":"b-0","status":"closed","assignee":"","metadata":{},"notes":""},'"$PARKED"']'
 out="$("$SUT" list 2>&1)"
-has "$out" "b-1 -> rig/pool [DISPATCHABLE NOW (in flight, rejection_reason set: a hold on an ancestor leaves it running" "list shows an arm in flight under a parked epic as dispatchable, and why"
+has "$out" "b-1 -> rig/pool [DISPATCHABLE NOW (in flight, carries branch: only its own waits hold it, and none is pending)]" "list shows an arm in flight under a parked epic as dispatchable, and why"
 export STUB_BD_LOG="$TMP/bd-flight.log"; : > "$STUB_BD_LOG"
 out="$("$SUT" reconcile 2>&1)"; rc=$?
 eq "$rc" 0 "dispatching an arm in flight under a parked epic is a clean pass"
 eq "$(slings)" "1" "an arm in flight is slung though its epic is parked"
 eq "$(meta b-1 gc.dispatch_when_ready)" "<absent>" "its record is cleared after the dispatch"
-has "$out" "nothing holds b-1: it is in flight (rejection_reason set), so a hold on an ancestor leaves it running" "the pass log says why it slung a bead under a parked epic"
+has "$out" "nothing holds b-1: it is in flight (carries branch), so only its own waits hold it, and none is pending — dispatching" "the pass log says why it slung a bead under a parked epic"
 hasnt "$out" "HELD by" "the park is not named as holding it"
-eq "$(arm_list_reads)" "3" "the walk reads no ancestor of a bead in flight (all + ready + its own blocker)"
+eq "$(arm_list_reads)" "1" "the pass lists the armed set once and reads no bead of its own"
 unset STUB_BD_LOG
 
 echo "# reconcile holds an arm in flight whose own blocker is open"
@@ -980,26 +1041,24 @@ eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "the still-blocked arm keeps 
 hasnt "$out" "HELD by" "an arm its own blocker holds gets no pass-log line, however its ancestors stand"
 has "$out" "1 held" "summary counts it as held"
 
-# Fail closed: a blocker of the bead's own that the store does not return holds
-# the arm, never slung on a guess. bd list --id silently drops an id with no
-# row, so an unread blocker must not read as a released one.
-echo "# an unresolvable own blocker fails closed (arm stays held)"
+# An edge of the bead's own onto a bead its store does not hold holds nothing,
+# as the store judges it: the edge points into another store, and arm names it
+# when it is recorded (above).
+echo "# an own edge onto a bead the store does not hold holds nothing"
 store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":false,"_deps":[{"id":"b-0-missing","dependency_type":"blocks"}]}]'
-out="$("$SUT" reconcile 2>&1)"; rc=$?
-eq "$(slings)" "0" "an unresolvable own blocker leaves the arm un-slung"
-eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "the arm keeps its record when its own blocker cannot be resolved"
-has "$out" "1 held" "an unresolved blocker counts as held, not dispatched"
 out="$("$SUT" list 2>&1)"
-has "$out" "b-1 -> rig/pool [HELD by b-0-missing (unreadable)]" "list says the blocker could not be read"
+has "$out" "b-1 -> rig/pool [DISPATCHABLE NOW]" "list shows the arm as dispatchable"
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$(slings)" "1" "the arm is slung"
+eq "$(meta b-1 gc.dispatch_when_ready)" "<absent>" "and its record is cleared"
 
 # An ancestor the store does not return, a parent in another store or one
 # deleted, holds nothing, as bd's cascade passes no hold through a row the store
-# does not hold. The stub reports the arm unready, so the pass asks the walk,
-# and the walk reads the parent with no row as bd does.
+# does not hold.
 echo "# an ancestor the store does not return holds nothing"
 store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":false,"_deps":[{"id":"epic-missing","dependency_type":"parent-child"}]}]'
 out="$("$SUT" list 2>&1)"
-has "$out" "b-1 -> rig/pool [DISPATCHABLE NOW (no open blocks blocker sits on it" "list shows an arm whose parent has no row as dispatchable"
+has "$out" "b-1 -> rig/pool [DISPATCHABLE NOW]" "list shows an arm whose parent has no row as dispatchable"
 hasnt "$out" "unreadable" "and names no unreadable ancestor"
 out="$("$SUT" reconcile 2>&1)"; rc=$?
 eq "$rc" 0 "dispatching an arm whose parent has no row is a clean pass"
@@ -1013,23 +1072,31 @@ store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"
 out="$("$SUT" reconcile 2>&1)"; rc=$?
 eq "$(slings)" "1" "an arm whose epic's only blocker has no row is slung"
 hasnt "$out" "HELD by" "the blocker with no row is named as no hold"
-echo "# a hold walk that cannot read fails the pass"
+echo "# a bead read that cannot read fails the pass"
 store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":false,"_deps":[{"id":"epic","dependency_type":"parent-child"}]},'"$PARKED"']'
 out="$(STUB_BD_LIST_ID_FAIL=1 "$SUT" reconcile 2>&1)"; rc=$?
-eq "$rc" 1 "a hold walk whose read fails exits non-zero"
+eq "$rc" 1 "a bead read that fails exits non-zero"
+has "$out" "could not read what holds b-1" "and says what it could not read"
+eq "$(slings)" "0" "and slings nothing"
+eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "and the arm stands"
+out="$(STUB_BD_LIST_ID_FAIL=1 "$SUT" list 2>&1)"
+has "$out" "b-1 -> rig/pool [UNREAD — what holds it could not be read" "list says what it could not read"
+out="$(GCTK_BIN="$TMP/no-gctk" "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 1 "a pass with no gctk to run exits non-zero"
 has "$out" "could not enumerate" "and says it could not see the queue"
+has "$out" "no gctk binary at '$TMP/no-gctk'" "and names the binary it looked for"
 eq "$(slings)" "0" "and slings nothing"
 
 # --- the N+1 fix: a full pass costs a bounded number of bd reads --------------
 # A pass that read per bead scaled with the armed set and overran the reconcile
 # order's timeout, so it was killed before it dispatched and an owed arm silently
 # starved. A pass must resolve every candidate's holds and read every candidate's
-# fields WITHOUT a per-bead call: blocker and parent ids come off the snapshot's
-# own edges, one listing per generation of ancestors and one for the blockers
-# resolve them, and each bead's fields come from the cached snapshot. This proves
-# the whole set is decided in reads that do not scale with the number of arms.
+# fields WITHOUT a per-bead call: one gctk bead holds call answers every open arm,
+# and each bead's fields come from the cached listing. This proves the whole set
+# is decided in reads that do not scale with the number of arms.
 echo "# reconcile resolves the whole candidate set without a per-bead read"
 export STUB_BD_LOG="$TMP/bd-bulk.log"
+: > "$STUB_GCTK_LOG"
 store '[
  {"id":"a-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":false,"_deps":[{"id":"blk-1","dependency_type":"blocks"}]},
  {"id":"a-2","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":false,"_deps":[{"id":"blk-2","dependency_type":"blocks"}]},
@@ -1045,13 +1112,14 @@ eq "$rc" 0 "a bulk pass over four arms held out of --ready is a clean pass"
 eq "$(slings)" "4" "all four arms nothing holds dispatch in one pass"
 eq "$(grep -c '^dep list' "$STUB_BD_LOG")" "0" "reconcile makes NO per-bead dep-list call — the N+1 is gone"
 eq "$(grep -c '^show' "$STUB_BD_LOG")" "4" "reconcile makes one show per sling, re-reading its arm, and none per arm: fields come from the cached snapshot"
-eq "$(arm_list_reads)" "3" "the whole set costs three list reads (all + ready + one blocker-status batch), not one per bead"
+eq "$(arm_list_reads)" "1" "the pass lists the armed set once, not once per bead"
+eq "$(gctk_runs)" "1" "and asks gctk bead holds once for every arm"
 eq "$(notice_list_reads)" "1" "and a pass that owes no notice reads the notice listing once"
 
 echo "# an arm disarmed after the pass listed it is not slung"
 NO_ARM_B1='map(if .id == "b-1" then (.metadata |= del(.["gc.dispatch_when_ready"], .["gc.dispatch_when_ready_args"])) else . end)'
 store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":true}]'
-out="$(STUB_RACE_AT='--ready' STUB_RACE_JQ="$NO_ARM_B1" "$SUT" reconcile 2>&1)"; rc=$?
+out="$(STUB_RACE_AT='where --json' STUB_RACE_JQ="$NO_ARM_B1" "$SUT" reconcile 2>&1)"; rc=$?
 eq "$rc" 0 "an arm withdrawn mid-pass is a clean pass"
 eq "$(slings)" "0" "the pass that listed it does not sling it"
 eq "$(meta b-1 gc.dispatch_when_ready_slung)" "<absent>" "and stamps no marker on it"
@@ -1066,12 +1134,31 @@ GATED_B1='[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes
  {"id":"g-b1","status":"open","issue_type":"gate","await_type":"human","assignee":"","metadata":{},"notes":""}]'
 GATE_CLOSED_B1='map(if .id == "g-b1" then .status = "closed" else . end)'
 store "$GATED_B1"
-out="$(STUB_RACE_AT='--ready' STUB_RACE_JQ="$NO_ARM_B1 | $GATE_CLOSED_B1" "$SUT" reconcile 2>&1)"; rc=$?
+out="$(STUB_RACE_AT='where --json' STUB_RACE_JQ="$NO_ARM_B1 | $GATE_CLOSED_B1" "$SUT" reconcile 2>&1)"; rc=$?
 eq "$(slings)" "0" "a disarm then an answer, both inside the pass's reads, sling nothing"
 has "$out" "withdrawn b-1" "the arm's re-read is what stops it"
 store "$GATED_B1"
-out="$(STUB_RACE_AT='--ready' STUB_RACE_JQ="$GATE_CLOSED_B1" "$SUT" reconcile 2>&1)"; rc=$?
+out="$(STUB_RACE_AT='where --json' STUB_RACE_JQ="$GATE_CLOSED_B1" "$SUT" reconcile 2>&1)"; rc=$?
 eq "$(slings)" "1" "control: an answer with no disarm, in the same window, slings the bead"
+
+echo "# a hold label set after the pass listed the arm holds it as the listing's would"
+# The label lands at the arm's re-read, after the listing that found it unheld:
+# the re-read applies the listing's own rule, so the arm waits for the lift.
+labels_of() { jq -c --arg id "$1" '(.[] | select(.id == $id) | .labels) // []' "$STUB_STORE"; }
+add_label_b1() { printf 'map(if .id == "b-1" then .labels = ((.labels // []) + ["%s"]) else . end)' "$1"; }
+store '[{"id":"b-1","status":"open","assignee":"","labels":["learning"],"metadata":{'"$A1"'},"notes":"","_ready":true}]'
+out="$(STUB_RACE_AT='show b-1' STUB_RACE_JQ="$(add_label_b1 hold:mayor)" "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "a hold set mid-pass is a clean pass"
+eq "$(slings)" "0" "the pass that listed the bead unheld does not sling it"
+eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "its arm stays"
+eq "$(meta b-1 gc.dispatch_when_ready_slung)" "<absent>" "and carries no marker"
+eq "$(meta b-1 gc.dispatch_when_ready_fail_count)" "<absent>" "and counts no attempt"
+eq "$(labels_of b-1)" '["learning","hold:mayor"]' "and the hold stays on"
+has "$out" "held b-1 — its hold:mayor label was set after this pass listed it" "the pass log names the label"
+has "$out" "1 held" "summary counts it as held"
+store '[{"id":"b-1","status":"open","assignee":"","labels":["learning"],"metadata":{'"$A1"'},"notes":"","_ready":true}]'
+out="$(STUB_RACE_AT='show b-1' STUB_RACE_JQ="$(add_label_b1 hold:po)" "$SUT" reconcile 2>&1)"; rc=$?
+eq "$(slings)" "1" "control: a label set in the same window that only resembles a hold is slung"
 
 echo "# a re-read of the arm that does not answer leaves it armed for the next pass"
 store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":true}]'
@@ -1085,21 +1172,22 @@ has "$out" "could not re-read the arm on b-1" "the pass log says so"
 out="$("$SUT" reconcile 2>&1)"; rc=$?
 eq "$(slings)" "1" "the next pass slings it"
 
-# The same bound with ancestors: four arms under one parked epic cost one more
-# read, for the epic, however many arms sit under it.
+# The same bound with ancestors: four arms under one parked epic cost the same
+# one call, however many arms sit under it.
 store '[
  {"id":"a-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":false,"_deps":[{"id":"epic","dependency_type":"parent-child"}]},
  {"id":"a-2","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":false,"_deps":[{"id":"epic","dependency_type":"parent-child"}]},
  {"id":"a-3","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":false,"_deps":[{"id":"epic","dependency_type":"parent-child"}]},
  {"id":"a-4","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":false,"_deps":[{"id":"epic","dependency_type":"parent-child"}]},'"$PARKED"']'
-: > "$STUB_BD_LOG"
+: > "$STUB_BD_LOG"; : > "$STUB_GCTK_LOG"
 out="$("$SUT" reconcile 2>&1)"; rc=$?
 eq "$(slings)" "0" "none of four arms under a parked epic is slung"
 has "$out" "4 held" "all four are counted held"
 has "$out" 'HELD by park "Parked until the operator unparks it" on ancestor epic: a-1 a-2 a-3 a-4' "the pass log names the park once, with every arm it keeps"
 eq "$(printf '%s\n' "$out" | grep -c 'HELD by')" "1" "one line for one park, however many arms it keeps"
 eq "$(grep -c '^dep list\|^show' "$STUB_BD_LOG")" "0" "the walk makes no per-bead call"
-eq "$(arm_list_reads)" "4" "four arms under one epic cost four list reads (all + ready + the epic + its blocker), not one per arm"
+eq "$(arm_list_reads)" "1" "four arms under one epic cost one listing of the pass's own"
+eq "$(gctk_runs)" "1" "and one gctk bead holds call, not one per arm"
 unset STUB_BD_LOG
 
 # --- the ARG_MAX fix: a large armed set enumerates, never dies on argv --------
@@ -1285,7 +1373,7 @@ store '[
  {"id":"b-0","status":"open","assignee":"","metadata":{},"notes":""},
  {"id":"b-5","status":"blocked","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool"},"notes":"","_ready":false}]'
 out="$("$SUT" list 2>&1)"
-has "$out" "b-5 -> rig/pool [STRANDED — status=blocked is never --ready]" "list names a stranded arm"
+has "$out" "b-5 -> rig/pool [STRANDED — status=blocked is never slung]" "list names a stranded arm"
 has "$out" "b-1 -> rig/pool [HELD by b-0]" "an open arm is held by its blocker, not stranded"
 
 echo "# reconcile names a stranded arm every pass"

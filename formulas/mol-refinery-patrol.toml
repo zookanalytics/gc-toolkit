@@ -157,26 +157,26 @@ if ! printf '%s' "$WORK_ROWS" | jq -e 'type == "array"' >/dev/null 2>&1; then
   gc runtime drain-ack
   exit 0
 fi
-# A bead something holds waits here until its blockers close. The hold is
-# hold-lib.sh's, the pack's one definition: a bead carrying a branch is work in
-# flight, so only a blocker on the bead itself holds it, never a park on an
-# ancestor. A blocker the store does not return holds the bead too, and a walk
-# that cannot read ends the turn, since a hold nobody read is no release.
-# hold-lib.sh builds on bd-lib.sh's rule of which human gates still hold, so
-# bd-lib.sh is sourced first.
-SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -f "$SCRIPTS/bd-lib.sh" ] && [ -f "$SCRIPTS/hold-lib.sh" ] || SCRIPTS=""
-fw_hold_read() { gc bd list ${GC_RIG:+--rig="$GC_RIG"} --id "$1" --all --include-gates --include-infra --include-templates --limit=0 --json; }
-WORK_JUDGED=""
-if [ -n "$SCRIPTS" ] && . "$SCRIPTS/bd-lib.sh" && . "$SCRIPTS/hold-lib.sh"; then
-  WORK_JUDGED=$(printf '%s' "$WORK_ROWS" | jq -c '[.[] | select((.metadata.merge_result // "") == "")]' | hold_annotate fw_hold_read) || WORK_JUDGED=""
-fi
+# A bead something holds waits here until its waits land. What holds it is
+# the answer of gctk bead holds, the pack's one rule: a bead carrying a branch
+# is work in flight, so only a wait of its own holds it, never a park on an
+# ancestor. A read that does not answer every handoff ends the turn, since a
+# hold nobody read is no release.
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+WORK_JUDGED=$({ printf '%s' "$WORK_ROWS"; echo; printf '%s' "$WORK_ROWS" | jq -r '[.[] | select((.metadata.merge_result // "") == "") | .id] | join(" ")' | xargs -r "$GCTK" bead holds; } | jq -s -c '.[0] as $rows | (.[1:] | map({key: .id, value: .}) | from_entries) as $h
+  | [ $rows[] | select((.metadata.merge_result // "") == "") ] as $c
+  | if all($c[]; $h[.id] != null and $h[.id].error == null) then [ $c[] | . + {holds: $h[.id]} ] else empty end' 2>/dev/null) || WORK_JUDGED=""
 if ! printf '%s' "$WORK_JUDGED" | jq -e 'type == "array"' >/dev/null 2>&1; then
-  echo "find-work: could not read what holds the assigned handoffs (bd-lib.sh or hold-lib.sh not in the pack, or a store read failed) — ending the turn without claiming; the next patrol retries." >&2
+  echo "find-work: could not read what holds the assigned handoffs (no gctk binary at $GCTK, or a store read failed) — ending the turn without claiming; the next patrol retries." >&2
   gc runtime drain-ack
   exit 0
 fi
-WORK=$(printf '%s' "$WORK_JUDGED" | jq -r '[.[] | select(.hold.state == "free")] | sort_by((.priority // 2), (.created_at // .created // .id)) | .[0].id // empty' 2>/dev/null)
-WORK_HELD=$(printf '%s' "$WORK_JUDGED" | jq -r '[.[] | select(.hold.state != "free") | (.id | tostring) + " waits on " + .hold.why] | join("; ")' 2>/dev/null)
+WORK=$(printf '%s' "$WORK_JUDGED" | jq -r '[.[] | select(.holds.status == "clear")] | sort_by((.priority // 2), (.created_at // .created // .id)) | .[0].id // empty' 2>/dev/null)
+WORK_HELD=$(printf '%s' "$WORK_JUDGED" | jq -r '[.[] | select(.holds.status != "clear") | (.id | tostring) + " waits on "
+  + (.holds.waits[0] | .id + (if (.title // "") != "" then " " + (.title | @json) else "" end))
+  + (if (.holds.waits | length) > 1 then " (+" + ((.holds.waits | length) - 1 | tostring) + " more)" else "" end)] | join("; ")' 2>/dev/null)
 if [ -n "$WORK_HELD" ]; then
   echo "find-work: leaving held handoff(s) until their blockers close: $WORK_HELD." >&2
 fi
@@ -198,7 +198,7 @@ handoff. Flag, never rewrite.
 A held bead is left in the queue, and the block's stderr names what holds it. A
 landing bead is assigned to you when its integration effort is stood up, and it
 waits on the effort's beads and its summary task by `blocks` edges, so it is
-taken once the last of them closes. A handoff with an open blocker of its own
+taken once the last of them closes. A handoff with an open wait of its own
 waits the same way, and a park on its epic holds none of them.
 
 If found: confirm `metadata.branch` exists (`gc bd show $WORK --json`),

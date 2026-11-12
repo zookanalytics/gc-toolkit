@@ -1,9 +1,11 @@
 # gc-toolkit — primary pack for a Gas City city. Native roster, no pack imports.
 #
 # Every agent this pack runs ships under agents/<name>/ (polecat, refinery,
-# witness, deacon, mechanik, polecat-codex, proactive, dog, demo, and the
-# converse-opus, converse-fable and converse-codex sittings). There is no
-# gastown import and there are no cross-pack prompt patches: each agent's
+# witness, deacon, mechanik, po, polecat-codex, proactive, dog, demo, the
+# converse-claude-opus, converse-claude-fable, converse-codex-sol and
+# converse-codex-astra sittings, and the converse-opus, converse-fable and
+# converse-codex templates kept for the sittings already open on them). There is
+# no gastown import and there are no cross-pack prompt patches: each agent's
 # prompt.template.md is purpose-written and injects shared doctrine from
 # template-fragments/ directly. The converse sittings share one prompt in
 # agents/_converse/, a directory the loader skips because its name starts
@@ -27,9 +29,9 @@
 # overlay's settings.json rather than a second stanza. Every agent must end up
 # with the guard: assets/scripts/gh-origin-guard-wiring.test.sh enumerates
 # agents/ and fails when one is left uncovered. The codex agents (dog,
-# polecat-codex, converse-codex) read no .claude/settings.json and take no
-# overlay; each registers the guard in the Codex home through its pre_start
-# (docs/gh-origin-guard.md, "Codex").
+# polecat-codex, converse-codex-sol, converse-codex-astra, converse-codex) read
+# no .claude/settings.json and take no overlay; each registers the guard in the
+# Codex home through its pre_start (docs/gh-origin-guard.md, "Codex").
 #
 # cycle-recycle and work-context self-gate by role and are safe no-ops
 # elsewhere; the gh guard applies to every role, so it does not.
@@ -77,6 +79,14 @@ overlay_dir = "overlays/cycle-recycle"
 # listed here carry no hook of their own; for the rest the same hook rides their
 # overlay.
 [[patches.agent]]
+name = "converse-claude-fable"
+overlay_dir = "overlays/gh-origin-guard"
+
+[[patches.agent]]
+name = "converse-claude-opus"
+overlay_dir = "overlays/gh-origin-guard"
+
+[[patches.agent]]
 name = "converse-fable"
 overlay_dir = "overlays/gh-origin-guard"
 
@@ -86,6 +96,10 @@ overlay_dir = "overlays/gh-origin-guard"
 
 [[patches.agent]]
 name = "mechanik"
+overlay_dir = "overlays/gh-origin-guard"
+
+[[patches.agent]]
+name = "po"
 overlay_dir = "overlays/gh-origin-guard"
 
 [[patches.agent]]
@@ -103,6 +117,14 @@ overlay_dir = "overlays/gh-origin-guard"
 template = "mechanik"
 scope = "city"
 mode = "always"
+
+# Each rig's po runs only while the operator holds a sitting, which `gc-helm po
+# --rig <rig>` opens, its idle limit puts to sleep and a drain-ack ends
+# (agents/po/agent.toml).
+[[named_session]]
+template = "po"
+scope = "rig"
+mode = "on_demand"
 
 [[named_session]]
 template = "refinery"

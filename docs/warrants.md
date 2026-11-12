@@ -73,12 +73,13 @@ shares only the word ([authority-map.md](authority-map.md)).
 - **Stands in for.** Steps of core's polecat base and Gas Town's polecat formula
   that would do what the pack needs. The formula overrides five steps and inherits
   `implement`. Each override differs for a reason of its own:
-  - `load-context` refuses a bead that is finished, parked, blocked or in another
-    live run, and ends the run by cancelling it with what releases the work on the
-    work bead. Upstream's has no such gate. `gc sling` keeps one live run of a
-    formula on a bead, and the gate reads the same record for what gets past it, a
-    forced relaunch and a claimant with no poured workflow, so it adds no key and
-    writes nothing to let a run through.
+  - `load-context` refuses a bead that is finished, parked, held by a wait as
+    `gctk bead holds` answers, or in another live run, and ends the run by
+    cancelling it with what releases the work on the work bead. Upstream's has no
+    such gate. `gc sling` keeps one live run of a formula on a bead, and the gate
+    reads the same record for what gets past it, a forced relaunch and a claimant
+    with no poured workflow, so it adds no key and writes nothing to let a run
+    through.
   - `workspace-setup` brings a rejected branch current by merge, where Gas Town's
     rebases it under an open PR, and waits behind a sibling.
   - `preflight-tests` runs the checks through `gctk rig`, so every polecat starting
@@ -117,10 +118,10 @@ shares only the word ([authority-map.md](authority-map.md)).
   In `gastownhall/gascity-packs`, `gastown/formulas/mol-polecat-work.toml` overrides
   `workspace-setup`, `self-review` and `submit-and-exit`, rebases a rejected
   branch, and at the handoff detaches the tree and deletes its branch.
-- **Verified.** 2026-11-08, at `gastownhall/gascity` main c7a45437f and
-  `gastownhall/gascity-packs` main 2a3b142e3.
-- **Retires when.** A step at a time. `load-context`: core's gate refuses finished
-  and parked work and ends a run by cancelling it. `workspace-setup`: the
+- **Verified.** 2026-11-11, at `gastownhall/gascity` main 6bd609f5b and
+  `gastownhall/gascity-packs` main 7f86098c0.
+- **Retires when.** A step at a time. `load-context`: core's gate refuses finished,
+  parked and held work and ends a run by cancelling it. `workspace-setup`: the
   refinery's rework machinery goes (`tk-1tfzr71.20`), which ends the merge resume.
   `preflight-tests` and `self-review`: Gas City ships a record of a check per
   commit. `submit-and-exit`: `tk-1tfzr71.20` moves the merge onto GitHub's branch
@@ -260,9 +261,11 @@ shares only the word ([authority-map.md](authority-map.md)).
     `push-branch` and `create-pr` commands write as a GitHub App installation,
     so GitHub holds those writes to the installation's repositories. It scopes
     no agent's own `gh`.
-- **Verified.** 2026-11-05, at `gastownhall/gascity` main a91df0b85 and
-  `gastownhall/gascity-packs` main 796d7ecd7, and against GitHub's *Managing
-  your personal access tokens* page, read the same day.
+- **Verified.** 2026-11-10, at `gastownhall/gascity` main f1f75f53c and
+  `gastownhall/gascity-packs` main c6f0a9aa6. The config reference's `[github]`
+  table declares pull-request monitors, whose `authors` allow-list scopes the
+  pull requests a monitor acts on, and scopes no agent's writes. GitHub's
+  *Managing your personal access tokens* page was read on 2026-11-05.
 - **Retires when.** Gas City ships per-agent write scoping. A GitHub
   fine-grained token covers only part of the origin rule. GitHub refuses it a
   write outside its one owner's selected repositories, so a stranger's
@@ -271,28 +274,6 @@ shares only the word ([authority-map.md](authority-map.md)).
   rig's origin can sit under another owner's account and a city-scope agent
   owns every rig's origin. A token the rigs share also leaves each rig's agents
   free to write to the others' repositories, which the guard refuses.
-
-## Converse reap
-
-- **Covers.** `assets/scripts/converse-reap.sh`, `orders/converse-reap.toml`.
-- **Stands in for.** Ending a manual session that outlives the conversation it
-  held: a stop that did not take, a conversation another path closed, or one a
-  sitting cut short handed back to the operator's queue.
-- **Evidence.** In `gastownhall/gascity`, a manual session does not end when its
-  work closes. It stays until it is closed or drained, and attaching wakes one
-  that sleeps (`cmd/gc/compute_awake_set.go` 443-451, 594-605 and 679-704).
-  No closer the controller runs on its own ends one because its work closed:
-  the stale-session closers exempt a session that has started its
-  conversation (`reapStaleSessionBeads`, `reapPreBootSessionBeads` and
-  `cleanDeadRuntimeCorpse` in `cmd/gc/session_beads.go`, at 3164, 3345 and
-  3608), and the core reaper prunes a session only once it has drained
-  (`internal/bootstrap/packs/core/assets/scripts/reaper.sh` 118 and 1588-1590).
-  A sitting drains itself once its conversation closes, and `gc-helm dismiss`
-  stops the session that held the conversation it closes, so nothing in the
-  controller ends a session either of them missed.
-- **Verified.** 2026-11-05, at `gastownhall/gascity` main 9f807760c.
-- **Retires when.** Gas City ends a manual session once its claimed work has
-  closed.
 
 ## Accept's lock
 
@@ -430,9 +411,9 @@ shares only the word ([authority-map.md](authority-map.md)).
     a reader keys on. The `gastown` pack's `pr-merge-reconcile` records a PR's
     lifecycle in `pr_state`, a key of its own.
   - The search is [specs/tk-blloeo/gas-city-search.md](../specs/tk-blloeo/gas-city-search.md).
-- **Verified.** 2026-11-06, at `gastownhall/gascity` main 74d62eb1e0c0,
-  `gastownhall/gascity-packs` main e3cb468bbc65, and `gastownhall/beads` main
-  8c3eb30f30f7.
+- **Verified.** 2026-11-08, at `gastownhall/gascity` main fdfec4c19dc4,
+  `gastownhall/gascity-packs` main 2a3b142e3fbd, and `gastownhall/beads` main
+  2edea9ced8c6.
 - **Retires when.** Gas City records a pull request's merge readiness where a
   reader of the PR's own bead finds it, and tells a required check still
   running from a block, for example once its PR monitor reads the base
@@ -480,7 +461,7 @@ shares only the word ([authority-map.md](authority-map.md)).
   handled post with (`WB_RESOLVED_REACTION`). Its reader is package
   `services/gctk/prstatus`: `RowFacts` reads it off the anchor and
   `unansweredFeedback` decides from it. `prstatus.Read` gathers it for
-  `gctk pr-status derive` in `services/gctk/internal/cli/prstatus.go` and for the
+  `gctk pr status` in `services/gctk/internal/cli/prstatus.go` and for the
   helm board's beads source in `services/helm/internal/source/beads.go`.
 - **Stands in for.** A record of a pull request's review threads kept on the
   bead whose pull request it is, which says whether review feedback still
@@ -511,9 +492,9 @@ shares only the word ([authority-map.md](authority-map.md)).
     findings, and its `ce-pr-comment-resolver` agent is handed a thread to fix
     or answer. Neither keeps a record of the thread.
   - The search is [specs/tk-iydyiup/gas-city-search.md](../specs/tk-iydyiup/gas-city-search.md).
-- **Verified.** 2026-11-06, at `gastownhall/gascity` main b2c0f62ae6c9 with
+- **Verified.** 2026-11-08, at `gastownhall/gascity` main 9f1abb50188b with
   the `gastown` pack it bundles at 66897e7132c9, `gastownhall/gascity-packs`
-  main e3cb468bbc65, and `gastownhall/beads` main 8c3eb30f30f7.
+  main 2a3b142e3fbd, and `gastownhall/beads` main 2edea9ced8c6.
 - **Retires when.** Gas City records a pull request's review threads where a
   reader of the PR's own bead finds them, for example once its readiness
   monitor reads review threads, or a webhook receiver keeps their state from
@@ -574,3 +555,43 @@ shares only the word ([authority-map.md](authority-map.md)).
 - **Retires when.** Gas City provisions a tree bound to an agent, with a sync to
   the default branch, or Gas Town's agents stop running a script of their own at
   `pre_start`.
+
+## Deferred dispatch residual
+
+- **Covers.** `assets/scripts/deferred-dispatch.sh`,
+  `orders/deferred-dispatch.toml`, the `gc.dispatch_when_ready` keys, and
+  [deferred-dispatch.md](deferred-dispatch.md).
+- **Stands in for.** A dispatch that waits for its bead's blockers, pouring the
+  bead's formula once nothing holds it.
+- **Evidence.** In `gastownhall/gascity`, nothing slings or pours a bead when its
+  blockers close. The bundled `core` pack's `cascade-nudge-on-blocker-close`
+  order runs on `bead.closed`, re-reads the closes with `gc events --since`, and
+  nudges each open dependent's assignee or routed pool with `gc session nudge`.
+  It slings nothing, and no core order or script calls `gc sling`
+  (`internal/bootstrap/packs/core/assets/scripts/cascade-nudge-on-blocker-close.sh`).
+- **Verified.** 2026-11-09, at `gastownhall/gascity` main e35c1602d936.
+- **Retires when.** Gas City or bd pours a formula on a bead once its blockers
+  close.
+
+## Quota-park nudging
+
+- **Covers.** `assets/scripts/quota-park-nudge.sh`,
+  `orders/quota-park-nudge.toml`, the nudge episode files under the city's
+  `.gc/runtime/quota-park`, and
+  [quota-park-recovery.md](quota-park-recovery.md).
+- **Stands in for.** Waking a live session that sits idle under a provider's
+  usage-limit banner once the limit resets.
+- **Evidence.** In `gastownhall/gascity`:
+  - The session reconciler classifies only a dead session's exit. A live
+    session short-circuits the classification and is never classified
+    (`ExitFacts.Alive` in `internal/session/lifecycle_exits.go`).
+  - Its provider-screen lane runs for a dead crash candidate. A session whose
+    process died on a provider's limit screen sleeps for a fixed 30 minutes,
+    after which the quarantine clears (`checkRateLimitStability` in
+    `cmd/gc/session_reconcile.go`, `defaultRateLimitQuarantineDuration` in
+    `cmd/gc/session_types.go`). Nothing wakes or nudges a live session idle
+    under the banner.
+- **Verified.** 2026-10-28, at `gastownhall/gascity` main 221b1476dc10.
+- **Retires when.** Gas City wakes a session parked on a provider's limit once
+  the limit resets, or every provider the city runs resumes such a session by
+  itself.

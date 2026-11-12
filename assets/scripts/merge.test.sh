@@ -1921,11 +1921,11 @@ eq "$(pinned CR1)|$(pinned CR2)|$(pinned CR3)" "progressing@$(cr_head 178)|block
 out=$("$SD/gate-ensure.sh" --default correctness --review-pool rig/gc-toolkit.polecat-codex --fix-pool rig/gc-toolkit.polecat 2>&1); rc=$?
 eq "$rc" 0 "test premise: gate-ensure.sh's pass exits 0"
 eq "$(pinned CR1) $(cause CR1)" "settled@$(cr_head 178) <absent>" "a cause that no longer holds stays cleared through gate-ensure.sh's verdict"
-eq "$("$GCTK_BIN" pr-status derive --anchor CR1)" "merging" "…so the PR reads merging while its required check re-runs"
+eq "$("$GCTK_BIN" pr status CR1)" "merging" "…so the PR reads merging while its required check re-runs"
 eq "$(pinned CR2) $(cause CR2)" "blocked@$(cr_head 179) check-failed" "a required check whose newest run failed keeps its verdict through both writers"
-eq "$("$GCTK_BIN" pr-status derive --anchor CR2)" "needs-attention" "…so the PR reads needs-attention"
+eq "$("$GCTK_BIN" pr status CR2)" "needs-attention" "…so the PR reads needs-attention"
 eq "$(pinned CR3) $(cause CR3)" "blocked@$(cr_head 180) review-threads" "an unresolved review thread keeps its verdict through both writers"
-eq "$("$GCTK_BIN" pr-status derive --anchor CR3)" "needs-attention" "…so the PR reads needs-attention"
+eq "$("$GCTK_BIN" pr status CR3)" "needs-attention" "…so the PR reads needs-attention"
 rm -f "$GH_DIR/rules_main.json" "$SD/gate-ensure.sh"
 
 echo "# a base gone BEHIND records blocked; the branch must be brought current"

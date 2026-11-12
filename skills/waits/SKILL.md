@@ -76,11 +76,25 @@ gate, below).
 - `<rig>` is the bead's own rig, whose polecat pool runs the closer, and the
   arm needs the bead open with no route. A first reaction writes the brief, the
   edge and the arm in one exit, its close exit with `--waiting-on <blocker>`.
+- A bead that Gas City's `hold:mayor` label holds, new work in the po's queue,
+  keeps its arm until the hold lifts. Once the arm lands, lift the hold, and the
+  bead waits on its blocker instead of in the queue. Gas City reads the label in
+  any case, and bd removes a label only by its exact text, so list the bead's
+  labels and remove each one that spells the hold:
+
+  ```bash
+  gc bd label list <bead>
+  gc bd update <bead> --remove-label hold:mayor   # and one --remove-label for each other spelling listed, such as Hold:Mayor
+  ```
 - bd keeps one edge type per pair of beads and refuses a second, so a bead that
   already carries another edge type onto the blocker needs that edge removed
   first with `gc bd dep remove <bead> <blocker>`.
 - bd also defines an `until` edge type. Nothing in the pack acts on one, so an
   `until` edge holds no bead and closes none.
+- A converse sign-off writes the brief and the arm for its subject when the
+  ruling leaves the subject waiting on work the sitting sent, after the
+  headline writes the edge (`--waiting-on <work> --close-brief "<…>"`, the
+  converse-settle step), and then lifts the subject's `hold:mayor` itself.
 
 ## Wait on a person
 
@@ -138,15 +152,25 @@ one: it appends your concern to that conversation's notes, where the sitting
 reads it, and a concern the conversation already carries is not appended again,
 so a call that asks on every pass leaves one copy.
 
-A conversation keeps nothing out of `bd ready`, and holds no merge and no
-close: it blocks nothing, and nothing waits on it. When work must wait for
-what the operator decides, file a human gate on that work as well (above).
+A conversation keeps no work out of `bd ready`. A conversation on an open PR
+holds the PR's merge, and with it the anchor's close, until it closes, through
+the anchor's `blocks` edge onto it, which `open` adds; it otherwise blocks
+nothing, and nothing else waits on it. When work must wait for what the
+operator decides, file a human gate on that work as well (above).
 
 ## Have work start by itself when its wait clears (an arm)
 
 The message is that once nothing holds this bead, it goes to this pool. The
 deferred-dispatch order's reconcile pass slings it as soon as nothing holds it,
 and retires the arm if the bead closes first.
+
+What holds a bead is the store's own answer, which `gctk bead holds <bead>`
+prints, from the gctk the city builds at
+`$GC_CITY_PATH/.gc/services/gctk/bin/gctk`. A wait of the bead's own that has
+not landed holds it, and so does one on a parent-child ancestor, such as a
+parked epic, while its work has not started. Once its work has started, only
+its own waits hold it. The answer names each wait behind it, so read it, not
+the bead's rows, to learn whether a bead still waits and on what.
 
 Writer: `"$(gc <binding> scripts-dir)/deferred-dispatch.sh" arm <bead> --target <rig>/<pool> --reason "waits for <blocker>"`.
 Add `--sling-arg --on --sling-arg <formula>` to send it on a formula other than

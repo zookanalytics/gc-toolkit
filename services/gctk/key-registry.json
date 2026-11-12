@@ -1,0 +1,264 @@
+[
+  {
+    "name": "anchor_bead",
+    "type": "string",
+    "readers": [
+      "listing"
+    ],
+    "doc": "The merge anchor a review, rework, finding or validation child names (lifecycle/lifecycle.toml, [metadata.gates]). A listing names it on each bead, and prstatus's in-flight set reads it."
+  },
+  {
+    "name": "branch",
+    "type": "string",
+    "readers": [
+      "waits"
+    ],
+    "doc": "The source branch a work bead's change is on, which the work formula's workspace-setup writes (lifecycle/lifecycle.toml, [metadata.merge_identity]). A bead carrying it is in flight."
+  },
+  {
+    "name": "epic_boundaries",
+    "type": "string",
+    "readers": [
+      "listing"
+    ],
+    "doc": "What an epic's work is not (docs/epics.md)."
+  },
+  {
+    "name": "epic_closure_condition",
+    "type": "string",
+    "readers": [
+      "listing"
+    ],
+    "doc": "An epic's closure checks (docs/epics.md)."
+  },
+  {
+    "name": "epic_handle",
+    "type": "string",
+    "readers": [
+      "listing"
+    ],
+    "doc": "An epic's 3-5 word handle (docs/epics.md)."
+  },
+  {
+    "name": "epic_hypothesis",
+    "type": "string",
+    "readers": [
+      "listing"
+    ],
+    "doc": "An epic's one-sentence hypothesis (docs/epics.md). An epic under an epic that carries none is a Delivery."
+  },
+  {
+    "name": "epic_indicators",
+    "type": "string",
+    "readers": [
+      "listing"
+    ],
+    "doc": "An epic's leading indicators (docs/epics.md)."
+  },
+  {
+    "name": "epic_ruling",
+    "type": "string",
+    "readers": [
+      "listing"
+    ],
+    "doc": "The latest ruling on an epic's hypothesis: continue, shift or close (docs/epics.md)."
+  },
+  {
+    "name": "epic_ruling_at",
+    "type": "string",
+    "readers": [
+      "listing"
+    ],
+    "doc": "When the operator made the latest ruling on an epic."
+  },
+  {
+    "name": "epic_ruling_reason",
+    "type": "string",
+    "readers": [
+      "listing"
+    ],
+    "doc": "Why the latest ruling on an epic was made, written with it."
+  },
+  {
+    "name": "gc.dispatch_when_ready",
+    "type": "string",
+    "readers": [
+      "waits"
+    ],
+    "doc": "The pool or agent an armed bead is slung to once nothing holds it. Its presence is the arm."
+  },
+  {
+    "name": "gc.dispatch_when_ready_args",
+    "type": "string",
+    "readers": [
+      "waits"
+    ],
+    "doc": "The arm's extra sling arguments, as a JSON array."
+  },
+  {
+    "name": "gc.dispatch_when_ready_armed_at",
+    "type": "string",
+    "readers": [
+      "waits"
+    ],
+    "doc": "When the bead was armed, in RFC 3339 UTC."
+  },
+  {
+    "name": "gc.dispatch_when_ready_armed_by",
+    "type": "string",
+    "readers": [
+      "waits"
+    ],
+    "doc": "Who armed the bead."
+  },
+  {
+    "name": "gc.dispatch_when_ready_fail_count",
+    "type": "string",
+    "readers": [
+      "waits"
+    ],
+    "doc": "The sling attempts made on the arm, as an integer string."
+  },
+  {
+    "name": "gc.dispatch_when_ready_reason",
+    "type": "string",
+    "readers": [
+      "waits"
+    ],
+    "doc": "Why the bead was armed, as free text."
+  },
+  {
+    "name": "gc.dispatch_when_ready_slung",
+    "type": "string",
+    "readers": [
+      "waits"
+    ],
+    "doc": "The arm's sling marker: slinging@\u003ctime\u003e while an attempt is in flight, slung@\u003ctime\u003e once it is proven."
+  },
+  {
+    "name": "gc.formula_contract",
+    "type": "string",
+    "readers": [
+      "waits"
+    ],
+    "doc": "The formula contract a root was poured under. A root reading graph.v2 is a run's root."
+  },
+  {
+    "name": "gc.input_convoy_id",
+    "type": "string",
+    "readers": [
+      "waits"
+    ],
+    "doc": "The input convoy a graph.v2 workflow root was poured over. The convoy tracks the bead the run works, and the bead a live run works is in flight once the run has passed load-context. A root without it works the bead its gc.var.issue names."
+  },
+  {
+    "name": "gc.kind",
+    "type": "string",
+    "readers": [
+      "waits"
+    ],
+    "doc": "The runtime's kind of a bead. A root reading workflow is a run's root."
+  },
+  {
+    "name": "gc.notify_when_ready",
+    "type": "string",
+    "readers": [
+      "waits"
+    ],
+    "doc": "The named agent a notice is owed to once nothing holds the bead assigned to it. Its presence is the arm."
+  },
+  {
+    "name": "gc.root_bead_id",
+    "type": "string",
+    "readers": [
+      "waits"
+    ],
+    "doc": "The workflow root a step was poured under."
+  },
+  {
+    "name": "gc.routed_to",
+    "type": "string",
+    "readers": [
+      "listing"
+    ],
+    "doc": "The pool or agent a bead is routed to, written by lifecycle.sh's --route and by the script or formula that owns the bead's dispatch (lifecycle/lifecycle.toml, ROUTE and [metadata.runtime_owned])."
+  },
+  {
+    "name": "gc.step_ref",
+    "type": "string",
+    "readers": [
+      "waits"
+    ],
+    "doc": "The formula step a step bead carries out, as \u003cformula\u003e.\u003cstep\u003e. A live run with an open step whose ref ends in .load-context has not passed load-context."
+  },
+  {
+    "name": "gc.var.issue",
+    "type": "string",
+    "readers": [
+      "waits"
+    ],
+    "doc": "The bead a classic molecule's issue variable names, which a root that names no input convoy works. A root whose input convoy tracks another bead works none."
+  },
+  {
+    "name": "gc.work_outcome",
+    "type": "string",
+    "readers": [
+      "listing"
+    ],
+    "aliases": [
+      "work_outcome"
+    ],
+    "doc": "A work bead's self-reported disposition, no-op or shipped, whose meaning is the runtime's (lifecycle/lifecycle.toml, [metadata.runtime_owned])."
+  },
+  {
+    "name": "merge_result",
+    "type": "string",
+    "readers": [
+      "listing",
+      "waits"
+    ],
+    "doc": "The anchor's lifecycle state, which lifecycle.sh, through gctk lifecycle, writes on every transition (lifecycle/lifecycle.toml, [machine] and [states]). A bead carrying it is in flight. A listing names it on each bead, so a reader tells an anchor whose pull request is open."
+  },
+  {
+    "name": "pr_number",
+    "type": "string",
+    "readers": [
+      "listing"
+    ],
+    "doc": "The number of the anchor's open pull request, which pr-open.sh writes when it opens and pr-facts.sh copies onto rework children (lifecycle/lifecycle.toml, [metadata.merge_identity])."
+  },
+  {
+    "name": "pr_url",
+    "type": "string",
+    "readers": [
+      "listing"
+    ],
+    "doc": "The URL of the anchor's open pull request, written with pr_number (lifecycle/lifecycle.toml, [metadata.merge_identity])."
+  },
+  {
+    "name": "rejection_reason",
+    "type": "string",
+    "readers": [
+      "waits"
+    ],
+    "doc": "Why the bead's last attempt bounced, which the refinery writes (lifecycle/lifecycle.toml, [metadata.merge_identity]). A bead carrying it is in flight."
+  },
+  {
+    "name": "rig_check.lint",
+    "type": "json",
+    "owner": "internal/rig",
+    "doc": "The published copy of a recorded check's result, which `gctk rig \u003ccheck\u003e --publish-bead \u003cbead\u003e` writes on the bead its caller names: the record the call answered with, as one JSON object of check, result, scope (absent on a lint or typecheck run), commit, tree, exit_code, duration_ms, runner, recorded_at and command. gctk writes it only once the record store holds the result it copies, after recording a result or answering from a record. No pack path reads it: the record under the rig clone's git common directory answers a later call. Absent means no call published that check to the bead. Never cleared: the next publish replaces it. Its commit is the one the check ran at: the head the call answered for, or, for a full-suite test pass answered through the tree, an earlier commit with the same tree."
+  },
+  {
+    "name": "rig_check.test",
+    "type": "json",
+    "owner": "internal/rig",
+    "doc": "The published copy of a recorded check's result, which `gctk rig \u003ccheck\u003e --publish-bead \u003cbead\u003e` writes on the bead its caller names: the record the call answered with, as one JSON object of check, result, scope (absent on a lint or typecheck run), commit, tree, exit_code, duration_ms, runner, recorded_at and command. gctk writes it only once the record store holds the result it copies, after recording a result or answering from a record. No pack path reads it: the record under the rig clone's git common directory answers a later call. Absent means no call published that check to the bead. Never cleared: the next publish replaces it. Its commit is the one the check ran at: the head the call answered for, or, for a full-suite test pass answered through the tree, an earlier commit with the same tree."
+  },
+  {
+    "name": "rig_check.typecheck",
+    "type": "json",
+    "owner": "internal/rig",
+    "doc": "The published copy of a recorded check's result, which `gctk rig \u003ccheck\u003e --publish-bead \u003cbead\u003e` writes on the bead its caller names: the record the call answered with, as one JSON object of check, result, scope (absent on a lint or typecheck run), commit, tree, exit_code, duration_ms, runner, recorded_at and command. gctk writes it only once the record store holds the result it copies, after recording a result or answering from a record. No pack path reads it: the record under the rig clone's git common directory answers a later call. Absent means no call published that check to the bead. Never cleared: the next publish replaces it. Its commit is the one the check ran at: the head the call answered for, or, for a full-suite test pass answered through the tree, an earlier commit with the same tree."
+  }
+]

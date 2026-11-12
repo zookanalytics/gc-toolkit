@@ -6,7 +6,8 @@ import (
 )
 
 // oneGate is one open human gate that holds the anchor, as [Facts.Gates] carries
-// it, and personOwed one live blocker of the anchor's a person owes.
+// it, and personOwed one bead a person owes the next move on, as [Facts.Owed]
+// carries it.
 var (
 	oneGate    = []Blocker{gate("g")}
 	personOwed = []Blocker{{ID: "d", Title: "pick the release window", Status: "open", IssueType: "decision"}}
@@ -37,8 +38,8 @@ func TestDerive(t *testing.T) {
 
 		// Whatever Held names is a thing a person has to act on, so it holds the PR
 		// as a human gate on the anchor does, whatever is in flight beside it.
-		{"a blocker a person owes", Facts{Blockers: personOwed}, NeedsAttention},
-		{"a blocker a person owes on an approved PR with work in flight", Facts{Blockers: personOwed, PRPosture: "approved@oid@t", InFlightCount: 1}, NeedsAttention},
+		{"a bead a person owes", Facts{Owed: personOwed}, NeedsAttention},
+		{"a bead a person owes on an approved PR with work in flight", Facts{Owed: personOwed, PRPosture: "approved@oid@t", InFlightCount: 1}, NeedsAttention},
 		{"review feedback the city has not answered, nothing in flight", Facts{PRPosture: "review_required@oid@t", PRMachine: "settled@oid@t", PRUnansweredThreads: "1@oid"}, NeedsAttention},
 		{"…which a fix unit in flight answers", Facts{PRPosture: "review_required@oid@t", PRUnansweredThreads: "1@oid", InFlightCount: 1}, Working},
 		{"…and an answer or a resolve releases", Facts{PRPosture: "review_required@oid@t", PRMachine: "settled@oid@t", PRUnansweredThreads: "0@oid"}, NeedsReview},
@@ -171,12 +172,12 @@ func TestHeld(t *testing.T) {
 		{"a blocker no automated actor holds", stuck, []Hold{HeldBlocked}},
 		{"the stuck blocker holds whatever is in flight", func() Facts { f := stuck; f.InFlightCount = 2; return f }(), []Hold{HeldBlocked}},
 		{"the stuck blocker at a head the posture has left", func() Facts { f := stuck; f.PRPosture = "approved@new@t"; return f }(), nil},
-		{"a blocker a person owes", Facts{Blockers: personOwed}, []Hold{HeldBlocked}},
-		{"a stuck blocker beside one a person owes is one value", func() Facts { f := stuck; f.Blockers = personOwed; return f }(), []Hold{HeldBlocked}},
+		{"a bead a person owes", Facts{Owed: personOwed}, []Hold{HeldBlocked}},
+		{"a stuck blocker beside a bead a person owes is one value", func() Facts { f := stuck; f.Owed = personOwed; return f }(), []Hold{HeldBlocked}},
 
-		{"a human gate and a person's blocker stand together", Facts{Gates: oneGate, Blockers: personOwed}, []Hold{HeldGate, HeldBlocked}},
+		{"a human gate and a bead a person owes stand together", Facts{Gates: oneGate, Owed: personOwed}, []Hold{HeldGate, HeldBlocked}},
 		{"a human gate beside the thread verdict", func() Facts { f := threads; f.Gates = oneGate; return f }(), []Hold{HeldGate, HeldReview}},
-		{"every value at once", func() Facts { f := threads; f.Gates = oneGate; f.Blockers = personOwed; return f }(), []Hold{HeldGate, HeldReview, HeldBlocked}},
+		{"every value at once", func() Facts { f := threads; f.Gates = oneGate; f.Owed = personOwed; return f }(), []Hold{HeldGate, HeldReview, HeldBlocked}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := Held(tc.f)

@@ -131,8 +131,45 @@ policy onto GitHub is the operator's ruling at tk-1tfzr71.20's design.
 What a person owes is a native human gate on the bead it blocks, and a
 conversation is a task. A sitting is a converse session that holds the
 conversation doctrine. Intake is slung work whose exits are native writes. The
-subsystem owns the converse, first-reaction and mechanik prompts, the converse
-skills, the operator's intake and the terminal surfaces.
+subsystem owns the converse, first-reaction, mechanik and po prompts, the
+converse skills and the po's refinement skill, the operator's intake and the
+terminal surfaces.
+
+New work no epic holds is owed to nobody. It carries Gas City's `hold:mayor`,
+and its rig's po, a fresh on-demand session chartered as the operator's
+prioritization partner, works that queue with the operator. A hold is the next
+actor's queue, and a gate is an answer someone owes.
+
+The po takes the agent shape of Gas Town's mayor, `wake_mode = "fresh"` and
+`max_active_sessions = 1`, once for each rig: `scope = "rig"` and a rig
+worktree, `work_dir = ".gc/worktrees/<rig>/po"`. Each difference names its reason, and each
+but the last ends with an operator ruling that gives the seat the job:
+
+- **Named `po`, not `mayor`.** Gas City's defaults and Gas Town's roles aim at
+  the name `mayor`, so a seat that answers to it takes their sends. SAFe's word
+  names the job.
+- **One for each rig, where Gas Town's mayor is one for the city.** A rig's
+  queue and its epics are weighed against that rig's target, so each rig's po
+  works its own, one sitting at a time.
+- **The operator's prioritization partner, not the human's point of contact.**
+  It works backlog refinement and portfolio sync, by the operator's charter.
+- **It places, parks and moves priority once the operator agrees in a sitting,
+  where Gas Town's mayor dispatches liberally.** It owns little, and the final
+  say is the operator's.
+- **It changes no repo, where Gas Town's mayor fixes directly when that is
+  fast.** The pools do the work, and mechanik edits the town repo.
+- **It files or points, where Gas Town's mayor handles escalations.** Findings
+  and human gates carry them.
+- **It reads a rig's wake and sleep, and changes neither.** Those are the
+  operator's and mechanik's.
+- **No `gc handoff` and no carried memory.** A context carried from sitting to
+  sitting would make the seat resident again.
+- **`sleep_after_idle = "1h"` in place of `idle_timeout = "1h"`.** Gas City
+  applies no `idle_timeout` to an always-on seat, so the mayor's hour never
+  fires. The po is on demand, and it takes its hour as Gas City's idle sleep: a
+  sitting no client is attached to sleeps once the hour has passed, and the
+  operator's next attach starts a new sitting. This ends if the po runs always
+  on, as the mayor does.
 
 The trade: the first reaction stops being a bead kind of its own
 (tk-1tfzr71.17).
@@ -174,8 +211,15 @@ reason and what ends it:
   ends when Gas City gives an always-on patrol an idle interval.
 - **Reading our anchors, PR states and conversations.** Our pipeline writes them.
   This ends as tk-1tfzr71.20 and .22 land.
-- **Findings and human gates in place of mayor mail.** This ends when the mayor
-  design tk-rl8gz4b.28 rules.
+- **Findings and human gates in place of mayor mail.** Gas Town's witness mails
+  the mayor about emergencies, failures, recovered and handed-off orphans and
+  queue health. This one files findings and human gates instead, because the po
+  owns little and takes none of that load, and the operator ruled at
+  tk-rl8gz4b.29's design that it stays. This ends when an operator ruling gives
+  the po escalation handling. Gas Town's formula addresses `mayor/` by name,
+  which reaches no seat in this city, so a copy taken by import would send its
+  escalations to no reader. Such a copy keeps findings and human gates, or the
+  import is ruled (tk-1tfzr71.19).
 - **No stuck-polecat check.** The liveness sweep covers it. This ends when
   tk-1tfzr71.19 retires the sweep.
 - **The nudge order.** Gas Town's deacon does this through a command and a step
@@ -284,11 +328,6 @@ and the change that fires the trigger deletes it.
   files: the `gc.proactive_reaction=1` proof and PR bodies older than the
   managed region, among others. Trigger: no store or open PR holds the shape.
   Each goes with the member that rewrites its reader.
-- The pass for an incomplete Epic, an epic that is not a Delivery and carries no
-  hypothesis, in the close gate's `clause_epic_ruling_recorded` and I15's
-  `exempt-nohyp` arm. Each is one line that passes every epic with no hypothesis.
-  Trigger: every live Epic carries its hypothesis, and every closed one carries a
-  hypothesis or a disposition (tk-wmwcdlc.5). Carried by tk-wmwcdlc.6.
 
 ### Doctrine restated per call site
 

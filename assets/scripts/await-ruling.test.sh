@@ -17,6 +17,8 @@
 #   * the arm: the real deferred-dispatch.sh records a re-sling to the pool the
 #     last pour ran on, --on <formula>, after the route keys a pour leaves are
 #     cleared (the arm refuses a routed bead);
+#   * a wait the store already keeps (--held-by) takes no edge, and its arm,
+#     claim release and route clear land as any wait's do;
 #   * re-running converges: an edge and an arm already in place count as landed
 #     and no second edge is written;
 #   * the pool outlives the route clear: the update that clears the route keys
@@ -749,6 +751,52 @@ run tk-work --blocked-by tk-sib --formula mol-polecat-work --dry-run
 eq "$RC" 0 "--blocked-by --dry-run exits 0"
 has "$OUT" "would wait on tk-sib" "--blocked-by --dry-run names the blocker"
 eq "$(meta tk-work gc.dispatch_when_ready)" "<absent>" "--blocked-by --dry-run writes nothing"
+
+# ── a wait the store already keeps, such as one on an ancestor ─
+reset
+run tk-work --held-by tk-park --formula mol-polecat-work
+eq "$RC" 0 "--held-by: the wait lands"
+has "$OUT" "tk-work is held by a wait on tk-park; once nothing holds it, it re-slings to $POOL --on mol-polecat-work" "--held-by: the result names the wait and the re-sling"
+eq "$(grep -c '^bd dep add' "$GC_LOG" | tr -d ' ')" 0 "--held-by: no edge is written, since the store already keeps the wait"
+eq "$(meta tk-work gc.dispatch_when_ready)" "$POOL" "--held-by: the re-sling is armed to the last pour's pool"
+eq "$(meta tk-work gc.dispatch_when_ready_args)" '["--on","mol-polecat-work"]' "--held-by: the re-sling pours the formula"
+has "$(meta tk-work gc.dispatch_when_ready_reason)" "held by a wait on tk-park" "--held-by: the arm's reason names the wait"
+eq "$(meta tk-work gc.execution_routed_to)" "" "--held-by: the pour's route stamp is cleared"
+eq "$(meta tk-work resling_target)" "$POOL" "--held-by: the clear records the pool, so a retry still knows it"
+run tk-work --held-by tk-park --formula mol-polecat-work
+eq "$RC" 0 "--held-by: a re-run converges"
+eq "$(meta tk-work gc.dispatch_when_ready)" "$POOL" "--held-by: a re-run re-arms to the pool it recorded"
+
+reset
+run tk-work --held-by xx-park --formula mol-polecat-work
+eq "$RC" 0 "--held-by: a wait on a bead in another store's id takes no edge, so no store check refuses it"
+
+reset
+claim in_progress hq-me
+OUT=$(env "${SELF[@]}" "$SCRIPT" tk-work --held-by tk-park --formula mol-polecat-work 2>&1); RC=$?
+eq "$RC" 0 "--held-by: a claim in this session's name is released before the arm"
+eq "$(field tk-work status)" open "--held-by: the released bead reads open"
+eq "$(field tk-work assignee)" "" "--held-by: the released bead reads unassigned"
+
+reset
+claim in_progress hq-live
+OUT=$(env "${SELF[@]}" FAKE_SESSIONS="$LIVE_LIST" "$SCRIPT" tk-work --held-by tk-park --formula mol-polecat-work 2>&1); RC=$?
+eq "$RC" 1 "--held-by: a claim a listed owner holds is kept, and no wait is recorded"
+eq "$(meta tk-work gc.dispatch_when_ready)" "<absent>" "--held-by: …and nothing is armed"
+
+run tk-work --held-by tk-park --blocked-by tk-sib --formula mol-polecat-work
+eq "$RC" 2 "--held-by with --blocked-by is a usage error"
+run tk-work --held-by tk-park --key x --formula mol-polecat-work
+eq "$RC" 2 "--held-by with --key is a usage error"
+run tk-work --held-by tk-park --subject tk-anchor --formula mol-polecat-work
+eq "$RC" 2 "--held-by with --subject is a usage error"
+run tk-work --held-by --formula mol-polecat-work
+eq "$RC" 2 "--held-by with no value is a usage error"
+reset
+run tk-work --held-by tk-park --formula mol-polecat-work --dry-run
+eq "$RC" 0 "--held-by --dry-run exits 0"
+has "$OUT" "would wait on tk-park" "--held-by --dry-run names the wait"
+eq "$(meta tk-work gc.dispatch_when_ready)" "<absent>" "--held-by --dry-run writes nothing"
 
 echo
 echo "await-ruling.test.sh: $PASS passed, $FAIL failed"

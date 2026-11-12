@@ -30,7 +30,7 @@ const (
 	// stateParked: the bead waits on a person. It waits on an open gate a
 	// person releases or on a demand, which holds its work, it is routed to the
 	// operator, or a conversation about it waits in the operator's queue, which
-	// holds nothing.
+	// holds none of its work.
 	stateParked = "parked"
 	// stateQueued: the bead waits its turn. It waits on open work or on a gate
 	// the city resolves by itself, or it carries a pool route, an arm or an
@@ -55,8 +55,10 @@ type beadState struct {
 	// waits is the open blockers behind a queued or parked bead: the work it
 	// waits its turn behind, or the gates a person holds it at. Oldest first.
 	waits []Blocker
-	// unread counts the open waits the source recorded without a blocker it
-	// could read, so a phrase can count them without naming them.
+	// unread counts the waits the source recorded and could not read: a wait
+	// with no blocker record behind it, or one the store did not answer
+	// ([WaitUnread]). A phrase counts them without naming them, and the bead
+	// waits its turn behind them, because nothing says whether they hold it.
 	unread int
 	// selfStart says a queued bead starts without anyone acting once nothing
 	// holds it: it carries a pool route, an arm, or an assignee.
@@ -79,8 +81,16 @@ type stateInput struct {
 	assignee string
 	metadata map[string]string
 	blockers []Blocker
-	// unread is the open waits with no blocker record behind them.
-	unread int
+	// unhydrated is the open waits the source recorded with no blocker record
+	// behind them.
+	unhydrated int
+}
+
+// unread is the input's recorded waits the source could not read
+// ([beadState.unread]): the ones with no blocker record behind them, and the
+// blockers the store did not answer.
+func (in stateInput) unread() int {
+	return in.unhydrated + unreadWaits(in.blockers)
 }
 
 // childInput is a child's [stateInput].
@@ -89,28 +99,27 @@ func childInput(c Child) stateInput {
 }
 
 // anchorInput is an anchor row's own [stateInput]. waitingOpen is the anchor's
-// open waits from [waitingSplit]; an id among them that no open blocker carries
-// is a wait the source recorded but could not read, and counts as unread.
+// open waits from [waitingSplit]; an id among them that no blocker record
+// carries is a wait the source recorded but did not hydrate.
 func anchorInput(a Anchor, waitingOpen []string) stateInput {
-	read := make(map[string]bool, len(a.Blockers))
+	hydrated := make(map[string]bool, len(a.Blockers))
 	for _, b := range a.Blockers {
-		if b.Status != "closed" {
-			read[b.ID] = true
-		}
+		hydrated[b.ID] = true
 	}
-	unread := 0
+	n := 0
 	for _, id := range waitingOpen {
-		if !read[id] {
-			unread++
+		if !hydrated[id] {
+			n++
 		}
 	}
-	return stateInput{id: a.ID, metadata: a.Metadata, blockers: a.Blockers, unread: unread}
+	return stateInput{id: a.ID, metadata: a.Metadata, blockers: a.Blockers, unhydrated: n}
 }
 
 // deriveState names the state a bead is in by itself, read off its own graph
 // and live work. Live work comes first, because it is what moves the bead
 // whatever else holds it. A pull request comes before a conversation, because
-// the conversation about a pull request does not stop the city landing it. A
+// the conversation about a pull request holds only its merge, while its review
+// and its reworks go on, and the PR's own row names that hold. A
 // person's hold comes before open work, because the work cannot start the bead
 // while a person holds it.
 func deriveState(in stateInput, f Facts) beadState {
@@ -125,24 +134,29 @@ func deriveState(in stateInput, f Facts) beadState {
 	}
 	gates, work := splitWaits(in.blockers)
 	routed := in.metadata[mdRoutedTo] == routedHuman
-	if len(gates) > 0 || routed || f.human.holds(in.id) {
-		talk := len(gates) == 0 && !routed && !f.human.holdsWork(in.id)
+	gated := f.human.parksWork(in.id, in.blockers)
+	if len(gates) > 0 || routed || gated || f.human.tracks(in.id) {
+		talk := len(gates) == 0 && !routed && !gated
 		return beadState{kind: stateParked, waits: gates, conversationOnly: talk}
 	}
 	selfStart := poolRoute(in.metadata) || in.metadata[mdDispatchWhenReady] != "" ||
 		(in.assignee != "" && in.status != "in_progress")
-	if len(work) > 0 || in.unread > 0 || selfStart {
-		return beadState{kind: stateQueued, waits: work, unread: in.unread, selfStart: selfStart}
+	if unread := in.unread(); len(work) > 0 || unread > 0 || selfStart {
+		return beadState{kind: stateQueued, waits: work, unread: unread, selfStart: selfStart}
 	}
 	return beadState{kind: stateStranded}
 }
 
-// splitWaits sorts a bead's open blockers into the ones a person holds it at
-// and the ones it waits its turn behind, each oldest first.
+// splitWaits sorts the waits the store says still hold a bead ([WaitPending])
+// into the ones a person holds it at and the ones it waits its turn behind,
+// each oldest first. A wait the store did not answer is in neither, because
+// a wait the bead's blockers carry holds it by the store's answer alone, a
+// gate's own row included ([humanIndex.parksWork]), and [stateInput.unread]
+// counts it.
 func splitWaits(blockers []Blocker) (gates, work []Blocker) {
 	for _, b := range blockers {
 		switch {
-		case b.Status == "closed":
+		case b.Wait != WaitPending:
 		case heldByPerson(b):
 			gates = append(gates, b)
 		default:
@@ -150,6 +164,17 @@ func splitWaits(blockers []Blocker) (gates, work []Blocker) {
 		}
 	}
 	return oldestFirst(gates), oldestFirst(work)
+}
+
+// unreadWaits counts the waits the store did not answer ([WaitUnread]).
+func unreadWaits(blockers []Blocker) int {
+	n := 0
+	for _, b := range blockers {
+		if b.Wait == WaitUnread {
+			n++
+		}
+	}
+	return n
 }
 
 // stateOf names the state a bead is in. It is the bead's own state
@@ -189,8 +214,8 @@ type hold struct {
 	// waits is the ancestors' open waits that make the hold, oldest first: the
 	// gates and demands of a parked hold, or the work of a queued one.
 	waits []Blocker
-	// unread counts the open waits of a queued hold that the source recorded
-	// without a blocker it could read.
+	// unread counts the open waits of a queued hold that the source could not
+	// read ([beadState.unread]).
 	unread int
 }
 
@@ -268,7 +293,7 @@ func waitHold(a Anchor) hold {
 	case len(gates) > 0:
 		return hold{kind: stateParked, waits: gates}
 	case len(open) > 0:
-		return hold{kind: stateQueued, waits: work, unread: in.unread}
+		return hold{kind: stateQueued, waits: work, unread: in.unread()}
 	}
 	return hold{}
 }
@@ -442,12 +467,13 @@ func oldestFirst(bs []Blocker) []Blocker {
 }
 
 // rowFrontier is a takeaway row's frontier phrase for its own state, counting
-// the open waits it has. A row its ancestors hold says so, and a queued row
-// that starts by itself says that. With no wait to count and no ancestor
-// holding it, a takeaway row waits on a person through a human gate, which
-// holds its work, or through a conversation waiting in the operator's queue,
-// which holds nothing, and the phrase says which: a row routed to the operator
-// takes [frontier]'s human-gated phrases instead.
+// the open waits it has and, among them, the ones the source could not read,
+// whose hold on the row no state can name. A row its ancestors hold says so,
+// and a queued row that starts by itself says that. With no wait to count and
+// no ancestor holding it, a takeaway row waits on a person through a human
+// gate, which holds its work, or through a conversation waiting in the
+// operator's queue, which holds none of it, and the phrase says which: a row
+// routed to the operator takes [frontier]'s human-gated phrases instead.
 func rowFrontier(s beadState, nOpen int) string {
 	if s.kind == stateParked && nOpen == 0 && !s.inherited {
 		if s.conversationOnly {
@@ -458,6 +484,9 @@ func rowFrontier(s beadState, nOpen int) string {
 	phrase := s.kind
 	if nOpen > 0 {
 		phrase += fmt.Sprintf(" · waiting on %d", nOpen)
+	}
+	if s.unread > 0 && !s.inherited {
+		phrase += fmt.Sprintf(" · %d unread", s.unread)
 	}
 	if s.inherited {
 		phrase += " · held by an ancestor's wait"

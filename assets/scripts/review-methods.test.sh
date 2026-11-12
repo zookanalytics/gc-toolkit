@@ -53,9 +53,25 @@
 #     method's What to check list nor any dimension of it. The correctness
 #     method is method alone: it carries no shell block and reads no record
 #     itself, because the review formula gathers what it reads.
+#   - The pm method says when triage adds it, in words that name no rig: a
+#     diff that changes what the rig's product does for the people it serves,
+#     or what it promises them, and always a diff that changes the product
+#     goals page. An edit that changes neither what the product does nor what
+#     it promises, and tests, do not warrant it. When a rig keeps no product
+#     goals, a pm review judges the change against its anchor alone and asks
+#     the change for no page. It files one request for the page under one
+#     token, and its duplicate probe counts a request that has closed. The
+#     method defines that page without the foundation doc only this repo keeps.
+#   - This repo's own docs/review-triage.md, read the way a review reads it at
+#     its commit, carries the changes that make pm mandatory and the edits that
+#     do not.
 #   - The arch skill approves no commit without a docs/architecture.md, files a
 #     gap in architecture the change does not touch without holding the change,
-#     and passes no change on a gap in architecture it does touch. This repo's
+#     and passes no change on a gap in architecture it does touch. It files an
+#     aggravated pattern's rearchitecture through mol-review's probe under a
+#     token that names the pattern, after listing the patterns already filed
+#     from the file of its first instance, so one pattern keeps one bead and
+#     another that starts in the same file keeps its own. This repo's
 #     own docs/review-arch.md and docs/review-triage.md, read the way a review
 #     reads them at its commit, carry the divergence lens and the changes that
 #     make arch mandatory, and the pack's arch skill carries none of that lens.
@@ -236,6 +252,28 @@ hasF "$ARCH_SKILL" '`docs/architecture.md: incomplete`' "…and files the rest o
 hasF "$ARCH_SKILL" 'File it the same way, and do not hold the change for it.' "…files a gap the change does not touch without holding the change for it"
 hasF "$ARCH_SKILL" 'A gap in the architecture the change does touch is no reason to pass the change' "…and passes no change on a gap in the architecture it touches"
 notF "$ARCH_SKILL" 'not a reason to pass or fail the change' "…so no missing reference lets a change through unjudged"
+# An aggravated pattern's token and listing, read from the skill and built for
+# two patterns whose first instance is one file, one name beginning the other.
+# mol-review titles the bug "<what is wrong> (<token>)", and its probe and the
+# listing take each bug whose title holds the text in any case, as bd's
+# --title-contains does.
+P_PATH="<the path of the pattern's first instance>"; P_NAME="<the pattern's name>"
+FORM=$(flat "$ARCH_SKILL" | grep -o "\`$P_PATH: aggravated[^\`]*\`" | head -n 1 | tr -d '`')
+LISTED=$(flat "$ARCH_SKILL" | grep -o -- "--title-contains \"$P_PATH: aggravated[^\"]*\"" | head -n 1 | cut -d'"' -f2)
+LISTED=${LISTED//"$P_PATH"/lib/client.ts}
+token() { local t=${FORM//"$P_PATH"/lib/client.ts}; printf '%s' "${t//"$P_NAME"/$1}"; }
+holds() { grep -qiF -- "$2" <<< "$1"; }
+ONE=$(token 'retry'); TWO=$(token 'retry loop')
+T_ONE="Three clients retry by hand ($ONE)"; T_TWO="Three clients loop on a refused call ($TWO)"
+if [ -n "$FORM" ] && ! holds "$T_TWO" "$ONE" && ! holds "$T_ONE" "$TWO"; then
+  ok "…files an aggravated pattern's rearchitecture under a token that names the pattern, so another pattern from the same file keeps its own bead"
+else bad "…files an aggravated pattern's rearchitecture under a token that names the pattern" "form '$FORM' gives '$ONE' and '$TWO'"; fi
+if [ -n "$LISTED" ] && holds "$T_ONE" "$LISTED" && holds "$T_TWO" "$LISTED"; then
+  ok "…lists the patterns already filed from that file"
+else bad "…lists the patterns already filed from that file" "listing '$LISTED'"; fi
+hasF "$ARCH_SKILL" 'When one of them is the pattern this change adds to, use the token at the end of its title.' \
+  "…and takes a listed pattern's token when the change adds to it, so one pattern keeps one bead"
+notF "$ARCH_SKILL" 'bd create' "…and files every follow-up through mol-review's probe, never a create of its own"
 notF "$ARCH_SKILL" 'divergence lens' "the pack's arch skill, which every rig's arch review loads, carries none of gc-toolkit's lens"
 # This checkout's guidance, committed in a scratch repository and read back
 # through --extension at that commit, the read load-dispatch makes for a review.
@@ -251,6 +289,9 @@ hasF "$TMP/own.arch" 'A converter is a finding on sight.' "…makes a converter 
 hasF "$TMP/own.arch" 'neither are tests or the fixtures they use' "…and leaves tests out of operational surface"
 hasF "$TMP/own.triage" '## When `arch` is mandatory' "this repo's triage guidance says when the arch check is mandatory"
 hasF "$TMP/own.triage" 'does not make `arch` mandatory' "…and that a diff of tests alone does not make it so"
+hasF "$TMP/own.triage" '## When `pm` is mandatory' "…says when the pm check is mandatory"
+hasF "$TMP/own.triage" 'does not make `pm` mandatory, and neither do tests and the fixtures they use' \
+  "…and that an edit changing no behavior, or a test, does not make it so"
 
 echo "# a region the review formulas repeat is one text in every step carrying it"
 python3 - "$ROOT/formulas/mol-review.toml" "$ROOT/formulas/mol-review-quorum-signoff.toml" > "$TMP/regions" <<'PY'
@@ -545,6 +586,23 @@ hasF "$DEMO" 'line can name another size, such as `390x844`, or a device the eng
 hasF "$DEMO" 'A `resize <width>x<height>` step changes the size from that step on.' "…as a resize step can"
 hasF "$ROOT/skills/review-pm/SKILL.md" "whether a visual proves its claim and whether a screen or message meets the rig's standards." \
   "the pm method leaves the rig's standards to the demo check"
+
+echo "# the pm method says when triage adds it, and asks a rig once for missing product goals"
+PM="$ROOT/skills/review-pm/SKILL.md"
+awk '/^### When triage adds it$/ {f = 1; next} f && /^#/ {exit} f' "$PM" > "$TMP/pm.triage"
+hasF "$TMP/pm.triage" "Triage adds \`pm\` when the diff changes what the rig's product does for the people it serves, or what it promises them" \
+  "triage adds pm for a change to what the rig's product does for the people it serves"
+hasF "$TMP/pm.triage" 'including a fix that changes how the product behaves for them' "…a fix that changes how it behaves for them included"
+hasF "$TMP/pm.triage" 'A diff that adds or changes that page makes this check mandatory.' "…and always for a change to the product goals page"
+hasF "$TMP/pm.triage" 'An edit that changes neither what the product does for the people it serves nor what it promises them, such as a refactor, a typo fixed or a link mended, needs no product review.' \
+  "…but not for an edit that changes neither what the product does for them nor what it promises them"
+hasF "$TMP/pm.triage" 'neither do tests and the fixtures they use' "…or for tests and their fixtures"
+awk '/^### A rig with no product goals$/ {f = 1; next} f && /^#/ {exit} f' "$PM" > "$TMP/pm.missing"
+hasF "$TMP/pm.missing" "judge the change against the anchor's stated problem alone" "with no product goals, a pm review judges the change against its anchor alone"
+hasF "$TMP/pm.missing" 'no finding asks the change to add it' "…asks the change for no page"
+hasF "$TMP/pm.missing" '`docs/product-goals.md: missing`' "…files one request for the page under one token"
+hasF "$TMP/pm.missing" "Add \`--all\` to that duplicate probe's \`gc bd list\`" "…whose duplicate probe counts a request that has closed"
+notF "$PM" 'reading of `docs/foundation.md`' "the pm method defines the goals page without the foundation doc only this repo keeps"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

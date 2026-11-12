@@ -10,9 +10,9 @@
 # unless the call passes --include-infra. That is stricter than bd, which lists
 # them for an explicit --type molecule too, and it holds the wisp probe to the
 # patrol formula's own wisp lookup, --type molecule --include-infra. A bead
-# something holds (hold-lib.sh) is not queue, because find-work leaves it, and a
-# wait is aged from the close that released its last hold when that is later
-# than its last write. The last section pins the queue probe to the filters
+# something holds, by the answer of the gctk bead holds this checkout builds,
+# is not queue, because find-work leaves it, and a wait is aged from the close
+# that landed its last wait when that is later than its last write. The last section pins the queue probe to the filters
 # find-work-select uses, so the queue this check ages stays the queue the patrol
 # takes from.
 set -uo pipefail
@@ -70,6 +70,18 @@ roster() { printf '%s\n' "$@" | jq -s --arg tmp "$TMP" '{agents: ., rigs: [
     {name: "cold",  path: ($tmp + "/cold"),  suspended: true}]}' > "$STATUS_JSON"; }
 
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
+# A read the gctk under test makes answers from the store its --db names,
+# through the seam holds-store.stub.sh keeps, and is logged with a "holds"
+# prefix. BD_ID_FAIL_STORE fails each such read in its store.
+if [ -n "${HOLDS_STUB_READ:-}" ] && [ "${1:-}" = "bd" ]; then
+  printf 'holds %s\n' "$*" >> "$CALLS"
+  shift
+  db=""; [ "${1:-}" = "--db" ] && db="${2:-}"
+  rig=$(basename "$(dirname "$db")")
+  [ "$rig" = "${BD_ID_FAIL_STORE:-}" ] && exit 3
+  f="$STORES/$rig.json"; [ -f "$f" ] || f=/dev/null
+  HOLDS_STORE="$f" exec "${HOLDS_STUB:?}" answer "$@"
+fi
 printf '%s\n' "$*" >> "$CALLS"
 [ "${1:-}" = "--city" ] && shift 2
 case "${1:-} ${2:-}" in
@@ -114,6 +126,11 @@ case "${1:-} ${2:-}" in
 esac
 GC
 chmod +x "$TMP/bin/gc"
+# What holds a queued bead is the answer of gctk bead holds, built from this
+# checkout and run over the stub stores above.
+export HOLDS_STUB="$REPO/assets/scripts/holds-store.stub.sh" GC_NO_API=1
+GCTK_BIN="$("$HOLDS_STUB" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so no hold can be read"; exit 1; }
+export GCTK_BIN
 
 run() { OUT="$(env PATH="$TMP/bin:$PATH" GC_CITY_PATH="$TMP/city" GC_PACK_DIR="$REPO" "$@" bash "$CHECK" 2>&1)"; RC=$?; }
 
@@ -223,8 +240,8 @@ has "$OUT" "$A: suspended, so its patrol is not expected to cycle" "and is repor
 default_roster
 
 echo "── 12. read-only ──"
-others=$(grep -vE '^(--city [^ ]+ )?(status --json|bd list )' "$CALLS" || true)
-eq "$others" "" "every call the check made was a status read or a bd list"
+others=$(grep -vE '^(--city [^ ]+ )?(status --json|bd list )|^holds bd --db [^ ]+ (list|blocked|sql) ' "$CALLS" || true)
+eq "$others" "" "every call the check made was a status read, a bd list, or a read gctk bead holds makes"
 hasnt "$(cat "$CALLS")" "$TMP/cold/.beads" "a suspended rig's store is never queried"
 
 echo "── 13. a bead something holds is not queue ──"
@@ -235,7 +252,7 @@ store alpha "$LANDING" "$(blocker tk-e1 open)" "$(blocker tk-sum open)" "$(wisp 
 run
 eq "$RC" "0" "a queue holding only a held landing bead, beside a wisp rested past the bound, is idle"
 has "$OUT" "$A: nothing in its find-work queue is free to take, so a resting patrol is idle" "the idle refinery says nothing is free to take"
-has "$OUT" "$A: find-work leaves its held bead(s) until their blockers close: tk-land waits on tk-e1 \"blocker tk-e1\" (+1 more)" \
+has "$OUT" "$A: find-work leaves its held bead(s) until their waits land: tk-land waits on tk-e1 \"blocker tk-e1\" (+1 more)" \
     "the held bead is a note naming what holds it"
 hasnt "$OUT" "STALLED" "a held landing bead is no stall"
 store alpha "$LANDING" "$(blocker tk-e1 open)" "$(blocker tk-sum open)" "$(work tk-old "$A" 5430)" "$(wisp tk-wisp-stale "$A" 4230)"
@@ -257,21 +274,32 @@ store alpha "$UNDER" "$EPIC" "$(blocker tk-park open "" gate)" "$(wisp tk-wisp-s
 run
 eq "$RC" "2" "a handoff under a parked epic is queue, so its rested patrol is stalled"
 has "$OUT" "$A: STALLED. 1 bead(s) wait in its find-work queue, the oldest (tk-under)" "the park on its epic holds none of it"
+# An edge onto a bead the store does not hold points into another store and
+# holds nothing, so the bead is queue.
 store alpha "$(blocked "$(work tk-ghosted "$A" 5430)" tk-ghost)" "$(wisp tk-wisp-stale "$A" 4230)"
 run
-eq "$RC" "1" "a bead held only by a blocker the store does not return warns"
-has "$OUT" "$A: find-work will not take bead(s) held only by a blocker the store does not return, until that blocker reads back or the edge goes: tk-ghosted waits on tk-ghost (unreadable)" \
-    "the warning names the bead and the blocker"
-hasnt "$OUT" "STALLED" "and it is no stall, since find-work never takes it"
+eq "$RC" "2" "a bead whose only blocker the store does not hold is queue, so its rested patrol is stalled"
+has "$OUT" "$A: STALLED. 1 bead(s) wait in its find-work queue, the oldest (tk-ghosted)" "the edge into another store holds none of it"
+# A waits-for edge of the bead's own is one the store cannot judge yet, so
+# find-work leaves the bead, and the note shows the edge as unjudged.
+WAITER=$(work tk-wf "$A" 5430 | jq -c '.dependencies = [{issue_id: "tk-wf", depends_on_id: "tk-spawn", type: "waits-for"}]')
+store alpha "$WAITER" "$(blocker tk-spawn closed 7230)" "$(wisp tk-wisp-stale "$A" 4230)"
+run
+eq "$RC" "0" "a queue holding only a bead with a waits-for edge of its own is idle"
+has "$OUT" "$A: find-work leaves its held bead(s) until their waits land: tk-wf waits on tk-spawn \"blocker tk-spawn\" (waits-for, unjudged)" \
+    "the note shows the edge as unjudged"
 store alpha "$LANDING" "$(blocker tk-e1 open)" "$(blocker tk-sum open)" "$(wisp tk-wisp-stale "$A" 4230)"
 run BD_ID_FAIL_STORE=alpha
-eq "$RC" "1" "a hold walk that cannot read warns"
+eq "$RC" "1" "a bead read that cannot read warns"
 has "$OUT" "$A: could not read what holds the beads in its find-work queue in $TMP/alpha/.beads, so this refinery was NOT checked" \
     "naming the refinery it could not check"
 has "$OUT" "$B: find-work queue empty" "while the other refinery is still read"
 store alpha "$(work tk-old "$A" 5430)" "$(wisp tk-wisp-stale "$A" 4230)"
 run BD_ID_FAIL_STORE=alpha
-eq "$RC" "2" "a queue whose beads carry no blocker needs no hold read"
+eq "$RC" "1" "a failed read leaves the refinery unchecked whatever its queue carries"
+run GCTK_BIN="$TMP/no-gctk"
+eq "$RC" "1" "with no gctk to run, the refinery is unchecked"
+has "$OUT" "$A: could not read what holds the beads in its find-work queue" "and the check says so"
 
 echo "── 14. the queue is find-work's queue ──"
 FW_BLOCK=$(sed -n '/# >>> find-work-select/,/# <<< find-work-select/p' "$REPO/formulas/mol-refinery-patrol.toml")
@@ -291,8 +319,8 @@ for f in $FW_FLAGS; do
 done
 has "$FW_BLOCK" 'select((.metadata.merge_result // "") == "")' "find-work drops a bead carrying merge_result"
 has "$(cat "$CHECK")" 'select(((.metadata.merge_result // "") | tostring) == "")' "and so does the check"
-has "$FW_BLOCK" 'hold_annotate' "find-work leaves a bead hold-lib.sh says is held"
-has "$(cat "$CHECK")" 'hold_annotate' "and so does the check"
+has "$FW_BLOCK" '"$GCTK" bead holds' "find-work leaves a bead gctk bead holds says is held"
+has "$(cat "$CHECK")" '"$GCTK" bead holds' "and so does the check"
 
 echo
 echo "── $PASS passed, $FAIL failed ──"

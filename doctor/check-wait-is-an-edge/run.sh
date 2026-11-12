@@ -24,12 +24,21 @@
 # structural and the marker still stands beside it, so nothing here is a
 # blanked hold.
 #
-# Two degrees, reported apart because their remedies differ: UNEDGED, where the
-# bead carries no `blocks` edge at all and one has to be filed, and STALE,
-# where every blocker it names has closed or lives in another store, so the
-# marker has outlived its edge. Both are one defect and take one posture, which
-# lifecycle.toml declares in `hold_severity`: a warning while the standing
-# backlog of marker-only holds is converted, an error once it is.
+# Whether a held bead still waits is its own pending waits, as `gctk bead holds`
+# answers them (docs/gctk-architecture.md, "The bead holds contract"): a wait of
+# the store's blocked rule onto a bead in the same store that is neither closed
+# nor pinned. One read per store answers every live bead that carries a marker
+# or a wait edge.
+#
+# Three degrees, reported apart because their remedies differ: UNEDGED, where
+# the bead carries no wait edge at all and one has to be filed; STALE, where
+# every wait it names has landed, is pinned or lives in another store, so the
+# marker has outlived its edge; and FOREIGN, a wait edge of any live bead,
+# marked or not, onto a bead in another store, which `bd dep add` accepts and
+# which holds nothing. They take one posture, which lifecycle.toml declares in
+# `hold_severity`: a warning while the standing backlog of marker-only holds is
+# converted, an error once it is. A waits-for edge, which the store cannot
+# judge yet, is noted as unjudged.
 # Read-only. Exit 0=OK 1=Warning 2=Error. stdout: first line = message, then
 # "  - detail" lines. Live probes are bounded; an UNREADABLE probe warns (1),
 # never passes.
@@ -37,10 +46,6 @@
 set -u
 
 dir="${GC_PACK_DIR:-.}"
-# Blockers the live listing does not carry resolve through a batched
-# `gc bd show`, split so a store with a large candidate set cannot build an
-# argv past the exec limit.
-CHUNK="${GC_DOCTOR_WAIT_CHUNK:-100}"
 # How many findings are PRINTED, not how many are found: every count in the
 # headline is taken before this cap, so no value here can make a store read as
 # clean. 0 prints all, which is what draining the backlog wants.
@@ -115,11 +120,12 @@ SETTLED_JSON=$(printf '%s\n' "$settled_keys" | jq -R '
     | {key: .[0:$i], value: .[$i+1:]}
     | select(.key != "" and .value != "")' | jq -cs 'from_entries')
 
-# The separator the jq programs join their fields on and every reader splits
-# on. Held once so no caller spells it differently.
-US=$'\037'
-
-stale=(); unedged=(); warnings=(); notes=()
+stale=(); unedged=(); foreign=(); warnings=(); notes=()
+# What holds a bead is the answer of `gctk bead holds`, from the binary the city
+# builds.
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 # >>> doctor-budget
 # One deadline for the whole check, anchored at process start. `gc doctor
 # --check-timeout` (default 60s) abandons an overrunning check and discards
@@ -177,20 +183,15 @@ scrub() { tr -d '\000-\037'; }
 
 # ---------------------------------------------------------------------------
 # One pass over a store's live listing. Emits, for each live bead carrying a
-# hold marker that the same listing shows no live blocker for:
-#   <id> US <status> US <marker=value; ...> US <blocks-target-ids,comma>
+# hold marker:
+#   <id> US <status> US <marker=value; ...> US <wait-target-ids,comma>
 #
-# The blocking edges ride along from that one listing, which is what holds the
-# check to a single query per store: `bd list --json` puts each bead's outgoing
-# dependency rows on the bead itself, keyed `.type` with the target in
-# `.depends_on_id`, while `bd show` keys the same edge `.dependency_type` with
-# the target in `.id`. Both spellings are read, so neither shape can silently
-# return no edges at all.
-#
-# A blocker still in the listing is a live bead in this store and answers the
-# hold. Every other blocker goes to the resolve pass, because absent from a
-# listing means closed, or in another store, or in a category the listing
-# hides, and those are three different answers.
+# The wait edges ride along from that one listing: `bd list --json` puts each
+# bead's outgoing dependency rows on the bead itself, keyed `.type` with the
+# target in `.depends_on_id`, while `bd show` keys the same edge
+# `.dependency_type` with the target in `.id`. Both spellings are read, so
+# neither shape can silently return no edges at all. Whether a wait is still
+# pending is the bead read's to answer, not this listing's.
 # ---------------------------------------------------------------------------
 # shellcheck disable=SC2016  # $mkeys and friends are jq variables fed by --arg; shell expansion here would be the bug
 WAIT_JQ='
@@ -202,7 +203,6 @@ def clip: if (length > 60) then (.[0:57] + "...") else . end;
 def unsettled($m; $k): ($settled[$k] // "") as $sk
     | $sk == "" or (($m[$sk] | txt) | length) == 0;
 [ .[]? | select(((.id // "") | tostring) != "") ] as $beads
-| ( [ $beads[] | (.id | tostring) ] ) as $liveids
 | $beads[]
 | . as $b
 | ($b.id | tostring) as $id
@@ -221,10 +221,10 @@ def unsettled($m; $k): ($settled[$k] // "") as $sk
       | $k + "=" + ($v | clip) ] | sort ) as $marks
 | select(($marks | length) > 0)
 | ( [ ($b.dependencies // [])[]
-      | select(((.type // .dependency_type // "") | tostring) == "blocks")
+      | select(((.type // .dependency_type // "") | tostring) as $t
+               | $t == "blocks" or $t == "conditional-blocks" or $t == "waits-for")
       | ((.depends_on_id // .id // "") | tostring)
       | select(. != "") ] | unique ) as $blk
-| select(($blk | any(. as $c | ($liveids | index($c)) != null)) | not)
 | [ $id, $st, ($marks | join("; ")), ($blk | join(",")) ]
 | join("\u001f")
 '
@@ -305,95 +305,103 @@ while IFS=$'\037' read -r rig_name rig_path hq suspended; do
         warnings+=("$label: could not read hold markers off the live listing — this store was NOT checked")
         continue
     fi
-    # A store with nothing held is judged: counting it is what makes "across N
-    # store(s)" mean the answer covered N stores, not that N were opened.
-    if [ -z "$rows" ]; then checked=$((checked + 1)); continue; fi
 
-    # Blockers the live listing did not carry. Whitespace is stripped per LINE:
-    # a `tr -d` after the split would delete the newlines the split just made
-    # and collapse every id into a single token.
-    unknown=$(printf '%s\n' "$rows" | awk -F'\037' 'NF>=4 && $4 != "" {print $4}' \
-        | tr ',' '\n' | sed 's/[[:space:]]//g' | grep -v '^$' | sort -u)
-
-    resolved='{}'; chunk=(); chunk_failed=""
-    flush_chunk() {
-        local out rc merged
-        [ "${#chunk[@]}" -ne 0 ] || return 0
-        out=$(run_bounded "${SCOPE[@]}" show "${chunk[@]}" --json 2>/dev/null); rc=$?
-        out=$(printf '%s' "$out" | scrub)
-        if [ -z "$out" ]; then chunk_failed="rc=$rc, no output"; return 1; fi
-        # `bd show` EXITS non-zero when nothing in the batch resolved, printing
-        # a well-formed no-matches error on stdout. That is a determinate
-        # answer — no id in the batch names a bead here — and not a failed
-        # read. Narrow on purpose: any other non-zero exit fails the store
-        # closed.
-        if [ "$rc" -ne 0 ] \
-           && ! printf '%s' "$out" | jq -e 'type == "object"
-                   and ((.error // "") | test("no issues? found"; "i"))' >/dev/null 2>&1; then
-            chunk_failed="rc=$rc"; return 1
-        fi
-        # An ARRAY when at least one id resolves, a bare OBJECT when none does.
-        # Projected to id -> status: the bodies are large and nothing below
-        # reads anything else off them.
-        merged=$(printf '%s' "$out" | jq -c --argjson a "$resolved" '
-            if type == "array" then
-                $a + ([ .[] | {key: (.id // "" | tostring),
-                               value: (.status // "?" | tostring)} ]
-                      | map(select(.key != "")) | from_entries)
-            elif type == "object" then $a
-            else null end' 2>/dev/null)
-        if [ -z "$merged" ] || [ "$merged" = "null" ]; then chunk_failed="unparseable"; return 1; fi
-        resolved="$merged"; chunk=(); return 0
-    }
-    while IFS= read -r cid; do
-        [ -n "$cid" ] || continue
-        chunk+=("$cid")
-        if [ "${#chunk[@]}" -ge "$CHUNK" ]; then flush_chunk || break; fi
-    done <<UNKNOWN_EOF
-$unknown
-UNKNOWN_EOF
-    [ -n "$chunk_failed" ] || flush_chunk || true
-    if [ -n "$chunk_failed" ]; then
-        # A partial resolve reports a live blocker as a dead one, which is an
-        # invented error, and buries the real ones behind it.
-        warnings+=("$label: could not resolve the blockers named by held beads ($chunk_failed) — this store was NOT checked")
+    # Each live bead's status, which the note and the verdicts below read. It and
+    # the marked rows reach jq as files, since both grow with the store and an
+    # argument past the kernel's cap fails the program. A pass below that does
+    # not run leaves the store NOT checked, since a verdict nobody computed is
+    # not a clean one.
+    statuses=$(printf '%s' "$live_json" | jq -c '[.[] | {key: ((.id // "") | tostring), value: ((.status // "") | tostring)}] | from_entries' 2>/dev/null) || statuses=""
+    if [ -z "$statuses" ]; then
+        warnings+=("$label: could not read the live beads' statuses off the listing — this store was NOT checked")
         continue
+    fi
+
+    # What holds each live bead that carries a marker or a wait edge, in one
+    # read of the store: a bead with neither has no wait to be pending and none
+    # to point into another store. A read that answers none of them is the
+    # store's read failing, so the store is NOT checked; a bead it could not
+    # answer is left out, and warned.
+    holds='{}'
+    ids=$(printf '%s' "$live_json" | jq -r --rawfile rows <(printf '%s' "$rows") '
+        ($rows | split("\n") | map(select(length > 0) | split("\u001f")[0])) as $marked
+        | [ .[] | ((.id // "") | tostring) as $id | select($id != "")
+            | select(($marked | index([$id])) != null
+                     or any((.dependencies // [])[]?; ((.type // .dependency_type // "") | tostring) as $t
+                            | $t == "blocks" or $t == "conditional-blocks" or $t == "waits-for"))
+            | $id ] | join(" ")' 2>/dev/null) || {
+        warnings+=("$label: could not list the beads to ask what holds them — this store was NOT checked")
+        continue
+    }
+    if [ -n "$ids" ]; then
+        holds=""
+        # shellcheck disable=SC2086  # one id per word
+        [ -x "$GCTK" ] && holds=$(run_bounded "$GCTK" bead holds --db "$rig_path/.beads" $ids 2>/dev/null | scrub \
+            | jq -s -c 'map(select(type == "object" and (.id // "") != "") | {key: .id, value: .}) | from_entries' 2>/dev/null)
+        if [ -z "$holds" ] || ! printf '%s' "$holds" | jq -e 'any(.[]; .error == null)' >/dev/null 2>&1; then
+            warnings+=("$label: could not read what holds its live beads (gctk bead holds at $GCTK answered none) — this store was NOT checked")
+            continue
+        fi
+        unread=$(printf '%s' "$holds" | jq -r '[.[] | select(.error != null) | .id] | join(", ")' 2>/dev/null)
+        [ -z "$unread" ] || warnings+=("$label: could not read what holds $unread — those beads were NOT checked")
+    fi
+
+    # Each marked bead's verdict, in one pass over the answers: live while a wait
+    # of its own is pending, unedged with no wait edge at all, stale otherwise,
+    # naming why each wait holds nothing. A bead the read could not answer is
+    # left to the warning above.
+    verdicts=""
+    if [ -n "$rows" ]; then
+        verdicts=$(printf '%s' "$holds" | jq -r --rawfile rows <(printf '%s' "$rows") --slurpfile statuses <(printf '%s' "$statuses") '
+            ($statuses[0]) as $st | . as $h
+            | $rows | split("\n")[] | select(length > 0) | split("\u001f") as [$id, $bst, $marks, $ids]
+            | ($h[$id] // null) as $r
+            | if $r == null or $r.error != null then empty
+              elif (($r.pending // []) | length) > 0 then empty
+              elif ($ids // "") == "" then ["unedged", $id, $bst, $marks, ""]
+              else ([$r.foreign[]?.id]) as $far
+                | ["stale", $id, $bst, $marks,
+                   (($ids | split(",") | map(select(. != "")) | map(. as $w
+                      | $w + " is " + (if ($far | index([$w])) != null then "in another store, where an edge holds nothing"
+                                       elif ($st[$w] // "") == "pinned" then "pinned"
+                                       elif ($st[$w] // "") != "" then ($st[$w] + ", which the store does not count")
+                                       else "closed" end))) | join(", "))]
+              end
+            | join("\u001f")' 2>/dev/null) || {
+            warnings+=("$label: could not judge the waits of its held beads — this store was NOT checked")
+            continue
+        }
     fi
     checked=$((checked + 1))
 
-    # Anything the resolve found alive was alive all along and the listing did
-    # not carry it. The join below is right either way, but a short listing is
-    # its own defect: the next hold on such a bead is a finding this check
-    # would never raise.
-    missed=$(printf '%s' "$resolved" | jq -r '[ to_entries[]
-        | select(.value != "" and .value != "closed" and .value != "?")
-        | .key + " (" + .value + ")" ] | join(", ")' 2>/dev/null)
+    # A pending wait the live listing did not carry is a live bead this scan
+    # misses, so the listing's own reach is short of the store: the next hold on
+    # such a bead is a finding this check would never raise.
+    missed=$(printf '%s' "$holds" | jq -r --slurpfile statuses <(printf '%s' "$statuses") '
+        ($statuses[0]) as $st
+        | [ .[] | select(.error == null) | (.pending // [])[] | select(.ancestor == null)
+          | select(.id as $i | $st | has($i) | not) | .id + " (" + (.status // "?") + ")" ] | unique | join(", ")' 2>/dev/null)
     if [ -n "$missed" ]; then
         notes+=("$label: the live listing did not carry $missed, which this store reports as not closed — the scanned status set or the category flags are short of what the store holds")
     fi
 
-    while IFS=$'\037' read -r id st marks blk; do
-        [ -n "$id" ] || continue
-        if [ -z "$blk" ]; then
-            unedged+=("$label bead $id ($st): held by $marks, and carries no \`blocks\` edge")
-            continue
-        fi
-        verdict=$(printf '%s' "$resolved" | jq -r --arg ids "$blk" '
-            . as $r
-            | ($ids | split(",") | map(select(. != ""))
-               | map({id: ., st: ($r[.] // "")})) as $rows
-            | if ($rows | any(.st != "" and .st != "closed")) then "live"
-              else "stale\u001f" + ($rows | map(.id + " is "
-                    + (if .st == "" then "in no store this scope can read"
-                       else .st end)) | join(", "))
-              end' 2>/dev/null)
-        case "$verdict" in
-            live*|'') continue ;;
+    # Every wait edge into another store, on any live bead, and every wait the
+    # store cannot judge yet.
+    while IFS= read -r line; do
+        [ -n "$line" ] && foreign+=("$label bead $line")
+    done < <(printf '%s' "$holds" | jq -r '.[] | select(.error == null and ((.foreign // []) | length) > 0)
+        | "\(.id): its wait edge onto " + ([.foreign[] | "\(.id) (\(.type))"] | join(", ")) + " points into another store, and holds nothing"' 2>/dev/null)
+    while IFS= read -r line; do
+        [ -n "$line" ] && notes+=("$label bead $line")
+    done < <(printf '%s' "$holds" | jq -r '.[] | select(.error == null and .status == "unjudged")
+        | "\(.id): waits on " + ([.waits[] | select(.type == "waits-for") | .id] | join(", ")) + " by a waits-for edge, which the store cannot judge yet (unjudged)"' 2>/dev/null)
+
+    while IFS=$'\037' read -r kind id st marks why; do
+        case "$kind" in
+            unedged) unedged+=("$label bead $id ($st): held by $marks, and carries no wait edge") ;;
+            stale) stale+=("$label bead $id ($st): held by $marks, and $why") ;;
         esac
-        stale+=("$label bead $id ($st): held by $marks, and ${verdict#stale$US}")
-    done <<ROW_EOF
-$rows
-ROW_EOF
+    done < <(printf '%s\n' "$verdicts")
 done <<SCOPE_EOF
 $scopes
 SCOPE_EOF
@@ -410,7 +418,7 @@ if [ "$checked" -eq 0 ]; then
 fi
 # One posture for both degrees: they are the same defect, told apart by
 # whether the bead ever carried an edge, and they take different remedies.
-found=$(( ${#stale[@]} + ${#unedged[@]} ))
+found=$(( ${#stale[@]} + ${#unedged[@]} + ${#foreign[@]} ))
 if [ "$found" -ne 0 ]; then
     case "$severity" in
         error) rc=2; posture="" ;;
@@ -418,14 +426,18 @@ if [ "$found" -ne 0 ]; then
         *)     rc=1; posture=" — reported as a warning"
                notes+=("hold_severity=\"$severity\" is not one of warn|error; the findings above are reported as warnings until the declaration names a posture this check knows") ;;
     esac
-    echo "holds a live bead states as a marker with no live \`blocks\` blocker (I1): $found finding(s) across $checked store(s)$posture"
+    echo "waits a live bead records that hold nothing (I1): $found finding(s) across $checked store(s)$posture"
     if [ "${#unedged[@]}" -ne 0 ]; then
-        detail "${#unedged[@]} carry a hold marker and no \`blocks\` edge at all. \`bd ready\` cannot answer whether any of them is still waiting, and no close releases one. For each: file what it waits on as a bead in the same store and block this one on it, or close it where the reason has expired."
+        detail "${#unedged[@]} carry a hold marker and no wait edge at all. \`bd ready\` cannot answer whether any of them is still waiting, and no close releases one. For each: file what it waits on as a bead in the same store and block this one on it, or close it where the reason has expired."
         detail_capped "$DETAILS" "${unedged[@]}"
     fi
     if [ "${#stale[@]}" -ne 0 ]; then
-        detail "${#stale[@]} carry a hold marker whose every \`blocks\` blocker is gone. The graph reports these ready while the marker reports them held, so the hold rests on the string alone: give each its disposition, or record the live wait as an edge. A blocker in another store never held it — \`bd dep add\` accepts a foreign id, reports success, and leaves the bead in \`bd ready\`."
+        detail "${#stale[@]} carry a hold marker none of whose waits is pending. The graph reports these ready while the marker reports them held, so the hold rests on the string alone: give each its disposition, or record the live wait as an edge."
         detail_capped "$DETAILS" "${stale[@]}"
+    fi
+    if [ "${#foreign[@]}" -ne 0 ]; then
+        detail "${#foreign[@]} carry a wait edge into another store. \`bd dep add\` accepts a foreign id, reports success, and the edge holds nothing, so the bead runs ahead of what it names: record the wait in the bead's own store, or remove the edge."
+        detail_capped "$DETAILS" "${foreign[@]}"
     fi
     detail ${warnings[@]+"${warnings[@]}"}
     detail ${notes[@]+"${notes[@]}"}
@@ -437,6 +449,6 @@ if [ "${#warnings[@]}" -ne 0 ]; then
     detail ${notes[@]+"${notes[@]}"}
     exit 1
 fi
-echo "OK: every hold marker a live bead carries across $checked store(s) sits beside a live \`blocks\` blocker"
+echo "OK: every hold marker a live bead carries across $checked store(s) sits beside a pending wait, and no wait edge points into another store"
 detail ${notes[@]+"${notes[@]}"}
 exit 0

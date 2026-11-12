@@ -60,8 +60,8 @@ command -v rig_carries_converse >/dev/null 2>&1 \
 roster_converse_for() {
     jq -n --arg rigs "$*" '{agents:
         [ ($rigs | split(" ")[] | select(length > 0)) as $r
-          | {qualified_name: ($r + "/gc-toolkit.converse-opus")},
-            {qualified_name: ($r + "/gc-toolkit.converse-codex")} ]}'
+          | {qualified_name: ($r + "/gc-toolkit.converse-claude-opus")},
+            {qualified_name: ($r + "/gc-toolkit.converse-codex-sol")} ]}'
 }
 
 # cap <rig> -> "0" capable, "1" not. Runs in a subshell so the predicate's
@@ -87,7 +87,7 @@ is "an HQ/city root absent from the roster is NOT capable" "$(cap mycity)" 1
 
 # --- the match is converse-specific and variant-aware -------------------------
 
-export ROSTER='{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.converse-opus"}]}'
+export ROSTER='{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.converse-claude-opus"}]}'
 is "a single sitting template is capable" "$(cap gc-toolkit)" 0
 
 # engage spawns only a converse-<model> template, so a bare gc-toolkit.converse
@@ -100,7 +100,7 @@ is "a proactive-only rig is NOT converse-capable" "$(cap gc-toolkit)" 1
 
 # The "/" in the key stops one rig name matching another it is a prefix of. The
 # entry is a real sitting template, so only the rig segment can refuse it.
-export ROSTER='{"agents":[{"qualified_name":"gc-toolkit-extra/gc-toolkit.converse-opus"}]}'
+export ROSTER='{"agents":[{"qualified_name":"gc-toolkit-extra/gc-toolkit.converse-claude-opus"}]}'
 is "a rig name that is a prefix of another is NOT matched" "$(cap gc-toolkit)" 1
 
 # --- fail open on an unreadable roster ----------------------------------------

@@ -1,18 +1,19 @@
-// Package daemon discovers the local Gas City supervisor API and builds the
-// per-city read URL for one bead.
+// Package daemon is the part of gctk's store adapter that finds the local Gas
+// City supervisor API and builds the per-city read URL for one bead. Only
+// internal/gcbd imports it.
 //
-// It is the seam every gctk read that moves off `gc bd` onto the supervisor's
-// pooled, process-lifetime Dolt connection shares: a `gc bd` invocation forks
-// and opens its own Dolt connection, where a GET against the already-running
-// supervisor answers in-process over its pool. The base URL is not advertised
+// It is the seam every store read that goes to the supervisor's pooled,
+// process-lifetime Dolt connection shares: a `gc bd` invocation forks and opens
+// its own Dolt connection, where a GET against the already-running supervisor
+// answers in-process over its pool. The base URL is not advertised
 // in any runtime file; it is derived from config exactly as `gc`'s own
 // supervisor-API discovery derives it — `$GC_HOME/supervisor.toml`'s
 // `[supervisor]` bind and port, defaulting to the supervisor's own
 // `127.0.0.1:8372`. Reachability is not probed here: the caller's request and
 // its fallback are the reachability signal.
 //
-// Stdlib only — gctk links no heavy dependency, so the TOML read is a scalar
-// lookup within one section, enough for these flat keys.
+// The TOML read is a scalar lookup within one section, which is enough for
+// these flat keys.
 package daemon
 
 import (

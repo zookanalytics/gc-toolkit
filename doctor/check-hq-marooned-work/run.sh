@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # doctor/check-hq-marooned-work — no rig-workable bead sits unclaimed in the HQ
 # (city) store where no worker will reach it. A city-scoped role (deacon,
-# mechanik, dog) runs with GC_RIG unset, so a bare `bd create` resolves to the
+# mechanik, po, dog) runs with GC_RIG unset, so a bare `bd create` resolves to the
 # HQ store instead of a rig store. Rig pools never read the HQ store, so rig work
 # filed there is marooned by construction: invisible to every rig queue, surfaced
 # by nothing. A city-scoped pool DOES read the HQ store, so a bead routed to one

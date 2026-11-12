@@ -27,10 +27,11 @@ File a bead for the work. The worker reads its description to learn what to do:
 gc bd create "<title>" -t task -d "<what needs doing, why, and what done looks like>" --json
 ```
 
-Add `--parent <epic>` when an epic applies, and
-`--metadata '{"placement":"pending"}'` when the bead may not be sent yet
-(below). Filing starts nothing: afterwards, send the bead, make it wait (the
-waits skill), or leave it for the operator to place.
+Add `--parent <epic>` when an epic applies, and `--labels hold:mayor` when the
+bead may not be sent yet (below). A bead that already exists is held with
+`gc bd set-state <id> hold=mayor --reason "<why it waits for placement>"`.
+Filing starts nothing: afterwards, send the bead, make it wait (the waits
+skill), or leave it for the operator to place.
 
 - **File it in the store of the pool that will work it.** A pool reads only its
   own rig's store, so a city-scoped session names the rig:
@@ -72,18 +73,20 @@ waits skill), or leave it for the operator to place.
   operator routed in a sitting (a converse session with the operator), by hand
   or by Accept. An emergency is a check that fails on the default branch's head,
   confirmed by reading that check. Other critical work runs now only when the
-  operator routes it. File any other bead with `placement=pending` in its create
-  and no route or arm: the operator decides where it goes.
+  operator routes it. File any other bead with Gas City's `hold:mayor` label in
+  its create and no route or arm: the operator decides where it goes.
+  `gc beads list --label hold:mayor` lists each bead filed so that still waits,
+  in every rig.
 
 ### File a Delivery
 
 A Delivery is filed only by the decision that aims it, and that decision is the
 operator's:
 
-- the sitting that elaborates an epic and aims its first Delivery;
+- a review's continue or shift ruling that aims it, whether it is the epic's
+  first Delivery or the next one after an Epic Checkpoint;
 - the approval of a design whose units deliver it, after which the units are
-  filed as its Stories;
-- an Epic Checkpoint's continue or shift ruling that aims the next one.
+  filed as its Stories.
 
 A product area, a theme or a wish to find work on the board files none. List
 the epic's open Deliveries first, and file a new one only once the list has
@@ -103,14 +106,12 @@ carries"), each field in its own key, through the writer below. The one field
 it cannot go without is its hypothesis: one sentence that says for whom, what
 changes and the signal that shows it worked. A rough sentence that sets the
 general direction is enough. When the operator has stated none, write one
-yourself and file at once, without asking first. Wherever you report that
-filing, quote the sentence and call it a first draft: it stays one until the
-operator first rules on the epic, at a sitting that judges and sharpens it. The
-other fields are the operator's, so give one only as the operator stated or
-confirmed it, and leave out one nobody stated. A Delivery carries an `Aim:`
-line instead, and is filed as above. An area that is only ever improvable has
-no hypothesis to answer, so it is not an epic, and its work is ordinary flow
-(`docs/epics.md`, "Epics are mortal").
+yourself and file at once, without asking first, with the handle and the
+boundaries too when you can. Wherever you report the filing, quote each field
+you wrote and call it your proposal. A Delivery carries an `Aim:` line instead,
+as above. An area that is only ever improvable has no hypothesis to answer, so
+it is not an epic, and its work is ordinary flow (`docs/epics.md`, "Epics are
+mortal").
 
 The writer refuses an epic whose parent is not an epic when it has no
 hypothesis, and files nothing. It prints the new epic's id:
@@ -123,12 +124,41 @@ hypothesis, and files nothing. It prints the new epic's id:
   -d "<what the epic is about>"
 ```
 
-`--closure-condition` and `--indicators` record the rest of the contract when
-it is stated, and `--parent` and `--rig` place the epic as they place any bead.
-A field stated after the create is recorded in its key:
-`gc bd update <epic> --set-metadata epic_hypothesis="<the sentence>"`, and the
-same way `epic_handle`, `epic_boundaries`, `epic_closure_condition` and
-`epic_indicators`.
+`--closure-condition` and `--indicators` record the rest of the contract, and
+`--parent` and `--rig` place the epic as they place any bead. Once the create
+has printed the epic's id, record on the epic whose words each field is:
+
+```bash
+gc bd update <epic> --append-notes "Filed $(date -u +%Y-%m-%d) by <you>. Proposed by <you>: <each field you wrote>. Stated by the operator: <each field they stated, and where they stated it, or none>."
+```
+
+Work the epic plainly owns goes on under it meanwhile, and the epic's next
+review judges your proposals.
+
+After the filing, a field's key takes only words the operator stated or
+approved, with a note that says where they said it. This records the
+hypothesis, and `epic_handle`, `epic_boundaries`, `epic_closure_condition` and
+`epic_indicators` go the same way:
+
+```bash
+gc bd update <epic> --set-metadata epic_hypothesis="<the operator's words>" \
+  --append-notes "Stated by the operator in <where they said it>: the hypothesis."
+```
+
+A change you would make yourself is a proposal for the epic's next review:
+leave the keys as they are, and record the change with its evidence:
+
+```bash
+gc bd update <epic> --append-notes "Proposed by <you>, $(date -u +%Y-%m-%d): <the change, quoted>. Evidence: <what you read or ran>."
+```
+
+When work you must do depends on the operator's answer, file a human gate on
+that work under the key `epic-review.<epic>`, whose message names the epic and
+quotes the change with its evidence, and arm the work behind it, as the `waits`
+skill waits on a person. When nothing waits on the answer but what you found
+contradicts the contract, open a conversation on the epic whose body quotes the
+change and its evidence (the `waits` skill, "Ask the operator for a
+conversation").
 
 ## Send a bead to a pool on a formula
 
@@ -141,6 +171,18 @@ gc sling <rig>/<pool> <bead> --on <formula>
 With no `--on`, the sling runs the pool's `default_sling_formula`, which for a
 polecat pool is `mol-polecat-work`.
 
+- **A held bead is placed, never slung.** A bead carrying `hold:mayor` waits
+  for the operator's placement, and a sling reads no hold, so it would start
+  the work with the label left on and the bead still in the queue. Once the
+  operator has placed it, carry that out with
+  `"$(gc <binding> scripts-dir)/gc-helm.sh" place <bead> --under <parent>`,
+  where the parent is the epic, or its open Delivery whose aim covers the bead,
+  or with `--standalone` for no parent. It sets the parent, settles the
+  priority, slings the bead to its rig's polecat pool, or arms it while a park
+  or a blocker holds it, and then lifts the hold. `--route <rig>/<pool>` and
+  `--on <formula>` send it elsewhere, and `--shift <±n>` ranks it against its
+  parent. Running it again after a failure finishes the placement without a
+  second run.
 - **One dispatch, never two.** A sling starts a workflow on the bead and sets
   `gc.execution_routed_to` on it. A raw route,
   `gc sling <rig>/<pool> <bead> --no-formula --no-convoy`, has the pool claim
@@ -164,7 +206,9 @@ Sign off by the case that fits (the converse-settle step):
   formula is the one the subject recommends, add `--accept` to the same sign-off
   and send nothing yourself (Take a recommendation, below).
 - **A new bead is the work, and the subject waits for it.** File the work, send
-  it, and sign off with `--ruled yes --waiting-on <the work>`.
+  it, and sign off with `--ruled yes --waiting-on <the work> --close-brief "<…>"`.
+  The sign-off arms the subject's validating closer, which checks the brief
+  once the work lands and closes the subject or asks the operator.
 - **New work decomposes an epic subject.** File it as the subject's member,
   with `--parent <subject>`, send it, and sign off with `--ruled yes --no-wait`.
   Leave it out of `--waiting-on`, which names a dependency only: the epic
@@ -190,10 +234,10 @@ Stand one up when several beads must reach the default branch as one PR the
 operator reviews. A lone bead needs none: slung to a pool, it opens its own PR.
 
 The procedure is the recipe in `integration-effort.md`, beside this file, which
-the mechanik runs. It also covers adding a bead to an existing effort and
-bringing the effort's branch current. The recipe pushes the effort's branch,
-and a converse sitting never pushes, so a sitting does not run it. A sitting
-sends the effort this way instead:
+the mechanik runs. It also covers adding a bead to an existing effort, and the
+hand-off that has the rig's refinery bring the effort's branch current. The
+recipe pushes the effort's branch, and a converse sitting never pushes, so a
+sitting does not run it. A sitting sends the effort this way instead:
 
 - When the subject's recommendation is `mol-design-convoy`, the sign-off's
   `--accept` takes it (Take a recommendation, below), and that formula's run

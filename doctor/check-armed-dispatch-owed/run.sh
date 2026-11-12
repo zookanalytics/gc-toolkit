@@ -12,21 +12,25 @@
 #     mid-dispatch, yet it has stayed armed well past the reconcile cadence.
 #     Either the order is not running (check-cadence-live/I10 is the direct cause
 #     there, but a single owed arm makes the effect concrete) or the dispatch is
-#     stuck. A hold is the one reconcile slings on, assets/scripts/hold-lib.sh's:
-#     an open `blocks` blocker on the bead or on a parent-child ancestor. So an
-#     arm a park or a human gate holds, by an edge of its own or its epic's, is
-#     not owed: the blocker leaves the arm intact and its status open, and the
-#     arm fires when the blocker closes. A bead in flight (a branch, a
-#     merge_result or a rejection_reason) is held by its own blockers alone, so
-#     its arm is owed under a parked epic, where reconcile slings it.
+#     stuck. What holds a bead is what reconcile slings on, the answer of
+#     `gctk bead holds`: a wait of the bead's own, or one on a parent-child
+#     ancestor of work that has not started. So an arm a park or a human gate
+#     holds, by an edge of its own or its epic's, is not owed: the wait leaves the
+#     arm intact and its status open, and the arm fires when the wait lands. A
+#     bead in flight is held by its own waits alone, so its arm is owed under a
+#     parked epic, where reconcile slings it. An unjudged one, with a waits-for
+#     edge of its own, is held, as reconcile holds it. An open bead carrying one
+#     of Gas City's hold labels (has_dispatch_hold,
+#     assets/scripts/dispatch-path.sh) is held too, because reconcile slings no
+#     such bead, so its arm is not owed either.
 #     check-blocked-work-armed asks blocked work for a dispatch path and nothing
 #     more, and an arm is one, so an arm that never fires is this check's to see.
 #     `bd blocked` lists a bead its parent's hold reaches under the bead's own
 #     id, naming the parent as its blocker, and that check skips it for the arm
 #     alone.
-#   * STRANDED — the bead is armed at a non-open status, which `bd list --ready`
-#     never answers, so no blocker closing will ever dispatch it (a bead armed
-#     while open, then set to another status). reconcile prints this to its own
+#   * STRANDED — the bead is armed at a non-open status, which reconcile never
+#     slings, so no wait landing will ever dispatch it (a bead armed while open,
+#     then set to another status). reconcile prints this to its own
 #     log every pass, but nothing surfaces it to a person. A hold does not excuse
 #     it: releasing the hold would not dispatch it either.
 #
@@ -48,10 +52,9 @@
 # the fan-out cap allows. While the city has no more stores than the cap, the
 # check costs the rig list plus its slowest store rather than the sum of every
 # store. Inside a store's scan the reads run one after the other: the armed
-# listing, then the hold walk's, a generation of ancestors at a time and then
-# every blocker once. The listing's rows carry each bead's own dependency edges,
-# so no store makes a dependency read. A read lands in a file, since a
-# background job cannot hand its parent a variable.
+# listing, then one `gctk bead holds` read of every candidate, so no store's
+# cost grows with its arms. A read lands in a file, since a background job
+# cannot hand its parent a variable.
 
 set -u
 
@@ -65,21 +68,18 @@ set -u
     printf '  - %s\n' "assets/scripts/order-cadence.sh could not be sourced from this pack, so the window an owed arm is judged by cannot be computed."
     exit 1
 }
-# The rule of which human gates still hold, which the definition of a hold
-# below builds on. Unsourceable, a held arm cannot be told from an owed one, so
-# the check warns.
-# shellcheck source=../../assets/scripts/bd-lib.sh
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/bd-lib.sh" || {
+# What holds a bead is the answer of `gctk bead holds`, which reconcile reads
+# too, from the binary the city builds.
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+# The one definition of a hold label, which reconcile also reads. Exposes
+# $DISPATCH_PATH_JQ. Unsourceable, a label-held arm cannot be told from an owed
+# one, so the check warns.
+# shellcheck source=../../assets/scripts/dispatch-path.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/dispatch-path.sh" || {
     echo "cannot determine whether owed deferred dispatches are firing"
-    printf '  - %s\n' "assets/scripts/bd-lib.sh could not be sourced from this pack, so a held arm cannot be told from an owed one."
-    exit 1
-}
-# The one definition of a hold, which reconcile also reads. Unsourceable, a held
-# arm cannot be told from an owed one, so the check warns.
-# shellcheck source=../../assets/scripts/hold-lib.sh
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/hold-lib.sh" || {
-    echo "cannot determine whether owed deferred dispatches are firing"
-    printf '  - %s\n' "assets/scripts/hold-lib.sh could not be sourced from this pack, so a held arm cannot be told from an owed one."
+    printf '  - %s\n' "assets/scripts/dispatch-path.sh could not be sourced from this pack, so a label-held arm cannot be told from an owed one."
     exit 1
 }
 
@@ -224,17 +224,6 @@ fi
 # an error object or two documents is an unread probe, never an empty answer.
 one_array() { jq -e -s 'length == 1 and (.[0] | type) == "array"' "$1" >/dev/null 2>&1; }
 
-# The hold walk's reader (hold-lib.sh): the named beads in the store being
-# scanned, at every status and of every class a listing hides by default, since
-# a blocker can be a gate and an ancestor can be closed. Each read lands in
-# hold_file with its stderr beside it, so a walk that fails can say why. A
-# store's scan sets both in its own job, so no two scans share them.
-hold_db=""; hold_file=""
-hold_read() {
-    read_to "$hold_file" gc bd list --db "$hold_db" --id "$1" --all --include-gates --include-infra --include-templates --brief --json --limit 0 \
-        && cat "$hold_file"
-}
-
 # The rig and order registries are read at once, in the background. The store
 # scans wait only on the rig list; the order registry is needed only once their
 # reports are judged.
@@ -262,7 +251,7 @@ fi
 scan_store() {
     local rig_name="$1" rig_path="$2"
     local label="${rig_name:-<city>}" listing="$3.armed.json"
-    local rc err classified kind cid f3 cand_json hold_rows hold released unread_ids since_epoch released_epoch
+    local rc err classified kind cid f3 hold_rows hold released why since_epoch released_epoch
     local -a cand_ids=()
     local -A armed_at_of=()
     # Every armed bead in this store, all statuses (a stranded arm is non-open).
@@ -277,14 +266,15 @@ scan_store() {
     # Classify every armed bead from this one listing. A stranded arm (armed at a
     # non-open status) is a finding on its own; the exemptions — closed, delivered
     # (merge_result), mid-dispatch (a slung marker), capped (the reconcile pass has
-    # already escalated it), assigned (reconcile will not sling over a holder) —
-    # need no further read. deferred-dispatch.sh's `list` classifies CAPPED ahead
-    # of stranded and dispatchable, so the cap test precedes the status test here
-    # too. Only an open, unassigned, live arm is a CANDIDATE whose blockers, on
-    # it and on its ancestors, decide whether a dispatch is owed.
+    # already escalated it), assigned (reconcile will not sling over a holder),
+    # held by a hold label (reconcile slings no such bead) — need no further
+    # read. deferred-dispatch.sh's `list` classifies CAPPED ahead of stranded and
+    # dispatchable, so the cap test precedes the status test here too. Only an
+    # open, unassigned, live arm is a CANDIDATE whose blockers, on it and on its
+    # ancestors, decide whether a dispatch is owed.
     classified=$(jq -r \
         --arg slung "$K_SLUNG" --arg armed_at "$K_ARMED_AT" --arg fails "$K_FAILS" \
-        --argjson cap "$MAX_SLING_FAILURES" '
+        --argjson cap "$MAX_SLING_FAILURES" "$DISPATCH_PATH_JQ"'
         .[]? | . as $b | ($b.metadata // {}) as $m
         | ((($b.id // "?") | tostring) | gsub("[[:cntrl:]]"; " ")) as $id
         | (($b.status // "") | tostring) as $st
@@ -300,6 +290,7 @@ scan_store() {
           elif $fails_n >= $cap then empty
           elif $st != "open"    then "stranded\t\($id)\t\($st)"
           elif $assigned        then empty
+          elif ($b | has_dispatch_hold) then empty
           else                       "candidate\t\($id)\t\($armed_when)"
           end' "$listing" 2>/dev/null) || {
         warnings+=("$label: could not evaluate armed beads in $rig_path/.beads — this store was NOT checked")
@@ -313,52 +304,60 @@ scan_store() {
         [ -n "$cid" ] || continue
         case "$kind" in
             stranded)   # f3 is the stranding status
-                findings+=("$label bead $cid: armed for dispatch at status=$f3, which \`bd list --ready\` never answers — no blocker closing can dispatch it. Return it to open, or disarm: deferred-dispatch.sh disarm $cid") ;;
+                findings+=("$label bead $cid: armed for dispatch at status=$f3, which reconcile never slings — no wait landing can dispatch it. Return it to open, or disarm: deferred-dispatch.sh disarm $cid") ;;
             candidate)  # f3 is armed_at
                 cand_ids+=("$cid"); armed_at_of["$cid"]="$f3" ;;
         esac
     done <<< "$classified"
     [ "${#cand_ids[@]}" -gt 0 ] || return
 
-    # A candidate is owed only when nothing holds it, by the predicate reconcile
-    # slings on, and that predicate answers for the candidate's own blockers as
-    # well as its ancestors'. The walk takes each candidate's own edges from its
-    # row in this listing, then reads the ancestors a generation at a time and
-    # every blocker once, so the store costs those few reads however many
-    # candidates it holds. A candidate held by a blocker the walk read is not
-    # owed. One whose only holds could not be read is NOT checked: an unread hold
-    # is no released one, and no owed dispatch either.
-    hold_db="$rig_path/.beads"; hold_file="$3.hold.json"
-    cand_json=$(printf '%s\n' "${cand_ids[@]}" | jq -R . | jq -sc .)
+    # A candidate is owed only when nothing holds it, by the answer reconcile
+    # slings on, which counts the candidate's own waits and its ancestors'. One
+    # read answers every candidate in the store. A candidate something holds is
+    # not owed. One the read could not answer is NOT checked: an unread hold is
+    # no released one, and no owed dispatch either.
     # The rows join on the unit separator, not a tab: `read` folds a run of tabs
-    # into one, so an empty release time would hand the unread ids its field.
+    # into one, so an empty release time would hand the error its field.
     hold_rows=""
-    if jq -c --argjson c "$cand_json" '[ .[]? | select(.id as $i | $c | index($i)) ]' "$listing" > "$3.seed.json" 2>/dev/null \
-       && hold_graph hold_read "$3.seed.json" "$3.graph.json"; then
-        hold_rows=$(jq -r --slurpfile g "$3.graph.json" "$HOLD_JQ"'
-            .[] | hold_holds($g[0]) as $h
-            | [ (.id | tostring),
-                (if any($h[]; .unread | not) then "held" elif ($h | length) > 0 then "unread" else "free" end),
-                (hold_released_at($g[0]) // ""),
-                ([ $h[] | select(.unread) | .by ] | join(" ")) ]
-            | map(gsub("[[:cntrl:]]"; " ")) | join("\u001f")' "$3.seed.json" 2>/dev/null)
+    if [ -x "$GCTK" ]; then
+        read_to "$3.holds.json" "$GCTK" bead holds --db "$rig_path/.beads" "${cand_ids[@]}"; rc=$?
+        if [ "$rc" -le 1 ]; then
+            hold_rows=$(jq -r -s '.[] | objects
+                | [ ((.id // "") | tostring),
+                    (if .error != null then "unread" elif .status == "clear" then "free"
+                     elif .status == "unjudged" then "unjudged" else "held" end),
+                    ((.last_landed // "") | tostring),
+                    (if .error != null then (.error | tostring)
+                     else ([ (.waits // [])[] | select(.type == "waits-for") | .id ] | join(" ")) end) ]
+                | map(gsub("[[:cntrl:]]"; " ")) | join("\u001f")' "$3.holds.json" 2>/dev/null)
+        fi
+    else
+        rc=127
+        printf 'no gctk binary at %s; GCTK_BIN names one, or GC_CITY_PATH the city whose build it is\n' "$GCTK" > "$3.holds.json.err"
+    fi
+    # A read that answered no candidate is the store's read failing, so it is
+    # one warning for the store, naming why.
+    if [ -n "$hold_rows" ] && ! printf '%s\n' "$hold_rows" | grep -q -v $'^[^\037]*\037unread\037'; then
+        printf '%s\n' "$hold_rows" | head -1 | cut -d$'\037' -f4 > "$3.holds.json.err"
+        hold_rows=""
     fi
     if [ -z "$hold_rows" ]; then
-        err=$(err_of "$hold_file")
-        warnings+=("$label: could not read what holds ${#cand_ids[@]} armed bead(s) in $rig_path/.beads — they were NOT checked${err:+; \`gc bd list\` stderr: $err}")
+        err=$(err_of "$3.holds.json")
+        warnings+=("$label: could not read what holds ${#cand_ids[@]} armed bead(s) in $rig_path/.beads — they were NOT checked${err:+; gctk bead holds: $err}")
         return
     fi
 
-    while IFS=$'\037' read -r cid hold released unread_ids; do
+    while IFS=$'\037' read -r cid hold released why; do
         [ -n "$cid" ] || continue
         case "$hold" in
             held) continue ;;                         # a park or a prerequisite holds it: not owed
-            unread) warnings+=("$label bead $cid: could not read [$unread_ids], which may hold it, in $rig_path/.beads — NOT checked"); continue ;;
+            unjudged) notes+=("$label bead $cid: held by a waits-for edge onto $why, which the store cannot judge yet (unjudged), so reconcile holds the arm until the bd the city runs judges the gate"); continue ;;
+            unread) warnings+=("$label bead $cid: could not read what holds it in $rig_path/.beads ($why) — NOT checked"); continue ;;
         esac
-        # Owed since the later of when it was armed and when the last hold on it
-        # released (hold_released_at), so a hold that released before the arm
-        # was recorded does not age it. An arm whose armed_at does not parse is
-        # judged from the release alone.
+        # Owed since the later of when it was armed and when the last wait on it
+        # landed, its own or a live ancestor's (last_landed), so a hold that
+        # released before the arm was recorded does not age it. An arm whose
+        # armed_at does not parse is judged from the release alone.
         since_epoch=$(iso_to_epoch "${armed_at_of[$cid]}")
         released_epoch=$(iso_to_epoch "$released")
         if [ -n "$released_epoch" ] && { [ -z "$since_epoch" ] || [ "$released_epoch" -gt "$since_epoch" ]; }; then
@@ -372,16 +371,18 @@ scan_store() {
 }
 
 # One store's scan, run as a background job. It reports through "$3.msg":
-# NUL-terminated records, each an F (a finding), a W (a warning) or an A (an
-# owed entry) followed by its text, each kind in the order the scan found it.
+# NUL-terminated records, each an F (a finding), a W (a warning), an N (a note)
+# or an A (an owed entry) followed by its text, each kind in the order the scan
+# found it.
 # The file appears only once the scan has finished, so a store with no .msg was
 # not checked.
 scan_job() {
-    findings=(); warnings=(); owed=()
+    findings=(); warnings=(); notes=(); owed=()
     scan_store "$@"
     local m
     { for m in ${findings[@]+"${findings[@]}"}; do printf 'F%s\0' "$m"; done
       for m in ${warnings[@]+"${warnings[@]}"}; do printf 'W%s\0' "$m"; done
+      for m in ${notes[@]+"${notes[@]}"}; do printf 'N%s\0' "$m"; done
       for m in ${owed[@]+"${owed[@]}"}; do printf 'A%s\0' "$m"; done
     } >"$3.part" && mv "$3.part" "$3.msg"
 }
@@ -438,6 +439,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         case "$rec" in
             F*) findings+=("${rec#F}") ;;
             W*) warnings+=("${rec#W}") ;;
+            N*) notes+=("${rec#N}") ;;
             A*) IFS=$'\037' read -r cid age <<< "${rec#A}"
                 [ "$age" -ge "$OWED_WINDOW_SECONDS" ] || continue
                 findings+=("$label bead $cid: armed and nothing has held it for ${age}s (> ${OWED_WINDOW_SECONDS}s), but it has not dispatched. The deferred-dispatch reconcile order slings an arm nothing holds on its next pass, and ${OWED_WINDOW_SECONDS}s is that order's cadence window, so a dispatch owed this long means that order is not firing (check-cadence-live/I10) or the dispatch is stuck. Look: deferred-dispatch.sh list; disarm if no longer wanted: deferred-dispatch.sh disarm $cid") ;;

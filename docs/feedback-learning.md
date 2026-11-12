@@ -29,9 +29,7 @@ measured.
 **Boundaries.** The design rationale and decision record live in
 `specs/2026-08-learning-system/`. The judgment content of the promotion
 rubric — what makes an observation promotable — lives in
-`skills/learning-distill/SKILL.md`, not here. Doc-keeper's
-brief-maintenance is an adjacent, separate loop: it keeps documentation
-current; this loop changes standing agent behavior.
+`skills/learning-distill/SKILL.md`, not here.
 
 ## The observation bead
 
@@ -149,8 +147,8 @@ The distiller (`mol-feedback-distiller`, judging by the
 them onto pattern beads, and decides which clusters have earned a rule.
 Each surviving proposal becomes one `prompt-update` bead carrying the
 exact rule text, the evidence list, and the reasoning. A proposal is new
-work, so the distiller files it marked `placement=pending` and routed to
-no pool, and it waits for the operator's placement sitting
+work, so the distiller files it held with Gas City's `hold:mayor` label and
+routed to no pool, and it waits for the operator's placement sitting
 ([steering.md](steering.md)). Once the sitting places it under an epic or
 routes it on its own, a polecat builds it and the refinery opens the PR;
 **operator review of that PR is the gate**. An engineering bead from
@@ -247,10 +245,10 @@ code, docs, and bead bodies someone else reads. Each such role composes the base
 and its class fragment, so a universal standard lives in the base once while a
 class-specific one reaches only the classes it impacts — a standard about
 changing a repo does not reach the human converse class. The classes: polecats
-(polecat, polecat-codex), human (the converse-opus, converse-fable and
-converse-codex sittings), system (deacon, mechanik, proactive, witness,
-refinery, keeper). The mechanik composes neither of its fragments, because its
-prime has to fit Claude Code's 10,000-character session-start cap, which
+(polecat, polecat-codex), human (every converse-<model> sitting), system
+(deacon, mechanik, proactive, witness, refinery, keeper). The mechanik composes
+neither of its fragments, because its prime has to fit Claude Code's
+10,000-character session-start cap, which
 `assets/scripts/mechanik-prime-cap.test.sh` holds it to. Its prompt instead
 gives the command that reads both from their files, and has it read them
 before it writes anything that outlives the turn, so a promotion to either

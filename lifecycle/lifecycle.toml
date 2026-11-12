@@ -196,7 +196,7 @@ check_set_sentinel = "none"
 approval_rule = "universal-nonself-standing"
 
 # The hold markers: the metadata a live bead carries to say it is not moving.
-# I1 holds that a hold is a `blocks` edge to a live bead in the same store, so
+# I1 holds that a hold is a wait edge to a live bead in the same store, so
 # each key below records a hold the graph cannot answer, and a live bead
 # carrying one with no such blocker is what doctor/check-wait-is-an-edge
 # reports. The check reads this declaration instead of carrying its own list,
@@ -366,16 +366,19 @@ keys = ["pr.machine", "pr.conversation", "pr_posture"]
 # instant alone, and a head move arrives with a fresh one no owed row reads.
 since_format = "RFC 3339 UTC"
 
-# The metadata-key registry: every key the pack writes, grouped and defined. A
-# key absent from the groups below is not pack state (docs/component-model.md
-# §2-§3), and doctor/check-state-space flags a bead carrying a key whose writer
-# was retired (its HEALER_RE and RETIRED_KEYS lists; retiring a key adds it
-# there). Each key's definition names five things a reader needs and only
-# two of which the value shows: what WRITES it, what READS it, what its ABSENCE
-# means, how it is CLEARED, and its value TYPE. Prose is spent where a reader
-# cannot recover those from the group and the sections above; a key whose
-# mechanics already sit in [gates], [posture], [holds], [machine],
-# [machine_axis] or [dated_keys] is defined there and only registered here.
+# The metadata-key registry: every key the pack writes that no gctk domain
+# declares, grouped and defined. A key a gctk domain owns is declared in that
+# domain's package and listed in services/gctk/key-registry.json, which is
+# generated from the declarations (docs/gctk-architecture.md, "The ledger"). A
+# key absent from both is not pack state (docs/component-model.md §2-§3), and
+# doctor/check-state-space flags a bead carrying a key whose writer was retired
+# (its HEALER_RE and RETIRED_KEYS lists; retiring a key adds it there). Each
+# key's definition names five things a reader needs and only two of which the
+# value shows: what WRITES it, what READS it, what its ABSENCE means, how it is
+# CLEARED, and its value TYPE. Prose is spent where a reader cannot recover
+# those from the group and the sections above; a key whose mechanics already sit
+# in [gates], [posture], [holds], [machine], [machine_axis] or [dated_keys] is
+# defined there and only registered here.
 #
 # Four field-vocabulary rules the whole registry rests on, each settled against
 # the code that reads it:
@@ -407,7 +410,8 @@ since_format = "RFC 3339 UTC"
 # nothing, and one longer than the 140 codepoints the cell holds.
 #
 # A WAIT IS AN EDGE, never a metadata string (I1, doctor/check-wait-is-an-edge):
-# `blocks` is the one edge type bd ready honors as a hold. `parent-child` is
+# `blocks` is the edge type the pack writes for a hold, one of the three bd
+# ready honors with `conditional-blocks` and `waits-for`. `parent-child` is
 # decomposition that cascades the parent's blocked state DOWN to its children,
 # so the pack attaches a conversation or a finding with `tracks` — which
 # carries the structure without making the child unclaimable — and reserves
@@ -1078,29 +1082,16 @@ keys = [
 #   reads as known, not as a stray.
 
 [metadata.rig_checks]
-# What beads carry about a rig's recorded checks: the published copy of a
-# check's result, which `gctk rig <check> --publish-bead <bead>` writes on the
-# bead its caller names, and a caller's judgment that a recorded fail is
-# pre-existing. The result that answers a later `gctk rig` call is the record
-# under the rig clone's git common directory (services/gctk/README.md, "rig");
-# these keys are for whoever reads the bead.
+# A caller's judgment, on a bead, that a rig's recorded fail is pre-existing.
+# The result that answers a later `gctk rig` call is the record under the rig
+# clone's git common directory (services/gctk/README.md, "rig"). The published
+# copy of a result, rig_check.<check>, is rig's key, declared in
+# services/gctk/internal/rig and listed in services/gctk/key-registry.json.
 keys = [
-  "rig_check.test", "rig_check.lint", "rig_check.typecheck",
   "rig_check_pre_existing.test", "rig_check_pre_existing.lint",
   "rig_check_pre_existing.typecheck", "rig_check_pre_existing.setup",
   "rig_check_pre_existing.build",
 ]
-# rig_check.test, rig_check.lint, rig_check.typecheck — the record the
-#   publishing call answered with, as one JSON object: check, result, scope
-#   (absent on a lint or typecheck run), commit, tree, exit_code, duration_ms,
-#   runner, recorded_at and command. gctk writes it only once the record store
-#   holds the result it copies: after recording a result, and after answering
-#   from a record. A write the store refuses is reported and changes no exit. No
-#   other pack path reads it. Absent means no call published that check to the
-#   bead. Never cleared: the next publish replaces it. Its commit is the one the
-#   check ran at: the head the call answered for, or, for a full-suite test pass
-#   answered through the tree, an earlier commit with the same tree. A JSON
-#   object stored as a string.
 # rig_check_pre_existing.test, .lint, .typecheck, .setup, .build — a caller's
 #   judgment that one recorded fail of the check is pre-existing: the same
 #   failure is red on the base branch, and a tracker carries it. One JSON
@@ -1211,7 +1202,7 @@ keys = [
 # (gc_thread_awaits_answer in pr-post.sh). merge.sh
 # writes it, through gctk merge, for every open, non-draft PR the pass visits,
 # whenever the count or the head moves. prstatus reads it for held: review,
-# through gctk pr-status for the labels and in the helm board, and only at the
+# through gctk pr status for the labels and in the helm board, and only at the
 # head the posture was read at. Absent means no visit has counted the threads
 # yet, and nothing reads as waiting. It is plain, not dated, and never cleared:
 # the next count replaces it.
@@ -1369,27 +1360,6 @@ keys = [
 #   bead, and a validating closer reads _reason as the close brief of a reaction
 #   that ran before reaction beads.
 
-[metadata.placement]
-# Intake's hold on new work (docs/steering.md). A bead may reach a pool only as a
-# member of an epic, as PR-finishing work, as a checked emergency, or by the
-# operator's own move. Other new work waits for the operator's placement sitting,
-# which places it under an epic or routes it on its own.
-keys = ["placement"]
-# placement — `pending`, the marker on a bead held for the placement sitting.
-#   Written by first-reaction-dispose.sh when intake holds its actionable route
-#   or its blocked exit's --then-route, before the release, which waits on the
-#   write's exit; by
-#   mol-witness-patrol.toml's bug-file block, in the create of a pack-defect bug;
-#   and by mol-feedback-distiller.toml, in the create of each prompt-update and
-#   engineering bead. Read through assets/scripts/placement.sh, whose
-#   awaiting_placement is the queue gc-helm.sh unplaced lists, the named wait
-#   liveness-classify.sh and liveness-recheck.sh give the bead, the exemption
-#   doctor/check-blocked-work-armed reads, and the beads the proactive scan
-#   (tools/gc-proactive.sh) files no first reaction for. A parent, a route, an
-#   arm, an assignee or a live pour places a bead whatever the marker says, so a
-#   marker left on a placed bead names no wait. Absent means intake never held
-#   the bead. No pack writer clears it. A string.
-
 [metadata.priority]
 # The priority flow (docs/steering.md): a bead's priority is the priority of the
 # bead it follows plus its own shift, computed by assets/scripts/priority-lib.sh,
@@ -1441,14 +1411,14 @@ keys = [
 # them. `gctk epic create` (assets/scripts/epic.sh, the work skill's epic
 # create) writes the contract fields into the create that files an epic, and
 # refuses an epic whose parent is not an epic when it has no epic_hypothesis.
-# The hypothesis can be the filer's first draft until the operator's first
-# ruling, and an epic with epic_hypothesis and no epic_ruling has one. The other
-# contract fields and the ruling's keys are the operator's: stamped when the
-# operator states or confirms a contract field or rules at a sitting on the
-# epic, the dated decision docs/epics.md calls for. No pack script writes the
-# ruling's keys. finalize-gate.sh (clause_epic_ruling_recorded) and
-# doctor/check-epic-closed-implies-ruled read epic_hypothesis, epic_ruling and
-# epic_ruling_reason.
+# A contract field the filer writes is its proposal, and the epic's notes say
+# whose words each field is. After the filing a contract field takes only words
+# the operator stated or approved, and the ruling's keys are stamped when the
+# operator rules at a review of the epic, whose block in the epic's notes is the
+# dated record docs/epics.md calls for. No key marks an epic as reviewed, and no
+# pack script writes the ruling's keys. finalize-gate.sh
+# (clause_epic_ruling_recorded) and doctor/check-epic-closed-implies-ruled read
+# epic_hypothesis, epic_ruling and epic_ruling_reason.
 keys = [
   "epic_handle", "epic_hypothesis", "epic_boundaries",
   "epic_closure_condition", "epic_indicators",
@@ -1457,25 +1427,27 @@ keys = [
 ]
 # epic_handle / epic_hypothesis / epic_boundaries — the elaboration floor
 #   (docs/epics.md): a 3-5 word handle, a one-sentence hypothesis, and the
-#   boundaries. epic_hypothesis is also the close gate's trigger: its presence
-#   brings an epic under the ruling requirement (clause_epic_ruling_recorded).
+#   boundaries. epic_hypothesis also tells an Epic from a Delivery: an epic
+#   whose parent is an epic and that carries none is a Delivery, which the
+#   ruling requirement does not hold (clause_epic_ruling_recorded).
 # epic_closure_condition / epic_indicators — the rest of the contract (3-6
 #   closure checks, 1-3 leading indicators). Absent means unrecorded.
 # epic_ruling — the latest ruling on the hypothesis: `continue`, `shift`, or
 #   `close` (docs/epics.md). continue and shift keep the epic open; close is the
 #   one terminal ruling. Each later ruling overwrites the last.
-#   clause_epic_ruling_recorded holds a stewarded epic's finalize until it reads
-#   close with an outcome, and check-epic-closed-implies-ruled errors on a closed
-#   stewarded epic that lacks either. Absent means the hypothesis has not been
-#   ruled on.
+#   clause_epic_ruling_recorded holds the finalize of an epic other than a
+#   Delivery until it reads close with an outcome, and
+#   check-epic-closed-implies-ruled errors on such a closed epic that lacks
+#   either. Absent means the hypothesis has not been ruled on.
 # epic_ruling_reason — why the latest ruling was made, written with it. On a close
 #   ruling it is the outcome, and the close requires it: the hypothesis held, was
 #   disproven, cannot be met as stated, stalled, or ran past its cost. On continue
 #   or shift it says what the next body of work is aimed at. Absent or whitespace
 #   alone reads as unrecorded.
-# epic_ruling_at / epic_ruling_by / epic_ruling_evidence — when the latest ruling
-#   was recorded, who recorded it, and the human gate whose resolve carried it.
-#   Bookkeeping beside epic_ruling; absent leaves the provenance unstated.
+# epic_ruling_at / epic_ruling_by / epic_ruling_evidence — when the operator
+#   made the latest ruling, who recorded it, and the human gate whose resolve
+#   carried it. Bookkeeping beside epic_ruling; absent leaves the provenance
+#   unstated.
 
 [metadata.human_surface]
 keys = [
@@ -1626,7 +1598,7 @@ keys = [
 # finding.first_seen/finding.last_seen bracket them.
 # finding.recurrence_of names the earlier finding a reappearance repeats: a
 # closed one, or one held at blocked with nothing open left to wait on. Either
-# way a fix that did not hold is visible.
+# way it is the bead to read first.
 keys = [
   "finding.key", "finding.scope", "finding.digest",
   "finding.first_seen", "finding.last_seen", "finding.occurrences",

@@ -22,7 +22,7 @@
 # workflow state, never an approval, and never assert a PR may merge:
 # machine-readiness rides pr.machine and the draft flag. The values themselves —
 # what each projects from, and their precedence — are decided by one Go package,
-# services/gctk/prstatus, reached through `gctk pr-status derive` and exported so
+# services/gctk/prstatus, reached through `gctk pr status` and exported so
 # the helm board derives the same per-bead state, so a bead's PR labels and its
 # board liveness cannot disagree.
 #
@@ -181,7 +181,7 @@ ensure_labels() { # uses ORIGIN_*
 
 # The values are computed by one Go package, services/gctk/prstatus, exported so
 # the helm board derives the same per-bead state from it, so a bead's PR labels
-# and its board liveness cannot disagree. `gctk pr-status derive --anchor ID`
+# and its board liveness cannot disagree. `gctk pr status <anchor>`
 # prints working|merging|needs-review|needs-attention, and with --json one
 # object carrying that status, the held values and the reasons behind them,
 # {"status": ..., "held": [...], "reasons": [...]}, of which this script reads
@@ -193,7 +193,7 @@ ensure_labels() { # uses ORIGIN_*
 #
 # The binary is resolved as lifecycle.sh resolves it — an explicit $GCTK_BIN,
 # else the city's deployed build — and, as there, it is not compared against the
-# checkout: a binary too old to carry `pr-status`, or its --json, exits non-zero
+# checkout: a binary too old to carry `pr status`, or its --json, exits non-zero
 # on the unknown subcommand or flag, which reads as "could not derive" and
 # leaves the labels untouched until the build order catches up.
 resolve_gctk() { # succeed with GCTK_BIN naming an executable, else fail
@@ -212,7 +212,7 @@ derive_value() { # <anchor-id> [--json]
   local anchor="$1"; shift
   [ -n "$anchor" ] || { warn "derive needs --anchor"; return 1; }
   if resolve_gctk; then
-    "$GCTK_BIN" pr-status derive --anchor "$anchor" "$@"
+    "$GCTK_BIN" pr status "$anchor" "$@"
     return $?
   fi
   warn "gctk unavailable (GCTK_BIN='${GCTK_BIN:-}'); cannot derive a status without the shared code path — leaving the labels unchanged"

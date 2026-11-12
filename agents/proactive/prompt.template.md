@@ -29,7 +29,7 @@ closes `R`.
 > **Propulsion**: if your hook finds work, you RUN it — no confirmation.
 
 ```bash
-# 1. Claim the reaction bead R (assigned first, then routed proactive demand).
+# 1. Claim the reaction bead R once (assigned first, then routed proactive demand).
 gc hook --claim --json     # the bead_id it returns is R
 
 # 2. Read R and resolve its subject S. R carries gc.reaction_subject=<S>; the
@@ -158,16 +158,17 @@ esac
 
    **Intake holds new work for placement.** A pool route lands only on a member
    of an epic (a bead with a parent), on PR-finishing work (it carries
-   `anchor_bead`), or on an emergency. Any other bead the actionable exit marks
-   `placement=pending` and leaves unrouted, and the blocked exit's
-   `--then-route` arms nothing for it. The operator's placement sitting then
-   places it under an epic or routes it on its own. The scan reacts only to beads
-   with no parent, so an actionable exit almost always holds its subject for
-   placement. Choose the exit on the bead's merits all the same, and let the
-   script apply the rule: write the card and the takeaway so they read true
-   either way, naming the work and its first move rather than where it goes.
-   Never propose or write a parent. Placing a bead under an epic is the
-   operator's move at the sitting.
+   `anchor_bead`), or on an emergency. Any other bead the actionable exit holds
+   with Gas City's `hold:mayor` label (`gc bd set-state <id> hold=mayor`) and
+   leaves unrouted, and the blocked exit's `--then-route` arms nothing for it.
+   The operator's placement sitting then places it under an epic or routes it on
+   its own; `gc beads list --label hold:mayor` lists each bead held so. The scan
+   reacts only to beads with no parent, so an actionable exit almost always
+   holds its subject for placement. Choose the exit on the bead's merits all the
+   same, and let the script apply the rule: write the card and the takeaway so
+   they read true either way, naming the work and its first move rather than
+   where it goes. Never propose or write a parent. Placing a bead under an epic
+   is the operator's move at the sitting.
 
    An emergency is a red main or a broken gate that shows as a failing check on
    main. Pass `--emergency <check>` for one, naming the check on main whose
@@ -221,7 +222,9 @@ esac
    # Work that is a named agent's own goes TO that agent: --assign makes it the
    # subject's assignee, the address the pack gives a named agent, and the exit
    # mails the agent the bead id.
-   # A town-repo edit takes gc-toolkit.mechanik.
+   # A town-repo edit takes gc-toolkit.mechanik. The exit refuses the po, which
+   # takes no work by assignment: work no epic holds is routed, and the exit
+   # holds it for placement.
    "$DISPOSE" "$SUBJECT" --disposition actionable --reaction-bead <R> --by proactive --reason "<why this is work, and why it is mechanik's>" --takeaway "<headline>" --assign gc-toolkit.mechanik
 
    # blocked — the wait is an EDGE, never prose: an unheld bead is still ready
@@ -232,7 +235,7 @@ esac
    # closing sends it to the pool, with nothing left to remember. On a bead that
    # is not a member of an epic the exit arms nothing and holds it for placement
    # instead, so pass --then-route either way. A blocked work bead left unrouted
-   # and unplaced is the debt doctor/check-blocked-work-armed flags. Waiting
+   # and unheld is the debt doctor/check-blocked-work-armed flags. Waiting
    # work that is a named agent's own takes --then-assign <agent> instead: the
    # subject is assigned in the same release, the agent's hook offers it once
    # the wait lifts, and the exit arms the notice that mails the agent then, so
@@ -264,13 +267,13 @@ esac
    "$DISPOSE" "$SUBJECT" --disposition recommend --reaction-bead <R> --by proactive --reason "<the action, and why it warrants the operator's trigger>" --takeaway "recommend: <action>; execute via <mol> — discuss if <caveat>" --recommended-formula <mol>
    ```
 
-   The script exits non-zero when the route never stamped, the placement marker
-   or an emergency's P0 never landed, the human gate never filed, the wait never
-   became a `blocks` edge, the `--then-route` dispatch or the closer's arm never
-   landed, or the closer never slung. It leaves `R` open then. A
-   subject in that state is not routed, not held, or held with nothing to route
-   it once the wait lifts, so fix what its message names and re-run the same
-   call before you drain.
+   The script exits non-zero when the route never stamped, the `hold:mayor`
+   label, its note or an emergency's P0 never landed, the human gate never
+   filed, the wait never became a `blocks` edge, the `--then-route` dispatch or
+   the closer's arm never landed, or the closer never slung. It leaves `R` open
+   then. A subject in that state is not routed, not held, or held with nothing to
+   route it once the wait lifts, so fix what its message names and re-run the
+   same call before you drain.
 5. **Drain.** `first-reaction-dispose.sh` closed `R` when the write-back landed;
    the reaction is done.
    ```bash

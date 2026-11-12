@@ -88,6 +88,30 @@ S
 
 # --- gc stub ------------------------------------------------------------------
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
+# A read the gctk under test makes answers through the seam holds-store.stub.sh
+# keeps. A read naming a bead the suite gives a dep-list fixture starts the
+# store: that bead, open and carrying the fixture's edges, each far bead the
+# fixture names, and a bare open row for any other bead the read names. Every
+# later read of the same call answers from it. A-PROBEDEAD and A-PROBEJUNK fail
+# the read, as they fail the dep list.
+if [ -n "${HOLDS_STUB_READ:-}" ] && [ "${1:-}" = bd ]; then
+  shift
+  case " $* " in *A-PROBEDEAD*|*A-PROBEJUNK*) echo "gc bd: simulated read failure" >&2; exit 1 ;; esac
+  hs="$FAKE_DEPLISTS/.holds-store.json"
+  asked=$(printf '%s\n' "$@" | awk 'p { print; exit } $0 == "--id" { p = 1 }')
+  fixtures=""
+  for b in $(printf '%s' "$asked" | tr ',' ' '); do
+    [ -f "$FAKE_DEPLISTS/$b.json" ] && fixtures="$fixtures $b"
+  done
+  if [ -n "$fixtures" ] || [ ! -f "$hs" ]; then
+    { for b in $fixtures; do
+        jq -c --arg b "$b" '[{id: $b, status: "open", dependencies: [ .[] | {id, dependency_type} ]}] + [ .[] | del(.dependency_type) ]' "$FAKE_DEPLISTS/$b.json"
+      done
+      jq -nc --arg ids "$asked" '[ $ids | split(",")[] | select(. != "") | {id: ., status: "open"} ]'
+    } | jq -s -c 'add // [] | unique_by(.id)' > "$hs"
+  fi
+  HOLDS_STORE="$hs" exec "${HOLDS_STUB:?}" answer "$@"
+fi
 case "$1 ${2:-}" in
   "rig list")
     # Two rigs. gc-toolkit's path has no .beads dir, so gc-helm issues
@@ -161,8 +185,11 @@ case "$1 ${2:-}" in
     # as one proof a same-branch wait's work has LANDED on the branch: the handoff
     # submit-and-exit writes only after it verifies the push. Absent id -> empty.
     asg="$(awk -F'|' -v i="$id" '$1==i{print $2; exit}' "$FAKE_ASSIGNEES" 2>/dev/null || true)"
-    if [ -n "$convoy" ]; then row=$(jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg c "$convoy" --arg rt "$routed" --arg er "$exec_routed" --arg sd "$settled" --arg tk "$takeaway" --arg sn "$sname" --arg si "$sid" --arg br "$br" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.takeaway":$tk,"gc.takeaway_settled":$sd,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br}}]')
-    else row=$(jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg rt "$routed" --arg er "$exec_routed" --arg sd "$settled" --arg tk "$takeaway" --arg sn "$sname" --arg si "$sid" --arg br "$br" '[{id:$i,status:$s,assignee:$a,metadata:{"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.takeaway":$tk,"gc.takeaway_settled":$sd,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br}}]'); fi
+    # The bead's labels, from FAKE_LABELS (id|label, one per line): a hold a
+    # release that sends the bead on lifts. Absent id -> no labels.
+    lbl="$(awk -F'|' -v i="$id" '$1==i{print $2}' "${FAKE_LABELS:-/dev/null}" 2>/dev/null | jq -Rsc 'split("\n") | map(select(length > 0))')"
+    if [ -n "$convoy" ]; then row=$(jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg c "$convoy" --arg rt "$routed" --arg er "$exec_routed" --arg sd "$settled" --arg tk "$takeaway" --arg sn "$sname" --arg si "$sid" --arg br "$br" --argjson lb "${lbl:-[]}" '[{id:$i,status:$s,assignee:$a,labels:$lb,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.takeaway":$tk,"gc.takeaway_settled":$sd,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br}}]')
+    else row=$(jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg rt "$routed" --arg er "$exec_routed" --arg sd "$settled" --arg tk "$takeaway" --arg sn "$sname" --arg si "$sid" --arg br "$br" --argjson lb "${lbl:-[]}" '[{id:$i,status:$s,assignee:$a,labels:$lb,metadata:{"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.takeaway":$tk,"gc.takeaway_settled":$sd,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br}}]'); fi
     printf '%s\n' "$row" ;;
   "bd close")
     printf '%s\n' "$*" >> "$FAKE_CLOSES" ;;
@@ -180,6 +207,14 @@ case "$1 ${2:-}" in
     # a bead fails to land, and FAKE_UPDATE_RC refuses every update.
     case "$3" in *NOPIN*) exit 1 ;; esac
     [ -z "${FAKE_UPDATE_RC:-}" ] || exit "$FAKE_UPDATE_RC"
+    # A --remove-label lands on FAKE_LABELS, by the label's exact text.
+    _prev=""
+    for a in "$@"; do
+      if [ "$_prev" = "--remove-label" ] && [ -n "${FAKE_LABELS:-}" ]; then
+        { grep -v -F -x "$3|$a" "$FAKE_LABELS" || true; } > "$FAKE_LABELS.tmp"; mv "$FAKE_LABELS.tmp" "$FAKE_LABELS"
+      fi
+      _prev="$a"
+    done
     # The keys a release writes land here, so a read of the bead sees them.
     for a in "$@"; do
       case "$a" in
@@ -252,8 +287,13 @@ export FAKE_STEPS_JSON="$TMP/steps.json" FAKE_ROOTS="$TMP/roots" \
        FAKE_EXEC="$TMP/exec" \
        FAKE_SNAME="$TMP/sname" FAKE_SID="$TMP/sid" FAKE_DEPLISTS="$TMP/deplists" \
        FAKE_BRANCHES="$TMP/branches" FAKE_ASSIGNEES="$TMP/assignees" \
-       FAKE_CONVOY_CALLS="$TMP/convoy-calls"
+       FAKE_CONVOY_CALLS="$TMP/convoy-calls" FAKE_LABELS="$TMP/labels"
 mkdir -p "$TMP/rig-a/.beads" "$TMP/deplists"
+# What holds a bead is the answer of gctk bead holds, built from this checkout
+# and run over the dep-list fixtures below.
+export HOLDS_STUB="$HERE/holds-store.stub.sh" GC_NO_API=1
+GCTK_BIN="$("$HOLDS_STUB" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so no hold can be read"; exit 1; }
+export GCTK_BIN
 : > "$TMP/convoy-calls"
 
 # Blocker fixtures, in the shape `gc bd dep list --direction=down --json`
@@ -278,6 +318,15 @@ cat > "$TMP/deplists/A-DONEBLK.json" <<'J'
 J
 cat > "$TMP/deplists/CLOSED-A-FOLD.json" <<'J'
 [{"id":"A-w-child","status":"open","dependency_type":"blocks","metadata":{}}]
+J
+# A-PINNEDBLK a pinned blocker, which the store counts as none -> nothing waits
+# A-WAITSFOR  a waits-for edge of its own, which the store cannot judge yet ->
+#             the bead waits on its spawner, unjudged
+cat > "$TMP/deplists/A-PINNEDBLK.json" <<'J'
+[{"id":"w-pin","status":"pinned","dependency_type":"blocks","metadata":{}}]
+J
+cat > "$TMP/deplists/A-WAITSFOR.json" <<'J'
+[{"id":"w-spawn","status":"closed","dependency_type":"waits-for","metadata":{}}]
 J
 cat > "$TMP/deplists/A-PROBEDEAD.json" <<'J'
 [{"id":"A-w-child","status":"open","dependency_type":"blocks","metadata":{}}]
@@ -751,6 +800,46 @@ grep -q "released to $POOL" "$TMP/rout" \
   && ok "(ROUTEONE) …and says where the bead went" \
   || bad "(ROUTEONE) the success line lost the route (stdout: $(cat "$TMP/rout"))"
 
+# ── takeaway --release to a pool or an agent: the hold lifts ──────────────────
+# Sending a held bead on is a placement, and Gas City serves no bead a hold
+# label holds, so a --release with --route or --assign lifts hold:mayor in its
+# own write. Covered:
+#   (HOLDROUTE)  --route removes each spelling of hold:mayor in the release write
+#   (HOLDAGENT)  --assign does the same
+#   (HOLDPARK)   a release back to the person keeps the hold
+printf 'A-PARKED|hold:mayor\nA-PARKED|Hold:Mayor\nA-PARKED|learning\n' > "$TMP/labels"
+: > "$TMP/updates"; printf '%s' "$POOL" > "$TMP/routed"
+HRC=0
+sh "$SCRIPT" takeaway A-PARKED "placed — routed to the polecat pool" --release --route "$POOL" >"$TMP/hout" 2>"$TMP/herr" || HRC=$?
+eq "$HRC" "0" "(HOLDROUTE) a release to a pool of a held bead exits 0"
+HLINE="$(grep -E "^bd update A-PARKED( |\$)" "$TMP/updates" | head -n1)"
+case "$HLINE" in
+  *"--set-metadata gc.routed_to=$POOL"*"--remove-label hold:mayor --remove-label Hold:Mayor"*) ok "(HOLDROUTE) the release write that routes the bead also lifts each spelling of its hold" ;;
+  *) bad "(HOLDROUTE) the lift did not ride the release write (got: ${HLINE:-<none>})" ;;
+esac
+eq "$(cat "$TMP/labels")" "A-PARKED|learning" "(HOLDROUTE) the hold is gone and the other labels stay"
+grep -q 'hold:mayor lifted' "$TMP/hout" \
+  && ok "(HOLDROUTE) the success line says the hold was lifted" \
+  || bad "(HOLDROUTE) the success line does not say so: $(cat "$TMP/hout")"
+cp "$TMP/assignees" "$TMP/assignees.hold"
+printf 'A-PARKED|gc-toolkit.mechanik\n' >> "$TMP/assignees"
+printf 'A-PARKED|hold:mayor\n' > "$TMP/labels"
+: > "$TMP/updates"; : > "$TMP/routed"
+sh "$SCRIPT" takeaway A-PARKED "a city.toml edit, mechanik's" --release --assign gc-toolkit.mechanik --no-wait >/dev/null 2>&1 || true
+HLINE="$(grep -E "^bd update A-PARKED( |\$)" "$TMP/updates" | head -n1 || true)"
+grep -q -- '--remove-label hold:mayor' <<< "$HLINE" \
+  && ok "(HOLDAGENT) a release to a named agent lifts the hold in the same write" \
+  || bad "(HOLDAGENT) no lift in the release write: $(head -n1 "$TMP/updates")"
+cp "$TMP/assignees.hold" "$TMP/assignees"
+printf 'A-PARKED|hold:mayor\n' > "$TMP/labels"
+: > "$TMP/updates"; : > "$TMP/routed"
+sh "$SCRIPT" takeaway A-PARKED "back to the person" --release --no-wait >/dev/null 2>&1 || true
+grep -q -- '--remove-label' "$TMP/updates" \
+  && bad "(HOLDPARK) a release back to the person lifted the hold: $(cat "$TMP/updates")" \
+  || ok "(HOLDPARK) a release back to the person keeps the hold"
+eq "$(cat "$TMP/labels")" "A-PARKED|hold:mayor" "(HOLDPARK) …and the label stands"
+: > "$TMP/labels"; : > "$TMP/routed"
+
 # (REFUSED) the update's exit is the verdict on the whole stamp.
 : > "$TMP/updates"; : > "$TMP/deps"; : > "$FAKE_CANCELS"
 URC=0
@@ -909,6 +998,27 @@ CRC2=0
 sh "$SCRIPT" takeaway A-DONEBLK "actionable — nothing outstanding" \
    --release --route "$POOL" >/dev/null 2>"$TMP/derr" || CRC2=$?
 eq "$CRC2" "0" "(DELEGDONE) a closed blocker does not refuse the route"
+
+# (DELEGPIN) a pinned blocker holds nothing, as the store counts it, so the
+# route lands.
+: > "$TMP/updates"; printf '%s' "$POOL" > "$TMP/routed"
+CRC3=0
+sh "$SCRIPT" takeaway A-PINNEDBLK "actionable — its blocker is pinned" \
+   --release --route "$POOL" >/dev/null 2>"$TMP/derr" || CRC3=$?
+eq "$CRC3" "0" "(DELEGPIN) a pinned blocker does not refuse the route"
+
+# (DELEGWAITS) a waits-for edge of the bead's own is a wait the store cannot
+# judge yet, so the bead's work may still sit on its spawner: the route is
+# refused, and the refusal names the spawner.
+: > "$TMP/updates"; printf '%s' "$POOL" > "$TMP/routed"
+WRC=0
+sh "$SCRIPT" takeaway A-WAITSFOR "routed — it waits for its spawner" --by converse \
+   --release --route "$POOL" >/dev/null 2>"$TMP/derr" || WRC=$?
+eq "$WRC" "2" "(DELEGWAITS) a waits-for edge of its own refuses the route"
+grep -q 'w-spawn' "$TMP/derr" \
+  && ok "(DELEGWAITS) …and the refusal names the spawner" \
+  || bad "(DELEGWAITS) the spawner is unnamed (stderr: $(cat "$TMP/derr"))"
+eq "$(wc -l < "$TMP/updates" | tr -d ' ')" "0" "(DELEGWAITS) …before any write"
 
 # (DELEGBARE) the release without a route is the disposition this guard sends
 # callers back to, so it has to keep working on the very bead it refuses.

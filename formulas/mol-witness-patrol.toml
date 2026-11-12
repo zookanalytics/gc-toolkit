@@ -74,20 +74,20 @@ Mail reporting a defect in the pack itself, a formula or script fault the
 sender hit and worked around, is none of those: it is work for a polecat, not
 a question for a human. It is also new work, so it waits for the operator's
 placement sitting like any finding, and the sitting places it under an epic or
-routes it on its own (docs/steering.md). File it as a bug bead marked
-`placement=pending` and leave it unrouted. The marker rides the create rather
-than a second write: a bug that exists before it is marked is an open, unrouted
-bead in no queue for as long as that second write is outstanding, and a second
-write that fails leaves it that way for good. Set TITLE and BODY first:
+routes it on its own (docs/steering.md). File it as a bug bead held with Gas
+City's `hold:mayor` label and leave it unrouted. The label rides the create
+rather than a second write: a bug that exists before it is held is an open,
+unrouted bead in no queue for as long as that second write is outstanding, and
+a second write that fails leaves it that way for good. Set TITLE and BODY first:
 ```bash
 # >>> bug-file
-BUG_JSON=$(gc bd create "$TITLE" -t bug -d "$BODY" --metadata '{"placement":"pending"}' --json)
+BUG_JSON=$(gc bd create "$TITLE" -t bug -d "$BODY" --labels hold:mayor --json)
 BUG=$(printf '%s' "$BUG_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
 if [ -n "$BUG" ] && [ "$BUG" != "null" ]; then
   echo "filed bug $BUG; it waits for placement"
 else
   CREATE_ERR=$(printf '%s' "$BUG_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null)
-  echo "gc bd create reported no id${CREATE_ERR:+ ($CREATE_ERR)}; look for the bug in gc-helm.sh unplaced before filing this again." >&2
+  echo "gc bd create reported no id${CREATE_ERR:+ ($CREATE_ERR)}; look for the bug in gc beads list --label hold:mayor before filing this again." >&2
 fi
 # <<< bug-file
 ```
@@ -895,8 +895,11 @@ landing bead sits in the queue from the moment its integration effort is stood
 up, and find-work leaves it until the effort's beads and its summary task close.
 ```bash
 # >>> refinery-stuck-handoff
-SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/human-gate.sh" ] && [ -x "$SCRIPTS/patrol-finding.sh" ] && [ -x "$SCRIPTS/resolve-route.sh" ] && [ -f "$SCRIPTS/bd-lib.sh" ] && [ -f "$SCRIPTS/hold-lib.sh" ] && . "$SCRIPTS/bd-lib.sh" || SCRIPTS=""
-: "${SCRIPTS:?human-gate.sh, patrol-finding.sh, resolve-route.sh, bd-lib.sh and hold-lib.sh not found in the pack, or bd-lib.sh did not source}"
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/human-gate.sh" ] && [ -x "$SCRIPTS/patrol-finding.sh" ] && [ -x "$SCRIPTS/resolve-route.sh" ] && [ -f "$SCRIPTS/bd-lib.sh" ] && . "$SCRIPTS/bd-lib.sh" || SCRIPTS=""
+: "${SCRIPTS:?human-gate.sh, patrol-finding.sh, resolve-route.sh and bd-lib.sh not found in the pack, or bd-lib.sh did not source}"
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 # The queue is whatever is assigned to the refinery's live identity, so the
 # address is resolved against the roster rather than assembled: bd lists an
 # address no agent holds as a valid empty array, which reads exactly like a
@@ -928,27 +931,18 @@ fi
 # past the bound. A listing that is not an array yields nothing (STUCK_N empty),
 # which the unreadable arm below catches and reports.
 PAST=$(printf '%s' "$QUEUE" | jq -c --argjson now "$NOW" --argjson max "$STUCK_SECS" 'if type == "array" then [ .[] | select((.metadata.merge_result // "") == "") | select($now - ((.updated_at | fromdateiso8601?) // $now) > $max) ] else empty end' 2>/dev/null) || PAST=""
-# A bead something holds, by hold-lib.sh's definition, is waiting, not stuck,
-# so it files nothing. The rest are aged from the later of their last write and
-# the close that released their last hold: a landing bead whose summary task has
-# just closed was last written when its effort was stood up. A bead held only by
-# a blocker the store does not return stays: find-work never takes it, and
-# nothing releases it until that blocker reads back or the edge goes. A walk
-# that cannot read leaves STUCK_N empty under HOLD_RC.
+# A bead something holds, by the answer of gctk bead holds, is waiting, not
+# stuck, so it files nothing. The rest are aged from the later of their last
+# write and the close that landed their last wait: a landing bead whose summary
+# task has just closed was last written when its effort was stood up. A read
+# that does not answer every handoff past the bound leaves STUCK_N empty under
+# HOLD_RC.
 HOLD_RC=0
 STUCK="$PAST"
-cr_hold_read() { gc bd list --all --include-gates --include-infra --include-templates --id="$1" --json --limit=0; }
 if [ -n "$PAST" ] && [ "$PAST" != "[]" ]; then
-  JUDGED=""
-  if . "$SCRIPTS/hold-lib.sh"; then
-    JUDGED=$(printf '%s' "$PAST" | hold_annotate cr_hold_read) || JUDGED=""
-  fi
-  if [ -n "$JUDGED" ]; then
-    STUCK=$(printf '%s' "$JUDGED" | jq -c --argjson now "$NOW" --argjson max "$STUCK_SECS" '[ .[] | select(.hold.state != "held") | ([.updated_at, .hold.released_at] | map(fromdateiso8601? // empty) | max) as $since | select($now - $since > $max) | {id, since: ($since | todate), why: (if .hold.state == "unread" then .hold.why else "" end)} ]' 2>/dev/null) || STUCK=""
-  else
-    STUCK=""
-    HOLD_RC=1
-  fi
+  STUCK=$({ printf '%s' "$PAST"; echo; printf '%s' "$PAST" | jq -r '[.[].id] | join(" ")' | xargs -r "$GCTK" bead holds; } | jq -s -c --argjson now "$NOW" --argjson max "$STUCK_SECS" '.[0] as $p | (.[1:] | map({key: .id, value: .}) | from_entries) as $h
+    | if all($p[]; $h[.id] != null and $h[.id].error == null) then [ $p[] | select($h[.id].status == "clear") | ([.updated_at, $h[.id].last_landed] | map(fromdateiso8601? // empty) | max) as $since | select($now - $since > $max) | {id, since: ($since | todate)} ] else empty end' 2>/dev/null) || STUCK=""
+  [ -n "$STUCK" ] || HOLD_RC=1
 fi
 STUCK_N=$(printf '%s' "$STUCK" | jq 'if type == "array" then length else empty end' 2>/dev/null) || STUCK_N=""
 case "${STUCK_N:-}" in
@@ -967,7 +961,7 @@ elif [ "$HOLD_RC" -ne 0 ]; then
   # handoff waiting on its blockers cannot be told from a stuck one. That is the
   # blind monitor too, reported under the same key as an unreadable queue.
   echo "check-refinery: could not read what holds the handoffs past the stuck bound; reporting the blind monitor" >&2
-  "$SCRIPTS/patrol-finding.sh" --scope witness-findings --key witness-refinery-queue-unreadable --title "check-refinery cannot read what holds the refinery handoffs" --message "check-refinery read the refinery queue but not what holds the handoffs that have sat past the stuck bound (the hold-lib.sh walk over their blockers failed), so it cannot tell a handoff waiting on its blockers from a stuck one. The stuck-handoff monitor is blind until those reads answer. Inspect the store's health." || echo "check-refinery: hold walk unreadable AND the finding was not filed" >&2
+  "$SCRIPTS/patrol-finding.sh" --scope witness-findings --key witness-refinery-queue-unreadable --title "check-refinery cannot read what holds the refinery handoffs" --message "check-refinery read the refinery queue but not what holds the handoffs that have sat past the stuck bound (gctk bead holds did not answer every one of them, or no gctk binary is at $GCTK), so it cannot tell a handoff waiting on its blockers from a stuck one. The stuck-handoff monitor is blind until those reads answer. Inspect the store's health." || echo "check-refinery: hold read unreadable AND the finding was not filed" >&2
 elif [ "$QUEUE_RC" -ne 0 ] || [ -z "$STUCK_N" ]; then
   # Genuinely unreadable: bd failed, or the listing is not a JSON array even
   # after the control-byte strip. A blinded monitor lets a genuinely stuck
@@ -983,10 +977,8 @@ else
   # A stuck handoff is still stuck on the next pass, which detects it again, so
   # the call declares a quiet window: a person's moot or benign answer stands
   # for a day.
-  printf '%s' "$STUCK" | jq -r '.[] | .id + " " + (.since // "unknown") + " " + (.why // "")' | while read -r SID SWHEN SWHY; do
-    SNOTE=""
-    [ -z "$SWHY" ] || SNOTE=" It waits on $SWHY, a blocker this store does not return, so find-work leaves it: restore that bead or remove the edge."
-    "$SCRIPTS/human-gate.sh" --subject "$SID" --key witness-refinery-queue --quiet-window 86400 --message "Refinery handoff $SID has sat assigned to $REFINERY, unprepared, since $SWHEN, past the ${STUCK_SECS}s stuck bound while the session kept polling. It is not draining on its own; inspect the bead and the refinery session.$SNOTE" >/dev/null || echo "check-refinery: the human gate was not filed for $SID" >&2
+  printf '%s' "$STUCK" | jq -r '.[] | .id + " " + (.since // "unknown")' | while read -r SID SWHEN; do
+    "$SCRIPTS/human-gate.sh" --subject "$SID" --key witness-refinery-queue --quiet-window 86400 --message "Refinery handoff $SID has sat assigned to $REFINERY, unprepared, since $SWHEN, past the ${STUCK_SECS}s stuck bound while the session kept polling. It is not draining on its own; inspect the bead and the refinery session." >/dev/null || echo "check-refinery: the human gate was not filed for $SID" >&2
   done
 fi
 # A handoff that has left the refinery queue is no longer sitting unprepared, so

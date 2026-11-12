@@ -143,6 +143,8 @@ func BlockerOf(b Bead) prstatus.Blocker {
 		Status:    b.Status,
 		IssueType: b.IssueType,
 		AwaitType: b.AwaitType,
+		Assignee:  b.Assignee,
+		Metadata:  b.Metadata,
 	}
 }
 

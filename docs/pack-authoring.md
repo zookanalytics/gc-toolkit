@@ -65,7 +65,10 @@ A molecule's lifecycle is gascity's, so the refusal ends the run through
 gascity's run cancel
 ([gascity/packs.md](gascity/packs.md#a-run-is-cancelled-through-the-supervisor-api)).
 `assets/scripts/run-cancel.sh` sends it, after naming the run from the step this
-session holds, and the pack writes no member of the molecule. Nothing
+session holds. The cancel interrupts the turn of each session that holds a
+started step of the run, so the script first puts that step back to not
+started, still in this session's name, and the call that sends the cancel goes
+on to the drain. The pack writes no other member of the molecule. Nothing
 resumes a cancelled run, so a wait for a person sits on the work bead:
 `assets/scripts/human-gate.sh` files a human gate that blocks it, and
 `assets/scripts/await-ruling.sh` reads that `blocks` edge back and arms the
@@ -80,8 +83,9 @@ the reason, and when a person must rule, the gate's subject, key and message,
 with the formula a re-sling pours when the work goes on after the ruling.
 
 The refusal drains only after the cancel lands. A cancel that does not land
-leaves the step claimed by this session, and the step goes back to the pool
-only once the session ends, so the next worker retries it.
+leaves the step in this session's name, not started: this session's next claim
+takes it up again, and once the session ends the step goes back to the pool, so
+the next worker retries it.
 
 A molecule keeps the step text it was poured with, while the scripts that text
 calls are read from the installed pack when the step runs. So a pack script that
@@ -535,7 +539,7 @@ and both scopes ship in one pack:
 | Agents | `scope` | Identity to stamp |
 | --- | --- | --- |
 | dog, deacon, mechanik | `city` | `gc-toolkit.<role>` — no rig segment, so the deacon is `gc-toolkit.deacon` |
-| converse-opus, converse-fable, converse-codex, polecat, polecat-codex, proactive, refinery, witness | `rig` | `gc-toolkit/gc-toolkit.<role>`, so the refinery is `gc-toolkit/gc-toolkit.refinery` |
+| converse-claude-opus, converse-claude-fable, converse-codex-sol, converse-codex-astra, polecat, polecat-codex, proactive, refinery, witness | `rig` | `gc-toolkit/gc-toolkit.<role>`, so the refinery is `gc-toolkit/gc-toolkit.refinery` |
 
 Each agent declares its own `scope` in `agents/<role>/agent.toml`, and the
 `[[named_session]]` stanzas in `pack.toml` restate it for the singletons. Read

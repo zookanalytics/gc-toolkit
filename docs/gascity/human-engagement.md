@@ -1,6 +1,6 @@
 ---
 name: Gas City and human engagement (platform facts)
-description: What Gas City offers for engaging a person, and how a session and its pane end, where upstream's docs leave it unsaid — human gates and the core orders that surface them, the primitives a conversation rides, where a question surfaces, the gc-roles worker contract, the idle ladder, max age, manual sessions, the stop, the no-wake-reason drain, the backstops, the claim releases that keep a bead routed to `human`, and where a failed start is recorded — each cited and dated. gc-toolkit's own model on these is human-engagement.md.
+description: What Gas City offers for engaging a person, and how a session and its pane end, where upstream's docs leave it unsaid — human gates and the core orders that surface them, the primitives a conversation rides, where a question surfaces, the gc-roles worker contract, the idle ladder, max age, manual sessions, the stop, the drain flag a drain-ack writes, the no-wake-reason drain, the backstops, the claim releases that keep a bead routed to `human`, where a failed start is recorded, and what an attach does to a session that is not running — each cited and dated. gc-toolkit's own model on these is human-engagement.md.
 ---
 
 # Gas City and human engagement
@@ -300,15 +300,86 @@ upstream `1e05ae624` and the fork on 2026-10-19.
 
 ### `max_session_age`
 
-Only an agent with a positive `max_session_age` is registered with the
-max-age tracker. `DecideMaxSessionAge` walks blocker, pending interaction and
-assigned work, then stops; it has no attachment rung on either ref. So a
-session whose only defer is its assigned work restarts on the first tick
-after that work closes, whoever is attached.
+Only the legacy reconciler reads `max_session_age`: the tracker's one reader
+is its tick, and the v2 reconciler has no max-age arm. There, only an agent with
+a positive `max_session_age` is registered with the tracker.
+`DecideMaxSessionAge` walks blocker, pending interaction and assigned work, then
+stops; it has no attachment rung. So under the legacy reconciler a session whose
+only defer is its assigned work restarts on the first tick after that work
+closes, whoever is attached.
 
 *Evidence:* `buildMaxSessionAgeTracker` (`cmd/gc/cmd_start.go`) and
 `DecideMaxSessionAge` (`internal/session/lifecycle_timers.go`), read at
-upstream `1e05ae624` and the fork on 2026-10-19.
+upstream `1e05ae624` and the fork on 2026-10-19; `shouldRestart`
+(`cmd/gc/max_session_age_tracker.go`) and its one caller, in
+`reconcileSessionBeadsTracedWithNamedDemand` (`cmd/gc/session_reconciler.go`),
+read at upstream `9f807760c` on 2026-11-07.
+
+### A stop the v2 reconciler makes waits while a client is attached
+
+The v2 session reconciler runs each stop of a live runtime through a fence, and
+the fence's attach leg holds the stop while a client is attached to the
+session, or while the attach probe cannot tell. That covers the stop a
+`gc runtime drain-ack` asks for, whether the session acks itself or an operator
+acks it with `--operator`, and the idle stop. A held stop backs off, 10 seconds
+doubling to five minutes, and goes ahead on the first attempt after the client
+detaches. v2 has no forced stop, and its stop-outstanding alert stays quiet
+while a client is attached. Only an explicit restart request stops through an
+attached client. The legacy reconciler stopped an acked session under one.
+
+A drain-ack's stop leaves the session's record open, with its state `drained`,
+which `gc session list` shows as `asleep`. The core reaper's
+`gc session prune --state drained` closes such a record, and never one an idle
+sleep stopped, whose state reads `asleep` with sleep reason `idle`.
+
+*Evidence:* `stopLegs` (`cmd/gc/reconcile_effect_stop.go`), `fenceDestructive`,
+`stopFenced` and `attachLeg` (`cmd/gc/reconcile_session_fence.go`), `armAck`
+(`cmd/gc/reconcile_arms_drain.go`), `armStop` (`cmd/gc/reconcile_arms_stop.go`),
+`vetoBackoff` (`cmd/gc/allocator_backoff.go`), `escalateStop` and
+`stopQuietHold` (`cmd/gc/reconcile_observe_v2.go`),
+`v2SignaledStopHeldForAttach` (`cmd/gc/session_reconciler.go`) and
+`TestFencedStopNeverKillsAttached` (`cmd/gc/reconcile_effect_stop_test.go`),
+read at upstream `9f807760c` on 2026-11-07; `PruneDetailed` and
+`pruneStateAllowed` (`internal/session/manager.go`), read there on 2026-11-08.
+Probed on this host on 2026-11-08, in a scratch v2 city
+([specs/tk-7w7qdls/idle-sleep-probe.md](../../specs/tk-7w7qdls/idle-sleep-probe.md)).
+
+### A drain-ack sets `GC_DRAIN_ACK` in the session's tmux environment
+
+`gc runtime drain-ack` records each ack it lands as `GC_DRAIN_ACK=1` in the
+session's metadata, which on the tmux runtime is the session's tmux
+environment: `set-environment -t <session> GC_DRAIN_ACK 1`. It does so for the
+session's own ack and an operator's `--operator` ack alike, and under both
+reconcilers. Under v2 the flag mirrors the ack the session row records, and
+under the legacy reconciler the flag is the ack. `gc runtime undrain` removes
+it with `set-environment -u`. The legacy reconciler also sets it when it
+acknowledges a drain on a session's behalf (*A pool session with no wake
+reason is drained*, below). Under v2 that drain code does not run, so there
+only a drain-ack sets the flag. A restart starts a fresh tmux session, whose
+environment holds no flag.
+
+tmux reads a format variable that names no option or format of its own from
+the session's environment, so a session's `set-titles-string` can read the
+flag: `#{?#{GC_DRAIN_ACK},done · ,}#T` reads `done · ` and the pane's title
+while the flag is set, and the pane's title alone once it is removed. Setting
+the variable redraws nothing. An attached client's title follows it when the
+pane next prints, or else at the client's next status refresh, every
+`status-interval` seconds, which is 15 by default and on this city's server.
+
+*Evidence:* upstream's
+[CLI reference for `gc runtime drain-ack`](https://docs.gascity.com/reference/cli#gc-runtime-drain-ack),
+which says it "Sets GC_DRAIN_ACK metadata on the session".
+`providerDrainOps.setDrainAck` and `providerDrainOps.clearDrain`,
+`finishRuntimeDrainAck`, `rowAckedDrainOps` and `persistedAckDrainOps`
+(`cmd/gc/cmd_runtime_drain.go`), `Provider.SetMeta` and `Provider.RemoveMeta`
+(`internal/runtime/tmux/adapter.go`), `Tmux.SetEnvironment` and
+`Tmux.RemoveEnvironment` (`internal/runtime/tmux/tmux.go`),
+`setReconcilerDrainAckMetadata` (`cmd/gc/session_wake.go`), its one caller in
+`reconcileSessionBeadsTracedWithNamedDemand` (`cmd/gc/session_reconciler.go`),
+and the v2 phase split in `cmd/gc/city_runtime_v2.go`, read at upstream
+`9ba215cb5` on 2026-11-09, the same at the fork build `cb80c5354`. The tmux
+behaviour was probed with tmux 3.8 on this host on 2026-11-09
+([specs/tk-7w7qdls/idle-sleep-probe.md](../../specs/tk-7w7qdls/idle-sleep-probe.md#the-done-mark-on-gas-citys-drain-flag)).
 
 ### A manual session stays up until it is closed
 
@@ -322,16 +393,41 @@ creates the canonical session, whose origin is `named`
 That session gets no manual keepalive; the named-session arms decide whether
 it stays desired. `gc session new` checks no session count, and the pool's
 scale-down drop paths skip manual sessions, so `max_active_sessions` does not
-cap them. A manual session can still be
-idle-slept by a `[chat_sessions]` idle timeout once its grace period ends, and
-a hold or quarantine overrides it.
+cap them. A hold or quarantine overrides the keep.
+
+A manual session can still be idle-slept. Its idle time is the
+`[chat_sessions] idle_timeout` when that is set, which the v2 reconciler refuses
+to boot under, and otherwise its agent's `sleep_after_idle`, or a
+`[session_sleep]` default for its class. Under v2 that policy sleeps a session
+that holds no claimed or assigned work and has no client attached once the
+policy's time has passed since the later of its last detach and its last
+terminal output. The awake set's own idle sleep spares a manual session younger
+than `[chat_sessions] grace_period` (ten minutes by default), but the sleep
+policy's pass, which runs after it, has no such rung, so a manual session under
+a sleep policy gets no grace: in the probe one slept about two minutes after it
+was created. A slept session reads `asleep` with sleep reason `idle`, and stays
+asleep only while its recorded sleep-policy fingerprint matches its template's
+current one: a change to the policy wakes it. Attaching wakes it with its
+conversation, and Gas City hands the agent its prompt again. The core reaper's
+drained prune never closes it, so its record stays until something closes it.
 
 *Evidence:* `ComputeAwakeSet` (`cmd/gc/compute_awake_set.go`),
 `isManualSessionInfo` (`cmd/gc/session_sleep.go`), `cmdSessionNew` and
 `sessionOriginForConfiguredNamed` (`cmd/gc/cmd_session.go`), the drop paths in
 `cmd/gc/build_desired_state.go`;
 read at upstream `1e05ae624` and the fork on 2026-10-19. Upstream's session
-model says manual sessions may soft-exceed the cap.
+model says manual sessions may soft-exceed the cap. The idle sleep:
+`ComputeAwakeSet`'s idle-sleep block and `inManualGracePeriod`
+(`cmd/gc/compute_awake_set.go`), `armDetachedAt`
+(`cmd/gc/reconcile_arms_heals.go`), `configSleepSuppressed`
+(`cmd/gc/allocator_decide.go`), `wakeDemandOverridesSleepSuppression`
+(`cmd/gc/session_reconciler.go`), `configWakeSuppressedAt`
+(`cmd/gc/session_sleep.go`), `ResolveSessionSleepPolicy`
+(`internal/config/session_sleep.go`), `v2LatchRefusals`
+(`cmd/gc/reconcile_latch.go`) and `pruneStateAllowed`
+(`internal/session/manager.go`), read at upstream `9f807760c` on 2026-11-08,
+and run in the scratch city of
+[specs/tk-7w7qdls/idle-sleep-probe.md](../../specs/tk-7w7qdls/idle-sleep-probe.md).
 
 ### Stopping a session destroys its pane
 
@@ -384,16 +480,18 @@ it is quiet and the trigger is still unclaimed; the continuation backstop's
 last step is a no-op; and the execution backstop requests a tracked drain on
 an unstarted claim and sends a default nudge on a started one.
 
-Upstream also has `[daemon] work_ladder` (default on), which only the opt-in
-v2 reconciler reads: there it replaces the three backstops with a per-seat
-ladder over open pool seats. The default reconciler ignores it and runs the
-three backstops, and the city's fork has no `work_ladder` at all.
+`[daemon] work_ladder` (default on), which only the v2 reconciler reads,
+replaces the three backstops with a per-seat ladder over the same open pool
+seats, and this city runs v2. The ladder governs no named or manual session
+either. With `work_ladder` off, or under the legacy reconciler, the three
+backstops run.
 
 *Evidence:* `governs()` in `cmd/gc/idle_nudge.go` and
-`cmd/gc/execution_backstop.go`, `runNudgeBackstop`
-(`cmd/gc/nudge_backstop.go`), `workLadder` (`cmd/gc/reconcile_steps_nudges.go`)
-and `cmd/gc/work_ladder_lane.go` (upstream only); read at upstream
-`1e05ae624` and the fork on 2026-10-19.
+`cmd/gc/execution_backstop.go` and `runNudgeBackstop`
+(`cmd/gc/nudge_backstop.go`), read at upstream `1e05ae624` and the fork on
+2026-10-19; `workLadder` (`cmd/gc/reconcile_steps_nudges.go`), `ladderGoverns`
+(`cmd/gc/work_ladder_lane.go`) and `WorkLadder` (`internal/config/config.go`),
+read at upstream `9f807760c` on 2026-11-08.
 
 ### No release frees a claim routed to `human`
 
@@ -466,6 +564,82 @@ fork `e03752646`, the build the city runs, and at upstream `adae2e678` on
 2026-10-26; the two agree. On the city's own records that day, a startup
 timeout, two setup timeouts and a never-started rollback each read as
 described.
+
+## What an attach does to a session that is not running
+
+`gc session attach` attaches to a running session as it stands. While the
+city's controller runs, it asks the controller to start a session whose
+runtime is not running: it records the wake `gc session wake` records, waits up
+to `--wait-timeout`, two minutes by default, for the session to run, and then
+attaches through a handle that attaches only to a running runtime and never
+starts one. A start the controller makes hands the agent its prompt as its
+first message. Under `wake_mode = "fresh"` the start clears the session key
+first, so it opens a new conversation, for a session its idle limit put to
+sleep too. A wake the controller will not act on, such as one for a suspended
+agent, fails the attach with the wake's reason, and so does a start that has
+not run within the wait. `--no-start` attaches only to a session already
+running and starts nothing.
+
+The attach starts a runtime from its own process for a session no configured
+agent runs, which the controller never starts, and for a session while no
+controller runs. A session still waiting for the reconciler's start, in a city
+registered with the supervisor while the supervisor does not run either, is the
+exception: there the attach starts nothing, exits non-zero and says to start
+the supervisor. The attach also starts a runtime from its own process when the
+runtime stops between the attach's check that it runs and the attach itself. A
+session found running is attached through the session's own handle, which
+starts a runtime it finds stopped once no stop is pending on the session's
+record, and only `--no-start` attaches it through the runtime-only handle.
+Between the attach's first check and the attach, Gas City builds the handle and
+the command a start would run, each of which reads the session's record, reads
+the record once more, and checks again whether the runtime runs. Once that
+second check finds the runtime running, the attach starts nothing, so only a
+stop that completes in that span makes the attach start the runtime. While a
+stop is pending on the record, the attach of a session found running fails and
+starts nothing. An agent's drain-ack leaves the record's state as it was and
+pokes the controller, so until the controller takes the ack up, the attach
+joins the session as it stands. The controller marks the drain-ack's stop
+pending as it begins to stop the runtime, and from then, while the runtime
+still runs, the attach fails, saying the session is stopping. A start from the
+attach's own process resumes the provider's conversation when the session keeps
+a session key. A session that a drain-ack ended under `wake_mode = "fresh"`
+keeps none, because the controller's patch that finishes the drain-ack's stop
+clears it, so the attach starts a new conversation. Either way the attach
+renders the agent's prompt, sends it as the start's startup nudge, which the
+session receives once its runtime runs, and marks the launch as having
+delivered it, so a session the attach starts comes up with its prompt, as one
+the controller starts does. Session-start hook context carries a prompt only
+for a start that delivered none, such as one on a runtime gc cannot send a
+startup prompt to, and `gc prime --hook` primes only a session whose record
+reads active, awake, creating or start_pending.
+
+*Evidence:* `newSessionAttachCmd`, `cmdSessionAttachWith`, `sessionAttach.run`
+and `attachOnceControllerStarts` (`cmd/gc/cmd_session.go`),
+`pendingStartAwaitsSupervisor` (`cmd/gc/control_plane.go`),
+`sessionStartAwaitsSupervisor` (`cmd/gc/cmd_supervisor_city.go`),
+`preWakePatch` (`cmd/gc/session_wake.go`), `PreWakePatch`,
+`AcknowledgeDrainPatch` and `DrainAckStopPendingPatch`
+(`internal/session/lifecycle_transition.go`), `runtimeDrainAck`,
+`finishRuntimeDrainAck` and `drainAckRowPatch` (`cmd/gc/cmd_runtime_drain.go`),
+`armAck` (`cmd/gc/reconcile_arms_drain.go`), `finalizePatch`
+(`cmd/gc/reconcile_finalize.go`), `primeHookLiveManagedSession` and
+`managedSessionHookPromptAlreadyDelivered` (`cmd/gc/cmd_prime.go`),
+`SessionByHandle` and `sessionFromRecord` (`internal/worker/factory.go`),
+`resolvedWorkerRuntimeWithConfigAndMetadata` (`cmd/gc/worker_handle.go`),
+`startupPromptCity.applyTo` (`cmd/gc/session_startup_prompt.go`),
+`planStartupPrompt`, `resumeStartupPromptPlan` and `startupPromptPlan.applyTo`
+(`cmd/gc/startup_prompt_delivery.go`), `restartPromptNudge`
+(`cmd/gc/session_lifecycle_parallel.go`), `SessionHandle.Attach` and
+`startCommand` (`internal/worker/handle_lifecycle.go`), `Manager.Attach`
+(`internal/session/manager.go`) and `startRefusal`, `ensureRunningOn` and
+`ensureLive` (`internal/session/chat.go`), read at upstream `8b1d799b8` on
+2026-11-10 and at upstream `f14384642` on 2026-11-11. The attach took this shape
+in `64ba02c02` (#9011, 2026-11-09), and its own start has sent the agent's
+prompt since `4a4921a60` (#8465, 2026-10-29). The city's gc on 2026-11-11 is
+the fork `36ad5186a`, whose last common commit with upstream is `f14384642`.
+The fork's own commits in these files change other session commands, a
+nudge's bead reference, a transcript lookup and what a start records about a
+task's work directory, and none of the paths this section reads.
 
 ## Refresh procedure
 

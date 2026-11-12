@@ -200,8 +200,8 @@ fresh() {
     bead tk-other task open ""
     bead tk-oconv task in_progress gc-toolkit/gc-toolkit.tk-oconv; edge tk-oconv tracks tk-other
     bead tk-find task open ""; edge tk-find tracks tk-subj
-    sessions '[{"id":"gc-50","session_name":"s-gc-50","alias":"gc-toolkit/gc-toolkit.tk-conv","template":"gc-toolkit/gc-toolkit.converse-opus","state":"active","closed":false,"rig":"gc-toolkit"},
-               {"id":"gc-51","session_name":"s-gc-51","alias":"gc-toolkit/gc-toolkit.tk-oconv","template":"gc-toolkit/gc-toolkit.converse-opus","state":"active","closed":false,"rig":"gc-toolkit"}]'
+    sessions '[{"id":"gc-50","session_name":"s-gc-50","alias":"gc-toolkit/gc-toolkit.tk-conv","template":"gc-toolkit/gc-toolkit.converse-claude-opus","state":"active","closed":false,"rig":"gc-toolkit"},
+               {"id":"gc-51","session_name":"s-gc-51","alias":"gc-toolkit/gc-toolkit.tk-oconv","template":"gc-toolkit/gc-toolkit.converse-claude-opus","state":"active","closed":false,"rig":"gc-toolkit"}]'
 }
 # bead <id> <type> <status> <assignee>
 bead() {
@@ -250,7 +250,7 @@ has "$OUT" "no live sitting on tk-subj — nothing to end" "(IDEM) …saying the
 
 echo "# the comment is drawn from the subject's rig checkout, and a refused record still ends the sitting"
 fresh; bead ra-subj task open ""; bead ra-conv task in_progress gc-toolkit/gc-toolkit.ra-conv; edge ra-conv tracks ra-subj
-sessions '[{"id":"gc-60","session_name":"s-gc-60","alias":"gc-toolkit/gc-toolkit.ra-conv","template":"gc-toolkit/gc-toolkit.converse-opus","state":"active","closed":false,"rig":"rig-a"}]'
+sessions '[{"id":"gc-60","session_name":"s-gc-60","alias":"gc-toolkit/gc-toolkit.ra-conv","template":"gc-toolkit/gc-toolkit.converse-claude-opus","state":"active","closed":false,"rig":"rig-a"}]'
 run_dismiss ra-subj
 eq "$(field ra-conv status)" "closed" "(PRCOMMENT-RIG) a dismiss named on a bead in another rig closes its sitting's conversation"
 has "$(cat "$REC_PSC_LOG")" "refresh --sitting ra-conv | pwd=$(cd "$RA_PATH" && pwd) | " "(PRCOMMENT-RIG) …and draws the comment from that rig's checkout, whose origin is the comment's repository"
@@ -347,7 +347,7 @@ eq "$RC" 2 "(INFER-AMBIG) a session holding two conversations refuses to guess"
 has "$ERR" "more than one open conversation" "(INFER-AMBIG) …naming the ambiguity"
 eq "$(grep -c '^bd ' "$CALLS" || true)" "0" "(INFER-AMBIG) …and writing nothing"
 fresh; bead ra-subj task open ""; bead ra-conv task in_progress gc-toolkit/gc-toolkit.ra-conv; edge ra-conv tracks ra-subj
-sessions '[{"id":"gc-60","session_name":"s-gc-60","alias":"gc-toolkit/gc-toolkit.ra-conv","template":"gc-toolkit/gc-toolkit.converse-opus","state":"active","closed":false,"rig":"rig-a"}]'
+sessions '[{"id":"gc-60","session_name":"s-gc-60","alias":"gc-toolkit/gc-toolkit.ra-conv","template":"gc-toolkit/gc-toolkit.converse-claude-opus","state":"active","closed":false,"rig":"rig-a"}]'
 GC_SESSION_ID=gc-60 GC_ALIAS=gc-toolkit/gc-toolkit.ra-conv run_dismiss
 has "$(grep '^list' "$READS")" "$TMP/ra/.beads" "(INFER-RIG) the current-sitting lookup is pinned at the session's own rig"
 eq "$(field ra-conv status)" "closed" "(INFER-RIG) …and finds the conversation there"
@@ -357,12 +357,12 @@ eq "$RC/$(field tk-conv status)" "0/closed" "(INFER-RIGS-DOWN) a rig list that d
 has "$(cat "$REC_PSC_LOG")" "refresh --sitting tk-conv | " "(INFER-RIGS-DOWN) …and the comment is drawn all the same, from where dismiss runs"
 
 echo "# dismiss stops the session that held the conversation it closed"
-# A sitting must not outlive its conversation, and a session viewed in a tab is
-# not kept up by the viewing. The stop is `gc runtime drain-ack`, so the
-# controller ends the session outside the verb's process: the holder the verb
-# runs in acks itself, after every close; any other holder is acked as an
-# operator. Only a live converse session counts as a holder, and a stop that
-# fails leaves the dismiss standing and names converse-reap.
+# A sitting must not outlive its conversation. The stop is `gc runtime
+# drain-ack`, so the controller ends the session outside the verb's process,
+# once no client is attached to it: the holder the verb runs in acks itself,
+# after every close; any other holder is acked as an operator. Only a live
+# converse session counts as a holder, and a stop that fails leaves the dismiss
+# standing and names the idle sleep that stops the session instead.
 export DRAINS="$TMP/drains"
 drains() { cat "$DRAINS"; }
 fresh; : > "$DRAINS"; run_dismiss tk-subj
@@ -376,8 +376,8 @@ eq "$(drains)" "drain-ack  | self=gc-50 | closes=2" "(STOP-OWN) …and the sitti
 has "$OUT" "ending this session (gc-50), which held the sitting" "(STOP-OWN) …saying so before it does"
 fresh; : > "$DRAINS"; FAKE_DRAIN_RC=1 run_dismiss tk-subj
 eq "$RC" 0 "(STOP-FAIL) a stop that fails leaves the dismiss standing"
-has "$ERR" "could not stop session gc-50, which held the sitting; converse-reap closes it on its next pass, because its conversation is closed" \
-    "(STOP-FAIL) …and names converse-reap as what closes the session"
+has "$ERR" "could not stop session gc-50, which held the sitting; it holds no conversation now, so its idle sleep stops it once no client is attached" \
+    "(STOP-FAIL) …and names the idle sleep as what stops the session"
 # A holder that runs another template is no sitting, so the close stops nothing.
 fresh; : > "$DRAINS"
 sessions '[{"id":"gc-50","session_name":"s-gc-50","alias":"gc-toolkit/gc-toolkit.tk-conv","template":"gc-toolkit/gc-toolkit.polecat","state":"active","closed":false,"rig":"gc-toolkit"}]'
@@ -395,7 +395,7 @@ eq "$(drains)" "" "(STOP-NOHOLDER) …and, held by nobody, stops nothing"
 # pin finds a holder whose name the assignee does not carry.
 fresh; : > "$DRAINS"
 jq '.metadata["gc.session_id"] = "gc-81" | .metadata["gc.session_name"] = "s-gc-81"' "$STORE/b/tk-conv.json" > "$STORE/b/x" && mv "$STORE/b/x" "$STORE/b/tk-conv.json"
-sessions '[{"id":"gc-81","session_name":"s-gc-81","alias":"gc-toolkit/gc-toolkit.tk-conv-other","template":"gc-toolkit/gc-toolkit.converse-fable","state":"active","closed":false,"rig":"gc-toolkit"}]'
+sessions '[{"id":"gc-81","session_name":"s-gc-81","alias":"gc-toolkit/gc-toolkit.tk-conv-other","template":"gc-toolkit/gc-toolkit.converse-claude-fable","state":"active","closed":false,"rig":"gc-toolkit"}]'
 run_dismiss tk-conv
 case "$(drains)" in
   "drain-ack --operator gc-81 "*) ok "(STOP-PIN) the conversation's gc.session_id names the holder to stop" ;;
@@ -467,7 +467,7 @@ for _mode in v2-inherited v2-bare legacy-inherited; do
     eq "$KRC/$KOUT" "0/" "(KEY) [$_mode] prefix+X exits 0 with nothing on stdout"
     eq "$(drains)" "drain-ack --operator gc-50 | self= | closes=2" \
        "(KEY) [$_mode] …and the real dismiss stops the sitting with one operator ack that Gas City takes"
-    has "$(cat "$FAKE_KEY_SAID")" "the sitting on tk-subj is over (conversation tk-conv closed), and its session is ending" \
+    has "$(cat "$FAKE_KEY_SAID")" "the sitting on tk-subj is over (conversation tk-conv closed), and its session stops once this tab detaches" \
         "(KEY) [$_mode] …and tells the operator the sitting is over"
 done
 unset DRAINS FAKE_SESSION_TOKENS FAKE_KEY_SAID

@@ -1,6 +1,6 @@
 ---
 name: Human engagement — gc-toolkit's subject, human gate and conversation model
-description: gc-toolkit's own model for engaging a person — the subject, the human gate and the conversation, how a gate reaches the operator, how a conversation starts, how a sitting claims, holds, answers and ends, Accept, how a parked subject comes back, the helm board, and the ground the pack builds itself. A pack convention; the Gas City primitives it rides are gascity/human-engagement.md.
+description: gc-toolkit's own model for engaging a person — the subject, the human gate and the conversation, how a gate reaches the operator, the way in through Engage, how a conversation starts, how a sitting claims, holds, answers and ends, Accept, how a parked subject comes back, how a po sitting opens, the helm board, and the ground the pack builds itself. A pack convention; the Gas City primitives it rides are gascity/human-engagement.md.
 ---
 
 # Human engagement
@@ -32,12 +32,13 @@ the pack uses them only in these senses.
 - **Conversation.** An ordinary task that carries one dialogue about one
   subject. It tracks its subject, which is always a bead and never a gate, and
   it replies to each human gate it answers, through bd's `replies-to` edge from
-  the conversation onto the gate. Neither edge holds anything: a conversation
-  blocks nothing, and nothing waits on it. Its description is the ask, the
-  concern the operator brought or the gate engage was pointed at. It is
-  assigned to `human` while it waits in the operator's queue, and to its
-  sitting's alias while a sitting holds it. Two dialogues about one bead are
-  two conversations.
+  the conversation onto the gate. Neither edge holds anything. A conversation
+  on an open PR holds the PR's merge until it closes, and otherwise blocks
+  nothing: the PR's anchor depends on it (*A conversation on an open PR holds
+  its merge*, below). Its description is the ask, the concern the operator
+  brought or the gate engage was pointed at. It is assigned to `human` while it
+  waits in the operator's queue, and to its sitting's alias while a sitting
+  holds it. Two dialogues about one bead are two conversations.
 - **Sitting.** The live hosting of one conversation by one converse session. A
   sitting is not a bead. Its session is a manual session whose alias names its
   conversation's id, and the conversation's assignee is that alias, which is
@@ -63,9 +64,10 @@ model the pack builds on them.
 ## Scope
 
 **Mandate.** gc-toolkit's model for engaging a person: the four terms, how a
-human gate reaches the operator, how a conversation starts, how a sitting
-claims, holds, answers and ends, Accept, how a parked subject comes back, the
-helm board, and the ground the pack builds itself.
+human gate reaches the operator, the way in through Engage, how a conversation
+starts, how a sitting claims, holds, answers and ends,
+Accept, how a parked subject comes back, how a po sitting opens, the helm
+board, and the ground the pack builds itself.
 
 **Boundaries.** The Gas City primitives the model rides are
 [gascity/human-engagement.md](gascity/human-engagement.md), and the routing
@@ -175,6 +177,46 @@ a row of its own that states what it asks, so no open gate is off the board.
 Nothing re-mails, and no session claims a gate, so a gate a sitting is
 discussing is still open and unassigned until the sitting answers it.
 
+## The way in
+
+The operator comes in through Engage. A bare `gc-helm` on a terminal opens
+engage's form on starting a conversation, with the cursor in the subject. The
+form's pages are tabs at its top, and the operator moves between them on the
+tabs, with no key of a page's own:
+
+- **Start a conversation** takes a subject, a bead, a PR, or a rig's name or
+  prefix for a new topic, and the question (*Engage*, below).
+- **Return to a conversation** lists the open conversations (*Returning to a
+  conversation*, below).
+- **People** lists the seats the operator sits with: mechanik, of which the
+  city has one, and each rig's po, the Product Owner, by its rig's name and
+  prefix. The city's HQ has none.
+
+↑ from the subject reaches the tabs, and ←/→ move along them, wrapping around
+at either end, as they cycle a value on the form's choosers. ↓ goes back down
+to the subject. On a list page ←/→ move along the tabs at once. The tabs are no
+field Tab moves through, so the question stays one Tab after the subject.
+`gc-helm attach` opens the form on the return page.
+
+The People page is the one way Engage opens a person. Each row shows the state
+Gas City's session list gives the seat's session, such as active or asleep,
+and whether a terminal is attached, or no session when the list holds none, as
+for a po that has never run. The session is the one the city's agent roster
+(`gc agent list`) names for the seat, so a seat the roster names no session
+for, or several, is not listed. When the roster cannot be read, the page lists
+no seat and says the seats did not read, and the other pages still list. A
+suspended rig's po reads rig suspended, since Gas City starts no session in a
+suspended rig, and the page says why it cannot start and how to resume the rig. The page reads the city again every ten seconds
+while it is on screen. ↑/↓ pick a seat, a line says what Enter does for it, and
+Enter leaves the terminal and then runs the seat's command, `gc-helm mechanik`
+or `gc-helm po --rig <name>`, as the form runs a conversation's attach. So all
+the command prints stays on the terminal and its exit status is the form's.
+Each command attaches to the seat's session, starting it first when it is not
+running (*A po sitting*, below). Gas City's attach carries no message, so a
+seat takes no question, and the sitting's purpose is given in the sitting. The
+subject on the start page takes no seat. A bare `gc-helm` without a terminal
+prints its usage and exits 2, so no script blocks on a form.
+
 ## How a conversation starts
 
 A conversation starts three ways: the operator engages a bead or a gate, the
@@ -182,6 +224,56 @@ operator's intake files one, or something asks the operator to talk a bead
 over with `gc-helm.sh open`. A conversation in the queue starts no session,
 because assigned work wakes only the session whose identity it carries and no
 session carries `human`. A sitting starts only when the operator engages.
+
+### A conversation on an open PR holds its merge
+
+A conversation on an open PR holds the PR's merge until it closes, and
+otherwise blocks nothing. The subject counts as an open PR when it is the PR's
+anchor (`merge_result=pull_request`, not closed), or a bead whose
+`anchor_bead` names that anchor, such as the PR's review, rework or
+supplement. The hold is bd's own: the anchor depends on the conversation
+through a `blocks` edge, so bd counts the anchor blocked while the
+conversation is open and lets it go once the conversation closes.
+
+- **Opening the conversation adds the edge.** `gc-helm.sh open` adds it for a
+  conversation it files and for one a second concern joins in the queue, and
+  every way a conversation starts goes through `open`, engage's included.
+  Engage adds it again whenever it starts a sitting, so a conversation filed
+  before its PR opened, or one whose sitting lifted the hold, holds the merge
+  once it is engaged, and the sitting's hold adds it when the PR has opened
+  since the sitting started. bd takes an edge it already holds as a no-op. A
+  read of the anchor that does not answer files nothing, and an edge the store
+  refuses is reported with its repair.
+- **While the conversation is open, the PR is held.** The merge pass holds a
+  PR while an open bead blocks its anchor. The PR reads `needs-attention` with
+  `held: blocked`, naming the conversation, by the one definition its labels,
+  the board and engage read
+  ([state-machine.md](state-machine.md#the-status-label-github-projection)): a
+  conversation is a bead a person owes the next move on. The edge holds only
+  the merge. Reviews, reworks and supplements keep running, because each is a
+  bead the anchor waits on, which the edge does not block.
+- **Every close frees the merge.** The sign-off, a dismiss, the premise
+  re-check's moot or benign close and a close by hand each end the hold with
+  the close itself, and nothing writes a release. A close that does not land
+  leaves the conversation open and the merge held. A conversation handed back
+  to the operator's queue is still open, so it still holds the merge.
+- **A sitting that is helping the PR land lifts the hold**, the shepherd case,
+  and so does one whose conversation has nothing to do with whether the PR
+  should land. It removes the edge with
+  `gc bd dep remove <anchor> <conversation>`, records why on the conversation
+  and says so in its framing. The lift lasts for that sitting: a later sitting
+  that engage starts on the conversation holds the merge again, and the
+  conversation form's save again (`open --conversation`) leaves the hold of a
+  conversation a sitting has taken as that sitting left it.
+- **A hold the operator wants to outlast the conversation** is a gate of its
+  own on the anchor, under a key that names what it waits for.
+
+Before a PR opens, its anchor is the work itself, and an edge onto the
+conversation would stop that work: the pool's offer, the work gate at
+load-context, the refinery's hand-off and the bead's close. So a pre-open
+anchor takes no edge, and a conversation on any subject that is no open PR
+files a gate only when something must wait for its answer (*The sitting*,
+below).
 
 ### Engage
 
@@ -191,12 +283,24 @@ these steps:
 1. **It takes the bead.** Given a bead, it works on that bead. Given a gate, it
    works on the one bead still waiting on the gate, read from the gate's
    `blocks` dependents. With several still waiting, as when an anchor and its
-   rework child both wait on the anchor's bring-current gate, it names them and
-   starts nothing, so the operator engages the one they mean. With none, it
-   says nothing waits on the gate, names any closed bead the gate was about,
-   and starts nothing, and the operator clears the gate.
-   Picked from the gates offered on a bead (below), the gate takes that bead
-   when it is one of those waiting.
+   rework child both wait on the anchor's bring-current gate, it works on the
+   bead `--from` names when that bead is one of them, and a gate that no longer
+   holds the `--from` bead starts nothing. Otherwise it works on the bead whose
+   `blocks` edge onto the gate is oldest, then the lowest id. An edge's age
+   never changes while a priority can, so engaging the question again lands on
+   the same bead and finds the conversation filed there, and since
+   `gc bd gate create --blocks` writes a gate with its first edge, that bead is
+   normally the one the question was asked about. A conversation filed on the
+   question carries a note naming the other beads the gate holds, and one that
+   `open` or engage lands on that does not name them as they stand takes the
+   same note, once, so the sitting sees each bead its answer reaches. The note
+   stays out of the conversation's ask, because the beads waiting on a gate
+   change while the question does not, and a save again finds its conversation
+   by the ask. `accept`, `dismiss` and
+   `handback` refuse such a gate, naming its beads, because a pick there would
+   act on a bead nobody named. With none waiting, engage says nothing waits on
+   the gate, names any closed bead the gate was about, and starts nothing, and
+   the operator clears the gate.
 2. **It reads the bead's conversations:** the open tasks that track the bead
    in the conversation shape, with the session list saying which of their
    sittings are live.
@@ -206,7 +310,9 @@ these steps:
    a conversation already, because a distinct concern is a distinct dialogue.
 4. **Without one, it attaches first.** A conversation a live session holds is
    a live sitting, and engage attaches the operator to it rather than starting
-   a second. Otherwise it takes the bead's conversation from the queue, or one
+   a second. A session the list shows with no state is live, since Gas City's
+   own wait for a new session reads it as a create still under way. Otherwise
+   it takes the bead's conversation from the queue, or one
    whose sitting's session has closed, or files a new one. Pointed at a gate,
    engage makes the conversation it landed on reply to the gate before it
    starts or attaches anything, and a reply the store refuses starts nothing.
@@ -215,7 +321,16 @@ these steps:
    prefix `c-` when the runtime refuses the bare id as an alias. A session
    still holding that alias that no longer holds the task, as a sitting cut
    short leaves it, is closed first once it is older than the bind wait and
-   unattached.
+   unattached, and the session whose alias the task is bound to is never
+   closed. A spawn the runtime refuses because a session holds the alias spawns
+   nothing. A task bound to that alias is that session's, since the session's
+   claim runs as its alias, even while the session list does not show the
+   session: a sitting another engage started seconds before can be missing
+   from a list the supervisor answers from its read cache. Engage attaches the
+   operator to that session as to a live sitting, and finds it by its alias
+   until the list names it. A task bound to no such alias is waited on for the
+   bind of the engage that holds the alias, and the session is named as left
+   over only when no bind comes within the bind wait.
 6. **It binds the task to the session's alias** with
    `gc bd update <task> --if-assignee <holder> --if-status <status> --assignee
    <alias>`, where the holder and the status are the ones engage read, or the
@@ -230,20 +345,172 @@ these steps:
    attaches the operator.
 
 **Engage offers what holds the bead.** It reads the reasons
-`gctk pr-status derive --json` gives (`prstatus.Read` and `prstatus.Reasons`),
+`gctk pr status --json` gives (`prstatus.Read` and `prstatus.Reasons`),
 the one definition the PR's `held:` labels and the board's row read: each open
 human gate reached from the bead through its open `blocks` edges, so a gate on a
-rework or a review the anchor waits on is offered from the PR, each blocker the
-bead waits on that a person has to clear, and the PR's own review threads or
-blocked verdict. The prompt lists them under "Held by" after the bead's
-conversations. A gate or a blocker takes a number, and picking one engages it as
-if it were named, except that a gate several beads wait on takes the bead it was
-picked from when that bead is one of them. The PR's own threads and verdict take
-none, because engaging the PR is how a person acts on them. An engage that asks
-nothing, as `--no-input` and the board's route do, names each
-and how to engage it, and an engage pointed at a gate or a conversation does not
-look for others. A conversation on the bead answers no gate until it replies to
-one.
+rework or a review the anchor waits on is offered from the PR, each bead a person
+owes the next move on that the same edges reach, such as a decision or another PR
+waiting on a review that the PR's rework waits for, and the PR's own review
+threads or blocked verdict. The conversation form lists them under the bead's
+conversations. A gate or a bead is a row, and choosing it makes it the subject.
+A gate chosen there keeps the bead it was listed under, which the screen names
+under the subject, and the form looks it up and saves it with `--from` naming
+that bead, so a gate several beads wait on is about that bead while the bead
+still waits on the gate. A gate the bead waits on only through another bead,
+such as a gate on its rework, is looked up as if it were typed: it is about the
+bead engage takes from it. A gate that no longer holds the bead by the time the
+form looks it up or saves it is refused, so the question is never filed on
+another bead in its place. A gate the operator types names no such bead, and
+neither does one whose subject the operator edits after choosing it, so a gate
+several beads wait on is about the bead engage takes from it, as on the command
+line.
+The PR's own threads and
+verdict are lines that no row stands for, because engaging the PR is how a
+person acts on them. The form says when what holds the bead did not read, so a
+bead it could not read does not look like one that nothing holds. An engage
+that asks nothing, as `--no-input` and the board's route do, names each and how
+to engage it, a gate with `--from` naming the bead, unless it was pointed at a
+gate or a conversation. A conversation
+on the bead answers no gate until it replies to one.
+
+**On a terminal, engage opens the conversation form.** An engage whose
+command line names no concern (`--reason`, `--template` or `--skill`) and not
+`--no-input` hands the terminal to helm-svc's `form` command
+(`services/helm/internal/form`), on its page for starting a conversation
+(*The way in*, above). The page holds, in this order, the subject, a
+multiline question, in which Enter adds a line, the model, shown with each
+word of its name capitalized and Claude-Opus as the default, and whether to
+attach once the sitting starts, which is on unless `--no-attach` is given. The
+subject is a bead id, a PR number or URL, or a rig's whole name or prefix, such
+as `gc-toolkit` or `tk`, matched ignoring case and the spaces around it, which
+starts a new topic in that rig. Part of a name names no rig, and the form
+completes none. Only text the operator types in the subject is matched to a
+rig. The subject the command line names is a reference, as the flag-driven
+engage reads it, and so is a bead the form puts there, such as a gate chosen
+from what holds a subject, so each is looked up even when a rig carries the
+same name. `--rig` fills in the subject with the rig's name, which names the
+rig of exactly that name, as `open --new-subject --rig` does, until the
+operator edits it. A line under the subject shows the rig it names, or a
+bead's own rig, and is not a field. Tab moves through the fields in that
+order, so the question is one Tab after the subject, and wraps around at
+either end. ↑ and ↓ move between the fields once the cursor is on a field's
+first or last row, with the question's rows counted as the screen shows them,
+and stop at the last field, while ↑ from the subject reaches the tabs. The
+form opens on the question when the command line names the subject or a new
+topic's rig. A tab in the question stays a tab, shown as ␉, and a line break
+written as LF, CR or CRLF is one line break. The field leaves out every other control
+character, such as BEL or ESC, and U+FFFD, the replacement character. It leaves
+out U+FDD0 as well, since inside the field that noncharacter stands for a tab.
+The command line fills in the fields, and typing never waits for a read.
+A `--model` that names no variant engage offers is refused before the form
+opens, as the flag-driven engage refuses it.
+While the operator types, the form reads `gc-helm.sh conversations` for the
+subject: the bead it resolves to, the rig a conversation about it is held in,
+whether a sitting can start there, its open conversations and what holds it.
+It reads the city's rigs with each one's prefix, so a rig's name or prefix
+typed as the subject is known as the rig and is not looked up as a bead. A
+rig's name wins over a bead of the same id, so typed text settles only once
+the rigs are read: until then the screen marks where it would file as still
+being checked, whatever its lookup answered, and Ctrl+S files nothing. When
+the rigs did not read, Ctrl+S reads them again. The screen shows where a
+submit would file before it does: a conversation on the subject in its own
+rig, or a new subject in the rig the subject names. A name or prefix that more
+than one rig carries names none of them, and a PR number that several live
+anchors record waits for the operator to pick the anchor. A result read for an
+earlier subject never stands in for the current one, and no result changes a
+conversation the operator chose. A conversation chosen from the list is
+started as it is, and a question typed beside it is not sent into it.
+
+**A suspended rig turns attaching off.** Gas City starts no session for an
+agent in a suspended rig, so no sitting can start there. In a suspended rig,
+whether the subject names it or it is a bead's own rig, the destination is
+still settled, Attach reads no with the reason beside it, and no key turns it
+on. Ctrl+S saves the question and leaves, starting no sitting, and the form
+says the conversation waits in the operator's queue until the rig resumes
+(`gc rig resume <rig>`). An open conversation chosen there is not started:
+Ctrl+S reads the subject again, keeping the conversation chosen, and once a
+read finds the rig resumed, the next Ctrl+S starts it. Once the subject names
+a rig that is not suspended, attaching is the operator's own choice again.
+`conversations <ref>` says a subject's rig is suspended as `rig_suspended`,
+which refuses nothing, and engage on the command line still refuses to start a
+sitting in a suspended rig.
+
+**The variants are the converse templates engage offers.** Each is an
+`agents/converse-*` template named `converse-<provider>-<model>`, and the name
+after `converse-` is what `--model` takes and what the form shows capitalized:
+`claude-opus` (the default), `claude-fable`, `codex-sol` and `codex-astra` read
+Claude-Opus, Claude-Fable, Codex-Sol and Codex-Astra. engage withdraws
+`converse-opus`, `converse-fable` and `converse-codex`: it offers none of them,
+and each stays configured only for the sittings already open on it. Gas City's
+reconciler wakes no session whose template is not configured, drains one that
+holds no work, and closes one whose process is gone, releasing the conversation
+it held, so a template goes only once no open sitting runs on it.
+
+Ctrl+S saves the question only once the destination is settled. `open` files
+it as a new conversation (`--allow-duplicate` and `--if-subject` on a subject,
+`--new-subject --rig` on a topic), with the field's question as its ask and
+titled by `conversation_title`, and the form says it is saved. `--if-subject`
+names the subject the screen shows, and `open` refuses the save when the
+reference names another bead by then, such as a subject closed onto a successor
+in another rig, so a question is filed only where the screen said. The reference
+goes as the operator typed it, so `open` resolves it again, and a PR whose
+anchor moved while the operator typed is refused too. A gate goes as itself, so
+the conversation replies to the gate the screen showed, and a chosen gate goes
+with `--from` naming the bead it was listed under, so `open` takes that bead
+among several waiting and files nothing once it has stopped waiting on the
+gate. On a gate the question is optional, and the empty box shows the gate's
+own question as what holds the subject lists it. Left empty, the save passes
+`open` no `--reason`, so the conversation is titled from the gate's title and
+its ask is what the gate asks. Every other subject needs the operator's
+question. Then `engage
+<conversation> --no-input --no-attach` starts the sitting. Once it has started,
+the form leaves the terminal, and then attaches it to the sitting through
+`engage <conversation> --no-input`, which waits for the session to start, as
+engage does on the command line. The attach runs after the form's last screen,
+so all that engage prints stays on the terminal, its reason when it attaches
+nothing included, and the form exits with engage's status. With attaching off,
+the form leaves the sitting to prepare, and says that
+the conversation is saved and how to return to it. An attach holds a
+conversation no live sitting holds, as after a start that failed or a sitting
+that ended before the attach reached it, in a new sitting on the model the
+start ran on, and after a start that failed, Enter attaches that way. A save
+that files the conversation and then fails, as when the store refuses
+its reply onto the gate, says the conversation holds the question and what
+did not complete, and starts nothing. r sends the save again naming that
+conversation (`--conversation`), and `open` completes it by its id rather than
+file a second, wherever it stands by then, even when a sitting another terminal
+started has taken it out of the queue. It adds the hold on an open PR's merge
+only while the conversation still waits in the queue, so a hold that such a
+sitting lifted stays lifted. A conversation closed since, or one that holds
+another ask, is refused, and nothing is filed. A save whose answer was
+lost leaves the form without the conversation's id. For that save, with
+`--allow-duplicate`, a concern that a conversation waiting in the queue holds as
+its whole ask lands on that conversation. Leaving while the save or the start
+still runs waits until it lands,
+because a verb the form leaves behind dies at its next line of output, and a save
+cut off there can leave a new subject without its conversation. A second Ctrl+C
+leaves at once, and the form then says what it does not know. A form that
+something else ends, such as an interrupt, a termination or a terminal that
+fails, leaves as a second Ctrl+C does while a save or a start runs, and as Esc
+does otherwise, so it keeps a question it did not save. A hangup, as when the
+terminal's window closes, ends the form before it can keep anything.
+A save that fails
+leaves the question in the form and reads the subject again, so a subject that
+names another bead now is on screen before the next Ctrl+S can file there. A new
+subject filed whose conversation was not becomes the subject of the next save,
+so the retry files onto it. The form kills a verb that runs past two minutes,
+and a save killed once its subject was filed still names the subject, because
+`open` answers it the moment it is filed. A subject whose create landed but
+whose reply was lost is one the form never learns, and a retry after that files
+a second subject. A save refused because a read failed,
+or because of a refusal that can change, such as a downed controller, reads it again
+for the next Ctrl+S. A question the form did not save is kept in a file under
+`GC_HELM_DRAFT_DIR` (else `$XDG_STATE_HOME/gc/engage-drafts`, else
+`~/.local/state/gc/engage-drafts`) when it closes, and before the terminal goes
+to a sitting picked from the return list, and the form names the file and the
+command that files it again. The command reads the file whole, trailing newlines
+included, because engage files through `open --allow-duplicate`, which lands on
+the conversation an earlier save filed only when the ask matches exactly.
 
 Engage warns when it starts a sitting while another live sitting tracks the
 bead, or replies to a gate the bead waits on. **One sitting per bead is a
@@ -336,20 +603,20 @@ Discuss-only. A recommend also records the formula it recommends as
 `gc.recommended_formula`, so the row offers Accept beside Discuss. When the
 reaction judges the action clear and reversible, it routes the subject, holds
 it, or hands it to a validating closer, and puts nothing to the operator. A
-capture that is not a member of an epic is not routed: it waits for the
-operator's placement sitting ([steering.md](steering.md)).
+capture that is not a member of an epic is not routed: it waits, held, for the
+po's backlog refinement with the operator ([steering.md](steering.md)).
 
 The fallback path files a conversation in the operator's queue directly,
-through `gc-helm.sh open`, which is where filing a conversation lives. It
-runs on `--no-react`, when `tools/gc-proactive.sh deliverable` answers that
-the proactive pool is not registered, is suspended or is capped at zero slots,
-and when the reaction would file nothing: the subject already has an open
-first reaction or a live owner owns it, a live workflow already drives it, it
-is already routed or armed, or an open human gate blocks it. A react path that
-could not deliver would leave a routed reaction bead nobody picks up and no
-conversation at all, the one outcome this channel exists to prevent. A roster
-the deliverable check cannot read answers yes, because absence of evidence is
-not evidence the pool is gone.
+through `gc-helm.sh open`, which is where filing a conversation lives. It runs
+on `--no-react`, when `tools/gc-proactive.sh deliverable` answers that the
+proactive pool is not registered, is suspended or is capped at zero slots, and
+when the reaction would file nothing: the subject already has an open first
+reaction or a live owner owns it, a live workflow already drives it, it is
+already routed or armed, a hold holds it, or an open human gate blocks it. A
+react path that could not deliver would leave a routed reaction bead nobody
+picks up and no conversation at all, the one outcome this channel exists to
+prevent. A roster the deliverable check cannot read answers yes, because
+absence of evidence is not evidence the pool is gone.
 
 **The intake stamps `gc.origin=operator` on the subject**, on both paths and
 never over an origin already recorded. It is a fact the reaction weighs, not a
@@ -368,14 +635,21 @@ City's own external-messaging process.
 The intake files a topic and lets the reaction triage it: the operator gets a
 board row, not a conversation. When the operator wants to talk now about
 something that has no bead yet, `gc-helm engage --new-subject` creates the
-subject and engages it in one gesture. It files the subject bead in a chosen
-rig, files its one conversation, spawns the sitting and binds it. The
-positional text is the subject's title and, absent `--reason` or
-`--template`, its opener. `--rig` names the rig, an interactive prompt over
-the converse-capable rigs asks otherwise, and `--no-input` requires it.
-`prefix+A` is the keystroke, and it opens the interactive prompt in a new tmux
-window (`assets/scripts/tmux-new-subject.sh`), because the choice of rig,
-subject and model does not fit tmux's one-line command prompt.
+subject and engages it in one gesture. It files the subject bead in the rig
+`--rig` names, files its one conversation, spawns the sitting and binds it.
+The rig is always the operator's choice: a topic carries no id prefix to derive
+one from, and a bead filed in the wrong rig can draw public comments there. The
+positional text, or `--reason` without one, is the question. The subject's
+description keeps it unchanged, newlines included, with a provenance line after
+it, and its title is the label `conversation_title` derives from the
+question's opening, so a question longer than a bead title is filed whole.
+Absent `--reason` or `--template` the question is the conversation's opener
+too. On a terminal, `--new-subject` with no concern opens the conversation form
+on a new topic, and `prefix+A` runs it in a new tmux window
+(`assets/scripts/tmux-new-subject.sh`), because a form does not fit tmux's
+one-line command prompt. `gc-helm open --new-subject --rig <rig>` files the
+subject and its conversation without starting a sitting, which is how the form
+saves a new topic before it starts one.
 
 The subject is created marked `gc.reaction_owned=1` in the same create, so
 the proactive scan never observes it unmarked. Three gates read the marker:
@@ -387,14 +661,49 @@ the marker stays, so no later scan reacts. If a later step refuses the live
 spawn, a bad model or a suspended rig, the subject's one conversation still
 waits in the queue, so the topic is never lost.
 
+### Returning to a conversation
+
+`gc-helm conversations` lists every open conversation in the city's stores and
+where it stands. It reads every task in a live status and keeps those the
+shared conversation rule (`conversation.sh`) picks out by their own rows, so a
+conversation is listed whatever its sitting's state, one bound to a sitting
+that ended before it claimed it included. A rig whose store does not answer, or
+whose ledger is not there, is named as not listed, and the list exits 4 after
+printing the rest. A conversation's readiness is queued while it waits in the
+operator's queue, starting while its sitting's session has not started,
+preparing until the sitting records its first hand-back after its session was
+created (`gc.handback_at`, which `gc-helm handback` stamps on each framing),
+ready once it has, and ended when its sitting's session has closed while the
+conversation stays open. Each row says whether a terminal is attached to the
+sitting. `gc-helm attach` opens the conversation form on that list, those no
+terminal is attached to first, by readiness and then newest first, and reads it
+again every ten seconds while it is on screen. What is picked is a
+conversation, so a read that re-sorts the list keeps it picked, and one that
+leaves the list leaves nothing picked until ↑/↓ picks again. A list longer than
+the terminal shows the page the pick is on, and a last line counts the rows
+above and below, so the row picked is always on screen, through a resize and a
+read that moves it. The form's rows on a subject are paged the same way. The
+form wraps its text at spaces to the terminal's width, so a destination, a
+refusal or a status is shown whole and the rows page around the lines it takes,
+while a row stays one line, which a narrower terminal cuts at its edge. A read
+again that fails keeps the rows the last read gave, and the screen says since
+when the list has not been refreshed, that it may be out of date, and why the
+read failed. Enter attaches to the one picked, and a sitting held anew there
+runs on engage's default model, since the list shows none.
+`gc-helm attach <conversation>` is engage's attach for a script or a shortcut:
+it attaches to a live sitting once it has started, and holds a conversation
+whose sitting ended, or one in the queue, in a new sitting first. Starting and
+returning are two pages of one form, and its tabs move between them.
+
 ## The sitting
 
 A sitting's session is a manual session of the converse agent the operator
-chose. It is manual because the pool execution backstop drains a pool session
-that holds in-progress work and is quiet for 90 seconds, and a sitting is quiet
-whenever the operator is reading or thinking. A manual session has no such
-clock: its work closing does not end it, idleness only sleeps it, and
-attaching wakes it.
+chose. It is manual because the controller's work ladder paces a pool session
+that holds a claim, nudging one that stays quiet and then recycling it, and a
+sitting is quiet whenever the operator is reading or thinking. A manual session
+has no such clock: its work closing does not end it, idleness only sleeps it,
+and attaching wakes it. The idle sleep its template sets never reaches a sitting
+that holds its conversation or has a client attached.
 
 **The claim.** The sitting claims its conversation with a plain
 `gc hook --claim`. The default work query finds the task assigned to the
@@ -441,20 +750,23 @@ and writes what the operator owes as the subject's headline,
 `holding — <the one decision needed>`. The headline names the gate that holds
 the subject with `--waiting-on`, or says `--no-wait` when nothing holds it but
 the conversation, so `doctor/check-wait-is-an-edge` never reads an unedged
-hold. The gates the conversation replies to stay open and owed. When something
-must wait for the answer and no gate the conversation replies to holds it, as
-when the merge must not land before the operator rules, the sitting files a
-human gate through the helper on the bead that must wait: the anchor when the
-merge must wait, or the one member whose work waits. A gate another
+hold. On an open PR's anchor that wait is the conversation itself, whose edge
+holds the merge, and a review or rework of an open PR waits on nothing the
+conversation adds, because the edge holds the anchor and not the subject. The
+gates the conversation replies to stay open and owed. When something else must
+wait for the answer and no gate the conversation replies to holds it, as when
+a pre-open anchor's PR must not open before the operator rules, the sitting
+files a human gate through the helper on the bead that must wait: that
+anchor, or the one member of an epic whose work waits. A gate another
 conversation filed there asks that conversation's question, and its ruling
 releases the bead whether or not this one is settled. So the key names the
 conversation, `conversation.<conversation id>`: a resumed hold finds the gate
 it filed, and two conversations on one bead each hold with a gate of their
 own, so the merge waits for both rulings. The sitting replies to its gate, so
 a resumed or handed-off conversation knows the gate
-it owes. Without that need it files nothing: a conversation does not
-freeze its subject, and a PR keeps moving while the operator and the sitting
-talk. The gate is what holds the subject: bd reads the subject as blocked while
+it owes. Without that need it files nothing: a conversation freezes no work,
+and an open PR's reviews and reworks keep moving while the operator and the
+sitting talk. The gate is what holds the subject: bd reads the subject as blocked while
 the gate is open, and the hold writes no lifecycle state or route, so the
 subject keeps its state, its route and any deferred-dispatch arm
 ([state-machine.md](state-machine.md#the-machine)). A hold does not use
@@ -491,8 +803,9 @@ own.
 **The sign-off** is `assets/scripts/converse-signoff.sh`, which writes the
 durable trace in one order every time:
 
-1. what a ruling does to an open PR it reaches, the subject or a PR that a
-   gate it answers releases: its rework, through `converse-rework.sh`, with
+1. what a ruling does to an open PR it reaches, the subject, the PR whose
+   merge the conversation holds or a PR that a gate it answers releases: its
+   rework, through `converse-rework.sh`, with
    the conversation as the rework child's `source_ruling_bead`, so a ruling
    that changes what the PR's branch must contain becomes work the refinery
    lands; or its retirement, through `pr-dispose.sh`, which records the
@@ -512,6 +825,24 @@ As it goes, it records the rework or the retirement, the ruling once the gates
 carry it, and the recommendation taken on the conversation, each a comment in
 plain words, which that comment lists as the visit's actions.
 
+A ruling that leaves the subject waiting on work the sitting sent also gets the
+subject checked once that work lands. Right after the headline, whose
+`--waiting-on` edges hold the subject until the work closes, the sign-off
+appends the sitting's `--close-brief` to the subject's notes and arms the
+subject's validating closer (`mol-validate-close`) in the subject's own rig,
+the waits skill's way of having a bead checked and closed once other work
+lands. A subject held for placement then has its `hold:mayor` lifted, every
+spelling of it, because the deferred-dispatch pass sends no arm while that
+label holds the subject. Each of these writes lands before any gate is
+answered, and one that does not land stops the sign-off. Once the work closes,
+the deferred-dispatch pass slings the closer, which checks the brief against
+what landed and closes the subject or puts it to the operator. No closer is
+armed for a subject that something else sends on once its wait clears: its own
+arm, a route or an assignee, the recommendation the ruling takes, or the
+refinery's merge or its members, for an anchor or an epic. A subject in the
+city's own store is refused, because no pool runs a closer there, so a person
+closes it on a human gate that names the work.
+
 It resolves no gate its conversation does not reply to: a gate the sitting
 never took up stays for whoever owes it, and a gate it replies to that the
 ruling leaves owed stays open with its reply in place. It reads those gates
@@ -523,8 +854,10 @@ merge, and resolving it releases the merge, so whatever the ruling puts in the
 merge's way lands before any gate is resolved. A ruling that reaches an open
 PR must say what it does to the PR (`--rework`, `--no-rework` or `--retire`),
 and the rework child's `blocks` edge or the closed PR is in place before step
-3. It reaches the subject when the subject is an open PR, and each open PR
-that a gate it answers releases, such as a member of an epic subject. The
+3. It reaches the subject when the subject is an open PR, the PR whose merge
+the conversation holds, the anchor that depends on the conversation, which a
+conversation on the PR's review reaches through nothing else, and each open
+PR that a gate it answers releases, such as a member of an epic subject. The
 rework or the retirement acts on one PR, which `--pr-anchor` names when the
 ruling reaches more than one, and each other one stands. It runs in that PR's
 own rig, with its store, pool and checkout, when a gate in another rig's store
@@ -568,8 +901,9 @@ dismissed while the sign-off ran.
 **Dismiss** (`gc-helm dismiss`) ends a sitting. It closes the conversation a
 live sitting holds on the bead, or the conversation an id names, with a reason
 that names the dismissal, and it answers nothing: every gate the conversation
-replies to stays open and owed, for its filer or the next sitting. With no
-argument it infers the current sitting from the session it runs in. The close
+replies to stays open and owed, for its filer or the next sitting. The close
+frees an open PR's merge the conversation held, with nothing written for it.
+With no argument it infers the current sitting from the session it runs in. The close
 falls back to `--force` when bd refuses an operator closing a conversation its
 sitting holds. It then stops the converse session that held each conversation
 it closed, with `gc runtime drain-ack`: the session it runs in acks itself,
@@ -585,18 +919,19 @@ whose caller names the session it stops.
 **A sitting ends its own session.** Gas City does not end a manual session
 when its work closes, so once a sitting's conversation has closed, or its
 sign-off has handed the conversation back, its last act is
-`gc runtime drain-ack`. The `converse-reap` order
-(`assets/scripts/converse-reap.sh`, every five minutes) is the backstop: it
-closes any converse session whose conversation has closed, is gone, or is back
-in the operator's queue, attached or not, once the session is older than the
-reap's interval, which keeps it off a session engage has started and not yet
-bound. A session whose conversation closed or came back to the queue also
-waits until the conversation has taken no write for that interval, because the
-sitting records its last hand-back on the conversation on the tool call after
-its sign-off, and the operator's tab prints that record once the session ends.
-It reads the
-conversation's id from the session's alias and strips the `c-` prefix. Its
-warrant, with the trigger that retires it, is in [warrants.md](warrants.md).
+`gc runtime drain-ack`. Gas City holds that stop while a client is attached
+([gascity/human-engagement.md](gascity/human-engagement.md#a-stop-the-v2-reconciler-makes-waits-while-a-client-is-attached)),
+so the pane stays live under the tab, with a title that leads with `done`
+(*How a pane dies when no sitting is live*, below), and the session stops
+within about five minutes of the detach. Its record then
+reads drained, and the core reaper's `gc session prune --state drained --before
+24h` closes it a day later. A sitting that holds no open conversation, such as
+one whose conversation was closed by hand, is stopped by its template's idle
+sleep, `sleep_after_idle = "10m"`: Gas City sleeps a session that holds no
+claimed or assigned work and has no client attached once ten minutes have
+passed since its last detach or terminal output
+([gascity/human-engagement.md](gascity/human-engagement.md#a-manual-session-stays-up-until-it-is-closed)).
+That record stays asleep, holding no process, until something closes it.
 
 **Iterating on a document.** A sitting writes no files, so it changes a document
 by sending work, and a worker sent on a short ruling makes every call the ruling
@@ -636,7 +971,9 @@ that gate was cleared. While another gate blocks the bead, the row offers
 Discuss and names the gates that withhold Accept (`accept_withheld`), and a
 sitting answers them. A live sitting does not withhold Accept; Accept warns
 when one tracks the bead or replies to the recommendation's gate, and that
-sitting's sign-off later reports the gate already cleared.
+sitting's sign-off later reports the gate already cleared. A conversation that
+holds an open PR's merge withholds no Accept either: it is no human gate, and
+it holds only the merge, which no dispatch reaches.
 
 `gc-helm.sh accept` runs under the bead's acceptance lock, a `flock` on one
 file per bead under `<city>/.gc/runtime/packs/gc-toolkit`, from before its live
@@ -690,7 +1027,9 @@ rule those scripts already apply: a `blocks` blocker, which
 and a `tracks` target reaches its own. A parked subject whose routed work has
 all landed therefore returns as an ordinary unnamed wait in the sweep's batch
 gate on the rig's triage subject, and the takeaway is never cleared: it is the
-record of what the sitting concluded.
+record of what the sitting concluded. A subject a sitting's ruling leaves
+waiting on work comes back through the validating closer the sign-off arms
+instead ([The sitting](#the-sitting)), which checks it once that work lands.
 
 **Routed work is wider than the board's disposition-due.** The board derives
 "blocker landed — dispose or resume" from the `blocks` edges
@@ -740,23 +1079,26 @@ place.
 Every `converse-<model>` template sets `idle_timeout = "0"`, which takes a
 sitting off the idle ladder entirely: Gas City never registers a template whose
 idle timeout is at or below zero with its idle tracker
-([gascity/human-engagement.md](gascity/human-engagement.md#the-idle-ladder)). A
-held sitting therefore ends when its conversation closes: the sitting's
-sign-off, or the operator's `gc-helm dismiss`. The sign-off is terminal, so
-converse takes it only when nothing important is still pending. Closing the
-conversation ends the session too, whichever path closes it. The sitting's own
-last act is `gc runtime drain-ack`, after the sign-off or a moot or benign
-close, and it never claims again: a closed conversation has no next turn in
-that session. `gc-helm dismiss` closes the conversation and then stops the
-session that held it, also through `drain-ack`, so the controller ends the
-session outside the verb's process; a dismiss typed into the sitting's own
-pane acks its own session last. The pack's `converse-reap` order
-(`assets/scripts/converse-reap.sh`) is the backstop: it closes any converse
-session whose conversation reads closed, gone or back in the operator's
-queue, whether or not anyone is attached. Viewing a sitting does not hold it
-open (*How a pane dies when no sitting is live*, below). A sitting whose
-conversation is still open, because the operator walked away before any
-sign-off, keeps its session running indefinitely.
+([gascity/human-engagement.md](gascity/human-engagement.md#the-idle-ladder)).
+Each also sets `sleep_after_idle = "10m"`, an idle sleep that skips a session
+holding claimed or assigned work, so it never reaches a held sitting. A held
+sitting therefore ends when its conversation closes, and only two things mark a
+conversation done: the sitting's sign-off and the operator's `gc-helm dismiss`.
+The sign-off is terminal, so converse takes it only when nothing important is
+still pending. Closing the conversation ends the session too, whichever path
+closes it. The sitting's own last act is `gc runtime drain-ack`, after the
+sign-off or a moot or benign close, and it never claims again: a closed
+conversation has no next turn in that session. `gc-helm dismiss` closes the
+conversation and then stops the session that held it, also through
+`drain-ack`, so the controller ends the session outside the verb's process; a
+dismiss typed into the sitting's own pane acks its own session last. Either
+stop waits while a client is attached, so a sitting the operator is watching
+stays live under the tab until it detaches (*How a pane dies when no sitting
+is live*, below). The idle sleep is the backstop for a sitting that holds no
+open conversation, such as one whose conversation was closed by hand. A
+sitting whose conversation is still open, because the operator walked away
+before any sign-off, keeps its session running indefinitely: the operator
+re-attaches or dismisses.
 
 A conversation can also outlive its sitting: the sitting's create fails after
 `gc-helm engage` bound the conversation to it, or its session is closed while
@@ -785,14 +1127,11 @@ Two endings the idle setting does not own:
   ([gascity/human-engagement.md](gascity/human-engagement.md#a-manual-session-stays-up-until-it-is-closed)),
   so the `no-wake-reason` drain that collects an ended pool session in about
   a minute never reaches it. Its own `drain-ack` ends it, `gc-helm dismiss`
-  stops it, and `converse-reap` above closes one that outlives its
-  conversation anyway. See *How a pane dies when no sitting is live*, below.
+  stops it, and the idle sleep above stops one that outlives its conversation
+  anyway. See *How a pane dies when no sitting is live*, below.
 - **No max-age restart reaches a sitting.** No `converse-<model>` template
-  sets `max_session_age`, and an unset age is off. Gas City's max-age restart
-  defers while the session holds open assigned work and has no attachment
-  rung ([gascity/human-engagement.md](gascity/human-engagement.md#max_session_age)),
-  so it would fire on the first tick after the conversation closed and destroy
-  the pane and its scrollback under an attached operator.
+  sets `max_session_age`, and only the legacy reconciler reads it
+  ([gascity/human-engagement.md](gascity/human-engagement.md#max_session_age)).
 
 The cost is real: a held conversation nobody answers keeps its sitting's
 session running, where an idle clock would recycle it, and
@@ -854,24 +1193,56 @@ through, so the converse prompt's restart rule reads the conversation's
 that names `gc hook --claim` alone, rather than sending the session through the
 prompt's claim block, skips that rule, so every `converse-<model>` template
 holds its `nudge` empty. Emptiness is not what protects a held sitting: a
-sitting runs as a manual session, never pool_managed, and no claim backstop
-governs a session that is not pool_managed
+sitting runs as a manual session, never pool_managed, and neither the work
+ladder nor a claim backstop governs a session that is not pool_managed
 ([gascity/human-engagement.md](gascity/human-engagement.md#the-controllers-backstops-govern-pool-sessions-only)).
 What the empty field reaches is the launch delivery, where the prompt is
 prepended to it and still arrives.
 
-Attachment is the one reading signal the runtime has, and only this city's
-gascity fork reads it: there an attached terminal defers the idle stop, a
-detached reader is still indistinguishable from abandonment, and the max-age
-restart ignores attachment altogether
-([gascity/human-engagement.md](gascity/human-engagement.md#the-idle-ladder)).
-That is why the trace is written when the hold begins rather than bought with
-a longer clock, and why no converse template sets `max_session_age`.
+Attachment is the one reading signal the runtime has. The v2 reconciler holds
+a stop it makes, an idle stop or the stop a drain-ack asks for, while a client
+is attached
+([gascity/human-engagement.md](gascity/human-engagement.md#a-stop-the-v2-reconciler-makes-waits-while-a-client-is-attached)),
+and a detached reader is still indistinguishable from abandonment. That is why
+the trace is written when the hold begins rather than bought with a longer
+clock.
+
+## A po sitting
+
+Each rig has its own po, the operator's prioritization partner for that rig's
+work: a named session of the rig, which the operator opens for one sitting at a
+time, a backlog refinement over the rig's `hold:mayor` queue or a portfolio
+sync over the rig's epics ([steering.md](steering.md)). A sitting ends when
+the po runs `gc runtime drain-ack`, and the next sitting starts a new
+conversation. The rig's row on Engage's People page opens one from whatever
+state the seat is in, with no other command, and so does `gc-helm po --rig
+<rig>`.
+
+Both are Gas City's attach on the rig's po, `gc session attach
+<rig>/<binding>.po`, Gas City's name for a rig's named session, where
+`<binding>` is the name the city imports the pack under. Both take that name
+from `gc agent list`, so they open the same seat whatever the binding is
+([gascity/human-engagement.md](gascity/human-engagement.md#what-an-attach-does-to-a-session-that-is-not-running)).
+A live sitting is attached to as it stands. Any other seat, one whose sitting
+ended, one whose sitting slept once its idle limit passed (`sleep_after_idle`)
+or one with no session yet, is started by the city's controller: the attach
+asks for the start, waits for the session to run and then attaches. The start
+gives the po its prompt as its first message, and because the po wakes fresh
+(`wake_mode = "fresh"`), it opens a new conversation, so a sitting that slept
+comes back as a new one. A po still ending its last sitting is attached as it
+ends until the controller begins to stop it. While that stop runs, the attach
+fails, saying the session is stopping, and `gc-helm po --rig <rig>` names the re-run, which
+opens a new sitting once the stop is done. The operator says what a sitting is
+for in the sitting. A sitting the attach starts itself, as it does
+while the city's controller is down, or when the po's last sitting ends
+between the attach's check that it is running and the attach itself, gets the
+po's prompt too, which the attach sends once the session runs.
 
 ## How a pane dies when no sitting is live
 
 The section above answers "what ends a **held** sitting". Once a sitting
-ends, its session goes with it, and with the session its pane.
+ends, its session goes with it as soon as no client is attached, and with the
+session its pane.
 
 **The sitting ends its own session.** A sitting is a manual session, and Gas
 City keeps a manual session desired for as long as it is neither closed nor
@@ -879,35 +1250,70 @@ drained and its template is still configured, so the `no-wake-reason` drain,
 which begins when a live session has no wake reason left, never begins for a
 sitting
 ([gascity/human-engagement.md](gascity/human-engagement.md#a-manual-session-stays-up-until-it-is-closed)).
-Nothing idle-sleeps one either: that takes a `[chat_sessions] idle_timeout` or
-a `[session_sleep]` policy, and this city sets neither. So a sitting ends its
-own session: once its conversation has closed and every write that must
-follow the close has run, its last act is `gc runtime drain-ack`, and the
-controller stops the session. `gc-helm dismiss` stops the session that held
-the conversation it closes the same way. The `converse-reap` order
-(`orders/converse-reap.toml`, a five-minute cooldown) runs
-`assets/scripts/converse-reap.sh`, which closes any converse session whose
-conversation reads closed, gone or back in the operator's queue with
-`gc session close`, attached or not: the backstop for a session that outlives
-its conversation.
+So a sitting ends its own session: once its conversation has closed and every
+write that must follow the close has run, its last act is
+`gc runtime drain-ack`, so the controller stops the session. `gc-helm dismiss`
+stops the session that held the conversation it closes the same way. The
+template's idle sleep, `sleep_after_idle`, is the backstop for a sitting that
+outlives its conversation: it stops a session that holds no claimed or
+assigned work and has no client attached once ten minutes have passed since
+its last detach or terminal output.
 
-**Viewing a sitting does not hold it open.** The city's tmux server carries
-several clients at once: the operator's main connection, and a terminal tab
-on each sitting the operator opened with `gc-helm engage`. The server's
-global `detach-on-destroy` is off, which moves every client of a destroyed
-session to the most recently active other session. Each `converse-<model>`
-template sets the option on for its own session (`session_live` in its
-`agent.toml`), so a plain client on a sitting exits when the sitting's
-session ends, and tmux shows `[exited]`. A client attached with
+**Viewing a sitting holds its stop.** The v2 reconciler holds a stop while a
+client is attached to the session, the stop a drain-ack asks for included
+([gascity/human-engagement.md](gascity/human-engagement.md#a-stop-the-v2-reconciler-makes-waits-while-a-client-is-attached)).
+So after a sign-off or a dismiss the pane stays live under the operator's tab,
+and the tab's title leads with `done`. That title is the `set-titles-string`
+each `converse-<model>` template's `session_live` sets,
+`#{?#{GC_DRAIN_ACK},done · ,}#T`, which tmux sends an attached client: the
+pane's own title, led by `done · ` while the session's tmux environment holds
+`GC_DRAIN_ACK`. Gas City sets that flag at every `gc runtime drain-ack` of the
+session, the sitting's own and an operator's alike
+([gascity/human-engagement.md](gascity/human-engagement.md#a-drain-ack-sets-gc_drain_ack-in-the-sessions-tmux-environment)),
+so nothing in the pack writes the title at the ending, and a tab reads done
+once its sitting has drained, whichever way the sitting ended: its
+conversation closed by the sign-off, a moot or benign close or a dismiss, or
+handed back to the queue by a sitting low on context. tmux reads the flag when
+it next draws the title. It does so at once when the pane prints, as the
+agent's pane does after the sitting's own drain-ack, and otherwise at the
+client's next status refresh, every 15 seconds on the city's tmux server,
+which keeps tmux's default `status-interval`. So a dismiss from outside the
+sitting shows on the tab within 15 seconds
+([specs/tk-7w7qdls/idle-sleep-probe.md](../specs/tk-7w7qdls/idle-sleep-probe.md#the-done-mark-on-gas-citys-drain-flag)).
+The mark renames nothing. It changes only the title tmux sends an attached
+client, so the pane's own title, the agent's own session name and the session
+record that `gc session list` and the board show keep the title
+`gctk session title` gave them. A restart starts a fresh tmux session, which
+holds no flag, so a restarted sitting reads live until it drains again. A
+`/rename`, which is how `gctk session title` names the agent, cannot make the
+mark. Gas City types one into a running session only at its next boundary, and
+in the probe one that the sitting's own agent queued with its drain-ack had
+not landed two minutes later
+([specs/tk-7w7qdls/idle-sleep-probe.md](../specs/tk-7w7qdls/idle-sleep-probe.md#why-the-done-mark-is-not-a-typed-rename)).
+One that lands while an attached operator has typed in the box goes onto that
+text, and both go to the model as one message. At a dismiss, a submit to a
+sitting that is not running resumes it.
+The session stops within about five minutes of the
+detach, because the held stop retries with a backoff from ten seconds, doubling,
+to five minutes. The city's tmux server carries several clients at once: the
+operator's main connection, and a terminal tab on each sitting the operator
+opened with `gc-helm engage`. The server's global `detach-on-destroy` is off,
+which moves every client of a destroyed session to the most recently active
+other session. Each `converse-<model>` template sets the option on for its own
+session (`session_live` in its `agent.toml`), so a plain client on a sitting
+exits when the sitting's session is destroyed under it, and tmux shows
+`[exited]`; a detach exits it with `[detached]`. A client attached with
 `-f no-detach-on-destroy`, as the operator's main connection is, and every
 client on any other session still move on. `gc-helm engage` runs its attach
 as a child, so when the tab's client exits it reads the conversation. A
 closed conversation prints how it closed and the last hand-back the sitting
 recorded on it (`gc-helm handback`, which the sitting runs before each
-framing and its sign-off); a conversation still open prints the command that
-re-attaches. Claude draws in tmux's alternate screen with no history, so
-nothing of the pane survives to recover, and the record on the conversation
-is what the tab prints.
+framing and its sign-off). A conversation back in the operator's queue, as a
+sitting cut short leaves it, prints the same hand-back and the command that
+takes the conversation up again. A conversation its sitting still holds prints
+the command that re-attaches. Claude draws in tmux's alternate screen with no
+history, so nothing of the pane survives to recover, and the record on the
+conversation is what the tab prints.
 
 Three things about that path are worth knowing before trusting a pane:
 
@@ -929,13 +1335,18 @@ Three things about that path are worth knowing before trusting a pane:
   `gc runtime drain-ack`
   ([gascity/human-engagement.md](gascity/human-engagement.md#a-pool-session-with-no-wake-reason-is-drained)).
   A sitting's stop event reads the same, and there it is the sitting's own
-  `drain-ack`.
+  `drain-ack`, an operator's from `gc-helm dismiss`, or its idle sleep.
 
-**What the design holds to.** A sitting ends its session as soon as its
-conversation closes, whichever path closes it, and nothing holds a session
-open because someone is viewing it. Nothing copies the pane, and no pane,
-live or dead, stays on screen after its session ends, so what a tab prints is
-the record on the conversation.
+**What the design holds to.** A conversation is done when the sitting closes
+it, at its sign-off or at a moot or benign close before any framing, or when
+the operator dismisses it. Neither a stop nor the idle sleep closes one. The
+agent runs while its sitting holds an open conversation or a client is
+attached, and stops otherwise: the drain-ack's stop once the tab detaches, and
+the idle sleep for a sitting that holds nothing. A tab reads done once its
+sitting has drained, from Gas City's own drain flag. Attaching to a stopped
+sitting resumes its thread. Nothing copies the pane, and no pane, live or
+dead, stays on screen after its session ends, so what a tab prints is the
+record on the conversation.
 
 **What follows for the pack.** The record has to be written before the pane
 matters: what is owed recorded at hold time, the outcome appended as soon as
@@ -956,16 +1367,25 @@ operator's *own* unsent words.
   plumbing. The supervisor API carries no `await_type`, so a board built on it
   alone folds no human gate ([gascity/human-engagement.md](gascity/human-engagement.md#where-a-question-surfaces)).
 - **One board, and its verbs in gc-helm.sh.** The web page that
-  `services/helm/` serves is the board's one view for people, and
-  `helm-svc board --json` prints the same rows for agents. Both run the one
+  `services/helm/` serves is the board's one view for people, and it reads
+  one document per rig (*The rig board* in
+  [services/helm/README.md](../services/helm/README.md)). The page shows two
+  views of the rig's work. Needs you is one entry per need, such as a
+  question, a pull request waiting on the operator's review or a ruling, with
+  the beads the need holds beneath it. The Work queue is the work in the order
+  it is expected to land. The Epics tab shows both for each epic and each
+  Delivery, and the Needs you and Work queue tabs show them across the rig,
+  each object drawn and ordered one way wherever it appears.
+  `helm-svc board --json` prints the board model's rows for agents, and the
+  sidecar's `/helm` answer serves the same model. Both run the one
   `internal/source` gather and the one `internal/board` derivation, so a
-  change to the gather, the ranking or the anchor kinds reaches the page and
-  the JSON together. A new tile field also owes the page's TypeScript mirror,
-  `web/src/contract.ts`, which `services/helm/web/contract_parity_test.go`
-  holds equal to the Go contract. `gc-helm.sh` keeps the write verbs (`open`,
-  `engage`, `react`, `takeaway`, `dismiss`, `accept`, `park`, `priority`) that
-  have no Go equivalent, and helm-svc's POST routes run `open`, `engage`,
-  `accept` and `dismiss`.
+  change to the gather, the ranking or the anchor kinds reaches the JSON and
+  the `/helm` answer together, and not the page. A new tile field also owes
+  the model's TypeScript mirror, `web/src/contract.ts`, which
+  `services/helm/web/contract_parity_test.go` holds equal to the Go contract.
+  `gc-helm.sh` keeps the write verbs (`open`, `engage`, `react`, `takeaway`,
+  `dismiss`, `accept`, `park`, `priority`) that have no Go equivalent, and
+  helm-svc's POST routes run `open`, `engage`, `accept` and `dismiss`.
 
 ## What upstream does not ship (the pack's actual seam)
 
@@ -1009,7 +1429,7 @@ which is the point.
 
 This page states the pack's own model, so it changes with the pack's code:
 update it in the same PR as a change to a human-gate filer, `gc-helm.sh`, the
-converse prompt or skills, the sign-off, the reap, or the board. The Gas City
-facts it links are re-verified by the refresh procedure in
+converse prompt or skills, the sign-off, the converse templates, or the board.
+The Gas City facts it links are re-verified by the refresh procedure in
 [gascity/human-engagement.md](gascity/human-engagement.md#refresh-procedure);
 when one of them moves, re-derive the seam here that rests on it.

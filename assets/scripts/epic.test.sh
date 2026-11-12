@@ -28,11 +28,11 @@
 #   - with no gctk binary, the bridge refuses (exit 1) and files nothing;
 #   - the work skill gives this create with the contract's floor fields, and
 #     says a rough sentence is enough, which the filer writes itself and files
-#     at once when the operator has stated none, and calls a first draft;
-#   - the sitting's record step and the checkpoint's re-aim name the keys, the
-#     record step reads the operator's yes to a hypothesis as a continue
-#     ruling, and the checkpoint reads an epic with no ruling as a first draft
-#     and tests its signal.
+#     at once when the operator has stated none, and records on the epic whose
+#     words each field is;
+#   - the review records each field the ruling sets in its key, tests the
+#     hypothesis's signal at every review, and quotes each change it proposes,
+#     and the sitting's record step sends a review of an epic to it.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -185,18 +185,17 @@ for f in --hypothesis --handle --boundaries; do
     pin skills/work/SKILL.md "$f \"" "...giving $f"
 done
 pin skills/work/SKILL.md 'A rough sentence that sets the general direction is enough.' "...and says a rough sentence that sets the general direction is enough"
-pin skills/work/SKILL.md 'When the operator has stated none, write one yourself and file at once, without asking first.' "...which the filer writes itself when the operator has stated none, and files at once"
-pin skills/work/SKILL.md 'quote the sentence and call it a first draft' "...and quotes as a first draft where it reports the filing"
+pin skills/work/SKILL.md 'When the operator has stated none, write one yourself and file at once, without asking first' "...which the filer writes itself when the operator has stated none, and files at once"
+pin skills/work/SKILL.md 'quote each field you wrote and call it your proposal' "...and quotes each field it wrote as its proposal where it reports the filing"
+pin skills/work/SKILL.md 'Proposed by <you>: <each field you wrote>. Stated by the operator:' "...and says on the epic whose words each field is"
 pin skills/work/SKILL.md '"Epics are mortal"' "...and says an area that is only ever improvable is not an epic"
 for k in epic_hypothesis epic_handle epic_boundaries epic_closure_condition epic_indicators; do
-    pin skills/converse-settle/SKILL.md "--set-metadata $k=" "the settle step records $k in its key"
+    pin skills/converse-epic-review/SKILL.md "--set-metadata $k=" "the review records $k in its key"
 done
-pin skills/converse-settle/SKILL.md 'is a ruling on the epic, a continue' "the settle step reads the operator's yes to a hypothesis as a continue ruling"
-pin skills/converse-settle/SKILL.md '--set-metadata epic_ruling=continue' "...and records that yes on an epic the ruling files"
-pin skills/converse-epic-checkpoint/SKILL.md '--set-metadata epic_hypothesis=' "the checkpoint re-aims a contract field in its key"
-pin skills/converse-epic-checkpoint/SKILL.md 'When that read shows `epic_hypothesis` and no `epic_ruling`, the hypothesis is a first draft' "the checkpoint reads an epic with no ruling as a first draft"
-pin skills/converse-epic-checkpoint/SKILL.md 'Could it still come out wrong once the work lands?' "...and tests its signal"
-pin skills/converse-epic-checkpoint/SKILL.md 'the framing says so, quotes it' "...and its framing quotes the draft"
+pin skills/converse-epic-review/SKILL.md 'Judge the contract as it reads, whoever wrote it and whatever a past ruling said' "...judges the contract as it reads at every review"
+pin skills/converse-epic-review/SKILL.md 'Could it still come out wrong once the work lands?' "...and tests its signal"
+pin skills/converse-epic-review/SKILL.md 'Quote each change you propose, as your proposal' "...and its framing quotes each change it proposes"
+pin skills/converse-settle/SKILL.md '`converse-epic-review` skill'"'"'s writes record it' "the settle step sends a review of an epic to the review's writes"
 
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

@@ -380,9 +380,19 @@ The actionable subset:
 jq -c '.results[] | select(.status != "ok")' "$PAYLOAD"
 ```
 For each finding: act directly on the simple ones (stale locks, temp
-cleanup, `gc doctor --fix`-able); file the rest. `--check` derives the
-situation key from the check's own name, so every recurrence lands on one
-bead:
+cleanup, a check whose own fix repairs it, run by name as
+`gc doctor --fix --check <check>`); file the rest. A bare `gc doctor --fix`
+also runs the known check's fix below, so never run it.
+
+One warning is known, and you neither file it nor run its fix:
+`hold-label-routed-to`. It wants a bead carrying a `hold:<value>` label routed
+to that value, and its fix writes the route. Intake holds new work with
+`hold:mayor` and no route, as Gas City's hold conventions describe, and Gas
+City's issue 6069 reports the check as a bug. A route its fix wrote would name
+no agent in this city. Report it as the known warning and go on.
+
+`--check` derives the situation key from the check's own name, so every
+recurrence lands on one bead:
 ```bash
 SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/patrol-finding.sh" ] || SCRIPTS=""
 FINDING=$(jq -c '.results[] | select(.name=="<check>")' "$PAYLOAD")

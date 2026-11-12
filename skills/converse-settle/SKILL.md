@@ -17,24 +17,9 @@ never pass `--notes`, which replaces them:
 ```bash
 gc bd update "$SUBJECT" --append-notes "<the decision>. <why>. <what changed>."
 ```
-When the subject is an epic and the ruling states or confirms its contract
-(`docs/epics.md`, "The contract an epic carries"), record each field in its own
-key as well, never in the description or the notes alone: the close gate, the
-doctor's I15 and the Epic Checkpoint read the keys. Give a field only as the
-operator stated or confirmed it, and leave out each line for a field the
-ruling does not settle:
-```bash
-gc bd update "$SUBJECT" --set-metadata epic_hypothesis="<the sentence: for whom, what changes, and the signal that shows it worked>" \
-  --set-metadata epic_handle="<three to five words>" \
-  --set-metadata epic_boundaries="<the axis it is cut on, and the work beside it that it is not, with where that lives>" \
-  --set-metadata epic_closure_condition="<the checks a person runs to answer the hypothesis>" \
-  --set-metadata epic_indicators="<the signals watched while it is in flight>"
-```
-The operator's yes to the epic's hypothesis, as they stated, confirmed or
-sharpened it, is a ruling on the epic, a continue, and the first ruling ends the
-sentence's first draft (`docs/epics.md`, "The contract an epic carries"). So a
-sitting that hears it is an Epic Checkpoint, and the `converse-epic-checkpoint`
-skill records the ruling.
+When the operator judged an epic's contract or its course in this sitting,
+the sitting is a review of that epic, and the `converse-epic-review` skill's
+writes record it, each field the ruling sets in its own key.
 
 When the notes have grown past a quick read, append a current-state block too.
 The newest one is the one in force, and step 4 primes from it:
@@ -91,7 +76,8 @@ then post the sign-off as the thread's last word. `converse-signoff.sh` writes
 the trace in one order every time: the ruling's rework or the PR's retirement,
 the subject's headline, the answer on each gate the conversation replies to,
 the subject's recommendation when the ruling takes it, the conversation's
-close, and the comment that shows the visit on the subject's pull request. It
+close, which frees an open PR's merge the conversation held, and the comment
+that shows the visit on the subject's pull request. It
 records the ruling and each act it takes on the conversation as the visit's
 actions, which that comment lists once the visit ends, so the ruling reaches
 the pull request as you write it: keep other rigs and their beads out of it.
@@ -104,14 +90,17 @@ conversation back to the operator's queue, which is the low-context path in
 the prompt's Rules. What is waiting on the subject is yours to state: one
 `--waiting-on <bead>` per dependency this sitting ROUTED work into, or the gate
 still holding it, `--no-wait` when it settled the subject and nothing is
-waiting, and NEITHER where the subject is parked for a person. It exits
-non-zero when it stopped short, and then you must NOT post the sign-off:
+waiting, and NEITHER where the subject is parked for a person. A subject that
+waits on work also takes `--close-brief`, the claim its validating closer
+checks once that work lands (the case **New work carries it**, below). It
+exits non-zero when it stopped short, and then you must NOT post the sign-off:
 ```bash
 if "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" \
      --outcome "<outcome> — <what this sitting settled or needs next, at most 140 characters, or 95 when the ruling leaves an open PR standing>" \
      --ruled yes --ruling "<the ruling, one line>" --no-wait
      # --leave <gate>, once for each gate the ruling leaves owed
      # --waiting-on <bead> [--waiting-on <bead> ...] in place of --no-wait
+     # --close-brief "<what that work's landing settles here, and what to check once it has>" beside a --waiting-on on work
      # --rework, --no-rework or --retire <kind>: one is required when the ruling reaches an open PR
      # --pr-anchor <bead> names the PR --rework or --retire acts on, when it reaches more than one
      # --accept when the ruling takes the subject's recommendation (below)
@@ -201,17 +190,30 @@ Then take the case that fits. The cases:
   non-zero, repair what it printed and re-run before you sign off. An open PR is
   retired instead (below).
 - **New work carries it.** File and send that work (below), then sign off
-  with `--ruled yes --waiting-on <the work>`.
+  with `--ruled yes --waiting-on <the work> --close-brief "<…>"`. The
+  sign-off appends the brief to the subject's notes and arms the subject's
+  validating closer in the subject's own rig, so once the work lands the closer
+  checks the brief against what landed, then closes the subject or puts it to
+  the operator. Write the brief as the claim the closer tests: what the work's
+  landing settles on the subject, and what to check once it has. A subject in
+  the city's own store has no pool to run its closer, so the sign-off refuses
+  it: put its close to the operator through a human gate that names the work
+  (the `waits` skill), and sign off with `--waiting-on <that gate>` in its
+  place.
 - **New work decomposes an epic subject.** File it as the subject's member and
   send it (below), then sign off with `--ruled yes --no-wait`,
   or with `--waiting-on` naming only the dependencies the sitting also sent.
-  A member takes no `--waiting-on`, because bd refuses that edge.
+  A member takes no `--waiting-on`, because bd refuses that edge. An epic takes
+  no `--close-brief`, because its members carry it, and the sign-off arms no
+  closer for it.
 
 **On a `--ruled yes` sign-off that reaches an open PR
 (`merge_result=pull_request`), answer what the ruling does to the PR.** The
-ruling reaches the subject when it is an open PR, and each open PR that a gate
-it answers releases, such as a member of an epic subject whose gate the
-epic's sitting answers, or the other PR behind a gate about two. Pass
+ruling reaches the subject when it is an open PR, the PR whose merge this
+conversation holds, which a conversation on the PR's review or rework reaches
+through nothing else, and each open PR that a gate it answers releases, such
+as a member of an epic subject whose gate the epic's sitting answers, or the
+other PR behind a gate about two. Pass
 `--rework` when it changes what the branch must contain, since the PR still
 reads review-ready against a head that predates the ruling (the `prs` skill,
 sending it back for rework). Pass `--no-rework` when the branch stands as it
@@ -229,8 +231,8 @@ answered before the PR is closed lets an approved PR merge. `--rework` and
 own rig, after the sign-off records on the conversation which PR it acts on
 and before it writes anything else. One that does not complete stops the
 sign-off there, and the script exits non-zero. No headline is written, no
-gate is answered and the conversation stays open, so a merge hold your hold
-filed still holds the PR. Re-run once the cause is repaired: the re-run
+gate is answered and the conversation stays open, so it still holds an open
+PR's merge. Re-run once the cause is repaired: the re-run
 adopts a child an earlier attempt filed, and finds a PR an earlier attempt
 closed. Given the same ruling and the same answer, it acts on the PR the
 earlier attempt recorded, even one that has closed since. A
@@ -284,20 +286,14 @@ HANDBACK
 The sign-off already closed the conversation, so nothing is said after this
 message.
 **If this sitting ROUTED work, file and send it, then pass
-`--waiting-on <work-bead>` to the sign-off for each dependency it sent.** The
+`--waiting-on <work-bead>` to the sign-off for each dependency it sent, with
+the `--close-brief` its validating closer checks.** The
 `work` skill says which bead carries the work and how to choose its formula. An
-epic the ruling files takes that skill's epic create, which records the epic's
-contract in the create and refuses an epic with no hypothesis. When the
-operator stated or confirmed the new epic's hypothesis, that yes is its first
-ruling, a continue, so record it once the create has returned the epic's id,
-with `--set-metadata epic_ruling_evidence=<the gate>` in place of the last line
-when a human gate carried the yes:
+epic the ruling files takes that skill's epic create, then a note that says
+whose words each field is, quoting the operator for each field they stated or
+approved in this sitting:
 ```bash
-gc bd update <the new epic> --set-metadata epic_ruling=continue \
-  --set-metadata epic_ruling_reason="<what the operator said yes to, and where>" \
-  --set-metadata epic_ruling_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --set-metadata epic_ruling_by="$GC_SESSION_NAME" \
-  --unset-metadata epic_ruling_evidence
+gc bd update <the new epic> --append-notes "Filed $(date -u +%Y-%m-%d) by $GC_SESSION_NAME in conversation $CONVERSATION. Proposed by this sitting: <each field it wrote, or none>. Stated by the operator: <each field they stated or approved, quoting their words, or none>."
 ```
 The sling runs only once the create returned the bead's id:
 ```bash
@@ -356,10 +352,15 @@ at 140 characters, so keep that line to one plain sentence:
   && "$CONV/deferred-dispatch.sh" arm <follow-up> --target <rig>/<pool> --reason "waits for <blocker>, through its human gate"
 ```
 
-**A recorded wait is also the return trip.** Once every recorded wait
-closes, the subject returns through the liveness sweep
-(`assets/scripts/liveness-sweep.sh`) as an unnamed wait; it reads
-those edges AND children, so legacy work stays visible.
+**The validating closer is the return trip.** Once every wait the sign-off
+recorded closes, the deferred-dispatch pass slings the closer the sign-off
+armed. It checks the close brief against what landed, then closes the subject
+or puts it to the operator. A subject the sign-off armed no closer for,
+because something else sends it on once its wait clears, such as its own arm,
+an assignee or the refinery's merge, goes there, and the sign-off says so. One
+that nothing sends on, such as a subject that waits only on a person's gate,
+returns through the liveness sweep (`assets/scripts/liveness-sweep.sh`) as an
+unnamed wait once every wait it records has closed.
 
 Never close a conversation by hand, and never end a held sitting without
 its sign-off: a thread that stops after a decision with no wrap-up reads as a
