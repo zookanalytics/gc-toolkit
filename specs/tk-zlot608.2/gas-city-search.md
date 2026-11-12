@@ -48,13 +48,39 @@ changed since the script read it.
 
 ## Find a store
 
-**Partly covered: Claude Code's naming.** The memory page gives the store as
+**Partly covered: Claude Code's storage-location rules and Gas City's settings
+file.** The memory page ("Storage location") gives the store as
 `~/.claude/projects/<project>/memory/`, where `<project>` "is derived from the
 git repository, so all worktrees and subdirectories within the same repo share
-one auto memory directory". It does not publish how a path becomes
-`<project>`, so the script derives the name from the rig's checkout as the
-stores on the host show it, with every `/` and `.` becoming `-`. A store that
-does not exist under that name makes the run a no-op that says so.
+one auto memory directory". The same section moves it. `CLAUDE_CONFIG_DIR`
+takes the place of `~/.claude`. `CLAUDE_CODE_PROJECT_DIR_NAME`, set beside it,
+names `<project>` for every repository launched with that config directory.
+`autoMemoryDirectory` names the store itself: "It is read from any settings
+scope: user, project, local, policy, or `--settings`". Claude Code honors a
+project's or a local value under workspace trust, and while
+`permissions.blockReadsOutsideWorkingDirectories` is on it neither loads nor
+writes memory in a directory a repository-supplied settings file chooses. When
+several levels set a key, Claude Code uses the value of the highest: managed
+settings, then `--settings`, then local, shared project and user settings
+([settings](https://code.claude.com/docs/en/settings), "Settings precedence").
+
+Gas City gives each Claude session one of those levels.
+`config.appendProviderSettings` adds `--settings` with the file
+`config.ProviderSettingsSource` names, `<city>/.gc/settings.json`, and
+`hooks.installClaude` writes that file from the city's own Claude settings,
+`<city>/.claude/settings.json` first (`internal/config/launch_command.go` and
+`internal/hooks/hooks.go` at 6bd609f5bf).
+
+No `claude` command prints the directory a session uses (`claude --help` at
+2.1.322), and inside a session `/memory` opens it. The page does not publish
+how a path becomes `<project>`, and the stores on this host show each `/` and
+`.` of the checkout's path becoming `-`. So the script applies the rules itself
+to the inputs it can read. [design.md](design.md), section 6, gives those
+inputs, the run that sorts each store, and how a run tells an absent store from
+a place it cannot resolve, so a miss under the derived name is never by itself
+an empty store. A place a run cannot resolve is reported through the pack's
+`patrol-finding.sh`, the route the feedback miner takes, so the triage adds no
+reporting of its own.
 
 ## Count the sessions that read a note
 
