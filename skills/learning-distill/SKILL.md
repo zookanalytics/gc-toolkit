@@ -386,8 +386,9 @@ of three states. The distiller formula gives the command for each.
   open; every follow-up it spawned has closed, whether or not a rule landed,
   since a veto comes back as a `learning-rubric` observation of its own; or it
   is dismissed as not a pattern, by a discard or by a hold whose window passed
-  with no recurrence. The close reason says which, so the recurrence bar below
-  can tell an adopted rule from a dismissal.
+  with no recurrence among the observations judged and none left unjudged. The
+  close reason says which, so the recurrence bar below can tell an adopted rule
+  from a dismissal.
 - **Waiting on its follow-up.** A promote, a retirement proposal or a
   route-to-engineering outcome waits on the bead filed for it, and a contest
   waits on its gate. Once the operator answers a contention gate, act on the
@@ -396,8 +397,12 @@ of three states. The distiller formula gives the command for each.
 - **Deferred while it gathers evidence.** A hold or a surface is deferred for
   the formula's window, with the block it is held on and the recurrence that
   would change the call. When the window ends with no new evidence, dismiss
-  it. A survivor the per-run cap dropped is deferred to the next run instead,
-  which judges it again.
+  it, but only when no observation is left unjudged, because any of them may
+  be its recurrence: on a run whose gate opened, or on a gated run with none
+  pending. A gated run that left observations pending defers the hold to the
+  next run instead, with a reason that says it waits for them to be judged. A
+  survivor the per-run cap dropped is deferred to the next run as well, and
+  the next run judges each again.
 
 A closed pattern takes new evidence and stays closed, unless that evidence
 crosses the recurrence bar, which reopens it:

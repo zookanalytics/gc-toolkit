@@ -26,7 +26,9 @@
 #   3. dismissed: it is a discard bucket, named below, whose observations the
 #      distiller judged not to be feedback. It closes as dismissed.
 #   4. held: it gathers evidence. It is deferred until --defer-days after its
-#      last_seen, or dismissed when that date has passed.
+#      last_seen. When that date has passed, it is deferred to the distiller's
+#      next run instead, which judges the pending observations before it
+#      dismisses the pattern, because one of them may be its recurrence.
 #
 # Every close stamps gc.work_outcome=no-op first, because a pattern ships no
 # commit of its own and the runtime's work-record gate reads that key.
@@ -43,7 +45,7 @@ while [ $# -gt 0 ]; do
     --rig)        RIG="${2:?--rig needs a name}"; shift 2 ;;
     --repo)       REPO="${2:?--repo needs a path}"; shift 2 ;;
     --defer-days) DAYS="${2:?--defer-days needs a number}"; shift 2 ;;
-    -h|--help)    sed -n '2,35p' "$0"; exit 0 ;;
+    -h|--help)    sed -n '2,37p' "$0"; exit 0 ;;
     *) echo "migrate: unknown argument '$1'" >&2; exit 64 ;;
   esac
 done
@@ -113,6 +115,7 @@ PLAN=$(printf '%s' "$READY" | jq -r --argjson adopted "$ADOPTED" --argjson statu
   | (($m.last_seen // "") | tostring) as $last
   | (if ($last | length) >= 10
      then ((($last[0:10]) + "T00:00:00Z") | fromdateiso8601) + $days * 86400 else null end) as $until
+  | (($m.promotion_hold // "") | if . == "" then "the recurrence its evidence waits for" else . end) as $hold
   | if ($unread | length) > 0 then
       [$p.id, "left", "-", "-", ("a follow-up could not be read: " + ($unread | join(",")))]
     elif ($there | length) > 0 then
@@ -130,12 +133,13 @@ PLAN=$(printf '%s' "$READY" | jq -r --argjson adopted "$ADOPTED" --argjson statu
       [$p.id, "left", "-", "-", "no last_seen to date a deferral from"]
     elif $until > $now then
       [$p.id, "deferred", "-", ($until | strftime("%Y-%m-%d")),
-       ("held on " + (($m.promotion_hold // "") | if . == "" then "the recurrence its evidence waits for" else . end)
-        + ": deferred " + ($days | tostring) + " days past its last evidence on " + $last[0:10]
-        + "; a recurrence before then is judged on its next run")]
+       ("held on " + $hold + ": deferred " + ($days | tostring) + " days past its last evidence on "
+        + $last[0:10] + "; a recurrence before then is judged on its next run")]
     else
-      [$p.id, "dismissed", "-", "-", ("dismissed: no recurrence in the " + ($days | tostring)
-        + " days after its last evidence on " + $last[0:10])]
+      [$p.id, "deferred", "-", "+12h",
+       ("held on " + $hold + ": its window of " + ($days | tostring) + " days past its last evidence on "
+        + $last[0:10] + " has passed, so the next distiller run dismisses it unless a pending observation"
+        + " is its recurrence")]
     end
   | @tsv') || { echo "migrate: the decisions could not be computed; nothing decided" >&2; exit 1; }
 

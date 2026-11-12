@@ -87,7 +87,7 @@ required = false
 default = "8"
 
 [vars.pattern_defer_days]
-description = "How long a held pattern waits for the recurrence it is held for: judge-and-cluster §7 defers it for this many days, and a pattern whose deferral ends with no new evidence is dismissed. It sets when a pattern is looked at again, not what its evidence earns: the rubric judges that."
+description = "How long a held pattern waits for the recurrence it is held for: judge-and-cluster §7 defers it for this many days, and a pattern whose deferral ends with no new evidence is dismissed by a run that has judged the pending observations, since one of them may be its recurrence. It sets when a pattern is looked at again, not what its evidence earns: the rubric judges that."
 required = false
 default = "90"
 
@@ -404,8 +404,8 @@ pattern whose deferral date has passed:
 gc bd ready --metadata-field task_kind=feedback-pattern --limit 0
 ```
 One this run did not judge is decided from its record: its edges (`gc bd
-show`), `proposal_bead`, `eng_bead`, `promotion_hold` and its description's
-judgment notes.
+show`), `proposal_bead`, `eng_bead`, `promotion_hold`, its description, and its
+notes, where a deferral's reason goes.
 
 **Closed.** A pattern ships no commit, so it closes with
 `gc.work_outcome=no-op` for the work-record gate:
@@ -430,7 +430,9 @@ gc bd update "$PATTERN" --set-metadata "promotion_hold=<the block, such as gate1
 gc bd defer "$PATTERN" --until "+{{pattern_defer_days}}d" --reason "<the recurrence that would change the call>"
 ```
 A hold back in `bd ready` with no new evidence has had its window: dismiss it.
-A survivor §6 dropped at the cap is deferred `--until +12h` and judged again.
+If this run is gated with observations pending, one may be its recurrence, so
+defer it `--until +12h` with a reason that says so. A survivor §6 dropped at
+the cap is deferred the same way. Each is judged again.
 
 Then close this step (non-terminal; the session carries the survivors and
 the consumed-observation map forward):

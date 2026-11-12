@@ -42,7 +42,10 @@ fits decides:
    reason. The window runs from its `last_seen`, not from the cut-over, because
    these holds were judged when their last evidence came, and the distiller
    defers a hold from the run that judges it. When that window has already
-   passed, it went by with no recurrence, and the pattern closes as dismissed.
+   passed, the pattern is deferred only until the distiller's next run
+   (`+12h`). An observation still pending may be its recurrence, and only the
+   distiller judges one, so the pattern is dismissed by the first run that has
+   judged every pending observation and found none to be its recurrence.
 
 Every close first stamps `gc.work_outcome=no-op`, because a pattern ships no
 commit of its own.
@@ -60,26 +63,29 @@ to minutes.
 
 ## The dry run on 2026-11-12
 
-Run at 19:01Z against the live store, writing nothing:
+Run at 20:46Z against the live store, writing nothing:
 
 | Outcome | Patterns |
 |---|---:|
 | Waiting on an open follow-up | 20 |
 | Resolved | 45 |
-| Dismissed | 7 |
-| Deferred | 108 |
+| Dismissed | 2 |
+| Deferred | 113 |
 | Left for the distiller | 0 |
 
 - The 20 waiting are the 16 the sitting counted plus 4 whose rule is adopted
   while a follow-up is open (tk-qenzk6e, tk-v32d2u, tk-b80kkz, tk-prvea). The
   sitting counted those 4 among its 48 resolved. Here 45 resolve: its 48 less
   those 4, and 1 more.
-- The 7 dismissed are the 2 discard buckets and 5 patterns whose last evidence
-  came on 2026-08-11 to 08-14 (tk-6u3v6, tk-b7q0n, tk-kjeog, tk-ln6za,
-  tk-q8a8n).
-- The 108 deferred are the 17 carrying `promotion_hold` and 91 with no recorded
-  decision. Their dates run from 2026-11 to 2027-02, most of them in 2027-01,
-  so the distiller judges them a few at a time as they come due.
+- The 2 dismissed are the discard buckets.
+- 108 of the deferred are deferred for their window: the 17 carrying
+  `promotion_hold` and 91 with no recorded decision. Their dates run from
+  2026-11 to 2027-02, most of them in 2027-01, so the distiller judges them a
+  few at a time as they come due.
+- The other 5 deferred are holds whose window has passed, because their last
+  evidence came on 2026-08-11 to 08-14 (tk-6u3v6, tk-b7q0n, tk-kjeog, tk-ln6za,
+  tk-q8a8n). They are deferred only until the distiller's next run, which
+  dismisses each unless an observation pending now is its recurrence.
 
 The live run reads the store again, so its figures move with whatever the
 distiller has done in between.
