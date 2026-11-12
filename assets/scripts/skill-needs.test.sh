@@ -47,7 +47,9 @@
 # a blocker in another store, and fails if the arm runs. It runs the settle
 # step's stay call, and the rework and return calls the settle and continue
 # steps derive from it, through the real sign-off's parser, and fails if the
-# parser refuses one. It runs the premise
+# parser refuses one. It runs the converse prompt's drain read under a stub gc,
+# and fails unless a list that does not read prints UNREADABLE, never the NONE
+# that drains a sitting that stays. It runs the premise
 # re-check's moot or benign close under stubs, and fails unless the close
 # settles a headline that still waits on a subject nothing holds any more,
 # leaves one that an open blocker holds, and closes the conversation only once
@@ -944,6 +946,52 @@ rework-return|…and the return of a rework stay, with --no-rework in place of i
 FORMS
     done
 fi
+echo "── step 1's drain read prints one of three answers, and a read that fails is never none ──"
+# A sitting woken while its work is out gets drain from the claim, and this
+# read decides whether it drains. A list that fails, answers nothing or answers
+# no list, or that has no alias to read under, prints UNREADABLE, never NONE,
+# which drains a sitting that stays. The read takes the list as the pack reads
+# every gc bd answer: a `gc bd:` notice line on stdout and a raw C0 byte inside
+# a notes field are taken out before jq.
+DR="$TMP/drain-read"
+mkdir -p "$DR/bin"
+cat >"$DR/bin/gc" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$DRAIN_DIR/calls"
+case "$DRAIN_CASE" in
+    fail) echo "bd list: data plane down" >&2; exit 1 ;;
+    silent) ;;
+    object) echo '{"error":"no issues found"}' ;;
+    empty) echo '[]' ;;
+    holding) printf '%s\n' '[{"id":"tk-c","notes":"staying: the dialog keeps what is typed (waits on tk-w)\nholding: the next framing"}]' ;;
+    staying) printf 'gc bd: answering from the rig store\n[{"id":"tk-c","notes":"a raw \033 byte\\nstaying: the dialog keeps what is typed (waits on tk-w)"}]\n' ;;
+esac
+STUB
+chmod +x "$DR/bin/gc"
+fenced_block "$PROMPT" 'gc bd list --assignee "$GC_ALIAS" --status open --json' >"$DR/block"
+UNREAD="UNREADABLE: the open conversations assigned to this session did not read"
+for sh_ in $shells; do
+    run=$sh_
+    [ "$sh_" = zsh ] && run="zsh -f"
+    while IFS='|' read -r case_ alias want label; do
+        : >"$DR/calls"
+        got=$(cd "$TMP/away" && env -u BASH_ENV -u ENV -u GC_ALIAS ${alias:+GC_ALIAS=$alias} DRAIN_DIR="$DR" \
+            DRAIN_CASE="$case_" PATH="$DR/bin:$PATH" $run "$DR/block" </dev/null 2>/dev/null)
+        if [ "$got" = "$want" ] && { [ -n "$alias" ] || [ ! -s "$DR/calls" ]; }; then
+            ok "($sh_) $label"
+        else
+            bad "($sh_) $label" "printed: $got; calls: $(tr '\n' ';' <"$DR/calls")"
+        fi
+    done <<CASES
+fail|rig/c.tk-c|$UNREAD|a list that fails reads as unreadable
+silent|rig/c.tk-c|$UNREAD|…as does one that answers nothing
+object|rig/c.tk-c|$UNREAD|…or answers no list
+staying||$UNREAD|…or has no alias to read under, which it never lists without
+empty|rig/c.tk-c|NONE: no open conversation of this session stays|a list with no conversation reads as none
+holding|rig/c.tk-c|NONE: no open conversation of this session stays|…as does one whose newest line is a holding: line
+staying|rig/c.tk-c|STAYING tk-c: staying: the dialog keeps what is typed (waits on tk-w)|a newest staying: line names its conversation, past a gc bd: notice and a raw C0 byte
+CASES
+done
 echo "── a sitting iterating on a document writes one scaffold and names it in the ruling ──"
 have "the step table sends a sitting iterating on a document to its skill" '**Steps 5–8, when the operator is iterating on a document**' "$PROMPT"
 have "…by name" '`converse-iterate-document` |' "$PROMPT"

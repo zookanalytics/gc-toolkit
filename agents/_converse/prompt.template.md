@@ -183,17 +183,27 @@ The loop, for the one conversation this sitting holds:
      drain, read the open conversation assigned to this session's alias, and
      the newest of its `holding:` and `staying:` lines:
      ```bash
-     gc bd list --assignee "$GC_ALIAS" --status open --json | jq -r '.[] | .id + ": " + ([(.notes // "") | split("\n")[] | select(startswith("holding:") or startswith("staying:"))] | last // "no holding: or staying: line")'
+     if [ -n "${GC_ALIAS:-}" ] && LIST=$(gc bd list --assignee "$GC_ALIAS" --status open --json) \
+       && OUT=$(printf '%s\n' "$LIST" | grep -av '^gc bd:' | tr -d '\000-\037' | jq -r 'if type != "array" then error("not a list") else
+            [.[] | {id, mark: ([(.notes // "") | split("\n")[] | select(startswith("holding:") or startswith("staying:"))] | last // "")}
+             | select(.mark | startswith("staying:")) | "STAYING " + .id + ": " + .mark]
+            | if length > 0 then .[] else "NONE: no open conversation of this session stays" end end') \
+       && [ -n "$OUT" ]; then
+       printf '%s\n' "$OUT"
+     else
+       echo "UNREADABLE: the open conversations assigned to this session did not read"
+     fi
      ```
-     When it names a conversation whose newest line is a `staying:` line,
-     this sitting stays and its work has not landed: an attach or a restart
-     woke it. Do not drain. That bead is `CONVERSATION` from here on, and
-     the read in the next bullet names its subject and gates. Answer
-     the operator if they speak (step 8), and otherwise end the turn with
-     nothing said: the session sleeps again on its own. When the read
-     fails, do not drain either: read it again, and if it stays unreadable,
-     say so in the thread and wait. When it names no such conversation,
-     there is no conversation to hold: `gc runtime drain-ack`, and stop.
+     It prints one of three answers. `STAYING <bead>: <line>` names a
+     conversation whose newest such line is a `staying:` line: this sitting
+     stays and its work has not landed, and an attach or a restart woke it.
+     Do not drain. That bead is `CONVERSATION` from here on, and the read
+     in the next bullet names its subject and gates. Answer the operator if
+     they speak (step 8), and otherwise end the turn with nothing said: the
+     session sleeps again on its own. `UNREADABLE` is no answer either way,
+     so do not drain: run the read again, and if it stays unreadable, say
+     so in the thread and wait. Only `NONE` means there is no conversation
+     to hold: `gc runtime drain-ack`, and stop.
    - **`action: "work"`** — `bead_id` is your conversation, `CONVERSATION`
      from here on. Work only that bead. Its subject is the one bead its
      `tracks` edge names, and the gates it answers are its `replies-to`
