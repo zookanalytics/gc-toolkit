@@ -801,7 +801,7 @@ demo_engine_copy() {
   if [ "$(printf '%s' "$rep" | jq -r '.started // false' 2>/dev/null)" = true ]; then
     DEMO_ENGINE_COPY_STOP=$dir
   else
-    _demo_engine_say "a copy (gctk rig serve) of this command already ran from $dir, so the capture takes it and leaves it running"
+    _demo_engine_say "a copy (gctk rig serve) of this command already runs from $dir, so the capture takes it and leaves it running"
   fi
   port=$(printf '%s' "$rep" | jq -r '.port // empty' 2>/dev/null)
   case "$port" in

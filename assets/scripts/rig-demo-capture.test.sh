@@ -245,7 +245,7 @@ RL="$(cat "$RUNLOG")"
 has "gctk rig serve --command npm run dev (in $SITE)" "$RL" "it asks the start, which reports the copy that runs"
 has "--base-url http://127.0.0.1:50200/" "$RL" "the engine records that copy"
 hasnt "rig serve --stop" "$RL" "and leaves the running copy running"
-has "already ran from $SITE, so the capture takes it and leaves it running" "$out" "it says it takes a copy it did not start"
+has "already runs from $SITE, so the capture takes it and leaves it running" "$out" "it says it takes a copy it did not start"
 out="$(run COPY_FOUND=1 -- --script "$SCRIPT" --output "$OUT" --serve 'npm run dev' --cwd "$SITE")"; rc=$?
 ok "a capture whose start reports a copy another caller started, though none ran before it, exits 0" "[ '$rc' = 0 ]"
 RL="$(cat "$RUNLOG")"

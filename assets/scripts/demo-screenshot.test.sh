@@ -412,7 +412,7 @@ eq "$rc" 0 "a capture of a checkout whose copy runs the command exits 0"
 has "gctk rig serve --command npm run dev (in $SITE)" "$(calls)" "it asks the start, which reports the copy that runs"
 has "[--base-url] [http://127.0.0.1:50200/]" "$(calls)" "it captures that copy"
 hasnt "rig serve --stop" "$(calls)" "and leaves it running"
-has "already ran from $SITE, so the capture takes it and leaves it running" "$out" "it says it takes a copy it did not start"
+has "already runs from $SITE, so the capture takes it and leaves it running" "$out" "it says it takes a copy it did not start"
 out="$(run COPY_FOUND=1 -- page --script "$SCRIPT" --serve 'npm run dev' --cwd "$SITE" --output "$OUT")"; rc=$?
 eq "$rc" 0 "a capture whose start reports a copy another caller started, though none ran before it, exits 0"
 has "[--base-url] [http://127.0.0.1:50200/]" "$(calls)" "it captures that copy"
