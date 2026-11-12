@@ -1,7 +1,9 @@
-import { defineConfig } from 'vite';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 
-// The dev server proxies the board fetch to a running helm service mount, so
+// The dev server proxies the page's reads to a running helm service mount, so
 // `npm run dev` renders live data. The mount defaults to the supervisor's
 // loopback port and the city a Gas City session runs in, which GC_CITY names
 // by its path or by its name. Point it at another city (or another supervisor
@@ -11,15 +13,10 @@ import react from '@vitejs/plugin-react';
 const DEFAULT_DEV_CITY = (process.env.GC_CITY ?? '').replace(/\/+$/, '').split('/').pop() ?? '';
 const NO_DEV_CITY = process.env.HELM_DEV_MOUNT === undefined && DEFAULT_DEV_CITY === '';
 const DEFAULT_DEV_MOUNT = `http://127.0.0.1:8372/v0/city/${encodeURIComponent(DEFAULT_DEV_CITY || '_')}/svc/helm`;
-// ttyd's own loopback port. In deployment the board reaches ttyd because a
-// tailscale-serve mapping publishes both under one origin; the dev server has
-// no such mapping, so it proxies /terminal itself to reproduce that same-origin
-// shape. Point it elsewhere with HELM_DEV_TTYD.
-const DEFAULT_DEV_TTYD = 'http://127.0.0.1:7681';
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
 
-// The supervisor and ttyd both bind loopback only and must never be exposed, so
-// a custom dev target must still resolve to loopback. Validate at config load:
+// The supervisor binds loopback only and must never be exposed, so a custom dev
+// target must still resolve to loopback. Validate at config load:
 // a malformed or off-host value fails here rather than silently proxying dev
 // traffic somewhere it should not go.
 function resolveLoopbackTarget(envName: string, fallback: string): string {
@@ -41,10 +38,11 @@ function resolveLoopbackTarget(envName: string, fallback: string): string {
   return raw;
 }
 
-// The city name the drill plane addresses in dev. In production it is read from
-// the mount path (/v0/city/<city>/svc/helm/); the dev server has no such path,
-// so it comes from the same HELM_DEV_MOUNT that configures the proxy below —
-// one source of truth rather than a second hardcoded city. See src/drill/origin.ts.
+// The city name the page's supervisor read addresses in dev. In production it
+// is read from the mount path (/v0/city/<city>/svc/helm/); the dev server has
+// no such path, so it comes from the same HELM_DEV_MOUNT that configures the
+// proxy below — one source of truth rather than a second hardcoded city. See
+// src/supervisor/origin.ts.
 function resolveDevCity(mount: string): string {
   const match = /\/v0\/city\/([^/]+)\//.exec(new URL(mount).pathname);
   if (match === null) {
@@ -56,11 +54,35 @@ function resolveDevCity(mount: string): string {
 }
 
 const devMount = resolveLoopbackTarget('HELM_DEV_MOUNT', DEFAULT_DEV_MOUNT);
-const devTtyd = resolveLoopbackTarget('HELM_DEV_TTYD', DEFAULT_DEV_TTYD);
+
+// The page bundles IBM Plex Sans and IBM Plex Mono (src/fonts.css), licensed
+// under the SIL Open Font License, which asks that the licence travel with the
+// fonts. The build writes each package's own licence beside the page, so the
+// licence served is always the one of the fonts bundled.
+const require = createRequire(import.meta.url);
+function fontLicences(): Plugin {
+  return {
+    name: 'helm-font-licences',
+    apply: 'build',
+    generateBundle() {
+      for (const [pkg, name] of [
+        ['@fontsource/ibm-plex-sans', 'IBM-Plex-Sans'],
+        ['@fontsource/ibm-plex-mono', 'IBM-Plex-Mono'],
+      ]) {
+        this.emitFile({
+          type: 'asset',
+          fileName: `fonts/${name}-LICENSE.txt`,
+          source: readFileSync(require.resolve(`${pkg}/LICENSE`)),
+        });
+      }
+    },
+  };
+}
 
 export default defineConfig({
   plugins: [
     react(),
+    fontLicences(),
     {
       name: 'helm-dev-city',
       configureServer() {
@@ -101,48 +123,17 @@ export default defineConfig({
     strictPort: true,
     host: '127.0.0.1',
     proxy: {
-      // The app fetches the board as a document-relative 'helm', which is
-      // '/helm' when served from the dev root.
+      // The page reads and writes document-relative 'helm/...', which is
+      // '/helm/...' when served from the dev root.
       '/helm': { target: devMount, changeOrigin: true },
-      // ws: true is required — the terminal is a WebSocket at /terminal/ws, and
-      // without it the upgrade is not proxied and the tile never attaches.
-      '/terminal': {
-        target: devTtyd,
-        changeOrigin: true,
-        ws: true,
-        // Forward the upgrade as same-origin. `changeOrigin` rewrites Host to
-        // the target but leaves Origin as the dev server's, and ttyd's
-        // `-O/--check-origin` compares the two: measured on 1.7.7, an Origin
-        // that does not match Host is refused, and so is a request with no
-        // Origin at all. So the moment the city adds -O (recommended alongside
-        // -a: see the Terminal section of the README), an unrewritten dev proxy
-        // stops attaching, with only a dropped socket to explain it. Inert
-        // while -O is off, since ttyd then ignores Origin entirely.
-        configure: (proxy) => {
-          const sameOrigin = (proxyReq: { setHeader(name: string, value: string): void }) => {
-            proxyReq.setHeader('origin', devTtyd);
-          };
-          // The upgrade is proxyReqWs; proxyReq is the plain-HTTP token fetch.
-          proxy.on('proxyReqWs', sameOrigin);
-          proxy.on('proxyReq', sameOrigin);
-        },
-      },
-      // The drill plane addresses the supervisor same-origin (see
-      // src/drill/origin.ts). In production that is literally the same server;
-      // in dev the proxy stands in for it, so /v0/... reaches the real
-      // supervisor — including the SSE stream, which needs buffering off to
-      // arrive as frames rather than in one lump at the end.
+      // Details reads a bead from the supervisor same-origin (see
+      // src/supervisor/origin.ts). In production that is literally the same
+      // server; in dev the proxy stands in for it, so /v0/... reaches the real
+      // supervisor.
       '/v0': {
         target: new URL(devMount).origin,
         changeOrigin: true,
         ws: false,
-        configure: (proxy) => {
-          proxy.on('proxyRes', (proxyRes) => {
-            if (proxyRes.headers['content-type']?.includes('text/event-stream')) {
-              proxyRes.headers['x-accel-buffering'] = 'no';
-            }
-          });
-        },
       },
     },
   },

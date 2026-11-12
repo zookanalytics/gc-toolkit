@@ -197,3 +197,20 @@ func (g *gcExec) CityPath(ctx context.Context) (string, error) {
 	}
 	return strings.TrimSpace(payload.CityPath), nil
 }
+
+// GC is the gc command as a reader outside this package runs it: one
+// subcommand, run from the city root and bounded as every call here is, with
+// its JSON decoded into out. The rig board's gather (internal/rigboard) reads
+// each rig's store through it.
+type GC interface {
+	JSON(ctx context.Context, out any, args ...string) error
+}
+
+// NewGC returns the gc command, located and run from cityPath as the board's
+// session read runs it.
+func NewGC(cityPath string) GC { return newGCExec(cityPath) }
+
+// JSON implements GC.
+func (g *gcExec) JSON(ctx context.Context, out any, args ...string) error {
+	return g.run(ctx, out, args...)
+}

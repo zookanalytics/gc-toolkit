@@ -146,7 +146,7 @@ a sitting is not a separate errand. It never stands in for the
 decision above it, and offering it is not a request to use it.
 
 ```
-! <the resolved gc-helm.sh path> dismiss --reason "<why this is done>"
+! <the resolved gc-helm.sh path> dismiss --reason "<this sitting's real reason>"
 ```
 
 Write the resolved path, not the variable. The leading `!` is what

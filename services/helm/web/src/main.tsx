@@ -1,8 +1,8 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { App } from './App';
-import { DrillProvider } from './drill';
-import './styles.css';
+import { Page } from './rigboard/Board';
+import './fonts.css';
+import './rigboard/board.css';
 
 const container = document.getElementById('root');
 if (!container) {
@@ -11,10 +11,6 @@ if (!container) {
 
 createRoot(container).render(
   <React.StrictMode>
-    {/* The drill plane resolves its supervisor origin once, here, and shares one
-        event stream with everything below. */}
-    <DrillProvider>
-      <App />
-    </DrillProvider>
+    <Page />
   </React.StrictMode>,
 );

@@ -3,9 +3,9 @@
 # advancing, or is reachable by something that can advance it.
 #
 # A graph.v2 molecule runs its continuation-group steps INLINE in one pool
-# session, and those step beads carry no owner and no route by construction. A
-# pool session recycles routinely, so a drain landing mid-molecule leaves the
-# forward steps open, unowned and unrouted. With no owner the witness's
+# session, and those step beads carry a route from the pour but no owner. A
+# pool session recycles routinely, but only a route stripped mid-molecule leaves
+# the forward steps open, unowned and unrouted. With no owner the witness's
 # orphan-recovery skips them (it keys on an assignee), and with no route no pool
 # is ever offered them, so the molecule advances no further and its
 # workflow-finalize waits forever under the control-dispatcher. Nothing else
