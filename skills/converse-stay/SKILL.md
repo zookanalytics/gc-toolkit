@@ -91,7 +91,8 @@ what it had done.
 The entry says `returned` once the work closes, with `WORK` and `AGREED`. The
 return reports to the operator. It works on nothing, takes no check's
 send-back, and passes and fails nothing, because it is not one of the work's
-checks, and the validating closer the stay armed checks the subject.
+checks, and the subject closes as it would after a hand-off, such as through
+the validating closer the stay armed.
 
 When your thread shows a return already under way, as after a restart, carry
 it on from where it stopped, so nothing is posted twice.
@@ -117,4 +118,4 @@ it on from where it stopped, so nothing is posted twice.
    return is done.
 
 When your context is too full for the comparison, say so in a hand-back and
-sign off the same way: the validating closer still checks the subject.
+sign off the same way: the subject still closes as it would after a hand-off.

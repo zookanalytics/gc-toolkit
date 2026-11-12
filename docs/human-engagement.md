@@ -1253,7 +1253,7 @@ the work's ordinary checks suffice. It puts the choice to the operator with its
 recommendation, so they need not know to ask, and never stays without their
 agreement. The return compares what landed with what was agreed and tells the
 operator where it departs. It passes and fails nothing: the work's own checks
-and the subject's validating closer do that.
+give the verdicts, and the subject closes as it would after a hand-off.
 
 A sitting that stays carries out the ruling with `converse-signoff.sh --stay`.
 That first appends a `staying:` line to the conversation's notes, then writes
