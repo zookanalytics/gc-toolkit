@@ -130,7 +130,8 @@ policy onto GitHub is the operator's ruling at tk-1tfzr71.20's design.
 
 What a person owes is a native human gate on the bead it blocks, and a
 conversation is a task. A sitting is a converse session that holds the
-conversation doctrine. Intake is slung work whose exits are native writes. The
+conversation doctrine, and it also edits a change on the operator's ruling,
+through Work's writers. Intake is slung work whose exits are native writes. The
 subsystem owns the converse, first-reaction, mechanik and po prompts, the
 converse skills and the po's refinement skill, the operator's intake and the
 terminal surfaces.

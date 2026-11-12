@@ -105,12 +105,14 @@ gate it files blocks the bead, so `bd ready` leaves the bead out until the gate
 is resolved, and the board reads the open gate as the bead's hold
 ([human-engagement.md](human-engagement.md#the-sitting)). The bead keeps the
 state, the route and any deferred-dispatch arm it carried. A conversation on
-an open PR holds the PR's merge until it closes, and otherwise blocks nothing:
-the PR's anchor depends on the conversation through a `blocks` edge, which
-`gc-helm.sh open` and engage add, and the conversation's close frees the merge
-by whatever route it closes
+an open PR holds the PR's merge until it closes: the PR's anchor depends on the
+conversation through a `blocks` edge, which `gc-helm.sh open` and engage add,
+and the conversation's close frees the merge by whatever route it closes
 ([human-engagement.md](human-engagement.md#a-conversation-on-an-open-pr-holds-its-merge)).
-The anchor keeps its state, `pull_request`.
+The anchor keeps its state, `pull_request`. The one other bead a conversation
+blocks is a change its sitting makes with the operator, which waits on it the
+same way until the hand-off removes the edge
+([human-engagement.md](human-engagement.md#a-sittings-change)).
 
 `pre_open_gate` and `pull_request` are the declared *detached* states
 (`detached_states`). The merge cadence drives them and no queue offers them, so
@@ -935,7 +937,8 @@ review's result set.
   back a lane through the ruling: a review already in flight when the ruling is
   filed, whose verdict is on the head it read, and an operator's GitHub
   approval, which until it is dismissed backs every lane but one a later
-  bring-current round reopened. converse never pushes code; the molecule does.
+  bring-current round reopened. A sitting does not edit an open PR's branch,
+  so a ruling on an open PR files this rework, which a polecat runs.
 - **Quiescence** (`gate-ensure.sh`): no review is dispatched while anything is
   acting on the anchor — a fix unit in flight (including the one answering an
   open `must-fix` finding on any lane), a validation pass in flight, or a full

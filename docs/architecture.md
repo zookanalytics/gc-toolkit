@@ -419,10 +419,7 @@ first. Either way the change is a decision on the record, not a drift.
 
 ## Debt
 
-- **A sitting cannot change a repository yet.** Its prompt says it never does.
-  The effort that lets a sitting edit a change (tk-bvw8j5t) retires it through
-  its implementation (tk-rbasce7).
 - **A sitting does not edit an open PR's branch.** A ruling on an open PR still
   files a rework a polecat runs. A unit that waits on the review-lanes member
-  (tk-1tfzr71.22) and the merge member (tk-1tfzr71.20) retires it, and the
-  implementation that lets a sitting edit a change (tk-rbasce7) files that unit.
+  (tk-1tfzr71.22) and the merge member (tk-1tfzr71.20) retires it
+  (tk-e70808f).
