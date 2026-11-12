@@ -20,8 +20,8 @@ the test that keeps new work grounded, the decisions that settle how a PR
 merges, and the debt where what is built falls short of this account.
 
 **Boundaries.** It works at altitude. The anchor lifecycle's states, writers,
-and check mechanics are owned by [state-machine.md](state-machine.md); the merge
-cadence's runtime semantics by
+and check mechanics are owned by [state-machine.md](state-machine.md); the
+runtime semantics of the merge cadence and the landing order by
 [refinery-merge-cadence.md](refinery-merge-cadence.md); the primitive list and
 the invariant→check binding by [component-model.md](component-model.md); the
 filing conventions by [file-structure.md](file-structure.md); how work is
