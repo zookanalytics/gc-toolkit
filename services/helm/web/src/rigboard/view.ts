@@ -1,8 +1,7 @@
 // What every part of the page shares: the document, the page's own view state
 // (what is open, what search holds, which bead id control just copied), and
 // the moves a row can make. The document decides every group, signal, count,
-// ask, section and order; the view decides only what is folded and what is
-// shown.
+// need and order; the view decides only what is folded and what is shown.
 
 import { createContext, useContext } from 'react';
 import type { ActuateError, ActuateResult } from '../actuate/client';
@@ -26,7 +25,7 @@ export interface View {
   isOpen(key: string, def: boolean): boolean;
   /** Fold or unfold the part at key. */
   flip(key: string, def: boolean): void;
-  /** Set several parts at once, as a count's click opens one group. */
+  /** Set several parts at once, as a count's click opens one view. */
   setOpen(parts: Record<string, boolean>): void;
   /** Copy an id to the clipboard for the bead id control whose key is from
    *  (useCopy, CopyButton). */
@@ -54,27 +53,27 @@ export function useView(): View {
 /** The depth step, in pixels: each level under a row sits this much further in. */
 export const STEP = 20;
 
-/** The look of each group: its word for a count, its ink, and its dot. */
-export const GROUP_LOOK: Record<Group, { word: string; ink: string; fill: string; ring: string }> = {
-  'Waiting on you': { word: 'on you', ink: '#8A5300', fill: '#D98A00', ring: '#D98A00' },
-  Queued: { word: 'queued', ink: '#1F5FBF', fill: '#2F6FDE', ring: '#2F6FDE' },
-  'Not moving': { word: 'not moving', ink: '#55606B', fill: 'transparent', ring: '#7A838C' },
-  Closed: { word: 'closed', ink: '#1E7A4C', fill: '#2E9B63', ring: '#2E9B63' },
+/** The look of each group, which inks a row's signal: its ink and its dot. */
+export const GROUP_LOOK: Record<Group, { ink: string; fill: string; ring: string }> = {
+  'Waiting on you': { ink: '#8A5300', fill: '#D98A00', ring: '#D98A00' },
+  Queued: { ink: '#1F5FBF', fill: '#2F6FDE', ring: '#2F6FDE' },
+  'Not moving': { ink: '#55606B', fill: 'transparent', ring: '#7A838C' },
+  Closed: { ink: '#1E7A4C', fill: '#2E9B63', ring: '#2E9B63' },
 };
 
-/** The groups in the order a container lists them, and each one's count. */
-export const GROUPS: { group: Group; count: keyof Counts }[] = [
-  { group: 'Waiting on you', count: 'waiting_on_you' },
-  { group: 'Queued', count: 'queued' },
-  { group: 'Not moving', count: 'not_moving' },
-  { group: 'Closed', count: 'closed' },
-];
+/** The parts of a container a count opens: its Needs you, its Work queue, the
+ *  work nobody scheduled at the queue's foot, and its closed work. */
+export type Part = 'needs' | 'queue' | 'not_scheduled' | 'closed';
 
-/** Waiting on you and Queued open by default, and Not moving and Closed fold,
- *  as the export draws them. */
-export function groupOpenByDefault(g: Group): boolean {
-  return g === 'Waiting on you' || g === 'Queued';
-}
+/** A container's counts in the order its line reads them, each with its words
+ *  and the look of the group its rows read in. Needs leads, a count that
+ *  reaches zero as the operator acts. */
+export const COUNTS: { part: Part; count: keyof Counts; one: string; many: string; look: Group }[] = [
+  { part: 'needs', count: 'needs', one: 'needs you', many: 'need you', look: 'Waiting on you' },
+  { part: 'queue', count: 'queue', one: 'in the queue', many: 'in the queue', look: 'Queued' },
+  { part: 'not_scheduled', count: 'not_scheduled', one: 'not scheduled', many: 'not scheduled', look: 'Not moving' },
+  { part: 'closed', count: 'closed', one: 'closed', many: 'closed', look: 'Closed' },
+];
 
 export const INK = '#1B1F23';
 export const MUTE = '#55606B';

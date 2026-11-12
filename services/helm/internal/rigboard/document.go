@@ -1,11 +1,14 @@
 package rigboard
 
 // The document one rig's read builds: every row the pages draw, once each, and
-// the four pages as lists of row ids. Go decides every group, signal, count,
-// ask, section and order in it, and the page lays it out and filters it. The
-// page's TypeScript types are generated from this file
-// (web/src/rigboard/document.gen.ts), and TestPageTypesAreCurrent fails when
-// that file is stale.
+// the four pages as lists of row ids. Two views make up the pages. Needs you is
+// one entry per need, with the work it holds beneath it, and the Work queue is
+// the work in the order it is expected to land. The Epics page shows both for
+// each epic and each Delivery, with its closed work, and the Needs you and Work
+// queue pages show them across the rig. Go decides every group, signal, count,
+// need and order in it, and the page lays it out and filters it. The page's
+// TypeScript types are generated from this file (web/src/rigboard/document.gen.ts),
+// and TestPageTypesAreCurrent fails when that file is stale.
 
 // Response is what the rig's route answers: the document, and the time its
 // gather finished beside it. The document depends on the store's answers
@@ -30,11 +33,11 @@ type Document struct {
 	Rows map[string]Row `json:"rows"`
 	// Epics is the Epics page: every open epic of the rig, in priority order.
 	Epics []EpicEntry `json:"epics"`
-	// NeedsYou is the Needs you page.
+	// NeedsYou is the Needs you page: every need in the rig.
 	NeedsYou NeedsYou `json:"needs_you"`
-	// WorkQueue is the Work queue page: its sections in order, each listed
-	// only when it holds a row.
-	WorkQueue []Section `json:"work_queue"`
+	// WorkQueue is the Work queue page: every open piece of work in the rig
+	// that does not carry hold:mayor.
+	WorkQueue WorkQueue `json:"work_queue"`
 	// Unprioritized is the Unprioritized page: every open bead that carries
 	// hold:mayor, grouped by priority, newest first in each.
 	Unprioritized []PriorityGroup `json:"unprioritized"`
@@ -69,7 +72,9 @@ type Row struct {
 	Note   string `json:"note,omitempty"`
 	// Group is the row's group, empty when no group holds it.
 	Group Group `json:"group,omitempty"`
-	// Ask is the kind of ask the row is, empty when it is none.
+	// Ask is the kind of need the row is, empty when it is none, as it is for
+	// work held for the Product Owner. A row that is a need is drawn as one
+	// wherever it appears.
 	Ask Ask `json:"ask,omitempty"`
 	// Line2 is an epic's hypothesis, a Delivery's aim, or the message of a
 	// gate, a decision or a conversation, less its first line when that line
@@ -84,8 +89,8 @@ type Row struct {
 	Reasons []Reason `json:"reasons,omitempty"`
 	// PullRequest is the facts of the bead's pull request, when it has one.
 	PullRequest *PullRequest `json:"pull_request,omitempty"`
-	// Counts are an epic's or a Delivery's work at any depth beneath it, by
-	// group. Gates, conversations and decisions are not counted. Closed work
+	// Counts are what an epic or a Delivery holds at any depth beneath it: the
+	// needs that hold or concern it, and its work by where it sits. Closed work
 	// counts as far as the read gathers it: the closed members of each open
 	// epic and Delivery and of each closed epic among them, and none beneath a
 	// bead that is not an epic.
@@ -96,11 +101,10 @@ type Row struct {
 	// WaitedOnBy the open beads whose own waits name it.
 	Waits      []Ref `json:"waits"`
 	WaitedOnBy []Ref `json:"waited_on_by"`
-	// Asks are the asks that stop this row's work, which the Epics and Work
-	// queue pages draw as its children.
-	Asks []string `json:"asks"`
-	// Holds is, for an ask, the work it holds, which the Needs you page draws
-	// as its children.
+	// Holds is, for a need, every bead it holds through any chain of waits
+	// (prstatus.Holding's answer), less work held for the Product Owner, which
+	// the Unprioritized page alone lists: its work in the Work queue's order,
+	// then the epics and Deliveries it holds.
 	Holds []string `json:"holds"`
 	// Conversation is, for a question, the open conversation that answers it.
 	Conversation string `json:"conversation,omitempty"`
@@ -134,11 +138,13 @@ type PullRequest struct {
 	Held   []string `json:"held,omitempty"`
 }
 
-// Counts are a container's work by group.
+// Counts are what a container holds. Needs counts each need that holds or
+// concerns it once, and reaches zero as the operator acts. Queue,
+// NotScheduled and Closed count its work by where it sits.
 type Counts struct {
-	WaitingOnYou int `json:"waiting_on_you"`
-	Queued       int `json:"queued"`
-	NotMoving    int `json:"not_moving"`
+	Needs        int `json:"needs"`
+	Queue        int `json:"queue"`
+	NotScheduled int `json:"not_scheduled"`
 	Closed       int `json:"closed"`
 }
 
@@ -155,68 +161,59 @@ type Contract struct {
 	RulingAt         string `json:"ruling_at,omitempty"`
 }
 
-// EpicEntry is one epic on the Epics page: its own asks, its Deliveries, and
-// the work that reaches it through no Delivery, in the four groups. Work whose
-// parent-child edges reach more than one epic or Delivery is listed under each.
+// EpicEntry is one epic on the Epics page: the two views of the work it holds
+// nearest, its closed work, and its Deliveries. Work whose parent-child edges
+// reach more than one epic or Delivery is listed under each.
 type EpicEntry struct {
 	ID         string          `json:"id"`
-	Asks       []string        `json:"asks"`
+	Needs      []Need          `json:"needs"`
+	Queue      WorkQueue       `json:"queue"`
+	Closed     []string        `json:"closed"`
 	Deliveries []DeliveryEntry `json:"deliveries"`
-	Groups     []GroupList     `json:"groups"`
-	// Unread is the work under it a reader could not answer, in no group.
-	Unread []string `json:"unread"`
 }
 
-// DeliveryEntry is one Delivery under an epic it sits under: its own asks and
-// its work in the four groups.
+// DeliveryEntry is one Delivery under an epic it sits under: the two views of
+// the work it holds nearest, and its closed work.
 type DeliveryEntry struct {
-	ID     string      `json:"id"`
-	Asks   []string    `json:"asks"`
-	Groups []GroupList `json:"groups"`
-	Unread []string    `json:"unread"`
+	ID     string    `json:"id"`
+	Needs  []Need    `json:"needs"`
+	Queue  WorkQueue `json:"queue"`
+	Closed []string  `json:"closed"`
 }
 
-// GroupList is the rows of one group, in priority order and then oldest
-// first. A group with no row is not listed.
-type GroupList struct {
-	Group Group    `json:"group"`
-	IDs   []string `json:"ids"`
+// Need is one entry of a Needs you view: a need, and the beads it holds that
+// the view covers, its work in the Work queue's order and then the epics and
+// Deliveries it holds. A view lists its needs in the order of the first bead
+// each holds in the Work queue, so the top need is the one holding up the
+// front of the queue. A need that is itself queued work counts its own place
+// too. A need that holds no queued work comes after those that do, by the
+// first unscheduled work it holds, and one that holds no work at all comes
+// last, by priority, then oldest, then id.
+type Need struct {
+	ID    string   `json:"id"`
+	Holds []string `json:"holds"`
 }
 
-// NeedsYou is the Needs you page. Count is the asks that hold or concern work
-// under an epic, each counted once, and it reaches zero when none does.
+// NeedsYou is the Needs you page: every open need in the rig, in the order a
+// view lists them. Count is the needs that hold or concern work under an
+// epic, each counted once, and it reaches zero when none does.
 type NeedsYou struct {
-	Count int `json:"count"`
-	// InConversation is every ask a conversation answers, under an epic or
-	// not.
-	InConversation []string `json:"in_conversation"`
-	// NoConversationYet is the other asks under each epic they hold or
-	// concern work under, epics in priority order. An ask under two epics is
-	// listed under each.
-	NoConversationYet []EpicAsks `json:"no_conversation_yet"`
-	// NoEpic is the asks no conversation answers that hold or concern no work
-	// under an epic. No ask under no epic is counted, in conversation or not.
-	NoEpic []string `json:"no_epic"`
+	Count int    `json:"count"`
+	Needs []Need `json:"needs"`
 }
 
-// EpicAsks is the asks under one epic.
-type EpicAsks struct {
-	Epic string   `json:"epic"`
-	Asks []string `json:"asks"`
-}
-
-// Section is one section of the Work queue: its rows, or its parts.
-type Section struct {
-	Name  string    `json:"name"`
-	Rows  []Entry   `json:"rows"`
-	Parts []Section `json:"parts,omitempty"`
-}
-
-// Entry is one row of a section, with the rows drawn beneath it: a gate with
-// the work it holds.
-type Entry struct {
-	ID       string   `json:"id"`
-	Children []string `json:"children,omitempty"`
+// WorkQueue is a Work queue view: the work in the order it is expected to land
+// (services/gctk/queue). Queue is the work the city takes as things stand: by
+// bd graph's execution layers, what can go now first, and within a layer in
+// the order the pool claims ready work, priority, then oldest, then id.
+// NotScheduled comes after it, in the same order: work the city takes none of
+// as things stand, since nobody has scheduled it or a hold label holds it, as
+// queue reads its row, and work that waits on such work. Unread is the work a
+// reader could not answer, in priority order and then oldest first.
+type WorkQueue struct {
+	Queue        []string `json:"queue"`
+	NotScheduled []string `json:"not_scheduled"`
+	Unread       []string `json:"unread"`
 }
 
 // PriorityGroup is the rows of one priority.

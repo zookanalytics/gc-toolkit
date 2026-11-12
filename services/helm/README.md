@@ -166,7 +166,7 @@ dates the turn rather than the last look at it.
 
 `helm-svc board --json` prints the queue, oldest first, and `--all` prints the
 overview. The rig board's page draws neither: its Needs you page lists the
-rig's asks from its own document (see *The rig board*).
+rig's needs from its own document (see *The rig board*).
 
 The wire arrives partitioned, so the overview sorts itself back to `rank_score`
 before it is capped (`board.CityOverview`). Reading the partitioned slice as if
@@ -1306,26 +1306,37 @@ the address (`?rig=<name>`); with no rig there, it lists the city's rigs from
 
 **What it reads.** One rig's document, `GET <mount>/helm/rigs/{rig}` (see *The
 rig board*), which it lays out as four pages: Epics, Needs you, Work queue and
-Unprioritized. The document decides every group, signal, count, ask, section
-and order; the page lays it out, folds it and filters it, and derives no state
-of its own. Its types are `src/rigboard/document.gen.ts`, generated from the Go
+Unprioritized. The document decides every group, signal, count, need and
+order; the page lays it out, folds it and filters it, and derives no state of
+its own. Its types are `src/rigboard/document.gen.ts`, generated from the Go
 types. It reads the document again every half minute, whenever the tab is shown
 again, and after a write it sends. A read that fails keeps the last good
 document on screen, with the time it was read and the failure beside it, and a
 failed read with no document before it shows the failure alone, never an empty
 list.
 
-**How it draws.** Every object, from an epic to a gate, is drawn with one row
-structure (`src/rigboard/Line.tsx`), whose look follows the operator's Claude
-Design export. A page decides only what nests under a row: on Epics and the Work
-queue a bead is the row and the asks that stop it are its children, and on
-Needs you the ask is the row and the work it holds is its children. Details
-opens in place under a row: the bead's whole description, formatted, which the
-page reads from the supervisor when Details opens (see *The page's supervisor
-read*), an epic's contract and last ruling, the pull request's facts with its
-link, what the bead waits on and what waits on it. Search runs over the loaded
-document. A bead id copies on a click, and a referenced id's "show" fills search
-with it.
+**How it draws.** Two views make up the pages. Needs you is one entry per need
+(a question, a decision, a conversation, a pull request waiting on the
+operator's review, work routed to them, a ruling), with every bead the need
+holds beneath it in the Work queue's order. The Work queue is the work in the
+order it is expected to land, with the work nobody has scheduled after it,
+folded under Not scheduled. Work that carries hold:mayor waits for the Product
+Owner: the Unprioritized page lists it, and neither view lists it or counts it.
+The Epics page shows both for each epic and each
+Delivery, over the work each holds nearest, with its closed work folded beneath,
+and each line leads with how many needs hold it. The Needs you and Work queue
+pages show the same views across the rig. Every object, from an epic to a gate,
+is drawn with one row structure (`src/rigboard/Line.tsx`), whose look follows
+the operator's Claude Design export, and an object looks the same wherever it
+appears: on every page a need is tinted and tagged with its kind, and its line 3
+says how many beads it holds up and, for a pull request, what holds it. A page
+decides only what nests under a row: a need on a Needs you view nests the beads
+it holds there, and nothing else nests. Details opens in place under a row: the
+bead's whole description, formatted, which the page reads from the supervisor
+when Details opens (see *The page's supervisor read*), an epic's contract and
+last ruling, the pull request's facts with its link, what the bead waits on and
+what waits on it. Search runs over the loaded document. A bead id copies on a
+click, and a referenced id's "show" fills search with it.
 
 **What it writes.** Start the conversation and Rejoin the conversation call the
 engage route, and the side panel, where the export draws its terminal, shows the
@@ -1445,7 +1456,10 @@ fixture): `specs/tk-eemvf.2/decisions.md`.
 `GET <mount>/helm/rigs` lists the city's rigs, and `GET <mount>/helm/rigs/{rig}`
 answers one rig's board: a document holding every row the four pages draw, once
 each, and the Epics, Needs you, Work queue and Unprioritized pages as lists of
-those rows' ids. Its read time sits beside it (`read_at`), not in it.
+those rows' ids. Each epic and Delivery on the Epics page carries its own Needs
+you, its own Work queue and its closed work, over the rows it holds nearest, and
+the Needs you and Work queue pages carry the same two views across the rig. Its
+read time sits beside it (`read_at`), not in it.
 
 **What it reads.** One read of the rig's store through gctk's listing
 (`services/gctk/listing`), a ledger pass, never the beads library: one
@@ -1466,6 +1480,7 @@ asked of the listing's rows, so one document never mixes two reads of a bead:
 | `services/gctk/prstatus` (`Holding` over `Listing.Blockers`) | what a person owes on a bead through its `blocks` edges |
 | `services/gctk/prstatus` (`Read` over the listing, `Derive`, `Held`, `Reasons`) | where an open pull request stands and what holds it |
 | `services/gctk/conversation` | what a conversation is, what it tracks and replies to |
+| `services/gctk/queue` (`Order` over the listing) | the order the rig's open work is expected to land in, which `queue` reads from the listing's rows and waits' answers, and whether the city takes each piece as things stand |
 
 The listing reads the store's ephemeral plane and its templates because waits
 reads every run, and a row is a bead bd's own listing shows: the board leaves
@@ -1477,8 +1492,25 @@ holds a bead, whose move it is or whether work is moving.
 `specs/tk-yhquh93.2/gas-city-search.md` says why it reads through `gc bd list`
 rather than the supervisor's bead routes.
 
+**How it orders work.** The read asks `services/gctk/queue` once for the
+order of the rig's open work, naming the work and handing over the listing, and
+every Work queue view lists its rows in that one order. Nothing sits above what
+it waits on: bd graph's execution layers put what can go now first, and each
+layer goes in the order the pool claims ready work,
+priority, then oldest, then id. Work nobody has scheduled comes after the queue.
+So does work that one of Gas City's hold labels keeps from dispatch, unless it
+is in flight, and so does work that waits on either. Work held for the Product
+Owner is placed with the rest, so the work behind it comes after the queue, and
+then no view lists it. A need sorts by the first bead it holds in that order,
+or by its own place when it is work itself, so the top need holds up the front
+of the queue. The Needs you page counts the needs that hold or concern work
+under an epic, so its count reaches zero as the operator acts.
+`specs/tk-yhquh93.13/gas-city-search.md` cites the rules the order composes,
+and `specs/tk-yhquh93.13/board-views.md` records the board's two views.
+
 **How it is cached.** The document depends on the store's answers alone, so it
-is cached whole per rig, by the rule the board's cache keeps: a minute's time to
+is cached whole per rig, the work's order with it, since the order is a function
+of the rig's one read. The cache keeps the board's rule: a minute's time to
 live (`server.RigBoardTTL`, from a measured 2.9 s read of gc-toolkit), one
 gather of a rig at a time however many requests wait on it, and every rig
 dropped when a write route succeeds. The drop also lets the next request gather
@@ -1500,13 +1532,14 @@ go test ./internal/rigboard -run TestPageTypesAreCurrent -update   # writes it a
 ```
 
 **Real data for tests and demos.** `internal/rigboard/testdata/gc-toolkit.fixture.json`
-is real gc-toolkit beads, three epics and their graph, cut from the store by the
-read's own gather and scanned for other rigs, host paths, emails and accounts;
-its `about` block says what was cut and replaced. `TestFixtureBoard` builds the
-document from it through the read itself, gctk's listing over the pack's stub
-store (`assets/scripts/holds-store.stub.sh`), and holds it to
-`internal/rigboard/testdata/gc-toolkit.board.json`. Cut it again from a city
-with `RIGBOARD_CUT_CITY=<city root> go test ./internal/rigboard -run TestCutFixture`,
+is real gc-toolkit beads, the epics `fixtureEpics` names and their graph, cut
+from the store by the read's own gather and scanned for other rigs, host paths,
+emails and accounts; its `about` block says what was cut and replaced.
+`TestFixtureBoard` builds the document from it through the read itself, gctk's
+listing over the pack's stub store (`assets/scripts/holds-store.stub.sh`), and
+holds it to `internal/rigboard/testdata/gc-toolkit.board.json`. Cut it again
+from a city with
+`RIGBOARD_CUT_CITY=<city root> go test ./internal/rigboard -run TestCutFixture`,
 then write the golden with `go test ./internal/rigboard -run TestFixtureBoard -update`.
 
 ## Actuating from the board (`POST <mount>/helm/{open,accept,engage,dismiss}`)
