@@ -189,21 +189,30 @@ func TestRunServesUntilItIsStopped(t *testing.T) {
 	}
 }
 
-// docCommand reads the board's capture from docs/review-demo.md and returns the
-// command it gives demo-screenshot.sh as --serve, the directory its --cwd names
-// under <worktree>, and its --port. The page gives the capture in prose, as
-// inline code that can wrap, so the page is read with its line breaks folded
-// into spaces and the capture runs to the end of its code span.
-func docCommand(t *testing.T) (serve, cwd, port string) {
+// declaredServe is the command a city declares as gc-toolkit's
+// ui_serve_command, the serve command docs/review-demo.md tells a capture of the
+// board to serve and ui-copy.sh runs for a live copy. It runs from the
+// worktree's root, and it ends with the fixture's own invocation, so a capture
+// can add the fixture's flags to it.
+const declaredServe = "cd services/helm && exec go run ./cmd/helm-fixture"
+
+// docCapture reads the board's capture from docs/review-demo.md, the one whose
+// --script is board.md, and returns the page's text, what the capture gives
+// demo-screenshot.sh as --serve, the directory its --cwd names under
+// <worktree>, empty for the worktree's root, and its --port. The page gives the
+// capture in prose, as inline code that can wrap, so the page is read with its
+// line breaks folded into spaces and the capture runs to the end of its code
+// span.
+func docCapture(t *testing.T) (text, serve, cwd, port string) {
 	t.Helper()
 	doc, err := os.ReadFile(filepath.Join(moduleRoot, "../../docs/review-demo.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	text := strings.Join(strings.Fields(string(doc)), " ")
+	text = strings.Join(strings.Fields(string(doc)), " ")
 	var capture string
 	for _, c := range regexp.MustCompile("demo-screenshot\\.sh\"? page [^`]*").FindAllString(text, -1) {
-		if strings.Contains(c, "helm-fixture") {
+		if strings.Contains(c, "--script board.md") {
 			if capture != "" {
 				t.Fatalf("docs/review-demo.md gives more than one capture of the board:\n%s\n%s", capture, c)
 			}
@@ -211,14 +220,14 @@ func docCommand(t *testing.T) (serve, cwd, port string) {
 		}
 	}
 	if capture == "" {
-		t.Fatal("docs/review-demo.md gives no capture of the board through helm-fixture")
+		t.Fatal("docs/review-demo.md gives no capture of the board")
 	}
 	for _, f := range []struct {
 		re  *regexp.Regexp
 		out *string
 	}{
 		{regexp.MustCompile(`--serve "([^"]+)"`), &serve},
-		{regexp.MustCompile(`--cwd "?<worktree>/([^"\s]+)`), &cwd},
+		{regexp.MustCompile(`--cwd "?<worktree>(?:/([^"\s]*))?`), &cwd},
 		{regexp.MustCompile(`--port (\S+)`), &port},
 	} {
 		m := f.re.FindStringSubmatch(capture)
@@ -227,7 +236,7 @@ func docCommand(t *testing.T) (serve, cwd, port string) {
 		}
 		*f.out = m[1]
 	}
-	return serve, cwd, port
+	return text, serve, cwd, port
 }
 
 // lockedBuffer collects a command's output, which the test reads while the
@@ -307,20 +316,31 @@ func startServe(t *testing.T, cmdline, dir string) string {
 	return ""
 }
 
-// TestTheDocumentedCommandServesTheBoard runs the --serve command
-// docs/review-demo.md gives a capture of the board, from the directory its --cwd
-// names, on the free port its --port 0 has demo-screenshot.sh hand over, and
-// reads back what the capture's browser reads: the app, the board as JSON at its
-// own path, and a verb refused for want of an answer. It runs the command again
-// with the --answers the page tells a reviewer to add, and a click's answer
-// comes back.
+// TestTheDocumentedCommandServesTheBoard checks that docs/review-demo.md has a
+// capture of the board serve the rig's declared command, from the worktree's
+// root, on the free port its --port 0 has demo-screenshot.sh hand over. It runs
+// the command a city declares there, and reads back what the capture's browser
+// reads: the app, the board as JSON at its own path, and a verb refused for want
+// of an answer. It runs the command again with the --answers the page tells a
+// reviewer to add, and a click's answer comes back.
 func TestTheDocumentedCommandServesTheBoard(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds and runs the command with go run")
 	}
-	serve, cwd, port := docCommand(t)
+	text, serve, cwd, port := docCapture(t)
+	if serve != "$SERVE" {
+		t.Errorf("the board's capture serves %q; it serves the rig's declared command, as $SERVE", serve)
+	}
+	for _, want := range []string{"ui_serve_command", "gc formula show mol-rig-demo --rig gc-toolkit --json"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("docs/review-demo.md does not name %q, where the capture's $SERVE comes from", want)
+		}
+	}
 	if port != "0" {
 		t.Errorf("the board's capture passes --port %s; it needs --port 0, the free port the command reads from PORT", port)
+	}
+	if cwd != "" {
+		t.Errorf("the board's capture runs its command from <worktree>/%s, but the declared command runs from the worktree's root", cwd)
 	}
 	repo, err := filepath.Abs(filepath.Join(moduleRoot, "../.."))
 	if err != nil {
@@ -329,9 +349,6 @@ func TestTheDocumentedCommandServesTheBoard(t *testing.T) {
 	mod, err := filepath.Abs(moduleRoot)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if rel, _ := filepath.Rel(repo, mod); rel != cwd {
-		t.Fatalf("the board's capture runs its command from <worktree>/%s, but the command's default board resolves from <worktree>/%s", cwd, rel)
 	}
 	board, err := os.ReadFile(filepath.Join(mod, defaultBoard))
 	if err != nil {
@@ -347,7 +364,7 @@ func TestTheDocumentedCommandServesTheBoard(t *testing.T) {
 	}
 
 	t.Run("as the page gives it", func(t *testing.T) {
-		base := startServe(t, serve, mod)
+		base := startServe(t, declaredServe, repo)
 		if res, body := get(t, http.MethodGet, base+"/", "text/html"); res.StatusCode != http.StatusOK || !bytes.Equal(body, shell) {
 			t.Errorf("GET /: %d, want the app shell the reviewed commit embeds", res.StatusCode)
 		}
@@ -372,7 +389,7 @@ func TestTheDocumentedCommandServesTheBoard(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(answers, "dismiss.json"), []byte(answer), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		base := startServe(t, serve+" --answers "+answers, mod)
+		base := startServe(t, declaredServe+" --answers "+answers, repo)
 		if res, body := get(t, http.MethodPost, base+"/helm/dismiss", ""); res.StatusCode != http.StatusOK || string(body) != answer {
 			t.Errorf("POST /helm/dismiss: %d %s, want the canned answer", res.StatusCode, body)
 		}

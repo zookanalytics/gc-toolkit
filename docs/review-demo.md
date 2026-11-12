@@ -23,10 +23,16 @@ particular to this rig.
 
 The board is the app the helm service embeds. The service's `helm-fixture`
 command serves the reviewed commit's board on fixture data, with no city behind
-it (`services/helm/README.md`). Capture it from the review workspace under the
-keepalive, as every capture runs, with the pack's `demo-screenshot.sh`:
-`demo-screenshot.sh page --script board.md --serve "go run ./cmd/helm-fixture"
---port 0 --cwd <worktree>/services/helm --output board.png`.
+it (`services/helm/README.md`). The command that runs it is the rig's declared
+serve command, `ui_serve_command`, which the city sets among gc-toolkit's
+formula vars and which a live copy of the board runs too (`ui-copy.sh`). It
+runs from the worktree's root, and
+`gc formula show mol-rig-demo --rig gc-toolkit --json` prints it as that var's
+`rig_default`. Capture the board from the review workspace under the keepalive,
+as every capture runs, with the pack's `demo-screenshot.sh` and `SERVE` set to
+the declared command:
+`demo-screenshot.sh page --script board.md --serve "$SERVE" --port 0 --cwd
+<worktree> --output board.png`.
 
 The page shows the gc-toolkit rig's document,
 `services/helm/internal/rigboard/testdata/gc-toolkit.board.json`, which the rig

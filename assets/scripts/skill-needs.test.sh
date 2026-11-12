@@ -919,6 +919,8 @@ have "the edit skill holds the change on the conversation" 'gc bd dep add "$CHAN
 have "…cuts its tree through Work's setup under --held-by" '"$CONV/work-setup.sh" --bead "$CHANGE" --held-by "$CONVERSATION"' "$EDIT"
 have "…and hands it off through Work's hand-off under --held-by" '"$CONV/work-submit.sh" --bead "$CHANGE" --held-by "$CONVERSATION"' "$EDIT"
 have "…and reads the polecat class's standards before the first edit" 'template-fragments/work-quality-polecats.template.md' "$EDIT"
+have "…shows the operator a copy of a UI change at an address of its own" '"$CONV/ui-copy.sh" start --tree "$TREE" --rig "$GC_RIG" --publish' "$EDIT"
+have "…and stops the copy" '"$CONV/ui-copy.sh" stop --tree "$TREE"' "$EDIT"
 echo "── a moot or benign close settles a headline that waits on nothing ──"
 # A cut-short sitting leaves its hold's headline on the subject, and the next
 # sitting's premise re-check can find the conversation moot and close it. The

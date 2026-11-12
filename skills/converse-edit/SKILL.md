@@ -221,6 +221,56 @@ signature the rig can verify, and a rig that requires verified signatures
 refuses the push at the hand-off. Tell the operator now, while the change is
 one commit.
 
+## Show the operator a copy of the UI
+
+When the change is to a rig's UI, the operator reacts to a copy of it: a live
+page served from the tree on fixture data, at an address of its own that they
+open in their own browser. Start one once the tree is set up:
+
+```bash
+"$CONV/ui-copy.sh" start --tree "$TREE" --rig "$GC_RIG" --publish
+```
+
+It prints `key=value` lines: `address=` is the address to give the operator,
+and `port=` is the copy's port on this host. A tree has one copy, so start is
+safe to run again, after a restart too. It reports the copy that runs, or starts
+one, and publishes again a copy that has lost its address.
+`"$CONV/ui-copy.sh" status --tree "$TREE"` says whether the copy runs and still
+has its address. The copy runs what its serve command built when it started, so
+an edit the command does not reload shows only once you stop the copy and start
+it again, which gives it a new port and address to give the operator.
+
+A rig that declares no serve command offers no copy, so its look cannot be
+shown live: start exits 1 with `reason=no-serve-command`. Say so, and recommend
+sending the change on a formula (the converse-settle step), and the operator's
+ruling decides.
+
+Where `address=` is empty, `detail=` says why. A copy whose publish command
+ended gets its address back when you run start again. Where the city can give no
+address, the operator cannot open the copy: stop it, and show them screenshots
+instead. Capture each look from the
+tree with `demo-screenshot.sh`, which serves the tree with the rig's serve
+command in a sandbox where the live city cannot be reached. Drive the app to
+the look with a script in the `gc-toolkit.demo-capture` skill's format, keep
+each image outside the tree and your home, and read each one yourself before you
+describe it to the operator:
+
+```bash
+SERVE=$(gc formula show mol-rig-demo --rig "$GC_RIG" --json | jq -r '[.vars[] | select(.name == "ui_serve_command")][0].rig_default // empty')
+"$CONV/demo-screenshot.sh" page --script "<the script>" --serve "$SERVE" --port 0 --cwd "$TREE" --output "<the image>"
+```
+
+The operator sees the images on GitHub once the change has a PR. After the
+hand-off, once the change records a `pr_number`, attach each image there:
+
+```bash
+"$CONV/demo-deliver.sh" --file "<the image>" --subject "$CHANGE"
+```
+
+Stop the copy at the hand-off, at a drop and at the sign-off, as those sections
+say. A copy left running ends once your session has ended, because Gas City's
+orphan sweep ends a process that carries an ended session's id.
+
 ## Run the rig's checks
 
 Before you ask for the go, run the checks a polecat's self-review runs, with
@@ -271,8 +321,10 @@ hand-off writes, wake of the refinery, and removal of the tree with its local
 branch. Its last write removes your hold, once the refinery holds the change.
 The change is then the anchor, as a polecat's fresh work is: one bound for the
 default branch reaches a PR, and one in an effort lands on the effort's branch.
-Run it in a subshell that enters the tree, so your own shell stays in its home
-when the tree goes:
+Stop the copy of the UI first, because the tree it serves goes too:
+`"$CONV/ui-copy.sh" stop --tree "$TREE"`, which exits 0 when no copy runs. Run
+the hand-off in a subshell that enters the tree, so your own shell stays in its
+home when the tree goes:
 
 ```bash
 ( cd "$TREE" && "$CONV/work-submit.sh" --bead "$CHANGE" --held-by "$CONVERSATION" \
@@ -346,12 +398,13 @@ own edge onto the conversation:
   && "$CONV/bead-rehome.sh" --origin "$CHANGE" --successor "$CONVERSATION" --kind not-needed --note "<the operator's ruling, one sentence>"
 ```
 
-Then remove the tree and its local branch with git, from your home, a worktree
-of the same repository. Git refuses a tree that holds uncommitted edits, and
-those are part of the change the operator dropped, so run the removal again
-with `--force` then:
+Then stop the copy of the UI, and remove the tree and its local branch with
+git, from your home, a worktree of the same repository. Git refuses a tree that
+holds uncommitted edits, and those are part of the change the operator dropped,
+so run the removal again with `--force` then:
 
 ```bash
+"$CONV/ui-copy.sh" stop --tree "$TREE"
 git -C "${GC_DIR:-$PWD}" worktree remove "$TREE" && git -C "${GC_DIR:-$PWD}" branch -D "polecat/$CHANGE"
 ```
 
@@ -386,6 +439,9 @@ through the sign-off's cases (the converse-settle step).
   rules that it waits for a later sitting.
 
 ## At the sign-off
+
+Stop a copy of the UI that still runs, as one does when the operator rules that
+the change waits for a later sitting: `"$CONV/ui-copy.sh" stop --tree "$TREE"`.
 
 Name the subject's wait on the change, `--waiting-on <the change>`, with the
 brief's own text as `--close-brief`. The sign-off finds the brief and the arm
