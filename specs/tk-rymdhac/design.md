@@ -414,42 +414,63 @@ engage the change, and a sitting edits it as an open PR once unit 5 has landed.
 
 ## 5. A copy of a rig's UI
 
+**One path for a person and a demo.** A copy of a rig's UI is served one way,
+whoever consumes it. The operator ruled in conversation tk-ralyjxq that the copy
+moves onto `gctk rig` and that the demo tools move with it: "Demo and user
+viewing should be the same path, it's just about who consumes it (showsprint or
+a user) and whether it needs to expose an external port or not." `gctk rig
+serve` runs a copy from the checkout it is called in, reports its state and
+stops it. A sitting starts one with an address for the operator. A demo
+capture's `--serve` starts one with no address and points the SprintShow
+engine at its loopback port, in place of the engine spawning the server itself.
+The verb follows the rig noun's checks: its caller passes the commands, with
+`--command` for the serve command, and `--check` reads a copy's state without
+starting one. `--stop` ends it.
+
 **The per-rig declaration.** A rig declares how to serve its UI as a serve
 command, `ui_serve_command`, among the commands the city's config sets for the
 rig beside its lint and test commands, which are the rig's `[rigs.formula_vars]`
-in `city.toml`. The copy script reads it as the demo engine reads
-`app_reads_city`: `gc formula show <formula> --rig <rig> --json`, then the var's
-`rig_default` (`assets/scripts/demo-engine-lib.sh:479-493`; that var is declared
-at `formulas/mol-rig-demo.toml:95`). `mol-rig-demo` declares the serve command
-beside it, along with the city's two values that Publishing describes, so one
-call reads all three. The serve command is a var of its own and not
-`mol-rig-demo`'s `serve_cmd`, because a rig's value is the default for every
-pour of that formula, and its capture step declines a pour that names
-`serve_cmd` beside a `serve_dir` or a `base_url`.
+in `city.toml`. `mol-rig-demo` declares it beside `app_reads_city`, along with
+the city's two values that Publishing describes, so one call,
+`gc formula show mol-rig-demo --rig <rig> --json`, reads all three as each var's
+`rig_default`. The caller reads them, as a formula step renders a check's
+command, and passes them to the verb, which reads no formula var. The serve
+command is a var of its own and not `mol-rig-demo`'s `serve_cmd`, because a
+rig's value is the default for every pour of that formula, and its capture step
+declines a pour that names `serve_cmd` beside a `serve_dir` or a `base_url`.
 
-The declared command, run from the tree it is given, serves the rig's UI on
+The declared command, run from the checkout's top, serves the rig's UI on
 fixture data with no city behind it, listens on loopback at `$PORT`, and takes
 nothing that two copies would share. It is one value for every branch of the
 rig, so it names an entry point every branch carries. A rig that declares none
 offers no live copy. That restricts live UI work to the rigs that can run an
 isolated copy, which is the restriction the operator's concern offered. The
 rig's demo guidance, its `docs/review-demo.md`, refers to the declared command
-where it tells a capture what to serve, so the command has one home, and how
-`demo-screenshot.sh` takes its command does not change. gc-toolkit's value runs
-`go run ./cmd/helm-fixture` from `services/helm`
+where it tells a capture what to serve, so the command has one home.
+gc-toolkit's value runs `go run ./cmd/helm-fixture` from `services/helm`
 ([review-demo.md](../../docs/review-demo.md#the-helm-board)). gc-toolkit sets
 `app_reads_city = "true"`, so its declared command is the fixture server and
 never the helm service.
 
-**Isolation.** A copy runs from the change's tree, so it shows the change. It
-listens on a free loopback port, chosen as `demo-screenshot.sh` turns
-`--port 0` into a free port, so two copies never collide. It serves fixture
-data with nothing live behind it. And it keeps an origin of its own: it is never
-mounted under the supervisor as a Gas City service, because a page there shares
-the supervisor's origin, and the board's own client reads the supervisor's API
+**Isolation.** A copy runs from the change's checkout, so it shows the change.
+It listens on a free loopback port the verb picks, so two copies never collide.
+Its serve command runs inside the sandbox the pack's demo capture runs in,
+`demo-engine-lib.sh`'s, through `demo_engine_sandboxed`: it cannot read the
+city's directories, reach a loopback port but its own or a Unix socket, or
+signal a process outside the sandbox, and it runs with none of the variables
+that point a command at the city. So both consumers get the demo's isolation,
+rather than only what a serve command promises. The verb finds the library in
+the pack's scripts directory, which `GCTK_SCRIPTS_DIR` names, as `gctk merge`
+finds its helpers. A capture's engine reaches a copy's port only once
+`gctk rig serve --check`, asked in the checkout the process listening there
+works in, answers that the copy runs on that port, which the verb reports only
+while every process listening there at an address loopback reaches is in the
+copy's own process group. A copy keeps an origin of its own: it is never mounted
+under the supervisor as a Gas City service, because a page there shares the
+supervisor's origin, and the board's own client reads the supervisor's API
 relative to the page's origin (`services/helm/web/src/drill/origin.ts`), so a
-copy mounted there would read the live city. A copy ends when the session that
-started it stops it, or by Gas City's orphan sweep once that session has ended
+copy mounted there would read the live city. A copy ends when its caller stops
+it, or by Gas City's orphan sweep once the session that started it has ended
 (Cleanup, below).
 
 **Reach.** The tailnet lets the operator's devices reach every port on this
@@ -465,52 +486,47 @@ operator's reach until something publishes its port. A copy is published on a
 port of its own and does not listen on the tailnet address itself, for the
 reasons the operator agreed to in conversation tk-mfwgu1a. `tailscaled`, which
 the firewall admits, takes the connection and hands it to the copy on loopback,
-so publishing works for any rig's UI with nobody at the host's screen. The copy
-never listens on a network address. And it gets an origin of its own.
+so publishing works for any rig's UI with nobody at the host's screen.
 
-**The copy script.** One pack script runs a copy, and any session of a rig can
-call it. The operator asked in conversation tk-mfwgu1a for a helper, or
-configuration and a helper, that lets an agent run a local instance of a rig's
-UI and learn the local port and the address to give them. This design gives it
-one caller, the sitting, through `converse-edit`. The script does these things:
+**The verb.** Any session of a rig can call it. The operator asked in
+conversation tk-mfwgu1a for a helper, or configuration and a helper, that lets
+an agent run a local instance of a rig's UI and learn the local port and the
+address to give them. It prints one JSON line, so a caller reads each value
+without parsing prose:
 
-- **Start.** From a tree the caller names, it reads the rig's declared serve
-  command, picks a free loopback port with `demo_engine_free_port`
-  (`assets/scripts/demo-engine-lib.sh:226-231`), as `demo-screenshot.sh
-  --port 0` does, runs the command there and prints the local port.
-- **An address on request.** When the caller asks for one, it also publishes the
-  port and prints the address to give the operator. A copy a session runs for
-  its own checks takes no address.
-- **Stop.** It ends a copy.
-- **State.** It tells a caller whether a copy is running and whether it still
-  has its address, because a publisher can end alone.
-- **Output.** It prints the local port and the address so that a caller reads
-  each without parsing prose.
-- **No publisher.** Where the city sets none, it runs the copy, prints the port
-  and says that no address can be given, and the sitting shows screenshots.
+- **Start.** `--command` with the serve command runs it from the checkout on a
+  free loopback port, and prints the port. A checkout has at most one copy, so a
+  start for one whose copy runs reports that copy, which makes a start safe to
+  repeat after a session wakes. A start reports a copy once it answers on its
+  port as its own, and stops a copy that does not within its wait.
+- **An address on request.** With `--publish-command` and `--address-pattern`
+  it also publishes the port and prints the address to give the operator. A
+  copy a capture runs takes no address.
+- **Stop.** `--stop` ends a copy's whole process group.
+- **State.** `--check` says whether a copy runs, answers on its port as its own
+  and still has its address, because a publisher can end alone.
+- **No publisher.** Where the city sets none, the copy runs with no address,
+  and the report says why, and the sitting shows screenshots.
 - **No cap.** Each copy has a port of its own, so any number run at once.
-
-Its verbs, flags and value names follow the pack's scripts and the names beside
-them in `[rigs.formula_vars]`.
 
 **Publishing.** The city sets a publish command, `ui_publish_command`, and an
 address pattern, `ui_address_pattern`. The publish command takes a copy's local
 port and publishes it at an origin of its own for exactly as long as the command
 runs. The address pattern gives the address for a port. There is no withdraw
-command. The script runs the publish command in the copy's process group and
-ties it to the copy. When the copy ends, the script ends the publish command, so
-no address outlives its copy. When the publish command ends alone, the copy runs
-on and reads as having no address until the script publishes it again. A publish
-the publisher refuses because another client was changing its config is tried
-again, and a port refused as taken gets another free port.
+command. The copy's leader runs the publish command in the copy's process group
+and ties it to the copy. When the copy ends, the leader ends the publish
+command, so no address outlives its copy. When the publish command ends alone,
+the copy runs on and reads as having no address until a start publishes it
+again. A publish the publisher refuses because another client was changing its
+config is tried again, and a port refused as taken gets another free port.
 
 In this city the publish command is `tailscale serve --yes --https=<port>
 http://127.0.0.1:<port>`, run in the foreground, and the address is
 `https://<the host's tailnet name>:<port>/`. `tailscaled` keeps such a mapping
 under the command's own session and deletes it when that session ends, however
 the command died. It refuses a port any mapping holds, so a copy cannot take the
-supervisor's port. The city's publish command never runs `tailscale serve
-reset`, which drops every mapping, the supervisor's included.
+supervisor's port. Nothing runs `tailscale serve reset`, which drops every
+mapping, the supervisor's included.
 
 The city's two values are read by the call that reads the serve command, so any
 session of the rig reads them, and the mechanik sets them. They are not an
@@ -525,40 +541,36 @@ board set no cookie today, and a cookie added to either would reach every copy.
 
 **Cleanup.** Stopping a copy ends its process group, which ends the publish
 command with it. The sitting stops its copy at the hand-off, at a drop and at the
-sign-off. A copy whose session has ended is ended by Gas City's orphan sweep,
-which the design composes and does not rebuild. The sweep ends a process that
-left its session's terminal, carries the session's `GC_SESSION_ID` and
-`GC_CITY_PATH` and has been reparented to PID 1, once the session is closed, or
-stopped with no live pane, and it kills that process's group. For a stopped
-session it also needs the process's `GC_RUNTIME_EPOCH` and a start before the
-stop. While the session runs, the sweep leaves the process alone, because a
-process whose `GC_SESSION_ID` names a running session counts as that session's.
-So the copy's leading process keeps the session's `GC_SESSION_ID`,
-`GC_CITY_PATH` and `GC_RUNTIME_EPOCH`. It leads a process group of its own that
-holds the copy and its publish command. And it is a program whose environment
-macOS lets `ps` read, which an Apple platform binary such as `/bin/sh`,
-`/bin/bash` or `/usr/bin/perl` is not.
-
-The script cannot compose `detached-job.sh start` as it stands, because that
-script removes `GC_SESSION_ID` from the job's environment to survive this sweep
-(`assets/scripts/detached-job.sh:321`), and a `/bin/sh` wrapper leads its job.
-In its place the script detaches the copy as that script does, through perl's or
-python3's `setsid()`, keeps the three values, and leads the group with a program
-whose environment `ps` reads, such as the Homebrew bash the pack's scripts run
-under on this host.
+sign-off, and a capture stops the copy it started once the capture is taken. A
+copy whose session has ended is ended by Gas City's orphan sweep, which the
+design composes and does not rebuild. The sweep ends a process that left its
+session's terminal, carries the session's `GC_SESSION_ID` and `GC_CITY_PATH` and
+has been reparented to PID 1, once the session is closed, or stopped with no
+live pane, and it kills that process's group. For a stopped session it also
+needs the process's `GC_RUNTIME_EPOCH` and a start before the stop. While the
+session runs, the sweep leaves the process alone, because a process whose
+`GC_SESSION_ID` names a running session counts as that session's. So the copy's
+leader keeps the session's `GC_SESSION_ID`, `GC_CITY_PATH` and
+`GC_RUNTIME_EPOCH`. It is a gctk process, `gctk rig serve --lead`, that a start
+runs in a session of its own, so it leads a process group that holds the copy
+and its publish command and is reparented to PID 1 once the start exits. And
+macOS lets `ps` read its environment, which it withholds for an Apple platform
+binary such as `/bin/sh`, `/bin/bash` or `/usr/bin/perl`. The serve command
+runs inside the sandbox with none of those values, in the leader's group, so
+the sweep's kill of the group reaches it. `detached-job.sh start` does not
+serve here, because it removes `GC_SESSION_ID` from the job's environment to
+survive this sweep (`assets/scripts/detached-job.sh:321`).
 
 A copy also ends when its session sleeps or is stopped. A held sitting does not
-sleep, and the script's start is safe to repeat after a wake. No watcher inside
-a copy polls for its session. Unit 4's first act is the proof on the host that
-the sweep ends a copy started this way on the city's running gc. If it does not,
-the fallback the operator accepted in conversation tk-mfwgu1a is that the
-script's next start ends each copy whose session has ended, for which the
-script then records each copy's session.
+sleep, and a start is safe to repeat after a wake. No watcher inside a copy
+polls for its session. Unit 4 proved on the host that the sweep ends a copy
+whose leader carries an ended session's values, on the city's running gc.
 
-**Screenshots.** Where the script can give no address, the sitting captures each
-look from the tree with `demo-screenshot.sh`, inside the sandbox where the live
-city cannot be reached, and reads the image itself. The operator sees the images
-on GitHub once the change has a PR, attached by `demo-deliver.sh`.
+**Screenshots.** Where the verb can give no address, the sitting captures each
+look from the checkout with `demo-screenshot.sh --serve`, which serves it as a
+copy with no address in the same sandbox and captures that copy, and reads the
+image itself. The operator sees the images on GitHub once the change has a PR,
+attached by `demo-deliver.sh`.
 
 **Containers stay out.** Gas City runs a city's sessions in pods or sandboxes,
 chosen for the whole city (`[session] provider`), and has no primitive that runs
@@ -625,7 +637,7 @@ conversation tk-16d2j3q: "yes, build the rest").
 | 1 | Work's writers serve a sitting | `--held-by <conversation>` on `work-setup.sh` and `work-submit.sh`: the proof, with its refusal of a bead someone else holds or is queued to take, the refinery included; refusals that end nothing; and the hand-off's release of the edge as its last write, after the refinery assignment. Tests in `work-setup.test.sh` and `work-submit.test.sh`: a sitting's setup and its re-entry to a recorded tree; a hand-off that assigns the refinery and then releases the edge; a hand-off stopped before the assignment by a refused write, which a second run completes with nothing written beyond what the first did not reach and its note appended again; a run once the refinery is assigned, refused with the refinery named as the holder and nothing pushed or written, whether this conversation's own hand-off stopped before its release or completed it, or the refinery took the bead another way and this conversation's edge was added afterwards; a missing edge, a hook that names another bead, a bead assigned to another holder, one a run works and one with a pool route, each refused with nothing written; and a refusal that drains nothing. The `component-model.md` rows. The commit cites the search record. | nothing |
 | 2 | One home for the PR summary's standard | The submit step's "Compose the PR summary" moves into the commit-conventions skill, whose description gains the summary. The submit step loads the skill and keeps its calls, and `formula-step-size.test.sh` holds. | nothing |
 | 3 | The doctrine and the edit skill | Every row of section 6 except the UI section of `converse-edit`, and the first Debt entry of `architecture.md` removed. | units 1 and 2 |
-| 4 | A copy of a rig's UI | The copy script, which starts a copy with or without an address, stops it and reports its state, and its tests, which stub the publish command so that no suite touches Tailscale. The serve command's declaration and the city's publish command and address pattern, as the three vars `mol-rig-demo` declares and the script reads. `converse-edit`'s section on a copy, which calls the script, gives the operator the address it prints and shows screenshots where it prints none. gc-toolkit's `docs/review-demo.md` pointed at the declared command. A bead for the mechanik to set gc-toolkit's serve command, which runs `go run ./cmd/helm-fixture` from `services/helm`, and the city's two values in the city's config. Its first act is the proof under Cleanup in section 5. | unit 3 |
+| 4 | A copy of a rig's UI | The copy's verb, `gctk rig serve`, which starts a copy with or without an address inside the capture's sandbox, stops it and reports its state, with the demo captures' `--serve` moved onto it, and its tests, which stub the publish command so that no suite touches Tailscale. The serve command's declaration and the city's publish command and address pattern, as the three vars `mol-rig-demo` declares and the verb's callers read. `converse-edit`'s section on a copy, which calls the verb, gives the operator the address it prints and shows screenshots where it prints none. gc-toolkit's `docs/review-demo.md` pointed at the declared command. A bead for the mechanik to set gc-toolkit's serve command, which runs `go run ./cmd/helm-fixture` from `services/helm`, and the city's two values in the city's config. Its first act is the proof under Cleanup in section 5. | unit 3 |
 | 5 | A sitting edits an open PR's branch | Built on tk-1tfzr71.22's rework in its loop and tk-1tfzr71.20's publication of a head, following whatever tk-1tfzr71.22's design settles. It removes the second Debt entry. | tk-1tfzr71.22 and tk-1tfzr71.20 |
 
 ## 9. Edges and notes the implementation child adds
@@ -770,9 +782,8 @@ conversation tk-16d2j3q: "yes, build the rest").
   declines a pour that names more than one of `serve_dir`, `serve_cmd` and
   `base_url` ("Resolve the app target" in `formulas/mol-rig-demo.toml`).
 - **The fixture board.** `helm-fixture` listens on loopback at `$PORT`, which
-  `demo-screenshot.sh --port 0` fills with a free port from
-  `demo_engine_free_port`, and it refuses a `--addr` that is not a loopback
-  address (`services/helm/cmd/helm-fixture/main.go:86-91`;
+  `gctk rig serve` fills with a free port for a copy, and it refuses a `--addr`
+  that is not a loopback address (`services/helm/cmd/helm-fixture/main.go:86-91`;
   [review-demo.md](../../docs/review-demo.md#the-helm-board)).
   `demo-deliver.sh` attaches a file to a PR through `gh pr comment --attach`,
   so an image reaches GitHub only through a PR.

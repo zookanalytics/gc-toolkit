@@ -110,6 +110,7 @@ bead.
 | `gctk pr guard` | hook | refuse an agent's `gh` write outside the rig's own origin, or an unmarked post on it | Gas City scopes no agent's writes ([warrants.md](warrants.md#gh-write-containment)). The rule lives in the GitHub adapter, so gctk's own writes meet it, and the tool-use hook every agent carries applies it to the commands an agent types. |
 | `gctk epic create <title>` | agent | file an epic with its contract, each field in its own key | bd's create checks hold no issue type to a metadata key, so nothing native refuses an epic filed with no hypothesis, which [epics.md](epics.md) makes the one hard gate on an epic. The verb refuses such an epic, files the contract in the create itself, and, under an epic, files a Delivery, which carries no contract. |
 | `gctk rig test`, `lint`, `typecheck`, `setup`, `build` | agent, hook | run a rig's check and record its result at the commit, or read that record | One consistent surface that simplifies an agent's logic, caches each result at its commit, and processes every check the same way. |
+| `gctk rig serve` | agent, hook | run a copy of the rig's UI from a checkout, with no address for a demo capture or at an address of its own for a person, report its state, or stop it | Gas City supervises a declared service under the supervisor's origin, one process per name, and runs no app instance from a worktree on a port of its own ([the search](../specs/tk-rymdhac/gas-city-search.md#a-copy-of-a-rigs-ui)). The verb serves both consumers on one path, inside the sandbox the pack's demo capture defines, and ends the copy's whole process group with the copy, at the caller's stop, or through Gas City's orphan sweep once the caller's session has ended. |
 | `gctk review checks` | hook, order | which checks gate a change at a commit, with the rig's index laid over the pack's | Gas City's formula check loop runs a check script and iterates, and holds no review checks. The check index and its rig overlay are the feature. The review formula's steps read it at the reviewed commit, a lane for its own row and triage for the whole index, and the merge cadence reads it for the lanes a change needs before it dispatches them or lands the change. The loop's shape is the review-lane member's design. |
 | `gctk review guidance <check>` | hook | the rig's guidance for a check at the reviewed commit | Part of the check index: a rig's guidance, read at the commit under review rather than the one checked out. |
 | `gctk review passed <bead>` | hook | whether every lane has passed at the head: the loop's pass-or-iterate check | The check script that a review formula's check loop runs after each round. It holds the pass rule over the lanes, which the loop itself cannot. |
@@ -141,7 +142,8 @@ What each noun owns:
   `lifecycle/lifecycle.toml`'s `[metadata.epic_stewardship]`.
 - **`rig`:** actions specific to, or on, the rig an agent works in. The check
   records are the first: the records under the rig clone's git common
-  directory, and their copies on beads.
+  directory, and their copies on beads. Beside them is the record of each copy
+  of the rig's UI that runs.
 - **`quota-park`:** the nudge episode of each parked session, under the city's
   runtime directory.
 - **`seed`:** the rendered audit under `generated/seed-audit/`.
