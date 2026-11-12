@@ -218,7 +218,8 @@ func Ready(src Sources, bead string) (Answer, error) {
 		return Answer{}, err
 	}
 	ans.Head, ans.Target = p.HeadRefOid, p.BaseRefName
-	var front []Condition
+	// Empty rather than nil, so a ready answer's conditions encode as [].
+	front := []Condition{}
 	if ids := identityGaps(p, rec.url, number, rec.repo, rec.branch, rec.target); len(ids) > 0 {
 		front = append(front, Condition{Kind: KindRecord,
 			Detail: "the PR on GitHub is not the one the record names: " + strings.Join(ids, ", ")})

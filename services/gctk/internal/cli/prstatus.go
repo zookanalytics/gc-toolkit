@@ -42,13 +42,16 @@ labels take, and reasons is each thing behind it. A reason's id is empty where
 the PR's own review threads or blocked verdict hold it. Both lists are empty
 arrays when nothing holds the PR.
 
-For a bead whose PR is on Gas Town's pending record, the status renders the
-pr domain's evaluator, which reads the PR on GitHub, and each condition not
-met follows the status on a line of its own, as <kind>: <detail>. Its --json
-object also carries "ready", the "head" and "target" the evaluator judged, and
-"conditions": [{"kind", "detail", "id", "value"}], an empty array when the PR
-is ready. The evaluator applies the pack's definition of feedback from the
-scripts directory GCTK_SCRIPTS_DIR names, or else the one gc names.
+For a bead whose PR is on Gas Town's pending record, the status renders the pr
+domain's evaluator, which reads the PR on GitHub, and each condition not met
+follows the status on a line of its own, as <kind>: <detail>. For such a bead,
+held and reasons name the gates and the beads a person owes that hold it, and
+the review threads the evaluator finds waiting on the city's answer while no
+work of the city's acts on them. Its --json object also carries "ready", the
+"head" and "target" the evaluator judged, and "conditions": [{"kind",
+"detail", "id", "value"}], an empty array when the PR is ready. The evaluator
+applies the pack's definition of feedback from the scripts directory
+GCTK_SCRIPTS_DIR names, or else the one gc names.
 
 exit: 0 printed
       1 usage
@@ -80,7 +83,8 @@ func newPRCmd(stdout, stderr io.Writer) *cobra.Command {
 // gathers about the anchor, and with asJSON the values prstatus.Held and
 // prstatus.Reasons return beside it. For an anchor on Gas Town's pending record
 // it prints the state prstatus.Render gives the evaluator's answer instead, with
-// the conditions not met.
+// the conditions not met, and with asJSON the values prstatus.RenderHeld and
+// prstatus.RenderReasons return.
 func prStatus(anchor string, asJSON bool, stdout, stderr io.Writer) int {
 	facts, err := prstatus.Read([]string{anchor}, gcbdStore{gcbd.New()})
 	f, answered := facts[anchor]
@@ -112,6 +116,12 @@ func prStatus(anchor string, asJSON bool, stdout, stderr io.Writer) int {
 		return 0
 	}
 	held, reasons := prstatus.Held(f), prstatus.Reasons(f)
+	if ans != nil {
+		held, reasons = prstatus.RenderHeld(*ans, f), prstatus.RenderReasons(*ans, f)
+		if ans.Conditions == nil {
+			ans.Conditions = []pr.Condition{}
+		}
+	}
 	if held == nil {
 		held = []prstatus.Hold{}
 	}

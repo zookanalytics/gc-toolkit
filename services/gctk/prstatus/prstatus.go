@@ -286,9 +286,12 @@ func Blocked(f Facts) bool {
 // derivation after the condition clears leaves it out. The merge freeze and the
 // rebase hold are not among them: they read needs-attention in [Derive] with no
 // held value of their own.
-func Held(f Facts) []Hold {
+func Held(f Facts) []Hold { return holdsOf(Reasons(f)) }
+
+// holdsOf is the held: value of each reason, once each, in their order.
+func holdsOf(reasons []Reason) []Hold {
 	var held []Hold
-	for _, r := range Reasons(f) {
+	for _, r := range reasons {
 		if !slices.Contains(held, r.Held) {
 			held = append(held, r.Held)
 		}

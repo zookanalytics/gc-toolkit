@@ -1,6 +1,7 @@
 package pr_test
 
 import (
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -166,7 +167,15 @@ func isReady(t *testing.T, a pr.Answer) {
 }
 
 func TestReadyAnswersWithTheHeadAndTargetItJudged(t *testing.T) {
-	isReady(t, ready().answer(t))
+	a := ready().answer(t)
+	isReady(t, a)
+	raw, err := json.Marshal(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"conditions":[]`) {
+		t.Fatalf("a ready answer encodes as %s, want its conditions an empty array", raw)
+	}
 }
 
 func TestApproval(t *testing.T) {

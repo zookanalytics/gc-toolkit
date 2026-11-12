@@ -590,13 +590,40 @@ func TestPRStatusOnThePendingRecord(t *testing.T) {
 
 	t.Run("a ready PR reads merging, with no condition", func(t *testing.T) {
 		stubGC(t, onRecord, `[]`)
-		answer(pr.Answer{Ready: true, Head: "abc", Target: "main", Conditions: []pr.Condition{}}, nil)
+		answer(pr.Answer{Ready: true, Head: "abc", Target: "main"}, nil)
 		if out, code := derive(t, "tk-a"); code != 0 || out != "merging\n" {
 			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, "merging\n")
 		}
 		out, _ := derive(t, "tk-a", "--json")
 		if !strings.Contains(out, `"ready":true`) || !strings.Contains(out, `"conditions":[]`) {
 			t.Fatalf("derive --json = %s, want ready with an empty conditions array", out)
+		}
+	})
+
+	t.Run("a review thread waiting on the city's answer reads held: review", func(t *testing.T) {
+		stubGC(t, onRecord, `[]`)
+		answer(pr.Answer{Head: "abc", Target: "main", Conditions: []pr.Condition{
+			{Kind: pr.KindThread, Value: "T1", Detail: "review thread T1 waits on the city's answer"},
+		}}, nil)
+		want := "needs-attention\nthread: review thread T1 waits on the city's answer\n"
+		if out, code := derive(t, "tk-a"); code != 0 || out != want {
+			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, want)
+		}
+		out, _ := derive(t, "tk-a", "--json")
+		if !strings.Contains(out, `"held":["review"]`) ||
+			!strings.Contains(out, `"reasons":[{"held":"review","id":"","title":"1 review thread waits on the city's answer"}]`) {
+			t.Fatalf("derive --json = %s, want held: review with the thread's reason", out)
+		}
+	})
+
+	t.Run("the merge pass's verdict and thread count, left from the old record, hold nothing", func(t *testing.T) {
+		stubGC(t, `[{"id":"tk-a","status":"blocked","metadata":{"merge_result":"pull_request_head_changed",`+
+			`"pr_posture":"approved@abc@t","pr.machine":"blocked@abc@t","pr.machine_cause":"blocker","pr.unanswered_threads":"2@abc"}}]`, `[]`)
+		answer(notReady, nil)
+		out, code := derive(t, "tk-a", "--json")
+		if code != 0 || !strings.Contains(out, `"status":"working"`) || !strings.Contains(out, `"held":[]`) ||
+			!strings.Contains(out, `"reasons":[]`) {
+			t.Fatalf("derive --json = (%q, %d), want working with nothing held", out, code)
 		}
 	})
 
