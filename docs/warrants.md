@@ -313,9 +313,14 @@ shares only the word ([authority-map.md](authority-map.md)).
   rig when the caller passes no `--merge` (the `Rig` section of
   `docs/reference/config.md`). Sling takes the explicit `--merge`, then the
   bead's rig's default, then the agent's rig's, and reads no target branch
-  (`SlingMergeStrategy` in `internal/sling/sling.go`). Neither the reference
-  nor the code chooses a strategy by the branch a bead lands on.
-- **Verified.** 2026-10-24, at `gastownhall/gascity` main 7cff3a265.
+  (`SlingMergeStrategy` in `internal/sling/sling.go` 1156-1171). Neither the
+  reference nor the code chooses a strategy by the branch a bead lands on. In
+  `gastownhall/gascity-packs`, the gastown refinery's merge-push step takes the
+  bead's `merge_strategy`, `direct` when it has none, and moves a `direct` bead
+  to `mr` only when it names an `existing_pr`, whatever its target
+  (`gastown/formulas/mol-refinery-patrol.toml` 674-704).
+- **Verified.** 2026-11-12, at `gastownhall/gascity` main 603e7eeec and
+  `gastownhall/gascity-packs` main 1f6d8e41c.
 - **Retires when.** Gas City can set a merge strategy for a target branch, so the
   rule becomes a line of the rig's config.
 
