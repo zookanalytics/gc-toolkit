@@ -2,11 +2,12 @@
 // document holding every row the pages draw and the four pages as lists of
 // those rows. The read is a gctk listing (services/gctk/listing), which lists
 // the store once and answers every shared reader from the rows it read:
-// services/gctk/waits for what holds a bead and whether it is in flight, and
+// services/gctk/waits for what holds a bead and whether it is in flight,
 // services/gctk/prstatus for what a person owes on a bead and where a pull
-// request stands. services/gctk/conversation says what a conversation is. One
-// table (table.go) turns those answers into a row's group and signal, and it
-// holds no rule of its own about what holds a bead, whose move it is or
+// request stands, and services/gctk/queue for the order the rig's work is
+// expected to land in. services/gctk/conversation says what a conversation
+// is. One table (table.go) turns those answers into a row's group and signal,
+// and it holds no rule of its own about what holds a bead, whose move it is or
 // whether work is moving.
 //
 // The listing decodes each key the board shows, so the board spells no key,
@@ -25,6 +26,7 @@ import (
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/listing"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/queue"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
@@ -109,6 +111,8 @@ type gathered struct {
 	// request, and noFacts the error for each it could not answer.
 	facts   map[string]prstatus.Facts
 	noFacts map[string]bool
+	// order is queue.Order's answer for every open piece of work (openWork).
+	order queue.Ordered
 }
 
 // Read reads one rig's store once, through a gctk listing, and builds its
@@ -185,6 +189,10 @@ func gather(ls *listing.Listing, rig string) (*gathered, error) {
 		}
 	}
 	g.facts = facts
+
+	if g.order, err = queue.Order(openWork(g.open), ls); err != nil {
+		return nil, fmt.Errorf("place the work of %s: %w", rig, err)
+	}
 	return g, nil
 }
 
