@@ -70,6 +70,17 @@ has "$(logged gc)" "sling --rig rig-a rig-a/gc-toolkit.polecat c --on mol-poleca
 [ ! -e "$HOME_DIR/worktrees/c" ] && rt_ok "the tree is removed" || rt_bad "the tree is removed"
 grep -q "worktrees/c$" <<< "$(git -C "$RIG" worktree list --porcelain)" && rt_bad "git still lists the tree" || rt_ok "git lists no tree for it"
 
+echo "# a conflicted bead that moved before the requeue wrote is left as it is"
+fresh
+branch_with polecat/mv same.txt >/dev/null
+work mv polecat/mv
+git -C "$SEED" checkout -q main && git -C "$SEED" pull -q origin main
+printf 'base side\n' > "$SEED/same.txt" && git -C "$SEED" add same.txt && git -C "$SEED" commit -q -m "same on main" && git -C "$SEED" push -q origin main
+STUB_GUARD_FAIL=1 run --bead mv
+eq "$RC" 3 "the prep ends the iteration (exit 3)"
+has "$OUT" "left the refinery or changed status" "it says the bead moved"
+eq "$(meta mv rejection_reason)" "<absent>" "nothing is written on it"
+
 echo "# a target origin does not carry parks the bead behind a gate"
 fresh
 branch_with polecat/t t.txt >/dev/null

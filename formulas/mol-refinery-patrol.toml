@@ -147,7 +147,7 @@ under your own worktree. A branch is never rebased.
 - Exit 3: the merge conflicted, and the work went back to the pool with the
   reason "Conflicts with <target> at <commit>": the bead itself through
   `gc sling` when it records no open PR, or its PR's rework child when it does.
-  Jump to next-iteration.
+  Or the bead had left you before the requeue wrote. Jump to next-iteration.
 - Exit 4: the target or the branch is not on origin, so the bead waits behind
   a human gate. Jump to next-iteration.
 - Exit 1: nothing prepared, and the bead stays with you. End the session with

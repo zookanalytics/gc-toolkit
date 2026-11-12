@@ -31,7 +31,8 @@
 #       1 nothing prepared, and the work stays with the refinery to retry; the
 #         output says why
 #       2 usage
-#       3 the merge conflicted, and the work went back to the pool
+#       3 the merge conflicted, and the work went back to the pool, or the bead
+#         left the refinery before it could
 #       4 the bead is parked behind a human gate
 set -uo pipefail
 
@@ -135,6 +136,8 @@ RQ=$?
 refinery_teardown "$HOME_DIR" "$BEAD" || echo "$PROG: the next prep removes the tree for $BEAD" >&2
 case "$RQ" in
   0) exit 3 ;;
+  3) echo "$PROG: $BEAD left the refinery or changed status before the requeue wrote, so it is left as it is" >&2
+     exit 3 ;;
   *) echo "$PROG: $BEAD's conflict with $TARGET did not go back to the pool (refinery-requeue.sh exit $RQ, its output above says why)" >&2
      exit 1 ;;
 esac
