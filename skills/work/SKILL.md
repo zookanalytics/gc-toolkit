@@ -305,6 +305,15 @@ name the formula and why you chose it.
   deferred-dispatch arm in place, and an armed bead is sent again once nothing
   holds it, so disarm it first (the waits skill). When the bead now waits on
   something, pass `--waiting-on <bead>` in place of `--no-wait`.
+  A claim a live session holds is not taken from it: the release writes the
+  headline and any wait, nudges the holder to stop and give the bead back, and
+  exits 4 naming the holder. If the holder dies before it gives the bead back,
+  Gas City's orphan sweep reopens the bead with its route still on it, and its
+  pool takes it up again. So a stop that must hold even then waits on a human
+  gate, which `bd ready` withholds whatever the bead's route: file one,
+  `"$(gc <binding> scripts-dir)/human-gate.sh" --subject <bead> --key <situation-key> --message "<what must happen before it goes on>"`,
+  which prints the gate's id, and pass `--waiting-on <gate>` in place of
+  `--no-wait`.
 - **Send it elsewhere.** Name where it goes in the same call:
   `"$(gc <binding> scripts-dir)/gc-helm.sh" takeaway <bead> "<where it goes now, and why>" --release --no-wait --route <rig>/<pool>`.
   For a named agent, pass `--assign <named-agent>` in place of
@@ -318,7 +327,10 @@ name the formula and why you chose it.
   answered. When the bead itself should go, close it instead (below).
 
 When the work already has an open pull request, retire the pull request instead
-of stopping the bead (the prs skill).
+of stopping the bead, and send more work on its branch to a rework child, both
+through the prs skill. The release refuses `--route` and `--assign` on an
+anchor whose `merge_result` is `pull_request` or `pre_open_gate`, because the
+merge cadence drives it.
 
 ## Close a bead that needs no work
 

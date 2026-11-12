@@ -306,10 +306,10 @@ reaction_absent_guard() {
 # Filing a reaction leaves the subject's route in place, so a routed subject
 # stays claimable for the whole reaction. The pool its route names can hand it
 # to a worker mid-reaction, and the disposition then acts on a bead that worker
-# holds: the release most exits end in (gc-helm.sh takeaway --release) reopens
-# and unassigns it, and the close exit slings a validating closer at it. An arm
-# is no safer: the deferred-dispatch reconcile pass slings the bead once nothing
-# holds it and reads no reaction, so the bead can be dispatched twice.
+# holds: the release most exits end in (gc-helm.sh takeaway --release) keeps
+# that claim and fails, and the close exit slings a validating closer at it.
+# An arm is no safer: the deferred-dispatch reconcile pass slings the bead once
+# nothing holds it and reads no reaction, so the bead can be dispatched twice.
 #
 # Returns 0 when the bead has no dispatch path or hold and no open human gate
 # blocks it, 1 when it has one or a gate blocks it, and 2 when its row cannot be

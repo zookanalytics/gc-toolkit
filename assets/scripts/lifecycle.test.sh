@@ -64,6 +64,10 @@ DUMP="$("$GCTK_BUILT" lifecycle --dump-machine 2>&1)"
 [ -n "$DUMP" ] && ok "machine dumped" || bad "gctk lifecycle --dump-machine produced nothing"
 eq "$(printf '%s\n' "$DUMP" | sed -n 's/^states //p')" "$(toml_states)" "states match lifecycle.toml"
 eq "$(printf '%s\n' "$DUMP" | sed -n 's/^detached_states //p')" "$(toml_detached)" "detached states match lifecycle.toml"
+# gc-helm.sh's takeaway refuses to send an anchor in one of them to a pool or an
+# agent, and it is sh, which reads no TOML, so it carries its own copy.
+eq "$(sed -n 's/^DETACHED_STATES="\([^"]*\)".*/\1/p' "$HERE/gc-helm.sh" | head -1)" "$(toml_detached)" \
+   "gc-helm.sh's DETACHED_STATES match lifecycle.toml"
 eq "$(printf '%s\n' "$DUMP" | sed -n 's/^closed_states //p')" "$(toml_closed)" "closed states match lifecycle.toml"
 [ -n "$(toml_exit_sets)" ] && ok "exit sets declared in lifecycle.toml" || bad "exit_sets = [...] missing from lifecycle.toml"
 eq "$(printf '%s\n' "$DUMP" | sed -n 's/^exit_sets //p')" "$(toml_exit_sets)" "exit sets match lifecycle.toml"
