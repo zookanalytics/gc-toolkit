@@ -738,21 +738,28 @@ values every later call sets and the skill to load next:
 | Entry | What the record shows | Next |
 |---|---|---|
 | `fresh` | A new claim, with no `staying:` line newest. | The premise re-check. |
-| `interrupted` | A restart, where the claim returns the conversation as an existing assignment: a `holding:` line newest means the hold stands, and none means nothing was held yet. Or a drain over a conversation still claimed while its work is out, which is a stay that stopped short. | `converse-continue`, the premise re-check, or `converse-stay`. |
-| `waiting` | No ready work, and the conversation open under the alias waits on open work, as `gctk bead holds` reads it. | `converse-stay`. |
-| `returned` | A claim whose newest `holding:` or `staying:` line is a `staying:` line, with nothing left open that the conversation waits on. | `converse-stay`. |
+| `interrupted` | A restart, where the claim returns the conversation as an existing assignment: a `holding:` line newest means the hold stands, and none means nothing was held yet. A drain over a conversation whose newest line is `holding:` is a hold that stands too. Or a stay that stopped short: its newest `staying:` line names no work yet, or names work that is still out with no edge onto it, or the conversation is still claimed while its work is out. | `converse-continue`, the premise re-check, or `converse-stay`. |
+| `waiting` | No ready work, and the conversation open under the alias waits on open work, as `gctk bead holds` reads it, through an edge onto each bead its newest `staying:` line names that is still out. | `converse-stay`. |
+| `returned` | A claim whose newest `holding:` or `staying:` line is a `staying:` line that names work, each bead of which has closed, with nothing left open that the conversation waits on. | `converse-stay`. |
 | `none` | No ready work, and no conversation under the alias. | Drain. |
 
 A read that fails, a listing that answers no list, a conversation assigned to
-the sitting with nothing holding it though the claim found no work, and a
-claim served while its work still reads open are each `unreadable`: the entry
-exits 1, and the sitting neither drains nor closes. The hold writes its
-`holding:` line before it posts the framing, and the stay its `staying:` line
-before it leaves the conversation open, so the newest of the two is the act
-that landed last. A return that leaves the operator something to answer holds,
-which writes a newer `holding:` line, so a restart after it reads the hold, and
-a conversation handed back to the queue after such a hold starts its next
-sitting fresh. The sitting reads none of these lines itself.
+the sitting with nothing holding it though the claim found no work, and a claim
+served while its work still reads open are each `unreadable`, and so are a
+conversation that waits on open work with no `staying:` line and a bead a
+`staying:` line names that does not read: the entry exits 1, and the sitting
+neither drains nor closes. The hold writes its `holding:` line before it posts
+the framing. The stay writes `staying: <what was agreed>` before anything else,
+and `staying: <what was agreed> (waits on <the work>)` once all but the wait
+has landed, then the edges, then the status. So the newest line is the act that
+began last, and a stay that stops anywhere reads as a stay, never as a hold
+that stands or a sitting that held nothing. A conversation keeps its edges onto
+the work of a stay that returned, so an edge alone proves nothing: the entry
+reads a stay as waiting or returned only once each bead its newest line names
+has an edge or has closed. A return that leaves the operator something to
+answer holds, which writes a newer `holding:` line, so a restart after it reads
+the hold, and a conversation handed back to the queue after such a hold starts
+its next sitting fresh. The sitting reads none of these lines itself.
 `assets/scripts/converse-entry.test.sh` runs each entry and each unreadable
 case.
 
@@ -1248,12 +1255,12 @@ agreement. The return compares what landed with what was agreed and tells the
 operator where it departs. It passes and fails nothing: the work's own checks
 and the subject's validating closer do that.
 
-A sitting that stays carries out the ruling with `converse-signoff.sh --stay`. That writes
-everything a sign-off writes, and then, in place of the close, makes the
-conversation wait on the work the sitting sent through bd's `blocks` edge,
-appends a `staying:` line to its notes, and puts it back to `open` under the
-sitting's alias, which drops the claim. Gas City does the rest with what it
-already has
+A sitting that stays carries out the ruling with `converse-signoff.sh --stay`.
+That first appends a `staying:` line to the conversation's notes, then writes
+everything a sign-off writes, and then, in place of the close, appends the line
+again naming the work the sitting sent, makes the conversation wait on that
+work through bd's `blocks` edge, and puts it back to `open` under the sitting's
+alias, which drops the claim. Gas City does the rest with what it already has
 ([specs/tk-pb9wnr3/stay-probe.md](../specs/tk-pb9wnr3/stay-probe.md)):
 
 - **The sleep.** Open work is wake demand only once bd reads it ready, and the

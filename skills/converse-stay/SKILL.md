@@ -15,14 +15,15 @@ Stay once the operator has agreed to it. First run the end up to its sign-off
 ruling settles and name what each answer releases, and settle the subject's
 dispatch path. Then run the sign-off with `--stay`, giving in one line what the
 operator agreed, which the return compares the work with.
-The call writes everything the ending sign-off writes: the subject's headline
-and wait, the close brief, the validating closer's arm and the gate answers. So
-the record stands even if this sitting never comes back. In place of the close,
-it makes the conversation wait on the work, appends
-`staying: <what was agreed> (waits on <the work>)` to the conversation's notes,
-and leaves the conversation open under this sitting. Write the headline as
-what the conversation waits for. It exits non-zero when it stopped short, and
-then you have not stayed:
+The call first appends `staying: <what was agreed>` to the conversation's
+notes, so a restart anywhere in it finds the stay. Then it writes everything the
+ending sign-off writes: the subject's headline and wait, the close brief, the
+validating closer's arm and the gate answers. So the record stands even if this
+sitting never comes back. In place of the close, it appends
+`staying: <what was agreed> (waits on <the work>)`, makes the conversation wait
+on that work, and leaves the conversation open under this sitting. Write the
+headline as what the conversation waits for. It exits non-zero when it stopped
+short, and then you have not stayed:
 
 ```bash
 if "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" \
@@ -73,10 +74,17 @@ wait, and the session sleeps again once the tab detaches.
 - **End the stay**: sign off without `--stay` (`converse-settle`), which closes
   the conversation over its wait.
 
-The entry says `interrupted` and names this skill when the conversation is
-still claimed while its work is out: the stay's call stopped before it left
-the conversation to wait. Run the call again with the same ruling, which is
-safe, and end the turn.
+The entry says `interrupted` and names this skill when a stay stopped short:
+before its sign-off finished, before the conversation waited on all its work,
+or before it left the conversation to wait. Run the call again with the same
+ruling, which is safe, and end the turn. When your thread no longer holds that
+call, rebuild it from the record: `AGREED` is its `--stay`, the conversation's
+comments record its ruling and what it did, the subject's latest close brief is
+its `--close-brief`, and `WORK`, once the sign-off finished, names its work, in
+which a bead whose `source_ruling_bead` is this conversation is its `--rework`.
+When the record does not give the whole call, as when `WORK` is empty, hold
+instead (`converse-hold`), and tell the operator the stay stopped short and
+what it had done.
 
 ## The return
 

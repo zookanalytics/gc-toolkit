@@ -7,8 +7,8 @@
 #                (converse-recheck-premise)
 #   interrupted  a restart mid-sitting: the hold stands (converse-continue),
 #                nothing was held yet (converse-recheck-premise), or a stay
-#                stopped short of leaving the conversation to wait
-#                (converse-stay)
+#                stopped short of leaving the conversation waiting on all its
+#                work (converse-stay)
 #   waiting      the sitting stays for work that is still out, and an attach or
 #                a restart woke it early (converse-stay)
 #   returned     the work the sitting stayed for has closed (converse-stay)
@@ -34,15 +34,25 @@
 #   work is still open.
 # - the newest of the conversation's `holding:` and `staying:` lines, which the
 #   hold and the stay write as their records (the converse-hold skill,
-#   converse-signoff.sh --stay). A `staying:` line newest means the sitting
-#   stayed and has not held since, so a claimed conversation whose work has all
-#   closed is a return. A `holding:` line newest means the operator owes the
-#   hold an answer.
+#   converse-signoff.sh --stay). A `holding:` line newest means the operator
+#   owes the hold an answer. A stay writes two `staying:` lines, and nothing
+#   but a stay gives a conversation a `blocks` edge. Its first line,
+#   `staying: <what was agreed>`, comes before every other write it makes, and
+#   says its sign-off has not finished. Its second, `staying: <what was agreed>
+#   (waits on <the work>)`, comes once everything but the wait has landed and
+#   names that work. So the entry reads a stay as waiting or returned only when
+#   the record agrees with that second line: the conversation waits through a
+#   `blocks` edge on each bead it names, or the bead has closed. Until then, the
+#   stay stopped short. An edge alone proves nothing, because a conversation
+#   keeps its edges onto the work of a stay that returned.
+# - for each bead the newest `staying:` line names that the conversation has no
+#   edge onto, its status.
 #
 # Output: a first line `ENTRY <entry>: <what it means>`, then `NEXT=<skill>`
 # (`NEXT=drain` for none), then one KEY=value line each for CONV, CONVERSATION,
-# SUBJECT and GATES, and for a stay WORK and AGREED. An interrupted entry whose
-# hold stands ends with the last hand-back recorded on the conversation.
+# SUBJECT and GATES, and for a stay WORK, the beads its newest line names, and
+# AGREED. An interrupted entry whose hold stands ends with the last hand-back
+# recorded on the conversation.
 #
 # Environment: GC_ALIAS, this session's alias, which the conversation it holds
 # is assigned to; GCTK_BIN or GC_CITY_PATH, to find gctk.
@@ -54,7 +64,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 
 case "${1:-}" in
   "") ;;
-  -h|--help) sed -n '2,48p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  -h|--help) sed -n '2,/^set -u$/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;;
   *) echo "$PROG: takes no arguments; it reads this session's claim" >&2; exit 2 ;;
 esac
 command -v jq >/dev/null 2>&1 || { echo "$PROG: jq is required" >&2; exit 2; }
@@ -110,16 +120,86 @@ values() {
     "GATES=" + ([ .dependencies[]? | select((.type // "") == "replies-to") | (.depends_on_id // "") ] | join(" ") | if . == "" then "none" else . end)'
 }
 
-# The work a stay waits on, and what the operator agreed, from the same row.
+# What a conversation row says of the newest `holding:` or `staying:` line in
+# its notes: the line, its first word, the beads a `staying:` line names after
+# "(waits on", none for the line a stay writes first, what the operator agreed,
+# and the beads the conversation waits on through its own `blocks` edges.
+MARK_JQ='def newest_mark: [ (.notes // "") | split("\n")[] | select(startswith("holding:") or startswith("staying:")) ] | last // "";
+  def mark_word: newest_mark | if . == "" then "" else split(":")[0] end;
+  def stay_work: newest_mark | if startswith("staying:")
+    then ([ capture(" \\(waits on (?<w>[^()]*)\\)$") | .w | split(", ")[] | select(. != "") ]) else [] end;
+  def agreed: newest_mark | ltrimstr("staying:") | ltrimstr(" ") | sub(" \\(waits on [^()]*\\)$"; "");
+  def edged: [ .dependencies[]? | select((.type // "") == "blocks") | (.depends_on_id // "") | tostring ];
+  def unedged: edged as $e | [ stay_work[] | select(. as $w | $e | any(.[]; . == $w) | not) ];'
+
+# The work a stay's newest line names, and what the operator agreed, from the
+# same row.
 stay_values() {
-  jq -r '
-    "WORK=" + ([ .dependencies[]? | select((.type // "") == "blocks") | (.depends_on_id // "") ] | join(" ")),
-    "AGREED=" + ([ (.notes // "") | split("\n")[] | select(startswith("staying:")) ] | last // "" | ltrimstr("staying:") | ltrimstr(" "))'
+  jq -r "$MARK_JQ"'"WORK=" + (stay_work | join(" ")), "AGREED=" + agreed'
 }
 
 # The newest `holding:` or `staying:` line's first word, from the same row.
 mark_of() {
-  jq -r '[ (.notes // "") | split("\n")[] | select(startswith("holding:") or startswith("staying:")) ] | last // "" | if . == "" then "" else split(":")[0] end'
+  jq -r "$MARK_JQ"'mark_word'
+}
+
+# still_out <ids> — those of the beads that have not closed, space-separated.
+# Fails when one does not read as itself.
+still_out() {
+  local w json st out=""
+  for w in $1; do
+    json=$(gc bd list --id "$w" --all --json 2>/dev/null) || return 1
+    st=$(printf '%s\n' "$json" | grep -av '^gc bd:' | scrub | jq -er --arg id "$w" '
+      if type == "array" and length == 1 and ((.[0].id // "") | tostring) == $id
+      then (.[0].status // "") | tostring | ascii_downcase else error("unread") end' 2>/dev/null) || return 1
+    [ -n "$st" ] || return 1
+    [ "$st" = closed ] || out="${out:+$out }$w"
+  done
+  printf '%s' "$out"
+}
+
+# hold_stands <conversation> <row> — the entry of a restart while the sitting's
+# hold stands, with the last hand-back recorded on the conversation.
+hold_stands() {
+  echo "ENTRY interrupted: a restart came while this sitting held conversation $1, and its hold stands."
+  echo "NEXT=converse-continue"
+  printf '%s' "$2" | values
+  printf '%s' "$2" | jq -r '(.metadata // {}) as $m
+    | if (($m["gc.handback"] // "") | tostring) == "" then "No hand-back is recorded on the conversation."
+      else "The last hand-back recorded on the conversation (" + (($m["gc.handback_at"] // "") | tostring) + "):", ($m["gc.handback"] | tostring) end'
+  exit 0
+}
+
+# stay_entry <conversation> <row> <pending> — the entry of a conversation whose
+# newest mark is a `staying:` line, read against the record, then its values.
+# <pending> is the open work it waits on through its edges, as holds reads it.
+# The line a stay writes first names no work, so its sign-off stopped before
+# it finished. A bead the newer line names with no edge onto it holds nothing:
+# when it is still out, the stay stopped before it made the conversation wait
+# on it, and when it has closed, it needs no edge.
+stay_entry() {
+  local c=$1 row=$2 pending=$3 work unedged out
+  work=$(printf '%s' "$row" | jq -r "$MARK_JQ"'stay_work | join(" ")')
+  unedged=$(printf '%s' "$row" | jq -r "$MARK_JQ"'unedged | join(" ")')
+  out=""
+  if [ -n "$unedged" ]; then
+    out=$(still_out "$unedged") || unreadable "conversation $c's stay names $unedged, which it has no edge onto, and one of them could not be read to tell whether it is still out"
+  fi
+  if [ -z "$work" ]; then
+    echo "ENTRY interrupted: a stay on conversation $c stopped before its sign-off finished, so the conversation does not wait on its work yet. Run the stay's call again."
+  elif [ -n "$out" ]; then
+    echo "ENTRY interrupted: a stay on conversation $c stopped before it made the conversation wait on $out, which is still out. Run the stay's call again."
+  elif [ -z "$pending" ]; then
+    echo "ENTRY returned: the work this sitting stayed for has closed, and conversation $c is back with it."
+  elif [ "$(printf '%s' "$row" | jq -r '(.status // "") | ascii_downcase')" = in_progress ]; then
+    echo "ENTRY interrupted: conversation $c waits on work that is still open ($pending) but is still claimed, so a stay stopped short of leaving it to wait. Run the stay's call again."
+  else
+    echo "ENTRY waiting: this sitting stays for work that is still open ($pending), and an attach or a restart woke it before that work closed."
+  fi
+  echo "NEXT=converse-stay"
+  printf '%s' "$row" | values
+  printf '%s' "$row" | stay_values
+  exit 0
 }
 
 HOOK=$(gc hook --claim --json 2>/dev/null)
@@ -132,7 +212,8 @@ case "$ACTION" in
     # Nothing ready is assigned to this session. A sitting that stays gets
     # this answer while its work is out, because its conversation waits on
     # that work: open once the stay is written, still in progress when the
-    # stay stopped before it left the conversation to wait.
+    # stay stopped before it left the conversation to wait. So does a sitting
+    # that held after a stay whose work is still out.
     [ -n "${GC_ALIAS:-}" ] || unreadable "this session has no GC_ALIAS, so the conversation it may hold cannot be listed"
     LIST=$(gc bd list --assignee "$GC_ALIAS" --status open,in_progress --json 2>/dev/null) \
       || unreadable "the open and in-progress beads assigned to $GC_ALIAS did not list"
@@ -151,15 +232,11 @@ case "$ACTION" in
     PENDING=$(pending_of "$C") || unreadable "gctk bead holds did not answer for conversation $C"
     [ -n "$PENDING" ] \
       || unreadable "conversation $C is assigned to this session with no work holding it, yet the claim found nothing; run this again, which claims it once it reads ready"
-    if [ "$(printf '%s' "$ROW" | jq -r '.status // ""')" = in_progress ]; then
-      echo "ENTRY interrupted: conversation $C waits on work that is still open ($PENDING) but is still claimed, so a stay stopped short of leaving it to wait. Run the stay's call again."
-    else
-      echo "ENTRY waiting: this sitting stays for work that is still open ($PENDING), and an attach or a restart woke it before that work closed."
-    fi
-    echo "NEXT=converse-stay"
-    printf '%s' "$ROW" | values
-    printf '%s' "$ROW" | stay_values
-    exit 0 ;;
+    case "$(printf '%s' "$ROW" | mark_of)" in
+      holding) hold_stands "$C" "$ROW" ;;
+      staying) stay_entry "$C" "$ROW" "$PENDING" ;;
+      *) unreadable "conversation $C waits on open work ($PENDING), and no staying: line records the stay that made it wait" ;;
+    esac ;;
   work) ;;
   *) unreadable "gc hook --claim --json answered action '$ACTION'" ;;
 esac
@@ -176,17 +253,9 @@ MARK=$(printf '%s' "$ROW" | mark_of)
 [ -z "$PENDING" ] \
   || unreadable "the claim served conversation $BEAD, which still waits on open work ($PENDING); run this again"
 if [ "$MARK" = staying ]; then
-  echo "ENTRY returned: the work this sitting stayed for has closed, and conversation $BEAD is back with it."
-  echo "NEXT=converse-stay"
-  printf '%s' "$ROW" | values
-  printf '%s' "$ROW" | stay_values
+  stay_entry "$BEAD" "$ROW" ""
 elif [ "$REASON" = existing_assignment ] && [ "$MARK" = holding ]; then
-  echo "ENTRY interrupted: a restart came while this sitting held conversation $BEAD, and its hold stands."
-  echo "NEXT=converse-continue"
-  printf '%s' "$ROW" | values
-  printf '%s' "$ROW" | jq -r '(.metadata // {}) as $m
-    | if (($m["gc.handback"] // "") | tostring) == "" then "No hand-back is recorded on the conversation."
-      else "The last hand-back recorded on the conversation (" + (($m["gc.handback_at"] // "") | tostring) + "):", ($m["gc.handback"] | tostring) end'
+  hold_stands "$BEAD" "$ROW"
 elif [ "$REASON" = existing_assignment ]; then
   echo "ENTRY interrupted: a restart came before this sitting held conversation $BEAD, so it starts from the premise."
   echo "NEXT=converse-recheck-premise"

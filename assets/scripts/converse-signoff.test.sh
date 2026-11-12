@@ -103,11 +103,17 @@
 #             take Accept does not complete stops the sign-off, and an answer that
 #             reached the gate first stands; each --var reaches Accept's writer,
 #             and one without --accept, or not <key>=<value>, is refused
-#   (STAY*)   a sitting the operator asked to stay runs the sign-off's writes,
-#             then leaves the conversation open under its sitting: the edge
-#             onto each bead of work it sent, a rework the call files included,
-#             then its staying: line, then the guarded status write, and no
-#             close or PR comment; a re-run writes the line no second time, a
+#   (STAY*)   a sitting the operator asked to stay records the stay as its
+#             first write, runs the sign-off's writes, then leaves the
+#             conversation open under its sitting: a staying: line naming the
+#             work it sent, a rework the call files included, then the edge
+#             onto each bead of it, then the guarded status write, and no
+#             close or PR comment; a stay that stops after a gate or at an edge
+#             leaves the line that tells the entry where it stopped, one whose
+#             first write the store refuses writes nothing else, a --stay that
+#             ends as the line naming the work does is refused, a second stay
+#             with more work records itself again, a re-run writes neither line
+#             a second time, a
 #             dismiss that closes an open conversation while the call runs
 #             fails that write and stops the stay, the call less --stay, with
 #             --no-wait for its waits and brief and --no-rework for a --rework,
@@ -211,6 +217,9 @@ case "$1 ${2:-}" in
             row "$o" | jq -c --arg t "$_ty" '. + {dependency_type: $t} | del(.deps)'
           done | jq -sc '.'
         fi ;;
+      add)
+        log "$*"
+        [ -n "${DEP_ADD_REFUSED:-}" ] && { echo "Error adding dependency: the store refused it" >&2; exit 1; } ;;
       *) log "$*" ;;
     esac ;;
   "bd comments") cat "$B/$3.comments.json" 2>/dev/null || printf '[]\n' ;;
@@ -1814,13 +1823,15 @@ hasnt "$(cat "$CALLS")" "bd close tk-conv" "(STAY) …closing nothing"
 hasnt "$(cat "$CALLS")" "pr-sitting-comment" "(STAY) …and drawing no PR comment as if it had closed"
 has "$(acts tk-conv)" "Kept this conversation open until the work it sent lands" "(STAY) the stay is one of the visit's actions"
 has "$OUT" "STAYING conversation tk-conv on tk-sub" "(STAY) …and it says so"
+eq "$(head -n 1 "$CALLS")" "bd update tk-conv --append-notes staying: the dialog keeps what is typed" "(STAY-ORDER) the stay records itself before any other write, naming no work yet"
 case "$(cat "$CALLS")" in
-  *"gate resolve tk-g"*"bd dep add tk-conv tk-work"*"--append-notes staying: "*"--status open"*) ok "(STAY-ORDER) the gate, then the edge, then the staying: line, then the status" ;;
+  *"--append-notes staying: the dialog keeps what is typed"*"gate resolve tk-g"*"--append-notes staying: the dialog keeps what is typed (waits on tk-work)"*"bd dep add tk-conv tk-work"*"--status open"*) ok "(STAY-ORDER) …then the gate, then the line that names the work, then the edge, then the status" ;;
   *) bad "(STAY-ORDER) the writes ran out of order: $(cat "$CALLS")" ;;
 esac
+eq "$(field tk-conv notes | grep '^staying:' | tr '\n' '|')" "staying: the dialog keeps what is typed|staying: the dialog keeps what is typed (waits on tk-work)|" "(STAY-LINES-TWO) …leaving the stay's two lines in its notes, the second newest"
 run_signoff --conversation tk-conv --outcome "staying — waits on tk-work" "${STAYING[@]}"
 eq "$RC" 0 "(STAY-RERUN) a re-run of the stay exits 0"
-eq "$(field tk-conv notes | grep -c '^staying:')" 1 "(STAY-RERUN) …writing the staying: line no second time"
+eq "$(field tk-conv notes | grep -c '^staying:')" 2 "(STAY-RERUN) …writing neither staying: line a second time"
 eq "$(field tk-conv status)" "open" "(STAY-RERUN) …and the conversation stays open"
 # The work has landed, and the deferred-dispatch pass has sent the closer the
 # stay armed, before the return signs off.
@@ -1831,6 +1842,16 @@ eq "$RC" 0 "(STAY-RETURN) the return's sign-off, the stay's call less --stay wit
 eq "$(field tk-conv status)" "closed" "(STAY-RETURN) …closes the conversation"
 eq "$(grep -c '^deferred-dispatch arm' "$CALLS")/$(meta tk-sub gc.dispatch_when_ready_args)" "$ARMS/" "(STAY-RETURN) …arming no second closer once the arm has sent the first"
 eq "$(briefs tk-sub)" 1 "(STAY-RETURN) …and writes no second brief"
+
+# A second stay with more work, from a sitting woken early, records itself
+# again before its writes, then names all its work.
+closer_case
+run_signoff --conversation tk-conv --outcome "staying — waits on tk-work" "${STAYING[@]}"
+bead tk-work2
+run_signoff --conversation tk-conv --outcome "staying — waits on tk-work and tk-work2" --ruled yes --ruling "build the fix" --waiting-on tk-work --waiting-on tk-work2 --close-brief "$BRIEF" --stay "the dialog keeps what is typed"
+eq "$RC" 0 "(STAY-MORE) a second stay with more work exits 0"
+eq "$(field tk-conv notes | grep '^staying:' | tr '\n' '|')" "staying: the dialog keeps what is typed|staying: the dialog keeps what is typed (waits on tk-work)|staying: the dialog keeps what is typed|staying: the dialog keeps what is typed (waits on tk-work, tk-work2)|" "(STAY-MORE) …recording itself again, then naming all its work"
+has "$(cat "$CALLS")" "bd dep add tk-conv tk-work2 --type blocks" "(STAY-MORE) …and waiting on the new work"
 
 # A stay can run on a conversation that already reads open under its sitting,
 # as a second stay from a sitting woken early does, and the operator can dismiss
@@ -1875,6 +1896,41 @@ eq "$RC" 1 "(STAY-REWORK-UNREAD) a rework child that does not read as this conve
 has "$OUT" "Sign off without --stay to end at the hand-off" "(STAY-REWORK-UNREAD) …naming the hand-off ending"
 hasnt "$(cat "$CALLS")" "bd dep add tk-conv" "(STAY-REWORK-UNREAD) …with no edge written"
 eq "$(field tk-conv status)" "in_progress" "(STAY-REWORK-UNREAD) …and the conversation still claimed"
+
+# A stay that stops after its first write leaves that line newest, which the
+# sitting's entry reads as a stay whose sign-off has not finished, whether its
+# work is open or has closed by the restart: here a gate does not close.
+closer_case
+GATE_STUCK=tk-g run_signoff --conversation tk-conv --outcome "staying — waits on tk-work" "${STAYING[@]}"
+eq "$RC" 1 "(STAY-STOPS-SHORT) a stay that stops at a gate exits 1"
+eq "$(field tk-conv notes | grep -E '^(holding|staying):' | tail -n 1)" "staying: the dialog keeps what is typed" "(STAY-STOPS-SHORT) …its first line already newest, though it stopped after the closer's arm"
+eq "$(meta tk-sub gc.dispatch_when_ready_args)" "$CLOSER_ARGS" "(STAY-STOPS-SHORT) …which the line came before"
+hasnt "$(field tk-conv notes)" "(waits on" "(STAY-STOPS-SHORT) …naming no work"
+hasnt "$(cat "$CALLS")" "bd dep add tk-conv" "(STAY-STOPS-SHORT) …with no edge written"
+eq "$(field tk-conv status)" "in_progress" "(STAY-STOPS-SHORT) …and the conversation still claimed"
+# One that stops at its edge has named its work, which the entry checks the
+# edges and the work's status against.
+closer_case
+DEP_ADD_REFUSED=1 run_signoff --conversation tk-conv --outcome "staying — waits on tk-work" "${STAYING[@]}"
+eq "$RC" 1 "(STAY-EDGE-REFUSED) a stay whose edge the store refuses exits 1"
+has "$OUT" "its staying: line names the work" "(STAY-EDGE-REFUSED) …saying the line naming the work is written"
+eq "$(field tk-conv notes | grep -E '^(holding|staying):' | tail -n 1)" "staying: the dialog keeps what is typed (waits on tk-work)" "(STAY-EDGE-REFUSED) …which is newest"
+eq "$(field tk-conv status)" "in_progress" "(STAY-EDGE-REFUSED) …and the conversation still claimed"
+run_signoff --conversation tk-conv --outcome "staying — waits on tk-work" "${STAYING[@]}"
+eq "$RC" 0 "(STAY-EDGE-REFUSED) the re-run stays"
+eq "$(field tk-conv notes | grep -c '^staying:')" 2 "(STAY-EDGE-REFUSED) …writing neither staying: line a second time"
+eq "$(field tk-conv status)" "open" "(STAY-EDGE-REFUSED) …and leaving the conversation open"
+closer_case
+REFUSE_UPDATE_MATCH="--append-notes staying:" run_signoff --conversation tk-conv --outcome "staying — waits on tk-work" "${STAYING[@]}"
+eq "$RC" 1 "(STAY-FIRST-REFUSED) a stay whose first line the store refuses exits 1"
+has "$OUT" "before its other writes; nothing was written" "(STAY-FIRST-REFUSED) …saying nothing was written"
+eq "$(writes)" 1 "(STAY-FIRST-REFUSED) …making no write after that one"
+eq "$(field tk-g status)" "open" "(STAY-FIRST-REFUSED) …so the gate stays open"
+closer_case
+run_signoff --conversation tk-conv --outcome x --ruled yes --ruling "build the fix" --waiting-on tk-work --close-brief "$BRIEF" --stay "keep it (waits on tk-work)"
+eq "$RC" 2 "(STAY-LIKE-WORK) a --stay ending as the line that names the work does exits 2"
+has "$OUT" "the sitting's entry would read it as that line" "(STAY-LIKE-WORK) …saying why"
+eq "$(writes)" 0 "(STAY-LIKE-WORK) …and writes nothing"
 
 closer_case
 run_signoff --conversation tk-conv --outcome x --ruled yes --ruling "build the fix" --no-wait --stay "x"

@@ -4,8 +4,9 @@
 # conversation's record, and pins the entry the script prints, the skill it
 # names next and the values it hands on: a fresh conversation, a restart while
 # the hold stands or before it, a stay woken early while its work is out, a
-# stay that stopped short, the return of the work, no conversation at all, and
-# each way the state can fail to read, which is never an answer to drain on.
+# stay that stopped short in each window its writes leave, with its work open
+# and with it closed, the return of the work, no conversation at all, and each
+# way the state can fail to read, which is never an answer to drain on.
 #
 # Hermetic: stubs gc and gctk, reads the repo only; no city, no network.
 
@@ -99,6 +100,9 @@ holds() {
     >"$FIXDIR/holds-$id.json"
 }
 assigned() { jq -sc '.' "$@" >"$FIXDIR/assigned"; }
+# item <id> <status> — the list row of a bead of work, as the entry reads the
+# status of one a stay names with no edge onto it.
+item() { jq -nc --arg id "$1" --arg s "$2" '{id: $id, issue_type: "task", status: $s}' >"$FIXDIR/row-$1.json"; }
 # enter — run the script as a sitting would; prints stdout, leaves the status
 # in $FIXDIR/rc and the calls it made in $FIXDIR/calls.
 enter() {
@@ -175,7 +179,7 @@ OUT=$(enter)
 is "a stay whose work has closed is a return" "$(line ENTRY | cut -d: -f1)" "ENTRY returned"
 is "…loading the stay's skill" "$(line NEXT=)" "NEXT=converse-stay"
 is "…naming the work it waited on" "$(line WORK=)" "WORK=tk-w"
-is "…and what the operator agreed" "$(line AGREED=)" "AGREED=keep the API as agreed (waits on tk-w)"
+is "…and what the operator agreed, without the work its line names" "$(line AGREED=)" "AGREED=keep the API as agreed"
 is "…with the conversation's values" "$(line SUBJECT=)" "SUBJECT=tk-s"
 fresh; hook work existing_assignment tk-c; conv tk-c in_progress "staying: keep the API (waits on tk-w)" tracks:tk-s blocks:tk-w; holds tk-c
 enter >/dev/null
@@ -185,7 +189,7 @@ holding: rule on the follow-up
 staying: keep the API and add the flag (waits on tk-w1, tk-w2)" tracks:tk-s blocks:tk-w1 blocks:tk-w2; holds tk-c
 enter >/dev/null
 is "a second stay's return names all its work" "$(line WORK=)" "WORK=tk-w1 tk-w2"
-is "…and the newest agreement" "$(line AGREED=)" "AGREED=keep the API and add the flag (waits on tk-w1, tk-w2)"
+is "…and the newest agreement" "$(line AGREED=)" "AGREED=keep the API and add the flag"
 
 echo "── waiting: a stay woken early, while its work is out ──"
 fresh; hook drain; conv tk-c open "staying: keep the API (waits on tk-w)" tracks:tk-s blocks:tk-w; holds tk-c tk-w
@@ -195,9 +199,109 @@ is "a drain over an open conversation whose work is out is waiting" "$(line ENTR
 is "…loading the stay's skill" "$(line NEXT=)" "NEXT=converse-stay"
 is "…naming the conversation" "$(line CONVERSATION=)" "CONVERSATION=tk-c"
 is "…the work" "$(line WORK=)" "WORK=tk-w"
-is "…and what was agreed" "$(line AGREED=)" "AGREED=keep the API (waits on tk-w)"
+is "…and what was agreed" "$(line AGREED=)" "AGREED=keep the API"
 is "…exiting 0" "$(rc)" 0
 has "…after listing this session's open and claimed beads by its alias" "$(cat "$FIXDIR/calls")" "bd list --assignee $ALIAS --status open,in_progress --json"
+
+echo "── a stay that stopped short: each window its writes leave, with the work open and closed ──"
+# converse-signoff.sh --stay writes `staying: <agreed>` before anything else,
+# then the sign-off's own writes, then `staying: <agreed> (waits on <the
+# work>)`, then an edge onto each bead that line names, then the status that
+# leaves the conversation open. A stop in any window, and a restart after it,
+# reads as a stay, never as a hold that stands or a sitting that held nothing,
+# and reads as a return only once each bead the newest line names has closed.
+#
+# After the first line, before the line that names the work. Nothing names the
+# work yet, so whether it is open or has closed, the record is the same, and so
+# is the entry: the sign-off has not finished.
+for st in open closed; do
+  fresh; hook work existing_assignment tk-c; conv tk-c in_progress "holding: decide the route
+staying: keep the API" tracks:tk-s replies-to:tk-g1; holds tk-c; item tk-w "$st"
+  OUT=$(enter)
+  is "a stay stopped before its sign-off finished, its work $st, is interrupted" "$(line ENTRY | cut -d: -f1)" "ENTRY interrupted"
+  has "…saying the sign-off did not finish" "$(line ENTRY)" "stopped before its sign-off finished"
+  is "…which the stay's skill runs again, not the hold's" "$(line NEXT=)" "NEXT=converse-stay"
+  is "…naming no work, which no line names yet" "$(line WORK=)" "WORK="
+  is "…and what was agreed" "$(line AGREED=)" "AGREED=keep the API"
+  hasnt "…reading nothing of the work" "$(cat "$FIXDIR/calls")" "tk-w"
+  is "…exiting 0" "$(rc)" 0
+done
+fresh; hook work existing_assignment tk-c; conv tk-c in_progress "staying: keep the API" tracks:tk-s replies-to:tk-g1; holds tk-c
+enter >/dev/null
+is "a stay with no hold before it, stopped there, is interrupted" "$(line ENTRY | cut -d: -f1)" "ENTRY interrupted"
+is "…and never sent to the premise re-check" "$(line NEXT=)" "NEXT=converse-stay"
+fresh; hook work existing_assignment tk-c; conv tk-c in_progress "staying: keep the API (waits on tk-w1)
+holding: rule on the follow-up
+staying: add the flag" tracks:tk-s blocks:tk-w1; holds tk-c
+enter >/dev/null
+is "a second stay stopped there, after a return that held, is interrupted, whatever the first stay's closed edge says" "$(line ENTRY | cut -d: -f1)" "ENTRY interrupted"
+hasnt "…and is no return" "$(line ENTRY)" "returned"
+fresh; hook drain; conv tk-c open "staying: keep the API (waits on tk-w1)
+staying: keep the API and add the flag" tracks:tk-s blocks:tk-w1; holds tk-c tk-w1
+assigned "$FIXDIR/row-tk-c.json"
+enter >/dev/null
+is "a second stay from a sitting woken early, stopped there, is interrupted, not waiting" "$(line ENTRY | cut -d: -f1)" "ENTRY interrupted"
+is "…which the stay's skill runs again" "$(line NEXT=)" "NEXT=converse-stay"
+#
+# After the line that names the work, before its edge. The claim serves the
+# conversation, since no edge holds it, so the work's own status decides.
+fresh; hook work existing_assignment tk-c; conv tk-c in_progress "holding: decide the route
+staying: keep the API (waits on tk-w)" tracks:tk-s replies-to:tk-g1; holds tk-c; item tk-w open
+OUT=$(enter)
+is "a stay stopped before its edge, its work open, is interrupted" "$(line ENTRY | cut -d: -f1)" "ENTRY interrupted"
+has "…naming the work it does not wait on yet" "$(line ENTRY)" "wait on tk-w, which is still out"
+is "…which the stay's skill runs again" "$(line NEXT=)" "NEXT=converse-stay"
+is "…with the work its line names" "$(line WORK=)" "WORK=tk-w"
+has "…after reading that work's status" "$(cat "$FIXDIR/calls")" "bd list --id tk-w --all --json"
+fresh; hook work existing_assignment tk-c; conv tk-c in_progress "holding: decide the route
+staying: keep the API (waits on tk-w)" tracks:tk-s replies-to:tk-g1; holds tk-c; item tk-w closed
+enter >/dev/null
+is "a stay stopped before its edge, its work closed, is the return" "$(line ENTRY | cut -d: -f1)" "ENTRY returned"
+is "…naming the work" "$(line WORK=)" "WORK=tk-w"
+is "…and what was agreed" "$(line AGREED=)" "AGREED=keep the API"
+fresh; hook work existing_assignment tk-c; conv tk-c in_progress "staying: keep the API (waits on tk-w1)
+holding: rule on the follow-up
+staying: add the flag (waits on tk-w2)" tracks:tk-s blocks:tk-w1; holds tk-c; item tk-w2 open
+enter >/dev/null
+is "a second stay stopped before its edge is interrupted, though the first stay's edge onto closed work stands" "$(line ENTRY | cut -d: -f1)" "ENTRY interrupted"
+has "…naming the second stay's work" "$(line ENTRY)" "wait on tk-w2"
+fresh; hook drain; conv tk-c in_progress "staying: keep the API (waits on tk-w1, tk-w2)" tracks:tk-s blocks:tk-w1; holds tk-c tk-w1; item tk-w2 open
+assigned "$FIXDIR/row-tk-c.json"
+enter >/dev/null
+is "a stay stopped between its edges, the unedged work open, is interrupted" "$(line ENTRY | cut -d: -f1)" "ENTRY interrupted"
+has "…naming the work it has no edge onto" "$(line ENTRY)" "wait on tk-w2, which is still out"
+fresh; hook drain; conv tk-c in_progress "staying: keep the API (waits on tk-w1, tk-w2)" tracks:tk-s blocks:tk-w1; holds tk-c tk-w1; item tk-w2 closed
+assigned "$FIXDIR/row-tk-c.json"
+enter >/dev/null
+is "…and with the unedged work closed, it stopped before it left the conversation to wait" "$(line ENTRY | cut -d: -f1)" "ENTRY interrupted"
+has "…waiting on the work still open" "$(line ENTRY)" "still open (tk-w1) but is still claimed"
+#
+# After the edges, before the status write. The claim serves no conversation
+# that waits on open work, so with the work open the drain finds it still
+# claimed, and with the work closed the claim serves it as an existing
+# assignment, as a restart during the return does.
+fresh; hook drain; conv tk-c in_progress "staying: keep the API (waits on tk-w)" tracks:tk-s blocks:tk-w; holds tk-c tk-w
+assigned "$FIXDIR/row-tk-c.json"
+enter >/dev/null
+is "a stay stopped before its status write, its work open, is interrupted" "$(line ENTRY | cut -d: -f1)" "ENTRY interrupted"
+fresh; hook work existing_assignment tk-c; conv tk-c in_progress "staying: keep the API (waits on tk-w)" tracks:tk-s blocks:tk-w; holds tk-c
+enter >/dev/null
+is "a stay stopped before its status write, its work closed, is the return" "$(line ENTRY | cut -d: -f1)" "ENTRY returned"
+#
+# The finished stay: open, waiting while its work is out, and the return once
+# it closes, are the waiting and returned sections above.
+#
+# A hold after a stay whose work is still out stands, and a conversation that
+# waits on open work no stay recorded is a record that does not agree with
+# itself.
+fresh; hook drain; conv tk-c in_progress "staying: keep the API (waits on tk-w)
+holding: rule on the follow-up" tracks:tk-s blocks:tk-w; holds tk-c tk-w
+handback tk-c "tk-s — the follow-up"
+assigned "$FIXDIR/row-tk-c.json"
+OUT=$(enter)
+is "a hold after a stay whose work is still out stands" "$(line ENTRY | cut -d: -f1)" "ENTRY interrupted"
+is "…and goes on with the hold" "$(line NEXT=)" "NEXT=converse-continue"
+has "…printing the last hand-back" "$OUT" "tk-s — the follow-up"
 
 echo "── none: no conversation is this session's ──"
 fresh; hook drain; printf '[]' >"$FIXDIR/assigned"
@@ -240,6 +344,11 @@ fresh; hook work ready_assignment tk-c; conv tk-c in_progress "staying: x (waits
 unread "a claim served while holds still reads its work open"
 fresh; hook drain; conv tk-c open "staying: x (waits on tk-w)" tracks:tk-s blocks:tk-w; assigned "$FIXDIR/row-tk-c.json"
 unread "the waiting conversation's holds does not answer"
+
+fresh; hook drain; conv tk-c in_progress "" tracks:tk-s blocks:tk-w; holds tk-c tk-w; assigned "$FIXDIR/row-tk-c.json"
+unread "a conversation that waits on open work with no staying: line"
+fresh; hook work existing_assignment tk-c; conv tk-c in_progress "staying: x (waits on tk-w)" tracks:tk-s; holds tk-c
+unread "a bead the stay names with no edge onto it does not read"
 
 echo "── it writes nothing beyond the hook's claim, and takes no arguments ──"
 fresh; hook work ready_assignment tk-c; conv tk-c in_progress "staying: x (waits on tk-w)" tracks:tk-s blocks:tk-w; holds tk-c

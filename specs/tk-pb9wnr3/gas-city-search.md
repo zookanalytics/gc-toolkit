@@ -7,8 +7,8 @@ description: Use when you review the stay that converse-signoff.sh's --stay writ
 
 A sitting the operator asks to stay must sleep with its conversation open and
 wake, with that conversation, when the work it sent closes. The change adds one
-mode to an existing writer, `converse-signoff.sh --stay`, and one line in a
-conversation's notes, `staying:`. Everything that sleeps and wakes the sitting
+mode to an existing writer, `converse-signoff.sh --stay`, and one kind of line in
+a conversation's notes, `staying:`. Everything that sleeps and wakes the sitting
 is Gas City's or bd's. Each Gas City citation is at upstream
 `gastownhall/gascity` commit `6bd609f5bf`, whose files named here match the
 installed build, and [stay-probe.md](stay-probe.md) ran each one.
@@ -64,15 +64,21 @@ closes) would duplicate the assigned-work demand above, so none is built.
   validating closer's arm and the answers to the gates, so the record stands if
   the sitting never returns. The sign-off is the one writer of those, in one
   order. Its `--answer` mode keeps the conversation open but takes a gate to
-  answer, and many conversations reply to none. So `--stay` runs the sign-off's
-  writes and, in place of the close, writes the edge, the notes line and the
-  guarded status write above. It adds no store, no metadata key, no lifecycle
-  state and no bead kind.
+  answer, and many conversations reply to none. So `--stay` writes its notes
+  line before anything else, runs the sign-off's writes and, in place of the
+  close, writes the line again naming the work, then the edge and the guarded
+  status write above. It adds no store, no metadata key, no lifecycle state and
+  no bead kind.
 - **The `staying:` notes line.** A woken sitting's claim answers `drain` while
   the work is out and `ready_assignment` once it lands, which is what a fresh
   sitting reads too. So the sitting's entry reads the newest of a
-  conversation's `holding:` and `staying:` lines (The entry, below). It is a
-  line in bd's notes, not a key.
+  conversation's `holding:` and `staying:` lines (The entry, below). The stay
+  writes `staying: <what was agreed>` before every other write, so a restart
+  anywhere in the call reads as a stay, and `staying: <what was agreed>
+  (waits on <the work>)` once all but the wait has landed. The entry reads a
+  stay as waiting or returned only when each bead that second line names has
+  the conversation's edge or has closed, since a conversation keeps its edges
+  onto the work of a stay that returned. It is a line in bd's notes, not a key.
 - **Two readers learn the state.** The per-rig board reads a conversation that a
   wait of its own holds as no ask, through the wait reader it already runs
   (`services/gctk/waits`). `gc-helm engage` attaches an asleep sitting at once,
@@ -117,8 +123,9 @@ work has returned, so the pack reads its own record:
 
 - **`converse-entry.sh`**, one read script the converse prompt runs first. It
   composes the claim above, the conversation's row, `gctk bead holds` for the
-  work still open, and the newest of the conversation's `holding:` and
-  `staying:` lines, which the hold and the stay already write. It prints the
+  work still open, the newest of the conversation's `holding:` and `staying:`
+  lines, which the hold and the stay already write, and the status of a bead
+  that newest `staying:` line names with no edge onto it. It prints the
   entry, the conversation's values and the skill to load next, and exits 1
   with `unreadable` when any read fails, so a sitting never drains or closes on
   a state it could not read. It adds no store, no metadata key, no lifecycle
