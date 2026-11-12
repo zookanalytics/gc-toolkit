@@ -118,12 +118,20 @@ ROW=$(gc bd show "$SUBJECT" --json) \
   && echo "$SUBJECT carries no arm and no pool route"
 ```
 
-Then write the wait the `waits` skill gives a bead that is checked and closed
-once other work lands: the close brief, the `blocks` edge and the validating
-closer's arm, each only once the one before it has landed. Write the brief as
-the claim the closer tests, what the change's landing settles on the subject
-and what to check once it has, and keep its text, because the sign-off names it
-again:
+An epic subject takes no edge, brief or arm: it already waits on its member, bd
+refuses the edge, and its members carry its close. Nor does a subject the
+sign-off arms no closer for take the brief or the arm, as the sign-off says when
+it refuses a `--close-brief`: an anchor, a bead assigned to someone, one routed
+to `human`, which the block above keeps and the arm refuses, or one at a status
+other than open. Such a subject takes the edge alone:
+`gc bd dep add "$SUBJECT" "$CHANGE" --type=blocks`.
+
+Any other subject takes the wait the `waits` skill gives a bead that is checked
+and closed once other work lands: the close brief, the `blocks` edge and the
+validating closer's arm, each only once the one before it has landed. Write the
+brief as the claim the closer tests, what the change's landing settles on the
+subject and what to check once it has, and keep its text, because the sign-off
+names it again:
 
 ```bash
 gc bd update "$SUBJECT" --append-notes "## Close brief (held on $CHANGE, $(date -u +%Y-%m-%dT%H:%M:%SZ))
@@ -137,12 +145,6 @@ The deferred-dispatch pass sends no arm while `hold:mayor` holds the subject,
 so remove each label it lists that spells `hold:mayor`, in any case, one
 `--remove-label` each, because bd removes a label only by its exact text:
 `gc bd update "$SUBJECT" --remove-label hold:mayor`.
-
-An epic subject takes none of this. It already waits on its member, bd refuses
-the edge, and its members carry its close. Nor does a subject the sign-off arms
-no closer for take the brief or the arm, as the sign-off says when it refuses a
-`--close-brief`: an anchor, a bead assigned to someone, or one at a status other
-than open. Such a subject takes the edge alone.
 
 ## Resume a change a sitting filed
 
