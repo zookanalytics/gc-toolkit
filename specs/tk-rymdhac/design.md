@@ -50,21 +50,19 @@ one pack script. In a city that sets no publisher, the sitting shows you
 screenshots instead. It captures each look and reads it, and you see the images
 on the change's PR once it has one.
 
-One call is left, the send-back call, and it costs something either way. **Who
-takes a check's send-back while the sitting is still open:**
+A check's send-back goes to the pool, as any change's does, even while the
+sitting that made the change is still open, so a review's finding never comes
+back into the sitting. When you want to react to a finding live, you engage the
+change, and a sitting edits it as an open PR once unit 5 lands. Every live
+change is a bead the sitting files. The sitting hands a change off on your go.
+In conversation tk-16d2j3q you answered "Yes always a new bead" to a
+recommendation that also sent every send-back to the pool, and "go" to the
+rework that has the sitting hand off on your go.
 
-- (a) The pool, as for any change. A check's finding is written down, which
-  is the line's own test for polecat work. A send-back about a look then
-  waits a polecat cycle, and you are not in it.
-- (b) The open sitting. It keeps you in the loop on feedback about a look,
-  and it waits for the review-lanes member, because the writer that files a
-  send-back today is one that member deletes.
-
-Approving as it stands ships (a), the pool taking a send-back. Merging this
-design's PR releases the implementation, whose first four units land on the
-effort's branch, the doctrine after the writers it names. The fifth, a sitting
-editing an open PR's branch, is filed to wait for the review-lanes and merge
-members.
+Merging this design's PR releases the implementation, whose first four units
+land on the effort's branch, the doctrine after the writers it names. The
+fifth, a sitting editing an open PR's branch, is filed to wait for the
+review-lanes and merge members.
 
 The design serves the Core Belief "Human attention is the budget"
 ([foundation.md](../../docs/foundation.md)), with the mandate's high-bandwidth
@@ -112,8 +110,9 @@ Whatever the ruling, a sitting never:
 ways, and each write's exit decides whether it landed:
 
 1. On the change's bead: the operator's words, quoted, with the date and the
-   conversation, and the scope of the change. It is the bead's description when
-   the sitting files the bead, and a note when the subject is itself the change.
+   conversation, and the scope of the change. It is the description of the
+   bead, which the sitting files. A later sitting that resumes the change
+   appends its own ruling to the bead as a note.
    A PR's body falls back to its anchor's description, and the summary quotes
    the ruling, so a reviewer sees where the change's decisions came from.
 2. On the subject, as step 6's outcome record: the ruling, and the bead that
@@ -124,15 +123,49 @@ ways, and each write's exit decides whether it landed:
 
 ## 2. Where the change lives
 
-**Which bead is the change.** When the subject is itself work the line covers,
-and no pool, live run or refinery holds it, the subject is the change's bead. A
-change an earlier sitting left in flight is such a subject (below). Otherwise
-the sitting files the bead as it files work for a pool (the work skill, "File
-new work"), in its own rig's store, since section 1 keeps a sitting's changes to
-its own rig's repository, with its target in the create: the default branch,
-or the integration branch of an effort the change belongs to. It carries no
-route and no `hold:mayor`, because the operator routed it in the sitting. The
-subject waits on it as it waits on any work a sitting sends (the waits skill).
+**Which bead is the change.** The sitting files every change's bead, as it
+files work for a pool (the work skill, "File new work"), in its own rig's store,
+since section 1 keeps a sitting's changes to its own rig's repository, with its
+target in the create: the default branch, or the integration branch of an
+effort the change belongs to. It carries no route and no `hold:mayor`, because
+the operator routed it in the sitting. For an epic subject, the bead is the
+epic's member. When a pool, a run or the refinery already holds the subject,
+the sitting tells the operator, and their ruling decides whether that work
+stops (the work skill) before the change is filed. That reading informs the
+operator and never picks the bead.
+
+The subject waits on the change from the moment it is filed, before the first
+edit. The sitting withdraws the subject's arm and pool route, as the sign-off's
+"New work carries it" case does (the converse-settle skill), then writes the
+wait the waits skill gives a bead that is checked and closed once other work
+lands: the close brief, the `blocks` edge and the validating closer's arm. So
+no pool takes the subject while the sitting edits, and a dismiss leaves the
+subject waiting on the change. An epic subject already waits on its member and
+takes no edge. A subject the sign-off arms no closer for, such as an epic,
+whose members carry it, takes no brief and no arm either, because the sign-off
+refuses a `--close-brief` for one (`converse-signoff.sh`).
+
+At the sign-off, the sitting names the same wait, `--waiting-on <the change>`
+with the brief's own text as `--close-brief`, and the sign-off writes none of it
+a second time. bd keeps one edge when the headline adds the same edge again
+(`AddDependencyInTx`, bd 1.3.4). The sign-off appends no brief while the
+subject's latest close brief is held on the same change with the same text, and
+it arms no closer that is already armed (`converse-signoff.sh`). So the subject
+carries one close brief and one closer arm. An epic subject's sign-off names no
+wait on its member, because bd refuses that edge.
+
+The one bead a sitting edits that it did not file in its own sitting is a
+change an earlier sitting filed and a dismiss left open, which the operator
+engages to resume. The sitting resumes it because the bead's own record, the
+ruling its description holds, says a sitting filed it for a change, never
+because of who holds it at the time. A subject the sitting did not file carries
+state the sitting did not write, such as a human gate waiting on the operator,
+a pool route, a dispatch arm, a hold label, a branch from an earlier run, and a
+description written before the ruling, which reviewers judge the change
+against. Work's writers would meet all of it, while a bead the sitting files
+carries only what the sitting wrote. The cost is a second bead beside the
+subject until the change lands, and the subject's close through its validating
+closer.
 
 **The tree.** Work's setup cuts the tree at `<the sitting's home>/worktrees/<bead>`,
 on the bead's branch cut fresh from its target, and records `work_dir` and
@@ -178,20 +211,27 @@ and a conversation's close ends its effect, so nothing else writes a release.
   nothing the next sitting cannot read. The commits stay local until the
   hand-off pushes them, as a polecat's do.
 - A dismiss closes the conversation and so ends the hold. The change's bead
-  stays open and unrouted with its tree, its record names it on the subject, and
-  the operator engages it to resume the change or closes it.
+  stays open and unrouted with its tree, the subject keeps waiting on it, and
+  the operator engages the change to resume it or drops it.
 
 **What removes the tree.**
 
 - The hand-off removes the tree and its local branch once the push is verified,
   as it removes a polecat's (`release_tree` in `work-submit.sh`). A send-back
   makes a fresh tree from origin's branch.
-- When the operator drops a change, the sitting closes its bead through the
-  disposition writer as not needed, with the conversation as the evidence, and
-  then removes the tree and its local branch with git. Naming the conversation
-  is also what lets the close land: bd refuses to close a bead that an open bead
+- When the operator drops a change, their ruling also says what becomes of the
+  subject's ask, and the sitting carries both out through the work skill. It
+  first withdraws the subject's validating-closer arm, so the closer does not
+  ask the operator about a drop they ruled. The disposition writer moves no wait
+  under not needed, so the change's close ends the subject's wait, and a closer
+  still armed would then be sent. The sitting closes the change's bead through
+  that writer as not needed, with the conversation as the evidence, and then
+  removes the tree and its local branch with git. Naming the conversation is
+  also what lets the close land: bd refuses to close a bead that an open bead
   blocks, and the writer gives a `blocks` edge onto the bead it names way to its
-  own edge (`bead-rehome.sh`). The edit skill gives the commands.
+  own edge (`bead-rehome.sh`). Once the change has closed, the subject's wait on
+  it holds nothing, and the sitting sends the subject on, closes it, or leaves
+  it waiting on other work, as ruled. The edit skill gives the commands.
 - A tree whose sitting ended before either is left on its branch, and Gas City's
   reaper removes it once its bead closes, as it does a polecat's
   (`auto_reap_closed_bead_worktrees`).
@@ -217,6 +257,12 @@ retires the script.
 
 ## 3. The hand-off
 
+**On the operator's go.** The sitting hands a change off on the operator's go.
+It asks for the go once the steps the operator agreed are in, and the operator
+can give it up front when they rule the edit, which leaves the moment to the
+sitting. After the hand-off every further change waits a review round, so the
+operator says when they have finished reacting.
+
 **The anchor and its target.** A new change has no PR yet, so its bead is the
 anchor, as a polecat's fresh work is. Its target is the one it was filed with.
 The refinery resolves a direct strategy on a bead whose target is the rig's
@@ -233,7 +279,24 @@ sitting's claim is its conversation, and the sitting must outlive the hand-off.
 So both writers take `--held-by <conversation>` beside `--bead`:
 
 - **The proof.** `gc hook current` names that conversation, and the bead has a
-  `blocks` edge onto it. Either missing refuses, with nothing written.
+  `blocks` edge onto it. Beside the hook and the edge, both writers refuse a
+  bead that someone else holds or is queued to take: one assigned to anyone,
+  one a run works, or one whose `gc.routed_to` names a pool. The assignee is a
+  field of the row the writers already read once (`work_read` and
+  `work_field .assignee` in `work-lib.sh`), which `work-submit.sh`'s `--bead`
+  check reads today. Only `run-lib.sh`'s `run_lib runs` tells a run, because
+  Gas City leaves a bead under a run open, unassigned and unrouted, and
+  `work-setup.sh`'s `in_flight` already asks it for a live one. The route is
+  the row's `gc.routed_to`, which `dispatch-path.sh` defines as the pool queue
+  that serves the bead once bd reports it ready. A missing hook or edge, or any
+  of the three, refuses, with nothing written. The one exception is the
+  hand-off run again after it assigned the refinery and before its release
+  landed (A hand-off cut short, below), which the edge onto this conversation,
+  still standing, identifies. Work's setup, which a sitting runs before any
+  edit, makes no exception. So a sitting that adds its edge to a change already
+  with the refinery, a polecat or a pool is stopped by the writers rather than
+  by its own reading, and the sitting then removes that edge, which would
+  otherwise hold the holder's work until the conversation closes.
 - **No run control.** Every refusal, a hand-off write bd refuses among them,
   exits non-zero with its reason, and writes no gate, cancels nothing, closes no
   step and drains nothing, because the operator is in the sitting to hear it.
@@ -322,21 +385,17 @@ without them.
 
 ## 4. A check's send-back
 
-Under option (a) of the send-back call, a send-back goes where any change's
-goes. A failure the branch caused at the refinery's gate sends the bead back to
-the polecat pool with its branch kept and its `rejection_reason`, and a review
-that requests changes files a rework child the pool runs (`signoff.sh` through
-`rework-child.sh` today, and the review-lanes member's loop once it lands). The
-sitting is not in that path.
+A send-back goes where any change's goes, even while the sitting that made the
+change is still open (operator, conversation tk-16d2j3q). A failure the branch
+caused at the refinery's gate sends the bead back to the polecat pool with its
+branch kept and its `rejection_reason`, and a review that requests changes
+files a rework child the pool runs (`signoff.sh` through `rework-child.sh`
+today, and the review-lanes member's loop once it lands). The sitting is not in
+that path.
 A finding is written down, which is the line's own test for polecat work, and a
 polecat resumes the sitting's branch because `metadata.branch` is authoritative
 to Work's setup. When the operator wants to react to a send-back live, they
 engage the change, and a sitting edits it as an open PR once unit 5 has landed.
-
-Under option (b), an open sitting on the change takes its send-backs. Routing a
-send-back to a sitting is new work on the rework writer that tk-1tfzr71.22
-retires, so unit 5 would carry it, and the sitting would stay open, holding the
-operator, until the change lands.
 
 ## 5. A copy of a rig's UI
 
@@ -503,7 +562,7 @@ here; its name follows [skills.md](../../docs/skills.md) when it is filed.
 | the same, "A sitting is not a unit of work" and "asks for work; it does not do it" | No files, no commits; a repo change is the one line a sitting does not cross. | A sitting asks for work. The one exception is a change the operator rules it make with them, which it hands off as a polecat's work is handed off. |
 | the same, Rules: a sitting's universe; disposing a subject | "What you never do is change a repository"; "never a repo change"; "Only a repo change does, and that goes to a molecule." | The rule states the line, the limits in section 1 and the edit skill, and keeps the reason that work a spec can carry is a molecule's. |
 | the same, the step table | No row for an edit. | A row: steps 5 to 8, when the operator rules that the sitting make a change with them, load `converse-edit`. |
-| `skills/converse-edit/SKILL.md` (new) | none | The line; the record; choosing or filing the change's bead; the hold edge; Work's setup and hand-off with `--held-by`; reading the polecat class's standards from their fragments before the first edit (`work-quality-polecats`, `learned-conventions-polecat`), as the mechanik reads its own; committing without identity flags and reading the first signature; a commit per agreed step; the rig's tests through `gctk rig`; the summary; each refusal; a hand-off cut short, which it runs again until the release lands, and the refinery's wake when a refusal says the refinery already holds the change; dropping a change; a change in flight at a hand-back, a restart or a dismiss; a UI copy (unit 4); an open PR, which sends a rework until unit 5. |
+| `skills/converse-edit/SKILL.md` (new) | none | The line; the record; filing the change's bead and making the subject wait on it at once; resuming a change a sitting filed; asking the operator's go before the hand-off; the hold edge; Work's setup and hand-off with `--held-by`; reading the polecat class's standards from their fragments before the first edit (`work-quality-polecats`, `learned-conventions-polecat`), as the mechanik reads its own; committing without identity flags and reading the first signature; a commit per agreed step; the rig's tests through `gctk rig`; the summary; each refusal; a hand-off cut short, which it runs again until the release lands, and the refinery's wake when a refusal says the refinery already holds the change; dropping a change; a change in flight at a hand-back, a restart or a dismiss; a UI copy (unit 4); an open PR, which sends a rework until unit 5. |
 | `skills/converse-iterate-document/SKILL.md` | "A sitting writes no files, so it changes a document by sending work." | Two ends: the operator rules the sitting edit the document itself (`converse-edit`), or the scaffold and one rework, which stays the way to change an open PR until unit 5. |
 | `skills/records/SKILL.md` | A sitting writes no files, so it files a bead for a document. | A sitting writes a document only as a change the operator ruled it make, and otherwise files a bead for it. |
 | `skills/work/SKILL.md`, "Stand up an integration effort", and `skills/work/integration-effort.md` | "a converse sitting never pushes, so a sitting does not run it" | A sitting pushes only the branch of a change the operator ruled it make, through Work's hand-off, so the effort's branch is cut by the recipe's runner or `mol-design-convoy`. |
@@ -542,15 +601,17 @@ the same way.
 ## 8. The units
 
 The implementation child (tk-rbasce7) files these, each in order behind the one
-before where the table says so.
+before where the table says so. Units 1 to 4 build now, and unit 5 waits on
+tk-1tfzr71.22 and tk-1tfzr71.20, filed outside the effort (operator,
+conversation tk-16d2j3q: "yes, build the rest").
 
 | # | Unit | What it builds | Waits on |
 |---|---|---|---|
-| 1 | Work's writers serve a sitting | `--held-by <conversation>` on `work-setup.sh` and `work-submit.sh`: the proof, refusals that end nothing, and the hand-off's release of the edge as its last write, after the refinery assignment, with a refusal after the release that says the refinery holds the bead. Tests in `work-setup.test.sh` and `work-submit.test.sh`: a sitting's setup and its re-entry to a recorded tree, a hand-off that assigns the refinery and then releases the edge, a hand-off stopped before the release, by a refused write or a failed release, that a second run completes with nothing written beyond what the first did not reach and its note appended again, a run after the release refused with the refinery named as the holder and nothing written, a missing edge and a hook that names another bead, each refused with nothing written, and a refusal that drains nothing. The `component-model.md` rows. The commit cites the search record. | nothing |
+| 1 | Work's writers serve a sitting | `--held-by <conversation>` on `work-setup.sh` and `work-submit.sh`: the proof, with its refusal of a bead someone else holds or is queued to take, refusals that end nothing, and the hand-off's release of the edge as its last write, after the refinery assignment, with a refusal after the release that says the refinery holds the bead. Tests in `work-setup.test.sh` and `work-submit.test.sh`: a sitting's setup and its re-entry to a recorded tree, a bead assigned to another holder, one a run works and one with a pool route, each refused with nothing written, and the hand-off run again after it assigned the refinery, which the refusal lets through to complete its release, a hand-off that assigns the refinery and then releases the edge, a hand-off stopped before the release, by a refused write or a failed release, that a second run completes with nothing written beyond what the first did not reach and its note appended again, a run after the release refused with the refinery named as the holder and nothing written, a missing edge and a hook that names another bead, each refused with nothing written, and a refusal that drains nothing. The `component-model.md` rows. The commit cites the search record. | nothing |
 | 2 | One home for the PR summary's standard | The submit step's "Compose the PR summary" moves into the commit-conventions skill, whose description gains the summary. The submit step loads the skill and keeps its calls, and `formula-step-size.test.sh` holds. | nothing |
 | 3 | The doctrine and the edit skill | Every row of section 6 except the UI section of `converse-edit`, and the first Debt entry of `architecture.md` removed. | units 1 and 2 |
 | 4 | A copy of a rig's UI | The copy script, which starts a copy with or without an address, stops it and reports its state, and its tests, which stub the publish command so that no suite touches Tailscale. The serve command's declaration and the city's publish command and address pattern, as the three vars `mol-rig-demo` declares and the script reads. `converse-edit`'s section on a copy, which calls the script, gives the operator the address it prints and shows screenshots where it prints none. gc-toolkit's `docs/review-demo.md` pointed at the declared command. A bead for the mechanik to set gc-toolkit's serve command, which runs `go run ./cmd/helm-fixture` from `services/helm`, and the city's two values in the city's config. Its first act is the proof under Cleanup in section 5. | unit 3 |
-| 5 | A sitting edits an open PR's branch | Built on tk-1tfzr71.22's rework in its loop and tk-1tfzr71.20's publication of a head, following whatever tk-1tfzr71.22's design settles. Under option (b) of the send-back call, it also routes a send-back to an open sitting. It removes the second Debt entry. | tk-1tfzr71.22 and tk-1tfzr71.20 |
+| 5 | A sitting edits an open PR's branch | Built on tk-1tfzr71.22's rework in its loop and tk-1tfzr71.20's publication of a head, following whatever tk-1tfzr71.22's design settles. It removes the second Debt entry. | tk-1tfzr71.22 and tk-1tfzr71.20 |
 
 ## 9. Edges and notes the implementation child adds
 
@@ -567,9 +628,9 @@ before where the table says so.
   which unit 1 gives a sitting's caller, and whichever lands second carries the
   other.
 - A note on tk-1tfzr71.22: its design decides how an open PR's branch takes a
-  writer other than a rework child's polecat, which unit 5 waits on, and the
-  send-back call is the operator's ruling on whether an open sitting takes a
-  send-back.
+  writer other than a rework child's polecat, which unit 5 waits on. An open
+  sitting takes no send-back, by the operator's ruling in conversation
+  tk-16d2j3q, so unit 5 routes none to one.
 - The mechanik's bead from unit 4 goes to the mechanik, and no bead of the
   effort waits on it, since a rig with no declared serve command offers no live
   copy and a city with no publisher shows screenshots.
