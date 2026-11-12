@@ -92,9 +92,10 @@ and keeps the sitting. Answer the operator's turns as any turn above, through
 the sign-off's writer. Nothing needs registering again, because the
 conversation's edge onto the work is the wait, and the session sleeps again on
 its own once the tab detaches. A ruling that sends more work while the sitting
-stays runs step 7's stay call again with the new work as a `--waiting-on`. One
-that ends the stay signs off (step 7) without `--stay`, which closes the
-conversation over its wait.
+stays runs step 7's stay call again, with a `--waiting-on` for each bead it now
+waits on, the earlier work and the new, so the headline names them all and the
+return waits for the last of them. One that ends the stay signs off (step 7)
+without `--stay`, which closes the conversation over its wait.
 
 ## The return
 
