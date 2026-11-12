@@ -240,7 +240,7 @@ func TestScheduled(t *testing.T) {
 		{name: "routed and held outside the store", routedTo: "gc-toolkit/gc-toolkit.polecat", labels: []string{"hold:external"}, want: false},
 		{name: "assigned and held, in any spelling", assignee: "gc-toolkit/gc-toolkit.mechanik", labels: []string{"learning", " Hold:Mayor "}, want: false},
 		{name: "in flight and held", h: waits.Holds{InFlight: "status in_progress"}, labels: []string{"hold:mayor"}, want: true},
-		{name: "routed, with a label that is no hold", routedTo: "gc-toolkit/gc-toolkit.polecat", labels: []string{"human", "hold:mayor-later"}, want: true},
+		{name: "routed, with a label that is no hold", routedTo: "gc-toolkit/gc-toolkit.polecat", labels: []string{"learning", "hold:mayor-later"}, want: true},
 	} {
 		if got := Scheduled(c.h, c.routedTo, c.assignee, c.labels); got != c.want {
 			t.Errorf("%s: Scheduled = %v, want %v", c.name, got, c.want)

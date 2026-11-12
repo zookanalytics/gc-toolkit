@@ -212,6 +212,13 @@ func build(g *gathered) Document {
 
 	// Row 2 first: the table reads whether a row is an ask.
 	for _, id := range ix.rows {
+		// Work held for the Product Owner is no need, whatever it would ask
+		// of a person, such as a review of its pull request: hold:mayor names
+		// the Product Owner as its next actor, and the Unprioritized page
+		// alone lists it.
+		if bt.forProductOwner(id) {
+			continue
+		}
 		b := ix.beads[id]
 		k := ix.kinds[id]
 		conv := ix.answeredBy[id]

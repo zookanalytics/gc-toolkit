@@ -72,8 +72,9 @@ type Row struct {
 	Note   string `json:"note,omitempty"`
 	// Group is the row's group, empty when no group holds it.
 	Group Group `json:"group,omitempty"`
-	// Ask is the kind of need the row is, empty when it is none. A row that is
-	// a need is drawn as one wherever it appears.
+	// Ask is the kind of need the row is, empty when it is none, as it is for
+	// work held for the Product Owner. A row that is a need is drawn as one
+	// wherever it appears.
 	Ask Ask `json:"ask,omitempty"`
 	// Line2 is an epic's hypothesis, a Delivery's aim, or the message of a
 	// gate, a decision or a conversation, less its first line when that line
@@ -205,10 +206,10 @@ type NeedsYou struct {
 // (services/gctk/queue). Queue is the work the city takes as things stand: by
 // bd graph's execution layers, what can go now first, and within a layer in
 // the order the pool claims ready work, priority, then oldest, then id.
-// NotScheduled comes after it, in the same order: work nobody has scheduled,
-// which the city takes none of until someone routes it, and work that waits on
-// such work. Unread is the work a reader could not answer, in priority order
-// and then oldest first.
+// NotScheduled comes after it, in the same order: work the city takes none of
+// as things stand, since nobody has scheduled it or a hold label holds it
+// (queue.Scheduled), and work that waits on such work. Unread is the work a
+// reader could not answer, in priority order and then oldest first.
 type WorkQueue struct {
 	Queue        []string `json:"queue"`
 	NotScheduled []string `json:"not_scheduled"`

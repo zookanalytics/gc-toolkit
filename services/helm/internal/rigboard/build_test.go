@@ -226,6 +226,38 @@ func TestWorkForTheProductOwner(t *testing.T) {
 			t.Errorf("Needs you counts %d and lists %+v, want 1 and %+v", n.Count, n.Needs, want)
 		}
 	})
+
+	t.Run("held work is no need, whatever it would ask of a person", func(t *testing.T) {
+		routedToYou := func(held bool) Document {
+			g := graph()
+			if held {
+				hold(g, "tk-b.1")
+			}
+			for i := range g.open {
+				if g.open[i].ID == "tk-b.1" {
+					g.open[i].PersonBlocker = true
+				}
+			}
+			return build(g)
+		}
+		if a := routedToYou(false).Rows["tk-b.1"].Ask; a != AskRoutedToYou {
+			t.Fatalf("unheld, tk-b.1 asks %q, want %q, so the case is not built", a, AskRoutedToYou)
+		}
+		doc := routedToYou(true)
+		if a := doc.Rows["tk-b.1"].Ask; a != "" {
+			t.Errorf("held tk-b.1 asks %q, want no ask", a)
+		}
+		want := []Need{{ID: "tk-q", Holds: []string{"tk-a.1.1", "tk-b.2"}}}
+		if n := doc.NeedsYou; n.Count != 1 || !slices.EqualFunc(n.Needs, want, sameNeed) {
+			t.Errorf("Needs you counts %d and lists %+v, want 1 and %+v", n.Count, n.Needs, want)
+		}
+		if b := entry(doc, "tk-b"); !slices.EqualFunc(b.Needs, []Need{{ID: "tk-q", Holds: []string{"tk-b.2"}}}, sameNeed) {
+			t.Errorf("tk-b's Needs you = %+v, want tk-q alone, holding tk-b.2", b.Needs)
+		}
+		if c := doc.Rows["tk-b"].Counts; c == nil || *c != (Counts{Needs: 1, NotScheduled: 1, Closed: 1}) {
+			t.Errorf("tk-b counts %+v, want its question, tk-b.2 after the queue and its closed work", c)
+		}
+	})
 }
 
 // TestNeedOrder holds a view's needs to the order of the first bead each holds

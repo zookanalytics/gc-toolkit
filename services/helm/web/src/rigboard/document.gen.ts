@@ -85,8 +85,9 @@ export interface Row {
    */
   group?: Group;
   /**
-   * Ask is the kind of need the row is, empty when it is none. A row that is
-   * a need is drawn as one wherever it appears.
+   * Ask is the kind of need the row is, empty when it is none, as it is for
+   * work held for the Product Owner. A row that is a need is drawn as one
+   * wherever it appears.
    */
   ask?: Ask;
   /**
@@ -248,10 +249,10 @@ export interface NeedsYou {
  * (services/gctk/queue). Queue is the work the city takes as things stand: by
  * bd graph's execution layers, what can go now first, and within a layer in
  * the order the pool claims ready work, priority, then oldest, then id.
- * NotScheduled comes after it, in the same order: work nobody has scheduled,
- * which the city takes none of until someone routes it, and work that waits on
- * such work. Unread is the work a reader could not answer, in priority order
- * and then oldest first.
+ * NotScheduled comes after it, in the same order: work the city takes none of
+ * as things stand, since nobody has scheduled it or a hold label holds it
+ * (queue.Scheduled), and work that waits on such work. Unread is the work a
+ * reader could not answer, in priority order and then oldest first.
  */
 export interface WorkQueue {
   queue: string[];

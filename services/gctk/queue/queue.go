@@ -218,8 +218,9 @@ func layers(byID map[string]Item, ids []string) map[string]int {
 	return layer
 }
 
-// notScheduled marks each item that comes after the queue: one nobody has
-// scheduled, and one that waits on such an item at any depth.
+// notScheduled marks each item that comes after the queue: one the city does
+// not take as things stand ([Scheduled]), and one that waits on such an item
+// at any depth.
 func notScheduled(byID map[string]Item, ids []string) map[string]bool {
 	after := map[string]bool{}
 	for _, id := range ids {
