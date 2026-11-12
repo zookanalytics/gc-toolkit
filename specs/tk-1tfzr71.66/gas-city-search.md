@@ -13,8 +13,8 @@ gastown 0.1.13, the release that Gas City main and the city's gc 1.4.3 bundle
 `gastownhall/beads` v1.3.4 (7ef2fd05eb0c). GitHub's behavior was read from its
 documentation, its GraphQL schema and the manual of gh 2.103.3 the same day.
 The draft between rounds of work was read on 2026-11-12, with gc-toolkit's
-workflows on main and PR #1469's timeline and runs. Each section names the
-unit of [the design](design.md) that adds the surface.
+workflows on main and the timelines and runs of PRs #1468 and #1469. Each
+section names the unit of [the design](design.md) that adds the surface.
 
 ## The work's record from publication to the verified merge (unit 3)
 
@@ -167,7 +167,9 @@ head.
   A check run carries its `conclusion`, `SKIPPED` among the values, whether the
   PR's target requires it (`isRequired`), and its check suite, created with the
   run: on PR #1469 the suite of the run that the ready transition started was
-  created two seconds after the event.
+  created two seconds after the event. A skipped run does not say what skipped
+  it: on PR #1468, the `test`, `test-macos` and `go` runs that its draft
+  skipped carry no title, summary or text.
 
 What tk-1tfzr71.22 and unit 2 compose: gh's two transitions, which the loop
 makes before each round's first push and once the round's lanes pass, reading
