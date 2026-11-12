@@ -427,6 +427,32 @@ OUT=$(run_check); RC=$?
 eq "$RC" "1" "a queued bead no rig's prefix names warns"
 has "$OUT" "queued bead(s) zz-q1 carry an id prefix no single rig" "…naming it"
 
+# --- 14b. each rig's po is a seat of its own ---------------------------------
+# The po is a named session of each rig, so the agent list names one seat per
+# rig, by Gas City's qualified name for a rig's agent, and the check reads every
+# one of them.
+cat > "$TMP/agents-rigs.json" <<'EOF'
+{"city_path":"/nowhere","agents":[
+  {"name":"po","qualified_name":"alpha/gc-toolkit.po","scope":"rig"},
+  {"name":"po","qualified_name":"town/gc-toolkit.po","scope":"rig"},
+  {"name":"mechanik","qualified_name":"gc-toolkit.mechanik","scope":"city"}]}
+EOF
+reset
+store alpha "$NEW1"
+queue "$NEW1"
+OUT=$(AGENTS_JSON="$TMP/agents-rigs.json" run_check); RC=$?
+eq "$RC" "0" "a city with a po in each rig passes when nothing reaches either but its queue"
+has "$OUT" "(2 po seat(s) read" "…having read each rig's po"
+has "$(cat "$TMP/gc.log")" "mail inbox alpha/gc-toolkit.po --json" "…each seat's mailbox at its own address"
+has "$(cat "$TMP/gc.log")" "mail inbox town/gc-toolkit.po --json" "…the other rig's too"
+reset
+store alpha '{"id":"al-rr","status":"open","issue_type":"task","metadata":{"gc.routed_to":"alpha/gc-toolkit.po"}}'
+store town '{"id":"hq-ra","status":"open","issue_type":"task","assignee":"town/gc-toolkit.po","metadata":{}}'
+OUT=$(AGENTS_JSON="$TMP/agents-rigs.json" run_check); RC=$?
+eq "$RC" "2" "work sent to a rig's po is a finding"
+has "$OUT" "alpha bead al-rr (open task): routed to alpha/gc-toolkit.po, outside the po's queue" "…a route to one rig's po"
+has "$OUT" "town bead hq-ra (open task): assigned to town/gc-toolkit.po" "…and an assignment to another's"
+
 # --- 15. a raw control byte, and the scratch tree -----------------------------
 reset
 inbox "$(printf '{"recipients":["gc-toolkit.po"],"messages":[{"id":"hq-wisp-m3","from":"human","subject":"line one\\nline two%s","read":false}]}' "$(printf '\001')")"
