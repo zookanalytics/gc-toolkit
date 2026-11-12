@@ -1,11 +1,3 @@
-// Package pr is the pull request's domain: what a PR a bead owns says of the
-// bead (docs/gctk-architecture.md, "The surface"). Gas Town's refinery opens a
-// PR with its bead's title and writes the body once. A composition gives the
-// title the conventional-commit type a repository's title check requires, and
-// keeps two marked sections of the body current while it leaves the text people
-// add: the managed summary region, which says what the change does and how it
-// reached the refinery, and the branch-beads section, which names every bead
-// whose work the branch carries.
 package pr
 
 import (

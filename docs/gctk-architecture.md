@@ -405,7 +405,8 @@ and CI runs those tests on every PR.
 |---|---|---|---|
 | store | the bead store | `gc bd` for writes, for reads that must see a fresh write and for the blocked set, the supervisor API for other reads | in-memory rows and edges, with the store's blocked answers set by the test |
 | git | git | one `git` command per call, in a named directory | a scratch repository |
-| github | GitHub | `gh` and the GitHub API | recorded responses |
+| github | GitHub | `gh` and the GitHub API | in-memory PRs a test sets, and recorded answers in the adapter's own tests |
+| feedback | the pack's one definition of feedback, `pr-post.sh feedback-def` | jq, applying the definition as each shell reader does | answers a test sets |
 | runtime | Gas City | `gc` (sling, session, events, runtime) and the supervisor API (runs, sessions) | recorded responses |
 | host | the machine | tmux, files and the clock | in-memory files, a fixed clock and scripted panes |
 
@@ -596,6 +597,12 @@ why a reader must know it, and the work that retires it.
   the pr domain, onto the ledger, with whichever of the merge member
   (tk-1tfzr71.20) and the GitHub-intake member (tk-1tfzr71.21) rewrites its
   facts.
+- **The pr domain reads which posts are feedback through the pack's shell.**
+  Its evaluator asks the feedback adapter, which runs `pr-post.sh feedback-def`
+  through jq, because that script holds the one definition every reader of
+  feedback applies. The move of the city's PR posts into gctk (tk-ssm8qns.8)
+  brings the definition into the pr domain, whose post verb owns it, and the
+  adapter goes.
 - **The `/helm` board reads the store itself.** Its source
   (`services/helm/internal/source`) reads each rig's store through the
   embedded beads library or the supervisor's API and decodes the rows and keys

@@ -5,27 +5,21 @@ import "github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 // The keys a composition reads. No domain owns any of them: shell writes each,
 // so each is declared read-only here and its definition stays in
 // lifecycle/lifecycle.toml. The change that moves a shell writer into a domain
-// takes its key's declaration over.
+// takes its key's declaration over. The keys the evaluator reads too, branch,
+// merged_target and merge_result, are declared once, with its keys.
 
-// The bead that owns the PR: what its summary says, where its change is, where
-// it lands and which checks gate it.
+// The bead that owns the PR: what its summary says, where it lands and which
+// checks gate it.
 var (
 	summaryKey = ledger.ReadOnly("pr_summary", ledger.String,
 		"The account of what a change does, which the polecat writes on the anchor at submit and an "+
 			"integration effort's summary task writes on its landing bead (lifecycle/lifecycle.toml, "+
 			"[metadata.merge_identity]). The PR's managed summary region carries it, and the dispatch text "+
 			"stands in while it is absent or blank.")
-	branchKey = ledger.ReadOnly("branch", ledger.String,
-		"The branch a bead's work is on. A composition reads it for the PR's source branch and finds the "+
-			"beads whose work the branch carries by it.")
 	targetKey = ledger.ReadOnly("target", ledger.String,
 		"The branch a bead's work lands on, which the polecat records at submit and a caller can set first "+
 			"(lifecycle/lifecycle.toml, [metadata.merge_identity]). A composition names it as the PR's target "+
 			"when merged_target is absent.")
-	mergedTargetKey = ledger.ReadOnly("merged_target", ledger.String,
-		"Where a bead's work actually lands (lifecycle/lifecycle.toml, [metadata.merge_identity]). A "+
-			"composition names it as the PR's target, and a bead carrying it with merge_result=merged has its "+
-			"work on that branch.")
 	checkSetKey = ledger.ReadOnly("check_set", ledger.String,
 		"The review checks a bead's change is gated by, as a comma list (lifecycle/lifecycle.toml, "+
 			"[metadata.gates]). A composition names it when no pre-open gate resolves from it.")
@@ -37,9 +31,6 @@ var (
 	foldTargetKey = ledger.ReadOnly("fold_target", ledger.String,
 		"The branch a bead's work was folded onto by a polecat (lifecycle/lifecycle.toml, "+
 			"[metadata.merge_identity]). A bead carrying it has its work on that branch.")
-	mergeResultKey = ledger.ReadOnly("merge_result", ledger.String,
-		"The anchor's lifecycle state (lifecycle/lifecycle.toml, [machine] and [states]). A bead on a branch "+
-			"that carries it is the branch's anchor, and one landed on another branch reads merged.")
 	routedToKey = ledger.ReadOnly("gc.routed_to", ledger.String,
 		"The pool, agent or person a bead is routed to (lifecycle/lifecycle.toml, ROUTE and "+
 			"[metadata.runtime_owned]). A bead on a branch that a pool still holds has not pushed its work.")
