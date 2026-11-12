@@ -4716,9 +4716,9 @@ cmd_engage() {
         conv_status=$(printf '%s' "$conv_line" | cut -f4)
     else
         # Pointed at a gate, the conversation is filed through the gate, so it
-        # is about the bead engage took from that gate and its ask names the
-        # other beads the gate holds. With no concern, its title and ask are
-        # what the gate asks.
+        # is about the bead engage took from that gate and a note on it names
+        # the other beads the gate holds. With no concern, its title and ask
+        # are what the gate asks.
         OPEN_GATE_FROM="$bead"
         if [ "$engage_file_new" = 1 ] || [ -n "$engage_reason" ]; then
             echo "$PROG: engage: filing a new conversation on $bead, then engaging it" >&2
