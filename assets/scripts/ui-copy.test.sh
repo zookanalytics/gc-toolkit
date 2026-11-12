@@ -40,7 +40,7 @@ has() { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3" "missing '$2' in: $1" ;; esa
 hasnt() { case "$1" in *"$2"*) bad "$3" "found '$2' in: $1" ;; *) ok "$3" ;; esac; }
 field() { printf '%s\n' "$1" | sed -n "s/^$2=//p" | head -1; }
 # The members of a process group, one pid per line.
-members() { ps -axo pgid=,pid= | awk -v g="$1" '$1 == g { print $2 }'; }
+members() { ps -A -o pgid=,pid= | awk -v g="$1" '$1 == g { print $2 }'; }
 group_gone() { [ -z "$(members "$1")" ]; }
 # A port answers on loopback.
 answers() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
@@ -237,7 +237,7 @@ echo "── a copy that ends takes its publish command with it ──"
 : >"$PUBLISHED"
 OUT=$("$SCRIPT" start --tree "$TMP/a" --rig demo --publish)
 L=$(leader "$OUT"); PUB=$(publisher_pid "$OUT")
-SERVE_PID=$(ps -axo pgid=,pid=,command= | awk -v g="$L" '$1 == g && /serve\.py/ { print $2 }' | head -1)
+SERVE_PID=$(ps -A -o pgid=,pid=,command= | awk -v g="$L" '$1 == g && /serve\.py/ { print $2 }' | head -1)
 [ -n "$SERVE_PID" ] && kill -TERM "$SERVE_PID"
 for _ in $(seq 1 25); do group_gone "$L" && break; sleep 0.2; done
 group_gone "$L" && ok "the leader ended the group once the serve command ended" || bad "the leader ended the group once the serve command ended" "$(members "$L")"
