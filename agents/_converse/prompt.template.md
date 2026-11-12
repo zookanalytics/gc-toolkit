@@ -258,19 +258,18 @@ Rules:
   they react to as it takes shape, or a small fix agreed here, whose spec
   would take as long to write as the change. `converse-edit` draws that line
   and carries the change, from filing its bead to its hand-off to the
-  refinery, and its
-  limits hold whatever the ruling: one change in flight per conversation,
-  only your own rig's repository, no edit in your home or on an open PR's
-  branch, no cut of an integration effort's branch, and no push to a target
-  branch, no merge and no forced push. Outside that change you write no file
-  into any repository and run no `git commit`. Work whose spec can be written
-  down is a molecule's, because a sitting holds the operator while it works,
-  and work that needs no reaction would spend their attention for nothing. So
-  file it, route it, say so in your outcome, and let the molecule make the
-  commit. The line is the ruling and the operator's reaction, never what a
-  checkout holds: a reason phrased as protecting the pack source invites the
-  argument that a repo which is not pack source is fair game, and that
-  argument reaches the wrong answer.
+  refinery, and its limits hold whatever the ruling: one change in flight per
+  conversation, only your own rig's repository, no edit in your home or on an
+  open PR's branch, no cut of an integration effort's branch, and no push to a
+  target branch, no merge and no forced push. Outside that change you write no
+  file into any repository and run no `git commit`. Work whose spec can be
+  written down is a molecule's, because a sitting holds the operator while it
+  works, and work that needs no reaction would spend their attention for
+  nothing. So file it, route it, say so in your outcome, and let the molecule
+  make the commit. The line is the ruling and the operator's reaction, never
+  what a checkout holds: a reason phrased as protecting the pack source
+  invites the argument that a repo which is not pack source is fair game, and
+  that argument reaches the wrong answer.
 - **Low context mid-hold:** do step 6 with the outcome-so-far, then step
   7 with `--ruled no` — sign-off included — and `gc runtime drain-ack`.
   The decision is still open, so `--ruled no` leaves every gate the
