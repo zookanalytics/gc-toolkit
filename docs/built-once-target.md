@@ -222,18 +222,21 @@ converse skills and the po's refinement skill, the operator's intake and the
 terminal surfaces.
 
 New work no epic holds is owed to nobody. It carries Gas City's `hold:mayor`,
-and the po, a fresh on-demand session chartered as the operator's
+and its rig's po, a fresh on-demand session chartered as the operator's
 prioritization partner, works that queue with the operator. A hold is the next
 actor's queue, and a gate is an answer someone owes.
 
-The po takes the agent shape of Gas Town's mayor: `scope = "city"`,
-`wake_mode = "fresh"`, `work_dir = ".gc/agents/po"` and
-`max_active_sessions = 1`. Each difference names its reason, and each but the
-last ends with an operator ruling that gives the seat the job:
+The po takes the agent shape of Gas Town's mayor, `wake_mode = "fresh"` and
+`max_active_sessions = 1`, once for each rig: `scope = "rig"` and a rig
+worktree, `work_dir = ".gc/worktrees/<rig>/po"`. Each difference names its reason, and each
+but the last ends with an operator ruling that gives the seat the job:
 
 - **Named `po`, not `mayor`.** Gas City's defaults and Gas Town's roles aim at
   the name `mayor`, so a seat that answers to it takes their sends. SAFe's word
   names the job.
+- **One for each rig, where Gas Town's mayor is one for the city.** A rig's
+  queue and its epics are weighed against that rig's target, so each rig's po
+  works its own, one sitting at a time.
 - **The operator's prioritization partner, not the human's point of contact.**
   It works backlog refinement and portfolio sync, by the operator's charter.
 - **It places, parks and moves priority once the operator agrees in a sitting,
@@ -250,9 +253,9 @@ last ends with an operator ruling that gives the seat the job:
 - **`sleep_after_idle = "1h"` in place of `idle_timeout = "1h"`.** Gas City
   applies no `idle_timeout` to an always-on seat, so the mayor's hour never
   fires. The po is on demand, and it takes its hour as Gas City's idle sleep: a
-  sitting no client is attached to sleeps once the hour has passed and keeps its
-  conversation, and the operator's next attach wakes it into that conversation.
-  This ends if the po runs always on, as the mayor does.
+  sitting no client is attached to sleeps once the hour has passed, and the
+  operator's next attach starts a new sitting. This ends if the po runs always
+  on, as the mayor does.
 
 The trade: the first reaction stops being a bead kind of its own
 (tk-1tfzr71.17).
@@ -412,11 +415,6 @@ and the change that fires the trigger deletes it.
   files: the `gc.proactive_reaction=1` proof and PR bodies older than the
   managed region, among others. Trigger: no store or open PR holds the shape.
   Each goes with the member that rewrites its reader.
-- The pass for an incomplete Epic, an epic that is not a Delivery and carries no
-  hypothesis, in the close gate's `clause_epic_ruling_recorded` and I15's
-  `exempt-nohyp` arm. Each is one line that passes every epic with no hypothesis.
-  Trigger: every live Epic carries its hypothesis, and every closed one carries a
-  hypothesis or a disposition (tk-wmwcdlc.5). Carried by tk-wmwcdlc.6.
 
 ### Doctrine restated per call site
 

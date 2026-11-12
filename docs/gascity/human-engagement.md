@@ -1,6 +1,6 @@
 ---
 name: Gas City and human engagement (platform facts)
-description: What Gas City offers for engaging a person, and how a session and its pane end, where upstream's docs leave it unsaid — human gates and the core orders that surface them, the primitives a conversation rides, where a question surfaces, the gc-roles worker contract, the idle ladder, max age, manual sessions, the stop, the drain flag a drain-ack writes, the no-wake-reason drain, the backstops, the claim releases that keep a bead routed to `human`, and where a failed start is recorded — each cited and dated. gc-toolkit's own model on these is human-engagement.md.
+description: What Gas City offers for engaging a person, and how a session and its pane end, where upstream's docs leave it unsaid — human gates and the core orders that surface them, the primitives a conversation rides, where a question surfaces, the gc-roles worker contract, the idle ladder, max age, manual sessions, the stop, the drain flag a drain-ack writes, the no-wake-reason drain, the backstops, the claim releases that keep a bead routed to `human`, where a failed start is recorded, and what an attach does to a session that is not running — each cited and dated. gc-toolkit's own model on these is human-engagement.md.
 ---
 
 # Gas City and human engagement
@@ -564,6 +564,82 @@ fork `e03752646`, the build the city runs, and at upstream `adae2e678` on
 2026-10-26; the two agree. On the city's own records that day, a startup
 timeout, two setup timeouts and a never-started rollback each read as
 described.
+
+## What an attach does to a session that is not running
+
+`gc session attach` attaches to a running session as it stands. While the
+city's controller runs, it asks the controller to start a session whose
+runtime is not running: it records the wake `gc session wake` records, waits up
+to `--wait-timeout`, two minutes by default, for the session to run, and then
+attaches through a handle that attaches only to a running runtime and never
+starts one. A start the controller makes hands the agent its prompt as its
+first message. Under `wake_mode = "fresh"` the start clears the session key
+first, so it opens a new conversation, for a session its idle limit put to
+sleep too. A wake the controller will not act on, such as one for a suspended
+agent, fails the attach with the wake's reason, and so does a start that has
+not run within the wait. `--no-start` attaches only to a session already
+running and starts nothing.
+
+The attach starts a runtime from its own process for a session no configured
+agent runs, which the controller never starts, and for a session while no
+controller runs. A session still waiting for the reconciler's start, in a city
+registered with the supervisor while the supervisor does not run either, is the
+exception: there the attach starts nothing, exits non-zero and says to start
+the supervisor. The attach also starts a runtime from its own process when the
+runtime stops between the attach's check that it runs and the attach itself. A
+session found running is attached through the session's own handle, which
+starts a runtime it finds stopped once no stop is pending on the session's
+record, and only `--no-start` attaches it through the runtime-only handle.
+Between the attach's first check and the attach, Gas City builds the handle and
+the command a start would run, each of which reads the session's record, reads
+the record once more, and checks again whether the runtime runs. Once that
+second check finds the runtime running, the attach starts nothing, so only a
+stop that completes in that span makes the attach start the runtime. While a
+stop is pending on the record, the attach of a session found running fails and
+starts nothing. An agent's drain-ack leaves the record's state as it was and
+pokes the controller, so until the controller takes the ack up, the attach
+joins the session as it stands. The controller marks the drain-ack's stop
+pending as it begins to stop the runtime, and from then, while the runtime
+still runs, the attach fails, saying the session is stopping. A start from the
+attach's own process resumes the provider's conversation when the session keeps
+a session key. A session that a drain-ack ended under `wake_mode = "fresh"`
+keeps none, because the controller's patch that finishes the drain-ack's stop
+clears it, so the attach starts a new conversation. Either way the attach
+renders the agent's prompt, sends it as the start's startup nudge, which the
+session receives once its runtime runs, and marks the launch as having
+delivered it, so a session the attach starts comes up with its prompt, as one
+the controller starts does. Session-start hook context carries a prompt only
+for a start that delivered none, such as one on a runtime gc cannot send a
+startup prompt to, and `gc prime --hook` primes only a session whose record
+reads active, awake, creating or start_pending.
+
+*Evidence:* `newSessionAttachCmd`, `cmdSessionAttachWith`, `sessionAttach.run`
+and `attachOnceControllerStarts` (`cmd/gc/cmd_session.go`),
+`pendingStartAwaitsSupervisor` (`cmd/gc/control_plane.go`),
+`sessionStartAwaitsSupervisor` (`cmd/gc/cmd_supervisor_city.go`),
+`preWakePatch` (`cmd/gc/session_wake.go`), `PreWakePatch`,
+`AcknowledgeDrainPatch` and `DrainAckStopPendingPatch`
+(`internal/session/lifecycle_transition.go`), `runtimeDrainAck`,
+`finishRuntimeDrainAck` and `drainAckRowPatch` (`cmd/gc/cmd_runtime_drain.go`),
+`armAck` (`cmd/gc/reconcile_arms_drain.go`), `finalizePatch`
+(`cmd/gc/reconcile_finalize.go`), `primeHookLiveManagedSession` and
+`managedSessionHookPromptAlreadyDelivered` (`cmd/gc/cmd_prime.go`),
+`SessionByHandle` and `sessionFromRecord` (`internal/worker/factory.go`),
+`resolvedWorkerRuntimeWithConfigAndMetadata` (`cmd/gc/worker_handle.go`),
+`startupPromptCity.applyTo` (`cmd/gc/session_startup_prompt.go`),
+`planStartupPrompt`, `resumeStartupPromptPlan` and `startupPromptPlan.applyTo`
+(`cmd/gc/startup_prompt_delivery.go`), `restartPromptNudge`
+(`cmd/gc/session_lifecycle_parallel.go`), `SessionHandle.Attach` and
+`startCommand` (`internal/worker/handle_lifecycle.go`), `Manager.Attach`
+(`internal/session/manager.go`) and `startRefusal`, `ensureRunningOn` and
+`ensureLive` (`internal/session/chat.go`), read at upstream `8b1d799b8` on
+2026-11-10 and at upstream `f14384642` on 2026-11-11. The attach took this shape
+in `64ba02c02` (#9011, 2026-11-09), and its own start has sent the agent's
+prompt since `4a4921a60` (#8465, 2026-10-29). The city's gc on 2026-11-11 is
+the fork `36ad5186a`, whose last common commit with upstream is `f14384642`.
+The fork's own commits in these files change other session commands, a
+nudge's bead reference, a transcript lookup and what a start records about a
+task's work directory, and none of the paths this section reads.
 
 ## Refresh procedure
 

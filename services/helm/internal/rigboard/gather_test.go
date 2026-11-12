@@ -17,8 +17,8 @@ import (
 // TestReadGathersALandedDelivery reads, through the read itself, a Delivery
 // that landed while its epic stays open, the lifecycle docs/epics.md gives
 // under "How a Delivery ends". The story under the Delivery is read, the Epics
-// page lists it in the Delivery's closed group, and it counts as closed in
-// both the Delivery and the epic.
+// page lists it in the Delivery's closed work, and it counts as closed in both
+// the Delivery and the epic.
 func TestReadGathersALandedDelivery(t *testing.T) {
 	rows := []json.RawMessage{
 		json.RawMessage(`{"id":"tk-e","title":"Epic","status":"open","priority":1,"issue_type":"epic","metadata":{"epic_hypothesis":"it works"},"created_at":"2026-01-01"}`),
@@ -36,9 +36,8 @@ func TestReadGathersALandedDelivery(t *testing.T) {
 		t.Errorf("the story under the landed Delivery reads as %+v (read: %v), want a closed row", r, ok)
 	}
 	if len(doc.Epics) != 1 || len(doc.Epics[0].Deliveries) != 1 ||
-		!slices.EqualFunc(doc.Epics[0].Deliveries[0].Groups, []GroupList{{Group: GroupClosed, IDs: []string{"tk-e.1.1"}}},
-			func(a, b GroupList) bool { return a.Group == b.Group && slices.Equal(a.IDs, b.IDs) }) {
-		t.Errorf("the Epics page reads %+v, want the story in the Delivery's closed group", doc.Epics)
+		!slices.Equal(doc.Epics[0].Deliveries[0].Closed, []string{"tk-e.1.1"}) || len(doc.Epics[0].Closed) != 0 {
+		t.Errorf("the Epics page reads %+v, want the story in the Delivery's closed work alone", doc.Epics)
 	}
 	for _, id := range []string{"tk-e.1", "tk-e"} {
 		if c := doc.Rows[id].Counts; c == nil || c.Closed != 1 {
@@ -49,8 +48,9 @@ func TestReadGathersALandedDelivery(t *testing.T) {
 
 // TestReadPlacesWorkUnderEveryEpicItSitsUnder reads work whose parent-child
 // edges name more than one parent, which bd allows. tk-w sits under two open
-// epics and waits on a human gate, so each epic lists it, counts it as waiting
-// on you and carries its question, and Needs you counts the question once.
+// epics and waits on a human gate, so each epic lists it, counts its question
+// and lists the question with tk-w beneath it, and Needs you counts the
+// question once.
 // tk-w2's first parent, as the stub store orders a row's edges by id, is a
 // closed task the read does not gather, which costs it nothing under the epic
 // it also names. tk-w3 reaches tk-e1 both directly and through tk-x, and tk-e1
@@ -75,33 +75,27 @@ func TestReadPlacesWorkUnderEveryEpicItSitsUnder(t *testing.T) {
 	}
 	listed := map[string][]string{}
 	for _, e := range doc.Epics {
-		for _, g := range e.Groups {
-			listed[e.ID] = append(listed[e.ID], g.IDs...)
+		for _, ids := range [][]string{e.Queue.Queue, e.Queue.NotScheduled, e.Queue.Unread, e.Closed} {
+			listed[e.ID] = append(listed[e.ID], ids...)
 		}
-		listed[e.ID] = append(listed[e.ID], e.Unread...)
 		slices.Sort(listed[e.ID])
+		if want := []Need{{ID: "tk-q", Holds: []string{"tk-w"}}}; !slices.EqualFunc(e.Needs, want, sameNeed) {
+			t.Errorf("%s's Needs you is %+v, want %+v", e.ID, e.Needs, want)
+		}
 	}
 	for epic, want := range map[string][]string{"tk-e1": {"tk-w", "tk-w3", "tk-x"}, "tk-e2": {"tk-w", "tk-w2"}} {
 		if !slices.Equal(listed[epic], want) {
 			t.Errorf("%s lists %v, want %v, each once", epic, listed[epic], want)
 		}
-		c := doc.Rows[epic].Counts
-		if c == nil || c.WaitingOnYou != 1 || c.WaitingOnYou+c.Queued+c.NotMoving+c.Closed != len(want) {
-			t.Errorf("%s counts %+v, want tk-w waiting on you and %d rows in all", epic, c, len(want))
+		if c := doc.Rows[epic].Counts; c == nil || *c != (Counts{Needs: 1, NotScheduled: len(want)}) {
+			t.Errorf("%s counts %+v, want its question and %d rows nobody scheduled", epic, c, len(want))
 		}
 	}
 	if got := doc.Rows["tk-w"].Group; got != GroupWaitingOnYou {
 		t.Errorf("tk-w is in %q, want waiting on you", got)
 	}
-	n := doc.NeedsYou
-	var under []string
-	for _, e := range n.NoConversationYet {
-		if slices.Contains(e.Asks, "tk-q") {
-			under = append(under, e.Epic)
-		}
-	}
-	if n.Count != 1 || !slices.Equal(under, []string{"tk-e1", "tk-e2"}) {
-		t.Errorf("Needs you counts %d and lists tk-q under %v, want 1 and both epics", n.Count, under)
+	if n := doc.NeedsYou; n.Count != 1 || !slices.EqualFunc(n.Needs, []Need{{ID: "tk-q", Holds: []string{"tk-w"}}}, sameNeed) {
+		t.Errorf("Needs you counts %d and lists %+v, want 1 and the question with tk-w beneath it", n.Count, n.Needs)
 	}
 }
 

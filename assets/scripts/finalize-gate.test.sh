@@ -2,12 +2,12 @@
 # finalize-gate.test.sh — the composable finalize gate over the hermetic bd stub.
 # Seeds human gates as store beads (issue_type gate, await_type human, the
 # situation key as await_id) plus a `GATE|blocks|SUBJECT` edge, and asserts the
-# gate refuses (exit 1) only for an open human gate that blocks the subject or a
-# stewarded epic not ruled closed, allows (exit 0) otherwise, and fails closed
-# (exit 1) on an unreadable probe. A gate filed under the --except-key situation
-# passes only while no person is assigned it. --as-disposed reads the bead as
-# naming its successor through a disposition edge, which only the ruling clause
-# reads.
+# gate refuses (exit 1) only for an open human gate that blocks the subject or an
+# epic other than a Delivery not ruled closed, allows (exit 0) otherwise, and
+# fails closed (exit 1) on an unreadable probe. A gate filed under the
+# --except-key situation passes only while no person is assigned it.
+# --as-disposed reads the bead as naming its successor through a disposition
+# edge, which only the ruling clause reads.
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/finalize-gate-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
@@ -197,17 +197,64 @@ out=$("$SUT" check E3off 2>/dev/null); rc=$?
 eq "$rc" 1 "epic with an off-enum ruling ('pending'): exit 1"
 has "$out" "continue/shift/close" "the refusal names the allowed ruling set"
 
-# 21. An epic with no hypothesis, a Delivery or an incomplete Epic, passes: it
-# has nothing to rule on.
+# 21. A top-level epic with no hypothesis is an incomplete Epic: it is held, and
+# the refusal names the missing key and how to record it.
 store "[$(epic_bead E3b open '{}')]"; : > "$STUB_DEPS"
 out=$("$SUT" check E3b 2>/dev/null); rc=$?
-eq "$rc" 0 "an epic with no hypothesis is not held by the ruling clause: exit 0"
+eq "$rc" 1 "a top-level epic with no hypothesis is held: exit 1"
+has "$out" "E3b" "the incomplete Epic hold names the epic"
+has "$out" "incomplete Epic" "…says what it is"
+has "$out" "--set-metadata epic_hypothesis=" "…and how to record its hypothesis"
+
+# 21a. A Delivery, an epic with no hypothesis whose parent is an epic, passes:
+# its epic carries the ruling. The parent's type is read off the show row's
+# parent-child edge, so the parent may be open or closed.
+for ps in open closed; do
+  store "[$(epic_bead P21 "$ps" '{"epic_hypothesis":"h"}'), $(epic_bead D21 open '{}')]"
+  printf 'D21|parent-child|P21\n' > "$STUB_DEPS"
+  out=$("$SUT" check D21 2>/dev/null); rc=$?
+  eq "$rc" 0 "a Delivery whose epic is $ps passes the ruling clause: exit 0"
+  eq "$out" "" "…with no output"
+done
+
+# 21b. Under a bead that is not an epic, an epic with no hypothesis is no
+# Delivery, and it is held as an incomplete Epic.
+store "[$(work T21 open), $(epic_bead D21t open '{}')]"
+printf 'D21t|parent-child|T21\n' > "$STUB_DEPS"
+out=$("$SUT" check D21t 2>/dev/null); rc=$?
+eq "$rc" 1 "an epic with no hypothesis under a task is held: exit 1"
+has "$out" "incomplete Epic" "…as an incomplete Epic"
+
+# 21c. A child epic that carries a hypothesis of its own is an epic, not a
+# Delivery, so it is held until it is ruled close.
+store "[$(epic_bead P21h open '{"epic_hypothesis":"h"}'), $(epic_bead C21h open '{"epic_hypothesis":"its own"}')]"
+printf 'C21h|parent-child|P21h\n' > "$STUB_DEPS"
+out=$("$SUT" check C21h 2>/dev/null); rc=$?
+eq "$rc" 1 "a child epic with a hypothesis of its own is held until ruled: exit 1"
+has "$out" "no valid epic_ruling" "…on its missing ruling"
+
+# 21d. The close ruling with its outcome is read before the hypothesis, so an
+# Epic ruled closed with no hypothesis passes. A non-terminal ruling or a close
+# with no outcome does not stand in for the hypothesis.
+store "[$(epic_bead E21r open '{"epic_ruling":"close","epic_ruling_reason":"its work is ordinary flow"}')]"; : > "$STUB_DEPS"
+out=$("$SUT" check E21r 2>/dev/null); rc=$?
+eq "$rc" 0 "an Epic ruled close with its outcome and no hypothesis: exit 0"
+for m in '{"epic_ruling":"close"}' '{"epic_ruling":"continue"}'; do
+  store "[$(epic_bead E21n open "$m")]"; : > "$STUB_DEPS"
+  out=$("$SUT" check E21n 2>/dev/null); rc=$?
+  eq "$rc" 1 "an Epic carrying $m and no hypothesis is held: exit 1"
+  has "$out" "incomplete Epic" "…as an incomplete Epic"
+done
 
 # 22. A disposed epic (its supersedes edge onto a successor, on the show row)
-# is exempt — a recorded terminal reason. The retired successor key alone is not.
+# is exempt — a recorded terminal reason — with a hypothesis or without one. The
+# retired successor key alone is not.
 store '[{"id":"E3c","status":"open","assignee":"","title":"E3c","description":"","notes":"","issue_type":"epic","metadata":{"epic_hypothesis":"h"},"dependencies":[{"id":"s-1","dependency_type":"supersedes"}]}]'; : > "$STUB_DEPS"
 out=$("$SUT" check E3c 2>/dev/null); rc=$?
 eq "$rc" 0 "a disposed epic is not held by the ruling clause: exit 0"
+store '[{"id":"E3d","status":"open","assignee":"","title":"E3d","description":"","notes":"","issue_type":"epic","metadata":{},"dependencies":[{"id":"s-1","dependency_type":"supersedes"}]}]'; : > "$STUB_DEPS"
+out=$("$SUT" check E3d 2>/dev/null); rc=$?
+eq "$rc" 0 "a disposed top-level epic with no hypothesis is not held: exit 0"
 store "[$(epic_bead E3k open '{"epic_hypothesis":"h","gc.superseded_by":"s-1"}')]"; : > "$STUB_DEPS"
 out=$("$SUT" check E3k 2>/dev/null); rc=$?
 eq "$rc" 1 "an epic carrying only the retired gc.superseded_by key is held: exit 1"
@@ -264,9 +311,9 @@ out=$("$SUT" check E27r --except-key dispose-failed.27 2>/dev/null); rc=$?
 eq "$rc" 0 "an epic ruled close with its outcome whose only gate is excepted: exit 0"
 
 # 28. --as-disposed answers as a disposed epic (22) answers, whatever the epic's
-# ruling reads. That is what bead-rehome.sh asks before it writes anything, on
-# its close and its --check alike.
-for m in '{"epic_hypothesis":"h"}' '{"epic_hypothesis":"h","epic_ruling":"continue"}' '{"epic_hypothesis":"h","epic_ruling":"shift"}' '{"epic_hypothesis":"h","epic_ruling":"pending"}' '{"epic_hypothesis":"h","epic_ruling":"close"}'; do
+# ruling reads and whether it carries a hypothesis. That is what bead-rehome.sh
+# asks before it writes anything, on its close and its --check alike.
+for m in '{"epic_hypothesis":"h"}' '{"epic_hypothesis":"h","epic_ruling":"continue"}' '{"epic_hypothesis":"h","epic_ruling":"shift"}' '{"epic_hypothesis":"h","epic_ruling":"pending"}' '{"epic_hypothesis":"h","epic_ruling":"close"}' '{}'; do
   store "[$(epic_bead E28 open "$m")]"; : > "$STUB_DEPS"
   "$SUT" check E28 >/dev/null 2>&1; eq "$?" 1 "$m: held as it stands"
   out=$("$SUT" check E28 --as-disposed 2>/dev/null); rc=$?
