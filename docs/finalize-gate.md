@@ -1,6 +1,6 @@
 ---
 name: finalize-gate
-description: The precondition set that decides whether a bead may be finalized — its PR merged or the bead closed — with the human-gate clause that holds finalization while an open human gate blocks that bead, and the epic-ruling clause that holds an epic until its hypothesis is ruled closed.
+description: The precondition set that decides whether a bead may be finalized — its PR merged or the bead closed — with the human-gate clause that holds finalization while an open human gate blocks that bead, and the epic-ruling clause that holds an epic other than a Delivery until it is ruled closed.
 ---
 
 # The finalize gate
@@ -70,23 +70,20 @@ that closes resolves those gates first, once nothing else would refuse the close
 
 ### Clause: epic ruling recorded
 
-An epic that carries a hypothesis (`epic_hypothesis`) refuses finalization until
-it is ruled close with its outcome recorded (`epic_ruling=close` and
-`epic_ruling_reason`). A continue or shift ruling keeps an epic open, so it holds
-the epic as an absent ruling does, and so does a value outside the enum. An epic
-with no hypothesis has nothing to rule on, so it passes. It is a Delivery, which
-carries an aim and closes at its epic's checkpoint
-([epics.md](epics.md#deliveries-and-epic-checkpoints)), or an incomplete Epic,
-which is fixed by recording its hypothesis
-([epics.md](epics.md#the-contract-an-epic-carries)). The pass for an incomplete
-Epic is compatibility debt
-([built-once-target.md](built-once-target.md#compatibility-debt)). A disposed
-epic (its duplicates or supersedes edge) carries a recorded terminal reason, so
-it passes too. A non-epic bead is untouched
-([epic-stewardship.md](epic-stewardship.md)). The
-clause reads the bead itself (`gc bd show`), so that read runs for every
-finalize, epic or not. The `--except-key` exception excepts a human gate, so it
-never releases an epic this clause holds.
+An epic refuses finalization until it is ruled close with its outcome recorded
+(`epic_ruling=close` and `epic_ruling_reason`). A continue or shift ruling keeps
+an epic open, so it holds the epic as an absent ruling does, and so does a value
+outside the enum. A disposed epic (its duplicates or supersedes edge) carries a
+recorded terminal reason, so it passes. A Delivery, an epic whose parent is an
+epic and that carries no hypothesis (`epic_hypothesis`), passes too: its epic
+carries the ruling, and it closes at that epic's checkpoint
+([epics.md](epics.md#deliveries-and-epic-checkpoints)). Any other epic with no
+hypothesis is an incomplete Epic, and the refusal names the missing key and how
+to record it ([epics.md](epics.md#the-contract-an-epic-carries)). A non-epic
+bead is untouched ([epic-stewardship.md](epic-stewardship.md)). The clause reads
+the bead itself (`gc bd show`), whose row also carries its parent's type, so
+that one read runs for every finalize, epic or not. The `--except-key` exception
+excepts a human gate, so it never releases an epic this clause holds.
 
 Neither finalize path wired today reaches an undisposed epic: `merge.sh`
 finalizes merge anchors, and `bead-rehome.sh` asks the gate about the bead as

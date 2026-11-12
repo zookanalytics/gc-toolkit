@@ -6,9 +6,9 @@
 # before it writes anything). This gate is the single place
 # that answers, for one bead, whether every precondition for that act holds. It
 # is a SET of independent clauses run in order; the first to refuse stops the set
-# and names why. The clauses are no-open-human-gate and epic-ruling-recorded (a
-# stewarded epic closes only on the close ruling or a disposition, not its last
-# unit merging).
+# and names why. The clauses are no-open-human-gate and epic-ruling-recorded (an
+# epic other than a Delivery closes only on the close ruling or a disposition,
+# not its last unit merging).
 # A later precondition is one more `clause_* "$1" || return 1` line in
 # finalize_gate_check.
 #
@@ -50,9 +50,9 @@
 # Usage:
 #   finalize-gate.sh check <bead-id> [--except-key <situation-key>] [--as-disposed]
 #     exit 0 — every clause passed; the bead may be finalized (no output)
-#     exit 1 — a clause refuses (an open human gate, a stewarded epic not ruled
-#              closed, or a probe that failed closed); the one-line reason is
-#              printed to stdout for the caller to log
+#     exit 1 — a clause refuses (an open human gate, an epic not ruled closed,
+#              or a probe that failed closed); the one-line reason is printed to
+#              stdout for the caller to log
 #     exit 2 — usage error
 #
 # Sourcing the script (BASH_SOURCE != $0) defines finalize_gate_check without
@@ -102,14 +102,15 @@ clause_no_open_human_gate() {
     return 0
 }
 
-# clause_epic_ruling_recorded <bead-id> [<as-disposed>] — holds finalization of a
-# stewarded epic (issue_type=epic carrying an epic_hypothesis) until its hypothesis
-# is ruled closed. An epic closes on a ruling, never as a side effect of its last unit
-# merging (docs/epics.md). The ruling is continue, shift, or close, and only close
-# is terminal: continue and shift keep the epic open, so they hold it here as an
-# absent ruling does. A close ruling carries its outcome (epic_ruling_reason), and
-# one recorded without it holds too. A non-epic bead passes untouched. FAIL
-# CLOSED: an unreadable probe refuses.
+# clause_epic_ruling_recorded <bead-id> [<as-disposed>] — holds finalization of an
+# epic until it is ruled closed. An epic closes on a ruling, never as a side
+# effect of its last unit merging (docs/epics.md). The ruling is continue, shift,
+# or close, and only close is terminal: continue and shift keep the epic open, so
+# they hold it here as an absent ruling does. A close ruling carries its outcome
+# (epic_ruling_reason), and one recorded without it holds too. A Delivery, an
+# epic whose parent is an epic and that carries no hypothesis, is the one epic
+# the clause passes unruled, because its epic carries the ruling. A non-epic
+# bead passes untouched. FAIL CLOSED: an unreadable probe refuses.
 #
 # Neither finalize path wired today reaches an undisposed epic. merge.sh
 # finalizes merge anchors, and bead-rehome.sh, which disposes of the epic, asks
@@ -132,44 +133,55 @@ clause_epic_ruling_recorded() {
         echo "epic-ruling probe unreadable ('gc bd show' failed) — refusing finalize on $_fgr_bead (fail-closed)"
         return 1
     }
-    # One jq emission reads the five fields the clause needs, unit-separated (\037).
+    # One jq emission reads the six fields the clause needs, unit-separated (\037).
     # A non-array (bd returns an object when nothing resolves) aborts jq non-zero,
     # read as unreadable. The hypothesis and the ruling's reason are emitted as
     # presence flags, not their text: a value may hold a newline that jq -r would
     # decode to a real newline and split the read across lines, dropping the
     # ruling and falsely holding; the disposition and ruling are id/enum values
     # with any newline stripped likewise. A reason of whitespace alone is absent.
+    # Whether the parent is an epic is read off the same row: a show row's edge
+    # carries the far bead with its issue_type, so it costs no second read. A
+    # show row leaves out an edge into another rig's store (DISPOSITION_JQ), so
+    # an epic whose parent sits there reads as having no epic parent and is
+    # held, as I15 reports it.
     _fgr_fields=$(printf '%s' "$_fgr_raw" | jq -r "$DISPOSITION_JQ"'
         if type != "array" then error("not an array")
         else [ (.[0].issue_type // .[0].type // ""),
                (.[0].metadata.epic_hypothesis // "" | tostring | length > 0 | tostring),
                (.[0] | disposed_to | gsub("[\\n\\r]"; " ")),
                (.[0].metadata.epic_ruling // "" | tostring | gsub("[\\n\\r]"; " ")),
-               (.[0].metadata.epic_ruling_reason // "" | tostring | test("\\S") | tostring) ]
+               (.[0].metadata.epic_ruling_reason // "" | tostring | test("\\S") | tostring),
+               (.[0] | any(.dependencies[]?; edge_type == "parent-child"
+                           and ((.issue_type // "") | tostring) == "epic") | tostring) ]
              | join("\u001f") end' 2>/dev/null) || {
         echo "epic-ruling probe unreadable (field read failed) — refusing finalize on $_fgr_bead (fail-closed)"
         return 1
     }
-    IFS=$'\037' read -r _fgr_type _fgr_hashyp _fgr_disposed _fgr_ruling _fgr_hasreason <<< "$_fgr_fields"
+    IFS=$'\037' read -r _fgr_type _fgr_hashyp _fgr_disposed _fgr_ruling _fgr_hasreason _fgr_epicparent <<< "$_fgr_fields"
     [ "$_fgr_type" = "epic" ] || return 0   # not an epic: this clause does not apply
     # The predicate doctor/check-epic-closed-implies-ruled (I15) applies to a
-    # closed epic: an epic is held once it carries a hypothesis, unless it is
-    # disposed or ruled close with its outcome. An epic with no hypothesis has
-    # nothing to rule on, so it passes. It is a Delivery, which carries an aim
-    # and closes at its epic's checkpoint, or an incomplete Epic, which is fixed
-    # by recording its hypothesis (docs/epics.md). The pass for an incomplete
-    # Epic is compatibility debt (docs/built-once-target.md). A disposition, the
-    # duplicates or supersedes edge bead-rehome.sh records, is a recorded
-    # terminal reason, so it passes too.
-    [ "$_fgr_hashyp" = true ] || return 0
+    # closed epic. The close ruling with its outcome releases any epic, and it is
+    # read before the hypothesis, so an Epic the operator ruled closed with no
+    # hypothesis passes. A disposition, the duplicates or supersedes edge
+    # bead-rehome.sh records, is a recorded terminal reason, so it releases one
+    # too. Otherwise an epic with no hypothesis passes only as a Delivery, whose
+    # epic carries the ruling and which closes at that epic's checkpoint. One
+    # whose parent is not an epic is an incomplete Epic, held until its
+    # hypothesis is recorded and ruled on (docs/epics.md).
+    [ "$_fgr_ruling" = close ] && [ "$_fgr_hasreason" = true ] && return 0
     [ -n "$_fgr_disposed$_fgr_as_disposed" ] && return 0
+    if [ "$_fgr_hashyp" != true ]; then
+        [ "$_fgr_epicparent" = true ] && return 0
+        echo "held: epic $_fgr_bead carries no epic_hypothesis and its parent is not an epic, so it is an incomplete Epic, not a Delivery — record the hypothesis the operator states or approves (gc bd update $_fgr_bead --set-metadata epic_hypothesis=\"<sentence>\") with its close ruling and outcome, at a review of the epic (docs/epics.md)"
+        return 1
+    fi
     # Only the close ruling, with its outcome recorded, releases the epic. A
     # non-terminal ruling and a value outside the enum (a draft like "pending", a
     # typo) both hold, each with its own reason, so an epic never closes "ruled"
     # on a value that does not end it.
     case "$_fgr_ruling" in
         close)
-            [ "$_fgr_hasreason" = true ] && return 0
             echo "held: epic $_fgr_bead is ruled close but carries no epic_ruling_reason — a close ruling carries its outcome (the hypothesis held, was disproven, stalled, or ran past its cost) (docs/epics.md)" ;;
         continue|shift)
             echo "held: epic $_fgr_bead carries the non-terminal ruling '$_fgr_ruling' — continue and shift keep an epic open, and it closes only on the close ruling (docs/epics.md)" ;;

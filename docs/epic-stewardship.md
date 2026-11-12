@@ -5,12 +5,12 @@ description: Use when you rule on or close an epic, close a Delivery, or extend 
 
 # Epic Stewardship
 
-Epic stewardship holds an epic to its contract. An epic that carries a
-hypothesis stays open until the operator rules it closed and records the
-outcome, or until a disposition closes it ([epics.md](epics.md)). The pack
-enforces that with a finalize-gate clause and a doctor invariant. Neither holds a
-Delivery, the level under an epic that SAFe calls a Feature, and the Epic
-Checkpoint closes it ([Closing a Delivery](#closing-a-delivery)). The pack does
+Epic stewardship holds an epic to its contract. An epic stays open until the
+operator rules it closed and records the outcome, or until a disposition closes
+it ([epics.md](epics.md)). The pack enforces that with a finalize-gate clause and
+a doctor invariant. Neither holds a Delivery, the level under an epic that SAFe
+calls a Feature, and the Epic Checkpoint closes it
+([Closing a Delivery](#closing-a-delivery)). The pack does
 not yet prompt the rulings themselves: the machinery that will is direction,
 described at the end of this doc.
 
@@ -60,7 +60,7 @@ the hypothesis, the ruling, and its reason.
 | Field | Meaning |
 |---|---|
 | `epic_handle` | the 3–5 word handle |
-| `epic_hypothesis` | the one-sentence hypothesis — a floor field, and what brings an epic under the close requirement |
+| `epic_hypothesis` | the one-sentence hypothesis — a floor field. An epic whose parent is an epic and that carries none is a Delivery, which the close requirement does not hold |
 | `epic_boundaries` | the epic's boundaries |
 | `epic_closure_condition` | the 3–6 operator-runnable closure checks |
 | `epic_indicators` | the 1–3 leading indicators |
@@ -77,17 +77,14 @@ auto-close" discipline ([epics.md](epics.md)) is a guardrail against building
 such a cascade, and an epic reaches closed only through an explicit act, such
 as a bare `gc bd close` or `bead-rehome.sh`'s close-with-successor.
 
-Two layers enforce the ruling, and they apply one predicate. An epic that
-carries a hypothesis may close only once it is ruled close with its outcome
-recorded. A continue or shift ruling holds it as an absent ruling does. An epic
-with no hypothesis has nothing to rule on, so it passes. It is a Delivery
-([Closing a Delivery](#closing-a-delivery)), or an incomplete Epic, which is
-fixed by recording its hypothesis
-([epics.md](epics.md#the-contract-an-epic-carries)). The pass for an incomplete
-Epic is compatibility debt
-([built-once-target.md](built-once-target.md#compatibility-debt)). A disposed
-epic (its duplicates or supersedes edge, written by `bead-rehome.sh`) carries a
-recorded terminal reason and passes.
+Two layers enforce the ruling, and they apply one predicate. An epic may close
+only once it is ruled close with its outcome recorded. A continue or shift
+ruling holds it as an absent ruling does. A disposed epic (its duplicates or
+supersedes edge, written by `bead-rehome.sh`) carries a recorded terminal reason
+and passes. A Delivery passes too ([Closing a Delivery](#closing-a-delivery)).
+Any other epic with no hypothesis is an incomplete Epic, which is fixed by
+recording its hypothesis ([epics.md](epics.md#the-contract-an-epic-carries)),
+and both layers hold it until it is ruled close.
 
 1. **The finalize-gate clause** (`finalize-gate.sh` `clause_epic_ruling_recorded`)
    refuses to finalize an epic the predicate holds, on every close path that
@@ -102,8 +99,9 @@ recorded terminal reason and passes.
    every close after the fact. A closed epic the predicate would have held is an
    error, whatever path closed it. A bare `gc bd close` is the ordinary way an
    epic closes, and I15 is what reports one closed without its ruling. Its
-   remedy is to record the ruling on the closed epic, or to reopen the epic
-   (`gc bd reopen`) when it should go on.
+   remedy is to record the ruling on the closed epic, and an incomplete Epic's
+   hypothesis with it, or to reopen the epic (`gc bd reopen`) when it should go
+   on.
 
 ## Closing a Delivery
 
