@@ -92,7 +92,7 @@ HOME_DIR=$(refinery_home) || stop "the refinery's own worktree is unknown"
 refinery_bead "$BEAD" || stop "$BEAD did not read"
 refinery_require "$HOME_DIR" "$BEAD" "$(bead_meta branch)" || stop "this iteration did not prepare $BEAD"
 GATE=$(gate_dir "$HOME_DIR") || stop "no repository at $HOME_DIR"
-GCTK=$(gctk_path) || stop "no gctk binary to run the checks through"
+gctk=$(gctk_path) || stop "no gctk binary to run the checks through"
 
 if ! OUT=$(DETACHED_JOB_STOP_GRACE=20 "$JOB" stop "$GATE" 2>&1); then
   printf '%s\n' "$OUT" >&2
@@ -187,5 +187,5 @@ done
 [ -z "$failed" ] || { echo "GATE FAILED:$failed"; exit 1; }
 echo "GATE PASSED"
 GATE
-"$JOB" start "$GATE" -- bash "$GATE/gate.sh" "$PREP_TREE" "$GATE/checks" "$GCTK" || stop "the gate did not start"
+"$JOB" start "$GATE" -- bash "$GATE/gate.sh" "$PREP_TREE" "$GATE/checks" "$gctk" || stop "the gate did not start"
 echo "$PROG: the gate for $BEAD runs in $PREP_TREE; wait for it with: $PROG wait"

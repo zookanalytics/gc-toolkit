@@ -67,7 +67,9 @@ has "$(git -C "$ORIGIN" log -1 --format=%s "$NEW")" "Merge origin/main into inte
 
 echo "# a repository that signs gets a signed merge"
 # The signing needs ssh-keygen with -Y sign (OpenSSH 8.0 and later), and signs
-# with a key the case makes, so it needs no signing agent.
+# with a key the case makes, so it needs no signing agent. tools/run-tests.sh
+# turns signing off through GIT_CONFIG_COUNT entries, which outrank the
+# repository's config, so the case also turns it on with an entry after them.
 fresh
 if command -v ssh-keygen >/dev/null 2>&1 && ssh-keygen -q -t ed25519 -N '' -C test -f "$TMP/signkey" >/dev/null 2>&1 \
    && printf 'x\n' | ssh-keygen -Y sign -n git -f "$TMP/signkey" >/dev/null 2>&1; then
@@ -76,7 +78,10 @@ if command -v ssh-keygen >/dev/null 2>&1 && ssh-keygen -q -t ed25519 -N '' -C te
   git -C "$RIG" config gpg.format ssh
   git -C "$RIG" config user.signingkey "$TMP/signkey"
   git -C "$RIG" config commit.gpgSign true
+  n=$((10#${GIT_CONFIG_COUNT:-0}))
+  export "GIT_CONFIG_KEY_$n=commit.gpgsign" "GIT_CONFIG_VALUE_$n=true" "GIT_CONFIG_COUNT=$((n + 1))"
   run
+  export "GIT_CONFIG_COUNT=$n"; unset "GIT_CONFIG_KEY_$n" "GIT_CONFIG_VALUE_$n"
   eq "$RC" 0 "the hand-off exits 0"
   eq "$(signed integration/land-1)" "1" "the merge commit is signed"
 else

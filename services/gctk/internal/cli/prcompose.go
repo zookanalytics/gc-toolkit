@@ -17,8 +17,9 @@ import (
 
 // `gctk pr compose <bead>` is how the step that opens or updates a PR asks what
 // the PR's title and body should say: pr-open.sh at a create and an adoption,
-// and the refinery's merge-push step at each round it lands on an open PR. The pr package composes; this command parses
-// the request, reads the published body it names, and prints the result.
+// and the refinery's merge-push step at each round it lands on an open PR. The
+// pr package composes; this command parses the request, reads the published
+// body it names, and prints the result.
 
 const prComposeLong = `Prints the title and body of the PR the bead owns, as the bead says they
 should be. The title is the bead's own, opened with a conventional-commit type

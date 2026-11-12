@@ -71,12 +71,14 @@ STUB
 
 # shellcheck disable=SC2120  # rt_init calls it bare; the suites pass values
 # rt_vars [name=value]... — the rig's formula vars `gc formula show --rig`
-# answers with, as rig values over the formula's defaults.
+# answers with, as rig values over the formula's defaults. The default check
+# set names two lanes the pack does not declare: a list of the pack's own
+# checks belongs only in its index and the default check_set's configuration.
 rt_vars() {
   local pair args=()
   for pair in "$@"; do args+=(--arg "${pair%%=*}" "${pair#*=}"); done
   jq -n ${args[@]+"${args[@]}"} '
-    {default_merge_strategy: "direct", delete_merged_branches: "true", check_set: "correctness,triage",
+    {default_merge_strategy: "direct", delete_merged_branches: "true", check_set: "lane-a,lane-b",
      pending_through_merge: "false", run_tests: "true", setup_command: "", typecheck_command: "",
      lint_command: "", test_command: "", build_command: ""} as $d
     | {ok: true, vars: [ $d | to_entries[] | .key as $k

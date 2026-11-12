@@ -85,7 +85,7 @@ TARGET=$(bead_meta target)
 [ -n "$TARGET" ] || TARGET=$(refinery_default_branch "$HOME_DIR") || stop "$BEAD carries no target, and origin/HEAD names no default branch"
 refinery_owner "$BEAD" "$BRANCH" || stop "the bead whose PR $BRANCH lands on cannot be told"
 REPO=$(origin_repo "$HOME_DIR") || stop "the rig's origin is not a github.com repository"
-GCTK=$(gctk_path) || stop "no gctk binary to compose and record the PR with"
+gctk=$(gctk_path) || stop "no gctk binary to compose and record the PR with"
 PR_POST="$HERE/pr-post.sh"
 
 # park <key> <reason>: the bead waits behind a human gate, with
@@ -182,7 +182,7 @@ fi
 # whether a section of a published body moved.
 compose() {
   local out
-  out=$("$GCTK" pr compose "$OWNER" --head "$HEAD_OID" --gates '' "$@" </dev/null) || return 1
+  out=$("$gctk" pr compose "$OWNER" --head "$HEAD_OID" --gates '' "$@" </dev/null) || return 1
   TITLE=$(printf '%s' "$out" | jq -r '.title // ""')
   MOVED=$(printf '%s' "$out" | jq -r 'if .summary == "written" or .branch_beads == "written" then "yes" else "" end')
   printf '%s' "$out" | jq -j '.body // ""' > "$BODY_FILE"
@@ -229,7 +229,7 @@ else
   echo "$PROG: opened $PR_URL as a draft from $BRANCH into $TARGET for $OWNER"
 fi
 
-GC_RIG_ROOT="$HOME_DIR" "$GCTK" pr record "$OWNER" --pr "$PR_URL" --head "$HEAD_OID" --target "$TARGET" --refinery "$GC_AGENT" </dev/null
+GC_RIG_ROOT="$HOME_DIR" "$gctk" pr record "$OWNER" --pr "$PR_URL" --head "$HEAD_OID" --target "$TARGET" --refinery "$GC_AGENT" </dev/null
 RC=$?
 case "$RC" in
   0) echo "$PROG: $OWNER records $PR_URL as pending at $HEAD_OID until its merge is verified on $TARGET" ;;

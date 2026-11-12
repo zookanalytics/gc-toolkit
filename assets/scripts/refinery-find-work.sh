@@ -53,10 +53,10 @@ CADENCE=$(printf '%s' "$ROWS" | jq -r '[ .[] | select(((.metadata.merge_result /
 CANDS=$(printf '%s' "$ROWS" | jq -c '[ .[] | select(((.metadata.merge_result // "") | tostring) as $m | $m != "pull_request" and $m != "pre_open_gate") ]')
 [ "$(printf '%s' "$CANDS" | jq 'length')" != 0 ] || exit 3
 
-GCTK=$(gctk_path) || unread "no gctk binary to read what holds the beads with"
+gctk=$(gctk_path) || unread "no gctk binary to read what holds the beads with"
 IDS=$(printf '%s' "$CANDS" | jq -r '.[].id')
 # shellcheck disable=SC2086  # one argument per bead id
-HOLDS=$("$GCTK" bead holds $IDS </dev/null 2>/dev/null) || unread "gctk bead holds did not answer for every bead"
+HOLDS=$("$gctk" bead holds $IDS </dev/null 2>/dev/null) || unread "gctk bead holds did not answer for every bead"
 JUDGED=$({ printf '%s\n' "$CANDS"; printf '%s\n' "$HOLDS"; } | jq -sc '.[0] as $c | (.[1:] | map({key: .id, value: .}) | from_entries) as $h
   | if all($c[]; $h[.id] != null and $h[.id].error == null) then [ $c[] | . + {holds: $h[.id]} ] else empty end' 2>/dev/null)
 printf '%s' "$JUDGED" | jq -e 'type == "array"' >/dev/null 2>&1 || unread "gctk bead holds did not answer for every bead"

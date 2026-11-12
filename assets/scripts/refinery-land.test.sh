@@ -91,7 +91,7 @@ HEAD_O=$(git -C "$HOME_DIR/worktrees/o" rev-parse HEAD)
 run --bead o
 eq "$RC" 0 "the landing exits 0"
 eq "$(tip polecat/o)" "$HEAD_O" "the head is pushed"
-has "$(logged scripts)" "lifecycle transition o --to pre_open_gate --assignee  --route  --set merged_target=main --set check_set=correctness,triage --unset rejection_reason" "the bead waits at pre_open_gate with its target and check set"
+has "$(logged scripts)" "lifecycle transition o --to pre_open_gate --assignee  --route  --set merged_target=main --set check_set=lane-a,lane-b --unset rejection_reason" "the bead waits at pre_open_gate with its target and check set"
 hasnt "$(logged gh)" "pr create" "the cadence, not the refinery, opens its PR"
 fresh
 branch_with polecat/r r.txt >/dev/null
@@ -101,7 +101,7 @@ pr 61 polecat/r someone
 rt_vars check_set=""
 run --bead r
 eq "$RC" 0 "the landing exits 0"
-has "$(logged scripts)" "lifecycle transition r --to pull_request --assignee  --route  --set pr_url=https://github.com/zook/rig/pull/61 --set pr_number=61 --set merged_target=main --set check_set=correctness,triage" "a bead that records an open PR waits at pull_request on it, an empty check set recovering the default"
+has "$(logged scripts)" "lifecycle transition r --to pull_request --assignee  --route  --set pr_url=https://github.com/zook/rig/pull/61 --set pr_number=61 --set merged_target=main --set check_set=lane-a,lane-b" "a bead that records an open PR waits at pull_request on it, an empty check set recovering the default"
 fresh
 branch_with polecat/b b.txt >/dev/null
 work b polecat/b '{"merge_result":"blocked"}'
