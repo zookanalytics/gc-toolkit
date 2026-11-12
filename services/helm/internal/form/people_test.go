@@ -155,6 +155,25 @@ func TestThePeoplePageListsTheSeatsWithTheirState(t *testing.T) {
 	}
 }
 
+// A read whose agent roster did not read lists no seat, and the People page
+// says the seats did not read, while the return list shows the conversations
+// the read gave.
+func TestARosterThatDidNotReadListsNoSeat(t *testing.T) {
+	c := rigCity()
+	c.Conversations = []Conversation{{ID: "tk-c1", Rig: "gc-toolkit", Title: "a conversation", Readiness: Ready}}
+	c.RosterUnread = true
+	m := newForm(t, &fakeHelm{city: c}, Options{})
+	loadCity(m)
+	toPage(t, m, peopleScreen)
+	v := sgr.ReplaceAllString(m.peopleView(), "")
+	if !strings.Contains(v, "The seats did not read: the city's agent roster (gc agent list), which names each seat's session, could not be read.") || strings.Contains(v, "No seat is listed.") {
+		t.Fatalf("the People page of a read whose roster did not read:\n%s", v)
+	}
+	if v := sgr.ReplaceAllString(m.returnView(), ""); !strings.Contains(v, "tk-c1") || strings.Contains(v, "did not read") {
+		t.Fatalf("the return list of a read whose roster did not read:\n%s", v)
+	}
+}
+
 // Enter opens the seat picked by its own verb once the form has left the
 // terminal: mechanik by gc-helm mechanik and a rig's Product Owner by gc-helm
 // po --rig, whether or not the rig carries a converse template. Nothing is

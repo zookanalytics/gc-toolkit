@@ -17,8 +17,10 @@ this surface:
   the form has left the terminal it runs the verb of the seat picked.
 - `gc-helm.sh conversations --json` gains `seats`, which the People page
   reads: each seat, with the open session Gas City's session list holds under
-  the name the seat's verb attaches to, or none. It exits 4 and lists nothing
-  when the agent roster that names the seats' sessions cannot be read.
+  the name the seat's verb attaches to, or none. It gains `roster_unread` too,
+  which says the agent roster that names the seats' sessions could not be read.
+  It then lists no seat, still lists the conversations and the rigs, and
+  exits 4 after the list.
 - `gc-helm.sh po --rig <name>` and `gc-helm.sh mechanik`, each of which
   attaches the terminal to its seat's session from whatever state the seat is
   in. Each reads its seat's session name from the agent roster first, and
@@ -30,9 +32,10 @@ this surface:
 Gas City read at upstream main `8b1d799b8` (gastownhall/gascity, fetched
 2026-11-10), the attach's paths read again at upstream `f14384642` on
 2026-11-11, the named session's rig scope read at upstream `6bd609f5bf` on
-2026-11-11, and a seat's state and a seat's name read at upstream `6bd609f5bf`
-on 2026-11-12. The city runs a fork build, `36ad5186a`, whose last common commit
-with upstream is `f14384642`. That build is not evidence of a primitive. It is
+2026-11-11, and a seat's state, a seat's name and a partial answer read at
+upstream `6bd609f5bf` on 2026-11-12. The city runs a fork build, `36ad5186a`,
+whose last common commit with upstream is `f14384642`. That build is not
+evidence of a primitive. It is
 read only for what the city runs (*The deployed version*, below).
 
 ## What was searched, and what each leaves
@@ -113,10 +116,25 @@ named `po` whose dir is the rig. Both verbs and `seats` take it from there, as
 already reads for each rig's converse, so the page makes no new call. No agent
 of the template there, or several, leaves the seat unnamed: the verb refuses
 and says which, and `seats` leaves the seat out. A roster that cannot be read
-names no seat. The verbs then refuse with a re-run, and `seats` lists nothing
-and exits 4, which the form shows as seats that did not read, keeping the rows
-of its last read when it has one. A seat listed with no session while its name
-is unknown would claim a state the read never saw.
+names no seat. The verbs then refuse with a re-run. `conversations --json`
+lists no seat, sets `roster_unread` and exits 4 after the list, as it does for
+a store that did not read. The conversations do not need the roster, and the
+rigs read it fail-open, as converse-capability.sh reads it for every caller, so
+the return list and the start page still list, and the People page says the
+seats did not read. A seat listed with no session
+while its name is unknown would claim a state the read never saw.
+
+Gas City reports an answer whose parts did not all read with `partial` and
+`partial_errors`: a flag for the whole answer, and a message for each read that
+failed (`StatusJSON.Partial` and `StatusJSON.PartialErrors`,
+`cmd/gc/cmd_citystatus.go`, and `SessionList.Partial` and
+`SessionList.PartialErrors`, `internal/api/decode_session_list.go`, at
+`6bd609f5bf`). That leaves part of the need. The People page has to know that
+the seats in particular did not read while the return list shows its rows, and
+a flag for the whole answer would leave the form to find which part failed in a
+message. `conversations --json` already gives the part that did not read a key
+of its own, as `unread` names each rig whose store did not, so `roster_unread`
+is a key of that kind.
 
 Three other primitives were read for the name, and each leaves part of it.
 `gc session attach` also takes a bare name, which matches a configured named

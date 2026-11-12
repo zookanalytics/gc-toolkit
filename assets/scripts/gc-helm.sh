@@ -5316,16 +5316,18 @@ helm_form() {
 #                          sitting holds or held, or that waits in the
 #                          operator's queue, each with its subject's title.
 #                          --json prints {conversations, rigs, seats,
-#                          unread}: rigs are the rigs a new topic can be filed
-#                          in, each with its name and prefix, whether it
-#                          carries converse and whether it is suspended, seats
-#                          are the seats the operator sits with, mechanik and
-#                          the po of each of those rigs, each with its session
-#                          (SEATS_JQ), and unread names each rig whose store
-#                          could not be read, because it did not answer or its
-#                          ledger is not there, after which the verb exits 4.
-#                          An agent roster that cannot be read, which names
-#                          the seats' sessions, lists nothing and exits 4.
+#                          roster_unread, unread}: rigs are the rigs a new
+#                          topic can be filed in, each with its name and
+#                          prefix, whether it carries converse and whether it
+#                          is suspended, seats are the seats the operator sits
+#                          with, mechanik and the po of each of those rigs,
+#                          each with its session (SEATS_JQ), roster_unread
+#                          says the agent roster, which names the seats'
+#                          sessions, could not be read, so no seat is listed,
+#                          and unread names each rig whose store could not be
+#                          read, because it did not answer or its ledger is
+#                          not there. A roster or a store that could not be
+#                          read exits 4 after the list.
 #   conversations <ref>    the subject <ref> names, resolved as engage resolves
 #                          it, and where a conversation about it would be held:
 #                          {ref, subject: {id, title, status, issue_type,
@@ -5477,21 +5479,24 @@ conversations_all() {
         # once with the rigs' converse, and each with its session from the
         # session list the conversations were read from. Only the roster's
         # names are passed on, which keeps the argument small in a city of many
-        # agents.
+        # agents. A roster that cannot be read names no seat, so none is
+        # listed, and the conversations and the rigs still are.
         converse_roster
         _ca_roster=""
         if [ -n "${_CONVERSE_ROSTER:-}" ]; then
             _ca_roster=$(printf '%s' "$_CONVERSE_ROSTER" | jq -c '{agents: [.agents[]? | objects | {name, dir, qualified_name}]}' 2>/dev/null) || _ca_roster=""
         fi
+        _ca_seats='[]'; _ca_roster_unread=false
         if [ -z "$_ca_roster" ]; then
-            echo "$PROG: conversations: could not read 'gc agent list', which gives each seat's session its name, so the seats could not be read. Nothing listed." >&2
-            exit 4
-        fi
-        if ! _ca_seats=$(printf '%s' "$_ca_list" | scrub | jq -c --argjson rigs "$_ca_rigs" --argjson roster "$_ca_roster" --arg mechanik "$MECHANIK_TEMPLATE" --arg po "$PO_TEMPLATE" "$SEAT_NAMES_JQ$SEATS_JQ" 2>/dev/null); then
+            _ca_roster_unread=true
+            echo "$PROG: conversations: could not read 'gc agent list', which gives each seat's session its name, so no seat is listed." >&2
+        elif ! _ca_seats=$(printf '%s' "$_ca_list" | scrub | jq -c --argjson rigs "$_ca_rigs" --argjson roster "$_ca_roster" --arg mechanik "$MECHANIK_TEMPLATE" --arg po "$PO_TEMPLATE" "$SEAT_NAMES_JQ$SEATS_JQ" 2>/dev/null); then
             echo "$PROG: conversations: the seats could not be read from 'gc session list'. Nothing listed." >&2
             exit 4
         fi
-        jq -nc --argjson c "$_ca_rows" --argjson r "$_ca_rigs" --argjson s "$_ca_seats" --argjson u "$_ca_unread" '{conversations: $c, rigs: $r, seats: $s, unread: $u}'
+        jq -nc --argjson c "$_ca_rows" --argjson r "$_ca_rigs" --argjson s "$_ca_seats" --argjson ru "$_ca_roster_unread" --argjson u "$_ca_unread" \
+            '{conversations: $c, rigs: $r, seats: $s, roster_unread: $ru, unread: $u}'
+        [ "$_ca_roster_unread" = false ] || exit 4
     else
         printf '%s' "$_ca_rows" | jq -r '
             def rank: {"ready": 0, "preparing": 1, "starting": 2, "ended": 3, "queued": 4}[.readiness] // 5;

@@ -123,12 +123,14 @@ const (
 
 // City is `gc-helm.sh conversations --json`: every open conversation in the
 // city's stores, the rigs a new topic can be filed in, the seats the operator
-// sits with, and the rigs whose store could not be read, because it did not
-// answer or its ledger is not there.
+// sits with, whether the city's agent roster, which names the seats' sessions,
+// could not be read, so that no seat is listed, and the rigs whose store could
+// not be read, because it did not answer or its ledger is not there.
 type City struct {
 	Conversations []Conversation `json:"conversations"`
 	Rigs          []Rig          `json:"rigs"`
 	Seats         []Seat         `json:"seats"`
+	RosterUnread  bool           `json:"roster_unread"`
 	Unread        []string       `json:"unread"`
 }
 
@@ -289,8 +291,8 @@ func (s Script) About(ctx context.Context, ref, from string) (About, error) {
 	return a, nil
 }
 
-// City runs `conversations --json`. A store that could not be read exits 4
-// after the list, which is still the list.
+// City runs `conversations --json`. A store or the agent roster that could not
+// be read exits 4 after the list, which is still the list.
 func (s Script) City(ctx context.Context) (City, error) {
 	var c City
 	out, err := s.run(ctx, "conversations", "--json")

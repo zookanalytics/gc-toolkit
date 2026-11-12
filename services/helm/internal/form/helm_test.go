@@ -151,6 +151,17 @@ func TestCityTakesAListWhoseStoreDidNotAllAnswer(t *testing.T) {
 	}
 }
 
+// A list whose agent roster did not read lists no seat and says so, and is
+// still the list.
+func TestCityTakesAListWhoseRosterDidNotRead(t *testing.T) {
+	s, _ := stubHelm(t, `{"conversations":[{"id":"tk-c","readiness":"ready"}],"rigs":[{"name":"gc-toolkit","converse":true}],"seats":[],"roster_unread":true,"unread":[]}`+"\n",
+		"gc-helm: conversations: could not read 'gc agent list', which gives each seat's session its name, so no seat is listed.\n", 4)
+	c, err := s.City(context.Background())
+	if err != nil || !c.RosterUnread || len(c.Seats) != 0 || len(c.Conversations) != 1 || c.Rigs[0].Name != "gc-toolkit" {
+		t.Fatalf("City = %+v, %v", c, err)
+	}
+}
+
 // A rig's prefix, which the subject can name it by, and a subject's suspended
 // rig are read from the verbs' answers.
 func TestARigsPrefixAndASubjectsSuspendedRigAreRead(t *testing.T) {
@@ -173,7 +184,7 @@ func TestTheSeatsAreReadWithTheirSessions(t *testing.T) {
 		`"seats":[{"seat":"mechanik","rig":"","session":{"id":"lx-m","name":"gc-toolkit__mechanik","state":"active","attached":true,"created_at":"2026-08-31T04:11:47Z"}},`+
 		`{"seat":"po","rig":"gc-toolkit","session":null}],"unread":[]}`+"\n", "", 0)
 	c, err := s.City(context.Background())
-	if err != nil || len(c.Seats) != 2 {
+	if err != nil || len(c.Seats) != 2 || c.RosterUnread {
 		t.Fatalf("City = %+v, %v", c, err)
 	}
 	if m := c.Seats[0]; m.Name != "mechanik" || m.Rig != "" || m.Session == nil || m.Session.State != "active" || !m.Session.Attached {

@@ -201,9 +201,12 @@ field Tab moves through, so the question stays one Tab after the subject.
 The People page is the one way Engage opens a person. Each row shows the state
 Gas City's session list gives the seat's session, such as active or asleep,
 and whether a terminal is attached, or no session when the list holds none, as
-for a po that has never run. A suspended rig's po reads rig suspended, since Gas
-City starts no session in a suspended rig, and the page says why it cannot start
-and how to resume the rig. The page reads the city again every ten seconds
+for a po that has never run. The session is the one the city's agent roster
+(`gc agent list`) names for the seat, so a seat the roster names no session
+for, or several, is not listed. When the roster cannot be read, the page lists
+no seat and says the seats did not read, and the other pages still list. A
+suspended rig's po reads rig suspended, since Gas City starts no session in a
+suspended rig, and the page says why it cannot start and how to resume the rig. The page reads the city again every ten seconds
 while it is on screen. ↑/↓ pick a seat, a line says what Enter does for it, and
 Enter leaves the terminal and then runs the seat's command, `gc-helm mechanik`
 or `gc-helm po --rig <name>`, as the form runs a conversation's attach. So all

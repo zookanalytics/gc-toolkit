@@ -2098,7 +2098,12 @@ func (m *Model) peopleView() string {
 		b.WriteString(badStyle.Render(fmt.Sprintf("Not refreshed since %s, so the list may be out of date: %s", m.cityAt.Format("15:04:05"), m.cityErr)) + "\n\n")
 	}
 	rows := m.seats()
-	if len(rows) == 0 {
+	switch {
+	case m.city.RosterUnread:
+		// The roster names each seat's session, so a read without it lists no
+		// seat.
+		b.WriteString(badStyle.Render("The seats did not read: the city's agent roster (gc agent list), which names each seat's session, could not be read.") + "\n")
+	case len(rows) == 0:
 		b.WriteString("No seat is listed.\n")
 	}
 	at := seatIndex(rows, m.seatSel)
