@@ -12,9 +12,10 @@
 //     oldest, then id (Gas City's beads.SortBeadsReadyOrder, which matches bd
 //     ready's default sort).
 //
-// Work nobody has scheduled comes after the queue, since the city takes none
-// of it until someone routes it, and so does work that waits on such work, so
-// the queue holds nothing that waits on work the city will not take.
+// Work the city does not take as things stand ([Scheduled]) comes after the
+// queue, since it waits until someone routes it or its hold lifts, and so does
+// work that waits on such work, so the queue holds nothing that waits on work
+// the city will not take.
 //
 // The package sits outside internal/ so the helm board, a separate module, can
 // import it.
@@ -57,8 +58,8 @@ type Place struct {
 type Ordered struct {
 	// Queue is the work the city takes as things stand.
 	Queue []Place
-	// NotScheduled is the work after the queue: work nobody has scheduled,
-	// and work that waits on such work at any depth.
+	// NotScheduled is the work after the queue: work the city does not take
+	// as things stand, and work that waits on such work at any depth.
 	NotScheduled []Place
 }
 
@@ -78,11 +79,37 @@ func Waiting(h waits.Holds, anchorOf func(id string) string) []string {
 }
 
 // Scheduled reports whether the city takes a piece of work as things stand:
-// it is in flight (waits' answer), armed to start by itself, routed to a pool
-// or an agent, or assigned to one.
-func Scheduled(h waits.Holds, routedTo, assignee string) bool {
-	return h.InFlight != "" || (h.Arm != nil && strings.TrimSpace(h.Arm.Target) != "") ||
-		strings.TrimSpace(routedTo) != "" || strings.TrimSpace(assignee) != ""
+// it is in flight (waits' answer), or no dispatch hold holds it and it is
+// armed to start by itself, routed to a pool or an agent, or assigned to one.
+// A dispatch hold is one of Gas City's hold labels, hold:mayor and
+// hold:external, read as its HasDispatchHold reads a label, trimmed and in any
+// case. Gas City serves a bead that carries one to no worker, and the
+// deferred-dispatch pass slings no armed bead while one holds it, so its route,
+// arm or assignee waits for the hold to lift. Work in flight is underway, so it
+// counts whatever it carries.
+func Scheduled(h waits.Holds, routedTo, assignee string, labels []string) bool {
+	if h.InFlight != "" {
+		return true
+	}
+	return !hasDispatchHold(labels) && ((h.Arm != nil && strings.TrimSpace(h.Arm.Target) != "") ||
+		strings.TrimSpace(routedTo) != "" || strings.TrimSpace(assignee) != "")
+}
+
+// dispatchHolds are Gas City's hold labels (DispatchHoldLabels in its package
+// beadmeta).
+var dispatchHolds = []string{"hold:mayor", "hold:external"}
+
+// hasDispatchHold reports whether labels carry a dispatch hold, comparing each
+// label as HasDispatchHold does.
+func hasDispatchHold(labels []string) bool {
+	for _, l := range labels {
+		for _, hold := range dispatchHolds {
+			if strings.EqualFold(strings.TrimSpace(l), hold) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // canGo reports whether a status lets a bead go now: open, which bd's ready

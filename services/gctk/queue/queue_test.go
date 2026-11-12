@@ -222,20 +222,27 @@ func TestWaiting(t *testing.T) {
 }
 
 func TestScheduled(t *testing.T) {
+	armed := waits.Holds{Arm: &waits.Arm{Target: "gc-toolkit/gc-toolkit.polecat"}}
 	for _, c := range []struct {
 		name               string
 		h                  waits.Holds
 		routedTo, assignee string
+		labels             []string
 		want               bool
 	}{
 		{name: "in flight", h: waits.Holds{InFlight: "status in_progress"}, want: true},
-		{name: "armed", h: waits.Holds{Arm: &waits.Arm{Target: "gc-toolkit/gc-toolkit.polecat"}}, want: true},
+		{name: "armed", h: armed, want: true},
 		{name: "routed", routedTo: "gc-toolkit/gc-toolkit.polecat", want: true},
 		{name: "assigned", assignee: "gc-toolkit/gc-toolkit.mechanik", want: true},
 		{name: "a notice owed is no arm", h: waits.Holds{Arm: &waits.Arm{Notify: "mechanik"}}, want: false},
 		{name: "nothing", routedTo: " ", assignee: "", want: false},
+		{name: "armed and held for the Product Owner", h: armed, labels: []string{"hold:mayor"}, want: false},
+		{name: "routed and held outside the store", routedTo: "gc-toolkit/gc-toolkit.polecat", labels: []string{"hold:external"}, want: false},
+		{name: "assigned and held, in any spelling", assignee: "gc-toolkit/gc-toolkit.mechanik", labels: []string{"learning", " Hold:Mayor "}, want: false},
+		{name: "in flight and held", h: waits.Holds{InFlight: "status in_progress"}, labels: []string{"hold:mayor"}, want: true},
+		{name: "routed, with a label that is no hold", routedTo: "gc-toolkit/gc-toolkit.polecat", labels: []string{"human", "hold:mayor-later"}, want: true},
 	} {
-		if got := Scheduled(c.h, c.routedTo, c.assignee); got != c.want {
+		if got := Scheduled(c.h, c.routedTo, c.assignee, c.labels); got != c.want {
 			t.Errorf("%s: Scheduled = %v, want %v", c.name, got, c.want)
 		}
 	}

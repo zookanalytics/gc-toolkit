@@ -30,9 +30,9 @@ import (
 //  6. waits says it is in flight. With an open pull request: "Pull request
 //     #<n>", with where it stands. Otherwise "In flight", with its assignee.
 //     Group Queued.
-//  7. It is armed, routed to a pool or assigned to an agent (queue.Scheduled):
-//     "Queued" when nothing holds it, and "Waits on <id>" naming each wait
-//     when one does. Group Queued.
+//  7. It is armed, routed to a pool or assigned to an agent, and no dispatch
+//     hold holds it (queue.Scheduled): "Queued" when nothing holds it, and
+//     "Waits on <id>" naming each wait when one does. Group Queued.
 //  8. Otherwise: "Not scheduled", with line 3 naming each wait when one holds
 //     it. Group Not moving.
 //
@@ -177,7 +177,7 @@ func table(in tableInput) verdict {
 		return verdict{out: outInFlight, group: GroupQueued, signal: "In flight", note: b.Assignee}
 	}
 	waitRefs := refsOf(h.Waits)
-	if queue.Scheduled(h, b.RoutedTo, b.Assignee) {
+	if queue.Scheduled(h, b.RoutedTo, b.Assignee, b.Labels) {
 		if h.Status == waits.Clear {
 			return verdict{out: outQueued, group: GroupQueued, signal: "Queued"}
 		}

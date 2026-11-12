@@ -385,18 +385,28 @@ func (bt *built) askID(id string) string {
 }
 
 // isWork reports whether a row is work a Work queue lists: an open piece of
-// work that does not carry hold:mayor, which keeps it on the Unprioritized
-// page until the Product Owner places it.
+// work that is not held for the Product Owner.
 func (bt *built) isWork(id string) bool {
+	return bt.ix.kinds[id] == KindWork && isOpen(bt.ix.beads[id]) && !bt.forProductOwner(id)
+}
+
+// forProductOwner reports whether a row is work held for the Product Owner: an
+// open piece of work that carries hold:mayor. The Unprioritized page alone
+// lists it, so no view lists it and no count counts it, though the work behind
+// it waits on it all the same.
+func (bt *built) forProductOwner(id string) bool {
 	b := bt.ix.beads[id]
-	return bt.ix.kinds[id] == KindWork && isOpen(b) && !carriesHoldMayor(b)
+	return bt.ix.kinds[id] == KindWork && isOpen(b) && carriesHoldMayor(b)
 }
 
 // place puts the rig's open work in the Work queue's order once, through
 // services/gctk/queue, so every view lists work in that one order: the queue,
 // then the work after it. A piece of work waits on what waits says holds it,
-// less a review or a rework anchored to it, whose work is its own. Work a
-// reader could not answer has no place and is listed apart.
+// less a review or a rework anchored to it, whose work is its own. Work held
+// for the Product Owner is placed with the rest, so the work behind it comes
+// after the queue as the city takes it, and is then left out of the order,
+// since no view lists it. Work a reader could not answer has no place and is
+// listed apart.
 func (bt *built) place() {
 	ix := bt.ix
 	anchorOf := map[string]string{}
@@ -407,27 +417,31 @@ func (bt *built) place() {
 	}
 	var items []queue.Item
 	for _, id := range ix.rows {
-		if !bt.isWork(id) {
+		if !bt.isWork(id) && !bt.forProductOwner(id) {
 			continue
 		}
-		if bt.verdict[id].out == outUnread {
+		if bt.isWork(id) && bt.verdict[id].out == outUnread {
 			bt.unread = append(bt.unread, id)
 			continue
 		}
 		b, h := ix.beads[id], ix.g.holds[id]
 		items = append(items, queue.Item{ID: id, Priority: b.Priority, CreatedAt: b.CreatedAt, Status: b.Status,
 			Waits:     queue.Waiting(h, func(x string) string { return anchorOf[x] }),
-			Scheduled: queue.Scheduled(h, b.RoutedTo, b.Assignee)})
+			Scheduled: queue.Scheduled(h, b.RoutedTo, b.Assignee, b.Labels)})
 	}
 	o := queue.Order(items)
 	for _, p := range o.Queue {
-		bt.pos[p.ID] = len(bt.order)
-		bt.order = append(bt.order, p.ID)
+		if bt.isWork(p.ID) {
+			bt.pos[p.ID] = len(bt.order)
+			bt.order = append(bt.order, p.ID)
+		}
 	}
 	for _, p := range o.NotScheduled {
-		bt.pos[p.ID] = len(bt.order)
-		bt.order = append(bt.order, p.ID)
-		bt.after[p.ID] = true
+		if bt.isWork(p.ID) {
+			bt.pos[p.ID] = len(bt.order)
+			bt.order = append(bt.order, p.ID)
+			bt.after[p.ID] = true
+		}
 	}
 	bt.sortIDs(bt.unread)
 }
@@ -454,12 +468,12 @@ func (bt *built) linkWaits() {
 
 // linkHolds fills the beads each need holds through any chain of waits: each
 // piece of work, epic and Delivery whose Holding answer names the need, in the
-// Work queue's order.
+// Work queue's order, less work held for the Product Owner.
 func (bt *built) linkHolds() {
 	ix := bt.ix
 	for _, id := range ix.rows {
 		k := ix.kinds[id]
-		if k != KindWork && k != KindEpic && k != KindDelivery {
+		if (k != KindWork && k != KindEpic && k != KindDelivery) || bt.forProductOwner(id) {
 			continue
 		}
 		h, ok := ix.g.holds[id]
@@ -508,7 +522,8 @@ func (bt *built) inOrder(ids []string) {
 }
 
 // findNeeds lists every open need, and what each one concerns: itself, the
-// beads it holds, and the bead its conversation is about.
+// beads it holds, and the bead its conversation is about unless that is work
+// held for the Product Owner.
 func (bt *built) findNeeds() {
 	ix := bt.ix
 	for _, id := range ix.rows {
@@ -518,7 +533,7 @@ func (bt *built) findNeeds() {
 		bt.needs = append(bt.needs, id)
 		c := append([]string{id}, bt.rows[id].Holds...)
 		for _, x := range []string{id, bt.rows[id].Conversation} {
-			if s := ix.subject[x]; x != "" && s != "" && !slices.Contains(c, s) {
+			if s := ix.subject[x]; x != "" && s != "" && !bt.forProductOwner(s) && !slices.Contains(c, s) {
 				c = append(c, s)
 			}
 		}

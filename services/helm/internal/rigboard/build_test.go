@@ -162,6 +162,72 @@ func TestPages(t *testing.T) {
 	})
 }
 
+// TestWorkForTheProductOwner holds work that carries hold:mayor to the
+// Unprioritized page while the work behind it still waits on it. In graph,
+// tk-b.1 is armed and waits on question tk-q, and armed tk-b.2 waits on tk-b.1.
+func TestWorkForTheProductOwner(t *testing.T) {
+	hold := func(g *gathered, id string) {
+		for i := range g.open {
+			if g.open[i].ID == id {
+				g.open[i].Labels = append(g.open[i].Labels, "hold:mayor")
+			}
+		}
+	}
+	entry := func(doc Document, e string) EpicEntry {
+		for _, x := range doc.Epics {
+			if x.ID == e {
+				return x
+			}
+		}
+		t.Fatalf("no epic %s", e)
+		return EpicEntry{}
+	}
+
+	t.Run("work behind it comes after the queue, though it and the work are armed", func(t *testing.T) {
+		g := graph()
+		hold(g, "tk-b.1")
+		doc := build(g)
+		want := WorkQueue{Queue: []string{"tk-loose"}, NotScheduled: []string{"tk-a.1.1", "tk-loose2", "tk-b.2"}, Unread: []string{}}
+		if !sameQueue(doc.WorkQueue, want) {
+			t.Errorf("work queue = %+v, want %+v: tk-b.2 waits on work the city takes only once it is placed", doc.WorkQueue, want)
+		}
+		if q := entry(doc, "tk-b").Queue; !sameQueue(q, WorkQueue{Queue: []string{}, NotScheduled: []string{"tk-b.2"}, Unread: []string{}}) {
+			t.Errorf("tk-b's Work queue = %+v, want tk-b.2 alone, after the queue", q)
+		}
+		if c := doc.Rows["tk-b"].Counts; c == nil || *c != (Counts{Needs: 1, NotScheduled: 1, Closed: 1}) {
+			t.Errorf("tk-b counts %+v, want its question, tk-b.2 after the queue and its closed work", c)
+		}
+		if got := doc.Unprioritized; len(got) != 1 || !slices.Equal(got[0].IDs, []string{"tk-desk2", "tk-desk1", "tk-b.1"}) {
+			t.Errorf("unprioritized = %+v, want tk-b.1 with the desk", got)
+		}
+	})
+
+	t.Run("a need reaches an epic only through work that is not held", func(t *testing.T) {
+		g := graph()
+		hold(g, "tk-b.1")
+		g.open = slices.DeleteFunc(g.open, func(b bead) bool { return b.ID == "tk-b.2" })
+		delete(g.holds, "tk-b.2")
+		delete(g.holding, "tk-b.2")
+		g.open = append(g.open, bead{ID: "tk-c", Title: "talk about B's story", Status: "open", Priority: 1, IssueType: "task",
+			Assignee: "human", Edges: []listing.Edge{{ID: "tk-b.1", Type: "tracks"}}, CreatedAt: "2026-01-11"})
+		g.holds["tk-c"] = waits.Holds{ID: "tk-c", Status: waits.Clear}
+		doc := build(g)
+		if got := doc.Rows["tk-q"].Holds; !slices.Equal(got, []string{"tk-a.1.1"}) {
+			t.Errorf("tk-q holds %v, want tk-a.1.1 alone", got)
+		}
+		if b := entry(doc, "tk-b"); len(b.Needs) != 0 {
+			t.Errorf("tk-b's Needs you = %+v, want none: its only open work is held for the Product Owner", b.Needs)
+		}
+		if c := doc.Rows["tk-b"].Counts; c == nil || *c != (Counts{Closed: 1}) {
+			t.Errorf("tk-b counts %+v, want its closed work alone", c)
+		}
+		want := []Need{{ID: "tk-q", Holds: []string{"tk-a.1.1"}}, {ID: "tk-c", Holds: []string{}}}
+		if n := doc.NeedsYou; n.Count != 1 || !slices.EqualFunc(n.Needs, want, sameNeed) {
+			t.Errorf("Needs you counts %d and lists %+v, want 1 and %+v", n.Count, n.Needs, want)
+		}
+	})
+}
+
 // TestNeedOrder holds a view's needs to the order of the first bead each holds
 // in the Work queue. tk-pr's pull request waits on the operator's review, and
 // it is queued work itself, at the front of the queue. tk-g1 holds queued work,

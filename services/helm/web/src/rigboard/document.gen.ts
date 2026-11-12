@@ -130,8 +130,9 @@ export interface Row {
   waited_on_by: Ref[];
   /**
    * Holds is, for a need, every bead it holds through any chain of waits
-   * (prstatus.Holding's answer): its work in the Work queue's order, then the
-   * epics and Deliveries it holds.
+   * (prstatus.Holding's answer), less work held for the Product Owner, which
+   * the Unprioritized page alone lists: its work in the Work queue's order,
+   * then the epics and Deliveries it holds.
    */
   holds: string[];
   /**

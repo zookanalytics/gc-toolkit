@@ -101,8 +101,9 @@ type Row struct {
 	Waits      []Ref `json:"waits"`
 	WaitedOnBy []Ref `json:"waited_on_by"`
 	// Holds is, for a need, every bead it holds through any chain of waits
-	// (prstatus.Holding's answer): its work in the Work queue's order, then the
-	// epics and Deliveries it holds.
+	// (prstatus.Holding's answer), less work held for the Product Owner, which
+	// the Unprioritized page alone lists: its work in the Work queue's order,
+	// then the epics and Deliveries it holds.
 	Holds []string `json:"holds"`
 	// Conversation is, for a question, the open conversation that answers it.
 	Conversation string `json:"conversation,omitempty"`
