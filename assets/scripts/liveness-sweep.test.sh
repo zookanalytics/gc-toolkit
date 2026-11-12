@@ -527,6 +527,8 @@ late_gate() { # late_gate <subject> <key> <description> — an open gate the lis
     jq -nc --arg id "g-late" --arg k "$2" --arg d "$3" \
         '[{id: $id, issue_type: "gate", await_type: "human", await_id: $k, status: "open",
            dependency_type: "blocks", title: ($d | split("\n")[0]), description: $d}]' > "$SHOW_DIR/dep-$1.json"
+    # The real human-gate.sh reads the subject's own row before its gates.
+    printf '[{"id":"%s","status":"open","issue_type":"task"}]\n' "$1" > "$SHOW_DIR/$1.json"
 }
 late_gate tk-subject liveness-sweep "unnamed waits: 1 new, 0 carried
 Census cut 2026-10-01T00:00:00Z — a snapshot, not the board. Before acting, re-check it:
@@ -538,7 +540,7 @@ grep -q "gate g-late already asks on tk-subject with an earlier census" <<< "$OU
 grep -q "filed batch gate" <<< "$OUT" \
     && bad "…and claims no filing" "$OUT" || ok "…and claims no filing"
 eq "$(cat "$BASELINE_FILE")" "c-plain" "…and the baseline is NOT advanced: the new set was never shown"
-rm -f "$SHOW_DIR/dep-tk-subject.json"
+rm -f "$SHOW_DIR/dep-tk-subject.json" "$SHOW_DIR/tk-subject.json"
 # A filed gate that does not read back proves nothing either.
 GC_DEP_FAIL=1 run_sweep "c-plain"
 eq "$RC" "1" "a gate whose subject's gates do not read back fails the pass"
@@ -732,7 +734,7 @@ grep -q "subj-ideas: gate g-late already asks with an earlier set — last_seen 
 grep -q 'bd update subj-ideas' "$GC_CALLS" \
     && bad "…and stamps no last_seen" "stamped anyway: $(grep subj-ideas "$GC_CALLS")" \
     || ok "…and stamps no last_seen, so a later run files the set"
-rm -f "$SHOW_DIR/dep-subj-ideas.json"
+rm -f "$SHOW_DIR/dep-subj-ideas.json" "$SHOW_DIR/subj-ideas.json"
 
 echo "── the pass owns the cadence window and spends it before it reads ──"
 # liveness-sweep-precheck.sh, the order's `check`, never spends this stamp on
