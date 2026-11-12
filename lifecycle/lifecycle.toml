@@ -93,14 +93,16 @@ meaning = "PR base moved externally; routed to human"
 
 [states.blocked]
 status = "open"
-meaning = "recorded existing_pr unusable, or a graduated convoy's zero-diff check could not run three patrols in a row; routed to human"
+meaning = "parked by the refinery behind a human gate: a target or branch origin does not carry, a strategy it does not land, or a PR it cannot take; still the refinery's, so clearing the gate hands it back"
 
 [states.refused_false_completion]
 status = "open"
-meaning = "the zero-diff check found no change on the branch; routed to human"
+meaning = "the zero-diff check found no change on the branch; parked by the refinery behind a human gate and still the refinery's, so clearing the gate hands it back"
 
-# Transitions. Every edge names its writer; the lifecycle writer performs the
-# write: gctk lifecycle, which lifecycle.sh execs and gctk merge runs in-process.
+# Transitions. Every edge names its writer. The lifecycle writer performs the
+# write, gctk lifecycle, which lifecycle.sh execs and gctk merge runs in-process,
+# on every edge but the two into a refinery park, which the park writes itself
+# with one gc bd update guarded on the assignee.
 # A self-edge (from == to) is always legal: an idempotent re-record.
 [[transition]]
 from = "unanchored"
@@ -516,7 +518,8 @@ keys = [
 #   refinery-land.sh, which lands a bead that names one through its PR, by
 #   refinery-publish.sh as the PR to take, and by pr-facts.sh and
 #   rework-child.sh to verify the child each files. Absent means no PR to reuse.
-#   Never cleared. Value is a PR URL.
+#   Cleared only by the pending record's publication (gctk pr record), which
+#   names the PR in the record's own keys. Value is a PR URL.
 # merge_strategy — how the refinery lands the branch, in Gas City's values.
 #   refinery-land.sh, the refinery's merge-push step, resolves it once: `mr`
 #   publishes a PR, `direct` fast-forwards and pushes straight to the target,
@@ -560,23 +563,25 @@ keys = [
 #   branch. Registered so that residue on a pre-retirement bead reads as known,
 #   not as a stray.
 # blocked_reason — the human-readable reason an anchor sits in a human state
-#   (existing_pr unusable, a PR closed or retargeted out of band, a graduated
-#   convoy's zero-diff check that could not run). Written by pr-facts.sh and
-#   mol-refinery-patrol.toml; it is also a [holds] marker, so a live bead
-#   carrying it owes a blocks edge. Freeform.
+#   (a refinery park, a PR closed or retargeted out of band), and on the pending
+#   record why the bead is blocked: the merge it awaits, or the exception that
+#   holds it. Written by pr-facts.sh, the refinery's parks (refinery-prep.sh,
+#   refinery-land.sh, refinery-publish.sh) and the pending record's writers
+#   (gctk pr record, gctk pr reconcile); it is also a [holds] marker, so a live
+#   bead carrying it owes a blocks edge. Freeform.
 # work_dir — the polecat's per-bead git worktree, an absolute path, written by
 #   workspace-setup so a restart or witness recovery can find the work in flight.
 #   Absent means no worktree is recorded yet. Never cleared. Absolute path.
-# false_completion_suspected — the reason mol-refinery-patrol.toml refused to
-#   close a branch as merged when it carried no verified change against its
-#   target; written on the `refused_false_completion` transition for a person to
-#   read. Freeform reason.
-# zero_diff_check_failures — consecutive patrols whose zero-diff check could not
-#   run on this bead. mol-refinery-patrol.toml leaves the work with the refinery
-#   to retry until the count reaches three, then files a human gate and makes
-#   the work wait on it (await-ruling.sh), or parks a graduated convoy `blocked`
-#   on it. An integer (absent reads as 0), cleared with `--unset` by a check
-#   that runs and once that wait or park lands.
+# false_completion_suspected — RETIRED. The reason the refinery refused to close
+#   a branch as merged when it carried no verified change against its target.
+#   Nothing writes or reads it now: refinery-land.sh's park puts that reason in
+#   blocked_reason and in its human gate. Registered so that residue on a
+#   pre-retirement bead reads as known, not as a stray.
+# zero_diff_check_failures — RETIRED. Consecutive patrols whose zero-diff check
+#   could not run on a bead. Nothing writes or reads it now: refinery-land.sh
+#   stops on a check that cannot run and leaves the work with the refinery, and
+#   the next patrol tries again. Registered so that residue on a pre-retirement
+#   bead reads as known, not as a stray.
 # branch_ready / halt_reason / auto_push — the auto_push=false halt. auto_push is
 #   a caller input the submit step reads; when it is false the polecat records
 #   branch_ready=true and halt_reason=auto_push_false and stops without pushing or
