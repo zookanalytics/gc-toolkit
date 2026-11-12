@@ -204,9 +204,10 @@ exit status is the form's. A seat takes no question, because Gas City's attach
 carries no message, so the sitting's purpose is given in the sitting. Each rig
 has its own Product Owner, which works that rig's queue and epics, and none
 runs in the city's HQ; mechanik is one for the city. Each verb is `gc session
-attach` on the seat: the Product Owner's session is <rig>/gc-toolkit.po, Gas
-City's name for a rig's named session. It joins a running session as it
-stands. For a seat that is not running, it asks the city's controller to start
+attach` on the seat's session, by the name `gc agent list` gives it:
+<rig>/<binding>.po for a rig's Product Owner and <binding>.mechanik for
+mechanik, where <binding> is the name the city imports this pack under. It
+joins a running session as it stands. For a seat that is not running, it asks the city's controller to start
 the session, waits for it to run and then attaches, and the controller's start
 gives the agent its prompt as its first message. The Product Owner starts
 fresh, so a sitting of it that slept or ended comes back as a new sitting. A
@@ -5322,6 +5323,8 @@ helm_form() {
 #                          (SEATS_JQ), and unread names each rig whose store
 #                          could not be read, because it did not answer or its
 #                          ledger is not there, after which the verb exits 4.
+#                          An agent roster that cannot be read, which names
+#                          the seats' sessions, lists nothing and exits 4.
 #   conversations <ref>    the subject <ref> names, resolved as engage resolves
 #                          it, and where a conversation about it would be held:
 #                          {ref, subject: {id, title, status, issue_type,
@@ -5468,9 +5471,22 @@ conversations_all() {
             _ca_pfx=$(printf '%s' "$RIGS" | jq -r --arg n "$_ca_r" 'first(.[] | select(.name == $n) | .prefix // "") // ""' 2>/dev/null || true)
             _ca_rigs=$(printf '%s' "$_ca_rigs" | jq -c --arg n "$_ca_r" --arg p "$_ca_pfx" --argjson c "$_ca_conv" --argjson s "$_ca_susp" '. + [{name: $n, prefix: $p, converse: $c, suspended: $s}]')
         done
-        # The seats, from the session list the conversations were read from,
-        # for the form's People page: mechanik, and the po of each of those rigs.
-        if ! _ca_seats=$(printf '%s' "$_ca_list" | scrub | jq -c --argjson rigs "$_ca_rigs" --arg mechanik "$MECHANIK_SEAT" --arg po "$PO_SEAT" "$SEATS_JQ" 2>/dev/null); then
+        # The seats, for the form's People page: mechanik, and the po of each of
+        # those rigs, each by the name the agent roster gives its session, read
+        # once with the rigs' converse, and each with its session from the
+        # session list the conversations were read from. Only the roster's
+        # names are passed on, which keeps the argument small in a city of many
+        # agents.
+        converse_roster
+        _ca_roster=""
+        if [ -n "${_CONVERSE_ROSTER:-}" ]; then
+            _ca_roster=$(printf '%s' "$_CONVERSE_ROSTER" | jq -c '{agents: [.agents[]? | objects | {name, dir, qualified_name}]}' 2>/dev/null) || _ca_roster=""
+        fi
+        if [ -z "$_ca_roster" ]; then
+            echo "$PROG: conversations: could not read 'gc agent list', which gives each seat's session its name, so the seats could not be read. Nothing listed." >&2
+            exit 4
+        fi
+        if ! _ca_seats=$(printf '%s' "$_ca_list" | scrub | jq -c --argjson rigs "$_ca_rigs" --argjson roster "$_ca_roster" --arg mechanik "$MECHANIK_TEMPLATE" --arg po "$PO_TEMPLATE" "$SEAT_NAMES_JQ$SEATS_JQ" 2>/dev/null); then
             echo "$PROG: conversations: the seats could not be read from 'gc session list'. Nothing listed." >&2
             exit 4
         fi
@@ -5639,49 +5655,76 @@ cmd_attach() {
 # The seats the operator sits with, each opened in one step, each a row of the
 # People page in engage's form and each a command of its own. A rig's po, the
 # operator's prioritization partner for that rig's work, is the rig's
-# on-demand named session, which a sitting opens and a drain-ack ends, and Gas
-# City names it <rig>/gc-toolkit.po. Mechanik, the operator's standing
-# conversation, is one named session for the city, which the controller keeps
-# running. Each verb is Gas City's attach on the seat's session, which owns
-# the seat's start and the wait for it: it attaches to a running session, and
-# asks the city's controller to start one that is not running, so the agent
-# takes its prompt as its first message, then attaches once the session runs
-# (docs/gascity/human-engagement.md, "What an attach does to a session that is
-# not running").
-PO_SEAT="gc-toolkit.po"
-MECHANIK_SEAT="gc-toolkit.mechanik"
+# on-demand named session, which a sitting opens and a drain-ack ends.
+# Mechanik, the operator's standing conversation, is one named session for the
+# city, which the controller keeps running. Each verb is Gas City's attach on
+# the seat's session, which owns the seat's start and the wait for it: it
+# attaches to a running session, and asks the city's controller to start one
+# that is not running, so the agent takes its prompt as its first message, then
+# attaches once the session runs (docs/gascity/human-engagement.md, "What an
+# attach does to a session that is not running").
+#
+# Gas City names a seat's session as it names the agent that runs it, after
+# the binding the city imports the pack under, and a rig's po after its rig as
+# well: <binding>.mechanik and <rig>/<binding>.po. The binding is the city's to
+# choose, so the verbs and the People page take a seat's name from the city's
+# agent roster (SEAT_NAMES_JQ), and know a seat only by its template, the agent
+# pack.toml's [[named_session]] stanza names.
+PO_TEMPLATE="po"
+MECHANIK_TEMPLATE="mechanik"
+
+# $SEAT_NAMES_JQ — defines seat_names($template; $rig): from the agent roster
+# given as input (`gc agent list --json`), the qualified name of each agent
+# named $template in the rig named $rig, or of the city's own for an empty
+# $rig, once each. A seat's named session takes its agent's qualified name,
+# because pack.toml gives the session no name of its own. One name is the
+# seat's. None means the city runs no such seat there, and with several, which
+# of them is the seat is not known.
+SEAT_NAMES_JQ='
+  def seat_names($template; $rig):
+    [ .agents[]? | objects
+      | select(((.name // "") | tostring) == $template and ((.dir // "") | tostring) == $rig)
+      | (.qualified_name // "") | tostring | select(. != "") ] | unique;
+'
 
 # $SEATS_JQ — the seats, as `conversations --json` lists them for the People
 # page, from a `gc session list --json` given as input, with the rigs a new
-# topic can be filed in as $rigs, which leave out the city's HQ, and the seats'
-# names as $mechanik and $po. Mechanik comes first, then each rig's po in the
-# order the rigs are listed, each as {seat, rig, session}: seat is the verb that
-# opens it, rig is the po's rig by its name and empty for mechanik, and session
-# is the open session the list holds under the name the verb attaches to, {id,
-# name, state, attached, created_at} with Gas City's own state, or null when it
-# holds none, as for a po that has never run.
+# topic can be filed in as $rigs, which leave out the city's HQ, the agent
+# roster as $roster and the seats' templates as $mechanik and $po. It runs after
+# $SEAT_NAMES_JQ. Mechanik comes first, then each rig's po in the order the
+# rigs are listed, each as {seat, rig, session}: seat is the verb that opens
+# it, rig is the po's rig by its name and empty for mechanik, and session is
+# the open session the list holds under the seat's name, {id, name, state,
+# attached, created_at} with Gas City's own state, or null when it holds none,
+# as for a po that has never run. A seat the roster gives no one name is left
+# out, since its verb attaches to nothing.
 SEATS_JQ='
   [ .sessions[] | objects
     | select((.closed // false) != true)
     | select(((.state // "") | tostring) != "closed") ] as $open
-  | def seat_session($name):
-      first($open[] | select(((.alias // "") | tostring) == $name)
-            | {id: ((.id // "") | tostring), name: ((.session_name // "") | tostring),
-               state: ((.state // "") | tostring), attached: ((.attached // false) == true),
-               created_at: ((.created_at // "") | tostring)}) // null;
-  [ {seat: "mechanik", rig: "", session: seat_session($mechanik)} ]
-  + [ $rigs[] | {seat: "po", rig: .name, session: seat_session(.name + "/" + $po)} ]
+  | def seat($seat; $rig; $names):
+      if ($names | length) == 1 then
+        [ {seat: $seat, rig: $rig,
+           session: (first($open[] | select(((.alias // "") | tostring) == $names[0])
+                     | {id: ((.id // "") | tostring), name: ((.session_name // "") | tostring),
+                        state: ((.state // "") | tostring), attached: ((.attached // false) == true),
+                        created_at: ((.created_at // "") | tostring)}) // null)} ]
+      else [] end;
+  seat("mechanik"; ""; $roster | seat_names($mechanik; ""))
+  + [ $rigs[] | .name as $r | seat("po"; $r; $roster | seat_names($po; $r))[] ]
 '
 
-# cmd_seat <verb> <seat> <name> [<arg>...] — attach the terminal to the seat's
-# session, and once it comes back, name how to return. po takes --rig <name>,
-# the rig whose po it is, named exactly, as open --new-subject --rig takes it,
-# and refuses (exit 4) a rig the city has not, the city's HQ, where Gas City
-# stamps no rig's named session, or a suspended rig, where it starts no
-# session. mechanik takes no argument. A failed attach exits 4, after gc has
-# said why.
+# cmd_seat <verb> <template> <name> [<arg>...] — attach the terminal to the
+# seat's session, and once it comes back, name how to return. The session is
+# the one the agent roster names for the seat's template (SEAT_NAMES_JQ). po
+# takes --rig <name>, the rig whose po it is, named exactly, as open
+# --new-subject --rig takes it, and refuses (exit 4) a rig the city has not,
+# the city's HQ, where Gas City stamps no rig's named session, or a suspended
+# rig, where it starts no session. mechanik takes no argument. A roster that
+# cannot be read, or that names no session for the seat or several, exits 4
+# attaching nothing, and so does a failed attach, after gc has said why.
 cmd_seat() {
-    _seat_verb="$1"; _seat="$2"; _seat_name="$3"; shift 3
+    _seat_verb="$1"; _seat_tmpl="$2"; _seat_name="$3"; shift 3
     _seat_rig=""; _seat_rig_set=0
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -5719,10 +5762,26 @@ cmd_seat() {
             echo "$PROG: po: rig '$_seat_rig' is suspended, and Gas City starts no session in a suspended rig, so its Product Owner cannot start until the rig resumes (gc rig resume $_seat_rig). Nothing attached." >&2
             exit 4
         fi
-        _seat="$_seat_rig/$_seat"
         _seat_name="the Product Owner of $_seat_rig"
         _seat_again="$PROG po --rig $_seat_rig"
     fi
+    converse_roster
+    _seat_names=""
+    if [ -n "${_CONVERSE_ROSTER:-}" ]; then
+        _seat_names=$(printf '%s' "$_CONVERSE_ROSTER" | jq -c --arg t "$_seat_tmpl" --arg r "$_seat_rig" "$SEAT_NAMES_JQ"'seat_names($t; $r)' 2>/dev/null) || _seat_names=""
+    fi
+    _seat_where="for the city"
+    [ -z "$_seat_rig" ] || _seat_where="in rig '$_seat_rig'"
+    case "$(printf '%s' "$_seat_names" | jq -r 'length' 2>/dev/null)" in
+        1) _seat=$(printf '%s' "$_seat_names" | jq -r '.[0]') ;;
+        0) echo "$PROG: $_seat_verb: 'gc agent list' names no $_seat_tmpl agent $_seat_where, so the city runs no session for $_seat_name. Nothing attached." >&2
+           exit 4 ;;
+        ''|*[!0-9]*)
+           echo "$PROG: $_seat_verb: could not read 'gc agent list', which gives the session of $_seat_name its name, so nothing was attached. Re-run: $_seat_again" >&2
+           exit 4 ;;
+        *) echo "$PROG: $_seat_verb: 'gc agent list' names more than one $_seat_tmpl agent $_seat_where ($(printf '%s' "$_seat_names" | jq -r 'join(", ")')), so the session of $_seat_name is not known. Nothing attached." >&2
+           exit 4 ;;
+    esac
     _seat_rc=0
     gc session attach "$_seat" || _seat_rc=$?
     if [ "$_seat_rc" -ne 0 ]; then
@@ -5747,8 +5806,8 @@ case "${1:-}" in
     accept)        shift; cmd_accept "$@" ;;
     conversations) shift; cmd_conversations "$@" ;;
     attach)        shift; cmd_attach "$@" ;;
-    po)            shift; cmd_seat po "$PO_SEAT" "the Product Owner" "$@" ;;
-    mechanik)      shift; cmd_seat mechanik "$MECHANIK_SEAT" mechanik "$@" ;;
+    po)            shift; cmd_seat po "$PO_TEMPLATE" "the Product Owner" "$@" ;;
+    mechanik)      shift; cmd_seat mechanik "$MECHANIK_TEMPLATE" mechanik "$@" ;;
     board)         echo "$PROG: the board moved to 'helm-svc board' (services/helm)" >&2; exit 2 ;;
     -h|--help|help) usage; exit 0 ;;
     # A bare gc-helm on a terminal is engage's form, the way in. Without a

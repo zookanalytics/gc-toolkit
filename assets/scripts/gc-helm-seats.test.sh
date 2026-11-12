@@ -11,14 +11,20 @@
 #   (BARE-NOTTY)  without a terminal it names the verbs and what a bare gc-helm
 #                 does on one, prints the usage and exits 2, opening no form
 #   (BARE-MISSING) with no form built it exits 3, naming the seats' commands
-#   (PO, MK)      a seat's verb is one `gc session attach` on the seat's session
-#                 name, a rig's po by Gas City's name for a rig's named session,
-#                 which starts a seat that is not running, and nothing else: no
-#                 listing, no nudge and no wake of its own; once the attach
-#                 comes back it names how to return
+#   (PO, MK)      a seat's verb reads its session's name from the agent roster
+#                 and makes one `gc session attach` on it, which starts a seat
+#                 that is not running, and nothing else: no session listing, no
+#                 nudge and no wake of its own; once the attach comes back it
+#                 names how to return
+#   (KIT)         under a city that imports the pack as kit, each verb attaches
+#                 to the session the roster names, kit.mechanik and
+#                 <rig>/kit.po
 #   (PO-RIG)      po needs --rig, the rig by its exact name, and refuses a rig
 #                 the city has not, the city's HQ or a suspended rig, attaching
 #                 nothing
+#   (SEAT-NAME)   a roster that cannot be read exits 4 naming the re-run, and
+#                 one that names no agent of the seat's template in its rig, or
+#                 several, exits 4 naming them, each attaching nothing
 #   (PO-ATTACH-FAIL, MK-ATTACH-FAIL) an attach that fails exits 4, naming the
 #                 re-run and no return
 #   (PO-ARGS, MK-ARGS) an argument or a flag the verb does not take exits 2 and
@@ -43,13 +49,18 @@ export CALLS="$TMP/calls"
 mkdir -p "$TMP/bin" "$TMP/agents/converse-claude-opus"
 export GC_HELM_AGENTS_DIR="$TMP/agents" TMPDIR="$TMP"
 
-# The stub records each call on a line of its own. `gc session attach` exits
-# $ATTACH_RC, saying why on stderr when that is not 0, as gc does; every other
-# call is one the verbs must not make, so the stub fails it.
+# The stub records each call on a line of its own. `gc agent list` prints the
+# roster $ROSTER names, or exits $ROSTER_RC saying why when that is not 0.
+# `gc session attach` exits $ATTACH_RC, saying why on stderr when that is not
+# 0, as gc does; every other call is one the verbs must not make, so the stub
+# fails it.
 cat > "$TMP/bin/gc" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" | tr '\n' ' ' >> "$CALLS"; printf '\n' >> "$CALLS"
 case "$1 ${2:-}" in
+  "agent list")
+    [ "${ROSTER_RC:-0}" -eq 0 ] || { echo "gc agent list: loading city config failed" >&2; exit "$ROSTER_RC"; }
+    cat "$ROSTER" ;;
   "session attach")
     [ "${ATTACH_RC:-0}" -eq 0 ] || echo "gc session attach: session ${3:-} did not start within 2m0s; not attaching" >&2
     exit "${ATTACH_RC:-0}" ;;
@@ -76,16 +87,35 @@ cat > "$TMP/fixture/rigs.json" <<'RIGS'
  {"name":"paused","path":"/rigs/paused","prefix":"pz","hq":false,"suspended":true}]
 RIGS
 
+# The city's agent roster, as `gc agent list --json` gives it: the pack imported
+# as gc-toolkit, with mechanik for the city and a po in each rig, the HQ aside,
+# beside an agent of another name. The same city importing the pack as kit.
+export ROSTER="$TMP/fixture/agents.json"
+cat > "$ROSTER" <<'AGENTS'
+{"city_name":"town","agents":[
+ {"name":"mechanik","qualified_name":"gc-toolkit.mechanik","scope":"city"},
+ {"name":"witness","qualified_name":"gc-toolkit/gc-toolkit.witness","dir":"gc-toolkit","scope":"rig"},
+ {"name":"po","qualified_name":"gc-toolkit/gc-toolkit.po","dir":"gc-toolkit","scope":"rig"},
+ {"name":"po","qualified_name":"paused/gc-toolkit.po","dir":"paused","scope":"rig"}]}
+AGENTS
+cat > "$TMP/fixture/agents-kit.json" <<'AGENTS'
+{"city_name":"town","agents":[
+ {"name":"mechanik","qualified_name":"kit.mechanik","scope":"city"},
+ {"name":"po","qualified_name":"gc-toolkit/kit.po","dir":"gc-toolkit","scope":"rig"},
+ {"name":"po","qualified_name":"paused/kit.po","dir":"paused","scope":"rig"}]}
+AGENTS
+
 # reset — no calls recorded and no form run.
 reset() { : > "$CALLS"; rm -f "$FORM_ARGV_FILE"; }
 
-# run <verb> [args...] -> RC/OUT/CALLED. stdin is /dev/null, so no terminal.
+# run <verb> [args...] -> RC/OUT/CALLED, CALLED being the calls in order, apart
+# by '|'. stdin is /dev/null, so no terminal.
 run() {
   set +e
   OUT="$(sh "$SCRIPT" "$@" </dev/null 2>"$TMP/err")"; RC=$?
   set -e
   OUT="$OUT$(cat "$TMP/err")"
-  CALLED="$(cat "$CALLS")"
+  CALLED="$(paste -s -d'|' - < "$CALLS")"
 }
 
 echo "# a bare gc-helm opens engage's form on a terminal, and without one prints its usage"
@@ -114,18 +144,27 @@ has "$OUT" "no helm-svc binary is built" "(BARE-MISSING) …saying the form is n
 has "$OUT" "gc-helm po --rig <name> to open a rig's Product Owner, gc-helm mechanik to attach to mechanik" "(BARE-MISSING) …naming the seats' commands"
 has "$OUT" "gc-helm attach <conversation> to return" "(BARE-MISSING) …and the conversations' commands"
 
-echo "# a seat's verb is Gas City's attach on the seat, and nothing else"
+echo "# a seat's verb is Gas City's attach on the seat, by the name the roster gives it, and nothing else"
 export GC_HELM_FIXTURE="$TMP/fixture"
 reset; run po --rig gc-toolkit
 eq "$RC" 0 "(PO) po exits 0 once the attach comes back"
-eq "$CALLED" "session attach gc-toolkit/gc-toolkit.po " "(PO) …having made one call, the attach on the rig's po"
+eq "$CALLED" "agent list --json |session attach gc-toolkit/gc-toolkit.po " "(PO) …having read the roster and made one attach, on the rig's po by the name the roster gives it"
 has "$OUT" "Return to the Product Owner of gc-toolkit with: gc-helm po --rig gc-toolkit" "(PO) …and naming how to return"
 reset; run po --rig=gc-toolkit
-eq "$CALLED" "session attach gc-toolkit/gc-toolkit.po " "(PO) --rig=<name> names the rig too"
+eq "$CALLED" "agent list --json |session attach gc-toolkit/gc-toolkit.po " "(PO) --rig=<name> names the rig too"
 reset; run mechanik
 eq "$RC" 0 "(MK) mechanik exits 0 once the attach comes back"
-eq "$CALLED" "session attach gc-toolkit.mechanik " "(MK) …having made one call, the attach on mechanik's seat"
+eq "$CALLED" "agent list --json |session attach gc-toolkit.mechanik " "(MK) …having read the roster and made one attach, on mechanik's seat"
 has "$OUT" "Return to mechanik with: gc-helm mechanik" "(MK) …and naming how to return"
+
+echo "# a city that imports the pack under another name opens the same seats"
+reset; ROSTER="$TMP/fixture/agents-kit.json" run po --rig gc-toolkit
+eq "$RC" 0 "(KIT) po exits 0 under a city that imports the pack as kit"
+eq "$CALLED" "agent list --json |session attach gc-toolkit/kit.po " "(KIT) …attaching to the rig's po under the name kit gives it"
+has "$OUT" "Return to the Product Owner of gc-toolkit with: gc-helm po --rig gc-toolkit" "(KIT) …and naming how to return"
+reset; ROSTER="$TMP/fixture/agents-kit.json" run mechanik
+eq "$RC" 0 "(KIT) mechanik exits 0 there too"
+eq "$CALLED" "agent list --json |session attach kit.mechanik " "(KIT) …attaching to kit.mechanik"
 
 echo "# po names its rig, one the city has and that runs"
 reset; run po
@@ -148,6 +187,32 @@ eq "$RC" 4 "(PO-RIG) a suspended rig exits 4"
 has "$OUT" "rig 'paused' is suspended" "(PO-RIG) …saying so"
 has "$OUT" "gc rig resume paused" "(PO-RIG) …and naming the resume"
 eq "$CALLED" "" "(PO-RIG) …and attaching nothing"
+
+echo "# a seat the roster gives no one name is attached to by no name"
+reset; ROSTER_RC=1 run po --rig gc-toolkit
+eq "$RC" 4 "(SEAT-NAME) a roster that cannot be read exits 4"
+has "$OUT" "could not read 'gc agent list', which gives the session of the Product Owner of gc-toolkit its name, so nothing was attached. Re-run: gc-helm po --rig gc-toolkit" "(SEAT-NAME) …saying so and naming the re-run"
+eq "$CALLED" "agent list --json " "(SEAT-NAME) …and attaching nothing"
+printf 'gc: warming up\n' > "$TMP/fixture/agents-garbled.json"
+reset; ROSTER="$TMP/fixture/agents-garbled.json" run mechanik
+eq "$RC" 4 "(SEAT-NAME) a roster that is not one exits 4 too"
+has "$OUT" "could not read 'gc agent list', which gives the session of mechanik its name, so nothing was attached. Re-run: gc-helm mechanik" "(SEAT-NAME) …saying so"
+eq "$CALLED" "agent list --json " "(SEAT-NAME) …and attaching nothing"
+jq -c '.agents |= map(select(.dir != "gc-toolkit"))' "$ROSTER" > "$TMP/fixture/agents-nopo.json"
+reset; ROSTER="$TMP/fixture/agents-nopo.json" run po --rig gc-toolkit
+eq "$RC" 4 "(SEAT-NAME) a rig whose roster names no po exits 4, a po of another rig not counting"
+has "$OUT" "'gc agent list' names no po agent in rig 'gc-toolkit', so the city runs no session for the Product Owner of gc-toolkit. Nothing attached." "(SEAT-NAME) …saying so"
+eq "$CALLED" "agent list --json " "(SEAT-NAME) …and attaching nothing"
+jq -c '.agents |= map(if .name == "mechanik" then . + {dir: "gc-toolkit", qualified_name: "gc-toolkit/gc-toolkit.mechanik"} else . end)' "$ROSTER" > "$TMP/fixture/agents-rigmk.json"
+reset; ROSTER="$TMP/fixture/agents-rigmk.json" run mechanik
+eq "$RC" 4 "(SEAT-NAME) a roster whose only mechanik is a rig's exits 4, since mechanik is the city's own"
+has "$OUT" "'gc agent list' names no mechanik agent for the city, so the city runs no session for mechanik. Nothing attached." "(SEAT-NAME) …saying so"
+eq "$CALLED" "agent list --json " "(SEAT-NAME) …and attaching nothing"
+jq -c '.agents += [{name: "po", qualified_name: "gc-toolkit/kit.po", dir: "gc-toolkit", scope: "rig"}]' "$ROSTER" > "$TMP/fixture/agents-twopo.json"
+reset; ROSTER="$TMP/fixture/agents-twopo.json" run po --rig gc-toolkit
+eq "$RC" 4 "(SEAT-NAME) a rig whose roster names two po agents exits 4"
+has "$OUT" "'gc agent list' names more than one po agent in rig 'gc-toolkit' (gc-toolkit/gc-toolkit.po, gc-toolkit/kit.po), so the session of the Product Owner of gc-toolkit is not known. Nothing attached." "(SEAT-NAME) …naming both"
+eq "$CALLED" "agent list --json " "(SEAT-NAME) …and attaching nothing"
 
 echo "# an attach that fails exits 4"
 reset; ATTACH_RC=1 run po --rig gc-toolkit
