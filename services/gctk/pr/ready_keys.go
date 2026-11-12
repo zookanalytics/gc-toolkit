@@ -2,32 +2,15 @@ package pr
 
 import "github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 
-// The keys the evaluator reads. No domain owns any of them yet, so each is
-// declared read-only here. Gas Town's refinery record is written by the
-// record verb the merge rewrite builds in this domain, which takes those
-// declarations over. Shell writes the holds, the feedback receipts and the
-// anchor link, and their definitions stay in lifecycle/lifecycle.toml.
+// The keys the evaluator reads beside Gas Town's pending record, which the
+// record package owns. No domain owns any of these yet, so each is declared
+// read-only here: shell writes the branch, the holds, the feedback receipts and
+// the anchor link, and their definitions stay in lifecycle/lifecycle.toml.
 
-// The pending record Gas Town's refinery keeps on the bead that owns a PR
-// (gastown/commands/pr-merge-reconcile/run.sh in gascity-packs).
-var (
-	mergeResultKey = ledger.ReadOnly("merge_result", ledger.String,
-		"The pr evaluator answers for a bead that reads pull_request_pending, Gas Town's record of a PR open "+
-			"at the head the refinery validated, or pull_request_head_changed, one open at a head it has not "+
-			"validated.")
-	prURLKey = ledger.ReadOnly("pr_url", ledger.String,
-		"The pr evaluator reads the PR on the host this names, and holds a PR whose URL on GitHub differs.")
-	prNumberKey = ledger.ReadOnly("pr_number", ledger.String,
-		"The pr evaluator reads the PR by this number.")
-	prRepoKey = ledger.ReadOnly("pr_repo", ledger.String,
-		"The repository of the PR the bead owns, owner/name, compared without case.")
-	prHeadKey = ledger.ReadOnly("pr_head_sha", ledger.String,
-		"The head the refinery validated, the one head the bead's PR may merge at.")
-	mergedTargetKey = ledger.ReadOnly("merged_target", ledger.String,
-		"The branch the bead's PR is to merge into, the base its PR must name.")
-	branchKey = ledger.ReadOnly("branch", ledger.String,
-		"The pr evaluator holds a PR whose head branch is not this one.")
-)
+// The branch the work is on, which the work formula's workspace-setup writes
+// (lifecycle/lifecycle.toml, [metadata.merge_identity]).
+var branchKey = ledger.ReadOnly("branch", ledger.String,
+	"The pr evaluator and the landing order hold a PR whose head branch is not this one.")
 
 // The holds a person sets by hand (lifecycle/lifecycle.toml, [holds] and
 // [metadata.holds]).

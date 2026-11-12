@@ -22,6 +22,7 @@ import (
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
@@ -121,16 +122,9 @@ type Sources struct {
 	Feedback Feedback
 }
 
-// The record's values that name a PR open on the record: the head the refinery
-// validated, and a head it has not.
-const (
-	pending     = "pull_request_pending"
-	headChanged = "pull_request_head_changed"
-)
-
 // OnRecord reports whether a bead whose merge_result is v owns a PR on Gas
 // Town's pending record, the PRs the evaluator answers for.
-func OnRecord(v string) bool { return v == pending || v == headChanged }
+func OnRecord(v string) bool { return record.OnRecord(v) }
 
 // prURL is a PR's URL: https, its host, its repository and its number.
 var prURL = regexp.MustCompile(`^https://([^/]+)/([^/]+/[^/]+)/pull/([0-9]+)$`)
@@ -157,9 +151,12 @@ func Ready(src Sources, bead string) (Answer, error) {
 		}
 		return strings.TrimSpace(v)
 	}
+	stored, serr := record.Read(r)
+	if err == nil {
+		err = serr
+	}
 	rec := struct{ result, url, number, repo, head, target, branch string }{
-		read(mergeResultKey), read(prURLKey), read(prNumberKey), read(prRepoKey),
-		read(prHeadKey), read(mergedTargetKey), read(branchKey),
+		stored.Result, stored.URL, stored.Number, stored.Repo, stored.Head, stored.Target, read(branchKey),
 	}
 	holds := []string{read(mergeHoldKey), read(rebaseHoldKey)}
 	rc := receipts{

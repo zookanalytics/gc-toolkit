@@ -9,13 +9,19 @@
     "doc": "The pr evaluator holds the PR of the bead an open bead names, until that work is filed with a blocks edge. The merge anchor a review, rework, finding or validation child names (lifecycle/lifecycle.toml, [metadata.gates]). A listing names it on each bead, and prstatus's in-flight set reads it."
   },
   {
+    "name": "blocked_reason",
+    "type": "string",
+    "owner": "pr/record",
+    "doc": "Why a bead on the record is blocked: the merge it awaits, or the exception that holds it."
+  },
+  {
     "name": "branch",
     "type": "string",
     "readers": [
       "pr",
       "waits"
     ],
-    "doc": "The source branch a work bead's change is on, which the work formula's workspace-setup writes (lifecycle/lifecycle.toml, [metadata.merge_identity]). A bead carrying it is in flight. The pr evaluator holds a PR whose head branch is not this one."
+    "doc": "The source branch a work bead's change is on, which the work formula's workspace-setup writes (lifecycle/lifecycle.toml, [metadata.merge_identity]). A bead carrying it is in flight. The pr evaluator and the landing order hold a PR whose head branch is not this one."
   },
   {
     "name": "epic_boundaries",
@@ -80,6 +86,12 @@
       "listing"
     ],
     "doc": "Why the latest ruling on an epic was made, written with it."
+  },
+  {
+    "name": "existing_pr",
+    "type": "string",
+    "owner": "pr/record",
+    "doc": "The PR the refinery reuses rather than open another, a PR's URL: armed with the marker before the record's second write, and set by a requeue. A publication clears it."
   },
   {
     "name": "gc.dispatch_when_ready",
@@ -223,20 +235,26 @@
   {
     "name": "merge_result",
     "type": "string",
-    "readers": [
-      "listing",
-      "pr",
-      "waits"
-    ],
-    "doc": "The anchor's lifecycle state, which lifecycle.sh, through gctk lifecycle, writes on every transition (lifecycle/lifecycle.toml, [machine] and [states]). A bead carrying it is in flight. The pr evaluator answers for a bead that reads pull_request_pending, Gas Town's record of a PR open at the head the refinery validated, or pull_request_head_changed, one open at a head it has not validated. A listing names it on each bead, so a reader tells an anchor whose pull request is open."
+    "owner": "pr/record",
+    "doc": "Where the work a bead carries stands on its way to its target. On Gas Town's pending record it reads pull_request_pending, pull_request_head_changed, mr_merged, pull_request_record_incomplete or one of the exceptions, pull_request_reconcile_invalid, pull_request_closed_unmerged, pull_request_merged_unvalidated_head, pull_request_merge_evidence_contradiction and pull_request_legacy_closed_unverified, each of which keeps the bead blocked behind a human gate keyed by its value. Absent, the bead has not landed and owns no open PR. The old path's values are lifecycle/lifecycle.toml's [states]."
+  },
+  {
+    "name": "merged_sha",
+    "type": "string",
+    "owner": "pr/record",
+    "doc": "The merge commit the landing order found on the target when it closed the bead."
   },
   {
     "name": "merged_target",
     "type": "string",
-    "readers": [
-      "pr"
-    ],
-    "doc": "The branch the bead's PR is to merge into, the base its PR must name."
+    "owner": "pr/record",
+    "doc": "The branch the bead's PR is to merge into, the base its PR must name, and once it lands the branch it landed on."
+  },
+  {
+    "name": "observed_pr_head_sha",
+    "type": "string",
+    "owner": "pr/record",
+    "doc": "The head the landing order found on a PR open at a head the refinery has not validated. The next publication clears it."
   },
   {
     "name": "pr_comment_answered",
@@ -257,10 +275,8 @@
   {
     "name": "pr_head_sha",
     "type": "string",
-    "readers": [
-      "pr"
-    ],
-    "doc": "The head the refinery validated, the one head the bead's PR may merge at."
+    "owner": "pr/record",
+    "doc": "The head the refinery validated, the one head the bead's PR may merge at. A requeue keeps it."
   },
   {
     "name": "pr_issue_comment_watermark",
@@ -271,13 +287,22 @@
     "doc": "The highest conversation comment id the intake has routed. A value that is not a whole number reads as 0."
   },
   {
+    "name": "pr_last_checked_at",
+    "type": "string",
+    "owner": "pr/record",
+    "doc": "When the record was last written or read, RFC 3339 UTC to the second. The landing order reads the records it checked least recently first."
+  },
+  {
+    "name": "pr_merged_at",
+    "type": "string",
+    "owner": "pr/record",
+    "doc": "When GitHub says the PR merged, recorded with the merge commit."
+  },
+  {
     "name": "pr_number",
     "type": "string",
-    "readers": [
-      "listing",
-      "pr"
-    ],
-    "doc": "The pr evaluator reads the PR by this number. The number of the anchor's open pull request, which pr-open.sh writes when it opens and pr-facts.sh copies onto rework children (lifecycle/lifecycle.toml, [metadata.merge_identity])."
+    "owner": "pr/record",
+    "doc": "The number of the PR the record names, in decimal."
   },
   {
     "name": "pr_provenance_since",
@@ -288,12 +313,22 @@
     "doc": "The instant from which a post under the city's login is feedback unless it carries the city's mark. A value that is not an instant in GitHub's form makes every such post the city's own."
   },
   {
+    "name": "pr_reconcile_error",
+    "type": "string",
+    "owner": "pr/record",
+    "doc": "Why the landing order's last read could not decide, such as a lookup that failed or a merge commit not yet on the fetched target. The next run reads the record again, and a read that decides clears it."
+  },
+  {
+    "name": "pr_reconcile_pending",
+    "type": "string",
+    "owner": "pr/record",
+    "doc": "true while a reconciliation of the record is still owed, the marker the landing order selects the records it reads by. The record's first write sets it, and the order clears it when the bead closes on a verified merge, goes back to the refinery, meets an exception or has been released from the refinery. A disposition's close clears it in the same write, through bead-rehome.sh, the one shell writer that spells it, because only that write closes the bead under the record lock."
+  },
+  {
     "name": "pr_repo",
     "type": "string",
-    "readers": [
-      "pr"
-    ],
-    "doc": "The repository of the PR the bead owns, owner/name, compared without case."
+    "owner": "pr/record",
+    "doc": "The repository of the PR the record names, owner/name, which matches the rig's origin and is compared without case."
   },
   {
     "name": "pr_review_answered",
@@ -312,13 +347,16 @@
     "doc": "The highest review id the intake has routed. A value that is not a whole number reads as 0."
   },
   {
+    "name": "pr_state",
+    "type": "string",
+    "owner": "pr/record",
+    "doc": "The PR's state as the landing order last read it: open, merged, or the state a read that could not decide or an exception left, such as lookup_failed, merge_unreachable or closed_unmerged."
+  },
+  {
     "name": "pr_url",
     "type": "string",
-    "readers": [
-      "listing",
-      "pr"
-    ],
-    "doc": "The pr evaluator reads the PR on the host this names, and holds a PR whose URL on GitHub differs. The URL of the anchor's open pull request, written with pr_number (lifecycle/lifecycle.toml, [metadata.merge_identity])."
+    "owner": "pr/record",
+    "doc": "The URL of the PR the record names, https://\u003chost\u003e/\u003cowner\u003e/\u003crepo\u003e/pull/\u003cnumber\u003e."
   },
   {
     "name": "rebase_hold",
@@ -331,10 +369,8 @@
   {
     "name": "rejection_reason",
     "type": "string",
-    "readers": [
-      "waits"
-    ],
-    "doc": "Why the bead's last attempt bounced, which the refinery writes (lifecycle/lifecycle.toml, [metadata.merge_identity]). A bead carrying it is in flight."
+    "owner": "pr/record",
+    "doc": "Why the work was sent back to the refinery: a head it has not validated, or a record left half written. A publication clears it."
   },
   {
     "name": "review_results",
