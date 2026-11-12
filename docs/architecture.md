@@ -171,11 +171,7 @@ the finished branch. Once they have closed, it takes steps 6 to 9 like any bead
 bound for main.
 
 A converse sitting can take steps 4 and 5 itself, on the operator's ruling in
-the sitting, for a change whose next step is the operator's reaction. It edits
-the change with them in a per-bead tree of its own, its conversation holds the
-bead through a `blocks` edge while it does, and it hands the change off through
-the same writer a polecat's submit runs, so the change takes every step after
-the hand-off as a polecat's does.
+the sitting, for a change whose next step is the operator's reaction.
 
 External facts the pack does not write — GitHub closing or retargeting a PR, a
 session dying, a provider quota park, a `gc` build that moves the text the seed
@@ -202,10 +198,7 @@ fast-forwarded to `main`
 ([pack-authoring.md](pack-authoring.md#a-landed-pack-change-is-confirmed-on-the-deployed-checkout)).
 The pack supplies how work is done, such as its formulas, scripts, skills and
 agent prompts. A rig supplies the repository the work changes, along with any
-review guidance the rig keeps in it. A rig declares how to serve its UI from a
-worktree on fixture data among the commands the city's config sets for it, which
-is how a session runs a copy of that UI with the operator, and a rig that
-declares none offers no copy.
+review guidance the rig keeps in it.
 
 gc-toolkit is a rig as well. A rule that binds only work on its own repository
 is the rig's, so it lives in the root [`AGENTS.md`](../AGENTS.md), which every
@@ -336,10 +329,8 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   conversation with a plain `gc hook --claim`, holds for the operator, answers
   each gate the operator rules on through its conversation's reply, and signs
   off by resolving those gates and closing the conversation, which ends its
-  session. On the operator's ruling it also makes a change with them and hands
-  it off ([How work moves](#how-work-moves)). A sitting cut short hands the
-  conversation back to the queue, and the next engagement resumes it, and any
-  change in flight, from the record.
+  session. A sitting cut short hands the conversation back to the queue, and
+  the next engagement resumes it from the record.
 - **A takeaway records what a sitting concluded**, and its `--waiting-on` edge
   is what makes the wait machine-answerable
   ([lifecycle-composition.md](lifecycle-composition.md)).
@@ -422,27 +413,17 @@ first. Either way the change is a decision on the record, not a drift.
 
 ## Decisions
 
-- **A converse sitting changes a repository only on the operator's ruling in
-  that sitting,** and only a change whose next step is their reaction, such as
-  a document's wording, a screen's look or a small fix agreed there. Work whose
-  spec can be written down goes to a pool.
-- **A sitting's change takes the pipeline a polecat's work takes:** the same
-  hand-off writer, the refinery's gate, the review checks, CI and the
-  operator's approval. The sitting is not one of its checks.
-- **A copy of a rig's UI runs on fixture data at an origin of its own,** never
-  under the supervisor's, because the board's page reads the live city from
-  the origin it is served on. The operator sees a copy as a page at that
-  origin, published for exactly as long as the copy runs by a command the city
-  sets, and as screenshots where the city sets none.
+- **After the hand-off, a sitting's change takes every step a polecat's
+  takes,** and the sitting is not one of its checks.
+- **A copy of a rig's UI that a session runs from a change's tree serves
+  fixture data,** never the live city's.
 
 ## Debt
 
-- **A sitting cannot change a repository yet.** Its prompt says it never does,
-  and Work's writers serve only a run, so no sitting that runs today works as
-  the decisions above describe. The effort that lets a sitting edit a change
-  (tk-bvw8j5t) retires it through its implementation (tk-rbasce7).
+- **A sitting cannot change a repository yet.** Its prompt says it never does.
+  The effort that lets a sitting edit a change (tk-bvw8j5t) retires it through
+  its implementation (tk-rbasce7).
 - **A sitting does not edit an open PR's branch.** A ruling on an open PR still
-  files a rework a polecat runs, because the branch's one writer is the rework
-  child the review machinery keys on. A unit that waits on the review-lanes
-  member (tk-1tfzr71.22) and the merge member (tk-1tfzr71.20) retires it, and
-  that effort's implementation files the unit.
+  files a rework a polecat runs. A unit that waits on the review-lanes member
+  (tk-1tfzr71.22) and the merge member (tk-1tfzr71.20) retires it, and the
+  implementation that lets a sitting edit a change (tk-rbasce7) files that unit.
