@@ -51,7 +51,10 @@ eq "$(jq -r 'type == "object" and length > 0
              and all(keys_unsorted[]; length > 0)
              and all(.[]; type == "string" and test("\\S"))' "$DEFINITION" 2>/dev/null)" \
    "true" "(DEF) kinds.json names its kinds, each saying what its record is"
-eq "$(jq -r 'keys_unsorted | length == (unique | length)' "$DEFINITION" 2>/dev/null)" \
+# A parsed object keeps only the last of a repeated key, so the kinds are read
+# off the token stream, which carries each key as often as the file writes it.
+eq "$(jq -n --stream '[inputs | select(length == 2 and (.[0] | length) == 1) | .[0][0]]
+                      | length == (unique | length)' "$DEFINITION" 2>/dev/null)" \
    "true" "(DEF) kinds.json names each kind once"
 KINDS_JSON="$(jq -nc "$STANDING_KINDS_JQ"'standing_kinds' 2>/dev/null)"
 eq "$KINDS_JSON" "$(jq -c 'keys_unsorted' "$DEFINITION" 2>/dev/null)" \
