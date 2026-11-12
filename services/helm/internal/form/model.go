@@ -1186,7 +1186,7 @@ func (m *Model) onSaved(msg savedMsg) tea.Cmd {
 		}
 		return nil
 	}
-	m.scr = composeScreen
+	m.showPage(composeScreen)
 	why := "the save answered without filing a conversation"
 	if msg.err != nil {
 		why = msg.err.Error()
@@ -1363,10 +1363,15 @@ func (m *Model) goTo(p screen) tea.Cmd {
 }
 
 // showPage puts page p on screen. A list page reads the city again while it is
-// on screen. A status one page gave is not carried to another.
+// on screen. A status one page gave is not carried to another. The start page
+// focuses its field again, so the field's cursor shows: the cursor blinks on
+// messages the form hands a field only while the start page is on screen, so
+// while another screen is up its blink stops where it was, dark as often as
+// not.
 func (m *Model) showPage(p screen) tea.Cmd {
 	m.scr, m.status = p, ""
 	if p == composeScreen {
+		m.setFocus(m.focus)
 		return nil
 	}
 	return tea.Batch(m.loadCity(), m.refreshCity())

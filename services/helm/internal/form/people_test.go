@@ -4,9 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
+	"time"
 
+	"charm.land/bubbles/v2/cursor"
 	tea "charm.land/bubbletea/v2"
 )
 
@@ -214,6 +217,84 @@ func TestThePagesKeysDoNothingWhileASaveRuns(t *testing.T) {
 			t.Fatalf("%s while the save runs: page %d", k, m.scr)
 		}
 	}
+}
+
+// A text field's cursor blinks on messages the form hands the field only while
+// the start page is on screen, so while another screen is up the blink stops
+// where it was. The start page comes back with the cursor showing in the field
+// it was left in, whether a page's key brings it back or a save that did not
+// file does.
+func TestTheStartPageComesBackWithItsCursorShowing(t *testing.T) {
+	for _, from := range []field{subjectField, questionField} {
+		f := &fakeHelm{about: map[string]About{"tk-a": subjectAbout("tk-a", "gc-toolkit")}, city: peopleCity(),
+			saveErr: &Refusal{Code: 4, Why: "gc-helm: open: could not create a conversation for 'tk-a'"}}
+		m := newForm(t, f, Options{Subject: "tk-a"})
+		loadCity(m)
+		settle(m)
+		blinkFast(m)
+		typeText(m, "one")
+		focusOn(t, m, from)
+		// ← moves the cursor, which starts its blink, and one blink turns it dark.
+		goDark := func(before string) {
+			t.Helper()
+			_, cmd := m.Update(key(tea.KeyLeft))
+			blink(m, cmd)
+			if cursorShows(m, from) {
+				t.Fatalf("field %d, before %s: the cursor still shows after its blink", from, before)
+			}
+		}
+		goDark("Ctrl+R")
+		m.Update(ctrl('r'))
+		m.Update(ctrl('n'))
+		if m.scr != composeScreen || m.focus != from || !cursorShows(m, from) {
+			t.Fatalf("field %d: Ctrl+R and Ctrl+N came back to page %d with the focus on %d, the cursor showing %v", from, m.scr, m.focus, cursorShows(m, from))
+		}
+		goDark("Ctrl+S")
+		_, cmd := m.Update(ctrl('s'))
+		deliver(m, cmd)
+		if m.scr != composeScreen || !strings.HasPrefix(m.status, "Not saved:") || m.focus != from || !cursorShows(m, from) {
+			t.Fatalf("field %d: the save that did not file came back to page %d with status %q, the focus on %d, the cursor showing %v", from, m.scr, m.status, m.focus, cursorShows(m, from))
+		}
+	}
+}
+
+// blinkFast makes the cursors of the start page's text fields blink every
+// millisecond, so a test can wait for a blink.
+func blinkFast(m *Model) {
+	s := m.subject.Styles()
+	s.Cursor.BlinkSpeed = time.Millisecond
+	m.subject.SetStyles(s)
+	q := m.question.ta.Styles()
+	q.Cursor.BlinkSpeed = time.Millisecond
+	m.question.ta.SetStyles(q)
+}
+
+// blink delivers the cursor's blink that cmd waits for, once, and nothing else
+// cmd asks for.
+func blink(m *Model, cmd tea.Cmd) {
+	if cmd == nil {
+		return
+	}
+	switch msg := cmd().(type) {
+	case tea.BatchMsg:
+		for _, c := range msg {
+			blink(m, c)
+		}
+	case cursor.BlinkMsg:
+		m.Update(msg)
+	}
+}
+
+// reverseVideo is an SGR sequence that turns reverse video on, which is how a
+// text field draws its cursor while the cursor shows.
+var reverseVideo = regexp.MustCompile("\x1b\\[(?:[0-9]+;)*7(?:;[0-9]+)*m")
+
+// cursorShows says whether f, the subject or the question, draws its cursor.
+func cursorShows(m *Model, f field) bool {
+	if f == subjectField {
+		return reverseVideo.MatchString(m.subject.View())
+	}
+	return reverseVideo.MatchString(m.question.View())
 }
 
 // The People page lists mechanik and each rig's Product Owner by its rig's
