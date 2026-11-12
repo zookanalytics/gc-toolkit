@@ -44,6 +44,22 @@ a:focus-visible {
   text-underline-offset: 3px;
 }
 
+/* A copy control (CopyButton) lays its label and the word that says it copied
+   in one cell, so it keeps one size whichever it reads, and nothing beside it
+   moves. The reading it does not show is hidden. */
+.copy {
+  display: inline-grid;
+  justify-items: center;
+}
+
+.copy > * {
+  grid-area: 1 / 1;
+}
+
+.copy > [aria-hidden='true'] {
+  visibility: hidden;
+}
+
 /* ── The bar ─────────────────────────────────────────────────────────── */
 
 .page {

@@ -4,7 +4,7 @@
 // Needs you the ask is the row and the beads it holds are its children.
 
 import type { ReactNode } from 'react';
-import type { Counts, DeliveryEntry, EpicEntry, Group, GroupList, Ref, Row } from './document.gen';
+import type { Counts, DeliveryEntry, EpicEntry, Group, GroupList, PullRequest, Ref, Row } from './document.gen';
 import { Description } from './Description';
 import { BeadId, Line, Show } from './Line';
 import {
@@ -166,15 +166,23 @@ function askActions(v: View, row: Row): ReactNode[] {
   ];
 }
 
+/** Where a pull request stands and what holds it, as its row and its Details
+ *  both read it: the state, then the reasons it is held. Empty where the
+ *  document records neither. */
+function pullRequestStatus(pr: PullRequest): string {
+  const facts: string[] = [];
+  if (pr.state !== undefined && pr.state !== '') facts.push(pr.state);
+  if (pr.held !== undefined && pr.held.length > 0) facts.push(`held: ${pr.held.join(', ')}`);
+  return facts.join(' · ');
+}
+
 function pullRequestBits(row: Row): ReactNode[] {
   const pr = row.pull_request;
   if (pr === undefined) return [];
-  const facts = [`#${pr.number}`];
-  if (pr.state !== undefined && pr.state !== '') facts.push(pr.state);
-  if (pr.held !== undefined && pr.held.length > 0) facts.push(`held: ${pr.held.join(', ')}`);
+  const status = pullRequestStatus(pr);
   return [
     <span key="pr" className="bit bit--mono">
-      {facts.join(' · ')}
+      {status === '' ? `#${pr.number}` : `#${pr.number} · ${status}`}
     </span>,
   ];
 }
@@ -207,9 +215,7 @@ export function DetailsBlock({ row, depth }: { row: Row; depth: number }) {
   }
   if (row.pull_request !== undefined) {
     const pr = row.pull_request;
-    const facts = [pr.state, pr.held !== undefined && pr.held.length > 0 ? `held: ${pr.held.join(', ')}` : '']
-      .filter((x) => x !== undefined && x !== '')
-      .join(', ');
+    const status = pullRequestStatus(pr);
     fields.push([
       'Pull request',
       <>
@@ -220,7 +226,7 @@ export function DetailsBlock({ row, depth }: { row: Row; depth: number }) {
         ) : (
           `#${pr.number}`
         )}
-        {facts !== '' && <span className="muted"> {facts}</span>}
+        {status !== '' && <span className="muted"> {status}</span>}
       </>,
     ]);
   }
