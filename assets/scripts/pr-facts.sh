@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# pr-facts — arm 7 of the merge cadence: record EXTERNAL facts about each open
-# pull_request anchor. No merge authority. Same enumeration and pinned identity
-# read as merge.sh; per anchor, in order: PR MERGED (out-of-band, or a record
+# pr-facts — arm 7 of the merge cadence: record EXTERNAL facts about each anchor
+# that owns an open PR. No merge authority. The same pinned identity read as
+# merge.sh; per anchor, in order: PR MERGED (out-of-band, or a record
 # that died after merge.sh landed it) -> lifecycle transition to merged, with
 # a failure counted against the same record-failure-cap.sh budget merge.sh
 # spends, since both are attempts at the one repair;
@@ -34,6 +34,16 @@
 # gate-ensure dispatches on the lane, not on the commit under it. A merged record never carries an
 # empty merged_sha — an unreadable mergeCommit records
 # merged_sha=unverified:PR#<n>, loudly.
+# An anchor owns an open PR at merge_result pull_request, open, and on Gas
+# Town's pending record (specs/tk-1tfzr71.66/design.md, section 6) at
+# pull_request_pending, blocked, or pull_request_head_changed, open, each
+# assigned to the refinery. merge.sh reads only the first. On the record the
+# landing order (gctk pr reconcile) alone writes the bead's end, so the merged,
+# closed and base-moved arms leave such a PR to it. Every other arm runs there
+# too and records what it read in one plain metadata write, guarded on the
+# status and the assignee the pass read (anchor_write), so it moves no
+# merge_result, assignee or route, and a red-check park files its gate without
+# the park route.
 # Every OPEN non-draft anchor also gets its POSTURE recorded before any dispatch
 # arm runs (lifecycle/lifecycle.toml [posture]): pr_posture (dated) and pr_merge_state
 # pinned to the live head, written only when the value changes, so merge.sh can
@@ -886,7 +896,7 @@ no_thread_blocks() {
   [ "$n" = 0 ] && NTB_WHY="No review thread blocks PR#$1's merge: none it counts is left unresolved."
   return 0
 }
-# withdraw_stale_gates <anchor> <num> <head-oid> <base> <recorded-target> <merge-state> <route>
+# withdraw_stale_gates <anchor> <num> <head-oid> <base> <recorded-target> <merge-state> <route> <state>
 # — withdraw this script's merge-path gates on an open PR's anchor once the
 # situation each asked about is gone. An open one holds the merge, and through
 # takeaway_is_holding the merge-in and red-check dispatch, so a gate that
@@ -904,7 +914,11 @@ no_thread_blocks() {
 #                                        its checks passing; the anchor's
 #                                        <route>, while it is still the park
 #                                        sentinel the red-check arm wrote with
-#                                        the gate, is cleared first
+#                                        the gate, is cleared first. An anchor
+#                                        whose <state> is on Gas Town's record
+#                                        took no park route, since the route is
+#                                        the record's, so its gate is withdrawn
+#                                        alone
 #   pr-comments.<num>.*                  never: nothing this script reads says
 #                                        its feedback was answered, so its gate
 #                                        waits for the person who answers it
@@ -912,7 +926,7 @@ no_thread_blocks() {
 # under the key moot. A key with an open gate a person is assigned is left to
 # them. A gate read that does not answer withdraws nothing this pass.
 withdraw_stale_gates() {
-  local id="$1" num="$2" head="$3" base="$4" rtarget="$5" mstate="$6" route="$7" gates keys key who why at
+  local id="$1" num="$2" head="$3" base="$4" rtarget="$5" mstate="$6" route="$7" state="$8" gates keys key who why at
   [ -x "$HUMAN_GATE" ] || return 0
   if ! gates=$(bd_open_human_gates "$id"); then
     echo "$PROG: $id — PR#$num's human gates did not read; no stale gate is withdrawn this pass" >&2
@@ -953,7 +967,7 @@ withdraw_stale_gates() {
     # later pass back to retry a clear that did not land.
     case "$key" in
       "pr-fix-noncode.$num"|"pr-fix-capped.$num"|"pr-fix-unmoved.$num")
-        if [ "$route" = human ]; then
+        if [ "$route" = human ] && ! on_record "$state"; then
           if ! "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request --route "" >/dev/null 2>&1; then
             echo "$PROG: $id — its stale $key gate stays open: the anchor's park route did not clear, and the next pass tries both again" >&2
             continue
@@ -1077,6 +1091,75 @@ mint_rework_verify() { # <bead> <anchor> <branch> <target> <reason> <mode> <pr-u
        and (($m.pr_number // "") | tostring) == $pn) | tostring' 2>/dev/null
 }
 
+# Gas Town's pending record (specs/tk-1tfzr71.66/design.md, section 6) owns an
+# open PR at two of its values: pull_request_pending, kept blocked, and
+# pull_request_head_changed, kept open, each assigned to the refinery. The
+# record's writers alone move such a bead's merge_result, status, assignee and
+# route. lifecycle/lifecycle.toml declares none of the record's values, so no
+# transition writes a bead that carries one, nor reads it.
+on_record() { # <merge_result> — 0 when it is a value of the record that owns an open PR
+  case "$1" in pull_request_pending|pull_request_head_changed) return 0 ;; esac
+  return 1
+}
+record_value() { # <merge_result> — 0 when it is any value of the record
+  case "$1" in pull_request_?*|mr_merged) return 0 ;; esac
+  return 1
+}
+
+# dated_value <have> <value>@<oid> — a dated key's value, <value>@<oid>@<since>:
+# the instant <have> carries while it names the same value and oid, and the
+# current one when either differs or <have> carries none. This is the rule
+# lifecycle.sh --set-dated applies (datedSince in
+# services/gctk/internal/cli/lifecycle.go), for the writes no transition makes.
+dated_value() {
+  local rest
+  case "$1" in
+    "$2@"?*)
+      rest="${1#"$2@"}"
+      case "$rest" in *@*) ;; *) printf '%s@%s' "$2" "$rest"; return 0 ;; esac ;;
+  esac
+  printf '%s@%s' "$2" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+
+# anchor_write <anchor> <state> <status> <assignee> [--set <key>=<value> |
+# --set-dated <key>=<value>@<oid> | --unset <key> | --keep-route]... — record
+# what an arm read on an anchor that stays in <state>, the merge_result the pass
+# read it at. In a state lifecycle/lifecycle.toml declares, that is one
+# transition onto the state (--to <state> --expect <state>), which lands nothing
+# once the anchor has moved. At a value of Gas Town's record it is one plain
+# metadata write of the same keys, guarded on the <status> and <assignee> the
+# pass read, which bd checks inside the write. So it moves no merge_result,
+# assignee or route, and it lands nothing once a writer of the record has moved
+# the bead. A dated key there takes its instant by dated_value, against the
+# value the bead carries when the write is made. The exit is the write's, and a
+# write it cannot make exits 1.
+anchor_write() {
+  local a="$1" state="$2" st="$3" as="$4" w=() k have=""
+  shift 4
+  if ! record_value "$state"; then
+    "$LIFECYCLE" transition "$a" --to "$state" --expect "$state" "$@"
+    return
+  fi
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --set) w+=(--set-metadata "${2:-}"); shift 2 ;;
+      --unset) w+=(--unset-metadata "${2:-}"); shift 2 ;;
+      --keep-route) shift ;;
+      --set-dated)
+        k="${2%%=*}"
+        if [ -z "$have" ]; then
+          have=$(gc bd show "$a" --json 2>/dev/null | scrub | jq -c '.[0].metadata // empty' 2>/dev/null)
+          [ -n "$have" ] || { echo "$PROG: $a — the bead did not read, so its dated $k is not written" >&2; return 1; }
+        fi
+        w+=(--set-metadata "$k=$(dated_value "$(printf '%s' "$have" | jq -r --arg k "$k" '(.[$k] // "") | tostring' 2>/dev/null)" "${2#*=}")")
+        shift 2 ;;
+      *) echo "$PROG: $a — $1 is no write a bead on Gas Town's record takes from this script" >&2; return 1 ;;
+    esac
+  done
+  [ "${#w[@]}" -gt 0 ] || return 0
+  gc bd update "$a" --if-status="$st" --if-assignee="$as" "${w[@]}" </dev/null
+}
+
 finishing_rank() { # <merge_result> <pr_posture> <pr_head_oid> — the rank an anchor's PR-finishing work follows
   # approved or unapproved, as the priority function reads the approval
   # (prio_pr_approved in priority-lib.sh) from the three fields it reads. Prints
@@ -1086,18 +1169,18 @@ finishing_rank() { # <merge_result> <pr_posture> <pr_head_oid> — the rank an a
     | if prio_pr_approved then "approved" else "unapproved" end' 2>/dev/null
 }
 
-rank_moves() { # <posture> <pr-head> <posture'> <pr-head'> — 0 when a write taking an anchor in pull_request from the first pair to the second moves its PR-finishing rank
-  [ "$(finishing_rank pull_request "$1" "$2")" != "$(finishing_rank pull_request "$3" "$4")" ]
+rank_moves() { # <state> <posture> <pr-head> <posture'> <pr-head'> — 0 when a write taking an anchor in <state> from the first pair to the second moves its PR-finishing rank
+  [ "$(finishing_rank "$1" "$2" "$3")" != "$(finishing_rank "$1" "$4" "$5")" ]
 }
 
-settle_finishing() { # <anchor> <state> <posture> <pr-head> <settled-rank> — finish the re-rank of its PR-finishing work
+settle_finishing() { # <anchor> <state> <posture> <pr-head> <settled-rank> [<status> <assignee>] — finish the re-rank of its PR-finishing work
   # An approved PR's finishing work runs at P0 whatever its shift, and any other
   # PR's at its anchor's priority plus its shift (docs/steering.md). That work is
   # the anchor's open reviews, reworks and validation passes, the work a pool
   # claims, with their live workflows. The rank it follows is finishing_rank's,
   # read from the state the anchor rests in, its recorded posture and the PR
-  # head recorded beside it: approved only in pull_request under a posture read
-  # approved at that head. The anchor's
+  # head recorded beside it: approved only in a state that owns an open PR,
+  # under a posture read approved at that head. The anchor's
   # pr_finishing_settled names the rank all of that work was last settled at,
   # approved or unapproved, and reads unsettled while a re-rank is owed. When it
   # names anything but the rank the work follows, the work is settled, and that
@@ -1105,19 +1188,20 @@ settle_finishing() { # <anchor> <state> <posture> <pr-head> <settled-rank> — f
   # fails leaves a record a later pass settles again, whether or not the posture
   # or the state moves, until all of it settles. A record naming the other rank
   # turns unsettled before the first settle, so a pass that stops partway leaves
-  # no record that a return to that rank would read as settled. Both writes are a
-  # transition onto the state the anchor rests in, so neither lands once the
-  # anchor has moved, and both are bookkeeping that moves no route
-  # (--keep-route): a human state keeps the route it carries, an empty one
-  # included, rather than taking the park route, and a detached state's route is
-  # left for the writes that route. Each settle waits for the store's priority
-  # lock a short while only, since the merge arm waits on the posture pass.
-  local a="$1" state="$2" posture="$3" head="$4" rec="$5" mr="$2" want basis kids k settled=0 left=""
-  local onto=(--to "$state" --expect "$state" --keep-route)
+  # no record that a return to that rank would read as settled. Both writes are
+  # anchor_write's onto the state the anchor rests in, guarded on the <status>
+  # and <assignee> the caller read where that state is on Gas Town's record, so
+  # neither lands once the anchor has moved, and both are bookkeeping that moves
+  # no route (--keep-route): a human state keeps the route it carries, an empty
+  # one included, rather than taking the park route, and a detached state's
+  # route is left for the writes that route. Each settle waits for the store's
+  # priority lock a short while only, since the merge arm waits on the posture
+  # pass.
+  local a="$1" state="$2" posture="$3" head="$4" rec="$5" st="${6:-}" as="${7:-}" mr="$2" want basis kids k settled=0 left=""
   [ "$state" != unanchored ] || mr=""
   basis="posture ${posture%%@*}"
   [ -n "${posture%%@*}" ] || basis="posture unrecorded"
-  [ "$state" = pull_request ] || basis="resting in $state"
+  [ "$state" = pull_request ] || on_record "$state" || basis="resting in $state"
   want=$(finishing_rank "$mr" "$posture" "$head")
   case "$want" in
     approved|unapproved) ;;
@@ -1126,11 +1210,11 @@ settle_finishing() { # <anchor> <state> <posture> <pr-head> <settled-rank> — f
   esac
   # An approval read at a head other than the PR's ranks nothing at P0, so the
   # basis names that rather than the posture word alone.
-  if [ "$state" = pull_request ] && [ "${posture%%@*}" = approved ] && [ "$want" = unapproved ]; then
+  if { [ "$state" = pull_request ] || on_record "$state"; } && [ "${posture%%@*}" = approved ] && [ "$want" = unapproved ]; then
     basis="posture approved at a head other than the PR's"
   fi
   [ "$rec" != "$want" ] || return 0
-  if [ -n "$rec" ] && [ "$rec" != unsettled ] && ! "$LIFECYCLE" transition "$a" "${onto[@]}" \
+  if [ -n "$rec" ] && [ "$rec" != unsettled ] && ! anchor_write "$a" "$state" "$st" "$as" --keep-route \
        --set pr_finishing_settled=unsettled >/dev/null; then
     echo "$PROG: WARN $a — its PR-finishing work is recorded at the $rec rank, not the $want rank it follows ($basis), and the record did not turn unsettled, so none of that work was re-ranked (retry next pass)" >&2
     return 1
@@ -1153,7 +1237,7 @@ settle_finishing() { # <anchor> <state> <posture> <pr-head> <settled-rank> — f
     echo "$PROG: WARN $a — $left did not settle at the $want rank ($basis); a later pass settles its PR-finishing work again" >&2
     return 1
   fi
-  if ! "$LIFECYCLE" transition "$a" "${onto[@]}" --set "pr_finishing_settled=$want" >/dev/null; then
+  if ! anchor_write "$a" "$state" "$st" "$as" --keep-route --set "pr_finishing_settled=$want" >/dev/null; then
     echo "$PROG: WARN $a — its PR-finishing work settled at the $want rank, but the record did not land, so a later pass settles it again" >&2
     return 1
   fi
@@ -1514,7 +1598,21 @@ answered_comment_ids() {
 }
 # <<< answered-threads-body
 
-ANCHORS=$(bd_list --status=open --metadata-field merge_result=pull_request) || {
+# The anchors that own an open PR, the beads every arm below walks: merge_result
+# pull_request on an open bead, and on Gas Town's pending record
+# pull_request_pending on a blocked one and pull_request_head_changed on an
+# open one. One listing reads them all.
+OPEN_PR_ANCHORS_JQ='[ .[] | (((.metadata // {}).merge_result // "") | tostring) as $mr
+    | ((.status // "") | tostring | ascii_downcase) as $st
+    | select(($mr == "pull_request" and $st == "open")
+             or ($mr == "pull_request_pending" and $st == "blocked")
+             or ($mr == "pull_request_head_changed" and $st == "open")) ]'
+open_pr_anchors() {
+  local rows
+  rows=$(bd_list --status=open,blocked --has-metadata-key=merge_result) || return 1
+  printf '%s' "$rows" | jq -c "$OPEN_PR_ANCHORS_JQ" 2>/dev/null
+}
+ANCHORS=$(open_pr_anchors) || {
   echo "$PROG: could not enumerate gating anchors; failing loudly rather than reporting a false all-clear" >&2
   exit 1
 }
@@ -1593,37 +1691,39 @@ LO_EOF
   fi
 fi
 
-# --- the PR-finishing work of anchors resting outside pull_request --------------
-# The rank an anchor's PR-finishing work follows is approved only while the
-# anchor rests in pull_request, and the per-anchor walk below reads only those.
-# Whichever writer moves an anchor out, the transition marks its record
-# unsettled (lifecycle.toml exit_sets): the exits this script writes settle the
-# work in the pass that writes them, and every other exit, such as a repool
-# through rejection-repool.sh, is settled here. So every full pass reads the live
-# anchors that carry a record, and settles the PR-finishing work of each one
-# resting elsewhere while its record names anything but the rank that work
-# follows, a settle an exit left short included. The listing's one jq reads that
-# rank through the priority function's own approval read (prio_pr_approved) and
-# keeps only the anchors whose record differs from it, so an anchor whose work
-# already settled there costs no read of its own on later passes. The record's
-# write moves no route, so a human state keeps the route a person gave it, or
-# none, and is never re-parked. Like the sweeps above, this runs before the
-# no-anchors early-exit.
+# --- the PR-finishing work of anchors the walk does not read --------------------
+# The per-anchor walk below settles the PR-finishing work of each anchor it
+# reads, one that owns an open PR. A transition that moves an anchor out of
+# pull_request marks its record unsettled (lifecycle.toml exit_sets), and a
+# writer of Gas Town's record moves one off the record's open values with no
+# mark. The exits this script writes settle the work in the pass that writes
+# them, and every other exit, such as a repool through rejection-repool.sh or
+# the landing order's record of an exception, is settled here. So every full
+# pass reads the live anchors that carry a record, and settles the PR-finishing
+# work of each one resting elsewhere while its record names anything but the
+# rank that work follows, a settle an exit left short included. The listing's
+# one jq reads that rank through the priority function's own approval read
+# (prio_pr_approved) and keeps only the anchors whose record differs from it,
+# so an anchor whose work already settled there costs no read of its own on
+# later passes. The record's write moves no route, so a human state keeps the
+# route a person gave it, or none, and is never re-parked. Like the sweeps
+# above, this runs before the no-anchors early-exit.
 if [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
   if fs_rows=$(bd_list --status="$LIVE_STATUSES" --has-metadata-key=pr_finishing_settled); then
-    while IFS=$'\037' read -r fsid fsstate fsposture fshead fsrec; do
+    while IFS=$'\037' read -r fsid fsstate fsposture fshead fsrec fsst fsas; do
       [ -n "${fsid:-}" ] || continue
-      settle_finishing "$fsid" "$fsstate" "$fsposture" "$fshead" "$fsrec" || true
+      settle_finishing "$fsid" "$fsstate" "$fsposture" "$fshead" "$fsrec" "$fsst" "$fsas" || true
     done <<FS_EOF
 $(printf '%s' "$fs_rows" | jq -r "$PRIORITY_JQ"'.[]? | (.metadata // {}) as $m
     | ((($m.merge_result // "") | tostring) | if . == "" then "unanchored" else . end) as $s
-    | select($s != "pull_request")
+    | select($s != "pull_request" and $s != "pull_request_pending" and $s != "pull_request_head_changed")
     | select((($m.pr_finishing_settled // "") | tostring) != (if prio_pr_approved then "approved" else "unapproved" end))
-    | [ (.id // ""), $s, ($m.pr_posture // ""), ($m.pr_head_oid // ""), ($m.pr_finishing_settled // "") ]
+    | [ (.id // ""), $s, ($m.pr_posture // ""), ($m.pr_head_oid // ""), ($m.pr_finishing_settled // ""),
+        (.status // ""), (.assignee // "") ]
     | map(tostring | gsub("[\u001f\n]"; " ")) | join("\u001f")' 2>/dev/null)
 FS_EOF
   else
-    echo "$PROG: WARN the anchors whose PR-finishing work carries a rank could not be listed, so none resting outside pull_request was re-ranked (retry next pass)" >&2
+    echo "$PROG: WARN the anchors whose PR-finishing work carries a rank could not be listed, so none the walk does not read was re-ranked (retry next pass)" >&2
   fi
 fi
 
@@ -1801,6 +1901,12 @@ while IFS= read -r tagged; do
   checkset=$(printf '%s' "$row" | jq -r '.metadata.check_set // ""')
   hold=$(printf '%s' "$row" | jq -r '.metadata.merge_hold // ""')
   rhold=$(printf '%s' "$row" | jq -r '.metadata.rebase_hold // ""')
+  # The state the anchor rests in, with the status and assignee this pass read:
+  # what each arm's record on the anchor is written onto (anchor_write), and on
+  # Gas Town's record what it is guarded on.
+  IFS=$'\037' read -r amr ast aas < <(printf '%s' "$row" | jq -r '[
+      (.metadata.merge_result // ""), (.status // ""), (.assignee // "")
+    ] | map(tostring | gsub("[\u001f\n]"; " ")) | join("\u001f")')
   # deferred-dispatch's arm marker (deferred-dispatch.sh): the pool this work
   # re-offers to once it reads bd-ready, set while the anchor waits and cleared
   # when the reconcile pass slings it. While set, the anchor is deliberately
@@ -1868,6 +1974,15 @@ while IFS= read -r tagged; do
     skipped=$((skipped + 1)); continue
   fi
   [ -n "$target" ] || target="$base"
+
+  # On Gas Town's record the landing order alone writes the bead's end from its
+  # own read of the PR, so a PR that merged or closed is left to its next run,
+  # and neither arm below records it.
+  if on_record "$amr" && [ "$state" != OPEN ]; then
+    [ "$POSTURE_ONLY" = 1 ] || [ "$ROUTE_ONLY" = 1 ] \
+      || echo "$PROG: $id — PR#$num is $state; its record ($amr) is the landing order's to close"
+    skipped=$((skipped + 1)); continue
+  fi
 
   # --- PR merged (out-of-band, or a died record): record it ----------------------
   # Reconciliation is the full pass's; the early arms (--posture-only,
@@ -2129,8 +2244,7 @@ MP_EOF
   PSINCE=$(printf '%s' "$row" | jq -r '(.metadata.pr_provenance_since // "") | tostring')
   if [ -z "$PSINCE" ]; then
     pnow=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-    if "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
-         --set "pr_provenance_since=$pnow" >/dev/null; then
+    if anchor_write "$id" "$amr" "$ast" "$aas" --set "pr_provenance_since=$pnow" >/dev/null; then
       PSINCE="$pnow"
     else
       echo "$PROG: $id — PR#$num provenance cutover did not record; every post under our login reads as the city's own this pass (retry next pass)" >&2
@@ -2145,7 +2259,7 @@ MP_EOF
   if [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ] && [ "$state" = OPEN ]; then
     withdraw_stale_gates "$id" "$num" "$head_oid" "$base" \
       "$(printf '%s' "$row" | jq -r '(.metadata.merged_target // "") | tostring')" "$merge_state" \
-      "$(printf '%s' "$row" | jq -r '(.metadata["gc.routed_to"] // "") | tostring')"
+      "$(printf '%s' "$row" | jq -r '(.metadata["gc.routed_to"] // "") | tostring')" "$amr"
   fi
 
   # --- status label: project the human-attention axis onto the PR list ----------
@@ -2175,17 +2289,17 @@ MP_EOF
       ] | map(tostring) | join("\u001f")')
     if [ -n "$head_oid" ] && [ "$dr_head" != "$head_oid" ]; then
       DR_SETS=(--set "pr_head_oid=$head_oid"); dr_marked=""
-      if [ -n "$dr_fs" ] && [ "$dr_fs" != unsettled ] && rank_moves "$dr_p" "$dr_head" "$dr_p" "$head_oid"; then
+      if [ -n "$dr_fs" ] && [ "$dr_fs" != unsettled ] && rank_moves "$amr" "$dr_p" "$dr_head" "$dr_p" "$head_oid"; then
         DR_SETS+=(--set pr_finishing_settled=unsettled); dr_marked=1
       fi
-      if "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request "${DR_SETS[@]}" >/dev/null; then
+      if anchor_write "$id" "$amr" "$ast" "$aas" "${DR_SETS[@]}" >/dev/null; then
         dr_head="$head_oid"; [ -z "$dr_marked" ] || dr_fs=unsettled
         echo "$PROG: $id — PR#$num is a draft; recorded PR head $head_oid"
       else
         echo "$PROG: $id — PR#$num draft head record failed; retry next pass" >&2
       fi
     fi
-    settle_finishing "$id" pull_request "$dr_p" "$dr_head" "$dr_fs" || true
+    settle_finishing "$id" "$amr" "$dr_p" "$dr_head" "$dr_fs" "$ast" "$aas" || true
     skipped=$((skipped + 1)); continue
   fi
 
@@ -2307,8 +2421,7 @@ MP_EOF
             marks=()
             [ "$cam_new" = "$cam" ] || marks+=(--set "pr_comment_answered=$cam_new")
             [ "$ram_new" = "$ram" ] || marks+=(--set "pr_review_answered=$ram_new")
-            if [ "${#marks[@]}" -gt 0 ] && ! "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
-                 "${marks[@]}" >/dev/null; then
+            if [ "${#marks[@]}" -gt 0 ] && ! anchor_write "$id" "$amr" "$ast" "$aas" "${marks[@]}" >/dev/null; then
               MARKS_UNRECORDED=1
               echo "$PROG: $id — PR#$num answered marks did not record; the threads are read again next pass" >&2
             fi
@@ -2506,12 +2619,12 @@ MP_EOF
   new_h="$have_head"; [ -z "$wrote_h" ] || new_h="$wrote_h"
   fs_marked=""
   if { [ -n "$wrote_p" ] || [ -n "$wrote_h" ]; } && [ -n "$have_fs" ] && [ "$have_fs" != unsettled ] \
-     && rank_moves "$have_p" "$have_head" "$new_p" "$new_h"; then
+     && rank_moves "$amr" "$have_p" "$have_head" "$new_p" "$new_h"; then
     PC_SETS+=(--set pr_finishing_settled=unsettled); fs_marked=1
   fi
   stored_p="$have_p"; stored_h="$have_head"
   if [ ${#PC_SETS[@]} -gt 0 ]; then
-    if "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request "${PC_SETS[@]}" >/dev/null; then
+    if anchor_write "$id" "$amr" "$ast" "$aas" "${PC_SETS[@]}" >/dev/null; then
       [ -n "$wrote_p" ] && { pinned=1; postured=$((postured + 1)); stored_p="$want_p"; }
       stored_h="$new_h"
       [ -z "$fs_marked" ] || have_fs=unsettled
@@ -2532,20 +2645,22 @@ MP_EOF
     fi
   fi
   # The priority function ranks the anchor's PR-finishing work from the state it
-  # rests in, pull_request here, and the posture and PR head the store holds:
-  # the ones this pass recorded, or the ones it found standing.
+  # rests in, one that owns an open PR here, and the posture and PR head the
+  # store holds: the ones this pass recorded, or the ones it found standing.
   # settle_finishing brings that work to the rank they give whenever the
   # anchor's record says it is not there yet, so a posture or head moving into
   # or out of approved re-ranks it in the pass that records it, and a re-rank
   # that pass left short is finished by a later one, whether or not anything
   # moves again.
-  settle_finishing "$id" pull_request "$stored_p" "$stored_h" "$have_fs" || true
+  settle_finishing "$id" "$amr" "$stored_p" "$stored_h" "$have_fs" "$ast" "$aas" || true
   # merge.sh validates the posture recorded here and never asks GitHub, so an
   # anchor this pass could not make current is one it would clear against a
   # fact from an earlier tick. A standing `commented@` is already holding that
   # merge; every other shape is the gap, and --posture-only reports it in its
-  # exit code so refinery-reconcile can hold the merge arm for the pass.
-  if [ "$pinned" != 1 ]; then
+  # exit code so refinery-reconcile can hold the merge arm for the pass. merge.sh
+  # reads no anchor on Gas Town's record, whose merge the landing order asks for
+  # on the evaluator's live read, so such an anchor is no gap here.
+  if [ "$pinned" != 1 ] && ! on_record "$amr"; then
     case "$have_p" in
       commented@*) : ;;
       *) unpostured=$((unpostured + 1))
@@ -2595,6 +2710,13 @@ MP_EOF
     # anchor does not merge this pass, and its feedback is not routed while it
     # sits on the wrong base, so the early feedback arm skips it.
     [ "$ROUTE_ONLY" != 1 ] || continue
+    # On Gas Town's record a base other than the record's target is the landing
+    # order's to record, as pull_request_reconcile_invalid behind its own gate,
+    # and nothing below acts on the PR meanwhile.
+    if on_record "$amr"; then
+      echo "$PROG: $id — PR#$num sits on base '$base', not its record's target '$rec_target'; the landing order records it"
+      skipped=$((skipped + 1)); continue
+    fi
     if "$LIFECYCLE" transition "$id" --to retargeted --expect pull_request \
          --assignee "" \
          --set "blocked_reason=PR#$num retargeted: base '$base' != expected target '$rec_target'" \
@@ -3464,7 +3586,7 @@ $CBODY"
     fi
     [ "$NRBATCH" = "$orbatch" ] || xbatch+=(--set "pr_review_batch=$NRBATCH")
     [ "$NIBATCH" = "$oibatch" ] || xbatch+=(--set "pr_issue_comment_batch=$NIBATCH")
-    if "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
+    if anchor_write "$id" "$amr" "$ast" "$aas" \
          --set "pr_comment_watermark=$max_c" --set "pr_review_watermark=$max_r" \
          --set "pr_issue_comment_watermark=$max_i" \
          --set "pr_comment_batch=$NBATCH" ${xbatch[@]+"${xbatch[@]}"} \
@@ -3593,8 +3715,7 @@ $CBODY"
     if [ -z "$UTVID" ]; then
       echo "$PROG: $id — PR#$num carries $UT_COUNT unengaged review thread(s); posture holds the merge but no human gate could be filed (retry next pass)" >&2
       skipped=$((skipped + 1))
-    elif "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
-           --set "pr_unengaged_threads=$head_oid" >/dev/null; then
+    elif anchor_write "$id" "$amr" "$ast" "$aas" --set "pr_unengaged_threads=$head_oid" >/dev/null; then
       flagged=$((flagged + 1))
       echo "$PROG: $id — PR#$num has $UT_COUNT unengaged review-thread finding(s); filed human gate $UTVID (merge held)"
     else
@@ -3633,7 +3754,9 @@ $CBODY"
   # through lifecycle.sh in one update with the takeaway the board shows as what
   # the person owes, so the next pass stands the anchor down on its own and the
   # fixer is never re-offered. Once GitHub reads the PR mergeable,
-  # withdraw_stale_gates withdraws the park's gate and clears its route.
+  # withdraw_stale_gates withdraws the park's gate and clears its route. On Gas
+  # Town's record the route is the record's, so a park there files its gate
+  # alone, and the next pass stands down on that gate.
   RC_FIX_ATTEMPT_CAP=3
   RC_DEPLOY_CHECK_RE="vercel|netlify|deploy"
   case "$merge_state" in
@@ -3761,8 +3884,7 @@ $CBODY"
                     echo "$PROG: $id — PR#$num required check(s) failing ($rc_allnames) for a non-code cause; run(s) $rc_live still have a job queued or running, so the re-run waits for them to finish (nothing parked)"
                     skipped=$((skipped + 1)); continue
                   fi
-                  if ! "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
-                       --set "pr_check_rerun=$head_oid" >/dev/null; then
+                  if ! anchor_write "$id" "$amr" "$ast" "$aas" --set "pr_check_rerun=$head_oid" >/dev/null; then
                     echo "$PROG: WARN $id — PR#$num required check(s) failing ($rc_allnames) for a non-code cause, but the record of a re-run at head $head_oid did not land; nothing re-run or parked (retry next pass)" >&2
                     skipped=$((skipped + 1)); continue
                   fi
@@ -3796,7 +3918,7 @@ $CBODY"
                     skipped=$((skipped + 1)); continue ;;
                 esac
               fi
-              if "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
+              if on_record "$amr" || "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
                    --route human \
                    --takeaway "PR#$num has a required check failing for a non-code cause — re-run it or fix the infrastructure; the park lifts once it is green" >/dev/null; then
                 human_gate "$id" "pr-fix-noncode.$num" \
@@ -3888,7 +4010,7 @@ $CBODY"
                 echo "$PROG: $id — PR#$num head re-read as '${rc_head_now:-nothing}' rather than $head_oid after red-check child $rc_tried closed; nothing parked or dispatched (the next pass reads the head again)" >&2
                 skipped=$((skipped + 1)); continue
               fi
-              if "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
+              if on_record "$amr" || "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
                    --route human \
                    --takeaway "PR#$num is still red at the head an auto-fixer was already sent to. Fix the failing check by hand or re-run it." >/dev/null; then
                 human_gate "$id" "pr-fix-unmoved.$num" \
@@ -3914,7 +4036,7 @@ $CBODY"
               | unique | map(select(. != ($h | ascii_downcase))) | length' 2>/dev/null)
             case "$rc_attempts" in ''|*[!0-9]*) rc_attempts=0 ;; esac
             if [ -z "$rc_stranded" ] && [ "$rc_attempts" -ge "$RC_FIX_ATTEMPT_CAP" ]; then
-              if "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
+              if on_record "$amr" || "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
                    --route human \
                    --takeaway "PR#$num is still red after $rc_attempts auto-fix attempts — fix the failing check by hand; no more fixers will be sent" >/dev/null; then
                 human_gate "$id" "pr-fix-capped.$num" \
@@ -4236,7 +4358,7 @@ wb_unresolvable() { # <thread-id>
 # follows them carries the write-back.
 if [ "$POSTURE_ONLY" = 1 ] || [ "$ROUTE_ONLY" = 1 ]; then
   WB_ANCHORS=""
-elif ! WB_ANCHORS=$(bd_list --status=open --metadata-field merge_result=pull_request); then
+elif ! WB_ANCHORS=$(open_pr_anchors); then
   echo "$PROG: write-back sweep skipped — could not re-read the anchors" >&2
   WB_ANCHORS=""
 fi

@@ -376,9 +376,11 @@ conversations = ["quiet", "outstanding", "answered"]
 # is not ends up dating a state that no longer holds, with nothing in either key
 # saying so.
 keys = ["pr.machine", "pr.conversation", "pr_posture"]
-# lifecycle.sh --set-dated is the only writer, and it applies one rule: preserve
-# the existing instant while the value and the oid both hold, stamp the current
-# one when either differs. Set, preserve and clear all fall out of it — the
+# lifecycle.sh --set-dated writes them, and pr-facts.sh's dated_value writes
+# pr_posture and pr.conversation on a bead at a value of Gas Town's pending
+# record, which no transition writes. Both apply one rule: preserve the
+# existing instant while the value and the oid both hold, stamp the current one
+# when either differs. Set, preserve and clear all fall out of it — the
 # reconcile cadence re-deriving the same verdict at the same head leaves the
 # instant alone, and a head move arrives with a fresh one no owed row reads.
 since_format = "RFC 3339 UTC"
