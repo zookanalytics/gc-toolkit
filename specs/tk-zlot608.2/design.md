@@ -346,25 +346,31 @@ restores it.
 rules do ([gas-city-search.md](gas-city-search.md#find-a-store)), from the
 inputs Gas City starts the rig's Claude sessions with:
 
-- Memory is off when the environment sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`,
-  or when the highest settings level that sets `autoMemoryEnabled` sets it
-  false.
+- Memory is off when the environment sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`.
+  It is also off when the highest settings level that sets `autoMemoryEnabled`
+  sets it false, unless the environment sets that variable to `0`, which turns
+  memory on.
 - Otherwise the store is the `autoMemoryDirectory` of the highest settings
   level that sets one. The levels, highest first, are managed settings, the
   `--settings` file Gas City gives each Claude session it starts, the
   checkout's local settings, its shared project settings, and the user settings
-  in the config directory.
+  in the config directory. A value that starts with `~/` is under the session's
+  home.
 - Otherwise the store is `<config dir>/projects/<project>/memory/`. The config
   directory is `CLAUDE_CONFIG_DIR`, or `.claude` under the session's home.
   `<project>` is `CLAUDE_CODE_PROJECT_DIR_NAME` when that is set beside
-  `CLAUDE_CONFIG_DIR`, and otherwise the checkout's path with each `/` and `.`
-  as `-`.
+  `CLAUDE_CONFIG_DIR` and is 1 to 64 letters, digits, hyphens or underscores.
+  Otherwise it is the checkout's path with each character that is not a letter
+  or a digit as `-`.
 
-The environment and the user settings a run reads are its own session's. Gas
-City starts the run on the rig's pool as it starts the rig's other Claude
-sessions, so they match unless an agent's provider or its own configuration
-sets a different environment, or a launch command gives each account a home of
-its own, as this host's does. A run compares paths by their real path, because
+The environment, the home and the user settings a run reads are its own
+session's. Gas City starts the run on the rig's pool as it starts the rig's
+other Claude sessions, so they match unless an agent's provider or its own
+configuration sets a different environment, or a launch command gives each
+account a home of its own, as this host's does. Where each account has a home
+of its own, another account's user settings, or a `~/` value under its home,
+can place a store where the run does not look, and the run reports it once a
+session writes there (below). A run compares paths by their real path, because
 those homes link their `projects` directories to one place, so one store shows
 under several paths.
 
@@ -383,18 +389,18 @@ well. The home rig is the one whose `pack.toml` names gc-toolkit, the test the
 distiller uses to decide where it runs.
 
 **A store several rigs share.** A store placed by the `--settings` file is one
-directory for the sessions of every rig and of the city root, and only the
-sessions Gas City starts are given that file. The home rig's run sorts it, as it
-sorts the city root's store, and the other rigs' runs leave it to that run. A
-store placed at the user or managed level, or named by
-`CLAUDE_CODE_PROJECT_DIR_NAME`, is also one directory for every project those
-sessions start in, but sessions the city does not run can share it, and no run
-can answer for their notes. No run sorts it. Each run that places a
-store there reports it as a place it cannot resolve (below). A store placed at
-the user level, or named by `CLAUDE_CODE_PROJECT_DIR_NAME`, comes under a run
-once the city's or the rig's own Claude settings set `autoMemoryDirectory`
-instead. Both rank above the user level, and a directory they set takes the
-place of the one the variable names.
+directory for the sessions of every rig and of the city root, one in each home
+when its value starts with `~/`, and only the sessions Gas City starts are given
+that file. The home rig's run sorts it, as it sorts the city root's store, and
+the other rigs' runs leave it to that run. A store placed at the user or managed
+level, or named by `CLAUDE_CODE_PROJECT_DIR_NAME`, is also one directory for
+every project those sessions start in, but sessions the city does not run can
+share it, and no run can answer for their notes. No run sorts it. Each run that
+places a store there reports it as a place it cannot resolve (below). A store
+placed at the user level, or named by `CLAUDE_CODE_PROJECT_DIR_NAME`, comes
+under a run once the city's or the rig's own Claude settings set
+`autoMemoryDirectory` instead. Both rank above the user level, and a directory
+they set takes the place of the one the variable names.
 
 **An absent store, and a place a run cannot resolve.** A store is absent when
 memory is off or no directory exists where the store is placed, provided no
@@ -402,13 +408,15 @@ session in the rig has written a memory index anywhere else since the previous
 run. The run then changes nothing, and its record says so. A run cannot resolve
 a place in these cases, and it removes nothing there:
 
-- A settings file at one of the levels does not parse, or the deciding
+- A settings file at one of the levels does not parse, the deciding
   `autoMemoryDirectory` is neither an absolute path nor one that starts with
-  `~/`, as the memory page requires. The run cannot tell what the sessions
-  used.
-- The rig's own settings place the store while
+  `~/`, as the memory page requires, or the checkout's converted path passes
+  200 characters, where Claude Code appends a hash the pages do not define.
+  The run cannot tell what the sessions used.
+- A settings file the repository supplies places the store while
   `permissions.blockReadsOutsideWorkingDirectories` is on, so Claude Code
-  neither loads nor writes memory there.
+  neither loads nor writes memory there. That is the rig's shared project
+  settings, or its local settings when git tracks them or `.claude` is a link.
 - The store is placed at a level no run sorts (above).
 - A session in the rig has written a memory index (`MEMORY.md`) with Claude
   Code's file tools since the previous run, outside the store the run placed
@@ -427,8 +435,8 @@ A run records each place it cannot resolve and why, and files a finding through
 `patrol-finding.sh` under a key for what it could not resolve, as the feedback
 miner files its findings. A case that stays unresolved updates that one finding
 from week to week, and a later run that resolves it marks the finding cleared.
-A place that is not one rig's alone is filed in the home rig's store, so it is
-one finding however many runs report it.
+A place that is not one rig's alone is filed in the home rig's bead store
+(`--rig`), so it is one finding however many runs report it.
 
 **The Product Owner.** Its memory stays off. `agents/po/agent.toml` sets
 `CLAUDE_CODE_DISABLE_AUTO_MEMORY`, because a note would carry one sitting's
@@ -487,7 +495,7 @@ recipes works it out again, and a note it writes about it counts as a repeat.
 
 | Unit | What it builds | Waits on |
 |---|---|---|
-| tk-zlot608.5 | The triage. `assets/scripts/memory-triage.sh` and its suite: verbs that place each store as Claude Code does and name the run that sorts it, copy it, list the due notes, count reads, remove notes with the hash and index checks, rewrite the guidance block, and report a place the run cannot resolve (section 6). The suite covers each input that moves a store or turns memory off, a shared store, an absent store and each case a run cannot resolve. `formulas/mol-memory-triage.toml`, `orders/memory-triage.toml` and the guidance file. The sort's method goes in the formula's sort step, or in a skill that step loads if the step would pass the step-size bound. It seeds this rig's records with the backlog record. It updates the docs this makes stale: the capture channels in docs/feedback-learning.md, the intake rule in docs/steering.md if the operator makes the route standing, the rows in docs/component-model.md §4, the feedback row in docs/built-once-target.md, and the Debt entry in docs/architecture.md, which it removes. | the operator's approval of this design, which closes tk-zlot608.2 |
+| tk-zlot608.5 | The triage. `assets/scripts/memory-triage.sh` and its suite: verbs that place each store as Claude Code does and name the run that sorts it, copy it, list the due notes, count reads, remove notes with the hash and index checks, rewrite the guidance block, and report a place the run cannot resolve (section 6). The suite covers each input that moves a store or turns memory on or off, a shared store, an absent store and each case a run cannot resolve. `formulas/mol-memory-triage.toml`, `orders/memory-triage.toml` and the guidance file. The sort's method goes in the formula's sort step, or in a skill that step loads if the step would pass the step-size bound. It seeds this rig's records with the backlog record. It updates the docs this makes stale: the capture channels in docs/feedback-learning.md, the intake rule in docs/steering.md if the operator makes the route standing, the rows in docs/component-model.md §4, the feedback row in docs/built-once-target.md, and the Debt entry in docs/architecture.md, which it removes. | the operator's approval of this design, which closes tk-zlot608.2 |
 
 One unit, because a script with no order to call it, or an order with no script,
 does nothing on its own.

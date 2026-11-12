@@ -52,14 +52,33 @@ changed since the script read it.
 file.** The memory page ("Storage location") gives the store as
 `~/.claude/projects/<project>/memory/`, where `<project>` "is derived from the
 git repository, so all worktrees and subdirectories within the same repo share
-one auto memory directory". The same section moves it. `CLAUDE_CONFIG_DIR`
-takes the place of `~/.claude`. `CLAUDE_CODE_PROJECT_DIR_NAME`, set beside it,
-names `<project>` for every repository launched with that config directory.
+one auto memory directory". The sessions page gives the conversion for a
+transcript's `<project>`, the working directory's path "with non-alphanumeric
+characters replaced by `-`", cut to 200 characters with a hash of the path
+appended when it is longer
+([sessions](https://code.claude.com/docs/en/sessions), "Where transcripts are
+stored"). The stores on this host carry that conversion of the path of the
+rig's checkout, for the sessions in its worktrees too.
+
+The memory page's section also moves the store. `CLAUDE_CONFIG_DIR` takes the
+place of `~/.claude`. `CLAUDE_CODE_PROJECT_DIR_NAME`, set beside it, names
+`<project>` for every repository launched with that config directory, and
+Claude Code ignores a value that is not 1 to 64 letters, digits, hyphens or
+underscores (sessions, "Name the project directory yourself").
 `autoMemoryDirectory` names the store itself: "It is read from any settings
-scope: user, project, local, policy, or `--settings`". Claude Code honors a
-project's or a local value under workspace trust, and while
+scope: user, project, local, policy, or `--settings`", and its value "must be
+an absolute path or start with `~/`". Claude Code honors a project's or a local
+value under workspace trust, and while
 `permissions.blockReadsOutsideWorkingDirectories` is on it neither loads nor
-writes memory in a directory a repository-supplied settings file chooses. When
+writes memory in a directory a repository-supplied settings file chooses. That
+is the shared project settings, or local settings that git tracks or that sit
+under a linked `.claude`
+([permissions](https://code.claude.com/docs/en/permissions), "When your local
+settings file needs trust"). Memory is off under `autoMemoryEnabled` false or
+`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` (the memory page, "Enable or disable auto
+memory"), and that variable set to `0` turns it on "even when `--bare` mode or
+`autoMemoryEnabled: false` would otherwise disable it"
+([environment variables](https://code.claude.com/docs/en/env-vars)). When
 several levels set a key, Claude Code uses the value of the highest: managed
 settings, then `--settings`, then local, shared project and user settings
 ([settings](https://code.claude.com/docs/en/settings), "Settings precedence").
@@ -72,15 +91,13 @@ Gas City gives each Claude session one of those levels.
 `internal/hooks/hooks.go` at 6bd609f5bf).
 
 No `claude` command prints the directory a session uses (`claude --help` at
-2.1.322), and inside a session `/memory` opens it. The page does not publish
-how a path becomes `<project>`, and the stores on this host show each `/` and
-`.` of the checkout's path becoming `-`. So the script applies the rules itself
-to the inputs it can read. [design.md](design.md), section 6, gives those
-inputs, the run that sorts each store, and how a run tells an absent store from
-a place it cannot resolve, so a miss under the derived name is never by itself
-an empty store. A place a run cannot resolve is reported through the pack's
-`patrol-finding.sh`, the route the feedback miner takes, so the triage adds no
-reporting of its own.
+2.1.322), and inside a session `/memory` opens it. So the script applies the
+rules itself to the inputs it can read. [design.md](design.md), section 6,
+gives those inputs, the run that sorts each store, and how a run tells an absent
+store from a place it cannot resolve, so a miss under the derived name is never
+by itself an empty store. A place a run cannot resolve is reported through the
+pack's `patrol-finding.sh`, the route the feedback miner takes, so the triage
+adds no reporting of its own.
 
 ## Count the sessions that read a note
 
