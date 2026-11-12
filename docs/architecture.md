@@ -324,14 +324,18 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   through its conversation's reply, and signs off by resolving those gates and
   closing the conversation, which ends its session. When a ruling sends work,
   the sitting and the operator choose whether it ends at that hand-off or stays
-  until the work returns, and it recommends staying where the discussion will
-  help judge the result
+  until the work returns
   ([human-engagement.md](human-engagement.md#a-sitting-that-stays-for-the-return)).
   Gas City sleeps a sitting that stays and wakes it with its thread when the
   work closes, and the board shows a conversation that waits on work as
-  waiting, not as an ask of the operator. A sitting cut short hands the
-  conversation back to the queue, and the next engagement resumes it from the
-  record.
+  waiting, not as an ask of the operator. On its return the sitting compares
+  what landed with what was agreed and tells the operator where it departs. It
+  passes and fails nothing: the work's own checks give the verdicts, and the
+  subject closes as it would after a hand-off, such as through the validating
+  closer the stay armed (`mol-validate-close`,
+  [component-model.md](component-model.md#4-where-each-component-sits)). A
+  sitting cut short hands the conversation back to the queue, and the next
+  engagement resumes it from the record.
 - **A takeaway records what a sitting concluded**, and its `--waiting-on` edge
   is what makes the wait machine-answerable
   ([lifecycle-composition.md](lifecycle-composition.md)).
