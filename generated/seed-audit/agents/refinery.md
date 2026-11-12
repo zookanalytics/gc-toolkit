@@ -115,13 +115,22 @@ the target lacks, and otherwise merges the target into it. It merges in the
 rig's repository without checking anything out, so it adds no worktree and
 leaves nothing to remove. It signs the merge commit when the repository's
 `commit.gpgSign` says to, as `git merge` would. It then pushes the branch and
-closes the hand-off, which releases the bead waiting on it:
+closes the hand-off, which releases the bead waiting on it.
+
+A merge that conflicts is a polecat's to resolve, never yours and never the
+operator's. The block pushes nothing and files the merge as a task on the
+effort's branch, which the hand-off and the landing bead wait on. It records
+the notice that hands the hand-off back to you once the task lands, then sends
+the task to the rig's polecat pool. The polecat makes the merge, resolves each
+conflict, and asks the operator only when a resolution needs a product
+decision:
 
 ```bash
 # >>> effort-bring-current
 H=<the hand-off>
 LANDING=<the landing bead it names>
-gc bd show "$H" --json | tr -d '[:cntrl:]' | jq -e '.[0] | .status != "closed" and all(.dependencies[]?; .dependency_type != "blocks" or .status == "closed")' >/dev/null 2>&1 \
+HJ=$(gc bd show "$H" --json | tr -d '[:cntrl:]')
+printf '%s' "$HJ" | jq -e '.[0] | .status != "closed" and all(.dependencies[]?; .dependency_type != "blocks" or .status == "closed")' >/dev/null 2>&1 \
   || { echo "$H does not read as open with every blocker closed, so nothing is brought current" >&2; exit 1; }
 L=$(gc bd show "$LANDING" --json | tr -d '[:cntrl:]')
 BRANCH=$(printf '%s' "$L" | jq -r '.[0].metadata.branch // empty' 2>/dev/null)
@@ -140,7 +149,27 @@ elif ! git -C "$RIG_ROOT" merge-base --is-ancestor "$OURS" "$THEIRS"; then
   TREE=$(git -C "$RIG_ROOT" merge-tree --write-tree --no-messages --name-only "$OURS" "$THEIRS")
   case $? in
     0) ;;
-    1) echo "pushed nothing: merging origin/$TARGET into $BRANCH conflicts in $(printf '%s\n' "$TREE" | sed 1d | tr '\n' ' ')" >&2; exit 1 ;;
+    1)
+      FILES=$(printf '%s\n' "$TREE" | sed 1d | tr '\n' ' '); FILES=${FILES% }
+      EPIC=$(printf '%s' "$HJ" | jq -r '[.[0].dependencies[]? | select(.dependency_type == "parent-child") | .id][0] // empty' 2>/dev/null)
+      PARENT=(); [ -z "$EPIC" ] || PARENT=(--parent "$EPIC")
+      BRIEF="The refinery's hand-off $H could not bring $BRANCH, the branch of $LANDING, current with $TARGET: merging origin/$TARGET at $THEIRS into it at $OURS conflicts in $FILES. It pushed nothing, and $H waits on this task.
+
+Merge origin/$TARGET into this task's branch, which is cut from $BRANCH, and resolve each conflict by keeping what each side meant. Make one merge commit whose second parent is origin/$TARGET, and never rebase or squash it, so that once it lands on $BRANCH the refinery finds nothing left to merge and closes $H. In its message, say for each file what collided and what you decided. The diff against $BRANCH holds all that $TARGET gained since the branch was cut, and your change is the resolution: run git show --remerge-diff on the merge to see only the hunks resolved by hand.
+
+The conflict is yours to resolve. Ask the operator only when a resolution needs a product decision, because the two sides want different behavior and nothing written settles which. Then ask through a human gate on this task with nothing pushed, as your prompt's section on blocked work and human gates says."
+      TASK=$(gc bd create "Merge origin/$TARGET into $BRANCH and resolve its conflicts" -t task "${PARENT[@]}" -d "$BRIEF" \
+        --metadata "$(jq -nc --arg t "$BRANCH" '{target: $t}')" --deps "blocks:$H,blocks:$LANDING" --json \
+        | tr -d '[:cntrl:]' | jq -r 'if type == "array" then .[0].id else .id end // empty' 2>/dev/null)
+      [ -n "$TASK" ] || { echo "pushed nothing: merging origin/$TARGET into $BRANCH conflicts in $FILES, and the create of its task returned no id; run the block again, or finish from the notice when $H already waits on a task the create wrote" >&2; exit 1; }
+      SCRIPTS=$(gc gc-toolkit scripts-dir)
+      "$SCRIPTS/deferred-dispatch.sh" notify "$H" --agent "$GC_AGENT" >/dev/null \
+        || { echo "pushed nothing and filed $TASK for the conflict in $FILES, but the notice on $H did not land; finish from the notice" >&2; exit 1; }
+      "$SCRIPTS/queue-priority.sh" settle "$TASK" >/dev/null \
+        && gc sling "gc-toolkit/gc-toolkit.polecat" "$TASK" --on mol-polecat-work >/dev/null \
+        || { echo "pushed nothing, filed $TASK for the conflict in $FILES and recorded the notice on $H, but $TASK was not settled and sent; finish from the settle" >&2; exit 1; }
+      echo "pushed nothing: merging origin/$TARGET into $BRANCH conflicts in $FILES, so $TASK sends the merge to a polecat, and $H comes back to you once $TASK lands"
+      exit 0 ;;
     *) echo "pushed nothing: git merge-tree could not merge origin/$TARGET into $BRANCH" >&2; exit 1 ;;
   esac
   SIGN=--no-gpg-sign
@@ -153,21 +182,17 @@ gc bd close "$H" --reason "Brought $BRANCH current with $TARGET at $(git -C "$RI
 ```
 
 A refused push leaves the branch as it was. The branch may have moved after
-the fetch, so run the block again. A merge that conflicts is a decision, and
-you never resolve one. Put it to the operator in a human gate on the hand-off,
-which then waits on the gate, and record the notice that hands the hand-off
-back to you once a person clears the gate:
+the fetch, so run the block again. A block that stops after it filed the task
+names the step that did not land. The hand-off already waits on the task, so
+running the block again does nothing, and you finish from that step instead.
+The notice is
+`"$(gc gc-toolkit scripts-dir)/deferred-dispatch.sh" notify <the hand-off> --agent "$GC_AGENT"`,
+and the settle and the send are
+`"$(gc gc-toolkit scripts-dir)/queue-priority.sh" settle <the task> && gc sling gc-toolkit/gc-toolkit.polecat <the task> --on mol-polecat-work`.
 
-```bash
-SCRIPTS=$(gc gc-toolkit scripts-dir)
-"$SCRIPTS/human-gate.sh" --subject <the hand-off> --key bring-current-conflict --message "<what collided, and the decision the merge needs>" \
-  && "$SCRIPTS/deferred-dispatch.sh" notify <the hand-off> --agent "$GC_AGENT"
-```
-
-When the hand-off comes back, run the block again. Once a person has pushed
-the merge, nothing is left to merge, and the block closes the hand-off.
-Archive a notice with `gc mail archive <its id>` once its hand-off is closed
-or waits on its gate.
+When the hand-off comes back, run the block again, which brings the branch
+current from where the task's merge left it. Archive a notice with
+`gc mail archive <its id>` once its hand-off is closed or waits on its task.
 
 ## Human gates
 

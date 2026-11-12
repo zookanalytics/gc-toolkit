@@ -10,13 +10,25 @@
 # branch with commits of its own takes a merge of the target, and a branch
 # already current is pushed as it is. Each case closes the hand-off once the
 # push has landed. The merge commit is signed exactly when the repository's
-# commit.gpgSign says so, as `git merge` would sign it. A merge that conflicts
-# pushes nothing, names the files, and leaves the hand-off open. So does a push
-# that origin refuses. A hand-off that is closed or still waits on a blocker, a
-# landing bead that records no integration branch or no target, and a target
-# origin does not carry bring nothing current. No case checks anything out:
-# the rig's checkout is left as it was, with no worktree added and no
-# temporary file behind, so the block has nothing to remove.
+# commit.gpgSign says so, as `git merge` would sign it.
+#
+# A merge that conflicts pushes nothing and goes to a polecat, never to a
+# person: the block files the merge as a task whose target is the effort's
+# branch, under the hand-off's parent when it has one, with the hand-off and the
+# landing bead waiting on it. Its description names the conflicted files and
+# asks the operator only for a product decision. The block records the notice
+# that hands the hand-off back to the refinery, then settles the task and slings
+# it to the rig's polecat pool on mol-polecat-work. It files no human gate, and
+# the hand-off stays open. A create that returns no id stops before anything is
+# sent. A notice or a send that does not land stops the block, and a run of it
+# then finds the hand-off waiting on the task and does nothing more.
+#
+# A push that origin refuses leaves the branch and the hand-off as they were. A
+# hand-off that is closed or still waits on a blocker, a landing bead that
+# records no integration branch or no target, and a target origin does not
+# carry bring nothing current. No case checks anything out: the rig's checkout
+# is left as it was, with no worktree added and no temporary file behind, so
+# the block has nothing to remove.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -45,7 +57,12 @@ git config --file "$GIT_CONFIG_GLOBAL" init.defaultBranch main
 
 # gc answers `bd show <id> --json` from STORE, a JSON array of beads, and
 # `bd close <id> --reason <text>` closes the bead in STORE and logs the reason.
-mkdir -p "$TMP/bin"
+# `bd create` keeps each flag's value as a file under CREATE, adds task-1 to
+# STORE with a blocks edge onto each bead its --deps names as blocks:<id>, and
+# answers task-1's id; STUB_CREATE_FAIL makes it write nothing and fail.
+# `<binding> scripts-dir` names STUB_SCRIPTS, and `sling` logs its arguments;
+# STUB_SLING_FAIL makes it fail.
+mkdir -p "$TMP/bin" "$TMP/scripts"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'STUB'
 case "${1:-} ${2:-}" in
   "bd show")
@@ -54,11 +71,51 @@ case "${1:-} ${2:-}" in
     printf 'close %s %s\n' "$3" "${5:-}" >> "$GC_LOG"
     jq -c --arg id "$3" 'map(if .id == $id then .status = "closed" else . end)' "$STORE" > "$STORE.new" && mv "$STORE.new" "$STORE"
     exit 0 ;;
+  "bd create")
+    printf 'create\n' >> "$GC_LOG"
+    [ -z "${STUB_CREATE_FAIL:-}" ] || { echo '{"error":"the store did not answer"}'; exit 1; }
+    printf '%s' "$3" > "$CREATE/title"; shift 3
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --json) shift ;;
+        -t|--parent|-d|--metadata|--deps) printf '%s' "$2" > "$CREATE/${1#"${1%%[!-]*}"}"; shift 2 ;;
+        *) printf '%s\n' "$1" >> "$CREATE/unknown"; shift ;;
+      esac
+    done
+    jq -c --arg deps "$(cat "$CREATE/deps" 2>/dev/null)" --argjson meta "$(cat "$CREATE/metadata")" '
+      ($deps | split(",") | map(select(startswith("blocks:")) | ltrimstr("blocks:"))) as $waiters
+      | map(if (.id as $id | $waiters | index($id)) != null
+            then .dependencies += [{id: "task-1", dependency_type: "blocks", status: "open"}] else . end)
+        + [{id: "task-1", status: "open", metadata: $meta, dependencies: []}]' "$STORE" > "$STORE.new" && mv "$STORE.new" "$STORE"
+    echo '{"id":"task-1"}'
+    exit 0 ;;
+  "gc-toolkit scripts-dir")
+    printf '%s\n' "$STUB_SCRIPTS"; exit 0 ;;
 esac
+if [ "${1:-}" = sling ]; then
+  shift
+  printf 'sling %s\n' "$*" >> "$GC_LOG"
+  [ -z "${STUB_SLING_FAIL:-}" ] || { echo "gc sling: the controller did not answer" >&2; exit 1; }
+fi
 exit 0
 STUB
 chmod +x "$TMP/bin/gc"
-export STORE="$TMP/store.json" GC_LOG="$TMP/gc.log"
+# The pack's scripts the block calls log each call; STUB_NOTIFY_FAIL and
+# STUB_SETTLE_FAIL make deferred-dispatch.sh and queue-priority.sh fail.
+# human-gate.sh only logs, so a call to it shows in the log.
+for s in deferred-dispatch queue-priority human-gate; do
+  { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; printf 'NAME=%s\n' "$s"; cat; } > "$TMP/scripts/$s.sh" <<'STUB'
+printf '%s %s\n' "$NAME" "$*" >> "$GC_LOG"
+case "$NAME" in
+  deferred-dispatch) [ -z "${STUB_NOTIFY_FAIL:-}" ] || exit 1 ;;
+  queue-priority) [ -z "${STUB_SETTLE_FAIL:-}" ] || exit 1 ;;
+esac
+exit 0
+STUB
+  chmod +x "$TMP/scripts/$s.sh"
+done
+export STORE="$TMP/store.json" GC_LOG="$TMP/gc.log" CREATE="$TMP/create" STUB_SCRIPTS="$TMP/scripts" \
+  GC_AGENT="rig-1/gc-toolkit.refinery"
 
 ORIGIN="$TMP/origin.git"; SEED="$TMP/seed"; RIG="$TMP/rig"
 # commit_on <ref> <file> <text>: a commit on origin's <ref> that writes <text>
@@ -75,11 +132,12 @@ head_of() { git -C "$ORIGIN" rev-parse "refs/heads/$1"; }
 signed() { git -C "$ORIGIN" cat-file -p "refs/heads/$1" | grep -c '^gpgsig' || true; }
 # setup [<jq edit>]: origin carries main and integration/land-1, both at one
 # base commit; the rig's checkout is a clone of it. The store holds the
-# hand-off ho-1, whose one blocker has closed, and the landing bead land-1,
-# which records the branch and main as its target. The edit changes the store.
+# hand-off ho-1, under the epic ep-1 and with its one blocker closed, and the
+# landing bead land-1, which records the branch and main as its target. The
+# edit changes the store.
 setup() {
-  rm -rf "$ORIGIN" "$SEED" "$RIG" "$TMP/tmpd"
-  mkdir -p "$TMP/tmpd"
+  rm -rf "$ORIGIN" "$SEED" "$RIG" "$TMP/tmpd" "$CREATE"
+  mkdir -p "$TMP/tmpd" "$CREATE"
   git init -q --bare "$ORIGIN"
   git clone -q "$ORIGIN" "$SEED" 2>/dev/null
   printf 'base\n' > "$SEED/shared.txt"
@@ -99,7 +157,8 @@ setup() {
 # is in $TMP/out and $TMP/err.
 run() {
   printf '%s\n' "$BLOCK" | sed -e 's#<the hand-off>#ho-1#g' -e 's#<the landing bead it names>#land-1#g' \
-    -e "s#{{ .RigRoot }}#$RIG#g" > "$TMP/block.sh"
+    -e "s#{{ .RigRoot }}#$RIG#g" -e 's#{{ .BindingName }}#gc-toolkit#g' -e 's#{{ .BindingPrefix }}#gc-toolkit.#g' \
+    -e 's#{{ .RigName }}#rig-1#g' > "$TMP/block.sh"
   RC=0
   if [ "$1" = zsh ]; then
     PATH="$TMP/bin:$PATH" TMPDIR="$TMP/tmpd" zsh -f "$TMP/block.sh" > "$TMP/out" 2> "$TMP/err" || RC=$?
@@ -123,6 +182,21 @@ if command -v ssh-keygen >/dev/null 2>&1 && ssh-keygen -q -t ed25519 -N '' -C te
 else
   echo "note - ssh-keygen cannot sign here; the signed-merge case is skipped"
 fi
+
+# conflict: main and the effort's branch each change shared.txt and add
+# other.txt, so merging main into the branch conflicts in both files. Sets OWN
+# and MAIN to the two heads.
+conflict() {
+  commit_on main shared.txt "main's line"; commit_on main other.txt "main's file"
+  commit_on integration/land-1 shared.txt "the effort's line"; commit_on integration/land-1 other.txt "the effort's file"
+  OWN=$(head_of integration/land-1); MAIN=$(head_of main)
+}
+# What a conflict sends, in order: the task's create, the hand-off's notice, the
+# task's settle, and its sling to the rig's polecat pool.
+SENT="create
+deferred-dispatch notify ho-1 --agent rig-1/gc-toolkit.refinery
+queue-priority settle task-1
+sling rig-1/gc-toolkit.polecat task-1 --on mol-polecat-work"
 
 SHELLS=(bash)
 command -v zsh >/dev/null 2>&1 && SHELLS+=(zsh) || echo "note - zsh not present; running under bash only"
@@ -176,15 +250,71 @@ for sh in "${SHELLS[@]}"; do
   run "$sh"
   eq "$RC $(head_of integration/land-1) $(status_of ho-1)" "0 $OWN closed" "[$sh] current: a branch already current is left as it is and the hand-off closes"
 
-  # Both sides change one line: a conflict pushes nothing.
-  setup; commit_on main shared.txt "main's line"; commit_on integration/land-1 shared.txt "the effort's line"
-  OWN=$(head_of integration/land-1)
+  # Both sides change two files: the merge conflicts, so nothing is pushed, and
+  # the merge goes to a polecat as a task, never to a person.
+  setup; conflict
   run "$sh"
-  [ "$RC" -ne 0 ] && ok "[$sh] conflict: the block exits non-zero" || bad "[$sh] conflict: the block reported success"
+  eq "$RC" "0" "[$sh] conflict: the block succeeds once the merge is sent to a polecat"
   eq "$(head_of integration/land-1) $(status_of ho-1)" "$OWN open" "[$sh] conflict: the branch is not pushed and the hand-off stays open"
-  grep -qF "pushed nothing: merging origin/main into integration/land-1 conflicts in shared.txt" "$TMP/err" \
-    && ok "[$sh] conflict: it says it pushed nothing, and names the file" || bad "[$sh] conflict: it does not say it pushed nothing, naming the file"
+  eq "$(cat "$GC_LOG")" "$SENT" \
+    "[$sh] conflict: it files the task, records the hand-off's notice, then settles the task and slings it to the rig's polecat pool on mol-polecat-work"
+  grep -q '^human-gate' "$GC_LOG" && bad "[$sh] conflict: a human gate was filed" || ok "[$sh] conflict: no human gate is filed"
+  eq "$(cat "$CREATE/title")" "Merge origin/main into integration/land-1 and resolve its conflicts" "[$sh] conflict: the task's title names the merge"
+  eq "$(cat "$CREATE/t") $(cat "$CREATE/parent") $(jq -c . "$CREATE/metadata") $(cat "$CREATE/deps")" \
+    'task ep-1 {"target":"integration/land-1"} blocks:ho-1,blocks:land-1' \
+    "[$sh] conflict: the task sits under the hand-off's epic, targets the effort's branch, and the hand-off and the landing bead wait on it"
+  [ -e "$CREATE/unknown" ] && bad "[$sh] conflict: the create passed arguments the stub does not know: $(tr '\n' ' ' < "$CREATE/unknown")" \
+    || ok "[$sh] conflict: the create passes only the title and the flags read above"
+  BRIEF=$(cat "$CREATE/d")
+  for want in "merging origin/main at $MAIN into it at $OWN conflicts in other.txt shared.txt. It pushed nothing, and ho-1 waits on this task." \
+              "whose second parent is origin/main, and never rebase or squash it" "say for each file what collided and what you decided" \
+              "git show --remerge-diff" "Ask the operator only when a resolution needs a product decision"; do
+    case "$BRIEF" in
+      *"$want"*) ok "[$sh] conflict: the task's description says \"$want\"" ;;
+      *) bad "[$sh] conflict: the task's description does not say \"$want\"" ;;
+    esac
+  done
+  grep -qF "pushed nothing: merging origin/main into integration/land-1 conflicts in other.txt shared.txt, so task-1 sends the merge to a polecat, and ho-1 comes back to you once task-1 lands" "$TMP/out" \
+    && ok "[$sh] conflict: it says it pushed nothing, names the files and the task" || bad "[$sh] conflict: it does not say it pushed nothing, naming the files and the task"
   untouched && ok "[$sh] conflict: the rig's checkout is untouched" || bad "[$sh] conflict: the rig's checkout changed, or a worktree or file was left"
+
+  # A hand-off with no parent files its task with none.
+  setup 'map(if .id == "ho-1" then .dependencies |= map(select(.dependency_type != "parent-child")) else . end)'; conflict
+  run "$sh"
+  eq "$RC" "0" "[$sh] conflict, no parent: the block succeeds"
+  eq "$(cat "$GC_LOG")" "$SENT" "[$sh] conflict, no parent: the task is filed and sent all the same"
+  [ -e "$CREATE/parent" ] && bad "[$sh] conflict, no parent: the task was filed under '$(cat "$CREATE/parent")'" \
+    || ok "[$sh] conflict, no parent: the task is filed with no parent"
+
+  # A create that returns no id stops before anything is sent.
+  setup; conflict
+  export STUB_CREATE_FAIL=1; run "$sh"; unset STUB_CREATE_FAIL
+  eq "$([ "$RC" -ne 0 ] && echo stopped) $(cat "$GC_LOG") $(head_of integration/land-1) $(status_of ho-1)" "stopped create $OWN open" \
+    "[$sh] create fails: the block stops with nothing sent, pushed or closed"
+  grep -qF "the create of its task returned no id" "$TMP/err" && ok "[$sh] create fails: it says no id came back" || bad "[$sh] create fails: it does not say no id came back"
+
+  # A notice that does not land stops the block before the task is sent, and a
+  # run of it then finds the hand-off waiting on the task and does nothing more.
+  setup; conflict
+  export STUB_NOTIFY_FAIL=1; run "$sh"; unset STUB_NOTIFY_FAIL
+  eq "$([ "$RC" -ne 0 ] && echo stopped) $(cat "$GC_LOG" | tr '\n' '|')" "stopped create|deferred-dispatch notify ho-1 --agent rig-1/gc-toolkit.refinery|" \
+    "[$sh] notice fails: the block stops before the task is settled or sent"
+  grep -qF "filed task-1 for the conflict in other.txt shared.txt, but the notice on ho-1 did not land; finish from the notice" "$TMP/err" \
+    && ok "[$sh] notice fails: it names the task and the step to finish from" || bad "[$sh] notice fails: it does not name the task and the step to finish from"
+  : > "$GC_LOG"; run "$sh"
+  eq "$([ "$RC" -ne 0 ] && echo refused) $(wc -l < "$GC_LOG" | tr -d ' ') $(head_of integration/land-1)" "refused 0 $OWN" \
+    "[$sh] notice fails: a run of the block again files, sends and pushes nothing"
+  grep -qF "ho-1 does not read as open with every blocker closed" "$TMP/err" \
+    && ok "[$sh] notice fails: the run again says the hand-off waits" || bad "[$sh] notice fails: the run again does not say the hand-off waits"
+
+  # A settle or a sling that does not land stops the block after the notice.
+  for fail in STUB_SETTLE_FAIL STUB_SLING_FAIL; do
+    setup; conflict
+    export "$fail=1"; run "$sh"; unset "$fail"
+    [ "$RC" -ne 0 ] && grep -qF "filed task-1 for the conflict in other.txt shared.txt and recorded the notice on ho-1, but task-1 was not settled and sent; finish from the settle" "$TMP/err" \
+      && ok "[$sh] $fail: the block stops and names the step to finish from" || bad "[$sh] $fail: the block did not stop naming the step to finish from (rc=$RC)"
+    grep -q '^human-gate' "$GC_LOG" && bad "[$sh] $fail: a human gate was filed" || ok "[$sh] $fail: no human gate is filed"
+  done
 
   # Origin refuses the push: the hand-off stays open.
   setup; commit_on main a.txt "from main"

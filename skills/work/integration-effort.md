@@ -131,9 +131,9 @@ and arm those beads in step 7 rather than sling them.
 
 A bead of the effort that builds on work reaching the default branch after the
 branch was cut needs the branch brought current first. That is a task for the
-rig's refinery, the hand-off below, and not a bead of the effort. No polecat
-builds it, so no self-review and no review check reads the default branch's
-commits as its change.
+rig's refinery, the hand-off below, and not a bead of the effort. A merge that
+is clean needs no polecat, so no self-review and no review check reads the
+default branch's commits as its change.
 
 1. File the hand-off by the block below. It names the effort's landing bead
    and waits on the outside work by a `blocks` edge. The block assigns it to
@@ -148,17 +148,22 @@ commits as its change.
    default branch when the branch holds nothing the default branch lacks, and
    otherwise merges the default branch into it. It pushes the result and
    closes the hand-off, which releases the bead.
-4. A merge that conflicts needs a decision. The refinery pushes nothing and
-   puts the conflict to the operator in a `bring-current-conflict` human gate
-   on the hand-off, which then waits on the gate. The refinery's prompt holds
-   the method of steps 3 and 4.
+4. A merge that conflicts goes to a polecat, never to the operator. The
+   refinery pushes nothing and files the merge as a bead of the effort, a task
+   on its branch that the hand-off and the landing bead wait on. The summary
+   task already waits on it, through the bead that waits on the hand-off. The
+   refinery sends the task to the rig's polecat pool, and the polecat resolves
+   each conflict, asking the operator only when a resolution needs a product
+   decision. Once the task lands, the hand-off comes back to the refinery,
+   which brings the branch current from where the task's merge left it. The
+   refinery's prompt holds the method of steps 3 and 4.
 
 ```bash
 # The hand-off, under the effort's epic (drop --parent when it has none).
 LANDING=<the landing bead of the effort>
 OUTSIDE=<the bead of the outside work>
 HANDOFF=$(gc bd --rig <rig> create "Bring integration/$LANDING current once <the outside work, such as its PR> lands" -t task \
-  -d "Once $OUTSIDE has landed, bring the branch of $LANDING, the effort's landing bead, current with the target it records. <What the outside work changes that the bead waiting on this builds on.>" \
+  -d "Once $OUTSIDE has landed, bring the branch of $LANDING, the effort's landing bead, current with the target it records. A merge that conflicts goes to a polecat, which resolves it and asks the operator only when a resolution needs a product decision. <What the outside work changes that the bead waiting on this builds on.>" \
   --parent <epic> --deps "$OUTSIDE" --json | jq -r '.id // empty')
 [ -n "$HANDOFF" ] || { echo "no hand-off filed, with its wait on the outside work; stopping" >&2; exit 1; }
 gc bd --rig <rig> update "$HANDOFF" --assignee <rig>/<binding>.refinery \
