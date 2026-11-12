@@ -120,11 +120,13 @@ shares only the word ([authority-map.md](authority-map.md)).
 - **Verified.** 2026-11-12, at `gastownhall/gascity` main 6bd609f5b and
   `gastownhall/gascity-packs` main 92b480a61.
 - **Retires when.** A step at a time. `load-context`: core's gate refuses finished,
-  parked and held work and ends a run by cancelling it. `workspace-setup`: the
-  refinery's rework machinery goes (`tk-1tfzr71.20`), which ends the merge resume.
+  parked and held work and ends a run by cancelling it. `workspace-setup`: no end
+  is planned for the merge resume, since the refinery brings every branch current
+  by merge and never rebases one
+  ([built-once-target.md](built-once-target.md#merge)).
   `preflight-tests` and `self-review`: Gas City ships a record of a check per
-  commit. `submit-and-exit`: `tk-1tfzr71.20` moves the merge onto GitHub's branch
-  rules.
+  commit. `submit-and-exit`: the merge and review nouns it holds retire, the
+  bring-current guard among them with the review loop (`tk-1tfzr71.22`).
 
 ## Dolt reclaim
 
