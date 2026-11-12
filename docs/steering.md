@@ -344,8 +344,9 @@ landing.
 A park leaves a rejected handoff running too. When the refinery sends a
 handed-off bead back, `refinery-requeue.sh` records the `rejection_reason` on it
 and dispatches the rebuild through `gc sling` as a fresh `mol-polecat-work`
-pour. A bead whose PR is open, or a convoy, keeps what it carries, and the
-reason and the pour go to a rework child on its branch instead. The cascade
+pour. A bead that records an open PR (`pull_request_head_changed`), or a convoy,
+keeps what it carries, and the reason and the pour go to a rework child on its
+branch instead. The cascade
 does not reach a poured workflow, and the rejected bead is in flight, so
 load-context holds it only by its own waits and the rebuild runs. When that
 sling fails, the script arms a retry, which deferred dispatch slings once the
