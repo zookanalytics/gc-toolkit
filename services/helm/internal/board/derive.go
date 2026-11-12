@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
 )
 
@@ -2185,8 +2186,10 @@ const (
 )
 
 // mergeResultMerged is the merge_result the refinery records on the anchor it
-// closes for a landed PR — the lifecycle's one closed state, and the board's
-// signal that a resolved row merged rather than closed without merging.
+// closes for a landed PR on the old record, and on a direct landing — the
+// board's signal that a resolved row merged rather than closed without merging.
+// The landing order records [record.Merged] for a PR it merged on Gas Town's
+// pending record.
 const mergeResultMerged = "merged"
 
 // classifyPhases stamps a row's live state, whose move it is, from the shared
@@ -2427,7 +2430,7 @@ func terminalPRPhase(a Anchor) string {
 	if !isMergeAnchor(a) {
 		return ""
 	}
-	if a.Metadata[mdMergeResult] == mergeResultMerged {
+	if r := a.Metadata[mdMergeResult]; r == mergeResultMerged || r == record.Merged {
 		return PhaseMerged
 	}
 	return PhaseClosed

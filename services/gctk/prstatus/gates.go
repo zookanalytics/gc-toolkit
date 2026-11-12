@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/conversation"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 )
 
 // Blocker is the far end of one `blocks` edge, in the fields [Holding] and
@@ -60,7 +61,9 @@ func IsPersonBlocker(b Blocker) bool {
 }
 
 // mergeResultPullRequest is the merge_result of a merge anchor whose pull
-// request is open.
+// request is open on the old record. On Gas Town's pending record an open pull
+// request is [record.Pending], or [record.HeadChanged] while the refinery
+// validates a head it has not.
 const mergeResultPullRequest = "pull_request"
 
 // awaitsPerson reports whether a merge anchor the walk reached is a person's to
@@ -89,7 +92,8 @@ func awaitsPerson(b Blocker, edges []Blocker) bool {
 	case NeedsAttention:
 		return true
 	case NeedsReview:
-		return result == mergeResultPullRequest
+		// A head the refinery has not validated is the refinery's to move first.
+		return result == mergeResultPullRequest || result == record.Pending
 	}
 	return false
 }
