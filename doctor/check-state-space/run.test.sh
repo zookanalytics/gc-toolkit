@@ -104,6 +104,26 @@ eq "$RC" "2" "merge_result=merged on an OPEN bead is an ERROR"
 has "$OUT" "a-4" "it names the bead"
 has "$OUT" "closed-only" "it says why merged is illegal while open"
 
+# --- 3b. the pending record's values -------------------------------------
+store '[{"id":"a-r1","status":"open","assignee":"alpha/gc-toolkit.refinery","metadata":{"merge_result":"pull_request_head_changed"}},
+        {"id":"a-r2","status":"blocked","assignee":"alpha/gc-toolkit.refinery","metadata":{"merge_result":"pull_request_pending"}},
+        {"id":"a-r3","status":"open","assignee":"alpha/gc-toolkit.refinery","metadata":{"merge_result":"pull_request_record_incomplete"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "the pending record's values are kept states, on a bead the refinery holds"
+store '[{"id":"a-r4","status":"open","metadata":{"merge_result":"mr_merged"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "merge_result=mr_merged on an OPEN bead is an ERROR"
+has "$OUT" "a-r4" "it names the bead"
+has "$OUT" "closed-only" "it says why the record's landed value is illegal while open"
+
+# The record's values are spelled in services/gctk/pr/record/record.go; the
+# check's copy is held to that file.
+RECORD_GO="$(cd "$(dirname "$CHECK")/../.." && pwd)/services/gctk/pr/record/record.go"
+want=$(awk '/^const \(/{c=1; next} c && /^\)/{exit} c' "$RECORD_GO" | grep -o '= "[a-z_]*"' | tr -d '="' | tr -d ' ' | sort | paste -sd ' ' -)
+got=$(sed -n 's/^RECORD_STATES="\(.*\)"$/\1/p' "$CHECK" | tr ' ' '\n' | sort | paste -sd ' ' -)
+[ -n "$want" ] && eq "$got" "$want" "(NO-DRIFT) the check's record values are the ones services/gctk/pr/record spells" \
+  || bad "(NO-DRIFT) no merge_result values read from $RECORD_GO"
+
 # --- 4. deleted healer-bookkeeping keys ----------------------------------
 store '[{"id":"a-5","status":"open","metadata":{"check_set_healed":"1"}},
         {"id":"a-6","status":"open","metadata":{"stranded_branch_flagged":"x"}},

@@ -3,7 +3,10 @@
 # Groups OPEN ANCHORS city-wide (all stores) by their pr_url metadata: only
 # merge_result-carrying beads count (anchors stamp pr_url and merge_result in
 # one lifecycle.sh write; review beads and rework children carry pr_url with
-# NO merge_result), and task_kind=review is excluded outright. Two or
+# NO merge_result), and task_kind=review is excluded outright. A blocked bead
+# counts when its merge_result is an open PR's: Gas Town's pending record keeps
+# a bead blocked at pull_request_pending while its PR waits on the merge, and
+# blocks the bead at an exception once its PR is no longer open. Two or
 # more open anchors naming the same PR is an error — N claimants on one PR means
 # the weakest check-set decides the merge, and merge.sh's refuse-on-sight hold
 # is only a runtime backstop that fires when someone tries to land it.
@@ -103,7 +106,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         notes+=("$label: skipped (suspended — querying its store would auto-start an orphan Dolt server)")
         continue
     fi
-    raw=$(run_bounded gc bd list --db "$rig_path/.beads" --status open \
+    raw=$(run_bounded gc bd list --db "$rig_path/.beads" --status open,blocked \
         --has-metadata-key pr_url --json --limit 0 2>/dev/null); rc=$?
     if [ "$rc" -ne 0 ] || [ -z "$raw" ]; then
         warnings+=("$label: could not list open beads carrying pr_url in $rig_path/.beads (rc=$rc) — this store was NOT checked, and a second anchor there would be invisible")
@@ -114,7 +117,10 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         | (($m.pr_url // "") | tostring | gsub("[[:cntrl:]]"; " ")) as $u
         | select($u != "")
         | select((($m.task_kind // "") | tostring) != "review")
-        | select((($m.merge_result // "") | tostring) != "")
+        | (($m.merge_result // "") | tostring) as $mr
+        | select(if ((.status // "open") | tostring) == "blocked"
+                 then ($mr == "pull_request" or $mr == "pull_request_pending" or $mr == "pull_request_head_changed")
+                 else $mr != "" end)
         | [$u, ((.id // "?") | tostring | gsub("[[:cntrl:]]"; " "))] | join("\u001f")' 2>/dev/null)
     if [ $? -ne 0 ]; then
         warnings+=("$label: pr_url listing from $rig_path/.beads could not be parsed — this store was NOT checked")
