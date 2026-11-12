@@ -38,7 +38,7 @@ git config --file "$GIT_CONFIG_GLOBAL" advice.detachedHead false
 PACK="$TMP/pack"; BIN="$TMP/bin"; mkdir -p "$PACK" "$BIN"
 cp "$HERE/work-submit.sh" "$HERE/work-lib.sh" "$HERE/decline.sh" "$HERE/claim-close.sh" "$HERE/bd-lib.sh" \
    "$HERE/hand-back.sh" "$HERE/store-only-exit.sh" "$HERE/run-lib.sh" "$HERE/deferred-dispatch.sh" "$PACK/" 2>/dev/null
-export REAL_GIT REAL_FIND PACK LOG="$TMP/log" STORE="$TMP/store.json"
+export REAL_GIT REAL_FIND LOG="$TMP/log" STORE="$TMP/store.json"
 
 # git: push and ls-remote can be made to fail, and a push, a worktree's removal
 # and a branch's delete are logged, whatever directory -C names.
@@ -347,10 +347,11 @@ CALL=$(sed -e 's/{{binding_prefix}}/gc-toolkit./g' -e 's/{{convoy_id}}/cv-1/g' -
 has "$CALL" 'work-submit.sh" --convoy cv-1 --base main' "(2j) the step's hand-off call extracts"
 case "$CALL" in *'{{'*|*'"<'*) bad "(2j) the call renders whole" "$CALL" ;; *) ok "(2j) the call renders whole" ;; esac
 # harness <call> <shell...> : the call run as WRAP runs it, by default the way
-# Claude Code does, in a shell standing in the tree.
+# Claude Code does, in a shell standing in the tree. The gc stub answers the
+# call's scripts-dir with PACK.
 harness() {
   local call="$1"; shift
-  OUT=$(cd "$C" && env PATH="$BIN:$PATH" WORK_READ_WAIT=0 GC_SESSION_ID=sess-me GC_RIG=gc-toolkit HOOK_CURRENT=st-submit \
+  OUT=$(cd "$C" && env PATH="$BIN:$PATH" PACK="$PACK" WORK_READ_WAIT=0 GC_SESSION_ID=sess-me GC_RIG=gc-toolkit HOOK_CURRENT=st-submit \
     GC_DIR="$TMP/home-$N" "$@" -c "${WRAP:-eval \"\$1\" && pwd -P}" _ "$call" 2>&1); RC=$?
 }
 SHELLS="bash"; command -v zsh >/dev/null 2>&1 && SHELLS="bash zsh"
