@@ -104,6 +104,8 @@ bead.
 | `gctk priority reconcile` | order | re-settle the queued beads after raw writes no writer saw | The backstop of the shape the pack ships, ported and never replaced: the settle in the pack's writers, a rig-scoped pass every fifteen minutes that reads the queue and never the whole store, one lock per store, and the stored shift ([steering.md](steering.md#the-pass)). |
 | `gctk pr summary <bead>` | agent, hook | record what the change does, for its PR's summary | Gas Town's refinery fills a PR's summary from its bead's description, which is written before the work. This summary is written once the work is done, and says what the diff does. |
 | `gctk pr compose <bead>` | hook | the PR's conventional-commit title and managed summary region, from the bead that owns it | Gas Town's refinery titles a PR with its bead's title and writes the body once, when it opens the PR. Compose puts the type prefix the repository's title check requires ahead of the title, and keeps a marked region of the body current with the summary while leaving the text people add. |
+| `gctk pr record <bead> --pr <url> --head <sha> --target <branch> --refinery <address>` | hook | record the PR the bead owns as pending until its merge is verified | Gas Town's refinery keeps this record (`gastown/commands/pr-merge-reconcile`), and no gastown release the city can take carries the command. The verb writes Gas Town's two writes under the store's record lock, each guarded on the status and assignee it read, so a bead that a close or a release reached first gets no record, where Gas Town's unguarded second write would reopen it as blocked. |
+| `gctk pr reconcile --refinery <address>` | order | land the PRs on the pending record: merge a ready one with its head pinned, close its bead once the merge commit is on the target, and send a changed head back to the refinery | Gas Town's refinery reconciles one record per find-work and merges nothing. The landing order (orders/pr-reconcile.toml) runs this with no agent, asks the evaluator whether each PR is ready, pins the merge request to the head it judged, reads a bounded number of records, the least recently checked first, and holds the store's record lock for one record at a time, so two runs that overlap act on one record one after the other. |
 | `gctk pr owner <pr>` | agent, order | which bead owns this PR | Nothing in Gas City's PR concept takes a GitHub event on an open PR to the bead that owns it, and the hop is what turns a review comment into work on that bead. |
 | `gctk pr status <bead>` | hook, order | where the PR stands: working, merging, needs-review or needs-attention | Nothing in Gas City gates a merge on approval or on required checks, so the pack reads both for the status label and the board. A pack writer that changes one of its inputs, opening the PR or recording a review verdict, sets the label in the same act. The order is the backstop: the merge cadence's pass walks the open beads that carry a PR, a set bounded by the open PRs, in a rotation that starts no bead past the pass's deadline, and writes a label only where its value changed. |
 | `gctk pr post <pr>` | agent, hook | post the city's comment, review or reply on a PR, carrying the city's mark | Every agent's `gh` token is one bot account, so a post's author cannot tell the city's notice from feedback. The mark can, and this one writer owns the mark and the definition of which posts are feedback. |
@@ -131,8 +133,9 @@ What each noun owns:
   priority of the epic it belongs to, a raise of specific work is a stored
   shift, and code computes both rather than a prompt. It stands on its warrant
   ([warrants.md](warrants.md#priority-following)).
-- **`pr`:** a bead's PR summary, and the title and managed summary region of its
-  PR. It starts from Gas City's own PR concept. Gas Town's refinery opens a PR
+- **`pr`:** a bead's PR summary, the title and managed summary region of its
+  PR, and Gas Town's pending-through-merge record on the bead that owns the PR,
+  with the store's record lock that each writer of the record takes. It starts from Gas City's own PR concept. Gas Town's refinery opens a PR
   with a title and a body taken from its bead, Gas City's PR monitor and
   `gc github pr backfill` read a PR's readiness when something runs them, and
   a `gh:pr` gate resolves when its PR merges. A pr verb is only what those
@@ -407,6 +410,7 @@ and CI runs those tests on every PR.
 | git | git | one `git` command per call, in a named directory | a scratch repository |
 | github | GitHub | `gh` and the GitHub API | in-memory PRs a test sets, and recorded answers in the adapter's own tests |
 | feedback | the pack's one definition of feedback, `pr-post.sh feedback-def` | jq, applying the definition as each shell reader does | answers a test sets |
+| human gate | the pack's one writer of a human gate, `human-gate.sh` | the script, from the pack's scripts directory | a double that records each gate filed |
 | runtime | Gas City | `gc` (sling, session, events, runtime) and the supervisor API (runs, sessions) | recorded responses |
 | host | the machine | tmux, files and the clock | in-memory files, a fixed clock and scripted panes |
 
