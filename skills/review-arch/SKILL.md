@@ -32,7 +32,8 @@ because without one the review has no architecture to hold the change to. A
 commit without one earns `request-changes`, with a finding that asks the change
 to add the document with a passable account of the architecture the change
 covers. Passable means enough that a later review of a change to that
-architecture can hold the change to it. The document meets the standard from
+architecture can hold the change to it: the standard's sufficiency test holds
+for the part the change covers. The document meets the standard from
 its first commit: it frames the whole repository and opens on its big picture,
 and the part the change covers is filled in. The rest of the repo's
 architecture is not this change's to write. File it as a follow-up under the
@@ -73,7 +74,16 @@ pass the change, and the questions below judge it as they would anywhere else.
 3. **Does the document meet the standard?** Hold each line the change adds to
    the architecture document, or changes in it, to the standard: the line sits
    in the section that holds its subject, passes the admission test, has the
-   entry shape, and keeps to what the document is.
+   entry shape, and keeps to what the document is. Then read the document
+   whole and judge it by the standard's sufficiency test, as far as the change
+   reaches. A change that rewrites the document reaches all of it. A change
+   that adds the first document reaches the part the change covers. That
+   document still frames the whole repository and opens on its big picture,
+   and the rest of the architecture is the follow-up that What it reads files,
+   never a reason to hold the change. Any other change reaches each part it
+   adds, changes or moves, which a reader must still be able to place among
+   the others. A shortfall beyond that reach, such as quality goals the
+   document already lacked, is a gap the change does not touch.
 
 ### Citing the standard
 
@@ -82,15 +92,18 @@ line in it, names the part of the standard it rules from: a section's heading
 or a rule's bold lead, as in `(gc-toolkit.architecture-document: Decisions)`.
 A finding asks for nothing the standard rules out, such as a link to a spec,
 mechanism a reader learns from the code, a part's own choice, or a reason no
-reader would get wrong.
+reader would get wrong. A finding under the sufficiency test names what a
+reader cannot do and the fact they lack, and leaves its form to the writer: it
+asks for no diagram, section or length, and for no threshold or policy the
+system does not already hold.
 When the document leans on a spec for standing practice, such as how the system
 is set up, the finding asks the document to drop the link. Moving that practice
 into a living doc is a follow-up, filed the way `mol-review` files a finding the
 change did not cause, under the token `<the spec's path>: standing practice`.
 
 When the diff adds or changes the architecture document, the verdict body adds
-a line naming the parts of the standard its lines were held to:
-`Standard: <each section or rule, and what you found there>`.
+a line naming the parts of the standard its lines and the document were held
+to: `Standard: <each section or rule, and what you found there>`.
 
 ### Aggravated patterns
 
@@ -140,6 +153,8 @@ approve is a precondition of approval, and a change that has not met it earns
   than pass architectural harm through.
 - A line it adds to the architecture document, or changes in it, fails the
   standard. Send it back with the part of the standard the line fails.
+- The document fails the sufficiency test within the change's reach. Send it
+  back with what a reader cannot do from it.
 
 The architecture-doc update lands in the reviewed PR, from its author, never from
 the review.
@@ -150,7 +165,8 @@ the review.
   architecture unchanged and leverages what is there, or it moves the
   architecture, the move is justified, and the matching architecture-doc update
   is in this same PR. Every line it adds to the architecture document, or
-  changes in it, meets the standard.
+  changes in it, meets the standard, and the document passes the sufficiency
+  test within the change's reach.
 - **Request changes** in every other case, each of the shapes above a finding.
 
 The check passes no `signoff.sh` flag of its own.

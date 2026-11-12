@@ -2,8 +2,8 @@ import { defineConfig } from 'vitest/config';
 
 // Kept separate from vite.config.ts so the app build never carries test config,
 // and so `vitest` does not inherit the dev proxy (which would reach a live
-// supervisor — these tests stub fetch and EventSource instead, and must pass
-// with no city running).
+// supervisor — these tests stub fetch instead, and must pass with no city
+// running).
 export default defineConfig({
   test: {
     environment: 'jsdom',
@@ -19,9 +19,9 @@ export default defineConfig({
   // run from any path.
   server: { fs: { strict: false } },
   define: {
-    // vite.config.ts injects this from HELM_DEV_MOUNT; tests never take the dev
-    // branch that reads it (they pass an explicit origin), but the identifier
-    // must still resolve at module scope.
+    // vite.config.ts injects this from HELM_DEV_MOUNT. Under vitest the page
+    // takes the dev branch of src/supervisor/origin.ts, so its supervisor read
+    // addresses this city.
     __HELM_DEV_CITY__: JSON.stringify('test-city'),
   },
 });

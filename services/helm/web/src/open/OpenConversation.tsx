@@ -1,18 +1,16 @@
-// The drill panel's one write action: file a conversation on this bead.
+// Discuss's form: file a conversation on this bead.
 //
-// It lives in the panel's `session` section because that is the section about
-// who is working the anchor, and this is how the operator causes someone to.
+// A row's Details offers Discuss on every bead, and the page opens this form in
+// its side panel for that bead.
 //
-// TWO THINGS IT IS CAREFUL ABOUT, both of them the operator's complaint about
-// the tmux affordance ("not enough details to really be the main action"):
+// TWO THINGS IT IS CAREFUL ABOUT:
 //
 //  1. It never claims more than happened. Filing a conversation puts it in the
 //     operator's queue; it does not start a sitting or put the operator in one.
-//     Engaging the queued conversation (the Discuss button beside this one) is
-//     what spawns the session, and there is no pane to attach to in a browser
-//     until the embedded ttyd can be retargeted (tk-rbf9r / tk-xlup8,
-//     unapplied). So the success copy says the conversation waits in the queue
-//     and points at Discuss — it does not say "you are in it".
+//     Rejoin the conversation, on the conversation's row on Needs you, is what
+//     spawns the sitting, and the page mounts no terminal. So the success copy
+//     says the conversation waits in the queue and points at Needs you. It does
+//     not say "you are in it".
 //  2. A failure says which failure. The service returns a stable `reason` slug
 //     beside the tool's own sentence; the sentence is shown verbatim and the
 //     slug picks a next move. A button whose only failure mode is a shrug is
@@ -45,9 +43,12 @@ type State =
 
 export interface OpenConversationProps {
   beadId: string;
+  /** Called once a conversation is filed or found waiting, so the page reads
+   *  its document again. */
+  onFiled?: () => void;
 }
 
-export function OpenConversation({ beadId }: OpenConversationProps) {
+export function OpenConversation({ beadId, onFiled }: OpenConversationProps) {
   const [state, setState] = useState<State>({ phase: 'idle' });
   // One in-flight request per mount. The service also collapses concurrent
   // opens of the same bead (409 busy) — that is the real guard, since two
@@ -58,12 +59,11 @@ export function OpenConversation({ beadId }: OpenConversationProps) {
   // settled promise. See the reset below for why that matters.
   const current = useRef(beadId);
 
-  // THE PANEL DOES NOT REMOUNT BETWEEN TILES. DrillPanel renders one
-  // <aside> and swaps `beadId` on it, so without this reset a result from bead
-  // A stays on screen under bead B's title — telling the operator a
-  // conversation was opened on a row where it was not. Same reason the
-  // late-response guard below exists: a request started on A must not report
-  // itself once the panel has moved on.
+  // THE FORM CAN BE POINTED AT ANOTHER BEAD WITHOUT REMOUNTING. Without this
+  // reset a result from bead A stays on screen under bead B's title, telling
+  // the operator a conversation was opened on a row where it was not. Same
+  // reason the late-response guard below exists: a request started on A must
+  // not report itself once the form has moved on.
   useEffect(() => {
     current.current = beadId;
     inFlight.current = false;
@@ -77,7 +77,10 @@ export function OpenConversation({ beadId }: OpenConversationProps) {
     setState({ phase: 'opening' });
     openConversation(target)
       .then((result) => {
-        if (current.current === target) setState({ phase: 'done', result });
+        if (current.current === target) {
+          setState({ phase: 'done', result });
+          onFiled?.();
+        }
       })
       .catch((cause: unknown) => {
         if (current.current !== target) return;
@@ -90,7 +93,7 @@ export function OpenConversation({ beadId }: OpenConversationProps) {
       .finally(() => {
         if (current.current === target) inFlight.current = false;
       });
-  }, [beadId]);
+  }, [beadId, onFiled]);
 
   return (
     <div className="open-conversation">
@@ -100,7 +103,7 @@ export function OpenConversation({ beadId }: OpenConversationProps) {
         onClick={open}
         disabled={state.phase === 'opening'}
       >
-        {state.phase === 'opening' ? 'filing…' : 'file a conversation'}
+        {state.phase === 'opening' ? 'filing…' : 'File a conversation'}
       </button>
 
       {state.phase === 'done' && <OpenedNotice result={state.result} />}
@@ -138,8 +141,8 @@ function OpenedNotice({ result }: { result: OpenResult }) {
       {result.message}{' '}
       <span className="muted">
         {result.outcome === 'existing'
-          ? 'Engage it with Discuss, or attach from the sessions picker or the terminal tile if a sitting already holds it.'
-          : 'No session holds it yet. Engage it with Discuss to start one. This button does not attach you.'}
+          ? 'Take it up with Rejoin the conversation on its row on Needs you. This button does not attach you.'
+          : 'No sitting holds it yet. Rejoin the conversation, on its row on Needs you, starts one. This button does not attach you.'}
       </span>
     </p>
   );

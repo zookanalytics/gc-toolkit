@@ -672,7 +672,7 @@ eq "$(f_field tk-find1 '.metadata["finding.occurrences"]')" "1" "(82b) a post th
 eq "$(cat "$TMP/kv.rig" 2>/dev/null)" "fixture-rig" "(82c) the record is read in the swept rig's store"
 set_status closed
 "$SUT" flag --dir "$W" >/dev/null 2>&1
-eq "$(findings_n)" "1" "(82d) nor once its finding is closed, where a raise would file a fix that did not hold"
+eq "$(findings_n)" "1" "(82d) nor once its finding is closed, where a raise would file a recurrence of it"
 STUB_KV_BROKEN=1 "$SUT" flag --dir "$W" >/dev/null 2>&1; RC=$?
 eq "$RC" "1" "(82e) a record that does not read stops the flag"
 eq "$(findings_n)" "1" "(82f) and it raises nothing"
@@ -707,7 +707,7 @@ has "$OUT" "already named in a finding under unmarked-city-post" "(82s8) the sam
 eq "$(f_field tk-find2 '.metadata["finding.occurrences"]')" "2" "(82s9) so the open finding counts no third occurrence"
 set_status closed
 "$SUT" flag --dir "$W" >/dev/null 2>&1
-eq "$(findings_n)" "2" "(82s10) and once it closes, no new finding reports that its fix did not hold"
+eq "$(findings_n)" "2" "(82s10) and once it closes, no new finding is filed as its recurrence"
 # The rest of the section raises onto tk-find2, open again.
 set_status open tk-find2
 # A note that does not land records nothing, so the next run names the post.

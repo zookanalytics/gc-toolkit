@@ -28,26 +28,29 @@ keepalive, as every capture runs, with the pack's `demo-screenshot.sh`:
 `demo-screenshot.sh page --script board.md --serve "go run ./cmd/helm-fixture"
 --port 0 --cwd <worktree>/services/helm --output board.png`.
 
-The board shows `services/helm/web/src/board.fixture.json`, the contract sample,
-which carries every key of the board contract. To show another board, write it
-in the shape `services/helm/web/src/contract.ts` names and add
-`--board $PWD/<file>` to the command. `demo-screenshot.sh` turns `--port 0` into
-a free port and hands it to the command as `$PORT`, where `helm-fixture` reads
-it, so two captures each get a server of their own. On a cold Go build cache the
-first run compiles Go's HTTP stack and can take most of the 30 s the engine
-waits for the command. When the engine reports that the command did not answer
-in time, capture again, because what the first run compiled stays cached.
+The page shows the gc-toolkit rig's document,
+`services/helm/internal/rigboard/testdata/gc-toolkit.board.json`, which the rig
+read builds from the committed fixture of real gc-toolkit beads, so the
+script's start path is `/?rig=gc-toolkit`. To show another rig's document,
+write it in the shape `services/helm/web/src/rigboard/document.gen.ts` names
+and add `--rig-board $PWD/<file>` to the command. `demo-screenshot.sh` turns
+`--port 0` into a free port and hands it to the command as `$PORT`, where
+`helm-fixture` reads it, so two captures each get a server of their own. On a
+cold Go build cache the first run compiles Go's HTTP stack and can take most of
+the 30 s the engine waits for the command. When the engine reports that the
+command did not answer in time, capture again, because what the first run
+compiled stays cached.
 
 A state that a verb leads to needs that verb's answer. Add
 `--answers $PWD/answers` to the command. A file there named for the verb, such
-as `dismiss.json`, is the answer a click on Dismiss gets, in the shape
-`services/helm/web/src/actuate/client.ts` reads, or `open/client.ts` for open.
-Name it `dismiss.409.json` and it answers with status 409, as a refusal does. A
-verb answers the same way on every click. A verb with no answer is refused as
-unavailable, so the board shows the refusal and nothing runs. `?drill=<id>` in
-the script's start path opens a row's drill panel. The panel's own reads go to
-the supervisor and fail against a fixture, and the panel still offers its
-actions.
+as `engage.json`, is the answer a click on Start the conversation or Rejoin
+the conversation gets, in the shape `services/helm/web/src/actuate/client.ts`
+reads, or `open/client.ts` for the form Discuss opens. Name it
+`engage.409.json` and it answers with status 409, as a refusal does. A verb
+answers the same way on every click. A verb with no answer is refused as
+unavailable, so the board shows the refusal and nothing runs. Details reads a
+bead's description from the supervisor, which a fixture cannot reach, so the
+page says it cannot read the description and shows the rest of Details.
 
 Capture the board through `helm-fixture`, never through a running helm
 service. A capture refuses a `--base-url` that any gc-toolkit server answers,

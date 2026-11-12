@@ -14,8 +14,10 @@ import (
 	"testing"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
-	// waits declares the keys gctk's bead read reads before any command links
-	// it, so the registry imports it here.
+	// listing declares the keys the helm board's read decodes, and no command
+	// links it, so the registry imports it here. waits declares the keys
+	// gctk's bead read reads before any command links it.
+	_ "github.com/zookanalytics/gc-toolkit/services/gctk/listing"
 	_ "github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
