@@ -2152,19 +2152,22 @@ func TestHoldsWithNoBeadAreShownAndNeverChosen(t *testing.T) {
 }
 
 // sharedGateHelm answers tk-a, held by gate tk-g1, which tk-a and tk-b both wait
-// on, and by decision tk-dec. Typed alone the gate names two beads and is
-// refused, as gc-helm.sh refuses it. Reached from tk-a it is about tk-a, and the
-// conversation replies to it.
+// on, and by decision tk-dec. Typed alone the gate is about tk-b, whose wait on
+// it is the older, as gc-helm.sh takes it. Reached from tk-a it is about tk-a.
+// Either way the conversation replies to it, and what holds the subject lists
+// the gate with its question.
 func sharedGateHelm() *fakeHelm {
 	a := heldAbout()
 	a.Holds = append(a.Holds, Hold{Held: "blocked", ID: "tk-dec", Title: "keep the old flag?"})
+	gate := []Hold{{Held: "gate", ID: "tk-g1", Title: "approve the wording"}}
 	viaA := subjectAbout("tk-a", "gc-toolkit")
-	viaA.Ref, viaA.Gate = "tk-g1", "tk-g1"
+	viaA.Ref, viaA.Gate, viaA.Holds = "tk-g1", "tk-g1", gate
 	viaA.Conversations = a.Conversations
+	typed := subjectAbout("tk-b", "gc-toolkit")
+	typed.Ref, typed.Gate, typed.Holds = "tk-g1", "tk-g1", gate
 	return &fakeHelm{
-		about: map[string]About{"tk-a": a, "tk-g1 --from tk-a": viaA, "tk-dec": subjectAbout("tk-dec", "gc-toolkit")},
-		aboutErr: map[string]error{"tk-g1": &Refusal{Code: 4, Why: "gc-helm: conversations: gate tk-g1 is about 2 beads still waiting on it (tk-a tk-b), " +
-			"and a conversation is about one bead. Name the one you mean: gc-helm conversations tk-g1 --from <bead>. Nothing read."}},
+		about:    map[string]About{"tk-a": a, "tk-g1 --from tk-a": viaA, "tk-g1": typed, "tk-dec": subjectAbout("tk-dec", "gc-toolkit")},
+		aboutErr: map[string]error{},
 	}
 }
 
@@ -2219,22 +2222,25 @@ func TestAGateSeveralBeadsWaitOnIsAboutTheSubjectItWasChosenFrom(t *testing.T) {
 	}
 }
 
-// A gate the operator types was reached from nothing, so one several beads wait
-// on is refused, naming them, and nothing is filed. A gate a choice put in the
-// field is read from nothing too once the field is edited, back to the same id
-// included, and a blocker chosen from what holds a subject is a subject of its
-// own, read from nothing.
-func TestAGateSeveralBeadsWaitOnIsRefusedWithNoSubjectItWasChosenFrom(t *testing.T) {
+// A gate the operator types was reached from nothing, so a gate several beads
+// wait on is about the bead its read names, the one gc-helm.sh takes from the
+// gate, and the save files there from nothing, naming that bead for open to
+// check. A gate a choice put in the field is read from nothing too once the
+// field is edited, back to the same id included, and a blocker chosen from what
+// holds a subject is a subject of its own, read from nothing.
+func TestAGateTypedAsTheSubjectIsAboutTheBeadItsReadNames(t *testing.T) {
 	f := sharedGateHelm()
+	f.saveResp = Saved{Subject: "tk-b", Conversation: "tk-c3", Filed: true}
 	m := newForm(t, f, Options{Subject: "tk-g1"})
 	settle(m)
-	if dest, ok := m.destination(); ok || !strings.Contains(dest, "2 beads still waiting on it (tk-a tk-b)") {
+	if dest, ok := m.destination(); !ok || !strings.Contains(dest, "a conversation on tk-b") || !strings.Contains(dest, "answering gate tk-g1") {
 		t.Fatalf("destination = %q, %v", dest, ok)
 	}
 	typeText(m, "q")
-	m.Update(ctrl('s'))
-	if len(f.saves) != 0 || !strings.Contains(m.status, "Not saved") {
-		t.Fatalf("saves %v status %q", f.saves, m.status)
+	_, cmd := m.Update(ctrl('s'))
+	deliver(m, cmd)
+	if want := (SaveRequest{Ref: "tk-g1", Subject: "tk-b", Question: "q"}); len(f.saves) != 1 || f.saves[0] != want {
+		t.Fatalf("saves = %+v, want %+v", f.saves, want)
 	}
 
 	m = newForm(t, f, Options{Subject: "tk-a"})
@@ -2248,7 +2254,9 @@ func TestAGateSeveralBeadsWaitOnIsRefusedWithNoSubjectItWasChosenFrom(t *testing
 		t.Fatalf("after the edit: subject %q from %q, want tk-g1 from nothing", m.ref(), m.from)
 	}
 	settle(m)
-	if dest, ok := m.destination(); ok || !strings.Contains(dest, "2 beads still waiting on it") {
+	// Typed text settles once the city's rigs say it names none of them.
+	loadCity(m)
+	if dest, ok := m.destination(); !ok || !strings.Contains(dest, "a conversation on tk-b") {
 		t.Fatalf("destination after the edit = %q, %v", dest, ok)
 	}
 	if strings.Contains(m.composeView(), "chosen from what holds") {
@@ -2260,6 +2268,105 @@ func TestAGateSeveralBeadsWaitOnIsRefusedWithNoSubjectItWasChosenFrom(t *testing
 	chooseRow(t, m, "tk-dec")
 	if m.ref() != "tk-dec" || m.from != "" || f.abouts[len(f.abouts)-1] != "tk-dec" {
 		t.Fatalf("a chosen blocker: subject %q from %q, reads %v", m.ref(), m.from, f.abouts)
+	}
+}
+
+// On a gate the question box is optional, and shows so: its placeholder says
+// what the conversation asks when the box is left empty, the gate's own
+// question as what holds the subject lists it, or the gate by its id when that
+// list did not read. A save with the box empty, or holding only spaces, goes
+// with no question, so open's ask is the gate's own, from a gate typed as the
+// subject, given on the command line or chosen from what holds a subject, and
+// the progress screen names the question it carries. A bead subject still needs
+// the operator's question, and its box asks for one.
+func TestTheQuestionIsOptionalOnAGate(t *testing.T) {
+	f := sharedGateHelm()
+	f.saveResp = Saved{Subject: "tk-b", Conversation: "tk-c3", Filed: true}
+	m := newForm(t, f, Options{Subject: "tk-g1"})
+	m.Update(tea.WindowSizeMsg{Width: 110, Height: 40})
+	settle(m)
+	const says = "Optional. Left empty, the conversation asks the question as it stands: approve the wording"
+	if got := m.placeholder(); got != says {
+		t.Fatalf("placeholder = %q, want %q", got, says)
+	}
+	if !strings.Contains(reads(screenAt(m.composeView(), 110, 40)), says) {
+		t.Fatalf("the box does not show that the question is optional:\n%s", m.composeView())
+	}
+	_, cmd := m.Update(ctrl('s'))
+	deliver(m, cmd)
+	if want := (SaveRequest{Ref: "tk-g1", Subject: "tk-b"}); len(f.saves) != 1 || f.saves[0] != want {
+		t.Fatalf("saves = %+v, want %+v (status %q)", f.saves, want, m.status)
+	}
+	if len(f.starts) != 1 || f.starts[0] != "tk-c3 claude-opus" {
+		t.Fatalf("starts = %v, want tk-c3", f.starts)
+	}
+	if v := m.progressView(); !strings.Contains(v, "saved: conversation tk-c3 on tk-b holds the question tk-g1 asks") {
+		t.Fatalf("the progress screen does not name the question saved:\n%s", v)
+	}
+
+	f = sharedGateHelm()
+	f.saveResp = Saved{Subject: "tk-a", Conversation: "tk-c2", Filed: true}
+	m = newForm(t, f, Options{Subject: "tk-g1", From: "tk-a"})
+	settle(m)
+	typeText(m, "  \n ")
+	_, cmd = m.Update(ctrl('s'))
+	deliver(m, cmd)
+	m = newForm(t, f, Options{Subject: "tk-a"})
+	settle(m)
+	chooseRow(t, m, "tk-g1")
+	_, cmd = m.Update(ctrl('s'))
+	deliver(m, cmd)
+	fromA := SaveRequest{Ref: "tk-g1", Subject: "tk-a", From: "tk-a"}
+	if len(f.saves) != 2 || f.saves[0] != fromA || f.saves[1] != fromA {
+		t.Fatalf("saves = %+v, want two of %+v", f.saves, fromA)
+	}
+
+	m = newForm(t, f, Options{Subject: "tk-a"})
+	settle(m)
+	if got := m.placeholder(); got != askPlaceholder {
+		t.Fatalf("placeholder on a bead = %q, want %q", got, askPlaceholder)
+	}
+	m.Update(ctrl('s'))
+	if len(f.saves) != 2 || m.status != "Not saved: type your question first." {
+		t.Fatalf("a bead saved with no question: saves %+v status %q", f.saves, m.status)
+	}
+
+	f = sharedGateHelm()
+	unread := f.about["tk-g1"]
+	unread.Holds, unread.HoldsRead = nil, false
+	f.about["tk-g1"] = unread
+	m = newForm(t, f, Options{Subject: "tk-g1"})
+	settle(m)
+	if got, want := m.placeholder(), "Optional. Left empty, the conversation asks question tk-g1 as it stands."; got != want {
+		t.Fatalf("placeholder with no holds read = %q, want %q", got, want)
+	}
+}
+
+// A save of the gate's own question that fails keeps nothing of the operator's,
+// since there is none: the status says why and no more, and leaving while such
+// a save runs keeps no draft and says the question's fate is unknown.
+func TestAFailedSaveOfTheGatesOwnQuestionKeepsNoDraft(t *testing.T) {
+	f := sharedGateHelm()
+	f.saveErr = errors.New("the store did not answer")
+	dir := t.TempDir()
+	m := newForm(t, f, Options{Subject: "tk-g1", DraftDir: dir})
+	settle(m)
+	_, cmd := m.Update(ctrl('s'))
+	deliver(m, cmd)
+	if want := "Not saved: the store did not answer."; m.status != want {
+		t.Fatalf("status = %q, want %q", m.status, want)
+	}
+
+	m = newForm(t, f, Options{Subject: "tk-g1", DraftDir: dir})
+	settle(m)
+	m.Update(ctrl('s'))
+	m.leaveNow()
+	want := "The form closed while the question tk-g1 asks was being saved, so whether it was filed is unknown: gc-helm.sh conversations lists the open conversations."
+	if m.Note() != want {
+		t.Fatalf("note = %q, want %q", m.Note(), want)
+	}
+	if kept, _ := os.ReadDir(dir); len(kept) != 0 {
+		t.Fatalf("a draft was kept: %v", kept)
 	}
 }
 
@@ -2589,18 +2696,25 @@ func demoGateHelm() *fakeHelm {
 	subject := Subject{ID: "tk-demo1", Title: "Board: show a PR's held reason on its row", Status: "open", IssueType: "task", Rig: "gc-toolkit"}
 	asked := Conversation{ID: "tk-demo2", Readiness: Ready, Title: "why does the held label lag the gate by a cycle?"}
 	gate := Hold{Held: "gate", ID: "tk-demo10", Title: "Approve the label wording"}
+	onGate := About{Ref: "tk-demo10", Subject: subject, Gate: "tk-demo10", HoldsRead: true,
+		Conversations: []Conversation{asked}, Holds: []Hold{gate}}
 	return &fakeHelm{
 		about: map[string]About{
 			"tk-demo1": {Ref: "tk-demo1", Subject: subject, HoldsRead: true,
 				Conversations: []Conversation{asked, {ID: "tk-demo9", Readiness: Preparing, Title: "your question"}},
 				Holds:         []Hold{gate, {Held: "review", Title: "2 review threads wait on the city's answer"}}},
-			"tk-demo10 --from tk-demo1": {Ref: "tk-demo10", Subject: subject, Gate: "tk-demo10", HoldsRead: true,
-				Conversations: []Conversation{asked}, Holds: []Hold{gate}},
+			"tk-demo10 --from tk-demo1": onGate,
+			"tk-demo10":                 onGate,
 		},
-		aboutErr: map[string]error{"tk-demo10": &Refusal{Code: 4, Why: "gc-helm: conversations: gate tk-demo10 is about 2 beads still waiting on it (tk-demo1 tk-demo11), " +
-			"and a conversation is about one bead. Name the one you mean: gc-helm conversations tk-demo10 --from <bead>. Nothing read."}},
+		aboutErr: map[string]error{"tk-demo12": &Refusal{Code: 4, Why: demoNothingWaits}},
 	}
 }
+
+// demoNothingWaits is gc-helm.sh's refusal of tk-demo12, a gate whose beads
+// have all closed.
+const demoNothingWaits = "gc-helm: conversations: nothing waits on gate tk-demo12 (it was about tk-demo1 tk-demo11, now closed), " +
+	"so there is no bead for a conversation to be about. Clear the gate instead: " +
+	`gc bd gate resolve tk-demo12 --reason "moot: <why nothing waits on it>". Nothing read.`
 
 // The destination is wrapped to the terminal beside "Files as", each line after
 // the first under its text, so a narrow terminal shows all of it before Ctrl+S:
@@ -2665,9 +2779,8 @@ func TestTheRowsPageAroundTheLinesTheDestinationWrapsOnto(t *testing.T) {
 // not complete and what r does, and on the return list the rigs whose store
 // did not read, with the selected row on screen.
 func TestEveryScreenShowsWhatItSaysWhole(t *testing.T) {
-	why := "gc-helm: conversations: gate tk-demo10 is about 2 beads still waiting on it (tk-demo1 tk-demo11), " +
-		"and a conversation is about one bead. Name the one you mean: gc-helm conversations tk-demo10 --from <bead>. Nothing read."
-	m := newForm(t, demoGateHelm(), Options{Subject: "tk-demo10"})
+	why := demoNothingWaits
+	m := newForm(t, demoGateHelm(), Options{Subject: "tk-demo12"})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
 	settle(m)
 	typeText(m, "q")

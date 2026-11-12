@@ -325,14 +325,22 @@ describe('the Needs you page', () => {
   });
 
   it('shows why an engage failed, in the tool’s words', async () => {
-    engageReply = () => json({ error: 'the gate holds two beads: name one with --from', reason: 'verb_failed' }, 422);
+    engageReply = () =>
+      json(
+        {
+          error:
+            'gc-helm: engage: nothing waits on gate tk-78qg2my (it was about tk-0ldb3ad, now closed), so there is no bead for a conversation to be about.',
+          reason: 'verb_failed',
+        },
+        422,
+      );
     render(<Page />);
     await loaded();
     tab(/Needs you/);
     fireEvent.click(within(rowOf('tk-78qg2my')).getByRole('button', { name: 'Start the conversation' }));
     const panel = await screen.findByRole('complementary', { name: 'Conversation' });
     const alert = await within(panel).findByRole('alert');
-    expect(text(alert)).toContain('the gate holds two beads');
+    expect(text(alert)).toContain('nothing waits on gate tk-78qg2my');
   });
 
   // Where the page places the panel below the board, opening it must bring it

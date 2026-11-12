@@ -158,9 +158,10 @@ type Rig struct {
 // the gate the conversation replies to. Subject is the subject the form showed
 // for it. From is the subject a gate Ref names was chosen from, which a gate
 // several beads wait on files about. A new topic leaves all three empty and
-// names its Rig. Conversation is set on a save again: the conversation an
-// earlier save filed and did not complete, which this save completes rather
-// than file another.
+// names its Rig. Question is the operator's question, and is empty on a gate
+// when the box was left empty, so the ask is the gate's own. Conversation is
+// set on a save again: the conversation an earlier save filed and did not
+// complete, which this save completes rather than file another.
 type SaveRequest struct {
 	Ref          string
 	Subject      string
@@ -311,10 +312,11 @@ func (s Script) City(ctx context.Context) (City, error) {
 
 // Save runs open: `open --new-subject --rig <rig> --reason <question> --json`
 // for a new topic, or `open <ref> --allow-duplicate --if-subject <subject>
-// [--from <from>] --reason <question> --json`, since a question the operator
+// [--from <from>] [--reason <question>] --json`, since a question the operator
 // brings is a concern of its own, and open refuses a reference that names
 // another subject than the one the form showed. The question rides as one argv element,
-// unchanged. A new subject filed whose conversation was not comes back with the
+// unchanged. An empty question, which the form saves only on a gate, goes with
+// no --reason, so open asks what the gate asks. A new subject filed whose conversation was not comes back with the
 // error, so a retry files onto that subject, and so does a conversation filed
 // whose save then failed. open answers a new subject the moment it files it, so
 // a save killed at its deadline after that still comes back with the subject,
@@ -340,7 +342,10 @@ func (s Script) Save(ctx context.Context, req SaveRequest) (Saved, error) {
 			args = append(args, "--conversation", req.Conversation)
 		}
 	}
-	args = append(args, "--reason", req.Question, "--json")
+	if req.Question != "" {
+		args = append(args, "--reason", req.Question)
+	}
+	args = append(args, "--json")
 	out, err := s.run(ctx, args...)
 	if jerr := lastJSON(out, &sv); jerr != nil && err == nil {
 		return sv, fmt.Errorf("gc-helm.sh open: %w", jerr)
