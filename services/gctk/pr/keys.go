@@ -2,20 +2,15 @@ package pr
 
 import "github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 
-// The keys a composition reads. No domain owns any of them: shell writes each,
-// so each is declared read-only here and its definition stays in
+// The keys a composition reads besides the PR summary, which this domain owns
+// (summary.go). No domain owns any of them: shell writes each, so each is
+// declared read-only here and its definition stays in
 // lifecycle/lifecycle.toml. The change that moves a shell writer into a domain
 // takes its key's declaration over. The keys the evaluator reads too, branch,
 // merged_target and merge_result, are declared once, with its keys.
 
-// The bead that owns the PR: what its summary says, where it lands and which
-// checks gate it.
+// The bead that owns the PR: where it lands and which checks gate it.
 var (
-	summaryKey = ledger.ReadOnly("pr_summary", ledger.String,
-		"The account of what a change does, which the polecat writes on the anchor at submit and an "+
-			"integration effort's summary task writes on its landing bead (lifecycle/lifecycle.toml, "+
-			"[metadata.merge_identity]). The PR's managed summary region carries it, and the dispatch text "+
-			"stands in while it is absent or blank.")
 	targetKey = ledger.ReadOnly("target", ledger.String,
 		"The branch a bead's work lands on, which the polecat records at submit and a caller can set first "+
 			"(lifecycle/lifecycle.toml, [metadata.merge_identity]). A composition names it as the PR's target "+

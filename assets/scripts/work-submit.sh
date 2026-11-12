@@ -28,8 +28,9 @@
 # read. On fresh work that is this bead. A convoy's rebuild child, a rework that
 # answers no review and no ruling, has the convoy it names, as merge-push resolves
 # it. A rework child's metadata.anchor_bead answers when the branch list cannot.
-# A write to the anchor is its own write, ahead of the handoff, because a failure
-# to land it costs the PR a current body or title, not the handoff.
+# The summary and a retitle go onto the anchor in one write, `gctk pr summary`,
+# which the pr domain owns. It is its own write, ahead of the handoff, because a
+# failure to land it costs the PR a current body or title, not the handoff.
 #
 # The handoff is three writes, not one, because bd's claim guard refuses a write
 # that reassigns a bead while it is in_progress, and that refusal rolls back
@@ -152,6 +153,10 @@ SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "${GC_BD_LIB:-$SCRIPT_DIR/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh beside this script" >&2; exit 1; }
 # shellcheck source=work-lib.sh
 . "$SCRIPT_DIR/work-lib.sh"
+# The summary and a retitle are recorded through gctk's pr domain.
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 
 work_resolve "$CONVOY" "$BEAD"
 case $? in
@@ -391,21 +396,16 @@ elif ! grep -qxF "$REFINERY_TARGET" <<< "$ROSTER"; then
   exit 1
 fi
 
-PR_SUMMARY=""
-if [ -s "${SUMMARY_FILE:-/dev/null}" ]; then PR_SUMMARY=$(cat "$SUMMARY_FILE"); fi
+# A summary file of whitespace alone writes no summary, and the retitle still goes.
+ACCOUNT=()
+if [ -s "${SUMMARY_FILE:-/dev/null}" ] && [ -n "$(tr -d '[:space:]' < "$SUMMARY_FILE")" ]; then
+  ACCOUNT+=(--file "$SUMMARY_FILE")
+fi
+if [ -n "$(printf '%s' "$TITLE" | tr -d '[:space:]')" ]; then ACCOUNT+=(--title "$TITLE"); fi
+if [ "${#ACCOUNT[@]}" -gt 0 ] && ! ACCOUNT_ERR=$("$GCTK" pr summary "${ANCHOR:-$WORK_ID}" "${ACCOUNT[@]}" 2>&1 </dev/null); then
+  echo "the summary and retitle given did not reach ${ANCHOR:-$WORK_ID}, so its PR keeps the body and title it would have without them: ${ACCOUNT_ERR:-gctk pr summary exited non-zero}" >&2
+fi
 HANDOFF_META=(--set-metadata "target=$LANDING_TARGET" --set-metadata gc.routed_to="" --unset-metadata gc.session_id --unset-metadata gc.session_name)
-if [ -n "$PR_SUMMARY" ]; then
-  if [ -n "$ANCHOR" ]; then
-    gc bd update "$ANCHOR" --set-metadata "pr_summary=$PR_SUMMARY" </dev/null >/dev/null \
-      || echo "pr_summary did not reach anchor $ANCHOR; its PR body falls back to the dispatch text" >&2
-  else
-    HANDOFF_META+=(--set-metadata "pr_summary=$PR_SUMMARY")
-  fi
-fi
-if [ -n "$(printf '%s' "$TITLE" | tr -d '[:space:]')" ]; then
-  gc bd update "${ANCHOR:-$WORK_ID}" --title "$TITLE" </dev/null >/dev/null \
-    || echo "the retitle did not reach ${ANCHOR:-$WORK_ID}; the PR title stays composed from the title it has" >&2
-fi
 
 if ! { gc bd update "$WORK_ID" "${HANDOFF_META[@]}" --append-notes "$NOTES" </dev/null >/dev/null \
     && gc bd update "$WORK_ID" --status=open </dev/null >/dev/null \

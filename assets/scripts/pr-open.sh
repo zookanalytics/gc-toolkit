@@ -2,7 +2,7 @@
 # pr-open — arm 3 of the merge cadence: pre_open_gate -> pull_request.
 # For each pre_open_gate anchor: adopt an existing OPEN or MERGED PR for the
 # branch (never open a twin) — an OPEN PR's body is first refreshed from the
-# anchor's current pr_summary, so a rework's restamp reaches the published merge
+# anchor's current PR summary, so a rework's restamp reaches the published merge
 # surface, while a MERGED PR is a landed record and is flipped untouched; a
 # CLOSED-unmerged-only PR is a headstone — open a fresh PR noting the superseded
 # one (unless the dead head IS the live head: that close was a decision about
@@ -12,7 +12,7 @@
 # same helper merge.sh asks) and no must-fix finding on the anchor to be open
 # (finding.sh); `gh pr create` pinned to origin — a draft when the check_set
 # names an open-as-draft check, ready otherwise — body summarizing the polecat's
-# `pr_summary` with the dispatch text demoted (the description only when no
+# PR summary with the dispatch text demoted (the description only when no
 # summary was carried), read back BY NUMBER, refuse a moved head, replay the
 # recorded verdict as a COMMENT (never an approval);
 # then ONE lifecycle.sh transition to pull_request carrying
@@ -367,7 +367,7 @@ refresh_pr_body() { # <id> <num> <head_oid> <phased>
   esac
   if [ -s "$NEW" ] && gh pr edit "$num" --repo "$ORIGIN_REPO_Q" --body-file "$NEW" </dev/null >/dev/null 2>&1; then
     rm -f "$CUR" "$NEW"
-    echo "$PROG: $id PR#$num body refreshed from the anchor's current pr_summary"
+    echo "$PROG: $id PR#$num body refreshed from the anchor's current PR summary"
     return 0
   fi
   rm -f "$CUR" "$NEW"
@@ -440,7 +440,7 @@ while IFS= read -r tagged; do
   case $? in
     0)
       # Adoption is not a publish, so the create-path gates do not re-run here;
-      # but an OPEN PR's published body must catch up to a reworked pr_summary
+      # but an OPEN PR's published body must catch up to a reworked PR summary
       # before the flip, or the merge surface stays stale. A refresh that cannot
       # land holds the anchor at pre_open_gate for the next pass rather than
       # flipping a body it knows to be behind. A MERGED PR is a landed record and
@@ -604,7 +604,7 @@ GATES
   # The title and body are composed from the anchor at the head the gate judged.
   # The title carries the bead id, so a PR is traceable to its anchor, behind the
   # conventional-commit type the repository's title check needs. The body is the
-  # marked summary region: the polecat's account of the diff, its pr_summary,
+  # marked summary region: the polecat's account of the diff, its PR summary,
   # with the dispatch text demoted below it, and the handoff facts, which name
   # the gates this one answer resolved and the closed PR this one supersedes.
   if ! COMPOSED=$(compose_pr "$id" --head "$head_oid" --opening --gates "$PHASED" --sections summary \

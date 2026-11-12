@@ -11,7 +11,8 @@
 // from them, and a test fails when it is stale.
 //
 // A verb's change of state is one Write, which Commit makes as one `gc bd
-// update` carrying every key the act sets, so the act lands whole or not at all.
+// update` carrying every key the act sets, and the title when the act gives
+// the bead one, so the act lands whole or not at all.
 // The update's exit decides whether the write landed: a write that exits
 // non-zero has failed, and nothing reads a write back to confirm it. A Snapshot
 // is one pass's read of the beads a question needs.
@@ -73,11 +74,12 @@ func open(c *gcbd.Client, db string, ids ...string) (*Ledger, error) {
 // errors.Is.
 var ErrGuard = gcbd.ErrGuard
 
-// Write is one act on one bead: every key it sets or clears, the status it
-// moves the bead to, the note it appends and the guard it lands under, made in
-// one update.
+// Write is one act on one bead: every key it sets or clears, the title it gives
+// the bead, the status it moves the bead to, the note it appends and the guard
+// it lands under, made in one update.
 type Write struct {
 	id     string
+	title  string
 	sets   []string // key=value, in the order set
 	unsets []string
 	status string
@@ -110,6 +112,10 @@ func (w *Write) unset(name string) {
 	}
 }
 
+// Title gives the bead title in the same write. The title is the row's own
+// field, which no key declares, so the act that sets it says what it means.
+func (w *Write) Title(title string) { w.title = title }
+
 // Status moves the bead to status in the same write. A move into closed is bd's
 // checked close, which bd refuses while a live blocker or an open child holds
 // the bead.
@@ -125,8 +131,8 @@ func (w *Write) Note(text string) { w.note = text }
 // is ErrGuard.
 func (w *Write) Guard(status, assignee string) { w.guard = &guard{status: status, assignee: assignee} }
 
-// args is the update's arguments: the guard, the status, every set, every
-// removal, then the note.
+// args is the update's arguments: the guard, the status, the title, every set,
+// every removal, then the note.
 func (w *Write) args() []string {
 	var args []string
 	if w.guard != nil {
@@ -134,6 +140,9 @@ func (w *Write) args() []string {
 	}
 	if w.status != "" {
 		args = append(args, "--status="+w.status)
+	}
+	if w.title != "" {
+		args = append(args, "--title", w.title)
 	}
 	for _, s := range w.sets {
 		args = append(args, "--set-metadata", s)
@@ -155,7 +164,7 @@ func (l *Ledger) Commit(w *Write) error {
 	if w.err != nil {
 		return w.err
 	}
-	if len(w.sets)+len(w.unsets) == 0 && w.status == "" && w.note == "" {
+	if len(w.sets)+len(w.unsets) == 0 && w.status == "" && w.title == "" && w.note == "" {
 		return fmt.Errorf("ledger: a write to %s carries no key", w.id)
 	}
 	if out, err := l.store.Update(w.id, w.args()...); err != nil {

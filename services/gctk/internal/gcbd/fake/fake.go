@@ -203,10 +203,10 @@ func (s *Store) Blocked() (*gcbd.BlockedSet, error) {
 }
 
 // Update applies one update's --set-metadata, --unset-metadata, --status,
-// --assignee and --append-notes to the row, and records it. A bead the store
-// does not hold refuses the write, as bd does. --if-status and --if-assignee are
-// bd's guards: an update whose guard no longer holds writes nothing and fails
-// with an error that is gcbd.ErrGuard.
+// --assignee, --append-notes and --title to the row, and records it. A bead the
+// store does not hold refuses the write, as bd does. --if-status and
+// --if-assignee are bd's guards: an update whose guard no longer holds writes
+// nothing and fails with an error that is gcbd.ErrGuard.
 func (s *Store) Update(id string, args ...string) (string, error) {
 	if s.BeforeUpdate != nil {
 		if err := s.BeforeUpdate(id, slices.Clone(args)); err != nil {
@@ -253,6 +253,8 @@ func (s *Store) Update(id string, args ...string) (string, error) {
 				b.Notes += "\n"
 			}
 			b.Notes += value
+		case "--title":
+			b.Title = value
 		case "--if-status":
 			if cur := s.rows[id].Status; cur != value {
 				return "", fmt.Errorf("fake store: %s is %s, not %s: %w", id, cur, value, gcbd.ErrGuard)

@@ -452,13 +452,15 @@ keys = [
   "existing_pr", "merge_strategy", "merge_result", "prepare_mode",
   "rejection_reason", "graduation", "blocked_reason", "work_dir",
   "false_completion_suspected", "branch_ready", "halt_reason", "auto_push",
-  "pr_summary", "merge_record_failures", "zero_diff_check_failures", "fold_target", "artifact_url",
+  "merge_record_failures", "zero_diff_check_failures", "fold_target", "artifact_url",
   "opened_as_draft", "draft_readied",
   "bring_current_from", "bring_current_scope", "conflict_audit", "conflict_question",
   "bring_current_record", "bring_current_reopened", "bring_current_round_at",
   "bring_current_lifted_at",
   "direct_landing_sha",
 ]
+# A bead's PR summary, the account of what its change does, is the pr domain's
+# key, declared in services/gctk/pr and listed in services/gctk/key-registry.json.
 # merge_result is the anchor state itself and is defined in [machine] / [states]
 # above: lifecycle.sh is its only writer (set on every transition, unset on
 # `--to unanchored`), absent reads as `unanchored`, and its value is one of the
@@ -577,12 +579,6 @@ keys = [
 #   product was store work. Absent auto_push means the normal push-and-hand-off
 #   path. Not cleared — the halt is terminal for that run. auto_push and
 #   branch_ready are boolean-ish; halt_reason is `auto_push_false | store_only`.
-# pr_summary — the account of what the diff does, rendered as the PR's
-#   `## Summary` by pr-open.sh, which falls back to the dispatch text and then a
-#   generic line when it is absent or blank. The polecat stamps it on the anchor
-#   at submit, and an integration effort's summary task stamps it on the effort's
-#   landing bead once the effort's work has landed. Never cleared. Freeform
-#   markdown.
 # merge_record_failures — consecutive failures to record a merged PR on this
 #   anchor. merge.sh and pr-facts.sh both perform that record and both retry
 #   every pass with no memory, so the count is the only thing that can tell a
