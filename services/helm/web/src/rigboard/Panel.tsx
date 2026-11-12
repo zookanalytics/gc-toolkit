@@ -3,9 +3,11 @@
 // conversation answered, with the command to run and a copy control, or
 // Discuss's form for filing a conversation on a bead.
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { attachCommand } from '../actuate/client';
 import { OpenConversation } from '../open/OpenConversation';
+import { CopyButton } from './CopyButton';
+import { useCopy } from './useCopy';
 import type { EngageAnswer, PanelState } from './view';
 
 // What the operator should do next, per failure reason. Absent where the
@@ -110,24 +112,12 @@ function Engaged({ answer }: { answer: EngageAnswer }) {
 
 /** The command to run, with a control that copies it. */
 function Command({ command }: { command: string }) {
-  const [copied, setCopied] = useState(false);
-  const copy = () => {
-    try {
-      const done = navigator.clipboard.writeText(command);
-      done.catch(() => {});
-    } catch {
-      // A page without clipboard access still shows the command to select.
-    }
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1200);
-  };
+  const [copied, copy] = useCopy();
   return (
     <div className="command">
       <span className="panel-dim">attach:</span>
       <code>{command}</code>
-      <button type="button" className="panel-copy" onClick={copy}>
-        {copied ? 'Copied' : 'Copy'}
-      </button>
+      <CopyButton className="panel-copy" text={command} label="Copy" done="Copied" copied={copied} copy={copy} />
     </div>
   );
 }
