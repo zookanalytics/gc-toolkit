@@ -519,6 +519,50 @@ describe('copying', () => {
   });
 });
 
+// The row and its Details draw a pull request in markup of their own, and
+// read its state and what holds it in the same words.
+describe('a pull request', () => {
+  /** The row whose own bead id reads id, as search lists it. */
+  function found(id: string): HTMLElement {
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search this rig' }), { target: { value: id } });
+    const line = [...document.querySelectorAll('.line')].find((l) => text(l.querySelector('.bead-slot .bead-id')) === id);
+    if (!(line instanceof HTMLElement)) throw new Error(`no row for ${id}`);
+    return line;
+  }
+
+  /** What the row's pull request bit reads, and what Details' Pull request
+   *  field reads once Details is open. */
+  function readings(id: string): { row: string; details: string } {
+    const line = found(id);
+    const row = text(line.querySelector('.bit--mono'));
+    fireEvent.click(within(line).getByRole('button', { name: 'Details' }));
+    const block = line.nextElementSibling;
+    if (block === null || !block.classList.contains('details-block')) throw new Error(`no Details for ${id}`);
+    const field = [...block.querySelectorAll('.field')].find((f) => text(f.querySelector('.field-key')) === 'Pull request');
+    return { row, details: text(field?.querySelector('.field-value') ?? null) };
+  }
+
+  it('reads its state and every reason it is held the same on its row and in Details', async () => {
+    const doc = structuredClone(board);
+    const held = doc.rows['tk-1tfzr71.66'];
+    held.pull_request = { ...held.pull_request!, held: ['gate', 'review'] };
+    rigReads = [() => json({ read_at: READ_AT, board: doc })];
+    render(<Page />);
+    await loaded();
+    expect(readings('tk-1tfzr71.66')).toEqual({
+      row: '#1459 · needs-attention · held: gate, review',
+      details: '#1459 needs-attention · held: gate, review',
+    });
+  });
+
+  it('reads a state with nothing held, and a number alone, the same way in both', async () => {
+    render(<Page />);
+    await loaded();
+    expect(readings('tk-c9dcsbn')).toEqual({ row: '#1464 · working', details: '#1464 working' });
+    expect(readings('tk-1hazlo2')).toEqual({ row: '#1256', details: '#1256' });
+  });
+});
+
 describe('Details', () => {
   it('reads the bead’s whole description from the supervisor and formats it', async () => {
     render(<Page />);
