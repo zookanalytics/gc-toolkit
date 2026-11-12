@@ -366,9 +366,8 @@ corrective feedback into standing behavior, so attention is never spent twice:
    review comments, recording every review post from outside the city and
    what self-report missed in the city's own; "learn this: …" is the
    operator fast path. Agents' memory notes are an intake, not a rulebook:
-   the `memory-triage` order sorts each store weekly, carries what a note
-   shows into a reviewed wording fix, an observation or its bead, and removes
-   the note within about two weeks.
+   an analysis carries what a note shows into a reviewed wording fix, an
+   observation or its bead, and removes the note.
 2. **Distill.** The `feedback-distiller` order clusters observations into
    patterns and promotes recurring ones as ordinary PRs against the pack —
    prompt edits, lint rules under `tools/lint-learned.d/`, doc changes.
@@ -411,7 +410,7 @@ first. Either way the change is a decision on the record, not a drift.
 
 ## Debt
 
-- **Agent memory is not triaged yet.** No `memory-triage` order runs, so a
-  memory store keeps its notes past two weeks, and a lesson in one reaches the
-  learning loop only when an agent files it by hand. Epic tk-zlot608 builds the
-  triage.
+- **Agent memory is not triaged yet.** Nothing analyzes memory notes, so a
+  note stays in its store until an agent or a person removes it, and a lesson
+  in one reaches the learning loop only when an agent files it by hand. Epic
+  tk-zlot608 builds the triage.
