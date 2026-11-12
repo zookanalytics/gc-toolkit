@@ -15,7 +15,8 @@
 #   - an open rework child already on the branch takes the reason in its notes
 #     and nothing else is filed, and one that was never dispatched is slung;
 #   - a rework child handed back goes back itself, and its anchor is untouched;
-#   - a write whose guard no longer holds writes nothing (exit 3);
+#   - a write whose guard no longer holds writes nothing (exit 3), and a write
+#     the store fails is no move of the bead: it stops (exit 1);
 #   - a sling that fails arms a deferred dispatch, and an arm that fails too
 #     files a gate;
 #   - a bead whose branch the refinery's tree does not hold gets no write.
@@ -123,6 +124,16 @@ STUB_GUARD_FAIL=1 run --bead g --reason "test fails"
 eq "$RC" 3 "a bead that moved after its read exits 3"
 has "$OUT" "changed after it was read" "it says the bead moved"
 eq "$(meta g rejection_reason)" "<absent>" "nothing is written"
+hasnt "$(logged gc)" "sling" "nothing is slung"
+fresh
+branch_with polecat/g g.txt >/dev/null
+work g polecat/g
+prepared g polecat/g
+STUB_UPDATE_FAIL=1 run --bead g --reason "test fails"
+eq "$RC" 1 "a write the store fails stops (exit 1)"
+has "$OUT" "a failure of the store rather than a change to g" "it names the store, not a move of the bead"
+hasnt "$OUT" "changed after it was read" "…and never says the bead moved"
+eq "$(bassignee g) $(meta g rejection_reason)" "rig-a/gc-toolkit.refinery <absent>" "the bead stays with the refinery, unwritten"
 hasnt "$(logged gc)" "sling" "nothing is slung"
 
 echo "# a sling that fails arms a retry, and an arm that fails files a gate"

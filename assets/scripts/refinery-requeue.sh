@@ -132,12 +132,18 @@ if [ "$(bead_meta merge_result)" = pull_request_head_changed ] || [ "$KIND" = co
 fi
 
 case "$STATUS" in open|in_progress) ;; *) stop "$BEAD is $STATUS, not open or in progress" ;; esac
-if ! OUT=$(gc bd update "$BEAD" --if-assignee="$GC_AGENT" --if-status="$STATUS" --status=open --assignee="" \
-     --set-metadata "rejection_reason=$REASON" --unset-metadata gc.routed_to --unset-metadata gc.execution_routed_to \
-     --unset-metadata gc.session_id --unset-metadata gc.session_name </dev/null 2>&1); then
-  echo "$PROG: $BEAD changed after it was read (no longer $STATUS and assigned to $GC_AGENT), so it was left as it is: $(printf '%s' "$OUT" | tr -s '[:space:]' ' ')" >&2
-  exit 3
-fi
+# bd exits 13 when a guard no longer holds, having written nothing; any other
+# failure is the store's, which says nothing about where the bead went.
+RC=0
+OUT=$(gc bd update "$BEAD" --if-assignee="$GC_AGENT" --if-status="$STATUS" --status=open --assignee="" \
+  --set-metadata "rejection_reason=$REASON" --unset-metadata gc.routed_to --unset-metadata gc.execution_routed_to \
+  --unset-metadata gc.session_id --unset-metadata gc.session_name </dev/null 2>&1) || RC=$?
+case "$RC" in
+  0) ;;
+  13) echo "$PROG: $BEAD changed after it was read (no longer $STATUS and assigned to $GC_AGENT), so it was left as it is: $(printf '%s' "$OUT" | tr -s '[:space:]' ' ')" >&2
+      exit 3 ;;
+  *) stop "the write that sends $BEAD back exited $RC, a failure of the store rather than a change to $BEAD: $(printf '%s' "$OUT" | tr -s '[:space:]' ' ')" ;;
+esac
 gc workflow delete-source "$BEAD" --apply </dev/null >&2 \
   || echo "$PROG: gc workflow delete-source $BEAD did not finish; a workflow still live on it makes the sling below refuse" >&2
 sling "$BEAD" || exit 1
