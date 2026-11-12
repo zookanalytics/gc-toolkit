@@ -406,7 +406,10 @@ that stays. Gas City stops the agent once no tab is attached, and wakes this
 session, with its thread, when the work closes. Step 1 then reads the
 `staying:` line and sends you to the return (step 8). On an open PR the merge
 this conversation holds waits for the return as well, so lift that hold (the
-`converse-hold` skill) when the operator wants the PR to land without it.
+`converse-hold` skill) when the operator wants the PR to land without it. A
+stay for that PR's own landing needs the hold lifted first, because its anchor
+already waits on this conversation, and the sign-off refuses the stay until
+it is.
 
 **The validating closer is the return trip.** Once every wait the sign-off
 recorded closes, the deferred-dispatch pass slings the closer the sign-off

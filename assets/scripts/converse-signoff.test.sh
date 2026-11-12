@@ -108,9 +108,11 @@
 #             onto each bead of work it sent, a rework the call files included,
 #             then its staying: line, then the guarded status write, and no
 #             close or PR comment; a re-run writes the line no second time, the
-#             same call less --stay closes it on the return, and a stay with no
-#             work, beside --answer or with no ruling, on work in another store,
-#             on a gate alone or on a conversation in the queue is refused
+#             call less --stay, with --no-wait for its waits and brief, closes
+#             it on the return and arms no second closer once the arm has sent
+#             one, and a stay with no work, beside --answer or with no ruling,
+#             on work in another store, on a gate alone, on work that waits on
+#             the conversation or on a conversation in the queue is refused
 #             before any write, as a rework child that does not read stops it
 #   (APPROVE*) a PR a ruling leaves standing with no approval is named in the
 #             headline, the close reason and the reminder, and printed with its
@@ -1815,10 +1817,14 @@ run_signoff --conversation tk-conv --outcome "staying — waits on tk-work" "${S
 eq "$RC" 0 "(STAY-RERUN) a re-run of the stay exits 0"
 eq "$(field tk-conv notes | grep -c '^staying:')" 1 "(STAY-RERUN) …writing the staying: line no second time"
 eq "$(field tk-conv status)" "open" "(STAY-RERUN) …and the conversation stays open"
-setf tk-work status closed
-run_signoff --conversation tk-conv --outcome "landed as agreed" --ruled yes --ruling "build the fix" --waiting-on tk-work --close-brief "$BRIEF"
-eq "$RC" 0 "(STAY-RETURN) the return's sign-off, the same call less --stay, exits 0"
+# The work has landed, and the deferred-dispatch pass has sent the closer the
+# stay armed, before the return signs off.
+setf tk-work status closed; sent_closer
+ARMS=$(grep -c '^deferred-dispatch arm' "$CALLS" || true)
+run_signoff --conversation tk-conv --outcome "landed as agreed" --ruled yes --ruling "build the fix" --no-wait
+eq "$RC" 0 "(STAY-RETURN) the return's sign-off, the stay's call less --stay with --no-wait for its waits and brief, exits 0"
 eq "$(field tk-conv status)" "closed" "(STAY-RETURN) …closes the conversation"
+eq "$(grep -c '^deferred-dispatch arm' "$CALLS")/$(meta tk-sub gc.dispatch_when_ready_args)" "$ARMS/" "(STAY-RETURN) …arming no second closer once the arm has sent the first"
 eq "$(briefs tk-sub)" 1 "(STAY-RETURN) …and writes no second brief"
 
 open_pr; bead tk-child; setm tk-child source_ruling_bead tk-conv
@@ -1851,6 +1857,13 @@ closer_case; gate tk-g2 waits-for-rb-work
 run_signoff --conversation tk-conv --outcome x --ruled yes --ruling "build the fix" --waiting-on tk-g2 --stay "x"
 eq "$RC" 2 "(STAY-GATE) a stay whose only wait is a gate exits 2"
 eq "$(writes)" 0 "(STAY-GATE) …and writes nothing"
+# The conversation holds the merge of the PR it is about: the anchor waits on
+# it through a blocks edge, as gc-helm open and engage write that hold.
+open_pr; edge tk-anc blocks tk-conv
+run_signoff --conversation tk-conv --outcome x --ruled yes --ruling "land it as it stands" --no-rework --waiting-on tk-anc --stay "x"
+eq "$RC" 2 "(STAY-HOLDS-MERGE) a stay on a PR whose merge the conversation holds exits 2"
+has "$OUT" "gc bd dep remove tk-anc tk-conv" "(STAY-HOLDS-MERGE) …naming the lift of that hold"
+eq "$(writes)" 0 "(STAY-HOLDS-MERGE) …and writes nothing"
 closer_case; setf tk-conv assignee human; setf tk-conv status open
 run_signoff --conversation tk-conv --outcome x --ruled yes --ruling "build the fix" --waiting-on tk-work --close-brief "$BRIEF" --stay "x"
 eq "$RC" 2 "(STAY-QUEUED) a conversation in the operator's queue has no sitting to stay"

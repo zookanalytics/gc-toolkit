@@ -211,10 +211,15 @@
 #     that is no gate and on the rework --rework files. <text> is what the
 #     sitting compares that work with once it lands, what the operator agreed,
 #     in one line; the conversation's notes carry it as `staying: <text>`, with
-#     the beads it waits on. Each must be in the conversation's own store. It is
-#     refused on a conversation no sitting holds, and with nothing to wait on.
-#     The sitting signs off on its return with the same call, less --stay, and
-#     with --no-rework in place of a --rework, whose child has landed.
+#     the beads it waits on. Each must be in the conversation's own store, and
+#     none may wait on the conversation itself, as the anchor of an open PR
+#     whose merge the conversation holds does, since then neither could close.
+#     It is refused on a conversation no sitting holds, and with nothing to
+#     wait on. The sitting signs off on its return with the same call less
+#     --stay, with --no-wait in place of its --waiting-on and --close-brief,
+#     and with --no-rework in place of a --rework, whose child has landed. The
+#     closer the stay armed already checks that work, and a --waiting-on on
+#     work that has landed would arm it again once its arm has sent it.
 # Exit: 0 signed off, or with --answer the named gates answered, or with --stay
 #   the conversation left waiting on the work; 1 stopped
 #   short — a read failed, the rework did not file, the PR did not retire, the
@@ -852,7 +857,10 @@ take_recommendation() {
 # An edge from the conversation onto a bead in another store holds nothing, and
 # a conversation that waited on nothing would read as ready work at once and
 # wake its sitting before the work landed, so each bead carries the
-# conversation's own prefix.
+# conversation's own prefix. A bead that waits on the conversation already, as
+# the anchor of an open PR whose merge the conversation holds does, would close
+# a cycle that bd refuses, and neither bead could close, so it is refused here,
+# before any write.
 STAY_ON=""
 if [ -n "$STAY" ]; then
   if [ "$HOLDER" = human ] || { [ "$CONV_STATUS" != in_progress ] && [ "$CONV_STATUS" != open ]; }; then
@@ -864,8 +872,12 @@ if [ -n "$STAY" ]; then
       || die "--stay would make conversation $CONVERSATION wait on $w, in another store, where its edge holds nothing; nothing was written. A sitting whose work is in another rig ends at the hand-off: sign off without --stay"
     WROW=$(show_row "$w") \
       || stopped "$w, which this sitting would stay for, could not be read to tell whether it is work or a gate; nothing was written"
-    printf '%s' "$WROW" | jq -e '(.issue_type // "") == "gate"' >/dev/null 2>&1 \
-      || STAY_ON="${STAY_ON:+$STAY_ON }$w"
+    printf '%s' "$WROW" | jq -e '(.issue_type // "") == "gate"' >/dev/null 2>&1 && continue
+    if printf '%s' "$WROW" | jq -e --arg c "$CONVERSATION" \
+         'any(.dependencies[]? | objects; ((.dependency_type // .type) // "") == "blocks" and ((.depends_on_id // .id) // "") == $c)' >/dev/null 2>&1; then
+      die "--stay would make conversation $CONVERSATION wait on $w, and $w already waits on $CONVERSATION, as the anchor of an open PR whose merge the conversation holds does, so neither could close; nothing was written. When the operator wants that PR to land first, lift the hold (gc bd dep remove $w $CONVERSATION, the converse-hold skill) and re-run; otherwise sign off without --stay"
+    fi
+    STAY_ON="${STAY_ON:+$STAY_ON }$w"
   done
   [ -n "$STAY_ON" ] || [ "$PR_ANSWER" = rework ] \
     || die "--stay waits on the work this ruling sent, and each --waiting-on is a gate; nothing was written"

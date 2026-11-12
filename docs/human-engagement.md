@@ -1188,7 +1188,10 @@ already has
   the return from the record.
 - **Where it cannot stay.** An edge onto a bead in another store holds
   nothing, so a sitting stays only for work in its conversation's own store,
-  and ends at the hand-off otherwise.
+  and ends at the hand-off otherwise. Nor does it stay for the PR whose merge
+  its conversation holds, since that PR's anchor already waits on the
+  conversation and neither could close: the sign-off refuses that stay until
+  the sitting lifts the hold.
 
 Gas City's `gc session wait <session> --on-beads <ids> --sleep` also sleeps a
 session until a bead closes. A sitting does not use it, because the attach that
