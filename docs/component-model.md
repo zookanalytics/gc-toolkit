@@ -225,7 +225,9 @@ false. **UNCHECKED** means the check does not exist and is filed as a bead.
 
 Further checks guard structure that is not an anchor invariant:
 `doctor/check-config-bound` (every prompt, overlay, and fragment the pack names
-resolves in the composed config), `doctor/check-seed-audit-current`
+resolves in the composed config, and no order registered with no rig declares
+`scope = "rig"`, since Gas City runs such an order once, in the city store),
+`doctor/check-seed-audit-current`
 (the generated seed audit is present and its pre-commit hook is wired;
 warn-only),
 `doctor/check-recycle-capable` (cycle-recycle can fire at all: the Stop and
