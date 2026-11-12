@@ -15,6 +15,11 @@
 #                 task that is not a conversation is left out; the rigs a new
 #                 topic can be filed in, each with its prefix, whether it
 #                 carries converse and whether it is suspended
+#   (CITY-SEATS)  the seats the form's People page lists: mechanik, then the po
+#                 of each rig a new topic can go to, each with the open session
+#                 the session list holds under the name its verb attaches to,
+#                 or null, read from the one session list the conversations
+#                 were read from
 #   (CITY-ENDED)  a bound conversation whose sitting ended before it claimed it
 #                 is found by its own row and reads ended, as conversations
 #                 <subject> reads it
@@ -152,7 +157,10 @@ seed() {
     {id:"s1", alias:"gc-toolkit/gc-toolkit.tk-ready", session_name:"s-s1", state:"active", attached:false, created_at:"2026-11-08T10:00:00Z", template:"gc-toolkit/gc-toolkit.converse-claude-opus"},
     {id:"s2", alias:"gc-toolkit/gc-toolkit.tk-prep", session_name:"s-s2", state:"active", attached:true, created_at:"2026-11-08T11:00:00Z", template:"gc-toolkit/gc-toolkit.converse-claude-opus"},
     {id:"s3", alias:"gc-toolkit/gc-toolkit.tk-bound", session_name:"s-s3", state:"start-pending", attached:false, created_at:"2026-11-08T12:00:00Z", template:"gc-toolkit/gc-toolkit.converse-claude-opus"},
-    {id:"s4", alias:"gc-toolkit/gc-toolkit.polecat-1", session_name:"s-s4", state:"active", attached:false, created_at:"2026-11-08T09:00:00Z", template:"gc-toolkit/gc-toolkit.polecat"}]}' > "$STATE/sessions.json"
+    {id:"s4", alias:"gc-toolkit/gc-toolkit.polecat-1", session_name:"s-s4", state:"active", attached:false, created_at:"2026-11-08T09:00:00Z", template:"gc-toolkit/gc-toolkit.polecat"},
+    {id:"s5", alias:"gc-toolkit.mechanik", session_name:"gc-toolkit__mechanik", state:"active", attached:true, created_at:"2026-08-31T04:11:47Z", template:"gc-toolkit.mechanik"},
+    {id:"s6", alias:"gascity/gc-toolkit.po", session_name:"gascity--gc-toolkit__po", state:"asleep", attached:false, created_at:"2026-11-08T08:00:00Z", template:"gascity/gc-toolkit.po"},
+    {id:"s7", alias:"docs/gc-toolkit.po", session_name:"docs--gc-toolkit__po", state:"closed", closed:true, attached:false, created_at:"2026-11-07T08:00:00Z", template:"docs/gc-toolkit.po"}]}' > "$STATE/sessions.json"
   jq -n '[
     {id:"tk-subj", issue_type:"task", status:"open", title:"the subject"},
     {id:"tk-shut", issue_type:"task", status:"closed", title:"a closed subject"},
@@ -195,6 +203,11 @@ eq "$(row tk-shutconv)" "" "(CITY) a closed conversation is not listed"
 eq "$(printf '%s' "$OUT" | jq -c '[.rigs[] | [.name, .converse, .suspended]]')" '[["gc-toolkit",true,false],["gascity",true,true],["docs",false,false]]' "(CITY) the rigs a new topic can go to, but the city's own store, with converse and suspension"
 eq "$(printf '%s' "$OUT" | jq -c '[.rigs[] | .prefix]')" '["tk","gc","dx"]' "(CITY) …each with its prefix, so the form can match one typed by it"
 eq "$(printf '%s' "$OUT" | jq -c '.unread')" '[]' "(CITY) …and no store unread"
+eq "$(printf '%s' "$OUT" | jq -c '[.seats[] | [.seat, .rig, (.session | if . == null then null else [.id, .state, .attached] end)]]')" \
+  '[["mechanik","",["s5","active",true]],["po","gc-toolkit",null],["po","gascity",["s6","asleep",false]],["po","docs",null]]' \
+  "(CITY-SEATS) mechanik, then each rig's po but the city's own store's, each with its open session or none"
+eq "$(printf '%s' "$OUT" | jq -c '.seats[0].session | {name, created_at}')" '{"name":"gc-toolkit__mechanik","created_at":"2026-08-31T04:11:47Z"}' "(CITY-SEATS) …a session with its name and when it was created"
+eq "$(grep -c '^session list' "$CALLS")" 1 "(CITY-SEATS) …from the one session list the conversations were read from"
 
 echo "# a bound conversation whose sitting ended before it claimed it is still listed"
 seed; jq '.sessions |= map(select(.id != "s3"))' "$STATE/sessions.json" > "$STATE/tmp.json" && mv "$STATE/tmp.json" "$STATE/sessions.json"

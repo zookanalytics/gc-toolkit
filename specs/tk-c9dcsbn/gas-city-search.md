@@ -1,6 +1,6 @@
 ---
 name: Gas City search for Engage's seats and a po for each rig
-description: The search the arch check asks for before the pack makes Engage the way in to gc-helm, with its subject taking a rig's po or mechanik, adds the seat verbs gc-helm po --rig and gc-helm mechanik, and makes the po a named session of each rig. What Gas City ships for choosing among sessions, for a session of each rig and the name an attach gives one, and for opening a named seat's sitting with its prompt from any state, read at named upstream commits; why each seat verb is that attach alone; and the Gas City build the city runs, which carries the attach the verbs compose. Read it when checking whether a seat or the po's rig scope can move onto a Gas City primitive, or which Gas City build the seat verbs need.
+description: The search the arch check asks for before the pack makes Engage the way in to gc-helm, with a People page that lists mechanik and each rig's po with the state of each one's session, adds the seat verbs gc-helm po --rig and gc-helm mechanik, and makes the po a named session of each rig. What Gas City ships for choosing among sessions, for a seat's state, for a session of each rig and the name an attach gives one, and for opening a named seat's sitting with its prompt from any state, read at named upstream commits; why each seat verb is that attach alone; and the Gas City build the city runs, which carries the attach the verbs compose. Read it when checking whether a seat, its state or the po's rig scope can move onto a Gas City primitive, or which Gas City build the seat verbs need.
 ---
 
 # Gas City search for Engage's seats and a po for each rig
@@ -11,9 +11,13 @@ this surface:
 - A bare `gc-helm.sh` on a terminal runs engage, which opens the conversation
   form on starting a conversation. Without a terminal it keeps its usage and
   exit 2.
-- The form's subject takes a seat typed there, `<rig>/po` for a rig's po, the
-  rig by a name or prefix, or `mechanik`, and once the form has left the
-  terminal it runs the seat's verb.
+- The form's pages are tabs, and a People page beside starting a
+  conversation and returning to one lists the seats: mechanik, and each rig's
+  po by its rig's name and prefix, each with the state of its session. Once
+  the form has left the terminal it runs the verb of the seat picked.
+- `gc-helm.sh conversations --json` gains `seats`, which the People page
+  reads: each seat, with the open session Gas City's session list holds under
+  the name the seat's verb attaches to, or none.
 - `gc-helm.sh po --rig <name>` and `gc-helm.sh mechanik`, each of which
   attaches the terminal to its seat's session from whatever state the seat is
   in.
@@ -22,8 +26,9 @@ this surface:
 
 Gas City read at upstream main `8b1d799b8` (gastownhall/gascity, fetched
 2026-11-10), the attach's paths read again at upstream `f14384642` on
-2026-11-11, and the named session's rig scope read at upstream `6bd609f5bf` on
-2026-11-11. The city runs a fork build, `36ad5186a`, whose last common commit
+2026-11-11, the named session's rig scope read at upstream `6bd609f5bf` on
+2026-11-11, and a seat's state read at upstream `6bd609f5bf` on 2026-11-12. The
+city runs a fork build, `36ad5186a`, whose last common commit
 with upstream is `f14384642`. That build is not evidence of a primitive. It is
 read only for what the city runs (*The deployed version*, below).
 
@@ -34,11 +39,36 @@ with its alias, template, state and whether a terminal is attached
 (`sessionListJSONRow`, `cmd/gc/cmd_session.go`), and `gc session attach`
 attaches to the one session it names (`newSessionAttachCmd`, `cobra.ExactArgs(1)`).
 No `gc session` subcommand offers a choice among sessions, and upstream's
-`go.mod` carries no terminal UI library. `gc dashboard` is a web page. So a
-seat is a subject of the terminal form the pack already ships (helm-svc form,
-whose search is [specs/tk-po06sre/gas-city-search.md](../tk-po06sre/gas-city-search.md)),
-and the form runs a gc-helm verb for it, so the form starts, reads and writes
+`go.mod` carries no terminal UI library. `gc dashboard` is a web page. So the
+choice among the seats is a page of the terminal form the pack already ships
+(helm-svc form, whose search is
+[specs/tk-po06sre/gas-city-search.md](../tk-po06sre/gas-city-search.md)), and
+the form runs a gc-helm verb for the seat picked, so the form starts and writes
 nothing for a seat itself.
+
+**A seat's state.** `gc session list --json` covers it. Each row carries the
+session's alias, its state as Gas City's lifecycle names it, and whether a
+terminal is attached (`sessionListJSONRow`, `cmd/gc/cmd_session.go`, at
+`6bd609f5bf`). The list holds the open sessions only (`sessionListInfos`), so a
+configured named session with no open session, such as a po that has never run,
+has no row, and the attach materializes it
+(`resolveSessionIDMaterializingNamed`). So `seats` reads the list once, the read
+`conversations` already makes for the live sittings, and takes for each seat the
+open session whose alias is the name the seat's verb attaches to, or none, with
+Gas City's state word as it stands. Which seats there are is the pack's: the
+seat verbs' names, and a po for each rig `gc rig list` gives but the city's HQ,
+as `ExpandGenericRigNamedSessions` stamps one for each of `cfg.Rigs`. Gas City
+also classifies each configured named session, `gc status` printing its state,
+or `reserved-unmaterialized` while it has no session (`namedSessionStatusForCity`
+and `cityStatusSnapshot.NamedSessions`, `cmd/gc/city_status_snapshot.go`), and
+it leaves part of the need: `gc status --json` carries no named session
+(`StatusJSON`, `cmd/gc/cmd_citystatus.go`), the text runs an identity of 24
+characters or more into its status (`%-24s%s`), and neither says whether a
+terminal is attached. The supervisor API's status carries the same
+classification as JSON (`StatusBody.NamedSessionDetails`,
+`named_session_details`, `internal/api/huma_types_patches.go`), with no
+attached either, and the form reads only through gc-helm's verbs, which read
+through the gc CLI.
 
 **A session of each rig, and the name an attach gives one.** Gas City ships
 it. A `[[named_session]]` with `scope = "rig"` and no `dir` is a generic
@@ -139,8 +169,14 @@ common commit with upstream is `f14384642`, so it carries `64ba02c02` and
 attach runs through (`85751fbe1`, `5028a000f`, `51055e7d3` and `b9ffe10ea`)
 change other session commands, a nudge's bead reference, a transcript lookup
 and what a start records about a task's work directory, and none of the paths
-above. The city's sessions show the rig-scoped named session's identity on
-that build: the pack's witness and refinery run as
+above. `cmd/gc/cmd_session.go` is the same at `f14384642` and `6bd609f5bf`, and
+the fork's commits there add a nudge's bead reference and `gc session
+release-name`, leaving `sessionListJSONRow` and `sessionListInfos` as upstream
+has them, so the city's `gc session list --json` gives each open session's
+alias, state and attached as the seats read them. Read on 2026-11-12, it lists
+mechanik's session under the alias `gc-toolkit.mechanik`, active with a
+terminal attached. The city's sessions show the rig-scoped named session's
+identity on that build: the pack's witness and refinery run as
 `<rig>/gc-toolkit.witness` and `<rig>/gc-toolkit.refinery` in every rig. So
 each seat verb, and a po for each rig, run on the city's gc as this page reads
 it.

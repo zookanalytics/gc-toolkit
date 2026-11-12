@@ -9,8 +9,8 @@
 # dismiss, handback, accept, the read-only resolve and conversations, and po
 # and mechanik, which attach to the seats the operator sits with: a rig's po,
 # and the city's mechanik. engage, which a bare gc-helm on a terminal runs, and
-# attach hand a terminal to the conversation form (helm_form), whose subject
-# also takes a seat. open, engage and react take a
+# attach hand a terminal to the conversation form (helm_form), whose People
+# page opens a seat. open, engage and react take a
 # <subject> (a bead id, a PR number or URL, or a superseded id) and resolve it to
 # the live bead that owns the work by metadata and the graph, never a title; an
 # unresolvable or ambiguous reference is refused and nothing is filed.
@@ -58,14 +58,14 @@ FIXTURE="${GC_HELM_FIXTURE:-}"              # test hook: <dir>/rigs.json replace
 usage() {
     cat >&2 <<'EOF'
 Usage:
-  gc-helm  on a terminal, engage's form, the way in: start a conversation, open a rig's Product Owner or mechanik, or return to a conversation (Ctrl+R); without a terminal, this usage and exit 2
+  gc-helm  on a terminal, engage's form, the way in, whose tabs start a conversation, return to one, or open mechanik or a rig's Product Owner from the People page; without a terminal, this usage and exit 2
   gc-helm po --rig <name>  attach to the rig's Product Owner: a live sitting as it stands, and any other through the controller's start, which opens a new sitting with its prompt
   gc-helm mechanik  attach to mechanik, the city's one, waiting while the controller starts it
   gc-helm open  <bead-id> [--reason "..."] [--body "..."] [--allow-duplicate] [--if-subject <id>] [--conversation <id>] [--from <bead-id>] [--json]  file a conversation about the bead in the operator's queue, for the operator to engage; a second concern joins the bead's conversation already in the queue unless --allow-duplicate files a fresh one, which lands instead on a conversation in the queue whose whole ask is that concern; a conversation about an open PR, or a bead of one, holds the PR's merge until it closes; --if-subject files only while the reference still names that subject, and a reference that names another now, through a successor, a PR's anchor or a gate's waiter, files nothing (exit 4); --conversation completes the conversation an earlier open filed for the concern, by its id, wherever it stands, adding the reply onto the gate that did not land, and the hold on an open PR's merge only while the conversation waits in the queue, since a sitting that has taken it keeps or lifts that hold; one no longer open on the bead or holding another ask files nothing (exit 4); --from names the bead a gate was reached from, and a gate several open beads wait on files the conversation about that bead while it is one of them, while a gate that no longer holds that bead files nothing (exit 4); --json prints {subject,conversation,filed}, and names the conversation on every exit once it is filed
   gc-helm open  --new-subject --rig <name> [<question> | --reason "<question>"] [--json]  file a FRESH subject in the named rig for a topic that has no bead yet, the question unchanged in its description and its title derived from the question's opening, then its conversation in the queue; --json answers the subject, filed:false, the moment it is filed, and open's last answer is the one that counts, so a subject filed whose conversation is not is named for a re-run onto it
   gc-helm engage [<subject>] [--subject <id>] [--from <bead-id>] [--new-subject [--rig <name>]] [--model <variant>] [--skill <name>] [--reason "..." | --template <key>] [--no-input] [--no-attach]  hold a conversation about the bead in a converse sitting and attach: attach to its live sitting, or take its conversation from the queue, or file one, then spawn a sitting named for it. Pointed at a human gate it takes the one bead still waiting on the gate, or the --from bead when it is one of several waiting, and the conversation replies to the gate. On a terminal, with no --reason, --template or --skill, it opens the conversation form instead: subject (a bead or a PR, or a rig's name or prefix typed there for a new topic in that rig), question, model and whether to attach on one screen, filled in from the command line, where --rig fills in the subject and --no-attach turns attaching off; --no-input keeps the flag-driven one-shot path. --skill seeds the sitting with any skill it carries as its lens on the subject (--skill review-arch is a conversation with the Architect). --new-subject files a FRESH subject bead in the --rig rig (the positional text, or --reason, is the question; its title is derived from the question's opening) and engages it in one gesture
   gc-helm attach [<conversation>]  return to a conversation: with an id, engage's attach (a live sitting once it has started, or a new sitting on a conversation whose sitting ended or that waits in the queue); with none, on a terminal, the conversation form's list of conversations to return to, by topic and readiness
-  gc-helm conversations [<ref> [--from <bead-id>]] [--json]  list where each open conversation stands: its sitting's readiness (queued, starting, preparing, ready, ended) and whether a terminal is attached; with a subject reference, the subject as engage resolves it, --from as engage takes it, the rig a conversation about it is held in, whether a sitting can start there, its open conversations and what holds it. Read-only
+  gc-helm conversations [<ref> [--from <bead-id>]] [--json]  list where each open conversation stands: its sitting's readiness (queued, starting, preparing, ready, ended) and whether a terminal is attached; with a subject reference, the subject as engage resolves it, --from as engage takes it, the rig a conversation about it is held in, whether a sitting can start there, its open conversations and what holds it; with none, --json also gives the rigs a new topic can be filed in, and the seats the form's People page lists, mechanik and each rig's Product Owner, each with its session as 'gc session list' holds it. Read-only
   gc-helm react <bead-id> [--reason "..."]  file a first reaction — a reaction bead that tracks the subject, claimed and disposed by the proactive pool
   gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>... | --no-wait] [--release [--route <rig>/<agent> | --assign <named-agent>]]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
   gc-helm park <bead-id> "<text>" [--body "..."]  hold everything under the bead that has not started: file a gate titled with why it is parked and what releases it (≤140 chars, ENFORCED), described by --body, and make the bead wait on it
@@ -194,23 +194,23 @@ gc.reaction_owned=1 so the async first-reaction/proactive worker stands down
 rather than file a second conversation; engage files the one conversation
 itself.
 
-A bare gc-helm on a terminal opens engage's form on starting a conversation,
-and Ctrl+R moves to the conversations to return to. Its subject also takes a
-seat to sit with: <rig>/po for a rig's Product Owner, the rig by a name or
-prefix as a new topic's rig is typed, or mechanik. The form leaves and then
-runs `gc-helm po --rig <name>` or `gc-helm mechanik`, so what the verb prints
-stays on the terminal and its exit status is the form's. A seat takes no
-question from the form, because Gas City's attach carries no message, so the
-sitting's purpose is given in the sitting. Each rig has its own Product Owner,
-which works that rig's queue and epics, and none runs in the city's HQ;
-mechanik is one for the city. Each verb is `gc session attach` on the seat: the
-Product Owner's session is <rig>/gc-toolkit.po, Gas City's name for a rig's
-named session. It joins a running session as it stands. For a seat that is not
-running, it asks the city's controller to start the session, waits for it to
-run and then attaches, and the controller's start gives the agent its prompt as
-its first message. The Product Owner starts fresh, so a sitting of it that
-slept or ended comes back as a new sitting. A failed attach exits 4 once gc has
-said why.
+A bare gc-helm on a terminal opens engage's form on starting a conversation.
+The form's pages are tabs at its top: starting a conversation, returning to
+one, and People, which lists mechanik and each rig's Product Owner with the
+state of its session. ↑ from the subject reaches the tabs, and ←/→ move along
+them. Enter on a person leaves the form and then runs `gc-helm po --rig <name>`
+or `gc-helm mechanik`, so what the verb prints stays on the terminal and its
+exit status is the form's. A seat takes no question, because Gas City's attach
+carries no message, so the sitting's purpose is given in the sitting. Each rig
+has its own Product Owner, which works that rig's queue and epics, and none
+runs in the city's HQ; mechanik is one for the city. Each verb is `gc session
+attach` on the seat: the Product Owner's session is <rig>/gc-toolkit.po, Gas
+City's name for a rig's named session. It joins a running session as it
+stands. For a seat that is not running, it asks the city's controller to start
+the session, waits for it to run and then attaches, and the controller's start
+gives the agent its prompt as its first message. The Product Owner starts
+fresh, so a sitting of it that slept or ended comes back as a new sitting. A
+failed attach exits 4 once gc has said why.
 
 dismiss ends the sitting. react files a proactive first-reaction bead via
 tools/gc-proactive.sh (its --reason is log-only operator intent). takeaway
@@ -735,7 +735,13 @@ bead_conversations() {
 # proves no sitting live and none gone.
 live_sittings() {
     _ls_raw=$(gc session list --json 2>/dev/null) || return 1
-    printf '%s' "$_ls_raw" | scrub | jq -ce '
+    live_sittings_in "$_ls_raw"
+}
+
+# live_sittings_in <session-list> — live_sittings over a `gc session list
+# --json` already read, so one read answers it and the seats (SEATS_JQ).
+live_sittings_in() {
+    printf '%s' "$1" | scrub | jq -ce '
         if type == "object" and ((.sessions // null) | type) == "array"
         then [ .sessions[] | objects
                | select((.closed // false) != true)
@@ -5307,13 +5313,15 @@ helm_form() {
 #   conversations          every open conversation in the city's stores that a
 #                          sitting holds or held, or that waits in the
 #                          operator's queue, each with its subject's title.
-#                          --json prints {conversations, rigs, unread}: rigs
-#                          are the rigs a new topic can be filed in, each with
-#                          its name and prefix, whether it carries converse
-#                          and whether it is suspended, and unread names each
-#                          rig whose store could not be read, because it did
-#                          not answer or its ledger is not there, after which
-#                          the verb exits 4.
+#                          --json prints {conversations, rigs, seats,
+#                          unread}: rigs are the rigs a new topic can be filed
+#                          in, each with its name and prefix, whether it
+#                          carries converse and whether it is suspended, seats
+#                          are the seats the operator sits with, mechanik and
+#                          the po of each of those rigs, each with its session
+#                          (SEATS_JQ), and unread names each rig whose store
+#                          could not be read, because it did not answer or its
+#                          ledger is not there, after which the verb exits 4.
 #   conversations <ref>    the subject <ref> names, resolved as engage resolves
 #                          it, and where a conversation about it would be held:
 #                          {ref, subject: {id, title, status, issue_type,
@@ -5399,7 +5407,7 @@ conversations_in_store() {
 # list nothing and fail.
 conversations_all() {
     enumerate_rigs
-    if ! _ca_live=$(live_sittings); then
+    if ! _ca_list=$(gc session list --json 2>/dev/null) || ! _ca_live=$(live_sittings_in "$_ca_list"); then
         echo "$PROG: conversations: could not read 'gc session list', so which sittings are live is unknown. Nothing listed." >&2
         exit 4
     fi
@@ -5460,7 +5468,13 @@ conversations_all() {
             _ca_pfx=$(printf '%s' "$RIGS" | jq -r --arg n "$_ca_r" 'first(.[] | select(.name == $n) | .prefix // "") // ""' 2>/dev/null || true)
             _ca_rigs=$(printf '%s' "$_ca_rigs" | jq -c --arg n "$_ca_r" --arg p "$_ca_pfx" --argjson c "$_ca_conv" --argjson s "$_ca_susp" '. + [{name: $n, prefix: $p, converse: $c, suspended: $s}]')
         done
-        jq -nc --argjson c "$_ca_rows" --argjson r "$_ca_rigs" --argjson u "$_ca_unread" '{conversations: $c, rigs: $r, unread: $u}'
+        # The seats, from the session list the conversations were read from,
+        # for the form's People page: mechanik, and the po of each of those rigs.
+        if ! _ca_seats=$(printf '%s' "$_ca_list" | scrub | jq -c --argjson rigs "$_ca_rigs" --arg mechanik "$MECHANIK_SEAT" --arg po "$PO_SEAT" "$SEATS_JQ" 2>/dev/null); then
+            echo "$PROG: conversations: the seats could not be read from 'gc session list'. Nothing listed." >&2
+            exit 4
+        fi
+        jq -nc --argjson c "$_ca_rows" --argjson r "$_ca_rigs" --argjson s "$_ca_seats" --argjson u "$_ca_unread" '{conversations: $c, rigs: $r, seats: $s, unread: $u}'
     else
         printf '%s' "$_ca_rows" | jq -r '
             def rank: {"ready": 0, "preparing": 1, "starting": 2, "ended": 3, "queued": 4}[.readiness] // 5;
@@ -5622,8 +5636,8 @@ cmd_attach() {
 }
 
 # ── The seats: a rig's po, and mechanik ──────────────────────────────
-# The seats the operator sits with, each opened in one step, each a subject
-# engage's form takes and each a command of its own. A rig's po, the
+# The seats the operator sits with, each opened in one step, each a row of the
+# People page in engage's form and each a command of its own. A rig's po, the
 # operator's prioritization partner for that rig's work, is the rig's
 # on-demand named session, which a sitting opens and a drain-ack ends, and Gas
 # City names it <rig>/gc-toolkit.po. Mechanik, the operator's standing
@@ -5636,6 +5650,28 @@ cmd_attach() {
 # not running").
 PO_SEAT="gc-toolkit.po"
 MECHANIK_SEAT="gc-toolkit.mechanik"
+
+# $SEATS_JQ — the seats, as `conversations --json` lists them for the People
+# page, from a `gc session list --json` given as input, with the rigs a new
+# topic can be filed in as $rigs, which leave out the city's HQ, and the seats'
+# names as $mechanik and $po. Mechanik comes first, then each rig's po in the
+# order the rigs are listed, each as {seat, rig, session}: seat is the verb that
+# opens it, rig is the po's rig by its name and empty for mechanik, and session
+# is the open session the list holds under the name the verb attaches to, {id,
+# name, state, attached, created_at} with Gas City's own state, or null when it
+# holds none, as for a po that has never run.
+SEATS_JQ='
+  [ .sessions[] | objects
+    | select((.closed // false) != true)
+    | select(((.state // "") | tostring) != "closed") ] as $open
+  | def seat_session($name):
+      first($open[] | select(((.alias // "") | tostring) == $name)
+            | {id: ((.id // "") | tostring), name: ((.session_name // "") | tostring),
+               state: ((.state // "") | tostring), attached: ((.attached // false) == true),
+               created_at: ((.created_at // "") | tostring)}) // null;
+  [ {seat: "mechanik", rig: "", session: seat_session($mechanik)} ]
+  + [ $rigs[] | {seat: "po", rig: .name, session: seat_session(.name + "/" + $po)} ]
+'
 
 # cmd_seat <verb> <seat> <name> [<arg>...] — attach the terminal to the seat's
 # session, and once it comes back, name how to return. po takes --rig <name>,

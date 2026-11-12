@@ -39,6 +39,15 @@ const (
 	composeScreen screen = iota
 	progressScreen
 	returnScreen
+	peopleScreen
+)
+
+// pages are the screens the tabs at the top of the form name, in the order the
+// tabs show them, and pageNames what the tabs call them. A submit's progress is
+// no page: it shows what a save and a start do as they land.
+var (
+	pages     = []screen{composeScreen, returnScreen, peopleScreen}
+	pageNames = map[screen]string{composeScreen: "Start a conversation", returnScreen: "Return to a conversation", peopleScreen: "People"}
 )
 
 type field int
@@ -50,6 +59,10 @@ const (
 	modelField
 	attachField
 	contextField
+	// tabsField is the row of tabs above the subject, which ↑ from the
+	// subject reaches. Tab does not move through it, so the question stays
+	// one Tab after the subject.
+	tabsField
 )
 
 // lookup is one `conversations <ref>` read, keyed by the reference it was
@@ -160,6 +173,11 @@ type Model struct {
 	// the list leaves it on the conversation the operator picked.
 	retSel string
 	retAt  int // where retSel was last in the list, for ↑/↓ once it has left the list
+
+	// The People page's selection is a seat, so a read that changes the city's
+	// rigs leaves it on the seat the operator picked.
+	seatSel string
+	seatAt  int // where seatSel was last in the list, as retAt is
 
 	status string
 	note   string // printed once the form has left the terminal
@@ -282,97 +300,17 @@ func (m *Model) namedRigs() []Rig {
 	for _, r := range m.city.Rigs {
 		switch {
 		case m.src == rigFlag && r.Name == ref,
-			m.src == typed && namesRig(ref, r):
+			m.src == typed && (strings.EqualFold(ref, r.Name) || (r.Prefix != "" && strings.EqualFold(ref, r.Prefix))):
 			rs = append(rs, r)
 		}
 	}
 	return rs
 }
 
-// namesRig says whether typed text names r: its whole name or prefix, ignoring
-// case.
-func namesRig(text string, r Rig) bool {
-	return strings.EqualFold(text, r.Name) || (r.Prefix != "" && strings.EqualFold(text, r.Prefix))
-}
-
 // newTopic says whether the subject field names a new topic's rig rather than
-// a subject to look up or a seat: the rig --rig named, before the city's rigs
-// have been read too, or typed text the rigs say is a rig's name or prefix.
-func (m *Model) newTopic() bool {
-	return !m.isSeat() && (m.src == rigFlag || len(m.namedRigs()) > 0)
-}
-
-// The seats the subject field takes, the people the operator sits with in the
-// city. Gas City names a rig's agent <rig>/<agent>, so the field takes a rig's
-// po as <rig>/po, its rig by a name or prefix as a new topic's rig is typed,
-// and mechanik, of which the city has one, by its name alone.
-const (
-	poSeat       = "po"
-	mechanikSeat = "mechanik"
-)
-
-// seat is a seat the subject field names, its rig by its name: the rig's po,
-// or mechanik, with no rig.
-type seat struct{ name, rig string }
-
-// typedSeat reads text the operator typed as a seat, ignoring case: mechanik,
-// or <rig>/po, where rig is the rig as typed. A reference the field was given,
-// or the rig --rig named, is never a seat.
-func (m *Model) typedSeat() (name, rig string, ok bool) {
-	if m.src != typed {
-		return "", "", false
-	}
-	ref := m.ref()
-	if strings.EqualFold(ref, mechanikSeat) {
-		return mechanikSeat, "", true
-	}
-	if r, s, found := strings.Cut(ref, "/"); found && strings.TrimSpace(r) != "" && strings.EqualFold(strings.TrimSpace(s), poSeat) {
-		return poSeat, strings.TrimSpace(r), true
-	}
-	return "", "", false
-}
-
-// isSeat says whether the subject field names a seat, which is opened rather
-// than looked up or filed in.
-func (m *Model) isSeat() bool {
-	_, _, ok := m.typedSeat()
-	return ok
-}
-
-// seatWhere is the seat Ctrl+S opens and what the screen says of it, and how
-// far that is settled: mechanik at once, and a rig's po once the city's rigs
-// say which rig the field names and that the rig runs, since Gas City starts
-// no session in a suspended rig. Gas City's attach carries no message, so the
-// line says the sitting's purpose is given in the sitting.
-func (m *Model) seatWhere() (seat, string, standing) {
-	const purpose = ". The attach carries no message, so give the sitting its purpose once you are in it."
-	name, rig, _ := m.typedSeat()
-	if name == mechanikSeat {
-		return seat{name: mechanikSeat}, "mechanik, the city's standing conversation" + purpose, settled
-	}
-	if m.city == nil {
-		if m.cityErr != "" {
-			return seat{}, fmt.Sprintf("the rigs did not read (%s), so rig %s cannot be checked", m.cityErr, rig), refused
-		}
-		return seat{}, fmt.Sprintf("the Product Owner of rig %s: checking the rig…", rig), reading
-	}
-	var rs []Rig
-	var named []string
-	for _, r := range m.city.Rigs {
-		if namesRig(rig, r) {
-			rs, named = append(rs, r), append(named, r.Name)
-		}
-	}
-	switch {
-	case len(rs) == 0:
-		return seat{}, fmt.Sprintf("rig %s is not a rig of this city", rig), refused
-	case len(rs) > 1:
-		return seat{}, fmt.Sprintf("%s names more than one rig (%s): name the one you mean by a name or prefix only it has", rig, strings.Join(named, ", ")), refused
-	case rs[0].Suspended:
-		return seat{}, fmt.Sprintf("rig %s is suspended, so its Product Owner cannot start until the rig resumes (gc rig resume %s)", rs[0].Name, rs[0].Name), refused
-	}
-	return seat{name: poSeat, rig: rs[0].Name}, "the Product Owner of rig " + rs[0].Name + purpose, settled
-}
+// a subject to look up: the rig --rig named, before the city's rigs have been
+// read too, or typed text the rigs say is a rig's name or prefix.
+func (m *Model) newTopic() bool { return m.src == rigFlag || len(m.namedRigs()) > 0 }
 
 // topicRig is the one rig the subject field names, which a new topic is filed
 // in. Until the city's rigs have been read, it is the rig --rig named, by that
@@ -393,9 +331,6 @@ func (m *Model) topicRig() (Rig, bool) {
 // starts no sitting, and it waits in the operator's queue until the rig
 // resumes.
 func (m *Model) suspendedRig() string {
-	if m.isSeat() {
-		return ""
-	}
 	if m.newTopic() {
 		if r, ok := m.topicRig(); ok && r.Suspended {
 			return r.Name
@@ -422,11 +357,11 @@ func (m *Model) loadCity() tea.Cmd {
 // lookup reads the subject k names, once per reference and origin while that
 // read is running or has answered. A read that failed is read again. A
 // reference already read selects the conversation it names, as its answer did.
-// A subject field that names a rig or a seat holds no subject to read, so it
-// is not looked up. Text typed before the city's rigs have been read is looked up,
+// A subject field that names a rig holds no subject to read, so it is not
+// looked up. Text typed before the city's rigs have been read is looked up,
 // and its answer stands aside once they say it names a rig.
 func (m *Model) lookup(k lookupKey) tea.Cmd {
-	if k.ref == "" || (k == m.subjectKey() && (m.newTopic() || m.isSeat())) {
+	if k.ref == "" || (k == m.subjectKey() && m.newTopic()) {
 		return nil
 	}
 	if l, ok := m.lookups[k]; ok && (l.pending || l.err == nil) {
@@ -456,13 +391,8 @@ func (m *Model) setFocus(f field) {
 // subject comes first and the question one Tab after it, since those are what
 // the operator gives almost every time. The rig the subject names is shown,
 // not a field, and the context list is a field only when it holds something to
-// choose. A seat runs on its own model and is attached to, so with a seat in
-// the subject field the model and the attach are shown, not fields, and the
-// question stays one, so a question typed there can be cleared.
+// choose. The tabs above the subject are no field of this order (tabsField).
 func (m *Model) fields() []field {
-	if m.isSeat() {
-		return []field{subjectField, questionField}
-	}
 	fs := []field{subjectField, questionField, modelField, attachField}
 	if len(m.contextRows()) > 1 {
 		fs = append(fs, contextField)
@@ -517,7 +447,7 @@ func (m *Model) focusOn(f field) tea.Cmd {
 // A field that names a rig has none: a lookup made before the city's rigs said
 // so stands aside.
 func (m *Model) current() *lookup {
-	if m.newTopic() || m.isSeat() {
+	if m.newTopic() {
 		return nil
 	}
 	l := m.lookups[m.subjectKey()]
@@ -632,11 +562,7 @@ func (m *Model) destination() (string, bool) {
 func (m *Model) where() (string, standing) {
 	ref := m.ref()
 	if ref == "" {
-		return "name the subject: a bead id, a PR number or URL, or a rig's name or prefix, which starts a new topic in that rig. Or name a seat to sit with: <rig>/po for a rig's Product Owner, or mechanik", refused
-	}
-	if m.isSeat() {
-		_, d, st := m.seatWhere()
-		return d, st
+		return "name the subject: a bead id, a PR number or URL, or a rig's name or prefix, which starts a new topic in that rig", refused
 	}
 	if m.newTopic() {
 		return m.topicWhere(ref)
@@ -792,6 +718,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		c := msg.city
 		m.city, m.cityAt, m.cityErr = &c, m.opt.Now(), ""
 		m.keepSelection()
+		m.keepSeat()
 		// A new topic has no conversations to choose among, so a choice a
 		// lookup made before the rigs said the subject names a rig is cleared.
 		if m.newTopic() {
@@ -835,7 +762,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.quit()
 	case cityTickMsg:
 		m.ticking = false
-		if m.scr == returnScreen {
+		if m.scr == returnScreen || m.scr == peopleScreen {
 			return m, tea.Batch(m.loadCity(), m.refreshCity())
 		}
 		return m, nil
@@ -892,23 +819,37 @@ func (m *Model) key(k tea.KeyPressMsg) tea.Cmd {
 		return m.progressKey(s)
 	case returnScreen:
 		return m.returnKey(s)
+	case peopleScreen:
+		return m.peopleKey(s)
 	}
 	switch s {
 	case "esc":
 		return m.quit()
 	case "ctrl+s":
 		return m.submit()
-	case "ctrl+r":
-		m.scr = returnScreen
-		return tea.Batch(m.loadCity(), m.refreshCity())
 	case "tab":
+		if m.focus == tabsField {
+			return m.focusOn(subjectField)
+		}
 		return m.moveFocus(1)
 	case "shift+tab":
 		return m.moveFocus(-1)
 	}
 	// ↑ and ↓ move between the fields at a field's first and last row, and
-	// stop at the form's first and last field, where Tab wraps around.
+	// stop at the form's last field, where Tab wraps around. ↑ from the
+	// subject reaches the tabs, where ←/→ move between the pages as they cycle
+	// a chooser's values.
 	switch m.focus {
+	case tabsField:
+		switch s {
+		case "left":
+			return m.movePage(-1)
+		case "right":
+			return m.movePage(1)
+		case "down", "enter":
+			return m.focusOn(subjectField)
+		}
+		return nil
 	case subjectField:
 		switch s {
 		case "enter":
@@ -916,7 +857,7 @@ func (m *Model) key(k tea.KeyPressMsg) tea.Cmd {
 		case "down":
 			return m.moveFocusArrow(1)
 		case "up":
-			return nil
+			return m.focusOn(tabsField)
 		}
 	case questionField:
 		// The question's rows are counted as the screen shows them, so ↑ and ↓
@@ -1006,9 +947,6 @@ func (m *Model) choose(rows []contextRow) tea.Cmd {
 // submit files the question, or starts the conversation chosen, once the
 // destination is settled. Nothing is written before then.
 func (m *Model) submit() tea.Cmd {
-	if m.isSeat() {
-		return m.submitSeat()
-	}
 	if m.model < 0 {
 		what := "Not saved"
 		if m.choice != newChoice {
@@ -1084,27 +1022,6 @@ func (m *Model) submit() tea.Cmd {
 	return m.save()
 }
 
-// submitSeat opens the seat the subject field names, once that is settled. A
-// seat takes no question from the form, because Gas City's attach carries no
-// message, so a question typed is refused rather than dropped, as one typed
-// for an open conversation is.
-func (m *Model) submitSeat() tea.Cmd {
-	s, dest, st := m.seatWhere()
-	if st != settled {
-		m.status = "Not opened: " + dest
-		if cmd := m.reread(); cmd != nil {
-			m.status = strings.TrimSuffix(m.status, ".") + ". Reading it again."
-			return cmd
-		}
-		return nil
-	}
-	if strings.TrimSpace(m.question.Value()) != "" {
-		m.status = "Not opened: a seat takes no question from the form, because the attach carries no message. Clear the question, and give the sitting its purpose once you are in it."
-		return nil
-	}
-	return m.openSeat(s)
-}
-
 // save runs the save request the submit made.
 func (m *Model) save() tea.Cmd {
 	m.saving = true
@@ -1140,8 +1057,6 @@ func (m *Model) reread() tea.Cmd {
 	switch {
 	case m.ref() == "":
 		return nil
-	case m.isSeat():
-		return m.loadCity()
 	case m.newTopic():
 		if len(m.namedRigs()) > 1 {
 			return nil
@@ -1344,12 +1259,182 @@ func (m *Model) returnKey(s string) tea.Cmd {
 		}
 	case "r":
 		return m.loadCity()
-	case "ctrl+r", "ctrl+n":
-		m.scr = composeScreen
+	case "left":
+		return m.movePage(-1)
+	case "right":
+		return m.movePage(1)
 	case "esc", "q":
 		return m.quit()
 	}
 	return nil
+}
+
+// movePage moves along the tabs to the page step away, wrapping around at
+// either end, as ←/→ cycle a chooser's values. A list page reads the city again
+// while it is on screen. Back on the start page the focus is on its tabs, so
+// ←/→ go on moving along them and ↓ goes down to the subject. A status one page
+// gave is not carried to another.
+func (m *Model) movePage(step int) tea.Cmd {
+	at := 0
+	for i, p := range pages {
+		if p == m.scr {
+			at = i
+		}
+	}
+	m.scr, m.status = pages[(at+step+len(pages))%len(pages)], ""
+	if m.scr == composeScreen {
+		return m.focusOn(tabsField)
+	}
+	return tea.Batch(m.loadCity(), m.refreshCity())
+}
+
+// The seats `conversations` lists, by the verb that opens each.
+const (
+	poSeat       = "po"
+	mechanikSeat = "mechanik"
+)
+
+// seats are the People page's rows: the seats the city's read lists, in its
+// order, mechanik first.
+func (m *Model) seats() []Seat {
+	if m.city == nil {
+		return nil
+	}
+	return m.city.Seats
+}
+
+// seatKey is what the People page keeps its selection by: the seat, and a
+// po's rig.
+func seatKey(s Seat) string { return s.Name + " " + s.Rig }
+
+// seatIndex is where the seat keyed key is in seats, or -1.
+func seatIndex(seats []Seat, key string) int {
+	for i, s := range seats {
+		if seatKey(s) == key {
+			return i
+		}
+	}
+	return -1
+}
+
+// keepSeat holds the People page's selection on its seat when the city is read
+// again, as keepSelection holds the return list's on its conversation.
+func (m *Model) keepSeat() {
+	rows := m.seats()
+	if m.seatSel == "" {
+		if len(rows) > 0 {
+			m.seatSel, m.seatAt = seatKey(rows[0]), 0
+		}
+		return
+	}
+	if i := seatIndex(rows, m.seatSel); i >= 0 {
+		m.seatAt = i
+	}
+}
+
+// rigNamed is the city's rig of that name, as the read that listed the seats
+// gave it.
+func (m *Model) rigNamed(name string) (Rig, bool) {
+	if m.city != nil {
+		for _, r := range m.city.Rigs {
+			if r.Name == name {
+				return r, true
+			}
+		}
+	}
+	return Rig{}, false
+}
+
+// seatWhere is what Enter on s opens and what the People page says of it, and
+// whether Enter opens it: mechanik, and a rig's po while its rig is not
+// suspended, since Gas City starts no session in a suspended rig. Gas City's
+// attach carries no message, so the line says the sitting's purpose is given in
+// the sitting.
+func (m *Model) seatWhere(s Seat) (string, standing) {
+	const how = ", which attaches to its session, starting it first when it is not running. The attach carries no message, so give the sitting its purpose once you are in it."
+	switch s.Name {
+	case mechanikSeat:
+		return "mechanik, the city's standing conversation: Enter runs gc-helm mechanik" + how, settled
+	case poSeat:
+		r, ok := m.rigNamed(s.Rig)
+		switch {
+		case !ok:
+			return fmt.Sprintf("rig %s is not among the city's rigs, so its Product Owner cannot be checked", s.Rig), refused
+		case r.Suspended:
+			return fmt.Sprintf("rig %s is suspended, so its Product Owner cannot start until the rig resumes (gc rig resume %s)", r.Name, r.Name), refused
+		}
+		return fmt.Sprintf("the Product Owner of rig %s: Enter runs gc-helm po --rig %s", r.Name, r.Name) + how, settled
+	}
+	return fmt.Sprintf("%s is not a seat the form opens", s.Name), refused
+}
+
+// seatState is a People page row's state: a suspended rig for a po there, where
+// no session starts, and otherwise the state of the seat's session as Gas
+// City's session list gives it, with whether a terminal is attached, or no
+// session when the list holds none.
+func (m *Model) seatState(s Seat) string {
+	if r, ok := m.rigNamed(s.Rig); s.Name == poSeat && ok && r.Suspended {
+		return "rig suspended"
+	}
+	if s.Session == nil {
+		return "no session"
+	}
+	st := s.Session.State
+	if st == "" {
+		st = "no state"
+	}
+	if s.Session.Attached {
+		st += ", attached"
+	}
+	return st
+}
+
+func (m *Model) peopleKey(s string) tea.Cmd {
+	rows := m.seats()
+	at := seatIndex(rows, m.seatSel)
+	switch s {
+	case "up", "down":
+		if len(rows) == 0 {
+			return nil
+		}
+		switch {
+		case at < 0:
+			at = min(m.seatAt, len(rows)-1)
+		case s == "up" && at > 0:
+			at--
+		case s == "down" && at < len(rows)-1:
+			at++
+		}
+		m.seatSel, m.seatAt, m.status = seatKey(rows[at]), at, ""
+	case "enter":
+		if at >= 0 {
+			return m.openPerson(rows[at])
+		}
+	case "r":
+		return m.loadCity()
+	case "left":
+		return m.movePage(-1)
+	case "right":
+		return m.movePage(1)
+	case "esc", "q":
+		return m.quit()
+	}
+	return nil
+}
+
+// openPerson opens s once seatWhere says Enter opens it. One it does not open
+// is refused, and the city is read again, so the next Enter opens a po whose
+// rig has resumed since.
+func (m *Model) openPerson(s Seat) tea.Cmd {
+	if d, st := m.seatWhere(s); st != settled {
+		m.status = "Not opened: " + d + "."
+		if cmd := m.loadCity(); cmd != nil {
+			m.status += " Reading the rigs again."
+			return cmd
+		}
+		return nil
+	}
+	return m.openSeat(s)
 }
 
 // attachTo leaves the form so the terminal can go to conv's sitting (handOff).
@@ -1368,11 +1453,11 @@ func (m *Model) attachTo(conv, model string) tea.Cmd {
 // openSeat leaves the form so the terminal can go to s's verb (handOff), which
 // attaches it to the seat's session. The form keeps one hand-off, as attachTo
 // says.
-func (m *Model) openSeat(s seat) tea.Cmd {
+func (m *Model) openSeat(s Seat) tea.Cmd {
 	if m.attaching {
 		return nil
 	}
-	return m.handOff(m.helm.SeatCommand(s.name, s.rig))
+	return m.handOff(m.helm.SeatCommand(s.Name, s.Rig))
 }
 
 // handOff keeps cmd and quits, and cmd runs once the form's program has
@@ -1572,6 +1657,8 @@ func (m *Model) View() tea.View {
 		s = m.progressView()
 	case returnScreen:
 		s = m.returnView()
+	case peopleScreen:
+		s = m.peopleView()
 	default:
 		s = m.composeView()
 	}
@@ -1706,6 +1793,38 @@ func (m *Model) label(f field, text string) string {
 	return labelStyle.Render(text)
 }
 
+// tabs is the row of tabs that names the form's pages, the page on screen
+// marked: reversed while ←/→ move along the row, as they do anywhere on a list
+// page and from the start page's tabs, and in bold while the focus is in one
+// of the start page's fields.
+func (m *Model) tabs() string {
+	parts := make([]string, len(pages))
+	for i, p := range pages {
+		name := " " + pageNames[p] + " "
+		switch {
+		case p != m.scr:
+			parts[i] = hintStyle.Render(name)
+		case p != composeScreen || m.focus == tabsField:
+			parts[i] = focusStyle.Render(name)
+		default:
+			parts[i] = labelStyle.Render(name)
+		}
+	}
+	return strings.Join(parts, hintStyle.Render("│"))
+}
+
+// standingMark is the mark beside a destination: settled, still being read, or
+// refused.
+func standingMark(st standing) string {
+	switch st {
+	case settled:
+		return okStyle.Render("✓")
+	case refused:
+		return badStyle.Render("✗")
+	}
+	return waitStyle.Render("…")
+}
+
 // questionLines is how many lines of the question the form shows, and
 // minQuestionLines the fewest it shows on a terminal too short for the fields
 // and the row in play beside them.
@@ -1721,21 +1840,18 @@ func (m *Model) composeView() string {
 	// below the list.
 	var head, b strings.Builder
 	suspended := m.suspendedRig()
-	seatName, _, isSeat := m.typedSeat()
 	act := "Ctrl+S save, start and attach"
 	switch {
-	case seatName == poSeat:
-		act = "Ctrl+S attach to the Product Owner"
-	case seatName == mechanikSeat:
-		act = "Ctrl+S attach to mechanik"
 	case suspended != "":
 		act = "Ctrl+S save and leave"
 	case !m.attach:
 		act = "Ctrl+S save, start and leave"
 	}
-	head.WriteString(labelStyle.Render("Start a conversation"))
-	head.WriteString(hintStyle.Render("   " + act + " · Tab next field · Ctrl+R return to a conversation · Esc cancel"))
-	head.WriteString("\n\n")
+	keys := " · Tab next field · ↑ to the tabs · Esc cancel"
+	if m.focus == tabsField {
+		keys = " · ←/→ another page · ↓ back to the subject · Esc cancel"
+	}
+	head.WriteString(m.tabs() + "\n" + hintStyle.Render(act+keys) + "\n\n")
 	head.WriteString(m.label(subjectField, "Subject ") + "  " + m.subject.View() + "\n")
 	if m.from != "" {
 		// The field pads its line to its width, so a note beside it would run
@@ -1747,17 +1863,12 @@ func (m *Model) composeView() string {
 	// The rig is shown, not chosen here: the subject names it.
 	if r, ok := m.topicRig(); ok {
 		b.WriteString(labelStyle.Render("Rig     ") + "  " + r.Name + hintStyle.Render("   a new topic in this rig") + "\n")
-	} else if s, _, st := m.seatWhere(); isSeat && st == settled && s.rig != "" {
-		b.WriteString(labelStyle.Render("Rig     ") + "  " + s.rig + hintStyle.Render("   the Product Owner's own") + "\n")
 	} else if l := m.current(); l != nil && l.err == nil && l.about.Subject.Rig != "" {
 		b.WriteString(labelStyle.Render("Rig     ") + "  " + l.about.Subject.Rig + hintStyle.Render("   the subject's own") + "\n")
 	}
 	// A model no variant carries is shown as the command line named it.
 	model := m.modelName()
 	switch {
-	case isSeat:
-		// Shown without ‹ ›, since a seat runs on the model its config names.
-		model = "the seat's own"
 	case m.model < 0:
 		model = badStyle.Render(model) + hintStyle.Render(" (not a configured model: ←/→ chooses one)")
 	case m.model == 0:
@@ -1765,16 +1876,9 @@ func (m *Model) composeView() string {
 	default:
 		model = modelLabel(model)
 	}
-	if isSeat {
-		b.WriteString(m.label(modelField, "Model   ") + "  " + model + "\n")
-	} else {
-		b.WriteString(m.label(modelField, "Model   ") + "  ‹ " + model + " ›\n")
-	}
+	b.WriteString(m.label(modelField, "Model   ") + "  ‹ " + model + " ›\n")
 	attach := "‹ yes, once its sitting starts" + hintStyle.Render(" (default)") + " ›"
 	switch {
-	case isSeat:
-		// Opening a seat is attaching to it, so no key turns it off.
-		attach = "yes, to the seat's session, starting it when it is not running"
 	case suspended != "":
 		// Shown without ‹ ›, since no key turns it on there.
 		attach = "no — rig " + suspended + " is suspended, so no sitting starts until it resumes"
@@ -1783,18 +1887,7 @@ func (m *Model) composeView() string {
 	}
 	b.WriteString(m.label(attachField, "Attach  ") + "  " + attach + "\n\n")
 	dest, st := m.where()
-	mark := waitStyle.Render("…")
-	switch st {
-	case settled:
-		mark = okStyle.Render("✓")
-	case refused:
-		mark = badStyle.Render("✗")
-	}
-	lead := "Files as"
-	if isSeat {
-		lead = "Opens   "
-	}
-	b.WriteString(m.wrapBeside(labelStyle.Render(lead)+"  "+mark+" ", dest) + "\n")
+	b.WriteString(m.wrapBeside(labelStyle.Render("Files as")+"  "+standingMark(st)+" ", dest) + "\n")
 	// The rows on this subject are paged to the lines left below the fields, so
 	// the row in play is on screen: the cursor's while the list has focus, and
 	// otherwise the row chosen, which is what Ctrl+S acts on.
@@ -1920,8 +2013,8 @@ func (m *Model) progressView() string {
 
 func (m *Model) returnView() string {
 	var b strings.Builder
-	b.WriteString(labelStyle.Render("Return to a conversation"))
-	b.WriteString(hintStyle.Render("   ↑/↓ choose · Enter attaches · r refreshes · Ctrl+R start one · Esc leaves") + "\n\n")
+	b.WriteString(m.tabs() + "\n")
+	b.WriteString(hintStyle.Render("↑/↓ choose · Enter attaches · r refreshes · ←/→ another page · Esc leaves") + "\n\n")
 	if m.city == nil {
 		if m.cityErr != "" {
 			b.WriteString(badStyle.Render("The conversations did not read: "+m.cityErr) + "\n")
@@ -1971,6 +2064,74 @@ func (m *Model) returnView() string {
 	sel := at
 	if sel < 0 {
 		sel = m.retAt
+	}
+	top, under := m.wrap(b.String()), m.wrap(after.String())
+	b.Reset()
+	b.WriteString(top)
+	for _, line := range listLines(list, sel, m.room(top, under)) {
+		b.WriteString(line + "\n")
+	}
+	b.WriteString(under)
+	return b.String()
+}
+
+// peopleView is the People page: the seats the operator sits with, mechanik
+// and each rig's po by its rig's name and prefix, each with its state
+// (seatState), and above them what Enter opens for the seat picked. It is
+// paged to the terminal around the pick, as the return list is.
+func (m *Model) peopleView() string {
+	var b strings.Builder
+	b.WriteString(m.tabs() + "\n")
+	b.WriteString(hintStyle.Render("↑/↓ choose · Enter opens · r refreshes · ←/→ another page · Esc leaves") + "\n\n")
+	if m.city == nil {
+		if m.cityErr != "" {
+			b.WriteString(badStyle.Render("The seats did not read: "+m.cityErr) + "\n")
+		} else {
+			b.WriteString(waitStyle.Render("…") + " reading the seats\n")
+		}
+		return m.wrap(b.String())
+	}
+	if m.cityErr != "" {
+		// A read again that failed keeps the rows the last read gave, as on the
+		// return list.
+		b.WriteString(badStyle.Render(fmt.Sprintf("Not refreshed since %s, so the list may be out of date: %s", m.cityAt.Format("15:04:05"), m.cityErr)) + "\n\n")
+	}
+	rows := m.seats()
+	if len(rows) == 0 {
+		b.WriteString("No seat is listed.\n")
+	}
+	at := seatIndex(rows, m.seatSel)
+	if at >= 0 {
+		d, st := m.seatWhere(rows[at])
+		b.WriteString(m.wrapBeside(labelStyle.Render("Opens")+"  "+standingMark(st)+" ", d) + "\n\n")
+	}
+	rigW := 0
+	for _, s := range rows {
+		rigW = max(rigW, lipgloss.Width(s.Rig))
+	}
+	var list []string
+	for i, s := range rows {
+		cur := "  "
+		if i == at {
+			cur = "› "
+		}
+		who := s.Name
+		if s.Name == poSeat {
+			r, _ := m.rigNamed(s.Rig)
+			who = "Product Owner  " + s.Rig + strings.Repeat(" ", rigW-lipgloss.Width(s.Rig)) + hintStyle.Render("  "+r.Prefix)
+		}
+		list = append(list, fmt.Sprintf("%s%-22s %s", cur, m.seatState(s), who))
+	}
+	var after strings.Builder
+	if at < 0 && m.seatSel != "" && len(rows) > 0 {
+		after.WriteString("\n" + waitStyle.Render("The seat picked is no longer listed, so nothing is selected: ↑/↓ chooses another.") + "\n")
+	}
+	if m.status != "" {
+		after.WriteString("\n" + badStyle.Render(m.status) + "\n")
+	}
+	sel := at
+	if sel < 0 {
+		sel = m.seatAt
 	}
 	top, under := m.wrap(b.String()), m.wrap(after.String())
 	b.Reset()

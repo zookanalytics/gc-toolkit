@@ -1,15 +1,17 @@
 // Package form is the terminal conversation form: the screen `gc-helm.sh
 // engage`, which a bare `gc-helm.sh` runs, and `gc-helm.sh attach` hand a
-// terminal to. One screen holds the subject, which names a bead, a PR, a new
-// topic's rig or a seat to sit with, a multiline question, the model and
-// whether to attach, while the subject's details, its open conversations and
-// the city's rigs load in the background. Submitting saves the question as a
-// conversation and starts its sitting, reporting each of the two as it lands,
-// and once the sitting has started attaches to it, or with attaching off
-// leaves it to prepare. In a suspended rig it saves the question and starts
-// nothing. A seat, a rig's po or mechanik, is opened by its own verb once the
-// form has left the terminal. The return list shows the open conversations by
-// topic and readiness and attaches to the one picked.
+// terminal to. Its pages are tabs at its top. Starting a conversation holds the
+// subject, which names a bead, a PR or a new topic's rig, a multiline question,
+// the model and whether to attach, while the subject's details, its open
+// conversations and the city's rigs load in the background. Submitting saves
+// the question as a conversation and starts its sitting, reporting each of the
+// two as it lands, and once the sitting has started attaches to it, or with
+// attaching off leaves it to prepare. In a suspended rig it saves the question
+// and starts nothing. The return list shows the open conversations by topic and
+// readiness and attaches to the one picked. The People page lists the seats the
+// operator sits with, mechanik and each rig's po, with the state of each one's
+// session, and opens the one picked by its own verb once the form has left the
+// terminal.
 //
 // The form writes nothing itself. Every read and write is a gc-helm.sh verb
 // ([Script]), so what the form shows and files is what the command line shows
@@ -100,7 +102,8 @@ type Conversation struct {
 // Attached says whether a terminal is attached to the conversation's sitting.
 func (c Conversation) Attached() bool { return c.Session != nil && c.Session.Attached }
 
-// Session is the live sitting's session.
+// Session is a live sitting's session, or a seat's, with its state as Gas
+// City's session list gives it.
 type Session struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
@@ -119,12 +122,24 @@ const (
 )
 
 // City is `gc-helm.sh conversations --json`: every open conversation in the
-// city's stores, the rigs a new topic can be filed in, and the rigs whose store
-// could not be read, because it did not answer or its ledger is not there.
+// city's stores, the rigs a new topic can be filed in, the seats the operator
+// sits with, and the rigs whose store could not be read, because it did not
+// answer or its ledger is not there.
 type City struct {
 	Conversations []Conversation `json:"conversations"`
 	Rigs          []Rig          `json:"rigs"`
+	Seats         []Seat         `json:"seats"`
 	Unread        []string       `json:"unread"`
+}
+
+// Seat is a seat the operator sits with: mechanik, of which the city has one,
+// or a rig's po, in the order `conversations` lists them. Session is the open
+// session Gas City's session list holds under the name the seat's verb
+// attaches to, and nil when it holds none, as for a po that has never run.
+type Seat struct {
+	Name    string   `json:"seat"` // which seat, as its verb names it: po or mechanik
+	Rig     string   `json:"rig"`  // a po's rig, by its name; empty for mechanik
+	Session *Session `json:"session"`
 }
 
 // Rig is a rig a new topic could be filed in, which the subject names by its

@@ -166,6 +166,24 @@ func TestARigsPrefixAndASubjectsSuspendedRigAreRead(t *testing.T) {
 	}
 }
 
+// The seats are read from the city's list in its order, each with its
+// session, or none.
+func TestTheSeatsAreReadWithTheirSessions(t *testing.T) {
+	s, _ := stubHelm(t, `{"conversations":[],"rigs":[{"name":"gc-toolkit","prefix":"tk","converse":true,"suspended":false}],`+
+		`"seats":[{"seat":"mechanik","rig":"","session":{"id":"lx-m","name":"gc-toolkit__mechanik","state":"active","attached":true,"created_at":"2026-08-31T04:11:47Z"}},`+
+		`{"seat":"po","rig":"gc-toolkit","session":null}],"unread":[]}`+"\n", "", 0)
+	c, err := s.City(context.Background())
+	if err != nil || len(c.Seats) != 2 {
+		t.Fatalf("City = %+v, %v", c, err)
+	}
+	if m := c.Seats[0]; m.Name != "mechanik" || m.Rig != "" || m.Session == nil || m.Session.State != "active" || !m.Session.Attached {
+		t.Fatalf("mechanik's seat = %+v", m)
+	}
+	if po := c.Seats[1]; po.Name != "po" || po.Rig != "gc-toolkit" || po.Session != nil {
+		t.Fatalf("the po's seat = %+v", po)
+	}
+}
+
 func TestStartAndAttachUseEngage(t *testing.T) {
 	s, dir := stubHelm(t, "", "", 0)
 	if err := s.Start(context.Background(), "tk-c", "codex-astra"); err != nil {
