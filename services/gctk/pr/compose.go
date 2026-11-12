@@ -119,9 +119,9 @@ func Compose(l *ledger.Ledger, id string, req Request) (*Composition, error) {
 }
 
 // readRegion is what the bead's summary region says, and the bead's branch.
-// The summary and the dispatch text end at their last line, and a summary of
-// whitespace alone is none. The target is merged_target, else target, else
-// main.
+// The summary and the dispatch text are taken as the region carries them, and
+// a summary of whitespace alone is none. The target is merged_target, else
+// target, else main.
 func readRegion(bead *ledger.Record, req Request) (region, string, error) {
 	keys := []ledger.Key[string]{summaryKey, branchKey, mergedTargetKey, targetKey, checkSetKey}
 	vals := make([]string, len(keys))
@@ -133,13 +133,13 @@ func readRegion(bead *ledger.Record, req Request) (region, string, error) {
 		vals[i] = v
 	}
 	summary, branch, merged, target, checkSet := vals[0], vals[1], vals[2], vals[3], vals[4]
-	summary = strings.TrimRight(summary, "\n")
+	summary = carried(summary)
 	if strings.TrimFunc(summary, isSpace) == "" {
 		summary = ""
 	}
 	return region{
 		summary:  summary,
-		desc:     strings.TrimRight(bead.Description(), "\n"),
+		desc:     carried(bead.Description()),
 		id:       bead.ID,
 		branch:   branch,
 		target:   firstOf(merged, target, "main"),
@@ -149,6 +149,14 @@ func readRegion(bead *ledger.Record, req Request) (region, string, error) {
 		gates:    req.Gates,
 		sup:      req.Supersedes,
 	}, branch, nil
+}
+
+// carried is a bead's text as the region carries it: ended at its last line,
+// and with no carriage return, because a published body is read with none. A
+// region that kept one would never read back as the one written, and every
+// pass would write it again.
+func carried(s string) string {
+	return strings.TrimRight(strings.ReplaceAll(s, "\r", ""), "\n")
 }
 
 func firstOf(vals ...string) string {

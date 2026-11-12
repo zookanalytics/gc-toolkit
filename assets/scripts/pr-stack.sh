@@ -231,7 +231,7 @@ while IFS=$'\t' read -r id branch num; do
   if [ "$did_summary" = 1 ] || [ "$did_beads" = 1 ]; then
     if gh pr edit "$num" --repo "$ORIGIN_REPO_Q" --body-file "$NEW" </dev/null >/dev/null 2>&1; then
       if [ "$did_beads" = 1 ]; then edited=$((edited + 1)); echo "$PROG: $id PR#$num body now names $beads_n beads on '$branch'"; fi
-      if [ "$did_summary" = 1 ]; then refreshed=$((refreshed + 1)); echo "$PROG: $id PR#$num summary region refreshed from the anchor's current pr_summary"; fi
+      if [ "$did_summary" = 1 ]; then refreshed=$((refreshed + 1)); echo "$PROG: $id PR#$num summary region refreshed from the anchor"; fi
     else
       echo "$PROG: $id PR#$num body edit failed; retried next pass" >&2
       skipped=$((skipped + 1))

@@ -251,6 +251,19 @@ func TestComposeAnOpenPR(t *testing.T) {
 		}
 	})
 
+	t.Run("a region the dispatch text stands in for is kept current like any other", func(t *testing.T) {
+		s := storeWith(anchor(map[string]string{"pr_summary": ""}))
+		body := opened(t, s)
+		if got := refresh(s, body, head, gates); got.Summary != Current {
+			t.Errorf("the region a create wrote reads %q", got.Summary)
+		}
+		got := refresh(s, body, newHead, gates)
+		if got.Summary != Written || !strings.Contains(got.Body, "## Summary\n\nBuild the widget.\n") ||
+			!strings.Contains(got.Body, "- Head `01234567`;") {
+			t.Errorf("a head a rework moved reads (%q):\n%s", got.Summary, got.Body)
+		}
+	})
+
 	t.Run("a head the summary quotes is not one the facts name", func(t *testing.T) {
 		s := storeWith(anchor(map[string]string{"pr_summary": "Fixes what `01234567` broke."}))
 		body := opened(t, s)
@@ -280,6 +293,19 @@ func TestComposeAnOpenPR(t *testing.T) {
 		body := "## Summary\n\nOld.\n\n## Refinery handoff\n\n- Issue: `A`\n"
 		if got := refresh(s, body, head, gates); got.Summary != Unmanaged || got.Body != body {
 			t.Errorf("(%q, %q)", got.Summary, got.Body)
+		}
+	})
+
+	t.Run("a summary and dispatch text stored with carriage returns read current once written", func(t *testing.T) {
+		b := anchor(map[string]string{"pr_summary": "Adds the widget.\r\n\r\nAnd its stand.\r\n"})
+		b.Description = "Build the widget.\r\nAnd its stand.\r\n"
+		s := storeWith(b)
+		body := opened(t, s)
+		if strings.Contains(body, "\r") {
+			t.Fatalf("the region a create wrote carries a carriage return: %q", body)
+		}
+		if got := refresh(s, body, head, gates); got.Summary != Current || got.Body != body {
+			t.Errorf("the region a create wrote reads %q", got.Summary)
 		}
 	})
 
