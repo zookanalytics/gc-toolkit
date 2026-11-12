@@ -1287,19 +1287,19 @@ alias, which drops the claim. Gas City does the rest with what it already has
   asks for leaves an asleep sitting asleep.
 - **What the record keeps.** The subject's wait, its close brief and its
   validating closer's arm are written at the stay, as at a hand-off, so the
-  subject's next steps stand whether or not the sitting comes back. When the
-  work is the subject itself, sent on a formula or taking its recommendation,
-  the conversation waits on the subject, whose headline reads settled, and no
-  closer is armed. A sitting
+  subject's next steps stand whether or not the sitting comes back. A sitting
   that cannot come back, because its session was closed, leaves its
   conversation open, and once the work closes the next engagement takes up
   the return from the record.
 - **Where it cannot stay.** An edge onto a bead in another store holds
   nothing, so a sitting stays only for work in its conversation's own store,
-  and ends at the hand-off otherwise. Nor does it stay for the PR whose merge
-  its conversation holds, since that PR's anchor already waits on the
-  conversation and neither could close: the sign-off refuses that stay until
-  the sitting lifts the hold.
+  and ends at the hand-off otherwise. It ends there too when the work is the
+  subject itself, sent on a formula or taking its recommendation: the
+  conversation tracks the subject, and bd keeps one edge from a bead onto
+  another, so the sign-off refuses a wait on the subject before any write.
+  Nor does it stay for the PR whose merge its conversation holds, since that
+  PR's anchor already waits on the conversation and neither could close: the
+  sign-off refuses that stay until the sitting lifts the hold.
 
 Gas City's `gc session wait <session> --on-beads <ids> --sleep` also sleeps a
 session until a bead closes. A sitting does not use it, because the attach that

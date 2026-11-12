@@ -116,11 +116,10 @@
 #             other call records itself again: a second stay with more work, a
 #             re-run of one that named its work, and a second stay with the
 #             same text, whether the earlier stay's rework has returned or its
-#             work is still out; a stay whose work is the subject itself waits
-#             on the subject with the headline settled and no closer, taking a
-#             recommendation through Accept before it waits, and refuses a
-#             close brief, while a sign-off that does not stay refuses a wait
-#             on its own subject; a
+#             work is still out; a wait on the subject itself, which the
+#             conversation tracks, is refused before any write, in a stay, in
+#             one that takes the recommendation, beside other work, and in a
+#             sign-off that does not stay; a
 #             dismiss that closes an open conversation while the call runs
 #             fails that write and stops the stay, the call less --stay, with
 #             --no-wait for its waits and brief and --no-rework for a --rework,
@@ -183,8 +182,10 @@ mkdir -p "$TMP/bin" "$TMP/store/b" "$TMP/rig/assets/scripts" "$TMP/cwd"
 # REFUSE_UPDATE_MATCH=<text> refuses an update whose arguments carry that text.
 # An appended note follows the notes before it on a line of its own, as bd
 # joins them, and a removed label goes only by its exact text, as bd removes
-# it. A bead's comments are kept in $STORE/b/<id>.comments.json, and each one
-# added is logged.
+# it. A dep add onto a bead its source already has an edge onto, of another
+# type, is refused, because bd keeps one edge from a bead onto another; the
+# hook DEP_ADD_REFUSED refuses every dep add. A bead's comments are kept in
+# $STORE/b/<id>.comments.json, and each one added is logged.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 B="$STORE/b"
 row() { cat "$B/$1.json" 2>/dev/null; }
@@ -227,7 +228,13 @@ case "$1 ${2:-}" in
         fi ;;
       add)
         log "$*"
-        [ -n "${DEP_ADD_REFUSED:-}" ] && { echo "Error adding dependency: the store refused it" >&2; exit 1; } ;;
+        [ -n "${DEP_ADD_REFUSED:-}" ] && { echo "Error adding dependency: the store refused it" >&2; exit 1; }
+        _ty=blocks; _p=""; for a in "$@"; do [ "$_p" = "--type" ] && _ty="$a"; _p="$a"; done
+        _had=$(row "$4" | jq -r --arg on "$5" '[ .deps[]? | select(.on == $on) | .type ] | first // ""')
+        if [ -n "$_had" ] && [ "$_had" != "$_ty" ]; then
+          echo "Error: dependency $4 -> $5 already exists with type \"$_had\" (requested \"$_ty\"); remove it first with 'bd dep remove' then re-add" >&2
+          exit 1
+        fi ;;
       *) log "$*" ;;
     esac ;;
   "bd comments") cat "$B/$3.comments.json" 2>/dev/null || printf '[]\n' ;;
@@ -1930,57 +1937,44 @@ REWORK_CHILD=tk-child2 TAKEAWAY_FAIL=1 run_signoff --conversation tk-conv --outc
 eq "$RC" 1 "(STAY-AGAIN-BESIDE) a second stay with the same text, beside that work and with a rework, stopped before it names its work, exits 1"
 eq "$(field tk-conv notes | grep -E '^(holding|staying):' | tail -n 1)" "staying: the retry backs off" "(STAY-AGAIN-BESIDE) …leaving its own first line newest, not the earlier line that names only the earlier work"
 
-# The work is the subject itself, sent on a formula once the sign-off has
-# exited 0: the conversation waits on the subject, and the headline reads
-# settled, because the subject waits on nothing of its own.
+# The conversation tracks its subject, and bd keeps one edge from a bead onto
+# another, so a wait on the subject itself is refused before any write: in a
+# stay, whose edge onto the subject bd would refuse only once every gate is
+# answered, in one that takes the recommendation, before Accept dispatches
+# anything, beside other work, and in a sign-off that does not stay.
 closer_case
-run_signoff --conversation tk-conv --outcome "staying — the fix runs on the report" --ruled yes --ruling "fix it on the report itself" --waiting-on tk-sub --stay "the dialog keeps what is typed"
-eq "$RC" 0 "(STAY-SUBJECT) a stay whose work is the subject itself, with no close brief, exits 0"
-has "$(grep '^gc-helm takeaway' "$CALLS")" "--no-wait" "(STAY-SUBJECT) …writing the headline settled"
-hasnt "$(grep '^gc-helm takeaway' "$CALLS")" "--waiting-on" "(STAY-SUBJECT) …with no wait of the subject on itself"
-hasnt "$(cat "$CALLS")" "deferred-dispatch arm" "(STAY-SUBJECT) …arming no closer"
-has "$(cat "$CALLS")" "bd dep add tk-conv tk-sub --type blocks" "(STAY-SUBJECT) …while the conversation waits on the subject"
-has "$(field tk-conv notes)" "staying: the dialog keeps what is typed (waits on tk-sub)" "(STAY-SUBJECT) …which its staying: line names"
-eq "$(field tk-conv status)" "open" "(STAY-SUBJECT) …with the conversation open"
-# The subject's own work has closed it before the return, which signs off with
-# the stay's call less --stay, and --no-wait in place of its wait.
-setf tk-sub status closed; setf tk-conv status in_progress
-run_signoff --conversation tk-conv --outcome "landed as agreed" --ruled yes --ruling "fix it on the report itself" --no-wait
-eq "$RC" 0 "(STAY-SUBJECT-RETURN) the return on a subject that has closed exits 0"
-eq "$(meta tk-sub gc.takeaway)" "landed as agreed" "(STAY-SUBJECT-RETURN) …writing what landed as the headline"
-eq "$(field tk-conv status)" "closed" "(STAY-SUBJECT-RETURN) …and closing the conversation"
-# Under --accept the sign-off takes the recommendation itself, and only then
-# leaves the conversation waiting on the subject it dispatched.
+(cd "$TMP/cwd" && gc bd dep add tk-conv tk-sub --type blocks >/dev/null 2>&1) \
+  && bad "(ONE-EDGE) the stub took a blocks edge beside the conversation's tracks edge onto its subject" \
+  || ok "(ONE-EDGE) the stub refuses a blocks edge beside the conversation's tracks edge onto its subject, as bd does"
+closer_case
+run_signoff --conversation tk-conv --outcome x --ruled yes --ruling "fix it on the report itself" --waiting-on tk-sub --stay "the dialog keeps what is typed"
+eq "$RC" 2 "(STAY-SUBJECT) a stay whose work is the subject itself exits 2"
+has "$OUT" "because it tracks tk-sub" "(STAY-SUBJECT) …saying the conversation tracks the subject"
+has "$OUT" "the sitting ends at the hand-off" "(STAY-SUBJECT) …and that the sitting ends at the hand-off"
+eq "$(writes)" 0 "(STAY-SUBJECT) …and writes nothing"
 closer_case; setm tk-sub gc.recommended_formula mol-fix
-run_signoff --conversation tk-conv --outcome "staying — the fix runs on mol-fix" --ruled yes --ruling "take the recommended fix" --waiting-on tk-sub --accept --stay "the dialog keeps what is typed"
-eq "$RC" 0 "(STAY-SUBJECT-ACCEPT) a stay that takes the subject's recommendation exits 0"
-eq "$(meta tk-sub gc.recommended_formula_dispatched)" "mol-fix" "(STAY-SUBJECT-ACCEPT) …dispatching it through Accept"
-case "$(cat "$CALLS")" in
-  *"gc-helm accept tk-sub"*"--append-notes staying: the dialog keeps what is typed (waits on tk-sub)"*"bd dep add tk-conv tk-sub --type blocks"*) ok "(STAY-SUBJECT-ACCEPT) …before the conversation waits on the subject" ;;
-  *) bad "(STAY-SUBJECT-ACCEPT) the writes ran out of order: $(cat "$CALLS")" ;;
-esac
-has "$(grep '^gc-helm takeaway' "$CALLS")" "--no-wait" "(STAY-SUBJECT-ACCEPT) …with the headline settled"
-setf tk-sub status closed; setf tk-conv status in_progress
-ACCEPT_DOES=dispatched run_signoff --conversation tk-conv --outcome "landed as agreed" --ruled yes --ruling "take the recommended fix" --no-wait --accept
-eq "$RC" 0 "(STAY-SUBJECT-ACCEPT-RETURN) the return, the stay's call less --stay with --no-wait in place of its wait, exits 0 on a subject that has closed"
-has "$OUT" "the recommendation was already taken" "(STAY-SUBJECT-ACCEPT-RETURN) …finding the recommendation already taken"
-eq "$(field tk-conv status)" "closed" "(STAY-SUBJECT-ACCEPT-RETURN) …and closing the conversation"
+run_signoff --conversation tk-conv --outcome x --ruled yes --ruling "take the recommended fix" --waiting-on tk-sub --accept --stay "the dialog keeps what is typed"
+eq "$RC" 2 "(STAY-SUBJECT-ACCEPT) a stay that takes the subject's recommendation, waiting on the subject, exits 2"
+eq "$(meta tk-sub gc.recommended_formula_dispatched)" "" "(STAY-SUBJECT-ACCEPT) …dispatching nothing"
+eq "$(writes)" 0 "(STAY-SUBJECT-ACCEPT) …and writes nothing"
 closer_case
-run_signoff --conversation tk-conv --outcome "staying — waits on the report and tk-work" --ruled yes --ruling "fix it on the report once tk-work lands" --waiting-on tk-sub --waiting-on tk-work --close-brief "$BRIEF" --stay "the dialog keeps what is typed"
-eq "$RC" 0 "(STAY-SUBJECT-BESIDE) a stay on the subject and other work exits 0"
-has "$(grep '^gc-helm takeaway' "$CALLS")" "--waiting-on tk-work" "(STAY-SUBJECT-BESIDE) …the headline waiting on the other work"
-hasnt "$(grep '^gc-helm takeaway' "$CALLS")" "--waiting-on tk-sub" "(STAY-SUBJECT-BESIDE) …and not on the subject itself"
-has "$(field tk-conv notes)" "(waits on tk-sub, tk-work)" "(STAY-SUBJECT-BESIDE) …while the conversation waits on both"
-closer_case
-run_signoff --conversation tk-conv --outcome x --ruled yes --ruling "fix it on the report itself" --waiting-on tk-sub --close-brief "$BRIEF" --stay "x"
-eq "$RC" 2 "(STAY-SUBJECT-BRIEF) a stay on the subject itself with a close brief exits 2"
-has "$OUT" "not tk-sub itself" "(STAY-SUBJECT-BRIEF) …saying the subject is no work its closer checks"
-eq "$(writes)" 0 "(STAY-SUBJECT-BRIEF) …and writes nothing"
+run_signoff --conversation tk-conv --outcome x --ruled yes --ruling "fix it on the report once tk-work lands" --waiting-on tk-sub --waiting-on tk-work --close-brief "$BRIEF" --stay "the dialog keeps what is typed"
+eq "$RC" 2 "(STAY-SUBJECT-BESIDE) a stay on the subject beside other work exits 2"
+eq "$(writes)" 0 "(STAY-SUBJECT-BESIDE) …and writes nothing"
 closer_case
 run_signoff --conversation tk-conv --outcome x --ruled yes --ruling "fix it on the report itself" --waiting-on tk-sub
 eq "$RC" 2 "(SELF-WAIT) a sign-off that does not stay, waiting on its own subject, exits 2"
 has "$OUT" "names the subject itself" "(SELF-WAIT) …saying why"
 eq "$(writes)" 0 "(SELF-WAIT) …and writes nothing"
+# The subject can close before the return, which still writes what landed as
+# its headline and closes the conversation.
+closer_case
+run_signoff --conversation tk-conv --outcome "staying — waits on tk-work" "${STAYING[@]}"
+setf tk-work status closed; setf tk-sub status closed; setf tk-conv status in_progress
+run_signoff --conversation tk-conv --outcome "landed as agreed" --ruled yes --ruling "build the fix" --no-wait
+eq "$RC" 0 "(STAY-RETURN-CLOSED) the return on a subject that has closed exits 0"
+eq "$(meta tk-sub gc.takeaway)" "landed as agreed" "(STAY-RETURN-CLOSED) …writing what landed as the headline"
+eq "$(field tk-conv status)" "closed" "(STAY-RETURN-CLOSED) …and closing the conversation"
 
 # A stay that stops after its first write leaves that line newest, which the
 # sitting's entry reads as a stay whose sign-off has not finished, whether its
@@ -2053,12 +2047,24 @@ eq "$RC" 2 "(STAY-GATE) a stay whose only wait is a gate exits 2"
 has "$OUT" "and each --waiting-on is a gate" "(STAY-GATE) …saying a gate is no work to wait on"
 eq "$(writes)" 0 "(STAY-GATE) …and writes nothing"
 # The conversation holds the merge of the PR it is about: the anchor waits on
-# it through a blocks edge, as gc-helm open and engage write that hold.
+# it through a blocks edge, as gc-helm open and engage write that hold. That
+# anchor is the subject itself, which no stay waits on, so a lift of the hold
+# would change nothing.
 open_pr; edge tk-anc blocks tk-conv
 run_signoff --conversation tk-conv --outcome x --ruled yes --ruling "land it as it stands" --no-rework --waiting-on tk-anc --stay "x"
-eq "$RC" 2 "(STAY-HOLDS-MERGE) a stay on a PR whose merge the conversation holds exits 2"
-has "$OUT" "gc bd dep remove tk-anc tk-conv" "(STAY-HOLDS-MERGE) …naming the lift of that hold"
+eq "$RC" 2 "(STAY-HOLDS-MERGE) a stay on the PR the conversation is about, whose merge it holds, exits 2"
+has "$OUT" "the sitting ends at the hand-off" "(STAY-HOLDS-MERGE) …ending the sitting at the hand-off"
+hasnt "$OUT" "gc bd dep remove" "(STAY-HOLDS-MERGE) …and offering no lift of the hold"
 eq "$(writes)" 0 "(STAY-HOLDS-MERGE) …and writes nothing"
+# A conversation about the PR's rework holds that PR's merge too, and a stay
+# there waits on the PR's landing only once the sitting lifts the hold.
+fresh; bead tk-anc; setm tk-anc merge_result pull_request
+bead tk-rw; setm tk-rw anchor_bead tk-anc
+conv tk-conv tk-rw; edge tk-anc blocks tk-conv
+run_signoff --conversation tk-conv --outcome x --ruled yes --ruling "land it once the rework is in" --no-rework --waiting-on tk-anc --close-brief "$BRIEF" --stay "x"
+eq "$RC" 2 "(STAY-HOLDS-MERGE-ANCHOR) a stay on the landing of the PR whose merge the conversation holds exits 2"
+has "$OUT" "gc bd dep remove tk-anc tk-conv" "(STAY-HOLDS-MERGE-ANCHOR) …naming the lift of that hold"
+eq "$(writes)" 0 "(STAY-HOLDS-MERGE-ANCHOR) …and writes nothing"
 closer_case; setf tk-conv assignee human; setf tk-conv status open
 run_signoff --conversation tk-conv --outcome x --ruled yes --ruling "build the fix" --waiting-on tk-work --close-brief "$BRIEF" --stay "x"
 eq "$RC" 2 "(STAY-QUEUED) a conversation in the operator's queue has no sitting to stay"

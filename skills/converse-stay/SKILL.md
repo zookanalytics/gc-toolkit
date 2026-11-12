@@ -31,9 +31,7 @@ if "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" \
      --ruled yes --ruling "<the ruling, one line>" --waiting-on <the work> \
      --close-brief "<what that work's landing settles here, and what to check once it has>" \
      --stay "<what the operator agreed, which the return compares the work with, one line>"
-     # --rework --no-wait in place of --waiting-on and --close-brief when the work is the PR's rework
-     # --waiting-on "$SUBJECT" and no --close-brief when the work is the subject itself, with --accept when the ruling takes its recommendation
-     # and the other flags as converse-settle's sign-off takes them
+     # --rework --no-wait in place of --waiting-on and --close-brief when the work is the PR's rework, and the other flags as converse-settle's sign-off takes them
 then
   : # staying — record the hand-back, post it, and end the turn with no drain
 else
@@ -42,25 +40,12 @@ else
 fi
 ```
 
-The work is the subject itself when the ruling sends the subject or takes its
-recommendation (`converse-settle`). The conversation then waits on the subject:
-pass `--waiting-on "$SUBJECT"` and no `--close-brief`. The sign-off writes the
-headline as settled, because the subject waits on nothing of its own, and arms
-no closer. Under `--accept` it dispatches the recommendation itself, before the
-conversation waits. A subject the ruling sends goes once the call has exited
-0, as after a sign-off. Send it before the hand-back, because until the sling
-lands nothing works on what the conversation waits for, and when it fails,
-repair what it printed and run it again:
-
-```bash
-gc sling <rig>/<pool> "$SUBJECT" --on <formula> \
-  && gc bd comment "$CONVERSATION" "Sent work: <what it will do, in plain words>"
-```
-
 The sign-off refuses a stay on work in another store than the conversation's,
-where the wait would hold nothing, so that sitting ends at the hand-off
-(`converse-settle`) and says why, as does one whose context is too full to
-compare the work once it lands. It also refuses a stay for the landing of the
+where the wait would hold nothing. It refuses one on the subject itself, as when
+the ruling sends the subject or takes its recommendation, because the
+conversation tracks the subject and bd keeps one edge from a bead onto another.
+Either sitting ends at the hand-off (`converse-settle`) and says why, as does
+one whose context is too full to compare the work once it lands. It also refuses a stay for the landing of the
 PR whose merge this conversation holds: when the operator wants that PR to
 land first, lift the hold (`converse-hold`) and run the stay again, and
 otherwise end at the hand-off.

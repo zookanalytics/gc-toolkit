@@ -45,7 +45,7 @@
 # under a gc that refuses the first step, and fails if anything after it runs.
 # It runs the settle step's arm under a gc that answers a dep add as bd does for
 # a blocker in another store, and fails if the arm runs. It runs the settle
-# step's stay call, and the rework, subject and return calls the settle and
+# step's stay call, and the rework and return calls the settle and
 # continue steps derive from it, through the real sign-off's parser, and fails
 # if the parser refuses one. It runs the stay's claim-back before a fallback
 # hold under a stub gc, and fails unless its line prints only for a
@@ -913,10 +913,8 @@ echo "── the stay example, and each call the skills derive from it, passes t
 # it refuses exits 2 before that read.
 have "the stay example's rework form takes --rework --no-wait in place of the wait and its brief" \
     '# --rework --no-wait in place of --waiting-on and --close-brief when the work is the PR'"'"'s rework' "$STAY"
-have "…and its subject form waits on the subject itself, with no brief" \
-    '# --waiting-on "$SUBJECT" and no --close-brief when the work is the subject itself, with --accept when the ruling takes its recommendation' "$STAY"
-have "…and a subject the ruling sends is slung after the call, as after a sign-off" \
-    'gc sling <rig>/<pool> "$SUBJECT" --on <formula>' "$STAY"
+have "…and a stay on the subject itself is refused, so that sitting ends at the hand-off" \
+    'It refuses one on the subject itself' "$STAY"
 SV="$TMP/stay-forms"
 mkdir -p "$SV/bin" "$SV/pack"
 printf '#!/bin/sh\nexit 1\n' >"$SV/bin/gc"
@@ -942,9 +940,6 @@ else
         { drop_args "$SV/stay" --waiting-on --close-brief; printf '%s\n' --rework --no-wait; } >"$SV/rework"
         { drop_args "$SV/stay" --stay --waiting-on --close-brief; printf '%s\n' --no-wait; } >"$SV/return"
         drop_args "$SV/rework" --stay | sed 's/^--rework$/--no-rework/' >"$SV/rework-return"
-        { drop_args "$SV/stay" --waiting-on --close-brief; printf '%s\n' --waiting-on tk-s; } >"$SV/subject"
-        { cat "$SV/subject"; printf '%s\n' --accept; } >"$SV/subject-accept"
-        { cat "$SV/return"; printf '%s\n' --accept; } >"$SV/subject-accept-return"
         while IFS='|' read -r form label; do
             args=()
             while IFS= read -r a; do args+=("$a"); done <"$SV/$form"
@@ -960,9 +955,6 @@ stay|the stay example's call passes the sign-off's parser
 rework|…as does its rework form, with --rework --no-wait in place of --waiting-on and --close-brief
 return|…the return's call, the stay's less --stay with --no-wait in place of its waits and brief
 rework-return|…and the return of a rework stay, with --no-rework in place of its --rework
-subject|…the subject form, with --waiting-on the subject and no brief
-subject-accept|…as it takes the recommendation, with --accept beside it
-subject-accept-return|…and that stay's return, with --no-wait in place of its wait
 FORMS
     done
 fi
