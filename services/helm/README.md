@@ -254,10 +254,13 @@ helm-svc form --helm <gc-helm.sh> --return     # the conversations to return to
 
 The screen `gc-helm.sh engage`, which a bare `gc-helm.sh` on a terminal runs,
 and `gc-helm.sh attach` hand a terminal to, which they run with their own path
-as `--helm` and the converse variants as `--models`. It holds the subject, a
-multiline question, the model, shown with
-each word of its name capitalized (claude-opus reads Claude-Opus) and passed on
-as named, and whether to attach, in that order. The subject is a bead, a PR, or
+as `--helm` and the converse variants as `--models`. Its pages are tabs at its
+top: starting a conversation, returning to one, and People. ↑ from the subject
+reaches the tabs, ←/→ move along them, and on a list page ←/→ move along them
+at once. The page for starting a conversation holds the subject, a multiline
+question, the model, shown with each word of its name capitalized (claude-opus
+reads Claude-Opus) and passed on as named, and whether to attach, in that
+order. The subject is a bead, a PR, or
 a rig's whole name or prefix typed there, which starts a new topic in that rig,
 and a line under it shows the rig it names or the bead's own rig. `--rig` fills
 in the subject with the name of the rig it names exactly, and `--subject` with
@@ -272,11 +275,12 @@ command line, opens the form with attaching off, and the form then leaves once
 the sitting has started. In a suspended rig attaching is off whatever the
 operator chose, and the form saves the question, starts no sitting and leaves.
 `--from`, which engage passes on too, names the bead a `--subject` gate was
-reached from. The subject also takes a seat typed there, `<rig>/po` for a rig's
-po, the rig by a name or prefix, or `mechanik`. The form looks no seat up and
-takes no question for one, and Ctrl+S leaves the terminal to
-`gc-helm.sh po --rig <rig>` or `gc-helm.sh mechanik`, each of which hands it to
-the seat's session. It writes nothing itself, so what it files is what the
+reached from. The People page lists the `seats` that `gc-helm.sh conversations
+--json` gives, mechanik and each rig's po, each with its session's state as
+Gas City's session list gives it, and reads them again every ten seconds while
+it is on screen. Enter leaves the terminal to `gc-helm.sh mechanik` or
+`gc-helm.sh po --rig <rig>`, each of which hands it to the seat's session, and
+a seat takes no question. It writes nothing itself, so what it files is what the
 command line files. [human-engagement.md](../../docs/human-engagement.md#engage)
 says what it shows and when it saves. `internal/form/testdata/helm-fixture.sh`
 answers those verbs from fixture data, so the form can be run with no city

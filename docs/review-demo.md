@@ -90,9 +90,10 @@ claude-opus,claude-fable,codex-astra,codex-sol --subject tk-demo1"` for a
 subject, `--rig gc-toolkit` for a new topic, `--subject 1446` for a PR two rigs
 record, `--subject tk-demo10` for a gate two beads wait on, which the form reads
 from tk-demo1 once it is chosen among what holds tk-demo1, or `--return` for the
-conversations to return to. A seat is typed, so with no subject flag a recording
-types `gc-toolkit/po` for that rig's po, or `mechanik`, and presses Ctrl+S, and
-the fixture names the seat's verb it was handed in place of attaching. A
+conversations to return to. The People page is reached on the form's tabs, so
+with no subject flag a recording presses ↑ to reach the tabs and ← to wrap
+around to People, then ↓ to gc-toolkit's po and Enter, and the fixture names
+the seat's verb it was handed in place of attaching. A
 terminal capture shows the form's first frame, drawn before the fixture answers
 its reads a second later. What those reads fill in, such as tk-demo1's
 conversations and what holds it, a gate and the PR's own review threads, and a

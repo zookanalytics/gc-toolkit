@@ -140,8 +140,8 @@ not.
 
 The placement sitting is the po's backlog refinement. Each rig has its own po,
 the operator's prioritization partner for that rig's work, and the operator
-opens a rig's po by typing `<rig>/po` as the subject in Engage's form or with
-`gc-helm po --rig <rig>` ([human-engagement.md](human-engagement.md#a-po-sitting)).
+opens a rig's po from the People page of Engage's form or with `gc-helm po
+--rig <rig>` ([human-engagement.md](human-engagement.md#a-po-sitting)).
 The two work that rig's queue together: every bead in the rig's store that
 carries `hold:mayor` in a spelling Gas City reads as the hold, trimmed and in
 any case. The po reads it from `gc beads list --format=json`, keeping each bead

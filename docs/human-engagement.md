@@ -180,24 +180,39 @@ discussing is still open and unassigned until the sitting answers it.
 ## The way in
 
 The operator comes in through Engage. A bare `gc-helm` on a terminal opens
-engage's form on starting a conversation (*Engage*, below), and Ctrl+R moves to
-the conversations to return to (*Returning to a conversation*, below). The
-form's subject names what the operator is there for: a bead, a gate or a rig
-for a new topic, or a person to sit with in the city:
+engage's form on starting a conversation, with the cursor in the subject. The
+form's pages are tabs at its top, and the operator moves between them on the
+tabs, with no key of a page's own:
 
-- **A rig's po**, typed `<rig>/po` with the rig by a name or prefix as a new
-  topic's rig is typed, opens a sitting with that rig's po (*A po sitting*,
-  below).
-- **Mechanik**, typed `mechanik`, attaches to mechanik's session, waiting while
-  the controller starts it. The city has one.
+- **Start a conversation** takes a subject, a bead, a PR, or a rig's name or
+  prefix for a new topic, and the question (*Engage*, below).
+- **Return to a conversation** lists the open conversations (*Returning to a
+  conversation*, below).
+- **People** lists the seats the operator sits with: mechanik, of which the
+  city has one, and each rig's po, the Product Owner, by its rig's name and
+  prefix. The city's HQ has none.
 
-Each seat is also a command of its own: `gc-helm po --rig <name>` and `gc-helm
-mechanik`. The form leaves the terminal and then runs the seat's command, as it
-runs a conversation's attach, so all the command prints stays on the terminal
-and its exit status is the form's. Gas City's attach carries no message, so a
-seat takes no question from the form, and the sitting's purpose is given in the
-sitting. A bare `gc-helm` without a terminal prints its usage and exits 2, so no
-script blocks on a form.
+↑ from the subject reaches the tabs, and ←/→ move along them, wrapping around
+at either end, as they cycle a value on the form's choosers. ↓ goes back down
+to the subject. On a list page ←/→ move along the tabs at once. The tabs are no
+field Tab moves through, so the question stays one Tab after the subject.
+`gc-helm attach` opens the form on the return page.
+
+The People page is the one way Engage opens a person. Each row shows the state
+Gas City's session list gives the seat's session, such as active or asleep,
+and whether a terminal is attached, or no session when the list holds none, as
+for a po that has never run. A suspended rig's po reads rig suspended, since Gas
+City starts no session in a suspended rig, and the page says why it cannot start
+and how to resume the rig. The page reads the city again every ten seconds
+while it is on screen. ↑/↓ pick a seat, a line says what Enter does for it, and
+Enter leaves the terminal and then runs the seat's command, `gc-helm mechanik`
+or `gc-helm po --rig <name>`, as the form runs a conversation's attach. So all
+the command prints stays on the terminal and its exit status is the form's.
+Each command attaches to the seat's session, starting it first when it is not
+running (*A po sitting*, below). Gas City's attach carries no message, so a
+seat takes no question, and the sitting's purpose is given in the sitting. The
+subject on the start page takes no seat. A bare `gc-helm` without a terminal
+prints its usage and exits 2, so no script blocks on a form.
 
 ## How a conversation starts
 
@@ -346,8 +361,9 @@ on the bead answers no gate until it replies to one.
 **On a terminal, engage opens the conversation form.** An engage whose
 command line names no concern (`--reason`, `--template` or `--skill`) and not
 `--no-input` hands the terminal to helm-svc's `form` command
-(`services/helm/internal/form`). One screen holds, in this order, the subject,
-a multiline question, in which Enter adds a line, the model, shown with each
+(`services/helm/internal/form`), on its page for starting a conversation
+(*The way in*, above). The page holds, in this order, the subject, a
+multiline question, in which Enter adds a line, the model, shown with each
 word of its name capitalized and Claude-Opus as the default, and whether to
 attach once the sitting starts, which is on unless `--no-attach` is given. The
 subject is a bead id, a PR number or URL, or a rig's whole name or prefix, such
@@ -364,10 +380,10 @@ bead's own rig, and is not a field. Tab moves through the fields in that
 order, so the question is one Tab after the subject, and wraps around at
 either end. ↑ and ↓ move between the fields once the cursor is on a field's
 first or last row, with the question's rows counted as the screen shows them,
-and stop at the first and last field. The form opens on the question when the
-command line names the subject or a new topic's rig. A tab in the question
-stays a tab, shown as ␉, and a line break written as
-LF, CR or CRLF is one line break. The field leaves out every other control
+and stop at the last field, while ↑ from the subject reaches the tabs. The
+form opens on the question when the command line names the subject or a new
+topic's rig. A tab in the question stays a tab, shown as ␉, and a line break
+written as LF, CR or CRLF is one line break. The field leaves out every other control
 character, such as BEL or ESC, and U+FFFD, the replacement character. It leaves
 out U+FDD0 as well, since inside the field that noncharacter stands for a tab.
 The command line fills in the fields, and typing never waits for a read.
@@ -658,7 +674,7 @@ runs on engage's default model, since the list shows none.
 `gc-helm attach <conversation>` is engage's attach for a script or a shortcut:
 it attaches to a live sitting once it has started, and holds a conversation
 whose sitting ended, or one in the queue, in a new sitting first. Starting and
-returning are two acts of one form: Ctrl+R moves between them.
+returning are two pages of one form, and its tabs move between them.
 
 ## The sitting
 
@@ -1180,8 +1196,9 @@ work: a named session of the rig, which the operator opens for one sitting at a
 time, a backlog refinement over the rig's `hold:mayor` queue or a portfolio
 sync over the rig's epics ([steering.md](steering.md)). A sitting ends when
 the po runs `gc runtime drain-ack`, and the next sitting starts a new
-conversation. `<rig>/po` in Engage's form opens one from whatever state the
-seat is in, with no other command, and so does `gc-helm po --rig <rig>`.
+conversation. The rig's row on Engage's People page opens one from whatever
+state the seat is in, with no other command, and so does `gc-helm po --rig
+<rig>`.
 
 Both are Gas City's attach on the rig's po, `gc session attach
 <rig>/gc-toolkit.po`, Gas City's name for a rig's named session
