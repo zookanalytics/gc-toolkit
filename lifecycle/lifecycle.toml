@@ -508,48 +508,51 @@ keys = [
 #   them to bind a bead to its live PR; a non-numeric pr_number is skipped, and an
 #   unparseable pr_url resolves to the fail-closed repo `?`. Never cleared.
 #   pr_number is an integer; pr_url is the canonical `scheme://host/owner/repo/pull/<n>`.
-# existing_pr — a PR the refinery should reuse rather than open. pr-facts.sh
-#   and rework-child.sh stamp it on the rework child each files, equal to that
-#   child's pr_url; the refinery's rejection transition carries it through
-#   (mol-refinery-patrol.toml). Read by mol-refinery-patrol.toml to force the PR
-#   pipeline when set (merge_strategy flips to mr), and by pr-facts.sh and
+# existing_pr — a PR the refinery should reuse rather than open. pr-facts.sh,
+#   rework-child.sh and refinery-requeue.sh stamp it on the rework child each
+#   files, equal to the PR the anchor owns; the refinery's requeue keeps it on a
+#   bead it sends back, and the pending record writes it (gctk pr record's first
+#   write, and the landing order's requeue of a changed head). Read by
+#   refinery-land.sh, which lands a bead that names one through its PR, by
+#   refinery-publish.sh as the PR to take, and by pr-facts.sh and
 #   rework-child.sh to verify the child each files. Absent means no PR to reuse.
 #   Never cleared. Value is a PR URL.
-# merge_strategy — how the refinery lands the branch. mol-refinery-patrol.toml
-#   resolves it once, in merge-push's merge-strategy-resolve block: `mr` opens
-#   and merges a PR, `direct` fast-forwards and pushes straight to the target,
-#   and `pr` is an alias normalized to `mr` on read. An absent key resolves to
-#   the default_merge_strategy var (default `direct`), and an empty value to
-#   `direct`. A bead that would land `direct` on the default branch, where a bead
-#   with no target lands, resolves to `mr`, so the default branch takes work
-#   only through a PR (docs/warrants.md). existing_pr forces the resolved mode
-#   up from `direct` at the refinery. `local`, which no pack writer stamps,
-#   passes through, and merge-push refuses it as unsupported. `mr` is stamped by
-#   pr-facts.sh, rework-child.sh, pre-open-rebase.sh and
-#   mol-feedback-distiller.toml. `pr` is written only by direct-merge-push.sh,
-#   auto-promoting a bead whose direct push was rejected for branch protection
-#   into the PR pipeline. Read by mol-refinery-patrol.toml, and read back by
-#   pr-facts.sh, rework-child.sh and pre-open-rebase.sh on the rework child each
-#   stamps. Never cleared. Enum `mr | pr | direct | local`.
+# merge_strategy — how the refinery lands the branch, in Gas City's values.
+#   refinery-land.sh, the refinery's merge-push step, resolves it once: `mr`
+#   publishes a PR, `direct` fast-forwards and pushes straight to the target,
+#   and `pr`, an older spelling, reads as `mr`. An absent or empty key resolves
+#   to the rig's default_merge_strategy var, else `direct`. A bead that would
+#   land `direct` on the default branch, where a bead with no target lands,
+#   resolves to `mr`, so the default branch takes work only through a PR
+#   (docs/warrants.md), and existing_pr forces `mr` too. Any other value,
+#   `local` among them, parks the bead behind a human gate. `mr` is stamped by
+#   pr-facts.sh, rework-child.sh, pre-open-rebase.sh, refinery-requeue.sh and
+#   mol-feedback-distiller.toml, and by direct-merge-push.sh, promoting a bead
+#   whose direct push was refused for branch protection into the PR path. Read
+#   by refinery-land.sh, and read back by pr-facts.sh, rework-child.sh and
+#   pre-open-rebase.sh on the rework child each stamps. Never cleared. Enum
+#   `mr | pr | direct | local`.
 # prepare_mode — how the refinery brings a rework branch current before it lands.
 #   Every branch shape (per-bead `polecat/*`, and the shared `integration/*` a
 #   landing bead carries) is stamped `merge`: the branch is brought current by
 #   merging origin/<target> in, never rebased, so no shape is rewritten or
 #   force-pushed.
-#   Written by pr-facts.sh, pre-open-rebase.sh and mol-refinery-patrol.toml. The
+#   Written by pr-facts.sh and pre-open-rebase.sh. The
 #   prepare and resume paths merge the target in whatever the stamp says; an
 #   absent value resolves to merge too, so a dropped stamp cannot select a
 #   rewrite. A dispatch site reads the stamp back and routes a child only once it
 #   sticks, and pre-open-rebase.test.sh holds both dispatch sites to `merge`.
 #   Never cleared. Enum `rebase | merge`; only `merge` is stamped.
 # rejection_reason — why the last attempt bounced, embedding `head <oid>` so a
-#   later pass can tell which head it spoke for. Written by the refinery
-#   (pr-facts.sh, signoff.sh, pre-open-rebase.sh, mol-polecat-work.toml); read at
+#   later pass can tell which head it spoke for. Written by the refinery's
+#   requeue (refinery-requeue.sh), the landing order's requeue of a changed head
+#   (gctk pr reconcile), pr-facts.sh, signoff.sh, pre-open-rebase.sh and
+#   mol-polecat-work.toml; read at
 #   load-context to resume rather than redo, and by pr-facts.sh to dedup a child
 #   already covering a head. Cleared with `--unset` by the refinery's
 #   merge-push in each transition it makes on a hand-back (merged, unanchored,
-#   pre_open_gate, pull_request), and by the polecat once the merge its resume
-#   runs concludes. A stop before then, such as a question for a person, leaves
+#   pre_open_gate, pull_request), by the publication of a pending record (gctk pr
+#   record), and by the polecat once the merge its resume runs concludes. A stop before then, such as a question for a person, leaves
 #   it, so the bead's next run resumes again. Freeform instruction text.
 # graduation — RETIRED. `true`, set on a convoy bead when convoy graduation
 #   carried its integration branch to the default branch. Nothing writes or
