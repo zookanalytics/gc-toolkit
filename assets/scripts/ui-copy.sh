@@ -214,14 +214,14 @@ _lead_publish() {
 # Ends the copy's whole process group, which holds the serve command and the
 # publish command, and then the leader. A member that ignores TERM gets KILL
 # once the grace has passed, and the KILL ends the leader with it, so the
-# leader never ends while a member runs.
+# leader never ends while a member runs. The clock keeps the grace, not a count
+# of polls, because each poll runs ps, whose time grows with the host's load.
 _lead_end() {
-  local i=0
+  local end=$((SECONDS + UC_GRACE))
   trap '' HUP INT TERM USR1
   kill -TERM 0 2>/dev/null
-  while [ -n "$(_lead_members)" ] && [ "$i" -lt $((UC_GRACE * 5)) ]; do
+  while [ -n "$(_lead_members)" ] && [ "$SECONDS" -le "$end" ]; do
     sleep 0.2
-    i=$((i + 1))
   done
   [ -z "$(_lead_members)" ] || kill -KILL 0
   exit "$1"
