@@ -51,6 +51,7 @@ var pkgLayer = map[string]struct {
 	"listing":            {layer: domain},
 	"prstatus":           {layer: domain},
 	"prstatus/fixture":   {layer: domain},
+	"queue":              {layer: domain},
 	"waits":              {layer: domain},
 	"internal/cli":       {layer: command},
 	"cmd/gctk":           {layer: binary},

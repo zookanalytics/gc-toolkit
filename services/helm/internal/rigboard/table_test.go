@@ -6,10 +6,9 @@ import (
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/listing"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/queue"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
-
-func noOwed(prstatus.Blocker) string { return "" }
 
 // TestTableRows walks the table's rows in order: each case is the first row
 // that matches, so an earlier row's answer stands over a later one's.
@@ -27,14 +26,15 @@ func TestTableRows(t *testing.T) {
 		return prstatus.Blocker{ID: "tk-c", Title: "talk", Status: "open", IssueType: "task", Assignee: assignee}
 	}
 	decision := prstatus.Blocker{ID: "tk-d", Title: "pick one", Status: "open", IssueType: "decision"}
-	withAsk := func(id string, a *askAnswer) func(prstatus.Blocker) string {
-		return func(b prstatus.Blocker) string {
-			if b.ID == id {
-				return a.words
-			}
-			return ""
-		}
-	}
+	// A merge anchor whose pull request waits on a person's review, as
+	// prstatus.Holding names it among the beads a person owes.
+	pr := prstatus.Blocker{ID: "tk-pr", Title: "land the change", Status: "open", IssueType: "task",
+		Metadata: map[string]string{"merge_result": "pull_request", "pr_number": "7"}}
+	prWait := waits.Wait{ID: "tk-pr", Type: "blocks", Title: "land the change", Status: "open", IssueType: "task"}
+	// Where queue placed the bead: in a place the city takes as things stand,
+	// and in one it does not.
+	taken := &queue.Place{ID: "tk-w", Layer: 1, Scheduled: true}
+	untaken := &queue.Place{ID: "tk-w", Layer: 1}
 
 	cases := []struct {
 		name   string
@@ -53,32 +53,39 @@ func TestTableRows(t *testing.T) {
 			out: outAsk, group: GroupWaitingOnYou, signal: "Routed to you"},
 		{name: "an own human gate waits on your answer",
 			in: tableInput{b: work, kind: KindWork, holds: blockedOn(gateWait),
-				holding: &prstatus.Holds{Gates: []prstatus.Blocker{humanGate}}, owedSignal: noOwed},
+				holding: &prstatus.Holds{Gates: []prstatus.Blocker{humanGate}}},
 			out: outOwnWait, group: GroupWaitingOnYou, signal: "Waits on your answer"},
 		{name: "an own conversation in your queue waits for you",
 			in: tableInput{b: work, kind: KindWork, holds: blockedOn(waits.Wait{ID: "tk-c", Type: "blocks", Status: "open", IssueType: "task"}),
-				holding: &prstatus.Holds{Owed: []prstatus.Blocker{conv("human")}}, owedSignal: noOwed},
+				holding: &prstatus.Holds{Owed: []prstatus.Blocker{conv("human")}}},
 			out: outOwnWait, group: GroupWaitingOnYou, signal: "Conversation waits for you"},
 		{name: "an own conversation a sitting holds is in conversation",
 			in: tableInput{b: work, kind: KindWork, holds: blockedOn(waits.Wait{ID: "tk-c", Type: "blocks", Status: "open", IssueType: "task"}),
-				holding: &prstatus.Holds{Owed: []prstatus.Blocker{conv("gc-toolkit/gc-toolkit.tk-c")}}, owedSignal: noOwed},
+				holding: &prstatus.Holds{Owed: []prstatus.Blocker{conv("gc-toolkit/gc-toolkit.tk-c")}}},
 			out: outOwnWait, group: GroupWaitingOnYou, signal: "In conversation"},
-		{name: "an own owed bead reads that bead's own signal",
+		{name: "an own decision waits on your answer, as a question does",
 			in: tableInput{b: work, kind: KindWork, holds: blockedOn(waits.Wait{ID: "tk-d", Type: "blocks", Status: "open", IssueType: "decision"}),
-				holding:    &prstatus.Holds{Owed: []prstatus.Blocker{decision}},
-				owedSignal: withAsk("tk-d", &askAnswer{kind: AskQuestion, words: "Question"})},
-			out: outOwnWait, group: GroupWaitingOnYou, signal: "Question"},
+				holding: &prstatus.Holds{Owed: []prstatus.Blocker{decision}}},
+			out: outOwnWait, group: GroupWaitingOnYou, signal: "Waits on your answer"},
+		{name: "a bead behind another bead's pull request names that bead, never its words",
+			in: tableInput{b: work, kind: KindWork, holds: blockedOn(prWait),
+				holding: &prstatus.Holds{Owed: []prstatus.Blocker{pr}}},
+			out: outOwnWait, group: GroupWaitingOnYou, signal: "Waits on tk-pr"},
+		{name: "a bead behind a pull request and other work names each wait",
+			in: tableInput{b: work, kind: KindWork, holds: blockedOn(workWait, prWait),
+				holding: &prstatus.Holds{Owed: []prstatus.Blocker{pr}}},
+			out: outOwnWait, group: GroupWaitingOnYou, signal: "Waits on tk-other, tk-pr"},
 		{name: "a person's move further along names the wait and ends on what Holding returned first",
 			in: tableInput{b: work, kind: KindWork, holds: blockedOn(workWait),
-				holding: &prstatus.Holds{Gates: []prstatus.Blocker{humanGate}, Owed: []prstatus.Blocker{decision}}, owedSignal: noOwed},
+				holding: &prstatus.Holds{Gates: []prstatus.Blocker{humanGate}, Owed: []prstatus.Blocker{decision}}},
 			out: outEndsOnYou, group: GroupWaitingOnYou, signal: "Waits on tk-other", line3: []string{"tk-g"}},
 		{name: "a held bead's ancestor gate a person answers is further along",
 			in: tableInput{b: work, kind: KindWork,
 				holds:   &waits.Holds{ID: "tk-w", Status: waits.Held, Waits: []waits.Wait{{ID: "tk-g", Type: "blocks", Status: "open", IssueType: "gate", AwaitType: "human", Ancestor: "tk-e"}}},
-				holding: &prstatus.Holds{Gates: []prstatus.Blocker{humanGate}}, owedSignal: noOwed},
+				holding: &prstatus.Holds{Gates: []prstatus.Blocker{humanGate}}},
 			out: outEndsOnYou, group: GroupWaitingOnYou, signal: "Waits on tk-g", line3: []string{"tk-g"}},
 		{name: "a gate no person answers holds it",
-			in:  tableInput{b: work, kind: KindWork, holds: blockedOn(workWait, parkWait), holding: &prstatus.Holds{}, owedSignal: noOwed},
+			in:  tableInput{b: work, kind: KindWork, holds: blockedOn(workWait, parkWait), holding: &prstatus.Holds{}},
 			out: outHeldByGate, group: GroupNotMoving, signal: "Held by a gate", note: "parked until the review"},
 		{name: "an ancestor's gate no person answers holds it",
 			in: tableInput{b: work, kind: KindWork,
@@ -98,18 +105,25 @@ func TestTableRows(t *testing.T) {
 				holds: &waits.Holds{Status: waits.Clear, InFlight: "carries merge_result"}, facts: &prstatus.Facts{InFlightCount: 1}},
 			out: outPullRequest, group: GroupQueued, signal: "Pull request #12", note: "working"},
 		{name: "armed and clear is queued",
-			in:  tableInput{b: work, kind: KindWork, holds: &waits.Holds{Status: waits.Clear, Arm: &waits.Arm{Target: "gc-toolkit/gc-toolkit.polecat"}}},
+			in:  tableInput{b: work, kind: KindWork, holds: &waits.Holds{Status: waits.Clear, Arm: &waits.Arm{Target: "gc-toolkit/gc-toolkit.polecat"}}, place: taken},
 			out: outQueued, group: GroupQueued, signal: "Queued"},
 		{name: "routed and held behind work names each wait",
 			in: tableInput{b: bead{ID: "tk-w", Status: "open", RoutedTo: "gc-toolkit/gc-toolkit.polecat"}, kind: KindWork,
-				holds: blockedOn(workWait), owedSignal: noOwed},
+				holds: blockedOn(workWait), place: taken},
 			out: outQueuedBehind, group: GroupQueued, signal: "Waits on tk-other"},
 		{name: "assigned to an agent is queued",
-			in:  tableInput{b: bead{ID: "tk-w", Status: "open", Assignee: "gc-toolkit.mechanik"}, kind: KindWork, holds: clear},
+			in:  tableInput{b: bead{ID: "tk-w", Status: "open", Assignee: "gc-toolkit.mechanik"}, kind: KindWork, holds: clear, place: taken},
 			out: outQueued, group: GroupQueued, signal: "Queued"},
 		{name: "nobody scheduled it, and line 3 names what it waits on",
-			in:  tableInput{b: work, kind: KindWork, holds: blockedOn(workWait), owedSignal: noOwed},
+			in:  tableInput{b: work, kind: KindWork, holds: blockedOn(workWait), place: untaken},
 			out: outNotScheduled, group: GroupNotMoving, signal: "Not scheduled", line3: []string{"tk-other"}},
+		{name: "armed, in a place the city does not take, is not scheduled",
+			in: tableInput{b: bead{ID: "tk-w", Status: "open", Labels: []string{"hold:external"}}, kind: KindWork,
+				holds: &waits.Holds{Status: waits.Clear, Arm: &waits.Arm{Target: "gc-toolkit/gc-toolkit.polecat"}}, place: untaken},
+			out: outNotScheduled, group: GroupNotMoving, signal: "Not scheduled"},
+		{name: "work that queue placed nowhere is unread",
+			in:  tableInput{b: bead{ID: "tk-w", Status: "open", RoutedTo: "gc-toolkit/gc-toolkit.polecat"}, kind: KindWork, holds: clear},
+			out: outUnread, signal: "unread"},
 		{name: "rows 6 to 8 never apply to an epic",
 			in:  tableInput{b: bead{ID: "tk-e", Status: "open", IssueType: "epic", Assignee: "gc-toolkit.mechanik"}, kind: KindEpic, holds: clear},
 			out: outNone},

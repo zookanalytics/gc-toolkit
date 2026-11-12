@@ -23,8 +23,9 @@ var (
 )
 
 // fixtureEpics are the epics the fixture is cut around: the ones the Claude
-// Design export of the board was drawn from.
-var fixtureEpics = []string{"tk-wmwcdlc", "tk-ssm8qns", "tk-yhquh93"}
+// Design export of the board was drawn from, and the one the operator adopted
+// the board's two views on.
+var fixtureEpics = []string{"tk-wmwcdlc", "tk-ssm8qns", "tk-yhquh93", "tk-1tfzr71"}
 
 // fixtureFile is the fixture as committed: what was cut and left out, and the
 // beads, one per line.
@@ -106,8 +107,8 @@ func TestFixtureBoard(t *testing.T) {
 	}
 }
 
-// encodeGolden writes the document with one row per line, so a change to the
-// read shows in a diff as the rows it moves.
+// encodeGolden writes the document with one row and one epic per line, so a
+// change to the read shows in a diff as the rows and epics it moves.
 func encodeGolden(t *testing.T, doc Document) []byte {
 	t.Helper()
 	var buf bytes.Buffer
@@ -131,8 +132,16 @@ func encodeGolden(t *testing.T, doc Document) []byte {
 		}
 		fmt.Fprintf(&buf, "  %s: %s%s\n", line(id), line(doc.Rows[id]), sep)
 	}
-	fmt.Fprintf(&buf, " },\n \"epics\": %s,\n \"needs_you\": %s,\n \"work_queue\": %s,\n \"unprioritized\": %s\n}\n",
-		line(doc.Epics), line(doc.NeedsYou), line(doc.WorkQueue), line(doc.Unprioritized))
+	fmt.Fprintf(&buf, " },\n \"epics\": [\n")
+	for i, e := range doc.Epics {
+		sep := ","
+		if i == len(doc.Epics)-1 {
+			sep = ""
+		}
+		fmt.Fprintf(&buf, "  %s%s\n", line(e), sep)
+	}
+	fmt.Fprintf(&buf, " ],\n \"needs_you\": %s,\n \"work_queue\": %s,\n \"unprioritized\": %s\n}\n",
+		line(doc.NeedsYou), line(doc.WorkQueue), line(doc.Unprioritized))
 	return buf.Bytes()
 }
 

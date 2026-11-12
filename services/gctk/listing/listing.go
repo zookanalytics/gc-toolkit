@@ -5,8 +5,8 @@
 // question asked of it answers from those rows. It gives each bead as a Bead,
 // whose keys it decodes through its declarations, so the reader spells no key
 // and parses no value. It answers what holds a bead through waits, and it is
-// prstatus's Store, so a pull request's facts and what a person owes come from
-// the same rows the reader lays out.
+// prstatus's Store and queue's, so a pull request's facts, what a person owes
+// and the order work lands in come from the same rows the reader lays out.
 //
 // The package sits outside internal/ so the helm board, a separate module, can
 // import it, while the ledger stays internal.
@@ -248,7 +248,7 @@ func (ls *Listing) closedUnder(parent string) ([]Bead, error) {
 
 // Holds answers what holds each bead named, through waits, from the listing's
 // rows: the answer for each bead it could answer, and the error for each it
-// could not. A read that fails returns its error.
+// could not. A read that fails returns its error. It implements queue.Store.
 func (ls *Listing) Holds(ids []string) (map[string]waits.Holds, map[string]error, error) {
 	snap, err := waits.Read(ls.pass, ids...)
 	if err != nil {

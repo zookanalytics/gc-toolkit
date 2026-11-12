@@ -1370,7 +1370,13 @@ operator's *own* unsent words.
 - **One board, and its verbs in gc-helm.sh.** The web page that
   `services/helm/` serves is the board's one view for people, and it reads
   one document per rig (*The rig board* in
-  [services/helm/README.md](../services/helm/README.md)).
+  [services/helm/README.md](../services/helm/README.md)). The page shows two
+  views of the rig's work. Needs you is one entry per need, such as a
+  question, a pull request waiting on the operator's review or a ruling, with
+  the beads the need holds beneath it. The Work queue is the work in the order
+  it is expected to land. The Epics tab shows both for each epic and each
+  Delivery, and the Needs you and Work queue tabs show them across the rig,
+  each object drawn and ordered one way wherever it appears.
   `helm-svc board --json` prints the board model's rows for agents, and the
   sidecar's `/helm` answer serves the same model. Both run the one
   `internal/source` gather and the one `internal/board` derivation, so a
