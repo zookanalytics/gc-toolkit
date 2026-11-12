@@ -13,8 +13,9 @@ gastown 0.1.13, the release that Gas City main and the city's gc 1.4.3 bundle
 `gastownhall/beads` v1.3.4 (7ef2fd05eb0c). GitHub's behavior was read from its
 documentation, its GraphQL schema and the manual of gh 2.103.3 the same day.
 The draft between rounds of work was read on 2026-11-12, with gc-toolkit's
-workflows on main and the timelines and runs of PRs #1468 and #1469. Each
-section names the unit of [the design](design.md) that adds the surface.
+workflows on main, the timelines, runs and check suites of PRs #1468 and #1469,
+and GitHub's pages on contexts and concurrency. Each section names the unit of
+[the design](design.md) that adds the surface.
 
 ## The work's record from publication to the verified merge (unit 3)
 
@@ -134,8 +135,8 @@ The need: the PR stays a draft while a round of the city's work goes on, so a
 repository whose workflows skip drafts runs none of that CI on the round's
 pushes, and it turns ready, which starts that CI, once the round's head passes
 the city's own checks. Each later round repeats the cycle. The merge then waits
-for the run the ready transition starts, never for a skip a draft left at the
-head.
+for a run of each required job at the head, never for a skip, which a draft can
+leave there before or after the ready transition.
 
 - **Gas City.** Nothing under `cmd/` or `internal/` changes a PR's draft state.
   The PR monitor reads the draft flag only to class a draft as not actionable
@@ -164,22 +165,40 @@ head.
   required check, while a workflow that a filter skips leaves its checks
   pending ([Troubleshooting required status
   checks](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks)).
-  A check run carries its `conclusion`, `SKIPPED` among the values, whether the
-  PR's target requires it (`isRequired`), and its check suite, created with the
-  run: on PR #1469 the suite of the run that the ready transition started was
-  created two seconds after the event. A skipped run does not say what skipped
-  it: on PR #1468, the `test`, `test-macos` and `go` runs that its draft
-  skipped carry no title, summary or text.
+  A check run carries its `conclusion`, `SKIPPED` and `CANCELLED` among the
+  values, whether the PR's target requires it (`isRequired`), and its check
+  suite, created with the run: on PR #1469 the suite of the run that the ready
+  transition started was created two seconds after the event. A suite's default
+  read gives each check's latest result, so a re-run's result replaces the
+  attempt it re-ran, and the `ALL` filter lists the earlier attempts. A skipped
+  run does not say what skipped it: on PR #1468, the `test`, `test-macos` and
+  `go` runs that its draft skipped carry no title, summary, text or step. Nor
+  does anything GitHub records say which of the PR's activities started a run,
+  a push or the ready transition, or the draft flag in that event's payload,
+  which a job's condition reads (`github.event`, the payload of the event that
+  triggered the run, by the [Contexts
+  reference](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts#github-context)).
+  On PR #1468 the draft's run and the ready transition's run carry the same
+  `event` (`pull_request`), push, creator and title, and differ only in their
+  ids, run numbers, times and results. The GraphQL `WorkflowRun`, `CheckSuite`
+  and `CheckRun` types have no field for the activity or the flag, since
+  `WorkflowRun.event` names only the event. A suite's creation time trails its
+  event. GitHub takes the runs of a concurrency group
+  in the order each started waiting on it, not the time each was dispatched,
+  and does not guarantee that order. A run that joins the group cancels the one
+  waiting there, and with `cancel-in-progress` the one running ([Control the
+  concurrency of workflows and
+  jobs](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency)).
 
 What tk-1tfzr71.22 and unit 2 compose: gh's two transitions, which the loop
 makes before each round's first push and once the round's lanes pass, reading
-the draft flag first; and the evaluator's read of each required check's results
-at the head, with a skip from a check suite created before the PR's last
-`ReadyForReviewEvent` set aside. The gap the primitives leave is the tie between
-the draft and the city's rounds, which nothing upstream makes, and a skip from a
-draft standing in for a required check, which GitHub counts as a pass.
-`gctk pr status` grows that condition among the conditions not met. Each
-repository's workflows stay its own, through a bead per rig (the design's
+the draft flag first; and the evaluator's read of each required check's latest
+result in each check suite at the head, which counts no skip or cancellation and
+compares no times. The gap the primitives leave is the tie between the draft and
+the city's rounds, which nothing upstream makes, and a skip standing in for a
+required check, which GitHub counts as a pass and records nothing to tell from a
+draft's. `gctk pr status` grows that condition among the conditions not met.
+Each repository's workflows stay its own, through a bead per rig (the design's
 section 12).
 
 ## The landing order (unit 3)
@@ -394,8 +413,9 @@ carries `pr_number`, with `mr_merged` and `merged` as landed.
 - bd guards a write on a metadata value. The record's writers then write under
   that guard, and the record lock goes.
 - GitHub lets a workflow leave drafts out at its trigger, so a draft's required
-  checks stay pending rather than pass on a skip. The evaluator's set-aside of a
-  draft's skips then goes.
+  checks stay pending rather than pass on a skip, or records on a run the event
+  and the draft flag that started it. The evaluator then counts a skip that no
+  draft made, as GitHub counts it.
 - Gas City or Gas Town ties a PR's draft to the work on its branch. The loop's
   transitions then move onto that primitive.
 - Gas Town's find-work reads waits, Gas Town's refinery requeues through
