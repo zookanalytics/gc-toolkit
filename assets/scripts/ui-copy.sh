@@ -28,15 +28,17 @@
 # script leaves running in a new session. The leader runs the serve command,
 # runs the publish command whenever this script asks it to, and ends the whole
 # group when the serve command ends or a signal ends the leader, so no address
-# outlives its copy. A publish command that ends alone leaves the copy running
-# with no address until start publishes it again. A publish command that ends
-# within the settle window has refused the port, and its output decides what
-# follows. Tailscale's "please try again", printed while another client is
-# changing its serve config, is tried again on the same port. Tailscale's
-# "listener already exists for port", printed when another mapping holds the
-# port, moves the copy to another free port. Any other refusal leaves the copy
-# running with no address, and the report says why. This script never runs
-# `tailscale serve reset`, which would drop every mapping.
+# outlives its copy. It sends the group TERM, then KILL to any member still
+# running after the grace that stop allows, and it ends last, so a copy whose
+# leader is gone has nothing left running. A publish command that ends alone
+# leaves the copy running with no address until start publishes it again. A
+# publish command that ends within the settle window has refused the port, and
+# its output decides what follows. Tailscale's "please try again", printed while
+# another client is changing its serve config, is tried again on the same port.
+# Tailscale's "listener already exists for port", printed when another mapping
+# holds the port, moves the copy to another free port. Any other refusal leaves
+# the copy running with no address, and the report says why. This script never
+# runs `tailscale serve reset`, which would drop every mapping.
 #
 # A copy ends when its caller stops it. It also ends once the session that
 # started it has ended, through Gas City's orphan sweep, which this script
@@ -165,10 +167,10 @@ start_id() {
 }
 
 # --- the leader --------------------------------------------------------------
-# start writes these functions into the record as lead.sh, and the leader runs
-# them, so a copy keeps running the code it started with. The leader sets its
-# traps before it records its pid, so a signal this script sends once it reads
-# the pid reaches a trap.
+# start writes these functions into the record as lead.sh, with the stop grace
+# as UC_GRACE, and the leader runs them, so a copy keeps running the code it
+# started with. The leader sets its traps before it records its pid, so a
+# signal this script sends once it reads the pid reaches a trap.
 
 lead() { # <record dir>
   UC_DIR=$1
@@ -203,11 +205,30 @@ _lead_publish() {
 }
 
 # Ends the copy's whole process group, which holds the serve command and the
-# publish command, and then the leader.
+# publish command, and then the leader. A member that ignores TERM gets KILL
+# once the grace has passed, and the KILL ends the leader with it, so the
+# leader never ends while a member runs.
 _lead_end() {
+  local i=0
   trap '' HUP INT TERM USR1
   kill -TERM 0 2>/dev/null
+  while [ -n "$(_lead_members)" ] && [ "$i" -lt $((UC_GRACE * 5)) ]; do
+    sleep 0.2
+    i=$((i + 1))
+  done
+  [ -z "$(_lead_members)" ] || kill -KILL 0
   exit "$1"
+}
+
+# The members of the copy's group other than the leader, one pid per line. It
+# leaves out the subshell it runs in and that subshell's children, which are in
+# the group too, and a member that has ended and waits to be reaped. The
+# subshell's pid is read before the pipeline, since each part of a pipeline
+# reads BASHPID as its own.
+_lead_members() {
+  local me=$BASHPID
+  ps -A -o pgid=,pid=,ppid=,stat= 2>/dev/null |
+    awk -v g="$$" -v me="$me" '$1 == g && $2 != g && $2 != me && $3 != me && $4 !~ /^Z/ { print $2 }'
 }
 
 # --- the record --------------------------------------------------------------
@@ -475,7 +496,7 @@ os.execvp(sys.argv[1], sys.argv[1:])') ;;
       pattern=${pattern//\$\{PORT\}/$port}
       printf '%s\n' "${pattern//\$PORT/$port}" > "$REC/address"
     fi
-    { declare -f lead _lead_publish _lead_end start_id; printf 'lead "$@"\n'; } > "$REC/lead.sh"
+    { declare -f lead _lead_publish _lead_end _lead_members start_id; printf 'UC_GRACE=%s\nlead "$@"\n' "$STOP_GRACE"; } > "$REC/lead.sh"
     "${detach[@]}" "$leader" "$REC/lead.sh" "$REC" </dev/null >>"$REC/serve.log" 2>&1
     if ! await_leader "$REC" 15; then
       remove_record "$REC"

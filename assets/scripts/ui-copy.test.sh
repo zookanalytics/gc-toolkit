@@ -5,12 +5,13 @@
 # that the copy's leader leads a process group of its own and carries the
 # caller's session values where the orphan sweep reads them; that a publish
 # command which ends alone leaves the copy running with no address until start
-# publishes it again, and a copy that ends takes its publish command with it;
-# that a publish refused while another client changes the config is tried
-# again, and a port refused as taken moves the copy to another; that a city
-# with no publisher gets a copy with no address; and that stop ends the whole
-# group. Real processes. gc, the publish command and the free-port pick are
-# stubs, so no suite touches Tailscale, a city or node; python3 serves.
+# publishes it again, and a copy that ends takes its publish command with it,
+# one that ignores TERM included, before its leader ends; that a publish refused
+# while another client changes the config is tried again, and a port refused as
+# taken moves the copy to another; that a city with no publisher gets a copy
+# with no address; and that stop ends the whole group. Real processes. gc, the
+# publish command and the free-port pick are stubs, so no suite touches
+# Tailscale, a city or node; python3 serves.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -99,12 +100,14 @@ PY
 # The publish command, by mode: ok stays running; again-once refuses its first
 # run as Tailscale does while another client changes the serve config;
 # taken-first refuses the first port it is given as Tailscale refuses a port
-# another mapping holds; fails refuses for another reason. Each run logs its
-# mode and $PORT.
+# another mapping holds; fails refuses for another reason; ignores-term stays
+# running through TERM. Each run logs its mode and $PORT.
 cat >"$TMP/publish.sh" <<'SH'
 #!/usr/bin/env bash
 printf '%s %s\n' "$1" "$PORT" >>"${PUBLISHED:?}"
 case "$1" in
+  ignores-term)
+    trap '' TERM ;;
   again-once)
     if [ ! -e "$PUBLISHED.again" ]; then
       : >"$PUBLISHED.again"
@@ -250,6 +253,25 @@ OUT=$("$SCRIPT" start --tree "$TMP/a" --rig demo); RC=$?
 eq "$RC" 0 "a start for that tree runs a new copy"
 [ "$(leader "$OUT")" != "$L" ] && ok "under a new leader" || bad "under a new leader" "same leader $L"
 "$SCRIPT" stop --tree "$TMP/a" >/dev/null
+
+echo "── a publish command that ignores TERM ends before the copy's leader ──"
+: >"$PUBLISHED"
+OUT=$(UI_PUBLISH="$TMP/publish.sh ignores-term" "$SCRIPT" start --tree "$TMP/a" --rig demo --publish); RC=$?
+eq "$RC" 0 "start exits 0"
+L=$(leader "$OUT"); PUB=$(publisher_pid "$OUT")
+kill -TERM "$PUB" 2>/dev/null; sleep 0.5
+kill -0 "$PUB" 2>/dev/null && ok "the publish command stays running through TERM" || bad "the publish command stays running through TERM" "pid '$PUB'"
+SERVE_PID=$(ps -A -o pgid=,pid=,command= | awk -v g="$L" '$1 == g && /serve\.py/ { print $2 }' | head -1)
+[ -n "$SERVE_PID" ] && kill -TERM "$SERVE_PID"
+# The leader sends KILL once the stop grace, 10 seconds, has passed.
+for _ in $(seq 1 75); do kill -0 "$L" 2>/dev/null || break; sleep 0.2; done
+kill -0 "$L" 2>/dev/null && bad "the leader ended" "pid $L" || ok "the leader ended"
+kill -0 "$PUB" 2>/dev/null && bad "the publish command did not outlive it" "pid $PUB" || ok "the publish command did not outlive it"
+group_gone "$L" && ok "no member of the copy's group is left" || bad "no member of the copy's group is left" "$(members "$L")"
+OUT=$("$SCRIPT" stop --tree "$TMP/a"); RC=$?
+eq "$RC" 0 "a stop then exits 0"
+eq "$(field "$OUT" state)" none "it reports state=none"
+[ -n "$PUB" ] && kill -KILL "$PUB" 2>/dev/null
 
 echo "── a publish refused while another client changes the config is tried again ──"
 : >"$PUBLISHED"
