@@ -96,6 +96,18 @@ default = ""
 description = "\"true\" for a rig whose app reads the city, such as a rig that develops code for a city. A city sets it among the rig's [rigs.formula_vars] in city.toml, and a demo capture then refuses the rig's servers. Any value but \"false\" counts as \"true\". demo-engine-lib.sh reads it, and this formula's steps do not use it."
 default = "false"
 
+[vars.ui_serve_command]
+description = "The command that serves the rig's UI for a live copy, run from the root of the tree the copy shows with the copy's loopback port as $PORT. It serves the UI on fixture data with no city behind it, listens on loopback at $PORT, and takes nothing two copies would share. It is one value for every branch of the rig, so it names an entry point every branch carries. A city sets it among the rig's [rigs.formula_vars] in city.toml, and a rig that sets none offers no live copy. ui-copy.sh reads it, and this formula's steps do not use it."
+default = ""
+
+[vars.ui_publish_command]
+description = "The city's command that publishes a live copy's loopback port, $PORT, at an origin of its own for exactly as long as the command runs, such as a foreground `tailscale serve --yes --https=$PORT http://127.0.0.1:$PORT`. Gas City sets a formula var only for a rig, so a city sets it, with ui_address_pattern, among the [rigs.formula_vars] of each rig that offers a live copy, and a copy gets no address where either is unset. ui-copy.sh reads it, and this formula's steps do not use it."
+default = ""
+
+[vars.ui_address_pattern]
+description = "The address ui_publish_command gives a live copy, with $PORT or ${PORT} where the copy's port goes, such as https://<the host's tailnet name>:$PORT/. A city sets it beside ui_publish_command. ui-copy.sh reads it, and this formula's steps do not use it."
+default = ""
+
 [vars.binding_prefix]
 description = "The binding the city imports the pack under, with its trailing dot. A step drops the dot to call the pack's own scripts as gc <binding> scripts-dir prints them. Gas City's sling adds it to every pour it makes; a pour that names none takes this default."
 default = "gc-toolkit."
