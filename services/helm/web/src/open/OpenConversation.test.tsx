@@ -7,9 +7,9 @@ import { OpenConversation } from './OpenConversation';
 // failure says WHICH failure, and that nothing here claims to have attached the
 // operator to anything.
 //
-// Matchers are plain vitest and interaction is fireEvent, matching App.test.tsx
-// — this package carries neither jest-dom nor user-event, and the board's
-// bundle is committed, so a test-only dependency is not free here.
+// Matchers are plain vitest and interaction is fireEvent, matching the page's
+// own tests — this package carries neither jest-dom nor user-event, and the
+// board's bundle is committed, so a test-only dependency is not free here.
 
 const BEAD_ID = 'tk-eemvf.3';
 
@@ -176,8 +176,8 @@ describe('OpenConversation', () => {
     expect(text(alert)).toContain('502');
   });
 
-  // The drill panel stays mounted as the operator moves between tiles, so this
-  // component is handed a new beadId rather than being remounted. A result left
+  // The page's side panel can hand this component a new beadId rather than
+  // remounting it. A result left
   // over from the previous bead would then sit under the NEW bead's title,
   // telling the operator a conversation was opened on a row where it was not.
   it('drops a result when the panel is pointed at a different bead', async () => {

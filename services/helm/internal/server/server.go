@@ -55,6 +55,10 @@ type Server struct {
 	// flight coalesces concurrent cache misses into one gather, so a burst of
 	// board requests drives a single gather rather than one per request.
 	flight singleflight.Group
+
+	// rigBoard serves the rig board's routes, GET /helm/rigs and
+	// GET /helm/rigs/{rig}; nil leaves them answering 503 (see rigboard.go).
+	rigBoard *rigBoard
 }
 
 // An Option configures a Server at construction.
@@ -110,8 +114,9 @@ func New(src source.Source, ttl time.Duration, opts ...Option) *Server {
 
 // Handler returns the HTTP routes: GET /helm (and bare /) serve the board;
 // GET /healthz is the liveness probe (no gather); POST /helm/{open,accept,engage,
-// dismiss} are the write routes (see actuate.go). With [WithSPA] the bare mount
-// also serves the app shell to browsers, and its assets beneath.
+// dismiss} are the write routes (see actuate.go); GET /helm/rigs and
+// GET /helm/rigs/{rig} serve the rig board (see rigboard.go). With [WithSPA]
+// the bare mount also serves the app shell to browsers, and its assets beneath.
 //
 // Each write route is registered as its own exact pattern, which ServeMux prefers
 // over the "/" catch-all — so it reaches its handler rather than the SPA handler,
@@ -124,6 +129,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/helm/accept", s.handleAccept)
 	mux.HandleFunc("/helm/engage", s.handleEngage)
 	mux.HandleFunc("/helm/dismiss", s.handleDismiss)
+	mux.HandleFunc("GET /helm/rigs", s.handleRigs)
+	mux.HandleFunc("GET /helm/rigs/{rig}", s.handleRig)
 	mux.HandleFunc("/", s.handleRoot)
 	return mux
 }
@@ -224,6 +231,10 @@ func (s *Server) invalidateBoard() {
 	// releases its own lock before running a flight's function, so its Forget
 	// and Do never hold that lock while a gather takes s.mu.
 	s.flight.Forget("board")
+	if s.rigBoard != nil {
+		s.rigBoard.rigs.invalidate()
+		s.rigBoard.docs.invalidate()
+	}
 }
 
 // gatherTimeout bounds one gather. A healthy gather is a few seconds; this is

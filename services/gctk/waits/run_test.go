@@ -127,3 +127,32 @@ func TestPastLoadContextReadsTheRunsOpenSteps(t *testing.T) {
 		}
 	}
 }
+
+// IsRootOrStep reads a run's root, as isRoot reads one, and a step poured
+// under a root as a run's own beads, and no other bead.
+func TestIsRootOrStepReadsARunsOwnBeads(t *testing.T) {
+	s := fake.New()
+	for _, b := range []fake.Bead{
+		{ID: "graph", Status: "open", IssueType: "task", Metadata: map[string]string{"gc.formula_contract": "graph.v2"}},
+		{ID: "flow", Status: "open", IssueType: "task", Metadata: map[string]string{"gc.kind": "workflow"}},
+		{ID: "mol", Status: "open", IssueType: "molecule"},
+		{ID: "step", Status: "open", IssueType: "task", Metadata: map[string]string{"gc.root_bead_id": "graph"}},
+		{ID: "work", Status: "open", IssueType: "task", Metadata: map[string]string{"gc.routed_to": "human"}},
+		{ID: "convoy", Status: "open", IssueType: "convoy"},
+	} {
+		s.Put(b)
+	}
+	recs, err := ledger.New(s).Find(ledger.Every())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var own []string
+	for _, r := range recs {
+		if IsRootOrStep(r) {
+			own = append(own, r.ID)
+		}
+	}
+	if want := []string{"flow", "graph", "mol", "step"}; !slices.Equal(own, want) {
+		t.Errorf("a run's own beads = %v, want %v", own, want)
+	}
+}
