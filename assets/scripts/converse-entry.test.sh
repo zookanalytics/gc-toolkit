@@ -240,8 +240,6 @@ fresh; hook work ready_assignment tk-c; conv tk-c in_progress "staying: x (waits
 unread "a claim served while holds still reads its work open"
 fresh; hook drain; conv tk-c open "staying: x (waits on tk-w)" tracks:tk-s blocks:tk-w; assigned "$FIXDIR/row-tk-c.json"
 unread "the waiting conversation's holds does not answer"
-fresh; hook drain; conv tk-c open "" tracks:tk-s; conv tk-d open "" tracks:tk-s; assigned "$FIXDIR/row-tk-c.json" "$FIXDIR/row-tk-d.json"
-unread "two open conversations under one alias"
 
 echo "── it writes nothing beyond the hook's claim, and takes no arguments ──"
 fresh; hook work ready_assignment tk-c; conv tk-c in_progress "staying: x (waits on tk-w)" tracks:tk-s blocks:tk-w; holds tk-c

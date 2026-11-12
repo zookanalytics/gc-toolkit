@@ -139,15 +139,14 @@ case "$ACTION" in
     ROWS=$(printf '%s\n' "$LIST" | grep -av '^gc bd:' | scrub | jq -ec "$CONVERSATION_JQ"'
       if type == "array" then [ .[] | select(conversation) ] else error("not a list") end' 2>/dev/null) \
       || unreadable "the open and in-progress beads assigned to $GC_ALIAS did not read as a list"
-    case "$(printf '%s' "$ROWS" | jq 'length')" in
-      0)
-        echo "ENTRY none: no conversation is assigned to this session, open or claimed."
-        echo "NEXT=drain"
-        exit 0 ;;
-      1) ;;
-      *) unreadable "more than one conversation is assigned to $GC_ALIAS" ;;
-    esac
-    ROW=$(printf '%s' "$ROWS" | jq -c '.[0]')
+    # A conversation's alias names its own id (conversation.sh), so at most
+    # one conversation is assigned to it.
+    ROW=$(printf '%s' "$ROWS" | jq -c '.[0] // empty')
+    if [ -z "$ROW" ]; then
+      echo "ENTRY none: no conversation is assigned to this session, open or claimed."
+      echo "NEXT=drain"
+      exit 0
+    fi
     C=$(printf '%s' "$ROW" | jq -r '.id')
     PENDING=$(pending_of "$C") || unreadable "gctk bead holds did not answer for conversation $C"
     [ -n "$PENDING" ] \

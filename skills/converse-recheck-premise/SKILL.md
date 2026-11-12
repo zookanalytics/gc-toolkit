@@ -18,7 +18,7 @@ description of each gate it replies to, the entry's `GATES`:
 
 ```bash
 gc bd show "$CONVERSATION"
-gc bd show <each gate the entry's GATES names>
+gc bd show <each gate GATES names>
 ```
 
 Their stated conditions are the premise, often bulleted literally, such as
