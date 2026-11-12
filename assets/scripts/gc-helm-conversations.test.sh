@@ -160,7 +160,8 @@ seed() {
     {id:"s4", alias:"gc-toolkit/gc-toolkit.polecat-1", session_name:"s-s4", state:"active", attached:false, created_at:"2026-11-08T09:00:00Z", template:"gc-toolkit/gc-toolkit.polecat"},
     {id:"s5", alias:"gc-toolkit.mechanik", session_name:"gc-toolkit__mechanik", state:"active", attached:true, created_at:"2026-08-31T04:11:47Z", template:"gc-toolkit.mechanik"},
     {id:"s6", alias:"gascity/gc-toolkit.po", session_name:"gascity--gc-toolkit__po", state:"asleep", attached:false, created_at:"2026-11-08T08:00:00Z", template:"gascity/gc-toolkit.po"},
-    {id:"s7", alias:"docs/gc-toolkit.po", session_name:"docs--gc-toolkit__po", state:"closed", closed:true, attached:false, created_at:"2026-11-07T08:00:00Z", template:"docs/gc-toolkit.po"}]}' > "$STATE/sessions.json"
+    {id:"s7", alias:"docs/gc-toolkit.po", session_name:"docs--gc-toolkit__po", state:"closed", attached:false, created_at:"2026-11-07T08:00:00Z", template:"docs/gc-toolkit.po"},
+    {id:"s8", alias:"gc-toolkit/gc-toolkit.po", session_name:"gc-toolkit--gc-toolkit__po", state:"asleep", closed:true, attached:false, created_at:"2026-11-07T09:00:00Z", template:"gc-toolkit/gc-toolkit.po"}]}' > "$STATE/sessions.json"
   jq -n '[
     {id:"tk-subj", issue_type:"task", status:"open", title:"the subject"},
     {id:"tk-shut", issue_type:"task", status:"closed", title:"a closed subject"},
@@ -205,7 +206,7 @@ eq "$(printf '%s' "$OUT" | jq -c '[.rigs[] | .prefix]')" '["tk","gc","dx"]' "(CI
 eq "$(printf '%s' "$OUT" | jq -c '.unread')" '[]' "(CITY) …and no store unread"
 eq "$(printf '%s' "$OUT" | jq -c '[.seats[] | [.seat, .rig, (.session | if . == null then null else [.id, .state, .attached] end)]]')" \
   '[["mechanik","",["s5","active",true]],["po","gc-toolkit",null],["po","gascity",["s6","asleep",false]],["po","docs",null]]' \
-  "(CITY-SEATS) mechanik, then each rig's po but the city's own store's, each with its open session or none"
+  "(CITY-SEATS) mechanik, then each rig's po but the city's own store's, each with its open session or none, a closed one by its flag or its state counting as none"
 eq "$(printf '%s' "$OUT" | jq -c '.seats[0].session | {name, created_at}')" '{"name":"gc-toolkit__mechanik","created_at":"2026-08-31T04:11:47Z"}' "(CITY-SEATS) …a session with its name and when it was created"
 eq "$(grep -c '^session list' "$CALLS")" 1 "(CITY-SEATS) …from the one session list the conversations were read from"
 
