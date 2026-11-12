@@ -2,12 +2,14 @@
 # bd-lib.sh — the guarded reads of the bead store, shared by every script that
 # queries it, the read of a bead's human gates every reader of them makes and
 # the order its open gates under one key are read in, the read of the bead a
-# disposed bead names, whether two bead ids name one store, the checked create,
-# metadata repair and unmake that code the deletion plan retires still files
-# through, the birth, settle and route of PR-finishing work, the validation
-# pass's work order, the gating-PR read's field set, the per-rig key an order's
-# state lives under, the pass lock that lets an order run one pass at a time,
-# and warn and die, which a script reports through. Sourced, never executed.
+# disposed bead names, the names this session goes by and the check that the
+# step it claimed is the step a script is running, whether two bead ids name one
+# store, the checked create, metadata repair and unmake that code the deletion
+# plan retires still files through, the birth, settle and route of PR-finishing
+# work, the validation pass's work order, the gating-PR read's field set, the
+# per-rig key an order's state lives under, the pass lock that lets an order run
+# one pass at a time, and warn and die, which a script reports through. Sourced,
+# never executed.
 #
 # A caller resolves this file beside itself and sources it:
 #   # shellcheck source=bd-lib.sh
@@ -73,6 +75,81 @@ bd_json() {
 # as a string. A key that is absent and a row that will not parse both read as
 # empty.
 row_meta() { printf '%s' "$1" | jq -r --arg k "$2" '(.[0].metadata[$k] // "") | tostring' 2>/dev/null; }
+
+# session_identities — the names this session goes by, one per line, each once:
+# GC_ALIAS, GC_SESSION_ID, GC_SESSION_NAME and GC_AGENT, those that are set. A
+# bead whose assignee is one of them is this session's. Gas City records a claim
+# under the alias, else the session id, hands a session the work assigned to its
+# id, its name or its alias, and sets GC_AGENT to the alias or the id. Prints
+# nothing when none is set.
+session_identities() {
+  printf '%s\n' "${GC_ALIAS:-}" "${GC_SESSION_ID:-}" "${GC_SESSION_NAME:-}" "${GC_AGENT:-}" | awk 'NF && !seen[$0]++'
+}
+
+# claimed_step <ref> [<db>] — whether the bead `gc hook current` names for this
+# session is the step <ref>, held by this session: the check a script makes
+# before it writes to the step it is running. <ref> is a step's gc.step_ref, or
+# a check loop's name, whose iterations carry <ref>.iteration.<n>. <db> is the
+# store to read the bead from, for a caller that names one. The step is held
+# here when its assignee is one of session_identities.
+#
+# It sets CLAIMED_ID, CLAIMED_ROW (the bead's `gc bd show` array), CLAIMED_REF,
+# CLAIMED_STATUS and CLAIMED_ASSIGNEE as far as it read them, and CLAIMED_WHY to
+# why it returned non-zero, a clause a caller ends with what it did not do.
+#   0  the claim is the step <ref>, and this session holds it;
+#   1  not read, so running again can change that: gc hook current named no
+#      bead, and CLAIMED_ID is empty, or the bead it named did not read. gc hook
+#      current exits 1 both when the session has claimed nothing and when its own
+#      read fails, so CLAIMED_WHY carries its exit status and what it printed on
+#      stderr rather than a cause;
+#   2  the claim is another step, or no step;
+#   3  the claim is the step <ref>, and this session does not hold it.
+# shellcheck disable=SC2034  # CLAIMED_* are read by the scripts that source this file
+claimed_step() {
+  local ref="${1:-}" db="${2:-}" out errf err="" rc=0
+  CLAIMED_ID=""; CLAIMED_ROW=""; CLAIMED_REF=""; CLAIMED_STATUS=""; CLAIMED_ASSIGNEE=""; CLAIMED_WHY=""
+  if [ -z "$ref" ]; then
+    CLAIMED_WHY="no step was named to check this session's claim against"
+    return 2
+  fi
+  errf=$(mktemp "${TMPDIR:-/tmp}/gctk-claimed-step.XXXXXX" 2>/dev/null) || errf=""
+  out=$(gc hook current --id-only </dev/null 2>"${errf:-/dev/null}") || rc=$?
+  if [ -n "$errf" ]; then
+    err=$(awk 'NF { printf "%s%s", s, $0; s = " " }' "$errf" 2>/dev/null)
+    rm -f "$errf"
+  fi
+  CLAIMED_ID=$(printf '%s\n' "$out" | awk 'NF { id = $1 } END { print id }')
+  if [ "$rc" -ne 0 ] || [ -z "$CLAIMED_ID" ]; then
+    CLAIMED_ID=""
+    CLAIMED_WHY="gc hook current exited $rc without naming a claim${err:+ (it said: $err)}"
+    return 1
+  fi
+  # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+  CLAIMED_ROW=$(bd_json show "$CLAIMED_ID" ${db:+--db "$db"})
+  if ! printf '%s' "$CLAIMED_ROW" | jq -e --arg id "$CLAIMED_ID" 'type == "array" and .[0].id == $id' >/dev/null 2>&1; then
+    CLAIMED_ROW=""
+    CLAIMED_WHY="could not read $CLAIMED_ID, the bead gc hook current names"
+    return 1
+  fi
+  CLAIMED_REF=$(row_meta "$CLAIMED_ROW" gc.step_ref)
+  CLAIMED_STATUS=$(printf '%s' "$CLAIMED_ROW" | jq -r '.[0].status // ""' 2>/dev/null)
+  CLAIMED_ASSIGNEE=$(printf '%s' "$CLAIMED_ROW" | jq -r '.[0].assignee // ""' 2>/dev/null)
+  case "$CLAIMED_REF" in
+    "$ref"|"$ref".iteration.*) ;;
+    *)
+      CLAIMED_WHY="this session's current claim is $CLAIMED_ID (${CLAIMED_REF:-not a formula step}), not $ref"
+      return 2 ;;
+  esac
+  if [ -z "$CLAIMED_ASSIGNEE" ]; then
+    CLAIMED_WHY="$CLAIMED_ID ($CLAIMED_REF) has no assignee, so this session no longer holds it"
+    return 3
+  fi
+  if ! grep -qxF -- "$CLAIMED_ASSIGNEE" <<< "$(session_identities)"; then
+    CLAIMED_WHY="$CLAIMED_ID ($CLAIMED_REF) is held by $CLAIMED_ASSIGNEE, not this session"
+    return 3
+  fi
+  return 0
+}
 
 # bd_list memoization — opt-in, off by default.
 #

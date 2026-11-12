@@ -613,12 +613,12 @@ _city_key=$(printf '%s' "${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-default}}}" 
 CACHE_FILE="$CACHE_DIR/board2-$_city_key.ndjson"
 bust_cache() { rm -f "$CACHE_FILE" 2>/dev/null || true; }
 
-# The spellings a bead's assignee can carry for THIS session, one per line —
-# the same three run-cancel.sh checks a held step's assignee against, and the
-# same set the claim hook matches when a respawn adopts a hold. Empty when none
-# is set.
+# The names this session goes by, one per line, which a bead's assignee carries
+# when the bead is this session's: the names bd-lib.sh's session_identities
+# prints, which claim-close.sh and run-cancel.sh hold a step under, copied
+# because this sh script cannot source that bash library. Empty when none is set.
 session_identities() {
-    printf '%s\n%s\n%s\n' "${GC_SESSION_NAME:-}" "${GC_SESSION_ID:-}" "${GC_ALIAS:-}" | grep -v '^$' || true
+    printf '%s\n' "${GC_ALIAS:-}" "${GC_SESSION_ID:-}" "${GC_SESSION_NAME:-}" "${GC_AGENT:-}" | awk 'NF && !seen[$0]++'
 }
 
 # ── Human gates, conversations and sittings ─────────────────────────
@@ -3142,7 +3142,7 @@ SITTING_CONV=""; SITTING_SUBJECT=""
 current_sitting() {
     _me=$(session_identities)
     if [ -z "$_me" ]; then
-        echo "$PROG: no session identity in the environment (GC_SESSION_NAME, GC_SESSION_ID, GC_ALIAS all unset); there is no sitting to infer. Name the subject: $PROG dismiss <bead-id>." >&2
+        echo "$PROG: no session identity in the environment (GC_ALIAS, GC_SESSION_ID, GC_SESSION_NAME and GC_AGENT all unset); there is no sitting to infer. Name the subject: $PROG dismiss <bead-id>." >&2
         return 2
     fi
     # Pin the lookup at THIS session's rig store. An unresolved rig leaves the

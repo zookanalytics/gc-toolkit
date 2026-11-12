@@ -22,10 +22,15 @@
 # worker writes, and the script writes no other member of the molecule.
 #
 # --step names the run by the step this shell is executing: the bead `gc hook
-# current` names, when it verifies as this session's bead for that gc.step_ref,
-# and that bead's gc.root_bead_id. The script accepts a --bead argument and
-# ignores it, because mol-validate's step text passes one, always empty. --root
-# names the run directly, for a caller that holds no step of it.
+# current` names, once bd-lib.sh's claimed_step shows it is that gc.step_ref and
+# this session holds it, the check claim-close.sh makes before a close, and that
+# bead's gc.root_bead_id. When the claim cannot be read, the run is not ended,
+# since running again can change that, and the refusal carries gc hook current's
+# exit status and stderr. The script accepts a --bead argument and does not read
+# it, because mol-validate's step text passes one, always empty. A --bead that
+# names a bead other than the claim is reported, so a call by hand leaves a
+# record of the id it was given. --root names the run directly, for a caller
+# that holds no step of it.
 #
 # A run whose root is already closed is not cancelled, because gascity's cancel
 # leaves a terminal run's members as they are and answers 409. A 409 for a root
@@ -70,14 +75,16 @@ usage: run-cancel.sh --step <formula.step-id> --reason "<text>" [--dry-run]
   --root     the run's root bead, for a caller that holds no step of it.
   --reason   why the run ends; appended to the held step in --step mode once
              the run has ended, and printed on the result line (required)
-  --bead     accepted and ignored: mol-validate's step text passes one. The
-             step is the one `gc hook current` names.
+  --bead     accepted and not read: mol-validate's step text passes one. The
+             step is the one `gc hook current` names, and a --bead that names
+             another bead is reported.
   --ended    the caller read the root as closed: close only what the run left
              open, and refuse a root that reads live rather than cancel it.
   --db       the store the run's beads live in, for a caller outside it.
   --dry-run  resolve and report; write nothing and send nothing.
 
-env: GC_SESSION_NAME, GC_SESSION_ID, GC_ALIAS name the session in --step mode.
+env: GC_ALIAS, GC_SESSION_ID, GC_SESSION_NAME and GC_AGENT name the session in
+     --step mode, and gc hook current reads GC_SESSION_ID.
      GC_CITY_PATH (or GC_CITY, GC_CITY_ROOT) names the city, else `gc status`
      does; GC_HOME holds supervisor.toml and cities.toml.
 
@@ -100,14 +107,14 @@ require_value() {
   esac
 }
 
-STEP=""; ROOT=""; REASON=""; ENDED=0; DB=""; DRY_RUN=0
+STEP=""; ROOT=""; REASON=""; HINT=""; ENDED=0; DB=""; DRY_RUN=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --step)    require_value "$@"; STEP="$2";   shift 2 ;;
     --root)    require_value "$@"; ROOT="$2";   shift 2 ;;
     --reason)  require_value "$@"; REASON="$2"; shift 2 ;;
-    --bead)    require_value "$@"; shift 2 ;;
+    --bead)    require_value "$@"; HINT="$2"; shift 2 ;;
     --ended)   ENDED=1; shift ;;
     --db)      require_value "$@"; DB="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
@@ -165,39 +172,32 @@ bd_json_array() { # <bd args...> -> the array on stdout; non-zero on a failed re
 
 TARGET=""
 if [ -n "$STEP" ]; then
-  IDENTITIES=$(printf '%s\n%s\n%s\n' \
-    "${GC_SESSION_NAME:-}" "${GC_SESSION_ID:-}" "${GC_ALIAS:-}" | awk 'NF && !seen[$0]++')
+  IDENTITIES=$(session_identities)
   if [ -z "$IDENTITIES" ]; then
-    echo "$PROG: no session identity in the environment (GC_SESSION_NAME, GC_SESSION_ID, GC_ALIAS all unset), so no step can be proven this session's; nothing was cancelled" >&2
+    echo "$PROG: no session identity in the environment (GC_ALIAS, GC_SESSION_ID, GC_SESSION_NAME and GC_AGENT all unset), so no step can be proven this session's; nothing was cancelled" >&2
     exit 2
   fi
 
-  # `index` is exact element equality; `inside` and `contains` match
-  # substrings, which would let session hq-zzk own hq-zzk9's bead.
-  verify() { # <id> -> its status when it is this session's bead for $STEP
-    local json
-    [ -n "$1" ] || return 1
-    # shellcheck disable=SC2086  # ${DB:+--db "$DB"} expands to 0 or 2 space-free fields
-    json=$(bd_json show "$1" ${DB:+--db "$DB"})
-    [ -n "$json" ] || return 1
-    printf '%s' "$json" | jq -r --arg step "$STEP" --arg ids "$IDENTITIES" '
-      ($ids | split("\n") | map(select(. != ""))) as $me
-      | .[0] as $b
-      | if $b == null then empty
-        elif ((($b.metadata["gc.step_ref"] // "") == $step or (($b.metadata["gc.step_ref"] // "") | startswith($step + ".iteration."))) | not) then empty
-        elif (($me | index($b.assignee // "")) == null) then empty
-        else ($b.status // "") end
-    ' 2>/dev/null
-  }
-
-  CLAIM=$(gc hook current --id-only </dev/null 2>/dev/null) || CLAIM=""
-  case "$(verify "$CLAIM")" in
-    in_progress|open|blocked|closed) TARGET="$CLAIM" ;;
+  claimed_step "$STEP" "$DB"; HELD=$?
+  if [ -n "$HINT" ] && [ "$HINT" != "$CLAIMED_ID" ]; then
+    echo "$PROG: NOTE: --bead '$HINT' is not read; the step is the one gc hook current names${CLAIMED_ID:+, $CLAIMED_ID}" >&2
+  fi
+  NOT_IDENTIFIED="$PROG: cannot identify this session's bead for step '$STEP'"
+  case "$HELD" in
+    0) ;;
+    1)
+      echo "$NOT_IDENTIFIED: $CLAIMED_WHY; nothing was cancelled" >&2
+      exit 1 ;;
+    *)
+      echo "$NOT_IDENTIFIED: $CLAIMED_WHY (identities tried: $(printf '%s' "$IDENTITIES" | tr '\n' ' ')); nothing was cancelled" >&2
+      exit 2 ;;
   esac
-  if [ -z "$TARGET" ]; then
-    echo "$PROG: cannot identify this session's bead for step '$STEP': gc hook current names ${CLAIM:-no bead}, which is not this session's bead for that step (identities tried: $(printf '%s' "$IDENTITIES" | tr '\n' ' ')); nothing was cancelled" >&2
-    exit 2
-  fi
+  case "$CLAIMED_STATUS" in
+    in_progress|open|blocked|closed) TARGET="$CLAIMED_ID" ;;
+    *)
+      echo "$NOT_IDENTIFIED: $CLAIMED_ID ($CLAIMED_REF) is ${CLAIMED_STATUS:-without a status}; nothing was cancelled" >&2
+      exit 2 ;;
+  esac
   # shellcheck disable=SC2086  # ${DB:+--db "$DB"} expands to 0 or 2 space-free fields
   if ! TARGET_JSON=$(bd_json_array show "$TARGET" ${DB:+--db "$DB"}); then
     echo "$PROG: could not read $TARGET to find its run; nothing was cancelled" >&2

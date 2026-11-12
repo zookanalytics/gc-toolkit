@@ -15,8 +15,12 @@
 #     requires on a mutation, for the city cities.toml registers at
 #     $GC_CITY_PATH;
 #   * --step resolves the run from the step `gc hook current` names, once that
-#     step shows it is this session's, and ignores --bead; --root takes the run
-#     as given;
+#     step shows it is this session's under any name it goes by, GC_AGENT
+#     included; a --bead is not read, and one that names another bead is
+#     reported; --root takes the run as given;
+#   * a CLAIM NOT READ: gc hook current exits 1 both for no claim and for a read
+#     that failed, so either is a run not ended, reported with gc's exit status
+#     and its own words, with no request and no write;
 #   * NOT STARTED BEFORE THE CANCEL: in --step mode a held step that reads
 #     in_progress goes back to open, its assignee kept, in one write guarded on
 #     that status and assignee, before the request; when the request is sent no
@@ -35,9 +39,9 @@
 #     ended; a 5xx or a failed connection is retried and then not ended;
 #   * the CITY: GC_CITY_PATH names it, else `gc status`, so a caller outside a
 #     session (an operator's shell running gc-helm.sh) reaches the same city;
-#   * refusals with no request and no write: no identity, no claim, a claim that
-#     is not this session's step, a step naming no root, a bead that is not a
-#     workflow root, usage errors;
+#   * refusals with no request and no write: no identity, a claim that is not
+#     this session's step, a step naming no root, a bead that is not a workflow
+#     root, usage errors;
 #   * the SUBSTRING trap: session hq-zzk must not own hq-zzk9's bead.
 #
 # No live city, Dolt, network, or beads: a tmpdir, a `gc` stub over a JSON
@@ -77,7 +81,8 @@ mkdir -p "$TMP/bin" "$TMP/home"
 #               under that assignee, from the read after the first
 #               $FAKE_SHOW_MOVE_AFTER reads of it when that is set, the way a
 #               claim that moved between two reads looks.
-# `hook current`: answers $FAKE_HOOK_CURRENT, or fails when it is empty.
+# `hook current`: answers $FAKE_HOOK_CURRENT, or fails when it is empty, saying
+#               $FAKE_HOOK_SAYS on stderr when that is set.
 # `convoy delete <root> --force` : closes every live bead whose
 #               gc.root_bead_id is <root>, or exits $FAKE_DELETE_RC.
 # `status`    : answers $FAKE_STATUS, or fails when it is unset.
@@ -98,7 +103,7 @@ if [ "${1:-}" = "status" ]; then
   printf '%s\n' "$FAKE_STATUS"; exit 0
 fi
 if [ "${1:-} ${2:-}" = "hook current" ]; then
-  [ -n "${FAKE_HOOK_CURRENT:-}" ] || { echo "gc hook current: no claim (stub)" >&2; exit 1; }
+  [ -n "${FAKE_HOOK_CURRENT:-}" ] || { echo "${FAKE_HOOK_SAYS:-gc hook current: no claim (stub)}" >&2; exit 1; }
   printf '%s\n' "$FAKE_HOOK_CURRENT"; exit 0
 fi
 [ "${1:-}" = "bd" ] || { echo "gc stub: unsupported '$*'" >&2; exit 2; }
@@ -302,6 +307,13 @@ eq "$RC" 0 "a step held under this session's alias: the run is cancelled"
 has "$(writes)" "bd update tk-lc --if-status=in_progress --if-assignee=$HICKS --status=open" "…and the step goes back to not started under a guard on the alias it is held by"
 eq "$(holders)|$(bassignee tk-lc)" "[]|$HICKS" "…so no started step names this session when the cancel is sent, and the alias stays its assignee"
 
+# A step held under GC_AGENT is this session's, as claim-close.sh reads it.
+reset
+jq -c 'map(if .id == "tk-lc" then .assignee = "agent-name" else . end)' "$FAKE_STORE" > "$FAKE_STORE.n" && mv "$FAKE_STORE.n" "$FAKE_STORE"
+OUT=$(GC_AGENT=agent-name "$SCRIPT" --step "$STEP" --reason r 2>&1); RC=$?
+eq "$RC" 0 "a step held under GC_AGENT: the run is cancelled"
+has "$(writes)" "bd update tk-lc --if-status=in_progress --if-assignee=agent-name --status=open" "…and the step goes back to not started under a guard on that name"
+
 reset '503 {"status":503,"detail":"run cancel failed: store busy"}'
 run --step "$STEP" --reason r
 eq "$RC" 1 "--step, a cancel that does not land after the step went back to not started: not ended"
@@ -316,7 +328,7 @@ has "$(cat "$CURL_LOG")" "POST $URL " "--root: POST to the named run"
 eq "$(writes)" "" "--root: nothing is written"
 eq "$(holders)" "[\"$MINE\"]" "--root: a step a session has started is still its holder when the cancel is sent"
 
-# ── 3. the claim names the step; --bead is accepted and ignored ─────────────
+# ── 3. the claim names the step; --bead is accepted and not read ────────────
 reset
 cat > "$TMP/store2.json" <<JSON
 [
@@ -332,24 +344,38 @@ eq "$RC" 0 "claim: gc hook current names which of two same-step beads this sessi
 has "$(cat "$CURL_LOG")" "/runs/tk-rootB/cancel" "claim: the claimed step's root is cancelled (a graph.v2-contract root counts)"
 cp "$TMP/store2.json" "$FAKE_STORE"; : > "$CURL_LOG"; : > "$GC_LOG"
 OUT=$(FAKE_HOOK_CURRENT=tk-a "$SCRIPT" --step "$STEP" --bead tk-b --reason r 2>&1); RC=$?
-eq "$RC" 0 "--bead is accepted and ignored: the claim names the step"
+eq "$RC" 0 "--bead is accepted and not read: the claim names the step"
 has "$(cat "$CURL_LOG")" "/runs/tk-rootA/cancel" "--bead: the claimed step's root is cancelled, not the root of the bead --bead names"
+has "$OUT" "NOTE: --bead 'tk-b' is not read; the step is the one gc hook current names, tk-a" \
+  "--bead: one that names another bead is reported, with the claim that names the step"
+cp "$TMP/store2.json" "$FAKE_STORE"; : > "$CURL_LOG"; : > "$GC_LOG"
+OUT=$(FAKE_HOOK_CURRENT=tk-a "$SCRIPT" --step "$STEP" --bead tk-a --reason r 2>&1); RC=$?
+eq "$RC" 0 "--bead naming the claimed step: the run is cancelled"
+hasnt "$OUT" "NOTE: --bead" "…and nothing is reported"
 cp "$TMP/store2.json" "$FAKE_STORE"; : > "$CURL_LOG"; : > "$GC_LOG"
 OUT=$(FAKE_HOOK_CURRENT=tk-rootA "$SCRIPT" --step "$STEP" --reason r 2>&1); RC=$?
 eq "$RC" 2 "claim: a current claim that is not this step is refused"
-has "$OUT" "gc hook current names tk-rootA, which is not this session's bead for that step" "…naming the claim it read"
+has "$OUT" "this session's current claim is tk-rootA (not a formula step), not $STEP" "…naming the claim it read"
 eq "$(calls)|$(writes)" "0|" "…with no request and no write"
 cp "$TMP/store2.json" "$FAKE_STORE"; : > "$CURL_LOG"; : > "$GC_LOG"
-OUT=$(FAKE_HOOK_CURRENT='' "$SCRIPT" --step "$STEP" --reason r 2>&1); RC=$?
-eq "$RC" 2 "no claim: refused, though two beads in the store are this session's for the step"
-has "$OUT" "gc hook current names no bead" "no claim: says so"
+OUT=$(FAKE_HOOK_CURRENT='' "$SCRIPT" --step "$STEP" --bead tk-b --reason r 2>&1); RC=$?
+eq "$RC" 1 "no claim: not ended, though two beads in the store are this session's for the step"
+has "$OUT" "gc hook current exited 1 without naming a claim (it said: gc hook current: no claim (stub)); nothing was cancelled" \
+  "no claim: carries gc hook current's exit status and its own words"
+has "$OUT" "NOTE: --bead 'tk-b' is not read; the step is the one gc hook current names" "no claim: a --bead it was given is still reported"
 eq "$(calls)|$(writes)" "0|" "no claim: no request and no write"
+cp "$TMP/store2.json" "$FAKE_STORE"; : > "$CURL_LOG"; : > "$GC_LOG"
+OUT=$(FAKE_HOOK_CURRENT='' FAKE_HOOK_SAYS="gc hook current: open session store: connection refused" "$SCRIPT" --step "$STEP" --reason r 2>&1); RC=$?
+eq "$RC" 1 "a failed read of the claim: not ended, so the step stays claimed and a retry can end it"
+has "$OUT" "(it said: gc hook current: open session store: connection refused)" "…and the refusal names the read's own failure"
+eq "$(calls)|$(writes)" "0|" "…with no request and no write"
 
 # mol-validate's step text passes --bead with an empty value.
 reset
 run --step "$STEP" --bead "" --reason r
 eq "$RC" 0 "an empty --bead, as mol-validate's step text passes it, is accepted"
 has "$(cat "$CURL_LOG")" "/runs/tk-root/cancel" "…and the claimed step's run is cancelled"
+hasnt "$OUT" "NOTE: --bead" "…and nothing is reported about it"
 
 # ── 3b. a check loop's step is named by the loop ─────────────────────────────
 cat > "$FAKE_STORE" <<JSON

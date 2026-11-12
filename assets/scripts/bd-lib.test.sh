@@ -14,9 +14,13 @@
 # the metadata read it shares with them, bd_gates_open_under_key, the order
 # every writer and reader of one situation's human gates reads them in, and
 # $DISPOSITION_JQ, the one reading of a disposition, are pinned first; they read
-# no store. bd_disposed_to, its store read, follows them. The readers that judge
-# a gate by $HUMAN_GATE_JQ are checked last, for sourcing it rather than copying
-# it.
+# no store. bd_disposed_to, its store read, follows them. session_identities and
+# claimed_step, the check a script makes on the step this session claimed, come
+# after row_meta; a shell function named gc answers claimed_step's `gc hook
+# current` and hands every other call to the stub. The readers that judge a gate
+# by $HUMAN_GATE_JQ are checked last, for sourcing it rather than copying it, and
+# the scripts that check a claimed step, for making that check through
+# claimed_step.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-bd-lib-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
@@ -49,6 +53,75 @@ eq "$(row_meta "$ROW" pr_number)" "42" "…a number as its string"
 eq "$(row_meta "$ROW" gc.routed_to)" "rig/pool" "…a dotted key whole"
 eq "$(row_meta "$ROW" target)" "" "…an absent key as empty"
 eq "$(row_meta '{"error":"no issues found"}' branch)" "" "…and a row that is not a show array as empty"
+
+# --- session_identities: the names this session goes by, each once ------------
+eq "$(GC_ALIAS=al GC_SESSION_ID=sid GC_SESSION_NAME=sn GC_AGENT=ag session_identities | paste -sd, -)" "al,sid,sn,ag" \
+  "session_identities: the alias, the session id, the session name and GC_AGENT, in that order"
+eq "$(GC_SESSION_ID=sid GC_SESSION_NAME=sn GC_AGENT=sid session_identities | paste -sd, -)" "sid,sn" \
+  "…each name once, as a pool session's GC_AGENT repeats its id"
+eq "$(session_identities)" "" "…and nothing when none is set"
+
+# --- claimed_step: the claim gc hook current names, its step and its holder ----
+# gc hook current answers $HOOK_CLAIM, or exits 1 with $HOOK_SAYS on stderr, as
+# gc does both for a session that claimed nothing and for a read that failed.
+gc() {
+  if [ "${1:-} ${2:-}" = "hook current" ]; then
+    [ -n "${HOOK_CLAIM:-}" ] || { echo "${HOOK_SAYS:-gc hook current: session s-me has no current claim (nothing claimed through gc hook --claim)}" >&2; return 1; }
+    printf '%s\n' "$HOOK_CLAIM"; return 0
+  fi
+  command gc "$@"
+}
+check_claim() { HOOK_CLAIM="$1"; claimed_step "$2"; CRC=$?; }
+store '[
+ {"id":"st-1","status":"in_progress","assignee":"s-me","metadata":{"gc.step_ref":"mol-x.load"}},
+ {"id":"st-it","status":"in_progress","assignee":"s-me","metadata":{"gc.step_ref":"self-review.iteration.2"}},
+ {"id":"st-9","status":"in_progress","assignee":"s-me9","metadata":{"gc.step_ref":"mol-x.load"}},
+ {"id":"st-free","status":"open","assignee":"","metadata":{"gc.step_ref":"mol-x.load"}},
+ {"id":"plain","status":"in_progress","assignee":"s-me","metadata":{}}
+]'
+export GC_SESSION_ID=s-me
+check_claim st-1 mol-x.load
+eq "$CRC|$CLAIMED_ID|$CLAIMED_REF|$CLAIMED_STATUS|$CLAIMED_ASSIGNEE|$CLAIMED_WHY" "0|st-1|mol-x.load|in_progress|s-me|" \
+  "claimed_step: the claim is the step, held under the session id"
+eq "$(jq -r '.[0].id' <<< "$CLAIMED_ROW")" "st-1" "…and CLAIMED_ROW is the step's show row"
+check_claim st-it self-review
+eq "$CRC" 0 "…a check loop's iteration answers to the loop's name"
+check_claim st-it self
+eq "$CRC" 2 "…and a prefix of the loop's name is not its name"
+check_claim plain mol-x.load
+eq "$CRC|$CLAIMED_WHY" "2|this session's current claim is plain (not a formula step), not mol-x.load" \
+  "…a claim on a bead that is no step is not the step"
+check_claim st-free mol-x.load
+eq "$CRC|$CLAIMED_WHY" "3|st-free (mol-x.load) has no assignee, so this session no longer holds it" \
+  "…the step with no holder is not this session's"
+check_claim st-9 mol-x.load
+eq "$CRC|$CLAIMED_WHY" "3|st-9 (mol-x.load) is held by s-me9, not this session" \
+  "…nor the step whose holder's name only begins with this session's"
+export GC_AGENT=s-me9
+check_claim st-9 mol-x.load
+eq "$CRC" 0 "…and a step held under GC_AGENT is this session's"
+unset GC_AGENT
+check_claim "" mol-x.load
+eq "$CRC|$CLAIMED_ID" "1|" "…gc hook current naming no claim is a claim not read, and names no bead"
+eq "$CLAIMED_WHY" "gc hook current exited 1 without naming a claim (it said: gc hook current: session s-me has no current claim (nothing claimed through gc hook --claim))" \
+  "…and the reason carries gc's exit status and its own words"
+HOOK_SAYS="gc hook current: open session store: connection refused"
+check_claim "" mol-x.load
+eq "$CRC" 1 "…a failed read of the claim is a claim not read too, so running again can change it"
+has "$CLAIMED_WHY" "(it said: gc hook current: open session store: connection refused)" \
+  "…and its reason names the read's own failure, not a missing claim"
+unset HOOK_SAYS
+STUB_SHOW_FAIL=1
+check_claim st-1 mol-x.load
+eq "$CRC|$CLAIMED_ID|$CLAIMED_WHY" "1|st-1|could not read st-1, the bead gc hook current names" \
+  "…a claimed bead the store does not answer for is a claim not read"
+STUB_SHOW_FAIL=""
+check_claim st-none mol-x.load
+eq "$CRC" 1 "…and so is a claimed bead the store does not return"
+claimed_step ""; CRC=$?
+eq "$CRC" 2 "…and no step named is no step this session holds"
+unset -f gc
+unset GC_SESSION_ID HOOK_CLAIM
 
 # --- bd_gates_open_under_key: the open gates under a key, in the one order ----
 # gate_row <id> <key> <status> <created_at> — one row as bd_human_gates prints it.
@@ -1014,6 +1087,26 @@ for r in tools/gc-proactive.sh doctor/check-blocked-work-armed/run.sh doctor/che
   if grep -q 'await_type' <<< "$code"; then bad "(READERS) $r tests no gate's await type itself"
   else ok "(READERS) …and tests no gate's await type itself"; fi
 done
+
+# The scripts that write to the step this session claimed check that claim
+# through claimed_step and read no claim of their own, so a step one of them
+# accepts as this session's is one each of them accepts. gc-helm.sh is sh and
+# cannot source this library, so it copies session_identities, with the same
+# names in the same order.
+for r in assets/scripts/claim-close.sh assets/scripts/run-cancel.sh; do
+  code=$(grep -vE '^[[:space:]]*#' "$ROOT/$r")
+  if grep -qE '(^|[[:space:];])claimed_step "\$STEP"' <<< "$code"; then ok "(CLAIMED) $r checks its claim through claimed_step"
+  else bad "(CLAIMED) $r checks its claim through claimed_step"; fi
+  if grep -q 'hook current --id-only' <<< "$code"; then bad "(CLAIMED) $r reads no claim of its own"
+  else ok "(CLAIMED) …and reads no claim of its own"; fi
+done
+identity_vars() { # <file> -> the GC_* names its session_identities reads, in order
+  awk '/^session_identities\(\)/ { b = 1 } b { print } b && /^}/ { exit }' "$1" | grep -oE 'GC_[A-Z_]+' | paste -sd, -
+}
+eq "$(identity_vars "$HERE/bd-lib.sh")" "GC_ALIAS,GC_SESSION_ID,GC_SESSION_NAME,GC_AGENT" \
+  "(CLAIMED) session_identities reads the alias, the session id, the session name and GC_AGENT"
+eq "$(identity_vars "$ROOT/assets/scripts/gc-helm.sh")" "$(identity_vars "$HERE/bd-lib.sh")" \
+  "(CLAIMED) gc-helm.sh's copy of session_identities reads the same names in the same order"
 
 echo
 echo "passed: $PASS  failed: $FAIL"
