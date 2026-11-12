@@ -320,16 +320,18 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   open children, which a gate on the bead would pause. `gc-helm engage` takes
   the bead's conversation, or files one, and spawns a manual `converse-<model>`
   session under an alias that names it: the sitting. The sitting claims its
-  conversation with a plain `gc hook --claim`, holds for the operator, answers
-  each gate the operator rules on through its conversation's reply, and signs
-  off by resolving those gates and closing the conversation, which ends its
-  session. A sitting the operator asks to stay keeps the conversation open
-  instead, waiting on the work it sent, and Gas City wakes it with its thread
-  when that work closes
+  conversation, holds for the operator, answers each gate the operator rules on
+  through its conversation's reply, and signs off by resolving those gates and
+  closing the conversation, which ends its session. When a ruling sends work,
+  the sitting and the operator choose whether it ends at that hand-off or stays
+  until the work returns, and it recommends staying where the discussion will
+  help judge the result
   ([human-engagement.md](human-engagement.md#a-sitting-that-stays-for-the-return)).
-  A conversation waiting on work is no ask on the board. A sitting cut short
-  hands the conversation back to the queue, and the next engagement resumes it
-  from the record.
+  Gas City sleeps a sitting that stays and wakes it with its thread when the
+  work closes, and the board shows a conversation that waits on work as
+  waiting, not as an ask of the operator. A sitting cut short hands the
+  conversation back to the queue, and the next engagement resumes it from the
+  record.
 - **A takeaway records what a sitting concluded**, and its `--waiting-on` edge
   is what makes the wait machine-answerable
   ([lifecycle-composition.md](lifecycle-composition.md)).

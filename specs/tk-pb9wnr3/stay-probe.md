@@ -97,8 +97,8 @@ such an alias, the wait path's:
   `drained` sessions, never an idle-slept one.
 - **The claim.** On the edge path, the claim answers `drain` while the work is
   out and `ready_assignment` once it lands, which is what a fresh sitting reads
-  too. So the converse prompt's step 1 reads the conversation's `staying:` line
-  for both.
+  too. So the claim alone cannot tell a return from a fresh sitting, and the
+  sitting's entry reads the record to tell them apart (The entry, below).
 
 ## What it decided
 
@@ -124,6 +124,37 @@ such an alias, the wait path's:
   stay writes everything a sign-off writes, and the `staying:` line names what
   the return compares, so that a new sitting can take up the return from the
   record.
+
+## The entry
+
+The probe above ran before the entry existed: its sittings read their
+`staying:` line through the claim block the converse prompt carried then.
+`assets/scripts/converse-entry.sh`, which replaced that block, was exercised in
+two ways, and in neither did a sitting run it.
+
+- **Its suite.** `assets/scripts/converse-entry.test.sh` stubs the claim, the
+  conversation's row and `gctk bead holds`, and runs each entry: a fresh
+  conversation, a restart while the hold stands and before it, a stay woken
+  early while its work is out, a stay that stopped short, the return, a second
+  stay's return, and no conversation. It runs each way a read can fail, and
+  each answers `unreadable` with exit 1, never `none`. The claim's answers it
+  stubs are the ones the upstream code gives, read at `6bd609f5bf`
+  ([gas-city-search.md](gas-city-search.md#the-entry-and-what-it-reads)),
+  among them `drain` with exit 1 for a bead that waits on open work.
+- **The real store.** On 2026-11-12 the script ran against the city's own store
+  with only the claim stubbed, so every row it read and every `gctk bead holds`
+  answer was real, and nothing was written. A held conversation read
+  `interrupted` with the hold standing on a restart and `fresh` on a new claim,
+  a closed conversation with a recorded hand-back printed it, a drain over a
+  claimed conversation that nothing holds read `unreadable`, an alias with
+  nothing under it read `none`, and a bead that is no conversation read
+  `unreadable`. No conversation in the store stayed, so the `waiting` and
+  `returned` entries ran only in the suite.
+
+What that leaves unproven is the live sequence: a real sitting that runs the
+entry when its work closes, and after an early attach. The probe's edge-path
+sitting showed the claim answers those two moments give, and the suite shows
+what the entry makes of each answer.
 
 ## Reproducing it
 

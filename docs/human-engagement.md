@@ -705,8 +705,9 @@ has no such clock: its work closing does not end it, idleness only sleeps it,
 and attaching wakes it. The idle sleep its template sets never reaches a sitting
 that holds its conversation or has a client attached.
 
-**The claim.** The sitting claims its conversation with a plain
-`gc hook --claim`. The default work query finds the task assigned to the
+**The claim.** The sitting enters through `converse-entry.sh`, which its
+prompt runs first each time the session starts or wakes, and which claims with
+a plain `gc hook --claim`. The default work query finds the task assigned to the
 session, open through its second tier and in progress through its first, and
 its routed tier is closed to a session whose alias is not its template's name,
 so the sitting is offered nothing but its task. The claim sets `in_progress`,
@@ -722,12 +723,38 @@ holder, so `gc hook --claim` returns the conversation as an existing
 assignment. A sitting whose session was closed cannot replay its transcript.
 Engage starts a new session under the same alias, which a closed session does
 not reserve, and the new session takes the in-progress task as its own. The
-record carries over in the task's and the subject's notes. The converse
-prompt's restart rule reads the conversation's notes: the hold writes a
-`holding:` line there before it posts the framing, so a conversation carrying
-one re-opens at prep and the hold, and one without it re-checks the premise.
-Nothing in Gas City releases a sitting's claim on its own, and the pack's
-witness recovery skips a conversation too, so the alias is the way back in.
+record carries over in the task's and the subject's notes. Nothing in Gas City
+releases a sitting's claim on its own, and the pack's witness recovery skips a
+conversation too, so the alias is the way back in.
+
+**The entry says where the sitting stands.** Gas City records no reason for a
+start or a wake, delivers the same prompt to each, and its claim answers a
+conversation a sitting first takes up and one whose work has returned alike,
+as a ready assignment
+([specs/tk-pb9wnr3/gas-city-search.md](../specs/tk-pb9wnr3/gas-city-search.md)).
+So the entry reads the conversation's record and prints one entry, with the
+values every later call sets and the skill to load next:
+
+| Entry | What the record shows | Next |
+|---|---|---|
+| `fresh` | A new claim, with no `staying:` line newest. | The premise re-check. |
+| `interrupted` | A restart: the claim returns the conversation as an existing assignment. A `holding:` line newest means the hold stands, and none means nothing was held yet. A conversation still claimed while its work is out is a stay that stopped short. | `converse-continue`, the premise re-check, or `converse-stay`. |
+| `waiting` | No ready work, and the conversation open under the alias waits on open work, as `gctk bead holds` reads it. | `converse-stay`. |
+| `returned` | A claim whose newest `holding:` or `staying:` line is a `staying:` line, with nothing left open that the conversation waits on. | `converse-stay`. |
+| `none` | No ready work, and no conversation under the alias. | Drain. |
+
+A read that fails, a listing that answers no list, a conversation assigned to
+the sitting with nothing holding it though the claim found no work, and a
+claim served while its work still reads open are each `unreadable`: the entry
+exits 1, and the sitting neither drains nor closes. The hold writes its
+`holding:` line before it posts the framing, and the stay its `staying:` line
+before it leaves the conversation open, so the newest of the two is the act
+that landed last. A return that leaves the operator something to answer holds,
+which writes a newer `holding:` line, so a restart after it reads the hold, and
+a conversation handed back to the queue after such a hold starts its next
+sitting fresh. The sitting reads none of these lines itself.
+`assets/scripts/converse-entry.test.sh` runs each entry and each unreadable
+case.
 
 **The premise re-check.** The condition that justified a conversation, or a
 gate it replies to, routinely dies before the operator engages it. The sitting
@@ -770,8 +797,8 @@ sitting talk. The gate is what holds the subject: bd reads the subject as blocke
 the gate is open, and the hold writes no lifecycle state or route, so the
 subject keeps its state, its route and any deferred-dispatch arm
 ([state-machine.md](state-machine.md#the-machine)). A hold does not use
-`gc session wait --sleep`, which sets a wait hold the controller then drains,
-destroying an attached operator's pane.
+`gc session wait`, which waits for beads to close, while a hold waits for the
+person in the session.
 
 **Answering a gate.** A sitting answers only the gates its conversation
 replies to: the gate engage was pointed at, one its hold filed, and any other
@@ -1190,11 +1217,11 @@ writes have exited 0.
 conversation back from `gc hook --claim` as an existing assignment. Draining
 then would end a sitting the operator has not ruled on, and running the loop
 from its premise re-check could close a conversation the operator is part way
-through, so the converse prompt's restart rule reads the conversation's
-`holding:` line and re-opens the hold rather than doing either. A wake nudge
-that names `gc hook --claim` alone, rather than sending the session through the
-prompt's claim block, skips that rule, so every `converse-<model>` template
-holds its `nudge` empty. Emptiness is not what protects a held sitting: a
+through, so the entry reads the conversation's record and sends the sitting
+back to its hold rather than doing either. A wake nudge that names
+`gc hook --claim` alone, rather than sending the session through the entry,
+skips that reading, so every `converse-<model>` template holds its `nudge`
+empty. Emptiness is not what protects a held sitting: a
 sitting runs as a manual session, never pool_managed, and neither the work
 ladder nor a claim backstop governs a session that is not pool_managed
 ([gascity/human-engagement.md](gascity/human-engagement.md#the-controllers-backstops-govern-pool-sessions-only)).
@@ -1211,8 +1238,17 @@ clock.
 
 ### A sitting that stays for the return
 
-A sitting ends at its hand-off unless the operator asks it to stay. One that
-stays carries out the ruling with `converse-signoff.sh --stay`. That writes
+A sitting that sends work agrees with the operator whether it ends at its
+hand-off or stays until that work returns. The converse prompt has it recommend
+staying when the discussion will help judge the result, because what was
+agreed holds more than the work's brief carries, and ending when the brief and
+the work's ordinary checks suffice. It puts the choice to the operator with its
+recommendation, so they need not know to ask, and never stays without their
+agreement. The return compares what landed with what was agreed and tells the
+operator where it departs. It passes and fails nothing: the work's own checks
+and the subject's validating closer do that.
+
+A sitting that stays carries out the ruling with `converse-signoff.sh --stay`. That writes
 everything a sign-off writes, and then, in place of the close, makes the
 conversation wait on the work the sitting sent through bd's `blocks` edge,
 appends a `staying:` line to its notes, and puts it back to `open` under the
@@ -1228,12 +1264,12 @@ already has
 - **The wake.** The work's close makes the conversation ready work assigned to
   the sitting's alias, so Gas City wakes the same session on its session key,
   and `wake_mode = "resume"` keeps the thread. The prompt it delivers again
-  runs the claim, which returns the conversation as a `ready_assignment`, and
-  the restart rule reads the `staying:` line and starts the return.
+  runs the entry, whose claim returns the conversation as a ready assignment,
+  and its newest `staying:` line makes the entry `returned`.
 - **An attach before then.** An attach wakes the sitting with its thread and
-  changes nothing: the claim answers `drain`, the restart rule reads the
-  `staying:` line and keeps the sitting, and it sleeps again once the tab
-  detaches. `gc-helm engage` attaches an asleep sitting at once.
+  changes nothing: the claim answers `drain`, the entry finds the conversation
+  open with its work open and answers `waiting`, which keeps the sitting, and
+  it sleeps again once the tab detaches. `gc-helm engage` attaches an asleep sitting at once.
 - **What reads it.** The board lists a conversation that waits on work as no
   ask: its row reads "Waits on" the work, in the Queued group, until the work
   closes. A dismiss closes it as it closes any conversation, and the stop it
@@ -1458,6 +1494,10 @@ This is the genuinely native ground, and it is deliberately small.
   What it lacks is a gate before the tree lands and a record-resident plan, so
   re-planning re-files instead of diffing. The native ground is the gate on the
   tree, not the tree-making.
+- **Where a sitting stands when it starts.** Upstream records no reason for a
+  session's start or wake and hands every resume the same prompt, and its claim
+  cannot tell a conversation first taken up from one whose work has returned.
+  The entry reads that from the conversation's record (*The sitting*, above).
 
 **A sitting is not a unit of work, and it acts on its subject's universe in
 coordination with the operator.** It files beads, slings them to a pool, wires

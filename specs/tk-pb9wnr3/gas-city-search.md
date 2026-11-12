@@ -1,6 +1,6 @@
 ---
 name: Gas City search for a sitting that stays until its work returns
-description: Use when you review the stay that converse-signoff.sh's --stay writes and need the Gas City and bd primitives it composes, the session wait it does not use and why, and why its surface is a mode of the sign-off and a notes line rather than a store, a key or a service of its own.
+description: Use when you review the stay that converse-signoff.sh's --stay writes, or the entry converse-entry.sh gives a sitting, and need the Gas City and bd primitives they compose, the native signals the entry looked for and why none tells a return from a fresh sitting, the session wait the stay does not use and why, and why the surface is a mode of the sign-off, a notes line and one read script rather than a store, a key or a service of its own.
 ---
 
 # Gas City search: a sitting that stays until its work returns
@@ -70,10 +70,58 @@ closes) would duplicate the assigned-work demand above, so none is built.
   state and no bead kind.
 - **The `staying:` notes line.** A woken sitting's claim answers `drain` while
   the work is out and `ready_assignment` once it lands, which is what a fresh
-  sitting reads too. So the converse prompt's restart rule reads the newest of a
-  conversation's `holding:` and `staying:` lines, as it reads `holding:` today.
-  It is a line in bd's notes, not a key.
+  sitting reads too. So the sitting's entry reads the newest of a
+  conversation's `holding:` and `staying:` lines (The entry, below). It is a
+  line in bd's notes, not a key.
 - **Two readers learn the state.** The per-rig board reads a conversation that a
   wait of its own holds as no ask, through the wait reader it already runs
   (`services/gctk/waits`). `gc-helm engage` attaches an asleep sitting at once,
   through `gc session attach`, which wakes it. Neither adds a verb or a key.
+
+## The entry, and what it reads
+
+A sitting must know, each time its session starts or wakes, whether it has a
+new conversation, a restart mid-sitting, work still out after an early attach,
+or work returned, and an unreadable state must never read as any of them. The
+search looked for a native signal that says so, at the same upstream commit.
+
+- **The claim.** `gc hook --claim --json` answers `work` with reason
+  `ready_assignment` for a ready bead assigned to the session, whether a sitting
+  takes it up for the first time or its work has just returned: both run the
+  assigned-ready tier and its claim (`assignedReadyTierCommand` in
+  `internal/config/workquery.go`, the `ready_assignment` result in
+  `cmd/gc/cmd_hook_claim.go`). An in-progress bead comes back as
+  `existing_assignment` (`hookClaimExistingAssignment`). A bead that waits on
+  open work is not served, an in-progress one included
+  (`inProgressBlockedByEnrichmentScript` in `internal/config/workquery.go`), so
+  the claim answers `drain` with reason `no_work` and exits 1
+  (`writeHookClaimNoWork`). The result carries no other hint of why the session
+  runs (`hookClaimJSONResult`, `schemas/hook/result.schema.json`).
+- **The session.** The start environment carries identity and epochs, and no
+  wake cause (`RuntimeEnvWithSessionContext` in `internal/session/lifecycle.go`).
+  A resume gets the whole startup prompt again as its first input
+  (`resumeStartupPromptPlan` in `cmd/gc/startup_prompt_delivery.go`), and the
+  prompt's context has no wake field (`PromptContext` in `cmd/gc/prompt.go`).
+- **The provider hooks.** Claude's SessionStart hook runs `gc prime` on the
+  `startup` matcher only (`internal/hooks/config/claude.json`), so a resume or a
+  wake runs none, and what it prints does not vary with how the session started.
+- **The notices.** The core order `cascade-nudge-on-blocker-close` nudges the
+  assignee of a closed bead's dependent with fixed text, as a reminder held
+  until after the turn, so it arrives behind the claim. A session wait's
+  `Wait satisfied` notice is cancelled by the attach that wakes a sleeping
+  session (`Store.wakeSessionFromBead` in `internal/session/wait_store.go`,
+  which calls `cancelWaitsAndCollectNudgeIDs`).
+
+No native signal tells a conversation a sitting first takes up from one whose
+work has returned, so the pack reads its own record:
+
+- **`converse-entry.sh`**, one read script the converse prompt runs first. It
+  composes the claim above, the conversation's row, `gctk bead holds` for the
+  work still open, and the newest of the conversation's `holding:` and
+  `staying:` lines, which the hold and the stay already write. It prints the
+  entry, the conversation's values and the skill to load next, and exits 1
+  with `unreadable` when any read fails, so a sitting never drains or closes on
+  a state it could not read. It adds no store, no metadata key, no lifecycle
+  state and no bead kind, and it writes nothing but the claim.
+  `assets/scripts/converse-entry.test.sh` runs each entry and each unreadable
+  case.
