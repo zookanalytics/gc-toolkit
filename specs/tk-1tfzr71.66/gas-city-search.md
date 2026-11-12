@@ -165,6 +165,10 @@ leave there before or after the ready transition.
   required check, while a workflow that a filter skips leaves its checks
   pending ([Troubleshooting required status
   checks](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks)).
+  The same page counts `success`, `skipped` and `neutral` as passing. A
+  required check can also be a commit status, which has no check suite and
+  only the states `error`, `failure`, `pending` and `success` ([REST API
+  endpoints for commit statuses](https://docs.github.com/en/rest/commits/statuses)).
   A check run carries its `conclusion`, `SKIPPED` and `CANCELLED` among the
   values, whether the PR's target requires it (`isRequired`), and its check
   suite, created with the run: on PR #1469 the suite of the run that the ready
@@ -192,14 +196,14 @@ leave there before or after the ready transition.
 
 What tk-1tfzr71.22 and unit 2 compose: gh's two transitions, which the loop
 makes before each round's first push and once the round's lanes pass, reading
-the draft flag first; and the evaluator's read of each required check's latest
-result in each check suite at the head, which counts no skip or cancellation and
-compares no times. The gap the primitives leave is the tie between the draft and
-the city's rounds, which nothing upstream makes, and a skip standing in for a
-required check, which GitHub counts as a pass and records nothing to tell from a
-draft's. `gctk pr status` grows that condition among the conditions not met.
-Each repository's workflows stay its own, through a bead per rig (the design's
-section 12).
+the draft flag first; and the evaluator's read of each required check run's
+latest result in each check suite at the head, which counts no skip or
+cancellation and compares no times. The gap the primitives leave is the tie
+between the draft and the city's rounds, which nothing upstream makes, and a
+skip standing in for a required check, which GitHub counts as a pass and records
+nothing to tell from a draft's. `gctk pr status` grows that condition among the
+conditions not met. Each repository's workflows stay its own, through a bead per
+rig (the design's section 12).
 
 ## The landing order (unit 3)
 
