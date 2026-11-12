@@ -85,11 +85,14 @@ the bead itself (`gc bd show`), whose row also carries its parent's type, so
 that one read runs for every finalize, epic or not. The `--except-key` exception
 excepts a human gate, so it never releases an epic this clause holds.
 
-Neither finalize path wired today reaches an undisposed epic: `merge.sh`
-finalizes merge anchors, and `bead-rehome.sh` asks the gate about the bead as
-its disposition will leave it. A bare `gc bd close` runs no gate, and the
-doctor invariant I15 (`doctor/check-epic-closed-implies-ruled`) reports an epic
-closed that way without its ruling.
+`merge.sh` finalizes merge anchors, and `bead-rehome.sh` asks the gate about
+the bead as its disposition will leave it, so neither reaches an undisposed
+epic. A review of an epic
+([`converse-epic-review`](../skills/converse-epic-review/SKILL.md)) runs the
+gate on each Delivery it closes and, once it has recorded the close ruling, on
+the epic. A bare `gc bd close` runs no gate, and the doctor invariant I15
+(`doctor/check-epic-closed-implies-ruled`) reports an epic closed that way
+without its ruling.
 
 `--as-disposed` reads the bead as carrying that disposition. `bead-rehome.sh`
 asks with it before it writes anything, on its close and on its read-only

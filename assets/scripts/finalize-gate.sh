@@ -112,10 +112,11 @@ clause_no_open_human_gate() {
 # the clause passes unruled, because its epic carries the ruling. A non-epic
 # bead passes untouched. FAIL CLOSED: an unreadable probe refuses.
 #
-# Neither finalize path wired today reaches an undisposed epic. merge.sh
-# finalizes merge anchors, and bead-rehome.sh, which disposes of the epic, asks
-# with <as-disposed> set. The clause therefore holds only a gate-running close
-# that reaches an undisposed epic. A bare `gc bd close` runs no gate, and
+# merge.sh finalizes merge anchors, and bead-rehome.sh, which disposes of the
+# epic, asks with <as-disposed> set, so neither reaches an undisposed epic. A
+# review of an epic (skills/converse-epic-review) runs the gate on each
+# Delivery it closes and, once it has recorded the close ruling, on the epic.
+# A bare `gc bd close` runs no gate, and
 # doctor/check-epic-closed-implies-ruled (I15) reports it after the fact. The
 # disposition is read off the `gc bd show` row, which carries the edge onto a
 # successor in the epic's own store; an edge into another rig's store reaches

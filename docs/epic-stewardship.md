@@ -88,13 +88,14 @@ and both layers hold it until it is ruled close.
 
 1. **The finalize-gate clause** (`finalize-gate.sh` `clause_epic_ruling_recorded`)
    refuses to finalize an epic the predicate holds, on every close path that
-   runs the gate. Neither path wired today reaches an undisposed epic:
-   `merge.sh` finalizes merge anchors, and `bead-rehome.sh` asks the gate about
-   the epic as its disposition will leave it (`--as-disposed`), before it writes
-   anything and in its read-only `--check`, so `stand-down.sh` carries out a
-   person's ruling that an epic will not go on. The clause is the
-   precondition any gate-running close of an epic inherits, not a choke point on
-   today's closes.
+   runs the gate. A review of an epic runs it on each Delivery it closes and,
+   once it has recorded the close ruling, on the epic. `merge.sh` finalizes
+   merge anchors, and `bead-rehome.sh` asks the gate about the epic as its
+   disposition will leave it (`--as-disposed`), before it writes anything and
+   in its read-only `--check`, so `stand-down.sh` carries out a person's ruling
+   that an epic will not go on. The clause is the precondition any
+   gate-running close of an epic inherits, not a choke point on today's
+   closes.
 2. **The doctor invariant** (I15, `doctor/check-epic-closed-implies-ruled`) sees
    every close after the fact. A closed epic the predicate would have held is an
    error, whatever path closed it. A bare `gc bd close` is the ordinary way an
