@@ -225,43 +225,50 @@ one commit.
 
 When the change is to a rig's UI, the operator reacts to a copy of it: a live
 page served from the tree on fixture data, at an address of its own that they
-open in their own browser. Start one once the tree is set up:
+open in their own browser. `gctk rig serve` runs the copy from the checkout you
+run it in, inside the sandbox a demo capture runs in, where the live city
+cannot be reached. Start one once the tree is set up, with the rig's serve
+command and the city's publisher, which the rig's formula vars carry:
 
 ```bash
-"$CONV/ui-copy.sh" start --tree "$TREE" --rig "$GC_RIG" --publish
+VARS=$(gc formula show mol-rig-demo --rig "$GC_RIG" --json)
+var() { printf '%s' "$VARS" | jq -r --arg n "$1" '[.vars[] | select(.name == $n)][0].rig_default // empty'; }
+SERVE=$(var ui_serve_command)
+[ -n "$SERVE" ] || echo "rig $GC_RIG declares no ui_serve_command, so it offers no copy"
+[ -z "$SERVE" ] || ( cd "$TREE" && GCTK_SCRIPTS_DIR="$CONV" "$GC_CITY_PATH/.gc/services/gctk/bin/gctk" rig serve --command "$SERVE" \
+  --publish-command "$(var ui_publish_command)" --address-pattern "$(var ui_address_pattern)" )
 ```
 
-It prints `key=value` lines: `address=` is the address to give the operator,
-and `port=` is the copy's port on this host. A tree has one copy, so start is
+It prints one JSON line: `address` is the address to give the operator, and
+`port` is the copy's port on this host. A tree has one copy, so the start is
 safe to run again, after a restart too. It reports the copy that runs, or starts
 one, and publishes again a copy that has lost its address.
-`"$CONV/ui-copy.sh" status --tree "$TREE"` says whether the copy runs, answers
-on its port and still has its address. A copy that runs and does not answer,
-such as one whose start was cut off while its serve command built, reads as
-`state=not-answering`: run start again, which waits for it to answer and stops
-it when it does not. The copy runs what its serve command built when it
-started, so an edit the command does not reload shows only once you stop the
-copy and start it again, which gives it a new port and address to give the
-operator.
+`( cd "$TREE" && "$GC_CITY_PATH/.gc/services/gctk/bin/gctk" rig serve --check )`
+says whether the copy runs, answers on its port and still has its address. A
+copy that runs and does not answer, such as one whose start was cut off while
+its serve command built, reads as `"state":"not-answering"`: run the start
+again, which waits for it to answer and stops it when it does not. The copy runs
+what its serve command built when it started, so an edit the command does not
+reload shows only once you stop the copy and start it again, which gives it a
+new port and address to give the operator.
 
 A rig that declares no serve command offers no copy, so its look cannot be
-shown live: start exits 1 with `reason=no-serve-command`. Say so, and recommend
-sending the change on a formula (the converse-settle step), and the operator's
-ruling decides.
+shown live, and the block says so. Tell the operator, and recommend sending the
+change on a formula (the converse-settle step), and the operator's ruling
+decides.
 
-Where `address=` is empty, `detail=` says why. A copy whose publish command
-ended gets its address back when you run start again. Where the city can give no
+Where `address` is empty, `detail` says why. A copy whose publish command ended
+gets its address back when you run the start again. Where the city can give no
 address, the operator cannot open the copy: stop it, and show them screenshots
-instead. Capture each look from the
-tree with `demo-screenshot.sh`, which serves the tree with the rig's serve
-command in a sandbox where the live city cannot be reached. Drive the app to
+instead. Capture each look from the tree with `demo-screenshot.sh`, which serves
+the tree as a copy in the same sandbox and captures that copy. Drive the app to
 the look with a script in the `gc-toolkit.demo-capture` skill's format, keep
 each image outside the tree and your home, and read each one yourself before you
 describe it to the operator:
 
 ```bash
 SERVE=$(gc formula show mol-rig-demo --rig "$GC_RIG" --json | jq -r '[.vars[] | select(.name == "ui_serve_command")][0].rig_default // empty')
-"$CONV/demo-screenshot.sh" page --script "<the script>" --serve "$SERVE" --port 0 --cwd "$TREE" --output "<the image>"
+"$CONV/demo-screenshot.sh" page --script "<the script>" --serve "$SERVE" --cwd "$TREE" --output "<the image>"
 ```
 
 The operator sees the images on GitHub once the change has a PR. After the
@@ -326,7 +333,8 @@ branch. Its last write removes your hold, once the refinery holds the change.
 The change is then the anchor, as a polecat's fresh work is: one bound for the
 default branch reaches a PR, and one in an effort lands on the effort's branch.
 Stop the copy of the UI first, because the tree it serves goes too:
-`"$CONV/ui-copy.sh" stop --tree "$TREE"`, which exits 0 when no copy runs. Run
+`( cd "$TREE" && "$GC_CITY_PATH/.gc/services/gctk/bin/gctk" rig serve --stop )`,
+which exits 0 when no copy runs. Run
 the hand-off in a subshell that enters the tree, so your own shell stays in its
 home when the tree goes:
 
@@ -408,7 +416,7 @@ holds uncommitted edits, and those are part of the change the operator dropped,
 so run the removal again with `--force` then:
 
 ```bash
-"$CONV/ui-copy.sh" stop --tree "$TREE"
+( cd "$TREE" && "$GC_CITY_PATH/.gc/services/gctk/bin/gctk" rig serve --stop )
 git -C "${GC_DIR:-$PWD}" worktree remove "$TREE" && git -C "${GC_DIR:-$PWD}" branch -D "polecat/$CHANGE"
 ```
 
@@ -446,7 +454,7 @@ through the sign-off's cases (the converse-settle step).
 
 When the operator rules that the change waits for a later sitting, no hand-off
 or drop has stopped its copy of the UI. Stop it now:
-`"$CONV/ui-copy.sh" stop --tree "$TREE"`.
+`( cd "$TREE" && "$GC_CITY_PATH/.gc/services/gctk/bin/gctk" rig serve --stop )`.
 
 Name the subject's wait on the change, `--waiting-on <the change>`, with the
 brief's own text as `--close-brief`. The sign-off finds the brief and the arm

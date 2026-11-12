@@ -133,25 +133,23 @@ reports whether the `gh` it needs is present.
   The skill `gc-toolkit.gc-demo-script` writes the `demo:capture` script from
   the anchor and the diff. Keep the script and the clip in the review workspace.
 
-  The app target is the draft's preview, `--base-url <url>`, where one
-  deploys. Otherwise serve the reviewed worktree, so the clip shows the
-  reviewed commit: `--serve-dir <worktree>/<dir>` for a static build, or
-  `--serve "<command>" --cwd <worktree>` for a dev server. When the rig's
-  guidance serves its app on this host from `<worktree>`, give its
-  `--base-url`, unless `city.toml` sets `app_reads_city = "true"` for the rig.
-  The capture refuses any other URL on this host and says why. Exit 0 is a clip
-  in which every step's proof held, exit 3 is a clip in which at least one
-  step failed its proof, and exit 1 is no clip. The last line names the clip
-  and says whether it is narrated. Narration needs `OPENAI_API_KEY` in the
-  session. Without it the clip is silent and captioned, and it still shows the
-  change. `doctor/check-demo-toolchain` reports which parts of the capture
-  toolchain resolve in this session.
+  The app target is the draft's preview, `--base-url <url>`, where one deploys.
+  Otherwise serve the reviewed worktree, so the clip shows the reviewed commit:
+  `--serve-dir <worktree>/<dir>` for a static build, or
+  `--serve "<command>" --cwd <worktree>` for an app a command serves, which
+  runs as a copy that `gctk rig serve` runs from the worktree, inside the
+  capture's sandbox, on a free port of its own that the command gets as
+  `$PORT`. When the rig's guidance serves its app on this host from
+  `<worktree>`, give its `--base-url`, unless `city.toml` sets
+  `app_reads_city = "true"` for the rig. The capture refuses any other URL on
+  this host and says why. Exit 0 is a clip in which every step's proof held,
+  exit 3 is a clip in which at least one step failed its proof, and exit 1 is
+  no clip. The last line names the clip and says whether it is narrated.
+  Narration needs `OPENAI_API_KEY` in the session. Without it the clip is
+  silent and captioned, and it still shows the change.
+  `doctor/check-demo-toolchain` reports which parts of the capture toolchain
+  resolve in this session.
 
-  A video's `--serve` command chooses its own port, because the SprintShow
-  engine sets no `$PORT` for it. The engine waits for the command on the port
-  `--port` names, or on 5173 when none is named, and it refuses `--port 0`. So
-  `--port` names the port the command binds, and two captures side by side each
-  need a different port.
 - `repo-artifact`: list the visuals the reviewed commit already carries.
 
   ```bash
@@ -192,11 +190,8 @@ reports whether the `gh` it needs is present.
   `**Device:**` line can name another size, such as `390x844`, or a device the
   engine knows by name, such as `iPhone 15`. A `resize <width>x<height>` step
   changes the size from that step on.
-  `demo-screenshot.sh` adds what the engine lacks for a `--serve`
-  command. It puts the port `--port` names in the command's `$PORT`, and it
-  turns `--port 0` into a free port first, so two screenshots side by side each
-  get a server of their own. With no `--port`, the command gets no `$PORT` and
-  the engine waits on 5173, as for a video.
+  A `--serve` command's copy takes a free port of its own, for a screenshot as
+  for a video, so two captures side by side each get a server of their own.
   `--selector <css>` captures one element instead of the viewport, and
   `--full-page` captures the whole page. For a terminal, the engine types the
   command at a bash prompt in a terminal of its own, whose shell starts in

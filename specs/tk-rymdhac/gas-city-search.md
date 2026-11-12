@@ -13,11 +13,14 @@ The surface the design adds:
 
 - `--held-by <conversation>` on `work-setup.sh` and `work-submit.sh` (unit 1), a
   mode on two existing scripts.
-- The pack's copy script, which starts a copy of a rig's UI, publishes it on
-  request, stops it and reports its state, and the three formula vars it reads,
-  which `mol-rig-demo` declares: `ui_serve_command`, the rig's serve command,
-  and `ui_publish_command` and `ui_address_pattern`, the city's publish command
-  and address pattern (unit 4).
+- `gctk rig serve`, which starts a copy of a rig's UI, publishes it on
+  request, stops it and reports its state, for a person and for a demo capture
+  alike, and the three formula vars its callers read and pass to it, which
+  `mol-rig-demo` declares: `ui_serve_command`, the rig's serve command, and
+  `ui_publish_command` and `ui_address_pattern`, the city's publish command and
+  address pattern (unit 4). With it, the pack's sandbox library gains
+  `demo_engine_sandboxed`, which runs a copy's serve command, and the demo
+  captures' `--serve` starts a copy in place of the engine's own server.
 
 The design adds no metadata key, bead kind, lifecycle state, order or formula
 step. The skill and the prompt text are not surface.
@@ -176,20 +179,40 @@ the pack's.
   stopped session's leftover to carry its `GC_RUNTIME_EPOCH`, and the kill of
   the leftover's process group in `internal/runtime/proctable/kill_unix.go`.
 
+- **A server for a demo capture.** The same need arises when a capture serves
+  the app it records, which the SprintShow engine did itself through its own
+  `--serve`, inside the pack's capture sandbox. Gas City's process-intrinsic
+  `gc runtime` verbs (drain, drain-ack, heartbeat, request-restart, check,
+  conformance and workdir export, `newRuntimeCmd` in `cmd/gc/cmd_runtime.go`)
+  act on a session's own process and start none. A workspace service, above, is
+  one supervised process per declared name, not a server a capture starts from
+  a worktree at the commit it reviews and stops once it has its clip. Gas City
+  allocates no loopback port for a process a session starts.
+- **A sandbox for one command.** Gas City's session runtimes, above, isolate a
+  whole session. Its only use of `sandbox-exec` is the macOS smoke test of a
+  release (`scripts/smoke-macos.sh`, "macOS smoke test" in `CONTRIBUTING.md`),
+  which jails the `gc` binary it tests. No primitive runs one command where the
+  live city cannot be reached.
+
 **Composed.** A rig's formula vars carry the serve command, and the city's
 publish command and address pattern beside it. Gas City offers no formula var
 set once for a city, so the mechanik sets the two among the formula vars of each
 rig that offers a live copy, and `mol-rig-demo` declares the three as it
 declares `app_reads_city`. Gas City's orphan sweep ends a copy whose session has
-ended. The pack's demo tools pick a copy's free port (`demo_engine_free_port`,
-as `demo-screenshot.sh --port 0` does) and capture screenshots in a sandbox
-where the live city cannot be reached.
+ended. The pack's capture sandbox, `demo-engine-lib.sh`'s, runs every copy's
+serve command, so a person's copy and a demo's get the same isolation, and a
+capture's engine reaches a copy's port only once the verb answers that the copy
+holds it.
 
-**Why the script.** No primitive starts one app instance from a worktree on a
-free port and publishes it at an origin of its own, so unit 4's script does
-that, and nothing more. Stopping a copy with its session is the sweep's, so the
-script does not claim it. The publication is the city's command, here a
-foreground `tailscale serve`, whose mapping lives as long as the command.
+**Why the verb.** No primitive starts one app instance from a worktree on a
+free port, inside a sandbox, and publishes it at an origin of its own, so
+`gctk rig serve` does that, and nothing more, for both consumers on one path.
+It sits on the rig noun beside the rig's checks, as the operator ruled in
+conversation tk-ralyjxq ("All other examples of this are gctk rig <verb>"), and
+it reads no formula var, as the checks read none. Stopping a copy with its
+session is the sweep's, so the verb does not claim it. The publication is the
+city's command, here a foreground `tailscale serve`, whose mapping lives as long
+as the command.
 
 The ways to publish a copy that were set aside, with tk-rymdhac's notes of
 2026-11-11 as the evidence: a fixed set of mapped ports, which caps the copies

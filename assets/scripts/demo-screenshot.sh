@@ -37,7 +37,9 @@
 # element, with a one-step script whose proof is that the surface is drawn.
 #
 # Every kind captures inside the sandbox demo-engine-lib.sh runs the engine in,
-# where the live city cannot be reached. A command, a --serve command or a page
+# where the live city cannot be reached. A --serve command's app runs as a copy
+# of the rig's UI that `gctk rig serve` runs inside the same sandbox, and the
+# engine captures the copy at its loopback port. A command, a copy or a page
 # that reads the city's stores or its API fails there, so a capture shows the
 # reviewed commit on fixture data, or shows the failure, and never live state.
 # The one server outside the sandbox a page capture can reach is a rig's app
@@ -58,8 +60,8 @@
 #
 # Usage:
 #   demo-screenshot.sh page --script <demo.md> --output <file.png>
-#       ( --serve-dir <dir> | --serve <command> | --base-url <url> ) [--port <n>]
-#       [--cwd <dir>] [--selector <css> | --full-page]
+#       ( --serve-dir <dir> [--port <n>] | --serve <command> [--cwd <dir>] | --base-url <url> )
+#       [--selector <css> | --full-page]
 #   demo-screenshot.sh terminal --output <file.png> ( --command <command> | --text <file> )
 #       [--cwd <dir>] [--title <text>] [--columns <n>]
 #   demo-screenshot.sh markdown --file <file.md> --output <file.png>
@@ -69,16 +71,19 @@
 #                is delivered to the PR, never committed.
 #   page:
 #   --script     the demo:capture script whose steps drive the app to the state.
-#   --serve-dir  serve a static directory, on a free port unless --port names one.
-#   --serve      spawn a dev-server command, wait for it on --port, then tear it
-#                down. --cwd is its working directory. With --port, the
-#                command's environment carries the port as PORT, and --port 0
-#                picks a free one, so captures side by side never share a
-#                server. A port that a server already answers on is refused.
-#   --base-url   drive a deployed preview, or an app that a worktree of a rig
-#                serves on this host. Any other server on this host is refused,
-#                as is the app of a rig that city.toml sets to
-#                app_reads_city = "true".
+#   --serve-dir  serve a static directory with the engine's own server, on a
+#                free port unless --port names one. A port that a server
+#                already answers on is refused.
+#   --serve      serve the app with this command as a copy that `gctk rig
+#                serve` runs from the checkout --cwd names (default: here),
+#                with no address, on a free port of its own, which the command
+#                gets as $PORT, so captures side by side never share a server.
+#                A copy of that checkout that already runs is the one captured,
+#                and it keeps running. One this capture starts ends with it.
+#   --base-url   drive a deployed preview, a copy that `gctk rig serve` runs,
+#                or an app that a worktree of a rig serves on this host. Any
+#                other server on this host is refused, as is the app of a rig
+#                that city.toml sets to app_reads_city = "true".
 #                Exactly one of --serve-dir / --serve / --base-url is required.
 #   --selector   capture this element instead of the viewport.
 #   --full-page  capture the whole scrollable page instead of the viewport.
@@ -178,7 +183,7 @@ case "$OUTPUT" in *.png|*.PNG) ;; *) usage_err "--output must name a .png file (
 # and the file's name is the alt text it shows otherwise.
 case "${OUTPUT##*/}" in *'#'*) usage_err "--output's file name must not contain '#', which gh reads as the start of an image's alt text" ;; esac
 posint() { case "$2" in ''|*[!0-9]*|0*) usage_err "$1 must be a positive integer (got '$2')" ;; esac; }
-[ -z "$PORT" ] || [ "$PORT" = 0 ] || posint --port "$PORT"
+[ -z "$PORT" ] || posint --port "$PORT"
 [ -z "$COLS" ] || posint --columns "$COLS"
 case "$KIND" in
   page)
@@ -191,9 +196,10 @@ case "$KIND" in
     # The engine refuses the pair too, but this script reaches the engine only
     # after provisioning its browser.
     if [ -n "$SELECTOR" ] && [ "$FULL_PAGE" -eq 1 ]; then usage_err "page takes --selector or --full-page, not both"; fi
-    # Only a command can be told which port to take; --serve-dir takes a free
-    # one by itself.
-    [ "$PORT" != 0 ] || [ -n "$SERVE_CMD" ] || usage_err "--port 0 picks a free port for a --serve command; give it with --serve only"
+    # A --serve command's copy takes a free port of its own, and serves from the
+    # checkout --cwd names.
+    [ -z "$PORT" ] || [ -n "$SERVE_DIR" ] || usage_err "--port names the --serve-dir server's port; a --serve command's copy takes a free port of its own"
+    [ -z "$CWD" ] || [ -n "$SERVE_CMD" ] || usage_err "--cwd names the checkout a --serve command serves the app from; give it with --serve only"
     [ -f "$SCRIPT" ] || fail "--script '$SCRIPT' does not exist"
     [ -z "$SERVE_DIR" ] || [ -d "$SERVE_DIR" ] || fail "--serve-dir '$SERVE_DIR' is not a directory"
     [ -z "$CWD" ] || [ -d "$CWD" ] || fail "--cwd '$CWD' is not a directory" ;;
@@ -246,7 +252,7 @@ OUTPUT=$(abspath "$OUTPUT")
 
 mkdir -p "$(dirname "$OUTPUT")" || fail "cannot create the output directory '$(dirname "$OUTPUT")'"
 TMPD=$(mktemp -d "${TMPDIR:-/tmp}/demo-screenshot.XXXXXX") || fail "cannot make a temp dir"
-trap 'rm -rf "$TMPD"' EXIT
+trap 'demo_engine_copy_stop; rm -rf "$TMPD"' EXIT
 
 # --- the engine ------------------------------------------------------------
 # demo-engine-lib.sh holds Node to the engine's floor, finds the engine,
@@ -273,20 +279,17 @@ fi
 # --- what the engine captures --------------------------------------------
 case "$KIND" in
   page)
-    # The engine would capture whatever already answers on a --serve port, so
-    # the sandbox refuses such a port, and a capture that runs beside another
-    # takes a port of its own. The port is free when it is read here, and stays
-    # so unless another process binds it before the command does.
-    if [ "$PORT" = 0 ]; then
-      PORT=$(demo_engine_free_port) || fail "could not find a free port for the --serve command"
+    # A --serve command's app runs as a copy, inside the sandbox, and the engine
+    # captures the copy at its loopback port, which the sandbox opens because
+    # gctk rig serve answers that the copy holds it.
+    if [ -n "$SERVE_CMD" ]; then
+      demo_engine_copy "${CWD:-$(pwd)}" "$SERVE_CMD" || exit 1
+      BASE_URL=$DEMO_ENGINE_COPY_URL
     fi
-    [ -z "$SERVE_CMD" ] || [ -z "$PORT" ] || export PORT
     set -- "$SCRIPT"
     if [ -n "$SERVE_DIR" ]; then set -- "$@" --serve-dir "$SERVE_DIR"
-    elif [ -n "$SERVE_CMD" ]; then set -- "$@" --serve "$SERVE_CMD"
     else set -- "$@" --base-url "$BASE_URL"; fi
     [ -z "$PORT" ] || set -- "$@" --port "$PORT"
-    [ -z "$CWD" ] || set -- "$@" --cwd "$CWD"
     [ -z "$SELECTOR" ] || set -- "$@" --selector "$SELECTOR"
     [ "$FULL_PAGE" -eq 0 ] || set -- "$@" --full-page ;;
   terminal)
