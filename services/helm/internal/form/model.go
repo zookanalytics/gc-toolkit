@@ -29,7 +29,7 @@ type Options struct {
 	Return   bool     // open on the return list
 	DraftDir string   // where the question of a cancelled form is kept
 	Debounce time.Duration
-	Refresh  time.Duration // how often the return list reads the city again
+	Refresh  time.Duration // how often a list page, the return list or People, reads the city again
 	Now      func() time.Time
 }
 
@@ -39,6 +39,15 @@ const (
 	composeScreen screen = iota
 	progressScreen
 	returnScreen
+	peopleScreen
+)
+
+// pages are the screens the tabs at the top of the form name, in the order the
+// tabs show them, and pageNames what the tabs call them. A submit's progress is
+// no page: it shows what a save and a start do as they land.
+var (
+	pages     = []screen{composeScreen, returnScreen, peopleScreen}
+	pageNames = map[screen]string{composeScreen: "Start a conversation", returnScreen: "Return to a conversation", peopleScreen: "People"}
 )
 
 type field int
@@ -50,6 +59,10 @@ const (
 	modelField
 	attachField
 	contextField
+	// tabsField is the row of tabs above the subject, which ↑ from the
+	// subject reaches. Tab does not move through it, so the question stays
+	// one Tab after the subject.
+	tabsField
 )
 
 // lookup is one `conversations <ref>` read, keyed by the reference it was
@@ -130,7 +143,7 @@ type Model struct {
 	cityAt   time.Time // when city was read
 	cityErr  string    // why the last read of the city failed; city stays the last one read
 	cityBusy bool
-	ticking  bool // a refresh of the return list is scheduled
+	ticking  bool // a refresh of the list pages is scheduled
 
 	model  int  // index into opt.Models; -1 while it is opt.Model, which no variant carries
 	attach bool // the operator's choice to attach to the sitting once it starts; off, the form leaves then
@@ -152,14 +165,19 @@ type Model struct {
 	leaving  bool // the operator left while a save or a start ran, so the form leaves once it lands
 
 	// How the form leaves the terminal.
-	attaching bool      // the form has kept an attach, so it keeps no other
-	attachCmd *exec.Cmd // the attach the form left to run (Attach)
+	attaching bool      // the form has kept a hand-off, so it keeps no other
+	attachCmd *exec.Cmd // the command the form left to run (Attach): an attach, or a seat's verb
 	left      bool      // the form has left by its own path, so the note is what it says
 
 	// The return list's selection is a conversation, so a refresh that re-sorts
 	// the list leaves it on the conversation the operator picked.
 	retSel string
 	retAt  int // where retSel was last in the list, for ↑/↓ once it has left the list
+
+	// The People page's selection is a seat, so a read that changes the city's
+	// rigs leaves it on the seat the operator picked.
+	seatSel string
+	seatAt  int // where seatSel was last in the list, as retAt is
 
 	status string
 	note   string // printed once the form has left the terminal
@@ -251,9 +269,10 @@ func (m *Model) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// refreshCity schedules the next read of the city for the return list, so the
-// readiness it shows stays current. One refresh is scheduled at a time, and it
-// schedules the next only while the list is on screen.
+// refreshCity schedules the next read of the city for the list pages, so the
+// readiness the return list shows, and the seats' states the People page
+// shows, stay current. One refresh is scheduled at a time, and it schedules the
+// next only while a list page is on screen.
 func (m *Model) refreshCity() tea.Cmd {
 	if m.ticking {
 		return nil
@@ -373,7 +392,7 @@ func (m *Model) setFocus(f field) {
 // subject comes first and the question one Tab after it, since those are what
 // the operator gives almost every time. The rig the subject names is shown,
 // not a field, and the context list is a field only when it holds something to
-// choose.
+// choose. The tabs above the subject are no field of this order (tabsField).
 func (m *Model) fields() []field {
 	fs := []field{subjectField, questionField, modelField, attachField}
 	if len(m.contextRows()) > 1 {
@@ -700,6 +719,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		c := msg.city
 		m.city, m.cityAt, m.cityErr = &c, m.opt.Now(), ""
 		m.keepSelection()
+		m.keepSeat()
 		// A new topic has no conversations to choose among, so a choice a
 		// lookup made before the rigs said the subject names a rig is cleared.
 		if m.newTopic() {
@@ -743,7 +763,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.quit()
 	case cityTickMsg:
 		m.ticking = false
-		if m.scr == returnScreen {
+		if m.scr == returnScreen || m.scr == peopleScreen {
 			return m, tea.Batch(m.loadCity(), m.refreshCity())
 		}
 		return m, nil
@@ -800,23 +820,37 @@ func (m *Model) key(k tea.KeyPressMsg) tea.Cmd {
 		return m.progressKey(s)
 	case returnScreen:
 		return m.returnKey(s)
+	case peopleScreen:
+		return m.peopleKey(s)
 	}
 	switch s {
 	case "esc":
 		return m.quit()
 	case "ctrl+s":
 		return m.submit()
-	case "ctrl+r":
-		m.scr = returnScreen
-		return tea.Batch(m.loadCity(), m.refreshCity())
 	case "tab":
+		if m.focus == tabsField {
+			return m.focusOn(subjectField)
+		}
 		return m.moveFocus(1)
 	case "shift+tab":
 		return m.moveFocus(-1)
 	}
 	// ↑ and ↓ move between the fields at a field's first and last row, and
-	// stop at the form's first and last field, where Tab wraps around.
+	// stop at the form's last field, where Tab wraps around. ↑ from the
+	// subject reaches the tabs, where ←/→ move between the pages as they cycle
+	// a chooser's values.
 	switch m.focus {
+	case tabsField:
+		switch s {
+		case "left":
+			return m.movePage(-1)
+		case "right":
+			return m.movePage(1)
+		case "down", "enter":
+			return m.focusOn(subjectField)
+		}
+		return nil
 	case subjectField:
 		switch s {
 		case "enter":
@@ -824,7 +858,7 @@ func (m *Model) key(k tea.KeyPressMsg) tea.Cmd {
 		case "down":
 			return m.moveFocusArrow(1)
 		case "up":
-			return nil
+			return m.focusOn(tabsField)
 		}
 	case questionField:
 		// The question's rows are counted as the screen shows them, so ↑ and ↓
@@ -1226,40 +1260,226 @@ func (m *Model) returnKey(s string) tea.Cmd {
 		}
 	case "r":
 		return m.loadCity()
-	case "ctrl+r", "ctrl+n":
-		m.scr = composeScreen
+	case "left":
+		return m.movePage(-1)
+	case "right":
+		return m.movePage(1)
 	case "esc", "q":
 		return m.quit()
 	}
 	return nil
 }
 
-// attachTo leaves the form so the terminal can go to conv's sitting. The form
-// keeps the attach and quits, and the attach runs once the form's program has
-// returned (Attach), so the form draws nothing after what the attach prints. A
-// question the form has not saved is kept first, so leaving for the attach
-// does not lose it. model is what a sitting held anew runs on. An attach after
-// a start passes the model the start ran on, so a start that failed or a
-// sitting that ended is held again on the model the screen showed. The return
-// list shows no model and passes none, so engage's default holds it. The form
-// keeps one attach, and a start that lands after it has left keeps no other.
+// movePage moves along the tabs to the page step away, wrapping around at
+// either end, as ←/→ cycle a chooser's values. A list page reads the city again
+// while it is on screen. Back on the start page the focus is on its tabs, so
+// ←/→ go on moving along them and ↓ goes down to the subject. A status one page
+// gave is not carried to another.
+func (m *Model) movePage(step int) tea.Cmd {
+	at := 0
+	for i, p := range pages {
+		if p == m.scr {
+			at = i
+		}
+	}
+	m.scr, m.status = pages[(at+step+len(pages))%len(pages)], ""
+	if m.scr == composeScreen {
+		return m.focusOn(tabsField)
+	}
+	return tea.Batch(m.loadCity(), m.refreshCity())
+}
+
+// The seats `conversations` lists, by the verb that opens each.
+const (
+	poSeat       = "po"
+	mechanikSeat = "mechanik"
+)
+
+// seats are the People page's rows: the seats the city's read lists, in its
+// order, mechanik first.
+func (m *Model) seats() []Seat {
+	if m.city == nil {
+		return nil
+	}
+	return m.city.Seats
+}
+
+// seatKey is what the People page keeps its selection by: the seat, and a
+// po's rig.
+func seatKey(s Seat) string { return s.Name + " " + s.Rig }
+
+// seatIndex is where the seat keyed key is in seats, or -1.
+func seatIndex(seats []Seat, key string) int {
+	for i, s := range seats {
+		if seatKey(s) == key {
+			return i
+		}
+	}
+	return -1
+}
+
+// keepSeat holds the People page's selection on its seat when the city is read
+// again, as keepSelection holds the return list's on its conversation.
+func (m *Model) keepSeat() {
+	rows := m.seats()
+	if m.seatSel == "" {
+		if len(rows) > 0 {
+			m.seatSel, m.seatAt = seatKey(rows[0]), 0
+		}
+		return
+	}
+	if i := seatIndex(rows, m.seatSel); i >= 0 {
+		m.seatAt = i
+	}
+}
+
+// rigNamed is the city's rig of that name, as the read that listed the seats
+// gave it.
+func (m *Model) rigNamed(name string) (Rig, bool) {
+	if m.city != nil {
+		for _, r := range m.city.Rigs {
+			if r.Name == name {
+				return r, true
+			}
+		}
+	}
+	return Rig{}, false
+}
+
+// seatWhere is what Enter on s opens and what the People page says of it, and
+// whether Enter opens it: mechanik, and a rig's po while its rig is not
+// suspended, since Gas City starts no session in a suspended rig. Gas City's
+// attach carries no message, so the line says the sitting's purpose is given in
+// the sitting.
+func (m *Model) seatWhere(s Seat) (string, standing) {
+	const how = ", which attaches to its session, starting it first when it is not running. The attach carries no message, so give the sitting its purpose once you are in it."
+	switch s.Name {
+	case mechanikSeat:
+		return "mechanik, the city's standing conversation: Enter runs gc-helm mechanik" + how, settled
+	case poSeat:
+		r, ok := m.rigNamed(s.Rig)
+		switch {
+		case !ok:
+			return fmt.Sprintf("rig %s is not among the city's rigs, so its Product Owner cannot be checked", s.Rig), refused
+		case r.Suspended:
+			return fmt.Sprintf("rig %s is suspended, so its Product Owner cannot start until the rig resumes (gc rig resume %s)", r.Name, r.Name), refused
+		}
+		return fmt.Sprintf("the Product Owner of rig %s: Enter runs gc-helm po --rig %s", r.Name, r.Name) + how, settled
+	}
+	return fmt.Sprintf("%s is not a seat the form opens", s.Name), refused
+}
+
+// seatState is a People page row's state: a suspended rig for a po there, where
+// no session starts, and otherwise the state of the seat's session as Gas
+// City's session list gives it, with whether a terminal is attached, or no
+// session when the list holds none.
+func (m *Model) seatState(s Seat) string {
+	if r, ok := m.rigNamed(s.Rig); s.Name == poSeat && ok && r.Suspended {
+		return "rig suspended"
+	}
+	if s.Session == nil {
+		return "no session"
+	}
+	st := s.Session.State
+	if st == "" {
+		st = "no state"
+	}
+	if s.Session.Attached {
+		st += ", attached"
+	}
+	return st
+}
+
+func (m *Model) peopleKey(s string) tea.Cmd {
+	rows := m.seats()
+	at := seatIndex(rows, m.seatSel)
+	switch s {
+	case "up", "down":
+		if len(rows) == 0 {
+			return nil
+		}
+		switch {
+		case at < 0:
+			at = min(m.seatAt, len(rows)-1)
+		case s == "up" && at > 0:
+			at--
+		case s == "down" && at < len(rows)-1:
+			at++
+		}
+		m.seatSel, m.seatAt, m.status = seatKey(rows[at]), at, ""
+	case "enter":
+		if at >= 0 {
+			return m.openPerson(rows[at])
+		}
+	case "r":
+		return m.loadCity()
+	case "left":
+		return m.movePage(-1)
+	case "right":
+		return m.movePage(1)
+	case "esc", "q":
+		return m.quit()
+	}
+	return nil
+}
+
+// openPerson opens s once seatWhere says Enter opens it. One it does not open
+// is refused, and the city is read again, so the next Enter opens a po whose
+// rig has resumed since.
+func (m *Model) openPerson(s Seat) tea.Cmd {
+	if d, st := m.seatWhere(s); st != settled {
+		m.status = "Not opened: " + d + "."
+		if cmd := m.loadCity(); cmd != nil {
+			m.status += " Reading the rigs again."
+			return cmd
+		}
+		return nil
+	}
+	return m.openSeat(s)
+}
+
+// attachTo leaves the form so the terminal can go to conv's sitting (handOff).
+// model is what a sitting held anew runs on. An attach after a start passes
+// the model the start ran on, so a start that failed or a sitting that ended
+// is held again on the model the screen showed. The return list shows no model
+// and passes none, so engage's default holds it. The form keeps one hand-off,
+// and a start that lands after it has left keeps no other.
 func (m *Model) attachTo(conv, model string) tea.Cmd {
 	if m.attaching {
 		return nil
 	}
+	return m.handOff(m.helm.AttachCommand(conv, model))
+}
+
+// openSeat leaves the form so the terminal can go to s's verb (handOff), which
+// attaches it to the seat's session. The form keeps one hand-off, as attachTo
+// says.
+func (m *Model) openSeat(s Seat) tea.Cmd {
+	if m.attaching {
+		return nil
+	}
+	return m.handOff(m.helm.SeatCommand(s.Name, s.Rig))
+}
+
+// handOff keeps cmd and quits, and cmd runs once the form's program has
+// returned (Attach), so the form draws nothing after what cmd prints, such as
+// its reason when it attaches nothing. A question the form has not saved is
+// kept first, so leaving for cmd does not lose it.
+func (m *Model) handOff(cmd *exec.Cmd) tea.Cmd {
 	m.attaching = true
-	m.attachCmd = m.helm.AttachCommand(conv, model)
+	m.attachCmd = cmd
 	m.note = m.keepUnsaved()
 	m.left = true
 	return tea.Quit
 }
 
-// Attach is the attach the form left to run, nil when it left without one. It
-// is engage's attach: it waits for the sitting to start, attaches the
-// terminal, and once the terminal comes back says how the sitting ended. It
-// runs once the form's program has returned and the note is printed, on the
-// terminal the program let go, so all it prints, a refusal included, comes
-// after the last screen the form drew.
+// Attach is the command the form left to run, nil when it left without one:
+// engage's attach, which waits for the sitting to start, attaches the
+// terminal, and once the terminal comes back says how the sitting ended, or a
+// seat's verb, which attaches the terminal to the seat's session. It runs once
+// the form's program has returned and the note is printed, on the terminal the
+// program let go, so all it prints, a refusal included, comes after the last
+// screen the form drew.
 func (m *Model) Attach() *exec.Cmd { return m.attachCmd }
 
 // quit leaves the form. While a save or a start runs, the form leaves once it
@@ -1438,6 +1658,8 @@ func (m *Model) View() tea.View {
 		s = m.progressView()
 	case returnScreen:
 		s = m.returnView()
+	case peopleScreen:
+		s = m.peopleView()
 	default:
 		s = m.composeView()
 	}
@@ -1572,6 +1794,38 @@ func (m *Model) label(f field, text string) string {
 	return labelStyle.Render(text)
 }
 
+// tabs is the row of tabs that names the form's pages, the page on screen
+// marked: reversed while ←/→ move along the row, as they do anywhere on a list
+// page and from the start page's tabs, and in bold while the focus is in one
+// of the start page's fields.
+func (m *Model) tabs() string {
+	parts := make([]string, len(pages))
+	for i, p := range pages {
+		name := " " + pageNames[p] + " "
+		switch {
+		case p != m.scr:
+			parts[i] = hintStyle.Render(name)
+		case p != composeScreen || m.focus == tabsField:
+			parts[i] = focusStyle.Render(name)
+		default:
+			parts[i] = labelStyle.Render(name)
+		}
+	}
+	return strings.Join(parts, hintStyle.Render("│"))
+}
+
+// standingMark is the mark beside a destination: settled, still being read, or
+// refused.
+func standingMark(st standing) string {
+	switch st {
+	case settled:
+		return okStyle.Render("✓")
+	case refused:
+		return badStyle.Render("✗")
+	}
+	return waitStyle.Render("…")
+}
+
 // questionLines is how many lines of the question the form shows, and
 // minQuestionLines the fewest it shows on a terminal too short for the fields
 // and the row in play beside them.
@@ -1594,9 +1848,11 @@ func (m *Model) composeView() string {
 	case !m.attach:
 		act = "Ctrl+S save, start and leave"
 	}
-	head.WriteString(labelStyle.Render("Start a conversation"))
-	head.WriteString(hintStyle.Render("   " + act + " · Tab next field · Ctrl+R return to a conversation · Esc cancel"))
-	head.WriteString("\n\n")
+	keys := " · Tab next field · ↑ to the tabs · Esc cancel"
+	if m.focus == tabsField {
+		keys = " · ←/→ another page · ↓ back to the subject · Esc cancel"
+	}
+	head.WriteString(m.tabs() + "\n" + hintStyle.Render(act+keys) + "\n\n")
 	head.WriteString(m.label(subjectField, "Subject ") + "  " + m.subject.View() + "\n")
 	if m.from != "" {
 		// The field pads its line to its width, so a note beside it would run
@@ -1632,14 +1888,7 @@ func (m *Model) composeView() string {
 	}
 	b.WriteString(m.label(attachField, "Attach  ") + "  " + attach + "\n\n")
 	dest, st := m.where()
-	mark := waitStyle.Render("…")
-	switch st {
-	case settled:
-		mark = okStyle.Render("✓")
-	case refused:
-		mark = badStyle.Render("✗")
-	}
-	b.WriteString(m.wrapBeside(labelStyle.Render("Files as")+"  "+mark+" ", dest) + "\n")
+	b.WriteString(m.wrapBeside(labelStyle.Render("Files as")+"  "+standingMark(st)+" ", dest) + "\n")
 	// The rows on this subject are paged to the lines left below the fields, so
 	// the row in play is on screen: the cursor's while the list has focus, and
 	// otherwise the row chosen, which is what Ctrl+S acts on.
@@ -1765,8 +2014,8 @@ func (m *Model) progressView() string {
 
 func (m *Model) returnView() string {
 	var b strings.Builder
-	b.WriteString(labelStyle.Render("Return to a conversation"))
-	b.WriteString(hintStyle.Render("   ↑/↓ choose · Enter attaches · r refreshes · Ctrl+R start one · Esc leaves") + "\n\n")
+	b.WriteString(m.tabs() + "\n")
+	b.WriteString(hintStyle.Render("↑/↓ choose · Enter attaches · r refreshes · ←/→ another page · Esc leaves") + "\n\n")
 	if m.city == nil {
 		if m.cityErr != "" {
 			b.WriteString(badStyle.Render("The conversations did not read: "+m.cityErr) + "\n")
@@ -1816,6 +2065,79 @@ func (m *Model) returnView() string {
 	sel := at
 	if sel < 0 {
 		sel = m.retAt
+	}
+	top, under := m.wrap(b.String()), m.wrap(after.String())
+	b.Reset()
+	b.WriteString(top)
+	for _, line := range listLines(list, sel, m.room(top, under)) {
+		b.WriteString(line + "\n")
+	}
+	b.WriteString(under)
+	return b.String()
+}
+
+// peopleView is the People page: the seats the operator sits with, mechanik
+// and each rig's po by its rig's name and prefix, each with its state
+// (seatState), and above them what Enter opens for the seat picked. It is
+// paged to the terminal around the pick, as the return list is.
+func (m *Model) peopleView() string {
+	var b strings.Builder
+	b.WriteString(m.tabs() + "\n")
+	b.WriteString(hintStyle.Render("↑/↓ choose · Enter opens · r refreshes · ←/→ another page · Esc leaves") + "\n\n")
+	if m.city == nil {
+		if m.cityErr != "" {
+			b.WriteString(badStyle.Render("The seats did not read: "+m.cityErr) + "\n")
+		} else {
+			b.WriteString(waitStyle.Render("…") + " reading the seats\n")
+		}
+		return m.wrap(b.String())
+	}
+	if m.cityErr != "" {
+		// A read again that failed keeps the rows the last read gave, as on the
+		// return list.
+		b.WriteString(badStyle.Render(fmt.Sprintf("Not refreshed since %s, so the list may be out of date: %s", m.cityAt.Format("15:04:05"), m.cityErr)) + "\n\n")
+	}
+	rows := m.seats()
+	switch {
+	case m.city.RosterUnread:
+		// The roster names each seat's session, so a read without it lists no
+		// seat.
+		b.WriteString(badStyle.Render("The seats did not read: the city's agent roster (gc agent list), which names each seat's session, could not be read.") + "\n")
+	case len(rows) == 0:
+		b.WriteString("No seat is listed.\n")
+	}
+	at := seatIndex(rows, m.seatSel)
+	if at >= 0 {
+		d, st := m.seatWhere(rows[at])
+		b.WriteString(m.wrapBeside(labelStyle.Render("Opens")+"  "+standingMark(st)+" ", d) + "\n\n")
+	}
+	rigW := 0
+	for _, s := range rows {
+		rigW = max(rigW, lipgloss.Width(s.Rig))
+	}
+	var list []string
+	for i, s := range rows {
+		cur := "  "
+		if i == at {
+			cur = "› "
+		}
+		who := s.Name
+		if s.Name == poSeat {
+			r, _ := m.rigNamed(s.Rig)
+			who = "Product Owner  " + s.Rig + strings.Repeat(" ", rigW-lipgloss.Width(s.Rig)) + hintStyle.Render("  "+r.Prefix)
+		}
+		list = append(list, fmt.Sprintf("%s%-22s %s", cur, m.seatState(s), who))
+	}
+	var after strings.Builder
+	if at < 0 && m.seatSel != "" && len(rows) > 0 {
+		after.WriteString("\n" + waitStyle.Render("The seat picked is no longer listed, so nothing is selected: ↑/↓ chooses another.") + "\n")
+	}
+	if m.status != "" {
+		after.WriteString("\n" + badStyle.Render(m.status) + "\n")
+	}
+	sel := at
+	if sel < 0 {
+		sel = m.seatAt
 	}
 	top, under := m.wrap(b.String()), m.wrap(after.String())
 	b.Reset()

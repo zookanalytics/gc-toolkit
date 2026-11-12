@@ -2,10 +2,12 @@
 # doctor/check-po-queue-only — the po receives nothing but its queue (I16 in
 # docs/component-model.md).
 #
-# The po (agents/po) is the operator's prioritization partner, and it owns
-# little. What it receives is the queue of new work no epic holds, the beads
-# carrying Gas City's hold:mayor label in any spelling Gas City reads as the
-# hold, which a sitting reads from `gc beads list`. Nothing at a writer keeps
+# The po (agents/po) is the operator's prioritization partner, one for each
+# rig, and it owns little. What a rig's po receives is the queue of new work no
+# epic holds in its rig's store, the beads carrying Gas City's hold:mayor label
+# in any spelling Gas City reads as the hold, which a sitting reads from `gc
+# beads list`. The check judges every rig's queue and every rig's po alike, so
+# the city's queue is the queues of its rigs. Nothing at a writer keeps
 # anything else away from it: an assignment, a mail and `gc sling <po> --on
 # <formula>` each reach the seat whatever its config says, and any writer can
 # set a label. So this check observes the invariant after the fact, one check
@@ -40,8 +42,9 @@
 # The po's addresses are every identity Gas City serves its work under, which
 # its session.AssigneeIdentities names: the session bead's id, its runtime
 # session name, its configured identity, its alias, and each alias it had
-# before. The qualified name `gc agent list` gives the agent named po is its
-# configured identity and its alias. `gc session list --template <po>` gives
+# before. The qualified name `gc agent list` gives each agent named po, which
+# for a rig's named session is <rig>/<binding>.po, is its configured identity
+# and its alias. `gc session list --template <po>` gives
 # each open session of the seat its id and its session name, and the po's
 # mailbox read gives its earlier aliases. Neither read wakes the seat. A city
 # that configures no po has no seat to reach, so only the queue is judged

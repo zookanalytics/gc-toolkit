@@ -37,6 +37,9 @@ type fakeHelm struct {
 	// attachCmds the command each one returned.
 	attachArgs []string
 	attachCmds []*exec.Cmd
+	// seats is the argv after the script's path of each seat's verb the form
+	// asked for, as Script builds it.
+	seats []string
 }
 
 // About answers a reference from about, and one reached from a bead from the
@@ -67,6 +70,11 @@ func (f *fakeHelm) AttachCommand(conv, model string) *exec.Cmd {
 	c := exec.Command("true")
 	f.attachCmds = append(f.attachCmds, c)
 	return c
+}
+
+func (f *fakeHelm) SeatCommand(seat, rig string) *exec.Cmd {
+	f.seats = append(f.seats, strings.Join(Script{Path: "gc-helm.sh"}.SeatCommand(seat, rig).Args[2:], " "))
+	return exec.Command("true")
 }
 
 func rigCity() City {
@@ -655,18 +663,23 @@ func TestTypedTextSettlesOnlyOnceTheRigsAreRead(t *testing.T) {
 }
 
 // ↑ and ↓ move between the fields once the cursor is at a field's first or
-// last row, and stop at the form's first and last field, where Tab wraps
-// around. Leaving the subject with ↓ looks it up, as Tab does. On Model and
-// Attach ←/→ still change the value, and in the rows on a subject ↑ on the
-// first row goes to the field above.
+// last row, and stop at the form's last field, where Tab wraps around. ↑ in
+// the subject reaches the tabs above it, and ↓ comes back. Leaving the subject
+// with ↓ looks it up, as Tab does. On Model and Attach ←/→ still change the
+// value, and in the rows on a subject ↑ on the first row goes to the field
+// above.
 func TestUpAndDownMoveBetweenTheFields(t *testing.T) {
 	a := subjectAbout("tk-a", "gc-toolkit")
 	a.Conversations = []Conversation{{ID: "tk-c1", Readiness: Queued, Title: "an open question"}}
 	f := &fakeHelm{about: map[string]About{"tk-a": a}}
 	m := newForm(t, f, Options{})
-	if _, cmd := m.Update(key(tea.KeyUp)); cmd != nil || m.focus != subjectField {
-		t.Fatalf("↑ in the first field moved the focus to %d", m.focus)
+	if _, cmd := m.Update(key(tea.KeyUp)); cmd != nil || m.focus != tabsField {
+		t.Fatalf("↑ in the first field moved the focus to %d, not the tabs", m.focus)
 	}
+	if m.Update(key(tea.KeyUp)); m.focus != tabsField || m.scr != composeScreen {
+		t.Fatalf("↑ on the tabs: focus %d, page %d", m.focus, m.scr)
+	}
+	m.Update(key(tea.KeyDown))
 	typeText(m, "tk-a")
 	_, cmd := m.Update(key(tea.KeyDown))
 	deliver(m, cmd)
@@ -1675,7 +1688,7 @@ func TestTheReturnListReadsTheCityAgainWhileOnScreen(t *testing.T) {
 	if m.refreshCity() != nil {
 		t.Fatalf("a second refresh was scheduled beside the first")
 	}
-	m.Update(ctrl('r')) // to the compose screen
+	m.Update(key(tea.KeyLeft)) // to the start page
 	if _, next := m.Update(cityTickMsg{}); next != nil || m.ticking {
 		t.Fatalf("the compose screen kept refreshing the return list")
 	}
@@ -1711,7 +1724,7 @@ func TestAttachingFromTheReturnListKeepsTheUnsavedQuestion(t *testing.T) {
 	settle(m)
 	loadCity(m)
 	typeText(m, "a question\n  on two lines ")
-	m.Update(ctrl('r'))
+	toPage(t, m, returnScreen)
 	_, cmd := m.Update(key(tea.KeyEnter))
 	if !isQuit(cmd) || m.Attach() == nil || len(f.attaches) != 1 || f.attaches[0] != "tk-c1" {
 		t.Fatalf("left %v, attach kept %v, attaches %v", isQuit(cmd), m.Attach() != nil, f.attaches)
