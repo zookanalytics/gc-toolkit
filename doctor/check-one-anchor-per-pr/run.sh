@@ -16,8 +16,6 @@
 
 set -u
 
-dir="${GC_PACK_DIR:-.}"
-
 errors=(); warnings=(); notes=()
 US=$'\037'
 # >>> doctor-budget
