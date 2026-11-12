@@ -207,11 +207,12 @@ runs in the city's HQ; mechanik is one for the city. Each verb is `gc session
 attach` on the seat's session, by the name `gc agent list` gives it:
 <rig>/<binding>.po for a rig's Product Owner and <binding>.mechanik for
 mechanik, where <binding> is the name the city imports this pack under. It
-joins a running session as it stands. For a seat that is not running, it asks the city's controller to start
-the session, waits for it to run and then attaches, and the controller's start
-gives the agent its prompt as its first message. The Product Owner starts
-fresh, so a sitting of it that slept or ended comes back as a new sitting. A
-failed attach exits 4 once gc has said why.
+joins a running session as it stands. For a seat that is not running, it asks
+the city's controller to start the session, waits for it to run and then
+attaches, and the controller's start gives the agent its prompt as its first
+message. The Product Owner starts fresh, so a sitting of it that slept or
+ended comes back as a new sitting. A failed attach exits 4 once gc has said
+why.
 
 dismiss ends the sitting. react files a proactive first-reaction bead via
 tools/gc-proactive.sh (its --reason is log-only operator intent). takeaway
@@ -5696,8 +5697,8 @@ SEAT_NAMES_JQ='
 # it, rig is the po's rig by its name and empty for mechanik, and session is
 # the open session the list holds under the seat's name, {id, name, state,
 # attached, created_at} with Gas City's own state, or null when it holds none,
-# as for a po that has never run. A seat the roster gives no one name is left
-# out, since its verb attaches to nothing.
+# as for a po that has never run. A seat the roster gives no name, or several,
+# is left out, since its verb refuses it.
 SEATS_JQ='
   [ .sessions[] | objects
     | select((.closed // false) != true)
