@@ -211,16 +211,15 @@ func Revalidate(w *ledger.Write, reason, now string) {
 }
 
 // Except records one of the exceptions: the bead blocked, merge_result the
-// exception, the PR's state, why, and the marker cleared, since no later run
-// reads it again. The human gate keyed by the exception is filed first, by the
-// verb.
+// exception, the PR's state and why. The marker stays until the verb has filed
+// the human gate keyed by the exception and cleared it (Unmark), so a run that
+// stops between the two leaves the gate for the next run to file.
 func Except(w *ledger.Write, result, state, reason, now string) {
 	w.Status("blocked")
 	mergeResultKey.Set(w, result)
 	prStateKey.Set(w, state)
 	checkedAtKey.Set(w, now)
 	blockedReasonKey.Set(w, reason)
-	pendingKey.Clear(w)
 }
 
 // Landing is a merge the landing order verified: the merge commit, the target

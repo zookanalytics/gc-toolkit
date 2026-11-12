@@ -430,6 +430,12 @@ func gaps(r record.Record, branch string) []string {
 // read from GitHub by its number.
 func (u *run) blocked(s state) RunOutcome {
 	r := s.rec
+	if record.Exception(r.Result) {
+		// A run recorded the exception and stopped before its gate filed.
+		return u.gate(s, r.Result, fmt.Sprintf("%s %s stays blocked, and what waits on it stays held, until a person "+
+			"decides what becomes of the work.", firstOf(r.BlockedReason, "The pending record met "+r.Result+"."), s.id),
+			RunOutcome{Bead: s.id, Action: ActExcepted, Detail: r.Result + ": the gate an earlier run did not file is filed"})
+	}
 	switch r.Result {
 	case record.Pending:
 		if missing := gaps(r, s.branch); len(missing) > 0 {
@@ -618,19 +624,33 @@ func (u *run) contradiction(s state, why string) RunOutcome {
 			"on it stays held. Check what merged into %s before closing it.", s.id, why, s.id, firstOf(s.rec.Target, "the target")))
 }
 
-// except files the human gate keyed by the exception, then records the
-// exception with the bead blocked and the marker cleared. A gate that does not
-// file leaves the record as it was, for the next run to try again.
+// except records the exception with the bead blocked, guarded on what the run
+// read, then files the human gate keyed by it and clears the marker. A bead that
+// moved since the read gets neither the record nor the gate.
 func (u *run) except(s state, result, prState, reason, message string) RunOutcome {
+	w := u.Ledger.Write(s.id)
+	record.Except(w, result, prState, reason, s.now)
+	done := u.commit(s, w, RunOutcome{Bead: s.id, Action: ActExcepted, Detail: result + ": " + reason})
+	if done.Action != ActExcepted {
+		return done
+	}
+	s.status = "blocked"
+	return u.gate(s, result, message, done)
+}
+
+// gate files the exception's human gate on a bead the record already holds
+// blocked, then clears the marker. A gate that does not file leaves the marker,
+// so the next run files it.
+func (u *run) gate(s state, result, message string, done RunOutcome) RunOutcome {
 	if err := u.Gates.File(s.id, result, message); err != nil {
 		w := u.Ledger.Write(s.id)
-		why := fmt.Sprintf("%s: the human gate did not file; will retry: %v", result, err)
+		why := fmt.Sprintf("%s: the human gate did not file; the next run files it: %v", result, err)
 		record.Retry(w, "", why, s.now)
 		return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActRetry, Detail: why})
 	}
 	w := u.Ledger.Write(s.id)
-	record.Except(w, result, prState, reason, s.now)
-	return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActExcepted, Detail: result + ": " + reason})
+	record.Unmark(w, "")
+	return u.commit(s, w, done)
 }
 
 // OriginError is a PR outside the rig's own repository, the one the clone's

@@ -361,7 +361,13 @@ func TestAnInvalidBlockedRecordIsAnExceptionBeforeLookup(t *testing.T) {
 			d.put("blocked", refinery)
 			is(t, d.once(t), pr.ActExcepted)
 			b := d.row(t)
-			meta(t, b, map[string]string{"merge_result": record.Invalid, "pr_state": "invalid", "pr_reconcile_pending": "<absent>"})
+			want := map[string]string{"merge_result": record.Invalid, "pr_state": "invalid", "pr_reconcile_pending": "<absent>"}
+			if result == record.Invalid {
+				// An earlier run recorded this exception and stopped before its
+				// gate: the run files the gate and leaves the record as it is.
+				delete(want, "pr_state")
+			}
+			meta(t, b, want)
 			if b.Status != "blocked" || readsPR(d.github) {
 				t.Fatalf("an invalid record left the bead %s, or read GitHub %v", b.Status, d.github.Reads())
 			}
@@ -401,6 +407,48 @@ func TestAClosedUnmergedPRStaysBlockedBehindAGate(t *testing.T) {
 func mergedOnGitHub(d *land, h string) {
 	d.pr.Facts.State, d.pr.Facts.HeadRefOid = "MERGED", h
 	d.pr.Facts.MergeCommit, d.pr.Facts.MergedAt = merged, "2026-11-12T08:30:00Z"
+}
+
+// The exception is recorded, guarded, before its gate is filed. A gate that
+// does not file keeps the marker, and the next run files it and clears it.
+func TestAnExceptionWhoseGateDidNotFileIsFiledByTheNextRun(t *testing.T) {
+	d := newLand(t)
+	d.pr.Facts.State = "CLOSED"
+	d.gates.err = errors.New("human-gate: could not read the bead's gates")
+	is(t, d.once(t), pr.ActRetry)
+	b := d.row(t)
+	if b.Status != "blocked" {
+		t.Fatalf("the exception left the bead %s", b.Status)
+	}
+	meta(t, b, map[string]string{"merge_result": record.ClosedUnmerged, "pr_reconcile_pending": "true"})
+	d.gates.err = nil
+	is(t, d.once(t), pr.ActExcepted)
+	meta(t, d.row(t), map[string]string{"merge_result": record.ClosedUnmerged, "pr_reconcile_pending": "<absent>"})
+	if !slices.Equal(d.gates.list(), []string{bead + " " + record.ClosedUnmerged}) {
+		t.Fatalf("gates filed %v", d.gates.list())
+	}
+	if out := d.reconcile(t, pr.Options{Count: 10}); len(out) != 0 {
+		t.Fatalf("a later run read the excepted bead: %+v", out)
+	}
+}
+
+// An exception on a bead that a release took between the run's read and its
+// write records nothing and files no gate.
+func TestAnExceptionOnABeadThatMovedFilesNoGate(t *testing.T) {
+	d := newLand(t)
+	d.pr.Facts.State = "CLOSED"
+	once := false
+	d.store.BeforeUpdate = func(string, []string) error {
+		if !once {
+			once = true
+			d.put("open", "")
+		}
+		return nil
+	}
+	is(t, d.once(t), pr.ActMoved)
+	if len(d.gates.list()) != 0 || d.row(t).Metadata["merge_result"] != record.Pending {
+		t.Fatalf("a moved bead got gates %v and result %s", d.gates.list(), d.row(t).Metadata["merge_result"])
+	}
 }
 
 func TestAMergedValidatedHeadOnItsTargetCloses(t *testing.T) {
