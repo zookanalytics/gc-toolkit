@@ -1,23 +1,25 @@
-// The rows the pages are made of. An object is drawn the same way wherever it
-// sits; the page decides only what nests under it. On the Epics page and the
-// Work queue a bead is the row and the asks that stop it are its children; on
-// Needs you the ask is the row and the beads it holds are its children.
+// The rows the pages are made of, and the two views every page lays out. An
+// object is drawn the same way wherever it sits: a need reads as a need on
+// every page, with its tint, its kind and what holds it. A page decides only
+// what nests under a row. On a Needs you view a need is the row and the beads
+// it holds there are its children; on a Work queue a bead nests nothing, since
+// the Needs you view beside it lists what holds it.
 
 import type { ReactNode } from 'react';
-import type { Counts, DeliveryEntry, EpicEntry, Group, GroupList, Ref, Row } from './document.gen';
+import type { Counts, DeliveryEntry, EpicEntry, Group, Need, Ref, Row, WorkQueue } from './document.gen';
 import { Description } from './Description';
 import { BeadId, Line, Show } from './Line';
 import {
   AMBER,
+  COUNTS,
   EPIC_HUES,
   GROUP_LOOK,
-  GROUPS,
   INK,
   MUTE,
   STEP,
-  groupOpenByDefault,
   signalInk,
   useView,
+  type Part,
   type View,
 } from './view';
 
@@ -26,7 +28,7 @@ const BAND = '#ECEDE7';
 const RULE = '#E6E7E2';
 const ASK_TINT = '#FFF8E3';
 
-/** The word a row's tag reads when the row is not drawn as an ask. */
+/** The word a row's tag reads when the row is no need. */
 const KIND_WORD: Partial<Record<Row['kind'], string>> = {
   delivery: 'Delivery',
   gate: 'Gate',
@@ -39,16 +41,12 @@ export interface ObjectRowProps {
   /** The key of the place it is drawn in, so each place folds on its own. */
   ctx: string;
   depth: number;
-  /** As an ask, the row reads its ask and nests what it holds; as an item, it
-   *  nests the asks that stop it. */
-  role: 'item' | 'ask';
-  /** Draw no children, as under a parent that already lists them. */
-  bare?: boolean;
-  /** The children a section gives it, in place of its own. */
+  /** The rows drawn beneath it: under a need on a Needs you view, the beads it
+   *  holds there. A row anywhere else nests none. */
   kids?: string[];
 }
 
-export function ObjectRow({ id, ctx, depth, role, bare, kids }: ObjectRowProps) {
+export function ObjectRow({ id, ctx, depth, kids }: ObjectRowProps) {
   const v = useView();
   const row = v.doc.rows[id];
   if (row === undefined) {
@@ -56,18 +54,17 @@ export function ObjectRow({ id, ctx, depth, role, bare, kids }: ObjectRowProps) 
       <Line depth={depth} look="item" rule={RULE} hasKids={false} open={false} onToggle={() => {}} title="Not in the board's document" titleInk={MUTE} id={id} />
     );
   }
-  const asAsk = role === 'ask' && row.ask !== undefined;
-  const key = `${ctx}/${asAsk ? 'n' : 'w'}:${id}`;
-  const childIds = kids ?? (bare === true ? [] : asAsk ? row.holds : row.asks);
-  const childRole: ObjectRowProps['role'] = kids !== undefined || asAsk ? 'item' : 'ask';
+  const key = `${ctx}/${id}`;
+  const childIds = kids ?? [];
   const kidsKey = `${key}/kids`;
   const kidsOpen = v.isOpen(kidsKey, true);
   const detailsKey = `${key}/details`;
   const detailsOpen = v.isOpen(detailsKey, false);
   const closed = row.group === 'Closed';
+  const need = row.ask !== undefined;
 
   const bits: ReactNode[] = [...pullRequestBits(row), ...refBits(row.line3 ?? [], 'line3')];
-  if (asAsk) {
+  if (need) {
     for (const [i, r] of (row.reasons ?? []).entries()) {
       bits.push(
         <span key={`reason${i}`} className="bit bit--ref">
@@ -81,7 +78,7 @@ export function ObjectRow({ id, ctx, depth, role, bare, kids }: ObjectRowProps) 
         </span>,
       );
     }
-    if (bare === true && row.holds.length > 0) {
+    if (row.holds.length > 0) {
       bits.push(
         <span key="holds" className="bit">
           holds up {row.holds.length} {row.holds.length === 1 ? 'bead' : 'beads'}
@@ -96,13 +93,13 @@ export function ObjectRow({ id, ctx, depth, role, bare, kids }: ObjectRowProps) 
       <Line
         depth={depth}
         look="item"
-        bg={asAsk && row.group === 'Waiting on you' ? ASK_TINT : WHITE}
+        bg={need && row.group === 'Waiting on you' ? ASK_TINT : WHITE}
         rule={RULE}
         hasKids={childIds.length > 0}
         open={kidsOpen}
         onToggle={() => v.flip(kidsKey, true)}
         priority={row.priority}
-        tag={tagOf(row, asAsk)}
+        tag={tagOf(row)}
         title={titleOf(row)}
         quiet={closed}
         titleInk={closed ? MUTE : INK}
@@ -113,14 +110,15 @@ export function ObjectRow({ id, ctx, depth, role, bare, kids }: ObjectRowProps) 
         bits={bits}
       />
       {detailsOpen && <DetailsBlock row={row} depth={depth} />}
-      {kidsOpen &&
-        childIds.map((c) => <ObjectRow key={c} id={c} ctx={key} depth={depth + 1} role={childRole} bare />)}
+      {kidsOpen && childIds.map((c) => <ObjectRow key={c} id={c} ctx={key} depth={depth + 1} />)}
     </>
   );
 }
 
-function tagOf(row: Row, asAsk: boolean): { text: string; ink: string; weight?: number } | undefined {
-  if (asAsk && row.ask !== undefined) {
+/** A need's tag is its kind, in amber while it waits on you, and any other
+ *  row's is its kind of object where it is no piece of work. */
+function tagOf(row: Row): { text: string; ink: string; weight?: number } | undefined {
+  if (row.ask !== undefined) {
     return { text: row.ask, ink: row.group === 'Waiting on you' ? AMBER : MUTE };
   }
   const word = KIND_WORD[row.kind];
@@ -286,34 +284,173 @@ function RefLine({ label, target }: { label: string; target: Ref }) {
   );
 }
 
-// ── Epics, Deliveries and their groups ─────────────────────────────────────
+// ── The two views ─────────────────────────────────────────────────────────
 
-/** An epic and everything under it: its own asks, its Deliveries, and the rest
- *  of its work in the four groups. */
+/** What a container lays out: its two views and its closed work. An epic's
+ *  and a Delivery's entries are each one. */
+interface Views {
+  needs: Need[];
+  queue: WorkQueue;
+  closed: string[];
+}
+
+/** A Needs you view: each need, in the document's order, with the beads it
+ *  holds there beneath it. */
+export function NeedsList({ needs, ctx, depth }: { needs: Need[]; ctx: string; depth: number }) {
+  return (
+    <>
+      {needs.map((n) => (
+        <ObjectRow key={n.id} id={n.id} ctx={ctx} depth={depth} kids={n.holds} />
+      ))}
+    </>
+  );
+}
+
+/** A Work queue view: the queue in its order, then the work after it under
+ *  Not scheduled, folded, then the work a reader could not answer. */
+export function QueueList({ queue, ctx, depth }: { queue: WorkQueue; ctx: string; depth: number }) {
+  const { doc } = useView();
+  return (
+    <>
+      {queue.queue.map((id) => (
+        <ObjectRow key={id} id={id} ctx={ctx} depth={depth} />
+      ))}
+      {queue.not_scheduled.length > 0 && (
+        <Heading
+          openKey={`${ctx}/not-scheduled`}
+          def={false}
+          depth={depth}
+          label="Not scheduled"
+          count={queue.not_scheduled.length}
+          group={sharedGroup(doc.rows, queue.not_scheduled)}
+        >
+          {queue.not_scheduled.map((id) => (
+            <ObjectRow key={id} id={id} ctx={`${ctx}/not-scheduled`} depth={depth + 1} />
+          ))}
+        </Heading>
+      )}
+      {queue.unread.length > 0 && (
+        <Heading openKey={`${ctx}/unread`} def depth={depth} label="Unread" count={queue.unread.length}>
+          {queue.unread.map((id) => (
+            <ObjectRow key={id} id={id} ctx={`${ctx}/unread`} depth={depth + 1} />
+          ))}
+        </Heading>
+      )}
+    </>
+  );
+}
+
+/** How many rows a Work queue view lists. */
+export function queueSize(q: WorkQueue): number {
+  return q.queue.length + q.not_scheduled.length + q.unread.length;
+}
+
+/** The group every row of a list reads in, which colours its heading, or
+ *  undefined when they read in more than one. */
+function sharedGroup(rows: Record<string, Row>, ids: string[]): Group | undefined {
+  const groups = new Set(ids.map((id) => rows[id]?.group));
+  if (groups.size !== 1) return undefined;
+  const [g] = groups;
+  return g !== undefined && g in GROUP_LOOK ? g : undefined;
+}
+
+/** A container's two views and its closed work: Needs you, the Work queue, and
+ *  its closed work, folded. A view with nothing in it is not drawn. */
+function ContainerViews({ views, ctx, depth }: { views: Views; ctx: string; depth: number }) {
+  const { doc } = useView();
+  const queued = queueSize(views.queue);
+  return (
+    <>
+      {views.needs.length > 0 && (
+        <Heading
+          openKey={`${ctx}/needs`}
+          def
+          depth={depth}
+          label="Needs you"
+          count={views.needs.length}
+          group={sharedGroup(
+            doc.rows,
+            views.needs.map((n) => n.id),
+          )}
+        >
+          <NeedsList needs={views.needs} ctx={`${ctx}/needs`} depth={depth + 1} />
+        </Heading>
+      )}
+      {queued > 0 && (
+        <Heading
+          openKey={`${ctx}/queue`}
+          def
+          depth={depth}
+          label="Work queue"
+          count={queued}
+          group={sharedGroup(doc.rows, [...views.queue.queue, ...views.queue.not_scheduled, ...views.queue.unread])}
+        >
+          <QueueList queue={views.queue} ctx={`${ctx}/queue`} depth={depth + 1} />
+        </Heading>
+      )}
+      {views.closed.length > 0 && (
+        <Heading openKey={`${ctx}/closed`} def={false} depth={depth} label="Closed" count={views.closed.length} group="Closed">
+          {views.closed.map((id) => (
+            <ObjectRow key={id} id={id} ctx={`${ctx}/closed`} depth={depth + 1} />
+          ))}
+        </Heading>
+      )}
+    </>
+  );
+}
+
+/** Whether a container's views hold anything of one part a count opens. */
+function holdsPart(views: Views, part: Part): boolean {
+  switch (part) {
+    case 'needs':
+      return views.needs.length > 0;
+    case 'queue':
+      return views.queue.queue.length > 0;
+    case 'not_scheduled':
+      return views.queue.not_scheduled.length > 0;
+    case 'closed':
+      return views.closed.length > 0;
+  }
+}
+
+/** The folds that show one part of the views at ctx and nothing else. */
+function showOnly(ctx: string, part: Part): Record<string, boolean> {
+  return {
+    [`${ctx}/needs`]: part === 'needs',
+    [`${ctx}/queue`]: part === 'queue' || part === 'not_scheduled',
+    [`${ctx}/queue/not-scheduled`]: part === 'not_scheduled',
+    [`${ctx}/closed`]: part === 'closed',
+  };
+}
+
+// ── Epics and Deliveries ──────────────────────────────────────────────────
+
+/** An epic and everything under it: its Deliveries, each with its two views
+ *  and its closed work, and the same for the work the epic holds nearest. */
 export function EpicBlock({ entry, index }: { entry: EpicEntry; index: number }) {
   const v = useView();
   const row = v.doc.rows[entry.id];
-  if (row === undefined) return <ObjectRow id={entry.id} ctx="epics" depth={0} role="item" bare />;
+  if (row === undefined) return <ObjectRow id={entry.id} ctx="epics" depth={0} />;
   const key = `e:${entry.id}`;
   const open = v.isOpen(key, false);
   const detailsKey = `${key}/details`;
   const detailsOpen = v.isOpen(detailsKey, false);
   const hue = EPIC_HUES[index % EPIC_HUES.length];
   const restKey = `${key}/rest`;
-  const hasRest = entry.groups.length > 0 || entry.unread.length > 0;
+  const hasDeliveries = entry.deliveries.length > 0;
+  const ownKey = hasDeliveries ? restKey : key;
+  const hasOwn = entry.needs.length > 0 || queueSize(entry.queue) > 0 || entry.closed.length > 0;
 
-  // A count's click opens its epic, and in each place under it, that group only.
-  const focus = (g: Group) => {
+  // A count's click opens its epic, and in each place under it, that part only.
+  const focus = (part: Part) => {
     const parts: Record<string, boolean> = { [key]: true };
     for (const d of entry.deliveries) {
       const dKey = `${key}/d:${d.id}`;
-      const has = d.groups.some((l) => l.group === g);
-      parts[dKey] = has;
-      for (const { group } of GROUPS) parts[`${dKey}/g:${group}`] = group === g;
+      parts[dKey] = holdsPart(d, part);
+      Object.assign(parts, showOnly(dKey, part));
     }
-    parts[restKey] = entry.groups.some((l) => l.group === g);
-    const restCtx = entry.deliveries.length > 0 ? restKey : key;
-    for (const { group } of GROUPS) parts[`${restCtx}/g:${group}`] = group === g;
+    if (hasDeliveries) parts[restKey] = holdsPart(entry, part);
+    Object.assign(parts, showOnly(ownKey, part));
     v.setOpen(parts);
   };
 
@@ -340,16 +477,13 @@ export function EpicBlock({ entry, index }: { entry: EpicEntry; index: number })
       {detailsOpen && <DetailsBlock row={row} depth={0} />}
       {open && (
         <div className="epic-body">
-          {entry.asks.map((a) => (
-            <ObjectRow key={a} id={a} ctx={key} depth={1} role="ask" bare />
-          ))}
           {entry.deliveries.map((d) => (
             <DeliveryBlock key={d.id} entry={d} epicKey={key} />
           ))}
-          {entry.deliveries.length > 0 && hasRest ? (
-            <RestOfEpic entry={entry} ctx={restKey} />
+          {hasDeliveries ? (
+            hasOwn && <RestOfEpic entry={entry} ctx={restKey} />
           ) : (
-            <Groups ctx={key} depth={1} groups={entry.groups} unread={entry.unread} />
+            <ContainerViews views={entry} ctx={key} depth={1} />
           )}
         </div>
       )}
@@ -360,7 +494,12 @@ export function EpicBlock({ entry, index }: { entry: EpicEntry; index: number })
 function RestOfEpic({ entry, ctx }: { entry: EpicEntry; ctx: string }) {
   const v = useView();
   const open = v.isOpen(ctx, true);
-  const counts = countsOf(entry.groups);
+  const counts: Counts = {
+    needs: entry.needs.length,
+    queue: entry.queue.queue.length,
+    not_scheduled: entry.queue.not_scheduled.length,
+    closed: entry.closed.length,
+  };
   return (
     <>
       <Line
@@ -372,13 +511,9 @@ function RestOfEpic({ entry, ctx }: { entry: EpicEntry; ctx: string }) {
         open={open}
         onToggle={() => v.flip(ctx, true)}
         title="The rest of the epic"
-        bits={countBits(counts, (g) => {
-          const parts: Record<string, boolean> = { [ctx]: true };
-          for (const { group } of GROUPS) parts[`${ctx}/g:${group}`] = group === g;
-          v.setOpen(parts);
-        })}
+        bits={countBits(counts, (part) => v.setOpen({ [ctx]: true, ...showOnly(ctx, part) }))}
       />
-      {open && <Groups ctx={ctx} depth={2} groups={entry.groups} unread={entry.unread} />}
+      {open && <ContainerViews views={entry} ctx={ctx} depth={2} />}
     </>
   );
 }
@@ -386,18 +521,14 @@ function RestOfEpic({ entry, ctx }: { entry: EpicEntry; ctx: string }) {
 function DeliveryBlock({ entry, epicKey }: { entry: DeliveryEntry; epicKey: string }) {
   const v = useView();
   const row = v.doc.rows[entry.id];
-  if (row === undefined) return <ObjectRow id={entry.id} ctx={epicKey} depth={1} role="item" bare />;
+  if (row === undefined) return <ObjectRow id={entry.id} ctx={epicKey} depth={1} />;
   const key = `${epicKey}/d:${entry.id}`;
   // A Delivery whose work has all closed folds by default.
-  const done = entry.groups.length > 0 && entry.groups.every((l) => l.group === 'Closed');
+  const done = entry.needs.length === 0 && queueSize(entry.queue) === 0 && entry.closed.length > 0;
   const open = v.isOpen(key, !done);
   const detailsKey = `${key}/details`;
   const detailsOpen = v.isOpen(detailsKey, false);
-  const focus = (g: Group) => {
-    const parts: Record<string, boolean> = { [epicKey]: true, [key]: true };
-    for (const { group } of GROUPS) parts[`${key}/g:${group}`] = group === g;
-    v.setOpen(parts);
-  };
+  const focus = (part: Part) => v.setOpen({ [epicKey]: true, [key]: true, ...showOnly(key, part) });
   return (
     <>
       <Line
@@ -409,7 +540,7 @@ function DeliveryBlock({ entry, epicKey }: { entry: DeliveryEntry; epicKey: stri
         open={open}
         onToggle={() => v.flip(key, !done)}
         priority={row.priority}
-        tag={tagOf(row, false)}
+        tag={tagOf(row)}
         title={row.title}
         signal={{ text: row.signal, note: row.note, ink: signalInk(row) }}
         details={{ open: detailsOpen, onToggle: () => v.flip(detailsKey, false) }}
@@ -418,52 +549,16 @@ function DeliveryBlock({ entry, epicKey }: { entry: DeliveryEntry; epicKey: stri
         bits={countBits(row.counts, focus)}
       />
       {detailsOpen && <DetailsBlock row={row} depth={1} />}
-      {open && (
-        <>
-          {entry.asks.map((a) => (
-            <ObjectRow key={a} id={a} ctx={key} depth={2} role="ask" bare />
-          ))}
-          <Groups ctx={key} depth={2} groups={entry.groups} unread={entry.unread} />
-        </>
-      )}
+      {open && <ContainerViews views={entry} ctx={key} depth={2} />}
     </>
   );
 }
 
-/** A container's work in its groups, then the work a reader could not answer. */
-function Groups({ ctx, depth, groups, unread }: { ctx: string; depth: number; groups: GroupList[]; unread: string[] }) {
-  return (
-    <>
-      {groups.map((l) => (
-        <Heading
-          key={l.group}
-          openKey={`${ctx}/g:${l.group}`}
-          def={groupOpenByDefault(l.group)}
-          depth={depth}
-          label={l.group}
-          count={l.ids.length}
-          group={l.group}
-        >
-          {l.ids.map((id) => (
-            <ObjectRow key={id} id={id} ctx={`${ctx}/g:${l.group}`} depth={depth + 1} role="item" />
-          ))}
-        </Heading>
-      ))}
-      {unread.length > 0 && (
-        <Heading openKey={`${ctx}/unread`} def depth={depth} label="Unread" count={unread.length}>
-          {unread.map((id) => (
-            <ObjectRow key={id} id={id} ctx={`${ctx}/unread`} depth={depth + 1} role="item" />
-          ))}
-        </Heading>
-      )}
-    </>
-  );
-}
-
-/** A container's counts, one per group, each opening that group only. */
-function countBits(counts: Counts | undefined, focus: (g: Group) => void): ReactNode[] {
+/** A container's counts, needs first, each opening its part of the views
+ *  only. */
+function countBits(counts: Counts | undefined, focus: (part: Part) => void): ReactNode[] {
   if (counts === undefined) return [];
-  return GROUPS.map(({ group, count }) => {
+  return COUNTS.map(({ part, count, one, many, look: group }) => {
     const n = counts[count];
     const look = GROUP_LOOK[group];
     const dot = (
@@ -473,12 +568,12 @@ function countBits(counts: Counts | undefined, focus: (g: Group) => void): React
         style={{ background: n > 0 ? look.fill : 'transparent', borderColor: n > 0 ? look.ring : '#A9B0B6' }}
       />
     );
-    const text = `${n} ${look.word}`;
+    const text = `${n} ${n === 1 ? one : many}`;
     return (
-      <span key={group} className="bit bit--count" style={{ color: n > 0 ? look.ink : '#65707B' }}>
+      <span key={part} className="bit bit--count" style={{ color: n > 0 ? look.ink : '#65707B' }}>
         {dot}
         {n > 0 ? (
-          <button type="button" className="link" title="Open just this group" onClick={() => focus(group)}>
+          <button type="button" className="link" title="Open just this part" onClick={() => focus(part)}>
             {text}
           </button>
         ) : (
@@ -487,16 +582,6 @@ function countBits(counts: Counts | undefined, focus: (g: Group) => void): React
       </span>
     );
   });
-}
-
-/** The rows a container's groups list, by group, for a count line of its own. */
-function countsOf(groups: GroupList[]): Counts {
-  const c: Counts = { waiting_on_you: 0, queued: 0, not_moving: 0, closed: 0 };
-  for (const l of groups) {
-    const g = GROUPS.find((x) => x.group === l.group);
-    if (g !== undefined) c[g.count] = l.ids.length;
-  }
-  return c;
 }
 
 // ── Headings ──────────────────────────────────────────────────────────────

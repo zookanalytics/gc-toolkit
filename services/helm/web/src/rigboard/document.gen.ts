@@ -37,14 +37,14 @@ export interface Document {
    */
   epics: EpicEntry[];
   /**
-   * NeedsYou is the Needs you page.
+   * NeedsYou is the Needs you page: every need in the rig.
    */
   needs_you: NeedsYou;
   /**
-   * WorkQueue is the Work queue page: its sections in order, each listed
-   * only when it holds a row.
+   * WorkQueue is the Work queue page: every open piece of work in the rig
+   * that does not carry hold:mayor.
    */
-  work_queue: Section[];
+  work_queue: WorkQueue;
   /**
    * Unprioritized is the Unprioritized page: every open bead that carries
    * hold:mayor, grouped by priority, newest first in each.
@@ -85,7 +85,8 @@ export interface Row {
    */
   group?: Group;
   /**
-   * Ask is the kind of ask the row is, empty when it is none.
+   * Ask is the kind of need the row is, empty when it is none. A row that is
+   * a need is drawn as one wherever it appears.
    */
   ask?: Ask;
   /**
@@ -110,8 +111,8 @@ export interface Row {
    */
   pull_request?: PullRequest;
   /**
-   * Counts are an epic's or a Delivery's work at any depth beneath it, by
-   * group. Gates, conversations and decisions are not counted. Closed work
+   * Counts are what an epic or a Delivery holds at any depth beneath it: the
+   * needs that hold or concern it, and its work by where it sits. Closed work
    * counts as far as the read gathers it: the closed members of each open
    * epic and Delivery and of each closed epic among them, and none beneath a
    * bead that is not an epic.
@@ -128,13 +129,9 @@ export interface Row {
   waits: Ref[];
   waited_on_by: Ref[];
   /**
-   * Asks are the asks that stop this row's work, which the Epics and Work
-   * queue pages draw as its children.
-   */
-  asks: string[];
-  /**
-   * Holds is, for an ask, the work it holds, which the Needs you page draws
-   * as its children.
+   * Holds is, for a need, every bead it holds through any chain of waits
+   * (prstatus.Holding's answer): its work in the Work queue's order, then the
+   * epics and Deliveries it holds.
    */
   holds: string[];
   /**
@@ -176,12 +173,14 @@ export interface PullRequest {
   held?: string[];
 }
 /**
- * Counts are a container's work by group.
+ * Counts are what a container holds. Needs counts each need that holds or
+ * concerns it once, and reaches zero as the operator acts. Queue,
+ * NotScheduled and Closed count its work by where it sits.
  */
 export interface Counts {
-  waiting_on_you: number /* int */;
-  queued: number /* int */;
-  not_moving: number /* int */;
+  needs: number /* int */;
+  queue: number /* int */;
+  not_scheduled: number /* int */;
   closed: number /* int */;
 }
 /**
@@ -199,83 +198,64 @@ export interface Contract {
   ruling_at?: string;
 }
 /**
- * EpicEntry is one epic on the Epics page: its own asks, its Deliveries, and
- * the work that reaches it through no Delivery, in the four groups. Work whose
- * parent-child edges reach more than one epic or Delivery is listed under each.
+ * EpicEntry is one epic on the Epics page: the two views of the work it holds
+ * nearest, its closed work, and its Deliveries. Work whose parent-child edges
+ * reach more than one epic or Delivery is listed under each.
  */
 export interface EpicEntry {
   id: string;
-  asks: string[];
+  needs: Need[];
+  queue: WorkQueue;
+  closed: string[];
   deliveries: DeliveryEntry[];
-  groups: GroupList[];
-  /**
-   * Unread is the work under it a reader could not answer, in no group.
-   */
-  unread: string[];
 }
 /**
- * DeliveryEntry is one Delivery under an epic it sits under: its own asks and
- * its work in the four groups.
+ * DeliveryEntry is one Delivery under an epic it sits under: the two views of
+ * the work it holds nearest, and its closed work.
  */
 export interface DeliveryEntry {
   id: string;
-  asks: string[];
-  groups: GroupList[];
-  unread: string[];
+  needs: Need[];
+  queue: WorkQueue;
+  closed: string[];
 }
 /**
- * GroupList is the rows of one group, in priority order and then oldest
- * first. A group with no row is not listed.
+ * Need is one entry of a Needs you view: a need, and the beads it holds that
+ * the view covers, its work in the Work queue's order and then the epics and
+ * Deliveries it holds. A view lists its needs in the order of the first bead
+ * each holds in the Work queue, so the top need is the one holding up the
+ * front of the queue. A need that is itself queued work counts its own place
+ * too. A need that holds no queued work comes after those that do, by the
+ * first unscheduled work it holds, and one that holds no work at all comes
+ * last, by priority, then oldest, then id.
  */
-export interface GroupList {
-  group: Group;
-  ids: string[];
+export interface Need {
+  id: string;
+  holds: string[];
 }
 /**
- * NeedsYou is the Needs you page. Count is the asks that hold or concern work
- * under an epic, each counted once, and it reaches zero when none does.
+ * NeedsYou is the Needs you page: every open need in the rig, in the order a
+ * view lists them. Count is the needs that hold or concern work under an
+ * epic, each counted once, and it reaches zero when none does.
  */
 export interface NeedsYou {
   count: number /* int */;
-  /**
-   * InConversation is every ask a conversation answers, under an epic or
-   * not.
-   */
-  in_conversation: string[];
-  /**
-   * NoConversationYet is the other asks under each epic they hold or
-   * concern work under, epics in priority order. An ask under two epics is
-   * listed under each.
-   */
-  no_conversation_yet: EpicAsks[];
-  /**
-   * NoEpic is the asks no conversation answers that hold or concern no work
-   * under an epic. No ask under no epic is counted, in conversation or not.
-   */
-  no_epic: string[];
+  needs: Need[];
 }
 /**
- * EpicAsks is the asks under one epic.
+ * WorkQueue is a Work queue view: the work in the order it is expected to land
+ * (services/gctk/queue). Queue is the work the city takes as things stand: by
+ * bd graph's execution layers, what can go now first, and within a layer in
+ * the order the pool claims ready work, priority, then oldest, then id.
+ * NotScheduled comes after it, in the same order: work nobody has scheduled,
+ * which the city takes none of until someone routes it, and work that waits on
+ * such work. Unread is the work a reader could not answer, in priority order
+ * and then oldest first.
  */
-export interface EpicAsks {
-  epic: string;
-  asks: string[];
-}
-/**
- * Section is one section of the Work queue: its rows, or its parts.
- */
-export interface Section {
-  name: string;
-  rows: Entry[];
-  parts?: Section[];
-}
-/**
- * Entry is one row of a section, with the rows drawn beneath it: a gate with
- * the work it holds.
- */
-export interface Entry {
-  id: string;
-  children?: string[];
+export interface WorkQueue {
+  queue: string[];
+  not_scheduled: string[];
+  unread: string[];
 }
 /**
  * PriorityGroup is the rows of one priority.

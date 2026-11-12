@@ -7,6 +7,7 @@ import (
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/conversation"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/queue"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
@@ -190,13 +191,26 @@ type built struct {
 	verdict map[string]verdict
 	asks    map[string]*askAnswer
 	rows    map[string]Row
+	// order is the rig's open work in the Work queue's order, the queue and
+	// then the work after it, and pos is each piece's place in it. after marks
+	// the work after the queue, and unread is the work a reader could not
+	// answer, which has no place.
+	order  []string
+	pos    map[string]int
+	after  map[string]bool
+	unread []string
+	// needs is every open need, and concern is what each one concerns: itself,
+	// the beads it holds, and the bead its conversation is about.
+	needs   []string
+	concern map[string][]string
 }
 
 func build(g *gathered) Document {
 	ix := newIndex(g)
-	bt := &built{ix: ix, verdict: map[string]verdict{}, asks: map[string]*askAnswer{}, rows: map[string]Row{}}
+	bt := &built{ix: ix, verdict: map[string]verdict{}, asks: map[string]*askAnswer{}, rows: map[string]Row{},
+		pos: map[string]int{}, after: map[string]bool{}, concern: map[string][]string{}}
 
-	// Row 2 first: an ask's words are what an own wait on it reads.
+	// Row 2 first: the table reads whether a row is an ask.
 	for _, id := range ix.rows {
 		b := ix.beads[id]
 		k := ix.kinds[id]
@@ -224,15 +238,9 @@ func build(g *gathered) Document {
 			bt.asks[id] = a
 		}
 	}
-	owedSignal := func(o prstatus.Blocker) string {
-		if a, ok := bt.asks[o.ID]; ok {
-			return a.words
-		}
-		return ""
-	}
 	for _, id := range ix.rows {
 		in := tableInput{b: ix.beads[id], kind: ix.kinds[id], ask: bt.asks[id], facts: factsOf(g, id),
-			prUnread: g.noFacts[id], owedSignal: owedSignal}
+			prUnread: g.noFacts[id]}
 		if h, ok := g.holds[id]; ok {
 			in.holds = &h
 			if root := rootOf(id, h); root != "" {
@@ -249,13 +257,16 @@ func build(g *gathered) Document {
 	for _, id := range ix.rows {
 		bt.rows[id] = bt.row(id)
 	}
-	bt.linkAsks()
+	bt.place()
+	bt.linkWaits()
+	bt.linkHolds()
+	bt.findNeeds()
 	bt.count()
 
 	doc := Document{Rig: g.rig, Rows: bt.rows}
 	doc.Epics = bt.epicsPage()
-	doc.NeedsYou = bt.needsYouPage(doc.Epics)
-	doc.WorkQueue = bt.workQueuePage()
+	doc.NeedsYou = bt.needsYouPage()
+	doc.WorkQueue = bt.queueOf(func(string) bool { return true })
 	doc.Unprioritized = bt.unprioritizedPage()
 	return doc
 }
@@ -288,7 +299,7 @@ func (bt *built) row(id string) Row {
 	v := bt.verdict[id]
 	r := Row{ID: id, Kind: k, Priority: b.Priority, Title: b.Title, Status: status(b), CreatedAt: b.CreatedAt,
 		Assignee: b.Assignee, Signal: v.signal, Note: v.note, Group: v.group, Line2: line2(b, k), Line3: v.line3,
-		Waits: []Ref{}, WaitedOnBy: []Ref{}, Asks: []string{}, Holds: []string{}}
+		Waits: []Ref{}, WaitedOnBy: []Ref{}, Holds: []string{}}
 	if a := bt.asks[id]; a != nil {
 		r.Ask = a.kind
 		if a.kind == AskPullRequest {
@@ -373,37 +384,79 @@ func (bt *built) askID(id string) string {
 	return ""
 }
 
-// linkAsks fills what waits on each row, the asks that stop each row's work,
-// and the work each ask holds.
-func (bt *built) linkAsks() {
+// isWork reports whether a row is work a Work queue lists: an open piece of
+// work that does not carry hold:mayor, which keeps it on the Unprioritized
+// page until the Product Owner places it.
+func (bt *built) isWork(id string) bool {
+	b := bt.ix.beads[id]
+	return bt.ix.kinds[id] == KindWork && isOpen(b) && !carriesHoldMayor(b)
+}
+
+// place puts the rig's open work in the Work queue's order once, through
+// services/gctk/queue, so every view lists work in that one order: the queue,
+// then the work after it. A piece of work waits on what waits says holds it,
+// less a review or a rework anchored to it, whose work is its own. Work a
+// reader could not answer has no place and is listed apart.
+func (bt *built) place() {
 	ix := bt.ix
+	anchorOf := map[string]string{}
+	for _, b := range ix.g.open {
+		if b.Anchor != "" {
+			anchorOf[b.ID] = b.Anchor
+		}
+	}
+	var items []queue.Item
 	for _, id := range ix.rows {
-		h, ok := ix.g.holds[id]
+		if !bt.isWork(id) {
+			continue
+		}
+		if bt.verdict[id].out == outUnread {
+			bt.unread = append(bt.unread, id)
+			continue
+		}
+		b, h := ix.beads[id], ix.g.holds[id]
+		items = append(items, queue.Item{ID: id, Priority: b.Priority, CreatedAt: b.CreatedAt, Status: b.Status,
+			Waits:     queue.Waiting(h, func(x string) string { return anchorOf[x] }),
+			Scheduled: queue.Scheduled(h, b.RoutedTo, b.Assignee)})
+	}
+	o := queue.Order(items)
+	for _, p := range o.Queue {
+		bt.pos[p.ID] = len(bt.order)
+		bt.order = append(bt.order, p.ID)
+	}
+	for _, p := range o.NotScheduled {
+		bt.pos[p.ID] = len(bt.order)
+		bt.order = append(bt.order, p.ID)
+		bt.after[p.ID] = true
+	}
+	bt.sortIDs(bt.unread)
+}
+
+// linkWaits fills what waits on each row: the open beads whose own waits name
+// it.
+func (bt *built) linkWaits() {
+	for _, id := range bt.ix.rows {
+		h, ok := bt.ix.g.holds[id]
 		if !ok {
 			continue
 		}
-		r := bt.rows[id]
 		for _, w := range h.Waits {
 			if w.Ancestor != "" {
 				continue
 			}
 			if far, ok := bt.rows[w.ID]; ok {
-				far.WaitedOnBy = append(far.WaitedOnBy, Ref{ID: id, Title: r.Title})
+				far.WaitedOnBy = append(far.WaitedOnBy, Ref{ID: id, Title: bt.rows[id].Title})
 				bt.rows[w.ID] = far
 			}
-			if a := bt.askID(w.ID); a != "" && !slices.Contains(r.Asks, a) {
-				r.Asks = append(r.Asks, a)
-			}
-		}
-		bt.rows[id] = r
-	}
-	for conv, subj := range ix.subject {
-		a := bt.askID(conv)
-		if r, ok := bt.rows[subj]; ok && a != "" && !slices.Contains(r.Asks, a) {
-			r.Asks = append(r.Asks, a)
-			bt.rows[subj] = r
 		}
 	}
+}
+
+// linkHolds fills the beads each need holds through any chain of waits: each
+// piece of work, epic and Delivery whose Holding answer names the need, in the
+// Work queue's order.
+func (bt *built) linkHolds() {
+	ix := bt.ix
 	for _, id := range ix.rows {
 		k := ix.kinds[id]
 		if k != KindWork && k != KindEpic && k != KindDelivery {
@@ -430,14 +483,52 @@ func (bt *built) linkAsks() {
 		}
 	}
 	for id, r := range bt.rows {
-		bt.sortIDs(r.Asks)
-		bt.sortIDs(r.Holds)
+		bt.inOrder(r.Holds)
 		bt.rows[id] = r
 	}
 }
 
-// count makes each epic's and Delivery's counts: the work under it at any
-// depth, by group, each row once however many paths lead to it.
+// inOrder sorts ids into the Work queue's order: the work it places by its
+// place, then every other row by priority, then oldest, then id.
+func (bt *built) inOrder(ids []string) {
+	slices.SortFunc(ids, func(a, b string) int {
+		pa, placedA := bt.pos[a]
+		pb, placedB := bt.pos[b]
+		switch {
+		case placedA && placedB:
+			return cmp.Compare(pa, pb)
+		case placedA:
+			return -1
+		case placedB:
+			return 1
+		}
+		ra, rb := bt.rows[a], bt.rows[b]
+		return cmp.Or(cmp.Compare(ra.Priority, rb.Priority), cmp.Compare(ra.CreatedAt, rb.CreatedAt), cmp.Compare(a, b))
+	})
+}
+
+// findNeeds lists every open need, and what each one concerns: itself, the
+// beads it holds, and the bead its conversation is about.
+func (bt *built) findNeeds() {
+	ix := bt.ix
+	for _, id := range ix.rows {
+		if bt.asks[id] == nil || !isOpen(ix.beads[id]) {
+			continue
+		}
+		bt.needs = append(bt.needs, id)
+		c := append([]string{id}, bt.rows[id].Holds...)
+		for _, x := range []string{id, bt.rows[id].Conversation} {
+			if s := ix.subject[x]; x != "" && s != "" && !slices.Contains(c, s) {
+				c = append(c, s)
+			}
+		}
+		bt.concern[id] = c
+	}
+}
+
+// count makes each epic's and Delivery's counts at any depth: the needs that
+// hold or concern it, each once, and its work by where it sits, each row once
+// however many paths lead to it.
 func (bt *built) count() {
 	ix := bt.ix
 	counts := map[string]*Counts{}
@@ -450,17 +541,28 @@ func (bt *built) count() {
 		if ix.kinds[id] != KindWork {
 			continue
 		}
+		_, placed := bt.pos[id]
 		for _, a := range ix.ancestors(id) {
 			c := counts[a]
-			switch bt.rows[id].Group {
-			case GroupWaitingOnYou:
-				c.WaitingOnYou++
-			case GroupQueued:
-				c.Queued++
-			case GroupNotMoving:
-				c.NotMoving++
-			case GroupClosed:
+			switch {
+			case !isOpen(ix.beads[id]):
 				c.Closed++
+			case bt.after[id]:
+				c.NotScheduled++
+			case placed:
+				c.Queue++
+			}
+		}
+	}
+	for _, n := range bt.needs {
+		var counted []string
+		for _, x := range bt.concern[n] {
+			for _, a := range append([]string{x}, ix.ancestors(x)...) {
+				if a == n || counts[a] == nil || slices.Contains(counted, a) {
+					continue
+				}
+				counted = append(counted, a)
+				counts[a].Needs++
 			}
 		}
 	}
@@ -479,32 +581,102 @@ func (bt *built) sortIDs(ids []string) {
 	})
 }
 
-var groupOrder = []Group{GroupWaitingOnYou, GroupQueued, GroupNotMoving, GroupClosed}
+// under reports whether a row sits nearest under a container: the views of an
+// epic or a Delivery cover the rows it holds nearest, so a row under a
+// Delivery is listed under the Delivery and not again under its epic.
+func (bt *built) under(container string) func(string) bool {
+	return func(id string) bool { return slices.Contains(bt.ix.within[id], container) }
+}
 
-// groupsOf splits the work rows a container holds nearest into its groups, and
-// the rows no group holds. A row under two containers is in both.
-func (bt *built) groupsOf(container string) ([]GroupList, []string) {
-	by := map[Group][]string{}
-	unread := []string{}
-	for _, id := range bt.ix.rows {
-		if bt.ix.kinds[id] != KindWork || !slices.Contains(bt.ix.within[id], container) {
+// queueOf is a Work queue view over the work covers admits, in the one order
+// place made.
+func (bt *built) queueOf(covers func(string) bool) WorkQueue {
+	q := WorkQueue{Queue: []string{}, NotScheduled: []string{}, Unread: []string{}}
+	for _, id := range bt.order {
+		switch {
+		case !covers(id):
+		case bt.after[id]:
+			q.NotScheduled = append(q.NotScheduled, id)
+		default:
+			q.Queue = append(q.Queue, id)
+		}
+	}
+	for _, id := range bt.unread {
+		if covers(id) {
+			q.Unread = append(q.Unread, id)
+		}
+	}
+	return q
+}
+
+// needsOf is a container's Needs you view: each need that concerns it or a
+// row it holds nearest, other than itself, with the rows it holds there.
+func (bt *built) needsOf(container string) []Need {
+	covers := bt.under(container)
+	out := []Need{}
+	for _, n := range bt.needs {
+		if n == container || !slices.ContainsFunc(bt.concern[n], func(x string) bool { return x == container || covers(x) }) {
 			continue
 		}
-		if g := bt.rows[id].Group; g != "" {
-			by[g] = append(by[g], id)
-		} else {
-			unread = append(unread, id)
+		held := []string{}
+		for _, x := range bt.rows[n].Holds {
+			if covers(x) {
+				held = append(held, x)
+			}
+		}
+		out = append(out, Need{ID: n, Holds: held})
+	}
+	bt.sortNeeds(out, covers)
+	return out
+}
+
+// sortNeeds puts a view's needs in need order: by the first place in the Work
+// queue's order among the beads listed beneath each, and the need itself when
+// it is work the view covers, so the top need is the one holding up the front
+// of the queue. A need with no such place comes last. Ties go by priority,
+// then oldest, then id.
+func (bt *built) sortNeeds(needs []Need, covers func(string) bool) {
+	first := map[string]int{}
+	for _, n := range needs {
+		best := -1
+		at := n.Holds
+		if covers(n.ID) {
+			at = append([]string{n.ID}, n.Holds...)
+		}
+		for _, x := range at {
+			if p, ok := bt.pos[x]; ok && (best < 0 || p < best) {
+				best = p
+			}
+		}
+		first[n.ID] = best
+	}
+	slices.SortFunc(needs, func(a, b Need) int {
+		if fa, fb := first[a.ID], first[b.ID]; fa != fb {
+			switch {
+			case fa < 0:
+				return 1
+			case fb < 0:
+				return -1
+			}
+			return cmp.Compare(fa, fb)
+		}
+		ra, rb := bt.rows[a.ID], bt.rows[b.ID]
+		return cmp.Or(cmp.Compare(ra.Priority, rb.Priority), cmp.Compare(ra.CreatedAt, rb.CreatedAt), cmp.Compare(a.ID, b.ID))
+	})
+}
+
+// closedOf is a container's closed work, the closed work it holds nearest, by
+// priority, then oldest, then id.
+func (bt *built) closedOf(container string) []string {
+	covers := bt.under(container)
+	out := []string{}
+	for _, id := range bt.ix.rows {
+		if bt.ix.kinds[id] == KindWork && !isOpen(bt.ix.beads[id]) && covers(id) {
+			out = append(out, id)
 		}
 	}
-	lists := []GroupList{}
-	for _, g := range groupOrder {
-		if ids := by[g]; len(ids) > 0 {
-			bt.sortIDs(ids)
-			lists = append(lists, GroupList{Group: g, IDs: ids})
-		}
-	}
-	bt.sortIDs(unread)
-	return lists, unread
+	bt.sortIDs(out)
+	return out
 }
 
 func (bt *built) epicsPage() []EpicEntry {
@@ -517,7 +689,8 @@ func (bt *built) epicsPage() []EpicEntry {
 	bt.sortIDs(epics)
 	out := []EpicEntry{}
 	for _, e := range epics {
-		entry := EpicEntry{ID: e, Asks: bt.rows[e].Asks, Deliveries: []DeliveryEntry{}}
+		entry := EpicEntry{ID: e, Needs: bt.needsOf(e), Queue: bt.queueOf(bt.under(e)), Closed: bt.closedOf(e),
+			Deliveries: []DeliveryEntry{}}
 		var dels []string
 		for _, id := range bt.ix.rows {
 			if bt.ix.kinds[id] == KindDelivery && slices.Contains(bt.ix.within[id], e) {
@@ -526,145 +699,26 @@ func (bt *built) epicsPage() []EpicEntry {
 		}
 		bt.sortIDs(dels)
 		for _, d := range dels {
-			de := DeliveryEntry{ID: d, Asks: bt.rows[d].Asks}
-			de.Groups, de.Unread = bt.groupsOf(d)
-			entry.Deliveries = append(entry.Deliveries, de)
+			entry.Deliveries = append(entry.Deliveries, DeliveryEntry{ID: d, Needs: bt.needsOf(d),
+				Queue: bt.queueOf(bt.under(d)), Closed: bt.closedOf(d)})
 		}
-		entry.Groups, entry.Unread = bt.groupsOf(e)
 		out = append(out, entry)
 	}
 	return out
 }
 
-func (bt *built) needsYouPage(epics []EpicEntry) NeedsYou {
-	ix := bt.ix
-	var asks []string
-	for _, id := range ix.rows {
-		if bt.asks[id] != nil && isOpen(ix.beads[id]) {
-			asks = append(asks, id)
-		}
-	}
-	bt.sortIDs(asks)
-	epicsOfAsk := map[string][]string{}
-	for _, a := range asks {
-		concern := append([]string{a}, bt.rows[a].Holds...)
-		for _, c := range []string{a, bt.rows[a].Conversation} {
-			if s := ix.subject[c]; s != "" {
-				concern = append(concern, s)
-			}
-		}
-		var es []string
-		for _, c := range concern {
-			for _, e := range ix.epicsOf(c) {
-				if !slices.Contains(es, e) {
-					es = append(es, e)
-				}
-			}
-		}
-		epicsOfAsk[a] = es
-	}
-	n := NeedsYou{InConversation: []string{}, NoConversationYet: []EpicAsks{}, NoEpic: []string{}}
-	for _, a := range asks {
-		if len(epicsOfAsk[a]) > 0 {
+// needsYouPage is every open need in the rig, each with every bead it holds,
+// in need order. It counts the needs that hold or concern work under an epic.
+func (bt *built) needsYouPage() NeedsYou {
+	n := NeedsYou{Needs: []Need{}}
+	for _, id := range bt.needs {
+		n.Needs = append(n.Needs, Need{ID: id, Holds: slices.Clone(bt.rows[id].Holds)})
+		if slices.ContainsFunc(bt.concern[id], func(x string) bool { return len(bt.ix.epicsOf(x)) > 0 }) {
 			n.Count++
 		}
-		switch {
-		case bt.asks[a].kind == AskConversation || bt.rows[a].Conversation != "":
-			n.InConversation = append(n.InConversation, a)
-		case len(epicsOfAsk[a]) == 0:
-			n.NoEpic = append(n.NoEpic, a)
-		}
 	}
-	for _, e := range epics {
-		var under []string
-		for _, a := range asks {
-			if bt.asks[a].kind == AskConversation || bt.rows[a].Conversation != "" {
-				continue
-			}
-			if slices.Contains(epicsOfAsk[a], e.ID) {
-				under = append(under, a)
-			}
-		}
-		if len(under) > 0 {
-			n.NoConversationYet = append(n.NoConversationYet, EpicAsks{Epic: e.ID, Asks: under})
-		}
-	}
+	bt.sortNeeds(n.Needs, func(string) bool { return true })
 	return n
-}
-
-// The Work queue's sections, in order.
-const (
-	sectionInFlight     = "In flight"
-	sectionPullRequest  = "Pull request"
-	sectionQueued       = "Queued"
-	sectionBehind       = "Waiting behind other work"
-	sectionEndsOnYou    = "Ends on you"
-	sectionBehindRest   = "The rest"
-	sectionHeldByGate   = "Held by a gate"
-	sectionDeferred     = "Deferred"
-	sectionNotScheduled = "Not scheduled"
-	sectionUnread       = "Unread"
-)
-
-func (bt *built) workQueuePage() []Section {
-	ix := bt.ix
-	by := map[outcome][]string{}
-	gates := map[string][]string{}
-	for _, id := range ix.rows {
-		b := ix.beads[id]
-		if ix.kinds[id] != KindWork || !isOpen(b) || carriesHoldMayor(b) {
-			continue
-		}
-		v := bt.verdict[id]
-		if v.out == outHeldByGate {
-			gates[v.gate] = append(gates[v.gate], id)
-			continue
-		}
-		by[v.out] = append(by[v.out], id)
-	}
-	section := func(name string, out outcome) Section {
-		ids := by[out]
-		bt.sortIDs(ids)
-		s := Section{Name: name, Rows: []Entry{}}
-		for _, id := range ids {
-			s.Rows = append(s.Rows, Entry{ID: id})
-		}
-		return s
-	}
-	var sections []Section
-	add := func(s Section) {
-		if len(s.Rows) > 0 || len(s.Parts) > 0 {
-			sections = append(sections, s)
-		}
-	}
-	add(section(sectionInFlight, outInFlight))
-	add(section(sectionPullRequest, outPullRequest))
-	add(section(sectionQueued, outQueued))
-	behind := Section{Name: sectionBehind, Rows: []Entry{}}
-	for _, p := range []Section{section(sectionEndsOnYou, outEndsOnYou), section(sectionBehindRest, outQueuedBehind)} {
-		if len(p.Rows) > 0 {
-			behind.Parts = append(behind.Parts, p)
-		}
-	}
-	add(behind)
-	held := Section{Name: sectionHeldByGate, Rows: []Entry{}}
-	var gateIDs []string
-	for g := range gates {
-		gateIDs = append(gateIDs, g)
-	}
-	bt.sortIDs(gateIDs)
-	for _, g := range gateIDs {
-		bt.sortIDs(gates[g])
-		held.Rows = append(held.Rows, Entry{ID: g, Children: gates[g]})
-	}
-	add(held)
-	add(section(sectionDeferred, outNotOpen))
-	add(section(sectionNotScheduled, outNotScheduled))
-	add(section(sectionUnread, outUnread))
-	if sections == nil {
-		sections = []Section{}
-	}
-	return sections
 }
 
 // carriesHoldMayor reports whether a bead carries hold:mayor, the label that

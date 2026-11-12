@@ -11,7 +11,8 @@ import (
 
 // graph is a small rig: two epics, a Delivery, the work under them, a human
 // gate holding work under both epics, a park gate, and the Product Owner's
-// desk.
+// desk. tk-b.1 and tk-b.2 are armed and tk-loose is routed to a pool, so the
+// city takes them, and nobody has scheduled tk-a.1.1 or tk-loose2.
 func graph() *gathered {
 	parent := func(p string) []listing.Edge { return []listing.Edge{{ID: p, Type: "parent-child"}} }
 	blocks := func(id string) listing.Edge { return listing.Edge{ID: id, Type: "blocks"} }
@@ -22,7 +23,7 @@ func graph() *gathered {
 		{ID: "tk-a.1.1", Title: "story under the delivery", Status: "open", Priority: 2, IssueType: "task", Edges: append(parent("tk-a.1"), blocks("tk-q")), CreatedAt: "2026-01-04"},
 		{ID: "tk-b.1", Title: "story under B", Status: "open", Priority: 2, IssueType: "task", Edges: append(parent("tk-b"), blocks("tk-q")), CreatedAt: "2026-01-05"},
 		{ID: "tk-b.2", Title: "behind B's story", Status: "open", Priority: 2, IssueType: "task", Edges: append(parent("tk-b"), blocks("tk-b.1")), CreatedAt: "2026-01-06"},
-		{ID: "tk-loose", Title: "parked work", Status: "open", Priority: 3, IssueType: "bug", Edges: []listing.Edge{blocks("tk-park")}, CreatedAt: "2026-01-07"},
+		{ID: "tk-loose", Title: "parked work", Status: "open", Priority: 3, IssueType: "bug", Edges: []listing.Edge{blocks("tk-park")}, RoutedTo: "gc-toolkit/gc-toolkit.polecat", CreatedAt: "2026-01-07"},
 		{ID: "tk-loose2", Title: "more parked work", Status: "open", Priority: 2, IssueType: "bug", Edges: []listing.Edge{blocks("tk-park")}, CreatedAt: "2026-01-08"},
 		{ID: "tk-desk1", Title: "new idea", Status: "open", Priority: 2, IssueType: "task", Labels: []string{" Hold:Mayor "}, CreatedAt: "2026-01-09"},
 		{ID: "tk-desk2", Title: "newer idea", Status: "open", Priority: 2, IssueType: "task", Labels: []string{"hold:mayor"}, CreatedAt: "2026-01-10"},
@@ -37,13 +38,14 @@ func graph() *gathered {
 	wpark := waits.Wait{ID: "tk-park", Type: "blocks", Title: "parked", Status: "open", IssueType: "gate"}
 	q := prstatus.Blocker{ID: "tk-q", Title: "which way?", Status: "open", IssueType: "gate", AwaitType: "human"}
 	clear := func(id string) waits.Holds { return waits.Holds{ID: id, Status: waits.Clear} }
+	armed := &waits.Arm{Target: "gc-toolkit/gc-toolkit.polecat"}
 	return &gathered{
 		rig: "gc-toolkit", open: open, closed: closed,
 		holds: map[string]waits.Holds{
 			"tk-a": clear("tk-a"), "tk-b": clear("tk-b"), "tk-a.1": clear("tk-a.1"),
 			"tk-a.1.1":  {ID: "tk-a.1.1", Status: waits.Blocked, Waits: []waits.Wait{wq}},
-			"tk-b.1":    {ID: "tk-b.1", Status: waits.Blocked, Waits: []waits.Wait{wq}},
-			"tk-b.2":    {ID: "tk-b.2", Status: waits.Blocked, Waits: []waits.Wait{{ID: "tk-b.1", Type: "blocks", Title: "story under B", Status: "open", IssueType: "task"}}},
+			"tk-b.1":    {ID: "tk-b.1", Status: waits.Blocked, Waits: []waits.Wait{wq}, Arm: armed},
+			"tk-b.2":    {ID: "tk-b.2", Status: waits.Blocked, Waits: []waits.Wait{{ID: "tk-b.1", Type: "blocks", Title: "story under B", Status: "open", IssueType: "task"}}, Arm: armed},
 			"tk-loose":  {ID: "tk-loose", Status: waits.Blocked, Waits: []waits.Wait{wpark}},
 			"tk-loose2": {ID: "tk-loose2", Status: waits.Blocked, Waits: []waits.Wait{wpark}},
 			"tk-desk1":  clear("tk-desk1"), "tk-desk2": clear("tk-desk2"),
@@ -61,25 +63,29 @@ func graph() *gathered {
 	}
 }
 
+func sameNeed(a, b Need) bool { return a.ID == b.ID && slices.Equal(a.Holds, b.Holds) }
+
+func sameQueue(a, b WorkQueue) bool {
+	return slices.Equal(a.Queue, b.Queue) && slices.Equal(a.NotScheduled, b.NotScheduled) && slices.Equal(a.Unread, b.Unread)
+}
+
 func TestPages(t *testing.T) {
 	doc := build(graph())
 
-	t.Run("an ask under two epics is listed under each and counted once", func(t *testing.T) {
+	t.Run("the work queue lists the rig's work but the desk, the queue first and in layers", func(t *testing.T) {
+		want := WorkQueue{Queue: []string{"tk-b.1", "tk-loose", "tk-b.2"}, NotScheduled: []string{"tk-a.1.1", "tk-loose2"}, Unread: []string{}}
+		if !sameQueue(doc.WorkQueue, want) {
+			t.Errorf("work queue = %+v, want %+v", doc.WorkQueue, want)
+		}
+	})
+
+	t.Run("a need lists every bead it holds, in the Work queue's order", func(t *testing.T) {
+		if got := doc.Rows["tk-q"].Holds; !slices.Equal(got, []string{"tk-b.1", "tk-b.2", "tk-a.1.1"}) {
+			t.Errorf("tk-q holds %v, want the queued work first and in its order", got)
+		}
 		n := doc.NeedsYou
-		if n.Count != 1 {
-			t.Errorf("count = %d, want 1", n.Count)
-		}
-		var under []string
-		for _, e := range n.NoConversationYet {
-			if slices.Contains(e.Asks, "tk-q") {
-				under = append(under, e.Epic)
-			}
-		}
-		if !slices.Equal(under, []string{"tk-a", "tk-b"}) {
-			t.Errorf("tk-q is listed under %v, want both epics in priority order", under)
-		}
-		if got := doc.Rows["tk-q"].Holds; !slices.Equal(got, []string{"tk-a.1.1", "tk-b.1", "tk-b.2"}) {
-			t.Errorf("tk-q holds %v", got)
+		if n.Count != 1 || !slices.EqualFunc(n.Needs, []Need{{ID: "tk-q", Holds: []string{"tk-b.1", "tk-b.2", "tk-a.1.1"}}}, sameNeed) {
+			t.Errorf("Needs you counts %d and lists %+v", n.Count, n.Needs)
 		}
 	})
 
@@ -87,72 +93,59 @@ func TestPages(t *testing.T) {
 		g := graph()
 		for _, id := range []string{"tk-a.1.1", "tk-b.1", "tk-b.2"} {
 			delete(g.holding, id)
-			g.holds[id] = waits.Holds{ID: id, Status: waits.Clear}
+			h := g.holds[id]
+			h.Status, h.Waits = waits.Clear, nil
+			g.holds[id] = h
 		}
-		if n := build(g).NeedsYou; n.Count != 0 || !slices.Equal(n.NoEpic, []string{"tk-q"}) {
-			t.Errorf("count = %d, no epic = %v; want 0 and the gate listed under no epic", n.Count, n.NoEpic)
+		n := build(g).NeedsYou
+		if n.Count != 0 || !slices.EqualFunc(n.Needs, []Need{{ID: "tk-q", Holds: []string{}}}, sameNeed) {
+			t.Errorf("count = %d, needs = %+v; want 0 and the gate listed, holding nothing", n.Count, n.Needs)
 		}
 	})
 
-	t.Run("the epics page nests a Delivery and groups the work", func(t *testing.T) {
+	t.Run("each epic and Delivery shows the two views of the work it holds nearest, and its closed work", func(t *testing.T) {
 		if len(doc.Epics) != 2 || doc.Epics[0].ID != "tk-a" || doc.Epics[1].ID != "tk-b" {
 			t.Fatalf("epics = %+v", doc.Epics)
 		}
 		a := doc.Epics[0]
+		if len(a.Needs) != 0 || !sameQueue(a.Queue, WorkQueue{Queue: []string{}, NotScheduled: []string{}, Unread: []string{}}) {
+			t.Errorf("tk-a lists %+v and %+v of its own, want nothing: its work sits under its Delivery", a.Needs, a.Queue)
+		}
 		if len(a.Deliveries) != 1 || a.Deliveries[0].ID != "tk-a.1" {
 			t.Fatalf("deliveries = %+v", a.Deliveries)
 		}
-		if got := a.Deliveries[0].Groups; len(got) != 1 || got[0].Group != GroupWaitingOnYou || !slices.Equal(got[0].IDs, []string{"tk-a.1.1"}) {
-			t.Errorf("delivery groups = %+v", got)
+		d := a.Deliveries[0]
+		if !slices.EqualFunc(d.Needs, []Need{{ID: "tk-q", Holds: []string{"tk-a.1.1"}}}, sameNeed) ||
+			!sameQueue(d.Queue, WorkQueue{Queue: []string{}, NotScheduled: []string{"tk-a.1.1"}, Unread: []string{}}) {
+			t.Errorf("the Delivery lists %+v and %+v", d.Needs, d.Queue)
 		}
-		if c := doc.Rows["tk-a"].Counts; c == nil || c.WaitingOnYou != 1 {
-			t.Errorf("tk-a counts the Delivery's work at depth: %+v", c)
+		b := doc.Epics[1]
+		if !slices.EqualFunc(b.Needs, []Need{{ID: "tk-q", Holds: []string{"tk-b.1", "tk-b.2"}}}, sameNeed) {
+			t.Errorf("tk-b's Needs you = %+v, want the question with its own work beneath it", b.Needs)
+		}
+		if !sameQueue(b.Queue, WorkQueue{Queue: []string{"tk-b.1", "tk-b.2"}, NotScheduled: []string{}, Unread: []string{}}) {
+			t.Errorf("tk-b's Work queue = %+v", b.Queue)
+		}
+		if !slices.Equal(b.Closed, []string{"tk-b.0"}) {
+			t.Errorf("tk-b's closed work = %v", b.Closed)
+		}
+		for id, want := range map[string]Counts{
+			"tk-a":   {Needs: 1, NotScheduled: 1},
+			"tk-a.1": {Needs: 1, NotScheduled: 1},
+			"tk-b":   {Needs: 1, Queue: 2, Closed: 1},
+		} {
+			if c := doc.Rows[id].Counts; c == nil || *c != want {
+				t.Errorf("%s counts %+v, want %+v", id, c, want)
+			}
 		}
 		if got := doc.Rows["tk-a.1"].Line2; got != "Aim: land one" {
 			t.Errorf("a Delivery's line 2 is its aim, got %q", got)
-		}
-		b := doc.Epics[1]
-		want := []GroupList{{Group: GroupWaitingOnYou, IDs: []string{"tk-b.1", "tk-b.2"}}, {Group: GroupClosed, IDs: []string{"tk-b.0"}}}
-		if !slices.EqualFunc(b.Groups, want, func(x, y GroupList) bool { return x.Group == y.Group && slices.Equal(x.IDs, y.IDs) }) {
-			t.Errorf("tk-b groups = %+v, want %+v", b.Groups, want)
-		}
-		if got := doc.Rows["tk-b.1"].Asks; !slices.Equal(got, []string{"tk-q"}) {
-			t.Errorf("tk-b.1's asks = %v, want the gate it waits on", got)
 		}
 		if got := doc.Rows["tk-b.1"].Anchored; len(got) != 1 || got[0].ID != "tk-review" {
 			t.Errorf("tk-b.1 lists its review in Details: %+v", got)
 		}
 		if _, ok := doc.Rows["tk-review"]; ok {
 			t.Error("a bead that carries anchor_bead has no row of its own")
-		}
-	})
-
-	t.Run("the work queue leaves out the desk and work waiting on you directly", func(t *testing.T) {
-		var listed []string
-		var held *Section
-		for i, s := range doc.WorkQueue {
-			for _, e := range s.Rows {
-				listed = append(listed, e.ID)
-			}
-			for _, p := range s.Parts {
-				for _, e := range p.Rows {
-					listed = append(listed, e.ID)
-				}
-			}
-			if s.Name == sectionHeldByGate {
-				held = &doc.WorkQueue[i]
-			}
-		}
-		for _, id := range []string{"tk-desk1", "tk-desk2", "tk-a.1.1", "tk-b.1"} {
-			if slices.Contains(listed, id) {
-				t.Errorf("%s is on the work queue", id)
-			}
-		}
-		if !slices.Contains(listed, "tk-b.2") {
-			t.Error("work that ends on you further along is on the work queue")
-		}
-		if held == nil || len(held.Rows) != 1 || held.Rows[0].ID != "tk-park" || !slices.Equal(held.Rows[0].Children, []string{"tk-loose2", "tk-loose"}) {
-			t.Errorf("held by a gate = %+v, want the gate once with its work beneath in priority order", held)
 		}
 	})
 
@@ -169,6 +162,79 @@ func TestPages(t *testing.T) {
 	})
 }
 
+// TestNeedOrder holds a view's needs to the order of the first bead each holds
+// in the Work queue. tk-pr's pull request waits on the operator's review, and
+// it is queued work itself, at the front of the queue. tk-g1 holds queued work,
+// tk-g2 holds only work nobody scheduled, and decision tk-d holds nothing.
+func TestNeedOrder(t *testing.T) {
+	parent := listing.Edge{ID: "tk-e", Type: "parent-child"}
+	blocks := func(id string) listing.Edge { return listing.Edge{ID: id, Type: "blocks"} }
+	armed := &waits.Arm{Target: "gc-toolkit/gc-toolkit.polecat"}
+	wait := func(id, issueType, awaitType string) waits.Wait {
+		return waits.Wait{ID: id, Type: "blocks", Status: "open", IssueType: issueType, AwaitType: awaitType}
+	}
+	gate := func(id string) prstatus.Blocker {
+		return prstatus.Blocker{ID: id, Status: "open", IssueType: "gate", AwaitType: "human"}
+	}
+	pr := prstatus.Blocker{ID: "tk-pr", Status: "open", IssueType: "task", Metadata: map[string]string{"merge_result": "pull_request"}}
+	g := &gathered{rig: "gc-toolkit",
+		open: []bead{
+			{ID: "tk-e", Title: "Epic", Status: "open", Priority: 1, IssueType: "epic", Epic: listing.Epic{Hypothesis: "it works"}, CreatedAt: "2026-01-01"},
+			{ID: "tk-g1", Title: "first question", Status: "open", Priority: 2, IssueType: "gate", AwaitType: "human", CreatedAt: "2026-01-01"},
+			{ID: "tk-g2", Title: "second question", Status: "open", Priority: 0, IssueType: "gate", AwaitType: "human", CreatedAt: "2026-01-01"},
+			{ID: "tk-d", Title: "a decision", Status: "open", Priority: 0, IssueType: "decision", Edges: []listing.Edge{parent}, CreatedAt: "2026-01-01"},
+			{ID: "tk-pr", Title: "the change", Status: "open", Priority: 2, IssueType: "task", Edges: []listing.Edge{parent, blocks("tk-rework")},
+				MergeResult: "pull_request", PRNumber: "9", CreatedAt: "2026-01-09"},
+			{ID: "tk-rework", Title: "Rework the change", Status: "open", IssueType: "task", Anchor: "tk-pr", CreatedAt: "2026-01-10"},
+			{ID: "tk-w1", Title: "behind the change", Status: "open", Priority: 2, IssueType: "task", Edges: []listing.Edge{parent, blocks("tk-pr")}, CreatedAt: "2026-01-02"},
+			{ID: "tk-w2", Title: "behind the first question", Status: "open", Priority: 1, IssueType: "task", Edges: []listing.Edge{parent, blocks("tk-g1")}, CreatedAt: "2026-01-03"},
+			{ID: "tk-w3", Title: "nobody scheduled", Status: "open", Priority: 0, IssueType: "task", Edges: []listing.Edge{parent, blocks("tk-g2")}, CreatedAt: "2026-01-04"},
+		},
+		holds: map[string]waits.Holds{
+			"tk-e": {ID: "tk-e", Status: waits.Clear}, "tk-g1": {ID: "tk-g1", Status: waits.Clear}, "tk-g2": {ID: "tk-g2", Status: waits.Clear},
+			"tk-d":  {ID: "tk-d", Status: waits.Clear},
+			"tk-pr": {ID: "tk-pr", Status: waits.Blocked, Waits: []waits.Wait{wait("tk-rework", "task", "")}, InFlight: "carries merge_result"},
+			"tk-w1": {ID: "tk-w1", Status: waits.Blocked, Waits: []waits.Wait{wait("tk-pr", "task", "")}, Arm: armed},
+			"tk-w2": {ID: "tk-w2", Status: waits.Blocked, Waits: []waits.Wait{wait("tk-g1", "gate", "human")}, Arm: armed},
+			"tk-w3": {ID: "tk-w3", Status: waits.Blocked, Waits: []waits.Wait{wait("tk-g2", "gate", "human")}},
+		},
+		unread: map[string]error{},
+		holding: map[string]prstatus.Holds{
+			"tk-pr": {},
+			"tk-w1": {Owed: []prstatus.Blocker{pr}},
+			"tk-w2": {Gates: []prstatus.Blocker{gate("tk-g1")}},
+			"tk-w3": {Gates: []prstatus.Blocker{gate("tk-g2")}},
+		},
+		unwalked: map[string]bool{}, facts: map[string]prstatus.Facts{"tk-pr": {}}, noFacts: map[string]bool{},
+	}
+	doc := build(g)
+
+	if got := doc.WorkQueue.Queue; !slices.Equal(got, []string{"tk-pr", "tk-w2", "tk-w1"}) {
+		t.Errorf("queue = %v, want the pull request first: its own rework puts nothing ahead of it", got)
+	}
+	want := []Need{
+		{ID: "tk-pr", Holds: []string{"tk-w1"}},
+		{ID: "tk-g1", Holds: []string{"tk-w2"}},
+		{ID: "tk-g2", Holds: []string{"tk-w3"}},
+		{ID: "tk-d", Holds: []string{}},
+	}
+	if got := doc.Epics[0].Needs; !slices.EqualFunc(got, want, sameNeed) {
+		t.Errorf("tk-e's Needs you = %+v, want %+v", got, want)
+	}
+	if got := doc.NeedsYou.Needs; !slices.EqualFunc(got, want, sameNeed) {
+		t.Errorf("Needs you = %+v, want %+v, the same order as the epic's", got, want)
+	}
+	if r := doc.Rows["tk-pr"]; r.Ask != AskPullRequest || r.Signal != "needs-review" || !slices.Contains(doc.Epics[0].Queue.Queue, "tk-pr") {
+		t.Errorf("tk-pr reads ask %q, signal %q, and the epic's queue is %v; want one row, a need in its queue", r.Ask, r.Signal, doc.Epics[0].Queue.Queue)
+	}
+	if got := doc.Rows["tk-w1"].Signal; got != "Waits on tk-pr" {
+		t.Errorf("tk-w1 reads %q, want it to name the bead whose pull request it waits on", got)
+	}
+	if c := doc.Rows["tk-e"].Counts; c == nil || *c != (Counts{Needs: 4, Queue: 3, NotScheduled: 1}) {
+		t.Errorf("tk-e counts %+v", c)
+	}
+}
+
 // TestWorkUnderTwoParents builds work whose parent-child edges name two
 // parents, in the order the row gives them, and holds each epic to the work it
 // sits under, listed and counted once.
@@ -182,16 +248,13 @@ func TestWorkUnderTwoParents(t *testing.T) {
 		return &gathered{rig: "gc-toolkit", open: open, closed: closed, holds: holds, unread: map[string]error{},
 			holding: map[string]prstatus.Holds{}, unwalked: map[string]bool{}, facts: map[string]prstatus.Facts{}, noFacts: map[string]bool{}}
 	}
-	listed := func(doc Document, e string) []GroupList {
+	entry := func(doc Document, e string) EpicEntry {
 		for _, x := range doc.Epics {
 			if x.ID == e {
-				return x.Groups
+				return x
 			}
 		}
-		return nil
-	}
-	same := func(a, b []GroupList) bool {
-		return slices.EqualFunc(a, b, func(x, y GroupList) bool { return x.Group == y.Group && slices.Equal(x.IDs, y.IDs) })
+		return EpicEntry{}
 	}
 
 	t.Run("a member whose first parent is a convoy sits under its epic", func(t *testing.T) {
@@ -200,8 +263,8 @@ func TestWorkUnderTwoParents(t *testing.T) {
 			{ID: "tk-e.1", Title: "landed", Status: "closed", Priority: 2, IssueType: "task", Edges: []listing.Edge{parent("tk-cv"), parent("tk-e")}, CreatedAt: "2026-01-02"},
 		}, map[string]waits.Holds{"tk-e": clear("tk-e")})
 		doc := build(g)
-		if got, want := listed(doc, "tk-e"), []GroupList{{Group: GroupClosed, IDs: []string{"tk-e.1"}}}; !same(got, want) {
-			t.Errorf("tk-e lists %+v, want %+v", got, want)
+		if got := entry(doc, "tk-e").Closed; !slices.Equal(got, []string{"tk-e.1"}) {
+			t.Errorf("tk-e lists closed %v, want tk-e.1", got)
 		}
 		if c := doc.Rows["tk-e"].Counts; c == nil || *c != (Counts{Closed: 1}) {
 			t.Errorf("tk-e counts %+v, want 1 closed", c)
@@ -220,17 +283,16 @@ func TestWorkUnderTwoParents(t *testing.T) {
 		g.holding["tk-w"] = prstatus.Holds{Gates: []prstatus.Blocker{{ID: "tk-q", Title: "which way?", Status: "open", IssueType: "gate", AwaitType: "human"}}}
 		doc := build(g)
 		for _, e := range []string{"tk-e1", "tk-e2"} {
-			if got, want := listed(doc, e), []GroupList{{Group: GroupWaitingOnYou, IDs: []string{"tk-w"}}}; !same(got, want) {
-				t.Errorf("%s lists %+v, want %+v", e, got, want)
+			x := entry(doc, e)
+			if !slices.Equal(x.Queue.NotScheduled, []string{"tk-w"}) || !slices.EqualFunc(x.Needs, []Need{{ID: "tk-q", Holds: []string{"tk-w"}}}, sameNeed) {
+				t.Errorf("%s lists %+v and %+v, want tk-w and its question", e, x.Queue, x.Needs)
 			}
-			if c := doc.Rows[e].Counts; c == nil || *c != (Counts{WaitingOnYou: 1}) {
-				t.Errorf("%s counts %+v, want 1 waiting on you", e, c)
+			if c := doc.Rows[e].Counts; c == nil || *c != (Counts{Needs: 1, NotScheduled: 1}) {
+				t.Errorf("%s counts %+v, want its question and tk-w", e, c)
 			}
 		}
-		n := doc.NeedsYou
-		want := []EpicAsks{{Epic: "tk-e1", Asks: []string{"tk-q"}}, {Epic: "tk-e2", Asks: []string{"tk-q"}}}
-		if n.Count != 1 || !slices.EqualFunc(n.NoConversationYet, want, func(x, y EpicAsks) bool { return x.Epic == y.Epic && slices.Equal(x.Asks, y.Asks) }) {
-			t.Errorf("Needs you counts %d and lists %+v, want 1 and the question under both epics", n.Count, n.NoConversationYet)
+		if n := doc.NeedsYou; n.Count != 1 || !slices.EqualFunc(n.Needs, []Need{{ID: "tk-q", Holds: []string{"tk-w"}}}, sameNeed) {
+			t.Errorf("Needs you counts %d and lists %+v, want 1 and the question once", n.Count, n.Needs)
 		}
 	})
 }
@@ -297,11 +359,8 @@ func TestAParentCycleEndsItsPath(t *testing.T) {
 		g.holds[id] = waits.Holds{ID: id, Status: waits.Clear}
 	}
 	doc := build(g)
-	var listed []string
-	for _, gl := range doc.Epics[0].Groups {
-		listed = append(listed, gl.IDs...)
-	}
-	listed = append(listed, doc.Epics[0].Unread...)
+	q := doc.Epics[0].Queue
+	listed := append(append(append([]string{}, q.Queue...), q.NotScheduled...), q.Unread...)
 	for _, id := range []string{"tk-c1", "tk-c2"} {
 		if n := len(slices.DeleteFunc(slices.Clone(listed), func(x string) bool { return x != id })); n != 1 {
 			t.Errorf("tk-a lists %s %d times, want once: %v", id, n, listed)
@@ -310,7 +369,8 @@ func TestAParentCycleEndsItsPath(t *testing.T) {
 }
 
 // TestAConversationAnsweringTwoQuestions holds one store to one document: a
-// conversation that answers two questions stands in the first of them.
+// conversation that answers two questions stands in the first of them, so the
+// work it holds up is held by that question on every build.
 func TestAConversationAnsweringTwoQuestions(t *testing.T) {
 	g := graph()
 	g.open = append(g.open,
@@ -320,12 +380,17 @@ func TestAConversationAnsweringTwoQuestions(t *testing.T) {
 		bead{ID: "tk-c", Title: "talk it through", Status: "open", Priority: 1, IssueType: "task", Assignee: "human", CreatedAt: "2026-01-11",
 			Edges: []listing.Edge{{ID: "tk-b.3", Type: "tracks"}, {ID: "tk-q2", Type: "replies-to"}, {ID: "tk-q", Type: "replies-to"}}},
 	)
-	for _, id := range []string{"tk-b.3", "tk-q2", "tk-c"} {
+	for _, id := range []string{"tk-q2", "tk-c"} {
 		g.holds[id] = waits.Holds{ID: id, Status: waits.Clear}
 	}
+	conv := prstatus.Blocker{ID: "tk-c", Status: "open", IssueType: "task", Assignee: "human"}
+	g.holds["tk-b.3"] = waits.Holds{ID: "tk-b.3", Status: waits.Blocked, Waits: []waits.Wait{{ID: "tk-c", Type: "blocks", Status: "open", IssueType: "task"}}}
+	g.holding["tk-b.3"] = prstatus.Holds{Owed: []prstatus.Blocker{conv}}
 	for range 20 {
-		if got := build(g).Rows["tk-b.3"].Asks; !slices.Equal(got, []string{"tk-q"}) {
-			t.Fatalf("tk-b.3's asks = %v, want the first question its conversation answers", got)
+		doc := build(g)
+		if !slices.Contains(doc.Rows["tk-q"].Holds, "tk-b.3") || slices.Contains(doc.Rows["tk-q2"].Holds, "tk-b.3") {
+			t.Fatalf("tk-q holds %v and tk-q2 holds %v, want tk-b.3 under the first question its conversation answers",
+				doc.Rows["tk-q"].Holds, doc.Rows["tk-q2"].Holds)
 		}
 	}
 }

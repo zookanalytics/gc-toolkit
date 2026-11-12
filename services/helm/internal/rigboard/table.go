@@ -6,6 +6,7 @@ import (
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/conversation"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/queue"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
@@ -16,11 +17,12 @@ import (
 //  1. The bead is closed: "Closed", with how it closed. Group Closed.
 //  2. It is an ask: the ask's words. Group Waiting on you.
 //  3. prstatus.Holding names a gate or a bead a person owes for it. When that
-//     is one of its own waits: "Waits on your answer" for a human gate,
-//     "Conversation waits for you" or "In conversation" for a conversation,
-//     and otherwise the owed bead's own signal. When it is further along:
-//     "Waits on <id>", with line 3 naming what Holding returned first. Group
-//     Waiting on you.
+//     is one of its own waits: "Waits on your answer" for a human gate or a
+//     decision, "Conversation waits for you" or "In conversation" for a
+//     conversation, and otherwise "Waits on <id>" naming each of its waits, so
+//     a bead behind another bead's pull request names that bead and never
+//     takes its words. When it is further along: "Waits on <id>", with line 3
+//     naming what Holding returned first. Group Waiting on you.
 //  4. A wait behind its status is a gate that is no human gate, its own or an
 //     ancestor's: "Held by a gate", with the gate's title. Group Not moving.
 //  5. Its status is deferred: "Deferred". Any other status that is neither
@@ -28,9 +30,9 @@ import (
 //  6. waits says it is in flight. With an open pull request: "Pull request
 //     #<n>", with where it stands. Otherwise "In flight", with its assignee.
 //     Group Queued.
-//  7. It is armed, routed to a pool or assigned to an agent: "Queued" when
-//     nothing holds it, and "Waits on <id>" naming each wait when one does.
-//     Group Queued.
+//  7. It is armed, routed to a pool or assigned to an agent (queue.Scheduled):
+//     "Queued" when nothing holds it, and "Waits on <id>" naming each wait
+//     when one does. Group Queued.
 //  8. Otherwise: "Not scheduled", with line 3 naming each wait when one holds
 //     it. Group Not moving.
 //
@@ -63,8 +65,7 @@ const (
 	AskRuling       Ask = "Ruling"
 )
 
-// outcome is the row of the table that answered, which places a piece of work
-// in a section of the Work queue.
+// outcome is the row of the table that answered.
 type outcome int
 
 const (
@@ -90,8 +91,6 @@ type verdict struct {
 	signal string
 	note   string
 	line3  []Ref
-	// gate is the gate that holds the row, for row 4.
-	gate string
 }
 
 // askAnswer is what makes a row an ask, and the words its signal reads.
@@ -132,9 +131,6 @@ type tableInput struct {
 	// request, and prUnread is true when it has one prstatus could not answer.
 	facts    *prstatus.Facts
 	prUnread bool
-	// owedSignal is the signal of each bead Holding names, by id, for an own
-	// wait on a bead a person owes.
-	owedSignal func(prstatus.Blocker) string
 }
 
 func table(in tableInput) verdict {
@@ -153,11 +149,11 @@ func table(in tableInput) verdict {
 	}
 	h := *in.holds
 	if in.holding != nil && (len(in.holding.Gates) > 0 || len(in.holding.Owed) > 0) {
-		return holdingVerdict(h, *in.holding, in.owedSignal)
+		return holdingVerdict(h, *in.holding)
 	}
 	for _, w := range h.Waits {
 		if strings.EqualFold(w.IssueType, "gate") && !prstatus.IsHumanGate(w.IssueType, w.AwaitType) {
-			return verdict{out: outHeldByGate, group: GroupNotMoving, signal: "Held by a gate", note: w.Title, gate: w.ID}
+			return verdict{out: outHeldByGate, group: GroupNotMoving, signal: "Held by a gate", note: w.Title}
 		}
 	}
 	switch st := status(b); st {
@@ -181,7 +177,7 @@ func table(in tableInput) verdict {
 		return verdict{out: outInFlight, group: GroupQueued, signal: "In flight", note: b.Assignee}
 	}
 	waitRefs := refsOf(h.Waits)
-	if (h.Arm != nil && h.Arm.Target != "") || strings.TrimSpace(b.RoutedTo) != "" || strings.TrimSpace(b.Assignee) != "" {
+	if queue.Scheduled(h, b.RoutedTo, b.Assignee) {
 		if h.Status == waits.Clear {
 			return verdict{out: outQueued, group: GroupQueued, signal: "Queued"}
 		}
@@ -194,7 +190,7 @@ func table(in tableInput) verdict {
 // own waits or further along. Holding lists the gates and the beads a person
 // owes each nearest first, and the gates come first, as prstatus.Reasons
 // orders them.
-func holdingVerdict(h waits.Holds, hold prstatus.Holds, owedSignal func(prstatus.Blocker) string) verdict {
+func holdingVerdict(h waits.Holds, hold prstatus.Holds) verdict {
 	own := map[string]bool{}
 	if h.Status == waits.Blocked || h.Status == waits.Unjudged {
 		for _, w := range h.Waits {
@@ -215,9 +211,10 @@ func holdingVerdict(h waits.Holds, hold prstatus.Holds, owedSignal func(prstatus
 		if conversation.IsCandidate(strings.ToLower(o.IssueType), o.Assignee, o.ID) {
 			return verdict{out: outOwnWait, group: GroupWaitingOnYou, signal: conversationWords(o.Assignee)}
 		}
-		if s := owedSignal(o); s != "" {
-			return verdict{out: outOwnWait, group: GroupWaitingOnYou, signal: s}
+		if strings.EqualFold(strings.TrimSpace(o.IssueType), "decision") {
+			return verdict{out: outOwnWait, group: GroupWaitingOnYou, signal: "Waits on your answer"}
 		}
+		return verdict{out: outOwnWait, group: GroupWaitingOnYou, signal: "Waits on " + joinIDs(refsOf(h.Waits))}
 	}
 	first := hold.Owed
 	if len(hold.Gates) > 0 {
