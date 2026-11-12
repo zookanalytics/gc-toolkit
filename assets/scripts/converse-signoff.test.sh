@@ -113,10 +113,12 @@
 #             --no-wait for its waits and brief and --no-rework for a --rework,
 #             closes it on the return, arming no second closer once the arm has
 #             sent one and filing no second rework, and a stay with no work,
-#             beside --answer or with no ruling, on work in another store, on a
-#             gate alone, on work that waits on the conversation or on a
-#             conversation in the queue is refused before any write, as a
-#             rework child that does not read stops it
+#             beside --answer or with no ruling, of more than one line, on its
+#             own conversation, on work in another store, on a gate alone, on
+#             work that waits on the conversation or on a conversation in the
+#             queue is refused before any write in words of its own, which an
+#             argument the parser does not know cannot print, as a rework
+#             child that does not read stops it
 #   (APPROVE*) a PR a ruling leaves standing with no approval is named in the
 #             headline, the close reason and the reminder, and printed with its
 #             link, read before the first write through the rule the merge lands
@@ -1877,11 +1879,25 @@ eq "$(field tk-conv status)" "in_progress" "(STAY-REWORK-UNREAD) …and the conv
 closer_case
 run_signoff --conversation tk-conv --outcome x --ruled yes --ruling "build the fix" --no-wait --stay "x"
 eq "$RC" 2 "(STAY-NOTHING) a stay with no work to wait on exits 2"
+has "$OUT" "so it needs --waiting-on <the work> or --rework" "(STAY-NOTHING) …saying it needs the work to wait on"
 eq "$(writes)" 0 "(STAY-NOTHING) …and writes nothing"
 run_signoff --conversation tk-conv --answer tk-g --ruling "build the fix" --outcome x --waiting-on tk-work --close-brief "$BRIEF" --stay "x"
 eq "$RC" 2 "(STAY-ANSWER) --stay beside --answer exits 2"
+has "$OUT" "so it takes --ruled yes and no --answer" "(STAY-ANSWER) …saying a stay takes no --answer"
+eq "$(writes)" 0 "(STAY-ANSWER) …and writes nothing"
 run_signoff --conversation tk-conv --outcome x --waiting-on tk-work --stay "x"
 eq "$RC" 2 "(STAY-UNRULED) --stay without --ruled yes exits 2"
+has "$OUT" "so it takes --ruled yes and no --answer" "(STAY-UNRULED) …saying a stay takes --ruled yes"
+eq "$(writes)" 0 "(STAY-UNRULED) …and writes nothing"
+run_signoff --conversation tk-conv --outcome x --ruled yes --ruling "build the fix" --waiting-on tk-work --close-brief "$BRIEF" --stay "the dialog
+keeps what is typed"
+eq "$RC" 2 "(STAY-LINES) a --stay of more than one line exits 2"
+has "$OUT" "--stay takes one line" "(STAY-LINES) …saying it takes one"
+eq "$(writes)" 0 "(STAY-LINES) …and writes nothing"
+run_signoff --conversation tk-conv --outcome x --ruled yes --ruling "build the fix" --waiting-on tk-conv --close-brief "$BRIEF" --stay "x"
+eq "$RC" 2 "(STAY-SELF) a stay that would wait on its own conversation exits 2"
+has "$OUT" "and tk-conv is this conversation" "(STAY-SELF) …saying so"
+eq "$(writes)" 0 "(STAY-SELF) …and writes nothing"
 closer_case; bead rb-work
 run_signoff --conversation tk-conv --outcome x --ruled yes --ruling "build the fix" --waiting-on rb-work --stay "x"
 eq "$RC" 2 "(STAY-ELSEWHERE) a stay on work in another store exits 2"
@@ -1890,6 +1906,7 @@ eq "$(writes)" 0 "(STAY-ELSEWHERE) …and writes nothing"
 closer_case; gate tk-g2 waits-for-rb-work
 run_signoff --conversation tk-conv --outcome x --ruled yes --ruling "build the fix" --waiting-on tk-g2 --stay "x"
 eq "$RC" 2 "(STAY-GATE) a stay whose only wait is a gate exits 2"
+has "$OUT" "and each --waiting-on is a gate" "(STAY-GATE) …saying a gate is no work to wait on"
 eq "$(writes)" 0 "(STAY-GATE) …and writes nothing"
 # The conversation holds the merge of the PR it is about: the anchor waits on
 # it through a blocks edge, as gc-helm open and engage write that hold.
@@ -1901,6 +1918,7 @@ eq "$(writes)" 0 "(STAY-HOLDS-MERGE) …and writes nothing"
 closer_case; setf tk-conv assignee human; setf tk-conv status open
 run_signoff --conversation tk-conv --outcome x --ruled yes --ruling "build the fix" --waiting-on tk-work --close-brief "$BRIEF" --stay "x"
 eq "$RC" 2 "(STAY-QUEUED) a conversation in the operator's queue has no sitting to stay"
+has "$OUT" "open for the sitting that holds it, and it reads open under human" "(STAY-QUEUED) …saying it has no sitting to stay"
 eq "$(writes)" 0 "(STAY-QUEUED) …and nothing is written"
 
 echo
