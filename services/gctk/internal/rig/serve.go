@@ -472,9 +472,10 @@ var leaderCommand = func(dir string) (*exec.Cmd, error) {
 // Serve starts a copy of the checkout whose top is checkout, or reports the
 // copy of it that runs. A checkout has at most one copy, so a start for one
 // whose copy runs starts no other, and a start after a session wakes is safe to
-// repeat. A start reports a copy once it answers on its port and holds it, and
-// stops a copy that does not within the wait, whether it ran the copy or found
-// it.
+// repeat. A start whose command differs from the running copy's fails and
+// leaves that copy running. A start reports a copy once it answers on its port
+// and holds it, and stops a copy of its command that does not within the wait,
+// whether it ran the copy or found it.
 func (c *Copies) Serve(checkout string, o ServeOpts) Report {
 	failed := func(reason, detail string) Report {
 		return Report{State: CopyFailed, Reason: reason, Checkout: checkout, Detail: detail}
@@ -501,6 +502,12 @@ func (c *Copies) Serve(checkout string, o ServeOpts) Report {
 		if !rec.awaitLeader(30*time.Second) || !rec.alive() {
 			_ = os.RemoveAll(string(rec))
 			continue
+		}
+		// A copy that runs another serve command shows another app, such as the
+		// board with other fixture flags, so this start neither reports it nor
+		// stops it.
+		if running := rec.read("command"); running != o.Command {
+			return failed("other-command", fmt.Sprintf("a copy of this checkout already runs another serve command (%s); stop it with gctk rig serve --stop, or serve from another checkout", running))
 		}
 		// The checkout's copy runs. It is reported once it answers, published
 		// first when an address is asked for. The start that ran it may have

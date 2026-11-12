@@ -267,6 +267,16 @@ func TestServeRunsTheCommandInTheSandboxFromTheCheckoutOnAPortOfItsOwn(t *testin
 		t.Errorf("check = %s on %d, want running on %d", c.State, c.Port, r.Port)
 	}
 
+	// A start with another command, such as a capture that adds the fixture's
+	// flags, would show another app, so it fails and leaves the copy running.
+	busy := f.copies.Serve(f.repo, f.opts(command+" --answers x"))
+	if busy.State != CopyFailed || busy.Reason != "other-command" || !strings.Contains(busy.Detail, command) {
+		t.Errorf("a start with another command = %s %s (%s), want failed other-command naming the running command", busy.State, busy.Reason, busy.Detail)
+	}
+	if f.leader(f.repo) != leader || !answers(r.Port) || len(f.lines("served")) != 1 {
+		t.Errorf("a start with another command touched the running copy: leader %d (was %d), served %q", f.leader(f.repo), leader, f.lines("served"))
+	}
+
 	other := f.copies.Serve(f.repo2, f.opts(command))
 	mustRun(t, other)
 	if other.Port == r.Port || !answers(other.Port) || !answers(r.Port) {

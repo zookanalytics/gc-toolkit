@@ -77,9 +77,12 @@
 #   --serve      serve the app with this command as a copy that `gctk rig
 #                serve` runs from the checkout --cwd names (default: here),
 #                with no address, on a free port of its own, which the command
-#                gets as $PORT, so captures side by side never share a server.
-#                A copy of that checkout that already runs is the one captured,
-#                and it keeps running. One this capture starts ends with it.
+#                gets as $PORT. A checkout has one copy, so captures from one
+#                checkout run one after another, and captures from two each get
+#                a copy of their own. A copy of that checkout that already runs
+#                the command is the one captured, and it keeps running, and one
+#                that runs another command is refused. One this capture starts
+#                ends with it.
 #   --base-url   drive a deployed preview, a copy that `gctk rig serve` runs,
 #                or an app that a worktree of a rig serves on this host. Any
 #                other server on this host is refused, as is the app of a rig

@@ -111,8 +111,9 @@ exec "$@"
 SBX
 # gctk stands in for gctk rig serve: --check answers with a copy running on
 # $COPY_PORT once one was started, or when COPY_RUNNING is set, --command starts
-# one, or fails as a copy whose serve command ended when COPY_FAIL is set, and
-# --stop ends it. lsof names the copy's process as the one listening on its
+# one or reports the one that runs, or fails as a copy whose serve command ended
+# when COPY_FAIL is set, or as a checkout whose copy runs another command when
+# COPY_OTHER is set, and --stop ends it. lsof names the copy's process as the one listening on its
 # port, working in the checkout it was started from. Each logs to $CALLLOG.
 cat >"$BIN/gctk" <<'GCTK'
 #!/usr/bin/env bash
@@ -125,6 +126,9 @@ case "$*" in
     fi
     printf '{"state":"none","checkout":"%s"}\n' "$(pwd)"; exit 3 ;;
   "rig serve --command "*)
+    if [ -n "${COPY_OTHER:-}" ]; then
+      printf '{"state":"failed","reason":"other-command","checkout":"%s","detail":"a copy of this checkout already runs another serve command (npm start)"}\n' "$(pwd)"; exit 1
+    fi
     if [ -n "${COPY_FAIL:-}" ]; then
       printf '{"state":"failed","reason":"serve-exited","checkout":"%s","detail":"the serve command ended before the copy answered"}\n' "$(pwd)"; exit 1
     fi
@@ -398,10 +402,15 @@ ok "the copy starts once the engine resolves, and the capture stops it once it i
 out="$(run -- page --script "$SCRIPT" --serve 'npm run dev' --output "$OUT")"; rc=$?
 has "gctk rig serve --command npm run dev (in $WORK)" "$(calls)" "with no --cwd, the copy runs from here"
 out="$(run COPY_RUNNING="$SITE" -- page --script "$SCRIPT" --serve 'npm run dev' --cwd "$SITE" --output "$OUT")"; rc=$?
-eq "$rc" 0 "a capture of a checkout whose copy runs exits 0"
+eq "$rc" 0 "a capture of a checkout whose copy runs the command exits 0"
+has "gctk rig serve --command npm run dev (in $SITE)" "$(calls)" "it asks the start, which reports the copy that runs"
 has "[--base-url] [http://127.0.0.1:50200/]" "$(calls)" "it captures that copy"
-hasnt "rig serve --command" "$(calls)" "it starts none"
 hasnt "rig serve --stop" "$(calls)" "and leaves it running"
+out="$(run COPY_RUNNING="$SITE" COPY_OTHER=1 -- page --script "$SCRIPT" --serve 'npm run dev' --cwd "$SITE" --output "$OUT")"; rc=$?
+eq "$rc" 1 "a capture of a checkout whose copy runs another command exits 1"
+has "the app's copy did not start: other-command" "$out" "it says why"
+hasnt "[screenshot]" "$(calls)" "and nothing is captured"
+hasnt "rig serve --stop" "$(calls)" "nor is the running copy stopped"
 out="$(run COPY_FAIL=1 -- page --script "$SCRIPT" --serve 'npm run dev' --cwd "$SITE" --output "$OUT")"; rc=$?
 eq "$rc" 1 "a copy that does not start exits 1"
 has "the app's copy did not start: serve-exited" "$out" "it says why"

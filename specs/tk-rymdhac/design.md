@@ -497,8 +497,11 @@ without parsing prose:
 - **Start.** `--command` with the serve command runs it from the checkout on a
   free loopback port, and prints the port. A checkout has at most one copy, so a
   start for one whose copy runs reports that copy, which makes a start safe to
-  repeat after a session wakes. A start reports a copy once it answers on its
-  port as its own, and stops a copy that does not within its wait.
+  repeat after a session wakes. A start whose command differs from the running
+  copy's is refused and leaves that copy running, because the copy shows
+  another app, so a capture never takes a copy of another command. A start
+  reports a copy once it answers on its port as its own, and stops a copy that
+  does not within its wait.
 - **An address on request.** With `--publish-command` and `--address-pattern`
   it also publishes the port and prints the address to give the operator. A
   copy a capture runs takes no address.

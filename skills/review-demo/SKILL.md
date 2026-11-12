@@ -191,7 +191,7 @@ reports whether the `gh` it needs is present.
   engine knows by name, such as `iPhone 15`. A `resize <width>x<height>` step
   changes the size from that step on.
   A `--serve` command's copy takes a free port of its own, for a screenshot as
-  for a video, so two captures side by side each get a server of their own.
+  for a video. A worktree has one copy, so take its captures one after another.
   `--selector <css>` captures one element instead of the viewport, and
   `--full-page` captures the whole page. For a terminal, the engine types the
   command at a bash prompt in a terminal of its own, whose shell starts in

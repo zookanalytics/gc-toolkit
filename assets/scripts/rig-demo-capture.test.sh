@@ -97,8 +97,9 @@ echo "node stub: unexpected call: $*" >&2; exit 97
 NODE
 # gctk stands in for gctk rig serve: --check answers with a copy running on
 # 50200 once one was started, or when COPY_RUNNING names its checkout,
-# --command starts one, or fails as a copy whose serve command ended when
-# COPY_FAIL is set, and --stop ends it. lsof names the copy's process as the one
+# --command starts one or reports the one that runs, or fails as a copy that did
+# not answer when COPY_FAIL is set, or as a checkout whose copy runs another
+# command when COPY_OTHER is set, and --stop ends it. lsof names the copy's process as the one
 # listening on its port, working in the checkout it was started from. Each logs
 # to $RUNLOG. git and jq read the checkout and the copy's report.
 cat >"$SBX/gctk" <<'GCTK'
@@ -111,6 +112,9 @@ case "$*" in
     fi
     printf '{"state":"none","checkout":"%s"}\n' "$(pwd)"; exit 3 ;;
   "rig serve --command "*)
+    if [ -n "${COPY_OTHER:-}" ]; then
+      printf '{"state":"failed","reason":"other-command","checkout":"%s","detail":"a copy of this checkout already runs another serve command (npm start)"}\n' "$(pwd)"; exit 1
+    fi
     if [ -n "${COPY_FAIL:-}" ]; then
       printf '{"state":"failed","reason":"not-answering","checkout":"%s","detail":"the copy did not answer"}\n' "$(pwd)"; exit 1
     fi
@@ -145,11 +149,12 @@ RUNLOG="$TMPD/run.log"
 # run [KEY=VAL ...] -- <sut args...>; per-call knobs, combined stdout+stderr.
 # $RUN_PATH replaces the sandbox directory on PATH for one call.
 run() {
-  local lint_rc=0 run_rc=0 nofile="" empty="" report="" failed="" late_rc=0 copy_running="" copy_fail=""
+  local lint_rc=0 run_rc=0 nofile="" empty="" report="" failed="" late_rc=0 copy_running="" copy_fail="" copy_other=""
   while [ $# -gt 0 ]; do
     case "$1" in
       COPY_RUNNING=*) copy_running="${1#*=}" ;;
       COPY_FAIL=*) copy_fail="${1#*=}" ;;
+      COPY_OTHER=*) copy_other="${1#*=}" ;;
       LINT_RC=*)   lint_rc="${1#*=}" ;;
       RUN_RC=*)    run_rc="${1#*=}" ;;
       RUN_NOFILE=*) nofile="${1#*=}" ;;
@@ -166,7 +171,7 @@ run() {
   ( cd "$TMPD" && env -i PATH="${RUN_PATH-$SBX}:$FARM" RUNLOG="$RUNLOG" SPRINTSHOW_BIN="$STUB" SANDBOX_LOG="$SANDBOX_LOG" \
       LINT_RC="$lint_rc" RUN_RC="$run_rc" RUN_NOFILE="$nofile" RUN_EMPTY="$empty" \
       RUN_REPORT="$report" RUN_FAILED="$failed" RUN_LATE_RC="$late_rc" \
-      GCTK_BIN="$SBX/gctk" COPY_STATE="$COPY_STATE" COPY_RUNNING="$copy_running" COPY_FAIL="$copy_fail" \
+      GCTK_BIN="$SBX/gctk" COPY_STATE="$COPY_STATE" COPY_RUNNING="$copy_running" COPY_FAIL="$copy_fail" COPY_OTHER="$copy_other" \
       bash "$SUT" "$@" 2>&1 )
 }
 
@@ -228,10 +233,17 @@ hasnt "--serve " "$RL" "and is given no --serve of its own"
 has "--no-narrate" "$RL" "no-narrate is forwarded"
 has "gctk rig serve --stop (in $SITE)" "$RL" "the capture stops the copy it started"
 out="$(run COPY_RUNNING="$SITE" -- --script "$SCRIPT" --output "$OUT" --serve 'npm run dev' --cwd "$SITE")"; rc=$?
-ok "a capture of a checkout whose copy runs exits 0" "[ '$rc' = 0 ]"
+ok "a capture of a checkout whose copy runs the command exits 0" "[ '$rc' = 0 ]"
 RL="$(cat "$RUNLOG")"
-hasnt "rig serve --command" "$RL" "it starts no copy"
+has "gctk rig serve --command npm run dev (in $SITE)" "$RL" "it asks the start, which reports the copy that runs"
+has "--base-url http://127.0.0.1:50200/" "$RL" "the engine records that copy"
 hasnt "rig serve --stop" "$RL" "and leaves the running copy running"
+out="$(run COPY_RUNNING="$SITE" COPY_OTHER=1 -- --script "$SCRIPT" --output "$OUT" --serve 'npm run dev' --cwd "$SITE")"; rc=$?
+ok "a capture of a checkout whose copy runs another command exits 1" "[ '$rc' = 1 ]"
+has "the app's copy did not start: other-command" "$out" "it says why"
+RL="$(cat "$RUNLOG")"
+hasnt "rig serve --stop" "$RL" "nor is the running copy stopped"
+ok "nothing is captured" "[ ! -e '$OUT' ]"
 out="$(run COPY_FAIL=1 -- --script "$SCRIPT" --output "$OUT" --serve 'npm run dev' --cwd "$SITE")"; rc=$?
 ok "a copy that does not start exits 1" "[ '$rc' = 1 ]"
 has "the app's copy did not start: not-answering" "$out" "it says why"

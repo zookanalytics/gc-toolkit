@@ -28,7 +28,8 @@ operator the copy's address, so both reach the UI through one path.
 
 A checkout has at most one copy. A start for a checkout whose copy runs starts
 no other: it reports that copy once it answers on its port, so a start is safe
-to repeat. --publish-command and --address-pattern ask for an address: the
+to repeat. A start whose command differs from the one that copy runs fails with
+reason other-command and leaves the copy running. --publish-command and --address-pattern ask for an address: the
 publish command publishes the copy's port, as $PORT, for exactly as long as it
 runs, and the address is the pattern with the port for each $PORT or ${PORT}.
 Either one empty means no address can be given. A copy started without them has
@@ -60,7 +61,7 @@ lines of the log of a copy that failed or ended, go to stderr.
   none, stopped  0     --stop: no copy runs, or its process group has ended
   running        1     --stop: the copy's process group survived SIGTERM and
                        SIGKILL
-  failed         1     start: no copy runs
+  failed         1     start: no copy of the command runs
 exit 2 is a usage error.
 
 --lead runs a copy's leader over its record. A start runs it in a session of
