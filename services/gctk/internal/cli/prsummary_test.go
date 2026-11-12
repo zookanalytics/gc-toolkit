@@ -146,12 +146,13 @@ func TestPRSummaryRecordsWhatItIsGiven(t *testing.T) {
 
 func TestPRSummaryRefusesWhatHasNoWords(t *testing.T) {
 	for name, args := range map[string][]string{
-		"an empty file":         {"--file", writeFile(t, "")},
-		"a file of newlines":    {"--file", writeFile(t, "\n\n")},
-		"a file of whitespace":  {"--file", writeFile(t, " \t\n \n"), "--title", "fix: keep it"},
-		"an empty title":        {"--title", ""},
-		"a title of whitespace": {"--file", writeFile(t, "Words."), "--title", "  "},
-		"an empty --file":       {"--file", ""},
+		"an empty file":                   {"--file", writeFile(t, "")},
+		"a file of newlines":              {"--file", writeFile(t, "\n\n")},
+		"a file of whitespace":            {"--file", writeFile(t, " \t\n \n"), "--title", "fix: keep it"},
+		"an empty title":                  {"--title", ""},
+		"an empty title beside a summary": {"--file", writeFile(t, "Words."), "--title", ""},
+		"a title of whitespace":           {"--file", writeFile(t, "Words."), "--title", "  "},
+		"an empty --file":                 {"--file", ""},
 	} {
 		t.Run(name, func(t *testing.T) {
 			updates := stubSummary(t, "["+summaryAnchor+"]")
