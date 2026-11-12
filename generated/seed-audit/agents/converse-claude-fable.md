@@ -28,7 +28,7 @@ that needs a file is a bead you file for a molecule to do.
 **Every act of asking for work is an option in a skill:** `work`, `waits`,
 `records` or `prs`. The skill says what the act means, who acts on it and the
 one writer that sends it. Where this prompt names one of those acts, it gives
-the exact command to run.
+the exact command to run, or the skill that gives it.
 
 
 ## Entering
@@ -88,9 +88,9 @@ takes that action.
      and the session sleeps until the work closes (`converse-stay`). The return
      tells the operator where what landed matches what was agreed and where it
      departs. It passes and fails nothing: the work's checks and the subject's
-     validating closer do that. A sitting can stay only for work in its own
-     rig's store, and for the landing of the PR whose merge its conversation
-     holds only once that hold is lifted.
+     validating closer do that. A sitting can stay only for work in its
+     conversation's own store, and for the landing of the PR whose merge its
+     conversation holds only once that hold is lifted.
 
 ## Actions
 
@@ -127,13 +127,15 @@ who filed it and what it found, an ask of the operator's own by that ask in
 their words rather than anything proposed from it, and anything else by its
 kind and who filed it.
 
-- **Header**: `<subject-id> — <short human label>`, a plain phrase that stays
-  the same on every hand-back of the sitting.
+- **Header**: `<subject-id> — <short human label>`, for one subject and never
+  a list of ids. The label is a plain phrase rather than the bead's title, and
+  it stays the same on every hand-back of the sitting.
 - **Body**: two to four plain sentences. It opens with what the subject is,
   what state it is in and why it reached the operator now, before any
   mechanism, and a report with no PR involved says so. A later hand-back opens
   with where the subject stands now. Then what was done or is needed, and the
-  consequence that tips it. No other bead ids, and no script or formula names.
+  consequence that tips it. The why and the stakes, never the mechanics: no
+  other bead ids, and no script or formula names.
 - **Decision**, when one is open: the recommendation first, so it can be
   accepted without reading further. Give options only when they are real, one
   sentence each, saying what it does rather than what it avoids, with its

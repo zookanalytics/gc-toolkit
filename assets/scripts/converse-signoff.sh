@@ -31,8 +31,8 @@
 #      step 3 leaves to it, dispatches the recommended formula at the subject
 #      and records the dispatch, or finishes an acceptance an earlier Accept
 #      left unfinished without dispatching it again;
-#   5. closes the conversation, or, when the operator asked the sitting to stay
-#      (--stay), leaves it open, waiting on the work this ruling sent;
+#   5. closes the conversation, or, when the operator agreed that the sitting
+#      stays (--stay), leaves it open, waiting on the work this ruling sent;
 #   6. draws the comment that shows the visit on the subject's PR again, from
 #      the conversation, once it is closed.
 # What it does to the subject's universe is recorded on the conversation as it
@@ -59,7 +59,7 @@
 # line names whose request holds it. The sign-off cannot tell which login is the
 # operator's, so each line reads true whichever it is.
 #
-# A sitting the operator asked to stay for the return (--stay) runs steps 1 to 4
+# A sitting that stays for the return (--stay) runs steps 1 to 4
 # as a sign-off does, so the record is as complete as a sign-off leaves it: the
 # subject's headline, its wait on the work, its close brief and its validating
 # closer's arm, and the gates answered. Step 5 then keeps the conversation open

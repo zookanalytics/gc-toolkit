@@ -160,7 +160,8 @@ it, the conversation's close, which frees an open PR's merge the conversation
 held, and the comment that shows the visit on the subject's PR. That comment
 lists the ruling and each act recorded on the conversation, so keep other rigs
 and their beads out of them. It exits non-zero when it stopped short, and then
-you must NOT post the sign-off. A re-run is safe:
+you must NOT post the sign-off. A re-run with the same `--ruling` is safe,
+because the writer keys what it recorded to that ruling:
 
 ```bash
 if "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" \
@@ -193,10 +194,14 @@ fi
   validating closer tests once the work lands: what the landing settles on the
   subject, and what to check. A subject in the city's own store has no pool to
   run its closer, so the sign-off refuses it: wait on a human gate that names
-  the work instead (the `waits` skill).
+  the work instead (the `waits` skill). A wait the store refuses only warns,
+  with the command that wires it: run that command before you say what the
+  subject waits on.
 - **The first answer wins.** A gate another answer closed first, such as a
   withdrawal, an Accept or another sitting, keeps that answer, and the sign-off
   prints it. Tell the operator which gate it was and what that answer said.
+  A gate this sitting answered on an earlier turn prints the same way, and
+  that answer is its own.
 
 Take the case that fits the ruling:
 
@@ -211,10 +216,10 @@ Take the case that fits the ruling:
   operator settles rides beside it as `--var <key>=<value>`. It refuses,
   writing nothing, while a gate the ruling does not answer still holds the
   subject. Answer that gate in the same ruling once the operator rules on it,
-  or sign off with `--leave` on
-  the recommendation's gate, and the board offers Accept once the other gate
-  clears. A `first-reaction` gate on an epic's member asks the member's
-  recommendation, which this does not take.
+  or sign off without `--accept` and with `--leave` on the recommendation's
+  gate, and the board offers Accept once the other gate clears. A
+  `first-reaction` gate on an epic's member asks the member's recommendation,
+  which this does not take.
 - **The work will not go on, and a human gate holds the subject.** Stand it
   down first, with the gate's `await_id` as the key:
   `"$CONV/stand-down.sh" "$SUBJECT" --key <situation-key> --ruling "<the ruling, one line>" --successor "$CONVERSATION"`.
@@ -264,15 +269,15 @@ PR closes lets an approved PR merge. `--pr-anchor <bead>` names the PR the
 rework or retirement acts on when the ruling reaches more than one, and each
 other one stands. The rework or retirement runs first, in that PR's own rig,
 and one that does not complete stops the sign-off with nothing answered, so
-the conversation still holds the merge. A re-run adopts the child or finds
-the PR an earlier attempt left. A conversation owns one live rework: while one
-filed for an earlier ruling is open, `--rework` for another is refused, so give
-a ruling that asks nothing more of the branch `--no-rework`, and keep the gate
-of one that does open (`--leave <gate>`) until that rework lands. A second PR
-whose own branch must change waits the same way, behind a gate kept open until
-a ruling of its own is carried out. `--rework` and `--retire` act only on an
-open PR: when the ruling reaches none, send its consequence as work and sign
-off without them.
+the conversation still holds the merge. A re-run of the same ruling adopts
+the child or finds the PR an earlier attempt left, even one closed since. A
+conversation owns one live rework: while one filed for an earlier ruling is
+open, `--rework` for another is refused, so give a ruling that asks nothing
+more of the branch `--no-rework`, and keep the gate of one that does open
+(`--leave <gate>`) until that rework lands. A second PR whose own branch must
+change waits the same way, behind a gate kept open until a ruling of its own
+is carried out. `--rework` and `--retire` act only on an open PR: when the
+ruling reaches none, send its consequence as work and sign off without them.
 
 **A ruling does not approve a PR.** A PR merges only on an Approve from an
 account other than the city's. When a PR the ruling leaves standing still

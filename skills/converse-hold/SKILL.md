@@ -124,7 +124,8 @@ hand-off or stay for the work's return, and why (the prompt's End or stay).
 
 Then offer the close-out as the last line, the only thing below the hand-back.
 It is the switch that ends the sitting, put where the operator already reads,
-and offering it is not a request to use it:
+and offering it is not a request to use it, nor does it stand in for the
+decision above it:
 
 ```
 ! <the resolved gc-helm.sh path> dismiss --reason "<this sitting's real reason>"

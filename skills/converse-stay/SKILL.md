@@ -39,13 +39,13 @@ else
 fi
 ```
 
-The sign-off refuses a stay on work in another rig's store, where the wait
-would hold nothing, so that sitting ends at the hand-off (`converse-settle`)
-and says why, as does one whose context is too full to compare the work once
-it lands. It also refuses a stay for the landing of the PR whose merge this
-conversation holds: when the operator wants that PR to land first, lift the
-hold (`converse-hold`) and run the stay again, and otherwise end at the
-hand-off.
+The sign-off refuses a stay on work in another store than the conversation's,
+where the wait would hold nothing, so that sitting ends at the hand-off
+(`converse-settle`) and says why, as does one whose context is too full to
+compare the work once it lands. It also refuses a stay for the landing of the
+PR whose merge this conversation holds: when the operator wants that PR to
+land first, lift the hold (`converse-hold`) and run the stay again, and
+otherwise end at the hand-off.
 
 Then record and post the hand-back. It opens with where the subject stands,
 and says the sitting stays until the work lands and comes back then to compare
@@ -75,7 +75,8 @@ wait, and the session sleeps again once the tab detaches.
 
 The entry says `interrupted` and names this skill when the conversation is
 still claimed while its work is out: the stay's call stopped before it left
-the conversation to wait. Run the call again, which is safe, and end the turn.
+the conversation to wait. Run the call again with the same ruling, which is
+safe, and end the turn.
 
 ## The return
 
@@ -83,6 +84,9 @@ The entry says `returned` once the work closes, with `WORK` and `AGREED`. The
 return reports to the operator. It works on nothing, takes no check's
 send-back, and passes and fails nothing, because it is not one of the work's
 checks, and the validating closer the stay armed checks the subject.
+
+When your thread shows a return already under way, as after a restart, carry
+it on from where it stopped, so nothing is posted twice.
 
 1. **Read what landed.** `gc bd show <each WORK bead>` gives how it closed and
    its PR. Read the change at the depth the comparison needs.
@@ -96,11 +100,13 @@ checks, and the validating closer the stay armed checks the subject.
    Send the work).
 4. **Then sign off, or hold.** Sign off with the stay's call less `--stay`,
    with `--no-wait` in place of its waits and brief, and with `--no-rework` in
-   place of a `--rework`, whose child has landed. It answers nothing the stay
-   already answered, and leaves the subject's closer as the stay armed it. When
-   the comparison leaves the operator anything to answer before the sitting
-   ends, hold instead (`converse-hold`): the hold's record tells a restart that
-   the return is done.
+   place of a `--rework`, whose child has landed. Its `--outcome` says what
+   landed, in place of the stay's `staying —` headline, which would otherwise
+   stay on the subject. It answers nothing the stay already answered, and
+   leaves the subject's closer as the stay armed it. When the comparison
+   leaves the operator anything to answer before the sitting ends, hold
+   instead (`converse-hold`): the hold's record tells a restart that the
+   return is done.
 
 When your context is too full for the comparison, say so in a hand-back and
 sign off the same way: the validating closer still checks the subject.

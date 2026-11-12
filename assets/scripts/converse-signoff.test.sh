@@ -1809,7 +1809,7 @@ eq "$(field tk-g status)" "closed" "(STAY) …answering the gate, as a sign-off 
 eq "$(meta tk-sub gc.dispatch_when_ready_args)" "$CLOSER_ARGS" "(STAY) …arming the subject's validating closer, as a sign-off does"
 eq "$(field tk-conv status)/$(field tk-conv assignee)" "open/gc-toolkit/gc-toolkit.tk-conv" "(STAY) …leaving the conversation open under its sitting"
 has "$(cat "$CALLS")" "bd dep add tk-conv tk-work --type blocks" "(STAY) …waiting on the work through a blocks edge"
-has "$(field tk-conv notes)" "staying: the dialog keeps what is typed (waits on tk-work)" "(STAY) …with the staying: line its restart rule reads"
+has "$(field tk-conv notes)" "staying: the dialog keeps what is typed (waits on tk-work)" "(STAY) …with the staying: line the entry reads"
 hasnt "$(cat "$CALLS")" "bd close tk-conv" "(STAY) …closing nothing"
 hasnt "$(cat "$CALLS")" "pr-sitting-comment" "(STAY) …and drawing no PR comment as if it had closed"
 has "$(acts tk-conv)" "Kept this conversation open until the work it sent lands" "(STAY) the stay is one of the visit's actions"
