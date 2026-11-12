@@ -263,9 +263,17 @@ def adv_truthy: ((. // "") | tostring) as $s
 def adv_human: . == "human" or endswith("/human");
 def adv_dated: ((. // "") | tostring | split("@")) as $p
   | if ($p | length) == 3 and $p[0] != "" and $p[1] != "" then {value: $p[0], head: $p[1]} else null end;
+def adv_record($mr): $mr == "pull_request_pending" or $mr == "pull_request_head_changed";
 def adv_anchor($m; $mr):
-  if $mr != "pre_open_gate" and $mr != "pull_request" then {state: "stuck", why: "human"}
+  if $mr != "pre_open_gate" and $mr != "pull_request" and (adv_record($mr) | not) then {state: "stuck", why: "human"}
   elif ($m["merge_hold"] | adv_truthy) or ($m["rebase_hold"] | adv_truthy) then {state: "stuck", why: "merge-hold"}
+  elif $mr == "pull_request_head_changed" then {state: "advancing"}
+  elif $mr == "pull_request_pending" then
+    ($m["pr_posture"] | adv_dated) as $po
+    | if $po == null then {state: "stuck", why: "unread"}
+      elif $po.value == "review_required" or $po.value == "changes_requested" then {state: "stuck", why: "approval"}
+      elif $po.value == "approved" or $po.value == "commented" or $po.value == "none" then {state: "advancing"}
+      else {state: "stuck", why: "unread"} end
   else ($m["pr.machine"] | adv_dated) as $ma | ($m["pr_posture"] | adv_dated) as $po
     | if $ma == null then {state: "stuck", why: "unread"}
       elif $ma.value == "progressing" then {state: "advancing"}
@@ -287,7 +295,7 @@ def adv_own($cap):
     elif .status == "in_progress" or .status == "hooked" then {state: "advancing"}
     elif ($r | adv_human) or ($a | adv_human) or .issue_type == "decision"
          or (.issue_type == "gate" and ((.await_type // "") | tostring) == "human") then {state: "stuck", why: "human"}
-    elif .status != "open" then {state: "stuck", why: "held"}
+    elif .status != "open" and $mr != "pull_request_pending" then {state: "stuck", why: "held"}
     elif $mr != "" then adv_anchor($m; $mr)
     elif $tk == "finding" and (($m["finding.disposition"] // "") == "needs-you") then {state: "stuck", why: "human"}
     elif $tk == "review" or $tk == "rework" or $tk == "validation" or $tk == "finding" then {state: "advancing"}

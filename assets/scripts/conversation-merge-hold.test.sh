@@ -442,6 +442,17 @@ no_release && ok "(SIGNOFF) …and nothing is written to release the merge" \
 eq "$(status_of tk-anc)" "needs-review []" "(SIGNOFF) the PR derives what it did before the conversation opened"
 eq "$(holds_of tk-anc)" "clear " "(SIGNOFF) …and nothing holds the anchor, though the edge onto the closed conversation stays"
 
+echo "# an open PR on the pending record is held the same way, blocked or open"
+for rec in "pull_request_pending blocked" "pull_request_head_changed open"; do
+    set -- $rec
+    fresh; bead tk-anc task "$2" "{\"merge_result\":\"$1\",\"pr_number\":\"41\"}"
+    run_open tk-anc --reason "should this land as built?" --json
+    C=$(opened_conv)
+    eq "$RC" 0 "(OPEN-RECORD) $1: open exits 0"
+    eq "$(deps_of tk-anc blocks)" "$C" "(OPEN-RECORD) $1: the anchor depends on the conversation through a blocks edge"
+    has "$ERR" "conversation $C holds the merge of the PR of tk-anc until it closes" "(OPEN-RECORD) $1: open says the conversation holds the merge"
+done
+
 echo "# dismiss closes the conversation, and the close frees the merge"
 pr; run_open tk-anc --json; C=$(opened_conv)
 : > "$CALLS"

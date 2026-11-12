@@ -26,8 +26,9 @@
 # Usage:
 #   converse-rework.sh --anchor <anchor-bead> --ruling-bead <conversation> \
 #     --ruling "<the ruling, one line>" [--pool <pool-name>]
-#   The anchor must be an open PR: live in the store, at
-#   merge_result=pull_request, carrying no disposition (gc.pr_close_disposition_kind
+#   The anchor must be an open PR: live in the store, at merge_result
+#   pull_request or, on the pending record, pull_request_pending or
+#   pull_request_head_changed, carrying no disposition (gc.pr_close_disposition_kind
 #   or a duplicates or supersedes edge onto a successor), and naming its branch,
 #   its landing target and its PR.
 #   Its rig checkout, the one its id prefix names in `gc rig list`, must resolve,
@@ -89,8 +90,10 @@ case ",$LIVE_STATUSES," in
   *) die "anchor $ANCHOR is status='${STATUS:-unset}', not live; the ruling-rework path applies only to an open PR" ;;
 esac
 MERGE_RESULT=$(row_meta "$ANCHOR_ROW" merge_result)
-[ "$MERGE_RESULT" = "pull_request" ] \
-  || die "anchor $ANCHOR is merge_result='${MERGE_RESULT:-unset}', not pull_request; the ruling-rework path applies only to an open PR"
+case "$MERGE_RESULT" in
+  pull_request|pull_request_pending|pull_request_head_changed) : ;;
+  *) die "anchor $ANCHOR is merge_result='${MERGE_RESULT:-unset}', not an open PR's (pull_request, pull_request_pending or pull_request_head_changed); the ruling-rework path applies only to an open PR" ;;
+esac
 DISPOSITION=$(row_meta "$ANCHOR_ROW" gc.pr_close_disposition_kind)
 [ -z "$DISPOSITION" ] \
   || die "anchor $ANCHOR is disposed (gc.pr_close_disposition_kind=$DISPOSITION), so its PR is closing; nothing filed"
