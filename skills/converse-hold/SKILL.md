@@ -39,7 +39,8 @@ conversation on an open PR holds the PR's merge until it closes, and otherwise
 blocks nothing: its subject keeps moving while you talk.
 
 **On an open PR the merge waits for this conversation.** When the subject is
-an open PR's anchor (`merge_result=pull_request`, not closed), or a bead whose
+an open PR's anchor (`merge_result` `pull_request`, `pull_request_pending` or
+`pull_request_head_changed`, and not closed), or a bead whose
 `anchor_bead` names one, such as its review, rework or supplement, the anchor
 depends on this conversation through bd's `blocks` edge. bd holds the anchor
 while the conversation is open and lets it go once the conversation closes, by
