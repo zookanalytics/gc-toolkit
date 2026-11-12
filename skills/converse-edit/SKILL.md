@@ -252,31 +252,16 @@ what its serve command built when it started, so an edit the command does not
 reload shows only once you stop the copy and start it again, which gives it a
 new port and address to give the operator.
 
-A rig that declares no serve command offers no copy, so its look cannot be
-shown live, and the block says so. Tell the operator, and recommend sending the
-change on a formula (the converse-settle step), and the operator's ruling
-decides.
-
 Where `address` is empty, `detail` says why. A copy whose publish command ended
-gets its address back when you run the start again. Where the city can give no
-address, the operator cannot open the copy: stop it, and show them screenshots
-instead. Capture each look from the tree with `demo-screenshot.sh`, which serves
-the tree as a copy in the same sandbox and captures that copy. Drive the app to
-the look with a script in the `gc-toolkit.demo-capture` skill's format, keep
-each image outside the tree and your home, and read each one yourself before you
-describe it to the operator:
-
-```bash
-SERVE=$(gc formula show mol-rig-demo --rig "$GC_RIG" --json | jq -r '[.vars[] | select(.name == "ui_serve_command")][0].rig_default // empty')
-"$CONV/demo-screenshot.sh" page --script "<the script>" --serve "$SERVE" --cwd "$TREE" --output "<the image>"
-```
-
-The operator sees the images on GitHub once the change has a PR. After the
-hand-off, once the change records a `pr_number`, attach each image there:
-
-```bash
-"$CONV/demo-deliver.sh" --file "<the image>" --subject "$CHANGE"
-```
+gets its address back when you run the start again. Where the city sets no
+publisher, or a second start still prints no address, the city can give no
+address and the operator cannot open the copy, so stop it with
+`( cd "$TREE" && "$GC_CITY_PATH/.gc/services/gctk/bin/gctk" rig serve --stop )`.
+A rig that declares no serve command offers no copy at all, and the block says
+so. Either way the look cannot be shown live. Tell the operator, and recommend
+sending the change on a formula (the converse-settle step), and the operator's
+ruling decides. A small fix agreed here, whose next step is not a look, is still
+inside the line.
 
 Stop the copy at the hand-off, at a drop and at the sign-off, as those sections
 say. A copy left running ends once your session has ended, because Gas City's

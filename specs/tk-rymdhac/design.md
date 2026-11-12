@@ -46,9 +46,10 @@ your devices reach every port on this host, but a copy listens only on the host
 itself, so the city publishes it. It cannot go under the supervisor's address,
 because the board's page reads the live city from whatever address it is served
 on. It needs a publisher the city sets, a serve command the rig declares, and
-one pack script. In a city that sets no publisher, the sitting shows you
-screenshots instead. It captures each look and reads it, and you see the images
-on the change's PR once it has one.
+one pack script. In a city that sets no publisher, you cannot open the copy, so
+its look cannot be shown live, as in a rig that declares no serve command. The
+sitting then tells you so and recommends sending the change on a formula, and
+your ruling decides.
 
 A check's send-back goes to the pool, as any change's does, even while the
 sitting that made the change is still open, so a review's finding never comes
@@ -509,7 +510,8 @@ without parsing prose:
 - **State.** `--check` says whether a copy runs, answers on its port as its own
   and still has its address, because a publisher can end alone.
 - **No publisher.** Where the city sets none, the copy runs with no address,
-  and the report says why, and the sitting shows screenshots.
+  and the report says why. The operator cannot open such a copy, so the sitting
+  stops it, as No live copy below says.
 - **No cap.** Each copy has a port of its own, so any number run at once.
 
 **Publishing.** The city sets a publish command, `ui_publish_command`, and an
@@ -569,11 +571,14 @@ sleep, and a start is safe to repeat after a wake. No watcher inside a copy
 polls for its session. Unit 4 proved on the host that the sweep ends a copy
 whose leader carries an ended session's values, on the city's running gc.
 
-**Screenshots.** Where the verb can give no address, the sitting captures each
-look from the checkout with `demo-screenshot.sh --serve`, which serves it as a
-copy with no address in the same sandbox and captures that copy, and reads the
-image itself. The operator sees the images on GitHub once the change has a PR,
-attached by `demo-deliver.sh`.
+**No live copy.** Where the verb can give no address, the operator cannot open
+the copy, so its look cannot be shown live, as in a rig that declares no serve
+command. The sitting stops the copy, tells the operator so and recommends
+sending the change on a formula, and the operator's ruling decides. A small fix
+agreed in the sitting, whose next step is not a look, is still inside the line.
+Screenshots do not stand in for the copy. The pack shows the operator an image
+only on a PR, through `demo-deliver.sh`, and the change has one only after the
+hand-off, once the operator's go has said they have finished reacting.
 
 **Containers stay out.** Gas City runs a city's sessions in pods or sandboxes,
 chosen for the whole city (`[session] provider`), and has no primitive that runs
@@ -640,7 +645,7 @@ conversation tk-16d2j3q: "yes, build the rest").
 | 1 | Work's writers serve a sitting | `--held-by <conversation>` on `work-setup.sh` and `work-submit.sh`: the proof, with its refusal of a bead someone else holds or is queued to take, the refinery included; refusals that end nothing; and the hand-off's release of the edge as its last write, after the refinery assignment. Tests in `work-setup.test.sh` and `work-submit.test.sh`: a sitting's setup and its re-entry to a recorded tree; a hand-off that assigns the refinery and then releases the edge; a hand-off stopped before the assignment by a refused write, which a second run completes with nothing written beyond what the first did not reach and its note appended again; a run once the refinery is assigned, refused with the refinery named as the holder and nothing pushed or written, whether this conversation's own hand-off stopped before its release or completed it, or the refinery took the bead another way and this conversation's edge was added afterwards; a missing edge, a hook that names another bead, a bead assigned to another holder, one a run works and one with a pool route, each refused with nothing written; and a refusal that drains nothing. The `component-model.md` rows. The commit cites the search record. | nothing |
 | 2 | One home for the PR summary's standard | The submit step's "Compose the PR summary" moves into the commit-conventions skill, whose description gains the summary. The submit step loads the skill and keeps its calls, and `formula-step-size.test.sh` holds. | nothing |
 | 3 | The doctrine and the edit skill | Every row of section 6 except the UI section of `converse-edit`, and the first Debt entry of `architecture.md` removed. | units 1 and 2 |
-| 4 | A copy of a rig's UI | The copy's verb, `gctk rig serve`, which starts a copy with or without an address inside the capture's sandbox, stops it and reports its state, with the demo captures' `--serve` moved onto it, and its tests, which stub the publish command so that no suite touches Tailscale. The serve command's declaration and the city's publish command and address pattern, as the three vars `mol-rig-demo` declares and the verb's callers read. `converse-edit`'s section on a copy, which calls the verb, gives the operator the address it prints and shows screenshots where it prints none. gc-toolkit's `docs/review-demo.md` pointed at the declared command. A bead for the mechanik to set gc-toolkit's serve command, which runs `go run ./cmd/helm-fixture` from `services/helm`, and the city's two values in the city's config. Its first act is the proof under Cleanup in section 5. | unit 3 |
+| 4 | A copy of a rig's UI | The copy's verb, `gctk rig serve`, which starts a copy with or without an address inside the capture's sandbox, stops it and reports its state, with the demo captures' `--serve` moved onto it, and its tests, which stub the publish command so that no suite touches Tailscale. The serve command's declaration and the city's publish command and address pattern, as the three vars `mol-rig-demo` declares and the verb's callers read. `converse-edit`'s section on a copy, which calls the verb, gives the operator the address it prints, and where it prints none stops the copy and recommends sending the change. gc-toolkit's `docs/review-demo.md` pointed at the declared command. A bead for the mechanik to set gc-toolkit's serve command, which runs `go run ./cmd/helm-fixture` from `services/helm`, and the city's two values in the city's config. Its first act is the proof under Cleanup in section 5. | unit 3 |
 | 5 | A sitting edits an open PR's branch | Built on tk-1tfzr71.22's rework in its loop and tk-1tfzr71.20's publication of a head, following whatever tk-1tfzr71.22's design settles. It removes the second Debt entry. | tk-1tfzr71.22 and tk-1tfzr71.20 |
 
 ## 9. Edges and notes the implementation child adds
@@ -662,8 +667,9 @@ conversation tk-16d2j3q: "yes, build the rest").
   sitting takes no send-back, by the operator's ruling in conversation
   tk-16d2j3q, so unit 5 routes none to one.
 - The mechanik's bead from unit 4 goes to the mechanik, and no bead of the
-  effort waits on it, since a rig with no declared serve command offers no live
-  copy and a city with no publisher shows screenshots.
+  effort waits on it, since a rig with no declared serve command and a city with
+  no publisher each offer no live copy, and a sitting then recommends sending
+  the change.
 
 ## 10. Facts this design rests on
 
