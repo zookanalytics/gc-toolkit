@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/git"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/host"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/rig"
 )
 
@@ -112,7 +113,7 @@ func newRigServeCmd(stdout, stderr io.Writer) *cobra.Command {
 			return errors.New(msg)
 		}
 		if o.lead != "" {
-			return exit(rig.Lead(o.lead))
+			return exit(rig.Lead(host.Local(), o.lead))
 		}
 		return exit(rigServe(o, stdout, stderr))
 	}
@@ -162,7 +163,7 @@ func rigServe(o rigServeOpts, stdout, stderr io.Writer) int {
 	if real, err := filepath.EvalSymlinks(top); err == nil {
 		top = real
 	}
-	copies := rig.NewCopies(co.Common)
+	copies := rig.NewCopies(co.Common, host.Local())
 	var rep rig.Report
 	code := 0
 	switch {

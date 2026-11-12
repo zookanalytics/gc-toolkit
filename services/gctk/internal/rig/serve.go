@@ -31,22 +31,23 @@ package rig
 // `processRootIncarnationOver` in Gas City's cmd/gc/session_beads.go). The
 // leader keeps the three values from its caller's environment, leads the
 // copy's group, and is a gctk binary, whose environment macOS lets ps read.
+//
+// Every process a copy starts, signals or reads, and every connection it
+// opens, goes through the host adapter (internal/host), so each decision here
+// is tested on its fake.
 
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
-	"io"
-	"net"
 	"os"
-	"os/exec"
-	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/host"
 )
 
 // A copy's state, as a report names it.
@@ -114,15 +115,16 @@ type ServeOpts struct {
 	ScriptsDir string
 }
 
-// Copies is the copies' directory of one clone.
+// Copies is the copies' directory of one clone, and the host they run on.
 type Copies struct {
 	root string
+	h    host.Host
 }
 
 // NewCopies returns the copies' directory under commonDir, the clone's git
-// common directory.
-func NewCopies(commonDir string) *Copies {
-	return &Copies{root: filepath.Join(commonDir, serveDirName)}
+// common directory, whose copies run on h.
+func NewCopies(commonDir string, h host.Host) *Copies {
+	return &Copies{root: filepath.Join(commonDir, serveDirName), h: h}
 }
 
 // Dir is the record directory of the copy of checkout, the hash of its path.
@@ -131,10 +133,16 @@ func (c *Copies) Dir(checkout string) string {
 	return filepath.Join(c.root, hex.EncodeToString(sum[:16]))
 }
 
-// copyRec is one copy's record directory, a file per value.
-type copyRec string
+// copyRec is one copy's record directory, a file per value, and the host the
+// copy runs on.
+type copyRec struct {
+	dir string
+	h   host.Host
+}
 
-func (r copyRec) path(name string) string { return filepath.Join(string(r), name) }
+func (c *Copies) rec(checkout string) copyRec { return copyRec{dir: c.Dir(checkout), h: c.h} }
+
+func (r copyRec) path(name string) string { return filepath.Join(r.dir, name) }
 
 // read returns a value as write wrote it, or "" when the file is absent.
 func (r copyRec) read(name string) string {
@@ -170,188 +178,21 @@ func (r copyRec) remove(names ...string) {
 	}
 }
 
-// --- the host ----------------------------------------------------------------
-
-// freePort picks a loopback port that nothing listens on. A variable so a test
-// can make the pick fail.
-var freePort = func() (int, error) {
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return 0, err
-	}
-	defer l.Close()
-	return l.Addr().(*net.TCPAddr).Port, nil
-}
-
-// answers reports whether something accepts a connection on the loopback port.
-func answers(port int) bool {
-	c, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), time.Second)
-	if err != nil {
-		return false
-	}
-	c.Close()
-	return true
-}
-
-// listeners returns the processes that listen on the TCP port at an address a
-// connection to loopback reaches: a loopback address or every address. One that
-// listens on another address, as a publisher's daemon listens on the host's
-// network address, is left out.
-func listeners(port int) ([]int, error) {
-	out, err := exec.Command("lsof", "-nP", "-iTCP:"+strconv.Itoa(port), "-sTCP:LISTEN", "-F", "pn").Output()
-	var ee *exec.ExitError
-	if err != nil && !(errors.As(err, &ee) && len(out) == 0) {
-		return nil, fmt.Errorf("lsof did not list the listeners on port %d: %v", port, err)
-	}
-	seen := map[int]bool{}
-	var pids []int
-	pid := 0
-	for _, line := range strings.Split(string(out), "\n") {
-		switch {
-		case strings.HasPrefix(line, "p"):
-			pid, _ = strconv.Atoi(line[1:])
-		case strings.HasPrefix(line, "n") && pid > 0 && reachedFromLoopback(line[1:]) && !seen[pid]:
-			seen[pid] = true
-			pids = append(pids, pid)
-		}
-	}
-	return pids, nil
-}
-
-// reachedFromLoopback reports whether a listening address, host:port as lsof
-// names it, takes a connection to loopback.
-func reachedFromLoopback(addr string) bool {
-	host := addr
-	if i := strings.LastIndex(addr, ":"); i >= 0 {
-		host = addr[:i]
-	}
-	host = strings.Trim(host, "[]")
-	switch host {
-	case "*", "0.0.0.0", "::", "localhost", "::1":
-		return true
-	}
-	return strings.HasPrefix(host, "127.")
-}
-
-// pgidOf returns a process's group, or 0 when ps does not name it.
-func pgidOf(pid int) int {
-	out, err := exec.Command("ps", "-o", "pgid=", "-p", strconv.Itoa(pid)).Output()
-	if err != nil {
-		return 0
-	}
-	n, _ := strconv.Atoi(strings.TrimSpace(string(out)))
-	return n
-}
-
-// owned reports whether the copy whose group pgid names holds the port: at
-// least one process listens there, and each one a connection to loopback
-// reaches is a member of the group. It says why when it does not.
-func owned(port, pgid int) (bool, string) {
-	pids, err := listeners(port)
-	if err != nil {
-		return false, err.Error()
-	}
-	if len(pids) == 0 {
-		return false, fmt.Sprintf("nothing listens on port %d", port)
-	}
-	for _, p := range pids {
-		if g := pgidOf(p); g != pgid {
-			return false, fmt.Sprintf("process %d, which listens on port %d, is not one of the copy's", p, port)
-		}
-	}
-	return true, ""
-}
-
-// startID is a process's start, in a form that stays the same for as long as it
-// runs, so a pid the kernel reused, which belongs to a process that started
-// later, is told from the leader: the starttime field of /proc/<pid>/stat where
-// that exists, else ps's start time in the C locale and UTC.
-func startID(pid int) string {
-	if b, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid)); err == nil {
-		s := string(b)
-		if i := strings.LastIndex(s, ") "); i >= 0 {
-			if f := strings.Fields(s[i+2:]); len(f) > 19 {
-				return f[19]
-			}
-		}
-		return ""
-	}
-	cmd := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(pid))
-	cmd.Env = append(os.Environ(), "LC_ALL=C", "TZ=UTC")
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	return strings.Join(strings.Fields(string(out)), " ")
-}
-
-// procStat returns a process's parent and its ps state, or false when ps does
-// not name it.
-func procStat(pid int) (int, string, bool) {
-	out, err := exec.Command("ps", "-o", "ppid=,stat=", "-p", strconv.Itoa(pid)).Output()
-	if err != nil {
-		return 0, "", false
-	}
-	f := strings.Fields(string(out))
-	if len(f) < 2 {
-		return 0, "", false
-	}
-	ppid, err := strconv.Atoi(f[0])
-	return ppid, f[1], err == nil
-}
-
-// members returns the processes of the group other than skip, leaving out any
-// that has exited and waits to be reaped. ps runs in a group of its own, so it
-// never lists itself among a group it is asked about.
-func members(pgid, skip int) []int {
-	cmd := exec.Command("ps", "-A", "-o", "pgid=,pid=,stat=")
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	out, err := cmd.Output()
-	if err != nil {
-		return nil
-	}
-	var pids []int
-	for _, line := range strings.Split(string(out), "\n") {
-		f := strings.Fields(line)
-		if len(f) < 3 || f[0] != strconv.Itoa(pgid) || strings.HasPrefix(f[2], "Z") {
-			continue
-		}
-		if p, err := strconv.Atoi(f[1]); err == nil && p != skip {
-			pids = append(pids, p)
-		}
-	}
-	return pids
-}
-
-// groupGone reports whether no live process is left in the group. kill answers
-// ESRCH for an empty group, and on darwin EPERM for one whose only members have
-// exited and wait to be reaped.
-func groupGone(pgid int) bool {
-	err := syscall.Kill(-pgid, 0)
-	if errors.Is(err, syscall.ESRCH) {
-		return true
-	}
-	return errors.Is(err, syscall.EPERM) && len(members(pgid, 0)) == 0
-}
-
 // --- the record --------------------------------------------------------------
 
 // alive reports whether the copy's leader runs and is the process its record
-// names.
+// names: a process that started later under a pid the kernel reused is not.
 func (r copyRec) alive() bool {
 	pid, ok := r.num("pid")
-	if !ok || syscall.Kill(pid, 0) != nil {
+	if !ok || r.h.Signal(pid, 0) != nil {
 		return false
 	}
-	if _, stat, ok := procStat(pid); !ok || strings.HasPrefix(stat, "Z") {
+	p, ok := r.h.Proc(pid)
+	if !ok {
 		return false
 	}
 	want := r.read("start_id")
-	if want == "" {
-		return true
-	}
-	got := startID(pid)
-	return got == "" || got == want
+	return want == "" || p.Started == "" || p.Started == want
 }
 
 // publisher returns the run of the publish command the record names and its
@@ -374,8 +215,8 @@ func (r copyRec) publisherAlive() bool {
 	if pid <= 0 || !ok {
 		return false
 	}
-	ppid, stat, ok := procStat(pid)
-	return ok && ppid == leader && !strings.HasPrefix(stat, "Z")
+	p, ok := r.h.Proc(pid)
+	return ok && p.Parent == leader
 }
 
 // ready reports whether the copy answers on its port and holds it.
@@ -385,10 +226,29 @@ func (r copyRec) ready() (bool, string) {
 	if !ok || !okp {
 		return false, "its record names no port or no leader"
 	}
-	if !answers(port) {
+	if !r.h.Answers(port) {
 		return false, fmt.Sprintf("nothing answers on port %d", port)
 	}
-	return owned(port, pid)
+	return r.owned(port, pid)
+}
+
+// owned reports whether the copy whose group pgid names holds the port: at
+// least one process listens there, and each one a connection to loopback
+// reaches is a member of the group. It says why when it does not.
+func (r copyRec) owned(port, pgid int) (bool, string) {
+	pids, err := r.h.Listeners(port)
+	if err != nil {
+		return false, err.Error()
+	}
+	if len(pids) == 0 {
+		return false, fmt.Sprintf("nothing listens on port %d", port)
+	}
+	for _, pid := range pids {
+		if p, ok := r.h.Proc(pid); !ok || p.Group != pgid {
+			return false, fmt.Sprintf("process %d, which listens on port %d, is not one of the copy's", pid, port)
+		}
+	}
+	return true, ""
 }
 
 // tail returns the last n lines of a file.
@@ -441,18 +301,18 @@ func (r copyRec) stopGroup() bool {
 	if !ok || !r.alive() {
 		return true
 	}
-	_ = syscall.Kill(-pid, syscall.SIGTERM)
+	_ = r.h.SignalGroup(pid, syscall.SIGTERM)
 	deadline := time.Now().Add(StopGrace)
-	for !groupGone(pid) && time.Now().Before(deadline) {
+	for !r.h.GroupGone(pid) && time.Now().Before(deadline) {
 		time.Sleep(200 * time.Millisecond)
 	}
-	if !groupGone(pid) {
-		_ = syscall.Kill(-pid, syscall.SIGKILL)
-		for i := 0; i < 10 && !groupGone(pid); i++ {
+	if !r.h.GroupGone(pid) {
+		_ = r.h.SignalGroup(pid, syscall.SIGKILL)
+		for i := 0; i < 10 && !r.h.GroupGone(pid); i++ {
 			time.Sleep(200 * time.Millisecond)
 		}
 	}
-	return groupGone(pid)
+	return r.h.GroupGone(pid)
 }
 
 // addressFor fills the address pattern with the port.
@@ -463,14 +323,14 @@ func addressFor(pattern string, port int) string {
 
 // --- start, check and stop ---------------------------------------------------
 
-// leaderCommand is the command that runs a copy's leader over its record. A
-// variable so a test can run its own binary as the leader.
-var leaderCommand = func(dir string) (*exec.Cmd, error) {
+// leaderArgv is the command that runs a copy's leader over its record: this
+// binary, as `gctk rig serve --lead <record>`.
+func leaderArgv(dir string) ([]string, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return nil, err
 	}
-	return exec.Command(exe, "rig", "serve", "--lead", dir), nil
+	return []string{exe, "rig", "serve", "--lead", dir}, nil
 }
 
 // Serve starts a copy of the checkout whose top is checkout, or reports the
@@ -496,18 +356,18 @@ func (c *Copies) Serve(checkout string, o ServeOpts) Report {
 	if err := os.MkdirAll(c.root, 0o755); err != nil {
 		return failed("no-state", fmt.Sprintf("the copies' directory %s could not be made: %v", c.root, err))
 	}
-	rec := copyRec(c.Dir(checkout))
+	rec := c.rec(checkout)
 	for claims := 0; ; claims++ {
-		if err := os.Mkdir(string(rec), 0o755); err == nil {
+		if err := os.Mkdir(rec.dir, 0o755); err == nil {
 			break
 		}
 		if claims >= tries {
-			return failed("no-state", fmt.Sprintf("the record %s could neither be claimed nor read", rec))
+			return failed("no-state", fmt.Sprintf("the record %s could neither be claimed nor read", rec.dir))
 		}
 		// A record that holds no leader yet is a start in progress, or one that
 		// died before its leader ran.
 		if !rec.awaitLeader(30*time.Second) || !rec.alive() {
-			_ = os.RemoveAll(string(rec))
+			_ = os.RemoveAll(rec.dir)
 			continue
 		}
 		// A copy that runs another serve command shows another app, such as the
@@ -538,7 +398,7 @@ func (c *Copies) Serve(checkout string, o ServeOpts) Report {
 				}
 				if port, ok := rec.num("port"); ok {
 					if err := rec.write("address", addressFor(o.AddressPattern, port)); err != nil {
-						return failed("no-state", fmt.Sprintf("the record %s could not be written: %v", rec, err))
+						return failed("no-state", fmt.Sprintf("the record %s could not be written: %v", rec.dir, err))
 					}
 				}
 				if o.PublishCommand != "" && o.AddressPattern != "" && rec.publish() == publishTaken {
@@ -552,13 +412,13 @@ func (c *Copies) Serve(checkout string, o ServeOpts) Report {
 	for name, v := range map[string]string{"checkout": checkout, "command": o.Command, "scripts": o.ScriptsDir,
 		"grace_ms": strconv.FormatInt(StopGrace.Milliseconds(), 10)} {
 		if err := rec.write(name, v); err != nil {
-			_ = os.RemoveAll(string(rec))
-			return failed("no-state", fmt.Sprintf("the record %s could not be written: %v", rec, err))
+			_ = os.RemoveAll(rec.dir)
+			return failed("no-state", fmt.Sprintf("the record %s could not be written: %v", rec.dir, err))
 		}
 	}
 	if o.Publish {
 		if reason, detail := rec.ask(o); reason != "" {
-			_ = os.RemoveAll(string(rec))
+			_ = os.RemoveAll(rec.dir)
 			return failed(reason, detail)
 		}
 	}
@@ -573,7 +433,7 @@ func (c *Copies) Serve(checkout string, o ServeOpts) Report {
 func (r copyRec) ask(o ServeOpts) (string, string) {
 	for _, kv := range [][2]string{{"asked", ""}, {"publish_command", o.PublishCommand}, {"address_pattern", o.AddressPattern}} {
 		if err := r.write(kv[0], kv[1]); err != nil {
-			return "no-state", fmt.Sprintf("the record %s could not be written: %v", r, err)
+			return "no-state", fmt.Sprintf("the record %s could not be written: %v", r.dir, err)
 		}
 	}
 	return "", ""
@@ -608,7 +468,7 @@ func (r copyRec) publish() publishResult {
 	for try := 1; try <= tries; try++ {
 		gen, _ := r.publisher()
 		pid, ok := r.num("pid")
-		if !ok || syscall.Kill(pid, syscall.SIGUSR1) != nil {
+		if !ok || r.h.Signal(pid, syscall.SIGUSR1) != nil {
 			return publishRefused
 		}
 		deadline := time.Now().Add(10 * time.Second)
@@ -646,23 +506,23 @@ func (r copyRec) publish() publishResult {
 // once it answers.
 func (c *Copies) launch(rec copyRec, checkout string, o ServeOpts) Report {
 	failed := func(reason, detail string) Report {
-		_ = os.RemoveAll(string(rec))
+		_ = os.RemoveAll(rec.dir)
 		return Report{State: CopyFailed, Reason: reason, Checkout: checkout, Detail: detail}
 	}
 	publishable := rec.has("asked") && rec.read("publish_command") != "" && rec.read("address_pattern") != ""
 	for try := 1; try <= tries; try++ {
-		port, err := freePort()
+		port, err := c.h.FreePort()
 		if err != nil {
 			return failed("no-free-port", fmt.Sprintf("no free loopback port could be picked: %v", err))
 		}
 		rec.remove("pid", "start_id", "publisher", "rc", "serve.log", "publish.log", "address")
 		if err := rec.write("port", strconv.Itoa(port)); err != nil {
-			return failed("no-state", fmt.Sprintf("the record %s could not be written: %v", rec, err))
+			return failed("no-state", fmt.Sprintf("the record %s could not be written: %v", rec.dir, err))
 		}
 		if publishable {
 			_ = rec.write("address", addressFor(rec.read("address_pattern"), port))
 		}
-		if reason, detail := startLeader(rec); reason != "" {
+		if reason, detail := rec.startLeader(); reason != "" {
 			return failed(reason, detail)
 		}
 		if !rec.awaitLeader(15 * time.Second) {
@@ -681,26 +541,23 @@ func (c *Copies) launch(rec copyRec, checkout string, o ServeOpts) Report {
 // process group that outlives this call, and is reparented to PID 1 once this
 // process exits. Its environment is the caller's, whole, because the orphan
 // sweep reads the session's values from it.
-func startLeader(rec copyRec) (string, string) {
-	cmd, err := leaderCommand(string(rec))
+func (r copyRec) startLeader() (string, string) {
+	argv, err := leaderArgv(r.dir)
 	if err != nil {
 		return "not-started", fmt.Sprintf("the copy's leader could not be named: %v", err)
 	}
-	logf, err := os.OpenFile(rec.path("serve.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	logf, err := os.OpenFile(r.path("serve.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return "no-state", fmt.Sprintf("the copy's log could not be opened: %v", err)
 	}
 	defer logf.Close()
-	cmd.Stdin = nil
-	cmd.Stdout = logf
-	cmd.Stderr = logf
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	if err := cmd.Start(); err != nil {
+	leader, err := r.h.Start(host.Spec{Argv: argv, Out: logf, Session: true})
+	if err != nil {
 		return "not-started", fmt.Sprintf("the copy's leader did not start: %v", err)
 	}
 	// The leader is this process's child until this process exits, so one
 	// that ends while a start waits is reaped here, and reads as gone.
-	go func() { _ = cmd.Wait() }()
+	go leader.Wait()
 	return "", ""
 }
 
@@ -722,7 +579,7 @@ func (r copyRec) await(checkout string, wait time.Duration) Report {
 			if rc, okRC := r.exitCode(); okRC {
 				rep.ExitCode = &rc
 			}
-			_ = os.RemoveAll(string(r))
+			_ = os.RemoveAll(r.dir)
 			return rep
 		}
 		if !time.Now().Before(deadline) {
@@ -730,7 +587,7 @@ func (r copyRec) await(checkout string, wait time.Duration) Report {
 			rep := Report{State: CopyFailed, Reason: "not-answering", Checkout: checkout,
 				Detail: fmt.Sprintf("the copy did not answer on port %d within %s (%s), so it was stopped", port, wait, why),
 				Tail:   tail(r.path("serve.log"), 20)}
-			_ = os.RemoveAll(string(r))
+			_ = os.RemoveAll(r.dir)
 			return rep
 		}
 		time.Sleep(500 * time.Millisecond)
@@ -744,8 +601,8 @@ func (r copyRec) exitCode() (int, bool) {
 
 // Check reports the state of the checkout's copy, and starts nothing.
 func (c *Copies) Check(checkout string) Report {
-	rec := copyRec(c.Dir(checkout))
-	if _, err := os.Stat(string(rec)); err != nil {
+	rec := c.rec(checkout)
+	if _, err := os.Stat(rec.dir); err != nil {
 		return Report{State: CopyNone, Checkout: checkout}
 	}
 	if rec.alive() {
@@ -767,16 +624,16 @@ func (c *Copies) Check(checkout string) Report {
 
 // Stop ends the checkout's copy and its record.
 func (c *Copies) Stop(checkout string) Report {
-	rec := copyRec(c.Dir(checkout))
-	if _, err := os.Stat(string(rec)); err != nil {
+	rec := c.rec(checkout)
+	if _, err := os.Stat(rec.dir); err != nil {
 		return Report{State: CopyNone, Checkout: checkout}
 	}
 	if !rec.alive() {
-		_ = os.RemoveAll(string(rec))
+		_ = os.RemoveAll(rec.dir)
 		return Report{State: CopyNone, Checkout: checkout}
 	}
 	if rec.stopGroup() {
-		_ = os.RemoveAll(string(rec))
+		_ = os.RemoveAll(rec.dir)
 		return Report{State: CopyStopped, Checkout: checkout}
 	}
 	return Report{State: CopyRunning, Checkout: checkout, Detail: "the copy's process group survived SIGTERM and SIGKILL"}
@@ -784,44 +641,39 @@ func (c *Copies) Stop(checkout string) Report {
 
 // --- the leader --------------------------------------------------------------
 
-// sandboxed runs the serve command, given after the port and the checkout,
-// inside the capture's sandbox, which demo-engine-lib.sh composes for the one
-// loopback port and the checkout.
-const sandboxed = `. "$1/` + SandboxLib + `" || exit 126; shift; demo_engine_sandboxed "$@"`
-
-// Lead runs the copy whose record is dir: the serve command, inside the
-// sandbox, and the publish command each time the leader gets SIGUSR1. It ends
-// the copy's whole process group when the serve command ends or a signal ends
-// the leader, and returns the code the leader exits with. It sets its signals
-// up before it records its pid, so a signal start sends once it reads the pid
-// reaches it.
-func Lead(dir string) int {
-	rec := copyRec(dir)
+// Lead runs the copy whose record is dir, on h, the host as the leader sees
+// it: the serve command, inside the sandbox, and the publish command each time
+// the leader gets SIGUSR1. It ends the copy's whole process group when the
+// serve command ends or a signal ends the leader, and returns the code the
+// leader exits with. It sets its signals up before it records its pid, so a
+// signal start sends once it reads the pid reaches it.
+func Lead(h host.Host, dir string) int {
+	rec := copyRec{dir: dir, h: h}
 	sigs := make(chan os.Signal, 8)
-	signal.Notify(sigs, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP, syscall.SIGUSR1)
-	me := os.Getpid()
+	h.Notify(sigs, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP, syscall.SIGUSR1)
+	me := h.Pid()
 	grace := StopGrace
 	if ms, ok := rec.num("grace_ms"); ok {
 		grace = time.Duration(ms) * time.Millisecond
 	}
-	// copied closes once the serve command's output is all in the log.
-	var copied chan struct{}
+	// relayed closes once the serve command's output is all in the log.
+	var relayed <-chan struct{}
 	end := func(code int) int {
-		signal.Ignore(syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP, syscall.SIGUSR1)
-		_ = syscall.Kill(-me, syscall.SIGTERM)
+		h.Ignore(syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP, syscall.SIGUSR1)
+		_ = h.SignalGroup(me, syscall.SIGTERM)
 		deadline := time.Now().Add(grace)
-		for len(members(me, me)) > 0 && time.Now().Before(deadline) {
+		for len(rec.others(me)) > 0 && time.Now().Before(deadline) {
 			time.Sleep(200 * time.Millisecond)
 		}
-		if len(members(me, me)) > 0 {
+		if len(rec.others(me)) > 0 {
 			// The KILL ends the leader with the group, so the leader never ends
 			// while a member runs.
-			_ = syscall.Kill(-me, syscall.SIGKILL)
+			_ = h.SignalGroup(me, syscall.SIGKILL)
 		}
-		// The group has ended, so the pipe has no writer left, and the copy of
+		// The group has ended, so the relay has no writer left, and the copy of
 		// its output finishes at once.
 		select {
-		case <-copied:
+		case <-relayed:
 		case <-time.After(time.Second):
 		}
 		return code
@@ -831,7 +683,11 @@ func Lead(dir string) int {
 	if !ok || checkout == "" {
 		return end(1)
 	}
-	_ = rec.write("start_id", startID(me))
+	started := ""
+	if p, ok := h.Proc(me); ok {
+		started = p.Started
+	}
+	_ = rec.write("start_id", started)
 	if err := rec.write("pid", strconv.Itoa(me)); err != nil {
 		return end(1)
 	}
@@ -840,31 +696,26 @@ func Lead(dir string) int {
 	if err != nil {
 		return end(1)
 	}
-	// The serve command writes through a pipe, which the leader copies to the
+	defer logf.Close()
+	// The serve command writes through a relay the leader copies into the
 	// log, so the sandbox never has to grant a write to the record. A serve
 	// command whose leader is gone dies at its next write.
-	pr, pw, err := os.Pipe()
+	serve, err := h.Start(host.Spec{
+		Argv:    []string{"bash", "-c", rec.read("command")},
+		Dir:     checkout,
+		Env:     []string{"PORT=" + strconv.Itoa(port)},
+		Out:     logf,
+		Relay:   true,
+		Sandbox: &host.Sandbox{Lib: filepath.Join(rec.read("scripts"), SandboxLib), Port: port, Prog: "gctk rig serve"},
+	})
 	if err != nil {
-		return end(1)
-	}
-	copied = make(chan struct{})
-	go func() { _, _ = io.Copy(logf, pr); close(copied) }()
-	serve := exec.Command("bash", "-c", sandboxed, "gctk rig serve", rec.read("scripts"), strconv.Itoa(port), checkout,
-		"bash", "-c", rec.read("command"))
-	serve.Dir = checkout
-	serve.Env = append(os.Environ(), "PORT="+strconv.Itoa(port), "PROG=gctk rig serve")
-	serve.Stdout, serve.Stderr = pw, pw
-	if err := serve.Start(); err != nil {
 		fmt.Fprintf(logf, "gctk rig serve: the serve command did not start: %v\n", err)
 		_ = rec.write("rc", "127")
 		return end(127)
 	}
-	pw.Close()
+	relayed = serve.Relayed()
 	done := make(chan int, 1)
-	go func() {
-		err := serve.Wait()
-		done <- exitStatus(serve.ProcessState, err)
-	}()
+	go func() { done <- serve.Wait() }()
 
 	gen := 0
 	for {
@@ -883,41 +734,36 @@ func Lead(dir string) int {
 	}
 }
 
+// others lists the members of the leader's group other than the leader.
+func (r copyRec) others(leader int) []int {
+	var pids []int
+	for _, p := range r.h.Members(leader) {
+		if p != leader {
+			pids = append(pids, p)
+		}
+	}
+	return pids
+}
+
 // leadPublish runs the publish command for the copy's port, in the copy's
 // group, and records which run it is and its pid.
 func leadPublish(rec copyRec, port, gen int) {
-	pub := exec.Command("bash", "-c", rec.read("publish_command"))
-	pub.Dir = rec.read("checkout")
-	pub.Env = append(os.Environ(), "PORT="+strconv.Itoa(port))
 	logf, err := os.Create(rec.path("publish.log"))
 	if err != nil {
 		return
 	}
 	defer logf.Close()
-	pub.Stdout, pub.Stderr = logf, logf
-	if err := pub.Start(); err != nil {
+	pub, err := rec.h.Start(host.Spec{
+		Argv: []string{"bash", "-c", rec.read("publish_command")},
+		Dir:  rec.read("checkout"),
+		Env:  []string{"PORT=" + strconv.Itoa(port)},
+		Out:  logf,
+	})
+	if err != nil {
 		fmt.Fprintf(logf, "gctk rig serve: the publish command did not start: %v\n", err)
 		_ = rec.write("publisher", fmt.Sprintf("%d 0", gen))
 		return
 	}
-	_ = rec.write("publisher", fmt.Sprintf("%d %d", gen, pub.Process.Pid))
-	go func() { _ = pub.Wait() }()
-}
-
-// exitStatus is a finished command's status as a shell reports it: its exit
-// code, or 128 plus the signal that ended it.
-func exitStatus(ps *os.ProcessState, err error) int {
-	if ps == nil {
-		return 127
-	}
-	if ws, ok := ps.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
-		return 128 + int(ws.Signal())
-	}
-	if code := ps.ExitCode(); code >= 0 {
-		return code
-	}
-	if err != nil {
-		return 1
-	}
-	return 0
+	_ = rec.write("publisher", fmt.Sprintf("%d %d", gen, pub.Pid()))
+	go pub.Wait()
 }
