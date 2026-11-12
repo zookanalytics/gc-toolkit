@@ -541,6 +541,38 @@ func (m *Model) heldLines() []string {
 	return out
 }
 
+// subjectQuestion is the human gate the subject field names, which a
+// conversation filed there answers, with the gate's own question: its title as
+// what holds the subject lists it, or empty when that list did not read or does
+// not name it. ok is false for any other subject. The operator's question is
+// optional on a gate: a save with none files the gate's own as the
+// conversation's ask (open's path with no --reason).
+func (m *Model) subjectQuestion() (gate, title string, ok bool) {
+	l := m.resolved()
+	if l == nil || l.about.Gate == "" {
+		return "", "", false
+	}
+	for _, h := range l.about.Holds {
+		if h.Held == "gate" && h.ID == l.about.Gate {
+			return l.about.Gate, h.Title, true
+		}
+	}
+	return l.about.Gate, "", true
+}
+
+// placeholder is what the empty question box shows: on a question, that the
+// box is optional and what the conversation asks when it is left empty.
+func (m *Model) placeholder() string {
+	gate, title, ok := m.subjectQuestion()
+	switch {
+	case !ok:
+		return askPlaceholder
+	case title == "":
+		return "Optional. Left empty, the conversation asks question " + gate + " as it stands."
+	}
+	return "Optional. Left empty, the conversation asks the question as it stands: " + title
+}
+
 // standing is how far a destination is from a save that files there.
 type standing int
 
@@ -994,9 +1026,14 @@ func (m *Model) submit() tea.Cmd {
 		m.scr = progressScreen
 		return m.start()
 	}
-	if blank {
+	// On a gate an empty question box saves the gate's own question as the
+	// ask. Every other subject needs the operator's.
+	if _, _, onGate := m.subjectQuestion(); blank && !onGate {
 		m.status = "Not saved: type your question first."
 		return nil
+	}
+	if blank {
+		q = ""
 	}
 	req := SaveRequest{Question: q}
 	if m.newTopic() {
@@ -1132,7 +1169,10 @@ func (m *Model) onSaved(msg savedMsg) tea.Cmd {
 	if msg.err != nil {
 		why = msg.err.Error()
 	}
-	m.status = "Not saved: " + strings.TrimSuffix(why, ".") + ". Your question is still here."
+	m.status = "Not saved: " + strings.TrimSuffix(why, ".") + "."
+	if m.req.Question != "" {
+		m.status += " Your question is still here."
+	}
 	var cmd tea.Cmd
 	switch {
 	case msg.saved.Subject != "" && m.newTopic():
@@ -1524,10 +1564,16 @@ func (m *Model) keepUnsaved() string {
 // once something else has ended the program (Leave). What that run did is
 // unknown, so the note says so and keeps the question.
 func (m *Model) leaveNow() tea.Cmd {
-	if m.saved != nil {
+	unknown := "so whether it was filed is unknown: gc-helm.sh conversations lists the open conversations."
+	switch {
+	case m.saved != nil:
 		m.note = m.savedNote()
-	} else {
-		m.note = m.keepDraft("The form closed while your question was being saved, so whether it was filed is unknown: gc-helm.sh conversations lists the open conversations.")
+	case m.req.Question == "" && m.req.Ref != "":
+		// A save of the gate's own question carries no text of the operator's
+		// to keep.
+		m.note = "The form closed while " + m.asked() + " was being saved, " + unknown
+	default:
+		m.note = m.keepDraft("The form closed while your question was being saved, " + unknown)
 	}
 	m.left = true
 	return tea.Quit
@@ -1552,6 +1598,15 @@ func (m *Model) Leave() string {
 	return m.note
 }
 
+// asked is how the screen names the question the save carries: the operator's,
+// or the gate's own when the box was left empty on a gate.
+func (m *Model) asked() string {
+	if m.req.Question == "" && m.req.Ref != "" {
+		return "the question " + m.req.Ref + " asks"
+	}
+	return "your question"
+}
+
 func (m *Model) savedNote() string {
 	s := m.saved
 	what := "is saved"
@@ -1559,7 +1614,7 @@ func (m *Model) savedNote() string {
 	case m.existing:
 		what = "was chosen"
 	case m.saving || m.saveErr != "":
-		what = "holds your question"
+		what = "holds " + m.asked()
 	}
 	state := "its sitting is starting"
 	switch {
@@ -1943,6 +1998,7 @@ func (m *Model) composeView() string {
 	// counts the rest.
 	top, below, under := m.wrap(head.String()), m.wrap(b.String()), m.wrap(after.String())
 	m.fitQuestion(lines(top) + lines(below) + min(len(list), 2) + lines(under))
+	m.question.SetPlaceholder(m.placeholder())
 	b.Reset()
 	b.WriteString(top + m.question.View() + "\n" + below)
 	for _, line := range listLines(list, sel, m.room(b.String(), under)) {
@@ -1973,13 +2029,13 @@ func (m *Model) progressView() string {
 	b.WriteString(labelStyle.Render("Start a conversation") + "\n\n")
 	switch {
 	case m.saving && m.saved != nil:
-		b.WriteString(waitStyle.Render("…") + fmt.Sprintf(" saving again: conversation %s on %s holds your question\n", m.saved.Conversation, m.saved.Subject))
+		b.WriteString(waitStyle.Render("…") + fmt.Sprintf(" saving again: conversation %s on %s holds %s\n", m.saved.Conversation, m.saved.Subject, m.asked()))
 	case m.saving:
-		b.WriteString(waitStyle.Render("…") + " saving your question\n")
+		b.WriteString(waitStyle.Render("…") + " saving " + m.asked() + "\n")
 	case m.saved != nil && m.existing:
 		b.WriteString(okStyle.Render("✓") + fmt.Sprintf(" conversation %s on %s, chosen\n", m.saved.Conversation, m.saved.Subject))
 	case m.saved != nil:
-		b.WriteString(okStyle.Render("✓") + fmt.Sprintf(" saved: conversation %s on %s holds your question\n", m.saved.Conversation, m.saved.Subject))
+		b.WriteString(okStyle.Render("✓") + fmt.Sprintf(" saved: conversation %s on %s holds %s\n", m.saved.Conversation, m.saved.Subject, m.asked()))
 	}
 	if m.saveErr != "" && !m.saving {
 		b.WriteString(badStyle.Render("✗") + " the save did not complete, so no sitting was started: " + m.saveErr + "\n")

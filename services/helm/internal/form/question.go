@@ -43,12 +43,16 @@ const heldTab = '\uFDD0'
 // symbol for a horizontal tab.
 const tabMark = "␉"
 
+// askPlaceholder is what the empty question box shows on a subject that needs
+// the operator's question.
+const askPlaceholder = "What do you want to talk about? Enter adds a line."
+
 func newQuestionEditor() questionEditor {
 	ta := textarea.New()
 	ta.ShowLineNumbers = false
 	ta.MaxHeight = 0 // a question is as long as the operator makes it
 	ta.CharLimit = 0
-	ta.Placeholder = "What do you want to talk about? Enter adds a line."
+	ta.Placeholder = askPlaceholder
 	ta.SetWidth(76)
 	ta.SetHeight(questionLines)
 	pasteKeys := ta.KeyMap.Paste.Keys()
@@ -75,6 +79,10 @@ func (e *questionEditor) Value() string {
 func (e *questionEditor) View() string {
 	return strings.ReplaceAll(e.ta.View(), string(heldTab), tabMark)
 }
+
+// SetPlaceholder sets what the box shows while it is empty. The textarea wraps
+// it at spaces to the box's width.
+func (e *questionEditor) SetPlaceholder(s string) { e.ta.Placeholder = s }
 
 func (e *questionEditor) Focus() tea.Cmd { return e.ta.Focus() }
 func (e *questionEditor) Blur()          { e.ta.Blur() }

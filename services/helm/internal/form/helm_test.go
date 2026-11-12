@@ -72,6 +72,19 @@ func TestSaveSendsTheQuestionAsOneUnchangedArgument(t *testing.T) {
 	}
 }
 
+// A question left empty, which the form saves only on a gate, goes with no
+// --reason, so open asks what the gate asks.
+func TestAnEmptyQuestionGoesWithNoReason(t *testing.T) {
+	s, dir := stubHelm(t, `{"subject":"tk-s","conversation":"tk-c","filed":true}`+"\n", "", 0)
+	if _, err := s.Save(context.Background(), SaveRequest{Ref: "tk-g", Subject: "tk-s"}); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"open", "tk-g", "--allow-duplicate", "--if-subject", "tk-s", "--json"}
+	if got := argv(t, dir); strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("argv = %q, want %q", got, want)
+	}
+}
+
 func TestASaveWithNoSubjectShownRunsNothing(t *testing.T) {
 	s, dir := stubHelm(t, `{"subject":"tk-s","conversation":"tk-c","filed":true}`, "", 0)
 	if _, err := s.Save(context.Background(), SaveRequest{Ref: "tk-s", Question: "q"}); err == nil {
