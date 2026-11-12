@@ -492,8 +492,10 @@ tests run on the fake.
   the loops act on. Its rig page reads each rig's store through `listing`, one
   pass that lists the store once, decodes each key the page shows through the
   listing's declarations, and answers `waits` and `prstatus` from those rows.
-  Its ranking, bands and grouping are its own. A question that a loop also
-  acts on belongs to a domain, not to the board.
+  The page lists work in the order `queue` places it from waits' answers, the
+  order the work is expected to land in, so any other reader of that order
+  lists it the same way. Its ranking, bands and grouping are its own. A
+  question that a loop also acts on belongs to a domain, not to the board.
 
 ## The `bead holds` contract
 

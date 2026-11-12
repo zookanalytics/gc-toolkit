@@ -124,6 +124,8 @@ listing/             one pass's read of a store for the helm board: every live b
                      prstatus's answers from the same rows
 waits/               what holds a bead, from one snapshot: the rule by where the work is, the
                      in-flight test, the run link's copy and the keys it reads, read-only
+queue/               the order work is expected to land in, for the helm board: bd graph's
+                     execution layers over waits' answers, then the pool's claim order
 key-registry.json    every declared key, generated from the declarations
 ```
 
