@@ -341,7 +341,7 @@ gc bd close fnd-1 >/dev/null 2>&1
 OUT=$("$SUT" --key dolt-backup-gascity --title "manifest stale" --message "manifest is 30h old" 2>&1)
 eq "$(beads)" "2" "(after close) a finding that fires again after its fix gets a new bead"
 eq "$(meta fnd-2 'finding.recurrence_of')" "fnd-1" "(after close) the new bead names the closed one"
-has "$(body fnd-2)" "fired again after fnd-1 was closed" "(after close) the body says the fix did not hold"
+has "$(body fnd-2)" "fired again after fnd-1 was closed" "(after close) the body names the closed bead"
 has "$OUT" "recurrence of closed fnd-1" "(after close) reported"
 # And it does not become a bead per tick: the new bead is open, so the next
 # sweep lands on it.
@@ -532,7 +532,7 @@ eq "$(beads)" "1" "(doctor-key) a non-doctor key is unaffected"
 # The finding's bead is parked at blocked behind the fix it waits on, and an
 # older bead for the same key is closed. A lookup that reads only open and
 # in_progress misses the held bead, files a second one, and names the older
-# closed bead as the predecessor whose fix "did not hold".
+# closed bead as its predecessor.
 reset
 "$SUT" --key doctor-held --title "held" --message "held fired" >/dev/null 2>&1
 gc bd close fnd-1 >/dev/null 2>&1

@@ -40,6 +40,10 @@ func isRoot(r *ledger.Record) bool {
 		r.IssueType() == "molecule"
 }
 
+// IsRootOrStep reports whether r is one of a run's own beads: a run's root, as
+// isRoot reads one, or a step poured under a root, which names that root.
+func IsRootOrStep(r *ledger.Record) bool { return isRoot(r) || str(rootBeadKey, r) != "" }
+
 // liveRuns reads every live run in the store, in root order, as run-lib.sh's
 // map verb does: the live roots that name an input convoy, the live roots that
 // record an issue, and every convoy those roots name, closed ones included.

@@ -1,6 +1,6 @@
 ---
 name: Human engagement — gc-toolkit's subject, human gate and conversation model
-description: gc-toolkit's own model for engaging a person — the subject, the human gate and the conversation, how a gate reaches the operator, how a conversation starts, how a sitting claims, holds, answers and ends, Accept, how a parked subject comes back, how a po sitting opens, the helm board, and the ground the pack builds itself. A pack convention; the Gas City primitives it rides are gascity/human-engagement.md.
+description: gc-toolkit's own model for engaging a person — the subject, the human gate and the conversation, how a gate reaches the operator, the way in through Engage, how a conversation starts, how a sitting claims, holds, answers and ends, Accept, how a parked subject comes back, how a po sitting opens, the helm board, and the ground the pack builds itself. A pack convention; the Gas City primitives it rides are gascity/human-engagement.md.
 ---
 
 # Human engagement
@@ -64,9 +64,10 @@ model the pack builds on them.
 ## Scope
 
 **Mandate.** gc-toolkit's model for engaging a person: the four terms, how a
-human gate reaches the operator, how a conversation starts, how a sitting
-claims, holds, answers and ends, Accept, how a parked subject comes back, how a
-po sitting opens, the helm board, and the ground the pack builds itself.
+human gate reaches the operator, the way in through Engage, how a conversation
+starts, how a sitting claims, holds, answers and ends,
+Accept, how a parked subject comes back, how a po sitting opens, the helm
+board, and the ground the pack builds itself.
 
 **Boundaries.** The Gas City primitives the model rides are
 [gascity/human-engagement.md](gascity/human-engagement.md), and the routing
@@ -175,6 +176,46 @@ the operator, Accept clears it. A gate none of whose beads has a live row keeps
 a row of its own that states what it asks, so no open gate is off the board.
 Nothing re-mails, and no session claims a gate, so a gate a sitting is
 discussing is still open and unassigned until the sitting answers it.
+
+## The way in
+
+The operator comes in through Engage. A bare `gc-helm` on a terminal opens
+engage's form on starting a conversation, with the cursor in the subject. The
+form's pages are tabs at its top, and the operator moves between them on the
+tabs, with no key of a page's own:
+
+- **Start a conversation** takes a subject, a bead, a PR, or a rig's name or
+  prefix for a new topic, and the question (*Engage*, below).
+- **Return to a conversation** lists the open conversations (*Returning to a
+  conversation*, below).
+- **People** lists the seats the operator sits with: mechanik, of which the
+  city has one, and each rig's po, the Product Owner, by its rig's name and
+  prefix. The city's HQ has none.
+
+↑ from the subject reaches the tabs, and ←/→ move along them, wrapping around
+at either end, as they cycle a value on the form's choosers. ↓ goes back down
+to the subject. On a list page ←/→ move along the tabs at once. The tabs are no
+field Tab moves through, so the question stays one Tab after the subject.
+`gc-helm attach` opens the form on the return page.
+
+The People page is the one way Engage opens a person. Each row shows the state
+Gas City's session list gives the seat's session, such as active or asleep,
+and whether a terminal is attached, or no session when the list holds none, as
+for a po that has never run. The session is the one the city's agent roster
+(`gc agent list`) names for the seat, so a seat the roster names no session
+for, or several, is not listed. When the roster cannot be read, the page lists
+no seat and says the seats did not read, and the other pages still list. A
+suspended rig's po reads rig suspended, since Gas City starts no session in a
+suspended rig, and the page says why it cannot start and how to resume the rig. The page reads the city again every ten seconds
+while it is on screen. ↑/↓ pick a seat, a line says what Enter does for it, and
+Enter leaves the terminal and then runs the seat's command, `gc-helm mechanik`
+or `gc-helm po --rig <name>`, as the form runs a conversation's attach. So all
+the command prints stays on the terminal and its exit status is the form's.
+Each command attaches to the seat's session, starting it first when it is not
+running (*A po sitting*, below). Gas City's attach carries no message, so a
+seat takes no question, and the sitting's purpose is given in the sitting. The
+subject on the start page takes no seat. A bare `gc-helm` without a terminal
+prints its usage and exits 2, so no script blocks on a form.
 
 ## How a conversation starts
 
@@ -323,16 +364,29 @@ on the bead answers no gate until it replies to one.
 **On a terminal, engage opens the conversation form.** An engage whose
 command line names no concern (`--reason`, `--template` or `--skill`) and not
 `--no-input` hands the terminal to helm-svc's `form` command
-(`services/helm/internal/form`). One screen holds, in this order, the subject
-(a bead id, a PR number or URL, or empty for a new topic), a multiline
-question, in which Enter adds a line, a new topic's rig, the model, shown with
-each word of its name capitalized and Claude-Opus as the default, and whether
-to attach once the sitting starts, which is on unless `--no-attach` is given.
-Tab moves through the fields in that order, so the question is one Tab after
-the subject, and the form opens on the question when the command line names
-the subject or a new topic's rig. A tab in the question stays a tab, shown as
-␉, and a line break written as
-LF, CR or CRLF is one line break. The field leaves out every other control
+(`services/helm/internal/form`), on its page for starting a conversation
+(*The way in*, above). The page holds, in this order, the subject, a
+multiline question, in which Enter adds a line, the model, shown with each
+word of its name capitalized and Claude-Opus as the default, and whether to
+attach once the sitting starts, which is on unless `--no-attach` is given. The
+subject is a bead id, a PR number or URL, or a rig's whole name or prefix, such
+as `gc-toolkit` or `tk`, matched ignoring case and the spaces around it, which
+starts a new topic in that rig. Part of a name names no rig, and the form
+completes none. Only text the operator types in the subject is matched to a
+rig. The subject the command line names is a reference, as the flag-driven
+engage reads it, and so is a bead the form puts there, such as a gate chosen
+from what holds a subject, so each is looked up even when a rig carries the
+same name. `--rig` fills in the subject with the rig's name, which names the
+rig of exactly that name, as `open --new-subject --rig` does, until the
+operator edits it. A line under the subject shows the rig it names, or a
+bead's own rig, and is not a field. Tab moves through the fields in that
+order, so the question is one Tab after the subject, and wraps around at
+either end. ↑ and ↓ move between the fields once the cursor is on a field's
+first or last row, with the question's rows counted as the screen shows them,
+and stop at the last field, while ↑ from the subject reaches the tabs. The
+form opens on the question when the command line names the subject or a new
+topic's rig. A tab in the question stays a tab, shown as ␉, and a line break
+written as LF, CR or CRLF is one line break. The field leaves out every other control
 character, such as BEL or ESC, and U+FFFD, the replacement character. It leaves
 out U+FDD0 as well, since inside the field that noncharacter stands for a tab.
 The command line fills in the fields, and typing never waits for a read.
@@ -341,14 +395,33 @@ opens, as the flag-driven engage refuses it.
 While the operator types, the form reads `gc-helm.sh conversations` for the
 subject: the bead it resolves to, the rig a conversation about it is held in,
 whether a sitting can start there, its open conversations and what holds it.
-It reads the city's rigs for a new topic. The screen shows where a submit would
-file before it does: a conversation on the subject in its own rig, or a new
-subject in the rig the operator chose. A new topic has no rig until the
-operator picks one, and a PR number that several live anchors record waits
-for the operator to pick the anchor. A result read for an earlier subject never
-stands in for the current one, and no result changes a rig or a conversation
-the operator chose. A conversation chosen from the list is started as it is,
-and a question typed beside it is not sent into it.
+It reads the city's rigs with each one's prefix, so a rig's name or prefix
+typed as the subject is known as the rig and is not looked up as a bead. A
+rig's name wins over a bead of the same id, so typed text settles only once
+the rigs are read: until then the screen marks where it would file as still
+being checked, whatever its lookup answered, and Ctrl+S files nothing. When
+the rigs did not read, Ctrl+S reads them again. The screen shows where a
+submit would file before it does: a conversation on the subject in its own
+rig, or a new subject in the rig the subject names. A name or prefix that more
+than one rig carries names none of them, and a PR number that several live
+anchors record waits for the operator to pick the anchor. A result read for an
+earlier subject never stands in for the current one, and no result changes a
+conversation the operator chose. A conversation chosen from the list is
+started as it is, and a question typed beside it is not sent into it.
+
+**A suspended rig turns attaching off.** Gas City starts no session for an
+agent in a suspended rig, so no sitting can start there. In a suspended rig,
+whether the subject names it or it is a bead's own rig, the destination is
+still settled, Attach reads no with the reason beside it, and no key turns it
+on. Ctrl+S saves the question and leaves, starting no sitting, and the form
+says the conversation waits in the operator's queue until the rig resumes
+(`gc rig resume <rig>`). An open conversation chosen there is not started:
+Ctrl+S reads the subject again, keeping the conversation chosen, and once a
+read finds the rig resumed, the next Ctrl+S starts it. Once the subject names
+a rig that is not suspended, attaching is the operator's own choice again.
+`conversations <ref>` says a subject's rig is suspended as `rig_suspended`,
+which refuses nothing, and engage on the command line still refuses to start a
+sitting in a suspended rig.
 
 **The variants are the converse templates engage offers.** Each is an
 `agents/converse-*` template named `converse-<provider>-<model>`, and the name
@@ -414,7 +487,7 @@ and a save killed once its subject was filed still names the subject, because
 `open` answers it the moment it is filed. A subject whose create landed but
 whose reply was lost is one the form never learns, and a retry after that files
 a second subject. A save refused because a read failed,
-or because of a refusal that can change, such as a suspended rig, reads it again
+or because of a refusal that can change, such as a downed controller, reads it again
 for the next Ctrl+S. A question the form did not save is kept in a file under
 `GC_HELM_DRAFT_DIR` (else `$XDG_STATE_HOME/gc/engage-drafts`, else
 `~/.local/state/gc/engage-drafts`) when it closes, and before the terminal goes
@@ -604,7 +677,7 @@ runs on engage's default model, since the list shows none.
 `gc-helm attach <conversation>` is engage's attach for a script or a shortcut:
 it attaches to a live sitting once it has started, and holds a conversation
 whose sitting ended, or one in the queue, in a new sitting first. Starting and
-returning are two acts of one form: Ctrl+R moves between them.
+returning are two pages of one form, and its tabs move between them.
 
 ## The sitting
 
@@ -1121,30 +1194,34 @@ clock.
 
 ## A po sitting
 
-The po is the operator's prioritization partner, a named session the operator
-opens for one sitting: a backlog refinement over the `hold:mayor` queue or a
-portfolio sync over the epics ([steering.md](steering.md)). A sitting ends when
+Each rig has its own po, the operator's prioritization partner for that rig's
+work: a named session of the rig, which the operator opens for one sitting at a
+time, a backlog refinement over the rig's `hold:mayor` queue or a portfolio
+sync over the rig's epics ([steering.md](steering.md)). A sitting ends when
 the po runs `gc runtime drain-ack`, and the next sitting starts a new
-conversation. Open one by nudging the po, then attach:
+conversation. The rig's row on Engage's People page opens one from whatever
+state the seat is in, with no other command, and so does `gc-helm po --rig
+<rig>`.
 
-```bash
-gc session nudge gc-toolkit.po "<what the sitting is for>"
-gc session attach gc-toolkit.po
-```
-
-The nudge queues its message and asks the controller to wake the seat, and the
-controller's start gives the po its prompt as its first message. An attach on
-its own joins a live sitting or wakes a sleeping one. A sitting no client is
-attached to sleeps once its idle limit passes (`sleep_after_idle`), keeps its
-conversation, and takes its prompt again when an attach wakes it. An attach on
-its own does not open a sitting on a seat whose last sitting ended: it starts
-the seat itself while the seat's record still reads drained, and Gas City's
-session-start prime hook primes only a session whose record reads active,
-awake, creating or start_pending. Attach soon after the nudge, because a po
-the nudge wakes with no client attached takes it for a wake with no sitting
-and drains. A sitting that starts without the po's prompt, one that does not
-know it is the po, has the whole prompt once the operator tells it to run
-`gc prime`.
+Both are Gas City's attach on the rig's po, `gc session attach
+<rig>/<binding>.po`, Gas City's name for a rig's named session, where
+`<binding>` is the name the city imports the pack under. Both take that name
+from `gc agent list`, so they open the same seat whatever the binding is
+([gascity/human-engagement.md](gascity/human-engagement.md#what-an-attach-does-to-a-session-that-is-not-running)).
+A live sitting is attached to as it stands. Any other seat, one whose sitting
+ended, one whose sitting slept once its idle limit passed (`sleep_after_idle`)
+or one with no session yet, is started by the city's controller: the attach
+asks for the start, waits for the session to run and then attaches. The start
+gives the po its prompt as its first message, and because the po wakes fresh
+(`wake_mode = "fresh"`), it opens a new conversation, so a sitting that slept
+comes back as a new one. A po still ending its last sitting is attached as it
+ends until the controller begins to stop it. While that stop runs, the attach
+fails, saying the session is stopping, and `gc-helm po --rig <rig>` names the re-run, which
+opens a new sitting once the stop is done. The operator says what a sitting is
+for in the sitting. A sitting the attach starts itself, as it does
+while the city's controller is down, or when the po's last sitting ends
+between the attach's check that it is running and the attach itself, gets the
+po's prompt too, which the attach sends once the session runs.
 
 ## How a pane dies when no sitting is live
 
@@ -1275,16 +1352,19 @@ operator's *own* unsent words.
   plumbing. The supervisor API carries no `await_type`, so a board built on it
   alone folds no human gate ([gascity/human-engagement.md](gascity/human-engagement.md#where-a-question-surfaces)).
 - **One board, and its verbs in gc-helm.sh.** The web page that
-  `services/helm/` serves is the board's one view for people, and
-  `helm-svc board --json` prints the same rows for agents. Both run the one
+  `services/helm/` serves is the board's one view for people, and it reads
+  one document per rig (*The rig board* in
+  [services/helm/README.md](../services/helm/README.md)).
+  `helm-svc board --json` prints the board model's rows for agents, and the
+  sidecar's `/helm` answer serves the same model. Both run the one
   `internal/source` gather and the one `internal/board` derivation, so a
-  change to the gather, the ranking or the anchor kinds reaches the page and
-  the JSON together. A new tile field also owes the page's TypeScript mirror,
-  `web/src/contract.ts`, which `services/helm/web/contract_parity_test.go`
-  holds equal to the Go contract. `gc-helm.sh` keeps the write verbs (`open`,
-  `engage`, `react`, `takeaway`, `dismiss`, `accept`, `park`, `priority`) that
-  have no Go equivalent, and helm-svc's POST routes run `open`, `engage`,
-  `accept` and `dismiss`.
+  change to the gather, the ranking or the anchor kinds reaches the JSON and
+  the `/helm` answer together, and not the page. A new tile field also owes
+  the model's TypeScript mirror, `web/src/contract.ts`, which
+  `services/helm/web/contract_parity_test.go` holds equal to the Go contract.
+  `gc-helm.sh` keeps the write verbs (`open`, `engage`, `react`, `takeaway`,
+  `dismiss`, `accept`, `park`, `priority`) that have no Go equivalent, and
+  helm-svc's POST routes run `open`, `engage`, `accept` and `dismiss`.
 
 ## What upstream does not ship (the pack's actual seam)
 

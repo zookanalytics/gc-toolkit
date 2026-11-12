@@ -21,6 +21,7 @@
 package ledger
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"strings"
@@ -44,7 +45,18 @@ func New(store gcbd.Store) *Ledger { return &Ledger{store: store} }
 // that bead, and one that names none to the store it resolves here. A store gc
 // names none of returns the adapter's *ReadError.
 func Open(db string, ids ...string) (*Ledger, error) {
-	c := gcbd.New()
+	return open(gcbd.New(), db, ids...)
+}
+
+// OpenContext is Open for a reader with a deadline: every call the ledger makes
+// to the store ends when ctx does, the processes it started killed with it
+// ([gcbd.Client.WithContext]), and a read it ends returns the adapter's
+// *ReadError.
+func OpenContext(ctx context.Context, db string, ids ...string) (*Ledger, error) {
+	return open(gcbd.New().WithContext(ctx), db, ids...)
+}
+
+func open(c *gcbd.Client, db string, ids ...string) (*Ledger, error) {
 	if db == "" {
 		routed, err := c.Route(ids...)
 		if err != nil {

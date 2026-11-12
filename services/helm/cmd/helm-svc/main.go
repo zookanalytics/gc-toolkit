@@ -6,21 +6,24 @@
 //
 // They share the gather (internal/source) and the ranking (internal/board)
 // rather than reimplementing either, so the rows `board --json` prints are the
-// rows the web page shows. Keeping them in one binary also keeps them from
-// going stale independently — see the comment atop board.go.
+// rows the sidecar's GET /helm serves. Keeping them in one binary also keeps
+// them from going stale independently — see the comment atop board.go.
 //
 // As the sidecar, it runs as a
 // Gas City `proxy_process` workspace-service: the supervisor spawns it, hands it
 // a unix socket path in GC_SERVICE_SOCKET, dials that socket as a reverse proxy,
 // and reaches GET /helm (the board), GET /healthz (liveness), the write routes
-// POST /helm/{open,accept,engage,dismiss} (actuate a board recommendation) and
-// the embedded web app (the mount root, plus its assets) over it. Requests arrive
-// already path-stripped.
+// POST /helm/{open,accept,engage,dismiss} (actuate a board recommendation), the
+// rig board's GET /helm/rigs and GET /helm/rigs/{rig}, and the embedded web app
+// (the mount root, plus its assets) over it. Requests arrive already
+// path-stripped.
 //
-// The service reads all bead state through the internal/source.Source seam —
+// The board reads all bead state through the internal/source.Source seam —
 // either the in-process beads library or the supervisor's loopback HTTP API,
 // both Gas City interfaces, never raw Dolt — and serves a ranked board ported
 // from assets/scripts/gc-helm.sh. See selectSource for which backend runs when.
+// The rig board reads each rig's store through the gc command
+// (internal/rigboard).
 package main
 
 import (
@@ -100,9 +103,9 @@ const topUsage = `Usage:
   helm-svc probe [flags]         report whether this binary can read the city's bead stores
   helm-svc form --helm <script>  the terminal conversation form gc-helm.sh engage and attach open
 
-The sidecar's web page and "board --json" share one gather and one ranking. Run
-"helm-svc board --help" for the board's flags, or "helm-svc probe --help" for
-the readability check.
+The sidecar's /helm answer and "board --json" share one gather and one
+ranking. Run "helm-svc board --help" for the board's flags, or "helm-svc probe
+--help" for the readability check.
 `
 
 func serve() {
@@ -122,6 +125,7 @@ func serve() {
 		server.WithSPA(spaHandler()),
 		server.WithActuator(selectActuator(cityPath)),
 		server.WithCityPath(cityPath),
+		server.WithRigBoard(source.NewGC(cityPath), server.RigBoardTTL),
 	)
 
 	// The supervisor removes any stale socket before spawning us, so we own
@@ -158,8 +162,8 @@ func serve() {
 // spaHandler builds the embedded single-page app's handler, or returns nil to
 // serve the board JSON alone.
 //
-// A broken bundle must not take the service down. The board is the load-bearing
-// contract — the operator curls it and the frontend units consume it — while
+// A broken bundle must not take the service down. The JSON routes are the
+// load-bearing contract, which the operator curls and the app reads, while
 // the app is additive, so an unreadable bundle is logged loudly and the service
 // keeps serving JSON exactly as it did before the app existed. The embed itself
 // is checked at compile time, so this only fires on a dist/ that built badly.

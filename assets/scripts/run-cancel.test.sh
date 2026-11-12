@@ -2,9 +2,12 @@
 # Hermetic test for assets/scripts/run-cancel.sh.
 #
 # The constraint: a molecule's lifecycle is gascity's, so a run that should not
-# continue ends through gascity's run cancel and the pack writes none of the
-# molecule's beads. The script sends one POST to the supervisor and appends its
-# reason to the step this session holds; nothing else is written.
+# continue ends through gascity's run cancel, and the pack writes no member of
+# the molecule but the step this session holds. Gascity's cancel interrupts the
+# turn of each session that holds an in_progress member of the run, so in --step
+# mode the script puts the held step back to not started before it sends the
+# cancel, sends one POST to the supervisor, and appends its reason to the step
+# once the run has ended; nothing else is written.
 #
 # What is exercised here:
 #   * the REQUEST: POST /v0/city/<city>/runs/<root>/cancel at the address
@@ -13,9 +16,17 @@
 #     $GC_CITY_PATH;
 #   * --step resolves the run from this session's step (in_progress, then open,
 #     then blocked; --bead a verified hint) and --root takes it as given;
-#   * NO MEMBER WRITE: the one bd write on any path is the reason appended to
-#     the held step in --step mode, once the run has ended, so an attempt that
-#     does not end it writes nothing;
+#   * NOT STARTED BEFORE THE CANCEL: in --step mode a held step that reads
+#     in_progress goes back to open, its assignee kept, in one write guarded on
+#     that status and assignee, before the request; when the request is sent no
+#     member of the run reads in_progress under this session, which is how
+#     gascity picks the sessions its cancel interrupts. A write that does not
+#     land sends no request, and a step at the open or blocked tier is not
+#     written;
+#   * ONE STEP WRITTEN: past that write, the one bd write on any path is the
+#     reason appended to the held step in --step mode, once the run has ended,
+#     so an attempt that does not end it adds no note, and --root writes
+#     nothing;
 #   * the ANSWERS: 202 ends the run; 409 is a run already terminal once its root
 #     reads closed again, whose open leftovers gascity's `gc convoy delete
 #     --force` closes, unless one carries a branch or a merge_result; a 409 for
@@ -55,8 +66,14 @@ mkdir -p "$TMP/bin" "$TMP/home"
 # `bd show`   : the bead as a one-element array (unknown id -> an error object).
 # `bd list`   : filters on --status= (comma list), --assignee= and
 #               --metadata-field k=v.
-# `bd update` : applies --append-notes; any other flag is recorded and refused,
-#               because this script writes nothing but a note.
+# `bd update` : applies --append-notes, and a --status= write only when it is
+#               guarded with both --if-status= and --if-assignee=, which it
+#               checks as bd does (exit 13 on a mismatch, nothing written;
+#               $FAKE_UPDATE_RC fails it outright). Any other flag is recorded
+#               and refused, because this script writes nothing else.
+# `bd show`   : with $FAKE_SHOW_ASSIGNEE (<id>=<assignee>), shows that bead
+#               under that assignee, the way a claim that moved between two
+#               reads looks.
 # `convoy delete <root> --force` : closes every live bead whose
 #               gc.root_bead_id is <root>, or exits $FAKE_DELETE_RC.
 # `status`    : answers $FAKE_STATUS, or fails when it is unset.
@@ -85,7 +102,9 @@ shift
 verb="${1:-}"; shift || true
 case "$verb" in
   show)
-    out=$(jq -c --arg id "${1:-}" '[ .[] | select(.id == $id) ]' "$S")
+    moved="${FAKE_SHOW_ASSIGNEE:-}"
+    out=$(jq -c --arg id "${1:-}" --arg mid "${moved%%=*}" --arg mas "${moved#*=}" \
+      '[ .[] | select(.id == $id) | if $mid != "" and .id == $mid then .assignee = $mas else . end ]' "$S")
     if [ "$out" = "[]" ]; then printf '{"error":"no issue found matching %s"}\n' "${1:-}"; else printf '%s\n' "$out"; fi ;;
   list)
     wstatus=""; wassignee=""; mk=""; mv=""
@@ -105,17 +124,28 @@ case "$verb" in
         | select($mk == "" or ((.metadata[$mk] // "") == $mv)) ]' "$S" ;;
   update)
     id="${1:-}"; shift || true
-    note=""; other=""
+    note=""; other=""; st=""; ifst=""; ifas=""; guards=0
     while [ $# -gt 0 ]; do
       case "$1" in
-        --append-notes) shift; note="${1:-}" ;;
+        --append-notes)  shift; note="${1:-}" ;;
+        --status=*)      st="${1#*=}" ;;
+        --if-status=*)   ifst="${1#*=}"; guards=$((guards + 1)) ;;
+        --if-assignee=*) ifas="${1#*=}"; guards=$((guards + 1)) ;;
         --json) ;;
         *) other="$other $1" ;;
       esac
       shift || true
     done
     if [ -n "$other" ]; then echo "gc stub: refused update of $id:$other" >&2; exit 1; fi
-    jq -c --arg id "$id" --arg n "$note" 'map(if .id == $id then .notes = ((.notes // "") + $n) else . end)' "$S" > "$S.n" && mv "$S.n" "$S"
+    if [ -n "$st" ]; then
+      [ "$guards" = 2 ] || { echo "gc stub: refused a status write of $id not guarded on its status and assignee" >&2; exit 1; }
+      [ -z "${FAKE_UPDATE_RC:-}" ] || { echo "gc stub: simulated update failure" >&2; exit "$FAKE_UPDATE_RC"; }
+      [ "$(jq -r --arg id "$id" '.[] | select(.id == $id) | "\(.status // "")|\(.assignee // "")"' "$S")" = "$ifst|$ifas" ] || exit 13
+      jq -c --arg id "$id" --arg st "$st" 'map(if .id == $id then .status = $st else . end)' "$S" > "$S.n" && mv "$S.n" "$S"
+    fi
+    if [ -n "$note" ]; then
+      jq -c --arg id "$id" --arg n "$note" 'map(if .id == $id then .notes = ((.notes // "") + $n) else . end)' "$S" > "$S.n" && mv "$S.n" "$S"
+    fi
     echo "✓ Updated issue: $id" ;;
   *) echo "gc stub: unsupported 'bd $verb'" >&2; exit 2 ;;
 esac
@@ -129,7 +159,9 @@ chmod +x "$TMP/bin/gc"
 # repeats its last line. Code 000 is a failed connection: no body, exit 7. A
 # request without the X-GC-Request header is answered 403, as gascity answers it.
 # With $FAKE_409_CLOSES set, a 409 also closes that root in the store, the way a
-# run that ended between the script's read and its request looks.
+# run that ended between the script's read and its request looks. Each request
+# also appends to $HOLDERS_LOG the assignees of the run's in_progress members as
+# the store reads at that moment: the sessions gascity's cancel interrupts.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/curl" <<'CURL'
 set -u
 out=""; fmt=""; method="GET"; hdr=""; url=""
@@ -146,6 +178,9 @@ while [ $# -gt 0 ]; do
   shift
 done
 printf '%s %s %s\n' "$method" "$url" "$hdr" >> "${CURL_LOG:?}"
+run_id=$(printf '%s' "$url" | sed -n 's#.*/runs/\([^/]*\)/cancel$#\1#p')
+jq -c --arg r "$run_id" '[ .[] | select((.metadata["gc.root_bead_id"] // "") == $r and .status == "in_progress")
+                          | (.assignee // "") | select(. != "") ]' "${FAKE_STORE:?}" >> "${HOLDERS_LOG:?}"
 Q="${FAKE_CURL_QUEUE:?}"
 line=$(head -n 1 "$Q")
 [ "$(wc -l < "$Q" | tr -d ' ')" -gt 1 ] && { tail -n +2 "$Q" > "$Q.n" && mv "$Q.n" "$Q"; }
@@ -163,7 +198,7 @@ CURL
 chmod +x "$TMP/bin/curl"
 
 export PATH="$TMP/bin:$PATH"
-export FAKE_STORE="$TMP/store.json" GC_LOG="$TMP/gc.log" CURL_LOG="$TMP/curl.log" FAKE_CURL_QUEUE="$TMP/queue"
+export FAKE_STORE="$TMP/store.json" GC_LOG="$TMP/gc.log" CURL_LOG="$TMP/curl.log" FAKE_CURL_QUEUE="$TMP/queue" HOLDERS_LOG="$TMP/holders.log"
 export GC_HOME="$TMP/home" GC_RUN_CANCEL_BACKOFF=0
 cat > "$GC_HOME/cities.toml" <<'TOML'
 [[cities]]
@@ -197,14 +232,18 @@ reset() {
  {"id":"tk-root2","status":"in_progress","assignee":"","metadata":{"gc.kind":"workflow"}}
 ]
 JSON
-  : > "$GC_LOG"; : > "$CURL_LOG"
+  : > "$GC_LOG"; : > "$CURL_LOG"; : > "$HOLDERS_LOG"
   printf '%s\n' "${1:-202 {\"run_id\":\"tk-root\",\"status\":\"canceled\",\"closed\":4}}" > "$FAKE_CURL_QUEUE"
 }
 run() { OUT=$("$SCRIPT" "$@" 2>&1); RC=$?; }
 writes()   { grep -E '^bd update' "$GC_LOG" || true; }
+notes_written() { grep -E '^bd update .*--append-notes' "$GC_LOG" || true; }
 calls()    { wc -l < "$CURL_LOG" | tr -d ' '; }
+holders()  { tr -d '\n' < "$HOLDERS_LOG"; }
 bnotes()   { jq -r --arg i "$1" '(.[] | select(.id == $i) | .notes) // ""' "$FAKE_STORE"; }
 bstatus()  { jq -r --arg i "$1" '(.[] | select(.id == $i) | .status) // "<absent>"' "$FAKE_STORE"; }
+bassignee() { jq -r --arg i "$1" '(.[] | select(.id == $i) | .assignee) // "<absent>"' "$FAKE_STORE"; }
+UNSTART="bd update tk-lc --if-status=in_progress --if-assignee=$MINE --status=open"
 
 # ── 1. --step: the run of this session's step, one POST, one note ────────────
 reset
@@ -214,10 +253,49 @@ eq "$(calls)" 1 "--step: exactly one request"
 has "$(cat "$CURL_LOG")" "POST $URL " "--step: POST to the run cancel of the step's root, in the city cities.toml names"
 has "$(cat "$CURL_LOG")" "X-GC-Request:" "--step: the request carries gascity's anti-CSRF header"
 has "$OUT" "cancelled run tk-root (4 beads closed): duplicate dispatch" "--step: the result line names the run, the count and the reason"
-eq "$(writes)" "bd update tk-lc --append-notes Declined at $STEP by $MINE: duplicate dispatch: tk-work already in flight. Run tk-root cancelled through gascity (4 beads closed)." \
-  "--step: the only write is the reason on the held step, naming what the cancel did"
+NOTE_WRITE="bd update tk-lc --append-notes Declined at $STEP by $MINE: duplicate dispatch: tk-work already in flight. Run tk-root cancelled through gascity (4 beads closed)."
+eq "$(writes)" "$UNSTART"$'\n'"$NOTE_WRITE" \
+  "--step: the held step goes back to not started in one write guarded on this session's claim, then takes the reason, naming what the cancel did"
+eq "$(holders)" "[]" "--step: when the cancel is sent, no member of the run reads in_progress under this session, so gascity has no turn of it to interrupt"
 for b in tk-root tk-ws tk-fin tk-work; do eq "$(bnotes "$b")" "" "--step: $b is not written"; done
-eq "$(bstatus tk-lc)" "in_progress" "--step: the script closes nothing itself; gascity's cancel does"
+eq "$(bstatus tk-lc)|$(bassignee tk-lc)" "open|$MINE" "--step: the script closes nothing itself, and the step stays in this session's name, where no other session's claim takes it"
+
+# ── 1b. the held step's write, before any request ────────────────────────────
+reset
+OUT=$(FAKE_UPDATE_RC=1 "$SCRIPT" --step "$STEP" --reason r 2>&1); RC=$?
+eq "$RC" 1 "a held step the store does not put back to not started: not ended"
+eq "$(calls)" 0 "…and no cancel is sent, since it would interrupt this very call"
+has "$OUT" "was not put back to not started (gc bd update exited 1)" "…and says which write did not land"
+eq "$(bstatus tk-lc)|$(notes_written)" "in_progress|" "…and the step is still started and claimed, with no note"
+hasnt "$OUT" "is back to not started" "…and does not call a started step not started"
+
+reset
+OUT=$(FAKE_SHOW_ASSIGNEE="tk-lc=hq-else" "$SCRIPT" --step "$STEP" --reason r 2>&1); RC=$?
+eq "$RC" 2 "a held step that reads another session's claim by the time it is read whole: refused"
+has "$OUT" "now reads in_progress under 'hq-else', which is not this session" "…and names the claim it found"
+eq "$(calls)|$(writes)" "0|" "…with no request and no write"
+
+reset
+jq -c 'map(if .id == "tk-lc" then .status = "open" else . end)' "$FAKE_STORE" > "$FAKE_STORE.n" && mv "$FAKE_STORE.n" "$FAKE_STORE"
+run --step "$STEP" --reason r
+eq "$RC" 0 "a step this session holds but has not started still names its run"
+eq "$(writes)" "bd update tk-lc --append-notes Declined at $STEP by $MINE: r. Run tk-root cancelled through gascity (4 beads closed)." \
+  "…and the only write is the note, since the cancel interrupts no session for an open step"
+
+# A session with an alias, as a Codex pool's are, holds its claims under it.
+reset
+HICKS="gc-toolkit/gc-toolkit.hicks"
+jq -c --arg a "$HICKS" 'map(if .id == "tk-lc" then .assignee = $a else . end)' "$FAKE_STORE" > "$FAKE_STORE.n" && mv "$FAKE_STORE.n" "$FAKE_STORE"
+OUT=$(GC_ALIAS="$HICKS" "$SCRIPT" --step "$STEP" --reason r 2>&1); RC=$?
+eq "$RC" 0 "a step held under this session's alias: the run is cancelled"
+has "$(writes)" "bd update tk-lc --if-status=in_progress --if-assignee=$HICKS --status=open" "…and the step goes back to not started under a guard on the alias it is held by"
+eq "$(holders)|$(bassignee tk-lc)" "[]|$HICKS" "…so no started step names this session when the cancel is sent, and the alias stays its assignee"
+
+reset '503 {"status":503,"detail":"run cancel failed: store busy"}'
+run --step "$STEP" --reason r
+eq "$RC" 1 "--step, a cancel that does not land after the step went back to not started: not ended"
+eq "$(bstatus tk-lc)|$(bassignee tk-lc)" "open|$MINE" "…and the step stays in this session's name, not started"
+has "$OUT" "tk-lc ($STEP) is back to not started, still in this session's name" "…and the caller is told so"
 
 # ── 2. --root: no step held, no write at all ─────────────────────────────────
 reset
@@ -225,6 +303,7 @@ run --root tk-root --reason "stood down by the sitting"
 eq "$RC" 0 "--root: a 202 ends the run"
 has "$(cat "$CURL_LOG")" "POST $URL " "--root: POST to the named run"
 eq "$(writes)" "" "--root: nothing is written"
+eq "$(holders)" "[\"$MINE\"]" "--root: a step a session has started is still its holder when the cancel is sent"
 
 # ── 3. --bead: a verified hint wins; a foreign one is ignored ─────────────────
 reset
@@ -283,6 +362,7 @@ jq -c 'map(if .id == "tk-lc" then .status = "blocked" else . end)' "$FAKE_STORE"
 run --step "$STEP" --reason r
 eq "$RC" 0 "a step this session already blocked still names its run"
 has "$(cat "$CURL_LOG")" "/runs/tk-root/cancel" "blocked tier: the step's root"
+hasnt "$(writes)" "--status=" "blocked tier: the step's status is not written"
 
 # ── 5. the substring trap ────────────────────────────────────────────────────
 reset
@@ -350,7 +430,7 @@ eq "$(bstatus tk-root) $(bstatus tk-lc) $(bstatus tk-ws) $(bstatus tk-fin)" "in_
 reset "$TERMINAL"
 run --step "$STEP" --reason r
 eq "$RC" 1 "--step, a 409 for a live root: not ended"
-eq "$(writes)" "" "--step, a 409 for a live root: no note, since the run did not end"
+eq "$(writes)" "$UNSTART" "--step, a 409 for a live root: no note, since the run did not end"
 
 # In --step mode the note lands once a run already over has its leftovers closed.
 reset; close_root
@@ -399,7 +479,7 @@ eq "$(calls)" 2 "503 then 202: two requests"
 reset '503 {"status":503,"detail":"run cancel failed: store busy"}'
 run --step "$STEP" --reason r
 eq "$RC" 1 "--step, 503 on every attempt: not ended"
-eq "$(writes)" "" "--step, 503 on every attempt: no note, so a retry adds none either"
+eq "$(notes_written)" "" "--step, 503 on every attempt: no note, so a retry adds none either"
 
 reset '503 {"status":503,"detail":"run cancel failed: store busy"}'
 run --root tk-root --reason r
@@ -445,7 +525,7 @@ eq "$(calls)" 0 "no city path: no request"
 reset
 run --step "$STEP" --reason r --dry-run
 eq "$RC" 0 "dry run: exit 0"
-has "$OUT" "DRY RUN: would cancel run tk-root" "dry run: names the run"
+has "$OUT" "DRY RUN: would put step tk-lc ($STEP) back to not started, then cancel run tk-root" "dry run: names the step's write and the run"
 eq "$(calls)" 0 "dry run: no request"
 eq "$(writes)" "" "dry run: no write"
 

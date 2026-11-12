@@ -111,7 +111,7 @@ cmd/gctk/            the binary's entry point, and the revision `version` prints
 internal/cli/        the command tree, each command with its help, flags and exit codes
 internal/lifecycle/  the lifecycle state machine, which lifecycle/lifecycle.toml declares
 internal/ledger/     typed bead records: each key's declaration, one write per act
-                     whose exit decides, and snapshots
+                     whose exit decides, snapshots, and a pass that reads each bead once
 internal/gcbd/       the store adapter: bead reads and writes through `gc bd` and the
                      supervisor API, the store's listing, and its blocked set
 internal/gcbd/fake/  the store adapter's in-memory fake, for the domains' tests
@@ -119,6 +119,9 @@ internal/daemon/     finding the supervisor API the store adapter's reads go thr
 internal/git/        the git subprocess seam: one git command per call, in a named directory
 internal/rig/        rig's runner and its commit-keyed record store
 prstatus/            the PR status derivation, exported for the helm board
+listing/             one pass's read of a store for the helm board: every live bead, the
+                     closed beads under a parent, the keys it decodes, and waits' and
+                     prstatus's answers from the same rows
 waits/               what holds a bead, from one snapshot: the rule by where the work is, the
                      in-flight test, the run link's copy and the keys it reads, read-only
 key-registry.json    every declared key, generated from the declarations

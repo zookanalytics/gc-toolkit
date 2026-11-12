@@ -12,6 +12,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 )
@@ -21,9 +22,17 @@ import (
 // into another store: Rows leaves it out, as a show does, and Find keeps it, as
 // a listing does. ClosedAt is when a closed bead closed. An edge carries the far
 // bead's fields as a show row reports them, so a closed row that names no close
-// time takes the one an edge onto it names.
+// time takes the one an edge onto it names. Assignee, AwaitType, Description,
+// Priority, Labels and CreatedAt are the row's own fields a listing carries,
+// and Ephemeral and Template put the row in the ephemeral plane or make it a
+// template.
 type Bead struct {
 	ID, Title, Status, IssueType, ClosedAt string
+	Assignee, AwaitType, Description       string
+	CreatedAt                              string
+	Priority                               int
+	Labels                                 []string
+	Ephemeral, Template                    bool
 	Metadata                               map[string]string
 	Edges                                  []gcbd.Edge
 }
@@ -34,8 +43,10 @@ type Write struct {
 	Args []string
 }
 
-// Store is an in-memory gcbd.Store.
+// Store is an in-memory gcbd.Store, safe for concurrent use as the city's
+// store is.
 type Store struct {
+	mu     sync.Mutex
 	rows   map[string]Bead
 	lost   map[string]bool
 	listed map[string][]string
@@ -58,23 +69,40 @@ func New() *Store {
 
 // Put adds b, or replaces the row of the same id.
 func (s *Store) Put(b Bead) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	b.Metadata = maps.Clone(b.Metadata)
 	b.Edges = slices.Clone(b.Edges)
+	b.Labels = slices.Clone(b.Labels)
 	s.rows[b.ID] = b
 }
 
 // List makes the store's blocked listing name id, held by by: its own waits, or
 // one of its parents, which need not be one the store marks blocked.
-func (s *Store) List(id string, by ...string) { s.listed[id] = slices.Clone(by) }
+func (s *Store) List(id string, by ...string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.listed[id] = slices.Clone(by)
+}
 
 // Mark makes the store mark ids blocked.
-func (s *Store) Mark(ids ...string) { s.marked = append(s.marked, ids...) }
+func (s *Store) Mark(ids ...string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.marked = append(s.marked, ids...)
+}
 
 // Writes returns every update the store took, in order.
-func (s *Store) Writes() []Write { return slices.Clone(s.writes) }
+func (s *Store) Writes() []Write {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.writes)
+}
 
 // Row returns the bead's row as it stands, and whether the store holds it.
 func (s *Store) Row(id string) (Bead, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	b, ok := s.rows[id]
 	return b, ok
 }
@@ -82,6 +110,8 @@ func (s *Store) Row(id string) (Bead, bool) {
 // Lose makes a read of each bead's own row fail, as a lookup that failed does,
 // while the store still holds it as the far bead of another row's edge.
 func (s *Store) Lose(ids ...string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.lost == nil {
 		s.lost = map[string]bool{}
 	}
@@ -94,6 +124,8 @@ func (s *Store) Lose(ids ...string) {
 // one Lose names, fails the read with a *gcbd.ReadError naming it, as
 // gcbd.Client.Rows does.
 func (s *Store) Rows(ids []string) ([]gcbd.Bead, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.RowsErr != nil {
 		return nil, s.RowsErr
 	}
@@ -111,12 +143,15 @@ func (s *Store) Rows(ids []string) ([]gcbd.Bead, error) {
 // Find returns, in id order, the row of each bead q selects, in a listing's
 // shape: every edge, with the far bead's id and the edge's type alone. A bead q
 // names that the store does not hold is left out, as a listing leaves it out.
+// A parent selects the beads whose own parent-child edge names it.
 func (s *Store) Find(q gcbd.Query) ([]gcbd.Bead, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.finds = append(s.finds, q)
 	if s.FindErr != nil {
 		return nil, s.FindErr
 	}
-	if len(q.IDs) == 0 && q.HasKey == "" && q.Key == "" {
+	if len(q.IDs) == 0 && q.HasKey == "" && q.Key == "" && q.Parent == "" && !q.Every {
 		return nil, &gcbd.ReadError{Reason: "the fake store takes no find that selects no beads"}
 	}
 	ids := slices.Sorted(maps.Keys(s.rows))
@@ -135,16 +170,27 @@ func (s *Store) Find(q gcbd.Query) ([]gcbd.Bead, error) {
 		if v, held := b.Metadata[q.Key]; q.Key != "" && (!held || v != q.Value) {
 			continue
 		}
+		if q.Parent != "" && !slices.ContainsFunc(b.Edges, func(e gcbd.Edge) bool {
+			return e.Type == gcbd.EdgeParentChild && e.ID == q.Parent
+		}) {
+			continue
+		}
 		out = append(out, s.listing(b))
 	}
 	return out, nil
 }
 
 // Finds returns every query Find took, in order.
-func (s *Store) Finds() []gcbd.Query { return slices.Clone(s.finds) }
+func (s *Store) Finds() []gcbd.Query {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.finds)
+}
 
 // Blocked returns the listing and the marks the test set.
 func (s *Store) Blocked() (*gcbd.BlockedSet, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.BlockedErr != nil {
 		return nil, s.BlockedErr
 	}
@@ -155,6 +201,8 @@ func (s *Store) Blocked() (*gcbd.BlockedSet, error) {
 // the row, and records it. A bead the store does not hold refuses the write, as
 // bd does.
 func (s *Store) Update(id string, args ...string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.UpdateErr != nil {
 		return "", s.UpdateErr
 	}
@@ -252,9 +300,32 @@ func bead(b Bead, deps []any) gcbd.Bead {
 	for k, v := range b.Metadata {
 		meta[k] = v
 	}
-	out := gcbd.Bead{ID: b.ID, Title: b.Title, Status: &status, Metadata: meta, Dependencies: deps}
+	out := gcbd.Bead{ID: b.ID, Title: b.Title, Status: &status, Metadata: meta, Dependencies: deps,
+		AwaitType: b.AwaitType, Priority: float64(b.Priority)}
 	if b.IssueType != "" {
 		out.IssueType = b.IssueType
+	}
+	if b.Assignee != "" {
+		out.Assignee = b.Assignee
+	}
+	if b.Description != "" {
+		out.Description = b.Description
+	}
+	if b.CreatedAt != "" {
+		out.CreatedAt = b.CreatedAt
+	}
+	if b.Ephemeral {
+		out.Ephemeral = true
+	}
+	if b.Template {
+		out.IsTemplate = true
+	}
+	if len(b.Labels) > 0 {
+		labels := make([]any, len(b.Labels))
+		for i, l := range b.Labels {
+			labels[i] = l
+		}
+		out.Labels = labels
 	}
 	return out
 }

@@ -13,6 +13,8 @@ import (
 
 const testBoard = `{"generated_at":"2026-10-17T00:00:00Z","rows":[]}`
 
+const testRig = `{"rig":"example-rig","rows":{"tk-abc12":{"id":"tk-abc12","title":"A & B"}},"epics":[]}`
+
 // spaStub stands in for the embedded app's handler and names the path it got.
 var spaStub = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -28,7 +30,7 @@ func serve(t *testing.T, h http.Handler, method, path string) *httptest.Response
 
 func mustHandler(t *testing.T, answers map[string]Answer) http.Handler {
 	t.Helper()
-	h, err := Handler([]byte(testBoard), answers, spaStub)
+	h, err := Handler([]byte(testBoard), []byte(testRig), answers, spaStub)
 	if err != nil {
 		t.Fatalf("Handler: %v", err)
 	}
@@ -128,12 +130,52 @@ func TestAPathThatNamesNoVerbIsNotFound(t *testing.T) {
 
 func TestHandlerRefusesABoardThatIsNotAJSONObject(t *testing.T) {
 	for _, board := range []string{"", "not json", "[1,2]", `"board"`, "{"} {
-		if _, err := Handler([]byte(board), nil, spaStub); err == nil {
+		if _, err := Handler([]byte(board), []byte(testRig), nil, spaStub); err == nil {
 			t.Errorf("Handler(%q): no error, want a refusal", board)
 		}
 	}
-	if _, err := Handler([]byte(testBoard), nil, nil); err == nil {
+	if _, err := Handler([]byte(testBoard), []byte(testRig), nil, nil); err == nil {
 		t.Error("Handler with no app handler: no error, want a refusal")
+	}
+}
+
+func TestHandlerRefusesARigDocumentThatNamesNoRig(t *testing.T) {
+	for _, rig := range []string{"", "not json", "[1,2]", `{"rows":{}}`, `{"rig":""}`} {
+		if _, err := Handler([]byte(testBoard), []byte(rig), nil, spaStub); err == nil {
+			t.Errorf("Handler with the rig document %q: no error, want a refusal", rig)
+		}
+	}
+}
+
+// TestTheRigBoardIsServedAtItsRoutes reads the rig board's routes as the page
+// reads them: the rig list, and the rig's document with its read time beside it.
+func TestTheRigBoardIsServedAtItsRoutes(t *testing.T) {
+	h := mustHandler(t, nil)
+
+	rec := serve(t, h, http.MethodGet, "/helm/rigs")
+	var list rigList
+	if err := json.Unmarshal(rec.Body.Bytes(), &list); rec.Code != http.StatusOK || err != nil {
+		t.Fatalf("GET /helm/rigs: %d %s", rec.Code, rec.Body.String())
+	}
+	if len(list.Rigs) != 1 || list.Rigs[0] != "example-rig" || list.ReadAt == "" {
+		t.Errorf("GET /helm/rigs: %+v, want the one rig the document names and a read time", list)
+	}
+
+	rec = serve(t, h, http.MethodGet, "/helm/rigs/example-rig")
+	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "application/json" {
+		t.Fatalf("GET /helm/rigs/example-rig: %d %s", rec.Code, rec.Header().Get("Content-Type"))
+	}
+	var answer rigAnswer
+	if err := json.Unmarshal(rec.Body.Bytes(), &answer); err != nil {
+		t.Fatalf("the rig answer %q is not JSON: %v", rec.Body.String(), err)
+	}
+	if string(answer.Board) != testRig || answer.ReadAt != list.ReadAt {
+		t.Errorf("GET /helm/rigs/example-rig: board %s read at %q, want the document as given, read at %q", answer.Board, answer.ReadAt, list.ReadAt)
+	}
+
+	rec = serve(t, h, http.MethodGet, "/helm/rigs/another-rig")
+	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "the city lists no such rig") {
+		t.Errorf("GET /helm/rigs/another-rig: %d %s, want 404 naming the rig", rec.Code, rec.Body.String())
 	}
 }
 
