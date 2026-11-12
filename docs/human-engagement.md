@@ -243,11 +243,20 @@ these steps:
    works on the one bead still waiting on the gate, read from the gate's
    `blocks` dependents. With several still waiting, as when an anchor and its
    rework child both wait on the anchor's bring-current gate, it works on the
-   bead `--from` names when that bead is one of them. Otherwise it names them
-   and starts nothing, so the operator engages the one they mean, and a gate
-   that no longer holds the `--from` bead starts nothing either. With none, it
-   says nothing waits on the gate, names any closed bead the gate was about,
-   and starts nothing, and the operator clears the gate.
+   bead `--from` names when that bead is one of them, and a gate that no longer
+   holds the `--from` bead starts nothing. Otherwise it works on the bead whose
+   `blocks` edge onto the gate is oldest, then the lowest id. An edge's age
+   never changes while a priority can, so engaging the question again lands on
+   the same bead and finds the conversation filed there, and since
+   `gc bd gate create --blocks` writes a gate with its first edge, that bead is
+   normally the one the question was asked about. A conversation filed on the
+   question names the other beads it holds in its ask, and one engage lands on
+   that the bead already has takes the same sentence as a note, once, so the
+   sitting sees each bead its answer reaches. `accept`, `dismiss` and
+   `handback` refuse such a gate, naming its beads, because a pick there would
+   act on a bead nobody named. With none waiting, engage says nothing waits on
+   the gate, names any closed bead the gate was about, and starts nothing, and
+   the operator clears the gate.
 2. **It reads the bead's conversations:** the open tasks that track the bead
    in the conversation shape, with the session list saying which of their
    sittings are live.
@@ -305,12 +314,12 @@ under the subject, and the form looks it up and saves it with `--from` naming
 that bead, so a gate several beads wait on is about that bead while the bead
 still waits on the gate. A gate the bead waits on only through another bead,
 such as a gate on its rework, is looked up as if it were typed: it is about the
-one bead that waits on it, and one several beads wait on is refused. A gate that
-no longer holds the bead by the time the form looks it up or saves it is
-refused, so the question is never filed on another bead in its place. A gate the
-operator types names no such bead, and neither does one whose subject the
-operator edits after choosing it, so a gate several beads wait on is refused
-there, naming them, as engage refuses it on the command line.
+bead engage takes from it. A gate that no longer holds the bead by the time the
+form looks it up or saves it is refused, so the question is never filed on
+another bead in its place. A gate the operator types names no such bead, and
+neither does one whose subject the operator edits after choosing it, so a gate
+several beads wait on is about the bead engage takes from it, as on the command
+line.
 The PR's own threads and
 verdict are lines that no row stands for, because engaging the PR is how a
 person acts on them. The form says when what holds the bead did not read, so a
@@ -404,7 +413,11 @@ anchor moved while the operator typed is refused too. A gate goes as itself, so
 the conversation replies to the gate the screen showed, and a chosen gate goes
 with `--from` naming the bead it was listed under, so `open` takes that bead
 among several waiting and files nothing once it has stopped waiting on the
-gate. Then `engage
+gate. On a gate the question is optional, and the empty box shows the gate's
+own question as what holds the subject lists it. Left empty, the save passes
+`open` no `--reason`, so the conversation is titled from the gate's title and
+its ask is what the gate asks. Every other subject needs the operator's
+question. Then `engage
 <conversation> --no-input --no-attach` starts the sitting. Once it has started,
 the form leaves the terminal, and then attaches it to the sitting through
 `engage <conversation> --no-input`, which waits for the session to start, as
