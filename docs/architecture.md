@@ -147,20 +147,17 @@ performer; the full transition table with writers is
    landing record yet, and the refinery writes its first.
 6. **Land.** The refinery follows Gas Town's refinery flow. It takes a bead
    handed to it once nothing holds the bead and no other open bead is working
-   on its branch, brings the branch current by merging the target in, and runs
-   the rig's gate. A failure the branch caused sends the work back to the
-   polecat pool through `gc sling`. A failure already on the target is tracked,
-   and the landing goes ahead. A `direct` bead lands on its target with no PR.
-   For an `mr` bead the refinery opens the PR as a draft, or moves the PR the
-   bead owns to the new head, and writes Gas Town's pending record, which keeps
-   the bead open until its merge is verified and names the PR and the head the
-   refinery validated.
+   on its branch, brings the branch current with its target, and runs the
+   rig's gate. A `direct` bead lands on its target with no PR. For an `mr` bead
+   the refinery opens the PR as a draft, or moves the PR the bead owns to the
+   new head, and writes Gas Town's pending record, which keeps the bead open
+   until its merge is verified and names the PR and the head the refinery
+   validated.
 7. **Review.** The merge cadence's gate-ensure arm makes every declared check
    raisable; a review bead is routed to the polecat-codex pool; the reviewer's
    single call to `signoff.sh` records the verdict on the review bead and, on
-   request-changes, files one rework child. The PR leaves draft once every
-   check gated before `ready-for-review` derives green, and goes back to draft
-   before each later round of the city's work on it pushes.
+   request-changes, files one rework child. The review loop moves the PR
+   between draft and ready for review.
 8. **Merge.** The landing order reads each pending PR. One evaluator decides
    whether the PR is ready: the operator's approval, on every target, the
    bead's waits, the review results at the PR's head, the feedback the city has
@@ -416,25 +413,22 @@ first. Either way the change is a decision on the record, not a drift.
 ## Decisions
 
 - **The operator's approval is the one permission to merge a PR the city
-  opens,** on every target, and the city, not the operator, merges it.
-- **The work's bead stays open until its merge commit is on the target,** on
-  Gas Town's pending-through-merge record, and the pack keeps no landing state
-  of its own beside that record.
-- **One evaluator decides whether a PR is ready,** and the board and the merge
-  both read its answer, which is computed at each read and stored nowhere.
-- **The city's merge request binds only the head the evaluator judged,** and no
-  permission to merge outlives the decision. A review, a hold or a change of
-  base that arrives after the read is not part of the decision, even when
-  GitHub carries out the request after it.
+  opens.**
+- **The pack keeps no landing state of its own beside Gas Town's pending
+  record.**
+- **The board and the merge both read the evaluator's answer,** which is
+  computed at each read and stored nowhere.
+- **A review, a hold or a change of base that arrives after the landing
+  order's read is not part of its decision to merge,** even when GitHub carries
+  out the merge request after it.
 - **The landing order is the one path that admits work on a pending record.**
-  It requeues a head the refinery has not validated, and it requests the merge.
 - **An approval stands across a push until triage reads the change as
   material,** so GitHub's own dismissal of stale approvals stays off.
 - **A PR's branch is brought current by merging, and no city push rewrites or
   overwrites its commits,** so the PR keeps the commits its approval and its
   threads were given on.
-- **No machine checks a landing's transitions.** Each step of a landing has one
-  writer, and the doctor checks the beads after the write.
+- **No machine checks a landing's transitions,** and the doctor checks the
+  beads after they are written.
 
 ## Debt
 
