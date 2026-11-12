@@ -47,7 +47,10 @@
 # a blocker in another store, and fails if the arm runs. It runs the settle
 # step's stay call, and the rework and return calls the settle and continue
 # steps derive from it, through the real sign-off's parser, and fails if the
-# parser refuses one. It runs the converse prompt's drain read under a stub gc,
+# parser refuses one. It runs the stay's claim-back before a fallback
+# hold under a stub gc, and fails unless its line prints only for a
+# conversation claimed under the sitting. It runs the converse prompt's drain
+# read under a stub gc,
 # and fails unless a list that does not read prints UNREADABLE, never the NONE
 # that drains a sitting that stays. It runs the premise
 # re-check's moot or benign close under stubs, and fails unless the close
@@ -951,6 +954,48 @@ rework|…as does its rework form, with --rework --no-wait in place of --waiting
 return|…the return's call, the stay's less --stay with --no-wait in place of its waits and brief
 rework-return|…and the return of a rework stay, with --no-rework in place of its --rework
 FORMS
+    done
+fi
+echo "── a stay that stopped short claims its conversation back before it holds ──"
+# A second stay leaves its conversation open, where a hold would read as a
+# fresh sitting once the earlier work closes, so the fallback claims it back.
+# Its line prints once the guarded write lands, or once the read after the
+# guard's miss (exit 13) finds the conversation claimed under the sitting, and
+# never when the store refused the write or the conversation moved.
+have "the stay's fallback claims the conversation back before it holds" \
+    'gc bd update "$CONVERSATION" --if-assignee "$GC_ALIAS" --if-status open --status in_progress' "$STAY"
+CB="$TMP/claim-back"
+mkdir -p "$CB/bin"
+cat >"$CB/bin/gc" <<'STUB'
+#!/bin/sh
+case "$1 $2" in
+    "bd update") exit "$CLAIM_RC" ;;
+    "bd show") printf '[{"id":"tk-v","status":"%s","assignee":"%s"}]\n' "$SHOW_STATUS" "$SHOW_ASSIGNEE" ;;
+esac
+exit 0
+STUB
+chmod +x "$CB/bin/gc"
+fenced_block "$STAY" '--if-status open --status in_progress' >"$CB/block"
+if [ ! -s "$CB/block" ]; then
+    bad "converse-stay: the claim-back is found" "no fenced bash block holds the claim-back in $STAY"
+else
+    for sh_ in $shells; do
+        run=$sh_
+        [ "$sh_" = zsh ] && run="zsh -f"
+        while IFS='|' read -r rc status assignee want label; do
+            out=$(cd "$TMP/away" && env -u BASH_ENV -u ENV PATH="$CB/bin:$PATH" CONVERSATION=tk-v GC_ALIAS=rig/rig.tk-v \
+                CLAIM_RC="$rc" SHOW_STATUS="$status" SHOW_ASSIGNEE="$assignee" $run "$CB/block" </dev/null 2>/dev/null)
+            case "$want:$out" in
+                yes:*"is claimed"*|no:) ok "($sh_) $label" ;;
+                *) bad "($sh_) $label" "printed: $out" ;;
+            esac
+        done <<CASES
+0|open|rig/rig.tk-v|yes|the claim-back of an open conversation prints its line
+13|in_progress|rig/rig.tk-v|yes|…as does a guard's miss on one the sitting still holds
+13|closed|rig/rig.tk-v|no|…but not on one a dismiss closed
+13|in_progress|human|no|…nor on one claimed under another
+1|in_progress|rig/rig.tk-v|no|…nor when the store refused the write, whatever a read would say
+CASES
     done
 fi
 echo "── a sitting iterating on a document writes one scaffold and names it in the ruling ──"

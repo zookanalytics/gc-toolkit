@@ -62,7 +62,9 @@ wants the PR to land without it.
 
 The entry says `waiting` when an attach or a restart woke the sitting before
 the work closed. When the operator speaks, answer their turns as
-`converse-continue` says, through the sign-off's `--answer`, and do not hold.
+`converse-continue` says, through the sign-off's `--answer`, and do not hold:
+a hold keeps its conversation claimed, and this one is open while its work is
+out.
 When nobody speaks, end the turn with nothing said and nothing recorded: a
 hand-back nobody asked for would replace the stay's, which the tab prints.
 Nothing needs registering again: the conversation's edge onto the work is the
@@ -85,6 +87,26 @@ which a bead whose `source_ruling_bead` is this conversation is its `--rework`.
 When the record does not give the whole call, as when `WORK` is empty, hold
 instead (`converse-hold`), and tell the operator the stay stopped short and
 what it had done.
+
+The hold keeps its conversation claimed, and a second stay that stopped short
+leaves the conversation open, waiting on the first stay's work. A hold
+recorded there would read as a fresh sitting once that work closes. So claim
+the conversation back first, and record the hold only once this prints its
+line:
+
+```bash
+gc bd update "$CONVERSATION" --if-assignee "$GC_ALIAS" --if-status open --status in_progress >/dev/null 2>&1; RC=$?
+if [ "$RC" -eq 0 ] || { [ "$RC" -eq 13 ] && gc bd show "$CONVERSATION" --json 2>/dev/null \
+     | jq -e --arg a "$GC_ALIAS" '.[0] | .status == "in_progress" and .assignee == $a' >/dev/null 2>&1; }; then
+  echo "conversation $CONVERSATION is claimed, so its hold stands once that work closes"
+fi
+```
+
+Its guard misses, with exit 13, when the conversation does not read open under
+this sitting, and the read then accepts one this sitting already holds. No line
+means it is not claimed: the store refused the write, or the conversation
+moved, as a dismiss closes it. Hold nothing until the line prints, and say in
+the thread what stopped it.
 
 ## The return
 

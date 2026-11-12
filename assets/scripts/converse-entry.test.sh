@@ -5,9 +5,10 @@
 # names next and the values it hands on: a fresh conversation, a restart while
 # the hold stands or before it, a stay woken early while its work is out, a
 # stay that stopped short in each window its writes leave, with its work open
-# and with it closed, a second stay with an earlier stay's text, the return of
-# the work, no conversation at all, and each way the state can fail to read,
-# which is never an answer to drain on.
+# and with it closed, a second stay with an earlier stay's text, a hold claimed
+# back over a second stay that stopped short, while the earlier work is out and
+# once it closes, the return of the work, no conversation at all, and each way
+# the state can fail to read, which is never an answer to drain on.
 #
 # Hermetic: stubs gc and gctk, reads the repo only; no city, no network.
 
@@ -257,6 +258,24 @@ assigned "$FIXDIR/row-tk-c.json"
 enter >/dev/null
 is "…and with that work still out, it is interrupted, not waiting" "$(line ENTRY | cut -d: -f1)" "ENTRY interrupted"
 is "…which the stay's skill runs again" "$(line NEXT=)" "NEXT=converse-stay"
+# When the record cannot rebuild the stopped call, the stay's skill holds, and
+# first claims back the conversation a second stay left open over the first
+# stay's work. That hold stands while the work is out and once it closes.
+STOPPED="staying: keep the API (waits on tk-w1)
+staying: add the flag
+holding: say what the stopped stay should wait on"
+fresh; hook drain; conv tk-c in_progress "$STOPPED" tracks:tk-s blocks:tk-w1; holds tk-c tk-w1
+assigned "$FIXDIR/row-tk-c.json"
+enter >/dev/null
+is "a hold claimed back over a second stay that stopped short, the first stay's work still out, stands" "$(line ENTRY | cut -d: -f1)" "ENTRY interrupted"
+is "…and goes on with the hold" "$(line NEXT=)" "NEXT=converse-continue"
+fresh; hook work existing_assignment tk-c; conv tk-c in_progress "$STOPPED" tracks:tk-s blocks:tk-w1; holds tk-c
+enter >/dev/null
+is "…and once that work closes, the claim returns the held conversation and the hold stands" "$(line ENTRY | cut -d: -f1)" "ENTRY interrupted"
+is "…going on with the hold" "$(line NEXT=)" "NEXT=converse-continue"
+fresh; hook work ready_assignment tk-c; conv tk-c in_progress "$STOPPED" tracks:tk-s blocks:tk-w1; holds tk-c
+enter >/dev/null
+is "a hold left on the open conversation reads as a fresh sitting once that work closes, so the skill claims it back first" "$(line NEXT=)" "NEXT=converse-recheck-premise"
 #
 # After the line that names the work, before its edge. The claim serves the
 # conversation, since no edge holds it, so the work's own status decides.

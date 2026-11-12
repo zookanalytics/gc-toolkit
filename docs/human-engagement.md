@@ -759,7 +759,11 @@ reads a stay as waiting or returned only once each bead its newest line names
 has an edge or has closed. A return that leaves the operator something to
 answer holds, which writes a newer `holding:` line, so a restart after it reads
 the hold, and a conversation handed back to the queue after such a hold starts
-its next sitting fresh. The sitting reads none of these lines itself.
+its next sitting fresh. A stay that stopped short where the record cannot
+rebuild its call holds too. A second stay leaves its conversation open over
+the first stay's work, and a claim of an open conversation reads a `holding:`
+line as a fresh sitting's, so the sitting claims the conversation back before
+it records that hold. The sitting reads none of these lines itself.
 `assets/scripts/converse-entry.test.sh` runs each entry and each unreadable
 case.
 
