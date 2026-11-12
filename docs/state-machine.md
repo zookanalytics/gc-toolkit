@@ -1145,7 +1145,7 @@ kind's phrase and the successor ride the close as an appended note, as in
 guarded close sets no close reason; when the edge is added after an earlier
 close, a `Disposition recorded` note carries them instead. The read side
 searches every store before concluding a close was false. Consumers: the
-close paths of the `work` skill and the converse prompt, the mechanik's prompt,
+close paths of the `work` skill and the converse-settle skill, the mechanik's prompt,
 which searches every store before it reopens a closed bead, `stand-down.sh` (a
 person's ruling that work a human gate holds will not go on),
 `preexisting-failure.sh` (a pre-existing-failure gate follows a closed

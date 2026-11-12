@@ -1226,14 +1226,14 @@ eq "$RC/$(field tk-rev status)/$(meta tk-anc gc.routed_to)" "0/closed/rig-a/old-
 awk '/^```bash[ \t]*$/ { inb = 1; buf = ""; hit = 0; next }
      inb && /^```[ \t]*$/ { if (hit) { printf "%s", buf; exit } inb = 0; next }
      inb { buf = buf $0 "\n"; if (index($0, "carries no arm and no pool route\"")) hit = 1 }' \
-    "$HERE/../../skills/converse-continue/SKILL.md" | sed 's#<[^>]*>#x#g' > "$TMP/withdraw.sh"
-[ -s "$TMP/withdraw.sh" ] && ok "(ANSWER-ROUTE) the continue step's withdrawal is found" \
-    || bad "(ANSWER-ROUTE) the continue step's withdrawal is found"
+    "$HERE/../../skills/converse-settle/SKILL.md" | sed 's#<[^>]*>#x#g' > "$TMP/withdraw.sh"
+[ -s "$TMP/withdraw.sh" ] && ok "(ANSWER-ROUTE) the settle skill's withdrawal is found" \
+    || bad "(ANSWER-ROUTE) the settle skill's withdrawal is found"
 routed_hold
 set +e
 WOUT="$(cd "$TMP/cwd" && CONV="$S" SUBJECT=tk-anc CONVERSATION=tk-conv bash "$TMP/withdraw.sh" 2>&1)"; WRC=$?
 set -e
-eq "$WRC" 0 "(ANSWER-ROUTE) the continue step's withdrawal exits 0"
+eq "$WRC" 0 "(ANSWER-ROUTE) the settle skill's withdrawal exits 0"
 has "$WOUT" "tk-anc carries no arm and no pool route" "(ANSWER-ROUTE) …and says neither is left"
 run_signoff --conversation tk-conv --answer tk-rev "${ANSWERED[@]}"
 eq "$RC/$(field tk-rev status)/$(field tk-conv status)" "0/closed/in_progress" "(ANSWER-ROUTE) the answer that follows resolves the gate and leaves the conversation open"

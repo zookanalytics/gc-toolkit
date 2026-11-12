@@ -1,109 +1,165 @@
 ---
 name: converse-settle
-description: Converse's record, its answer to each gate the ruling settles, the sign-off, and the conversation's close (safety-critical).
+description: Converse's end of a sitting, which records the outcome, sends the work a ruling needs, answers the gates it settles, signs off and closes the conversation (safety-critical).
 ---
 
-# Steps 6–7 — Record, sign off, and close the conversation
+# End the sitting
 
-Each tool call starts a fresh shell, so set `CONV`, `CONVERSATION` and
-`SUBJECT` literally, from what step 1 found, at the top of every call below.
-Run these once the operator has replied to the held sitting (step 5).
+Each call starts a fresh shell, so set `CONV`, `CONVERSATION` and `SUBJECT`
+literally, from the entry's output, at the top of every call below.
 
-## 6. Record
+The sign-off answers the gates the ruling settles and closes the conversation,
+so take it only when nothing important is pending. When the operator still has
+something to read or answer, such as a live decision or a routing answer, post
+the hand-back, keep the conversation open, and go on (`converse-continue`),
+which answers at once a gate they have ruled on. A settled sitting signs off
+here rather than waiting for a dismiss. A sitting that stays takes everything
+below but the close, through `converse-stay`.
 
-Append the sitting's outcome to the subject's notes: the decision, its
-rationale, and what changed (the `records` skill). Notes are append-only, so
-never pass `--notes`, which replaces them:
+## Record
+
+Append the outcome to the subject's notes (the `records` skill). Notes are
+append-only, so never pass `--notes`, which replaces them:
+
 ```bash
 gc bd update "$SUBJECT" --append-notes "<the decision>. <why>. <what changed>."
 ```
-When the operator judged an epic's contract or its course in this sitting,
-the sitting is a review of that epic, and the `converse-epic-review` skill's
-writes record it, each field the ruling sets in its own key.
 
 When the notes have grown past a quick read, append a current-state block too.
-The newest one is the one in force, and step 4 primes from it:
+The newest one is in force, and the prep primes from it:
+
 ```bash
 gc bd update "$SUBJECT" --append-notes "## Current state ($(date -u +%Y-%m-%d))
 <where things stand>
 Decisions in force: <each decision in force>
 Open questions: <each open question, or none>"
 ```
+
+When the operator judged an epic's contract or its course, the
+`converse-epic-review` skill's writes record it, each field in its own key.
 The record goes on the subject alone. A gate the sitting answers can block a
-bead that is not the subject, such as a rework child waiting on its anchor's
-bring-current gate, or a member of an epic whose gate the epic's sitting
-answers. That bead reads the answer in the gate's resolve reason, and the
-record and headline stay off it.
+bead that is not the subject, and that bead reads the answer in the gate's
+resolve reason.
 
-## 7. Sign off, then close the conversation — only when nothing important is still pending
+## Send the work
 
-The sign-off is the terminal act: it answers the gates the ruling settles and
-closes the conversation. So before you take it, ask whether this is a sign-off
-turn at all. **If there is important information you want to communicate to
-the operator — a live decision, a routing answer, anything they need to read
-or may want to respond to, anything past "settled and done" — do not sign off
-this turn.** Post the hand-back in the shape the prompt's Definitions define
-(**The hand-back**), recorded on the conversation first by the block below the
-sign-off's shape, leave the conversation OPEN, and wait for operator input
-the way a held sitting does; signing off now would close the conversation
-under a message they have not read. A gate the operator has already ruled on
-is still answered now, through the sign-off's `--answer` (step 8), so a
-dismiss that ends the sitting later leaves nothing they ruled on open. The
-sitting ends on a later turn: the
-operator's `gc-helm dismiss`, further engagement, or a genuinely terminal
-sign-off once nothing important is pending. Whether a sign-off is terminal is
-still your judgment, and a sitting that is genuinely settled still signs off
-and closes here rather than waiting for a manual dismiss.
+When the ruling needs work, file it and send it before the sign-off, then name
+it in the sign-off's `--waiting-on` with a `--close-brief`. The `work` skill
+says which bead carries the work and how to choose its formula. The sling runs
+only once the create returned the bead's id, and the comment records the
+dispatch as one of the visit's actions, which the comment on the subject's PR
+lists:
 
-**Which ending: a sitting ends at its hand-off unless the operator asks it to
-stay.** At the hand-off the sign-off below closes the conversation. When the
-operator asks you to stay for the return of the work this sitting sends, the
-same sign-off takes `--stay`, and the conversation stays open, waiting on that
-work, until it lands (**Staying for the return**, below). Stay only on their
-ask. End at the hand-off when the work is in another rig's store, which
-`--stay` refuses because the wait could not hold there, or when your context is
-too full to compare the work when it lands, and say in the sign-off which
-ending you took and why.
+```bash
+WORK=$(gc bd create "<title>" -t task -d "<what needs doing, why, and what done looks like>" --json | jq -er '.id') \
+  && gc sling <rig>/<pool> "$WORK" --on <formula> \
+  && gc bd comment "$CONVERSATION" "Sent work: <what it will do, in plain words>"
+```
 
-**A gate is answered through the conversation's reply, and the operator hears
-what the answer releases first.** The sitting answers only the gates its
-conversation replies to: the gate engage was pointed at, one its hold filed,
-and any other human gate the operator rules on within the subject's universe.
-To answer one the conversation does not reply to yet, add the reply, then name
-every bead the answer releases, read from the gate's `blocks` dependents, so an
-answer that releases a bead beyond the subject is given knowingly:
+Record any other act on the subject's universe the same way once it lands, in
+one plain sentence that names no other rig or its beads.
+
+- **Beside the subject, not under it.** Work the subject waits on is a
+  dependency. Add `--parent <epic>` only when the work belongs to that epic.
+  The subject's parent, as `"$CONV/converse-parent.sh" "$SUBJECT"` prints it,
+  applies only when the work serves the same epic. It is the subject's own parent, or the nearest open
+  bead above it once that parent has closed. Under a Delivery whose aim does
+  not cover the work, the work goes under that Delivery's epic.
+- **An epic's own decomposition is its member**, created with `--parent "$SUBJECT"`,
+  and it gets no `--waiting-on`, because bd refuses a `blocks` edge from a
+  parent to its own descendant.
+- **Another rig's pool**: run the create as `gc bd --rig <rig> create`.
+- **An epic the ruling files** takes the `work` skill's epic create, then a
+  note saying whose words each field is:
+
+  ```bash
+  gc bd update <the new epic> --append-notes "Filed $(date -u +%Y-%m-%d) by $GC_SESSION_NAME in conversation $CONVERSATION. Proposed by this sitting: <each field it wrote, or none>. Stated by the operator: <each field they stated or approved, quoting their words, or none>."
+  ```
+
+**A follow-up that cannot start until another bead lands is armed** (the
+`waits` skill), never sent now and never left for someone to send later. It
+waits on the blocker, then the arm sends it once the blocker closes. A
+`dep add` onto a bead in another store exits 0 and holds nothing, so the edge
+is written only when both ids carry one prefix, the text before the first
+`-`, and the arm runs only once the edge exits 0. Each call names the
+follow-up's rig:
+
+```bash
+[ "$(echo <follow-up> | cut -d- -f1)" = "$(echo <blocker> | cut -d- -f1)" ] \
+  && gc bd --rig <rig> dep add <follow-up> <blocker> --type=blocks \
+  && "$CONV/deferred-dispatch.sh" arm <follow-up> --target <rig>/<pool> --reason "waits for <blocker>"
+```
+
+When the blocker is in another store, make the follow-up wait on a human gate
+in its own store that names the blocker, and arm it on that gate. The operator
+clears the gate once the blocker lands. The message's first line is the gate's
+title, cut at 140 characters:
+
+```bash
+"$CONV/human-gate.sh" --subject <follow-up> --key waits-for-<blocker> --message "Clear once <what the blocker delivers> lands, so <what the follow-up does> can start
+<follow-up> waits for <blocker> in <its rig>. Clear this gate once <blocker> closes." \
+  && "$CONV/deferred-dispatch.sh" arm <follow-up> --target <rig>/<pool> --reason "waits for <blocker>, through its human gate"
+```
+
+## Answer the gates
+
+The sitting answers only the gates its conversation replies to: the one
+engage was pointed at, one its hold filed, and any other human gate the
+operator rules on within the subject's universe. To answer one the
+conversation does not reply to yet, add the reply, then name each bead the
+answer releases, so an answer that releases more than the subject is given
+knowingly:
+
 ```bash
 gc bd dep add "$CONVERSATION" <gate> --type replies-to \
   && gc bd dep list <gate> --direction=up --type blocks --json | jq -r '.[] | "\(.id) [\(.status)] \(.title)"'
 ```
-A gate with no tie to the subject takes its own conversation, so that its
-outcome does not land in the notes of a bead that is not about it. A gate
-assigned to a person is that person's to clear: reply to it only when they
-rule on it in this sitting.
 
-When nothing important is pending, sign off. Write the durable trace first,
-then post the sign-off as the thread's last word. `converse-signoff.sh` writes
-the trace in one order every time: the ruling's rework or the PR's retirement,
-the subject's headline, the answer on each gate the conversation replies to,
-the subject's recommendation when the ruling takes it, the conversation's
-close, which frees an open PR's merge the conversation held, and the comment
-that shows the visit on the subject's pull request. It
-records the ruling and each act it takes on the conversation as the visit's
-actions, which that comment lists once the visit ends, so the ruling reaches
-the pull request as you write it: keep other rigs and their beads out of it.
-You tell it what this sitting settled.
-`--ruled yes` resolves each open gate the conversation replies to with
-`ruled: <the ruling>`, except each one a `--leave` names, which the ruling
-leaves owed with its reply in place.
-`--ruled no` answers nothing: it leaves every gate open and owed and hands the
-conversation back to the operator's queue, which is the low-context path in
-the prompt's Rules. What is waiting on the subject is yours to state: one
-`--waiting-on <bead>` per dependency this sitting ROUTED work into, or the gate
-still holding it, `--no-wait` when it settled the subject and nothing is
-waiting, and NEITHER where the subject is parked for a person. A subject that
-waits on work also takes `--close-brief`, the claim its validating closer
-checks once that work lands (the case **New work carries it**, below). It
-exits non-zero when it stopped short, and then you must NOT post the sign-off:
+A gate with no tie to the subject takes a conversation of its own, so its
+outcome does not land in the notes of a bead it is not about. A gate assigned
+to a person is that person's to clear: reply to it only when they rule on it
+in this sitting.
+
+## Settle the subject's dispatch path
+
+Every answer to a gate on the subject, at the sign-off or on a turn's
+`--answer`, first settles the subject's arm and route. The hold kept both, so
+once the gate is answered and nothing else holds the subject, an arm sends it
+and a pool route has that pool claim it. Read them:
+
+```bash
+ROW=$(gc bd show "$SUBJECT" --json) \
+  && printf '%s\n' "$ROW" | jq -er --arg s "$SUBJECT" 'if type == "array" and length == 1 and .[0].id == $s then (.[0].metadata // {}) | "arm: \(.["gc.dispatch_when_ready"] // "none") \(.["gc.dispatch_when_ready_args"] // "") route: \(.["gc.routed_to"] // "none")" else error("unread") end'
+```
+
+When the ruling sends the subject where its arm or route already sends it, by
+the same method, keep them. Under any other ruling, with or without
+`--accept`, withdraw them before the answer. The block disarms an arm, clears a
+pool route and keeps a `human` route, which sends the subject to no pool. It
+prints its `carries no arm and no pool route` line only once each write has
+exited 0, and without that line you answer nothing:
+
+```bash
+WHY="<the ruling, one line>"
+ROW=$(gc bd show "$SUBJECT" --json) \
+  && ARM=$(printf '%s\n' "$ROW" | jq -er --arg s "$SUBJECT" 'if type == "array" and length == 1 and .[0].id == $s then (.[0].metadata["gc.dispatch_when_ready"] // "") | tostring else error("unread") end') \
+  && ROUTE=$(printf '%s\n' "$ROW" | jq -er '(.[0].metadata["gc.routed_to"] // "") | tostring') \
+  && { [ -z "$ARM" ] || "$CONV/deferred-dispatch.sh" disarm "$SUBJECT" --reason "$WHY"; } \
+  && { [ -z "$ROUTE" ] || [ "$ROUTE" = human ] || gc bd update "$SUBJECT" --unset-metadata gc.routed_to; } \
+  && echo "$SUBJECT carries no arm and no pool route"
+```
+
+## Sign off
+
+`converse-signoff.sh` writes the trace in one order every time: the ruling's
+rework or the PR's retirement, the subject's headline, the answer on each gate
+the conversation replies to, the subject's recommendation when the ruling takes
+it, the conversation's close, which frees an open PR's merge the conversation
+held, and the comment that shows the visit on the subject's PR. That comment
+lists the ruling and each act recorded on the conversation, so keep other rigs
+and their beads out of them. It exits non-zero when it stopped short, and then
+you must NOT post the sign-off. A re-run is safe:
+
 ```bash
 if "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" \
      --outcome "<outcome> — <what this sitting settled or needs next, at most 140 characters, or 95 when the ruling leaves an open PR standing>" \
@@ -115,325 +171,133 @@ if "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" \
      # --pr-anchor <bead> names the PR --rework or --retire acts on, when it reaches more than one
      # --accept when the ruling takes the subject's recommendation (below)
 then
-  : # signed off — report any answer it says reached a gate first, then post the sign-off below
+  : # signed off: report any answer it says reached a gate first, then post the sign-off
 else
   # NOT signed off: a read failed, the rework did not file, the PR did not
   # retire, the headline did not land, a gate did not close, the
-  # recommendation was not taken, or the conversation did not close or hand
-  # back. Do NOT post the sign-off. Repair what it printed and re-run, or raise
-  # it in the thread.
+  # recommendation was not taken, or the conversation did not close. Repair
+  # what it printed and re-run, or raise it in the thread.
   exit 1
 fi
 ```
-Re-running it is safe. What it wrote before it stopped is written again the
-same way, a gate it already answered reads as answered, and a gate it did not
-reach is still open for the re-run to find.
 
-**The first answer wins.** bd resolves a gate that is already closed without
-changing it, so the sign-off reads each gate back after its resolve. A close
-reason other than its own means another answer reached the gate first: a
-filer's withdrawal, an Accept, another sitting, or a person at the command
-line. The sign-off prints that answer and leaves it standing. Tell the
-operator, in the sign-off, which gate it was and what that answer said,
-instead of claiming your own.
+- `--ruled yes` resolves each open gate the conversation replies to with
+  `ruled: <the ruling>`, except each one a `--leave` names, which stays owed
+  with its reply in place.
+- What the subject waits on is yours to state: a `--waiting-on` for each bead
+  this sitting routed work into, or for the gate still holding it, with a
+  `--close-brief` beside work. `--no-wait` when nothing waits, and neither when
+  the subject is parked for a person. The brief is the claim the subject's
+  validating closer tests once the work lands: what the landing settles on the
+  subject, and what to check. A subject in the city's own store has no pool to
+  run its closer, so the sign-off refuses it: wait on a human gate that names
+  the work instead (the `waits` skill).
+- **The first answer wins.** A gate another answer closed first, such as a
+  withdrawal, an Accept or another sitting, keeps that answer, and the sign-off
+  prints it. Tell the operator which gate it was and what that answer said.
 
-**On `--ruled yes`, the sign-off follows which bead carries the work** (the
-`work` skill says why). First settle the subject's dispatch path, its arm and
-its route, as every answer to a gate on it does first, a turn's `--answer`
-(step 8) included. The hold kept both, and the writer leaves them as they are,
-so once the gate is answered and nothing else holds the subject, an arm sends
-it and a pool route has that pool claim it. Read them:
-```bash
-ROW=$(gc bd show "$SUBJECT" --json) \
-  && printf '%s\n' "$ROW" | jq -er --arg s "$SUBJECT" 'if type == "array" and length == 1 and .[0].id == $s then (.[0].metadata // {}) | "arm: \(.["gc.dispatch_when_ready"] // "none") \(.["gc.dispatch_when_ready_args"] // "") route: \(.["gc.routed_to"] // "none")" else error("unread") end'
-```
-When the ruling leaves the subject to go where its arm or route already sends
-it, by the same method, keep them: sign off with `--ruled yes --no-wait` and
-send nothing yourself. Under any other ruling, one that sends it elsewhere or
-nowhere, withdraw them before the answer, with or without `--accept`. The block
-disarms an arm and clears a pool route, and keeps a `human` route, which sends
-the subject to no pool. It prints its `carries no arm and no pool route`
-line only once each write has exited 0:
-```bash
-WHY="<the ruling, one line>"
-ROW=$(gc bd show "$SUBJECT" --json) \
-  && ARM=$(printf '%s\n' "$ROW" | jq -er --arg s "$SUBJECT" 'if type == "array" and length == 1 and .[0].id == $s then (.[0].metadata["gc.dispatch_when_ready"] // "") | tostring else error("unread") end') \
-  && ROUTE=$(printf '%s\n' "$ROW" | jq -er '(.[0].metadata["gc.routed_to"] // "") | tostring') \
-  && { [ -z "$ARM" ] || "$CONV/deferred-dispatch.sh" disarm "$SUBJECT" --reason "$WHY"; } \
-  && { [ -z "$ROUTE" ] || [ "$ROUTE" = human ] || gc bd update "$SUBJECT" --unset-metadata gc.routed_to; } \
-  && echo "$SUBJECT carries no arm and no pool route"
-```
-Without that line, answer nothing: fix what the block printed and re-run it.
-Then take the case that fits. The cases:
-- **The subject is the work.** Sign off with `--ruled yes --no-wait`,
-  then send the subject: `gc sling <rig>/<pool> "$SUBJECT" --on <formula>`.
-  The formula the subject recommends is never sent this way; take it as the
-  next case says.
-- **The subject takes its recommendation.** The operator rules to take the
-  formula a first reaction recommended, `gc.recommended_formula`. Make the
-  conversation reply to the recommendation's gate, the human gate under the
-  key `first-reaction` that blocks the subject, as for any gate you answer. A
-  gate under that key on an epic's member asks the member's recommendation,
-  which the sign-off does not take. Then sign off with
-  `--ruled yes --no-wait --accept`. Send nothing yourself: the
-  sign-off answers that gate through `gc-helm.sh accept`, the writer the
-  board's Accept runs, after every other write but the close. Under the
-  subject's acceptance lock it dispatches the formula, or records a dispatch
-  an Accept already made, so the work goes once (the `work` skill). A var the
-  operator settles for that dispatch rides beside `--accept` as
-  `--var <key>=<value>`; the formula's own description names the vars it
-  takes. It refuses, writing nothing, while a human gate the ruling does not
-  answer still holds the subject, or while the subject carries another gate
-  under the key, one Accept would answer, that the ruling does not answer.
-  Answer that gate in the same ruling once the operator rules on it, or sign
-  off without `--accept` and with `--leave` on the recommendation's gate, and
-  the board offers Accept once the other gate is cleared.
-- **The ruling is that the subject's work will not go on, and a human gate
-  holds it.** Stand it down first, with the gate's `await_id` as the key:
+Take the case that fits the ruling:
+
+- **The subject is the work.** Sign off with `--ruled yes --no-wait`, then send
+  it: `gc sling <rig>/<pool> "$SUBJECT" --on <formula>`. A formula the subject
+  recommends is never sent this way.
+- **The subject takes its recommendation.** Reply to the recommendation's gate,
+  the human gate under the key `first-reaction` that blocks the subject, and sign off with
+  `--ruled yes --no-wait --accept`. Send nothing yourself: the sign-off hands
+  that gate to `gc-helm.sh accept`, the writer the board's Accept runs, which
+  dispatches the formula once under the subject's acceptance lock. A var the
+  operator settles rides beside it as `--var <key>=<value>`. It refuses,
+  writing nothing, while a gate the ruling does not answer still holds the
+  subject. Answer that gate in the same ruling, or sign off with `--leave` on
+  the recommendation's gate, and the board offers Accept once the other gate
+  clears. A `first-reaction` gate on an epic's member asks the member's
+  recommendation, which this does not take.
+- **The work will not go on, and a human gate holds the subject.** Stand it
+  down first, with the gate's `await_id` as the key:
   `"$CONV/stand-down.sh" "$SUBJECT" --key <situation-key> --ruling "<the ruling, one line>" --successor "$CONVERSATION"`.
-  It removes the arm that would send the subject once its gate clears, ends any
-  run beneath it, answers the gate and closes the subject. Then sign off with
-  `--ruled yes --no-wait`, which reads that gate as already
-  answered. A gate that also holds another open bead takes no answer from it:
-  the subject leaves the gate, and it prints which bead the gate still holds.
-  Unless the ruling settles that bead too, add `--leave <gate>` to the sign-off,
-  because the sign-off would answer the gate and release it. When it exits
-  non-zero, repair what it printed and re-run before you sign off. An open PR is
-  retired instead (below).
-- **New work carries it.** File and send that work (below), then sign off
-  with `--ruled yes --waiting-on <the work> --close-brief "<…>"`. The
-  sign-off appends the brief to the subject's notes and arms the subject's
-  validating closer in the subject's own rig, so once the work lands the closer
-  checks the brief against what landed, then closes the subject or puts it to
-  the operator. Write the brief as the claim the closer tests: what the work's
-  landing settles on the subject, and what to check once it has. A subject in
-  the city's own store has no pool to run its closer, so the sign-off refuses
-  it: put its close to the operator through a human gate that names the work
-  (the `waits` skill), and sign off with `--waiting-on <that gate>` in its
-  place.
-- **New work decomposes an epic subject.** File it as the subject's member and
-  send it (below), then sign off with `--ruled yes --no-wait`,
-  or with `--waiting-on` naming only the dependencies the sitting also sent.
-  A member takes no `--waiting-on`, because bd refuses that edge. An epic takes
-  no `--close-brief`, because its members carry it, and the sign-off arms no
-  closer for it.
+  It removes the arm, ends any run beneath it, answers the gate and closes the
+  subject. Then sign off with `--ruled yes --no-wait`. A gate that also holds
+  another open bead is left in place, and it prints which bead. Unless the
+  ruling settles that bead too, add `--leave <gate>` to the sign-off. When it
+  exits non-zero, repair what it printed and re-run before you sign off. An
+  open PR is retired instead (below).
+- **New work carries it.** Send it (Send the work), then sign off with
+  `--ruled yes --waiting-on <the work> --close-brief "<…>"`.
+- **New work decomposes an epic subject.** Sign off with `--ruled yes --no-wait`,
+  or `--waiting-on` only the dependencies the sitting also sent. An epic takes
+  no `--close-brief`, because its members carry it.
+- **The subject needs no work.** Sign off first, because an open gate on the
+  subject holds its close, then close it through the disposition writer (the
+  `work` skill), with this conversation as the evidence. The writer runs only
+  once the no-op record lands:
 
-**On a `--ruled yes` sign-off that reaches an open PR
-(`merge_result=pull_request`), answer what the ruling does to the PR.** The
-ruling reaches the subject when it is an open PR, the PR whose merge this
-conversation holds, which a conversation on the PR's review or rework reaches
-through nothing else, and each open PR that a gate it answers releases, such
-as a member of an epic subject whose gate the epic's sitting answers, or the
-other PR behind a gate about two. Pass
-`--rework` when it changes what the branch must contain, since the PR still
-reads review-ready against a head that predates the ruling (the `prs` skill,
-sending it back for rework). Pass `--no-rework` when the branch stands as it
-is. Pass `--retire <kind>` when the PR will not land (the `prs` skill,
-retiring it): `not-needed` when nothing carries the work, with this
-conversation as the evidence, or `duplicate`, `folded`, `re-homed` or
-`fixed-upstream` with `--successor <bead>`, the bead that carries it now.
-Given none of them on a ruling that reaches an open PR, the sign-off refuses
-and writes nothing, because a ruling whose rework is never filed lands only in
-notes nothing reads while the stale PR keeps reading ready, and a gate
-answered before the PR is closed lets an approved PR merge. `--rework` and
-`--retire` act on one PR. When the ruling reaches more than one,
-`--pr-anchor <bead>` names it, and each other one stands under the ruling, as
-`--no-rework` says of each. The rework or the retirement runs in that PR's
-own rig, after the sign-off records on the conversation which PR it acts on
-and before it writes anything else. One that does not complete stops the
-sign-off there, and the script exits non-zero. No headline is written, no
-gate is answered and the conversation stays open, so it still holds an open
-PR's merge. Re-run once the cause is repaired: the re-run
-adopts a child an earlier attempt filed, and finds a PR an earlier attempt
-closed. Given the same ruling and the same answer, it acts on the PR the
-earlier attempt recorded, even one that has closed since. A
-conversation's rework carries the ruling it was filed for, and a conversation
-owns one live rework, on whichever PR it was filed. While one filed for an
-earlier ruling of this conversation is open, `--rework` for another ruling is
-refused, because the open one would never carry it: give a ruling that asks
-nothing of the branch beyond it `--no-rework`, and keep the gate of one that
-asks for more open (`--leave <gate>`, or cut the sitting short) until that
-rework has landed. A second PR whose own branch must change waits the same
-way: keep the gate that releases it open until a ruling of its own is carried
-out. `--rework` and `--retire` apply only to an open PR. When the ruling
-reaches none, file and send its consequence as work (below), and re-run
-without them.
+  ```bash
+  gc bd update "$SUBJECT" --set-metadata gc.work_outcome=no-op \
+    && "$CONV/bead-rehome.sh" --origin "$SUBJECT" --successor "$CONVERSATION" --kind not-needed --note "<the sitting's reason, one sentence>"
+  ```
 
-**A ruling does not approve a PR.** A PR merges only on an Approve review on
-GitHub from an account other than the city's, and nothing a sitting writes is
-one. When an open PR the ruling leaves standing still waits on GitHub, the
-sign-off prints a line saying what its merge needs, with its link, and when
-that is the operator's Approve, the headline says so after your `--outcome`.
-Pass each line on in your sign-off, so the operator does not take your ruling
-for the approval. When a line asks for their Approve, call it the one thing
-left only when nothing else holds the PR. When the ruling holds the PR back,
-leaves a gate or decision owed (`--leave`) or waits on other work
-(`--waiting-on`), or the line names a request for changes, say that first,
-with what settles it, and give the Approve as the step after it. When no line
-prints, leave the Approve out.
+  A gate the sitting did not answer makes it exit 5 with nothing closed: run
+  it again once that gate clears. When another bead carries the work, name it
+  as the successor, under `--kind duplicate`, `folded`, `re-homed` or
+  `fixed-upstream`. An epic ruled close is the `converse-epic-review` skill's
+  to close.
 
-Then post the **sign-off** — the sitting's last word, a hand-back in
-the shape the prompt's Definitions define (**The hand-back**),
-self-contained enough to act on from its last few lines:
-```
-<subject-id> — <short human label>
+**A ruling that reaches an open PR** (`merge_result=pull_request`) says what it
+does to the PR: the subject's PR, the PR whose merge this conversation holds,
+or one a gate it answers releases. Pass `--rework` when the branch must change
+(the `prs` skill), `--no-rework` when it stands, or `--retire <kind>` when it
+will not land: `not-needed` with this conversation as the evidence, or
+`duplicate`, `folded`, `re-homed` or `fixed-upstream` with
+`--successor <bead>`. To retire the subject's PR:
 
-<2-4 plain sentences at executive altitude: what this sitting settled
-and the consequence that mattered; if a decision is still open, lead
-with its recommendation.>
-```
-At the hand-off, its last words say what the record does after it: what the
-subject waits on, and what checks the subject and closes it once that work
-lands, such as its validating closer, the refinery's merge or a person's gate.
-Never promise to confirm, check, watch or follow up yourself, in any words:
-the conversation is closed, and nothing brings this sitting back to keep the
-promise.
-A converse is about its one subject; name another bead only where the
-conversation's substance genuinely leads there, and then as a plain
-sentence. Record it on the conversation just before you post it (the
-prompt's **Record each hand-back on the conversation, then post it**). It is
-also the visit's conclusion: the comment on the subject's pull request shows
-it word for word once the visit ends, so name no other rig or its beads in it,
-as the topic does:
 ```bash
-"$CONV/gc-helm.sh" handback "$CONVERSATION" <<'HANDBACK'
-<the sign-off as you post it>
-HANDBACK
-```
-The sign-off already closed the conversation, so nothing is said after this
-message.
-**If this sitting ROUTED work, file and send it, then pass
-`--waiting-on <work-bead>` to the sign-off for each dependency it sent, with
-the `--close-brief` its validating closer checks.** The
-`work` skill says which bead carries the work and how to choose its formula. An
-epic the ruling files takes that skill's epic create, then a note that says
-whose words each field is, quoting the operator for each field they stated or
-approved in this sitting:
-```bash
-gc bd update <the new epic> --append-notes "Filed $(date -u +%Y-%m-%d) by $GC_SESSION_NAME in conversation $CONVERSATION. Proposed by this sitting: <each field it wrote, or none>. Stated by the operator: <each field they stated or approved, quoting their words, or none>."
-```
-The sling runs only once the create returned the bead's id:
-```bash
-WORK=$(gc bd create "<title>" -t task -d "<what needs doing, why, and what done looks like>" --json | jq -er '.id') \
-  && gc sling <rig>/<pool> "$WORK" --on <formula> \
-  && gc bd comment "$CONVERSATION" "Sent work: <what it will do, in plain words>"
-```
-The last line records the dispatch as one of the visit's actions, and the
-comment on the subject's pull request lists it once the visit ends. Record
-any other act this sitting takes on the subject's universe the same way, once
-it lands, such as the follow-up armed below, in one plain sentence that names
-no other rig or its beads. Detail about another rig stays in the thread and in
-notes, which that comment does not show.
-File it beside the subject, not under it: work the subject waits on is a
-dependency, and that is the default. Add `--parent <epic>` to the create only
-when the work belongs to that epic. The subject's parent, as
-`"$CONV/converse-parent.sh" "$SUBJECT"` prints it, applies only when the new
-work serves the same epic. It is the subject's own parent, or the nearest open
-bead above it once that parent has closed. When it is a Delivery whose aim does
-not cover the work, the work goes under that Delivery's epic (the `work`
-skill). Work that genuinely decomposes an epic subject is the one
-exception. It is the subject's member, created with `--parent "$SUBJECT"`, and
-it gets no `--waiting-on`, because bd refuses a `blocks` edge from a parent to
-its own descendant. Run the create as `gc bd --rig <rig> create` when the
-pool's rig is not this session's. The takeaway alone cannot carry the wait:
-*waiting and holding are graph states, not comments.* An edge that will not
-take warns on stderr and the takeaway still lands.
-
-**A follow-up that cannot run until another bead lands is ARMED, not left
-unrouted** (the `waits` skill). Slinging it now is wrong, because it is
-blocked, and leaving it to route once the blocker closes is the
-come-back-later that keeps you or a person on the hook. Make it wait on the
-blocker, then arm it, so it routes itself when the blocker closes and the
-sitting can queue everything and close. An arm with nothing holding the
-follow-up sends it on the next pass, so the arm runs only once the add exits 0.
-A `dep add` onto a bead in another rig's store prints success and exits 0, but
-holds nothing, so the edge is written only when the follow-up and the blocker
-carry the same id prefix, the text before the first `-`, which names the
-store. Each call names the follow-up's rig, the one its pool reads: unpinned,
-a command that also names a city bead is answered from the city's store.
-```bash
-[ "$(echo <follow-up> | cut -d- -f1)" = "$(echo <blocker> | cut -d- -f1)" ] \
-  && gc bd --rig <rig> dep add <follow-up> <blocker> --type=blocks \
-  && "$CONV/deferred-dispatch.sh" arm <follow-up> --target <rig>/<pool> --reason "waits for <blocker>"
-```
-When the prefixes differ, the blocker is in another rig's store, where no
-edge can hold the follow-up, and the block writes nothing. Make the follow-up
-wait on a human gate in its own store that names the blocker, and arm it on
-that gate. The gate reaches the operator, who clears it once the blocker
-lands, and the arm then sends the follow-up. The helper files the gate in the
-follow-up's own store, and the message's first line is the gate's title, cut
-at 140 characters, so keep that line to one plain sentence:
-```bash
-"$CONV/human-gate.sh" --subject <follow-up> --key waits-for-<blocker> --message "Clear once <what the blocker delivers> lands, so <what the follow-up does> can start
-<follow-up> waits for <blocker> in <its rig>. Clear this gate once <blocker> closes." \
-  && "$CONV/deferred-dispatch.sh" arm <follow-up> --target <rig>/<pool> --reason "waits for <blocker>, through its human gate"
+"$CONV/converse-signoff.sh" --conversation "$CONVERSATION" --outcome "<headline>" --ruled yes --ruling "<the ruling, one line>" --no-wait --retire not-needed
 ```
 
-**Staying for the return.** When the operator asks the sitting to stay, file
-and send the work first, as above, then run the sign-off with `--stay` added:
-what the operator agreed, in one line, which the return compares the work with
-once it lands. It writes everything the hand-off's sign-off writes, the
-subject's wait, its close brief and its validating closer's arm included, so
-the record is as complete as at the hand-off: a stay that never returns, such
-as one whose session was closed, leaves the subject's next steps in place.
-Then, in place of the close, it makes the conversation wait on each
-`--waiting-on` bead that is no gate and on a rework `--rework` files, appends
-`staying: <that line> (waits on <the work>)` to the conversation's notes, and
-leaves the conversation open under this sitting. Write the headline as what
-the conversation waits for. It exits non-zero when it stopped short, and then
-you have not stayed:
-```bash
-if "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" \
-     --outcome "staying — <what this conversation waits for, at most 140 characters>" \
-     --ruled yes --ruling "<the ruling, one line>" --waiting-on <the work> \
-     --close-brief "<what that work's landing settles here, and what to check once it has>" \
-     --stay "<what the operator agreed, which the return compares the work with, one line>"
-     # --rework --no-wait in place of --waiting-on and --close-brief when the work is the PR's rework, and the other flags as the sign-off above takes them
-then
-  : # staying — record the hand-back, post it, and end the turn with no drain
-else
-  # NOT staying: repair what it printed and re-run, or sign off without --stay to end at the hand-off.
-  exit 1
-fi
-```
-Record the hand-back on the conversation and post it, as every hand-back is. It
-opens with where the subject stands, then says the sitting stays until the work
-lands and comes back then to compare it with what was agreed. Below it, offer
-the close-out line a framing offers (the `converse-hold` skill), since the
-operator ends a sitting that stays the same way. Then end the turn without
-`gc runtime drain-ack`: the conversation is open, and a drain ends the sitting
-that stays. Gas City stops the agent once no tab is attached, and wakes this
-session, with its thread, when the work closes. Step 1 then reads the
-`staying:` line and sends you to the return (step 8). On an open PR the merge
-this conversation holds waits for the return as well, so lift that hold (the
-`converse-hold` skill) when the operator wants the PR to land without it. A
-stay for that PR's own landing needs the hold lifted first, because its anchor
-already waits on this conversation, and the sign-off refuses the stay until
-it is.
+Given none of them, the sign-off refuses and writes nothing, because a rework
+never filed leaves the stale PR reading ready, and a gate answered before the
+PR closes lets an approved PR merge. `--pr-anchor <bead>` names the PR the
+rework or retirement acts on when the ruling reaches more than one, and each
+other one stands. The rework or retirement runs first, in that PR's own rig,
+and one that does not complete stops the sign-off with nothing answered, so
+the conversation still holds the merge. A re-run adopts the child or finds
+the PR an earlier attempt left. A conversation owns one live rework: while one
+filed for an earlier ruling is open, `--rework` for another is refused, so give
+a ruling that asks nothing more of the branch `--no-rework`, and keep the gate
+of one that does open (`--leave <gate>`) until that rework lands. A second PR
+whose own branch must change waits the same way, behind a gate kept open until
+a ruling of its own is carried out. `--rework` and `--retire` act only on an
+open PR: when the ruling reaches none, send its consequence as work and sign
+off without them.
 
-**The validating closer is the return trip.** Once every wait the sign-off
-recorded closes, the deferred-dispatch pass slings the closer the sign-off
-armed. It checks the close brief against what landed, then closes the subject
-or puts it to the operator. A subject the sign-off armed no closer for,
-because something else sends it on once its wait clears, such as its own arm,
-an assignee or the refinery's merge, goes there, and the sign-off says so. One
-that nothing sends on, such as a subject that waits only on a person's gate,
-returns through the liveness sweep (`assets/scripts/liveness-sweep.sh`) as an
-unnamed wait once every wait it records has closed. A sitting that stays comes
-back as well, to the operator: its return checks nothing on the subject, which
-stays the closer's to check (step 8).
+**A ruling does not approve a PR.** A PR merges only on an Approve from an
+account other than the city's. When a PR the ruling leaves standing still
+waits on GitHub, the sign-off prints what its merge needs, with its link. Pass
+each line on. Name the operator's Approve as the one thing left only when
+nothing else holds the PR. When the ruling holds the PR back, leaves a gate
+owed or waits on other work, say that first and give the Approve as the step
+after it. When no line prints, leave the Approve out.
 
-Never close a conversation by hand, and never end a held sitting without
-its sign-off: a thread that stops after a decision with no wrap-up reads as a
-crash, and a conversation closed by hand answers none of the gates it replies
-to. The sign-off is owed to a sitting that was **held**; one closed before any
-framing was posted (step 2's `moot` or `benign`) asked the operator nothing,
-so closing it silently is the contract.
+Then post the sign-off as the sitting's last word, a hand-back that opens with
+where the subject stands. Its last words say what the record does next: what
+the subject waits on, and what checks and closes it once that work lands, such
+as its validating closer, the refinery's merge or a person's gate. Never
+promise to confirm, check, watch or follow up yourself, in any words: nothing
+brings an ended sitting back. Record it on the conversation before you post it
+(the prompt's hand-back), and name no other rig or its beads, because the
+comment on the subject's PR shows it word for word.
 
-Then drain: a closed conversation ends this session (the prompt's **How this
-thread ends**). Run `gc runtime drain-ack` once the sign-off has closed the
-conversation and its message is posted, and run nothing after it. A stay
-closes nothing, so it drains nothing: its turn ends after its hand-back. A sign-off
-that stopped short leaves the conversation open and the sitting not over:
-repair what `converse-signoff.sh` printed, or raise it in the thread, and do
-not drain.
+Once the sign-off has closed the conversation and its message is posted, run
+`gc runtime drain-ack`, and nothing after it. A sign-off that stopped short
+leaves the sitting open: repair what it printed, or raise it in the thread, and
+do not drain. Never close a conversation by hand: a held sitting ends with its
+sign-off, because a conversation closed by hand answers none of its gates.
+
+## Ending early
+
+When your context runs low before the operator answers, record the outcome so
+far, then sign off with `--ruled no`, and drain. It answers nothing: every gate
+stays open and owed with its reply in place, and the conversation goes back to
+the operator's queue, where the next engagement takes it up from its record.
+It is the one ending that drains with the conversation open, and a sitting the
+operator has not ruled on is never ended to unblock something else.

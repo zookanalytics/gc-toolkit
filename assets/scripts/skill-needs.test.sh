@@ -75,6 +75,8 @@ SETTLE="$REPO/skills/converse-settle/SKILL.md"
 CONTINUE="$REPO/skills/converse-continue/SKILL.md"
 ITERATE="$REPO/skills/converse-iterate-document/SKILL.md"
 EPIC_REVIEW="$REPO/skills/converse-epic-review/SKILL.md"
+STAY="$REPO/skills/converse-stay/SKILL.md"
+HOLD="$REPO/skills/converse-hold/SKILL.md"
 MECHANIK="$REPO/agents/mechanik/prompt.template.md"
 WORK_SKILL="$REPO/skills/work/SKILL.md"
 PRS_SKILL="$REPO/skills/prs/SKILL.md"
@@ -439,7 +441,7 @@ lacks() {
 have() {
     if grep -qF -- "$2" "$3"; then ok "$1"; else bad "$1" "missing: $2"; fi
 }
-have "the step table points acting on a ruling at the skills" '`work`, `waits`, `records`, `prs`' "$PROMPT"
+have "the action table points asking for work at the skills" '`work`, `waits`, `records`, `prs`' "$PROMPT"
 have "the record step gives the append it runs" 'gc bd update "$SUBJECT" --append-notes "<the decision>.' "$SETTLE"
 have "…and the append of a current-state block" 'gc bd update "$SUBJECT" --append-notes "## Current state' "$SETTLE"
 have "the settle step gives the create and the sling for routed work" 'gc sling <rig>/<pool> "$WORK" --on <formula>' "$SETTLE"
@@ -485,8 +487,8 @@ have "the settle step says the same of the subject's parent" \
 have "the settle step gives the arm it names" 'deferred-dispatch.sh" arm <follow-up>' "$SETTLE"
 have "…once the follow-up and the blocker carry one id prefix" '[ "$(echo <follow-up> | cut -d- -f1)" = "$(echo <blocker> | cut -d- -f1)" ]' "$SETTLE"
 have "…and holds a follow-up on another rig's bead with a human gate in its own store" 'human-gate.sh" --subject <follow-up>' "$SETTLE"
-have "the prompt gives the disposal writer's call" 'bead-rehome.sh" --origin "$SUBJECT"' "$PROMPT"
-have "the prompt gives the retire call, through the sign-off" '--ruled yes --ruling "<the ruling, one line>" --no-wait --retire not-needed' "$PROMPT"
+have "the settle skill gives the disposal writer's call" 'bead-rehome.sh" --origin "$SUBJECT"' "$SETTLE"
+have "the settle skill gives the retire call, through the sign-off" '--ruled yes --ruling "<the ruling, one line>" --no-wait --retire not-needed' "$SETTLE"
 have "…as the prs skill does" '--ruled yes --ruling "<the ruling, one line>" --no-wait --retire not-needed' "$PRS_SKILL"
 # A gate can hold a merge, so a sitting answers every gate through the sign-off
 # writer, which carries out what the ruling does to the PR first.
@@ -495,12 +497,13 @@ lacks "…and never through a bare gate resolve" 'gc bd gate resolve <gate>' "$C
     "a bare resolve releases what the gate holds before the ruling's rework or retirement is in place"
 # The hold keeps the subject's arm and route, so an answer that clears its last
 # blocker releases it to them. Before the answer, a ruling that sends the
-# subject elsewhere withdraws both, by the sign-off's own rule and block, which
-# the dispatch-path section below compares whole and runs.
-have "…and first withdraws an arm the ruling does not keep" '"$CONV/deferred-dispatch.sh" disarm "$SUBJECT" --reason "$WHY"' "$CONTINUE"
-have "…and a pool route" 'gc bd update "$SUBJECT" --unset-metadata gc.routed_to' "$CONTINUE"
-have "…by step 7's rule" "by step 7's" "$CONTINUE"
-have "the prompt gives the call that withdraws a recommendation" 'converse-invalidate-recommendation.sh" "<why' "$PROMPT"
+# subject elsewhere withdraws both, by the settle skill's one block, which the
+# dispatch-path section below runs.
+have "…and first settles the dispatch path by the settle skill's block" "settle the subject's dispatch path, as \`converse-settle\` gives it" "$CONTINUE"
+have "the settle skill withdraws an arm the ruling does not keep" '"$CONV/deferred-dispatch.sh" disarm "$SUBJECT" --reason "$WHY"' "$SETTLE"
+have "…and a pool route" 'gc bd update "$SUBJECT" --unset-metadata gc.routed_to' "$SETTLE"
+have "the hold sends a recommendation it judges stale to the work skill's withdrawal" 'withdraw it (the `work` skill' "$HOLD"
+have "…which gives the call" 'converse-invalidate-recommendation.sh" "<why' "$WORK_SKILL"
 # One writer dispatches a recommendation, under the bead's acceptance lock and a
 # token that finds a dispatch an Accept that stopped part way already poured. A
 # sling of the agent's own pours the formula again once that run has finished.
@@ -508,31 +511,35 @@ have "the work skill takes a recommendation through Accept's writer" 'gc-helm.sh
 lacks "…and gives no sling of its own that records the dispatch" 'gc.recommended_formula_dispatched=' "$WORK_SKILL" \
     "a sling and record of its own bypasses Accept's lock and token, and dispatches the recommendation twice"
 have "the settle step takes a subject's recommendation through the sign-off" '--ruled yes --no-wait --accept' "$SETTLE"
-have "the prompt gives the call that opens a conversation" 'gc-helm.sh" open <bead>' "$PROMPT"
-have "the prompt gives the PR post calls" 'pr-post.sh" reply --host github.com' "$PROMPT"
-# A sitting ends at its hand-off unless the operator asks it to stay. One that
-# stays sleeps with its conversation open and comes back when its work closes,
-# and step 1 tells that return, and a wake while the work is out, from the
-# conversation's staying: line.
+have "the continue skill gives the call that opens a conversation" 'gc-helm.sh" open <bead>' "$CONTINUE"
+have "the prs skill gives the PR post calls the return uses" 'pr-post.sh" reply --host github.com' "$PRS_SKILL"
+# A sitting that sends work agrees with the operator whether it ends at its
+# hand-off or stays for the work's return, and recommends staying only where
+# the discussion helps judge the result. One that stays sleeps with its
+# conversation open, and the entry (converse-entry.sh, its own suite) tells its
+# return, and a wake while the work is out, from a fresh sitting.
 tr -s '[:space:]' ' ' <"$PROMPT" >"$TMP/prompt-stay"
-have "the prompt says a sitting ends at its hand-off unless asked to stay" \
-    'A sitting ends at its hand-off unless the operator asks it to stay.' "$TMP/prompt-stay"
-have "…and that a sitting that ends promises nothing it cannot keep" \
-    'It makes no first-person promise to confirm, check, watch or follow up' "$TMP/prompt-stay"
-have "step 1 reads the conversation the alias holds before it drains" \
-    'gc bd list --assignee "$GC_ALIAS" --status open --json' "$PROMPT"
-have "…and a ready assignment with a staying: line is the return" \
-    'is a `staying:` line — the work it waited on has closed, so this is the return.' "$TMP/prompt-stay"
-have "the settle step stays through the sign-off" \
-    '--stay "<what the operator agreed, which the return compares the work with, one line>"' "$SETTLE"
-tr -s '[:space:]' ' ' <"$SETTLE" >"$TMP/settle-stay"
-have "…and a stay drains nothing" 'A stay closes nothing, so it drains nothing' "$TMP/settle-stay"
-tr -s '[:space:]' ' ' <"$CONTINUE" >"$TMP/continue-stay"
-have "the continue step gives the return its sign-off" \
-    'Sign off (step 7) with the stay'"'"'s call less `--stay`, with `--no-wait` in place of its waits and brief, and with `--no-rework` in place of a `--rework`' "$TMP/continue-stay"
+have "the prompt recommends staying when the discussion helps judge the result" \
+    'Recommend staying when the discussion will help judge the result' "$TMP/prompt-stay"
+have "…and ending when the brief and the ordinary checks suffice" \
+    'Recommend ending when the brief and the work'"'"'s ordinary checks suffice.' "$TMP/prompt-stay"
+have "…puts the choice to the operator, so they need not know to ask" \
+    'Put the choice to the operator with your recommendation, so they need not know to ask, and never stay without their agreement.' "$TMP/prompt-stay"
+have "…and says a sitting that ends promises nothing it cannot keep" \
+    'makes no promise of its own to confirm, check, watch or follow up' "$TMP/prompt-stay"
+have "the prompt enters through converse-entry.sh, which tells each entry apart" \
+    '/converse-entry.sh"' "$PROMPT"
+lacks "…and reconstructs no entry from a conversation's notes" 'staying:' "$PROMPT" \
+    "the entry reads the record; the prompt acts on what it prints"
+have "the stay skill stays through the sign-off" \
+    '--stay "<what the operator agreed, which the return compares the work with, one line>"' "$STAY"
+tr -s '[:space:]' ' ' <"$STAY" >"$TMP/stay-squeezed"
+have "…and a stay drains nothing" 'A stay closes nothing, so it drains nothing' "$TMP/stay-squeezed"
+have "the stay skill gives the return its sign-off" \
+    'Sign off with the stay'"'"'s call less `--stay`, with `--no-wait` in place of its waits and brief, and with `--no-rework` in place of a `--rework`' "$TMP/stay-squeezed"
 have "…and the return passes and fails nothing" \
-    'It works on nothing, takes no check'"'"'s send-back, and passes and fails nothing' "$TMP/continue-stay"
-for f in "$PROMPT" "$SETTLE"; do
+    'It works on nothing, takes no check'"'"'s send-back, and passes and fails nothing' "$TMP/stay-squeezed"
+for f in "$PROMPT" "$SETTLE" "$STAY" "$CONTINUE" "$HOLD"; do
     missing=""
     for w in $(grep -oE '"\$CONV/[A-Za-z0-9._-]+"' "$f" | sed 's#.*/##; s#"$##' | sort -u); do
         [ -x "$ROOT/assets/scripts/$w" ] || missing="$missing $w"
@@ -856,7 +863,7 @@ while IFS='|' read -r label file marker; do
     done
 done <<SPECS
 work: closing a bead that needs no work|$WORK_SKILL|gc.work_outcome=no-op
-converse prompt: disposing of a no-work subject|$PROMPT|gc.work_outcome=no-op
+converse-settle: disposing of a no-work subject|$SETTLE|gc.work_outcome=no-op
 converse-settle: filing and sending routed work|$SETTLE|gc sling <rig>/<pool> "\$WORK"
 converse-settle: arming a follow-up|$SETTLE|gc bd --rig <rig> dep add <follow-up> <blocker>
 converse-settle: arming a follow-up on a human gate|$SETTLE|"\$CONV/human-gate.sh" --subject <follow-up> --key waits-for-<blocker>
@@ -895,20 +902,20 @@ for sh_ in $shells; do
     fi
 done
 echo "── the stay example, and each call the skills derive from it, passes the sign-off's parser ──"
-# The settle skill gives one stay call and says how its rework form differs from
-# it, and the continue skill says how the return's call differs from the stay's.
+# The stay skill gives one stay call and says how its rework form, and the
+# return's call, differ from it.
 # Each form is built from the example's own arguments the way those skills word
 # it, then run through the real sign-off under a gc that answers nothing. A form
 # the parser takes reaches the conversation read and stops there (exit 1). One
 # it refuses exits 2 before that read.
 have "the stay example's rework form takes --rework --no-wait in place of the wait and its brief" \
-    '# --rework --no-wait in place of --waiting-on and --close-brief when the work is the PR'"'"'s rework' "$SETTLE"
+    '# --rework --no-wait in place of --waiting-on and --close-brief when the work is the PR'"'"'s rework' "$STAY"
 SV="$TMP/stay-forms"
 mkdir -p "$SV/bin" "$SV/pack"
 printf '#!/bin/sh\nexit 1\n' >"$SV/bin/gc"
 printf '#!/bin/sh\nprintf "%%s\\n" "$@" >"$STAY_ARGV"\n' >"$SV/pack/converse-signoff.sh"
 chmod +x "$SV/bin/gc" "$SV/pack/converse-signoff.sh"
-fenced_block "$SETTLE" '--stay "<what the operator agreed' | sed 's#<[^>]*>#x#g' >"$SV/block"
+fenced_block "$STAY" '--stay "<what the operator agreed' | sed 's#<[^>]*>#x#g' >"$SV/block"
 # drop_args <file> <flag>... — the arguments in <file>, one per line, less each
 # named flag and the value after it.
 drop_args() {
@@ -917,7 +924,7 @@ drop_args() {
     awk -v drop=" $* " 'skip { skip = 0; next } index(drop, " " $0 " ") { skip = 1; next } { print }' "$f"
 }
 if [ ! -s "$SV/block" ]; then
-    bad "converse-settle: the stay example is found" "no fenced bash block holds its --stay in $SETTLE"
+    bad "converse-stay: the stay example is found" "no fenced bash block holds its --stay in $STAY"
 else
     for sh_ in $shells; do
         run=$sh_
@@ -946,54 +953,8 @@ rework-return|…and the return of a rework stay, with --no-rework in place of i
 FORMS
     done
 fi
-echo "── step 1's drain read prints one of three answers, and a read that fails is never none ──"
-# A sitting woken while its work is out gets drain from the claim, and this
-# read decides whether it drains. A list that fails, answers nothing or answers
-# no list, or that has no alias to read under, prints UNREADABLE, never NONE,
-# which drains a sitting that stays. The read takes the list as the pack reads
-# every gc bd answer: a `gc bd:` notice line on stdout and a raw C0 byte inside
-# a notes field are taken out before jq.
-DR="$TMP/drain-read"
-mkdir -p "$DR/bin"
-cat >"$DR/bin/gc" <<'STUB'
-#!/usr/bin/env bash
-printf '%s\n' "$*" >>"$DRAIN_DIR/calls"
-case "$DRAIN_CASE" in
-    fail) echo "bd list: data plane down" >&2; exit 1 ;;
-    silent) ;;
-    object) echo '{"error":"no issues found"}' ;;
-    empty) echo '[]' ;;
-    holding) printf '%s\n' '[{"id":"tk-c","notes":"staying: the dialog keeps what is typed (waits on tk-w)\nholding: the next framing"}]' ;;
-    staying) printf 'gc bd: answering from the rig store\n[{"id":"tk-c","notes":"a raw \033 byte\\nstaying: the dialog keeps what is typed (waits on tk-w)"}]\n' ;;
-esac
-STUB
-chmod +x "$DR/bin/gc"
-fenced_block "$PROMPT" 'gc bd list --assignee "$GC_ALIAS" --status open --json' >"$DR/block"
-UNREAD="UNREADABLE: the open conversations assigned to this session did not read"
-for sh_ in $shells; do
-    run=$sh_
-    [ "$sh_" = zsh ] && run="zsh -f"
-    while IFS='|' read -r case_ alias want label; do
-        : >"$DR/calls"
-        got=$(cd "$TMP/away" && env -u BASH_ENV -u ENV -u GC_ALIAS ${alias:+GC_ALIAS=$alias} DRAIN_DIR="$DR" \
-            DRAIN_CASE="$case_" PATH="$DR/bin:$PATH" $run "$DR/block" </dev/null 2>/dev/null)
-        if [ "$got" = "$want" ] && { [ -n "$alias" ] || [ ! -s "$DR/calls" ]; }; then
-            ok "($sh_) $label"
-        else
-            bad "($sh_) $label" "printed: $got; calls: $(tr '\n' ';' <"$DR/calls")"
-        fi
-    done <<CASES
-fail|rig/c.tk-c|$UNREAD|a list that fails reads as unreadable
-silent|rig/c.tk-c|$UNREAD|…as does one that answers nothing
-object|rig/c.tk-c|$UNREAD|…or answers no list
-staying||$UNREAD|…or has no alias to read under, which it never lists without
-empty|rig/c.tk-c|NONE: no open conversation of this session stays|a list with no conversation reads as none
-holding|rig/c.tk-c|NONE: no open conversation of this session stays|…as does one whose newest line is a holding: line
-staying|rig/c.tk-c|STAYING tk-c: staying: the dialog keeps what is typed (waits on tk-w)|a newest staying: line names its conversation, past a gc bd: notice and a raw C0 byte
-CASES
-done
 echo "── a sitting iterating on a document writes one scaffold and names it in the ruling ──"
-have "the step table sends a sitting iterating on a document to its skill" '**Steps 5–8, when the operator is iterating on a document**' "$PROMPT"
+have "the action table sends a sitting iterating on a document to its skill" '**Iterate on a document**' "$PROMPT"
 have "…by name" '`converse-iterate-document` |' "$PROMPT"
 have "the ruling line names the block the worker starts from" 'to the scaffold in the notes of <bead>, the block headed ## Current state (<date>)' "$ITERATE"
 have "…and the sign-off files the rework" '--no-wait --rework' "$ITERATE"
@@ -1194,23 +1155,24 @@ done
 echo "── every answer to a gate settles the subject's dispatch path first ──"
 # The hold leaves the subject's arm and route in place, and the writer leaves
 # them too, so an answer that clears the subject's last blocker releases the
-# subject to them. The sign-off (step 7) and a turn's --answer (step 8) settle
-# that path by one procedure, the same read and the same withdrawal, run before
-# the answer. Compared whole, the two copies cannot drift apart.
+# subject to them. The sign-off and a turn's --answer settle that path by one
+# procedure, the read and the withdrawal the settle skill gives, run before the
+# answer. The continue skill points at that procedure and keeps no copy.
 DP_READ_MARK='"arm: '
 DP_WITHDRAW_MARK='carries no arm and no pool route"'
+DP_POINTER="settle the subject's dispatch path, as \`converse-settle\` gives it"
 for pair in "$DP_READ_MARK|read" "$DP_WITHDRAW_MARK|withdrawal"; do
     mark=${pair%|*}; what=${pair##*|}
     fenced_block "$SETTLE" "$mark" >"$TMP/dp-settle"
     fenced_block "$CONTINUE" "$mark" >"$TMP/dp-continue"
-    if [ -s "$TMP/dp-settle" ] && cmp -s "$TMP/dp-settle" "$TMP/dp-continue"; then
-        ok "the continue step settles the dispatch path with the sign-off's own $what"
+    if [ -s "$TMP/dp-settle" ] && [ ! -s "$TMP/dp-continue" ]; then
+        ok "the settle skill holds the dispatch path's $what, and the continue skill keeps no copy"
     else
-        bad "the continue step settles the dispatch path with the sign-off's own $what" \
-            "$(diff "$TMP/dp-settle" "$TMP/dp-continue" 2>&1 | head -4 | tr '\n' ' ')"
+        bad "the settle skill holds the dispatch path's $what, and the continue skill keeps no copy" \
+            "settle: $(wc -l <"$TMP/dp-settle") lines, continue: $(wc -l <"$TMP/dp-continue") lines"
     fi
 done
-withdraw_at=$(grep -nF "$DP_WITHDRAW_MARK" "$CONTINUE" | head -1 | cut -d: -f1)
+withdraw_at=$(grep -nF "$DP_POINTER" "$CONTINUE" | head -1 | cut -d: -f1)
 answer_at=$(grep -nF 'converse-signoff.sh" --conversation "$CONVERSATION" --answer <gate>' "$CONTINUE" | head -1 | cut -d: -f1)
 if [ -n "$withdraw_at" ] && [ -n "$answer_at" ] && [ "$withdraw_at" -lt "$answer_at" ]; then
     ok "…and withdraws the path before its --answer call"
@@ -1254,7 +1216,7 @@ printf 'converse-signoff.sh %s\n' "$*" >>"$DP_DIR/log"
 jq -r '.[0].metadata | "answered with arm \(.["gc.dispatch_when_ready"] // "none") route \(.["gc.routed_to"] // "none")"' "$DP_DIR/row.json" >>"$DP_DIR/log"
 STUB
 chmod +x "$DP/bin/gc" "$DP/pack/assets/scripts/"*.sh
-fenced_block "$CONTINUE" "$DP_WITHDRAW_MARK" | fill_block >"$DP/withdraw"
+fenced_block "$SETTLE" "$DP_WITHDRAW_MARK" | fill_block >"$DP/withdraw"
 fenced_block "$CONTINUE" 'converse-signoff.sh" --conversation "$CONVERSATION" --answer <gate>' | fill_block >"$DP/answer"
 # dp_seed <metadata-json> — a store whose subject tk-x carries that metadata,
 # and an empty log.
@@ -1356,12 +1318,13 @@ echo "── a review of an epic gates what waits on its ruling, records it, and
 # answers nothing. A park's gate can hold other beads, so a release closes it
 # only once nothing else waits on it, and never closes a blocker that is not a
 # park's own gate.
-have "the step table sends a sitting that reviews an epic to its skill" '**Steps 4–8, when the operator judges an epic'"'"'s contract or its course, or the subject is a landed Delivery or work that waits on a judgment about an epic**' "$PROMPT"
+have "the action table sends a sitting that reviews an epic to its skill" '**Review an epic**' "$PROMPT"
 have "…by name" '`converse-epic-review` |' "$PROMPT"
 have "the prompt sends a review's closes to its skill, none of them forced" \
     'A review of an epic makes its own closes, none of them forced, through the `converse-epic-review` skill.' "$PROMPT_JOINED"
+tr -s '[:space:]' ' ' <"$SETTLE" >"$TMP/settle-squeezed"
 have "…and an epic ruled close is the disposition writer's exception, which that skill closes" \
-    'An epic ruled close is the exception to the disposition writer: the `converse-epic-review` skill closes it.' "$PROMPT_JOINED"
+    'An epic ruled close is the `converse-epic-review` skill'"'"'s to close.' "$TMP/settle-squeezed"
 EPIC_REVIEW_JOINED="$TMP/epic-review-squeezed"
 tr -s '[:space:]' ' ' <"$EPIC_REVIEW" >"$EPIC_REVIEW_JOINED"
 have "the hold gates each landed Delivery's close" \
@@ -1505,15 +1468,20 @@ prs	Still routing: I'm finding the right way to send rework back to an open PR's
 prs	Before acting on your ruling, I'm checking that the PR's state hasn't moved overnight and reading how the sign-off files the rework.
 NEEDS
 
-# The converse step skills are loaded by name from the step table in the
+# The converse action skills are loaded by name from the action table in the
 # converse prompt, never chosen by description, so they are not competitors.
-grep -E '^\| \*\*Steps? ' "$PROMPT" | grep -oE '`converse-[a-z-]+`' | tr -d '`' | sort -u >"$TMP/by-name"
-[ -s "$TMP/by-name" ] && ok "the step table names the skills it loads by name ($(tr '\n' ' ' <"$TMP/by-name"))" \
-    || bad "the step table names the skills it loads by name" "no \`converse-…\` names in $PROMPT"
+grep -E '^\| \*\*' "$PROMPT" | grep -oE '`converse-[a-z-]+`' | tr -d '`' | sort -u >"$TMP/by-name"
+[ -s "$TMP/by-name" ] && ok "the action table names the skills it loads by name ($(tr '\n' ' ' <"$TMP/by-name"))" \
+    || bad "the action table names the skills it loads by name" "no \`converse-…\` names in $PROMPT"
 while read -r s; do
-    [ -r "$SKILLS/$s/SKILL.md" ] && ok "$s: the skill the step table names exists" \
-        || bad "$s: the skill the step table names exists" "no $SKILLS/$s/SKILL.md"
+    [ -r "$SKILLS/$s/SKILL.md" ] && ok "$s: the skill the action table names exists" \
+        || bad "$s: the skill the action table names exists" "no $SKILLS/$s/SKILL.md"
 done <"$TMP/by-name"
+for d in "$SKILLS"/converse-*/; do
+    s=$(basename "$d")
+    grep -qx "$s" "$TMP/by-name" && ok "$s: the action table loads it by name" \
+        || bad "$s: the action table loads it by name" "no row of the action table in $PROMPT names \`$s\`"
+done
 
 awk -F '\t' -v byname="$TMP/by-name" '
     BEGIN {

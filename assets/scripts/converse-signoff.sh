@@ -66,7 +66,8 @@
 # for the sitting's return. The conversation waits on the work through bd's
 # blocks edge, one onto each --waiting-on bead that is no gate and onto the
 # rework --rework filed. Its notes gain a `staying:` line, which the sitting's
-# restart rule reads. Last, one write guarded on the holder and the status it
+# entry (converse-entry.sh) reads to tell its return from a fresh sitting once
+# the work closes. Last, one write guarded on the holder and the status it
 # read leaves it open under the sitting that holds it, so it is no longer
 # claimed work, and a conversation a dismiss closed while the call ran fails
 # that guard and does not stay. Gas City then sleeps the sitting once no tab is
@@ -1090,8 +1091,9 @@ if [ "$RULED" = yes ]; then
     # 5. Stay for the return. The edges onto the work come first, so the
     # conversation is never open and assigned with nothing holding it, which
     # Gas City would read as ready work and wake the sitting for at once. The
-    # `staying:` line comes next, before the status write, because a wake
-    # that finds the conversation open reads it to tell the sitting it stays.
+    # `staying:` line comes next, before the status write, because the
+    # sitting's entry reads it, once the work closes, to tell its return from
+    # a fresh sitting.
     # The guarded write last drops the claim and its lease and keeps the
     # assignee, so the sitting idle-sleeps once no tab is attached and the
     # work's close makes the conversation its ready work, which wakes it. On a

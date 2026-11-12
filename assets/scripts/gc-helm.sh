@@ -5374,9 +5374,10 @@ cmd_engage() {
     # --no-attach` records the sitting as start-pending. The reconciler then
     # launches it with the rendered converse prompt on argv: every converse
     # provider resolves to prompt_mode=arg, and Claude Code and the codex CLI
-    # each take that argument as the session's first user turn. The prompt's
-    # loop opens with the claim block, so the sitting claims its conversation,
-    # re-checks the premise, preps, and posts its framing with no keystrokes.
+    # each take that argument as the session's first user turn. The prompt
+    # opens with the entry (converse-entry.sh), which claims the conversation,
+    # so the sitting re-checks the premise, preps, and posts its framing with no
+    # keystrokes.
     # That holds on the --no-attach board-picker path too, so whoever attaches
     # later finds a started sitting.
     #
