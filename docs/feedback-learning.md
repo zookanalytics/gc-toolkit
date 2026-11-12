@@ -145,6 +145,15 @@ Four producers file the same bead contract:
 The distiller (`mol-feedback-distiller`, judging by the
 `learning-distill` rubric skill) dedups pending observations, clusters
 them onto pattern beads, and decides which clusters have earned a rule.
+A pattern bead (`task_kind=feedback-pattern`) is backlog work the distiller
+triages, the way a bug is, and nothing routes or assigns it. Every run leaves
+each pattern in one of three states: closed once resolved (its rule adopted,
+every follow-up it spawned closed, or dismissed as not a pattern), waiting on
+its follow-up through a `blocks` edge, or deferred with a date while it gathers
+evidence. A deferred pattern comes back to the distiller when its date passes,
+and a closed one reopens when its feedback recurs. `gc bd ready` lists a
+pattern only while it needs a decision, which the distiller makes on its next
+run.
 Each surviving proposal becomes one `prompt-update` bead carrying the
 exact rule text, the evidence list, and the reasoning. A proposal is new
 work, so the distiller files it held with Gas City's `hold:mayor` label and
@@ -360,5 +369,5 @@ Recurrence after adoption is the pass's sharpest input: the rule was
 adopted and the feedback came back anyway. That argues for a different
 carrier or a mechanism, never for restating the same bullet more loudly.
 Evidence against an adopted rule never silently retires it — contradiction
-files a human gate on the rule's pattern bead for the operator, who picks
-scope-narrowing, retirement, or dismissal.
+reopens the rule's pattern bead and files a human gate on it for the operator,
+who picks scope-narrowing, retirement, or dismissal.

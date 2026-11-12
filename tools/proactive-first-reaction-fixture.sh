@@ -106,15 +106,14 @@ cat > "$FXDIR/ready.json" <<'JSON'
 JSON
 # px-lo/px-hi are allowlisted top-level inputs the scan KEEPS; the rest are
 # each dropped by one precision filter (disallowed type, topology root,
-# feedback-pattern machinery, already-ruled, non-top-level child, a dispatched
-# review lane, an implementation branch/PR anchor).
+# already-ruled, non-top-level child, a dispatched review lane, an
+# implementation branch/PR anchor).
 cat > "$FXDIR/scan.json" <<'JSON'
 [
   {"id":"px-lo","title":"low-priority movable","description":"has a body","priority":4,"created_at":"2026-01-01T00:00:00Z","issue_type":"task"},
   {"id":"px-hi","title":"high-priority movable","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"bug"},
   {"id":"px-spec","title":"disallowed type (spec is an output, not an input)","description":"an output artifact","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"spec"},
   {"id":"px-wf","title":"topology root wearing issue_type task","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"task","metadata":{"gc.kind":"workflow"}},
-  {"id":"px-fb","title":"feedback-pattern distiller machinery","description":"a learned pattern","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"task","metadata":{"task_kind":"feedback-pattern"}},
   {"id":"px-ruled","title":"a sitting already ruled this","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"task","metadata":{"gc.takeaway":"ruled: do X"}},
   {"id":"px-child","title":"a parent-child CHILD (work-in-flight, not top-level)","description":"has a body","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"task","dependencies":[{"dependency_type":"parent-child","issue_id":"px-child","depends_on_id":"px-parent"}]},
   {"id":"px-review","title":"a dispatched review bead (work-in-flight, not input)","description":"VERDICT pending on a branch","priority":0,"created_at":"2026-05-01T00:00:00Z","issue_type":"task","metadata":{"task_kind":"review","check_name":"codex","anchor_bead":"px-anchor"}},
@@ -451,7 +450,6 @@ has    "keeps an allowlisted task"                       "px-lo"    "$SCAN_IDS"
 has    "keeps an allowlisted bug"                        "px-hi"    "$SCAN_IDS"
 absent "drops a disallowed type (spec, an output)"       "px-spec"  "$SCAN_IDS"
 absent "drops a topology root wearing issue_type task"   "px-wf"    "$SCAN_IDS"
-absent "drops feedback-pattern distiller machinery"      "px-fb"    "$SCAN_IDS"
 absent "drops a bead a sitting already ruled (takeaway)" "px-ruled" "$SCAN_IDS"
 absent "drops a non-top-level parent-child child"        "px-child" "$SCAN_IDS"
 # The two work-in-flight populations the scan must never sling a fresh reaction

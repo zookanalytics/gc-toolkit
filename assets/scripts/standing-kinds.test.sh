@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Hermetic test for assets/scripts/standing-kinds.sh, the one definition of the
 # standing kinds. Covers:
-#   (DEF)     the list is non-empty, unique, and names both kinds the pack writes
-#             as standing records today
+#   (DEF)     the list is non-empty, unique, and names the kind the pack writes
+#             as a standing record today
 #   (PRED)    is_standing_kind is true for every listed kind and false for an
 #             empty, absent, near-miss or ordinary task_kind
 #   (READERS) every reader of the standing kinds sources this file and applies
@@ -40,10 +40,8 @@ eq "$(printf '%s' "$KINDS_JSON" | jq -r 'type == "array" and length > 0 and all(
    "true" "(DEF) standing_kinds is a non-empty list of non-empty strings"
 eq "$(printf '%s' "$KINDS_JSON" | jq -r 'length == (unique | length)' 2>/dev/null)" \
    "true" "(DEF) standing_kinds names each kind once"
-for k in triage-subject feedback-pattern; do
-    eq "$(printf '%s' "$KINDS_JSON" | jq -r --arg k "$k" 'index($k) != null' 2>/dev/null)" \
-       "true" "(DEF) standing_kinds names $k"
-done
+eq "$(printf '%s' "$KINDS_JSON" | jq -r 'index("triage-subject") != null' 2>/dev/null)" \
+   "true" "(DEF) standing_kinds names triage-subject"
 
 echo "# the predicate"
 for k in $(printf '%s' "$KINDS_JSON" | jq -r '.[]'); do
@@ -76,8 +74,9 @@ for r in $READERS; do
 done
 
 echo "# no private copies"
-# A copy is a jq def of the list, or both kinds named side by side in one list
-# literal. Specs and generated renders are history and output, not readers.
+# A copy is a jq def of the list, or a list literal naming triage-subject beside
+# feedback-pattern. Specs and generated renders are history and output, not
+# readers.
 COPY_RE='def standing_kinds|"triage-subject"[[:space:]]*,[[:space:]]*"feedback-pattern"|"feedback-pattern"[[:space:]]*,[[:space:]]*"triage-subject"'
 COPIES=""
 for d in agents assets doctor formulas lifecycle orders overlays packs services skills template-fragments tools; do

@@ -21,6 +21,12 @@ an exemplar pair.
 The carrier decides the target file, the budget, and which gates apply; the
 rubric holds the selection rule.
 
+Each cluster of observations lives on a pattern bead
+(`task_kind=feedback-pattern`), which is backlog work this formula triages.
+Every run leaves each pattern decided: closed once resolved, waiting on the
+follow-up it spawned, or deferred with a date while it gathers evidence. A
+closed pattern reopens when its feedback recurs.
+
 Read-only plus bead-filing: this formula never edits a fragment, prompt, or
 skill — only an operator-merged PR changes agent behavior.
 
@@ -42,12 +48,13 @@ Variables:
   {{exemplar_cap}}: Entry budget for the exemplar corpus, template-fragments/learning-exemplars.template.md (carrier: exemplar). Read per review rather than per turn, so the cap is larger per unit of cost and still bounded. (default=8)
   {{fragment_bullet_cap}}: Bullet budget per learned-conventions fragment. A promotion past the cap must name a displacement in the same proposal or it does not file. (default=15)
   {{max_beads_per_run}}: Maximum prompt-update/engineering beads filed per run; dropped survivors re-surface next cycle (state is durable, so this is naturally resumable). (default=3)
+  {{pattern_defer_days}}: How long a held pattern waits for the recurrence it is held for: judge-and-cluster §7 defers it for this many days, and a pattern whose deferral ends with no new evidence is dismissed. It sets when a pattern is looked at again, not what its evidence earns: the rubric judges that. (default=90)
   {{profile_entry_cap}}: Entry budget for the operator profile (carrier: profile). Same displacement rule as fragment_bullet_cap. (default=12)
   {{rig_list}}: Space-separated rig names whose stores hold observations (D5). Empty = runtime enumeration; if that fails, the run aborts fail-safe — never judge on a partial observation set. (default=)
   {{work_quality_entry_cap}}: Entry budget per work-quality fragment — the shared base or any one per-class fragment (carrier: work-quality). Same displacement rule as fragment_bullet_cap. (default=12)
 
 Steps (4):
   ├── mol-feedback-distiller.load-and-gate: Prime, home-rig gate, read pending observations cross-rig, apply the D7 cadence gate
-  ├── mol-feedback-distiller.judge-and-cluster: Judge the pending set with the learning-distill rubric; cluster onto pattern beads; run the retirement pass [needs: mol-feedback-distiller.load-and-gate]
+  ├── mol-feedback-distiller.judge-and-cluster: Judge the pending set with the learning-distill rubric; cluster onto pattern beads; run the retirement pass; leave every pattern decided [needs: mol-feedback-distiller.load-and-gate]
   ├── mol-feedback-distiller.file-and-dispatch: File one prompt-update bead per proposal, stamp consumed observations, gate contested rules, drain [needs: mol-feedback-distiller.judge-and-cluster]
   └── mol-feedback-distiller.workflow-finalize: Finalize workflow [needs: mol-feedback-distiller.file-and-dispatch]

@@ -568,7 +568,7 @@ shares only the word ([authority-map.md](authority-map.md)).
   nudges each open dependent's assignee or routed pool with `gc session nudge`.
   It slings nothing, and no core order or script calls `gc sling`
   (`internal/bootstrap/packs/core/assets/scripts/cascade-nudge-on-blocker-close.sh`).
-- **Verified.** 2026-11-09, at `gastownhall/gascity` main e35c1602d936.
+- **Verified.** 2026-11-12, at `gastownhall/gascity` main 6bd609f5bfb4.
 - **Retires when.** Gas City or bd pours a formula on a bead once its blockers
   close.
 
@@ -594,3 +594,34 @@ shares only the word ([authority-map.md](authority-map.md)).
 - **Retires when.** Gas City wakes a session parked on a provider's limit once
   the limit resets, or every provider the city runs resumes such a session by
   itself.
+
+## Feedback patterns
+
+- **Covers.** The `feedback-pattern` name, the `evidence_count`,
+  `distinct_sources`, `first_seen`, `last_seen`, `promotion_hold`,
+  `proposal_bead`, `proposal_carrier`, `proposal_action` and `remedy_note`
+  keys, in the `[metadata.learning]` table of `lifecycle/lifecycle.toml`. Their
+  writer: `formulas/mol-feedback-distiller.toml`. The pattern's lifecycle is in
+  [feedback-learning.md](feedback-learning.md).
+- **Stands in for.** A kind for knowledge a loop keeps current: a record that
+  gathers evidence over time, names the beads it was derived from, and stays
+  out of the work queues.
+- **Evidence.**
+  - In `gastownhall/beads`, every status is a work state (`AllStatuses` in
+    `internal/types/types.go`), and no kind is kept for knowledge. The Memory
+    Beads proposal (issue #5877) would add one: a Memory Bead that never
+    becomes ready, blocked or closed, with a derived-from field listing the
+    beads it was written from. It is open, and no memory type is in
+    `internal/types/types.go`.
+  - In `gastownhall/gascity`, the ready view leaves out a fixed list of types
+    and labels, and a pack can add to neither (`readyExcludeTypes` and
+    `HasReadyExcludedLabel` in `internal/beads/beads.go`).
+  - So a pattern is a task the distiller triages, and its lifecycle composes
+    bd's own work states: the `deferred` status with a date (`bd defer
+    --until`), a `blocks` edge onto its follow-up, `bd close`, and `bd reopen`.
+    The search is
+    [specs/tk-ltcv43q/gas-city-search.md](../specs/tk-ltcv43q/gas-city-search.md).
+- **Verified.** 2026-11-12, at `gastownhall/beads` v1.3.4 (7ef2fd05eb0c) and
+  main 125c62063406, and `gastownhall/gascity` main 6bd609f5bfb4.
+- **Retires when.** bd ships a knowledge kind, such as the proposal's Memory
+  Bead with its derived-from field, and Gas City's ready view leaves it out.

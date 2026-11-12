@@ -109,15 +109,18 @@ same pool/scope/vapor shape). Mirroring `mol-doc-keeper-memory-audit` step for
 step:
 
 1. **load-context** — prime; list closed `task_kind=observation` beads in the
-   evidence window (180 days); list open `task_kind=feedback-pattern` beads
-   (below); missing/empty inputs are a clean no-op with the step bead closed
-   `gc.outcome=pass` before `gc runtime drain-ack`.
+   evidence window (180 days); list `task_kind=feedback-pattern` beads at every
+   status (below); missing/empty inputs are a clean no-op with the step bead
+   closed `gc.outcome=pass` before `gc runtime drain-ack`.
 2. **cluster-and-score** — a reading task, not a bucketing script (the
    memory-audit's "the `## Scope` is the classifier" stance). Group
    observations by category + scope + semantic similarity. Each cluster is
-   owned by one standing **pattern bead** (`task_kind=feedback-pattern`, open,
-   unrouted — the `triage-subject` idiom: a standing record, not claimable
-   work). The distiller recomputes and caches evidence on it (§5).
+   owned by one **pattern bead** (`task_kind=feedback-pattern`, unrouted), which
+   is backlog work the distiller triages, the way a bug is: open while it needs
+   a decision, waiting on the follow-up it spawned, deferred while it gathers
+   evidence, closed once resolved, and reopened when its feedback recurs. Every
+   run leaves each pattern in one of those states. The distiller recomputes and
+   caches evidence on it (§5), whatever its status.
 3. **promote / demote / dedup** — apply the criteria below; dedup against
    in-flight `prompt-update` beads *and the open PRs of closed ones* (the
    refinery closes on PR-open under `merge_strategy=mr` — the exact dedup
@@ -211,9 +214,11 @@ not accumulated.**
 ## 6. Honest weaknesses, and build size
 
 - **Two systems to keep coherent.** Fragment rules vs. pattern beads can
-  drift (a rule hand-deleted; a pattern bead closed with prose still live).
+  drift (a rule hand-deleted while its pattern reads adopted; a marker naming
+  a bead that is no pattern).
   Mitigation: a `doctor/check-learned-rule-anchors/` check asserting every
-  `<!-- rule:tk-... -->` marker has a live pattern bead and vice versa.
+  `<!-- rule:tk-... -->` marker names a pattern bead that exists, and every
+  pattern closed as an adopted rule has its marker.
 - **The distiller is the crux.** Clustering and "is this the same feedback?"
   are LLM judgment, like the memory audit's gates. Failure is bounded on both
   sides: over-promotion hits `max_beads_per_run` and then a human PR review;

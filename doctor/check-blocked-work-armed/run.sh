@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # doctor/check-blocked-work-armed — blocked work carries a dispatch path. A
 # LIVE, unassigned bead that is plainly work (not a review, step or workflow-
-# topology bead, not a standing record, and not a merge anchor) and
+# topology bead, not a standing record or a feedback pattern, and not a merge
+# anchor) and
 # is held out of `bd ready` by an open `blocks` edge must ALSO carry a way to be
 # dispatched once that edge clears: either `gc.routed_to` (a pool queue
 # consumes it, and bd's readiness gates the offer until the blocker closes) or
@@ -37,6 +38,15 @@
 # it sits behind owes it no dispatch path, and arming one would sling a
 # held-by-design record to a pool the moment its blocker closed. It is exempt on
 # its task_kind, read from that shared definition.
+#
+# So is a feedback pattern (task_kind=feedback-pattern), backlog work the
+# feedback distiller triages. It waits on the follow-up it spawned, or on the
+# human gate a contested rule files, through a blocks edge, and the distiller
+# decides it once that wait clears: every run lists the patterns `bd ready`
+# returns and leaves each closed, deferred or waiting again
+# (formulas/mol-feedback-distiller.toml). The distiller is its dispatch path, so
+# it owes no arm, and the arm remedy would sling it to a pool with no formula
+# for it.
 #
 # So is a held bead (has_dispatch_hold, assets/scripts/dispatch-path.sh): it
 # carries one of Gas City's hold labels, which say its next actor is not a
@@ -222,10 +232,10 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         continue
     }
     # The predicate, entirely on the listing's own fields: plainly work
-    # (unassigned; not review/standing/step/workflow-topology; not a merge
-    # anchor; an allowlisted work issue_type, which a gate is not), carrying no
-    # dispatch path (has_dispatch_path: no route and no arm), AND not held
-    # (has_dispatch_hold: no hold label).
+    # (unassigned; not review/standing/feedback-pattern/step/workflow-topology;
+    # not a merge anchor; an allowlisted work issue_type, which a gate is not),
+    # carrying no dispatch path (has_dispatch_path: no route and no arm), AND
+    # not held (has_dispatch_hold: no hold label).
     cand=$(printf '%s' "$raw" | jq -r --arg allow "$WORK_TYPES" "$STANDING_KINDS_JQ$DISPATCH_PATH_JQ"'
         .[]? | . as $b
         | ((($b.id // "?") | tostring) | gsub("[[:cntrl:]]"; " ")) as $id
@@ -233,6 +243,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         | select(($b.assignee // "") == "")
         | select(($m["task_kind"] // "") != "review")
         | select(($b | is_standing_kind) | not)
+        | select(($m["task_kind"] // "") != "feedback-pattern")
         | select(($m["gc.step_ref"] // "") == "")
         | select(($m["gc.kind"] // "") == "")
         | select(($m["merge_result"] // "") == "")
