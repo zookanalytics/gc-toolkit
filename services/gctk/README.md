@@ -133,6 +133,9 @@ internal/cli/        the command tree, each command with its help, flags and exi
 internal/lifecycle/  the lifecycle state machine, which lifecycle/lifecycle.toml declares
 internal/ledger/     typed bead records: each key's declaration, one write per act
                      whose exit decides, snapshots, and a pass that reads each bead once
+internal/host/       the host adapter: the processes gctk starts and signals, the process
+                     table, and the loopback ports and their listeners
+internal/host/fake/  the host adapter's in-memory fake, for the domains' tests
 internal/gcbd/       the store adapter: bead reads and writes through `gc bd` and the
                      supervisor API, the store's listing, and its blocked set
 internal/gcbd/fake/  the store adapter's in-memory fake, for the domains' tests

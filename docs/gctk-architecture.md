@@ -409,7 +409,7 @@ and CI runs those tests on every PR.
 | git | git | one `git` command per call, in a named directory | a scratch repository |
 | github | GitHub | `gh` and the GitHub API | recorded responses |
 | runtime | Gas City | `gc` (sling, session, events, runtime) and the supervisor API (runs, sessions) | recorded responses |
-| host | the machine | tmux, files and the clock | in-memory files, a fixed clock and scripted panes |
+| host | the machine | `os/exec` and kill(2) for the processes it starts and signals, `ps` for the process table, `lsof` for a port's listeners, a dial for whether a loopback port answers, and `demo-engine-lib.sh` for a start inside the sandbox a demo capture runs in | a machine in memory whose processes are goroutines running the programs a test names, with process groups, signals and loopback ports, on the fake clock of a `testing/synctest` bubble |
 
 The store's rules are the store's own. The store adapter asks the store whether
 a bead is blocked or ready and returns its answer, and computes none itself.
@@ -478,6 +478,13 @@ whether the stub listing names it or not. Its acceptance test runs the bd the
 city runs against a scratch store, so it pins the answer that bd gives for each
 kind of wait, each gate included, and the beads it marks blocked. The domains'
 tests run on the fake.
+
+The host adapter's own tests start real processes, so they pin what its fake
+stands in for: a group that ends whole, a start that leads a session of its own
+with its caller's environment, a port's listeners as `lsof` reads them, and a
+start inside the capture's sandbox. A domain's tests run on its fake inside a
+`testing/synctest` bubble, so a wait or a grace a rule sets passes on the
+bubble's clock, and no rule's test needs a tool on the machine.
 
 ## Compositions
 
@@ -612,14 +619,15 @@ why a reader must know it, and the work that retires it.
   counts as its human gates the ones whose rows name it and the ones among its
   blockers that are not closed. The board member (tk-1tfzr71.24) retires that
   read or writes the warrant it stands on.
-- **`epic create`, `session title` and `rig` start processes outside an
-  adapter.** `epic create` files the epic with its own `gc bd create`,
+- **`epic create`, `session title` and `rig`'s checks start processes outside
+  an adapter.** `epic create` files the epic with its own `gc bd create`,
   `session title` runs `gc session rename` and `gc session submit`, and the
   rig domain runs a check's command itself.
   `epic create` and `session title` also read beads through the store adapter,
-  around the ledger. No runtime or host adapter exists, so their tests stub
-  `gc` on `PATH` or run real processes, and none of them is the model for a
-  new verb. tk-ssm8qns.16 puts them behind the ledger and the adapters.
+  around the ledger. No runtime adapter exists, and the host adapter holds only
+  what a copy of a rig's UI needs, so their tests stub `gc` on `PATH` or run
+  real processes, and none of them is the model for a new verb. tk-ssm8qns.16
+  puts them behind the ledger and the adapters.
 - **`lifecycle` and `merge` reach git, GitHub, the store and the pack's
   scripts themselves.** They retire whole with tk-1tfzr71.20
   ([the register](#the-re-implementation-register)), so they get no layering
