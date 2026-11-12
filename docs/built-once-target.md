@@ -71,7 +71,7 @@ assumptions:
 |---|---|---|---|
 | work | one formula extending core's polecat base | 7.1k / 12.7k | 2.5k / 2.5k |
 | review | the declared checks as lanes of one check loop | 11.4k / 11.1k | 4.0k / 2.0k |
-| merge | Gas Town's refinery flow under GitHub's branch rules | 16.5k / 27.2k | 2.0k / 2.0k |
+| merge | the pack's own refinery on Gas Town's flow and record, with the pack's approval contract | 16.5k / 27.2k | 2.0k / 2.0k |
 | human engagement | native human gates and conversation tasks | 13.9k / 21.3k | 5.5k / 4.0k |
 | board | a ranked render of platform objects | 17.5k / 21.0k | 5.0k / 5.0k |
 | patrol | Gas City's orders, plus the patrols' judgment | 9.8k / 16.1k | 2.5k / 2.0k |
@@ -115,16 +115,29 @@ in the loop. A person's finding on a PR stays a record the operator rules on.
 
 ### Merge
 
-Gas Town's refinery flow lands a branch, directly or through a PR whose
-approval and required checks GitHub's branch rules enforce. The pack adds the
-PR's managed summary and title, and the step that takes a GitHub event to the
-bead that owns it.
+The pack's own refinery lands a branch directly or publishes it as a PR, and
+Gas Town's pending-through-merge record keeps the work's bead open until the
+merge is verified on the target. The pack adds one approval contract for every PR the
+city opens, on any target, in one evaluator of the PR's readiness that the
+board and the merge read, a merge request pinned to the head the evaluator
+judged, the PR's managed summary and title, and the step that takes a GitHub
+event to the bead that owns it.
 
-The trade: the pack's own approval rule, the merge cadence's arms with their
-lock, cursors and crash detection, and the rework and branch-currency machinery
-give way to GitHub's rules and the refinery's rebase-or-requeue. An approval
-nuance GitHub cannot express keeps a residual under a warrant. Moving the
-policy onto GitHub is the operator's ruling at tk-1tfzr71.20's design.
+The trade: the pack's transition machine, its second copy of the approval
+rule, the merge cadence's arms with their lock, cursors and crash detection,
+and the rework and branch-currency machinery give way to Gas Town's record,
+the bring-current-or-requeue of the pack's refinery, which merges the target in
+where Gas Town's rebases, and one landing order. The approval behavior stays the
+pack's, because no rule of GitHub's covers an integration branch, and the
+operator ruled at tk-1tfzr71.20's design that the city requires an approval on
+every target.
+
+The refinery is modeled step for step on Gas Town's refinery, which is its
+target. The pack keeps a refinery of its own because the city imports no
+gastown pack and no gastown release carries the pending-through-merge record
+yet. Each difference from Gas Town's refinery, with its reason and what ends
+it, is in tk-1tfzr71.20's design under
+[What the pack keeps of its own](../specs/tk-1tfzr71.66/design.md#what-the-pack-keeps-of-its-own).
 
 ### Human engagement
 
