@@ -1,13 +1,17 @@
 // Package form is the terminal conversation form: the screen `gc-helm.sh
-// engage` and `gc-helm.sh attach` hand a terminal to. One screen holds the
+// engage`, which a bare `gc-helm.sh` runs, and `gc-helm.sh attach` hand a
+// terminal to. Its pages are tabs at its top. Starting a conversation holds the
 // subject, which names a bead, a PR or a new topic's rig, a multiline question,
 // the model and whether to attach, while the subject's details, its open
 // conversations and the city's rigs load in the background. Submitting saves
 // the question as a conversation and starts its sitting, reporting each of the
 // two as it lands, and once the sitting has started attaches to it, or with
 // attaching off leaves it to prepare. In a suspended rig it saves the question
-// and starts nothing. The return list shows the open conversations by topic
-// and readiness and attaches to the one picked.
+// and starts nothing. The return list shows the open conversations by topic and
+// readiness and attaches to the one picked. The People page lists the seats the
+// operator sits with, mechanik and each rig's po, with the state of each one's
+// session, and opens the one picked by its own verb once the form has left the
+// terminal.
 //
 // The form writes nothing itself. Every read and write is a gc-helm.sh verb
 // ([Script]), so what the form shows and files is what the command line shows
@@ -98,7 +102,8 @@ type Conversation struct {
 // Attached says whether a terminal is attached to the conversation's sitting.
 func (c Conversation) Attached() bool { return c.Session != nil && c.Session.Attached }
 
-// Session is the live sitting's session.
+// Session is a live sitting's session, or a seat's, with its state as Gas
+// City's session list gives it.
 type Session struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
@@ -117,12 +122,26 @@ const (
 )
 
 // City is `gc-helm.sh conversations --json`: every open conversation in the
-// city's stores, the rigs a new topic can be filed in, and the rigs whose store
-// could not be read, because it did not answer or its ledger is not there.
+// city's stores, the rigs a new topic can be filed in, the seats the operator
+// sits with, whether the city's agent roster, which names the seats' sessions,
+// could not be read, so that no seat is listed, and the rigs whose store could
+// not be read, because it did not answer or its ledger is not there.
 type City struct {
 	Conversations []Conversation `json:"conversations"`
 	Rigs          []Rig          `json:"rigs"`
+	Seats         []Seat         `json:"seats"`
+	RosterUnread  bool           `json:"roster_unread"`
 	Unread        []string       `json:"unread"`
+}
+
+// Seat is a seat the operator sits with: mechanik, of which the city has one,
+// or a rig's po, in the order `conversations` lists them. Session is the open
+// session Gas City's session list holds under the name the seat's verb
+// attaches to, and nil when it holds none, as for a po that has never run.
+type Seat struct {
+	Name    string   `json:"seat"` // which seat, as its verb names it: po or mechanik
+	Rig     string   `json:"rig"`  // a po's rig, by its name; empty for mechanik
+	Session *Session `json:"session"`
 }
 
 // Rig is a rig a new topic could be filed in, which the subject names by its
@@ -174,6 +193,9 @@ type Helm interface {
 	// conversation's sitting, holding it in a new sitting first when it has
 	// none: on model, or on engage's default when model is empty.
 	AttachCommand(conversation, model string) *exec.Cmd
+	// SeatCommand is the command that attaches the terminal to a seat's
+	// session: the po of rig, or mechanik, whose rig is empty.
+	SeatCommand(seat, rig string) *exec.Cmd
 }
 
 // Script runs gc-helm.sh at Path.
@@ -269,8 +291,8 @@ func (s Script) About(ctx context.Context, ref, from string) (About, error) {
 	return a, nil
 }
 
-// City runs `conversations --json`. A store that could not be read exits 4
-// after the list, which is still the list.
+// City runs `conversations --json`. A store or the agent roster that could not
+// be read exits 4 after the list, which is still the list.
 func (s Script) City(ctx context.Context) (City, error) {
 	var c City
 	out, err := s.run(ctx, "conversations", "--json")
@@ -349,6 +371,18 @@ func (s Script) AttachCommand(conversation, model string) *exec.Cmd {
 	args := []string{s.Path, "engage", conversation, "--no-input"}
 	if model != "" {
 		args = append(args, "--model", model)
+	}
+	return exec.Command("sh", args...)
+}
+
+// SeatCommand is the seat's verb: `po --rig <rig>` for a rig's po, and
+// `mechanik`. Each is Gas City's attach on the seat's session, which asks the
+// city's controller to start a seat that is not running and waits for it to
+// run before it attaches.
+func (s Script) SeatCommand(seat, rig string) *exec.Cmd {
+	args := []string{s.Path, seat}
+	if rig != "" {
+		args = append(args, "--rig", rig)
 	}
 	return exec.Command("sh", args...)
 }

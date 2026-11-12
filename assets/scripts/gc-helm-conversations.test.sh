@@ -15,6 +15,21 @@
 #                 task that is not a conversation is left out; the rigs a new
 #                 topic can be filed in, each with its prefix, whether it
 #                 carries converse and whether it is suspended
+#   (CITY-SEATS)  the seats the form's People page lists: mechanik, then the po
+#                 of each rig a new topic can go to, each with the open session
+#                 the session list holds under the name the agent roster gives
+#                 its session, or null, read from the one session list the
+#                 conversations were read from and the one roster the rigs'
+#                 converse was read from
+#   (CITY-SEATS-KIT) under a city that imports the pack as kit, each seat's
+#                 session is the one under kit's name, and a session under
+#                 gc-toolkit's name is no seat's
+#   (CITY-SEATS-NAME) a seat whose template the roster names no agent for in
+#                 its rig, or two, is left out
+#   (CITY-SEATS-ROSTER) a roster that cannot be read lists no seat, says so in
+#                 roster_unread and exits 4, and lists the conversations and
+#                 the unread stores as a roster that reads does, and the rigs,
+#                 and the list without --json, which shows no seat, still lists
 #   (CITY-ENDED)  a bound conversation whose sitting ended before it claimed it
 #                 is found by its own row and reads ended, as conversations
 #                 <subject> reads it
@@ -147,12 +162,22 @@ seed() {
     {name:"gascity", path:$r2, prefix:"gc", suspended:true},
     {name:"docs", path:$r3, prefix:"dx", suspended:false},
     {name:"hq", path:$h, prefix:"hq", hq:true, running:true}]}' > "$STATE/rigs.json"
-  jq -n '{agents:[{qualified_name:"gc-toolkit/gc-toolkit.converse-claude-opus"},{qualified_name:"gascity/gc-toolkit.converse-claude-opus"}]}' > "$STATE/agents.json"
+  jq -n '{agents:[
+    {name:"converse-claude-opus", dir:"gc-toolkit", qualified_name:"gc-toolkit/gc-toolkit.converse-claude-opus"},
+    {name:"converse-claude-opus", dir:"gascity", qualified_name:"gascity/gc-toolkit.converse-claude-opus"},
+    {name:"mechanik", qualified_name:"gc-toolkit.mechanik", scope:"city"},
+    {name:"po", dir:"gc-toolkit", qualified_name:"gc-toolkit/gc-toolkit.po", scope:"rig"},
+    {name:"po", dir:"gascity", qualified_name:"gascity/gc-toolkit.po", scope:"rig"},
+    {name:"po", dir:"docs", qualified_name:"docs/gc-toolkit.po", scope:"rig"}]}' > "$STATE/agents.json"
   jq -n '{sessions:[
     {id:"s1", alias:"gc-toolkit/gc-toolkit.tk-ready", session_name:"s-s1", state:"active", attached:false, created_at:"2026-11-08T10:00:00Z", template:"gc-toolkit/gc-toolkit.converse-claude-opus"},
     {id:"s2", alias:"gc-toolkit/gc-toolkit.tk-prep", session_name:"s-s2", state:"active", attached:true, created_at:"2026-11-08T11:00:00Z", template:"gc-toolkit/gc-toolkit.converse-claude-opus"},
     {id:"s3", alias:"gc-toolkit/gc-toolkit.tk-bound", session_name:"s-s3", state:"start-pending", attached:false, created_at:"2026-11-08T12:00:00Z", template:"gc-toolkit/gc-toolkit.converse-claude-opus"},
-    {id:"s4", alias:"gc-toolkit/gc-toolkit.polecat-1", session_name:"s-s4", state:"active", attached:false, created_at:"2026-11-08T09:00:00Z", template:"gc-toolkit/gc-toolkit.polecat"}]}' > "$STATE/sessions.json"
+    {id:"s4", alias:"gc-toolkit/gc-toolkit.polecat-1", session_name:"s-s4", state:"active", attached:false, created_at:"2026-11-08T09:00:00Z", template:"gc-toolkit/gc-toolkit.polecat"},
+    {id:"s5", alias:"gc-toolkit.mechanik", session_name:"gc-toolkit__mechanik", state:"active", attached:true, created_at:"2026-08-31T04:11:47Z", template:"gc-toolkit.mechanik"},
+    {id:"s6", alias:"gascity/gc-toolkit.po", session_name:"gascity--gc-toolkit__po", state:"asleep", attached:false, created_at:"2026-11-08T08:00:00Z", template:"gascity/gc-toolkit.po"},
+    {id:"s7", alias:"docs/gc-toolkit.po", session_name:"docs--gc-toolkit__po", state:"closed", attached:false, created_at:"2026-11-07T08:00:00Z", template:"docs/gc-toolkit.po"},
+    {id:"s8", alias:"gc-toolkit/gc-toolkit.po", session_name:"gc-toolkit--gc-toolkit__po", state:"asleep", closed:true, attached:false, created_at:"2026-11-07T09:00:00Z", template:"gc-toolkit/gc-toolkit.po"}]}' > "$STATE/sessions.json"
   jq -n '[
     {id:"tk-subj", issue_type:"task", status:"open", title:"the subject"},
     {id:"tk-shut", issue_type:"task", status:"closed", title:"a closed subject"},
@@ -195,6 +220,48 @@ eq "$(row tk-shutconv)" "" "(CITY) a closed conversation is not listed"
 eq "$(printf '%s' "$OUT" | jq -c '[.rigs[] | [.name, .converse, .suspended]]')" '[["gc-toolkit",true,false],["gascity",true,true],["docs",false,false]]' "(CITY) the rigs a new topic can go to, but the city's own store, with converse and suspension"
 eq "$(printf '%s' "$OUT" | jq -c '[.rigs[] | .prefix]')" '["tk","gc","dx"]' "(CITY) …each with its prefix, so the form can match one typed by it"
 eq "$(printf '%s' "$OUT" | jq -c '.unread')" '[]' "(CITY) …and no store unread"
+eq "$(printf '%s' "$OUT" | jq -c '[.seats[] | [.seat, .rig, (.session | if . == null then null else [.id, .state, .attached] end)]]')" \
+  '[["mechanik","",["s5","active",true]],["po","gc-toolkit",null],["po","gascity",["s6","asleep",false]],["po","docs",null]]' \
+  "(CITY-SEATS) mechanik, then each rig's po but the city's own store's, each with its open session or none, a closed one by its flag or its state counting as none"
+eq "$(printf '%s' "$OUT" | jq -c '.seats[0].session | {name, created_at}')" '{"name":"gc-toolkit__mechanik","created_at":"2026-08-31T04:11:47Z"}' "(CITY-SEATS) …a session with its name and when it was created"
+eq "$(grep -c '^session list' "$CALLS")" 1 "(CITY-SEATS) …from the one session list the conversations were read from"
+eq "$(grep -c '^agent list' "$CALLS")" 1 "(CITY-SEATS) …and their names from the one agent roster the rigs' converse was read from"
+eq "$(printf '%s' "$OUT" | jq -c '.roster_unread')" false "(CITY-SEATS) …which read"
+
+echo "# a city that imports the pack under another name lists the same seats, under the names it gives them"
+seed
+jq '.agents |= map(.qualified_name |= sub("gc-toolkit\\.(?<t>mechanik|po)$"; "kit.\(.t)"))' "$STATE/agents.json" > "$STATE/tmp.json" && mv "$STATE/tmp.json" "$STATE/agents.json"
+jq '.sessions |= map(if .id == "s5" or .id == "s6" then .alias |= sub("gc-toolkit\\."; "kit.") else . end)
+    | .sessions += [{id:"s9", alias:"docs/gc-toolkit.po", session_name:"docs--gc-toolkit__po", state:"active", attached:false, created_at:"2026-11-09T08:00:00Z", template:"docs/gc-toolkit.po"}]' \
+  "$STATE/sessions.json" > "$STATE/tmp.json" && mv "$STATE/tmp.json" "$STATE/sessions.json"
+run conversations --json
+eq "$RC" 0 "(CITY-SEATS-KIT) the list exits 0 under a city that imports the pack as kit"
+eq "$(printf '%s' "$OUT" | jq -c '[.seats[] | [.seat, .rig, (.session | if . == null then null else [.id, .state, .attached] end)]]')" \
+  '[["mechanik","",["s5","active",true]],["po","gc-toolkit",null],["po","gascity",["s6","asleep",false]],["po","docs",null]]' \
+  "(CITY-SEATS-KIT) …each seat with its session under kit's name, docs' open session under gc-toolkit's name being no seat's"
+
+echo "# a seat the roster gives no one name is left out"
+seed
+jq '.agents |= (map(select(.name != "mechanik" and .dir != "docs")) + [{name:"po", dir:"gascity", qualified_name:"gascity/kit.po", scope:"rig"}])' "$STATE/agents.json" > "$STATE/tmp.json" && mv "$STATE/tmp.json" "$STATE/agents.json"
+run conversations --json
+eq "$RC" 0 "(CITY-SEATS-NAME) the list exits 0"
+eq "$(printf '%s' "$OUT" | jq -c '[.seats[] | [.seat, .rig]]')" '[["po","gc-toolkit"]]' \
+  "(CITY-SEATS-NAME) mechanik and docs' po, which the roster names no agent for, and gascity's po, which it names two for, are left out"
+
+echo "# a roster that cannot be read lists no seat, and the rest as it otherwise would"
+seed; run conversations --json; READ_OUT="$OUT"
+printf 'gc: warming up\n' > "$STATE/agents.json"
+run conversations --json
+eq "$RC" 4 "(CITY-SEATS-ROSTER) a roster that cannot be read exits 4"
+has "$ERR" "could not read 'gc agent list', which gives each seat's session its name, so no seat is listed." "(CITY-SEATS-ROSTER) …saying so"
+eq "$(printf '%s' "$OUT" | jq -c '[.seats, .roster_unread]')" '[[],true]' "(CITY-SEATS-ROSTER) …listing no seat, and saying the roster did not read"
+eq "$(printf '%s' "$OUT" | jq -c '[.conversations, .unread]')" "$(printf '%s' "$READ_OUT" | jq -c '[.conversations, .unread]')" \
+  "(CITY-SEATS-ROSTER) …and listing the conversations and the unread stores as a roster that reads lists them"
+eq "$(field tk-ready .readiness)" "ready" "(CITY-SEATS-ROSTER) …a hand-back since its session started still reading ready"
+eq "$(printf '%s' "$OUT" | jq -c '[.rigs[] | [.name, .prefix, .suspended]]')" '[["gc-toolkit","tk",false],["gascity","gc",true],["docs","dx",false]]' \
+  "(CITY-SEATS-ROSTER) …and the rigs a new topic can go to"
+run conversations
+eq "$RC" 0 "(CITY-SEATS-ROSTER) the list without --json, which shows no seat, still lists"
 
 echo "# a bound conversation whose sitting ended before it claimed it is still listed"
 seed; jq '.sessions |= map(select(.id != "s3"))' "$STATE/sessions.json" > "$STATE/tmp.json" && mv "$STATE/tmp.json" "$STATE/sessions.json"
