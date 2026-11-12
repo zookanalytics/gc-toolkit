@@ -55,19 +55,27 @@ func gh(args ...string) ([]byte, error) {
 	return out, nil
 }
 
-// PullRequest is a PR as GitHub reports it. State is OPEN, CLOSED or MERGED.
-// MergeStateStatus is GitHub's merge state, such as CLEAN, BLOCKED or DIRTY.
-// Repository is the base repository, owner/name.
+// PullRequest is a PR as GitHub reports it. ID is its node id, which a merge
+// request names it by. State is OPEN, CLOSED or MERGED. MergeStateStatus is
+// GitHub's merge state, such as CLEAN, BLOCKED or DIRTY. Repository is the base
+// repository, owner/name. MergedAt and MergeCommit are set once it merged.
+// InMergeQueue is whether it is in a merge queue, and MergeQueueEnabled whether
+// its base requires one (isMergeQueueEnabled).
 type PullRequest struct {
-	Number           int
-	URL              string
-	State            string
-	IsDraft          bool
-	HeadRefName      string
-	HeadRefOid       string
-	BaseRefName      string
-	MergeStateStatus string
-	Repository       string
+	ID                string
+	Number            int
+	URL               string
+	State             string
+	IsDraft           bool
+	HeadRefName       string
+	HeadRefOid        string
+	BaseRefName       string
+	MergeStateStatus  string
+	Repository        string
+	MergedAt          string
+	MergeCommit       string
+	InMergeQueue      bool
+	MergeQueueEnabled bool
 }
 
 // Review is one review of a PR. State is APPROVED, CHANGES_REQUESTED,
@@ -140,8 +148,18 @@ type IssueComment struct {
 const (
 	pullQuery = `query($owner:String!,$name:String!,$number:Int!){
   repository(owner:$owner,name:$name){pullRequest(number:$number){
-    number url state isDraft headRefName headRefOid baseRefName mergeStateStatus
-    repository{nameWithOwner}}}}`
+    id number url state isDraft headRefName headRefOid baseRefName mergeStateStatus
+    repository{nameWithOwner} mergedAt mergeCommit{oid} isInMergeQueue isMergeQueueEnabled}}}`
+
+	// A merge request pinned to the head the caller judged: GitHub merges, or
+	// adds the PR to its base's merge queue, only while the PR's head is that
+	// commit (expectedHeadOid). The merge squashes, as gctk merge's
+	// `gh pr merge --squash --match-head-commit` does.
+	mergeMutation = `mutation($id:ID!,$head:GitObjectID!){
+  mergePullRequest(input:{pullRequestId:$id,expectedHeadOid:$head,mergeMethod:SQUASH}){pullRequest{number}}}`
+
+	enqueueMutation = `mutation($id:ID!,$head:GitObjectID!){
+  enqueuePullRequest(input:{pullRequestId:$id,expectedHeadOid:$head}){mergeQueueEntry{id}}}`
 
 	reviewsQuery = `query($owner:String!,$name:String!,$number:Int!,$endCursor:String){
   repository(owner:$owner,name:$name){pullRequest(number:$number){
@@ -182,6 +200,7 @@ func (c *Client) PullRequest(repo string, number int) (*PullRequest, error) {
 	var page struct {
 		Repository *struct {
 			PullRequest *struct {
+				ID               string `json:"id"`
 				Number           int    `json:"number"`
 				URL              string `json:"url"`
 				State            string `json:"state"`
@@ -193,6 +212,12 @@ func (c *Client) PullRequest(repo string, number int) (*PullRequest, error) {
 				Repository       struct {
 					NameWithOwner string `json:"nameWithOwner"`
 				} `json:"repository"`
+				MergedAt    *string `json:"mergedAt"`
+				MergeCommit *struct {
+					Oid string `json:"oid"`
+				} `json:"mergeCommit"`
+				IsInMergeQueue      bool `json:"isInMergeQueue"`
+				IsMergeQueueEnabled bool `json:"isMergeQueueEnabled"`
 			} `json:"pullRequest"`
 		} `json:"repository"`
 	}
@@ -209,11 +234,45 @@ func (c *Client) PullRequest(repo string, number int) (*PullRequest, error) {
 		return nil, fmt.Errorf("github: %s holds no pull request %d", repo, number)
 	}
 	p := page.Repository.PullRequest
-	return &PullRequest{
-		Number: p.Number, URL: p.URL, State: p.State, IsDraft: p.IsDraft,
+	out := &PullRequest{
+		ID: p.ID, Number: p.Number, URL: p.URL, State: p.State, IsDraft: p.IsDraft,
 		HeadRefName: p.HeadRefName, HeadRefOid: p.HeadRefOid, BaseRefName: p.BaseRefName,
 		MergeStateStatus: p.MergeStateStatus, Repository: p.Repository.NameWithOwner,
-	}, nil
+		InMergeQueue: p.IsInMergeQueue, MergeQueueEnabled: p.IsMergeQueueEnabled,
+	}
+	if p.MergedAt != nil {
+		out.MergedAt = *p.MergedAt
+	}
+	if p.MergeCommit != nil {
+		out.MergeCommit = p.MergeCommit.Oid
+	}
+	return out, nil
+}
+
+// MergePullRequest asks GitHub to squash-merge the PR whose node id is id, only
+// while its head is head. An error is a request GitHub refused, such as one a
+// push since the caller's read made stale, or one whose answer did not arrive,
+// which may still take effect: the caller reads the PR again to learn which.
+func (c *Client) MergePullRequest(id, head string) error {
+	return c.mutate(mergeMutation, id, head)
+}
+
+// EnqueuePullRequest asks GitHub to add the PR whose node id is id to its base's
+// merge queue, only while its head is head. An error reads as MergePullRequest's.
+func (c *Client) EnqueuePullRequest(id, head string) error {
+	return c.mutate(enqueueMutation, id, head)
+}
+
+// mutate runs a request that names a PR by its node id and pins it to head.
+func (c *Client) mutate(query, id, head string) error {
+	if id == "" {
+		return errors.New("github: a merge request names no pull request")
+	}
+	if head == "" {
+		return errors.New("github: a merge request names no head to pin it to")
+	}
+	return c.graphql(query, []string{"-f", "id=" + id, "-f", "head=" + head}, false,
+		func(json.RawMessage) error { return nil })
 }
 
 // Reviews reads every review of PR number in repo, oldest first.

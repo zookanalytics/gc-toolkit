@@ -42,17 +42,18 @@ func client(answers ...[2]string) (*gh.Client, *recorded) {
 }
 
 func TestPullRequest(t *testing.T) {
-	c, r := client([2]string{"pullRequest(number:$number){\n    number", `{"data":{"repository":{"pullRequest":{
-		"number":7,"url":"https://github.com/acme/widgets/pull/7","state":"OPEN","isDraft":false,
+	c, r := client([2]string{"pullRequest(number:$number){\n    id number", `{"data":{"repository":{"pullRequest":{
+		"id":"PR_kw1","number":7,"url":"https://github.com/acme/widgets/pull/7","state":"OPEN","isDraft":false,
 		"headRefName":"polecat/tk-1","headRefOid":"abc","baseRefName":"main","mergeStateStatus":"CLEAN",
-		"repository":{"nameWithOwner":"acme/widgets"}}}}}`})
+		"repository":{"nameWithOwner":"acme/widgets"},"mergedAt":null,"mergeCommit":null,
+		"isInMergeQueue":true,"isMergeQueueEnabled":true}}}}`})
 	p, err := c.PullRequest("acme/widgets", 7)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := gh.PullRequest{Number: 7, URL: "https://github.com/acme/widgets/pull/7", State: "OPEN",
+	want := gh.PullRequest{ID: "PR_kw1", Number: 7, URL: "https://github.com/acme/widgets/pull/7", State: "OPEN",
 		HeadRefName: "polecat/tk-1", HeadRefOid: "abc", BaseRefName: "main", MergeStateStatus: "CLEAN",
-		Repository: "acme/widgets"}
+		Repository: "acme/widgets", InMergeQueue: true, MergeQueueEnabled: true}
 	if *p != want {
 		t.Fatalf("got %+v, want %+v", *p, want)
 	}
@@ -64,6 +65,60 @@ func TestPullRequest(t *testing.T) {
 	}
 	if strings.Contains(args, "--paginate") {
 		t.Errorf("a read of one PR pages nothing: %q", args)
+	}
+}
+
+func TestAMergedPullRequestNamesItsMergeCommit(t *testing.T) {
+	c, _ := client([2]string{"pullRequest(number:$number)", `{"data":{"repository":{"pullRequest":{
+		"id":"PR_kw1","number":7,"url":"https://github.com/acme/widgets/pull/7","state":"MERGED","isDraft":false,
+		"headRefName":"polecat/tk-1","headRefOid":"abc","baseRefName":"main","mergeStateStatus":"UNKNOWN",
+		"repository":{"nameWithOwner":"acme/widgets"},"mergedAt":"2026-11-12T08:00:00Z","mergeCommit":{"oid":"def"},
+		"isInMergeQueue":false,"isMergeQueueEnabled":false}}}}`})
+	p, err := c.PullRequest("acme/widgets", 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.State != "MERGED" || p.MergeCommit != "def" || p.MergedAt != "2026-11-12T08:00:00Z" {
+		t.Fatalf("a merged PR read as %+v", *p)
+	}
+}
+
+// A merge request and an enqueue each name the PR by its node id and pin the
+// request to the head the caller judged, so GitHub refuses either once a push
+// has moved the head.
+func TestAMergeRequestIsPinnedToTheHeadItNames(t *testing.T) {
+	for _, tc := range []struct {
+		name, mutation string
+		do             func(*gh.Client) error
+	}{
+		{"merge", "mergePullRequest(input:{pullRequestId:$id,expectedHeadOid:$head,mergeMethod:SQUASH})",
+			func(c *gh.Client) error { return c.MergePullRequest("PR_kw1", "abc") }},
+		{"enqueue", "enqueuePullRequest(input:{pullRequestId:$id,expectedHeadOid:$head})",
+			func(c *gh.Client) error { return c.EnqueuePullRequest("PR_kw1", "abc") }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, r := client([2]string{tc.mutation, `{"data":{"x":{}}}`})
+			if err := tc.do(c); err != nil {
+				t.Fatal(err)
+			}
+			args := strings.Join(r.calls[0].args, " ")
+			for _, want := range []string{"api --hostname github.com graphql", "-f id=PR_kw1", "-f head=abc"} {
+				if !strings.Contains(args, want) {
+					t.Errorf("the request %q lacks %q", args, want)
+				}
+			}
+		})
+	}
+}
+
+func TestAMergeRequestGitHubRefusesIsAnError(t *testing.T) {
+	c, _ := client([2]string{"mergePullRequest", `{"data":null,"errors":[{"message":"Head branch was modified. Review and try the merge again."}]}`})
+	if err := c.MergePullRequest("PR_kw1", "abc"); err == nil || !strings.Contains(err.Error(), "Head branch was modified") {
+		t.Fatalf("a refused merge request read as %v", err)
+	}
+	c, _ = client()
+	if err := c.MergePullRequest("", "abc"); err == nil {
+		t.Fatal("a merge request that names no PR was sent")
 	}
 }
 

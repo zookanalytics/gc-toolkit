@@ -279,3 +279,59 @@ func TestASnapshotWithoutABeadItNeedsIsAReadError(t *testing.T) {
 		t.Errorf("a blocked listing naming a parent the row lacks = %v; want a read error naming orphan", err)
 	}
 }
+
+// A guarded write carries the guard, the status and the note in its one update,
+// lands while the bead still has the status and assignee it is guarded on, and
+// otherwise writes nothing and fails with ErrGuard.
+func TestAGuardedWriteLandsOnlyOnTheBeadItWasGuardedOn(t *testing.T) {
+	s := fake.New()
+	s.Put(fake.Bead{ID: "b-1", Status: "blocked", Assignee: "rig/refinery"})
+	l := New(s)
+	w := l.Write("b-1")
+	w.Guard("blocked", "rig/refinery")
+	w.Status("closed")
+	testText.Set(w, "landed")
+	w.Note("PR #7 merged")
+	if err := l.Commit(w); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"--if-status=blocked", "--if-assignee=rig/refinery", "--status=closed",
+		"--set-metadata", "test.ledger.text=landed", "--append-notes", "PR #7 merged"}
+	if got := s.Writes()[0].Args; !slices.Equal(got, want) {
+		t.Fatalf("the update is %q, want %q", got, want)
+	}
+	b, _ := s.Row("b-1")
+	if b.Status != "closed" || b.Notes != "PR #7 merged" || b.Metadata["test.ledger.text"] != "landed" {
+		t.Fatalf("the bead reads %+v", b)
+	}
+
+	s.Put(fake.Bead{ID: "b-2", Status: "open", Assignee: ""})
+	w = l.Write("b-2")
+	w.Guard("open", "rig/refinery")
+	testText.Set(w, "never")
+	err := l.Commit(w)
+	if !errors.Is(err, ErrGuard) {
+		t.Fatalf("a stale guard failed with %v, want ErrGuard", err)
+	}
+	if b, _ := s.Row("b-2"); b.Metadata["test.ledger.text"] != "" {
+		t.Fatal("a write its guard refused landed")
+	}
+	if err := l.Commit(l.Write("b-2")); err == nil {
+		t.Fatal("a write that changes nothing was committed")
+	}
+}
+
+// A key's reading face reads the key and names it, and offers no write.
+func TestAViewReadsItsKey(t *testing.T) {
+	s := fake.New()
+	s.Put(fake.Bead{ID: "b-1", Status: "open", Metadata: map[string]string{"test.ledger.old_text": "aliased"}})
+	snap, err := New(s).Read("b-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, _ := snap.Record("b-1")
+	v := testText.View()
+	if got, ok, err := v.Get(r); err != nil || !ok || got != "aliased" || v.Name() != "test.ledger.text" {
+		t.Fatalf("the view read %q, %v, %v as %s", got, ok, err, v.Name())
+	}
+}
