@@ -29,7 +29,7 @@ type Options struct {
 	Return   bool     // open on the return list
 	DraftDir string   // where the question of a cancelled form is kept
 	Debounce time.Duration
-	Refresh  time.Duration // how often the return list reads the city again
+	Refresh  time.Duration // how often a list page, the return list or People, reads the city again
 	Now      func() time.Time
 }
 
@@ -143,7 +143,7 @@ type Model struct {
 	cityAt   time.Time // when city was read
 	cityErr  string    // why the last read of the city failed; city stays the last one read
 	cityBusy bool
-	ticking  bool // a refresh of the return list is scheduled
+	ticking  bool // a refresh of the list pages is scheduled
 
 	model  int  // index into opt.Models; -1 while it is opt.Model, which no variant carries
 	attach bool // the operator's choice to attach to the sitting once it starts; off, the form leaves then
@@ -269,9 +269,10 @@ func (m *Model) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// refreshCity schedules the next read of the city for the return list, so the
-// readiness it shows stays current. One refresh is scheduled at a time, and it
-// schedules the next only while the list is on screen.
+// refreshCity schedules the next read of the city for the list pages, so the
+// readiness the return list shows, and the seats' states the People page
+// shows, stay current. One refresh is scheduled at a time, and it schedules the
+// next only while a list page is on screen.
 func (m *Model) refreshCity() tea.Cmd {
 	if m.ticking {
 		return nil
