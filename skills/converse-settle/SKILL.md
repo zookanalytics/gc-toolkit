@@ -55,6 +55,16 @@ sign-off once nothing important is pending. Whether a sign-off is terminal is
 still your judgment, and a sitting that is genuinely settled still signs off
 and closes here rather than waiting for a manual dismiss.
 
+**Which ending: a sitting ends at its hand-off unless the operator asks it to
+stay.** At the hand-off the sign-off below closes the conversation. When the
+operator asks you to stay for the return of the work this sitting sends, the
+same sign-off takes `--stay`, and the conversation stays open, waiting on that
+work, until it lands (**Staying for the return**, below). Stay only on their
+ask. End at the hand-off when the work is in another rig's store, which
+`--stay` refuses because the wait could not hold there, or when your context is
+too full to compare the work when it lands, and say in the sign-off which
+ending you took and why.
+
 **A gate is answered through the conversation's reply, and the operator hears
 what the answer releases first.** The sitting answers only the gates its
 conversation replies to: the gate engage was pointed at, one its hold filed,
@@ -272,6 +282,12 @@ self-contained enough to act on from its last few lines:
 and the consequence that mattered; if a decision is still open, lead
 with its recommendation.>
 ```
+At the hand-off, its last words say what the record does after it: what the
+subject waits on, and what checks the subject and closes it once that work
+lands, such as its validating closer, the refinery's merge or a person's gate.
+Never promise to confirm, check, watch or follow up yourself, in any words:
+the conversation is closed, and nothing brings this sitting back to keep the
+promise.
 A converse is about its one subject; name another bead only where the
 conversation's substance genuinely leads there, and then as a plain
 sentence. Record it on the conversation just before you post it (the
@@ -353,6 +369,45 @@ at 140 characters, so keep that line to one plain sentence:
   && "$CONV/deferred-dispatch.sh" arm <follow-up> --target <rig>/<pool> --reason "waits for <blocker>, through its human gate"
 ```
 
+**Staying for the return.** When the operator asks the sitting to stay, file
+and send the work first, as above, then run the sign-off with `--stay` added:
+what the operator agreed, in one line, which the return compares the work with
+once it lands. It writes everything the hand-off's sign-off writes, the
+subject's wait, its close brief and its validating closer's arm included, so
+the record is as complete as at the hand-off: a stay that never returns, such
+as one whose session was closed, leaves the subject's next steps in place.
+Then, in place of the close, it makes the conversation wait on each
+`--waiting-on` bead that is no gate and on a rework `--rework` files, appends
+`staying: <that line> (waits on <the work>)` to the conversation's notes, and
+leaves the conversation open under this sitting. Write the headline as what
+the conversation waits for. It exits non-zero when it stopped short, and then
+you have not stayed:
+```bash
+if "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" \
+     --outcome "staying — <what this conversation waits for, at most 140 characters>" \
+     --ruled yes --ruling "<the ruling, one line>" --waiting-on <the work> \
+     --close-brief "<what that work's landing settles here, and what to check once it has>" \
+     --stay "<what the operator agreed, which the return compares the work with, one line>"
+     # --rework in place of --waiting-on when the work is the PR's rework, and the other flags as the sign-off above takes them
+then
+  : # staying — record the hand-back, post it, and end the turn with no drain
+else
+  # NOT staying: repair what it printed and re-run, or sign off without --stay to end at the hand-off.
+  exit 1
+fi
+```
+Record the hand-back on the conversation and post it, as every hand-back is. It
+opens with where the subject stands, then says the sitting stays until the work
+lands and comes back then to compare it with what was agreed. Below it, offer
+the close-out line a framing offers (the `converse-hold` skill), since the
+operator ends a sitting that stays the same way. Then end the turn without
+`gc runtime drain-ack`: the conversation is open, and a drain ends the sitting
+that stays. Gas City stops the agent once no tab is attached, and wakes this
+session, with its thread, when the work closes. Step 1 then reads the
+`staying:` line and sends you to the return (step 8). On an open PR the merge
+this conversation holds waits for the return as well, so lift that hold (the
+`converse-hold` skill) when the operator wants the PR to land without it.
+
 **The validating closer is the return trip.** Once every wait the sign-off
 recorded closes, the deferred-dispatch pass slings the closer the sign-off
 armed. It checks the close brief against what landed, then closes the subject
@@ -361,7 +416,9 @@ because something else sends it on once its wait clears, such as its own arm,
 an assignee or the refinery's merge, goes there, and the sign-off says so. One
 that nothing sends on, such as a subject that waits only on a person's gate,
 returns through the liveness sweep (`assets/scripts/liveness-sweep.sh`) as an
-unnamed wait once every wait it records has closed.
+unnamed wait once every wait it records has closed. A sitting that stays comes
+back as well, to the operator: its return checks nothing on the subject, which
+stays the closer's to check (step 8).
 
 Never close a conversation by hand, and never end a held sitting without
 its sign-off: a thread that stops after a decision with no wrap-up reads as a
@@ -372,7 +429,8 @@ so closing it silently is the contract.
 
 Then drain: a closed conversation ends this session (the prompt's **How this
 thread ends**). Run `gc runtime drain-ack` once the sign-off has closed the
-conversation and its message is posted, and run nothing after it. A sign-off
+conversation and its message is posted, and run nothing after it. A stay
+closes nothing, so it drains nothing: its turn ends after its hand-back. A sign-off
 that stopped short leaves the conversation open and the sitting not over:
 repair what `converse-signoff.sh` printed, or raise it in the thread, and do
 not drain.

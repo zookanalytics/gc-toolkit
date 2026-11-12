@@ -31,9 +31,10 @@
 #      step 3 leaves to it, dispatches the recommended formula at the subject
 #      and records the dispatch, or finishes an acceptance an earlier Accept
 #      left unfinished without dispatching it again;
-#   5. closes the conversation;
+#   5. closes the conversation, or, when the operator asked the sitting to stay
+#      (--stay), leaves it open, waiting on the work this ruling sent;
 #   6. draws the comment that shows the visit on the subject's PR again, from
-#      the conversation.
+#      the conversation, once it is closed.
 # What it does to the subject's universe is recorded on the conversation as it
 # lands, one comment in plain words for each act: the rework or the retirement,
 # the ruling once the gates carry it, and the recommendation taken. The comment
@@ -57,6 +58,25 @@
 # the merge whatever approval stands, so a PR with both needs no Approve, and its
 # line names whose request holds it. The sign-off cannot tell which login is the
 # operator's, so each line reads true whichever it is.
+#
+# A sitting the operator asked to stay for the return (--stay) runs steps 1 to 4
+# as a sign-off does, so the record is as complete as a sign-off leaves it: the
+# subject's headline, its wait on the work, its close brief and its validating
+# closer's arm, and the gates answered. Step 5 then keeps the conversation open
+# for the sitting's return. The conversation waits on the work through bd's
+# blocks edge, one onto each --waiting-on bead that is no gate and onto the
+# rework --rework filed. Its notes gain a `staying:` line, which the sitting's
+# restart rule reads. Last, one write guarded on the holder and the status puts
+# it back to open under the sitting that holds it, so it is no longer claimed
+# work. Gas City then sleeps the sitting once no tab is attached, under the
+# template's sleep_after_idle, and wakes the same session, with its thread,
+# once the work closes: the conversation is then ready work assigned to the
+# sitting (gascity cmd/gc/compute_awake_set.go, the assigned-work demand and the
+# idle sleep it exempts). An attach in between wakes the sitting and changes
+# nothing, and it sleeps again once the tab detaches. An edge onto a bead in
+# another store holds nothing, so a stay waits only on work in the
+# conversation's own store, and a sitting whose work is elsewhere ends at the
+# hand-off.
 #
 # A ruling given on a turn that does not sign off (--answer) runs steps 1 to 3
 # for the gates --answer names, and step 4 when it takes the recommendation,
@@ -113,7 +133,7 @@
 #     [--leave <gate> ...] [--answer <gate> ...] \
 #     [--no-wait | --waiting-on <bead> ... [--close-brief "<text>"]] \
 #     [--rework | --no-rework | --retire <kind> [--successor <bead>]] \
-#     [--pr-anchor <bead>] [--accept [--var <key>=<value> ...]]
+#     [--pr-anchor <bead>] [--accept [--var <key>=<value> ...]] [--stay "<text>"]
 #   --outcome is the subject's headline, and the close reason the sittings card
 #   falls back to. A PR the ruling leaves standing with no Approve review adds a
 #   clause saying so, which counts toward the cap. --ruled defaults to `no`.
@@ -186,12 +206,22 @@
 #     it has. It is required when the closer is armed, refused where it is not,
 #     and appended to the subject's notes as its close brief, unless the
 #     subject's latest close brief is already this one, held on the same work.
-# Exit: 0 signed off, or with --answer the named gates answered; 1 stopped
+#   --stay "<text>" (with --ruled yes) keeps the conversation open for the
+#     sitting's return instead of closing it, waiting on each --waiting-on bead
+#     that is no gate and on the rework --rework files. <text> is what the
+#     sitting compares that work with once it lands, what the operator agreed,
+#     in one line; the conversation's notes carry it as `staying: <text>`, with
+#     the beads it waits on. Each must be in the conversation's own store. It is
+#     refused on a conversation no sitting holds, and with nothing to wait on.
+#     The sitting signs off on its return with the same call, less --stay, and
+#     with --no-rework in place of a --rework, whose child has landed.
+# Exit: 0 signed off, or with --answer the named gates answered, or with --stay
+#   the conversation left waiting on the work; 1 stopped
 #   short — a read failed, the rework did not file, the PR did not retire, the
 #   headline, the close brief, the closer's arm or the lift of the subject's
 #   hold:mayor did not land, a gate did not close, the recommendation was not
-#   taken, or the conversation did not close or hand back — so do NOT post the
-#   sign-off, or report the ruling as
+#   taken, or the conversation did not close, hand back or stay — so do NOT
+#   post the sign-off, or report the ruling as
 #   carried out; repair what it names and re-run, which repeats every write it
 #   made safely; 2 refused before any write: usage, a conversation that is not
 #   one, a gate it does not reply to, a ruling that reaches an open PR and gave
@@ -228,6 +258,7 @@ ACCEPT_VARS=()
 WAIT=()
 WAIT_IDS=""
 CLOSE_BRIEF=""
+STAY=""
 LEAVE=()
 ANSWER_GATES=()
 UNDONE="NOT SIGNED OFF — do NOT post the sign-off."
@@ -334,6 +365,7 @@ while [ $# -gt 0 ]; do
     --no-wait)    WAIT+=(--no-wait) ;;
     --waiting-on) shift; [ $# -gt 0 ] || die "--waiting-on needs a bead id"; WAIT+=(--waiting-on "$1"); WAIT_IDS="${WAIT_IDS:+$WAIT_IDS }$1" ;;
     --close-brief) shift; [ -n "${1:-}" ] || die "--close-brief needs the brief's text"; CLOSE_BRIEF="$1" ;;
+    --stay)       shift; [ -n "${1:-}" ] || die "--stay needs what the sitting compares the work with once it lands, in one line"; STAY="$1" ;;
     -h|--help)    sed -n '2,/^set -u$/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)            die "unknown argument '$1'" ;;
   esac
@@ -365,6 +397,14 @@ fi
 if [ -n "$CLOSE_BRIEF" ]; then
   [ "$RULED" = yes ] || die "--close-brief requires a ruling (--ruled yes, or --answer): it is the claim the subject's validating closer checks once the work the ruling sent lands"
   [ -n "$WAIT_IDS" ] || die "--close-brief requires --waiting-on <the work>: it is the claim the subject's validating closer checks once that work lands"
+fi
+if [ -n "$STAY" ]; then
+  [ "$RULED" = yes ] && [ -z "$ANSWERING" ] \
+    || die "--stay keeps the conversation open in place of a sign-off's close, so it takes --ruled yes and no --answer"
+  case "$STAY" in *$'\n'*) die "--stay takes one line" ;; esac
+  [ -n "$WAIT_IDS" ] || [ "$PR_ANSWER" = rework ] \
+    || die "--stay waits on the work this ruling sent, so it needs --waiting-on <the work> or --rework; nothing was written"
+  UNDONE="NOT STAYING — do NOT post the hand-back as a sitting that stays."
 fi
 if [ "$PR_ANSWER" = retire ]; then
   case "$RETIRE_KIND" in
@@ -806,6 +846,31 @@ take_recommendation() {
   stopped "the recommendation was not taken: gc-helm.sh accept exited $rc, and its output above says why${open:+, and its gate $open is still open}. The conversation is not closed. Repair what Accept names, then re-run, which finishes an acceptance Accept left unfinished without dispatching it twice"
 }
 
+# The work a sitting that stays waits on: each --waiting-on bead that is no
+# gate, read now, and the rework step 1 files. A stay keeps the conversation for
+# the sitting that holds it, so one in the operator's queue has none to stay.
+# An edge from the conversation onto a bead in another store holds nothing, and
+# a conversation that waited on nothing would read as ready work at once and
+# wake its sitting before the work landed, so each bead carries the
+# conversation's own prefix.
+STAY_ON=""
+if [ -n "$STAY" ]; then
+  if [ "$HOLDER" = human ] || { [ "$CONV_STATUS" != in_progress ] && [ "$CONV_STATUS" != open ]; }; then
+    die "--stay keeps conversation $CONVERSATION open for the sitting that holds it, and it reads ${CONV_STATUS:-of no status} under ${HOLDER:-no one}; nothing was written"
+  fi
+  for w in $WAIT_IDS; do
+    [ "$w" != "$CONVERSATION" ] || die "--stay waits on the work this ruling sent, and $w is this conversation; nothing was written"
+    [ "${w%%-*}" = "${CONVERSATION%%-*}" ] \
+      || die "--stay would make conversation $CONVERSATION wait on $w, in another store, where its edge holds nothing; nothing was written. A sitting whose work is in another rig ends at the hand-off: sign off without --stay"
+    WROW=$(show_row "$w") \
+      || stopped "$w, which this sitting would stay for, could not be read to tell whether it is work or a gate; nothing was written"
+    printf '%s' "$WROW" | jq -e '(.issue_type // "") == "gate"' >/dev/null 2>&1 \
+      || STAY_ON="${STAY_ON:+$STAY_ON }$w"
+  done
+  [ -n "$STAY_ON" ] || [ "$PR_ANSWER" = rework ] \
+    || die "--stay waits on the work this ruling sent, and each --waiting-on is a gate; nothing was written"
+fi
+
 # 1. What the ruling does to an open PR. --rework files the fix unit a review
 # verdict files, sourced by this conversation, and returns every review lane to
 # unreviewed; the child's blocks edge holds the merge. --retire records the
@@ -864,6 +929,24 @@ case "$ACTING" in
     fi ;;
 esac
 for p in "${STANDS[@]+"${STANDS[@]}"}"; do echo "the ruling leaves the branch of $p as it stands"; done
+
+# A stay waits on the rework step 1 filed, the child its writer names on its
+# last line ("<child> <route> <filed|adopted|in-flight>"), read back as this
+# conversation's rework in the conversation's own store.
+if [ -n "$STAY" ] && [ "$ACTING" = rework ]; then
+  read -r CHILD _ <<EOF
+$(printf '%s\n' "$PR_OUT" | tail -n 1)
+EOF
+  CROW=""
+  if [ -n "$CHILD" ] && [ "${CHILD%%-*}" = "${CONVERSATION%%-*}" ]; then
+    CROW=$(show_row "$CHILD") || CROW=""
+  fi
+  printf '%s' "$CROW" | jq -e --arg c "$CONVERSATION" '((.metadata // {}).source_ruling_bead // "") == $c' >/dev/null 2>&1 \
+    || stopped "the rework is filed, but ${CHILD:-its child} could not be read as this conversation's rework in its own store, so the conversation has nothing to wait on and does not stay. Sign off without --stay to end at the hand-off; it adopts the same rework"
+  case " $STAY_ON " in *" $CHILD "*) ;; *) STAY_ON="${STAY_ON:+$STAY_ON }$CHILD" ;; esac
+fi
+[ -z "$STAY" ] || [ -n "$STAY_ON" ] \
+  || stopped "the PR this ruling's rework acts on reads closed and filed no rework, and no --waiting-on names other work, so the conversation has nothing to wait on and does not stay. Sign off without --stay"
 
 # 2. The headline. An ARRAY, not a string: this city runs zsh, which does not
 # word-split an unquoted parameter, so "${WAIT[@]}" is what passes each flag as
@@ -989,6 +1072,46 @@ if [ "$RULED" = yes ]; then
 
   # 4. The recommendation.
   [ -z "$ACCEPT" ] || take_recommendation
+
+  if [ -n "$STAY" ]; then
+    # 5. Stay for the return. The edges onto the work come first, so the
+    # conversation is never open and assigned with nothing holding it, which
+    # Gas City would read as ready work and wake the sitting for at once. The
+    # `staying:` line comes next, before the status write, because a wake
+    # that finds the conversation open reads it to tell the sitting it stays.
+    # The guarded write last drops the claim and its lease and keeps the
+    # assignee, so the sitting idle-sleeps once no tab is attached and the
+    # work's close makes the conversation its ready work, which wakes it.
+    for w in $STAY_ON; do
+      gc bd dep add "$CONVERSATION" "$w" --type blocks >/dev/null 2>&1 \
+        || stopped "the store refused the edge that makes conversation $CONVERSATION wait on $w, so it would not wake its sitting when $w closes; every gate above is answered, the conversation is still claimed, and a re-run writes the edge"
+    done
+    STAY_LINE="staying: $STAY (waits on $(printf '%s' "$STAY_ON" | sed 's/ /, /g'))"
+    LAST_MARK=$(printf '%s' "$CONV_ROW" | jq -r '(.notes // "") | split("\n") | map(select(startswith("staying:") or startswith("holding:"))) | last // ""')
+    if [ "$LAST_MARK" != "$STAY_LINE" ]; then
+      gc bd update "$CONVERSATION" --append-notes "$STAY_LINE" >/dev/null 2>&1 \
+        || stopped "the store refused the staying: line on conversation $CONVERSATION, which a woken sitting reads to tell it stays; the conversation is still claimed, and a re-run writes it"
+    fi
+    if [ "$CONV_STATUS" != open ]; then
+      STAY_RC=0
+      gc bd update "$CONVERSATION" --if-assignee "$HOLDER" --if-status "$CONV_STATUS" --status open >/dev/null 2>&1 || STAY_RC=$?
+      case "$STAY_RC" in
+        0) ;;
+        13)
+          BACK=$(show_row "$CONVERSATION") || BACK=""
+          case "$(printf '%s' "$BACK" | jq -r '"\(.assignee // "")/\((.status // "") | ascii_downcase)"' 2>/dev/null)" in
+            "$HOLDER/open") ;;
+            */closed) stopped "conversation $CONVERSATION was closed while this call ran, by a dismiss or another sign-off, so nothing stays" ;;
+            *) stopped "conversation $CONVERSATION moved while this call ran, so it was not left waiting for its sitting's return; re-run to stay from where it is now" ;;
+          esac ;;
+        *) stopped "the store refused the write that leaves conversation $CONVERSATION waiting under $HOLDER (gc bd update exited $STAY_RC); its edges and its staying: line are written, and a re-run makes the write" ;;
+      esac
+    fi
+    record_action "Kept this conversation open until the work it sent lands, to compare it then with what was agreed."
+    echo "STAYING conversation $CONVERSATION on $SUBJECT: it waits on $STAY_ON under $HOLDER. Its sitting sleeps once no tab is attached and wakes with this thread when that work closes"
+    tell_approval
+    exit 0
+  fi
 
   # 5. Close the conversation. The work-record gate the close runs wants
   # gc.work_outcome, stamped in a write of its own so it never decides whether

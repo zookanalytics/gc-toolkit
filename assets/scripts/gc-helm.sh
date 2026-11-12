@@ -4677,7 +4677,12 @@ cmd_engage() {
     #
     # engage_await_start returns 0 once the sitting's `gc session list` row
     # reads `active`, which it does only once the runtime is running; before the
-    # launch it reads start-pending or creating. It returns 2 when the sitting
+    # launch it reads start-pending or creating. It returns 0 at once for a row
+    # that reads `asleep` as well: a sitting that has run and slept, as one that
+    # stays for the return of the work it sent sleeps under the template's
+    # sleep_after_idle, and `gc session attach` wakes it with its thread and
+    # delivers its prompt again (specs/tk-pb9wnr3/stay-probe.md), so waiting
+    # would only hold the operator to the bound. It returns 2 when the sitting
     # ended first, and 1 when ENGAGE_WAIT_TIMEOUT seconds pass first. The
     # sitting is the row whose id is $sid. With $sid empty it is the open row
     # under the alias $start_alias, bare or qualified, a sitting that holds the
@@ -4727,7 +4732,7 @@ cmd_engage() {
             start_waited=$(( $(date +%s) - _start_t0 ))
             _start_now=""
             case "$start_state" in
-                active) return 0 ;;
+                active|asleep) return 0 ;;
                 closed|failed-create) return 2 ;;
                 unlisted) [ "$_start_seen" = 0 ] || { start_state=gone; return 2; } ;;
                 none) _start_seen=1 ;;

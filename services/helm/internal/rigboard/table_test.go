@@ -119,6 +119,12 @@ func TestTableRows(t *testing.T) {
 		{name: "a walk past its bound leaves the bead unread",
 			in:  tableInput{b: work, kind: KindWork, holds: blockedOn(workWait), unwalked: true},
 			out: outUnread, signal: "unread"},
+		{name: "a conversation its own wait holds waits on that work, queued",
+			in:  tableInput{b: bead{ID: "tk-c", Status: "open", IssueType: "task", Assignee: "gc-toolkit/gc-toolkit.tk-c"}, kind: KindConversation, holds: blockedOn(workWait)},
+			out: outNone, group: GroupQueued, signal: "Waits on tk-other"},
+		{name: "a conversation nothing holds reads who holds it",
+			in:  tableInput{b: bead{ID: "tk-c", Status: "in_progress", IssueType: "task", Assignee: "gc-toolkit/gc-toolkit.tk-c"}, kind: KindConversation, holds: clear},
+			out: outNone, signal: "In conversation"},
 		{name: "a pull request prstatus could not answer is unread before any ask",
 			in:  tableInput{b: work, kind: KindWork, ask: &askAnswer{kind: AskRoutedToYou, words: "Routed to you"}, prUnread: true},
 			out: outUnread, signal: "unread"},
@@ -152,6 +158,7 @@ func TestAsks(t *testing.T) {
 		gateOpen    func(string) bool
 		facts       *prstatus.Facts
 		open, all   int
+		held        bool
 		want        *askAnswer
 	}{
 		{name: "a human gate is a question", b: bead{ID: "tk-g", Status: "open", IssueType: "gate", AwaitType: "human"}, kind: KindGate,
@@ -163,6 +170,9 @@ func TestAsks(t *testing.T) {
 			want: &askAnswer{kind: AskQuestion, words: "Question"}},
 		{name: "a conversation is its own ask", b: bead{ID: "tk-c", Status: "open", IssueType: "task", Assignee: "human"}, kind: KindConversation,
 			gateOpen: noGate, want: &askAnswer{kind: AskConversation, words: "Conversation waits for you"}},
+		{name: "a conversation a wait of its own holds stays for its work and is no ask",
+			b: bead{ID: "tk-c", Status: "open", IssueType: "task", Assignee: "gc-toolkit/gc-toolkit.tk-c"}, kind: KindConversation,
+			gateOpen: noGate, held: true},
 		{name: "a conversation that replies to an open human gate belongs to its ask",
 			b:    bead{ID: "tk-c", Status: "open", IssueType: "task", Assignee: "human", Edges: []listing.Edge{{ID: "tk-g", Type: "replies-to"}}},
 			kind: KindConversation, gateOpen: openGate},
@@ -185,7 +195,7 @@ func TestAsks(t *testing.T) {
 			if gateOpen == nil {
 				gateOpen = noGate
 			}
-			got := askOf(c.b, c.kind, c.conv, c.convA, gateOpen, c.facts, c.open, c.all)
+			got := askOf(c.b, c.kind, c.conv, c.convA, gateOpen, c.facts, c.open, c.all, c.held)
 			if (got == nil) != (c.want == nil) || (got != nil && *got != *c.want) {
 				t.Errorf("askOf = %+v, want %+v", got, c.want)
 			}

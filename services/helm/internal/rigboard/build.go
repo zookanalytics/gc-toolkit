@@ -220,7 +220,13 @@ func build(g *gathered) Document {
 				}
 			}
 		}
-		if a := askOf(b, k, conv, convAssignee, ix.openHumanGate, factsOf(g, id), open, members); a != nil {
+		// A wait of its own holds the bead: for a conversation, the work its
+		// sitting stays for.
+		held := false
+		if h, ok := g.holds[id]; ok && h.Status == waits.Blocked {
+			held = true
+		}
+		if a := askOf(b, k, conv, convAssignee, ix.openHumanGate, factsOf(g, id), open, members, held); a != nil {
 			bt.asks[id] = a
 		}
 	}

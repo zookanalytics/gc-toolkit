@@ -103,6 +103,15 @@
 #             take Accept does not complete stops the sign-off, and an answer that
 #             reached the gate first stands; each --var reaches Accept's writer,
 #             and one without --accept, or not <key>=<value>, is refused
+#   (STAY*)   a sitting the operator asked to stay runs the sign-off's writes,
+#             then leaves the conversation open under its sitting: the edge
+#             onto each bead of work it sent, a rework the call files included,
+#             then its staying: line, then the guarded status write, and no
+#             close or PR comment; a re-run writes the line no second time, the
+#             same call less --stay closes it on the return, and a stay with no
+#             work, beside --answer or with no ruling, on work in another store,
+#             on a gate alone or on a conversation in the queue is refused
+#             before any write, as a rework child that does not read stops it
 #   (APPROVE*) a PR a ruling leaves standing with no approval is named in the
 #             headline, the close reason and the reminder, and printed with its
 #             link, read before the first write through the rule the merge lands
@@ -1783,6 +1792,69 @@ run_signoff --conversation tk-conv --answer tk-rev --ruling "design approved" --
 eq "$RC" 0 "(APPROVE-ANSWER) an answer that leaves the PR standing exits 0"
 said "(APPROVE-ANSWER)" owed
 eq "$(field tk-conv status)" "in_progress" "(APPROVE-ANSWER) …and the conversation stays open"
+
+echo "# a sitting the operator asked to stay keeps its conversation open, waiting on the work"
+STAYING=(--ruled yes --ruling "build the fix" --waiting-on tk-work --close-brief "$BRIEF" --stay "the dialog keeps what is typed")
+closer_case
+run_signoff --conversation tk-conv --outcome "staying — waits on tk-work" "${STAYING[@]}"
+eq "$RC" 0 "(STAY) a stay exits 0"
+eq "$(field tk-g status)" "closed" "(STAY) …answering the gate, as a sign-off does"
+eq "$(meta tk-sub gc.dispatch_when_ready_args)" "$CLOSER_ARGS" "(STAY) …arming the subject's validating closer, as a sign-off does"
+eq "$(field tk-conv status)/$(field tk-conv assignee)" "open/gc-toolkit/gc-toolkit.tk-conv" "(STAY) …leaving the conversation open under its sitting"
+has "$(cat "$CALLS")" "bd dep add tk-conv tk-work --type blocks" "(STAY) …waiting on the work through a blocks edge"
+has "$(field tk-conv notes)" "staying: the dialog keeps what is typed (waits on tk-work)" "(STAY) …with the staying: line its restart rule reads"
+hasnt "$(cat "$CALLS")" "bd close tk-conv" "(STAY) …closing nothing"
+hasnt "$(cat "$CALLS")" "pr-sitting-comment" "(STAY) …and drawing no PR comment as if it had closed"
+has "$(acts tk-conv)" "Kept this conversation open until the work it sent lands" "(STAY) the stay is one of the visit's actions"
+has "$OUT" "STAYING conversation tk-conv on tk-sub" "(STAY) …and it says so"
+case "$(cat "$CALLS")" in
+  *"gate resolve tk-g"*"bd dep add tk-conv tk-work"*"--append-notes staying: "*"--status open"*) ok "(STAY-ORDER) the gate, then the edge, then the staying: line, then the status" ;;
+  *) bad "(STAY-ORDER) the writes ran out of order: $(cat "$CALLS")" ;;
+esac
+run_signoff --conversation tk-conv --outcome "staying — waits on tk-work" "${STAYING[@]}"
+eq "$RC" 0 "(STAY-RERUN) a re-run of the stay exits 0"
+eq "$(field tk-conv notes | grep -c '^staying:')" 1 "(STAY-RERUN) …writing the staying: line no second time"
+eq "$(field tk-conv status)" "open" "(STAY-RERUN) …and the conversation stays open"
+setf tk-work status closed
+run_signoff --conversation tk-conv --outcome "landed as agreed" --ruled yes --ruling "build the fix" --waiting-on tk-work --close-brief "$BRIEF"
+eq "$RC" 0 "(STAY-RETURN) the return's sign-off, the same call less --stay, exits 0"
+eq "$(field tk-conv status)" "closed" "(STAY-RETURN) …closes the conversation"
+eq "$(briefs tk-sub)" 1 "(STAY-RETURN) …and writes no second brief"
+
+open_pr; bead tk-child; setm tk-child source_ruling_bead tk-conv
+run_signoff --conversation tk-conv --outcome "staying — the retry is reworked" --ruled yes --ruling "fix the retry" --rework --no-wait --stay "the retry backs off"
+eq "$RC" 0 "(STAY-REWORK) a stay on a ruling that reworks the PR exits 0"
+has "$(cat "$CALLS")" "bd dep add tk-conv tk-child --type blocks" "(STAY-REWORK) …waiting on the rework the call filed"
+has "$(field tk-conv notes)" "(waits on tk-child)" "(STAY-REWORK) …which its staying: line names"
+eq "$(field tk-conv status)" "open" "(STAY-REWORK) …with the conversation open"
+open_pr
+run_signoff --conversation tk-conv --outcome "staying — the retry is reworked" --ruled yes --ruling "fix the retry" --rework --no-wait --stay "the retry backs off"
+eq "$RC" 1 "(STAY-REWORK-UNREAD) a rework child that does not read as this conversation's stops the stay"
+has "$OUT" "Sign off without --stay to end at the hand-off" "(STAY-REWORK-UNREAD) …naming the hand-off ending"
+hasnt "$(cat "$CALLS")" "bd dep add tk-conv" "(STAY-REWORK-UNREAD) …with no edge written"
+eq "$(field tk-conv status)" "in_progress" "(STAY-REWORK-UNREAD) …and the conversation still claimed"
+
+closer_case
+run_signoff --conversation tk-conv --outcome x --ruled yes --ruling "build the fix" --no-wait --stay "x"
+eq "$RC" 2 "(STAY-NOTHING) a stay with no work to wait on exits 2"
+eq "$(writes)" 0 "(STAY-NOTHING) …and writes nothing"
+run_signoff --conversation tk-conv --answer tk-g --ruling "build the fix" --outcome x --waiting-on tk-work --close-brief "$BRIEF" --stay "x"
+eq "$RC" 2 "(STAY-ANSWER) --stay beside --answer exits 2"
+run_signoff --conversation tk-conv --outcome x --waiting-on tk-work --stay "x"
+eq "$RC" 2 "(STAY-UNRULED) --stay without --ruled yes exits 2"
+closer_case; bead rb-work
+run_signoff --conversation tk-conv --outcome x --ruled yes --ruling "build the fix" --waiting-on rb-work --stay "x"
+eq "$RC" 2 "(STAY-ELSEWHERE) a stay on work in another store exits 2"
+has "$OUT" "ends at the hand-off" "(STAY-ELSEWHERE) …naming the hand-off ending"
+eq "$(writes)" 0 "(STAY-ELSEWHERE) …and writes nothing"
+closer_case; gate tk-g2 waits-for-rb-work
+run_signoff --conversation tk-conv --outcome x --ruled yes --ruling "build the fix" --waiting-on tk-g2 --stay "x"
+eq "$RC" 2 "(STAY-GATE) a stay whose only wait is a gate exits 2"
+eq "$(writes)" 0 "(STAY-GATE) …and writes nothing"
+closer_case; setf tk-conv assignee human; setf tk-conv status open
+run_signoff --conversation tk-conv --outcome x --ruled yes --ruling "build the fix" --waiting-on tk-work --close-brief "$BRIEF" --stay "x"
+eq "$RC" 2 "(STAY-QUEUED) a conversation in the operator's queue has no sitting to stay"
+eq "$(writes)" 0 "(STAY-QUEUED) …and nothing is written"
 
 echo
 echo "converse-signoff: $PASS passed, $FAIL failed"

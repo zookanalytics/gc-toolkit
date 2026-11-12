@@ -882,7 +882,10 @@ narrower, not wrong — and marks the gather partial.
 
 The service's `/helm` answer carries the record in the board's order: open
 first, longest-open first, then most recently closed. The rig board's page does
-not draw it; a conversation reaches the page as an ask on Needs you.
+not draw it; a conversation reaches the page as an ask on Needs you. One that a
+wait of its own holds, a sitting staying for the return of the work it sent, is
+no ask until that work closes: its row reads "Waits on" that work, in the Queued
+group.
 
 `helm-svc board --json` prints the tiles alone. The record rides the service's
 envelope as `sittings`, because a second shape in the bare array would break

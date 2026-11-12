@@ -1,6 +1,6 @@
 ---
 name: converse-continue
-description: Converse's continuation of a sitting until its conversation closes.
+description: Converse's continuation of a sitting until its conversation closes, and the return of a sitting that stayed for the work it sent.
 ---
 
 # Step 8 — Continue until the conversation closes
@@ -81,6 +81,56 @@ as step 6 says, and sign off (step 7) once nothing important is pending.
 an existing assignment, and step 1's restart rule says where the sitting picks
 up.
 
+## While a sitting stays
+
+A sitting that stays keeps its conversation open, waiting on the work it sent,
+and its agent sleeps until that work closes (step 7, **Staying for the
+return**). The operator can still engage it before then: an attach wakes this
+session with its thread, and step 1's claim answers `drain`, because the
+conversation is not ready while it waits. Step 1 then reads the `staying:` line
+and keeps the sitting. Answer the operator's turns as any turn above, through
+the sign-off's writer. Nothing needs registering again, because the
+conversation's edge onto the work is the wait, and the session sleeps again on
+its own once the tab detaches. A ruling that sends more work while the sitting
+stays runs step 7's stay call again with the new work as a `--waiting-on`. One
+that ends the stay signs off (step 7) without `--stay`, which closes the
+conversation over its wait.
+
+## The return
+
+When the work a sitting that stays waits on closes, Gas City wakes this
+session with its thread, and step 1's claim returns the conversation as a
+`ready_assignment` whose newest line is a `staying:` line. The return reports
+to the operator. It works on nothing, takes no check's send-back, and passes
+and fails nothing, because it is not one of the work's checks, and it checks
+nothing on the subject, whose validating closer the stay armed.
+
+1. **Read what landed.** `gc bd show <the work>` gives how it closed and its
+   PR. Read the PR's diff or the change it made, at the depth the comparison
+   needs. A work bead that still reads open means the stay was cut short
+   before it left the conversation waiting, so this is no return: run the
+   stay's call again (step 7), which finishes the stay, and end the turn.
+2. **Compare it with what the operator agreed in this conversation.** The
+   thread holds what they agreed. A session that came up without it reads the
+   `staying:` line, the subject's notes and the resolve reasons of the gates
+   the conversation answered.
+3. **Tell the operator where it matches and where it departs**, in plain
+   words, in two places. Post it on the work's PR as a comment through
+   `pr-post.sh` (the prompt's Rules give the call). Then put it in a
+   hand-back, recorded on the conversation and posted here. A departure is
+   what the operator needs to know, and never a verdict on the work. One they
+   want changed is new work, filed and sent as step 7 says.
+4. **Then sign off, or hold.** Sign off (step 7) with the stay's call less
+   `--stay`, with `--no-wait` in place of its waits and brief, and with
+   `--no-rework` in place of a `--rework`, whose child has landed. It answers
+   nothing the stay already answered and leaves the subject's closer as the
+   stay armed it. When the comparison leaves the operator a decision, hold for
+   it (step 5) as any sitting does.
+
+A sitting whose context is too full for the comparison says so in a hand-back
+and signs off as step 4 says: the subject's validating closer still checks
+what the work's landing settles.
+
 **Once the conversation has closed, the thread has ended, and so does this
 session.** Whichever path closed it, once the close has landed and every write
 that must follow it has run, drain, with nothing after it (the prompt's **How
@@ -97,4 +147,5 @@ in the operator's queue until they engage it:
 `"$CONV/gc-helm.sh" open <bead> --reason "<what it is about>" --body "<the ask>"`.
 The one sitting that drains with its conversation still open is the
 low-context path in the prompt's Rules, once its sign-off has handed the
-conversation back to the queue.
+conversation back to the queue. A sitting that stays keeps its conversation
+open too, but it never drains: it ends its turn and sleeps.

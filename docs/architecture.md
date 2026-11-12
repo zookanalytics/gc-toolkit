@@ -324,8 +324,11 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   conversation with a plain `gc hook --claim`, holds for the operator, answers
   each gate the operator rules on through its conversation's reply, and signs
   off by resolving those gates and closing the conversation, which ends its
-  session. A sitting cut short hands the conversation back to the queue, and
-  the next engagement resumes it from the record.
+  session. A sitting the operator asks to stay keeps the conversation open
+  instead, waiting through a `blocks` edge on the work it sent, and Gas City
+  wakes it with its thread when that work closes. A conversation waiting on
+  work is no ask on the board. A sitting cut short hands the conversation back
+  to the queue, and the next engagement resumes it from the record.
 - **A takeaway records what a sitting concluded**, and its `--waiting-on` edge
   is what makes the wait machine-answerable
   ([lifecycle-composition.md](lifecycle-composition.md)).

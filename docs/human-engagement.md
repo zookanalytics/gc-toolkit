@@ -1024,7 +1024,8 @@ sitting off the idle ladder entirely: Gas City never registers a template whose
 idle timeout is at or below zero with its idle tracker
 ([gascity/human-engagement.md](gascity/human-engagement.md#the-idle-ladder)).
 Each also sets `sleep_after_idle = "10m"`, an idle sleep that skips a session
-holding claimed or assigned work, so it never reaches a held sitting. A held
+holding claimed work or ready work assigned to it, so it never reaches a held
+sitting. A held
 sitting therefore ends when its conversation closes, and only two things mark a
 conversation done: the sitting's sign-off and the operator's `gc-helm dismiss`.
 The sign-off is terminal, so converse takes it only when nothing important is
@@ -1149,6 +1150,50 @@ is attached
 and a detached reader is still indistinguishable from abandonment. That is why
 the trace is written when the hold begins rather than bought with a longer
 clock.
+
+### A sitting that stays for the return
+
+A sitting ends at its hand-off unless the operator asks it to stay. One that
+stays carries out the ruling with `converse-signoff.sh --stay`. That writes
+everything a sign-off writes, and then, in place of the close, makes the
+conversation wait on the work the sitting sent through bd's `blocks` edge,
+appends a `staying:` line to its notes, and puts it back to `open` under the
+sitting's alias, which drops the claim. Gas City does the rest with what it
+already has
+([specs/tk-pb9wnr3/stay-probe.md](../specs/tk-pb9wnr3/stay-probe.md)):
+
+- **The sleep.** Open work is wake demand only once bd reads it ready, and the
+  idle sleep skips a session that holds claimed work, not one whose assigned
+  work is blocked. So the sitting idle-sleeps under the template's
+  `sleep_after_idle` once no tab is attached, and its record reads `asleep`
+  with sleep reason `idle`, which no prune closes.
+- **The wake.** The work's close makes the conversation ready work assigned to
+  the sitting's alias, so Gas City wakes the same session on its session key,
+  and `wake_mode = "resume"` keeps the thread. The prompt it delivers again
+  runs the claim, which returns the conversation as a `ready_assignment`, and
+  the restart rule reads the `staying:` line and starts the return.
+- **An attach before then.** An attach wakes the sitting with its thread and
+  changes nothing: the claim answers `drain`, the restart rule reads the
+  `staying:` line and keeps the sitting, and it sleeps again once the tab
+  detaches. `gc-helm engage` attaches an asleep sitting at once.
+- **What reads it.** The board lists a conversation that waits on work as no
+  ask: its row reads "Waits on" the work, in the Queued group, until the work
+  closes. A dismiss closes it as it closes any conversation, and the stop it
+  asks for leaves an asleep sitting asleep.
+- **What the record keeps.** The subject's wait, its close brief and its
+  validating closer's arm are written at the stay, as at a hand-off, so the
+  subject's next steps stand whether or not the sitting comes back. A sitting
+  that cannot come back, because its session was closed, leaves its
+  conversation open, and once the work closes the next engagement takes up
+  the return from the record.
+- **Where it cannot stay.** An edge onto a bead in another store holds
+  nothing, so a sitting stays only for work in its conversation's own store,
+  and ends at the hand-off otherwise.
+
+Gas City's `gc session wait <session> --on-beads <ids> --sleep` also sleeps a
+session until a bead closes. A sitting does not use it, because the attach that
+wakes a sleeping session cancels every wait of that session, and a sitting
+that holds its claimed conversation without a wait never sleeps again.
 
 ## A po sitting
 

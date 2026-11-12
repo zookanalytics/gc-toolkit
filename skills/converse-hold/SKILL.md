@@ -165,6 +165,7 @@ held conversation is assigned to the sitting's alias, and bd closes an
 assigned bead only for its assignee. Then wait for operator input in this
 session.
 
-When the operator replies, record and sign off (steps 6–7, the
-`converse-settle` skill). If context runs low mid-hold before they do,
-take the low-context path in the prompt's Rules.
+When the operator replies, record, then sign off at the hand-off, or stay for
+the return of the work you send when they ask you to (steps 6–7, the
+`converse-settle` skill). If context runs low mid-hold before they do, take
+the low-context path in the prompt's Rules.

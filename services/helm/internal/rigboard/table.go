@@ -24,7 +24,9 @@ import (
 //  4. A wait behind its status is a gate that is no human gate, its own or an
 //     ancestor's: "Held by a gate", with the gate's title. Group Not moving.
 //  5. Its status is deferred: "Deferred". Any other status that is neither
-//     open nor a claim reads as the store's word. Group Not moving.
+//     open nor a claim reads as the store's word. Group Not moving. A
+//     conversation a wait of its own holds then reads "Waits on <id>", naming
+//     each wait, in Group Queued: its sitting comes back once that work closes.
 //  6. waits says it is in flight. With an open pull request: "Pull request
 //     #<n>", with where it stands. Otherwise "In flight", with its assignee.
 //     Group Queued.
@@ -168,6 +170,9 @@ func table(in tableInput) verdict {
 		return verdict{out: outNotOpen, group: GroupNotMoving, signal: st}
 	}
 	if in.kind == KindConversation {
+		if h.Status == waits.Blocked && len(h.Waits) > 0 {
+			return verdict{out: outNone, group: GroupQueued, signal: "Waits on " + joinIDs(refsOf(h.Waits))}
+		}
 		return verdict{out: outNone, signal: conversationWords(b.Assignee)}
 	}
 	if in.kind != KindWork {
@@ -255,8 +260,11 @@ func joinIDs(refs []Ref) string {
 //
 //   - Question: an open human gate, or an open decision.
 //   - Conversation: an open conversation that replies to no open gate a
-//     person answers. One that replies to such a gate belongs to that gate's
-//     ask, as its conversation.
+//     person answers and that no wait of its own holds. One that replies to
+//     such a gate belongs to that gate's ask, as its conversation. One a wait
+//     of its own holds is a sitting staying for the return of the work it sent,
+//     which comes back to the operator once that work closes, so until then it
+//     is no person's move.
 //   - Pull request: a bead whose pull request reads needs-review or
 //     needs-attention, in those words.
 //   - Routed to you: any other open bead prstatus.IsPersonBlocker counts, as
@@ -265,7 +273,7 @@ func joinIDs(refs []Ref) string {
 //
 // A gate that is no human gate is never an ask.
 func askOf(b bead, k Kind, answeredBy string, answeredByAssignee string, openQuestionGate func(string) bool,
-	facts *prstatus.Facts, membersOpen, members int) *askAnswer {
+	facts *prstatus.Facts, membersOpen, members int, held bool) *askAnswer {
 	if !isOpen(b) {
 		return nil
 	}
@@ -278,6 +286,9 @@ func askOf(b bead, k Kind, answeredBy string, answeredByAssignee string, openQue
 	case KindDecision:
 		return questionAsk("", "")
 	case KindConversation:
+		if held {
+			return nil
+		}
 		for _, g := range edgesOf(b, "replies-to") {
 			if openQuestionGate(g) {
 				return nil

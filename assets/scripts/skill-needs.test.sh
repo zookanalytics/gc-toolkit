@@ -505,6 +505,28 @@ lacks "…and gives no sling of its own that records the dispatch" 'gc.recommend
 have "the settle step takes a subject's recommendation through the sign-off" '--ruled yes --no-wait --accept' "$SETTLE"
 have "the prompt gives the call that opens a conversation" 'gc-helm.sh" open <bead>' "$PROMPT"
 have "the prompt gives the PR post calls" 'pr-post.sh" reply --host github.com' "$PROMPT"
+# A sitting ends at its hand-off unless the operator asks it to stay. One that
+# stays sleeps with its conversation open and comes back when its work closes,
+# and step 1 tells that return, and a wake while the work is out, from the
+# conversation's staying: line.
+tr -s '[:space:]' ' ' <"$PROMPT" >"$TMP/prompt-stay"
+have "the prompt says a sitting ends at its hand-off unless asked to stay" \
+    'A sitting ends at its hand-off unless the operator asks it to stay.' "$TMP/prompt-stay"
+have "…and that a sitting that ends promises nothing it cannot keep" \
+    'It makes no first-person promise to confirm, check, watch or follow up' "$TMP/prompt-stay"
+have "step 1 reads the conversation the alias holds before it drains" \
+    'gc bd list --assignee "$GC_ALIAS" --status open --json' "$PROMPT"
+have "…and a ready assignment with a staying: line is the return" \
+    'is a `staying:` line — the work it waited on has closed, so this is the return.' "$TMP/prompt-stay"
+have "the settle step stays through the sign-off" \
+    '--stay "<what the operator agreed, which the return compares the work with, one line>"' "$SETTLE"
+tr -s '[:space:]' ' ' <"$SETTLE" >"$TMP/settle-stay"
+have "…and a stay drains nothing" 'A stay closes nothing, so it drains nothing' "$TMP/settle-stay"
+tr -s '[:space:]' ' ' <"$CONTINUE" >"$TMP/continue-stay"
+have "the continue step gives the return its sign-off" \
+    'Sign off (step 7) with the stay'"'"'s call less `--stay`, with `--no-wait` in place of its waits and brief, and with `--no-rework` in place of a `--rework`' "$TMP/continue-stay"
+have "…and the return passes and fails nothing" \
+    'It works on nothing, takes no check'"'"'s send-back, and passes and fails nothing' "$TMP/continue-stay"
 for f in "$PROMPT" "$SETTLE"; do
     missing=""
     for w in $(grep -oE '"\$CONV/[A-Za-z0-9._-]+"' "$f" | sed 's#.*/##; s#"$##' | sort -u); do
