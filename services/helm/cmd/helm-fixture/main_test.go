@@ -396,6 +396,107 @@ func TestTheDocumentedCommandServesTheBoard(t *testing.T) {
 	})
 }
 
+// docBlock returns the fenced bash block in docs/review-demo.md that contains
+// marker, with its fences left out.
+func docBlock(t *testing.T, marker string) string {
+	t.Helper()
+	doc, err := os.ReadFile(filepath.Join(moduleRoot, "../../docs/review-demo.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found string
+	for _, m := range regexp.MustCompile("(?s)```bash\n(.*?)```").FindAllStringSubmatch(string(doc), -1) {
+		if strings.Contains(m[1], marker) {
+			if found != "" {
+				t.Fatalf("docs/review-demo.md has more than one block with %q", marker)
+			}
+			found = m[1]
+		}
+	}
+	if found == "" {
+		t.Fatalf("docs/review-demo.md has no block with %q", marker)
+	}
+	return found
+}
+
+// TestTheBoardsCaptureNeedsTheDeclaredCommand runs the block docs/review-demo.md
+// gives for the board's capture, with gc and demo-screenshot.sh stubbed. Where
+// gc reads gc-toolkit's ui_serve_command, the block captures the board with it
+// from the worktree's root on --port 0. Where the city sets the var no value, or
+// the mol-rig-demo gc loads declares no such var, the block captures nothing,
+// says why and exits non-zero.
+func TestTheBoardsCaptureNeedsTheDeclaredCommand(t *testing.T) {
+	worktree := t.TempDir()
+	block := strings.ReplaceAll(docBlock(t, "--script board.md"), "<worktree>", worktree)
+	bin := t.TempDir()
+	stubs := map[string]string{
+		// gc answers gc formula show with the vars STUB_VARS names.
+		"gc": "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >>\"$STUB_GC\"\nprintf '{\"ok\":true,\"name\":\"mol-rig-demo\",\"vars\":%s}\\n' \"$STUB_VARS\"\n",
+		// demo-screenshot.sh records its arguments, one per line.
+		"demo-screenshot.sh": "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" >\"$STUB_CAPTURE\"\n",
+	}
+	for name, body := range stubs {
+		if err := os.WriteFile(filepath.Join(bin, name), []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// serveVar is the var as gc formula show lists it; a nil value is one the
+	// city does not set.
+	serveVar := func(value any) string {
+		v, err := json.Marshal(map[string]any{"name": "ui_serve_command", "default": "", "rig_default": value})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(v)
+	}
+	readsCity := `{"name":"app_reads_city","default":"false","rig_default":"true"}`
+
+	for _, c := range []struct {
+		name, vars string
+		captures   bool
+	}{
+		{"the city sets the declared var", "[" + readsCity + "," + serveVar(declaredServe) + "]", true},
+		{"the city sets the var no value", "[" + readsCity + "," + serveVar(nil) + "]", false},
+		{"gc loads a formula that declares no such var", "[" + readsCity + "]", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			gcLog, capture := filepath.Join(dir, "gc.log"), filepath.Join(dir, "capture")
+			cmd := exec.Command("bash", "-c", block)
+			cmd.Dir = dir
+			cmd.Env = append(os.Environ(),
+				"PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"),
+				"STUB_VARS="+c.vars, "STUB_GC="+gcLog, "STUB_CAPTURE="+capture)
+			var stderr bytes.Buffer
+			cmd.Stderr = &stderr
+			err := cmd.Run()
+			if calls, rerr := os.ReadFile(gcLog); rerr != nil || string(calls) != "formula show mol-rig-demo --rig gc-toolkit --json\n" {
+				t.Errorf("the block's gc calls: %q (%v), want the one formula read", calls, rerr)
+			}
+			args, cerr := os.ReadFile(capture)
+			if !c.captures {
+				if err == nil {
+					t.Error("the block exits 0 with no command to serve")
+				}
+				if cerr == nil {
+					t.Errorf("the block captured with no command to serve: %q", args)
+				}
+				if msg := stderr.String(); !strings.Contains(msg, "ui_serve_command") || !strings.Contains(msg, "gc-toolkit") {
+					t.Errorf("the block's message %q does not say that gc reads no ui_serve_command for gc-toolkit", msg)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("the block: %v\n%s", err, stderr.String())
+			}
+			want := []string{"page", "--script", "board.md", "--serve", declaredServe, "--port", "0", "--cwd", worktree, "--output", "board.png"}
+			if got := strings.Split(strings.TrimSuffix(string(args), "\n"), "\n"); !reflect.DeepEqual(got, want) {
+				t.Errorf("the block captures with %q, want %q", got, want)
+			}
+		})
+	}
+}
+
 // rigBoardOf is the board a rig route's answer carries.
 func rigBoardOf(t *testing.T, body []byte) []byte {
 	t.Helper()

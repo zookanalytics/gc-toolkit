@@ -26,16 +26,23 @@ command serves the reviewed commit's board on fixture data, with no city behind
 it (`services/helm/README.md`). The command that runs it is the rig's declared
 serve command, `ui_serve_command`, which the city sets among gc-toolkit's
 formula vars and which a live copy of the board runs too (`ui-copy.sh`). It
-runs from the worktree's root. Read it as that var's `rig_default`:
+runs from the worktree's root. A capture of the board needs that value as gc
+reads it: the city sets it for gc-toolkit, and the `mol-rig-demo` that gc loads
+declares the var, since `gc formula show` lists only the vars a formula
+declares. Read it as that var's `rig_default`, and capture the board from the
+review workspace under the keepalive, as every capture runs, with the pack's
+`demo-screenshot.sh`. Where gc reads no value, the block captures nothing and
+says why:
 
 ```bash
 SERVE=$(gc formula show mol-rig-demo --rig gc-toolkit --json | jq -r '[.vars[] | select(.name == "ui_serve_command")][0].rig_default // empty')
+if [ -z "$SERVE" ]; then
+  echo "no capture of the board: gc reads no ui_serve_command for gc-toolkit; the city sets none for it, or the mol-rig-demo that gc loads declares none" >&2
+  false
+else
+  demo-screenshot.sh page --script board.md --serve "$SERVE" --port 0 --cwd <worktree> --output board.png
+fi
 ```
-
-Capture the board from the review workspace under the keepalive, as every
-capture runs, with the pack's `demo-screenshot.sh`:
-`demo-screenshot.sh page --script board.md --serve "$SERVE" --port 0 --cwd
-<worktree> --output board.png`.
 
 The page shows the gc-toolkit rig's document,
 `services/helm/internal/rigboard/testdata/gc-toolkit.board.json`, which the rig
