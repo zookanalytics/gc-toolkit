@@ -868,17 +868,6 @@ for sh_ in $shells; do
         bad "($sh_) converse-settle: a gate that did not land arms nothing" "exit $rc, calls: $(tr '\n' ';' <"$CH/log")"
     fi
 done
-echo "── a sitting makes a change the operator rules it make through Work's writers ──"
-# A sitting's change is held on its conversation and goes through the writers a
-# polecat's work goes through, under --held-by, so the step table loads the edit
-# skill by name and the skill calls both writers that way.
-EDIT="$REPO/skills/converse-edit/SKILL.md"
-have "the step table sends a sitting the operator rules make a change to its skill" '**Steps 5–8, when the operator rules that the sitting make a change with them**' "$PROMPT"
-have "…by name" '`converse-edit` |' "$PROMPT"
-have "the edit skill holds the change on the conversation" 'gc bd dep add "$CHANGE" "$CONVERSATION" --type=blocks' "$EDIT"
-have "…cuts its tree through Work's setup under --held-by" '"$CONV/work-setup.sh" --bead "$CHANGE" --held-by "$CONVERSATION"' "$EDIT"
-have "…and hands it off through Work's hand-off under --held-by" '"$CONV/work-submit.sh" --bead "$CHANGE" --held-by "$CONVERSATION"' "$EDIT"
-have "…and reads the polecat class's standards before the first edit" 'template-fragments/work-quality-polecats.template.md' "$EDIT"
 echo "── a sitting iterating on a document writes one scaffold and names it in the ruling ──"
 have "the step table sends a sitting iterating on a document to its skill" '**Steps 5–8, when the operator is iterating on a document**' "$PROMPT"
 have "…by name" '`converse-iterate-document` |' "$PROMPT"
@@ -919,6 +908,17 @@ for sh_ in $shells; do
         bad "($sh_) converse-iterate-document: a scaffold the store refuses is not reported as written" "exit $rc"
     fi
 done
+echo "── a sitting makes a change the operator rules it make through Work's writers ──"
+# A sitting's change is held on its conversation and goes through the writers a
+# polecat's work goes through, under --held-by, so the step table loads the edit
+# skill by name and the skill calls both writers that way.
+EDIT="$REPO/skills/converse-edit/SKILL.md"
+have "the step table sends a sitting the operator rules make a change to its skill" '**Steps 5–8, when the operator rules that the sitting make a change with them**' "$PROMPT"
+have "…by name" '`converse-edit` |' "$PROMPT"
+have "the edit skill holds the change on the conversation" 'gc bd dep add "$CHANGE" "$CONVERSATION" --type=blocks' "$EDIT"
+have "…cuts its tree through Work's setup under --held-by" '"$CONV/work-setup.sh" --bead "$CHANGE" --held-by "$CONVERSATION"' "$EDIT"
+have "…and hands it off through Work's hand-off under --held-by" '"$CONV/work-submit.sh" --bead "$CHANGE" --held-by "$CONVERSATION"' "$EDIT"
+have "…and reads the polecat class's standards before the first edit" 'template-fragments/work-quality-polecats.template.md' "$EDIT"
 echo "── a moot or benign close settles a headline that waits on nothing ──"
 # A cut-short sitting leaves its hold's headline on the subject, and the next
 # sitting's premise re-check can find the conversation moot and close it. The
