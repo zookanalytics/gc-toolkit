@@ -39,6 +39,52 @@ func (r *Record) Status() string { return r.row.StatusLower() }
 // IssueType is the bead's issue type, "" when the row carries none.
 func (r *Record) IssueType() string { return r.row.IssueTypeString() }
 
+// Title is the bead's title.
+func (r *Record) Title() string { return r.row.Title }
+
+// Description is the bead's description, "" when the row carries none.
+func (r *Record) Description() string { return r.row.DescriptionString() }
+
+// Priority is the bead's priority, 0 when the row carries none.
+func (r *Record) Priority() int { return r.row.PriorityInt() }
+
+// Assignee is the bead's assignee, "" when it has none.
+func (r *Record) Assignee() string { return r.row.AssigneeString() }
+
+// Labels is the bead's labels, in the row's order.
+func (r *Record) Labels() []string { return r.row.LabelStrings() }
+
+// AwaitType is what a gate awaits, "" on a bead that is no gate.
+func (r *Record) AwaitType() string { return r.row.AwaitType }
+
+// CreatedAt is when the bead was created, as the row writes the time.
+func (r *Record) CreatedAt() string { return r.row.CreatedAtString() }
+
+// ClosedAt is when the bead closed, as the row writes the time, "" while it is
+// live.
+func (r *Record) ClosedAt() string { return r.row.ClosedAtString() }
+
+// EphemeralPlane reports whether the store keeps the bead in its ephemeral
+// plane, a wisp or a row stored with no history, which bd's listing leaves out
+// unless asked.
+func (r *Record) EphemeralPlane() bool { return r.row.InEphemeralPlane() }
+
+// Template reports whether the bead is a template molecule.
+func (r *Record) Template() bool { return r.row.Template() }
+
+// Rendered is every metadata value the row holds, each as the pack's scripts
+// render it, `(.metadata[k] // "") | tostring`. It is the input of a domain
+// that still spells the keys it reads, prstatus's Store among them
+// (docs/gctk-architecture.md, Debt). A domain reads a key it declares through
+// the declaration.
+func (r *Record) Rendered() map[string]string {
+	out := make(map[string]string, len(r.row.Metadata))
+	for k := range r.row.Metadata {
+		out[k] = r.row.Meta(k)
+	}
+	return out
+}
+
 // Edges is the bead's own edges. A record a snapshot read carries its wait and
 // parent-child edges alone, each with the far bead's title, status and close
 // time, and leaves out an edge whose far bead the store does not hold. A record

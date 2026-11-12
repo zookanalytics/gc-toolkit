@@ -78,11 +78,17 @@ func (e *WaitsForError) Error() string {
 // ReadError says one read could not answer: the store's reply failed or did not
 // decode, or its blocked listing left out a bead the store marks blocked. ID
 // names the bead it could not answer, and is empty when the whole read failed.
-// The next read can answer, so it is never an answer about the bead.
+// The next read can answer, so it is never an answer about the bead. Err is
+// what stopped a read that did not fail on its own, such as the context of a
+// client that stops its calls ([Client.WithContext]), and nil otherwise.
 type ReadError struct {
 	ID     string
 	Reason string
+	Err    error
 }
+
+// Unwrap is Err, so a caller can tell a stopped read by what stopped it.
+func (e *ReadError) Unwrap() error { return e.Err }
 
 func (e *ReadError) Error() string {
 	if e.ID == "" {
@@ -315,7 +321,8 @@ func (c *Client) Blocked() (*BlockedSet, error) {
 
 // strictArray runs `gc <args>` and returns the one JSON array it prints, under
 // List's strict contract: a non-zero exit, a reply that is not an array, or
-// anything but whitespace after the array fails the read with a *ReadError.
+// anything but whitespace after the array fails the read with a *ReadError, as
+// does a call the client's context stopped.
 func (c *Client) strictArray(args ...string) (json.RawMessage, error) {
 	what := "gc " + strings.Join(args[:min(len(args), 2)], " ")
 	var stderr bytes.Buffer
@@ -323,6 +330,9 @@ func (c *Client) strictArray(args ...string) (json.RawMessage, error) {
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
+		if cause := c.stopped(); cause != nil {
+			return nil, &ReadError{Reason: fmt.Sprintf("%s was stopped: %v", what, cause), Err: cause}
+		}
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
 			return nil, &ReadError{Reason: fmt.Sprintf("%s exited %d: %s", what, ee.ExitCode(), failure(out, stderr.String()))}

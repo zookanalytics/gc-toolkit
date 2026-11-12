@@ -2,8 +2,9 @@
 // show the board a commit builds with no city behind it.
 //
 // It serves the embedded app, a board answer read from a file at the board's own
-// path, and a canned answer for each write verb, and nothing else. It gathers no
-// bead state and runs no write tool, so nothing it serves reads or writes a city.
+// path, one rig's document read from a file at the rig board's routes, and a
+// canned answer for each write verb, and nothing else. It gathers no bead state
+// and runs no write tool, so nothing it serves reads or writes a city.
 // cmd/helm-fixture is its command, and that command's tests hold its import graph
 // to this package, the app's package and the standard library.
 package fixture
@@ -17,6 +18,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Answer is one write verb's canned HTTP answer: the status and the JSON body the
@@ -38,32 +40,70 @@ type errorBody struct {
 	Reason string `json:"reason"`
 }
 
+// rigList and rigAnswer mirror the bodies of helm-svc's rig board routes
+// (rigboard.Rigs and rigboard.Response, internal/server/rigboard.go), which the
+// page reads.
+type rigList struct {
+	ReadAt string   `json:"read_at"`
+	Rigs   []string `json:"rigs"`
+}
+
+type rigAnswer struct {
+	ReadAt string          `json:"read_at"`
+	Board  json.RawMessage `json:"board"`
+}
+
 // Handler returns the fixture's routes.
 //
 //   - /helm answers board, in the place helm-svc answers the board it computes,
 //     as JSON, whatever the method.
+//   - GET /helm/rigs lists the one rig rig's document names, and
+//     GET /helm/rigs/{rig} answers that document for that rig, with the time
+//     the fixture started as its read time, in the places helm-svc answers the
+//     rig board. Any other rig answers 404, as helm-svc answers a rig the city
+//     does not list.
 //   - POST /helm/<verb> answers with that verb's canned answer. A verb with none
 //     answers 503 with reason "unavailable", as helm-svc answers a write when it
 //     has no write tool, so the app shows its refusal and nothing runs.
 //   - Any other method on /helm/<verb> answers 405, as helm-svc's does.
 //   - Every other path goes to spa, the embedded app's handler.
 //
-// Any segment after /helm/ is a verb, so a verb the service adds later is served
-// here too, refused until it has an answer.
-func Handler(board []byte, answers map[string]Answer, spa http.Handler) (http.Handler, error) {
+// Any other segment after /helm/ is a verb, so a verb the service adds later is
+// served here too, refused until it has an answer.
+func Handler(board, rig []byte, answers map[string]Answer, spa http.Handler) (http.Handler, error) {
 	if !json.Valid(board) {
 		return nil, fmt.Errorf("the board answer is not JSON")
 	}
 	if trimmed := strings.TrimSpace(string(board)); !strings.HasPrefix(trimmed, "{") {
 		return nil, fmt.Errorf("the board answer is not a JSON object")
 	}
+	var doc struct {
+		Rig string `json:"rig"`
+	}
+	if err := json.Unmarshal(rig, &doc); err != nil {
+		return nil, fmt.Errorf("the rig document is not a JSON object: %w", err)
+	}
+	if doc.Rig == "" {
+		return nil, fmt.Errorf("the rig document names no rig")
+	}
 	if spa == nil {
 		return nil, fmt.Errorf("no app handler")
 	}
+	readAt := time.Now().UTC().Format(time.RFC3339)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/helm", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(board)
+	})
+	mux.HandleFunc("GET /helm/rigs", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, rigList{ReadAt: readAt, Rigs: []string{doc.Rig}})
+	})
+	mux.HandleFunc("GET /helm/rigs/{rig}", func(w http.ResponseWriter, r *http.Request) {
+		if name := r.PathValue("rig"); name != doc.Rig {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": name + ": the city lists no such rig"})
+			return
+		}
+		writeJSON(w, http.StatusOK, rigAnswer{ReadAt: readAt, Board: rig})
 	})
 	mux.HandleFunc("/helm/", func(w http.ResponseWriter, r *http.Request) {
 		verb := strings.TrimPrefix(r.URL.Path, "/helm/")
@@ -91,9 +131,16 @@ func Handler(board []byte, answers map[string]Answer, spa http.Handler) (http.Ha
 }
 
 func writeError(w http.ResponseWriter, status int, reason, msg string) {
+	writeJSON(w, status, errorBody{Error: msg, Reason: reason})
+}
+
+// writeJSON writes body as helm-svc writes its answers, with no HTML escaping.
+func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(errorBody{Error: msg, Reason: reason})
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(body)
 }
 
 // LoadAnswers reads the canned write answers in dir. A file named <verb>.json is

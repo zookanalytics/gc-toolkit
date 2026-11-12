@@ -5,8 +5,9 @@
 > `gc init`.
 
 gc-toolkit ships a **native agent roster** — polecat, refinery, witness,
-deacon, mechanik, polecat-codex, proactive, and the converse-opus,
-converse-fable and converse-codex sittings — declared in its own `pack.toml`.
+deacon, mechanik, polecat-codex, proactive, and the converse-claude-opus,
+converse-claude-fable, converse-codex-sol and converse-codex-astra sittings —
+declared in its own `pack.toml`.
 It imports nothing: there are no gastown prerequisites, no transitive imports,
 and no agent patches to wire.
 
@@ -107,8 +108,9 @@ that does not import the pack itself.
 
 - **The roster** — worker pools (`polecat`, and `polecat-codex` on the
   codex provider), patrols (`refinery`, `witness`, `deacon`), conversation
-  sittings (`converse-opus`, `converse-fable`, `converse-codex`, which
-  `gc-helm engage` opens per conversation), and `proactive` (always-on, 2-slot).
+  sittings (`converse-claude-opus`, `converse-claude-fable`,
+  `converse-codex-sol`, `converse-codex-astra`, which `gc-helm engage` opens
+  per conversation), and `proactive` (always-on, 2-slot).
 - **The lifecycle** — `lifecycle/lifecycle.toml` (states, transitions,
   metadata registry) and the single transition writer
   `assets/scripts/lifecycle.sh`. The script execs the `gctk` binary that the
@@ -228,6 +230,7 @@ The pack's checks, and what a failure means:
 | `check-root-advancing` | a started workflow root is still advancing or reachable: no in_progress `gc.kind=workflow` root sits with a dead session, unlanded work, and an unclaimable — unrouted AND unowned — executable frontier (I13) | a molecule drained mid-flight, and its inline steps have no owner and no route, so orphan recovery and the pool both pass over them |
 | `check-refinery-patrol-live` | a refinery whose find-work queue has held a bead past the bound (default 60m) has written its `mol-refinery-patrol` wisp within that bound (I14) | a refinery session working outside its patrol loop, or none running, while handed-off work waits in its queue |
 | `check-epic-closed-implies-ruled` | a closed epic that carries a hypothesis was ruled closed with its outcome (`epic_ruling=close` and `epic_ruling_reason`) or carries an explicit disposition (a duplicates or supersedes edge onto its successor); a closed epic with no hypothesis, a Delivery or an incomplete Epic that owes one, is exempt, and the incomplete Epic's exemption is compatibility debt (I15) | an epic closed by a bare `gc bd close`, which runs no finalize gate, before it was ruled close, or on a continue or shift ruling |
+| `check-po-queue-only` | the po receives nothing but its queue: no bead that a hold does not hold is routed or assigned to it, no mail to it waits unread, and every bead in its queue is new work that nothing has sent (I16) | a path that sends the po work: a route, an assignment, `gc sling <po> --on <formula>`, mail from any sender, or `hold:mayor` set on PR-finishing work, on a bead with a landing state, or on a bead an arm, an assignee or a live run already sends |
 | `check-config-bound` | prompts/overlays/fragments resolve in the composed config | a rename that missed a reference |
 | `check-seed-audit-current` | `generated/seed-audit/` is present and the pre-commit hook that regenerates it is wired (warn-only) | a fresh clone before its first render, or `core.hooksPath` not set to `assets/hooks` |
 | `check-recycle-capable` | cycle-recycle can fire: the Stop and UserPromptSubmit events reach the hook with its stdin intact, the hook's own `--measure` reads a transcript's context size, its `--drift` sees a changed pack file, and no refinery defer guard is latched | the wiring stopped passing the hook its stdin, the transcript shape moved under the measurement or the drift check, or an uncommitted tracked file has latched the refinery's git-op guard |
@@ -266,8 +269,9 @@ gc config show | grep -E '^\[\[agent\]\]|^name ='
 ```
 
 Confirm the native roster is present — `polecat`, `polecat-codex`,
-`refinery`, `witness`, `deacon`, `dog`, `converse-opus`, `converse-fable`,
-`converse-codex`, `mechanik` — with no gastown entries.
+`refinery`, `witness`, `deacon`, `dog`, `converse-claude-opus`,
+`converse-claude-fable`, `converse-codex-sol`, `converse-codex-astra`,
+`mechanik` — with no gastown entries.
 
 ### The seed audit's upkeep
 

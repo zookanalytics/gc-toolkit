@@ -67,6 +67,33 @@ eq "$("$SUT" --anchor A6g)" "none" "a human gate answers none"
 store "[$(anchor A6h), {\"id\":\"G6h\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"issue_type\":\"gate\",\"await_type\":\"human\",\"metadata\":{}}, $(blk B6h open '')]"
 printf 'G6h|blocks|A6h\nB6h|blocks|A6h\n' > "$STUB_DEPS"
 eq "$("$SUT" --anchor A6h)" "stuck B6h" "a human gate beside an unmarked blocker leaves the blocker stuck"
+echo "# a conversation that holds the PR's merge is a person's: neither an actor nor stuck"
+# A conversation on an open PR holds the merge through the anchor's blocks edge
+# onto it, and its row tells it: a task in the operator's queue, or one a
+# sitting holds under the alias that names its own id.
+conv() { # <id> <status> <assignee>
+  printf '{"id":"%s","status":"%s","assignee":"%s","notes":"","issue_type":"task","metadata":{}}' "$1" "$2" "$3"
+}
+store "[$(anchor A6c), $(conv C6q open human)]"
+printf 'C6q|blocks|A6c
+C6q|tracks|A6c
+' > "$STUB_DEPS"
+eq "$("$SUT" --anchor A6c)" "none" "a conversation in the operator's queue answers none"
+store "[$(anchor A6s), $(conv C6s in_progress 'gc-toolkit/converse-claude-opus.c-C6s')]"
+printf 'C6s|blocks|A6s
+C6s|tracks|A6s
+' > "$STUB_DEPS"
+eq "$("$SUT" --anchor A6s)" "none" "a conversation a sitting holds answers none, not a claim"
+store "[$(anchor A6x), $(conv C6x in_progress 'gc-toolkit/converse-claude-opus.c-C6x'), $(blk B6x open '')]"
+printf 'C6x|blocks|A6x
+B6x|blocks|A6x
+' > "$STUB_DEPS"
+eq "$("$SUT" --anchor A6x)" "stuck B6x" "a conversation beside an unmarked blocker leaves the blocker stuck, named alone"
+store "[$(anchor A6o), $(conv T6o in_progress 'gc-toolkit/gc-toolkit.polecat-2')]"
+printf 'T6o|blocks|A6o
+' > "$STUB_DEPS"
+eq "$("$SUT" --anchor A6o)" "actor T6o claimed by gc-toolkit/gc-toolkit.polecat-2" "a task a worker claims is still an actor's"
+
 echo "# an armed dispatch slings the blocker once nothing holds it: an actor's, not stuck"
 store "[$(anchor A6a), {\"id\":\"B6a\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"gc.dispatch_when_ready\":\"rig/pool\"}}]"
 printf 'B6a|blocks|A6a\n' > "$STUB_DEPS"

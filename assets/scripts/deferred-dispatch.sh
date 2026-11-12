@@ -9,13 +9,17 @@
 # (docs/gctk-architecture.md, "The bead holds contract"): work that has not
 # started is held by a wait of its own or one on a parent-child ancestor, and
 # work in flight only by its own waits, so an armed re-dispatch of work already
-# begun fires under a parked epic. The pass asks it once for every open armed
-# bead, and slings one it answers clear. One it holds, blocked, held or
-# unjudged, keeps its arm and fires once nothing holds it, and one it could not
-# answer stays armed for the next pass. Status still gates: a non-open status is
-# set deliberately, and a bead at one is never dispatched. `list` answers "what
-# dispatches are owed?", naming the wait that holds each held arm; `disarm`
-# withdraws one.
+# begun fires under a parked epic. An open bead carrying one of Gas City's hold
+# labels is held too (has_dispatch_hold, dispatch-path.sh): a sling reads no
+# hold, so slinging it would pour work the label keeps from every pool. `arm`
+# still accepts such a bead, because placing one arms it and then lifts the
+# hold. The pass asks gctk bead holds once for every open armed bead, and slings
+# one it answers clear that carries no hold label. One it holds, blocked, held
+# or unjudged, or one a label holds, keeps its arm and fires once nothing holds
+# it, and one it could not answer stays armed for the next pass. Status still
+# gates: a non-open status is set deliberately, and a bead at one is never
+# dispatched. `list` answers "what dispatches are owed?", naming the wait or the
+# label that holds each held arm; `disarm` withdraws one.
 #
 # Work assigned to a named agent owes a notice, not a sling (`notify`). A named
 # session's hook offers it a bead by the bead's assignee once bd reports the
@@ -168,6 +172,22 @@ CAP_QUIET_WINDOW=86400
 # >>> gctk-bin
 GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
+# The one definition of a dispatch hold, the label hold a sling does not read,
+# shared with the proactive scan and the doctor checks. Unsourceable, no arm can
+# be told from a label-held one, so nothing runs.
+# shellcheck source=dispatch-path.sh
+. "$SCRIPTS_DIR/dispatch-path.sh" || { echo "$PROG: cannot source dispatch-path.sh beside this script" >&2; exit 1; }
+# A label hold as the pass log and `list` name it: "its <label> label" for an
+# open bead carrying one, empty for any other bead. It reads before the answer
+# of `gctk bead holds`, because no wait landing lifts a label.
+# shellcheck disable=SC2016  # a jq program: $-names are jq's, not the shell's
+DD_LABEL_HOLD_JQ='
+  def label_hold:
+    if (.status // "") == "open" and has_dispatch_hold
+    then "its " + ([(.labels // [])[]? | tostring | select({labels: [.]} | has_dispatch_hold)][0]
+                   | gsub("[[:cntrl:]]"; " ")) + " label"
+    else "" end;
+'
 # The pass lock is keyed per rig like the order, so two rigs never share one. It
 # lives in the pack state dir the order's env names; the override lets the
 # hermetic test point it at a tmpdir.
@@ -401,8 +421,11 @@ cmd_arm() {
     # slings the arm while that bead is still open. The read lists such an edge,
     # so the hint names it rather than let the all-clear stand on it. This is the
     # one place a human is here to redirect the sequencing. A read that does not
-    # answer proves neither, so the hint says so.
-    local rec="" rec_rc=0 foreign="" hstatus="" hold=""
+    # answer proves neither, so the hint says so. A hold label on the bead holds
+    # it whatever gctk answers, as the pass reads it (label_hold), so the hint
+    # names the label rather than an all-clear.
+    local rec="" rec_rc=0 foreign="" hstatus="" hold="" lhold=""
+    lhold="$(printf '%s' "$json" | jq -r "$DISPATCH_PATH_JQ$DD_LABEL_HOLD_JQ"'label_hold' 2>/dev/null)" || lhold=""
     rec="$(holds_read "$bead")" || rec_rc=$?
     if [ "$rec_rc" -eq 0 ]; then
         foreign="$(printf '%s' "$rec" | jq -r '[.foreign[]?.id] | join(",")' 2>/dev/null)" || rec_rc=1
@@ -413,6 +436,8 @@ cmd_arm() {
         echo "$PROG: warning: $bead — could not read what holds it, so when reconcile will dispatch it is unproven. Read it with \`gctk bead holds $bead\` if the timing matters." >&2
     elif [ -n "$foreign" ]; then
         echo "$PROG: warning: $bead has a wait edge to $foreign, which has no row in this store. bd resolves dependencies within a single store, so this cross-rig or external blocker does not hold the arm: reconcile will dispatch $bead with $foreign still open. Sequence it by hand if that ordering matters." >&2
+    elif [ -n "$lhold" ]; then
+        echo "$PROG: note: $bead is HELD by $lhold — the first reconcile pass after nothing holds it will dispatch it"
     elif [ "$hstatus" = clear ]; then
         echo "$PROG: note: nothing holds $bead right now — the next reconcile pass will dispatch it"
     else
@@ -696,21 +721,25 @@ armed_rows() { # rows_out all_out : "<id>\037<status>\037<holds>\037<hold>\037<a
     # The answers reach jq as a file and the listing over stdin, since both grow
     # with the armed set and an argv value past the kernel's per-argument cap
     # fails the whole enumeration. A bead the read printed no line for has no
-    # answer, which is an error, never clear.
-    jq -rn --slurpfile h "$held" "$HOLDS_JQ"'
+    # answer, which is an error, never clear. A hold label reads first, as
+    # "label", because no wait landing lifts it (label_hold).
+    jq -rn --slurpfile h "$held" "$HOLDS_JQ$DISPATCH_PATH_JQ$DD_LABEL_HOLD_JQ"'
         ($h | map({key: ((.id // "") | tostring), value: .}) | from_entries) as $hm
         | input | .[]
         | ((.id // "") | tostring) as $id
         | ($hm[$id] // null) as $r
+        | label_hold as $l
         | (if (.status // "") != "open" then ""
+           elif $l != "" then "label"
            elif $r == null or $r.error != null then "error"
            else (($r.status // "") | tostring | if . == "" then "error" else . end) end) as $s
         | [ $id, (.status // ""), $s,
-            (if $s == "error" then (if $r == null then "gctk bead holds printed no answer for it" else ($r.error | tostring) end)
+            (if $s == "label" then $l
+             elif $s == "error" then (if $r == null then "gctk bead holds printed no answer for it" else ($r.error | tostring) end)
              elif $s == "" or $s == "clear" then ""
              else ($r | holds_line) end),
             (if $s == "held" then ($r | holds_line) else "" end),
-            (if $s == "" or $s == "error" then "" else (($r.in_flight // "") | tostring) end) ]
+            (if $s == "" or $s == "error" or $s == "label" then "" else (($r.in_flight // "") | tostring) end) ]
         | map(tostring | gsub("[[:cntrl:]]"; " ")) | join("\u001f")' < "$all_out" > "$out" 2>/dev/null || return 1
     return 0
 }
@@ -929,7 +958,7 @@ reconcile_dispatch() {
     expected="$(wc -l < "$rows" | tr -d ' ')"
     mktemp_tracked || { echo "$PROG: reconcile: mktemp failed" >&2; return 1; }; heldf="$REPLY"
 
-    local id status holds hold via json fresh target args_json assignee slung rc merge_result fails flight
+    local id status holds hold via json fresh fresh_hold target args_json assignee slung rc merge_result fails flight
     while IFS=$'\037' read -r id status holds hold via flight; do
         [ -n "${id:-}" ] || continue
         processed=$((processed + 1))
@@ -1016,16 +1045,18 @@ reconcile_dispatch() {
             retired=$((retired + 1)); continue
         fi
 
-        # Not dispatchable. An open bead `gctk bead holds` answers clear is the
-        # one way in. A held bead waits on a wait that can clear, its own or an
-        # ancestor's, and the arm stays intact for the first pass after nothing
-        # holds it. An arm an ancestor's wait holds is gathered for the pass log
-        # below; one its own wait holds waits on what it was armed for, and is
-        # counted. A bead the read could not answer stays armed, and the pass
-        # fails, since an unread hold is not a release. Any other live status is
-        # never slung, so waiting for it is waiting for something no wait landing
-        # can deliver. Say so every pass — the arm outlives every session that
-        # could remember it, and a silent count is how it stays lost.
+        # Not dispatchable. An open bead `gctk bead holds` answers clear, and that
+        # carries no hold label, is the one way in. A held bead waits on a wait
+        # that can clear, its own or an ancestor's, or on the write that lifts its
+        # label (label_hold), which no sling reads, and the arm stays intact for
+        # the first pass after nothing holds it. An arm an ancestor's wait holds is
+        # gathered for the pass log below; one its own wait or its label holds
+        # waits on what it was armed for, and is counted. A bead the read could not
+        # answer stays armed, and the pass fails, since an unread hold is not a
+        # release. Any other live status is never slung, so waiting for it is
+        # waiting for something no wait landing can deliver. Say so every pass —
+        # the arm outlives every session that could remember it, and a silent
+        # count is how it stays lost.
         if [ "$status" != "open" ]; then
             echo "$PROG: STRANDED $id is armed at status=$status, and reconcile slings open beads only — return it to open or disarm; no wait landing will dispatch it" >&2
             stranded=$((stranded + 1)); continue
@@ -1124,9 +1155,12 @@ reconcile_dispatch() {
         # withdrawn this dispatch. That is what lets stand-down.sh answer a bead's
         # gate with a ruling not to proceed: it disarms first, so a pass that read
         # the gate closed reads the arm gone here, and a pass that read the gate open
-        # holds the bead above. This is one read per sling, so it does not grow with
-        # the armed set. A read that does not answer leaves the bead armed for the
-        # next pass.
+        # holds the bead above. The same read is tested for a hold label by the rule
+        # the listing applies (label_hold), because a label set since then holds the
+        # bead as one in the listing does: no sling reads it, so the arm stays, with
+        # no marker and no attempt counted, for the write that lifts the label. This
+        # is one read per sling, so it does not grow with the armed set. A read that
+        # does not answer leaves the bead armed for the next pass.
         if ! fresh="$(show_bead "$id")" || [ -z "$fresh" ]; then
             echo "$PROG: WARN could not re-read the arm on $id before slinging it — leaving armed, not slinging" >&2
             failed=$((failed + 1)); continue
@@ -1134,6 +1168,14 @@ reconcile_dispatch() {
         if [ -z "$(meta_of "$fresh" "$K_TARGET")" ]; then
             echo "$PROG: withdrawn $id — its arm was removed after this pass listed it; not slinging"
             retired=$((retired + 1)); continue
+        fi
+        if ! fresh_hold="$(printf '%s' "$fresh" | jq -r "$DISPATCH_PATH_JQ$DD_LABEL_HOLD_JQ"'label_hold' 2>/dev/null)"; then
+            echo "$PROG: WARN could not read the hold labels on $id before slinging it — leaving armed, not slinging" >&2
+            failed=$((failed + 1)); continue
+        fi
+        if [ -n "$fresh_hold" ]; then
+            echo "$PROG: held $id — $fresh_hold was set after this pass listed it; not slinging, and its arm stays"
+            held=$((held + 1)); continue
         fi
 
         # Stamp the marker in its unproven "slinging@" state, THEN sling. Dying

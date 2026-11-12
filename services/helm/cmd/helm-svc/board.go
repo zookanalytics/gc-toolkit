@@ -15,8 +15,9 @@ import (
 )
 
 // `helm-svc board --json` prints the board's rows as JSON, for agents and
-// tooling: the same gather and the same derivation the web page serves. People
-// read the board on the web page; this command has no terminal view.
+// tooling: the same gather and the same derivation the sidecar's GET /helm
+// serves. People read the board on the web page; this command has no terminal
+// view.
 //
 // WHY IT IS THE SAME BINARY. The obvious alternative — a separate `helm-board`
 // built alongside — re-creates exactly the failure that motivated this epic:
@@ -49,8 +50,8 @@ const boardUsage = `Usage:
 
   Print the board's rows as a JSON array: what is owed by you, oldest first
   after any conversation whose sitting failed to start. It is the same gather
-  and derivation the Helm web page serves. People read the board on that page;
-  this command has no terminal view.
+  and derivation the sidecar's /helm answer serves. People read the board on
+  the Helm web page; this command has no terminal view.
 
   --json             Print the rows as a JSON array (stable contract). Required.
   --all              The city overview instead: every anchor, ranked together.

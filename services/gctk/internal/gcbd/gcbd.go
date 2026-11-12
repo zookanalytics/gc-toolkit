@@ -26,6 +26,7 @@ package gcbd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -37,6 +38,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/daemon"
@@ -52,7 +54,10 @@ import (
 // the fields that make a bead a human gate (prstatus.IsHumanGate); `gc bd dep list`
 // carries them on each far bead's row, and bd leaves a field out of a row when
 // its value is empty. DependencyType is the edge a `gc bd show` row's
-// dependency was reached by, and is empty on any other row.
+// dependency was reached by, and is empty on any other row. Description,
+// Priority, Labels and CreatedAt keep their JSON shapes too, each read through
+// its accessor, and so do Ephemeral, NoHistory and IsTemplate, the columns
+// that put a row in the store's ephemeral plane or make it a template.
 type Bead struct {
 	ID           string         `json:"id"`
 	Title        string         `json:"title"`
@@ -65,6 +70,13 @@ type Bead struct {
 	IssueType    any            `json:"issue_type"`
 	AwaitType    string         `json:"await_type"`
 	AwaitID      string         `json:"await_id"`
+	Description  any            `json:"description"`
+	Priority     any            `json:"priority"`
+	Labels       any            `json:"labels"`
+	CreatedAt    any            `json:"created_at"`
+	Ephemeral    any            `json:"ephemeral"`
+	NoHistory    any            `json:"no_history"`
+	IsTemplate   any            `json:"is_template"`
 
 	DependencyType string `json:"dependency_type"`
 }
@@ -124,6 +136,53 @@ func (b *Bead) NotesString() string { return jqString(b.Notes) }
 // IssueTypeString returns `.issue_type // "" | tostring`.
 func (b *Bead) IssueTypeString() string { return jqString(b.IssueType) }
 
+// ClosedAtString returns `.closed_at // "" | tostring`.
+func (b *Bead) ClosedAtString() string { return jqString(b.ClosedAt) }
+
+// DescriptionString returns `.description // "" | tostring`.
+func (b *Bead) DescriptionString() string { return jqString(b.Description) }
+
+// CreatedAtString returns `.created_at // "" | tostring`.
+func (b *Bead) CreatedAtString() string { return jqString(b.CreatedAt) }
+
+// PriorityInt returns the bead's priority, 0 when the row carries none or one
+// that is not a whole number.
+func (b *Bead) PriorityInt() int {
+	switch t := b.Priority.(type) {
+	case json.Number:
+		if n, err := t.Int64(); err == nil {
+			return int(n)
+		}
+	case float64:
+		if t == float64(int(t)) {
+			return int(t)
+		}
+	}
+	return 0
+}
+
+// InEphemeralPlane reports whether the store keeps the bead in its ephemeral
+// plane, bd's wisps table: a wisp, or a row stored with no history. bd's
+// listing leaves that plane out unless asked.
+func (b *Bead) InEphemeralPlane() bool { return b.Ephemeral == true || b.NoHistory == true }
+
+// Template reports whether the bead is a template molecule, which bd's listing
+// leaves out unless asked.
+func (b *Bead) Template() bool { return b.IsTemplate == true }
+
+// LabelStrings returns the bead's labels, in the row's order, leaving out a
+// label that is not a string.
+func (b *Bead) LabelStrings() []string {
+	list, _ := b.Labels.([]any)
+	var out []string
+	for _, l := range list {
+		if s, ok := l.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 // StatusLower returns `.status // "" | tostring | ascii_downcase`.
 func (b *Bead) StatusLower() string { return b.StatusLowerOr("") }
 
@@ -152,13 +211,34 @@ const maxDaemonBody = 1 << 20
 // supervisor-API read path and are all empty when it is off (GC_NO_API, no city
 // in the environment, no discoverable supervisor, or a pinned store), in which
 // case Show reads straight through bin. db is the store a pinned client names
-// on every call ([Client.In]), empty for the store gc resolves.
+// on every call ([Client.In]), empty for the store gc resolves. ctx ends every
+// call the client forks ([Client.WithContext]), and is nil for a client whose
+// calls run to their end.
 type Client struct {
 	bin     string
 	httpc   *http.Client
 	baseURL string
 	city    string
 	db      string
+	ctx     context.Context
+}
+
+// stopGrace is how long a call stopped by its context may hold its output open
+// before the wait for it gives up. The stop kills every process the call
+// started, so only one that left the call's process group can hold it that
+// long.
+const stopGrace = 2 * time.Second
+
+// WithContext returns a client whose every forked `gc` call ends when ctx
+// does. Each call runs in a process group of its own, and once ctx is done the
+// whole group is killed. gc runs bd as a child that writes to the call's own
+// output, so a stop that killed gc alone would leave bd reading the store and
+// the call waiting on it. A call that has not started by then does not start.
+// The supervisor-API read is not a forked call and keeps its own timeout.
+func (c *Client) WithContext(ctx context.Context) *Client {
+	p := *c
+	p.ctx = ctx
+	return &p
 }
 
 // In returns a client pinned to the bead store at db, a store's .beads
@@ -259,12 +339,30 @@ func (c *Client) Route(ids ...string) (string, error) {
 
 // command is the `gc` command for args, a `bd` call, with a pinned client's
 // store named ahead of the verb, where bd reads its global flags. A call that
-// names its own store keeps it.
+// names its own store keeps it. A client with a context runs the call in its
+// own process group and kills the group once the context is done
+// ([Client.WithContext]).
 func (c *Client) command(args ...string) *exec.Cmd {
 	if c.db != "" && len(args) > 0 && args[0] == "bd" && !slices.Contains(args, "--db") {
 		args = append([]string{"bd", "--db", c.db}, args[1:]...)
 	}
-	return exec.Command(c.bin, args...)
+	if c.ctx == nil {
+		return exec.Command(c.bin, args...)
+	}
+	cmd := exec.CommandContext(c.ctx, c.bin, args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	cmd.WaitDelay = stopGrace
+	return cmd
+}
+
+// stopped is why the client's context stopped its calls, and nil while the
+// context runs.
+func (c *Client) stopped() error {
+	if c.ctx == nil || c.ctx.Err() == nil {
+		return nil
+	}
+	return context.Cause(c.ctx)
 }
 
 // New returns a Client whose reads prefer the supervisor API when one is

@@ -87,6 +87,12 @@ operator would want to make. Read each line that way:
   in quoted and marked exact. An accepted proposal goes in by its substance,
   because "as recommended" sends the worker to a transcript, and by its text only
   where the operator accepted that text.
+- **A line for a repository's architecture document is held to its standard,**
+  `gc-toolkit.architecture-document`, as the document's own lines are, because
+  the worker may carry its substance into the document word for word. Load the
+  standard before you write the line. What the standard keeps out, such as how
+  a part will carry out its job, goes in a line for the file that holds it,
+  such as the design.
 - **A change across the whole document is one line** under `WHOLE DOCUMENT`,
   such as a term renamed everywhere, with no line references. A rule the worker
   applies by judgment adds the test each row or sentence must pass, and a rule of

@@ -11,8 +11,8 @@
 // board's `--json` emits, in the same order, inside the envelope
 // {generated_at, total, tiles}.
 //
-// PARITY (tk-134d7). The board is ONE model, which the web dashboard renders
-// and `helm-svc board --json` prints, so the field set here is the whole
+// PARITY (tk-134d7). The board is ONE model, which the sidecar's GET /helm
+// serves and `helm-svc board --json` prints, so the field set here is the whole
 // of gc-helm.sh's `--json` contract rather than the spike subset. Everything
 // the bash board computes is computed here: the full rank weight (subtree size
 // + priority + a capped cross-rig-ref count), the takeaway-driven NEEDS
@@ -26,8 +26,9 @@
 // conversations the gather admits as anchors of their own ([KindGate],
 // [KindConversation]), which the board folds onto the beads they concern.
 //
-// The struct tags are an additive contract: the TypeScript frontend mirrors
-// them, so fields may be added but never renamed or removed.
+// The struct tags are an additive contract: `helm-svc board --json`'s callers
+// read them and web/src/contract.ts mirrors them, so fields may be added but
+// never renamed or removed.
 package board
 
 import (
@@ -334,8 +335,8 @@ const (
 	WaitLanded WaitAnswer = "landed"
 )
 
-// Tile is one rendered row of the board — the additive contract mirrored by the
-// frontend and emitted verbatim by `helm-svc board --json`.
+// Tile is one rendered row of the board — the additive contract mirrored by
+// web/src/contract.ts and emitted verbatim by `helm-svc board --json`.
 //
 // FIELD ORDER IS PART OF THE CONTRACT. encoding/json emits struct fields in
 // declaration order, so the sequence below is what every consumer sees.
@@ -363,9 +364,9 @@ type Tile struct {
 	// Held says the operator's side has this bead: an open human gate blocks
 	// it, an acceptance an earlier Accept left unfinished keeps it, or an open
 	// conversation tracks it. Only the first two hold its work ([WorkHeld]); a
-	// conversation blocks nothing. A held anchor is never stranded, because the
-	// question or the conversation IS the attention it would be flagged for
-	// lacking.
+	// conversation holds none, and one on an open PR holds only the PR's merge.
+	// A held anchor is never stranded, because the question or the conversation
+	// IS the attention it would be flagged for lacking.
 	Held bool `json:"held"`
 	// SittingState refines Held. It is the roll-up of the [Sitting.State] of the
 	// sittings on this row, so the row and the record cannot disagree:
@@ -544,9 +545,9 @@ type Tile struct {
 
 	// --- the attention-type band and the cluster key -----------------------
 	//
-	// Two derived classifications the dashboard groups by, on the wire for the
+	// Two derived classifications a surface groups by, on the wire for the
 	// same reason [Owed] is: the split is not recoverable from the coarse
-	// [Severity] band, and putting it here is what keeps the dashboard from
+	// [Severity] band, and putting it here is what keeps a surface from
 	// inventing its own client-side split.
 
 	// Section is the KIND of attention a row wants, orthogonal to Severity's
@@ -570,7 +571,7 @@ type Tile struct {
 	// GroupRoot is the id of the family this row belongs to — the top-most anchor
 	// its parent-child and blocked edges climb to, equal to the row's OWN id when
 	// it climbs to nothing. Every tile carries one, so a surface buckets families
-	// the way the dashboard already buckets [Section]. Dependency structure is the
+	// the way it buckets [Section]. Dependency structure is the
 	// board's primary grouping axis and the attention band orders and highlights
 	// WITHIN a family; [GroupByFamily] is that partition.
 	GroupRoot string `json:"group_root"`
@@ -685,10 +686,11 @@ type Tile struct {
 	// WorkHeld refines Held: true when the operator's answer is required before
 	// this bead's work can move, because an open human gate blocks it or an
 	// acceptance an earlier Accept left unfinished keeps it. A Held row where it
-	// is false only has a conversation on it, which blocks nothing, so the work
-	// can move and merge while the conversation waits for the operator. False on
-	// every row that is not held. It is derived here rather than in the browser,
-	// so each surface tells the two kinds of held row apart from one reading.
+	// is false only has a conversation on it, which holds no work, so the work
+	// moves while the conversation waits for the operator, and only an open PR's
+	// merge waits for the conversation to close. False on every row that is not
+	// held. It is derived here, so each reader of the row tells the two kinds of
+	// held row apart from one reading.
 	WorkHeld bool `json:"work_held"`
 }
 

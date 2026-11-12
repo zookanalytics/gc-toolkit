@@ -32,9 +32,28 @@
 #   (UNREAD)   a candidate whose own row does not read files nothing, exit 4
 #   (OPEN-JSON) --json prints {subject, conversation, filed}
 #   (ALLOWDUP) --allow-duplicate files a fresh conversation beside a queued one
+#   (REPLY-PART) a conversation filed whose reply onto the gate the store
+#              refuses exits 4, and --json still names the conversation
+#   (REPLY-EARLY) --json names the conversation before its reply onto the
+#              gate is written, and answers it once
+#   (ALLOWDUP-AGAIN) --allow-duplicate on a concern a queued conversation holds
+#              as its ask lands on it, completes its reply, and files nothing
+#   (CONVERSATION) --conversation completes the conversation it names, which a
+#              sitting has taken out of the queue, files nothing, and says the
+#              sitting has it; one that holds another ask or is closed files
+#              nothing, exit 4, and beside --new-subject it is refused, exit 2
+#   (IF-SUBJECT) --if-subject files only while the reference names that subject:
+#              a successor, a PR's anchor or a gate's waiter that is another
+#              bead files nothing, exit 4, and beside --new-subject it is
+#              refused, exit 2
 #   (GATE)     a human gate names the one bead still waiting on it, and the
 #              conversation replies to the gate; several waiting beads, or none,
 #              file nothing and say why
+#   (FROM)     --from names the bead the gate was reached from: a gate several
+#              open beads wait on files about that one; one that holds it only
+#              through another bead is taken as without --from; one that no
+#              longer holds it, or whose holds do not read, files nothing, exit
+#              4; beside --new-subject it is refused, exit 2
 #   (MISSING)  bd show's `{"error": …}` OBJECT answer -> exit 4, NOTHING filed
 #   (MISMATCH) bd show answering a DIFFERENT bead -> exit 4, nothing filed
 #   (NORIG)    an id prefix matching no rig -> exit 4 naming the prefix
@@ -91,12 +110,17 @@ mkdir -p "$TMP/bin"
 #   bd dep list <gate> --direction=up --type blocks — the beads waiting on the
 #     gate: $FAKE_WAITERS, a JSON array.
 #   bd list --id <ids> — each named bead's own row, with its edges, for the
-#     comma-separated ids. $FAKE_CONV tracks the recorded bead alone, and
+#     comma-separated ids. $FAKE_CONV tracks the recorded bead alone, its
+#     ask $FAKE_CONV_DESC and its replies-to edges the ones `dep add` recorded, and
 #     $FAKE_TWO tracks it and tk-elsewhere, so it is no conversation. Any other
 #     id is the conversation a create filed: a task that tracks the subject its
 #     --deps named and carries the assignee it was filed with. Its replies-to
-#     edges are the ones `dep add` recorded. An id in $FAKE_LIST_DROPS is left
-#     out, as a row the store did not return.
+#     edges are the ones `dep add` recorded. Under $FAKE_REPLY_REFUSED a
+#     `dep add` exits 1 and records nothing, as a store that refused the edge.
+#     Under $FAKE_REPLY_SEES, a file, `dep add` copies it to
+#     $FAKE_REPLY_SEES.at-reply first, so a case that sends open's stdout there
+#     reads what open had answered when its reply was written.
+#     An id in $FAKE_LIST_DROPS is left out, as a row the store did not return.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 ${2:-}" in
   "rig list")
@@ -163,7 +187,14 @@ case "$1 ${2:-}" in
         esac ;;
       *)
         printf 'bd dep %s\n' "$*" >> "$FAKE_CALLS"
-        [ "${3:-}" = add ] && printf '%s %s\n' "$4" "$5" >> "$TMP_REPLIES" ;;
+        if [ "${3:-}" = add ] && [ -n "${FAKE_REPLY_SEES:-}" ]; then
+          cat "$FAKE_REPLY_SEES" > "$FAKE_REPLY_SEES.at-reply"
+        fi
+        if [ "${3:-}" = add ] && [ -n "${FAKE_REPLY_REFUSED:-}" ]; then
+          echo "bd dep add: the store refused the edge" >&2; exit 1
+        fi
+        [ "${3:-}" = add ] && printf '%s %s\n' "$4" "$5" >> "$TMP_REPLIES"
+        : ;;
     esac ;;
   "bd list")
     # Each named bead's own row (--id, comma-separated).
@@ -174,9 +205,11 @@ case "$1 ${2:-}" in
     for _id in $(printf '%s' "$_ids" | tr ',' ' '); do
       case ",${FAKE_LIST_DROPS:-}," in *",$_id,"*) continue ;; esac
       if [ -n "${FAKE_CONV:-}" ] && [ "$_id" = "$FAKE_CONV" ]; then
+        _reps="$(awk -v c="$_id" '$1 == c {print $2}' "$TMP_REPLIES" 2>/dev/null | jq -Rsc --arg c "$_id" '[ split("\n")[] | select(. != "") | {issue_id:$c, depends_on_id:., type:"replies-to"} ]')"
         _row=$(jq -n --arg c "$_id" --arg a "${FAKE_CONV_ASSIGNEE:-human}" --arg st "${FAKE_CONV_STATUS:-open}" --arg s "$_tracked" \
-          '{id:$c, issue_type:"task", status:$st, assignee:$a, title:"an earlier concern", created_at:"2026-10-01T00:00:00Z",
-            dependencies:[{issue_id:$c, depends_on_id:$s, type:"tracks"}]}')
+            --arg d "${FAKE_CONV_DESC:-an earlier concern}" --argjson r "${_reps:-[]}" \
+          '{id:$c, issue_type:"task", status:$st, assignee:$a, title:"an earlier concern", description:$d, created_at:"2026-10-01T00:00:00Z",
+            dependencies:([{issue_id:$c, depends_on_id:$s, type:"tracks"}] + $r)}')
       elif [ -n "${FAKE_TWO:-}" ] && [ "$_id" = "$FAKE_TWO" ]; then
         _row=$(jq -n --arg c "$_id" --arg s "$_tracked" \
           '{id:$c, issue_type:"task", status:"open", assignee:"human", title:"a task about two beads", created_at:"2026-09-01T00:00:00Z",
@@ -489,6 +522,97 @@ grep -q 'is already open' <<< "$OUT$ERR" \
   || ok "(ALLOWDUP) the join is bypassed"
 unset FAKE_CONV
 
+# --- (REPLY-PART) a conversation filed whose reply the store refuses ---------
+# The conversation is filed and holds the concern, so --json names it, and a
+# caller that saves again knows what holds the concern.
+export FAKE_WAITERS='[{"id":"tk-anchor","status":"open","dependency_type":"blocks"}]' FAKE_REPLY_REFUSED=1
+run_open found tk-gate1 --reason "the question" --allow-duplicate --if-subject tk-anchor --json
+eq "$RC" "4" "(REPLY-PART) a reply onto the gate the store refuses exits 4"
+eq "$OUT" '{"subject":"tk-anchor","conversation":"tk-conv1","filed":true}' "(REPLY-PART) --json names the conversation it filed"
+grep -q 'conversation tk-conv1 is filed on tk-anchor, but the store refused its reply onto gate tk-gate1' <<< "$ERR" \
+  && ok "(REPLY-PART) …and stderr says the store refused its reply onto the gate" || bad "(REPLY-PART) message (err: $ERR)"
+unset FAKE_REPLY_REFUSED
+
+# --- (REPLY-EARLY) the conversation is answered before its reply ------------
+# A caller that stops waiting while the reply onto the gate stalls, as the form
+# does at its deadline, has already read which conversation holds the concern,
+# and saves again onto it by its id.
+export FAKE_REPLY_SEES="$TMP/out"
+reset_store; export FAKE_SHOW_MODE=found
+set +e
+sh "$SCRIPT" open tk-gate1 --reason "the question" --allow-duplicate --if-subject tk-anchor --json >"$TMP/out" 2>"$TMP/err"; RC=$?
+set -e
+eq "$RC" "0" "(REPLY-EARLY) a conversation filed through a gate exits 0"
+eq "$(cat "$TMP/out.at-reply" 2>/dev/null)" '{"subject":"tk-anchor","conversation":"tk-conv1","filed":true}' \
+  "(REPLY-EARLY) --json named the conversation before its reply onto the gate was written"
+eq "$(cat "$TMP/out")" '{"subject":"tk-anchor","conversation":"tk-conv1","filed":true}' "(REPLY-EARLY) …and answers it once"
+grep -q 'bd dep add tk-conv1 tk-gate1 --type replies-to' "$FAKE_CALLS" \
+  && ok "(REPLY-EARLY) …then writes the reply" || bad "(REPLY-EARLY) reply (calls: $(cat "$FAKE_CALLS"))"
+unset FAKE_REPLY_SEES
+rm -f "$TMP/out" "$TMP/out.at-reply"
+
+# --- (ALLOWDUP-AGAIN) a concern a queued conversation holds is not filed again -
+# A run again after one that filed the conversation and then failed lands on
+# that conversation, completes its reply onto the gate, and files nothing new.
+export FAKE_CONV=tk-conv0 FAKE_CONV_DESC="the question"
+run_open found tk-gate1 --reason "the question" --allow-duplicate --if-subject tk-anchor --json
+eq "$RC" "0" "(ALLOWDUP-AGAIN) --allow-duplicate on a concern a queued conversation holds exits 0"
+grep -q '^bd create' <<< "$CALLS" \
+  && bad "(ALLOWDUP-AGAIN) a second conversation was filed (calls: $CALLS)" || ok "(ALLOWDUP-AGAIN) nothing new is filed"
+grep -q 'bd dep add tk-conv0 tk-gate1 --type replies-to' <<< "$CALLS" \
+  && ok "(ALLOWDUP-AGAIN) its reply onto the gate is made" || bad "(ALLOWDUP-AGAIN) reply (calls: $CALLS)"
+eq "$OUT" '{"subject":"tk-anchor","conversation":"tk-conv0","filed":true}' "(ALLOWDUP-AGAIN) --json names the conversation that holds the concern"
+run_open found tk-gate1 --reason "another question" --allow-duplicate --if-subject tk-anchor --json
+grep -q '^bd create' <<< "$CALLS" \
+  && ok "(ALLOWDUP-AGAIN) a concern it does not hold is filed as its own" || bad "(ALLOWDUP-AGAIN) no create for another concern (calls: $CALLS)"
+unset FAKE_CONV FAKE_CONV_DESC FAKE_WAITERS
+
+# --- (CONVERSATION) a save again completes the conversation it names -----------
+# The conversation an earlier open filed is completed by its id wherever it
+# stands. Here a sitting another terminal started has taken it out of the queue,
+# so the match on a queued ask passes it over and files a second one (the
+# control), while --conversation adds its reply onto the gate and files nothing.
+export FAKE_WAITERS='[{"id":"tk-anchor","status":"open","dependency_type":"blocks"}]'
+export FAKE_CONV=tk-conv0 FAKE_CONV_DESC="the question" FAKE_CONV_STATUS=in_progress FAKE_CONV_ASSIGNEE=c-tk-conv0
+run_open found tk-gate1 --reason "the question" --allow-duplicate --if-subject tk-anchor --json
+grep -q '^bd create' <<< "$CALLS" \
+  && ok "(CONVERSATION) control: with no --conversation, a conversation a sitting took is passed over" \
+  || bad "(CONVERSATION) control: no create without --conversation (calls: $CALLS)"
+run_open found tk-gate1 --reason "the question" --allow-duplicate --if-subject tk-anchor --conversation tk-conv0 --json
+eq "$RC" "0" "(CONVERSATION) --conversation naming the conversation a sitting took exits 0"
+grep -q '^bd create' <<< "$CALLS" \
+  && bad "(CONVERSATION) a second conversation was filed (calls: $CALLS)" || ok "(CONVERSATION) nothing new is filed"
+grep -q 'bd dep add tk-conv0 tk-gate1 --type replies-to' <<< "$CALLS" \
+  && ok "(CONVERSATION) its reply onto the gate is made" || bad "(CONVERSATION) reply (calls: $CALLS)"
+eq "$OUT" '{"subject":"tk-anchor","conversation":"tk-conv0","filed":true}' "(CONVERSATION) --json names the conversation completed"
+run_open found tk-gate1 --reason "the question" --allow-duplicate --if-subject tk-anchor --conversation tk-conv0
+eq "$RC" "0" "(CONVERSATION) without --json, the save again exits 0"
+grep -q "conversation tk-conv0 filed on tk-anchor — the sitting c-tk-conv0 has taken it out of the operator's queue" <<< "$OUT" \
+  && ok "(CONVERSATION) …saying the sitting has the conversation" || bad "(CONVERSATION) message (out: $OUT)"
+grep -q 'attach tk-conv0' <<< "$OUT" \
+  && ok "(CONVERSATION) …and how to return to it" || bad "(CONVERSATION) return hint (out: $OUT)"
+grep -q "waiting in the operator's queue" <<< "$OUT" \
+  && bad "(CONVERSATION) says a conversation a sitting took waits in the queue (out: $OUT)" || ok "(CONVERSATION) …not that it waits in the queue"
+run_open found tk-gate1 --reason "another question" --allow-duplicate --if-subject tk-anchor --conversation=tk-conv0 --json
+eq "$RC" "4" "(CONVERSATION) a conversation that holds another ask exits 4"
+[ -z "$CALLS" ] && ok "(CONVERSATION) …writing nothing" || bad "(CONVERSATION) wrote something (calls: $CALLS)"
+grep -q 'conversation tk-conv0 on tk-anchor holds another ask than this concern' <<< "$ERR" \
+  && ok "(CONVERSATION) …and says so" || bad "(CONVERSATION) message (err: $ERR)"
+export FAKE_CONV_STATUS=closed
+run_open found tk-gate1 --reason "the question" --allow-duplicate --if-subject tk-anchor --conversation tk-conv0 --json
+eq "$RC" "4" "(CONVERSATION) a conversation closed since it was filed exits 4"
+[ -z "$CALLS" ] && ok "(CONVERSATION) …writing nothing" || bad "(CONVERSATION) wrote something (calls: $CALLS)"
+[ -z "$OUT" ] && ok "(CONVERSATION) …with no --json answer, since it completed nothing" || bad "(CONVERSATION) --json (out: $OUT)"
+grep -q 'conversation tk-conv0 is not an open conversation about tk-anchor' <<< "$ERR" \
+  && ok "(CONVERSATION) …and says so" || bad "(CONVERSATION) message (err: $ERR)"
+unset FAKE_CONV FAKE_CONV_DESC FAKE_CONV_STATUS FAKE_CONV_ASSIGNEE FAKE_WAITERS
+set +e
+OUT="$(sh "$SCRIPT" open --new-subject --rig gc-toolkit --reason "a new topic" --conversation tk-c 2>&1)"; RC=$?
+set -e
+eq "$RC" "2" "(CONVERSATION) --conversation beside --new-subject exits 2"
+grep -q -- '--conversation completes a conversation an earlier open filed' <<< "$OUT" \
+  && ok "(CONVERSATION) …saying the two cannot go together" || bad "(CONVERSATION) message (out: $OUT)"
+
 # --- (GATE) a gate names the one bead still waiting on it ---------------------
 export FAKE_WAITERS='[{"id":"tk-anchor","status":"open","dependency_type":"blocks"},{"id":"tk-done","status":"closed","dependency_type":"blocks"}]'
 run_open found tk-gate1
@@ -520,7 +644,80 @@ grep -q 'nothing waits on gate tk-gate1' <<< "$ERR" && grep -q 'tk-done' <<< "$E
   || bad "(GATE-NONE) message (err: $ERR)"
 grep -q 'gc bd gate resolve tk-gate1' <<< "$ERR" \
   && ok "(GATE-NONE) …and how to clear the gate" || bad "(GATE-NONE) names the resolve (err: $ERR)"
+# (IF-SUBJECT-GATE) --if-subject names the bead the caller showed for the gate.
+export FAKE_WAITERS='[{"id":"tk-anchor","status":"open","dependency_type":"blocks"}]'
+run_open found tk-gate1 --if-subject tk-anchor
+eq "$RC" "0" "(IF-SUBJECT-GATE) --if-subject naming the bead the gate is about files, exit 0"
+grep -q -- '--deps tracks:tk-anchor' <<< "$CALLS" && grep -q 'bd dep add tk-conv1 tk-gate1 --type replies-to' <<< "$CALLS" \
+  && ok "(IF-SUBJECT-GATE) …on that bead, replying to the gate" || bad "(IF-SUBJECT-GATE) filed on the bead (calls: $CALLS)"
+run_open found tk-gate1 --if-subject tk-shown
+eq "$RC" "4" "(IF-SUBJECT-GATE) a gate about another bead than the one shown exits 4"
+[ -z "$CALLS" ] && ok "(IF-SUBJECT-GATE) …filing nothing" || bad "(IF-SUBJECT-GATE) filed something (calls: $CALLS)"
+grep -q 'tk-gate1 names tk-anchor in rig gc-toolkit now, not tk-shown (--if-subject). No conversation filed.' <<< "$ERR" \
+  && ok "(IF-SUBJECT-GATE) …naming the bead it names now and the one shown" || bad "(IF-SUBJECT-GATE) message (err: $ERR)"
+# (FROM) --from names the bead the gate was reached from, as the conversation
+# form names the subject whose holds listed it: a gate two open beads wait on
+# files about that bead, replying to the gate. A --from bead that does not wait
+# on the gate itself is checked against what holds it, read through gctk
+# ($FAKE_HOLDS): held through another bead, the gate is taken as it is without
+# --from, and no longer held, or closed, or unread, it files nothing.
+printf '#!/bin/sh\n[ -z "${FAKE_HOLDS_FAIL:-}" ] || exit 2\nprintf %%s "{\\"reasons\\":${FAKE_HOLDS:-[]}}"\n' > "$TMP/bin/gctk-holds"
+chmod +x "$TMP/bin/gctk-holds"
+export GCTK_BIN="$TMP/bin/gctk-holds" FAKE_HOLDS='[]'
+HELD_THROUGH='[{"held":"gate","id":"tk-gate1","title":"Approve the rollout"}]'
+export FAKE_WAITERS='[{"id":"tk-anchor","status":"open"},{"id":"tk-child","status":"in_progress"}]'
+run_open found tk-gate1 --from tk-child --if-subject tk-child --allow-duplicate --reason "is the wording right?" --json
+eq "$RC" "0" "(FROM) a gate two open beads wait on, opened --from one of them, exits 0"
+grep -q -- '--deps tracks:tk-child' <<< "$CALLS" && grep -q 'bd dep add tk-conv1 tk-gate1 --type replies-to' <<< "$CALLS" \
+  && ok "(FROM) …filing the conversation on that bead, replying to the gate" || bad "(FROM) filed on the --from bead (calls: $CALLS)"
+grep -q -- '--deps tracks:tk-anchor' <<< "$CALLS" \
+  && bad "(FROM) filed on the other bead waiting (calls: $CALLS)" || ok "(FROM) …and not on the other bead waiting"
+eq "$(printf '%s' "$OUT" | jq -c .)" '{"subject":"tk-child","conversation":"tk-conv1","filed":true}' "(FROM) --json answers the conversation on the --from bead"
+run_open found tk-gate1 --from tk-other
+eq "$RC" "4" "(FROM-NOT-WAITING) --from a bead the gate does not hold exits 4"
+[ -z "$CALLS" ] && ok "(FROM-NOT-WAITING) …filing nothing" || bad "(FROM-NOT-WAITING) filed something (calls: $CALLS)"
+grep -q 'tk-other does not wait on gate tk-gate1 now (the beads waiting on it are tk-anchor tk-child), so the gate is not tk-other'"'"'s to answer. No conversation filed.' <<< "$ERR" \
+  && ok "(FROM-NOT-WAITING) …naming the bead and the beads waiting" || bad "(FROM-NOT-WAITING) message (err: $ERR)"
+FAKE_HOLDS="$HELD_THROUGH" run_open found tk-gate1 --from tk-pr
+eq "$RC" "4" "(FROM-THROUGH-TWO) a gate two beads wait on, held on the --from bead only through another, exits 4"
+grep -q 'is about one bead. tk-pr is not one of them. Name the one you mean: gc-helm open tk-gate1 --from <bead>.' <<< "$ERR" \
+  && ok "(FROM-THROUGH-TWO) …naming --from to choose the one meant" || bad "(FROM-THROUGH-TWO) message (err: $ERR)"
+run_open found tk-gate1
+grep -q 'Name the one you mean: gc-helm open tk-gate1 --from <bead>.' <<< "$ERR" && ! grep -q 'is not one of them' <<< "$ERR" \
+  && ok "(GATE-TWO) a gate two beads wait on, opened from nothing, names --from to choose one" || bad "(GATE-TWO) names --from (err: $ERR)"
+export FAKE_WAITERS='[{"id":"tk-anchor","status":"open","dependency_type":"blocks"}]'
+FAKE_HOLDS="$HELD_THROUGH" run_open found tk-gate1 --from tk-pr --if-subject tk-anchor
+eq "$RC" "0" "(FROM-THROUGH) a gate held on the --from bead through the one bead waiting on it exits 0"
+grep -q -- '--deps tracks:tk-anchor' <<< "$CALLS" && grep -q 'bd dep add tk-conv1 tk-gate1 --type replies-to' <<< "$CALLS" \
+  && ok "(FROM-THROUGH) …filing on the bead that waits on it, as without --from" || bad "(FROM-THROUGH) filed on the waiting bead (calls: $CALLS)"
+run_open found tk-gate1 --from tk-child --if-subject tk-child
+eq "$RC" "4" "(FROM-GONE) a gate the --from bead has stopped waiting on exits 4, though another bead waits on it"
+[ -z "$CALLS" ] && ok "(FROM-GONE) …filing nothing on the bead left waiting" || bad "(FROM-GONE) filed something (calls: $CALLS)"
+grep -q 'tk-child does not wait on gate tk-gate1 now (the beads waiting on it are tk-anchor)' <<< "$ERR" \
+  && ok "(FROM-GONE) …saying so" || bad "(FROM-GONE) message (err: $ERR)"
+export FAKE_WAITERS='[{"id":"tk-anchor","status":"open"},{"id":"tk-child","status":"closed"}]'
+FAKE_HOLDS="$HELD_THROUGH" run_open found tk-gate1 --from tk-child --if-subject tk-child
+eq "$RC" "4" "(FROM-CLOSED) a --from bead that closed exits 4, whatever its holds read"
+[ -z "$CALLS" ] && ok "(FROM-CLOSED) …filing nothing" || bad "(FROM-CLOSED) filed something (calls: $CALLS)"
+grep -q 'tk-child does not wait on gate tk-gate1 now' <<< "$ERR" && ok "(FROM-CLOSED) …saying so" || bad "(FROM-CLOSED) message (err: $ERR)"
+FAKE_HOLDS_FAIL=1 run_open found tk-gate1 --from tk-other
+eq "$RC" "4" "(FROM-UNREAD) a --from bead whose holds do not read exits 4"
+[ -z "$CALLS" ] && ok "(FROM-UNREAD) …filing nothing" || bad "(FROM-UNREAD) filed something (calls: $CALLS)"
+grep -q 'what holds tk-other could not be read' <<< "$ERR" && ok "(FROM-UNREAD) …saying so" || bad "(FROM-UNREAD) message (err: $ERR)"
+unset GCTK_BIN FAKE_HOLDS
+set +e
+OUT="$(sh "$SCRIPT" open --new-subject --rig gc-toolkit --reason "a new topic" --from tk-a 2>&1)"; RC=$?
+set -e
+eq "$RC" "2" "(FROM-NEW) --from beside --new-subject exits 2"
+grep -q -- '--from names the bead a gate was reached from' <<< "$OUT" \
+  && ok "(FROM-NEW) …saying the two cannot go together" || bad "(FROM-NEW) message (out: $OUT)"
 unset FAKE_WAITERS
+set +e
+OUT="$(sh "$SCRIPT" open --new-subject --rig gc-toolkit --reason "a new topic" --if-subject tk-a 2>&1)"; RC=$?
+set -e
+eq "$RC" "2" "(IF-SUBJECT-NEW) --if-subject beside --new-subject exits 2"
+grep -q -- '--if-subject names an existing subject' <<< "$OUT" \
+  && ok "(IF-SUBJECT-NEW) …saying the two cannot go together" || bad "(IF-SUBJECT-NEW) message (out: $OUT)"
 
 # --- (MISSING) a typo must file NOTHING ----------------------------------------
 run_open missing tk-nope1
@@ -976,11 +1173,11 @@ export RESRIG="$TMP/resrig"
 # anchor only a query carrying `deferred` sees.
 export FAKE_PR_ROWS='[]'
 
-# run_resolve <arg> -> RC/OUT/ERR/CALLS via the id-aware resbin stub.
+# run_resolve <arg> [args...] -> RC/OUT/ERR/CALLS via the id-aware resbin stub.
 run_resolve() {
     reset_store
     set +e
-    OUT="$(PATH="$TMP/resbin:$PATH" sh "$SCRIPT" open "$1" 2>"$TMP/err")"; RC=$?
+    OUT="$(PATH="$TMP/resbin:$PATH" sh "$SCRIPT" open "$@" 2>"$TMP/err")"; RC=$?
     set -e
     ERR="$(cat "$TMP/err")"; CALLS="$(cat "$FAKE_CALLS")"
 }
@@ -997,6 +1194,23 @@ grep -q -- '--deps tracks:tk-pred' <<< "$CALLS" \
 grep -q 'tk-pred is closed and superseded' <<< "$ERR" \
   && ok "(RESOLVE-SUPERSEDE) announces the redirect — never silent" \
   || bad "(RESOLVE-SUPERSEDE) redirect not announced (err: $ERR)"
+
+# (IF-SUBJECT) --if-subject is the subject the caller showed. A reference
+# superseded since names another bead, so open files nothing and says so last,
+# the line the conversation form shows; one that names the subject still files.
+FAKE_PR_ROWS='[]'; run_resolve tk-pred --if-subject tk-pred
+eq "$RC" "4" "(IF-SUBJECT) a reference superseded since the caller showed it exits 4"
+[ -z "$CALLS" ] && ok "(IF-SUBJECT) …filing nothing, on the successor or the predecessor" || bad "(IF-SUBJECT) filed something (calls: $CALLS)"
+eq "$(printf '%s\n' "$ERR" | tail -n1)" "gc-helm: open: tk-pred names tk-succ in rig gc-toolkit now, not tk-pred (--if-subject). No conversation filed." \
+  "(IF-SUBJECT) …its last line naming where the reference leads now and the subject shown"
+FAKE_PR_ROWS='[]'; run_resolve tk-pred --if-subject tk-succ
+eq "$RC" "0" "(IF-SUBJECT) --if-subject naming the successor the reference leads to files"
+grep -q -- '--deps tracks:tk-succ' <<< "$CALLS" \
+  && ok "(IF-SUBJECT) …on the successor" || bad "(IF-SUBJECT) filed on the successor (calls: $CALLS)"
+FAKE_PR_ROWS='[]'; run_resolve tk-live1 --if-subject=tk-live1
+eq "$RC" "0" "(IF-SUBJECT) a live bead that is the subject shown files"
+grep -q -- '--deps tracks:tk-live1' <<< "$CALLS" \
+  && ok "(IF-SUBJECT) …on it" || bad "(IF-SUBJECT) filed on the live bead (calls: $CALLS)"
 
 # (RESOLVE-CHAIN) a multi-hop chain (head -> mid -> succ) resolves to the end.
 FAKE_PR_ROWS='[]'; run_resolve tk-head
@@ -1072,6 +1286,9 @@ grep -q -- '--deps tracks:tk-prbead' <<< "$CALLS" \
   || bad "(RESOLVE-PR-NUMBER) filed elsewhere (calls: $CALLS)"
 grep -q 'PR #615 -> tk-prbead' <<< "$ERR" \
   && ok "(RESOLVE-PR-NUMBER) says which bead it matched" || bad "(RESOLVE-PR-NUMBER) match not announced (err: $ERR)"
+run_resolve 615 --if-subject tk-prbead2
+eq "$RC" "4" "(IF-SUBJECT-PR) a PR whose anchor is another bead than the one shown exits 4"
+[ -z "$CALLS" ] && ok "(IF-SUBJECT-PR) …filing nothing" || bad "(IF-SUBJECT-PR) filed something (calls: $CALLS)"
 
 # (RESOLVE-PR-URL) a PR URL resolves the same way, pinning the repo.
 FAKE_PR_ROWS='[{"id":"tk-prbead","status":"open","metadata":{"pr_number":"615","pr_url":"https://github.com/o/r/pull/615"}}]'
@@ -1399,7 +1616,7 @@ chmod +x "$TMP/rebin/gc-proactive.sh"
 # also refuses up front a rig whose checkout carries no converse template
 # (agents/converse-*), so the fixture carries one; without it engage exits 4
 # before it resolves and binds.
-mkdir -p "$TMP/rebinrig/.beads" "$TMP/rebinrig/agents/converse-opus"
+mkdir -p "$TMP/rebinrig/.beads" "$TMP/rebinrig/agents/converse-claude-opus"
 export REBINRIG="$TMP/rebinrig"
 export FAKE_SLING="$TMP/slung" CONV_STATE="$TMP/conv_state"
 

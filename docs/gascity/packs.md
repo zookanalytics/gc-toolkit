@@ -131,13 +131,20 @@ drain-ack event is in upstream's OpenAPI schema; the reopen is undocumented.
 
 ## A run is cancelled through the supervisor API
 
-`POST /v0/city/{city}/runs/{run_id}/cancel` ends a molecule's run. It closes
-the workflow root and every member that is not closed, a `blocked` one
-included, with `gc.outcome=canceled`, blockers first, and runs none of them;
-members with `gc.scope_role=teardown` are left alone. A session mid-step
-finishes that step and idles. The call needs an `X-GC-Request: true` header
-and answers 202 with the count it closed, 404 for an unknown run, and 409
-when every root it matched is already closed. Nothing resumes a cancelled run.
+`POST /v0/city/{city}/runs/{run_id}/cancel` ends a molecule's run. Its first
+write marks the root `gc.cancel_requested`, and from then on the claim gate
+refuses the run's steps. It closes the workflow root and every member that is
+not closed, a `blocked` one included, with `gc.outcome=canceled`, blockers
+first, and runs none of them; members with `gc.scope_role=teardown` are left
+alone. It also interrupts the current turn of each live session that holds an
+`in_progress` member, which ends the tool call that turn is running. The
+interrupt is the one `POST /session/{id}/stop` sends, and it kills no session.
+The cancel finds those sessions by the assignees of the members that read
+`in_progress`, so a member that reads `open` names no session to interrupt,
+whoever it is assigned to. The request carries nothing that names who sent it.
+The call needs an `X-GC-Request: true` header and answers 202 with the count it
+closed and the sessions it interrupted, 404 for an unknown run, and 409 when
+every root it matched is already closed. Nothing resumes a cancelled run.
 Upstream ships no `gc` verb for it; `gc wait cancel` cancels a wait, not a run.
 
 Two CLI verbs close workflow beads by other routes. `gc convoy delete <id>`
@@ -147,6 +154,11 @@ closes a root and every bead carrying its `gc.root_bead_id` with
 root does not carry, so it reports nothing to close for one.
 
 *Evidence:* `humaHandleRunCancel` (`internal/api/huma_handlers_runs.go`);
+its `cancelRun`, `planRunCancel`, `inProgressAssignees` and
+`interruptRunHolders`, `RunCancelInput` and `RunCancelOutput`
+(`internal/api/huma_types_runs.go`) and `workflowRootStop`
+(`internal/molecule/workflow_stop.go`), read 2026-11-11 at upstream main
+f143846427 and alike in this city's `gc` build, 36ad5186a; a
 live probe of this city's supervisor, `gc` 1.4.3, 2026-10-13, and a
 `delete-source` probe that matched no convoy-first root, 2026-10-07; upstream
 documents the endpoint only in its

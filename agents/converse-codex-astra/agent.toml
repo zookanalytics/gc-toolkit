@@ -1,0 +1,26 @@
+# converse-codex-astra — a converse sitting on Codex's GPT-6-Astra. One of the
+# per-model converse templates (converse-*), which share the converse role and
+# prompt and differ only in provider and model. `gc-helm engage` opens one with
+# `gc session new converse-codex-astra --alias <conversation> --no-attach`,
+# whose alias is the conversation task's id: an origin=manual session, which is
+# not pool_managed, so the controller's pacing of pool work never reaches it.
+# The naming and the field rationale are documented on converse-claude-opus.
+scope = "rig"
+provider = "codex"
+option_defaults = { model = "gpt-6-astra" }
+prompt_template = "agents/_converse/prompt.template.md"
+work_dir = ".gc/worktrees/{{.Rig}}/converse-codex-astra/{{.AgentBase}}"
+# Codex reads no .claude overlay, so the gh origin guard is registered in the
+# Codex home before the session starts (docs/gh-origin-guard.md, "Codex").
+pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync", "{{.ConfigDir}}/assets/scripts/gh-origin-guard-codex.sh"]
+wake_mode = "resume"
+attach = true
+session_live = [
+  'tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} set-option -t "={{.Session}}:" detach-on-destroy on',
+  'tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} set-option -t "={{.Session}}:" set-titles on \; set-option -t "={{.Session}}:" set-titles-string "#{?#{GC_DRAIN_ACK},done · ,}#T"',
+]
+nudge = ""
+idle_timeout = "0"
+sleep_after_idle = "10m"
+min_active_sessions = 0
+max_active_sessions = 8

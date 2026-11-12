@@ -117,8 +117,8 @@ shares only the word ([authority-map.md](authority-map.md)).
   In `gastownhall/gascity-packs`, `gastown/formulas/mol-polecat-work.toml` overrides
   `workspace-setup`, `self-review` and `submit-and-exit`, rebases a rejected
   branch, and at the handoff detaches the tree and deletes its branch.
-- **Verified.** 2026-11-09, at `gastownhall/gascity` main d12e89601 and
-  `gastownhall/gascity-packs` main 356737249.
+- **Verified.** 2026-11-11, at `gastownhall/gascity` main 6bd609f5b and
+  `gastownhall/gascity-packs` main 7f86098c0.
 - **Retires when.** A step at a time. `load-context`: core's gate refuses finished,
   parked and held work and ends a run by cancelling it. `workspace-setup`: the
   refinery's rework machinery goes (`tk-1tfzr71.20`), which ends the merge resume.
@@ -260,9 +260,11 @@ shares only the word ([authority-map.md](authority-map.md)).
     `push-branch` and `create-pr` commands write as a GitHub App installation,
     so GitHub holds those writes to the installation's repositories. It scopes
     no agent's own `gh`.
-- **Verified.** 2026-11-05, at `gastownhall/gascity` main a91df0b85 and
-  `gastownhall/gascity-packs` main 796d7ecd7, and against GitHub's *Managing
-  your personal access tokens* page, read the same day.
+- **Verified.** 2026-11-10, at `gastownhall/gascity` main f1f75f53c and
+  `gastownhall/gascity-packs` main c6f0a9aa6. The config reference's `[github]`
+  table declares pull-request monitors, whose `authors` allow-list scopes the
+  pull requests a monitor acts on, and scopes no agent's writes. GitHub's
+  *Managing your personal access tokens* page was read on 2026-11-05.
 - **Retires when.** Gas City ships per-agent write scoping. A GitHub
   fine-grained token covers only part of the origin rule. GitHub refuses it a
   write outside its one owner's selected repositories, so a stranger's
@@ -566,7 +568,7 @@ shares only the word ([authority-map.md](authority-map.md)).
   nudges each open dependent's assignee or routed pool with `gc session nudge`.
   It slings nothing, and no core order or script calls `gc sling`
   (`internal/bootstrap/packs/core/assets/scripts/cascade-nudge-on-blocker-close.sh`).
-- **Verified.** 2026-11-09, at `gastownhall/gascity` main 9ba215cb592b.
+- **Verified.** 2026-11-09, at `gastownhall/gascity` main e35c1602d936.
 - **Retires when.** Gas City or bd pours a formula on a bead once its blockers
   close.
 

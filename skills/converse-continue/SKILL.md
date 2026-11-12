@@ -52,8 +52,8 @@ A ruling that sends the subject on is carried out once the answer below exits
 Then answer the ruling through the sign-off's writer with `--answer`, never
 with a bare `gc bd gate resolve`. A gate can be what holds a merge, so the
 writer puts the ruling's consequences in place before it resolves the gate.
-When the ruling reaches an open PR, the subject or one the
-gate releases, the first of them is the rework or the retirement the ruling
+When the ruling reaches an open PR, the subject, the PR whose merge this
+conversation holds or one the gate releases, the first of them is the rework or the retirement the ruling
 calls for, passed the way step 7 passes it, and the next is the subject's
 headline with each wait this turn routed. A ruling that takes the subject's
 recommendation names the recommendation's gate with `--answer` and adds
@@ -68,6 +68,7 @@ Until it exits 0, do not tell the operator the ruling is in place:
   # when the ruling reaches an open PR, add --rework, --no-rework or --retire <kind> (step 7)
   # when it takes the subject's recommendation, --answer its gate and add --accept (step 7)
   # --waiting-on <bead> for each bead this turn routed work into, or --no-wait
+  # --close-brief "<what that work's landing settles here, and what to check once it has>" beside a --waiting-on on work (step 7)
 ```
 An answer that reached the gate first stands, and the writer prints it: tell
 the operator. It also prints a line for each open PR the ruling leaves standing

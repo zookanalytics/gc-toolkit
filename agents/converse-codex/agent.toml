@@ -1,17 +1,15 @@
-# converse-codex — a converse sitting on the codex provider. One of the
-# per-model converse templates (converse-*), which share the converse role and
-# prompt and differ only in provider and model. `gc-helm engage` opens one with
-# `gc session new converse-codex --alias <conversation> --no-attach`, whose
-# alias is the conversation task's id: an origin=manual session, which is not
-# pool_managed, so the controller's pacing of pool work never reaches it. The
-# field rationale is documented on converse-opus.
+# converse-codex — kept for the sittings already open on it. engage does not
+# offer it, and opens converse-codex-sol for the same model. Gas City's
+# reconciler wakes no session whose template is not configured, drains one
+# that holds no work, and closes one whose process is gone, releasing the
+# conversation it held, so this template stays until no open sitting runs on
+# it. Its fields are the ones its sittings started on, documented on
+# converse-claude-opus.
 scope = "rig"
 provider = "codex"
 option_defaults = { model = "gpt-6.1-sol" }
 prompt_template = "agents/_converse/prompt.template.md"
 work_dir = ".gc/worktrees/{{.Rig}}/converse-codex/{{.AgentBase}}"
-# Codex reads no .claude overlay, so the gh origin guard is registered in the
-# Codex home before the session starts (docs/gh-origin-guard.md, "Codex").
 pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync", "{{.ConfigDir}}/assets/scripts/gh-origin-guard-codex.sh"]
 wake_mode = "resume"
 attach = true

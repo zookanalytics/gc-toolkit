@@ -279,10 +279,13 @@ then checks that `git status --porcelain -- dist` prints nothing.
   its builder never runs npm, so a change to the app's runtime code ships only
   with the rebuilt `dist/` in the same diff. A runtime change that ships
   renames `dist/assets/index-*.js`, and no gate compares `dist/` with `src/`.
+- **The page's types are generated.** The page reads one document per rig, and
+  `src/rigboard/document.gen.ts` is generated from its Go types by
+  `go test ./internal/rigboard -run TestPageTypesAreCurrent -update`, which
+  fails without `-update` when the file is stale. Nobody writes it by hand.
 - **The contract is a hand-written mirror.** `src/contract.ts` mirrors the Go
-  wire structs by hand, because the board's `/svc/` surface is not in the
-  supervisor's OpenAPI document, and a Go field renamed without its mirror
-  reads `undefined` in the browser with nothing failing.
+  wire structs of the `/helm` answer by hand, because the board's `/svc/`
+  surface is not in the supervisor's OpenAPI document. No page code reads it.
   `web/contract_parity_test.go` compares the two in both directions, and
   `src/contract.fixture.ts` fails `npm run build` when the committed wire
   sample stops matching the type. `go test ./web -run TestBoardFixture -update`
@@ -290,15 +293,16 @@ then checks that `git status --porcelain -- dist` prints nothing.
 - **Writes carry `X-GC-Request`.** The supervisor proxies helm-svc and refuses
   a mutation without that header, with a 403 that never reaches helm-svc.
   Every write client takes `SVC_WRITE_HEADERS` from `src/svcWrite.ts`, and
-  `ActuateButton.test.tsx` and `OpenConversation.test.tsx` assert the header on
-  each write.
+  `src/rigboard/Board.test.tsx` and `OpenConversation.test.tsx` assert the
+  header on each write.
 - **URLs are document-relative.** The app is served under
   `/v0/city/<city>/svc/helm/`, a prefix the proxy strips, so `vite.config.ts`
-  keeps `base: './'` and `App.tsx` fetches `helm`, not `/helm`. A root-absolute
+  keeps `base: './'` and the page fetches `helm/rigs/...`, not `/helm/rigs/...`
+  (`src/rigboard/read.ts`). A root-absolute
   URL works on the dev server and misses helm-svc under the mount.
   `web/handler_test.go` resolves every asset `dist/index.html` names through
   the mount.
-- **Supervisor types are a pruned snapshot.** `src/drill/gen/supervisor.d.ts`
+- **Supervisor types are a pruned snapshot.** `src/supervisor/gen/supervisor.d.ts`
   is generated from a live supervisor's OpenAPI document for the operations
   `scripts/gen-supervisor-types.mjs` lists, and committed. A new supervisor
   call adds its operation there and regenerates with

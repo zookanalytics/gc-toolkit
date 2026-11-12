@@ -246,9 +246,10 @@ func rollUpBy(a Anchor, f Facts, state func(Child) string) rollup {
 	// which is whatever order the store returned the dependency rows in — so
 	// the bash board's own output for these three fields is not stable run to
 	// run, and neither would a port of it be. Sorting makes THIS board's wire
-	// bytes deterministic, which is what a golden test and a polling frontend
-	// both need. Parity against the bash board on these fields is therefore by
-	// SET, not by sequence; every other field matches element for element.
+	// bytes deterministic, which is what a golden test and a comparison of two
+	// reads both need. Parity against the bash board on these fields is
+	// therefore by SET, not by sequence; every other field matches element for
+	// element.
 	sort.Strings(r.liveHeads)
 	sort.Strings(r.deadOwnerHeads)
 	sort.Strings(r.inFlightHeads)
@@ -826,7 +827,7 @@ func frontier(a Anchor, r rollup, held, workHeld bool, takeaway string, waitingO
 	case inProgressLive == 0 && dead > 0 && !held:
 		return fmt.Sprintf("%d open · %d stuck (dead owner)", r.idle(), dead) + waitSfx
 	// A human gate holds the work until the operator answers, and a
-	// conversation holds nothing, so the phrase names which of the two the
+	// conversation holds none of it, so the phrase names which of the two the
 	// operator's side has on the row.
 	case inProgressLive == 0 && workHeld:
 		return fmt.Sprintf("%d open · held by a human gate", r.idle()) + deadSfx + waitSfx
@@ -1163,7 +1164,8 @@ func poolRouted(b Blocker) bool {
 // would hide every wait that has not been. The row names what it is waiting
 // on, so a reader can see that two rows in the queue share one cause.
 //
-// A conversation never reaches here: it tracks its bead and blocks nothing.
+// A conversation reaches here only as a blocker of an open PR's anchor, whose
+// merge it holds until it closes, and it is a person's ([demand]).
 func asksAPerson(b Blocker) bool {
 	return (b.Status != "closed" && humanGate(b)) || demand(b)
 }
@@ -1175,7 +1177,7 @@ func asksAPerson(b Blocker) bool {
 // gate never counts as both, whatever its route.
 func demand(b Blocker) bool {
 	return prstatus.IsPersonBlocker(prstatus.Blocker{ID: b.ID, Status: b.Status, IssueType: b.IssueType, AwaitType: b.AwaitType,
-		Metadata: map[string]string{mdRoutedTo: b.RoutedTo}})
+		Assignee: b.Assignee, Metadata: map[string]string{mdRoutedTo: b.RoutedTo}})
 }
 
 // prMachine is what the merge cadence can do with this anchor on its next pass.
@@ -1187,8 +1189,8 @@ func demand(b Blocker) bool {
 // flight is acting on, is the next merge pass's to replace. A closed row's
 // recorded verdict travels unchanged, and a live PR whose facts have no answer
 // cannot tell, so its recorded verdict reads unknown. The owed rule and the
-// needs phrase read this axis, so a row's place in the operator's queue and its
-// chip come from the one rule.
+// needs phrase read this axis, so a row's place in the operator's queue, its
+// needs and its phase come from the one rule.
 //
 // Any other verdict is read off the bead, with ONE live upgrade: an open
 // pool-routed blocker means an actor is due to act whatever the last gate pass
@@ -1768,8 +1770,7 @@ const (
 // Review and gate are the operator's own moves and lead; stalled is the loudest
 // health signal under them; active is the city working normally; cleanup and
 // done are the quiet tail. A surface reads the bands in this order, never in an
-// ad-hoc one: the dashboard mirrors it, and [sectionRank] orders a family's
-// members by it.
+// ad-hoc one, and [sectionRank] orders a family's members by it.
 var SectionOrder = []string{
 	SectionReview, SectionGate, SectionStalled, SectionActive, SectionCleanup, SectionDone,
 }
@@ -2452,7 +2453,7 @@ func beadPhase(a Anchor, f Facts) string {
 // human gates that hold it, which are the gates the gather admitted with the
 // bead among their subjects and the gates in its own `blocks` listing, and the
 // live-workflow signal standing over the bead itself ([Facts.anchorInFlight]).
-// A conversation blocks nothing, so it is never among the gates.
+// A conversation is no human gate, so it is never among the gates.
 func beadFacts(a Anchor, f Facts) prstatus.Facts {
 	pf := prstatus.RowFacts(a.Metadata)
 	for _, g := range f.human.gates[a.ID] {
@@ -2622,7 +2623,7 @@ func wrapperAsk(a Anchor, t Tile, f Facts) foldedAsk {
 // columns (the web board renders title beside needs) does not repeat one
 // sentence in each. A
 // conversation's own row is Held, in session or waiting, and its WorkHeld
-// stays false, because a conversation blocks nothing.
+// stays false, because a conversation holds no work.
 func keepWrapper(t *Tile, a Anchor, fa foldedAsk) {
 	t.Title = a.Source
 	if len(a.Subjects) > 0 {
@@ -2645,7 +2646,7 @@ func keepWrapper(t *Tile, a Anchor, fa foldedAsk) {
 
 // applyFold moves the asks folded onto one row. The row is now held: a human
 // gate holds its bead's work, which sets WorkHeld, or a conversation tracks
-// the bead and holds nothing. It is owed when any ask is — an open gate, an
+// the bead and holds none of its work. It is owed when any ask is — an open gate, an
 // unfinished acceptance, or a conversation no live sitting holds — and its
 // owed clock takes the earliest of those asks, so the queue dates the row by
 // when the ask began; an existing earlier instant, such as a merge anchor's PR
@@ -2736,8 +2737,8 @@ func tagClusters(tiles []Tile) {
 // A family is one top-level anchor and every tile that hangs off it by a
 // parent-child or a `blocks` edge. Grouping by family is the board's primary
 // axis; the attention band orders and highlights WITHIN a family. The grouping
-// key is derived once here, so the dashboard does not invent its own split —
-// exactly as [Section] is.
+// key is derived once here, so no surface invents its own split, exactly as
+// [Section] is.
 
 // assignGroupRoots stamps [Tile.GroupRoot] and [Tile.GroupParent] on every tile.
 // GroupRoot is the id of the top-most tile its edges climb to, or its own id when

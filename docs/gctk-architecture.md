@@ -385,6 +385,12 @@ Nothing outside it parses a metadata value or spells a key's name.
   board builds one per render. A domain that must find beads by a key, as the
   bead read finds the runs that work a bead, selects them through the ledger
   by the key's declaration, so it never spells the key.
+- **A pass reads a store once.** A pass is a ledger whose every read of a bead
+  answers with the row it kept when it first read that bead. Once it has read
+  every live bead, it answers a selection of live beads from those rows, and
+  it reads the store again only for a bead it has not read, such as a closed
+  one. Every domain asked through one pass answers from one read of each
+  bead, and a pass takes no write.
 
 ## The adapters
 
@@ -483,8 +489,11 @@ tests run on the fake.
   reports what it finds. The check that guards a domain moves with that domain.
 - **The helm board.** The board imports the domain packages and asks the same
   questions the commands ask, against one snapshot per render, so it shows what
-  the loops act on. Its ranking, bands and grouping are its own. A question
-  that a loop also acts on belongs to a domain, not to the board.
+  the loops act on. Its rig page reads each rig's store through `listing`, one
+  pass that lists the store once, decodes each key the page shows through the
+  listing's declarations, and answers `waits` and `prstatus` from those rows.
+  Its ranking, bands and grouping are its own. A question that a loop also
+  acts on belongs to a domain, not to the board.
 
 ## The `bead holds` contract
 
@@ -581,14 +590,17 @@ why a reader must know it, and the work that retires it.
 - **`gctk pr status` reads around the ledger.** Its command builds the store
   that `prstatus` reads over the store adapter and gathers the PR's facts
   itself (`internal/cli/prstatus.go`), and `prstatus` spells the keys it
-  reads, so the key registry does not show it reading them. A new pr verb
-  takes neither shape. `prstatus` moves under the pr domain, onto the ledger,
-  with whichever of the merge member (tk-1tfzr71.20) and the GitHub-intake
-  member (tk-1tfzr71.21) rewrites its facts.
-- **The board reads the store itself.** Its source reads each rig's store
-  through the embedded beads library or the supervisor's API and decodes the
-  rows and keys it shows, and only what holds a bead and where a PR stands
-  come from the domains. One render therefore holds two reads of the store, so
+  reads, so the key registry does not show it reading them. For the same
+  reason `listing` hands `prstatus` each record's metadata whole, as the
+  ledger renders it. A new pr verb takes neither shape. `prstatus` moves under
+  the pr domain, onto the ledger, with whichever of the merge member
+  (tk-1tfzr71.20) and the GitHub-intake member (tk-1tfzr71.21) rewrites its
+  facts.
+- **The `/helm` board reads the store itself.** Its source
+  (`services/helm/internal/source`) reads each rig's store through the
+  embedded beads library or the supervisor's API and decodes the rows and keys
+  it shows, and only what holds a bead, where a PR stands and
+  the shape of a conversation come from the domains. One render therefore holds two reads of the store, so
   the board renders a domain's answer, or that the answer is missing, and
   never derives its own from its rows. Human gates are where it still does.
   An open gate's own row marks each bead it names as held by a person, and

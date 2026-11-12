@@ -181,23 +181,28 @@ mk_sut_dir() { # <dir> <file>...
   # the same way. pr-post.sh is the single writer of the city's PR posts and the
   # owner of the provenance definition every feedback reader asks, so a SUT that
   # posts or reads feedback runs it by sibling path. work-outcome.sh is the
-  # gc.work_outcome stamp a conversation's closers source by sibling path. Copy
+  # gc.work_outcome stamp a conversation's closers source by sibling path, and
+  # conversation.sh the one shell definition of a conversation, which
+  # blocker-holder.sh sources the same way. Copy
   # each of them beside the SUT so those calls resolve in the private dir; cp
   # keeps pr-post.sh's executable bit. They sit beside this harness, so they are found whatever the
   # SUT's own directory is.
   local here lib; here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-  for lib in "$here/bd-lib.sh" "$here/pace-lib.sh" "$here/gctk-resolve.sh" "$here/pr-post.sh" "$here/work-outcome.sh"; do
+  for lib in "$here/bd-lib.sh" "$here/pace-lib.sh" "$here/gctk-resolve.sh" "$here/pr-post.sh" "$here/work-outcome.sh" "$here/conversation.sh"; do
     [ -f "$lib" ] && cp "$lib" "$d/"
   done
   # review-verdict.sh, the approval rule, review-dismissal.sh, what a dismissal
   # retires, review-answer.sh, what the living answer to a review shows,
-  # priority-lib.sh, the priority function, whose reading of a PR's approval
-  # pr-facts.sh sources, git-lib.sh, the one read of a branch's head on origin,
-  # which gate-ensure.sh and signoff.sh source, and run-lib.sh, the one reader of
-  # a run's link to its bead, are sourced by sibling path the same way.
+  # dispatch-path.sh, the one definition of a dispatch path and a label hold,
+  # which deferred-dispatch.sh sources, priority-lib.sh, the priority function,
+  # whose reading of a PR's approval pr-facts.sh sources, git-lib.sh, the one
+  # read of a branch's head on origin, which gate-ensure.sh and signoff.sh
+  # source, and run-lib.sh, the one reader of a run's link to its bead, are
+  # sourced by sibling path the same way.
   [ -f "$here/review-verdict.sh" ] && cp "$here/review-verdict.sh" "$d/"
   [ -f "$here/review-dismissal.sh" ] && cp "$here/review-dismissal.sh" "$d/"
   [ -f "$here/review-answer.sh" ] && cp "$here/review-answer.sh" "$d/"
+  [ -f "$here/dispatch-path.sh" ] && cp "$here/dispatch-path.sh" "$d/"
   [ -f "$here/priority-lib.sh" ] && cp "$here/priority-lib.sh" "$d/"
   [ -f "$here/git-lib.sh" ] && cp "$here/git-lib.sh" "$d/"
   [ -f "$here/run-lib.sh" ] && cp "$here/run-lib.sh" "$d/"

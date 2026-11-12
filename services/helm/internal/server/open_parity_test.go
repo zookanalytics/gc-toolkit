@@ -37,6 +37,7 @@ var shellVars = strings.NewReplacer(
 	"$existing", "tk-old99",
 	"$CONV", "tk-new11",
 	"$bead", "tk-abc12",
+	"$open_stands", "waiting in the operator's queue; no session spawned.",
 )
 
 func TestParseOpenStdoutMatchesTheScriptsRealSentences(t *testing.T) {

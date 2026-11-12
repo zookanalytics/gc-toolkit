@@ -235,23 +235,25 @@ printf '%s' "$C" | jq -e '[(.new[], .carried[]) | select(.id == "b-exec")] | .[0
     || bad "the worked detail names the execution route" "$(printf '%s' "$C" | jq -r '[.new[] | select(.id == "b-exec")] | .[0].detail')"
 
 echo "── a bead held for placement reads as that wait, whatever else it carries ──"
-# Intake marks new work placement=pending and leaves it unrouted, and
-# gc-helm.sh unplaced lists it for the placement sitting. A visit the sweep
-# filed before intake held the bead still lists it, and reading it as idle or
-# recorded would put the same decision on this sitting's agenda too. The queue
-# lists such a bead whether or not a blocker holds it or the first reaction left
-# its takeaway, so neither sends it to not-ready, recorded or idle. A parent or
-# a route places the bead whatever its marker says, and an open human gate is a
-# person's answer owed, which outranks the wait as it does in the sweep.
+# Intake holds new work with hold:mayor and leaves it unrouted, and
+# `gc beads list --label hold:mayor` lists it for the placement sitting. A visit
+# the sweep filed before intake held the bead still lists it, and reading it as
+# idle or recorded would put the same decision on this sitting's agenda too. The
+# queue lists such a bead whether or not a blocker holds it or the first
+# reaction left its takeaway, so neither sends it to not-ready, recorded or
+# idle. The retired placement marker holds nothing, a route makes the bead
+# worked, and an open human gate is a person's answer owed, which outranks the
+# wait as it does in the sweep.
 jq -nc --argjson b "[
-  $(bead p-plain    open '{"placement":"pending"}')
- ,$(bead p-take     open '{"placement":"pending","gc.takeaway":"actionable — held for placement"}')
- ,$(bead p-blocked  open '{"placement":"pending"}')
- ,$(bead p-blk-take open '{"placement":"pending","gc.takeaway":"blocked — held for placement"}')
+  $(bead p-plain    open '{}')
+ ,$(bead p-take     open '{"gc.takeaway":"actionable — held for placement"}')
+ ,$(bead p-blocked  open '{}')
+ ,$(bead p-blk-take open '{"gc.takeaway":"blocked — held for placement"}')
  ,$(bead p-parent   open '{"placement":"pending"}')
- ,$(bead p-routed   open '{"placement":"pending","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}')
- ,$(bead p-demand   open '{"placement":"pending"}')
+ ,$(bead p-routed   open '{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}')
+ ,$(bead p-demand   open '{}')
 ]" '$b
+  | map(if .id != "p-parent" then .labels = ["hold:mayor"] else . end)
   | map(if (.id == "p-blocked" or .id == "p-blk-take") then .dependencies = [{depends_on_id: "tk-blocker", type: "blocks"}] else . end)
   | map(if .id == "p-parent" then (.parent = "tk-epic" | .dependencies = [{depends_on_id: "tk-epic", type: "parent-child"}]) else . end)
   | map(if .id == "p-demand" then .dependencies = [{depends_on_id: "g-2", type: "blocks"}] else . end)' > "$STUB_BEADS"
@@ -264,8 +266,8 @@ eq "$(verdict_of "$C" p-plain)"    "awaiting-placement" "a bead held for placeme
 eq "$(verdict_of "$C" p-take)"     "awaiting-placement" "…with the first reaction's takeaway on it, not recorded"
 eq "$(verdict_of "$C" p-blocked)"  "awaiting-placement" "…with a blocker holding it, not not-ready"
 eq "$(verdict_of "$C" p-blk-take)" "awaiting-placement" "…with a takeaway and a blocker both"
-eq "$(verdict_of "$C" p-parent)"   "idle"               "a parent places the bead whatever its marker says"
-eq "$(verdict_of "$C" p-routed)"   "worked"             "a route places the bead whatever its marker says"
+eq "$(verdict_of "$C" p-parent)"   "idle"               "a placed bead carrying only the retired placement marker is idle"
+eq "$(verdict_of "$C" p-routed)"   "worked"             "a route makes a held bead worked"
 eq "$(verdict_of "$C" p-demand)"   "held"               "an open human gate outranks the placement wait"
 eq "$(printf '%s' "$C" | jq -r '.summary.new_live')" "1" \
    "the placement wait is not on this sitting's live agenda (only the placed, idle bead is)"
@@ -276,7 +278,7 @@ T="$("$SCRIPT" --ids "$PIDS" 2>/dev/null)"
 printf '%s' "$T" | grep -q "p-blk-take" \
     && ok "a bead held for placement is PRINTED, not silently dropped from the report" \
     || bad "a bead held for placement is PRINTED, not silently dropped from the report" "p-blk-take absent from the text report"
-printf '%s' "$T" | grep -q "gc-helm.sh unplaced lists it" \
+printf '%s' "$T" | grep -q "gc beads list --label hold:mayor lists it" \
     && ok "its bucket names the queue that lists it" \
     || bad "its bucket names the queue that lists it" "no placement bucket in the report"
 # The rule reads the bead's own row, not the ready set, so a failed ready read

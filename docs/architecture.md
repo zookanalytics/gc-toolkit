@@ -135,8 +135,9 @@ performer; the full transition table with writers is
    first) routes it to a pool. Routed, unclaimed work is *demand*: the runtime
    spawns a session to meet it, with no operator keystroke. New work is routed
    only once it may enter a pool: a member of an epic, PR-finishing work, an
-   emergency, or the operator's own move. Other new work waits for the
-   operator's placement sitting first ([steering.md](steering.md)).
+   emergency, or the operator's own move. Other new work waits, held, until the
+   po's backlog refinement places it with the operator
+   ([steering.md](steering.md)).
 3. **Claim.** A polecat claims via `gc hook --claim`; the runtime writes
    assignee and claim in one step. It takes the ready bead with the most urgent
    priority first, and the pack computes that priority from what the bead
@@ -295,6 +296,22 @@ none.
 The human surface is subject / human gate / conversation / takeaway on native
 primitives ([human-engagement.md](human-engagement.md) is the reference).
 
+- **The seats the operator sits with.** Each owns only what a ruling gave it,
+  and a new ownership is the operator's ruling
+  ([authority-map.md](authority-map.md)).
+  - **The po**, the operator's prioritization partner, is a session the
+    operator opens for a sitting with a nudge and then an attach, which starts
+    fresh each time ([human-engagement.md](human-engagement.md#a-po-sitting)).
+    Its backlog refinement works the queue
+    of new work no epic holds, and its portfolio sync works the epics, their
+    parks and their priorities. It owns the queue's writes, and each placement,
+    park and priority move the operator agrees to in a sitting. Here the po
+    works the platform's coordination hold, `hold:mayor`: Gas City's dispatcher
+    reads only its two fixed hold values, whose names are not roles.
+  - **Mechanik**, the operator's standing conversation, owns how the city works
+    and every edit to the town repo.
+  - **A converse sitting** holds one bead's conversation, below. The patrols,
+    the pools and the refinery keep what they own.
 - **A subject is the bead a human gate or a conversation is about.** Its notes
   carry the durable outcome of every conversation about it, and the resolve
   reasons of the gates it waits on carry their answers, so whoever works it
@@ -313,8 +330,8 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   close, until a person resolves the gate with the answer as its reason, headed
   `ruled:`, `moot:` or `benign:`
   ([component-model.md](component-model.md#4-where-each-component-sits) has the
-  helper's contract). There is no mayor; a situation that needs a human is a
-  human gate, same as any other. A patrol files a human gate on the bead a
+  helper's contract). A situation that needs a person is a human gate, not
+  mail to the po. A patrol files a human gate on the bead a
   situation is about, or a finding (`patrol-finding.sh`), rather than mail,
   because a patrol sits at the top of the agent tier and has no peer to mail.
   Every reader finds a bead's human gates the one way, through the bead's
@@ -324,7 +341,8 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   it blocks.
 - **A conversation is a task about one subject.** It tracks its subject,
   replies to each human gate it answers through bd's `replies-to` edge, and
-  blocks nothing. It waits in the operator's queue, assigned to `human`, until
+  blocks nothing but an open PR's anchor, whose merge it holds until it closes.
+  It waits in the operator's queue, assigned to `human`, until
   the operator engages it. `gc-helm.sh open` files one, and so do the
   operator's intake, `operator-intake.sh`, and a caller asking about a bead with
   open children, which a gate on the bead would pause. `gc-helm engage` takes
@@ -352,12 +370,13 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   ([steering.md](steering.md#priority)).
 - **The board is render-only.** `services/helm` (helm-svc) derives every row
   per render from the ledger. `gc-helm.sh` carries the write verbs open,
-  engage, react, takeaway, dismiss, accept, park and priority, and the
-  read-only verbs resolve and unplaced. Accept clears a first reaction's
-  recommendation gate and nothing else, under the bead's acceptance lock, and
-  is offered only while no other human gate blocks the bead. `gc-helm.sh unplaced` lists the placement
-  sitting's queue ([steering.md](steering.md)). Everything works without the
-  board: it spends no state, so it can never be wrong for longer than one
+  engage, react, takeaway, dismiss, accept, park, priority and place, and the
+  read-only verb resolve. Accept clears a first reaction's recommendation gate
+  and nothing else, under the bead's acceptance lock, and is offered only while
+  no other human gate blocks the bead. The po's backlog refinement works the
+  queue, every bead `hold:mayor` holds in any spelling
+  ([steering.md](steering.md#the-queue-the-po-works)). Everything works without
+  the board: it spends no state, so it can never be wrong for longer than one
   render.
 
 The discipline throughout is *agents earn every interaction*: prep done before

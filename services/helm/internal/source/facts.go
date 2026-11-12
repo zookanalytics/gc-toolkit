@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/beads"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/conversation"
 	"github.com/zookanalytics/gc-toolkit/services/helm/internal/board"
 )
 
@@ -56,10 +57,11 @@ func sittingWindow() time.Duration {
 //
 // A conversation is a task that tracks the one bead it is about, assigned to
 // `human` while it waits in the operator's queue and to an alias that names its
-// own id while a sitting holds it (assets/scripts/conversation.sh). It carries
-// no pack marker, so the query cuts by type and status and the shape is read
-// here: the assignee off the row, and the edges from one batched read of every
-// candidate's own dependencies. That read names the conversation's `tracks`
+// own id while a sitting holds it (the gctk conversation package, and
+// assets/scripts/conversation.sh for the scripts). It carries no pack marker,
+// so the query cuts by type and status and the shape is read here: the assignee
+// off the row, and the edges from one batched read of every candidate's own
+// dependencies. That read names the conversation's `tracks`
 // edge and its `replies-to` edges whichever store holds the gate a reply
 // names. bd's close leaves a task's assignee and edges as they were, so a
 // closed conversation keeps its shape, and the closed pass finds it the same
@@ -76,7 +78,7 @@ func sittingWindow() time.Duration {
 // tasks accumulate forever, and a gather that read them all to throw most away
 // would grow without limit against a store the whole city shares.
 func (s *BeadsSource) rigConversations(ctx context.Context, st beadStore, r rigRef, g *gatherState, now time.Time) ([]board.Anchor, []board.Sitting) {
-	task := beads.IssueType("task")
+	task := beads.IssueType(conversation.IssueType)
 	open, err := st.SearchIssues(ctx, "", beads.IssueFilter{
 		IssueType: &task,
 		Statuses:  liveStatuses,
@@ -140,57 +142,27 @@ func (s *BeadsSource) rigConversations(ctx context.Context, st beadStore, r rigR
 }
 
 // conversationCandidates keeps the tasks whose assignee is one a conversation
-// carries ([conversationAssignee]). Their edges decide the rest of the shape.
+// carries ([conversation.IsAssignee]). Their edges decide the rest of the shape.
 func conversationCandidates(in []*beads.Issue) []*beads.Issue {
 	out := make([]*beads.Issue, 0, len(in))
 	for _, iss := range in {
-		if iss != nil && conversationAssignee(iss.Assignee, iss.ID) {
+		if iss != nil && conversation.IsAssignee(iss.Assignee, iss.ID) {
 			out = append(out, iss)
 		}
 	}
 	return out
 }
 
-// conversationAssignee reports whether assignee is one a conversation carries:
-// `human`, or the alias that names the task's own id, bare, as its `c-`
-// fallback, or qualified by the session's rig and template binding
-// (`<rig>/<binding>.<alias>`). It is the rule conversation.sh's
-// conversation_assignee applies, so the board and the scripts read one shape.
-func conversationAssignee(assignee, id string) bool {
-	if assignee == "" || id == "" {
-		return false
-	}
-	if assignee == "human" {
-		return true
-	}
-	for _, alias := range []string{id, "c-" + id} {
-		if assignee == alias || strings.HasSuffix(assignee, "/"+alias) || strings.HasSuffix(assignee, "."+alias) {
-			return true
-		}
-	}
-	return false
-}
-
-// conversationEdges reads a conversation's subject and replies off its own
-// edges: ok only when exactly one `tracks` edge names a bead, which is the
-// subject, and replies is every gate its `replies-to` edges name.
+// conversationEdges is [conversation.Shape] over a candidate's own edges, as
+// the store's batched dependency read answers them.
 func conversationEdges(ds []*beads.Dependency) (subject string, replies []string, ok bool) {
-	var tracked []string
+	edges := make([]conversation.Edge, 0, len(ds))
 	for _, d := range ds {
-		if d == nil {
-			continue
-		}
-		switch string(d.Type) {
-		case "tracks":
-			tracked = append(tracked, d.DependsOnID)
-		case "replies-to":
-			replies = append(replies, d.DependsOnID)
+		if d != nil {
+			edges = append(edges, conversation.Edge{Type: string(d.Type), DependsOnID: d.DependsOnID})
 		}
 	}
-	if tracked = uniqueStrings(tracked); len(tracked) != 1 {
-		return "", nil, false
-	}
-	return tracked[0], uniqueStrings(replies), true
+	return conversation.Shape(edges)
 }
 
 // newSitting projects one conversation task onto the board's record of a

@@ -38,14 +38,14 @@
 # held-by-design record to a pool the moment its blocker closed. It is exempt on
 # its task_kind, read from that shared definition.
 #
-# So is a bead that waits for placement (assets/scripts/placement.sh): intake
-# held it as new work for the operator's placement sitting (docs/steering.md),
-# and its dispatch is the route the sitting gives it when it places the bead.
-# Arming it would start work the operator has not placed. A bead the sitting
-# placed under an epic is work again, marker or not, and owes a dispatch path.
-# `bd blocked` prints no parent, so a marked candidate is judged on the row the
-# marker's own `bd list` prints, which carries one. When that listing cannot be
-# read, the candidate is reported as unverifiable and never flagged.
+# So is a held bead (has_dispatch_hold, assets/scripts/dispatch-path.sh): it
+# carries one of Gas City's hold labels, which say its next actor is not a
+# worker. Intake holds new work for the operator's placement sitting with
+# hold:mayor (docs/steering.md), and its dispatch is the route it gets once the
+# sitting places it and the hold is lifted. Arming it would start work the
+# operator has not placed, and the deferred-dispatch pass slings no held bead
+# anyway. `bd blocked` prints a bead's labels, so the hold is read on the row the
+# listing already gives.
 #
 # So is a bead a converse sitting holds. The hold files a human gate under the
 # key `conversation.<conversation id>`, and the sitting's sign-off decides the
@@ -102,23 +102,14 @@ WORK_TYPES=" bug feature task chore spike story "
     printf '  - %s\n' "assets/scripts/standing-kinds.sh could not be sourced from this pack, so a standing record cannot be told from stranded work."
     exit 1
 }
-# What counts as a dispatch path, from the one definition shared with the
-# proactive scan and check-step-terminal. Exposes $DISPATCH_PATH_JQ. An
-# unsourceable one warns: without it no bead can be told to have a dispatch path.
+# What counts as a dispatch path and a dispatch hold, from the one definition
+# shared with the proactive scan, check-step-terminal and deferred-dispatch.sh.
+# Exposes $DISPATCH_PATH_JQ. An unsourceable one warns: without it no bead can be
+# told to have a dispatch path or a hold.
 # shellcheck source=../../assets/scripts/dispatch-path.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/dispatch-path.sh" || {
     echo "cannot determine whether blocked work carries a dispatch path"
     printf '  - %s\n' "assets/scripts/dispatch-path.sh could not be sourced from this pack, so a routed or armed bead cannot be told from stranded work."
-    exit 1
-}
-# What waits for placement, from the one definition shared with gc-helm.sh
-# unplaced and the liveness classifier. Exposes $PLACEMENT_JQ. An unsourceable
-# one warns: without it a bead the sitting owes its dispatch would read as
-# stranded work and draw the arm remedy.
-# shellcheck source=../../assets/scripts/placement.sh
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/placement.sh" || {
-    echo "cannot determine whether blocked work carries a dispatch path"
-    printf '  - %s\n' "assets/scripts/placement.sh could not be sourced from this pack, so a bead waiting for placement cannot be told from stranded work."
     exit 1
 }
 # Which human gates still hold the bead they block, from the one rule every
@@ -232,12 +223,10 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     }
     # The predicate, entirely on the listing's own fields: plainly work
     # (unassigned; not review/standing/step/workflow-topology; not a merge
-    # anchor; an allowlisted work issue_type, which a gate is not), AND carrying no dispatch
-    # path (has_dispatch_path: no route and no arm). A candidate that reads as
-    # waiting for placement on this listing is marked in the fourth column:
-    # `bd blocked` prints no parent, so whether the sitting placed it is settled
-    # below, on a listing that prints one.
-    cand=$(printf '%s' "$raw" | jq -r --arg allow "$WORK_TYPES" "$STANDING_KINDS_JQ$DISPATCH_PATH_JQ$PLACEMENT_JQ"'
+    # anchor; an allowlisted work issue_type, which a gate is not), carrying no
+    # dispatch path (has_dispatch_path: no route and no arm), AND not held
+    # (has_dispatch_hold: no hold label).
+    cand=$(printf '%s' "$raw" | jq -r --arg allow "$WORK_TYPES" "$STANDING_KINDS_JQ$DISPATCH_PATH_JQ"'
         .[]? | . as $b
         | ((($b.id // "?") | tostring) | gsub("[[:cntrl:]]"; " ")) as $id
         | ($b.metadata // {}) as $m
@@ -249,10 +238,10 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         | select(($m["merge_result"] // "") == "")
         | select($allow | contains(" " + (($b.issue_type // "") | tostring) + " "))
         | select(($b | has_dispatch_path) | not)
+        | select(($b | has_dispatch_hold) | not)
         | [ $id,
             (($b.issue_type // "?") | tostring | gsub("[[:cntrl:]]"; " ")),
             (if (($m["gc.execution_routed_to"] // "") != "") then "1" else "0" end),
-            (if ($b | awaiting_placement) then "1" else "0" end),
             ([ ($b.blocked_by // [])[] | tostring | gsub("[^A-Za-z0-9._-]"; "") | select(. != "") ]
              | if length == 0 then "-" else join(",") end),
             (($b.title // "") | tostring | gsub("[[:cntrl:]]"; " ") | .[0:70]) ]
@@ -276,28 +265,6 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         liveness_ok=0           # the runs could not be read: cannot confirm any coverage
     fi
 
-    # A marked candidate waits for the placement sitting unless the sitting
-    # placed it. The parent that would say so is missing from `bd blocked`, so
-    # the marked beads are read again from `bd list`, which prints it, and
-    # awaiting_placement judges that row. Read only when a candidate is marked,
-    # and left unconfirmed ($placement_ok=0) when the listing fails, so a marked
-    # candidate is warned rather than flagged: arming a bead that still waits for
-    # the sitting would start work the operator has not placed. A listing that
-    # prints an array and then exits non-zero has not answered for the store, so
-    # bd's own exit status is read, not scrub's.
-    waiting=" "; placement_ok=1
-    if printf '%s\n' "$cand" | awk -F'\t' '$4 == "1" { found = 1 } END { exit !found }'; then
-        marked=$(run_bounded gc bd list --db "$rig_path/.beads" --metadata-field placement=pending \
-            --status open,in_progress,blocked,deferred,hooked,pinned --json --limit 0 2>/dev/null); marked_rc=$?
-        marked=$(printf '%s' "$marked" | scrub)
-        if [ "$marked_rc" -eq 0 ] && printf '%s' "$marked" | jq -e 'type == "array"' >/dev/null 2>&1 \
-            && waiting_ids=$(printf '%s' "$marked" | jq -r "$DISPATCH_PATH_JQ$PLACEMENT_JQ"'.[]? | select(awaiting_placement) | .id' 2>/dev/null); then
-            while IFS= read -r w; do [ -n "$w" ] && waiting="$waiting$w "; done <<< "$waiting_ids"
-        else
-            placement_ok=0
-        fi
-    fi
-
     # The gates a converse sitting's hold files: those that still hold by the
     # shared rule (open_human_gate), under the hold's key. The listing names
     # every live status, because bd's default scope leaves out a gate in status
@@ -316,19 +283,12 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         sitting_ok=0
     fi
 
-    while IFS=$'\t' read -r id btype has_exec held blockers title; do
+    while IFS=$'\t' read -r id btype has_exec blockers title; do
         [ -n "$id" ] || continue
         case "$worked" in *" $id "*) continue ;; esac   # a live run works it
         if [ "$has_exec" = "1" ] && [ "$liveness_ok" != "1" ]; then
             warnings+=("$label bead $id [$btype]: blocked and carries gc.execution_routed_to, but whether a live run works it could not be confirmed in $rig_path/.beads — NOT flagged, because arming a bead a live workflow still drives would double-dispatch it. Verify by hand whether a live run works it; if not, arm it ($title)")
             continue
-        fi
-        if [ "$held" = "1" ]; then
-            case "$waiting" in *" $id "*) continue ;; esac   # waits for the placement sitting
-            if [ "$placement_ok" != "1" ]; then
-                warnings+=("$label bead $id [$btype]: blocked and marked placement=pending, but whether the placement sitting placed it could not be read in $rig_path/.beads — NOT flagged, because arming a bead that still waits for the sitting would start work the operator has not placed. Check by hand whether it has a parent; if it does, arm it ($title)")
-                continue
-            fi
         fi
         if [ "$blockers" != "-" ]; then
             sat=""

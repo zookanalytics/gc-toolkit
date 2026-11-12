@@ -736,6 +736,31 @@ eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "a blocked armed bead keeps i
 hasnt "$out" "HELD by b-0" "an arm its own blocker holds gets no line of its own in the pass log"
 has "$out" "1 held" "summary counts it as held"
 
+# A hold label is Gas City's: the bead's next actor is not a worker, and bd's
+# readiness does not read the label, so the bead reports ready. A sling reads no
+# hold either, so the pass must leave the arm for when a write lifts the label.
+# arm still accepts the bead, because placing one arms it and then lifts the hold.
+echo "# reconcile withholds a bead a hold label holds"
+store '[{"id":"b-1","status":"open","assignee":"","labels":["learning","hold:mayor"],"metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true}]'
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "an armed bead a hold label holds is not an error"
+eq "$(slings)" "0" "a ready bead carrying hold:mayor is NOT slung, since no sling reads a hold"
+eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "…and it keeps its record for when the hold is lifted"
+has "$out" "1 held" "summary counts it as held"
+out="$("$SUT" list 2>&1)"
+has "$out" 'b-1 -> rig/pool [HELD by its hold:mayor label]' "list names the label that holds the arm"
+store '[{"id":"b-1","status":"open","assignee":"","labels":[" Hold:External"],"metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true}]'
+"$SUT" reconcile >/dev/null 2>&1
+eq "$(slings)" "0" "Gas City's other hold label, in another case, holds the arm too"
+store '[{"id":"b-1","status":"open","assignee":"","labels":["hold:mayor"],"metadata":{},"notes":"","_ready":true}]'
+out="$("$SUT" arm b-1 --target rig/pool 2>&1)"; rc=$?
+eq "$rc" 0 "arm accepts a bead a hold label holds"
+eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "…and records its dispatch"
+has "$out" "b-1 is HELD by its hold:mayor label" "…naming the label it waits on, not an all-clear"
+store '[{"id":"b-1","status":"open","assignee":"","labels":["learning","hold:po"],"metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true}]'
+"$SUT" reconcile >/dev/null 2>&1
+eq "$(slings)" "1" "a bead whose hold is lifted, or whose label only resembles one, is slung"
+
 store '[{"id":"b-1","status":"open","assignee":"someone/else","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true}]'
 out="$("$SUT" reconcile 2>&1)"; rc=$?
 eq "$(slings)" "0" "a ready bead someone holds is NOT slung out from under them"
@@ -1115,6 +1140,25 @@ has "$out" "withdrawn b-1" "the arm's re-read is what stops it"
 store "$GATED_B1"
 out="$(STUB_RACE_AT='where --json' STUB_RACE_JQ="$GATE_CLOSED_B1" "$SUT" reconcile 2>&1)"; rc=$?
 eq "$(slings)" "1" "control: an answer with no disarm, in the same window, slings the bead"
+
+echo "# a hold label set after the pass listed the arm holds it as the listing's would"
+# The label lands at the arm's re-read, after the listing that found it unheld:
+# the re-read applies the listing's own rule, so the arm waits for the lift.
+labels_of() { jq -c --arg id "$1" '(.[] | select(.id == $id) | .labels) // []' "$STUB_STORE"; }
+add_label_b1() { printf 'map(if .id == "b-1" then .labels = ((.labels // []) + ["%s"]) else . end)' "$1"; }
+store '[{"id":"b-1","status":"open","assignee":"","labels":["learning"],"metadata":{'"$A1"'},"notes":"","_ready":true}]'
+out="$(STUB_RACE_AT='show b-1' STUB_RACE_JQ="$(add_label_b1 hold:mayor)" "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "a hold set mid-pass is a clean pass"
+eq "$(slings)" "0" "the pass that listed the bead unheld does not sling it"
+eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "its arm stays"
+eq "$(meta b-1 gc.dispatch_when_ready_slung)" "<absent>" "and carries no marker"
+eq "$(meta b-1 gc.dispatch_when_ready_fail_count)" "<absent>" "and counts no attempt"
+eq "$(labels_of b-1)" '["learning","hold:mayor"]' "and the hold stays on"
+has "$out" "held b-1 — its hold:mayor label was set after this pass listed it" "the pass log names the label"
+has "$out" "1 held" "summary counts it as held"
+store '[{"id":"b-1","status":"open","assignee":"","labels":["learning"],"metadata":{'"$A1"'},"notes":"","_ready":true}]'
+out="$(STUB_RACE_AT='show b-1' STUB_RACE_JQ="$(add_label_b1 hold:po)" "$SUT" reconcile 2>&1)"; rc=$?
+eq "$(slings)" "1" "control: a label set in the same window that only resembles a hold is slung"
 
 echo "# a re-read of the arm that does not answer leaves it armed for the next pass"
 store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":true}]'

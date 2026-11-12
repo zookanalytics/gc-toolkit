@@ -40,7 +40,8 @@ doc does not cover slinging in general, and it does not speak for what a
 dep edge means to `bd` — it defers to `bd`'s own readiness predicate
 rather than restating it. What holds an armed bead is defined once, by
 `gctk bead holds` ([its contract](gctk-architecture.md#the-bead-holds-contract)),
-and this doc says how the pass applies it.
+with a hold label beside it in `assets/scripts/dispatch-path.sh`, and this doc
+says how the pass applies them.
 
 ## Arm it instead of remembering it
 
@@ -224,8 +225,9 @@ Each pass runs `deferred-dispatch.sh reconcile`, which:
   [Work assigned to a named agent owes a notice](#work-assigned-to-a-named-agent-owes-a-notice));
 - **dispatches** every armed open bead nothing holds — the ones `bd` reports
   ready, and also a bead in flight that bd keeps unready only through a held
-  ancestor (see below) — reading the arm once more, so that an arm disarmed since
-  the pass's listing is not sent, then stamping its own
+  ancestor (see below) — reading the bead once more, so that an arm disarmed
+  since the pass's listing is not sent and one a hold label has held since then
+  keeps its arm, then stamping its own
   `gc.dispatch_when_ready_slung` marker in its unproven `slinging@` state,
   running the recorded sling, promoting the marker to `slung@` on success,
   then clearing the record;
@@ -291,6 +293,14 @@ dispatched), and an assignee still keeps the pass off the bead. The one read
 lists the beads named and then each generation of ancestors, so its cost does
 not grow with the number of armed beads under a held epic.
 
+A hold label holds an arm too. An open bead carrying one of Gas City's hold
+labels, `hold:mayor` or `hold:external` (`has_dispatch_hold` in
+`dispatch-path.sh`), names a next actor that is not a worker. bd's readiness
+does not read the label and a sling reads no hold, so the pass leaves the arm
+until a write lifts the label, and `list` shows it as
+`HELD by its hold:mayor label`. `arm` still records an arm on a held bead, and
+it fires once the hold is lifted.
+
 A held arm keeps its record. Releasing the hold, by closing a park's gate or
 by the prerequisite landing, needs no re-arm: the first pass after it
 dispatches the bead. `list` shows a held arm as `HELD by <blocker>
@@ -334,8 +344,8 @@ cadence can be live and the pass still leave a dispatch unmade, so it flags an
 arm nothing holds that has stayed open and armed past the reconcile window, or
 one armed at a non-open status the pass can never dispatch — a dispatch
 silently not firing, surfaced before a human has to notice it days later. It
-reads holds through the same `gctk bead holds`, so an arm a park holds is not
-reported.
+reads holds through the same `gctk bead holds`, and hold labels through the
+same `dispatch-path.sh`, so an arm a park or a label holds is not reported.
 
 ## One pass at a time, inside the timeout
 
@@ -439,7 +449,11 @@ pass slings the closer once nothing holds the bead. The closer checks the close
 brief in the bead's notes against what landed, then closes the bead or puts it
 to a person. The waits skill gives the steps an agent runs, the close brief
 among them, and the first reaction's close exit writes the edge and the arm
-itself when it is given `--waiting-on <blocker>`.
+itself when it is given `--waiting-on <blocker>`. A converse sign-off writes the
+brief and the arm for its subject when the ruling leaves the subject waiting on
+work the sitting sent, after its headline writes the edge
+(`--waiting-on <work> --close-brief "<brief>"`), and then lifts the subject's
+`hold:mayor`, every spelling of it, so the pass can send the arm.
 
 bd also defines an `until` edge type. Nothing in the pack acts on one, so an
 `until` edge holds no bead and closes none.

@@ -33,6 +33,9 @@
 #              warned about, and Accept clears the gate
 #   (PARENT)   a recommendation on a bead with an open child is accepted as on
 #              any bead
+#   (PLACE, PLACE-FINISH) an Accept on a bead held for placement lifts its
+#              hold:mayor after the sling and before the record, and the finish
+#              of an acceptance stopped after its sling lifts it once
 #   (STOP-*)   an Accept stopped after its resolve, before its sling, or after
 #              its sling leaves the gate answered, the recommendation in place
 #              and the lock free, and the next Accept finishes it once
@@ -231,6 +234,7 @@ case "$1 ${2:-}" in
         --set-metadata)   _k="${2%%=*}"; _v="${2#*=}"; _r=$(printf '%s' "$_r" | jq --arg k "$_k" --arg v "$_v" '.metadata[$k] = $v'); shift 2 ;;
         --unset-metadata) _r=$(printf '%s' "$_r" | jq --arg k "$2" 'del(.metadata[$k])'); shift 2 ;;
         --append-notes)   _r=$(printf '%s' "$_r" | jq --arg n "$2" '.notes = ((.notes // "") + (if (.notes // "") == "" then "" else "\n" end) + $n)'); shift 2 ;;
+        --remove-label)   _r=$(printf '%s' "$_r" | jq --arg l "$2" '.labels = [ (.labels // [])[] | select(. != $l) ]'); shift 2 ;;
         *) shift ;;
       esac
     done
@@ -464,13 +468,33 @@ eq "$(writes)" 0 "(OTHER-BEAD) …and nothing is written or slung"
 echo "# a live sitting whose conversation replies to the recommendation's gate is warned about"
 rec; bead tk-conv; edge tk-conv tracks tk-anc; edge tk-conv replies-to tk-rec
 jq '.assignee = "gc-toolkit/gc-toolkit.tk-conv" | .status = "in_progress"' "$STORE/b/tk-conv.json" > "$STORE/b/tk-conv.tmp" && mv "$STORE/b/tk-conv.tmp" "$STORE/b/tk-conv.json"
-jq -n '[{id:"gc-50", session_name:"s-gc-50", alias:"gc-toolkit/gc-toolkit.tk-conv", template:"gc-toolkit/gc-toolkit.converse-opus", state:"active", closed:false}]' > "$STORE/sessions.json"
+jq -n '[{id:"gc-50", session_name:"s-gc-50", alias:"gc-toolkit/gc-toolkit.tk-conv", template:"gc-toolkit/gc-toolkit.converse-claude-opus", state:"active", closed:false}]' > "$STORE/sessions.json"
 run_accept tk-anc
 eq "$RC" 0 "(LIVE-SITTING) Accept beside a live sitting replying to the gate exits 0"
 has "$OUT" "warning: a live sitting holds conversation tk-conv" "(LIVE-SITTING) …warning of the sitting"
 has "$(field tk-rec close_reason)" "ruled: accepted mol-fix accept:" "(LIVE-SITTING) …and clearing the gate anyway"
 eq "$(slings)" 1 "(LIVE-SITTING) …slinging once"
 eq "$(field tk-conv status)" "in_progress" "(LIVE-SITTING) …and leaving the sitting's conversation to the operator"
+
+echo "# an Accept on a bead held for placement lifts its hold"
+# placement_hold <id> — the bead as intake holds new work: hold:mayor, beside a
+# label of its own.
+placement_hold() { jq '.labels = ["learning", "hold:mayor"]' "$STORE/b/$1.json" > "$STORE/b/$1.tmp" && mv "$STORE/b/$1.tmp" "$STORE/b/$1.json"; }
+rec; placement_hold tk-anc
+run_accept tk-anc
+eq "$RC" 0 "(PLACE) an Accept on a held bead exits 0"
+eq "$(jq -c '.labels' "$STORE/b/tk-anc.json")" '["learning"]' "(PLACE) its hold is lifted and its other labels stay"
+case "$(cat "$CALLS")" in
+  *"sling tk-anc"*"bd update tk-anc --remove-label hold:mayor"*"bd update tk-anc --set-metadata gc.recommended_formula_dispatched=mol-fix"*) ok "(PLACE) the lift comes after the sling and before the record" ;;
+  *) bad "(PLACE) the lift is out of order (calls: $(cat "$CALLS"))" ;;
+esac
+rec; placement_hold tk-anc; STOP_AT=after-sling run_accept tk-anc
+eq "$(jq -c '.labels' "$STORE/b/tk-anc.json")" '["learning","hold:mayor"]' "(PLACE-FINISH) an Accept stopped after its sling leaves the hold on"
+SL_BEFORE="$(slings)"; run_accept tk-anc
+eq "$RC" 0 "(PLACE-FINISH) the next Accept finishes it"
+eq "$(slings)" "$SL_BEFORE" "(PLACE-FINISH) …slinging nothing"
+eq "$(jq -c '.labels' "$STORE/b/tk-anc.json")" '["learning"]' "(PLACE-FINISH) …and lifting the hold"
+eq "$(meta tk-anc gc.recommended_formula_dispatched)" "mol-fix" "(PLACE-FINISH) …before it records the dispatch"
 
 echo "# a recommendation on a bead with an open child is accepted as on any bead"
 fresh; bead tk-par mol-fix; bead tk-kid; edge tk-kid parent-child tk-par
@@ -726,7 +750,7 @@ printf '#!/usr/bin/env bash\nexit 0\n' > "$TMP/rig/assets/scripts/pr-sitting-com
 chmod +x "$TMP/rig/assets/scripts/"*.sh
 # Linked after the chmod, which would otherwise follow each link and change the
 # mode of the pack's own file.
-for _lib in converse-signoff.sh conversation.sh work-outcome.sh bd-lib.sh review-verdict.sh review-dismissal.sh bead-store.sh rig-map.sh; do
+for _lib in converse-signoff.sh conversation.sh work-outcome.sh bd-lib.sh review-verdict.sh review-dismissal.sh bead-store.sh rig-map.sh dispatch-path.sh; do
     ln -s "$HERE/$_lib" "$TMP/rig/assets/scripts/$_lib"
 done
 SIGNOFF="$TMP/rig/assets/scripts/converse-signoff.sh"
@@ -735,7 +759,7 @@ SIGNOFF="$TMP/rig/assets/scripts/converse-signoff.sh"
 sitting() {
     bead tk-conv; edge tk-conv tracks tk-anc; edge tk-conv replies-to tk-rec
     jq '.assignee = "gc-toolkit/gc-toolkit.tk-conv" | .status = "in_progress"' "$STORE/b/tk-conv.json" > "$STORE/b/tk-conv.tmp" && mv "$STORE/b/tk-conv.tmp" "$STORE/b/tk-conv.json"
-    jq -n '[{id:"gc-50", session_name:"s-gc-50", alias:"gc-toolkit/gc-toolkit.tk-conv", template:"gc-toolkit/gc-toolkit.converse-opus", state:"active", closed:false}]' > "$STORE/sessions.json"
+    jq -n '[{id:"gc-50", session_name:"s-gc-50", alias:"gc-toolkit/gc-toolkit.tk-conv", template:"gc-toolkit/gc-toolkit.converse-claude-opus", state:"active", closed:false}]' > "$STORE/sessions.json"
 }
 # run_take [<arg>...] -> RC, OUT: the sitting's sign-off on the operator's
 # ruling to take the recommendation, with any further sign-off args, from a

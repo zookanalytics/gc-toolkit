@@ -12,11 +12,12 @@ import (
 // WHY IT IS ON THE BOARD. Nothing in the running system builds these binaries:
 // the launchers exec what a build order published, and the order runs on a
 // cooldown. So a component can serve a binary older than its sources for as
-// long as nobody looks, and looking meant running a one-shot script. The board
-// is where the operator already looks, so the seam is surfaced there.
+// long as nobody looks, and looking meant running a one-shot script. The seam
+// rides the board's envelope instead, as pack_health on the sidecar's GET
+// /helm, and the rig board's page does not draw it.
 //
 // The fields are what the build order writes; Severity and Detail are derived
-// by [DerivePackHealth] so the dashboard renders what the derivation says.
+// by [DerivePackHealth] so a reader prints what the derivation says.
 type PackBuild struct {
 	Component string `json:"component"`
 
@@ -56,8 +57,8 @@ type PackBuild struct {
 	// measures the LOCAL checkout (its sources against its binary), so a
 	// checkout parked off-main reads perfectly current on those while it serves
 	// code main has moved past; this is the one field that sees that gap. It is
-	// off the wire because the drift it signals is spoken by Detail, which the
-	// dashboard renders, so no consumer needs the raw count.
+	// off the wire because the drift it signals is spoken by Detail, which rides
+	// the wire, so no consumer needs the raw count.
 	BehindMain int `json:"-"`
 
 	Severity Severity `json:"severity"`

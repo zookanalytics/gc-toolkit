@@ -21,6 +21,11 @@
 #   triage-round-read     reads the round of the anchor the record names.
 #   triage-index-gap      files the observation with that anchor in its title,
 #                         provenance and quote.
+#
+# The suite finds each skill through the index and names none, so a change to a
+# skill alone selects it only as a tree-wide suite.
+#
+# run-tests-scope: tree
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -72,7 +77,7 @@ WT="$TMP/wt"
 # scripts-dir answers a pack laid out as the installed one is, its scripts and
 # its index linked from this checkout, with bring-current-audit.sh standing in
 # to log how it was called. gc answers `kit scripts-dir`, the anchor's
-# `bd show`, and `bd create` with an id.
+# `bd show`, `bd list` with no match, and `bd create` with an id.
 SCRIPTS="$TMP/pack/assets/scripts"; mkdir -p "$SCRIPTS"
 for s in "$ROOT"/assets/scripts/*; do ln -s "$s" "$SCRIPTS/$(basename "$s")"; done
 ln -s "$ROOT/review-checks.toml" "$TMP/pack/review-checks.toml"
@@ -87,6 +92,7 @@ case "$1 ${2:-}" in
   "kit scripts-dir") [ -n "${STUB_SCRIPTS:-}" ] || { echo "gc: unknown command" >&2; exit 1; }
                      printf '%s\n' "$STUB_SCRIPTS" ;;
   "bd show") printf '%s\n' '[{"id":"tk-anchor1","metadata":{}}]' ;;
+  "bd list") printf 'No issues found.\n' ;;
   "bd create") shift 2
                for a in "$@"; do printf '%s\n' "$a"; done > "$STUB_CREATE"
                printf '{"id":"tk-obs1"}\n' ;;

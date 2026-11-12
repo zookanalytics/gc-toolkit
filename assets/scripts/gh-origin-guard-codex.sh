@@ -6,8 +6,8 @@
 # Codex reads a project's hooks from <project root>/.codex/hooks.json, and for a
 # linked git worktree the project root is the repository's main checkout, so a
 # hooks file staged into an agent's worktree is never read. polecat-codex and
-# converse-codex run in worktrees. The Codex home is read by every session, so
-# the guard is registered there (docs/gh-origin-guard.md, "Codex").
+# the codex converse sittings run in worktrees. The Codex home is read by every
+# session, so the guard is registered there (docs/gh-origin-guard.md, "Codex").
 #
 # Codex sends a shell call in the payload shape Claude does and reads the same
 # deny object back, so the registration is the gh-origin-guard overlay's own

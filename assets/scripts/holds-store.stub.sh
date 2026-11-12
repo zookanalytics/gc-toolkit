@@ -25,8 +25,10 @@
 #       for one onto a bead in another store, as does an edge onto an id no row
 #       has. A closed row that names no closed_at carries one, as every bead bd
 #       closes does. The verbs are the store adapter's reads:
-#         list   the rows --id, --has-metadata-key, --metadata-field and --all
-#                select, each edge in the listing shape, every edge kept
+#         list   the rows --id, --has-metadata-key, --metadata-field, --parent
+#                and --all select, each edge in the listing shape, every edge
+#                kept; --parent selects the rows whose own parent-child edge
+#                names it
 #         blocked  the store's blocked listing, by bd's rule over the rows: a
 #                live bead (neither closed nor pinned) is blocked by a blocks or
 #                conditional-blocks edge onto a live bead in this store, by a
@@ -132,7 +134,7 @@ EDGES='
 
 case "$verb" in
   list)
-    ids=""; key=""; field=""; all=0
+    ids=""; key=""; field=""; parent=""; all=0
     while [ $# -gt 0 ]; do
       case "$1" in
         --id) shift; ids="${1:-}" ;;
@@ -141,11 +143,13 @@ case "$verb" in
         --has-metadata-key=*) key="${1#--has-metadata-key=}" ;;
         --metadata-field) shift; field="${1:-}" ;;
         --metadata-field=*) field="${1#--metadata-field=}" ;;
+        --parent) shift; parent="${1:-}" ;;
+        --parent=*) parent="${1#--parent=}" ;;
         --all) all=1 ;;
       esac
       shift || true
     done
-    jq -c --rawfile d "$deps" --arg ids "$ids" --arg key "$key" --arg field "$field" --argjson all "$all" "$EDGES"'
+    jq -c --rawfile d "$deps" --arg ids "$ids" --arg key "$key" --arg field "$field" --arg parent "$parent" --argjson all "$all" "$EDGES"'
       ($ids | if . == "" then [] else split(",") end) as $want
       | ($field | if . == "" then null else (index("=")) as $i | {k: .[:$i], v: .[$i + 1:]} end) as $f
       | rows($d)
@@ -153,6 +157,7 @@ case "$verb" in
           | select(($want | length) == 0 or (.id as $i | $want | index($i)))
           | select($key == "" or ((.metadata // {}) | has($key)))
           | select($f == null or ((((.metadata // {})[$f.k]) // "") | tostring) == $f.v)
+          | select($parent == "" or any(._edges[]; .type == "parent-child" and .id == $parent))
           | select($all == 1 or ((.status // "open") != "closed"))
           | .id as $self
           | .dependencies = [ ._edges[] | {issue_id: $self, depends_on_id: .id, type} ]

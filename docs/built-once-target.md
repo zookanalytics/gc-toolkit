@@ -144,8 +144,42 @@ it, is in tk-1tfzr71.20's design under
 What a person owes is a native human gate on the bead it blocks, and a
 conversation is a task. A sitting is a converse session that holds the
 conversation doctrine. Intake is slung work whose exits are native writes. The
-subsystem owns the converse, first-reaction and mechanik prompts, the converse
-skills, the operator's intake and the terminal surfaces.
+subsystem owns the converse, first-reaction, mechanik and po prompts, the
+converse skills and the po's refinement skill, the operator's intake and the
+terminal surfaces.
+
+New work no epic holds is owed to nobody. It carries Gas City's `hold:mayor`,
+and the po, a fresh on-demand session chartered as the operator's
+prioritization partner, works that queue with the operator. A hold is the next
+actor's queue, and a gate is an answer someone owes.
+
+The po takes the agent shape of Gas Town's mayor: `scope = "city"`,
+`wake_mode = "fresh"`, `work_dir = ".gc/agents/po"` and
+`max_active_sessions = 1`. Each difference names its reason, and each but the
+last ends with an operator ruling that gives the seat the job:
+
+- **Named `po`, not `mayor`.** Gas City's defaults and Gas Town's roles aim at
+  the name `mayor`, so a seat that answers to it takes their sends. SAFe's word
+  names the job.
+- **The operator's prioritization partner, not the human's point of contact.**
+  It works backlog refinement and portfolio sync, by the operator's charter.
+- **It places, parks and moves priority once the operator agrees in a sitting,
+  where Gas Town's mayor dispatches liberally.** It owns little, and the final
+  say is the operator's.
+- **It changes no repo, where Gas Town's mayor fixes directly when that is
+  fast.** The pools do the work, and mechanik edits the town repo.
+- **It files or points, where Gas Town's mayor handles escalations.** Findings
+  and human gates carry them.
+- **It reads a rig's wake and sleep, and changes neither.** Those are the
+  operator's and mechanik's.
+- **No `gc handoff` and no carried memory.** A context carried from sitting to
+  sitting would make the seat resident again.
+- **`sleep_after_idle = "1h"` in place of `idle_timeout = "1h"`.** Gas City
+  applies no `idle_timeout` to an always-on seat, so the mayor's hour never
+  fires. The po is on demand, and it takes its hour as Gas City's idle sleep: a
+  sitting no client is attached to sleeps once the hour has passed and keeps its
+  conversation, and the operator's next attach wakes it into that conversation.
+  This ends if the po runs always on, as the mayor does.
 
 The trade: the first reaction stops being a bead kind of its own
 (tk-1tfzr71.17).
@@ -187,8 +221,15 @@ reason and what ends it:
   ends when Gas City gives an always-on patrol an idle interval.
 - **Reading our anchors, PR states and conversations.** Our pipeline writes them.
   This ends as tk-1tfzr71.20 and .22 land.
-- **Findings and human gates in place of mayor mail.** This ends when the mayor
-  design tk-rl8gz4b.28 rules.
+- **Findings and human gates in place of mayor mail.** Gas Town's witness mails
+  the mayor about emergencies, failures, recovered and handed-off orphans and
+  queue health. This one files findings and human gates instead, because the po
+  owns little and takes none of that load, and the operator ruled at
+  tk-rl8gz4b.29's design that it stays. This ends when an operator ruling gives
+  the po escalation handling. Gas Town's formula addresses `mayor/` by name,
+  which reaches no seat in this city, so a copy taken by import would send its
+  escalations to no reader. Such a copy keeps findings and human gates, or the
+  import is ruled (tk-1tfzr71.19).
 - **No stuck-polecat check.** The liveness sweep covers it. This ends when
   tk-1tfzr71.19 retires the sweep.
 - **The nudge order.** Gas Town's deacon does this through a command and a step
