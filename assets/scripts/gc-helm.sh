@@ -2551,9 +2551,11 @@ open_edges() {
 open_join() {
     _oj_c="$1"; _oj_ask="${open_body:-$open_reason}"
     # $1 is a row_now answer: a row in the queue carries the concern when it is
-    # the conversation's own ask or a note an earlier join appended.
+    # the conversation's own ask, or when its ask or a note an earlier join
+    # appended already holds the note, as the ask open files on a gate holds
+    # the sentence naming the other beads the gate holds.
     _oj_queued='((.assignee // "") | tostring) == "human" and ((.status // "") | tostring | ascii_downcase) == "open"'
-    _oj_carries='((.description // "") == $ask) or ((.notes // "") | contains($n))'
+    _oj_carries='((.description // "") == $ask) or ((.description // "") | contains($n)) or ((.notes // "") | contains($n))'
     if [ -n "$join_note" ]; then
         _oj_row=$(row_now "$_oj_c")
         if [ -n "$_oj_row" ] && ! printf '%s' "$_oj_row" | jq -e "$_oj_queued" >/dev/null 2>&1; then

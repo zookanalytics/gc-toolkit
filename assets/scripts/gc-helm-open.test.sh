@@ -52,8 +52,10 @@
 #   (GATE-TWO) a gate two open beads wait on files about the one whose wait on
 #              it is oldest, and the ask, a question's included, ends naming the
 #              other bead, as does the note a concern leaves on a conversation
-#              it joins; a caller that showed the other bead, or a read of the
-#              waits that answers without a bead, files nothing, exit 4
+#              it joins, while a join onto a conversation whose ask already
+#              names it notes nothing; a caller that showed the other bead, or
+#              a read of the waits that answers without a bead, files nothing,
+#              exit 4
 #   (FROM)     --from names the bead the gate was reached from: a gate several
 #              open beads wait on files about that one, its ask naming the
 #              other; one that holds it only through another bead is taken as
@@ -670,6 +672,12 @@ run_open found tk-gate1
 eq "$RC" "0" "(GATE-TWO) the gate opened while the bead's conversation waits in the queue exits 0"
 grep -q 'bd update tk-conv0 --if-assignee human --if-status open --append-notes Gate tk-gate1 also holds tk-anchor, which waits on the same answer.' <<< "$CALLS" \
   && ok "(GATE-TWO) …joining it with a note naming the other bead the gate holds" || bad "(GATE-TWO) the join's note (calls: $CALLS)"
+grep -q 'bd create' <<< "$CALLS" && bad "(GATE-TWO) filed a second conversation (calls: $CALLS)" || ok "(GATE-TWO) …and filing none"
+FAKE_CONV_DESC="$(printf 'Answer the human gate tk-gate1 on tk-child: Approve the rollout.\n\nGate on the waiting bead. Approve it or say why not.\n\nGate tk-gate1 also holds tk-anchor, which waits on the same answer.')" \
+  run_open found tk-gate1
+eq "$RC" "0" "(GATE-TWO) the gate opened again onto the conversation an earlier open filed there exits 0"
+grep -q -- '--append-notes' <<< "$CALLS" && bad "(GATE-TWO) noted the other bead its ask already names (calls: $CALLS)" \
+  || ok "(GATE-TWO) …noting nothing, since its ask already names the other bead"
 grep -q 'bd create' <<< "$CALLS" && bad "(GATE-TWO) filed a second conversation (calls: $CALLS)" || ok "(GATE-TWO) …and filing none"
 unset FAKE_CONV
 FAKE_LIST_DROPS=tk-child run_open found tk-gate1
