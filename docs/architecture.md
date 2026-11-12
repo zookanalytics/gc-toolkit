@@ -86,13 +86,9 @@ flowchart LR
 ```
 
 **Legend.** Solid = writes state. Dashed = reads without writing. Each write
-path that matters has one writer. The refinery writes landings: it lands a
-`direct` bead and closes it, and it opens an `mr` bead's PR as a draft or
-updates the PR the bead owns, then writes the bead's pending record. The
-landing order writes each later step of that record: it asks GitHub to merge a
-ready PR at the head the refinery validated, and closes the bead once the merge
-commit is on the target. `bead-rehome.sh` writes dispositions, the closes that
-name a successor. `signoff.sh` writes check verdicts. Everything else reads.
+path that matters has one writer. The refinery writes landings, and the landing
+order writes merges. `bead-rehome.sh` writes dispositions, the closes that name
+a successor. `signoff.sh` writes check verdicts. Everything else reads.
 
 **The PRs the city lands.** A PR another account opened, such as a person's,
 Dependabot's or one from a fork, stays outside the city's landing, even when it
@@ -150,28 +146,20 @@ performer; the full transition table with writers is
    leaves either the pre-handoff state (witness orphan recovery re-routes it)
    or the complete post-handoff state, never a half. The bead carries no
    landing record yet, and the refinery writes its first.
-6. **Land.** The refinery follows Gas Town's refinery flow. It takes a bead
-   handed to it once nothing holds the bead and no other open bead is working
-   on its branch, brings the branch current with its target, and runs the
-   rig's gate. A `direct` bead lands on its target with no PR. For an `mr` bead
-   the refinery opens the PR as a draft, or moves the PR the bead owns to the
-   new head, and writes Gas Town's pending record, which keeps the bead open
-   until its merge is verified and names the PR and the head the refinery
-   validated.
+6. **Land.** The refinery takes each bead handed to it through Gas Town's
+   refinery flow. A `direct` bead lands on its target with no PR. For an `mr`
+   bead the refinery opens the PR as a draft, or updates the PR the bead owns,
+   and puts the PR on Gas Town's pending record
+   ([state-machine.md](state-machine.md#the-pending-record)).
 7. **Review.** The merge cadence's gate-ensure arm makes every declared check
    raisable; a review bead is routed to the polecat-codex pool; the reviewer's
    single call to `signoff.sh` records the verdict on the review bead and, on
    request-changes, files one rework child. The review loop moves the PR
    between draft and ready for review.
-8. **Merge.** The landing order reads each pending PR. One evaluator decides
-   whether the PR is ready: the operator's approval, on every target, the
-   bead's waits, the review results at the PR's head, the feedback the city has
-   handled, and the merge state GitHub reports. When it is ready, the order asks
-   GitHub to merge exactly the head the refinery validated, and once the merge
-   commit is on the target, it closes the bead. A PR at a head the refinery has
-   not validated goes back to the refinery, and a PR closed without merging,
-   merged at another head or moved to another base keeps the bead open behind a
-   gate for a person.
+8. **Merge.** The landing order has GitHub merge each PR on the pending record
+   at the head the refinery validated, once the evaluator reads the PR ready,
+   and closes the bead once the merge commit is on the target
+   ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-landing-order)).
 9. **Close propagates.** `closed` is the one signal waiting parties key on
    ([lifecycle-composition.md](lifecycle-composition.md)). A landing closes a
    bead as *landed and verified*. A disposition closes one that did not land, through
@@ -198,11 +186,9 @@ bound for main.
 
 External facts the pack does not write — GitHub closing or retargeting a PR, a
 session dying, a provider quota park, a `gc` build that moves the text the seed
-audit renders — are handled by these reactive paths: the landing order files a
-human gate on the bead when GitHub closes a PR on the pending record without
-merging it, merges another head or moves it to another base, `pr-facts.sh` (an
-arm of the cadence) records the other PR events and files a human gate, the
-witness patrol
+audit renders — are handled by these reactive paths: `pr-facts.sh` (an arm of
+the cadence), or the landing order for a PR on the pending record, records PR
+events and files a human gate, the witness patrol
 recovers work orphaned by dead sessions, the `dog` pool is warrant executor for
 due-process recovery of wedged sessions (demand-scaled 0-2),
 `quota-park-nudge.sh` nudges a session parked behind a provider limit,
