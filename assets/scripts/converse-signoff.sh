@@ -66,17 +66,18 @@
 # for the sitting's return. The conversation waits on the work through bd's
 # blocks edge, one onto each --waiting-on bead that is no gate and onto the
 # rework --rework filed. Its notes gain a `staying:` line, which the sitting's
-# restart rule reads. Last, one write guarded on the holder and the status puts
-# it back to open under the sitting that holds it, so it is no longer claimed
-# work. Gas City then sleeps the sitting once no tab is attached, under the
-# template's sleep_after_idle, and wakes the same session, with its thread,
-# once the work closes: the conversation is then ready work assigned to the
-# sitting (gascity cmd/gc/compute_awake_set.go, the assigned-work demand and the
-# idle sleep it exempts). An attach in between wakes the sitting and changes
-# nothing, and it sleeps again once the tab detaches. An edge onto a bead in
-# another store holds nothing, so a stay waits only on work in the
-# conversation's own store, and a sitting whose work is elsewhere ends at the
-# hand-off.
+# restart rule reads. Last, one write guarded on the holder and the status it
+# read leaves it open under the sitting that holds it, so it is no longer
+# claimed work, and a conversation a dismiss closed while the call ran fails
+# that guard and does not stay. Gas City then sleeps the sitting once no tab is
+# attached, under the template's sleep_after_idle, and wakes the same session,
+# with its thread, once the work closes: the conversation is then ready work
+# assigned to the sitting (gascity cmd/gc/compute_awake_set.go, the
+# assigned-work demand and the idle sleep it exempts). An attach in between
+# wakes the sitting and changes nothing, and it sleeps again once the tab
+# detaches. An edge onto a bead in another store holds nothing, so a stay waits
+# only on work in the conversation's own store, and a sitting whose work is
+# elsewhere ends at the hand-off.
 #
 # A ruling given on a turn that does not sign off (--answer) runs steps 1 to 3
 # for the gates --answer names, and step 4 when it takes the recommendation,
@@ -1093,7 +1094,10 @@ if [ "$RULED" = yes ]; then
     # that finds the conversation open reads it to tell the sitting it stays.
     # The guarded write last drops the claim and its lease and keeps the
     # assignee, so the sitting idle-sleeps once no tab is attached and the
-    # work's close makes the conversation its ready work, which wakes it.
+    # work's close makes the conversation its ready work, which wakes it. On a
+    # conversation that already reads open, as on a re-run or a second stay
+    # from a sitting woken early, the write changes nothing, and its guard is
+    # what finds a dismiss that closed the conversation while this call ran.
     for w in $STAY_ON; do
       gc bd dep add "$CONVERSATION" "$w" --type blocks >/dev/null 2>&1 \
         || stopped "the store refused the edge that makes conversation $CONVERSATION wait on $w, so it would not wake its sitting when $w closes; every gate above is answered, the conversation is still claimed, and a re-run writes the edge"
@@ -1104,21 +1108,19 @@ if [ "$RULED" = yes ]; then
       gc bd update "$CONVERSATION" --append-notes "$STAY_LINE" >/dev/null 2>&1 \
         || stopped "the store refused the staying: line on conversation $CONVERSATION, which a woken sitting reads to tell it stays; the conversation is still claimed, and a re-run writes it"
     fi
-    if [ "$CONV_STATUS" != open ]; then
-      STAY_RC=0
-      gc bd update "$CONVERSATION" --if-assignee "$HOLDER" --if-status "$CONV_STATUS" --status open >/dev/null 2>&1 || STAY_RC=$?
-      case "$STAY_RC" in
-        0) ;;
-        13)
-          BACK=$(show_row "$CONVERSATION") || BACK=""
-          case "$(printf '%s' "$BACK" | jq -r '"\(.assignee // "")/\((.status // "") | ascii_downcase)"' 2>/dev/null)" in
-            "$HOLDER/open") ;;
-            */closed) stopped "conversation $CONVERSATION was closed while this call ran, by a dismiss or another sign-off, so nothing stays" ;;
-            *) stopped "conversation $CONVERSATION moved while this call ran, so it was not left waiting for its sitting's return; re-run to stay from where it is now" ;;
-          esac ;;
-        *) stopped "the store refused the write that leaves conversation $CONVERSATION waiting under $HOLDER (gc bd update exited $STAY_RC); its edges and its staying: line are written, and a re-run makes the write" ;;
-      esac
-    fi
+    STAY_RC=0
+    gc bd update "$CONVERSATION" --if-assignee "$HOLDER" --if-status "$CONV_STATUS" --status open >/dev/null 2>&1 || STAY_RC=$?
+    case "$STAY_RC" in
+      0) ;;
+      13)
+        BACK=$(show_row "$CONVERSATION") || BACK=""
+        case "$(printf '%s' "$BACK" | jq -r '"\(.assignee // "")/\((.status // "") | ascii_downcase)"' 2>/dev/null)" in
+          "$HOLDER/open") ;;
+          */closed) stopped "conversation $CONVERSATION was closed while this call ran, by a dismiss or another sign-off, so nothing stays" ;;
+          *) stopped "conversation $CONVERSATION moved while this call ran, so it was not left waiting for its sitting's return; re-run to stay from where it is now" ;;
+        esac ;;
+      *) stopped "the store refused the write that leaves conversation $CONVERSATION waiting under $HOLDER (gc bd update exited $STAY_RC); its edges and its staying: line are written, and a re-run makes the write" ;;
+    esac
     record_action "Kept this conversation open until the work it sent lands, to compare it then with what was agreed."
     echo "STAYING conversation $CONVERSATION on $SUBJECT: it waits on $STAY_ON under $HOLDER. Its sitting sleeps once no tab is attached and wakes with this thread when that work closes"
     tell_approval

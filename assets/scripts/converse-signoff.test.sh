@@ -107,14 +107,16 @@
 #             then leaves the conversation open under its sitting: the edge
 #             onto each bead of work it sent, a rework the call files included,
 #             then its staying: line, then the guarded status write, and no
-#             close or PR comment; a re-run writes the line no second time, the
-#             call less --stay, with --no-wait for its waits and brief and
-#             --no-rework for a --rework, closes it on the return, arming no
-#             second closer once the arm has sent one and filing no second
-#             rework, and a stay with no work, beside --answer or with no ruling,
-#             on work in another store, on a gate alone, on work that waits on
-#             the conversation or on a conversation in the queue is refused
-#             before any write, as a rework child that does not read stops it
+#             close or PR comment; a re-run writes the line no second time, a
+#             dismiss that closes an open conversation while the call runs
+#             fails that write and stops the stay, the call less --stay, with
+#             --no-wait for its waits and brief and --no-rework for a --rework,
+#             closes it on the return, arming no second closer once the arm has
+#             sent one and filing no second rework, and a stay with no work,
+#             beside --answer or with no ruling, on work in another store, on a
+#             gate alone, on work that waits on the conversation or on a
+#             conversation in the queue is refused before any write, as a
+#             rework child that does not read stops it
 #   (APPROVE*) a PR a ruling leaves standing with no approval is named in the
 #             headline, the close reason and the reminder, and printed with its
 #             link, read before the first write through the rule the merge lands
@@ -1827,6 +1829,28 @@ eq "$RC" 0 "(STAY-RETURN) the return's sign-off, the stay's call less --stay wit
 eq "$(field tk-conv status)" "closed" "(STAY-RETURN) …closes the conversation"
 eq "$(grep -c '^deferred-dispatch arm' "$CALLS")/$(meta tk-sub gc.dispatch_when_ready_args)" "$ARMS/" "(STAY-RETURN) …arming no second closer once the arm has sent the first"
 eq "$(briefs tk-sub)" 1 "(STAY-RETURN) …and writes no second brief"
+
+# A stay can run on a conversation that already reads open under its sitting,
+# as a second stay from a sitting woken early does, and the operator can dismiss
+# it while the call runs. A dismiss closes the conversation and keeps its
+# holder, and here it lands just before the stay's first write to it.
+closer_case; setf tk-conv status open
+cp "$TMP/bin/gc" "$TMP/bin/gc.real"
+cat > "$TMP/bin/gc" <<'G3'
+#!/usr/bin/env bash
+if [ "$1 $2 $3" = "bd update tk-conv" ] && [ -n "${DISMISS_BEFORE_UPDATE:-}" ]; then
+  jq '.status = "closed" | .close_reason = "dismissed by the operator"' "$STORE/b/$3.json" > "$STORE/b/x" && mv "$STORE/b/x" "$STORE/b/$3.json"
+fi
+exec "$(dirname "$0")/gc.real" "$@"
+G3
+chmod +x "$TMP/bin/gc"
+DISMISS_BEFORE_UPDATE=1 run_signoff --conversation tk-conv --outcome "staying — waits on tk-work" "${STAYING[@]}"
+mv "$TMP/bin/gc.real" "$TMP/bin/gc"
+eq "$RC" 1 "(STAY-DISMISS) a stay on an open conversation that a dismiss closes while it runs exits 1"
+has "$OUT" "was closed while this call ran, by a dismiss or another sign-off, so nothing stays" "(STAY-DISMISS) …saying the dismiss closed it"
+hasnt "$OUT" "STAYING conversation" "(STAY-DISMISS) …reporting no stay"
+has "$(cat "$CALLS")" "bd update tk-conv --if-assignee gc-toolkit/gc-toolkit.tk-conv --if-status open --status open" "(STAY-DISMISS) …through the write guarded on the holder and the open status it read"
+eq "$(field tk-conv status)" "closed" "(STAY-DISMISS) …and the conversation stays closed"
 
 open_pr; bead tk-child; setm tk-child source_ruling_bead tk-conv
 run_signoff --conversation tk-conv --outcome "staying — the retry is reworked" --ruled yes --ruling "fix the retry" --rework --no-wait --stay "the retry backs off"
