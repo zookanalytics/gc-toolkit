@@ -138,19 +138,21 @@ not.
 
 ## The queue the po works
 
-The placement sitting is the po's backlog refinement: the operator opens the
-po, the operator's prioritization partner, with a nudge and then an attach
-([human-engagement.md](human-engagement.md#a-po-sitting)), and the two work the
-queue together. The queue is every bead in every rig's store that carries
-`hold:mayor` in a spelling Gas City reads as the hold, trimmed and in any case.
-The po reads it from `gc beads list --format=json`, keeping each bead with such
-a label, because `--label hold:mayor` matches only the exact text and would
-leave out a bead labeled `Hold:Mayor`. The read writes nothing. A hold is lifted
+The placement sitting is the po's backlog refinement. Each rig has its own po,
+the operator's prioritization partner for that rig's work, and the operator
+opens a rig's po from the People page of Engage's form or with `gc-helm po
+--rig <rig>` ([human-engagement.md](human-engagement.md#a-po-sitting)).
+The two work that rig's queue together: every bead in the rig's store that
+carries `hold:mayor` in a spelling Gas City reads as the hold, trimmed and in
+any case. The po reads it from `gc beads list --format=json`, keeping each bead
+whose id carries its rig's prefix and that has such a label, because `--label
+hold:mayor` matches only the exact text and would leave out a bead labeled
+`Hold:Mayor`. The read writes nothing. A hold is lifted
 by a write, so the label alone puts a bead in the queue, and nothing is
 inferred from the bead's other fields.
 
-The queue is all the po receives. `doctor/check-po-queue-only` reports
-anything else that reaches it: a bead that no hold holds and that is routed or
+A rig's queue is all its po receives. `doctor/check-po-queue-only` reports
+anything else that reaches a po: a bead that no hold holds and that is routed or
 assigned to the po, unread mail to the po, and a bead in the queue that is not
 new work or that an arm, an assignee or a live run already sends (I16 in
 [component-model.md](component-model.md#3-invariants)).

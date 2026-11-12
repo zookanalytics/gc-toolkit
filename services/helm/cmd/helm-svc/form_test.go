@@ -87,6 +87,7 @@ func (h attachHelm) Save(context.Context, form.SaveRequest) (form.Saved, error) 
 }
 func (h attachHelm) Start(context.Context, string, string) error { return errors.New("no start here") }
 func (h attachHelm) AttachCommand(string, string) *exec.Cmd      { return h.attach }
+func (h attachHelm) SeatCommand(string, string) *exec.Cmd        { return h.attach }
 
 // A form that leaves to attach to a sitting runs the attach once its program
 // has returned, so what the attach prints, such as engage's reason when it
