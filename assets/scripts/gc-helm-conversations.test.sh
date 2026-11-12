@@ -33,11 +33,15 @@
 #                 a sitting can start there, its open conversations and what
 #                 holds it; a conversation id names its subject and itself; a gate
 #                 names the bead waiting on it and itself
-#   (ABOUT-FROM)  a gate two beads wait on is about the one --from names, and is
-#                 refused naming both when read from nothing; a gate that holds
-#                 the --from bead only through another bead is read as without
-#                 --from, and one that no longer holds it is refused; --from with
-#                 no reference is refused, exit 2
+#   (ABOUT-FROM)  a gate two beads wait on is about the one --from names, and
+#                 read from nothing about the one whose wait on it is oldest,
+#                 the same one each read, then the lowest id, a wait with no
+#                 recorded time reading last; a read of those waits that does
+#                 not answer exits 4; a gate that holds the --from bead only
+#                 through another bead is read as without --from, and one that
+#                 no longer holds it is refused; --from with no reference is
+#                 refused, exit 2; accept, dismiss and handback refuse a gate
+#                 two beads wait on, naming both
 #   (ABOUT-SUSPENDED) a subject in a suspended rig reads with rig_suspended
 #                 and no refusal, and the text says it waits until the rig
 #                 resumes
@@ -100,6 +104,8 @@ case "$1 ${2:-}" in
     [ -f "$STATE/$p.unread" ] && exit 1
     rows="$STATE/$p.json"; [ -f "$rows" ] || { echo '[]'; exit 0; }
     ids=$(arg_after --id "$@"); status=$(arg_after --status "$@"); asg=$(arg_after --assignee "$@")
+    # $LIST_ID_FAIL fails a listing by id that names it, as a store that did not answer.
+    if [ -n "${LIST_ID_FAIL:-}" ]; then case ",$ids," in *",$LIST_ID_FAIL,"*) exit 1 ;; esac; fi
     jq -c --arg ids "$ids" --arg st "$status" --arg asg "$asg" '
       [ .[] | select($ids == "" or (.id as $i | ($ids | split(",")) | index($i)))
             | select($ids != "" or $st == "" or (.status as $s | ($st | split(",")) | index($s)))
@@ -282,21 +288,42 @@ has "$(printf '%s' "$OUT" | jq -r '.closed.said')" "closed at 2026-11-07T10:00:0
 seed; run conversations tk-gate --json
 eq "$(printf '%s' "$OUT" | jq -r '.subject.id + " " + .gate')" "tk-held tk-gate" "(ABOUT) a gate names the bead waiting on it, and itself"
 
-echo "# a gate two beads wait on is about the bead it was reached from"
-seed; jq '. + [{id:"tk-held2", issue_type:"task", status:"open", title:"second held bead", dependencies:[{type:"blocks", depends_on_id:"tk-gate"}]}]' "$STATE/tk.json" > "$STATE/tmp.json" && mv "$STATE/tmp.json" "$STATE/tk.json"
-run conversations tk-gate --from tk-held2 --json
+echo "# a gate two beads wait on is about the bead it was reached from, and read from nothing, the one whose wait on it is oldest"
+# tk-held2's edge onto the gate is the older one, though its id sorts after tk-held's.
+edges() { jq "$1" "$STATE/tk.json" > "$STATE/tmp.json" && mv "$STATE/tmp.json" "$STATE/tk.json"; }
+seed; edges '[ .[] | if .id == "tk-held" then .dependencies = [{type:"blocks", depends_on_id:"tk-gate", created_at:"2026-11-02T09:00:00Z"}] else . end ]
+    + [{id:"tk-held2", issue_type:"task", status:"open", title:"second held bead", dependencies:[{type:"blocks", depends_on_id:"tk-gate", created_at:"2026-11-01T09:00:00Z"}]}]'
+run conversations tk-gate --from tk-held --json
 eq "$RC" 0 "(ABOUT-FROM) a gate two beads wait on, read --from one of them, exits 0"
-eq "$(printf '%s' "$OUT" | jq -r '.subject.id + " " + .gate')" "tk-held2 tk-gate" "(ABOUT-FROM) …naming that bead, and the gate"
+eq "$(printf '%s' "$OUT" | jq -r '.subject.id + " " + .gate')" "tk-held tk-gate" "(ABOUT-FROM) …naming that bead, and the gate, though the other has waited on it longer"
 run conversations tk-gate --json
-eq "$RC" 4 "(ABOUT-FROM) read from nothing, it exits 4"
-has "$ERR" "gate tk-gate is about 2 beads still waiting on it (tk-held tk-held2), and a conversation" "(ABOUT-FROM) …naming both beads"
-has "$ERR" "Name the one you mean: gc-helm conversations tk-gate --from <bead>." "(ABOUT-FROM) …and how to name one"
+eq "$RC" 0 "(ABOUT-FROM) read from nothing, it exits 0"
+eq "$(printf '%s' "$OUT" | jq -r '.subject.id + " " + .gate')" "tk-held2 tk-gate" "(ABOUT-FROM) …naming the bead whose wait on it is oldest, and the gate"
+run conversations tk-gate --json
+eq "$(printf '%s' "$OUT" | jq -r '.subject.id')" "tk-held2" "(ABOUT-FROM) …and the same bead when read again"
 run conversations tk-gate --from tk-subj --json
 eq "$RC" 4 "(ABOUT-FROM) read --from a bead the gate does not hold, it exits 4"
 has "$ERR" "tk-subj does not wait on gate tk-gate now (the beads waiting on it are tk-held tk-held2)" "(ABOUT-FROM) …saying so"
 GCTK_REASONS='[{"held":"gate","id":"tk-gate","title":"approve it"}]' run conversations tk-gate --from tk-subj --json
-eq "$RC" 4 "(ABOUT-FROM) read --from a bead it holds only through another, it exits 4 while two beads wait on it"
-has "$ERR" "is about one bead. tk-subj is not one of them. Name the one you mean" "(ABOUT-FROM) …saying the bead is not one of them"
+eq "$RC" 0 "(ABOUT-FROM) read --from a bead it holds only through another, it exits 0 while two beads wait on it"
+eq "$(printf '%s' "$OUT" | jq -r '.subject.id')" "tk-held2" "(ABOUT-FROM) …naming the bead whose wait is oldest, as without --from"
+LIST_ID_FAIL=tk-held2 run conversations tk-gate --json
+eq "$RC" 4 "(ABOUT-FROM) a read of the beads' waits that does not answer exits 4"
+has "$ERR" "gate tk-gate holds 2 beads (tk-held tk-held2), and when each began waiting on it could not be read" "(ABOUT-FROM) …saying which one cannot be told"
+for v in accept dismiss; do
+  run "$v" tk-gate
+  eq "$RC" 4 "(ABOUT-FROM) $v on a gate two beads wait on exits 4"
+  has "$ERR" "gc-helm: $v: gate tk-gate is about 2 beads still waiting on it (tk-held tk-held2), and a conversation is about one bead. Name the one you mean: gc-helm $v <bead>." "(ABOUT-FROM) …refusing it, naming both beads, since $v would act on a bead nobody named"
+done
+run handback tk-gate <<< "the hand-back"
+eq "$RC" 4 "(ABOUT-FROM) handback on a gate two beads wait on exits 4"
+has "$ERR" "gc-helm: handback: gate tk-gate is about 2 beads still waiting on it (tk-held tk-held2), and a conversation is about one bead. Name the one you mean: gc-helm handback <bead>. Nothing was recorded." "(ABOUT-FROM) …refusing it, naming both beads"
+edges '[ .[] | if .id == "tk-held2" then .dependencies[0].created_at = "2026-11-02T09:00:00Z" else . end ]'
+run conversations tk-gate --json
+eq "$(printf '%s' "$OUT" | jq -r '.subject.id')" "tk-held" "(ABOUT-FROM) two waits as old as each other leave the bead whose id sorts first"
+edges '[ .[] | if .id == "tk-held" then .dependencies[0] |= del(.created_at) else . end ]'
+run conversations tk-gate --json
+eq "$(printf '%s' "$OUT" | jq -r '.subject.id')" "tk-held2" "(ABOUT-FROM) a wait with no recorded time reads after one with a time"
 seed; GCTK_REASONS='[{"held":"gate","id":"tk-gate","title":"approve it"}]' run conversations tk-gate --from tk-subj --json
 eq "$(printf '%s' "$OUT" | jq -r '.subject.id + " " + .gate')" "tk-held tk-gate" "(ABOUT-FROM) a gate one bead waits on, holding the --from bead through it, is about that bead, as without --from"
 run conversations tk-gate --from tk-subj --json

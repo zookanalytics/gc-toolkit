@@ -7,8 +7,8 @@
 # then spawns a manual converse-<model> sitting named for the conversation,
 # binds the conversation to the sitting's alias with a write guarded on the
 # holder it read, and attaches once the reconciler has started it. Pointed at a
-# human gate, it takes the one bead still waiting on the gate, and the
-# conversation it lands on replies to the gate.
+# human gate, it takes a bead still waiting on the gate, and the conversation it
+# lands on replies to the gate.
 #
 # Runs the REAL gc-helm.sh (invoked via `sh`, as shipped) with a stubbed `gc` on
 # PATH — no live city, Dolt, network, or sessions. Covered:
@@ -64,11 +64,14 @@
 #             missed it, and engage attaches it
 #   (GATE)    a gate names the one bead waiting on it; the conversation engage
 #             lands on — filed, taken from the queue, or live — replies to the
-#             gate before any sitting starts; two waiting beads, or none, start
-#             nothing and say why, and two engaged --from one of them take that
-#             one; a gate that holds the --from bead only through another bead
-#             is taken as without --from, and one that no longer holds it starts
-#             nothing
+#             gate before any sitting starts; none waiting starts nothing and
+#             says why; of two waiting, engage takes the one whose wait on the
+#             gate is oldest, and a conversation it files there, a concern's
+#             included, names the other in its ask, while one the bead already
+#             has takes a note naming it, once (GATE-TWO, GATE-TWO-NEW),
+#             and two engaged --from one of them take that one; a gate that
+#             holds the --from bead only through another bead is taken as
+#             without --from, and one that no longer holds it starts nothing
 #   (WARN)    a second live sitting on the bead, or one replying to a gate the
 #             bead waits on, is warned about, never refused
 #   (TAKEN, BIND-FAIL, STOMP, NOPERSIST) a bind that misses or does not stick
@@ -195,16 +198,18 @@ conv_row() {
   if [ "$1" = tk-two ]; then _created="2026-09-01T00:00:00Z"; _title="a task about two beads"; _also="tk-elsewhere"; fi
   # $ST/<id>.meta (a JSON object), $ST/<id>.reason and $ST/<id>.closed_at seed
   # the metadata, the close reason and the close time a closed sitting leaves,
-  # such as its hand-back.
+  # such as its hand-back, and $ST/<id>.notes holds the notes `bd update
+  # --append-notes` has added.
   _meta=$(cat "$ST/$1.meta" 2>/dev/null || true); [ -n "$_meta" ] || _meta='{}'
   jq -n --arg c "$1" --arg a "$(asg_of "$1")" --arg st "$(stat_of "$1")" --arg s "$(subj_of "$1")" \
         --arg t "$_title" --arg cr "$_created" --arg shape "$2" --arg x "$_also" --argjson r "${_reps:-[]}" \
         --argjson md "$_meta" --arg why "$(cat "$ST/$1.reason" 2>/dev/null || true)" \
-        --arg cat "$(cat "$ST/$1.closed_at" 2>/dev/null || true)" '
+        --arg cat "$(cat "$ST/$1.closed_at" 2>/dev/null || true)" --arg nt "$(cat "$ST/$1.notes" 2>/dev/null || true)" '
     ([$s] + (if $x == "" then [] else [$x] end)) as $tracked
     | {id:$c, issue_type:"task", status:$st, assignee:$a, title:$t, created_at:$cr, metadata:$md}
     + (if $why == "" then {} else {close_reason:$why} end)
     + (if $cat == "" then {} else {closed_at:$cat} end)
+    + (if $nt == "" then {} else {notes:$nt} end)
     + (if $shape == "show"
        then {dependencies:([ $tracked[] | {id:., dependency_type:"tracks"} ] + [ $r[] | {id:., dependency_type:"replies-to"} ])}
        else {dependencies:([ $tracked[] | {issue_id:$c, depends_on_id:., type:"tracks"} ] + [ $r[] | {issue_id:$c, depends_on_id:., type:"replies-to"} ])} end)'
@@ -350,6 +355,12 @@ case "$1 ${2:-}" in
       _rows='[]'
       for _i in $(printf '%s' "$_id" | tr ',' ' '); do
         case ",${LIST_DROPS:-}," in *",$_i,"*) continue ;; esac
+        # $WAITER_ROWS (a JSON object) answers the row it keys, as a bead
+        # waiting on a gate, its blocks edge carrying when the wait began.
+        if [ -n "${WAITER_ROWS:-}" ] && _w=$(jq -ce --arg i "$_i" '.[$i] // empty' <<< "$WAITER_ROWS"); then
+          _rows=$(jq -c --argjson r "$_w" '. + [$r]' <<< "$_rows")
+          continue
+        fi
         _rows=$(jq -c --argjson r "$(conv_row "$_i" list)" '. + [$r]' <<< "$_rows")
       done
       printf '%s\n' "$_rows"
@@ -519,7 +530,7 @@ case "$1 ${2:-}" in
         --if-assignee) _ifa_set=1; _ifa="${2-}"; shift 2 ;;
         --if-status)   _ifs_set=1; _ifs="${2-}"; shift 2 ;;
         --assignee)    _new_set=1; _new="${2-}"; shift 2 ;;
-        --append-notes) _notes=1; shift 2 ;;
+        --append-notes) _notes=1; _note="${2-}"; shift 2 ;;
         *) shift ;;
       esac
     done
@@ -543,6 +554,7 @@ case "$1 ${2:-}" in
       stub_unlock "$ST/$_id.lock"
       exit 0
     fi
+    [ "$_notes" = 1 ] && printf '%s\n' "$_note" >> "$ST/$_id.notes"
     [ "$_new_set" = 1 ] && printf '%s' "$_new" > "$ST/$_id.assignee"
     exit 0 ;;
   "bd create")
@@ -649,7 +661,7 @@ export GC_SITTING_COMMENT_TOOL="$TMP/rec-psc" REC_PSC_LOG="$TMP/psc.log"
 reset() {
     : > "$CALLS"; : > "$SPAWNED"; : > "$POLLS"; : > "$TMP/psc.log"
     rm -f "$ALIAS_REFUSED" "$ALIAS_REFUSED.reads"
-    find "${STATE_DIR:?}" -type f \( -name '*.assignee' -o -name '*.status' -o -name '*.subject' -o -name '*.meta' -o -name '*.reason' -o -name '*.closed_at' -o -name '*.unread' -o -name '*.title' -o -name '*.description' -o -name '*.metadata' -o -name '*.db' -o -name spawned-alias -o -name tracks-reads -o -name close-reads -o -name live-polls \) -delete
+    find "${STATE_DIR:?}" -type f \( -name '*.assignee' -o -name '*.status' -o -name '*.subject' -o -name '*.meta' -o -name '*.reason' -o -name '*.closed_at' -o -name '*.notes' -o -name '*.unread' -o -name '*.title' -o -name '*.description' -o -name '*.metadata' -o -name '*.db' -o -name spawned-alias -o -name tracks-reads -o -name close-reads -o -name live-polls \) -delete
     printf '1700000000' > "$TMP/clock"
     : > "$STATE_DIR/replies"; : > "$STATE_DIR/live"
     for _l in ${LIVE_SITTINGS:-}; do printf '%s %s\n' "${_l%%=*}" "${_l#*=}" >> "$STATE_DIR/live"; done
@@ -1041,6 +1053,7 @@ case "$CALLED" in
   *) bad "(GATE-REPLY-QUEUE) the reply should precede the spawn (calls: $CALLED)" ;;
 esac
 has "$OUT" "conversation tk-conv for tk-subj" "(GATE) …and the sitting holds tk-subj's conversation"
+hasnt "$CALLED" "--append-notes" "(GATE) …noting no other bead, since none waits on the gate"
 export HAVE_CONV=0
 reset; run_engage tk-gate --no-attach
 eq "$RC" 0 "(GATE-NEW) a gate whose bead has no conversation exits 0"
@@ -1075,14 +1088,34 @@ has "$CALLED" "bd dep bd dep add tk-conv tk-gate --type replies-to" \
 has "$OUT" "nothing spawned, because the sitting would talk while the PR could merge" "(GATE-NOHOLD) …saying why nothing spawned"
 hasnt "$CALLED" "session new" "(GATE-NOHOLD) …and starting no sitting"
 
-echo "# a gate two open beads wait on starts nothing and names both"
+echo "# a gate two open beads wait on is about the one whose wait on it is oldest"
+# tk-subj's edge onto the gate is the older one, though its id sorts after tk-child's.
 export GATE_WAITERS='[{"id":"tk-subj","status":"open"},{"id":"tk-child","status":"in_progress"}]'
+export WAITER_ROWS='{
+  "tk-subj":  {"id":"tk-subj","issue_type":"task","status":"open","dependencies":[{"issue_id":"tk-subj","depends_on_id":"tk-gate","type":"blocks","created_at":"2026-11-01T11:35:20Z"}]},
+  "tk-child": {"id":"tk-child","issue_type":"task","status":"in_progress","dependencies":[{"issue_id":"tk-child","depends_on_id":"tk-gate","type":"blocks","created_at":"2026-11-06T07:42:23Z"}]}}'
 reset; run_engage tk-gate --no-attach
-eq "$RC" 4 "(GATE-TWO) a gate two open beads wait on exits 4"
-has "$OUT" "tk-subj tk-child" "(GATE-TWO) …naming both, so the operator engages the one they mean"
-hasnt "$CALLED" "bd create" "(GATE-TWO) …filing no conversation"
-hasnt "$CALLED" "session new" "(GATE-TWO) …and starting no session"
-has "$OUT" "Name the one you mean: gc-helm engage tk-gate --from <bead>." "(GATE-TWO) …and how to name the one meant"
+eq "$RC" 0 "(GATE-TWO) a gate two open beads wait on, engaged from nothing, exits 0"
+has "$OUT" "tk-gate is a gate about tk-subj and tk-child — engaging tk-subj, which has waited on it longest" "(GATE-TWO) …taking the bead whose wait on it is oldest, and saying so"
+has "$CALLED" "bd dep bd dep add tk-conv tk-gate --type replies-to" "(GATE-TWO) …landing on its conversation, which replies to the gate"
+has "$CALLED" "bd update tk-conv --append-notes Gate tk-gate also holds tk-child, which waits on the same answer." "(GATE-TWO) …and takes a note naming the other bead the gate holds"
+has "$CALLED" "session new converse-claude-opus --alias tk-conv" "(GATE-TWO) …and starting its sitting"
+reset; printf '%s\n' "Gate tk-gate also holds tk-child, which waits on the same answer." > "$STATE_DIR/tk-conv.notes"
+run_engage tk-gate --no-attach
+eq "$RC" 0 "(GATE-TWO) the gate engaged again exits 0"
+hasnt "$CALLED" "--append-notes" "(GATE-TWO) …noting nothing its conversation already carries"
+export HAVE_CONV=0
+reset; run_engage tk-gate --no-input --no-attach
+eq "$RC" 0 "(GATE-TWO-NEW) the gate engaged while that bead has no conversation exits 0"
+has "$CALLED" "--deps tracks:tk-subj" "(GATE-TWO-NEW) …filing one on that bead"
+eq "$(tail -n 1 "$STATE_DIR/tk-new.description")" "Gate tk-gate also holds tk-child, which waits on the same answer." "(GATE-TWO-NEW) …whose ask ends naming the other bead the gate holds"
+hasnt "$CALLED" "--append-notes" "(GATE-TWO-NEW) …and no note repeating it"
+reset; run_engage tk-gate --reason "is the wording right?" --no-input --no-attach
+eq "$RC" 0 "(GATE-TWO-NEW) a concern engaged on the gate exits 0"
+has "$CALLED" "--deps tracks:tk-subj" "(GATE-TWO-NEW) …filing its conversation on that bead"
+eq "$(cat "$STATE_DIR/tk-new.description")" "$(printf 'is the wording right?\n\nGate tk-gate also holds tk-child, which waits on the same answer.')" "(GATE-TWO-NEW) …its ask the concern, then the other bead the gate holds"
+has "$CALLED" "bd dep bd dep add tk-new tk-gate --type replies-to" "(GATE-TWO-NEW) …replying to the gate"
+unset HAVE_CONV WAITER_ROWS
 
 echo "# a gate two open beads wait on, engaged --from one of them, is about that one"
 reset; run_engage tk-gate --from tk-subj --no-attach
