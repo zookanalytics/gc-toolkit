@@ -14,6 +14,7 @@ import { EpicsPage, MatchesPage, NeedsYouPage, UnprioritizedPage, WorkQueuePage 
 import { SidePanel } from './Panel';
 import { READ_TIMEOUT_MS, readRigs, rigAddress, rigFromAddress } from './read';
 import { Note } from './rows';
+import { useCopy } from './useCopy';
 import { useRigDocument, type RigDocumentState } from './useRigDocument';
 import { ViewContext, type PanelState, type View } from './view';
 
@@ -102,8 +103,7 @@ function RigBoard({ rig }: { rig: string }) {
   const [query, setQuery] = useState('');
   const [open, setOpenState] = useState<Record<string, boolean>>({});
   const [panel, setPanel] = useState<PanelState | null>(null);
-  const [copied, setCopied] = useState<string | null>(null);
-  const copiedTimer = useRef<number | undefined>(undefined);
+  const [copied, copy] = useCopy();
   // The engage whose answer the panel may show; a later click replaces it.
   const engaging = useRef(0);
 
@@ -142,16 +142,7 @@ function RigBoard({ rig }: { rig: string }) {
       isOpen: (key, def) => (key in open ? open[key] : def),
       flip: (key, def) => setOpenState((prev) => ({ ...prev, [key]: !(key in prev ? prev[key] : def) })),
       setOpen: (parts) => setOpenState((prev) => ({ ...prev, ...parts })),
-      copy: (id) => {
-        try {
-          navigator.clipboard.writeText(id).catch(() => {});
-        } catch {
-          // A page without clipboard access still shows the id to select.
-        }
-        setCopied(id);
-        window.clearTimeout(copiedTimer.current);
-        copiedTimer.current = window.setTimeout(() => setCopied(null), 1200);
-      },
+      copy,
       copied,
       show: (id) => setQuery(id),
       openPanel: (p) => {
@@ -163,7 +154,7 @@ function RigBoard({ rig }: { rig: string }) {
         startEngage(bead, title);
       },
     };
-  }, [doc, open, copied, panel, startEngage]);
+  }, [doc, open, copy, copied, panel, startEngage]);
 
   const closePanel = () => {
     engaging.current++;

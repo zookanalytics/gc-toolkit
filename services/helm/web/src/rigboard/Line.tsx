@@ -12,6 +12,7 @@
 // none keeps the chevron's slot empty, and a click on its title opens Details.
 
 import type { ReactNode } from 'react';
+import { CopyButton } from './CopyButton';
 import { STEP, useView } from './view';
 
 export interface LineProps {
@@ -127,9 +128,15 @@ export function Line(p: LineProps) {
 export function BeadId({ id }: { id: string }) {
   const v = useView();
   return (
-    <button type="button" className="link bead-id" title="Copy the bead ID" onClick={() => v.copy(id)}>
-      {v.copied === id ? 'copied' : id}
-    </button>
+    <CopyButton
+      className="link bead-id"
+      title="Copy the bead ID"
+      text={id}
+      label={id}
+      done="copied"
+      copied={v.copied}
+      copy={v.copy}
+    />
   );
 }
 
