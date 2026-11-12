@@ -738,7 +738,7 @@ values every later call sets and the skill to load next:
 | Entry | What the record shows | Next |
 |---|---|---|
 | `fresh` | A new claim, with no `staying:` line newest. | The premise re-check. |
-| `interrupted` | A restart: the claim returns the conversation as an existing assignment. A `holding:` line newest means the hold stands, and none means nothing was held yet. A conversation still claimed while its work is out is a stay that stopped short. | `converse-continue`, the premise re-check, or `converse-stay`. |
+| `interrupted` | A restart, where the claim returns the conversation as an existing assignment: a `holding:` line newest means the hold stands, and none means nothing was held yet. Or a drain over a conversation still claimed while its work is out, which is a stay that stopped short. | `converse-continue`, the premise re-check, or `converse-stay`. |
 | `waiting` | No ready work, and the conversation open under the alias waits on open work, as `gctk bead holds` reads it. | `converse-stay`. |
 | `returned` | A claim whose newest `holding:` or `staying:` line is a `staying:` line, with nothing left open that the conversation waits on. | `converse-stay`. |
 | `none` | No ready work, and no conversation under the alias. | Drain. |

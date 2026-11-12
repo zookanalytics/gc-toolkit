@@ -13,8 +13,9 @@ so take it only when nothing important is pending. When the operator still has
 something to read or answer, such as a live decision or a routing answer, post
 the hand-back, keep the conversation open, and go on (`converse-continue`),
 which answers at once a gate they have ruled on. A settled sitting signs off
-here rather than waiting for a dismiss. A sitting that stays takes everything
-below but the close, through `converse-stay`.
+here rather than waiting for a dismiss. A sitting that stays runs everything
+below up to the sign-off, then signs off through `converse-stay` in place of
+the close.
 
 ## Record
 
@@ -133,7 +134,8 @@ ROW=$(gc bd show "$SUBJECT" --json) \
 ```
 
 When the ruling sends the subject where its arm or route already sends it, by
-the same method, keep them. Under any other ruling, with or without
+the same method, keep them and send nothing yourself: once the gate is
+answered, the arm or the route sends it. Under any other ruling, with or without
 `--accept`, withdraw them before the answer. The block disarms an arm, clears a
 pool route and keeps a `human` route, which sends the subject to no pool. It
 prints its `carries no arm and no pool route` line only once each write has
@@ -208,7 +210,8 @@ Take the case that fits the ruling:
   dispatches the formula once under the subject's acceptance lock. A var the
   operator settles rides beside it as `--var <key>=<value>`. It refuses,
   writing nothing, while a gate the ruling does not answer still holds the
-  subject. Answer that gate in the same ruling, or sign off with `--leave` on
+  subject. Answer that gate in the same ruling once the operator rules on it,
+  or sign off with `--leave` on
   the recommendation's gate, and the board offers Accept once the other gate
   clears. A `first-reaction` gate on an epic's member asks the member's
   recommendation, which this does not take.
@@ -239,8 +242,9 @@ Take the case that fits the ruling:
   A gate the sitting did not answer makes it exit 5 with nothing closed: run
   it again once that gate clears. When another bead carries the work, name it
   as the successor, under `--kind duplicate`, `folded`, `re-homed` or
-  `fixed-upstream`. An epic ruled close is the `converse-epic-review` skill's
-  to close.
+  `fixed-upstream`. An open PR, or a branch whose PR is not open yet, does not
+  stop the ruling: an open PR is retired instead (below). An epic ruled close
+  is the `converse-epic-review` skill's to close.
 
 **A ruling that reaches an open PR** (`merge_result=pull_request`) says what it
 does to the PR: the subject's PR, the PR whose merge this conversation holds,
@@ -275,8 +279,9 @@ account other than the city's. When a PR the ruling leaves standing still
 waits on GitHub, the sign-off prints what its merge needs, with its link. Pass
 each line on. Name the operator's Approve as the one thing left only when
 nothing else holds the PR. When the ruling holds the PR back, leaves a gate
-owed or waits on other work, say that first and give the Approve as the step
-after it. When no line prints, leave the Approve out.
+owed or waits on other work, or the line names a request for changes, say that
+first, with what settles it, and give the Approve as the step after it. When no
+line prints, leave the Approve out.
 
 Then post the sign-off as the sitting's last word, a hand-back that opens with
 where the subject stands. Its last words say what the record does next: what
@@ -296,8 +301,9 @@ sign-off, because a conversation closed by hand answers none of its gates.
 ## Ending early
 
 When your context runs low before the operator answers, record the outcome so
-far, then sign off with `--ruled no`, and drain. It answers nothing: every gate
-stays open and owed with its reply in place, and the conversation goes back to
-the operator's queue, where the next engagement takes it up from its record.
+far, sign off with `--ruled no`, record and post a hand-back that says the
+conversation is back in their queue and what is still owed, and drain. The
+sign-off answers nothing: every gate stays open and owed with its reply in
+place, and the next engagement takes the conversation up from its record.
 It is the one ending that drains with the conversation open, and a sitting the
 operator has not ruled on is never ended to unblock something else.

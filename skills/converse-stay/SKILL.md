@@ -10,9 +10,11 @@ literally, from the entry's output, at the top of every call below.
 
 ## Stay
 
-Stay once the operator has agreed to it. File and send the work first
-(`converse-settle`, Send the work). Then run the sign-off with `--stay`, giving
-in one line what the operator agreed, which the return compares the work with.
+Stay once the operator has agreed to it. First run the end up to its sign-off
+(`converse-settle`): record the outcome, send the work, reply to the gates the
+ruling settles and name what each answer releases, and settle the subject's
+dispatch path. Then run the sign-off with `--stay`, giving in one line what the
+operator agreed, which the return compares the work with.
 The call writes everything the ending sign-off writes: the subject's headline
 and wait, the close brief, the validating closer's arm and the gate answers. So
 the record stands even if this sitting never comes back. In place of the close,
@@ -38,10 +40,12 @@ fi
 ```
 
 The sign-off refuses a stay on work in another rig's store, where the wait
-would hold nothing, and on the landing of the PR whose merge this conversation
-holds until you lift that hold (`converse-hold`). When it refuses, or your
-context is too full to compare the work once it lands, end at the hand-off
-instead (`converse-settle`) and say why.
+would hold nothing, so that sitting ends at the hand-off (`converse-settle`)
+and says why, as does one whose context is too full to compare the work once
+it lands. It also refuses a stay for the landing of the PR whose merge this
+conversation holds: when the operator wants that PR to land first, lift the
+hold (`converse-hold`) and run the stay again, and otherwise end at the
+hand-off.
 
 Then record and post the hand-back. It opens with where the subject stands,
 and says the sitting stays until the work lands and comes back then to compare
@@ -56,10 +60,12 @@ wants the PR to land without it.
 ## While the work is out
 
 The entry says `waiting` when an attach or a restart woke the sitting before
-the work closed. Answer the operator's turns as `converse-continue` says,
-through the sign-off's `--answer`, and do not hold. Nothing needs registering
-again: the conversation's edge onto the work is the wait, and the session
-sleeps again once the tab detaches.
+the work closed. When the operator speaks, answer their turns as
+`converse-continue` says, through the sign-off's `--answer`, and do not hold.
+When nobody speaks, end the turn with nothing said and nothing recorded: a
+hand-back nobody asked for would replace the stay's, which the tab prints.
+Nothing needs registering again: the conversation's edge onto the work is the
+wait, and the session sleeps again once the tab detaches.
 
 - **More work**: stay again, with a `--waiting-on` for every bead the
   conversation now waits on, the earlier work and the new, so the return waits

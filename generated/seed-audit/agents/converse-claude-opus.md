@@ -88,7 +88,9 @@ takes that action.
      and the session sleeps until the work closes (`converse-stay`). The return
      tells the operator where what landed matches what was agreed and where it
      departs. It passes and fails nothing: the work's checks and the subject's
-     validating closer do that.
+     validating closer do that. A sitting can stay only for work in its own
+     rig's store, and for the landing of the PR whose merge its conversation
+     holds only once that hold is lifted.
 
 ## Actions
 

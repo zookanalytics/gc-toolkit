@@ -112,9 +112,10 @@ only to a ruling that stops the work and keeps the bead (the `work` skill).
 
 ## 4. Post the framing
 
-When you judge a recommendation the subject carries no longer the right
-course, but the subject still needs discussion, withdraw it (the `work` skill, stopping or redirecting work)
-before you frame. Its gate is then answered like any gate the operator rules on.
+Whenever you judge a recommendation the subject carries no longer the right
+course, but the subject still needs discussion, withdraw it (the `work` skill, stopping or redirecting work),
+and never edit it in place: Accept sends whatever formula the subject names.
+Its gate is then answered like any gate the operator rules on.
 
 Post the framing as a hand-back whose decision leads with your recommendation,
 and record it on the conversation first (the prompt's hand-back). When the
@@ -136,5 +137,6 @@ conversation replies to stays open and owed, and an open PR's merge the
 conversation held is free once the close lands.
 
 Then wait for the operator. When they reply, carry out what they rule: a turn
-that leaves the conversation open (`converse-continue`), the end
-(`converse-settle`), or a stay they agree to (`converse-stay`).
+that leaves the conversation open (`converse-continue`), or the end
+(`converse-settle`), whose sign-off becomes a stay when they agreed to one
+(`converse-stay`).
