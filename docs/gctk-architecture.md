@@ -135,7 +135,8 @@ What each noun owns:
   ([warrants.md](warrants.md#priority-following)).
 - **`pr`:** a bead's PR summary, the title and managed summary region of its
   PR, and Gas Town's pending-through-merge record on the bead that owns the PR,
-  with the store's record lock that each writer of the record takes. It starts from Gas City's own PR concept. Gas Town's refinery opens a PR
+  with the store's record lock that each writer of the record takes. It starts
+  from Gas City's own PR concept. Gas Town's refinery opens a PR
   with a title and a body taken from its bead, Gas City's PR monitor and
   `gc github pr backfill` read a PR's readiness when something runs them, and
   a `gh:pr` gate resolves when its PR merges. A pr verb is only what those

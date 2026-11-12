@@ -654,26 +654,38 @@ func (u *run) gate(s state, result, message string, done RunOutcome) RunOutcome 
 }
 
 // OriginError is a PR outside the rig's own repository, the one the clone's
-// origin names, or an origin that did not read.
+// origin names.
 type OriginError struct{ Why string }
 
 func (e *OriginError) Error() string { return e.Why }
 
-// sameOrigin refuses a PR outside the rig's own repository.
+// sameOrigin refuses a PR outside the rig's own repository. An origin that
+// does not read is a read that did not answer, not a refusal.
 func (l Landing) sameOrigin(host, repo string) error {
-	if why := l.originDiffers(host, repo); why != "" {
+	raw, err := l.Checkout.OriginURL()
+	if err != nil {
+		return fmt.Errorf("the rig's origin did not read: %w", err)
+	}
+	if why := outsideOrigin(raw, host, repo); why != "" {
 		return &OriginError{Why: why}
 	}
 	return nil
 }
 
 // originDiffers says why a PR on host in repo is not in the repository the
-// clone's origin names, and is empty when it is.
+// clone's origin names, or why the origin did not read, and is empty when the
+// PR is in it.
 func (l Landing) originDiffers(host, repo string) string {
 	raw, err := l.Checkout.OriginURL()
 	if err != nil {
 		return "the rig's origin did not read: " + err.Error()
 	}
+	return outsideOrigin(raw, host, repo)
+}
+
+// outsideOrigin says why a PR on host in repo is not in the repository the
+// origin URL raw names, and is empty when it is.
+func outsideOrigin(raw, host, repo string) string {
 	oh, orepo, ok := originRepo(raw)
 	if !ok {
 		return fmt.Sprintf("the rig's origin %s names no repository on a host", raw)

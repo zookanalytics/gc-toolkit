@@ -8,7 +8,7 @@
 //
 // Other domains read the record through Read, or through the reading faces of
 // the keys whose value is their whole question (Result, PRURL, PRNumber,
-// Rejection), and write none of it.
+// Rejection, Target) and the selection OnTarget, and write none of it.
 package record
 
 import (

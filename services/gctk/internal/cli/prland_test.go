@@ -16,7 +16,8 @@ import (
 
 const validated = "1111111111111111111111111111111111111111"
 
-// landingCmd runs gctk with args over store, in a clone whose origin is origin.
+// landingCmd runs gctk with args over store, in a clone whose origin is origin,
+// or a clone with no origin when origin is empty.
 func landingCmd(t *testing.T, store, origin string, args ...string) (stdout, stderr string, code int) {
 	t.Helper()
 	bin := t.TempDir()
@@ -26,7 +27,11 @@ func landingCmd(t *testing.T, store, origin string, args ...string) (stdout, std
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("STUB_STORE", store)
 	rig := t.TempDir()
-	for _, a := range [][]string{{"init", "-q"}, {"remote", "add", "origin", origin}} {
+	setup := [][]string{{"init", "-q"}}
+	if origin != "" {
+		setup = append(setup, []string{"remote", "add", "origin", origin})
+	}
+	for _, a := range setup {
 		if out, err := exec.Command("git", append([]string{"-C", rig}, a...)...).CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", a, err, out)
 		}
@@ -97,5 +102,16 @@ func TestPRRecordRefusesAPROutsideTheRigsOrigin(t *testing.T) {
 		"--target", "main", "--refinery", "rig/refinery", "--db", t.TempDir())
 	if code != 1 || !strings.Contains(errs, "is not the rig's origin") {
 		t.Fatalf("exit %d, stderr %q, want exit 1 naming the origin", code, errs)
+	}
+}
+
+// An origin that does not read is a read that did not answer, exit 2, never
+// the refusal of a PR outside the rig's repository.
+func TestPRRecordWhoseOriginDoesNotReadWritesNothingAndExits2(t *testing.T) {
+	_, errs, code := landingCmd(t, `[{"id":"st-1","status":"open","assignee":"rig/refinery"}]`, "",
+		"pr", "record", "st-1", "--pr", "https://github.com/acme/widgets/pull/7", "--head", validated,
+		"--target", "main", "--refinery", "rig/refinery", "--db", t.TempDir())
+	if code != 2 || !strings.Contains(errs, "origin did not read") {
+		t.Fatalf("exit %d, stderr %q, want exit 2 naming the origin's read", code, errs)
 	}
 }

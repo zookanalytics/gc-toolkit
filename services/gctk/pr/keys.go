@@ -6,8 +6,9 @@ import "github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 // (summary.go). No domain owns any of them: shell writes each, so each is
 // declared read-only here and its definition stays in
 // lifecycle/lifecycle.toml. The change that moves a shell writer into a domain
-// takes its key's declaration over. The keys the evaluator reads too, branch,
-// merged_target and merge_result, are declared once, with its keys.
+// takes its key's declaration over. The branch, which the evaluator reads too,
+// is declared once, with its keys, and merged_target and merge_result are the
+// record's, read through the reading faces package record exports.
 
 // The bead that owns the PR: where it lands and which checks gate it.
 var (
