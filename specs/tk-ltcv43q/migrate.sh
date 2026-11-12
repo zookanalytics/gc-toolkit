@@ -26,9 +26,9 @@
 #   3. dismissed: it is a discard bucket, named below, whose observations the
 #      distiller judged not to be feedback. It closes as dismissed.
 #   4. held: it gathers evidence. It is deferred until --defer-days after its
-#      last_seen. When that date has passed, it is deferred to the distiller's
-#      next run instead, which judges the pending observations before it
-#      dismisses the pattern, because one of them may be its recurrence.
+#      last_seen. When that date has passed, it is deferred for 12 hours, and
+#      the first distiller run after that to judge every pending observation
+#      dismisses it unless one of them is its recurrence.
 #
 # Every close stamps gc.work_outcome=no-op first, because a pattern ships no
 # commit of its own and the runtime's work-record gate reads that key.
@@ -138,8 +138,8 @@ PLAN=$(printf '%s' "$READY" | jq -r --argjson adopted "$ADOPTED" --argjson statu
     else
       [$p.id, "deferred", "-", "+12h",
        ("held on " + $hold + ": its window of " + ($days | tostring) + " days past its last evidence on "
-        + $last[0:10] + " has passed, so the next distiller run dismisses it unless a pending observation"
-        + " is its recurrence")]
+        + $last[0:10] + " has passed, so once this deferral ends, the first distiller run to judge every"
+        + " pending observation dismisses it unless one is its recurrence")]
     end
   | @tsv') || { echo "migrate: the decisions could not be computed; nothing decided" >&2; exit 1; }
 

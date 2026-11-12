@@ -42,10 +42,13 @@ fits decides:
    reason. The window runs from its `last_seen`, not from the cut-over, because
    these holds were judged when their last evidence came, and the distiller
    defers a hold from the run that judges it. When that window has already
-   passed, the pattern is deferred only until the distiller's next run
-   (`+12h`). An observation still pending may be its recurrence, and only the
-   distiller judges one, so the pattern is dismissed by the first run that has
-   judged every pending observation and found none to be its recurrence.
+   passed, the pattern is deferred for 12 hours (`+12h`). An observation still
+   pending may be its recurrence, and only the distiller judges one, so the
+   pattern is dismissed by the first distiller run after those 12 hours that
+   has judged every pending observation and found none to be its recurrence.
+   The distiller's order fires on a 24-hour cooldown, so that run is the
+   distiller's next one only when the cut-over runs at least 12 hours before
+   it.
 
 Every close first stamps `gc.work_outcome=no-op`, because a pattern ships no
 commit of its own.
@@ -84,8 +87,9 @@ Run at 20:46Z against the live store, writing nothing:
   few at a time as they come due.
 - The other 5 deferred are holds whose window has passed, because their last
   evidence came on 2026-08-11 to 08-14 (tk-6u3v6, tk-b7q0n, tk-kjeog, tk-ln6za,
-  tk-q8a8n). They are deferred only until the distiller's next run, which
-  dismisses each unless an observation pending now is its recurrence.
+  tk-q8a8n). They are deferred for 12 hours, and the first distiller run after
+  that to judge every pending observation dismisses each unless one of them is
+  its recurrence.
 
 The live run reads the store again, so its figures move with whatever the
 distiller has done in between.
