@@ -128,7 +128,7 @@ the PR's anchor depends on the conversation through a `blocks` edge, which
 `gc-helm.sh open` and engage add, and the conversation's close frees the merge
 by whatever route it closes
 ([human-engagement.md](human-engagement.md#a-conversation-on-an-open-pr-holds-its-merge)).
-The anchor keeps its state, `pull_request` or its value on the pending record.
+The anchor keeps its state, `pull_request`.
 
 `pre_open_gate` and `pull_request` are the declared *detached* states
 (`detached_states`). The merge cadence drives them and no queue offers them, so
