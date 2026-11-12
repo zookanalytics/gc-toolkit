@@ -228,6 +228,11 @@ bd_rows() {
 #              a merge anchor the cadence acts on: its recorded machine axis is
 #                progressing, or settled before a PR exists (the PR-open pass
 #                publishes it), or settled with a PR that needs no further review.
+#              a PR on Gas Town's pending record, where no machine axis is
+#                written: one whose new head the refinery validates
+#                (pull_request_head_changed), or one that waits on its merge
+#                (pull_request_pending) with a recorded posture that needs no
+#                further review.
 #   stuck      human: a human gate (a gate whose await type is human, which
 #                carries no route), a bead routed or assigned to the reserved
 #                `human`, a decision, a finding that needs the operator, an
@@ -237,14 +242,18 @@ bd_rows() {
 #                by its sitting.
 #              held: any other status. Blocked, deferred and pinned are
 #                deliberate holds no pool offers; a status a store adds is one
-#                this classifier does not know, so it fails closed.
+#                this classifier does not know, so it fails closed. The blocked
+#                status the pending record gives a PR that waits on its merge is
+#                no such hold, so that PR is read as an anchor.
 #              approval: an open PR settled and waiting on the operator's review
-#                (review required, or changes requested) at its live head.
+#                (review required, or changes requested) at its live head, or a
+#                PR on the pending record whose recorded posture says so.
 #              merge-hold: an operator merge or rebase hold on an anchor.
 #              merge-blocked: the anchor's machine axis says no automated actor
 #                can move it.
 #              unread: an anchor whose machine axis, or whose PR posture at that
-#                axis's head, is not recorded.
+#                axis's head, is not recorded, or a PR on the pending record
+#                with no posture recorded.
 #              capped: an armed dispatch that hit its sling-failure cap.
 #              unrouted: open with no route, arm or assignee, so nothing picks it up.
 #
