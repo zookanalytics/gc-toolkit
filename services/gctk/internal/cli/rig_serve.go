@@ -34,8 +34,11 @@ publish command publishes the copy's port, as $PORT, for exactly as long as it
 runs, and the address is the pattern with the port for each $PORT or ${PORT}.
 Either one empty means no address can be given. A copy started without them has
 no address, and a start with them publishes a running copy whose publish
-command ended. --check reports the copy's state and starts nothing. --stop ends
-the copy's whole process group.
+command ended. A start with them while the copy's publish command runs, with
+another publish command or address pattern, an empty one included, fails with
+reason other-publisher and leaves the copy and its publish command running.
+--check reports the copy's state and starts nothing. --stop ends the copy's
+whole process group.
 
 The sandbox is the one demo-engine-lib.sh defines, in the pack's scripts
 directory, which GCTK_SCRIPTS_DIR names. The serve command cannot read the
@@ -64,7 +67,7 @@ go to stderr.
   none, stopped  0     --stop: no copy runs, or its process group has ended
   running        1     --stop: the copy's process group survived SIGTERM and
                        SIGKILL
-  failed         1     start: no copy of the command runs
+  failed         1     start: no copy of the command runs as the start asks
 exit 2 is a usage error.
 
 --lead runs a copy's leader over its record. A start runs it in a session of

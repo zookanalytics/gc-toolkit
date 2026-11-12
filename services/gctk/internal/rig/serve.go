@@ -478,9 +478,11 @@ var leaderCommand = func(dir string) (*exec.Cmd, error) {
 // whose copy runs starts no other, and a start after a session wakes is safe to
 // repeat. The report of a start that ran the copy says so, in Started. A start
 // whose command differs from the running copy's fails and leaves that copy
-// running. A start reports a copy once it answers on its port and holds it, and
-// stops a copy of its command that does not within the wait, whether it ran the
-// copy or found it.
+// running, and so does one that asks for an address while the copy's publish
+// command runs, with another publish command or address pattern. A start
+// reports a copy once it answers on its port and holds it, and stops a copy of
+// its command that does not within the wait, whether it ran the copy or found
+// it.
 func (c *Copies) Serve(checkout string, o ServeOpts) Report {
 	failed := func(reason, detail string) Report {
 		return Report{State: CopyFailed, Reason: reason, Checkout: checkout, Detail: detail}
@@ -519,14 +521,27 @@ func (c *Copies) Serve(checkout string, o ServeOpts) Report {
 		// been cut off before its wait ended, so this start's wait decides, as a
 		// new copy's does.
 		if o.Publish {
-			_ = rec.write("asked", "")
-			_ = rec.write("publish_command", o.PublishCommand)
-			_ = rec.write("address_pattern", o.AddressPattern)
-			if port, ok := rec.num("port"); ok {
-				_ = rec.write("address", addressFor(o.AddressPattern, port))
-			}
-			if o.PublishCommand != "" && o.AddressPattern != "" && !rec.publisherAlive() {
-				if rec.publish() == publishTaken {
+			// A copy whose publish command runs is reported at the address its
+			// record holds for that command. A start that asks for another
+			// publish command or address pattern, an empty one included, would
+			// record an address no publish command gives, so it is decided
+			// before the record changes: it fails, and leaves the copy and its
+			// publish command running, as a start with another serve command
+			// does.
+			if rec.publisherAlive() {
+				if rec.read("publish_command") != o.PublishCommand || rec.read("address_pattern") != o.AddressPattern {
+					return failed("other-publisher", fmt.Sprintf("a copy of this checkout is already published at %s, by another publish command or address pattern (%s); stop it with gctk rig serve --stop and start it again to publish it with these", rec.read("address"), rec.read("publish_command")))
+				}
+			} else {
+				if reason, detail := rec.ask(o); reason != "" {
+					return failed(reason, detail)
+				}
+				if port, ok := rec.num("port"); ok {
+					if err := rec.write("address", addressFor(o.AddressPattern, port)); err != nil {
+						return failed("no-state", fmt.Sprintf("the record %s could not be written: %v", rec, err))
+					}
+				}
+				if o.PublishCommand != "" && o.AddressPattern != "" && rec.publish() == publishTaken {
 					rec.stopGroup()
 					return c.launch(rec, checkout, o)
 				}
@@ -542,13 +557,26 @@ func (c *Copies) Serve(checkout string, o ServeOpts) Report {
 		}
 	}
 	if o.Publish {
-		_ = rec.write("asked", "")
-		_ = rec.write("publish_command", o.PublishCommand)
-		_ = rec.write("address_pattern", o.AddressPattern)
+		if reason, detail := rec.ask(o); reason != "" {
+			_ = os.RemoveAll(string(rec))
+			return failed(reason, detail)
+		}
 	}
 	rep := c.launch(rec, checkout, o)
 	rep.Started = rep.State == CopyRunning
 	return rep
+}
+
+// ask records that a start asks for an address, with the publish command and
+// the address pattern it passes, which the leader's next publish runs. It says
+// why when the record could not be written.
+func (r copyRec) ask(o ServeOpts) (string, string) {
+	for _, kv := range [][2]string{{"asked", ""}, {"publish_command", o.PublishCommand}, {"address_pattern", o.AddressPattern}} {
+		if err := r.write(kv[0], kv[1]); err != nil {
+			return "no-state", fmt.Sprintf("the record %s could not be written: %v", r, err)
+		}
+	}
+	return "", ""
 }
 
 // publishResult is how a publish ended.

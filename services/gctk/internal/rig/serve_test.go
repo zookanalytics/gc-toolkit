@@ -365,6 +365,75 @@ func TestServePublishesOnlyWhenAskedAndTiesThePublisherToTheCopy(t *testing.T) {
 	}
 }
 
+func TestServeRefusesAnotherPublicationWhileThePublishCommandRuns(t *testing.T) {
+	f := newServeFixture(t)
+	old := "https://old.example:$PORT/"
+	r := f.copies.Serve(f.repo, f.published("ok", old))
+	mustRun(t, r)
+	want := addressFor(old, r.Port)
+	if address(r) != want {
+		t.Fatalf("address = %q, want %q", address(r), want)
+	}
+	leader := f.leader(f.repo)
+	_, pub := f.rec(f.repo).publisher()
+
+	// While the publish command runs, a start that asks for another publish
+	// command, another address pattern or none changes nothing: it fails, and
+	// the copy keeps its publish command and the address that command gives.
+	noPublisher := f.opts("exec python3 serve.py")
+	noPublisher.Publish = true
+	for name, o := range map[string]ServeOpts{
+		"another publish command": f.published("other", old),
+		"another address pattern": f.published("ok", "https://new.example:$PORT/"),
+		"no publish command":      noPublisher,
+	} {
+		busy := f.copies.Serve(f.repo, o)
+		if busy.State != CopyFailed || busy.Reason != "other-publisher" || !strings.Contains(busy.Detail, want) || !strings.Contains(busy.Detail, "--stop") {
+			t.Errorf("a start with %s = %s %s (%s), want failed other-publisher naming the address it is published at and how to stop it", name, busy.State, busy.Reason, busy.Detail)
+		}
+		if busy.Address != nil || busy.Started {
+			t.Errorf("a start with %s reports address %q, started %v, want neither", name, address(busy), busy.Started)
+		}
+		c := f.copies.Check(f.repo)
+		if c.State != CopyRunning || address(c) != want {
+			t.Errorf("after a start with %s, check = %s at %q, want running at %q", name, c.State, address(c), want)
+		}
+		if _, now := f.rec(f.repo).publisher(); now != pub || !f.rec(f.repo).publisherAlive() {
+			t.Errorf("after a start with %s the publish command is %d (alive %v), want the first one, %d, still running", name, now, f.rec(f.repo).publisherAlive(), pub)
+		}
+		if got := f.lines("published"); len(got) != 1 || got[0] != "ok "+strconv.Itoa(r.Port) {
+			t.Errorf("after a start with %s the publish commands run are %q, want only the first", name, got)
+		}
+		if f.leader(f.repo) != leader || !answers(r.Port) {
+			t.Errorf("a start with %s touched the copy: leader %d (was %d)", name, f.leader(f.repo), leader)
+		}
+	}
+
+	// The same values report the copy at its address, and publish nothing more.
+	same := f.copies.Serve(f.repo, f.published("ok", old))
+	mustRun(t, same)
+	if address(same) != want || len(f.lines("published")) != 1 {
+		t.Errorf("a start with the same values: address %q, published %q, want %q and one run", address(same), f.lines("published"), want)
+	}
+
+	// Once the publish command has ended, a start publishes the copy again with
+	// the values it passes, and reports the address they give.
+	_ = syscall.Kill(pub, syscall.SIGKILL)
+	if !waitFor(5*time.Second, func() bool { return !f.rec(f.repo).publisherAlive() }) {
+		t.Fatal("the publish command did not end")
+	}
+	newer := "https://new.example:$PORT/"
+	again := f.copies.Serve(f.repo, f.published("ok", newer))
+	mustRun(t, again)
+	if want := addressFor(newer, r.Port); address(again) != want || address(f.copies.Check(f.repo)) != want {
+		t.Errorf("a start once the publish command ended: address %q, check %q, want %q", address(again), address(f.copies.Check(f.repo)), want)
+	}
+	if got := f.lines("published"); len(got) != 2 {
+		t.Errorf("published %q, want a second run", got)
+	}
+	f.copies.Stop(f.repo)
+}
+
 func TestServeACopyThatEndsTakesItsPublishCommandWithIt(t *testing.T) {
 	f := newServeFixture(t)
 	mustRun(t, f.copies.Serve(f.repo, f.published("ok", "https://host.example:$PORT/")))
