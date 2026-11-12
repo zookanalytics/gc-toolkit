@@ -532,7 +532,7 @@ eq "$(beads)" "1" "(doctor-key) a non-doctor key is unaffected"
 # The finding's bead is parked at blocked behind the fix it waits on, and an
 # older bead for the same key is closed. A lookup that reads only open and
 # in_progress misses the held bead, files a second one, and names the older
-# closed bead as the predecessor whose fix "did not hold".
+# closed bead as its predecessor.
 reset
 "$SUT" --key doctor-held --title "held" --message "held fired" >/dev/null 2>&1
 gc bd close fnd-1 >/dev/null 2>&1

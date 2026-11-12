@@ -672,7 +672,7 @@ eq "$(f_field tk-find1 '.metadata["finding.occurrences"]')" "1" "(82b) a post th
 eq "$(cat "$TMP/kv.rig" 2>/dev/null)" "fixture-rig" "(82c) the record is read in the swept rig's store"
 set_status closed
 "$SUT" flag --dir "$W" >/dev/null 2>&1
-eq "$(findings_n)" "1" "(82d) nor once its finding is closed, where a raise would file a fix that did not hold"
+eq "$(findings_n)" "1" "(82d) nor once its finding is closed, where a raise would file a recurrence of it"
 STUB_KV_BROKEN=1 "$SUT" flag --dir "$W" >/dev/null 2>&1; RC=$?
 eq "$RC" "1" "(82e) a record that does not read stops the flag"
 eq "$(findings_n)" "1" "(82f) and it raises nothing"
