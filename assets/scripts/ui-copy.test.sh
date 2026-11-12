@@ -9,9 +9,11 @@
 # one that ignores TERM included, before its leader ends; that a publish refused
 # while another client changes the config is tried again, and a port refused as
 # taken moves the copy to another; that a city with no publisher gets a copy
-# with no address; and that stop ends the whole group. Real processes. gc, the
-# publish command and the free-port pick are stubs, so no suite touches
-# Tailscale, a city or node; python3 serves.
+# with no address; that a copy reads as running only while it answers on its
+# port, and a start stops one that does not answer within its wait; and that
+# stop ends the whole group. Real processes. gc, the publish command and the
+# free-port pick are stubs, so no suite touches Tailscale, a city or node;
+# python3 serves.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -346,6 +348,24 @@ eq "$(ls "$TMP/state")" "" "neither leaves a record"
 NEVER=$(cat "$TMP/never.pid" 2>/dev/null)
 [ -n "$NEVER" ] && ! kill -0 "$NEVER" 2>/dev/null && ok "the copy that never answered was stopped" \
   || bad "the copy that never answered was stopped" "pid '$NEVER'"
+
+echo "── a copy whose start was cut off, and which does not answer ──"
+UI_COPY_START_WAIT=120 UI_SERVE="exec sleep 120" "$SCRIPT" start --tree "$TMP/a" --rig demo >/dev/null 2>&1 &
+CUT=$!
+for _ in $(seq 1 50); do ls "$TMP"/state/*/pid >/dev/null 2>&1 && break; sleep 0.2; done
+kill -TERM "$CUT" 2>/dev/null; wait "$CUT" 2>/dev/null
+L=$(cat "$TMP"/state/*/pid 2>/dev/null)
+kill -0 "$L" 2>/dev/null && ok "the copy outlives the start that ran it" || bad "the copy outlives the start that ran it" "leader '$L'"
+OUT=$("$SCRIPT" status --tree "$TMP/a"); RC=$?
+eq "$RC" 1 "status of a copy that does not answer exits 1"
+eq "$(field "$OUT" state)" not-answering "it reports state=not-answering"
+hasnt "$OUT" "address=" "it gives no address"
+OUT=$(UI_COPY_START_WAIT=2 "$SCRIPT" start --tree "$TMP/a" --rig demo --publish); RC=$?
+eq "$RC" 1 "a start that finds it exits 1 once its own wait has passed"
+eq "$(field "$OUT" state)" failed "it reports state=failed"
+eq "$(field "$OUT" reason)" not-answering "it gives the reason"
+group_gone "$L" && ok "it stopped the copy" || bad "it stopped the copy" "$(members "$L")"
+eq "$(ls "$TMP/state")" "" "it leaves no record"
 
 echo "── the state root is the city's when the city names one ──"
 mkdir -p "$TMP/city/.gc"

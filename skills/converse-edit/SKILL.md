@@ -235,10 +235,14 @@ It prints `key=value` lines: `address=` is the address to give the operator,
 and `port=` is the copy's port on this host. A tree has one copy, so start is
 safe to run again, after a restart too. It reports the copy that runs, or starts
 one, and publishes again a copy that has lost its address.
-`"$CONV/ui-copy.sh" status --tree "$TREE"` says whether the copy runs and still
-has its address. The copy runs what its serve command built when it started, so
-an edit the command does not reload shows only once you stop the copy and start
-it again, which gives it a new port and address to give the operator.
+`"$CONV/ui-copy.sh" status --tree "$TREE"` says whether the copy runs, answers
+on its port and still has its address. A copy that runs and does not answer,
+such as one whose start was cut off while its serve command built, reads as
+`state=not-answering`: run start again, which waits for it to answer and stops
+it when it does not. The copy runs what its serve command built when it
+started, so an edit the command does not reload shows only once you stop the
+copy and start it again, which gives it a new port and address to give the
+operator.
 
 A rig that declares no serve command offers no copy, so its look cannot be
 shown live: start exits 1 with `reason=no-serve-command`. Say so, and recommend

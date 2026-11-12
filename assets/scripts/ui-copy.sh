@@ -60,7 +60,9 @@
 # <city>/.gc/runtime/packs/gc-toolkit/ui-copies, for the city that GC_CITY_PATH,
 # GC_CITY or GC_CITY_ROOT names, else ${TMPDIR:-/tmp}/gc/ui-copies. A tree has
 # at most one copy, so a start for a tree whose copy runs reports that copy and
-# starts no other, and a start after a session wakes is safe to repeat.
+# starts no other, and a start after a session wakes is safe to repeat. A start
+# reports a copy once it answers on its port, and stops a copy that does not
+# answer within the start's wait, whether that start ran the copy or found it.
 #
 # Usage:
 #   ui-copy.sh start --tree <dir> [--rig <rig>] [--publish]
@@ -74,18 +76,23 @@
 #               as for a copy a session runs for its own checks. A start with
 #               --publish for a copy that runs with no address publishes it.
 #
-# Output is key=value lines, state= first. port= and address= are printed for a
-# copy that runs, and address= is empty when the copy has no address, with
-# detail= saying why. log= names the file the serve command writes to.
+# Output is key=value lines, state= first. port= is printed for a copy that
+# runs, and address= for one that answers on its port, empty when the copy has
+# no address, with detail= saying why. log= names the file the serve command
+# writes to.
 #
-#   state     exit  meaning
-#   running   0     start, status: the copy runs and answers on its port
-#   stopped   0     stop: the copy was running and its process group has ended
-#   none      0|1   stop (0), status (1): no copy of the tree runs
-#   died      1     status: the copy's leader is gone; rc= is the serve
-#                   command's exit code when it recorded one
-#   failed    1     start: no copy runs; reason= and detail= say why
-#   running   1     stop: the copy's process group survived TERM and KILL
+#   state          exit  meaning
+#   running        0     start, status: the copy runs and answers on its port
+#   not-answering  1     status: the copy runs and does not answer on its port,
+#                        as while its serve command builds; a start waits for
+#                        it to answer, and stops it when it does not
+#   stopped        0     stop: the copy was running and its process group has
+#                        ended
+#   none           0|1   stop (0), status (1): no copy of the tree runs
+#   died           1     status: the copy's leader is gone; rc= is the serve
+#                        command's exit code when it recorded one
+#   failed         1     start: no copy runs; reason= and detail= say why
+#   running        1     stop: the copy's process group survived TERM and KILL
 #
 # Exit 2 is a usage error.
 #
@@ -571,7 +578,9 @@ cmd_start() {
       remove_record "$REC"
       continue
     fi
-    # The tree's copy runs: report it, publishing it first when asked.
+    # The tree's copy runs: report it once it answers, publishing it first when
+    # asked. The start that ran it may have been cut off before its wait ended,
+    # so this start's wait decides, as a new copy's does.
     [ "$want" = 1 ] && : > "$REC/asked"
     if [ "$want" = 1 ] && [ -s "$REC/publish_command" ] && ! publisher_alive "$REC"; then
       publish "$REC"
@@ -580,8 +589,17 @@ cmd_start() {
         launch
       fi
     fi
-    local deadline=$(( $(now) + START_WAIT ))
-    until answers "$(read_line "$REC/port")" || [ "$(now)" -ge "$deadline" ] || ! alive "$REC"; do
+    local port deadline=$(( $(now) + START_WAIT ))
+    port=$(read_line "$REC/port")
+    until answers "$port" || ! alive "$REC"; do
+      if [ "$(now)" -ge "$deadline" ]; then
+        stop_group "$REC"
+        report failed "reason=not-answering" "tree=$TREE" \
+          "detail=the copy did not answer on port $port within $START_WAIT seconds, so it was stopped"
+        show_tail "$REC/serve.log" 20
+        remove_record "$REC"
+        exit 1
+      fi
       sleep 0.5
     done
     if alive "$REC"; then
@@ -619,7 +637,7 @@ tree_arg() { # <verb> <args...>: prints the --tree value
 }
 
 cmd_status() {
-  local tree rc
+  local tree rc port
   tree=$(tree_arg status "$@") || exit 2
   ROOT=$(state_root)
   find_record "$tree"
@@ -628,8 +646,15 @@ cmd_status() {
     exit 1
   fi
   if alive "$REC"; then
-    report_running "$REC"
-    exit 0
+    port=$(read_line "$REC/port")
+    if answers "$port"; then
+      report_running "$REC"
+      exit 0
+    fi
+    report not-answering "port=$port" "tree=$(read_line "$REC/tree")" "log=$REC/serve.log" \
+      "detail=the copy runs and does not answer on port $port; start waits for it to answer, and stops it when it does not"
+    show_tail "$REC/serve.log" 20
+    exit 1
   fi
   rc=$(read_num "$REC/rc") || rc=""
   report died "tree=$(read_line "$REC/tree")" "rc=$rc" "log=$REC/serve.log"
