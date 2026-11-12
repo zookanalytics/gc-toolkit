@@ -137,8 +137,15 @@ case "$(printf '%s' "$WORK_JSON" | jq -r '.[0].status // ""' 2>/dev/null)" in
     echo "$PROG: $WORK is already closed, so there is nothing to stand down"
     exit 0 ;;
 esac
-[ "$(row_meta "$WORK_JSON" merge_result)" != pull_request ] \
-  || refuse "$WORK is an open PR, which is retired rather than stood down, so the PR closes before an answer releases its merge: $SCRIPT_DIR/pr-dispose.sh, or --retire on a sitting's sign-off."
+WORK_MR=$(row_meta "$WORK_JSON" merge_result)
+case "$WORK_MR" in
+  pull_request)
+    refuse "$WORK is an open PR, which is retired rather than stood down, so the PR closes before an answer releases its merge: $SCRIPT_DIR/pr-dispose.sh, or --retire on a sitting's sign-off." ;;
+  # A PR on the pending record ends through the landing order alone: a closed PR
+  # is recorded as pull_request_closed_unmerged, behind a gate under that key.
+  pull_request_pending|pull_request_head_changed)
+    refuse "$WORK owns an open PR on the pending record ($WORK_MR), which is retired rather than stood down: close the PR, and the landing order records the close behind a human gate under the key pull_request_closed_unmerged, which a stand-down under that key answers." ;;
+esac
 
 GATES=$(bd_human_gates "$WORK") || refuse "could not read the human gates of $WORK."
 OPEN_GATES=$(printf '%s' "$GATES" | bd_gates_open_under_key "$KEY") \

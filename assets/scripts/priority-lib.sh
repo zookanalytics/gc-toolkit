@@ -13,13 +13,14 @@
 #     link to its bead.
 #   * PR-finishing work, a bead carrying anchor_bead, follows its anchor. Once
 #     the anchor's PR is approved, it runs at P0 whatever its shift. A PR is
-#     approved when its anchor rests in pull_request (merge_result) and the
-#     posture pr-facts.sh records there (pr_posture, stored as
-#     <posture>@<oid>@<since>) reads approved before its first @, at the head
-#     pr-facts.sh last read for the PR (pr_head_oid, the posture's <oid>). An
-#     approval recorded at any other head is for code the PR no longer
-#     carries. An anchor that rests anywhere else has no open PR to be
-#     approved, whatever posture an earlier PR left on it, and leaving
+#     approved when its anchor owns an open PR, its merge_result pull_request
+#     or a value of the pending record (pull_request_pending,
+#     pull_request_head_changed), and the posture pr-facts.sh records there
+#     (pr_posture, stored as <posture>@<oid>@<since>) reads approved before
+#     its first @, at the head pr-facts.sh last read for the PR (pr_head_oid,
+#     the posture's <oid>). An approval recorded at any other head is for code
+#     the PR no longer carries. An anchor that rests anywhere else has no open
+#     PR to be approved, whatever posture an earlier PR left on it, and leaving
 #     pull_request clears pr_head_oid (lifecycle.toml exit_sets), so an anchor
 #     that returns reads no approval until pr-facts.sh has read its PR again.
 #   * A member follows its parent, and the most urgent one, the lowest
@@ -104,12 +105,15 @@ PRIORITY_JQ="$RUN_JQ"'
           elif ($s | test("^[+-]?[0-9]+$")) then {ok: true, n: ($s | ltrimstr("+") | tonumber)}
           else {ok: false, raw: $s} end end;
   # Whether the PR of this anchor is approved, which ranks its PR-finishing work
-  # at P0: it rests in pull_request, and the dated posture pr-facts.sh records
-  # on it reads approved before its first @, at the oid after it, which is the
-  # head pr-facts.sh last read for the PR (pr_head_oid).
+  # at P0: its merge_result says it owns an open PR, pull_request or a value of
+  # the pending record (pull_request_pending, pull_request_head_changed), and
+  # the dated posture pr-facts.sh records on it reads approved before its first
+  # @, at the oid after it, which is the head pr-facts.sh last read for the PR
+  # (pr_head_oid).
   def prio_pr_approved:
     (prio_str("pr_posture") | split("@")) as $p
-    | prio_str("merge_result") == "pull_request"
+    | (prio_str("merge_result") as $mr
+        | $mr == "pull_request" or $mr == "pull_request_pending" or $mr == "pull_request_head_changed")
       and ($p[0] // "") == "approved"
       and ($p[1] // "") != ""
       and ($p[1] // "") == prio_str("pr_head_oid");

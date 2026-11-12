@@ -446,6 +446,12 @@ has "$OUT" "already closed" "…and says so"
 fresh; patch 'map(if .id == "tk-w" then .metadata.merge_result = "pull_request" else . end)'
 refused "an open PR" tk-w --key polecat-x --ruling "x"
 has "$OUT" "pr-dispose.sh" "an open PR: it names the writer that retires one"
+for mr in pull_request_pending pull_request_head_changed; do
+  fresh; patch "map(if .id == \"tk-w\" then .metadata.merge_result = \"$mr\" else . end)"
+  refused "an open PR on the pending record ($mr)" tk-w --key polecat-x --ruling "x"
+  has "$OUT" "pull_request_closed_unmerged" "an open PR on the pending record ($mr): it names the gate the landing order files on the close"
+  hasnt "$OUT" "pr-dispose.sh" "…and not the old record's writer, which refuses it"
+done
 fresh
 refused "no gate under the key" tk-w --key another-key --ruling "x"
 has "$OUT" "no human gate under another-key" "no gate under the key: it says so"
