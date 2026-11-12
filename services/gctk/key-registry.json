@@ -3,17 +3,19 @@
     "name": "anchor_bead",
     "type": "string",
     "readers": [
-      "listing"
+      "listing",
+      "pr"
     ],
-    "doc": "The merge anchor a review, rework, finding or validation child names (lifecycle/lifecycle.toml, [metadata.gates]). A listing names it on each bead, and prstatus's in-flight set reads it."
+    "doc": "The pr evaluator holds the PR of the bead an open bead names, until that work is filed with a blocks edge. The merge anchor a review, rework, finding or validation child names (lifecycle/lifecycle.toml, [metadata.gates]). A listing names it on each bead, and prstatus's in-flight set reads it."
   },
   {
     "name": "branch",
     "type": "string",
     "readers": [
+      "pr",
       "waits"
     ],
-    "doc": "The source branch a work bead's change is on, which the work formula's workspace-setup writes (lifecycle/lifecycle.toml, [metadata.merge_identity]). A bead carrying it is in flight."
+    "doc": "The source branch a work bead's change is on, which the work formula's workspace-setup writes (lifecycle/lifecycle.toml, [metadata.merge_identity]). A bead carrying it is in flight. The pr evaluator holds a PR whose head branch is not this one."
   },
   {
     "name": "epic_boundaries",
@@ -211,29 +213,120 @@
     "doc": "A work bead's self-reported disposition, no-op or shipped, whose meaning is the runtime's (lifecycle/lifecycle.toml, [metadata.runtime_owned])."
   },
   {
+    "name": "merge_hold",
+    "type": "string",
+    "readers": [
+      "pr"
+    ],
+    "doc": "A hold on the bead's merge, set by hand. Any value but an unset spelling holds the PR."
+  },
+  {
     "name": "merge_result",
     "type": "string",
     "readers": [
       "listing",
+      "pr",
       "waits"
     ],
-    "doc": "The anchor's lifecycle state, which lifecycle.sh, through gctk lifecycle, writes on every transition (lifecycle/lifecycle.toml, [machine] and [states]). A bead carrying it is in flight. A listing names it on each bead, so a reader tells an anchor whose pull request is open."
+    "doc": "The anchor's lifecycle state, which lifecycle.sh, through gctk lifecycle, writes on every transition (lifecycle/lifecycle.toml, [machine] and [states]). A bead carrying it is in flight. The pr evaluator answers for a bead that reads pull_request_pending, Gas Town's record of a PR open at the head the refinery validated, or pull_request_head_changed, one open at a head it has not validated. A listing names it on each bead, so a reader tells an anchor whose pull request is open."
+  },
+  {
+    "name": "merged_target",
+    "type": "string",
+    "readers": [
+      "pr"
+    ],
+    "doc": "The branch the bead's PR is to merge into, the base its PR must name."
+  },
+  {
+    "name": "pr_comment_answered",
+    "type": "string",
+    "readers": [
+      "pr"
+    ],
+    "doc": "The inline comment id through which the review threads have answered the comments past the comment watermark. A value that is not a whole number reads as 0."
+  },
+  {
+    "name": "pr_comment_watermark",
+    "type": "string",
+    "readers": [
+      "pr"
+    ],
+    "doc": "The highest inline comment id the intake has routed. A value that is not a whole number reads as 0."
+  },
+  {
+    "name": "pr_head_sha",
+    "type": "string",
+    "readers": [
+      "pr"
+    ],
+    "doc": "The head the refinery validated, the one head the bead's PR may merge at."
+  },
+  {
+    "name": "pr_issue_comment_watermark",
+    "type": "string",
+    "readers": [
+      "pr"
+    ],
+    "doc": "The highest conversation comment id the intake has routed. A value that is not a whole number reads as 0."
   },
   {
     "name": "pr_number",
     "type": "string",
     "readers": [
-      "listing"
+      "listing",
+      "pr"
     ],
-    "doc": "The number of the anchor's open pull request, which pr-open.sh writes when it opens and pr-facts.sh copies onto rework children (lifecycle/lifecycle.toml, [metadata.merge_identity])."
+    "doc": "The pr evaluator reads the PR by this number. The number of the anchor's open pull request, which pr-open.sh writes when it opens and pr-facts.sh copies onto rework children (lifecycle/lifecycle.toml, [metadata.merge_identity])."
+  },
+  {
+    "name": "pr_provenance_since",
+    "type": "string",
+    "readers": [
+      "pr"
+    ],
+    "doc": "The instant from which a post under the city's login is feedback unless it carries the city's mark. A value that is not an instant in GitHub's form makes every such post the city's own."
+  },
+  {
+    "name": "pr_repo",
+    "type": "string",
+    "readers": [
+      "pr"
+    ],
+    "doc": "The repository of the PR the bead owns, owner/name, compared without case."
+  },
+  {
+    "name": "pr_review_answered",
+    "type": "string",
+    "readers": [
+      "pr"
+    ],
+    "doc": "The review id through which the review threads have answered the reviews past the review watermark. A value that is not a whole number reads as 0."
+  },
+  {
+    "name": "pr_review_watermark",
+    "type": "string",
+    "readers": [
+      "pr"
+    ],
+    "doc": "The highest review id the intake has routed. A value that is not a whole number reads as 0."
   },
   {
     "name": "pr_url",
     "type": "string",
     "readers": [
-      "listing"
+      "listing",
+      "pr"
     ],
-    "doc": "The URL of the anchor's open pull request, written with pr_number (lifecycle/lifecycle.toml, [metadata.merge_identity])."
+    "doc": "The pr evaluator reads the PR on the host this names, and holds a PR whose URL on GitHub differs. The URL of the anchor's open pull request, written with pr_number (lifecycle/lifecycle.toml, [metadata.merge_identity])."
+  },
+  {
+    "name": "rebase_hold",
+    "type": "string",
+    "readers": [
+      "pr"
+    ],
+    "doc": "A hold on bringing the bead's branch current, set by hand. Any value but an unset spelling holds the PR."
   },
   {
     "name": "rejection_reason",
@@ -242,6 +335,14 @@
       "waits"
     ],
     "doc": "Why the bead's last attempt bounced, which the refinery writes (lifecycle/lifecycle.toml, [metadata.merge_identity]). A bead carrying it is in flight."
+  },
+  {
+    "name": "review_results",
+    "type": "json",
+    "readers": [
+      "pr"
+    ],
+    "doc": "The review loop's results on the bead that owns a PR, a JSON array of {head, target, passed}, one for each head and target the loop judged. The evaluator counts only a result for the PR's live head and target."
   },
   {
     "name": "rig_check.lint",

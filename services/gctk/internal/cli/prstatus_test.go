@@ -3,12 +3,14 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus/fixture"
 )
@@ -534,4 +536,84 @@ func TestPRStatusUsageErrors(t *testing.T) {
 	if code := Run([]string{"pr", "bogus"}, "", &out, &errbuf); code != 2 {
 		t.Errorf("a verb pr does not have = %d, want 2", code)
 	}
+}
+
+// An anchor on Gas Town's pending record reads the evaluator's answer, which
+// prstatus renders, and prints each condition not met.
+func TestPRStatusOnThePendingRecord(t *testing.T) {
+	onRecord := `[{"id":"tk-a","status":"blocked","metadata":{"merge_result":"pull_request_pending"}}]`
+	answer := func(a pr.Answer, err error) {
+		t.Helper()
+		prev := evaluateReady
+		evaluateReady = func(anchor string) (pr.Answer, error) {
+			if anchor != "tk-a" {
+				t.Fatalf("evaluated %q, want tk-a", anchor)
+			}
+			a.Bead = anchor
+			return a, err
+		}
+		t.Cleanup(func() { evaluateReady = prev })
+	}
+	notReady := pr.Answer{Head: "abc", Target: "main", Conditions: []pr.Condition{
+		{Kind: pr.KindApproval, Detail: "no approval stands from an account that can push to the repository"},
+		{Kind: pr.KindReview, Detail: "no review result passed at head abc into main"},
+	}}
+
+	t.Run("prints the rendered status, then each condition not met", func(t *testing.T) {
+		stubGC(t, onRecord, `[]`)
+		answer(notReady, nil)
+		want := "working\napproval: no approval stands from an account that can push to the repository\nreview: no review result passed at head abc into main\n"
+		if out, code := derive(t, "tk-a"); code != 0 || out != want {
+			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, want)
+		}
+	})
+
+	t.Run("--json carries the answer beside the status", func(t *testing.T) {
+		stubGC(t, onRecord, `[]`)
+		answer(notReady, nil)
+		out, code := derive(t, "tk-a", "--json")
+		var got struct {
+			Status     string         `json:"status"`
+			Ready      *bool          `json:"ready"`
+			Head       string         `json:"head"`
+			Target     string         `json:"target"`
+			Conditions []pr.Condition `json:"conditions"`
+		}
+		if code != 0 || json.Unmarshal([]byte(out), &got) != nil {
+			t.Fatalf("derive --json = (%q, %d)", out, code)
+		}
+		if got.Status != "working" || got.Ready == nil || *got.Ready || got.Head != "abc" || got.Target != "main" ||
+			!slices.Equal(got.Conditions, notReady.Conditions) {
+			t.Fatalf("derive --json = %s", out)
+		}
+	})
+
+	t.Run("a ready PR reads merging, with no condition", func(t *testing.T) {
+		stubGC(t, onRecord, `[]`)
+		answer(pr.Answer{Ready: true, Head: "abc", Target: "main", Conditions: []pr.Condition{}}, nil)
+		if out, code := derive(t, "tk-a"); code != 0 || out != "merging\n" {
+			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, "merging\n")
+		}
+		out, _ := derive(t, "tk-a", "--json")
+		if !strings.Contains(out, `"ready":true`) || !strings.Contains(out, `"conditions":[]`) {
+			t.Fatalf("derive --json = %s, want ready with an empty conditions array", out)
+		}
+	})
+
+	t.Run("an evaluation that fails derives nothing", func(t *testing.T) {
+		stubGC(t, onRecord, `[]`)
+		answer(pr.Answer{}, errors.New("github: unreachable"))
+		if out, code := derive(t, "tk-a"); code != 2 || out != "" {
+			t.Fatalf("derive = (%q, %d), want (\"\", 2)", out, code)
+		}
+	})
+
+	t.Run("an anchor off the record is not evaluated, and its --json carries no answer", func(t *testing.T) {
+		stubGC(t, `[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request"}}]`, `[]`)
+		answer(pr.Answer{}, errors.New("evaluated an anchor off the record"))
+		out, code := derive(t, "tk-a", "--json")
+		if code != 0 || strings.Contains(out, `"ready"`) || strings.Contains(out, `"conditions"`) {
+			t.Fatalf("derive --json = (%q, %d), want the derivation alone", out, code)
+		}
+	})
 }

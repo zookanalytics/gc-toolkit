@@ -9,7 +9,11 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/feedback"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
 )
 
@@ -37,6 +41,14 @@ anchor. With --json it prints one object instead:
 labels take, and reasons is each thing behind it. A reason's id is empty where
 the PR's own review threads or blocked verdict hold it. Both lists are empty
 arrays when nothing holds the PR.
+
+For a bead whose PR is on Gas Town's pending record, the status renders the
+pr domain's evaluator, which reads the PR on GitHub, and each condition not
+met follows the status on a line of its own, as <kind>: <detail>. Its --json
+object also carries "ready", the "head" and "target" the evaluator judged, and
+"conditions": [{"kind", "detail", "id", "value"}], an empty array when the PR
+is ready. The evaluator applies the pack's definition of feedback from the
+scripts directory GCTK_SCRIPTS_DIR names, or else the one gc names.
 
 exit: 0 printed
       1 usage
@@ -66,7 +78,9 @@ func newPRCmd(stdout, stderr io.Writer) *cobra.Command {
 
 // prStatus prints the state prstatus.Derive returns for the facts prstatus.Read
 // gathers about the anchor, and with asJSON the values prstatus.Held and
-// prstatus.Reasons return beside it.
+// prstatus.Reasons return beside it. For an anchor on Gas Town's pending record
+// it prints the state prstatus.Render gives the evaluator's answer instead, with
+// the conditions not met.
 func prStatus(anchor string, asJSON bool, stdout, stderr io.Writer) int {
 	facts, err := prstatus.Read([]string{anchor}, gcbdStore{gcbd.New()})
 	f, answered := facts[anchor]
@@ -79,8 +93,22 @@ func prStatus(anchor string, asJSON bool, stdout, stderr io.Writer) int {
 		return 2
 	}
 	state := prstatus.Derive(f)
+	var ans *pr.Answer
+	if pr.OnRecord(f.MergeResult) {
+		a, err := evaluateReady(anchor)
+		if err != nil {
+			fmt.Fprintf(stderr, "%s: could not decide whether the PR %s owns is ready: %v; cannot derive a status\n", prStatusProg, anchor, err)
+			return 2
+		}
+		ans, state = &a, prstatus.Render(a, f)
+	}
 	if !asJSON {
 		fmt.Fprintf(stdout, "%s\n", state)
+		if ans != nil {
+			for _, c := range ans.Conditions {
+				fmt.Fprintf(stdout, "%s: %s\n", c.Kind, c.Detail)
+			}
+		}
 		return 0
 	}
 	held, reasons := prstatus.Held(f), prstatus.Reasons(f)
@@ -90,11 +118,19 @@ func prStatus(anchor string, asJSON bool, stdout, stderr io.Writer) int {
 	if reasons == nil {
 		reasons = []prstatus.Reason{}
 	}
-	raw, err := json.Marshal(struct {
-		Status  prstatus.State    `json:"status"`
-		Held    []prstatus.Hold   `json:"held"`
-		Reasons []prstatus.Reason `json:"reasons"`
-	}{state, held, reasons})
+	out := struct {
+		Status     prstatus.State    `json:"status"`
+		Held       []prstatus.Hold   `json:"held"`
+		Reasons    []prstatus.Reason `json:"reasons"`
+		Ready      *bool             `json:"ready,omitempty"`
+		Head       string            `json:"head,omitempty"`
+		Target     string            `json:"target,omitempty"`
+		Conditions *[]pr.Condition   `json:"conditions,omitempty"`
+	}{Status: state, Held: held, Reasons: reasons}
+	if ans != nil {
+		out.Ready, out.Head, out.Target, out.Conditions = &ans.Ready, ans.Head, ans.Target, &ans.Conditions
+	}
+	raw, err := json.Marshal(out)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s: could not encode the derivation of %s: %v\n", prStatusProg, anchor, err)
 		return 2
@@ -186,4 +222,32 @@ func asBlockers(rows []gcbd.Bead) []prstatus.Blocker {
 		})
 	}
 	return out
+}
+
+// evaluateReady is the evaluation pr status prints, evaluate, which its tests
+// replace with an answer of their own.
+var evaluateReady = evaluate
+
+// evaluate asks the pr domain's evaluator whether the PR anchor owns is ready,
+// reading the anchor's store through the ledger, GitHub through gh on the host
+// the PR's URL names, and the pack's definition of feedback, loaded in the
+// directory gctk runs in, which pr-post.sh reads the rig's declaration from.
+func evaluate(anchor string) (pr.Answer, error) {
+	l, err := ledger.Open("", anchor)
+	if err != nil {
+		return pr.Answer{}, err
+	}
+	scripts, err := feedback.ScriptsDir()
+	if err != nil {
+		return pr.Answer{}, err
+	}
+	rule, err := feedback.Load(scripts, "")
+	if err != nil {
+		return pr.Answer{}, err
+	}
+	return pr.Ready(pr.Sources{
+		Ledger:   l,
+		GitHub:   func(host string) pr.GitHub { return gh.New(host) },
+		Feedback: rule,
+	}, anchor)
 }

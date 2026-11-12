@@ -18,7 +18,7 @@ through `gc bd` and the supervisor's API.
 | `epic` | actions taken on an epic: filing one with its contract, each field in its own key, refused when the epic has no hypothesis and its parent is not an epic | `gctk epic --help`, `internal/cli/epic.go` |
 | `lifecycle` | anchor lifecycle transitions over the state machine `lifecycle/lifecycle.toml` declares. It parses its own verbs and flags | `gctk lifecycle`, `internal/cli/lifecycle.go`, `internal/lifecycle` |
 | `merge` | arm 2 of the merge cadence, the single writer of merged truth | `internal/cli/merge.go` |
-| `pr status` | a PR's status (working, merging, needs-review or needs-attention), the one derivation the `status:` label and the helm board share, and the open human gates that hold it, which `gc-helm engage` offers | `gctk pr status --help`, `internal/cli/prstatus.go`, `prstatus` |
+| `pr status` | a PR's status (working, merging, needs-review or needs-attention), the one derivation the `status:` label and the helm board share, and the open human gates that hold it, which `gc-helm engage` offers; for a PR on Gas Town's pending record, the pr domain's evaluator decides it, and each condition not met follows it | `gctk pr status --help`, `internal/cli/prstatus.go`, `prstatus`, `pr` |
 | `rig` | actions taken on the rig: running its checks and recording each result against the commit | `gctk rig --help`, `internal/cli/rig.go`, `internal/rig` |
 | `session` | actions taken on a session: giving it a title its Gas City record and its terminal both show, made of the bead it is about (`--subject`), the pull request it is about (`--pr`) and its topic (`--topic`). A Claude Code or Codex terminal takes the title at the session's next boundary, a few seconds after the turn ends | `gctk session --help`, `internal/cli/session.go` |
 | `version` | the revision the binary was built from | `cmd/gctk` |
@@ -117,7 +117,13 @@ internal/gcbd/       the store adapter: bead reads and writes through `gc bd` an
 internal/gcbd/fake/  the store adapter's in-memory fake, for the domains' tests
 internal/daemon/     finding the supervisor API the store adapter's reads go through
 internal/git/        the git subprocess seam: one git command per call, in a named directory
+internal/gh/         the GitHub adapter: one `gh api` call per read, paged to its end
+internal/gh/fake/    the GitHub adapter's in-memory fake, for the domains' tests
+internal/feedback/   the pack's one definition of feedback, pr-post.sh's feedback-def, run
+                     through jq
 internal/rig/        rig's runner and its commit-keyed record store
+pr/                  the pr domain: whether the PR a bead owns is ready to merge at its
+                     current revision, from the store, GitHub and the definition of feedback
 prstatus/            the PR status derivation, exported for the helm board
 listing/             one pass's read of a store for the helm board: every live bead, the
                      closed beads under a parent, the keys it decodes, and waits' and
