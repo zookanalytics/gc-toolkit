@@ -513,8 +513,8 @@ if [ -z "$DISTINCT" ]; then
 fi
 
 # ── Recurring after its bead let go is news, and gets its own bead ────
-# A finding whose bead was closed as fixed, firing again, means the fix did
-# not hold. A bead held at blocked with nothing open left to wait on is the
+# A finding whose bead was closed as fixed, firing again, is news whatever its
+# cause. A bead held at blocked with nothing open left to wait on is the
 # same news before anyone has closed it, and it is the predecessor to name,
 # not an older closed bead. That is worth one new bead — and only one: the next
 # recurrence finds THIS bead open above.
@@ -546,8 +546,8 @@ that bead before re-deriving the cause."
 elif [ -n "$PRIOR" ]; then
   BODY="$BODY
 
-This finding fired again after $PRIOR was closed, so the earlier fix did not
-hold. Read that bead before re-deriving the cause."
+This finding fired again after $PRIOR was closed, and its cause may differ.
+Read that bead before re-deriving the cause."
 fi
 
 # Every stamp rides the create. A bead whose finding.key landed in a second

@@ -1623,7 +1623,7 @@ keys = [
 # finding.first_seen/finding.last_seen bracket them.
 # finding.recurrence_of names the earlier finding a reappearance repeats: a
 # closed one, or one held at blocked with nothing open left to wait on. Either
-# way a fix that did not hold is visible.
+# way it is the bead to read first.
 keys = [
   "finding.key", "finding.scope", "finding.digest",
   "finding.first_seen", "finding.last_seen", "finding.occurrences",

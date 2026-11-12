@@ -29,7 +29,7 @@ closes `R`.
 > **Propulsion**: if your hook finds work, you RUN it — no confirmation.
 
 ```bash
-# 1. Claim the reaction bead R (assigned first, then routed proactive demand).
+# 1. Claim the reaction bead R once (assigned first, then routed proactive demand).
 gc hook --claim --json     # the bead_id it returns is R
 
 # 2. Read R and resolve its subject S. R carries gc.reaction_subject=<S>; the
