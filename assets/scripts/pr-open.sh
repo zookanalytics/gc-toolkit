@@ -97,17 +97,20 @@ prs_band() { # <phased> <phase>
 # title, the body and each section's outcome. Non-zero, printing nothing, when no
 # binary is there to ask or it composed nothing; the caller holds the anchor, and
 # a pass with no binary says so once.
-GCTK=""; GCTK_MISSING=""
+# The binary comes from gctk-resolve.sh's chain rather than the gctk-bin block,
+# because the merge cadence's order carries no city path, which is all the
+# block reads.
+COMPOSE_BIN=""; COMPOSE_MISSING=""
 compose_pr() { # <id> <gctk pr compose flags...>
-  if [ -z "$GCTK" ]; then
-    [ -z "$GCTK_MISSING" ] || return 1
-    if ! GCTK=$(gctk_path); then
-      GCTK_MISSING=1
+  if [ -z "$COMPOSE_BIN" ]; then
+    [ -z "$COMPOSE_MISSING" ] || return 1
+    if ! COMPOSE_BIN=$(gctk_path); then
+      COMPOSE_MISSING=1
       echo "$PROG: no gctk binary to compose a PR with (GCTK_BIN='${GCTK_BIN:-}'); no PR is opened or adopted with an open body this pass" >&2
       return 1
     fi
   fi
-  "$GCTK" pr compose "$@" </dev/null
+  "$COMPOSE_BIN" pr compose "$@" </dev/null
 }
 
 command -v gh >/dev/null 2>&1 || exit 0
