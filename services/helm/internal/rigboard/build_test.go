@@ -226,6 +226,38 @@ func TestWorkAReaderCouldNotAnswer(t *testing.T) {
 	}
 }
 
+// TestWorkWhoseWaitsAreUnread lists apart work whose waits could not be
+// answered, which queue places nowhere, even when its row reads as an ask. In
+// graph, tk-loose is routed to a pool and waits on a park gate.
+func TestWorkWhoseWaitsAreUnread(t *testing.T) {
+	routedToYou := func(answered bool) Document {
+		g := graph()
+		for i := range g.open {
+			if g.open[i].ID == "tk-loose" {
+				g.open[i].PersonBlocker = true
+			}
+		}
+		if !answered {
+			delete(g.holds, "tk-loose")
+			delete(g.holding, "tk-loose")
+			g.unread["tk-loose"] = errors.New("its edges did not decode")
+		}
+		return boardOf(t, g)
+	}
+	if doc := routedToYou(true); doc.Rows["tk-loose"].Ask != AskRoutedToYou || !slices.Contains(doc.WorkQueue.Queue, "tk-loose") {
+		t.Fatalf("answered, tk-loose asks %q in queue %v; want %q and queued, so the case is not built",
+			doc.Rows["tk-loose"].Ask, doc.WorkQueue.Queue, AskRoutedToYou)
+	}
+	doc := routedToYou(false)
+	want := WorkQueue{Queue: []string{"tk-b.1", "tk-b.2"}, NotScheduled: []string{"tk-a.1.1", "tk-loose2"}, Unread: []string{"tk-loose"}}
+	if !sameQueue(doc.WorkQueue, want) {
+		t.Errorf("work queue = %+v, want %+v: tk-loose has no place, so it is listed apart", doc.WorkQueue, want)
+	}
+	if a := doc.Rows["tk-loose"].Ask; a != AskRoutedToYou {
+		t.Errorf("tk-loose asks %q, want %q", a, AskRoutedToYou)
+	}
+}
+
 // TestWorkForTheProductOwner holds work that carries hold:mayor to the
 // Unprioritized page while the work behind it still waits on it. In graph,
 // tk-b.1 is armed and waits on question tk-q, and armed tk-b.2 waits on tk-b.1.

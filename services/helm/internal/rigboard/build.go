@@ -442,13 +442,10 @@ func (bt *built) forProductOwner(id string) bool {
 // every open piece of work, work held for the Product Owner included, so the
 // work behind held work comes after the queue as the city takes it. Held work
 // is then left out of the order, since no view lists it. Work a reader could
-// not answer has no place in it and is listed apart.
+// not answer has no place in it and is listed apart: work whose row reads
+// unread, and work the order places nowhere, whose row can still read as an
+// ask.
 func (bt *built) place() {
-	for _, id := range bt.ix.rows {
-		if bt.isWork(id) && bt.verdict[id].out == outUnread {
-			bt.unread = append(bt.unread, id)
-		}
-	}
 	list := func(places []queue.Place, after bool) {
 		for _, p := range places {
 			if !bt.isWork(p.ID) || bt.verdict[p.ID].out == outUnread {
@@ -463,6 +460,11 @@ func (bt *built) place() {
 	}
 	list(bt.ix.g.order.Queue, false)
 	list(bt.ix.g.order.NotScheduled, true)
+	for _, id := range bt.ix.rows {
+		if _, placed := bt.pos[id]; bt.isWork(id) && !placed {
+			bt.unread = append(bt.unread, id)
+		}
+	}
 	bt.sortIDs(bt.unread)
 }
 
