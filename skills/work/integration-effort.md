@@ -154,9 +154,17 @@ default branch's commits as its change.
    task already waits on it, through the bead that waits on the hand-off. The
    refinery sends the task to the rig's polecat pool, and the polecat resolves
    each conflict, asking the operator only when a resolution needs a product
-   decision. Once the task lands, the hand-off comes back to the refinery,
-   which brings the branch current from where the task's merge left it. The
-   refinery's prompt holds the method of steps 3 and 4.
+   decision. Unlike a clean merge, the task's merge goes through checks, and
+   that is accepted because its resolution is written by hand. The checks of the
+   polecat's self-review and of the refinery's gate run on the merged tree,
+   and a check that reads a diff reads the default branch's gains as part of
+   the task's change. A check that fails the same way at the default branch's
+   head is the default branch's own failure, which the task's brief has the
+   polecat treat as pre-existing. No review check reads the task, because it
+   lands on the effort's branch directly. Once the task lands, the hand-off
+   comes back to the refinery, which brings the branch current from where the
+   task's merge left it. The refinery's prompt holds the method of steps 3
+   and 4.
 
 ```bash
 # The hand-off, under the effort's epic (drop --parent when it has none).

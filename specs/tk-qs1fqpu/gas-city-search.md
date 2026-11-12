@@ -7,9 +7,10 @@ description: Use when you need the evidence that the refinery's sending a confli
 
 The refinery's `effort-bring-current` block brings an integration effort's
 branch current with its target. When the merge conflicts, the block now files
-the merge as a task on the effort's branch, with the hand-off and the landing
-bead waiting on it, records the hand-off's notice, and slings the task to the
-rig's polecat pool on `mol-polecat-work` with `--merge direct`. Before, it put
+the merge as a task on the effort's branch, with `direct` as its merge strategy
+and the hand-off and the landing bead waiting on it, records the hand-off's
+notice, and slings the task to the rig's polecat pool on `mol-polecat-work`
+with `--merge direct`. Before, it put
 the conflict to the operator in a `bring-current-conflict` human gate. The
 block grows by that send.
 The change adds no script, metadata key, bead kind, lifecycle state or order.
@@ -52,6 +53,16 @@ makes both wait on the task in the create that files it, with `--parent` and
 `--metadata` in the same write. No write leaves the task filed while the
 hand-off does not wait on it.
 
+**Finding a task the create wrote but did not name: the hand-off's blockers.**
+Covers it. A create can write its task and still answer no id the block can
+read, as when a line before the JSON spoils the parse. `ExecuteCreate` in
+`internal/storage/issueops/execution.go` writes the bead and the edges it asks
+for in one transaction, and refuses the whole create when an edge cannot be
+written, so a task the create wrote is among what the hand-off waits on. The
+block reads the hand-off's open `blocks` dependencies for the one with the
+task's title and goes on with it. It stops, saying how to find the task, when
+that read does not answer.
+
 **The branch the work starts from and lands on: the bead's `target`.** Covers
 it. `BeadMetadataTarget` in `internal/sling/sling.go` reads the bead's own
 `target` metadata "used for branch targeting" before any parent's, so a task
@@ -78,6 +89,28 @@ the effort's target as its second parent. Without the flag, a rig whose
 default is `mr` would have its task stamped `mr` and landed through a pull
 request, which `gctk merge` merges by squash, and the hand-off would meet the
 same conflict again.
+
+**The strategy set before any sling runs: `merge_strategy` in the create.**
+Covers what the sling's stamp leaves open. `doStartGraphWorkflow` stamps
+`merge_strategy` only after `PromoteWorkflowLaunchBead` has started the
+workflow's root, and a failed stamp is "reported rather than fatal". A launch
+that fails at the start has already poured the workflow, and
+`rollbackGraphV2ReplacementLaunch` in `internal/sling/sling.go` undoes nothing
+unless `--force` replaced a root, so the workflow stays live with no strategy
+stamped. The block therefore writes `merge_strategy` as `direct` in the task's
+create, the key `doStartGraphWorkflow` writes, and keeps `--merge direct` on
+the sling, which would otherwise stamp the rig's default over it.
+
+**Finishing a send that failed: `gc sling` refuses a second live workflow.**
+Covers it. In `attachFormulaToBead` (`internal/sling/sling_core.go`),
+`checkLegacySourceWorkflowConflict` refuses a launch while a live root of the
+same formula tracks the bead through its input convoy, and `cmd/gc/cmd_sling.go`
+exits 3 on that conflict, printing that the bead "already has live
+workflow(s)". A pour that fails part way closes the roots it made
+(`closeFailedGraphV2Roots` in `internal/sling/sling.go`). So the send, run again
+after a sling that exited non-zero, pours the workflow once when the first
+launch left none live, and exits 3 when it did, which the refinery's prompt
+reads as the task sent.
 
 **Bringing the hand-off back once the task lands: the hand-off's notice.**
 Existing pack surface, unchanged. The recipe records the notice
