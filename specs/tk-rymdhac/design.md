@@ -170,12 +170,11 @@ closer.
 
 A resumed change is its own conversation's subject, so the subject's wait is
 not written again. The original subject has waited on the change since the
-earlier sitting filed it, through its close brief, its `blocks` edge and its
-closer's arm, and that wait stands. The resuming sitting adds only its hold,
-the change's `blocks` edge onto its own conversation, and appends its ruling to
-the change, which as the subject also takes its outcome record (section 1).
-Before its first edit and at its sign-off, it writes no close brief, no
-closer's arm and no edge that makes the change wait on itself.
+earlier sitting filed it, and that wait stands. The resuming sitting adds only
+its hold, the change's `blocks` edge onto its own conversation, and appends its
+ruling to the change, which as the subject also takes its outcome record
+(section 1). Before its first edit and at its sign-off, it writes no close
+brief, no closer's arm and no edge that makes the change wait on itself.
 
 **The tree.** Work's setup cuts the tree at `<the sitting's home>/worktrees/<bead>`,
 on the bead's branch cut fresh from its target, and records `work_dir` and
