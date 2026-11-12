@@ -132,12 +132,85 @@ pack's, because no rule of GitHub's covers an integration branch, and the
 operator ruled at tk-1tfzr71.20's design that the city requires an approval on
 every target.
 
-The refinery is modeled step for step on Gas Town's refinery, which is its
-target. The pack keeps a refinery of its own because the city imports no
-gastown pack and no gastown release carries the pending-through-merge record
-yet. Each difference from Gas Town's refinery, with its reason and what ends
-it, is in tk-1tfzr71.20's design under
-[What the pack keeps of its own](../specs/tk-1tfzr71.66/design.md#what-the-pack-keeps-of-its-own).
+The refinery's target is Gas Town's refinery, and its patrol takes Gas Town's
+steps one for one. The pack keeps a refinery of its own because the city imports
+no gastown pack, and no gastown release carries the pending-through-merge record
+yet. Each remaining difference names its reason and what ends it:
+
+- **Merge, never rebase.** The refinery brings a branch current by merging its
+  target in, and every push is a fast-forward. A push onto a work's branch goes
+  under git's lease on the commit the writer read there, once the writer has
+  checked that the new head descends from it, so the lease never forces. Gas
+  Town rebases, and in `mr` it force-pushes with a lease that names no commit.
+  A PR keeps the commits its approval and its threads were given on, and a push
+  someone else made is refused, never overwritten. No end is planned.
+- **A requeue keeps the branch and the PR.** Work the refinery will not land
+  goes back to the pool through `gc sling` with its branch kept, as the bead
+  itself when it has no PR open, and as its PR's rework child when it has one.
+  Gas Town writes the pool route by hand and deletes the branch after a failure
+  the branch caused. Dispatch goes only through `gc sling`, and deleting a PR's
+  branch closes the PR. This ends when Gas Town requeues through `gc sling` and
+  keeps the PR of a bead it sends back.
+- **A pre-existing failure is tracked by its key.** `preexisting-failure.sh`
+  keys a failure already on the target by its symptom, where Gas Town searches
+  open bugs by title. Two agents title one failure two ways, and the key finds
+  the tracker after a retitle. This ends when Gas Town keys its tracker.
+- **Human gates in place of mayor mail.** Where a person must act, such as the
+  refinery's park or an exception the landing order finds, the pack files a
+  human gate on the bead, keyed by the case. Gas Town routes the bead to
+  `human` and mails the mayor. The po owns only what a ruling gives it. This
+  ends when an operator ruling gives the po escalation handling.
+- **The PR opens as a draft.** The review loop (tk-1tfzr71.22) returns it to
+  draft for each later round of the city's work and marks it ready once the
+  lanes before the ready-for-review phase pass. Gas Town opens it ready and
+  never returns it to draft. The city's checks run on the PR before it asks the
+  operator, and a repository whose workflows skip drafts runs its CI on the
+  head the loop marks ready. No end is planned.
+- **The city merges.** The landing order asks GitHub to merge the head the
+  refinery validated once the evaluator finds the PR ready, where Gas Town
+  leaves the merge to a person. The operator approves and the city lands the
+  PR, on every target. No end is planned.
+- **Only the city's own PRs.** The `mr` step takes a PR only when the city's
+  account opened it, and parks the bead behind a gate when another account
+  opened the PR on its branch. Gas Town takes the PR open on the branch and
+  never checks its author. The city merges every PR it takes, so its contract
+  covers only the PRs it opens. No end is planned.
+- **The record's writers.** The pack writes Gas Town's pending-through-merge
+  record itself (`gctk pr record`, `gctk pr reconcile`), from a landing order
+  rather than from the refinery's find-work, and its reconcile also decides
+  readiness and requests the merge. Both writers take the store's record lock,
+  and each write is guarded on the bead's status and assignee, so a bead that a
+  close or a release reached first gets no record, and a run leaves a bead a
+  release took as the release left it. Gas Town's one refinery session
+  reconciles once per find-work, writes the record unconditionally and assigns
+  the bead to the refinery at each check. No gastown release carries the
+  command, and an order holds no session while a PR waits on its approval or
+  its checks. This ends when the city takes a gastown release that carries the
+  command, refuses a bead a close or a release reached first and leaves a bead
+  a release took. The record and the close then become that command, and the
+  pack keeps the readiness check and the merge request.
+- **find-work reads waits.** It skips a bead something holds or whose branch
+  another open bead works on, and takes a rework child before its anchor. Gas
+  Town takes any bead assigned to the refinery. Two writers on one branch would
+  overwrite each other's work. This ends when Gas Town's find-work reads waits.
+- **A branch already on its target.** A direct landing an earlier pass pushed
+  but did not record is recorded `merged`, at the commit the bead's
+  `direct_landing_sha` names, and any other branch with no change is refused as
+  `refused_false_completion`. Gas Town closes a branch that is an ancestor of
+  its target, with a commit since its recorded fork point, as `already_merged`.
+  Every reader that asks whether a direct landing happened asks one value. No
+  end is planned.
+- **The gate runs detached.** The rig's checks run as one `detached-job.sh`
+  job, where Gas Town runs each inline, because a tool call is cut off at ten
+  minutes and a gate can run longer. This ends when the gate runs where no tool
+  call bounds it.
+- **The integration-effort hand-off.** The refinery brings an integration
+  effort's branch current with its target (`effort-bring-current.sh`). Gas Town
+  has no integration efforts. This ends when the convoys member (tk-1tfzr71.23)
+  moves efforts onto `gc convoy land`.
+- **One worker per branch.** A conflict on a branch whose rework child is open
+  goes to that child's notes. Gas Town has no rework children. This ends when
+  the review loop (tk-1tfzr71.22) takes review feedback off rework children.
 
 ### Human engagement
 
@@ -220,7 +293,8 @@ reason and what ends it:
   not apply to an always-on session, so there its passes run back to back. This
   ends when Gas City gives an always-on patrol an idle interval.
 - **Reading our anchors, PR states and conversations.** Our pipeline writes them.
-  This ends as tk-1tfzr71.20 and .22 land.
+  This ends as the old merge path's retirement (tk-1tfzr71.70) and tk-1tfzr71.22
+  land.
 - **Findings and human gates in place of mayor mail.** Gas Town's witness mails
   the mayor about emergencies, failures, recovered and handed-off orphans and
   queue health. This one files findings and human gates instead, because the po
@@ -322,7 +396,7 @@ home.
 - A rule kept in two languages, with a test holding the copies equal:
   `gctk merge` and `review-verdict.sh`, `gctk lifecycle` and the key registry,
   and the board's Go contract and its TypeScript mirror. Carried by
-  tk-1tfzr71.20 and .25.
+  tk-1tfzr71.70, the old merge path's retirement, and tk-1tfzr71.25.
 
 ### Compatibility debt
 
@@ -389,15 +463,15 @@ convoy lands only after the operator approves its design.
 
 | Lane | Member | What it removes | Size |
 |---|---|---|---|
-| A | tk-1tfzr71.20 | the merge cadence, the approval rule, rework and branch currency; the operator rules at its design | 10,920 |
-| A | tk-1tfzr71.22 | review beads, lane derivation, validation passes, machine findings | 10,924 |
-| A | tk-1tfzr71.21 | `pr-facts.sh` polling and mirroring | 15,233 |
+| A | tk-1tfzr71.22 | review beads, lane derivation, validation passes, machine findings, the bring-current guard and audit | 13,703 |
+| A | tk-1tfzr71.70 | the old merge path, once every rig's cutover has moved its PRs onto the pending record: `gctk merge` and the transition machine, `pr-open.sh`'s create, `pre-open-rebase.sh`, `merge-tail-report.sh` | 1,288, and the rows it adds |
+| A | tk-1tfzr71.21 | `pr-facts.sh` polling and mirroring, the merge cadence's driver and its pacing, the failure cap and the supersession check | 17,981 |
 | A | tk-1tfzr71.23 | the membership readers on parent-child | partial files |
 | B | tk-1tfzr71.15 | raw route stamps and the checks that police them | 1,175 |
 | B | tk-1tfzr71.16 | deferred dispatch's notify path, lock, budget and crash marker | partial files |
 | B | tk-1tfzr71.17 | the reaction bead and the intake converters | 189, plus partial files |
 | B | tk-1tfzr71.18 | warrants, the dance, pin keepalive, boot health, quota park, each after its re-check | 5,815 |
-| B | tk-1tfzr71.19 | the doctor runner, the liveness census, the incident ledger, the copied patrol steps | 7,869 |
+| B | tk-1tfzr71.19 | the doctor runner, the liveness census, the incident ledger, the copied patrol steps, the salvage's branch context | 8,331 |
 | B | tk-1tfzr71.24 | the board's second data plane and pack-stamped rows, verbs that only call Gas City | partial files |
 | B | tk-1tfzr71.25 | registry entries, wrapper lint rules, parity tests, the `board` stub verb | 1,488 |
 
