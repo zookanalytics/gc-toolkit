@@ -27,8 +27,9 @@ export interface View {
   flip(key: string, def: boolean): void;
   /** Set several parts at once, as a count's click opens one group. */
   setOpen(parts: Record<string, boolean>): void;
+  /** Copy an id to the clipboard (useCopy). */
   copy(id: string): void;
-  /** The id copied last, for a moment after its click. */
+  /** The id copied last, for a moment once the clipboard has taken it. */
   copied: string | null;
   /** Fill search with an id, which lists the rows that match it. */
   show(id: string): void;

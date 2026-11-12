@@ -424,15 +424,98 @@ describe('search', () => {
     expect((screen.getByRole('searchbox', { name: 'Search this rig' }) as HTMLInputElement).value).toBe(ref);
     expect(rowIds()).toContain(ref);
   });
+});
 
-  it('copies a bead id on a click', async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
+// A bead id and the side panel's attach command copy through one hook
+// (useCopy.test.ts holds its timers); these hold what each control reads when
+// the browser takes the write, refuses it, or has no clipboard at all.
+describe('copying', () => {
+  /** A clipboard whose writes answer as answer says. */
+  function clipboard(answer: () => Promise<void>) {
+    const writeText = vi.fn((_text: string) => answer());
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+    return writeText;
+  }
+
+  function refused(): Promise<void> {
+    return Promise.reject(new DOMException('Write permission denied.', 'NotAllowedError'));
+  }
+
+  /** Lets every answer already due reach the page. */
+  async function settle() {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  }
+
+  async function attachPanel(): Promise<HTMLElement> {
+    tab(/Needs you/);
+    fireEvent.click(within(rowOf('tk-78qg2my')).getByRole('button', { name: 'Start the conversation' }));
+    const panel = await screen.findByRole('complementary', { name: 'Conversation' });
+    await within(panel).findByText('gc session attach tk-s1tt1ng');
+    return panel;
+  }
+
+  it('says a bead id was copied only once the clipboard has taken it', async () => {
+    let take = () => {};
+    const writeText = clipboard(
+      () =>
+        new Promise<void>((resolve) => {
+          take = resolve;
+        }),
+    );
     render(<Page />);
     await loaded();
     fireEvent.click(screen.getByRole('button', { name: 'tk-wmwcdlc' }));
     expect(writeText).toHaveBeenCalledWith('tk-wmwcdlc');
-    expect(screen.getByRole('button', { name: 'copied' })).toBeTruthy();
+    await settle();
+    expect(screen.queryByRole('button', { name: 'copied' })).toBeNull();
+    take();
+    expect(await screen.findByRole('button', { name: 'copied' })).toBeTruthy();
+  });
+
+  it('keeps a bead id on screen, and claims no copy, when the browser refuses the write', async () => {
+    const writeText = clipboard(refused);
+    render(<Page />);
+    await loaded();
+    fireEvent.click(screen.getByRole('button', { name: 'tk-wmwcdlc' }));
+    await settle();
+    expect(writeText).toHaveBeenCalledWith('tk-wmwcdlc');
+    expect(screen.queryByRole('button', { name: 'copied' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'tk-wmwcdlc' })).toBeTruthy();
+  });
+
+  it('keeps a bead id on screen, and claims no copy, on a page with no clipboard', async () => {
+    vi.stubGlobal('navigator', { ...navigator, clipboard: undefined });
+    render(<Page />);
+    await loaded();
+    fireEvent.click(screen.getByRole('button', { name: 'tk-wmwcdlc' }));
+    await settle();
+    expect(screen.queryByRole('button', { name: 'copied' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'tk-wmwcdlc' })).toBeTruthy();
+  });
+
+  it('says the attach command was copied once the clipboard has taken it', async () => {
+    const writeText = clipboard(() => Promise.resolve());
+    render(<Page />);
+    await loaded();
+    const panel = await attachPanel();
+    fireEvent.click(within(panel).getByRole('button', { name: 'Copy' }));
+    expect(writeText).toHaveBeenCalledWith('gc session attach tk-s1tt1ng');
+    expect(await within(panel).findByRole('button', { name: 'Copied' })).toBeTruthy();
+  });
+
+  it('leaves the attach command to select by hand, and claims no copy, when the browser refuses the write', async () => {
+    const writeText = clipboard(refused);
+    render(<Page />);
+    await loaded();
+    const panel = await attachPanel();
+    fireEvent.click(within(panel).getByRole('button', { name: 'Copy' }));
+    await settle();
+    expect(writeText).toHaveBeenCalledWith('gc session attach tk-s1tt1ng');
+    expect(within(panel).queryByRole('button', { name: 'Copied' })).toBeNull();
+    expect(within(panel).getByRole('button', { name: 'Copy' })).toBeTruthy();
+    expect(text(panel.querySelector('.command code'))).toBe('gc session attach tk-s1tt1ng');
   });
 });
 
