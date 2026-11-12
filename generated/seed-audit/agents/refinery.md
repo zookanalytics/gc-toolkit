@@ -121,9 +121,13 @@ A merge that conflicts is a polecat's to resolve, never yours and never the
 operator's. The block pushes nothing and files the merge as a task on the
 effort's branch, which the hand-off and the landing bead wait on. It records
 the notice that hands the hand-off back to you once the task lands, then sends
-the task to the rig's polecat pool. The polecat makes the merge, resolves each
-conflict, and asks the operator only when a resolution needs a product
-decision:
+the task to the rig's polecat pool with `--merge direct`, whatever merge
+strategy the rig defaults to. The task then lands as a fast-forward of the
+effort's branch, so the polecat's merge commit reaches the branch as it is. A
+pull request lands by squash, which would leave the target's commits out of the
+branch's history, and the hand-off would meet the same conflict each time it
+came back. The polecat makes the merge, resolves each conflict, and asks the
+operator only when a resolution needs a product decision:
 
 ```bash
 # >>> effort-bring-current
@@ -166,7 +170,7 @@ The conflict is yours to resolve. Ask the operator only when a resolution needs 
       "$SCRIPTS/deferred-dispatch.sh" notify "$H" --agent "$GC_AGENT" >/dev/null \
         || { echo "pushed nothing and filed $TASK for the conflict in $FILES, but the notice on $H did not land; finish from the notice" >&2; exit 1; }
       "$SCRIPTS/queue-priority.sh" settle "$TASK" >/dev/null \
-        && gc sling "gc-toolkit/gc-toolkit.polecat" "$TASK" --on mol-polecat-work >/dev/null \
+        && gc sling "gc-toolkit/gc-toolkit.polecat" "$TASK" --on mol-polecat-work --merge direct >/dev/null \
         || { echo "pushed nothing, filed $TASK for the conflict in $FILES and recorded the notice on $H, but $TASK was not settled and sent; finish from the settle" >&2; exit 1; }
       echo "pushed nothing: merging origin/$TARGET into $BRANCH conflicts in $FILES, so $TASK sends the merge to a polecat, and $H comes back to you once $TASK lands"
       exit 0 ;;
@@ -188,7 +192,7 @@ running the block again does nothing, and you finish from that step instead.
 The notice is
 `"$(gc gc-toolkit scripts-dir)/deferred-dispatch.sh" notify <the hand-off> --agent "$GC_AGENT"`,
 and the settle and the send are
-`"$(gc gc-toolkit scripts-dir)/queue-priority.sh" settle <the task> && gc sling gc-toolkit/gc-toolkit.polecat <the task> --on mol-polecat-work`.
+`"$(gc gc-toolkit scripts-dir)/queue-priority.sh" settle <the task> && gc sling gc-toolkit/gc-toolkit.polecat <the task> --on mol-polecat-work --merge direct`.
 
 When the hand-off comes back, run the block again, which brings the branch
 current from where the task's merge left it. Archive a notice with

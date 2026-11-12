@@ -9,8 +9,9 @@ The refinery's `effort-bring-current` block brings an integration effort's
 branch current with its target. When the merge conflicts, the block now files
 the merge as a task on the effort's branch, with the hand-off and the landing
 bead waiting on it, records the hand-off's notice, and slings the task to the
-rig's polecat pool on `mol-polecat-work`. Before, it put the conflict to the
-operator in a `bring-current-conflict` human gate. The block grows by that send.
+rig's polecat pool on `mol-polecat-work` with `--merge direct`. Before, it put
+the conflict to the operator in a `bring-current-conflict` human gate. The
+block grows by that send.
 The change adds no script, metadata key, bead kind, lifecycle state or order.
 Each primitive searched is below, with what it covers.
 
@@ -63,6 +64,20 @@ formula to bead before routing", and a v2 formula is routed "with gc sling
 <target> <bead> --on <formula>". The block slings the task to the rig's
 polecat pool on `mol-polecat-work`, the formula that every bead of an effort
 runs.
+
+**Landing the task as a fast-forward of the effort's branch: `gc sling --merge direct`.**
+Covers it. `cmd/gc/cmd_sling.go` defines `--merge` as the "merge strategy:
+direct, mr, or local". `SlingMergeStrategy` in `internal/sling/sling.go`
+resolves "the explicit --merge value the caller passed" ahead of the
+`default_merge_strategy` recorded on the rig, and `doStartGraphWorkflow` in
+`internal/sling/sling_core.go` stamps the result on the work bead as
+`merge_strategy` when a v2 formula is slung. The pack's refinery lands a bead
+stamped `direct` whose target is not the default branch as a fast-forward of
+that target, so the polecat's merge commit reaches the effort's branch with
+the target as its second parent. Without the flag, a rig whose default is `mr`
+would have its task stamped `mr` and landed through a pull request, which
+`gctk merge` merges by squash, and the hand-off would meet the same conflict
+again.
 
 **Bringing the hand-off back once the task lands: the hand-off's notice.**
 Existing pack surface, unchanged. The recipe records the notice

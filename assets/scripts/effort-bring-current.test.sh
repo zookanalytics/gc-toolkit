@@ -18,10 +18,13 @@
 # landing bead waiting on it. Its description names the conflicted files and
 # asks the operator only for a product decision. The block records the notice
 # that hands the hand-off back to the refinery, then settles the task and slings
-# it to the rig's polecat pool on mol-polecat-work. It files no human gate, and
-# the hand-off stays open. A create that returns no id stops before anything is
-# sent. A notice or a send that does not land stops the block, and a run of it
-# then finds the hand-off waiting on the task and does nothing more.
+# it to the rig's polecat pool on mol-polecat-work with --merge direct, so the
+# task lands as a fast-forward of the effort's branch whatever merge strategy
+# the rig defaults to, and its merge commit is never squashed. It files no
+# human gate, and the hand-off stays open. A create that returns no id stops
+# before anything is sent. A notice or a send that does not land stops the
+# block, and a run of it then finds the hand-off waiting on the task and does
+# nothing more.
 #
 # A push that origin refuses leaves the branch and the hand-off as they were. A
 # hand-off that is closed or still waits on a blocker, a landing bead that
@@ -192,11 +195,11 @@ conflict() {
   OWN=$(head_of integration/land-1); MAIN=$(head_of main)
 }
 # What a conflict sends, in order: the task's create, the hand-off's notice, the
-# task's settle, and its sling to the rig's polecat pool.
+# task's settle, and its sling to the rig's polecat pool with a direct landing.
 SENT="create
 deferred-dispatch notify ho-1 --agent rig-1/gc-toolkit.refinery
 queue-priority settle task-1
-sling rig-1/gc-toolkit.polecat task-1 --on mol-polecat-work"
+sling rig-1/gc-toolkit.polecat task-1 --on mol-polecat-work --merge direct"
 
 SHELLS=(bash)
 command -v zsh >/dev/null 2>&1 && SHELLS+=(zsh) || echo "note - zsh not present; running under bash only"
@@ -257,7 +260,10 @@ for sh in "${SHELLS[@]}"; do
   eq "$RC" "0" "[$sh] conflict: the block succeeds once the merge is sent to a polecat"
   eq "$(head_of integration/land-1) $(status_of ho-1)" "$OWN open" "[$sh] conflict: the branch is not pushed and the hand-off stays open"
   eq "$(cat "$GC_LOG")" "$SENT" \
-    "[$sh] conflict: it files the task, records the hand-off's notice, then settles the task and slings it to the rig's polecat pool on mol-polecat-work"
+    "[$sh] conflict: it files the task, records the hand-off's notice, then settles the task and slings it to the rig's polecat pool on mol-polecat-work with --merge direct"
+  grep -qxF "sling rig-1/gc-toolkit.polecat task-1 --on mol-polecat-work --merge direct" "$GC_LOG" \
+    && ok "[$sh] conflict: the sling pins the task's landing with --merge direct, which outranks the rig's default strategy, so a squash never drops the merge" \
+    || bad "[$sh] conflict: the sling does not pin the task's landing with --merge direct"
   grep -q '^human-gate' "$GC_LOG" && bad "[$sh] conflict: a human gate was filed" || ok "[$sh] conflict: no human gate is filed"
   eq "$(cat "$CREATE/title")" "Merge origin/main into integration/land-1 and resolve its conflicts" "[$sh] conflict: the task's title names the merge"
   eq "$(cat "$CREATE/t") $(cat "$CREATE/parent") $(jq -c . "$CREATE/metadata") $(cat "$CREATE/deps")" \
