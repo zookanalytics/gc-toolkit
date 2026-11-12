@@ -159,7 +159,8 @@ performer; the full transition table with writers is
    raisable; a review bead is routed to the polecat-codex pool; the reviewer's
    single call to `signoff.sh` records the verdict on the review bead and, on
    request-changes, files one rework child. The PR leaves draft once every
-   check gated before `ready-for-review` derives green.
+   check gated before `ready-for-review` derives green, and goes back to draft
+   before each later round of the city's work on it pushes.
 8. **Merge.** The landing order reads each pending PR. One evaluator decides
    whether the PR is ready: the operator's approval, on every target, the
    bead's waits, the review results at the PR's head, the feedback the city has

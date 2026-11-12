@@ -12,7 +12,9 @@ gastown 0.1.13, the release that Gas City main and the city's gc 1.4.3 bundle
 (`PublicGastownPackVersion` in `internal/config/public_packs.go`), and at
 `gastownhall/beads` v1.3.4 (7ef2fd05eb0c). GitHub's behavior was read from its
 documentation, its GraphQL schema and the manual of gh 2.103.3 the same day.
-Each section names the unit of [the design](design.md) that adds the surface.
+The draft between rounds of work was read on 2026-11-12, with gc-toolkit's
+workflows on main and PR #1469's timeline and runs. Each section names the
+unit of [the design](design.md) that adds the surface.
 
 ## The work's record from publication to the verified merge (unit 3)
 
@@ -125,6 +127,58 @@ and the anchor's feedback receipts. The gap the primitives leave is the
 approval on a branch with no rule, the bead's waits and the city's reading of
 the feedback, which no rule reads. `gctk pr status` grows the conditions not
 met in its output, so the board shows what the merge reads.
+
+## The draft between rounds of work (tk-1tfzr71.22, and unit 2's final run)
+
+The need: the PR stays a draft while a round of the city's work goes on, so a
+repository whose workflows skip drafts runs none of that CI on the round's
+pushes, and it turns ready, which starts that CI, once the round's head passes
+the city's own checks. Each later round repeats the cycle. The merge then waits
+for the run the ready transition starts, never for a skip a draft left at the
+head.
+
+- **Gas City.** Nothing under `cmd/` or `internal/` changes a PR's draft state.
+  The PR monitor reads the draft flag only to class a draft as not actionable
+  (`classifyPullRequest` in `internal/githubmonitor/monitor.go`), so it files no
+  repair bead for one.
+- **Gas Town.** `gastown/formulas/mol-refinery-patrol.toml` opens each PR ready
+  and never returns one to draft: nothing under `gastown/` at 7f86098c04ea
+  passes `--draft` or calls `gh pr ready`.
+- **bd.** Nothing in its Go reads a PR's draft state, and its `gh:pr` gate reads
+  only the PR's state and title (`checkGHPRWithRunner` in `cmd/bd/gate.go`).
+- **GitHub.** `gh pr ready` marks a PR ready, and `gh pr ready --undo` returns
+  it to draft where the repository's plan offers drafts (gh's manual), as
+  GitHub's `markPullRequestReadyForReview` and `convertPullRequestToDraft`
+  mutations do. No one can merge a draft until it is marked ready ([Changing
+  the stage of a pull
+  request](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/changing-the-stage-of-a-pull-request)),
+  and the PR's timeline records each transition, as a `ReadyForReviewEvent` or
+  a `ConvertToDraftEvent` with its `createdAt`. That page says nothing of
+  reviews on a return to draft, and the approval on PR #1469 stood through one
+  and back. Each workflow decides whether it runs on a draft. A `pull_request`
+  trigger runs on `opened`, `synchronize` and `reopened` unless it names its
+  activity types, `ready_for_review` and `converted_to_draft` among them
+  ([Events that trigger
+  workflows](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request)).
+  A job that its condition skips reports success and holds no merge, even as a
+  required check, while a workflow that a filter skips leaves its checks
+  pending ([Troubleshooting required status
+  checks](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks)).
+  A check run carries its `conclusion`, `SKIPPED` among the values, whether the
+  PR's target requires it (`isRequired`), and its check suite, created with the
+  run: on PR #1469 the suite of the run that the ready transition started was
+  created two seconds after the event.
+
+What tk-1tfzr71.22 and unit 2 compose: gh's two transitions, which the loop
+makes before each round's first push and once the round's lanes pass, reading
+the draft flag first; and the evaluator's read of each required check's results
+at the head, with a skip from a check suite created before the PR's last
+`ReadyForReviewEvent` set aside. The gap the primitives leave is the tie between
+the draft and the city's rounds, which nothing upstream makes, and a skip from a
+draft standing in for a required check, which GitHub counts as a pass.
+`gctk pr status` grows that condition among the conditions not met. Each
+repository's workflows stay its own, through a bead per rig (the design's
+section 12).
 
 ## The landing order (unit 3)
 
@@ -337,6 +391,11 @@ carries `pr_number`, with `mr_merged` and `merged` as landed.
   the landing order's next run come sooner.
 - bd guards a write on a metadata value. The record's writers then write under
   that guard, and the record lock goes.
+- GitHub lets a workflow leave drafts out at its trigger, so a draft's required
+  checks stay pending rather than pass on a skip. The evaluator's set-aside of a
+  draft's skips then goes.
+- Gas City or Gas Town ties a PR's draft to the work on its branch. The loop's
+  transitions then move onto that primitive.
 - Gas Town's find-work reads waits, Gas Town's refinery requeues through
   `gc sling`, keeps a branch that has a PR, or keys its pre-existing trackers.
   Each matching difference then ends.
