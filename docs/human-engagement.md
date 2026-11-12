@@ -1201,7 +1201,9 @@ state the seat is in, with no other command, and so does `gc-helm po --rig
 <rig>`.
 
 Both are Gas City's attach on the rig's po, `gc session attach
-<rig>/gc-toolkit.po`, Gas City's name for a rig's named session
+<rig>/<binding>.po`, Gas City's name for a rig's named session, where
+`<binding>` is the name the city imports the pack under. Both take that name
+from `gc agent list`, so they open the same seat whatever the binding is
 ([gascity/human-engagement.md](gascity/human-engagement.md#what-an-attach-does-to-a-session-that-is-not-running)).
 A live sitting is attached to as it stands. Any other seat, one whose sitting
 ended, one whose sitting slept once its idle limit passed (`sleep_after_idle`)
