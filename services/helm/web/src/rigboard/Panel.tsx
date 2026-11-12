@@ -6,6 +6,7 @@
 import { useEffect, useRef } from 'react';
 import { attachCommand } from '../actuate/client';
 import { OpenConversation } from '../open/OpenConversation';
+import { CopyButton } from './CopyButton';
 import { useCopy } from './useCopy';
 import type { EngageAnswer, PanelState } from './view';
 
@@ -116,9 +117,7 @@ function Command({ command }: { command: string }) {
     <div className="command">
       <span className="panel-dim">attach:</span>
       <code>{command}</code>
-      <button type="button" className="panel-copy" onClick={() => copy(command)}>
-        {copied === command ? 'Copied' : 'Copy'}
-      </button>
+      <CopyButton className="panel-copy" text={command} label="Copy" done="Copied" copied={copied} copy={copy} />
     </div>
   );
 }

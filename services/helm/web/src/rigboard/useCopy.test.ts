@@ -52,29 +52,42 @@ function mount() {
   return {
     ...hook,
     copied: () => hook.result.current[0],
-    copy: (text: string) => act(() => hook.result.current[1](text)),
+    copy: (text: string, from: string) => act(() => hook.result.current[1](text, from)),
   };
 }
 
 describe('useCopy', () => {
-  it('shows a copy only once the clipboard has taken it, for COPIED_MS', async () => {
+  it('shows a copy only once the clipboard has taken it, for COPIED_MS, under the key of the control that asked', async () => {
     const h = mount();
-    h.copy('tk-wmwcdlc');
+    h.copy('tk-wmwcdlc', 'here');
     expect(writes.map((w) => w.text)).toEqual(['tk-wmwcdlc']);
     await wait(0);
     expect(h.copied()).toBeNull();
     writes[0].take();
     await wait(0);
-    expect(h.copied()).toBe('tk-wmwcdlc');
+    expect(h.copied()).toBe('here');
     await wait(COPIED_MS - 1);
-    expect(h.copied()).toBe('tk-wmwcdlc');
+    expect(h.copied()).toBe('here');
     await wait(1);
     expect(h.copied()).toBeNull();
   });
 
+  it('moves the success to the control that copies the same text next', async () => {
+    const h = mount();
+    h.copy('tk-wmwcdlc', 'here');
+    writes[0].take();
+    await wait(0);
+    expect(h.copied()).toBe('here');
+    h.copy('tk-wmwcdlc', 'there');
+    expect(h.copied()).toBeNull();
+    writes[1].take();
+    await wait(0);
+    expect(h.copied()).toBe('there');
+  });
+
   it('shows nothing when the browser refuses the write', async () => {
     const h = mount();
-    h.copy('tk-wmwcdlc');
+    h.copy('tk-wmwcdlc', 'here');
     writes[0].refuse();
     await wait(0);
     expect(h.copied()).toBeNull();
@@ -84,7 +97,7 @@ describe('useCopy', () => {
   it('shows nothing on a page with no clipboard', async () => {
     vi.stubGlobal('navigator', { ...navigator, clipboard: undefined });
     const h = mount();
-    h.copy('tk-wmwcdlc');
+    h.copy('tk-wmwcdlc', 'here');
     await wait(0);
     expect(h.copied()).toBeNull();
     expect(vi.getTimerCount()).toBe(0);
@@ -92,43 +105,43 @@ describe('useCopy', () => {
 
   it('clears an earlier success at a later copy, and gives the later one its whole moment', async () => {
     const h = mount();
-    h.copy('tk-first');
+    h.copy('tk-first', 'a');
     writes[0].take();
     await wait(0);
-    expect(h.copied()).toBe('tk-first');
+    expect(h.copied()).toBe('a');
     await wait(COPIED_MS - 200);
-    h.copy('tk-second');
+    h.copy('tk-second', 'b');
     // The earlier success goes at the click, before the browser answers.
     expect(h.copied()).toBeNull();
     writes[1].take();
     await wait(0);
-    expect(h.copied()).toBe('tk-second');
+    expect(h.copied()).toBe('b');
     expect(vi.getTimerCount()).toBe(1);
     // Past the moment the earlier copy's timer would have ended it.
     await wait(200);
-    expect(h.copied()).toBe('tk-second');
+    expect(h.copied()).toBe('b');
     await wait(COPIED_MS - 200);
     expect(h.copied()).toBeNull();
   });
 
   it('shows nothing for a write that answers after a later copy started', async () => {
     const h = mount();
-    h.copy('tk-first');
-    h.copy('tk-second');
+    h.copy('tk-first', 'a');
+    h.copy('tk-second', 'b');
     writes[0].take();
     await wait(0);
     expect(h.copied()).toBeNull();
     writes[1].take();
     await wait(0);
-    expect(h.copied()).toBe('tk-second');
+    expect(h.copied()).toBe('b');
   });
 
   it('a later refusal leaves no earlier success showing', async () => {
     const h = mount();
-    h.copy('tk-first');
+    h.copy('tk-first', 'a');
     writes[0].take();
     await wait(0);
-    h.copy('tk-second');
+    h.copy('tk-second', 'b');
     writes[1].refuse();
     await wait(0);
     expect(h.copied()).toBeNull();
@@ -137,7 +150,7 @@ describe('useCopy', () => {
 
   it('leaves no timer behind when it unmounts, and starts none for a write still in flight', async () => {
     const h = mount();
-    h.copy('tk-first');
+    h.copy('tk-first', 'a');
     writes[0].take();
     await wait(0);
     expect(vi.getTimerCount()).toBe(1);
@@ -145,7 +158,7 @@ describe('useCopy', () => {
     expect(vi.getTimerCount()).toBe(0);
 
     const late = mount();
-    late.copy('tk-second');
+    late.copy('tk-second', 'b');
     late.unmount();
     writes[1].take();
     await wait(0);

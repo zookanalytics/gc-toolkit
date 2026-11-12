@@ -97,6 +97,15 @@ function text(el: Element | null): string {
   return el?.textContent ?? '';
 }
 
+/** What a control reads: its text, less a reading it holds unseen. */
+function reading(el: Element | null): string {
+  if (el === null) return '';
+  return [...el.childNodes]
+    .filter((n) => !(n instanceof Element && n.getAttribute('aria-hidden') === 'true'))
+    .map((n) => n.textContent ?? '')
+    .join('');
+}
+
 /** The row whose bead id reads id, the first where the page draws it twice. */
 function rowOf(id: string): HTMLElement {
   const button = screen.getAllByRole('button', { name: id })[0];
@@ -106,7 +115,7 @@ function rowOf(id: string): HTMLElement {
 }
 
 function rowIds(): string[] {
-  return [...document.querySelectorAll('.line .bead-id')].map((b) => text(b));
+  return [...document.querySelectorAll('.line .bead-id')].map((b) => reading(b));
 }
 
 function headings(): string[] {
@@ -474,6 +483,40 @@ describe('copying', () => {
     expect(await screen.findByRole('button', { name: 'copied' })).toBeTruthy();
   });
 
+  it('says a bead id was copied only where it was clicked, though the page draws it in more than one place', async () => {
+    const writeText = clipboard(() => Promise.resolve());
+    render(<Page />);
+    await loaded();
+    tab(/Needs you/);
+    // Needs you draws a bead once for each row that names it.
+    const readings = screen.getAllByTitle('Copy the bead ID').map((b) => reading(b));
+    const id = readings.find((r, i) => readings.indexOf(r) !== i);
+    if (id === undefined) throw new Error('Needs you draws no bead id twice');
+    const drawn = screen.getAllByRole('button', { name: id });
+    const clicked = drawn[drawn.length - 1];
+    fireEvent.click(clicked);
+    expect(writeText).toHaveBeenCalledWith(id);
+    expect(await screen.findAllByRole('button', { name: 'copied' })).toEqual([clicked]);
+    expect(screen.getAllByRole('button', { name: id })).toEqual(drawn.filter((b) => b !== clicked));
+    // The clicked id stays laid out under its word, unseen, so the control
+    // keeps the id's size and nothing beside it moves.
+    expect(text(clicked.querySelector('[aria-hidden="true"]'))).toBe(id);
+  });
+
+  it('says copied in one place on the board at a time: a later bead id takes the word from an earlier one', async () => {
+    clipboard(() => Promise.resolve());
+    render(<Page />);
+    await loaded();
+    tab(/Needs you/);
+    // Two ids the page draws once each, so only the one slot is in question.
+    const controls = screen.getAllByTitle('Copy the bead ID');
+    const [first, second] = controls.filter((b) => controls.filter((c) => reading(c) === reading(b)).length === 1);
+    fireEvent.click(first);
+    expect(await screen.findAllByRole('button', { name: 'copied' })).toEqual([first]);
+    fireEvent.click(second);
+    expect(await screen.findAllByRole('button', { name: 'copied' })).toEqual([second]);
+  });
+
   it('keeps a bead id on screen, and claims no copy, when the browser refuses the write', async () => {
     const writeText = clipboard(refused);
     render(<Page />);
@@ -502,7 +545,9 @@ describe('copying', () => {
     const panel = await attachPanel();
     fireEvent.click(within(panel).getByRole('button', { name: 'Copy' }));
     expect(writeText).toHaveBeenCalledWith('gc session attach tk-s1tt1ng');
-    expect(await within(panel).findByRole('button', { name: 'Copied' })).toBeTruthy();
+    const copied = await within(panel).findByRole('button', { name: 'Copied' });
+    // Copy stays laid out under Copied, unseen, so the control keeps one size.
+    expect(text(copied.querySelector('[aria-hidden="true"]'))).toBe('Copy');
   });
 
   it('leaves the attach command to select by hand, and claims no copy, when the browser refuses the write', async () => {
@@ -525,7 +570,7 @@ describe('a pull request', () => {
   /** The row whose own bead id reads id, as search lists it. */
   function found(id: string): HTMLElement {
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search this rig' }), { target: { value: id } });
-    const line = [...document.querySelectorAll('.line')].find((l) => text(l.querySelector('.bead-slot .bead-id')) === id);
+    const line = [...document.querySelectorAll('.line')].find((l) => reading(l.querySelector('.bead-slot .bead-id')) === id);
     if (!(line instanceof HTMLElement)) throw new Error(`no row for ${id}`);
     return line;
   }
