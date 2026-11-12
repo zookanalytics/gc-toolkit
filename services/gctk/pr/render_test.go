@@ -5,6 +5,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -202,6 +203,33 @@ func TestTextLines(t *testing.T) {
 	} {
 		if got := textLines(c.in); strings.Join(got, "|") != strings.Join(c.want, "|") || len(got) != len(c.want) {
 			t.Errorf("textLines(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// An author who follows the commit-conventions skill's table must never read
+// `chore: <type>: ...`, which is what a type the composer does not recognize
+// composes to, so every type the table offers is one Title keeps, with a scope
+// and without.
+func TestTitleKeepsEveryTypeTheSkillOffers(t *testing.T) {
+	raw, err := os.ReadFile("../../../skills/commit-conventions/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var types []string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if f := strings.Split(line, "`"); strings.HasPrefix(line, "| `") && len(f) > 2 {
+			types = append(types, f[1])
+		}
+	}
+	if !slices.Contains(types, "fix") || !slices.Contains(types, "chore") {
+		t.Fatalf("the skill's table did not read: %v", types)
+	}
+	for _, typ := range types {
+		for _, title := range []string{typ + ": name the change", typ + "(api): name the change"} {
+			if got := Title("tk-a1", title, "task"); got != title+" (tk-a1)" {
+				t.Errorf("Title(%q) = %q", title, got)
+			}
 		}
 	}
 }

@@ -189,6 +189,15 @@ func TestComposeAnOpenPR(t *testing.T) {
 		}
 	})
 
+	t.Run("the opened-green words quoted outside the region's facts are no claim", func(t *testing.T) {
+		claim := "- Gates `correctness` signed off pre-open at `abcdef12`; PR opened green."
+		s := storeWith(anchor(map[string]string{"pr_summary": "Drops the line that read\n\n" + claim}))
+		body := opened(t, s) + "\nOperator note quoting it:\n" + claim + "\n## Refinery handoff\n\n" + claim + "\n"
+		if got := refresh(s, body, head, gates); got.Summary != Current || got.Body != body {
+			t.Errorf("(%q):\n%s", got.Summary, got.Body)
+		}
+	})
+
 	// tk-tefrxph: a summary that carries a collapsed section of its own, opened
 	// on a line of its own, read up to the first `<details>` line never matched
 	// the bead's, so every pass edited a body that had not changed.

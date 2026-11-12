@@ -18,6 +18,7 @@ through `gc bd` and the supervisor's API.
 | `epic` | actions taken on an epic: filing one with its contract, each field in its own key, refused when the epic has no hypothesis and its parent is not an epic | `gctk epic --help`, `internal/cli/epic.go` |
 | `lifecycle` | anchor lifecycle transitions over the state machine `lifecycle/lifecycle.toml` declares. It parses its own verbs and flags | `gctk lifecycle`, `internal/cli/lifecycle.go`, `internal/lifecycle` |
 | `merge` | arm 2 of the merge cadence, the single writer of merged truth | `internal/cli/merge.go` |
+| `pr compose` | a PR's title and body as the bead that owns it says they should be: its title with the conventional-commit type a repository's title check requires, and its body's managed summary region and branch-beads section, each read by its markers and kept current while the text people add stays as it is | `gctk pr compose --help`, `internal/cli/prcompose.go`, `pr` |
 | `pr status` | a PR's status (working, merging, needs-review or needs-attention), the one derivation the `status:` label and the helm board share, and the open human gates that hold it, which `gc-helm engage` offers | `gctk pr status --help`, `internal/cli/prstatus.go`, `prstatus` |
 | `rig` | actions taken on the rig: running its checks and recording each result against the commit | `gctk rig --help`, `internal/cli/rig.go`, `internal/rig` |
 | `session` | actions taken on a session: giving it a title its Gas City record and its terminal both show, made of the bead it is about (`--subject`), the pull request it is about (`--pr`) and its topic (`--topic`). A Claude Code or Codex terminal takes the title at the session's next boundary, a few seconds after the turn ends | `gctk session --help`, `internal/cli/session.go` |
@@ -53,6 +54,12 @@ binary the same way, and when there is none, or the binary is too old to carry
 lists what holds a bead from the reasons in the same verb's `--json` answer, and
 the helm board imports the package behind it, `prstatus`, so the labels, engage
 and the board read one definition of what holds a PR.
+
+`assets/scripts/pr-open.sh` and `pr-stack.sh` take a PR's title and body from
+`gctk pr compose`, so an opened PR and a post-open refresh read one composer.
+Each finds the binary through `gctk-resolve.sh`'s `gctk_path`, and with no
+binary, or one too old to carry the verb, it opens no PR and edits no body or
+title that pass.
 
 ## rig
 
@@ -118,6 +125,9 @@ internal/gcbd/fake/  the store adapter's in-memory fake, for the domains' tests
 internal/daemon/     finding the supervisor API the store adapter's reads go through
 internal/git/        the git subprocess seam: one git command per call, in a named directory
 internal/rig/        rig's runner and its commit-keyed record store
+pr/                  the PR's composition: its title, and its body's managed summary
+                     region and branch-beads section, with the renders they replaced
+                     pinned under testdata
 prstatus/            the PR status derivation, exported for the helm board
 listing/             one pass's read of a store for the helm board: every live bead, the
                      closed beads under a parent, the keys it decodes, and waits' and

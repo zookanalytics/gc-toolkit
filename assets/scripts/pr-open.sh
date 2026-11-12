@@ -19,10 +19,10 @@
 # pr_url/pr_number/merged_target. Every failure leaves pre_open_gate.
 # A second arm flips a draft the refinery opened to ready once its pre-open and
 # open-as-draft gates read green.
-# The composed body lives in a delimited region (compose_managed, between the
-# gc:pr-summary markers), so an adoption re-splices a fresh region while keeping
-# text an operator or a later arm (pr-stack) added; the region writes its own
-# `## Summary` heading, so a stored pr_summary that repeats one is de-duplicated.
+# The PR's title and body come from `gctk pr compose`, which composes them from
+# the anchor. The body's managed region sits between the gc:pr-summary markers,
+# so an adoption rewrites a fresh region while keeping text an operator or a
+# later arm (pr-stack) added.
 # Args: [--deadline <epoch-secs>] [--cursor <file>] pace the walk (pace-lib.sh):
 # anchors gate-ensure last recorded as settled, and whose rows carry no hold
 # this arm applies, are visited first and the rest after them, each group in a
@@ -74,12 +74,41 @@ PR_STATUS_LABEL="$SCRIPTS_DIR/pr-status-label.sh"
 # superseded notice go through it so they carry the city's mark, which is what
 # keeps pr-facts.sh from reading them back as feedback.
 PR_POST="$SCRIPTS_DIR/pr-post.sh"
-# The managed `## Summary` region (markers, composer and splice helpers) and the
-# title composer (cc_title), shared with pr-stack.sh so an opened PR and a
-# post-open refresh never diverge.
-# shellcheck source=pr-summary-region.sh
-. "${GC_PR_SUMMARY_LIB:-$SCRIPTS_DIR/pr-summary-region.sh}" \
-  || { echo "$PROG: cannot source pr-summary-region.sh beside this script" >&2; exit 1; }
+# The PR's title and body are composed by `gctk pr compose`, which pr-stack.sh
+# asks too, so an opened PR and a post-open refresh never diverge. The binary is
+# the one gctk-resolve.sh's chain names, read once a pass needs it.
+# shellcheck source=gctk-resolve.sh
+. "$SCRIPTS_DIR/gctk-resolve.sh" || { echo "$PROG: cannot source gctk-resolve.sh beside this script" >&2; exit 1; }
+
+# Every gate through the draft stage at <head_oid>, `<name>\t<phase>` per line.
+# Each anchor's gates are resolved once, and that one answer feeds its create
+# gate, its draft decision and the body composed for it. Non-zero when the
+# resolver fails: an unreadable set is never an empty one, and the caller holds.
+prs_resolve_phased() { # <check_set> <head_oid>
+  "$REVIEW_CHECKS" --resolve --check-set "${1:-}" --through open-as-draft --with-phase --at "${2:-}" 2>/dev/null
+}
+
+# One phase band of a resolved set: the names tagged <phase>, one per line.
+prs_band() { # <phased> <phase>
+  printf '%s\n' "${1:-}" | awk -F'\t' -v p="$2" '$2 == p { print $1 }'
+}
+
+# The answer of `gctk pr compose <id> <flags>`: one JSON object carrying the
+# title, the body and each section's outcome. Non-zero, printing nothing, when no
+# binary is there to ask or it composed nothing; the caller holds the anchor, and
+# a pass with no binary says so once.
+GCTK=""; GCTK_MISSING=""
+compose_pr() { # <id> <gctk pr compose flags...>
+  if [ -z "$GCTK" ]; then
+    [ -z "$GCTK_MISSING" ] || return 1
+    if ! GCTK=$(gctk_path); then
+      GCTK_MISSING=1
+      echo "$PROG: no gctk binary to compose a PR with (GCTK_BIN='${GCTK_BIN:-}'); no PR is opened or adopted with an open body this pass" >&2
+      return 1
+    fi
+  fi
+  "$GCTK" pr compose "$@" </dev/null
+}
 
 command -v gh >/dev/null 2>&1 || exit 0
 
@@ -277,98 +306,68 @@ api_head() { # <branch> -> sha from the API, or nothing
   gh api --hostname "$ORIGIN_HOST" "repos/$ORIGIN_REPO/commits/$1" 2>/dev/null | jq -r '.sha // empty' 2>/dev/null
 }
 
-# --- PR body: one delimited region, composed once and re-splice-able ------------
-# The markers (PRS_MARK_OPEN/CLOSE), the composer (compose_managed) and the region
-# read-modify-write helpers (prs_current_section, prs_marker_state,
-# prs_splice_in_place, prs_establish_region) live in pr-summary-region.sh, sourced
-# above and shared with pr-stack.sh so an opened body and a post-open refresh never
-# diverge.
-
-# Refresh an OPEN PR's published body from the anchor's current pr_summary before
-# the adoption flip, the read-modify-write pr-stack.sh uses: read the body
-# \r-stripped, then bring the managed region current. A well-formed marker pair has
-# what is between the markers replaced, leaving operator edits and pr-stack's section
-# in place. A markerless body carrying the shape a create wrote before these markers
-# (## Summary … ## Refinery handoff) has the region established over that legacy
-# prefix, keeping whatever follows — the stale-body case adoption exists to close. A
-# body with no managed region — empty, hand-written, or a malformed marker shape —
-# has no stale MANAGED summary to republish and is adopted as it stands. 0 = current,
-# refreshed, established, or carries no managed region; proceed to the flip. 1 = the
-# reworked summary could not be proven onto a MANAGED body: a missing head oid, an
-# unreadable or unparseable body, a scratch or compose failure, or a failed edit —
-# hold at pre_open_gate and retry rather than flip a managed body known to be behind,
-# the miss the refresh exists to close. <phased> is the anchor's gate set resolved
-# at <head_oid>, which the composed handoff bullets name.
-refresh_pr_body() { # <id> <num> <row> <branch> <target> <head_oid> <phased>
-  local id="$1" num="$2" row="$3" branch="$4" target="$5" head_oid="$6" phased="${7:-}"
-  local summary desc checkset body_json CUR SECTION NEW ms rc
+# Refresh an OPEN PR's published body from the anchor before the adoption flip,
+# so a rework's restamped summary reaches the merge surface: read the body, then
+# have `gctk pr compose --opening` bring its managed region current. It writes the
+# region between a well-formed marker pair, leaving operator edits and pr-stack's
+# section in place, and marks one over a body a create wrote before the markers
+# existed (## Summary … ## Refinery handoff), keeping whatever follows. A body
+# with no managed region, empty, hand-written or with its markers cut into
+# another shape, has no stale managed summary to republish and is adopted as it
+# stands. 0 = current, refreshed, or carries no managed region; proceed to the
+# flip. 1 = the summary could not be proven onto a managed body: a missing head
+# oid, an unreadable or unparseable body, a scratch or compose failure, or a
+# failed edit. The anchor holds at pre_open_gate for a retry rather than flip a
+# body known to be behind. <phased> is the anchor's gate set resolved at
+# <head_oid>, which the composed handoff facts name.
+refresh_pr_body() { # <id> <num> <head_oid> <phased>
+  local id="$1" num="$2" head_oid="$3" phased="${4:-}"
+  local body_json CUR NEW composed outcome rc
   if [ -z "$head_oid" ]; then
     echo "$PROG: $id PR#$num head oid unknown from the PR row; body refresh cannot be composed, anchor stays pre_open_gate (retry next pass)" >&2
     return 1
   fi
-  summary=$(printf '%s' "$row" | jq -r '.metadata.pr_summary // empty')
-  [ -n "$(printf '%s' "$summary" | tr -d '[:space:]')" ] || summary=""
-  desc=$(printf '%s' "$row" | jq -r '.description // empty')
-  checkset=$(printf '%s' "$row" | jq -r '.metadata.check_set // ""')
   body_json=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" --json body </dev/null 2>/dev/null); rc=$?
   if [ "$rc" -ne 0 ] || [ -z "$body_json" ]; then
     echo "$PROG: $id PR#$num body unreadable; anchor stays pre_open_gate (retry next pass)" >&2
     return 1
   fi
-  CUR=$(mktemp "${TMPDIR:-/tmp}/gctk-pr-open-cur.XXXXXX") \
-    || { echo "$PROG: $id PR#$num scratch file unavailable; anchor stays pre_open_gate (retry next pass)" >&2; return 1; }
-  SECTION=$(mktemp "${TMPDIR:-/tmp}/gctk-pr-open-sec.XXXXXX") \
-    || { rm -f "$CUR"; echo "$PROG: $id PR#$num scratch file unavailable; anchor stays pre_open_gate (retry next pass)" >&2; return 1; }
-  NEW=$(mktemp "${TMPDIR:-/tmp}/gctk-pr-open-new.XXXXXX") \
-    || { rm -f "$CUR" "$SECTION"; echo "$PROG: $id PR#$num scratch file unavailable; anchor stays pre_open_gate (retry next pass)" >&2; return 1; }
-  # Read the current body into scratch and compose its replacement. A payload that
-  # slipped past the read check but does not parse, or a compose that writes
-  # nothing, is a render failure that holds rather than flips a body it could not
-  # rebuild. The parse is proven first — jq is the last stage of its own pipeline,
-  # so its status stands without pipefail — then the body is spliced as before.
+  # A payload that slipped past the read check but does not parse is a body this
+  # arm cannot rebuild, so it holds rather than flips. jq is the last stage of
+  # its own pipeline, so its status stands without pipefail.
   if ! printf '%s' "$body_json" | jq -e . >/dev/null 2>&1; then
-    rm -f "$CUR" "$SECTION" "$NEW"
     echo "$PROG: $id PR#$num published body did not parse; anchor stays pre_open_gate (retry next pass)" >&2
     return 1
   fi
-  printf '%s' "$body_json" | jq -r '.body // ""' 2>/dev/null | tr -d '\r' > "$CUR"
-  if ! compose_managed "$summary" "$desc" "$id" "$branch" "$target" "$checkset" "$head_oid" "" "" open "$phased" > "$SECTION" \
-     || [ ! -s "$SECTION" ]; then
-    rm -f "$CUR" "$SECTION" "$NEW"
-    echo "$PROG: $id PR#$num refreshed body could not be composed; anchor stays pre_open_gate (retry next pass)" >&2
-    return 1
-  fi
-  prs_marker_state "$CUR"; ms=$?
-  if [ "$ms" = 0 ]; then
-    # A well-formed region: replace what is between the markers, no-op when the
-    # render already matches so no edit is spent.
-    if [ "$(prs_current_section "$CUR")" = "$(cat "$SECTION")" ]; then
-      rm -f "$CUR" "$SECTION" "$NEW"; return 0
-    fi
-    prs_splice_in_place "$CUR" "$SECTION" "$NEW"
-  elif [ "$ms" = 1 ] && prs_establish_region "$CUR" "$SECTION" "$NEW"; then
-    # A markerless body carrying the shape a create wrote before these markers
-    # (## Summary … ## Refinery handoff) IS the stale-body case adoption exists to
-    # close: establish the region over that legacy prefix, keeping what follows.
-    # prs_establish_region fails for a markerless body WITHOUT that prefix, which falls
-    # through to the leave-alone arm below.
-    :
-  else
-    # No managed region to refresh: the markers are absent and the body is not a
-    # legacy managed prefix (an empty or hand-written body), or they are malformed
-    # (a lone marker, a second pair). There is no stale MANAGED summary to
-    # republish, and rewriting a body the arm did not compose would clobber an
-    # operator's own text, so adopt it as it stands.
-    rm -f "$CUR" "$SECTION" "$NEW"
-    echo "$PROG: $id PR#$num body carries no managed gc:pr-summary region to refresh; adopted as it stands"
-    return 0
-  fi
-  if gh pr edit "$num" --repo "$ORIGIN_REPO_Q" --body-file "$NEW" </dev/null >/dev/null 2>&1; then
-    rm -f "$CUR" "$SECTION" "$NEW"
+  CUR=$(mktemp "${TMPDIR:-/tmp}/gctk-pr-open-cur.XXXXXX") \
+    || { echo "$PROG: $id PR#$num scratch file unavailable; anchor stays pre_open_gate (retry next pass)" >&2; return 1; }
+  NEW=$(mktemp "${TMPDIR:-/tmp}/gctk-pr-open-new.XXXXXX") \
+    || { rm -f "$CUR"; echo "$PROG: $id PR#$num scratch file unavailable; anchor stays pre_open_gate (retry next pass)" >&2; return 1; }
+  printf '%s' "$body_json" | jq -r '.body // ""' 2>/dev/null > "$CUR"
+  composed=$(compose_pr "$id" --head "$head_oid" --opening --gates "$phased" --sections summary --body-file "$CUR")
+  outcome=$(printf '%s' "$composed" | jq -r '.summary // empty' 2>/dev/null)
+  case "$outcome" in
+    current)
+      rm -f "$CUR" "$NEW"; return 0 ;;
+    unmanaged)
+      # Rewriting a body the arm did not compose would clobber an operator's own
+      # text, so it is adopted as it stands.
+      rm -f "$CUR" "$NEW"
+      echo "$PROG: $id PR#$num body carries no managed gc:pr-summary region to refresh; adopted as it stands"
+      return 0 ;;
+    written)
+      printf '%s' "$composed" | jq -j '.body // ""' > "$NEW" ;;
+    *)
+      rm -f "$CUR" "$NEW"
+      echo "$PROG: $id PR#$num refreshed body could not be composed; anchor stays pre_open_gate (retry next pass)" >&2
+      return 1 ;;
+  esac
+  if [ -s "$NEW" ] && gh pr edit "$num" --repo "$ORIGIN_REPO_Q" --body-file "$NEW" </dev/null >/dev/null 2>&1; then
+    rm -f "$CUR" "$NEW"
     echo "$PROG: $id PR#$num body refreshed from the anchor's current pr_summary"
     return 0
   fi
-  rm -f "$CUR" "$SECTION" "$NEW"
+  rm -f "$CUR" "$NEW"
   echo "$PROG: $id PR#$num body refresh failed to land; anchor stays pre_open_gate (retry next pass)" >&2
   return 1
 }
@@ -452,11 +451,11 @@ while IFS= read -r tagged; do
           echo "$PROG: $id PR#$CERT_NUM head oid unknown from the PR row; its gates cannot be resolved nor its body composed, anchor stays pre_open_gate (retry next pass)" >&2
           skipped=$((skipped + 1)); continue
         fi
-        if ! APHASED=$(prs_resolve_phased "$acs" "$CERT_HEAD_OID" "$REVIEW_CHECKS"); then
+        if ! APHASED=$(prs_resolve_phased "$acs" "$CERT_HEAD_OID"); then
           echo "$PROG: $id PR#$CERT_NUM gate set unreadable at its head ${CERT_HEAD_OID:0:8}; anchor stays pre_open_gate (retry next pass)" >&2
           skipped=$((skipped + 1)); continue
         fi
-        if ! refresh_pr_body "$id" "$CERT_NUM" "$row" "$branch" "$target" "$CERT_HEAD_OID" "$APHASED"; then
+        if ! refresh_pr_body "$id" "$CERT_NUM" "$CERT_HEAD_OID" "$APHASED"; then
           skipped=$((skipped + 1)); continue
         fi
         # Record whether this adopted PR is a draft the refinery owns the ready-flip
@@ -545,7 +544,7 @@ while IFS= read -r tagged; do
   # whole set is what the published body names. One answer feeds all three, so
   # the gate, the draft decision and the body cannot disagree. An unreadable set
   # holds.
-  if ! PHASED=$(prs_resolve_phased "$checkset" "$head_oid" "$REVIEW_CHECKS"); then
+  if ! PHASED=$(prs_resolve_phased "$checkset" "$head_oid"); then
     echo "$PROG: $id branch '$branch' gate set unreadable at ${head_oid:0:8}; held"
     held=$((held + 1)); continue
   fi
@@ -599,26 +598,26 @@ GATES
   fi
 
   # --- create, pinned; a draft when an open-as-draft check gates the PR ----------
-  title=$(printf '%s' "$row" | jq -r '.title // empty')
-  kind=$(printf '%s' "$row" | jq -r '.issue_type // empty')
-  desc=$(printf '%s' "$row" | jq -r '.description // empty')
-  # The summary is the polecat's account of the diff, carried in pr_summary by
-  # the refinery handoff. The anchor's description is dispatch text — what the
-  # work was asked to do, addressed to the agent that did it and never revised
-  # once the diff exists — so it is demoted to a collapsed section and stands
-  # in as the summary only when the handoff carried no account. Whitespace is
-  # the absent case, as it is for check_set above.
-  summary=$(printf '%s' "$row" | jq -r '.metadata.pr_summary // empty')
-  [ -n "$(printf '%s' "$summary" | tr -d '[:space:]')" ] || summary=""
+  # The title and body are composed from the anchor at the head the gate judged.
+  # The title carries the bead id, so a PR is traceable to its anchor, behind the
+  # conventional-commit type the repository's title check needs. The body is the
+  # marked summary region: the polecat's account of the diff, its pr_summary,
+  # with the dispatch text demoted below it, and the handoff facts, which name
+  # the gates this one answer resolved and the closed PR this one supersedes.
+  if ! COMPOSED=$(compose_pr "$id" --head "$head_oid" --opening --gates "$PHASED" --sections summary \
+       ${SUP_NUM:+--supersedes "$SUP_NUM" --superseded-head "$SUP_HEAD"}) \
+     || [ "$(printf '%s' "$COMPOSED" | jq -r '.summary // empty' 2>/dev/null)" != written ]; then
+    echo "$PROG: $id branch '$branch' PR title and body could not be composed; skip (retry next pass)" >&2
+    skipped=$((skipped + 1)); continue
+  fi
+  pr_title=$(printf '%s' "$COMPOSED" | jq -r '.title // empty')
   BODY=$(mktemp "${TMPDIR:-/tmp}/gctk-pr-open.XXXXXX") || { echo "$PROG: cannot create a temp file for the PR body" >&2; exit 1; }
-  {
-    printf '%s\n' "$PRS_MARK_OPEN"
-    compose_managed "$summary" "$desc" "$id" "$branch" "$target" "$checkset" "$head_oid" "$SUP_NUM" "$SUP_HEAD" open "$PHASED"
-    printf '%s\n' "$PRS_MARK_CLOSE"
-  } > "$BODY"
-  # The bead id stays in the title so a PR is traceable to its anchor; the
-  # type prefix goes ahead of it so the conventional-commit check passes.
-  pr_title="$(cc_title "$title" "$kind") ($id)"
+  printf '%s' "$COMPOSED" | jq -j '.body // ""' > "$BODY"
+  if [ -z "$pr_title" ] || [ ! -s "$BODY" ]; then
+    rm -f "$BODY"
+    echo "$PROG: $id branch '$branch' composed no PR title or body (an untitled anchor?); skip (retry next pass)" >&2
+    skipped=$((skipped + 1)); continue
+  fi
   # Open as a DRAFT when the check_set names an open-as-draft check (demo): that
   # check runs against the open PR, so the PR must exist for a preview to deploy,
   # but it is not surfaced for human review until the draft->ready arm below flips
