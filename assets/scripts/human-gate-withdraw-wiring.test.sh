@@ -107,7 +107,7 @@ else
   esac
 fi
 
-if grep -nE 'escalate\.sh|visit-close\.sh' "$FRAG"; then
+if grep -n 'visit-close\.sh' "$FRAG"; then
   bad "the fragment names a retired writer"
 else
   ok "the fragment names human-gate.sh alone"

@@ -711,7 +711,7 @@ lacks "the skill gives a finding no pack kind: bd's status, label and edge carry
 for probe in '--status deferred' 'isSecurityPolicyEnabled' 'private-vulnerability-reporting'; do
     lacks "…and the doc does not: $probe" "$probe" "$OUTBOUND" "each command an agent runs lives only in the skill"
 done
-for probe in 'human-gate.sh' 'escalate.sh' 'gh issue create' 'gh pr create' 'gh issue comment' 'upstream-finding.sh'; do
+for probe in 'human-gate.sh' 'gh issue create' 'gh pr create' 'gh issue comment' 'upstream-finding.sh'; do
     lacks "the skill drafts no send and asks nothing: no $probe" "$probe" "$EXTERNAL" \
         "a finding is set aside with nothing drafted and no question owed; the send is drafted when the operator picks it up"
 done

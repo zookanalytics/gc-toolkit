@@ -244,7 +244,7 @@ store, PR posts with their provenance mark, the gh write guard under its
 warrant, and the seed audit.
 
 The trade: per-site read-backs give way to each write's own exit
-(tk-1tfzr71.11), and step-close and the hand-off shims give way to native calls.
+(tk-1tfzr71.11), and step-close gives way to a native call.
 The wrapper that provisions an agent's home stays under its warrant, because
 `gc worktree` binds a tree to one bead and a home outlives every bead.
 
@@ -319,9 +319,6 @@ home.
 A compatibility piece carries a dated debt and the trigger that retires it,
 and the change that fires the trigger deletes it.
 
-- The hand-offs at `escalate.sh` and `escalation-rig.sh`, 241 lines with their
-  test. Trigger: no open step bead names them, and no session started before the
-  cutover still runs. Carried by tk-kvdomjb.
 - `molecule-hold.sh`, for step text poured before `run-cancel.sh`, 168 lines
   with its test. Trigger: no open step bead names it. Carried by tk-1tfzr71.39.
 - Readers of legacy shapes, which "legacy" names 31 times across 15 runtime
@@ -363,7 +360,6 @@ shows its measured net instead.
 
 | Bead | What it removes | Size | Waits on |
 |---|---|---|---|
-| tk-kvdomjb | the hand-offs at `escalate.sh` and `escalation-rig.sh` | 241 | its drain check |
 | tk-1tfzr71.39 | step-close, the work-tree holder, the lease wrapper, `molecule-hold.sh` | 3,390 | tk-1tfzr71.12, then no open step naming them |
 
 ### 3. The lanes
@@ -386,7 +382,7 @@ convoy lands only after the operator approves its design.
 | B | tk-1tfzr71.24 | the board's second data plane and pack-stamped rows, verbs that only call Gas City | partial files |
 | B | tk-1tfzr71.25 | registry entries, wrapper lint rules, parity tests, the `board` stub verb | 1,488 |
 
-The whole files that tk-kvdomjb and the migration members name come to 60k of
+The whole files that the migration members name come to 57k of
 the 202k between the baseline and the built-once estimate. Their partial
 rewrites carry more, chiefly the board, `gc-helm.sh`, the work and patrol
 formulas, deferred dispatch and the sign-off. The page's own items below carry
