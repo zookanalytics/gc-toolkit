@@ -440,8 +440,9 @@ through the sign-off's cases (the converse-settle step).
 
 ## At the sign-off
 
-Stop a copy of the UI that still runs, as one does when the operator rules that
-the change waits for a later sitting: `"$CONV/ui-copy.sh" stop --tree "$TREE"`.
+When the operator rules that the change waits for a later sitting, no hand-off
+or drop has stopped its copy of the UI. Stop it now:
+`"$CONV/ui-copy.sh" stop --tree "$TREE"`.
 
 Name the subject's wait on the change, `--waiting-on <the change>`, with the
 brief's own text as `--close-brief`. The sign-off finds the brief and the arm

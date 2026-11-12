@@ -26,11 +26,14 @@ command serves the reviewed commit's board on fixture data, with no city behind
 it (`services/helm/README.md`). The command that runs it is the rig's declared
 serve command, `ui_serve_command`, which the city sets among gc-toolkit's
 formula vars and which a live copy of the board runs too (`ui-copy.sh`). It
-runs from the worktree's root, and
-`gc formula show mol-rig-demo --rig gc-toolkit --json` prints it as that var's
-`rig_default`. Capture the board from the review workspace under the keepalive,
-as every capture runs, with the pack's `demo-screenshot.sh` and `SERVE` set to
-the declared command:
+runs from the worktree's root. Read it as that var's `rig_default`:
+
+```bash
+SERVE=$(gc formula show mol-rig-demo --rig gc-toolkit --json | jq -r '[.vars[] | select(.name == "ui_serve_command")][0].rig_default // empty')
+```
+
+Capture the board from the review workspace under the keepalive, as every
+capture runs, with the pack's `demo-screenshot.sh`:
 `demo-screenshot.sh page --script board.md --serve "$SERVE" --port 0 --cwd
 <worktree> --output board.png`.
 
