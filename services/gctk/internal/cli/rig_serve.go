@@ -48,8 +48,11 @@ the copy's leader.
 
 It prints one JSON line on stdout: the state, the checkout, the copy's port, its
 address, empty when it has none, its log, the serve command's exit status once
-it has ended, and, in reason and detail, why. rig's own lines, and the last
-lines of the log of a copy that failed or ended, go to stderr.
+it has ended, and, in reason and detail, why. A start that found no copy
+running and ran one also prints "started": true, so its caller knows the copy
+is its own to stop. A start that found the copy running prints no started key.
+rig's own lines, and the last lines of the log of a copy that failed or ended,
+go to stderr.
 
   state          exit  meaning
   running        0     the copy runs and answers on its port as its own

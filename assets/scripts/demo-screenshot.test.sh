@@ -111,10 +111,12 @@ exec "$@"
 SBX
 # gctk stands in for gctk rig serve: --check answers with a copy running on
 # $COPY_PORT once one was started, or when COPY_RUNNING is set, --command starts
-# one or reports the one that runs, or fails as a copy whose serve command ended
-# when COPY_FAIL is set, or as a checkout whose copy runs another command when
-# COPY_OTHER is set, and --stop ends it. lsof names the copy's process as the one listening on its
-# port, working in the checkout it was started from. Each logs to $CALLLOG.
+# one and says it started it, or reports the one that runs, or one that another
+# caller started as this start ran when COPY_FOUND is set, or fails as a copy
+# whose serve command ended when COPY_FAIL is set, or as a checkout whose copy
+# runs another command when COPY_OTHER is set, and --stop ends it. lsof names the
+# copy's process as the one listening on its port, working in the checkout it
+# was started from. Each logs to $CALLLOG.
 cat >"$BIN/gctk" <<'GCTK'
 #!/usr/bin/env bash
 printf 'gctk %s (in %s) GCTK_SCRIPTS_DIR=%s\n' "$*" "$(pwd)" "${GCTK_SCRIPTS_DIR:-}" >>"${CALLLOG:?}"
@@ -132,8 +134,12 @@ case "$*" in
     if [ -n "${COPY_FAIL:-}" ]; then
       printf '{"state":"failed","reason":"serve-exited","checkout":"%s","detail":"the serve command ended before the copy answered"}\n' "$(pwd)"; exit 1
     fi
+    if [ -n "${COPY_RUNNING:-}" ] || [ -n "${COPY_FOUND:-}" ]; then
+      [ -n "${COPY_RUNNING:-}" ] || pwd >"$COPY_STATE"
+      printf '{"state":"running","checkout":"%s","port":%s,"address":""}\n' "$(pwd)" "$port"; exit 0
+    fi
     pwd >"$COPY_STATE"
-    printf '{"state":"running","checkout":"%s","port":%s,"address":""}\n' "$(pwd)" "$port"; exit 0 ;;
+    printf '{"state":"running","checkout":"%s","port":%s,"address":"","started":true}\n' "$(pwd)" "$port"; exit 0 ;;
   "rig serve --stop") : >"$COPY_STATE"; printf '{"state":"stopped","checkout":"%s"}\n' "$(pwd)"; exit 0 ;;
 esac
 exit 2
@@ -392,8 +398,8 @@ hasnt "[screenshot]" "$(calls)" "and nothing is captured"
 echo "# page: a --serve command's app is served as a copy that gctk rig serve runs from --cwd, and the engine captures the copy"
 out="$(run -- page --script "$SCRIPT" --serve 'go run ./cmd/helm-fixture' --cwd "$SITE" --output "$OUT")"; rc=$?
 eq "$rc" 0 "a --serve capture exits 0"
-has "gctk rig serve --check (in $SITE)" "$(calls)" "it asks for the checkout's copy first"
 has "gctk rig serve --command go run ./cmd/helm-fixture (in $SITE) GCTK_SCRIPTS_DIR=$(dirname "$SUT")" "$(calls)" "it starts a copy from --cwd with the command, naming the scripts that hold the sandbox"
+has "gctk rig serve --command" "$(grep 'gctk rig serve' "$CALLLOG" | head -n 1)" "the start is its first call to gctk rig serve: no --check before it decides whose the copy is"
 has "[--base-url] [http://127.0.0.1:50200/]" "$(calls)" "the engine captures the copy at its loopback port"
 hasnt "[--serve]" "$(calls)" "and is given no --serve of its own"
 has "engine-env PORT=unset" "$(calls)" "nor a PORT"
@@ -406,6 +412,11 @@ eq "$rc" 0 "a capture of a checkout whose copy runs the command exits 0"
 has "gctk rig serve --command npm run dev (in $SITE)" "$(calls)" "it asks the start, which reports the copy that runs"
 has "[--base-url] [http://127.0.0.1:50200/]" "$(calls)" "it captures that copy"
 hasnt "rig serve --stop" "$(calls)" "and leaves it running"
+has "already ran from $SITE, so the capture takes it and leaves it running" "$out" "it says it takes a copy it did not start"
+out="$(run COPY_FOUND=1 -- page --script "$SCRIPT" --serve 'npm run dev' --cwd "$SITE" --output "$OUT")"; rc=$?
+eq "$rc" 0 "a capture whose start reports a copy another caller started, though none ran before it, exits 0"
+has "[--base-url] [http://127.0.0.1:50200/]" "$(calls)" "it captures that copy"
+hasnt "rig serve --stop" "$(calls)" "and leaves it running, since its start did not run it"
 out="$(run COPY_RUNNING="$SITE" COPY_OTHER=1 -- page --script "$SCRIPT" --serve 'npm run dev' --cwd "$SITE" --output "$OUT")"; rc=$?
 eq "$rc" 1 "a capture of a checkout whose copy runs another command exits 1"
 has "the app's copy did not start: other-command" "$out" "it says why"

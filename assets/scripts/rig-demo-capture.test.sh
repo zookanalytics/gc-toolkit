@@ -97,11 +97,13 @@ echo "node stub: unexpected call: $*" >&2; exit 97
 NODE
 # gctk stands in for gctk rig serve: --check answers with a copy running on
 # 50200 once one was started, or when COPY_RUNNING names its checkout,
-# --command starts one or reports the one that runs, or fails as a copy that did
-# not answer when COPY_FAIL is set, or as a checkout whose copy runs another
-# command when COPY_OTHER is set, and --stop ends it. lsof names the copy's process as the one
-# listening on its port, working in the checkout it was started from. Each logs
-# to $RUNLOG. git and jq read the checkout and the copy's report.
+# --command starts one and says it started it, or reports the one that runs, or
+# one that another caller started as this start ran when COPY_FOUND is set, or
+# fails as a copy that did not answer when COPY_FAIL is set, or as a checkout
+# whose copy runs another command when COPY_OTHER is set, and --stop ends it.
+# lsof names the copy's process as the one listening on its port, working in the
+# checkout it was started from. Each logs to $RUNLOG. git and jq read the
+# checkout and the copy's report.
 cat >"$SBX/gctk" <<'GCTK'
 #!/usr/bin/env bash
 printf 'gctk %s (in %s)\n' "$*" "$(pwd)" >>"${RUNLOG:?}"
@@ -118,8 +120,12 @@ case "$*" in
     if [ -n "${COPY_FAIL:-}" ]; then
       printf '{"state":"failed","reason":"not-answering","checkout":"%s","detail":"the copy did not answer"}\n' "$(pwd)"; exit 1
     fi
+    if [ -n "${COPY_RUNNING:-}" ] || [ -n "${COPY_FOUND:-}" ]; then
+      [ -n "${COPY_RUNNING:-}" ] || pwd >"$COPY_STATE"
+      printf '{"state":"running","checkout":"%s","port":50200,"address":""}\n' "$(pwd)"; exit 0
+    fi
     pwd >"$COPY_STATE"
-    printf '{"state":"running","checkout":"%s","port":50200,"address":""}\n' "$(pwd)"; exit 0 ;;
+    printf '{"state":"running","checkout":"%s","port":50200,"address":"","started":true}\n' "$(pwd)"; exit 0 ;;
   "rig serve --stop") : >"$COPY_STATE"; printf '{"state":"stopped","checkout":"%s"}\n' "$(pwd)"; exit 0 ;;
 esac
 exit 2
@@ -149,10 +155,11 @@ RUNLOG="$TMPD/run.log"
 # run [KEY=VAL ...] -- <sut args...>; per-call knobs, combined stdout+stderr.
 # $RUN_PATH replaces the sandbox directory on PATH for one call.
 run() {
-  local lint_rc=0 run_rc=0 nofile="" empty="" report="" failed="" late_rc=0 copy_running="" copy_fail="" copy_other=""
+  local lint_rc=0 run_rc=0 nofile="" empty="" report="" failed="" late_rc=0 copy_running="" copy_found="" copy_fail="" copy_other=""
   while [ $# -gt 0 ]; do
     case "$1" in
       COPY_RUNNING=*) copy_running="${1#*=}" ;;
+      COPY_FOUND=*) copy_found="${1#*=}" ;;
       COPY_FAIL=*) copy_fail="${1#*=}" ;;
       COPY_OTHER=*) copy_other="${1#*=}" ;;
       LINT_RC=*)   lint_rc="${1#*=}" ;;
@@ -171,7 +178,7 @@ run() {
   ( cd "$TMPD" && env -i PATH="${RUN_PATH-$SBX}:$FARM" RUNLOG="$RUNLOG" SPRINTSHOW_BIN="$STUB" SANDBOX_LOG="$SANDBOX_LOG" \
       LINT_RC="$lint_rc" RUN_RC="$run_rc" RUN_NOFILE="$nofile" RUN_EMPTY="$empty" \
       RUN_REPORT="$report" RUN_FAILED="$failed" RUN_LATE_RC="$late_rc" \
-      GCTK_BIN="$SBX/gctk" COPY_STATE="$COPY_STATE" COPY_RUNNING="$copy_running" COPY_FAIL="$copy_fail" COPY_OTHER="$copy_other" \
+      GCTK_BIN="$SBX/gctk" COPY_STATE="$COPY_STATE" COPY_RUNNING="$copy_running" COPY_FOUND="$copy_found" COPY_FAIL="$copy_fail" COPY_OTHER="$copy_other" \
       bash "$SUT" "$@" 2>&1 )
 }
 
@@ -226,18 +233,24 @@ echo "# --serve: the app is served as a copy that gctk rig serve runs from --cwd
 out="$(run -- --script "$SCRIPT" --output "$OUT" --serve 'npm run dev' --no-narrate --cwd "$SITE")"; rc=$?
 ok "serve exits 0" "[ '$rc' = 0 ]"
 RL="$(cat "$RUNLOG")"
-has "gctk rig serve --check (in $SITE)" "$RL" "it asks for the checkout's copy first"
 has "gctk rig serve --command npm run dev (in $SITE)" "$RL" "it starts a copy from --cwd with the command"
+has "gctk rig serve --command" "$(grep 'gctk rig serve' "$RUNLOG" | head -n 1)" "the start is its first call to gctk rig serve: no --check before it decides whose the copy is"
 has "run $SCRIPT --mode walkthrough -o $OUT --base-url http://127.0.0.1:50200/" "$RL" "the engine records the copy at its loopback port"
 hasnt "--serve " "$RL" "and is given no --serve of its own"
 has "--no-narrate" "$RL" "no-narrate is forwarded"
-has "gctk rig serve --stop (in $SITE)" "$RL" "the capture stops the copy it started"
+has "gctk rig serve --stop (in $SITE)" "$RL" "the capture stops the copy its start reports it started"
 out="$(run COPY_RUNNING="$SITE" -- --script "$SCRIPT" --output "$OUT" --serve 'npm run dev' --cwd "$SITE")"; rc=$?
 ok "a capture of a checkout whose copy runs the command exits 0" "[ '$rc' = 0 ]"
 RL="$(cat "$RUNLOG")"
 has "gctk rig serve --command npm run dev (in $SITE)" "$RL" "it asks the start, which reports the copy that runs"
 has "--base-url http://127.0.0.1:50200/" "$RL" "the engine records that copy"
 hasnt "rig serve --stop" "$RL" "and leaves the running copy running"
+has "already ran from $SITE, so the capture takes it and leaves it running" "$out" "it says it takes a copy it did not start"
+out="$(run COPY_FOUND=1 -- --script "$SCRIPT" --output "$OUT" --serve 'npm run dev' --cwd "$SITE")"; rc=$?
+ok "a capture whose start reports a copy another caller started, though none ran before it, exits 0" "[ '$rc' = 0 ]"
+RL="$(cat "$RUNLOG")"
+has "--base-url http://127.0.0.1:50200/" "$RL" "the engine records that copy"
+hasnt "rig serve --stop" "$RL" "and the capture leaves it running, since its start did not run it"
 out="$(run COPY_RUNNING="$SITE" COPY_OTHER=1 -- --script "$SCRIPT" --output "$OUT" --serve 'npm run dev' --cwd "$SITE")"; rc=$?
 ok "a capture of a checkout whose copy runs another command exits 1" "[ '$rc' = 1 ]"
 has "the app's copy did not start: other-command" "$out" "it says why"

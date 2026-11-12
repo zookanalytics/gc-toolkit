@@ -118,10 +118,11 @@
 #                        rig serve` runs from the checkout <dir> sits in, with
 #                        no address, and sets DEMO_ENGINE_COPY_URL to the
 #                        loopback URL a capture's --base-url gives the engine.
-#                        A checkout has one copy. One that already runs the
+#                        A checkout has one copy, so captures from one checkout
+#                        run one after another. One that already runs the
 #                        command is the one captured, and it keeps running
 #                        after the capture, and one that runs another command
-#                        is refused. One this call starts is
+#                        is refused. One this call's start reports it ran is
 #                        demo_engine_copy_stop's to end. Returns 1, having said
 #                        why on stderr, when no copy of the command runs.
 #   demo_engine_copy_stop
@@ -781,26 +782,27 @@ EOF
 _demo_engine_gctk() { printf '%s\n' "${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"; }
 
 demo_engine_copy() {
-  local dir="${1:-}" command="${2:-}" gctk found rep state port
+  local dir="${1:-}" command="${2:-}" gctk rep state port
   DEMO_ENGINE_COPY_URL=""; DEMO_ENGINE_COPY_STOP=""
   gctk=$(_demo_engine_gctk)
   [ -x "$gctk" ] || { _demo_engine_say "no gctk binary at $gctk, which runs the copy a capture serves the app as; the gctk-build order publishes it, or set GCTK_BIN"; return 1; }
   [ -d "$dir" ] || { _demo_engine_say "'$dir' is not a directory to serve the app from"; return 1; }
-  # A copy that already runs belongs to whoever started it, so the capture
-  # leaves it running. The start reports it when it runs this command, and
-  # refuses it when it runs another, which would show another app.
-  found=$(cd "$dir" && "$gctk" rig serve --check 2>/dev/null | jq -r '.state // empty' 2>/dev/null)
-  case "$found" in
-    running|not-answering) _demo_engine_say "a copy (gctk rig serve) already runs from $dir; the capture takes it if it runs this command" ;;
-    *) _demo_engine_say "serving the app from $dir as a copy (gctk rig serve), which runs inside the sandbox" ;;
-  esac
+  _demo_engine_say "serving the app from $dir as a copy (gctk rig serve), which runs inside the sandbox"
   rep=$(cd "$dir" && GCTK_SCRIPTS_DIR="$DEMO_ENGINE_LIB_DIR" "$gctk" rig serve --command "$command")
   state=$(printf '%s' "$rep" | jq -r '.state // empty' 2>/dev/null)
   if [ "$state" != running ]; then
     _demo_engine_say "the app's copy did not start: $(printf '%s' "$rep" | jq -r '"\(.reason // "no reason"): \(.detail // "gctk rig serve answered nothing jq could read")"' 2>/dev/null)"
     return 1
   fi
-  case "$found" in running|not-answering) ;; *) DEMO_ENGINE_COPY_STOP=$dir ;; esac
+  # Whose the copy is comes from the start's own report. A copy it ran is this
+  # capture's to stop, and one it found running belongs to whoever started it,
+  # so it keeps running after the capture. The start refuses a copy that runs
+  # another command, which would show another app.
+  if [ "$(printf '%s' "$rep" | jq -r '.started // false' 2>/dev/null)" = true ]; then
+    DEMO_ENGINE_COPY_STOP=$dir
+  else
+    _demo_engine_say "a copy (gctk rig serve) of this command already ran from $dir, so the capture takes it and leaves it running"
+  fi
   port=$(printf '%s' "$rep" | jq -r '.port // empty' 2>/dev/null)
   case "$port" in
     ''|*[!0-9]*) _demo_engine_say "gctk rig serve reported no port for the app's copy"; return 1 ;;

@@ -85,8 +85,12 @@ type Report struct {
 	Address *string `json:"address,omitempty"`
 	Log     string  `json:"log,omitempty"`
 	// ExitCode is the serve command's exit status, for a copy that ended.
-	ExitCode *int   `json:"exit_code,omitempty"`
-	Detail   string `json:"detail,omitempty"`
+	ExitCode *int `json:"exit_code,omitempty"`
+	// Started is set on the report of a start that found no copy running and
+	// ran one, so its caller knows the copy is its own to stop. A start that
+	// found the copy running leaves it unset.
+	Started bool   `json:"started,omitempty"`
+	Detail  string `json:"detail,omitempty"`
 	// Tail holds the last lines of the serve command's log, for the caller's
 	// own lines. It is not part of the report.
 	Tail string `json:"-"`
@@ -472,10 +476,11 @@ var leaderCommand = func(dir string) (*exec.Cmd, error) {
 // Serve starts a copy of the checkout whose top is checkout, or reports the
 // copy of it that runs. A checkout has at most one copy, so a start for one
 // whose copy runs starts no other, and a start after a session wakes is safe to
-// repeat. A start whose command differs from the running copy's fails and
-// leaves that copy running. A start reports a copy once it answers on its port
-// and holds it, and stops a copy of its command that does not within the wait,
-// whether it ran the copy or found it.
+// repeat. The report of a start that ran the copy says so, in Started. A start
+// whose command differs from the running copy's fails and leaves that copy
+// running. A start reports a copy once it answers on its port and holds it, and
+// stops a copy of its command that does not within the wait, whether it ran the
+// copy or found it.
 func (c *Copies) Serve(checkout string, o ServeOpts) Report {
 	failed := func(reason, detail string) Report {
 		return Report{State: CopyFailed, Reason: reason, Checkout: checkout, Detail: detail}
@@ -541,7 +546,9 @@ func (c *Copies) Serve(checkout string, o ServeOpts) Report {
 		_ = rec.write("publish_command", o.PublishCommand)
 		_ = rec.write("address_pattern", o.AddressPattern)
 	}
-	return c.launch(rec, checkout, o)
+	rep := c.launch(rec, checkout, o)
+	rep.Started = rep.State == CopyRunning
+	return rep
 }
 
 // publishResult is how a publish ended.

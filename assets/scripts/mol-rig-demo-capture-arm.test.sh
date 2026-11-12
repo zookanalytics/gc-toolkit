@@ -195,9 +195,9 @@ exit 0
 NODE
 # gctk, at the city's build path, stands in for gctk rig serve: a start runs the
 # serve command through the library's sandbox, which GCTK_SCRIPTS_DIR names, as
-# the copy's leader does, keeps that profile, and reports the copy on 50200,
-# which --check then reports from the copy's checkout. lsof names the copy's
-# process as the one listening there, working in that checkout.
+# the copy's leader does, keeps that profile, and reports the copy on 50200 as
+# one it started, which --check then reports from the copy's checkout. lsof
+# names the copy's process as the one listening there, working in that checkout.
 mkdir -p "$CITY/.gc/services/gctk/bin"
 { printf '%s\n' "$SHEBANG"; cat; } > "$CITY/.gc/services/gctk/bin/gctk" <<'GCTK'
 printf '%s (in %s)\n' "$*" "$(pwd)" >> "$FAKE_DIR/gctk.argv"
@@ -210,7 +210,7 @@ case "$*" in
       || { printf '{"state":"failed","reason":"serve-exited"}\n'; exit 1; }
     cp "$FAKE_DIR/profile" "$FAKE_DIR/copy-profile"
     pwd > "$FAKE_DIR/copy-dir"
-    printf '{"state":"running","port":50200}\n' ;;
+    printf '{"state":"running","port":50200,"started":true}\n' ;;
   "rig serve --stop") rm -f "$FAKE_DIR/copy-dir"; printf '{"state":"stopped"}\n' ;;
 esac
 exit 0

@@ -1,6 +1,7 @@
 package rig
 
 import (
+	"encoding/json"
 	"errors"
 	"net"
 	"os"
@@ -263,6 +264,23 @@ func TestServeRunsTheCommandInTheSandboxFromTheCheckoutOnAPortOfItsOwn(t *testin
 		t.Errorf("a second start ran a second copy: port %d (was %d), leader %d (was %d), served %q",
 			again.Port, r.Port, f.leader(f.repo), leader, f.lines("served"))
 	}
+	// The start that ran the copy says so, and one that found it running does
+	// not, so a caller stops only a copy its own start ran.
+	if !r.Started || again.Started {
+		t.Errorf("started = %v on the start that ran the copy and %v on the one that found it, want true and false", r.Started, again.Started)
+	}
+	for _, c := range []struct {
+		rep  Report
+		want bool
+	}{{r, true}, {again, false}} {
+		raw, err := json.Marshal(c.rep)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Contains(string(raw), `"started":true`); got != c.want {
+			t.Errorf("the report %s carries \"started\":true = %v, want %v", raw, got, c.want)
+		}
+	}
 	if c := f.copies.Check(f.repo); c.State != CopyRunning || c.Port != r.Port {
 		t.Errorf("check = %s on %d, want running on %d", c.State, c.Port, r.Port)
 	}
@@ -337,6 +355,9 @@ func TestServePublishesOnlyWhenAskedAndTiesThePublisherToTheCopy(t *testing.T) {
 		t.Errorf("a start did not publish the copy again: port %d, address %q, leader %d (was %d), published %q",
 			again.Port, address(again), f.leader(f.repo), leader, f.lines("published"))
 	}
+	if again.Started {
+		t.Error("a start that published a running copy again says it ran the copy")
+	}
 	_, pub = f.rec(f.repo).publisher()
 	f.copies.Stop(f.repo)
 	if !groupGone(leader) || syscall.Kill(pub, 0) == nil {
@@ -374,6 +395,30 @@ func TestServeACopyThatEndsTakesItsPublishCommandWithIt(t *testing.T) {
 	mustRun(t, r)
 	if f.leader(f.repo) == leader {
 		t.Error("the new copy runs under the old leader's pid")
+	}
+	if !r.Started {
+		t.Error("the start that ran a new copy in place of the one that ended does not say it started it")
+	}
+	f.copies.Stop(f.repo)
+}
+
+// Two starts at once find no copy running, and the one whose claim of the
+// record wins runs the copy. The other reports that copy, so exactly one says
+// it started it.
+func TestServeTwoStartsAtOnceRunOneCopyAndOneSaysItStartedIt(t *testing.T) {
+	f := newServeFixture(t)
+	reps := make(chan Report, 2)
+	for i := 0; i < 2; i++ {
+		go func() { reps <- f.copies.Serve(f.repo, f.opts("exec python3 serve.py")) }()
+	}
+	a, b := <-reps, <-reps
+	mustRun(t, a)
+	mustRun(t, b)
+	if a.Port != b.Port || len(f.lines("served")) != 1 {
+		t.Errorf("two starts at once ran two copies: ports %d and %d, served %q", a.Port, b.Port, f.lines("served"))
+	}
+	if a.Started == b.Started {
+		t.Errorf("started = %v and %v, want exactly one start to say it ran the copy", a.Started, b.Started)
 	}
 	f.copies.Stop(f.repo)
 }
