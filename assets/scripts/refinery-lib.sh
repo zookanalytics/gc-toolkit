@@ -193,6 +193,40 @@ refinery_gate_dir() {
   printf '%s/gc-refinery-gate\n' "$common"
 }
 
+# refinery_gate_verdict <home> <head> — whether the rig's last gate
+# (refinery-gate.sh) cleared <head> to be recorded as the head the refinery
+# validated. The gate's job names the head it ran at in its log's
+# `GATE AT <head>` line and ends the log with its verdict, and
+# refinery-pre-existing.sh adds `<check> <head>` to the record's `tracked` file
+# for each failure it tracks. 0 when the gate finished at <head> and passed, or
+# failed only checks with a failure tracked at <head>, the landing the patrol's
+# handle-failures step lets go ahead. Non-zero otherwise, with GATE_VERDICT
+# saying why: no gate finished, the last one ran at another head, it was cut
+# short, or a check it failed has no failure tracked.
+# shellcheck disable=SC2034  # GATE_VERDICT is read by the scripts that source this
+refinery_gate_verdict() {
+  local gate rc at last item check
+  GATE_VERDICT=""
+  gate=$(refinery_gate_dir "$1") || { GATE_VERDICT="no repository at $1"; return 1; }
+  rc=$(tr -d '[:space:]' < "$gate/rc" 2>/dev/null) || rc=""
+  [ -n "$rc" ] || { GATE_VERDICT="no gate has finished in $gate"; return 1; }
+  at=$(sed -n 's/^GATE AT //p' "$gate/log" 2>/dev/null | head -n 1)
+  [ "$at" = "$2" ] || { GATE_VERDICT="the last gate ran at ${at:-a head it did not name}, not at $2"; return 1; }
+  last=$(tail -n 1 "$gate/log" 2>/dev/null)
+  case "$rc:$last" in
+    "0:GATE PASSED") return 0 ;;
+    "1:GATE FAILED:"*)
+      for item in ${last#GATE FAILED:}; do
+        check=${item%%:*}
+        grep -qxF "$check $2" "$gate/tracked" 2>/dev/null \
+          || { GATE_VERDICT="the gate at $2 failed $check, and no failure of it is tracked as pre-existing there"; return 1; }
+      done
+      return 0 ;;
+  esac
+  GATE_VERDICT="the gate at $2 ended ${last:-with no verdict} (exit $rc)"
+  return 1
+}
+
 # refinery_owner <bead> <branch> — the bead whose PR the work on <branch>
 # lands on, in OWNER, with its row in OWNER_ROW. BEAD_ROW must be <bead>'s row.
 # It is the bead <bead> names as its anchor_bead when that bead is open on

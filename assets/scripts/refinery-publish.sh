@@ -35,6 +35,11 @@
 # The PR's ready transitions are the review loop's, so the step records no
 # opened_as_draft.
 #
+# Before any of it, the step reads the gate's record (refinery-lib.sh's
+# refinery_gate_verdict): a head the gate did not pass, or whose failed checks
+# have no failure tracked as pre-existing, gets no push, no edit and no record,
+# so the pending record names only a head the rig's checks cleared.
+#
 # It then writes the owner's pending record with `gctk pr record`, which takes
 # the store's record lock and writes nothing on an owner that closed or left the
 # refinery first. Such an owner keeps its state, and the step names the PR in a
@@ -81,6 +86,11 @@ refinery_bead "$BEAD" || stop "$BEAD did not read"
 BRANCH=$(bead_meta branch)
 refinery_require "$HOME_DIR" "$BEAD" "$BRANCH" || stop "this iteration did not prepare $BEAD"
 HEAD_OID="$PREP_HEAD"; READ="$PREP_READ"; TREE="$PREP_TREE"
+# The record names this head as the one the refinery validated, the one head the
+# landing order may merge, so the gate's own record must show it cleared:
+# passed, or failed only checks with a failure tracked as pre-existing.
+refinery_gate_verdict "$HOME_DIR" "$HEAD_OID" \
+  || stop "no gate cleared $HEAD_OID, the prepared head: $GATE_VERDICT. Nothing was pushed or recorded; the next patrol prepares and gates it again"
 TARGET=$(bead_meta target)
 [ -n "$TARGET" ] || TARGET=$(refinery_default_branch "$HOME_DIR") || stop "$BEAD carries no target, and origin/HEAD names no default branch"
 refinery_owner "$BEAD" "$BRANCH" || stop "the bead whose PR $BRANCH lands on cannot be told"

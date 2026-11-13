@@ -23,6 +23,10 @@
 #   - a rework child handed back records the PR on its anchor and closes;
 #   - a bead that owns its PR records it on itself, though a parked rework
 #     child of it waits on its branch with a merge_result of its own;
+#   - a head no gate cleared, by the gate's record, is neither pushed nor
+#     recorded: no gate finished, one ran at another head, one was cut short,
+#     or one failed a check with no failure tracked at the head; a failed check
+#     whose failure is tracked there lets the head be recorded;
 #   - a city login that does not read takes no PR;
 #   - a bead whose branch the refinery's tree does not hold gets no write.
 set -uo pipefail
@@ -191,6 +195,39 @@ hasnt "$(logged gctk)" "pr record kid" "…and never on the parked rework child"
 eq "$(bstatus bp) $(meta bp merge_result)" "blocked pull_request_pending" "the bead waits on its PR's merge"
 eq "$(bstatus kid) $(meta kid merge_result)" "open blocked" "the parked rework child is left as it was"
 hasnt "$(bnotes bp)" "Rework landed" "the bead that owns the PR is not closed as a landed rework"
+
+echo "# a head no gate cleared is neither pushed nor recorded"
+fresh
+BEFORE=$(branch_with polecat/g g.txt)
+work g polecat/g
+prepared g polecat/g
+HEAD_G=$(git -C "$HOME_DIR/worktrees/g" rev-parse HEAD)
+rm -f "$(gate_dir)/rc"
+run --bead g
+eq "$RC" 1 "a head whose gate never finished stops (exit 1)"
+has "$OUT" "no gate cleared $HEAD_G" "it names the head"
+has "$OUT" "no gate has finished" "…and says no gate finished"
+gate_record g 0 "GATE PASSED" 0123456789abcdef0123456789abcdef01234567
+run --bead g
+eq "$RC" 1 "a gate that passed at another head stops"
+has "$OUT" "the last gate ran at 0123456789abcdef0123456789abcdef01234567, not at $HEAD_G" "it names both heads"
+gate_record g 4 "GATE CUT SHORT: test:124"
+run --bead g
+eq "$RC" 1 "a gate cut short stops"
+gate_record g 1 "GATE FAILED: lint:1 test:1"
+printf 'lint %s\n' "$HEAD_G" >> "$(gate_dir)/tracked"
+printf 'test 0123456789abcdef0123456789abcdef01234567\n' >> "$(gate_dir)/tracked"
+run --bead g
+eq "$RC" 1 "a failed check with no failure tracked at the head stops"
+has "$OUT" "failed test, and no failure of it is tracked as pre-existing there" "it names the check"
+eq "$(tip polecat/g)" "$BEFORE" "none of them pushes anything"
+hasnt "$(logged gctk)" "pr record" "…or records anything"
+hasnt "$(logged gh)" "pr create" "…or opens a PR"
+printf 'test %s\n' "$HEAD_G" >> "$(gate_dir)/tracked"
+run --bead g
+eq "$RC" 0 "a gate whose every failed check has a failure tracked at the head lets it be recorded"
+eq "$(tip polecat/g)" "$HEAD_G" "the head is pushed"
+has "$(logged gctk)" "pr record g --pr" "…and recorded as pending"
 
 echo "# a city login that does not read takes no PR"
 fresh

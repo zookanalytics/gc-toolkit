@@ -30,7 +30,10 @@
 # its command's exit status, and the checks after a failed one still run. Every
 # check ends inside the two hours the wait allows. The job's log ends
 # `GATE PASSED`, `GATE FAILED: <check:rc>...` or `GATE CUT SHORT: <check:rc>...`
-# for a check that stopped short of a verdict.
+# for a check that stopped short of a verdict. Its first line,
+# `GATE AT <head>`, names the commit the checks ran at, and a start clears the
+# failures refinery-pre-existing.sh tracked against the gate before it
+# (refinery-lib.sh's refinery_gate_verdict reads both).
 #
 # wait blocks for up to about eight minutes and reports the job's state as
 # detached-job.sh does, stopping a gate that has run two hours. Every stop gives
@@ -93,7 +96,7 @@ if ! OUT=$(DETACHED_JOB_STOP_GRACE=20 "$JOB" stop "$GATE" 2>&1); then
   stop "the gate a previous session left running in $GATE did not stop, so its checks are not rewritten under it"
 fi
 mkdir -p "$GATE/checks" || stop "cannot make $GATE/checks"
-for OLD in "$GATE"/checks/*; do
+for OLD in "$GATE"/checks/* "$GATE/tracked"; do
   [ -e "$OLD" ] || continue
   rm -f "$OLD" || stop "cannot clear $OLD"
 done
@@ -134,6 +137,7 @@ fi
 cat > "$GATE/gate.sh" <<'GATE' || stop "cannot write $GATE/gate.sh"
 cd "$1" || exit 2
 gctk="$3"
+echo "GATE AT $(git rev-parse --verify -q HEAD)"
 # Every check ends this many seconds into the gate, inside the two hours its
 # wait allows, so the wait never stops gctk in the middle of a stop of its own.
 deadline=7080
