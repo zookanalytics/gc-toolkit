@@ -109,6 +109,12 @@ pattern, a bead whose lifecycle composes bd's `blocks` edges, `bd defer` and
 a file, not a bead, so no bd edge can make it wait. The list the script keeps
 records the bead each note waits on, and each run reads that bead's status.
 
+**Searched: bd's dated defer,** for a note about a moment that has not passed,
+which the judge reads again on a date (design.md, section 2). `bd defer --until`
+hides an issue from `bd ready` until the date passes and then returns it to open
+(`cmd/bd/defer.go` at d76ade282). It holds only an issue, and the note is a
+file, so the note's row on the list holds the date, and each run compares it.
+
 **Searched: bd's cross-project dependency,** for a note's wait on a fix filed in
 another rig's store. A dependency names a local issue or an external reference,
 `external:<project>:<capability>` (`cmd/bd/dep.go` at d76ade282). An external

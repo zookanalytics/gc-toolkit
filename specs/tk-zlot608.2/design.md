@@ -89,7 +89,7 @@ is this design's proposal.
 `feedback-distiller` order fires once a day, the run does its work only in the
 pack's home rig, and it already reads every rig's store for reports. In the same
 run it reads the memory directories of the city's rigs and its root (section 7),
-judges each note it has not read before, and groups what the note shows onto the
+judges each due note (section 5), and groups what the note shows onto the
 feedback patterns the reports are grouped onto. The patterns stay in the home
 rig's store, under the lifecycle PR #1486 (tk-ltcv43q) brings: a pattern is
 closed once resolved, waits on its follow-up through a `blocks` edge, or is
@@ -145,7 +145,9 @@ how it reads.
 - **Live work**: the state of work still open. Its bead takes, in one append,
   what the note says that the bead lacks, and the note is dropped. A ruling
   about one case lives with that case the same way. A note about a moment that
-  has not passed, with no bead to carry it, stays due for the next run.
+  has not passed, with no bead to carry it, stays, and the judge sets the date
+  it is next due: the date the judge expects the moment to pass, or a week on
+  when it cannot tell. The note is not read again before that date (section 5).
 - **Wording fix** (question 2): a vague or misleading direction that a change of
   about zero size fixes, as the backlog's were
   ([report.md](../tk-zlot608.1/report.md#wording-fixes)). It is filed even when
@@ -254,7 +256,8 @@ For each memory directory, the run keeps these in the pack's state directory,
 
 - **The list**, one row for each note or entry the judge has read and kept: its
   name, the hash the judge read, the date it was judged, and what it waits on,
-  its pattern or the bead in another rig's store.
+  its pattern or the bead in another rig's store. A note kept for a moment that
+  has not passed has, in place of a wait, the date it is next due.
 - **Each removed note's text**, as it was when removed, filed under its name and
   hash. Nothing prunes these.
 - **The directory's real path**, so a person can tell which directory a key
@@ -265,9 +268,10 @@ directories share a key only when they are one directory. A key that replaces
 characters would merge directories: with each `/` and `.` as `-`, `/x/a.b`,
 `/x/a-b` and `/x-a/b` share one.
 
-A note is due when the list does not hold it at its current hash, so the list is
-all the next run needs of the last. The run keeps no copy of the directory and
-no findings record. The town repository ignores `.gc/`, and no session loads it.
+A note is due when the list does not hold it at its current hash, or holds the
+date it is next due and that date has come, so the list is all the next run
+needs of the last. The run keeps no copy of the directory and no findings
+record. The town repository ignores `.gc/`, and no session loads it.
 
 Other writers and other runs:
 
@@ -294,8 +298,10 @@ Other writers and other runs:
 ## 5. Which notes a run reads
 
 A note is due from the first run that finds it, new or changed since the judge
-read it. The judge's own question, whether a note can go away, decides whether a
-fresh note leaves, so no age decides when a note is read.
+read it, and a note the judge kept for a moment that has not passed is due again
+from the date the judge set (section 2). The judge's own question, whether a
+note can go away, decides whether a fresh note leaves, so no age decides when a
+note is read.
 
 Due notes are pending like reports. They count toward the distiller's cadence
 gate beside the pending observations, and a gated run leaves them due. With
@@ -303,15 +309,18 @@ about 50 notes a day the gate opens on nearly every run, and it already sees
 steady volume from reports: this rig's store took in 186 observations from
 2026-11-01 to 2026-11-13. While due notes remain, a hold whose window ends is
 deferred to the next run, as the rubric defers one while observations remain
-unjudged, since a due note may be its recurrence.
+unjudged, since a due note may be its recurrence. A note that waits for its
+date is not due, so it neither counts toward the gate nor defers a hold.
 
 A run reads at most `memory_notes_per_run` due notes, oldest first, and the rest
-stay due. The proposed default is 200. The city's memory directories took in
-about 360 notes in the week to 2026-11-13, about 50 a day, so a run reads the
-day's intake and about 150 of the backlog. Read-only subagents may read batches
-of due notes and return what each says, as they did for the backlog record (71
-batches for 2,161 units). The judge decides each note itself and makes every
-write.
+stay due. A note is as old as its last change, and a note due again on the date
+the judge set is as old as that date, so it waits behind the notes due before
+it, and every due note reaches the judge in turn. The proposed default is 200.
+The city's memory directories took in about 360 notes in the week to
+2026-11-13, about 50 a day, so a run reads the day's intake and about 150 of the
+backlog. Read-only subagents may read batches of due notes and return what each
+says, as they did for the backlog record (71 batches for 2,161 units). The judge
+decides each note itself and makes every write.
 
 **The first runs.** The city's memory directories hold about 2,070 whole notes
 today, beside their indexes and this rig's collection notes: about 1,040 in this
@@ -466,7 +475,7 @@ that tk-1tfzr71.21 retires, which the epic's boundaries name.
 
 | Unit | What it builds | Waits on |
 |---|---|---|
-| tk-zlot608.5 | `assets/scripts/memory-intake.sh` and its suite: verbs that place each memory directory as Claude Code does, keep each directory's list under the SHA-256 of its real path with that path written beside it, list the due notes, record each judged note on the list, remove a note under the hash, index and collection-note checks while keeping its text, end a note's wait once its pattern or bead is done and its fix has landed, rewrite the guidance block, and report a place the run cannot resolve. The suite covers each input that moves a directory or turns memory on or off, a shared directory, an absent directory, each case the run cannot resolve, a note changed since it was judged, and a follow-up that landed on an effort's branch. It also covers directories whose real paths a character conversion merges, such as `/x/a.b`, `/x/a-b` and `/x-a/b`, each holding a note of the same name and text. `mol-feedback-distiller`'s `read-memory` step, its `memory_notes_per_run` variable and the clauses the other steps gain, within the step-size bound. The `learning-distill` skill's memory section. The guidance file. The docs this makes stale: the intake and promotion path in docs/feedback-learning.md, the rows in docs/component-model.md §4 for the distiller and the script, the feedback paragraph in docs/built-once-target.md, and the Debt entry in docs/architecture.md, which it removes. | this design's merge (tk-zlot608.2), and the pattern change it builds on (tk-ltcv43q, PR #1486) |
+| tk-zlot608.5 | `assets/scripts/memory-intake.sh` and its suite: verbs that place each memory directory as Claude Code does, keep each directory's list under the SHA-256 of its real path with that path written beside it, list the due notes oldest first, record each judged note on the list with what it waits on or the date it is next due, remove a note under the hash, index and collection-note checks while keeping its text, end a note's wait once its pattern or bead is done and its fix has landed, rewrite the guidance block, and report a place the run cannot resolve. The suite covers each input that moves a directory or turns memory on or off, a shared directory, an absent directory, each case the run cannot resolve, a note changed since it was judged, and a follow-up that landed on an effort's branch. It also covers directories whose real paths a character conversion merges, such as `/x/a.b`, `/x/a-b` and `/x-a/b`, each holding a note of the same name and text, and a note kept for a moment that has not passed, which is not due before its date and then waits behind the notes due before it. `mol-feedback-distiller`'s `read-memory` step, its `memory_notes_per_run` variable and the clauses the other steps gain, within the step-size bound. The `learning-distill` skill's memory section. The guidance file. The docs this makes stale: the intake and promotion path in docs/feedback-learning.md, the rows in docs/component-model.md §4 for the distiller and the script, the feedback paragraph in docs/built-once-target.md, and the Debt entry in docs/architecture.md, which it removes. | this design's merge (tk-zlot608.2), and the pattern change it builds on (tk-ltcv43q, PR #1486) |
 
 One unit, because the step with no script, or the script with no step, does
 nothing on its own.
