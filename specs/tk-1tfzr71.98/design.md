@@ -508,9 +508,15 @@ behavior.
   city with a class binding, and the city's `gc config show` names none.
   `gctk bead holds` also gives the reason the start prints for each arm it
   holds.
-- **No hold test of the pack's own.** The `has_dispatch_hold` test of
-  `dispatch-path.sh` leaves this rule, since the rule's `--exclude-label` flags
-  are the hold test the pool applies.
+- **The hook's hold test.** bd's `--exclude-label` compares a label exactly,
+  and the pool's hook then drops a candidate that carries `hold:mayor` or
+  `hold:external` trimmed and in any case (`isHeldHookCandidate`,
+  `cmd/gc/cmd_hook.go`, through `beadmeta.HasDispatchHold`, whose comment
+  calls the hook's filter "the last word on what a session is served"). So the
+  start holds such a bead back too, with the comparison `HasDispatchHold` makes,
+  which gctk's `queue` already copies (`hasDispatchHold`,
+  `services/gctk/queue/queue.go`). The `has_dispatch_hold` test of
+  `dispatch-path.sh` leaves this rule.
 
 The rule reads only arms still owed, because section 4 retires the arm on a
 closed or delivered bead first. The delivery stamp has to be read there and not
@@ -755,9 +761,10 @@ pass lock through `bd-lib.sh`, which unit 1 ends. `docs/pack-authoring.md`
 links the notice section that unit 2 rewrites. `docs/review-correctness.md` and
 `docs/review-demo.md` take their examples from the script and its test, and
 `assets/scripts/test-harness.sh`'s comments name both, so unit 3 replaces each
-when it deletes them. `docs/steering.md` says an armed member in flight keeps
-running under a park, which section 7's rule ends, so that line changes in
-unit 1. In unit 1, `services/gctk/README.md`'s layout gains the two packages
+when it deletes them. `docs/steering.md` says twice that an armed member in
+flight keeps running under a park, in a rejected handoff's retry and in what a
+park holds. Section 7's rule ends that, so both lines change in unit 1. In
+unit 1, `services/gctk/README.md`'s layout gains the two packages
 and `docs/gctk-architecture.md` gains section 2's Debt entry.
 
 Callers find the script today through `GC_DEFERRED_DISPATCH_TOOL` or
@@ -781,9 +788,9 @@ the bd the city runs against a scratch store on a Dolt server of its own
   whose only open blocker is a `conditional-blocks` edge, which is held; a
   `waits-for` edge, which holds the bead, and a wait edge into another store,
   which holds it too; an armed bead labeled `human`, which is not sent, and an
-  armed epic, which is not sent either; a hold label; an assignee; a status
-  other than `open`; and a park on an ancestor, which holds unstarted and
-  in-flight work alike.
+  armed epic, which is not sent either; a hold label, in Gas City's spelling
+  and in another case; an assignee; a status other than `open`; and a park on
+  an ancestor, which holds unstarted and in-flight work alike.
 - **The retirements**: an open, unassigned armed bead that carries
   `merge_result=pull_request` with no open blocker and no live workflow left on
   it, the same at `pre_open_gate`, the same behind an open `blocks` blocker,
@@ -880,7 +887,7 @@ new start replaces the old pass at that landing, with every arm carried over
    performs the arm, `docs/gctk-architecture.md`'s rows,
    `services/gctk/README.md`'s layout, `gctk bead holds`' help on the arm it
    prints, `docs/refinery-merge-cadence.md`'s lock line, `docs/steering.md`'s
-   line on an armed member in flight, and the warrant. The warrant's Covers
+   two lines on an armed member in flight, and the warrant. The warrant's Covers
    gains the dispatch lock and the token, its evidence is re-verified at the
    upstream commit the unit builds against, and its Retires-when line is
    restated in upstream's terms: Gas City holds a poured workflow's steps until
@@ -973,6 +980,7 @@ composes Gas City's hand-off, its nudges and its controller's wake.
 | The controller wakes a stopped session that has ready work assigned to it, and an on-demand named session that has ready work routed to it | the assigned-work pass of `computeAwakeSetKeyed`, through `workBeadHasAwakeDemand`, `cmd/gc/compute_awake_set.go`; for routed work, the default probe of the session's backing template and `computeNamedSessionDemandOn`, `cmd/gc/build_desired_state.go` | same functions |
 | A named session's hook serves work routed to its alias | `namedSelfTargetAdmit`, `internal/config/workquery.go`, lets a named session into the routed tier only when the probe target is its `GC_ALIAS` | same; `gc sling gc-toolkit.mechanik <bead> --no-formula --dry-run` writes `gc.routed_to=gc-toolkit.mechanik`, the mechanik's alias |
 | The pool serves by `PoolDemandServeRulesForQuery` | `internal/config/workquery.go`: `--unassigned`, `--exclude-type=epic`, and an `--exclude-label` for each of `beadmeta.DispatchHoldLabels` and `beadmeta.HumanLabel`, rendered into every generated demand query | same; the labels are `hold:mayor`, `hold:external` and `human`, and bd 1.3.4's `bd ready` takes `--has-metadata-key` with those flags |
+| The hook drops a held candidate whatever its label's case | `isHeldHookCandidate`, `cmd/gc/cmd_hook.go`, through `beadmeta.HasDispatchHold`, which compares each label trimmed and in any case, where the routed tier's `--exclude-label` compares exactly | same |
 | Upstream tracks the gap as #7163 and #8832, with draft fix #8834 | both issues open, labeled `kind/bug` and `priority/p1`, and #8834 an open draft that closes #8832, read on 2026-11-13; neither commit carries the fix | the build carries no part of #8834 |
 | Upstream removed its named-seat backstop | 386211397c (#6551), an ancestor of both commits, reverts #6302 and #6287, and its release notes say named seats have no controller claim or execution backstop and name follow-up ga-o1w8h | same: 386211397c is an ancestor of the build |
 | Gas City's readiness treats a blocker closed as blocked as still holding | `beads.DependencySatisfied` with `beads.ReadinessWorkOutcome`, `internal/beads/beads.go` | same |
