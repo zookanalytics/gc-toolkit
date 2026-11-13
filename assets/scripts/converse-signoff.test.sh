@@ -127,6 +127,7 @@
 #             dismiss that closes an open conversation while the call runs
 #             fails that write and stops the stay, the call less --stay, with
 #             --no-wait for its waits and brief and --no-rework for a --rework,
+#             less the --pr-anchor that picked one of two PRs for it,
 #             closes it on the return, on a subject that has closed too,
 #             arming no second closer once the arm has
 #             sent one and filing no second rework, and a stay with no work,
@@ -1990,6 +1991,21 @@ eq "$RC" 0 "(STAY-REWORK-RETURN) the return of a rework stay, its call less --st
 has "$OUT" "the ruling leaves the branch of tk-anc as it stands" "(STAY-REWORK-RETURN) …leaving the reworked branch as it stands"
 eq "$(grep -c '^converse-rework ' "$CALLS" || true)" "$REWORKS" "(STAY-REWORK-RETURN) …filing no second rework"
 eq "$(field tk-conv status)" "closed" "(STAY-REWORK-RETURN) …and closing the conversation"
+# A ruling that reaches two open PRs reworks the one its --pr-anchor names. The
+# return leaves that --pr-anchor out with the --rework, since --no-rework takes
+# none and leaves both PRs standing.
+shared_pr; bead tk-child; setm tk-child source_ruling_bead tk-conv
+run_signoff --conversation tk-conv --outcome "staying — the retry is reworked" --ruled yes --ruling "fix the retry" --rework --pr-anchor tk-anc --no-wait --stay "the retry backs off"
+eq "$RC" 0 "(STAY-REWORK-PICK) a rework stay on a ruling that reaches two open PRs, naming the one it reworks, exits 0"
+has "$(cat "$CALLS")" "bd dep add tk-conv tk-child --type blocks" "(STAY-REWORK-PICK) …waiting on that PR's rework"
+setf tk-child status closed
+REWORKS=$(grep -c '^converse-rework ' "$CALLS" || true)
+run_signoff --conversation tk-conv --outcome "landed as agreed" --ruled yes --ruling "fix the retry" --no-rework --no-wait
+eq "$RC" 0 "(STAY-REWORK-PICK-RETURN) its return, with --no-rework in place of the --rework and no --pr-anchor, exits 0"
+has "$OUT" "the ruling leaves the branch of tk-anc as it stands" "(STAY-REWORK-PICK-RETURN) …leaving the reworked branch as it stands"
+has "$OUT" "the ruling leaves the branch of tk-pr2 as it stands" "(STAY-REWORK-PICK-RETURN) …and the other PR's"
+eq "$(grep -c '^converse-rework ' "$CALLS" || true)" "$REWORKS" "(STAY-REWORK-PICK-RETURN) …filing no second rework"
+eq "$(field tk-conv status)" "closed" "(STAY-REWORK-PICK-RETURN) …and closing the conversation"
 open_pr
 REWORK_NO_CHILD=1 run_signoff --conversation tk-conv --outcome "staying — the retry is reworked" --ruled yes --ruling "fix the retry" --rework --no-wait --stay "the retry backs off"
 eq "$RC" 1 "(STAY-REWORK-UNREAD) a rework child that does not read as this conversation's stops the stay"

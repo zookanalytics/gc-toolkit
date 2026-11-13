@@ -145,13 +145,15 @@ it on from where it stopped, so nothing is posted twice.
    Send the work).
 4. **Then sign off, or hold.** Sign off with the stay's call less `--stay`,
    with `--no-wait` in place of its waits and brief, and with `--no-rework` in
-   place of a `--rework`, whose child has landed. Its `--outcome` says what
-   landed, in place of the stay's `staying —` headline, which would otherwise
-   stay on the subject. It answers nothing the stay already answered, and
-   leaves the subject's closer as the stay armed it. When the comparison
-   leaves the operator anything to answer before the sitting ends, hold
-   instead (`converse-hold`): the hold's record tells a restart that the
-   return is done.
+   place of a `--rework`, whose child has landed. Leave out the `--pr-anchor`
+   that named the PR the rework went to: the sign-off takes one only beside
+   `--rework` or `--retire`, and `--no-rework` leaves every PR the ruling
+   reaches standing. Its `--outcome` says what landed, in place of the stay's
+   `staying —` headline, which would otherwise stay on the subject. It answers
+   nothing the stay already answered, and leaves the subject's closer as the
+   stay armed it. When the comparison leaves the operator anything to answer
+   before the sitting ends, hold instead (`converse-hold`): the hold's record
+   tells a restart that the return is done.
 
 When your context is too full for the comparison, say so in a hand-back and
 sign off the same way: the subject still closes as it would after a hand-off.

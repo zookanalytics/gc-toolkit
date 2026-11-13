@@ -555,6 +555,8 @@ tr -s '[:space:]' ' ' <"$STAY" >"$TMP/stay-squeezed"
 have "…and a stay drains nothing" 'A stay closes nothing, so it drains nothing' "$TMP/stay-squeezed"
 have "the stay skill gives the return its sign-off" \
     'Sign off with the stay'"'"'s call less `--stay`, with `--no-wait` in place of its waits and brief, and with `--no-rework` in place of a `--rework`' "$TMP/stay-squeezed"
+have "…which leaves out the --pr-anchor of a rework that picked its PR" \
+    'Leave out the `--pr-anchor` that named the PR the rework went to' "$TMP/stay-squeezed"
 have "…and the return passes and fails nothing" \
     'It works on nothing, takes no check'"'"'s send-back, and passes and fails nothing' "$TMP/stay-squeezed"
 for f in "$PROMPT" "$SETTLE" "$STAY" "$CONTINUE" "$HOLD"; do
@@ -921,13 +923,17 @@ for sh_ in $shells; do
 done
 echo "── the stay example, and each call the skills derive from it, passes the sign-off's parser ──"
 # The stay skill gives one stay call and says how its rework form, and the
-# return's call, differ from it.
+# return's call, differ from it. The rework form takes converse-settle's
+# --pr-anchor when the ruling reaches more than one open PR, and its return
+# leaves that out with the --rework.
 # Each form is built from the example's own arguments the way those skills word
 # it, then run through the real sign-off under a gc that answers nothing. A form
 # the parser takes reaches the conversation read and stops there (exit 1). One
 # it refuses exits 2 before that read.
 have "the stay example's rework form takes --rework --no-wait in place of the wait and its brief" \
     '# --rework --no-wait in place of --waiting-on and --close-brief when the work is the PR'"'"'s rework' "$STAY"
+have "…and converse-settle's sign-off, whose other flags it takes, picks the PR a rework acts on with --pr-anchor" \
+    '# --pr-anchor <bead> names the PR --rework or --retire acts on, when it reaches more than one' "$SETTLE"
 have "…and a stay on the subject itself is refused, so that sitting ends at the hand-off" \
     'It refuses one on the subject itself' "$STAY"
 SV="$TMP/stay-forms"
@@ -953,8 +959,11 @@ else
         (cd "$TMP/away" && env -u BASH_ENV -u ENV STAY_ARGV="$SV/stay" CONV="$SV/pack" CONVERSATION=tk-v \
             $run "$SV/block" </dev/null >/dev/null 2>&1)
         { drop_args "$SV/stay" --waiting-on --close-brief; printf '%s\n' --rework --no-wait; } >"$SV/rework"
+        { cat "$SV/rework"; printf '%s\n' --pr-anchor x; } >"$SV/rework-pick"
         { drop_args "$SV/stay" --stay --waiting-on --close-brief; printf '%s\n' --no-wait; } >"$SV/return"
-        drop_args "$SV/rework" --stay | sed 's/^--rework$/--no-rework/' >"$SV/rework-return"
+        for f in rework rework-pick; do
+            drop_args "$SV/$f" --stay --pr-anchor | sed 's/^--rework$/--no-rework/' >"$SV/$f-return"
+        done
         while IFS='|' read -r form label; do
             args=()
             while IFS= read -r a; do args+=("$a"); done <"$SV/$form"
@@ -968,8 +977,10 @@ else
         done <<FORMS
 stay|the stay example's call passes the sign-off's parser
 rework|…as does its rework form, with --rework --no-wait in place of --waiting-on and --close-brief
+rework-pick|…and that form with the --pr-anchor that picks its PR when the ruling reaches more than one
 return|…the return's call, the stay's less --stay with --no-wait in place of its waits and brief
-rework-return|…and the return of a rework stay, with --no-rework in place of its --rework
+rework-return|…the return of a rework stay, with --no-rework in place of its --rework
+rework-pick-return|…and the return of one that picked its PR, which leaves out its --pr-anchor
 FORMS
     done
     # Work can close before the stay's edge onto it is written, and then no

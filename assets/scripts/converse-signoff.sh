@@ -244,8 +244,11 @@
 #     wait on. The sitting signs off on its return with the same call less
 #     --stay, with --no-wait in place of its --waiting-on and --close-brief,
 #     and with --no-rework in place of a --rework, whose child has landed. The
-#     closer the stay armed already checks that work, and a --waiting-on on
-#     work that has landed would arm it again once its arm has sent it.
+#     return leaves out the --pr-anchor that named the PR the rework went to,
+#     since --pr-anchor goes only with --rework or --retire, and --no-rework
+#     leaves every PR the ruling reaches standing. The closer the stay armed
+#     already checks that work, and a --waiting-on on work that has landed
+#     would arm it again once its arm has sent it.
 # Exit: 0 signed off, or with --answer the named gates answered, or with --stay
 #   the conversation left waiting on the work; 1 stopped short — a read
 #   failed, the rework did not file or its record did not land, the PR did not
