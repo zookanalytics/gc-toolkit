@@ -12,8 +12,10 @@
 #   - a PR another account opened, found on the branch or named by an old-path
 #     record, parks the bead behind refinery-pr-not-city-opened, with nothing
 #     edited, pushed or opened;
-#   - a recorded PR that is closed parks the bead behind
-#     refinery-invalid-existing-pr;
+#   - a recorded PR that is closed, or that the repository does not have,
+#     parks the bead behind refinery-invalid-existing-pr, whose message names
+#     the stand-down under that key, a bead at a head the refinery has not
+#     validated among them;
 #   - an edit that does not take pushes nothing, so the head never moves under
 #     a stale body;
 #   - a branch someone pushed to after the prep is refused, never overwritten,
@@ -135,6 +137,25 @@ run --bead x
 eq "$RC" 4 "the publication parks (exit 4)"
 has "$(logged scripts)" "human-gate --subject x --key refinery-invalid-existing-pr" "the gate is keyed refinery-invalid-existing-pr"
 has "$(logged scripts)" "is CLOSED, not open" "…and says why the PR is not reused"
+has "$(logged scripts)" "stand-down.sh x --key refinery-invalid-existing-pr --ruling" "…and names the stand-down under its key"
+fresh
+branch_with polecat/hc hc.txt >/dev/null
+work hc polecat/hc '{"merge_result":"pull_request_head_changed","existing_pr":"https://github.com/zook/rig/pull/47","pr_url":"https://github.com/zook/rig/pull/47","pr_number":"47"}'
+prepared hc polecat/hc
+pr 47 polecat/hc gc-city-bot CLOSED
+run --bead hc
+eq "$RC" 4 "a bead at a head the refinery has not validated, whose PR closed, parks at its publication (exit 4)"
+has "$(logged scripts)" "human-gate --subject hc --key refinery-invalid-existing-pr" "…behind the gate stand-down.sh's refusal names for it"
+has "$(logged scripts)" "stand-down.sh hc --key refinery-invalid-existing-pr --ruling" "…whose message names the stand-down under its key"
+hasnt "$(logged gctk)" "pr record" "…and nothing is recorded"
+fresh
+branch_with polecat/nf nf.txt >/dev/null
+work nf polecat/nf '{"existing_pr":"https://github.com/zook/rig/pull/48"}'
+prepared nf polecat/nf
+run --bead nf
+eq "$RC" 4 "a recorded PR the repository does not have parks the bead (exit 4)"
+has "$(logged scripts)" "human-gate --subject nf --key refinery-invalid-existing-pr" "…behind refinery-invalid-existing-pr"
+has "$(logged scripts)" "stand-down.sh nf --key refinery-invalid-existing-pr --ruling" "…whose message names the stand-down under its key"
 
 echo "# an edit that does not take pushes nothing"
 fresh

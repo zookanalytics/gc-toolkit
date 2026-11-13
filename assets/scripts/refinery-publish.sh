@@ -25,9 +25,10 @@
 # the PR and its author. A recorded PR that is not open, or not from the
 # branch into the target in the rig's own repository, parks the bead behind
 # the gate refinery-invalid-existing-pr. Each park sets merge_result=blocked and
-# keeps the bead with the refinery, so clearing the gate hands it back. A step
-# that cannot read the PR's author or the city's login takes no PR, and the
-# next pass tries again.
+# keeps the bead with the refinery, so clearing the gate hands it back, and each
+# gate's message offers the stand-down under its key, for work that will not go
+# on. A step that cannot read the PR's author or the city's login takes no PR,
+# and the next pass tries again.
 #
 # The title and body are composed by `gctk pr compose` from the owner, at the
 # prepared head. On a PR the step takes, it edits the title and body first,
@@ -162,11 +163,11 @@ if [ -n "$RECORDED" ]; then
     VIEW=$(cat "$ERR_FILE")
     case "$VIEW" in
       *"Could not resolve to a PullRequest"*|*"no pull requests found"*|*"Not Found"*)
-        park refinery-invalid-existing-pr "$OWNER records PR $RECORDED, which $REPO does not have. Give $OWNER the PR its branch $BRANCH is open on into $TARGET, or clear the record, then clear this gate." ;;
+        park refinery-invalid-existing-pr "$OWNER records PR $RECORDED, which $REPO does not have. Give $OWNER the PR its branch $BRANCH is open on into $TARGET, or clear the record, then clear this gate; or stand $BEAD down instead: run $HERE/stand-down.sh $BEAD --key refinery-invalid-existing-pr --ruling '<why>'." ;;
     esac
     stop "PR $RECORDED did not read: $(printf '%s' "$VIEW" | tr -s '[:space:]' ' ')"
   fi
-  take "$VIEW" || park refinery-invalid-existing-pr "$OWNER records PR #$PR_NUMBER ($PR_URL), which $PR_WRONG, so it is not reused. Give $OWNER the PR its branch $BRANCH is open on into $TARGET, or clear the record, then clear this gate."
+  take "$VIEW" || park refinery-invalid-existing-pr "$OWNER records PR #$PR_NUMBER ($PR_URL), which $PR_WRONG, so it is not reused. Give $OWNER the PR its branch $BRANCH is open on into $TARGET, or clear the record, then clear this gate; or stand $BEAD down instead: run $HERE/stand-down.sh $BEAD --key refinery-invalid-existing-pr --ruling '<why>'."
   city_opened || not_city_opened
 else
   LIST=$(gh pr list --repo "$REPO" --head "$BRANCH" --base "$TARGET" --state open --json "$PR_FIELDS" --limit 10 </dev/null 2>/dev/null) \
