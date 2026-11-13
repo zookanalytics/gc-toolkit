@@ -22,7 +22,8 @@
 #     records an open PR, whose title and body it brings current first, with
 #     merged_target and the check set, an empty check set recovering the
 #     declared default; a bead a person handed back from a park first leaves
-#     it;
+#     it; a PR whose body is current and whose title differs only in its
+#     spacing is not edited;
 #   - a rework child handed back on the old path brings its anchor's PR title
 #     and body current, pushes, notes the anchor and closes;
 #   - the body brought current names the gates of the check set the PR waits
@@ -234,6 +235,16 @@ run --bead b
 eq "$RC" 0 "the landing exits 0"
 has "$(logged scripts)" "lifecycle transition b --to unanchored --expect blocked" "a bead handed back from a park leaves it first"
 has "$(logged scripts)" "--set check_set=none" "a none check set is stamped as none"
+fresh
+branch_with polecat/q q.txt >/dev/null
+work q polecat/q '{"existing_pr":"https://github.com/zook/rig/pull/67"}'
+prepared q polecat/q
+HEAD_Q=$(git -C "$HOME_DIR/worktrees/q" rev-parse HEAD)
+pr 67 polecat/q someone OPEN main "<!-- gc:pr-summary -->composed for q at $HEAD_Q<!-- /gc:pr-summary -->"
+jq '.title = "feat:  q (q)"' "$GH_DIR/view_67.json" > "$GH_DIR/view_67.json.t" && mv "$GH_DIR/view_67.json.t" "$GH_DIR/view_67.json"
+run --bead q
+eq "$RC" 0 "the landing exits 0"
+hasnt "$(logged gh)" "pr edit 67" "a PR whose body is current and whose title differs only in spacing is not edited"
 
 echo "# a rework child handed back on the old path lands on its anchor's branch"
 fresh

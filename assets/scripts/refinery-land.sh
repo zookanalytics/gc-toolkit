@@ -141,7 +141,7 @@ owner_pr() {
 # pushed under a stale body: once the owner waits at pull_request, no cadence
 # pass edits its PR's title or body.
 refresh() {
-  local gctk gates out title moved body published edit=() rc=0
+  local gctk gates out title live moved body published edit=() rc=0
   gctk=$(gctk_path) || { echo "$PROG: no gctk binary composes PR #$PR_NUMBER's title and body" >&2; return 1; }
   gates=$(cd "$HOME_DIR" && "$HERE/review-checks.sh" --resolve --check-set "$1" --through open-as-draft --with-phase --at "$HEAD_OID") \
     || { echo "$PROG: the gates of check set '$1' did not resolve at $HEAD_OID, so PR #$PR_NUMBER's body cannot name them" >&2; return 1; }
@@ -152,7 +152,8 @@ refresh() {
     title=$(printf '%s' "$out" | jq -r '.title // ""')
     moved=$(printf '%s' "$out" | jq -r 'if .summary == "written" or .branch_beads == "written" then "yes" else "" end')
     printf '%s' "$out" | jq -j '.body // ""' > "$body"
-    [ -z "$title" ] || [ "$(printf '%s' "$title" | tr -s '[:space:]' ' ')" = "$(printf '%s' "$PR_ROW" | jq -r '.title // ""' | tr -s '[:space:]' ' ')" ] || edit+=(--title "$title")
+    live=$(printf '%s' "$PR_ROW" | jq -r '.title // ""')
+    [ -z "$title" ] || [ "$(printf '%s' "$title" | tr -s '[:space:]' ' ')" = "$(printf '%s' "$live" | tr -s '[:space:]' ' ')" ] || edit+=(--title "$title")
     [ -z "$moved" ] || [ ! -s "$body" ] || edit+=(--body-file "$body")
     if [ "${#edit[@]}" -gt 0 ] && ! gh pr edit "$PR_NUMBER" --repo "$REPO" "${edit[@]}" </dev/null >/dev/null; then
       echo "$PROG: PR #$PR_NUMBER's title and body did not take" >&2
