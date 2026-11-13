@@ -5420,6 +5420,27 @@ eq "$(tresolved 338 T-338)" "false" "…leaving the thread to the pass that read
 out=$(run)
 eq "$(tresolved 338 T-338)" "true" "which resolves it"
 
+echo "# an objection declined after an earlier answer of ours is answered by its decline, and its thread resolved"
+# The thread's first comment was answered by its batch's landing before the
+# operator objected below that answer. The objection's own finding was declined,
+# so the decline's reply answers it: once that reply is on the PR, nobody is
+# still using the thread.
+store "[$(anchor WLA 359 "$(wb_meta rework:KLA 101)"), $(child KLA closed), $(hfind FLA WLA 101 900 declined closed 'Declined: the read is already bounded.')]"
+printf '%s' "$(prview 359 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_359.json"
+threads 359 "$(printf '%s' "$(one_thread 359)" | jq -c '
+  .threads[0].comments.nodes[0].reactionGroups = [{"content":"THUMBS_UP","viewerHasReacted":true}]
+  | .threads[0].comments.nodes += [
+    {"id":"NC-359m","databaseId":0,"author":{"login":"gc-city-bot"},"body":"✅ Fixed in kla0aaaa (KLA).\n<!-- gc-writeback -->\n<!-- gc-writeback-mark:resolved -->","reactionGroups":[]},
+    {"id":"NC-359b","databaseId":101,"author":{"login":"johnzook"},"body":"this still reads past the end","reactionGroups":[]}]')"
+out=$(run)
+has "$(treply 359 T-359)" "Declined: the read is already bounded." "the objection is answered with its decline"
+eq "$(tresolved 359 T-359)" "false" "…and the thread waits for the pass that reads the decline on the PR"
+mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
+out=$(run)
+eq "$(tresolved 359 T-359)" "true" "that pass resolves it, the declined objection being answered"
+hasnt "$out" "thread T-359 has a reply after ours" "…and does not read the objection as someone still writing"
+hasnt "$(gh_since "$mark")" "REPLY" "…posting nothing more"
+
 echo "# a thread holding a fixed and a declined finding is answered for both, then resolved"
 store "[$(anchor WPB 339 "$(wb_meta rework:KPB 101)"), $(child KPB closed), $(hfind FPA WPB 100 900 must-fix closed), $(hfind FPB WPB 101 900 declined closed 'Declined: the second ask is already handled.')]"
 printf '%s' "$(prview 339 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_339.json"

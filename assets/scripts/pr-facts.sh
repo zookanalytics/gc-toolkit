@@ -4843,13 +4843,19 @@ WB_ROUNDS
     | [ $v.threads[] | . as $t | ($t.comments.nodes // []) as $cs
         | ([ $cs | to_entries[] | select(.value | ours)
              | select((.value | marks | any(.st == "resolved")) or (.value | legacy)) | .key ] | max) as $mres
-        | (if $mres == null then 0
-           else [ $cs | to_entries[] | select(.key > $mres) | select(.value | foreign) ] | length end) as $after
         | ($t.isResolved // false) as $tres | (($t.viewerCanResolve // false) == true) as $canres
         | [ $cs | to_entries[] | .key as $k | .value
             | select(foreign) | select((.databaseId // 0) > 0 and .databaseId <= $cwm)
             | { id, s: "c", d: .databaseId, k: $k, rgs: (.reactionGroups // []),
                 mres: $mres, tres: $tres } + cstate("c"; .databaseId; ($offc[.databaseId | tostring] == true)) ] as $fc
+        # A post after our last resolved answer is someone still using the
+        # thread, unless its own finding was declined or deferred. That ruling
+        # answers it, through the reply it owes when it owes one, and the
+        # thread waits below (owed) until this read shows that reply.
+        | [ $fc[] | select(.by == "finding" and .st == "resolved") | .k ] as $fk
+        | (if $mres == null then 0
+           else [ $cs | to_entries[] | select(.key > $mres) | select(.value | foreign)
+                  | select(.key as $k | ($fk | index($k)) == null) ] | length end) as $after
         # held: the comments a batch record covers. owned: those, and every
         # comment its own finding answers, whose record may already be gone.
         | { id: $t.id, fc: $fc, held: [ $fc[] | select(.ri != null) ],
