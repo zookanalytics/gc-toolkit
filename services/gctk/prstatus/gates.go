@@ -75,29 +75,29 @@ const mergeResultPullRequest = "pull_request"
 // person's move is needs-attention, and needs-review once the pull request is
 // open, where the move is a review. A pre-open anchor has no pull request to
 // review yet, and a bead with no merge_result is no merge anchor.
-//
-// The walk reads no GitHub, so a pull request on Gas Town's pending record
-// ([record.OnRecord]) is weighed by its row as well, less the old record's
-// facts, which no pass writes on a bead on this one and which [Render] does not
-// read for the PR itself: the merge pass's verdict and thread count, and
-// pr-open.sh's draft markers. Its review is a person's move only at the
-// validated head, and only once pr-facts.sh has recorded a posture, which it
-// does not read while the pull request is a draft, the city's work.
 func awaitsPerson(b Blocker, edges []Blocker) bool {
 	result := b.Metadata["merge_result"]
 	if result == "" {
 		return false
 	}
 	f := RowFacts(b.Metadata)
-	onRecord := record.OnRecord(result)
-	if onRecord {
-		f.PRMachine, f.PRMachineCause, f.PRMachineReason, f.PRUnansweredThreads = "", "", "", ""
-		f.OpenedAsDraft, f.DraftReadied = "", ""
-	}
 	for _, e := range edges {
 		if e.open() && !IsHumanGate(e.IssueType, e.AwaitType) && !IsPersonBlocker(e) {
 			f.InFlightCount++
 		}
+	}
+
+	// The walk reads no GitHub, so a pull request on Gas Town's pending record
+	// is weighed by its row as well, less the old record's facts, which no pass
+	// writes on a bead on this one and which [Render] does not read for the PR
+	// itself: the merge pass's verdict and thread count, and pr-open.sh's draft
+	// markers. Its review is a person's move only at the validated head, and
+	// only once pr-facts.sh has recorded a posture, which it does not read while
+	// the pull request is a draft, the city's work.
+	onRecord := record.OnRecord(result)
+	if onRecord {
+		f.PRMachine, f.PRMachineCause, f.PRMachineReason, f.PRUnansweredThreads = "", "", "", ""
+		f.OpenedAsDraft, f.DraftReadied = "", ""
 	}
 	switch Derive(f) {
 	case NeedsAttention:
