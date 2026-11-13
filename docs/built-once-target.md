@@ -364,7 +364,7 @@ convoy lands only after the operator approves its design.
 
 | Lane | Member | What it removes | Size |
 |---|---|---|---|
-| A | tk-1tfzr71.20 | the merge cadence, the approval rule, rework and branch currency; the operator rules at its design | +6,450 net on its branch so far |
+| A | tk-1tfzr71.20 | the merge cadence, the approval rule, rework and branch currency; the operator rules at its design | +6,369 net on its branch so far |
 | A | tk-1tfzr71.22 | review beads, lane derivation, validation passes, machine findings | 10,894 |
 | A | tk-1tfzr71.21 | `pr-facts.sh` polling and mirroring | 15,411 |
 | A | tk-1tfzr71.23 | the membership readers on parent-child | partial files |

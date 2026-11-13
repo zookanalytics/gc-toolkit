@@ -194,14 +194,15 @@ files.
 
 tk-1tfzr71.20's branch is in flight, as its integration effort's PR (#1488),
 so the doc's lanes table gives it the measured net the doc gives a branch in
-flight. Read on 2026-11-13 at the branch's head, 893215bd9:
+flight. Read on 2026-11-13 at the branch's head, 5902b02bf, which has merged
+25cda8ace, so the net runs from the baseline:
 
 ```
-$ tools/measure.sh --pr $C 893215bd9
-Net lines from the merge base `bf4a299d8`: runtime +5164 and tests +1286.
+$ tools/measure.sh --pr $C 5902b02bf
+Net lines from the merge base `25cda8ace`: runtime +5094 and tests +1275.
 ```
 
-That is +6,450 lines. Of the other members, only tk-1tfzr71.16 has a branch on
+That is +6,369 lines. Of the other members, only tk-1tfzr71.16 has a branch on
 origin, its integration branch, which is still the main commit dbe034457, with
 a design PR open into it.
 
