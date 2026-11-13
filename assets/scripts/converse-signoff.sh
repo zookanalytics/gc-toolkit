@@ -921,19 +921,23 @@ take_recommendation() {
 # a path from <bead> to it, a path bd would close into a cycle with the
 # conversation's edge onto <bead>, and refuse. bd's cycle check walks every
 # blocks, conditional-blocks and parent-child edge from <bead>, whatever the
-# status of the beads it passes (beads 7ef2fd05e,
+# status or the kind of the beads it passes (beads 7ef2fd05e,
 # issueops.cycleReachabilityQuery), and only its own store's edges, so a bead
 # in another store ends a path. The walk reads one level at a time through
-# `gc bd list --id`. Prints that bead and returns 0 when a path reaches the
-# conversation, 1 when none does, 2 when a level did not read as the beads it
-# asked for, and 3 when the walk went past 50 levels, the depth bd's dep tree
-# stops at.
+# `gc bd list --id`, which leaves out gates, templates, infrastructure beads and
+# wisps unless the call asks for them (workapi.applyTypeSuppressions at the
+# same commit). So it passes the flags bd_exact_row (bd-lib.sh) passes, which
+# lift all four, and a gate on the path reads like any other bead. Prints that
+# bead and returns 0 when a path reaches the conversation, 1 when none does, 2
+# when a level did not read as the beads it asked for, and 3 when the walk went
+# past 50 levels, the depth bd's dep tree stops at.
 waits_on_conversation() {
   local frontier="$1" seen=" $1 " level=0 json out
   while [ -n "$frontier" ]; do
     level=$((level + 1))
     [ "$level" -le 50 ] || return 3
-    json=$(gc bd list --id "$(printf '%s' "$frontier" | tr ' ' ',')" --all --json 2>/dev/null) || return 2
+    json=$(gc bd list --id "$(printf '%s' "$frontier" | tr ' ' ',')" --all \
+        --include-gates --include-infra --include-templates --json --limit 0 2>/dev/null) || return 2
     out=$(printf '%s\n' "$json" | grep -av '^gc bd:' | scrub | jq -r --arg want "$frontier" --arg seen "$seen" \
         --arg c "$CONVERSATION" --arg p "${CONVERSATION%%-*}-" '
       if type != "array" or ([ .[] | (.id // "") | tostring ] | sort) != ($want | split(" ") | sort)

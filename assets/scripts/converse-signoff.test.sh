@@ -179,7 +179,9 @@ mkdir -p "$TMP/bin" "$TMP/store/b" "$TMP/rig/assets/scripts" "$TMP/cwd"
 # One JSON file per bead under $STORE/b/<id>.json, its edges as deps
 # [{type, on}] on the bead the edge starts from. Every write is appended to
 # $CALLS. A guarded update whose --if-assignee or --if-status misses exits 13
-# and writes nothing, as bd does. Hooks: LIST_DOWN fails `bd list`;
+# and writes nothing, as bd does. `bd list` leaves out a gate, a template, an
+# agent, role or message bead and a wisp unless the call asks for that kind, as
+# bd does. Hooks: LIST_DOWN fails `bd list`;
 # LIST_DOWN_ID=<id> fails a `bd list` whose --id names that bead;
 # SHOW_DOWN=<id> fails `bd show` of that bead; SHOW_DOWN_SECOND=<id> answers the
 # first `bd show` of that bead and fails the next; DEP_UP_DOWN=<gate> fails the
@@ -220,7 +222,12 @@ case "$1 ${2:-}" in
     _id=""; _p=""; for a in "$@"; do [ "$_p" = "--id" ] && _id="$a"; _p="$a"; done
     case ",$_id," in *",${LIST_DOWN_ID:-}",*) [ -z "${LIST_DOWN_ID:-}" ] || { echo "bd list: data plane down" >&2; exit 1; } ;; esac
     if [ -n "$_id" ]; then
-      for i in $(printf '%s' "$_id" | tr ',' ' '); do [ ! -f "$B/$i.json" ] || list_row "$i"; done | jq -sc '.'
+      for i in $(printf '%s' "$_id" | tr ',' ' '); do [ ! -f "$B/$i.json" ] || list_row "$i"; done \
+        | jq -sc --arg a " $* " 'def asked($f): $a | contains(" --include-" + $f + " ");
+            [ .[] | select(((.issue_type // "") != "gate" or asked("gates"))
+              and (((.is_template // false) | tostring) != "true" or asked("templates"))
+              and (((.issue_type // "") | IN("agent", "role", "message") | not) or asked("infra"))
+              and (((.ephemeral // false) | tostring) != "true" or asked("ephemeral") or asked("infra"))) ]'
     else printf '[]\n'; fi ;;
   "bd dep")
     case "$3" in
@@ -2207,6 +2214,27 @@ bead tk-found; edge tk-found discovered-from tk-anc
 run_signoff "${FOLLOW[@]}" --waiting-on tk-found
 hasnt "$OUT" "already waits on" "(STAY-HOLDS-MERGE-OTHER-EDGE) a path through an edge bd's cycle check does not walk refuses nothing"
 has "$(cat "$CALLS")" "bd dep add tk-conv tk-found --type blocks" "(STAY-HOLDS-MERGE-OTHER-EDGE) …and the stay waits on that work"
+# bd's cycle check walks a bead whatever its kind, and bd list leaves out
+# gates, templates, infrastructure beads and wisps unless the call asks for
+# them, so the walk asks for them all. A path to the conversation through a
+# bead of a kind the list hides is refused like any other.
+fresh; bead tk-anc; setm tk-anc merge_result pull_request
+bead tk-rw; setm tk-rw anchor_bead tk-anc
+conv tk-conv tk-rw; edge tk-anc blocks tk-conv
+gate tk-gpath path-gate; bead tk-tpl; setf tk-tpl is_template true; bead tk-msg message; bead tk-wisp-1; setf tk-wisp-1 ephemeral true
+for hid in tk-gpath tk-tpl tk-msg tk-wisp-1; do
+  bead tk-via; edge tk-via blocks "$hid"; edge "$hid" blocks tk-anc
+  run_signoff "${FOLLOW[@]}" --waiting-on tk-via
+  eq "$RC" 2 "(STAY-WALK-HIDDEN) a stay on work that waits on the held PR through $hid, of a kind bd list hides, exits 2"
+  has "$OUT" "tk-via already waits on tk-conv through tk-anc" "(STAY-WALK-HIDDEN) …naming the bead that holds the conversation through $hid"
+  eq "$(writes)" 0 "(STAY-WALK-HIDDEN) …and writes nothing through $hid"
+done
+# Work that waits on a gate a person has cleared reads that gate on the walk,
+# and stays.
+closer_case; gate tk-cleared cleared-gate; setf tk-cleared status closed; edge tk-work blocks tk-cleared
+run_signoff --conversation tk-conv --outcome "staying — waits on tk-work" "${STAYING[@]}"
+eq "$RC" 0 "(STAY-WALK-GATE) a stay on work that waits on a cleared gate exits 0"
+has "$(cat "$CALLS")" "bd dep add tk-conv tk-work --type blocks" "(STAY-WALK-GATE) …and waits on that work"
 closer_case; setf tk-conv assignee human; setf tk-conv status open
 run_signoff --conversation tk-conv --outcome x --ruled yes --ruling "build the fix" --waiting-on tk-work --close-brief "$BRIEF" --stay "x"
 eq "$RC" 2 "(STAY-QUEUED) a conversation in the operator's queue has no sitting to stay"
