@@ -146,7 +146,7 @@ change.
 |---|---|---|
 | `gctk bead arm <bead> --target <rig>/<pool> [--on <formula>] --reason <text> [--db <path>]` | agent, hook | Records the arm. With no `--on` it records the target's default formula, read from `gc config show --json` (`DefaultSlingFormula`). It refuses a closed bead, a bead not `open`, a bead already dispatched (`in_progress`, or a `gc.routed_to` route), a target with no formula to pour, and a bead with a wait edge into another store. An arm already present with the same target and formula is a success that writes nothing, and a different one is refused. |
 | `gctk bead disarm <bead> --reason <text> [--db <path>]` | agent, hook | Removes the arm in one write, under the bead's dispatch lock (section 4). It exits 0 once no arm remains, the case where none was there included. Once it exits 0, no start has the bead in flight and none will send it. |
-| `gctk bead start-armed [--db <path>] [--dry-run]` | order | Retires the arm on each closed or delivered bead, and starts each armed bead section 7's rule sends (section 4). It prints one JSON object per arm it reads: `gctk bead holds`' answer for the bead, with what the pass did with the arm, or with `--dry-run` would do. That is a retire and its case, a start, an exit 3 read as already sent, a hold and what holds the bead, a cap reached, a failed sling or a malformed record. |
+| `gctk bead start-armed [--db <path>] [--dry-run]` | order | Retires the arm on each closed or delivered bead, and starts each armed bead section 7's rule sends (section 4). It prints one JSON object per arm it reads: `gctk bead holds`' answer for the bead, with what the pass did with the arm, or with `--dry-run` would do. That is a retire and its case, a start, an exit 3 read as already sent, a hold and what holds the bead, a cap reached, an unfinished pour it asks a person about, a failed sling or a malformed record. |
 
 Nothing remains of `deferred-dispatch.sh`. `orders/deferred-dispatch.toml`
 keeps its name, cadence, rig scope and single-flight gate, so
@@ -239,7 +239,8 @@ What the chosen shape still needs:
   per-pass call and time budget its suite asserts. The start stops starting
   slings once less than one sling's allowance remains before a deadline set
   below the order's timeout, and leaves the rest armed for the next pass. A
-  sling the timeout kills is recovered by section 4's search. The partial and
+  sling the timeout kills is recovered by section 4's search, which asks a
+  person when that sling left its pour unfinished. The partial and
   skipped outcome declarations retire, since the next pass and the doctor's
   owed check carry what a pass leaves.
 - **No marker.** Section 4 replaces it.
@@ -285,19 +286,24 @@ uses.
    closed or gained a `merge_result` since then has its arm retired as above.
 2. Resolve the formula: the arm's `--on`, or else the target's default formula.
 3. When the arm records an earlier attempt (`_fail_count` above 0), search for
-   a workflow root titled with the arm's token, `<formula> arm:<bead>@<armed
-   at>`. A root that is not a closed `molecule_failed` one means the earlier
-   attempt landed: disarm, and stop here.
+   the workflow roots that carry the arm's token, `arm:<bead>@<armed at>`. A
+   root found there that is not an unfinished pour (below) means the earlier
+   attempt landed, whichever formula it carries: disarm, and stop here. While
+   an unfinished pour found there is still open, the start keeps the arm,
+   slings nothing, and asks a person as step 6 does, naming the root.
 4. Raise `_fail_count` by one in one write.
 5. Run `gc sling <target> <bead> --on <formula> --title "<formula>
    arm:<bead>@<armed at>"`.
-6. Exit 0: disarm. Exit 3: disarm too, because `gc sling` exits 3 only when a
-   live workflow already works the bead (`sourceworkflow.ConflictError`, mapped
-   to 3 in `cmd/gc/cmd_sling.go`), so the work is already sent. Any other exit
-   keeps the arm for the next pass. At three attempts the start asks a person
-   instead of slinging, as the pass does today, through `human-gate.sh` under
-   the key `deferred-dispatch-sling-failed.<bead>`, or through
-   `gc-helm.sh open` when the bead has an open child.
+6. Exit 0: disarm. Exit 3: `gc sling` exits 3 only when its launch check
+   counts a live workflow on the bead (`sourceworkflow.ConflictError`, mapped
+   to 3 in `cmd/gc/cmd_sling.go`), and it names each one. When one of them is
+   not an unfinished pour, the work is already sent: disarm. When each is an
+   unfinished pour, nothing works the bead, so the start keeps the arm and
+   asks a person, naming those roots. Any other exit keeps the arm for the
+   next pass. At three attempts the start asks a person instead of slinging,
+   as the pass does today, through `human-gate.sh` under the key
+   `deferred-dispatch-sling-failed.<bead>`, or through `gc-helm.sh open` when
+   the bead has an open child.
 
 What Gas City reports is enough while the first run is live. Its launch takes a
 per-bead lock and refuses a second root of the same formula while one is live,
@@ -309,10 +315,20 @@ and a sling a killed pass left running, therefore pour once. Gas City cannot
 report a run that has finished, because the launch check counts only roots
 that are not terminal. So a start that died after its sling landed, and before
 its disarm, would pour again once that run had ended. The token closes that
-window. It is a title on Gas City's own root, found by
-`gc bd list --all --include-ephemeral --title-contains`, the way Accept finds
-its own pour (the "Accept's lock" warrant). It is searched only after an
-earlier attempt, so a start that succeeds the first time costs no search.
+window. It is a title on Gas City's own root, `<formula> arm:<bead>@<armed
+at>`, found by `gc bd list --all --include-ephemeral --include-gates
+--title-contains "arm:<bead>@<armed at>"`. The argument is the part of the
+token that names no formula, the way Accept searches for `accept:<token>`
+alone (`accept_token_root`, `assets/scripts/gc-helm.sh`; the "Accept's lock"
+warrant). An arm that names no formula resolves its target's default at each
+start, and that default can change between an attempt and its retry. A search
+that named the formula would then miss the root the earlier attempt poured,
+and Gas City's launch check, which is scoped to the formula, would not refuse
+the second pour either. The search includes gates because a pour Gas City left
+unfinished keeps its root typed as a gate (below), and bd's `list` shows a gate
+only with `--include-gates`, which `--all` does not imply. The token is
+searched only after an earlier attempt, so a start that succeeds the first
+time costs no search.
 
 The launch check has a second half: it also refuses while a live root of any
 formula names the bead in `gc.source_bead_id`
@@ -322,6 +338,49 @@ also mean that a run of another formula, launched some other way, already works
 the bead. The start reads that as sent too, since the bead is already being
 worked, and it prints the line `gc sling` printed, which names the live
 workflow.
+
+A root that carries `molecule_failed=true`, or still carries the fence
+`gc.instantiating`, whatever its status, is an unfinished pour. It never shows
+that the arm's work was sent, whether step 3's search finds it or an exit 3
+names it. Gas City pours a graph in one batch where its store supports one
+(`instantiateViaGraphApply`, `internal/molecule/graph_apply.go`). Otherwise, or
+once the batch has failed twice with a transient error, `Instantiate`
+(`internal/molecule/molecule.go`) makes the beads one at a time, root first.
+The fence it puts on each bead as it makes it also types the bead as a gate and
+withholds its route (`fenceGraphWorkflowBead`), and only once every bead is
+made does it lift the fences and restore each type and route. When that pour
+fails part way, `markFailed` stamps `molecule_failed=true` on each bead made so
+far and clears its fence without restoring its type or route, and closes
+nothing. `gc sling` closes the failed root in a cleanup of its own
+(`closeFailedGraphV2Roots`, `internal/sling/sling.go`), which returns its error
+and leaves the root open when its lookup or its close fails, or when the sling
+stops before the cleanup runs. A sling killed while it makes the beads leaves
+its root open, still fenced and typed as a gate. Upstream tracks both states
+as open P1 bugs: gastownhall/gascity#6177, a failed chain that only a retry
+under the same key closes, and #6179, a fenced chain a killed client leaves.
+Accept's search already skips a `molecule_failed` root whatever its status
+(`accept_token_root`).
+
+While the root of an unfinished `--on` pour is open, Gas City refuses every
+sling of that formula on the bead with exit 3, naming that root. The launch
+check (`liveConvoyTrackedWorkflowRoots`, `internal/sling/sling_attachment.go`)
+walks every synthetic input convoy that tracks the bead, closed ones included,
+and keeps each root that is not terminal, is a workflow and carries the same
+`gc.formula_name`. It reads neither mark. An unfinished pour's convoy still
+tracks the bead: a failed sling closes it with `CloseSyntheticInputConvoy`
+(`internal/graphv2/invocation.go`), which leaves the `tracks` edge in place,
+and a killed one leaves it open. The check runs before the pour
+(`attachFormulaToBead`, `internal/sling/sling_core.go`), so a retry is refused
+before anything it does could close the old root. A retry of that formula
+cannot pour while the root is open, so the start keeps the arm, slings
+nothing, and asks a person through step 6's gate, naming the root and the
+command that closes it with its steps, `gc convoy delete <root> --force`
+(`cmdWorkflowDelete`, `cmd/gc/cmd_convoy_dispatch.go`). It ends no Gas City run
+itself. It reads the roots an exit 3 names from the line `gc sling` prints
+(`printSourceWorkflowConflictLines`, `cmd/gc/cmd_sling.go`). Once the root is
+closed and the gate is cleared, the next start slings, because a closed
+unfinished pour holds nothing back: step 3 passes over it, and the launch check
+skips a terminal root.
 
 Neither the token nor exit 3 sees work that another path delivered, which is
 why the delivery stamp retires an arm. The run that delivered the work was not
@@ -554,8 +613,9 @@ them had an ancestor that waits.
   case for each, an unstarted armed bead whose only open blocker is that edge,
   run against the real bd.
 - **tk-cedhuvm, exit 3 read as malformed arguments.** Exit 3 means a live
-  workflow already works the bead, so it retires the arm, and no pack failure
-  shares that exit (section 4). Unit 1.
+  workflow already works the bead, so it retires the arm, unless each workflow
+  it names is a pour Gas City never finished, which keeps the arm and asks a
+  person. No pack failure shares that exit (section 4). Unit 1.
 
 Each of these waits on tk-1tfzr71.16 through a `blocks` edge with an armed
 validating closer, which checks it once the effort lands on main.
@@ -801,16 +861,26 @@ the bd the city runs against a scratch store on a Dolt server of its own
   then the gate's answer, after which the start sends nothing.
 - **The writes**: `arm` and `disarm` against the real store, and the start's
   disarm after a sling.
+- **The recovery after an earlier attempt**, with each root made in the real
+  store under the arm's token: a root poured for one formula while the arm now
+  resolves another, which disarms and slings nothing; an open root carrying
+  `molecule_failed=true`, and an open root still fenced by `gc.instantiating`,
+  each typed as a gate as Gas City leaves it, and each of which keeps the arm,
+  slings nothing and asks a person, naming the root; and a closed
+  `molecule_failed` root, which does not disarm, so the retry slings.
 - **The record's decoding**, in gctk's ordinary suite on the fake store: the
   formula the start pours from each stored form of `_args`
   (`["--on","<formula>"]`, `["--on=<formula>"]`, `[]`, absent and malformed),
   and the attempts below, at and past the cap.
 
 A test cannot run Gas City's launch, so `gc sling` is a shim that records each
-call and exits 0, 1 or 3 as the case says, and the exit-3 case pins
-tk-cedhuvm's answer. Unit 3 runs stand-down's real-store proof again against
-its scripts. The store harness is opt-in, as it is today, so each unit runs it
-and records the run in its PR. The retirement cases also run in gctk's
+call and exits 0, 1 or 3 as the case says. On exit 3 it prints the line
+`gc sling` prints, naming roots made in the store. The exit-3 cases pin
+tk-cedhuvm's answer: an exit 3 that names a root Gas City finished disarms,
+and one whose only named root is an unfinished pour keeps the arm and asks a
+person. Unit 3 runs stand-down's real-store proof again against its scripts.
+The store harness is opt-in, as it is today, so each unit runs it and records
+the run in its PR. The retirement cases also run in gctk's
 ordinary suite on its fake store (`services/gctk/internal/gcbd/fake`), so they
 run on every test run. They carry the regression `deferred-dispatch.test.sh`
 holds for the delivered retire, which unit 1 deletes with `reconcile`.
@@ -872,12 +942,13 @@ new start replaces the old pass at that landing, with every arm carried over
    the record in `services/gctk/arm/record` (section 2), with sections 4 and 7:
    the retirement of the arm on a closed or delivered bead, the selection of
    armed beads by section 7's rule, the dispatch lock, the formula resolution,
-   the token, exit 3 as sent, the cap's ask and the time bound. Take the six
-   live keys over in the record, have `waits` ask the record for the arm and
-   drop its declarations of the arm's keys and the marker, add both packages to
-   `layers_test.go`'s domains, regenerate `key-registry.json`, and remove the
-   six from `lifecycle/lifecycle.toml`, where the marker stays registered as
-   retired. Point `orders/deferred-dispatch.toml`'s `exec` at the verb. Delete
+   the token, exit 3 as sent, the ask about an unfinished pour, the cap's ask
+   and the time bound. Take the six live keys over in the record, have `waits`
+   ask the record for the arm and drop its declarations of the arm's keys and
+   the marker, add both packages to `layers_test.go`'s domains, regenerate
+   `key-registry.json`, and remove the six from `lifecycle/lifecycle.toml`,
+   where the marker stays registered as retired. Point
+   `orders/deferred-dispatch.toml`'s `exec` at the verb. Delete
    `reconcile` from `deferred-dispatch.sh` with its pass lock, budget, marker
    and outcome code, and have its `arm` and `disarm` call the gctk verbs until
    unit 3 deletes the file. Move the owed check onto the start's dry run and
@@ -963,14 +1034,20 @@ each, the search was for a Gas City or bd primitive that pours on readiness,
 reports a finished launch, or keeps and reads a launch put off until a bead is
 ready, and none covers the need. The start's lines decode the arm, a record
 only the pack keeps, so no primitive reads it. Section 6 adds no surface: it
-composes Gas City's hand-off, its nudges and its controller's wake.
+composes Gas City's hand-off, its nudges and its controller's wake. Nor does an
+unfinished pour (section 4): the start asks a person through the gate it
+already has, and Gas City's own `gc convoy delete` closes the root.
 
 | Fact | Upstream 3bcab243e and dba20336ed | The city's build 6589a7df45 |
 |---|---|---|
 | Nothing pours a formula when a bead's blockers close | no core order or script calls `gc sling`; `cascade-nudge-on-blocker-close.sh` and `nudge-on-route.sh` only nudge | same scripts, plus the queued delivery below |
 | `gc sling` pours without reading readiness | `internal/sling`: `validateExistingBeadInQuerier` checks existence only, and no readiness check precedes a pour | a dry run on a blocked armed bead prints "A wisp will be attached automatically" |
 | Nothing keeps a launch for later, so nothing lists or decodes one | no command or order records a launch for a later pour (the two rows above), so none reports one | same; bd 1.3.4's `list --has-metadata-key` selects the rows that carry a key and decodes no value |
-| Exit 3 means a live workflow already works the bead | `cmd/gc/cmd_sling.go`: the `DoSling` error branch returns 3 for `*sourceworkflow.ConflictError` only; `internal/sourceworkflow/sourceworkflow.go` documents the mapping; `checkLegacySourceWorkflowConflict` in `internal/sling/sling_core.go` raises it for a live root of the same formula that the bead's input convoy tracks, or of any formula whose `gc.source_bead_id` names the bead | same |
+| Exit 3 means the launch check counts a live workflow on the bead, and names it | `cmd/gc/cmd_sling.go`: the `DoSling` error branch returns 3 for `*sourceworkflow.ConflictError` only, and `printSourceWorkflowConflictLines` prints the workflows it names; `internal/sourceworkflow/sourceworkflow.go` documents the mapping; `checkLegacySourceWorkflowConflict` in `internal/sling/sling_core.go` raises it for a live root of the same formula that the bead's input convoy tracks, or of any formula whose `gc.source_bead_id` names the bead | same |
+| A pour made one bead at a time can leave a root it never finished, typed as a gate | `instantiateViaGraphApply`, `internal/molecule/graph_apply.go`, pours in one batch where the store supports one; otherwise, or after two transient batch failures, `Instantiate`, `internal/molecule/molecule.go`, makes the root first, and `fenceGraphWorkflowBead` keeps every bead fenced with `gc.instantiating`, typed as a gate and with its route withheld until all are made; `markFailed` stamps a pour that fails part way `molecule_failed=true` and clears the fences without restoring a type or route, and closes nothing; `closeFailedGraphV2Roots`, `internal/sling/sling.go`, is a separate cleanup that returns its error | same functions; bd 1.3.4's `list` shows a gate only with `--include-gates`, which `--all` does not imply (`applyTypeSuppressions`, `internal/workapi/list.go`) |
+| The launch check counts an unfinished pour while its root is open | `liveConvoyTrackedWorkflowRoots`, `internal/sling/sling_attachment.go`, walks closed synthetic convoys too and reads neither mark; `CloseSyntheticInputConvoy`, `internal/graphv2/invocation.go`, closes a failed pour's convoy and keeps its `tracks` edge; `attachFormulaToBead`, `internal/sling/sling_core.go`, runs the check before the pour | same functions |
+| `gc convoy delete <root> --force` closes a workflow root and its steps | `cmdWorkflowDelete` and `findWorkflowBeads`, `cmd/gc/cmd_convoy_dispatch.go` | same |
+| Upstream tracks unfinished pours as #6177 and #6179 | both issues open, labeled `kind/bug` and `priority/p1`, read on 2026-11-13: #6177 for a failed chain that only a same-key retry closes, #6179 for a fenced chain a killed client leaves | the build carries no fix for either |
 | A dry run reports a live same-formula root, and nothing reports a finished one | `dryRunReportBlockingMolecule` with `sling.LiveConvoyTrackedWorkflowRoots`, "the same check checkLegacySourceWorkflowConflict runs at launch time" | same |
 | `--title` names the root of a formula pour | `cmd/gc/cmd_sling.go`: "wisp root bead title (with --formula or --on)" | same |
 | bd ignores a cross-prefix blocker, and Gas City re-judges one only on a split city | `internal/readywork/crossstore.go` header | `gc config show` names no class binding |
