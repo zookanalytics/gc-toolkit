@@ -45,23 +45,29 @@ for the waits bd cannot judge, and this doc says how the start applies them.
 
 ## Arm it instead of remembering it
 
+The arm and the disarm are gctk's verbs, from the binary the city builds at
+`$GC_CITY_PATH/.gc/services/gctk/bin/gctk`, which a caller finds through the
+`gctk-bin` block:
+
 ```bash
-"$PACK_DIR/assets/scripts/deferred-dispatch.sh" arm <bead> \
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+"$GCTK" bead arm <bead> \
     --target <rig>/<agent> \
     --reason "waits for <blocker> to land"
 ```
 
-That hands the call to `gctk bead arm`, which writes the pending dispatch onto
-the work bead in one write, with a note saying who armed it and why, and
-returns. Nothing is held in your context; you may drain immediately.
+`gctk bead arm` writes the pending dispatch onto the work bead in one write,
+with a note saying who armed it and why, and returns. Nothing is held in your
+context; you may drain immediately. Without `--db` it writes in the store gc
+routes the bead to, so the arm lands from any seat.
 
-The arm records the formula the start pours: the one `--sling-arg --on
---sling-arg <formula>` names, or else the target's default, which the city's
-config gives. The arm passes `gc sling` nothing else:
+The arm records the formula the start pours: the one `--on <formula>` names, or
+else the target's default, which the city's config gives. The arm passes
+`gc sling` nothing else:
 
 ```bash
-deferred-dispatch.sh arm tk-abc --target gc-toolkit/gc-toolkit.polecat \
-    --sling-arg --on --sling-arg mol-pr-from-issue
+"$GCTK" bead arm tk-abc --target gc-toolkit/gc-toolkit.polecat \
+    --on mol-pr-from-issue --reason "waits for tk-xyz to land"
 ```
 
 `arm` is fail-closed. It refuses a bead that is closed, one that is
@@ -108,13 +114,18 @@ dispatch.
 `tools/gc-proactive.sh sling` directly, so the sling refuses a bead that has a
 dispatch path too, and a reaction they ask for cannot race the arm either.
 
-To see what is owed, in this rig's store:
+To see what is owed in a rig's store, and to take an arm back:
 
 ```bash
-deferred-dispatch.sh list        # each armed bead and what the next pass would do with it
-deferred-dispatch.sh list --json # the armed beads alone, as bd lists them, with no hold
-deferred-dispatch.sh disarm <bead> --reason "superseded by <x>"
+"$GCTK" bead start-armed --dry-run --db <rig root>/.beads  # each armed bead and what the next pass would do with it
+"$GCTK" bead holds <bead>                                  # one bead's arm, and what holds it
+"$GCTK" bead disarm <bead> --reason "superseded by <x>"
 ```
+
+The dry run writes, slings and asks nothing, and takes no lock. It prints one
+JSON object per armed bead: what `gctk bead holds` answers for it, and under
+`start` the act the next pass would take. The disarm exits 0 once no arm
+remains, a bead that carried none included.
 
 A converse sitting holds a bead with a human gate and writes nothing else the
 pass reads, so an armed bead keeps its arm through the hold. The gate holds it
@@ -135,6 +146,15 @@ gate that also holds another open bead takes no answer, because an answer releas
 everything it blocks. With `--successor` naming the evidence, the bead leaves that
 gate after its arm and route are gone. Removing that edge first would send the work,
 as any release of an armed bead does.
+
+Every write that stops an armed bead, or sends it on another way, removes the arm
+first, through `gctk bead disarm`, and goes on only once that exits 0, for the same
+reason. `gc-helm.sh takeaway --release` makes the disarm its first write, before
+the release write, the waits, the run's end and any `--route` or `--assign`, so a
+bead it stops stays stopped once nothing holds it. `gc-helm.sh accept` does too,
+because the answer it gives the recommendation's gate could release the bead to its
+arm ahead of Accept's own pour. So do `stand-down.sh` and a sitting's withdrawal of
+the subject's arm and route.
 
 ## A named agent hears through Gas City's hand-off
 
@@ -226,11 +246,12 @@ runs `gctk bead start-armed` on the rig's store (`services/gctk/arm`), which:
 
 A held arm keeps its record. Releasing the hold, by closing a park's gate or by
 the prerequisite landing, needs no re-arm: the first pass after it dispatches
-the bead. `deferred-dispatch.sh list` prints each arm as the start's dry run
-reads it: `HELD by <blocker> "<title>"`, adding `on ancestor <id>` when the
-wait sits on an ancestor and `(waits-for, unjudged)` for a wait the store
-cannot judge yet, `DISPATCHABLE NOW`, `STRANDED` for a status the start never
-sends, and the rest by the act the next pass would take.
+the bead. The start's dry run, `gctk bead start-armed --dry-run`, names what
+holds each held arm. Its `waits` lists each wait, with `ancestor` set when the
+wait sits on an ancestor and the type `waits-for` for a wait the store cannot
+judge yet. Its `start` holds the act: `hold` and the case that holds the arm,
+`start` for an arm nothing holds, or `hold` with the case `status` for a status
+the start never sends.
 
 ### Exactly once
 
@@ -347,9 +368,9 @@ bead through a `blocks` edge, and its arm sends it to the validating closer,
 
 ```bash
 gc bd dep add <bead> <blocker> -t blocks
-"$PACK_DIR/assets/scripts/deferred-dispatch.sh" arm <bead> \
+"$GCTK" bead arm <bead> \
     --target <rig>/gc-toolkit.polecat \
-    --sling-arg --on --sling-arg mol-validate-close \
+    --on mol-validate-close \
     --reason "waits for <blocker>; the validating closer checks it once that closes"
 ```
 

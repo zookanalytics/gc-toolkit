@@ -558,11 +558,12 @@ shares only the word ([authority-map.md](authority-map.md)).
 
 ## Deferred dispatch residual
 
-- **Covers.** `assets/scripts/deferred-dispatch.sh`,
-  `orders/deferred-dispatch.toml`, `services/gctk/arm`, which holds the dispatch
-  lock its verbs take on each armed bead and the title token
-  `arm:<bead>@<armed at>` its start pours under, the `gc.dispatch_when_ready`
-  keys, and [deferred-dispatch.md](deferred-dispatch.md).
+- **Covers.** `orders/deferred-dispatch.toml`, `services/gctk/arm`, whose
+  verbs `gctk bead arm`, `gctk bead disarm` and `gctk bead start-armed` every
+  caller of the arm runs, which holds the dispatch lock those verbs take on each
+  armed bead and the title token `arm:<bead>@<armed at>` its start pours under,
+  the `gc.dispatch_when_ready` keys, and
+  [deferred-dispatch.md](deferred-dispatch.md).
 - **Stands in for.** A dispatch that waits for its bead's blockers, pouring the
   bead's formula once nothing holds it, exactly once.
 - **Evidence.** In `gastownhall/gascity`, nothing pours a formula on a bead once

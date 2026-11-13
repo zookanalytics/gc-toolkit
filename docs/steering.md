@@ -176,9 +176,9 @@ trimmed and in any case, as Gas City's own `HasDispatchHold` does. Its readers:
   move is the sitting's, and its sling refuses one held after the scan read it
   or named to the sling directly;
 - the deferred-dispatch pass slings no armed bead while it is held, because a
-  sling reads no hold, and `deferred-dispatch.sh list` names the label that
-  holds the arm, so `doctor/check-armed-dispatch-owed` owes that arm no
-  dispatch;
+  sling reads no hold, and its dry run (`gctk bead start-armed --dry-run`)
+  names the label that holds the arm, so `doctor/check-armed-dispatch-owed`
+  owes that arm no dispatch;
 - `gc-helm.sh place` refuses a bead that `hold:external` also holds, because a
   placement lifts only `hold:mayor`.
 
@@ -213,7 +213,7 @@ its hold, so `place` runs the writes in one order, each taking its exit:
    formula. A bead with no `hold:mayor` is refused, or reported as already
    placed when a live run, a route, an arm or an assignee shows its dispatch.
 2. It clears any route, since the `--fix` of Gas City's `hold-label-routed-to`
-   check writes one and `deferred-dispatch.sh arm` refuses a routed bead. With
+   check writes one and `gctk bead arm` refuses a routed bead. With
    `--under` it removes a relates-to link between the bead and the parent,
    which bd refuses beside a parent edge, sets the parent, and moves `--shift`
    through `queue-priority.sh move`.
@@ -222,7 +222,7 @@ its hold, so `place` runs the writes in one order, each taking its exit:
 4. It dispatches the bead to `--route`, or else to the polecat pool of the
    bead's rig, on `--on`, or else on that pool's default formula. While a
    blocker holds the bead or a parent above it, such as a park, it arms the
-   dispatch (`deferred-dispatch.sh arm`), so the run starts once nothing holds
+   dispatch (`gctk bead arm`), so the run starts once nothing holds
    the bead. Otherwise it slings.
 5. It lifts the hold, with a note saying where the bead went, in one write
    that removes each label spelling the hold, one `--remove-label` each:
