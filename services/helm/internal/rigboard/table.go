@@ -156,15 +156,13 @@ func gateHold(h waits.Holds) *waits.Wait {
 	return nil
 }
 
-// staying reports whether a conversation reads as its sitting's stay: open
-// under the sitting, which the stay's last write leaves it, with a wait of its
-// own holding it. A sitting that holds keeps its conversation claimed, in
-// progress, and one in the operator's queue is assigned to them, so neither
-// is a stay, whatever edge an earlier stay left on it: the operator owes it a
-// move.
+// staying reports whether a conversation's row is its sitting's stay
+// ([conversation.Staying]), with a wait of its own holding it as waits answers.
+// prstatus reads a conversation a pull request waits on by the same rule, so
+// the conversation's row and its pull request's agree on whether the operator
+// owes a move.
 func staying(b bead, h waits.Holds) bool {
-	a := strings.TrimSpace(b.Assignee)
-	return status(b) == "open" && a != "" && a != "human" && h.Status == waits.Blocked
+	return conversation.Staying(b.Status, b.Assignee, h.Status == waits.Blocked)
 }
 
 // table answers one row. in carries the readers' answers about it.

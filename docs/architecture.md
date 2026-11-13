@@ -328,8 +328,9 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   ([human-engagement.md](human-engagement.md#a-sitting-that-stays-for-the-return)).
   Gas City sleeps a sitting that stays, and when the work closes it wakes the
   sitting with its thread, or sends a sitting still up a notice that the work
-  closed. The board shows a conversation its sitting stays in as waiting on
-  that work, not as an ask of the operator. On its return the sitting compares
+  closed. The board shows a conversation its sitting stays in, and the pull
+  request whose merge it holds, as waiting on that work, not as asks of the
+  operator. On its return the sitting compares
   what landed with what was agreed and tells the operator where it departs. It
   passes and fails nothing: the work's own checks give the verdicts, and the
   subject closes as it would after a hand-off, such as through the validating

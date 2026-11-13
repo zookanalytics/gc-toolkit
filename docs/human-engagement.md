@@ -1307,8 +1307,12 @@ alias, which drops the claim. Gas City does the rest with what it already has
   it sleeps again once the tab detaches. `gc-helm engage` attaches an asleep sitting at once.
 - **What reads it.** The board lists a conversation its sitting stays in, open
   under the sitting and held by its work, as no ask: its row reads "Waits on"
-  the work, in the Queued group, until the work closes. One the sitting has
-  claimed to hold is an ask, whatever edge an earlier stay left on it. A
+  the work, in the Queued group, until the work closes. The pull request whose
+  merge it holds is no ask either: its status reads `working`, approved or not,
+  with no `held:` label for the conversation, and the merge stays held. Once
+  the work closes, the conversation and its pull request are both asks again.
+  One the sitting has claimed to hold is an ask, whatever edge an earlier stay
+  left on it. A
   dismiss closes it as it closes any conversation, and the stop it asks for
   leaves an asleep sitting asleep.
 - **What the record keeps.** The subject's wait, its close brief and its

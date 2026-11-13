@@ -54,6 +54,30 @@ func TestIsCandidateIsATaskAConversationsAssigneeHolds(t *testing.T) {
 	}
 }
 
+// TestStayingIsOpenUnderItsSittingWithAWaitOfItsOwn pins the stay: the state
+// the stay's last write leaves, open under the sitting, held by a wait of its
+// own. A claim, the operator's queue or no wait each make it a person's move.
+func TestStayingIsOpenUnderItsSittingWithAWaitOfItsOwn(t *testing.T) {
+	sitting := "gc-toolkit/gc-toolkit.tk-c1"
+	for _, tc := range []struct {
+		status, assignee string
+		waiting, want    bool
+	}{
+		{"open", sitting, true, true},
+		{" Open ", sitting, true, true},
+		{"in_progress", sitting, true, false},
+		{"open", "human", true, false},
+		{"open", "", true, false},
+		{"open", sitting, false, false},
+		{"closed", sitting, true, false},
+		{"", sitting, true, false},
+	} {
+		if got := Staying(tc.status, tc.assignee, tc.waiting); got != tc.want {
+			t.Errorf("Staying(%q, %q, %v) = %v, want %v", tc.status, tc.assignee, tc.waiting, got, tc.want)
+		}
+	}
+}
+
 // TestShapeIsOneTracksEdgeAndItsReplies pins the edge half: exactly one bead a
 // `tracks` edge names, which is the subject, and the beads its `replies-to`
 // edges name, each once and sorted. Every other edge is read past.

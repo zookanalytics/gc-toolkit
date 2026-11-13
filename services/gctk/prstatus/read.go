@@ -39,7 +39,8 @@ var ErrUnresolved = errors.New("the anchor does not resolve")
 // Read gathers the [Facts] the city records about each anchor's PR: the anchor's
 // own row, its in-flight set over [InFlightStatuses], and what holds it that
 // only a person moves, which [Holding] reads through its `blocks` edges: the
-// open human gates, and the beads a person owes the next move on. It is the one
+// open human gates, the beads a person owes the next move on, and the
+// conversations that hold it while their sittings stay for work. It is the one
 // place that decides what is read, so every reader that asks what holds a PR, or
 // where a PR stands, gives Read its own [Store] and decides from the same facts.
 //
@@ -121,7 +122,7 @@ func Read(anchors []string, s Store) (map[string]Facts, error) {
 			continue
 		}
 		f := RowFacts(rows[id].Metadata)
-		f.Gates, f.Owed, f.InFlightCount = h.Gates, h.Owed, len(inFlight[id])
+		f.Gates, f.Owed, f.Staying, f.InFlightCount = h.Gates, h.Owed, h.Staying, len(inFlight[id])
 		facts[id] = f
 	}
 	return facts, errors.Join(errs...)
@@ -130,7 +131,8 @@ func Read(anchors []string, s Store) (map[string]Facts, error) {
 // RowFacts are the facts a bead's own row records, read off its metadata: its
 // holds, the posture, the machine verdict with its cause and sentence, the
 // thread count and the draft-stage markers. [Read] adds what it gathers beside
-// the row to them: the gates, the beads a person owes and the in-flight count.
+// the row to them: the gates, the beads a person owes, the staying
+// conversations and the in-flight count.
 // [Holding] weighs a merge anchor it reaches by its row's facts, and the helm
 // board reads a row that is no PR, or whose PR has no answer, by them alone.
 func RowFacts(md map[string]string) Facts {
