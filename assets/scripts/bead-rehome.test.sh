@@ -173,9 +173,10 @@ done
 sub="${1:-}"; shift || true
 [ -z "${FAKE_CALL_LOG:-}" ] || printf '%s %s\n' "$sub" "$*" >> "$FAKE_CALL_LOG"
 
-# Every bead the suite makes stays in one store, so a read that started a
-# process for each bead in it would grow the suite's time with the square of its
-# cases. A read starts the same few processes whatever the store holds.
+# The suite never empties a store, and most of its cases add beads to the same
+# one, so a read that started a process for each bead in a store would grow the
+# suite's time with the square of its cases. A read starts the same few
+# processes whatever the store holds.
 # val <file> <key> — the value on the bead's last `<key>=` line, or "", in VAL,
 # read by bash itself.
 val() {
@@ -207,7 +208,8 @@ race_at() { # <point>
 # rows <file>... — those beads' `bd list` rows, in the order given, built by one
 # jq: the far end of each edge by depends_on_id and its type as type, the last
 # status, assignee, issue_type and is_template line, every notes line, and the
-# m.<key> metadata.
+# m.<key> metadata. jq reads an argument that starts with a dash as one of its
+# options even after --args, so `--` ends its options before the values.
 rows() {
   local f c args=()
   for f in "$@"; do
@@ -226,7 +228,7 @@ rows() {
            | {issue_id: $p[$i], depends_on_id: .[:$e], type: .[$e + 1:]}]}
       | if $as != "" then .assignee = $as else . end
       | if last_of($ls; "is_template") == "true" then .is_template = true else . end ]' \
-    --args ${args[@]+"${args[@]}"}
+    --args -- ${args[@]+"${args[@]}"}
 }
 # The blockers still holding a bead, by the rule real bd applies: a blocks
 # edge counts unless the bead it names is closed or pinned.
@@ -282,7 +284,7 @@ if [ "$sub" = "dep" ]; then
     jq -nc '[ $ARGS.positional as $p | range(0; $p | length; 6) as $i
       | {id: $p[$i], status: $p[$i + 1], issue_type: (if $p[$i + 2] == "" then "task" else $p[$i + 2] end),
          await_type: $p[$i + 3], await_id: $p[$i + 4], assignee: $p[$i + 5], dependency_type: "blocks"}
-      | with_entries(select(.value != "")) ]' --args ${fields[@]+"${fields[@]}"}
+      | with_entries(select(.value != "")) ]' --args -- ${fields[@]+"${fields[@]}"}
     exit 0
   fi
   other="${1:-}"; shift || true
