@@ -632,7 +632,6 @@ fenced_block() {
 # pack, so its prompt calls its watch and its gate withdrawal under the binding
 # it is rendered with, which the seed audit renders as gc-toolkit.
 DISPATCH="$REPO/template-fragments/watch-dispatched-work.template.md"
-DD_CALL='"$(gc <binding> scripts-dir)/deferred-dispatch.sh"'
 WATCH_CALL='"$(gc <binding> scripts-dir)/gc-bd-watch.sh"'
 KEEPER_RENDER="$REPO/generated/seed-audit/agents/keeper.md"
 MECHANIK_RENDER="$REPO/generated/seed-audit/agents/mechanik.md"
