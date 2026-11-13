@@ -19,8 +19,15 @@
 # A standing record (a task_kind assets/scripts/standing-kinds.sh lists) is open,
 # unrouted and unassigned by design and never closes, so a first reaction has no
 # disposition to make on it:
-#   (STANDING-DROP) scan_precision_filter drops a bead of every standing kind
-#   (STANDING-KEEP) …while a raw input beside them is still a candidate
+#   (STANDING-DROP)  scan_precision_filter drops a bead of every standing kind
+#   (STANDING-KEEP)  …while a raw input beside them is still a candidate
+#   (STANDING-SKIP)  sling refuses a bead of every standing kind named to it
+#                    directly (exit RC_STANDING_RECORD), naming its kind, and
+#                    the raw input still proceeds
+#   (STANDING-ORDER) a standing record that also carries a route and an open
+#                    reaction is refused as a standing record
+#   (STANDING-SWEEP) a sweep skips a standing record without spending a cap slot
+#   (STANDING-READS) on the live read, the sling refuses a standing record
 # A bead with a dispatch path (assets/scripts/dispatch-path.sh: a route or an
 # arm) already has its dispatch decided, so a first reaction would only
 # second-guess it:
@@ -154,6 +161,58 @@ has "$IDS" "tk-raw" "(STANDING-KEEP) a raw input beside the standing records is 
 for k in $KINDS; do
     hasnt "$IDS" "tk-standing-$k" "(STANDING-DROP) a task_kind=$k standing record is not a scan candidate"
 done
+
+# gc-helm react and operator-intake name a bead to the sling directly, so the
+# sling refuses a standing record on its own read. The store holds every bead
+# the scan read, plus tk-standing-reacting: a standing record of the first kind
+# that also carries a route, with an open reaction (tk-r-standing) tracking it.
+K1="$(printf '%s\n' "$KINDS" | head -n1)"
+jq --arg k "$K1" '(map({key: .id, value: {metadata: .metadata}}) | from_entries)
+    + {"tk-standing-reacting": {"metadata": {"task_kind": $k, "gc.routed_to": "gc-toolkit/gc-toolkit.polecat"}},
+       "tk-r-standing": {"status": "open", "metadata": {"task_kind": "reaction", "gc.reaction_subject": "tk-standing-reacting"}}}' \
+    "$TMP/scan.json" > "$TMP/beads.json"
+
+echo "# sling refuses a standing record of every kind as a no-op, naming the kind"
+for k in $KINDS; do
+    set +e
+    OUT="$(bash "$SCRIPT" sling "tk-standing-$k" 2>&1)"; RC=$?
+    set -e
+    eq "$RC" 6 "(STANDING-SKIP) sling of a task_kind=$k standing record exits RC_STANDING_RECORD (6)"
+    has "$OUT" "tk-standing-$k is a standing record (task_kind=$k)" "(STANDING-SKIP) …naming its kind"
+    hasnt "$OUT" "would file a reaction bead" "(STANDING-SKIP) …nothing filed for the $k record"
+done
+set +e
+OUT="$(bash "$SCRIPT" sling tk-raw 2>&1)"; RC=$?
+set -e
+eq "$RC" 0 "(STANDING-SKIP) sling of the raw input beside them exits 0"
+has "$OUT" "would file a reaction bead tracking tk-raw" "(STANDING-SKIP) …and files a reaction"
+
+echo "# a standing record is refused as one, whatever reaction or route it also carries"
+set +e
+OUT="$(bash "$SCRIPT" sling tk-standing-reacting 2>&1)"; RC=$?
+set -e
+eq "$RC" 6 "(STANDING-ORDER) a routed standing record an open reaction tracks exits RC_STANDING_RECORD (6)"
+has "$OUT" "tk-standing-reacting is a standing record (task_kind=$K1)" "(STANDING-ORDER) …naming the standing record"
+hasnt "$OUT" "already has an open first reaction" "(STANDING-ORDER) …not the open reaction"
+hasnt "$OUT" "already has a dispatch path" "(STANDING-ORDER) …nor the route"
+hasnt "$OUT" "would file a reaction bead" "(STANDING-ORDER) …and files nothing"
+
+# The scan drops every standing kind, so a sweep meets one only when the row the
+# sling reads differs from the scan's. Two candidates, that one oldest so it
+# ranks first: with a cap of one, the slot shows whether its skip was counted.
+cat > "$TMP/scan.json" <<'JSON'
+[
+  {"id":"tk-late-standing", "issue_type":"task", "description":"a standing record the scan read without its kind", "title":"late", "created_at":"2026-01-01T00:00:00Z", "metadata":{}},
+  {"id":"tk-raw",           "issue_type":"task", "description":"a raw input bead",                                  "title":"raw",  "created_at":"2026-01-02T00:00:00Z", "metadata":{}}
+]
+JSON
+jq -n --arg k "$K1" '{"tk-late-standing": {"metadata": {"task_kind": $k}}, "tk-raw": {"metadata": {}}}' > "$TMP/beads.json"
+echo "# a sweep skips a standing record without spending a cap slot"
+OUT="$(GC_PROACTIVE_SLING_CAP=1 bash "$SCRIPT" scan --sling 2>&1)"
+hasnt "$OUT" "tracking tk-late-standing" "(STANDING-SWEEP) the standing record is never reacted to"
+has "$OUT" "tk-late-standing is a standing record (task_kind=$K1)" "(STANDING-SWEEP) …the sling's read names its kind"
+has "$OUT" "would file a reaction bead tracking tk-raw" "(STANDING-SWEEP) …the cap's one slot goes to the next candidate"
+has "$OUT" "1 standing record(s), not counted" "(STANDING-SWEEP) …and the sweep names the uncounted skip"
 
 # beads.json: the metadata the sling guard reads per bead.
 cat > "$TMP/beads.json" <<'JSON'
@@ -1162,6 +1221,8 @@ hasnt "$OUT" "gc bd create" "(SUBJECT-VANISHED) …and files no reaction"
 #                   the bead's one row
 #   tk-path-gated   an open human gate blocks it
 #   tk-path-held    held, under an upper-case spelling of hold:mayor
+#   tk-path-standing  a standing record of the first kind the shared definition
+#                   lists, which the same read shows
 # Each one's tracks-edge reads answer empty, so no guard before or after the
 # dispatch-path guard refuses it.
 SHOW="$TMP/stub-show"
@@ -1179,6 +1240,8 @@ case "\$*" in
       printf '[{"id":"tk-path-gated","metadata":{},"dependencies":[{"id":"tk-gate-live","dependency_type":"blocks","issue_type":"gate","await_type":"human","status":"open"}]}]' ;;
   "bd show tk-path-held --json")
       printf '[{"id":"tk-path-held","metadata":{},"labels":["learning","HOLD:MAYOR"]}]' ;;
+  "bd show tk-path-standing --json")
+      printf '[{"id":"tk-path-standing","metadata":{"task_kind":"$K1"}}]' ;;
   "bd show tk-path-twice --json")
       printf '[{"id":"tk-path-twice","metadata":{}}]\n[{"id":"tk-path-twice","metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}}]' ;;
   "bd dep list tk-path-"*" --direction up -t tracks --json") printf '[]' ;;
@@ -1207,6 +1270,12 @@ set -e
 eq "$RC" 5 "(PATH-READS) the live path refuses a held bead (exit 5)"
 has "$OUT" "tk-path-held is held (HOLD:MAYOR)" "(PATH-READS) …naming the label it read from the bead's row"
 hasnt "$OUT" "gc bd create" "(PATH-READS) …and files no reaction for the held bead"
+set +e
+OUT="$(show_sling tk-path-standing)"; RC=$?
+set -e
+eq "$RC" 6 "(STANDING-READS) the live path refuses a standing record (exit 6)"
+has "$OUT" "tk-path-standing is a standing record (task_kind=$K1)" "(STANDING-READS) …naming the kind it read from the bead's row"
+hasnt "$OUT" "gc bd create" "(STANDING-READS) …and files no reaction"
 set +e
 OUT="$(show_sling tk-path-locked)"; RC=$?
 set -e

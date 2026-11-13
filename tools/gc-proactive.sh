@@ -46,17 +46,17 @@ FIXTURE="${GC_PROACTIVE_FIXTURE:-}"
 # The reaction sub-type stamped on R. One kind today; the key leaves room for
 # others (a scheduled re-reaction) without a second dedup dimension.
 REACTION_KIND="first-reaction"
-# Set by cmd_sling when it skips a bead as a no-op, else empty: "reacted" when
-# a reaction is already open for the subject or a live owner owns its reaction,
-# "dispatch-path" when the subject already has a route or an arm, a dispatch
-# hold holds it, or an open human gate blocks it, "live-workflow" when a live
-# workflow already drives it.
+# Set by cmd_sling when it skips a bead as a no-op, else empty: "standing" when
+# the subject is a standing record, "reacted" when a reaction is already open
+# for the subject or a live owner owns its reaction, "dispatch-path" when the
+# subject already has a route or an arm, a dispatch hold holds it, or an open
+# human gate blocks it, "live-workflow" when a live workflow already drives it.
 # cmd_scan's --sling loop reads it in-process to keep a skip from spending the
-# cap; the `sling` CLI verb in main() translates it to RC_ALREADY_REACTED,
-# RC_DISPATCH_PATH or RC_LIVE_WORKFLOW so a cross-process caller (gc-helm
-# react, operator-intake) can tell the no-op from a dispatch, name its cause,
-# and file its own conversation rather than wait for a reaction that is
-# already in flight or never ran.
+# cap; the `sling` CLI verb in main() translates it to RC_STANDING_RECORD,
+# RC_ALREADY_REACTED, RC_DISPATCH_PATH or RC_LIVE_WORKFLOW so a cross-process
+# caller (gc-helm react, operator-intake) can tell the no-op from a dispatch,
+# name its cause, and file its own conversation rather than wait for a
+# reaction that is already in flight or never runs.
 SLING_SKIPPED=""
 # Exit codes the `sling` CLI verb uses for those skips — distinct from a
 # dispatch (0) and an error (1), so a caller that needs a NEW reaction can
@@ -64,6 +64,7 @@ SLING_SKIPPED=""
 RC_ALREADY_REACTED=3
 RC_LIVE_WORKFLOW=4
 RC_DISPATCH_PATH=5
+RC_STANDING_RECORD=6
 # The issue types a first reaction may target — an ALLOWLIST (fail-safe): a
 # new bead type earns reactions only when added here deliberately. Tunable per
 # rig via GC_PROACTIVE_TYPES without a code change. The default excludes the
@@ -76,7 +77,7 @@ RC_DISPATCH_PATH=5
 PROACTIVE_TYPES="${GC_PROACTIVE_TYPES:-task,bug,feature,spike}"
 # The one definition of the standing kinds, shared with the liveness sweep and
 # the doctor checks. Exposes $STANDING_KINDS_JQ, which scan_precision_filter
-# applies.
+# and sling_standing_record_guard apply.
 # shellcheck source=../assets/scripts/standing-kinds.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../assets/scripts/standing-kinds.sh" \
     || { printf '%s: cannot source assets/scripts/standing-kinds.sh from the pack\n' "$PROG" >&2; exit 1; }
@@ -199,6 +200,65 @@ subject_present_guard() {
     return 1
 }
 
+# sling_subject_row — print the subject's own row, the one read that
+# sling_standing_record_guard and sling_dispatch_path_guard both judge. Returns
+# 0 with the row, and 1 when the row cannot be read. A failed read is not proof
+# that the bead is neither a standing record nor dispatched, so the caller
+# fails closed on 1: nothing is filed, and the refusal is an error rather than
+# a skip.
+# The live read takes only one JSON array holding one row as an answer, so an
+# empty answer fails it even when gc exits 0, and two answers fail it too.
+# bd's not-found error is no exception: subject_present_guard has proven the
+# bead present, so a not-found here is a bead deleted since, and nothing may be
+# filed for it. The read comes from the fixture under test (beads.json), live
+# otherwise. A fixture with no beads.json models no store reads, so its row is
+# empty and both guards pass it.
+sling_subject_row() {
+    local bead="$1" row
+    local unreadable="$PROG: sling: cannot tell whether $bead already has a dispatch path or is a standing record (its row could not be read) — not filing a first reaction. A reaction to a routed or armed bead races the dispatch already decided for it, and a standing record has no disposition for a reaction to make; retry once the store answers."
+    if [ -n "$FIXTURE" ]; then
+        [ -f "$FIXTURE/beads.json" ] || { printf '{}'; return 0; }
+        row="$(jq -c --arg id "$bead" '.[$id] // {}' "$FIXTURE/beads.json" 2>/dev/null)" \
+            || { log "$unreadable"; return 1; }
+    else
+        local db; db="$(rig_beads_db)"
+        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+        row="$(gc bd show "$bead" ${db:+--db "$db"} --json 2>/dev/null | scrub \
+            | jq -cs 'if length == 1 and (.[0] | type) == "array" and (.[0] | length) == 1
+                      then .[0][0] else error("unreadable") end' 2>/dev/null)" \
+            || { log "$unreadable"; return 1; }
+    fi
+    printf '%s' "$row"
+}
+
+# sling_standing_record_guard — a standing record (is_standing_kind,
+# assets/scripts/standing-kinds.sh) is open, unrouted and unassigned by design
+# and never closes, so a first reaction has no disposition to make on it, and
+# a close disposition would hand a validating closer a bead that must not
+# close. The scan drops every standing kind, and this guard holds the same line
+# for a bead named to the sling directly, the way gc-helm react and
+# operator-intake name one. The kinds come from the one shared definition, so a
+# kind added to it or taken off it changes this refusal with no edit here.
+# cmd_sling asks this guard before the reaction dedup and the dispatch-path and
+# live-workflow guards. A reaction closes, a route clears and a workflow ends,
+# while a standing record stays one, so a standing record that also carries any
+# of them is refused for the cause that lasts.
+#
+# It judges the row sling_subject_row read. Returns 0 when the bead is no
+# standing record, 1 when it is one, and 2 when its row cannot be judged, which
+# the caller fails closed on.
+sling_standing_record_guard() {
+    local bead="$1" row="$2" kind
+    kind="$(printf '%s' "$row" | jq -r "$STANDING_KINDS_JQ"'
+        if is_standing_kind then (.metadata.task_kind | tostring) else "" end' 2>/dev/null)" || {
+        log "$PROG: sling: cannot tell whether $bead is a standing record (its row could not be judged) — not filing a first reaction. A standing record has no disposition for a reaction to make; retry once the store answers."
+        return 2
+    }
+    [ -n "$kind" ] || return 0
+    log "$PROG: sling: $bead is a standing record (task_kind=$kind) — not filing a first reaction. A standing record stays open, unrouted and unassigned by design and never closes, so a reaction has no disposition to make on it. File a conversation directly (gc-helm open) to ask about it."
+    return 1
+}
+
 # reaction_absent_guard — a first reaction happens once AT A TIME, and never
 # where a live owner already owns it. Returns 0 when the caller may file, 1 when
 # it should skip filing a reaction for this subject, and 2 when the dedup could
@@ -297,9 +357,10 @@ reaction_absent_guard() {
 # A held bead (has_dispatch_hold) is refused the same way: hold:mayor keeps it
 # for the operator's placement sitting and hold:external for an actor outside
 # this store, so its next move is not a reaction's. The scan drops it too, and
-# this guard's own read refuses one held since the scan's read and one named to
-# the sling directly. A reaction would only triage it again, and its close exit
-# could hand it to a validating closer before the sitting reads it.
+# the sling's own read of the row refuses one held since the scan's read and
+# one named to the sling directly. A reaction would only triage it again, and
+# its close exit could hand it to a validating closer before the sitting reads
+# it.
 # A bead an open human gate blocks is refused the same way: the person's answer
 # decides what happens to it, as a converse sitting's ruling does to the bead
 # it holds, and `bd ready` keeps every such bead out of the sweeps.
@@ -311,31 +372,13 @@ reaction_absent_guard() {
 # An arm is no safer: the deferred-dispatch reconcile pass slings the bead once
 # nothing holds it and reads no reaction, so the bead can be dispatched twice.
 #
-# Returns 0 when the bead has no dispatch path or hold and no open human gate
-# blocks it, 1 when it has one or a gate blocks it, and 2 when its row cannot be
-# read. A failed read is not proof that it has none, so the caller fails closed
-# on 2.
-# The live read takes only one JSON array holding one row as an answer, so an
-# empty answer fails it even when gc exits 0, and two answers fail it too.
-# bd's not-found error is no exception: subject_present_guard has proven the
-# bead present, so a not-found here is a bead deleted since, and nothing may be
-# filed for it. The read comes from the fixture under test (beads.json), live
-# otherwise.
+# It judges the row sling_subject_row read. Returns 0 when the bead has no
+# dispatch path or hold and no open human gate blocks it, 1 when it has one or
+# a gate blocks it, and 2 when its row cannot be judged. A row it cannot judge
+# is not proof that it has none, so the caller fails closed on 2.
 sling_dispatch_path_guard() {
-    local bead="$1" row paths holds gates
-    local unreadable="$PROG: sling: cannot tell whether $bead already has a dispatch path (its row could not be read) — not filing a first reaction. A reaction to a routed or armed bead races the dispatch already decided for it; retry once the store answers."
-    if [ -n "$FIXTURE" ]; then
-        [ -f "$FIXTURE/beads.json" ] || return 0
-        row="$(jq -c --arg id "$bead" '.[$id] // {}' "$FIXTURE/beads.json" 2>/dev/null)" \
-            || { log "$unreadable"; return 2; }
-    else
-        local db; db="$(rig_beads_db)"
-        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
-        row="$(gc bd show "$bead" ${db:+--db "$db"} --json 2>/dev/null | scrub \
-            | jq -cs 'if length == 1 and (.[0] | type) == "array" and (.[0] | length) == 1
-                      then .[0][0] else error("unreadable") end' 2>/dev/null)" \
-            || { log "$unreadable"; return 2; }
-    fi
+    local bead="$1" row="$2" paths holds gates
+    local unreadable="$PROG: sling: cannot tell whether $bead already has a dispatch path (its row could not be judged) — not filing a first reaction. A reaction to a routed or armed bead races the dispatch already decided for it; retry once the store answers."
     # Each key is asked on its own through the shared predicate, so the log can
     # name the path it found without a second definition of one.
     paths="$(printf '%s' "$row" | jq -r "$DISPATCH_PATH_JQ"'
@@ -458,9 +501,10 @@ Usage: $PROG demand [<pool-target>]   Pool work_query: emit the routed
                                       $RC_LIVE_WORKFLOW already driven by a live
                                       workflow, $RC_DISPATCH_PATH already routed
                                       or armed, held, or waiting on a person's
-                                      answer (each a no-op, nothing filed), 1
-                                      error, including a <bead> its own store
-                                      does not prove present.
+                                      answer, $RC_STANDING_RECORD a standing record
+                                      (each a no-op, nothing filed), 1 error,
+                                      including a <bead> its own store does not
+                                      prove present.
        $PROG deliverable [<pool-target>] [<bead>]
                                       Would work routed at that pool actually
                                       be PICKED UP? No when this city's agent
@@ -997,7 +1041,7 @@ cmd_scan() {
     # many downstream sessions as the scan found candidates. What it skips is
     # named, not silently dropped — the next sweep sees the same subjects, since
     # a subject only leaves the scan once a reaction has advanced it.
-    local slung=0 skipped=0 reacted=0 routed=0 driven=0
+    local slung=0 skipped=0 reacted=0 routed=0 driven=0 standing=0
     local ids
     ids="$(printf '%s' "$cands" | jq -r '.[].id')"
     local id
@@ -1006,19 +1050,22 @@ cmd_scan() {
             skipped=$(( skipped + 1 ))
             continue
         fi
-        # Only a genuine dispatch spends the cap. cmd_sling skips a subject that
-        # already has an open reaction as a no-op and flags it in SLING_SKIPPED —
-        # a reaction filed after the scan selected it, or one still running. It
-        # skips a bead routed, armed or held since the scan's read, and a bead a
-        # live workflow drives, the same way. Counting any of these skips is the
+        # Only a genuine dispatch spends the cap, and cmd_sling reports one by
+        # leaving SLING_SKIPPED empty. It flags each no-op there instead: a
+        # subject that already has an open reaction, filed after the scan
+        # selected it or still running; a bead routed, armed or held since the
+        # scan's read; a bead a live workflow drives; and a standing record,
+        # which the scan drops, so a sweep meets one only when the row the sling
+        # reads differs from the scan's. Counting any of these skips is the
         # cap-starvation bug: subjects that need no new reaction would spend the
         # whole cap every sweep while no reaction is filed.
         if cmd_sling "$id"; then
             case "$SLING_SKIPPED" in
+                "")            slung=$(( slung + 1 )) ;;
                 reacted)       reacted=$(( reacted + 1 )) ;;
                 dispatch-path) routed=$(( routed + 1 )) ;;
                 live-workflow) driven=$(( driven + 1 )) ;;
-                *)             slung=$(( slung + 1 )) ;;
+                standing)      standing=$(( standing + 1 )) ;;
             esac
         fi
     done
@@ -1026,6 +1073,7 @@ cmd_scan() {
     if [ "$reacted" -gt 0 ]; then uncounted="$reacted already reacting"; fi
     if [ "$routed" -gt 0 ]; then uncounted="${uncounted:+$uncounted, }$routed already routed or armed, held, or waiting on a person"; fi
     if [ "$driven" -gt 0 ]; then uncounted="${uncounted:+$uncounted, }$driven driven by a live workflow"; fi
+    if [ "$standing" -gt 0 ]; then uncounted="${uncounted:+$uncounted, }$standing standing record(s)"; fi
     if [ -n "$uncounted" ]; then note=" ($uncounted, not counted)"; fi
     if [ "$skipped" -gt 0 ]; then
         log "scan --sling: filed $slung first reaction(s)$note; $skipped candidate(s) left for the next sweep (cap $SLING_CAP, GC_PROACTIVE_SLING_CAP)"
@@ -1060,22 +1108,33 @@ cmd_sling() {
     # subject absent from its store, or one its store gives no verdict on, is an
     # error rather than a skip: it returns 1 and nothing is filed.
     #
-    # A first reaction happens once at a time, and never where a live owner owns
-    # it (see reaction_absent_guard), so skip such a subject as an idempotent
-    # no-op rather than file a duplicate. A reaction never second-guesses a
-    # dispatch already decided (see sling_dispatch_path_guard) and never races a
-    # live workflow (see sling_live_workflow_guard), so skip those beads the same
-    # way. cmd_sling returns 0 for each skip and flags it out-of-band in
-    # SLING_SKIPPED: the in-process cmd_scan --sling loop reads that flag to tell
-    # a skip from a dispatch and not spend a cap slot on it, and the `sling` CLI
-    # verb in main() reads it to exit with the skip's own code, the signal a
-    # cross-process caller needs. The return stays 0 because a non-zero one
-    # cannot carry the distinction here: caught in the loop's condition it would
-    # disable set -e for this function, and returned to main it would read as
-    # the generic fail-closed error, not the specific no-op. A guard read that
-    # fails is that error: it returns 1 and nothing is filed.
+    # A standing record has no disposition for a reaction to make (see
+    # sling_standing_record_guard), and a first reaction happens once at a time
+    # and never where a live owner owns it (see reaction_absent_guard), so skip
+    # such a subject as an idempotent no-op rather than file a reaction. A
+    # reaction never second-guesses a dispatch already decided (see
+    # sling_dispatch_path_guard) and never races a live workflow (see
+    # sling_live_workflow_guard), so skip those beads the same way. The standing
+    # and dispatch-path guards judge one read of the subject's row
+    # (sling_subject_row). cmd_sling returns 0 for each skip and flags it
+    # out-of-band in SLING_SKIPPED: the in-process cmd_scan --sling loop reads
+    # that flag to tell a skip from a dispatch and not spend a cap slot on it,
+    # and the `sling` CLI verb in main() reads it to exit with the skip's own
+    # code, the signal a cross-process caller needs. The return stays 0 because
+    # a non-zero one cannot carry the distinction here: caught in the loop's
+    # condition it would disable set -e for this function, and returned to main
+    # it would read as the generic fail-closed error, not the specific no-op. A
+    # guard read that fails is that error: it returns 1 and nothing is filed.
     SLING_SKIPPED=""
     subject_present_guard "$bead" || return 1
+    local row standing=0
+    row="$(sling_subject_row "$bead")" || return 1
+    sling_standing_record_guard "$bead" "$row" || standing=$?
+    case "$standing" in
+        0) ;;
+        1) SLING_SKIPPED="standing"; return 0 ;;
+        *) return 1 ;;
+    esac
     local absent=0
     reaction_absent_guard "$bead" || absent=$?
     case "$absent" in
@@ -1084,7 +1143,7 @@ cmd_sling() {
         *) return 1 ;;
     esac
     local pathed=0
-    sling_dispatch_path_guard "$bead" || pathed=$?
+    sling_dispatch_path_guard "$bead" "$row" || pathed=$?
     case "$pathed" in
         0) ;;
         1) SLING_SKIPPED="dispatch-path"; return 0 ;;
@@ -1191,6 +1250,7 @@ main() {
                 reacted)       exit "$RC_ALREADY_REACTED" ;;
                 dispatch-path) exit "$RC_DISPATCH_PATH" ;;
                 live-workflow) exit "$RC_LIVE_WORKFLOW" ;;
+                standing)      exit "$RC_STANDING_RECORD" ;;
             esac
             ;;
         deliverable) cmd_deliverable "$@" ;;

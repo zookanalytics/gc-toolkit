@@ -20,8 +20,9 @@
 #   the rig-enumeration helper leaving no trap installed on its caller
 #   the react verb: an already-reacted sling skip (exit 3) re-raised as react's
 #     own no-op code (5), distinct from a dispatch (0) and a real failure (4),
-#     a live-workflow sling skip (exit 4) re-raised as react's code (6), and a
-#     dispatch-path sling skip (exit 5) re-raised as react's code (7)
+#     a live-workflow sling skip (exit 4) re-raised as react's code (6), a
+#     dispatch-path sling skip (exit 5) re-raised as react's code (7), and a
+#     standing-record sling skip (exit 6) re-raised as react's code (8)
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -2000,6 +2001,20 @@ grep -q "tk-react1 is already routed or armed" "$TMP/rerr4" \
   || bad "(REACT) react dispatch-path message missing: $(cat "$TMP/rerr4")"
 grep -q "already has an open first reaction\|live workflow\|failed" "$TMP/rerr4" \
   && bad "(REACT) a dispatch-path skip must not read as another skip or as a failure" \
+  || ok "(REACT) …and is neither of the other skips nor a failure"
+
+# The sling's standing-record guard exits RC_STANDING_RECORD (6) when the bead is
+# a standing record, which never closes and gives a reaction nothing to
+# dispose: a fourth no-op with its own cause. react re-raises it as its own code
+# (8), so the intake caller names that cause, never one of the other skips or a
+# failure to file.
+rrc=0; FAKE_SLING_RC=6 sh "$SCRIPT" react tk-react1 >/dev/null 2>"$TMP/rerr5" || rrc=$?
+eq "$rrc" "8" "(REACT) a standing-record skip (sling exit 6) becomes react exit 8"
+grep -q "tk-react1 is a standing record" "$TMP/rerr5" \
+  && ok "(REACT) …and names the no-op cause" \
+  || bad "(REACT) react standing-record message missing: $(cat "$TMP/rerr5")"
+grep -q "already has an open first reaction\|live workflow\|already routed or armed\|failed" "$TMP/rerr5" \
+  && bad "(REACT) a standing-record skip must not read as another skip or as a failure" \
   || ok "(REACT) …and is neither of the other skips nor a failure"
 unset GC_PROACTIVE_TOOL FAKE_SLING_RC
 

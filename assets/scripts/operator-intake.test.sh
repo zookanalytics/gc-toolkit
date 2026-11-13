@@ -341,6 +341,24 @@ hasnt "$ERR" "a live workflow already drives" "(ROUTED) it is NOT reported as a 
 hasnt "$ERR" "FAILED" "(ROUTED) it is NOT reported as a failure to file"
 unset FAKE_HELM_REACT_RC
 
+# --- (STANDING) a standing record files the conversation directly ------------
+# react returns its fourth no-op code (8) when the subject is a standing record:
+# the guard filed nothing because a standing record never closes and a reaction
+# has no disposition to make on it, so no reaction will put the topic to the
+# operator. The conversation's ask must name that cause, not another skip and
+# not a failure to file.
+FAKE_HELM_REACT_RC=8 run yes "a topic on a standing record"
+eq "$RC" "0" "(STANDING) exits 0 — the conversation is filed"
+has "$CALLS" "helm react tk-newsub" "(STANDING) react was attempted"
+has "$CALLS" "helm open tk-newsub" "(STANDING) a standing record falls through to filing the conversation"
+has "$CALLS" "the subject is a standing record" "(STANDING) the conversation's ask names the standing record"
+has "$ERR" "subject tk-newsub is a standing record" "(STANDING) the reason names the no-op skip"
+hasnt "$ERR" "already has an open first reaction" "(STANDING) it is NOT reported as an already-reacting subject"
+hasnt "$ERR" "a live workflow already drives" "(STANDING) it is NOT reported as a driven subject"
+hasnt "$ERR" "already routed or armed" "(STANDING) it is NOT reported as a routed subject"
+hasnt "$ERR" "FAILED" "(STANDING) it is NOT reported as a failure to file"
+unset FAKE_HELM_REACT_RC
+
 # --- (RIG) the default rig is fixed; --rig retargets; unknown rigs file nothing
 run no "some cross-cutting topic"
 has "$CALLS" "--db $TMP/rigs/gc-toolkit/.beads" "(RIG) the default rig is gc-toolkit, not inferred from cwd"

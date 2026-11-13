@@ -41,6 +41,10 @@
 # nothing was filed (a first reaction never second-guesses a dispatch already
 # decided) — distinct from 5 and 6 so the intake caller names the cause in the
 # conversation it files.
+# 8 react no-op: the subject is a standing record, so nothing was filed (a
+# standing record never closes, and a first reaction has no disposition to
+# make on it) — distinct from 5, 6 and 7 so the intake caller names the cause
+# in the conversation it files.
 
 set -eu
 
@@ -3314,13 +3318,15 @@ cmd_react() {
     # gc-proactive.sh sling exits 3 (RC_ALREADY_REACTED) when its dedup found an
     # open reaction bead already tracking this subject, or a live owner owning its
     # reaction, 4 (RC_LIVE_WORKFLOW) when its live-workflow guard skipped a bead a
-    # live workflow already drives, and 5 (RC_DISPATCH_PATH) when its
+    # live workflow already drives, 5 (RC_DISPATCH_PATH) when its
     # dispatch-path guard skipped a bead that is already routed or armed, that a
-    # dispatch hold holds, or that an open human gate blocks. Each is
-    # a no-op, not a failure, and NO new reaction was filed. Re-raise them as exit
-    # 5, exit 6 and exit 7 so an intake caller (operator-intake.sh) files its own
-    # conversation, naming the cause, instead of waiting for a reaction that is already
-    # in flight or never ran; any other non-zero is a real failure.
+    # dispatch hold holds, or that an open human gate blocks, and 6
+    # (RC_STANDING_RECORD) when its standing-record guard skipped a standing
+    # record. Each is a no-op, not a failure, and NO new reaction was filed.
+    # Re-raise them as exit 5, exit 6, exit 7 and exit 8 so an intake caller
+    # (operator-intake.sh) files its own conversation, naming the cause, instead
+    # of waiting for a reaction that is already in flight or never runs; any
+    # other non-zero is a real failure.
     if "$tool" "$@"; then
         :
     else
@@ -3336,6 +3342,10 @@ cmd_react() {
         if [ "$sling_rc" -eq 5 ]; then
             echo "$PROG: react: $bead is already routed or armed, held, or waits on a person's answer — nothing filed (a first reaction never second-guesses a dispatch already decided). Open a conversation directly, or react once that route, arm, hold or gate is cleared." >&2
             exit 7
+        fi
+        if [ "$sling_rc" -eq 6 ]; then
+            echo "$PROG: react: $bead is a standing record — nothing filed (a standing record never closes, and a first reaction has no disposition to make on it). Open a conversation directly to ask about it." >&2
+            exit 8
         fi
         echo "$PROG: react: gc-proactive.sh sling '$bead' failed" >&2
         exit 4
