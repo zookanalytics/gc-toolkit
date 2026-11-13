@@ -9,7 +9,9 @@
 # are more than one command, and so is a command substitution that holds more
 # than one. A substitution holding a single command is an argument of the
 # command around it, so `"$(gc <binding> scripts-dir)/foo.sh" --bead X` is one
-# call.
+# call. A cd that && runs after a call weighs nothing, and neither does that
+# &&: it moves the agent's own shell once the call exits 0, which no script can
+# do for its caller.
 #
 # The lint judges only what a change adds, so step text that predates the rule
 # passes until its own rewrite. It weighs each step, named by its id, by the
@@ -374,9 +376,15 @@ function scan(s,   n, i, c, nx, k, top, st, w, out, subd, at, j) {
 # SC_W, and the command it runs, if any, into SC_CMD. Only a word in command
 # position is a keyword. segs drops a case clause's pattern label before this
 # reads the segment, so a word that ends in ) closes a subshell and is the
-# subshell's last command.
-function seg_end(g,   nw, ww, j, t) {
+# subshell's last command. A cd that an && runs takes back that &&, which segs
+# counted when it split there, and counts no command.
+function seg_end(g,   nw, ww, j, t, and) {
     nw = split(g, ww, /[ \t]+/)
+    j = 1
+    while (j <= nw && ww[j] == "") j++
+    if (j > nw) return
+    and = SC_AND; SC_AND = 0
+    if (and && ww[j] == "cd") { SC_CF--; sub(/ &&$/, "", SC_W); return }
     j = 1
     while (j <= nw) {
         t = ww[j]
@@ -397,7 +405,7 @@ function seg_end(g,   nw, ww, j, t) {
 # in, or after ;; ;& or ;;&. SC_LBL says one is due, across lines, and the
 # label is skipped whole, alternatives and all, so its | is not a pipe.
 function segs(m,   n, i, c, nx, pv, g) {
-    n = length(m); g = ""; SC_CMD = 0; SC_CF = 0; SC_W = ""
+    n = length(m); g = ""; SC_CMD = 0; SC_CF = 0; SC_W = ""; SC_AND = 0
     for (i = 1; i <= n; i++) {
         c = substr(m, i, 1); nx = substr(m, i + 1, 1); pv = (i > 1) ? substr(m, i - 1, 1) : ""
         if (SC_LBL && c != " " && c != "\t" && c != "\n") {
@@ -406,7 +414,7 @@ function segs(m,   n, i, c, nx, pv, g) {
             if (match(substr(m, i), CASE_LABEL)) { i += RLENGTH - 1; continue }
         }
         if (c == "&") {
-            if (nx == "&") { seg_end(g); g = ""; SC_CF++; SC_W = SC_W " &&"; i++; continue }
+            if (nx == "&") { seg_end(g); g = ""; SC_CF++; SC_W = SC_W " &&"; SC_AND = 1; i++; continue }
             if (pv == ">" || pv == "<" || nx == ">") { g = g c; continue }
             seg_end(g); g = ""; continue
         }
