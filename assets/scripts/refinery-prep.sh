@@ -111,7 +111,11 @@ TIP=$(git -C "$HOME_DIR" rev-parse --verify -q "refs/remotes/origin/$TARGET^{com
 
 TREE=$(refinery_tree "$HOME_DIR" "$BEAD")
 mkdir -p "$HOME_DIR/worktrees" || stop "cannot make $HOME_DIR/worktrees"
-if ! OUT=$(git -C "$HOME_DIR" worktree add -q --detach "$TREE" "$READ" 2>&1); then
+# git can still register the tree's path after its directory is gone, locked
+# when an add was killed partway, and a plain add refuses such a path on every
+# retry. -f given twice reuses it, locked or not, and still refuses a path
+# whose directory holds files, so nothing there is staged over.
+if ! OUT=$(git -C "$HOME_DIR" worktree add -q -f -f --detach "$TREE" "$READ" 2>&1); then
   stop "the tree $TREE was not added: $(printf '%s' "$OUT" | tr -s '[:space:]' ' ')"
 fi
 git -C "$TREE" update-ref "$REFINERY_READ_NS/$BRANCH" "$READ" || stop "the commit read on $BRANCH was not recorded in $TREE"

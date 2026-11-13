@@ -131,7 +131,8 @@ refinery_default_branch() {
 # state the iteration left it. A `worktree add` killed partway leaves its
 # worktree locked, and git refuses a locked worktree a single --force, so the
 # removal gives it twice. A directory git does not know as a worktree is left
-# alone and named. 0 once no tree is there.
+# alone and named. 0 once no tree is there. A registration whose directory is
+# gone is left as it is: the prep's add reuses its path (refinery-prep.sh).
 refinery_teardown() {
   local tree out
   tree=$(refinery_tree "$1" "$2")

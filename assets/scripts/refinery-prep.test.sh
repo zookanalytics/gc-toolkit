@@ -16,7 +16,9 @@
 #     rework child a review filed leaves the prep as it is;
 #   - a target or a branch origin does not carry parks the bead behind a human
 #     gate, with merge_result=blocked, still assigned to the refinery;
-#   - a tree an earlier iteration left is removed before the next is staged;
+#   - a tree an earlier iteration left is removed before the next is staged,
+#     and a path git still registers, locked, after its directory is gone is
+#     staged again;
 #   - a bead not assigned to this refinery, or with no branch, is not prepared.
 set -uo pipefail
 
@@ -139,6 +141,18 @@ run --bead new
 eq "$RC" 0 "the next prep exits 0"
 [ ! -e "$HOME_DIR/worktrees/old" ] && rt_ok "the earlier tree, dirty, is removed" || rt_bad "the earlier tree, dirty, is removed"
 [ -d "$HOME_DIR/worktrees/new" ] && rt_ok "the new tree is staged" || rt_bad "the new tree is staged"
+
+echo "# a tree whose directory is gone while git still registers it, locked, is staged again"
+fresh
+branch_with polecat/g g.txt >/dev/null
+work g polecat/g
+run --bead g
+eq "$RC" 0 "the first prep exits 0"
+git -C "$HOME_DIR" worktree lock --reason initializing "$HOME_DIR/worktrees/g"
+rm -rf "$HOME_DIR/worktrees/g"
+run --bead g
+eq "$RC" 0 "the next prep for that bead exits 0"
+eq "$(held g)" "polecat/g $(git -C "$HOME_DIR" rev-parse refs/remotes/origin/polecat/g)" "…and its tree is staged again, recording the commit read"
 
 echo "# a bead not assigned to this refinery, or with no branch, is not prepared"
 fresh
