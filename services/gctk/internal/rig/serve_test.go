@@ -911,6 +911,59 @@ func TestServeACheckDuringAStartReadsACopyWithNoLeaderAsNotAnswering(t *testing.
 	})
 }
 
+// A check takes the checkout's lock shared, so checks never read one another
+// as a start or a stop under way: with another check's hold on the lock, a
+// check of a copy that died reads died. With a start's or a stop's hold, which
+// is exclusive, it reads not-answering, and a stop waits out every check that
+// holds the lock.
+func TestServeChecksShareTheLockAndAStopWaitsThemOut(t *testing.T) {
+	serveTest(t, func(t *testing.T, f *serveFixture) {
+		port, _ := f.me.FreePort()
+		f.claim(t, f.repo, map[string]string{"command": "serve", "port": strconv.Itoa(port),
+			"pid": strconv.Itoa(f.me.Pid()), "start_id": "the start of a leader that ended"})
+		// A start's lock leaves its file once the checkout has a record.
+		unlock, err := f.copies.lock(f.repo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		unlock()
+
+		other, busy, err := f.copies.tryShared(f.repo)
+		if err != nil || busy {
+			t.Fatalf("a check's try: busy %v, %v; want the lock, which no start or stop holds", busy, err)
+		}
+		if c := f.copies.Check(f.repo); c.State != CopyDied {
+			t.Errorf("a check beside another check's hold = %s (%s), want died", c.State, c.Detail)
+		}
+		stopped := make(chan Report, 1)
+		go func() { stopped <- f.copies.Stop(f.repo) }()
+		time.Sleep(5 * time.Second)
+		select {
+		case s := <-stopped:
+			t.Errorf("a stop ended (%s) while a check held the lock", s.State)
+		default:
+		}
+		other()
+		if s := <-stopped; s.State != CopyNone {
+			t.Errorf("stop = %s (%s), want none: the copy had died", s.State, s.Detail)
+		}
+
+		f.claim(t, f.repo, map[string]string{"command": "serve", "port": strconv.Itoa(port),
+			"pid": strconv.Itoa(f.me.Pid()), "start_id": "the start of a leader that ended"})
+		held, err := f.copies.lock(f.repo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c := f.copies.Check(f.repo); c.State != CopyNotAnswering || !strings.Contains(c.Detail, "under way") {
+			t.Errorf("a check beside a start's or a stop's hold = %s (%s), want not-answering, with the call under way", c.State, c.Detail)
+		}
+		held()
+		if c := f.copies.Check(f.repo); c.State != CopyDied {
+			t.Errorf("a check once the hold is released = %s, want died", c.State)
+		}
+	})
+}
+
 // The release removes the lock's file once the checkout has no record, and a
 // call that was waiting on that file takes the lock again on the file at the
 // lock's path, whether a later call made it or it makes it, so no two calls

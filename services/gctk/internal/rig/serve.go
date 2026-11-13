@@ -38,7 +38,7 @@ package rig
 //
 // Starts and stops of one checkout take turns under the checkout's lock, so
 // each reads the record the one before it left and none acts on a record
-// another is changing. A check reads under the lock when it is free and waits
+// another is changing. A check shares the lock with other checks and waits
 // for no start or stop.
 
 import (
@@ -150,7 +150,7 @@ const lockPoll = 200 * time.Millisecond
 // so two starts that find a copy that died run one copy in its place, two that
 // publish a running copy run one publish command, and a stop ends the copy a
 // start left. The call that holds it ends within its own waits. A check takes
-// it only when it is free (tryLock), for as long as one read of the record.
+// it shared (tryShared), for as long as one read of the record.
 //
 // The lock is an flock(2) of a file beside the record directory, outside what
 // a start removes when it replaces a copy that died, and the kernel releases it
@@ -160,35 +160,74 @@ const lockPoll = 200 * time.Millisecond
 // file once the checkout has no record, and a call that took the lock on a
 // file removed meanwhile takes the file that replaced it.
 func (c *Copies) lock(checkout string) (func(), error) {
-	release, _, err := c.takeLock(checkout, true)
-	return release, err
-}
-
-// tryLock takes the checkout's lock when no other call holds it, and returns
-// its release. It reports busy, with no release, while another call holds it.
-func (c *Copies) tryLock(checkout string) (release func(), busy bool, err error) {
-	return c.takeLock(checkout, false)
-}
-
-func (c *Copies) takeLock(checkout string, wait bool) (func(), bool, error) {
 	dir := c.Dir(checkout)
 	path := dir + ".lock"
 	for {
 		f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o644)
 		if err != nil {
-			return nil, false, err
+			return nil, err
 		}
 		fd := int(f.Fd())
 		for {
 			err = syscall.Flock(fd, syscall.LOCK_EX|syscall.LOCK_NB)
-			if errors.Is(err, syscall.EWOULDBLOCK) && !wait {
-				_ = f.Close()
-				return nil, true, nil
-			}
 			if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EINTR) {
 				break
 			}
 			time.Sleep(lockPoll)
+		}
+		if err != nil {
+			_ = f.Close()
+			return nil, err
+		}
+		held, err := f.Stat()
+		if err != nil {
+			_ = f.Close()
+			return nil, err
+		}
+		now, err := os.Stat(path)
+		if err == nil && os.SameFile(held, now) {
+			return func() {
+				if _, err := os.Stat(dir); errors.Is(err, fs.ErrNotExist) {
+					_ = os.Remove(path)
+				}
+				_ = syscall.Flock(fd, syscall.LOCK_UN)
+				_ = f.Close()
+			}, nil
+		}
+		_ = f.Close()
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return nil, err
+		}
+	}
+}
+
+// tryShared takes the checkout's lock shared when no start or stop holds it,
+// and returns its release. Checks share it, so no check waits for another or
+// reads another as a start or a stop under way, and a start or a stop waits out
+// every check that holds it. busy reports a start or a stop that holds it. A
+// check makes no lock file, and its release removes none, since another check
+// may hold the file: with no file at the lock's path, no start or stop holds
+// the lock, and there is nothing to hold or release.
+func (c *Copies) tryShared(checkout string) (release func(), busy bool, err error) {
+	path := c.Dir(checkout) + ".lock"
+	for {
+		f, err := os.Open(path)
+		if errors.Is(err, fs.ErrNotExist) {
+			return func() {}, false, nil
+		}
+		if err != nil {
+			return nil, false, err
+		}
+		fd := int(f.Fd())
+		for {
+			err = syscall.Flock(fd, syscall.LOCK_SH|syscall.LOCK_NB)
+			if !errors.Is(err, syscall.EINTR) {
+				break
+			}
+		}
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			_ = f.Close()
+			return nil, true, nil
 		}
 		if err != nil {
 			_ = f.Close()
@@ -199,20 +238,13 @@ func (c *Copies) takeLock(checkout string, wait bool) (func(), bool, error) {
 			_ = f.Close()
 			return nil, false, err
 		}
-		now, err := os.Stat(path)
-		if err == nil && os.SameFile(held, now) {
+		if now, err := os.Stat(path); err == nil && os.SameFile(held, now) {
 			return func() {
-				if _, err := os.Stat(dir); errors.Is(err, fs.ErrNotExist) {
-					_ = os.Remove(path)
-				}
 				_ = syscall.Flock(fd, syscall.LOCK_UN)
 				_ = f.Close()
 			}, false, nil
 		}
 		_ = f.Close()
-		if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return nil, false, err
-		}
 	}
 }
 
@@ -719,16 +751,17 @@ func (r copyRec) exitCode() (int, bool) {
 }
 
 // Check reports the state of the checkout's copy, and starts nothing. It
-// waits for no start or stop: it reads the record under the checkout's lock
-// when the lock is free, and as it stands when a start or a stop holds it.
-// That call may be running the copy or ending it, so a copy whose leader it
-// finds no longer running then reads as not-answering, not as one that died.
+// waits for no start or stop: it reads the record under the checkout's lock,
+// which it shares with other checks, when no start or stop holds it, and reads
+// it as it stands when one does. That call may be running the copy or ending
+// it, so a copy whose leader it finds no longer running then reads as
+// not-answering, not as one that died.
 func (c *Copies) Check(checkout string) Report {
 	rec := c.rec(checkout)
 	if _, err := os.Stat(rec.dir); err != nil {
 		return Report{State: CopyNone, Checkout: checkout}
 	}
-	unlock, busy, err := c.tryLock(checkout)
+	unlock, busy, err := c.tryShared(checkout)
 	if err == nil && !busy {
 		defer unlock()
 		if _, err := os.Stat(rec.dir); err != nil {
