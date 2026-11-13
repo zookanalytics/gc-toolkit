@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # run-cancel — end a graph.v2 molecule's run through gascity.
 #
-#   run-cancel.sh --step <formula.step-id> --reason "<text>" [--bead <id>] [--dry-run]
+#   run-cancel.sh --step <formula.step-id> --reason "<text>" [--dry-run]
 #   run-cancel.sh --root <root-id> --reason "<text>" [--ended] [--db <path>] [--dry-run]
 #
 # A molecule's lifecycle is gascity's: pour, claim, finalize, autoclose and run
@@ -23,10 +23,13 @@
 #
 # --step names the run by the step this shell is executing: the bead `gc hook
 # current` names, when it verifies as this session's bead for that gc.step_ref,
-# and that bead's gc.root_bead_id. A --bead hint from step text poured before
-# this read is tried first, and a step that text holds through no claim is found
-# by assignee (in_progress first, then open, then blocked). --root names the run
-# directly, for a caller that holds no step of it.
+# and that bead's gc.root_bead_id. When the claim cannot be read, the run is not
+# ended, since running again can change that, and the refusal carries gc hook
+# current's exit status and stderr. The script accepts a --bead argument and
+# does not read it, because mol-validate's step text passes one, always empty. A
+# --bead that names a bead other than the claim is reported, so a call by hand
+# leaves a record of the id it was given. --root names the run directly, for a
+# caller that holds no step of it.
 #
 # A run whose root is already closed is not cancelled, because gascity's cancel
 # leaves a terminal run's members as they are and answers 409. A 409 for a root
@@ -44,8 +47,7 @@
 # to next retries the cancel, this session at its next claim included.
 #
 # Callers: decline.sh; mol-review's failed gather and mol-validate's decline
-# arms; molecule-hold.sh (--step, for step text that names that script);
-# orphan-dispose.sh (--ended); gc-helm.sh takeaway --release.
+# arms; orphan-dispose.sh (--ended); gc-helm.sh takeaway --release.
 # exit: 0 the run is ended · 1 the run is not ended · 2 refused, nothing written
 set -uo pipefail
 
@@ -61,7 +63,7 @@ scrub() { tr -d '\000-\037'; }
 
 usage() {
   cat >&2 <<'USAGE'
-usage: run-cancel.sh --step <formula.step-id> --reason "<text>" [--bead <id>] [--dry-run]
+usage: run-cancel.sh --step <formula.step-id> --reason "<text>" [--dry-run]
        run-cancel.sh --root <root-id> --reason "<text>" [--ended] [--db <path>] [--dry-run]
 
   --step     the gc.step_ref of the step this shell is executing, e.g.
@@ -72,8 +74,9 @@ usage: run-cancel.sh --step <formula.step-id> --reason "<text>" [--bead <id>] [-
   --root     the run's root bead, for a caller that holds no step of it.
   --reason   why the run ends; appended to the held step in --step mode once
              the run has ended, and printed on the result line (required)
-  --bead     candidate id in place of `gc hook current`'s. A HINT: used only if
-             it verifies as this session's bead for --step.
+  --bead     accepted and not read: mol-validate's step text passes one. The
+             step is the one `gc hook current` names, and a --bead that names
+             another bead is reported.
   --ended    the caller read the root as closed: close only what the run left
              open, and refuse a root that reads live rather than cancel it.
   --db       the store the run's beads live in, for a caller outside it.
@@ -144,13 +147,6 @@ case "$ROOT" in
     echo "$PROG: --root must contain only [A-Za-z0-9._-] (got '$ROOT')" >&2
     exit 2 ;;
 esac
-# --bead is only a hint, so one that names no bead, such as a placeholder left
-# unsubstituted, is reported and the store resolves the step instead.
-case "$HINT" in
-  *[!A-Za-z0-9._-]*)
-    echo "$PROG: NOTE: --bead '$HINT' is not a bead id; resolving from the store" >&2
-    HINT="" ;;
-esac
 if [ -z "$REASON" ]; then
   echo "$PROG: --reason is required; a run ended for no stated reason cannot be audited" >&2
   usage
@@ -199,45 +195,30 @@ if [ -n "$STEP" ]; then
     ' 2>/dev/null
   }
 
-  discover() { # <status> -> this session's ids for $STEP at that status
-    local ident json
-    while IFS= read -r ident; do
-      [ -n "$ident" ] || continue
-      # shellcheck disable=SC2086  # ${DB:+--db "$DB"} expands to 0 or 2 space-free fields
-      json=$(bd_json list --status="$1" --assignee="$ident" --limit=0 ${DB:+--db "$DB"})
-      [ -n "$json" ] || continue
-      printf '%s' "$json" | jq -r --arg step "$STEP" '
-        if type == "array" then
-          .[] | select((.metadata["gc.step_ref"] // "") == $step) | .id
-        else empty end
-      ' 2>/dev/null
-    done <<< "$IDENTITIES"
-  }
-
-  # A claim that names nothing, or another step, leaves the store to answer.
-  [ -n "$HINT" ] || HINT=$(gc hook current --id-only </dev/null 2>/dev/null) || HINT=""
-  if [ -n "$HINT" ]; then
-    case "$(verify "$HINT")" in
-      in_progress|open|blocked|closed) TARGET="$HINT" ;;
-      *) echo "$PROG: NOTE: --bead $HINT is not this session's bead for $STEP; resolving from the store" >&2 ;;
-    esac
+  # gc hook current exits 1 both when this session has claimed nothing and when
+  # its own read fails, so its status cannot tell the two apart. Either way the
+  # run is not ended, since running again can change that, and the refusal
+  # quotes the read's exit status and what it said on stderr.
+  HOOK_RC=0; HOOK_SAID=""
+  HOOK_ERR=$(mktemp "${TMPDIR:-/tmp}/gctk-run-cancel-hook.XXXXXX" 2>/dev/null) || HOOK_ERR=""
+  CLAIM=$(gc hook current --id-only </dev/null 2>"${HOOK_ERR:-/dev/null}") || HOOK_RC=$?
+  if [ -n "$HOOK_ERR" ]; then
+    HOOK_SAID=$(awk 'NF { printf "%s%s", s, $0; s = " " }' "$HOOK_ERR" 2>/dev/null)
+    rm -f "$HOOK_ERR"
   fi
-  if [ -z "$TARGET" ]; then
-    for tier in in_progress open blocked; do
-      FOUND=$(discover "$tier" | sort -u)
-      N=$(printf '%s\n' "$FOUND" | awk 'NF' | wc -l | tr -d ' ')
-      if [ "$N" -eq 1 ]; then
-        TARGET="$FOUND"
-        break
-      elif [ "$N" -gt 1 ]; then
-        echo "$PROG: $N $tier beads match step '$STEP' for this session: $(printf '%s' "$FOUND" | tr '\n' ' ')" >&2
-        echo "$PROG: refusing to guess which run this shell is executing; pass the claimed step as --bead. Nothing was cancelled." >&2
-        exit 2
-      fi
-    done
+  [ "$HOOK_RC" -eq 0 ] || CLAIM=""
+  if [ -n "$HINT" ] && [ "$HINT" != "$CLAIM" ]; then
+    echo "$PROG: NOTE: --bead '$HINT' is not read; the step is the one gc hook current names${CLAIM:+, $CLAIM}" >&2
   fi
+  if [ -z "$CLAIM" ]; then
+    echo "$PROG: cannot identify this session's bead for step '$STEP': gc hook current exited $HOOK_RC without naming a claim${HOOK_SAID:+ (it said: $HOOK_SAID)}; nothing was cancelled" >&2
+    exit 1
+  fi
+  case "$(verify "$CLAIM")" in
+    in_progress|open|blocked|closed) TARGET="$CLAIM" ;;
+  esac
   if [ -z "$TARGET" ]; then
-    echo "$PROG: cannot identify this session's bead for step '$STEP' (identities tried: $(printf '%s' "$IDENTITIES" | tr '\n' ' ')); nothing was cancelled" >&2
+    echo "$PROG: cannot identify this session's bead for step '$STEP': gc hook current names $CLAIM, which is not this session's bead for that step (identities tried: $(printf '%s' "$IDENTITIES" | tr '\n' ' ')); nothing was cancelled" >&2
     exit 2
   fi
   # shellcheck disable=SC2086  # ${DB:+--db "$DB"} expands to 0 or 2 space-free fields

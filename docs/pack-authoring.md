@@ -89,14 +89,8 @@ the next worker retries it.
 
 A molecule keeps the step text it was poured with, while the scripts that text
 calls are read from the installed pack when the step runs. So a pack script that
-open step text names stays callable under that name until no open step bead
-names it. Step text from an earlier version of these formulas requires
-`assets/scripts/molecule-hold.sh` to exist before it resolves the pack's
-scripts, and calls it to decline. That script hands the call to
-`run-cancel.sh --step` unchanged, so such a run ends through gascity's run
-cancel like any other. The same text calls `step-close.sh`,
-`work-tree-holder.sh` and `lease-heartbeat.sh`, which stay for it until no open
-step bead names them.
+open step text names stays callable under that name, and keeps accepting the
+arguments that text passes it, until no open step bead names it.
 
 ## Step text and skills reach pack scripts at runtime
 
@@ -142,8 +136,8 @@ resolves the directory once, probes what it needs, and empties the variable
 when gc or a probe fails, so the guard after it stops the text:
 
 ```bash
-SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/escalate.sh" ] || SCRIPTS=""
-: "${SCRIPTS:?escalate.sh not found in the pack}"
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""
+: "${SCRIPTS:?human-gate.sh not found in the pack}"
 ```
 
 An empty or wrong binding fails loud: gc answers `unknown command`, and the
@@ -172,6 +166,12 @@ substitution that holds a single command is an argument of the command around
 it. A here-document's body is data when any part of its delimiter is quoted.
 Otherwise the shell expands the body, and a substitution in it counts as one
 in an argument does.
+
+A `cd` that `&&` runs after a call is no procedure, and that `&&` is no control
+flow. It moves the agent's own shell once the call exits 0, which no script can
+do for its caller, and Claude Code carries the shell's directory from one call
+to the next. So a call that removes the directory the agent's shell stands in
+ends in `&& cd <a directory that stays>`.
 
 `tools/lint-step-text.sh` holds the rule, and `tools/lint.sh` runs it on the
 files a change names. It reads every TOML string in a formula as Python's

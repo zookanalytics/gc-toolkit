@@ -6,7 +6,20 @@
 // the Needs you view beside it lists what holds it.
 
 import type { ReactNode } from 'react';
-import type { Counts, DeliveryEntry, EpicEntry, Group, Need, PullRequest, Ref, Row, WorkQueue } from './document.gen';
+import type {
+  Counts,
+  DeliveryEntry,
+  EpicEntry,
+  Group,
+  KindCount,
+  Need,
+  NeedKind,
+  NeedsYou,
+  PullRequest,
+  Ref,
+  Row,
+  WorkQueue,
+} from './document.gen';
 import { Description } from './Description';
 import { BeadId, Line, Show } from './Line';
 import {
@@ -16,6 +29,7 @@ import {
   GROUP_LOOK,
   INK,
   MUTE,
+  NEED_WORDS,
   STEP,
   signalInk,
   useView,
@@ -295,13 +309,13 @@ function RefLine({ label, target }: { label: string; target: Ref }) {
 /** What a container lays out: its two views and its closed work. An epic's
  *  and a Delivery's entries are each one. */
 interface Views {
-  needs: Need[];
+  needs: NeedsYou;
   queue: WorkQueue;
   closed: string[];
 }
 
-/** A Needs you view: each need, in the document's order, with the beads it
- *  holds there beneath it. */
+/** Needs in the document's order, each with the beads it holds there beneath
+ *  it. */
 export function NeedsList({ needs, ctx, depth }: { needs: Need[]; ctx: string; depth: number }) {
   return (
     <>
@@ -309,6 +323,79 @@ export function NeedsList({ needs, ctx, depth }: { needs: Need[]; ctx: string; d
         <ObjectRow key={n.id} id={n.id} ctx={ctx} depth={depth} kids={n.holds} />
       ))}
     </>
+  );
+}
+
+/** A Needs you view: how many needs of each kind count, then the needs that
+ *  count, then the needs that do not, folded under Parked or unprioritized as
+ *  closed work folds. A kind's count shows that kind alone in both lists. */
+export function NeedsView({ needs, ctx, depth }: { needs: NeedsYou; ctx: string; depth: number }) {
+  const v = useView();
+  const kind = v.kindShown(ctx);
+  const shown = (list: Need[]) => (kind === undefined ? list : list.filter((n) => n.kind === kind));
+  const counted = shown(needs.counted);
+  const folded = shown(needs.not_counted);
+  return (
+    <>
+      <KindCounts kinds={needs.kinds} shown={kind} ctx={ctx} depth={depth} />
+      <NeedsList needs={counted} ctx={ctx} depth={depth} />
+      {folded.length > 0 && (
+        <Heading openKey={`${ctx}/not-counted`} def={false} depth={depth} label="Parked or unprioritized" count={folded.length}>
+          <NeedsList needs={folded} ctx={`${ctx}/not-counted`} depth={depth + 1} />
+        </Heading>
+      )}
+    </>
+  );
+}
+
+/** How many needs of each kind count, each kind drawn, a zero among them, so
+ *  a glance tells which is empty. A count shows its kind alone, and a second
+ *  click shows every kind again. */
+function KindCounts({ kinds, shown, ctx, depth }: { kinds: KindCount[]; shown?: NeedKind; ctx: string; depth: number }) {
+  const v = useView();
+  const look = GROUP_LOOK['Waiting on you'];
+  // A view's kinds hold Routed to you only while one counts, so a read can
+  // leave out the kind shown alone. It is drawn at zero then, so the view can
+  // still show every kind again.
+  const drawn = shown === undefined || kinds.some((k) => k.kind === shown) ? kinds : [...kinds, { kind: shown, count: 0 }];
+  return (
+    <div className="kinds" role="group" aria-label="Kinds of need" style={{ paddingLeft: depth * STEP + 4 }}>
+      {drawn.map(({ kind, count }) => {
+        const words = NEED_WORDS[kind];
+        const text = `${count} ${count === 1 ? words.one : words.many}`;
+        const dot = (
+          <span
+            className="dot dot--small"
+            aria-hidden="true"
+            style={{ background: count > 0 ? look.fill : 'transparent', borderColor: count > 0 ? look.ring : '#A9B0B6' }}
+          />
+        );
+        const on = shown === kind;
+        // A kind shown alone stays a control when none of it counts any longer,
+        // so the view can show every kind again.
+        if (count === 0 && !on) {
+          return (
+            <span key={kind} className="kind kind--none">
+              {dot}
+              {text}
+            </span>
+          );
+        }
+        return (
+          <button
+            key={kind}
+            type="button"
+            className={on ? 'kind kind--on' : 'kind'}
+            aria-pressed={on}
+            title={on ? 'Show every kind again' : 'Show this kind alone'}
+            onClick={() => v.showKind(ctx, kind)}
+          >
+            {dot}
+            {text}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -351,6 +438,12 @@ export function queueSize(q: WorkQueue): number {
   return q.queue.length + q.not_scheduled.length + q.unread.length;
 }
 
+/** How many needs a Needs you view lists, those that count and those that do
+ *  not. */
+export function needsListed(n: NeedsYou): number {
+  return n.counted.length + n.not_counted.length;
+}
+
 /** The group every row of a list reads in, which colours its heading, or
  *  undefined when they read in more than one. */
 function sharedGroup(rows: Record<string, Row>, ids: string[]): Group | undefined {
@@ -361,25 +454,26 @@ function sharedGroup(rows: Record<string, Row>, ids: string[]): Group | undefine
 }
 
 /** A container's two views and its closed work: Needs you, the Work queue, and
- *  its closed work, folded. A view with nothing in it is not drawn. */
+ *  its closed work, folded. A view with nothing in it is not drawn. Needs you
+ *  leads with how many of its needs count. */
 function ContainerViews({ views, ctx, depth }: { views: Views; ctx: string; depth: number }) {
   const { doc } = useView();
   const queued = queueSize(views.queue);
   return (
     <>
-      {views.needs.length > 0 && (
+      {needsListed(views.needs) > 0 && (
         <Heading
           openKey={`${ctx}/needs`}
           def
           depth={depth}
           label="Needs you"
-          count={views.needs.length}
+          count={views.needs.count}
           group={sharedGroup(
             doc.rows,
-            views.needs.map((n) => n.id),
+            views.needs.counted.map((n) => n.id),
           )}
         >
-          <NeedsList needs={views.needs} ctx={`${ctx}/needs`} depth={depth + 1} />
+          <NeedsView needs={views.needs} ctx={`${ctx}/needs`} depth={depth + 1} />
         </Heading>
       )}
       {queued > 0 && (
@@ -409,7 +503,7 @@ function ContainerViews({ views, ctx, depth }: { views: Views; ctx: string; dept
 function holdsPart(views: Views, part: Part): boolean {
   switch (part) {
     case 'needs':
-      return views.needs.length > 0;
+      return views.needs.count > 0;
     case 'queue':
       return views.queue.queue.length > 0;
     case 'not_scheduled':
@@ -445,7 +539,7 @@ export function EpicBlock({ entry, index }: { entry: EpicEntry; index: number })
   const restKey = `${key}/rest`;
   const hasDeliveries = entry.deliveries.length > 0;
   const ownKey = hasDeliveries ? restKey : key;
-  const hasOwn = entry.needs.length > 0 || queueSize(entry.queue) > 0 || entry.closed.length > 0;
+  const hasOwn = needsListed(entry.needs) > 0 || queueSize(entry.queue) > 0 || entry.closed.length > 0;
 
   // A count's click opens its epic, and in each place under it, that part only.
   const focus = (part: Part) => {
@@ -501,7 +595,7 @@ function RestOfEpic({ entry, ctx }: { entry: EpicEntry; ctx: string }) {
   const v = useView();
   const open = v.isOpen(ctx, true);
   const counts: Counts = {
-    needs: entry.needs.length,
+    needs: entry.needs.count,
     queue: entry.queue.queue.length,
     not_scheduled: entry.queue.not_scheduled.length,
     closed: entry.closed.length,
@@ -530,7 +624,7 @@ function DeliveryBlock({ entry, epicKey }: { entry: DeliveryEntry; epicKey: stri
   if (row === undefined) return <ObjectRow id={entry.id} ctx={epicKey} depth={1} />;
   const key = `${epicKey}/d:${entry.id}`;
   // A Delivery whose work has all closed folds by default.
-  const done = entry.needs.length === 0 && queueSize(entry.queue) === 0 && entry.closed.length > 0;
+  const done = needsListed(entry.needs) === 0 && queueSize(entry.queue) === 0 && entry.closed.length > 0;
   const open = v.isOpen(key, !done);
   const detailsKey = `${key}/details`;
   const detailsOpen = v.isOpen(detailsKey, false);

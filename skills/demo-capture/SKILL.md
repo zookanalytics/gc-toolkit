@@ -72,14 +72,21 @@ assemble the MP4:
 
 ```bash
 demo_engine_cli run demo.md --serve-dir ./public          # serve a static directory
-demo_engine_cli run demo.md --serve "npm run dev" --port 5173   # spin up a dev server, tear it down
 demo_engine_cli run demo.md --base-url https://<preview-host>   # drive a deployed preview
 ```
 
-A `--base-url` on this host works for a rig's own app running in a worktree of
-that rig, unless `city.toml` sets `app_reads_city = "true"` for the rig.
-Otherwise the capture refuses the URL and says why. Then serve the app with
-`--serve` or `--serve-dir`, or capture a deployed preview.
+An app a command serves, such as a dev server, runs as a copy that
+`gctk rig serve` runs from a checkout, inside the same sandbox, and the engine
+captures the copy at its loopback port. `rig-demo-capture.sh` and
+`demo-screenshot.sh page` do that for `--serve "<command>" --cwd <checkout>`:
+they start the copy, capture it and stop it. The engine's own `--serve` is
+refused, because the sandbox cannot vouch for the server it would start.
+
+A `--base-url` on this host works for a copy that `gctk rig serve` runs, and for
+a rig's own app running in a worktree of that rig, unless `city.toml` sets
+`app_reads_city = "true"` for the rig. Otherwise the capture refuses the URL and
+says why. Then serve the app as a copy or with `--serve-dir`, or capture a
+deployed preview.
 
 Two capture modes come from one script:
 

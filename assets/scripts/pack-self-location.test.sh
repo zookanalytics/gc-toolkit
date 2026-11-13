@@ -227,7 +227,10 @@ if [ -n "$PATH_LINE" ]; then
 fi
 
 echo "── 4. a city that imports the pack from git reaches the pack's scripts in its cache ──"
-if [ -z "${GC_BIN:-}" ] || [ ! -x "${GC_BIN:-}" ]; then
+# The real gc is the one GC_BIN names, which tools/run-tests.sh hands on as
+# RUN_TESTS_GC_BIN.
+REAL_GC="${RUN_TESTS_GC_BIN:-${GC_BIN:-}}"
+if [ -z "$REAL_GC" ] || [ ! -x "$REAL_GC" ]; then
   printf '  SKIP  GC_BIN names no gc, so the remote layout was not exercised (set GC_BIN to run it)\n'
 else
   # This tree, committed into a repository of its own, is the pack the city
@@ -236,7 +239,7 @@ else
   # in its pack.toml and in its one rig, the layout docs/install.md gives.
   SRC="$TMP/src"; CITY="$TMP/city"; GCH="$TMP/gc-home"; RIG_ONLY="$TMP/city-rig-only"
   mkdir -p "$SRC" "$CITY/rigs/probe" "$RIG_ONLY/rigs/probe" "$GCH" "$TMP/real-gc" "$TMP/away"
-  ln -s "$GC_BIN" "$TMP/real-gc/gc"
+  ln -s "$REAL_GC" "$TMP/real-gc/gc"
   ( cd "$ROOT" && git ls-files -co --exclude-standard -z | xargs -0 tar -cf - 2>/dev/null ) | tar -xf - -C "$SRC"
   ( cd "$SRC" && git init -q -b main && git add -A \
       && git -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q -m "pack" )

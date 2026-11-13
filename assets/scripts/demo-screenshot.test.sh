@@ -109,7 +109,53 @@ cat >"$BIN/sandbox-exec" <<'SBX'
 shift 2
 exec "$@"
 SBX
-chmod +x "$BIN"/node "$BIN"/npm "$BIN"/gc "$BIN"/gh "$BIN"/sandbox-exec
+# gctk stands in for gctk rig serve: --check answers with a copy running on
+# $COPY_PORT once one was started, or when COPY_RUNNING is set, --command starts
+# one and says it started it, or reports the one that runs, or one that another
+# caller started as this start ran when COPY_FOUND is set, or fails as a copy
+# whose serve command ended when COPY_FAIL is set, or as a checkout whose copy
+# runs another command when COPY_OTHER is set, and --stop ends it. lsof names the
+# copy's process as the one listening on its port, working in the checkout it
+# was started from. Each logs to $CALLLOG.
+cat >"$BIN/gctk" <<'GCTK'
+#!/usr/bin/env bash
+printf 'gctk %s (in %s) GCTK_SCRIPTS_DIR=%s\n' "$*" "$(pwd)" "${GCTK_SCRIPTS_DIR:-}" >>"${CALLLOG:?}"
+port=${COPY_PORT:-50200}
+case "$*" in
+  "rig serve --check")
+    if [ -n "${COPY_RUNNING:-}" ] || [ -s "${COPY_STATE:?}" ]; then
+      printf '{"state":"running","checkout":"%s","port":%s,"address":""}\n' "$(pwd)" "$port"; exit 0
+    fi
+    printf '{"state":"none","checkout":"%s"}\n' "$(pwd)"; exit 3 ;;
+  "rig serve --command "*)
+    if [ -n "${COPY_OTHER:-}" ]; then
+      printf '{"state":"failed","reason":"other-command","checkout":"%s","detail":"a copy of this checkout already runs another serve command (npm start)"}\n' "$(pwd)"; exit 1
+    fi
+    if [ -n "${COPY_FAIL:-}" ]; then
+      printf '{"state":"failed","reason":"serve-exited","checkout":"%s","detail":"the serve command ended before the copy answered"}\n' "$(pwd)"; exit 1
+    fi
+    if [ -n "${COPY_RUNNING:-}" ] || [ -n "${COPY_FOUND:-}" ]; then
+      [ -n "${COPY_RUNNING:-}" ] || pwd >"$COPY_STATE"
+      printf '{"state":"running","checkout":"%s","port":%s,"address":""}\n' "$(pwd)" "$port"; exit 0
+    fi
+    pwd >"$COPY_STATE"
+    printf '{"state":"running","checkout":"%s","port":%s,"address":"","started":true}\n' "$(pwd)" "$port"; exit 0 ;;
+  "rig serve --stop") : >"$COPY_STATE"; printf '{"state":"stopped","checkout":"%s"}\n' "$(pwd)"; exit 0 ;;
+esac
+exit 2
+GCTK
+cat >"$BIN/lsof" <<'LSOF'
+#!/usr/bin/env bash
+printf 'lsof %s\n' "$*" >>"${CALLLOG:?}"
+dir=$(cat "${COPY_STATE:?}" 2>/dev/null); [ -n "$dir" ] || dir=${COPY_RUNNING:-}
+[ -n "$dir" ] || exit 1
+case "$*" in
+  *"-iTCP:${COPY_PORT:-50200} "*) echo 4321 ;;
+  *"-p 4321 "*) printf 'p4321\nfcwd\nn%s\n' "$dir" ;;
+  *) exit 1 ;;
+esac
+LSOF
+chmod +x "$BIN"/node "$BIN"/npm "$BIN"/gc "$BIN"/gh "$BIN"/sandbox-exec "$BIN"/gctk "$BIN"/lsof
 
 # The engine's CLI. help lists the screenshot command unless $ENGINE_OLD is set,
 # and its terminal scripts unless $ENGINE_OLD or $ENGINE_NO_TERMINAL is, and
@@ -182,7 +228,11 @@ MD="$WORK/comment.md"; printf '**Approve.** Nothing needs you.\n\n<details>\n<su
 TXT="$WORK/out.txt"; printf 'line one\nline two\n' >"$TXT"
 OUT="$WORK/shots/shot.png"
 CALLLOG="$TMPD/calls.log"; HANDED="$TMPD/handed"; GH_REQ="$TMPD/gh-request.json"
-SCRIPT_HANDED="$TMPD/script-handed"; SERVED="$TMPD/served"
+SCRIPT_HANDED="$TMPD/script-handed"; SERVED="$TMPD/served"; COPY_STATE="$TMPD/copy-state"
+# The checkout a --serve command's copy runs from.
+SITE="$WORK/site"; mkdir -p "$SITE"
+git -C "$SITE" init -q && git -C "$SITE" -c user.name=t -c user.email=t@example.com commit -q --allow-empty -m one \
+  || { echo "test setup: git could not make the copy's checkout" >&2; exit 2; }
 
 # run [VAR=VAL ...] -- <sut args...>: combined stdout and stderr, run from $WORK.
 # The local engine is listed unless a case sets SS_RIG itself.
@@ -190,10 +240,10 @@ run() {
   local envs=(SS_RIG="$ENGINE")
   while [ $# -gt 0 ] && [ "$1" != "--" ]; do envs+=("$1"); shift; done
   [ $# -gt 0 ] && shift
-  : >"$CALLLOG"; rm -f "$HANDED" "$GH_REQ" "$SCRIPT_HANDED" "$SERVED"
+  : >"$CALLLOG"; rm -f "$HANDED" "$GH_REQ" "$SCRIPT_HANDED" "$SERVED"; : >"$COPY_STATE"
   ( cd "$WORK" && env -i PATH="$BIN:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" HANDED="$HANDED" \
       GH_REQ="$GH_REQ" ENGINE_STUB="$ENGINE_STUB" SCRIPT_HANDED="$SCRIPT_HANDED" SERVED="$SERVED" \
-      "${envs[@]}" bash "$SUT" "$@" 2>&1 )
+      GCTK_BIN="$BIN/gctk" COPY_STATE="$COPY_STATE" "${envs[@]}" bash "$SUT" "$@" 2>&1 )
 }
 calls() { cat "$CALLLOG"; }
 # line_of <substring>: the first $CALLLOG line holding it, or 0 when none does.
@@ -336,10 +386,7 @@ out="$(run -- page --script "$SCRIPT" --serve-dir "$APP" --full-page --output "$
 eq "$rc" 0 "a --full-page capture exits 0"
 has "node [$CLI] [screenshot] [$SCRIPT] [--serve-dir] [$APP] [--full-page] [-o] [$OUT] [--scale] [2]" "$(calls)" "--full-page reaches the engine"
 
-echo "# page: --serve with --cwd, and --base-url, are forwarded"
-out="$(run -- page --script "$SCRIPT" --serve 'npm run dev' --port 5175 --cwd "$APP" --output "$OUT")"; rc=$?
-eq "$rc" 0 "a --serve capture exits 0"
-has "[--serve] [npm run dev] [--port] [5175] [--cwd] [$APP]" "$(calls)" "the dev-server command, its port and its directory reach the engine"
+echo "# page: --base-url is forwarded"
 out="$(run -- page --script "$SCRIPT" --base-url https://preview.example.com --output "$OUT")"; rc=$?
 eq "$rc" 0 "a --base-url capture exits 0"
 has "[--base-url] [https://preview.example.com]" "$(calls)" "the base URL reaches the engine"
@@ -348,31 +395,48 @@ eq "$rc" 1 "a --base-url on this host exits 1"
 has "names a server on this host" "$out" "it says a server here runs outside the sandbox"
 hasnt "[screenshot]" "$(calls)" "and nothing is captured"
 
-echo "# page: a --serve command is told its port as PORT, and --port 0 picks a free one"
-out="$(run -- page --script "$SCRIPT" --serve 'npm run dev' --port 5175 --cwd "$APP" --output "$OUT")"; rc=$?
-has "engine-env PORT=5175" "$(calls)" "--port reaches the engine's environment as PORT, which its --serve command inherits"
-out="$(run FREE_PORT=50123 -- page --script "$SCRIPT" --serve 'go run ./cmd/helm-fixture' --port 0 --cwd "$APP" --output "$OUT")"; rc=$?
-eq "$rc" 0 "a --port 0 capture exits 0"
-has "[--serve] [go run ./cmd/helm-fixture] [--port] [50123] [--cwd] [$APP]" "$(calls)" "the engine waits on the free port the pick found"
-has "engine-env PORT=50123" "$(calls)" "and the --serve command inherits it as PORT"
-P=$(line_of "node [-e]"); H=$(line_of "[help]"); S=$(line_of "[screenshot]")
-ok "the port is picked after the engine resolves and before the capture (lines $H, $P, $S)" "[ '$H' -gt 0 ] && [ '$P' -gt '$H' ] && [ '$S' -gt '$P' ]"
-out="$(run -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
-has "engine-env PORT=unset" "$(calls)" "a capture with no --serve command sets no PORT"
+echo "# page: a --serve command's app is served as a copy that gctk rig serve runs from --cwd, and the engine captures the copy"
+out="$(run -- page --script "$SCRIPT" --serve 'go run ./cmd/helm-fixture' --cwd "$SITE" --output "$OUT")"; rc=$?
+eq "$rc" 0 "a --serve capture exits 0"
+has "gctk rig serve --command go run ./cmd/helm-fixture (in $SITE) GCTK_SCRIPTS_DIR=$(dirname "$SUT")" "$(calls)" "it starts a copy from --cwd with the command, naming the scripts that hold the sandbox"
+has "gctk rig serve --command" "$(grep 'gctk rig serve' "$CALLLOG" | head -n 1)" "the start is its first call to gctk rig serve: no --check before it decides whose the copy is"
+has "[--base-url] [http://127.0.0.1:50200/]" "$(calls)" "the engine captures the copy at its loopback port"
+hasnt "[--serve]" "$(calls)" "and is given no --serve of its own"
+has "engine-env PORT=unset" "$(calls)" "nor a PORT"
+H=$(line_of "[help]"); C=$(line_of "rig serve --command"); S=$(line_of "[screenshot]"); T=$(line_of "rig serve --stop")
+ok "the copy starts once the engine resolves, and the capture stops it once it is taken (lines $H, $C, $S, $T)" "[ '$H' -gt 0 ] && [ '$C' -gt '$H' ] && [ '$S' -gt '$C' ] && [ '$T' -gt '$S' ]"
 out="$(run -- page --script "$SCRIPT" --serve 'npm run dev' --output "$OUT")"; rc=$?
-has "engine-env PORT=unset" "$(calls)" "nor does a --serve capture with no --port, which waits on the engine's own default"
-for target in "--serve-dir $APP" "--base-url http://localhost:3000"; do
+has "gctk rig serve --command npm run dev (in $WORK)" "$(calls)" "with no --cwd, the copy runs from here"
+out="$(run COPY_RUNNING="$SITE" -- page --script "$SCRIPT" --serve 'npm run dev' --cwd "$SITE" --output "$OUT")"; rc=$?
+eq "$rc" 0 "a capture of a checkout whose copy runs the command exits 0"
+has "gctk rig serve --command npm run dev (in $SITE)" "$(calls)" "it asks the start, which reports the copy that runs"
+has "[--base-url] [http://127.0.0.1:50200/]" "$(calls)" "it captures that copy"
+hasnt "rig serve --stop" "$(calls)" "and leaves it running"
+has "already runs from $SITE, so the capture takes it and leaves it running" "$out" "it says it takes a copy it did not start"
+out="$(run COPY_FOUND=1 -- page --script "$SCRIPT" --serve 'npm run dev' --cwd "$SITE" --output "$OUT")"; rc=$?
+eq "$rc" 0 "a capture whose start reports a copy another caller started, though none ran before it, exits 0"
+has "[--base-url] [http://127.0.0.1:50200/]" "$(calls)" "it captures that copy"
+hasnt "rig serve --stop" "$(calls)" "and leaves it running, since its start did not run it"
+out="$(run COPY_RUNNING="$SITE" COPY_OTHER=1 -- page --script "$SCRIPT" --serve 'npm run dev' --cwd "$SITE" --output "$OUT")"; rc=$?
+eq "$rc" 1 "a capture of a checkout whose copy runs another command exits 1"
+has "the app's copy did not start: other-command" "$out" "it says why"
+hasnt "[screenshot]" "$(calls)" "and nothing is captured"
+hasnt "rig serve --stop" "$(calls)" "nor is the running copy stopped"
+out="$(run COPY_FAIL=1 -- page --script "$SCRIPT" --serve 'npm run dev' --cwd "$SITE" --output "$OUT")"; rc=$?
+eq "$rc" 1 "a copy that does not start exits 1"
+has "the app's copy did not start: serve-exited" "$out" "it says why"
+hasnt "[screenshot]" "$(calls)" "and nothing is captured"
+for target in "--serve npm" "--base-url http://localhost:3000"; do
   # shellcheck disable=SC2086 # the target is a flag and its value
-  out="$(run -- page --script "$SCRIPT" $target --port 0 --output "$OUT")"; rc=$?
-  eq "$rc" 2 "--port 0 with ${target%% *} exits 2"
-  has "give it with --serve only" "$out" "it says --port 0 is for a --serve command"
+  out="$(run -- page --script "$SCRIPT" $target --port 5175 --output "$OUT")"; rc=$?
+  eq "$rc" 2 "--port with ${target%% *} exits 2"
+  has "--port names the --serve-dir server's port" "$out" "it says --port is the --serve-dir server's"
 done
-for got in "" 0 abc; do
-  out="$(run FREE_PORT="$got" -- page --script "$SCRIPT" --serve 'go run ./cmd/helm-fixture' --port 0 --output "$OUT")"; rc=$?
-  eq "$rc" 1 "a free-port pick that answers '$got' exits 1"
-  has "could not find a free port for the --serve command" "$out" "it says no port was found"
-  hasnt "[screenshot]" "$(calls)" "and nothing is captured"
-done
+out="$(run -- page --script "$SCRIPT" --serve-dir "$APP" --cwd "$SITE" --output "$OUT")"; rc=$?
+eq "$rc" 2 "--cwd with --serve-dir exits 2"
+has "--cwd names the checkout a --serve command serves the app from" "$out" "it says what --cwd names"
+out="$(run -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
+has "engine-env PORT=unset" "$(calls)" "a --serve-dir capture sets no PORT"
 
 echo "# page: a step whose proof failed still yields the capture -> exit 3"
 out="$(run ENGINE_MODE=failed -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
@@ -765,12 +829,11 @@ HTML
   has "demo-screenshot.mjs: github.com finishes part of this comment" "$out" "it says why"
   ok "no page is written for a refused comment" "[ ! -e '$TMPD/refused.html' ]"
 
-  echo "# page: the real node picks the free port"
-  out="$(run REAL_NODE="$NODE_BIN" -- page --script "$SCRIPT" --serve 'go run ./cmd/helm-fixture' --port 0 --output "$OUT")"; rc=$?
-  eq "$rc" 0 "a --port 0 capture exits 0 with the port the real node found"
-  P=$(sed -n 's/^engine-env PORT=//p' "$CALLLOG" | head -n 1)
+  echo "# page: the real node picks the --serve-dir server's free port"
+  out="$(run REAL_NODE="$NODE_BIN" -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
+  eq "$rc" 0 "a --serve-dir capture with no --port exits 0 with the port the real node found"
+  P=$(sed -n 's/.*\[screenshot\].*\[--port\] \[\([0-9]*\)\].*/\1/p' "$CALLLOG" | head -n 1)
   ok "the port is one a server can listen on (got '$P')" "case '$P' in ''|*[!0-9]*|0*) false ;; *) [ '$P' -le 65535 ] ;; esac"
-  has "[--port] [$P]" "$(calls)" "the engine waits on that port"
 
   echo "# markdown end to end, on HTML GitHub returned, through the real renderer"
   rm -f "$OUT"

@@ -159,6 +159,24 @@ with_step new "$(block '[ -n "$X" ] && "$S/new.sh" "$X"')" > "$REPO/$F"
 run_lint "$F"
 expect 1 "&& is control flow: exit 1" "control flow (&&)"
 
+# A cd that && runs after the call moves the agent's own shell, which the call
+# cannot do for its caller, so it and its && weigh nothing. Any other cd weighs.
+with_step new "$(block '"$S/new.sh" "$X" && cd "$D"')" > "$REPO/$F"
+run_lint "$F"
+expect 0 "a cd that && runs after the call weighs nothing, nor does its &&: exit 0"
+
+with_step new "$(block 'cd "$D" && "$S/new.sh" "$X"')" > "$REPO/$F"
+run_lint "$F"
+expect 1 "a cd ahead of the call weighs, and so does its &&: exit 1" "with 2 commands and control flow (&&)\. "
+
+with_step new "$(block '"$S/new.sh" "$X" || cd "$D"')" > "$REPO/$F"
+run_lint "$F"
+expect 1 "a cd that runs when the call fails weighs, and so does its ||: exit 1" "with 2 commands and control flow (||)\. "
+
+with_step new "$(block '"$S/new.sh" "$X" && cd "$D" && "$S/other.sh"')" > "$REPO/$F"
+run_lint "$F"
+expect 1 "a command after the cd weighs, and so does the && that runs it: exit 1" "with 2 commands and control flow (&&)\. "
+
 with_step new "$(block 'for x in a b; do
   "$S/new.sh" "$x"
 done')" > "$REPO/$F"
@@ -477,6 +495,12 @@ expect 0 "a step that trades its procedure for a call: exit 0"
 base_formula | sed 's#^"$GC_RIG_ROOT/assets/scripts/one.sh" --bead "$X"$#"$GC_RIG_ROOT/assets/scripts/one.sh" --bead "$X"; gc runtime drain-ack#' > "$REPO/$F"
 run_lint "$F"
 expect 1 "a call that grows into a sequence: exit 1" "step one gains shell blocks that do more than call a script, with 2 commands"
+
+base_formula | sed 's#^"$GC_RIG_ROOT/assets/scripts/one.sh" --bead "$X"$#"$GC_RIG_ROOT/assets/scripts/one.sh" --bead "$X" \&\& cd "$D"#' > "$REPO/$F"
+grep -qF '"$GC_RIG_ROOT/assets/scripts/one.sh" --bead "$X" && cd "$D"' "$REPO/$F" \
+  && ok "the cd fixture ends step one's call in && cd" || bad "the cd fixture ends step one's call in && cd"
+run_lint "$F"
+expect 0 "a call that gains a cd that && runs after it stays one call: exit 0"
 
 # The old procedure moves, unedited, from step two into step one.
 base_formula | awk '

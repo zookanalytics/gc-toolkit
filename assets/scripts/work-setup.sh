@@ -4,6 +4,7 @@
 # lands in the same place.
 #
 #   work-setup.sh --convoy <id>|--bead <id> --base <branch> [--step <ref>] [--formula <f>]
+#   work-setup.sh --bead <id> --held-by <conversation>
 #   work-setup.sh --conclude-merge --convoy <id>|--bead <id>
 #   work-setup.sh --stop-merge --convoy <id>|--bead <id> --path <file> --collided "<text>"
 #                 --question "<text>" [--step <ref>] [--formula <f>]
@@ -41,10 +42,21 @@
 # guessing and aborts the merge. The work bead then waits on the question's gate,
 # armed to re-sling, and the run ends, or a bead with no molecule drains.
 #
+# A converse sitting sets its change up with --held-by <conversation> beside
+# --bead. Its claim is the conversation, so the bead must show that the sitting
+# holds it, by the proof the hand-off reads too (work_held_by_proof in
+# work-lib.sh), and the tree is cut from the bead's target. A change that carries
+# a rejection reason is refused before anything is written: a check sent it back,
+# and a polecat's resume brings its branch current by merge, which a sitting
+# never does, so no merge mode takes --held-by. The sitting outlives the call and
+# is in the conversation to hear why it stopped, so no stop files a gate, cancels
+# or drains. A second run re-enters the tree the bead records.
+#
 # stdout: progress, then the path of the worktree as the last line, which the
 # caller enters. Everything a person should read goes to stderr.
 # exit: 0 ready · 3 the merge stopped on conflicts, which the worker resolves in
-# the printed worktree · 1 stopped, and what follows was taken care of · 2 usage
+# the printed worktree · 1 stopped, and what follows was taken care of · 2 usage.
+# Under --held-by, 1 is a stop that asked and ended nothing.
 set -uo pipefail
 
 PROG="work-setup"
@@ -52,6 +64,7 @@ PROG="work-setup"
 usage() {
   cat >&2 <<'USAGE'
 usage: work-setup.sh --convoy <id>|--bead <id> --base <branch> [--step <ref>] [--formula <f>]
+       work-setup.sh --bead <id> --held-by <conversation>
        work-setup.sh --conclude-merge --convoy <id>|--bead <id>
        work-setup.sh --stop-merge --convoy <id>|--bead <id> --path <file> --collided "<text>"
                      --question "<text>" [--step <ref>] [--formula <f>]
@@ -59,6 +72,9 @@ usage: work-setup.sh --convoy <id>|--bead <id> --base <branch> [--step <ref>] [-
   --convoy   the run's input convoy; its one tracked bead is the work
   --bead     the work bead, for a claimant with no poured workflow
   --base     the branch the work is poured from
+  --held-by  the conversation a converse sitting holds, whose blocks edge holds
+             the bead; the bead's target is the base, a bead that carries a
+             rejection reason is refused, and no stop gates, cancels or drains
   --step     the step this session holds; default mol-polecat-work.workspace-setup
   --formula  the formula a re-sling pours; default mol-polecat-work
 
@@ -75,7 +91,7 @@ require_value() {
 }
 
 MODE=setup; CONVOY=""; BEAD=""; BASE=""; STEP="mol-polecat-work.workspace-setup"; FORMULA="mol-polecat-work"
-AUDIT_PATH=""; COLLIDED=""; QUESTION=""
+AUDIT_PATH=""; COLLIDED=""; QUESTION=""; WORK_HELD_BY=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --conclude-merge) MODE=conclude; shift ;;
@@ -83,6 +99,7 @@ while [ $# -gt 0 ]; do
     --convoy)   require_value "$@"; CONVOY="$2";     shift 2 ;;
     --bead)     require_value "$@"; BEAD="$2";       shift 2 ;;
     --base)     require_value "$@"; BASE="$2";       shift 2 ;;
+    --held-by)  require_value "$@"; WORK_HELD_BY="$2"; shift 2 ;;
     --step)     require_value "$@"; STEP="$2";       shift 2 ;;
     --formula)  require_value "$@"; FORMULA="$2";    shift 2 ;;
     --path)     require_value "$@"; AUDIT_PATH="$2"; shift 2 ;;
@@ -97,7 +114,12 @@ if { [ -n "$CONVOY" ] && [ -n "$BEAD" ]; } || { [ -z "$CONVOY" ] && [ -z "$BEAD"
   usage
   exit 2
 fi
-if [ "$MODE" = setup ] && [ -z "$BASE" ]; then
+if [ -n "$WORK_HELD_BY" ] && { [ -n "$CONVOY" ] || [ -n "$BASE" ] || [ "$MODE" != setup ]; }; then
+  echo "$PROG: --held-by sets up the bead --bead names, from its own target, so it takes no --convoy, no --base and no merge mode" >&2
+  usage
+  exit 2
+fi
+if [ "$MODE" = setup ] && [ -z "$BASE" ] && [ -z "$WORK_HELD_BY" ]; then
   echo "$PROG: --base is required" >&2
   usage
   exit 2
@@ -157,14 +179,21 @@ if [ "$MODE" = stop ]; then
   exit 0
 fi
 
-git fetch --prune origin >&2 || echo "$PROG: git fetch --prune origin failed; going on with the refs already here" >&2
-
 work_read "$WORK_ID"
 case $? in
   0) ;;
   3) echo "$PROG: the store has no bead $WORK_ID, so there is no work to set up" >&2; exit 1 ;;
   *) work_outage "could not read work bead $WORK_ID" ;;
 esac
+if [ -n "$WORK_HELD_BY" ]; then
+  work_held_by_proof || exit 1
+  [ -z "$(work_meta rejection_reason)" ] \
+    || work_held_stop "$WORK_ID carries a rejection reason, so a check sent it back: a polecat's resume brings its branch current by merging its target in, and a sitting never does"
+  BASE=$(work_meta target)
+  [ -n "$BASE" ] || work_held_stop "$WORK_ID records no target, the branch its change is cut from"
+fi
+
+git fetch --prune origin >&2 || echo "$PROG: git fetch --prune origin failed; going on with the refs already here" >&2
 
 store_read() { gc bd "$@"; }
 
@@ -198,8 +227,10 @@ $(printf '%s' "$rows" | jq -r --arg me "$WORK_ID" '.[] | select(.id != $me and (
 ROWS
 }
 
-# Ends the run: this work waits on SIBLING, which is in flight in <tree>.
+# Ends the run: this work waits on SIBLING, which is in flight in <tree>. A
+# sitting's call writes no wait and only says so.
 wait_on_sibling() { # <tree>
+  [ -z "$WORK_HELD_BY" ] || work_held_stop "$BRANCH is checked out in $1, where $SIBLING is in flight"
   if "$SCRIPT_DIR/await-ruling.sh" "$WORK_ID" --blocked-by "$SIBLING" --formula "$FORMULA"; then
     gc bd update "$WORK_ID" --append-notes "Yielded behind sibling $SIBLING on $BRANCH, whose tree holds the branch at $1. A re-sling is armed for when it closes." </dev/null >/dev/null 2>&1 \
       || echo "$PROG: The note did not land on $WORK_ID; the cancel reason on this step still records it." >&2
