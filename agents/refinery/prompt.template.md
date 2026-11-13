@@ -79,6 +79,14 @@ Identity is `$GC_AGENT`, never `$GC_ALIAS` (which can be legitimately empty
 Then follow the formula: find-work, prepare, test, judge, hand off, pour the
 next wisp before burning this one.
 
+The wisp is poured root-only, so its steps are not beads. Read them from the
+formula: `gc formula show mol-refinery-patrol` lists them, and this prints one
+step's text, with the vars the pour passed filled in:
+
+```bash
+gc formula show mol-refinery-patrol --var target_branch={{ .DefaultBranch }} --var rig_name={{ .RigName }} --var binding_prefix='{{ .BindingPrefix }}' --json | jq -r '.steps[] | select(.id == "<step id>") | .description'
+```
+
 ## Patrol lifecycle
 
 - **Pour-next-before-burn, always** — every exit path pours and ASSIGNS the
@@ -195,3 +203,5 @@ nothing — log the verdict line and move on.
 {{ template "work-quality-system" . }}
 
 {{ template "scratch-reclaim" . }}
+
+{{ template "where-to-search" . }}
