@@ -325,6 +325,39 @@ shares only the word ([authority-map.md](authority-map.md)).
 - **Retires when.** Gas City can set a merge strategy for a target branch, so the
   rule becomes a line of the rig's config.
 
+## A merged PR's refused close
+
+- **Covers.** The `pull_request_merged_close_refused` name, the exception the
+  landing order records when bd refuses to close a bead whose merge it
+  verified. Its writers: `Refuse` in `services/gctk/pr/record/record.go`, and
+  `refused`, `refusedMessage` and `closeRefused` in
+  `services/gctk/pr/landing.go`.
+- **Stands in for.** An escalation, on the bead's own pending record, of a
+  merge the reconcile verified but whose close the store refuses.
+- **Evidence.**
+  - In `gastownhall/gascity-packs`, Gas Town's reconcile writes `mr_merged` on
+    the still-blocked bead, and when `bd_close` fails it prints "merge verified
+    but bead close failed; pending marker retained for retry" and returns, so
+    its next run tries the close again. Its record has no value for the case,
+    and it escalates nothing (`gastown/commands/pr-merge-reconcile/run.sh`
+    709-723). Its escalations elsewhere in that file are mail to the mayor
+    (`mail_mayor` at 40, called at 302, 404, 423 and 699).
+  - In `gastownhall/beads`, an update that would close a bead with an open
+    child or a live direct blocker returns `CloseOpenChildrenError` or
+    `ErrCloseBlocked` to its caller unless it forces the close policy
+    (`issueops/issueops.go` 561-566). bd's human gate
+    (`bd gate create --type human`, `cmd/bd/gate.go` 1952) is the primitive the
+    exception's gate composes.
+  - A search of `gastownhall/gascity` and `gastownhall/beads` for a refused
+    close finds no record of one kept on the bead for a person. What it finds
+    in Gas City handles a refusal inside the closes Gas City makes itself, such
+    as the autoclose sweep's retry of a convoy, wisp or molecule autoclose
+    (`cmd/gc/autoclose_sweep.go` 21-22).
+- **Verified.** 2026-11-13, at `gastownhall/gascity-packs` main 1f6d8e41c,
+  `gastownhall/beads` main 1d22ef9be and `gastownhall/gascity` main a07d754c7.
+- **Retires when.** Gas Town's `pr-merge-reconcile` escalates a close it cannot
+  make. The exception then moves onto what Gas Town records.
+
 ## Machine axis
 
 - **Covers.** The `pr.machine`, `pr.machine_cause` and `pr.machine_reason`
