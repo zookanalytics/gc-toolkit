@@ -111,8 +111,8 @@ dispatch path too, and a reaction they ask for cannot race the arm either.
 To see what is owed, in this rig's store:
 
 ```bash
-deferred-dispatch.sh list        # each armed bead and what the next pass would do with it; then each notice owed
-deferred-dispatch.sh list --json # the armed beads alone, as bd lists them: no hold, no notice
+deferred-dispatch.sh list        # each armed bead and what the next pass would do with it
+deferred-dispatch.sh list --json # the armed beads alone, as bd lists them, with no hold
 deferred-dispatch.sh disarm <bead> --reason "superseded by <x>"
 ```
 
@@ -136,88 +136,55 @@ everything it blocks. With `--successor` naming the evidence, the bead leaves th
 gate after its arm and route are gone. Removing that edge first would send the work,
 as any release of an armed bead does.
 
-## Work assigned to a named agent owes a notice
+## A named agent hears through Gas City's hand-off
 
-gc-toolkit hands work to a named agent by assignee, never by route. That is
-the form Gas City documents for direct delivery to a named session: an
-assignee with no route, which the controller does not count as pool demand,
-where a route on an unassigned bead is demand for its target's pool
-([dispatch architecture](https://github.com/gastownhall/gascity/blob/main/engdocs/architecture/dispatch.md),
-"scale_check ↔ work_query correspondence"). The hook of a plain named
-session, which each of the pack's named agents is, offers it a bead assigned
-to it and a bead routed to its own name alike, once `bd` reports the bead
-ready
-([gascity/routing-model.md](gascity/routing-model.md#the-read-side-the-claim-predicate)),
-so a route would reach the agent too. What a route does not reach is the
-controller's handling of assigned work, which under `wake_mode = "fresh"`
-restarts a live named session onto a newly assigned bead. Under `"resume"`,
-nothing gives an idle named session a turn when its bead becomes ready: the
-controller's claim, continuation and execution backstops govern pool
-sessions only, the agent's `nudge` text is typed at launch, and the
-fresh-mode restart does not apply
-([gascity/agent-types.md](gascity/agent-types.md#an-assignment-gives-a-named-session-no-turn)).
-So the dispatch an assignment owes is a notice to the agent, keyed on the
-assignee:
+A named agent takes no arm: an arm pours a formula through a pool, and a named
+agent is no pool. Work for one goes to it in the form it finds its work by, and
+it hears about the work through Gas City's own paths, so the pack keeps no
+record for it. The work skill gives each agent's command.
 
-```bash
-"$PACK_DIR/assets/scripts/deferred-dispatch.sh" notify <bead> \
-    --agent gc-toolkit.mechanik --reason "<why the bead is the agent's>"
-```
+- **An agent that claims through its hook, such as the mechanik, takes a
+  route.** `gc sling <agent> <bead> --no-formula --no-convoy` writes
+  `gc.routed_to=<agent>`, and a plain named session's hook serves a bead routed
+  to its own name once `bd` reports the bead ready
+  ([gascity/routing-model.md](gascity/routing-model.md#the-read-side-the-claim-predicate)).
+  `--no-convoy` keeps the raw route from filing an auto-convoy around the bead.
+- **An agent that finds its work by listing the beads assigned to it takes the
+  assignee.** The refinery's patrol lists the open beads assigned to it that
+  carry a `branch`, and the keeper's wake sweep lists the beads assigned to it
+  that carry a handback. A route never reaches either list.
+- **The deacon and the witness patrol their own wisps.** Each one's hook
+  answers its patrol's wisp ahead of a bead routed or assigned to it, and
+  neither patrol lists assigned beads, so they take mail, which each patrol
+  reads every cycle.
 
-The notice is `gc mail send <agent> --notify`, naming the bead. `--notify`
-requests the agent's turn and wakes it when it is not running, and the mail
-stays in the agent's inbox. When `bd` already reports the bead ready, the
-mail goes at once. Otherwise `notify` records the notice on the bead as
-`gc.notify_when_ready=<agent>`, and the reconcile pass sends it once `bd`
-does, because a notice sent while the bead still waits would wake the agent
-for a bead its hook does not offer yet. The notice waits on `bd`'s readiness,
-the predicate the hook reads, and not on what `gctk bead holds` calls a hold:
-a bead `bd` keeps unready is not offered to the agent, whatever holds it.
+A route or an assignee alone gives a running agent no turn. Core's
+`nudge-on-route` order would nudge a routed agent, but it reads the route from
+a flat event payload, and the build the city runs nests the bead in every
+`bead.updated` event, so it nudges nobody. So a writer whose bead is ready
+nudges the agent at the write, naming the bead:
+`gc session nudge <agent> "<bead> is routed to you and ready"`, or "is assigned
+to you" for the assignee form. A nudge to an agent that is not running queues,
+and asks the controller to wake the agent, which delivers it.
 
-A notice is done once the agent's turn is requested, not once its mail is
-saved, because mail alone requests no turn. `gc mail send` saves the mail
-before it requests the turn, and when that request fails it says so on
-stderr and still exits 0. So the notice reads `notified` from the command's
-`--json` result, not its exit status. The mail's dedup key,
-`ready-notice:<bead>`, keeps a second copy out of the agent's mailbox while
-the first notice about the bead is still there, read or not, and a send it
-suppresses requests no turn either. So whenever the mail requests no turn,
-whether the send failed, its turn request failed or the dedup key suppressed
-it, the notice requests it with `gc session nudge <agent> --reference-bead <bead>`,
-whose exit status is its outcome. A nudge still queued for the agent about
-the same bead gives way to the new one. A notice that gets no turn requested
-either way keeps its record, and the log keeps what `gc mail send` and
-`gc session nudge` printed about the failure.
+A bead that still waits on a `blocks` blocker takes the route or the assignee
+alone. When the blocker closes, core's `cascade-nudge-on-blocker-close` nudges
+each dependent that no other blocker holds, naming it: the assignee with a
+queued nudge, which reaches a running session at its next idle boundary, or
+else the route with the default delivery. The controller also wakes a stopped
+session once ready work is assigned to it, and an on-demand named session
+once ready work is routed to it.
 
-`notify` refuses a bead that is not assigned to the agent, because the
-notice is owed for an assignment, so assign the bead first. A closed bead,
-or one the agent already claimed, owes no notice, and `notify` writes
-nothing and exits 0. Once the record is down the notice is owed: a readiness
-read that fails, or a notice that gets no turn requested, leaves the record
-for the pass, and `notify` still exits 0.
+What no path covers: a running, idle agent is not told about work that becomes
+ready another way, such as a lifted park, a removed hold label or a wait that
+is not a `blocks` edge, and hears at its next turn. Nothing nudges on a raw
+`bd update --assignee` either, so a person hands work to a named agent through
+the work skill's send.
 
-Each pass sends the notices whose beads `bd` reports ready, ahead of its
-slings, and retires a notice unsent on a bead that closed, that its agent
-claimed, or that is no longer assigned to that agent. `notify` takes no pass
-lock, so it can record a notice for a bead's new assignee while a pass runs.
-Every retire therefore re-reads the bead first, in a pass and in `notify`
-alike. A record that now names another agent, or a notice owed again, stays
-for the next pass. `bd` has no conditional unset, so a notice recorded between
-that read and the retire's write is still lost. A notice that gets no
-turn requested keeps the record and fails the pass, and the next pass tries
-it again. Unless the agent has archived the first mail, the dedup key keeps
-that retry from adding a second copy, and `gc session nudge` requests the
-turn. A pass that dies between the send and the retire costs no second
-message either, only a second turn request. `list` shows each notice owed
-and what decides it. `list --json` prints only the armed beads, and no
-notice. The `disarm` verb clears a notice with the rest of the record, while
-a pass that retires an arm on the same bead leaves its notice owed. The verb's
-write takes its exit, so it exits 0 once the store has taken the clear, and its
-caller can act on that exit, as `stand-down.sh` closes the bead on it.
-
-`first-reaction-dispose.sh` asks for the notice on both of its named-agent
-exits: `--assign`, whose bead is normally ready, and `--then-assign`, whose
-bead waits on its blocker.
+`first-reaction-dispose.sh` addresses only an agent whose hook offers the bead,
+so both of its named-agent exits route it: `--assign`, whose bead is ready, and
+nudges the agent, and `--then-assign`, whose bead waits on its blocker, with
+the route alone.
 
 ## What performs it
 
