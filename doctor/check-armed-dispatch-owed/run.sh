@@ -13,10 +13,13 @@
 # an arm: it reads the start's.
 #
 # Two ways a dispatch stops firing SILENTLY, neither caught elsewhere:
-#   * OWED-BUT-NOT-FIRING — the next pass would start the arm, yet it has stayed
+#   * OWED-BUT-NOT-FIRING — the next pass would start the arm, or nothing holds
+#     it and the start cannot resolve the formula it pours, yet it has stayed
 #     armed well past the order's cadence window. Either the order is not
 #     running (check-cadence-live/I10 is the direct cause there, but a single
-#     owed arm makes the effect concrete) or the dispatch is stuck. An arm the
+#     owed arm makes the effect concrete) or the dispatch is stuck, and the
+#     finding names why when the dry run says. An arm the start cannot resolve
+#     counts no attempt, so the cap never asks a person about it. An arm the
 #     start would hold, by a wait, a hold label, an assignee or bd's readiness,
 #     is not owed: the arm fires when what holds it lifts. An unjudged one, with
 #     a waits-for edge of its own, is held too, and the check names it in a note.
@@ -24,9 +27,11 @@
 #     more, and an arm is one, so an arm that never fires is this check's to see.
 #   * STRANDED — the bead is armed at a non-open status, which the start never
 #     sends, so no wait landing will ever dispatch it (a bead armed while open,
-#     then set to another status). The start names it on every pass, but nothing
-#     surfaces it to a person. A hold does not excuse it: releasing the hold
-#     would not dispatch it either.
+#     then set to another status). An arm whose record does not decode is
+#     stranded too, because the start sends no malformed arm and counts no
+#     attempt on it. The start names each on every pass, but nothing surfaces it
+#     to a person. A hold does not excuse it: releasing the hold would not
+#     dispatch it either.
 #
 # An arm whose attempts reached the cap is NOT flagged: the start asks a person
 # about it, so it is not silent.
@@ -216,13 +221,15 @@ fi
 
 # One store's scan. A stranded arm goes to findings, and a store or bead it could
 # not check goes to warnings, each in the words the report prints. An arm the
-# next pass would start goes to owed as "<id>\037<seconds since>", and the
-# report judges it against the owed window. The store's reads land in files
-# named from the prefix $3.
+# next pass would start, or one nothing holds whose formula the start cannot
+# resolve, goes to owed as "<id>\037<seconds since>\037<why it is stuck>", the
+# last empty for an arm the next pass would start, and the report judges it
+# against the owed window. The store's reads land in files named from the
+# prefix $3.
 scan_store() {
     local rig_name="$1" rig_path="$2"
     local label="${rig_name:-<city>}" lines="$3.dry.json"
-    local rc err rows cid act kase why armed_at released spawners since_epoch released_epoch
+    local rc err rows cid act kase why armed_at released spawners since_epoch released_epoch stuck
     # The start's dry run of this store: one line per armed bead. Its exit 1 says
     # an arm's act failed, and that arm's line says why. A run that printed no
     # line, or exited otherwise, read nothing this check can trust.
@@ -253,16 +260,19 @@ scan_store() {
         case "$act/$kase" in
             hold/status)
                 findings+=("$label bead $cid: armed for dispatch, and $why — no wait landing can dispatch it. Return it to open, or disarm: deferred-dispatch.sh disarm $cid") ;;
+            fail/malformed)
+                findings+=("$label bead $cid: armed for dispatch, and $why — no wait landing can dispatch it. Disarm it (deferred-dispatch.sh disarm $cid), then arm it again if the dispatch is still wanted") ;;
             hold/unjudged)
                 notes+=("$label bead $cid: held by a waits-for edge onto $spawners, which the store cannot judge yet (unjudged), so the start holds the arm until the bd the city runs judges the gate") ;;
             fail/read)
                 warnings+=("$label bead $cid: could not read what holds it in $rig_path/.beads ($why) — NOT checked") ;;
-            start/*)
+            start/*|fail/formula)
                 # Owed since the later of when it was armed and when the last
                 # wait on it landed, its own or a live ancestor's (last_landed),
                 # so a hold that released before the arm was recorded does not
                 # age it. An arm whose armed_at does not parse is judged from
-                # the release alone.
+                # the release alone. An arm whose formula the start could not
+                # resolve carries why, so its finding names what keeps it.
                 since_epoch=$(iso_to_epoch "$armed_at")
                 released_epoch=$(iso_to_epoch "$released")
                 if [ -n "$released_epoch" ] && { [ -z "$since_epoch" ] || [ "$released_epoch" -gt "$since_epoch" ]; }; then
@@ -272,7 +282,8 @@ scan_store() {
                 # sweep sees a readable timestamp, and a real stall persists to
                 # be caught then.
                 [ -n "$since_epoch" ] || continue
-                owed+=("$cid"$'\037'"$(( now - since_epoch ))") ;;
+                stuck=""; [ "$act" = start ] || stuck="$why"
+                owed+=("$cid"$'\037'"$(( now - since_epoch ))"$'\037'"$stuck") ;;
         esac
     done <<< "$rows"
 }
@@ -347,9 +358,9 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
             F*) findings+=("${rec#F}") ;;
             W*) warnings+=("${rec#W}") ;;
             N*) notes+=("${rec#N}") ;;
-            A*) IFS=$'\037' read -r cid age <<< "${rec#A}"
+            A*) IFS=$'\037' read -r cid age stuck <<< "${rec#A}"
                 [ "$age" -ge "$OWED_WINDOW_SECONDS" ] || continue
-                findings+=("$label bead $cid: armed and nothing has held it for ${age}s (> ${OWED_WINDOW_SECONDS}s), but it has not dispatched. The deferred-dispatch order's pass starts an arm nothing holds, and ${OWED_WINDOW_SECONDS}s is that order's cadence window, so a dispatch owed this long means that order is not firing (check-cadence-live/I10) or the dispatch is stuck. Look: deferred-dispatch.sh list; disarm if no longer wanted: deferred-dispatch.sh disarm $cid") ;;
+                findings+=("$label bead $cid: armed and nothing has held it for ${age}s (> ${OWED_WINDOW_SECONDS}s), but it has not dispatched${stuck:+: $stuck}. The deferred-dispatch order's pass starts an arm nothing holds, and ${OWED_WINDOW_SECONDS}s is that order's cadence window, so a dispatch owed this long means that order is not firing (check-cadence-live/I10) or the dispatch is stuck. Look: deferred-dispatch.sh list; disarm if no longer wanted: deferred-dispatch.sh disarm $cid") ;;
         esac
     done <"$WORK/$n.msg"
 done <<< "$scopes"

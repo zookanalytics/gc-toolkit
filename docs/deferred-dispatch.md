@@ -312,7 +312,10 @@ and disarming and arming it again starts its attempts over. An ask that does
 not reach a person keeps the arm, and the next pass asks again.
 
 A record the start cannot read, such as arguments that name no formula alone,
-is reported as malformed, and nothing is slung on it.
+is reported as malformed, and nothing is slung on it. Such a record, and an
+arm that names no formula for a target the city's config gives no default,
+count no attempt, so the cap never asks a person about either, and
+`doctor/check-armed-dispatch-owed` reports both instead (below).
 
 A listing that cannot be read exits non-zero and says so. It never prints an
 empty pass, because for a dispatcher "I could not see the queue" and "nothing
@@ -331,8 +334,10 @@ without the cadence and `arm` still succeeds and writes a well-formed record,
 and nothing ever performs it. `doctor/check-armed-dispatch-owed` closes the gap
 the other two leave: the cadence can be live and the pass still leave a
 dispatch unmade, so it reads each arm from the start's dry run and flags one
-the next pass would start that has stayed armed past the order's window, or
-one armed at a status other than `open`, which the start never sends.
+the next pass would start, or one nothing holds whose formula the start cannot
+resolve, that has stayed armed past the order's window. It also flags one armed
+at a status other than `open`, or one whose record does not decode, which the
+start never sends.
 
 ## The dispatch lock and the time bound
 

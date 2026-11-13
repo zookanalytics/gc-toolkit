@@ -4,7 +4,9 @@
 # dry run, `gctk bead start-armed --dry-run`, which the suite builds from this
 # checkout and runs over the stub stores. Covers: the OWED finding (an arm the
 # next pass would start, whose own blocks edges closed long ago, that never
-# dispatched), the STRANDED finding (armed at a non-open status), the narrowing
+# dispatched, and an arm nothing holds whose formula the start cannot resolve,
+# named with why), the STRANDED finding (armed at a non-open status, or with a
+# record that does not decode, whatever its age), the narrowing
 # exemptions (still waiting on its own open blocker; dispatchable only
 # recently, within the order's window; armed only recently, after its blockers
 # closed; delivered via merge_result; closed; assigned; held by a hold label;
@@ -273,6 +275,12 @@ aarmed()  { printf '{"id":"%s","status":"open","metadata":{"gc.dispatch_when_rea
 astatus() { printf '{"id":"%s","status":"%s","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_armed_at":"2020-01-01T00:00:00Z"}}' "$1" "$2"; }
 amr()     { printf '{"id":"%s","status":"open","metadata":{"gc.dispatch_when_ready":"rig/pool","merge_result":"pull_request"}}' "$1"; }
 aassigned() { printf '{"id":"%s","status":"open","assignee":"rig/rig.refinery","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_armed_at":"%s"}}' "$1" "${2:-2020-01-01T00:00:00Z}"; }
+# amalformed <id> [armed_at] — an open arm whose sling arguments are no JSON
+# array, a record the start reports as malformed.
+amalformed() { printf '{"id":"%s","status":"open","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"not json","gc.dispatch_when_ready_armed_at":"%s"}}' "$1" "${2:-2020-01-01T00:00:00Z}"; }
+# anoformula <id> <target> [armed_at] — an open arm that names no formula, for a
+# target the fixture config gives no agent, so the start cannot resolve one.
+anoformula() { printf '{"id":"%s","status":"open","metadata":{"gc.dispatch_when_ready":"%s","gc.dispatch_when_ready_armed_at":"%s"}}' "$1" "$2" "${3:-2020-01-01T00:00:00Z}"; }
 # alabelled <id> <label> — an open, unassigned arm carrying that label.
 alabelled() { printf '{"id":"%s","status":"open","labels":["learning","%s"],"metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_armed_at":"2020-01-01T00:00:00Z"}}' "$1" "$2"; }
 # A capped arm: fail count defaults to the cap (3); $2 overrides it. Paired with
@@ -876,6 +884,31 @@ eq "$RC" "1" "of two stores whose walks read at once, the one with an owed arm w
 has "$OUT" "beta bead k-2: armed and nothing has held it" "beta's arm is judged against beta's blockers"
 hasnt "$OUT" "alpha bead k-1" "alpha's arm is judged against alpha's blockers, which hold it"
 hasnt "$OUT" "could not read" "neither walk judges the other store's arms"
+clear_stores
+
+# --- 37. MALFORMED: an arm whose record does not decode is stranded ----------
+# The start sends no malformed arm and counts no attempt on it, so the cap never
+# asks a person about it. The check reports it at once, however recently it was
+# armed, because no wait landing will dispatch it.
+armed_store alpha "$(amalformed m-1 "$RECENT")"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "an arm whose record does not decode warns (exit 1)"
+has "$OUT" "alpha bead m-1: armed for dispatch, and its arm does not decode" "the finding names the bead and that its arm does not decode"
+has "$OUT" "do not decode as a JSON array of strings" "the finding names what in the record does not decode"
+has "$OUT" "deferred-dispatch.sh disarm m-1" "the finding names the disarm remedy for that bead"
+clear_stores
+
+# --- 38. an arm whose formula the start cannot resolve is owed past the window
+# An arm that names no formula pours its target's default, and a target the
+# city's config gives no agent has none, so the start sends nothing and counts
+# no attempt. Nothing holds the arm, so it reads as owed once the window has
+# passed, and the finding says why it has not dispatched.
+armed_store alpha "$(anoformula f-1 rig/gone)" "$(anoformula f-2 rig/gone "$RECENT")"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "an old arm whose formula cannot be resolved warns (exit 1)"
+has "$OUT" "alpha bead f-1: armed and nothing has held it" "it reads as owed but not firing"
+has "$OUT" "no agent in the city's config answers to rig/gone" "the finding names why the start cannot send it"
+hasnt "$OUT" "alpha bead f-2" "one armed within the window is not flagged yet"
 clear_stores
 
 echo "── every run removes its scratch ──"
