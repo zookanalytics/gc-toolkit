@@ -146,7 +146,7 @@ func (a *Arms) Arm(req Request) (string, error) {
 	}
 	at := a.Now().UTC().Format(time.RFC3339)
 	w := a.Ledger.Write(req.ID)
-	record.Set(w, record.Arm{Target: req.Target, Formula: formula, Reason: req.Reason, ArmedBy: a.Actor, ArmedAt: at})
+	record.Set(w, req.Target, formula, req.Reason, a.Actor, at)
 	w.Note(fmt.Sprintf("deferred-dispatch: dispatch armed by %s at %s, for %s on %s%s. The deferred-dispatch order starts it once nothing holds this bead, and no agent keeps it in context.",
 		a.Actor, at, req.Target, formula, reasonClause(req.Reason)))
 	if err := a.Ledger.Commit(w); err != nil {
@@ -158,22 +158,22 @@ func (a *Arms) Arm(req Request) (string, error) {
 // armedAlready answers an arm on a bead that carries one: a success when it is
 // the same arm, and a refusal otherwise.
 func (a *Arms) armedAlready(req Request, have *record.Arm) (string, error) {
-	if have.Malformed != "" {
-		return "", refuse("%s carries an arm the start cannot read (%s). Disarm it, then arm it again", req.ID, have.Malformed)
+	if have.Malformed() != "" {
+		return "", refuse("%s carries an arm the start cannot read (%s). Disarm it, then arm it again", req.ID, have.Malformed())
 	}
 	want, err := a.formulaFor(req.Target, req.Formula)
 	if err != nil {
 		return "", err
 	}
 	// An arm that names no formula pours its target's default at each start.
-	had := have.Formula
+	had := have.Formula()
 	if had == "" {
 		had, _ = a.defaultFormula(have.Target)
 	}
 	if have.Target == req.Target && had != "" && had == want {
 		return fmt.Sprintf("%s is already armed for %s on %s, so nothing was written", req.ID, req.Target, want), nil
 	}
-	return "", refuse("%s is already armed for %s on %s. Disarm it first if you mean to change where it goes", req.ID, have.Target, nonEmpty(have.Formula, "its default formula"))
+	return "", refuse("%s is already armed for %s on %s. Disarm it first if you mean to change where it goes", req.ID, have.Target, nonEmpty(have.Formula(), "its default formula"))
 }
 
 // formulaFor is the formula an arm for target pours: named, or else the

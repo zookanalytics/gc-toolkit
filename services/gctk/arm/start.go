@@ -175,7 +175,7 @@ func (a *Arms) StartArmed(opts StartOptions, emit func(Line)) (Summary, error) {
 			out(q.l)
 			continue
 		}
-		q.l.Start = a.start(q.r.ID, opts)
+		q.l.Start = a.start(q.r, opts)
 		out(q.l)
 	}
 	return sum, nil
@@ -238,8 +238,8 @@ func (a *Arms) retire(id string, act Act, dryRun bool) Act {
 // does after bd's exact comparison.
 func (a *Arms) judge(r *ledger.Record, arm *record.Arm, h waits.Holds, holdsErr, readyErr error, ready bool) (Act, bool) {
 	switch status := r.Status(); {
-	case arm != nil && arm.Malformed != "":
-		return Act{Action: ActFail, Case: "malformed", Why: "its arm does not decode, so nothing is slung: " + arm.Malformed}, true
+	case arm != nil && arm.Malformed() != "":
+		return Act{Action: ActFail, Case: "malformed", Why: "its arm does not decode, so nothing is slung: " + arm.Malformed()}, true
 	case status != "open":
 		return Act{Action: ActHold, Case: "status",
 			Why: fmt.Sprintf("it is at status %s, and the start sends an open bead alone: return it to open, or disarm it", status)}, true
@@ -283,23 +283,22 @@ func (a *Arms) judge(r *ledger.Record, arm *record.Arm, h waits.Holds, holdsErr,
 // start sends one armed bead nothing holds, under its lock: it reads the bead
 // once more, resolves the formula, finds the pour an earlier attempt made by
 // the arm's token, asks a person at the cap, counts the attempt, slings, and
-// reads the sling's exit. A dry run says what it would do and takes no lock.
-func (a *Arms) start(id string, opts StartOptions) Act {
-	release := func() {}
+// reads the sling's exit. A dry run says what it would do from the row the pass
+// listed, and takes no lock.
+func (a *Arms) start(listed *ledger.Record, opts StartOptions) Act {
+	id, r := listed.ID, listed
 	if !opts.DryRun {
-		r, holder, err := a.takeLock(id, 0)
+		release, holder, err := a.takeLock(id, 0)
 		if err != nil {
 			return Act{Action: ActFail, Case: "lock", Why: err.Error()}
 		}
-		if r == nil {
+		if release == nil {
 			return Act{Action: ActLeave, Case: "locked", Why: fmt.Sprintf("its dispatch lock is held by %s, so the next pass sends it", holder)}
 		}
-		release = r
-	}
-	defer release()
-	r, err := a.read(id)
-	if err != nil {
-		return Act{Action: ActFail, Case: "read", Why: "it could not be read again before its sling, so it stays armed: " + err.Error()}
+		defer release()
+		if r, err = a.read(id); err != nil {
+			return Act{Action: ActFail, Case: "read", Why: "it could not be read again before its sling, so it stays armed: " + err.Error()}
+		}
 	}
 	arm := record.Of(r)
 	if arm == nil {
@@ -314,7 +313,7 @@ func (a *Arms) start(id string, opts StartOptions) Act {
 		}
 		return act
 	}
-	formula := arm.Formula
+	formula := arm.Formula()
 	if formula == "" {
 		f, err := a.defaultFormula(arm.Target)
 		if err != nil || f == "" {
@@ -329,7 +328,7 @@ func (a *Arms) start(id string, opts StartOptions) Act {
 		formula = f
 	}
 	token := "arm:" + id + "@" + arm.ArmedAt
-	if arm.FailCount > 0 {
+	if arm.Attempts() > 0 {
 		roots, err := a.Ledger.Find(ledger.Titled(token).WithClosed())
 		if err != nil {
 			return Act{Action: ActFail, Case: "read", Formula: formula, Why: "the pours of its earlier attempts could not be read, so it stays armed: " + err.Error()}
@@ -345,14 +344,14 @@ func (a *Arms) start(id string, opts StartOptions) Act {
 			return a.askUnfinished(id, formula, pours.only(open), opts.DryRun)
 		}
 	}
-	if arm.Capped {
+	if arm.Capped() {
 		return a.askCap(id, arm, formula, opts.DryRun)
 	}
 	if opts.DryRun {
 		return Act{Action: ActStart, Formula: formula, Why: fmt.Sprintf("nothing holds it, so a pass slings it to %s on %s", arm.Target, formula)}
 	}
 	w := a.Ledger.Write(id)
-	record.SetAttempts(w, arm.FailCount+1)
+	record.SetAttempts(w, arm.Attempts()+1)
 	if err := a.Ledger.Commit(w); err != nil {
 		return Act{Action: ActFail, Case: "write", Formula: formula, Why: "its attempt could not be counted, so nothing was slung: " + err.Error()}
 	}
@@ -369,7 +368,7 @@ func (a *Arms) start(id string, opts StartOptions) Act {
 		return a.liveOnExit3(id, formula, res)
 	}
 	return Act{Action: ActFail, Case: "sling", Formula: formula,
-		Why: fmt.Sprintf("gc sling failed (%s), so it stays armed with %d attempt(s) counted", res.Failure(), arm.FailCount+1)}
+		Why: fmt.Sprintf("gc sling failed (%s), so it stays armed with %d attempt(s) counted", res.Failure(), arm.Attempts()+1)}
 }
 
 // retireLocked retires an arm a start found closed or delivered on its fresh
@@ -535,13 +534,13 @@ func (a *Arms) askUnfinished(id, formula string, ps pours, dryRun bool) Act {
 // reached the cap, instead of slinging it again.
 func (a *Arms) askCap(id string, arm *record.Arm, formula string, dryRun bool) Act {
 	act := Act{Action: ActAsk, Case: "cap", Formula: formula,
-		Why: fmt.Sprintf("%d attempts have reached the cap of %d, so a person is asked instead of slinging it again", arm.FailCount, record.Cap())}
+		Why: fmt.Sprintf("%d attempts have reached the cap of %d, so a person is asked instead of slinging it again", arm.Attempts(), record.Cap())}
 	if dryRun {
 		return act
 	}
 	msg := fmt.Sprintf("Deferred dispatch has tried to sling armed bead %s to %s on %s %d times, and its cap is %d, so it asks a person instead of slinging again. Each attempt mints an input convoy. A common cause is work another path already delivered, or a target that refuses the pour. Look at why the slings failed, then disarm it (gctk bead disarm %s --reason \"<why>\"), or disarm it and arm it again, which starts its attempts over (gctk bead arm %s --target %s --on %s --reason \"<why>\").",
-		id, arm.Target, formula, arm.FailCount, record.Cap(), id, id, arm.Target, formula)
-	return a.ask(id, act, fmt.Sprintf("deferred dispatch has failed %d times: disarm or re-arm", arm.FailCount), msg)
+		id, arm.Target, formula, arm.Attempts(), record.Cap(), id, id, arm.Target, formula)
+	return a.ask(id, act, fmt.Sprintf("deferred dispatch has failed %d times: disarm or re-arm", arm.Attempts()), msg)
 }
 
 // ask puts the question to a person: a conversation on a bead with an open

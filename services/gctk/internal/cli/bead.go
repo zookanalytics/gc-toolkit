@@ -47,14 +47,12 @@ last wait that applies to it landed: its own, and for work that has not
 started each live ancestor's too, "" when none has. in_flight says why the
 bead is in flight: claimed, carrying branch, merge_result or
 rejection_reason, or worked by a live workflow past load-context, and is ""
-when it is not. arm is the arm on a bead armed to start by itself, as its
-record decodes it, and null when it carries none: {"target", "formula",
-"reason", "armed_by", "armed_at", "fail_count", "capped"}, where formula is
-"" when the arm names none, so a start pours the target's default, fail_count
-is the attempts a start has made on it, and capped says they have reached the
-cap, at which a start asks a person instead. "malformed" says why a stored arm
-does not decode, and a start slings no such arm. foreign is the bead's wait
-edges into another store, each {"id", "type"}, which hold nothing.
+when it is not. arm is the arm on a bead armed to start by itself, each value
+as the store holds it, and null when it carries none: {"target", "args",
+"reason", "armed_by", "armed_at", "fail_count"}, where args is the JSON array
+of sling arguments that names the formula a start pours, and fail_count the
+attempts a start has made on it. foreign is the bead's wait edges into another
+store, each {"id", "type"}, which hold nothing.
 
 A bead the store could not answer prints {"id", "error"} and no status, and
 so does a bead the store does not hold.

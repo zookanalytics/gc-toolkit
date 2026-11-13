@@ -1,6 +1,7 @@
 package record_test
 
 import (
+	"encoding/json"
 	"reflect"
 	"slices"
 	"strings"
@@ -48,8 +49,8 @@ func TestTheFormulaFromEachStoredForm(t *testing.T) {
 		{name: "--on=<formula>", args: `["--on=mol-polecat-report"]`, formula: "mol-polecat-report"},
 		{name: "an empty list", args: `[]`},
 		{name: "absent", args: "<absent>"},
-		{name: "a list that does not decode", args: `not json`, malformed: "does not decode"},
-		{name: "a value that is no list", args: `"--on mol-x"`, malformed: "does not decode"},
+		{name: "a list that does not decode", args: `not json`, malformed: "do not decode"},
+		{name: "a value that is no list", args: `"--on mol-x"`, malformed: "do not decode"},
 		{name: "--on with no value", args: `["--on"]`, malformed: "name no formula alone"},
 		{name: "--on with an empty value", args: `["--on",""]`, malformed: "name no formula alone"},
 		{name: "another argument beside --on", args: `["--on","mol-x","--var","a=b"]`, malformed: "name no formula alone"},
@@ -64,14 +65,14 @@ func TestTheFormulaFromEachStoredForm(t *testing.T) {
 			if a == nil {
 				t.Fatal("an armed bead read no arm")
 			}
-			if a.Formula != tc.formula {
-				t.Errorf("formula = %q, want %q", a.Formula, tc.formula)
+			if a.Formula() != tc.formula {
+				t.Errorf("formula = %q, want %q", a.Formula(), tc.formula)
 			}
-			if tc.malformed == "" && a.Malformed != "" {
-				t.Errorf("malformed = %q, want none", a.Malformed)
+			if tc.malformed == "" && a.Malformed() != "" {
+				t.Errorf("malformed = %q, want none", a.Malformed())
 			}
-			if tc.malformed != "" && !strings.Contains(a.Malformed, tc.malformed) {
-				t.Errorf("malformed = %q, want it to say %q", a.Malformed, tc.malformed)
+			if tc.malformed != "" && !strings.Contains(a.Malformed(), tc.malformed) {
+				t.Errorf("malformed = %q, want it to say %q", a.Malformed(), tc.malformed)
 			}
 		})
 	}
@@ -104,30 +105,39 @@ func TestTheAttemptsAgainstTheCap(t *testing.T) {
 				meta["gc.dispatch_when_ready_fail_count"] = tc.count
 			}
 			a := armOf(t, meta)
-			if a.FailCount != tc.attempts || a.Capped != tc.capped || (a.Malformed != "") != tc.malformed {
-				t.Errorf("arm = %+v; want %d attempts, capped %v, malformed %v", a, tc.attempts, tc.capped, tc.malformed)
+			if a.Attempts() != tc.attempts || a.Capped() != tc.capped || (a.Malformed() != "") != tc.malformed {
+				t.Errorf("arm %+v reads %d attempts, capped %v, malformed %q; want %d, %v, %v",
+					a, a.Attempts(), a.Capped(), a.Malformed(), tc.attempts, tc.capped, tc.malformed)
 			}
 		})
 	}
 }
 
-// The arm is the presence of its target. A target that is empty, and an arm
-// with no arm time, which every pour's token is made from, are malformed.
+// The arm is the presence of its target, and it carries each key as the store
+// holds it, which is what gctk bead holds prints. A target that is empty, and an
+// arm with no arm time, which every pour's token is made from, are malformed.
 func TestTheTargetAndTheArmTime(t *testing.T) {
 	if a := armOf(t, map[string]string{"gc.dispatch_when_ready_reason": "left behind"}); a != nil {
 		t.Errorf("a bead with no target reads arm %+v", a)
 	}
-	full := armOf(t, armed(map[string]string{"gc.dispatch_when_ready_args": `["--on","mol-x"]`}))
-	want := &record.Arm{Target: "rig/rig.polecat", Formula: "mol-x", Reason: "waits for unit 1", ArmedBy: "a-session", ArmedAt: "2026-11-13T06:19:00Z"}
-	if !reflect.DeepEqual(full, want) {
-		t.Errorf("arm = %+v, want %+v", full, want)
+	full := armOf(t, armed(map[string]string{"gc.dispatch_when_ready_args": `["--on","mol-x"]`, "gc.dispatch_when_ready_fail_count": "1"}))
+	raw, err := json.Marshal(full)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if a := armOf(t, armed(map[string]string{"gc.dispatch_when_ready": " "})); a == nil || !strings.Contains(a.Malformed, "no target") {
+	want := `{"target":"rig/rig.polecat","args":"[\"--on\",\"mol-x\"]","reason":"waits for unit 1","armed_by":"a-session","armed_at":"2026-11-13T06:19:00Z","fail_count":"1"}`
+	if string(raw) != want {
+		t.Errorf("the arm prints %s, want %s", raw, want)
+	}
+	if full.Formula() != "mol-x" || full.Attempts() != 1 || full.Malformed() != "" {
+		t.Errorf("the arm decodes to %q, %d, %q", full.Formula(), full.Attempts(), full.Malformed())
+	}
+	if a := armOf(t, armed(map[string]string{"gc.dispatch_when_ready": " "})); a == nil || !strings.Contains(a.Malformed(), "no target") {
 		t.Errorf("an empty target reads %+v; want it malformed for its target", a)
 	}
 	noTime := armed(nil)
 	delete(noTime, "gc.dispatch_when_ready_armed_at")
-	if a := armOf(t, noTime); a == nil || !strings.Contains(a.Malformed, "arm time") {
+	if a := armOf(t, noTime); a == nil || !strings.Contains(a.Malformed(), "arm time") {
 		t.Errorf("an arm with no arm time reads %+v; want it malformed for its arm time", a)
 	}
 }
@@ -140,7 +150,7 @@ func TestTheWrites(t *testing.T) {
 	l := ledger.New(s)
 
 	w := l.Write("b")
-	record.Set(w, record.Arm{Target: "rig/rig.polecat", Formula: "mol-x", Reason: "why", ArmedBy: "me", ArmedAt: "2026-11-13T06:19:00Z"})
+	record.Set(w, "rig/rig.polecat", "mol-x", "why", "me", "2026-11-13T06:19:00Z")
 	if err := l.Commit(w); err != nil {
 		t.Fatal(err)
 	}

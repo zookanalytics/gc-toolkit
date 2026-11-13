@@ -88,9 +88,9 @@
   },
   {
     "name": "gc.dispatch_when_ready_args",
-    "type": "json",
+    "type": "string",
     "owner": "arm/record",
-    "doc": "The formula the arm pours, as the sling arguments that name it: [\"--on\",\"\u003cformula\u003e\"], or [\"--on=\u003cformula\u003e\"], or [] or absent for the target's default formula, read at each start. Any other value is a record the start reports as malformed and slings nothing on."
+    "doc": "The formula the arm pours, as the JSON array of sling arguments that names it: [\"--on\",\"\u003cformula\u003e\"] or [\"--on=\u003cformula\u003e\"], or [] or absent for the target's default formula, read at each start. Any other value is a record the start reports as malformed and slings nothing on."
   },
   {
     "name": "gc.dispatch_when_ready_armed_at",
@@ -106,9 +106,9 @@
   },
   {
     "name": "gc.dispatch_when_ready_fail_count",
-    "type": "int",
+    "type": "string",
     "owner": "arm/record",
-    "doc": "The sling attempts the start has made on the arm, raised in one write before each sling. At the cap, GC_MAX_DISPATCH_SLING_FAILURES (3 by default), the start asks a person instead of slinging. Absent means none."
+    "doc": "The sling attempts the start has made on the arm, as a decimal integer, raised in one write before each sling. At the cap, GC_MAX_DISPATCH_SLING_FAILURES (3 by default), the start asks a person instead of slinging. Absent means none."
   },
   {
     "name": "gc.dispatch_when_ready_reason",
