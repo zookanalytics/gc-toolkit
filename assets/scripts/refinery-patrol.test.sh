@@ -10,7 +10,9 @@
 #     mol-refinery-patrol assigned to this refinery, or as GC_BEAD_ID;
 #   - next removes the trees the iteration left under the refinery's home;
 #   - a current wisp that cannot be named pours nothing, and an assign that
-#     fails burns the new wisp and keeps the current one.
+#     fails burns the new wisp and keeps the current one;
+#   - a pour that yields no wisp assigns and burns nothing, and an assign whose
+#     rollback burn also fails still exits 1 with the current wisp kept.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -68,6 +70,18 @@ STUB_UPDATE_FAIL=1 run next
 eq "$RC" 1 "an assign that fails exits 1"
 eq "$(bstatus w-cur)" "in_progress" "the current wisp is kept"
 eq "$(jq '[ .[] | select(.title == "mol-refinery-patrol") ] | length' "$STORE")" "1" "the unassigned new wisp is burned"
+fresh
+wisp w-cur "$GC_AGENT" 2026-11-12T01:00:00Z
+STUB_WISP_FAIL=1 run next
+eq "$RC" 1 "a pour that yields no wisp exits 1"
+hasnt "$(logged gc)" "bd update" "…assigns nothing"
+eq "$(bstatus w-cur)" "in_progress" "…and keeps the current wisp"
+fresh
+wisp w-cur "$GC_AGENT" 2026-11-12T01:00:00Z
+STUB_UPDATE_FAIL=1 STUB_BURN_FAIL=1 run next
+eq "$RC" 1 "an assign that fails exits 1 when its rollback burn fails too"
+eq "$(bstatus w-cur)" "in_progress" "…keeps the current wisp"
+has "$OUT" "the startup reconcile collects it" "…and leaves the new wisp to the startup reconcile"
 "$SUT/refinery-patrol.sh" bogus >/dev/null 2>&1; eq "$?" 2 "an unknown verb is usage"
 
 echo

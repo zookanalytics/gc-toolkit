@@ -254,10 +254,13 @@ case "$verb" in
   mol)
     case "$1" in
       wisp)
+        [ -z "${STUB_WISP_FAIL:-}" ] || { echo "pour refused" >&2; exit 1; }
         n=$(jq 'length' "$STORE"); id="wisp-$n"
         st --arg id "$id" '. + [{id: $id, title: "mol-refinery-patrol", status: "open", assignee: "", issue_type: "molecule", created_at: "2026-11-12T02:00:00Z", notes: "", metadata: {}}]'
         printf '{"new_epic_id":"%s"}\n' "$id" ;;
-      burn) st --arg id "$2" 'map(select(.id != $id))' ;;
+      burn)
+        [ -z "${STUB_BURN_FAIL:-}" ] || { echo "burn refused" >&2; exit 1; }
+        st --arg id "$2" 'map(select(.id != $id))' ;;
     esac ;;
   *) echo "gc stub: unsupported bd $verb" >&2; exit 2 ;;
 esac
