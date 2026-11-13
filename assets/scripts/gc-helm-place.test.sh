@@ -295,39 +295,41 @@ esac
 QP
 chmod +x "$TMP/bin/queue-priority"
 
-# deferred-dispatch: `arm <bead> --target T [--sling-arg X]... [--reason R]
-# [--db D]`, the flags the real arm parses. Like the real one it refuses a
-# routed bead and one whose status is not open, and otherwise writes the arm's
-# keys. STUB_ARM_FAIL refuses with nothing written.
-cat > "$TMP/bin/deferred-dispatch" <<'DD'
+# gctk: `bead arm <bead> --target T [--on F] --reason R [--db D]`, the flags the
+# real arm parses. Like the real one it refuses a routed bead and one whose
+# status is not open, and otherwise writes the arm's keys, the formula as the
+# sling args the record stores. STUB_ARM_FAIL refuses with nothing written.
+# Every other gctk call runs the build GCTK_BUILT names.
+cat > "$TMP/bin/gctk-arm" <<'GCTK'
 #!/usr/bin/env bash
 set -u
 S="${STUB_STORE:?}"
-printf 'deferred-dispatch %s\n' "$*" >> "${STUB_CALLS:?}"
-[ "${1:-}" = arm ] || { echo "deferred-dispatch stub: unsupported '${1:-}'" >&2; exit 2; }
-bead="${2:-}"; shift 2
-target=""; reason=""; sargs=()
+if [ "${1:-} ${2:-}" != "bead arm" ]; then exec "${GCTK_BUILT:?}" "$@"; fi
+printf 'gctk %s\n' "$*" >> "${STUB_CALLS:?}"
+bead="${3:-}"; shift 3
+target=""; reason=""; formula=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --target) shift; target="${1:-}" ;;
     --reason) shift; reason="${1:-}" ;;
-    --sling-arg) shift; sargs+=("${1:-}") ;;
+    --on) shift; formula="${1:-}" ;;
     --db) shift ;;
-    *) echo "deferred-dispatch: arm: unknown flag '$1'" >&2; exit 2 ;;
+    *) echo "gctk bead arm: unknown flag '$1'" >&2; exit 2 ;;
   esac
   shift || true
 done
-[ -n "${STUB_ARM_FAIL:-}" ] && { echo "deferred-dispatch: simulated arm failure" >&2; exit 1; }
+[ -n "$target" ] && [ -n "$reason" ] || { echo "gctk bead arm: name the bead, its --target and the --reason it is armed for" >&2; exit 2; }
+[ -n "${STUB_ARM_FAIL:-}" ] && { echo "gctk bead arm: the arm on $bead was not written: simulated" >&2; exit 1; }
 jq -e --arg b "$bead" 'any(.[]; .id == $b and .status == "open" and ((.metadata["gc.routed_to"] // "") == ""))' "$S" >/dev/null \
-  || { echo "deferred-dispatch: arm: $bead is routed or not open" >&2; exit 1; }
-aj=$(printf '%s\n' ${sargs[@]+"${sargs[@]}"} | jq -Rsc 'split("\n") | map(select(length > 0))')
+  || { echo "gctk bead arm: $bead is dispatched already, or not open" >&2; exit 1; }
+aj=$(jq -nc --arg f "$formula" 'if $f == "" then [] else ["--on", $f] end')
 jq -c --arg b "$bead" --arg t "$target" --arg r "$reason" --argjson a "$aj" '
   map(if .id == $b then .metadata["gc.dispatch_when_ready"] = $t
                         | .metadata["gc.dispatch_when_ready_args"] = ($a | tojson)
                         | .metadata["gc.dispatch_when_ready_reason"] = $r else . end)' "$S" > "$S.tmp" && mv "$S.tmp" "$S"
-echo "deferred-dispatch: armed $bead -> $target"
-DD
-chmod +x "$TMP/bin/deferred-dispatch"
+echo "armed $bead for $target on ${formula:-its default formula}"
+GCTK
+chmod +x "$TMP/bin/gctk-arm"
 
 # Hermetic: the store's environment is the stub's, no inherited GC_*/BEADS_*
 # steers the script, and the floor refuses any call no stub answers.
@@ -336,12 +338,11 @@ export PATH="$TMP/bin:$FLOOR:$PATH"
 export TMPDIR="$TMP"
 export STUB_STORE="$TMP/store.json" STUB_CALLS="$TMP/calls" STUB_RIG_TK="$TMP/rig-tk"
 export GC_QUEUE_PRIORITY_TOOL="$TMP/bin/queue-priority"
-export GC_DEFERRED_DISPATCH_TOOL="$TMP/bin/deferred-dispatch"
 # What holds a bead is the answer of gctk bead holds, built from this checkout
 # and run over the stub store.
 export HOLDS_STUB="$HERE/holds-store.stub.sh" GC_NO_API=1
-GCTK_BIN="$("$HOLDS_STUB" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so no hold can be read"; exit 1; }
-export GCTK_BIN
+GCTK_BUILT="$("$HOLDS_STUB" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so no hold can be read"; exit 1; }
+export GCTK_BUILT GCTK_BIN="$TMP/bin/gctk-arm"
 
 # The store every case starts from.
 #   tk-epic     an open epic at P1
@@ -468,7 +469,7 @@ eq "$(meta tk-new gc.dispatch_when_ready)" "gc-toolkit/gc-toolkit.polecat" "(PAR
 eq "$(meta tk-new gc.dispatch_when_ready_args)" '["--on","mol-polecat-work"]' "(PARKED) the formula rides the arm"
 has "$(meta tk-new gc.dispatch_when_ready_reason)" "tk-pg" "(PARKED) the arm names the park that holds it"
 eq "$(labels tk-new)" "" "(PARKED) the hold is lifted"
-before "deferred-dispatch arm tk-new" "--remove-label hold:mayor" "(PARKED) the arm comes before the lift"
+before "gctk bead arm tk-new" "--remove-label hold:mayor" "(PARKED) the arm comes before the lift"
 has "$OUT" "armed for gc-toolkit/gc-toolkit.polecat on mol-polecat-work, held by tk-pg" "(PARKED) the summary names the hold"
 reset_store
 run_place tk-wait --standalone
@@ -589,7 +590,7 @@ run_place tk-new --under tk-parked
 eq "$RC" "0" "(STOP) after a stop at an armed bead's lift, a second run finishes"
 eq "$(labels tk-new)" "" "(STOP) its hold is lifted"
 hasnt "$CALLS" "sling " "(STOP) and nothing is slung"
-hasnt "$CALLS" "deferred-dispatch arm" "(STOP) and the first run's arm is kept, not written again"
+hasnt "$CALLS" "gctk bead arm" "(STOP) and the first run's arm is kept, not written again"
 # The park closes between the stop and the second run: the first run's arm is
 # the dispatch, which the deferred-dispatch pass slings once the hold is gone,
 # so a sling beside it would start a second run when it fires.
@@ -599,14 +600,14 @@ jq -c 'map(if .id == "tk-pg" then .status = "closed" else . end)' "$STUB_STORE" 
 run_place tk-new --under tk-parked
 eq "$RC" "0" "(STOP-FREED) after a stop at an armed bead's lift and its park's close, a second run finishes"
 hasnt "$CALLS" "sling " "(STOP-FREED) …slinging nothing beside the arm"
-hasnt "$CALLS" "deferred-dispatch arm" "(STOP-FREED) …and arming nothing again"
+hasnt "$CALLS" "gctk bead arm" "(STOP-FREED) …and arming nothing again"
 eq "$(meta tk-new gc.dispatch_when_ready)" "gc-toolkit/gc-toolkit.polecat" "(STOP-FREED) …keeping the arm, which the pass slings once the hold is gone"
 eq "$(labels tk-new)" "" "(STOP-FREED) …and lifting the hold"
 has "$OUT" "already armed for gc-toolkit/gc-toolkit.polecat" "(STOP-FREED) …and says the arm stands"
 
 echo "# an arm that would send the bead elsewhere is refused"
-# arm_new <target> <args-json> — tk-new armed the way deferred-dispatch.sh arm
-# stores it, the sling args as a JSON string.
+# arm_new <target> <args-json> — tk-new armed the way gctk bead arm stores it,
+# the sling args as a JSON string.
 arm_new() {
   jq -c --arg t "$1" --arg a "$2" 'map(if .id == "tk-new" then .metadata["gc.dispatch_when_ready"] = $t | .metadata["gc.dispatch_when_ready_args"] = $a else . end)' \
     "$STUB_STORE" > "$STUB_STORE.tmp" && mv "$STUB_STORE.tmp" "$STUB_STORE"
@@ -615,7 +616,7 @@ reset_store; arm_new gc-toolkit/gc-toolkit.other '[]'
 run_place tk-new --under tk-epic
 eq "$RC" "2" "(ARMED-ELSEWHERE) a bead armed for another pool exits 2"
 has "$ERR" "already armed for gc-toolkit/gc-toolkit.other" "(ARMED-ELSEWHERE) …naming the arm"
-has "$ERR" "disarm tk-new" "(ARMED-ELSEWHERE) …and the disarm that frees it"
+has "$ERR" "gctk-arm bead disarm tk-new --db $STUB_RIG_TK/.beads --reason 'placed to gc-toolkit/gc-toolkit.polecat'" "(ARMED-ELSEWHERE) …and the disarm that frees it, a call of gctk's verb with its reason"
 unchanged "(ARMED-ELSEWHERE) …with nothing written"
 hasnt "$CALLS" "sling " "(ARMED-ELSEWHERE) …and nothing slung"
 reset_store; arm_new gc-toolkit/gc-toolkit.polecat '[]'
@@ -627,7 +628,7 @@ run_place tk-new --under tk-epic
 eq "$RC" "2" "(ARMED-CLOSER) a bead armed for its validating closer exits 2"
 has "$ERR" "armed for its validating closer (mol-validate-close)" "(ARMED-CLOSER) …naming the wait"
 has "$ERR" "gc bd update tk-new --remove-label hold:mayor" "(ARMED-CLOSER) …and the lift that lets the closer run"
-has "$ERR" "To place it as work instead, disarm it" "(ARMED-CLOSER) …with the disarm only as the way to place it instead"
+has "$ERR" "To place it as work instead, disarm it, then re-run: $GCTK_BIN bead disarm tk-new --db $STUB_RIG_TK/.beads --reason" "(ARMED-CLOSER) …with the disarm only as the way to place it instead"
 unchanged "(ARMED-CLOSER) …with nothing written"
 hasnt "$CALLS" "sling " "(ARMED-CLOSER) …and nothing slung"
 # bd removes a label by its exact text, so the lift it names removes each
