@@ -78,7 +78,9 @@ go to stderr.
   running        1     --stop: the copy still runs, because its process group
                        survived SIGTERM and SIGKILL, or the lock on its record
                        could not be taken
-  failed         1     start: no copy of the command runs as the start asks
+  failed         1     start: no copy of the command runs as the start asks;
+                       any call from a directory in no git checkout, with
+                       reason no-checkout
 exit 2 is a usage error.
 
 --lead runs a copy's leader over its record. A start runs it in a session of
@@ -164,45 +166,13 @@ func rigServe(o rigServeOpts, stdout, stderr io.Writer) int {
 	say := func(format string, a ...any) {
 		fmt.Fprintf(stderr, "gctk rig serve: %s\n", fmt.Sprintf(format, a...))
 	}
-	co, err := git.Open(".")
-	if err != nil {
-		say("%v", err)
-		return 2
-	}
-	top := co.Top
-	if real, err := filepath.EvalSymlinks(top); err == nil {
-		top = real
-	}
-	copies := rig.NewCopies(co.Common, host.Local())
 	var rep rig.Report
-	code := 0
-	switch {
-	case o.check:
-		rep = copies.Check(top)
-		switch rep.State {
-		case rig.CopyRunning:
-		case rig.CopyNone:
-			code = 3
-		default:
-			code = 1
-		}
-	case o.stop:
-		rep = copies.Stop(top)
-		if rep.State == rig.CopyRunning {
-			code = 1
-		}
-	default:
-		rep = copies.Serve(top, rig.ServeOpts{
-			Command:        o.command,
-			Publish:        o.given("publish-command"),
-			PublishCommand: o.publish,
-			AddressPattern: o.pattern,
-			Wait:           o.timeout,
-			ScriptsDir:     o.scriptDir,
-		})
-		if rep.State != rig.CopyRunning {
-			code = 1
-		}
+	var code int
+	if co, err := git.Open("."); err != nil {
+		rep, code = rig.Report{State: rig.CopyFailed, Reason: "no-checkout",
+			Detail: fmt.Sprintf("the current directory is in no git checkout, whose top names the copy (%v)", err)}, 1
+	} else {
+		rep, code = rigServeIn(co, o)
 	}
 	raw, err := json.Marshal(rep)
 	if err != nil {
@@ -217,4 +187,43 @@ func rigServe(o rigServeOpts, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "--- the last lines of the copy's log\n%s\n", rep.Tail)
 	}
 	return code
+}
+
+// rigServeIn runs the start, check or stop for the checkout co, and returns
+// its report and the exit code.
+func rigServeIn(co *git.Checkout, o rigServeOpts) (rig.Report, int) {
+	top := co.Top
+	if real, err := filepath.EvalSymlinks(top); err == nil {
+		top = real
+	}
+	copies := rig.NewCopies(co.Common, host.Local())
+	switch {
+	case o.check:
+		rep := copies.Check(top)
+		switch rep.State {
+		case rig.CopyRunning:
+			return rep, 0
+		case rig.CopyNone:
+			return rep, 3
+		}
+		return rep, 1
+	case o.stop:
+		rep := copies.Stop(top)
+		if rep.State == rig.CopyRunning {
+			return rep, 1
+		}
+		return rep, 0
+	}
+	rep := copies.Serve(top, rig.ServeOpts{
+		Command:        o.command,
+		Publish:        o.given("publish-command"),
+		PublishCommand: o.publish,
+		AddressPattern: o.pattern,
+		Wait:           o.timeout,
+		ScriptsDir:     o.scriptDir,
+	})
+	if rep.State != rig.CopyRunning {
+		return rep, 1
+	}
+	return rep, 0
 }

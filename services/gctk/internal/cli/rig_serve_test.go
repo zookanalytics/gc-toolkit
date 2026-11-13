@@ -48,6 +48,26 @@ func TestRigServeCountsLeadAsAModeOnceGiven(t *testing.T) {
 	}
 }
 
+// A call from a directory in no git checkout prints one JSON line, as every
+// other failure does, so a caller that reads the report finds why: failed,
+// with reason no-checkout, and exit 1. Exit 2 stays a usage error.
+func TestRigServeFromNoCheckoutReportsWhy(t *testing.T) {
+	f := newRigFixture(t)
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
+	t.Chdir(dir)
+	for _, args := range [][]string{{"serve", "--check"}, {"serve", "--stop"}, {"serve", "--command", "x"}} {
+		code, out, errb := f.call(args...)
+		rep := rigServeReport(t, out)
+		if code != 1 || rep["state"] != "failed" || rep["reason"] != "no-checkout" || !strings.Contains(errb, "no git checkout") {
+			t.Errorf("%v from no checkout: exit %d, %v %v, stderr %q, want 1, failed and no-checkout, and why", args, code, rep["state"], rep["reason"], errb)
+		}
+	}
+}
+
 func rigServeReport(t *testing.T, out string) map[string]any {
 	t.Helper()
 	var rep map[string]any
