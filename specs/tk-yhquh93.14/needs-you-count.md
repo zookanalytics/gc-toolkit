@@ -74,7 +74,7 @@ What the reading leaves:
 
 | The question | The call | Why |
 |---|---|---|
-| What a need holds or is about | Every bead whose `prstatus.Holding` answer names it, work held for the Product Owner included, and the bead its conversation tracks, the need's own or its question's conversation's | The rule weighs hold:mayor work, which the board's list of what a need holds leaves out |
+| What a need holds or is about | Every bead whose `prstatus.Holding` answer names it, whatever its kind and work held for the Product Owner included, and the bead its conversation tracks, the need's own or its question's conversation's | The rule weighs every bead a need holds. The board's list beneath a need draws only its work, epics and Deliveries, less hold:mayor work, so a question holding only a parked decision lists nothing and still folds |
 | A need about a bead the read did not gather, such as a conversation about a bead in another store | It counts | The read cannot tell that bead is parked or held, so the need stays in the count |
 | A question whose conversation waits in the operator's queue | Question, and its row reads "Conversation waits for you" as before | The bead's item 3 makes a question In conversation when a sitting holds its conversation, "since the operator's attention is already on it". A conversation not yet started holds no one's attention |
 | The words beside each kind's count | "pull requests", "questions", "conversations waiting for you", "in conversation", "rulings", "routed to you", each in the singular for one | The bead's names for the kinds, lower-cased beside a number as an epic's line reads its counts |

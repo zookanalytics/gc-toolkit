@@ -210,8 +210,9 @@ type built struct {
 	// the beads it holds, and the bead its conversation is about.
 	needs   []string
 	concern map[string][]string
-	// held is every bead each ask holds through any chain of waits, work held
-	// for the Product Owner included, and counts marks the needs that count.
+	// held is every bead each ask holds through any chain of waits, of any kind
+	// and work held for the Product Owner included, and counts marks the needs
+	// that count.
 	held   map[string][]string
 	counts map[string]bool
 }
@@ -479,17 +480,15 @@ func (bt *built) linkWaits() {
 	}
 }
 
-// linkHolds fills the beads each need holds through any chain of waits: each
-// piece of work, epic and Delivery whose Holding answer names the need, in the
-// Work queue's order, less work held for the Product Owner. held keeps that
-// work too, since whether a need counts reads it.
+// linkHolds fills the beads each need holds through any chain of waits, each
+// row whose Holding answer names the need. held takes every one of them,
+// whatever its kind and work held for the Product Owner included, since whether
+// a need counts reads every bead it holds. A need's Holds, the list the board
+// draws beneath it, takes each piece of work, epic and Delivery among them, in
+// the Work queue's order, less work held for the Product Owner.
 func (bt *built) linkHolds() {
 	ix := bt.ix
 	for _, id := range ix.rows {
-		k := ix.kinds[id]
-		if k != KindWork && k != KindEpic && k != KindDelivery {
-			continue
-		}
 		h, ok := ix.g.holds[id]
 		if !ok {
 			continue
@@ -498,6 +497,8 @@ func (bt *built) linkHolds() {
 		if !ok {
 			continue
 		}
+		k := ix.kinds[id]
+		listed := (k == KindWork || k == KindEpic || k == KindDelivery) && !bt.forProductOwner(id)
 		for _, x := range append(slices.Clone(hold.Gates), hold.Owed...) {
 			a := bt.askID(x.ID)
 			if a == "" || a == id {
@@ -507,7 +508,7 @@ func (bt *built) linkHolds() {
 				bt.held[a] = append(bt.held[a], id)
 			}
 			ar := bt.rows[a]
-			if !bt.forProductOwner(id) && !slices.Contains(ar.Holds, id) {
+			if listed && !slices.Contains(ar.Holds, id) {
 				ar.Holds = append(ar.Holds, id)
 				bt.rows[a] = ar
 			}

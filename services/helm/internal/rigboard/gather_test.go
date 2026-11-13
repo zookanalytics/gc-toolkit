@@ -103,8 +103,11 @@ func TestReadPlacesWorkUnderEveryEpicItSitsUnder(t *testing.T) {
 // a park leaves out of the count. Epic tk-pe waits on park gate tk-park, which
 // carries no await type, as gc-helm.sh park files one, and its only member has
 // closed, so it asks for a ruling. Question tk-q2 waits on the park itself, and
-// question tk-q holds only tk-w, which waits on the park too. Decision tk-d
-// stands alone and counts.
+// question tk-q holds only tk-w, which waits on the park too. Question tk-q3
+// holds only decision tk-d2, which waits on the park too, so both fold, and the
+// decision is not drawn beneath the question, whose list draws work, epics and
+// Deliveries. Decision tk-d stands alone and counts, and question tk-q4 holds
+// only decision tk-d3, which nothing parks, so both count.
 func TestReadFoldsNeedsAboutParkedWork(t *testing.T) {
 	rows := []json.RawMessage{
 		json.RawMessage(`{"id":"tk-pe","title":"Parked epic","status":"open","priority":1,"issue_type":"epic","metadata":{"epic_hypothesis":"it works later"},"dependencies":[{"issue_id":"tk-pe","depends_on_id":"tk-park","type":"blocks"}],"created_at":"2026-01-01"}`),
@@ -114,6 +117,10 @@ func TestReadFoldsNeedsAboutParkedWork(t *testing.T) {
 		json.RawMessage(`{"id":"tk-w","title":"behind the question and the park","status":"open","priority":2,"issue_type":"task","dependencies":[{"issue_id":"tk-w","depends_on_id":"tk-q","type":"blocks"},{"issue_id":"tk-w","depends_on_id":"tk-park","type":"blocks"}],"created_at":"2026-01-04"}`),
 		json.RawMessage(`{"id":"tk-q2","title":"and which?","status":"open","priority":1,"issue_type":"gate","await_type":"human","dependencies":[{"issue_id":"tk-q2","depends_on_id":"tk-park","type":"blocks"}],"created_at":"2026-01-05"}`),
 		json.RawMessage(`{"id":"tk-d","title":"pick one","status":"open","priority":2,"issue_type":"decision","created_at":"2026-01-06"}`),
+		json.RawMessage(`{"id":"tk-q3","title":"before the parked pick?","status":"open","priority":1,"issue_type":"gate","await_type":"human","created_at":"2026-01-07"}`),
+		json.RawMessage(`{"id":"tk-d2","title":"pick behind the question and the park","status":"open","priority":2,"issue_type":"decision","dependencies":[{"issue_id":"tk-d2","depends_on_id":"tk-park","type":"blocks"},{"issue_id":"tk-d2","depends_on_id":"tk-q3","type":"blocks"}],"created_at":"2026-01-08"}`),
+		json.RawMessage(`{"id":"tk-q4","title":"before the live pick?","status":"open","priority":1,"issue_type":"gate","await_type":"human","created_at":"2026-01-09"}`),
+		json.RawMessage(`{"id":"tk-d3","title":"pick behind the question","status":"open","priority":2,"issue_type":"decision","dependencies":[{"issue_id":"tk-d3","depends_on_id":"tk-q4","type":"blocks"}],"created_at":"2026-01-10"}`),
 	}
 	doc, err := Read(context.Background(), stubStore(t, rows))
 	if err != nil {
@@ -134,11 +141,16 @@ func TestReadFoldsNeedsAboutParkedWork(t *testing.T) {
 		return out
 	}
 	n := doc.NeedsYou
-	if n.Count != 1 || !slices.Equal(ids(n.Counted), []string{"tk-d"}) {
-		t.Errorf("Needs you counts %d: %v, want the decision alone", n.Count, ids(n.Counted))
+	if got, want := ids(n.Counted), []string{"tk-d", "tk-d3", "tk-q4"}; n.Count != len(want) || !slices.Equal(got, want) {
+		t.Errorf("Needs you counts %d: %v, want %v", n.Count, got, want)
 	}
-	if got, want := ids(n.NotCounted), []string{"tk-pe", "tk-q", "tk-q2"}; !slices.Equal(got, want) {
+	if got, want := ids(n.NotCounted), []string{"tk-d2", "tk-pe", "tk-q", "tk-q2", "tk-q3"}; !slices.Equal(got, want) {
 		t.Errorf("Needs you folds %v, want %v", got, want)
+	}
+	for _, x := range append(slices.Clone(n.Counted), n.NotCounted...) {
+		if (x.ID == "tk-q3" || x.ID == "tk-q4") && len(x.Holds) != 0 {
+			t.Errorf("%s draws %v beneath it, want nothing, since it holds no work", x.ID, x.Holds)
+		}
 	}
 }
 

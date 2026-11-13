@@ -408,7 +408,7 @@ gate, the gate the text form of `park` files, which its table reads as "Held by
 a gate". A park made with `--waiting-on` onto a task or a human gate reads as
 the wait it is. A need that waits on a park, or sits under an epic or Delivery
 that does, does not count, and neither does a question, decision or
-conversation about nothing but parked work and work carrying `hold:mayor`
+conversation about nothing but what is parked or carries `hold:mayor`
 ([services/helm/README.md](../services/helm/README.md), *What it counts*).
 
 ### Where a park goes
