@@ -21,6 +21,8 @@
 #   - a bead closed or released before its record keeps that state, and the PR
 #     is named in a note on it;
 #   - a rework child handed back records the PR on its anchor and closes;
+#   - a bead that owns its PR records it on itself, though a parked rework
+#     child of it waits on its branch with a merge_result of its own;
 #   - a city login that does not read takes no PR;
 #   - a bead whose branch the refinery's tree does not hold gets no write.
 set -uo pipefail
@@ -174,6 +176,21 @@ eq "$(meta an merge_result)" "pull_request_pending" "the anchor records its PR a
 eq "$(bstatus ch)" "closed" "the child closes"
 eq "$(meta ch gc.work_commit)" "$HEAD_C" "…with its work record"
 eq "$(tip polecat/an)" "$HEAD_C" "the head is on the anchor's branch"
+
+echo "# a bead that owns its PR records it on itself, though a parked rework child waits on its branch"
+fresh
+branch_with polecat/bp bp.txt >/dev/null
+work bp polecat/bp '{"merge_result":"pull_request_head_changed","existing_pr":"https://github.com/zook/rig/pull/49","pr_number":"49"}'
+work kid polecat/bp '{"task_kind":"rework","anchor_bead":"bp","merge_result":"blocked","blocked_reason":"parked behind a gate"}'
+prepared bp polecat/bp
+pr 49 polecat/bp gc-city-bot
+run --bead bp
+eq "$RC" 0 "the publication exits 0"
+has "$(logged gctk)" "pr record bp --pr https://github.com/zook/rig/pull/49" "the record is written on the bead that owns the PR"
+hasnt "$(logged gctk)" "pr record kid" "…and never on the parked rework child"
+eq "$(bstatus bp) $(meta bp merge_result)" "blocked pull_request_pending" "the bead waits on its PR's merge"
+eq "$(bstatus kid) $(meta kid merge_result)" "open blocked" "the parked rework child is left as it was"
+hasnt "$(bnotes bp)" "Rework landed" "the bead that owns the PR is not closed as a landed rework"
 
 echo "# a city login that does not read takes no PR"
 fresh

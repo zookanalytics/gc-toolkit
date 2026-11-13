@@ -16,6 +16,8 @@
 #     park first leaves it;
 #   - a rework child handed back on the old path brings its anchor's PR title
 #     and body current, pushes, notes the anchor and closes;
+#   - a bead that owns its PR lands as itself on the old path, though a parked
+#     rework child of it waits on its branch with a merge_result of its own;
 #   - a branch with no change parks the bead behind refinery-false-completion,
 #     unless the target carries the bead's stamped direct landing, which is
 #     recorded;
@@ -127,6 +129,19 @@ has "$(logged gh)" "pr edit 62 --repo zook/rig --title feat: an (an) --body-file
 has "$(bnotes an)" "Rework ch landed on polecat/an at $HEAD_C" "the anchor notes the landing"
 eq "$(bstatus ch) $(meta ch gc.work_outcome)" "closed shipped" "the child closes with its work record"
 eq "$(meta an merge_result)" "pull_request" "the anchor keeps its record"
+
+echo "# a bead that owns its PR lands as itself on the old path, though a parked rework child waits on its branch"
+fresh
+branch_with polecat/bp bp.txt >/dev/null
+work bp polecat/bp '{"merge_result":"blocked","existing_pr":"https://github.com/zook/rig/pull/63"}'
+work kid polecat/bp '{"task_kind":"rework","anchor_bead":"bp","merge_result":"blocked","blocked_reason":"parked behind a gate"}'
+prepared bp polecat/bp
+pr 63 polecat/bp gc-city-bot
+run --bead bp
+eq "$RC" 0 "the landing exits 0"
+has "$(logged scripts)" "lifecycle transition bp --to pull_request --assignee  --route  --set pr_url=https://github.com/zook/rig/pull/63" "the bead waits at pull_request on its own PR"
+eq "$(bstatus bp)" "open" "it is not closed as a landed rework"
+eq "$(bstatus kid) $(meta kid merge_result)" "open blocked" "the parked rework child is left as it was"
 
 echo "# a branch with no change parks the bead, unless the target carries its stamped landing"
 fresh

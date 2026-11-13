@@ -145,13 +145,17 @@ refinery_teardown() {
 # refinery_owner <bead> <branch> — the bead whose PR the work on <branch>
 # lands on, in OWNER, with its row in OWNER_ROW. BEAD_ROW must be <bead>'s row.
 # It is the bead <bead> names as its anchor_bead when that bead is open on
-# <branch>; else the oldest other open bead on <branch> that carries a
-# merge_result, since any recorded state, a park included, still owns its PR;
-# else <bead> itself. Non-zero, with a line on stderr, when the open beads on
-# <branch> do not read.
+# <branch>. Else it is <bead> itself when <bead> carries a merge_result or
+# records a PR (existing_pr, pr_url or pr_number), since any recorded state, a
+# park included, still owns its PR. Else it is the oldest other open bead on
+# <branch> that carries a merge_result and names no other bead as its
+# anchor_bead, since such a bead, a rework child among them, lands on that
+# anchor's PR and never owns one, though a park stamps a merge_result on it too.
+# Else it is <bead> itself. Non-zero, with a line on stderr, when the open beads
+# on <branch> do not read.
 # shellcheck disable=SC2034  # OWNER_ROW is read by the scripts that source this
 refinery_owner() {
-  local on named
+  local on named key
   on=$(bd_json list ${GC_RIG:+--rig="$GC_RIG"} --metadata-field "branch=$2" \
     --status=open,in_progress,blocked,deferred,hooked,pinned --limit=0) || on=""
   printf '%s' "$on" | jq -e 'type == "array"' >/dev/null 2>&1 \
@@ -160,9 +164,15 @@ refinery_owner() {
   OWNER=""
   [ -z "$named" ] || [ "$named" = "$1" ] \
     || OWNER=$(printf '%s' "$on" | jq -r --arg n "$named" '[ .[] | select(.id == $n) ] | .[0].id // empty')
-  [ -n "$OWNER" ] || OWNER=$(printf '%s' "$on" | jq -r --arg self "$1" '[ .[] | select(.id != $self)
-    | select(((.metadata.merge_result // "") | tostring) != "") ] | sort_by(.created_at // .id) | .[0].id // empty')
   if [ -z "$OWNER" ]; then
+    for key in merge_result existing_pr pr_url pr_number; do
+      [ -z "$(bead_meta "$key")" ] || { OWNER="$1"; break; }
+    done
+  fi
+  [ -n "$OWNER" ] || OWNER=$(printf '%s' "$on" | jq -r --arg self "$1" '[ .[] | select(.id != $self)
+    | select(((.metadata.anchor_bead // "") | tostring) as $a | $a == "" or $a == .id)
+    | select(((.metadata.merge_result // "") | tostring) != "") ] | sort_by(.created_at // .id) | .[0].id // empty')
+  if [ -z "$OWNER" ] || [ "$OWNER" = "$1" ]; then
     OWNER="$1"; OWNER_ROW="$BEAD_ROW"
   else
     OWNER_ROW=$(printf '%s' "$on" | jq -c --arg o "$OWNER" '[ .[] | select(.id == $o) ]')
