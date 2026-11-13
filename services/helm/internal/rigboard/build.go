@@ -192,20 +192,6 @@ func (ix *index) ancestors(id string) []string {
 	return out
 }
 
-// epicsOf are the epics, not Deliveries, a bead sits under or is.
-func (ix *index) epicsOf(id string) []string {
-	var out []string
-	if ix.kinds[id] == KindEpic {
-		out = append(out, id)
-	}
-	for _, a := range ix.ancestors(id) {
-		if ix.kinds[a] == KindEpic && !slices.Contains(out, a) {
-			out = append(out, a)
-		}
-	}
-	return out
-}
-
 // built is the per-row answers build keeps while it composes the pages.
 type built struct {
 	ix      *index
@@ -224,12 +210,17 @@ type built struct {
 	// the beads it holds, and the bead its conversation is about.
 	needs   []string
 	concern map[string][]string
+	// held is every bead each ask holds through any chain of waits, work held
+	// for the Product Owner included, and counts marks the needs that count.
+	held   map[string][]string
+	counts map[string]bool
 }
 
 func build(g *gathered) Document {
 	ix := newIndex(g)
 	bt := &built{ix: ix, verdict: map[string]verdict{}, asks: map[string]*askAnswer{}, rows: map[string]Row{},
-		pos: map[string]int{}, after: map[string]bool{}, concern: map[string][]string{}}
+		pos: map[string]int{}, after: map[string]bool{}, concern: map[string][]string{}, held: map[string][]string{},
+		counts: map[string]bool{}}
 
 	// Row 2 first: the table reads whether a row is an ask.
 	for _, id := range ix.rows {
@@ -490,12 +481,13 @@ func (bt *built) linkWaits() {
 
 // linkHolds fills the beads each need holds through any chain of waits: each
 // piece of work, epic and Delivery whose Holding answer names the need, in the
-// Work queue's order, less work held for the Product Owner.
+// Work queue's order, less work held for the Product Owner. held keeps that
+// work too, since whether a need counts reads it.
 func (bt *built) linkHolds() {
 	ix := bt.ix
 	for _, id := range ix.rows {
 		k := ix.kinds[id]
-		if (k != KindWork && k != KindEpic && k != KindDelivery) || bt.forProductOwner(id) {
+		if k != KindWork && k != KindEpic && k != KindDelivery {
 			continue
 		}
 		h, ok := ix.g.holds[id]
@@ -511,8 +503,11 @@ func (bt *built) linkHolds() {
 			if a == "" || a == id {
 				continue
 			}
+			if !slices.Contains(bt.held[a], id) {
+				bt.held[a] = append(bt.held[a], id)
+			}
 			ar := bt.rows[a]
-			if !slices.Contains(ar.Holds, id) {
+			if !bt.forProductOwner(id) && !slices.Contains(ar.Holds, id) {
 				ar.Holds = append(ar.Holds, id)
 				bt.rows[a] = ar
 			}
@@ -543,9 +538,10 @@ func (bt *built) inOrder(ids []string) {
 	})
 }
 
-// findNeeds lists every open need, and what each one concerns: itself, the
-// beads it holds, and the bead its conversation is about unless that is work
-// held for the Product Owner.
+// findNeeds lists every open need, what each one concerns, and whether it
+// counts. A need concerns itself, the beads it holds, and the bead its
+// conversation is about unless that is work held for the Product Owner. What it
+// is about is every bead it holds and that bead, held work included.
 func (bt *built) findNeeds() {
 	ix := bt.ix
 	for _, id := range ix.rows {
@@ -554,18 +550,64 @@ func (bt *built) findNeeds() {
 		}
 		bt.needs = append(bt.needs, id)
 		c := append([]string{id}, bt.rows[id].Holds...)
+		about := slices.Clone(bt.held[id])
 		for _, x := range []string{id, bt.rows[id].Conversation} {
-			if s := ix.subject[x]; x != "" && s != "" && !bt.forProductOwner(s) && !slices.Contains(c, s) {
+			s := ix.subject[x]
+			if x == "" || s == "" || s == id {
+				continue
+			}
+			if !slices.Contains(about, s) {
+				about = append(about, s)
+			}
+			if !bt.forProductOwner(s) && !slices.Contains(c, s) {
 				c = append(c, s)
 			}
 		}
 		bt.concern[id] = c
+		bt.counts[id] = bt.counted(id, about)
 	}
 }
 
+// counted reports whether a need counts, given every bead it is about. A need
+// parked itself does not. A gate, a decision or a conversation does not when
+// every bead it is about is parked or carries hold:mayor, and one about nothing
+// counts. A pull request, or other work that is itself a need, counts unless it
+// is parked itself, whatever it holds.
+func (bt *built) counted(id string, about []string) bool {
+	if bt.parked(id) {
+		return false
+	}
+	switch bt.ix.kinds[id] {
+	case KindGate, KindDecision, KindConversation:
+		return len(about) == 0 || slices.ContainsFunc(about, func(x string) bool { return !bt.parked(x) && !bt.onDesk(x) })
+	}
+	return true
+}
+
+// parked reports whether a bead waits on a park, or an epic or a Delivery above
+// it does: a wait behind its status on a gate that is no human gate (gateHold),
+// as waits answers the bead and each of those above it. Each is read for its own
+// waits, so work in flight under a parked epic, which the epic's wait does not
+// hold, is parked with it.
+func (bt *built) parked(id string) bool {
+	for _, x := range append([]string{id}, bt.ix.ancestors(id)...) {
+		if h, ok := bt.ix.g.holds[x]; ok && gateHold(h) != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// onDesk reports whether a bead is the Unprioritized page's: an open bead that
+// carries hold:mayor.
+func (bt *built) onDesk(id string) bool {
+	b, ok := bt.ix.beads[id]
+	return ok && isOpen(b) && carriesHoldMayor(b)
+}
+
 // count makes each epic's and Delivery's counts at any depth: the needs that
-// hold or concern it, each once, and its work by where it sits, each row once
-// however many paths lead to it.
+// count and hold or concern it, each once, and its work by where it sits, each
+// row once however many paths lead to it.
 func (bt *built) count() {
 	ix := bt.ix
 	counts := map[string]*Counts{}
@@ -592,6 +634,9 @@ func (bt *built) count() {
 		}
 	}
 	for _, n := range bt.needs {
+		if !bt.counts[n] {
+			continue
+		}
 		var counted []string
 		for _, x := range bt.concern[n] {
 			for _, a := range append([]string{x}, ix.ancestors(x)...) {
@@ -648,9 +693,9 @@ func (bt *built) queueOf(covers func(string) bool) WorkQueue {
 
 // needsOf is a container's Needs you view: each need that concerns it or a
 // row it holds nearest, other than itself, with the rows it holds there.
-func (bt *built) needsOf(container string) []Need {
+func (bt *built) needsOf(container string) NeedsYou {
 	covers := bt.under(container)
-	out := []Need{}
+	var needs []Need
 	for _, n := range bt.needs {
 		if n == container || !slices.ContainsFunc(bt.concern[n], func(x string) bool { return x == container || covers(x) }) {
 			continue
@@ -661,9 +706,41 @@ func (bt *built) needsOf(container string) []Need {
 				held = append(held, x)
 			}
 		}
-		out = append(out, Need{ID: n, Holds: held})
+		needs = append(needs, Need{ID: n, Kind: bt.asks[n].need, Holds: held})
 	}
-	bt.sortNeeds(out, covers)
+	return bt.view(needs, covers)
+}
+
+// view is a Needs you view of the needs it lists: each in need order, those
+// that count first, and how many of each kind count.
+func (bt *built) view(needs []Need, covers func(string) bool) NeedsYou {
+	bt.sortNeeds(needs, covers)
+	v := NeedsYou{Counted: []Need{}, NotCounted: []Need{}}
+	by := map[NeedKind]int{}
+	for _, n := range needs {
+		if !bt.counts[n.ID] {
+			v.NotCounted = append(v.NotCounted, n)
+			continue
+		}
+		v.Counted = append(v.Counted, n)
+		by[n.Kind]++
+	}
+	v.Count = len(v.Counted)
+	v.Kinds = kindCounts(by)
+	return v
+}
+
+// kindCounts is how many needs of each kind count, in the order a view reads
+// them: the five kinds every view shows, each one zero included, so a glance
+// tells which is empty, then Routed to you when one counts.
+func kindCounts(by map[NeedKind]int) []KindCount {
+	out := []KindCount{}
+	for _, k := range []NeedKind{NeedKindPullRequest, NeedKindQuestion, NeedKindWaitsForYou, NeedKindInConversation, NeedKindRuling} {
+		out = append(out, KindCount{Kind: k, Count: by[k]})
+	}
+	if n := by[NeedKindRoutedToYou]; n > 0 {
+		out = append(out, KindCount{Kind: NeedKindRoutedToYou, Count: n})
+	}
 	return out
 }
 
@@ -745,17 +822,13 @@ func (bt *built) epicsPage() []EpicEntry {
 }
 
 // needsYouPage is every open need in the rig, each with every bead it holds,
-// in need order. It counts the needs that hold or concern work under an epic.
+// in need order, and how many of them count.
 func (bt *built) needsYouPage() NeedsYou {
-	n := NeedsYou{Needs: []Need{}}
+	var needs []Need
 	for _, id := range bt.needs {
-		n.Needs = append(n.Needs, Need{ID: id, Holds: slices.Clone(bt.rows[id].Holds)})
-		if slices.ContainsFunc(bt.concern[id], func(x string) bool { return len(bt.ix.epicsOf(x)) > 0 }) {
-			n.Count++
-		}
+		needs = append(needs, Need{ID: id, Kind: bt.asks[id].need, Holds: slices.Clone(bt.rows[id].Holds)})
 	}
-	bt.sortNeeds(n.Needs, func(string) bool { return true })
-	return n
+	return bt.view(needs, func(string) bool { return true })
 }
 
 // carriesHoldMayor reports whether a bead carries hold:mayor, the label that

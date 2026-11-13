@@ -218,6 +218,12 @@ function needIds(needs: { id: string; holds: string[] }[]): string[] {
   return needs.flatMap((n) => [n.id, ...n.holds]);
 }
 
+/** What each kind's count reads in a Needs you view's strip, and whether it
+ *  is a control. */
+function kindsOf(strip: HTMLElement): { text: string; control: boolean }[] {
+  return [...strip.querySelectorAll('.kind')].map((k) => ({ text: text(k), control: k.tagName === 'BUTTON' }));
+}
+
 /** The rows drawn between an epic's row and the next epic's. */
 function underEpic(id: string): string[] {
   const shown = rowIds();
@@ -261,8 +267,8 @@ describe('the Epics page', () => {
     expect(headings()).toEqual(['Needs you2', 'Work queue23', 'Not scheduled2', 'Closed51']);
     const entry = epicEntry('tk-1tfzr71');
     // Not scheduled and Closed fold until opened.
-    expect(underEpic('tk-1tfzr71')).toEqual([...needIds(entry.needs), ...entry.queue.queue]);
-    expect(entry.needs.map((n) => n.id)).toEqual(['tk-q4dd6mk', 'tk-ucjq40f']);
+    expect(underEpic('tk-1tfzr71')).toEqual([...needIds(entry.needs.counted), ...entry.queue.queue]);
+    expect(entry.needs.counted.map((n) => n.id)).toEqual(['tk-q4dd6mk', 'tk-ucjq40f']);
     expect(entry.queue.queue[0]).toBe('tk-1tfzr71.66');
   });
 
@@ -276,7 +282,7 @@ describe('the Epics page', () => {
     expect(screen.getByText('The rest of the epic')).toBeTruthy();
     const entry = epicEntry('tk-wmwcdlc');
     const shown = rowIds();
-    for (const id of [...needIds(entry.needs), ...entry.queue.queue]) expect(shown).toContain(id);
+    for (const id of [...needIds(entry.needs.counted), ...entry.queue.queue]) expect(shown).toContain(id);
     for (const id of entry.deliveries[0].closed) expect(shown).not.toContain(id);
     fireEvent.click(within(delivery).getByRole('button', { name: /Delivery: the Delivery layer/ }));
     expect(headings()).toContain('Closed7');
@@ -291,6 +297,28 @@ describe('the Epics page', () => {
     fireEvent.click(within(rowOf('tk-1tfzr71')).getByRole('button', { name: '2 not scheduled' }));
     expect(underEpic('tk-1tfzr71')).toEqual([...entry.queue.queue, ...entry.queue.not_scheduled]);
   });
+  it('gives an epic’s Needs you the counts of each kind, each a filter', async () => {
+    render(<Page />);
+    await loaded();
+    fireEvent.click(within(rowOf('tk-yhquh93')).getByRole('button', { name: /Board UI design/ }));
+    const entry = epicEntry('tk-yhquh93');
+    expect(headings()[0]).toBe(`Needs you${entry.needs.count}`);
+    const strip = screen.getByRole('group', { name: 'Kinds of need' });
+    expect(kindsOf(strip).map((k) => k.text)).toEqual([
+      '1 pull request',
+      '0 questions',
+      '0 conversations waiting for you',
+      '1 in conversation',
+      '0 rulings',
+    ]);
+    const talking = within(strip).getByRole('button', { name: '1 in conversation' });
+    fireEvent.click(talking);
+    expect(talking.getAttribute('aria-pressed')).toBe('true');
+    const inConversation = entry.needs.counted.filter((n) => n.kind === 'In conversation');
+    expect(underEpic('tk-yhquh93')).toEqual([...needIds(inConversation), ...entry.queue.queue]);
+    fireEvent.click(talking);
+    expect(underEpic('tk-yhquh93')).toEqual([...needIds(entry.needs.counted), ...entry.queue.queue]);
+  });
 });
 
 describe('the Needs you page', () => {
@@ -300,9 +328,9 @@ describe('the Needs you page', () => {
     tab(/Needs you/);
     expect(text(document.querySelector('.pill'))).toBe(String(board.needs_you.count));
     expect(text(document.querySelector('.lead-count'))).toBe(String(board.needs_you.count));
-    expect(text(document.querySelector('.lead-text'))).toBe('things in an epic are waiting on you.');
+    expect(text(document.querySelector('.lead-text'))).toBe('things are waiting on you.');
     expect(headings()).toEqual([]);
-    expect(rowIds()).toEqual(needIds(board.needs_you.needs));
+    expect(rowIds()).toEqual(needIds(board.needs_you.counted));
   });
 
   it('draws a need the same way on every page', async () => {
@@ -412,6 +440,82 @@ describe('the Needs you page', () => {
     await within(again).findByText(/discuss on new conversation tk-c0nv1/);
     expect(scrolls).toHaveLength(3);
     expect(document.activeElement).toBe(again);
+  });
+  it('counts each kind of need that counts beneath the lead, a zero among them', async () => {
+    render(<Page />);
+    await loaded();
+    tab(/Needs you/);
+    const strip = screen.getByRole('group', { name: 'Kinds of need' });
+    expect(kindsOf(strip)).toEqual([
+      { text: '1 pull request', control: true },
+      { text: '4 questions', control: true },
+      { text: '0 conversations waiting for you', control: false },
+      { text: '1 in conversation', control: true },
+      { text: '1 ruling', control: true },
+    ]);
+    expect(board.needs_you.kinds.reduce((sum, k) => sum + k.count, 0)).toBe(board.needs_you.count);
+  });
+
+  it('shows one kind alone when its count is clicked, and every kind again on a second click', async () => {
+    render(<Page />);
+    await loaded();
+    tab(/Needs you/);
+    const questions = screen.getByRole('button', { name: '4 questions' });
+    fireEvent.click(questions);
+    expect(questions.getAttribute('aria-pressed')).toBe('true');
+    expect(rowIds()).toEqual(needIds(board.needs_you.counted.filter((n) => n.kind === 'Question')));
+    // The lead and the tab still count every need that counts.
+    expect(text(document.querySelector('.lead-count'))).toBe(String(board.needs_you.count));
+    expect(text(document.querySelector('.pill'))).toBe(String(board.needs_you.count));
+    fireEvent.click(questions);
+    expect(questions.getAttribute('aria-pressed')).toBe('false');
+    expect(rowIds()).toEqual(needIds(board.needs_you.counted));
+  });
+
+  it('folds the needs that do not count beneath the rest, with their own count, closed until opened', async () => {
+    // The cut parks nothing a need is about, so this document folds the
+    // ruling the read would fold were its epic parked.
+    const doc: Document = structuredClone(board);
+    const n = doc.needs_you;
+    n.not_counted = n.counted.splice(
+      n.counted.findIndex((x) => x.id === 'tk-wmwcdlc.3'),
+      1,
+    );
+    n.count = n.counted.length;
+    n.kinds = n.kinds.map((k) => (k.kind === 'Ruling' ? { ...k, count: 0 } : k));
+    rigReads = [() => json({ read_at: READ_AT, board: doc })];
+    render(<Page />);
+    await loaded();
+    tab(/Needs you/);
+    expect(text(document.querySelector('.pill'))).toBe(String(n.count));
+    expect(text(document.querySelector('.lead-count'))).toBe(String(n.count));
+    expect(headings()).toEqual(['Parked or unprioritized1']);
+    expect(rowIds()).toEqual(needIds(n.counted));
+    fireEvent.click(screen.getByRole('button', { name: /^Parked or unprioritized/ }));
+    expect(rowIds()).toEqual([...needIds(n.counted), 'tk-wmwcdlc.3']);
+    // A kind shown alone shows it in both lists, so the ruling folds away with
+    // the other kinds.
+    fireEvent.click(screen.getByRole('button', { name: '4 questions' }));
+    expect(headings()).toEqual([]);
+  });
+
+  it('leads with zero when nothing that counts needs you, and still lists what does not count', async () => {
+    const doc: Document = structuredClone(board);
+    const n = doc.needs_you;
+    n.not_counted = n.counted;
+    n.counted = [];
+    n.count = 0;
+    n.kinds = n.kinds.map((k) => ({ ...k, count: 0 }));
+    rigReads = [() => json({ read_at: READ_AT, board: doc })];
+    render(<Page />);
+    await loaded();
+    tab(/Needs you/);
+    expect(text(document.querySelector('.lead-count'))).toBe('0');
+    expect(text(document.querySelector('.lead-text'))).toBe('Nothing is waiting on you.');
+    expect(text(document.querySelector('.pill'))).toBe('0');
+    expect(kindsOf(screen.getByRole('group', { name: 'Kinds of need' })).every((k) => !k.control)).toBe(true);
+    expect(headings()).toEqual([`Parked or unprioritized${n.not_counted.length}`]);
+    expect(screen.queryByText('Nothing in this rig needs you.')).toBeNull();
   });
 });
 

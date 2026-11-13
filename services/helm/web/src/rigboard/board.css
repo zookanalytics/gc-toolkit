@@ -219,6 +219,42 @@ a:focus-visible {
   color: #55606b;
 }
 
+/* A Needs you view's count of each kind of need, each a control that shows
+   its kind alone. A kind with none reads muted and is no control. */
+.kinds {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  padding: 6px 16px 8px 4px;
+  font-size: 13px;
+}
+
+.kind {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  color: #8a5300;
+  font-variant-numeric: tabular-nums;
+}
+
+button.kind:hover {
+  border-color: #e7c873;
+}
+
+.kind--on {
+  border-color: #d98a00;
+  background: #fff8e3;
+  font-weight: 600;
+}
+
+.kind--none {
+  color: #65707b;
+}
+
 .note-line {
   display: flex;
   flex-wrap: wrap;

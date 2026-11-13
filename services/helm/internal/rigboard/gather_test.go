@@ -79,7 +79,7 @@ func TestReadPlacesWorkUnderEveryEpicItSitsUnder(t *testing.T) {
 			listed[e.ID] = append(listed[e.ID], ids...)
 		}
 		slices.Sort(listed[e.ID])
-		if want := []Need{{ID: "tk-q", Holds: []string{"tk-w"}}}; !slices.EqualFunc(e.Needs, want, sameNeed) {
+		if want := []Need{{ID: "tk-q", Kind: NeedKindQuestion, Holds: []string{"tk-w"}}}; !slices.EqualFunc(e.Needs.Counted, want, sameNeed) {
 			t.Errorf("%s's Needs you is %+v, want %+v", e.ID, e.Needs, want)
 		}
 	}
@@ -94,8 +94,51 @@ func TestReadPlacesWorkUnderEveryEpicItSitsUnder(t *testing.T) {
 	if got := doc.Rows["tk-w"].Group; got != GroupWaitingOnYou {
 		t.Errorf("tk-w is in %q, want waiting on you", got)
 	}
-	if n := doc.NeedsYou; n.Count != 1 || !slices.EqualFunc(n.Needs, []Need{{ID: "tk-q", Holds: []string{"tk-w"}}}, sameNeed) {
-		t.Errorf("Needs you counts %d and lists %+v, want 1 and the question with tk-w beneath it", n.Count, n.Needs)
+	if n := doc.NeedsYou; n.Count != 1 || !slices.EqualFunc(n.Counted, []Need{{ID: "tk-q", Kind: NeedKindQuestion, Holds: []string{"tk-w"}}}, sameNeed) {
+		t.Errorf("Needs you counts %d and lists %+v, want 1 and the question with tk-w beneath it", n.Count, n.Counted)
+	}
+}
+
+// TestReadFoldsNeedsAboutParkedWork reads, through the read itself, the needs
+// a park leaves out of the count. Epic tk-pe waits on park gate tk-park, which
+// carries no await type, as gc-helm.sh park files one, and its only member has
+// closed, so it asks for a ruling. Question tk-q2 waits on the park itself, and
+// question tk-q holds only tk-w, which waits on the park too. Decision tk-d
+// stands alone and counts.
+func TestReadFoldsNeedsAboutParkedWork(t *testing.T) {
+	rows := []json.RawMessage{
+		json.RawMessage(`{"id":"tk-pe","title":"Parked epic","status":"open","priority":1,"issue_type":"epic","metadata":{"epic_hypothesis":"it works later"},"dependencies":[{"issue_id":"tk-pe","depends_on_id":"tk-park","type":"blocks"}],"created_at":"2026-01-01"}`),
+		json.RawMessage(`{"id":"tk-pe.1","title":"landed","status":"closed","priority":2,"issue_type":"task","dependencies":[{"issue_id":"tk-pe.1","depends_on_id":"tk-pe","type":"parent-child"}],"created_at":"2026-01-02"}`),
+		json.RawMessage(`{"id":"tk-park","title":"Parked while the steer lands","status":"open","priority":2,"issue_type":"gate","created_at":"2026-01-02"}`),
+		json.RawMessage(`{"id":"tk-q","title":"which way?","status":"open","priority":1,"issue_type":"gate","await_type":"human","created_at":"2026-01-03"}`),
+		json.RawMessage(`{"id":"tk-w","title":"behind the question and the park","status":"open","priority":2,"issue_type":"task","dependencies":[{"issue_id":"tk-w","depends_on_id":"tk-q","type":"blocks"},{"issue_id":"tk-w","depends_on_id":"tk-park","type":"blocks"}],"created_at":"2026-01-04"}`),
+		json.RawMessage(`{"id":"tk-q2","title":"and which?","status":"open","priority":1,"issue_type":"gate","await_type":"human","dependencies":[{"issue_id":"tk-q2","depends_on_id":"tk-park","type":"blocks"}],"created_at":"2026-01-05"}`),
+		json.RawMessage(`{"id":"tk-d","title":"pick one","status":"open","priority":2,"issue_type":"decision","created_at":"2026-01-06"}`),
+	}
+	doc, err := Read(context.Background(), stubStore(t, rows))
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if r := doc.Rows["tk-pe"]; r.Ask != AskRuling {
+		t.Fatalf("tk-pe asks %q, want a ruling, so the case is not built", r.Ask)
+	}
+	if r := doc.Rows["tk-w"]; r.Signal != "Waits on your answer" {
+		t.Fatalf("tk-w reads %q, want it held by its question, so the case is not built", r.Signal)
+	}
+	ids := func(needs []Need) []string {
+		var out []string
+		for _, n := range needs {
+			out = append(out, n.ID)
+		}
+		slices.Sort(out)
+		return out
+	}
+	n := doc.NeedsYou
+	if n.Count != 1 || !slices.Equal(ids(n.Counted), []string{"tk-d"}) {
+		t.Errorf("Needs you counts %d: %v, want the decision alone", n.Count, ids(n.Counted))
+	}
+	if got, want := ids(n.NotCounted), []string{"tk-pe", "tk-q", "tk-q2"}; !slices.Equal(got, want) {
+		t.Errorf("Needs you folds %v, want %v", got, want)
 	}
 }
 
