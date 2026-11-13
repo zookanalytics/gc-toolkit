@@ -65,9 +65,10 @@
 #                its section "Bring the app up": its app target, --cwd and
 #                --port, each directory relative to the worktree's root. The
 #                command, or a terminal script's shell, runs in the guide's
-#                --cwd, or at the worktree's root when the guide names none. A terminal script takes no app target, so
-#                only the directory applies to one. --guide names the whole
-#                app, so it takes no app target, --cwd or --port beside it.
+#                --cwd, or at the worktree's root when the guide names none.
+#                A terminal script takes no app target, so only the directory
+#                applies to one. --guide names the whole app, so it takes no
+#                app target, --cwd or --port beside it.
 #   --port       port for --serve (default 5173) or --serve-dir (default: a free
 #                port). A port that a server already answers on is refused.
 #   --cwd        working directory for the --serve command, the directory a
