@@ -326,9 +326,10 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   the sitting and the operator choose whether it ends at that hand-off or stays
   until the work returns
   ([human-engagement.md](human-engagement.md#a-sitting-that-stays-for-the-return)).
-  Gas City sleeps a sitting that stays and wakes it with its thread when the
-  work closes, and the board shows a conversation that waits on work as
-  waiting, not as an ask of the operator. On its return the sitting compares
+  Gas City sleeps a sitting that stays, and when the work closes it wakes the
+  sitting with its thread, or sends a sitting still up a notice that the work
+  closed. The board shows a conversation its sitting stays in as waiting on
+  that work, not as an ask of the operator. On its return the sitting compares
   what landed with what was agreed and tells the operator where it departs. It
   passes and fails nothing: the work's own checks give the verdicts, and the
   subject closes as it would after a hand-off, such as through the validating
