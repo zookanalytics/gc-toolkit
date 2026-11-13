@@ -30,7 +30,7 @@
 # them assigns the subject or dispatches anything, so a setup that stops between
 # steps leaves no child in flight, and no child can land while the subject waits
 # on fewer than all of them. The dispatch step reads nothing back: it hands the
-# subject to the refinery with its notice, slings the design child
+# subject to the refinery by its assignee alone, slings the design child
 # (--merge mr when gated), arms the implementation behind the design or slings
 # it, and arms the summary task on mol-polecat-report. It stamps each marker
 # (gc.design_armed, gc.impl_armed, gc.summary_armed) right after its own
@@ -50,7 +50,7 @@
 # summary task wait on the bead, never the reverse, and refuses a summary task
 # that has been dispatched, or whose beads have all closed so that a pass may
 # already be slinging it. Its hand-off that brings the effort's branch current
-# goes to the rig's refinery with its notice, waits on the outside work, names
+# goes to the rig's refinery by its assignee alone, waits on the outside work, names
 # the landing bead, and carries no branch, so the refinery's patrol never takes
 # it to land.
 #
@@ -395,7 +395,6 @@ cat > "$TMP/bin/deferred-dispatch.sh" <<'STUB'
 printf 'deferred-dispatch %s\n' "$*" >> "$GC_LOG"
 case "${1:-}" in
   arm) exit "${ARM_RC:-0}" ;;
-  notify) exit "${NOTIFY_RC:-0}" ;;
 esac
 exit 0
 STUB
@@ -429,7 +428,7 @@ fixture() {
   rm -f "$STORE.creates"
   printf 'main\n' > "$ORIGIN_REFS"
   export ORIGIN_HEAD=main FETCH_RC=0 PUSH_FAIL="" REFUSE_EDGES="" UPDATE_FAIL="" SHOW_FAIL="" \
-    CREATE_FAIL="" NEXT_ID="" NEXT_IDS="" SLING_RC=0 ARM_RC=0 NOTIFY_RC=0 ROSTER_FAIL="" \
+    CREATE_FAIL="" NEXT_ID="" NEXT_IDS="" SLING_RC=0 ARM_RC=0 ROSTER_FAIL="" \
     DESIGN_ARMED="" IMPL_ARMED="" SUMMARY_ARMED=""
   export DESIGN_CHILD="dz-design" IMPL_CHILD="dz-impl" SUMMARY_TASK=""
 }
@@ -746,8 +745,8 @@ for sh in "${SHELLS[@]}"; do
   run_block setup-dispatch "$sh"
   eq "$RC" "0" "[$sh] dispatch gated: a filed setup is handed over and dispatched"
   eq "$(field dz-sub assignee)" "rig/gc-toolkit.refinery" "[$sh] dispatch: the subject is assigned to the refinery"
-  logged "deferred-dispatch notify dz-sub --agent rig/gc-toolkit.refinery" \
-    && ok "[$sh] dispatch: the notice the assignment owes is recorded" || bad "[$sh] dispatch: no notice"
+  not_logged "deferred-dispatch notify" && not_logged "session nudge" \
+    && ok "[$sh] dispatch: the assignee alone hands the waiting subject over" || bad "[$sh] dispatch: a notice or a nudge went with the assignment"
   logged "sling rig/gc-toolkit.polecat dz-design --on mol-polecat-work --merge mr" \
     && ok "[$sh] dispatch gated: the design child is slung --merge mr, a stage" || bad "[$sh] dispatch gated: not slung as a stage"
   logged "deferred-dispatch arm dz-impl --target rig/gc-toolkit.polecat --sling-arg --on --sling-arg mol-polecat-work" \
@@ -760,9 +759,9 @@ for sh in "${SHELLS[@]}"; do
   not_logged "bd dep list" && not_logged "bd show dz-design" && not_logged "bd show dz-impl" \
     && ok "[$sh] dispatch: it reads no target or edge back" \
     || bad "[$sh] dispatch: the setup was read back"
-  before "update dz-sub --if-assignee" "deferred-dispatch notify" && before "deferred-dispatch notify" "gc sling" \
+  before "update dz-sub --if-assignee" "gc sling" \
     && before "gc sling" "deferred-dispatch arm dz-impl" && before "deferred-dispatch arm dz-impl" "deferred-dispatch arm dz-sum" \
-    && ok "[$sh] dispatch: the hand-over and its notice come before any dispatch" \
+    && ok "[$sh] dispatch: the hand-over comes before any dispatch" \
     || bad "[$sh] dispatch: a dispatch ran before the subject was handed over"
 
   # --- setup-dispatch, all-in-one ---
@@ -797,14 +796,8 @@ for sh in "${SHELLS[@]}"; do
   wired; export UPDATE_FAIL="dz-sub:assignee"
   run_block setup-dispatch "$sh"
   stopped && not_logged "deferred-dispatch" && not_logged "sling" \
-    && ok "[$sh] dispatch: an assignment that fails neither records the notice nor dispatches" \
+    && ok "[$sh] dispatch: an assignment that fails dispatches nothing" \
     || bad "[$sh] dispatch: went ahead after a failed assignment (rc=$RC)"
-
-  wired; export NOTIFY_RC=1
-  run_block setup-dispatch "$sh"
-  stopped && not_logged "sling" && not_logged "deferred-dispatch arm" && [ "$(meta dz-sub gc.design_armed)" = "<absent>" ] \
-    && ok "[$sh] dispatch: a notice that does not record stops before any dispatch" \
-    || bad "[$sh] dispatch: dispatched with no notice recorded (rc=$RC)"
 
   wired; export SLING_RC=1
   run_block setup-dispatch "$sh"
@@ -877,8 +870,8 @@ for sh in "${SHELLS[@]}"; do
     "[$sh] recipe: the landing bead waits on the bead and the summary task, and the summary task on the bead"
   eq "$(meta dz-sum target)" "<absent>" "[$sh] recipe: the summary task carries no target"
   eq "$(field land-1 assignee)" "rig/gc-toolkit.refinery" "[$sh] recipe: the landing bead is handed to the refinery"
-  logged "deferred-dispatch notify land-1 --agent rig/gc-toolkit.refinery" \
-    && ok "[$sh] recipe: …with the notice the assignment owes" || bad "[$sh] recipe: no notice for the assignment"
+  not_logged "deferred-dispatch notify" && not_logged "session nudge" \
+    && ok "[$sh] recipe: …by its assignee alone, since it waits on the effort's beads" || bad "[$sh] recipe: a notice or a nudge went with the assignment"
   logged "sling rig/gc-toolkit.polecat work-1" && logged "deferred-dispatch arm dz-sum --target rig/gc-toolkit.polecat --sling-arg --on --sling-arg mol-polecat-report" \
     && ok "[$sh] recipe: the bead is slung and the summary task armed on mol-polecat-report" || bad "[$sh] recipe: the work was not dispatched"
   all_before "rig create" "update land-1 --assignee" && before "update land-1 --assignee" "gc sling" \
@@ -978,23 +971,19 @@ for sh in "${SHELLS[@]}"; do
   handoff_store; run_handoff "$sh"
   eq "$RC" "0" "[$sh] hand-off: the block files the hand-off and hands it over"
   eq "$(field ho-1 assignee)" "rig/gc-toolkit.refinery" "[$sh] hand-off: the rig's refinery owns it"
-  logged "deferred-dispatch notify ho-1 --agent rig/gc-toolkit.refinery" && before "update ho-1 --assignee" "deferred-dispatch notify ho-1" \
-    && ok "[$sh] hand-off: …with the notice the assignment owes, after it" || bad "[$sh] hand-off: no notice to the refinery after the assignment"
+  not_logged "deferred-dispatch notify" && not_logged "session nudge" \
+    && ok "[$sh] hand-off: …by its assignee alone, since it waits on the outside work" || bad "[$sh] hand-off: a notice or a nudge went with the assignment"
   eq "$(waits_on ho-1 out-1)" "1" "[$sh] hand-off: it waits on the outside work"
   eq "$(meta ho-1 branch) $(meta ho-1 target)" "<absent> <absent>" "[$sh] hand-off: it carries no branch and no target, so the refinery's patrol never takes it to land"
   eq "$(waits_on land-1 ho-1) $(parents ho-1)" "0 ep-1" "[$sh] hand-off: it sits under the effort's epic, and the landing bead does not wait on it"
   says ho-1 "land-1, the effort's landing bead" && ok "[$sh] hand-off: it names the landing bead, whose branch and target the refinery reads" \
     || bad "[$sh] hand-off: its description does not name the landing bead"
 
-  for fail in "CREATE_FAIL=ho-1" "UPDATE_FAIL=ho-1:assignee" "NOTIFY_RC=1"; do
+  for fail in "CREATE_FAIL=ho-1" "UPDATE_FAIL=ho-1:assignee"; do
     handoff_store; export "${fail?}"
     run_handoff "$sh"
     stopped && ok "[$sh] hand-off: a refused write ($fail) stops the block" || bad "[$sh] hand-off: went ahead past a refused write ($fail) (rc=$RC)"
   done
-  handoff_store; export UPDATE_FAIL=ho-1:assignee
-  run_handoff "$sh"
-  not_logged "deferred-dispatch notify" && ok "[$sh] hand-off: an assignment the store refuses sends no notice" \
-    || bad "[$sh] hand-off: a notice went out for a hand-off nobody owns"
 done
 
 echo

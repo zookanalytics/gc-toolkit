@@ -73,12 +73,14 @@ SUMMARY=$(gc bd --rig <rig> create "summary: the PR for <what the effort deliver
   --parent <epic> --deps "<each bead of the effort, comma-separated>,blocks:$LANDING" --json | jq -r '.id // empty')
 [ -n "$SUMMARY" ] || { echo "no summary task filed; stopping" >&2; exit 1; }
 
-# 6. Assign the landing bead to the refinery, and notify it. The refinery takes
-# it once nothing it waits on is open, so assign it only after every wait above
-# is written: then it cannot reach the default branch before every bead of the
-# effort and the summary task has closed.
+# 6. Assign the landing bead to the refinery. Its patrol finds its work by the
+# beads assigned to it, and the landing bead waits on the effort's beads, so
+# the assignee alone hands it over: Gas City nudges the refinery when the last
+# of them closes. The refinery takes it once nothing it waits on is open, so
+# assign it only after every wait above is written: then it cannot reach the
+# default branch before every bead of the effort and the summary task has
+# closed.
 gc bd --rig <rig> update "$LANDING" --assignee <rig>/<binding>.refinery \
-  && "$(gc <binding> scripts-dir)/deferred-dispatch.sh" notify "$LANDING" --agent <rig>/<binding>.refinery \
   || { echo "$LANDING is not handed to the refinery; dispatching nothing" >&2; exit 1; }
 
 # 7. Sling each bead of the effort, or arm it when it waits on other work, and
@@ -139,14 +141,14 @@ commits as its change.
 
 1. File the hand-off by the block below. It names the effort's landing bead
    and waits on the outside work by a `blocks` edge. The block assigns it to
-   the refinery and notifies it, as the work skill sends a named agent a bead.
-   It carries no `branch`, because the refinery's patrol takes a bead that
-   carries one as a branch to land.
+   the refinery, as the work skill sends the refinery a bead. It carries no
+   `branch`, because the refinery's patrol takes a bead that carries one as a
+   branch to land.
 2. Make the bead that needs the branch current wait on the hand-off by a
    `blocks` edge, and arm it to dispatch when the hand-off closes (the waits
    skill).
-3. Once the outside work has landed, deferred dispatch sends the notice, and
-   the refinery brings the branch current. It fast-forwards the branch to the
+3. Once the outside work has landed, Gas City nudges the refinery with the
+   hand-off's id, and the refinery brings the branch current. It fast-forwards the branch to the
    default branch when the branch holds nothing the default branch lacks, and
    otherwise merges the default branch into it. It pushes the result and
    closes the hand-off, which releases the bead.
@@ -164,7 +166,6 @@ HANDOFF=$(gc bd --rig <rig> create "Bring integration/$LANDING current once <the
   --parent <epic> --deps "$OUTSIDE" --json | jq -r '.id // empty')
 [ -n "$HANDOFF" ] || { echo "no hand-off filed, with its wait on the outside work; stopping" >&2; exit 1; }
 gc bd --rig <rig> update "$HANDOFF" --assignee <rig>/<binding>.refinery \
-  && "$(gc <binding> scripts-dir)/deferred-dispatch.sh" notify "$HANDOFF" --agent <rig>/<binding>.refinery \
   || { echo "$HANDOFF is not handed to the refinery; make nothing wait on it yet" >&2; exit 1; }
 ```
 

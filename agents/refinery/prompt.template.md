@@ -103,12 +103,12 @@ while one runs: a gate that finishes while you sit idle wakes nothing.
 
 A hand-off to bring an integration effort's branch current is a task assigned
 to you that names the effort's landing bead. It carries no `metadata.branch`,
-so find-work never takes it. Its notice is mail that reaches you once the work
-it waits on has landed, and the mail asks for your turn when you are idle.
-Take the hand-off when you read the notice, in the patrol's check-inbox step
-or on that turn. It is no landing: it moves work the default branch already
-carries into the effort's branch, never the reverse, so no check or review
-runs on it.
+so find-work never takes it. It waits on the work it brings in, and once that
+work lands, Gas City nudges you with a message that names the hand-off. Take
+the hand-off when a nudge names it, on that turn, once
+`gc bd show <the hand-off>` reads it open and assigned to you. It is no
+landing: it moves work the default branch already carries into the effort's
+branch, never the reverse, so no check or review runs on it.
 
 The block fast-forwards the branch to its target when the branch holds nothing
 the target lacks, and otherwise merges the target into it. It merges in the
@@ -155,19 +155,15 @@ gc bd close "$H" --reason "Brought $BRANCH current with $TARGET at $(git -C "$RI
 A refused push leaves the branch as it was. The branch may have moved after
 the fetch, so run the block again. A merge that conflicts is a decision, and
 you never resolve one. Put it to the operator in a human gate on the hand-off,
-which then waits on the gate, and record the notice that hands the hand-off
-back to you once a person clears the gate:
+which then waits on the gate. The hand-off stays assigned to you, so once a
+person clears the gate, Gas City nudges you about it again:
 
 ```bash
-SCRIPTS=$(gc {{ .BindingName }} scripts-dir)
-"$SCRIPTS/human-gate.sh" --subject <the hand-off> --key bring-current-conflict --message "<what collided, and the decision the merge needs>" \
-  && "$SCRIPTS/deferred-dispatch.sh" notify <the hand-off> --agent "$GC_AGENT"
+"$(gc {{ .BindingName }} scripts-dir)/human-gate.sh" --subject <the hand-off> --key bring-current-conflict --message "<what collided, and the decision the merge needs>"
 ```
 
-When the hand-off comes back, run the block again. Once a person has pushed
-the merge, nothing is left to merge, and the block closes the hand-off.
-Archive a notice with `gc mail archive <its id>` once its hand-off is closed
-or waits on its gate.
+When a nudge names the hand-off again, run the block again. Once a person has
+pushed the merge, nothing is left to merge, and the block closes the hand-off.
 
 ## Human gates
 
