@@ -588,14 +588,15 @@ cmd_deliverable() {
 }
 
 # ---------------------------------------------------------------------------
-# assignable <named-agent> [<bead>] — "if I assign work to this agent right now,
+# assignable <named-agent> [<bead>] — "if I hand work to this agent right now,
 # will its own hook ever offer it?" The first reaction's actionable and blocked
-# exits ask it before they address a bead to a named agent (--assign,
-# --then-assign). A named session's hook matches the bead's assignee
-# (docs/gascity/routing-model.md, "The read side"), so an assignment vanishes
-# when no agent is registered under that exact name, when the agent is a pool
-# rather than a named session (a pool's instances match their own identities,
-# never the pool's name), or when its hook reads no store the bead lives in. A
+# exits ask it before they hand a bead to a named agent (--assign,
+# --then-assign). A plain named session's hook serves a bead assigned to it or
+# routed to its own name (docs/gascity/routing-model.md, "The read side"), so a
+# hand-off vanishes when no agent is registered under that exact name, when the
+# agent is a pool rather than a named session (a pool's instances match their
+# own identities, never the pool's name), or when its hook reads no store the
+# bead lives in. A
 # city-scoped agent's hook reads every rig's store; a rig-scoped one reads its
 # own rig's store and the city's. A suspended agent leaves the bead sitting
 # until it resumes.

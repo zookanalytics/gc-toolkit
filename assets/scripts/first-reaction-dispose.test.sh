@@ -61,13 +61,9 @@ case "$1 ${2:-}" in
       case "$_prev" in
         --set-metadata)   case "$_a" in
                             gc.recommended_formula=*) _reco_set="${_a#gc.recommended_formula=}" ;;
-                            # The notice the real deferred-dispatch.sh records,
-                            # which its own notice listing reads back below.
-                            gc.notify_when_ready=*) printf '%s' "${_a#gc.notify_when_ready=}" > "$FAKE_STATE.notice" ;;
                           esac ;;
         --unset-metadata) case "$_a" in
                             gc.recommended_formula) _reco_unset=1 ;;
-                            gc.notify_when_ready) rm -f "$FAKE_STATE.notice" ;;
                           esac ;;
         # An emergency's P0, which a later `bd show` reflects.
         --priority) printf '%s' "$_a" > "$FAKE_STATE.priority" ;;
@@ -109,58 +105,10 @@ case "$1 ${2:-}" in
     fi
     [ -e "$FAKE_STATE.hold" ] && _shown=$(printf '%s' "$_shown" | jq -c '.[0].labels = ((.[0].labels // []) + ["hold:mayor"])' 2>/dev/null || printf '%s' "$_shown")
     [ -n "$_priority" ] && _shown=$(printf '%s' "$_shown" | jq -c --argjson v "$_priority" '.[0].priority = $v' 2>/dev/null || printf '%s' "$_shown")
-    # The notice the real deferred-dispatch.sh records, as the store returns
-    # it: its retire re-reads the bead and clears only a record that still
-    # names the agent it notified.
-    _notice_rec="$(cat "$FAKE_STATE.notice" 2>/dev/null || printf '')"
-    if [ -n "$_notice_rec" ]; then
-      _shown=$(printf '%s' "$_shown" | jq -c --arg v "$_notice_rec" '.[0].metadata = ((.[0].metadata // {}) + {"gc.notify_when_ready": $v})' 2>/dev/null || printf '%s' "$_shown")
-    fi
-    # The release's --assign, which the helm stub records: the bead is open and
-    # held by that agent from then on.
-    _assignee="$(cat "$FAKE_STATE.assignee" 2>/dev/null || printf '')"
-    [ -n "$_assignee" ] && _shown=$(printf '%s' "$_shown" | jq -c --arg v "$_assignee" '.[0].assignee = $v | .[0].status = "open"' 2>/dev/null || printf '%s' "$_shown")
     printf '%s\n' "$_shown" ;;
   "bd list")
     printf 'LIST %s\n' "$*" >> "$FAKE_LOG"
-    case " $* " in
-      *" --has-metadata-key gc.notify_when_ready "*)
-        # The notice recorded above, as the real deferred-dispatch.sh lists it.
-        # Every listing carries it, and a --ready one only while
-        # FAKE_SUBJECT_READY says bd reports the bead ready.
-        _notice="$(cat "$FAKE_STATE.notice" 2>/dev/null || printf '')"
-        case " $* " in *" --ready "*) [ -n "${FAKE_SUBJECT_READY:-}" ] || _notice="" ;; esac
-        if [ -n "$_notice" ]; then
-          jq -cn --arg a "$_notice" --arg who "$(cat "$FAKE_STATE.assignee" 2>/dev/null)" \
-            '[{id: "tk-sub", status: "open", assignee: $who, metadata: {"gc.notify_when_ready": $a}}]'
-        else
-          printf '[]\n'
-        fi ;;
-      *) printf '%s\n' "${FAKE_LIST_JSON:-[]}" ;;
-    esac ;;
-  "mail send")
-    # The --json answer gascity's doMailSendJSON gives. A send whose dedup key
-    # matches a message still in the mailbox saves nothing, requests no turn
-    # and reports already_done. Any other send saves the message and then
-    # requests the turn, reporting `notified` only when that succeeds.
-    # FAKE_MAIL_NUDGE_FAILS fails the request, which the real command reports
-    # on stderr while it still exits 0.
-    printf 'MAIL %s\n' "$*" >> "$FAKE_LOG"
-    [ -n "${FAKE_MAIL_FAILS:-}" ] && exit 1
-    _prev=""; _key=""
-    for _a in "$@"; do [ "$_prev" = "--dedup" ] && _key="$_a"; _prev="$_a"; done
-    if [ -n "$_key" ] && grep -qxF -- "$_key" "$FAKE_STATE.mailbox" 2>/dev/null; then
-      printf '%s\n' '{"ok":true,"action":"send","count":0,"already_done":true}'; exit 0
-    fi
-    printf '%s\n' "$_key" >> "$FAKE_STATE.mailbox"
-    if [ -n "${FAKE_MAIL_NUDGE_FAILS:-}" ]; then
-      echo "gc mail send: nudge failed: fake nudge-store failure" >&2
-      printf '%s\n' '{"ok":true,"action":"send","count":1}'; exit 0
-    fi
-    printf '%s\n' '{"ok":true,"action":"send","count":1,"notified":true}' ;;
-  "session nudge")
-    printf 'NUDGE %s\n' "$*" >> "$FAKE_LOG"
-    if [ -n "${FAKE_NUDGE_FAILS:-}" ]; then echo "gc session nudge: fake nudge failure" >&2; exit 1; fi ;;
+    printf '%s\n' "${FAKE_LIST_JSON:-[]}" ;;
   "bd dep")
     printf 'DEP %s\n' "$*" >> "$FAKE_LOG"
     # `dep list --json` answers with what the store holds AFTER the helm call.
@@ -181,7 +129,8 @@ case "$1 ${2:-}" in
   "sling "*) printf 'SLING %s\n' "$*" >> "$FAKE_LOG"
     # FAKE_SLING_RC is the exit gc sling returns: 3 is its live-workflow
     # conflict, the only code it exits on a bead a workflow already drives.
-    [ -n "${FAKE_SLING_FAILS:-}" ] && exit 1
+    # FAKE_SLING_FAILS is a sling that names why it failed on stderr.
+    [ -n "${FAKE_SLING_FAILS:-}" ] && { echo "gc sling: fake refusal" >&2; exit 1; }
     [ -n "${FAKE_SLING_RC:-}" ] && exit "$FAKE_SLING_RC" ;;
   "formula show")
     printf 'FORMULA %s\n' "$*" >> "$FAKE_LOG"
@@ -199,16 +148,6 @@ cat > "$TMP/helm" <<'HELM'
 #!/usr/bin/env bash
 printf 'HELM %s\n' "$*" >> "$FAKE_LOG"
 [ -n "${FAKE_HELM_FAILS:-}" ] && exit 4
-# A release with --assign makes that agent the bead's assignee, which a later
-# `bd show` reflects.
-case " $* " in
-  *" --release "*)
-    _prev=""
-    for _a in "$@"; do
-      [ "$_prev" = "--assign" ] && printf '%s' "$_a" > "$FAKE_STATE.assignee"
-      _prev="$_a"
-    done ;;
-esac
 # Model gc-helm.sh takeaway --release retiring the pour stamp. The shared-state
 # file stands in for gc.execution_routed_to; a run that does not opt in
 # (FAKE_EXEC_ROUTED_FILE unset) is unchanged. The arm does not depend on this
@@ -332,8 +271,7 @@ R="tk-react"   # the reaction bead the worker holds
 # Reset per run, then seed the recommendation state from the fixture so the first
 # `bd show` matches FAKE_SHOW_JSON and later writes mutate it from there.
 run() {
-  : > "$FAKE_LOG"; rm -f "$FAKE_STATE.hold" "$FAKE_STATE.priority" \
-    "$FAKE_STATE.assignee" "$FAKE_STATE.notice" "$FAKE_STATE.mailbox"
+  : > "$FAKE_LOG"; rm -f "$FAKE_STATE.hold" "$FAKE_STATE.priority"
   printf '%s' "${FAKE_SHOW_JSON:-$DEFAULT_SHOW}" \
     | jq -r '(.[0].metadata // {})["gc.recommended_formula"] // ""' > "$FAKE_STATE" 2>/dev/null || : > "$FAKE_STATE"
   RC=0; OUT="$("$SCRIPT" "$@" 2>"$TMP/err")" || RC=$?; ERR="$(cat "$TMP/err")"; LOG="$(cat "$FAKE_LOG")";
@@ -448,14 +386,17 @@ eq "$(cat "$FAKE_LOG")" "" "(ACTRIG) …and writes nothing"
 has "routes to nobody" "$ERR" "(ACTRIG) …and names what a bare target would cost"
 
 # ── actionable --assign: work that is a named agent's own ────────────────────
-# A town-repo edit is mechanik's direct edit, and mechanik is a named agent,
-# which the pack addresses by assignee (docs/deferred-dispatch.md), so the exit
-# releases the bead TO it as its assignee instead of routing it to a pool.
-#   (ACTASSIGN)  the release carries --assign, not --route, and still says
-#                nothing waits; the run names the agent, and the reaction
-#                bead closes once the landed proof is stamped
+# A town-repo edit is mechanik's direct edit, and mechanik is a named agent that
+# claims through its hook, so the exit hands the bead TO it through Gas City's
+# hand-off (docs/deferred-dispatch.md) instead of routing it to a pool.
+#   (ACTASSIGN)  the release leaves the bead at rest, unassigned and unrouted,
+#                and still says nothing waits; the run names the agent, and
+#                the reaction bead closes once the landed proof is stamped
 #   (ACTASSIGN)  the exit asks whether the agent's hook would offer the bead,
 #                and does not ask the pool question
+#   (ACTHANDOFF) gc sling then routes the bead to the agent's own name, raw: no
+#                formula and no convoy, after the release and before the
+#                landed proof, with no arm and no assignee
 #   (ASSIGNNO)   an agent that cannot be handed the bead refuses the exit
 #   (ASSIGNBOTH) --route and --assign together are refused
 #   (ASSIGNRIG)  a named agent needs no GC_RIG to qualify it
@@ -466,19 +407,18 @@ has "gc.reacted_by=$R" "$LOG" "(ACTASSIGN) the landed proof names the reaction b
 has "disposed as actionable (gc-toolkit.mechanik)" "$OUT" "(ACTASSIGN) …and the run names the agent it went to"
 has "UPDATE bd update $R --set-metadata gc.outcome=reacted --set-metadata gc.work_outcome=no-op --status=closed" "$LOG" \
     "(ACTASSIGN) …and the reaction bead closes"
-has "HELM takeaway tk-sub city.toml edit routed to mechanik --by proactive --release --assign gc-toolkit.mechanik --no-wait" \
-    "$LOG" "(ACTASSIGN) the release hands the bead to the agent as its assignee, moving, in one call"
-hasnt "--route" "$LOG" "(ACTASSIGN) …and stamps no pool route beside the assignee"
+has "HELM takeaway tk-sub city.toml edit routed to mechanik --by proactive --release --no-wait" \
+    "$LOG" "(ACTASSIGN) the release leaves the bead at rest and says nothing waits, in one call"
+hasnt "--assign" "$(grep '^HELM' "$FAKE_LOG")" "(ACTASSIGN) …writing no assignee"
+hasnt "--route" "$(grep '^HELM' "$FAKE_LOG")" "(ACTASSIGN) …and no pool route"
 has "PROACTIVE assignable gc-toolkit.mechanik tk-sub" "$LOG" "(ACTASSIGN) the exit asks whether the agent's hook would offer this bead"
 hasnt "PROACTIVE deliverable" "$LOG" "(ACTASSIGN) …and does not ask the pool question of a named agent"
-# (ACTNOTIFY) nothing wakes an idle named session for a new assignee, so the
-# exit asks deferred-dispatch.sh to tell the agent it assigned: once the release
-# has made it the assignee, and before the landed proof.
-has "DEFERRED notify tk-sub --agent gc-toolkit.mechanik --reason first reaction: the remedy is a city.toml edit, mechanik's direct edit" \
-    "$LOG" "(ACTNOTIFY) the exit asks deferred-dispatch.sh to tell the agent about the bead"
-before '^HELM takeaway' '^DEFERRED notify' "(ACTNOTIFY) …after the release makes the agent its assignee"
-before '^DEFERRED notify' 'gc.reacted_by' "(ACTNOTIFY) …and before the landed proof"
-hasnt "DEFERRED arm" "$LOG" "(ACTNOTIFY) …arming no sling for a named agent"
+has "gc-toolkit.mechanik tk-sub --no-formula --no-convoy" "$(grep '^SLING ' "$FAKE_LOG")" \
+    "(ACTHANDOFF) gc sling hands the bead to the agent's own name, pouring no formula and filing no convoy"
+eq "$(grep -c '^SLING ' "$FAKE_LOG")" "1" "(ACTHANDOFF) …once"
+before '^HELM takeaway' '^SLING ' "(ACTHANDOFF) …after the release leaves the bead at rest"
+before '^SLING ' 'gc.reacted_by' "(ACTHANDOFF) …and before the landed proof"
+hasnt "DEFERRED" "$LOG" "(ACTHANDOFF) …arming nothing for a named agent"
 
 export FAKE_AGENT_GONE=1
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --assign mechanik
@@ -499,7 +439,7 @@ has "not both" "$ERR" "(ASSIGNBOTH) …and the refusal says a bead takes one add
 OUT="$(env -u GC_RIG "$SCRIPT" tk-sub --disposition actionable --reason "r" --takeaway "t" --assign gc-toolkit.mechanik 2>"$TMP/err")" || RC=$?
 LOG="$(cat "$FAKE_LOG")"
 eq "$RC" "0" "(ASSIGNRIG) with no GC_RIG, an --assign still lands"
-has "--assign gc-toolkit.mechanik --no-wait" "$LOG" "(ASSIGNRIG) …because a named agent is addressed by its own name"
+has "SLING sling gc-toolkit.mechanik tk-sub --no-formula --no-convoy" "$LOG" "(ASSIGNRIG) …because a named agent is addressed by its own name"
 
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --then-assign gc-toolkit.mechanik
 eq "$RC" "2" "(ASSIGNEXIT) actionable refuses --then-assign, the blocked exit's flag"
@@ -515,31 +455,29 @@ eq "$LOG" "" "(ASSIGNEXIT) …and no gate was filed"
 : > "$FAKE_LOG"; RC=0
 OUT="$("$SCRIPT" tk-sub --disposition actionable --reason "r" --takeaway "t" --assign gc-toolkit.mechanik --dry-run 2>"$TMP/err")" || RC=$?
 eq "$RC" "0" "(ASSIGNDRY) a dry run of the --assign exit succeeds"
-has "would release tk-sub to named agent gc-toolkit.mechanik" "$OUT" "(ASSIGNDRY) …and names the agent it would hand the bead to"
-has "would tell gc-toolkit.mechanik about tk-sub once bd reports it ready" "$OUT" "(ASSIGNDRY) …and that it would tell the agent"
+has "would hand tk-sub to named agent gc-toolkit.mechanik (gc sling gc-toolkit.mechanik tk-sub --no-formula --no-convoy)" "$OUT" \
+    "(ASSIGNDRY) …and names the agent it would hand the bead to, and how"
 hasnt "UPDATE" "$(cat "$FAKE_LOG")" "(ASSIGNDRY) …writing nothing"
-hasnt "DEFERRED" "$(cat "$FAKE_LOG")" "(ASSIGNDRY) …and telling no one"
+hasnt "SLING" "$(cat "$FAKE_LOG")" "(ASSIGNDRY) …and handing nothing over"
 
-# (NOTIFYFAIL) a notice deferred-dispatch.sh neither sent nor recorded leaves the
-# agent unwoken for its bead, so the exit fails before the landed proof and the
-# reaction bead stays open for the re-run.
-export FAKE_DEFERRED_FAILS=1
+# (HANDOFFFAIL) a hand-off gc sling refused leaves the agent's hook without the
+# bead, so the exit fails before the landed proof and the reaction bead stays
+# open for the re-run.
+export FAKE_SLING_FAILS=1
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --assign gc-toolkit.mechanik --reaction-bead "$R"
-eq "$RC" "4" "(NOTIFYFAIL) an --assign whose notice did not land fails the exit"
-has "gc-toolkit.mechanik was not told about it" "$ERR" "(NOTIFYFAIL) …saying the agent was not told"
-has "fake refusal" "$ERR" "(NOTIFYFAIL) …with the tool's own reason"
-has "HELM takeaway tk-sub" "$LOG" "(NOTIFYFAIL) …after the release, which stands"
-hasnt "gc.reacted_by" "$LOG" "(NOTIFYFAIL) …with no landed proof"
-hasnt "UPDATE bd update $R" "$LOG" "(NOTIFYFAIL) …and the reaction bead left open"
-unset FAKE_DEFERRED_FAILS
+eq "$RC" "4" "(HANDOFFFAIL) an --assign whose hand-off did not land fails the exit"
+has "gc sling did not hand it to gc-toolkit.mechanik (exit 1: gc sling: fake refusal" "$ERR" "(HANDOFFFAIL) …with gc sling's own reason"
+has "HELM takeaway tk-sub" "$LOG" "(HANDOFFFAIL) …after the release, which stands"
+hasnt "gc.reacted_by" "$LOG" "(HANDOFFFAIL) …with no landed proof"
+hasnt "UPDATE bd update $R" "$LOG" "(HANDOFFFAIL) …and the reaction bead left open"
+unset FAKE_SLING_FAILS
 
-# (NOTIFYTOOL) with no deferred-dispatch.sh to tell the agent, the exit cannot
-# land, so it is refused before the first write.
+# (HANDOFFTOOL) the hand-off is gc sling's, so --assign lands with no
+# deferred-dispatch.sh to call.
 GC_DEFERRED_DISPATCH_TOOL="$TMP/no-such-deferred-dispatch" \
     run tk-sub --disposition actionable --reason "r" --takeaway "t" --assign gc-toolkit.mechanik --reaction-bead "$R"
-eq "$RC" "4" "(NOTIFYTOOL) --assign with no deferred-dispatch.sh is refused"
-has "no-such-deferred-dispatch" "$ERR" "(NOTIFYTOOL) …naming the tool it looked for"
-eq "$LOG" "" "(NOTIFYTOOL) …before anything is written"
+eq "$RC" "0" "(HANDOFFTOOL) --assign lands with no deferred-dispatch.sh"
+has "SLING " "$LOG" "(HANDOFFTOOL) …handing the bead over"
 
 # ── blocked: the wait is an edge, in one store ───────────────────────────────
 #   (BLK)      the release carries the wait as --waiting-on
@@ -720,28 +658,29 @@ hasnt "DEFERRED arm" "$LOG" "(BLKROUTE) …and nothing is armed to a target that
 unset FAKE_POOL_DEAD FAKE_DEPS_JSON
 
 # (BLKASSIGN) a town-repo edit that must wait on a rig change is held on that
-# change AND assigned to mechanik in the same release. An assigned bead reaches
-# its agent's hook only once bd reports it ready, so the edge is the gate and no
+# change, and handed to mechanik after the release. A routed bead reaches its
+# agent's hook only once bd reports it ready, so the edge is the gate and no
 # sling is armed: a deferred dispatch slings a pool, and a named agent is not
-# one. What is armed is the notice that tells the agent when the wait lifts
-# (BLKNOTIFY), since nothing else wakes an idle named session then.
+# one. The hand-off goes now, while the bead waits (BLKHANDOFF): Gas City nudges
+# the agent's route when the blocker closes.
 export FAKE_DEPS_JSON='[{"id":"tk-blk1"}]'
 run tk-sub --disposition blocked --reason "the comment can change only once the order lands" \
     --takeaway "held: city.toml comment waits on the order" --waiting-on tk-blk1 --then-assign gc-toolkit.mechanik \
     --reaction-bead "$R"
-eq "$RC" "0" "(BLKASSIGN) a blocked disposition assigned to a named agent succeeds"
+eq "$RC" "0" "(BLKASSIGN) a blocked disposition handed to a named agent succeeds"
 has "disposed as blocked (tk-blk1)" "$OUT" "(BLKASSIGN) the run still names the wait"
 has "gc.reacted_by=$R" "$LOG" "(BLKASSIGN) …and the landed proof names the reaction bead"
 has "UPDATE bd update $R --set-metadata gc.outcome=reacted --set-metadata gc.work_outcome=no-op --status=closed" "$LOG" \
     "(BLKASSIGN) …which then closes"
-has "--release --waiting-on tk-blk1 --assign gc-toolkit.mechanik" "$LOG" \
-    "(BLKASSIGN) the wait and the assignee ride one release"
+has "--release --waiting-on tk-blk1" "$LOG" "(BLKASSIGN) the wait rides the release"
+hasnt "--assign" "$(grep '^HELM' "$FAKE_LOG")" "(BLKASSIGN) …which writes no assignee"
 hasnt "--no-wait" "$LOG" "(BLKASSIGN) …and the named wait is not called settled"
-hasnt "DEFERRED arm" "$LOG" "(BLKASSIGN) …and no sling is armed for a named agent"
+hasnt "DEFERRED" "$LOG" "(BLKASSIGN) …and nothing is armed for a named agent"
 has "PROACTIVE assignable gc-toolkit.mechanik tk-sub" "$LOG" "(BLKASSIGN) the exit asks whether the agent's hook would offer the bead"
-has "DEFERRED notify tk-sub --agent gc-toolkit.mechanik --reason first reaction: the comment can change only once the order lands" \
-    "$LOG" "(BLKNOTIFY) the exit asks deferred-dispatch.sh for the notice that tells the agent when the wait lifts"
-before '^DEFERRED notify' 'gc.reacted_by' "(BLKNOTIFY) …and before the landed proof"
+has "gc-toolkit.mechanik tk-sub --no-formula --no-convoy" "$(grep '^SLING ' "$FAKE_LOG")" \
+    "(BLKHANDOFF) gc sling hands the waiting bead to the agent's own name"
+before '^HELM takeaway' '^SLING ' "(BLKHANDOFF) …after the release writes the wait"
+before '^SLING ' 'gc.reacted_by' "(BLKHANDOFF) …and before the landed proof"
 
 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 \
     --then-route gc-toolkit/gc-toolkit.polecat --then-assign gc-toolkit.mechanik
@@ -753,22 +692,19 @@ eq "$RC" "2" "(BLKASSIGN) blocked refuses --assign, the actionable exit's flag"
 
 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 --then-assign gc-toolkit.mechanik --dry-run
 eq "$RC" "0" "(BLKASSIGN) a dry run of the --then-assign exit succeeds"
-has "would wait tk-sub on: tk-blk1, assigned to gc-toolkit.mechanik" "$OUT" "(BLKASSIGN) …and names the agent the held bead goes to"
-has "would tell gc-toolkit.mechanik about tk-sub once bd reports it ready" "$OUT" "(BLKASSIGN) …and when the agent would be told"
+has "would wait tk-sub on: tk-blk1" "$OUT" "(BLKASSIGN) …and names the wait"
+has "would hand tk-sub to named agent gc-toolkit.mechanik (gc sling gc-toolkit.mechanik tk-sub --no-formula --no-convoy), whose hook serves it once the wait lifts" "$OUT" \
+    "(BLKASSIGN) …and the agent the held bead goes to"
 hasnt "UPDATE" "$LOG" "(BLKASSIGN) …writing nothing"
-hasnt "DEFERRED" "$LOG" "(BLKASSIGN) …and arming no notice"
+hasnt "SLING" "$LOG" "(BLKASSIGN) …and handing nothing over"
 
-export FAKE_DEFERRED_FAILS=1
+export FAKE_SLING_FAILS=1
 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 --then-assign gc-toolkit.mechanik --reaction-bead "$R"
-eq "$RC" "4" "(NOTIFYFAIL) a --then-assign whose notice did not land fails the exit"
-has "no notice was armed" "$ERR" "(NOTIFYFAIL) …saying nothing would tell the agent"
-hasnt "gc.reacted_by" "$LOG" "(NOTIFYFAIL) …with no landed proof"
-hasnt "UPDATE bd update $R" "$LOG" "(NOTIFYFAIL) …and the reaction bead left open"
-unset FAKE_DEFERRED_FAILS
-GC_DEFERRED_DISPATCH_TOOL="$TMP/no-such-deferred-dispatch" \
-    run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 --then-assign gc-toolkit.mechanik --reaction-bead "$R"
-eq "$RC" "4" "(NOTIFYTOOL) --then-assign with no deferred-dispatch.sh is refused"
-eq "$LOG" "" "(NOTIFYTOOL) …before anything is written"
+eq "$RC" "4" "(HANDOFFFAIL) a --then-assign whose hand-off did not land fails the exit"
+has "gc sling did not hand it to gc-toolkit.mechanik" "$ERR" "(HANDOFFFAIL) …saying the agent's hook does not offer it"
+hasnt "gc.reacted_by" "$LOG" "(HANDOFFFAIL) …with no landed proof"
+hasnt "UPDATE bd update $R" "$LOG" "(HANDOFFFAIL) …and the reaction bead left open"
+unset FAKE_SLING_FAILS
 
 export FAKE_AGENT_GONE=1
 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 --then-assign gc-toolkit/gc-toolkit.witness
@@ -1919,56 +1855,6 @@ run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolk
 eq "$RC" "2" "(EMERGARGS) …and so is a blank check name"
 eq "$LOG" "" "(EMERGARGS) …and nothing was written"
 unset FAKE_SHOW_JSON FAKE_GH FAKE_ORIGIN_URL FAKE_RIG_PATH
-
-# ── The notice, end to end through the real deferred-dispatch.sh ─────────────
-# The stubbed tool above proves each exit asks for the notice. These runs hand
-# the exits the real deferred-dispatch.sh over the same stubbed gc, so what the
-# agent receives at the exit is pinned. The store stays unpinned. No pass sends
-# a recorded notice later: the deferred-dispatch order's start sends arms alone.
-#   (E2EASSIGN) --assign on a bead bd reports ready: the agent is mailed at
-#               once, asking for its turn and naming the bead, and no notice
-#               is left recorded
-#   (E2EHELD)   --then-assign while the wait holds: no mail, and the notice is
-#               recorded for the agent
-#   (E2ENOTURN) --assign whose mail is saved but gets the agent no turn, from
-#               the mail or from the nudge after it: the exit lands with the
-#               notice still recorded
-unset GC_RIG_ROOT GC_PACK_STATE_DIR GC_ORDER_OUTCOME_FILE
-REAL_DD="$HERE/deferred-dispatch.sh"
-GC_DEFERRED_DISPATCH_TOOL="$REAL_DD" FAKE_SUBJECT_READY=1 \
-    run tk-sub --disposition actionable --reason "the remedy is a city.toml edit" \
-    --takeaway "city.toml edit routed to mechanik" --assign gc-toolkit.mechanik --reaction-bead "$R"
-eq "$RC" "0" "(E2EASSIGN) the --assign exit lands with the real deferred-dispatch.sh"
-eq "$(grep -c '^MAIL ' "$FAKE_LOG")" "1" "(E2EASSIGN) the agent is mailed once"
-has "MAIL mail send gc-toolkit.mechanik --notify" "$LOG" "(E2EASSIGN) …the agent the bead went to, asking for its turn"
-has "Ready for you: tk-sub" "$LOG" "(E2EASSIGN) …naming the bead"
-before '^HELM takeaway' '^MAIL ' "(E2EASSIGN) …once the release has made it the assignee"
-before '^MAIL ' 'gc.reacted_by' "(E2EASSIGN) …and before the landed proof"
-hasnt "NUDGE " "$LOG" "(E2EASSIGN) …with no nudge, since the mail requested the turn"
-[ ! -e "$FAKE_STATE.notice" ] && ok "(E2EASSIGN) …leaving no notice recorded" \
-    || bad "(E2EASSIGN) a notice sent at once is still recorded"
-
-export FAKE_DEPS_JSON='[{"id":"tk-blk1"}]'
-GC_DEFERRED_DISPATCH_TOOL="$REAL_DD" \
-    run tk-sub --disposition blocked --reason "the comment can change only once the order lands" \
-    --takeaway "held: city.toml comment waits on the order" --waiting-on tk-blk1 --then-assign gc-toolkit.mechanik \
-    --reaction-bead "$R"
-eq "$RC" "0" "(E2EHELD) the --then-assign exit lands with the real deferred-dispatch.sh"
-hasnt "MAIL " "$LOG" "(E2EHELD) no mail goes while the wait holds the bead"
-has "--set-metadata gc.notify_when_ready=gc-toolkit.mechanik" "$LOG" "(E2EHELD) …the notice is recorded for the agent instead"
-before '^UPDATE bd update tk-sub --set-metadata gc.notify_when_ready' 'gc.reacted_by' "(E2EHELD) …before the landed proof"
-eq "$(cat "$FAKE_STATE.notice" 2>/dev/null)" "gc-toolkit.mechanik" "(E2EHELD) …keeping the notice for the agent"
-
-unset FAKE_DEPS_JSON
-GC_DEFERRED_DISPATCH_TOOL="$REAL_DD" FAKE_SUBJECT_READY=1 FAKE_MAIL_NUDGE_FAILS=1 FAKE_NUDGE_FAILS=1 \
-    run tk-sub --disposition actionable --reason "the remedy is a city.toml edit" \
-    --takeaway "city.toml edit routed to mechanik" --assign gc-toolkit.mechanik --reaction-bead "$R"
-eq "$RC" "0" "(E2ENOTURN) the --assign exit lands though no turn was requested, since the notice is recorded"
-eq "$(grep -c '^MAIL ' "$FAKE_LOG")" "1" "(E2ENOTURN) the agent is mailed once"
-eq "$(grep -c '^NUDGE ' "$FAKE_LOG")" "1" "(E2ENOTURN) …and, the mail having requested no turn, nudged once"
-before '^NUDGE ' 'gc.reacted_by' "(E2ENOTURN) …before the landed proof"
-eq "$(cat "$FAKE_STATE.notice" 2>/dev/null)" "gc-toolkit.mechanik" "(E2ENOTURN) …and the notice stays recorded for the agent"
-has "nudge failed: fake nudge-store failure" "$ERR" "(E2ENOTURN) …and the mail's diagnostic reaches the exit's output"
 
 echo ""
 echo "first-reaction-dispose (exits, reaction-bead): $PASS passed, $FAIL failed"
