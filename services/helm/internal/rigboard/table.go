@@ -69,6 +69,22 @@ const (
 	AskRuling       Ask = "Ruling"
 )
 
+// NeedKind is the kind of need a row is, the kinds a Needs you view counts and
+// filters its needs by. It is the row's ask, in the ask's own words, except
+// that a conversation's kind says whether it waits for you or a sitting holds
+// it, and a question a sitting is talking over is in conversation too, since
+// your attention is already on it.
+type NeedKind string
+
+const (
+	NeedKindPullRequest    NeedKind = "Pull request"
+	NeedKindQuestion       NeedKind = "Question"
+	NeedKindWaitsForYou    NeedKind = "Conversation waits for you"
+	NeedKindInConversation NeedKind = "In conversation"
+	NeedKindRuling         NeedKind = "Ruling"
+	NeedKindRoutedToYou    NeedKind = "Routed to you"
+)
+
 // outcome is the row of the table that answered.
 type outcome int
 
@@ -97,10 +113,12 @@ type verdict struct {
 	line3  []Ref
 }
 
-// askAnswer is what makes a row an ask, and the words its signal reads.
+// askAnswer is what makes a row an ask, the words its signal reads, and the
+// kind of need it is.
 type askAnswer struct {
 	kind  Ask
 	words string
+	need  NeedKind
 }
 
 // Words the table writes that another document already gives.
@@ -111,14 +129,31 @@ const (
 	signalNeedsRuling    = "Needs a ruling"
 )
 
-// conversationWords is what a conversation's row says: whether it waits in the
-// operator's queue or a sitting holds it, read off its assignee as
-// conversation.IsAssignee reads one.
-func conversationWords(assignee string) string {
+// conversationKind is whether a conversation waits in the operator's queue or a
+// sitting holds it, read off its assignee as conversation.IsAssignee reads one.
+func conversationKind(assignee string) NeedKind {
 	if strings.TrimSpace(assignee) == "human" {
-		return "Conversation waits for you"
+		return NeedKindWaitsForYou
 	}
-	return "In conversation"
+	return NeedKindInConversation
+}
+
+// conversationWords is what a conversation's row says: its kind, in words.
+func conversationWords(assignee string) string { return string(conversationKind(assignee)) }
+
+// gateHold is the first wait behind a bead's status, its own or an ancestor's,
+// on a gate that is no human gate, and nil when none is. Row 4 reads such a
+// wait as "Held by a gate", and a Needs you view reads it as a park
+// (docs/steering.md, "A park"), whose gate gc-helm.sh park files with no await
+// type. A gate of a type bd closes by itself, such as a timer, reads as one
+// too, so a row and the count read a gate one way.
+func gateHold(h waits.Holds) *waits.Wait {
+	for i, w := range h.Waits {
+		if strings.EqualFold(w.IssueType, "gate") && !prstatus.IsHumanGate(w.IssueType, w.AwaitType) {
+			return &h.Waits[i]
+		}
+	}
+	return nil
 }
 
 // staying reports whether a conversation reads as its sitting's stay: open
@@ -169,10 +204,8 @@ func table(in tableInput) verdict {
 	if in.holding != nil && (len(in.holding.Gates) > 0 || len(in.holding.Owed) > 0) {
 		return holdingVerdict(h, *in.holding)
 	}
-	for _, w := range h.Waits {
-		if strings.EqualFold(w.IssueType, "gate") && !prstatus.IsHumanGate(w.IssueType, w.AwaitType) {
-			return verdict{out: outHeldByGate, group: GroupNotMoving, signal: "Held by a gate", note: w.Title}
-		}
+	if w := gateHold(h); w != nil {
+		return verdict{out: outHeldByGate, group: GroupNotMoving, signal: "Held by a gate", note: w.Title}
 	}
 	switch st := status(b); st {
 	case "open", "in_progress", "hooked":
@@ -310,33 +343,38 @@ func askOf(b bead, k Kind, answeredBy string, answeredByAssignee string, openQue
 				return nil
 			}
 		}
-		return &askAnswer{kind: AskConversation, words: conversationWords(b.Assignee)}
+		return &askAnswer{kind: AskConversation, words: conversationWords(b.Assignee), need: conversationKind(b.Assignee)}
 	case KindEpic, KindDelivery:
 		if members > 0 && membersOpen == 0 {
 			if k == KindDelivery {
-				return &askAnswer{kind: AskRuling, words: signalLandedDelivery}
+				return &askAnswer{kind: AskRuling, words: signalLandedDelivery, need: NeedKindRuling}
 			}
-			return &askAnswer{kind: AskRuling, words: signalNeedsRuling}
+			return &askAnswer{kind: AskRuling, words: signalNeedsRuling, need: NeedKindRuling}
 		}
 	}
 	if facts != nil {
 		if st := prstatus.Derive(*facts); st == prstatus.NeedsReview || st == prstatus.NeedsAttention {
-			return &askAnswer{kind: AskPullRequest, words: string(st)}
+			return &askAnswer{kind: AskPullRequest, words: string(st), need: NeedKindPullRequest}
 		}
 	}
 	if b.PersonBlocker {
-		return &askAnswer{kind: AskRoutedToYou, words: string(AskRoutedToYou)}
+		return &askAnswer{kind: AskRoutedToYou, words: string(AskRoutedToYou), need: NeedKindRoutedToYou}
 	}
 	return nil
 }
 
 // questionAsk is a question's ask: "Question", or its conversation's words when
-// one answers it.
+// one answers it. It is in conversation once a sitting holds that
+// conversation, and a question otherwise.
 func questionAsk(answeredBy, assignee string) *askAnswer {
-	if answeredBy != "" {
-		return &askAnswer{kind: AskQuestion, words: conversationWords(assignee)}
+	if answeredBy == "" {
+		return &askAnswer{kind: AskQuestion, words: string(AskQuestion), need: NeedKindQuestion}
 	}
-	return &askAnswer{kind: AskQuestion, words: string(AskQuestion)}
+	a := &askAnswer{kind: AskQuestion, words: conversationWords(assignee), need: NeedKindQuestion}
+	if conversationKind(assignee) == NeedKindInConversation {
+		a.need = NeedKindInConversation
+	}
+	return a
 }
 
 // pullRequestOf is a bead's pull request in the pack's words, nil when it

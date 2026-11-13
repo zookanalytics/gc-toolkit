@@ -105,7 +105,9 @@ func boardOf(t *testing.T, g *gathered) Document {
 	return build(g)
 }
 
-func sameNeed(a, b Need) bool { return a.ID == b.ID && slices.Equal(a.Holds, b.Holds) }
+func sameNeed(a, b Need) bool {
+	return a.ID == b.ID && a.Kind == b.Kind && slices.Equal(a.Holds, b.Holds)
+}
 
 func sameQueue(a, b WorkQueue) bool {
 	return slices.Equal(a.Queue, b.Queue) && slices.Equal(a.NotScheduled, b.NotScheduled) && slices.Equal(a.Unread, b.Unread)
@@ -126,12 +128,13 @@ func TestPages(t *testing.T) {
 			t.Errorf("tk-q holds %v, want the queued work first and in its order", got)
 		}
 		n := doc.NeedsYou
-		if n.Count != 1 || !slices.EqualFunc(n.Needs, []Need{{ID: "tk-q", Holds: []string{"tk-b.1", "tk-b.2", "tk-a.1.1"}}}, sameNeed) {
-			t.Errorf("Needs you counts %d and lists %+v", n.Count, n.Needs)
+		if n.Count != 1 || !slices.EqualFunc(n.Counted, []Need{{ID: "tk-q", Kind: NeedKindQuestion, Holds: []string{"tk-b.1", "tk-b.2", "tk-a.1.1"}}}, sameNeed) ||
+			len(n.NotCounted) != 0 {
+			t.Errorf("Needs you counts %d, lists %+v and folds %+v", n.Count, n.Counted, n.NotCounted)
 		}
 	})
 
-	t.Run("the count reaches zero once nothing under an epic waits on a person", func(t *testing.T) {
+	t.Run("a question about nothing else counts, and the count reaches zero once it is answered", func(t *testing.T) {
 		g := graph()
 		for _, id := range []string{"tk-a.1.1", "tk-b.1", "tk-b.2"} {
 			delete(g.holding, id)
@@ -140,8 +143,16 @@ func TestPages(t *testing.T) {
 			g.holds[id] = h
 		}
 		n := boardOf(t, g).NeedsYou
-		if n.Count != 0 || !slices.EqualFunc(n.Needs, []Need{{ID: "tk-q", Holds: []string{}}}, sameNeed) {
-			t.Errorf("count = %d, needs = %+v; want 0 and the gate listed, holding nothing", n.Count, n.Needs)
+		if n.Count != 1 || !slices.EqualFunc(n.Counted, []Need{{ID: "tk-q", Kind: NeedKindQuestion, Holds: []string{}}}, sameNeed) {
+			t.Errorf("count = %d, needs = %+v; want the gate counted, holding nothing", n.Count, n.Counted)
+		}
+		for i := range g.open {
+			if g.open[i].ID == "tk-q" {
+				g.open[i].Status = "closed"
+			}
+		}
+		if n := boardOf(t, g).NeedsYou; n.Count != 0 || len(n.Counted) != 0 || len(n.NotCounted) != 0 {
+			t.Errorf("once answered, Needs you counts %d and lists %+v and %+v; want nothing", n.Count, n.Counted, n.NotCounted)
 		}
 	})
 
@@ -150,19 +161,20 @@ func TestPages(t *testing.T) {
 			t.Fatalf("epics = %+v", doc.Epics)
 		}
 		a := doc.Epics[0]
-		if len(a.Needs) != 0 || !sameQueue(a.Queue, WorkQueue{Queue: []string{}, NotScheduled: []string{}, Unread: []string{}}) {
+		if a.Needs.Count != 0 || len(a.Needs.Counted)+len(a.Needs.NotCounted) != 0 ||
+			!sameQueue(a.Queue, WorkQueue{Queue: []string{}, NotScheduled: []string{}, Unread: []string{}}) {
 			t.Errorf("tk-a lists %+v and %+v of its own, want nothing: its work sits under its Delivery", a.Needs, a.Queue)
 		}
 		if len(a.Deliveries) != 1 || a.Deliveries[0].ID != "tk-a.1" {
 			t.Fatalf("deliveries = %+v", a.Deliveries)
 		}
 		d := a.Deliveries[0]
-		if !slices.EqualFunc(d.Needs, []Need{{ID: "tk-q", Holds: []string{"tk-a.1.1"}}}, sameNeed) ||
+		if d.Needs.Count != 1 || !slices.EqualFunc(d.Needs.Counted, []Need{{ID: "tk-q", Kind: NeedKindQuestion, Holds: []string{"tk-a.1.1"}}}, sameNeed) ||
 			!sameQueue(d.Queue, WorkQueue{Queue: []string{}, NotScheduled: []string{"tk-a.1.1"}, Unread: []string{}}) {
 			t.Errorf("the Delivery lists %+v and %+v", d.Needs, d.Queue)
 		}
 		b := doc.Epics[1]
-		if !slices.EqualFunc(b.Needs, []Need{{ID: "tk-q", Holds: []string{"tk-b.1", "tk-b.2"}}}, sameNeed) {
+		if !slices.EqualFunc(b.Needs.Counted, []Need{{ID: "tk-q", Kind: NeedKindQuestion, Holds: []string{"tk-b.1", "tk-b.2"}}}, sameNeed) {
 			t.Errorf("tk-b's Needs you = %+v, want the question with its own work beneath it", b.Needs)
 		}
 		if !sameQueue(b.Queue, WorkQueue{Queue: []string{"tk-b.1", "tk-b.2"}, NotScheduled: []string{}, Unread: []string{}}) {
@@ -311,15 +323,17 @@ func TestWorkForTheProductOwner(t *testing.T) {
 		if got := doc.Rows["tk-q"].Holds; !slices.Equal(got, []string{"tk-a.1.1"}) {
 			t.Errorf("tk-q holds %v, want tk-a.1.1 alone", got)
 		}
-		if b := entry(doc, "tk-b"); len(b.Needs) != 0 {
+		if b := entry(doc, "tk-b"); len(b.Needs.Counted)+len(b.Needs.NotCounted) != 0 {
 			t.Errorf("tk-b's Needs you = %+v, want none: its only open work is held for the Product Owner", b.Needs)
 		}
 		if c := doc.Rows["tk-b"].Counts; c == nil || *c != (Counts{Closed: 1}) {
 			t.Errorf("tk-b counts %+v, want its closed work alone", c)
 		}
-		want := []Need{{ID: "tk-q", Holds: []string{"tk-a.1.1"}}, {ID: "tk-c", Holds: []string{}}}
-		if n := doc.NeedsYou; n.Count != 1 || !slices.EqualFunc(n.Needs, want, sameNeed) {
-			t.Errorf("Needs you counts %d and lists %+v, want 1 and %+v", n.Count, n.Needs, want)
+		// tk-c is about held work alone, so it is listed and does not count.
+		n := doc.NeedsYou
+		if n.Count != 1 || !slices.EqualFunc(n.Counted, []Need{{ID: "tk-q", Kind: NeedKindQuestion, Holds: []string{"tk-a.1.1"}}}, sameNeed) ||
+			!slices.EqualFunc(n.NotCounted, []Need{{ID: "tk-c", Kind: NeedKindWaitsForYou, Holds: []string{}}}, sameNeed) {
+			t.Errorf("Needs you counts %d, lists %+v and folds %+v; want tk-q counted and tk-c folded", n.Count, n.Counted, n.NotCounted)
 		}
 	})
 
@@ -343,11 +357,11 @@ func TestWorkForTheProductOwner(t *testing.T) {
 		if a := doc.Rows["tk-b.1"].Ask; a != "" {
 			t.Errorf("held tk-b.1 asks %q, want no ask", a)
 		}
-		want := []Need{{ID: "tk-q", Holds: []string{"tk-a.1.1", "tk-b.2"}}}
-		if n := doc.NeedsYou; n.Count != 1 || !slices.EqualFunc(n.Needs, want, sameNeed) {
-			t.Errorf("Needs you counts %d and lists %+v, want 1 and %+v", n.Count, n.Needs, want)
+		want := []Need{{ID: "tk-q", Kind: NeedKindQuestion, Holds: []string{"tk-a.1.1", "tk-b.2"}}}
+		if n := doc.NeedsYou; n.Count != 1 || !slices.EqualFunc(n.Counted, want, sameNeed) {
+			t.Errorf("Needs you counts %d and lists %+v, want 1 and %+v", n.Count, n.Counted, want)
 		}
-		if b := entry(doc, "tk-b"); !slices.EqualFunc(b.Needs, []Need{{ID: "tk-q", Holds: []string{"tk-b.2"}}}, sameNeed) {
+		if b := entry(doc, "tk-b"); !slices.EqualFunc(b.Needs.Counted, []Need{{ID: "tk-q", Kind: NeedKindQuestion, Holds: []string{"tk-b.2"}}}, sameNeed) {
 			t.Errorf("tk-b's Needs you = %+v, want tk-q alone, holding tk-b.2", b.Needs)
 		}
 		if c := doc.Rows["tk-b"].Counts; c == nil || *c != (Counts{Needs: 1, NotScheduled: 1, Closed: 1}) {
@@ -407,15 +421,15 @@ func TestNeedOrder(t *testing.T) {
 		t.Errorf("queue = %v, want the pull request first: its own rework puts nothing ahead of it", got)
 	}
 	want := []Need{
-		{ID: "tk-pr", Holds: []string{"tk-w1"}},
-		{ID: "tk-g1", Holds: []string{"tk-w2"}},
-		{ID: "tk-g2", Holds: []string{"tk-w3"}},
-		{ID: "tk-d", Holds: []string{}},
+		{ID: "tk-pr", Kind: NeedKindPullRequest, Holds: []string{"tk-w1"}},
+		{ID: "tk-g1", Kind: NeedKindQuestion, Holds: []string{"tk-w2"}},
+		{ID: "tk-g2", Kind: NeedKindQuestion, Holds: []string{"tk-w3"}},
+		{ID: "tk-d", Kind: NeedKindQuestion, Holds: []string{}},
 	}
-	if got := doc.Epics[0].Needs; !slices.EqualFunc(got, want, sameNeed) {
+	if got := doc.Epics[0].Needs.Counted; !slices.EqualFunc(got, want, sameNeed) {
 		t.Errorf("tk-e's Needs you = %+v, want %+v", got, want)
 	}
-	if got := doc.NeedsYou.Needs; !slices.EqualFunc(got, want, sameNeed) {
+	if got := doc.NeedsYou.Counted; !slices.EqualFunc(got, want, sameNeed) {
 		t.Errorf("Needs you = %+v, want %+v, the same order as the epic's", got, want)
 	}
 	if r := doc.Rows["tk-pr"]; r.Ask != AskPullRequest || r.Signal != "needs-review" || !slices.Contains(doc.Epics[0].Queue.Queue, "tk-pr") {
@@ -478,15 +492,15 @@ func TestWorkUnderTwoParents(t *testing.T) {
 		doc := boardOf(t, g)
 		for _, e := range []string{"tk-e1", "tk-e2"} {
 			x := entry(doc, e)
-			if !slices.Equal(x.Queue.NotScheduled, []string{"tk-w"}) || !slices.EqualFunc(x.Needs, []Need{{ID: "tk-q", Holds: []string{"tk-w"}}}, sameNeed) {
+			if !slices.Equal(x.Queue.NotScheduled, []string{"tk-w"}) || !slices.EqualFunc(x.Needs.Counted, []Need{{ID: "tk-q", Kind: NeedKindQuestion, Holds: []string{"tk-w"}}}, sameNeed) {
 				t.Errorf("%s lists %+v and %+v, want tk-w and its question", e, x.Queue, x.Needs)
 			}
 			if c := doc.Rows[e].Counts; c == nil || *c != (Counts{Needs: 1, NotScheduled: 1}) {
 				t.Errorf("%s counts %+v, want its question and tk-w", e, c)
 			}
 		}
-		if n := doc.NeedsYou; n.Count != 1 || !slices.EqualFunc(n.Needs, []Need{{ID: "tk-q", Holds: []string{"tk-w"}}}, sameNeed) {
-			t.Errorf("Needs you counts %d and lists %+v, want 1 and the question once", n.Count, n.Needs)
+		if n := doc.NeedsYou; n.Count != 1 || !slices.EqualFunc(n.Counted, []Need{{ID: "tk-q", Kind: NeedKindQuestion, Holds: []string{"tk-w"}}}, sameNeed) {
+			t.Errorf("Needs you counts %d and lists %+v, want 1 and the question once", n.Count, n.Counted)
 		}
 	})
 }
@@ -593,7 +607,7 @@ func TestAConversationAnsweringTwoQuestions(t *testing.T) {
 // record. A conversation left open under its sitting over the work it sent
 // waits for that work and is no need. One its sitting claimed back to hold,
 // keeping the edge an earlier stay left onto work still out, owes the operator
-// an answer, so it is on Needs you.
+// an answer, so Needs you counts it.
 func TestAConversationThatStaysAndOneThatHolds(t *testing.T) {
 	for _, c := range []struct {
 		name, status string
@@ -616,13 +630,193 @@ func TestAConversationThatStaysAndOneThatHolds(t *testing.T) {
 			g.holds["tk-c"] = waits.Holds{ID: "tk-c", Status: waits.Blocked,
 				Waits: []waits.Wait{{ID: "tk-w", Type: "blocks", Title: "the work it sent", Status: "open", IssueType: "task"}}}
 			doc := boardOf(t, g)
-			listed := slices.ContainsFunc(doc.NeedsYou.Needs, func(n Need) bool { return n.ID == "tk-c" })
-			if listed != c.need {
-				t.Errorf("Needs you lists tk-c: %v, want %v", listed, c.need)
+			on := func(ns []Need) bool { return slices.ContainsFunc(ns, func(n Need) bool { return n.ID == "tk-c" }) }
+			if counted, uncounted := on(doc.NeedsYou.Counted), on(doc.NeedsYou.NotCounted); counted != c.need || uncounted {
+				t.Errorf("Needs you counts tk-c: %v, and lists it uncounted: %v, want %v and false", counted, uncounted, c.need)
 			}
 			if r := doc.Rows["tk-c"]; r.Group != c.group || r.Signal != c.signal {
 				t.Errorf("tk-c reads %q in %q, want %q in %q", r.Signal, r.Group, c.signal, c.group)
 			}
 		})
 	}
+}
+
+// TestNeedsThatCount holds each view to the needs that count. Gate tk-park
+// parks epics tk-pe, whose members have all closed so it asks for a ruling, and
+// tk-pf, which holds pull request tk-pr in flight. Question tk-pq waits on the
+// park itself. Question tk-qp holds only work the park holds, question tk-qd
+// only work held for the Product Owner, and question tk-qf one of each beside
+// work under epic tk-e. Pull request tk-pr2 holds only parked work. Decision
+// tk-d stands alone. Conversation tk-c1 waits for you about tk-e's work, a
+// sitting holds conversation tk-c2 about the parked work, and a sitting holds
+// conversation tk-cs, which answers question tk-qs.
+func TestNeedsThatCount(t *testing.T) {
+	parent := func(p string) listing.Edge { return listing.Edge{ID: p, Type: "parent-child"} }
+	blocks := func(id string) listing.Edge { return listing.Edge{ID: id, Type: "blocks"} }
+	tracks := func(id string) listing.Edge { return listing.Edge{ID: id, Type: "tracks"} }
+	park := waits.Wait{ID: "tk-park", Type: "blocks", Title: "parked", Status: "open", IssueType: "gate"}
+	question := func(id string) waits.Wait {
+		return waits.Wait{ID: id, Type: "blocks", Status: "open", IssueType: "gate", AwaitType: "human"}
+	}
+	gate := func(id string) prstatus.Blocker {
+		return prstatus.Blocker{ID: id, Status: "open", IssueType: "gate", AwaitType: "human"}
+	}
+	blocked := func(id string, ws ...waits.Wait) waits.Holds {
+		return waits.Holds{ID: id, Status: waits.Blocked, Waits: ws}
+	}
+	clear := func(id string) waits.Holds { return waits.Holds{ID: id, Status: waits.Clear} }
+	inFlight := waits.Holds{Status: waits.Clear, InFlight: "carries merge_result"}
+	epic := func(id string, edges ...listing.Edge) bead {
+		return bead{ID: id, Title: "Epic " + id, Status: "open", Priority: 1, IssueType: "epic", Epic: listing.Epic{Hypothesis: "it works"},
+			Edges: edges, CreatedAt: "2026-01-01"}
+	}
+	task := func(id string, edges ...listing.Edge) bead {
+		return bead{ID: id, Title: "work " + id, Status: "open", Priority: 2, IssueType: "task", Edges: edges, CreatedAt: "2026-01-02"}
+	}
+	human := func(id string) bead {
+		return bead{ID: id, Title: "question " + id, Status: "open", Priority: 2, IssueType: "gate", AwaitType: "human", CreatedAt: "2026-01-03"}
+	}
+	conv := func(id, assignee string, edges ...listing.Edge) bead {
+		return bead{ID: id, Title: "talk " + id, Status: "open", Priority: 2, IssueType: "task", Assignee: assignee, Edges: edges, CreatedAt: "2026-01-04"}
+	}
+	pr := func(id string, edges ...listing.Edge) bead {
+		b := task(id, edges...)
+		b.MergeResult, b.PRNumber = "pull_request", "1"
+		return b
+	}
+	pq := human("tk-pq")
+	pq.Edges = []listing.Edge{blocks("tk-park")}
+	desk, desk2 := task("tk-desk", blocks("tk-qd")), task("tk-desk2", blocks("tk-qf"))
+	desk.Labels, desk2.Labels = []string{"hold:mayor"}, []string{"hold:mayor"}
+	g := &gathered{rig: "gc-toolkit",
+		open: []bead{
+			epic("tk-e"), epic("tk-pe", blocks("tk-park")), epic("tk-pf", blocks("tk-park")),
+			{ID: "tk-park", Title: "parked", Status: "open", Priority: 2, IssueType: "gate", CreatedAt: "2026-01-01"},
+			pr("tk-pr", parent("tk-pf")), pr("tk-pr2"), task("tk-wb", blocks("tk-pr2"), blocks("tk-park")),
+			pq, human("tk-qp"), task("tk-wp", blocks("tk-qp"), blocks("tk-park")),
+			human("tk-qd"), desk,
+			human("tk-qf"), task("tk-wf", parent("tk-e"), blocks("tk-qf")), desk2,
+			{ID: "tk-d", Title: "a decision", Status: "open", Priority: 2, IssueType: "decision", CreatedAt: "2026-01-05"},
+			conv("tk-c1", "human", tracks("tk-wf")),
+			conv("tk-c2", "gc-toolkit/gc-toolkit.tk-c2", tracks("tk-wp")),
+			human("tk-qs"), task("tk-ws", blocks("tk-qs")),
+			conv("tk-cs", "gc-toolkit/gc-toolkit.tk-cs", tracks("tk-ws"), listing.Edge{ID: "tk-qs", Type: "replies-to"}),
+		},
+		closed: []bead{{ID: "tk-pe.1", Title: "landed", Status: "closed", Priority: 2, IssueType: "task", Edges: []listing.Edge{parent("tk-pe")}}},
+		holds: map[string]waits.Holds{
+			"tk-e": clear("tk-e"), "tk-pe": blocked("tk-pe", park), "tk-pf": blocked("tk-pf", park), "tk-park": clear("tk-park"),
+			"tk-pr": inFlight, "tk-pr2": inFlight,
+			"tk-wb": blocked("tk-wb", waits.Wait{ID: "tk-pr2", Type: "blocks", Status: "open", IssueType: "task"}, park),
+			"tk-pq": blocked("tk-pq", park), "tk-qp": clear("tk-qp"), "tk-wp": blocked("tk-wp", question("tk-qp"), park),
+			"tk-qd": clear("tk-qd"), "tk-desk": blocked("tk-desk", question("tk-qd")),
+			"tk-qf": clear("tk-qf"), "tk-wf": blocked("tk-wf", question("tk-qf")), "tk-desk2": blocked("tk-desk2", question("tk-qf")),
+			"tk-d": clear("tk-d"), "tk-c1": clear("tk-c1"), "tk-c2": clear("tk-c2"),
+			"tk-qs": clear("tk-qs"), "tk-ws": blocked("tk-ws", question("tk-qs")), "tk-cs": clear("tk-cs"),
+		},
+		unread: map[string]error{},
+		holding: map[string]prstatus.Holds{
+			"tk-pe": {}, "tk-pf": {}, "tk-pq": {},
+			"tk-wb":    {Owed: []prstatus.Blocker{{ID: "tk-pr2", Status: "open", IssueType: "task", Metadata: map[string]string{"merge_result": "pull_request"}}}},
+			"tk-wp":    {Gates: []prstatus.Blocker{gate("tk-qp")}},
+			"tk-desk":  {Gates: []prstatus.Blocker{gate("tk-qd")}},
+			"tk-wf":    {Gates: []prstatus.Blocker{gate("tk-qf")}},
+			"tk-desk2": {Gates: []prstatus.Blocker{gate("tk-qf")}},
+			"tk-ws":    {Gates: []prstatus.Blocker{gate("tk-qs")}},
+		},
+		unwalked: map[string]bool{}, facts: map[string]prstatus.Facts{"tk-pr": {}, "tk-pr2": {}}, noFacts: map[string]bool{},
+	}
+	doc := boardOf(t, g)
+	ids := func(needs []Need) []string {
+		var out []string
+		for _, n := range needs {
+			out = append(out, n.ID)
+		}
+		slices.Sort(out)
+		return out
+	}
+	kindOf := func(v NeedsYou, id string) NeedKind {
+		for _, n := range append(slices.Clone(v.Counted), v.NotCounted...) {
+			if n.ID == id {
+				return n.Kind
+			}
+		}
+		return ""
+	}
+	entry := func(e string) EpicEntry {
+		for _, x := range doc.Epics {
+			if x.ID == e {
+				return x
+			}
+		}
+		t.Fatalf("no epic %s", e)
+		return EpicEntry{}
+	}
+
+	n := doc.NeedsYou
+	t.Run("the rig counts every need that counts, under an epic or not", func(t *testing.T) {
+		if got, want := ids(n.Counted), []string{"tk-c1", "tk-d", "tk-pr2", "tk-qf", "tk-qs"}; n.Count != len(want) || !slices.Equal(got, want) {
+			t.Errorf("Needs you counts %d: %v, want %v", n.Count, got, want)
+		}
+	})
+	t.Run("a need about parked or held work, or parked itself, is listed apart", func(t *testing.T) {
+		if got, want := ids(n.NotCounted), []string{"tk-c2", "tk-pe", "tk-pq", "tk-pr", "tk-qd", "tk-qp"}; !slices.Equal(got, want) {
+			t.Errorf("Needs you folds %v, want %v", got, want)
+		}
+		if r := doc.Rows["tk-pe"]; r.Ask != AskRuling {
+			t.Errorf("the parked epic asks %q, want a ruling, so the case is not built", r.Ask)
+		}
+		if got := doc.Rows["tk-qd"].Holds; len(got) != 0 {
+			t.Errorf("tk-qd holds %v, want none listed: its work is held for the Product Owner", got)
+		}
+	})
+	t.Run("each need is of its kind, and the view counts each kind that counts", func(t *testing.T) {
+		for id, want := range map[string]NeedKind{
+			"tk-pr2": NeedKindPullRequest, "tk-qf": NeedKindQuestion, "tk-d": NeedKindQuestion, "tk-c1": NeedKindWaitsForYou,
+			"tk-qs": NeedKindInConversation, "tk-c2": NeedKindInConversation, "tk-pe": NeedKindRuling,
+		} {
+			if got := kindOf(n, id); got != want {
+				t.Errorf("%s is of kind %q, want %q", id, got, want)
+			}
+		}
+		want := []KindCount{{NeedKindPullRequest, 1}, {NeedKindQuestion, 2}, {NeedKindWaitsForYou, 1}, {NeedKindInConversation, 1}, {NeedKindRuling, 0}}
+		if !slices.Equal(n.Kinds, want) {
+			t.Errorf("kinds = %+v, want %+v: the five kinds, a zero among them, and no Routed to you", n.Kinds, want)
+		}
+	})
+	t.Run("an epic's view counts its own needs by the same rule", func(t *testing.T) {
+		e := entry("tk-e").Needs
+		if got := ids(e.Counted); e.Count != 2 || !slices.Equal(got, []string{"tk-c1", "tk-qf"}) || len(e.NotCounted) != 0 {
+			t.Errorf("tk-e's Needs you counts %d: %v, folds %v", e.Count, got, ids(e.NotCounted))
+		}
+		if want := []KindCount{{NeedKindPullRequest, 0}, {NeedKindQuestion, 1}, {NeedKindWaitsForYou, 1}, {NeedKindInConversation, 0}, {NeedKindRuling, 0}}; !slices.Equal(e.Kinds, want) {
+			t.Errorf("tk-e's kinds = %+v, want %+v", e.Kinds, want)
+		}
+		f := entry("tk-pf").Needs
+		if f.Count != 0 || len(f.Counted) != 0 || !slices.Equal(ids(f.NotCounted), []string{"tk-pr"}) {
+			t.Errorf("the parked epic's Needs you counts %d and folds %v, want 0 and its pull request", f.Count, ids(f.NotCounted))
+		}
+		for id, want := range map[string]int{"tk-e": 2, "tk-pf": 0, "tk-pe": 0} {
+			if c := doc.Rows[id].Counts; c == nil || c.Needs != want {
+				t.Errorf("%s counts %+v needs, want %d", id, c, want)
+			}
+		}
+	})
+	t.Run("routed to you is a kind only where one counts", func(t *testing.T) {
+		routed := func(id string) NeedsYou {
+			g := graph()
+			for i := range g.open {
+				if g.open[i].ID == id {
+					g.open[i].PersonBlocker = true
+				}
+			}
+			return boardOf(t, g).NeedsYou
+		}
+		// tk-loose waits on a park, so it is listed apart and its kind is not counted.
+		if v := routed("tk-loose"); len(v.Kinds) != 5 || !slices.Contains(ids(v.NotCounted), "tk-loose") {
+			t.Errorf("a parked routed need gives kinds %+v and folds %v", v.Kinds, ids(v.NotCounted))
+		}
+		if v := routed("tk-b.1"); len(v.Kinds) != 6 || v.Kinds[5] != (KindCount{NeedKindRoutedToYou, 1}) {
+			t.Errorf("a routed need that counts gives kinds %+v, want Routed to you last", v.Kinds)
+		}
+	})
 }
