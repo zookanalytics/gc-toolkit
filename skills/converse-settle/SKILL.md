@@ -269,7 +269,8 @@ rework or retirement acts on when the ruling reaches more than one, and each
 other one stands. The rework or retirement runs first, in that PR's own rig,
 and one that does not complete stops the sign-off with nothing answered, so
 the conversation still holds the merge. A re-run of the same ruling adopts
-the child or finds the PR an earlier attempt left, even one closed since. A
+the child an earlier attempt filed, files none again once that child has
+closed, and finds the PR an earlier attempt left, even one closed since. A
 conversation owns one live rework: while one filed for an earlier ruling is
 open, `--rework` for another is refused, so give a ruling that asks nothing
 more of the branch `--no-rework`, and keep the gate of one that does open
