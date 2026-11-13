@@ -76,9 +76,9 @@ their form. Run on 2026-11-13 between 20:55Z and 21:17Z.
 The scratch city's config, the sink, the shim and the agents' logs are under
 `~/.cache/tk-1tfzr71.103/live/evidence/` on the host that ran it. The recipe:
 `gc init --template minimal --no-start` into a short path such as
-`/private/tmp/claude-502/<name>` (a long one overflows the supervisor's socket
-path), a `supervisor.toml` with its own port, `cities.toml` by hand, every gc
-call under `env -i HOME=/Users/gc … GC_HOME=<its home>`, the storage
+`/tmp/<name>` (a long one overflows the supervisor's socket path), a
+`supervisor.toml` with its own port, `cities.toml` by hand, every gc call
+under `env -i HOME="$HOME" … GC_HOME=<its home>`, the storage
 migration above, the shim, then `gc supervisor run`. Never give its agents a
 real shell as their provider: gc types each agent's prompt into the session at
 start.
