@@ -318,7 +318,11 @@ the cadence — the arms run whether or not any refinery session is awake.
    such as one the requeue sent back to the pool, has its PR composed the same
    way before its push, with the gates of the check set the refinery stamps on
    it. Gates that do not resolve, or an edit that does not take, push nothing,
-   and the bead stays with the refinery for its next pass.
+   and the bead stays with the refinery for its next pass. A bead that lands
+   `direct` onto the branch of a PR an anchor holds at `pull_request` has that
+   PR composed the same way once its landing is recorded, at the branch's new
+   tip, since only then does the body's list of the beads on the branch name
+   it. There an edit that does not take prints a line, and the landing stands.
 4. **pr-facts.sh --route-comments-only** — the feedback routing of arm 7, run
    ahead of the slow arms. Arm 7 runs behind gate-ensure, so a pass the timeout
    kills before arm 7 would leave the operator's review stamped-as-seen by the

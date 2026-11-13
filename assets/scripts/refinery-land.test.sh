@@ -9,6 +9,11 @@
 #     park, blocked or refused_false_completion, first leaves it for
 #     unanchored, and one that does not leave it lands nothing, while a value
 #     the pending record writes goes through no transition there;
+#   - once a direct landing is recorded, the PR open from its target that a
+#     bead holds at pull_request is composed at the target's new tip and edited
+#     to name the bead that landed, an edit that does not take leaving the
+#     landing's exit 0, and an owner the pending record holds is left to the
+#     landing order;
 #   - a direct bead bound for the default branch takes mr;
 #   - on a rig whose pending_through_merge is "true", mr publishes the PR and
 #     records it pending;
@@ -77,6 +82,7 @@ eq "$(tip integration/e)" "$HEAD_D" "the target holds the prepared head"
 has "$(logged scripts)" "lifecycle transition d --to merged --close --set merged_sha=$HEAD_D --set merged_target=integration/e" "the landing is recorded and the bead closed"
 [ ! -e "$HOME_DIR/worktrees/d" ] && rt_ok "the tree is removed" || rt_bad "the tree is removed"
 eq "$(tip polecat/d)" "<absent>" "delete_merged_branches deletes the branch once the landing is recorded"
+hasnt "$(logged gctk)" "pr compose" "with no PR open from the target, nothing is composed"
 
 # direct_onto <bead> <metadata> — a direct bead whose branch, cut from
 # integration/e, carries a change, prepared and current with integration/e;
@@ -136,6 +142,37 @@ fresh
 direct_onto d '{"merge_result":"pull_request_pending"}'
 run --bead d
 hasnt "$(logged scripts)" "--to unanchored" "a value the pending record writes is not sent through lifecycle.sh"
+
+echo "# a direct landing onto a branch whose PR a bead holds at pull_request brings that PR current"
+# owner_of_e <merge_result> — an, holding PR #66 from integration/e into main at
+# <merge_result>, with a published body that names nothing riding it.
+owner_of_e() {
+  put "$(jq -nc --arg r "$1" '{id: "an", title: "Anchor", status: "open", assignee: "", issue_type: "task",
+    created_at: "2026-11-11T00:00:00Z", notes: "", metadata: {branch: "integration/e", target: "main", merge_result: $r,
+    pr_url: "https://github.com/zook/rig/pull/66", pr_number: "66", merged_target: "main", check_set: "lane-c"}}')"
+  pr 66 integration/e gc-city-bot OPEN main "<!-- gc:pr-summary -->stale<!-- /gc:pr-summary -->"
+}
+fresh
+direct_onto d '{}'
+owner_of_e pull_request
+run --bead d
+eq "$RC" 0 "the landing exits 0"
+has "$(logged scripts)" "lifecycle transition d --to merged --close --set merged_sha=$HEAD_D --set merged_target=integration/e" "the landing is recorded"
+has "$(logged gctk)" "pr compose an --head $HEAD_D --gates lane-c	pre-open --body-file" "the owner's PR is composed at the target's new tip, naming the gates of its check set"
+has "$(cat "$GH_DIR/edit_66.md" 2>/dev/null)" "riding: d" "…and the body its edit gives the PR names the bead that landed"
+fresh
+direct_onto d '{}'
+owner_of_e pull_request
+STUB_EDIT_RC=1 run --bead d
+eq "$RC" 0 "an edit that does not take leaves the landing's exit 0"
+has "$(logged scripts)" "lifecycle transition d --to merged --close" "…with the bead recorded merged and closed"
+has "$OUT" "PR #66, open from integration/e, does not name d, which landed on it; the landing stands" "…and a line saying the PR does not name it"
+fresh
+direct_onto d '{}'
+owner_of_e pull_request_pending
+run --bead d
+eq "$RC" 0 "a landing onto a branch whose PR the pending record holds exits 0"
+hasnt "$(logged gctk)" "pr compose" "…and composes nothing: the landing order hands that owner back to the refinery"
 
 echo "# a direct bead bound for the default branch takes mr"
 fresh

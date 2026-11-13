@@ -14,6 +14,9 @@
 #   - fake gc, gh and gctk on PATH, over a JSON bead store ($STORE). The fake
 #     `gctk pr record` keeps the real one's guard: it writes nothing on a bead
 #     that is closed or assigned to anyone but the refinery, and exits 3. The
+#     fake `gctk pr compose` names, as riding the owner's PR, each bead whose
+#     landing onto the owner's branch the lifecycle stub logged, and the fake
+#     `gh pr edit` keeps the body it gives PR #<n> as $GH_DIR/edit_<n>.md. The
 #     store's wait edges are lines of $STUB_HOLDS, "<bead> <what it waits on>":
 #     a blocks edge a create or `gc bd dep` writes is added there, `gc bd dep
 #     list` reads them, and `gctk bead holds` answers from the ones whose far
@@ -312,6 +315,12 @@ case "$1 $2" in
     echo "https://github.com/$REPO_SLUG/pull/$n"; exit 0 ;;
   "pr edit")
     [ "${STUB_EDIT_RC:-0}" = 0 ] || exit "$STUB_EDIT_RC"
+    # The body an edit gives PR #<n> is kept as edit_<n>.md.
+    n="$3"; prev=""
+    for a in "$@"; do
+      [ "$prev" != --body-file ] || cp "$a" "$GH_DIR/edit_$n.md"
+      prev="$a"
+    done
     exit 0 ;;
 esac
 echo "gh stub: unsupported $*" >&2
@@ -342,7 +351,12 @@ case "$1 $2" in
       case "$1" in --head) head="$2"; shift ;; --body-file) bodyf="$2"; shift ;; esac
       shift
     done
-    body="<!-- gc:pr-summary -->composed for $owner at $head<!-- /gc:pr-summary -->"
+    # A bead whose landing onto the owner's branch the lifecycle stub logged
+    # rides the owner's PR, as the branch-beads section names it.
+    branch=$(jq -r --arg id "$owner" '[ .[] | select(.id == $id) ][0].metadata.branch // ""' "$STORE")
+    riders=$(awk -v t="--set merged_target=$branch " '$1 == "lifecycle" && index($0, " --to merged ") && index($0 " ", t) { print $3 }' "$LOGS/scripts.log" | paste -sd, -)
+    body="<!-- gc:pr-summary -->composed for $owner at $head<!-- /gc:pr-summary -->${riders:+
+riding: $riders}"
     outcome=written
     [ -n "$bodyf" ] && grep -qF "at $head" "$bodyf" && outcome=current
     jq -n --arg t "feat: $owner (${owner})" --arg b "$body" --arg o "$outcome" \
