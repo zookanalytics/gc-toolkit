@@ -672,30 +672,29 @@ func TestWaitEdgesIntoAnotherStore(t *testing.T) {
 	}
 }
 
-// A bead's arm is carried as the store holds it: a sling armed for a pool, or a
-// notice owed to the agent the bead is assigned to.
+// A bead's arm is the arm's record answer: the target, the formula it pours,
+// why and by whom it was armed and when, and the attempts made on it. A bead
+// that carries no target carries no arm, whatever else it holds.
 func TestTheArm(t *testing.T) {
 	s := fake.New()
-	s.Put(bead{ID: "slung", Status: "open", Metadata: map[string]string{
+	s.Put(bead{ID: "armed", Status: "open", Metadata: map[string]string{
 		"gc.dispatch_when_ready":            "rig/rig.polecat",
 		"gc.dispatch_when_ready_args":       `["--on","mol-polecat-work"]`,
 		"gc.dispatch_when_ready_reason":     "waits for unit 1",
 		"gc.dispatch_when_ready_armed_by":   "a-session",
 		"gc.dispatch_when_ready_armed_at":   "2026-10-30T01:05:10Z",
-		"gc.dispatch_when_ready_slung":      "slinging@2026-11-08T20:56:00Z",
 		"gc.dispatch_when_ready_fail_count": "1",
 	}})
 	s.Put(bead{ID: "noticed", Status: "open", Metadata: map[string]string{"gc.notify_when_ready": "rig/mechanik"}})
 	s.Put(bead{ID: "plain", Status: "open", Metadata: map[string]string{"gc.dispatch_when_ready_reason": "left behind"}})
-	want := &waits.Arm{Target: "rig/rig.polecat", Args: `["--on","mol-polecat-work"]`, Reason: "waits for unit 1",
-		ArmedBy: "a-session", ArmedAt: "2026-10-30T01:05:10Z", Slung: "slinging@2026-11-08T20:56:00Z", FailCount: "1"}
-	if h := holdsOf(t, s, "slung"); !reflect.DeepEqual(h.Arm, want) {
-		t.Errorf("slung's arm = %+v; want %+v", h.Arm, want)
+	want := &waits.Arm{Target: "rig/rig.polecat", Formula: "mol-polecat-work", Reason: "waits for unit 1",
+		ArmedBy: "a-session", ArmedAt: "2026-10-30T01:05:10Z", FailCount: 1}
+	if h := holdsOf(t, s, "armed"); !reflect.DeepEqual(h.Arm, want) {
+		t.Errorf("armed's arm = %+v; want %+v", h.Arm, want)
 	}
-	if h := holdsOf(t, s, "noticed"); h.Arm == nil || h.Arm.Notify != "rig/mechanik" || h.Arm.Target != "" {
-		t.Errorf("noticed's arm = %+v; want the notice owed to rig/mechanik", h.Arm)
-	}
-	if h := holdsOf(t, s, "plain"); h.Arm != nil {
-		t.Errorf("a bead with neither a target nor a notice reads arm %+v", h.Arm)
+	for _, id := range []string{"noticed", "plain"} {
+		if h := holdsOf(t, s, id); h.Arm != nil {
+			t.Errorf("%s carries no target and reads arm %+v", id, h.Arm)
+		}
 	}
 }

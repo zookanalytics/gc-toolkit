@@ -67,14 +67,19 @@ func open(c *gcbd.Client, db string, ids ...string) (*Ledger, error) {
 	return New(c.In(db)), nil
 }
 
-// Write is one act on one bead: every key it sets or clears, made in one
-// update.
+// Write is one act on one bead: every key it sets or clears, and the note it
+// appends, made in one update.
 type Write struct {
 	id     string
 	sets   []string // key=value, in the order set
 	unsets []string
+	note   string
 	err    error
 }
+
+// Note appends text to the bead's notes in the same update, so the act and its
+// record land together or not at all. A later Note replaces an earlier one.
+func (w *Write) Note(text string) { w.note = text }
 
 // Write starts an act on the bead.
 func (l *Ledger) Write(id string) *Write {
@@ -97,7 +102,8 @@ func (w *Write) unset(name string) {
 	}
 }
 
-// args is the update's arguments: every set, then every removal.
+// args is the update's arguments: every set, then every removal, then the
+// note.
 func (w *Write) args() []string {
 	var args []string
 	for _, s := range w.sets {
@@ -106,18 +112,21 @@ func (w *Write) args() []string {
 	for _, u := range w.unsets {
 		args = append(args, "--unset-metadata", u)
 	}
+	if w.note != "" {
+		args = append(args, "--append-notes", w.note)
+	}
 	return args
 }
 
 // Commit makes w as one update, whose exit decides whether it landed. A write a
-// Set refused, an empty write and an update that exits non-zero all fail, and
-// nothing reads the write back.
+// Set refused, a write that carries no key and an update that exits non-zero
+// all fail, and nothing reads the write back.
 func (l *Ledger) Commit(w *Write) error {
 	if w.err != nil {
 		return w.err
 	}
 	args := w.args()
-	if len(args) == 0 {
+	if len(w.sets) == 0 && len(w.unsets) == 0 {
 		return fmt.Errorf("ledger: a write to %s carries no key", w.id)
 	}
 	if out, err := l.store.Update(w.id, args...); err != nil {
