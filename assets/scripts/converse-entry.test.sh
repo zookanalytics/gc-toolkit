@@ -354,7 +354,7 @@ enter >/dev/null
 is "an open bead under the alias that is no conversation leaves nothing to hold" "$(line NEXT=)" "NEXT=drain"
 
 echo "── stop: Gas City stops the session, whatever its conversation's state ──"
-DRAIN_SAID="gc hook --claim: drain pending for this session; run: gc runtime drain-ack lx-s1 — then exit"
+DRAIN_SAID="gc hook --claim: drain pending for this session; run: gc runtime drain-ack tk-s1 — then exit"
 # stopped <what> — the case's entry is a stop that drains on the hook's word,
 # reads nothing past the claim, and passes on what the hook said.
 stopped() {
