@@ -58,10 +58,10 @@
 #
 # Usage:
 #   demo-screenshot.sh page --script <demo.md> --output <file.png>
-#       ( --serve-dir <dir> | --serve <command> | --base-url <url> ) [--port <n>]
-#       [--cwd <dir>] [--selector <css> | --full-page]
+#       ( --serve-dir <dir> | --serve <command> | --base-url <url> | --guide <worktree> )
+#       [--port <n>] [--cwd <dir>] [--selector <css> | --full-page]
 #   demo-screenshot.sh terminal --output <file.png> ( --command <command> | --text <file> )
-#       [--cwd <dir>] [--title <text>] [--columns <n>]
+#       [--cwd <dir> | --guide <worktree>] [--title <text>] [--columns <n>]
 #   demo-screenshot.sh markdown --file <file.md> --output <file.png>
 #       [--repo <owner/name>] [--title <text>] [--expand]
 #
@@ -79,7 +79,16 @@
 #                serves on this host. Any other server on this host is refused,
 #                as is the app of a rig that city.toml sets to
 #                app_reads_city = "true".
-#                Exactly one of --serve-dir / --serve / --base-url is required.
+#   --guide      a worktree of the rig at the commit to capture, whose demo
+#                guide, the docs/review-demo.md that commit carries, names the
+#                app in its section "Bring the app up": its app target, --cwd
+#                and --port, each directory relative to the worktree's root. A
+#                command runs in the guide's --cwd, or at the worktree's root
+#                when the guide names none.
+#                It names the whole app, so it takes no app target, --port or
+#                --cwd beside it.
+#                Exactly one of --serve-dir / --serve / --base-url / --guide is
+#                required.
 #   --selector   capture this element instead of the viewport.
 #   --full-page  capture the whole scrollable page instead of the viewport.
 #                At most one of --selector / --full-page is given.
@@ -94,6 +103,9 @@
 #                cat to exit 0, even when the file switches the terminal to the
 #                alternate screen a full-screen program draws.
 #                Exactly one of --command / --text is required.
+#   --guide      a worktree of the rig whose demo guide names the directory
+#                --command runs in: the guide's --cwd, or the worktree's root
+#                when the guide names none. It is given instead of --cwd.
 #   --title      the window's title bar text (default: the command, or the
 #                file's name).
 #   --columns    the terminal's width in columns, 20 to 300, at which a line
@@ -135,13 +147,13 @@ case "$KIND" in
   *)  usage_err "unknown kind '$KIND': page, terminal or markdown" ;;
 esac
 
-OUTPUT=""; SCRIPT=""; SERVE_DIR=""; SERVE_CMD=""; BASE_URL=""; PORT=""; CWD=""
+OUTPUT=""; SCRIPT=""; SERVE_DIR=""; SERVE_CMD=""; BASE_URL=""; PORT=""; CWD=""; GUIDE=""
 SELECTOR=""; FULL_PAGE=0; COMMAND=""; TEXT=""; TITLE=""; COLS=""
 FILE=""; REPO=""; EXPAND=0
 # Each kind takes only its own flags.
 case "$KIND" in
-  page)     ALLOWED=" --output --script --serve-dir --serve --base-url --port --cwd --selector --full-page " ;;
-  terminal) ALLOWED=" --output --command --text --cwd --title --columns " ;;
+  page)     ALLOWED=" --output --script --serve-dir --serve --base-url --guide --port --cwd --selector --full-page " ;;
+  terminal) ALLOWED=" --output --command --text --cwd --guide --title --columns " ;;
   markdown) ALLOWED=" --output --file --repo --title --expand " ;;
 esac
 while [ $# -gt 0 ]; do
@@ -158,6 +170,7 @@ while [ $# -gt 0 ]; do
     --serve-dir) SERVE_DIR="$2" ;;
     --serve)     SERVE_CMD="$2" ;;
     --base-url)  BASE_URL="$2" ;;
+    --guide)     GUIDE="$2" ;;
     --port)      PORT="$2" ;;
     --cwd)       CWD="$2" ;;
     --selector)  SELECTOR="$2" ;;
@@ -180,14 +193,36 @@ case "${OUTPUT##*/}" in *'#'*) usage_err "--output's file name must not contain 
 posint() { case "$2" in ''|*[!0-9]*|0*) usage_err "$1 must be a positive integer (got '$2')" ;; esac; }
 [ -z "$PORT" ] || [ "$PORT" = 0 ] || posint --port "$PORT"
 [ -z "$COLS" ] || posint --columns "$COLS"
+# take_guide: reads the guide in the worktree --guide names, through
+# demo-engine-lib.sh, as every capture that takes the app from it reads it.
+take_guide() {
+  [ -d "$GUIDE" ] || fail "--guide '$GUIDE' is not a directory"
+  GUIDE=$(CDPATH='' cd -- "$GUIDE" && pwd) || fail "cannot enter --guide '$GUIDE'"
+  demo_engine_guide "$GUIDE" || exit 2
+}
 case "$KIND" in
   page)
     [ -n "$SCRIPT" ] || usage_err "page needs --script"
+    if [ -n "$GUIDE" ]; then
+      [ -z "$SERVE_DIR$SERVE_CMD$BASE_URL$PORT$CWD" ] \
+        || usage_err "--guide names the whole app, so give it without --serve-dir / --serve / --base-url / --port / --cwd, or name the app with those instead"
+      take_guide
+      SERVE_DIR="$DEMO_GUIDE_SERVE_DIR"; SERVE_CMD="$DEMO_GUIDE_SERVE"; BASE_URL="$DEMO_GUIDE_BASE_URL"; PORT="$DEMO_GUIDE_PORT"
+      [ -z "$SERVE_CMD" ] || CWD="${DEMO_GUIDE_CWD:-$DEMO_GUIDE_ROOT}"
+      if [ -z "$DEMO_GUIDE" ]; then
+        echo "$PROG: the commit checked out in $DEMO_GUIDE_ROOT carries no docs/review-demo.md, so nothing names the app this page script drives; name it with --serve-dir / --serve / --base-url" >&2; exit 2
+      fi
+      if [ -z "$SERVE_DIR$SERVE_CMD$BASE_URL" ]; then
+        echo "$PROG: $DEMO_GUIDE names no app: its section \"Bring the app up\" has no **Serve:**, **Serve dir:** or **Base URL:** line. Add one, or name the app with --serve-dir / --serve / --base-url" >&2; exit 2
+      fi
+      [ -z "$PORT" ] || [ "$PORT" = 0 ] || posint --port "$PORT"
+      echo "$PROG: the app is the one $DEMO_GUIDE names" >&2
+    fi
     TARGETS=0
     [ -n "$SERVE_DIR" ] && TARGETS=$((TARGETS + 1))
     [ -n "$SERVE_CMD" ] && TARGETS=$((TARGETS + 1))
     [ -n "$BASE_URL" ] && TARGETS=$((TARGETS + 1))
-    [ "$TARGETS" -eq 1 ] || usage_err "page needs exactly one of --serve-dir / --serve / --base-url (got $TARGETS)"
+    [ "$TARGETS" -eq 1 ] || usage_err "page needs exactly one of --serve-dir / --serve / --base-url, or --guide (got $TARGETS)"
     # The engine refuses the pair too, but this script reaches the engine only
     # after provisioning its browser.
     if [ -n "$SELECTOR" ] && [ "$FULL_PAGE" -eq 1 ]; then usage_err "page takes --selector or --full-page, not both"; fi
@@ -219,6 +254,12 @@ case "$KIND" in
       || usage_err "--columns must be 20 to 300, the widths the engine's terminal takes (got '$COLS')"
     [ -z "$TEXT" ] || [ -f "$TEXT" ] || fail "--text '$TEXT' does not exist"
     [ -z "$CWD" ] || [ -n "$COMMAND" ] || usage_err "--cwd is where --command runs; --text takes none"
+    if [ -n "$GUIDE" ]; then
+      [ -n "$COMMAND" ] || usage_err "--guide names where --command runs; --text takes none"
+      [ -z "$CWD" ] || usage_err "--guide names the directory --command runs in, so give it without --cwd"
+      take_guide
+      CWD="${DEMO_GUIDE_CWD:-$DEMO_GUIDE_ROOT}"
+    fi
     [ -z "$CWD" ] || [ -d "$CWD" ] || fail "--cwd '$CWD' is not a directory" ;;
   markdown)
     [ -n "$FILE" ] || usage_err "markdown needs --file"

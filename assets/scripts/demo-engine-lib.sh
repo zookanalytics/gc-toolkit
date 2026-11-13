@@ -99,6 +99,32 @@
 #   demo_engine_free_port
 #                        Prints a loopback port that nothing listens on, or
 #                        returns 1.
+#   demo_engine_guide <dir>
+#                        Reads the app that the rig's demo guide names: the
+#                        docs/review-demo.md of the commit checked out in the
+#                        git worktree that holds <dir>, which review-checks.sh
+#                        --extension demo reads at that commit. Sets
+#                        DEMO_GUIDE_ROOT to the worktree's root, DEMO_GUIDE to
+#                        the guide's name and commit, or to empty when the
+#                        commit carries none, and DEMO_GUIDE_SERVE,
+#                        DEMO_GUIDE_SERVE_DIR, DEMO_GUIDE_BASE_URL,
+#                        DEMO_GUIDE_CWD and DEMO_GUIDE_PORT to the values of the
+#                        guide's **Serve:**, **Serve dir:**, **Base URL:**,
+#                        **Cwd:** and **Port:** lines, each empty when the guide
+#                        has no such line. A relative directory is resolved
+#                        against the worktree's root. Returns 1, having said
+#                        why on stderr, when <dir> is in no git worktree, the
+#                        guide does not read, or it names a line twice, names
+#                        more than one of **Serve:**, **Serve dir:** and **Base
+#                        URL:**, or gives a value that is not one code span.
+#
+# A rig names the app a capture brings up in its demo guide, in the options a
+# capture takes: the guide's section "Bring the app up" holds one line for
+# each, such as **Serve:** `npm run dev`. The lines are read only in that
+# section and outside a fenced code block. Every capture that takes the app
+# from the guide reads it through demo_engine_guide, so the guide names the
+# app the same way to each. The demo:capture skill says what else the guide
+# holds.
 #
 # DEMO_ENGINE_PACKAGE names the package. DEMO_ENGINE_BIN, when set, names an
 # executable that demo_engine_cli runs in the engine's place, in the same
@@ -213,6 +239,104 @@ demo_engine_resolve() {
     fi
     _demo_engine_say "engine = published $DEMO_ENGINE_PACKAGE (no local rig checkout)"
   fi
+}
+
+# --- the rig's demo guide ----------------------------------------------------
+
+# The guide is read at the commit, as every reader of a rig's review guidance
+# reads it, so a capture takes the app of the commit it shows and never a copy
+# in a working tree. The awk program reads the guide's section "Bring the app
+# up": a level-one or level-two heading of that text, in any case, opens it,
+# and the next such heading closes it. A fenced code block, opened by three or
+# more backticks or tildes and closed by at least as many of the same, holds no
+# heading and no line. Each line it reads prints as key=value, and each fault
+# as !message, and it exits 1 when it found one.
+# shellcheck disable=SC2034  # the DEMO_GUIDE_* values are read by the scripts that source this file
+demo_engine_guide() {
+  local dir="$1" top="" oid="" text="" out="" rc=0 line key val
+  DEMO_GUIDE=""; DEMO_GUIDE_ROOT=""; DEMO_GUIDE_SERVE=""; DEMO_GUIDE_SERVE_DIR=""
+  DEMO_GUIDE_BASE_URL=""; DEMO_GUIDE_CWD=""; DEMO_GUIDE_PORT=""
+  top=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null) \
+    && oid=$(git -C "$dir" rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null) \
+    && [ -n "$top" ] && [ -n "$oid" ] \
+    || { _demo_engine_say "'$dir' is in no git worktree with a commit checked out, so no commit there holds a demo guide"; return 1; }
+  DEMO_GUIDE_ROOT="$top"
+  text=$(CDPATH='' cd -- "$top" && "$DEMO_ENGINE_LIB_DIR/review-checks.sh" --extension demo --at "$oid") \
+    || { _demo_engine_say "the demo guide at $oid in $top did not read"; return 1; }
+  [ -n "$text" ] || return 0
+  DEMO_GUIDE="docs/review-demo.md at $(printf '%.12s' "$oid") in $top"
+  out=$(printf '%s\n' "$text" | awk -v guide="$DEMO_GUIDE" '
+    function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t\r]+$/, "", s); return s }
+    function fault(m) { printf "!%s\n", m; bad = 1 }
+    {
+      raw = $0; sub(/\r$/, "", raw)
+      t = raw; ind = 0
+      while (ind < 4 && substr(t, 1, 1) == " ") { t = substr(t, 2); ind++ }
+      if (ind < 4 && (substr(t, 1, 3) == "```" || substr(t, 1, 3) == "~~~")) {
+        c = substr(t, 1, 1); n = 0
+        while (substr(t, n + 1, 1) == c) n++
+        if (fence == "") { fence = c; flen = n; next }
+        if (c == fence && n >= flen && trim(substr(t, n + 1)) == "") { fence = ""; next }
+      }
+      if (fence != "") next
+      if (ind < 4 && substr(t, 1, 1) == "#") {
+        h = 0
+        while (substr(t, h + 1, 1) == "#") h++
+        rest = substr(t, h + 1)
+        if (h <= 2 && (rest == "" || rest ~ /^[ \t]/)) {
+          txt = trim(rest); sub(/(^|[ \t]+)#+$/, "", txt)
+          sect = (tolower(txt) == "bring the app up")
+          next
+        }
+      }
+      if (!sect) next
+      l = trim(raw)
+      if (l !~ /^\*\*[^*]+:\*\*/) next
+      k = substr(l, 3); k = substr(k, 1, index(k, ":**") - 1)
+      key = tolower(k)
+      if (key == "serve dir") key = "serve_dir"
+      else if (key == "base url") key = "base_url"
+      else if (key != "serve" && key != "cwd" && key != "port") next
+      v = trim(substr(l, index(l, ":**") + 3))
+      if (seen[key]++) { fault(guide ", line " FNR ": the section Bring the app up names **" k ":** twice; name it once"); next }
+      if (v !~ /^`[^`]+`$/ || trim(substr(v, 2, length(v) - 2)) == "") {
+        fault(guide ", line " FNR ": write **" k ":** with its value in one code span, as **" k ":** `<value>`")
+        next
+      }
+      printf "%s=%s\n", key, trim(substr(v, 2, length(v) - 2))
+    }
+    END {
+      if ((seen["serve"] > 0) + (seen["serve_dir"] > 0) + (seen["base_url"] > 0) > 1)
+        fault(guide ": the section Bring the app up names more than one of **Serve:**, **Serve dir:** and **Base URL:**; name the one app a capture brings up")
+      exit bad
+    }') || rc=1
+  while IFS= read -r line; do
+    case "$line" in
+      '!'*) _demo_engine_say "${line#!}"; continue ;;
+      *=*) ;;
+      *) continue ;;
+    esac
+    key=${line%%=*}; val=${line#*=}
+    case "$key" in
+      cwd|serve_dir)
+        case "$val" in
+          /*) ;;
+          .|./) val="$top" ;;
+          ./*) val="$top/${val#./}" ;;
+          *) val="$top/$val" ;;
+        esac ;;
+    esac
+    case "$key" in
+      serve) DEMO_GUIDE_SERVE="$val" ;;
+      serve_dir) DEMO_GUIDE_SERVE_DIR="$val" ;;
+      base_url) DEMO_GUIDE_BASE_URL="$val" ;;
+      cwd) DEMO_GUIDE_CWD="$val" ;;
+      port) DEMO_GUIDE_PORT="$val" ;;
+    esac
+  done <<EOF
+$out
+EOF
+  return "$rc"
 }
 
 # --- the sandbox -------------------------------------------------------------
