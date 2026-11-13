@@ -81,7 +81,8 @@ Run the reviewed commit's script from the reviewed worktree, for example
 These scripts read the city through `gc`, which a capture cannot reach, so give
 the command fixture data: put a `gc` stub first on its PATH that answers from
 fixture JSON, as the script's own test suite does
-(`doctor/check-po-queue-only/run.test.sh` builds one for that check). Keep the stub and its JSON in the review workspace beside the PNG.
+(`doctor/check-po-queue-only/run.test.sh` builds one for that check). Keep the
+stub and its JSON in the review workspace beside the PNG.
 The verdict says the report shows fixture data.
 
 ## The conversation form

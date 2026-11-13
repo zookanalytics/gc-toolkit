@@ -82,8 +82,8 @@ WALK_DEPTH=6
 # subject, the open ones first, and count the rest. A gate can hold a hundred
 # parked beads, and the edges print on every read.
 AWAITED_CAP=10
-# The deferred-dispatch order's start (gctk bead start-armed) stops re-slinging an
-# armed bead at this many failed slings and asks a person; the same knob and
+# The deferred-dispatch order's start (gctk bead start-armed) stops re-slinging
+# an armed bead at this many failed slings and asks a person; the same knob and
 # default set the cap read here.
 ARM_CAP="${GC_MAX_DISPATCH_SLING_FAILURES:-3}"
 case "$ARM_CAP" in ''|*[!0-9]*) ARM_CAP=3 ;; esac

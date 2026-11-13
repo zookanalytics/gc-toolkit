@@ -884,8 +884,9 @@ for p in "${STANDS[@]+"${STANDS[@]}"}"; do echo "the ruling leaves the branch of
 # the arm an earlier attempt wrote, and writes neither again.
 # The closer checks the latest close brief in the subject's notes: the last
 # `## Close brief (` heading and the lines after it, up to the next heading.
-# The notes the arm's verbs append end it too: the arm's own note follows the
-# brief, and the record's clearing follows that once the closer is sent. So the brief counts as written only when that heading is held on
+# The notes the arm's verbs append end it too: the arm's own note
+# follows the brief, and the record's clearing follows that once the closer
+# is sent. So the brief counts as written only when that heading is held on
 # these same waits and its lines are this brief. The same words anywhere
 # else, such as in an older brief or in a sitting's notes, do not count,
 # because the closer would then check the older claim.

@@ -30,8 +30,9 @@
 #     the work bead's own edge here, because a rework child's `related` edge to
 #     its anchor holds nothing, and the gate is then about both beads;
 #   * an arm, written by `gctk bead arm`, that re-slings the work through
-#     <formula> once bd reports it ready. Clearing the gate is the "proceed" ruling: the edge
-#     clears and the deferred-dispatch order's next pass pours a fresh molecule.
+#     <formula> once bd reports it ready. Clearing the gate is the "proceed"
+#     ruling: the edge clears and the deferred-dispatch order's next pass pours
+#     a fresh molecule.
 #     A ruling not to proceed goes through stand-down.sh, which removes the arm
 #     before it answers the gate, because bd refuses to close a bead the open
 #     gate blocks.

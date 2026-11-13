@@ -163,8 +163,8 @@ Usage:
   not a bead yet; --blocker-key dedups repeats of one recurring cause onto
   that single bead instead of one bead per instance.
   --then-route arms the deferred dispatch that slings the subject when the
-  blocker closes (gctk bead arm). An arm that does not
-  land fails the exit before the landed proof, so a re-run resumes it.
+  blocker closes (gctk bead arm). An arm that does not land fails the exit
+  before the landed proof, so a re-run resumes it.
   Intake decides whether the actionable route and the --then-route arm are
   written at all. Only a member of an epic, PR-finishing work (anchor_bead)
   or a confirmed emergency reaches a pool. Any other bead is held with Gas
