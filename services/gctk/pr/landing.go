@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 )
@@ -280,11 +281,49 @@ func (l Landing) read(id string) (*ledger.Record, error) {
 }
 
 // run is one run of the landing order, which loads the definition of feedback
-// once, when a record first needs the evaluator.
+// once, when a record first needs the evaluator, and reads the login the city's
+// account acts as once for each host.
 type run struct {
 	Landing
 	feedback Feedback
+	logins   map[string]string
 }
+
+// login is the login the city's account acts as on host, read from hub the
+// first time a record on that host needs it, and kept for the rest of the run.
+func (u *run) login(host string, hub Hub) (string, error) {
+	if l, ok := u.logins[host]; ok {
+		return l, nil
+	}
+	l, err := hub.Login()
+	if err != nil {
+		return "", err
+	}
+	if u.logins == nil {
+		u.logins = map[string]string{}
+	}
+	u.logins[host] = l
+	return l, nil
+}
+
+// readHub is GitHub as the evaluator reads it on a run: the hub of the record's
+// host, which answers the PR the run read just before it with that read and the
+// login with the run's own, so the evaluator reads neither again. Its other
+// reads go to GitHub.
+type readHub struct {
+	Hub
+	pr    *gh.PullRequest
+	login func() (string, error)
+}
+
+func (h readHub) PullRequest(repo string, number int) (*gh.PullRequest, error) {
+	if h.pr != nil && number == h.pr.Number && strings.EqualFold(repo, h.pr.Repository) {
+		return h.pr, nil
+	}
+	return h.Hub.PullRequest(repo, number)
+}
+
+func (h readHub) Login() (string, error) { return h.login() }
 
 // state is one record as a run read it under the lock.
 type state struct {
@@ -469,7 +508,7 @@ func (u *run) blocked(s state) RunOutcome {
 			record.Requeue(w, r.URL, p.HeadRefOid, reason, s.now)
 			return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActRequeued, Detail: reason})
 		}
-		return u.decide(s, hub, p.ID, p.InMergeQueue, p.MergeQueueEnabled, retry)
+		return u.decide(s, host, hub, p, retry)
 	case "CLOSED":
 		return u.except(s, record.ClosedUnmerged, "closed_unmerged", "Pull request "+r.URL+" closed without merging.",
 			fmt.Sprintf("Pull request %s closed without merging, so %s stays blocked, and what waits on it stays "+
@@ -484,9 +523,11 @@ func (u *run) blocked(s state) RunOutcome {
 // decide asks the evaluator whether a PR open at the validated head is ready,
 // and asks GitHub to merge one that is, pinned to the head the answer judged,
 // or to add it to its base's merge queue where the base requires one. A PR
-// already in the queue has its merge requested. Whatever GitHub answers, the
-// next run reads the PR again by its number.
-func (u *run) decide(s state, hub Hub, nodeID string, inQueue, queue bool, retry func(string, string) RunOutcome) RunOutcome {
+// already in the queue has its merge requested. The evaluator reads the PR as
+// blocked read it a moment before, and the run's login (readHub). Whatever
+// GitHub answers, the next run reads the PR again by its number.
+func (u *run) decide(s state, host string, hub Hub, p *gh.PullRequest, retry func(string, string) RunOutcome) RunOutcome {
+	nodeID, inQueue, queue := p.ID, p.InMergeQueue, p.MergeQueueEnabled
 	checked := func(detail string) RunOutcome {
 		w := u.Ledger.Write(s.id)
 		record.Checked(w, "open", s.now)
@@ -502,7 +543,13 @@ func (u *run) decide(s state, hub Hub, nodeID string, inQueue, queue bool, retry
 		}
 		u.feedback = rule
 	}
-	ans, err := Ready(Sources{Ledger: u.Ledger, GitHub: func(host string) GitHub { return u.Hub(host) }, Feedback: u.feedback}, s.id)
+	read := readHub{Hub: hub, pr: p, login: func() (string, error) { return u.login(host, hub) }}
+	ans, err := Ready(Sources{Ledger: u.Ledger, GitHub: func(h string) GitHub {
+		if h == host {
+			return read
+		}
+		return u.Hub(h)
+	}, Feedback: u.feedback}, s.id)
 	if err != nil {
 		return retry("lookup_failed", "the evaluator's read did not answer; will retry: "+err.Error())
 	}

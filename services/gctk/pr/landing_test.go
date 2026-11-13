@@ -586,6 +586,42 @@ func TestTheOldestPendingRecordIsReadFirst(t *testing.T) {
 	}
 }
 
+// A record reads its PR once, and the evaluator takes that read and the run's
+// login rather than asking GitHub again for either.
+func TestARunReadsEachRecordsPROnceAndTheLoginOncePerHost(t *testing.T) {
+	d := newLand(t)
+	d.pr.Reviews = nil
+	for i := 0; i < 2; i++ {
+		md := map[string]string{}
+		for k, v := range d.md {
+			md[k] = v
+		}
+		d.store.Put(fake.Bead{ID: fmt.Sprintf("tk-r%d", i), Status: "blocked", Assignee: refinery, Metadata: md})
+	}
+	out := d.reconcile(t, pr.Options{Count: 10})
+	if len(out) != 3 {
+		t.Fatalf("three records, %d outcomes: %+v", len(out), out)
+	}
+	for _, o := range out {
+		is(t, o, pr.ActChecked)
+	}
+	count := func(method string) int {
+		n := 0
+		for _, r := range d.github.Reads() {
+			if r == method {
+				n++
+			}
+		}
+		return n
+	}
+	if n := count("PullRequest"); n != 3 {
+		t.Errorf("the run read the PR %d times for three records, want 3: %v", n, d.github.Reads())
+	}
+	if n := count("Login"); n != 1 {
+		t.Errorf("the run read the login %d times, want once: %v", n, d.github.Reads())
+	}
+}
+
 // --- the pack's merge request -------------------------------------------------
 
 func TestAReadyPRIsMergedWithItsHeadPinned(t *testing.T) {
