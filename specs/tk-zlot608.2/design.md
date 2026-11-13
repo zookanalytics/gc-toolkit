@@ -123,8 +123,10 @@ file-and-dispatch run 7,612, 8,910 and 8,775 bytes.
 - The judging method is a section of the `learning-distill` skill, which the
   distiller reads from origin/main as it reads the rest of its rubric.
 - The formula gains one step, `read-memory`, run first, which holds only calls to
-  the script. It removes the notes whose wait has ended, rewrites the guidance
-  block and lists the due notes for the later steps. load-and-gate's cadence gate
+  the script. The script makes the home-rig check that load-and-gate opens with,
+  so the step changes nothing on a rig that only imports the pack. It removes
+  the notes whose wait has ended, rewrites the guidance block and lists the due
+  notes for the later steps. load-and-gate's cadence gate
   counts the due notes, judge-and-cluster judges them beside the pending
   observations, and file-and-dispatch has the script record each judged note and
   remove the ones the judge dropped. Each of those steps gains a clause or a
@@ -432,12 +434,12 @@ which this design leaves as it is.
 
 The ruling changes epic tk-zlot608. Its boundaries now reach the learning loop's
 sorting of memory notes, and its two-week closure condition and its signal of a
-store with no note older than two weeks go. The sitting that ruled puts the
-redrafted contract to the operator (conversation tk-iyhd38d), so this design
-proposes no wording for it, and the closure-condition changes its first draft
-proposed on the epic's notes are withdrawn. The list and the removed notes' text
-give the counts an indicator can read: the notes in each directory from run to
-run, how many wait on an open pattern, and how many the judge dropped.
+memory directory with no note older than two weeks go. The sitting that ruled
+puts the redrafted contract to the operator (conversation tk-iyhd38d), so this
+design proposes no wording for it, and the closure-condition changes its first
+draft proposed on the epic's notes are withdrawn. The list and the removed notes'
+text give the counts an indicator can read: the notes in each directory from run
+to run, how many wait on an open pattern, and how many the judge dropped.
 
 ## 9. Size, and the deletion schedule
 
