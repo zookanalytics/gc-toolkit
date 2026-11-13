@@ -11,8 +11,9 @@ single-writer**: `lifecycle/lifecycle.toml` enumerates every state, every legal
 transition, and every pack-written metadata key, and
 `assets/scripts/lifecycle.sh` is the only thing that writes a transition: it
 validates, then makes one atomic `bd update` carrying every field of the
-transition, whose exit decides whether it landed. An unknown `merge_result` value is an error: every reader surfaces it via
-`escalate.sh`, and `doctor/check-state-space` catches it. A bead closed while
+transition, whose exit decides whether it landed. An unknown `merge_result`
+value is an error: `lifecycle.sh` names it and refuses to transition or reopen
+the bead, and `doctor/check-state-space` catches it. A bead closed while
 `merge_result` is a non-closed state is repaired by `lifecycle.sh reopen`
 (human-invoked; `merge_result` untouched).
 
