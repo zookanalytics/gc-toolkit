@@ -62,11 +62,18 @@ trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
 
 # --foreground keeps gc in this process group, so a caller's deadline that
 # signals the group reaches gc as well as this script.
+#
+# gc answers one line of JSON, and the command substitution drops the newline
+# that ends it, so only a listing that still carries a control byte goes
+# through scrub: any other is what scrub would print. The substitution drops a
+# NUL byte as scrub would, and the group's stderr takes the warning bash gives
+# when it does.
 if [ -n "$TO" ]; then
-  OUT=$("$TO" --foreground -k 5 "$SECS" gc ${CITY:+--city "$CITY"} rig list --json </dev/null 2>"${ERRF:-/dev/null}" | scrub); RC=$?
+  { OUT=$("$TO" --foreground -k 5 "$SECS" gc ${CITY:+--city "$CITY"} rig list --json </dev/null 2>"${ERRF:-/dev/null}"); RC=$?; } 2>/dev/null
 else
-  OUT=$(gc ${CITY:+--city "$CITY"} rig list --json </dev/null 2>"${ERRF:-/dev/null}" | scrub); RC=$?
+  { OUT=$(gc ${CITY:+--city "$CITY"} rig list --json </dev/null 2>"${ERRF:-/dev/null}"); RC=$?; } 2>/dev/null
 fi
+case "$OUT" in *[[:cntrl:]]*) OUT=$(printf '%s' "$OUT" | scrub) ;; esac
 
 if [ -n "$TO" ] && { [ "$RC" -eq 124 ] || [ "$RC" -eq 137 ]; }; then
   fail "\`gc rig list --json\` did not answer within ${SECS}s and was killed. Check whether gc or Dolt is wedged, or raise the bound with GC_RIG_LIST_TIMEOUT=<seconds>."
@@ -77,8 +84,9 @@ if [ "$RC" -ne 0 ]; then
   fail "\`gc rig list --json\` exited $RC${WHY:+: $WHY}. That is gc's data plane: try 'gc doctor' and check Dolt."
 fi
 [ -n "$OUT" ] || fail "\`gc rig list --json\` exited 0 but printed nothing, which usually means gc was killed or the city path is wrong. Check GC_CITY and 'gc doctor'."
-printf '%s' "$OUT" | jq empty >/dev/null 2>&1 \
+# One jq both parses the listing and selects the map: it exits non-zero on
+# output that is not JSON, and prints nothing for JSON that holds no map.
+MAP=$(printf '%s' "$OUT" | jq -c 'select(type == "object" and (.rigs | type) == "array")' 2>/dev/null) \
   || fail "\`gc rig list --json\` printed something that is not JSON: $(printf '%s' "$OUT" | cut -c1-120). Run it by hand to see what it printed; a stray log line on stdout is the usual cause."
-MAP=$(printf '%s' "$OUT" | jq -c 'select(type == "object" and (.rigs | type) == "array")' 2>/dev/null)
 [ -n "$MAP" ] || fail "\`gc rig list --json\` printed JSON with no '.rigs' array, which is a change in gc's output contract, not a city problem."
 printf '%s\n' "$MAP"
