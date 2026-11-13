@@ -589,7 +589,9 @@ func (r copyRec) publishSaid(what string) bool {
 
 // launch runs a copy over the claimed record, on a free port, publishing it
 // when its record asks for an address the caller could give, and reports it
-// once it answers.
+// once it answers. A copy whose port another mapping already publishes is
+// stopped and run again on another port, and one whose process group
+// survives the stop fails the start and keeps its record.
 func (c *Copies) launch(rec copyRec, checkout string, o ServeOpts) Report {
 	failed := func(reason, detail string) Report {
 		_ = os.RemoveAll(rec.dir)
@@ -615,12 +617,24 @@ func (c *Copies) launch(rec copyRec, checkout string, o ServeOpts) Report {
 			return failed("not-started", "the copy's leader did not start within 15 seconds")
 		}
 		if publishable && rec.publish() == publishTaken && try < tries {
-			rec.stopGroup()
+			if !rec.stopGroup() {
+				return rec.notStopped(checkout, fmt.Sprintf("another mapping already publishes port %d, so this start moved the copy it ran there to another port", port))
+			}
 			continue
 		}
 		break
 	}
 	return rec.await(checkout, o.Wait)
+}
+
+// notStopped is the report of a start that could not stop a copy, because the
+// copy's process group survived SIGTERM and SIGKILL. The record stays, since
+// it is the only thing that names the group to a check and a stop.
+func (r copyRec) notStopped(checkout, why string) Report {
+	port, _ := r.num("port")
+	return Report{State: CopyFailed, Reason: "not-stopped", Checkout: checkout, Port: port, Log: r.path("serve.log"),
+		Detail: why + ", and the copy's process group survived SIGTERM and SIGKILL, so its record stays: gctk rig serve --check reports the copy and --stop ends it",
+		Tail:   tail(r.path("serve.log"), 20)}
 }
 
 // startLeader starts the copy's leader in a session of its own, so it leads a
@@ -649,7 +663,7 @@ func (r copyRec) startLeader() (string, string) {
 
 // await waits for the copy to answer on its port and hold it, and reports it.
 // A copy whose leader ends first, or that does not answer within the wait, is
-// stopped, and its record goes.
+// stopped, and its record goes, unless its process group survives the stop.
 func (r copyRec) await(checkout string, wait time.Duration) Report {
 	port, _ := r.num("port")
 	deadline := time.Now().Add(wait)
@@ -669,7 +683,9 @@ func (r copyRec) await(checkout string, wait time.Duration) Report {
 			return rep
 		}
 		if !time.Now().Before(deadline) {
-			r.stopGroup()
+			if !r.stopGroup() {
+				return r.notStopped(checkout, fmt.Sprintf("the copy did not answer on port %d within %s (%s), so this start stopped it", port, wait, why))
+			}
 			rep := Report{State: CopyFailed, Reason: "not-answering", Checkout: checkout,
 				Detail: fmt.Sprintf("the copy did not answer on port %d within %s (%s), so it was stopped", port, wait, why),
 				Tail:   tail(r.path("serve.log"), 20)}

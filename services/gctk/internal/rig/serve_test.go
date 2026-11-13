@@ -208,6 +208,21 @@ func (g gated) Signal(pid int, sig syscall.Signal) error {
 	return g.Host.Signal(pid, sig)
 }
 
+// unkillable is the host one call runs on in a test where a copy's process
+// group outlives SIGTERM and SIGKILL, as one stuck in the kernel does: the
+// signals the call sends the group pgid names are lost.
+type unkillable struct {
+	host.Host
+	pgid func() int
+}
+
+func (u unkillable) SignalGroup(pgid int, sig syscall.Signal) error {
+	if pgid == u.pgid() {
+		return nil
+	}
+	return u.Host.SignalGroup(pgid, sig)
+}
+
 // flags are the points calls in a test have reached.
 type flags struct {
 	mu  sync.Mutex
@@ -1021,6 +1036,52 @@ func TestServeMovesACopyWhosePortIsRefusedAsTaken(t *testing.T) {
 		}
 		f.copies.Stop(f.repo)
 	})
+}
+
+// A start that cannot stop a copy, because the copy's process group outlives
+// SIGTERM and SIGKILL, fails not-stopped and keeps the copy's record, so a
+// check still reports the copy and a stop ends it once its group can be ended.
+// No second leader runs over that record. A start stops a copy when it moves
+// one it ran off a port another mapping holds, and when one does not answer
+// within its wait.
+func TestServeAStartThatCannotStopACopyKeepsItsRecord(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		opts func(f *serveFixture) ServeOpts
+	}{
+		{"moved off a taken port", func(f *serveFixture) ServeOpts {
+			return f.publishing("taken-first", "https://host.example:$PORT/")
+		}},
+		{"not answering", func(f *serveFixture) ServeOpts { return f.opts("hang") }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			serveTest(t, func(t *testing.T, f *serveFixture) {
+				first := func() int {
+					if s := f.starts("leader"); len(s) > 0 {
+						return s[0].Pid
+					}
+					return 0
+				}
+				r := f.copiesOn(unkillable{Host: f.me, pgid: first}).Serve(f.repo, tc.opts(f))
+				leader := first()
+				if r.State != CopyFailed || r.Reason != "not-stopped" || !strings.Contains(r.Detail, "--stop") {
+					t.Errorf("the start = %s %s (%s), want failed not-stopped, and how to end the copy", r.State, r.Reason, r.Detail)
+				}
+				if n := len(f.starts("leader")); n != 1 {
+					t.Errorf("leaders started: %d, want only the one whose group survived", n)
+				}
+				if f.leader(f.repo) != leader || !f.running(leader) {
+					t.Errorf("the record names leader %d (running %v), want the copy's, %d", f.leader(f.repo), f.running(leader), leader)
+				}
+				if c := f.copies.Check(f.repo); c.State == CopyNone || c.State == CopyDied {
+					t.Errorf("check = %s, want the copy reported while its group runs", c.State)
+				}
+				if s := f.copies.Stop(f.repo); s.State != CopyStopped || !f.me.GroupGone(leader) {
+					t.Errorf("stop = %s (%s), want stopped, and the copy's group gone", s.State, s.Detail)
+				}
+			})
+		})
+	}
 }
 
 // A copy a start found may serve another caller on its port, such as a
