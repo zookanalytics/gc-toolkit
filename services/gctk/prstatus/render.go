@@ -15,11 +15,14 @@ import (
 //   - needs-attention: something only a person clears holds the PR. It is one
 //     of [RenderReasons], a hold set by hand, a PR that is not open or not the
 //     one the record names, a required check that failed, or a merge state
-//     GitHub reports that nothing else the evaluator names explains, a
-//     conflict or a rule it does not read, on an approved PR.
+//     GitHub reports that nothing else the evaluator names explains, such as a
+//     conflict, a branch behind a base that requires it current or a rule it
+//     does not read, on an approved PR, since nothing of the city's changes it.
 //   - merging: the PR is ready, or approved with only the city's work left,
 //     such as a check still running, the review loop's result, a wait on work
-//     on its branch, or a review thread that work acts on.
+//     on its branch, or a review thread that work acts on, or with only the
+//     merge state GitHub has yet to compute (UNKNOWN), which the next read
+//     settles.
 //   - working: the PR waits on the city's work and on an approval.
 //   - needs-review: only an approval is left, or a request for changes that
 //     the account that made it has to lift.
@@ -47,7 +50,7 @@ func Render(a pr.Answer, f Facts) State {
 	switch {
 	case person:
 		return NeedsAttention
-	case !approval && !city && (mergeState == "DIRTY" || mergeState == "BLOCKED"):
+	case !approval && !city && mergeState != "" && mergeState != "UNKNOWN":
 		return NeedsAttention
 	case !approval:
 		return Merging

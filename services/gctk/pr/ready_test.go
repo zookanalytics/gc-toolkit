@@ -267,7 +267,7 @@ func TestHeadOtherThanTheValidatedOne(t *testing.T) {
 }
 
 func TestEachMergeState(t *testing.T) {
-	for _, state := range []string{"BEHIND", "BLOCKED", "DIRTY", "DRAFT", "HAS_HOOKS", "UNKNOWN", "UNSTABLE"} {
+	for _, state := range []string{"BEHIND", "BLOCKED", "DIRTY", "DRAFT", "HAS_HOOKS", "UNKNOWN"} {
 		t.Run(state, func(t *testing.T) {
 			w := ready()
 			w.pr.Facts.MergeStateStatus = state
@@ -279,6 +279,19 @@ func TestEachMergeState(t *testing.T) {
 		})
 	}
 	t.Run("CLEAN", func(t *testing.T) { isReady(t, ready().answer(t)) })
+	// UNSTABLE says a check the base does not require is not passing. Each
+	// required check is the evaluator's own read, so that is what holds.
+	t.Run("UNSTABLE, every required check passed", func(t *testing.T) {
+		w := ready()
+		w.pr.Facts.MergeStateStatus = "UNSTABLE"
+		isReady(t, w.answer(t))
+	})
+	t.Run("UNSTABLE, a required check failed", func(t *testing.T) {
+		w := ready()
+		w.pr.Facts.MergeStateStatus = "UNSTABLE"
+		w.pr.Suites[head] = []gh.CheckSuite{{ID: 1, Runs: []gh.CheckRun{run("test", "COMPLETED", "FAILURE"), passed("test-macos")}}}
+		only(t, w.answer(t), pr.KindCheckFailed)
+	})
 }
 
 func TestRequiredChecks(t *testing.T) {

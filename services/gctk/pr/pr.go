@@ -47,9 +47,12 @@ const (
 	KindDraft Kind = "draft"
 	// KindHead: the PR's head is not the head the refinery validated.
 	KindHead Kind = "head"
-	// KindMergeState: GitHub reports a merge state other than CLEAN, which a
-	// conflict, a check that is not passing or any rule of the target holds
-	// back.
+	// KindMergeState: GitHub reports a merge state other than CLEAN or
+	// UNSTABLE, which a conflict, a branch behind a base that requires it
+	// current, a required commit status or any other rule of the target holds
+	// back. UNSTABLE says only that a check the base does not require is not
+	// passing, and the required check runs are the evaluator's own read
+	// (KindCheckFailed, KindCheckPending).
 	KindMergeState Kind = "merge-state"
 	// KindCheckFailed: a required check has a result at the head that did not
 	// pass.
@@ -233,9 +236,12 @@ func Ready(src Sources, bead string) (Answer, error) {
 		front = append(front, Condition{Kind: KindHead,
 			Detail: fmt.Sprintf("the PR's head %s is not the head the refinery validated, %s", p.HeadRefOid, rec.Head)})
 	}
-	if p.MergeStateStatus != "CLEAN" {
+	// GitHub reads a failing or pending required check as BLOCKED, so UNSTABLE
+	// leaves only checks the base does not require, which hold no merge, as the
+	// old merge pass also proceeds on it.
+	if p.MergeStateStatus != "CLEAN" && p.MergeStateStatus != "UNSTABLE" {
 		front = append(front, Condition{Kind: KindMergeState, Value: p.MergeStateStatus,
-			Detail: fmt.Sprintf("GitHub reports the PR's merge state %s, not CLEAN", p.MergeStateStatus)})
+			Detail: fmt.Sprintf("GitHub reports the PR's merge state %s, not CLEAN or UNSTABLE", p.MergeStateStatus)})
 	}
 	suites, err := hub.CheckSuites(rec.Repo, p.HeadRefOid, number)
 	if err != nil {
