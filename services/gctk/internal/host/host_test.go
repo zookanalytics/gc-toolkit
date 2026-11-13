@@ -104,6 +104,48 @@ func TestStartInASessionOfItsOwnLeadsAGroupWithTheCallersEnvironment(t *testing.
 	}
 }
 
+// A process Start starts gets its output and no other open file of its
+// caller's, so an flock its caller holds ends with its caller's file however
+// long the process runs. The lock each start of a rig's UI copy holds rests on
+// this: the copy's leader, which a start runs, never holds it.
+func TestStartPassesTheProcessNoOpenFileButItsOutput(t *testing.T) {
+	t.Setenv("GCTK_HOST_TEST_HELPER", "sleep")
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, "lock")
+	held, err := os.OpenFile(lockPath, os.O_RDWR|os.O_CREATE, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Flock(int(held.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	out, err := os.Create(filepath.Join(dir, "out"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := Local()
+	c, err := h.Start(Spec{Argv: []string{os.Args[0], "-test.run=^$"}, Out: out, Session: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid := c.Pid()
+	t.Cleanup(func() { _ = h.SignalGroup(pid, syscall.SIGKILL); c.Wait() })
+	out.Close()
+	// Closed with no unlock, the lock ends once no open file of it is left.
+	held.Close()
+	other, err := os.OpenFile(lockPath, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+	if err := syscall.Flock(int(other.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Errorf("the lock its caller held outlives the caller's file while the process runs: %v", err)
+	}
+	if _, ok := h.Proc(pid); !ok {
+		t.Error("the process ended before the lock was tried, so the test proves nothing")
+	}
+}
+
 func TestSignalGroupReachesEveryMemberAndAGroupEndsWhole(t *testing.T) {
 	h := Local()
 	c, err := h.Start(Spec{Argv: []string{"bash", "-c", `sleep 60 & (trap "" TERM; exec sleep 61) & wait`}, Session: true})

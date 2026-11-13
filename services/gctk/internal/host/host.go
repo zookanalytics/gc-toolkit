@@ -32,7 +32,8 @@ type Host interface {
 	Notify(c chan<- os.Signal, sig ...os.Signal)
 	Ignore(sig ...os.Signal)
 
-	// Start starts a process as s says, as a child of this process.
+	// Start starts a process as s says, as a child of this process. The
+	// process gets its output and no other file this process has open.
 	Start(s Spec) (Child, error)
 	// Signal sends sig to the process pid, and SignalGroup sends it to every
 	// process in the group pgid. Signal 0 sends nothing and says whether a
