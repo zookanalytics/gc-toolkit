@@ -229,12 +229,11 @@ bd_rows() {
 #                progressing, or settled before a PR exists (the PR-open pass
 #                publishes it), or settled with a PR that needs no further review.
 #   stuck      human: a human gate (a gate whose await type is human, which
-#                carries no route), a bead routed or assigned to the reserved
-#                `human`, a decision, a finding that needs the operator, an
-#                anchor parked in a human state, or a conversation
-#                (conversation.sh), which holds an open PR's merge until a
-#                person's ruling or dismissal closes it, in the queue or held
-#                by its sitting.
+#                carries no route), a bead assigned to the reserved `human`, a
+#                decision, a finding that needs the operator, an anchor parked
+#                in a human state, or a conversation (conversation.sh), which
+#                holds an open PR's merge until a person's ruling or dismissal
+#                closes it, in the queue or held by its sitting.
 #              held: any other status. Blocked, deferred and pinned are
 #                deliberate holds no pool offers; a status a store adds is one
 #                this classifier does not know, so it fails closed.
@@ -249,9 +248,9 @@ bd_rows() {
 #              unrouted: open with no route, arm or assignee, so nothing picks it up.
 #
 # Where two rules apply, a conversation outranks everything, so its sitting's
-# claim reads as the person's it is, in-progress outranks everything else, and an
-# explicit human route outranks every advancing kind, so a review routed to a
-# person stays stuck.
+# claim reads as the person's it is, in-progress outranks everything else, and a
+# human gate, a decision or a bead assigned to `human` outranks every advancing
+# kind, so a review assigned to a person stays stuck.
 # Whether a claim's or a route's session is still up is a liveness join over the
 # session list, not a fact on the row, so a stranded claim reads advancing here,
 # and a bead a poured molecule is working (its work bead, or an inline step)
@@ -285,7 +284,7 @@ def adv_own($cap):
   | ((.assignee // "") | tostring) as $a
   | if conversation then {state: "stuck", why: "human"}
     elif .status == "in_progress" or .status == "hooked" then {state: "advancing"}
-    elif ($r | adv_human) or ($a | adv_human) or .issue_type == "decision"
+    elif ($a | adv_human) or .issue_type == "decision"
          or (.issue_type == "gate" and ((.await_type // "") | tostring) == "human") then {state: "stuck", why: "human"}
     elif .status != "open" then {state: "stuck", why: "held"}
     elif $mr != "" then adv_anchor($m; $mr)

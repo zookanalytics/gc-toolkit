@@ -171,8 +171,8 @@ intent you cannot infer) is a question for a person, not a guess. Push
 nothing: the branch stays as it was last reviewed. Ask once, with what collided
 and the one decision you need. The human gate it files on the anchor carries
 your entries so far and holds the anchor's merge. This call asks, aborts the
-merge, ends the run and drains. On a molecule's step the work bead waits on that
-gate through its own edge, and clearing the gate re-slings the work:
+merge, ends the run and drains. The work bead waits on that gate through its own
+edge, and clearing the gate re-slings the work:
 ```bash
 "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/work-setup.sh" --stop-merge --convoy {{convoy_id}} --path "<file>" --collided "<the two intents that met>" --question "<the one decision you need>"
 ```
@@ -350,8 +350,9 @@ rig`, which records each result against the commit it ran at, and the exit
 condition (assets/scripts/self-review-check.sh) converges the loop only when
 test, lint, typecheck, setup and build all passed at the live HEAD. A red
 iteration spawns the next, up to `max_attempts`, so a failure the refinery
-would have bounced a hop later is fixed here instead. The refinery still runs
-the real gate as the backstop.
+would have bounced a hop later is fixed here instead, and a last attempt still
+red asks a person (step 5). The refinery still runs the real gate as the
+backstop.
 
 Each iteration runs in a FRESH pooled session with none of the previous one's
 context: the loop clears session affinity on every pool retry, by design.
@@ -440,31 +441,45 @@ stands:
 Mark only a failure you reproduced on the base; a run with another command or
 scope replaces the record and needs a mark of its own. A check still red after
 your best effort stays red: the exit condition reads it as "not yet", and the
-loop iterates. `git status` must be clean before you close the iteration.
+loop iterates until its last attempt. `git status` must be clean before you
+close the iteration.
 
-**5. Close this iteration, which is what runs the exit condition, and drain:**
+**5. On the loop's last attempt, a check still red asks a person.** The loop's
+control bead holds the budget in `gc.max_attempts` and one `gc.attempt_log`
+entry per attempt already closed, so this attempt is the last when the log
+holds one entry fewer than the budget. Read it under the `root_bead_id` your
+claim named:
+```bash
+gc bd list --metadata-field "gc.root_bead_id=<the workflow root>" --metadata-field gc.kind=ralph --json
+```
+On the last attempt, a check still red that step 4 does not mark is declined
+here, not closed: a close leaves the exit condition to end the loop with nobody
+asked. This call files a human gate on the work bead, makes the work bead wait
+on it, cancels the run and drains, and clearing the gate re-slings the work:
+`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/decline.sh" --step self-review --reason "the self-review loop's last attempt is still red" --subject "<the work bead>" --key self-review-exhausted --message "Self-review spent its last attempt with <each check still red> failing at <HEAD>; <what you tried>. The branch and worktree are intact. Before the work goes on, fix what holds them red or say on the work bead how." --formula mol-polecat-work`
+
+**6. Otherwise, close this iteration, which is what runs the exit condition, and
+drain:**
 ```bash
 "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step self-review && gc runtime drain-ack
 ```
 Never close the work bead, and never close the `self-review` control bead: the
-orchestrator closes the control on convergence, and on the final failing attempt
-the exit condition hands the work bead back itself
-(`aborted_at=self-review-exhausted`), because nothing runs after the budget is
-spent.
+orchestrator closes the control when the loop converges or its last attempt
+fails.
 
 **Exit criteria (for the loop, not for you):** the records of the test, lint and
 typecheck runs above and the note of setup and build at HEAD pass, or name a
 failure the work bead marks pre-existing at that HEAD, and this iteration bead
-is closed.
+is closed, or the last attempt, still red, is declined.
 Any iteration that leaves the tree closer to that has done its job."""
 
 [steps.check]
 # Total attempts including the first. A red iteration spawns the next; this
-# bounds the churn a self-review fix usually takes, not any goal count.
-# Exhaustion closes the control bead gc.outcome=fail and the exit condition
-# hands the work bead back on that last failing attempt — it reads this budget
-# off the control bead's gc.max_attempts, so changing the number here needs no
-# other edit.
+# bounds the churn a self-review fix usually takes, not any goal count. The
+# last attempt's session, still red, declines the run through a human gate, and
+# a last attempt closed red has the exit condition note the exhaustion on the
+# work bead. Both read this budget off the control bead's gc.max_attempts, so
+# changing the number here needs no other edit.
 max_attempts = 3
 
 [steps.check.check]
@@ -473,8 +488,8 @@ path = "../assets/scripts/self-review-check.sh"
 # The script reads the checks' records at HEAD; it does not run the checks (its
 # header explains why — the exec is inline in the control dispatcher, sandboxed,
 # and time-bounded, so a real test suite would time out and stall the city). 2m
-# is slack for a few bead and record reads and the exhaustion handback, not a
-# test budget.
+# is slack for a few bead and record reads and the exhaustion note, not a test
+# budget.
 timeout = "2m"
 
 [[steps]]
@@ -601,9 +616,12 @@ bring-current guard, writes the summary and any retitle onto the anchor, writes
 the refinery handoff, wakes the refinery, closes this step, removes the worktree
 and its local branch, and drains. Pass the anchor the last call printed, when it
 printed one.
-`--notes` is appended to the bead's notes, never written over them.
+`--notes` is appended to the bead's notes, never written over them. The call
+ends in your session's own directory, because Claude Code fails a call that
+leaves your shell in the worktree it removed. Add nothing after it, not even an
+echo of its exit, so that its exit is the hand-off's own.
 ```bash
-"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/work-submit.sh" --convoy {{convoy_id}} --base {{base_branch}} --binding-prefix {{binding_prefix}} --anchor "<the anchor it printed, or leave this flag out>" --summary-file "<the summary file>" --title "<type>(<scope>): <what the branch does>" --notes "Implemented: <brief summary>"
+"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/work-submit.sh" --convoy {{convoy_id}} --base {{base_branch}} --binding-prefix {{binding_prefix}} --anchor "<the anchor it printed, or leave this flag out>" --summary-file "<the summary file>" --title "<type>(<scope>): <what the branch does>" --notes "Implemented: <brief summary>" && cd "$GC_DIR"
 ```
 - Exit 0: handed off and drained. You are gone.
 - Exit 3: nothing is handed off and you must not drain: it names what you owe,

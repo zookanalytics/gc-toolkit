@@ -32,8 +32,9 @@ const formUsage = `Usage:
 The terminal conversation form. gc-helm.sh engage runs it on a terminal when the
 command line leaves the concern open, as a bare gc-helm.sh does, and gc-helm.sh
 attach runs it with --return. Its pages are tabs at its top: starting a
-conversation, returning to one, and People, which lists mechanik and each rig's
-Product Owner with the state of its session. ↑ from the subject reaches the
+conversation (Ctrl+N), returning to one (Ctrl+R), and People (Ctrl+P), which
+lists mechanik and each rig's Product Owner with the state of its session. A
+page's key goes to it from any page and field. ↑ from the subject reaches the
 tabs, and ←/→ move along them. Each flag fills in its field, --rig fills in the
 subject with a new topic's rig, named exactly, --subject with a reference the
 form never matches to a rig, and --from names the bead the gate --subject names

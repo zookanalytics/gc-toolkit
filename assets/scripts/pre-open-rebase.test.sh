@@ -175,13 +175,13 @@ eq "$(bprio "$K")" "1" "…and routed at its anchor's priority less one (A1 read
 # The priority writer's own write is the one pinned to its store (--db), so a
 # route that carried a priority, or a priority the arm wrote itself, fails.
 PL=$(grep -n "^bd update $K --priority 1 --db " "$STUB_GC_LOG" | head -1 | cut -d: -f1)
-RL=$(grep -n "^bd update $K --set-metadata gc.routed_to=$POOL" "$STUB_GC_LOG" | head -1 | cut -d: -f1)
+RL=$(grep -n "^sling $POOL $K --no-formula --no-convoy$" "$STUB_GC_LOG" | head -1 | cut -d: -f1)
 if [ -n "$PL" ] && [ -n "$RL" ] && [ "$PL" -lt "$RL" ]; then
   ok "…its priority written by the priority writer before the route"
 else
   bad "the merge-in's priority was not written by the priority writer before its route (priority write at log line '${PL:-none}', route at '${RL:-none}')"
 fi
-hasnt "$(grep "^bd update $K --set-metadata gc.routed_to" "$STUB_GC_LOG")" "--priority" "…and the route written with no priority in it"
+hasnt "$(grep "^sling $POOL $K " "$STUB_GC_LOG")" "--priority" "…and the route written with no priority in it"
 
 echo "# a merge-in child is routed at its rank, and an earlier PR's approval does not raise it"
 # The anchor sits under a P2 epic, its own stored priority stale. It carries the

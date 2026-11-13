@@ -181,16 +181,24 @@ discussing is still open and unassigned until the sitting answers it.
 
 The operator comes in through Engage. A bare `gc-helm` on a terminal opens
 engage's form on starting a conversation, with the cursor in the subject. The
-form's pages are tabs at its top, and the operator moves between them on the
-tabs, with no key of a page's own:
+form's pages are tabs at its top, and each page has a key of its own, which its
+tab shows before its name:
 
-- **Start a conversation** takes a subject, a bead, a PR, or a rig's name or
-  prefix for a new topic, and the question (*Engage*, below).
-- **Return to a conversation** lists the open conversations (*Returning to a
-  conversation*, below).
-- **People** lists the seats the operator sits with: mechanik, of which the
-  city has one, and each rig's po, the Product Owner, by its rig's name and
-  prefix. The city's HQ has none.
+- **Start a conversation**, Ctrl+N, takes a subject, a bead, a PR, or a rig's
+  name or prefix for a new topic, and the question (*Engage*, below).
+- **Return to a conversation**, Ctrl+R, lists the open conversations
+  (*Returning to a conversation*, below).
+- **People**, Ctrl+P, lists the seats the operator sits with: mechanik, of
+  which the city has one, and each rig's po, the Product Owner, by its rig's
+  name and prefix. The city's HQ has none.
+
+A page's key goes straight to that page from any page and any field, and the
+key of the page on screen does nothing. In the question, Ctrl+N and Ctrl+P go
+to their pages rather than to the line below and above, and ↓ and ↑ move
+between its lines. Start a conversation comes back as the operator left it,
+with what they typed and the cursor in the field it was in. The screen that
+shows a save or a start as it runs is not a page, and the pages' keys do
+nothing there.
 
 ↑ from the subject reaches the tabs, and ←/→ move along them, wrapping around
 at either end, as they cycle a value on the form's choosers. ↓ goes back down
@@ -786,13 +794,12 @@ given knowingly. It also settles the subject's dispatch path first, at the
 sign-off and on a turn that does not sign off alike. The hold kept the
 subject's arm and route, and an answer that clears the subject's last blocker
 releases it to them, so a ruling that sends the subject anywhere else
-withdraws both before the answer, and a `human` route, which sends it to no
-pool, stays. The record and the headline go on the subject alone: a rework
-child waiting on its anchor's bring-current gate, or a member of an epic whose
-gate the epic's sitting answers, reads the answer in the gate's resolve
-reason, through its own `blocks` edge. A gate with no tie to the subject takes
-its own conversation, so its outcome never lands in the notes of a bead that is
-not about it.
+withdraws both before the answer. The record and the headline go on the
+subject alone: a rework child waiting on its anchor's bring-current gate, or a
+member of an epic whose gate the epic's sitting answers, reads the answer in
+the gate's resolve reason, through its own `blocks` edge. A gate with no tie to
+the subject takes its own conversation, so its outcome never lands in the
+notes of a bead that is not about it.
 
 **The first answer wins.** bd resolves a gate already closed without changing
 it and reports success either way, so every resolver reads the gate back. A
@@ -1063,7 +1070,9 @@ as a hold unless its writer stamped that key beside it.
 - **A stand-down (`takeaway … --release --no-wait`).** The dispatch's premise
   is falsified and the work should not happen. The anchor is parked, and the
   run beneath it is cancelled through gascity's run cancel. An anchor already
-  closed takes the cancel without the park, and `--route` is refused there.
+  closed takes the cancel without the park, and `--route` is refused there. A
+  claim a live session holds is not taken: the headline lands, the holder is
+  nudged to stop and give the bead back, and the release exits 4 until it has.
   `assets/scripts/stand-down.sh` runs this write for work a human gate holds, after
   it removes the arm that would re-sling the work, and goes on to answer the gate,
   or to leave one that also holds another open bead, and close the bead.

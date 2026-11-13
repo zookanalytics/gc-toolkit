@@ -154,11 +154,11 @@ type Facts struct {
 	Gates []Blocker
 	// Owed are the beads other than human gates that a person owes the next move
 	// on, on the anchor's own blockers or behind a bead it waits on, nearest
-	// first, as [Holding] reads them ([Holds.Owed]): a decision, a bead routed to
-	// a person, a conversation that holds the PR's merge until it closes, or
-	// another merge anchor whose own state is a person's to move, such as a PR
-	// waiting on a review that a rework of this one waits for. No automated
-	// actor will move any of them, so each holds the PR.
+	// first, as [Holding] reads them ([Holds.Owed]): a decision, a conversation
+	// that holds the PR's merge until it closes, or another merge anchor whose
+	// own state is a person's to move, such as a PR waiting on a review that a
+	// rework of this one waits for. No automated actor will move any of them, so
+	// each holds the PR.
 	Owed []Blocker
 	// PRPosture is metadata.pr_posture, stored value@oid@instant. The value is
 	// read before the first '@', and the oid after it is the head the posture

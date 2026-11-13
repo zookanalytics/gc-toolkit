@@ -11,7 +11,7 @@ var (
 		"The merge anchor a review, rework, finding or validation child names (lifecycle/lifecycle.toml, "+
 			"[metadata.gates]). A listing names it on each bead, and prstatus's in-flight set reads it.")
 	routedToKey = ledger.ReadOnly("gc.routed_to", ledger.String,
-		"The pool, agent or person a bead is routed to, written by lifecycle.sh's --route and by the script or "+
+		"The pool or agent a bead is routed to, written by lifecycle.sh's --route and by the script or "+
 			"formula that owns the bead's dispatch (lifecycle/lifecycle.toml, ROUTE and [metadata.runtime_owned]).")
 	workOutcomeKey = ledger.ReadOnly("gc.work_outcome", ledger.String,
 		"A work bead's self-reported disposition, no-op or shipped, whose meaning is the runtime's "+

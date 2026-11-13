@@ -3,7 +3,7 @@ Prepare an upstream pull request from one or more local-fork commits. An
 ordered batch is cherry-picked onto a single branch and lands as one combined
 PR draft; N=1 is the single-commit case. Mechanical work through
 `push-branch`, then `prepare-pr-handoff` drafts the PR title/body (and an
-optional issue draft), then `handback-to-keeper` re-routes the bead to the
+optional issue draft), then `handback-to-keeper` hands the bead back to the
 requesting keeper for the conversational tail.
 
 PR creation itself is operator-gated and currently blocked at the city level —
@@ -13,9 +13,10 @@ when to run the assembled `gh pr create` command.
 Extends `mol-polecat-base` for load-context but replaces the implement /
 self-review chain with cherry-pick / scrub / test / push / draft / handback.
 Every abort path (a roster with no gascity rig, cherry-pick conflict, test
-failure, push race) mails the keeper + operator and hands the bead back open,
-assigned and routed to the keeper — never stranded `in_progress` on the drained
-session."""
+failure, push race) hands the bead back open and assigned to the keeper, with no
+route, and mails the keeper and the operator. The keeper's mail requests its
+turn (`--notify`), which is the notice the assignment owes, so the bead is never
+stranded `in_progress` on the drained session."""
 formula = "mol-upstream-gc-pr-prep"
 extends = ["mol-polecat-base"]
 version = 3
@@ -102,12 +103,11 @@ if [ -z "$RIG_ROOT" ]; then
   if ! gc bd update {{issue}} \
     --set-metadata aborted_at=workspace-setup \
     --status=open \
-    --assignee="$REQUESTING_KEEPER" \
-    --set-metadata gc.routed_to="$REQUESTING_KEEPER"; then
+    --assignee="$REQUESTING_KEEPER"; then
     echo "pr-prep: the hand-back of {{issue}} to $REQUESTING_KEEPER did not land; NOT draining, so the next worker retries" >&2
     exit 1
   fi
-  gc mail send "$REQUESTING_KEEPER" -s "pr-prep: no gascity rig for {{issue}}" -m "$(cat <<EOF
+  gc mail send "$REQUESTING_KEEPER" --notify -s "pr-prep: no gascity rig for {{issue}}" -m "$(cat <<EOF
 No single rig called gascity resolves in gc rig list --json, so no path
 names the repository to branch from. Nothing was fetched, created or pushed.
 
@@ -218,7 +218,7 @@ while IFS= read -r SHA; do
     git reset --hard "{{upstream_remote}}/{{upstream_branch}}"
 
     REQUESTING_KEEPER=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.requesting_keeper')
-    gc mail send "$REQUESTING_KEEPER" -s "pr-prep: cherry-pick conflict for {{issue}}" -m "$(cat <<EOF
+    gc mail send "$REQUESTING_KEEPER" --notify -s "pr-prep: cherry-pick conflict for {{issue}}" -m "$(cat <<EOF
 Cherry-pick of $SHA onto {{upstream_remote}}/{{upstream_branch}} conflicted.
 
 Bead: {{issue}}
@@ -240,8 +240,7 @@ EOF
       --set-metadata aborted_at=cherry-pick \
       --set-metadata conflict_sha="$SHA" \
       --status=open \
-      --assignee="$REQUESTING_KEEPER" \
-      --set-metadata gc.routed_to="$REQUESTING_KEEPER"
+      --assignee="$REQUESTING_KEEPER"
     gc runtime drain-ack
     exit 0
   fi
@@ -326,7 +325,7 @@ operator decides whether the commit is viable upstream as-is:
 TEST_TAIL=$(<test output, last 200 lines>)
 REQUESTING_KEEPER=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.requesting_keeper')
 
-gc mail send "$REQUESTING_KEEPER" -s "pr-prep: tests failed for {{issue}}" -m "$(cat <<EOF
+gc mail send "$REQUESTING_KEEPER" --notify -s "pr-prep: tests failed for {{issue}}" -m "$(cat <<EOF
 Cherry-pick succeeded but {{test_command}} failed on the rebased branch.
 
 Bead: {{issue}}
@@ -341,8 +340,7 @@ gc mail send human -s "pr-prep: tests failed for {{issue}}" -m "(see keeper mail
 gc bd update {{issue}} \
   --set-metadata aborted_at=test \
   --status=open \
-  --assignee="$REQUESTING_KEEPER" \
-  --set-metadata gc.routed_to="$REQUESTING_KEEPER"
+  --assignee="$REQUESTING_KEEPER"
 gc runtime drain-ack
 exit 0
 ```"""
@@ -381,7 +379,7 @@ If the push is rejected because the branch already exists on
 ```bash
 REQUESTING_KEEPER=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.requesting_keeper')
 
-gc mail send "$REQUESTING_KEEPER" -s "pr-prep: branch race for {{issue}}" -m "$(cat <<EOF
+gc mail send "$REQUESTING_KEEPER" --notify -s "pr-prep: branch race for {{issue}}" -m "$(cat <<EOF
 git push --force-with-lease was rejected on $(git branch --show-current).
 Someone else pushed to that branch on {{origin_remote}}.
 
@@ -397,8 +395,7 @@ gc mail send human -s "pr-prep: branch race for {{issue}}" -m "(see keeper mail)
 gc bd update {{issue}} \
   --set-metadata aborted_at=push-branch \
   --status=open \
-  --assignee="$REQUESTING_KEEPER" \
-  --set-metadata gc.routed_to="$REQUESTING_KEEPER"
+  --assignee="$REQUESTING_KEEPER"
 gc runtime drain-ack
 exit 0
 ```
@@ -502,25 +499,26 @@ issue is recommended; `gh_pr_command` has no placeholders."""
 
 [[steps]]
 id = "handback-to-keeper"
-title = "Reassign the bead to the keeper, nudge, mail backstop"
+title = "Reassign the bead to the keeper, notify it, mail backstop"
 needs = ["prepare-pr-handoff"]
 description = """
 Mirror the polecat→refinery handoff contract, destination = the requesting
 keeper. The bead stays **open** — the keeper closes it after the title/body
 conversation.
 
-**1. Reassign and re-route:**
+**1. Reassign.** The assignment alone hands the keeper the bead, with no route
+beside it:
 ```bash
 REQUESTING_KEEPER=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.requesting_keeper')
 gc bd update {{issue}} \
   --status=open \
-  --assignee="$REQUESTING_KEEPER" \
-  --set-metadata gc.routed_to="$REQUESTING_KEEPER"
+  --assignee="$REQUESTING_KEEPER"
 ```
 
-**2. Nudge the keeper (ephemeral signal):**
+**2. Notify the keeper.** The assignment owes it a notice: mail that requests its
+turn, and wakes it when it is not running:
 ```bash
-gc session nudge "$REQUESTING_KEEPER" "PR prep ready: {{issue}}"
+gc mail send "$REQUESTING_KEEPER" --notify -s "PR prep ready: {{issue}}" -m "{{issue}} is assigned to you: its metadata carries the PR drafts and the gh commands."
 ```
 
 **3. Mail the operator a durable backstop** (the keeper may not be running):
@@ -530,7 +528,7 @@ gc mail send human -s "pr-prep ready: {{issue}}" -m "$(cat <<EOF
 PR prep is complete for {{issue}}. Branch pushed: $BRANCH_URL.
 
 The keeper ($REQUESTING_KEEPER) has been re-assigned the bead and
-nudged. When you're ready to refine the PR title / body, engage the
+notified. When you're ready to refine the PR title / body, engage the
 keeper — it'll surface the drafts and the gh commands for review.
 
 If the keeper isn't running, just spawn it: gc session new $REQUESTING_KEEPER.
@@ -544,5 +542,5 @@ gc runtime drain-ack
 exit 0
 ```
 
-**Exit criteria:** bead open and assigned to the keeper; nudge sent;
-operator mailed; session drained."""
+**Exit criteria:** bead open and assigned to the keeper, with no route; the
+keeper notified; operator mailed; session drained."""

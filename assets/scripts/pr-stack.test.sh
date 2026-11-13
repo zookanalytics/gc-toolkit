@@ -161,6 +161,15 @@ out=$("$SUT" 2>&1)
 has "$out" "names 2 beads" "the hand-back joins once its route is cleared"
 has "$(body 100)" '- `T1` — Rework branch polecat/T' "…and is listed as a contributor"
 
+echo "# a human route is a route like any other: the child stays out until it clears"
+store "[$(anchor T polecat/T 100),
+        $(printf '{"id":"T1","status":"open","title":"Rework branch polecat/T: address pre-open signoff findings","created_at":"2026-02-01T00:00:00Z","metadata":{"branch":"polecat/T","gc.routed_to":"human","rejection_reason":"signoff requested changes"}}')]"
+pr 100 OPEN polecat/T "$OPENER_BODY"
+: > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1)
+has "$out" "1 single-bead" "a child routed to human drops out as a pool-routed one does"
+hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "…so the one-bead body is never written"
+
 echo "# an ordinary one-bead PR is left exactly as pr-open.sh composed it"
 store "[$(anchor E polecat/E 30)]"
 pr 30 OPEN polecat/E "$OPENER_BODY"
