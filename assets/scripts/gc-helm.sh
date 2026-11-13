@@ -628,8 +628,9 @@ CACHE_FILE="$CACHE_DIR/board2-$_city_key.ndjson"
 bust_cache() { rm -f "$CACHE_FILE" 2>/dev/null || true; }
 
 # The spellings a bead's assignee can carry for THIS session, one per line —
-# the same three step-close.sh tries as the assignee, and the same set the
-# claim hook matches when a respawn adopts a hold. Empty when none is set.
+# the same three run-cancel.sh checks a held step's assignee against, and the
+# same set the claim hook matches when a respawn adopts a hold. Empty when none
+# is set.
 session_identities() {
     printf '%s\n%s\n%s\n' "${GC_SESSION_NAME:-}" "${GC_SESSION_ID:-}" "${GC_ALIAS:-}" | grep -v '^$' || true
 }

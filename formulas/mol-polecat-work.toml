@@ -585,9 +585,12 @@ bring-current guard, writes the summary and any retitle onto the anchor, writes
 the refinery handoff, wakes the refinery, closes this step, removes the worktree
 and its local branch, and drains. Pass the anchor the last call printed, when it
 printed one.
-`--notes` is appended to the bead's notes, never written over them.
+`--notes` is appended to the bead's notes, never written over them. The call
+ends in your session's own directory, because Claude Code fails a call that
+leaves your shell in the worktree it removed. Add nothing after it, not even an
+echo of its exit, so that its exit is the hand-off's own.
 ```bash
-"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/work-submit.sh" --convoy {{convoy_id}} --base {{base_branch}} --binding-prefix {{binding_prefix}} --anchor "<the anchor it printed, or leave this flag out>" --summary-file "<the summary file>" --title "<type>(<scope>): <what the branch does>" --notes "Implemented: <brief summary>"
+"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/work-submit.sh" --convoy {{convoy_id}} --base {{base_branch}} --binding-prefix {{binding_prefix}} --anchor "<the anchor it printed, or leave this flag out>" --summary-file "<the summary file>" --title "<type>(<scope>): <what the branch does>" --notes "Implemented: <brief summary>" && cd "$GC_DIR"
 ```
 - Exit 0: handed off and drained. You are gone.
 - Exit 3: nothing is handed off and you must not drain: it names what you owe,
