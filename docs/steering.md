@@ -274,7 +274,9 @@ A park is an ordinary blocker: a `blocks` edge from the parked bead onto an open
 bead in the same store. bd marks a bead blocked when it, or any of its
 parent-child ancestors, has an open blocker, and `bd ready` leaves a blocked
 bead out. So a park on an epic takes the epic and every member under it out of
-`bd ready`. No reader tells a park from any other blocker, and none needs to.
+`bd ready`. What a park holds needs no reader to tell it from any other
+blocker. The rig board tells a park apart only to leave parked work out of what
+Needs you counts ([below](#what-reads-a-park-as-a-fault)).
 
 ### Parking a bead
 
@@ -401,6 +403,16 @@ stranded, and the parked epic names the gate that holds it. A member that has a
 row of its own reads parked there too and names the gate, so the board asks for
 no disposition of it while the park holds it. The board's `parked` kind is
 something else: a bead the board lists because it carries a takeaway.
+
+The rig board's Needs you lists a need about parked work apart from the rest
+and does not count it. It tells a park as a wait on a gate that is no human
+gate, the gate the text form of `park` files, which its table reads as "Held by
+a gate". A park made with `--waiting-on` onto a task or a human gate reads as
+the wait it is. A need that waits on a park, or sits under an epic or Delivery
+that does, does not count, and neither does a question, decision or
+conversation about nothing but what is parked, what carries `hold:mayor`, or
+other needs that do not count
+([services/helm/README.md](../services/helm/README.md), *What it counts*).
 
 ### Where a park goes
 

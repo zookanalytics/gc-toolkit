@@ -1394,8 +1394,10 @@ operator's *own* unsent words.
   [services/helm/README.md](../services/helm/README.md)). The page shows two
   views of the rig's work. Needs you is one entry per need, such as a
   question, a pull request waiting on the operator's review or a ruling, with
-  the beads the need holds beneath it. The Work queue is the work in the order
-  it is expected to land. The Epics tab shows both for each epic and each
+  the beads the need holds beneath it. It leads with how many needs count, and
+  how many of each kind, and folds apart the needs about parked work or work
+  held for the Product Owner. The Work queue is the work in the order it is
+  expected to land. The Epics tab shows both for each epic and each
   Delivery, and the Needs you and Work queue tabs show them across the rig,
   each object drawn and ordered one way wherever it appears.
   `helm-svc board --json` prints the board model's rows for agents, and the

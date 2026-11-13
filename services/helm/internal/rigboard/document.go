@@ -33,7 +33,8 @@ type Document struct {
 	Rows map[string]Row `json:"rows"`
 	// Epics is the Epics page: every open epic of the rig, in priority order.
 	Epics []EpicEntry `json:"epics"`
-	// NeedsYou is the Needs you page: every need in the rig.
+	// NeedsYou is the Needs you page: every need in the rig, and how many of
+	// them count.
 	NeedsYou NeedsYou `json:"needs_you"`
 	// WorkQueue is the Work queue page: every open piece of work in the rig
 	// that does not carry hold:mayor.
@@ -72,9 +73,10 @@ type Row struct {
 	Note   string `json:"note,omitempty"`
 	// Group is the row's group, empty when no group holds it.
 	Group Group `json:"group,omitempty"`
-	// Ask is the kind of need the row is, empty when it is none, as it is for
-	// work held for the Product Owner. A row that is a need is drawn as one
-	// wherever it appears.
+	// Ask is what the row asks of a person, empty when it is no need, as it is
+	// for work held for the Product Owner. A row that is a need is drawn as one
+	// wherever it appears, tagged with its ask, and a Needs you view counts it
+	// by its kind (Need).
 	Ask Ask `json:"ask,omitempty"`
 	// Line2 is an epic's hypothesis, a Delivery's aim, or the message of a
 	// gate, a decision or a conversation, less its first line when that line
@@ -139,8 +141,9 @@ type PullRequest struct {
 }
 
 // Counts are what a container holds. Needs counts each need that holds or
-// concerns it once, and reaches zero as the operator acts. Queue,
-// NotScheduled and Closed count its work by where it sits.
+// concerns it once, of the needs that count (NeedsYou), and reaches zero as
+// the operator acts. Queue, NotScheduled and Closed count its work by where it
+// sits.
 type Counts struct {
 	Needs        int `json:"needs"`
 	Queue        int `json:"queue"`
@@ -166,7 +169,7 @@ type Contract struct {
 // reach more than one epic or Delivery is listed under each.
 type EpicEntry struct {
 	ID         string          `json:"id"`
-	Needs      []Need          `json:"needs"`
+	Needs      NeedsYou        `json:"needs"`
 	Queue      WorkQueue       `json:"queue"`
 	Closed     []string        `json:"closed"`
 	Deliveries []DeliveryEntry `json:"deliveries"`
@@ -176,30 +179,54 @@ type EpicEntry struct {
 // the work it holds nearest, and its closed work.
 type DeliveryEntry struct {
 	ID     string    `json:"id"`
-	Needs  []Need    `json:"needs"`
+	Needs  NeedsYou  `json:"needs"`
 	Queue  WorkQueue `json:"queue"`
 	Closed []string  `json:"closed"`
 }
 
-// Need is one entry of a Needs you view: a need, and the beads it holds that
-// the view covers, its work in the Work queue's order and then the epics and
-// Deliveries it holds. A view lists its needs in the order of the first bead
-// each holds in the Work queue, so the top need is the one holding up the
-// front of the queue. A need that is itself queued work counts its own place
-// too. A need that holds no queued work comes after those that do, by the
-// first unscheduled work it holds, and one that holds no work at all comes
+// Need is one entry of a Needs you view: a need, its kind, and the beads it
+// holds that the view covers, its work in the Work queue's order and then the
+// epics and Deliveries it holds. A view lists its needs in the order of the
+// first bead each holds in the Work queue, so the top need is the one holding
+// up the front of the queue. A need that is itself queued work counts its own
+// place too. A need that holds no queued work comes after those that do, by
+// the first unscheduled work it holds, and one that holds no work at all comes
 // last, by priority, then oldest, then id.
 type Need struct {
 	ID    string   `json:"id"`
+	Kind  NeedKind `json:"kind"`
 	Holds []string `json:"holds"`
 }
 
-// NeedsYou is the Needs you page: every open need in the rig, in the order a
-// view lists them. Count is the needs that hold or concern work under an
-// epic, each counted once, and it reaches zero when none does.
+// NeedsYou is a Needs you view: the Needs you page over the whole rig, and the
+// view of each epic and Delivery over the needs that hold or concern the work
+// it holds nearest. It lists every need it covers, each once and in the order
+// a view lists them, the needs that count first.
+//
+// A need does not count when what it is about is parked or waits for the
+// Product Owner. It is parked itself when it, or an epic or Delivery above it,
+// waits on a park, a gate that is no human gate. A gate, a decision or a
+// conversation does not count when every bead it holds or is about is parked,
+// is a need that does not count, or carries hold:mayor, the Unprioritized
+// page's work. A need that is about nothing else counts, and so does a pull
+// request or other work that is itself a need, unless it is parked itself.
+//
+// Count is the needs that count, and it reaches zero only when nothing that
+// counts needs you. Kinds is how many of them are of each kind: Pull request,
+// Question, Conversation waits for you, In conversation and Ruling, each one
+// zero included, then Routed to you when one counts. Counted lists the needs
+// that count, and NotCounted the needs that do not.
 type NeedsYou struct {
-	Count int    `json:"count"`
-	Needs []Need `json:"needs"`
+	Count      int         `json:"count"`
+	Kinds      []KindCount `json:"kinds"`
+	Counted    []Need      `json:"counted"`
+	NotCounted []Need      `json:"not_counted"`
+}
+
+// KindCount is how many of a view's needs that count are of one kind.
+type KindCount struct {
+	Kind  NeedKind `json:"kind"`
+	Count int      `json:"count"`
 }
 
 // WorkQueue is a Work queue view: the work in the order it is expected to land

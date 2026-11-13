@@ -1,11 +1,12 @@
 // What every part of the page shares: the document, the page's own view state
-// (what is open, what search holds, which bead id control just copied), and
-// the moves a row can make. The document decides every group, signal, count,
-// need and order; the view decides only what is folded and what is shown.
+// (what is open, which kind of need each Needs you view shows alone, what
+// search holds, which bead id control just copied), and the moves a row can
+// make. The document decides every group, signal, count, need, kind and order;
+// the view decides only what is folded and what is shown.
 
 import { createContext, useContext } from 'react';
 import type { ActuateError, ActuateResult } from '../actuate/client';
-import type { Counts, Document, Group, Row } from './document.gen';
+import type { Counts, Document, Group, NeedKind, Row } from './document.gen';
 
 /** Where an engage the page sent stands. */
 export type EngageAnswer =
@@ -27,6 +28,12 @@ export interface View {
   flip(key: string, def: boolean): void;
   /** Set several parts at once, as a count's click opens one view. */
   setOpen(parts: Record<string, boolean>): void;
+  /** The kind of need the Needs you view at key shows alone, undefined while
+   *  it shows every kind. */
+  kindShown(key: string): NeedKind | undefined;
+  /** Show one kind of need alone in the Needs you view at key, or every kind
+   *  again when it shows that kind alone already. */
+  showKind(key: string, kind: NeedKind): void;
   /** Copy an id to the clipboard for the bead id control whose key is from
    *  (useCopy, CopyButton). */
   copy(id: string, from: string): void;
@@ -74,6 +81,17 @@ export const COUNTS: { part: Part; count: keyof Counts; one: string; many: strin
   { part: 'not_scheduled', count: 'not_scheduled', one: 'not scheduled', many: 'not scheduled', look: 'Not moving' },
   { part: 'closed', count: 'closed', one: 'closed', many: 'closed', look: 'Closed' },
 ];
+
+/** What a Needs you view's count of one kind of need reads, beside the
+ *  number. */
+export const NEED_WORDS: Record<NeedKind, { one: string; many: string }> = {
+  'Pull request': { one: 'pull request', many: 'pull requests' },
+  Question: { one: 'question', many: 'questions' },
+  'Conversation waits for you': { one: 'conversation waiting for you', many: 'conversations waiting for you' },
+  'In conversation': { one: 'in conversation', many: 'in conversation' },
+  Ruling: { one: 'ruling', many: 'rulings' },
+  'Routed to you': { one: 'routed to you', many: 'routed to you' },
+};
 
 export const INK = '#1B1F23';
 export const MUTE = '#55606B';
