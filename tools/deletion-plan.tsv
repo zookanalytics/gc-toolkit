@@ -78,9 +78,6 @@ assets/scripts/review-dismissal.test.sh	tk-1tfzr71.21
 doctor/check-feedback-routing-owed/doctor.toml	tk-1tfzr71.21
 doctor/check-feedback-routing-owed/run.sh	tk-1tfzr71.21
 doctor/check-feedback-routing-owed/run.test.sh	tk-1tfzr71.21
-doctor/check-routed-work-claimable/doctor.toml	tk-1tfzr71.15
-doctor/check-routed-work-claimable/run.sh	tk-1tfzr71.15
-doctor/check-routed-work-claimable/run.test.sh	tk-1tfzr71.15
 assets/scripts/proactive-scan-sling.sh	tk-1tfzr71.17
 assets/scripts/proactive-scan-sling.test.sh	tk-1tfzr71.17
 orders/proactive-scan-sling.toml	tk-1tfzr71.17

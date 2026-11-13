@@ -8,9 +8,11 @@ follow-up mols).
 Extends `mol-polecat-base` for `load-context`, but replaces the
 `implement / self-review` chain with a single `survey` step that drives
 `tools/upstream-gc-sync.sh`, then a `report-and-close` step that persists
-the output and closes the bead. Every abort path leaves the bead open,
-reassigned to `{{notify_recipient}}` (or `human`), with the failure tail
-in notes and `metadata.aborted_at` naming the step.
+the output and closes the bead. Every abort path hands the bead to its
+owner. A keeper that `{{notify_recipient}}` names is assigned the bead, with the
+failure tail in its notes and `metadata.aborted_at` naming the step, and its
+mail requests its turn. With no keeper named, or `human`, a person is asked
+through a human gate the bead waits on, and clearing it runs the sync again.
 
 Variables:
   {{base_branch}}: The base branch to rebase on and compare against (e.g., main, integration/convoy-id) (default=main)

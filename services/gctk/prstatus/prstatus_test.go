@@ -10,7 +10,7 @@ import (
 // carries it.
 var (
 	oneGate    = []Blocker{gate("g")}
-	personOwed = []Blocker{routedToPerson("d")}
+	personOwed = []Blocker{{ID: "d", Title: "pick the release window", Status: "open", IssueType: "decision"}}
 )
 
 // The precedence table, one row per case pr-status-label.test.sh asserts.

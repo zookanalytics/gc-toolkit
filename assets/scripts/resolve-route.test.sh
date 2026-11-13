@@ -102,13 +102,14 @@ eq "$RC" 1 "an unknown name refuses"
 eq "$OUT" "" "with nothing on stdout"
 has "$ERR" "matches no live agent identity" "and says so"
 
-echo "# the operator marker is held by its reader, not a name that failed to resolve"
+echo "# human is a name no agent carries, and it resolves as any such name does"
 run "human"
-eq "$RC" 0 "'human' is accepted"
-eq "$OUT" "human" "unchanged"
+eq "$RC" 1 "'human' refuses"
+eq "$OUT" "" "with nothing on stdout"
+has "$ERR" "matches no live agent identity" "and says so"
 run "human" STUB_AGENTS_FAIL=1
-eq "$RC" 0 "no agent carries it, so an unreadable roster cannot unsettle it"
-eq "$OUT" "human" "and it still resolves to itself"
+eq "$RC" 3 "an unreadable roster leaves it unproven, as any name"
+eq "$OUT" "human" "and hands it back for the caller to decide"
 
 echo "# an unreadable roster is the absence of proof, not proof of an empty city"
 run "gc-toolkit.polecat" STUB_AGENTS_FAIL=1

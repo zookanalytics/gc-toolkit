@@ -85,8 +85,9 @@ shares only the word ([authority-map.md](authority-map.md)).
   - `preflight-tests` runs the checks through `gctk rig`, so every polecat starting
     from one base shares one recorded run, and keys a tracker on a stamp. Core's
     runs each command raw per polecat and matches trackers by title.
-  - `self-review` is a bounded check loop over those records, where Gas Town's is
-    one inline step.
+  - `self-review` is a bounded check loop over those records, whose last attempt
+    asks a person through a human gate when a check is still red, where Gas
+    Town's is one inline step.
   - `submit-and-exit` holds the anchor, the bring-current guard and the store-only
     exit, which are nouns of the merge and review subsystems. Once the handoff is
     written it removes the run's worktree with its local branch, as core's own

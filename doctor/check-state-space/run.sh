@@ -4,19 +4,18 @@
 # lifecycle/lifecycle.toml (built-in enum when the declaration is absent or
 # unparseable); a closed-only state (merged) on an OPEN bead is an error; and
 # an open bead in a declared detached state is held by nobody and offered to no
-# pool. The merge cadence drives those states, so its assignee must be empty and
-# its gc.routed_to must be empty or the declared park_route sentinel that no
-# pool claims; any other value is a second driver racing the cadence. A detached
-# anchor must also stay open: the cadence readers (pr-open, merge, pr-facts,
-# gate-ensure) enumerate --status=open, so one claimed or held into any other
-# live status drops out of every one of them until the claim resolves. The
-# open-scoped scan misses that end-state for the same reason the cadence does, so
-# a second probe reads the non-open live statuses to report it. No open bead
-# carries a metadata key from the deleted healer-bookkeeping registry — those
-# keys have no writer any more, so their presence means a retired repair pass is
-# still writing state. Finally, no live bead carries a key the registry retired
-# together with every reader (RETIRED_KEYS), whose presence is state nothing
-# acts on any more.
+# pool. The merge cadence drives those states, so its assignee and its
+# gc.routed_to must be empty; any value is a second driver racing the cadence.
+# A detached anchor must also stay open: the cadence readers (pr-open, merge,
+# pr-facts, gate-ensure) enumerate --status=open, so one claimed or held into
+# any other live status drops out of every one of them until the claim
+# resolves. The open-scoped scan misses that end-state for the same reason the
+# cadence does, so a second probe reads the non-open live statuses to report
+# it. No open bead carries a metadata key from the deleted healer-bookkeeping
+# registry — those keys have no writer any more, so their presence means a
+# retired repair pass is still writing state. Finally, no live bead carries a
+# key the registry retired together with every reader (RETIRED_KEYS), whose
+# presence is state nothing acts on any more.
 # Read-only. Exit 0=OK 1=Warning 2=Error. stdout: first line = message, then
 # "  - detail" lines. Live probes are bounded; an UNREADABLE probe warns (1),
 # never passes.
@@ -30,27 +29,20 @@ dir="${GC_PACK_DIR:-.}"
 BUILTIN_STATES="unanchored pre_open_gate pull_request merged abandoned retargeted blocked refused_false_completion"
 BUILTIN_CLOSED="merged"
 BUILTIN_DETACHED="pre_open_gate pull_request"
-BUILTIN_PARK_ROUTE="human"
 lifecycle="$dir/lifecycle/lifecycle.toml"
-toml_scalar() { # <file> <key> — the quoted string of the first `<key> = "..."`
-    awk -v k="$2" '$0 ~ ("^[[:space:]]*" k "[[:space:]]*=[[:space:]]*\"") {
-        sub(/^[^"]*"/, ""); sub(/".*$/, ""); print; exit }' "$1" 2>/dev/null
-}
 toml_array() { # <file> <key> — quoted strings of the first `<key> = [...]`
     awk -v k="$2" 'ok { print } $0 ~ ("^[[:space:]]*" k "[[:space:]]*=[[:space:]]*\\[") { ok = 1; print }' "$1" 2>/dev/null \
         | awk '{ print } /\]/ { exit }' | grep -o '"[^"]*"' | tr -d '"'
 }
-states=""; closed_states=""; detached_states=""; park_route=""
+states=""; closed_states=""; detached_states=""
 if [ -f "$lifecycle" ]; then
     states=$(toml_array "$lifecycle" "states")
     closed_states=$(toml_array "$lifecycle" "closed_states")
     detached_states=$(toml_array "$lifecycle" "detached_states")
-    park_route=$(toml_scalar "$lifecycle" "park_route")
 fi
 [ -n "$states" ] || states=$(printf '%s\n' $BUILTIN_STATES)
 [ -n "$closed_states" ] || closed_states=$(printf '%s\n' $BUILTIN_CLOSED)
 [ -n "$detached_states" ] || detached_states=$(printf '%s\n' $BUILTIN_DETACHED)
-[ -n "$park_route" ] || park_route="$BUILTIN_PARK_ROUTE"
 states_json=$(printf '%s\n' "$states" | jq -R . | jq -cs 'map(select(. != ""))')
 closed_json=$(printf '%s\n' "$closed_states" | jq -R . | jq -cs 'map(select(. != ""))')
 detached_json=$(printf '%s\n' "$detached_states" | jq -R . | jq -cs 'map(select(. != ""))')
@@ -206,7 +198,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     fi
     rows=$(printf '%s' "$raw" | scrub | jq -r \
         --argjson states "$states_json" --argjson closed "$closed_json" \
-        --argjson detached "$detached_json" --arg park "$park_route" --arg hre "$HEALER_RE" '
+        --argjson detached "$detached_json" --arg hre "$HEALER_RE" '
         def clean: tostring | gsub("[[:cntrl:]]"; " ");
         .[]? | . as $b | ($b.metadata // {}) as $m
         | (($b.id // "?") | clean) as $id
@@ -218,7 +210,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
                   elif ($states | index($mr)) == null then [["badmr", $id, $mr, ""]]
                   elif ($closed | index($mr)) != null then [["openclosed", $id, $mr, ""]]
                   elif ($detached | index($mr)) != null then
-                    ((if $rt == "" or $rt == $park then [] else [["detachedroute", $id, $mr, $rt]] end)
+                    ((if $rt == "" then [] else [["detachedroute", $id, $mr, $rt]] end)
                      + (if $as == "" then [] else [["detachedassignee", $id, $mr, $as]] end))
                   else [] end)
              else [] end)
@@ -302,7 +294,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         case "$kind" in
             badmr)      errors+=("$label bead $id: merge_result=\"$val\" is not a declared state ($enum_str) — an unknown state has no handler and every reader defaults differently on it; surface it with human-gate.sh, never invent a reading") ;;
             openclosed) errors+=("$label bead $id: OPEN with merge_result=$val — a closed-only state on an open bead means the close half of the transition was lost or a landed anchor was reopened") ;;
-            detachedroute)    errors+=("$label bead $id: merge_result=$val carries gc.routed_to=\"$extra\" — $val is a detached state (lifecycle/lifecycle.toml detached_states), driven by the merge cadence and offered to no pool, so any route but the \"$park_route\" park is demand for work already in the merge queue; the claim it invites moves the anchor out of \`--status=open\`, where merge.sh and pr-facts.sh both stop seeing it") ;;
+            detachedroute)    errors+=("$label bead $id: merge_result=$val carries gc.routed_to=\"$extra\" — $val is a detached state (lifecycle/lifecycle.toml detached_states), driven by the merge cadence and offered to no pool, so any route is demand for work already in the merge queue; the claim it invites moves the anchor out of \`--status=open\`, where merge.sh and pr-facts.sh both stop seeing it") ;;
             detachedassignee) errors+=("$label bead $id: merge_result=$val carries assignee=\"$extra\" — $val is a detached state (lifecycle/lifecycle.toml detached_states) and rests unheld; a holder here is a second driver racing the cadence on one anchor") ;;
             healer)     errors+=("$label bead $id: carries deleted healer-bookkeeping key \"$val\" — lifecycle/lifecycle.toml removed it with its writer, so something retired is still writing state") ;;
         esac

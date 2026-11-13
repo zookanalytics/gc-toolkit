@@ -39,7 +39,8 @@
 #
 # --conclude-merge commits a merge whose conflicts are resolved and audited.
 # --stop-merge asks a person about a conflict that cannot be resolved without
-# guessing, aborts the merge, and ends the run or hands the bead back.
+# guessing and aborts the merge. The work bead then waits on the question's gate,
+# armed to re-sling, and the run ends, or a bead with no molecule drains.
 #
 # A converse sitting sets its change up with --held-by <conversation> beside
 # --bead. Its claim is the conversation, so the bead must show that the sitting
@@ -156,26 +157,21 @@ if [ "$MODE" = stop ]; then
   "$BCA" ask --bead "$WORK_ID" --path "$AUDIT_PATH" --collided "$COLLIDED" --question "$QUESTION" \
     || { echo "$PROG: the question reached no gate; NOT stopping, since nothing asks it yet. Re-run the ask." >&2; exit 1; }
   git merge --abort
+  # ask filed the gate on the anchor, under a key that names this bead.
+  # await-ruling.sh gives the work bead its own edge onto it, releases this
+  # session's claim on the bead, clears its route and arms the re-sling, so
+  # clearing the gate re-slings the work, with a molecule or without one. A wait
+  # that does not land ends and drains nothing, and running this again converges.
   CLAIMED=$(gc hook current --id-only </dev/null 2>/dev/null) || CLAIMED=""
+  ANCHOR=$("$BCA" anchor --bead "$WORK_ID") \
+    && "$SCRIPT_DIR/await-ruling.sh" "$WORK_ID" --key "bring-current-question.$WORK_ID" --subject "$ANCHOR" --formula "$FORMULA" \
+    || { echo "$PROG: the wait did not land on $WORK_ID; NOT cancelling or draining, so the next worker retries." >&2; exit 1; }
   if [ -n "$CLAIMED" ] && [ "$CLAIMED" != "$WORK_ID" ]; then
-    # ask filed the gate on the anchor, under a key that names this bead, and
-    # await-ruling.sh gives the work bead its own edge onto it.
-    ANCHOR=$("$BCA" anchor --bead "$WORK_ID") \
-      && "$SCRIPT_DIR/await-ruling.sh" "$WORK_ID" --key "bring-current-question.$WORK_ID" --subject "$ANCHOR" --formula "$FORMULA" \
-      || { echo "$PROG: the wait did not land on $WORK_ID; NOT cancelling or draining, so the next worker retries." >&2; exit 1; }
     "$SCRIPT_DIR/decline.sh" --step "$STEP" --reason "bringing the branch current needs a decision only a person can make; the bring-current-question gate on the anchor asks it"
     exit $?
   fi
-  # A bead with no molecule parks to a person, naming what it waits for. The note
-  # lands first, and the park rides the hand-back, one write that reopens the bead
-  # and releases this session's claim. A refused hand-back leaves the claim on the
-  # route it had, which Gas City can release when the session ends. No agent serves
-  # the person route, so a claim parked there would stay held.
+  # A bead with no molecule has no run to end, so its notes carry why it stopped.
   gc bd update "$WORK_ID" --append-notes "Stopped bringing the branch current: a conflict needs a decision (the bring-current-question gate on the anchor asks it). Nothing was pushed." </dev/null >/dev/null
-  "$SCRIPT_DIR/hand-back.sh" "$WORK_ID" --set-metadata gc.routed_to=human \
-    --set-metadata "gc.takeaway=Needs a decision before its branch can be brought current; the gate on its anchor asks it" \
-    --set-metadata "gc.takeaway_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" --set-metadata gc.takeaway_by=mol-polecat-work \
-    --set-metadata gc.takeaway_settled=
   gc runtime drain-ack
   exit 0
 fi
