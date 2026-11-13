@@ -907,8 +907,9 @@ for sh in "${SHELLS[@]}"; do
   # The effort's beads and its summary task are filed and dispatched; work-2
   # joins with the writes that file an effort's bead (its target and the landing
   # bead's wait on it). The summary task's own wait takes it while the
-  # task is undispatched, which the arm with no dispatch marker shows, and still
-  # held, which the open work-1 shows.
+  # task is undispatched, which its arm shows, since the deferred-dispatch order
+  # clears an arm once it has sent the bead, and still held, which the open
+  # work-1 shows.
   JOINED='map(if .id == "land-1" then ._deps += [{id: "work-2", dependency_type: "blocks"}] else . end)
     + [{id: "work-2", title: "x", issue_type: "task", status: "open", assignee: "", description: "", metadata: {target: "integration/land-1"}, _deps: []}]'
   recipe_store; run_recipe "$sh"
@@ -921,15 +922,13 @@ for sh in "${SHELLS[@]}"; do
   case " $(open_blockers dz-sum) " in *" work-2 "*) ok "[$sh] late join: the summary task is held until the joining bead lands" ;;
     *) bad "[$sh] late join: the summary task is not held by the joining bead" ;; esac
 
-  for marker in '{}' '{"gc.dispatch_when_ready": "rig/gc-toolkit.polecat", "gc.dispatch_when_ready_slung": "slinging@2026-10-26T00:00:00Z"}'; do
-    recipe_store; run_recipe "$sh"
-    jq -c --arg m "$marker" "$JOINED"' | map(if .id == "dz-sum" then .metadata = ($m | fromjson) else . end)' "$STORE" > "$STORE.new" && mv "$STORE.new" "$STORE"
-    export SUMMARY=dz-sum WORK=work-2
-    run_late "$sh"
-    stopped && not_logged "dep add" && [ "$(waits_on dz-sum work-2)" = "0" ] && reported "file a fresh summary task" \
-      && ok "[$sh] late join: a dispatched summary task ($marker) takes no wait, and a fresh one is asked for" \
-      || bad "[$sh] late join: a dispatched summary task ($marker) took the wait (rc=$RC)"
-  done
+  recipe_store; run_recipe "$sh"
+  jq -c "$JOINED"' | map(if .id == "dz-sum" then .metadata = {} else . end)' "$STORE" > "$STORE.new" && mv "$STORE.new" "$STORE"
+  export SUMMARY=dz-sum WORK=work-2
+  run_late "$sh"
+  stopped && not_logged "dep add" && [ "$(waits_on dz-sum work-2)" = "0" ] && reported "file a fresh summary task" \
+    && ok "[$sh] late join: a summary task with no arm, dispatched already, takes no wait, and a fresh one is asked for" \
+    || bad "[$sh] late join: a summary task with no arm took the wait (rc=$RC)"
 
   # Armed with no marker, every bead it waits on closed: a pass that read it as
   # ready slings it whatever wait is added after, so it takes none either.

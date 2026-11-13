@@ -630,7 +630,7 @@ run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk
 has "DEFERRED arm tk-sub --target gc-toolkit/gc-toolkit.polecat" "$LOG" \
     "(BLKARM) --then-route arms the dispatch for when the wait lifts"
 hasnt "--sling-arg" "$LOG" \
-    "(BLKARM) …a plain arm, no --on — reconcile slings it even with the pour stamp set"
+    "(BLKARM) …a plain arm, no --on — the order's start slings it even with the pour stamp set"
 has "armed the dispatch to gc-toolkit/gc-toolkit.polecat" "$ERR" \
     "(BLKARM) …and the arm lands"
 before '^DEFERRED arm' 'gc.reacted_by' "(BLKARM) …before the landed proof, which is the last write"
@@ -638,7 +638,7 @@ before '^DEFERRED arm' 'gc.reacted_by' "(BLKARM) …before the landed proof, whi
 # Control: a pour stamp still set after a release that exits 0 still lets the
 # plain arm land. gc-helm.sh takeaway --release clears the stamp in the update
 # whose exit it takes, so a stamp set after a zero exit was written after the release
-# landed, here on a member its parent places. No arm or reconcile guard reads
+# landed, here on a member its parent places. No arm or start guard reads
 # that stamp, so dispose runs on to arm the plain dispatch.
 printf 'gc-toolkit/gc-toolkit.proactive' > "$FAKE_EXEC_ROUTED_FILE"
 export FAKE_HELM_KEEPS_STAMP=1
@@ -707,7 +707,7 @@ unset FAKE_DEPS_JSON
 
 # (BLKROUTE) --then-route is held to the SAME roster test as --route: a target no
 # pool runs is refused before anything is written, not silently armed to fail
-# every reconcile pass. Its parse check only tests for a "/", which a copied
+# every pass of the order. Its parse check only tests for a "/", which a copied
 # `<rig>/<rig>.polecat` placeholder passes, so the roster probe is what catches it.
 export FAKE_DEPS_JSON='[{"id":"tk-blk1"}]'
 export FAKE_POOL_DEAD=1
@@ -716,7 +716,7 @@ run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk
 eq "$RC" "2" "(BLKROUTE) --then-route to a pool nothing runs is refused"
 has "PROACTIVE deliverable gc-toolkit/gc-toolkit.nosuchpool tk-sub" "$LOG" \
     "(BLKROUTE) …the exit asks whether that pool can claim before arming"
-hasnt "DEFERRED arm" "$LOG" "(BLKROUTE) …and nothing is armed to a target that would fail every reconcile pass"
+hasnt "DEFERRED arm" "$LOG" "(BLKROUTE) …and nothing is armed to a target that would fail every pass of the order"
 unset FAKE_POOL_DEAD FAKE_DEPS_JSON
 
 # (BLKASSIGN) a town-repo edit that must wait on a rig change is held on that
@@ -1198,22 +1198,22 @@ eq "$LOG" "" "(CLOSE) …and nothing is written"
 # reaction workflow, and the closer must be the bead's SOLE dispatch surface
 # (formula-spec-v2 §3). So the close exit does NOT sling now: it holds the bead on
 # the reaction's own workflow root and arms a deferred dispatch, and the
-# deferred-dispatch reconcile pass slings mol-validate-close once that root
-# closes. The arm carries the exact sling reconcile replays, so the closer
+# deferred-dispatch order slings mol-validate-close once that root closes.
+# The arm carries the formula the order pours, so the closer
 # FORMULA is asserted here rather than a bare "something was slung".
 GC_RIG=gc-toolkit run tk-sub --disposition close --reason "already fixed" --takeaway "close: fixed in #123" --after-workflow tk-root
 eq "$RC" "0" "(CLOSEDEFER) the deferred close exit succeeds"
-has "DEP bd dep add tk-sub tk-root -t blocks" "$LOG" "(CLOSEDEFER) it holds the bead on the reaction root so reconcile waits for it to close"
+has "DEP bd dep add tk-sub tk-root -t blocks" "$LOG" "(CLOSEDEFER) it holds the bead on the reaction root so the order waits for it to close"
 before 'Close brief' '^DEFERRED arm' "(CLOSEDEFER) …with the close brief on the subject before the closer is armed"
 has "DEFERRED arm tk-sub --target gc-toolkit/gc-toolkit.polecat --sling-arg --on --sling-arg mol-validate-close" "$LOG" \
-   "(CLOSEDEFER) …and arms a deferred dispatch carrying the exact --on mol-validate-close sling reconcile replays"
-hasnt "SLING" "$LOG" "(CLOSEDEFER) …and slings nothing now — the reconcile pass does it once the reaction closes"
+   "(CLOSEDEFER) …and arms a deferred dispatch carrying the --on mol-validate-close the order pours"
+hasnt "SLING" "$LOG" "(CLOSEDEFER) …and slings nothing now — the deferred-dispatch order does it once the reaction closes"
 has "gc.proactive_reaction=1" "$LOG" "(CLOSEDEFER) …and stamps the legacy landed proof so a re-offer does not queue a second closer"
 before '^DEFERRED arm' 'gc.proactive_reaction=1' "(CLOSEDEFER) …after the arm"
 hasnt "gc.reacted_by" "$LOG" "(CLOSEDEFER) …with no reaction-bead marker on the frozen path"
 hasnt "CLOSE bd close" "$LOG" "(CLOSEDEFER) …and never closes the bead itself"
 
-# The gate is a REQUIRED write: reconcile dispatches from `bd list --ready`, so a
+# The gate is a REQUIRED write: the order dispatches by bd's readiness, so a
 # hold that does not land leaves the bead reading ready and mol-validate-close
 # would sling beside the still-live reaction — the two-live-surfaces shape this
 # exit prevents. So a failed hold fails closed: the exit refuses to arm, and the
@@ -1923,23 +1923,17 @@ unset FAKE_SHOW_JSON FAKE_GH FAKE_ORIGIN_URL FAKE_RIG_PATH
 # ── The notice, end to end through the real deferred-dispatch.sh ─────────────
 # The stubbed tool above proves each exit asks for the notice. These runs hand
 # the exits the real deferred-dispatch.sh over the same stubbed gc, so what the
-# agent receives is pinned. The store stays unpinned, and the deferred-dispatch
-# pass keeps its lock in this run's tmpdir.
+# agent receives at the exit is pinned. The store stays unpinned. No pass sends
+# a recorded notice later: the deferred-dispatch order's start sends arms alone.
 #   (E2EASSIGN) --assign on a bead bd reports ready: the agent is mailed at
 #               once, asking for its turn and naming the bead, and no notice
 #               is left recorded
-#   (E2EHELD)   --then-assign while the wait holds: no mail, the notice is
-#               recorded for the agent, and a pass while bd still holds the
-#               bead sends nothing
-#   (E2ELIFT)   the wait lifts: the next pass mails the agent, naming the
-#               bead, and retires the notice
+#   (E2EHELD)   --then-assign while the wait holds: no mail, and the notice is
+#               recorded for the agent
 #   (E2ENOTURN) --assign whose mail is saved but gets the agent no turn, from
 #               the mail or from the nudge after it: the exit lands with the
-#               notice still recorded, and the next pass, with the first mail
-#               still unread in the mailbox, requests the turn with
-#               gc session nudge and retires the notice
+#               notice still recorded
 unset GC_RIG_ROOT GC_PACK_STATE_DIR GC_ORDER_OUTCOME_FILE
-export DEFERRED_DISPATCH_STATE_DIR="$TMP/deferred-state" DEFERRED_DISPATCH_PASS_BUDGET_SECS=0
 REAL_DD="$HERE/deferred-dispatch.sh"
 GC_DEFERRED_DISPATCH_TOOL="$REAL_DD" FAKE_SUBJECT_READY=1 \
     run tk-sub --disposition actionable --reason "the remedy is a city.toml edit" \
@@ -1963,19 +1957,7 @@ eq "$RC" "0" "(E2EHELD) the --then-assign exit lands with the real deferred-disp
 hasnt "MAIL " "$LOG" "(E2EHELD) no mail goes while the wait holds the bead"
 has "--set-metadata gc.notify_when_ready=gc-toolkit.mechanik" "$LOG" "(E2EHELD) …the notice is recorded for the agent instead"
 before '^UPDATE bd update tk-sub --set-metadata gc.notify_when_ready' 'gc.reacted_by' "(E2EHELD) …before the landed proof"
-: > "$FAKE_LOG"
-DD_RC=0; "$REAL_DD" reconcile >/dev/null 2>&1 || DD_RC=$?
-eq "$DD_RC" "0" "(E2EHELD) a deferred-dispatch pass while the wait holds is clean"
-hasnt "MAIL " "$(cat "$FAKE_LOG")" "(E2EHELD) …and sends nothing"
 eq "$(cat "$FAKE_STATE.notice" 2>/dev/null)" "gc-toolkit.mechanik" "(E2EHELD) …keeping the notice for the agent"
-DD_RC=0; FAKE_SUBJECT_READY=1 "$REAL_DD" reconcile >/dev/null 2>&1 || DD_RC=$?
-LOG="$(cat "$FAKE_LOG")"
-eq "$DD_RC" "0" "(E2ELIFT) the pass once the wait lifts is clean"
-eq "$(grep -c '^MAIL ' "$FAKE_LOG")" "1" "(E2ELIFT) the agent is mailed once the wait lifts"
-has "MAIL mail send gc-toolkit.mechanik --notify" "$LOG" "(E2ELIFT) …asking for its turn"
-has "Ready for you: tk-sub" "$LOG" "(E2ELIFT) …naming the bead"
-[ ! -e "$FAKE_STATE.notice" ] && ok "(E2ELIFT) …and the notice retires" \
-    || bad "(E2ELIFT) the notice is still recorded after it was sent"
 
 unset FAKE_DEPS_JSON
 GC_DEFERRED_DISPATCH_TOOL="$REAL_DD" FAKE_SUBJECT_READY=1 FAKE_MAIL_NUDGE_FAILS=1 FAKE_NUDGE_FAILS=1 \
@@ -1987,16 +1969,6 @@ eq "$(grep -c '^NUDGE ' "$FAKE_LOG")" "1" "(E2ENOTURN) …and, the mail having r
 before '^NUDGE ' 'gc.reacted_by' "(E2ENOTURN) …before the landed proof"
 eq "$(cat "$FAKE_STATE.notice" 2>/dev/null)" "gc-toolkit.mechanik" "(E2ENOTURN) …and the notice stays recorded for the agent"
 has "nudge failed: fake nudge-store failure" "$ERR" "(E2ENOTURN) …and the mail's diagnostic reaches the exit's output"
-: > "$FAKE_LOG"
-DD_RC=0; FAKE_SUBJECT_READY=1 "$REAL_DD" reconcile >/dev/null 2>&1 || DD_RC=$?
-LOG="$(cat "$FAKE_LOG")"
-eq "$DD_RC" "0" "(E2ENOTURN) the next pass is clean"
-eq "$(grep -c '^MAIL ' "$FAKE_LOG")" "1" "(E2ENOTURN) …it sends the mail again"
-eq "$(wc -l < "$FAKE_STATE.mailbox" | tr -d ' ')" "1" "(E2ENOTURN) …which the dedup key keeps to the one copy in the mailbox"
-has "NUDGE session nudge gc-toolkit.mechanik Ready for you: tk-sub" "$LOG" "(E2ENOTURN) …so it requests the turn with gc session nudge, naming the bead"
-[ ! -e "$FAKE_STATE.notice" ] && ok "(E2ENOTURN) …and the notice retires" \
-    || bad "(E2ENOTURN) the notice is still recorded after the turn was requested"
-unset DEFERRED_DISPATCH_STATE_DIR DEFERRED_DISPATCH_PASS_BUDGET_SECS
 
 echo ""
 echo "first-reaction-dispose (exits, reaction-bead): $PASS passed, $FAIL failed"

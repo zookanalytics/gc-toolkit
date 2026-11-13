@@ -198,7 +198,7 @@ chmod +x "$PACK"/*.sh
 # --assignee, --set-metadata, --unset-metadata and --append-notes to the work
 # bead. Every call but a read is logged. A `--db <path>` pin is dropped. A read
 # the gctk under test makes answers from the same beads and edges, through the
-# seam holds-store.stub.sh keeps.
+# seam holds-store.stub.sh keeps, and its write is the update above.
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 if [ "$1" = bd ] && [ "${2:-}" = --db ]; then set -- bd "${@:4}"; fi
@@ -209,7 +209,7 @@ rows() {
 edges() {
   { [ -n "${FAKE_DEPS:-}" ] && [ -f "$FAKE_DEPS" ] && cat "$FAKE_DEPS"; } | jq -R -s -c 'split("\n") | map(select(length > 0) | split("|") | {from: .[0], type: .[1], to: .[2]})'
 }
-if [ -n "${HOLDS_STUB_READ:-}" ] && [ "$1" = bd ]; then
+if [ -n "${HOLDS_STUB_READ:-}" ] && [ "$1" = bd ] && [ "${2:-}" != update ]; then
   shift
   rows | jq -c --argjson e "$(edges)" '[ .[] | . as $b
     | .dependencies = ((.dependencies // []) + [ $e[] | select(.from == $b.id) | {depends_on_id: .to, type: .type} ]) ]' > "$FAKE_META.holds"

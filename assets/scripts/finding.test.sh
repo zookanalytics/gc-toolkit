@@ -5,6 +5,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-finding-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
 . "$HERE/test-harness.sh"
 unset GC_RIG 2>/dev/null || true
+# A deferral arms its follow-up through deferred-dispatch.sh, whose arm is gctk's.
+harness_build_gctk
 harness_init
 SUT="$HERE/finding.sh"
 
