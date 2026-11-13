@@ -333,10 +333,10 @@ api_head() { # <branch> -> sha from the API, or nothing
 # be proven current: a missing head oid, an unreadable or unparseable PR, a
 # scratch or compose failure, or an edit that did not take. The anchor holds
 # at pre_open_gate for a retry rather than flip a PR known to be behind.
-# <phased> is the anchor's gate set resolved at <head_oid>, which the composed
-# handoff facts name.
-refresh_pr_body() { # <id> <num> <head_oid> <phased>
-  local id="$1" num="$2" head_oid="$3" phased="${4:-}"
+# <phased> is the anchor's gate set resolved at <head_oid>, and <target> the base
+# find_pr read the PR open into, which the composed handoff facts name.
+refresh_pr_body() { # <id> <num> <head_oid> <phased> <target>
+  local id="$1" num="$2" head_oid="$3" phased="${4:-}" base="${5:-}"
   local view_json CUR NEW composed summary beads title live rc what="" edit=()
   if [ -z "$head_oid" ]; then
     echo "$PROG: $id PR#$num head oid unknown from the PR row; body refresh cannot be composed, anchor stays pre_open_gate (retry next pass)" >&2
@@ -359,7 +359,7 @@ refresh_pr_body() { # <id> <num> <head_oid> <phased>
   NEW=$(mktemp "${TMPDIR:-/tmp}/gctk-pr-open-new.XXXXXX") \
     || { rm -f "$CUR"; echo "$PROG: $id PR#$num scratch file unavailable; anchor stays pre_open_gate (retry next pass)" >&2; return 1; }
   printf '%s' "$view_json" | jq -r '.body // ""' 2>/dev/null > "$CUR"
-  composed=$(compose_pr "$id" --head "$head_oid" --opening --gates "$phased" --body-file "$CUR")
+  composed=$(compose_pr "$id" --head "$head_oid" --target "$base" --opening --gates "$phased" --body-file "$CUR")
   summary=$(printf '%s' "$composed" | jq -r '.summary // empty' 2>/dev/null)
   beads=$(printf '%s' "$composed" | jq -r '.branch_beads // empty' 2>/dev/null)
   case "$summary" in
@@ -485,7 +485,7 @@ while IFS= read -r tagged; do
           echo "$PROG: $id PR#$CERT_NUM gate set unreadable at its head ${CERT_HEAD_OID:0:8}; anchor stays pre_open_gate (retry next pass)" >&2
           skipped=$((skipped + 1)); continue
         fi
-        if ! refresh_pr_body "$id" "$CERT_NUM" "$CERT_HEAD_OID" "$APHASED"; then
+        if ! refresh_pr_body "$id" "$CERT_NUM" "$CERT_HEAD_OID" "$APHASED" "$target"; then
           skipped=$((skipped + 1)); continue
         fi
         # Record whether this adopted PR is a draft the refinery owns the ready-flip
@@ -638,7 +638,7 @@ GATES
   # branch, once there is more than the anchor's, such as an integration
   # effort's landed members. Beads on the branch that do not read open the PR
   # without the section, with a line.
-  if ! COMPOSED=$(compose_pr "$id" --head "$head_oid" --opening --gates "$PHASED" \
+  if ! COMPOSED=$(compose_pr "$id" --head "$head_oid" --target "$target" --opening --gates "$PHASED" \
        ${SUP_NUM:+--supersedes "$SUP_NUM" --superseded-head "$SUP_HEAD"}) \
      || [ "$(printf '%s' "$COMPOSED" | jq -r '.summary // empty' 2>/dev/null)" != written ]; then
     echo "$PROG: $id branch '$branch' PR title and body could not be composed; skip (retry next pass)" >&2

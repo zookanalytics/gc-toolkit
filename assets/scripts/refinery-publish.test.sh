@@ -16,6 +16,9 @@
 #     parks the bead behind refinery-invalid-existing-pr, whose message names
 #     the stand-down under that key, a bead at a head the refinery has not
 #     validated among them;
+#   - the body names the base the PR opens into: the rig's default branch for a
+#     bead that records no target, and a retargeted bead's new target over its
+#     older merged_target;
 #   - an edit that does not take pushes nothing, so the head never moves under
 #     a stale body;
 #   - a branch someone pushed to after the prep is refused, never overwritten,
@@ -156,6 +159,30 @@ run --bead nf
 eq "$RC" 4 "a recorded PR the repository does not have parks the bead (exit 4)"
 has "$(logged scripts)" "human-gate --subject nf --key refinery-invalid-existing-pr" "…behind refinery-invalid-existing-pr"
 has "$(logged scripts)" "stand-down.sh nf --key refinery-invalid-existing-pr --ruling" "…whose message names the stand-down under its key"
+
+echo "# the body names the base the PR opens into: the rig's default branch, or a retargeted bead's new one"
+fresh
+branch_with trunk trunk.txt >/dev/null
+git -C "$RIG" fetch -q origin "+refs/heads/trunk:refs/remotes/origin/trunk"
+git -C "$RIG" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/trunk
+branch_with polecat/dt dt.txt trunk >/dev/null
+work dt polecat/dt '{"target":""}'
+prepared dt polecat/dt
+HEAD_DT=$(git -C "$HOME_DIR/worktrees/dt" rev-parse HEAD)
+run --bead dt
+eq "$RC" 0 "a bead that records no target publishes (exit 0)"
+has "$(logged gctk)" "pr compose dt --head $HEAD_DT --target trunk " "…its body naming the rig's default branch"
+has "$(logged gh)" "pr create --repo zook/rig --base trunk --head polecat/dt" "…the base the PR opens into"
+fresh
+branch_with integration/y y-base.txt >/dev/null
+branch_with polecat/rt rt.txt integration/y >/dev/null
+work rt polecat/rt '{"target":"integration/y","merged_target":"integration/x"}'
+prepared rt polecat/rt
+HEAD_RT=$(git -C "$HOME_DIR/worktrees/rt" rev-parse HEAD)
+run --bead rt
+eq "$RC" 0 "a retargeted bead whose merged_target names its old base publishes (exit 0)"
+has "$(logged gctk)" "pr compose rt --head $HEAD_RT --target integration/y " "…its body naming the new base"
+has "$(logged gh)" "pr create --repo zook/rig --base integration/y --head polecat/rt" "…the base the PR opens into"
 
 echo "# an edit that does not take pushes nothing"
 fresh

@@ -40,6 +40,12 @@ adopted, at --head once its pre-open gates signed off there: the region says
 so, it is rewritten whenever it differs, and a body written before the
 markers existed has the region marked over its shape.
 
+--target is the branch the PR opens into, or is open into: the base the
+caller resolved for the PR's create, or read the open PR's base against. The
+summary region names it, and never the bead's own target or merged_target,
+since a bead with no target opens into the rig's default branch and a
+retargeted bead's merged_target names its earlier base.
+
 --gates is the gate set the bead's check set resolves to at --head, as
 review-checks.sh --resolve --through open-as-draft --with-phase prints it,
 empty for none. A region that must be written without it is left as it
@@ -65,8 +71,8 @@ const (
 )
 
 type prComposeOpts struct {
-	head, bodyFile, gates, supersedes, supersededHead, sections string
-	opening                                                     bool
+	head, target, bodyFile, gates, supersedes, supersededHead, sections string
+	opening                                                             bool
 }
 
 func newPRComposeCmd(stdout, stderr io.Writer) *cobra.Command {
@@ -91,6 +97,7 @@ func newPRComposeCmd(stdout, stderr io.Writer) *cobra.Command {
 	}
 	f := cmd.Flags()
 	f.StringVar(&o.head, "head", "", "the commit the PR opens at, or carries now")
+	f.StringVar(&o.target, "target", "", "the branch the PR opens into, or is open into")
 	f.StringVar(&o.bodyFile, "body-file", "", "the PR's body as published, - for stdin; without it the PR is not opened yet")
 	f.BoolVar(&o.opening, "opening", false, "the PR opens, or is adopted, at --head once its pre-open gates signed off there")
 	f.StringVar(&o.gates, "gates", "", "the gates the bead's check set resolves to at --head, one <check>\\t<phase> per line")
@@ -103,7 +110,7 @@ func newPRComposeCmd(stdout, stderr io.Writer) *cobra.Command {
 // request is the composition the flags ask for, or the usage error that refuses
 // it.
 func (o prComposeOpts) request(c *cobra.Command) (pr.Request, error) {
-	req := pr.Request{Head: strings.TrimSpace(o.head), Opening: o.opening}
+	req := pr.Request{Head: strings.TrimSpace(o.head), Target: strings.TrimSpace(o.target), Opening: o.opening}
 	for _, s := range strings.Split(o.sections, ",") {
 		switch strings.TrimSpace(s) {
 		case sectionSummary:
@@ -116,6 +123,9 @@ func (o prComposeOpts) request(c *cobra.Command) (pr.Request, error) {
 	}
 	if req.Summary && req.Head == "" {
 		return req, errors.New("the summary region names the PR's head: give --head")
+	}
+	if req.Summary && req.Target == "" {
+		return req, errors.New("the summary region names the branch the PR opens into: give --target")
 	}
 	if c.Flags().Changed("gates") {
 		req.Gates = pr.ParseGates(o.gates)

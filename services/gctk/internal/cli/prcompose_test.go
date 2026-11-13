@@ -95,7 +95,7 @@ func runCompose(t *testing.T, args ...string) (composed, string, string, int) {
 
 func TestPRComposeANewPR(t *testing.T) {
 	stubCompose(t, "["+composeAnchor+"]")
-	got, raw, _, code := runCompose(t, "tk-a", "--head", "abcdef1234567890", "--opening",
+	got, raw, _, code := runCompose(t, "tk-a", "--target", "main", "--head", "abcdef1234567890", "--opening",
 		"--gates", "correctness\tpre-open", "--sections", "summary")
 	if code != 0 {
 		t.Fatalf("exit %d", code)
@@ -110,15 +110,20 @@ func TestPRComposeANewPR(t *testing.T) {
 	if !strings.Contains(raw, `"<!-- gc:pr-summary -->`) {
 		t.Errorf("the markers are escaped in the JSON: %s", raw)
 	}
+	got, _, _, code = runCompose(t, "tk-a", "--target", "trunk", "--head", "abcdef1234567890", "--opening",
+		"--gates", "correctness\tpre-open", "--sections", "summary")
+	if code != 0 || !strings.Contains(got.Body, "- Target: `trunk`\n") {
+		t.Errorf("the region names the target given, not the bead's: exit %d:\n%s", code, got.Body)
+	}
 }
 
 func TestPRComposeGatesGivenEmpty(t *testing.T) {
 	stubCompose(t, "["+composeAnchor+"]")
-	got, _, _, code := runCompose(t, "tk-a", "--head", "abcdef12", "--opening", "--gates", "", "--sections", "summary")
+	got, _, _, code := runCompose(t, "tk-a", "--target", "main", "--head", "abcdef12", "--opening", "--gates", "", "--sections", "summary")
 	if code != 0 || got.Summary != "written" || !strings.Contains(got.Body, "- Anchor declares no pre-open gate (`check_set=correctness`); opened at `abcdef12`.") {
 		t.Errorf("exit %d: %+v", code, got)
 	}
-	got, _, _, code = runCompose(t, "tk-a", "--head", "abcdef12", "--opening", "--sections", "summary")
+	got, _, _, code = runCompose(t, "tk-a", "--target", "main", "--head", "abcdef12", "--opening", "--sections", "summary")
 	if code != 0 || got.Summary != "needs-gates" || got.Body != "" {
 		t.Errorf("without --gates: exit %d: %+v", code, got)
 	}
@@ -133,7 +138,7 @@ func TestPRComposeAPublishedBody(t *testing.T) {
 	if err := os.WriteFile(file, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, _, _, code := runCompose(t, "tk-a", "--head", "abcdef12", "--body-file", file)
+	got, _, _, code := runCompose(t, "tk-a", "--target", "main", "--head", "abcdef12", "--body-file", file)
 	if code != 0 || got.Summary != "unmanaged" || got.BranchBeads != "written" || got.BranchBeadCount != 2 {
 		t.Fatalf("exit %d: %+v", code, got)
 	}
@@ -153,7 +158,7 @@ func TestPRComposeAPublishedBody(t *testing.T) {
 		stdin := os.Stdin
 		os.Stdin = r
 		defer func() { os.Stdin = stdin }()
-		again, _, _, code := runCompose(t, "tk-a", "--head", "abcdef12", "--body-file", "-")
+		again, _, _, code := runCompose(t, "tk-a", "--target", "main", "--head", "abcdef12", "--body-file", "-")
 		if code != 0 || again.Body != got.Body {
 			t.Errorf("exit %d: %q", code, again.Body)
 		}
@@ -179,7 +184,7 @@ func TestPRComposeReadsTheBeadsOwnStore(t *testing.T) {
 	if err := os.WriteFile(file, []byte("Operator text.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, _, _, code := runCompose(t, "tk-a", "--head", "abcdef12", "--body-file", file)
+	got, _, _, code := runCompose(t, "tk-a", "--target", "main", "--head", "abcdef12", "--body-file", file)
 	if code != 0 || got.BranchBeads != "written" || got.BranchBeadCount != 2 {
 		t.Fatalf("exit %d: %+v", code, got)
 	}
@@ -209,29 +214,30 @@ func TestPRComposeRefuses(t *testing.T) {
 	stubCompose(t, "["+composeAnchor+"]")
 	for name, args := range map[string][]string{
 		"no head for the summary":         {"tk-a"},
-		"an unknown section":              {"tk-a", "--head", "x", "--sections", "summary,footer"},
-		"a superseded PR with no head":    {"tk-a", "--head", "x", "--opening", "--supersedes", "41"},
-		"a superseded PR, not opening":    {"tk-a", "--head", "x", "--supersedes", "41", "--superseded-head", "y"},
-		"a superseded PR, a body to edit": {"tk-a", "--head", "x", "--opening", "--body-file", "-", "--supersedes", "41", "--superseded-head", "y"},
-		"no bead":                         {"--head", "x"},
+		"no target for the summary":       {"tk-a", "--head", "x"},
+		"an unknown section":              {"tk-a", "--target", "main", "--head", "x", "--sections", "summary,footer"},
+		"a superseded PR with no head":    {"tk-a", "--target", "main", "--head", "x", "--opening", "--supersedes", "41"},
+		"a superseded PR, not opening":    {"tk-a", "--target", "main", "--head", "x", "--supersedes", "41", "--superseded-head", "y"},
+		"a superseded PR, a body to edit": {"tk-a", "--target", "main", "--head", "x", "--opening", "--body-file", "-", "--supersedes", "41", "--superseded-head", "y"},
+		"no bead":                         {"--target", "main", "--head", "x"},
 	} {
 		if _, out, _, code := runCompose(t, args...); code != 1 || out != "" {
 			t.Errorf("%s: exit %d, stdout %q", name, code, out)
 		}
 	}
-	if _, out, errs, code := runCompose(t, "tk-gone", "--head", "x"); code != 2 || out != "" || !strings.Contains(errs, "tk-gone") {
+	if _, out, errs, code := runCompose(t, "tk-gone", "--target", "main", "--head", "x"); code != 2 || out != "" || !strings.Contains(errs, "tk-gone") {
 		t.Errorf("a bead the store does not hold: exit %d, %q, %q", code, out, errs)
 	}
-	if _, out, _, code := runCompose(t, "tk-a", "--head", "x", "--body-file", filepath.Join(t.TempDir(), "absent")); code != 2 || out != "" {
+	if _, out, _, code := runCompose(t, "tk-a", "--target", "main", "--head", "x", "--body-file", filepath.Join(t.TempDir(), "absent")); code != 2 || out != "" {
 		t.Errorf("a body that does not read: exit %d, %q", code, out)
 	}
 	t.Setenv("STUB_LIST_FAIL", "1")
-	if _, out, _, code := runCompose(t, "tk-a", "--head", "x"); code != 2 || out != "" {
+	if _, out, _, code := runCompose(t, "tk-a", "--target", "main", "--head", "x"); code != 2 || out != "" {
 		t.Errorf("a store that does not read: exit %d, %q", code, out)
 	}
 	t.Setenv("STUB_LIST_FAIL", "")
 	t.Setenv("STUB_WHERE_FAIL", "1")
-	if _, out, errs, code := runCompose(t, "tk-a", "--head", "x"); code != 2 || out != "" || !strings.Contains(errs, "the store holding tk-a did not resolve") {
+	if _, out, errs, code := runCompose(t, "tk-a", "--target", "main", "--head", "x"); code != 2 || out != "" || !strings.Contains(errs, "the store holding tk-a did not resolve") {
 		t.Errorf("a store that does not resolve: exit %d, %q, %q", code, out, errs)
 	}
 }

@@ -66,7 +66,7 @@ func TestRegionRendersAsBefore(t *testing.T) {
 			}
 			store := fake.New()
 			store.Put(fake.Bead{ID: c.ID, Title: "t", Status: "open", Description: c.Desc, Metadata: meta})
-			req := Request{Head: c.Head, Opening: c.Mode == "open", Gates: gatesOf(c.Gates), Summary: true}
+			req := Request{Head: c.Head, Target: c.Target, Opening: c.Mode == "open", Gates: gatesOf(c.Gates), Summary: true}
 			if c.SupNum != "" {
 				req.Supersedes = &Superseded{Number: c.SupNum, Head: c.SupHead}
 			}

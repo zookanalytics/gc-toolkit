@@ -8,14 +8,11 @@ import "github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 // lifecycle/lifecycle.toml. The change that moves a shell writer into a domain
 // takes its key's declaration over. The branch, which the evaluator reads too,
 // is declared once, with its keys, and merged_target and merge_result are the
-// record's, read through the reading faces package record exports.
+// record's, read through what package record exports: the selection OnTarget
+// and the reading face Result.
 
-// The bead that owns the PR: where it lands and which checks gate it.
+// The bead that owns the PR: which checks gate it.
 var (
-	targetKey = ledger.ReadOnly("target", ledger.String,
-		"The branch a bead's work lands on, which the polecat records at submit and a caller can set first "+
-			"(lifecycle/lifecycle.toml, [metadata.merge_identity]). A composition names it as the PR's target "+
-			"when merged_target is absent.")
 	checkSetKey = ledger.ReadOnly("check_set", ledger.String,
 		"The review checks a bead's change is gated by, as a comma list (lifecycle/lifecycle.toml, "+
 			"[metadata.gates]). A composition names it when no pre-open gate resolves from it.")

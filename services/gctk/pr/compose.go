@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
-	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 )
 
 // Request is what a composition takes besides the bead: the PR as GitHub has
@@ -13,6 +12,10 @@ import (
 type Request struct {
 	// Head is the commit the PR opens at, or carries now.
 	Head string
+	// Target is the branch the PR opens into, or is open into: the base its
+	// caller resolved for the PR's create, or read the open PR's base against.
+	// The summary region names it.
+	Target string
 	// Body is the PR's body as published, nil for a PR not opened yet.
 	Body *string
 	// Opening is a PR opened, or adopted, at Head once its pre-open gates
@@ -113,10 +116,12 @@ func Compose(l *ledger.Ledger, id string, req Request) (*Composition, error) {
 
 // readRegion is what the bead's summary region says, and the bead's branch.
 // The summary and the dispatch text are taken as the region carries them, and
-// a summary of whitespace alone is none. The target is merged_target, else
-// target, else main.
+// a summary of whitespace alone is none. The target is the request's, the base
+// the PR opens into or is open into. The bead's own keys can name another: a
+// bead with no target opens into the rig's default branch, and a retargeted
+// bead's merged_target names its earlier base until its next record.
 func readRegion(bead *ledger.Record, req Request) (region, string, error) {
-	keys := []reading{summaryKey, branchKey, record.Target, targetKey, checkSetKey}
+	keys := []reading{summaryKey, branchKey, checkSetKey}
 	vals := make([]string, len(keys))
 	for i, k := range keys {
 		v, err := value(bead, k)
@@ -125,7 +130,7 @@ func readRegion(bead *ledger.Record, req Request) (region, string, error) {
 		}
 		vals[i] = v
 	}
-	summary, branch, merged, target, checkSet := vals[0], vals[1], vals[2], vals[3], vals[4]
+	summary, branch, checkSet := vals[0], vals[1], vals[2]
 	summary = carried(summary)
 	if strings.TrimFunc(summary, isSpace) == "" {
 		summary = ""
@@ -135,7 +140,7 @@ func readRegion(bead *ledger.Record, req Request) (region, string, error) {
 		desc:     carried(bead.Description()),
 		id:       bead.ID,
 		branch:   branch,
-		target:   firstOf(merged, target, "main"),
+		target:   req.Target,
 		checkSet: checkSet,
 		head:     req.Head,
 		opening:  req.Opening,

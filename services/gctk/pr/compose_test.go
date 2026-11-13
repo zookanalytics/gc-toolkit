@@ -52,12 +52,12 @@ func bodyOf(s string) *string { return &s }
 // opened is the body a create of the anchor's PR wrote at head.
 func opened(t *testing.T, s gcbd.Store) string {
 	t.Helper()
-	return compose(t, s, Request{Head: head, Opening: true, Gates: gates, Summary: true}).Body
+	return compose(t, s, Request{Target: "main", Head: head, Opening: true, Gates: gates, Summary: true}).Body
 }
 
 func TestComposeANewPR(t *testing.T) {
 	s := storeWith(anchor(nil))
-	got := compose(t, s, Request{Head: head, Opening: true, Gates: gates, Summary: true,
+	got := compose(t, s, Request{Target: "main", Head: head, Opening: true, Gates: gates, Summary: true,
 		Supersedes: &Superseded{Number: "41", Head: "1234567890abcdef"}})
 	if got.Title != "feat: add the widget (A)" {
 		t.Errorf("title = %q", got.Title)
@@ -79,7 +79,7 @@ func TestComposeANewPR(t *testing.T) {
 	}
 
 	t.Run("without its gates a new PR's region is not composed", func(t *testing.T) {
-		got := compose(t, s, Request{Head: head, Opening: true, Summary: true})
+		got := compose(t, s, Request{Target: "main", Head: head, Opening: true, Summary: true})
 		if got.Summary != NeedsGates || got.Body != "" {
 			t.Errorf("(%q, %q), want needs-gates and no body", got.Summary, got.Body)
 		}
@@ -89,7 +89,7 @@ func TestComposeANewPR(t *testing.T) {
 func TestComposeAnAdoptedPR(t *testing.T) {
 	s := storeWith(anchor(nil))
 	req := func(body string) Request {
-		return Request{Head: head, Opening: true, Gates: gates, Summary: true, Body: bodyOf(body)}
+		return Request{Target: "main", Head: head, Opening: true, Gates: gates, Summary: true, Body: bodyOf(body)}
 	}
 
 	t.Run("a region that says it already is current", func(t *testing.T) {
@@ -134,7 +134,7 @@ func TestComposeAnAdoptedPR(t *testing.T) {
 
 	t.Run("a region to write with no gates is left, and says so", func(t *testing.T) {
 		body := summaryOpen + "\nOld.\n" + summaryClose + "\n"
-		got := compose(t, s, Request{Head: head, Opening: true, Summary: true, Body: bodyOf(body)})
+		got := compose(t, s, Request{Target: "main", Head: head, Opening: true, Summary: true, Body: bodyOf(body)})
 		if got.Summary != NeedsGates || got.Body != body {
 			t.Errorf("(%q, %q)", got.Summary, got.Body)
 		}
@@ -143,7 +143,7 @@ func TestComposeAnAdoptedPR(t *testing.T) {
 
 func TestComposeAnOpenPR(t *testing.T) {
 	refresh := func(s gcbd.Store, body, at string, g []Gate) *Composition {
-		return compose(t, s, Request{Head: at, Gates: g, Summary: true, Body: bodyOf(body)})
+		return compose(t, s, Request{Target: "main", Head: at, Gates: g, Summary: true, Body: bodyOf(body)})
 	}
 
 	t.Run("a PR merely opened keeps the facts it opened with", func(t *testing.T) {
@@ -319,20 +319,31 @@ func TestComposeAnOpenPR(t *testing.T) {
 	})
 }
 
+// The region names the target its caller resolved, whatever the bead records: a
+// bead with no target opens into the rig's default branch, and a retargeted
+// bead's merged_target names its earlier base until its next record.
 func TestComposeTheTarget(t *testing.T) {
 	for _, c := range []struct {
-		name string
-		meta map[string]string
-		want string
+		name   string
+		meta   map[string]string
+		target string
 	}{
-		{"merged_target first", map[string]string{"merged_target": "integration/x", "target": "main"}, "integration/x"},
-		{"an empty merged_target gives way", map[string]string{"merged_target": "", "target": "integration/y"}, "integration/y"},
-		{"main when neither is recorded", map[string]string{"target": ""}, "main"},
+		{"the rig's default branch, for a bead that records no target", map[string]string{"target": ""}, "trunk"},
+		{"the new base of a retargeted bead, whose merged_target names the old one",
+			map[string]string{"merged_target": "integration/x", "target": "integration/y"}, "integration/y"},
 	} {
-		got := compose(t, storeWith(anchor(c.meta)), Request{Head: head, Opening: true, Gates: gates, Summary: true})
-		if !strings.Contains(got.Body, "- Target: `"+c.want+"`\n") {
+		got := compose(t, storeWith(anchor(c.meta)), Request{Target: c.target, Head: head, Opening: true, Gates: gates, Summary: true})
+		if !strings.Contains(got.Body, "- Target: `"+c.target+"`\n") {
 			t.Errorf("%s:\n%s", c.name, got.Body)
 		}
+	}
+	// A published region a rework moved the head of is written again, naming the
+	// base its caller read the open PR against.
+	s := storeWith(anchor(map[string]string{"merged_target": "integration/x", "target": "integration/y"}))
+	body := compose(t, s, Request{Target: "integration/x", Head: head, Opening: true, Gates: gates, Summary: true}).Body
+	got := compose(t, s, Request{Target: "integration/y", Head: newHead, Gates: gates, Summary: true, Body: bodyOf(body)})
+	if got.Summary != Written || !strings.Contains(got.Body, "- Target: `integration/y`\n") {
+		t.Errorf("(%q)\n%s", got.Summary, got.Body)
 	}
 }
 
@@ -435,7 +446,7 @@ func TestComposeTheBranchBeads(t *testing.T) {
 	t.Run("a read that fails leaves the section, and the rest is composed", func(t *testing.T) {
 		s := &failing{Store: two, key: "fold_target"}
 		body := opened(t, two)
-		got := compose(t, s, Request{Head: newHead, Gates: gates, Summary: true, BranchBeads: true, Body: bodyOf(body)})
+		got := compose(t, s, Request{Target: "main", Head: newHead, Gates: gates, Summary: true, BranchBeads: true, Body: bodyOf(body)})
 		if got.BranchBeads != Unread || got.Unread == nil || got.Summary != Written {
 			t.Errorf("(%q, %v, %q)", got.BranchBeads, got.Unread, got.Summary)
 		}
@@ -459,12 +470,12 @@ func (f *failing) Find(q gcbd.Query) ([]gcbd.Bead, error) {
 }
 
 func TestComposeABeadThatDoesNotRead(t *testing.T) {
-	if _, err := Compose(ledger.New(fake.New()), "A", Request{Head: head, Summary: true}); err == nil {
+	if _, err := Compose(ledger.New(fake.New()), "A", Request{Target: "main", Head: head, Summary: true}); err == nil {
 		t.Error("a bead the store does not hold composed")
 	}
 	s := storeWith(anchor(nil))
 	s.FindErr = errors.New("simulated")
-	if _, err := Compose(ledger.New(s), "A", Request{Head: head, Summary: true}); err == nil {
+	if _, err := Compose(ledger.New(s), "A", Request{Target: "main", Head: head, Summary: true}); err == nil {
 		t.Error("a bead whose read failed composed")
 	}
 }

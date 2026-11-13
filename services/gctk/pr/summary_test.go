@@ -23,7 +23,7 @@ func TestRecordWritesTheSummaryAndTheTitleInOneWrite(t *testing.T) {
 	if err != nil || got != "Adds the widget.\n\nAnd its stand." {
 		t.Errorf("summary = %q, %v", got, err)
 	}
-	c := compose(t, s, Request{Head: head, Opening: true, Gates: gates, Summary: true})
+	c := compose(t, s, Request{Target: "main", Head: head, Opening: true, Gates: gates, Summary: true})
 	if c.Title != "feat: add the widget and its stand (A)" || !strings.Contains(c.Body, "## Summary\n\nAdds the widget.\n\nAnd its stand.\n") {
 		t.Errorf("the PR does not carry the account recorded:\ntitle %q\n%s", c.Title, c.Body)
 	}

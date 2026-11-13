@@ -266,7 +266,7 @@
     "name": "merged_target",
     "type": "string",
     "owner": "pr/record",
-    "doc": "The branch the bead's PR is to merge into, the base its PR must name, and once it lands the branch it landed on. A PR's composition names it as the PR's target."
+    "doc": "The branch the bead's PR is to merge into, the base its PR must name, and once it lands the branch it landed on. A PR's composition reads it to find the beads that landed on the PR's branch."
   },
   {
     "name": "observed_pr_head_sha",
@@ -421,13 +421,5 @@
     "type": "json",
     "owner": "internal/rig",
     "doc": "The published copy of a recorded check's result, which `gctk rig \u003ccheck\u003e --publish-bead \u003cbead\u003e` writes on the bead its caller names: the record the call answered with, as one JSON object of check, result, scope (absent on a lint or typecheck run), commit, tree, exit_code, duration_ms, runner, recorded_at and command. gctk writes it only once the record store holds the result it copies, after recording a result or answering from a record. No pack path reads it: the record under the rig clone's git common directory answers a later call. Absent means no call published that check to the bead. Never cleared: the next publish replaces it. Its commit is the one the check ran at: the head the call answered for, or, for a full-suite test pass answered through the tree, an earlier commit with the same tree."
-  },
-  {
-    "name": "target",
-    "type": "string",
-    "readers": [
-      "pr"
-    ],
-    "doc": "The branch a bead's work lands on, which the polecat records at submit and a caller can set first (lifecycle/lifecycle.toml, [metadata.merge_identity]). A composition names it as the PR's target when merged_target is absent."
   }
 ]

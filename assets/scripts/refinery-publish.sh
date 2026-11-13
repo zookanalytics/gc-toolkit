@@ -182,11 +182,12 @@ else
 fi
 
 # compose [--body-file <file>]: the title and body the owner says its PR
-# should carry at the prepared head, in TITLE and BODY_FILE, and in MOVED
+# should carry at the prepared head, its handoff naming TARGET, the base the PR
+# opens into or was read open into, in TITLE and BODY_FILE, and in MOVED
 # whether a section of a published body moved.
 compose() {
   local out
-  out=$("$gctk" pr compose "$OWNER" --head "$HEAD_OID" --gates '' "$@" </dev/null) || return 1
+  out=$("$gctk" pr compose "$OWNER" --head "$HEAD_OID" --target "$TARGET" --gates '' "$@" </dev/null) || return 1
   TITLE=$(printf '%s' "$out" | jq -r '.title // ""')
   MOVED=$(printf '%s' "$out" | jq -r 'if .summary == "written" or .branch_beads == "written" then "yes" else "" end')
   printf '%s' "$out" | jq -j '.body // ""' > "$BODY_FILE"

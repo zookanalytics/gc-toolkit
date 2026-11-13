@@ -147,8 +147,9 @@ owner_pr() {
   PR_NUMBER=$(printf '%s' "$PR_ROW" | jq -r '(.number // "") | tostring')
   [ -n "$PR_URL" ] && [ -n "$PR_NUMBER" ] || { PR_ROW=""; return 2; }
 }
-# refresh <check_set>: bring the open PR owner_pr read, in PR_ROW, current with
-# the owner at HEAD_OID, its title and body. The body's handoff names the gates
+# refresh <check_set> <target>: bring the open PR owner_pr read, in PR_ROW,
+# current with the owner at HEAD_OID, its title and body. The body's handoff
+# names <target>, the base owner_pr read the PR open into, and the gates
 # <check_set> resolves to at that head, resolved as pr-open.sh resolves them
 # when it opens the PR, in the refinery's own repository, which holds the head.
 # Non-zero, with a line on stderr, when the gates do not resolve, the title and
@@ -164,7 +165,7 @@ refresh() {
   published=$(mktemp "${TMPDIR:-/tmp}/refinery-land.XXXXXX") || return 1
   body=$(mktemp "${TMPDIR:-/tmp}/refinery-land.XXXXXX") || { rm -f "$published"; return 1; }
   printf '%s' "$PR_ROW" | jq -j '.body // ""' > "$published"
-  if out=$("$gctk" pr compose "$OWNER" --head "$HEAD_OID" --gates "$gates" --body-file "$published" </dev/null); then
+  if out=$("$gctk" pr compose "$OWNER" --head "$HEAD_OID" --target "$2" --gates "$gates" --body-file "$published" </dev/null); then
     title=$(printf '%s' "$out" | jq -r '.title // ""')
     moved=$(printf '%s' "$out" | jq -r 'if .summary == "written" or .branch_beads == "written" then "yes" else "" end')
     printf '%s' "$out" | jq -j '.body // ""' > "$body"
@@ -218,7 +219,7 @@ refresh_target_pr() {
     echo "$PROG: origin/$TARGET did not read after $BEAD landed on it, so PR #$PR_NUMBER was not brought current; the landing stands" >&2
     return 0
   fi
-  refresh "$(row_meta "$OWNER_ROW" check_set)" \
+  refresh "$(row_meta "$OWNER_ROW" check_set)" "$base" \
     || echo "$PROG: PR #$PR_NUMBER, open from $TARGET, does not name $BEAD, which landed on it; the landing stands" >&2
 }
 
@@ -312,7 +313,7 @@ push() {
 if [ "$OWNER" != "$BEAD" ]; then
   owner_pr "$BRANCH" "$TARGET"
   case "$?" in
-    0) refresh "$(row_meta "$OWNER_ROW" check_set)" \
+    0) refresh "$(row_meta "$OWNER_ROW" check_set)" "$TARGET" \
          || stop "PR #$PR_NUMBER is not current with $OWNER, so the head is not pushed under a stale body" ;;
     1) ;;
     *) stop "PR $PR_RECORDED, which $OWNER records, did not read, so the head is not pushed under a title and body nobody brought current" ;;
@@ -340,7 +341,7 @@ OWNS_PR=""
 owner_pr "$BRANCH" "$TARGET"
 case "$?" in
   0) OWNS_PR=1
-     refresh "$CHECK_SET" || stop "PR #$PR_NUMBER is not current with $BEAD, so the head is not pushed under a stale body" ;;
+     refresh "$CHECK_SET" "$TARGET" || stop "PR #$PR_NUMBER is not current with $BEAD, so the head is not pushed under a stale body" ;;
   1) ;;
   *) stop "PR $PR_RECORDED, which $BEAD records, did not read, so the head is not pushed under a title and body nobody brought current" ;;
 esac

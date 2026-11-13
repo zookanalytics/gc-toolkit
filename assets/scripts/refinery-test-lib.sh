@@ -348,11 +348,13 @@ case "$1 $2" in
       fi
     done ;;
   "pr compose")
-    owner="$3"; shift 3; head=""; bodyf=""
+    owner="$3"; shift 3; head=""; target=""; bodyf=""
     while [ $# -gt 0 ]; do
-      case "$1" in --head) head="$2"; shift ;; --body-file) bodyf="$2"; shift ;; esac
+      case "$1" in --head) head="$2"; shift ;; --target) target="$2"; shift ;; --body-file) bodyf="$2"; shift ;; esac
       shift
     done
+    # The real command refuses a summary region with no --target as usage.
+    [ -n "$target" ] || { echo "the summary region names the branch the PR opens into: give --target" >&2; exit 1; }
     # A bead whose landing onto the owner's branch the lifecycle stub logged
     # rides the owner's PR, as the branch-beads section names it.
     branch=$(jq -r --arg id "$owner" '[ .[] | select(.id == $id) ][0].metadata.branch // ""' "$STORE")

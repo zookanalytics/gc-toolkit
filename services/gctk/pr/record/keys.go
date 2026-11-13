@@ -44,7 +44,7 @@ var (
 			"records it checked least recently first.")
 	mergedTargetKey = ledger.Declare("merged_target", ledger.String,
 		"The branch the bead's PR is to merge into, the base its PR must name, and once it lands the branch "+
-			"it landed on. A PR's composition names it as the PR's target.")
+			"it landed on. A PR's composition reads it to find the beads that landed on the PR's branch.")
 	mergedSHAKey = ledger.Declare("merged_sha", ledger.String,
 		"The merge commit the landing order found on the target when it closed the bead.")
 	mergedAtKey = ledger.Declare("pr_merged_at", ledger.String,
@@ -70,14 +70,12 @@ var (
 
 // The reading faces of the record's keys whose value is another domain's whole
 // question: whether a bead carries a merge_result or a rejection_reason, which
-// puts it in flight, the PR a listing names on each bead, and the target a
-// composition names.
+// puts it in flight, and the PR a listing names on each bead.
 var (
 	Result    = mergeResultKey.View()
 	PRURL     = prURLKey.View()
 	PRNumber  = prNumberKey.View()
 	Rejection = rejectionReasonKey.View()
-	Target    = mergedTargetKey.View()
 )
 
 // OnTarget selects the beads whose merged_target is branch: the ones whose PR

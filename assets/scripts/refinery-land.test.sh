@@ -161,7 +161,7 @@ owner_of_e pull_request
 run --bead d
 eq "$RC" 0 "the landing exits 0"
 has "$(logged scripts)" "lifecycle transition d --to merged --close --set merged_sha=$HEAD_D --set merged_target=integration/e" "the landing is recorded"
-has "$(logged gctk)" "pr compose an --head $HEAD_D --gates lane-c	pre-open --body-file" "the owner's PR is composed at the target's new tip, naming the gates of its check set"
+has "$(logged gctk)" "pr compose an --head $HEAD_D --target main --gates lane-c	pre-open --body-file" "the owner's PR is composed at the target's new tip, naming its base and the gates of its check set"
 has "$(cat "$GH_DIR/edit_66.md" 2>/dev/null)" "riding: d" "…and the body its edit gives the PR names the bead that landed"
 fresh
 direct_onto d '{}'
@@ -232,7 +232,7 @@ rt_vars check_set=""
 run --bead r
 eq "$RC" 0 "the landing exits 0"
 has "$(logged gh)" "pr edit 61 --repo zook/rig --title feat: r (r) --body-file" "its PR's title and body are brought current"
-has "$(logged gctk)" "pr compose r --head $HEAD_R --gates lane-a	pre-open
+has "$(logged gctk)" "pr compose r --head $HEAD_R --target main --gates lane-a	pre-open
 lane-b	pre-open --body-file" "…its body naming the gates of the check set it is stamped with, resolved at the head"
 has "$(logged scripts)" "lifecycle transition r --to pull_request --assignee  --route  --set pr_url=https://github.com/zook/rig/pull/61 --set pr_number=61 --set merged_target=main --set check_set=lane-a,lane-b" "a bead that records an open PR waits at pull_request on it, an empty check set recovering the default"
 fresh
@@ -267,7 +267,7 @@ run --bead ch
 eq "$RC" 0 "the hand-back exits 0"
 eq "$(tip polecat/an)" "$HEAD_C" "the head is on the anchor's branch"
 has "$(logged gh)" "pr edit 62 --repo zook/rig --title feat: an (an) --body-file" "the anchor's PR title and body are brought current"
-has "$(logged gctk)" "pr compose an --head $HEAD_C --gates lane-c	pre-open --body-file" "…its body naming the gates of the anchor's check set"
+has "$(logged gctk)" "pr compose an --head $HEAD_C --target main --gates lane-c	pre-open --body-file" "…its body naming the base and the gates of the anchor's check set"
 has "$(bnotes an)" "Rework ch landed on polecat/an at $HEAD_C" "the anchor notes the landing"
 eq "$(bstatus ch) $(meta ch gc.work_outcome)" "closed shipped" "the child closes with its work record"
 eq "$(meta an merge_result)" "pull_request" "the anchor keeps its record"
