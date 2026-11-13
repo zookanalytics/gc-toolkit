@@ -7,7 +7,7 @@ description: What gc-toolkit would be if built once on Gas City as shipped, with
 
 Built once, on Gas City as shipped and with every fact said in one place,
 gc-toolkit would weigh an estimated 64k lines: 35.0k of runtime and 28.5k of
-tests. At the baseline it weighs 265.9k: 114.8k of runtime and 151.1k of tests.
+tests. At the baseline it weighs 283.9k: 122.2k of runtime and 161.7k of tests.
 The estimates show where the weight is. They set no limit, since useful code
 grows. [The rules](#the-rules) aim at code written without value to the
 operator: no new work in code the deletion plan retires, no procedures in step
@@ -36,20 +36,20 @@ bead carries it, and the operator funds each one.
   board's web source. Flow is formulas, orders and the other TOML and JSON config. Text
   is agent prompts, fragments and skills. Test is tests and their fixtures.
   Runtime is code, flow and text.
-- **Beside the pack** are docs (16.8k), the tooling under `tools/` and
-  `.github/` (15.9k), the record under `specs/` (72.3k) and generated files
-  (8.0k). They are reported beside pack weight and are not part of it.
+- **Beside the pack** are docs (18.9k), the tooling under `tools/` and
+  `.github/` (16.0k), the record under `specs/` (87.3k) and generated files
+  (6.9k). They are reported beside pack weight and are not part of it.
 - **A path's subsystem** is its row in
   [component-model.md](component-model.md#4-where-each-component-sits) §4, and
-  a test takes its script's row. §4 has a row for 115 of the 144 runtime
+  a test takes its script's row. §4 has a row for 114 of the 140 runtime
   scripts under `assets/scripts/`, and the measuring script's rules place the
-  other 29 (8.1k lines).
+  other 26 (6.4k lines).
 
 `tools/measure.sh [REF]` prints a commit's table, `measure.sh BASE HEAD`
 prints what a change adds net of what it removes, and `measure.sh --pr BASE
 HEAD` prints a PR's size section ([rule 3](#the-rules)). The baseline is main
-at d983f9f50 (2026-10-31). Every number on this page is derived in
-[the measurement record](../specs/tk-11l1ejh/measurement.md).
+at 25cda8ace (2026-11-12). Every number on this page is derived in
+[the measurement record](../specs/tk-1tfzr71.95/measurement.md).
 
 ## The built-once shape, subsystem by subsystem
 
@@ -60,8 +60,8 @@ assumptions:
   is a call to it, and the pack's version weighs nothing.
 - **Said once.** A fact, a rule or an idiom has one home, and a call site
   carries only its own facts. A comment states a reason the code cannot show,
-  which the estimate puts at about 15% of a runtime file. Runtime shell is 35%
-  comment today, and Go 33%.
+  which the estimate puts at about 15% of a runtime file. Runtime shell is 36%
+  comment today, and Go 29%.
 - **Tests follow code.** The estimate puts a subsystem's tests at about the
   weight of its code and flow. A test pins the behavior of the one copy where it
   lives. No test extracts formula step text to run it, holds two copies equal,
@@ -69,20 +69,20 @@ assumptions:
 
 | Subsystem | Built once, it is | Baseline runtime / tests | Built once, estimated runtime / tests |
 |---|---|---|---|
-| work | one formula extending core's polecat base | 7.1k / 12.7k | 2.5k / 2.5k |
-| review | the declared checks as lanes of one check loop | 11.4k / 11.1k | 4.0k / 2.0k |
-| merge | Gas Town's refinery flow under GitHub's branch rules | 16.5k / 27.2k | 2.0k / 2.0k |
-| human engagement | native human gates and conversation tasks | 13.9k / 21.3k | 5.5k / 4.0k |
-| board | a ranked render of platform objects | 17.5k / 21.0k | 5.0k / 5.0k |
-| patrol | Gas City's orders, plus the patrols' judgment | 9.8k / 16.1k | 2.5k / 2.0k |
-| doctor | one check per surviving invariant | 7.7k / 9.4k | 3.0k / 3.0k |
-| shared glue | one call per series of native steps | 13.2k / 24.5k | 5.0k / 5.0k |
-| gctk | the rig check runner and its records | 6.7k / 4.8k | 1.5k / 1.5k |
+| work | one formula extending core's polecat base | 6.4k / 10.4k | 2.5k / 2.5k |
+| review | the declared checks as lanes of one check loop | 11.7k / 11.8k | 4.0k / 2.0k |
+| merge | Gas Town's refinery flow under GitHub's branch rules | 15.4k / 25.2k | 2.0k / 2.0k |
+| human engagement | native human gates and conversation tasks | 16.8k / 25.0k | 5.5k / 4.0k |
+| board | a ranked render of platform objects | 21.0k / 26.4k | 5.0k / 5.0k |
+| patrol | Gas City's orders, plus the patrols' judgment | 9.5k / 16.1k | 2.5k / 2.0k |
+| doctor | one check per surviving invariant | 7.5k / 9.3k | 3.0k / 3.0k |
+| shared glue | one call per series of native steps | 10.6k / 24.0k | 5.0k / 5.0k |
+| gctk | the rig check runner and its records | 11.5k / 10.6k | 1.5k / 1.5k |
 | feedback | the learning loop | 2.4k / 1.9k | 2.0k / 1.5k |
-| config | the pack, its check index and its key registry | 3.0k / 0 | 0.7k / 0 |
-| doctrine | shared fragments and skills | 1.8k / 0 | 1.3k / 0 |
+| config | the pack, its check index and its key registry | 2.9k / 0 | 0.7k / 0 |
+| doctrine | shared fragments and skills | 2.6k / 0 | 1.3k / 0 |
 | keeper sub-pack | nothing: the built-once shape has no fork | 3.8k / 1.1k | 0 / 0 |
-| **total** | | **114.8k / 151.1k** | **35.0k / 28.5k** |
+| **total** | | **122.2k / 161.7k** | **35.0k / 28.5k** |
 
 The keeper is the opt-in `packs/gascity-keeper/`.
 
@@ -265,7 +265,7 @@ Feedback is the miner and distiller formulas, the learning-distill skill and
 their orders, and saying each fact once is the only cut its estimate takes.
 Config is `pack.toml`, the check index, the overlays, the pack command, and a
 key registry that declares only the keys of surviving warranted nouns, as data:
-1,584 of the registry's 1,966 lines are comments today. Doctrine is the shared
+1,494 of the registry's 1,854 lines are comments today. Doctrine is the shared
 fragments and skills, with each doctrine sentence in one home.
 
 ### Keeper sub-pack
@@ -274,7 +274,7 @@ The keeper maintains a fork of Gas City, and foundation answers a missing
 primitive by reshaping the feature, never by a fork. It retires by its own
 page's trigger, a fork with no diverging commit
 ([fork-patching.md](fork-patching.md#when-this-doc-should-disappear)). The fork
-carries 102 today. The migration map keeps the keeper until then, and no bead
+carries 77 today. The migration map keeps the keeper until then, and no bead
 carries its retirement.
 
 ## What has no place in the built-once shape
@@ -318,7 +318,7 @@ home.
 A compatibility piece carries a dated debt and the trigger that retires it,
 and the change that fires the trigger deletes it.
 
-- Readers of legacy shapes, which "legacy" names 31 times across 15 runtime
+- Readers of legacy shapes, which "legacy" names 23 times across 12 runtime
   files: the `gc.proactive_reaction=1` proof and PR bodies older than the
   managed region, among others. Trigger: no store or open PR holds the shape.
   Each goes with the member that rewrites its reader.
@@ -327,16 +327,16 @@ and the change that fires the trigger deletes it.
 
 A restatement needs no trigger either, once the doctrine has its home.
 
-- Comments: runtime shell is 35% comment (21.2k of 59.7k lines), Go 33%, the
-  key registry 81% and the orders 66%.
-- Formula step text: 3.7k of the formulas' 8.8k lines are shell inside code
+- Comments: runtime shell is 36% comment (20.7k of 58.2k lines), Go 29%, the
+  key registry 81% and the orders 65%.
+- Formula step text: 2.8k of the formulas' 7.4k lines are shell inside code
   fences, and step prose restates doctrine the fragments hold. Rule 2 keeps new
   procedures out of step text.
 
 ### Tests that pin what should not exist
 
-- 47 test files, 16.4k lines, have no script of their own. Each reads a marked
-  block of formula step text, to run it or to pin its text, and 14 script tests
+- 41 test files, 13.1k lines, have no script of their own. Each reads a marked
+  block of formula step text, to run it or to pin its text, and 9 script tests
   read one too. Trigger: the step's mechanics become one call to a script with
   its own test, as rule 2 requires (P4).
 - Tests that hold two copies equal, and tests that assert a retired name stays
@@ -345,18 +345,13 @@ A restatement needs no trigger either, once the doctrine has its home.
 ## The deletion schedule
 
 Stage 1, the native-gates convoy (tk-iirrmiw) and its cutover (tk-o6pd01i),
-has landed, and the baseline is main at the commit that landed it. Stages 2
-and 3 run in the order below, and each of the page's own items starts when
-what it waits on lands. An armed bead is blocked by what it waits on and
-slings itself when that lands. A size is the lines of the whole files a
-bead's contract retires, with their tests, at the baseline, so a bead that also
-rewrites part of a file retires more than its size. A branch already in flight
-shows its measured net instead.
-
-### 2. Released by the native-gates convoy landing
-
-| Bead | What it removes | Size | Waits on |
-|---|---|---|---|
+has landed, and so has stage 2, the removals its landing released. The baseline
+is main at the commit that landed the last of them. Stage 3 runs in the order
+below, and each of the page's own items starts when what it waits on lands. An
+armed bead is blocked by what it waits on and slings itself when that lands. A
+size is the lines of the whole files a bead's contract retires, with their
+tests, at the baseline, so a bead that also rewrites part of a file retires
+more than its size. A branch already in flight shows its measured net instead.
 
 ### 3. The lanes
 
@@ -366,19 +361,19 @@ convoy lands only after the operator approves its design.
 
 | Lane | Member | What it removes | Size |
 |---|---|---|---|
-| A | tk-1tfzr71.20 | the merge cadence, the approval rule, rework and branch currency; the operator rules at its design | 10,920 |
-| A | tk-1tfzr71.22 | review beads, lane derivation, validation passes, machine findings | 10,924 |
-| A | tk-1tfzr71.21 | `pr-facts.sh` polling and mirroring | 15,233 |
+| A | tk-1tfzr71.20 | the merge cadence, the approval rule, rework and branch currency; the operator rules at its design | +6,450 net on its branch so far |
+| A | tk-1tfzr71.22 | review beads, lane derivation, validation passes, machine findings | 10,894 |
+| A | tk-1tfzr71.21 | `pr-facts.sh` polling and mirroring | 15,411 |
 | A | tk-1tfzr71.23 | the membership readers on parent-child | partial files |
 | B | tk-1tfzr71.16 | deferred dispatch's notify path, lock, budget and crash marker | partial files |
 | B | tk-1tfzr71.17 | the reaction bead and the intake converters | 189, plus partial files |
-| B | tk-1tfzr71.18 | warrants, the dance, pin keepalive, boot health, quota park, each after its re-check | 5,815 |
-| B | tk-1tfzr71.19 | the doctor runner, the liveness census, the incident ledger, the copied patrol steps | 7,869 |
+| B | tk-1tfzr71.18 | warrants, the dance, pin keepalive, boot health, quota park, each after its re-check | 5,838 |
+| B | tk-1tfzr71.19 | the doctor runner, the liveness census, the incident ledger, the copied patrol steps | 7,855 |
 | B | tk-1tfzr71.24 | the board's second data plane and pack-stamped rows, verbs that only call Gas City | partial files |
-| B | tk-1tfzr71.25 | registry entries, wrapper lint rules, parity tests, the `board` stub verb | 1,488 |
+| B | tk-1tfzr71.25 | registry entries, wrapper lint rules, parity tests, the `board` stub verb | 1,490 |
 
-The whole files that the migration members name come to 52k of
-the 202k between the baseline and the built-once estimate. Their partial
+The whole files that the migration members name come to 53k of
+the 220k between the baseline and the built-once estimate. Their partial
 rewrites carry more, chiefly the board, `gc-helm.sh`, the work and patrol
 formulas, deferred dispatch and the sign-off. The page's own items below carry
 the step-text tests.
@@ -390,7 +385,7 @@ Each item is carried by the bead it names.
 
 | # | Item | Extent | Carried by | Waits on |
 |---|---|---|---|---|
-| P4 | Rule 2: step text calls tested scripts, and the block-extraction tests go with the blocks they extract | 3.7k lines of shell in step text, 47 tests of 16.4k lines | tk-1tfzr71.19 and .20, each applying it to the formulas it rewrites | each bead's place in its lane |
+| P4 | Rule 2: step text calls tested scripts, and the block-extraction tests go with the blocks they extract | 2.8k lines of shell in step text, 41 tests of 13.1k lines | tk-1tfzr71.19 and .20, each applying it to the formulas it rewrites | each bead's place in its lane |
 | P5 | Each Go port (tk-ssm8qns) carries only the migration map's surviving intents and deletes the shell it replaces in the same change, and rule 3's size line shows its net | the port's contract | a note on tk-ssm8qns | the port's blockers |
 
 ## The rules
