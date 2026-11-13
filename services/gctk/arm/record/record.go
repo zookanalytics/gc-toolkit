@@ -4,8 +4,8 @@
 // start ask it, in services/gctk/arm, and so does waits, for the arm gctk bead
 // holds prints. It asks no other domain.
 //
-// The keys keep the spellings deferred-dispatch.sh stored them under, so an
-// arm written before this package owned them reads as one written after.
+// The keys keep the spellings the arms already in the stores carry, so an arm
+// written before this package owned them reads as one written after.
 // Readers outside gctk's bead domain still read them as they did, under the
 // debt docs/gctk-architecture.md records.
 package record

@@ -3,8 +3,8 @@
 # says how a bead will be dispatched, so whoever set it has already decided that
 # dispatch. Two keys each give a bead one. gc.routed_to names a pool queue,
 # which serves the bead once bd reports it ready. gc.dispatch_when_ready is an
-# arm (deferred-dispatch.sh arm), which the deferred-dispatch order slings once
-# nothing holds the bead, by the answer of `gctk bead holds`.
+# arm (gctk bead arm), which the deferred-dispatch order slings once nothing
+# holds the bead, by the answer of `gctk bead holds`.
 # gc.execution_routed_to is not one: it is execution provenance a formula pour
 # leaves, and no queue reads it.
 #
@@ -31,8 +31,8 @@
 # message carries (liveness-recheck.sh), which name the hold as a wait.
 # The deferred-dispatch order's start (gctk bead start-armed) reads no row here:
 # it selects armed beads by Gas City's own serve rule and holds one carrying a
-# hold label in any case, as Gas City's hook does, and deferred-dispatch.sh's
-# list and check-armed-dispatch-owed read its dry run.
+# hold label in any case, as Gas City's hook does, and check-armed-dispatch-owed
+# reads its dry run.
 # gc-helm.sh sources it to place a held bead: place reports a bead with no hold
 # that a route or an arm already dispatches as placed, and refuses one that
 # another hold also holds. place, and takeaway and accept when they send a bead

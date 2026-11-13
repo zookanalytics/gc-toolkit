@@ -22,8 +22,8 @@
 # doctor/check-blocked-work-armed/run.test.sh,
 # doctor/check-step-terminal/run.test.sh,
 # doctor/check-armed-dispatch-owed/run.test.sh,
-# doctor/check-po-queue-only/run.test.sh, deferred-dispatch.test.sh,
-# liveness-classify.test.sh, liveness-recheck.test.sh).
+# doctor/check-po-queue-only/run.test.sh, liveness-classify.test.sh,
+# liveness-recheck.test.sh).
 # Reads the repo only; no gc, no city, no network.
 set -uo pipefail
 

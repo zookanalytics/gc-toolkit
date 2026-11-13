@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # test-harness.sh — shared stub fixtures for the merge-cadence test suites.
 # Sourced by *.test.sh (never run as a suite itself). Provides stub gc/gh/git
-# binaries over a JSON bead store plus assertion helpers, following the
-# deferred-dispatch.test.sh pattern: stubs log invocations and serve canned
-# JSON; tests assert on the logs, the store, and exit codes.
+# binaries over a JSON bead store plus assertion helpers: stubs log invocations
+# and serve canned JSON, and tests assert on the logs, the store, and exit
+# codes.
 # Contract: caller sets TMP (tempdir); harness_init installs stubs on PATH and
 # exports STUB_* env the stubs read, and GC_QUEUE_PRIORITY_TOOL, this tree's
 # priority writer over the stub store. No live city, network, gc, bd or gh: the
@@ -211,11 +211,11 @@ mk_sut_dir() { # <dir> <file>...
   # review-verdict.sh, the approval rule, review-dismissal.sh, what a dismissal
   # retires, review-answer.sh, what the living answer to a review shows,
   # dispatch-path.sh, the one definition of a dispatch path and a label hold,
-  # which deferred-dispatch.sh sources, priority-lib.sh, the priority function,
-  # whose reading of a PR's approval pr-facts.sh sources, git-lib.sh, the one
-  # read of a branch's head on origin, which gate-ensure.sh and signoff.sh
-  # source, and run-lib.sh, the one reader of a run's link to its bead, are
-  # sourced by sibling path the same way.
+  # which gc-helm.sh sources to ask how a bead is dispatched, priority-lib.sh,
+  # the priority function, whose reading of a PR's approval pr-facts.sh
+  # sources, git-lib.sh, the one read of a branch's head on origin, which
+  # gate-ensure.sh and signoff.sh source, and run-lib.sh, the one reader of a
+  # run's link to its bead, are sourced by sibling path the same way.
   [ -f "$here/review-verdict.sh" ] && cp "$here/review-verdict.sh" "$d/"
   [ -f "$here/review-dismissal.sh" ] && cp "$here/review-dismissal.sh" "$d/"
   [ -f "$here/review-answer.sh" ] && cp "$here/review-answer.sh" "$d/"

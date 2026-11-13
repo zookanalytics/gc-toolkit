@@ -366,13 +366,13 @@ mk_sut_dir "$TMP/sut" "$HERE/lifecycle.sh"
 [ -f "$TMP/sut/gctk-resolve.sh" ] && ok "mk_sut_dir copies gctk-resolve.sh beside the SUT" || bad "mk_sut_dir left gctk-resolve.sh out"
 out="$(GCTK_BIN=none "$TMP/sut/lifecycle.sh" state tk-blk 2>&1)"
 hasnt "$out" "cannot source gctk-resolve.sh" "a copied lifecycle.sh sources gctk-resolve.sh from its private dir"
-# A copy of deferred-dispatch.sh runs a verb from its private dir: bd-lib.sh and
-# dispatch-path.sh are the libraries it sources by sibling path.
-mk_sut_dir "$TMP/sut-dd" "$HERE/deferred-dispatch.sh"
-[ -f "$TMP/sut-dd/dispatch-path.sh" ] && ok "mk_sut_dir copies dispatch-path.sh beside the SUT" || bad "mk_sut_dir left dispatch-path.sh out"
-out="$("$TMP/sut-dd/deferred-dispatch.sh" help 2>&1)"; rc=$?
-eq "$rc" "0" "a copied deferred-dispatch.sh runs a verb"
-hasnt "$out" "cannot source" "a copied deferred-dispatch.sh sources its libraries from its private dir"
+# A script that asks how a bead is dispatched, such as gc-helm.sh, sources
+# dispatch-path.sh by sibling path, so its copy sources from the private dir.
+mk_sut_dir "$TMP/sut-dp" "$HERE/gc-helm.sh"
+[ -f "$TMP/sut-dp/dispatch-path.sh" ] && ok "mk_sut_dir copies dispatch-path.sh beside the SUT" || bad "mk_sut_dir left dispatch-path.sh out"
+out="$(bash -c '. "$1/dispatch-path.sh" && printf "%s" "$DISPATCH_PATH_JQ"' _ "$TMP/sut-dp" 2>&1)"; rc=$?
+eq "$rc" "0" "the copied dispatch-path.sh sources from the SUT's private dir"
+has "$out" "def has_dispatch_path" "…and defines the dispatch path"
 # pr-facts.sh sources the priority function's reading of a PR's approval.
 mk_sut_dir "$TMP/sut-pf" "$HERE/pr-facts.sh"
 [ -f "$TMP/sut-pf/priority-lib.sh" ] && ok "mk_sut_dir copies priority-lib.sh beside the SUT" || bad "mk_sut_dir left priority-lib.sh out"

@@ -81,7 +81,7 @@ PROACTIVE_TYPES="${GC_PROACTIVE_TYPES:-task,bug,feature,spike}"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../assets/scripts/standing-kinds.sh" \
     || { printf '%s: cannot source assets/scripts/standing-kinds.sh from the pack\n' "$PROG" >&2; exit 1; }
 # The one definition of a dispatch path and of a dispatch hold, shared with the
-# doctor checks, deferred-dispatch.sh and the liveness classifier. Exposes
+# doctor checks, gc-helm.sh and the liveness classifier. Exposes
 # $DISPATCH_PATH_JQ, which scan_precision_filter and sling_dispatch_path_guard
 # apply.
 # shellcheck source=../assets/scripts/dispatch-path.sh
