@@ -313,7 +313,10 @@ the cadence — the arms run whether or not any refinery session is awake.
    the anchor is `pull_request`, a rework's restamp reaches the PR when the
    refinery lands the rework's hand-back: it composes the PR's title and body
    with `gctk pr compose` and edits them onto the PR before it pushes the new
-   head.
+   head. A bead that comes back through the refinery with its own PR open, such
+   as one the requeue sent back to the pool, has its PR composed the same way
+   before its push. An edit that does not take pushes nothing, and the bead
+   stays with the refinery for its next pass.
 4. **pr-facts.sh --route-comments-only** — the feedback routing of arm 7, run
    ahead of the slow arms. Arm 7 runs behind gate-ensure, so a pass the timeout
    kills before arm 7 would leave the operator's review stamped-as-seen by the

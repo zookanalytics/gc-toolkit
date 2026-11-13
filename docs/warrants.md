@@ -354,7 +354,7 @@ shares only the word ([authority-map.md](authority-map.md)).
     as the autoclose sweep's retry of a convoy, wisp or molecule autoclose
     (`cmd/gc/autoclose_sweep.go` 21-22).
 - **Verified.** 2026-11-13, at `gastownhall/gascity-packs` main 1f6d8e41c,
-  `gastownhall/beads` main 1d22ef9be and `gastownhall/gascity` main a07d754c7.
+  `gastownhall/beads` main 526c1c877 and `gastownhall/gascity` main cb9105579.
 - **Retires when.** Gas Town's `pr-merge-reconcile` escalates a close it cannot
   make. The exception then moves onto what Gas Town records.
 
