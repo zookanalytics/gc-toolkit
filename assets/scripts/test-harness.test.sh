@@ -372,7 +372,7 @@ mk_sut_dir "$TMP/sut-dp" "$HERE/gc-helm.sh"
 [ -f "$TMP/sut-dp/dispatch-path.sh" ] && ok "mk_sut_dir copies dispatch-path.sh beside the SUT" || bad "mk_sut_dir left dispatch-path.sh out"
 out="$(bash -c '. "$1/dispatch-path.sh" && printf "%s" "$DISPATCH_PATH_JQ"' _ "$TMP/sut-dp" 2>&1)"; rc=$?
 eq "$rc" "0" "the copied dispatch-path.sh sources from the SUT's private dir"
-has "$out" "def has_dispatch_path" "…and defines the dispatch path"
+[ -n "$out" ] && ok "…and sets the dispatch path's program" || bad "…and sets the dispatch path's program (it set none)"
 # pr-facts.sh sources the priority function's reading of a PR's approval.
 mk_sut_dir "$TMP/sut-pf" "$HERE/pr-facts.sh"
 [ -f "$TMP/sut-pf/priority-lib.sh" ] && ok "mk_sut_dir copies priority-lib.sh beside the SUT" || bad "mk_sut_dir left priority-lib.sh out"

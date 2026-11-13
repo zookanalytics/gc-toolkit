@@ -230,10 +230,10 @@ follows it when the store refuses that update. --release first removes the
 bead's arm through gctk bead disarm, so the deferred-dispatch start cannot send
 the bead again, and exits 4 with nothing else written when that does not land;
 it also reopens/unassigns/clears the route in that update and ends the run
-beneath the anchor through gascity's run cancel. The update is guarded on the status and
-the assignee the release read: a bead closed since takes only the headline and
-the run's end, and any other change exits 4 with nothing written. It takes no
-live claim: a claim another session holds is released only once
+beneath the anchor through gascity's run cancel. The update is guarded on the
+status and the assignee the release read: a bead closed since takes only the
+headline and the run's end, and any other change exits 4 with nothing written.
+It takes no live claim: a claim another session holds is released only once
 'gc session list' lists that holder under none of its names, and otherwise the
 release writes the headline and any wait, ends the run beneath the bead,
 nudges the holder to stop and give the bead back, and exits 4 naming the
