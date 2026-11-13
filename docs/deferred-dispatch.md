@@ -252,8 +252,9 @@ runs `gctk bead start-armed` on the rig's store (`services/gctk/arm`), which:
   arm:<bead>@<armed at>"`, and clears the arm once the sling exits 0.
 - **prints** one JSON line per armed bead: `gctk bead holds`' answer for it,
   with what the pass did with its arm. That is a retire and its case, a start,
-  a send already made, a hold and what holds the bead, a question to a person,
-  a bead left for the next pass, or a failure. A bead at a status other than
+  a send already made, a hold and what holds the bead, an arm withdrawn since
+  the pass listed it, a question to a person, a bead left for the next pass,
+  or a failure. A bead at a status other than
   `open` is held, and its line says so on every pass, because no wait landing
   dispatches it.
 

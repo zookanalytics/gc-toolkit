@@ -85,7 +85,8 @@ harness_init() {
   export GC_NO_API=1
   export STUB_STORE="$TMP/beads.json"
   # The answers the arm's verbs take (harness_init's gctk pin).
-  export STUB_HOLDS_ANSWER="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/holds-store.stub.sh"
+  STUB_HOLDS_ANSWER="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/holds-store.stub.sh"
+  export STUB_HOLDS_ANSWER
   export STUB_DEPS="$TMP/deps.txt"
   export STUB_KV="$TMP/kv.txt"
   export STUB_GC_LOG="$TMP/gc.log"
