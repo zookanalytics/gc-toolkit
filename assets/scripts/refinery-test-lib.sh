@@ -282,6 +282,8 @@ case "$1 $2" in
     [ -n "${STUB_LOGIN:-}" ] || { echo "gh: not logged in" >&2; exit 1; }
     echo "$STUB_LOGIN"; exit 0 ;;
   "pr view")
+    # STUB_VIEW_FAIL fails every view the way a lost connection does.
+    [ -z "${STUB_VIEW_FAIL:-}" ] || { echo "error connecting to api.github.com" >&2; exit 1; }
     ref="$3"; num="${ref##*/}"
     f="$GH_DIR/view_$num.json"
     [ -f "$f" ] || { echo "GraphQL: Could not resolve to a PullRequest with the number of $num." >&2; exit 1; }

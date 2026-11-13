@@ -11,9 +11,9 @@
 #     the pending record writes goes through no transition there;
 #   - once a direct landing is recorded, the PR open from its target that a
 #     bead holds at pull_request is composed at the target's new tip and edited
-#     to name the bead that landed, an edit that does not take leaving the
-#     landing's exit 0, and an owner the pending record holds is left to the
-#     landing order;
+#     to name the bead that landed, an edit that does not take, or a PR that
+#     does not read, leaving the landing's exit 0, and an owner the pending
+#     record holds is left to the landing order;
 #   - a direct bead bound for the default branch takes mr;
 #   - on a rig whose pending_through_merge is "true", mr publishes the PR and
 #     records it pending;
@@ -30,8 +30,10 @@
 #     on, resolved at the prepared head: the one the landing stamps on a bead
 #     that owns its PR, else the anchor's;
 #   - on the old path, a title and body that do not reach the PR, its own or
-#     its anchor's, or gates that do not resolve, stop the landing with
-#     nothing pushed;
+#     its anchor's, gates that do not resolve, or a view of a recorded PR that
+#     does not answer, stop the landing with nothing pushed, while a recorded
+#     PR GitHub reads as closed, or says the repository does not have, is no
+#     PR to bring current, so the landing goes on;
 #   - a bead that owns its PR lands as itself on the old path, though a parked
 #     rework child of it waits on its branch with a merge_result of its own;
 #   - a convoy's rebuild child lands on its convoy while the convoy is open on
@@ -170,6 +172,13 @@ has "$(logged scripts)" "lifecycle transition d --to merged --close" "…with th
 has "$OUT" "PR #66, open from integration/e, does not name d, which landed on it; the landing stands" "…and a line saying the PR does not name it"
 fresh
 direct_onto d '{}'
+owner_of_e pull_request
+STUB_VIEW_FAIL=1 run --bead d
+eq "$RC" 0 "a PR the owner records that does not read leaves the landing's exit 0"
+has "$(logged scripts)" "lifecycle transition d --to merged --close" "…with the bead recorded merged and closed"
+has "$OUT" "PR https://github.com/zook/rig/pull/66, which an records, did not read, so it was not brought current with d, which landed on integration/e; the landing stands" "…and a line saying the PR did not read"
+fresh
+direct_onto d '{}'
 owner_of_e pull_request_pending
 run --bead d
 eq "$RC" 0 "a landing onto a branch whose PR the pending record holds exits 0"
@@ -262,6 +271,18 @@ has "$(logged gctk)" "pr compose an --head $HEAD_C --gates lane-c	pre-open --bod
 has "$(bnotes an)" "Rework ch landed on polecat/an at $HEAD_C" "the anchor notes the landing"
 eq "$(bstatus ch) $(meta ch gc.work_outcome)" "closed shipped" "the child closes with its work record"
 eq "$(meta an merge_result)" "pull_request" "the anchor keeps its record"
+fresh
+branch_with polecat/an an.txt >/dev/null
+put '{"id":"an","title":"Anchor","status":"open","assignee":"","issue_type":"task","created_at":"2026-11-11T00:00:00Z","notes":"","metadata":{"branch":"polecat/an","target":"main","merge_result":"pull_request","pr_url":"https://github.com/zook/rig/pull/62","pr_number":"62"}}'
+work ch polecat/an '{"task_kind":"rework","anchor_bead":"an"}'
+prepared ch polecat/an
+HEAD_C=$(git -C "$HOME_DIR/worktrees/ch" rev-parse HEAD)
+pr 62 polecat/an gc-city-bot CLOSED
+run --bead ch
+eq "$RC" 0 "a hand-back whose anchor's recorded PR GitHub reads as closed exits 0"
+eq "$(tip polecat/an)" "$HEAD_C" "…the head on the anchor's branch"
+hasnt "$(logged gh)" "pr edit" "…with no open PR to bring current"
+eq "$(bstatus ch)" "closed" "…and the child closed"
 
 echo "# on the old path, a title and body that do not reach the PR, or gates that do not resolve, stop the landing with nothing pushed"
 fresh
@@ -299,6 +320,50 @@ eq "$(tip polecat/gr)" "$BEFORE" "…with nothing pushed"
 hasnt "$(logged gctk)" "pr compose" "…nothing composed"
 hasnt "$(logged gh)" "pr edit" "…the PR not edited"
 hasnt "$(logged scripts)" "lifecycle" "…and no transition written"
+fresh
+BEFORE=$(branch_with polecat/vf vf.txt)
+main_with vf-later.txt >/dev/null
+work vf polecat/vf '{"existing_pr":"https://github.com/zook/rig/pull/69"}'
+prepared vf polecat/vf
+pr 69 polecat/vf gc-city-bot
+STUB_VIEW_FAIL=1 run --bead vf
+eq "$RC" 1 "a PR the bead records that does not read stops (exit 1)"
+has "$OUT" "PR https://github.com/zook/rig/pull/69, which vf records, did not read" "…saying which PR did not read"
+eq "$(tip polecat/vf)" "$BEFORE" "…with nothing pushed"
+hasnt "$(logged gctk)" "pr compose" "…nothing composed"
+hasnt "$(logged scripts)" "lifecycle" "…and no transition written"
+fresh
+BEFORE=$(branch_with polecat/an an.txt)
+main_with an-later.txt >/dev/null
+put '{"id":"an","title":"Anchor","status":"open","assignee":"","issue_type":"task","created_at":"2026-11-11T00:00:00Z","notes":"","metadata":{"branch":"polecat/an","target":"main","merge_result":"pull_request","pr_url":"https://github.com/zook/rig/pull/62","pr_number":"62"}}'
+work ch polecat/an '{"task_kind":"rework","anchor_bead":"an"}'
+prepared ch polecat/an
+pr 62 polecat/an gc-city-bot
+STUB_VIEW_FAIL=1 run --bead ch
+eq "$RC" 1 "a PR the anchor records that does not read stops the hand-back (exit 1)"
+has "$OUT" "PR https://github.com/zook/rig/pull/62, which an records, did not read" "…saying which PR did not read"
+eq "$(tip polecat/an)" "$BEFORE" "…with nothing pushed onto the anchor's branch"
+hasnt "$(logged gctk)" "pr compose" "…nothing composed"
+eq "$(bstatus ch)" "open" "…and the child stays open for the next pass"
+fresh
+branch_with polecat/vg vg.txt >/dev/null
+work vg polecat/vg '{"existing_pr":"https://github.com/zook/rig/pull/71"}'
+prepared vg polecat/vg
+HEAD_V=$(git -C "$HOME_DIR/worktrees/vg" rev-parse HEAD)
+run --bead vg
+eq "$RC" 0 "a PR the bead records that GitHub says it does not have is no PR open on the branch, so the landing exits 0"
+eq "$(tip polecat/vg)" "$HEAD_V" "…the head is pushed"
+has "$(logged scripts)" "lifecycle transition vg --to pre_open_gate" "…and the bead waits at pre_open_gate"
+fresh
+branch_with polecat/an an.txt >/dev/null
+put '{"id":"an","title":"Anchor","status":"open","assignee":"","issue_type":"task","created_at":"2026-11-11T00:00:00Z","notes":"","metadata":{"branch":"polecat/an","target":"main","merge_result":"pull_request","pr_url":"https://github.com/zook/rig/pull/72","pr_number":"72"}}'
+work ch polecat/an '{"task_kind":"rework","anchor_bead":"an"}'
+prepared ch polecat/an
+HEAD_C=$(git -C "$HOME_DIR/worktrees/ch" rev-parse HEAD)
+run --bead ch
+eq "$RC" 0 "a hand-back whose anchor records a PR GitHub says it does not have lands (exit 0)"
+eq "$(tip polecat/an)" "$HEAD_C" "…the head on the anchor's branch"
+eq "$(bstatus ch)" "closed" "…and the child closed"
 
 echo "# a bead that owns its PR lands as itself on the old path, though a parked rework child waits on its branch"
 fresh

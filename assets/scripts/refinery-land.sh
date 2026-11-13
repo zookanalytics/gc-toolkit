@@ -35,16 +35,17 @@
 # target, the bead's own or, for a rework child handed back, its anchor's, has
 # its title and body brought current, its handoff naming the gates its check set
 # resolves to at the head: the check set this step stamps on a bead that owns
-# its PR, or the anchor's. Then the head is pushed under the lease on the commit
-# the prep read. A bead that owns its PR is parked for the merge cadence, at
-# pull_request when it records a PR open from its branch, else at pre_open_gate,
-# with merged_target and check_set, through lifecycle.sh. On either path a
-# rework child handed back lands on its anchor's branch and closes with its work
-# record. A convoy's rebuild child whose convoy is not open on its branch, is no
-# bead in the store, or is open there with no merge_result and assigned to
-# nobody, lands on neither path: it is parked behind the gate
-# refinery-rebuild-convoy-not-open before anything is pushed (refinery-lib.sh's
-# refinery_owner).
+# its PR, or the anchor's. A recorded PR that does not read stops the step
+# before the push, since whether it is open there is unknown. Then the head is
+# pushed under the lease on the commit the prep read. A bead that owns its PR is
+# parked for the merge cadence, at pull_request when it records a PR open from
+# its branch, else at pre_open_gate, with merged_target and check_set, through
+# lifecycle.sh. On either path a rework child handed back lands on its anchor's
+# branch and closes with its work record. A convoy's rebuild child whose convoy
+# is not open on its branch, is no bead in the store, or is open there with no
+# merge_result and assigned to nobody, lands on neither path: it is parked
+# behind the gate refinery-rebuild-convoy-not-open before anything is pushed
+# (refinery-lib.sh's refinery_owner).
 #
 # Every park files its human gate first, sets the merge_result, and keeps the
 # bead with the refinery, so clearing the gate hands it back. A bead handed
@@ -115,21 +116,36 @@ unanchor() {
   CURRENT=""
 }
 REPO=$(origin_repo "$HOME_DIR") || REPO=""
-# owner_pr <head> <base>: the PR the owner records, read from GitHub into
-# PR_URL and PR_NUMBER and held in PR_ROW, when it is open from <head> into
-# <base>.
+# owner_pr <head> <base>: the PR the owner records, PR_RECORDED, read from
+# GitHub into PR_URL and PR_NUMBER and held in PR_ROW, when it is open from
+# <head> into <base>. 0 when it is open there. 1 when the owner records no PR,
+# or GitHub answers that the one it records is not open from <head> into
+# <base>, or that the repository has no such PR, which refinery-publish.sh reads
+# by the same words. 2 when the view did not answer, so whether the PR is open
+# there is unknown.
 owner_pr() {
-  local recorded
+  local err
   PR_URL=""; PR_NUMBER=""; PR_ROW=""
-  recorded=$(row_meta "$OWNER_ROW" existing_pr)
-  [ -n "$recorded" ] || recorded=$(row_meta "$OWNER_ROW" pr_url)
-  [ -n "$recorded" ] || recorded=$(row_meta "$OWNER_ROW" pr_number)
-  [ -n "$recorded" ] && [ -n "$REPO" ] || return 1
-  PR_ROW=$(gh pr view "$recorded" --repo "$REPO" --json number,url,state,headRefName,baseRefName,title,body </dev/null 2>/dev/null) || return 1
+  PR_RECORDED=$(row_meta "$OWNER_ROW" existing_pr)
+  [ -n "$PR_RECORDED" ] || PR_RECORDED=$(row_meta "$OWNER_ROW" pr_url)
+  [ -n "$PR_RECORDED" ] || PR_RECORDED=$(row_meta "$OWNER_ROW" pr_number)
+  [ -n "$PR_RECORDED" ] || return 1
+  [ -n "$REPO" ] || return 2
+  err=$(mktemp "${TMPDIR:-/tmp}/refinery-land.XXXXXX") || return 2
+  if ! PR_ROW=$(gh pr view "$PR_RECORDED" --repo "$REPO" --json number,url,state,headRefName,baseRefName,title,body </dev/null 2>"$err"); then
+    PR_ROW=""
+    case "$(cat "$err")" in
+      *"Could not resolve to a PullRequest"*|*"no pull requests found"*|*"Not Found"*) rm -f "$err"; return 1 ;;
+    esac
+    rm -f "$err"
+    return 2
+  fi
+  rm -f "$err"
+  printf '%s' "$PR_ROW" | jq -e 'type == "object" and (.state | type == "string")' >/dev/null 2>&1 || { PR_ROW=""; return 2; }
   printf '%s' "$PR_ROW" | jq -e --arg b "$1" --arg t "$2" '.state == "OPEN" and .headRefName == $b and .baseRefName == $t' >/dev/null 2>&1 || return 1
   PR_URL=$(printf '%s' "$PR_ROW" | jq -r '.url // ""')
   PR_NUMBER=$(printf '%s' "$PR_ROW" | jq -r '(.number // "") | tostring')
-  [ -n "$PR_URL" ] && [ -n "$PR_NUMBER" ]
+  [ -n "$PR_URL" ] && [ -n "$PR_NUMBER" ] || { PR_ROW=""; return 2; }
 }
 # refresh <check_set>: bring the open PR owner_pr read, in PR_ROW, current with
 # the owner at HEAD_OID, its title and body. The body's handoff names the gates
@@ -190,10 +206,13 @@ refresh_target_pr() {
   base=$(row_meta "$OWNER_ROW" merged_target)
   [ -n "$base" ] || base=$(row_meta "$OWNER_ROW" target)
   [ -n "$base" ] || base="$DEFAULT_BRANCH"
-  if ! owner_pr "$TARGET" "$base"; then
-    [ -n "$PR_ROW" ] || echo "$PROG: the PR $OWNER records did not read, so it was not brought current with $BEAD, which landed on $TARGET; the landing stands" >&2
-    return 0
-  fi
+  owner_pr "$TARGET" "$base"
+  case "$?" in
+    0) ;;
+    1) return 0 ;;
+    *) echo "$PROG: PR $PR_RECORDED, which $OWNER records, did not read, so it was not brought current with $BEAD, which landed on $TARGET; the landing stands" >&2
+       return 0 ;;
+  esac
   if ! git -C "$HOME_DIR" fetch --no-tags origin "+refs/heads/$TARGET:refs/remotes/origin/$TARGET" >/dev/null 2>&1 \
      || ! HEAD_OID=$(git -C "$HOME_DIR" rev-parse --verify -q "refs/remotes/origin/$TARGET"); then
     echo "$PROG: origin/$TARGET did not read after $BEAD landed on it, so PR #$PR_NUMBER was not brought current; the landing stands" >&2
@@ -291,10 +310,13 @@ push() {
 }
 
 if [ "$OWNER" != "$BEAD" ]; then
-  if owner_pr "$BRANCH" "$TARGET"; then
-    refresh "$(row_meta "$OWNER_ROW" check_set)" \
-      || stop "PR #$PR_NUMBER is not current with $OWNER, so the head is not pushed under a stale body"
-  fi
+  owner_pr "$BRANCH" "$TARGET"
+  case "$?" in
+    0) refresh "$(row_meta "$OWNER_ROW" check_set)" \
+         || stop "PR #$PR_NUMBER is not current with $OWNER, so the head is not pushed under a stale body" ;;
+    1) ;;
+    *) stop "PR $PR_RECORDED, which $OWNER records, did not read, so the head is not pushed under a title and body nobody brought current" ;;
+  esac
   push
   gc bd update "$OWNER" --append-notes "Rework $BEAD landed on $BRANCH at $HEAD_OID." </dev/null >/dev/null \
     || echo "$PROG: the note that $BEAD landed did not reach $OWNER; the landing stands" >&2
@@ -315,10 +337,13 @@ case "$(printf '%s' "$CHECK_SET" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]
   none|off) CHECK_SET="none" ;;
 esac
 OWNS_PR=""
-if owner_pr "$BRANCH" "$TARGET"; then
-  OWNS_PR=1
-  refresh "$CHECK_SET" || stop "PR #$PR_NUMBER is not current with $BEAD, so the head is not pushed under a stale body"
-fi
+owner_pr "$BRANCH" "$TARGET"
+case "$?" in
+  0) OWNS_PR=1
+     refresh "$CHECK_SET" || stop "PR #$PR_NUMBER is not current with $BEAD, so the head is not pushed under a stale body" ;;
+  1) ;;
+  *) stop "PR $PR_RECORDED, which $BEAD records, did not read, so the head is not pushed under a title and body nobody brought current" ;;
+esac
 push
 if [ -n "$CURRENT" ]; then
   unanchor || stop "$HEAD_OID is on $BRANCH, but $BEAD did not leave $CURRENT for the merge cadence's gate"
