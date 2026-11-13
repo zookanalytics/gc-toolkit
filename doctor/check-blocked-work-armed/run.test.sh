@@ -118,7 +118,7 @@ OUT=$(run_check); RC=$?
 eq "$RC" "1" "a blocked plainly-work bead with no dispatch path warns (exit 1)"
 has "$OUT" "no dispatch path" "the headline names the defect"
 has "$OUT" "alpha bead a-1" "the finding names the rig and bead"
-has "$OUT" "deferred-dispatch.sh arm a-1" "the finding names the arm remedy for that bead"
+has "$OUT" "gctk bead arm a-1" "the finding names the arm remedy for that bead"
 clear_stores
 
 # --- a converse sitting's hold: its ruling decides the dispatch --------------
@@ -134,7 +134,7 @@ clear_stores
 blocked_store alpha "$(bwork a-1)"; gates_store alpha "$(hgate x-0 polecat-blocked)"
 OUT=$(run_check); RC=$?
 eq "$RC" "1" "a blocked bead another human gate holds is flagged"
-has "$OUT" "deferred-dispatch.sh arm a-1" "…with the arm remedy"
+has "$OUT" "gctk bead arm a-1" "…with the arm remedy"
 clear_stores
 # Which gates hold is the rule every reader of a gate shares (bd-lib.sh's
 # open_human_gate): every status but closed, pinned included. bd's default
@@ -155,7 +155,7 @@ blocked_store alpha "$(bwork a-1)"; gates_store alpha "$(hgate x-0 conversation.
 OUT=$(BD_FAIL_GATES=alpha run_check); RC=$?
 eq "$RC" "1" "an unreadable gate listing warns (exit 1)"
 has "$OUT" "whether a converse sitting's gate holds it could not be read" "…naming what could not be read"
-hasnt "$OUT" "deferred-dispatch.sh arm a-1" "…and flags nothing"
+hasnt "$OUT" "gctk bead arm a-1" "…and flags nothing"
 clear_stores
 # A store with no candidate reads no gates.
 blocked_store alpha "$(barmed a-1)"
@@ -233,7 +233,7 @@ blocked_store alpha "$(btyped a-1 story)"
 OUT=$(run_check); RC=$?
 eq "$RC" "1" "a blocked, unarmed story-typed bead warns"
 has "$OUT" "alpha bead a-1 [story]: blocked with no gc.routed_to and no gc.dispatch_when_ready" "…and is reported as stranded work"
-has "$OUT" "deferred-dispatch.sh arm a-1" "…with the arm remedy"
+has "$OUT" "gctk bead arm a-1" "…with the arm remedy"
 clear_stores
 
 # A route or an arm holding only whitespace is no dispatch path
@@ -276,7 +276,7 @@ bheld() { printf '{"id":"%s","status":"open","assignee":"","issue_type":"task","
 blocked_store alpha "$(bheld a-1 hold:mayor)"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a blocked bead held for placement (hold:mayor) is not flagged"
-hasnt "$OUT" "deferred-dispatch.sh arm a-1" "…and draws no arm remedy"
+hasnt "$OUT" "gctk bead arm a-1" "…and draws no arm remedy"
 hasnt "$OUT" "unexpected list" "…judged on the blocked listing's own row"
 clear_stores
 blocked_store alpha "$(bheld a-1 ' Hold:External')"
@@ -287,7 +287,7 @@ clear_stores
 blocked_store alpha "$(bmeta a-1 placement pending)"
 OUT=$(run_check); RC=$?
 eq "$RC" "1" "a blocked bead carrying only the retired placement marker is flagged"
-has "$OUT" "deferred-dispatch.sh arm a-1" "…and draws the arm remedy"
+has "$OUT" "gctk bead arm a-1" "…and draws the arm remedy"
 clear_stores
 blocked_store alpha "$(bheld a-1 hold:po)"
 eq "$(run_check >/dev/null; echo $?)" "1" "a label that only resembles a hold exempts nothing"
@@ -302,7 +302,7 @@ CTL_ROW=$(printf '{"id":"a-9","status":"open","assignee":"someone/else","issue_t
 blocked_store alpha "$(bwork a-1)" "$CTL_ROW"
 OUT=$(run_check); RC=$?
 eq "$RC" "1" "a blocked listing with a raw control byte in a title is still judged (exit 1)"
-has "$OUT" "deferred-dispatch.sh arm a-1" "…its stranded bead is flagged"
+has "$OUT" "gctk bead arm a-1" "…its stranded bead is flagged"
 hasnt "$OUT" "NOT checked" "…rather than the store reported unchecked"
 clear_stores
 blocked_store alpha "$(bheld a-1 hold:mayor)" "$CTL_ROW"
@@ -341,7 +341,7 @@ for k in $KINDS; do
     blocked_store alpha "$(bmeta a-1 task_kind "$k")"
     OUT=$(run_check); RC=$?
     eq "$RC" "0" "a blocked standing record (task_kind=$k) is not flagged"
-    hasnt "$OUT" "deferred-dispatch.sh arm a-1" "…and draws no arm remedy (task_kind=$k)"
+    hasnt "$OUT" "gctk bead arm a-1" "…and draws no arm remedy (task_kind=$k)"
     clear_stores
 done
 

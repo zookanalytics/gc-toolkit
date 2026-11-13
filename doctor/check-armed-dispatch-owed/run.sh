@@ -36,9 +36,10 @@
 # An arm whose attempts reached the cap is NOT flagged: the start asks a person
 # about it, so it is not silent.
 #
-# The remedy the finding names is a look at `deferred-dispatch.sh list` (which
-# marks each arm held / dispatchable / stranded) and, if the dispatch is no
-# longer wanted, `deferred-dispatch.sh disarm`.
+# The remedy the finding names is a look at the start's dry run,
+# `gctk bead start-armed --dry-run` (which says what the next pass would do with
+# each arm: hold it and why, start it, or leave it stranded) and, if the dispatch
+# is no longer wanted, `gctk bead disarm`.
 #
 # Read-only. Exit 0=OK 1=Warning. stdout: first line = message, then
 # "  - detail" lines. Warn-only. An UNREADABLE probe warns (1), never passes —
@@ -259,9 +260,9 @@ scan_store() {
         [ -n "$cid" ] || continue
         case "$act/$kase" in
             hold/status)
-                findings+=("$label bead $cid: armed for dispatch, and $why — no wait landing can dispatch it. Return it to open, or disarm: deferred-dispatch.sh disarm $cid") ;;
+                findings+=("$label bead $cid: armed for dispatch, and $why — no wait landing can dispatch it. Return it to open, or disarm it: gctk bead disarm $cid --reason \"<why>\"") ;;
             fail/malformed)
-                findings+=("$label bead $cid: armed for dispatch, and $why — no wait landing can dispatch it. Disarm it (deferred-dispatch.sh disarm $cid), then arm it again if the dispatch is still wanted") ;;
+                findings+=("$label bead $cid: armed for dispatch, and $why — no wait landing can dispatch it. Disarm it (gctk bead disarm $cid --reason \"<why>\"), then arm it again (gctk bead arm) if the dispatch is still wanted") ;;
             hold/unjudged)
                 notes+=("$label bead $cid: held by a waits-for edge onto $spawners, which the store cannot judge yet (unjudged), so the start holds the arm until the bd the city runs judges the gate") ;;
             fail/read)
@@ -360,7 +361,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
             N*) notes+=("${rec#N}") ;;
             A*) IFS=$'\037' read -r cid age stuck <<< "${rec#A}"
                 [ "$age" -ge "$OWED_WINDOW_SECONDS" ] || continue
-                findings+=("$label bead $cid: armed and nothing has held it for ${age}s (> ${OWED_WINDOW_SECONDS}s), but it has not dispatched${stuck:+: $stuck}. The deferred-dispatch order's pass starts an arm nothing holds, and ${OWED_WINDOW_SECONDS}s is that order's cadence window, so a dispatch owed this long means that order is not firing (check-cadence-live/I10) or the dispatch is stuck. Look: deferred-dispatch.sh list; disarm if no longer wanted: deferred-dispatch.sh disarm $cid") ;;
+                findings+=("$label bead $cid: armed and nothing has held it for ${age}s (> ${OWED_WINDOW_SECONDS}s), but it has not dispatched${stuck:+: $stuck}. The deferred-dispatch order's pass starts an arm nothing holds, and ${OWED_WINDOW_SECONDS}s is that order's cadence window, so a dispatch owed this long means that order is not firing (check-cadence-live/I10) or the dispatch is stuck. Look: gctk bead start-armed --dry-run --db $rig_path/.beads; disarm if no longer wanted: gctk bead disarm $cid --reason \"<why>\"") ;;
         esac
     done <"$WORK/$n.msg"
 done <<< "$scopes"

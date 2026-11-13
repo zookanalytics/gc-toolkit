@@ -337,7 +337,8 @@ OUT=$(run_check); RC=$?
 eq "$RC" "1" "an owed-but-not-firing arm warns (exit 1)"
 has "$OUT" "owed but not firing" "the headline names the defect"
 has "$OUT" "alpha bead a-1" "the finding names the rig and bead"
-has "$OUT" "disarm a-1" "the finding names the disarm remedy for that bead"
+has "$OUT" "gctk bead disarm a-1 --reason" "the finding names the disarm remedy for that bead, gctk's verb"
+has "$OUT" "Look: gctk bead start-armed --dry-run --db " "…and the look at the start's dry run in that rig's store"
 clear_stores
 
 # --- 2. STRANDED: armed at a non-open status ---------------------------------
@@ -346,6 +347,7 @@ OUT=$(run_check); RC=$?
 eq "$RC" "1" "an arm at a non-open status warns (exit 1)"
 has "$OUT" "it is at status blocked" "the finding names the stranding status"
 has "$OUT" "alpha bead a-2" "the stranded finding names the rig and bead"
+has "$OUT" "Return it to open, or disarm it: gctk bead disarm a-2 --reason" "the stranded finding names gctk's disarm"
 clear_stores
 
 # --- 3. EXEMPT: still waiting on its OWN open blocker ------------------------
@@ -895,7 +897,7 @@ OUT=$(run_check); RC=$?
 eq "$RC" "1" "an arm whose record does not decode warns (exit 1)"
 has "$OUT" "alpha bead m-1: armed for dispatch, and its arm does not decode" "the finding names the bead and that its arm does not decode"
 has "$OUT" "do not decode as a JSON array of strings" "the finding names what in the record does not decode"
-has "$OUT" "deferred-dispatch.sh disarm m-1" "the finding names the disarm remedy for that bead"
+has "$OUT" "Disarm it (gctk bead disarm m-1 --reason" "the finding names the disarm remedy for that bead, gctk's verb"
 clear_stores
 
 # --- 38. an arm whose formula the start cannot resolve is owed past the window
