@@ -456,9 +456,8 @@ why a reader must know it, and the work that retires it.
   (tk-1tfzr71.89) and, for gc-toolkit, the seed audit's re-render after a
   landing (tk-1tfzr71.92). The retirement bead (tk-1tfzr71.70), which waits on
   every cutover, deletes the old path once no open bead is on it.
-- **The merge cadence still admits work on a pending record.** The
-  `pr-facts.sh` arms that route a PR's feedback and its conflicts read a PR on
-  the pending record too, so they file rework for its feedback and a merge-in
-  for its conflict, beside the landing order's requeue of a changed head. The
-  refinery's find-work keeps the two off one branch. The GitHub intake
-  (tk-1tfzr71.21) moves that routing into the landing order's run.
+- **The merge cadence still admits work on a pending record.** It files work
+  for a PR on the pending record beside the landing order
+  ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-arms)), so the
+  decision that the landing order is the one path is not yet what runs. The
+  GitHub intake (tk-1tfzr71.21) moves that filing into the landing order's run.
