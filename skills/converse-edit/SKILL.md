@@ -104,9 +104,8 @@ holds the change.
 From the filing on, the subject waits on the change, so no pool takes the
 subject while you edit, and a dismiss leaves it waiting on the change. First
 withdraw the subject's arm and pool route, as the sign-off's case **New work
-carries it** does (the converse-settle step). The block keeps a `human` route,
-which sends the subject to no pool, and prints its last line only once each
-write has exited 0:
+carries it** does (the converse-settle step). The block prints its last line
+only once each write has exited 0:
 
 ```bash
 WHY="the operator ruled that conversation $CONVERSATION make the change that carries it"
@@ -114,16 +113,15 @@ ROW=$(gc bd show "$SUBJECT" --json) \
   && ARM=$(printf '%s\n' "$ROW" | jq -er --arg s "$SUBJECT" 'if type == "array" and length == 1 and .[0].id == $s then (.[0].metadata["gc.dispatch_when_ready"] // "") | tostring else error("unread") end') \
   && ROUTE=$(printf '%s\n' "$ROW" | jq -er '(.[0].metadata["gc.routed_to"] // "") | tostring') \
   && { [ -z "$ARM" ] || "$CONV/deferred-dispatch.sh" disarm "$SUBJECT" --reason "$WHY"; } \
-  && { [ -z "$ROUTE" ] || [ "$ROUTE" = human ] || gc bd update "$SUBJECT" --unset-metadata gc.routed_to; } \
+  && { [ -z "$ROUTE" ] || gc bd update "$SUBJECT" --unset-metadata gc.routed_to; } \
   && echo "$SUBJECT carries no arm and no pool route"
 ```
 
 An epic subject takes no edge, brief or arm: it already waits on its member, bd
 refuses the edge, and its members carry its close. Nor does a subject the
 sign-off arms no closer for take the brief or the arm, as the sign-off says when
-it refuses a `--close-brief`: an anchor, a bead assigned to someone, one routed
-to `human`, which the block above keeps and the arm refuses, or one at a status
-other than open. Such a subject takes the edge alone:
+it refuses a `--close-brief`: an anchor, a bead assigned to someone, or one at
+a status other than open. Such a subject takes the edge alone:
 `gc bd dep add "$SUBJECT" "$CHANGE" --type=blocks`.
 
 Any other subject takes the wait the `waits` skill gives a bead that is checked
