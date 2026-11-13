@@ -43,12 +43,22 @@ const (
 )
 
 // pages are the screens the tabs at the top of the form name, in the order the
-// tabs show them, and pageNames what the tabs call them. A submit's progress is
-// no page: it shows what a save and a start do as they land.
+// tabs show them, pageNames what the tabs call them, and pageKeys the key that
+// goes straight to each, which its tab shows. A submit's progress is no page:
+// it shows what a save and a start do as they land.
 var (
 	pages     = []screen{composeScreen, returnScreen, peopleScreen}
 	pageNames = map[screen]string{composeScreen: "Start a conversation", returnScreen: "Return to a conversation", peopleScreen: "People"}
+	pageKeys  = map[screen]pageKey{
+		composeScreen: {press: "ctrl+n", name: "Ctrl+N"},
+		returnScreen:  {press: "ctrl+r", name: "Ctrl+R"},
+		peopleScreen:  {press: "ctrl+p", name: "Ctrl+P"},
+	}
 )
+
+// pageKey is the key that goes straight to a page: press is how bubbletea
+// names a press of it, and name how the page's tab shows it.
+type pageKey struct{ press, name string }
 
 type field int
 
@@ -847,6 +857,18 @@ func (m *Model) key(k tea.KeyPressMsg) tea.Cmd {
 		}
 		return m.quit()
 	}
+	// A page's key goes to that page from any page and any field, ahead of what
+	// a field binds the key to. The question's text box binds Ctrl+N and Ctrl+P
+	// to the line below and above, where ↓ and ↑ still go, and the subject's
+	// text input binds them to suggestions, which it never shows. The progress
+	// of a submit is no page, and keeps its own keys.
+	if m.scr != progressScreen {
+		for _, p := range pages {
+			if s == pageKeys[p].press {
+				return m.goTo(p)
+			}
+		}
+	}
 	switch m.scr {
 	case progressScreen:
 		return m.progressKey(s)
@@ -1164,7 +1186,7 @@ func (m *Model) onSaved(msg savedMsg) tea.Cmd {
 		}
 		return nil
 	}
-	m.scr = composeScreen
+	m.showPage(composeScreen)
 	why := "the save answered without filing a conversation"
 	if msg.err != nil {
 		why = msg.err.Error()
@@ -1311,10 +1333,9 @@ func (m *Model) returnKey(s string) tea.Cmd {
 }
 
 // movePage moves along the tabs to the page step away, wrapping around at
-// either end, as ←/→ cycle a chooser's values. A list page reads the city again
-// while it is on screen. Back on the start page the focus is on its tabs, so
-// ←/→ go on moving along them and ↓ goes down to the subject. A status one page
-// gave is not carried to another.
+// either end, as ←/→ cycle a chooser's values. Back on the start page the focus
+// is on its tabs, so ←/→ go on moving along them and ↓ goes down to the
+// subject.
 func (m *Model) movePage(step int) tea.Cmd {
 	at := 0
 	for i, p := range pages {
@@ -1322,9 +1343,36 @@ func (m *Model) movePage(step int) tea.Cmd {
 			at = i
 		}
 	}
-	m.scr, m.status = pages[(at+step+len(pages))%len(pages)], ""
+	cmd := m.showPage(pages[(at+step+len(pages))%len(pages)])
 	if m.scr == composeScreen {
 		return m.focusOn(tabsField)
+	}
+	return cmd
+}
+
+// goTo goes straight to page p, as p's key does. The key of the page on
+// screen does nothing, so the keys neither toggle between pages nor cycle
+// through them. The start page comes back as the operator left it: its fields
+// as they were, and the focus in the field it was in, which is where the form
+// opened it until the operator moves it.
+func (m *Model) goTo(p screen) tea.Cmd {
+	if p == m.scr {
+		return nil
+	}
+	return m.showPage(p)
+}
+
+// showPage puts page p on screen. A list page reads the city again while it is
+// on screen. A status one page gave is not carried to another. The start page
+// focuses its field again, so the field's cursor shows: the cursor blinks on
+// messages the form hands a field only while the start page is on screen, so
+// while another screen is up its blink stops where it was, dark as often as
+// not.
+func (m *Model) showPage(p screen) tea.Cmd {
+	m.scr, m.status = p, ""
+	if p == composeScreen {
+		m.setFocus(m.focus)
+		return nil
 	}
 	return tea.Batch(m.loadCity(), m.refreshCity())
 }
@@ -1849,14 +1897,15 @@ func (m *Model) label(f field, text string) string {
 	return labelStyle.Render(text)
 }
 
-// tabs is the row of tabs that names the form's pages, the page on screen
-// marked: reversed while ←/→ move along the row, as they do anywhere on a list
-// page and from the start page's tabs, and in bold while the focus is in one
-// of the start page's fields.
+// tabs is the row of tabs that names the form's pages, each after the key that
+// goes straight to it, as the hints under the row name a key before what it
+// does. The page on screen is marked: reversed while ←/→ move along the row, as
+// they do anywhere on a list page and from the start page's tabs, and in bold
+// while the focus is in one of the start page's fields.
 func (m *Model) tabs() string {
 	parts := make([]string, len(pages))
 	for i, p := range pages {
-		name := " " + pageNames[p] + " "
+		name := " " + pageKeys[p].name + " " + pageNames[p] + " "
 		switch {
 		case p != m.scr:
 			parts[i] = hintStyle.Render(name)
