@@ -307,6 +307,14 @@ AGENTS=(
   "deacon   city 0|w-cur|w-new       1|w-new|w-new       yes"
   "refinery rig  -                   -                   -"
 )
+# The files the loop reads through paths it builds from each agent's name.
+# run-tests --affected selects a suite only by a path it names, so they are
+# named here, and the loop fails on a file it reads that this list leaves out.
+READS=(
+  agents/witness/prompt.template.md formulas/mol-witness-patrol.toml
+  agents/deacon/prompt.template.md formulas/mol-deacon-patrol.toml
+  agents/refinery/prompt.template.md
+)
 
 for SPEC in "${AGENTS[@]}"; do
   read -r AGENT SCOPE POUR_OK POUR_FAIL BURNS_CURRENT <<<"$SPEC"
@@ -326,6 +334,15 @@ for SPEC in "${AGENTS[@]}"; do
   TOML="$ROOT/formulas/$TITLE.toml"
   echo
   echo "== $AGENT =="
+
+  NEEDS="${PROMPT#"$ROOT"/}"
+  [ "$POUR_OK" = - ] || NEEDS="$NEEDS ${TOML#"$ROOT"/}"
+  for F in $NEEDS; do
+    case " ${READS[*]} " in
+      *" $F "*) ok "$AGENT: READS names $F" ;;
+      *) bad "$AGENT: READS leaves out $F, so run-tests --affected cannot select this suite when it changes" ;;
+    esac
+  done
 
   RECONCILE="$(extract patrol-wisp-reconcile "$PROMPT")"
   POUR=""
