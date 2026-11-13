@@ -251,7 +251,10 @@ reload shows only once you stop the copy and start it again, which gives it a
 new port and address to give the operator.
 
 Where `address` is empty, `detail` says why. A copy whose publish command ended
-gets its address back when you run the start again. Where the city sets no
+gets its address back when you run the start again. A start that fails says why
+in `reason` and `detail`. One that fails `address-taken` found the copy on a
+port another mapping already publishes, and left it running there, so stop the
+copy and start it again, which runs it on another port. Where the city sets no
 publisher, or a second start still prints no address, the city can give no
 address and the operator cannot open the copy, so stop it with
 `( cd "$TREE" && "$GC_CITY_PATH/.gc/services/gctk/bin/gctk" rig serve --stop )`.
