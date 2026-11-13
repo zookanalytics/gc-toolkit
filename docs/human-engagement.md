@@ -888,13 +888,25 @@ A ruling is not an approval. The merge counts only an Approve review on GitHub
 from an account other than the city's (the merge condition in
 [state-machine.md](state-machine.md)), and nothing the sign-off writes is one.
 So when a ruling leaves standing an open PR whose status reads needs-review
-(`gctk pr status`, the status its `status:` label shows), the headline ends by
-saying the PR still needs the operator's Approve on GitHub, and keeps saying so
-after the operator approves, until the PR merges or another headline replaces
-it. The sitting also passes on a line the sign-off prints with the PR's link. A
-PR the city is still changing or landing, or one a person must clear first,
-asks for no Approve yet. A PR whose status cannot be read counts as needing
-one, and on a host with neither `timeout` nor `gtimeout` no PR's status can be.
+(`gctk pr status`, the status its `status:` label shows) and does not show an
+approval standing, the headline ends by saying the PR still needs the
+operator's Approve on GitHub, and keeps saying so after the operator approves,
+until the PR merges or another headline replaces it. The sitting also passes on
+a line the sign-off prints with the PR's link. A PR the city is still changing
+or landing, or one a person must clear first, asks for no Approve yet. A PR
+whose status cannot be read counts as needing one, and on a host with neither
+`timeout` nor `gtimeout` no PR's status can be.
+
+A request for changes holds the merge whatever approval stands, until its
+author approves or the request is dismissed, and the status reads needs-review
+then too. For a PR on the pending record the status carries the evaluator's
+conditions, which say whether an approval stands and name whose request holds
+the PR. A PR whose approval stands asks for no Approve, and its line names whose
+request holds the merge and what clears it. A request beside no approval is
+named on the line that asks for the Approve. The sign-off cannot tell which
+account is the operator's, so each line reads true whichever it is. A status on
+the old record carries no conditions, so needs-review there asks for the
+Approve.
 
 **A sitting cut short** writes its record, signs off with `--ruled no`, which
 leaves every gate its conversation replies to open and owed with its reply in

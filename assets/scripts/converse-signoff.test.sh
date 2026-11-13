@@ -104,14 +104,18 @@
 #             reached the gate first stands; each --var reaches Accept's writer,
 #             and one without --accept, or not <key>=<value>, is refused
 #   (APPROVE*) a PR a ruling leaves standing whose status (gctk pr status)
-#             reads needs-review, or does not read, is named in the headline, the
-#             close reason and the reminder, and printed with its link, read
-#             before the first write; one merging, working or needing attention
-#             asks for no Approve yet; a PR on the pending record is answered for
-#             and read the same way; several are counted in the headline and
-#             named in the reminder's actions, so it stays under the real cap; a
-#             host with no timeout tool makes no status read; a PR the ruling
-#             reworks or retires is not named
+#             reads needs-review with no approval standing, or does not read, is
+#             named in the headline, the close reason and the reminder, and
+#             printed with its link, read before the first write; one merging,
+#             working or needing attention asks for no Approve yet; a PR on the
+#             pending record is answered for and read the same way; one whose
+#             status names an approval standing beside a request for changes
+#             asks for no Approve, and its line names whose request holds it; a
+#             request beside no approval is named on the line that asks for it;
+#             a status with no conditions asks for it; several are counted in the
+#             headline and named in the reminder's actions, so it stays under the
+#             real cap; a host with no timeout tool makes no status read; a PR
+#             the ruling reworks or retires is not named
 #
 # Runs the REAL converse-signoff.sh with a stubbed `gc` on PATH over a
 # file-backed store, linked into a stub pack beside the libraries it sources and
@@ -277,15 +281,19 @@ chmod +x "$TMP/bin/gh"
 
 # --- gctk stub -----------------------------------------------------------------
 # `pr status <bead> --json` answers the status $STORE/status-<bead> holds, or
-# needs-review when none is set. Every call is logged to $GCTK_CALLS with how
-# many writes came before it, and GCTK_DOWN fails every call.
+# needs-review when none is set, and the conditions array
+# $STORE/conditions-<bead> holds, as a PR on the pending record carries them,
+# with no conditions key when none is set, as on the old record. Every call is
+# logged to $GCTK_CALLS with how many writes came before it, and GCTK_DOWN fails
+# every call.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gctk" <<'GCTK'
 printf 'writes=%s %s\n' "$(grep -c '' "$CALLS" 2>/dev/null)" "$*" >> "$GCTK_CALLS"
 [ -n "${GCTK_DOWN:-}" ] && { echo "gctk: could not read the store" >&2; exit 2; }
 case "$1 $2" in
   "pr status")
     _s=needs-review; [ -f "$STORE/status-$3" ] && _s=$(cat "$STORE/status-$3")
-    printf '{"status":"%s","held":[],"reasons":[]}\n' "$_s" ;;
+    _c=""; [ -f "$STORE/conditions-$3" ] && _c=",\"conditions\":$(cat "$STORE/conditions-$3")"
+    printf '{"status":"%s","held":[],"reasons":[]%s}\n' "$_s" "$_c" ;;
   *) exit 2 ;;
 esac
 GCTK
@@ -1533,9 +1541,12 @@ eq "$(writes)" 0 "(ACCEPT-VAR-FORM) …writing nothing"
 echo "# a ruling is not an approval: a PR it leaves standing with none says so"
 # pr_at <anchor> <n> — the PR the anchor records. pr_status <anchor> <status> —
 # the status gctk pr status reads for the PR the anchor owns; with none set, the
-# stub reads needs-review, a PR with only an Approve left.
+# stub reads needs-review. pr_conditions <anchor> <json> — the conditions that
+# status carries; with none set, it carries no conditions key, as a status on
+# the old record does, which does not say whether an approval stands.
 pr_at() { setm "$1" pr_number "$2"; setm "$1" pr_url "https://github.com/acme/widgets/pull/$2"; }
 pr_status() { printf '%s' "$2" > "$STORE/status-$1"; }
+pr_conditions() { printf '%s' "$2" > "$STORE/conditions-$1"; }
 # said <label> <owed|landed> — what a sign-off outcome "design approved" on PR #77
 # wrote and printed: the Approve still owed, or nothing of it.
 said() {
@@ -1557,6 +1568,7 @@ eq "$(field tk-conv close_reason)" "design approved; PR #77 still needs your App
 eq "$(grep '^pr-sitting-comment' "$CALLS")" "pr-sitting-comment refresh --sitting tk-conv" "(APPROVE-OWED) …and the comment on the PR is drawn again from the conversation"
 has "$OUT" "this ruling does not count as one" "(APPROVE-OWED) the sitting is told the ruling is not the approval"
 has "$OUT" "link it: https://github.com/acme/widgets/pull/77" "(APPROVE-OWED) …with the PR's link"
+hasnt "$OUT" "request for changes" "(APPROVE-OWED) …and with a status that carries no conditions, names no request for changes"
 hasnt "$(grep '^bd comment' "$CALLS")" "Approve" "(APPROVE-OWED) the Approve is no act of the sign-off, so no action recorded on the conversation repeats it"
 case "$OUT" in
   *"SIGNED OFF"*"PR #77 still needs the operator's Approve"*) ok "(APPROVE-OWED) …as the last thing it reads" ;;
@@ -1597,6 +1609,59 @@ for _rec in "pull_request_pending blocked" "pull_request_head_changed open"; do
     run_signoff "${STAND[@]}"
     said "(APPROVE-RECORD) $1, merging:" landed
 done
+
+# On the pending record the status carries the evaluator's conditions, which say
+# whether an approval stands and name each account whose request for changes
+# holds the PR. pending_pr <conditions> — PR #77 on the pending record, its
+# status needs-review with those conditions. approval_owed and requested <login>
+# are the conditions the evaluator writes for a missing approval and for
+# <login>'s standing request.
+pending_pr() {
+    open_pr; pr_at tk-anc 77; setm tk-anc merge_result pull_request_pending; setf tk-anc status blocked
+    pr_conditions tk-anc "$1"
+}
+approval_owed='{"kind":"approval","detail":"no approval stands from an account that can push to the repository"}'
+requested() { printf '{"kind":"changes-requested","value":"%s","detail":"%s requests changes, and the request stands"}' "$1" "$1"; }
+pending_pr '[]'; pr_status tk-anc merging
+run_signoff "${STAND[@]}"
+MERGING_WRITES=$(cat "$CALLS")
+# vetoed <label> <login> — what a sign-off on PR #77 wrote and printed when its
+# status names an approval standing beside <login>'s request for changes.
+vetoed() {
+    eq "$RC" 0 "$1 a ruling that leaves an approval beside a request for changes signs off"
+    eq "$(meta tk-anc gc.takeaway)" "design approved" "$1 no Approve is owed, so the headline stays as given"
+    eq "$(field tk-conv close_reason)" "design approved" "$1 …and so does the close reason"
+    hasnt "$(grep '^bd comment' "$CALLS")" "Approve" "$1 …and no action recorded on the conversation"
+    hasnt "$OUT" "Approve" "$1 …and the sitting is told to ask for none"
+    has "$OUT" "An approval stands on PR #77, and a request for changes from $2 holds its merge until $2 approves or the request is dismissed. This ruling does neither." "$1 …but names whose request holds the merge and what clears it"
+    has "$OUT" "link it: https://github.com/acme/widgets/pull/77" "$1 …with the PR's link"
+    eq "$(field tk-rev status)" "closed" "$1 the ruling still answers the gate"
+    eq "$(cat "$CALLS")" "$MERGING_WRITES" "$1 …writing what a sign-off on a PR that asks for no Approve writes"
+}
+pending_pr "[$(requested maintainer)]"
+run_signoff "${STAND[@]}"
+vetoed "(APPROVE-VETO) the operator's approval beside another account's request:" maintainer
+pending_pr "[$(requested operator)]"
+run_signoff "${STAND[@]}"
+vetoed "(APPROVE-VETO-MIRROR) the same when the request is the operator's and the approval another account's:" operator
+pending_pr "[$(requested maintainer),$(requested reviewer)]"
+run_signoff "${STAND[@]}"
+eq "$(meta tk-anc gc.takeaway)" "design approved" "(APPROVE-VETO-TWO) an approval beside two requests asks for no Approve"
+has "$OUT" "An approval stands on PR #77, and a request for changes from maintainer holds its merge until maintainer approves or the request is dismissed. A request for changes from reviewer also holds it until reviewer approves or the request is dismissed. This ruling does neither." "(APPROVE-VETO-TWO) …and names each request that holds the merge"
+
+pending_pr "[$approval_owed,$(requested operator)]"
+run_signoff "${STAND[@]}"
+said "(APPROVE-VETO-OWED) a request for changes with no approval beside it:" owed
+has "$OUT" "A request for changes from operator also stands: the operator's Approve replaces it only if operator is their own account, and otherwise it holds the merge until operator approves or the request is dismissed." "(APPROVE-VETO-OWED) …and the sitting is told whose it is and what clears it"
+hasnt "$OUT" "An approval stands" "(APPROVE-VETO-OWED) …and not that an approval stands"
+pending_pr "[$approval_owed]"
+run_signoff "${STAND[@]}"
+said "(APPROVE-PENDING-OWED) a status whose conditions name only a missing approval:" owed
+hasnt "$OUT" "request for changes" "(APPROVE-PENDING-OWED) …names no request for changes"
+pending_pr '[]'
+run_signoff "${STAND[@]}"
+said "(APPROVE-PENDING-UNNAMED) a needs-review status whose conditions name nothing that holds it still asks:" owed
+hasnt "$OUT" "An approval stands" "(APPROVE-PENDING-UNNAMED) …and does not say an approval stands"
 
 open_pr; pr_at tk-anc 77
 GCTK_DOWN=1 run_signoff "${STAND[@]}"
@@ -1707,6 +1772,11 @@ run_signoff --conversation tk-conv --outcome "the approach stands" "${RULED[@]}"
 eq "$(meta tk-anc gc.takeaway)" "the approach stands; PR #78 still needs your Approve on GitHub" "(APPROVE-TWO) a PR a person must clear first is not counted as owing one"
 hasnt "$OUT" "PR #77 still needs" "(APPROVE-TWO) …and is not named"
 has "$OUT" "PR #78 still needs the operator's Approve review" "(APPROVE-TWO) …beside the other PR's line"
+shared_pr; pr_at tk-anc 77; pr_at tk-pr2 78; setm tk-anc merge_result pull_request_pending; setf tk-anc status blocked; pr_conditions tk-anc "[$(requested maintainer)]"
+run_signoff --conversation tk-conv --outcome "the approach stands" "${RULED[@]}" --no-rework
+eq "$(meta tk-anc gc.takeaway)" "the approach stands; PR #78 still needs your Approve on GitHub" "(APPROVE-TWO) an approval beside a request for changes is not counted as owing one"
+has "$OUT" "a request for changes from maintainer holds its merge" "(APPROVE-TWO) …and its line still prints"
+has "$OUT" "PR #78 still needs the operator's Approve review" "(APPROVE-TWO) …beside the other PR's"
 
 # many_prs <count> — a gate that releases the subject's PR and others up to
 # <count>, numbered from #1000 in the order the sign-off finds them.

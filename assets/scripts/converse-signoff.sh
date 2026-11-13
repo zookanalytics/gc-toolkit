@@ -50,14 +50,23 @@
 # from an account other than the city's. So the headline says when an open PR
 # the ruling leaves standing still needs one, naming one PR and counting several
 # so the clause fits the cap, and a printed line gives the sitting each PR's
-# link. Whether one is still needed is the PR's status, the one its status:
-# label shows (`gctk pr status`): needs-review means only an Approve is left. A
-# PR the city is still changing or landing, or one a person must clear first,
-# asks for no Approve yet. The statuses are read before the first write, each
-# call bounded at 20 seconds, since a PR on the pending record is read from
-# GitHub, so a stalled read cannot hold the ruling's writes. A PR whose status
-# does not read counts as needing one: a needless ask costs a glance, and a
-# missed one leaves the PR unmerged.
+# link. Whether one is still needed is read from the PR's status, the one its
+# status: label shows (`gctk pr status`). needs-review means a person's review is
+# all that is left: an Approve, or a request for changes, which holds the merge
+# whatever approval stands until its author approves or it is dismissed. A PR
+# the city is still changing or landing, or one a person must clear first, asks
+# for no Approve yet. For a PR on the pending record the status also carries the
+# evaluator's conditions, which say whether an approval stands and name the
+# account behind each standing request for changes. A PR whose approval stands
+# needs no Approve, and its line names whose request holds its merge. A request
+# beside no approval is named on the line too. The sign-off cannot tell which
+# login is the operator's, so each line reads true whichever it is. A status
+# with no conditions, as on the old record, does not say whether an approval
+# stands, so needs-review there asks for one. The statuses are read before the
+# first write, each call bounded at 20 seconds, since a PR on the pending record
+# is read from GitHub, so a stalled read cannot hold the ruling's writes. A PR
+# whose status does not read counts as needing one: a needless ask costs a
+# glance, and a missed one leaves the PR unmerged.
 #
 # A ruling given on a turn that does not sign off (--answer) runs steps 1 to 3
 # for the gates --answer names, and step 4 when it takes the recommendation,
@@ -703,18 +712,30 @@ fi
   || die "--close-brief is the claim $SUBJECT's validating closer checks once the work it waits on lands, and none of --waiting-on${WAIT_IDS:+ ($WAIT_IDS)} is work in $SUBJECT's own store, a bead that is no gate, so no closer is armed; nothing was written. Drop --close-brief"
 HELM=$(pack_script gc-helm.sh) || stopped "no gc-helm.sh beside $0, so the subject's headline cannot be written; nothing was written"
 
-# pr_status <bead> — the status `gctk pr status` gives the PR the bead owns,
-# stopped after 20 seconds. A call stopped that way exits non-zero, as one that
-# failed does. A host with neither timeout tool makes no call and exits non-zero
-# too, so every PR left standing reads as one whose status did not read: the
-# sign-off exists to get a ruling's writes down, and an unbounded call ahead of
-# them could hold them. Prints nothing when the status does not read.
+# pr_status <bead> — what `gctk pr status` says of the PR the bead owns, as one
+# line of words: the status; then `owed` when its conditions name a missing
+# approval, `stands` when they name none, or `untold` when the status carries no
+# conditions, as one on the old record does; then the login of each account
+# whose request for changes stands, which the conditions name only on the
+# pending record. The call is stopped after 20 seconds, and one stopped that way
+# exits non-zero, as one that failed does. A host with neither timeout tool
+# makes no call and exits non-zero too, so every PR left standing reads as one
+# whose status did not read: the sign-off exists to get a ruling's writes down,
+# and an unbounded call ahead of them could hold them. Prints nothing when the
+# status does not read.
 pr_status() {
   local t
   [ -x "$GCTK" ] || return 1
   for t in timeout gtimeout; do
     command -v "$t" >/dev/null 2>&1 || continue
-    "$t" -k 5 20 "$GCTK" pr status "$1" --json </dev/null 2>/dev/null | scrub | jq -er '.status | strings | select(. != "")' 2>/dev/null
+    "$t" -k 5 20 "$GCTK" pr status "$1" --json </dev/null 2>/dev/null | scrub | jq -er '
+      select((.status | type) == "string" and .status != "")
+      | [.status,
+          (.conditions | if type != "array" then "untold"
+            elif any(.[]; .kind == "approval") then "owed" else "stands" end)]
+        + [.conditions | arrays | .[] | select(.kind == "changes-requested")
+            | .value | strings | select(. != "")]
+      | join(" ")' 2>/dev/null
     return
   done
   return 1
@@ -729,14 +750,31 @@ for p in "${STANDS[@]+"${STANDS[@]}"}"; do
   P_NUM=$(printf '%s' "$PROW" | jq -r '.metadata.pr_number // "" | tostring')
   [ -n "$P_NUM" ] || P_NUM=$(printf '%s' "$P_URL" | sed -n 's#.*/pull/\([0-9][0-9]*\).*#\1#p')
   P_READ=$(pr_status "$p") || P_READ=""
-  case "$P_READ" in ""|needs-review) ;; *) continue ;; esac
+  P_WORDS=()
+  [ -z "$P_READ" ] || read -r -a P_WORDS <<<"$P_READ"
+  case "${P_WORDS[0]:-}" in ""|needs-review) ;; *) continue ;; esac
   P_NAME="PR #$P_NUM"
   [ -n "$P_NUM" ] || P_NAME="$p's PR"
-  APPROVE_OWED+=("$P_NAME")
-  if [ "$P_READ" = needs-review ]; then
-    P_SAYS="$P_NAME still needs the operator's Approve review on GitHub before it can merge, and this ruling does not count as one."
-  else
+  if [ -z "${P_WORDS[0]:-}" ]; then
+    APPROVE_OWED+=("$P_NAME")
     P_SAYS="The status of $P_NAME could not be read, so its merge may still need the operator's Approve review on GitHub, and this ruling does not count as one."
+  elif [ "${P_WORDS[1]:-}" = stands ] && [ "${#P_WORDS[@]}" -gt 2 ]; then
+    # An approval stands, and each request for changes the status names holds
+    # the merge until its author approves or it is dismissed.
+    P_SAYS="An approval stands on $P_NAME, and a request for changes from ${P_WORDS[2]} holds its merge until ${P_WORDS[2]} approves or the request is dismissed."
+    for ((P_I = 3; P_I < ${#P_WORDS[@]}; P_I++)); do
+      P_SAYS="$P_SAYS A request for changes from ${P_WORDS[$P_I]} also holds it until ${P_WORDS[$P_I]} approves or the request is dismissed."
+    done
+    P_SAYS="$P_SAYS This ruling does neither."
+  else
+    # No approval stands, or the status does not say whether one does, so the
+    # Approve is asked. A request the status names beside it is the operator's
+    # to replace only when it is their own.
+    APPROVE_OWED+=("$P_NAME")
+    P_SAYS="$P_NAME still needs the operator's Approve review on GitHub before it can merge, and this ruling does not count as one."
+    for ((P_I = 2; P_I < ${#P_WORDS[@]}; P_I++)); do
+      P_SAYS="$P_SAYS A request for changes from ${P_WORDS[$P_I]} also stands: the operator's Approve replaces it only if ${P_WORDS[$P_I]} is their own account, and otherwise it holds the merge until ${P_WORDS[$P_I]} approves or the request is dismissed."
+    done
   fi
   APPROVE_TELL+=("$P_SAYS Tell them so in plain words${P_URL:+ and link it: $P_URL}")
 done
