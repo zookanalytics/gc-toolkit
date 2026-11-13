@@ -31,10 +31,11 @@ reading of the parked rule they approved. The board's two views are recorded in
 - **The parked rule.** A need does not count when what it is about is parked or
   waits for the Product Owner. It is parked itself when it, or an epic or
   Delivery above it, waits on a park. A gate, a decision or a conversation does
-  not count when every bead it holds or is about is parked or carries
-  hold:mayor. A pull request or other work that is itself a need counts unless
-  it is parked itself, whatever it holds, and a need about nothing else counts.
-  An epic's and a Delivery's line counts only the needs that count.
+  not count when every bead it holds or is about is parked, is a need that does
+  not count, or carries hold:mayor. A pull request or other work that is itself
+  a need counts unless it is parked itself, whatever it holds, and a need about
+  nothing else counts. An epic's and a Delivery's line counts only the needs
+  that count.
 - **The fold.** The needs that do not count are listed beneath the rest, under
   "Parked or unprioritized" with their own count, closed until opened, as closed
   work folds. Nothing changes what is parked.
@@ -75,6 +76,7 @@ What the reading leaves:
 | The question | The call | Why |
 |---|---|---|
 | What a need holds or is about | Every bead whose `prstatus.Holding` answer names it, whatever its kind and work held for the Product Owner included, and the bead its conversation tracks, the need's own or its question's conversation's | The rule weighs every bead a need holds. The board's list beneath a need draws only its work, epics and Deliveries, less hold:mayor work, so a question holding only a parked decision lists nothing and still folds |
+| A need that holds or is about a need which does not count | It weighs that need as it weighs a parked bead, so a question holding a decision about nothing but parked work leaves the count with the decision | The approved reading names parked beads and hold:mayor work, and such a decision is neither. Weighed as live, it would keep its question counting for work that is parked, where the operator ruled that "A parked epic shouldn't surface what it needs". This call is the build's reading of that ruling |
 | A need about a bead the read did not gather, such as a conversation about a bead in another store | It counts | The read cannot tell that bead is parked or held, so the need stays in the count |
 | A question whose conversation waits in the operator's queue | Question, and its row reads "Conversation waits for you" as before | The bead's item 3 makes a question In conversation when a sitting holds its conversation, "since the operator's attention is already on it". A conversation not yet started holds no one's attention |
 | The words beside each kind's count | "pull requests", "questions", "conversations waiting for you", "in conversation", "rulings", "routed to you", each in the singular for one | The bead's names for the kinds, lower-cased beside a number as an epic's line reads its counts |

@@ -542,47 +542,69 @@ func (bt *built) inOrder(ids []string) {
 // findNeeds lists every open need, what each one concerns, and whether it
 // counts. A need concerns itself, the beads it holds, and the bead its
 // conversation is about unless that is work held for the Product Owner. What it
-// is about is every bead it holds and that bead, held work included.
+// is about is every bead it holds and that bead, held work included. Every need
+// counts until counted finds it does not, and a need that leaves the count can
+// take a need about it out too, so counted reads the needs again until none
+// leaves.
 func (bt *built) findNeeds() {
 	ix := bt.ix
+	about := map[string][]string{}
 	for _, id := range ix.rows {
 		if bt.asks[id] == nil || !isOpen(ix.beads[id]) {
 			continue
 		}
 		bt.needs = append(bt.needs, id)
 		c := append([]string{id}, bt.rows[id].Holds...)
-		about := slices.Clone(bt.held[id])
+		a := slices.Clone(bt.held[id])
 		for _, x := range []string{id, bt.rows[id].Conversation} {
 			s := ix.subject[x]
 			if x == "" || s == "" || s == id {
 				continue
 			}
-			if !slices.Contains(about, s) {
-				about = append(about, s)
+			if !slices.Contains(a, s) {
+				a = append(a, s)
 			}
 			if !bt.forProductOwner(s) && !slices.Contains(c, s) {
 				c = append(c, s)
 			}
 		}
 		bt.concern[id] = c
-		bt.counts[id] = bt.counted(id, about)
+		about[id] = a
+		bt.counts[id] = true
+	}
+	for left := true; left; {
+		left = false
+		for _, id := range bt.needs {
+			if bt.counts[id] && !bt.counted(id, about[id]) {
+				bt.counts[id] = false
+				left = true
+			}
+		}
 	}
 }
 
 // counted reports whether a need counts, given every bead it is about. A need
 // parked itself does not. A gate, a decision or a conversation does not when
-// every bead it is about is parked or carries hold:mayor, and one about nothing
-// counts. A pull request, or other work that is itself a need, counts unless it
-// is parked itself, whatever it holds.
+// every bead it is about is parked, carries hold:mayor or is a need that does
+// not count, and one about nothing counts. A pull request, or other work that
+// is itself a need, counts unless it is parked itself, whatever it holds.
 func (bt *built) counted(id string, about []string) bool {
 	if bt.parked(id) {
 		return false
 	}
 	switch bt.ix.kinds[id] {
 	case KindGate, KindDecision, KindConversation:
-		return len(about) == 0 || slices.ContainsFunc(about, func(x string) bool { return !bt.parked(x) && !bt.onDesk(x) })
+		return len(about) == 0 || slices.ContainsFunc(about, bt.live)
 	}
 	return true
+}
+
+// live reports whether a bead a need is about keeps the need in the count: it
+// is not parked, it carries no hold:mayor, and it is no need that has left the
+// count.
+func (bt *built) live(id string) bool {
+	counts, need := bt.counts[id]
+	return !bt.parked(id) && !bt.onDesk(id) && (!need || counts)
 }
 
 // parked reports whether a bead waits on a park, or an epic or a Delivery above
