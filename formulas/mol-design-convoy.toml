@@ -16,7 +16,9 @@ closes when that PR merges, as any PR's owning bead does, so work queued behind
 it starts then. Doctrine: docs/design-convoy.md.
 
 The molecule writes no code and needs no worktree of its own. Its one push is a
-ref push from the rig's checkout, which a converse sitting cannot make. Each step
+ref push from the rig's checkout, which a converse sitting cannot make, because
+a sitting pushes only the branch of a change the operator rules it make, through
+Work's hand-off. Each step
 re-derives the subject from the input convoy ({{convoy_id}}'s one tracked member)
 in its own shell, records its result on the subject so a resume is idempotent,
 and closes its own step bead through assets/scripts/claim-close.sh.
@@ -109,8 +111,9 @@ Cut `integration/<subject-id>` from the default branch with one create-only push
 from the rig's checkout, and record it on the subject: `branch` names the
 integration branch and `target` the default branch. The subject is the effort's
 landing bead. Its children land on the branch, and its own PR carries the branch
-to the default branch. A converse sitting cannot cut the branch, because it never
-pushes, which is why the pattern needs this molecule.
+to the default branch. A converse sitting cannot cut the branch, because it pushes
+only the branch of a change the operator rules it make, through Work's hand-off,
+which is why the pattern needs this molecule.
 
 The default branch is the one `origin/HEAD` names in the rig's checkout, or
 `main` when it names none. The push sends a ref and checks nothing out, so the

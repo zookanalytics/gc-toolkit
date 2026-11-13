@@ -165,8 +165,10 @@ Choose by what the learning *is*:
   when a reader catches the failure in the diff; use this carrier when the
   author must hold the standard as they write. Route a universal standard to
   the shared base (`work-quality-base`) and a class-specific one to the
-  fragment(s) of the class(es) it impacts — polecats, human, or system; a
-  standard about changing a repo does not reach the human converse class.
+  fragment(s) of the class(es) it impacts — polecats, human, or system. A
+  standard about changing a repository goes to the polecats' fragment, which
+  a converse sitting reads before its first edit of a change the operator
+  rules it make (`gc-toolkit.converse-edit`).
 - **`review-rubric`** when the failure is **visible in a diff**. Prefer this
   over `convention` for anything a reader could catch: one rubric dimension
   reaches every agent's version of the mistake through the reviewer, where a

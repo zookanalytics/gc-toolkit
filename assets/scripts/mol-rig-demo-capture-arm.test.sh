@@ -22,8 +22,9 @@
 # A capture's sandbox refuses a rig's own checkout, so the app runs from a
 # detached worktree of it, which the step's rig-demo-app-root region makes. The
 # last cases run that region and the capture block with the real capture, sandbox
-# library and workspace scripts, against a fixture city, a stub engine and a
-# stub sandbox-exec that keeps the profile it was handed.
+# library and workspace scripts, against a fixture city, a stub engine, a stub
+# sandbox-exec that keeps the profile it was handed, and a stub gctk that runs a
+# copy's serve command through the library's sandbox, as gctk rig serve does.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -192,7 +193,38 @@ SBX
 [ $# -ge 3 ] || printf '50123'
 exit 0
 NODE
-chmod +x "$TMP/bin/engine" "$TMP/bin/sandbox-exec" "$TMP/bin/node"
+# gctk, at the city's build path, stands in for gctk rig serve: a start runs the
+# serve command through the library's sandbox, which GCTK_SCRIPTS_DIR names, as
+# the copy's leader does, keeps that profile, and reports the copy on 50200 as
+# one it started, which --check then reports from the copy's checkout. lsof
+# names the copy's process as the one listening there, working in that checkout.
+mkdir -p "$CITY/.gc/services/gctk/bin"
+{ printf '%s\n' "$SHEBANG"; cat; } > "$CITY/.gc/services/gctk/bin/gctk" <<'GCTK'
+printf '%s (in %s)\n' "$*" "$(pwd)" >> "$FAKE_DIR/gctk.argv"
+case "$*" in
+  "rig serve --check")
+    if [ "$(cat "$FAKE_DIR/copy-dir" 2>/dev/null)" = "$(pwd)" ]; then printf '{"state":"running","port":50200}\n'; exit 0; fi
+    printf '{"state":"none"}\n'; exit 3 ;;
+  "rig serve --command "*)
+    ( . "$GCTK_SCRIPTS_DIR/demo-engine-lib.sh" && demo_engine_sandboxed 50200 "$(pwd)" true ) \
+      || { printf '{"state":"failed","reason":"serve-exited"}\n'; exit 1; }
+    cp "$FAKE_DIR/profile" "$FAKE_DIR/copy-profile"
+    pwd > "$FAKE_DIR/copy-dir"
+    printf '{"state":"running","port":50200,"started":true}\n' ;;
+  "rig serve --stop") rm -f "$FAKE_DIR/copy-dir"; printf '{"state":"stopped"}\n' ;;
+esac
+exit 0
+GCTK
+{ printf '%s\n' "$SHEBANG"; cat; } > "$TMP/bin/lsof" <<'LSOF'
+dir=$(cat "$FAKE_DIR/copy-dir" 2>/dev/null)
+[ -n "$dir" ] || exit 1
+case "$*" in
+  *"-iTCP:50200 "*) echo 4321 ;;
+  *"-p 4321 "*) printf 'p4321\nfcwd\nn%s\n' "$dir" ;;
+  *) exit 1 ;;
+esac
+LSOF
+chmod +x "$TMP/bin/engine" "$TMP/bin/sandbox-exec" "$TMP/bin/node" "$CITY/.gc/services/gctk/bin/gctk" "$TMP/bin/lsof"
 # gc adds the rig list the sandbox denies by, here.
 { printf '%s\n' "$SHEBANG"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 $2" in
@@ -207,7 +239,8 @@ GC
 # pour <strict|plain> <serve_dir> <serve_cmd> <base_url> [rig path] prints
 # "<rc>|<ordered verb log>", with no workspace left by an earlier case.
 pour() {
-  : > "$TMP/log"; : > "$TMP/gc.argv"; : > "$TMP/engine.argv"; : > "$TMP/decline.argv"; rm -f "$TMP/profile"
+  : > "$TMP/log"; : > "$TMP/gc.argv"; : > "$TMP/engine.argv"; : > "$TMP/decline.argv"; : > "$TMP/gctk.argv"
+  rm -f "$TMP/profile" "$TMP/copy-profile" "$TMP/copy-dir"
   REVIEW_WORKSPACE_DIR="$WS" "$HERE/review-workspace.sh" remove --review-bead tk-req >/dev/null
   local rc=0
   ( cd "$TMP/cwd" && env -i PATH="$PATH" HOME="$TMP/home" TMPDIR="$TMP" GC_CITY_PATH="$CITY" GIT_CEILING_DIRECTORIES="$TMP" \
@@ -224,22 +257,23 @@ echo "# the sandbox refuses the rig's own checkout, which is why the app needs a
 RC=0
 ( cd "$TMP/cwd" && env -i PATH="$PATH" HOME="$TMP/home" TMPDIR="$TMP" GC_CITY_PATH="$CITY" FAKE_RIG="$RIG" FAKE_DIR="$TMP" \
     SPRINTSHOW_BIN="$TMP/bin/engine" \
-    "$HERE/rig-demo-capture.sh" --script "$TMP/cwd/walkthrough.md" --output "$OUT" --serve 'npm run dev' --cwd "$RIG" --port 5173 ) > "$TMP/out" 2>&1 || RC=$?
-eq "$RC" 1 "a capture whose --cwd is the rig's checkout exits 1"
+    "$HERE/rig-demo-capture.sh" --script "$TMP/cwd/walkthrough.md" --output "$OUT" --serve-dir "$RIG/site" ) > "$TMP/out" 2>&1 || RC=$?
+eq "$RC" 1 "a capture that serves from the rig's checkout exits 1"
 has "$(cat "$TMP/out")" "$RIG holds $RIG" "and names the checkout"
 
 for MODE in strict plain; do
-  echo "# $MODE shell: a serve_cmd runs from a detached worktree of the rig at its HEAD"
+  echo "# $MODE shell: a serve_cmd runs as a copy from a detached worktree of the rig at its HEAD"
   eq "$(pour "$MODE" "" "npm run dev" "")" "0|UPDATE;" "$MODE: the capture passes the sandbox, and the clip is recorded"
-  has "$(cat "$TMP/engine.argv")" "--serve npm run dev" "$MODE: the engine runs the command"
-  has "$(cat "$TMP/engine.argv")" "--cwd $WT" "$MODE: in the worktree"
-  eq "$(git -C "$WT" rev-parse HEAD)" "$RIG_HEAD" "$MODE: which is at the rig's HEAD"
+  has "$(cat "$TMP/gctk.argv")" "rig serve --command npm run dev (in $WT)" "$MODE: gctk rig serve runs the command in the worktree"
+  has "$(cat "$TMP/engine.argv")" "--base-url http://127.0.0.1:50200/" "$MODE: the engine records the copy"
+  eq "$(git -C "$WT" rev-parse HEAD)" "$RIG_HEAD" "$MODE: the worktree is at the rig's HEAD"
   eq "$(git -C "$WT" symbolic-ref -q HEAD || echo detached)" "detached" "$MODE: and detached"
-  has "$(cat "$TMP/profile")" "(allow file-read-data file-write* (subpath \"$WT\"))" "$MODE: the sandbox opens the worktree"
-  case "$(cat "$TMP/profile")" in
-    *"(allow file-read-data file-write* (subpath \"$RIG\"))"*) bad "$MODE: the sandbox keeps the rig's checkout shut" ;;
-    *) ok "$MODE: the sandbox keeps the rig's checkout shut" ;;
+  has "$(cat "$TMP/copy-profile")" "(allow file-read-data file-write* (subpath \"$WT\"))" "$MODE: the copy's sandbox opens the worktree"
+  case "$(cat "$TMP/copy-profile")" in
+    *"(allow file-read-data file-write* (subpath \"$RIG\"))"*) bad "$MODE: the copy's sandbox keeps the rig's checkout shut" ;;
+    *) ok "$MODE: the copy's sandbox keeps the rig's checkout shut" ;;
   esac
+  has "$(cat "$TMP/gctk.argv")" "rig serve --stop (in $WT)" "$MODE: and the capture stops the copy"
 
   echo "# $MODE shell: a relative serve_dir resolves against that worktree"
   eq "$(pour "$MODE" "site" "" "")" "0|UPDATE;" "$MODE: the capture passes the sandbox"

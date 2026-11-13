@@ -9,8 +9,9 @@
 # What is the ruling's own to decide is decided here: the anchor must be an open
 # PR, the child resumes the anchor's own branch and lands where the anchor lands,
 # and its rejection_reason carries the ruling. Resuming the branch keeps the PR
-# and its history, which closing the PR and re-pouring would discard. converse
-# never pushes code; the molecule does (docs/authority-map.md).
+# and its history, which closing the PR and re-pouring would discard. A sitting
+# does not edit an open PR's branch, so this rework, which a polecat runs, is
+# how a ruling changes an open PR (docs/authority-map.md).
 #
 # A ruling has no lane of its own. Like a human feedback batch the validator rules
 # not converged, it is operator input the whole diff was never reviewed against,

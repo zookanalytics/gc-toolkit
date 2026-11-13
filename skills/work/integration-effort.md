@@ -9,8 +9,9 @@ PR goes into the branch. The summary task writes the landing bead's
 `pr_summary` once the effort's beads have landed.
 
 A converse sitting does not run the recipe: step 2 is a push from the rig's
-checkout, which a sitting never makes. The work skill says where a sitting
-sends an effort instead.
+checkout, and a sitting pushes only the branch of a change the operator rules
+it make, through Work's hand-off. The work skill says where a sitting sends an
+effort instead.
 
 File every bead of the effort in its rig's store, and pass `--rig <rig>`, the
 rig you sling to, on every `gc bd` call, as the recipe does. A city-scoped

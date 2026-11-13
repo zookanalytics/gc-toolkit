@@ -77,7 +77,7 @@ assumptions:
 | patrol | Gas City's orders, plus the patrols' judgment | 9.5k / 16.1k | 2.5k / 2.0k |
 | doctor | one check per surviving invariant | 7.5k / 9.3k | 3.0k / 3.0k |
 | shared glue | one call per series of native steps | 10.6k / 24.0k | 5.0k / 5.0k |
-| gctk | the rig check runner and its records | 11.5k / 10.6k | 1.5k / 1.5k |
+| gctk | the rig's actions: its check runner and records, and a copy of its UI | 11.5k / 10.6k | 1.5k / 1.5k |
 | feedback | the learning loop | 2.4k / 1.9k | 2.0k / 1.5k |
 | config | the pack, its check index and its key registry | 2.9k / 0 | 0.7k / 0 |
 | doctrine | shared fragments and skills | 2.6k / 0 | 1.3k / 0 |
@@ -130,7 +130,8 @@ policy onto GitHub is the operator's ruling at tk-1tfzr71.20's design.
 
 What a person owes is a native human gate on the bead it blocks, and a
 conversation is a task. A sitting is a converse session that holds the
-conversation doctrine. Intake is slung work whose exits are native writes. The
+conversation doctrine, and it also edits a change on the operator's ruling,
+through Work's writers. Intake is slung work whose exits are native writes. The
 subsystem owns the converse, first-reaction, mechanik and po prompts, the
 converse skills and the po's refinement skill, the operator's intake and the
 terminal surfaces.
@@ -251,7 +252,9 @@ The wrapper that provisions an agent's home stays under its warrant, because
 ### gctk
 
 `gctk rig` runs a rig's declared checks and records each result against the
-commit it ran at.
+commit it ran at, and runs a copy of the rig's UI from a checkout, which a demo
+capture records and a sitting shows the operator. The copy came after the
+baseline, so the estimate above does not weigh it.
 
 The trade: `gctk merge`'s approval rule goes with the merge member, and its
 compiled copy of the key registry goes with the registry. A domain moves into
