@@ -624,7 +624,11 @@ reps() { _r=""; _n=0; while [ "$_n" -lt "$2" ]; do _r="$_r $1"; _n=$((_n + 1)); 
 export PATH="$TMP/bin:$PATH"
 export CALLS="$TMP/calls" STATE_DIR="$TMP/state" ALIAS_REFUSED="$TMP/alias-refused"
 export SPAWNED="$TMP/spawned" POLLS="$TMP/polls"
-unset GC_HELM_FIXTURE || true
+# Hermetic: no GC_* or BEADS_* the session exports steers engage. gc-helm.sh
+# finds the city root, and the gctk and helm-svc built under it, through
+# GC_CITY_PATH, GC_CITY and GC_CITY_ROOT, so an inherited one points a case at
+# the live city's binaries.
+unset "${!GC_@}" "${!BEADS_@}" 2>/dev/null || true
 # The START-BACKSTOP case reads the default bound, and only a case's own prefix
 # runs the clock stubs fake or picks the signal an interrupted case sends.
 unset GC_HELM_ENGAGE_WAIT_TIMEOUT FAKE_CLOCK FAKE_CLOCK_SCALE INTERRUPT_SIG || true
