@@ -44,8 +44,13 @@
 # refinery_owner).
 #
 # Every park files its human gate first, sets the merge_result, and keeps the
-# bead with the refinery, so clearing the gate hands it back. The tree is
-# removed once the step has done its part.
+# bead with the refinery, so clearing the gate hands it back. A bead handed
+# back still carries the park's merge_result, blocked or
+# refused_false_completion, and the lifecycle machine lets either leave only
+# for unanchored. So a direct landing takes the bead to unanchored, through
+# lifecycle.sh, before it records the bead merged, and the old path takes it
+# there from whatever merge_result it carries before it parks it for the
+# cadence. The tree is removed once the step has done its part.
 #
 # Exit: 0 landed, published, parked for the cadence, or handed back
 #       1 nothing landed, and the work stays with the refinery to retry; the
@@ -98,6 +103,14 @@ refinery_formula_vars || stop "the rig's formula vars did not read"
 park() {
   refinery_park "$BEAD" "$1" "$2" "$3" "$4" "$HOME_DIR" || stop "the $1 gate on $BEAD did not land ($3)"
 }
+# unanchor: the bead leaves CURRENT, the merge_result it was read with, for
+# unanchored, through lifecycle.sh, and CURRENT is cleared once it has.
+LC="$HERE/lifecycle.sh"
+CURRENT=$(bead_meta merge_result)
+unanchor() {
+  "$LC" transition "$BEAD" --to unanchored --expect "$CURRENT" --unset rejection_reason || return 1
+  CURRENT=""
+}
 
 STRATEGY=$(bead_meta merge_strategy)
 [ -n "$STRATEGY" ] || STRATEGY=$(refinery_formula_var default_merge_strategy)
@@ -147,6 +160,12 @@ case "$?" in
 esac
 
 if [ "$STRATEGY" = direct ]; then
+  # A bead handed back from a park leaves it for unanchored, the one state the
+  # machine lets either park leave for, before the landing records it merged.
+  case "$CURRENT" in
+    blocked|refused_false_completion)
+      unanchor || stop "$BEAD did not leave $CURRENT for its direct landing, so nothing landed" ;;
+  esac
   DIRECT=(--work "$BEAD" --branch "$BRANCH" --target "$TARGET")
   [ "$(refinery_formula_var delete_merged_branches)" != true ] || DIRECT+=(--delete-branch)
   "$HERE/direct-merge-push.sh" "${DIRECT[@]}"
@@ -260,11 +279,8 @@ if owner_pr; then
   refresh "$CHECK_SET" || stop "PR #$PR_NUMBER is not current with $BEAD, so the head is not pushed under a stale body"
 fi
 push
-LC="$HERE/lifecycle.sh"
-CURRENT=$(bead_meta merge_result)
 if [ -n "$CURRENT" ]; then
-  "$LC" transition "$BEAD" --to unanchored --expect "$CURRENT" --unset rejection_reason \
-    || stop "$HEAD_OID is on $BRANCH, but $BEAD did not leave $CURRENT for the merge cadence's gate"
+  unanchor || stop "$HEAD_OID is on $BRANCH, but $BEAD did not leave $CURRENT for the merge cadence's gate"
 fi
 if [ -n "$OWNS_PR" ]; then
   "$LC" transition "$BEAD" --to pull_request --assignee "" --route "" --set "pr_url=$PR_URL" --set "pr_number=$PR_NUMBER" \

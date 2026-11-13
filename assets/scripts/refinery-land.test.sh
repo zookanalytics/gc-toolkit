@@ -5,7 +5,10 @@
 # and a stub lifecycle.sh that logs each transition (refinery-test-lib.sh).
 # Proves:
 #   - a direct bead onto an integration branch lands by a fast-forward push and
-#     is recorded through direct-merge-push.sh;
+#     is recorded through direct-merge-push.sh; one a person handed back from a
+#     park, blocked or refused_false_completion, first leaves it for
+#     unanchored, and one that does not leave it lands nothing, while a value
+#     the pending record writes goes through no transition there;
 #   - a direct bead bound for the default branch takes mr;
 #   - on a rig whose pending_through_merge is "true", mr publishes the PR and
 #     records it pending;
@@ -74,6 +77,65 @@ eq "$(tip integration/e)" "$HEAD_D" "the target holds the prepared head"
 has "$(logged scripts)" "lifecycle transition d --to merged --close --set merged_sha=$HEAD_D --set merged_target=integration/e" "the landing is recorded and the bead closed"
 [ ! -e "$HOME_DIR/worktrees/d" ] && rt_ok "the tree is removed" || rt_bad "the tree is removed"
 eq "$(tip polecat/d)" "<absent>" "delete_merged_branches deletes the branch once the landing is recorded"
+
+# direct_onto <bead> <metadata> — a direct bead whose branch, cut from
+# integration/e, carries a change, prepared and current with integration/e;
+# HEAD_D is its prepared head.
+direct_onto() {
+  integration
+  branch_with "polecat/$1" "$1.txt" integration/e >/dev/null
+  work "$1" "polecat/$1" "$(jq -nc --argjson m "$2" '{target: "integration/e", merge_strategy: "direct"} + $m')"
+  prepared "$1" "polecat/$1"
+  git -C "$HOME_DIR" fetch -q origin "+refs/heads/integration/e:refs/remotes/origin/integration/e"
+  git -C "$HOME_DIR/worktrees/$1" merge -q --no-edit refs/remotes/origin/integration/e >/dev/null 2>&1
+  HEAD_D=$(git -C "$HOME_DIR/worktrees/$1" rev-parse HEAD)
+}
+# before <log> <first> <second>: <first> is logged ahead of <second>, and both are.
+before() {
+  local a b
+  a=$(grep -n -F -- "$2" "$LOGS/$1.log" | head -n 1 | cut -d: -f1)
+  b=$(grep -n -F -- "$3" "$LOGS/$1.log" | head -n 1 | cut -d: -f1)
+  [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ]
+}
+
+echo "# a direct bead handed back from a park leaves it before its landing is recorded"
+for park in blocked refused_false_completion; do
+  fresh
+  direct_onto d "{\"merge_result\":\"$park\",\"rejection_reason\":\"parked\"}"
+  run --bead d
+  eq "$RC" 0 "$park: the landing exits 0"
+  eq "$(tip integration/e)" "$HEAD_D" "$park: the target holds the prepared head"
+  if before scripts "lifecycle transition d --to unanchored --expect $park --unset rejection_reason" \
+       "lifecycle transition d --to merged --close --set merged_sha=$HEAD_D --set merged_target=integration/e"; then
+    rt_ok "$park: the bead leaves it for unanchored, then closes merged at its merged_sha"
+  else
+    rt_bad "$park: the bead leaves it for unanchored, then closes merged at its merged_sha" "$(logged scripts)"
+  fi
+done
+fresh
+integration
+STAMP=$(branch_with polecat/s s.txt integration/e)
+git -C "$SEED" checkout -q integration/e && git -C "$SEED" merge -q --ff-only "$STAMP" && git -C "$SEED" push -q origin integration/e
+work s polecat/s "{\"target\":\"integration/e\",\"merge_strategy\":\"direct\",\"direct_landing_sha\":\"$STAMP\",\"merge_result\":\"blocked\"}"
+prepared s polecat/s
+run --bead s
+eq "$RC" 0 "a landing pushed under a park but never recorded is recorded"
+if before scripts "lifecycle transition s --to unanchored --expect blocked" "lifecycle transition s --to merged --close --set merged_sha=$STAMP"; then
+  rt_ok "…at its stamp, once the bead has left blocked"
+else
+  rt_bad "…at its stamp, once the bead has left blocked" "$(logged scripts)"
+fi
+fresh
+direct_onto d '{"merge_result":"blocked"}'
+BEFORE=$(git -C "$SEED" rev-parse origin/integration/e)
+STUB_LIFECYCLE_RC=1 run --bead d
+eq "$RC" 1 "a park the bead does not leave stops (exit 1)"
+eq "$(tip integration/e)" "$BEFORE" "…with nothing pushed onto the target"
+hasnt "$(logged scripts)" "--to merged" "…and nothing recorded"
+fresh
+direct_onto d '{"merge_result":"pull_request_pending"}'
+run --bead d
+hasnt "$(logged scripts)" "--to unanchored" "a value the pending record writes is not sent through lifecycle.sh"
 
 echo "# a direct bead bound for the default branch takes mr"
 fresh
