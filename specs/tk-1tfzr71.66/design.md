@@ -1037,9 +1037,10 @@ its PR, and `gctk merge` merges it under the pack's rule. `gctk merge` acts only
 on `merge_result=pull_request`, so it never merges a PR on the new path.
 
 **The switch.** A rig formula variable, `pending_through_merge`, says that the
-rig is on the new path. Only the refinery's `mr` step reads it, and each patrol
-wisp renders it when the wisp is poured. Every other reader tells the two paths
-apart by the record's value.
+rig is on the new path. Only the refinery's `mr` step reads it, each time the
+merge-push step runs: `refinery-land.sh` reads the rig's formula vars with `gc
+formula show --rig` when it starts, so no wisp carries a value from its pour.
+Every other reader tells the two paths apart by the record's value.
 
 **Each rig's cutover** is a bead the implementation child files on the default
 branch, blocked by this initiative's landing and by tk-1tfzr71.22:
@@ -1049,11 +1050,15 @@ branch, blocked by this initiative's landing and by tk-1tfzr71.22:
 2. The mechanik sets `pending_through_merge` in the rig's config.
 3. Once the refinery has poured a patrol wisp since step 2, the rig's open
    beads that own an open PR, or that wait at `pre_open_gate` for one, move onto
-   the new path. The wisp running at step 2 rendered the switch unset, so it can
-   still park its bead at `pre_open_gate` or record it at `pull_request`, and
-   the wait lets the moves take that bead too. Each bead's PR is read on GitHub
-   first, and the bead's old record is appended to its notes, so no history is
-   lost:
+   the new path. The wisp running at step 2 takes whichever path its merge-push
+   step reads: a step that read the switch before step 2 can still park its
+   bead at `pre_open_gate` or record it at `pull_request`, and one that reads
+   it after publishes on the new path. The refinery runs one wisp at a time and
+   pours the next only once the merge-push step of the one before has run, so
+   the wait for a wisp poured after step 2 bounds every merge-push step that
+   read the switch unset, and lets the moves take that bead too. Each bead's PR
+   is read on GitHub first, and the bead's old record is appended to its notes,
+   so no history is lost:
    - A bead whose open PR still matches its number, repository, branch and base
      goes to `pull_request_head_changed`, open and assigned to the refinery,
      with `existing_pr` and the live head as `observed_pr_head_sha`. The
@@ -1086,8 +1091,10 @@ branch, blocked by this initiative's landing and by tk-1tfzr71.22:
      a landing the old path verified, and every reader takes it as landed.
 
    Which opener owns a parked bead, at each point of the cutover:
-   - Until the refinery pours its first patrol wisp after step 2, it can park
-     beads at `pre_open_gate`, and `pr-open.sh` opens their PRs, as today.
+   - Until the refinery pours its first patrol wisp after step 2, a merge-push
+     step that read the switch before step 2 can park its bead at
+     `pre_open_gate`, and `pr-open.sh` opens its PR, as today, while one that
+     reads it after step 2 publishes the PR on the new path.
    - From that wisp until a bead moves, the refinery parks no new bead there,
      and `pr-open.sh` still owns each bead parked before. A bead it opens in
      that time carries `pull_request`, so the move, which expects
