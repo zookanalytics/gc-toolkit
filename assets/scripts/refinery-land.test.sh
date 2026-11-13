@@ -17,8 +17,12 @@
 #     it;
 #   - a rework child handed back on the old path brings its anchor's PR title
 #     and body current, pushes, notes the anchor and closes;
+#   - the body brought current names the gates of the check set the PR waits
+#     on, resolved at the prepared head: the one the landing stamps on a bead
+#     that owns its PR, else the anchor's;
 #   - on the old path, a title and body that do not reach the PR, its own or
-#     its anchor's, stop the landing with nothing pushed;
+#     its anchor's, or gates that do not resolve, stop the landing with
+#     nothing pushed;
 #   - a bead that owns its PR lands as itself on the old path, though a parked
 #     rework child of it waits on its branch with a merge_result of its own;
 #   - a convoy's rebuild child lands on its convoy while the convoy is open on
@@ -49,7 +53,7 @@ trap 'rm -rf "$TMP"' EXIT
 
 fresh() {
   rm -rf "${TMP:?}"/*
-  rt_init refinery-land.sh refinery-publish.sh direct-merge-push.sh rig-root.sh
+  rt_init refinery-land.sh refinery-publish.sh direct-merge-push.sh rig-root.sh review-checks.sh
   export GC_RIG_ROOT="$RIG" DIRECT_MERGE_PUSH_BACKOFF=0
 }
 run() { OUT=$("$SUT/refinery-land.sh" "$@" 2>&1); RC=$?; }
@@ -113,11 +117,14 @@ fresh
 branch_with polecat/r r.txt >/dev/null
 work r polecat/r '{"existing_pr":"https://github.com/zook/rig/pull/61"}'
 prepared r polecat/r
+HEAD_R=$(git -C "$HOME_DIR/worktrees/r" rev-parse HEAD)
 pr 61 polecat/r someone
 rt_vars check_set=""
 run --bead r
 eq "$RC" 0 "the landing exits 0"
 has "$(logged gh)" "pr edit 61 --repo zook/rig --title feat: r (r) --body-file" "its PR's title and body are brought current"
+has "$(logged gctk)" "pr compose r --head $HEAD_R --gates lane-a	pre-open
+lane-b	pre-open --body-file" "…its body naming the gates of the check set it is stamped with, resolved at the head"
 has "$(logged scripts)" "lifecycle transition r --to pull_request --assignee  --route  --set pr_url=https://github.com/zook/rig/pull/61 --set pr_number=61 --set merged_target=main --set check_set=lane-a,lane-b" "a bead that records an open PR waits at pull_request on it, an empty check set recovering the default"
 fresh
 branch_with polecat/b b.txt >/dev/null
@@ -132,7 +139,7 @@ has "$(logged scripts)" "--set check_set=none" "a none check set is stamped as n
 echo "# a rework child handed back on the old path lands on its anchor's branch"
 fresh
 branch_with polecat/an an.txt >/dev/null
-put '{"id":"an","title":"Anchor","status":"open","assignee":"","issue_type":"task","created_at":"2026-11-11T00:00:00Z","notes":"","metadata":{"branch":"polecat/an","target":"main","merge_result":"pull_request","pr_url":"https://github.com/zook/rig/pull/62","pr_number":"62"}}'
+put '{"id":"an","title":"Anchor","status":"open","assignee":"","issue_type":"task","created_at":"2026-11-11T00:00:00Z","notes":"","metadata":{"branch":"polecat/an","target":"main","merge_result":"pull_request","pr_url":"https://github.com/zook/rig/pull/62","pr_number":"62","check_set":"lane-c"}}'
 work ch polecat/an '{"task_kind":"rework","anchor_bead":"an"}'
 prepared ch polecat/an
 HEAD_C=$(git -C "$HOME_DIR/worktrees/ch" rev-parse HEAD)
@@ -141,13 +148,15 @@ run --bead ch
 eq "$RC" 0 "the hand-back exits 0"
 eq "$(tip polecat/an)" "$HEAD_C" "the head is on the anchor's branch"
 has "$(logged gh)" "pr edit 62 --repo zook/rig --title feat: an (an) --body-file" "the anchor's PR title and body are brought current"
+has "$(logged gctk)" "pr compose an --head $HEAD_C --gates lane-c	pre-open --body-file" "…its body naming the gates of the anchor's check set"
 has "$(bnotes an)" "Rework ch landed on polecat/an at $HEAD_C" "the anchor notes the landing"
 eq "$(bstatus ch) $(meta ch gc.work_outcome)" "closed shipped" "the child closes with its work record"
 eq "$(meta an merge_result)" "pull_request" "the anchor keeps its record"
 
-echo "# on the old path, a title and body that do not reach the PR stop the landing with nothing pushed"
+echo "# on the old path, a title and body that do not reach the PR, or gates that do not resolve, stop the landing with nothing pushed"
 fresh
 BEFORE=$(branch_with polecat/st st.txt)
+main_with st-later.txt >/dev/null
 work st polecat/st '{"existing_pr":"https://github.com/zook/rig/pull/64"}'
 prepared st polecat/st
 pr 64 polecat/st gc-city-bot
@@ -157,6 +166,7 @@ eq "$(tip polecat/st)" "$BEFORE" "…with nothing pushed"
 hasnt "$(logged scripts)" "lifecycle" "…and no transition written"
 fresh
 BEFORE=$(branch_with polecat/an an.txt)
+main_with an-later.txt >/dev/null
 put '{"id":"an","title":"Anchor","status":"open","assignee":"","issue_type":"task","created_at":"2026-11-11T00:00:00Z","notes":"","metadata":{"branch":"polecat/an","target":"main","merge_result":"pull_request","pr_url":"https://github.com/zook/rig/pull/62","pr_number":"62"}}'
 work ch polecat/an '{"task_kind":"rework","anchor_bead":"an"}'
 prepared ch polecat/an
@@ -165,6 +175,20 @@ STUB_EDIT_RC=1 run --bead ch
 eq "$RC" 1 "an edit of the anchor's PR that does not take stops (exit 1)"
 eq "$(tip polecat/an)" "$BEFORE" "…with nothing pushed onto the anchor's branch"
 eq "$(bstatus ch)" "open" "…and the child stays open for the next pass"
+fresh
+BEFORE=$(branch_with polecat/gr gr.txt)
+main_with gr-later.txt >/dev/null
+work gr polecat/gr '{"existing_pr":"https://github.com/zook/rig/pull/65"}'
+prepared gr polecat/gr
+pr 65 polecat/gr gc-city-bot
+printf '[checks.lane-a]\npurpose = "a"\nphase = "someday"\n' > "$TMP/bad-index.toml"
+GC_REVIEW_CHECKS_INDEX="$TMP/bad-index.toml" run --bead gr
+eq "$RC" 1 "gates that do not resolve at the head stop (exit 1)"
+has "$OUT" "the gates of check set 'lane-a,lane-b' did not resolve at" "…saying which check set did not resolve"
+eq "$(tip polecat/gr)" "$BEFORE" "…with nothing pushed"
+hasnt "$(logged gctk)" "pr compose" "…nothing composed"
+hasnt "$(logged gh)" "pr edit" "…the PR not edited"
+hasnt "$(logged scripts)" "lifecycle" "…and no transition written"
 
 echo "# a bead that owns its PR lands as itself on the old path, though a parked rework child waits on its branch"
 fresh

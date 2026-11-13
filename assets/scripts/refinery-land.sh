@@ -29,8 +29,10 @@
 # path's publication (refinery-publish.sh) when pending_through_merge is
 # "true". Otherwise it keeps the old path. The PR the bead's owner records
 # open from the branch into the target, the bead's own or, for a rework child
-# handed back, its anchor's, has its title and body brought current, and then
-# the head is pushed under the lease on the commit the prep read. A bead that
+# handed back, its anchor's, has its title and body brought current, its
+# handoff naming the gates its check set resolves to at the head: the check set
+# this step stamps on a bead that owns its PR, or the anchor's. Then the head
+# is pushed under the lease on the commit the prep read. A bead that
 # owns its PR is parked for the merge cadence, at pull_request when it records
 # a PR open from its branch, else at pre_open_gate, with merged_target and
 # check_set, through lifecycle.sh. On either path a rework child handed back
@@ -185,18 +187,24 @@ owner_pr() {
   PR_NUMBER=$(printf '%s' "$PR_ROW" | jq -r '(.number // "") | tostring')
   [ -n "$PR_URL" ] && [ -n "$PR_NUMBER" ]
 }
-# refresh: bring the open PR owner_pr read, in PR_ROW, current with the owner at
-# the prepared head, its title and body, before the head is pushed. Non-zero,
-# with a line on stderr, when they do not compose or the edit does not take, so
-# the head is never pushed under a stale body: once the owner waits at
-# pull_request, no pass edits its PR's title or body.
+# refresh <check_set>: bring the open PR owner_pr read, in PR_ROW, current with
+# the owner at the prepared head, its title and body, before the head is
+# pushed. The body's handoff names the gates <check_set> resolves to at that
+# head, resolved as pr-open.sh resolves them when it opens the PR, in the
+# refinery's own repository, which holds the head before it is pushed.
+# Non-zero, with a line on stderr, when the gates do not resolve, the title and
+# body do not compose or the edit does not take, so the head is never pushed
+# under a stale body: once the owner waits at pull_request, no pass edits its
+# PR's title or body.
 refresh() {
-  local gctk out title moved body published edit=() rc=0
+  local gctk gates out title moved body published edit=() rc=0
   gctk=$(gctk_path) || { echo "$PROG: no gctk binary composes PR #$PR_NUMBER's title and body" >&2; return 1; }
+  gates=$(cd "$HOME_DIR" && "$HERE/review-checks.sh" --resolve --check-set "$1" --through open-as-draft --with-phase --at "$HEAD_OID") \
+    || { echo "$PROG: the gates of check set '$1' did not resolve at $HEAD_OID, so PR #$PR_NUMBER's body cannot name them" >&2; return 1; }
   published=$(mktemp "${TMPDIR:-/tmp}/refinery-land.XXXXXX") || return 1
   body=$(mktemp "${TMPDIR:-/tmp}/refinery-land.XXXXXX") || { rm -f "$published"; return 1; }
   printf '%s' "$PR_ROW" | jq -j '.body // ""' > "$published"
-  if out=$("$gctk" pr compose "$OWNER" --head "$HEAD_OID" --gates '' --body-file "$published" </dev/null); then
+  if out=$("$gctk" pr compose "$OWNER" --head "$HEAD_OID" --gates "$gates" --body-file "$published" </dev/null); then
     title=$(printf '%s' "$out" | jq -r '.title // ""')
     moved=$(printf '%s' "$out" | jq -r 'if .summary == "written" or .branch_beads == "written" then "yes" else "" end')
     printf '%s' "$out" | jq -j '.body // ""' > "$body"
@@ -224,7 +232,8 @@ push() {
 
 if [ "$OWNER" != "$BEAD" ]; then
   if owner_pr; then
-    refresh || stop "PR #$PR_NUMBER is not current with $OWNER, so the head is not pushed under a stale body"
+    refresh "$(row_meta "$OWNER_ROW" check_set)" \
+      || stop "PR #$PR_NUMBER is not current with $OWNER, so the head is not pushed under a stale body"
   fi
   push
   gc bd update "$OWNER" --append-notes "Rework $BEAD landed on $BRANCH at $HEAD_OID." </dev/null >/dev/null \
@@ -248,7 +257,7 @@ esac
 OWNS_PR=""
 if owner_pr; then
   OWNS_PR=1
-  refresh || stop "PR #$PR_NUMBER is not current with $BEAD, so the head is not pushed under a stale body"
+  refresh "$CHECK_SET" || stop "PR #$PR_NUMBER is not current with $BEAD, so the head is not pushed under a stale body"
 fi
 push
 LC="$HERE/lifecycle.sh"
