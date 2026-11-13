@@ -243,8 +243,8 @@ anchor and on a bead blocked by anything but a human gate, a wait its own
 --waiting-on names included, since the work is then on the blocker and a pool
 has nothing to perform here; --assign <named-agent> releases
 it TO a named agent instead, in the same write, as its assignee and with no
-route, because the assignee is what the controller and the pack's notice read
-to give a named agent a turn (docs/deferred-dispatch.md). Either one also
+route, the form an agent that finds its work by listing the beads assigned to
+it takes (docs/deferred-dispatch.md). Either one also
 lifts the bead's hold:mayor in the release's write, because sending a held bead
 on is a placement, and Gas City serves no bead a hold label holds, assigned or
 not. Both are refused on an anchor whose merge_result is pre_open_gate or

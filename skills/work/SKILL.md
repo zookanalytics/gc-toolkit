@@ -348,8 +348,8 @@ name the formula and why you chose it.
   For the refinery or the keeper, pass `--assign <named-agent>` in place of
   `--route <rig>/<pool>`, which writes the assignee in the release, then nudge
   it once the bead is ready, as Send a bead to a named agent says. For the
-  mechanik, release the bead with neither and hand it over as that section
-  says.
+  mechanik, the deacon or the witness, release the bead with neither and send
+  it as that section says.
 - **Withdraw a recommendation** the bead should not take, keeping the bead open
   for discussion:
   `SUBJECT=<bead> CONVERSATION=<conversation> "$(gc <binding> scripts-dir)/converse-invalidate-recommendation.sh" "<why it no longer holds>"`.
