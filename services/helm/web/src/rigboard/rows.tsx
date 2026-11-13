@@ -354,9 +354,13 @@ export function NeedsView({ needs, ctx, depth }: { needs: NeedsYou; ctx: string;
 function KindCounts({ kinds, shown, ctx, depth }: { kinds: KindCount[]; shown?: NeedKind; ctx: string; depth: number }) {
   const v = useView();
   const look = GROUP_LOOK['Waiting on you'];
+  // A view's kinds hold Routed to you only while one counts, so a read can
+  // leave out the kind shown alone. It is drawn at zero then, so the view can
+  // still show every kind again.
+  const drawn = shown === undefined || kinds.some((k) => k.kind === shown) ? kinds : [...kinds, { kind: shown, count: 0 }];
   return (
     <div className="kinds" role="group" aria-label="Kinds of need" style={{ paddingLeft: depth * STEP + 4 }}>
-      {kinds.map(({ kind, count }) => {
+      {drawn.map(({ kind, count }) => {
         const words = NEED_WORDS[kind];
         const text = `${count} ${count === 1 ? words.one : words.many}`;
         const dot = (
