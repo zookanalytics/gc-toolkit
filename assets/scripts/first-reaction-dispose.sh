@@ -979,17 +979,18 @@ $REASON" >/dev/null 2>&1 \
         || die "could not append the close brief to $BEAD's notes; the validating closer reads it there, so nothing was dispatched. Clear the cause and re-run this command."
     if [ -n "$WAITING$AFTER_WORKFLOW" ]; then
         # Gate the deferred dispatch: hold the bead on what it waits for so
-        # reconcile does not sling until that closes. The hold is a REQUIRED
-        # write. Reconcile dispatches from `bd list --ready`, so a bead left
-        # unheld reads ready and mol-validate-close slings at once: before the
-        # landing it waits on, or beside the still-live reaction, the
-        # two-live-surfaces shape (formula-spec-v2 §3). A hold that does not
+        # the deferred-dispatch order does not sling until that closes. The
+        # hold is a REQUIRED write. The order dispatches by bd's readiness
+        # (`bd ready`), so a bead left unheld reads ready and mol-validate-close
+        # slings at once: before the landing it waits on, or beside the
+        # still-live reaction, the two-live-surfaces shape (formula-spec-v2
+        # §3). A hold that does not
         # land therefore fails closed: refuse to arm, and let the documented
         # re-run resume. bd keeps one edge type per pair of beads, so an edge of
         # another type onto the same bead refuses this one.
         for h in $WAITING $AFTER_WORKFLOW; do
             gc_bd dep add "$BEAD" "$h" -t blocks >/dev/null 2>&1 \
-                || die "could not hold $BEAD on $h; refusing to arm the closer dispatch ungated (reconcile would sling mol-validate-close before $h closes). bd keeps one edge type per pair of beads, so an edge of another type $BEAD already has onto $h refuses this one: remove it with gc bd dep remove $BEAD $h${DB:+ --db $DB}. Clear the cause and re-run this command."
+                || die "could not hold $BEAD on $h; refusing to arm the closer dispatch ungated (the deferred-dispatch order would sling mol-validate-close before $h closes). bd keeps one edge type per pair of beads, so an edge of another type $BEAD already has onto $h refuses this one: remove it with gc bd dep remove $BEAD $h${DB:+ --db $DB}. Clear the cause and re-run this command."
         done
         # shellcheck disable=SC2086  # $BD_DB_ARGS expands to 0 or 2 space-free fields
         "$DEFERRED" arm "$BEAD" --target "$ROUTE" --sling-arg --on --sling-arg mol-validate-close --reason "first reaction close: $REASON" $BD_DB_ARGS >/dev/null 2>&1 \

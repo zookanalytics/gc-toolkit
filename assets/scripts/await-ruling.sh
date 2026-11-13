@@ -52,10 +52,11 @@
 # claim the bare bead instead of the re-sling pouring a fresh molecule.
 #
 # The re-sling fires only for an open, unassigned bead: the arm refuses an
-# in_progress one, and reconcile never slings over an assignee. So a claim the
-# work bead still carries is released after the edge lands and before the arm,
-# when no live worker holds it. That is a claim in this session's name, or an
-# in_progress claim whose owner `gc session list` lists under none of its names.
+# in_progress one, and the deferred-dispatch order never slings over an
+# assignee. So a claim the work bead still carries is released after the edge
+# lands and before the arm, when no live worker holds it. That is a claim in
+# this session's name, or an in_progress claim whose owner `gc session list`
+# lists under none of its names.
 # mol-polecat-work's load-context builds over such a crashed owner's claim, and
 # this script proves the owner gone itself, so a wait asked at any step of that
 # run releases the claim without the caller naming it.
@@ -242,7 +243,7 @@ if [ -n "$ASSIGNEE" ]; then
       esac
     fi
     if [ -z "$RELEASE" ]; then
-      echo "$PROG: $WORK is $STATUS under $ASSIGNEE, a claim not in this session's name: $KEPT. Reconcile never slings an assigned bead, so the claim is kept and no wait was recorded" >&2
+      echo "$PROG: $WORK is $STATUS under $ASSIGNEE, a claim not in this session's name: $KEPT. The deferred-dispatch order never slings an assigned bead, so the claim is kept and no wait was recorded" >&2
       exit 1
     fi
   fi

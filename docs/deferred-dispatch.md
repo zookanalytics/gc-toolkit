@@ -38,10 +38,10 @@ happened is ended through Gas City's run cancel, as the pack's decline does
 ([pack-authoring.md](pack-authoring.md#a-run-that-must-not-advance-is-cancelled-after-its-wait-is-recorded)). This
 doc does not cover slinging in general, and it does not speak for what a
 dep edge means to `bd` — it defers to `bd`'s own readiness predicate
-rather than restating it. What holds an armed bead is defined once, by
-`gctk bead holds` ([its contract](gctk-architecture.md#the-bead-holds-contract)),
-with a hold label beside it in `assets/scripts/dispatch-path.sh`, and this doc
-says how the pass applies them.
+rather than restating it. What holds an armed bead is the pool's own serve
+rule, `bd ready` with the flags Gas City renders for a pool's demand, with
+`gctk bead holds` ([its contract](gctk-architecture.md#the-bead-holds-contract))
+for the waits bd cannot judge, and this doc says how the start applies them.
 
 ## Arm it instead of remembering it
 

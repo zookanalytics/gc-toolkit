@@ -408,7 +408,7 @@ and CI runs those tests on every PR.
 | store | the bead store | `gc bd` for writes, for reads that must see a fresh write and for the blocked set, the supervisor API for other reads | in-memory rows and edges, with the store's blocked answers set by the test |
 | git | git | one `git` command per call, in a named directory | a scratch repository |
 | github | GitHub | `gh` and the GitHub API | recorded responses |
-| runtime | Gas City | `gc` (sling, session, events, runtime) and the supervisor API (runs, sessions) | recorded responses |
+| runtime | Gas City | `gc` (sling, config, session, events, runtime), the supervisor API (runs, sessions), and the pack's scripts that ask a person | recorded responses |
 | host | the machine | `os/exec` and kill(2) for the processes it starts and signals, `ps` for the process table, `lsof` for a port's listeners, a dial for whether a loopback port answers, and `demo-engine-lib.sh` for a start inside the sandbox a demo capture runs in | a machine in memory whose processes are goroutines running the programs a test names, with process groups, signals and loopback ports, on the fake clock of a `testing/synctest` bubble |
 
 The store's rules are the store's own. The store adapter asks the store whether
