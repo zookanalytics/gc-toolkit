@@ -112,7 +112,7 @@ while [ $# -gt 0 ]; do
     --step)    require_value "$@"; STEP="$2";   shift 2 ;;
     --root)    require_value "$@"; ROOT="$2";   shift 2 ;;
     --reason)  require_value "$@"; REASON="$2"; shift 2 ;;
-    --bead)    require_value "$@"; HINT="$2"; shift 2 ;;
+    --bead)    require_value "$@"; HINT="$2";   shift 2 ;;
     --ended)   ENDED=1; shift ;;
     --db)      require_value "$@"; DB="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
