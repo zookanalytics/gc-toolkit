@@ -1317,7 +1317,14 @@ list.
 **How it draws.** Two views make up the pages. Needs you is one entry per need
 (a question, a decision, a conversation, a pull request waiting on the
 operator's review, work routed to them, a ruling), with every bead the need
-holds beneath it in the Work queue's order. The Work queue is the work in the
+holds beneath it in the Work queue's order. Each Needs you view leads with how
+many of its needs count, and beneath that how many of each kind count: pull
+requests, questions, conversations waiting for you, in conversation and
+rulings, a zero among them, then routed to you when one counts. A kind's count
+shows that kind alone, and a second click shows every kind again. The needs
+that do not count, those about parked work or work held for the Product Owner,
+fold beneath the rest under Parked or unprioritized, closed until opened. The
+Work queue is the work in the
 order it is expected to land, with the work nobody has scheduled after it,
 folded under Not scheduled. Work that carries hold:mayor waits for the Product
 Owner: the Unprioritized page lists it, and neither view lists it or counts it.
@@ -1502,10 +1509,25 @@ is in flight, and so does work that waits on either. Work held for the Product
 Owner is placed with the rest, so the work behind it comes after the queue, and
 then no view lists it. A need sorts by the first bead it holds in that order,
 or by its own place when it is work itself, so the top need holds up the front
-of the queue. The Needs you page counts the needs that hold or concern work
-under an epic, so its count reaches zero as the operator acts.
-`specs/tk-yhquh93.13/gas-city-search.md` cites the rules the order composes,
-and `specs/tk-yhquh93.13/board-views.md` records the board's two views.
+of the queue. `specs/tk-yhquh93.13/gas-city-search.md` cites the rules the
+order composes, and `specs/tk-yhquh93.13/board-views.md` records the board's
+two views.
+
+**What it counts.** Every Needs you view, the rig's and each epic's and
+Delivery's, lists each need it covers once, counts the needs that count, and
+counts them by kind (`NeedsYou` in `internal/rigboard/document.go`), so a count
+reaches zero only when nothing that counts needs the operator. A need does not
+count when what it is about is parked or waits for the Product Owner. It is
+parked itself when it, or an epic or Delivery above it, waits on a park, which
+the read tells as a wait on a gate that is no human gate, the wait the table
+reads as "Held by a gate" (`gateHold`). A gate, a decision or a conversation
+does not count when every bead it holds or is about is parked or carries
+hold:mayor. A pull request or other work that is itself a need counts unless it
+is parked itself, and a need about nothing else counts. A question a sitting
+is talking over counts as in conversation. An epic's or a Delivery's needs
+count on its line counts the needs that count too.
+`specs/tk-yhquh93.14/needs-you-count.md` records the rule and the calls it
+settled, and `specs/tk-yhquh93.14/gas-city-search.md` the search behind it.
 
 **How it is cached.** The document depends on the store's answers alone, so it
 is cached whole per rig, the work's order with it, since the order is a function
