@@ -238,7 +238,7 @@ names the bead that stops it, with one of these reasons:
 
 | `why` | The bead that stops it |
 |---|---|
-| `human` | is routed or assigned to the `human` gate, is a decision, is a finding that needs the operator, or is an anchor parked in a human state |
+| `human` | is a human gate, is assigned to `human`, is a decision, is a finding that needs the operator, or is an anchor parked in a human state |
 | `unrouted` | is open with no route, no arm and no assignee, so nothing picks it up |
 | `held` | has any status but open, in progress or hooked: blocked, deferred, pinned, or a status its store adds |
 | `approval` | is a PR the cadence has settled, waiting on the operator's review (review required, or changes requested) |
@@ -252,12 +252,12 @@ names the bead that stops it, with one of these reasons:
 
 So an armed bead takes its blockers' verdict, and a routed bead behind an orphan
 is stuck on the orphan. A merge anchor is judged by its recorded `pr.machine`
-and `pr_posture`, never by the route the merge cadence clears. An explicit
-`human` route outranks every moving state except in progress. A row read cannot
-see liveness. A claim or route whose session has died still reads advancing. A
-bead a poured molecule is working, whether its work bead or one of its inline
-steps, carries no route of its own, so it reads `unrouted` while that molecule
-runs.
+and `pr_posture`, never by the route the merge cadence clears. A human gate, a
+decision or a bead assigned to `human` outranks every moving state except in
+progress. A row read cannot see liveness. A claim or route whose session has
+died still reads advancing. A bead a poured molecule is working, whether its
+work bead or one of its inline steps, carries no route of its own, so it reads
+`unrouted` while that molecule runs.
 
 The converse opening opts into both, so its subject slice, the readiness verdict
 and the epic-health snapshot arrive from one call. A caller that only needs

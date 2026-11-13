@@ -41,6 +41,7 @@ EOF
 while [ "${1:-}" = "--city" ]; do shift 2; done
 case "$1 $2" in
   "config show") rc="${CFG_RC:-0}"; [ "$rc" -eq 0 ] || exit "$rc"; cat "$CFG_FILE" ;;
+  "order list") rc="${ORDERS_RC:-0}"; [ "$rc" -eq 0 ] || { [ -n "${ORDERS_ERR:-}" ] && printf '%s\n' "$ORDERS_ERR" >&2; exit "$rc"; }; cat "$ORDERS_JSON" ;;
   *) exit 0 ;;
 esac
 GC
@@ -94,7 +95,9 @@ prompt_template = "prompts/worker.md"
 name = "stubbed"
 prompt_template = "prompts/missing.md"
 EOF
-run_live() { PATH="$TMP/bin:$PATH" CFG_FILE="$1" GC_PACK_DIR="$P" GC_CITY_PATH="$TMP/city" bash "$CHECK" 2>&1; }
+printf '{"orders":[]}\n' > "$TMP/orders-none.json"
+run_live() { PATH="$TMP/bin:$PATH" CFG_FILE="$1" ORDERS_JSON="${ORDERS_JSON:-$TMP/orders-none.json}" \
+    GC_PACK_DIR="$P" GC_CITY_PATH="$TMP/city" bash "$CHECK" 2>&1; }
 OUT=$(run_live "$TMP/cfg-good.toml"); RC=$?
 eq "$RC" "0" "a readable resolved prompt_template passes"
 has "$OUT" "1 resolved prompt_template" "the live arm counted the template it verified"
@@ -104,9 +107,51 @@ has "$OUT" "stubbed" "the stub-primed agent is named"
 has "$OUT" "prompts/missing.md" "the unresolvable path is named"
 
 # --- 6. fail-CLOSED: a config that does not load ------------------------------------
-OUT=$(PATH="$TMP/bin:$PATH" CFG_RC=1 CFG_FILE="$TMP/cfg-good.toml" GC_PACK_DIR="$P" GC_CITY_PATH="$TMP/city" bash "$CHECK" 2>&1); RC=$?
+OUT=$(CFG_RC=1 run_live "$TMP/cfg-good.toml"); RC=$?
 eq "$RC" "1" "an unresolvable city config warns, never passes"
 has "$OUT" "UNVERIFIED" "the warning says the answer is unknown"
+
+# --- 7. live arm: an order meant for each rig, registered with no rig --------------
+mkdir -p "$TMP/orders"
+printf 'scope = "rig"\n' > "$TMP/orders/sweeper.toml"
+printf 'scope = "city"\n' > "$TMP/orders/citywide.toml"
+cat > "$TMP/orders-unbound.json" <<EOF
+{"orders":[{"name":"sweeper","rig":"","source":"$TMP/orders/sweeper.toml"}]}
+EOF
+OUT=$(ORDERS_JSON="$TMP/orders-unbound.json" run_live "$TMP/cfg-good.toml"); RC=$?
+eq "$RC" "2" "a scope=rig order registered with no rig is an ERROR"
+has "$OUT" "order sweeper" "the order is named"
+has "$OUT" "city store" "the finding says where the order runs instead"
+cat > "$TMP/orders-city.json" <<EOF
+{"orders":[{"name":"citywide","source":"$TMP/orders/citywide.toml"}]}
+EOF
+OUT=$(ORDERS_JSON="$TMP/orders-city.json" run_live "$TMP/cfg-good.toml"); RC=$?
+eq "$RC" "0" "a scope=city order with no rig is the point of city scope"
+has "$OUT" "none of the 1 order(s) registered with no rig" "the arm read the registry it passed"
+cat > "$TMP/orders-bound.json" <<EOF
+{"orders":[{"name":"sweeper","rig":"alpha","source":"$TMP/orders/sweeper.toml"}]}
+EOF
+OUT=$(ORDERS_JSON="$TMP/orders-bound.json" run_live "$TMP/cfg-good.toml"); RC=$?
+eq "$RC" "0" "a scope=rig order registered for a rig passes"
+has "$OUT" "none of the 0 order(s)" "an order with a rig is not one the arm reads"
+cat > "$TMP/orders-gone.json" <<EOF
+{"orders":[{"name":"ghost","source":"$TMP/orders/ghost.toml"}]}
+EOF
+OUT=$(ORDERS_JSON="$TMP/orders-gone.json" run_live "$TMP/cfg-good.toml"); RC=$?
+eq "$RC" "0" "an order whose source cannot be read is reported, not judged"
+has "$OUT" "order ghost" "the unjudged order is still named"
+has "$OUT" "declared scope is unknown" "the note says why it was not judged"
+
+# --- 8. fail-CLOSED: an order registry that does not answer --------------------------
+OUT=$(ORDERS_RC=1 run_live "$TMP/cfg-good.toml"); RC=$?
+eq "$RC" "1" "an unreadable order registry warns (the arm did not run)"
+has "$OUT" "could not read the order registry" "the warning says the registry went unread"
+hasnt "$OUT" "stderr:" "no stderr is quoted when the probe wrote none"
+OUT=$(ORDERS_RC=1 ORDERS_ERR="order registry: socket unavailable" run_live "$TMP/cfg-good.toml"); RC=$?
+eq "$RC" "1" "a failed \`gc order list\` still warns"
+has "$OUT" "socket unavailable" "the order-registry warning carries the probe's stderr"
+OUT=$(ORDERS_JSON="$TMP/cfg-good.toml" run_live "$TMP/cfg-good.toml"); RC=$?
+eq "$RC" "1" "a registry that answers with something other than its JSON warns"
 
 echo
 echo "check-config-bound: $PASS passed, $FAIL failed"

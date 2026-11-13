@@ -15,8 +15,7 @@ import (
 // bead's assignee as it reads, which tells a conversation by its row
 // ([conversation.IsCandidate]). Metadata is the far bead's metadata whole, each
 // value as [Row.Metadata] renders it, so the definition decides which keys it
-// reads: the route of any blocker, and the facts a merge anchor records about
-// its own PR.
+// reads: the facts a merge anchor records about its own PR.
 type Blocker struct {
 	ID        string
 	Title     string
@@ -41,21 +40,20 @@ func IsHumanGate(issueType, awaitType string) bool {
 }
 
 // IsPersonBlocker reports whether a blocker is a person's to clear and not a
-// human gate: a live blocker routed to a person (gc.routed_to=human), a
-// decision, or a conversation. A conversation on an open PR holds the PR's
-// merge through the anchor's `blocks` edge onto it, and a blocker reads as one
-// by its row ([conversation.IsCandidate]): a task in the operator's queue or
-// held by a sitting, which a person's ruling or dismissal closes. No automated
-// actor will clear any of them, so each holds a PR as held: blocked. A human
-// gate is never one, whatever its route, because held: gate is what counts it.
-// A blocker with no status reads open, and only a closed one is not live. The
-// helm board asks it of any bead's blockers, for the rows that ask a person for
-// something.
+// human gate: a live decision or conversation. A conversation on an open PR
+// holds the PR's merge through the anchor's `blocks` edge onto it, and a
+// blocker reads as one by its row ([conversation.IsCandidate]): a task in the
+// operator's queue or held by a sitting, which a person's ruling or dismissal
+// closes. No automated actor will clear either, so each holds a PR as held:
+// blocked. A human gate is never one, because held: gate is what counts it,
+// and a route marks no blocker as a person's. A blocker with no status reads
+// open, and only a closed one is not live. The helm board asks it of any bead's
+// blockers, for the rows that ask a person for something.
 func IsPersonBlocker(b Blocker) bool {
 	if !b.open() || IsHumanGate(b.IssueType, b.AwaitType) {
 		return false
 	}
-	return b.Metadata["gc.routed_to"] == "human" || strings.EqualFold(b.IssueType, "decision") ||
+	return strings.EqualFold(b.IssueType, "decision") ||
 		conversation.IsCandidate(strings.ToLower(b.IssueType), b.Assignee, b.ID)
 }
 

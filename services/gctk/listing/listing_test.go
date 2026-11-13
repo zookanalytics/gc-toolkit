@@ -36,6 +36,7 @@ func rig() *fake.Store {
 		{ID: "tk-old", Title: "an old answer", Status: "closed", IssueType: "task", ClosedAt: "2026-01-02T00:00:00Z"},
 		{ID: "tk-review", Title: "review", Status: "open", IssueType: "task", Metadata: map[string]string{"anchor_bead": "tk-e.2"}},
 		{ID: "tk-ask", Title: "routed to a person", Status: "open", IssueType: "task", Metadata: map[string]string{"gc.routed_to": "human"}},
+		{ID: "tk-decide", Title: "which rig owns it?", Status: "open", IssueType: "decision"},
 		{ID: "tk-root", Title: "mol-polecat-work", Status: "open", IssueType: "task",
 			Metadata: map[string]string{"gc.kind": "workflow", "gc.formula_contract": "graph.v2", "gc.input_convoy_id": "tk-cv"}},
 		{ID: "tk-step", Title: "Implement the solution", Status: "open", IssueType: "task",
@@ -67,7 +68,7 @@ func TestListingDecodesEachLiveBead(t *testing.T) {
 		t.Fatal(err)
 	}
 	live := ls.Live()
-	want := []string{"tk-ask", "tk-cv", "tk-e", "tk-e.2", "tk-q", "tk-review", "tk-root", "tk-step", "tk-wisp-1"}
+	want := []string{"tk-ask", "tk-cv", "tk-decide", "tk-e", "tk-e.2", "tk-q", "tk-review", "tk-root", "tk-step", "tk-wisp-1"}
 	if !slices.Equal(ids(live), want) {
 		t.Fatalf("live = %v, want %v", ids(live), want)
 	}
@@ -93,8 +94,9 @@ func TestListingDecodesEachLiveBead(t *testing.T) {
 	if !by["tk-wisp-1"].EphemeralPlane || by["tk-e.2"].EphemeralPlane {
 		t.Errorf("the ephemeral plane reads %v for the wisp and %v for the story", by["tk-wisp-1"].EphemeralPlane, by["tk-e.2"].EphemeralPlane)
 	}
-	if !by["tk-ask"].PersonBlocker || by["tk-q"].PersonBlocker {
-		t.Errorf("a person's to clear reads %v for routed work and %v for a human gate", by["tk-ask"].PersonBlocker, by["tk-q"].PersonBlocker)
+	if !by["tk-decide"].PersonBlocker || by["tk-ask"].PersonBlocker || by["tk-q"].PersonBlocker {
+		t.Errorf("a person's to clear reads %v for a decision, %v for work routed to human and %v for a human gate",
+			by["tk-decide"].PersonBlocker, by["tk-ask"].PersonBlocker, by["tk-q"].PersonBlocker)
 	}
 	if q := by["tk-q"]; q.AwaitType != "human" || q.Assignee != "human" || q.Description != "which way?\nthe whole question" {
 		t.Errorf("the gate reads %+v", q)

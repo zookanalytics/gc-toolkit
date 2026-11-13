@@ -293,6 +293,8 @@ eq "$(meta tk-work gc.dispatch_when_ready_args)" '["--on","mol-polecat-work"]' "
 has "$(meta tk-work gc.dispatch_when_ready_reason)" "tk-v1" "the arm's reason names the gate"
 eq "$(meta tk-work gc.execution_routed_to)" "" "the pour's route stamp is cleared, so the bead advertises no finished pour"
 eq "$(meta tk-work gc.routed_to)" "" "the work bead is unrouted"
+eq "$(grep -c 'gc\.deferred_' "$GC_LOG" | tr -d ' ')" 0 \
+  "no gc.deferred_* key is written, since Gas City writes those only on a node its pour creates"
 eq "$(meta tk-work branch)" "polecat/tk-work" "the branch record is kept for the re-sling to resume"
 
 # ── 2. re-running converges ──────────────────────────────────────────────────

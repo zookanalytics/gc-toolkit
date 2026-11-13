@@ -45,7 +45,7 @@ type Row struct {
 	Status    string
 	Priority  int
 	CreatedAt string
-	// RoutedTo is the pool, agent or person it is routed to, Assignee the one
+	// RoutedTo is the pool or agent it is routed to, Assignee the one
 	// it is assigned to, and Labels its labels, among them the hold labels.
 	RoutedTo string
 	Assignee string

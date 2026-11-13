@@ -181,7 +181,7 @@
     "readers": [
       "listing"
     ],
-    "doc": "The pool, agent or person a bead is routed to, written by lifecycle.sh's --route and by the script or formula that owns the bead's dispatch (lifecycle/lifecycle.toml, ROUTE and [metadata.runtime_owned])."
+    "doc": "The pool or agent a bead is routed to, written by lifecycle.sh's --route and by the script or formula that owns the bead's dispatch (lifecycle/lifecycle.toml, ROUTE and [metadata.runtime_owned])."
   },
   {
     "name": "gc.step_ref",
