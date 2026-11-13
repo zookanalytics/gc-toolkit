@@ -86,8 +86,11 @@ the same thing in the same place:
   runs in, which is also where a terminal script's shell starts. `**Port:**`
   names the port the command binds, and `0` has the capture pick a free one and
   hand it to the command as `$PORT`. Each value is one code span, and each
-  directory is relative to the root of the repository. The section's prose
-  says what the lines cannot, such as how long the app takes to start.
+  directory is relative to the root of the repository and lies in it. A
+  capture refuses a guide whose directory leads out of the repository, by an
+  absolute path, `..` or a symlink, because a capture reads and writes where
+  each directory it is given leads. The section's prose says what the lines
+  cannot, such as how long the app takes to start.
 - `## A known state`: how a script puts the app in a known state, such as the
   start path a page script opens with `**Start:**`, and the fixture data, seed
   or scenario behind it.

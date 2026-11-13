@@ -420,6 +420,11 @@ out="$(run -- page --script "$SCRIPT" --guide "$GT" --output "$OUT")"; rc=$?
 eq "$rc" 2 "a guide that names two apps exits 2"
 has "names more than one of **Serve:**, **Serve dir:** and **Base URL:**" "$out" "it says the guide names more than one app"
 hasnt "[screenshot]" "$(calls)" "and nothing is captured"
+GO="$WORK/rig-climb"; mkdir -p "$GO"; guide "$GO" '**Serve dir:** `../rig-static/site`'
+out="$(run -- page --script "$SCRIPT" --guide "$GO" --output "$OUT")"; rc=$?
+eq "$rc" 2 "a guide whose directory climbs out of the repository by .. exits 2"
+has "**Serve dir:** \`../rig-static/site\` leads outside the worktree, to $GS/site" "$out" "it says where the directory leads, which the sandbox would open"
+hasnt "[screenshot]" "$(calls)" "and nothing is captured"
 for extra in "--serve-dir $APP" "--port 4321" "--cwd $APP"; do
   # shellcheck disable=SC2086 # each case is a flag and a value without blanks
   out="$(run -- page --script "$SCRIPT" --guide "$GW" $extra --output "$OUT")"; rc=$?

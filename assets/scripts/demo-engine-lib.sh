@@ -116,7 +116,8 @@
 #                        why on stderr, when <dir> is in no git worktree, the
 #                        guide does not read, or it names a line twice, names
 #                        more than one of **Serve:**, **Serve dir:** and **Base
-#                        URL:**, or gives a value that is not one code span.
+#                        URL:**, gives a value that is not one code span, or
+#                        names a directory that lies outside the worktree.
 #
 # A rig names the app a capture brings up in its demo guide, in the options a
 # capture takes: the guide's section "Bring the app up" holds one line for
@@ -253,7 +254,7 @@ demo_engine_resolve() {
 # as !message, and it exits 1 when it found one.
 # shellcheck disable=SC2034  # the DEMO_GUIDE_* values are read by the scripts that source this file
 demo_engine_guide() {
-  local dir="$1" top="" oid="" text="" out="" rc=0 line key val
+  local dir="$1" top="" oid="" text="" out="" rc=0 root="" line key val raw k p
   DEMO_GUIDE=""; DEMO_GUIDE_ROOT=""; DEMO_GUIDE_SERVE=""; DEMO_GUIDE_SERVE_DIR=""
   DEMO_GUIDE_BASE_URL=""; DEMO_GUIDE_CWD=""; DEMO_GUIDE_PORT=""
   top=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null) \
@@ -310,6 +311,12 @@ demo_engine_guide() {
         fault(guide ": the section Bring the app up names more than one of **Serve:**, **Serve dir:** and **Base URL:**; name the one app a capture brings up")
       exit bad
     }') || rc=1
+  # A capture opens the rig worktree that holds each directory it is given, so
+  # a directory the guide names must lie in the worktree the guide was read
+  # from. It leads where the deepest part of it that exists leads, through any
+  # symlink the commit holds, as the sandbox resolves it.
+  root=$(_demo_engine_canon "$top")
+  [ -n "$root" ] || { _demo_engine_say "the root of the worktree $top did not resolve"; return 1; }
   while IFS= read -r line; do
     case "$line" in
       '!'*) _demo_engine_say "${line#!}"; continue ;;
@@ -319,12 +326,21 @@ demo_engine_guide() {
     key=${line%%=*}; val=${line#*=}
     case "$key" in
       cwd|serve_dir)
+        raw=$val
         case "$val" in
           /*) ;;
           .|./) val="$top" ;;
           ./*) val="$top/${val#./}" ;;
           *) val="$top/$val" ;;
-        esac ;;
+        esac
+        p=$val
+        while [ ! -e "$p" ] && [ "$p" != / ]; do p=$(dirname -- "$p"); done
+        p=$(_demo_engine_canon "$p")
+        if [ -z "$p" ] || ! _demo_engine_under "$p" "$root"; then
+          if [ "$key" = cwd ]; then k='**Cwd:**'; else k='**Serve dir:**'; fi
+          _demo_engine_say "$DEMO_GUIDE: $k \`$raw\` leads outside the worktree, to ${p:-a place that does not resolve}; name a directory in the repository, relative to its root"
+          rc=1; continue
+        fi ;;
     esac
     case "$key" in
       serve) DEMO_GUIDE_SERVE="$val" ;;

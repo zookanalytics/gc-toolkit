@@ -336,6 +336,32 @@ out="$(run -- --script "$SCRIPT" --output "$OUT" --guide "$TMPD/nowhere")"; rc=$
 ok "a --guide that is not a directory exits 1" "[ '$rc' = 1 ]"
 has "is not a directory" "$out" "it says so"
 
+echo "# a directory the guide names lies in its worktree, which the capture's sandbox would widen to: one that leads out -> exit 2"
+GO="$GBASE/rig-climb"; mkdir -p "$GO"; guide "$GO" '**Serve:** `npm run dev`
+**Cwd:** `../rig-wt/web`'
+out="$(run -- --script "$SCRIPT" --output "$OUT" --guide "$GO")"; rc=$?
+ok "a **Cwd:** that climbs out of the repository by .. exits 2" "[ '$rc' = 2 ]"
+has "**Cwd:** \`../rig-wt/web\` leads outside the worktree, to $GW/web" "$out" "it names the directory as the guide writes it, and where it leads"
+ok "nothing is captured" "[ ! -s '$RUNLOG' ] && [ ! -e '$OUT' ]"
+GA="$GBASE/rig-whole"; mkdir -p "$GA"; guide "$GA" "**Serve dir:** \`$GS/site\`"
+out="$(run -- --script "$SCRIPT" --output "$OUT" --guide "$GA")"; rc=$?
+ok "a **Serve dir:** named whole, in another worktree, exits 2" "[ '$rc' = 2 ]"
+has "leads outside the worktree, to $GS/site" "$out" "it says where the directory leads"
+GL="$GBASE/rig-link"; mkdir -p "$GL"; ln -s ../rig-static/site "$GL/site"; guide "$GL" '**Serve dir:** `site`'
+out="$(run -- --script "$SCRIPT" --output "$OUT" --guide "$GL")"; rc=$?
+ok "a **Serve dir:** that a committed symlink leads out of the repository exits 2" "[ '$rc' = 2 ]"
+has "**Serve dir:** \`site\` leads outside the worktree, to $GS/site" "$out" "it says where the symlink leads"
+ok "nothing is captured" "[ ! -s '$RUNLOG' ] && [ ! -e '$OUT' ]"
+GI="$GBASE/rig-inside"; mkdir -p "$GI/build/web"; ln -s build/web "$GI/web"; guide "$GI" '**Serve:** `npm run dev`
+**Cwd:** `web`'
+out="$(run -- --script "$SCRIPT" --output "$OUT" --guide "$GI")"; rc=$?
+ok "a **Cwd:** that a symlink leads elsewhere in the repository captures (exit 0)" "[ '$rc' = 0 ]"
+has "--cwd $GI/web" "$(cat "$RUNLOG")" "the command runs in the directory the guide names"
+GD="$GBASE/rig-unbuilt"; mkdir -p "$GD"; guide "$GD" '**Serve dir:** `dist`'
+out="$(run -- --script "$SCRIPT" --output "$OUT" --guide "$GD")"; rc=$?
+ok "a **Serve dir:** that a build has not made yet captures (exit 0)" "[ '$rc' = 0 ]"
+has "--serve-dir $GD/dist" "$(cat "$RUNLOG")" "the engine is given the directory the guide names"
+
 echo "# --guide names the whole app, so it takes no app target, --cwd or --port beside it -> exit 2"
 for args in "--serve-dir $SERVE_DIR" "--base-url https://preview.example.com" "--cwd $SERVE_DIR" "--port 4321"; do
   # shellcheck disable=SC2086 # each case is a flag and a value without blanks
