@@ -143,7 +143,7 @@ for i in 00 01 02 03 04 05 06 07 08 09 10 11; do
 done
 
 # Frontier verdict fixtures: one open unrouted blocker (stuck), one open
-# pool-routed blocker (advancing), one open human-gated blocker (stuck).
+# pool-routed blocker (advancing), one open human gate (stuck).
 bead "$R_TK" tk-stuck <<'J'
 {"id":"tk-stuck","title":"held by an unrouted blocker","status":"open","issue_type":"task","metadata":{},
  "dependencies":[{"id":"tk-op","dependency_type":"blocks","status":"open","title":"open unrouted blocker"}]}
@@ -161,11 +161,11 @@ bead "$R_TK" tk-routed <<'J'
 J
 bead "$R_TK" tk-humangate <<'J'
 {"id":"tk-humangate","title":"held by a human gate","status":"open","issue_type":"task","metadata":{},
- "dependencies":[{"id":"tk-hg","dependency_type":"blocks","status":"open","title":"human-gated blocker"}]}
+ "dependencies":[{"id":"tk-hg","dependency_type":"blocks","status":"open","title":"a human gate"}]}
 J
 bead "$R_TK" tk-hg <<'J'
-{"id":"tk-hg","title":"human-gated blocker","status":"open","issue_type":"task",
- "metadata":{"gc.routed_to":"human"}}
+{"id":"tk-hg","title":"a human gate","status":"open","issue_type":"gate",
+ "await_type":"human","await_id":"which-base","metadata":{}}
 J
 # tk-convheld: held by a conversation its sitting holds, in progress under the
 # alias that names its own id, as one on an open PR holds the PR's merge. It is a
@@ -198,7 +198,7 @@ bead "$R_TK" tk-parked <<'J'
  "dependencies":[{"id":"tk-pgate","dependency_type":"blocks","status":"open","title":"Parked until the operator says"}]}
 J
 bead "$R_TK" tk-pgate <<'J'
-{"id":"tk-pgate","title":"Parked until the operator says","status":"open","issue_type":"gate","metadata":{"gc.routed_to":"human"}}
+{"id":"tk-pgate","title":"Parked until the operator says","status":"open","issue_type":"gate","await_type":"human","metadata":{}}
 J
 bead "$R_TK" tk-under <<'J'
 {"id":"tk-under","title":"a member of the parked parent","status":"open","issue_type":"task","parent":"tk-parked","metadata":{}}
@@ -248,7 +248,10 @@ blk "$R_TK" tk-w-mover open "$POOL"
 # ... and a human gate beneath it makes it stuck, naming the gate.
 blk "$R_TK" tk-w-sub3 open '{}' tk-w-armed2
 blk "$R_TK" tk-w-armed2 open "$ARMED" tk-w-gate
-blk "$R_TK" tk-w-gate open '{"gc.routed_to":"human"}'
+bead "$R_TK" tk-w-gate <<'J'
+{"id":"tk-w-gate","title":"tk-w-gate","status":"open","issue_type":"gate",
+ "await_type":"human","await_id":"ship-it","metadata":{}}
+J
 # A cycle never drains: each routed bead waits on the other.
 blk "$R_TK" tk-w-sub4 open '{}' tk-w-cyc-a
 blk "$R_TK" tk-w-cyc-a open "$POOL" tk-w-cyc-b
@@ -313,11 +316,11 @@ blk "$R_TK" tk-a-hold open "{\"merge_result\":\"pre_open_gate\",\"merge_hold\":\
 blk "$R_TK" tk-a-blocked open "{\"merge_result\":\"pull_request\",\"pr.machine\":\"blocked$AX\"}"
 blk "$R_TK" tk-a-stale open "{\"merge_result\":\"pull_request\",\"pr.machine\":\"settled$AX\",\"pr_posture\":\"review_required@h0@2026-09-30T00:00:00Z\"}"
 blk "$R_TK" tk-a-noaxis open '{"merge_result":"pre_open_gate"}'
-blk "$R_TK" tk-a-humanstate open '{"merge_result":"abandoned","gc.routed_to":"human","gc.takeaway":"PR#9 was closed without merging"}'
+blk "$R_TK" tk-a-humanstate open '{"merge_result":"abandoned","gc.takeaway":"PR#9 was closed without merging"}'
 
 # A bead's own state, one rule per blocker.
 blk "$R_TK" tk-w-kinds open '{}' tk-k-blocked tk-k-validation tk-k-finding tk-k-needsyou \
-  tk-k-refinery tk-k-capped tk-k-hooked tk-k-deferred tk-k-gate
+  tk-k-refinery tk-k-capped tk-k-hooked tk-k-deferred tk-k-gate tk-k-humanroute
 blk "$R_TK" tk-k-blocked blocked "$POOL"
 blk "$R_TK" tk-k-validation open '{"task_kind":"validation","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}'
 blk "$R_TK" tk-k-finding open '{"task_kind":"finding","finding.disposition":"must-fix"}'
@@ -325,6 +328,7 @@ blk "$R_TK" tk-k-needsyou open '{"task_kind":"finding","finding.disposition":"ne
 blk "$R_TK" tk-k-capped open '{"gc.dispatch_when_ready":"gc-toolkit/gc-toolkit.polecat","gc.dispatch_when_ready_fail_count":"3"}'
 blk "$R_TK" tk-k-hooked hooked '{}'
 blk "$R_TK" tk-k-deferred deferred "$POOL"
+blk "$R_TK" tk-k-humanroute open '{"gc.routed_to":"human"}'
 bead "$R_TK" tk-k-gate <<'J'
 {"id":"tk-k-gate","title":"held by ruling","status":"open","issue_type":"gate",
  "await_type":"human","await_id":"which-way","metadata":{}}
@@ -345,9 +349,9 @@ J
 # parent-child listing, never its own edges) cover every advance state: an open
 # pool-routed and an in-progress child advance, as do tk-anchor — a merge anchor
 # whose recorded machine axis is progressing — and tk-kid-rework, a rework bead
-# whose pour cleared its route, machine work rather than a human gate. An open
-# human-gated child is stuck, and so is tk-kid-armed: armed, so it takes its
-# blocker's verdict, and its blocker is the human gate tk-hg. Three children sit
+# whose pour cleared its route, machine work rather than a human gate. A child
+# in the operator's queue is stuck, and so is tk-kid-armed: armed, so it takes
+# its blocker's verdict, and its blocker is the human gate tk-hg. Three children sit
 # in statuses a default or --status listing can leave out: a hooked child
 # advances, a pinned one is a hold whatever its route, and one in a status its
 # store adds is unknown to the classifier, so it fails closed. One done child is
@@ -369,8 +373,8 @@ bead "$R_TK" tk-kid-prog <<'J'
 {"id":"tk-kid-prog","title":"in-progress child","status":"in_progress","issue_type":"task","parent":"tk-epic","metadata":{}}
 J
 bead "$R_TK" tk-kid-human <<'J'
-{"id":"tk-kid-human","title":"human-gated child","status":"open","issue_type":"task","parent":"tk-epic",
- "metadata":{"gc.routed_to":"human"}}
+{"id":"tk-kid-human","title":"a child in the operator's queue","status":"open","issue_type":"task","parent":"tk-epic",
+ "assignee":"human","metadata":{}}
 J
 bead "$R_TK" tk-kid-done <<'J'
 {"id":"tk-kid-done","title":"done child","status":"closed","issue_type":"task","parent":"tk-epic","metadata":{}}
@@ -385,7 +389,7 @@ J
 bead "$R_TK" tk-kid-armed <<'J'
 {"id":"tk-kid-armed","title":"armed child","status":"open","issue_type":"task","parent":"tk-epic",
  "metadata":{"gc.dispatch_when_ready":"gc-toolkit/gc-toolkit.polecat"},
- "dependencies":[{"id":"tk-hg","dependency_type":"blocks","status":"open","title":"human-gated blocker"}]}
+ "dependencies":[{"id":"tk-hg","dependency_type":"blocks","status":"open","title":"a human gate"}]}
 J
 bead "$R_TK" tk-kid-hooked <<'J'
 {"id":"tk-kid-hooked","title":"hooked child","status":"hooked","issue_type":"task","parent":"tk-epic","metadata":{}}
@@ -720,8 +724,8 @@ JQF='.frontier.open[0].title'    runj tk-stuck --frontier; eq "$JQ" "open unrout
 JQF='.frontier.verdict'          runj tk-adv --frontier; eq "$JQ" advancing "an open pool-routed blocker is advancing"
 JQF='.frontier.open[0].advance'  runj tk-adv --frontier; eq "$JQ" advancing "  ... advance=advancing"
 
-JQF='.frontier.verdict'          runj tk-humangate --frontier; eq "$JQ" stuck "a blocker routed to the human gate is stuck, not advancing"
-JQF='.frontier.open[0].advance'  runj tk-humangate --frontier; eq "$JQ" stuck "  ... advance=stuck for a human-routed blocker"
+JQF='.frontier.verdict'          runj tk-humangate --frontier; eq "$JQ" stuck "a human gate as the blocker is stuck, not advancing"
+JQF='.frontier.open[0].advance'  runj tk-humangate --frontier; eq "$JQ" stuck "  ... advance=stuck for the human gate"
 
 JQF='.frontier.open[0] | "\(.id) \(.advance)"' runj tk-convheld --frontier; eq "$JQ" "tk-cv stuck" "a conversation its sitting holds is a person's, so stuck, not advancing"
 JQF='.frontier.verdict'          runj tk-convheld --frontier; eq "$JQ" stuck "  ... and so is the subject it holds"
@@ -828,6 +832,7 @@ eq "$(blkr tk-k-refinery)" "advancing - -" "an open bead assigned to the refiner
 eq "$(blkr tk-k-capped)" "stuck tk-k-capped capped" "an armed dispatch at its sling-failure cap is stuck"
 eq "$(blkr tk-k-hooked)" "advancing - -" "a hooked bead is held by an agent, so advancing"
 eq "$(blkr tk-k-gate)" "stuck tk-k-gate human" "a human gate, which a bare listing hides and which carries no route, is read and stuck on a person"
+eq "$(blkr tk-k-humanroute)" "advancing - -" "a human route marks no person's hold: it reads as the route it is"
 
 run tk-w-decides --frontier --json
 eq "$(blkr tk-k-decision)" "stuck tk-k-decision human" "a decision is a person's to make"
@@ -843,14 +848,14 @@ JQF='.horizon.children.total'        runj tk-epic --horizon;  eq "$JQ" 10 "every
 JQF='.horizon.children.open'         runj tk-epic --horizon;  eq "$JQ" 9 "  ... nine are open"
 JQF='.horizon.children.closed'       runj tk-epic --horizon;  eq "$JQ" 1 "  ... the done child is counted (the listing asks for every status), and the closed event is not"
 JQF='.horizon.children.advancing'    runj tk-epic --horizon;  eq "$JQ" 5 "  ... pool-routed, in-progress, hooked, a progressing anchor and a pour-cleared rework child advance"
-JQF='.horizon.children.stuck'        runj tk-epic --horizon;  eq "$JQ" 4 "  ... the human-gated, armed-behind-the-gate, pinned and custom-status children are stuck"
+JQF='.horizon.children.stuck'        runj tk-epic --horizon;  eq "$JQ" 4 "  ... the operator-queued, armed-behind-the-gate, pinned and custom-status children are stuck"
 JQF='.horizon.open | length'         runj tk-epic --horizon;  eq "$JQ" 9 "open children are listed; the done one is not"
 JQF='[.horizon.open[].id] | index("tk-kid-done")' runj tk-epic --horizon; eq "$JQ" null "the done child is never in the open list"
 JQF='[.horizon.open[]|select(.id=="tk-kid-pool")][0].advance' runj tk-epic --horizon; eq "$JQ" advancing "a pool-routed open child advances"
-JQF='[.horizon.open[]|select(.id=="tk-kid-human")][0].advance' runj tk-epic --horizon; eq "$JQ" stuck "a human-gated open child is stuck"
+JQF='[.horizon.open[]|select(.id=="tk-kid-human")][0].advance' runj tk-epic --horizon; eq "$JQ" stuck "an open child in the operator's queue is stuck"
 : > "$FAKE_GC_LOG"; run tk-epic --horizon --json
 kid() { jr "[.horizon.open[] | select(.id == \"$1\")][0] | \"\(.advance) \(.stuck_on.id // \"-\") \(.stuck_on.why // \"-\")\""; }
-eq "$(kid tk-kid-human)" "stuck tk-kid-human human" "  ... and names itself as the gate"
+eq "$(kid tk-kid-human)" "stuck tk-kid-human human" "  ... and names itself, a person's to move"
 eq "$(kid tk-kid-rework)" "advancing - -" "a pour-cleared rework child advances, with no stuck_on"
 eq "$(kid tk-kid-armed)" "stuck tk-hg human" "an armed child takes its blocker's verdict: behind a human gate it is stuck, naming the gate"
 eq "$(kid tk-kid-hooked)" "advancing - -" "a hooked child is listed and advances: an agent holds it"

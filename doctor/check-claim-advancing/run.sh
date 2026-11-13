@@ -35,6 +35,14 @@
 # to all of them. Clearing an assignee and setting a status are separate writes,
 # so this state exists briefly during a legitimate release; the bound covers it.
 #
+# Arm 1 judges steps alone. Core's orphan-sweep order resets a claim on any
+# bead whose holder no longer exists, every five minutes. The bare beads a pool
+# claims, which are rework children, first-reaction beads, warrants and reviews
+# returned to their pool, are each a piece the deletion schedule removes, and
+# its members replace them with poured runs where the work has a formula, so
+# every pool claim becomes a step. Judging the bare beads now would hold their
+# pools to a stall bound nobody has measured for them.
+#
 # Arm 2 — UNCLAIMED. A claim is not the first thing that can fail to happen. A
 # step poured, routed to a pool and never claimed by anybody stays `open`, so
 # arm 1 does not see it, and gate-ensure's pour_spent reads any open step as
@@ -44,7 +52,8 @@
 # agent its route names:
 #
 #   control-dispatcher route  -> note   (advanced in-process, never claimed)
-#   route names no agent      -> note   (an unreachable address is I3's finding)
+#   route names no agent      -> note   (gc sling refuses one: a person wrote it,
+#                                        or its agent has left the config)
 #   the agent is suspended    -> note   (parked on purpose)
 #   pool max is 0             -> note   (nothing is meant to claim it)
 #   no running session        -> note   (scaled to zero; the demand probe's)
@@ -405,8 +414,8 @@ while IFS="$SEP" read -r rig_name rig_path suspended; do
         | select($ref != "")
         | (($b.id // "") | tostring) as $raw
         | select($raw != "")
-        # Any assignee at all means something owns it; a blank-but-present one
-        # is an address fault I3 reports, not an unclaimed step.
+        # Any assignee at all, a blank-but-present one included, means a write
+        # took the step, so it is not an unclaimed one.
         | select((($b.assignee // "") | tostring) == "")
         | select((($m["gc.claimed_at"] // "") | tostring) == "")
         # Routes are compared as stored, so a padded one falls through to the
@@ -596,7 +605,7 @@ if [ "${#unclaimed[@]}" -ne 0 ]; then
                     errors+=("$label step $bid ($ref): offered by \`bd ready\` and NEVER claimed for ${age}m — no assignee, no gc.claimed_at — while its route \"$route\" has $free of $total running session(s) holding nothing (${pool_names[$route]:-}). An idle worker and an offered step have not met; nudge the pool so it calls \`gc hook --claim\`, or re-sling the molecule root.")
                 fi ;;
             *)
-                quiet "$label" "$route" "it names no agent — an address nothing answers is check-routed-work-claimable's finding (I3), not this one" "$age" ;;
+                quiet "$label" "$route" "it names no agent — \`gc sling\` refuses a target the city does not configure, so a person wrote this route by hand, or the agent it names has since left the config" "$age" ;;
         esac
     done <<< "$(printf '%s\n' "${unclaimed[@]}")"
     if [ "${#quiet_count[@]}" -ne 0 ]; then

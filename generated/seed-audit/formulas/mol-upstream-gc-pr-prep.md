@@ -3,7 +3,7 @@ Description: Prepare an upstream pull request from one or more local-fork commit
 ordered batch is cherry-picked onto a single branch and lands as one combined
 PR draft; N=1 is the single-commit case. Mechanical work through
 `push-branch`, then `prepare-pr-handoff` drafts the PR title/body (and an
-optional issue draft), then `handback-to-keeper` re-routes the bead to the
+optional issue draft), then `handback-to-keeper` hands the bead back to the
 requesting keeper for the conversational tail.
 
 PR creation itself is operator-gated and currently blocked at the city level —
@@ -13,9 +13,10 @@ when to run the assembled `gh pr create` command.
 Extends `mol-polecat-base` for load-context but replaces the implement /
 self-review chain with cherry-pick / scrub / test / push / draft / handback.
 Every abort path (a roster with no gascity rig, cherry-pick conflict, test
-failure, push race) mails the keeper + operator and hands the bead back open,
-assigned and routed to the keeper — never stranded `in_progress` on the drained
-session.
+failure, push race) hands the bead back open and assigned to the keeper, with no
+route, and mails the keeper and the operator. The keeper's mail requests its
+turn (`--notify`), which is the notice the assignment owes, so the bead is never
+stranded `in_progress` on the drained session.
 
 Required vars:
   {{commit_sha}}: Whitespace-separated, ORDERED list of one-or-more local commits on origin/main to extract for upstream submission. Apply order is topological — old→new, as the commits sit on origin/main. A single SHA (N=1) is the original single-commit behavior.
@@ -50,5 +51,5 @@ Steps (12):
   ├── mol-upstream-gc-pr-prep.test: Run the test suite on the cherry-picked branch [needs: mol-upstream-gc-pr-prep.scrub-commit-message]
   ├── mol-upstream-gc-pr-prep.push-branch: Push the prepped branch to origin [needs: mol-upstream-gc-pr-prep.test]
   ├── mol-upstream-gc-pr-prep.prepare-pr-handoff: Draft PR title/body, optional issue, and gh commands [needs: mol-upstream-gc-pr-prep.push-branch]
-  ├── mol-upstream-gc-pr-prep.handback-to-keeper: Reassign the bead to the keeper, nudge, mail backstop [needs: mol-upstream-gc-pr-prep.prepare-pr-handoff]
+  ├── mol-upstream-gc-pr-prep.handback-to-keeper: Reassign the bead to the keeper, notify it, mail backstop [needs: mol-upstream-gc-pr-prep.prepare-pr-handoff]
   └── mol-upstream-gc-pr-prep.workflow-finalize: Finalize workflow [needs: mol-upstream-gc-pr-prep.handback-to-keeper]

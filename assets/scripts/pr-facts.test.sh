@@ -468,7 +468,7 @@ out=$(run)
 has "$out" "closed out-of-band; abandoned" "the abandonment is recorded"
 eq "$(meta F2 merge_result)" "abandoned" "merge_result=abandoned"
 eq "$(bstatus F2)" "open" "the anchor stays OPEN (work did not land)"
-eq "$(meta F2 'gc.routed_to')" "human" "routed to human"
+eq "$(meta F2 'gc.routed_to')" "<absent>" "no route is written: the gate it files is the park"
 eq "$(bassignee F2)" "" "assignee cleared"
 has "$(cat "$STUB_ESC_LOG")" "--subject F2 --key pr-abandoned.11" "human-gate.sh got the situation key"
 hasnt "$(cat "$STUB_ESC_LOG")" "--key pr-abandoned.11 --quiet-window" "an out-of-band close is an event, so its call declares no quiet window"
@@ -945,7 +945,7 @@ printf '%s' "$(prview 12 OPEN CLEAN MERGEABLE)" | jq -c '.baseRefName = "release
 out=$(run)
 has "$out" "retargeted (base 'release'" "the retarget is recorded"
 eq "$(meta F3 merge_result)" "retargeted" "merge_result=retargeted"
-eq "$(meta F3 'gc.routed_to')" "human" "routed to human"
+eq "$(meta F3 'gc.routed_to')" "" "no route is written: the gate it files is the park"
 eq "$(meta rv-f3 gc.outcome)" "recorded" "the lane's backing review is not superseded"
 eq "$(bstatus rv-f3)" "closed" "…and stays the closed record its green derives from"
 has "$(cat "$STUB_ESC_LOG")" "--key pr-retargeted.12" "escalated once per situation key"
@@ -1005,13 +1005,13 @@ eq "$(bparents "$K1")$(bparents "$K2")" "" "…and neither filed with a parent"
 # The priority writer's own write is the one pinned to its store (--db), so a
 # route that carried a priority, or a priority the creator wrote itself, fails.
 PL=$(grep -n "^bd update $K1 --priority 0 --db " "$STUB_GC_LOG" | head -1 | cut -d: -f1)
-RL=$(grep -n "^bd update $K1 --set-metadata gc.routed_to=$FIX" "$STUB_GC_LOG" | head -1 | cut -d: -f1)
+RL=$(grep -n "^sling $FIX $K1 --no-formula --no-convoy$" "$STUB_GC_LOG" | head -1 | cut -d: -f1)
 if [ -n "$PL" ] && [ -n "$RL" ] && [ "$PL" -lt "$RL" ]; then
   ok "…its priority written by the priority writer before the route"
 else
   bad "the merge-in's priority was not written by the priority writer before its route (priority write at log line '${PL:-none}', route at '${RL:-none}')"
 fi
-hasnt "$(grep "^bd update $K1 --set-metadata gc.routed_to" "$STUB_GC_LOG")" "--priority" "…and the route written with no priority in it"
+hasnt "$(grep "^sling $FIX $K1 " "$STUB_GC_LOG")" "--priority" "…and the route written with no priority in it"
 
 echo "# …a merge-in whose priority does not settle is left unrouted, and the stranded arm routes it next pass"
 printf '#!/usr/bin/env bash\necho "queue-priority: settle: cannot compute the priority of $2" >&2\nexit 1\n' > "$TMP/qp-fail"
@@ -2470,7 +2470,7 @@ eq "$(meta PRF1 merge_result)" "retargeted" "the full pass retargets PRF1"
 for b in PRW PRV PCV PRT PST PVP; do eq "$(bprio "$b")" "1" "…and $b leaves P0 for P1 in that pass"; done
 eq "$(meta PRF1 pr_finishing_settled)" "unapproved" "…and PRF1 records the unapproved rank"
 has "$out" "PRF1 — settled 3 bead(s) of its PR-finishing work at the unapproved rank (resting in retargeted)" "…and the pass names the re-rank and where PRF1 rests"
-eq "$(meta PRF1 'gc.routed_to')" "human" "…and the record's write leaves PRF1 routed to the person its retarget asks"
+eq "$(meta PRF1 'gc.routed_to')" "" "…and PRF1 rests unrouted: the gate its retarget files is the park"
 
 echo "# …and its return to pull_request, the PR still approved, brings that work back to P0, work filed while it was away included"
 # While PRF1 rests in retargeted, a validation pass is filed at the rank it then
@@ -2500,7 +2500,7 @@ echo "# a retarget whose settle fails is finished by the next full pass, which r
 # at P0, and the retarget left the record unsettled. The next full pass reads no
 # anchor in pull_request, yet settles PRF1's work at P1 from that record. A
 # person has meanwhile routed PRF1 to themselves, and the record's write keeps
-# that route: a human state's default route would put it back on the park.
+# that route.
 prf1 approved approved 0
 retargeted_710
 out=$(GC_QUEUE_PRIORITY_TOOL="$TMP/qp-down" run)
@@ -2582,10 +2582,8 @@ abandoned_unrouted() { # [--no-takeaway]
 }
 
 echo "# the record of an abandoned anchor with no route and no takeaway lands, and the route stays empty"
-# A human state's default route is the park, and the park guard refuses it on an
-# anchor that carries no takeaway. A record write that took the default would be
-# refused on every full pass, each settling all of PRF1's work again. The record
-# moves no route, so it lands, and the next full pass reads none of that work.
+# The record moves no route, so it lands, and the next full pass reads none of
+# that work.
 prf1 approved approved 0
 abandoned_unrouted --no-takeaway
 eq "$(meta PRF1 merge_result)|$(meta PRF1 'gc.routed_to')|$(meta PRF1 gc.takeaway)" "abandoned||<absent>" "PRF1 rests abandoned with no route and no takeaway"
@@ -2597,12 +2595,12 @@ eq "$(meta PRF1 'gc.routed_to')" "" "…while the route stays empty"
 out=$(run)
 hasnt "$(cat "$STUB_GC_LOG")" "anchor_bead=PRF1" "…so the next full pass reads none of PRF1's work"
 
-echo "# …and one that carries a takeaway is not re-parked by the record"
+echo "# …and one that carries a takeaway records its rank with the route left empty"
 prf1 approved approved 0
 abandoned_unrouted
 out=$(run)
 eq "$(meta PRF1 pr_finishing_settled)" "unapproved" "an abandoned anchor with a takeaway and no route records its rank"
-eq "$(meta PRF1 'gc.routed_to')" "" "…and its route stays empty rather than taking the park"
+eq "$(meta PRF1 'gc.routed_to')" "" "…and its route stays empty"
 
 echo "# an anchor back in pull_request counts no approval until its PR is read again, and then only at the PR's head"
 # PRF1 rests approved at sha-710 with its work at P0. A repool takes it out of
@@ -3160,7 +3158,7 @@ printf '[{"id":35201,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments
 out=$(run)
 CW7=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "rework") | select((.metadata.anchor_bead // "") == "WK7") | .id ] | .[0] // "<none>"' "$STUB_STORE")
 eq "$(meta "$CW7" 'gc.routed_to')|$(meta WK7 pr_comment_watermark)" "$FIX|35201" "a fresh child is routed and the mark moves"
-eq "$(awk -v c="bd show $CW7 " -v w="bd update $CW7 --set-metadata gc.routed_to" 'index($0, w) == 1 { exit } index($0, c) == 1 { n++ } END { print n + 0 }' "$STUB_GC_LOG")" "1" \
+eq "$(awk -v c="bd show $CW7 " -v w="sling $FIX $CW7 " 'index($0, w) == 1 { exit } index($0, c) == 1 { n++ } END { print n + 0 }' "$STUB_GC_LOG")" "1" \
   "…after one read of it, bd_create's own"
 
 echo "# …a comment rework an earlier two-write create left without its anchor_bead is closed before a fresh one is filed"
@@ -3355,7 +3353,7 @@ printf '[{"id":8100,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_
 out=$(run)
 eq "$(cat "$STUB_ESC_LOG")" "" "a human-routed anchor does not send the batch to a person"
 has "$(meta H6 pr_comment_disposition)" "rework:" "…its feedback becomes a rework child"
-eq "$(meta H6 'gc.routed_to')" "human" "…and the anchor's own route is left alone"
+eq "$(meta H6 'gc.routed_to')" "" "…and the pass's record clears the anchor's route, since a detached anchor rests unrouted"
 store "[$(anchor H3 48)]"
 printf '%s' "$(prview 48 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_48.json"
 echo '[]' > "$GH_DIR/reviews_48.json"
@@ -3416,7 +3414,7 @@ for hv_state in "BLOCKED MERGEABLE" "DIRTY CONFLICTING"; do
     case "$hv_hold" in
       merge_hold)  eq "$(meta "$A" merge_hold)" "true" "$L …the hold is left standing" ;;
       rebase_hold) eq "$(meta "$A" rebase_hold)" "true" "$L …the freeze is left standing" ;;
-      human)       eq "$(meta "$A" 'gc.routed_to')" "human" "$L …the human route is left standing" ;;
+      human)       eq "$(meta "$A" 'gc.routed_to')" "" "$L …and the human route is cleared, since a detached anchor rests unrouted" ;;
       armed)       eq "$(meta "$A" 'gc.dispatch_when_ready')" "rig/gc-toolkit.polecat" "$L …the arm is left standing" ;;
       gate)        eq "$(bstatus "dm-$A")" "open" "$L …the gate is left standing" ;;
     esac
@@ -3644,7 +3642,7 @@ printf '[{"id":8730,"user":{"login":"human1"},"body":"still not right"}]' > "$GH
 out=$(run)
 hasnt "$(vpass_id Vc)" "<none>" "the batch still opens a validation pass"
 eq "$(meta Vc merge_hold)" "true" "…but the operator's hold is left standing — this arm does not touch it"
-eq "$(meta Vc 'gc.routed_to')" "human" "…nor the human route"
+eq "$(meta Vc 'gc.routed_to')" "" "…while its human route is cleared, since a detached anchor rests unrouted"
 eq "$(meta Vc signoff_rounds_reset)" "<absent>" "…and no signoff_rounds_reset is written"
 has "$(meta Vc pr_comment_disposition)" "rework:" "…and the comments still become a rework child: a hold does not send them to a person"
 
@@ -3665,7 +3663,7 @@ out=$(run)
 eq "$(meta_pinned R3 pr_posture)" "review_required@sha-57" "the city's own verdict is not an outstanding comment"
 eq "$(vpass_id R3)" "<none>" "…so no validation pass opens"
 eq "$(meta R3 merge_hold)" "true" "…the operator's hold stands, untouched"
-eq "$(meta R3 'gc.routed_to')" "human" "…and the anchor stays parked for the person it was given to"
+eq "$(meta R3 'gc.routed_to')" "" "…while its human route is cleared, since a detached anchor rests unrouted"
 
 echo "# …and a rework hand-back, which posts nothing at all, is not feedback either"
 KID52='{"id":"kid-52","status":"open","assignee":"","title":"Rework PR#52","notes":"","metadata":{"anchor_bead":"R7","source_review_bead":"rv-52"}}'
@@ -3677,7 +3675,7 @@ out=$(run)
 eq "$(meta_pinned R7 pr_posture)" "review_required@sha-52" "a hand-back leaves the PR with nothing outstanding on it"
 eq "$(vpass_id R7)" "<none>" "…so no validation pass opens"
 eq "$(meta R7 merge_hold)" "true" "…and the operator's hold stands"
-eq "$(meta R7 'gc.routed_to')" "human" "…with the hold it belongs to"
+eq "$(meta R7 'gc.routed_to')" "" "…while its human route is cleared, since a detached anchor rests unrouted"
 
 echo "# a comment opening with the no-review mark is not feedback, from a person or an app, in every space"
 # A comment not for review informs rather than asks (docs/not-for-review.md). A
@@ -3980,7 +3978,7 @@ out=$(run)
 hasnt "$(vpass_id PB)" "<none>" "the veto opens a validation pass"
 eq "$(meta PB signoff_rounds_reset)" "<absent>" "…and no signoff_rounds_reset is written"
 eq "$(meta PB merge_hold)" "true" "…the operator's hold is left standing"
-eq "$(meta PB 'gc.routed_to')" "human" "…with the human route"
+eq "$(meta PB 'gc.routed_to')" "" "…while its human route is cleared, since a detached anchor rests unrouted"
 has "$(meta PB pr_comment_disposition)" "rework:" "…and the objection still becomes a rework child"
 
 echo "# …a review DISMISSED before it routed is never filed"
@@ -6104,7 +6102,7 @@ out=$(run)
 has "$out" "re-ran the failed jobs of run(s) 7110 at head sha-110 (nothing parked)" "the timed-out check's run is re-run, and the pass says so"
 eq "$(reruns 7110)" "1" "…once, its failed jobs only, on the origin repo"
 eq "$(meta NC1 pr_check_rerun)" "sha-110" "…recorded at that head on the anchor"
-eq "$(meta NC1 'gc.routed_to')" "" "…and the anchor is not parked"
+hasnt "$out" "parked to human" "…and the anchor is not parked"
 hasnt "$(cat "$STUB_ESC_LOG")" "pr-fix-noncode.110" "…and no gate is filed"
 eq "$(no_rework)" "0" "no fixer is dispatched at a non-code failure"
 
@@ -6113,11 +6111,11 @@ echo "# …a pass at the same head re-runs nothing, and the re-run's failure par
 out=$(run)
 eq "$(reruns 7110)" "0" "a second pass at the same head re-runs nothing"
 has "$out" "non-code cause; parked to human" "…the failure at a head already re-run parks the approved PR"
-eq "$(meta NC1 'gc.routed_to')" "human" "the anchor is parked to a human"
+eq "$(meta NC1 'gc.routed_to')" "" "the park writes no route, since its gate is the park"
 has "$(meta NC1 'gc.takeaway')" "PR#110 has a required check failing for a non-code cause" "…with a takeaway naming what the person owes"
 has "$(meta NC1 'gc.takeaway')" "the park lifts once it is green" "…and saying the park lifts on its own"
 eq "$(meta NC1 'gc.takeaway_settled')" "" "…left unsettled, because a person still owes it"
-eq "$(grep '^bd update NC1 ' "$STUB_GC_LOG" | grep -F 'gc.routed_to=human' | grep -cF 'gc.takeaway=PR#110' || true)" "1" "…written in the same update as the route"
+eq "$(grep '^bd update NC1 ' "$STUB_GC_LOG" | grep -cF 'gc.takeaway=PR#110' || true)" "1" "…written in the transition's one update"
 eq "$(no_rework)" "0" "no fixer is dispatched at a non-code failure"
 has "$(cat "$STUB_ESC_LOG")" "--subject NC1 --key pr-fix-noncode.110" "a non-code park files its gate"
 has "$(ncdesc 110)" "The refinery re-ran the failed jobs once at head sha-110, and they failed again." "…which says the re-run failed too"
@@ -6133,7 +6131,7 @@ eq "$(reruns 7116)" "1" "an unapproved PR's cancelled check is re-run"
 out=$(run)
 eq "$(reruns 7116)" "1" "…once"
 has "$out" "no approval stands, so nothing is parked and the PR waits for its review" "…and its failure at the re-run head parks nothing"
-eq "$(meta NC7 'gc.routed_to')" "" "…the anchor stays unrouted"
+hasnt "$out" "parked to human" "…the anchor is not parked"
 hasnt "$(cat "$STUB_ESC_LOG")" "pr-fix-noncode.116" "…and no gate is filed"
 eq "$(no_rework)" "0" "…and no fixer is dispatched"
 
@@ -6145,7 +6143,7 @@ approve 117
 out=$(STUB_RUN_RERUN_RC=1 run)
 eq "$(reruns 7117)" "1" "the re-run is tried"
 has "$out" "the re-run of the failed jobs of run(s) 7117 at head sha-117 did not go through" "…its refusal is reported"
-eq "$(meta NC8 'gc.routed_to')" "human" "…and the approved PR parks at once"
+has "$(meta NC8 'gc.takeaway')" "PR#117 has a required check failing for a non-code cause" "…and the approved PR parks at once"
 has "$(ncdesc 117)" "re-run of the failed jobs of run(s) 7117 at head sha-117 did not go through" "…with a gate naming the refused re-run"
 eq "$(meta NC8 pr_check_rerun)" "sha-117" "…and the head stays recorded, so no later pass at it re-runs"
 
@@ -6189,7 +6187,7 @@ approve 112
 : > "$STUB_GH_LOG"
 out=$(run)
 eq "$(reruns 7112)" "0" "a check that asks for an action is not re-run"
-eq "$(meta NC3 'gc.routed_to')" "human" "…and the approved PR parks"
+has "$(meta NC3 'gc.takeaway')" "PR#112 has a required check failing for a non-code cause" "…and the approved PR parks"
 hasnt "$(ncdesc 112)" "re-ran" "…with a gate that claims no re-run"
 eq "$(no_rework)" "0" "…and dispatches no fixer"
 
@@ -6199,7 +6197,7 @@ printf '[{"type":"required_status_checks","parameters":{"required_status_checks"
 printf '%s' "$(prview 113 OPEN UNSTABLE MERGEABLE ',"statusCheckRollup":[{"name":"Vercel","status":"COMPLETED","conclusion":"FAILURE"}]')" > "$GH_DIR/pr_view_113.json"
 : > "$STUB_ESC_LOG"
 out=$(run)
-eq "$(meta NC4 'gc.routed_to')" "human" "a deploy-type FAILURE parks rather than routing a code-fixer"
+has "$(meta NC4 'gc.takeaway')" "PR#113 has a required check failing for a non-code cause" "a deploy-type FAILURE parks rather than routing a code-fixer"
 eq "$(no_rework)" "0" "…and dispatches no fixer"
 has "$(cat "$STUB_ESC_LOG")" "--key pr-fix-noncode.113" "…and files the non-code park gate"
 echo "# …and a deploy-type check that timed out in an Actions run parks too, unapproved and with no re-run"
@@ -6208,7 +6206,7 @@ printf '%s' "$(prview 119 OPEN BLOCKED MERGEABLE ",\"statusCheckRollup\":[$(ncro
 : > "$STUB_GH_LOG"
 out=$(run)
 eq "$(reruns 7119)" "0" "a deploy-type check is never re-run"
-eq "$(meta NC10 'gc.routed_to')" "human" "…and it parks the PR though nobody approved it"
+has "$(meta NC10 'gc.takeaway')" "PR#119 has a required check failing for a non-code cause" "…and it parks the PR though nobody approved it"
 
 echo "# …a genuine code FAILURE still dispatches, even alongside a non-code failure, naming only the code check"
 store "[$(anchor NC5 114)]"
@@ -6243,7 +6241,7 @@ store "[$(anchor CAP1 120),$(rwchild CK1 CAP1 120 "$CAPH1" closed),$(rwchild CK2
 rcredview 120 "$CAPHX"
 out=$(run)
 has "$out" "required check(s) failing (test); filed" "with 2 prior attempts, the 3rd red head still dispatches"
-eq "$(meta CAP1 'gc.routed_to')" "" "…and the anchor is not parked under the cap"
+hasnt "$out" "parked to human" "…and the anchor is not parked under the cap"
 eq "$(no_rework)" "1" "…exactly one new fixer"
 rm -f "$GH_DIR/rules_main.json"
 
@@ -6254,27 +6252,26 @@ rcredview 121 "$CAPHX"
 : > "$STUB_ESC_LOG"; : > "$STUB_GC_LOG"
 out=$(run)
 has "$out" "reached the cap (3)" "the arm names the cap it hit"
-eq "$(meta CAP2 'gc.routed_to')" "human" "the stuck anchor is parked to a human"
+eq "$(meta CAP2 'gc.routed_to')" "" "the stuck anchor's park writes no route, since its gate is the park"
 has "$(meta CAP2 'gc.takeaway')" "PR#121 is still red after 3 auto-fix attempts" "…with a takeaway naming the PR and the attempts it drew"
-eq "$(grep '^bd update CAP2 ' "$STUB_GC_LOG" | grep -F 'gc.routed_to=human' | grep -cF 'gc.takeaway=PR#121' || true)" "1" "…written in the same update as the route"
+eq "$(grep '^bd update CAP2 ' "$STUB_GC_LOG" | grep -cF 'gc.takeaway=PR#121' || true)" "1" "…written in the transition's one update"
 eq "$(no_rework)" "0" "…and no fourth fixer is dispatched"
 has "$(cat "$STUB_ESC_LOG")" "--subject CAP2 --key pr-fix-capped.121" "…and the cap park files its gate"
 has "$(jq -r '[ .[] | select((.await_id // "") == "pr-fix-capped.121") | .description ] | .[0] // ""' "$STUB_STORE")" \
   "clearing this gate and gc.routed_to while it is still red parks it again" "…whose message names the gate in the release, since an open gate holds the arm"
 eq "$(meta CAP2 merge_result)" "pull_request" "…while the anchor keeps gating"
 
-echo "# …nothing lowers the count: a person clearing the route on a still-red PR is held by the gate, then parked again"
-# The park's gate blocks the anchor, and an open human gate holds this arm as
-# the route does. Clearing the route alone dispatches nothing. Clearing the gate
-# too, with the PR still red at the cap, parks the anchor again.
-jq -c 'map(if .id == "CAP2" then .metadata["gc.routed_to"] = "" else . end)' "$STUB_STORE" > "$TMP/cap2.json" && mv "$TMP/cap2.json" "$STUB_STORE"
+echo "# …nothing lowers the count: a still-red PR is held by its open gate, then parked again once a person clears it"
+# The park's gate blocks the anchor, and an open human gate holds this arm, so
+# the next pass dispatches nothing. Clearing the gate, with the PR still red at
+# the cap, parks the anchor again.
 out=$(run)
-eq "$(meta CAP2 'gc.routed_to')" "" "the open gate holds the arm, so nothing re-parks the anchor"
+hasnt "$out" "parked to human" "the open gate holds the arm, so nothing re-parks the anchor"
 eq "$(no_rework)" "0" "…and no fixer is dispatched"
 CAP2G=$(jq -r '[ .[] | select((.await_id // "") == "pr-fix-capped.121") | .id ] | .[0] // "<none>"' "$STUB_STORE")
 bmut "$CAP2G" '.status = "closed" | .close_reason = "ruled: let it try again"'
 out=$(run)
-eq "$(meta CAP2 'gc.routed_to')" "human" "the next red pass after the gate clears parks the anchor again"
+has "$out" "reached the cap (3); parked to human" "the next red pass after the gate clears parks the anchor again"
 eq "$(no_rework)" "0" "…and still dispatches no fixer"
 rm -f "$GH_DIR/rules_main.json"
 
@@ -6304,7 +6301,7 @@ rcredview 123 "$CAPHX"
 : > "$STUB_ESC_LOG"
 out=$(run)
 has "$out" "reached the cap (3)" "three worked children with no rejection_reason are three attempts"
-eq "$(meta CAP4 'gc.routed_to')" "human" "…so the anchor parks to a human"
+has "$(meta CAP4 'gc.takeaway')" "PR#123 is still red after 3 auto-fix attempts" "…so the anchor parks for a person"
 eq "$(no_rework)" "0" "…and no fourth fixer is dispatched"
 rm -f "$GH_DIR/rules_main.json"
 
@@ -6320,15 +6317,15 @@ out=$(run)
 hasnt "$out" "reached the cap" "two prior heads plus one child at the current head stay under the cap"
 hasnt "$out" "was already sent to fix" "…an unmade husk at the current head does not park the anchor"
 has "$out" "required check(s) failing (test); filed" "…so the arm sends the current head its fixer"
-eq "$(meta CAP5 'gc.routed_to')" "" "…and the anchor is not parked"
+hasnt "$out" "parked to human" "…and the anchor is not parked"
 rm -f "$GH_DIR/rules_main.json"
 
 # ---- same-head park: a head a fixer was already sent to draws no second one ----
 # A red-check child closed at the head the PR is still red at means a fixer was
 # already sent to that head and the head did not move. A second fixer would
 # repeat the attempt, and the cap counts only prior heads, so it would never stop
-# the repeats. The anchor parks to a human instead (gc.routed_to=human and the
-# takeaway in one lifecycle.sh update) and a pr-fix-unmoved gate is filed.
+# the repeats. The anchor parks for a person instead (the takeaway in one
+# lifecycle.sh update, with no route) and a pr-fix-unmoved gate is filed.
 echo "# a worked child at the CURRENT head parks the anchor rather than send a second fixer"
 reap_req
 store "[$(anchor UM1 175),$(rwchild_worked CK15 UM1 175 "$CAPHX")]"
@@ -6336,31 +6333,29 @@ rcredview 175 "$CAPHX"
 : > "$STUB_ESC_LOG"; : > "$STUB_GC_LOG"
 out=$(run)
 has "$out" "which red-check child CK15 was already sent to fix; parked to human" "a worked child, its head only in its title, parks the anchor"
-eq "$(meta UM1 'gc.routed_to')" "human" "…to a human"
+eq "$(meta UM1 'gc.routed_to')" "" "…with no route, since its gate is the park"
 has "$(meta UM1 'gc.takeaway')" "PR#175 is still red at the head an auto-fixer was already sent to" "…with a takeaway naming what the person owes"
-eq "$(grep '^bd update UM1 ' "$STUB_GC_LOG" | grep -F 'gc.routed_to=human' | grep -cF 'gc.takeaway=PR#175' || true)" "1" "…written in the same update as the route"
+eq "$(grep '^bd update UM1 ' "$STUB_GC_LOG" | grep -cF 'gc.takeaway=PR#175' || true)" "1" "…written in the transition's one update"
 eq "$(no_rework)" "0" "…and no second fixer is sent to the unmoved head"
 has "$(cat "$STUB_ESC_LOG")" "--subject UM1 --key pr-fix-unmoved.175" "…and the park files its gate"
 has "$(jq -r '[ .[] | select((.await_id // "") == "pr-fix-unmoved.175") | .description ] | .[0] // ""' "$STUB_STORE")" \
   "Clearing this gate and gc.routed_to at this head parks it again" "…whose message names the gate in the release, since an open gate holds the arm"
 eq "$(meta UM1 merge_result)" "pull_request" "…while the anchor keeps gating"
 
-echo "# …a person clearing the route and the gate at the same head sees it parked again"
+echo "# …a person clearing the gate at the same head sees it parked again"
 UM1G=$(jq -r '[ .[] | select((.await_id // "") == "pr-fix-unmoved.175") | .id ] | .[0] // "<none>"' "$STUB_STORE")
-jq -c 'map(if .id == "UM1" then .metadata["gc.routed_to"] = "" else . end)' "$STUB_STORE" > "$TMP/um1.json" && mv "$TMP/um1.json" "$STUB_STORE"
 bmut "$UM1G" '.status = "closed" | .close_reason = "ruled: try once more"'
 out=$(run)
-eq "$(meta UM1 'gc.routed_to')" "human" "the next red pass at the same head parks the anchor again"
+has "$out" "which red-check child CK15 was already sent to fix; parked to human" "the next red pass at the same head parks the anchor again"
 eq "$(no_rework)" "0" "…and still sends no fixer"
 
-echo "# …once a push moves the head, clearing the route and the gate lets a fixer try the new head"
+echo "# …once a push moves the head, clearing the gate lets a fixer try the new head"
 rcredview 175 "$CAPH1"
 UM1G=$(jq -r '[ .[] | select((.await_id // "") == "pr-fix-unmoved.175") | select(.status != "closed") | .id ] | .[0] // "<none>"' "$STUB_STORE")
-jq -c 'map(if .id == "UM1" then .metadata["gc.routed_to"] = "" else . end)' "$STUB_STORE" > "$TMP/um1.json" && mv "$TMP/um1.json" "$STUB_STORE"
 bmut "$UM1G" '.status = "closed" | .close_reason = "ruled: pushed a fix"'
 out=$(run)
 has "$out" "required check(s) failing (test); filed" "a still-red moved head draws a fixer, the unmoved head counting as one prior attempt"
-eq "$(meta UM1 'gc.routed_to')" "" "…and the anchor is not parked"
+hasnt "$out" "parked to human" "…and the anchor is not parked"
 rm -f "$GH_DIR/rules_main.json"
 
 echo "# …a red-check child closed unworked at the current head parks too, read from its rejection_reason"
@@ -6386,10 +6381,10 @@ printf '{"headRefOid":"%s"}' "$CAPH1" > "$GH_DIR/pr_view_177.queue/headRefOid/01
 out=$(run)
 has "$out" "PR#177 head re-read as '$CAPH1' rather than $CAPHX" "a head that re-reads as moved is named"
 has "$out" "nothing parked or dispatched" "…and is neither parked nor sent a fixer"
-eq "$(meta UM3 'gc.routed_to')" "" "…so the anchor stays unrouted"
+hasnt "$out" "parked to human" "…so the anchor is not parked"
 eq "$(no_rework)" "0" "…and no fixer goes to the stale head"
 out=$(run)
-eq "$(meta UM3 'gc.routed_to')" "human" "…while a pass whose re-read still names the head parks it"
+has "$(meta UM3 'gc.takeaway')" "PR#177 is still red at the head an auto-fixer was already sent to" "…while a pass whose re-read still names the head parks it"
 rm -f "$GH_DIR/rules_main.json"
 
 echo "# …a closed child of another arm at the current head neither parks the anchor nor stands the arm down"

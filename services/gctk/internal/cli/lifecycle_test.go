@@ -43,7 +43,7 @@ func TestParseTransitionCollectsRepeatedFlags(t *testing.T) {
 		"--to", "merged", "--expect", "pull_request", "--close",
 		"--set", "merged_sha=abc", "--set", "merged_target=main",
 		"--unset", "rejection_reason", "--unset", "merge_hold",
-		"--route", "human", "--assignee", "", "--append-notes", "landed", "--json",
+		"--route", "rig/pool", "--assignee", "", "--append-notes", "landed", "--json",
 	})
 	if err != nil {
 		t.Fatalf("parseTransition: %v", err)
@@ -59,7 +59,7 @@ func TestParseTransitionCollectsRepeatedFlags(t *testing.T) {
 	if !o.assigneeSet || o.assignee != "" {
 		t.Errorf("--assignee '' = (set %v, %q), want (true, \"\")", o.assigneeSet, o.assignee)
 	}
-	if !o.routeSet || o.route != "human" {
+	if !o.routeSet || o.route != "rig/pool" {
 		t.Errorf("--route = (set %v, %q)", o.routeSet, o.route)
 	}
 	if !o.notesSet || o.notes != "landed" {
@@ -119,7 +119,7 @@ func TestDumpMachineNamesEveryDeclaredEdge(t *testing.T) {
 	got := out.String()
 	for _, want := range []string{
 		"states " + strings.Join(lifecycle.States, " "),
-		"human_states " + strings.Join(lifecycle.HumanStates, " "),
+		"detached_states " + strings.Join(lifecycle.DetachedStates, " "),
 		"closed_states " + strings.Join(lifecycle.ClosedStates, " "),
 		"exit_sets pull_request:pr_finishing_settled=unsettled pull_request:pr_head_oid=",
 	} {
@@ -164,11 +164,14 @@ func TestPreReadRefusalsNeverTouchABead(t *testing.T) {
 		{"--set-dated with no oid", []string{"b-1", "--to", "pull_request", "--set-dated", "pr.machine=settled"}, "<value>@<oid>"},
 		{"--set-dated carrying its own instant", []string{"b-1", "--to", "pull_request", "--set-dated", "pr.machine=settled@oid@2026-01-01T00:00:00Z"}, "<value>@<oid>"},
 		{"--set-dated with no '='", []string{"b-1", "--to", "pull_request", "--set-dated", "pr.machine"}, "is not k=<value>@<oid>"},
-		// A human state names the person it waits on. The refusal is decided on
-		// arguments alone, so it happens before any bead is read.
-		{"empty --route into a human state", []string{"b-1", "--to", "abandoned", "--route", ""}, "waiting on nobody"},
-		{"empty --takeaway", []string{"b-1", "--to", "abandoned", "--takeaway", ""}, "no question recorded"},
-		{"whitespace-only --takeaway", []string{"b-1", "--to", "abandoned", "--takeaway", " \t\n "}, "no question recorded"},
+		// A route names a pool by its qualified address. `human` is a bare name
+		// like any other: a person's wait is a human gate, never a route. The
+		// refusal is decided on arguments alone, so it happens before any bead is
+		// read.
+		{"--route human", []string{"b-1", "--to", "abandoned", "--route", "human"}, "not rig-qualified"},
+		{"--route human on a detached state", []string{"b-1", "--to", "pull_request", "--expect", "pull_request", "--route", "human"}, "not rig-qualified"},
+		{"empty --takeaway", []string{"b-1", "--to", "abandoned", "--takeaway", ""}, "tells the operator nothing"},
+		{"whitespace-only --takeaway", []string{"b-1", "--to", "abandoned", "--takeaway", " \t\n "}, "tells the operator nothing"},
 		{"--takeaway over the cap", []string{"b-1", "--to", "abandoned", "--takeaway", strings.Repeat("x", lifecycle.TakeawayMax+1)}, "the cap is 140"},
 		// A value-taking flag with no following token is malformed; the refusal is
 		// on arguments alone, ahead of any read. --expect is the one that matters:

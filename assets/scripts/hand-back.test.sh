@@ -115,8 +115,8 @@ for form in GC_ALIAS GC_SESSION_NAME GC_AGENT; do
 done
 
 store "[$(bead B3 in_progress hq-me)]"
-hb GC_SESSION_ID=hq-me -- B3 --set-metadata gc.routed_to=human --set-metadata "gc.takeaway=Needs a decision"
-eq "$RC|$(meta B3 gc.routed_to)|$(meta B3 gc.takeaway)" "0|human|Needs a decision" "further flags land with the hand-back"
+hb GC_SESSION_ID=hq-me -- B3 --set-metadata gc.routed_to= --set-metadata "gc.work_outcome=no-op"
+eq "$RC|$(meta B3 gc.routed_to)|$(meta B3 gc.work_outcome)" "0||no-op" "further flags land with the hand-back, such as the route a caller clears"
 eq "$(writes B3 | wc -l | tr -d ' ')" "1" "…in the same write as the reopen"
 
 store "[$(bead B4 open "")]"
@@ -168,10 +168,10 @@ has "$ERR" "B11 could not be read, so nothing was released." "…and stderr says
 
 echo "# a refused write leaves the claim whole and says what the bead shows"
 store "[$(bead B12 in_progress hq-me)]"
-hb GC_SESSION_ID=hq-me WRAP_REFUSE=1 -- B12 --set-metadata gc.routed_to=human --set-metadata "gc.takeaway=Needs a decision"
+hb GC_SESSION_ID=hq-me WRAP_REFUSE=1 -- B12 --set-metadata gc.routed_to= --set-metadata "gc.work_outcome=no-op"
 eq "$RC" "1" "a write the store refuses: exit 1"
 eq "$(claim B12)" "$HELD_CLAIM" "…the claim stands: status, assignee, both pins and the route"
-eq "$(meta B12 gc.takeaway)" "<absent>" "…and no further flag landed either"
+eq "$(meta B12 gc.work_outcome)" "<absent>" "…and no further flag landed either"
 has "$(notes B12)" "Hand-back refused: the write that reopens B12 and releases this session's claim exited 1 (the store refused it). It shows status in_progress and assignee hq-me." \
     "…and the note names the exit and what the bead shows"
 
