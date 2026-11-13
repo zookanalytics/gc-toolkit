@@ -173,12 +173,18 @@ done
 sub="${1:-}"; shift || true
 [ -z "${FAKE_CALL_LOG:-}" ] || printf '%s %s\n' "$sub" "$*" >> "$FAKE_CALL_LOG"
 
-meta_of() { # <file>
-  local lines
-  lines=$(sed -n 's/^m\.//p' "$1" 2>/dev/null || true)
-  if [ -z "$lines" ]; then printf '{}'; return; fi
-  printf '%s' "$lines" | jq -R -s 'split("\n") | map(select(length > 0))
-    | map(split("=") | {key: .[0], value: (.[1:] | join("="))}) | from_entries'
+# Every bead the suite makes stays in one store, so a read that started a
+# process for each bead in it would grow the suite's time with the square of its
+# cases. A read starts the same few processes whatever the store holds.
+# val <file> <key> — the value on the bead's last `<key>=` line, or "", in VAL,
+# read by bash itself.
+val() {
+  local line
+  VAL=""
+  [ -f "$1" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in "$2="*) VAL="${line#"$2="}" ;; esac
+  done < "$1"
 }
 # The edges a bead carries, one {other, type} per line. The order is the one bd
 # keeps them in, the order they were added, which is the first a reader takes.
@@ -198,22 +204,29 @@ race_at() { # <point>
   : > "$DB/.raced.$1.$id"
   bash "$s" || true
 }
-# A `bd list` row: the far end of an edge by depends_on_id, its type as type.
-list_row() { # <file>
-  local f="$1" id="${1##*/}" deps='[]' o t
-  while read -r o t; do
-    [ -n "$o" ] || continue
-    deps=$(jq -nc --argjson d "$deps" --arg i "$id" --arg o "$o" --arg t "$t" '$d + [{issue_id: $i, depends_on_id: $o, type: $t}]')
-  done < <(edges_of "$f")
-  jq -nc --arg id "$id" --arg st "$(sed -n 's/^status=//p' "$f" | tail -1)" \
-        --arg as "$(sed -n 's/^assignee=//p' "$f" | tail -1)" \
-        --arg it "$(sed -n 's/^issue_type=//p' "$f" | tail -1)" \
-        --arg tpl "$(sed -n 's/^is_template=//p' "$f" | tail -1)" \
-        --arg notes "$(sed -n 's/^notes=//p' "$f" | tr '\n' ' ')" \
-        --argjson meta "$(meta_of "$f")" --argjson deps "$deps" \
-    '{id: $id, status: $st, issue_type: (if $it == "" then "task" else $it end), notes: $notes, metadata: $meta, dependencies: $deps}
-     | if $as != "" then .assignee = $as else . end
-     | if $tpl == "true" then .is_template = true else . end'
+# rows <file>... — those beads' `bd list` rows, in the order given, built by one
+# jq: the far end of each edge by depends_on_id and its type as type, the last
+# status, assignee, issue_type and is_template line, every notes line, and the
+# m.<key> metadata.
+rows() {
+  local f c args=()
+  for f in "$@"; do
+    c=""; IFS= read -r -d '' c < "$f" || true
+    args+=("${f##*/}" "$c")
+  done
+  jq -nc 'def last_of($ls; $k): [$ls[] | select(startswith($k + "=")) | .[($k | length) + 1:]] | .[-1] // "";
+    [ $ARGS.positional as $p | range(0; $p | length; 2) as $i
+      | ($p[$i + 1] | split("\n")) as $ls
+      | last_of($ls; "issue_type") as $it | last_of($ls; "assignee") as $as
+      | {id: $p[$i], status: last_of($ls; "status"), issue_type: (if $it == "" then "task" else $it end),
+         notes: ([$ls[] | select(startswith("notes=")) | .[6:] + " "] | add // ""),
+         metadata: ([$ls[] | select(startswith("m.")) | .[2:] | select(length > 0)
+           | split("=") | {key: .[0], value: (.[1:] | join("="))}] | from_entries),
+         dependencies: [$ls[] | select(startswith("dep.")) | .[4:] | (index("=") // 0) as $e | select($e > 0)
+           | {issue_id: $p[$i], depends_on_id: .[:$e], type: .[$e + 1:]}]}
+      | if $as != "" then .assignee = $as else . end
+      | if last_of($ls; "is_template") == "true" then .is_template = true else . end ]' \
+    --args ${args[@]+"${args[@]}"}
 }
 # The blockers still holding a bead, by the rule real bd applies: a blocks
 # edge counts unless the bead it names is closed or pinned.
@@ -222,7 +235,7 @@ open_blockers() { # <file>
   while read -r o t; do
     [ "$t" = blocks ] || continue
     st=""; bf="$DB/$o"
-    [ -f "$bf" ] && st=$(sed -n 's/^status=//p' "$bf" | tail -1)
+    [ -f "$bf" ] && { val "$bf" status; st="$VAL"; }
     case "$st" in closed|pinned) ;; *) out="$out $o" ;; esac
   done < <(edges_of "$1")
   printf '%s' "${out# }"
@@ -250,28 +263,26 @@ if [ "$sub" = "dep" ]; then
     fi
     f="$DB/$id"
     [ -f "$f" ] || { printf '{"error":"no issues found matching the provided IDs","schema_version":1}\n'; exit 1; }
-    rows='[]'
+    fields=()
     while read -r b t; do
       [ "$t" = blocks ] || continue
       bf="$DB/$b"
       [ -f "$bf" ] || continue
-      row=$(jq -nc --arg id "$b" \
-        --arg st "$(sed -n 's/^status=//p' "$bf" | tail -1)" \
-        --arg it "$(sed -n 's/^issue_type=//p' "$bf" | tail -1)" \
-        --arg at "$(sed -n 's/^await_type=//p' "$bf" | tail -1)" \
-        --arg ai "$(sed -n 's/^await_id=//p' "$bf" | tail -1)" \
-        --arg as "$(sed -n 's/^assignee=//p' "$bf" | tail -1)" \
-        '{id: $id, status: $st, issue_type: (if $it == "" then "task" else $it end),
-          await_type: $at, await_id: $ai, assignee: $as, dependency_type: "blocks"}
-         | with_entries(select(.value != ""))')
-      rows=$(jq -nc --argjson r "$rows" --argjson x "$row" '$r + [$x]')
+      fields+=("$b")
+      for k in status issue_type await_type await_id assignee; do val "$bf" "$k"; fields+=("$VAL"); done
     done < <(if [ -n "$up" ]; then
-               for wf in "$DB"/*; do
-                 [ -f "$wf" ] || continue
-                 edges_of "$wf" | awk -v i="$id" -v w="${wf##*/}" '$1 == i && $2 == "blocks" { print w, "blocks" }'
-               done
+               # One awk reads the whole store, taking each edge line as
+               # edges_of does.
+               awk -v i="$id" '/^dep\.[^=]*=/ {
+                   s = substr($0, 5); e = index(s, "=")
+                   split(substr(s, 1, e - 1) " " substr(s, e + 1), f)
+                   if (f[1] == i && f[2] == "blocks") { w = FILENAME; sub(/.*\//, "", w); print w, "blocks" }
+                 }' "$DB"/*
              else edges_of "$f"; fi)
-    printf '%s\n' "$rows"
+    jq -nc '[ $ARGS.positional as $p | range(0; $p | length; 6) as $i
+      | {id: $p[$i], status: $p[$i + 1], issue_type: (if $p[$i + 2] == "" then "task" else $p[$i + 2] end),
+         await_type: $p[$i + 3], await_id: $p[$i + 4], assignee: $p[$i + 5], dependency_type: "blocks"}
+      | with_entries(select(.value != "")) ]' --args ${fields[@]+"${fields[@]}"}
     exit 0
   fi
   other="${1:-}"; shift || true
@@ -351,16 +362,16 @@ if [ "$sub" = "list" ]; then
   if [ -n "$ids" ] && { [ -n "${FAKE_BD_LIST_ID_FAIL:-}" ] || [ -e "$DB/.list-id-fails" ]; }; then
     echo "Error: simulated list failure" >&2; exit 1
   fi
-  rows='[]'
+  listed=()
   for bf in "$DB"/*; do
     [ -f "$bf" ] || continue
     bid="${bf##*/}"
-    bs=$(sed -n 's/^status=//p' "$bf" | tail -1)
+    [ -z "$ids" ] || case ",$ids," in *",$bid,"*) ;; *) continue ;; esac
+    val "$bf" status; bs="$VAL"
     if [ -n "$ids" ]; then
-      case ",$ids," in *",$bid,"*) ;; *) continue ;; esac
       [ -n "$all" ] || [ "$bs" != closed ] || continue
     elif [ -n "$parent" ]; then
-      [ "$(sed -n 's/^parent=//p' "$bf" | tail -1)" = "$parent" ] || continue
+      val "$bf" parent; [ "$VAL" = "$parent" ] || continue
       if [ -z "$st" ]; then
         case "$bs" in closed|pinned) continue ;; esac
       else
@@ -369,9 +380,10 @@ if [ "$sub" = "list" ]; then
     else
       case ",$st," in *",$bs,"*) ;; *) continue ;; esac
     fi
-    rows=$(jq -nc --argjson r "$rows" --argjson x "$(list_row "$bf")" '$r + [$x]')
+    listed+=("$bf")
   done
-  printf '%s\n' "$rows" | jq -c --argjson mf "$mf" \
+  if [ "$mf" = '[]' ]; then rows ${listed[@]+"${listed[@]}"}; exit 0; fi
+  rows ${listed[@]+"${listed[@]}"} | jq -c --argjson mf "$mf" \
     '[.[] | select(. as $row | all($mf[]; $row.metadata[.k] as $x | $x != null and ($x | tostring) == .v))]'
   exit 0
 fi
@@ -401,7 +413,7 @@ if [ "$sub" = "gate" ]; then
   while [ $# -gt 0 ]; do
     case "$1" in --reason) reason="$2"; shift 2 ;; *) shift ;; esac
   done
-  [ "$(sed -n 's/^status=//p' "$f" | tail -1)" = "closed" ] || printf 'status=closed\nreason=%s\n' "$reason" >> "$f"
+  val "$f" status; [ "$VAL" = "closed" ] || printf 'status=closed\nreason=%s\n' "$reason" >> "$f"
   echo "✓ Gate resolved: $id"
   exit 0
 fi
@@ -419,7 +431,7 @@ case "$sub" in
       [ -f "$DB/$o" ] || continue
       deps=$(jq -nc --argjson d "$deps" --arg o "$o" --arg t "$t" '$d + [{id: $o, dependency_type: $t}]')
     done < <(edges_of "$f")
-    jq -nc --argjson row "$(list_row "$f")" --argjson deps "$deps" '[$row | .dependencies = $deps]'
+    jq -nc --argjson rows "$(rows "$f")" --argjson deps "$deps" '[$rows[0] | .dependencies = $deps]'
     ;;
   update)
     # FAKE_UPDATE_LOG, when set, gets each update's bead id and arguments.
@@ -450,8 +462,8 @@ case "$sub" in
     # FAKE_BD_NOTE_FAIL fails an update that does not close, as a store that does
     # not answer fails it, which is not a guard's refusal.
     [ -n "$closing" ] || [ -z "${FAKE_BD_NOTE_FAIL:-}" ] || { echo "Error: simulated update failure" >&2; exit 1; }
-    cur_st="$(sed -n 's/^status=//p' "$f" | tail -1)"
-    cur_as="$(sed -n 's/^assignee=//p' "$f" | tail -1)"
+    val "$f" status; cur_st="$VAL"
+    val "$f" assignee; cur_as="$VAL"
     if { [ "$if_st" != "-" ] && [ "$if_st" != "$cur_st" ]; } || { [ "$if_as" != "-" ] && [ "$if_as" != "$cur_as" ]; }; then
       echo "Error: precondition failed for $id: status/assignee changed" >&2
       exit 13
@@ -463,7 +475,7 @@ case "$sub" in
       # FAKE_BD_CLOSE_REFUSE refuses it outright.
       [ -z "${FAKE_BD_CLOSE_REFUSE:-}" ] || { echo "cannot close issue assigned to other-agent (actor: someone-else)" >&2; exit 1; }
       if [ -n "${FAKE_BD_ENFORCE_CLOSE_GUARDS:-}" ]; then
-        [ "$(sed -n 's/^is_template=//p' "$f" | tail -1)" != "true" ] \
+        val "$f" is_template; [ "$VAL" != "true" ] \
           || { echo "Error: cannot close template $id" >&2; exit 1; }
         [ "$cur_st" != "pinned" ] \
           || { echo "Error: cannot close pinned issue $id (use --force to override)" >&2; exit 1; }
@@ -476,8 +488,9 @@ case "$sub" in
         exit 1
       fi
       for cf in "$DB"/*; do
-        [ -f "$cf" ] && [ "$(sed -n 's/^parent=//p' "$cf" | tail -1)" = "$id" ] || continue
-        case "$(sed -n 's/^status=//p' "$cf" | tail -1)" in closed|pinned) ;; *)
+        val "$cf" parent; [ "$VAL" = "$id" ] || continue
+        val "$cf" status
+        case "$VAL" in closed|pinned) ;; *)
           echo "cannot close $id: it has open children (use --force to override)" >&2; exit 1 ;; esac
       done
     fi
