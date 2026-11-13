@@ -249,16 +249,21 @@ with only its writer behind it.
 A memory directory is the directory of note files Claude Code keeps for one
 project (section 7). It is not a bead store.
 
-For each memory directory, the run keeps two things in the pack's state
-directory, `<city>/.gc/runtime/packs/gc-toolkit/memory-intake/<directory key>/`,
-where `<directory key>` is the directory's real path with each `/` and `.` as
-`-`:
+For each memory directory, the run keeps these in the pack's state directory,
+`<city>/.gc/runtime/packs/gc-toolkit/memory-intake/<directory key>/`:
 
 - **The list**, one row for each note or entry the judge has read and kept: its
   name, the hash the judge read, the date it was judged, and what it waits on,
   its pattern or the bead in another rig's store.
 - **Each removed note's text**, as it was when removed, filed under its name and
   hash. Nothing prunes these.
+- **The directory's real path**, so a person can tell which directory a key
+  belongs to.
+
+`<directory key>` is the SHA-256 of the directory's real path, in hex, so two
+directories share a key only when they are one directory. A key that replaces
+characters would merge directories: with each `/` and `.` as `-`, `/x/a.b`,
+`/x/a-b` and `/x-a/b` share one.
 
 A note is due when the list does not hold it at its current hash, so the list is
 all the next run needs of the last. The run keeps no copy of the directory and
@@ -282,8 +287,9 @@ Other writers and other runs:
 - A link inside a whole note's own text stays as written.
 - An edit to the index or a collection note is written only if the file is
   unchanged since the run read it. Otherwise the run reads it again.
-- Two distiller runs can overlap, so the script holds a lock on each directory
-  while it writes the list, removes notes and edits the index.
+- Two distiller runs can overlap, so the script holds a lock in each
+  directory's state directory while it writes the list, removes notes and edits
+  the index.
 
 ## 5. Which notes a run reads
 
@@ -460,7 +466,7 @@ that tk-1tfzr71.21 retires, which the epic's boundaries name.
 
 | Unit | What it builds | Waits on |
 |---|---|---|
-| tk-zlot608.5 | `assets/scripts/memory-intake.sh` and its suite: verbs that place each memory directory as Claude Code does, list the due notes, record each judged note on the list, remove a note under the hash, index and collection-note checks while keeping its text, end a note's wait once its pattern or bead is done and its fix has landed, rewrite the guidance block, and report a place the run cannot resolve. The suite covers each input that moves a directory or turns memory on or off, a shared directory, an absent directory, each case the run cannot resolve, a note changed since it was judged, and a follow-up that landed on an effort's branch. `mol-feedback-distiller`'s `read-memory` step, its `memory_notes_per_run` variable and the clauses the other steps gain, within the step-size bound. The `learning-distill` skill's memory section. The guidance file. The docs this makes stale: the intake and promotion path in docs/feedback-learning.md, the rows in docs/component-model.md §4 for the distiller and the script, the feedback paragraph in docs/built-once-target.md, and the Debt entry in docs/architecture.md, which it removes. | this design's merge (tk-zlot608.2), and the pattern change it builds on (tk-ltcv43q, PR #1486) |
+| tk-zlot608.5 | `assets/scripts/memory-intake.sh` and its suite: verbs that place each memory directory as Claude Code does, keep each directory's list under the SHA-256 of its real path with that path written beside it, list the due notes, record each judged note on the list, remove a note under the hash, index and collection-note checks while keeping its text, end a note's wait once its pattern or bead is done and its fix has landed, rewrite the guidance block, and report a place the run cannot resolve. The suite covers each input that moves a directory or turns memory on or off, a shared directory, an absent directory, each case the run cannot resolve, a note changed since it was judged, and a follow-up that landed on an effort's branch. It also covers directories whose real paths a character conversion merges, such as `/x/a.b`, `/x/a-b` and `/x-a/b`, each holding a note of the same name and text. `mol-feedback-distiller`'s `read-memory` step, its `memory_notes_per_run` variable and the clauses the other steps gain, within the step-size bound. The `learning-distill` skill's memory section. The guidance file. The docs this makes stale: the intake and promotion path in docs/feedback-learning.md, the rows in docs/component-model.md §4 for the distiller and the script, the feedback paragraph in docs/built-once-target.md, and the Debt entry in docs/architecture.md, which it removes. | this design's merge (tk-zlot608.2), and the pattern change it builds on (tk-ltcv43q, PR #1486) |
 
 One unit, because the step with no script, or the script with no step, does
 nothing on its own.
