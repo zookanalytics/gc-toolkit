@@ -180,6 +180,7 @@ mkdir -p "$TMP/bin" "$TMP/store/b" "$TMP/rig/assets/scripts" "$TMP/cwd"
 # [{type, on}] on the bead the edge starts from. Every write is appended to
 # $CALLS. A guarded update whose --if-assignee or --if-status misses exits 13
 # and writes nothing, as bd does. Hooks: LIST_DOWN fails `bd list`;
+# LIST_DOWN_ID=<id> fails a `bd list` whose --id names that bead;
 # SHOW_DOWN=<id> fails `bd show` of that bead; SHOW_DOWN_SECOND=<id> answers the
 # first `bd show` of that bead and fails the next; DEP_UP_DOWN=<gate> fails the
 # listing of the beads that wait on that gate; GATE_STUCK=<gate> makes its
@@ -217,7 +218,10 @@ case "$1 ${2:-}" in
   "bd list")
     [ -n "${LIST_DOWN:-}" ] && { echo "bd list: data plane down" >&2; exit 1; }
     _id=""; _p=""; for a in "$@"; do [ "$_p" = "--id" ] && _id="$a"; _p="$a"; done
-    if [ -n "$_id" ] && [ -f "$B/$_id.json" ]; then jq -c -n --argjson r "$(list_row "$_id")" '[$r]'; else printf '[]\n'; fi ;;
+    case ",$_id," in *",${LIST_DOWN_ID:-}",*) [ -z "${LIST_DOWN_ID:-}" ] || { echo "bd list: data plane down" >&2; exit 1; } ;; esac
+    if [ -n "$_id" ]; then
+      for i in $(printf '%s' "$_id" | tr ',' ' '); do [ ! -f "$B/$i.json" ] || list_row "$i"; done | jq -sc '.'
+    else printf '[]\n'; fi ;;
   "bd dep")
     case "$3" in
       list)
@@ -2149,6 +2153,32 @@ run_signoff --conversation tk-conv --outcome x --ruled yes --ruling "land it onc
 eq "$RC" 2 "(STAY-HOLDS-MERGE-ANCHOR) a stay on the landing of the PR whose merge the conversation holds exits 2"
 has "$OUT" "gc bd dep remove tk-anc tk-conv" "(STAY-HOLDS-MERGE-ANCHOR) …naming the lift of that hold"
 eq "$(writes)" 0 "(STAY-HOLDS-MERGE-ANCHOR) …and writes nothing"
+# Work that waits on that PR's anchor waits on the conversation through it, and
+# so does a child of that work, because bd's cycle check walks blocks,
+# conditional-blocks and parent-child edges: bd would refuse the stay's edge as
+# a cycle, after the headline and the gate answers. So the stay is refused
+# before any write, naming the hold to lift. A path through an edge that check
+# does not walk, such as discovered-from, holds nothing.
+bead tk-follow; edge tk-follow blocks tk-anc
+FOLLOW=(--conversation tk-conv --outcome x --ruled yes --ruling "land the follow-up once the PR is in" --no-rework --close-brief "$BRIEF" --stay "x")
+run_signoff "${FOLLOW[@]}" --waiting-on tk-follow
+eq "$RC" 2 "(STAY-HOLDS-MERGE-THROUGH) a stay on work that waits on the PR whose merge the conversation holds exits 2"
+has "$OUT" "tk-follow already waits on tk-conv through tk-anc" "(STAY-HOLDS-MERGE-THROUGH) …naming the bead that holds the conversation"
+has "$OUT" "gc bd dep remove tk-anc tk-conv" "(STAY-HOLDS-MERGE-THROUGH) …and the lift of that hold"
+eq "$(writes)" 0 "(STAY-HOLDS-MERGE-THROUGH) …and writes nothing"
+bead tk-sub; edge tk-sub parent-child tk-follow
+run_signoff "${FOLLOW[@]}" --waiting-on tk-sub
+eq "$RC" 2 "(STAY-HOLDS-MERGE-CHILD) a stay on a child of that work exits 2"
+has "$OUT" "tk-sub already waits on tk-conv through tk-anc" "(STAY-HOLDS-MERGE-CHILD) …through the parent-child edge"
+eq "$(writes)" 0 "(STAY-HOLDS-MERGE-CHILD) …and writes nothing"
+LIST_DOWN_ID=tk-follow run_signoff "${FOLLOW[@]}" --waiting-on tk-follow
+eq "$RC" 1 "(STAY-HOLDS-MERGE-UNREAD) a stay whose walk does not read exits 1"
+has "$OUT" "could not be read to tell whether one of them waits on conversation tk-conv" "(STAY-HOLDS-MERGE-UNREAD) …saying so"
+eq "$(writes)" 0 "(STAY-HOLDS-MERGE-UNREAD) …and writes nothing"
+bead tk-found; edge tk-found discovered-from tk-anc
+run_signoff "${FOLLOW[@]}" --waiting-on tk-found
+hasnt "$OUT" "already waits on" "(STAY-HOLDS-MERGE-OTHER-EDGE) a path through an edge bd's cycle check does not walk refuses nothing"
+has "$(cat "$CALLS")" "bd dep add tk-conv tk-found --type blocks" "(STAY-HOLDS-MERGE-OTHER-EDGE) …and the stay waits on that work"
 closer_case; setf tk-conv assignee human; setf tk-conv status open
 run_signoff --conversation tk-conv --outcome x --ruled yes --ruling "build the fix" --waiting-on tk-work --close-brief "$BRIEF" --stay "x"
 eq "$RC" 2 "(STAY-QUEUED) a conversation in the operator's queue has no sitting to stay"

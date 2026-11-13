@@ -86,8 +86,8 @@ takes that action.
      departs. It passes and fails nothing: the work's checks give the verdicts,
      and the subject closes as it would after a hand-off. A sitting can stay
      only for work other than its subject, in its conversation's own store,
-     and for the landing of the PR whose merge its conversation holds only
-     once that hold is lifted.
+     and for the landing of the PR whose merge its conversation holds, or
+     work that waits on it, only once that hold is lifted.
 
 ## Actions
 

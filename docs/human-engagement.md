@@ -1313,9 +1313,12 @@ alias, which drops the claim. Gas City does the rest with what it already has
   subject itself, sent on a formula or taking its recommendation: the
   conversation tracks the subject, and bd keeps one edge from a bead onto
   another, so the sign-off refuses a wait on the subject before any write.
-  Nor does it stay for the PR whose merge its conversation holds, since that
-  PR's anchor already waits on the conversation and neither could close: the
-  sign-off refuses that stay until the sitting lifts the hold.
+  Nor does it stay for the PR whose merge its conversation holds, or for work
+  that waits on that PR, itself or through other beads, since that PR's anchor
+  already waits on the conversation and neither could close. bd would refuse
+  the stay's edge as a cycle, so the sign-off walks the edges bd's cycle check
+  walks, blocks, conditional-blocks and parent-child, and refuses that stay
+  before any write until the sitting lifts the hold.
 
 Gas City's `gc session wait <session> --on-beads <ids> --sleep` also sleeps a
 session until a bead closes. A sitting does not use it, because the attach that

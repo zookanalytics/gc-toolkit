@@ -46,9 +46,10 @@ the ruling sends the subject or takes its recommendation, because the
 conversation tracks the subject and bd keeps one edge from a bead onto another.
 Either sitting ends at the hand-off (`converse-settle`) and says why, as does
 one whose context is too full to compare the work once it lands. It also refuses a stay for the landing of the
-PR whose merge this conversation holds: when the operator wants that PR to
-land first, lift the hold (`converse-hold`) and run the stay again, and
-otherwise end at the hand-off.
+PR whose merge this conversation holds, and for work that waits on that PR,
+itself or through other beads: when the operator wants that PR to land first,
+lift the hold (`converse-hold`) and run the stay again, and otherwise end at
+the hand-off.
 
 Then record and post the hand-back. It opens with where the subject stands,
 and says the sitting stays until the work lands and comes back then to compare

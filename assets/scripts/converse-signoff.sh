@@ -911,16 +911,55 @@ take_recommendation() {
   stopped "the recommendation was not taken: gc-helm.sh accept exited $rc, and its output above says why${open:+, and its gate $open is still open}. The conversation is not closed. Repair what Accept names, then re-run, which finishes an acceptance Accept left unfinished without dispatching it twice"
 }
 
+# waits_on_conversation <bead> — the bead whose edge onto the conversation ends
+# a path from <bead> to it, a path bd would close into a cycle with the
+# conversation's edge onto <bead>, and refuse. bd's cycle check walks every
+# blocks, conditional-blocks and parent-child edge from <bead>, whatever the
+# status of the beads it passes (beads 7ef2fd05e,
+# issueops.cycleReachabilityQuery), and only its own store's edges, so a bead
+# in another store ends a path. The walk reads one level at a time through
+# `gc bd list --id`. Prints that bead and returns 0 when a path reaches the
+# conversation, 1 when none does, 2 when a level did not read as the beads it
+# asked for, and 3 when the walk went past 50 levels, the depth bd's dep tree
+# stops at.
+waits_on_conversation() {
+  local frontier="$1" seen=" $1 " level=0 json out
+  while [ -n "$frontier" ]; do
+    level=$((level + 1))
+    [ "$level" -le 50 ] || return 3
+    json=$(gc bd list --id "$(printf '%s' "$frontier" | tr ' ' ',')" --all --json 2>/dev/null) || return 2
+    out=$(printf '%s\n' "$json" | grep -av '^gc bd:' | scrub | jq -r --arg want "$frontier" --arg seen "$seen" \
+        --arg c "$CONVERSATION" --arg p "${CONVERSATION%%-*}-" '
+      if type != "array" or ([ .[] | (.id // "") | tostring ] | sort) != ($want | split(" ") | sort)
+      then error("not the beads asked for") else . end
+      | [ .[] | (.id | tostring) as $from | .dependencies[]? | objects
+          | select(((.type // .dependency_type) // "") as $t
+              | $t == "blocks" or $t == "conditional-blocks" or $t == "parent-child")
+          | {from: $from, on: ((.depends_on_id // "") | tostring)}
+          | select(.on | startswith($p)) ] as $edges
+      | ([ $edges[] | select(.on == $c) | .from ] | first) as $hit
+      | if $hit != null then "HIT " + $hit
+        else "NEXT " + ([ $edges[] | .on | select(. as $o | $seen | contains(" " + $o + " ") | not) ] | unique | join(" "))
+        end' 2>/dev/null) || return 2
+    case "$out" in
+      "HIT "*) printf '%s' "${out#HIT }"; return 0 ;;
+      "NEXT "*) frontier="${out#NEXT }"; seen="$seen$frontier " ;;
+      *) return 2 ;;
+    esac
+  done
+  return 1
+}
+
 # The work a sitting that stays waits on: each --waiting-on bead that is no
 # gate, read now, and the rework step 1 files. A stay keeps the conversation for
 # the sitting that holds it, so one in the operator's queue has none to stay.
 # An edge from the conversation onto a bead in another store holds nothing, and
 # a conversation that waited on nothing would read as ready work at once and
 # wake its sitting before the work landed, so each bead carries the
-# conversation's own prefix. A bead that waits on the conversation already, as
-# the anchor of an open PR whose merge the conversation holds does, would close
-# a cycle that bd refuses, and neither bead could close, so it is refused here,
-# before any write.
+# conversation's own prefix. A bead that waits on the conversation already,
+# itself or through the beads it waits on, as the anchor of an open PR whose
+# merge the conversation holds does, would close a cycle that bd refuses, and
+# neither bead could close, so it is refused here, before any write.
 STAY_ON=""
 if [ -n "$STAY" ]; then
   if [ "$HOLDER" = human ] || { [ "$CONV_STATUS" != in_progress ] && [ "$CONV_STATUS" != open ]; }; then
@@ -933,10 +972,20 @@ if [ -n "$STAY" ]; then
     WROW=$(show_row "$w") \
       || stopped "$w, which this sitting would stay for, could not be read to tell whether it is work or a gate; nothing was written"
     printf '%s' "$WROW" | jq -e '(.issue_type // "") == "gate"' >/dev/null 2>&1 && continue
-    if printf '%s' "$WROW" | jq -e --arg c "$CONVERSATION" \
-         'any(.dependencies[]? | objects; ((.dependency_type // .type) // "") == "blocks" and ((.depends_on_id // .id) // "") == $c)' >/dev/null 2>&1; then
-      die "--stay would make conversation $CONVERSATION wait on $w, and $w already waits on $CONVERSATION, as the anchor of an open PR whose merge the conversation holds does, so neither could close; nothing was written. When the operator wants that PR to land first, lift the hold (gc bd dep remove $w $CONVERSATION, the converse-hold skill) and re-run; otherwise sign off without --stay"
-    fi
+    HOLDS_RC=0
+    HOLDS_IT=$(waits_on_conversation "$w") || HOLDS_RC=$?
+    case "$HOLDS_RC" in
+      0)
+        if [ "$HOLDS_IT" = "$w" ]; then
+          THROUGH="$w already waits on $CONVERSATION"
+        else
+          THROUGH="$w already waits on $CONVERSATION through $HOLDS_IT, which waits on it"
+        fi
+        die "--stay would make conversation $CONVERSATION wait on $w, and $THROUGH, as the anchor of an open PR whose merge the conversation holds does, so neither could close; nothing was written. When the operator wants that PR to land first, lift the hold (gc bd dep remove $HOLDS_IT $CONVERSATION, the converse-hold skill) and re-run; otherwise sign off without --stay" ;;
+      1) ;;
+      3) stopped "the beads $w waits on lead more than 50 levels deep, so the sign-off could not tell whether one of them waits on conversation $CONVERSATION, which would make bd refuse the stay's edge; nothing was written. Sign off without --stay" ;;
+      *) stopped "the beads $w waits on could not be read to tell whether one of them waits on conversation $CONVERSATION, which would make bd refuse the stay's edge; nothing was written" ;;
+    esac
     STAY_ON="${STAY_ON:+$STAY_ON }$w"
   done
   [ -n "$STAY_ON" ] || [ "$PR_ANSWER" = rework ] \
