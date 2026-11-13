@@ -1295,10 +1295,12 @@ alias, which drops the claim. Gas City does the rest with what it already has
   changes nothing: the claim answers `drain`, the entry finds the conversation
   open with its work open and answers `waiting`, which keeps the sitting, and
   it sleeps again once the tab detaches. `gc-helm engage` attaches an asleep sitting at once.
-- **What reads it.** The board lists a conversation that waits on work as no
-  ask: its row reads "Waits on" the work, in the Queued group, until the work
-  closes. A dismiss closes it as it closes any conversation, and the stop it
-  asks for leaves an asleep sitting asleep.
+- **What reads it.** The board lists a conversation its sitting stays in, open
+  under the sitting and held by its work, as no ask: its row reads "Waits on"
+  the work, in the Queued group, until the work closes. One the sitting has
+  claimed to hold is an ask, whatever edge an earlier stay left on it. A
+  dismiss closes it as it closes any conversation, and the stop it asks for
+  leaves an asleep sitting asleep.
 - **What the record keeps.** The subject's wait, its close brief and its
   validating closer's arm are written at the stay, as at a hand-off, so the
   subject's next steps stand whether or not the sitting comes back. A sitting

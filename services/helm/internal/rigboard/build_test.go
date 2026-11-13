@@ -588,3 +588,41 @@ func TestAConversationAnsweringTwoQuestions(t *testing.T) {
 		}
 	}
 }
+
+// TestAConversationThatStaysAndOneThatHolds holds the board to the stay's
+// record. A conversation left open under its sitting over the work it sent
+// waits for that work and is no need. One its sitting claimed back to hold,
+// keeping the edge an earlier stay left onto work still out, owes the operator
+// an answer, so it is on Needs you.
+func TestAConversationThatStaysAndOneThatHolds(t *testing.T) {
+	for _, c := range []struct {
+		name, status string
+		need         bool
+		group        Group
+		signal       string
+	}{
+		{name: "a stay", status: "open", group: GroupQueued, signal: "Waits on tk-w"},
+		{name: "a hold over an earlier stay's work", status: "in_progress", need: true, group: GroupWaitingOnYou, signal: "In conversation"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			g := graph()
+			g.open = append(g.open,
+				bead{ID: "tk-w", Title: "the work it sent", Status: "open", Priority: 2, IssueType: "task", CreatedAt: "2026-01-11"},
+				bead{ID: "tk-c", Title: "talk it through", Status: c.status, Priority: 1, IssueType: "task",
+					Assignee: "gc-toolkit/gc-toolkit.tk-c", CreatedAt: "2026-01-11",
+					Edges: []listing.Edge{{ID: "tk-b.1", Type: "tracks"}, {ID: "tk-w", Type: "blocks"}}},
+			)
+			g.holds["tk-w"] = waits.Holds{ID: "tk-w", Status: waits.Clear}
+			g.holds["tk-c"] = waits.Holds{ID: "tk-c", Status: waits.Blocked,
+				Waits: []waits.Wait{{ID: "tk-w", Type: "blocks", Title: "the work it sent", Status: "open", IssueType: "task"}}}
+			doc := boardOf(t, g)
+			listed := slices.ContainsFunc(doc.NeedsYou.Needs, func(n Need) bool { return n.ID == "tk-c" })
+			if listed != c.need {
+				t.Errorf("Needs you lists tk-c: %v, want %v", listed, c.need)
+			}
+			if r := doc.Rows["tk-c"]; r.Group != c.group || r.Signal != c.signal {
+				t.Errorf("tk-c reads %q in %q, want %q in %q", r.Signal, r.Group, c.signal, c.group)
+			}
+		})
+	}
+}
