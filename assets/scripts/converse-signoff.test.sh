@@ -75,7 +75,14 @@
 #             is filed, a record the store refuses stops the sign-off before
 #             the headline, a recorded rework that does not read stops a re-run
 #             before any write, and a re-run once it has closed, with the PR
-#             still open, files no second rework
+#             still open, files no second rework; a re-run whose record names
+#             the PR and no rework, after an attempt whose record of its rework
+#             the store refused, adopts and records that rework while it is
+#             open, and once it has closed is refused before any write, a
+#             stay's first line included, naming it, while a closed rework
+#             another ruling's record names or one on another PR refuses
+#             nothing, an open one beside a closed one is adopted, and a read
+#             of the conversation's reworks that fails stops the re-run
 #   (ANSWER*) a ruling on a turn that does not sign off answers only the gates
 #             it names, after the same rework or retirement, and leaves the
 #             conversation open for the sign-off
@@ -182,8 +189,11 @@ mkdir -p "$TMP/bin" "$TMP/store/b" "$TMP/rig/assets/scripts" "$TMP/cwd"
 # $CALLS. A guarded update whose --if-assignee or --if-status misses exits 13
 # and writes nothing, as bd does. `bd list` leaves out a gate, a template, an
 # agent, role or message bead and a wisp unless the call asks for that kind, as
-# bd does. Hooks: LIST_DOWN fails `bd list`;
+# bd does. A `bd list` with --metadata-field <key>=<value> answers each bead
+# whose metadata carries it, open ones alone unless --all or --status asks for
+# more, as bd does. Hooks: LIST_DOWN fails `bd list`;
 # LIST_DOWN_ID=<id> fails a `bd list` whose --id names that bead;
+# LIST_META_DOWN fails a `bd list` by --metadata-field;
 # SHOW_DOWN=<id> fails `bd show` of that bead; SHOW_DOWN_SECOND=<id> answers the
 # first `bd show` of that bead and fails the next; DEP_UP_DOWN=<gate> fails the
 # listing of the beads that wait on that gate; GATE_STUCK=<gate> makes its
@@ -220,7 +230,12 @@ case "$1 ${2:-}" in
     else printf '{"error":"no issues found matching the provided IDs"}\n'; exit 1; fi ;;
   "bd list")
     [ -n "${LIST_DOWN:-}" ] && { echo "bd list: data plane down" >&2; exit 1; }
-    _id=""; _p=""; for a in "$@"; do [ "$_p" = "--id" ] && _id="$a"; _p="$a"; done
+    _id=""; _mf=""; _st=""; _all=""; _p=""
+    for a in "$@"; do
+      [ "$_p" = "--id" ] && _id="$a"; [ "$_p" = "--metadata-field" ] && _mf="$a"; [ "$_p" = "--status" ] && _st="$a"
+      case "$a" in --all) _all=1 ;; --status=*) _st="${a#--status=}" ;; esac
+      _p="$a"
+    done
     case ",$_id," in *",${LIST_DOWN_ID:-}",*) [ -z "${LIST_DOWN_ID:-}" ] || { echo "bd list: data plane down" >&2; exit 1; } ;; esac
     if [ -n "$_id" ]; then
       for i in $(printf '%s' "$_id" | tr ',' ' '); do [ ! -f "$B/$i.json" ] || list_row "$i"; done \
@@ -229,6 +244,13 @@ case "$1 ${2:-}" in
               and (((.is_template // false) | tostring) != "true" or asked("templates"))
               and (((.issue_type // "") | IN("agent", "role", "message") | not) or asked("infra"))
               and (((.ephemeral // false) | tostring) != "true" or asked("ephemeral") or asked("infra"))) ]'
+    elif [ -n "$_mf" ]; then
+      [ -n "${LIST_META_DOWN:-}" ] && { echo "bd list: data plane down" >&2; exit 1; }
+      for i in $(all_ids); do case "$i" in *.comments) ;; *) list_row "$i" ;; esac; done \
+        | jq -sc --arg k "${_mf%%=*}" --arg v "${_mf#*=}" --arg all "$_all" --arg st "$_st" '
+            [ .[] | select((((.metadata // {})[$k] // "") | tostring) == $v)
+                  | select($all == "1" or ((.status // "") as $s
+                      | if $st == "" then $s != "closed" else any(($st | split(","))[]; . == $s) end)) ]'
     else printf '[]\n'; fi ;;
   "bd dep")
     case "$3" in
@@ -1158,6 +1180,53 @@ SHOW_DOWN=tk-child run_signoff --conversation tk-conv --outcome "settled" "${RUL
 eq "$RC" 1 "(REWORK-RECORD-UNREAD) a re-run whose recorded rework does not read exits 1"
 has "$OUT" "could not be read to tell whether it has closed" "(REWORK-RECORD-UNREAD) …saying so"
 eq "$(writes)" 0 "(REWORK-RECORD-UNREAD) …writing nothing"
+# An attempt that stops after its rework is filed and before the record names
+# it leaves the record naming the PR alone. Run again while that rework is open,
+# the writer adopts it and the record names it. Run again once it has closed,
+# the writer would file a second one, so the re-run is refused before any
+# write, and the sitting holds.
+acceptance; setm tk-anc merge_result pull_request
+REFUSE_UPDATE_MATCH='"child":"tk-child"' run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
+eq "$RC" 1 "(REWORK-WINDOW) an attempt whose rework's record the store refuses exits 1"
+eq "$(meta tk-conv gc.ruling_consequence | jq -c '.["ruled: fix the retry before the merge"]')" '{"act":"rework","anchor":"tk-anc"}' "(REWORK-WINDOW) …leaving the record naming the PR and no rework"
+: > "$CALLS"
+run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
+eq "$RC" 0 "(REWORK-WINDOW-OPEN) the same sign-off, run while that rework is open, exits 0"
+has "$(cat "$CALLS")" "converse-rework --anchor tk-anc --ruling-bead tk-conv" "(REWORK-WINDOW-OPEN) …sending the ruling to the writer, which adopts the open rework"
+eq "$(meta tk-conv gc.ruling_consequence | jq -c '.["ruled: fix the retry before the merge"]')" '{"act":"rework","anchor":"tk-anc","child":"tk-child"}' "(REWORK-WINDOW-OPEN) …and recording it"
+acceptance; setm tk-anc merge_result pull_request
+REFUSE_UPDATE_MATCH='"child":"tk-child"' run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
+setf tk-child status closed
+: > "$CALLS"
+run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
+eq "$RC" 2 "(REWORK-WINDOW-CLOSED) the same sign-off, run once that rework has closed, exits 2"
+has "$OUT" "has a closed rework on tk-anc that no recorded ruling names (tk-child)" "(REWORK-WINDOW-CLOSED) …naming the rework the stopped attempt may have filed"
+has "$OUT" "hold instead (converse-hold)" "(REWORK-WINDOW-CLOSED) …and sending the sitting to hold"
+eq "$(writes)" 0 "(REWORK-WINDOW-CLOSED) …filing no second rework and writing nothing"
+eq "$(field tk-conv status)" "in_progress" "(REWORK-WINDOW-CLOSED) …so the conversation stays held"
+# The same refusal for a stay, before its first write.
+REFUSE_UPDATE_MATCH='"child":"tk-child"' run_signoff --conversation tk-conv --outcome "staying — the retry is reworked" --ruled yes --ruling "fix the retry before the merge" --rework --no-wait --stay "the retry backs off"
+eq "$RC/$(writes)" "2/0" "(REWORK-WINDOW-STAY) a stay re-run over that closed rework is refused, writing nothing, its staying: line included"
+# A read of the conversation's reworks that fails stops the re-run.
+LIST_META_DOWN=1 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
+eq "$RC/$(writes)" "1/0" "(REWORK-WINDOW-UNREAD) a re-run whose reworks do not read stops, writing nothing"
+has "$OUT" "could not be read, to tell whether an earlier attempt of this ruling filed one on tk-anc" "(REWORK-WINDOW-UNREAD) …saying so"
+# A closed rework another ruling's record names, or one on another PR, is no
+# window, and an open one beside a closed one is adopted.
+acceptance; setm tk-anc merge_result pull_request
+bead tk-old task closed; setm tk-old task_kind rework; setm tk-old anchor_bead tk-anc; setm tk-old source_ruling_bead tk-conv
+bead tk-else task closed; setm tk-else task_kind rework; setm tk-else anchor_bead tk-pr2; setm tk-else source_ruling_bead tk-conv
+setm tk-conv gc.ruling_consequence '{"ruled: an earlier ruling":{"act":"rework","anchor":"tk-anc","child":"tk-old"},"ruled: fix the retry before the merge":{"act":"rework","anchor":"tk-anc"}}'
+run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
+eq "$RC" 0 "(REWORK-WINDOW-NAMED) a re-run beside a closed rework another ruling records, and one on another PR, exits 0"
+has "$(cat "$CALLS")" "converse-rework --anchor tk-anc --ruling-bead tk-conv" "(REWORK-WINDOW-NAMED) …filing its rework"
+acceptance; setm tk-anc merge_result pull_request
+bead tk-old task closed; setm tk-old task_kind rework; setm tk-old anchor_bead tk-anc; setm tk-old source_ruling_bead tk-conv
+bead tk-child task open; setm tk-child task_kind rework; setm tk-child anchor_bead tk-anc; setm tk-child source_ruling_bead tk-conv
+setm tk-conv gc.ruling_consequence '{"ruled: fix the retry before the merge":{"act":"rework","anchor":"tk-anc"}}'
+run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
+eq "$RC" 0 "(REWORK-WINDOW-LIVE) a re-run with an open rework beside a closed one no record names exits 0"
+eq "$(meta tk-conv gc.ruling_consequence | jq -c '.["ruled: fix the retry before the merge"]')" '{"act":"rework","anchor":"tk-anc","child":"tk-child"}' "(REWORK-WINDOW-LIVE) …adopting and recording the open one"
 acceptance; setm tk-anc merge_result pull_request
 REWORK_FAIL=1 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
 eq "$RC" 1 "(REWORK-FAIL) a rework that does not file exits 1"

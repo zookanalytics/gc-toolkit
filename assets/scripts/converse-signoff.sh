@@ -191,7 +191,12 @@
 #     The record also names the child a --rework filed, written once
 #     converse-rework.sh reports it, and a re-run that finds that child closed
 #     files no second rework and supersedes no review again: the ruling's
-#     rework is done, and a stay waits on that child.
+#     rework is done, and a stay waits on that child. A re-run whose record
+#     names the PR and no child, after an attempt that stopped before its
+#     child was recorded, adopts an open rework of this conversation on that
+#     PR and records it, and is refused before any write while a closed one
+#     that no recorded answer names stands, since that attempt may have filed
+#     it.
 #   --pr-anchor <bead> names the PR --rework or --retire acts on when the
 #     ruling reaches more than one, which it requires; every other one the
 #     ruling reaches stands. A conversation owns one live rework child, so a
@@ -268,7 +273,9 @@
 #   form <key>=<value>, or a ruling that leaves the subject waiting on work its
 #   closer would check with no --close-brief, a --close-brief where no closer
 #   is armed, a subject waiting on work in the city's own store, or a
-#   --waiting-on that names the subject itself.
+#   --waiting-on that names the subject itself, or a re-run of a --rework
+#   whose record names the PR and no rework while a closed rework of this
+#   conversation on that PR that no recorded answer names stands.
 set -u
 
 # >>> control-char-scrub
@@ -609,8 +616,9 @@ fi
 # files nothing and supersedes nothing, and a stay waits on that child, which
 # returns it at once. A stop after the child is filed and before its record
 # lands leaves the record without it, and the re-run then adopts the child
-# while it is live. The child's writer, rework-child.sh, is retired by the
-# deletion plan, so it gains no record of the ruling.
+# while it is live, and the check after in_target_rig below refuses the re-run
+# once that child has closed. The child's writer, rework-child.sh, is retired
+# by the deletion plan, so it gains no record of the ruling.
 CONSEQUENCE_JQ='def consequences: ((.metadata // {})["gc.ruling_consequence"] // {})
   | (if type == "string" then (fromjson? // {}) else . end) | if type == "object" then . else {} end;'
 RECORDED_ON=""
@@ -679,6 +687,32 @@ fi
 # in_target_rig <cmd> [args...] — run <cmd> in the rig of the PR the
 # consequence acts on.
 in_target_rig() { ( cd "$TARGET_PATH" && GC_RIG="$TARGET_RIG" GC_RIG_ROOT="$TARGET_PATH" "$@" ); }
+# A re-run of a --rework ruling whose record names the PR and no rework comes
+# after an attempt that stopped between those two records: before
+# converse-rework.sh filed a rework, or after it filed one whose record never
+# landed, as when that writer's supersede failed or the store refused the
+# record. The writer adopts only a live rework (rework-child.sh), so a rework
+# that attempt filed and that has since closed would be filed a second time,
+# block the PR again and send the reworked branch's reviews back to unreviewed.
+# Nothing tells such a rework from one an unrecorded earlier ruling filed, so
+# a closed rework of this conversation on that PR that no recorded answer names
+# refuses the re-run, before any write, and the sitting holds to ask the
+# operator. A live one is adopted and recorded, and none means the attempt
+# filed none. The record is written after the writer reports its child, since
+# the writer, which the deletion plan retires, names the child only then.
+if [ "$PR_ANSWER" = rework ] && [ -n "$RECORDED_ON" ] && [ "$PR_TARGET" = "$RECORDED_ON" ] \
+   && [ -z "$RECORDED_CHILD" ] && [ -z "$TARGET_CLOSED" ]; then
+  REWORKS=$(in_target_rig bd_list --metadata-field "source_ruling_bead=$CONVERSATION" --all) \
+    || stopped "the reworks conversation $CONVERSATION has filed could not be read, to tell whether an earlier attempt of this ruling filed one on $PR_TARGET that has closed since; nothing was written"
+  NAMED=$(printf '%s' "$CONV_ROW" | jq -c "$CONSEQUENCE_JQ"'[ consequences[] | objects | (.child // "") | tostring | select(. != "") ]' 2>/dev/null)
+  UNNAMED=$(printf '%s' "$REWORKS" | jq -r --arg a "$PR_TARGET" --argjson named "${NAMED:-[]}" '
+      [ .[]? | select(((.metadata.anchor_bead // "") | tostring) as $on | $on == $a or $on == "") ] as $on_pr
+      | if any($on_pr[]; ((.status // "") | ascii_downcase) != "closed") then ""
+        else [ $on_pr[] | .id | select(. as $id | $named | any(. == $id) | not) ] | join(" ") end' 2>/dev/null) \
+    || stopped "the reworks conversation $CONVERSATION has filed did not read as a list; nothing was written"
+  [ -z "$UNNAMED" ] \
+    || die "an earlier attempt of this ruling recorded $PR_TARGET as the PR its --rework acts on and stopped before it recorded a rework, and conversation $CONVERSATION has a closed rework on $PR_TARGET that no recorded ruling names ($UNNAMED). That attempt may have filed it, and the writer adopts only an open rework, so this re-run would file a second one for the same ruling and send the PR's reviews back again; nothing was written. Re-run nothing: hold instead (converse-hold) and tell the operator which rework closed. A ruling that takes it as done signs off with --no-rework, and one that asks more of the branch is a ruling of its own"
+fi
 # --accept takes the subject's recommendation through the gate that put it to
 # the operator: a human gate under the key first-reaction that blocks the
 # subject. A gate under the key that blocks another bead, such as a member of

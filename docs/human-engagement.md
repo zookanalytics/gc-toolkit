@@ -915,7 +915,11 @@ A re-run that finds that PR closed, as a retirement leaves it once pr-facts
 consummates it, goes on without it. The record also names the rework a ruling
 filed, once it is filed, because the store keeps no trace of which ruling
 filed a child. A re-run that finds that rework closed files no second one and
-supersedes no review again, and a stay waits on the closed rework. A conversation owns one live rework, so
+supersedes no review again, and a stay waits on the closed rework. An attempt
+that stopped after filing its rework and before recording it leaves a rework
+no record names: a re-run adopts and records it while it is open, and once it
+has closed the sign-off refuses the re-run before any write, because the
+writer would file a second one, and the sitting holds to ask the operator. A conversation owns one live rework, so
 a second PR whose branch must change waits behind its gate, left owed, for a
 ruling of its own. A
 sitting signs off only when nothing important is pending; a turn that hands

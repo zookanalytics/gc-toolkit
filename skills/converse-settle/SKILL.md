@@ -160,7 +160,9 @@ held, and the comment that shows the visit on the subject's PR. That comment
 lists the ruling and each act recorded on the conversation, so keep other rigs
 and their beads out of them. It exits non-zero when it stopped short, and then
 you must NOT post the sign-off. A re-run with the same `--ruling` is safe,
-because the writer keys what it recorded to that ruling:
+because the writer keys what it recorded to that ruling, and it refuses, with
+nothing written, the one re-run it cannot make safe: a rework an earlier attempt
+may have filed and never recorded (below):
 
 ```bash
 if "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" \
@@ -268,9 +270,19 @@ PR closes lets an approved PR merge. `--pr-anchor <bead>` names the PR the
 rework or retirement acts on when the ruling reaches more than one, and each
 other one stands. The rework or retirement runs first, in that PR's own rig,
 and one that does not complete stops the sign-off with nothing answered, so
-the conversation still holds the merge. A re-run of the same ruling adopts
-the child an earlier attempt filed, files none again once that child has
-closed, and finds the PR an earlier attempt left, even one closed since. A
+the conversation still holds the merge. A re-run of the same ruling finds the
+PR an earlier attempt recorded, even one closed since. It files no second
+rework once the record names the child an earlier attempt filed, even after
+that child has closed, and while a child no record names is open it adopts and
+records it. An attempt that stopped after filing its child and before
+recording it, as one that printed `REWORK NOT COMPLETE` or that the store
+refused its record, leaves a child no record names, and once that child has
+closed a re-run would file a second one. So the sign-off refuses it before any
+write, naming each closed rework on the PR that no recorded ruling names. Then
+run nothing again: hold (`converse-hold`) and tell the operator which rework
+closed, since the ruling may already be carried out. A ruling that takes it as
+done signs off with `--no-rework`, and one that asks more of the branch is a
+ruling of its own. A
 conversation owns one live rework: while one filed for an earlier ruling is
 open, `--rework` for another is refused, so give a ruling that asks nothing
 more of the branch `--no-rework`, and keep the gate of one that does open

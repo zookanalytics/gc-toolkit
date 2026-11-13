@@ -924,7 +924,10 @@ review's result set.
   the conversation records which PR it acts on (`gc.ruling_consequence`), so a
   re-run of the same ruling acts on the same PR even once it has closed. The
   record names the rework too once it is filed, and a re-run that finds that
-  rework closed files no second one.
+  rework closed files no second one. A re-run whose record names no rework yet
+  adopts an open one and records it, and is refused before any write while a
+  closed one stands that no recorded ruling names, since the attempt that
+  stopped may have filed it.
   `--retire` records the
   disposition and closes the PR through `pr-dispose.sh`, and `pr-facts.sh`
   then takes the anchor through the `pull_request → closed (disposed)`

@@ -90,9 +90,16 @@ blocker closed brings it back.
 The entry says `interrupted` and names this skill when a stay stopped short:
 before its sign-off finished, before the conversation waited on all its work,
 or before it left the conversation to wait. Run the call again with the same
-ruling, which is safe, and go on from the entry it runs, as after any stay. The
-sign-off records the rework it filed under the ruling, so the call files none
-again, even once that rework has closed, and the entry then reads `returned`.
+ruling, and go on from the entry it runs, as after any stay. The re-run files
+no second rework once the ruling's record names the rework it filed, even
+after that rework has closed, and the entry then reads `returned`. A rework of
+the ruling that no record names yet is adopted and recorded while it is open.
+A stay that stopped after its rework was filed and before the record named it
+leaves one the sign-off cannot tell from an earlier ruling's, and once that
+rework has closed the call refuses before any write, saying it has a closed
+rework that no recorded ruling names. Then run nothing again: hold instead, as
+below, and tell the operator which rework closed, since the ruling may already
+be carried out.
 When your thread no longer holds that call, rebuild it from the record:
 `AGREED` is its `--stay`, the conversation's comments record its ruling and
 what it did, the subject's latest close brief is its `--close-brief`, and
