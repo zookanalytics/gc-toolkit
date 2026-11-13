@@ -207,7 +207,7 @@ exception and comes back keeps the posture its earlier head was read at until
 | handed_off → blocked | the refinery's parks, one `gc bd update` guarded on the assignee, after the park's human gate: `refinery-prep.sh`, `refinery-land.sh`, `refinery-publish.sh` | a target or branch origin does not carry, a `merge_strategy` the refinery does not land, a recorded PR it cannot reuse, or a PR another account opened; the bead stays assigned to the refinery, and clearing the gate hands it back |
 | handed_off → refused_false_completion | `refinery-land.sh`'s park, as above | the zero-diff check found no change on the handed-off branch, and the target carries no `direct_landing_sha` stamp |
 | blocked / refused_false_completion → unanchored | `refinery-land.sh` on a rig still on the old path, via `lifecycle.sh` | the park's gate was cleared, which handed the bead back, and the old path parks it again |
-| handed_off → poured | `refinery-requeue.sh`, from the refinery's rebase and handle-failures steps | a conflict with the target or a failure the branch caused, on a bead that records no open PR (`pull_request_head_changed`) and is not a convoy: one write guarded on the assignee and status reopens it unassigned with `rejection_reason`, and `gc sling` pours `mol-polecat-work` on it, keeping its branch |
+| handed_off → poured | `refinery-requeue.sh`, from the refinery's rebase and handle-failures steps | a conflict with the target or a failure the branch caused, on a bead that records no open PR (`pull_request_head_changed`) and is not a convoy: one write guarded on the assignee and status reopens it unassigned with `rejection_reason` and clears the `merge_result` and `blocked_reason` a park or a half-written record left, and `gc sling` pours `mol-polecat-work` on it, keeping its branch and the PR it may reuse |
 | pre_open_gate → unanchored | the move of a parked bead to the refinery at its rig's cutover, via `lifecycle.sh` | the rig's switch is set; the bead is assigned to the refinery, which publishes it on the new path |
 | poured → handed_off | the pour's `mol-polecat-work` submit step | push verified on the remote |
 
@@ -241,13 +241,14 @@ stateDiagram-v2
   mr_merged --> [*]
   [*] --> pull_request_record_incomplete: landing order — a publication stopped between its two writes
   pull_request_record_incomplete --> pull_request_pending: the refinery validates it again
+  pull_request_record_incomplete --> [*]: refinery-requeue.sh — the work goes back to the pool
   pull_request_pending --> exception: landing order — see the table
   exception --> [*]: a person, through the exception's gate
 ```
 
 | Value | Status, assignee | Meaning |
 |---|---|---|
-| no record | — | The bead has not landed and owns no open PR. A bead sent back keeps the record it had, so absence never means "rejected". |
+| no record | — | The bead has not landed and owns no PR on the record. A bead the landing order sends back to the refinery keeps its record, and one the refinery sends back to the pool keeps the PR it may reuse as `existing_pr`, so absence never means "rejected": `rejection_reason` says that. |
 | `pull_request_pending` | `blocked`, the refinery | The PR is open at the head the refinery validated, and the bead waits on its merge. The record names the PR (`pr_url`, `pr_number`, `pr_repo`), the validated head (`pr_head_sha`), `pr_state=open`, the intended target (`merged_target`), `blocked_reason` and when the landing order last read it (`pr_last_checked_at`). |
 | `pull_request_head_changed` | open, the refinery | The PR is open at a head the refinery has not validated, such as after a person's push. The bead keeps `pr_head_sha` and records `existing_pr`, the head found (`observed_pr_head_sha`) and why (`rejection_reason`), and the refinery validates the new head and records it pending again, on the same PR. |
 | `mr_merged` | closed | The PR merged the validated head, and the merge commit is on the freshly fetched target. The record names `merged_sha`, `merged_target`, `pr_state=merged` and `pr_merged_at`. |
@@ -1017,7 +1018,8 @@ review's result set.
   back through `refinery-requeue.sh`, with the branch kept and a
   `rejection_reason` the resumed worker starts from. A bead that records no open PR
   goes back itself: one write, guarded on the assignee and status the refinery read,
-  reopens it unassigned with the reason, and `gc sling` pours `mol-polecat-work`
+  reopens it unassigned with the reason, clearing any `merge_result` a park left,
+  and `gc sling` pours `mol-polecat-work`
   on it, so it rests `poured`. It is a pour, not a route on the bead, because
   the bead is a member of its epic and bd's blocked flag cascades down
   parent-child edges, while a poured workflow's root has no parent, so a hold on

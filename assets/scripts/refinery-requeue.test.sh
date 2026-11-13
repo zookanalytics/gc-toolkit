@@ -9,6 +9,10 @@
 #     mol-polecat-work;
 #   - a half-written record, the marker and existing_pr, goes back the same way,
 #     unassigned, so a run of the landing order that read it writes nothing;
+#   - a bead a park left blocked, or one the landing order sent back to be
+#     validated again, goes back with its merge_result and blocked_reason
+#     cleared, since the work gate refuses a bead that carries one, and keeps
+#     the PR it may reuse;
 #   - a bead that records an open PR keeps it and comes back as its rework
 #     child: a task with the work order, joined to the bead and blocking it
 #     through edges in its create, settled and slung, while the bead stays with
@@ -80,6 +84,25 @@ eq "$(bstatus h)" "open" "…and open"
 has "$(logged gc)" "--if-status=in_progress" "the write is guarded on the status read"
 eq "$(meta h existing_pr)" "https://github.com/zook/rig/pull/52" "it keeps the PR it may reuse"
 hasnt "$(logged gc)" "bd create" "no rework child is filed for it"
+
+echo "# a parked bead, or one sent back to be validated again, goes back with no merge_result"
+fresh
+branch_with polecat/p p.txt >/dev/null
+work p polecat/p '{"merge_result":"blocked","blocked_reason":"refinery-false-completion: no change"}'
+prepared p polecat/p
+run --bead p --reason "Conflicts with main at 1234567"
+eq "$RC" 0 "the requeue of a parked bead exits 0"
+eq "$(meta p merge_result) $(meta p blocked_reason)" "<absent> <absent>" "its merge_result and blocked_reason are cleared, so the work gate takes it"
+eq "$(bstatus p) $(bassignee p)" "open " "it is open and unassigned"
+has "$(logged gc)" "sling --rig rig-a rig-a/gc-toolkit.polecat p --on mol-polecat-work" "it is slung"
+branch_with polecat/v v.txt >/dev/null
+work v polecat/v '{"merge_result":"pull_request_record_incomplete","pr_state":"revalidation_required","existing_pr":"https://github.com/zook/rig/pull/53"}'
+prepared v polecat/v
+run --bead v --reason "test TestY fails on the branch"
+eq "$RC" 0 "the requeue of a record sent back to be validated again exits 0"
+eq "$(meta v merge_result)" "<absent>" "its merge_result is cleared"
+eq "$(meta v existing_pr)" "https://github.com/zook/rig/pull/53" "it keeps the PR it may reuse"
+hasnt "$(logged gc)" "bd create" "no rework child is filed for either"
 
 echo "# a bead that records an open PR comes back as its rework child"
 fresh

@@ -177,12 +177,12 @@ writer = "human"
 [[transition]]
 from = "blocked"
 to = "unanchored"
-writer = "human; or refinery-land.sh, on a rig whose pending_through_merge is unset, for a bead its gate's clearing handed back, before the old path parks it again (via lifecycle.sh)"
+writer = "human; or refinery-land.sh, on a rig whose pending_through_merge is unset, for a bead its gate's clearing handed back, before the old path parks it again (via lifecycle.sh); or refinery-requeue.sh, a guarded gc bd update that sends such a bead back to the pool when its prep conflicts or its gate fails"
 
 [[transition]]
 from = "refused_false_completion"
 to = "unanchored"
-writer = "human; or refinery-land.sh, on a rig whose pending_through_merge is unset, for a bead its gate's clearing handed back, before the old path parks it again (via lifecycle.sh)"
+writer = "human; or refinery-land.sh, on a rig whose pending_through_merge is unset, for a bead its gate's clearing handed back, before the old path parks it again (via lifecycle.sh); or refinery-requeue.sh, a guarded gc bd update that sends such a bead back to the pool when its prep conflicts or its gate fails"
 
 [gates]
 # check_set: comma list of check names on the anchor. Default stamped by

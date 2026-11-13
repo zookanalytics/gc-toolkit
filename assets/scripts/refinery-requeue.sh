@@ -40,10 +40,14 @@
 # Any other bead, a rework child among them, goes back itself. One write,
 # guarded on the assignee and status it read, reopens it unassigned with the
 # rejection_reason and clears its claim route, its last pour's stamp and the
-# session that last held it, so a run of the landing order that read it before writes nothing (bd's guard), and
-# the next run clears a marker a dead publication left, as after a release. Its
-# branch, target and existing_pr stay. A live workflow left on it is closed
-# (gc workflow delete-source), and it is slung.
+# session that last held it, so a run of the landing order that read it before
+# writes nothing (bd's guard), and the next run clears a marker a dead
+# publication left, as after a release. The same write clears the merge_result
+# and blocked_reason that a park, or a record the landing order found half
+# written, left on it, because the polecat's work gate refuses an open bead
+# that carries a merge_result as finished work. Its branch, target and
+# existing_pr stay, so the rework reuses the PR it may have. A live workflow
+# left on it is closed (gc workflow delete-source), and it is slung.
 #
 # A sling that fails arms a deferred dispatch, whose reconcile pass retries the
 # pour. An arm that fails too files a human gate keyed refinery-requeue-failed.
@@ -187,7 +191,8 @@ case "$STATUS" in open|in_progress) ;; *) stop "$BEAD is $STATUS, not open or in
 # failure is the store's, which says nothing about where the bead went.
 RC=0
 OUT=$(gc bd update "$BEAD" --if-assignee="$GC_AGENT" --if-status="$STATUS" --status=open --assignee="" \
-  --set-metadata "rejection_reason=$REASON" --unset-metadata gc.routed_to --unset-metadata gc.execution_routed_to \
+  --set-metadata "rejection_reason=$REASON" --unset-metadata merge_result --unset-metadata blocked_reason \
+  --unset-metadata gc.routed_to --unset-metadata gc.execution_routed_to \
   --unset-metadata gc.session_id --unset-metadata gc.session_name </dev/null 2>&1) || RC=$?
 case "$RC" in
   0) ;;
