@@ -89,14 +89,8 @@ the next worker retries it.
 
 A molecule keeps the step text it was poured with, while the scripts that text
 calls are read from the installed pack when the step runs. So a pack script that
-open step text names stays callable under that name until no open step bead
-names it. Step text from an earlier version of these formulas requires
-`assets/scripts/molecule-hold.sh` to exist before it resolves the pack's
-scripts, and calls it to decline. That script hands the call to
-`run-cancel.sh --step` unchanged, so such a run ends through gascity's run
-cancel like any other. The same text calls `step-close.sh`,
-`work-tree-holder.sh` and `lease-heartbeat.sh`, which stay for it until no open
-step bead names them.
+open step text names stays callable under that name, and keeps accepting the
+arguments that text passes it, until no open step bead names it.
 
 ## Step text and skills reach pack scripts at runtime
 
