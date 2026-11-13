@@ -1,19 +1,25 @@
 ---
-name: Standing memory triage and the guidance for writing memory (tk-zlot608.2)
-description: The design of the weekly triage that sorts each agent memory store by the operator's three questions, carries what a note shows into the pack's reviewed paths or onto a bead, and removes the note, and of the guidance that tells agents what a note should carry. Read it to build or review the triage, or to judge what becomes of a memory note.
+name: Agent memory as the learning loop's second intake (tk-zlot608.2)
+description: The design by which the feedback distiller reads agent memory notes beside the loop's reports, judges each note by the operator's three questions, groups what notes show onto feedback patterns, and removes a note once its pattern closes or it holds nothing worth keeping, and the guidance that tells agents what goes in memory and what goes in a report. Read it to build or review the memory intake, or to judge what becomes of a memory note.
 ---
 
-# Standing memory triage and the guidance for writing memory
+# Agent memory as the learning loop's second intake
 
-Agent memory stays an intake. Agents keep writing notes, and a weekly triage
-sorts each note one to two weeks after it is written. It carries what the note
-shows to the place that holds such things, a reviewed fix in the pack, the
-learning loop or a bead, and then removes the note. The backlog triage's record,
-[specs/tk-zlot608.1/report.md](../tk-zlot608.1/report.md), is the worked
-example: the standing triage sorts the way that record did, and its record keeps
-the same columns.
+Agent memory and the learning loop's reports are two intakes with one judge. A
+memory note holds something that should change the next agent's behavior. A
+report, an observation bead, holds something to be evaluated. The loop's
+distiller already judges the reports. It also reads each memory note where it
+is, by the operator's three questions, and groups what the note shows onto the
+same feedback patterns, so a lesson an agent wrote down and a correction an
+agent reported meet in one judgment. A note stays in memory while its pattern is
+open. It leaves once the pattern closes and its fix has landed, or as soon as
+the distiller finds nothing in it worth keeping. No note leaves because of its
+age.
 
-## What the operator ruled, and what this design proposes
+The backlog record, [specs/tk-zlot608.1/report.md](../tk-zlot608.1/report.md),
+is the worked example of reading notes by the three questions.
+
+## What the operator ruled
 
 The operator ruled in conversation tk-1amy8sd on 2026-11-11:
 
@@ -36,466 +42,423 @@ asks:
    where we are balancing scope of fix against severity, since the claim here
    is something that is off."
 
-When they asked for the audit (tk-ljv34vu), they wrote that memories "should
-become structural items in the pack, or skills, or changes in a rig, or new
-functionality".
+Reviewing this design's first draft (review 5882522195 on PR #1474), they asked
+whether the reviewing agent has the guidance to remove unnecessary rules, whether
+a rule expected to be long-term should stay until something permanent replaces
+it, and whether the memory-to-learning cycle had a bigger strategy. In the
+sitting that followed (conversation tk-iyhd38d, 2026-11-13), they proposed
+keeping "all not yet scheduled, still evaluating notes, or ungrouped notes, as
+actual memories", "dropping the need to do a proposed learning and then
+aggregate those again". They held that
+there are "still two flows, memory notes + reported learnings", because without
+reports "we have no way for an agent to say, this might be worth doing, but I
+need approval to do it", nor to report a "do not do X" that may mean never or
+only in that context. They ruled:
 
-Everything else on this page is this design's proposal, for the operator's
-review of its PR. That includes the two-week limit, which the filing sitting
-proposed from how quickly notes stop being read.
+> I think memory is things that should change the next agents behavior and a
+> report is an observation to be evaluated, or something roughly along those
+> lines. And yes, the two intakes, one judge feels right.
 
-## 1. Where the analysis runs, and how often
+The rest of the ruling is the sitting's framing, which the operator took, and
+the close reason of gate tk-8z75eqq records it. The distiller is the one judge,
+under the pattern lifecycle that PR #1486 brings. A note stays in memory while
+its pattern is open and leaves when the pattern closes or when the judge finds
+nothing worth keeping in it, with no age limit. The three questions are how the
+judge reads a note, and an unneeded rule is dropped by the distiller's
+retirement test. A list of note names and hashes, with each removed note's text,
+takes the place of a copy of the whole directory. Everything else on this page
+is this design's proposal.
 
-A Gas City order, `memory-triage`, pours the formula `mol-memory-triage` onto
-the `gc-toolkit.polecat` pool once a week (`trigger = "cooldown"`,
-`interval = "168h"`). The order is scoped to the rig, so it comes with the pack
-to every rig, as the feedback miner's order does, and each rig sorts its own
-store. Gas City runs one at a time: its dispatcher skips an order whose earlier
-run is still open. [gas-city-search.md](gas-city-search.md) records the search
-for a primitive that covers the need. An order covers the schedule, and nothing
-in Gas City, bd or Claude Code sorts or empties an agent's memory.
+## 1. Two intakes, one judge
 
-The analysis is the polecat's own reading. Read-only subagents may sort batches,
-as they did for the backlog (71 batches for 2,161 units), and the polecat checks
-every row they return and owns the record. A week's intake is about 220 notes,
-from the audit's count of about 32 a day (tk-ljv34vu's notes).
+**What goes where.**
 
-The triage is a formula of its own, not a step of the miner:
+- A memory note holds something that should change the next agent's behavior.
+  Claude Code loads each memory directory's index into every session that has
+  memory, and a session reads a note when it needs one, so a note steers agents
+  from the moment it is written, with only its writer behind it.
+- A report is an observation bead
+  ([feedback-learning.md](../../docs/feedback-learning.md)). It holds something
+  to be evaluated: corrective feedback from a review, a rework or the operator,
+  feedback whose reach the writer cannot tell, and a change that needs approval.
+  It steers no agent until the loop decides it.
+- The state of open work goes on its bead's notes, and what the pack already
+  says goes nowhere.
 
-- The miner no-ops a rig whose checkout has no usable GitHub, and the triage
-  needs none.
-- The miner records and changes nothing. The triage removes notes and sends
-  fixes.
-- The miner reads a window of pull requests every day. The triage reads a host
-  directory every week.
+**One judge.** The distiller (`mol-feedback-distiller`) judges both intakes. Its
+`feedback-distiller` order fires once a day, the run does its work only in the
+pack's home rig, and it already reads every rig's store for reports. In the same
+run it reads the memory directories of the city's rigs and its root (section 7),
+judges each note it has not read before, and groups what the note shows onto the
+feedback patterns the reports are grouped onto. The patterns stay in the home
+rig's store, under the lifecycle PR #1486 (tk-ltcv43q) brings: a pattern is
+closed once resolved, waits on its follow-up through a `blocks` edge, or is
+deferred with a date while it gathers evidence. Nothing turns a note into a
+report first, so no lesson is grouped twice, and no judge keeps findings of its
+own.
 
-Joined, each would inherit the other's no-op and the other's failures.
+**A step of the distiller, not a pass of its own.** The ruling left this choice
+to the design.
 
-It is not the distiller either. The distiller judges observations, and filing
-every note as one would be the stream the operator ruled out. The triage sits in
-front of the learning loop and passes on only what its analysis finds.
+- One run judges both intakes, so a note and a report about one problem meet in
+  one judgment, each pattern has one writer, and the distiller's dedup against
+  work in flight and its cap on beads filed per run cover what both show.
+- A pass of its own would write the same patterns from a second formula, with
+  its own filing, dedup and cap, and two passes could decide one pattern at once.
+  That is the second judge the ruling removed.
+- The memory directories are on the host the distiller runs on.
 
-**Which notes a run sorts.** A run sorts each note that was already in the store
-when the previous run copied it. A note the run sees for the first time waits
-for the next run, so every note is sorted one to two weeks after it is written.
-A daily run would sort notes in their first days, which is when other sessions
-read them: in the audit's week, another session opened 171 of the 221 new notes,
-and about 110 of the 1,232 older ones. A store's first run sorts nothing. It
-copies the store, records what it saw and writes the guidance block (section 5).
+The cost is the distiller's size. Every one of its steps sits near the bound a
+step must render within when a hook delivers it, 9,000 bytes
+([pack-authoring.md](../../docs/pack-authoring.md)): at PR #1486's head
+(7feb0da0f) the descriptions of load-and-gate, judge-and-cluster and
+file-and-dispatch run 7,612, 8,910 and 8,775 bytes.
 
-## 2. How a note leaves the store
+**Where the work lives.**
 
-**When.** At the triage, once what the note shows has been carried to where it
-goes (section 3). A note whose content could not be carried, because a write
-failed, stays for the next run. Removal does not wait for a fix to land:
+- The mechanics are one script, `assets/scripts/memory-intake.sh`. It places
+  each memory directory, lists the due notes, records each judged note, removes
+  notes and edits the index and collection notes under the checks in section 4,
+  rewrites the guidance block, and reports a place it cannot resolve.
+- The judging method is a section of the `learning-distill` skill, which the
+  distiller reads from origin/main as it reads the rest of its rubric.
+- The formula gains one step, `read-memory`, run first, which holds only calls to
+  the script. It removes the notes whose wait has ended, rewrites the guidance
+  block and lists the due notes for the later steps. load-and-gate's cadence gate
+  counts the due notes, judge-and-cluster judges them beside the pending
+  observations, and file-and-dispatch has the script record each judged note and
+  remove the ones the judge dropped. Each of those steps gains a clause or a
+  call, traded for weight the build moves into the script or the skill, since a
+  step that grows past the bound fails `formula-step-size.test.sh`.
 
-- A note rarely prevents a repeat. Of the 34 sampled notes that describe a
-  problem a check or script would remove, any session opened 5 in the audit's
-  week.
-- A note kept until its fix lands keeps an unreviewed rule steering agents for
-  as long as the slowest fix takes, and the triage would have to track every
-  fix across runs.
-- A problem that comes back before its fix lands gets written down again, and
-  the next run counts the new note as a repeat of the same finding, which
-  raises its severity.
+## 2. How the judge reads a note
 
-One kind of note stays: a guard. A note that is the only guard against a
-high-severity harm, such as the rule never to kill processes by name pattern on
-a host where one user runs every session, stays until the pack carries a guard
-of its own. It is the stopgap already in place, and removing it would bring the
-harm back. Each run sorts it again and removes it once the pack carries the fix.
-The record lists every note held this way, with the observation that carries
-its fix.
+The judge reads each due note, or each entry of a collection note that carries
+text of its own (section 4), and gives it one outcome. The three questions are
+how it reads.
 
-**How long a note may stay.** Two weeks, plus any delay the pool adds to a run.
-A held guard is the one exception, and each run's record names it.
+- **Point-in-time** (question 1): finished work, something that no longer holds,
+  something the pack already says, or the state of a moment that has passed. The
+  note is dropped.
+- **Live work**: the state of work still open. Its bead takes, in one append,
+  what the note says that the bead lacks, and the note is dropped. A ruling
+  about one case lives with that case the same way. A note about a moment that
+  has not passed, with no bead to carry it, stays due for the next run.
+- **Wording fix** (question 2): a vague or misleading direction that a change of
+  about zero size fixes, as the backlog's were
+  ([report.md](../tk-zlot608.1/report.md#wording-fixes)). It is filed even when
+  seen once, as the question allows. The note joins or seeds its pattern, and
+  the pattern waits on the bead that carries the fix.
+- **The rest joins a pattern** (question 3 and what it leaves): something off
+  that a script, a check or a more robust instruction would fix, and a rule or a
+  recipe agents keep needing that the pack lacks. The judge weighs it as it
+  weighs a report, by the rubric's judgments and its gates on promotion, and
+  writes its reasoning on the pattern. Question 3's balance of a fix's scope
+  against the problem's severity is part of that reasoning, and no table stands
+  in for it.
+- **Not worth keeping**: a rule the note states is asked the retirement pass's
+  questions, whether it still binds and whether something the pack carries
+  subsumes it. A rule current agents follow untold, or one the pack already
+  carries, is dropped, and so is anything else the judge finds nothing worth
+  keeping in.
 
-**The copy.** Before it removes anything, a run copies the whole store to
-`<city>/.gc/runtime/packs/gc-toolkit/memory-triage/<store>/<run start>/` and
-checks the copy file for file. That is the pack's state directory, which Gas
-City names for each pack in a city. The town repository ignores `.gc/`, and no
-session loads it. The next run reads this copy to learn which notes are due.
-`<store>` is the store's real path with each `/` and `.` as `-`, so each store
-keeps its own copies whichever run sorts it (section 6). Copies are kept, and
-nothing prunes them. A copy of this rig's store at the audit's intake is a few
-megabytes. The backlog's copy stays where tk-zlot608.3 put it.
+**A note on a pattern.** The pattern's evidence names the note by its memory
+directory, its name and the hash the judge read. A note is one occurrence in its
+writer's voice, and a note that cites an event a report already carries counts
+with that event once. A pattern backed only by notes meets the loop's first gate,
+which holds back a rule only agents reported until the operator endorses it or
+another voice backs it, so notes alone never promote a rule into a carrier every
+agent pays for. A structural fix and a wording fix go to a bead, which that gate
+does not guard. A ruling a note attributes to the operator is checked against the
+source the note gives, as the distiller checks the voice behind a self-reported
+observation. The note is the operator's voice only when that source holds their
+words. Otherwise the rule is the writer's own and never reaches the operator as
+theirs. The pack's files cite a note only as `memory`, because a note's directory
+or its name can name a rig the pack's public files must not name.
 
-**Concurrent writers.** Every Claude session in the rig can write the store
-while a run works.
+**Where a fix goes.** The judge files a pattern's follow-up the way the
+distiller files every follow-up, held for the operator's placement
+([steering.md](../../docs/steering.md#the-intake-rule)), and takes these routes
+first:
 
-- A note is removed only while its hash still matches the copy. A note changed
-  since the copy is skipped and sorted next run, and a note written since the
-  copy is not due.
-- A collection note (`hub-*.md`) is sorted entry by entry and removed whole once
-  every entry has been carried or let go. The triage never edits a note, since
-  another session may be writing it.
-- A link to a removed note, in a note not yet sorted, stays until that note is
-  sorted, within a cycle. That covers the 313 links in collection notes and the
-  649 in other notes that the backlog removal left (tk-zlot608.3).
+- A fix in the words of an adopted learned rule joins that rule's pattern, and
+  its follow-up is the distiller's update proposal.
+- A fix in a file the deletion schedule retires is appended to the notes of the
+  retiring bead, which the pattern waits on (AGENTS.md).
+- A problem an open bead already carries is appended there as more evidence, and
+  the pattern waits on that bead.
+- A problem in software no rig of the city owns becomes an upstream finding by
+  the `gc-toolkit.external-issue` skill, and the pattern waits on the finding.
+- A fix in another rig's repository is that rig's work, as the external-issue
+  skill says of a problem a rig of the city owns. The judge files it in that
+  rig's store with the `gc-toolkit.work` skill, held for placement, or appends it
+  to the open bead there that carries it. The note waits on that bead and joins
+  no pattern, because a pattern's `blocks` edge can name only a bead in the
+  pattern's own store.
 
-**The index.** Claude Code loads the first 200 lines or 25 KB of `MEMORY.md`
-into every session. A run changes two things in it. It takes out the entries of
-the notes it removed, and it rewrites the guidance block at the top (section 5).
-For each edit it reads the file just before writing and writes only if nothing
-changed since that read, or it reads again. tk-zlot608.3 removed the backlog's
-notes the same way.
+One run's wording fixes in one repository are one bead, so one PR carries them
+and they count once against the distiller's cap.
 
-## 3. What each answer becomes
+## 3. When a note leaves memory
 
-A run sorts each due note, or each entry of a due collection note, under one
-answer. The answers are the backlog record's, with its "fits none" read for what
-the standing triage does with it.
+A note leaves in one of two ways, and never because of its age.
 
-| Answer | What it is | What becomes of it |
-|---|---|---|
-| Point-in-time (question 1) | finished work, something that no longer holds, something the pack already says, one moment's state | removed |
-| Wording fix (question 2) | a vague or misleading direction that a change of at most two words fixes | listed on the run's wording-fix bead, then removed |
-| Structural (question 3) | something off that a script, a check or a more robust instruction would fix, including knowledge agents keep needing that the pack lacks | a finding, weighed and sent on (below), then removed, unless the note is a held guard |
-| Live work | the state of work still open | what its bead lacks is appended to the bead, then removed |
-| Let go | knowledge still true with no pack defect behind it, which an agent can learn again | removed |
+- **When the judge drops it.** A point-in-time note, a live-work note once its
+  bead has what it lacked, and a note with nothing worth keeping leave in the
+  run that judged them, once the run has carried what each shows to where it
+  goes.
+- **When what it waits on is done.** A note on a pattern leaves once the pattern
+  closes and every follow-up of the pattern that closed on a merge has landed. A
+  note that waits on a bead in another rig's store leaves once that bead closes
+  and, if it closed on a merge, has landed.
 
-The backlog's 1,374 "fits none" units are mostly recipes, facts about tools the
-pack does not own, and Gas City behavior. Each is let go unless the run finds
-that agents rely on it, and the copy keeps its text. An agent that needs one works it out again and may write it down
-again, and a lesson that keeps coming back is question 3's "agents regularly
-getting confused". So a later run sorts it as structural and carries it. A note
-many sessions read is also structural, since agents rely on what it says
-(section 4). The backlog's 159 unwritten rules are each either structural or a
-ruling (below): a rule the pack lacks is either something off or something for
-the operator to decide.
+A follow-up has landed when its merge is on its repository's default branch.
+Closing is not enough, because a follow-up placed under an integration effort
+closes when it lands on the effort's branch: tk-jvl45ot closed on 2026-10-31 at
+14:50Z with `merged_target` set to `integration/tk-nrsd2fd`, and the effort's
+PR, #1379, merged at 22:48Z. So a follow-up merged into an effort's branch has
+landed once the effort's landing bead has merged into the default branch. A
+follow-up that closed with no merge, such as a proposal the operator vetoed,
+ends the wait at its close.
 
-### Wording fixes
+A note on a held pattern stays through the pattern's deferral, which lasts
+`pattern_defer_days` (90). When the window ends with no recurrence, the
+distiller dismisses the pattern and the note leaves. When the lesson recurs, the
+distiller judges the pattern again on the new evidence, and the note stays while
+the pattern is open. A lesson that comes back after its notes left is new
+evidence on its closed pattern, which the rubric's recurrence bar decides
+whether to reopen.
 
-Each fix names the instruction at main by file and section, its current words,
-the replacement and the change in words, as the backlog record's do. A fix adds
-at most two words, the largest the backlog needed. A fix that needs more is
-structural, because its instruction is silent rather than misleading.
+The operator's two concerns, in that cycle:
 
-A run files one wording-fix bead for each repository that holds an instruction
-at fault, in that repository's rig store (`gc bd --rig`). The bead lists every
-fix with the note that showed it, and it is slung to that rig's polecat pool on
-`mol-polecat-work`. The builder re-reads each instruction at main, skips a fix
-whose words have changed, and shows each instruction's size before and after in
-the PR. The operator's review of the PR is the gate on every change to an
-instruction.
+- **Removing unnecessary rules.** The retirement test drops a rule in memory that
+  agents no longer need, as the distiller already asks of each adopted rule
+  (skills/learning-distill/SKILL.md, Retirement questions).
+- **Keeping a long-term rule until something permanent replaces it.** A note
+  worth keeping stays while its pattern is open, which lasts until the pattern's
+  fix has landed, or until its deferral passes with no recurrence.
 
-Two kinds of fix go elsewhere:
+The cost is that memory shrinks only as fast as the distiller decides and fixes
+land, and until a rule's replacement lands, a rule the judge kept steers agents
+with only its writer behind it.
 
-- A fix in the words of an adopted learned rule becomes an observation on the
-  rule's pattern bead, because the learning loop owns those words.
-- A fix in a file `tools/deletion-plan.tsv` lists is appended to the notes of
-  the bead that retires the file (AGENTS.md).
+## 4. The list, and how a note is removed
 
-The intake rule in [steering.md](../../docs/steering.md#the-intake-rule) lets a
-bead reach a pool only on one of the grounds it lists. **Proposed:** approving
-this design makes the wording-fix bead a standing route, as the seed audit's
-re-audit is, because each fix has a proven remedy and asks no policy question.
-If the operator declines, the bead is filed held for placement instead, and each
-week's fixes wait for a sitting before a polecat builds them.
+A memory directory is the directory of note files Claude Code keeps for one
+project (section 7). It is not a bead store.
 
-### Structural findings
+For each memory directory, the run keeps two things in the pack's state
+directory, `<city>/.gc/runtime/packs/gc-toolkit/memory-intake/<directory key>/`,
+where `<directory key>` is the directory's real path with each `/` and `.` as
+`-`:
 
-A run groups the structural notes and entries into findings, one for each
-problem, as the backlog record did. Each finding names what is off, the notes
-that show it, what it costs when it happens, its severity and the scope of its
-fix.
+- **The list**, one row for each note or entry the judge has read and kept: its
+  name, the hash the judge read, the date it was judged, and what it waits on,
+  its pattern or the bead in another rig's store.
+- **Each removed note's text**, as it was when removed, filed under its name and
+  hash. Nothing prunes these.
 
-- **Severity** is what the problem costs each time. High: it destroys or loses
-  work, stops sessions, corrupts a store, exposes what must stay private, or
-  lands a wrong change. Medium: it costs a rework, a failed gate or a repair by
-  hand. Low: it costs a retry or a few minutes. Severity rises one level when
-  the problem recurs: two or more notes show it, a note records a repeat, an
-  earlier run's record holds the same finding, or many sessions read a note
-  that works around it.
-- **Scope** is the size of the fix. Small: a few lines of text, or one script
-  or check. Medium: several scripts, or a new script or formula step. Large: a
-  new subsystem, a redesign, or a change outside the pack.
+A note is due when the list does not hold it at its current hash, so the list is
+all the next run needs of the last. The run keeps no copy of the directory and
+no findings record. The town repository ignores `.gc/`, and no session loads it.
 
-| Severity | Small fix | Medium fix | Large fix |
-|---|---|---|---|
-| High | sent on | sent on | sent on |
-| Medium | sent on | sent on | kept in the record |
-| Low | kept in the record | kept in the record | kept in the record |
+Other writers and other runs:
 
-This table is the filter that keeps the intake from becoming a stream. A finding
-kept in the record is not dropped for good. When later notes show it again, its
-severity rises, and a later run sends it on.
+- Every Claude session in the city can write a memory directory while a run
+  works. A note is removed only while its hash still matches the hash the judge
+  read, and a note changed since is due again.
+- The index, `MEMORY.md`, holds pointers and is never judged. Claude Code loads
+  its first 200 lines or 25 KB into every session. The run takes out each line of
+  the index or a collection note that links a note no longer in the directory.
+  That includes the 313 links in collection notes to notes the backlog removal
+  took out (tk-zlot608.3).
+- A collection note (`hub-*.md`) is judged entry by entry, as the backlog record
+  sorted it. A line that links a whole note stands for that note. An entry with
+  text of its own is judged like a note and keyed on the list by its own hash.
+  When such an entry leaves, the run takes its lines out, and it removes a
+  collection note that has no entries left.
+- A link inside a whole note's own text stays as written.
+- An edit to the index or a collection note is written only if the file is
+  unchanged since the run read it. Otherwise the run reads it again.
+- Two distiller runs can overlap, so the script holds a lock on each directory
+  while it writes the list, removes notes and edits the index.
 
-A finding that is sent on goes the first way that applies:
+## 5. Which notes a run reads
 
-1. A problem in a file `tools/deletion-plan.tsv` lists is appended to the
-   retiring bead's notes (AGENTS.md).
-2. A problem an open bead already carries is appended to that bead's notes as
-   more evidence.
-3. A problem in software the pack does not own goes the way the
-   `gc-toolkit.external-issue` skill sends it.
-4. Anything else becomes one observation in the learning loop
-   ([feedback-learning.md](../../docs/feedback-learning.md)), filed in the run's
-   rig store with `obs.source=self`, `obs.directive=standing`, a provenance that
-   names the run, and the finding's slug as `obs.category`. A later run that
-   finds the same problem reuses the slug, so the loop's repeat measure counts
-   it.
+A note is due from the first run that finds it, new or changed since the judge
+read it. The judge's own question, whether a note can go away, decides whether a
+fresh note leaves, so no age decides when a note is read.
 
-The learning process then treats it as it treats any observation. The distiller
-clusters it with feedback on the same problem from pull requests, sends a
-structural remedy to an engineering bead (Gate 2), and holds back a rule that
-only agents reported until the operator endorses it (Gate 1). Every proposal it
-files waits for the operator's placement. So a structural finding reaches the
-operator's queue through the learning process, and no note changes an
-instruction without the operator's review.
+Due notes are pending like reports. They count toward the distiller's cadence
+gate beside the pending observations, and a gated run leaves them due. With
+about 50 notes a day the gate opens on nearly every run, and it already sees
+steady volume from reports: this rig's store took in 186 observations from
+2026-11-01 to 2026-11-13. While due notes remain, a hold whose window ends is
+deferred to the next run, as the rubric defers one while observations remain
+unjudged, since a due note may be its recurrence.
 
-### Live work
+A run reads at most `memory_notes_per_run` due notes, oldest first, and the rest
+stay due. The proposed default is 200. The city's memory directories took in
+about 360 notes in the week to 2026-11-13, about 50 a day, so a run reads the
+day's intake and about 150 of the backlog. Read-only subagents may read batches
+of due notes and return what each says, as they did for the backlog record (71
+batches for 2,161 units). The judge decides each note itself and makes every
+write.
 
-A note about work still open belongs on its bead. The run reads the bead's notes
-and appends, in one append for each bead, what a later session on that work
-needs and the notes do not already say, such as a decision, a blocker or a fact
-about the branch. Then it removes the note. Most such notes repeat what the bead
-or its pull request already shows, and leave with nothing appended.
+**The first runs.** The city's memory directories hold about 2,070 whole notes
+today, beside their indexes and this rig's collection notes: about 1,040 in this
+rig's, 470 in the city root's and 560 across the other rigs'. The backlog record
+found 741 entries with text of their own in this rig's collection notes. At about
+150 a run past the day's intake, the backlog is read in about three weeks.
+Memory shrinks first by the notes the judge drops and then as patterns close.
+The backlog record's structural findings need no seeding, because the judge
+reads the notes behind them and groups them as it goes.
 
-### A ruling attributed to the operator
+## 6. How agents are told what goes in memory
 
-The run checks each ruling that a note attributes to the operator against the
-source the note gives.
-
-- **The source holds the operator's words.**
-  - A ruling about one case lives with that case. Its note is point-in-time
-    once the case has closed, and live work while it is open.
-  - A standing ruling the pack already carries is point-in-time.
-  - A standing ruling the pack does not carry becomes one observation that
-    quotes the operator's words and links the source. The distiller checks the
-    voice behind it, and the operator says yes or no at the PR that would adopt
-    it.
-- **The source does not hold those words, or the note gives none.** The rule is
-  the writer's own. It is sorted by the three questions as the writer's, the
-  record marks the attribution unsupported, and it never reaches the operator
-  as theirs.
-
-The backlog record marks 257 units that attribute a ruling to the operator,
-taken from each note's own text. This check is what sorts those into rulings
-that stand and agents' own inferences.
-
-## 4. The run's record
-
-Beside its copy, a run writes two files:
-
-- `record.tsv` has one row for each unit it sorted, in the backlog record's
-  columns: the unit, its kind, its hash, the answer, the detail, the ruling it
-  attributes to the operator with the source it claims, and the retiring bead.
-  Three columns are added: the sessions that read the note since the previous
-  run, the earlier finding or lesson it repeats, and where it went (removed,
-  skipped, held, an observation, a wording-fix bead, or a bead it was appended
-  to).
-- `summary.md` gives the counts under each answer, the notes removed, skipped
-  and held, the notes that repeat an earlier run's lesson, the findings sent on
-  and kept, and the wording-fix beads.
-
-The epic's indicators come from these files: the count of notes in each store
-from run to run, the share under each question, and how many new notes repeat a
-lesson an earlier run sorted. The records stay on the host, because a store's
-notes can name private rigs and paths. The next run reads the previous copy and
-the records, and nothing else holds the triage's state.
-
-**Reads.** The sessions that read a note are counted from the session
-transcripts Claude Code keeps on the host, which record each tool call and the
-files it read. A note many sessions read is one agents rely on, which raises the
-severity of the problem it works around. A note no session has read since it was
-written is evidence that it can go.
-
-## 5. How agents are told to write memory well
-
-The guidance sits at the top of each store's index. `MEMORY.md` loads into every
-session that has memory, and an agent edits it after writing a note. Each run
-rewrites the block from one file in the pack, so its words change only through a
-reviewed PR. It adds nothing to the pack's prompts, and it reaches no agent whose
-memory is off. **Proposed** words, for the unit that builds them:
+The guidance sits at the top of each memory directory's index, which loads into
+every session that has memory and which an agent edits after writing a note.
+`read-memory` rewrites the block each run from one file in the pack, so its
+words change only through a reviewed PR. It adds nothing to the pack's prompts,
+and it reaches no agent whose memory is off. **Proposed** words, for the unit
+that builds them:
 
 ```markdown
-<!-- memory-triage: rewritten each week from the gc-toolkit pack -->
-Notes here are an intake. A weekly triage sorts each one a week or two after it is written, sends what the pack should hold to a fix, and removes the note.
-Write a lesson so it can be fixed: what you did, what happened, the instruction, command or script that led there, what it cost, and whether it happened before.
+<!-- memory-intake: rewritten from the gc-toolkit pack each run -->
+A note here holds something that should change the next agent's behavior. The learning loop reads each note, leaves it here while the lesson it shows is being judged or fixed, and removes it once that lesson is settled or the note holds nothing worth keeping.
+Write a lesson so it can be acted on: what you did, what happened, the instruction, command or script that led there, what it cost, and whether it happened before.
 A rule is the operator's only with their words and where they said them. Otherwise it is yours, and the note says so.
-The state of open work goes on its bead's notes, and corrective feedback from a review, a rework or the operator goes in an observation bead. Leave out what the pack already says.
-<!-- /memory-triage -->
+What is to be evaluated goes in a report, an observation bead the gc-toolkit.records skill files: corrective feedback from a review, a rework or the operator, feedback whose reach you cannot tell, and a change that needs approval. The state of open work goes on its bead's notes. Leave out what the pack already says.
+<!-- /memory-intake -->
 ```
 
-What a note carries so the analysis can act on it:
+What a note carries so the judge can act on it:
 
 - A lesson gives the act, what happened, the instruction, command or script
-  behind it by file and section or command line, the cost, and any earlier
-  time it happened. With these the run can find the words to fix (question 2),
-  or weigh a finding (question 3).
+  behind it by file and section or command line, the cost, and any earlier time
+  it happened. With these the judge can find the words to fix (question 2), or
+  weigh a problem against its fix (question 3).
 - A ruling gives the operator's words and where they gave them.
 
-What does not belong in memory, and where it goes:
+The block's cost is that an agent may edit it between runs, and the next run
+restores it. The other place for it is a fragment in every Claude prompt, which
+costs each session about the same text, sits away from the act of writing, and
+reaches the Product Owner, whose memory is off.
 
-- The state of open work goes on the bead's notes.
-- Corrective feedback from a durable source goes in an observation, by the route
-  the `file-feedback-observations` fragment gives.
-- What the pack or the repository already says goes nowhere.
-- A durable document goes in the repository (`gc-toolkit.filing-documentation`).
+## 7. The memory directories, the Product Owner and agents without memory
 
-The other place this guidance could live is a shared fragment in every Claude
-role's prompt. That costs each session about the same text, but it sits away
-from the act of writing, and it reaches the Product Owner, whose memory is off.
-The block's own cost is that an agent may edit it between runs, and the next run
-restores it.
-
-## 6. The stores, the Product Owner and agents without memory
-
-**Where a store is.** A run places each store as Claude Code's storage-location
-rules do ([gas-city-search.md](gas-city-search.md#find-a-store)), from the
-inputs Gas City starts the rig's Claude sessions with:
+**Where a memory directory is.** The run places each directory as Claude Code's
+storage-location rules do
+([gas-city-search.md](gas-city-search.md#find-a-memory-directory)), from the
+inputs Gas City starts each rig's Claude sessions with:
 
 - Memory is off when the environment sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`.
   It is also off when the highest settings level that sets `autoMemoryEnabled`
   sets it false, unless the environment sets that variable to `0`, which turns
   memory on.
-- Otherwise the store is the `autoMemoryDirectory` of the highest settings
+- Otherwise the directory is the `autoMemoryDirectory` of the highest settings
   level that sets one. The levels, highest first, are managed settings, the
   `--settings` file Gas City gives each Claude session it starts, the
   checkout's local settings, its shared project settings, and the user settings
   in the config directory. A value that starts with `~/` is under the session's
   home.
-- Otherwise the store is `<config dir>/projects/<project>/memory/`. The config
-  directory is `CLAUDE_CONFIG_DIR`, or `.claude` under the session's home.
+- Otherwise the directory is `<config dir>/projects/<project>/memory/`. The
+  config directory is `CLAUDE_CONFIG_DIR`, or `.claude` under the session's home.
   `<project>` is `CLAUDE_CODE_PROJECT_DIR_NAME` when that is set beside
   `CLAUDE_CONFIG_DIR` and is 1 to 64 letters, digits, hyphens or underscores.
   Otherwise it is the checkout's path with each character that is not a letter
   or a digit as `-`.
 
-The environment, the home and the user settings a run reads are its own
-session's. Gas City starts the run on the rig's pool as it starts the rig's
-other Claude sessions, so they match unless an agent's provider or its own
-configuration sets a different environment, or a launch command gives each
-account a home of its own, as this host's does. Where each account has a home
-of its own, another account's user settings, or a `~/` value under its home,
-can place a store where the run does not look, and the run reports it once a
-session writes there (below). A run compares paths by their real path, because
-those homes link their `projects` directories to one place, so one store shows
-under several paths.
+The environment, the home and the user settings the run reads are its own
+session's. Gas City starts every rig's Claude sessions as it starts the run, so
+they match unless an agent's provider or its own configuration sets a different
+environment, or a launch command gives each account a home of its own, as this
+host's does. The run compares paths by their real path, because those homes link
+their `projects` directories to one place, so one directory shows under several
+paths.
 
-**Other rigs.** The order is scoped to the rig, so each rig's run sorts the
-store that is the rig's own: the one named for its checkout, or one its own
-local or shared project settings place. A run files observations in its own
-rig's store, and the distiller reads observations across rigs. A wording fix
-goes to the rig whose repository holds the instruction, so a fix in the pack's
-files reaches the pack's own rig. A fix PR against this public repository
-names no other rig, which self-review's `rig-mentions.sh` checks. On this host
-the other rigs' stores hold about 550 notes.
+**Which directories the run reads.** It reads each rig's own directory, the one
+named for its checkout or the one the rig's own local or shared project settings
+place, and the city root's. A directory the city's `--settings` file places is
+one for every rig and the city root, and the run reads it once. A directory
+placed at the user or managed level, or named by `CLAUDE_CODE_PROJECT_DIR_NAME`,
+is one directory for every project those sessions start in, and sessions the
+city does not run can share it, so the run reads none of it and reports it as a
+place it cannot resolve. One placed at the user level, or named by the variable,
+comes under the run once the city's or the rig's own Claude settings set
+`autoMemoryDirectory`: both rank above the user level, and a directory they set
+takes the place of the one the variable names. A directory keyed to a path
+outside the city's rigs and its root belongs to sessions the city does not run,
+and the run reads none of it.
 
-**The city root.** The agents that run at the city root write a store of their
-own, about 470 notes on this host. The run in the pack's home rig sorts it as
-well. The home rig is the one whose `pack.toml` names gc-toolkit, the test the
-distiller uses to decide where it runs.
+**An absent directory, and a place the run cannot resolve.** A directory is
+absent when memory is off or nothing exists where it is placed, and the run
+changes nothing there. The run cannot resolve a place, and removes nothing
+there, when:
 
-**A store several rigs share.** A store placed by the `--settings` file is one
-directory for the sessions of every rig and of the city root, one in each home
-when its value starts with `~/`, and only the sessions Gas City starts are given
-that file. The home rig's run sorts it, as it sorts the city root's store, and
-the other rigs' runs leave it to that run. A store placed at the user or managed
-level, or named by `CLAUDE_CODE_PROJECT_DIR_NAME`, is also one directory for
-every project those sessions start in, but sessions the city does not run can
-share it, and no run can answer for their notes. No run sorts it. Each run that
-places a store there reports it as a place it cannot resolve (below). A store
-placed at the user level, or named by `CLAUDE_CODE_PROJECT_DIR_NAME`, comes
-under a run once the city's or the rig's own Claude settings set
-`autoMemoryDirectory` instead. Both rank above the user level, and a directory
-they set takes the place of the one the variable names.
-
-**An absent store, and a place a run cannot resolve.** A store is absent when
-memory is off or no directory exists where the store is placed, provided no
-session in the rig has written a memory index anywhere else since the previous
-run. The run then changes nothing, and its record says so. A run cannot resolve
-a place in these cases, and it removes nothing there:
-
-- A settings file at one of the levels does not parse, the deciding
+- a settings file at one of the levels does not parse, the deciding
   `autoMemoryDirectory` is neither an absolute path nor one that starts with
-  `~/`, as the memory page requires, or the checkout's converted path passes
-  200 characters, where Claude Code appends a hash the pages do not define.
-  The run cannot tell what the sessions used.
-- A settings file the repository supplies places the store while
+  `~/`, or the checkout's converted path passes 200 characters, where Claude
+  Code appends a hash the pages do not define;
+- a settings file the repository supplies places the directory while
   `permissions.blockReadsOutsideWorkingDirectories` is on, so Claude Code
   neither loads nor writes memory there. That is the rig's shared project
-  settings, or its local settings when git tracks them or `.claude` is a link.
-- The store is placed at a level no run sorts (above).
-- A session in the rig has written a memory index (`MEMORY.md`) with Claude
-  Code's file tools since the previous run, outside the store the run placed
-  and outside the city's checkouts, where such a file is a repository's own.
-  Another account's user settings, a managed source the run cannot read, such
-  as server-managed settings, or workspace trust, which decides whether Claude
-  Code honors a project's value, can each move a store to a place the run does
-  not look. The run still sorts the store it placed.
+  settings, or its local settings when git tracks them or `.claude` is a link;
+- the directory is placed at a level the run does not read (above).
 
-The configuration places each store. The transcripts the run reads to count
-reads (section 4) only add places to report, and they never make a store absent
-or move one, since they show where sessions wrote, not where Claude Code places
-a store no session has written yet.
-
-A run records each place it cannot resolve and why, and files a finding through
-`patrol-finding.sh` under a key for what it could not resolve, as the feedback
-miner files its findings. A case that stays unresolved updates that one finding
-from week to week, and a later run that resolves it marks the finding cleared.
-A place that is not one rig's alone is filed in the home rig's bead store
-(`--rig`), so it is one finding however many runs report it.
+The run files one finding for each such place through `patrol-finding.sh`, under
+a key for what it could not resolve, as the feedback miner files its findings. A
+case that stays unresolved updates that finding from run to run, and a run that
+resolves it marks the finding cleared. An input the run cannot read, such as
+another account's user settings or a `~/` value under its home, server-managed
+settings, or workspace trust, which decides whether Claude Code honors a
+project's value, can move a directory where the run does not look. That
+directory's notes then stay unread, as every directory's are today.
 
 **The Product Owner.** Its memory stays off. `agents/po/agent.toml` sets
 `CLAUDE_CODE_DISABLE_AUTO_MEMORY`, because a note would carry one sitting's
-context into the next. It has no store, and the triage changes nothing for it.
-What the triage sends on reaches the Product Owner's queue through the
-distiller, held for placement like any other new work.
+context into the next. It has no memory directory, and nothing here changes for
+it. What the distiller files reaches the Product Owner's queue held for
+placement, like any other new work.
 
 **Agents with no such memory.** Codex agents (`polecat-codex`, the
-`converse-codex` sittings and `dog`) load no Claude Code store, and Codex's own
-memory store on this host is empty. The triage reads no Codex store. Their
-lessons keep the routes they have: an observation for corrective feedback, and
-a bead's notes for the state of work. A lesson a Codex agent learns on its own
-has no intake. That falls outside this epic's cut, and bd's memory plane would
-be its natural intake if the operator wants one
-([gas-city-search.md](gas-city-search.md)).
+`converse-codex` sittings and `dog`) load no Claude Code memory directory, and
+Codex's own memory on this host holds nothing. Their lessons keep the routes
+they have: a report for what is to be evaluated, and a bead's notes for the
+state of work. A lesson a Codex agent learns on its own has no memory intake,
+which this design leaves as it is.
 
-Stores keyed to directories outside the city's rigs and its root belong to
-sessions the city does not run, and no run sorts them.
+## 8. The epic's contract
 
-## 7. Size, and the deletion schedule
+The ruling changes epic tk-zlot608. Its boundaries now reach the learning loop's
+sorting of memory notes, and its two-week closure condition and its signal of a
+store with no note older than two weeks go. The sitting that ruled puts the
+redrafted contract to the operator (conversation tk-iyhd38d), so this design
+proposes no wording for it, and the closure-condition changes its first draft
+proposed on the epic's notes are withdrawn. The list and the removed notes' text
+give the counts an indicator can read: the notes in each directory from run to
+run, how many wait on an open pattern, and how many the judge dropped.
 
-At main (986037bd4) the learning loop measures 2.4k runtime lines and 1.9k test
-lines. [built-once-target.md](../../docs/built-once-target.md) estimates 2.0k
-and 1.5k for its built-once shape, which has no memory triage. The unit below
-adds about 0.7k runtime lines, chiefly a script of about 400 and a formula of
-about 250, plus the order and the guidance file. It adds about 0.5k test lines.
-It updates the page's feedback row and its paragraph to include the triage.
+## 9. Size, and the deletion schedule
 
-The triage adds nothing to a file `tools/deletion-plan.tsv` lists. Its method
-sends a fix or a finding in such a file to the retiring bead's notes (section
-3), so it gives that code no new work. That includes the feedback-routing doctor
-check that tk-1tfzr71.21 retires, which the epic's boundaries name.
+The learning loop measures 2.4k runtime lines and 1.9k test lines in
+[built-once-target.md](../../docs/built-once-target.md), against a built-once
+estimate of 2.0k and 1.5k that has no memory intake. The unit below adds about
+0.5k runtime lines: the script, about 350, the formula's new step and the
+clauses the other steps gain, the skill's memory section and the guidance file.
+It adds about 0.4k test lines. It updates the page's feedback paragraph to name
+the memory step.
 
-## 8. What the first runs do
+Nothing it changes is in `tools/deletion-plan.tsv`. A fix the judge finds in a
+file the plan lists goes to the retiring bead's notes (section 2), so the intake
+gives that code no new work. That includes the feedback-routing doctor check
+that tk-1tfzr71.21 retires, which the epic's boundaries name.
 
-Merging the unit starts the order in every rig. A store's first run only copies
-the store, records what it saw and writes the guidance block. Its second run, a
-week later, sorts every note the first one saw, so each store's backlog leaves
-then.
-
-- In this rig that is the 1,046 files left after the backlog removal. The unit
-  seeds this store's records with the backlog record, so the second run weighs
-  the backlog's 35 findings by the table in section 3 and sends on those that
-  pass it.
-- The city root's store and the other rigs' stores, about 1,000 notes between
-  them, leave the same way.
-
-The cost falls on the collection notes agents open most. In the audit's week the
-busiest was opened by 131 sessions, and 47 notes were opened by ten or more.
-Their entries leave at the second run. What agents rely on in them is sent on at
-that run, its severity raised by its reads, and it waits for placement and a
-build like any other finding. Until that lands, an agent that needs one of those
-recipes works it out again, and a note it writes about it counts as a repeat.
-
-## 9. The units that build it
+## 10. The unit that builds it
 
 | Unit | What it builds | Waits on |
 |---|---|---|
-| tk-zlot608.5 | The triage. `assets/scripts/memory-triage.sh` and its suite: verbs that place each store as Claude Code does and name the run that sorts it, copy it, list the due notes, count reads, remove notes with the hash and index checks, rewrite the guidance block, and report a place the run cannot resolve (section 6). The suite covers each input that moves a store or turns memory on or off, a shared store, an absent store and each case a run cannot resolve. `formulas/mol-memory-triage.toml`, `orders/memory-triage.toml` and the guidance file. The sort's method goes in the formula's sort step, or in a skill that step loads if the step would pass the step-size bound. It seeds this rig's records with the backlog record. It updates the docs this makes stale: the capture channels in docs/feedback-learning.md, the intake rule in docs/steering.md if the operator makes the route standing, the rows in docs/component-model.md §4, the feedback row in docs/built-once-target.md, and the Debt entry in docs/architecture.md, which it removes. | the operator's approval of this design, which closes tk-zlot608.2 |
+| tk-zlot608.5 | `assets/scripts/memory-intake.sh` and its suite: verbs that place each memory directory as Claude Code does, list the due notes, record each judged note on the list, remove a note under the hash, index and collection-note checks while keeping its text, end a note's wait once its pattern or bead is done and its fix has landed, rewrite the guidance block, and report a place the run cannot resolve. The suite covers each input that moves a directory or turns memory on or off, a shared directory, an absent directory, each case the run cannot resolve, a note changed since it was judged, and a follow-up that landed on an effort's branch. `mol-feedback-distiller`'s `read-memory` step, its `memory_notes_per_run` variable and the clauses the other steps gain, within the step-size bound. The `learning-distill` skill's memory section. The guidance file. The docs this makes stale: the intake and promotion path in docs/feedback-learning.md, the rows in docs/component-model.md §4 for the distiller and the script, the feedback paragraph in docs/built-once-target.md, and the Debt entry in docs/architecture.md, which it removes. | this design's merge (tk-zlot608.2), and the pattern change it builds on (tk-ltcv43q, PR #1486) |
 
-One unit, because a script with no order to call it, or an order with no script,
-does nothing on its own.
+One unit, because the step with no script, or the script with no step, does
+nothing on its own.
