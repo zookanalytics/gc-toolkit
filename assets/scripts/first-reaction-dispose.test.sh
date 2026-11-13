@@ -109,6 +109,11 @@ case "$1 ${2:-}" in
   "bd list")
     printf 'LIST %s\n' "$*" >> "$FAKE_LOG"
     printf '%s\n' "${FAKE_LIST_JSON:-[]}" ;;
+  "session nudge")
+    # The nudge a ready hand-off gives the agent. FAKE_NUDGE_FAILS is a nudge
+    # that names why it failed on stderr.
+    printf 'NUDGE %s\n' "$*" >> "$FAKE_LOG"
+    [ -n "${FAKE_NUDGE_FAILS:-}" ] && { echo "gc session nudge: fake refusal" >&2; exit 1; } ;;
   "bd dep")
     printf 'DEP %s\n' "$*" >> "$FAKE_LOG"
     # `dep list --json` answers with what the store holds AFTER the helm call.
@@ -396,7 +401,8 @@ has "routes to nobody" "$ERR" "(ACTRIG) …and names what a bare target would co
 #                and does not ask the pool question
 #   (ACTHANDOFF) gc sling then routes the bead to the agent's own name, raw: no
 #                formula and no convoy, after the release and before the
-#                landed proof, with no arm and no assignee
+#                landed proof, with no arm and no assignee; the bead is ready
+#                now, so gc session nudge gives the agent a turn for it
 #   (ASSIGNNO)   an agent that cannot be handed the bead refuses the exit
 #   (ASSIGNBOTH) --route and --assign together are refused
 #   (ASSIGNRIG)  a named agent needs no GC_RIG to qualify it
@@ -419,6 +425,10 @@ eq "$(grep -c '^SLING ' "$FAKE_LOG")" "1" "(ACTHANDOFF) …once"
 before '^HELM takeaway' '^SLING ' "(ACTHANDOFF) …after the release leaves the bead at rest"
 before '^SLING ' 'gc.reacted_by' "(ACTHANDOFF) …and before the landed proof"
 hasnt "DEFERRED" "$LOG" "(ACTHANDOFF) …arming nothing for a named agent"
+has "NUDGE session nudge gc-toolkit.mechanik tk-sub is routed to you and ready" "$LOG" \
+    "(ACTHANDOFF) the agent is nudged with the bead's id, since a route alone gives it no turn"
+before '^SLING ' '^NUDGE ' "(ACTHANDOFF) …once the bead is routed to it"
+before '^NUDGE ' 'gc.reacted_by' "(ACTHANDOFF) …and before the landed proof"
 
 export FAKE_AGENT_GONE=1
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --assign mechanik
@@ -455,7 +465,7 @@ eq "$LOG" "" "(ASSIGNEXIT) …and no gate was filed"
 : > "$FAKE_LOG"; RC=0
 OUT="$("$SCRIPT" tk-sub --disposition actionable --reason "r" --takeaway "t" --assign gc-toolkit.mechanik --dry-run 2>"$TMP/err")" || RC=$?
 eq "$RC" "0" "(ASSIGNDRY) a dry run of the --assign exit succeeds"
-has "would hand tk-sub to named agent gc-toolkit.mechanik (gc sling gc-toolkit.mechanik tk-sub --no-formula --no-convoy)" "$OUT" \
+has "would hand tk-sub to named agent gc-toolkit.mechanik (gc sling gc-toolkit.mechanik tk-sub --no-formula --no-convoy) and nudge it" "$OUT" \
     "(ASSIGNDRY) …and names the agent it would hand the bead to, and how"
 hasnt "UPDATE" "$(cat "$FAKE_LOG")" "(ASSIGNDRY) …writing nothing"
 hasnt "SLING" "$(cat "$FAKE_LOG")" "(ASSIGNDRY) …and handing nothing over"
@@ -470,7 +480,15 @@ has "gc sling did not hand it to gc-toolkit.mechanik (exit 1: gc sling: fake ref
 has "HELM takeaway tk-sub" "$LOG" "(HANDOFFFAIL) …after the release, which stands"
 hasnt "gc.reacted_by" "$LOG" "(HANDOFFFAIL) …with no landed proof"
 hasnt "UPDATE bd update $R" "$LOG" "(HANDOFFFAIL) …and the reaction bead left open"
+hasnt "NUDGE" "$LOG" "(HANDOFFFAIL) …and no agent nudged about a bead it was not handed"
 unset FAKE_SLING_FAILS
+export FAKE_NUDGE_FAILS=1
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --assign gc-toolkit.mechanik --reaction-bead "$R"
+eq "$RC" "4" "(HANDOFFFAIL) an --assign whose nudge did not reach the agent fails the exit"
+has "gc session nudge did not reach the agent (exit 1: gc session nudge: fake refusal" "$ERR" "(HANDOFFFAIL) …with the nudge's own reason"
+has "SLING " "$LOG" "(HANDOFFFAIL) …after the route, which stands"
+hasnt "gc.reacted_by" "$LOG" "(HANDOFFFAIL) …with no landed proof, so a re-run nudges again"
+unset FAKE_NUDGE_FAILS
 
 # (HANDOFFTOOL) the hand-off is gc sling's, so --assign lands with no
 # deferred-dispatch.sh to call.
@@ -681,6 +699,7 @@ has "gc-toolkit.mechanik tk-sub --no-formula --no-convoy" "$(grep '^SLING ' "$FA
     "(BLKHANDOFF) gc sling hands the waiting bead to the agent's own name"
 before '^HELM takeaway' '^SLING ' "(BLKHANDOFF) …after the release writes the wait"
 before '^SLING ' 'gc.reacted_by' "(BLKHANDOFF) …and before the landed proof"
+hasnt "NUDGE" "$LOG" "(BLKHANDOFF) …and no nudge while the bead still waits"
 
 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 \
     --then-route gc-toolkit/gc-toolkit.polecat --then-assign gc-toolkit.mechanik
