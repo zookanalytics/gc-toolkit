@@ -196,16 +196,27 @@ func (f *serveFixture) copiesOn(h host.Host) *Copies {
 }
 
 // gated is the host one call runs on in a test that drives two calls through
-// an interleaving: before each signal the call sends, hold runs, and it can
-// wait there for the other call to reach a point of its own.
+// an interleaving: before each signal the call sends, hold runs, and before
+// each process it starts, starting runs, and either can wait there for the
+// other call to reach a point of its own.
 type gated struct {
 	host.Host
-	hold func(pid int, sig syscall.Signal)
+	hold     func(pid int, sig syscall.Signal)
+	starting func(s host.Spec)
 }
 
 func (g gated) Signal(pid int, sig syscall.Signal) error {
-	g.hold(pid, sig)
+	if g.hold != nil {
+		g.hold(pid, sig)
+	}
 	return g.Host.Signal(pid, sig)
+}
+
+func (g gated) Start(s host.Spec) (host.Child, error) {
+	if g.starting != nil {
+		g.starting(s)
+	}
+	return g.Host.Start(s)
 }
 
 // unkillable is the host one call runs on in a test where a copy's process
@@ -852,6 +863,51 @@ func TestServeAStopWaitsForAStartUnderWayAndEndsTheCopyItLeft(t *testing.T) {
 				t.Errorf("the serve command %d still runs after the stop", sv.Pid)
 			}
 		}
+	})
+}
+
+// A check waits for no start, and a start's record has no leader while the
+// start runs one: at a copy's first launch, and when it moves the copy it ran
+// off a port another mapping holds. A check then reads the copy as
+// not-answering, with the start under way, where reading the record as it
+// stands would report a copy that died. Once the start reports, the check
+// reads the copy it ran.
+func TestServeACheckDuringAStartReadsACopyWithNoLeaderAsNotAnswering(t *testing.T) {
+	serveTest(t, func(t *testing.T, f *serveFixture) {
+		var at flags
+		var mu sync.Mutex
+		launches := 0
+		starting := gated{Host: f.me, starting: func(s host.Spec) {
+			if len(s.Argv) != 5 || s.Argv[3] != "--lead" {
+				return
+			}
+			mu.Lock()
+			launches++
+			name := fmt.Sprintf("launch %d", launches)
+			mu.Unlock()
+			at.mark(name)
+			waitFor(10*time.Second, at.reached(name+" checked"))
+		}}
+		started := make(chan Report, 1)
+		go func() {
+			started <- f.copiesOn(starting).Serve(f.repo, f.publishing("taken-first", "https://host.example:$PORT/"))
+		}()
+		for _, name := range []string{"launch 1", "launch 2"} {
+			if !waitFor(10*time.Second, at.reached(name)) {
+				t.Errorf("the start did not reach its %s", name)
+				break
+			}
+			if c := f.copies.Check(f.repo); c.State != CopyNotAnswering || !strings.Contains(c.Detail, "under way") {
+				t.Errorf("a check at the start's %s = %s (%s), want not-answering, with the start under way", name, c.State, c.Detail)
+			}
+			at.mark(name + " checked")
+		}
+		r := <-started
+		mustRun(t, r)
+		if c := f.copies.Check(f.repo); c.State != CopyRunning || c.Port != r.Port {
+			t.Errorf("a check after the start = %s on port %d, want running on port %d", c.State, c.Port, r.Port)
+		}
+		f.copies.Stop(f.repo)
 	})
 }
 

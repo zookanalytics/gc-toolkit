@@ -38,7 +38,8 @@ package rig
 //
 // Starts and stops of one checkout take turns under the checkout's lock, so
 // each reads the record the one before it left and none acts on a record
-// another is changing.
+// another is changing. A check reads under the lock when it is free and waits
+// for no start or stop.
 
 import (
 	"crypto/sha256"
@@ -148,7 +149,8 @@ const lockPoll = 200 * time.Millisecond
 // record to its report, and a stop from its first read to its last removal,
 // so two starts that find a copy that died run one copy in its place, two that
 // publish a running copy run one publish command, and a stop ends the copy a
-// start left. The call that holds it ends within its own waits.
+// start left. The call that holds it ends within its own waits. A check takes
+// it only when it is free (tryLock), for as long as one read of the record.
 //
 // The lock is an flock(2) of a file beside the record directory, outside what
 // a start removes when it replaces a copy that died, and the kernel releases it
@@ -158,16 +160,31 @@ const lockPoll = 200 * time.Millisecond
 // file once the checkout has no record, and a call that took the lock on a
 // file removed meanwhile takes the file that replaced it.
 func (c *Copies) lock(checkout string) (func(), error) {
+	release, _, err := c.takeLock(checkout, true)
+	return release, err
+}
+
+// tryLock takes the checkout's lock when no other call holds it, and returns
+// its release. It reports busy, with no release, while another call holds it.
+func (c *Copies) tryLock(checkout string) (release func(), busy bool, err error) {
+	return c.takeLock(checkout, false)
+}
+
+func (c *Copies) takeLock(checkout string, wait bool) (func(), bool, error) {
 	dir := c.Dir(checkout)
 	path := dir + ".lock"
 	for {
 		f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o644)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		fd := int(f.Fd())
 		for {
 			err = syscall.Flock(fd, syscall.LOCK_EX|syscall.LOCK_NB)
+			if errors.Is(err, syscall.EWOULDBLOCK) && !wait {
+				_ = f.Close()
+				return nil, true, nil
+			}
 			if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EINTR) {
 				break
 			}
@@ -175,12 +192,12 @@ func (c *Copies) lock(checkout string) (func(), error) {
 		}
 		if err != nil {
 			_ = f.Close()
-			return nil, err
+			return nil, false, err
 		}
 		held, err := f.Stat()
 		if err != nil {
 			_ = f.Close()
-			return nil, err
+			return nil, false, err
 		}
 		now, err := os.Stat(path)
 		if err == nil && os.SameFile(held, now) {
@@ -190,11 +207,11 @@ func (c *Copies) lock(checkout string) (func(), error) {
 				}
 				_ = syscall.Flock(fd, syscall.LOCK_UN)
 				_ = f.Close()
-			}, nil
+			}, false, nil
 		}
 		_ = f.Close()
 		if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return nil, err
+			return nil, false, err
 		}
 	}
 }
@@ -701,11 +718,28 @@ func (r copyRec) exitCode() (int, bool) {
 	return rc, err == nil
 }
 
-// Check reports the state of the checkout's copy, and starts nothing.
+// Check reports the state of the checkout's copy, and starts nothing. It
+// waits for no start or stop: it reads the record under the checkout's lock
+// when the lock is free, and as it stands when a start or a stop holds it.
+// That call may be running the copy or ending it, so a copy whose leader it
+// finds no longer running then reads as not-answering, not as one that died.
 func (c *Copies) Check(checkout string) Report {
 	rec := c.rec(checkout)
 	if _, err := os.Stat(rec.dir); err != nil {
 		return Report{State: CopyNone, Checkout: checkout}
+	}
+	unlock, busy, err := c.tryLock(checkout)
+	if err == nil && !busy {
+		defer unlock()
+		if _, err := os.Stat(rec.dir); err != nil {
+			return Report{State: CopyNone, Checkout: checkout}
+		}
+	}
+	if busy && !rec.alive() {
+		port, _ := rec.num("port")
+		return Report{State: CopyNotAnswering, Checkout: checkout, Port: port, Log: rec.path("serve.log"),
+			Detail: "a start or a stop of this checkout is under way, and the copy's leader is not running; a start waits for that call to end, and reports the copy it leaves",
+			Tail:   tail(rec.path("serve.log"), 20)}
 	}
 	if rec.alive() {
 		ok, why := rec.ready()
