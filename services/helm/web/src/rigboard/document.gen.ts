@@ -37,7 +37,8 @@ export interface Document {
    */
   epics: EpicEntry[];
   /**
-   * NeedsYou is the Needs you page: every need in the rig.
+   * NeedsYou is the Needs you page: every need in the rig, and how many of
+   * them count.
    */
   needs_you: NeedsYou;
   /**
@@ -85,9 +86,10 @@ export interface Row {
    */
   group?: Group;
   /**
-   * Ask is the kind of need the row is, empty when it is none, as it is for
-   * work held for the Product Owner. A row that is a need is drawn as one
-   * wherever it appears.
+   * Ask is what the row asks of a person, empty when it is no need, as it is
+   * for work held for the Product Owner. A row that is a need is drawn as one
+   * wherever it appears, tagged with its ask, and a Needs you view counts it
+   * by its kind (Need).
    */
   ask?: Ask;
   /**
@@ -176,8 +178,9 @@ export interface PullRequest {
 }
 /**
  * Counts are what a container holds. Needs counts each need that holds or
- * concerns it once, and reaches zero as the operator acts. Queue,
- * NotScheduled and Closed count its work by where it sits.
+ * concerns it once, of the needs that count (NeedsYou), and reaches zero as
+ * the operator acts. Queue, NotScheduled and Closed count its work by where it
+ * sits.
  */
 export interface Counts {
   needs: number /* int */;
@@ -206,7 +209,7 @@ export interface Contract {
  */
 export interface EpicEntry {
   id: string;
-  needs: Need[];
+  needs: NeedsYou;
   queue: WorkQueue;
   closed: string[];
   deliveries: DeliveryEntry[];
@@ -217,32 +220,55 @@ export interface EpicEntry {
  */
 export interface DeliveryEntry {
   id: string;
-  needs: Need[];
+  needs: NeedsYou;
   queue: WorkQueue;
   closed: string[];
 }
 /**
- * Need is one entry of a Needs you view: a need, and the beads it holds that
- * the view covers, its work in the Work queue's order and then the epics and
- * Deliveries it holds. A view lists its needs in the order of the first bead
- * each holds in the Work queue, so the top need is the one holding up the
- * front of the queue. A need that is itself queued work counts its own place
- * too. A need that holds no queued work comes after those that do, by the
- * first unscheduled work it holds, and one that holds no work at all comes
+ * Need is one entry of a Needs you view: a need, its kind, and the beads it
+ * holds that the view covers, its work in the Work queue's order and then the
+ * epics and Deliveries it holds. A view lists its needs in the order of the
+ * first bead each holds in the Work queue, so the top need is the one holding
+ * up the front of the queue. A need that is itself queued work counts its own
+ * place too. A need that holds no queued work comes after those that do, by
+ * the first unscheduled work it holds, and one that holds no work at all comes
  * last, by priority, then oldest, then id.
  */
 export interface Need {
   id: string;
+  kind: NeedKind;
   holds: string[];
 }
 /**
- * NeedsYou is the Needs you page: every open need in the rig, in the order a
- * view lists them. Count is the needs that hold or concern work under an
- * epic, each counted once, and it reaches zero when none does.
+ * NeedsYou is a Needs you view: the Needs you page over the whole rig, and the
+ * view of each epic and Delivery over the needs that hold or concern the work
+ * it holds nearest. It lists every need it covers, each once and in the order
+ * a view lists them, the needs that count first.
+ * A need does not count when what it is about is parked or waits for the
+ * Product Owner. It is parked itself when it, or an epic or Delivery above it,
+ * waits on a park, a gate that is no human gate. A gate, a decision or a
+ * conversation does not count when every bead it holds or is about is parked,
+ * is a need that does not count, or carries hold:mayor, the Unprioritized
+ * page's work. A need that is about nothing else counts, and so does a pull
+ * request or other work that is itself a need, unless it is parked itself.
+ * Count is the needs that count, and it reaches zero only when nothing that
+ * counts needs you. Kinds is how many of them are of each kind: Pull request,
+ * Question, Conversation waits for you, In conversation and Ruling, each one
+ * zero included, then Routed to you when one counts. Counted lists the needs
+ * that count, and NotCounted the needs that do not.
  */
 export interface NeedsYou {
   count: number /* int */;
-  needs: Need[];
+  kinds: KindCount[];
+  counted: Need[];
+  not_counted: Need[];
+}
+/**
+ * KindCount is how many of a view's needs that count are of one kind.
+ */
+export interface KindCount {
+  kind: NeedKind;
+  count: number /* int */;
 }
 /**
  * WorkQueue is a Work queue view: the work in the order it is expected to land
@@ -291,3 +317,17 @@ export const AskPullRequest = "Pull request";
 export const AskRoutedToYou = "Routed to you";
 export const AskRuling = "Ruling";
 export type Ask = typeof AskQuestion | typeof AskConversation | typeof AskPullRequest | typeof AskRoutedToYou | typeof AskRuling;
+/**
+ * NeedKind is the kind of need a row is, the kinds a Needs you view counts and
+ * filters its needs by. It is the row's ask, in the ask's own words, except
+ * that a conversation's kind says whether it waits for you or a sitting holds
+ * it, and a question a sitting is talking over is in conversation too, since
+ * your attention is already on it.
+ */
+export const NeedKindPullRequest = "Pull request";
+export const NeedKindQuestion = "Question";
+export const NeedKindWaitsForYou = "Conversation waits for you";
+export const NeedKindInConversation = "In conversation";
+export const NeedKindRuling = "Ruling";
+export const NeedKindRoutedToYou = "Routed to you";
+export type NeedKind = typeof NeedKindPullRequest | typeof NeedKindQuestion | typeof NeedKindWaitsForYou | typeof NeedKindInConversation | typeof NeedKindRuling | typeof NeedKindRoutedToYou;

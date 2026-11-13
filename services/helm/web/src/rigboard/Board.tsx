@@ -9,7 +9,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ActuateError, engage } from '../actuate/client';
-import type { Response as RigResponse } from './document.gen';
+import type { NeedKind, Response as RigResponse } from './document.gen';
 import { EpicsPage, MatchesPage, NeedsYouPage, UnprioritizedPage, WorkQueuePage } from './pages';
 import { SidePanel } from './Panel';
 import { READ_TIMEOUT_MS, readRigs, rigAddress, rigFromAddress } from './read';
@@ -102,6 +102,8 @@ function RigBoard({ rig }: { rig: string }) {
   const [tab, setTab] = useState<Tab>('epics');
   const [query, setQuery] = useState('');
   const [open, setOpenState] = useState<Record<string, boolean>>({});
+  // The kind of need each Needs you view shows alone, by the view's key.
+  const [kinds, setKinds] = useState<Record<string, NeedKind>>({});
   const [panel, setPanel] = useState<PanelState | null>(null);
   const [copied, copy] = useCopy();
   // The engage whose answer the panel may show; a later click replaces it.
@@ -142,6 +144,14 @@ function RigBoard({ rig }: { rig: string }) {
       isOpen: (key, def) => (key in open ? open[key] : def),
       flip: (key, def) => setOpenState((prev) => ({ ...prev, [key]: !(key in prev ? prev[key] : def) })),
       setOpen: (parts) => setOpenState((prev) => ({ ...prev, ...parts })),
+      kindShown: (key) => kinds[key],
+      showKind: (key, kind) =>
+        setKinds((prev) => {
+          const next = { ...prev };
+          if (next[key] === kind) delete next[key];
+          else next[key] = kind;
+          return next;
+        }),
       copy,
       copied,
       show: (id) => setQuery(id),
@@ -154,7 +164,7 @@ function RigBoard({ rig }: { rig: string }) {
         startEngage(bead, title);
       },
     };
-  }, [doc, open, copy, copied, panel, startEngage]);
+  }, [doc, open, kinds, copy, copied, panel, startEngage]);
 
   const closePanel = () => {
     engaging.current++;
