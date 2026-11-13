@@ -77,7 +77,9 @@ work is out.
 When nobody speaks, end the turn with nothing said and nothing recorded: a
 hand-back nobody asked for would replace the stay's, which the tab prints.
 Nothing needs registering again: the conversation's edge onto the work is the
-wait, and the session sleeps again once the tab detaches.
+wait, and while the work is out the session sleeps again once the tab
+detaches. Once the work closes it stays up, and Gas City's notice that a
+blocker closed brings it back.
 
 - **More work**: stay again, with a `--waiting-on` for every bead the
   conversation now waits on, the earlier work and the new, so the return waits

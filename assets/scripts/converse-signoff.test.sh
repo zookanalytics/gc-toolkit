@@ -1920,6 +1920,20 @@ has "$(cat "$CALLS")" "bd dep add tk-conv tk-work --type blocks" "(STAY-WORK-CLO
 eq "$(field tk-conv status)/$(field tk-conv assignee)" "open/gc-toolkit/gc-toolkit.tk-conv" "(STAY-WORK-CLOSED) …leaving the conversation open under its sitting, ready at once"
 has "$OUT" "Run the entry now" "(STAY-WORK-CLOSED) …and sending the sitting to its entry"
 hasnt "$OUT" "wakes with this thread" "(STAY-WORK-CLOSED) …never promising a wake that cannot come"
+# A stay that stops before it names its work, here at the headline, is run
+# again once that work has closed. The re-run finishes the stay and sends the
+# sitting to its entry the same way.
+closer_case
+TAKEAWAY_FAIL=1 run_signoff --conversation tk-conv --outcome "staying — waits on tk-work" "${STAYING[@]}"
+eq "$RC" 1 "(STAY-WORK-CLOSED-RERUN) a stay that stops at its headline exits 1"
+hasnt "$(cat "$CALLS")" "bd dep add tk-conv" "(STAY-WORK-CLOSED-RERUN) …before any edge"
+setf tk-work status closed
+run_signoff --conversation tk-conv --outcome "staying — waits on tk-work" "${STAYING[@]}"
+eq "$RC" 0 "(STAY-WORK-CLOSED-RERUN) the same call, run once its work has closed, exits 0"
+eq "$(field tk-conv notes | grep '^staying:' | tr '\n' '|')" "staying: the dialog keeps what is typed|staying: the dialog keeps what is typed (waits on tk-work)|" "(STAY-WORK-CLOSED-RERUN) …finishing the stay its first line began"
+eq "$(field tk-conv status)/$(field tk-conv assignee)" "open/gc-toolkit/gc-toolkit.tk-conv" "(STAY-WORK-CLOSED-RERUN) …leaving the conversation open under its sitting, ready at once"
+has "$OUT" "Run the entry now" "(STAY-WORK-CLOSED-RERUN) …and sending the sitting to its entry"
+hasnt "$OUT" "wakes with this thread" "(STAY-WORK-CLOSED-RERUN) …never promising a wake"
 
 # A second stay with more work, from a sitting woken early, records itself
 # again before its writes, then names all its work.
