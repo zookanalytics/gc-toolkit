@@ -1575,13 +1575,13 @@ grep -q 'helm-svc board' <<< "$BERRTXT" \
 # ── The releasing session's own run survives the release ─────────────────────
 # A releasing session may itself own a step of a molecule anchored to the bead it
 # disposes by `takeaway --release`, and then has to close its own chain.
-# step-close.sh resolves that bead within its molecule and corroborates it by
-# the assignee, so the release leaves that run alone: it writes none of its
-# beads and cancels nothing. A run no step of which is this session's ends
-# through the REAL run-cancel.sh, whose request a curl stub answers. This
-# section runs the real release and then the real step-close.sh against ONE
-# mutating store — a logging-only stub cannot show the second command failing
-# on what the first wrote.
+# claim-close.sh closes the step `gc hook current` names once the step shows it
+# is that step and this session holds it, so the release leaves that run alone:
+# it writes none of its beads and cancels nothing. A run no step of which is this
+# session's ends through the REAL run-cancel.sh, whose request a curl stub
+# answers. This section runs the real release and then the real claim-close.sh
+# against ONE mutating store — a logging-only stub cannot show the second
+# command failing on what the first wrote.
 LIVE="$TMP/live"; mkdir -p "$LIVE/bin"
 export LIVE_STORE="$LIVE/store.json" LIVE_CONVOYS="$LIVE/convoys" LIVE_LOG="$LIVE/log"
 # A store write the stub cannot land must not pass silently. The stub mutates the
@@ -1657,6 +1657,7 @@ chmod +x "$LIVE/bin/curl"
 sw() { jq "$@" "$LIVE_STORE" > "$LIVE_STORE.n" && mv "$LIVE_STORE.n" "$LIVE_STORE" && return 0; : >> "$LIVE_WRITE_FAILED"; return 1; }
 case "$1 ${2:-}" in
   "rig list") printf '{"rigs":[{"name":"gc-toolkit","path":"/nonexistent-rig","prefix":"tk"}]}\n' ;;
+  "hook current") [ -n "${LIVE_HOOK_CURRENT:-}" ] || exit 1; printf '%s\n' "$LIVE_HOOK_CURRENT" ;;
   "bd list")
     st=""; who=""; seen_who=0
     for a in "$@"; do
@@ -1784,15 +1785,16 @@ eq "$(field A-LIVE assignee)" ""    "(LIVESTEP) …and unassigned"
 eq "$(field A-LIVE gc.routed_to)" "$POOL" "(LIVESTEP) …and routed to the pool"
 
 # The proof the guard exists for: the terminal step is still CLOSABLE after the
-# release, by the same resolution the formula's terminal block uses.
+# release, by the close a formula's step runs (claim-close.sh), with this
+# session's claim still on it.
 SCRC=0
-SCOUT="$(GC_SESSION_NAME="$SESSION" GC_SESSION_ID="hq-live1" \
-  bash "$HERE/step-close.sh" --step mol-sample.advance-and-drain --outcome pass 2>&1)" || SCRC=$?
-live_store_intact   # step-close's close landed, or this is disk pressure not a verdict
-eq "$SCRC" "0" "(LIVESTEP) step-close.sh still resolves this session's step after the release"
+SCOUT="$(LIVE_HOOK_CURRENT=L-live GC_SESSION_NAME="$SESSION" GC_SESSION_ID="hq-live1" \
+  bash "$HERE/claim-close.sh" --step mol-sample.advance-and-drain --outcome pass 2>&1)" || SCRC=$?
+live_store_intact   # claim-close's close landed, or this is disk pressure not a verdict
+eq "$SCRC" "0" "(LIVESTEP) claim-close.sh still closes this session's step after the release"
 eq "$(field L-live status)" "closed" \
-   "(LIVESTEP) …and closes it, so the molecule advances instead of re-offering"
-[ "$SCRC" -eq 0 ] || printf 'note: step-close output:\n%s\n' "$SCOUT" >&2
+   "(LIVESTEP) …and the step reads closed, so the molecule advances instead of re-offering"
+[ "$SCRC" -eq 0 ] || printf 'note: claim-close output:\n%s\n' "$SCOUT" >&2
 
 # ── A FOLDED anchor, against the same mutating store ─────────────────────────
 # The argv assertions in the FOLDED section prove which flags the verb sent.
