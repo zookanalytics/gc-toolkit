@@ -2,7 +2,7 @@
 # lifecycle.sh — THE writer of anchor lifecycle transitions (lifecycle/lifecycle.toml).
 #   lifecycle.sh transition <bead-id> --to <state> [--expect <state>] [--set k=v]...
 #     [--set-dated k=<value>@<oid>]... [--unset k]... [--assignee <a>]
-#     [--route <rig>/<agent>|human | --keep-route] [--takeaway <text>] [--close]
+#     [--route <rig>/<agent> | --keep-route] [--takeaway <text>] [--close]
 #     [--append-notes <t>] [--json]
 #   lifecycle.sh state <bead-id>
 #   lifecycle.sh reopen <bead-id>
@@ -25,22 +25,18 @@
 # the branch is fetched there first, because the runtime's work-record gate
 # asks that checkout whether it is. With no GC_RIG_ROOT, or a branch git does
 # not accept as a branch name, nothing is fetched and one WARN line names the
-# landing. A state's declared routing rides in the same call unless --route is
-# given: human states stamp gc.routed_to=human, and detached states clear it
-# unless the bead already rests on the park route. --keep-route writes no route
-# at all, for a write that records on a bead staying in its state: the bead
-# keeps the gc.routed_to it carries, with no default and no park guard. It is
-# refused with --route, and on an edge into another state, which takes that
-# state's routing.
+# landing. No transition writes a park route: a person's wait is the human gate
+# filed on the bead. A detached state clears gc.routed_to in the same call
+# unless --route is given. --route takes a rig-qualified <rig>/<agent>, or an
+# empty value that clears the route, so a bare name such as `human` is refused.
+# --keep-route writes no route at all, for a write that records on a bead
+# staying in its state: the bead keeps the gc.routed_to it carries, and a
+# detached state's clear does not run. It is refused with --route, and on an
+# edge into another state, which takes that state's routing.
 # A detached state also clears the assignee of a bead still at status=open,
-# unless --assignee is given; that is the unheld half of the same property. A
-# human state also refuses an EMPTY --route: a bead waiting on a person has to
-# name one, and routing to the park sentinel refuses without a takeaway — the
-# board spends gc.takeaway as the row's NEEDS sentence, so a park with none
-# reaches the operator saying no question was recorded. --takeaway writes the
-# triple (text/_at/_by) in the same atomic call, capped at 140 codepoints and
-# refused when it normalizes to nothing; a bead that already carries a takeaway
-# satisfies the guard.
+# unless --assignee is given; that is the unheld half of the same property.
+# --takeaway writes the triple (text/_at/_by) in the same atomic call, capped at
+# 140 codepoints and refused when it normalizes to nothing.
 # reopen: repair a bead closed while merge_result is a NON-closed state — set
 # status=open, merge_result untouched. Human-invoked only (docs/authority-map.md).
 # Callers: pr-open.sh, pr-facts.sh, mol-refinery-patrol. gctk merge runs the

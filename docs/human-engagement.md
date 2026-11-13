@@ -832,13 +832,12 @@ given knowingly. It also settles the subject's dispatch path first, at the
 sign-off and on a turn that does not sign off alike. The hold kept the
 subject's arm and route, and an answer that clears the subject's last blocker
 releases it to them, so a ruling that sends the subject anywhere else
-withdraws both before the answer, and a `human` route, which sends it to no
-pool, stays. The record and the headline go on the subject alone: a rework
-child waiting on its anchor's bring-current gate, or a member of an epic whose
-gate the epic's sitting answers, reads the answer in the gate's resolve
-reason, through its own `blocks` edge. A gate with no tie to the subject takes
-its own conversation, so its outcome never lands in the notes of a bead that is
-not about it.
+withdraws both before the answer. The record and the headline go on the
+subject alone: a rework child waiting on its anchor's bring-current gate, or a
+member of an epic whose gate the epic's sitting answers, reads the answer in
+the gate's resolve reason, through its own `blocks` edge. A gate with no tie to
+the subject takes its own conversation, so its outcome never lands in the
+notes of a bead that is not about it.
 
 **The first answer wins.** bd resolves a gate already closed without changing
 it and reports success either way, so every resolver reads the gate back. A
@@ -1109,7 +1108,9 @@ as a hold unless its writer stamped that key beside it.
 - **A stand-down (`takeaway … --release --no-wait`).** The dispatch's premise
   is falsified and the work should not happen. The anchor is parked, and the
   run beneath it is cancelled through gascity's run cancel. An anchor already
-  closed takes the cancel without the park, and `--route` is refused there.
+  closed takes the cancel without the park, and `--route` is refused there. A
+  claim a live session holds is not taken: the headline lands, the holder is
+  nudged to stop and give the bead back, and the release exits 4 until it has.
   `assets/scripts/stand-down.sh` runs this write for work a human gate holds, after
   it removes the arm that would re-sling the work, and goes on to answer the gate,
   or to leave one that also holds another open bead, and close the bead.

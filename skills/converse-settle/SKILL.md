@@ -136,10 +136,9 @@ ROW=$(gc bd show "$SUBJECT" --json) \
 When the ruling sends the subject where its arm or route already sends it, by
 the same method, keep them and send nothing yourself: once the gate is
 answered, the arm or the route sends it. Under any other ruling, with or without
-`--accept`, withdraw them before the answer. The block disarms an arm, clears a
-pool route and keeps a `human` route, which sends the subject to no pool. It
-prints its `carries no arm and no pool route` line only once each write has
-exited 0, and without that line you answer nothing:
+`--accept`, withdraw them before the answer. The block disarms an arm and
+clears a pool route. It prints its `carries no arm and no pool route` line only
+once each write has exited 0, and without that line you answer nothing:
 
 ```bash
 WHY="<the ruling, one line>"
@@ -147,7 +146,7 @@ ROW=$(gc bd show "$SUBJECT" --json) \
   && ARM=$(printf '%s\n' "$ROW" | jq -er --arg s "$SUBJECT" 'if type == "array" and length == 1 and .[0].id == $s then (.[0].metadata["gc.dispatch_when_ready"] // "") | tostring else error("unread") end') \
   && ROUTE=$(printf '%s\n' "$ROW" | jq -er '(.[0].metadata["gc.routed_to"] // "") | tostring') \
   && { [ -z "$ARM" ] || "$CONV/deferred-dispatch.sh" disarm "$SUBJECT" --reason "$WHY"; } \
-  && { [ -z "$ROUTE" ] || [ "$ROUTE" = human ] || gc bd update "$SUBJECT" --unset-metadata gc.routed_to; } \
+  && { [ -z "$ROUTE" ] || gc bd update "$SUBJECT" --unset-metadata gc.routed_to; } \
   && echo "$SUBJECT carries no arm and no pool route"
 ```
 

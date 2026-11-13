@@ -1171,13 +1171,13 @@ func asksAPerson(b Blocker) bool {
 }
 
 // demand reports whether an open blocker is one a person owes that is not a
-// human gate: a ruling only the operator can give (a `decision`), or a bead
-// routed to the operator. It is prstatus.IsPersonBlocker, the rule a PR's held:
-// blocked value reads, beside the human gate its held: gate value reads, so one
-// gate never counts as both, whatever its route.
+// human gate: a ruling only the operator can give (a `decision`), or a
+// conversation, which holds a PR's merge until it closes. It is
+// prstatus.IsPersonBlocker, the rule a PR's held: blocked value reads, beside
+// the human gate its held: gate value reads, so one gate never counts as both.
 func demand(b Blocker) bool {
 	return prstatus.IsPersonBlocker(prstatus.Blocker{ID: b.ID, Status: b.Status, IssueType: b.IssueType, AwaitType: b.AwaitType,
-		Assignee: b.Assignee, Metadata: map[string]string{mdRoutedTo: b.RoutedTo}})
+		Assignee: b.Assignee})
 }
 
 // prMachine is what the merge cadence can do with this anchor on its next pass.

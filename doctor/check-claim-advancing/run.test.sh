@@ -398,14 +398,14 @@ OUT=$(run_check); RC=$?
 eq "$RC" "0" "a step routed to a pool with no running session is silent"
 has "$OUT" "no running session" "the note says the pool is empty"
 
-# A route nothing answers is I3's finding, and reporting it here too would
-# double-report one defect.
+# `gc sling` refuses a target the city does not configure, so a route that names
+# no agent was written by hand or outlived its agent. It is a note.
 sessions "$(live hq-1 pool-1 "" 30 rig/pool.polecat)"
 agents "$(agent rig/other.agent false 2)"
 OUT=$(run_check); RC=$?
-eq "$RC" "0" "a route that names no agent is left to I3"
+eq "$RC" "0" "a route that names no agent is a note, not a finding"
 has "$OUT" "names no agent" "the note says the address is unreachable"
-has "$OUT" "I3" "the note hands the finding to the check that owns it"
+has "$OUT" "a person wrote this route by hand" "the note says how such a route arises"
 clear_stores
 
 # --- 14c. a full pool is backpressure, not starvation ---------------------

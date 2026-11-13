@@ -1449,29 +1449,22 @@ has "$out" "no external APPROVED review" "the approval hold fires"
 eq "$(pinned V5)" "settled@sha-84" "the cadence is done; the pull request waits on an approval"
 
 echo "# recording a verdict moves no route"
-store "[$(anchor V8 87 ',"gc.routed_to":"human"'), $(rev V8)]"
+store "[$(anchor V8 87 ',"gc.routed_to":"rig/gc-toolkit.polecat"'), $(rev V8)]"
 : > "$STUB_DEPS"
 printf '%s' "$(prview 87 OPEN CLEAN)" > "$GH_DIR/pr_view_87.json"
 echo '[]' > "$GH_DIR/reviews_87.json"
 out=$("$SUT" 2>&1)
 eq "$(pinned V8)" "settled@sha-87" "the verdict is recorded"
-eq "$(meta V8 'gc.routed_to')" "human" "…and the anchor keeps the route it carried"
+eq "$(meta V8 'gc.routed_to')" "rig/gc-toolkit.polecat" "…and the anchor keeps the route it carried"
 
 echo "# an open blocker is progressing only when an automated actor holds it, a pool among them"
 store "[$(anchor V6 85), $(rev V6),
-        {\"id\":\"rw-v6\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"gc.routed_to\":\"rig/gc-toolkit.polecat\"}},
-        $(anchor V7 86), $(rev V7),
-        {\"id\":\"dm-v7\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"gc.routed_to\":\"human\"}}]"
-printf 'rw-v6|blocks|V6\ndm-v7|blocks|V7\n' > "$STUB_DEPS"
+        {\"id\":\"rw-v6\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"gc.routed_to\":\"rig/gc-toolkit.polecat\"}}]"
+printf 'rw-v6|blocks|V6\n' > "$STUB_DEPS"
 printf '%s' "$(prview 85 OPEN CLEAN)" > "$GH_DIR/pr_view_85.json"
-printf '%s' "$(prview 86 OPEN CLEAN)" > "$GH_DIR/pr_view_86.json"
 approved 85
-approved 86
 out=$("$SUT" 2>&1)
 eq "$(pinned V6)" "progressing@sha-85" "a pool-routed rework child is an actor that will act"
-# A blocker routed to a person has no automated actor behind it, so it must not
-# read as the machine working.
-eq "$(machine V7)" "<absent>" "a blocker routed to a person is not the machine progressing"
 
 echo "# a human gate blocking the anchor is that person's hold: no machine state"
 # A gate carries no route, so a reader that did not know its await type would
@@ -1490,10 +1483,9 @@ eq "$(machine V7g)" "<absent>" "…and records no machine state: neither progres
 # is recorded twice: pr.machine_cause, the value a reader keys on, and
 # pr.machine_reason, the sentence a person reads.
 echo "# an UNROUTED blocker no pool will claim records blocked, naming the holder"
-# An unrouted rework husk vetoes the merge, but no pool will claim it (unlike V6)
-# and no human route makes it an `asking` demand (unlike V7). It is neither
-# progressing nor silence — record blocked so the board stops reading it as
-# awaiting-review.
+# An unrouted rework husk vetoes the merge, but no pool will claim it (unlike V6).
+# It is neither progressing nor silence — record blocked so the board stops
+# reading it as awaiting-review.
 store "[$(anchor BK1 92), $(rev BK1),
         {\"id\":\"rw-bk1\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{}}]"
 printf 'rw-bk1|blocks|BK1\n' > "$STUB_DEPS"
