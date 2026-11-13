@@ -88,6 +88,14 @@ step: continue, or jump to next-iteration, which pours and ASSIGNS the next
 wisp before burning this one — a failed assign rolls the pour back and keeps
 the current wisp.
 
+The wisp is poured root-only, so its steps are not beads. Read them from the
+formula: `gc formula show mol-witness-patrol` lists them, and this prints one
+step's text, with the vars the pour passed filled in:
+
+```bash
+gc formula show mol-witness-patrol --var binding_prefix='gc-toolkit.' --json | jq -r '.steps[] | select(.id == "<step id>") | .description'
+```
+
 **A pass ends at next-iteration.** That step leaves the next wisp assigned and
 deferred an hour and ends your turn, and once the hour has passed the
 controller's reassignment restart runs the next pass in a fresh session.
@@ -338,6 +346,30 @@ durable work belongs in the repo (docs/file-structure.md) and a returning
 session may need `mkdir -p` first. Keep build artifacts and whole-store bead
 dumps out of scratch: reference a binary at its build path, and ask for the
 narrow `gc bd list` rather than writing `--all` to a file.
+
+
+
+## Where to search
+
+Search only inside the city (`$GC_CITY_PATH`), your rig or worktree, and
+`$TMPDIR` or your scratchpad. Never search the home folder (`~`), `/Users` or
+the disk root (`/`): on macOS such a search reaches folders the system guards
+with a privacy prompt, nobody answers the prompt, and the search waits until
+the tool's time limit ends it. Look up anything else where it lives:
+
+- a formula: `gc formula show <name>`, whose `--json` carries each step's text
+  under `.steps[]`, or `gc formula list`;
+- the pack's scripts: `"$(gc gc-toolkit scripts-dir)"`;
+- the packs the city imports, and their sources: `gc import list`;
+- Gas City's own source: the rig that checks it out (`gc rig list`), with the
+  core pack at `internal/bootstrap/packs/core` and bd at `examples/bd`;
+- a skill: `gc skill list`;
+- a Go module's source, such as beads: the `Dir` that
+  `go mod download -json <module>` prints, run in the repo that depends on it;
+- a command: `command -v <name>`;
+- a node package: the worktree's own `node_modules`, or its package manager;
+- Claude session transcripts: `~/.claude/projects/`, in the folder named for
+  the session's working directory with each `/` and `.` turned into `-`.
 
 
 

@@ -48,7 +48,8 @@ what puts it back on your hook.
 
 Pass every var the formula declares. A restart runs this pour and a looping
 patrol runs the formula's own next-iteration pour; the two have to seed the
-same values, which mirror `[vars]` in `formulas/mol-deacon-patrol.toml`.
+same values, which mirror the defaults `gc formula show mol-deacon-patrol`
+lists for its variables.
 
 ```bash
 # >>> patrol-wisp-reconcile
@@ -101,6 +102,14 @@ assign rolls the pour back and keeps the current wisp. Do NOT enter a
 `gc hook`. A turn you end anyway comes back as Stop hook feedback from the
 patrol-continue hook, which hands you the next cycle; run it
 (docs/patrol-continue.md).
+
+The wisp is poured root-only, so its steps are not beads. Read them from the
+formula: `gc formula show mol-deacon-patrol` lists them, and this prints one
+step's text, with the vars the pour passed filled in:
+
+```bash
+gc formula show mol-deacon-patrol --city="$GC_CITY_PATH" --var binding_prefix='{{ .BindingPrefix }}' --var event_timeout='600' --var doctor_interval='3600' --json | jq -r '.steps[] | select(.id == "<step id>") | .description'
+```
 
 ## Findings
 
@@ -168,3 +177,5 @@ back to skipping it.
 {{ template "work-quality-system" . }}
 
 {{ template "scratch-reclaim" . }}
+
+{{ template "where-to-search" . }}
