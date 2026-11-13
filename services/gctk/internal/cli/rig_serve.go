@@ -38,9 +38,15 @@ no address, and a start with them publishes a running copy whose publish
 command ended. A start with them while the copy's publish command runs, with
 another publish command or address pattern, an empty one included, fails with
 reason other-publisher and leaves the copy and its publish command running.
---check reports the copy's state and starts nothing. --stop ends the copy's
+When another mapping already publishes the copy's port, a start moves a copy it
+ran to another port, and fails with reason address-taken for a copy it found,
+which keeps running on its port for whoever uses it. A start that cannot stop a
+copy, because its process group survives SIGTERM and SIGKILL, fails with reason
+not-stopped and keeps the copy's record, so --check reports it and --stop ends
+it. --check reports the copy's state and starts nothing. --stop ends the copy's
 whole process group. Starts and stops of one checkout take turns: one that
-finds another under way waits for it to end, and acts on the copy it left.
+finds another under way waits for it to end, and acts on the copy it left. A
+check waits for neither.
 
 The sandbox is the one demo-engine-lib.sh defines, in the pack's scripts
 directory, which GCTK_SCRIPTS_DIR names. The serve command cannot read the
@@ -62,7 +68,9 @@ go to stderr.
   state          exit  meaning
   running        0     the copy runs and answers on its port as its own
   not-answering  1     --check: the copy runs and does not answer on its port
-                       as its own; a start waits for it to, and stops it when
+                       as its own, or a start or a stop of the checkout is
+                       under way and the copy's leader is not running; a
+                       start waits for the copy to answer, and stops it when
                        it does not
   died           1     --check: the copy's leader has ended
   none           3     --check: no copy of the checkout runs
