@@ -9,8 +9,9 @@
 #                nothing was held yet (converse-recheck-premise), or a stay
 #                stopped short of leaving the conversation waiting on all its
 #                work (converse-stay)
-#   waiting      the sitting stays for work that is still out, and an attach or
-#                a restart woke it early (converse-stay)
+#   waiting      the sitting stays for work that is still out, read right after
+#                its stay lands or when the sitting is back before that work
+#                closes (converse-stay)
 #   returned     the work the sitting stayed for has closed (converse-stay)
 #   none         this session holds no conversation (drain)
 #   stop         Gas City refused the claim to stop this session, as when a
@@ -216,7 +217,7 @@ stay_entry() {
   elif [ "$(printf '%s' "$row" | jq -r '(.status // "") | ascii_downcase')" = in_progress ]; then
     echo "ENTRY interrupted: conversation $c waits on work that is still open ($pending) but is still claimed, so a stay stopped short of leaving it to wait. Run the stay's call again."
   else
-    echo "ENTRY waiting: this sitting stays for work that is still open ($pending), and an attach or a restart woke it before that work closed."
+    echo "ENTRY waiting: this sitting stays for work that is still open ($pending)."
   fi
   echo "NEXT=converse-stay"
   printf '%s' "$row" | values
