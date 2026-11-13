@@ -30,6 +30,24 @@ func TestRigServeRefusesFlagsThatDoNotGoTogether(t *testing.T) {
 	}
 }
 
+// --lead counts as a mode once it is given, as --command does, so an empty
+// --lead says it needs a record, and one beside another mode says the two
+// exclude one another.
+func TestRigServeCountsLeadAsAModeOnceGiven(t *testing.T) {
+	f := newRigFixture(t)
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"serve", "--lead", ""}, "--lead needs a record"},
+		{[]string{"serve", "--check", "--lead", ""}, "exclude one another"},
+	} {
+		if code, out, errb := f.call(tc.args...); code != 2 || out != "" || !strings.Contains(errb, tc.want) {
+			t.Errorf("%v: exit %d, stdout %q, stderr %q, want a usage error (2) saying %q", tc.args, code, out, errb, tc.want)
+		}
+	}
+}
+
 func rigServeReport(t *testing.T, out string) map[string]any {
 	t.Helper()
 	var rep map[string]any

@@ -133,7 +133,7 @@ func newRigServeCmd(stdout, stderr io.Writer) *cobra.Command {
 // checkRigServeOpts says why the flags do not go together, or returns "".
 func checkRigServeOpts(o rigServeOpts) string {
 	modes := 0
-	for _, on := range []bool{o.given("command"), o.check, o.stop, o.lead != ""} {
+	for _, on := range []bool{o.given("command"), o.check, o.stop, o.given("lead")} {
 		if on {
 			modes++
 		}
