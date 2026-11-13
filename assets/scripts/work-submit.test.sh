@@ -43,7 +43,9 @@ cp "$HERE/work-submit.sh" "$HERE/work-lib.sh" "$HERE/decline.sh" "$HERE/claim-cl
 export REAL_GIT REAL_FIND LOG="$TMP/log" STORE="$TMP/store.json"
 
 # git: push and ls-remote can be made to fail, and a push, a worktree's removal
-# and a branch's delete are logged, whatever directory -C names.
+# and a branch's delete are logged, whatever directory -C names. LS_REMOTE_DOWN
+# fails the first read of origin, as an unreachable remote does: git prints why
+# and exits 128.
 cat > "$BIN/git" <<'SH'
 #!/usr/bin/env bash
 dir=()
@@ -53,6 +55,7 @@ case "${1:-}" in
     printf 'push %s\n' "$*" >> "$LOG"
     [ -z "${PUSH_FAIL:-}" ] || { echo "remote: refused (stub)" >&2; exit 1; } ;;
   ls-remote)
+    [ -z "${LS_REMOTE_DOWN:-}" ] || { echo "fatal: unable to access origin (stub)" >&2; exit 128; }
     [ -z "${LS_REMOTE_WRONG:-}" ] || { [ ! -e "$LS_REMOTE_WRONG" ] || { printf 'deadbeef\trefs/heads/x\n'; exit 0; }; : > "$LS_REMOTE_WRONG"; } ;;
   branch)
     case "${2:-}" in -D) printf 'release %s\n' "${3:-}" >> "$LOG" ;; esac ;;
@@ -483,6 +486,15 @@ go "LS_REMOTE_WRONG=$TMP/ls-seen-$N"
 eq "$RC" 1 "(12) a ref on origin that is not HEAD: stops"
 has "$OUT" "PUSH VERIFICATION FAILED" "(12) says so"
 eq "$(field assignee)" "" "(12) nothing is handed off"
+prepare polecat/tk-w "$FRESH"
+go LS_REMOTE_DOWN=1
+eq "$RC" 1 "(12b) a read of origin that does not answer: stops"
+has "$OUT" "ORIGIN UNREAD" "(12b) says origin's read did not answer"
+no "$OUT" "moved under you" "(12b) …never that the branch moved"
+eq "$(pushed)" 0 "(12b) nothing is pushed"
+eq "$(field assignee)" "" "(12b) nothing is handed off"
+eq "$(closed_step)" "in_progress" "(12b) the step stays open"
+eq "$(tail -n 1 "$LOG")" "drain" "(12b) the session drains"
 
 echo "# the bring-current guard holds the handoff"
 prepare polecat/tk-w "$FRESH"

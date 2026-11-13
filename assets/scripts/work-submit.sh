@@ -351,10 +351,19 @@ fi
 # The commit origin's branch holds as this run reads it: the push goes under the
 # lease on it (branch-push.sh), so a push someone made after this read is never
 # overwritten, and it is where the bring-current guard starts reading when no
-# resume recorded a start. No branch on origin is a branch that must not exist.
-PRE_PUSH_HEAD=$(git ls-remote origin "refs/heads/$CURRENT_BRANCH" 2>/dev/null | awk '{print $1}')
-LEASE=(--new)
-[ -z "$PRE_PUSH_HEAD" ] || LEASE=(--from "$PRE_PUSH_HEAD")
+# resume recorded a start. ls-remote --exit-code exits 2 for a branch origin
+# does not carry, a branch that must not exist yet, as branch-push.sh's
+# --from-origin reads it. Any other exit is a read that did not answer, which
+# says nothing about the branch, so nothing is pushed.
+LS_OUT=$(git ls-remote --exit-code --heads origin "refs/heads/$CURRENT_BRANCH" 2>&1)
+case $? in
+  0) PRE_PUSH_HEAD=$(printf '%s' "$LS_OUT" | awk 'NR == 1 { print $1 }'); LEASE=(--from "$PRE_PUSH_HEAD") ;;
+  2) PRE_PUSH_HEAD=""; LEASE=(--new) ;;
+  *)
+    echo "ORIGIN UNREAD: $CURRENT_BRANCH on origin did not read, so nothing was pushed and $WORK_ID stays with this run. Whether the branch is there is unknown, not absent; re-run submit-and-exit once origin answers: $(printf '%s' "$LS_OUT" | tr -s '[:space:]' ' ')" >&2
+    gc runtime drain-ack
+    exit 1 ;;
+esac
 if ! "$SCRIPT_DIR/branch-push.sh" --repo "$PWD" --branch "$CURRENT_BRANCH" --head HEAD "${LEASE[@]}"; then
   echo "PUSH FAILED: $WORK_ID stays with this run. A branch that moved under you, or a head that does not hold it, means: re-fetch, MERGE origin in, and retry. Never force-push: branches are brought current by merge, never rebase." >&2
   gc runtime drain-ack
