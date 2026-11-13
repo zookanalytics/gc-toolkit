@@ -2,14 +2,10 @@
 # Hermetic test for assets/scripts/pr-facts.sh — external PR facts, no merge
 # authority. Covers: recording an out-of-band merge (never with an empty
 # merged_sha); abandoned (+ a human gate); retargeted (+ a human gate, check
-# markers cleared, human-routed); BLOCKED -> a gate only for an unresolved-thread
-# block (merge-blocked-threads, read from reviewThreads because reviewDecision is
-# masked while threads are open; no guess when the read fails, and an operator
-# merge_hold left alone), and none while the city's own feedback work on the PR
-# is live: an open one is withdrawn then, and the gate is filed again once that
-# work closes, with no quiet window kept by the withdrawal, while a person's
-# answer keeps one. A pending required approving review files no gate
-# and any stale merge-blocked-approval gate is retired; CONFLICTING -> one rework child per head (dedup on
+# markers cleared, human-routed); BLOCKED -> no gate, whether an unresolved
+# review thread or a pending required approving review holds the PR, and any
+# open merge-blocked-threads or merge-blocked-approval gate is retired;
+# CONFLICTING -> one rework child per head (dedup on
 # branch+head, holds and a live human gate veto, unstamped orphans adopted, a
 # supersession hold from branch-supersession.sh vetoes — asked only on an
 # approved PR, after the dedup, and only about the head GitHub reported),
@@ -53,10 +49,9 @@
 # a body review that frames its round can be ruled restates.
 # Write-back: EYES on a routed comment; a question-mark answer naming the gate
 # while a comment's batch waits on an open one, or its finding on a needs-you
-# ruling; a question-mark answer in the thread of a declined or deferred
-# finding, which is left open for the operator, saying that resolving it accepts
-# the ruling and a reply in it is ruled as new feedback, and the ruling alone in
-# a thread the operator already resolved; once the batch's bead closes and the
+# ruling; the ruling alone in the thread of a declined or deferred finding,
+# which the next pass resolves once it reads the answer recorded, a reply in a
+# thread the city resolved routing as feedback; once the batch's bead closes and the
 # comment's finding has closed,
 # one check-mark answer naming what resolved it and EYES traded for THUMBS_UP, in the
 # thread (resolved behind it) for an inline comment and on the Conversation tab,
@@ -903,12 +898,12 @@ echo "# a pre-recorded disposition withdraws the PR's other merge-path gates bef
 # closed with its disposition recorded, so there is no merge left to hold, and
 # none of them may keep the anchor from closing.
 : > "$STUB_DEPS"
-store "[$(anchor F2z 133 ',"gc.pr_close_disposition_kind":"folded","gc.pr_close_disposition_successor":"tk-z"'), $(hgate VC1 F2z pr-comments.133.5.7), $(hgate VU1 F2z pr-unengaged-threads.133.sha-133), $(hgate VB1 F2z merge-blocked-threads), $(hgate VT3 F2z pr-retargeted.133), $(hgate VN3 F2z pr-fix-noncode.133 deferred), $(hgate VK3 F2z pr-fix-capped.133), $(hgate VM3 F2z pr-fix-unmoved.133)]"
+store "[$(anchor F2z 133 ',"gc.pr_close_disposition_kind":"folded","gc.pr_close_disposition_successor":"tk-z"'), $(hgate VC1 F2z pr-comments.133.5.7), $(hgate VU1 F2z pr-unengaged-threads.133.sha-133), $(hgate VT3 F2z pr-retargeted.133), $(hgate VN3 F2z pr-fix-noncode.133 deferred), $(hgate VK3 F2z pr-fix-capped.133), $(hgate VM3 F2z pr-fix-unmoved.133)]"
 printf '%s' "$(prview 133 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_133.json"
 : > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
 out=$(run)
 eq "$(bstatus F2z)" "closed" "the anchor closes in the same pass"
-for v in VC1 VU1 VB1 VT3 VN3 VK3 VM3; do
+for v in VC1 VU1 VT3 VN3 VK3 VM3; do
   eq "$(bstatus "$v")" "closed" "merge-path gate $v is withdrawn"
 done
 has "$(creason VC1)" "moot: F2z disposed (folded -> tk-z)" "…cleared moot, naming the disposition"
@@ -1730,104 +1725,31 @@ fi # part rework
 # watermark and the thread reads behind it ====
 if part posture; then
 
-echo "# BLOCKED on unresolved threads (thread resolution required): merge-blocked-threads"
-store "[$(anchor B1 35)]"
+echo "# a BLOCKED PR files no gate: neither an unresolved review thread nor a pending approval asks a person anything"
+# The write-back resolves every thread the city rules on, and a thread only a
+# person can answer waits on a gate of its own, so a thread that branch
+# protection holds the merge on is no question for one. B1's PR holds an
+# unresolved thread under a rule that requires threads resolved. B2's waits only
+# on a required approving review, the operator's own review queue.
+store "[$(anchor B1 35), $(anchor B2 36)]"
 printf '%s' "$(prview 35 OPEN BLOCKED MERGEABLE)" > "$GH_DIR/pr_view_35.json"
-echo '{"threads":[{"id":"tb1a","isResolved":false},{"id":"tb1b","isResolved":true}]}' > "$GH_DIR/threads_35.json"
-printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":true,"required_approving_review_count":1}}]' > "$GH_DIR/rules_main.json"
-: > "$STUB_ESC_LOG"
-out=$(run)
-has "$out" "PR#35 BLOCKED on 1 unresolved review thread(s)" "the arm names the unresolved-thread cause and counts only the open ones"
-has "$(cat "$STUB_ESC_LOG")" "--subject B1 --key merge-blocked-threads" "a gate is filed under the thread-cause key"
-has "$(cat "$STUB_ESC_LOG")" "--key merge-blocked-threads --quiet-window 86400" "…declaring the standing quiet window, since every pass detects the blocked merge again"
-
-echo "# BLOCKED with thread resolution OFF escalates nothing — the open thread is not the gate, and a pending approval is state"
-store "[$(anchor B5 41)]"
-printf '%s' "$(prview 41 OPEN BLOCKED MERGEABLE)" > "$GH_DIR/pr_view_41.json"
-echo '{"threads":[{"id":"tb5","isResolved":false}]}' > "$GH_DIR/threads_41.json"
-printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":false,"required_approving_review_count":1}}]' > "$GH_DIR/rules_main.json"
-: > "$STUB_ESC_LOG"
-out=$(run)
-eq "$(cat "$STUB_ESC_LOG")" "" "an open thread with thread-resolution off is not the gate, and a required approving review is state, not a question"
-
-echo "# BLOCKED solely on a required approving review files NO gate (the operator's review queue is state)"
-store "[$(anchor B2 36)]"
 printf '%s' "$(prview 36 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_36.json"
+echo '{"threads":[{"id":"tb1a","isResolved":false},{"id":"tb1b","isResolved":true}]}' > "$GH_DIR/threads_35.json"
 echo '{"threads":[{"id":"tb2","isResolved":true}]}' > "$GH_DIR/threads_36.json"
 printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":true,"required_approving_review_count":1}}]' > "$GH_DIR/rules_main.json"
 : > "$STUB_ESC_LOG"
 out=$(run)
-eq "$(cat "$STUB_ESC_LOG")" "" "a PR blocked only on a required approving review escalates nothing"
-hasnt "$out" "BLOCKED awaiting approval" "…and the removed approval arm no longer names the cause"
-
-echo "# BLOCKED that neither a required thread nor a required approval explains escalates nothing"
-store "[$(anchor B6 43)]"
-printf '%s' "$(prview 43 OPEN BLOCKED MERGEABLE)" > "$GH_DIR/pr_view_43.json"
-printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":false,"required_approving_review_count":0}}]' > "$GH_DIR/rules_main.json"
-: > "$STUB_ESC_LOG"
-out=$(run)
-eq "$(cat "$STUB_ESC_LOG")" "" "an unmodeled cause is not escalated as a guess"
-
-echo "# BLOCKED whose reviewThreads cannot be read (thread resolution required) escalates no guessed cause"
-store "[$(anchor B3 37)]"
-printf '%s' "$(prview 37 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_37.json"
-echo '{"threads":[{"id":"tb3","isResolved":false}]}' > "$GH_DIR/threads_37.json"
-printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":true,"required_approving_review_count":1}}]' > "$GH_DIR/rules_main.json"
-: > "$STUB_ESC_LOG"
-out=$(STUB_GQL_READ_FAIL=1 run)
-eq "$(cat "$STUB_ESC_LOG")" "" "an unreadable connection escalates nothing — never a guessed cause"
-
-echo "# BLOCKED whose branch rules cannot be read escalates no guessed cause"
-store "[$(anchor B7 44)]"
-printf '%s' "$(prview 44 OPEN BLOCKED MERGEABLE)" > "$GH_DIR/pr_view_44.json"
-printf '{"message":"Not Found"}' > "$GH_DIR/rules_main.json"
-: > "$STUB_ESC_LOG"
-out=$(run)
-eq "$(cat "$STUB_ESC_LOG")" "" "unreadable branch rules escalate nothing, not a guess"
-
-echo "# a BLOCKED PR under an operator merge_hold is their gate, left unescalated"
-store "[$(anchor B4 38 ',"merge_hold":"true"')]"
-printf '%s' "$(prview 38 OPEN BLOCKED MERGEABLE)" > "$GH_DIR/pr_view_38.json"
-echo '{"threads":[{"id":"tb4","isResolved":false}]}' > "$GH_DIR/threads_38.json"
-printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":true,"required_approving_review_count":1}}]' > "$GH_DIR/rules_main.json"
-: > "$STUB_ESC_LOG"
-out=$(run)
-eq "$(cat "$STUB_ESC_LOG")" "" "an operator merge_hold leaves the BLOCKED escalation unsent"
-
-echo "# BLOCKED on a thread holding only the city's finding comments escalates nothing; one a human wrote in still does"
-# The write-back posts a ruled finding as a review thread, through pr-post.sh and
-# so carrying the city's mark, and resolves it once a fixed finding closes. While
-# only the city has written in it, it asks nothing of a person. BF2's thread holds
-# the same finding comment and a human reply. BF3's one comment carries the
-# finding marker but is not the city's own post, so it is a thread like any other.
-# BF4's holds only the city's post of a deferred finding, whose answer leaves the
-# thread open for the operator to accept or overrule, so it waits on a person.
-store "[$(anchor BF1 207), $(anchor BF2 208), $(anchor BF3 210), $(anchor BF4 213)]"
-for n in 207 208 210 213; do printf '%s' "$(prview "$n" OPEN BLOCKED MERGEABLE)" > "$GH_DIR/pr_view_$n.json"; done
-bfc='{"id":"FC-b","databaseId":9200,"author":{"login":"gc-city-bot"},"body":"**Finding from the codex review, ruled must-fix** (FB)\n<!-- gc-finding:FB -->\n\n<!-- gc:city -->","reactionGroups":[]}'
-printf '{"threads":[{"id":"FT-207","isResolved":false,"comments":{"nodes":[%s]}}]}' "$bfc" > "$GH_DIR/threads_207.json"
-printf '{"threads":[{"id":"FT-208","isResolved":false,"comments":{"nodes":[%s,{"id":"NC-208","databaseId":300,"author":{"login":"johnzook"},"body":"why not fix it here?","reactionGroups":[]}]}}]}' "$bfc" > "$GH_DIR/threads_208.json"
-printf '{"threads":[{"id":"FT-210","isResolved":false,"comments":{"nodes":[{"id":"NC-210","databaseId":301,"author":{"login":"johnzook"},"body":"see <!-- gc-finding:FB --> above","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_210.json"
-bfo='{"id":"FC-o","databaseId":9201,"author":{"login":"gc-city-bot"},"body":"**Finding from the codex review, ruled deferred** (FO)\n**Outcome:** Deferred: follow-up tk-fo carries this after the merge.\n<!-- gc-finding:FO -->\n<!-- gc-finding:FO:answered -->\n<!-- gc-finding:FO:open -->\n\n<!-- gc:city -->","reactionGroups":[]}'
-printf '{"threads":[{"id":"FT-213","isResolved":false,"comments":{"nodes":[%s]}}]}' "$bfo" > "$GH_DIR/threads_213.json"
-printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":true,"required_approving_review_count":1}}]' > "$GH_DIR/rules_main.json"
-: > "$STUB_ESC_LOG"
-out=$(run)
-hasnt "$(cat "$STUB_ESC_LOG")" "--subject BF1 --key merge-blocked-threads" "a thread only the city's finding comments are in is not escalated: the write-back resolves it"
-has "$(cat "$STUB_ESC_LOG")" "--subject BF2 --key merge-blocked-threads" "…but one a human wrote in counts like any thread"
-has "$(cat "$STUB_ESC_LOG")" "--subject BF3 --key merge-blocked-threads" "…and so does one whose marker text is not the city's own post"
-has "$(cat "$STUB_ESC_LOG")" "--subject BF4 --key merge-blocked-threads" "…and so does one whose answer leaves it open for the operator"
-: > "$STUB_ESC_LOG"
-out=$(STUB_SELF_LOGIN_RC=1 run)
-eq "$(grep -c -- '--key merge-blocked-threads' "$STUB_ESC_LOG")" "0" "with no acting login no thread is put to a person, since the city's own findings cannot be told from anyone's"
+eq "$(cat "$STUB_ESC_LOG")" "" "neither an unresolved thread nor a pending approving review files a gate"
+hasnt "$out" "merge-blocked-threads" "…and the pass names no thread gate"
 rm -f "$GH_DIR/rules_main.json"
 
-echo "# the merge-blocked-approval gate category is retired: every open one is withdrawn, even with no live anchors"
+echo "# the merge-blocked-approval and merge-blocked-threads gate categories are retired: every open one is withdrawn, even with no live anchors"
 # A store whose PRs have all merged (no open pull_request anchor) is exactly
 # where the no-anchors early-exit would skip a tail sweep, so the retirement runs
 # before it. AV1 blocks a closed anchor (its PR merged); AV2 a live PR the board
 # still surfaces as state; the beads AV3 blocks do not read this pass; ATV is a
-# genuine unresolved-thread block under a different key.
+# thread gate on that live PR, which asks a person nothing either, since the
+# city resolves every thread it rules on.
 store "[{\"id\":\"MC1\",\"status\":\"closed\",\"title\":\"t\",\"notes\":\"\",\"metadata\":{\"merge_result\":\"merged\"}}, {\"id\":\"MO1\",\"status\":\"open\",\"title\":\"t\",\"notes\":\"\",\"metadata\":{\"pr_posture\":\"review_required@sha-9@2026-09-18T00:00:00Z\"}}, $(hgate AV1 MC1 merge-blocked-approval), $(hgate AV2 MO1 merge-blocked-approval), $(hgate AV3 MX1 merge-blocked-approval), $(hgate ATV MO1 merge-blocked-threads)]"
 : > "$STUB_ESC_LOG"
 out=$(STUB_DEP_GARBAGE="list AV3 --direction=up" run); rc=$?
@@ -1842,23 +1764,27 @@ has "$(creason AV2)" "It blocked MO1 open." "…its reason naming its own bead's
 eq "$(bstatus AV3)" "open" "a gate whose beads do not read this pass is left, never withdrawn on a read that did not land"
 eq "$(creason AV3)" "<absent>" "…and nothing is written on it"
 has "$out" "gate AV3 — the beads it blocks are unreadable this pass" "…and the fail-closed skip is reported"
-eq "$(bstatus ATV)" "open" "a genuine unresolved-thread gate (different key) is untouched by the approval sweep"
+eq "$(bstatus ATV)" "closed" "an open merge-blocked-threads gate is withdrawn the same way"
+has "$(creason ATV)" "moot: retired by pr-facts: the city resolves every review thread it rules on" "…moot, with the reason its own key asks nothing"
+has "$(creason ATV)" "this cadence files no merge-blocked-threads gates. It blocked MO1 open." "…naming the bead it blocked"
+has "$out" "retired stale merge-blocked-threads gate ATV (it blocked MO1 open)" "…and the withdrawal is reported"
 eq "$(cat "$STUB_ESC_LOG")" "" "the sweep files nothing — it only withdraws"
 
 # A gate resolves whatever its assignee, so one a person was assigned is
 # withdrawn like the rest. A resolve that does not land leaves its gate open and
 # reported, and the sweep goes on to the next gate; a gate listing that does not
 # read withdraws nothing.
-echo "# the approval retire withdraws an assigned gate, and a refused resolve leaves it for the next pass"
-store "[{\"id\":\"MC2\",\"status\":\"closed\",\"title\":\"t\",\"notes\":\"\",\"metadata\":{\"merge_result\":\"merged\"}}, $(hgate AV4 MC2 merge-blocked-approval open hq-sitting), $(hgate AV5 MC2 merge-blocked-approval), $(hgate AV6 MC2 merge-blocked-approval)]"
+echo "# the retirement withdraws an assigned gate, and a refused resolve leaves it for the next pass"
+store "[{\"id\":\"MC2\",\"status\":\"closed\",\"title\":\"t\",\"notes\":\"\",\"metadata\":{\"merge_result\":\"merged\"}}, $(hgate AV4 MC2 merge-blocked-approval open hq-sitting), $(hgate AV5 MC2 merge-blocked-approval), $(hgate AV6 MC2 merge-blocked-approval), $(hgate TV4 MC2 merge-blocked-threads open hq-sitting)]"
 out=$(STUB_GATE_LIST_FAIL=1 run); rc=$?
 eq "$rc" 0 "an unreadable gate listing does not fail the pass"
-has "$out" "merge-blocked-approval gate sweep skipped — could not list the store's gates" "…it is reported"
-eq "$(bstatus AV4),$(bstatus AV5),$(bstatus AV6)" "open,open,open" "…and nothing is withdrawn on it"
+has "$out" "retired-gate sweep (merge-blocked-approval, merge-blocked-threads) skipped — could not list the store's gates" "…it is reported"
+eq "$(bstatus AV4),$(bstatus AV5),$(bstatus AV6),$(bstatus TV4)" "open,open,open,open" "…and nothing is withdrawn on it"
 out=$(STUB_GATE_RESOLVE_FAIL="AV5" run); rc=$?
 eq "$rc" 0 "a refused withdrawal does not fail the pass"
 eq "$(bstatus AV4)" "closed" "an approval gate assigned to a person is withdrawn over the assignment"
 has "$(creason AV4)" "It blocked MC2 closed." "…with its reason"
+eq "$(bstatus TV4)" "closed" "…and so is a thread gate assigned to one"
 eq "$(bstatus AV5)" "open" "a gate whose resolve is refused stays open for the next pass"
 has "$out" "could not retire stale merge-blocked-approval gate AV5" "…and the refusal is reported"
 eq "$(bstatus AV6)" "closed" "…while the sweep goes on to withdraw the next gate"
@@ -2142,6 +2068,24 @@ eq "$(meta AE6 pr_comment_watermark)" "5503" "…through the outstanding comment
 CB=$(jq -r '[ .[] | select((.metadata.anchor_bead // "") == "AE6") | select((.metadata.task_kind // "") == "rework") | .description ] | .[0] // ""' "$STUB_STORE")
 has "$CB" "no, this is still broken" "the work order carries the outstanding comment"
 hasnt "$CB" "(comment 5501)" "…and not the one our reply answered"
+
+echo "# a reply in a thread the city resolved behind a decline routes as new feedback"
+# The write-back resolves the thread of a declined or deferred finding once its
+# answer is on the PR, and a reply does not reopen it. The reviewer's reply
+# (6973) comes after the city's last post in the thread, its decline (6972), so
+# it is outstanding and routes as a batch of its own. The comment the decline
+# answered (6971) sits below the mark of the batch that carried it.
+store "[$(anchor AEr 497 ',"pr_comment_watermark":6971,"pr_comment_batch":"rework:AErk|0|6971","pr_comment_disposition":"rework:AErk"'), $(child AErk polecat/x497 ',"task_kind":"rework","anchor_bead":"AEr"' closed)]"
+printf '%s' "$(prview 497 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_497.json"
+echo '[]' > "$GH_DIR/reviews_497.json"
+printf '[{"id":6971,"user":{"login":"human1"},"body":"rename this flag","path":"a.sh","line":1},{"id":6972,"user":{"login":"gc-city-bot"},"body":"Declined: the name follows the upstream flag.\\n<!-- gc-writeback -->\\n<!-- gc-writeback-finding:AErf -->\\n\\n<!-- gc:city -->","path":"a.sh","line":1,"in_reply_to_id":6971},{"id":6973,"user":{"login":"human1"},"body":"upstream renamed it last week","path":"a.sh","line":1,"in_reply_to_id":6971}]' > "$GH_DIR/comments_497.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-497","isResolved":true,"viewerCanResolve":false,"comments":{"nodes":[{"id":"NC-497a","databaseId":6971,"fullDatabaseId":"6971","author":{"login":"human1"},"body":"rename this flag","reactionGroups":[]},{"id":"NC-497b","databaseId":6972,"fullDatabaseId":"6972","author":{"login":"gc-city-bot"},"body":"Declined: the name follows the upstream flag.\n<!-- gc-writeback -->\n<!-- gc-writeback-finding:AErf -->\n\n<!-- gc:city -->","reactionGroups":[]},{"id":"NC-497c","databaseId":6973,"fullDatabaseId":"6973","author":{"login":"human1"},"body":"upstream renamed it last week","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_497.json"
+out=$(run)
+eq "$(meta_pinned AEr pr_posture)" "commented@sha-497" "the reply in the resolved thread makes the PR commented"
+eq "$(meta AEr pr_comment_watermark)" "6973" "…and routes, through the reply"
+CB=$(jq -r '[ .[] | select((.metadata.anchor_bead // "") == "AEr") | select((.metadata.task_kind // "") == "rework") | select(.id != "AErk") | .description ] | .[0] // ""' "$STUB_STORE")
+has "$CB" "upstream renamed it last week" "the work order carries the reply"
+hasnt "$CB" "(comment 6971)" "…and not the comment the decline answered"
 
 echo "# a thread resolved with no reply of ours answers nothing"
 # Resolution alone does not say the city answered: the comment routes as it would
@@ -2715,13 +2659,10 @@ echo "# the full pass withdraws its own merge-path gates once their situation is
 # Each merge-path gate holds the merge and the dispatch arms while it is open,
 # so one that outlived its situation would hold them on a question nobody needs
 # answered. PR#601 is open and BLOCKED, its head at sha-601, on its recorded
-# base, with one thread still unresolved under a rule that requires them
-# resolved.
+# base.
 : > "$STUB_DEPS"
-store "[$(anchor SG1 601), $(hgate SGu1 SG1 pr-unengaged-threads.601.sha-OLD), $(hgate SGu2 SG1 pr-unengaged-threads.601.sha-601), $(hgate SGu3 SG1 pr-unengaged-threads.601.sha-PRIOR open hq-sitting), $(hgate SGb SG1 merge-blocked-threads), $(hgate SGc SG1 pr-comments.601.5.7), $(hgate SGk SG1 pr-fix-noncode.601), $(hgate SGr SG1 pr-retargeted.601), $(hgate SGa SG1 pr-abandoned.601), $(hgate SGq SG1 some-other-question)]"
+store "[$(anchor SG1 601), $(hgate SGu1 SG1 pr-unengaged-threads.601.sha-OLD), $(hgate SGu2 SG1 pr-unengaged-threads.601.sha-601), $(hgate SGu3 SG1 pr-unengaged-threads.601.sha-PRIOR open hq-sitting), $(hgate SGc SG1 pr-comments.601.5.7), $(hgate SGk SG1 pr-fix-noncode.601), $(hgate SGr SG1 pr-retargeted.601), $(hgate SGa SG1 pr-abandoned.601), $(hgate SGq SG1 some-other-question)]"
 printf '%s' "$(prview 601 OPEN BLOCKED MERGEABLE)" > "$GH_DIR/pr_view_601.json"
-echo '{"threads":[{"id":"t601","isResolved":false}]}' > "$GH_DIR/threads_601.json"
-printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":true,"required_approving_review_count":1}}]' > "$GH_DIR/rules_main.json"
 : > "$STUB_ESC_LOG"
 out=$(run)
 eq "$(bstatus SGu1)" "closed" "an unengaged-threads gate filed at an older head is withdrawn"
@@ -2731,7 +2672,6 @@ has "$out" "withdrew its stale pr-unengaged-threads.601.sha-OLD gate" "…and th
 eq "$(bstatus SGu2)" "open" "the one filed at the live head stays open"
 eq "$(bstatus SGu3)" "open" "an older head's gate a person is assigned stays open"
 has "$out" "its pr-unengaged-threads.601.sha-PRIOR gate is assigned to hq-sitting, who is left to clear it" "…left to them, and the pass says so"
-eq "$(bstatus SGb)" "open" "merge-blocked-threads stays open while a thread is still unresolved"
 eq "$(bstatus SGr)" "closed" "the retarget gate is withdrawn once the base is the recorded target again"
 has "$(creason SGr)" "moot: PR#601's base is main again" "…moot, naming the base"
 eq "$(bstatus SGa)" "closed" "the abandoned gate is withdrawn once the PR is open again"
@@ -2739,24 +2679,14 @@ eq "$(bstatus SGk)" "open" "a red-check park's gate stays open while GitHub does
 eq "$(bstatus SGc)" "open" "a feedback gate stays open: nothing read says its feedback was answered"
 eq "$(bstatus SGq)" "open" "a gate under a key the script does not file is never its to withdraw"
 
-echo "# …merge-blocked-threads once no thread it counts is unresolved"
+echo "# …and, once GitHub reads the PR mergeable, every red-check gate, with the park route"
 : > "$STUB_DEPS"
-store "[$(anchor SG3 603), $(hgate SGb3 SG3 merge-blocked-threads)]"
-printf '%s' "$(prview 603 OPEN BLOCKED MERGEABLE)" > "$GH_DIR/pr_view_603.json"
-echo '{"threads":[{"id":"t603","isResolved":true}]}' > "$GH_DIR/threads_603.json"
-out=$(run)
-eq "$(bstatus SGb3)" "closed" "merge-blocked-threads is withdrawn once every thread is resolved"
-has "$(creason SGb3)" "none it counts is left unresolved" "…saying so"
-
-echo "# …and, once GitHub reads the PR mergeable, every thread and red-check gate, with the park route"
-: > "$STUB_DEPS"
-store "[$(anchor SG2 602 ',"gc.routed_to":"human","gc.takeaway":"PR#602 parked"'), $(hgate SGb2 SG2 merge-blocked-threads), $(hgate SGk2 SG2 pr-fix-capped.602), $(hgate SGn2 SG2 pr-fix-noncode.602), $(hgate SGm2 SG2 pr-fix-unmoved.602 open operator), $(hgate SGc2 SG2 pr-comments.602.1.2)]"
+store "[$(anchor SG2 602 ',"gc.routed_to":"human","gc.takeaway":"PR#602 parked"'), $(hgate SGk2 SG2 pr-fix-capped.602), $(hgate SGn2 SG2 pr-fix-noncode.602), $(hgate SGm2 SG2 pr-fix-unmoved.602 open operator), $(hgate SGc2 SG2 pr-comments.602.1.2)]"
 printf '%s' "$(prview 602 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_602.json"
 : > "$STUB_ESC_LOG"
 out=$(run)
-eq "$(bstatus SGb2)" "closed" "merge-blocked-threads is withdrawn once the PR reads mergeable"
-has "$(creason SGb2)" "GitHub reads it mergeable (CLEAN)" "…saying why"
-eq "$(bstatus SGk2)/$(bstatus SGn2)" "closed/closed" "…and so are the red-check parks' gates"
+eq "$(bstatus SGk2)/$(bstatus SGn2)" "closed/closed" "the red-check parks' gates are withdrawn once the PR reads mergeable"
+has "$(creason SGk2)" "GitHub reads PR#602 mergeable with its checks passing (CLEAN)" "…saying why"
 eq "$(meta SG2 gc.routed_to)" "" "…and the park route the red-check arm wrote with them is cleared"
 has "$(creason SGk2)" "The anchor's park route is cleared with it." "…which the first of them withdrawn says"
 eq "$(bstatus SGm2)" "open" "…but not one a person is assigned"
@@ -2775,105 +2705,6 @@ eq "$(bstatus SGu4)" "open" "a gate read that does not answer withdraws nothing"
 has "$out" "PR#604's human gates did not read; no stale gate is withdrawn this pass" "…and the pass says so"
 out=$(run)
 eq "$(bstatus SGu4)" "closed" "the next pass that reads the gates withdraws it"
-
-echo "# BLOCKED on threads the city's own feedback work is answering files no gate until that work closes"
-# A comment batch's rework child, and the human-lane validation pass that rules
-# the batch's findings, answer the batch's review threads, and the write-back
-# resolves each thread once its fix lands, so while that work is live the block
-# asks nothing of a person. LF1's batch went to a rework a worker holds, LF2
-# carries an open human-lane validation pass, and a worker has hooked LF3's
-# rework. LN1's live rework was routed no comment batch, and its validation pass
-# rules another lane, so neither answers the threads. LN2's batch rework is
-# blocked, waiting for a person to move it. The children of LR1 and LR2 do not
-# read this pass.
-# A rework child of PR <num>'s comment batches, or with a lane, a validation
-# pass on that lane.
-fbkid() { # id anchor num status [lane]
-  jq -nc --arg id "$1" --arg a "$2" --arg n "$3" --arg st "$4" --arg l "${5:-}" --arg fix "$FIX" '
-    if $l == "" then
-      {id: $id, status: $st, assignee: (if $st == "open" or $st == "blocked" then "" else "rig/polecat-1" end), notes: "",
-       title: ("Address review comments on PR#" + $n + " (through review 0, comment 7)"),
-       metadata: {task_kind: "rework", anchor_bead: $a, branch: ("polecat/x" + $n), target: "main",
-                  prepare_mode: "merge", "gc.routed_to": $fix}}
-    else
-      {id: $id, status: $st, assignee: "", notes: "", title: ("Validate PR#" + $n + " feedback (through review 0, comment 7)"),
-       metadata: {task_kind: "validation", anchor_bead: $a, check_name: $l, reviewed_oid: ("sha-" + $n)}}
-    end'
-}
-# The batch ledger of an anchor whose feedback through comment 7 was routed to <rework>.
-routed_to() { printf ',"pr_comment_watermark":7,"pr_comment_batch":"rework:%s|0|7","pr_comment_disposition":"rework:%s"' "$1" "$1"; }
-blocked_on_a_thread() { # num...
-  local n
-  for n in "$@"; do
-    printf '%s' "$(prview "$n" OPEN BLOCKED MERGEABLE ',"labels":[]')" > "$GH_DIR/pr_view_$n.json"
-    printf '{"threads":[{"id":"t%s","isResolved":false}]}' "$n" > "$GH_DIR/threads_$n.json"
-  done
-  printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":true,"required_approving_review_count":1}}]' > "$GH_DIR/rules_main.json"
-}
-: > "$STUB_DEPS"
-store "[$(anchor LF1 741 "$(routed_to LFr1)"), $(fbkid LFr1 LF1 741 in_progress),
-        $(anchor LF2 742), $(fbkid LFv2 LF2 742 open human),
-        $(anchor LF3 743 "$(routed_to LFr3)"), $(fbkid LFr3 LF3 743 hooked),
-        $(anchor LN1 744), $(child LNm1 polecat/x744 ',"task_kind":"rework","anchor_bead":"LN1"' in_progress rig/polecat-1), $(fbkid LNv1 LN1 744 open correctness),
-        $(anchor LN2 745 "$(routed_to LNr2)"), $(fbkid LNr2 LN2 745 blocked),
-        $(anchor LR1 749 "$(routed_to LRr1)"), $(fbkid LRr1 LR1 749 in_progress), $(hgate LRg1 LR1 merge-blocked-threads),
-        $(anchor LR2 751 "$(routed_to LRr2)"), $(fbkid LRr2 LR2 751 in_progress)]"
-blocked_on_a_thread 741 742 743 744 745 749 751
-: > "$STUB_ESC_LOG"
-out=$(STUB_LIST_FAIL_ON="anchor_bead=LR" run)
-hasnt "$(cat "$STUB_ESC_LOG")" "--subject LF1 --key merge-blocked-threads" "a live rework child a comment batch was routed to files no gate on the threads it answers"
-has "$out" "PR#741 BLOCKED on 1 unresolved review thread(s), which the city's own feedback work (LFr1) is answering; no gate filed" "…and the pass names the work answering them"
-hasnt "$(cat "$STUB_ESC_LOG")" "--subject LF2 --key merge-blocked-threads" "…nor does an open human-lane validation pass"
-hasnt "$(cat "$STUB_ESC_LOG")" "--subject LF3 --key merge-blocked-threads" "…nor a batch's rework a worker has hooked"
-has "$(cat "$STUB_ESC_LOG")" "--subject LN1 --key merge-blocked-threads" "a live rework no batch was routed to, and a validation pass on another lane, answer no thread, so the gate is filed"
-has "$(cat "$STUB_ESC_LOG")" "--subject LN2 --key merge-blocked-threads" "…and it is filed while the batch's rework is blocked, waiting for a person"
-eq "$(bstatus LRg1)" "open" "a children read that does not answer withdraws no gate"
-has "$out" "whether the city's feedback work on PR#749 is live did not read; its merge-blocked-threads gate is left for the next pass" "…and the pass says so"
-hasnt "$(cat "$STUB_ESC_LOG")" "--subject LR2 --key merge-blocked-threads" "…and files none on a guess"
-has "$out" "PR#751 BLOCKED on 1 unresolved review thread(s), but whether the city's feedback work on them is live did not read; no gate filed (retry next pass)" "…which the pass says too"
-
-echo "# …an open gate is withdrawn while that work is live, and filed again once the work closes with a thread unresolved"
-# LW1's gate was filed before its batch's rework took the threads up, and LK1's
-# is assigned to a person. LP1 has no live work, and its newest answer under the
-# key is a person's moot, given after a withdrawal of this script's own.
-# A merge-blocked-threads gate on <subject> that closed at <at> with <reason>.
-mbtgate() { # id subject at reason
-  jq -nc --arg id "$1" --arg s "$2" --arg at "$3" --arg r "$4" \
-    '{id: $id, status: "closed", assignee: "", title: ("Rule on " + $s), description: "", notes: "",
-      issue_type: "gate", await_type: "human", await_id: "merge-blocked-threads", close_reason: $r, closed_at: $at, metadata: {}}'
-  printf '%s|blocks|%s\n' "$1" "$2" >> "$STUB_DEPS"
-}
-: > "$STUB_DEPS"
-store "[$(anchor LW1 746 "$(routed_to LWr1)"), $(fbkid LWr1 LW1 746 in_progress), $(hgate LWg1 LW1 merge-blocked-threads),
-        $(anchor LK1 747 "$(routed_to LKr1)"), $(fbkid LKr1 LK1 747 in_progress), $(hgate LKg1 LK1 merge-blocked-threads open hq-sitting),
-        $(anchor LP1 748),
-        $(mbtgate LPg1 LP1 2026-11-12T10:00:00Z "moot: PR#748's review threads are being answered by the city's own feedback work (LPr1), so no person is asked to resolve them yet."),
-        $(mbtgate LPg2 LP1 2026-11-12T11:00:00Z "moot: resolving these by hand")]"
-blocked_on_a_thread 746 747 748
-# The real label writer over gctk's derivation, so the label LW1's PR reads is
-# what the shared code path decides.
-printf '#!/usr/bin/env bash\nexec %q "$@"\n' "$HERE/pr-status-label.sh" > "$SD/pr-status-label.sh"
-chmod +x "$SD/pr-status-label.sh"
-: > "$STUB_ESC_LOG"
-out=$(run)
-rm -f "$SD/pr-status-label.sh"
-eq "$(bstatus LWg1)" "closed" "an open merge-blocked-threads gate is withdrawn while the batch's rework is live"
-has "$(creason LWg1)" "moot: PR#746's review threads are being answered by the city's own feedback work (LWr1)" "…moot, naming the work answering them"
-has "$(cat "$STUB_ESC_LOG")" "--retract --subject LW1 --key merge-blocked-threads" "…through human-gate.sh --retract"
-eq "$(grep -c -- '^--subject LW1 ' "$STUB_ESC_LOG")" "0" "…and no gate is filed in its place"
-eq "$(jq -r '[.labels[]?.name] | sort | join(",")' "$GH_DIR/pr_view_746.json")" "status: working" "…so the PR reads working, not held by a gate"
-eq "$(bstatus LKg1)" "open" "a gate a person is assigned is kept while the work is live"
-has "$out" "its merge-blocked-threads gate is assigned to hq-sitting, who is left to clear it" "…left to them, and the pass says so"
-has "$(cat "$STUB_ESC_LOG")" "--subject LP1 --key merge-blocked-threads --quiet-window 86400" "with no live work, a person's moot answer newest under the key keeps the standing quiet window"
-# The rework lands and closes, and the store records when the withdrawn gate closed.
-jq -c --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  'map(if .id == "LWr1" then .status = "closed" elif .id == "LWg1" then .closed_at = $at else . end)' \
-  "$STUB_STORE" > "$STUB_STORE.tmp" && mv "$STUB_STORE.tmp" "$STUB_STORE"
-: > "$STUB_ESC_LOG"
-out=$(run)
-has "$(cat "$STUB_ESC_LOG")" "--subject LW1 --key merge-blocked-threads --message PR#746 (" "once the work closes with a thread unresolved, the gate is filed again, with no quiet window: the answer it would weigh is the script's own withdrawal while the work was live"
-eq "$(bstatus LKg1)" "open" "…and the assigned gate still stands"
-rm -f "$GH_DIR/rules_main.json"
 
 fi # part posture
 
@@ -4613,36 +4444,37 @@ hasnt "$(gh_since "$mark")" "REACT" "…and no reaction"
 # The validator may overrule a human on the merits (finding declined), but it
 # owes them the reason on their PR: it stamps the answer (finding.reply) and the
 # row it answers (finding.comment_id), and the write-back posts that answer into
-# the thread, leading with the question mark and the ruling, and leaves the
-# thread open for the operator to accept it or push back, which the answer's
-# last line says how to do. A closed declined human finding carrying both.
+# the thread, leading with the ruling, and resolves the thread behind it once it
+# reads the answer recorded. A closed declined human finding carrying both.
 dfind() { # id anchor comment_id [reply]
   printf '{"id":"%s","status":"closed","assignee":"","notes":"declined: not an objection","title":"finding[human]: x","metadata":{"task_kind":"finding","anchor_bead":"%s","finding.lane":"human","finding.disposition":"declined","finding.source":"human:johnzook","finding.comment_id":"%s"%s}}' \
     "$1" "$2" "$3" "${4:+,\"finding.reply\":\"$4\"}"
 }
 
-echo "# a declined human objection is answered on its thread, and the thread is left open"
+echo "# a declined human objection is answered on its thread, and the next pass resolves the thread"
 store "[$(anchor WD1 47 "$(wb_meta human:VD1)"), $(dfind DF1 WD1 100 'The diff already asserts X in helper; no change needed.')]"
 printf '%s' "$(prview 47 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_47.json"
 threads 47 "$(one_thread 47)"
 out=$(run)
-has "$(treply 47 T-47)" "Declined: The diff already asserts X in helper; no change needed." "the validator's decline reason is posted into the raiser's thread, leading with the ruling"
+eq "$(treply 47 T-47 | head -n 1)" "Declined: The diff already asserts X in helper; no change needed." "the decline reason is posted into the raiser's thread as the ruling alone"
 hasnt "$(treply 47 T-47)" "✅" "…never with the check mark a fix carries"
-has "$(treply 47 T-47)" "❓ Declined: The diff already asserts X" "…but with the question mark, since the thread awaits the operator"
-has "$(treply 47 T-47)" "no change needed.
-
-Resolving the thread accepts the decline. To push back, reply in the thread; your reply is ruled as new feedback." "…and a line of its own saying that resolving the thread accepts the decline"
+hasnt "$(treply 47 T-47)" "❓" "…nor the question mark, since nothing in the thread waits on a person"
+hasnt "$(treply 47 T-47)" "Resolving the thread" "…nor a line asking anyone to resolve it"
 has "$(treply 47 T-47)" "<!-- gc-writeback -->" "…carrying the write-back marker"
-eq "$(tresolved 47 T-47)" "false" "…and the thread is left open for the operator to accept or overrule"
 eq "$(meta DF1 finding.reply_posted)" "1" "…and the finding is marked answered"
-echo "# …and a second pass answers the same thread nothing"
+eq "$(tresolved 47 T-47)" "false" "…while the thread waits for the pass that reads the answer recorded"
+echo "# …and the next pass resolves the thread behind the answer, posting nothing more"
 mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
 out=$(run)
-hasnt "$(gh_since "$mark")" "addPullRequestReviewThreadReply" "the answered decline is never replied to twice"
+eq "$(tresolved 47 T-47)" "true" "the thread is resolved behind the decline"
+hasnt "$(gh_since "$mark")" "REPLY" "…and the answered decline is never replied to twice"
+eq "$(thumbed 47 NC-47),$(reacted 47 NC-47)" "true,false" "…and the comment carries THUMBS_UP in place of EYES"
+mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
+out=$(run)
+hasnt "$(gh_since "$mark")" "REPLY" "a later pass writes nothing into the thread"
+hasnt "$(gh_since "$mark")" "RESOLVE" "…and resolves nothing again"
 
-echo "# a decline posted into a thread the operator already resolved is the ruling alone"
-# Resolving the thread accepted the ruling before its answer arrived, so the
-# answer asks for nothing more: no question mark and no line about resolving it.
+echo "# a decline posted into a thread the operator already resolved is the ruling alone, and resolves nothing"
 store "[$(anchor WDS 353 "$(wb_meta human:VDS)"), $(dfind DFS WDS 100 'The diff already asserts X in helper; no change needed.')]"
 printf '%s' "$(prview 353 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_353.json"
 threads 353 "$(one_thread 353 | jq -c '.threads[0].isResolved = true')"
@@ -4650,51 +4482,52 @@ mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
 out=$(run)
 eq "$(gh_since "$mark" | grep -c '^REPLY T-353$')" "1" "the decline is posted into the resolved thread"
 has "$(treply 353 T-353)" "Declined: The diff already asserts X in helper; no change needed." "…leading with the ruling"
-hasnt "$(treply 353 T-353)" "❓" "…with no question mark, since nothing in the thread awaits the operator"
-hasnt "$(treply 353 T-353)" "Resolving the thread" "…and no line asking them to resolve a thread they already resolved"
+hasnt "$(treply 353 T-353)" "❓" "…with no question mark"
+eq "$(gh_since "$mark" | grep -c '^RESOLVE T-353$')" "0" "…and the thread already resolved is not resolved again"
 eq "$(meta DFS finding.reply_posted)" "1" "…and the finding is marked answered"
-echo "# …and a later pass reads it back by its text, so a reopened thread gets no second answer"
+echo "# …and a later pass reads it back by its text, so a reopened thread gets no second answer, only the resolve"
 jq -c '.threads[0].isResolved = false' "$GH_DIR/threads_353.json" > "$TMP/t353.json" && mv "$TMP/t353.json" "$GH_DIR/threads_353.json"
 mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
 out=$(run)
 hasnt "$(gh_since "$mark")" "REPLY T-353" "the plain decline is not posted again once the thread reopens"
+eq "$(tresolved 353 T-353)" "true" "…and the thread is resolved behind it, as a fixed thread would be"
 
-echo "# the no-objection carve-out declines silently — no owed reply, no thread write"
+echo "# the no-objection carve-out declines silently — no owed reply, and the thread resolved"
 # A comment that raises no objection (a question the diff answers, praise) is
 # declined like a machine finding, with no --reply, so finding.reply is unset and
-# the write-back owes nothing: the thread is neither replied to nor resolved.
+# the write-back owes it no reply. Its closing answers it, so the thread is
+# resolved with nothing posted into it.
 store "[$(anchor WD3 48 "$(wb_meta human:VD3)"), $(dfind DF3 WD3 100)]"
 printf '%s' "$(prview 48 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_48.json"
 threads 48 "$(one_thread 48)"
 out=$(run)
 eq "$(treply 48 T-48)" "" "a no-objection decline owes no reply, so none is posted"
-eq "$(tresolved 48 T-48)" "false" "…and the thread is left untouched"
+eq "$(tresolved 48 T-48)" "true" "…and its thread is resolved"
+eq "$(thumbed 48 NC-48),$(reacted 48 NC-48)" "true,false" "…with the comment marked handled"
 eq "$(meta DF3 finding.reply_posted)" "<absent>" "…and the finding is not marked answered"
 
 # ---- a deferred or needs-you human finding owes its raiser an answer too -------
 # The write-back answers every human ruling that owes a reply, not only declines:
-# a deferred finding posts its follow-up id and leaves the thread open for the
-# operator to accept or overrule, a needs-you finding posts its gate's id and
-# leaves the thread UNRESOLVED (the operator still owes a ruling). A finding
-# carrying the disposition, its comment_id, and the owed reply.
+# a deferred finding posts its follow-up id and its thread is resolved behind
+# it, a needs-you finding posts its gate's id and leaves the thread UNRESOLVED
+# (the operator still owes a ruling). A finding carrying the disposition, its
+# comment_id, and the owed reply.
 xfind() { # id anchor comment_id disposition status reply
   printf '{"id":"%s","status":"%s","assignee":"","notes":"","title":"finding[human]: x","metadata":{"task_kind":"finding","anchor_bead":"%s","finding.lane":"human","finding.disposition":"%s","finding.source":"human:johnzook","finding.comment_id":"%s","finding.reply":"%s"}}' \
     "$1" "$5" "$2" "$4" "$3" "$6"
 }
 
-echo "# a deferred human objection posts its follow-up id into the thread and leaves it open"
+echo "# a deferred human objection posts its follow-up id into the thread, which the next pass resolves"
 store "[$(anchor WDF1 51 "$(wb_meta human:VDF1)"), $(xfind DFF1 WDF1 100 deferred closed 'Deferred — tracked as follow-up tk-fup1. It will be picked up after this merges.')]"
 printf '%s' "$(prview 51 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_51.json"
 threads 51 "$(one_thread 51)"
 out=$(run)
 has "$(treply 51 T-51)" "tracked as follow-up tk-fup1" "the deferred finding's follow-up id is posted into the raiser's thread"
 has "$(treply 51 T-51)" "<!-- gc-writeback -->" "…carrying the write-back marker"
-has "$(treply 51 T-51)" "❓ Deferred — tracked as follow-up tk-fup1" "…leading with the question mark and the ruling, which the reply already opens with"
-has "$(treply 51 T-51)" "after this merges.
-
-Resolving the thread accepts the deferral. To push back, reply in the thread; your reply is ruled as new feedback." "…and a line of its own saying that resolving the thread accepts the deferral"
-eq "$(tresolved 51 T-51)" "false" "…and the thread is left open for the operator to accept or overrule"
+eq "$(treply 51 T-51 | head -n 1)" "Deferred — tracked as follow-up tk-fup1. It will be picked up after this merges." "…leading with the ruling, which the reply already opens with, and nothing more"
 eq "$(meta DFF1 finding.reply_posted)" "1" "…and the finding is marked answered"
+out=$(run)
+eq "$(tresolved 51 T-51)" "true" "the next pass resolves the thread behind the deferral"
 
 echo "# a needs-you objection posts its gate's id into the thread but leaves it UNRESOLVED"
 store "[$(anchor WNU1 52 "$(wb_meta human:VNU1)"), $(xfind NUF1 WNU1 100 needs-you open 'This comment needs your decision — filed human gate tk-gat1. The review stays changes-requested until you clear it with your ruling and the work it calls for lands.')]"
@@ -4921,7 +4754,7 @@ out=$(run)
 eq "$(tresolved 217 FT-217)" "true" "once the identity can resolve it, the next pass does"
 eq "$(meta NF1 finding.pr_answered)" "1" "…and records the finding answered"
 
-echo "# a deferred machine finding's thread is answered and left open for the operator"
+echo "# a deferred machine finding's thread is answered and resolved, as a fixed one's is"
 store "[$(anchor MD 345 "$UTCUT"), $(mfind DF7 MD deferred closed 'assets/scripts/x.sh: parse_name' codex ',"finding.follow_up":"tk-fu7","finding.reply":"Deferred — tracked as follow-up tk-fu7: low risk. It will be picked up after this merges."')]"
 printf '%s' "$(prview 345 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_345.json"
 threads 345 '{"reviews":[],"threads":[],"issue_comments":[]}'
@@ -4929,12 +4762,34 @@ printf '[{"filename":"assets/scripts/x.sh","status":"modified"}]' > "$GH_DIR/fil
 out=$(run)
 TD=$(fthread 345 DF7)
 has "$(tbodies "$TD")" "**Outcome:** Deferred — tracked as follow-up tk-fu7" "the deferred finding is posted on its file with its outcome"
-has "$(tbodies "$TD")" "<!-- gc-finding:DF7:open -->" "…carrying the open line, since its thread waits for the operator"
+hasnt "$(tbodies "$TD")" ":open -->" "…with no open line, since nothing in its thread waits on a person"
 out=$(run)
 TD=$(fthread 345 DF7)
-eq "$(printf '%s' "$TD" | jq -r '.isResolved')" "false" "the next pass leaves the thread open"
+eq "$(printf '%s' "$TD" | jq -r '.isResolved')" "true" "the next pass resolves the thread behind the answer"
 eq "$(meta DF7 finding.pr_answered)" "1" "…and records the finding answered"
-has "$out" "finding DF7 is deferred; thread" "…saying it left the thread open"
+eq "$(printf '%s' "$TD" | jq -r '.comments.nodes | length')" "1" "…posting nothing more, its answer being in place"
+
+echo "# a finding thread whose answer carries the open line is resolved while it holds only the city's comments"
+# An answer on PR#356 carries the open line, and its finding is recorded
+# answered, so nothing re-answers it. Nothing else is in its thread, so the plan
+# resolves it. PR#357's open-line thread holds a reply of the reviewer's as
+# well, which is feedback of its own: that thread is left for the answer to the
+# reply. A human batch brings both anchors into the sweep.
+mfopen() { # num finding
+  printf '{"id":"FT-%s","isResolved":false,"viewerCanResolve":true,"comments":{"nodes":[{"id":"FC-%s","databaseId":%s01,"author":{"login":"gc-city-bot"},"reactionGroups":[],"body":"**Finding from the codex review, ruled deferred** (%s)\\n**Outcome:** Deferred: follow-up tk-fu carries this after the merge.\\n<!-- gc-finding:%s -->\\n<!-- gc-finding:%s:answered -->\\n<!-- gc-finding:%s:open -->\\n\\n<!-- gc:city -->"}]}}' \
+    "$1" "$1" "$1" "$2" "$2" "$2" "$2"
+}
+store "[$(anchor MO 356 "$UTCUT$(wb_meta rework:KMO)"), $(child KMO closed), $(mfind DF8 MO deferred closed 'assets/scripts/x.sh: parse_name' codex ',"finding.follow_up":"tk-fu","finding.pr_comment":"35601","finding.pr_answered":"1"'),
+  $(anchor MP 357 "$UTCUT$(wb_meta rework:KMP)"), $(child KMP closed), $(mfind DF9 MP deferred closed 'assets/scripts/x.sh: parse_name' codex ',"finding.follow_up":"tk-fu","finding.pr_comment":"35701","finding.pr_answered":"1"')]"
+printf '%s' "$(prview 356 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_356.json"
+printf '%s' "$(prview 357 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_357.json"
+threads 356 "{\"reviews\":[],\"issue_comments\":[],\"threads\":[$(mfopen 356 DF8)]}"
+threads 357 "$(printf '{"reviews":[],"issue_comments":[],"threads":[%s]}' "$(mfopen 357 DF9)" | jq -c '.threads[0].comments.nodes += [{id: "NC-357", databaseId: 35702, author: {login: "johnzook"}, body: "this should not wait", reactionGroups: []}]')"
+mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
+out=$(run)
+eq "$(tresolved 356 FT-356)" "true" "the thread holding only the city's comments is resolved"
+hasnt "$(gh_since "$mark")" "REPLY FT-356" "…with nothing posted into it"
+eq "$(tresolved 357 FT-357)" "false" "the one the reviewer replied in is left for the answer to the reply"
 
 echo "# a re-raise re-blocks: a re-review after a decline re-opens the human validation pass"
 # Declining closes the finding, so a still-standing objection re-adopts as a
@@ -5447,21 +5302,23 @@ hasnt "$(treply 314 T-314)" "Resolved" "the landed batch never claims the commen
 eq "$(tresolved 314 T-314)" "false" "…and the thread stays open for the ruling"
 eq "$(thumbed 314 NC-314)" "false" "…with the comment not marked resolved"
 
-echo "# a declined finding's answer leads with its ruling, marks the comment answered, and leaves the thread open"
+echo "# a declined finding's answer leads with its ruling, marks the comment answered, and the thread is resolved behind it"
 store "[$(anchor WT6 315 "$(wb_meta rework:KT6)"), $(child KT6 open), $(hfind FT6 WT6 100 900 declined closed 'The helper already asserts it; no change needed.')]"
 printf '%s' "$(prview 315 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_315.json"
 threads 315 "$(one_thread 315)"
 out=$(run)
 has "$(treply 315 T-315)" "Declined: The helper already asserts it; no change needed." "the decline is answered leading with its ruling"
 hasnt "$(treply 315 T-315)" "✅" "…not the check mark a fix carries"
-eq "$(tresolved 315 T-315)" "false" "…and its thread is left open for the operator to accept or overrule"
+eq "$(tresolved 315 T-315)" "false" "…while its thread waits for the pass that reads the answer recorded"
 mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
 out=$(run)
 eq "$(thumbed 315 NC-315),$(reacted 315 NC-315)" "true,false" "the next pass trades the comment's EYES for THUMBS_UP"
+eq "$(tresolved 315 T-315)" "true" "…and resolves the thread, though the batch's own bead is still open: the ruling has the last word"
 hasnt "$(gh_since "$mark")" "REPLY" "…without answering it twice"
 mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
 out=$(run)
 hasnt "$(gh_since "$mark")" "REACT" "a third pass writes no reaction"
+hasnt "$(gh_since "$mark")" "RESOLVE" "…and resolves nothing again"
 
 echo "# a declined review body is answered in its review's living answer, linking to the review"
 # A review body sits in no thread, so the living answer to its review carries
@@ -5513,7 +5370,7 @@ out=$(run)
 has "$(treply 335 T-335)" "Declined: the measured read is the slower one." "the decline is posted though an older reply of ours sits in its thread"
 has "$(treply 335 T-335)" "<!-- gc-writeback-finding:FLG -->" "…naming its finding"
 eq "$(meta FLG finding.reply_posted)" "1" "…and the finding is marked answered once it is"
-eq "$(tresolved 335 T-335)" "false" "…with the thread left open for the operator"
+eq "$(tresolved 335 T-335)" "false" "…with the thread resolved only by the pass that reads it recorded"
 
 echo "# a finding stamped answered whose answer never reached the PR is answered now"
 # What an older pass left: the thread resolved behind the batch's answer, and the
@@ -5535,6 +5392,8 @@ hasnt "$(gh_since "$mark")" "REPLY" "a later pass finds the answer and posts not
 echo "# a needs-you answer does not stand in for the ruling that replaced it"
 # The operator ruled on the gate and the finding was re-ruled declined with a new
 # reply, while its stamp still records the needs-you answer under the same line.
+# The plan reads that stamp as the answer recorded, so the thread is resolved in
+# the pass that posts the new answer.
 store "[$(anchor WRR 337 "$(wb_meta rework:KRR)"), $(child KRR closed), $(hfind FRR WRR 100 900 declined closed 'Declined: the operator ruled the cap stays.' | stamped)]"
 printf '%s' "$(prview 337 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_337.json"
 threads 337 "$(printf '%s' "$(one_thread 337)" | jq -c '
@@ -5542,7 +5401,7 @@ threads 337 "$(printf '%s' "$(one_thread 337)" | jq -c '
     {"id":"NC-337q","databaseId":0,"author":{"login":"gc-city-bot"},"body":"❓ This comment needs your decision — filed human gate tk-g337.\n<!-- gc-writeback -->\n<!-- gc-writeback-finding:FRR -->","reactionGroups":[]}]')"
 out=$(run)
 has "$(treply 337 T-337)" "Declined: the operator ruled the cap stays." "the new ruling's answer is posted under the old one"
-eq "$(tresolved 337 T-337)" "false" "…and the thread stays open"
+eq "$(tresolved 337 T-337)" "true" "…and the thread is resolved"
 
 echo "# a stamped answer that is missing and fails to post drops its stamp, so the review waits"
 store "[$(anchor WSD 338 "$(wb_meta rework:KSD)"), $(child KSD closed), $(hfind FSD WSD 100 900 declined closed 'Declined: not an objection.' | stamped)]"
@@ -5554,7 +5413,7 @@ out=$(run)
 has "$(treply 338 T-338)" "Declined: not an objection." "the next pass posts the answer"
 eq "$(meta FSD finding.reply_posted)" "1" "…and stamps it"
 
-echo "# a thread holding a fixed and a declined finding is answered for both and left open"
+echo "# a thread holding a fixed and a declined finding is answered for both, then resolved"
 store "[$(anchor WPB 339 "$(wb_meta rework:KPB 101)"), $(child KPB closed), $(hfind FPA WPB 100 900 must-fix closed), $(hfind FPB WPB 101 900 declined closed 'Declined: the second ask is already handled.')]"
 printf '%s' "$(prview 339 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_339.json"
 threads 339 "$(printf '%s' "$(one_thread 339)" | jq -c '
@@ -5564,21 +5423,38 @@ commits 339 '[{"oid":"kpba00aaaaaa","message":"fix: the first ask (KPB)\n\nRevie
 out=$(run)
 has "$(treply 339 T-339)" "✅ Fixed in kpba00aa (KPB)." "the fixed comment is answered as fixed"
 has "$(treply 339 T-339)" "Declined: the second ask is already handled." "…and the declined one with its ruling"
-eq "$(tresolved 339 T-339)" "false" "…and the thread is left open, since the operator still accepts or overrules the decline"
-has "$out" "thread T-339 holds a declined or deferred finding; left open for the operator" "…which the pass says"
+eq "$(tresolved 339 T-339)" "false" "…and the thread waits for the pass that reads the decline recorded"
 mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
 out=$(run)
 hasnt "$(gh_since "$mark")" "REPLY" "a later pass answers nothing twice"
-hasnt "$(gh_since "$mark")" "RESOLVE" "…resolves nothing"
-hasnt "$out" "thread T-339 holds a declined" "…and does not report the open thread again"
+eq "$(gh_since "$mark" | grep -c '^RESOLVE T-339$')" "1" "…and resolves the thread, once"
+mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
+out=$(run)
+hasnt "$(gh_since "$mark")" "RESOLVE" "a third pass resolves nothing again"
 
-echo "# a comment declined as no objection is not claimed fixed by its landed batch"
+echo "# a declined finding's thread is resolved though no batch record covers its comment any more"
+# A record is dropped once every comment it covers is done, and a comment its own
+# finding answers is done once that answer is recorded posted. The plan reads
+# such a comment from its finding, so its thread is still resolved behind the
+# answer already on the PR.
+store "[$(anchor WGR 358 "$(wb_meta rework:KGR 200)$(wb_batch 'rework:KGR|100|200')"), $(child KGR closed), $(hfind FGR WGR 100 900 declined closed 'Declined: the guard already holds.' | stamped)]"
+printf '%s' "$(prview 358 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_358.json"
+threads 358 "$(printf '%s' "$(one_thread 358)" | jq -c '
+  .threads[0].comments.nodes[0].reactionGroups = [{"content":"THUMBS_UP","viewerHasReacted":true}]
+  | .threads[0].comments.nodes += [
+    {"id":"NC-358d","databaseId":0,"author":{"login":"gc-city-bot"},"body":"Declined: the guard already holds.\n<!-- gc-writeback -->\n<!-- gc-writeback-finding:FGR -->","reactionGroups":[]}]')"
+mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
+out=$(run)
+eq "$(tresolved 358 T-358)" "true" "the thread is resolved behind the decline already on the PR"
+hasnt "$(gh_since "$mark")" "REPLY" "…posting nothing more"
+
+echo "# a comment declined as no objection is not claimed fixed by its landed batch, and its thread is resolved"
 store "[$(anchor WNO 340 "$(wb_meta rework:KNO)"), $(child KNO closed), $(hfind FNO WNO 100 900 declined closed)]"
 printf '%s' "$(prview 340 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_340.json"
 threads 340 "$(one_thread 340 'nice approach')"
 out=$(run)
 eq "$(treply 340 T-340)" "" "nothing is posted: a no-objection decline owes no answer, and the batch does not claim one"
-eq "$(tresolved 340 T-340)" "false" "…and the thread is not resolved over it"
+eq "$(tresolved 340 T-340)" "true" "…and the thread is resolved, the decline having answered it"
 out=$(run)
 eq "$(thumbed 340 NC-340),$(reacted 340 NC-340)" "true,false" "…while the comment is marked handled"
 
@@ -7285,10 +7161,9 @@ printf '%s' "$(prview 607 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_607.json"
 threads 607 "$(lreview 607 6008 COMMENTED '' 6801 6802)"
 : > "$STUB_GH_LOG"
 out=$(run)
-has "$(lanswer 607 6008)" "**Needs you**
+has "$(lanswer 607 6008)" "**Worth a look**
 - **[Rename the cap to budget.](https://github.com/zook/gc-toolkit/pull/607#discussion_r6801)** Renamed anyway, though the ruling declined it: the config key was renamed in the same change.
-  Resolving the thread accepts the decline. To push back, reply in the thread; your reply is ruled as new feedback." \
-  "the decline its fix unit flagged needs the operator while its thread is open, in the fix unit's words, citing no commit while that fix unit is in flight"
+" "the decline its fix unit flagged is worth a look, in the fix unit's words, citing no commit while that fix unit is in flight"
 bmut KL8 '.status = "closed"'
 commits 607 '[{"oid":"7a7a7a7aaaaa","message":"fix: rename the cap to budget (KL8)\n\nReview comment 6801."}]'
 : > "$STUB_GH_LOG"
@@ -7297,9 +7172,9 @@ eq "$(grep -c '^ICEDIT' "$STUB_GH_LOG")" "1" "the fix unit landing edits the liv
 has "$(lanswer 607 6008)" "the config key was renamed in the same change. (7a7a7a7a)" "…to cite the commit that made the change"
 eq "$(lcount 607 6008)" "1" "…still in the one living answer"
 
-echo "# a decline whose thread waits on the reviewer needs them, in its thread and in the living answer, until they resolve it"
-# A review of two points: one fixed and its thread resolved,
-# one declined and its thread left open for the reviewer to accept or push back on.
+echo "# a decline in a review's thread is answered with its ruling, its thread resolved, and the living answer shows it worth a look"
+# A review of two points: one fixed, one declined. Neither asks the reviewer
+# anything, since the city resolves both threads.
 store "[$(anchor LA17 618 "$(lmeta rework:KL17 6182 6018)"), $(fixunit KL17 closed),
   $(lfind LR1 LA17 6181 6018 must-fix closed '**Count each page once.**' '{"finding.fix_unit":"KL17","finding.fix_answer":"Fixed as you suggested."}'),
   $(lfind LR2 LA17 6182 6018 declined closed '**The barrier now runs once per page, not once per count.**' '{"finding.fix_unit":"KL17","finding.reply":"the count query is paged, so the barrier has to run once per page."}')]"
@@ -7308,49 +7183,35 @@ threads 618 "$(lreview 618 6018 CHANGES_REQUESTED '' 6181 6182)"
 commits 618 '[{"oid":"6c6c6c6ccccc","message":"fix: count each page once (KL17)\n\nReview comment 6181."}]'
 : > "$STUB_GH_LOG"
 out=$(run)
-has "$(treply 618 T-618-6182)" "❓ Declined: the count query is paged, so the barrier has to run once per page.
-
-Resolving the thread accepts the decline. To push back, reply in the thread; your reply is ruled as new feedback." \
-  "the decline in the thread leads with the question mark and says that resolving the thread accepts it"
-eq "$(tresolved 618 T-618-6181)|$(tresolved 618 T-618-6182)" "true|false" "…and its thread is left open, while the fixed point's thread is resolved"
-L17=$(lanswer 618 6018)
-has "$L17" "### Your review: 2 points, 1 needs you, 1 answered
-" "the count line counts the decline as needing the reviewer"
-hasnt "$L17" "all answered" "…and does not read all answered while its thread is open"
-has "$L17" "**Needs you**
-- **[The barrier now runs once per page, not once per count.](https://github.com/zook/gc-toolkit/pull/618#discussion_r6182)** Declined: the count query is paged, so the barrier has to run once per page.
-  Resolving the thread accepts the decline. To push back, reply in the thread; your reply is ruled as new feedback." \
-  "the decline is under Needs you, saying what resolving its thread and replying in it do"
-eq "$(grep -c 'message=Your review: 2 points, 1 needs you, 1 answered (https://github.com/zook/gc-toolkit/pull/618#issuecomment-[0-9]*)\. Dismissal is not approval' "$STUB_GH_LOG")" "1" \
-  "the answered review is dismissed with a note saying a point needs the reviewer"
-showcase decline-waits-on-reviewer 618 6018
-echo "# …and once the reviewer resolves the thread, the next pass shows the decline as accepted"
-rdismissed 618 6018
-jq -c '.threads |= map(if .id == "T-618-6182" then .isResolved = true else . end)' "$GH_DIR/threads_618.json" > "$TMP/t618.json" \
-  && mv "$TMP/t618.json" "$GH_DIR/threads_618.json"
-: > "$STUB_GH_LOG"
-out=$(run)
-eq "$(grep -c '^ICEDIT' "$STUB_GH_LOG")" "1" "the living answer is edited in place"
+eq "$(treply 618 T-618-6182 | head -n 1)" "Declined: the count query is paged, so the barrier has to run once per page." \
+  "the decline in the thread is the ruling alone"
+hasnt "$(treply 618 T-618-6182)" "Resolving the thread" "…asking nothing of the reviewer"
+eq "$(tresolved 618 T-618-6181)|$(tresolved 618 T-618-6182)" "true|false" "…and the fixed point's thread is resolved, while the decline's waits for the pass that reads its answer recorded"
 L17=$(lanswer 618 6018)
 has "$L17" "### Your review: 2 points, all answered
-" "…its count line reading all answered"
+" "the count line reads all answered"
 has "$L17" "**Worth a look**
 - **[The barrier now runs once per page, not once per count.](https://github.com/zook/gc-toolkit/pull/618#discussion_r6182)** Declined: the count query is paged, so the barrier has to run once per page.
 
-**Done**" "…and the decline worth a look"
+**Done**" "…and the decline is worth a look"
 hasnt "$L17" "Needs you" "…with nothing shown as needing the reviewer"
-hasnt "$L17" "Resolving the thread" "…and nothing asked of them"
-hasnt "$(cat "$STUB_GH_LOG")" "REPLY" "…while the thread is answered nothing more"
-eq "$(tresolved 618 T-618-6182)" "true" "…and stays resolved"
+eq "$(grep -c 'message=Your review: 2 points, all answered (https://github.com/zook/gc-toolkit/pull/618#issuecomment-[0-9]*)\. Dismissal is not approval' "$STUB_GH_LOG")" "1" \
+  "the answered review is dismissed with a note saying all of it is answered"
+showcase decline-worth-a-look 618 6018
+echo "# …and the next pass resolves the decline's thread, leaving the living answer as it is"
+rdismissed 618 6018
 : > "$STUB_GH_LOG"
 out=$(run)
-eq "$(grep -c '^ICEDIT\|^PRCOMMENT\|^REPLY' "$STUB_GH_LOG")" "0" "a pass after it writes nothing"
+eq "$(tresolved 618 T-618-6182)" "true" "the decline's thread is resolved behind its answer"
+eq "$(grep -c '^ICEDIT\|^PRCOMMENT\|^REPLY' "$STUB_GH_LOG")" "0" "…with nothing posted or edited"
+: > "$STUB_GH_LOG"
+out=$(run)
+eq "$(grep -c '^ICEDIT\|^PRCOMMENT\|^REPLY\|^RESOLVE' "$STUB_GH_LOG")" "0" "a pass after it writes nothing"
 
-echo "# a decline whose post failed asks the reviewer nothing until its answer is in the thread"
-# The living answer reads the thread off the PR, so a decline the write-back
-# could not post leaves its point worth a look, and the pass that does post it
-# shows the point as needing the reviewer, in the living answer and in the
-# dismissal note, since the post joins that pass's read of the PR.
+echo "# a decline whose post failed keeps its thread open and the review standing until its answer is in the thread"
+# The review dismissal waits for every answer its findings owe, and the thread
+# is resolved only behind its answer, so a decline the write-back could not post
+# holds both until the pass that does post it.
 store "[$(anchor LA21 621 "$(lmeta rework:KL21 6212 6021)"), $(fixunit KL21 closed),
   $(lfind LT1 LA21 6211 6021 must-fix closed '**Count each page once.**' '{"finding.fix_unit":"KL21","finding.fix_answer":"Fixed as you suggested."}'),
   $(lfind LT2 LA21 6212 6021 declined closed '**The barrier now runs once per page, not once per count.**' '{"finding.fix_unit":"KL21","finding.reply":"the count query is paged, so the barrier has to run once per page."}')]"
@@ -7361,33 +7222,27 @@ commits 621 '[{"oid":"6e6e6e6eeeee","message":"fix: count each page once (KL21)\
 out=$(STUB_REPLY_RC=1 run)
 has "$out" "could not post the owed reply for LT2" "the decline's post fails"
 eq "$(treply 621 T-621-6212)" "" "…so its thread holds no answer"
+eq "$(tresolved 621 T-621-6212)" "false" "…and is not resolved"
 L21=$(lanswer 621 6021)
 has "$L21" "**Worth a look**
 - **[The barrier now runs once per page, not once per count.](https://github.com/zook/gc-toolkit/pull/621#discussion_r6212)** Declined: the count query is paged, so the barrier has to run once per page.
-" "the living answer leaves the decline worth a look"
-hasnt "$L21" "Needs you" "…with nothing shown as needing the reviewer"
-hasnt "$L21" "Resolving the thread" "…and no request, since the thread holds nothing to accept"
+" "the living answer shows the decline worth a look"
 hasnt "$(cat "$STUB_GH_LOG")" "dismissals" "…and the review is not dismissed while the decline it owes is undelivered"
-echo "# …and the pass that posts the decline shows it as needing the reviewer"
+echo "# …and the pass that posts the decline dismisses the review, and the next resolves the thread"
 : > "$STUB_GH_LOG"
 out=$(run)
-has "$(treply 621 T-621-6212)" "❓ Declined: the count query is paged" "the decline is posted, awaiting the reviewer"
-L21=$(lanswer 621 6021)
-has "$L21" "### Your review: 2 points, 1 needs you, 1 answered
-" "the living answer counts it as needing them in the pass that posts it"
-has "$L21" "**Needs you**
-- **[The barrier now runs once per page, not once per count.](https://github.com/zook/gc-toolkit/pull/621#discussion_r6212)** Declined: the count query is paged, so the barrier has to run once per page.
-  Resolving the thread accepts the decline. To push back, reply in the thread; your reply is ruled as new feedback." \
-  "…under Needs you, asking them to resolve the thread"
-eq "$(grep -c 'message=Your review: 2 points, 1 needs you, 1 answered (https://github.com/zook/gc-toolkit/pull/621#issuecomment-[0-9]*)\. Dismissal is not approval' "$STUB_GH_LOG")" "1" \
-  "…and the review is dismissed with a note saying a point needs them"
+eq "$(treply 621 T-621-6212 | head -n 1)" "Declined: the count query is paged, so the barrier has to run once per page." "the decline is posted, the ruling alone"
+eq "$(grep -c 'message=Your review: 2 points, all answered (https://github.com/zook/gc-toolkit/pull/621#issuecomment-[0-9]*)\. Dismissal is not approval' "$STUB_GH_LOG")" "1" \
+  "…and the review is dismissed in the same pass"
+eq "$(tresolved 621 T-621-6212)" "false" "…while the thread waits for the pass that reads the answer recorded"
+out=$(run)
+eq "$(tresolved 621 T-621-6212)" "true" "the next pass resolves it"
 
-echo "# a reply under a decline is a point of its own, and once the city answers it the thread waits on the reviewer again"
+echo "# a reply under a decline is a point of its own, and once the city answers it the thread is resolved"
 # The reply is ruled as new feedback and the decline stays closed. While the
-# reply waits on the city, the decline asks the reviewer nothing. The thread
-# still holds the decline, so the write-back answers the reply there and leaves
-# the thread open, and that answer puts the decline back under Needs you in the
-# pass that posts it.
+# reply waits on the city, the thread is left open, and once the reply's fix
+# lands the write-back answers it there and resolves the thread. The decline
+# stays worth a look throughout.
 store "[$(anchor LA22 622 "$(lmeta rework:KL22 6222 6022)"), $(fixunit KL22 closed),
   $(lfind LU1 LA22 6221 6022 must-fix closed '**Count each page once.**' '{"finding.fix_unit":"KL22","finding.fix_answer":"Fixed as you suggested."}'),
   $(lfind LU2 LA22 6222 6022 declined closed '**The barrier now runs once per page, not once per count.**' '{"finding.fix_unit":"KL22","finding.reply":"the count query is paged, so the barrier has to run once per page."}')]"
@@ -7395,7 +7250,8 @@ printf '%s' "$(prview 622 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_622.json"
 threads 622 "$(lreview 622 6022 CHANGES_REQUESTED '' 6221 6222)"
 commits 622 '[{"oid":"6f6f6f6fffff","message":"fix: count each page once (KL22)\n\nReview comment 6221."}]'
 out=$(run)
-has "$(lanswer 622 6022)" "**Needs you**" "the decline needs the reviewer once its answer is in the thread"
+has "$(lanswer 622 6022)" "**Worth a look**" "the decline is worth a look once its answer is in the thread"
+hasnt "$(lanswer 622 6022)" "Needs you" "…and asks the reviewer nothing"
 rdismissed 622 6022
 jq -c '.reviews += [ { id: "RV-622b", databaseId: 6023, state: "COMMENTED", body: "", author: { login: "johnzook" },
                        url: "https://github.com/zook/gc-toolkit/pull/622#pullrequestreview-6023", reactionGroups: [] } ]
@@ -7411,11 +7267,11 @@ out=$(run)
 L22=$(lanswer 622 6022)
 has "$L22" "**Worth a look**
 - **[The barrier now runs once per page, not once per count.](https://github.com/zook/gc-toolkit/pull/622#discussion_r6222)** Declined: the count query is paged, so the barrier has to run once per page.
-" "a reply of the reviewer after the decline puts the decline under Worth a look"
-hasnt "$L22" "Resolving the thread" "…asking them nothing while their reply waits on the city"
+" "a reply of the reviewer after the decline leaves the decline worth a look"
 hasnt "$(cat "$STUB_GH_LOG")" "REPLY T-622-6222" "…and nothing is posted into the thread before the reply is answered"
+eq "$(tresolved 622 T-622-6222)" "false" "…nor is it resolved over the reply"
 eq "$(meta LU2 finding.disposition)|$(bstatus LU2)" "declined|closed" "…while the decline stays closed and declined"
-echo "# …and once the reply's fix lands, its answer leaves the thread open and the decline needs the reviewer again"
+echo "# …and once the reply's fix lands, it is answered in the thread and the thread is resolved"
 bmut LU3 '.status = "closed" | .metadata["finding.disposition"] = "must-fix" | .metadata["finding.fix_answer"] = "Fixed as you suggested."'
 commits 622 '[{"oid":"6f6f6f6fffff","message":"fix: count each page once (KL22)\n\nReview comment 6221."},
   {"oid":"6a6a6a6aaaaa","message":"fix: say why the barrier runs once per page (KL22)\n\nReview comment 6223."}]'
@@ -7423,14 +7279,11 @@ commits 622 '[{"oid":"6f6f6f6fffff","message":"fix: count each page once (KL22)\
 out=$(run)
 eq "$(grep -c '^REPLY T-622-6222$' "$STUB_GH_LOG")" "1" "the reply's fix is answered in the thread"
 has "$(treply 622 T-622-6222)" "Fixed in 6a6a6a6a (KL22)." "…naming the commit that made it"
-eq "$(tresolved 622 T-622-6222)" "false" "…and the thread, still holding the decline, is left open for the reviewer"
+eq "$(tresolved 622 T-622-6222)" "true" "…and the thread, its decline answered too, is resolved"
 L22=$(lanswer 622 6022)
-has "$L22" "### Your review: 2 points, 1 needs you, 1 answered
-" "the decline counts as needing the reviewer again, in the pass that answers the reply"
-has "$L22" "**Needs you**
-- **[The barrier now runs once per page, not once per count.](https://github.com/zook/gc-toolkit/pull/622#discussion_r6222)** Declined: the count query is paged, so the barrier has to run once per page.
-  Resolving the thread accepts the decline. To push back, reply in the thread; your reply is ruled as new feedback." \
-  "…under Needs you, asking them to resolve the thread the city left open"
+has "$L22" "### Your review: 2 points, all answered
+" "the round of the decline reads all answered"
+hasnt "$L22" "Needs you" "…with nothing shown as needing the reviewer"
 
 echo "# a dismissal whose edit of the living answer is refused still reads as re-requested on the next pass"
 store "[$(anchor LA11 610 "$(lmeta rework:KL11 7101 6011)"), $(fixunit KL11 closed),
