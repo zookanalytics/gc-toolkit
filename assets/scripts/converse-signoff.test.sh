@@ -1887,6 +1887,8 @@ hasnt "$(cat "$CALLS")" "bd close tk-conv" "(STAY) …closing nothing"
 hasnt "$(cat "$CALLS")" "pr-sitting-comment" "(STAY) …and drawing no PR comment as if it had closed"
 has "$(acts tk-conv)" "Kept this conversation open until the work it sent lands" "(STAY) the stay is one of the visit's actions"
 has "$OUT" "STAYING conversation tk-conv on tk-sub" "(STAY) …and it says so"
+has "$OUT" "Run the entry now: it reads waiting while that work is out, and returned once it has closed" "(STAY) …sending the sitting to its entry, which reads where the work stands"
+hasnt "$OUT" "wakes with this thread" "(STAY) …and promising no wake, which a sitting that is up never gets"
 eq "$(head -n 1 "$CALLS")" "bd update tk-conv --append-notes staying: the dialog keeps what is typed" "(STAY-ORDER) the stay records itself before any other write, naming no work yet"
 case "$(cat "$CALLS")" in
   *"--append-notes staying: the dialog keeps what is typed"*"gate resolve tk-g"*"--append-notes staying: the dialog keeps what is typed (waits on tk-work)"*"bd dep add tk-conv tk-work"*"--status open"*) ok "(STAY-ORDER) …then the gate, then the line that names the work, then the edge, then the status" ;;
@@ -1906,6 +1908,18 @@ eq "$RC" 0 "(STAY-RETURN) the return's sign-off, the stay's call less --stay wit
 eq "$(field tk-conv status)" "closed" "(STAY-RETURN) …closes the conversation"
 eq "$(grep -c '^deferred-dispatch arm' "$CALLS")/$(meta tk-sub gc.dispatch_when_ready_args)" "$ARMS/" "(STAY-RETURN) …arming no second closer once the arm has sent the first"
 eq "$(briefs tk-sub)" 1 "(STAY-RETURN) …and writes no second brief"
+
+# Work that is not a rework can close before the stay writes its edge onto it,
+# and its close then neither wakes the sitting nor sends it Gas City's notice.
+# The stay still lands, and sends the sitting to its entry, which reads the
+# conversation, now ready, as returned (converse-entry.test.sh).
+closer_case; setf tk-work status closed
+run_signoff --conversation tk-conv --outcome "staying — waits on tk-work" "${STAYING[@]}"
+eq "$RC" 0 "(STAY-WORK-CLOSED) a stay whose work has closed already exits 0"
+has "$(cat "$CALLS")" "bd dep add tk-conv tk-work --type blocks" "(STAY-WORK-CLOSED) …waiting on that work"
+eq "$(field tk-conv status)/$(field tk-conv assignee)" "open/gc-toolkit/gc-toolkit.tk-conv" "(STAY-WORK-CLOSED) …leaving the conversation open under its sitting, ready at once"
+has "$OUT" "Run the entry now" "(STAY-WORK-CLOSED) …and sending the sitting to its entry"
+hasnt "$OUT" "wakes with this thread" "(STAY-WORK-CLOSED) …never promising a wake that cannot come"
 
 # A second stay with more work, from a sitting woken early, records itself
 # again before its writes, then names all its work.
@@ -1945,7 +1959,7 @@ eq "$RC" 0 "(STAY-REWORK) a stay on a ruling that reworks the PR exits 0"
 has "$(cat "$CALLS")" "bd dep add tk-conv tk-child --type blocks" "(STAY-REWORK) …waiting on the rework the call filed"
 has "$(field tk-conv notes)" "(waits on tk-child)" "(STAY-REWORK) …which its staying: line names"
 eq "$(field tk-conv status)" "open" "(STAY-REWORK) …with the conversation open"
-has "$OUT" "wakes with this thread when that work closes" "(STAY-REWORK) …and its sitting woken once the rework closes"
+has "$OUT" "Run the entry now" "(STAY-REWORK) …and its sitting sent to its entry"
 # The rework has landed on the PR's branch, and the PR is still open, so the
 # return answers it with --no-rework in place of the stay's --rework.
 setf tk-child status closed
@@ -1979,8 +1993,8 @@ eq "$(grep -c '^converse-rework ' "$CALLS" || true)" "$REWORKS" "(STAY-REWORK-RE
 has "$(field tk-conv notes | grep -E '^(holding|staying):' | tail -n 1)" "(waits on tk-child)" "(STAY-REWORK-RESTART) …naming the closed rework as its work"
 has "$(cat "$CALLS")" "bd dep add tk-conv tk-child --type blocks" "(STAY-REWORK-RESTART) …waiting on it"
 eq "$(field tk-conv status)" "open" "(STAY-REWORK-RESTART) …with the conversation open, ready at once for its return"
-has "$OUT" "which has closed already, so the work is back. Run the entry again" "(STAY-REWORK-RESTART) …and sending the sitting to the return, since nothing will wake it"
-hasnt "$OUT" "wakes with this thread when that work closes" "(STAY-REWORK-RESTART) …never promising a wake"
+has "$OUT" "Run the entry now" "(STAY-REWORK-RESTART) …and sending the sitting to its entry, which reads the closed rework as returned, since nothing will wake it"
+hasnt "$OUT" "wakes with this thread" "(STAY-REWORK-RESTART) …never promising a wake"
 eq "$(acts tk-conv | tr '|' '\n' | grep -c 'back for rework' || true)" 1 "(STAY-REWORK-RESTART) …and the conversation lists the rework once"
 # Run again once the PR has merged as well, the stay still waits on the closed
 # rework rather than ending at the hand-off.

@@ -1291,6 +1291,16 @@ alias, which drops the claim. Gas City does the rest with what it already has
   and `wake_mode = "resume"` keeps the thread. The prompt it delivers again
   runs the entry, whose claim returns the conversation as a ready assignment,
   and its newest `staying:` line makes the entry `returned`.
+- **A sitting still up.** The idle sleep also skips a session whose assigned
+  work is ready, and the wake reaches only a session that sleeps. So a sitting
+  still up when its work closes, before `sleep_after_idle` runs out or with a
+  tab attached, stays up with no turn from that close. Gas City's core order
+  `cascade-nudge-on-blocker-close` sends the assignee of a bead whose last
+  blocker closed a notice, `blocker <the work> closed — your dependent <the
+  conversation> may be unblocked`, which starts a turn, and the prompt runs the
+  entry on it. Work that closed before the stay's edge onto it was written
+  leaves no close to wake the sitting or send the notice, so the stay ends by
+  running the entry, which then reads `returned`.
 - **An attach before then.** An attach wakes the sitting with its thread and
   changes nothing: the claim answers `drain`, the entry finds the conversation
   open with its work open and answers `waiting`, which keeps the sitting, and

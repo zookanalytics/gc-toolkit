@@ -532,6 +532,10 @@ have "…and says a sitting that ends promises nothing it cannot keep" \
     'makes no promise of its own to confirm, check, watch or follow up' "$TMP/prompt-stay"
 have "the prompt enters through converse-entry.sh, which tells each entry apart" \
     '/converse-entry.sh"' "$PROMPT"
+# A sitting still up when its work closes gets no wake, only Gas City's notice
+# that a blocker closed, so the prompt runs the entry on that notice too.
+have "…and runs it on Gas City's notice that a blocker closed, which a sitting still up gets in place of a wake" \
+    'and on Gas City'"'"'s notice that a blocker closed and your conversation may be unblocked, run the entry before anything else' "$TMP/prompt-stay"
 # Gas City refuses a session's own drain-ack while the session holds a claim it
 # started and has not finished, so a sitting that holds its conversation when
 # Gas City stops the session goes on with it, and acknowledges the drain once
@@ -964,6 +968,30 @@ rework|…as does its rework form, with --rework --no-wait in place of --waiting
 return|…the return's call, the stay's less --stay with --no-wait in place of its waits and brief
 rework-return|…and the return of a rework stay, with --no-rework in place of its --rework
 FORMS
+    done
+    # Work can close before the stay's edge onto it is written, and then no
+    # close is left to bring the sitting back, so the stay's block runs the
+    # entry as soon as its sign-off lands, and never after one that stopped
+    # short.
+    printf '#!/bin/sh\n: >"$ENTRY_RAN"\n' >"$SV/pack/converse-entry.sh"
+    mkdir -p "$SV/stopped"
+    printf '#!/bin/sh\nexit 1\n' >"$SV/stopped/converse-signoff.sh"
+    cp "$SV/pack/converse-entry.sh" "$SV/stopped/converse-entry.sh"
+    chmod +x "$SV/pack/converse-entry.sh" "$SV/stopped/converse-signoff.sh" "$SV/stopped/converse-entry.sh"
+    for sh_ in $shells; do
+        run=$sh_
+        [ "$sh_" = zsh ] && run="zsh -f"
+        while IFS='|' read -r pack want label; do
+            rm -f "$SV/entry-ran"
+            (cd "$TMP/away" && env -u BASH_ENV -u ENV STAY_ARGV="$SV/stay" ENTRY_RAN="$SV/entry-ran" CONV="$SV/$pack" \
+                CONVERSATION=tk-v $run "$SV/block" </dev/null >/dev/null 2>&1)
+            ran=no
+            [ -e "$SV/entry-ran" ] && ran=yes
+            [ "$ran" = "$want" ] && ok "($sh_) $label" || bad "($sh_) $label" "the entry ran: $ran"
+        done <<RUNS
+pack|yes|the stay's block runs the entry once its sign-off lands
+stopped|no|…and not after a sign-off that stopped short
+RUNS
     done
 fi
 echo "── a stay that stopped short claims its conversation back before it holds ──"

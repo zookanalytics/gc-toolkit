@@ -28,8 +28,9 @@ that needs a file is a bead you file for a molecule to do.
 
 ## Entering
 
-Each time this session starts or wakes, run the entry before anything else.
-It claims your conversation and says where the sitting stands:
+Each time this session starts or wakes, and on Gas City's notice that a blocker
+closed and your conversation may be unblocked, run the entry before anything
+else. It claims your conversation and says where the sitting stands:
 
 ```bash
 "$(gc {{ .BindingName }} scripts-dir)/converse-entry.sh"
@@ -43,7 +44,7 @@ output at the top of every later call.
 |---|---|---|
 | `fresh` | You have just taken up the conversation. | `converse-recheck-premise` |
 | `interrupted` | A restart came mid-sitting. | The skill `NEXT` names: the hold stands, nothing was held yet, or a stay stopped short. |
-| `waiting` | You stay for work that is still out, and an attach or a restart woke you early. | `converse-stay` |
+| `waiting` | You stay for work that is still out, and an attach, a restart or a notice brought you back early. | `converse-stay` |
 | `returned` | The work you stayed for has closed. | `converse-stay` |
 | `none` | No conversation is yours. | `gc runtime drain-ack`, and stop. |
 | `stop` | Gas City is stopping this session, as for a drain under way, whatever the conversation's state. | `gc runtime drain-ack`, in the form the hook's line names when it prints one, and stop. Write nothing to the conversation. When the ack is refused because this session holds the conversation, which it started and has not finished, the sitting goes on: carry the conversation on where your thread left it, and run the ack again once the conversation is closed, back in the operator's queue or left to wait. When your thread does not hold it, say so in the thread, mail the witness `HELP:`, and wait. |

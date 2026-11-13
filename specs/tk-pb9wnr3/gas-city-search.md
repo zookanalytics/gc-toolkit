@@ -40,6 +40,24 @@ acknowledgement were read and not run.
   601).
 - **`wake_mode = "resume"`, as the thread.** The woken session relaunches on its
   session key, and the probe found its thread intact after each wake.
+- **The core order `cascade-nudge-on-blocker-close`, as the call to a sitting
+  that is up.** The idle sleep also spares a session whose assigned work is
+  ready (`cmd/gc/compute_awake_set.go`, the `desired[name] != "assigned-work"`
+  term at 674), and the wake starts only a session that sleeps. So a sitting
+  still up when its work closes, before `sleep_after_idle` runs out or with a
+  tab attached, gets no turn from the close. The order runs on `bead.closed`
+  and nudges the assignee of each dependent that no other blocker still holds
+  with `blocker <id> closed — your dependent <id> may be unblocked`
+  (`internal/bootstrap/packs/core/orders/cascade-nudge-on-blocker-close.toml`,
+  and the assignee branch of its script). `gc session nudge`'s default
+  delivery, `wait-idle`, gives it to the session as a prompt at its next idle
+  boundary (`docs/reference/cli.md`, `gc session nudge`). The installed build's
+  copy queues it instead, and its nudge poller types it into the session once
+  the pane is quiet (`tryDeliverQueuedNudgesByPoller` in `cmd/gc/cmd_nudge.go`
+  at `6589a7df45`). The converse prompt runs the entry on that notice. Work
+  that closed before the stay's edge onto it was written sends no notice and
+  wakes nothing, so the stay ends by running the entry, which reads that work
+  as `returned`.
 
 ## What it does not use, and why
 

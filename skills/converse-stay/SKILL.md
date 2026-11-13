@@ -33,7 +33,7 @@ if "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" \
      --stay "<what the operator agreed, which the return compares the work with, one line>"
      # --rework --no-wait in place of --waiting-on and --close-brief when the work is the PR's rework, and the other flags as converse-settle's sign-off takes them
 then
-  : # staying — record the hand-back, post it, and end the turn with no drain
+  "$CONV/converse-entry.sh"  # staying: waiting while the work is out, returned once it has closed
 else
   # NOT staying: repair what it printed and re-run, or sign off without --stay to end at the hand-off.
   exit 1
@@ -51,23 +51,29 @@ itself or through other beads: when the operator wants that PR to land first,
 lift the hold (`converse-hold`) and run the stay again, and otherwise end at
 the hand-off.
 
-Then record and post the hand-back. It opens with where the subject stands,
-and says the sitting stays until the work lands and comes back then to compare
-it with what was agreed. Below it, offer the close-out line a framing offers
-(`converse-hold`), since a sitting that stays ends the same way. A stay closes
-nothing, so it drains nothing: end the turn without `gc runtime drain-ack`.
-Gas City stops the session once no tab is attached, and wakes it with its
-thread when the work closes. On an open PR, the merge this conversation holds
-waits for the return too, so lift that hold (`converse-hold`) when the operator
-wants the PR to land without it.
+A stay that lands runs the entry at once, as the block above does, because the
+work can close before the conversation waits on it, as on a re-run, and then no
+close is left to bring the sitting back. On `returned`, carry out the return
+(below) in place of a hand-back. On `waiting`, record and post the hand-back.
+It opens with where the subject stands, and says the sitting stays until the
+work lands and comes back then to compare it with what was agreed. Below it,
+offer the close-out line a framing offers (`converse-hold`), since a sitting
+that stays ends the same way. A stay closes nothing, so it drains nothing: end
+the turn without `gc runtime drain-ack`. Gas City stops the session once no tab
+is attached, and wakes it with its thread when the work closes. When the work
+closes while the session is still up, Gas City keeps it up for the ready
+conversation and sends it a notice that a blocker closed, on which the prompt
+runs the entry. On an open PR, the merge this conversation holds waits for the
+return too, so lift that hold (`converse-hold`) when the operator wants the PR
+to land without it.
 
 ## While the work is out
 
-The entry says `waiting` when an attach or a restart woke the sitting before
-the work closed. When the operator speaks, answer their turns as
-`converse-continue` says, through the sign-off's `--answer`, and do not hold:
-a hold keeps its conversation claimed, and this one is open while its work is
-out.
+The entry says `waiting` when an attach, a restart or a notice brought the
+sitting back before all its work closed. When the operator speaks, answer their
+turns as `converse-continue` says, through the sign-off's `--answer`, and do
+not hold: a hold keeps its conversation claimed, and this one is open while its
+work is out.
 When nobody speaks, end the turn with nothing said and nothing recorded: a
 hand-back nobody asked for would replace the stay's, which the tab prints.
 Nothing needs registering again: the conversation's edge onto the work is the
@@ -82,15 +88,14 @@ wait, and the session sleeps again once the tab detaches.
 The entry says `interrupted` and names this skill when a stay stopped short:
 before its sign-off finished, before the conversation waited on all its work,
 or before it left the conversation to wait. Run the call again with the same
-ruling, which is safe, and end the turn. The sign-off records the rework it
-filed under the ruling, so the call files none again, even once that rework has
-closed. When that closed rework is all the stay waits on, its last line says
-the work is back: run the entry again, which reads `returned`, and carry out
-the return instead of ending the turn. When your thread no longer holds that
-call, rebuild it from the record: `AGREED` is its `--stay`, the conversation's
-comments record its ruling and what it did, the subject's latest close brief is
-its `--close-brief`, and `WORK`, once the sign-off finished, names its work, in
-which a bead whose `source_ruling_bead` is this conversation is its `--rework`.
+ruling, which is safe, and go on from the entry it runs, as after any stay. The
+sign-off records the rework it filed under the ruling, so the call files none
+again, even once that rework has closed, and the entry then reads `returned`.
+When your thread no longer holds that call, rebuild it from the record:
+`AGREED` is its `--stay`, the conversation's comments record its ruling and
+what it did, the subject's latest close brief is its `--close-brief`, and
+`WORK`, once the sign-off finished, names its work, in which a bead whose
+`source_ruling_bead` is this conversation is its `--rework`.
 When the record does not give the whole call, as when `WORK` is empty, hold
 instead (`converse-hold`), and tell the operator the stay stopped short and
 what it had done.

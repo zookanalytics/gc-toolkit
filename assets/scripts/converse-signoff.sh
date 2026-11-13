@@ -82,7 +82,13 @@
 # thread, once the work closes: the conversation is then ready work assigned to
 # the sitting (gascity cmd/gc/compute_awake_set.go, the assigned-work demand and
 # the idle sleep it exempts). An attach in between wakes the sitting and changes
-# nothing, and it sleeps again once the tab detaches. An edge onto a bead in
+# nothing, and it sleeps again once the tab detaches. A sitting still up when
+# the work closes is kept up for its ready conversation and gets no turn from
+# it, so Gas City's notice that a blocker closed (the core order
+# cascade-nudge-on-blocker-close) brings it back. Work that closed before the
+# edge onto it was written neither wakes the sitting nor sends it that notice,
+# so the call ends by sending the sitting to its entry, which reads that work as
+# returned. An edge onto a bead in
 # another store holds nothing, so a stay waits only on work in the
 # conversation's own store, and a sitting whose work is elsewhere ends at the
 # hand-off.
@@ -1270,13 +1276,15 @@ if [ "$RULED" = yes ]; then
       *) stopped "the store refused the write that leaves conversation $CONVERSATION waiting under $HOLDER (gc bd update exited $STAY_RC); its edges and its staying: line are written, and a re-run makes the write" ;;
     esac
     record_action "Kept this conversation open until the work it sent lands, to compare it then with what was agreed."
-    # A stay whose only work is a rework that has closed already is ready at
-    # once, so nothing wakes its sitting: the sitting turns to the return now.
-    if [ -n "$CHILD_CLOSED" ] && [ "$STAY_ON" = "$RECORDED_CHILD" ]; then
-      echo "STAYING conversation $CONVERSATION on $SUBJECT: it waits on $STAY_ON under $HOLDER, which has closed already, so the work is back. Run the entry again, which reads it as returned, and carry out the return"
-    else
-      echo "STAYING conversation $CONVERSATION on $SUBJECT: it waits on $STAY_ON under $HOLDER. Its sitting sleeps once no tab is attached and wakes with this thread when that work closes"
-    fi
+    # The work can close before the conversation's edge onto it is written, as
+    # on a re-run once it has landed, and then its close neither wakes the
+    # sitting nor sends it Gas City's notice that a blocker closed. Gas City
+    # keeps a sitting that is up awake for a ready conversation, and gives it no
+    # turn for it (gascity 6589a7df4, cmd/gc/compute_awake_set.go: the idle
+    # sleep spares assigned work). So the sitting runs its entry now, which
+    # reads the stay as waiting while the work is out and as returned once it
+    # has closed.
+    echo "STAYING conversation $CONVERSATION on $SUBJECT: it waits on $STAY_ON under $HOLDER. Run the entry now: it reads waiting while that work is out, and returned once it has closed, which the sitting then carries out at once"
     tell_approval
     exit 0
   fi
