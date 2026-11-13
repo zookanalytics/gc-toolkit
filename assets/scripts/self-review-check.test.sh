@@ -8,7 +8,7 @@
 # records the cases write by running `gctk rig` in the fixture the way an
 # iteration does. So the exit-code contract (0 verified-green, 1 everything
 # else, fail-closed on any unreadable state), the record reads and the
-# exhaustion handback are pinned against the code that ships, not a paraphrase.
+# exhaustion note are pinned against the code that ships, not a paraphrase.
 set -uo pipefail
 
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/self-review-check-test.XXXXXX")"
@@ -50,7 +50,6 @@ show)
     sep=""
     [ -n "$MD_WORK_DIR" ]    && { printf '%s"work_dir":"%s"' "$sep" "$MD_WORK_DIR"; sep=","; }
     [ -n "$MD_BRANCH" ]      && { printf '%s"branch":"%s"' "$sep" "$MD_BRANCH"; sep=","; }
-    [ -n "$MD_GATE" ]        && { printf '%s"self_review_passed_sha":"%s"' "$sep" "$MD_GATE"; sep=","; }
     [ -n "$MD_ROUTE" ]       && { printf '%s"gc.execution_routed_to":"%s"' "$sep" "$MD_ROUTE"; sep=","; }
     [ -n "$MD_ABORTED_AT" ]  && { printf '%s"aborted_at":"%s"' "$sep" "$MD_ABORTED_AT"; sep=","; }
     # A pre-existing mark is JSON kept as a string, as bd keeps it.
@@ -58,7 +57,9 @@ show)
     [ -n "$MD_PRE_TEST" ]    && { printf '%s"rig_check_pre_existing.test":%s' "$sep" "$(printf '%s' "$MD_PRE_TEST" | jq -Rs .)"; sep=","; }
     [ -n "$MD_SETUP_BUILD" ] && { printf '%s"self_review_setup_build":%s' "$sep" "$(printf '%s' "$MD_SETUP_BUILD" | jq -Rs .)"; sep=","; }
     [ -n "$MD_PRE_BUILD" ]   && { printf '%s"rig_check_pre_existing.build":%s' "$sep" "$(printf '%s' "$MD_PRE_BUILD" | jq -Rs .)"; sep=","; }
-    printf '}}]'
+    printf '}'
+    [ -n "$MD_NOTES" ] && printf ',"notes":%s' "$(printf '%s' "$MD_NOTES" | jq -Rs .)"
+    printf '}]'
     ;;
   *)
     # An iteration bead: the root pointer for the GC_WISP_ID fallback, the
@@ -191,7 +192,6 @@ MD_ROOT_ISSUE="${MD_ROOT_ISSUE-$issue_id}"
 GC_COLD="${GC_COLD-0}"
 MD_WORK_DIR="${MD_WORK_DIR-$WT}"
 MD_BRANCH="${MD_BRANCH-polecat/gc-issue}"
-MD_GATE="${MD_GATE-}"
 MD_ROUTE="${MD_ROUTE-gc-toolkit/gc-toolkit.polecat}"
 MD_ABORTED_AT="${MD_ABORTED_AT-}"
 MD_MAX_ATTEMPTS="${MD_MAX_ATTEMPTS-3}"
@@ -203,6 +203,7 @@ EOF
   printf 'MD_PRE_TEST=%q\n' "${MD_PRE_TEST-}" >> "$STATE"
   printf 'MD_SETUP_BUILD=%q\n' "${MD_SETUP_BUILD-$SB_GREEN}" >> "$STATE"
   printf 'MD_PRE_BUILD=%q\n' "${MD_PRE_BUILD-}" >> "$STATE"
+  printf 'MD_NOTES=%q\n' "${MD_NOTES-}" >> "$STATE"
   # The run of the root, as run-lib.sh would name it: by default it works the
   # case's issue, and RUN_BEAD="" is a run that names no bead.
   jq -nc --arg root "${ROOT_ID-wisp-1}" --arg bead "${RUN_BEAD-$issue_id}" \
@@ -218,7 +219,7 @@ EOF
 # Run the script in a cwd that is deliberately NOT the fixture worktree: the
 # script must resolve the worktree from bead metadata, never from cwd.
 # GC_ITERATION default 1 keeps the gate cases far from the budget so they never
-# trip the handback.
+# trip the exhaustion note.
 run_case() {
   local desc="$1" want="$2"
   : > "$CALLS"
@@ -249,8 +250,8 @@ assert_out() {
 
 reset_env() {
   unset ROOT_ID ISSUE_ID MD_ROOT_ISSUE RUN_BEAD RUN_FAILS GC_COLD
-  unset MD_WORK_DIR MD_BRANCH MD_GATE MD_ROUTE MD_ABORTED_AT MD_MAX_ATTEMPTS MD_SUBJECT_MAX
-  unset UPDATE_FAILS ITERATION MD_PRE_LINT MD_PRE_TEST MD_SETUP_BUILD MD_PRE_BUILD GCTK
+  unset MD_WORK_DIR MD_BRANCH MD_ROUTE MD_ABORTED_AT MD_MAX_ATTEMPTS MD_SUBJECT_MAX
+  unset UPDATE_FAILS ITERATION MD_PRE_LINT MD_PRE_TEST MD_SETUP_BUILD MD_PRE_BUILD GCTK MD_NOTES
   unset VAR_BASE VAR_SETUP VAR_TYPECHECK VAR_LINT VAR_BUILD VAR_AFFECTED VAR_TEST
   clear_records
 }
@@ -532,30 +533,13 @@ run_case "FAIL when the block ran over uncommitted changes, beside records that 
 assert_out "…because the block noted no setup and build" "nothing recorded at $HEAD_SHA for: setup build"
 
 # --- 3e. some checks recorded, one not ----------------------------------------
-reset_env; MD_GATE="$HEAD_SHA"; write_state
+reset_env; write_state
 record "$WT" test --scope affected --command true
 record "$WT" lint --command true
-run_case "FAIL when a check has no record, even beside a stamp naming HEAD" 1
+run_case "FAIL when a check has no record" 1
 assert_out "names the check with no record" "nothing recorded at $HEAD_SHA for: typecheck"
 
-# --- 3f. a run poured before its checks were recorded --------------------------
-# Such a run notes no setup and build either; its stamp certified them.
-reset_env; MD_GATE="$HEAD_SHA"; MD_SETUP_BUILD=""; write_state
-run_case "PASS on a stamp naming HEAD when nothing is recorded" 0
-assert_out "says the stamp stood in" "by the stamp of a run poured before its checks were recorded"
-reset_env; MD_GATE="$OLD_SHA"; MD_SETUP_BUILD=""; write_state
-run_case "FAIL on a stamp naming an older HEAD when nothing is recorded" 1
-reset_env; MD_GATE="$HEAD_SHA"; MD_SETUP_BUILD=""; write_state; green
-run_case "PASS on a stamp naming HEAD in place of the setup and build note, beside records that pass" 0
-# Records of runs the step does not declare say nothing about its own, so the
-# stamp still stands in where they are all that HEAD holds.
-reset_env; MD_GATE="$HEAD_SHA"; MD_SETUP_BUILD=""; write_state
-record "$WT" test --scope full --command true; record "$WT" lint --command 'printf other'
-run_case "PASS on a stamp naming HEAD where only records of other runs are" 0
-reset_env; MD_GATE="$HEAD_SHA"; MD_SETUP_BUILD=$(noted "$HEAD_SHA" none fail); write_state; green
-run_case "FAIL when the note at HEAD says the build failed, even beside a stamp naming HEAD" 1
-
-# --- 3g. no gctk binary ------------------------------------------------------
+# --- 3f. no gctk binary ------------------------------------------------------
 reset_env; GCTK=none; write_state; green
 run_case "FAIL (fail-closed) with no gctk binary to read the records" 1
 assert_out "names the missing binary" "no gctk binary"
@@ -615,33 +599,102 @@ reset_env; GC_COLD=1; write_state; green
 run_case "PASS under a cold gc (resolution is bd-only, and the record reads call no gc)" 0
 refute_call "resolution must not shell out to gc convoy" "gc convoy"
 
-# --- 12. exhaustion handback -------------------------------------------------
-# The last failing attempt (GC_ITERATION >= gc.max_attempts) hands the work bead
-# back itself, because nothing runs after the budget is spent.
-reset_env; MD_GATE=""; ITERATION=3; MD_MAX_ATTEMPTS=3; write_state
+# --- 12. exhaustion note ----------------------------------------------------
+# The last failing attempt (GC_ITERATION >= gc.max_attempts) notes the
+# exhaustion on the work bead, and that note is the condition's one write: the
+# loop's last iteration asks a person through a gate from its own session, and
+# this condition runs inside the control dispatcher's judgment of the control.
+reset_env; ITERATION=3; MD_MAX_ATTEMPTS=3; write_state
 run_case "FAIL on the last attempt with nothing recorded" 1
-assert_call "last attempt stamps aborted_at=self-review-exhausted" "aborted_at=self-review-exhausted"
-assert_call "last attempt reassigns to the witness (derived from the pool route)" "gc-toolkit/gc-toolkit.witness"
-assert_call "last attempt clears the pool route" "gc.routed_to="
-assert_call "last attempt clears the drained session pins" "--unset-metadata gc.session_id"
-assert_call "last attempt nudges the witness (best effort)" "gc session nudge gc-toolkit/gc-toolkit.witness"
+assert_call "last attempt notes the exhaustion on the work bead, naming the run" \
+  "update gc-issue --append-notes Self-review loop of run wisp-1 exhausted its budget (attempt 3 of 3)"
+assert_call "the note names the gate a last attempt still red asks through" "self-review-exhausted human gate"
+if [ "$(grep -c '^bd update ' "$CALLS")" = 1 ]; then ok "the note is the condition's one write"; else
+  bad "the note is the condition's one write"; sed 's/^/       /' "$CALLS"; fi
+for flag in --set-metadata --unset-metadata --assignee --status; do
+  refute_call "the note's write carries no $flag: it routes, assigns, reopens and stamps nothing" "$flag"
+done
+refute_call "nothing is nudged" "gc session nudge"
 
-# --- 13. exhaustion is idempotent --------------------------------------------
-# A work bead already carrying aborted_at is left alone: a retried exec of the
-# same attempt must not append a second handback.
-reset_env; MD_GATE=""; ITERATION=3; MD_MAX_ATTEMPTS=3; MD_ABORTED_AT="self-review-exhausted"; write_state
-run_case "FAIL on the last attempt when already aborted" 1
-refute_call "does not re-stamp an already-aborted bead" "aborted_at=self-review-exhausted"
+# --- 13. one note for a run ---------------------------------------------------
+# A work bead whose notes already record this run's exhaustion is left alone: a
+# retried exec of the same attempt must not append a second note.
+reset_env; ITERATION=3; MD_MAX_ATTEMPTS=3
+MD_NOTES="Self-review loop of run wisp-1 exhausted its budget (attempt 3 of 3) without a verified-green gate"; write_state
+run_case "FAIL on the last attempt when the run's exhaustion is already noted" 1
+refute_call "does not note the same run's exhaustion twice" "--append-notes"
+# An earlier run's note, and the aborted_at an earlier hand-back stamped, say
+# nothing about this run.
+reset_env; ITERATION=3; MD_MAX_ATTEMPTS=3; MD_ABORTED_AT="self-review-exhausted"
+MD_NOTES="Self-review loop of run wisp-0 exhausted its budget (attempt 3 of 3) without a verified-green gate"; write_state
+run_case "FAIL on the last attempt of a later run on the same bead" 1
+assert_call "an earlier run's note and aborted_at leave this run's note to be written" \
+  "--append-notes Self-review loop of run wisp-1 exhausted its budget"
 
-# --- 14. no handback before the budget is spent ------------------------------
-reset_env; MD_GATE=""; ITERATION=2; MD_MAX_ATTEMPTS=3; write_state
+# --- 14. no note before the budget is spent ----------------------------------
+reset_env; ITERATION=2; MD_MAX_ATTEMPTS=3; write_state
 run_case "FAIL mid-budget with nothing recorded" 1
-refute_call "no handback before the last attempt" "aborted_at=self-review-exhausted"
+refute_call "no note before the last attempt" "--append-notes"
 
 # --- 15. budget read from the subject bead when carried there ----------------
-reset_env; MD_GATE=""; ITERATION=3; MD_MAX_ATTEMPTS=""; MD_SUBJECT_MAX=3; write_state
+reset_env; ITERATION=3; MD_MAX_ATTEMPTS=""; MD_SUBJECT_MAX=3; write_state
 run_case "FAIL on the last attempt with the budget on the subject bead" 1
-assert_call "resolves the budget from the subject when the control list is empty" "aborted_at=self-review-exhausted"
+assert_call "resolves the budget from the subject when the control list is empty" "--append-notes"
+
+# --- 16. the note needs no gc, and cannot change the verdict -----------------
+reset_env; ITERATION=3; MD_MAX_ATTEMPTS=3; GC_COLD=1; write_state
+run_case "FAIL on the last attempt under a cold gc" 1
+assert_call "the note still lands, since it goes through bd alone" "--append-notes Self-review loop of run wisp-1"
+reset_env; ITERATION=3; MD_MAX_ATTEMPTS=3; UPDATE_FAILS=1; write_state
+run_case "FAIL on the last attempt when the store refuses the note" 1
+assert_out "says the note did not land" "the exhaustion note did not land on gc-issue"
+
+# --- 17. the step's last-attempt decline, run as the step writes it ----------
+# The self-review step's last attempt, still red, declines its run with one
+# decline.sh call. Rendered as a pour renders it and run against the real
+# decline.sh, the call files the self-review-exhausted gate on the work bead,
+# makes the work bead wait on it armed to re-sling mol-polecat-work, cancels the
+# run at the iteration it holds and drains, in that order. The gate, the wait
+# and the cancel are stubs that record their calls; decline.test.sh holds what
+# decline.sh does when one of them does not land.
+DECLINE_CALL=$(grep -E '^`"\$\(b=.\{\{binding_prefix\}\}.; gc "\$\{b%\.\}" scripts-dir\)/decline\.sh" --step self-review ' "$ROOT/formulas/mol-polecat-work.toml")
+if [ "$(printf '%s\n' "$DECLINE_CALL" | grep -c 'decline\.sh')" = 1 ]; then ok "the self-review step carries one decline.sh call for its last attempt"; else
+  bad "the self-review step carries one decline.sh call for its last attempt (found: $DECLINE_CALL)"; fi
+DPACK="$TMP/decline-pack"; DBIN="$TMP/decline-bin"; mkdir -p "$DPACK" "$DBIN"
+cp "$HERE/decline.sh" "$DPACK/"
+for stub in human-gate:gate await-ruling:await run-cancel:cancel; do
+  printf '#!/usr/bin/env bash\nprintf %s "$*" >> "$DCALLS"\n' "'${stub#*:} %s\\n'" > "$DPACK/${stub%%:*}.sh"
+done
+chmod +x "$DPACK"/*.sh
+cat > "$DBIN/gc" <<'GC'
+#!/usr/bin/env bash
+case "$1 $2" in
+  "gc-toolkit scripts-dir") printf '%s\n' "$DPACK" ;;
+  "hook current") printf 'iter-3\n' ;;
+  "bd show") printf '[{"id":"iter-3","status":"in_progress","assignee":"me","metadata":{"gc.step_ref":"self-review.iteration.3"}}]\n' ;;
+  "runtime drain-ack") printf 'drain\n' >> "$DCALLS" ;;
+  *) exit 1 ;;
+esac
+GC
+chmod +x "$DBIN/gc"
+printf '%s\n' "$DECLINE_CALL" | sed -e 's/^`//' -e 's/`$//' \
+  -e "s|{{binding_prefix}}|gc-toolkit.|g" -e 's|"<the work bead>"|"gc-issue"|' > "$TMP/decline.sh"
+grep -q -e '{{' -e '<the work bead>' "$TMP/decline.sh" \
+  && bad "the decline call renders with a placeholder a pour leaves unfilled" \
+  || ok "a pour fills every placeholder in the decline call"
+for sh in $SHELLS; do
+  : > "$TMP/decline.calls"
+  ( cd "$TMP" && env PATH="$DBIN:$PATH" DPACK="$DPACK" DCALLS="$TMP/decline.calls" "$sh" "$TMP/decline.sh" ) >"$TMP/decline.out" 2>&1
+  rc=$?
+  eq "$rc" 0 "$sh: the last attempt's decline exits 0"
+  eq "$(awk '{ print $1 }' "$TMP/decline.calls" | tr '\n' ';')" "gate;await;cancel;drain;" \
+    "$sh: …filing the gate, then the wait, then the run's cancel, then the drain"
+  assert_decline() { grep -qE -- "$2" "$TMP/decline.calls" && ok "$sh: $1" || { bad "$sh: $1"; sed 's/^/       /' "$TMP/decline.calls"; }; }
+  assert_decline "…the gate blocks the work bead under self-review-exhausted" '^gate --subject gc-issue --key self-review-exhausted --message '
+  assert_decline "…its message tells the person clearing it re-slings the work" 'clearing it re-slings gc-issue'
+  assert_decline "…the work bead waits on that gate, armed to re-sling mol-polecat-work" '^await gc-issue --key self-review-exhausted --formula mol-polecat-work$'
+  assert_decline "…and the run is cancelled at the iteration this session holds" '^cancel --step self-review --reason '
+done
 
 echo
 echo "self-review-check: $PASS passed, $FAIL failed"

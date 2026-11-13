@@ -52,28 +52,33 @@
 # load the full city config including the pack import closure, which in the
 # condition env can be cold — then the `gc` call dies before doing anything
 # ("... locked but not cached ...; run 'gc import install'"). A resolution that
-# dies goes blind to an already-green gate AND suppresses the exhaustion
-# handback below (which is gated on a resolved $ISSUE), so the loop burns its
-# whole budget and strands with nothing on anyone's hook. Keeping resolution on
+# dies goes blind to an already-green gate AND suppresses the exhaustion note
+# below (which is gated on a resolved $ISSUE), so the loop burns its whole
+# budget and ends with nothing on the work bead to say so. Keeping resolution on
 # `bd` keeps both working in a minimal env. Each `bd` call carries a `# raw-bd:`
 # marker, which the raw-bd-invocation lint reads.
 #
-# ## Why this script writes to the work bead on the LAST failing attempt
+# ## Why this script notes the LAST failing attempt on the work bead
 #
 # When gc.attempt reaches gc.max_attempts the orchestrator closes the control
-# bead gc.outcome=fail and stops; nothing touches the work bead, and
-# submit-and-exit stays blocked forever. This script is the only thing that runs
-# at that moment, so it performs the handback itself: stamp aborted_at, clear
-# the pool route and the drained session's pins, reassign the work bead to the
-# witness with the failure tail in notes, and nudge. It fires only on the
-# budget's last attempt (GC_ITERATION >= gc.max_attempts) and only once (a work
-# bead already carrying aborted_at is left alone). Every write is best-effort: a
-# handback that fails must not change the verdict, which is a FAIL either way.
+# bead gc.outcome=fail and stops, and nothing else touches the work bead. The
+# loop asks a person before that, from its last iteration's own session: an
+# iteration that finds a check still red on the last attempt declines its run
+# through a human gate on the work bead (self-review-exhausted), with the work's
+# re-sling armed behind it, as the step says. This script cannot ask, because it
+# runs inside the control dispatcher's judgment of the control bead that the
+# run's end would close. When the last attempt closed red instead, this script
+# is the only thing that runs at that moment, so it appends what it found to the
+# work bead's notes. That note is its one write: it routes, assigns and nudges
+# nothing. It fires only on the budget's last attempt (GC_ITERATION >=
+# gc.max_attempts) and only once for a run (a work bead whose notes already
+# record this run's exhaustion is left alone). The write is best-effort: a note
+# that fails must not change the verdict, which is a FAIL either way.
 
 set -uo pipefail
 
-# Resolved as we go; the handback needs $ISSUE and runs from failure paths that
-# can fire before it is set.
+# Resolved as we go; the exhaustion note needs $ISSUE and runs from failure
+# paths that can fire before it is set.
 ROOT=""
 ISSUE=""
 
@@ -81,15 +86,15 @@ note() { printf 'self-review-check: %s\n' "$1" >&2; }
 
 fail() {
 	printf 'self-review-check: FAIL: %s\n' "$1" >&2
-	handback_if_budget_exhausted "$1"
+	note_if_budget_exhausted "$1"
 	exit 1
 }
 
 # A truthful "not done yet": run another iteration, unless this was the last —
-# in which case the handback is the durable signal.
+# in which case the exhaustion note is the durable record.
 incomplete() {
 	note "$1"
-	handback_if_budget_exhausted "$1"
+	note_if_budget_exhausted "$1"
 	exit 1
 }
 
@@ -112,7 +117,7 @@ iteration_json() {
 # The loop's budget, from the ralph control bead's gc.max_attempts. The ralph
 # condition env sets GC_ITERATION but leaves GC_MAX_ITERATIONS at its zero value,
 # so the budget comes from the beads. Echoes nothing when it cannot be resolved —
-# an unknown budget means no handback, never a guessed one.
+# an unknown budget means no note, never a guessed one.
 resolve_budget() {
 	local subject_json step
 	subject_json=$(iteration_json)
@@ -140,19 +145,7 @@ resolve_budget() {
 			| .[0].metadata."gc.max_attempts" // empty'
 }
 
-# The witness address, derived from the molecule's pool route (…/<prefix>polecat
-# -> …/<prefix>witness). The witness is the escalation first responder; it
-# triages the handed-back bead and puts it to a person through a human gate if needed.
-resolve_witness() {
-	local route="$1"
-	case "$route" in
-	*.polecat) printf '%s.witness' "${route%.polecat}" ;;
-	*.polecat-*) printf '%s.witness' "${route%.polecat-*}" ;;
-	*) : ;;
-	esac
-}
-
-handback_if_budget_exhausted() {
+note_if_budget_exhausted() {
 	local reason="$1"
 	[ -n "$ISSUE" ] || return 0
 
@@ -169,67 +162,45 @@ handback_if_budget_exhausted() {
 	[ "$attempt" -ge "$budget" ] || return 0
 
 	# Re-read rather than trusting a snapshot: a retried exec of this same
-	# attempt must not append a second handback.
-	local issue_json
+	# attempt must not append a second note. The note names the run, so an
+	# earlier run's exhaustion on the same bead leaves this one's to be written.
+	local issue_json marker
+	marker="Self-review loop of run $ROOT exhausted its budget"
 	# raw-bd: gc bd loads the city config, which can be cold here — see "Why resolution is bd-only"
 	issue_json=$(bd show "$ISSUE" --json 2>/dev/null) || {
-		note "WARN: could not re-read $ISSUE for the exhaustion handback"
+		note "WARN: could not re-read $ISSUE for the exhaustion note"
 		return 0
 	}
-	local already
-	already=$(printf '%s' "$issue_json" | jq -r '.[0].metadata.aborted_at // empty')
-	if [ -n "$already" ]; then
-		note "budget exhausted; $ISSUE already carries aborted_at=$already (leaving it)"
+	if printf '%s' "$issue_json" | jq -e --arg m "$marker" '.[0].notes // "" | contains($m)' >/dev/null 2>&1; then
+		note "budget exhausted; $ISSUE already notes run $ROOT's exhaustion (leaving it)"
 		return 0
 	fi
 
-	local worktree branch route witness
+	local worktree branch
 	worktree=$(printf '%s' "$issue_json" | jq -r '.[0].metadata.work_dir // "(not recorded)"')
 	branch=$(printf '%s' "$issue_json" | jq -r '.[0].metadata.branch // "(not recorded)"')
-	route=$(printf '%s' "$issue_json" | jq -r '.[0].metadata."gc.execution_routed_to" // .[0].metadata."gc.routed_to" // empty')
-	witness=$(resolve_witness "$route")
 
-	# Clear the pool route so no fresh polecat is offered the same failing work,
-	# and clear the drained session's pins so the bead does not read as owned by
-	# a session that has ceased to exist. Reassign to the witness with the
-	# failure recorded. aborted_at is what a sweep keys on; the assignee + notes
-	# are what a reader acts on.
-	local -a args=(
-		--status=open
-		--set-metadata "aborted_at=self-review-exhausted"
-		--set-metadata "self_review_loop_attempts=$attempt"
-		--set-metadata "gc.routed_to="
-		--unset-metadata gc.session_id
-		--unset-metadata gc.session_name
-	)
-	[ -n "$witness" ] && args+=(--assignee "$witness")
-
-	if ! bd update "$ISSUE" "${args[@]}" --append-notes "$(
+	# raw-bd: gc bd loads the city config, which can be cold here — see "Why resolution is bd-only"
+	if ! bd update "$ISSUE" --append-notes "$(
 		cat <<EOF
-Self-review check loop exhausted its budget (attempt $attempt of $budget) without
-a verified-green gate (aborted_at=self-review-exhausted). The control bead closes
-gc.outcome=fail and submit-and-exit stays blocked; no further iteration will run.
+$marker (attempt $attempt of $budget) without a verified-green gate, so its
+control bead closes gc.outcome=fail and no further iteration runs. A last
+attempt still red asks a person through a self-review-exhausted human gate on
+this bead; with no such gate here, nobody has been asked.
 
 Last exit-condition verdict: $reason
 Worktree: $worktree
 Branch: $branch
 
-The branch and worktree are intact. Resume by checking out the branch in the
-worktree, driving the declared checks to green by hand, then re-slinging
-mol-polecat-work on this bead; or judge the change unshippable and dispose of it.
+The branch and worktree are intact. Resume by driving the declared checks to
+green on the branch, then re-slinging mol-polecat-work on this bead; or judge the
+change unshippable and dispose of it.
 EOF
 	)" >/dev/null 2>&1; then
-		note "WARN: exhaustion handback write failed for $ISSUE (loop still reports FAIL)"
+		note "WARN: the exhaustion note did not land on $ISSUE (loop still reports FAIL)"
 		return 0
 	fi
-	note "budget exhausted at attempt $attempt/$budget; handed $ISSUE back to ${witness:-(no witness resolved)} with aborted_at=self-review-exhausted"
-
-	# Timely signal only; the bead above is the durable one.
-	if [ -n "$witness" ]; then
-		gc session nudge "$witness" \
-			"$ISSUE: self-review check loop exhausted ($attempt/$budget) — the change could not reach a green gate; branch intact, details in bead notes (aborted_at=self-review-exhausted)" \
-			>/dev/null 2>&1 || true
-	fi
+	note "budget exhausted at attempt $attempt/$budget; noted on $ISSUE"
 }
 
 # --- 1. Resolve the molecule root (wisp) -------------------------------------
@@ -253,8 +224,8 @@ fi
 # The reads go through `bd` only. The root's own row is read first, since the
 # step's commands are read from it below. A run that cannot be read leaves
 # gc.var.issue on that row, which the self-review iteration stamps as the
-# fallback for a degraded store, so the handback below still has a bead to hand
-# back; the check says the run went unverified.
+# fallback for a degraded store, so the exhaustion note below still has a bead
+# to go on; the check says the run went unverified.
 # raw-bd: gc bd loads the city config, which can be cold here — see "Why resolution is bd-only"
 ROOT_JSON=$(bd show "$ROOT" --json 2>/dev/null)
 [ -n "$ROOT_JSON" ] || fail "could not read root bead $ROOT"
@@ -427,24 +398,7 @@ else
 	done
 fi
 [ -z "$FAILED" ] || incomplete "not green at $HEAD_SHA:$FAILED; another iteration is needed"
-
-# A molecule poured before its self-review ran the checks through gctk rig
-# keeps step text that records nothing and stamps self_review_passed_sha on the
-# work bead once every declared check, setup and build included, has passed.
-# That stamp naming HEAD stands in for the setup and build outcome such a run
-# never notes, and for the records when none of the three declared runs has one
-# there, so such a run still converges.
-if [ -n "$UNRECORDED" ]; then
-	LEGACY_SHA=$(printf '%s' "$ISSUE_JSON" | jq -r '.[0].metadata.self_review_passed_sha // empty')
-	if [ "$LEGACY_SHA" = "$HEAD_SHA" ]; then
-		UNRECORDED="${UNRECORDED% setup build}"
-		if [ "$UNRECORDED" = " test lint typecheck" ]; then
-			note "PASS: self-review green at $HEAD_SHA, by the stamp of a run poured before its checks were recorded"
-			exit 0
-		fi
-	fi
-	[ -z "$UNRECORDED" ] || incomplete "nothing recorded at $HEAD_SHA for:$UNRECORDED by the runs the step declares, so another iteration is needed"
-fi
+[ -z "$UNRECORDED" ] || incomplete "nothing recorded at $HEAD_SHA for:$UNRECORDED by the runs the step declares, so another iteration is needed"
 
 note "PASS: self-review green at $HEAD_SHA"
 exit 0

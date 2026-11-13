@@ -435,16 +435,18 @@ eq "$RC" 0 "pr-prep/unregistered: the hand-back exits 0, as the formula's other 
 [ ! -e "$WT" ] && ok "pr-prep/unregistered: nothing created at the worktree path" || bad "pr-prep/unregistered: nothing created at the worktree path"
 eq "$(wt_paths "$D/cwd" | count)" 1 "pr-prep/unregistered: nothing registered in the cwd repo"
 eq "$(git -C "$D/cwd" for-each-ref --format='%(refname)' 'refs/heads/upstream-pr/' | count)" 0 "pr-prep/unregistered: no branch is created in the cwd repo"
-has "$(cat "$D/gc.log")" "mail send gascity/gascity-keeper.keeper -s pr-prep: no gascity rig for tk-iss" "pr-prep/unregistered: the keeper is mailed"
+has "$(cat "$D/gc.log")" "mail send gascity/gascity-keeper.keeper --notify -s pr-prep: no gascity rig for tk-iss" \
+  "pr-prep/unregistered: the keeper is mailed, and the mail requests its turn, the notice its assignment owes"
 has "$(cat "$D/gc.log")" "mail send human -s pr-prep: no gascity rig for tk-iss" "pr-prep/unregistered: the operator is mailed"
-has "$(cat "$D/gc.log")" "bd update tk-iss --set-metadata aborted_at=workspace-setup --status=open --assignee=gascity/gascity-keeper.keeper --set-metadata gc.routed_to=gascity/gascity-keeper.keeper" \
-  "pr-prep/unregistered: the bead goes back open, assigned and routed to the keeper"
+has "$(cat "$D/gc.log")" "bd update tk-iss --set-metadata aborted_at=workspace-setup --status=open --assignee=gascity/gascity-keeper.keeper" \
+  "pr-prep/unregistered: the bead goes back open and assigned to the keeper"
+hasnt "$(cat "$D/gc.log")" "gc.routed_to" "pr-prep/unregistered: no route is written beside the assignment"
 eq "$(head -n 1 "$D/gc.log" | cut -d' ' -f1-3)" "bd update tk-iss" "pr-prep/unregistered: the hand-back is written before any mail"
 has "$(cat "$D/gc.log")" "runtime drain-ack" "pr-prep/unregistered: the session drains"
 PRPREP_META='[{"metadata":{}}]' prprep_case other unstamped
-has "$(cat "$D/gc.log")" "bd update tk-iss --set-metadata aborted_at=workspace-setup --status=open --assignee=keeper/from-var --set-metadata gc.routed_to=keeper/from-var" \
+has "$(cat "$D/gc.log")" "bd update tk-iss --set-metadata aborted_at=workspace-setup --status=open --assignee=keeper/from-var" \
   "pr-prep/unstamped: with no requesting_keeper on the bead, it goes back to the keeper the run was slung with"
-has "$(cat "$D/gc.log")" "mail send keeper/from-var -s pr-prep: no gascity rig for tk-iss" "pr-prep/unstamped: that keeper is mailed"
+has "$(cat "$D/gc.log")" "mail send keeper/from-var --notify -s pr-prep: no gascity rig for tk-iss" "pr-prep/unstamped: that keeper is mailed, requesting its turn"
 hasnt "$(cat "$D/gc.log")" "null" "pr-prep/unstamped: no write or mail names an agent called null"
 prprep_case other refused 1
 eq "$RC" 1 "pr-prep/refused: a hand-back the store refuses fails the block"

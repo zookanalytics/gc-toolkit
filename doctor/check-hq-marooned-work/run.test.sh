@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Hermetic test for doctor/check-hq-marooned-work. Stub gc/bd only; no city,
 # no network. Covers: a marooned bug and a pool-routed task are flagged; every
-# legitimate HQ resident is exempt (infra type, human route, a bead an open
-# human gate blocks, which another gate does not exempt, a conversation,
+# legitimate HQ resident is exempt (infra type, a bead an open human gate
+# blocks, which another gate does not exempt, a conversation,
 # deacon-ledger label, debt label, gc-doctor title, an assigned bead, a bead
 # routed to a city-scoped agent, a warrant label, a standing subject); the
 # machinery types bd's ready-work query excludes (step, convoy,
@@ -97,7 +97,7 @@ gates() { local IFS=,; printf '[%s]' "$*" > "$TMP/stores/testcity.gates.json"; }
 B_BUG='{"id":"m-bug","status":"open","issue_type":"bug","title":"real marooned defect"}'
 B_POOL='{"id":"m-pool","status":"open","issue_type":"task","title":"work routed nowhere readable","metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}}'
 B_SESSION='{"id":"ok-sess","status":"open","issue_type":"session","title":"gc-toolkit/gc-toolkit.witness"}'
-B_HUMAN='{"id":"ok-human","status":"open","issue_type":"task","title":"operator disk-size call","metadata":{"gc.routed_to":"human"}}'
+B_HUMAN='{"id":"m-human","status":"open","issue_type":"task","title":"operator disk-size call","metadata":{"gc.routed_to":"human"}}'
 B_CONV='{"id":"ok-conv","status":"open","issue_type":"task","title":"about an operator pick","assignee":"human","dependencies":[{"issue_id":"ok-conv","depends_on_id":"tk-pick","type":"tracks"}]}'
 B_GATE='{"id":"ok-gate","status":"open","issue_type":"gate","await_type":"human","await_id":"operator-pick","title":"operator pick"}'
 B_UNASSIGNED_CONV='{"id":"m-conv","status":"open","issue_type":"task","title":"a conversation someone unassigned by hand","dependencies":[{"issue_id":"m-conv","depends_on_id":"tk-pick","type":"tracks"}]}'
@@ -130,13 +130,19 @@ OUT=$(run_check); RC=$?
 eq "$RC" "2" "a task routed to a pool but sitting in the HQ store is an ERROR"
 has "$OUT" "routed to gc-toolkit/gc-toolkit.polecat" "the finding names the pool route"
 
-# --- 3. every legitimate HQ resident is exempt ------------------------------
-store "$B_SESSION" "$B_HUMAN" "$B_CONV" "$B_GATE" "$B_LEDGER" "$B_DEBT" "$B_DOCTOR" "$B_ASSIGNED"
+# --- 2a. a human route exempts nothing: a person's wait is a human gate -----
+store "$B_HUMAN"
 OUT=$(run_check); RC=$?
-eq "$RC" "0" "session/human/conversation/gate/ledger/debt/doctor/assigned are all legitimate HQ contents"
+eq "$RC" "2" "a task routed to human in the HQ store is an ERROR"
+has "$OUT" "m-human" "the finding names the bead"
+has "$OUT" "routed to human" "the finding names the route"
+
+# --- 3. every legitimate HQ resident is exempt ------------------------------
+store "$B_SESSION" "$B_CONV" "$B_GATE" "$B_LEDGER" "$B_DEBT" "$B_DOCTOR" "$B_ASSIGNED"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "session/conversation/gate/ledger/debt/doctor/assigned are all legitimate HQ contents"
 has "$OUT" "OK:" "the pass message is the OK line"
 hasnt "$OUT" "ok-sess" "an infra session type is not flagged"
-hasnt "$OUT" "ok-human" "a decision routed to human is not flagged"
 hasnt "$OUT" "ok-conv" "a conversation in the operator's queue is assigned, so it is not flagged"
 hasnt "$OUT" "ok-gate" "a human gate is a gate, an infra type, so it is not flagged"
 hasnt "$OUT" "ok-ledger" "a deacon-ledger daily digest is not flagged"
@@ -191,7 +197,7 @@ has "$OUT" "m-conv" "…and the finding names it"
 has "$OUT" "m-visit" "…and a leftover visit is flagged like any unassigned task"
 
 # --- 4. a mix names only the marooned beads ---------------------------------
-store "$B_BUG" "$B_SESSION" "$B_DEBT" "$B_HUMAN" "$B_DOCTOR"
+store "$B_BUG" "$B_SESSION" "$B_DEBT" "$B_DOCTOR"
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "one marooned bead among legitimate contents is still an ERROR"
 has "$OUT" "1 finding" "the count is the marooned beads alone"

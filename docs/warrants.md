@@ -85,8 +85,9 @@ shares only the word ([authority-map.md](authority-map.md)).
   - `preflight-tests` runs the checks through `gctk rig`, so every polecat starting
     from one base shares one recorded run, and keys a tracker on a stamp. Core's
     runs each command raw per polecat and matches trackers by title.
-  - `self-review` is a bounded check loop over those records, where Gas Town's is
-    one inline step.
+  - `self-review` is a bounded check loop over those records, whose last attempt
+    asks a person through a human gate when a check is still red, where Gas
+    Town's is one inline step.
   - `submit-and-exit` holds the anchor, the bring-current guard and the store-only
     exit, which are nouns of the merge and review subsystems. Once the handoff is
     written it removes the run's worktree with its local branch, as core's own
@@ -117,8 +118,8 @@ shares only the word ([authority-map.md](authority-map.md)).
   In `gastownhall/gascity-packs`, `gastown/formulas/mol-polecat-work.toml` overrides
   `workspace-setup`, `self-review` and `submit-and-exit`, rebases a rejected
   branch, and at the handoff detaches the tree and deletes its branch.
-- **Verified.** 2026-11-11, at `gastownhall/gascity` main 6bd609f5b and
-  `gastownhall/gascity-packs` main 7f86098c0.
+- **Verified.** 2026-11-12, at `gastownhall/gascity` main 3bcab243e and
+  `gastownhall/gascity-packs` main 1f6d8e41c.
 - **Retires when.** A step at a time. `load-context`: core's gate refuses finished,
   parked and held work and ends a run by cancelling it. `workspace-setup`: the
   refinery's rework machinery goes (`tk-1tfzr71.20`), which ends the merge resume.

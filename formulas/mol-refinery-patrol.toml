@@ -857,7 +857,10 @@ branch_has_real_change() {
 ```
 
 **0. Refuse a 0-diff branch (both modes).** A close-as-merged or a PR for a
-branch that merges to a no-op is a false completion. Never silently retry. The
+branch that merges to a no-op is a false completion. Never silently retry. Its
+park files the human gate first and records `refused_false_completion` only once
+the gate is filed. A gate that is not filed leaves the work with the refinery,
+and the next patrol checks it again. The
 prepared head is the detached prep worktree's HEAD (the rebase step staged it
 there), so resolve that path and read its commit rather than a `temp` branch.
 A branch with no change is not always a false completion. `direct-merge-push.sh`
@@ -919,7 +922,7 @@ if [ "$BHRC_RC" != 0 ] && [ "$BHRC_RC" != 1 ]; then
   elif [ "$WORK_KIND" = convoy ]; then
     # human-gate.sh filed its gate on the convoy, in the convoy's store, so the
     # gate blocks the convoy already, and that holds the park.
-    "$LC" transition "$WORK" --to blocked --assignee "" --route human --set "blocked_reason=the zero-diff check could not run in $RIG_ROOT, $CHECK_FAILS patrols in a row: $BHRC_ERROR" --unset zero_diff_check_failures --takeaway "the zero-diff check could not run $CHECK_FAILS patrols in a row; fix the error its gate names, then hand the convoy back" && WAITS=1
+    "$LC" transition "$WORK" --to blocked --assignee "" --set "blocked_reason=the zero-diff check could not run in $RIG_ROOT, $CHECK_FAILS patrols in a row: $BHRC_ERROR" --unset zero_diff_check_failures --takeaway "the zero-diff check could not run $CHECK_FAILS patrols in a row; fix the error its gate names, then hand the convoy back" && WAITS=1
   elif "$SCRIPTS/await-ruling.sh" "$WORK" --key refinery-zero-diff-check-failed --formula mol-polecat-work; then
     WAITS=1
     gc bd update "$WORK" --unset-metadata zero_diff_check_failures --append-notes "Refinery: the zero-diff check of $BRANCH could not run in $RIG_ROOT, $CHECK_FAILS patrols in a row ($BHRC_ERROR), so the branch was not judged and nothing was merged. $WORK waits on its refinery-zero-diff-check-failed gate. Clearing that gate pours a fresh run, and that run hands the branch back to the refinery." >/dev/null 2>&1 || echo "could not clear the failed-check count on $WORK, so its next failed check asks a person at once"
@@ -947,11 +950,10 @@ if [ "$BHRC_RC" = 1 ]; then
     echo "origin/$TARGET carries $LANDED_SHA, which a direct landing of $WORK pushed without recording; taking the direct path to record it"
     MERGE_STRATEGY=direct
   else
-    "$LC" transition "$WORK" --to refused_false_completion --assignee "" --route human --set false_completion_suspected="branch $BRANCH no verified change vs origin/$TARGET; refused merge-close" --takeaway "the branch has no verified change against its target — refused close-as-merged; inspect the branch or drop the bead"
-    if [ -n "$SCRIPTS" ]; then
-      "$SCRIPTS/human-gate.sh" --subject "$WORK" --key refinery-false-completion --message "Branch $BRANCH introduces no verified change vs origin/$TARGET; refused close-as-merged. Bead parked for a human; never silently retried."
+    if "$SCRIPTS/human-gate.sh" --subject "$WORK" --key refinery-false-completion --message "Branch $BRANCH introduces no verified change vs origin/$TARGET; refused close-as-merged. Bead parked for a human; never silently retried."; then
+      "$LC" transition "$WORK" --to refused_false_completion --assignee "" --set false_completion_suspected="branch $BRANCH no verified change vs origin/$TARGET; refused merge-close" --takeaway "the branch has no verified change against its target — refused close-as-merged; inspect the branch or drop the bead"
     else
-      echo "human-gate.sh not found in the pack; $WORK is parked for a human with no refinery-false-completion gate"
+      echo "no refinery-false-completion gate was filed on $WORK, so it is not parked: it stays with the refinery, and the next patrol checks it again"
     fi
     gc runtime drain-ack
     exit 1
@@ -1049,13 +1051,15 @@ branch the prepare block put in merge mode.
 2. Validate a caller-supplied `existing_pr` (must be OPEN, head==$BRANCH,
 base==$TARGET, in the rig's origin repo — `gh pr view <ref> --repo "$(git -C
 "$RIG_ROOT" remote get-url origin)" --json url,number,state,headRefName,baseRefName`). Any mismatch is a durable block,
-not a retry. Fill BOTH placeholders: `blocked_reason` is the row's detail and
-`--takeaway` the one line the operator's board renders as what this bead
-needs, capped at 140 characters.
+not a retry. Fill every placeholder: the gate's `<reason>` is what the person
+reads, `blocked_reason` is the row's detail and `--takeaway` the one line the
+operator's board renders as what this bead needs, capped at 140 characters.
+The gate is filed first, and the bead is parked `blocked` only once it is. A
+gate that is not filed leaves the work with the refinery, and the next patrol
+validates it again.
 ```bash
-"$LC" transition "$WORK" --to blocked --assignee "" --route human --set blocked_reason="<what is wrong with existing_pr>" --takeaway "existing_pr failed validation: <what is wrong> — supply a valid PR or clear existing_pr"
 SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""
-[ -n "$SCRIPTS" ] && "$SCRIPTS/human-gate.sh" --subject "$WORK" --key refinery-invalid-existing-pr --message "existing_pr on $WORK failed validation: <reason>. Bead blocked and routed to human."
+"$SCRIPTS/human-gate.sh" --subject "$WORK" --key refinery-invalid-existing-pr --message "existing_pr on $WORK failed validation: <reason>. Bead blocked for a person: supply a valid PR or clear existing_pr." && "$LC" transition "$WORK" --to blocked --assignee "" --set blocked_reason="<what is wrong with existing_pr>" --takeaway "existing_pr failed validation: <what is wrong> — supply a valid PR or clear existing_pr"
 ```
 Then jump to next-iteration (pour before burn).
 

@@ -1557,10 +1557,10 @@ if part machine; then
 # moving without re-implementing these predicates, and the value is head-pinned
 # so a stale verdict can never read as current.
 echo "# machine axis: the settled check, and the one being raised"
-# X1 is fully green and routed to a person. Its green lane derives from a local
+# X1 is fully green and held for a person. Its green lane derives from a local
 # backing review — read through bd list, never a per-anchor bd show — which is
 # what keeps the unchanged re-record pass below from re-reading the anchor.
-store "[$(anchor X1 pull_request correctness "" polecat/x1 ',"merge_hold":"true","gc.routed_to":"human"'), $(backed rev-x1 X1),
+store "[$(anchor X1 pull_request correctness "" polecat/x1 ',"merge_hold":"true"'), $(backed rev-x1 X1),
         $(anchor X2 pull_request correctness "" polecat/x2), $(backed rev-x2 X2),
         $(anchor X3 pull_request correctness "" polecat/x3), $(mustfix find-x3 X3),
         $(anchor X4 pre_open_gate correctness unreviewed polecat/x4 ',"merge_hold":"true"')]"
@@ -1596,7 +1596,6 @@ echo "# recording a verdict moves no route"
 # The stamp rides a lifecycle self-transition, and a detached state's default is
 # to clear the route. An observation must not retract a routing decision it
 # never looked at, so the anchor's own route rides back with it.
-eq "$(meta X1 'gc.routed_to')" "human" "an anchor routed to a person keeps that route"
 store "[$(anchor X6 pull_request correctness "" polecat/x6 ',"gc.routed_to":"rig/gc-toolkit.polecat"'), $(backed rev-x6 X6)]"
 oid x6 > "$GH_DIR/head_polecat_x6"
 run >/dev/null

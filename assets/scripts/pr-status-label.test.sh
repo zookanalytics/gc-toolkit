@@ -405,9 +405,9 @@ resetlog
 eq "$(pv_labels 72)" "status: working" "…and resolving it takes held: gate off"
 : > "$STUB_DEPS"
 
-# held: blocked — a live blocker routed to a person, which no automated actor clears.
+# held: blocked — a live decision, which no automated actor clears.
 store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"approved@abc@t","pr.machine":"settled@abc@t"}},
-        {"id":"tk-d","status":"open","metadata":{"gc.routed_to":"human"}}]'
+        {"id":"tk-d","status":"open","issue_type":"decision","metadata":{}}]'
 printf 'tk-d|blocks|tk-a\n' > "$STUB_DEPS"
 pv 72 '[{"name":"status: merging"}]'
 resetlog

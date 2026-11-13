@@ -244,7 +244,7 @@ store, PR posts with their provenance mark, the gh write guard under its
 warrant, and the seed audit.
 
 The trade: per-site read-backs give way to each write's own exit
-(tk-1tfzr71.11), and step-close gives way to a native call.
+(tk-1tfzr71.11).
 The wrapper that provisions an agent's home stays under its warrant, because
 `gc worktree` binds a tree to one bead and a home outlives every bead.
 
@@ -290,8 +290,7 @@ bd 1.3.2.
 
 | Pack machinery | Gas City's primitive | Carried by |
 |---|---|---|
-| `step-close.sh` | `gc hook current` | tk-1tfzr71.39 |
-| hand-stamped routes and the sweeps that repair them | `gc sling --no-formula`, assignment | tk-1tfzr71.15 |
+| the hand-stamped routes in code other members retire, and the rescues that repair them | `gc sling --no-formula`, assignment | the member that retires each, tk-1tfzr71.17 to .22 |
 | `orphan-dispose.sh`'s generic arms | core's orphan-sweep | tk-1tfzr71.19 |
 | `pr-facts.sh` polling and its mirrored keys | the PR monitor and webhook receiver | tk-1tfzr71.21 |
 
@@ -307,8 +306,8 @@ home.
 - The decline sequence (file the human gate, cancel the run, drain): two copies
   in the step text of `mol-validate.toml`, which tk-1tfzr71.22 retires. Outside
   that file a decline calls `decline.sh`. `mol-review`'s failed gather cancels
-  its own run, because it restores the review's pool route once the cancel has
-  landed, and tk-1tfzr71.15 converts that restore.
+  its own run, because it returns the review to its pool through `gc sling` once
+  the cancel has landed.
 - A rule kept in two languages, with a test holding the copies equal:
   `gctk merge` and `review-verdict.sh`, `gctk lifecycle` and the key registry,
   and the board's Go contract and its TypeScript mirror. Carried by
@@ -319,8 +318,6 @@ home.
 A compatibility piece carries a dated debt and the trigger that retires it,
 and the change that fires the trigger deletes it.
 
-- `molecule-hold.sh`, for step text poured before `run-cancel.sh`, 168 lines
-  with its test. Trigger: no open step bead names it. Carried by tk-1tfzr71.39.
 - Readers of legacy shapes, which "legacy" names 31 times across 15 runtime
   files: the `gc.proactive_reaction=1` proof and PR bodies older than the
   managed region, among others. Trigger: no store or open PR holds the shape.
@@ -360,7 +357,6 @@ shows its measured net instead.
 
 | Bead | What it removes | Size | Waits on |
 |---|---|---|---|
-| tk-1tfzr71.39 | step-close, the work-tree holder, the lease wrapper, `molecule-hold.sh` | 3,390 | tk-1tfzr71.12, then no open step naming them |
 
 ### 3. The lanes
 
@@ -374,7 +370,6 @@ convoy lands only after the operator approves its design.
 | A | tk-1tfzr71.22 | review beads, lane derivation, validation passes, machine findings | 10,924 |
 | A | tk-1tfzr71.21 | `pr-facts.sh` polling and mirroring | 15,233 |
 | A | tk-1tfzr71.23 | the membership readers on parent-child | partial files |
-| B | tk-1tfzr71.15 | raw route stamps and the checks that police them | 1,175 |
 | B | tk-1tfzr71.16 | deferred dispatch's notify path, lock, budget and crash marker | partial files |
 | B | tk-1tfzr71.17 | the reaction bead and the intake converters | 189, plus partial files |
 | B | tk-1tfzr71.18 | warrants, the dance, pin keepalive, boot health, quota park, each after its re-check | 5,815 |
@@ -382,8 +377,8 @@ convoy lands only after the operator approves its design.
 | B | tk-1tfzr71.24 | the board's second data plane and pack-stamped rows, verbs that only call Gas City | partial files |
 | B | tk-1tfzr71.25 | registry entries, wrapper lint rules, parity tests, the `board` stub verb | 1,488 |
 
-The whole files that tk-1tfzr71.39 and the migration members name come to 57k
-of the 202k between the baseline and the built-once estimate. Their partial
+The whole files that the migration members name come to 52k of
+the 202k between the baseline and the built-once estimate. Their partial
 rewrites carry more, chiefly the board, `gc-helm.sh`, the work and patrol
 formulas, deferred dispatch and the sign-off. The page's own items below carry
 the step-text tests.

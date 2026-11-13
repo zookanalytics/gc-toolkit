@@ -37,6 +37,10 @@
 #     directory is removed is refused there rather than reaching the binary
 #     behind it, which the same file run directly reaches; a tree without the
 #     floor does not run;
+#   - every file runs with no GC_* or BEADS_* variable of the caller's and with
+#     those outside both prefixes, while the same file run directly gets them
+#     all; the gc binary GC_BIN names reaches a file as RUN_TESTS_GC_BIN, in
+#     place of one the caller exported, and with no GC_BIN a file gets none;
 #   - with no -j and no TEST_JOBS the wave runs half the cores, at least one,
 #     counted by nproc, else getconf, else sysctl, and capped at the run count;
 #     TEST_JOBS and -j each override that default;
@@ -450,6 +454,40 @@ OUT="$(RUNTESTS_FIXTURE_STATE="$STATE" "$NREPO/tools/run-tests.sh" -j 2 -t 30 "$
 eq "$RC" 2 "a runner whose tree has no floor refuses to run"
 has "$OUT" "no test floor at $NREPO/tools/test-floor" "…and names the missing floor"
 if [ -e "$STATE/resolved" ]; then bad "…and no file runs" "the fixture ran"; else ok "…and no file runs"; fi
+
+echo "── env: no GC_* or BEADS_* variable of the caller's reaches a file ──"
+# The seeds stand in for a city's session: its city, rig, store and session, and
+# the gc binary it names. RUNTESTS_FIXTURE_KEPT is outside both prefixes, and
+# the RUN_TESTS_GC_BIN seed is one the caller exported itself.
+cat > "$FIX/env.test.sh" <<'F'
+#!/usr/bin/env bash
+S="$RUNTESTS_FIXTURE_STATE"
+compgen -e | grep -E '^(GC|BEADS)_' > "$S/names"
+printf 'kept=%s\ngc-bin=%s\n' "${RUNTESTS_FIXTURE_KEPT-unset}" "${RUN_TESTS_GC_BIN-unset}" > "$S/env"
+F
+session_env() {
+  GC_CITY_PATH=/live/city GC_CITY=/live/city GC_RIG=gc-toolkit GC_SESSION_ID=live-session \
+    BEADS_DIR=/live/city/.beads BEADS_ACTOR=live-actor GC_BIN="$TMP/session-gc" \
+    RUN_TESTS_GC_BIN=/caller/gc RUNTESTS_FIXTURE_KEPT=kept "$@"
+}
+reset_state
+session_env run "$FIX/env.test.sh"
+eq "$RC" 0 "a file runs under a session's variables"
+eq "$(cat "$STATE/names")" "" "it sees no GC_* or BEADS_* variable"
+eq "$(grep '^kept=' "$STATE/env")" "kept=kept" "…and keeps a variable outside both prefixes"
+eq "$(grep '^gc-bin=' "$STATE/env")" "gc-bin=$TMP/session-gc" "the gc binary GC_BIN names reaches it as RUN_TESTS_GC_BIN, in place of the caller's"
+reset_state
+OUT="$(unset GC_BIN; RUN_TESTS_GC_BIN=/caller/gc RUNTESTS_FIXTURE_STATE="$STATE" "$RUNNER_COPY" -j 2 -t 30 "$FIX/env.test.sh" 2>&1)"; RC=$?
+eq "$RC" 0 "a file runs with GC_BIN unset"
+eq "$(grep '^gc-bin=' "$STATE/env")" "gc-bin=unset" "…and gets no RUN_TESTS_GC_BIN, even one the caller exported"
+# Run directly, the file gets the session's variables as they are: the clear
+# above is the runner's doing.
+reset_state
+session_env env RUNTESTS_FIXTURE_STATE="$STATE" bash "$FIX/env.test.sh"
+names="$(cat "$STATE/names")"
+has "$names" "GC_CITY_PATH" "the same file run directly sees the session's GC_* variables"
+has "$names" "BEADS_DIR" "…and its BEADS_* ones"
+eq "$(grep '^gc-bin=' "$STATE/env")" "gc-bin=/caller/gc" "…and the caller's own RUN_TESTS_GC_BIN"
 
 echo "── jobs: the default is half the cores, at least one ──"
 # The runner counts cores with nproc, then getconf, then sysctl. Stubs ahead of
