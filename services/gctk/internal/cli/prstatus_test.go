@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/feedback"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus/fixture"
@@ -643,4 +645,104 @@ func TestPRStatusOnThePendingRecord(t *testing.T) {
 			t.Fatalf("derive --json = (%q, %d), want the derivation alone", out, code)
 		}
 	})
+}
+
+// declared is the prefix a test rig's default branch declares as a
+// third-party marker of posts that are not for review, one no real repository
+// declares.
+const declared = "[gctk-declared]:"
+
+// declaringRig is a rig's checkout whose default branch declares prefix in its
+// not-for-review.toml, or declares nothing when prefix is empty.
+func declaringRig(t *testing.T, prefix string) string {
+	t.Helper()
+	dir := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git("init", "-q")
+	if prefix != "" {
+		if err := os.WriteFile(filepath.Join(dir, "not-for-review.toml"), []byte("[[marker]]\nprefix = \""+prefix+"\"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		git("add", "not-for-review.toml")
+	}
+	git("commit", "-q", "--allow-empty", "-m", "base")
+	git("update-ref", "refs/remotes/origin/main", "HEAD")
+	return dir
+}
+
+// packScripts has feedback.ScriptsDir name this checkout's scripts, whose
+// pr-post.sh holds the one definition of feedback, and leaves GC_RIG_ROOT
+// unset, which that definition reads only outside a repository.
+func packScripts(t *testing.T) {
+	t.Helper()
+	dir, err := filepath.Abs("../../../../assets/scripts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "pr-post.sh")); err != nil {
+		t.Fatalf("pr-post.sh is not in %s: %v", dir, err)
+	}
+	t.Setenv("GCTK_SCRIPTS_DIR", dir)
+	t.Setenv("GC_RIG_ROOT", "")
+}
+
+// readsDeclared reports whether a loaded definition reads the declaration of
+// a rig that declares declared: a post that opens with it is no feedback
+// there, and feedback where nothing declares it.
+func readsDeclared(t *testing.T, f pr.Feedback) bool {
+	t.Helper()
+	ids, err := f.IssueComments("zook-bot", "2026-10-01T00:00:00Z", []feedback.Comment{
+		{ID: 1, Author: "integration", Body: declared + " a status the integration posts", CreatedAt: "2026-11-12T01:00:00Z"},
+		{ID: 2, Author: "operator", Body: "one more thing", CreatedAt: "2026-11-12T01:00:00Z"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	switch {
+	case slices.Equal(ids, []int64{2}):
+		return true
+	case slices.Equal(ids, []int64{1, 2}):
+		return false
+	}
+	t.Fatalf("feedback %v, want [2] where the prefix is declared or [1 2] where it is not", ids)
+	return false
+}
+
+// routeStub answers the two reads that route a bead to its store: bd where
+// names rig A's store, the one the directory gctk runs in resolves, and rig
+// list names rig A's and rig B's.
+const routeStub = `#!/bin/sh
+case "$1 $2" in
+"bd where") printf '{"path":"%s/.beads","prefix":"ra"}\n' "$STUB_RIG_A" ;;
+"rig list") printf '{"rigs":[{"name":"a","prefix":"ra","path":"%s"},{"name":"b","prefix":"rb","path":"%s"}]}\n' "$STUB_RIG_A" "$STUB_RIG_B" ;;
+*) echo "stub gc: no answer for $*" >&2; exit 2 ;;
+esac
+`
+
+// The evaluator loads the definition of feedback in the checkout of the rig
+// whose store holds the anchor, so it reads that rig's declaration, whatever
+// directory gctk runs in: here rig A's store is the one gc resolves, and the
+// test runs in this checkout, neither of which declares the prefix.
+func TestPRStatusLoadsTheDefinitionInTheAnchorsRig(t *testing.T) {
+	packScripts(t)
+	rigA, rigB, bin := declaringRig(t, ""), declaringRig(t, declared), t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "gc"), []byte(routeStub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("STUB_RIG_A", rigA)
+	t.Setenv("STUB_RIG_B", rigB)
+	src, err := readySources("rb-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !readsDeclared(t, src.Feedback) {
+		t.Fatal("the definition did not read the declaration of rig B, whose store holds rb-1")
+	}
 }

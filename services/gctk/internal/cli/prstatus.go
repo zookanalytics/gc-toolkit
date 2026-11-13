@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -242,25 +243,49 @@ func asBlockers(rows []gcbd.Bead) []prstatus.Blocker {
 var evaluateReady = evaluate
 
 // evaluate asks the pr domain's evaluator whether the PR anchor owns is ready,
-// reading the anchor's store through the ledger, GitHub through gh on the host
-// the PR's URL names, and the pack's definition of feedback, loaded in the
-// directory gctk runs in, which pr-post.sh reads the rig's declaration from.
+// over readySources.
 func evaluate(anchor string) (pr.Answer, error) {
-	l, err := ledger.Open("", anchor)
+	src, err := readySources(anchor)
 	if err != nil {
 		return pr.Answer{}, err
 	}
-	scripts, err := feedback.ScriptsDir()
+	return pr.Ready(src, anchor)
+}
+
+// readySources are what the evaluator reads for the PR anchor owns: the store
+// gc routes the anchor to, through the ledger, GitHub through gh on the host
+// the PR's URL names, and the pack's definition of feedback. The definition is
+// loaded in the checkout of the rig whose store holds the anchor, the
+// directory that holds the store's .beads, because pr-post.sh reads the
+// declaration of the posts that are not for review from the default branch of
+// the checkout it runs in. The directory gctk runs in can be another rig's.
+func readySources(anchor string) (pr.Sources, error) {
+	db, err := gcbd.New().Route(anchor)
 	if err != nil {
-		return pr.Answer{}, err
+		return pr.Sources{}, err
 	}
-	rule, err := feedback.Load(scripts, "")
+	l, err := ledger.Open(db)
 	if err != nil {
-		return pr.Answer{}, err
+		return pr.Sources{}, err
 	}
-	return pr.Ready(pr.Sources{
+	rule, err := feedbackIn(filepath.Dir(db))
+	if err != nil {
+		return pr.Sources{}, err
+	}
+	return pr.Sources{
 		Ledger:   l,
 		GitHub:   func(host string) pr.GitHub { return gh.New(host) },
 		Feedback: rule,
-	}, anchor)
+	}, nil
+}
+
+// feedbackIn loads the pack's definition of feedback in checkout, a rig's
+// clone, so the definition holds the posts that rig's default branch declares
+// not for review.
+func feedbackIn(checkout string) (*feedback.Rule, error) {
+	scripts, err := feedback.ScriptsDir()
+	if err != nil {
+		return nil, err
+	}
+	return feedback.Load(scripts, checkout)
 }

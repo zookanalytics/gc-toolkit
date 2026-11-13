@@ -115,3 +115,23 @@ func TestPRRecordWhoseOriginDoesNotReadWritesNothingAndExits2(t *testing.T) {
 		t.Fatalf("exit %d, stderr %q, want exit 2 naming the origin's read", code, errs)
 	}
 }
+
+// A run of the landing order loads the definition of feedback in the clone it
+// reads, $GC_RIG_ROOT, so it reads that rig's declaration, whatever directory
+// gctk runs in: the test runs in this checkout, which does not declare the
+// prefix.
+func TestLandingLoadsTheDefinitionInItsClone(t *testing.T) {
+	packScripts(t)
+	t.Setenv("GC_RIG_ROOT", declaringRig(t, declared))
+	l, err := landing(filepath.Join(t.TempDir(), ".beads"), "rig/refinery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := l.Feedback()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !readsDeclared(t, f) {
+		t.Fatal("the definition did not read the declaration of the clone at $GC_RIG_ROOT")
+	}
+}

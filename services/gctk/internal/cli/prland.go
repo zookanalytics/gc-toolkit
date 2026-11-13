@@ -212,8 +212,8 @@ func prReconcile(refinery, db string, count int, budget time.Duration, stdout, s
 // landing builds the pr domain's Landing over the city's adapters: the store
 // at db, else the one gc routes the first of ids to, the record lock in that
 // store's .beads directory, GitHub through gh, the clone at $GC_RIG_ROOT else
-// the working directory, and the pack's scripts for the definition of feedback
-// and for human gates.
+// the working directory, the pack's definition of feedback, loaded in that
+// clone, and the pack's scripts for human gates.
 func landing(db, refinery string, ids ...string) (pr.Landing, error) {
 	if db == "" {
 		routed, err := gcbd.New().Route(ids...)
@@ -236,11 +236,11 @@ func landing(db, refinery string, ids ...string) (pr.Landing, error) {
 		Refinery: refinery,
 		Hub:      func(host string) pr.Hub { return gh.New(host) },
 		Feedback: func() (pr.Feedback, error) {
-			scripts, err := feedback.ScriptsDir()
+			rule, err := feedbackIn(dir)
 			if err != nil {
 				return nil, err
 			}
-			return feedback.Load(scripts, "")
+			return rule, nil
 		},
 		Checkout: checkout{dir: dir},
 		Gates:    &gates{},
