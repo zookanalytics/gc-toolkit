@@ -298,7 +298,7 @@ uses.
    counts a live workflow on the bead (`sourceworkflow.ConflictError`, mapped
    to 3 in `cmd/gc/cmd_sling.go`), and it names each one. When one of them is
    not an unfinished pour, the work is already sent: disarm. When each is an
-   unfinished pour, nothing works the bead, so the start keeps the arm and
+   unfinished pour, none of them can finish, so the start keeps the arm and
    asks a person, naming those roots. Any other exit keeps the arm for the
    next pass. At three attempts the start asks a person instead of slinging,
    as the pass does today, through `human-gate.sh` under the key
@@ -325,8 +325,8 @@ start, and that default can change between an attempt and its retry. A search
 that named the formula would then miss the root the earlier attempt poured,
 and Gas City's launch check, which is scoped to the formula, would not refuse
 the second pour either. The search includes gates because a pour Gas City left
-unfinished keeps its root typed as a gate (below), and bd's `list` shows a gate
-only with `--include-gates`, which `--all` does not imply. The token is
+unfinished can keep its root typed as a gate (below), and bd's `list` shows a
+gate only with `--include-gates`, which `--all` does not imply. The token is
 searched only after an earlier attempt, so a start that succeeds the first
 time costs no search.
 
@@ -339,27 +339,43 @@ the bead. The start reads that as sent too, since the bead is already being
 worked, and it prints the line `gc sling` printed, which names the live
 workflow.
 
-A root that carries `molecule_failed=true`, or still carries the fence
-`gc.instantiating`, whatever its status, is an unfinished pour. It never shows
-that the arm's work was sent, whether step 3's search finds it or an exit 3
-names it. Gas City pours a graph in one batch where its store supports one
-(`instantiateViaGraphApply`, `internal/molecule/graph_apply.go`). Otherwise, or
-once the batch has failed twice with a transient error, `Instantiate`
-(`internal/molecule/molecule.go`) makes the beads one at a time, root first.
-The fence it puts on each bead as it makes it also types the bead as a gate and
-withholds its route (`fenceGraphWorkflowBead`), and only once every bead is
-made does it lift the fences and restore each type and route. When that pour
-fails part way, `markFailed` stamps `molecule_failed=true` on each bead made so
-far and clears its fence without restoring its type or route, and closes
-nothing. `gc sling` closes the failed root in a cleanup of its own
+A root is an unfinished pour when it carries `molecule_failed=true`, or when it
+or a bead poured under it still carries the fence `gc.instantiating`, whatever
+their status. The start never reads it as a sign that the arm's work was sent,
+whether step 3's search finds it or an exit 3 names it. Gas City pours a graph
+in one batch where its store supports one (`instantiateViaGraphApply`,
+`internal/molecule/graph_apply.go`). Otherwise, or once the batch has failed
+twice with a transient error, `Instantiate` (`internal/molecule/molecule.go`)
+makes the beads one at a time, root first. The fence it puts on each bead as it
+makes it also types the bead as a gate and withholds its route
+(`fenceGraphWorkflowBead`). Only once every bead is made does it lift the
+fences, one bead at a time in the same order, and restore each type and route.
+When that pour fails part way, `markFailed` stamps `molecule_failed=true` on
+each bead made so far and clears its fence without restoring its type or route,
+and closes nothing. `gc sling` closes the failed root in a cleanup of its own
 (`closeFailedGraphV2Roots`, `internal/sling/sling.go`), which returns its error
 and leaves the root open when its lookup or its close fails, or when the sling
 stops before the cleanup runs. A sling killed while it makes the beads leaves
-its root open, still fenced and typed as a gate. Upstream tracks both states
-as open P1 bugs: gastownhall/gascity#6177, a failed chain that only a retry
-under the same key closes, and #6179, a fenced chain a killed client leaves.
-Accept's search already skips a `molecule_failed` root whatever its status
+its root open, still fenced and typed as a gate. One killed while it lifts the
+fences leaves the root open and activated over steps that are still fenced, so
+only the steps show it. Upstream tracks these states as open P1 bugs:
+gastownhall/gascity#6177, a failed chain that only a retry under the same key
+closes, and #6179, a fenced chain a killed client leaves. Accept's search
+already skips a `molecule_failed` root whatever its status
 (`accept_token_root`).
+
+The start finds the beads poured under a root the way `gc convoy delete` does,
+by the root's id in their `gc.root_bead_id` (`findWorkflowBeads`), with
+`gc bd list --all --include-ephemeral --include-gates --metadata-field
+gc.root_bead_id=<root>`, and it reads only their fence. A failure stamp under a
+root does not show that the root's own pour failed. A fanout that Gas City
+pours into a live run one bead at a time names the run's root on its beads,
+and stamps them when that pour fails (`InstantiateFragment`). The fence can
+show for a moment on a run that was sent as well. While Gas City makes a ralph
+loop's next iteration one bead at a time on a store with no conditional
+writer, `Attach` fences the iteration's beads under the run's root. The start
+then asks about a run that is working, and the person who finds it working
+clears the gate.
 
 While the root of an unfinished `--on` pour is open, Gas City refuses every
 sling of that formula on the bead with exit 3, naming that root. The launch
@@ -864,10 +880,13 @@ the bd the city runs against a scratch store on a Dolt server of its own
 - **The recovery after an earlier attempt**, with each root made in the real
   store under the arm's token: a root poured for one formula while the arm now
   resolves another, which disarms and slings nothing; an open root carrying
-  `molecule_failed=true`, and an open root still fenced by `gc.instantiating`,
-  each typed as a gate as Gas City leaves it, and each of which keeps the arm,
-  slings nothing and asks a person, naming the root; and a closed
-  `molecule_failed` root, which does not disarm, so the retry slings.
+  `molecule_failed=true`, an open root still fenced by `gc.instantiating`, and
+  an open root with neither mark over a step still fenced, each fenced or
+  failed bead typed as a gate as Gas City leaves it, and each of which keeps
+  the arm, slings nothing and asks a person, naming the root; a closed
+  `molecule_failed` root, and a closed root over a step still fenced, neither
+  of which disarms, so the retry slings; and a root with neither mark whose
+  only marked bead under it carries `molecule_failed=true`, which disarms.
 - **The record's decoding**, in gctk's ordinary suite on the fake store: the
   formula the start pours from each stored form of `_args`
   (`["--on","<formula>"]`, `["--on=<formula>"]`, `[]`, absent and malformed),
@@ -1044,7 +1063,8 @@ already has, and Gas City's own `gc convoy delete` closes the root.
 | `gc sling` pours without reading readiness | `internal/sling`: `validateExistingBeadInQuerier` checks existence only, and no readiness check precedes a pour | a dry run on a blocked armed bead prints "A wisp will be attached automatically" |
 | Nothing keeps a launch for later, so nothing lists or decodes one | no command or order records a launch for a later pour (the two rows above), so none reports one | same; bd 1.3.4's `list --has-metadata-key` selects the rows that carry a key and decodes no value |
 | Exit 3 means the launch check counts a live workflow on the bead, and names it | `cmd/gc/cmd_sling.go`: the `DoSling` error branch returns 3 for `*sourceworkflow.ConflictError` only, and `printSourceWorkflowConflictLines` prints the workflows it names; `internal/sourceworkflow/sourceworkflow.go` documents the mapping; `checkLegacySourceWorkflowConflict` in `internal/sling/sling_core.go` raises it for a live root of the same formula that the bead's input convoy tracks, or of any formula whose `gc.source_bead_id` names the bead | same |
-| A pour made one bead at a time can leave a root it never finished, typed as a gate | `instantiateViaGraphApply`, `internal/molecule/graph_apply.go`, pours in one batch where the store supports one; otherwise, or after two transient batch failures, `Instantiate`, `internal/molecule/molecule.go`, makes the root first, and `fenceGraphWorkflowBead` keeps every bead fenced with `gc.instantiating`, typed as a gate and with its route withheld until all are made; `markFailed` stamps a pour that fails part way `molecule_failed=true` and clears the fences without restoring a type or route, and closes nothing; `closeFailedGraphV2Roots`, `internal/sling/sling.go`, is a separate cleanup that returns its error | same functions; bd 1.3.4's `list` shows a gate only with `--include-gates`, which `--all` does not imply (`applyTypeSuppressions`, `internal/workapi/list.go`) |
+| A pour made one bead at a time can leave a root it never finished, typed as a gate or activated over fenced steps | `instantiateViaGraphApply`, `internal/molecule/graph_apply.go`, pours in one batch where the store supports one; otherwise, or after two transient batch failures, `Instantiate`, `internal/molecule/molecule.go`, makes the root first, and `fenceGraphWorkflowBead` keeps every bead fenced with `gc.instantiating`, typed as a gate and with its route withheld until all are made, then lifts the fences one bead at a time in recipe order, root first; `markFailed` stamps a pour that fails part way `molecule_failed=true` and clears the fences without restoring a type or route, and closes nothing; `closeFailedGraphV2Roots`, `internal/sling/sling.go`, is a separate cleanup that returns its error | same functions; bd 1.3.4's `list` shows a gate only with `--include-gates`, which `--all` does not imply (`applyTypeSuppressions`, `internal/workapi/list.go`) |
+| Beads Gas City pours into a live run later name its root, and can carry either mark | `InstantiateFragment`, `internal/molecule/molecule.go`, stamps each fanout bead's `gc.root_bead_id` with the run's root and, making them one at a time, stamps them `molecule_failed=true` when that pour fails; `Attach` stamps every step of a sub-DAG with the run's root, and with no conditional writer its `Instantiate` fences a ralph iteration's beads while it makes them one at a time (`preservesGraphActionTypes` reads the iteration's `gc.attempt` and `gc.step_ref`) | same functions |
 | The launch check counts an unfinished pour while its root is open | `liveConvoyTrackedWorkflowRoots`, `internal/sling/sling_attachment.go`, walks closed synthetic convoys too and reads neither mark; `CloseSyntheticInputConvoy`, `internal/graphv2/invocation.go`, closes a failed pour's convoy and keeps its `tracks` edge; `attachFormulaToBead`, `internal/sling/sling_core.go`, runs the check before the pour | same functions |
 | `gc convoy delete <root> --force` closes a workflow root and its steps | `cmdWorkflowDelete` and `findWorkflowBeads`, `cmd/gc/cmd_convoy_dispatch.go` | same |
 | Upstream tracks unfinished pours as #6177 and #6179 | both issues open, labeled `kind/bug` and `priority/p1`, read on 2026-11-13: #6177 for a failed chain that only a same-key retry closes, #6179 for a fenced chain a killed client leaves | the build carries no fix for either |
