@@ -390,12 +390,15 @@ echo "── under a renamed import, the real gc answers the binding the skill n
 # has no gc gc-toolkit command at all. The scratch city is never started: gc
 # reads its config, lists its skills and runs the pack command, with GC_CITY
 # naming it and nothing in the environment naming a live city, rig or store.
-if [ -z "${GC_BIN:-}" ] || [ ! -x "${GC_BIN:-}" ]; then
+# The real gc is the one GC_BIN names, which tools/run-tests.sh hands on as
+# RUN_TESTS_GC_BIN.
+REAL_GC="${RUN_TESTS_GC_BIN:-${GC_BIN:-}}"
+if [ -z "$REAL_GC" ] || [ ! -x "$REAL_GC" ]; then
     printf '  SKIP  GC_BIN names no gc, so the renamed import was not checked against the real gc (set GC_BIN to run it)\n'
 else
     CITY="$TMP/city-kit"
     mkdir -p "$CITY" "$TMP/real-gc" "$TMP/gc-home"
-    ln -s "$GC_BIN" "$TMP/real-gc/gc"
+    ln -s "$REAL_GC" "$TMP/real-gc/gc"
     printf '[workspace]\nprovider = "claude"\n\n[providers.claude]\nbase = "builtin:claude"\n\n[providers.codex]\nbase = "builtin:codex"\n\n[providers.gemini]\nbase = "builtin:gemini"\n' >"$CITY/city.toml"
     printf '[pack]\nname = "skill-needs-probe"\nschema = 2\n\n[imports.kit]\nsource = "%s"\n' "$ROOT" >"$CITY/pack.toml"
     # in_city <command...> — run in the scratch city, with the real gc first on PATH.

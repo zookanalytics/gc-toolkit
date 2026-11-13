@@ -123,6 +123,17 @@
 # directly gets the floor only through harness_init
 # (assets/scripts/test-harness.sh).
 #
+# Every file runs with no GC_* or BEADS_* variable of the caller's. A city's
+# session exports them, naming its city, rig, store and session, while CI sets
+# none. A script under test that read one would reach the live city when a
+# session runs the file, and the file's own stubs when CI does. The one value
+# handed on is the gc binary GC_BIN names, as RUN_TESTS_GC_BIN, for a file that
+# runs the real gc against a scratch city of its own. It goes under the
+# runner's name, so no script under test finds the real gc through GC_BIN. A
+# file run directly gets the caller's variables as they are, and a setting
+# under either prefix that is meant for one file, such as
+# GC_TMUX_TEST_WAIT_SECS, reaches it only then.
+#
 # Exit: 0 every file passed, or passed on a serial re-run, or the subset was
 # empty; 1 one or more failed serially too; 2 a usage or enumeration error,
 # such as a BASE git cannot read.
@@ -460,6 +471,16 @@ export TMPDIR="$tmp_real"
 [ -x "$ROOT/tools/test-floor/gc" ] || {
   echo "run-tests: no test floor at $ROOT/tools/test-floor; not running" >&2; exit 2; }
 export PATH="$ROOT/tools/test-floor:$PATH"
+
+# The caller's variables every file runs without, and the one value handed on
+# (see the header). The runner is the only source of RUN_TESTS_GC_BIN, so one
+# the caller exported is replaced.
+if [ -n "${GC_BIN:-}" ]; then
+  export RUN_TESTS_GC_BIN="$GC_BIN"
+else
+  unset RUN_TESTS_GC_BIN
+fi
+unset "${!GC_@}" "${!BEADS_@}"
 
 LOGDIR="$(mktemp -d "${TMPDIR:-/tmp}/run-tests.XXXXXX")" || { echo "run-tests: mktemp failed" >&2; exit 2; }
 trap 'rm -rf "$LOGDIR"' EXIT
