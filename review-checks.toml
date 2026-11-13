@@ -28,11 +28,14 @@
 # requiring a standing non-city APPROVED review.
 #
 # The other review file a rig may keep is a check's guidance,
-# docs/review-<check>.md, which holds that one check's guidance and nothing
-# else. The review formula prints it from the commit under review, so it adds
-# to the check's method and never replaces it; absent is the common case. A rig
-# keeps one to add guidance of its own, or to say where it keeps a reference
-# doc the method reads when that doc is not where the method looks.
+# docs/review-<check>.md, which holds that one check's guidance. The review
+# formula prints it from the commit under review, so it adds to the check's
+# method and never replaces it; absent is the common case. A rig keeps one to
+# add guidance of its own, or to say where it keeps a reference doc the method
+# reads when that doc is not where the method looks. docs/review-demo.md is
+# also the rig's demo guide, which every demo path reads at the commit it
+# shows: the drafter gc-demo-script, mol-rig-demo and a capture given --guide
+# read it beside the demo check, and the demo:capture skill says what it holds.
 #
 # Adding a check. Declare it here as a [checks.<name>] row, and ship its method
 # as skills/review-<name>/SKILL.md, the skill that carries its whole generic

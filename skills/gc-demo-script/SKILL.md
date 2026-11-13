@@ -11,6 +11,10 @@ This skill is the Gas City-native sibling of `demo:epic`: it reads the bead
 description, notes, parent molecule, sibling design-leg beads, and git/PR
 diff, then produces a user-facing demo script that `demo:capture` can
 execute.
+It drafts against the rig's demo guide, the `docs/review-demo.md` the commit
+being demoed holds: the surfaces, the start state and the sign-in the guide
+names. Only for a rig that keeps no guide does it fall back to the generic
+shape of a web app below.
 
 **This skill DOES NOT run `demo:capture`.** It writes a script file and
 returns the path.
@@ -36,6 +40,9 @@ You receive parsed arguments from the command wrapper:
   `metadata.pr_number` on the bead
 - **`--focus "area"`** (optional) — bias the demo narration toward a
   specific functional area (e.g., "mobile", "diff viewing")
+- **The commit the demo shows** — where the rig's demo guide is read: a
+  worktree at that commit, such as a PR's head or a review's reviewed commit,
+  or the commit in the rig's checkout, such as its HEAD for `mol-rig-demo`
 
 If no bead ID is provided, ask the caller for one.
 
@@ -50,8 +57,9 @@ If the bead doesn't exist, stop and report:
 "Bead `<id>` not found. Check the ID and try again."
 
 Unlike `demo:epic`, this skill needs no browser, no ffmpeg, and no running
-app — it only reads the bead and its diff to write a script file. `demo:capture`
-runs that script later, from a session that carries the demo toolchain.
+app — it only reads the bead, its diff and the rig's guide to write a script
+file. `demo:capture` runs that script later, from a session that carries the
+demo toolchain.
 
 ## Phase A: Gather Context (sequential reads)
 
@@ -60,7 +68,35 @@ design-leg beads, parent molecules, and commits.
 Read them in order; do NOT dispatch parallel subagents (the inputs are
 small enough for direct reads, and ordering matters for cross-references).
 
-### Step A1: Read the work bead
+### Step A1: Read the rig's demo guide
+
+Read `docs/review-demo.md` at the commit the demo shows. The pack reads a rig's
+review guidance at a commit through one script, run from inside a worktree or
+checkout of the rig, where `<binding>` is the name in front of this skill's
+own, `gc-toolkit` in `gc-toolkit.gc-demo-script`:
+
+```bash
+( cd <a worktree or checkout of the rig> && "$(gc <binding> scripts-dir)/review-checks.sh" --extension demo --at "$(git rev-parse <commit>)" )
+```
+
+It prints the guide that commit carries, and nothing when it carries none. In a
+review, the review formula has printed it for the reviewed commit already.
+
+The `gc-toolkit.demo-capture` skill says what a guide holds. Keep from it:
+
+- `## Surfaces`: what a person sees, and the files that draw each surface.
+  Phase B sorts the diff by them.
+- `## Bring the app up`: whether a surface is a page or a terminal session.
+  The capture takes the app from these lines, so the script names no app.
+- `## A known state`: the start path and the fixture data a script opens on.
+- `## Sign-in`: the steps a script signs in with, or that the app has none.
+- `## Worked examples`: the rig's own scripts, whose actions and assertions
+  show how its app is driven.
+
+When the commit holds no `docs/review-demo.md`, the rig keeps no guide: draft
+in the generic shape each step below gives, and say so in the summary.
+
+### Step A2: Read the work bead
 
 ```bash
 bd show "$BEAD"                               # Human-readable summary
@@ -88,7 +124,7 @@ From the JSON, extract and keep in working memory:
   prefer `work_dir` and fall back to `worktree`)
 - `parent` — the convoy/molecule wrapping this work
 
-### Step A2: Read the parent molecule (if any)
+### Step A3: Read the parent molecule (if any)
 
 If the bead has a parent convoy or `metadata.molecule_id`, read it:
 
@@ -102,7 +138,7 @@ MOLECULE=$(bd show "$BEAD" --json | jq -r '.[0].metadata.molecule_id // empty')
 The parent gives cross-bead context — the wider initiative, why this work
 mattered, and how it fits with other beads.
 
-### Step A3: Read sibling design-leg beads
+### Step A4: Read sibling design-leg beads
 
 Scan the work bead's `description` and `notes` for bead IDs referenced in
 prose (e.g., "per tk-so9 §6", "tk-9hi G2.1").
@@ -138,7 +174,7 @@ They are rich sources for:
 - Test scenarios you can lift into Scrutiny items
 - Risk descriptions that become Scrutiny items
 
-### Step A4: Read git history on the branch
+### Step A5: Read git history on the branch
 
 ```bash
 BRANCH=$(bd show "$BEAD" --json | jq -r '.[0].metadata.branch // empty')
@@ -152,7 +188,9 @@ if [ -n "$BRANCH" ]; then
 fi
 ```
 
-For each significant commit, examine the user-facing portion of the diff:
+For each significant commit, examine the user-facing portion of the diff: the
+files that draw a surface the guide names, or with no guide these generic paths
+of a web app:
 
 ```bash
 git show "$COMMIT" -- \
@@ -162,7 +200,7 @@ git show "$COMMIT" -- \
 If the branch is not accessible, fall back to bead description and notes
 only — those are usually detailed enough for script outlining.
 
-### Step A5: Read the PR diff (if the bead has one)
+### Step A6: Read the PR diff (if the bead has one)
 
 Honor the `--pr` override if the caller passed one; otherwise derive the
 PR number from the bead's metadata.
@@ -181,7 +219,13 @@ The diff is the ground truth for what the user will see.
 
 ## Phase B: Identify User-Facing Changes
 
-Categorize every changed file from Phase A using this table:
+Categorize every changed file from Phase A. With a guide, a file that draws a
+surface the guide's `## Surfaces` names is user-facing (HIGH), a file that
+changes what such a surface shows only through its behaviour is MEDIUM, and the
+rest is LOW. A terminal session's surface is what its command prints, and a
+message's is its sender, subject and body.
+
+With no guide, use this table, which describes a web app:
 
 | Category       | Paths                                                                                        | Demo relevance                     |
 | -------------- | -------------------------------------------------------------------------------------------- | ---------------------------------- |
@@ -221,7 +265,13 @@ No script generated.
 
 ### Step C1: Pick the entry URL
 
-Scan the user-facing file list for the most natural entry point:
+With a guide, the script opens where its `## A known state` says: the start path
+that puts the app in the state the demo needs, such as one that arms a
+scenario. A surface the guide names as a terminal session takes no entry URL:
+its script declares `**Terminal:**`, and its shell starts where the guide's
+`## Bring the app up` says.
+
+With no guide, scan the user-facing file list for the most natural entry point:
 
 1. If the bead touches a specific route (`src/app/<route>/page.tsx`),
    start there (e.g., `/compare`, `/dashboard`).
@@ -305,7 +355,10 @@ Aim for 2–4 scrutiny items — sharp, verifiable, focused on risk.
 
 ### Step C5: Assemble the script
 
-Use this template (matches `demo:capture`'s expected format exactly):
+Use this template (matches `demo:capture`'s expected format exactly). With a
+guide, leave out the `**Auth:**` line, and when the guide's `## Sign-in` gives
+steps, begin the steps with them. A terminal script declares `**Terminal:**` in
+place of `**Start:**` and `**Auth:**`.
 
 ```markdown
 # Demo: <human-readable title, drawn from bead title and focus>
@@ -340,8 +393,8 @@ If any fails, fix inline and re-check (up to 2 rewrite attempts).
 
 1. **Format** — presence of:
    - `# Demo:` heading on the first non-blank line
-   - `**Start:**` URL line
-   - `**Auth:**` line
+   - `**Start:**` URL line, or `**Terminal:**` for a terminal script
+   - `**Auth:**` line, in the generic shape only
    - `## Steps` section with numbered items
    - Each step has a bold-heading narration line
    - Each step has a `_Prove:_` line and a `_Fail if:_` line
@@ -374,9 +427,10 @@ If any fails, fix inline and re-check (up to 2 rewrite attempts).
    re-validate.
 
 5. **Start URL plausibility** — the URL should start with `/` and look
-   like a real route (match a path you saw in `src/app/`).
+   like a real route: one the guide's `## A known state` names, or with no
+   guide a path you saw in `src/app/`.
    If the URL is obviously fabricated, fall back to `/` and note it in
-   the summary.
+   the summary. A terminal script has no URL to check.
 
 If validation still fails after 2 rewrite attempts, save the script
 anyway but print a warning listing the unresolved validation failures so
@@ -419,8 +473,9 @@ after):
 Script: .captures/demo-scripts/<bead-id>-<slug>.md
 Bead:   <id> — <title>
 PR:     #<num> (or "none" if no PR)
+Guide:  docs/review-demo.md at <commit> (or "none: generic shape")
 Steps:  <N>
-Start:  <URL>
+Start:  <URL, or "terminal">
 
 To capture: invoke demo:capture with this script.
 ```
@@ -431,11 +486,10 @@ listing them before the "To capture" line.
 ## Integration with `demo:capture`
 
 This skill intentionally does NOT invoke `demo:capture`.
-The caller is responsible for the handoff, usually by running:
-
-```text
-/demo:capture <paste contents of .captures/demo-scripts/<id>-<slug>.md>
-```
+The caller is responsible for the handoff: the `gc-toolkit.demo-capture`
+skill's "Demo a PR" adapts, lints and captures the draft, and `mol-rig-demo`
+captures it in its next step. Either capture can take the app from the rig's
+guide.
 
 This matches how `demo:epic` separates script generation from execution,
 and lets a caller review the script before committing to a long-running
@@ -446,8 +500,9 @@ video capture session.
 | Condition                         | Action                                                 |
 | --------------------------------- | ------------------------------------------------------ |
 | Bead not found                    | Stop with clear error                                  |
+| Rig keeps no demo guide           | Draft in the generic shape; say so in the summary      |
 | Bead has zero user-facing changes | Stop with Phase B report, no script                    |
 | Branch not fetchable              | Fall back to description + notes only                  |
-| No PR on bead                     | Skip Step A5, proceed with other sources               |
+| No PR on bead                     | Skip Step A6, proceed with other sources               |
 | Validation fails after 2 rewrites | Save anyway + warn in summary                          |
 | More than 12 steps after dedup    | Narrow with implicit `--focus` on highest-impact route |
