@@ -346,9 +346,8 @@ esac
 # arm lands, nothing else on the bead names the pool, so the same update records
 # it as resling_target: a run whose arm is refused, or that stops before the
 # arm, leaves the next run a pool to arm to.
-if ! gc bd update "$WORK" --set-metadata gc.routed_to="" --set-metadata gc.deferred_routed_to="" \
-    --set-metadata gc.execution_routed_to="" --set-metadata gc.deferred_execution_routed_to="" \
-    --set-metadata gc.deferred_assignee="" --set-metadata resling_target="$TARGET" \
+if ! gc bd update "$WORK" --set-metadata gc.routed_to="" --set-metadata gc.execution_routed_to="" \
+    --set-metadata resling_target="$TARGET" \
     --unset-metadata gc.session_id --unset-metadata gc.session_name </dev/null >/dev/null 2>&1; then
   echo "$PROG: could not clear the route keys on $WORK, so the re-sling cannot be armed; it waits on $WAIT_ON unarmed" >&2
   exit 1

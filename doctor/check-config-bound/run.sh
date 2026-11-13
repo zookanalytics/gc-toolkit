@@ -4,12 +4,17 @@
 # inject_fragments_append list resolves in template-fragments/ — as
 # <name>.template.md or a {{ define "<name>" }} block; sub-pack files check
 # their own tree first, then the root's — and every declared overlay_dir
-# exists. Live arm (needs gc + a city): every agent prompt_template in the
+# exists. Live arms (need gc + a city): every agent prompt_template in the
 # RESOLVED config names a readable file — `gc prime` renders an unreadable
 # template as the 16-line generic stub and exits 0, so the agent claims real
-# work with none of its doctrine and nothing reports an error.
+# work with none of its doctrine and nothing reports an error — and no order
+# registered with no rig declares scope = "rig". Gas City gives an order from a
+# city-level order root no rig, whatever its scope says, and runs an order with
+# no rig once, in the city store, so such an order runs in no rig's store and
+# Gas City reports nothing.
 # Read-only. Exit 0=OK 1=Warning 2=Error. stdout: message, then "  - detail"
-# lines. Bounded probes; an unreadable RESOLVED config warns (1), never passes.
+# lines. Bounded probes; an unreadable RESOLVED config or order registry warns
+# (1), never passes.
 
 set -u
 
@@ -104,14 +109,14 @@ for f in ${config_files[@]+"${config_files[@]}"}; do
     done <<< "$(sed -n 's/^[[:space:]]*overlay_dir[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$f" 2>/dev/null)"
 done
 
-# --- Live arm: resolved prompt_template paths readable -----------------------
-# Resolution is a runtime property; outside a city this arm is a note, not a
-# finding — nothing has been observed to be wrong.
-prompts_checked=0
+# --- Live arms: resolved prompt_template paths, and orders with no rig --------
+# Resolution and registration are runtime properties; outside a city these arms
+# are a note, not a finding — nothing has been observed to be wrong.
+prompts_checked=0; orders_checked=0
 if ! command -v gc >/dev/null 2>&1; then
-    notes+=("gc is not on PATH — prompt_template resolution is a runtime property, not verifiable here")
+    notes+=("gc is not on PATH — prompt_template resolution and order registration are runtime properties, not verifiable here")
 elif [ -z "$city" ]; then
-    notes+=("no city in scope (GC_CITY_PATH/GC_CITY unset) — prompt_template resolution not verifiable here")
+    notes+=("no city in scope (GC_CITY_PATH/GC_CITY unset) — prompt_template resolution and order registration not verifiable here")
 else
     config_out=$(run_bounded gc --city "$city" config show 2>/dev/null); config_rc=$?
     if [ "$config_rc" -ne 0 ] || [ -z "$config_out" ]; then
@@ -132,6 +137,31 @@ else
             [ -r "$abs" ] || errors+=("agent $agent_name: prompt_template does not resolve to a readable file ($abs) — \`gc prime\` will render the 16-line generic stub at exit 0; confirm with \`gc prime --strict $agent_name\`")
         done <<< "$resolved"
     fi
+
+    # The order registry carries no scope, so the scope is read from the file
+    # each order was parsed from, which the registry gives as its source. The
+    # probe's stderr goes to a file, so a failed read can say why it failed.
+    orders_errf=$(mktemp "${TMPDIR:-/tmp}/gctk-check-config-bound.XXXXXX" 2>/dev/null) || orders_errf=""
+    [ -z "$orders_errf" ] || trap 'rm -f "$orders_errf"' EXIT
+    orders_out=$(run_bounded gc --city "$city" order list --json 2>"${orders_errf:-/dev/null}"); orders_rc=$?
+    orders_why=""
+    [ -z "$orders_errf" ] || orders_why=$(sed -n '/[^[:space:]]/{p;q;}' "$orders_errf" 2>/dev/null | cut -c1-200)
+    if [ "$orders_rc" -ne 0 ] || ! printf '%s' "$orders_out" | jq -e '(.orders | type) == "array"' >/dev/null 2>&1; then
+        warnings+=("could not read the order registry (\`gc --city $city order list --json\`, rc=$orders_rc) — an order with no rig whose file declares scope = \"rig\" would not be visible here${orders_why:+; \`gc order list\` stderr: $orders_why}")
+    else
+        while IFS=$'\t' read -r oname osrc; do
+            [ -n "$oname" ] || continue
+            orders_checked=$((orders_checked + 1))
+            if [ -n "$osrc" ] && [ -f "$osrc" ] && [ -r "$osrc" ]; then
+                grep -qE '^[[:space:]]*scope[[:space:]]*=[[:space:]]*"rig"' "$osrc" 2>/dev/null \
+                    && errors+=("order $oname: registered with no rig, but $osrc declares scope = \"rig\" — Gas City runs an order with no rig once, in the city store, so this order runs in no rig's store")
+            else
+                notes+=("order $oname: registered with no rig, and its source (${osrc:-none given}) cannot be read, so its declared scope is unknown — reported, not judged")
+            fi
+        done <<< "$(printf '%s' "$orders_out" | jq -r '.orders[]?
+            | select(((.rig // "") | tostring) == "")
+            | [(.name // ""), (.source // "")] | @tsv' 2>/dev/null)"
+    fi
 fi
 
 if budget_spent; then
@@ -150,6 +180,6 @@ if [ "${#warnings[@]}" -ne 0 ]; then
     detail ${notes[@]+"${notes[@]}"}
     exit 1
 fi
-echo "OK: $frags_checked fragment reference(s), $overlays_checked overlay_dir(s), $prompts_checked resolved prompt_template(s) all bind"
+echo "OK: $frags_checked fragment reference(s), $overlays_checked overlay_dir(s), $prompts_checked resolved prompt_template(s) all bind, and none of the $orders_checked order(s) registered with no rig declares scope = \"rig\""
 detail ${notes[@]+"${notes[@]}"}
 exit 0

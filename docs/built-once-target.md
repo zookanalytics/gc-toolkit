@@ -136,18 +136,21 @@ converse skills and the po's refinement skill, the operator's intake and the
 terminal surfaces.
 
 New work no epic holds is owed to nobody. It carries Gas City's `hold:mayor`,
-and the po, a fresh on-demand session chartered as the operator's
+and its rig's po, a fresh on-demand session chartered as the operator's
 prioritization partner, works that queue with the operator. A hold is the next
 actor's queue, and a gate is an answer someone owes.
 
-The po takes the agent shape of Gas Town's mayor: `scope = "city"`,
-`wake_mode = "fresh"`, `work_dir = ".gc/agents/po"` and
-`max_active_sessions = 1`. Each difference names its reason, and each but the
-last ends with an operator ruling that gives the seat the job:
+The po takes the agent shape of Gas Town's mayor, `wake_mode = "fresh"` and
+`max_active_sessions = 1`, once for each rig: `scope = "rig"` and a rig
+worktree, `work_dir = ".gc/worktrees/<rig>/po"`. Each difference names its reason, and each
+but the last ends with an operator ruling that gives the seat the job:
 
 - **Named `po`, not `mayor`.** Gas City's defaults and Gas Town's roles aim at
   the name `mayor`, so a seat that answers to it takes their sends. SAFe's word
   names the job.
+- **One for each rig, where Gas Town's mayor is one for the city.** A rig's
+  queue and its epics are weighed against that rig's target, so each rig's po
+  works its own, one sitting at a time.
 - **The operator's prioritization partner, not the human's point of contact.**
   It works backlog refinement and portfolio sync, by the operator's charter.
 - **It places, parks and moves priority once the operator agrees in a sitting,
@@ -164,9 +167,9 @@ last ends with an operator ruling that gives the seat the job:
 - **`sleep_after_idle = "1h"` in place of `idle_timeout = "1h"`.** Gas City
   applies no `idle_timeout` to an always-on seat, so the mayor's hour never
   fires. The po is on demand, and it takes its hour as Gas City's idle sleep: a
-  sitting no client is attached to sleeps once the hour has passed and keeps its
-  conversation, and the operator's next attach wakes it into that conversation.
-  This ends if the po runs always on, as the mayor does.
+  sitting no client is attached to sleeps once the hour has passed, and the
+  operator's next attach starts a new sitting. This ends if the po runs always
+  on, as the mayor does.
 
 The trade: the first reaction stops being a bead kind of its own
 (tk-1tfzr71.17).
@@ -288,7 +291,7 @@ bd 1.3.2.
 | Pack machinery | Gas City's primitive | Carried by |
 |---|---|---|
 | `step-close.sh` | `gc hook current` | tk-1tfzr71.39 |
-| hand-stamped routes and the sweeps that repair them | `gc sling --no-formula`, assignment | tk-1tfzr71.15 |
+| the hand-stamped routes in code other members retire, and the rescues that repair them | `gc sling --no-formula`, assignment | the member that retires each, tk-1tfzr71.17 to .22 |
 | `orphan-dispose.sh`'s generic arms | core's orphan-sweep | tk-1tfzr71.19 |
 | `pr-facts.sh` polling and its mirrored keys | the PR monitor and webhook receiver | tk-1tfzr71.21 |
 
@@ -304,8 +307,8 @@ home.
 - The decline sequence (file the human gate, cancel the run, drain): two copies
   in the step text of `mol-validate.toml`, which tk-1tfzr71.22 retires. Outside
   that file a decline calls `decline.sh`. `mol-review`'s failed gather cancels
-  its own run, because it restores the review's pool route once the cancel has
-  landed, and tk-1tfzr71.15 converts that restore.
+  its own run, because it returns the review to its pool through `gc sling` once
+  the cancel has landed.
 - A rule kept in two languages, with a test holding the copies equal:
   `gctk merge` and `review-verdict.sh`, `gctk lifecycle` and the key registry,
   and the board's Go contract and its TypeScript mirror. Carried by
@@ -325,11 +328,6 @@ and the change that fires the trigger deletes it.
   files: the `gc.proactive_reaction=1` proof and PR bodies older than the
   managed region, among others. Trigger: no store or open PR holds the shape.
   Each goes with the member that rewrites its reader.
-- The pass for an incomplete Epic, an epic that is not a Delivery and carries no
-  hypothesis, in the close gate's `clause_epic_ruling_recorded` and I15's
-  `exempt-nohyp` arm. Each is one line that passes every epic with no hypothesis.
-  Trigger: every live Epic carries its hypothesis, and every closed one carries a
-  hypothesis or a disposition (tk-wmwcdlc.5). Carried by tk-wmwcdlc.6.
 
 ### Doctrine restated per call site
 
@@ -380,7 +378,6 @@ convoy lands only after the operator approves its design.
 | A | tk-1tfzr71.22 | review beads, lane derivation, validation passes, machine findings | 10,924 |
 | A | tk-1tfzr71.21 | `pr-facts.sh` polling and mirroring | 15,233 |
 | A | tk-1tfzr71.23 | the membership readers on parent-child | partial files |
-| B | tk-1tfzr71.15 | raw route stamps and the checks that police them | 1,175 |
 | B | tk-1tfzr71.16 | deferred dispatch's notify path, lock, budget and crash marker | partial files |
 | B | tk-1tfzr71.17 | the reaction bead and the intake converters | 189, plus partial files |
 | B | tk-1tfzr71.18 | warrants, the dance, pin keepalive, boot health, quota park, each after its re-check | 5,815 |
@@ -388,7 +385,7 @@ convoy lands only after the operator approves its design.
 | B | tk-1tfzr71.24 | the board's second data plane and pack-stamped rows, verbs that only call Gas City | partial files |
 | B | tk-1tfzr71.25 | registry entries, wrapper lint rules, parity tests, the `board` stub verb | 1,488 |
 
-The whole files that tk-kvdomjb and the migration members name come to 60k of
+The whole files that tk-kvdomjb and the migration members name come to 56k of
 the 202k between the baseline and the built-once estimate. Their partial
 rewrites carry more, chiefly the board, `gc-helm.sh`, the work and patrol
 formulas, deferred dispatch and the sign-off. The page's own items below carry

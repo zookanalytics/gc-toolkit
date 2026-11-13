@@ -19,10 +19,10 @@ import (
 )
 
 // `helm-svc form` is the terminal conversation form (internal/form): the
-// screen `gc-helm.sh engage` and `gc-helm.sh attach` hand a terminal to. It
-// reads and writes only through the gc-helm.sh at --helm, which passes its own
-// path, and it is an entry point of this binary for the reason board is: one
-// build, one artifact.
+// screen `gc-helm.sh engage`, which a bare `gc-helm.sh` runs, and `gc-helm.sh
+// attach` hand a terminal to. It reads and writes only through the gc-helm.sh
+// at --helm, which passes its own path, and it is an entry point of this
+// binary for the reason board is: one build, one artifact.
 
 const formUsage = `Usage:
   helm-svc form --helm <gc-helm.sh> [--subject <ref> [--from <bead>]] [--new-subject]
@@ -30,17 +30,22 @@ const formUsage = `Usage:
                 [--question <text>] [--no-attach] [--return]
 
 The terminal conversation form. gc-helm.sh engage runs it on a terminal when the
-command line leaves the concern open, and gc-helm.sh attach runs it with
---return. Each flag fills in its field, --rig fills in the subject with a new
-topic's rig, named exactly, --subject with a reference the form never matches
-to a rig, and --from names the bead the gate --subject names was reached
-from, as engage's --from does. Once the sitting a
-save starts has started, the form attaches to it, and --no-attach turns that
-field off, so the form leaves the sitting to prepare instead. --return opens on
-the conversations to return to. The attach runs once the form has left the
-terminal, and its exit status is the form's. A cancelled question is kept in a
-file under GC_HELM_DRAFT_DIR, else $XDG_STATE_HOME/gc/engage-drafts, else
-~/.local/state/gc/engage-drafts.
+command line leaves the concern open, as a bare gc-helm.sh does, and gc-helm.sh
+attach runs it with --return. Its pages are tabs at its top: starting a
+conversation (Ctrl+N), returning to one (Ctrl+R), and People (Ctrl+P), which
+lists mechanik and each rig's Product Owner with the state of its session. A
+page's key goes to it from any page and field. ↑ from the subject reaches the
+tabs, and ←/→ move along them. Each flag fills in its field, --rig fills in the
+subject with a new topic's rig, named exactly, --subject with a reference the
+form never matches to a rig, and --from names the bead the gate --subject names
+was reached from, as engage's --from does. Once the sitting a save starts has
+started, the form attaches to it, and --no-attach turns that field off, so the
+form leaves the sitting to prepare instead. --return opens on the conversations
+to return to. Enter on a person opens it with gc-helm.sh mechanik or gc-helm.sh
+po --rig <rig>, which takes no question. The attach, or the seat's verb, runs
+once the form has left the terminal, and its exit status is the form's. A
+cancelled question is kept in a file under GC_HELM_DRAFT_DIR, else
+$XDG_STATE_HOME/gc/engage-drafts, else ~/.local/state/gc/engage-drafts.
 `
 
 func formMain(args []string) {

@@ -6,8 +6,11 @@
 # renders nothing.
 # Verbs (full grammar and per-verb notes in usage(), `gc-helm --help`): the
 # write verbs open, engage, attach, react, takeaway, park, priority, place,
-# dismiss, handback, accept, and the read-only resolve and conversations.
-# engage and attach hand a terminal to the conversation form (helm_form). open, engage and react take a
+# dismiss, handback, accept, the read-only resolve and conversations, and po
+# and mechanik, which attach to the seats the operator sits with: a rig's po,
+# and the city's mechanik. engage, which a bare gc-helm on a terminal runs, and
+# attach hand a terminal to the conversation form (helm_form), whose People
+# page opens a seat. open, engage and react take a
 # <subject> (a bead id, a PR number or URL, or a superseded id) and resolve it to
 # the live bead that owns the work by metadata and the graph, never a title; an
 # unresolvable or ambiguous reference is refused and nothing is filed.
@@ -15,15 +18,18 @@
 # via GC_HELM_OPEN_TOOL (open, engage, accept, dismiss — open's stderr/stdout
 # sentences are parsed by services/helm/internal/server, guarded by
 # open_parity_test.go), converse (takeaway, handback) and the proactive worker
-# (takeaway), operators by hand (park, priority, place).
+# (takeaway), operators by hand (park, priority, place), and helm-svc's
+# conversation form on the operator's terminal (conversations, open, engage,
+# po and mechanik).
 # Exit codes: 0 ok, 2 usage, 3 environment (jq/gc missing, rigs
 # unenumerable, no city root or flock for Accept's lock — each failure names
 # its own operator move),
 # 4 verb runtime failure (bead not found / unverifiable / filing failed /
 # a --route, or a takeaway headline or disposition, that will not stamp / a
-# priority move the store refused / a placement whose write the store refused
-# or whose dispatch failed / an Accept refused or held by another Accept on the
-# bead),
+# takeaway release that a live session's claim, or a change to the bead after
+# its read, refused / a priority move the store refused / a placement whose
+# write the store refused or whose dispatch failed / an Accept refused or held
+# by another Accept on the bead),
 # 5 react no-op: the subject already has an open first reaction, or a live owner
 # owns its reaction, so nothing was filed (a first reaction happens once at a
 # time) — distinct from 4 so an intake caller files its own conversation
@@ -48,16 +54,20 @@ scrub() { tr -d '\000-\037'; }
 
 PROG="gc-helm"
 TAKEAWAY_MAX=140                            # hard cap on a takeaway headline, in CODEPOINTS
+DETACHED_STATES="pre_open_gate pull_request" # lifecycle.toml detached_states: the merge cadence drives these anchors
 FIXTURE="${GC_HELM_FIXTURE:-}"              # test hook: <dir>/rigs.json replaces `gc rig list`
 
 usage() {
     cat >&2 <<'EOF'
 Usage:
-  gc-helm open  <bead-id> [--reason "..."] [--body "..."] [--allow-duplicate] [--if-subject <id>] [--conversation <id>] [--from <bead-id>] [--json]  file a conversation about the bead in the operator's queue, for the operator to engage; a second concern joins the bead's conversation already in the queue unless --allow-duplicate files a fresh one, which lands instead on a conversation in the queue whose whole ask is that concern; a conversation about an open PR, or a bead of one, holds the PR's merge until it closes; --if-subject files only while the reference still names that subject, and a reference that names another now, through a successor, a PR's anchor or a gate's waiter, files nothing (exit 4); --conversation completes the conversation an earlier open filed for the concern, by its id, wherever it stands, adding the reply onto the gate that did not land, and the hold on an open PR's merge only while the conversation waits in the queue, since a sitting that has taken it keeps or lifts that hold; one no longer open on the bead or holding another ask files nothing (exit 4); --from names the bead a gate was reached from, and a gate several open beads wait on files the conversation about that bead while it is one of them, while a gate that no longer holds that bead files nothing (exit 4); --json prints {subject,conversation,filed}, and names the conversation on every exit once it is filed
+  gc-helm  on a terminal, engage's form, the way in, whose tabs start a conversation, return to one, or open mechanik or a rig's Product Owner from the People page; without a terminal, this usage and exit 2
+  gc-helm po --rig <name>  attach to the rig's Product Owner: a live sitting as it stands, and any other through the controller's start, which opens a new sitting with its prompt
+  gc-helm mechanik  attach to mechanik, the city's one, waiting while the controller starts it
+  gc-helm open  <bead-id> [--reason "..."] [--body "..."] [--allow-duplicate] [--if-subject <id>] [--conversation <id>] [--from <bead-id>] [--json]  file a conversation about the bead in the operator's queue, for the operator to engage; a second concern joins the bead's conversation already in the queue unless --allow-duplicate files a fresh one, which lands instead on a conversation in the queue whose whole ask is that concern; a conversation about an open PR, or a bead of one, holds the PR's merge until it closes; --if-subject files only while the reference still names that subject, and a reference that names another now, through a successor, a PR's anchor or a gate's waiter, files nothing (exit 4); --conversation completes the conversation an earlier open filed for the concern, by its id, wherever it stands, adding the reply onto the gate that did not land, and the hold on an open PR's merge only while the conversation waits in the queue, since a sitting that has taken it keeps or lifts that hold; one no longer open on the bead or holding another ask files nothing (exit 4); a gate several open beads wait on files the conversation about the one whose wait on it is oldest, with a note naming the others; --from names the bead a gate was reached from, and such a gate files the conversation about that bead while it is one of them, while a gate that no longer holds that bead files nothing (exit 4); --json prints {subject,conversation,filed}, and names the conversation on every exit once it is filed
   gc-helm open  --new-subject --rig <name> [<question> | --reason "<question>"] [--json]  file a FRESH subject in the named rig for a topic that has no bead yet, the question unchanged in its description and its title derived from the question's opening, then its conversation in the queue; --json answers the subject, filed:false, the moment it is filed, and open's last answer is the one that counts, so a subject filed whose conversation is not is named for a re-run onto it
-  gc-helm engage [<subject>] [--subject <id>] [--from <bead-id>] [--new-subject [--rig <name>]] [--model <variant>] [--skill <name>] [--reason "..." | --template <key>] [--no-input] [--no-attach]  hold a conversation about the bead in a converse sitting and attach: attach to its live sitting, or take its conversation from the queue, or file one, then spawn a sitting named for it. Pointed at a human gate it takes the one bead still waiting on the gate, or the --from bead when it is one of several waiting, and the conversation replies to the gate. On a terminal, with no --reason, --template or --skill, it opens the conversation form instead: subject (a bead or a PR, or a rig's name or prefix typed there for a new topic in that rig), question, model and whether to attach on one screen, filled in from the command line, where --rig fills in the subject and --no-attach turns attaching off; --no-input keeps the flag-driven one-shot path. --skill seeds the sitting with any skill it carries as its lens on the subject (--skill review-arch is a conversation with the Architect). --new-subject files a FRESH subject bead in the --rig rig (the positional text, or --reason, is the question; its title is derived from the question's opening) and engages it in one gesture
+  gc-helm engage [<subject>] [--subject <id>] [--from <bead-id>] [--new-subject [--rig <name>]] [--model <variant>] [--skill <name>] [--reason "..." | --template <key>] [--no-input] [--no-attach]  hold a conversation about the bead in a converse sitting and attach: attach to its live sitting, or take its conversation from the queue, or file one, then spawn a sitting named for it. Pointed at a human gate it takes the one bead still waiting on the gate, or of several waiting the --from bead when it is one of them and otherwise the one whose wait on it is oldest, and the conversation replies to the gate. On a terminal, with no --reason, --template or --skill, it opens the conversation form instead: subject (a bead or a PR, or a rig's name or prefix typed there for a new topic in that rig), question, model and whether to attach on one screen, filled in from the command line, where --rig fills in the subject and --no-attach turns attaching off; --no-input keeps the flag-driven one-shot path. --skill seeds the sitting with any skill it carries as its lens on the subject (--skill review-arch is a conversation with the Architect). --new-subject files a FRESH subject bead in the --rig rig (the positional text, or --reason, is the question; its title is derived from the question's opening) and engages it in one gesture
   gc-helm attach [<conversation>]  return to a conversation: with an id, engage's attach (a live sitting once it has started, or a new sitting on a conversation whose sitting ended or that waits in the queue); with none, on a terminal, the conversation form's list of conversations to return to, by topic and readiness
-  gc-helm conversations [<ref> [--from <bead-id>]] [--json]  list where each open conversation stands: its sitting's readiness (queued, starting, preparing, ready, ended) and whether a terminal is attached; with a subject reference, the subject as engage resolves it, --from as engage takes it, the rig a conversation about it is held in, whether a sitting can start there, its open conversations and what holds it. Read-only
+  gc-helm conversations [<ref> [--from <bead-id>]] [--json]  list where each open conversation stands: its sitting's readiness (queued, starting, preparing, ready, ended) and whether a terminal is attached; with a subject reference, the subject as engage resolves it, --from as engage takes it, the rig a conversation about it is held in, whether a sitting can start there, its open conversations and what holds it; with none, --json also gives the rigs a new topic can be filed in, and the seats the form's People page lists, mechanik and each rig's Product Owner, each with its session as 'gc session list' holds it. Read-only
   gc-helm react <bead-id> [--reason "..."]  file a first reaction — a reaction bead that tracks the subject, claimed and disposed by the proactive pool
   gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>... | --no-wait] [--release [--route <rig>/<agent> | --assign <named-agent>]]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
   gc-helm park <bead-id> "<text>" [--body "..."]  hold everything under the bead that has not started: file a gate titled with why it is parked and what releases it (≤140 chars, ENFORCED), described by --body, and make the bead wait on it
@@ -103,8 +113,11 @@ takes, reporting the sitting's state while it waits (an interrupted wait leaves
 the sitting to start on its own, to attach later). Pointed at a human gate,
 engage takes the one bead still waiting on the gate and makes the conversation
 it lands on reply to the gate; with several beads waiting it takes the --from
-bead when that bead is one of them, and otherwise it names them and
-starts nothing, and with none it says nothing waits and starts nothing.
+bead when that bead is one of them, and otherwise the one whose wait on the gate
+is oldest, so engaging the question again lands on the same bead, and a note
+on the conversation names the others, filed with it when engage files it and
+written once onto one the bead already has; with none it says nothing waits and
+starts nothing.
 Named by a conversation that has closed, engage says when it closed and the
 first line of its last hand-back after the header, starts nothing and names
 the subject's engage, which opens a fresh conversation. A subject that is
@@ -140,13 +153,15 @@ whether a sitting can start there, its open conversations and what holds it,
 and the city's rigs with their prefixes. A gate
 chosen from what holds the subject becomes the subject, read and saved --from
 the subject it was chosen from, so a gate several beads wait on is about that
-one. A result
+one. A gate typed as the subject is about the bead engage takes from it. A result
 for an earlier subject never stands in for the current one, and no result
 changes a conversation the operator chose. Ctrl+S saves only once the
 destination it shows is settled: open files the question as a new conversation,
 with --allow-duplicate and --if-subject naming the subject shown on a subject,
 and --new-subject --rig on a topic, and the form says it is saved; engage
-<conversation> --no-attach then starts its sitting. Once it has started, the
+<conversation> --no-attach then starts its sitting. On a human gate the question
+is optional, and its box shows the gate's own question: left empty, the save
+passes open no --reason, so the ask is what the gate asks. Once the sitting has started, the
 form attaches to it, or with attaching off leaves it to prepare and names how to
 return to it. In a suspended rig, named or a bead's own, attaching is off and
 says why, and Ctrl+S saves the question and leaves, starting no sitting: the
@@ -185,23 +200,56 @@ conversation_title derives from its opening, and absent --reason or
 gc.reaction_owned=1 so the async first-reaction/proactive worker stands down
 rather than file a second conversation; engage files the one conversation
 itself.
+
+A bare gc-helm on a terminal opens engage's form on starting a conversation.
+The form's pages are tabs at its top: starting a conversation (Ctrl+N),
+returning to one (Ctrl+R), and People (Ctrl+P), which lists mechanik and each
+rig's Product Owner with the state of its session. A page's key goes to it
+from any page and field. ↑ from the subject reaches the tabs, and ←/→ move along
+them. Enter on a person leaves the form and then runs `gc-helm po --rig <name>`
+or `gc-helm mechanik`, so what the verb prints stays on the terminal and its
+exit status is the form's. A seat takes no question, because Gas City's attach
+carries no message, so the sitting's purpose is given in the sitting. Each rig
+has its own Product Owner, which works that rig's queue and epics, and none
+runs in the city's HQ; mechanik is one for the city. Each verb is `gc session
+attach` on the seat's session, by the name `gc agent list` gives it:
+<rig>/<binding>.po for a rig's Product Owner and <binding>.mechanik for
+mechanik, where <binding> is the name the city imports this pack under. It
+joins a running session as it stands. For a seat that is not running, it asks
+the city's controller to start the session, waits for it to run and then
+attaches, and the controller's start gives the agent its prompt as its first
+message. The Product Owner starts fresh, so a sitting of it that slept or
+ended comes back as a new sitting. A failed attach exits 4 once gc has said
+why.
+
 dismiss ends the sitting. react files a proactive first-reaction bead via
 tools/gc-proactive.sh (its --reason is log-only operator intent). takeaway
 stamps gc.takeaway (+_at/+_by) in one update, and exits 4 before anything
 follows it when the store refuses that update; --release also
-reopens/unassigns/clears the route and ends the run beneath the anchor through
-gascity's run cancel. On an anchor that is already
+reopens/unassigns/clears the route in that update and ends the run beneath the
+anchor through gascity's run cancel. The update is guarded on the status and
+the assignee the release read: a bead closed since takes only the headline and
+the run's end, and any other change exits 4 with nothing written. It takes no
+live claim: a claim another session holds is released only once
+'gc session list' lists that holder under none of its names, and otherwise the
+release writes the headline and any wait, ends the run beneath the bead,
+nudges the holder to stop and give the bead back, and exits 4 naming the
+holder. On an anchor that is already
 CLOSED the reopen would resurrect a landed disposition, so it is skipped and
-only the run's end runs; --route <rig>/<agent> releases it TO a pool instead of
-back to the human, in the same write, and is refused on a closed anchor and on
-a bead blocked by anything but a human gate, since the work is then on the
-blocker and a pool has nothing to perform here; --assign <named-agent> releases
+only the run's end runs; --route <rig>/<agent> sends it TO a pool instead of
+back to the human, through `gc sling <rig>/<agent> <bead> --no-formula
+--no-convoy` once the run beneath it has ended, and is refused on a closed
+anchor and on a bead blocked by anything but a human gate, a wait its own
+--waiting-on names included, since the work is then on the blocker and a pool
+has nothing to perform here; --assign <named-agent> releases
 it TO a named agent instead, in the same write, as its assignee and with no
 route, because the assignee is what the controller and the pack's notice read
 to give a named agent a turn (docs/deferred-dispatch.md). Either one also
-lifts the bead's hold:mayor in the same write, because sending a held bead on
-is a placement, and Gas City serves no bead a hold label holds, assigned or
-not. --assign is refused
+lifts the bead's hold:mayor in the release's write, because sending a held bead
+on is a placement, and Gas City serves no bead a hold label holds, assigned or
+not. Both are refused on an anchor whose merge_result is pre_open_gate or
+pull_request, since the merge cadence drives it and work on its branch goes to
+a child. --assign is refused
 beside --route and on a closed anchor, and without --waiting-on also on a bead
 blocked by anything but a human gate; with --waiting-on the named waits gate
 the hand-off, since the agent's hook offers the bead only once bd reports it
@@ -586,6 +634,36 @@ session_identities() {
     printf '%s\n%s\n%s\n' "${GC_SESSION_NAME:-}" "${GC_SESSION_ID:-}" "${GC_ALIAS:-}" | grep -v '^$' || true
 }
 
+# claim_is_mine <assignee> — whether a claim's assignee is a name this session
+# goes by: its session name, its session id, its agent address or its alias,
+# the four await-ruling.sh and work-lib.sh's work_is_self accept as this
+# session's own claim.
+claim_is_mine() {
+    [ -n "$1" ] || return 1
+    for _cm in "${GC_SESSION_NAME:-}" "${GC_SESSION_ID:-}" "${GC_AGENT:-}" "${GC_ALIAS:-}"; do
+        [ -n "$_cm" ] && [ "$_cm" = "$1" ] && return 0
+    done
+    return 1
+}
+
+# holder_sessions <assignee> — the sessions `gc session list` lists under the
+# assignee, one id per line, matched on any of the forms a claim writes: the
+# session name, the session id, or the agent address, which is a session's
+# alias or the end of one. That listing holds every session that has not
+# closed, asleep ones included. await-ruling.sh's owner_listed and work-lib.sh's
+# work_owner_listed count the same listing with the same match. Prints nothing
+# when none is listed, and returns 1 when the list does not read, which proves
+# no holder gone.
+holder_sessions() {
+    _hs_raw=$(gc session list --json 2>/dev/null </dev/null) || return 1
+    printf '%s' "$_hs_raw" | scrub | jq -r --arg o "$1" '
+        if type == "object" and (.sessions | type) == "array" and all(.sessions[]; type == "object") then
+          .sessions[] | select(((.alias // "") == $o) or ((.alias // "") | endswith($o))
+                               or ((.session_name // "") == $o) or ((.id // "") == $o))
+          | (.id // .session_name // .alias // $o) | tostring
+        else error("not a session list") end' 2>/dev/null
+}
+
 # ── Human gates, conversations and sittings ─────────────────────────
 # need_human_gate_jq — load $HUMAN_GATE_JQ, the one rule of which human gates
 # still hold a bead, the rule every reader of a bead's gates prepends. It lives
@@ -708,7 +786,13 @@ bead_conversations() {
 # proves no sitting live and none gone.
 live_sittings() {
     _ls_raw=$(gc session list --json 2>/dev/null) || return 1
-    printf '%s' "$_ls_raw" | scrub | jq -ce '
+    live_sittings_in "$_ls_raw"
+}
+
+# live_sittings_in <session-list> — live_sittings over a `gc session list
+# --json` already read, so one read answers it and the seats (SEATS_JQ).
+live_sittings_in() {
+    printf '%s' "$1" | scrub | jq -ce '
         if type == "object" and ((.sessions // null) | type) == "array"
         then [ .sessions[] | objects
                | select((.closed // false) != true)
@@ -1153,26 +1237,82 @@ ROOTS
 )
 # <<< cancel-release-molecules
 
+# takeaway_closed_skip <bead> <state> — say that a closed bead keeps its
+# disposition: the release writes no park, and still ends the run beneath it.
+# <state> says when the release found it closed.
+takeaway_closed_skip() {
+    _tcs_sup=$(disposed_to_of "$1") || _tcs_sup=""
+    echo "$PROG: takeaway: $1 $2${_tcs_sup:+, superseded by $_tcs_sup} — its disposition stands, so the release write is skipped (no reopen, no unassign, no route clear). The run beneath it is still ended." >&2
+}
+
+# takeaway_nudge_holder <bead> <holder> <sessions> <text> — ask the session that
+# holds the bead's claim to stop and give the bead back, at each session id the
+# session list names it under, or at the holder's own name when the list did
+# not read. The nudge reaches a running turn where the runtime can steer, and
+# one still queued about the same bead is replaced rather than stacked. It names
+# the hand-back write, one guarded write that reopens the bead and clears the
+# claim, its session pins and its route. Prints the sessions it reached, and
+# returns 1 when no nudge landed.
+takeaway_nudge_holder() {
+    _tn_targets="$3"; [ -n "$_tn_targets" ] || _tn_targets="$2"
+    _tn_msg="Stop work on $1: a takeaway --release took it out of play while you hold its claim, and its headline says why: $4. Give it back in one guarded write that reopens it and clears your claim and its route: $SCRIPT_DIR/hand-back.sh $1 --set-metadata gc.routed_to="
+    _tn_hit=""
+    for _tn in $_tn_targets; do
+        if gc session nudge --delivery immediate "$_tn" "$_tn_msg" --reference-bead "$1" >/dev/null 2>&1 </dev/null; then
+            _tn_hit="$_tn_hit $_tn"
+        fi
+    done
+    [ -n "$_tn_hit" ] || return 1
+    printf '%s' "${_tn_hit# }"
+}
+
 # ── Verb: takeaway ───────────────────────────────────────────────────
 # Stamp gc.takeaway/_at/_by in ONE update, then bust the cache. --release adds
 # two acts to that stamp: PARK the anchor, and END the run beneath it.
 #
-# The park (reopen, unassign, stamp the route) rides the same write as the
+# The park (reopen, unassign, clear the route) rides the same write as the
 # headline, so a reaction that concludes "this is work" hands the bead on in
 # the write that records the conclusion: either the whole disposition lands or
-# none of it does. It applies to an anchor still standing.
+# none of it does. It applies to an anchor still standing, and it is a
+# compare-and-swap on the status and assignee the release read: bd writes
+# nothing and exits 13 when either has changed since (gc bd update --help).
+# On that refusal the release reads the bead again. A bead closed since takes
+# the closed anchor's path, and any other change fails the verb, so the bead
+# stays with whoever holds it now.
 # A closed anchor was disposed already, so it keeps that disposition and gets
-# the run's end alone.
+# the headline and the run's end alone.
+#
+# The park takes no live claim. bd lets a write that names the holder in
+# --if-assignee change an in_progress claim it would refuse to touch otherwise
+# (validateIssueReassignable, cmd/bd/show_unit_helpers.go in beads), so the
+# park names a claim's holder only once that holder is shown gone, by the rule
+# await-ruling.sh applies: the claim is this session's, or `gc session list`
+# lists its holder under none of its names. The park is then the one guarded
+# write that releases the claim. It is the compare-and-swap Gas City's
+# `gc bd release-if-current` sends (releaseIfCurrentViaBdVerb,
+# internal/beads/bdstore_conditional_release.go in gascity), carrying the
+# park's other keys, so the bead is never open and unassigned while its old
+# route or session pins remain, where its pool or Gas City's orphan lane would
+# take it up again. A holder the list still names, or a list that does not
+# read, keeps the claim: the release writes the headline alone and any wait
+# edge, ends the run beneath the bead, nudges the holder to stop and hand the
+# bead back, and exits 4 naming the holder. Nothing in Gas City stops a session
+# that holds a bare bead, and the holder's own hand-back releases the claim and
+# its route in one guarded write.
 #
 # The run's end is gascity's run cancel on the molecule's root, which closes the
 # root and every step that is not closed; a run the releasing session holds a
 # step of is its own, and is left to close its chain.
 #
-# --route names a pool to release TO. The target is rig-qualified or refused,
-# because gc.routed_to is read by exact string and a bare agent name routes to
-# nobody and sits forever; on a closed anchor the route is refused outright. It
-# also names a bead that is itself the work, so a bead blocked by anything but
-# a human gate is refused.
+# --route names a pool to send the bead TO. The park clears the bead's route,
+# and once the run beneath the bead has ended, `gc sling <rig>/<pool> <bead>
+# --no-formula --no-convoy` routes it. The sling pours nothing, files no convoy,
+# and refuses a target the city does not configure or a store the pool does not
+# read. A target that is not rig-qualified is refused before anything is
+# written, because the sling comes only after the park and the run's end. On a
+# closed anchor the route is refused outright. It also names a bead that is
+# itself the work, so a bead blocked by anything but a human gate is refused,
+# and so is one whose --waiting-on names such a wait.
 # --assign names a NAMED agent to release TO, written as the assignee with no
 # route (the usage says why). A bead is addressed one way or the other, never
 # both. --assign is refused on a closed anchor like --route. Without
@@ -1180,6 +1320,10 @@ ROOTS
 # guard is skipped: the caller has named the waits, and the hook offers the
 # bead only once bd reports it ready, so every open blocker gates the hand-off,
 # named or not.
+# Both are refused on an anchor whose merge_result is a detached state
+# (lifecycle.toml detached_states): the merge cadence drives it and work on its
+# branch goes to a child, so a route or an assignee would offer the anchor
+# itself as fresh work.
 # --waiting-on records each wait as a `blocks` edge, best-effort: the stamp is
 # what the sitting owes the operator, so a rejected edge only warns and never
 # fails the verb. One wait is written as no edge: a LANDED rider — a bead that
@@ -1214,6 +1358,7 @@ ROOTS
 cmd_takeaway() {
     bead=""; text=""; by="host"; release=""; route=""; assign=""; npos=0
     waiting_ids=""; no_wait=""; subj_branch=""; real_waits=""; skipped_riders=""
+    route_waits=""; route_unread=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --by=*)    by="${1#--by=}"; shift ;;
@@ -1254,9 +1399,11 @@ cmd_takeaway() {
 
     [ -n "$by" ] || by="host"
 
-    # --route rides --release: a route stamped without the release would leave
-    # the bead assigned to this session AND routed to a pool, which is the
-    # half-state no reader can act on.
+    # --route rides --release: the sling sends a bead the release has parked and
+    # whose run has ended. Sent without the release, the bead would keep its
+    # assignee and its run beside the route, the half-state no reader can act
+    # on. The target is checked before anything is written, because the sling
+    # comes after the park and the run's end.
     if [ -n "$route" ]; then
         [ -n "$release" ] || { echo "$PROG: takeaway: --route needs --release (it names where the bead is released TO)" >&2; exit 2; }
         case "$route" in
@@ -1279,7 +1426,7 @@ cmd_takeaway() {
     db=""; [ -n "$path" ] && [ -d "$path/.beads" ] && db="$path/.beads"
 
     # --release is two acts welded into one flag: PARK the anchor (reopen,
-    # unassign, stamp the route) and END the run beneath it. The park
+    # unassign, clear the route) and END the run beneath it. The park
     # is correct for an anchor still standing and destructive for one already
     # disposed — a bead closed by a fold names its carrier through its
     # supersedes edge, and `--status=open` there makes work
@@ -1291,29 +1438,47 @@ cmd_takeaway() {
     #
     # The status is read before anything is written, and an unreadable one
     # refuses the verb: a bead whose disposition cannot be proven is the one
-    # case where reopening it costs the most.
+    # case where reopening it costs the most. The same read gives the assignee
+    # and the merge_result, and the park write is guarded on the status and the
+    # assignee it read.
     # >>> takeaway-release-closed-anchor
-    release_park=""
+    release_park=""; anchor_row=""; anchor_status=""; anchor_assignee=""; anchor_mr=""
     if [ -n "$release" ]; then
         release_park=1
         # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
-        anchor_json=$(gc bd show "$bead" ${db:+--db "$db"} --json 2>/dev/null | scrub)
-        anchor_status=$(printf '%s' "$anchor_json" \
-            | jq -r --arg b "$bead" \
+        anchor_row=$(gc bd show "$bead" ${db:+--db "$db"} --json 2>/dev/null | scrub \
+            | jq -c --arg b "$bead" \
                 'if type == "array"
-                 then [ .[] | select(type == "object" and (.id // "") == $b) ] | first | (.status // "")
+                 then [ .[] | select(type == "object" and (.id // "") == $b) ] | first // empty
                  else empty end' 2>/dev/null || true)
+        anchor_status=$(printf '%s' "$anchor_row" | jq -r '(.status // "") | tostring' 2>/dev/null || true)
         if [ -z "$anchor_status" ]; then
             echo "$PROG: takeaway: could not read the status of '$bead' (does it exist in rig '${path:-?}'?). Refusing --release rather than reopen a bead whose disposition cannot be read. Nothing was written." >&2
             exit 4
         fi
+        anchor_assignee=$(printf '%s' "$anchor_row" | jq -r '(.assignee // "") | tostring' 2>/dev/null || true)
+        anchor_mr=$(printf '%s' "$anchor_row" | jq -r '((.metadata // {}).merge_result // "") | tostring' 2>/dev/null || true)
         if [ "$anchor_status" = "closed" ]; then
             release_park=""
-            superseded=$(disposed_to_of "$bead") || superseded=""
-            echo "$PROG: takeaway: $bead is closed${superseded:+, superseded by $superseded} — its disposition stands, so the release write is skipped (no reopen, no unassign, no route stamp). The run beneath it is still ended." >&2
+            takeaway_closed_skip "$bead" "is closed"
         fi
     fi
     # <<< takeaway-release-closed-anchor
+
+    # An anchor in a detached state rests unrouted and unassigned while the merge
+    # cadence drives it (lifecycle.toml detached_states), and work on its branch
+    # goes to a child (the prs skill). A route or an assignee would offer the
+    # anchor itself as fresh work, and a claim on it would move it out of the
+    # open, unassigned state merge.sh and pr-facts.sh read anchors in. Refused
+    # before anything is written, so a re-run without either lands the headline
+    # and the release.
+    if [ -n "$release_park" ] && [ -n "$route$assign" ] && [ -n "$anchor_mr" ]; then
+        case " $DETACHED_STATES " in
+            *" $anchor_mr "*)
+                echo "$PROG: takeaway: ${route:+--route '$route'}${assign:+--assign '$assign'} on $bead, whose merge_result is $anchor_mr. The merge cadence drives an anchor in that state, which rests unrouted and unassigned (lifecycle.toml detached_states), and work on its branch goes to a child (the prs skill), so it is not sent to a pool or an agent. Re-run with --release alone, which still lands the headline and the release. Nothing was written." >&2
+                exit 2 ;;
+        esac
+    fi
 
     # A release that sends the bead on, to a pool or to a named agent, is a
     # placement, so its write lifts the bead's hold:mayor. Gas City serves no bead
@@ -1321,8 +1486,7 @@ cmd_takeaway() {
     # reach nobody while the label stood.
     hold_sp=""
     if [ -n "$release_park" ] && [ -n "$route$assign" ]; then
-        hold_sp=$(hold_spellings "$(printf '%s' "$anchor_json" \
-            | jq -c --arg b "$bead" '[ .[]? | objects | select((.id // "") == $b) ] | first // empty' 2>/dev/null)")
+        hold_sp=$(hold_spellings "$anchor_row")
     fi
 
     # A park for a person states its disposition, UNLESS the bead is already held
@@ -1362,55 +1526,6 @@ cmd_takeaway() {
         fi
     fi
 
-    # A pool route promises a claim some session can perform. A bead blocked by
-    # anything other than a human gate has its method somewhere else: no pool
-    # can see it until the blocker closes, and by then it is a record of work
-    # that already happened, so each session that claims it re-derives that and
-    # drains. A human gate is the one blocker that leaves the route honest,
-    # because answering it is what makes this bead the work. The gate's own
-    # fields tell it apart ($HUMAN_GATE_JQ's human_gate), not its shape.
-    # Refused before the write, so a re-run without --route still lands the
-    # headline, and the route is all the refusal costs: the board gathers a
-    # parked row on gc.takeaway and bands it disposition-due once its waits have
-    # all closed, so the operator is asked either way. An unreadable probe
-    # allows the route and says so. A store that will not answer must not cost
-    # a sitting its disposition, but a route stamped over an uninspected bead is
-    # a weaker promise than one the guard cleared, and in silence the two read
-    # alike. The blockers are the bead's own pending waits (helm_pending), so a
-    # wait onto a bead in another store holds nothing here, as the store judges
-    # it. A closed anchor is not this
-    # refusal's case: its route is refused below on the disposition itself,
-    # after the headline and the run's end a folded anchor still needs have
-    # landed. An --assign takes the same guard, since a named agent offered a
-    # bead whose work sits on a blocker has nothing to perform either, unless
-    # the call names its waits with --waiting-on: the agent's hook offers the
-    # bead only once bd reports it ready, so the named waits gate the hand-off.
-    dest=""; dest_flag=""
-    if [ -n "$route" ]; then dest="$route"; dest_flag="--route"
-    elif [ -n "$assign" ] && [ -z "$waiting_ids" ]; then dest="$assign"; dest_flag="--assign"; fi
-    if [ -n "$dest" ] && [ -n "$release_park" ]; then
-        probe_read=1
-        need_human_gate_jq
-        blocked_by=""
-        if route_pending=$(helm_pending "$bead" "$db"); then
-            blocked_by=$(printf '%s' "$route_pending" | jq -r "$HUMAN_GATE_JQ"'[ .[] | select(human_gate | not) | .id ] | join(" ")' 2>/dev/null) || probe_read=""
-        else
-            probe_read=""
-        fi
-        if [ -z "$probe_read" ]; then
-            blocked_by=""
-            echo "$PROG: takeaway: could not read the blockers on $bead ('gctk bead holds' could not answer it), so $dest_flag '$dest' goes UNCHECKED. If this bead's work is really on a blocker, it reaches '$dest' with no method to perform once that blocker closes. Re-run with --release alone to leave it at rest, or re-run this call once the store answers." >&2
-        fi
-        if [ -n "$blocked_by" ] && [ "$dest_flag" = "--route" ]; then
-            echo "$PROG: takeaway: --route '$route' on $bead, which is blocked by $blocked_by. None of those is a human gate on $bead, so the work is on them and this bead has no method a pool can perform: routed, it waits for them to close and is then offered to '$route' forever. Re-run with --release alone, which still lands the headline and the release and leaves the bead at rest. A bead that should reach a pool once its blocker clears is first-reaction-dispose.sh --disposition blocked --then-route '$route', which routes on the unblock instead of now." >&2
-            exit 2
-        fi
-        if [ -n "$blocked_by" ]; then
-            echo "$PROG: takeaway: --assign '$assign' on $bead, which is blocked by $blocked_by. None of those is a human gate on $bead, so the work is on them: assigned, $bead reaches '$assign' once they close, as a record of work that already happened. Re-run with --release alone, which still lands the headline and the release and leaves the bead at rest. A bead that should reach '$assign' once its blocker clears names that wait: first-reaction-dispose.sh --disposition blocked --then-assign '$assign'." >&2
-            exit 2
-        fi
-    fi
-
     # Partition --waiting-on into the waits a pool still owes and the LANDED
     # riders. A landed rider both rode <bead>'s OWN branch and has already put
     # its work there, so <bead>'s own merge is what carries it
@@ -1429,9 +1544,14 @@ cmd_takeaway() {
     # all of them, so no_wait is set and the headline stamps gc.takeaway_settled
     # the same way --no-wait does — which keeps doctor/check-wait-is-an-edge (I1)
     # satisfied without an edge to a wait that is not there.
+    # A --route also notes each owed wait that is neither closed nor a human
+    # gate, for the blocker guard below: a wait the call names holds the bead as
+    # an edge it already carries does. A wait whose row does not read is noted
+    # too, since nothing shows it closed or a gate.
     if [ -n "$waiting_ids" ]; then
         subj_branch=$(meta_now "$bead" branch)
         have_real=""
+        [ -z "$route" ] || [ -z "$release_park" ] || need_human_gate_jq
         for _w in $waiting_ids; do
             [ -n "$_w" ] || continue
             if [ "$_w" = "$bead" ]; then
@@ -1461,9 +1581,93 @@ cmd_takeaway() {
                 continue
             fi
             real_waits="$real_waits $_w"; have_real=1
+            if [ -n "$route" ] && [ -n "$release_park" ] && [ "$_wstatus" != closed ]; then
+                if [ -z "$_wstatus" ]; then
+                    route_waits="$route_waits $_w"; route_unread="$route_unread $_w"
+                elif ! printf '%s' "$_wrow" | jq -e "$HUMAN_GATE_JQ"'.[0] | human_gate' >/dev/null 2>&1; then
+                    route_waits="$route_waits $_w"
+                fi
+            fi
         done
         if [ -n "$skipped_riders" ] && [ -z "$have_real" ]; then no_wait=1; fi
     fi
+
+    # A pool route promises a claim some session can perform. A bead blocked by
+    # anything other than a human gate has its method somewhere else: no pool
+    # can see it until the blocker closes, and by then it is a record of work
+    # that already happened, so each session that claims it re-derives that and
+    # drains. A human gate is the one blocker that leaves the route honest,
+    # because answering it is what makes this bead the work. The gate's own
+    # fields tell it apart ($HUMAN_GATE_JQ's human_gate), not its shape.
+    # Refused before the write, so a re-run without --route still lands the
+    # headline, and the route is all the refusal costs: the board gathers a
+    # parked row on gc.takeaway and bands it disposition-due once its waits have
+    # all closed, so the operator is asked either way. An unreadable probe
+    # allows the route and says so. A store that will not answer must not cost
+    # a sitting its disposition, but a route stamped over an uninspected bead is
+    # a weaker promise than one the guard cleared, and in silence the two read
+    # alike. The blockers are the bead's own pending waits (helm_pending), so a
+    # wait onto a bead in another store holds nothing here, as the store judges
+    # it. A closed anchor is not this
+    # refusal's case: its route is refused below on the disposition itself,
+    # after the headline and the run's end a folded anchor still needs have
+    # landed. An --assign takes the same guard, since a named agent offered a
+    # bead whose work sits on a blocker has nothing to perform either, unless
+    # the call names its waits with --waiting-on: the agent's hook offers the
+    # bead only once bd reports it ready, so the named waits gate the hand-off.
+    # A --route counts the waits its own --waiting-on names beside the edges the
+    # bead already carries, because the edges are written only after the
+    # release, and a wait named in the same call would otherwise pass the guard
+    # and leave the bead routed while it waits on work.
+    dest=""; dest_flag=""
+    if [ -n "$route" ]; then dest="$route"; dest_flag="--route"
+    elif [ -n "$assign" ] && [ -z "$waiting_ids" ]; then dest="$assign"; dest_flag="--assign"; fi
+    if [ -n "$dest" ] && [ -n "$release_park" ]; then
+        probe_read=1
+        need_human_gate_jq
+        blocked_by=""
+        if route_pending=$(helm_pending "$bead" "$db"); then
+            blocked_by=$(printf '%s' "$route_pending" | jq -r "$HUMAN_GATE_JQ"'[ .[] | select(human_gate | not) | .id ] | join(" ")' 2>/dev/null) || probe_read=""
+        else
+            probe_read=""
+        fi
+        if [ -z "$probe_read" ]; then
+            blocked_by=""
+            echo "$PROG: takeaway: could not read the blockers on $bead ('gctk bead holds' could not answer it), so $dest_flag '$dest' goes UNCHECKED. If this bead's work is really on a blocker, it reaches '$dest' with no method to perform once that blocker closes. Re-run with --release alone to leave it at rest, or re-run this call once the store answers." >&2
+        fi
+        if [ -n "$blocked_by$route_waits" ] && [ "$dest_flag" = "--route" ]; then
+            _rerun="Re-run with --release alone, which still lands the headline and the release and leaves the bead at rest."
+            [ -z "$route_waits" ] || _rerun="Re-run without --route, which still lands the headline, the release and the waits, and leaves the bead at rest."
+            echo "$PROG: takeaway: --route '$route' on $bead, ${blocked_by:+which is blocked by $blocked_by}${blocked_by:+${route_waits:+, and }}${route_waits:+whose --waiting-on names$route_waits}. None of those is a human gate on $bead, so the work is on them and this bead has no method a pool can perform: routed, it waits for them to close and is then offered to '$route' forever.${route_unread:+ The row of$route_unread did not read, so nothing shows it closed or a human gate.} $_rerun A bead that should reach a pool once its blocker clears is first-reaction-dispose.sh --disposition blocked --then-route '$route', which routes on the unblock instead of now." >&2
+            exit 2
+        fi
+        if [ -n "$blocked_by" ]; then
+            echo "$PROG: takeaway: --assign '$assign' on $bead, which is blocked by $blocked_by. None of those is a human gate on $bead, so the work is on them: assigned, $bead reaches '$assign' once they close, as a record of work that already happened. Re-run with --release alone, which still lands the headline and the release and leaves the bead at rest. A bead that should reach '$assign' once its blocker clears names that wait: first-reaction-dispose.sh --disposition blocked --then-assign '$assign'." >&2
+            exit 2
+        fi
+    fi
+
+    # >>> takeaway-release-claim
+    # A claim another session holds is released only once its holder is shown
+    # gone (the header says why). bd's claim statuses are in_progress and hooked.
+    # claim_kept names the holder of a claim this release keeps, claim_sessions
+    # the ids `gc session list` lists it under, and claim_unread marks a list that
+    # did not read. Read after every refusal above, so a refused call reads no
+    # session list.
+    claim_kept=""; claim_sessions=""; claim_unread=""
+    if [ -n "$release_park" ] && [ -n "$anchor_assignee" ]; then
+        case "$anchor_status" in
+            in_progress|hooked)
+                if ! claim_is_mine "$anchor_assignee"; then
+                    if claim_sessions=$(holder_sessions "$anchor_assignee"); then
+                        [ -z "$claim_sessions" ] || claim_kept="$anchor_assignee"
+                    else
+                        claim_sessions=""; claim_kept="$anchor_assignee"; claim_unread=1
+                    fi
+                fi ;;
+        esac
+    fi
+    # <<< takeaway-release-claim
 
     # Build args with `set --` ($text/$by contain spaces); --release rides the
     # SAME update so stamp + release stay one Dolt write.
@@ -1473,14 +1677,15 @@ cmd_takeaway() {
                --set-metadata "gc.takeaway_at=$takeaway_at" \
                --set-metadata "gc.takeaway_by=$by" \
                --set-metadata "gc.takeaway_settled=$no_wait"
-    # --release retires the pour's routing on the anchor: gc.routed_to takes the
-    # new route (empty when none) and gc.execution_routed_to — the stamp a pour
-    # leaves naming the pool it dispatched to — is dropped. That stamp is
-    # execution provenance, not a live dispatch path: deferred-dispatch's reconcile
-    # keys idempotency on its own gc.dispatch_when_ready_slung marker, and arm
-    # refuses on a live route (gc.routed_to) or that marker, so neither reads
-    # gc.execution_routed_to. No queue reads it either, a held bead's included,
-    # since a hold is its label. The release drops it.
+    # The park writes no route: it clears gc.routed_to, and a --route sends the
+    # bead on only through gc sling, once its run has ended. It also drops
+    # gc.execution_routed_to, the stamp a pour leaves naming the pool it
+    # dispatched to. That stamp is execution provenance, not a live dispatch
+    # path: deferred-dispatch's reconcile keys idempotency on its own
+    # gc.dispatch_when_ready_slung marker, and arm refuses on a live route
+    # (gc.routed_to) or that marker, so neither reads gc.execution_routed_to. No
+    # queue reads it either, a held bead's included, since a hold is its label.
+    # The release drops it.
     #
     # The park unassigns the bead, or assigns it to the --assign agent, so the
     # identity the last executor stamped goes with the old assignee:
@@ -1492,24 +1697,58 @@ cmd_takeaway() {
     # stale pin the runtime's orphan recovery resolves an owner from. Every pair
     # rides the one update, which bd applies as one atomic operation, so the
     # pairs land together or not at all.
-    [ -n "$release_park" ] && set -- "$@" --status=open --assignee="$assign" \
-               --set-metadata "gc.routed_to=$route" --unset-metadata gc.execution_routed_to \
+    #
+    # The guards are the status and the assignee the release read, so a close or
+    # a claim that lands after that read refuses the whole write. They name a
+    # claim's holder only once it is shown gone, above. A claim this release
+    # keeps takes the headline alone.
+    if [ -n "$release_park" ] && [ -z "$claim_kept" ]; then
+        set -- "$@" --if-status="$anchor_status" --if-assignee="$anchor_assignee" \
+               --status=open --assignee="$assign" \
+               --set-metadata "gc.routed_to=" --unset-metadata gc.execution_routed_to \
                --unset-metadata gc.session_name --unset-metadata gc.session_id
-    if [ -n "$hold_sp" ]; then
-        while IFS= read -r _hs; do
-            [ -z "$_hs" ] || set -- "$@" --remove-label "$_hs"
-        done <<EOF
+        if [ -n "$hold_sp" ]; then
+            while IFS= read -r _hs; do
+                [ -z "$_hs" ] || set -- "$@" --remove-label "$_hs"
+            done <<EOF
 $hold_sp
 EOF
+        fi
     fi
     # What follows a zero exit cannot be taken back: the run's end below, and
     # the close a caller makes on it, as when first-reaction-dispose.sh closes
     # its reaction or converse-signoff.sh resolves gates and closes the
     # conversation. So a refused update ends the verb here, with no wait edge
     # and no run's end, and a re-run writes the whole update again.
-    _tk_err=""
+    _tk_rc=0; _tk_err=""
     # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
-    if ! _tk_err=$(gc bd update "$bead" ${db:+--db "$db"} "$@" 2>&1 >/dev/null); then
+    _tk_err=$(gc bd update "$bead" ${db:+--db "$db"} "$@" 2>&1 >/dev/null) || _tk_rc=$?
+    # Exit 13 is the guard's refusal: the bead changed after the release read it.
+    # A bead closed since keeps that disposition and takes the closed anchor's
+    # path, the headline and the run's end. Any other change leaves the bead
+    # with whoever holds it now, and nothing more is written.
+    if [ "$_tk_rc" -eq 13 ] && [ -n "$release_park" ] && [ -z "$claim_kept" ]; then
+        _now_row=$(row_now "$bead")
+        _now_status=$(printf '%s' "$_now_row" | jq -r '(.status // "") | tostring' 2>/dev/null || true)
+        if [ "$_now_status" != closed ]; then
+            [ -z "$_tk_err" ] || printf '%s\n' "$_tk_err" >&2
+            _now_assignee=$(printf '%s' "$_now_row" | jq -r '(.assignee // "") | tostring' 2>/dev/null || true)
+            if [ -n "$_now_status" ]; then _now="now shows status $_now_status${_now_assignee:+ under $_now_assignee}"
+            else _now="could not be read again"; fi
+            echo "$PROG: takeaway: $bead changed after the release read it, so bd refused its guarded write and nothing was written: it showed status $anchor_status${anchor_assignee:+ under $anchor_assignee}, and $_now. The release takes it from no one who holds it now, so no wait was wired and no run was ended. Re-run to decide again on what it shows now." >&2
+            exit 4
+        fi
+        release_park=""; hold_sp=""
+        takeaway_closed_skip "$bead" "closed after the release read it"
+        set -- --set-metadata "gc.takeaway=$text" \
+               --set-metadata "gc.takeaway_at=$takeaway_at" \
+               --set-metadata "gc.takeaway_by=$by" \
+               --set-metadata "gc.takeaway_settled=$no_wait"
+        _tk_rc=0; _tk_err=""
+        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+        _tk_err=$(gc bd update "$bead" ${db:+--db "$db"} "$@" 2>&1 >/dev/null) || _tk_rc=$?
+    fi
+    if [ "$_tk_rc" -ne 0 ]; then
         [ -z "$_tk_err" ] || printf '%s\n' "$_tk_err" >&2
         echo "$PROG: takeaway: could not update '$bead' (does it exist in rig '${path:-?}'?)" >&2
         exit 4
@@ -1540,6 +1779,19 @@ EOF
     if [ -n "$release" ]; then
         cancel_release_molecules "$bead" "$db" || cancel_missed=1
     fi
+    # A claim kept for a live holder: the headline and the waits are written, and
+    # what is left is the holder's own stop, which only the holder can make. The
+    # holder is asked for it, and the exit names the holder, so no caller reads
+    # the bead as released.
+    if [ -n "$claim_kept" ]; then
+        _tn_hit=$(takeaway_nudge_holder "$bead" "$claim_kept" "$claim_sessions" "$text") || _tn_hit=""
+        if [ -n "$claim_unread" ]; then _why="'gc session list' could not be read, so nothing shows that holder gone"
+        else _why="'gc session list' still lists that holder ($(printf '%s' "$claim_sessions" | tr '\n' ' ' | sed 's/ *$//'))"; fi
+        if [ -n "$_tn_hit" ]; then _asked="$claim_kept was nudged ($_tn_hit) to stop and give the bead back"
+        else _asked="The nudge to $claim_kept did not land, so ask it to stop and give the bead back"; fi
+        echo "$PROG: takeaway: $bead is $anchor_status under $claim_kept, and $_why, so its claim was kept: a release takes no live claim, and nothing in Gas City stops a session that holds a bare bead. The headline${real_waits:+ and the waits} are written, but $bead was not released${route:+ to $route}${assign:+ to $assign}. $_asked. A stop that must hold even if $claim_kept dies first waits on a human gate (--waiting-on <gate>). Once the bead is given back, re-run this call." >&2
+        exit 4
+    fi
     # Named, with its repair, by the helper. Nothing retries a cancel that did not
     # land, so a zero exit here would read as a run ended when it still runs.
     if [ -n "$cancel_missed" ]; then
@@ -1559,6 +1811,20 @@ EOF
     fi
     if [ -n "$edge_missed" ]; then
         exit 4
+    fi
+    # The bead is parked and its run has ended, so a --route sends it to the pool
+    # now, through gc sling: a raw route, which pours nothing and files no
+    # convoy. A wait that did not wire, or a run that did not end, stopped the
+    # verb above, so no pool is offered a bead it was asked to hold or a bead a
+    # run still works. A sling that fails leaves the bead at rest.
+    if [ -n "$route" ]; then
+        _sl_rc=0
+        _sl_out=$(gc sling "$route" "$bead" --no-formula --no-convoy 2>&1 </dev/null) || _sl_rc=$?
+        if [ "$_sl_rc" -ne 0 ]; then
+            [ -z "$_sl_out" ] || printf '%s\n' "$_sl_out" >&2
+            echo "$PROG: takeaway: $bead is released and the run beneath it has ended, but gc sling did not route it to '$route' (exit $_sl_rc, its reason above), so it rests open, unassigned and routed to no pool. Route it once the cause is fixed: gc sling $route $bead --no-formula --no-convoy" >&2
+            exit 4
+        fi
     fi
     rel_note=""
     if [ -n "$release" ]; then
@@ -2277,24 +2543,105 @@ verify_subject() {
 }
 
 # ── Conversations: the bead a call is about, and the reply onto a gate ──
+# words_and <word>... — the words as a sentence lists them: "a", "a and b",
+# "a, b and c".
+words_and() {
+    case $# in
+        0) return 0 ;;
+        1) printf '%s' "$1" ;;
+        *) _wa_out="$1"; shift
+           while [ $# -gt 1 ]; do _wa_out="$_wa_out, $1"; shift; done
+           printf '%s and %s' "$_wa_out" "$1" ;;
+    esac
+}
+
+# gate_pick <gate> <bead>... — of the open beads that wait on the gate, the one
+# a conversation about the gate is about: the bead whose blocks edge onto the
+# gate is oldest, then the lowest id. An edge's age never changes, so the pick
+# stays on that bead while it waits, and the question engaged again finds the
+# conversation filed there. A priority can change between two engages, and a
+# pick that followed it would move to a bead with no conversation and file a
+# second one for the same question. `gc bd gate create --blocks` writes a gate
+# with its first edge, so the oldest edge is normally the bead the question was
+# asked about. A `gc bd list` row carries each of its edges with the edge's own
+# created_at, which the `gc bd dep list` rows gate_waiters reads leave out, so
+# the beads' own rows are read, in one listing. Returns 1 when that read did not
+# answer, or answered without a bead's row.
+gate_pick() {
+    _gp_gate="$1"; shift
+    _gp_ids=$(printf '%s,' "$@"); _gp_ids="${_gp_ids%,}"
+    _gp_rows=$(bd_rows list --id "$_gp_ids" --all --limit 0) || return 1
+    printf '%s' "$_gp_rows" | jq -er --arg g "$_gp_gate" --arg ids "$_gp_ids" '
+        ($ids | split(",")) as $want
+        | [ .[] | objects | select(((.id // "") | tostring) as $i | any($want[]; . == $i)) ] as $rows
+        | if ([ $rows[] | .id | tostring ] | unique) != ($want | unique) then error("a bead did not read") else . end
+        | [ $rows[]
+            | {id: (.id | tostring),
+               at: ([ (.dependencies // [])[]? | objects
+                      | select(((.depends_on_id // "") | tostring) == $g
+                               and (((.type // .dependency_type) // "") | tostring) == "blocks")
+                      | (.created_at // "") | tostring | select(. != "") ] | min // "")} ]
+        | sort_by((.at == ""), .at, .id) | first | .id' 2>/dev/null
+}
+
+# gate_others_line — the sentence a conversation that answers a gate several
+# open beads wait on carries about the other beads (TAKE_OTHERS), so its sitting
+# sees each bead the answer reaches. Empty when the conversation answers no gate
+# or the gate holds no other bead. The sentence rides in the conversation's
+# notes and never in its ask: the beads waiting on a gate change while the
+# question stays the same, and the ask is what a run again matches the
+# conversation by.
+gate_others_line() {
+    [ -n "$TAKE_GATE" ] && [ -n "$TAKE_OTHERS" ] || return 0
+    # shellcheck disable=SC2086  # one word per bead
+    set -- $TAKE_OTHERS
+    _gol_waits="wait"; [ $# -gt 1 ] || _gol_waits="waits"
+    printf 'Gate %s also holds %s, which %s on the same answer.' "$TAKE_GATE" "$(words_and "$@")" "$_gol_waits"
+}
+
+# conversation_carries <row> <text> — 0 iff the conversation's row, a row_now
+# answer, holds the text in its ask or its notes. A row that did not read holds
+# nothing.
+conversation_carries() {
+    printf '%s' "$1" | jq -e --arg n "$2" '((.description // "") + "\n" + (.notes // "")) | contains($n)' >/dev/null 2>&1
+}
+
+# conversation_note_others <verb> <conversation> <sentence> <gate> — give a
+# conversation that open or engage lands on, and did not file this run, the
+# sentence naming the other open beads the gate holds now (gate_others_line) as
+# a note, unless it carries that sentence already, so its sitting sees each bead
+# the answer reaches. A row that does not read proves nothing, so the note is
+# written. The conversation's reply onto the gate names the gate to its sitting,
+# so a note the store refuses costs a warning.
+conversation_note_others() {
+    [ -n "$3" ] || return 0
+    conversation_carries "$(row_now "$2")" "$3" && return 0
+    gc bd update "$2" --append-notes "$3" >/dev/null 2>&1 \
+        || echo "$PROG: $1: warning: the store refused the note on conversation $2 naming the other beads gate $4 holds; they are listed by: gc bd dep list $4 --direction=up --type blocks" >&2
+    return 0
+}
+
 # take_bead <verb> <nothing-msg> [<from>] — settle which bead a conversation is about,
 # from the verified row verify_subject left in VS_ROW: the bead itself, the
-# subject a conversation id tracks, or, for a gate, the one bead still waiting
-# on it, since a conversation always tracks a bead and never a gate. Sets
-# TAKE_BEAD (that bead), TAKE_GATE (the human gate the id named, which the
-# conversation replies to) and TAKE_CONV (the conversation the id named). A gate
-# several open beads wait on takes <from>, the bead the caller reached it from,
-# when it is one of them. A <from> that waits on the gate only through another
-# bead, such as its rework, takes the gate as it is without <from>, and one the
-# gate no longer holds (holding_rows) is refused. Otherwise a gate several open
-# beads wait on is refused, naming them, so the
-# operator names the one they mean, and so is a gate nothing waits on, naming the
-# beads it was about, because a sitting there would answer an ask that holds
-# nothing. A refusal or a read that did not answer exits 4 with <nothing-msg>.
-TAKE_BEAD=""; TAKE_GATE=""; TAKE_CONV=""
+# subject a conversation id tracks, or, for a gate, a bead still waiting on it,
+# since a conversation always tracks a bead and never a gate. Sets TAKE_BEAD
+# (that bead), TAKE_GATE (the human gate the id named, which the conversation
+# replies to), TAKE_CONV (the conversation the id named), TAKE_OTHERS (the other
+# open beads the gate holds, sorted) and TAKE_PICKED (1 when gate_pick chose
+# the bead). A gate several open beads wait on takes <from>, the bead the caller
+# reached it from, when it is one of them. A <from> that waits on the gate only
+# through another bead, such as its rework, takes the gate as it is without
+# <from>, and one the gate no longer holds (holding_rows) is refused. Otherwise
+# open, engage and conversations take the bead gate_pick names, and accept,
+# dismiss and handback refuse the gate, naming the beads, so the operator names
+# the one they mean, because a pick there would act on a bead nobody named. A
+# gate nothing waits on is refused, naming the beads it was about, because a
+# sitting there would answer an ask that holds nothing. A refusal or a read that
+# did not answer exits 4 with <nothing-msg>.
+TAKE_BEAD=""; TAKE_GATE=""; TAKE_CONV=""; TAKE_OTHERS=""; TAKE_PICKED=""
 take_bead() {
     _tb_verb="$1"; _tb_nothing="$2"; _tb_from="${3:-}"
-    TAKE_BEAD=""; TAKE_GATE=""; TAKE_CONV=""
+    TAKE_BEAD=""; TAKE_GATE=""; TAKE_CONV=""; TAKE_OTHERS=""; TAKE_PICKED=""
     # A `gc bd show` row spells an edge {dependency_type, id}; the shape rule
     # reads the `gc bd list` spelling {type, depends_on_id}, so the row is
     # respelled before conversation.sh's rule reads it.
@@ -2313,9 +2660,10 @@ take_bead() {
             fi
             _tb_open=$(printf '%s' "$_tb_waiters" | jq -r '[ .[] | select(((.status // "open") | tostring | ascii_downcase) != "closed") | .id // empty ] | join(" ")')
             _tb_closed=$(printf '%s' "$_tb_waiters" | jq -r '[ .[] | select(((.status // "open") | tostring | ascii_downcase) == "closed") | .id // empty ] | join(" ")')
+            _tb_take=""
             if [ -n "$_tb_from" ]; then
                 case " $_tb_open " in
-                    *" $_tb_from "*) _tb_open="$_tb_from" ;;
+                    *" $_tb_from "*) _tb_take="$_tb_from" ;;
                     *)  # <from> does not wait on the gate itself. One that
                         # waited and has closed is not held by it. Any other is
                         # held only through another bead, when the read a list
@@ -2340,17 +2688,26 @@ take_bead() {
             # shellcheck disable=SC2086  # split the ids into positional parameters to count them
             set -- $_tb_open
             case $# in
-                1)  TAKE_BEAD="$1"
-                    [ "${_tb_kind#gate"$TAB"}" = human ] && TAKE_GATE="$_tb_id" ;;
                 0)  echo "$PROG: $_tb_verb: nothing waits on gate $_tb_id${_tb_closed:+ (it was about $_tb_closed, now closed)}, so there is no bead for a conversation to be about. Clear the gate instead: gc bd gate resolve $_tb_id --reason \"moot: <why nothing waits on it>\". $_tb_nothing" >&2
                     exit 4 ;;
-                *)  _tb_name="$PROG $_tb_verb <bead>"
-                    case "$_tb_verb" in
-                        open|engage|conversations) _tb_name="$PROG $_tb_verb $_tb_id --from <bead>" ;;
-                    esac
-                    echo "$PROG: $_tb_verb: gate $_tb_id is about $# beads still waiting on it ($_tb_open), and a conversation is about one bead.${_tb_from:+ $_tb_from is not one of them.} Name the one you mean: $_tb_name. $_tb_nothing" >&2
-                    exit 4 ;;
-            esac ;;
+                1)  _tb_take="$1" ;;
+                *)  if [ -z "$_tb_take" ]; then
+                        case "$_tb_verb" in
+                            open|engage|conversations)
+                                if ! _tb_take=$(gate_pick "$_tb_id" "$@"); then
+                                    echo "$PROG: $_tb_verb: gate $_tb_id holds $# beads ($_tb_open), and when each began waiting on it could not be read ('gc bd list --id' of them did not answer), so which one a conversation is about cannot be told. $_tb_nothing" >&2
+                                    exit 4
+                                fi
+                                TAKE_PICKED=1 ;;
+                            *)  echo "$PROG: $_tb_verb: gate $_tb_id is about $# beads still waiting on it ($_tb_open), and a conversation is about one bead. Name the one you mean: $PROG $_tb_verb <bead>. $_tb_nothing" >&2
+                                exit 4 ;;
+                        esac
+                    fi
+                    TAKE_OTHERS=$(printf '%s\n' "$@" | grep -vxF -e "$_tb_take" | LC_ALL=C sort | tr '\n' ' ')
+                    TAKE_OTHERS="${TAKE_OTHERS% }" ;;
+            esac
+            TAKE_BEAD="$_tb_take"
+            [ "${_tb_kind#gate"$TAB"}" = human ] && TAKE_GATE="$_tb_id" ;;
         conversation"$TAB"*)
             TAKE_BEAD="${_tb_kind#conversation"$TAB"}"; TAKE_CONV="$_tb_id" ;;
         *)
@@ -2466,40 +2823,54 @@ open_edges() {
     return "$_oe_rc"
 }
 
-# open_join <conversation> — join open's concern ($join_note, empty for none)
-# to a conversation waiting in the operator's queue, assigned to `human` and
-# open, which is where a sitting claims it and reads its notes. The note is
-# appended once, in a write guarded on that queue state, so a conversation a
-# sitting took or a dismiss closed after open's listing takes no note, and the
-# write's exit says whether the note landed. The conversation then takes the
-# hold on an open PR's merge and the reply onto a pointed gate (open_edges). The
-# row is then read to tell that it still waits in the queue. Returns 0 once it
-# does; 1 when the conversation is no longer in the queue, so it cannot receive
-# the concern and the caller moves on to the next one; and 2 when a write or
-# that read failed, which it says on stderr.
+# open_join <conversation> — join open's concern ($join_concern, empty for none)
+# and the sentence naming the other open beads the gate holds ($open_others,
+# empty for none) to a conversation waiting in the operator's queue, assigned to
+# `human` and open, which is where a sitting claims it and reads its notes. What
+# the conversation does not carry yet is appended in one note, in a write
+# guarded on that queue state, so a conversation a sitting took or a dismiss
+# closed after open's listing takes no note, and the write's exit says whether
+# the note landed. The conversation then takes the hold on an open PR's merge
+# and the reply onto a pointed gate (open_edges). The row is then read to tell
+# that it still waits in the queue. Returns 0 once it does; 1 when the
+# conversation is no longer in the queue, so it cannot receive the note and the
+# caller moves on to the next one; and 2 when a write or that read failed,
+# which it says on stderr.
 open_join() {
-    _oj_c="$1"; _oj_ask="${open_body:-$open_reason}"
-    # $1 is a row_now answer: a row in the queue carries the concern when it is
-    # the conversation's own ask or a note an earlier join appended.
+    _oj_c="$1"; _oj_ask="${open_body:-$open_reason}"; _oj_note=""
     _oj_queued='((.assignee // "") | tostring) == "human" and ((.status // "") | tostring | ascii_downcase) == "open"'
-    _oj_carries='((.description // "") == $ask) or ((.notes // "") | contains($n))'
-    if [ -n "$join_note" ]; then
+    if [ -n "$join_concern$open_others" ]; then
         _oj_row=$(row_now "$_oj_c")
         if [ -n "$_oj_row" ] && ! printf '%s' "$_oj_row" | jq -e "$_oj_queued" >/dev/null 2>&1; then
             return 1
         fi
-        # A concern the conversation already carries is no second concern, so
-        # nothing is written for it. A caller that asks again on every pass
-        # while its condition stands, as deferred dispatch's capped arm does,
-        # would otherwise grow the notes by a copy a pass. A row that does not
-        # read proves nothing, so the guarded write decides.
-        if [ -z "$_oj_row" ] || ! printf '%s' "$_oj_row" | jq -e --arg ask "$_oj_ask" --arg n "$join_note" "$_oj_carries" >/dev/null 2>&1; then
+        # The concern and the sentence are each written unless the
+        # conversation carries it already, and each is checked on its own: the
+        # concern is carried when it is the conversation's own ask or a note an
+        # earlier join appended, and the sentence when the conversation holds
+        # it (conversation_carries). So a conversation whose ask is this very
+        # question still takes the beads the gate holds, and a caller that asks
+        # again on every pass while its condition stands, as deferred
+        # dispatch's capped arm does, does not grow the notes by a copy a pass.
+        # A row that does not read proves nothing, so both are written and the
+        # guarded write decides.
+        _oj_what="the note naming the other beads gate $TAKE_GATE holds"
+        if [ -n "$join_concern" ] && ! printf '%s' "$_oj_row" | jq -e --arg ask "$_oj_ask" --arg n "$join_concern" \
+                '((.description // "") == $ask) or ((.notes // "") | contains($n))' >/dev/null 2>&1; then
+            _oj_note="$join_concern"; _oj_what="the new concern"
+        fi
+        if [ -n "$open_others" ] && ! conversation_carries "$_oj_row" "$open_others"; then
+            _oj_note="${_oj_note:+$_oj_note
+
+}$open_others"
+        fi
+        if [ -n "$_oj_note" ]; then
             _oj_rc=0
-            gc bd update "$_oj_c" --if-assignee human --if-status open --append-notes "$join_note" >/dev/null 2>&1 || _oj_rc=$?
+            gc bd update "$_oj_c" --if-assignee human --if-status open --append-notes "$_oj_note" >/dev/null 2>&1 || _oj_rc=$?
             case "$_oj_rc" in
                 0) ;;
                 13) return 1 ;;
-                *) echo "$PROG: open: could not append the new concern to conversation $_oj_c's notes (gc bd update exited $_oj_rc), so it did not join and nothing records it. Re-run once the store answers: $PROG open $bead" >&2
+                *) echo "$PROG: open: could not append $_oj_what to conversation $_oj_c's notes (gc bd update exited $_oj_rc), so it did not join and nothing records it. Re-run once the store answers: $PROG open $bead" >&2
                    return 2 ;;
             esac
         fi
@@ -2507,7 +2878,7 @@ open_join() {
     open_edges "$_oj_c" "waits in the queue for $bead" || return 2
     _oj_back=$(row_now "$_oj_c")
     if [ -z "$_oj_back" ]; then
-        echo "$PROG: open: conversation $_oj_c could not be read after open joined it, so whether it still waits in the queue${join_note:+ carrying the new concern} cannot be told. Re-run once the store answers: $PROG open $bead" >&2
+        echo "$PROG: open: conversation $_oj_c could not be read after open joined it, so whether it still waits in the queue${_oj_note:+ carrying the note open appended} cannot be told. Re-run once the store answers: $PROG open $bead" >&2
         return 2
     fi
     printf '%s' "$_oj_back" | jq -e "$_oj_queued" >/dev/null 2>&1 || return 1
@@ -2518,8 +2889,13 @@ open_join() {
 # File a CONVERSATION about the bead in the operator's queue: an ordinary task
 # that tracks the bead, assigned to `human`, holding no session until the
 # operator engages it. The bead must RESOLVE first so a typo cannot manufacture
-# one. A human gate names the one bead still waiting on it, and the
-# conversation replies to that gate. Without --allow-duplicate, a concern on a
+# one. A human gate names a bead still waiting on it, and the conversation
+# replies to that gate. Of several open beads waiting, it names the one --from
+# names, or else the one that has waited longest (gate_pick), and a note on the
+# conversation names the others, filed with a conversation open files and
+# appended once to one it lands on, so its sitting sees each bead the answer
+# reaches. With no --reason or --body, the ask is what the gate asks.
+# Without --allow-duplicate, a concern on a
 # bead whose conversation already waits in the queue joins it (open_join): the
 # reason and body are appended to that task's notes, once, so a concern the
 # conversation already carries writes nothing. One that leaves the queue
@@ -2663,11 +3039,19 @@ cmd_open() {
     # >>> open-subject-exists
     verify_subject "$bead" open "No conversation filed." || exit $?
     # <<< open-subject-exists
-    # A gate or a conversation id names the bead the conversation is about.
+    # A gate or a conversation id names the bead the conversation is about. A
+    # gate that holds other open beads as well has them named to the sitting,
+    # in a note on the conversation open files or lands on.
     take_bead open "No conversation filed." "${open_from:-$OPEN_GATE_FROM}"
+    open_others=$(gate_others_line)
     if [ "$TAKE_BEAD" != "$bead" ]; then
         open_what=gate; [ -n "$TAKE_CONV" ] && open_what=conversation
-        echo "$PROG: open: $bead is a $open_what about $TAKE_BEAD — the conversation is about $TAKE_BEAD" >&2
+        if [ -n "$TAKE_PICKED" ]; then
+            # shellcheck disable=SC2086  # one word per bead
+            echo "$PROG: open: $bead is a gate about $TAKE_BEAD and $(words_and $TAKE_OTHERS) — the conversation is about $TAKE_BEAD, which has waited on it longest" >&2
+        else
+            echo "$PROG: open: $bead is a $open_what about $TAKE_BEAD — the conversation is about $TAKE_BEAD" >&2
+        fi
         bead="$TAKE_BEAD"
         open_pin "$bead"
         verify_subject "$bead" open "No conversation filed." || exit $?
@@ -2720,11 +3104,11 @@ cmd_open() {
     # own, which is a distinct dialogue even when the bead has one. So does
     # --conversation, which names the conversation that holds the concern.
     if [ -z "$open_allow_dup" ] && [ -z "$open_conv" ]; then
-        join_note=""
+        join_concern=""
         if [ -n "$open_reason$open_body" ]; then
-            join_note="Another concern joined this conversation: ${open_reason:-$open_body}"
+            join_concern="Another concern joined this conversation: ${open_reason:-$open_body}"
             if [ -n "$open_reason" ] && [ -n "$open_body" ]; then
-                join_note="$join_note
+                join_concern="$join_concern
 
 $open_body"
             fi
@@ -2799,7 +3183,11 @@ $gate_desc}"
     # (skills/converse-hold), and a sitting that is helping the PR land lifts
     # it. So open adds the hold only to a conversation that its listing above
     # still finds in the queue, assigned to `human`, and open_sitting names the
-    # sitting that has the conversation otherwise.
+    # sitting that has the conversation otherwise. The ask holds the question
+    # alone (gate_others_line), so the match holds when the beads waiting on a
+    # gate have changed since the conversation was filed, and the conversation
+    # takes the sentence naming them as they stand now when it does not carry
+    # it (conversation_note_others).
     CONV=""; open_again=0
     if [ -n "$open_conv" ]; then
         _oc_row=$(printf '%s' "$open_convs" | jq -c --arg c "$open_conv" \
@@ -2825,8 +3213,9 @@ $gate_desc}"
 
     # File the conversation: a task that tracks the bead, in the operator's
     # queue (assigned to `human`), in one create, so no reader ever sees a task
-    # in this shape without its subject. The tracks edge is what makes the task
-    # a conversation about the bead, and the bead can sit in another store,
+    # in this shape without its subject, nor one on a shared gate without the
+    # note naming the other beads it holds. The tracks edge is what makes the
+    # task a conversation about the bead, and the bead can sit in another store,
     # where bd stores the edge without finding its target and the task's own
     # `gc bd list` row still carries it.
     # bd create answers an ARRAY (or bare object) carrying the id on success and
@@ -2834,7 +3223,7 @@ $gate_desc}"
     # error object never crashes jq.
     if [ "$open_again" = 0 ]; then
         CONV_RC=0
-        CONV_JSON=$(gc bd create -t task --title "$conv_title" -d "$conv_body" \
+        CONV_JSON=$(gc bd create -t task --title "$conv_title" -d "$conv_body" ${open_others:+--notes "$open_others"} \
             --deps "tracks:$bead" --assignee human --json 2>/dev/null) || CONV_RC=$?
         CONV=$(printf '%s' "$CONV_JSON" | scrub \
             | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null || true)
@@ -2858,6 +3247,7 @@ $gate_desc}"
     [ -z "$open_json" ] || jq -nc --arg s "$bead" --arg c "$CONV" '{subject: $s, conversation: $c, filed: true}'
     bust_cache
     open_edges "$CONV" "is filed on $bead" || exit 4
+    [ "$open_again" = 0 ] || conversation_note_others open "$CONV" "$open_others" "$TAKE_GATE"
 
     # One sentence reports a conversation that holds the concern, filed by this
     # open or by an earlier one, and it is the sentence helm-svc's board reads
@@ -4020,7 +4410,9 @@ sitting_refusal() {
 # engage_take <id> [<from>] — settle what the engage is about from a bead, a
 # conversation or a gate: sets bead and bead_row to the bead its conversation
 # tracks, pointed_gate to a gate the id named, which the conversation replies to,
-# and named_conv to a conversation it named. <from> is engage's --from, the bead
+# pointed_others to the sentence naming the other open beads that gate holds
+# (gate_others_line), and named_conv to a conversation it named. <from> is
+# engage's --from, the bead
 # the gate was reached from (take_bead). A conversation the id named is read
 # for its status here, before anything is filed, and a closed one goes to
 # engage_closed_conversation. A refusal exits.
@@ -4028,11 +4420,14 @@ engage_take() {
     bead="$1"; _et_conv_row=""
     verify_subject "$bead" engage "Nothing spawned." || exit $?
     take_bead engage "Nothing spawned." "${2:-}"
-    pointed_gate="$TAKE_GATE"; named_conv="$TAKE_CONV"
+    pointed_gate="$TAKE_GATE"; named_conv="$TAKE_CONV"; pointed_others=$(gate_others_line)
     if [ "$TAKE_BEAD" != "$bead" ]; then
         if [ -n "$named_conv" ]; then
             _et_conv_row="$VS_ROW"
             echo "$PROG: engage: $bead is a conversation on $TAKE_BEAD" >&2
+        elif [ -n "$TAKE_PICKED" ]; then
+            # shellcheck disable=SC2086  # one word per bead
+            echo "$PROG: engage: $bead is a gate about $TAKE_BEAD and $(words_and $TAKE_OTHERS) — engaging $TAKE_BEAD, which has waited on it longest, and the conversation replies to the gate" >&2
         else
             echo "$PROG: engage: $bead is a gate about $TAKE_BEAD — engaging $TAKE_BEAD, and the conversation replies to the gate" >&2
         fi
@@ -4581,17 +4976,18 @@ cmd_engage() {
         conv_holder=$(printf '%s' "$conv_line" | cut -f3)
         conv_status=$(printf '%s' "$conv_line" | cut -f4)
     else
+        # Pointed at a gate, the conversation is filed through the gate, so it
+        # is about the bead engage took from that gate and a note on it names
+        # the other beads the gate holds. With no concern, its title and ask
+        # are what the gate asks.
+        OPEN_GATE_FROM="$bead"
         if [ "$engage_file_new" = 1 ] || [ -n "$engage_reason" ]; then
             echo "$PROG: engage: filing a new conversation on $bead, then engaging it" >&2
-            set -- "$bead" --allow-duplicate
+            set -- "${pointed_gate:-$bead}" --allow-duplicate
             [ -n "$engage_reason" ] && set -- "$@" --reason "$engage_reason"
             [ -n "$engage_body" ] && set -- "$@" --body "$engage_body"
         else
-            # Pointed at a gate, the conversation is filed through the gate, so
-            # its title and ask are what the gate asks, and it is about the bead
-            # engage took from that gate.
             echo "$PROG: engage: no conversation on $bead — filing one, then engaging it" >&2
-            OPEN_GATE_FROM="$bead"
             set -- "${pointed_gate:-$bead}"
         fi
         # cmd_open runs in this shell and leaves in CONV the conversation it
@@ -4646,6 +5042,14 @@ cmd_engage() {
         eng_unready=1
     fi
     [ -z "$eng_unready" ] || exit 4
+    # A conversation open did not file or join this run, on a gate that holds
+    # other open beads too, takes the sentence naming them as a note when it
+    # does not carry it, as one open files or joins does, so its sitting sees
+    # each bead the answer reaches. A note the store refuses starts nothing
+    # less.
+    if [ -z "$conv_via_open" ]; then
+        conversation_note_others engage "$CONV" "$pointed_others" "$pointed_gate"
+    fi
 
     # One sitting per bead is engage's default, not a guarantee: a concern of
     # its own, two engages racing on a bead with no conversation, or a gate
@@ -5247,14 +5651,15 @@ cmd_engage() {
 # ── The conversation form ────────────────────────────────────────────
 # helm_form <verb> [<form-arg>...] — hand the terminal to the conversation form,
 # helm-svc's `form` command (services/helm/internal/form). engage runs it on a
-# terminal when the command line leaves the concern open, and attach runs it to
-# find a conversation to return to. The form reads and writes through this
-# script, at the path it is given, so what it shows and what it files are the
-# verbs' own: it reads `conversations`, saves with `open`, starts with `engage
-# --no-attach` and attaches with `engage`. GC_HELM_FORM_BIN names the binary,
-# which defaults to the one the helm-build order publishes under the city's
-# .gc/services/helm. With no binary there, the verb names the flag-driven form
-# of the same act and exits 3.
+# terminal when the command line leaves the concern open, as a bare gc-helm
+# does, and attach runs it to find a conversation to return to. The form reads
+# and writes through this script, at the path it is given, so what it shows and
+# what it files are the verbs' own: it reads `conversations`, saves with
+# `open`, starts with `engage --no-attach`, attaches with `engage`, and opens
+# the seats with `po --rig <name>` and `mechanik`. GC_HELM_FORM_BIN names the
+# binary, which defaults to the one the helm-build order publishes under the
+# city's .gc/services/helm. With no binary there, the verb names the
+# flag-driven form of the same act and exits 3.
 helm_form() {
     _hf_verb="$1"; shift
     _hf_bin="${GC_HELM_FORM_BIN:-}"
@@ -5263,7 +5668,7 @@ helm_form() {
         [ -z "$_hf_root" ] || _hf_bin="$_hf_root/.gc/services/helm/bin/helm-svc"
     fi
     if [ -z "$_hf_bin" ] || [ ! -x "$_hf_bin" ]; then
-        echo "$PROG: $_hf_verb: the conversation form is helm-svc's, and no helm-svc binary is built${_hf_bin:+ at $_hf_bin}. Build it with \"\$(gc gc-toolkit scripts-dir)/gc-build.sh\" helm, or name everything on the command line: $PROG engage <subject> --reason \"<question>\" --no-input to start, $PROG attach <conversation> to return." >&2
+        echo "$PROG: $_hf_verb: the conversation form is helm-svc's, and no helm-svc binary is built${_hf_bin:+ at $_hf_bin}. Build it with \"\$(gc gc-toolkit scripts-dir)/gc-build.sh\" helm, or name everything on the command line: $PROG engage <subject> --reason \"<question>\" --no-input to start, $PROG attach <conversation> to return, $PROG po --rig <name> to open a rig's Product Owner, $PROG mechanik to attach to mechanik." >&2
         exit 3
     fi
     exec "$_hf_bin" form --helm "$SCRIPT_PATH" --models "$(engage_list_models | paste -s -d, - 2>/dev/null || true)" "$@"
@@ -5279,13 +5684,19 @@ helm_form() {
 #   conversations          every open conversation in the city's stores that a
 #                          sitting holds or held, or that waits in the
 #                          operator's queue, each with its subject's title.
-#                          --json prints {conversations, rigs, unread}: rigs
-#                          are the rigs a new topic can be filed in, each with
-#                          its name and prefix, whether it carries converse
-#                          and whether it is suspended, and unread names each
-#                          rig whose store could not be read, because it did
-#                          not answer or its ledger is not there, after which
-#                          the verb exits 4.
+#                          --json prints {conversations, rigs, seats,
+#                          roster_unread, unread}: rigs are the rigs a new
+#                          topic can be filed in, each with its name and
+#                          prefix, whether it carries converse and whether it
+#                          is suspended, seats are the seats the operator sits
+#                          with, mechanik and the po of each of those rigs,
+#                          each with its session (SEATS_JQ), roster_unread
+#                          says the agent roster, which names the seats'
+#                          sessions, could not be read, so no seat is listed,
+#                          and unread names each rig whose store could not be
+#                          read, because it did not answer or its ledger is
+#                          not there. A roster or a store that could not be
+#                          read exits 4 after the list.
 #   conversations <ref>    the subject <ref> names, resolved as engage resolves
 #                          it, and where a conversation about it would be held:
 #                          {ref, subject: {id, title, status, issue_type,
@@ -5302,7 +5713,9 @@ helm_form() {
 #                          form names the subject whose
 #                          holds listed a gate: a gate several open beads wait
 #                          on is about that bead while it is one of them, and
-#                          one that no longer holds it is refused (take_bead).
+#                          one that no longer holds it is refused. Without
+#                          --from such a gate is about the bead whose wait on
+#                          it is oldest, as engage takes it (take_bead).
 #                          A bare PR number more than one live
 #                          anchor records prints {ref, candidates} instead,
 #                          each anchor with its title and rig, so the person
@@ -5371,7 +5784,7 @@ conversations_in_store() {
 # list nothing and fail.
 conversations_all() {
     enumerate_rigs
-    if ! _ca_live=$(live_sittings); then
+    if ! _ca_list=$(gc session list --json 2>/dev/null) || ! _ca_live=$(live_sittings_in "$_ca_list"); then
         echo "$PROG: conversations: could not read 'gc session list', so which sittings are live is unknown. Nothing listed." >&2
         exit 4
     fi
@@ -5432,7 +5845,29 @@ conversations_all() {
             _ca_pfx=$(printf '%s' "$RIGS" | jq -r --arg n "$_ca_r" 'first(.[] | select(.name == $n) | .prefix // "") // ""' 2>/dev/null || true)
             _ca_rigs=$(printf '%s' "$_ca_rigs" | jq -c --arg n "$_ca_r" --arg p "$_ca_pfx" --argjson c "$_ca_conv" --argjson s "$_ca_susp" '. + [{name: $n, prefix: $p, converse: $c, suspended: $s}]')
         done
-        jq -nc --argjson c "$_ca_rows" --argjson r "$_ca_rigs" --argjson u "$_ca_unread" '{conversations: $c, rigs: $r, unread: $u}'
+        # The seats, for the form's People page: mechanik, and the po of each of
+        # those rigs, each by the name the agent roster gives its session, read
+        # once with the rigs' converse, and each with its session from the
+        # session list the conversations were read from. Only the roster's
+        # names are passed on, which keeps the argument small in a city of many
+        # agents. A roster that cannot be read names no seat, so none is
+        # listed, and the conversations and the rigs still are.
+        converse_roster
+        _ca_roster=""
+        if [ -n "${_CONVERSE_ROSTER:-}" ]; then
+            _ca_roster=$(printf '%s' "$_CONVERSE_ROSTER" | jq -c '{agents: [.agents[]? | objects | {name, dir, qualified_name}]}' 2>/dev/null) || _ca_roster=""
+        fi
+        _ca_seats='[]'; _ca_roster_unread=false
+        if [ -z "$_ca_roster" ]; then
+            _ca_roster_unread=true
+            echo "$PROG: conversations: could not read 'gc agent list', which gives each seat's session its name, so no seat is listed." >&2
+        elif ! _ca_seats=$(printf '%s' "$_ca_list" | scrub | jq -c --argjson rigs "$_ca_rigs" --argjson roster "$_ca_roster" --arg mechanik "$MECHANIK_TEMPLATE" --arg po "$PO_TEMPLATE" "$SEAT_NAMES_JQ$SEATS_JQ" 2>/dev/null); then
+            echo "$PROG: conversations: the seats could not be read from 'gc session list'. Nothing listed." >&2
+            exit 4
+        fi
+        jq -nc --argjson c "$_ca_rows" --argjson r "$_ca_rigs" --argjson s "$_ca_seats" --argjson ru "$_ca_roster_unread" --argjson u "$_ca_unread" \
+            '{conversations: $c, rigs: $r, seats: $s, roster_unread: $ru, unread: $u}'
+        [ "$_ca_roster_unread" = false ] || exit 4
     else
         printf '%s' "$_ca_rows" | jq -r '
             def rank: {"ready": 0, "preparing": 1, "starting": 2, "ended": 3, "queued": 4}[.readiness] // 5;
@@ -5593,6 +6028,146 @@ cmd_attach() {
     exit 2
 }
 
+# ── The seats: a rig's po, and mechanik ──────────────────────────────
+# The seats the operator sits with, each opened in one step, each a row of the
+# People page in engage's form and each a command of its own. A rig's po, the
+# operator's prioritization partner for that rig's work, is the rig's
+# on-demand named session, which a sitting opens and a drain-ack ends.
+# Mechanik, the operator's standing conversation, is one named session for the
+# city, which the controller keeps running. Each verb is Gas City's attach on
+# the seat's session, which owns the seat's start and the wait for it: it
+# attaches to a running session, and asks the city's controller to start one
+# that is not running, so the agent takes its prompt as its first message, then
+# attaches once the session runs (docs/gascity/human-engagement.md, "What an
+# attach does to a session that is not running").
+#
+# Gas City names a seat's session as it names the agent that runs it, after
+# the binding the city imports the pack under, and a rig's po after its rig as
+# well: <binding>.mechanik and <rig>/<binding>.po. The binding is the city's to
+# choose, so the verbs and the People page take a seat's name from the city's
+# agent roster (SEAT_NAMES_JQ), and know a seat only by its template, the agent
+# pack.toml's [[named_session]] stanza names.
+PO_TEMPLATE="po"
+MECHANIK_TEMPLATE="mechanik"
+
+# $SEAT_NAMES_JQ — defines seat_names($template; $rig): from the agent roster
+# given as input (`gc agent list --json`), the qualified name of each agent
+# named $template in the rig named $rig, or of the city's own for an empty
+# $rig, once each. A seat's named session takes its agent's qualified name,
+# because pack.toml gives the session no name of its own. One name is the
+# seat's. None means the city runs no such seat there, and with several, which
+# of them is the seat is not known.
+SEAT_NAMES_JQ='
+  def seat_names($template; $rig):
+    [ .agents[]? | objects
+      | select(((.name // "") | tostring) == $template and ((.dir // "") | tostring) == $rig)
+      | (.qualified_name // "") | tostring | select(. != "") ] | unique;
+'
+
+# $SEATS_JQ — the seats, as `conversations --json` lists them for the People
+# page, from a `gc session list --json` given as input, with the rigs a new
+# topic can be filed in as $rigs, which leave out the city's HQ, the agent
+# roster as $roster and the seats' templates as $mechanik and $po. It runs after
+# $SEAT_NAMES_JQ. Mechanik comes first, then each rig's po in the order the
+# rigs are listed, each as {seat, rig, session}: seat is the verb that opens
+# it, rig is the po's rig by its name and empty for mechanik, and session is
+# the open session the list holds under the seat's name, {id, name, state,
+# attached, created_at} with Gas City's own state, or null when it holds none,
+# as for a po that has never run. A seat the roster gives no name, or several,
+# is left out, since its verb refuses it.
+SEATS_JQ='
+  [ .sessions[] | objects
+    | select((.closed // false) != true)
+    | select(((.state // "") | tostring) != "closed") ] as $open
+  | def seat($seat; $rig; $names):
+      if ($names | length) == 1 then
+        [ {seat: $seat, rig: $rig,
+           session: (first($open[] | select(((.alias // "") | tostring) == $names[0])
+                     | {id: ((.id // "") | tostring), name: ((.session_name // "") | tostring),
+                        state: ((.state // "") | tostring), attached: ((.attached // false) == true),
+                        created_at: ((.created_at // "") | tostring)}) // null)} ]
+      else [] end;
+  seat("mechanik"; ""; $roster | seat_names($mechanik; ""))
+  + [ $rigs[] | .name as $r | seat("po"; $r; $roster | seat_names($po; $r))[] ]
+'
+
+# cmd_seat <verb> <template> <name> [<arg>...] — attach the terminal to the
+# seat's session, and once it comes back, name how to return. The session is
+# the one the agent roster names for the seat's template (SEAT_NAMES_JQ). po
+# takes --rig <name>, the rig whose po it is, named exactly, as open
+# --new-subject --rig takes it, and refuses (exit 4) a rig the city has not,
+# the city's HQ, where Gas City stamps no rig's named session, or a suspended
+# rig, where it starts no session. mechanik takes no argument. A roster that
+# cannot be read, or that names no session for the seat or several, exits 4
+# attaching nothing, and so does a failed attach, after gc has said why.
+cmd_seat() {
+    _seat_verb="$1"; _seat_tmpl="$2"; _seat_name="$3"; shift 3
+    _seat_rig=""; _seat_rig_set=0
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -h|--help) usage; exit 0 ;;
+            --rig=*|--rig)
+                [ "$_seat_verb" = po ] || { echo "$PROG: $_seat_verb: unknown flag '$1': mechanik is one for the city" >&2; exit 2; }
+                case "$1" in
+                    --rig=*) _seat_rig="${1#--rig=}"; shift ;;
+                    *) shift; [ $# -gt 0 ] || { echo "$PROG: po: --rig requires a value" >&2; exit 2; }
+                       _seat_rig="$1"; shift ;;
+                esac
+                _seat_rig_set=1 ;;
+            -*) echo "$PROG: $_seat_verb: unknown flag '$1'" >&2; exit 2 ;;
+            *) echo "$PROG: $_seat_verb takes no argument" >&2; exit 2 ;;
+        esac
+    done
+    _seat_again="$PROG $_seat_verb"
+    if [ "$_seat_verb" = po ]; then
+        if [ "$_seat_rig_set" = 0 ] || [ -z "$_seat_rig" ]; then
+            echo "$PROG: po: each rig has its own Product Owner, so name the rig: $PROG po --rig <name>" >&2
+            exit 2
+        fi
+        enumerate_rigs
+        _seat_row=$(printf '%s' "$RIGS" | jq -c --arg n "$_seat_rig" 'first(.[] | select(.name == $n)) // empty' 2>/dev/null)
+        _seat_known=$(printf '%s' "$RIGS" | jq -r '[.[] | select((.hq // false) | not) | .name] | join(", ")' 2>/dev/null)
+        if [ -z "$_seat_row" ]; then
+            echo "$PROG: po: --rig '$_seat_rig' matches no rig in 'gc rig list' (known: $_seat_known). Nothing attached." >&2
+            exit 4
+        fi
+        if [ "$(printf '%s' "$_seat_row" | jq -r '.hq // false' 2>/dev/null)" = true ]; then
+            echo "$PROG: po: '$_seat_rig' is the city's HQ in 'gc rig list', not a rig, and Gas City starts a rig's named session only in a rig, so the HQ has no Product Owner. Name a rig: $_seat_known. Nothing attached." >&2
+            exit 4
+        fi
+        if [ "$(printf '%s' "$_seat_row" | jq -r '.suspended // false' 2>/dev/null)" = true ]; then
+            echo "$PROG: po: rig '$_seat_rig' is suspended, and Gas City starts no session in a suspended rig, so its Product Owner cannot start until the rig resumes (gc rig resume $_seat_rig). Nothing attached." >&2
+            exit 4
+        fi
+        _seat_name="the Product Owner of $_seat_rig"
+        _seat_again="$PROG po --rig $_seat_rig"
+    fi
+    converse_roster
+    _seat_names=""
+    if [ -n "${_CONVERSE_ROSTER:-}" ]; then
+        _seat_names=$(printf '%s' "$_CONVERSE_ROSTER" | jq -c --arg t "$_seat_tmpl" --arg r "$_seat_rig" "$SEAT_NAMES_JQ"'seat_names($t; $r)' 2>/dev/null) || _seat_names=""
+    fi
+    _seat_where="for the city"
+    [ -z "$_seat_rig" ] || _seat_where="in rig '$_seat_rig'"
+    case "$(printf '%s' "$_seat_names" | jq -r 'length' 2>/dev/null)" in
+        1) _seat=$(printf '%s' "$_seat_names" | jq -r '.[0]') ;;
+        0) echo "$PROG: $_seat_verb: 'gc agent list' names no $_seat_tmpl agent $_seat_where, so the city runs no session for $_seat_name. Nothing attached." >&2
+           exit 4 ;;
+        ''|*[!0-9]*)
+           echo "$PROG: $_seat_verb: could not read 'gc agent list', which gives the session of $_seat_name its name, so nothing was attached. Re-run: $_seat_again" >&2
+           exit 4 ;;
+        *) echo "$PROG: $_seat_verb: 'gc agent list' names more than one $_seat_tmpl agent $_seat_where ($(printf '%s' "$_seat_names" | jq -r 'join(", ")')), so the session of $_seat_name is not known. Nothing attached." >&2
+           exit 4 ;;
+    esac
+    _seat_rc=0
+    gc session attach "$_seat" || _seat_rc=$?
+    if [ "$_seat_rc" -ne 0 ]; then
+        echo "$PROG: $_seat_verb: gc session attach $_seat exited $_seat_rc, so $_seat_name was not attached. Re-run: $_seat_again" >&2
+        exit 4
+    fi
+    printf '\nReturn to %s with: %s\n' "$_seat_name" "$_seat_again"
+}
+
 # ── Dispatch ─────────────────────────────────────────────────────────
 case "${1:-}" in
     open)          shift; cmd_open "$@" ;;
@@ -5608,7 +6183,15 @@ case "${1:-}" in
     accept)        shift; cmd_accept "$@" ;;
     conversations) shift; cmd_conversations "$@" ;;
     attach)        shift; cmd_attach "$@" ;;
+    po)            shift; cmd_seat po "$PO_TEMPLATE" "the Product Owner" "$@" ;;
+    mechanik)      shift; cmd_seat mechanik "$MECHANIK_TEMPLATE" mechanik "$@" ;;
     board)         echo "$PROG: the board moved to 'helm-svc board' (services/helm)" >&2; exit 2 ;;
     -h|--help|help) usage; exit 0 ;;
-    *)             echo "$PROG: unknown verb '${1:-}' (try: open, engage, attach, conversations, react, accept, takeaway, park, priority, place, dismiss, handback, resolve, help; the board is 'helm-svc board')" >&2; usage; exit 2 ;;
+    # A bare gc-helm on a terminal is engage's form, the way in. Without a
+    # terminal it names the verbs and exits 2, so no script blocks on a form.
+    "")            if [ -t 0 ] || [ -n "${GC_HELM_ASSUME_TTY:-}" ]; then
+                       cmd_engage
+                   fi
+                   echo "$PROG: name a verb (try: engage, attach, po, mechanik, conversations, open, react, accept, takeaway, park, priority, place, dismiss, handback, resolve, help); on a terminal, a bare $PROG opens engage's form" >&2; usage; exit 2 ;;
+    *)             echo "$PROG: unknown verb '${1:-}' (try: po, mechanik, open, engage, attach, conversations, react, accept, takeaway, park, priority, place, dismiss, handback, resolve, help; the board is 'helm-svc board')" >&2; usage; exit 2 ;;
 esac

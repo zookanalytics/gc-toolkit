@@ -32,7 +32,10 @@
 #     bead reads by then; the branch is deleted once the landing is recorded;
 #   - a branch that never introduced work is still refused, parked and put to a
 #     person as a human gate, with no stamp and with a stamp its target does not
-#     carry, and so is a branch whose commits net to no change;
+#     carry, and so is a branch whose commits net to no change. The gate is
+#     filed first and the park writes no route, so a gate that is not filed,
+#     refused or with no human-gate.sh in the pack, parks nothing and leaves the
+#     work with the refinery;
 #   - a check that cannot run leaves the work with the refinery to retry,
 #     counting the failures in a row on the bead. The third files a human gate
 #     with no quiet window, which says the check could not run and names git's
@@ -451,10 +454,23 @@ attempt
 eq "$PREP_RC" 0 "nowork: the prepare stages the branch"
 eq "$RC" 1 "nowork: merge-push stops"
 has "$(cat "$D/lc.log")" "transition wb --to refused_false_completion" "nowork: the bead is parked as a false completion"
+hasnt "$(cat "$D/lc.log")" "--route" "nowork: the park writes no route, since its gate is the park"
 has "$(cat "$D/gc.log")" "human-gate --subject wb --key refinery-false-completion" "nowork: the refusal files a gate on the bead"
 has "$(cat "$D/gc.log")" "runtime drain-ack" "nowork: the session drains"
 eq "$(merged_tries)" 0 "nowork: nothing is recorded as merged"
 eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "nowork: nothing is pushed"
+
+echo "── a refusal whose gate is not filed parks nothing ──"
+fixture "$TMP/nowork-nogate" nowork
+attempt GATE_FAIL=1
+eq "$RC" 1 "nogate: merge-push stops"
+has "$(cat "$D/gc.log")" "human-gate --subject wb --key refinery-false-completion" "nogate: the refusal asks for its gate first"
+hasnt "$(cat "$D/lc.log")" "refused_false_completion" "nogate: with no gate filed, the bead is not parked"
+has "$OUT" "no refinery-false-completion gate was filed on wb, so it is not parked: it stays with the refinery, and the next patrol checks it again" \
+  "nogate: the block says the work stays with the refinery"
+has "$(cat "$D/gc.log")" "runtime drain-ack" "nogate: the session drains"
+eq "$(merged_tries)" 0 "nogate: nothing is recorded as merged"
+eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "nogate: nothing is pushed"
 
 echo "── the same, with a stamp the target does not carry ──"
 fixture "$TMP/stale" nowork
@@ -489,15 +505,16 @@ pack_merge_push "$CITY/rigs/gc-toolkit"
 eq "$RC" 1 "pack: merge-push stops"
 has "$(cat "$D/lc.log")" "transition wb --to refused_false_completion" "pack: the bead is parked as a false completion"
 has "$(cat "$D/gc.log")" "human-gate --subject wb --key refinery-false-completion" "pack: the refusal files its gate"
-# A pack with no human-gate.sh: the park stands, and the block says no gate was
-# filed.
+# A pack with no human-gate.sh files no gate, so the bead is not parked, and
+# the block says the work stays with the refinery.
 mkdir -p "$TMP/no-gate/assets/scripts"
 cp "$PACK/lifecycle.sh" "$PACK/rig-root.sh" "$TMP/no-gate/assets/scripts/"
 pack_merge_push "$TMP/no-gate"
 eq "$RC" 1 "pack/no human-gate.sh: merge-push stops"
-has "$(cat "$D/lc.log")" "transition wb --to refused_false_completion" "pack/no human-gate.sh: the bead is parked as a false completion"
+hasnt "$(cat "$D/lc.log")" "refused_false_completion" "pack/no human-gate.sh: with no gate filed, the bead is not parked"
 hasnt "$(cat "$D/gc.log")" "human-gate " "pack/no human-gate.sh: no gate is filed"
-has "$OUT" "human-gate.sh not found in the pack; wb is parked for a human with no refinery-false-completion gate" "pack/no human-gate.sh: the block says the park has no gate"
+has "$OUT" "no refinery-false-completion gate was filed on wb, so it is not parked: it stays with the refinery, and the next patrol checks it again" \
+  "pack/no human-gate.sh: the block says the work stays with the refinery"
 # A pack with no rig-root.sh, so the rig does not resolve: the block stops
 # before the check, parks nothing and leaves the work with the refinery to
 # retry.
@@ -682,8 +699,9 @@ convoy_failure "$TMP/convoy"
 nocheck_merge_push
 GATE=$(gate_of)
 eq "$RC" 1 "convoy: merge-push stops"
-has "$(cat "$D/lc.log")" "transition wb --to blocked --assignee  --route human --set blocked_reason=the zero-diff check could not run in $D/rig, 3 patrols in a row: merge-base origin/main " \
+has "$(cat "$D/lc.log")" "transition wb --to blocked --assignee  --set blocked_reason=the zero-diff check could not run in $D/rig, 3 patrols in a row: merge-base origin/main " \
   "convoy: the convoy is parked blocked, its reason naming the rig, the count and the failed git call"
+hasnt "$(cat "$D/lc.log")" "--route" "convoy: the park writes no route, since its gate is the park"
 has "$(cat "$D/lc.log")" "--unset zero_diff_check_failures --takeaway the zero-diff check could not run 3 patrols in a row; fix the error its gate names, then hand the convoy back" \
   "convoy: the park clears the count, and its takeaway names the hand-back"
 eq "$(grep -cxF "wb|blocks|$GATE" "$D/deps.txt")" 1 "convoy: the park is held by its gate, which blocks the convoy"

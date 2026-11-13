@@ -133,7 +133,7 @@ _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # branch=<this head> on a rework child at CREATION, before any polecat claims
 # it, and that child sits open and routed to a pool until one does. Its fix is
 # not on the branch, so a direct row that is still routed to a pool
-# (gc.routed_to set, not `human`) and carries no merge_result is dropped — the
+# (gc.routed_to set) and carries no merge_result is dropped — the
 # same route signal merge.sh reads to hold a merge for an in-flight child. The
 # anchor (merge_result set) and a hand-back whose submit-and-exit cleared the
 # route both stay; fold_target and merged_target rows are records of work
@@ -144,7 +144,7 @@ ledger_of() { # <branch>
   direct=$(printf '%s' "$direct" | jq '
     map(select(
       (((.metadata // {}).merge_result // "") | tostring) != ""
-      or (((.metadata // {})["gc.routed_to"] // "") | tostring | (. == "" or . == "human"))
+      or (((.metadata // {})["gc.routed_to"] // "") | tostring) == ""
     ))') || return 1
   folded=$(bd_list --status="$ALL_STATUSES" --metadata-field fold_target="$br") || return 1
   landed=$(bd_list --status="$ALL_STATUSES" --metadata-field merged_target="$br" \
