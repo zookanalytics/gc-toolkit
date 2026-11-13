@@ -676,10 +676,23 @@ eq "$(field tk-g close_reason)" "ruled: over two lines" "a ruling is one line"
 fresh; patch 'map(if .id == "tk-w" then .metadata = {} else . end)'
 run tk-w --key polecat-x --ruling "no arm here"
 eq "$RC" 0 "a bead with no arm stands down"
-eq "$(line_of "--unset-metadata gc.dispatch_when_ready ")" "" "…with no disarm to run"
-fresh; patch 'map(if .id == "tk-w" then .metadata = {"gc.notify_when_ready":"an-agent"} else . end)'
-run tk-w --key polecat-x --ruling "no notice either"
-eq "$(meta tk-w gc.notify_when_ready)" "<absent>" "a notice owed goes with the arm"
+eq "$(line_of "--unset-metadata gc.dispatch_when_ready ")" "" "…and its disarm writes nothing"
+# The disarm reads no arm first, so an arm written after the stand-down read the
+# bead is removed before the gate's answer could send it. The arm lands ahead of
+# gctk's own read of the bead, the first read that lists templates.
+fresh; patch 'map(if .id == "tk-w" then .metadata = {} else . end)'
+STUB_LAND_AT="--include-templates" STUB_LAND="jq -c 'map(if .id == \"tk-w\" then .metadata = {\"gc.dispatch_when_ready\":\"rig/pool\",\"gc.dispatch_when_ready_args\":\"[]\",\"gc.dispatch_when_ready_armed_at\":\"2026-11-13T00:00:00Z\",\"gc.dispatch_when_ready_reason\":\"armed meanwhile\"} else . end)' '$STUB_STORE' > '$STUB_STORE.x' && mv '$STUB_STORE.x' '$STUB_STORE'" \
+  run tk-w --key polecat-x --ruling "armed after the read"
+eq "$RC" 0 "a bead armed after the stand-down read it stands down"
+[ -e "$STUB_STORE.landed" ] && ok "…the arm landed in the stand-down's run" || bad "the arm never landed, so the case proves nothing"
+eq "$(meta tk-w gc.dispatch_when_ready)" "<absent>" "…and the arm written meanwhile is gone"
+DISARM=$(line_of "--unset-metadata gc.dispatch_when_ready ")
+ANSWER=$(line_of "gate resolve tk-g")
+if [ -n "$DISARM" ] && [ -n "$ANSWER" ] && [ "$DISARM" -lt "$ANSWER" ]; then
+  ok "…removed before the gate's answer"
+else
+  bad "the arm written meanwhile is removed before the gate's answer (lines ${DISARM:-none}, ${ANSWER:-none})"
+fi
 fresh; patch 'map(if .id == "tk-w" then .metadata["gc.routed_to"] = "human" else . end)'
 run tk-w --key polecat-x --ruling "parked for a person"
 eq "$RC" 0 "a subject parked on the person route stands down"

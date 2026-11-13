@@ -10,11 +10,12 @@
 # wait. bd refuses to close a bead an open gate blocks, and clearing the gate
 # first makes the bead ready, which is what the arm waits for. This runs the one
 # order that does end it:
-#   1. It removes the arm, and any notice owed, through deferred-dispatch.sh
-#      disarm, whose exit says the arm is gone. The disarm takes the bead's
-#      dispatch lock, which the deferred-dispatch start holds while it sends the
-#      bead and reads the arm again under, so a start that reads the gate closed
-#      reads the arm gone, and it retires an arm it finds on a closed bead.
+#   1. It removes the arm through deferred-dispatch.sh disarm, whose exit says
+#      the arm is gone, whether or not the bead carried one. The disarm takes
+#      the bead's dispatch lock, which the deferred-dispatch start holds while
+#      it sends the bead and reads the arm again under, so a start that reads
+#      the gate closed reads the arm gone, and it retires an arm it finds on a
+#      closed bead.
 #   2. It ends the run beneath the bead and clears the bead's route and session
 #      pins through gc-helm.sh takeaway --release --no-wait, whose exit says the
 #      release landed, so the bead is left with no route. So nothing is still
@@ -190,10 +191,10 @@ fi
 # Each step below is one a re-run takes again, so a stop names what stands.
 stopped() { echo "$PROG: $1 Re-run this command once that is repaired." >&2; exit 1; }
 
-if [ -n "$(row_meta "$WORK_JSON" gc.dispatch_when_ready)$(row_meta "$WORK_JSON" gc.notify_when_ready)" ]; then
-  "$DEFERRED" disarm "$WORK" --reason "stand-down: $RULING" >/dev/null \
-    || stopped "the arm on $WORK was not removed, so no gate was answered."
-fi
+# The disarm runs with no read of the arm first: it exits 0 once no arm remains,
+# and an arm written after the read above is removed too.
+"$DEFERRED" disarm "$WORK" --reason "stand-down: $RULING" >/dev/null \
+  || stopped "the arm on $WORK was not removed, so no gate was answered."
 
 "$HELM" takeaway "$WORK" "Stood down on a person's ruling, so nothing builds it" --release --no-wait \
   || stopped "the arm on $WORK is gone, but its run did not end or its route did not clear, or a live session still holds its claim, as gc-helm.sh says above, so no gate was answered."
