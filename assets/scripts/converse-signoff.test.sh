@@ -71,7 +71,11 @@
 #             and one that fails writes nothing else, so the gate keeps holding
 #             the merge; the same sign-off run again once the PR has closed
 #             acts on nothing, and the conversation keeps the action the first
-#             attempt recorded
+#             attempt recorded; the rework is recorded under its ruling once it
+#             is filed, a record the store refuses stops the sign-off before
+#             the headline, a recorded rework that does not read stops a re-run
+#             before any write, and a re-run once it has closed, with the PR
+#             still open, files no second rework
 #   (ANSWER*) a ruling on a turn that does not sign off answers only the gates
 #             it names, after the same rework or retirement, and leaves the
 #             conversation open for the sign-off
@@ -131,7 +135,10 @@
 #             work that waits on the conversation or on a conversation in the
 #             queue is refused before any write in words of its own, which an
 #             argument the parser does not know cannot print, as a rework
-#             child that does not read stops it
+#             child that does not read stops it; a rework stay that stops
+#             after its rework is filed, run again once that rework has closed,
+#             with the PR open or merged, files no second rework and waits on
+#             the closed one, and run while it is open adopts it
 #   (APPROVE*) a PR a ruling leaves standing with no approval is named in the
 #             headline, the close reason and the reminder, and printed with its
 #             link, read before the first write through the rule the merge lands
@@ -373,13 +380,21 @@ exit 0
 H
 # The rework and the retirement stand-ins each log the rig they ran in: GC_RIG,
 # GC_RIG_ROOT and the working directory. The rework names the child it filed,
-# tk-child, or REWORK_CHILD.
+# tk-child, or REWORK_CHILD, and files it in the store as the writer does, an
+# open rework of the anchor sourced by the conversation, unless the store holds
+# it already. REWORK_NO_CHILD files none, for a child that does not read.
 cat > "$S/converse-rework.sh" <<'R'
 #!/usr/bin/env bash
 printf 'converse-rework %s\n' "$*" >> "$CALLS"
 printf 'converse-rework ran in GC_RIG=%s GC_RIG_ROOT=%s PWD=%s\n' "${GC_RIG:-}" "${GC_RIG_ROOT:-}" "$PWD" >> "$CALLS"
 [ -n "${REWORK_FAIL:-}" ] && { echo "rework refused: anchor has no branch"; exit 2; }
-echo "${REWORK_CHILD:-tk-child} gc-toolkit/gc-toolkit.polecat filed"
+_child="${REWORK_CHILD:-tk-child}"
+_a=""; _r=""; _p=""; for x in "$@"; do [ "$_p" = "--anchor" ] && _a="$x"; [ "$_p" = "--ruling-bead" ] && _r="$x"; _p="$x"; done
+if [ -z "${REWORK_NO_CHILD:-}" ] && [ ! -f "$STORE/b/$_child.json" ]; then
+  jq -n --arg id "$_child" --arg a "$_a" --arg r "$_r" '{id:$id, title:("Rework " + $a), issue_type:"task", status:"open", assignee:"",
+      metadata:{task_kind:"rework", anchor_bead:$a, source_ruling_bead:$r}, deps:[]}' > "$STORE/b/$_child.json"
+fi
+echo "$_child gc-toolkit/gc-toolkit.polecat filed"
 R
 # RETIRE_FAIL models pr-dispose.sh recording the disposition and then failing
 # to close the PR, which leaves it open.
@@ -1102,6 +1117,35 @@ hasnt "$(cat "$CALLS")" "converse-rework" "(REWORK-RETRY) …filing no second re
 hasnt "$(cat "$CALLS")" "bd comment " "(REWORK-RETRY) …recording no action again"
 eq "$(acts tk-conv)" "Sent PR #41 back for rework.|Ruled: fix the retry before the merge" "(REWORK-RETRY) …so the conversation still lists the rework among its actions"
 has "$(grep '^pr-sitting-comment' "$CALLS")" "refresh --sitting tk-conv" "(REWORK-RETRY) …and the comment is drawn again from it"
+# The record names the rework once it is filed. A sign-off that stops after
+# it, run again once the rework has closed with the PR still open, files no
+# second rework and goes on to sign off.
+acceptance; setm tk-anc merge_result pull_request; setm tk-anc pr_number 41
+TAKEAWAY_FAIL=1 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
+eq "$RC" 1 "(REWORK-CLOSED) a sign-off that stops after its rework is filed exits 1"
+eq "$(meta tk-conv gc.ruling_consequence | jq -c '.["ruled: fix the retry before the merge"]')" '{"act":"rework","anchor":"tk-anc","child":"tk-child"}' "(REWORK-CLOSED) …with the rework recorded under its ruling"
+setf tk-child status closed
+: > "$CALLS"
+run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
+eq "$RC" 0 "(REWORK-CLOSED) the same sign-off, run once its rework has closed, exits 0"
+hasnt "$(cat "$CALLS")" "converse-rework" "(REWORK-CLOSED) …filing no second rework and superseding no review"
+eq "$(acts tk-conv)" "Sent PR #41 back for rework.|Ruled: fix the retry before the merge" "(REWORK-CLOSED) …recording the rework once"
+eq "$(field tk-conv status)" "closed" "(REWORK-CLOSED) …and closing the conversation"
+# A record the store refuses stops the sign-off before the headline.
+acceptance; setm tk-anc merge_result pull_request
+REFUSE_UPDATE_MATCH='"child":"tk-child"' run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
+eq "$RC" 1 "(REWORK-RECORD-REFUSED) a rework whose record the store refuses exits 1"
+has "$OUT" "the store refused its record on conversation tk-conv" "(REWORK-RECORD-REFUSED) …saying so"
+hasnt "$(cat "$CALLS")" "gc-helm takeaway" "(REWORK-RECORD-REFUSED) …with no headline written"
+eq "$(field tk-rev status)" "open" "(REWORK-RECORD-REFUSED) …and no gate resolved"
+# A recorded rework that does not read stops a re-run before any write.
+acceptance; setm tk-anc merge_result pull_request
+TAKEAWAY_FAIL=1 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
+: > "$CALLS"
+SHOW_DOWN=tk-child run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
+eq "$RC" 1 "(REWORK-RECORD-UNREAD) a re-run whose recorded rework does not read exits 1"
+has "$OUT" "could not be read to tell whether it has closed" "(REWORK-RECORD-UNREAD) …saying so"
+eq "$(writes)" 0 "(REWORK-RECORD-UNREAD) …writing nothing"
 acceptance; setm tk-anc merge_result pull_request
 REWORK_FAIL=1 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
 eq "$RC" 1 "(REWORK-FAIL) a rework that does not file exits 1"
@@ -1897,6 +1941,7 @@ eq "$RC" 0 "(STAY-REWORK) a stay on a ruling that reworks the PR exits 0"
 has "$(cat "$CALLS")" "bd dep add tk-conv tk-child --type blocks" "(STAY-REWORK) …waiting on the rework the call filed"
 has "$(field tk-conv notes)" "(waits on tk-child)" "(STAY-REWORK) …which its staying: line names"
 eq "$(field tk-conv status)" "open" "(STAY-REWORK) …with the conversation open"
+has "$OUT" "wakes with this thread when that work closes" "(STAY-REWORK) …and its sitting woken once the rework closes"
 # The rework has landed on the PR's branch, and the PR is still open, so the
 # return answers it with --no-rework in place of the stay's --rework.
 setf tk-child status closed
@@ -1907,11 +1952,50 @@ has "$OUT" "the ruling leaves the branch of tk-anc as it stands" "(STAY-REWORK-R
 eq "$(grep -c '^converse-rework ' "$CALLS" || true)" "$REWORKS" "(STAY-REWORK-RETURN) …filing no second rework"
 eq "$(field tk-conv status)" "closed" "(STAY-REWORK-RETURN) …and closing the conversation"
 open_pr
-run_signoff --conversation tk-conv --outcome "staying — the retry is reworked" --ruled yes --ruling "fix the retry" --rework --no-wait --stay "the retry backs off"
+REWORK_NO_CHILD=1 run_signoff --conversation tk-conv --outcome "staying — the retry is reworked" --ruled yes --ruling "fix the retry" --rework --no-wait --stay "the retry backs off"
 eq "$RC" 1 "(STAY-REWORK-UNREAD) a rework child that does not read as this conversation's stops the stay"
 has "$OUT" "Sign off without --stay to end at the hand-off" "(STAY-REWORK-UNREAD) …naming the hand-off ending"
 hasnt "$(cat "$CALLS")" "bd dep add tk-conv" "(STAY-REWORK-UNREAD) …with no edge written"
 eq "$(field tk-conv status)" "in_progress" "(STAY-REWORK-UNREAD) …and the conversation still claimed"
+
+# A rework stay that stops after its rework is filed, before it names its work,
+# is run again once that rework has closed, with the PR still open. The record
+# names the rework, so the re-run files no second one and supersedes no review
+# again: it waits on the closed rework, which returns the stay at once.
+open_pr; setm tk-anc pr_number 41
+TAKEAWAY_FAIL=1 run_signoff --conversation tk-conv --outcome "staying — the retry is reworked" --ruled yes --ruling "fix the retry" --rework --no-wait --stay "the retry backs off"
+eq "$RC" 1 "(STAY-REWORK-RESTART) a rework stay that stops after its rework is filed exits 1"
+eq "$(meta tk-conv gc.ruling_consequence | jq -c '.["ruled: fix the retry"]')" '{"act":"rework","anchor":"tk-anc","child":"tk-child"}' "(STAY-REWORK-RESTART) …with the rework recorded under its ruling"
+setf tk-child status closed
+REWORKS=$(grep -c '^converse-rework ' "$CALLS" || true)
+run_signoff --conversation tk-conv --outcome "staying — the retry is reworked" --ruled yes --ruling "fix the retry" --rework --no-wait --stay "the retry backs off"
+eq "$RC" 0 "(STAY-REWORK-RESTART) the same call, run once that rework has closed, exits 0"
+has "$OUT" "tk-child, the rework an earlier attempt of this ruling filed on tk-anc, has closed" "(STAY-REWORK-RESTART) …finding the rework closed"
+eq "$(grep -c '^converse-rework ' "$CALLS" || true)" "$REWORKS" "(STAY-REWORK-RESTART) …filing no second rework and superseding no review"
+has "$(field tk-conv notes | grep -E '^(holding|staying):' | tail -n 1)" "(waits on tk-child)" "(STAY-REWORK-RESTART) …naming the closed rework as its work"
+has "$(cat "$CALLS")" "bd dep add tk-conv tk-child --type blocks" "(STAY-REWORK-RESTART) …waiting on it"
+eq "$(field tk-conv status)" "open" "(STAY-REWORK-RESTART) …with the conversation open, ready at once for its return"
+has "$OUT" "which has closed already, so the work is back. Run the entry again" "(STAY-REWORK-RESTART) …and sending the sitting to the return, since nothing will wake it"
+hasnt "$OUT" "wakes with this thread when that work closes" "(STAY-REWORK-RESTART) …never promising a wake"
+eq "$(acts tk-conv | tr '|' '\n' | grep -c 'back for rework' || true)" 1 "(STAY-REWORK-RESTART) …and the conversation lists the rework once"
+# Run again once the PR has merged as well, the stay still waits on the closed
+# rework rather than ending at the hand-off.
+open_pr; setm tk-anc pr_number 41
+TAKEAWAY_FAIL=1 run_signoff --conversation tk-conv --outcome "staying — the retry is reworked" --ruled yes --ruling "fix the retry" --rework --no-wait --stay "the retry backs off"
+setf tk-child status closed; setf tk-anc status closed; setm tk-anc merge_result merged
+REWORKS=$(grep -c '^converse-rework ' "$CALLS" || true)
+run_signoff --conversation tk-conv --outcome "staying — the retry is reworked" --ruled yes --ruling "fix the retry" --rework --no-wait --stay "the retry backs off"
+eq "$RC" 0 "(STAY-REWORK-RESTART-MERGED) the same call, run once the rework closed and the PR merged, exits 0"
+eq "$(grep -c '^converse-rework ' "$CALLS" || true)" "$REWORKS" "(STAY-REWORK-RESTART-MERGED) …filing no second rework"
+has "$(field tk-conv notes | grep -E '^(holding|staying):' | tail -n 1)" "(waits on tk-child)" "(STAY-REWORK-RESTART-MERGED) …and waiting on the closed rework"
+# A restart while the rework is still open adopts it, and records nothing anew.
+open_pr
+TAKEAWAY_FAIL=1 run_signoff --conversation tk-conv --outcome "staying — the retry is reworked" --ruled yes --ruling "fix the retry" --rework --no-wait --stay "the retry backs off"
+: > "$CALLS"
+run_signoff --conversation tk-conv --outcome "staying — the retry is reworked" --ruled yes --ruling "fix the retry" --rework --no-wait --stay "the retry backs off"
+eq "$RC" 0 "(STAY-REWORK-RESTART-OPEN) the same call, run while its rework is open, exits 0"
+has "$(cat "$CALLS")" "converse-rework --anchor tk-anc --ruling-bead tk-conv" "(STAY-REWORK-RESTART-OPEN) …sending the rework again, which the writer adopts"
+hasnt "$(cat "$CALLS")" "gc.ruling_consequence=" "(STAY-REWORK-RESTART-OPEN) …with the record already naming it"
 
 # A second stay with the text of an earlier one is a call of its own: it
 # records itself again before its writes, so one that stops before it names

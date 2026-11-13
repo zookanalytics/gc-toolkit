@@ -81,7 +81,11 @@ wait, and the session sleeps again once the tab detaches.
 The entry says `interrupted` and names this skill when a stay stopped short:
 before its sign-off finished, before the conversation waited on all its work,
 or before it left the conversation to wait. Run the call again with the same
-ruling, which is safe, and end the turn. When your thread no longer holds that
+ruling, which is safe, and end the turn. The sign-off records the rework it
+filed under the ruling, so the call files none again, even once that rework has
+closed. When that closed rework is all the stay waits on, its last line says
+the work is back: run the entry again, which reads `returned`, and carry out
+the return instead of ending the turn. When your thread no longer holds that
 call, rebuild it from the record: `AGREED` is its `--stay`, the conversation's
 comments record its ruling and what it did, the subject's latest close brief is
 its `--close-brief`, and `WORK`, once the sign-off finished, names its work, in

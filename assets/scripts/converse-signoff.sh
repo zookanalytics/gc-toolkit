@@ -13,7 +13,8 @@
 #      runs in that PR's own rig, its store, pool and checkout, whichever rig
 #      the conversation lives in, and the PR it acts on is recorded on the
 #      conversation before it acts, so a re-run of the same ruling acts on the
-#      same PR even once that PR has closed;
+#      same PR even once that PR has closed. The rework is recorded there too
+#      once it is filed, so a re-run once it has closed files no second one;
 #   2. writes the subject's headline through gc-helm.sh takeaway, and stops
 #      when takeaway refuses it, then, when the ruling leaves the subject
 #      waiting on work, its close brief and the arm of its validating closer,
@@ -181,6 +182,10 @@
 #     then, even once it has closed, as a retired PR closes when pr-facts
 #     consummates its disposition; a PR that reads closed has nothing left for
 #     the rework or the retirement to do, so the re-run goes on without it.
+#     The record also names the child a --rework filed, written once
+#     converse-rework.sh reports it, and a re-run that finds that child closed
+#     files no second rework and supersedes no review again: the ruling's
+#     rework is done, and a stay waits on that child.
 #   --pr-anchor <bead> names the PR --rework or --retire acts on when the
 #     ruling reaches more than one, which it requires; every other one the
 #     ruling reaches stands. A conversation owns one live rework child, so a
@@ -236,15 +241,15 @@
 #     closer the stay armed already checks that work, and a --waiting-on on
 #     work that has landed would arm it again once its arm has sent it.
 # Exit: 0 signed off, or with --answer the named gates answered, or with --stay
-#   the conversation left waiting on the work; 1 stopped
-#   short — a read failed, the rework did not file, the PR did not retire, the
-#   headline, the close brief, the closer's arm or the lift of the subject's
-#   hold:mayor did not land, a gate did not close, the recommendation was not
-#   taken, or the conversation did not close, hand back or stay — so do NOT
-#   post the sign-off, or report the ruling as
-#   carried out; repair what it names and re-run, which repeats every write it
-#   made safely; 2 refused before any write: usage, a conversation that is not
-#   one, a gate it does not reply to, a ruling that reaches an open PR and gave
+#   the conversation left waiting on the work; 1 stopped short — a read
+#   failed, the rework did not file or its record did not land, the PR did not
+#   retire, the headline, the close brief, the closer's arm or the lift of the
+#   subject's hold:mayor did not land, a gate did not close, the
+#   recommendation was not taken, or the conversation did not close, hand back
+#   or stay — so do NOT post the sign-off, or report the ruling as carried out;
+#   repair what it names and re-run, which repeats every write it made safely;
+#   2 refused before any write: usage, a conversation that is not one, a gate
+#   it does not reply to, a ruling that reaches an open PR and gave
 #   none of --rework, --no-rework and --retire, a --rework or --retire on a
 #   ruling that reaches more than one open PR without a --pr-anchor naming one
 #   of them, or an --accept with none of the subject's own recommendation gates
@@ -583,16 +588,34 @@ fi
 # and a recorded PR that reads closed has nothing left for the answer to do. A
 # re-run that answers differently is a new answer, and the record does not
 # bind it.
+#
+# A rework's record also names the child it filed, once converse-rework.sh
+# reports it, because the store cannot name it later: a conversation's rework
+# children all carry its id as source_ruling_bead, and the ruling a child
+# carries as its rejection_reason is cleared once its worker resumes the branch
+# (work-setup.sh). The writer adopts only a live child, so
+# a re-run once the child has closed would file a second rework on the same
+# ruling, block the PR again and supersede the reviews of the reworked branch.
+# So a recorded child that has closed is this ruling's rework done: the re-run
+# files nothing and supersedes nothing, and a stay waits on that child, which
+# returns it at once. A stop after the child is filed and before its record
+# lands leaves the record without it, and the re-run then adopts the child
+# while it is live. The child's writer, rework-child.sh, is retired by the
+# deletion plan, so it gains no record of the ruling.
 CONSEQUENCE_JQ='def consequences: ((.metadata // {})["gc.ruling_consequence"] // {})
   | (if type == "string" then (fromjson? // {}) else . end) | if type == "object" then . else {} end;'
 RECORDED_ON=""
+RECORDED_CHILD=""
 case "$PR_ANSWER" in
   rework|retire)
     RECORDED_ON=$(printf '%s' "$CONV_ROW" | jq -r --arg a "$ANSWER" --arg act "$PR_ANSWER" "$CONSEQUENCE_JQ"'
-      consequences | .[$a] // {} | select(((.act // "") | tostring) == $act) | (.anchor // "") | tostring' 2>/dev/null) ;;
+      consequences | .[$a] // {} | select(((.act // "") | tostring) == $act) | (.anchor // "") | tostring' 2>/dev/null)
+    RECORDED_CHILD=$(printf '%s' "$CONV_ROW" | jq -r --arg a "$ANSWER" --arg act "$PR_ANSWER" "$CONSEQUENCE_JQ"'
+      consequences | .[$a] // {} | select(((.act // "") | tostring) == $act) | (.child // "") | tostring' 2>/dev/null) ;;
 esac
 PR_TARGET=""
 TARGET_CLOSED=""
+CHILD_CLOSED=""
 STANDS=()
 case "$PR_ANSWER" in
   rework|retire)
@@ -613,6 +636,15 @@ case "$PR_ANSWER" in
       TROW=$(show_row "$PR_TARGET") \
         || stopped "$PR_TARGET, the PR an earlier attempt of this ruling recorded for its --$PR_ANSWER, could not be read to tell whether it is still open; nothing was written"
       [ "$(printf '%s' "$TROW" | jq -r '(.status // "") | ascii_downcase')" = closed ] && TARGET_CLOSED=yes
+      # The recorded rework matters while its PR is open, which it would rework
+      # again, and to a stay, which waits on it whatever the PR's state.
+      if [ -n "$RECORDED_CHILD" ] && { [ -z "$TARGET_CLOSED" ] || [ -n "$STAY" ]; }; then
+        CHROW=$(show_row "$RECORDED_CHILD") \
+          || stopped "$RECORDED_CHILD, the rework an earlier attempt of this ruling filed on $PR_TARGET, could not be read to tell whether it has closed; nothing was written"
+        printf '%s' "$CHROW" | jq -e --arg c "$CONVERSATION" '((.metadata // {}).source_ruling_bead // "") == $c' >/dev/null 2>&1 \
+          || stopped "$RECORDED_CHILD, which the record on conversation $CONVERSATION names as this ruling's rework on $PR_TARGET, does not read as this conversation's rework; nothing was written"
+        [ "$(printf '%s' "$CHROW" | jq -r '(.status // "") | ascii_downcase')" = closed ] && CHILD_CLOSED=yes
+      fi
     fi ;;
   no-rework)
     STANDS=("${PR_ANCHORS[@]+"${PR_ANCHORS[@]}"}")
@@ -958,7 +990,12 @@ if [ -n "$TARGET_CLOSED" ]; then
   echo "$PR_TARGET, the PR an earlier attempt of this ruling recorded for its --$PR_ANSWER, reads closed, so the $PR_ANSWER has nothing left to act on"
   CONSEQUENCE="found $PR_TARGET closed, so the $PR_ANSWER had nothing left to act on"
   ACTING=""
+elif [ -n "$CHILD_CLOSED" ]; then
+  echo "$RECORDED_CHILD, the rework an earlier attempt of this ruling filed on $PR_TARGET, has closed, so the rework has nothing left to do"
+  CONSEQUENCE="found the rework $RECORDED_CHILD closed, so the rework had nothing left to do"
+  ACTING=""
 fi
+CHILD=""
 case "$ACTING" in
   rework)
     CR=$(pack_script converse-rework.sh)
@@ -967,14 +1004,29 @@ case "$ACTING" in
     elif PR_OUT=$(in_target_rig "$CR" --anchor "$PR_TARGET" --ruling-bead "$CONVERSATION" --ruling "$RULING" 2>&1); then
       echo "$PR_OUT"
       CONSEQUENCE="filed ruling-driven rework on $PR_TARGET"
-      record_action "Sent $(pr_label "$PR_TARGET") back for rework."
     fi
     if [ -z "$CONSEQUENCE" ]; then
       echo "REWORK NOT COMPLETE on $PR_TARGET: $PR_OUT"
       echo "Nothing else was written${STAY:+ but the staying: line that records the stay}: no headline, gate answer or close. $UNDONE"
       echo "Repair the cause and re-run. If $PR_TARGET is not an open PR, file the ruling's consequence as work, then re-run without --rework and with --waiting-on <that bead>. If it cannot be repaired, raise it in the thread."
       exit 1
-    fi ;;
+    fi
+    # The child the writer names on its last line
+    # ("<child> <route> <filed|adopted|in-flight>") is recorded under the
+    # ruling before anything else is written, so a re-run once it has closed
+    # finds it there. A refused record stops here, and a re-run while the
+    # child is open adopts it and records it.
+    read -r CHILD _ <<EOF
+$(printf '%s\n' "$PR_OUT" | tail -n 1)
+EOF
+    case "$CHILD" in -*|*-|*[!A-Za-z0-9._-]*) CHILD="" ;; *-*) ;; *) CHILD="" ;; esac
+    if [ -n "$CHILD" ] && [ "$CHILD" != "$RECORDED_CHILD" ]; then
+      RECORD=$(printf '%s' "$CONV_ROW" | jq -c --arg a "$ANSWER" --arg t "$PR_TARGET" --arg c "$CHILD" "$CONSEQUENCE_JQ"'
+        consequences + {($a): {act: "rework", anchor: $t, child: $c}}' 2>/dev/null)
+      [ -n "$RECORD" ] && gc bd update "$CONVERSATION" --set-metadata "gc.ruling_consequence=$RECORD" >/dev/null 2>&1 \
+        || stopped "rework $CHILD is filed on $PR_TARGET, but the store refused its record on conversation $CONVERSATION (gc.ruling_consequence), which a re-run reads once $CHILD has closed so that it files no second rework; nothing else was written${STAY:+ but the staying: line that records the stay}. Re-run while $CHILD is open, which adopts it"
+    fi
+    record_action "Sent $(pr_label "$PR_TARGET") back for rework." ;;
   retire)
     PD=$(pack_script pr-dispose.sh)
     if [ -z "$PD" ]; then
@@ -993,13 +1045,11 @@ case "$ACTING" in
 esac
 for p in "${STANDS[@]+"${STANDS[@]}"}"; do echo "the ruling leaves the branch of $p as it stands"; done
 
-# A stay waits on the rework step 1 filed, the child its writer names on its
-# last line ("<child> <route> <filed|adopted|in-flight>"), read back as this
-# conversation's rework in the conversation's own store.
-if [ -n "$STAY" ] && [ "$ACTING" = rework ]; then
-  read -r CHILD _ <<EOF
-$(printf '%s\n' "$PR_OUT" | tail -n 1)
-EOF
+# A stay waits on this ruling's rework, read back as this conversation's rework
+# in the conversation's own store: the child step 1 filed, or the one an
+# earlier attempt filed that has closed, which returns the stay at once.
+[ -z "$CHILD_CLOSED" ] || CHILD="$RECORDED_CHILD"
+if [ -n "$STAY" ] && { [ "$ACTING" = rework ] || [ -n "$CHILD_CLOSED" ]; }; then
   CROW=""
   if [ -n "$CHILD" ] && [ "${CHILD%%-*}" = "${CONVERSATION%%-*}" ]; then
     CROW=$(show_row "$CHILD") || CROW=""
@@ -1171,7 +1221,13 @@ if [ "$RULED" = yes ]; then
       *) stopped "the store refused the write that leaves conversation $CONVERSATION waiting under $HOLDER (gc bd update exited $STAY_RC); its edges and its staying: line are written, and a re-run makes the write" ;;
     esac
     record_action "Kept this conversation open until the work it sent lands, to compare it then with what was agreed."
-    echo "STAYING conversation $CONVERSATION on $SUBJECT: it waits on $STAY_ON under $HOLDER. Its sitting sleeps once no tab is attached and wakes with this thread when that work closes"
+    # A stay whose only work is a rework that has closed already is ready at
+    # once, so nothing wakes its sitting: the sitting turns to the return now.
+    if [ -n "$CHILD_CLOSED" ] && [ "$STAY_ON" = "$RECORDED_CHILD" ]; then
+      echo "STAYING conversation $CONVERSATION on $SUBJECT: it waits on $STAY_ON under $HOLDER, which has closed already, so the work is back. Run the entry again, which reads it as returned, and carry out the return"
+    else
+      echo "STAYING conversation $CONVERSATION on $SUBJECT: it waits on $STAY_ON under $HOLDER. Its sitting sleeps once no tab is attached and wakes with this thread when that work closes"
+    fi
     tell_approval
     exit 0
   fi

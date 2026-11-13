@@ -1568,13 +1568,17 @@ keys = [
 #   in its comment on the subject's PR. Never cleared. Freeform multi-line text.
 # gc.ruling_consequence — on a conversation, the open PR each of its rulings'
 #   --rework or --retire acts on: a JSON object from the ruling's answer
-#   (`ruled: <ruling>`) to {act, anchor}, act `rework` or `retire` and anchor
-#   the PR's anchor bead. converse-signoff.sh writes a ruling's entry first,
-#   and the rework or retirement acts only on its zero exit. A re-run of that
-#   ruling with the same answer acts on the anchor it names, even once that
-#   anchor has closed, as a retired PR's does when pr-facts consummates its
-#   disposition. An entry binds no re-run that answers differently, which
-#   rewrites it when its answer acts on a PR. Never cleared.
+#   (`ruled: <ruling>`) to {act, anchor, child}, act `rework` or `retire`,
+#   anchor the PR's anchor bead, and child the rework a `rework` filed.
+#   converse-signoff.sh writes a ruling's entry first, without child, and the
+#   rework or retirement acts only on its zero exit. Once converse-rework.sh
+#   names the child it filed, the sign-off writes the entry again with it,
+#   before any other write. A re-run of that ruling with the same answer acts
+#   on the anchor it names, even once that anchor has closed, as a retired PR's
+#   does when pr-facts consummates its disposition, and files no second rework
+#   once the child it names has closed. An entry binds no re-run that answers
+#   differently, which rewrites it when its answer acts on a PR. Never
+#   cleared.
 
 [metadata.patrol_findings]
 # One durable bead per distinct patrol finding, written by

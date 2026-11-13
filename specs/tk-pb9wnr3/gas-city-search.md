@@ -1,6 +1,6 @@
 ---
 name: Gas City search for a sitting that stays until its work returns
-description: Use when you review the stay that converse-signoff.sh's --stay writes, or the entry converse-entry.sh gives a sitting, and need the Gas City and bd primitives they compose, the native signals the entry looked for and why none tells a return from a fresh sitting, the session wait the stay does not use and why, and why the surface is a mode of the sign-off, a notes line and one read script rather than a store, a key or a service of its own.
+description: Use when you review the stay that converse-signoff.sh's --stay writes, the entry converse-entry.sh gives a sitting, or the rework a ruling's record names, and need the Gas City and bd primitives they compose, the native signals the entry looked for and why none tells a return from a fresh sitting, the session wait the stay does not use and why, why a ruling's record names its rework where no bd edge can, and why the surface is a mode of the sign-off, a notes line and one read script rather than a store, a key or a service of its own.
 ---
 
 # Gas City search: a sitting that stays until its work returns
@@ -79,6 +79,23 @@ closes) would duplicate the assigned-work demand above, so none is built.
   stay as waiting or returned only when each bead that second line names has
   the conversation's edge or has closed, since a conversation keeps its edges
   onto the work of a stay that returned. It is a line in bd's notes, not a key.
+- **The rework a ruling filed, as `child` in its `gc.ruling_consequence`
+  entry.** A stay that stops after its rework is filed is run again with the
+  same ruling, and once that rework has closed, the re-run must not file it a
+  second time. The rework's writer adopts only a live child, so the re-run must
+  learn which child the ruling filed. The child carries the conversation as
+  `source_ruling_bead`, which every rework of that conversation shares, and the
+  ruling only as `rejection_reason`, which `work-setup.sh` clears when the
+  child's worker resumes the branch. bd's own edge cannot carry the ruling. Its
+  `Dependency` type has a `Metadata` field (`internal/types/types.go` at beads
+  `7ef2fd05e`, the installed bd 1.3.4), but `bd dep add` builds each edge from
+  its two ids and its type alone (`issueops.DependencyEdge` in
+  `cmd/bd/dep.go`), so an edge from the conversation onto the child says the two
+  are related and not which ruling filed it. A field written on the child at its
+  create, such as bd's `--external-ref`, would need the child's writer,
+  `rework-child.sh`, which the deletion plan retires (tk-1tfzr71.22). So the
+  sign-off writes the child into the ruling's own entry in the record it
+  already keeps per ruling, once `converse-rework.sh` names it. It adds no key.
 - **Two readers learn the state.** The per-rig board reads a conversation that a
   wait of its own holds as no ask, through the wait reader it already runs
   (`services/gctk/waits`). `gc-helm engage` attaches an asleep sitting at once,

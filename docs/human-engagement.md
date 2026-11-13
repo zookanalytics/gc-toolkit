@@ -912,7 +912,10 @@ own rig, with its store, pool and checkout, when a gate in another rig's store
 releases it. The PR it acts on is recorded on the conversation first
 (`gc.ruling_consequence`), so a re-run of the same ruling acts on the same PR.
 A re-run that finds that PR closed, as a retirement leaves it once pr-facts
-consummates it, goes on without it. A conversation owns one live rework, so
+consummates it, goes on without it. The record also names the rework a ruling
+filed, once it is filed, because the store keeps no trace of which ruling
+filed a child. A re-run that finds that rework closed files no second one and
+supersedes no review again, and a stay waits on the closed rework. A conversation owns one live rework, so
 a second PR whose branch must change waits behind its gate, left owed, for a
 ruling of its own. A
 sitting signs off only when nothing important is pending; a turn that hands
