@@ -218,15 +218,43 @@ Sign off by the case that fits (the converse-settle step):
 
 ## Send a bead to a named agent
 
-The mechanik, deacon, witness, refinery and keeper are named agents. Assign the
-bead to the agent by the qualified name `gc agent list` prints, then notify it,
-because an idle named agent acts on the bead only once notified
-(`docs/deferred-dispatch.md`):
+The mechanik, deacon, witness, refinery and keeper are named agents. Address
+one by the qualified name `gc agent list` prints, in the form it finds its work
+by (`docs/deferred-dispatch.md`). A bead is ready when bd reports it so, which
+this answers:
+`gc bd --rig <rig> ready --brief --json --limit 0 | jq -e --arg b <bead> 'any(.[]; .id == $b)'`.
 
-```bash
-gc bd update <bead> --assignee <qualified-name> \
-  && "$(gc <binding> scripts-dir)/deferred-dispatch.sh" notify <bead> --agent <qualified-name>
-```
+- **The mechanik claims through its hook**, so hand the bead over with Gas
+  City's route. A route alone gives a running agent no turn, so nudge the
+  agent too when the bead is ready:
+
+  ```bash
+  gc sling <qualified-name> <bead> --no-formula --no-convoy \
+    && gc session nudge <qualified-name> "<bead> is routed to you and ready"
+  ```
+
+  A bead that still waits on a blocker takes the route alone, and Gas City
+  nudges the agent when the blocker closes.
+- **The refinery and the keeper list the beads assigned to them**, which a
+  route never reaches, so assign the bead, and nudge the agent when the bead
+  is ready:
+
+  ```bash
+  gc bd update <bead> --assignee <qualified-name> \
+    && gc session nudge <qualified-name> "<bead> is assigned to you and ready"
+  ```
+
+  A bead that still waits takes the assignee alone, and Gas City nudges the
+  agent when its blocker closes. The refinery takes an integration effort's
+  landing bead and its bring-current hand-off, which `integration-effort.md`
+  files.
+- **The deacon and the witness patrol**, and each one's hook offers only its
+  patrol's own wisp, so neither takes a bead. Send what one of them must act
+  on as mail, which its patrol reads every cycle:
+
+  ```bash
+  gc mail send <qualified-name> -s "<what it must do>" -m "<the bead, and what to do about it>"
+  ```
 
 ## Stand up an integration effort
 
@@ -317,9 +345,11 @@ name the formula and why you chose it.
   `--no-wait`.
 - **Send it elsewhere.** Name where it goes in the same call:
   `"$(gc <binding> scripts-dir)/gc-helm.sh" takeaway <bead> "<where it goes now, and why>" --release --no-wait --route <rig>/<pool>`.
-  For a named agent, pass `--assign <named-agent>` in place of
-  `--route <rig>/<pool>`, then notify it:
-  `"$(gc <binding> scripts-dir)/deferred-dispatch.sh" notify <bead> --agent <named-agent>`.
+  For the refinery or the keeper, pass `--assign <named-agent>` in place of
+  `--route <rig>/<pool>`, which writes the assignee in the release, then nudge
+  it once the bead is ready, as Send a bead to a named agent says. For the
+  mechanik, release the bead with neither and hand it over as that section
+  says.
 - **Withdraw a recommendation** the bead should not take, keeping the bead open
   for discussion:
   `SUBJECT=<bead> CONVERSATION=<conversation> "$(gc <binding> scripts-dir)/converse-invalidate-recommendation.sh" "<why it no longer holds>"`.

@@ -636,8 +636,9 @@ DD_CALL='"$(gc <binding> scripts-dir)/deferred-dispatch.sh"'
 WATCH_CALL='"$(gc <binding> scripts-dir)/gc-bd-watch.sh"'
 KEEPER_RENDER="$REPO/generated/seed-audit/agents/keeper.md"
 MECHANIK_RENDER="$REPO/generated/seed-audit/agents/mechanik.md"
-have "the dispatch fragment gives the work skill's notice call" "$DD_CALL notify <bead> --agent <qualified-name>" "$DISPATCH"
-have "…the call the work skill gives" "$DD_CALL notify <bead> --agent <qualified-name>" "$WORK_SKILL"
+HANDOFF='gc sling <qualified-name> <bead> --no-formula --no-convoy'
+have "the dispatch fragment gives the work skill's hand-off to a named agent" "$HANDOFF" "$DISPATCH"
+have "…the hand-off the work skill gives" "$HANDOFF" "$WORK_SKILL"
 have "…and runs its watch through the pack command" "command: '$WATCH_CALL <bead>'" "$DISPATCH"
 # named_only_via <render> <script> [<binding>] — prose names a script by its bare
 # name in backticks. Every other mention is a call, and goes through the pack
@@ -650,10 +651,10 @@ named_only_via() {
     [ "$via" -gt 0 ] && [ "$named" = "$((via + prose))" ] && ok "…and names $2 no other way ($via calls)" \
         || bad "…and names $2 no other way" "$via of its $((named - prose)) calls go through the pack command"
 }
-verbs=$(grep -oF -- "$DD_CALL notify
-$DD_CALL arm" "$KEEPER_RENDER" | sed 's/.* //' | sort -u | tr '\n' ' ')
-[ "$verbs" = "arm notify " ] && ok "keeper's render gives the notice and the arm as calls through the pack command" \
-    || bad "keeper's render gives the notice and the arm as calls through the pack command" "found: '$verbs'"
+DD_VERB_RE='\$\(gc <binding> scripts-dir\)/deferred-dispatch\.sh" [a-z]+'
+verbs=$(grep -oE -- "$DD_VERB_RE" "$KEEPER_RENDER" | sed 's/.* //' | sort -u | tr '\n' ' ')
+[ "$verbs" = "arm " ] && ok "keeper's render gives the arm, its one deferred-dispatch call, through the pack command" \
+    || bad "keeper's render gives the arm, its one deferred-dispatch call, through the pack command" "found: '$verbs'"
 have "…and the watch" "command: '$WATCH_CALL <bead>'" "$KEEPER_RENDER"
 for script in deferred-dispatch.sh gc-bd-watch.sh; do
     named_only_via "$KEEPER_RENDER" "$script"
