@@ -612,7 +612,7 @@ sitting() { # [<VAR=value>...] — work-setup.sh --held-by, from the sitting's h
 ended() { grep -cE '^(drain|gate|await|cancel)( |$)' "$CALLS" | tr -d ' '; }
 printf '[]' > "$RUNS"
 printf '%s' '[{"root":"root-9","convoy":"cv-9","bead":"tk-c","formula":"mol-polecat-work","live":true}]' > "$TMP/runs-c.json"
-for case in edge hook no-hook holder refinery run route target; do
+for case in edge hook no-hook holder refinery run route target rejection; do
   envs=(); edit="."
   case "$case" in
     edge)     edit='.dependencies = []'; want="no blocks edge onto tk-conv" ;;
@@ -623,6 +623,8 @@ for case in edge hook no-hook holder refinery run route target; do
     run)      envs=("RUN_LIB_STUB_RUNS=$TMP/runs-c.json"); want="a run works it (root-9)" ;;
     route)    edit='.metadata["gc.routed_to"] = "gc-toolkit/gc-toolkit.polecat"'; want="routed to gc-toolkit/gc-toolkit.polecat" ;;
     target)   edit='.metadata = {}'; want="records no target" ;;
+    rejection) edit='.metadata += {branch: "polecat/tk-c", rejection_reason: "Conflicts with main"}'
+              want="carries a rejection reason, so a check sent it back" ;;
   esac
   change "$edit" > "$STORE"; cp "$STORE" "$TMP/store-before"
   sitting ${envs[@]+"${envs[@]}"}

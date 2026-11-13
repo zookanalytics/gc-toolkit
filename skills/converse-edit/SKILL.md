@@ -360,6 +360,12 @@ answer it:
   or it is routed to a pool. Remove your edge the same way, because it would
   hold their work until the conversation closes, and tell the operator who
   holds the change.
+- **A check sent the change back** (setup: `it carries a rejection reason`).
+  Its branch takes a polecat's resume, which brings it current by merging its
+  target in, and a sitting never brings a branch current (After the hand-off).
+  Remove your edge the same way, because it would hold that resume until the
+  conversation closes, and tell the operator what the rejection reason says.
+  Their ruling decides whether the change goes to the pool (the `work` skill).
 - **The hold is missing.** `gc hook current` names another bead when this
   session does not hold its conversation, and step 1's claim takes it again.
   When the missing `blocks` edge onto the conversation is the only reason, add

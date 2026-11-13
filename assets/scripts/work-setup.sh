@@ -45,9 +45,12 @@
 # A converse sitting sets its change up with --held-by <conversation> beside
 # --bead. Its claim is the conversation, so the bead must show that the sitting
 # holds it, by the proof the hand-off reads too (work_held_by_proof in
-# work-lib.sh), and the tree is cut from the bead's target. The sitting outlives
-# the call and is in the conversation to hear why it stopped, so no stop files a
-# gate, cancels or drains. A second run re-enters the tree the bead records.
+# work-lib.sh), and the tree is cut from the bead's target. A change that carries
+# a rejection reason is refused before anything is written: a check sent it back,
+# and a polecat's resume brings its branch current by merge, which a sitting
+# never does, so no merge mode takes --held-by. The sitting outlives the call and
+# is in the conversation to hear why it stopped, so no stop files a gate, cancels
+# or drains. A second run re-enters the tree the bead records.
 #
 # stdout: progress, then the path of the worktree as the last line, which the
 # caller enters. Everything a person should read goes to stderr.
@@ -70,8 +73,8 @@ usage: work-setup.sh --convoy <id>|--bead <id> --base <branch> [--step <ref>] [-
   --bead     the work bead, for a claimant with no poured workflow
   --base     the branch the work is poured from
   --held-by  the conversation a converse sitting holds, whose blocks edge holds
-             the bead; the bead's target is the base, and no stop gates,
-             cancels or drains
+             the bead; the bead's target is the base, a bead that carries a
+             rejection reason is refused, and no stop gates, cancels or drains
   --step     the step this session holds; default mol-polecat-work.workspace-setup
   --formula  the formula a re-sling pours; default mol-polecat-work
 
@@ -184,6 +187,8 @@ case $? in
 esac
 if [ -n "$WORK_HELD_BY" ]; then
   work_held_by_proof || exit 1
+  [ -z "$(work_meta rejection_reason)" ] \
+    || work_held_stop "$WORK_ID carries a rejection reason, so a check sent it back: a polecat's resume brings its branch current by merging its target in, and a sitting never does"
   BASE=$(work_meta target)
   [ -n "$BASE" ] || work_held_stop "$WORK_ID records no target, the branch its change is cut from"
 fi

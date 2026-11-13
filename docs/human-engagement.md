@@ -1018,12 +1018,14 @@ and a conversation's close ends its effect.
 **The tree.** Work's setup, `work-setup.sh --held-by <conversation>`, cuts the
 change's tree at `<the sitting's home>/worktrees/<bead>` on `polecat/<bead>`,
 fresh from its target, and records `work_dir` and `branch` on the bead, where and
-how it cuts a polecat's. The home's start syncs the home to the default branch
-and leaves `worktrees/` alone. Before its first edit the sitting reads the
-polecat class's standards from their fragments. It commits after each step the
-operator agrees, with no identity flags, because each agent home's git
-configuration signs its commits, and the commits stay local until Work's
-hand-off pushes them.
+how it cuts a polecat's. It refuses a change that carries a rejection reason,
+writing nothing: a check sent that change back, and a polecat's resume brings
+its branch current by merging its target in, which a sitting never does. The
+home's start syncs the home to the default branch and leaves `worktrees/`
+alone. Before its first edit the sitting reads the polecat class's standards
+from their fragments. It commits after each step the operator agrees, with no
+identity flags, because each agent home's git configuration signs its commits,
+and the commits stay local until Work's hand-off pushes them.
 
 **The hand-off to the refinery** comes on the operator's go, which the sitting
 asks for once the agreed steps are in, or which the operator gives when they
