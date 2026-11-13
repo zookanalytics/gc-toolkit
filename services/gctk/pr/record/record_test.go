@@ -68,6 +68,13 @@ func TestReadReadsTheRecordAndItsMarker(t *testing.T) {
 		!record.Exception(record.CloseRefused) || record.Exception(record.Pending) {
 		t.Fatal("the record's values read wrong")
 	}
+	for v, want := range map[string]bool{record.Merged: true, record.CloseRefused: true, record.MergedUnvalidatedHead: true,
+		record.Pending: false, record.HeadChanged: false, record.ClosedUnmerged: false, record.EvidenceContradiction: false,
+		record.LegacyClosed: false, record.Invalid: false, record.Incomplete: false, "merged": false, "": false} {
+		if record.PRMerged(v) != want {
+			t.Errorf("PRMerged(%q) = %v", v, !want)
+		}
+	}
 	if !strings.HasPrefix(record.Result.Name(), "merge_result") {
 		t.Fatal("the reading face names another key")
 	}

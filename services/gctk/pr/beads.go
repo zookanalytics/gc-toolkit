@@ -30,8 +30,9 @@ type onBranch struct {
 //     branch from its creation, and its fix is not on the branch until its
 //     polecat's hand-off clears the route;
 //   - fold_target, when a polecat folded its work onto the branch;
-//   - merged_target with merge_result=merged, when its work landed on the
-//     branch.
+//   - merged_target, when its work landed on the branch: merge_result reads
+//     merged on the old path, or a value the pending record writes once its PR
+//     merged (record.PRMerged).
 //
 // A bead that put no work there is left out: one closed as another bead's
 // duplicate, whose branch can name this one, and one whose work outcome reads
@@ -93,7 +94,7 @@ func branchBeads(l *ledger.Ledger, branch string) ([]onBranch, error) {
 		if err != nil {
 			return nil, err
 		}
-		if result != "merged" {
+		if result != "merged" && !record.PRMerged(result) {
 			continue
 		}
 		if err := add(r); err != nil {

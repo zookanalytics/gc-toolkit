@@ -22,7 +22,8 @@ var (
 			", each of which keeps the bead blocked behind a human gate keyed by its value. Absent, the bead "+
 			"has not landed and owns no open PR. The old path's values are lifecycle/lifecycle.toml's [states]. "+
 			"A PR's composition reads a bead on its branch that carries one as the branch's anchor, and one "+
-			"that reads merged as having landed its work on its merged_target.")
+			"that reads merged, or "+Merged+", "+CloseRefused+" or "+MergedUnvalidatedHead+", as having landed "+
+			"its work on its merged_target.")
 	prURLKey = ledger.Declare("pr_url", ledger.String,
 		"The URL of the PR the record names, https://<host>/<owner>/<repo>/pull/<number>.")
 	prNumberKey = ledger.Declare("pr_number", ledger.String,

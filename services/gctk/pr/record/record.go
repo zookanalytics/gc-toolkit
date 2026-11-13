@@ -59,6 +59,12 @@ const (
 // record, at the head the refinery validated or at one it has not.
 func OnRecord(v string) bool { return v == Pending || v == HeadChanged }
 
+// PRMerged reports whether a bead whose merge_result is v had its PR merge into
+// its merged_target, as GitHub reported it: at the validated head, whether bd
+// closed the bead or refused the close, or at a head the refinery did not
+// validate. Either way the PR's commits are on the target.
+func PRMerged(v string) bool { return v == Merged || v == CloseRefused || v == MergedUnvalidatedHead }
+
 // Exception reports whether v is one of the record's exceptions, each of which
 // keeps the bead blocked behind a human gate keyed by v.
 func Exception(v string) bool {

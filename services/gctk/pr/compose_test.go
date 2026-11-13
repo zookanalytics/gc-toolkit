@@ -8,6 +8,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 )
 
 const (
@@ -354,6 +355,9 @@ func TestComposeTheBranchBeads(t *testing.T) {
 		s := storeWith(anchor(nil),
 			rider("F", "2026-02-01T00:00:00Z", map[string]string{"fold_target": "polecat/A"}),
 			rider("M", "2026-03-01T00:00:00Z", map[string]string{"branch": "polecat/M", "merged_target": "polecat/A", "merge_result": "merged"}),
+			rider("P", "2026-03-02T00:00:00Z", map[string]string{"branch": "polecat/P", "merged_target": "polecat/A", "merge_result": record.Merged}),
+			rider("Q", "2026-03-03T00:00:00Z", map[string]string{"branch": "polecat/Q", "merged_target": "polecat/A", "merge_result": record.CloseRefused}),
+			rider("V", "2026-03-04T00:00:00Z", map[string]string{"branch": "polecat/V", "merged_target": "polecat/A", "merge_result": record.MergedUnvalidatedHead}),
 			rider("R", "2026-05-01T00:00:00Z", map[string]string{"branch": "polecat/A", "gc.routed_to": "", "fold_target": "polecat/A"}),
 		)
 		got := beads(s, "Body.\n")
@@ -362,8 +366,11 @@ func TestComposeTheBranchBeads(t *testing.T) {
 			"- `A` — feat: add the widget _(opener)_\n" +
 			"- `F` — rider F\n" +
 			"- `M` — rider M _(merged in from `polecat/M`)_\n" +
+			"- `P` — rider P _(merged in from `polecat/P`)_\n" +
+			"- `Q` — rider Q _(merged in from `polecat/Q`)_\n" +
+			"- `V` — rider V _(merged in from `polecat/V`)_\n" +
 			"- `R` — rider R\n" + beadsClose + "\n"
-		if got.BranchBeads != Written || got.BranchBeadCount != 4 || got.Body != want {
+		if got.BranchBeads != Written || got.BranchBeadCount != 7 || got.Body != want {
 			t.Errorf("(%q, %d):\n%s", got.BranchBeads, got.BranchBeadCount, got.Body)
 		}
 		if again := beads(s, got.Body); again.BranchBeads != Current || again.Body != got.Body {
@@ -379,6 +386,8 @@ func TestComposeTheBranchBeads(t *testing.T) {
 			rider("N", "2026-02-01T00:00:00Z", map[string]string{"branch": "polecat/A", "gc.work_outcome": "no-op"}),
 			rider("O", "2026-02-01T00:00:00Z", map[string]string{"branch": "polecat/A", "work_outcome": "no-op"}),
 			rider("U", "2026-02-01T00:00:00Z", map[string]string{"merged_target": "polecat/A", "merge_result": "pull_request"}),
+			rider("E", "2026-02-01T00:00:00Z", map[string]string{"branch": "polecat/E", "merged_target": "polecat/A", "merge_result": record.Pending}),
+			rider("X", "2026-02-01T00:00:00Z", map[string]string{"branch": "polecat/X", "merged_target": "polecat/A", "merge_result": record.ClosedUnmerged}),
 			fake.Bead{ID: "G", Title: "gate", Status: "open", IssueType: "gate", Metadata: map[string]string{"branch": "polecat/A"}},
 			fake.Bead{ID: "W", Title: "wisp", Status: "open", Ephemeral: true, Metadata: map[string]string{"branch": "polecat/A"}},
 			fake.Bead{ID: "T", Title: "template", Status: "open", Template: true, Metadata: map[string]string{"fold_target": "polecat/A"}},
