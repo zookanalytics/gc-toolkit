@@ -5,7 +5,7 @@
 // each page lists and in what order; a page lays it out, folds it and filters
 // it.
 
-import { EpicBlock, Heading, NeedsList, Note, ObjectRow, QueueList, queueSize } from './rows';
+import { EpicBlock, Heading, NeedsView, Note, ObjectRow, QueueList, needsListed, queueSize } from './rows';
 import { AMBER, useView } from './view';
 
 export function EpicsPage() {
@@ -20,6 +20,7 @@ export function EpicsPage() {
   );
 }
 
+/** Every need in the rig, led by how many count and how many of each kind. */
 export function NeedsYouPage() {
   const { doc } = useView();
   const n = doc.needs_you;
@@ -31,11 +32,12 @@ export function NeedsYouPage() {
         </span>
         <span className="lead-text">
           {n.count === 0
-            ? 'Nothing in an epic is waiting on you.'
-            : `${n.count === 1 ? 'thing' : 'things'} in an epic ${n.count === 1 ? 'is' : 'are'} waiting on you.`}
+            ? 'Nothing is waiting on you.'
+            : `${n.count === 1 ? 'thing is' : 'things are'} waiting on you.`}
         </span>
       </div>
-      {n.needs.length === 0 ? <Note>Nothing in this rig needs you.</Note> : <NeedsList needs={n.needs} ctx="needs" depth={0} />}
+      <NeedsView needs={n} ctx="needs" depth={0} />
+      {needsListed(n) === 0 && <Note>Nothing in this rig needs you.</Note>}
     </>
   );
 }
