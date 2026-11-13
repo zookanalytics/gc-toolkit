@@ -256,9 +256,9 @@
     ]
   },
   {
-    "name": "a live blocker routed to a person",
+    "name": "a live blocker routed to human is no person's",
     "anchor": "tk-a",
-    "want": {"status": "needs-attention", "held": ["blocked"]},
+    "want": {"status": "merging", "held": []},
     "beads": [
       {"id": "tk-a", "status": "open", "waits_on": ["tk-d"], "metadata": {"merge_result": "pull_request", "pr_posture": "approved@abc@2026-10-27T00:00:00Z", "pr.machine": "settled@abc@2026-10-27T00:00:00Z"}},
       {"id": "tk-d", "status": "open", "issue_type": "task", "title": "pick the release window", "metadata": {"gc.routed_to": "human"}}
@@ -274,12 +274,12 @@
     ]
   },
   {
-    "name": "a closed blocker routed to a person no longer holds",
+    "name": "a closed decision no longer holds",
     "anchor": "tk-a",
     "want": {"status": "merging", "held": []},
     "beads": [
       {"id": "tk-a", "status": "open", "waits_on": ["tk-d"], "metadata": {"merge_result": "pull_request", "pr_posture": "approved@abc@2026-10-27T00:00:00Z", "pr.machine": "settled@abc@2026-10-27T00:00:00Z"}},
-      {"id": "tk-d", "status": "closed", "issue_type": "task", "title": "pick the release window", "metadata": {"gc.routed_to": "human"}}
+      {"id": "tk-d", "status": "closed", "issue_type": "decision", "title": "keep the old flag?"}
     ]
   },
   {
@@ -292,21 +292,21 @@
     ]
   },
   {
-    "name": "a human gate routed to a person counts once, as a gate",
+    "name": "a human gate the anchor waits on counts once, as a gate",
     "anchor": "tk-a",
     "want": {"status": "needs-attention", "held": ["gate"]},
     "beads": [
       {"id": "tk-a", "status": "open", "waits_on": ["tk-g"], "metadata": {"merge_result": "pull_request", "pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
-      {"id": "tk-g", "status": "open", "issue_type": "gate", "await_type": "human", "title": "answer the review", "metadata": {"gc.routed_to": "human"}}
+      {"id": "tk-g", "status": "open", "issue_type": "gate", "await_type": "human", "title": "answer the review"}
     ]
   },
   {
-    "name": "a gate that awaits no person, routed to one, is a person's blocker",
+    "name": "a gate that awaits no person is no person's blocker",
     "anchor": "tk-a",
-    "want": {"status": "needs-attention", "held": ["blocked"]},
+    "want": {"status": "needs-review", "held": []},
     "beads": [
       {"id": "tk-a", "status": "open", "waits_on": ["tk-g"], "metadata": {"merge_result": "pull_request", "pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
-      {"id": "tk-g", "status": "open", "issue_type": "gate", "await_type": "timer", "title": "wait out the freeze", "metadata": {"gc.routed_to": "human"}}
+      {"id": "tk-g", "status": "open", "issue_type": "gate", "await_type": "timer", "title": "wait out the freeze"}
     ]
   },
   {
@@ -350,13 +350,13 @@
     ]
   },
   {
-    "name": "a rework waiting on a bead routed to a person",
+    "name": "an approved PR whose rework waits on a decision",
     "anchor": "tk-a",
     "want": {"status": "needs-attention", "held": ["blocked"]},
     "beads": [
       {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"], "metadata": {"merge_result": "pull_request", "pr_posture": "approved@abc@2026-10-27T00:00:00Z", "pr.machine": "settled@abc@2026-10-27T00:00:00Z"}},
       {"id": "tk-a.rw", "status": "open", "issue_type": "task", "waits_on": ["tk-p"], "metadata": {"task_kind": "rework", "anchor_bead": "tk-a"}},
-      {"id": "tk-p", "status": "open", "issue_type": "task", "title": "pick the release window", "metadata": {"gc.routed_to": "human"}}
+      {"id": "tk-p", "status": "open", "issue_type": "decision", "title": "pick the release window"}
     ]
   },
   {
@@ -446,7 +446,7 @@
     "beads": [
       {"id": "tk-a", "status": "open", "waits_on": ["tk-g", "tk-d"], "metadata": {"merge_result": "pull_request", "pr_posture": "approved@abc@2026-10-27T00:00:00Z", "pr.machine": "blocked@abc@2026-10-27T00:00:00Z", "pr.machine_cause": "review-threads", "pr.machine_reason": "1 unresolved review thread(s) must be resolved before this PR can merge", "pr.unanswered_threads": "1@abc"}},
       {"id": "tk-g", "status": "open", "issue_type": "gate", "await_type": "human", "title": "sign off the release"},
-      {"id": "tk-d", "status": "open", "issue_type": "task", "title": "pick the release window", "metadata": {"gc.routed_to": "human"}}
+      {"id": "tk-d", "status": "open", "issue_type": "decision", "title": "pick the release window"}
     ]
   },
   {

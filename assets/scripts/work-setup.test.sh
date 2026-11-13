@@ -23,6 +23,7 @@ ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1${2:+ ($2)}"; }
 eq()  { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3" "got '$1' want '$2'"; fi; }
 has() { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3" "'$2' not in '$1'" ;; esac; }
+hasnt() { case "$1" in *"$2"*) bad "$3" "'$2' found in '$1'" ;; *) ok "$3" ;; esac; }
 
 command -v jq >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit 1; }
 REAL_GIT="$(command -v git)" || { echo "git is required for this test" >&2; exit 1; }
@@ -312,14 +313,17 @@ for how in molecule bare; do
   : > "$CALLS"
   if [ "$how" = molecule ]; then
     TOOL_ENV=HOOK_CURRENT=tk-step tool --stop-merge --bead tk-w --path shared.txt --collided c --question q
-    grep -q '^await tk-w --key bring-current-question\.tk-w --subject tk-a ' "$CALLS" \
-      && ok "(14) molecule: the bead waits on the question's gate on its anchor" \
-      || bad "(14) molecule: the bead waits on the question's gate on its anchor"
     grep -q '^cancel --step mol-polecat-work.workspace-setup ' "$CALLS" && ok "(14) molecule: and its run is cancelled" || bad "(14) molecule: and its run is cancelled"
   else
     TOOL_ENV=HOOK_CURRENT=tk-w tool --stop-merge --bead tk-w --path shared.txt --collided c --question q
-    eq "$(meta gc.routed_to)" "human" "(14) bare: the bead parks to a person"
+    eq "$(grep -c '^cancel ' "$CALLS")" "0" "(14) bare: no run works it, so nothing is cancelled"
+    has "$(jq -r '.[0].notes // ""' "$STORE")" "Stopped bringing the branch current" "(14) bare: its notes say why it stopped"
   fi
+  grep -q '^await tk-w --key bring-current-question\.tk-w --subject tk-a --formula mol-polecat-work$' "$CALLS" \
+    && ok "(14) $how: the bead waits on the question's gate on its anchor, armed to re-sling" \
+    || bad "(14) $how: the bead waits on the question's gate on its anchor, armed to re-sling" "$(grep '^await' "$CALLS")"
+  eq "$(grep -cE '^gc bd update tk-w .*(gc\.routed_to|gc\.takeaway)' "$CALLS")" "0" "(14) $how: and nothing parks it on a route or a headline"
+  eq "$(grep -c '^bca ask --bead tk-w --path shared.txt --collided c --question q$' "$CALLS")" "1" "(14) $how: the question is asked once, with what collided"
   eq "$RC" "0" "(14) $how: --stop-merge exits 0"
   grep -qx 'drain' "$CALLS" && ok "(14) $how: it drains" || bad "(14) $how: it drains"
   eq "$(g "$C" rev-parse HEAD) $(g "$C" rev-parse -q --verify MERGE_HEAD)" "$W2 " "(14) $how: the merge is aborted, HEAD at the PR head"
@@ -338,11 +342,15 @@ setup_run "$(bead polecat/w2 "$(jq -nc --arg r "$CONFLICTS" '{rejection_reason: 
 TOOL_ENV=ASK_FAIL=1 tool --stop-merge --bead tk-w --path shared.txt --collided c --question q
 eq "$RC" "1" "(16) a question that reaches no gate stops the stop"
 eq "$(g "$C" rev-parse -q --verify MERGE_HEAD)" "$BASE_TIP" "(16) and the merge stays open"
-clone polecat/w2
-setup_run "$(bead polecat/w2 "$(jq -nc --arg r "$CONFLICTS" '{rejection_reason: $r, anchor_bead: "tk-a"}')")"
-TOOL_ENV="HOOK_CURRENT=tk-step AWAIT_RC=1" tool --stop-merge --bead tk-w --path shared.txt --collided c --question q
-eq "$RC" "1" "(16b) a wait that does not land stops the stop"
-eq "$(grep -cE '^(cancel|drain)( |$)' "$CALLS")" "0" "(16b) and nothing cancels or drains"
+for held in tk-step tk-w; do
+  clone polecat/w2
+  setup_run "$(bead polecat/w2 "$(jq -nc --arg r "$CONFLICTS" '{rejection_reason: $r, anchor_bead: "tk-a"}')")"
+  TOOL_ENV="HOOK_CURRENT=$held AWAIT_RC=1" tool --stop-merge --bead tk-w --path shared.txt --collided c --question q
+  eq "$RC" "1" "(16b) holding $held: a wait that does not land stops the stop"
+  eq "$(grep -cE '^(cancel|drain)( |$)' "$CALLS")" "0" "(16b) holding $held: and nothing cancels or drains"
+  eq "$(grep -cE '^gc bd update tk-w .*(--status|--assignee)' "$CALLS")" "0" "(16b) holding $held: the stop releases no claim itself, so it stays held"
+  hasnt "$(jq -r '.[0].notes // ""' "$STORE")" "Stopped bringing the branch current" "(16b) holding $held: and the notes record no stop"
+done
 
 clone polecat/w1
 setup_run "$(bead polecat/w1 "$(jq -nc --arg r "$STALE" '{rejection_reason: $r}')")" DROP_WRITE_WITH=bring_current_from

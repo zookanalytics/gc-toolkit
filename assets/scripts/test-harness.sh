@@ -285,6 +285,32 @@ case "$sub" in
     # records the priority the bead carried at the sling, bd's default 2 when
     # none was written (bpoured).
     [ -n "${STUB_SLING_FAIL:-}" ] && { echo "gc: simulated sling failure" >&2; exit 1; }
+    # A raw route, `gc sling <target> <bead> --no-formula`, pours nothing and
+    # writes what Gas City's router writes: gc.routed_to=<target>, then an empty
+    # gc.execution_routed_to on a bead that is no workflow's member
+    # (clearGraphTakeoverRoute). An empty target is refused, as gc refuses an
+    # agent city.toml does not name. STUB_DROP_KEYS="<bead>:gc.routed_to"
+    # leaves the route unwritten, as it leaves a pour's stamp.
+    case " $* " in
+      *" --no-formula "*)
+        target="${1:-}"; bead="${2:-}"
+        [ -n "$target" ] || { echo "gc sling: agent \"\" not found in city.toml" >&2; exit 1; }
+        [ -n "$bead" ] || exit 0
+        drops=""
+        for pair in ${STUB_DROP_KEYS:-}; do
+          case "$pair" in "$bead:"*) drops="${pair#*:}" ;; esac
+        done
+        route=1
+        case ",$drops," in *",gc.routed_to,"*) route=0 ;; esac
+        tmp="${S%/*}/.gc-stub.$$"
+        jq -c --arg id "$bead" --arg t "$target" --argjson route "$route" '
+          map(if .id == $id then
+                (if $route == 1 then .metadata["gc.routed_to"] = $t else . end)
+                | (if ((.metadata["gc.execution_routed_to"] // "") != "") and ((.metadata["gc.root_bead_id"] // "") == "")
+                   then .metadata["gc.execution_routed_to"] = "" else . end)
+              else . end)' "$S" > "$tmp" && mv "$tmp" "$S"
+        exit 0 ;;
+    esac
     target=""; bead=""
     while [ $# -gt 0 ]; do
       case "$1" in

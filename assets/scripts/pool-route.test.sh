@@ -120,9 +120,9 @@ eq "$(verdict gc-toolkit/gc-toolkit.converse)" "ok" "a live identity reads ok"
 eq "$(verdict gc-toolkit.converse)" "no-identity" "the bare form reads no-identity"
 eq "$(verdict rig-a/gc-toolkit.converse)" "cross-rig" "another rig's pool reads cross-rig"
 eq "$(verdict '')" "no-identity" "an empty route reads no-identity"
-# The operator marker is a held route, not a pool name that failed to resolve;
-# reading it as dead is how an operator-owned item gets handed back to a pool.
-eq "$(verdict human)" "ok" "the human sentinel reads ok"
+# No agent carries `human`, so it is a name that addresses nobody, as any such
+# name is.
+eq "$(verdict human)" "no-identity" "human reads no-identity"
 eq "$(STUB_AGENTS_FAIL=1 verdict gc-toolkit/gc-toolkit.converse)" "unknown" "an unreadable set reads unknown"
 # A route the caller did not write is only reconcilable against a store the
 # caller can name. GC_RIG names it, so without one a rig-qualified route reads
@@ -133,7 +133,7 @@ eq "$(env -u GC_RIG "$SUT" --verdict gc-toolkit/gc-toolkit.converse 2>/dev/null)
     "…unset reads the same as empty"
 eq "$(verdict gc-toolkit.deacon '')" "ok" "a bare city identity is still read on identity alone"
 eq "$(verdict gc-toolkit.converse '')" "no-identity" "…and an unheld bare name still reads no-identity"
-eq "$(verdict human '')" "ok" "the human sentinel carries no rig to reconcile"
+eq "$(verdict human '')" "no-identity" "…rig-less too"
 eq "$(verdict '' '')" "no-identity" "an empty route is still no-identity"
 env -u GC_RIG "$SUT" --verdict gc-toolkit/gc-toolkit.converse >/dev/null 2>&1
 eq "$?" 0 "unbound-store exits 0 too — still a reading"
@@ -149,16 +149,14 @@ env -u GC_RIG "$SUT" gc-toolkit/gc-toolkit.polecat >"$TMP/out" 2>"$TMP/err"; RC=
 eq "$RC" 0 "exit 0"
 eq "$(cat "$TMP/out")" "gc-toolkit/gc-toolkit.polecat" "the route the caller named is returned"
 
-echo "# the board marker human is passed through unqualified, never rig-scoped"
-# GC_RIG must NOT qualify `human`: `<rig>/human` names no agent, and the board
-# route is always claimable by design. route_verdict reads bare `human` as ok,
-# so the resolve path returns it unchanged, rig-bound or not.
+echo "# human is no pool: it is refused as any name no agent carries"
 GC_RIG=gc-toolkit run human
-eq "$RC" 0 "exit 0 with GC_RIG set"
-eq "$OUT" "human" "returned unqualified, not gc-toolkit/human"
-env -u GC_RIG "$SUT" human >"$TMP/out" 2>&1; RC=$?
-eq "$RC" 0 "exit 0 rig-less too"
-eq "$(cat "$TMP/out")" "human" "…and still bare human"
+eq "$RC" 1 "exit 1 with GC_RIG set"
+eq "$OUT" "" "stdout is EMPTY"
+has "$ERR" "route 'gc-toolkit/human' matches no live agent identity" "it is qualified like any bare name, then refused"
+env -u GC_RIG "$SUT" human >"$TMP/out" 2>"$TMP/err"; RC=$?
+eq "$RC" 1 "exit 1 rig-less too"
+eq "$(cat "$TMP/out")" "" "…with stdout EMPTY"
 
 echo "# usage"
 "$SUT" >/dev/null 2>&1; eq "$?" 2 "no argument is a usage error"

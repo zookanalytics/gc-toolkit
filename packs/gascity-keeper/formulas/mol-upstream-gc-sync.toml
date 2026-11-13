@@ -8,9 +8,11 @@ follow-up mols).
 Extends `mol-polecat-base` for `load-context`, but replaces the
 `implement / self-review` chain with a single `survey` step that drives
 `tools/upstream-gc-sync.sh`, then a `report-and-close` step that persists
-the output and closes the bead. Every abort path leaves the bead open,
-reassigned to `{{notify_recipient}}` (or `human`), with the failure tail
-in notes and `metadata.aborted_at` naming the step."""
+the output and closes the bead. Every abort path hands the bead to its
+owner. A keeper that `{{notify_recipient}}` names is assigned the bead, with the
+failure tail in its notes and `metadata.aborted_at` naming the step, and its
+mail requests its turn. With no keeper named, or `human`, a person is asked
+through a human gate the bead waits on, and clearing it runs the sync again."""
 formula = "mol-upstream-gc-sync"
 extends = ["mol-polecat-base"]
 version = 3
@@ -79,24 +81,29 @@ RIG_ROOT=$("$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-root.sh" --ri
 
 If `{{upstream_rig}}` is not registered in this city (rig-root.sh prints
 nothing, so the line exits non-zero instead of letting `git -C ""` fetch the
-current directory's repository), record the failure and abort — the
-`--status=open` + reassign + `gc.routed_to` triplet keeps the bead from
-stranding `in_progress` on this drained session:
+current directory's repository), the sync stops and hands the bead to its
+owner. A keeper is assigned it with the failure in its notes and mailed with
+`--notify`, which requests its turn, and the session drains. A person is asked
+through a human gate in one call, which makes the bead wait on the gate, armed
+to run the sync again once it clears, then ends the run and drains:
 ```bash
-ABORT_OWNER="{{notify_recipient}}"
-[ -z "$ABORT_OWNER" ] && ABORT_OWNER="human"
-gc bd update {{issue}} \
-    --set-metadata aborted_at=workspace-setup \
-    --status=open \
-    --assignee="$ABORT_OWNER" \
-    --set-metadata gc.routed_to="$ABORT_OWNER" \
-    --set-metadata "gc.takeaway=upstream rig '{{upstream_rig}}' is not registered in this city — register it or retarget this bead" \
-    --set-metadata "gc.takeaway_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    --set-metadata gc.takeaway_by=mol-upstream-gc-sync \
-    --set-metadata gc.takeaway_settled= \
-    --append-notes "Upstream rig '{{upstream_rig}}' not present in this city; cannot generate drift report."
-gc runtime drain-ack
-exit 1
+case "{{notify_recipient}}" in
+""|human)
+    "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/decline.sh" --step mol-upstream-gc-sync.workspace-setup \
+        --reason "upstream rig {{upstream_rig}} is not registered in this city" \
+        --subject {{issue}} --key upstream-gc-sync-no-rig \
+        --message "mol-upstream-gc-sync stopped at workspace-setup: upstream rig '{{upstream_rig}}' is not registered in this city, so no drift report was generated. Register the rig, or retarget this bead." \
+        --formula mol-upstream-gc-sync ;;
+*)
+    gc bd update {{issue}} \
+        --set-metadata aborted_at=workspace-setup \
+        --status=open \
+        --assignee="{{notify_recipient}}" \
+        --append-notes "Upstream rig '{{upstream_rig}}' not present in this city; cannot generate drift report."
+    gc mail send "{{notify_recipient}}" --notify -s "upstream-gc-sync: {{issue}} stopped at workspace-setup" \
+        -m "Upstream rig '{{upstream_rig}}' is not registered in this city. {{issue}} is assigned to you, and its notes say why."
+    gc runtime drain-ack ;;
+esac
 ```
 
 **Exit criteria:** worktree exists at `metadata.work_dir`; upstream
@@ -133,24 +140,27 @@ description = """
 Drive `{{sync_script}}` against the upstream rig, capturing stdout to a
 report file under the worktree.
 
-**1. Verify the script is present and executable:**
+**1. Verify the script is present and executable.** When it is not, the sync
+stops and hands the bead to its owner, as workspace-setup's stop does:
 ```bash
-SCRIPT={{sync_script}}
-if [ ! -x "$SCRIPT" ]; then
-    ABORT_OWNER="{{notify_recipient}}"
-    [ -z "$ABORT_OWNER" ] && ABORT_OWNER="human"
-    gc bd update {{issue}} \
-        --set-metadata aborted_at=survey \
-        --status=open \
-        --assignee="$ABORT_OWNER" \
-        --set-metadata gc.routed_to="$ABORT_OWNER" \
-        --set-metadata "gc.takeaway=the pack ships no runnable drift detector — install one at the configured sync_script path" \
-        --set-metadata "gc.takeaway_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-        --set-metadata gc.takeaway_by=mol-upstream-gc-sync \
-        --set-metadata gc.takeaway_settled= \
-        --append-notes "Sync script not found or not executable at $SCRIPT — pack may not include the drift detector yet."
-    gc runtime drain-ack
-    exit 1
+if [ ! -x "{{sync_script}}" ]; then
+    case "{{notify_recipient}}" in
+    ""|human)
+        "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/decline.sh" --step mol-upstream-gc-sync.survey \
+            --reason "no executable drift detector at {{sync_script}}" \
+            --subject {{issue}} --key upstream-gc-sync-no-detector \
+            --message "mol-upstream-gc-sync stopped at survey: no executable drift detector at {{sync_script}}, so no drift report was generated. Install one at the configured sync_script path." \
+            --formula mol-upstream-gc-sync ;;
+    *)
+        gc bd update {{issue}} \
+            --set-metadata aborted_at=survey \
+            --status=open \
+            --assignee="{{notify_recipient}}" \
+            --append-notes "Sync script not found or not executable at {{sync_script}} — pack may not include the drift detector yet."
+        gc mail send "{{notify_recipient}}" --notify -s "upstream-gc-sync: {{issue}} stopped at survey" \
+            -m "No executable drift detector at {{sync_script}}. {{issue}} is assigned to you, and its notes say why."
+        gc runtime drain-ack ;;
+    esac
 fi
 ```
 
@@ -168,24 +178,16 @@ if [ "{{with_diff}}" = "1" ]; then
     EXTRA_ARGS+=(--with-diff)
 fi
 
-if "$SCRIPT" \
+if "{{sync_script}}" \
         --rig-path "$RIG_ROOT" \
         --upstream-ref "{{upstream_ref}}" \
         "${EXTRA_ARGS[@]}" \
         > "$REPORT_FILE" 2> "$ERR_FILE"; then
     gc bd update {{issue}} --set-metadata report_file="$REPORT_FILE"
 else
-    ABORT_OWNER="{{notify_recipient}}"
-    [ -z "$ABORT_OWNER" ] && ABORT_OWNER="human"
+    # The failure goes to the notes first, so either owner reads it there.
     gc bd update {{issue}} \
         --set-metadata aborted_at=survey \
-        --status=open \
-        --assignee="$ABORT_OWNER" \
-        --set-metadata gc.routed_to="$ABORT_OWNER" \
-        --set-metadata "gc.takeaway=drift detector failed on {{upstream_rig}} — read the captured stderr in this bead's notes" \
-        --set-metadata "gc.takeaway_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-        --set-metadata gc.takeaway_by=mol-upstream-gc-sync \
-        --set-metadata gc.takeaway_settled= \
         --append-notes "$(cat <<EOF
 Sync script failed.
 
@@ -196,8 +198,19 @@ Stdout (if any):
 $(cat "$REPORT_FILE" 2>/dev/null || echo "(stdout capture missing)")
 EOF
 )"
-    gc runtime drain-ack
-    exit 1
+    case "{{notify_recipient}}" in
+    ""|human)
+        "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/decline.sh" --step mol-upstream-gc-sync.survey \
+            --reason "the drift detector failed on {{upstream_rig}}" \
+            --subject {{issue}} --key upstream-gc-sync-detector-failed \
+            --message "mol-upstream-gc-sync stopped at survey: the drift detector failed on {{upstream_rig}}, and its stderr and stdout are in this bead's notes. Fix what failed it." \
+            --formula mol-upstream-gc-sync ;;
+    *)
+        gc bd update {{issue}} --status=open --assignee="{{notify_recipient}}"
+        gc mail send "{{notify_recipient}}" --notify -s "upstream-gc-sync: {{issue}} stopped at survey" \
+            -m "The drift detector failed on {{upstream_rig}}. {{issue}} is assigned to you, and its notes carry the failure."
+        gc runtime drain-ack ;;
+    esac
 fi
 ```
 

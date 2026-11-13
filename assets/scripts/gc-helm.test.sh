@@ -8,6 +8,12 @@
 #     run cancel) and writes no step or root itself, while a run the releasing
 #     session holds a step of is left to close its own chain
 #   --release on a CLOSED anchor: the run's end without the resurrecting park
+#   the release write guarded on the status and assignee it read: a close or a
+#     claim after the read refuses it, and a close takes the closed path
+#   a claim a live session holds is kept: the headline alone, a nudge to its
+#     holder and exit 4, while a gone holder's or this session's is released
+#   --route through gc sling once the run has ended, and the refusal of a route
+#     or an assignee on a detached anchor and of a route beside a named wait
 #   --waiting-on edges, and the refusal of a wait in another store
 #   the ≤140-codepoint length gate
 #   the retired board verb refuses and names helm-svc board
@@ -112,6 +118,15 @@ if [ -n "${HOLDS_STUB_READ:-}" ] && [ "${1:-}" = bd ]; then
   fi
   HOLDS_STORE="$hs" exec "${HOLDS_STUB:?}" answer "$@"
 fi
+# What the bead shows now. FAKE_STATUSES (id|status, the last line wins) sets
+# a status the id prefix does not: a claim, or a close that lands between a
+# release's read and its write. FAKE_ASSIGNEES (id|assignee) sets the assignee.
+cur_status() {
+  _cs=open; case "$1" in CLOSED-*|A-CLOSED-*) _cs=closed ;; esac
+  _co="$(awk -F'|' -v i="$1" '$1==i{s=$2} END{print s}' "${FAKE_STATUSES:-/dev/null}" 2>/dev/null || true)"
+  printf '%s' "${_co:-$_cs}"
+}
+cur_assignee() { awk -F'|' -v i="$1" '$1==i{print $2; exit}' "$FAKE_ASSIGNEES" 2>/dev/null || true; }
 case "$1 ${2:-}" in
   "rig list")
     # Two rigs. gc-toolkit's path has no .beads dir, so gc-helm issues
@@ -156,12 +171,14 @@ case "$1 ${2:-}" in
     fi ;;
   "bd show")
     id="$3"
-    # UNKNOWN- ids resolve to nothing, the way `bd show` answers for a bead
-    # that is not there: a bare error OBJECT, never an array.
-    case "$id" in UNKNOWN-*) printf '{"error":"no issues found"}\n'; exit 0 ;; esac
-    # CLOSED- ids answer status=closed; everything else is open. --release on a
-    # closed anchor ends its run without the park.
-    st=open; case "$id" in CLOSED-*|A-CLOSED-*) st=closed ;; esac
+    # UNKNOWN- ids, and ids carrying -UNREAD, resolve to nothing, the way
+    # `bd show` answers for a bead that is not there: a bare error OBJECT, never
+    # an array.
+    case "$id" in UNKNOWN-*|*-UNREAD*) printf '{"error":"no issues found"}\n'; exit 0 ;; esac
+    # CLOSED- ids answer status=closed; everything else is open, unless
+    # FAKE_STATUSES says otherwise. --release on a closed anchor ends its run
+    # without the park.
+    st=$(cur_status "$id")
     convoy=$(awk -F'|' -v r="$id" '$1==r{print $2; exit}' "$FAKE_ROOTS")
     # What gc.routed_to reads as: FAKE_ROUTED holds it.
     routed="$(cat "${FAKE_ROUTED:-/dev/null}" 2>/dev/null || true)"
@@ -190,6 +207,12 @@ case "$1 ${2:-}" in
     lbl="$(awk -F'|' -v i="$id" '$1==i{print $2}' "${FAKE_LABELS:-/dev/null}" 2>/dev/null | jq -Rsc 'split("\n") | map(select(length > 0))')"
     if [ -n "$convoy" ]; then row=$(jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg c "$convoy" --arg rt "$routed" --arg er "$exec_routed" --arg sd "$settled" --arg tk "$takeaway" --arg sn "$sname" --arg si "$sid" --arg br "$br" --argjson lb "${lbl:-[]}" '[{id:$i,status:$s,assignee:$a,labels:$lb,metadata:{"gc.input_convoy_id":$c,"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.takeaway":$tk,"gc.takeaway_settled":$sd,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br}}]')
     else row=$(jq -n --arg i "$id" --arg s "$st" --arg a "$asg" --arg rt "$routed" --arg er "$exec_routed" --arg sd "$settled" --arg tk "$takeaway" --arg sn "$sname" --arg si "$sid" --arg br "$br" --argjson lb "${lbl:-[]}" '[{id:$i,status:$s,assignee:$a,labels:$lb,metadata:{"gc.routed_to":$rt,"gc.execution_routed_to":$er,"gc.takeaway":$tk,"gc.takeaway_settled":$sd,"gc.session_name":$sn,"gc.session_id":$si,"branch":$br}}]'); fi
+    # merge_result, from FAKE_MERGE (id|merge_result). An id carrying -HGATE is
+    # a human gate, as its type and await type say.
+    _mr="$(awk -F'|' -v i="$id" '$1==i{print $2; exit}' "${FAKE_MERGE:-/dev/null}" 2>/dev/null || true)"
+    row=$(printf '%s' "$row" | jq -c --arg mr "$_mr" --arg i "$id" '
+      (if $mr != "" then .[0].metadata.merge_result = $mr else . end)
+      | (if ($i | contains("-HGATE")) then .[0].issue_type = "gate" | .[0].await_type = "human" else . end)')
     printf '%s\n' "$row" ;;
   "bd close")
     printf '%s\n' "$*" >> "$FAKE_CLOSES" ;;
@@ -207,6 +230,30 @@ case "$1 ${2:-}" in
     # a bead fails to land, and FAKE_UPDATE_RC refuses every update.
     case "$3" in *NOPIN*) exit 1 ;; esac
     [ -z "${FAKE_UPDATE_RC:-}" ] || exit "$FAKE_UPDATE_RC"
+    # A guarded write compares --if-status and --if-assignee with what the bead
+    # shows now, as bd does, and a mismatch writes nothing and exits 13.
+    # FAKE_CLOSE_ON_WRITE (an id) closes the bead, and FAKE_CLAIM_ON_WRITE
+    # (id|holder) claims it, just before its guarded write is compared: the
+    # change that lands between a release's read and its write.
+    _ifs=""; _ifa=""; _has_ifs=""; _has_ifa=""
+    for a in "$@"; do
+      case "$a" in
+        --if-status=*)   _has_ifs=1; _ifs="${a#--if-status=}" ;;
+        --if-assignee=*) _has_ifa=1; _ifa="${a#--if-assignee=}" ;;
+      esac
+    done
+    if [ -n "$_has_ifs$_has_ifa" ]; then
+      if [ "${FAKE_CLOSE_ON_WRITE:-}" = "$3" ]; then printf '%s|closed\n' "$3" >> "$FAKE_STATUSES"; fi
+      if [ -n "${FAKE_CLAIM_ON_WRITE:-}" ] && [ "${FAKE_CLAIM_ON_WRITE%%|*}" = "$3" ]; then
+        printf '%s|in_progress\n' "$3" >> "$FAKE_STATUSES"
+        printf '%s|%s\n' "$3" "${FAKE_CLAIM_ON_WRITE#*|}" >> "$FAKE_ASSIGNEES"
+      fi
+      if { [ -n "$_has_ifs" ] && [ "$_ifs" != "$(cur_status "$3")" ]; } \
+         || { [ -n "$_has_ifa" ] && [ "$_ifa" != "$(cur_assignee "$3")" ]; }; then
+        echo "Error updating $3: the --if-assignee/--if-status precondition no longer holds" >&2
+        exit 13
+      fi
+    fi
     # A --remove-label lands on FAKE_LABELS, by the label's exact text.
     _prev=""
     for a in "$@"; do
@@ -244,6 +291,22 @@ case "$1 ${2:-}" in
     printf '%s\n' "$*" >> "$FAKE_DEPS"
     # A blocker named NOPE stands for every edge that cannot be written.
     case "$*" in *NOPE*) exit 1 ;; esac ;;
+  "session list")
+    # FAKE_SESSIONS holds the listing, an empty file none; FAKE_SESSIONS_RC is
+    # a list that does not read.
+    [ -z "${FAKE_SESSIONS_RC:-}" ] || exit "$FAKE_SESSIONS_RC"
+    if [ -s "${FAKE_SESSIONS:-/dev/null}" ]; then cat "$FAKE_SESSIONS"; else printf '{"sessions":[]}\n'; fi ;;
+  "session nudge")
+    printf '%s\n' "$*" >> "${FAKE_NUDGES:-/dev/null}"
+    exit "${FAKE_NUDGE_RC:-0}" ;;
+  "sling "*)
+    # gc sling writes the route it was asked for, as a raw route does, and
+    # FAKE_GC_SLING_RC refuses it. FAKE_ORDER interleaves the sling with the
+    # run's end, so a test can read which came first.
+    printf '%s\n' "$*" >> "${FAKE_SLINGS:-/dev/null}"
+    printf 'sling %s\n' "${3:-}" >> "${FAKE_ORDER:-/dev/null}"
+    if [ -n "${FAKE_GC_SLING_RC:-}" ]; then echo "gc sling: agent \"$2\" not found in city.toml" >&2; exit "$FAKE_GC_SLING_RC"; fi
+    printf '%s' "$2" > "${FAKE_ROUTED:-/dev/null}" ;;
 esac
 exit 0
 GC
@@ -254,6 +317,7 @@ chmod +x "$TMP/bin/gc"
 cat > "$TMP/bin/run-cancel-stub" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "${FAKE_CANCELS:?}"
+printf 'cancel %s\n' "${2:-}" >> "${FAKE_ORDER:-/dev/null}"
 [ "${FAKE_CANCEL_RC:-0}" = 0 ] || echo "run-cancel: run is not cancelled: the supervisor answered 503" >&2
 exit "${FAKE_CANCEL_RC:-0}"
 STUB
@@ -287,7 +351,12 @@ export FAKE_STEPS_JSON="$TMP/steps.json" FAKE_ROOTS="$TMP/roots" \
        FAKE_EXEC="$TMP/exec" \
        FAKE_SNAME="$TMP/sname" FAKE_SID="$TMP/sid" FAKE_DEPLISTS="$TMP/deplists" \
        FAKE_BRANCHES="$TMP/branches" FAKE_ASSIGNEES="$TMP/assignees" \
-       FAKE_CONVOY_CALLS="$TMP/convoy-calls" FAKE_LABELS="$TMP/labels"
+       FAKE_CONVOY_CALLS="$TMP/convoy-calls" FAKE_LABELS="$TMP/labels" \
+       FAKE_STATUSES="$TMP/statuses" FAKE_MERGE="$TMP/merge" \
+       FAKE_SESSIONS="$TMP/sessions" FAKE_NUDGES="$TMP/nudges" \
+       FAKE_SLINGS="$TMP/slings" FAKE_ORDER="$TMP/order"
+: > "$TMP/statuses"; : > "$TMP/merge"; : > "$TMP/sessions"; : > "$TMP/nudges"
+: > "$TMP/slings"; : > "$TMP/order"
 mkdir -p "$TMP/rig-a/.beads" "$TMP/deplists"
 # What holds a bead is the answer of gctk bead holds, built from this checkout
 # and run over the dep-list fixtures below.
@@ -361,7 +430,7 @@ unset GC_HELM_FIXTURE || true
 # GC_RIG and BEADS_DIR too: the current-sitting lookup resolves the session's
 # rig, and an ambient value from the runner's own agent env would pin a store
 # the fixtures never set up.
-unset GC_SESSION_NAME GC_SESSION_ID GC_ALIAS GC_RIG BEADS_DIR || true
+unset GC_SESSION_NAME GC_SESSION_ID GC_ALIAS GC_AGENT GC_RIG BEADS_DIR || true
 
 # --- Run: park A-PARKED with --release. ---------------------------------------
 : > "$TMP/run-lib.log"; : > "$FAKE_CANCELS"
@@ -380,8 +449,14 @@ grep -q -- '--status=open' <<< "$A" \
   && ok "(RELEASE) anchor reopened (--status=open)" || bad "(RELEASE) anchor --status=open (got: $A)"
 grep -q 'gc.proactive_reaction' <<< "$A" \
   && bad "(RELEASE) anchor still stamps the retired proactive_reaction" || ok "(RELEASE) anchor no longer stamps the retired proactive_reaction"
-grep -q 'gc.routed_to=' <<< "$A" \
+grep -q 'gc.routed_to= ' <<< "$A" \
   && ok "(RELEASE) anchor route cleared" || bad "(RELEASE) anchor route cleared"
+# (CAS) the park is a compare-and-swap on the status and the assignee the
+# release read (open, unassigned), so a close or a claim after that read
+# refuses the whole write.
+grep -q -- '--if-status=open --if-assignee= --status=open --assignee= ' <<< "$A" \
+  && ok "(CAS) the park write is guarded on the status and the assignee it read" \
+  || bad "(CAS) the park write carries no guard on what it read (got: $A)"
 # The pour that dispatched this bead stamped gc.execution_routed_to; a release
 # ends that pour, so the stamp is retired in the same write, and a parked or
 # re-routed bead does not linger advertising a finished pour's pool.
@@ -730,27 +805,36 @@ case "$U" in
   *) bad "(SETTLEDREL) the settled key is missing from the release write: $U" ;;
 esac
 
-# ── takeaway --release --route: release the bead TO a pool ────────────────────
+# ── takeaway --release --route: send the bead TO a pool ──────────────────────
 # A first reaction that concludes "this is work" hands the bead on instead of
-# back. The route rides the release write, so the disposition lands whole or
-# not at all. Covered:
-#   (ROUTE)     the route replaces the empty clear, in the SAME single update
+# back. The release write parks the bead and writes no route, and once the run
+# beneath it has ended, gc sling routes it raw: no formula poured, no convoy
+# filed. Covered:
+#   (ROUTE)     the release write clears the route, and gc sling routes the
+#               bead once the run beneath it has ended
 #   (ROUTECLR)  no --route still clears the route (the release is unchanged)
 #   (ROUTEQUAL) a bare agent name is refused before anything is written
 #   (ROUTEREL)  --route without --release is refused (the unreadable half-state)
 #   (ROUTEONE)  the release is one write, whose exit decides, and says where
 #               the bead went
 #   (REFUSED)   an update the store refuses fails the verb: no success line, no
-#               edge and no run ended
+#               edge, no run ended and no sling
 POOL="gc-toolkit/gc-toolkit.polecat"
-: > "$TMP/updates"; printf '%s' "$POOL" > "$TMP/routed"
+: > "$TMP/updates"; : > "$TMP/routed"; : > "$TMP/slings"; : > "$TMP/order"; : > "$FAKE_CANCELS"
 sh "$SCRIPT" takeaway A-PARKED "actionable — routed to the polecat pool" \
    --by proactive --release --route "$POOL" >/dev/null 2>"$TMP/rerr" || true
 RLINE="$(grep -E "^bd update A-PARKED( |$)" "$TMP/updates" | head -n1)"
 case "$RLINE" in
-  *"--set-metadata gc.routed_to=$POOL"*) ok "(ROUTE) the release routes the bead to the pool" ;;
-  *) bad "(ROUTE) no route stamp in the release write (got: ${RLINE:-<none>})" ;;
+  *"--set-metadata gc.routed_to= "*) ok "(ROUTE) the release write clears the route and writes none" ;;
+  *) bad "(ROUTE) the release write does not clear the route (got: ${RLINE:-<none>})" ;;
 esac
+grep -q "gc.routed_to=$POOL" "$TMP/updates" \
+  && bad "(ROUTE) an update wrote the pool route by hand: $(cat "$TMP/updates")" \
+  || ok "(ROUTE) …and no update writes the pool route"
+eq "$(cat "$TMP/slings")" "sling $POOL A-PARKED --no-formula --no-convoy" \
+   "(ROUTE) the pool is reached through gc sling, raw: no formula poured, no convoy filed"
+eq "$(cat "$TMP/order")" "cancel root-PARKED
+sling A-PARKED" "(ROUTE) …once the run beneath the bead has ended"
 case "$RLINE" in
   *"--status=open"*"--assignee="*) ok "(ROUTE) …in the same write that reopens and unassigns" ;;
   *) bad "(ROUTE) the release halves split off the route write: ${RLINE:-<none>}" ;;
@@ -814,7 +898,7 @@ sh "$SCRIPT" takeaway A-PARKED "placed — routed to the polecat pool" --release
 eq "$HRC" "0" "(HOLDROUTE) a release to a pool of a held bead exits 0"
 HLINE="$(grep -E "^bd update A-PARKED( |\$)" "$TMP/updates" | head -n1)"
 case "$HLINE" in
-  *"--set-metadata gc.routed_to=$POOL"*"--remove-label hold:mayor --remove-label Hold:Mayor"*) ok "(HOLDROUTE) the release write that routes the bead also lifts each spelling of its hold" ;;
+  *"--set-metadata gc.routed_to= "*"--remove-label hold:mayor --remove-label Hold:Mayor"*) ok "(HOLDROUTE) the release write that sends the bead on also lifts each spelling of its hold" ;;
   *) bad "(HOLDROUTE) the lift did not ride the release write (got: ${HLINE:-<none>})" ;;
 esac
 eq "$(cat "$TMP/labels")" "A-PARKED|learning" "(HOLDROUTE) the hold is gone and the other labels stay"
@@ -841,9 +925,9 @@ eq "$(cat "$TMP/labels")" "A-PARKED|hold:mayor" "(HOLDPARK) …and the label sta
 : > "$TMP/labels"; : > "$TMP/routed"
 
 # (REFUSED) the update's exit is the verdict on the whole stamp.
-: > "$TMP/updates"; : > "$TMP/deps"; : > "$FAKE_CANCELS"
+: > "$TMP/updates"; : > "$TMP/deps"; : > "$FAKE_CANCELS"; : > "$TMP/slings"
 URC=0
-FAKE_UPDATE_RC=1 sh "$SCRIPT" takeaway A-PARKED "refused" --release --route "$POOL" \
+FAKE_UPDATE_RC=1 sh "$SCRIPT" takeaway A-PARKED "refused" --release \
    --waiting-on A-w-child >"$TMP/rout" 2>"$TMP/rerr" || URC=$?
 eq "$URC" "4" "(REFUSED) an update the store refuses is a verb runtime failure"
 grep -q "could not update 'A-PARKED'" "$TMP/rerr" \
@@ -854,6 +938,9 @@ grep -q 'takeaway set on' "$TMP/rout" \
   || ok "(REFUSED) …and success is not reported"
 eq "$(wc -l < "$TMP/deps" | tr -d ' ')|$(wc -l < "$FAKE_CANCELS" | tr -d ' ')" "0|0" \
    "(REFUSED) …with no edge written and no run ended"
+URC=0
+FAKE_UPDATE_RC=1 sh "$SCRIPT" takeaway A-PARKED "refused" --release --route "$POOL" >/dev/null 2>&1 || URC=$?
+eq "$URC|$(wc -l < "$TMP/slings" | tr -d ' ')" "4|0" "(REFUSED) …and a --route whose release was refused is never slung"
 
 # ── takeaway --waiting-on in another store: refused before anything is written ─
 # An id's prefix names its store, and bd stores an edge onto another store's
@@ -922,9 +1009,9 @@ XRC=0
 sh "$SCRIPT" takeaway CLOSED-A-FOLD "route a disposed bead" --by proactive --release --route "$POOL" \
    >"$TMP/rout" 2>"$TMP/rerr" || XRC=$?
 eq "$XRC" "4" "(FOLDROUTE) --route on a closed anchor is a verb runtime failure"
-grep -q "gc.routed_to=$POOL" <<< "$(line_for CLOSED-A-FOLD)" \
-  && bad "(FOLDROUTE) a disposed bead was handed to a pool" \
-  || ok "(FOLDROUTE) …and the pool route is never stamped"
+grep -q "CLOSED-A-FOLD" "$TMP/slings" \
+  && bad "(FOLDROUTE) a disposed bead was handed to a pool: $(cat "$TMP/slings")" \
+  || ok "(FOLDROUTE) …and gc sling never routes it"
 grep -q -- '--root root-FOLD' "$FAKE_CANCELS" \
   && ok "(FOLDROUTE) …while the run's end the operator came for still runs" \
   || bad "(FOLDROUTE) the refusal took the run's end with it"
@@ -985,9 +1072,9 @@ MRC=0
 sh "$SCRIPT" takeaway A-GATED "actionable — the pool takes it once ruled" \
    --by converse --release --route "$POOL" >/dev/null 2>"$TMP/derr" || MRC=$?
 eq "$MRC" "0" "(GATED) a bead blocked only by a human gate still routes"
-grep -q -- "--set-metadata gc.routed_to=$POOL" "$TMP/updates" \
-  && ok "(GATED) …and the route is written" \
-  || bad "(GATED) the route was lost: $(cat "$TMP/updates")"
+grep -q "^sling $POOL A-GATED " "$TMP/slings" \
+  && ok "(GATED) …and gc sling routes it" \
+  || bad "(GATED) the route was lost: $(cat "$TMP/slings")"
 grep -q 'could not read the blockers' "$TMP/derr" \
   && bad "(GATED) a probe that answered still warned it had not (stderr: $(cat "$TMP/derr"))" \
   || ok "(GATED) …and a probe that answered says nothing: the warning stays a signal"
@@ -1039,9 +1126,9 @@ PRC=0
 sh "$SCRIPT" takeaway A-PROBEDEAD "actionable — routed" \
    --release --route "$POOL" >/dev/null 2>"$TMP/derr" || PRC=$?
 eq "$PRC" "0" "(DELEGPROBE) an unreadable blocker probe allows the route"
-grep -q -- "--set-metadata gc.routed_to=$POOL" "$TMP/updates" \
-  && ok "(DELEGPROBE) …and the route is written" \
-  || bad "(DELEGPROBE) the route was lost: $(cat "$TMP/updates")"
+grep -q "^sling $POOL A-PROBEDEAD " "$TMP/slings" \
+  && ok "(DELEGPROBE) …and gc sling routes it" \
+  || bad "(DELEGPROBE) the route was lost: $(cat "$TMP/slings")"
 grep -q 'could not read the blockers on A-PROBEDEAD' "$TMP/derr" \
   && ok "(DELEGPROBE) …and the caller is told the check did not run" \
   || bad "(DELEGPROBE) the guard was skipped in silence (stderr: $(cat "$TMP/derr"))"
@@ -1057,9 +1144,9 @@ JRC=0
 sh "$SCRIPT" takeaway A-PROBEJUNK "actionable — routed" \
    --release --route "$POOL" >/dev/null 2>"$TMP/derr" || JRC=$?
 eq "$JRC" "0" "(DELEGJUNK) a non-array payload allows the route too"
-grep -q -- "--set-metadata gc.routed_to=$POOL" "$TMP/updates" \
-  && ok "(DELEGJUNK) …and the route is written" \
-  || bad "(DELEGJUNK) the route was lost: $(cat "$TMP/updates")"
+grep -q "^sling $POOL A-PROBEJUNK " "$TMP/slings" \
+  && ok "(DELEGJUNK) …and gc sling routes it" \
+  || bad "(DELEGJUNK) the route was lost: $(cat "$TMP/slings")"
 grep -q 'could not read the blockers on A-PROBEJUNK' "$TMP/derr" \
   && ok "(DELEGJUNK) …and it is reported unreadable, not empty" \
   || bad "(DELEGJUNK) an error object was read as an edge list (stderr: $(cat "$TMP/derr"))"
@@ -1083,8 +1170,8 @@ grep -q -- '--root root-FOLD' "$FAKE_CANCELS" \
 # The pack addresses a named agent by its assignee (docs/deferred-dispatch.md),
 # so work that is its own (a town-repo edit is mechanik's) is released to it as
 # its assignee, with no route. The stub reads a bead's assignee from the
-# assignees fixture, so a row there models an assignee that landed and its
-# absence one that is not there. Covered:
+# assignees fixture, and the release's guarded write compares its guard with
+# that row. Covered:
 #   (TOAGENT)      the assignee replaces the empty clear in the one release
 #                  write, and the route beside it stays empty
 #   (TOAGENTOK)    the release is written once, exits 0, and the success
@@ -1105,6 +1192,10 @@ ALINE="$(grep -E "^bd update A-PARKED( |\$)" "$TMP/updates" | head -n1)"
 case "$ALINE" in
   *"--status=open --assignee=$AGENT --set-metadata gc.routed_to= "*) ok "(TOAGENT) the release assigns the bead to the named agent, with no route beside it" ;;
   *) bad "(TOAGENT) the release write did not assign the agent with an empty route (got: ${ALINE:-<none>})" ;;
+esac
+case "$ALINE" in
+  *"--if-status=open --if-assignee=$AGENT "*) ok "(TOAGENT) …guarded on the open bead and the assignee the release read" ;;
+  *) bad "(TOAGENT) the assign write is not guarded on what the release read (got: ${ALINE:-<none>})" ;;
 esac
 case "$ALINE" in
   *"--set-metadata gc.takeaway=actionable — a city.toml edit, mechanik's"*) ok "(TOAGENT) …in the write that carries the headline" ;;
@@ -1180,6 +1271,245 @@ grep -q -- '--root root-FOLD' "$FAKE_CANCELS" \
   && ok "(TOAGENTFOLD) …while the run's end a fold still needs runs" \
   || bad "(TOAGENTFOLD) the refusal took the run's end with it"
 mv "$TMP/assignees.orig" "$TMP/assignees"
+
+# ── takeaway --release: the guarded park, a held claim, a detached anchor ─────
+# The park write is a compare-and-swap on the status and the assignee the
+# release read, a claim is taken from no live session, a --route or an --assign
+# sends on no anchor the merge cadence drives, and a --route reaches its pool
+# only through gc sling. Covered:
+#   (RACECLOSE)  a close between the read and the write refuses the park, and
+#                the bead keeps its close, takes the headline alone and still
+#                has its run ended; a --route on it is never slung
+#   (RACECLAIM)  a claim between the read and the write: nothing more is
+#                written, and the exit names who holds it now
+#   (HELD)       a claim a live session holds: the headline alone, its waits,
+#                a nudge to its holder, and exit 4 naming the holder
+#   (HELDROUTE)  …and a --route on it is not slung
+#   (HELDUNREAD) a session list that does not read keeps the claim, and the
+#                holder is nudged by its own name
+#   (HELDNUDGE)  a nudge that does not land is said
+#   (GONE)       a claim whose holder the list does not name is released in the
+#                park's one guarded write
+#   (MINE)       this session's own claim is released with no session list read
+#   (DETACHED)   --route and --assign are refused on a detached anchor before
+#                any write, and --release alone still lands
+#   (NAMEDWAIT)  a --route beside a named wait that is open and no human gate,
+#                or whose row does not read, is refused before any write; one
+#                onto a human gate or a closed bead still routes
+#   (SLINGFAIL)  a sling that fails is a verb failure that names the repair,
+#                with the release kept
+#   (SLINGHOLD)  a run that did not end, or a wait that did not wire, sends
+#                nothing to the pool
+last_status() { awk -F'|' -v i="$1" '$1==i{s=$2} END{print s}' "$TMP/statuses"; }
+# (RACECLOSE) the bead closes after the release read it open, before its write.
+: > "$TMP/updates"; : > "$TMP/deps"; : > "$FAKE_CANCELS"; : > "$TMP/slings"; : > "$TMP/statuses"
+RCRC=0
+FAKE_CLOSE_ON_WRITE=A-PARKED sh "$SCRIPT" takeaway A-PARKED "parked — its premise fell" --by converse \
+   --release --no-wait >"$TMP/rcout" 2>"$TMP/rcerr" || RCRC=$?
+eq "$RCRC" "0" "(RACECLOSE) a release on a bead that closed after its read still exits 0"
+RC1="$(sed -n 1p "$TMP/updates")"; RC2="$(sed -n 2p "$TMP/updates")"
+grep -q -- '--if-status=open --if-assignee= --status=open' <<< "$RC1" \
+  && ok "(RACECLOSE) the park write was guarded on the open bead the release read" \
+  || bad "(RACECLOSE) the first write was not the guarded park (got: ${RC1:-<none>})"
+eq "$(last_status A-PARKED)" "closed" "(RACECLOSE) …so the close stands"
+grep -q -- '--set-metadata gc.takeaway=parked — its premise fell' <<< "$RC2" \
+  && ok "(RACECLOSE) …and the headline lands on the closed bead" \
+  || bad "(RACECLOSE) the headline was lost (got: ${RC2:-<none>})"
+grep -qE -- '(^| )--(status|assignee|if-status|if-assignee)=|gc\.routed_to' <<< "$RC2" \
+  && bad "(RACECLOSE) the second write reopened or reassigned the closed bead: $RC2" \
+  || ok "(RACECLOSE) …in a write that reopens and reassigns nothing"
+eq "$(grep -c . "$TMP/updates")" "2" "(RACECLOSE) …and no third write"
+grep -q -- '--root root-PARKED' "$FAKE_CANCELS" \
+  && ok "(RACECLOSE) the run beneath it is still ended" \
+  || bad "(RACECLOSE) the run was not ended (cancels: $(cat "$FAKE_CANCELS"))"
+grep -q 'A-PARKED closed after the release read it' "$TMP/rcerr" \
+  && ok "(RACECLOSE) …and the close is named" \
+  || bad "(RACECLOSE) the skipped park is unexplained (stderr: $(cat "$TMP/rcerr"))"
+grep -q 'anchor left closed' "$TMP/rcout" \
+  && ok "(RACECLOSE) …and the success line claims no release" \
+  || bad "(RACECLOSE) the success line claims a release (stdout: $(cat "$TMP/rcout"))"
+: > "$TMP/updates"; : > "$TMP/slings"; : > "$TMP/statuses"
+RCRC=0
+FAKE_CLOSE_ON_WRITE=A-PARKED sh "$SCRIPT" takeaway A-PARKED "routed — then it closed" \
+   --release --route "$POOL" >/dev/null 2>&1 || RCRC=$?
+eq "$RCRC|$(grep -c . "$TMP/slings" || true)" "4|0" "(RACECLOSE) a --route on a bead that closed after the read is refused and never slung"
+: > "$TMP/statuses"
+
+# (RACECLAIM) a session claims the bead after the release read it open.
+: > "$TMP/updates"; : > "$TMP/deps"; : > "$FAKE_CANCELS"; : > "$TMP/slings"
+cp "$TMP/assignees" "$TMP/assignees.race"
+RKRC=0
+FAKE_CLAIM_ON_WRITE="A-PARKED|gc-toolkit__polecat-hq-new" sh "$SCRIPT" takeaway A-PARKED "stopped" \
+   --release --waiting-on A-w-child >"$TMP/rkout" 2>"$TMP/rkerr" || RKRC=$?
+eq "$RKRC" "4" "(RACECLAIM) a release on a bead claimed after its read is a verb failure"
+eq "$(grep -c . "$TMP/updates")" "1" "(RACECLAIM) …the refused park is the only write"
+eq "$(grep -c . "$TMP/deps" || true)|$(grep -c . "$FAKE_CANCELS" || true)|$(grep -c . "$TMP/slings" || true)" "0|0|0" \
+   "(RACECLAIM) …with no edge wired, no run ended and nothing slung"
+grep -q 'now shows status in_progress under gc-toolkit__polecat-hq-new' "$TMP/rkerr" \
+  && ok "(RACECLAIM) …and the exit names who holds it now" \
+  || bad "(RACECLAIM) the new holder is unnamed (stderr: $(cat "$TMP/rkerr"))"
+mv "$TMP/assignees.race" "$TMP/assignees"; : > "$TMP/statuses"
+
+# (HELD) a live session holds the claim: its row is in the session list.
+printf '{"sessions":[{"id":"hq-other-1","alias":"","session_name":"gc-toolkit__polecat-hq-other","state":"active"}]}\n' > "$TMP/sessions"
+printf 'A-HELD|in_progress\n' > "$TMP/statuses"
+cp "$TMP/assignees" "$TMP/assignees.held"
+printf 'A-HELD|gc-toolkit__polecat-hq-other\n' >> "$TMP/assignees"
+: > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/nudges"; : > "$TMP/slings"
+HDRC=0
+sh "$SCRIPT" takeaway A-HELD "stopped — the PR it rebuilds was retired" --by converse \
+   --release --waiting-on A-w-child >"$TMP/hdout" 2>"$TMP/hderr" || HDRC=$?
+eq "$HDRC" "4" "(HELD) a release on a claim a live session holds exits 4"
+HD="$(cat "$TMP/updates")"
+eq "$(grep -c . <<< "$HD")" "1" "(HELD) …in one write"
+grep -q -- '--set-metadata gc.takeaway=stopped — the PR it rebuilds was retired' <<< "$HD" \
+  && ok "(HELD) …which lands the headline" || bad "(HELD) the headline was lost: $HD"
+grep -qE -- '(^| )--(status|assignee|if-status|if-assignee)=|gc\.routed_to|--unset-metadata' <<< "$HD" \
+  && bad "(HELD) the write touched the claim: $HD" \
+  || ok "(HELD) …and nothing else: no status, assignee, guard, route or pin"
+grep -qE '^bd dep add A-HELD A-w-child -t blocks' "$TMP/deps" \
+  && ok "(HELD) …the wait is still wired" || bad "(HELD) the wait was not wired: $(cat "$TMP/deps")"
+NUDGE="$(cat "$TMP/nudges")"
+case "$NUDGE" in
+  "session nudge --delivery immediate hq-other-1 Stop work on A-HELD: "*"stopped — the PR it rebuilds was retired"*"hand-back.sh A-HELD --set-metadata gc.routed_to= --reference-bead A-HELD")
+    ok "(HELD) the holder's session is nudged to stop, with why and the write that gives the bead back" ;;
+  *) bad "(HELD) the nudge is missing or misshapen (got: ${NUDGE:-<none>})" ;;
+esac
+grep -q 'A-HELD is in_progress under gc-toolkit__polecat-hq-other' "$TMP/hderr" \
+  && ok "(HELD) …and the exit names the holder" || bad "(HELD) the holder is unnamed (stderr: $(cat "$TMP/hderr"))"
+grep -q 'takeaway set on' "$TMP/hdout" \
+  && bad "(HELD) success was reported on a kept claim" || ok "(HELD) …and success is not reported"
+: > "$TMP/updates"; : > "$TMP/slings"; : > "$TMP/nudges"
+HDRC=0
+sh "$SCRIPT" takeaway A-HELD "stopped — sent elsewhere" --release --route "$POOL" >/dev/null 2>"$TMP/hderr" || HDRC=$?
+eq "$HDRC|$(grep -c . "$TMP/slings" || true)" "4|0" "(HELDROUTE) a --route on a claim a live session holds is not slung"
+grep -q "was not released to $POOL" "$TMP/hderr" \
+  && ok "(HELDROUTE) …and the exit says so" || bad "(HELDROUTE) the unsent route is unexplained (stderr: $(cat "$TMP/hderr"))"
+: > "$TMP/updates"; : > "$TMP/nudges"
+HDRC=0
+FAKE_SESSIONS_RC=1 sh "$SCRIPT" takeaway A-HELD "stopped" --release --no-wait >/dev/null 2>"$TMP/hderr" || HDRC=$?
+eq "$HDRC" "4" "(HELDUNREAD) a session list that does not read keeps the claim"
+grep -qE -- '(^| )--(status|assignee|if-assignee)=' "$TMP/updates" \
+  && bad "(HELDUNREAD) the write took the claim: $(cat "$TMP/updates")" \
+  || ok "(HELDUNREAD) …and the write takes nothing from the holder"
+grep -q '^session nudge --delivery immediate gc-toolkit__polecat-hq-other Stop work on A-HELD' "$TMP/nudges" \
+  && ok "(HELDUNREAD) …the holder is nudged by its own name" || bad "(HELDUNREAD) no nudge (got: $(cat "$TMP/nudges"))"
+grep -q 'could not be read' "$TMP/hderr" \
+  && ok "(HELDUNREAD) …and the exit says the list did not read" || bad "(HELDUNREAD) unexplained (stderr: $(cat "$TMP/hderr"))"
+: > "$TMP/updates"
+HDRC=0
+FAKE_NUDGE_RC=1 sh "$SCRIPT" takeaway A-HELD "stopped" --release --no-wait >/dev/null 2>"$TMP/hderr" || HDRC=$?
+eq "$HDRC" "4" "(HELDNUDGE) a nudge that does not land still keeps the claim"
+grep -q 'The nudge to gc-toolkit__polecat-hq-other did not land' "$TMP/hderr" \
+  && ok "(HELDNUDGE) …and the exit says the nudge did not land" || bad "(HELDNUDGE) unexplained (stderr: $(cat "$TMP/hderr"))"
+mv "$TMP/assignees.held" "$TMP/assignees"
+
+# (GONE) the holder is in no row of the session list.
+printf 'A-GONE|in_progress\nA-MINE|in_progress\nA-MINE2|in_progress\n' > "$TMP/statuses"
+cp "$TMP/assignees" "$TMP/assignees.gone"
+printf 'A-GONE|gc-toolkit__polecat-hq-dead\nA-MINE|hq-me\nA-MINE2|gc-toolkit.mechanik\n' >> "$TMP/assignees"
+: > "$TMP/updates"; : > "$TMP/nudges"
+GNRC=0
+sh "$SCRIPT" takeaway A-GONE "stopped — its holder is gone" --release --no-wait >/dev/null 2>"$TMP/gnerr" || GNRC=$?
+eq "$GNRC" "0" "(GONE) a claim whose holder the session list does not name is released"
+grep -q -- '--if-status=in_progress --if-assignee=gc-toolkit__polecat-hq-dead --status=open --assignee= ' "$TMP/updates" \
+  && ok "(GONE) …in the park's one guarded write, which names the holder it read" \
+  || bad "(GONE) the release did not name the gone holder (got: $(cat "$TMP/updates"))"
+eq "$(grep -c . "$TMP/updates")|$(grep -c . "$TMP/nudges" || true)" "1|0" "(GONE) …with no other write and no nudge"
+
+# (MINE) this session's own claim needs no session list, which does not read here.
+: > "$TMP/updates"
+MNRC=0
+GC_SESSION_ID=hq-me FAKE_SESSIONS_RC=1 sh "$SCRIPT" takeaway A-MINE "released — this session's own" \
+   --release --no-wait >/dev/null 2>&1 || MNRC=$?
+eq "$MNRC" "0" "(MINE) this session's own claim is released with no session list read"
+grep -q -- '--if-status=in_progress --if-assignee=hq-me --status=open --assignee= ' "$TMP/updates" \
+  && ok "(MINE) …in the guarded park" || bad "(MINE) the release did not name this session (got: $(cat "$TMP/updates"))"
+: > "$TMP/updates"
+MNRC=0
+GC_AGENT=gc-toolkit.mechanik FAKE_SESSIONS_RC=1 sh "$SCRIPT" takeaway A-MINE2 "released — mechanik's own" \
+   --release --no-wait >/dev/null 2>&1 || MNRC=$?
+eq "$MNRC" "0" "(MINE) …and so is a named agent's, under its agent address"
+mv "$TMP/assignees.gone" "$TMP/assignees"; : > "$TMP/statuses"; : > "$TMP/sessions"
+
+# (DETACHED) the merge cadence drives an anchor in pre_open_gate or pull_request.
+printf 'A-DETPR|pull_request\nA-DETPRE|pre_open_gate\n' > "$TMP/merge"
+: > "$TMP/updates"; : > "$TMP/slings"
+DTRC=0
+sh "$SCRIPT" takeaway A-DETPR "routed" --release --route "$POOL" >/dev/null 2>"$TMP/dterr" || DTRC=$?
+eq "$DTRC" "2" "(DETACHED) --route on an anchor in pull_request is refused"
+eq "$(grep -c . "$TMP/updates" || true)|$(grep -c . "$TMP/slings" || true)" "0|0" "(DETACHED) …before anything is written"
+grep -q 'merge_result is pull_request' "$TMP/dterr" \
+  && ok "(DETACHED) …naming the state" || bad "(DETACHED) the state is unnamed (stderr: $(cat "$TMP/dterr"))"
+DTRC=0
+sh "$SCRIPT" takeaway A-DETPRE "assigned" --release --assign gc-toolkit.mechanik --no-wait >/dev/null 2>&1 || DTRC=$?
+eq "$DTRC|$(grep -c . "$TMP/updates" || true)" "2|0" "(DETACHED) --assign on an anchor at its pre-open gate is refused too, before any write"
+DTRC=0
+sh "$SCRIPT" takeaway A-DETPR "stopped" --release --no-wait >/dev/null 2>&1 || DTRC=$?
+eq "$DTRC" "0" "(DETACHED) --release alone on a detached anchor still lands"
+grep -qE '^bd update A-DETPR .*--status=open' "$TMP/updates" \
+  && ok "(DETACHED) …with its park" || bad "(DETACHED) the park was lost: $(cat "$TMP/updates")"
+: > "$TMP/merge"
+
+# (NAMEDWAIT) a wait the call names is a claim on the bead as an edge is.
+: > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/slings"
+NWRC=0
+sh "$SCRIPT" takeaway A-PARKED "routed — once its fix lands" --release --route "$POOL" \
+   --waiting-on A-w-open >/dev/null 2>"$TMP/nwerr" || NWRC=$?
+eq "$NWRC" "2" "(NAMEDWAIT) a --route beside a named wait that is open and no human gate is refused"
+eq "$(grep -c . "$TMP/updates" || true)|$(grep -c . "$TMP/deps" || true)|$(grep -c . "$TMP/slings" || true)" "0|0|0" \
+   "(NAMEDWAIT) …before anything is written"
+grep -q 'whose --waiting-on names A-w-open' "$TMP/nwerr" \
+  && ok "(NAMEDWAIT) …naming the wait" || bad "(NAMEDWAIT) the wait is unnamed (stderr: $(cat "$TMP/nwerr"))"
+grep -q 'Re-run without --route' "$TMP/nwerr" \
+  && ok "(NAMEDWAIT) …and the call that does land" || bad "(NAMEDWAIT) no re-run named (stderr: $(cat "$TMP/nwerr"))"
+NWRC=0
+sh "$SCRIPT" takeaway A-PARKED "routed — the pool takes it once ruled" --release --route "$POOL" \
+   --waiting-on A-HGATE1 >/dev/null 2>&1 || NWRC=$?
+eq "$NWRC" "0" "(NAMEDWAIT) a named wait onto a human gate still routes"
+grep -qE '^bd dep add A-PARKED A-HGATE1 -t blocks' "$TMP/deps" \
+  && ok "(NAMEDWAIT) …held on the gate" || bad "(NAMEDWAIT) the gate edge was not written: $(cat "$TMP/deps")"
+grep -q "^sling $POOL A-PARKED " "$TMP/slings" \
+  && ok "(NAMEDWAIT) …and slung" || bad "(NAMEDWAIT) not slung: $(cat "$TMP/slings")"
+: > "$TMP/slings"
+NWRC=0
+sh "$SCRIPT" takeaway A-PARKED "routed — its wait is done" --release --route "$POOL" \
+   --waiting-on A-CLOSED-w1 >/dev/null 2>&1 || NWRC=$?
+eq "$NWRC|$(grep -c . "$TMP/slings" || true)" "0|1" "(NAMEDWAIT) a named wait that is closed still routes"
+: > "$TMP/updates"; : > "$TMP/slings"
+NWRC=0
+sh "$SCRIPT" takeaway A-PARKED "routed" --release --route "$POOL" \
+   --waiting-on A-w-UNREAD >/dev/null 2>"$TMP/nwerr" || NWRC=$?
+eq "$NWRC|$(grep -c . "$TMP/updates" || true)|$(grep -c . "$TMP/slings" || true)" "2|0|0" \
+   "(NAMEDWAIT) a named wait whose row does not read is refused, before any write"
+grep -q 'A-w-UNREAD did not read' "$TMP/nwerr" \
+  && ok "(NAMEDWAIT) …and the refusal says its row did not read" || bad "(NAMEDWAIT) unexplained (stderr: $(cat "$TMP/nwerr"))"
+
+# (SLINGFAIL) gc sling refuses the route after the release has landed.
+: > "$TMP/updates"; : > "$TMP/slings"
+SFRC=0
+FAKE_GC_SLING_RC=1 sh "$SCRIPT" takeaway A-PARKED "routed" --release --route "$POOL" \
+   >"$TMP/sfout" 2>"$TMP/sferr" || SFRC=$?
+eq "$SFRC" "4" "(SLINGFAIL) a sling that fails is a verb failure"
+grep -q "gc sling did not route it to '$POOL'" "$TMP/sferr" \
+  && ok "(SLINGFAIL) …which says the route did not land" || bad "(SLINGFAIL) unexplained (stderr: $(cat "$TMP/sferr"))"
+grep -q "gc sling $POOL A-PARKED --no-formula --no-convoy" "$TMP/sferr" \
+  && ok "(SLINGFAIL) …and names the sling that routes it" || bad "(SLINGFAIL) no repair named (stderr: $(cat "$TMP/sferr"))"
+grep -qE '^bd update A-PARKED .*--status=open' "$TMP/updates" \
+  && ok "(SLINGFAIL) …with the release kept" || bad "(SLINGFAIL) the release was lost: $(cat "$TMP/updates")"
+grep -q 'takeaway set on' "$TMP/sfout" \
+  && bad "(SLINGFAIL) success was reported" || ok "(SLINGFAIL) …and success is not reported"
+
+# (SLINGHOLD) nothing reaches the pool while a run still works the bead, or
+# while a wait the call asked for is not wired.
+: > "$TMP/slings"
+SHRC=0
+FAKE_CANCEL_RC=1 sh "$SCRIPT" takeaway A-PARKED "routed" --release --route "$POOL" >/dev/null 2>&1 || SHRC=$?
+eq "$SHRC|$(grep -c . "$TMP/slings" || true)" "4|0" "(SLINGHOLD) a run that did not end sends nothing to the pool"
+SHRC=0
+sh "$SCRIPT" takeaway A-PARKED "routed — once ruled" --release --route "$POOL" \
+   --waiting-on A-HGATE-NOPE >/dev/null 2>&1 || SHRC=$?
+eq "$SHRC|$(grep -c . "$TMP/slings" || true)" "4|0" "(SLINGHOLD) …and neither does a wait that did not wire"
 
 # ── takeaway length: the ≤140 cap, ENFORCED ─────────────────────
 # REJECT over the cap, never truncate; measured in codepoints, after the
@@ -1285,10 +1615,15 @@ cat > "$LIVE_STORE" <<JSON
  {"id":"A-FOLD","status":"closed","assignee":"gc-toolkit__polecat-hq-old","dependencies":[{"issue_id":"A-FOLD","depends_on_id":"A-CARRIER","type":"supersedes"}],"metadata":{"gc.routed_to":"human"}},
  {"id":"root-FOLD","status":"in_progress","assignee":"","metadata":{"gc.kind":"workflow","gc.step_id":"mol-polecat-work","gc.input_convoy_id":"convoy-FOLD","gc.routed_to":"$POOL"}},
  {"id":"F-held","status":"in_progress","assignee":"gc-toolkit__polecat-hq-other","metadata":{"gc.step_ref":"mol-polecat-work.load-context","gc.root_bead_id":"root-FOLD","gc.routed_to":"$POOL","gc.session_affinity":"require"}},
- {"id":"F-work","status":"open","assignee":"gc-toolkit__polecat-hq-gone","metadata":{"gc.step_ref":"mol-polecat-work.workspace-setup","gc.root_bead_id":"root-FOLD","gc.routed_to":"$POOL","gc.session_affinity":"require"}}
+ {"id":"F-work","status":"open","assignee":"gc-toolkit__polecat-hq-gone","metadata":{"gc.step_ref":"mol-polecat-work.workspace-setup","gc.root_bead_id":"root-FOLD","gc.routed_to":"$POOL","gc.session_affinity":"require"}},
+ {"id":"A-HELD","status":"in_progress","assignee":"hq-held","metadata":{"gc.routed_to":"$POOL","gc.session_id":"hq-held","gc.session_name":"gc-toolkit__polecat-hq-held"}},
+ {"id":"A-GONE","status":"in_progress","assignee":"hq-gone","metadata":{"gc.routed_to":"$POOL","gc.session_id":"hq-gone","gc.session_name":"gc-toolkit__polecat-hq-gone"}}
 ]
 JSON
 printf 'convoy-LIVE|A-LIVE\nconvoy-FOLD|A-FOLD\n' > "$LIVE_CONVOYS"
+# A-HELD's holder is a session the list still names; A-GONE's is in no row.
+export LIVE_SESSIONS="$LIVE/sessions.json"
+printf '{"sessions":[{"id":"hq-held","alias":"","session_name":"gc-toolkit__polecat-hq-held","state":"active"}]}\n' > "$LIVE_SESSIONS"
 : > "$LIVE_LOG"
 # The real run-cancel.sh, against a supervisor a curl stub stands in for: it
 # logs each request with its headers and answers 202, as gascity's cancel does.
@@ -1340,21 +1675,39 @@ case "$1 ${2:-}" in
   "bd update")
     printf 'update %s\n' "$*" >> "$LIVE_LOG"
     id="$3"; shift 3
-    # beads refuses to clear the assignee of an in_progress bead ANOTHER
-    # session holds, and refuses the whole update along with it. Checked
-    # before anything is applied, so the refusal is atomic here too: a stub
-    # that let the other keys through would hide the loss this split prevents.
+    st=$(jq -r --arg i "$id" '.[] | select(.id==$i) | .status // ""' "$LIVE_STORE")
+    who=$(jq -r --arg i "$id" '.[] | select(.id==$i) | .assignee // ""' "$LIVE_STORE")
+    # A guarded write compares --if-status and --if-assignee with the row, and a
+    # mismatch writes nothing and exits 13. bd skips its reassign fence for a
+    # write guarded on the assignee, since the guard names the holder, and that
+    # skip is why the release names a holder only once it is shown gone.
+    has_ifs=""; ifs=""; has_ifa=""; ifa=""
     for a in "$@"; do
       case "$a" in
-        --assignee|--assignee=*)
-          st=$(jq -r --arg i "$id" '.[] | select(.id==$i) | .status // ""' "$LIVE_STORE")
-          who=$(jq -r --arg i "$id" '.[] | select(.id==$i) | .assignee // ""' "$LIVE_STORE")
-          if [ "$st" = "in_progress" ] && [ -n "$who" ] && [ "$who" != "${GC_SESSION_NAME:-}" ]; then
-            printf 'refused %s (held by %s)\n' "$id" "$who" >> "$LIVE_LOG"
-            exit 1
-          fi ;;
+        --if-status=*)   has_ifs=1; ifs="${a#--if-status=}" ;;
+        --if-assignee=*) has_ifa=1; ifa="${a#--if-assignee=}" ;;
       esac
     done
+    if { [ -n "$has_ifs" ] && [ "$ifs" != "$st" ]; } || { [ -n "$has_ifa" ] && [ "$ifa" != "$who" ]; }; then
+      printf 'mismatch %s\n' "$id" >> "$LIVE_LOG"
+      exit 13
+    fi
+    # beads refuses to clear the assignee of an in_progress bead ANOTHER
+    # session holds, and refuses the whole update along with it, unless the
+    # write is guarded on the assignee. Checked before anything is applied, so
+    # the refusal is atomic here too: a stub that let the other keys through
+    # would hide the loss this split prevents.
+    if [ -z "$has_ifa" ]; then
+      for a in "$@"; do
+        case "$a" in
+          --assignee|--assignee=*)
+            if [ "$st" = "in_progress" ] && [ -n "$who" ] && [ "$who" != "${GC_SESSION_NAME:-}" ]; then
+              printf 'refused %s (held by %s)\n' "$id" "$who" >> "$LIVE_LOG"
+              exit 1
+            fi ;;
+        esac
+      done
+    fi
     while [ $# -gt 0 ]; do
       case "$1" in
         --db)             shift 2 ;;
@@ -1369,6 +1722,14 @@ case "$1 ${2:-}" in
   "bd dep")
     printf 'dep %s\n' "$*" >> "$LIVE_LOG"
     [ "${3:-}" = "list" ] && printf '[]\n' ;;
+  "session list")
+    if [ -s "$LIVE_SESSIONS" ]; then cat "$LIVE_SESSIONS"; else printf '{"sessions":[]}\n'; fi ;;
+  "session nudge")
+    printf 'nudge %s\n' "$*" >> "$LIVE_LOG" ;;
+  "sling "*)
+    # A raw route: gc sling writes the bead's gc.routed_to and pours nothing.
+    printf 'sling %s\n' "$*" >> "$LIVE_LOG"
+    sw --arg i "$3" --arg v "$2" 'map(if .id==$i then .metadata["gc.routed_to"]=$v else . end)' ;;
 esac
 exit 0
 GCL
@@ -1473,6 +1834,45 @@ grep -q 'superseded by A-CARRIER' <<< "$FOLDERR" \
 grep -q 'anchor left closed' <<< "$FOLDOUT" \
   && ok "(FOLDSTORE) …and reports the run's end, not a release" \
   || bad "(FOLDSTORE) the run claimed a release (stdout: $FOLDOUT)"
+
+# ── A claim another session holds, against the same mutating store ───────────
+# This store refuses an unguarded write that takes another session's live
+# claim, and skips that fence for a write guarded on the holder, as bd does. A
+# release that named a live holder in its guard would take the claim here, so
+# the store shows whether the claim of a session the list still names stands,
+# and whether the claim of one that is gone is released whole. Covered:
+#   (HELDSTORE) the live holder keeps its claim, its route and its pins, the
+#               headline lands, and the holder is nudged
+#   (GONESTORE) a gone holder's claim is released in one guarded write: open,
+#               unassigned, routed to no pool, its pins gone
+HSRC=0
+HSOUT="$(GC_SESSION_NAME="$SESSION" GC_SESSION_ID="hq-live1" \
+  sh "$SCRIPT" takeaway A-HELD "stopped — the PR it rebuilds was retired" --by converse --release --no-wait 2>&1)" || HSRC=$?
+live_store_intact   # the headline landed, or this is disk pressure not a verdict
+eq "$HSRC" "4" "(HELDSTORE) a release on a claim a live session holds exits 4"
+eq "$(field A-HELD status)|$(field A-HELD assignee)" "in_progress|hq-held" \
+   "(HELDSTORE) …and the claim stands, in_progress under its holder"
+eq "$(field A-HELD gc.routed_to)|$(field A-HELD gc.session_id)" "$POOL|hq-held" \
+   "(HELDSTORE) …with its route and its pins, which the holder's own hand-back clears"
+eq "$(field A-HELD gc.takeaway)" "stopped — the PR it rebuilds was retired" \
+   "(HELDSTORE) …while the headline lands"
+grep -q '^nudge session nudge --delivery immediate hq-held Stop work on A-HELD' "$LIVE_LOG" \
+  && ok "(HELDSTORE) …and the holder is nudged to stop" \
+  || bad "(HELDSTORE) no nudge reached the holder (log: $(cat "$LIVE_LOG"))"
+grep -q 'A-HELD is in_progress under hq-held' <<< "$HSOUT" \
+  && ok "(HELDSTORE) …and the exit names the holder" \
+  || bad "(HELDSTORE) the holder is unnamed (out: $HSOUT)"
+GSRC=0
+GC_SESSION_NAME="$SESSION" GC_SESSION_ID="hq-live1" \
+  sh "$SCRIPT" takeaway A-GONE "stopped — its holder is gone" --by converse --release --no-wait >/dev/null 2>&1 || GSRC=$?
+live_store_intact   # the release landed, or this is disk pressure not a verdict
+eq "$GSRC" "0" "(GONESTORE) a release on a claim whose holder is gone succeeds"
+eq "$(field A-GONE status)|$(field A-GONE assignee)|$(field A-GONE gc.routed_to)" "open||" \
+   "(GONESTORE) …leaving it open, unassigned and routed to no pool"
+eq "$(field A-GONE gc.session_id)|$(field A-GONE gc.session_name)" "|" \
+   "(GONESTORE) …with the gone holder's pins removed"
+grep -q '^nudge .*A-GONE' "$LIVE_LOG" \
+  && bad "(GONESTORE) a holder that is gone was nudged" || ok "(GONESTORE) …and no holder is nudged"
 
 # ── the disk-pressure guard itself ───────────────────────────────────────────
 # The release assertions above read the store back through field(); a stub write

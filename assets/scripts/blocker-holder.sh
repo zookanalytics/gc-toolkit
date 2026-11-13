@@ -6,15 +6,14 @@
 #   actor <bead> <how>   an automated actor holds this live blocker, so the merge
 #                        waits on work the city is doing (progressing)
 #   stuck <bead>...      no automated actor holds any live blocker, and these are
-#                        not routed to a person, so nothing the city runs will
-#                        clear them. The merge pass records blocked, cause
-#                        blocker, for the first that no open human gate holds
+#                        not human gates, so nothing the city runs will clear
+#                        them. The merge pass records blocked, cause blocker,
+#                        for the first that no open human gate holds
 #                        (prstatus.HoldingGates)
 #   none                 no live blocker, or only blockers a person holds
 #
-# A person holds a blocker routed to a person (gc.routed_to=human), and a human
-# gate, by bd-lib.sh's rule (human_gate): the gate is the hold of the person who
-# must clear it, so it is neither an actor's nor stuck.
+# A person holds a human gate, by bd-lib.sh's rule (human_gate): the gate is the
+# hold of the person who must clear it, so it is neither an actor's nor stuck.
 #
 # A person holds a conversation as well. One on an open PR holds the PR's merge
 # until a person's ruling or dismissal closes it, so it is neither an actor's nor
@@ -25,7 +24,7 @@
 # A live blocker is one whose status is open, in_progress, blocked, deferred,
 # hooked or pinned, a missing status reading open. An automated actor holds it
 # when any of these marks it:
-#   - a route: gc.routed_to names a pool or an agent, anything but human;
+#   - a route: gc.routed_to names a pool or an agent;
 #   - a claim: an assignee other than human. The refinery holds a rework handed
 #     back to it this way until the rework lands on its branch;
 #   - an arm: gc.dispatch_when_ready names where the deferred-dispatch pass slings
@@ -92,7 +91,7 @@ marks=$(printf '%s' "$rows" | jq -r --arg live "$LIVE_STATUSES" "$HUMAN_GATE_JQ$
   | ((.assignee // "") | tostring) as $a
   | select(((.issue_type // "") == "task" and ($a == "human" or conversation_alias)) | not)
   | (((.metadata // {})["gc.dispatch_when_ready"] // "") | tostring) as $armed
-  | select($r != "human" and (human_gate | not))
+  | select(human_gate | not)
   | [ ((.id // "") | tostring),
       (if $r != "" then "routed to " + $r
        elif $a != "" and $a != "human" then "claimed by " + $a
