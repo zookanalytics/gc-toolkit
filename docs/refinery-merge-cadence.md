@@ -603,10 +603,11 @@ the cadence — the arms run whether or not any refinery session is awake.
    made, the deferral's follow-up, or the decline. Its thread is then
    resolved, whether the finding was fixed, declined or deferred, unless a post
    that is feedback has come after it. A thread the identity cannot resolve
-   leaves the finding owed its answer, as above. A thread holding only the
-   city's comments for one finding, whose answer carries the
-   `<!-- gc-finding:<id>:open -->` line, is resolved the same way. A
-   Conversation comment is edited to carry the answer. A finding that closed
+   leaves the finding owed its answer, as above. A declined or deferred
+   finding's answer is recorded `settled`. One recorded `1` can still have its
+   thread open, behind an answer carrying the `<!-- gc-finding:<id>:open -->`
+   line, so it is answered again, and its thread is resolved by the same rule.
+   A Conversation comment is edited to carry the answer. A finding that closed
    before it was posted, as a pre-open round's findings have, is posted with its
    answer already in place. A human finding is never posted, because it already
    sits on the PR where its raiser wrote it and is answered there. One

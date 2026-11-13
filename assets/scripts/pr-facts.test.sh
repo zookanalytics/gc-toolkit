@@ -4611,7 +4611,7 @@ has "$IC3" "ruled deferred" "a deferred finding is posted as deferred"
 has "$IC3" "**Outcome:** Deferred — tracked as follow-up tk-fu3" "…with its follow-up as the outcome"
 has "$IC3" 'Locus: `PR #200 body / Summary`' "…and its locus named, since no file in the diff holds it"
 has "$IC3" "<!-- gc:city -->" "…and the city's mark, as every Conversation post carries"
-eq "$(meta FM3 finding.pr_answered)" "1" "a Conversation comment posted with its outcome owes nothing more"
+eq "$(meta FM3 finding.pr_answered)" "settled" "a Conversation comment posted with its outcome owes nothing more, recorded settled as a deferral is"
 has "$(fissue 200 FM4)" "The merge waits for this to be fixed on the branch." "an open finding posted to the Conversation says what it holds"
 eq "$(printf '%s\n' "$since" | grep -c '^COMMITS 200$')" "1" "the PR's commits are read once for the two outcomes that cite them"
 
@@ -4766,15 +4766,16 @@ hasnt "$(tbodies "$TD")" ":open -->" "…with no open line, since nothing in its
 out=$(run)
 TD=$(fthread 345 DF7)
 eq "$(printf '%s' "$TD" | jq -r '.isResolved')" "true" "the next pass resolves the thread behind the answer"
-eq "$(meta DF7 finding.pr_answered)" "1" "…and records the finding answered"
+eq "$(meta DF7 finding.pr_answered)" "settled" "…and records the deferral settled"
 eq "$(printf '%s' "$TD" | jq -r '.comments.nodes | length')" "1" "…posting nothing more, its answer being in place"
 
 echo "# a finding thread whose answer carries the open line is resolved while it holds only the city's comments"
-# An answer on PR#356 carries the open line, and its finding is recorded
-# answered, so nothing re-answers it. Nothing else is in its thread, so the plan
-# resolves it. PR#357's open-line thread holds a reply of the reviewer's as
-# well, which is feedback of its own: that thread is left for the answer to the
-# reply. A human batch brings both anchors into the sweep.
+# An answer on PR#356 carries the open line, and its deferred finding is
+# recorded answered `1`, so it is answered again: its answer is already in
+# place, nothing else is in its thread, and the thread is resolved. PR#357's
+# open-line thread holds a reply of the reviewer's as well, which is feedback of
+# its own: that thread is left for the answer to the reply. Each finding is then
+# recorded settled, so neither is answered a third time.
 mfopen() { # num finding
   printf '{"id":"FT-%s","isResolved":false,"viewerCanResolve":true,"comments":{"nodes":[{"id":"FC-%s","databaseId":%s01,"author":{"login":"gc-city-bot"},"reactionGroups":[],"body":"**Finding from the codex review, ruled deferred** (%s)\\n**Outcome:** Deferred: follow-up tk-fu carries this after the merge.\\n<!-- gc-finding:%s -->\\n<!-- gc-finding:%s:answered -->\\n<!-- gc-finding:%s:open -->\\n\\n<!-- gc:city -->"}]}}' \
     "$1" "$1" "$1" "$2" "$2" "$2" "$2"
@@ -4790,6 +4791,41 @@ out=$(run)
 eq "$(tresolved 356 FT-356)" "true" "the thread holding only the city's comments is resolved"
 hasnt "$(gh_since "$mark")" "REPLY FT-356" "…with nothing posted into it"
 eq "$(tresolved 357 FT-357)" "false" "the one the reviewer replied in is left for the answer to the reply"
+eq "$(meta DF8 finding.pr_answered),$(meta DF9 finding.pr_answered)" "settled,settled" "…and each finding is recorded settled"
+mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
+out=$(run)
+hasnt "$(gh_since "$mark")" "FT-35" "a later pass writes to neither thread"
+
+echo "# an open-line finding thread is resolved on a PR with no human batch, and retried until it reads resolved"
+# Neither anchor carries a disposition, and each one's only finding is recorded
+# answered `1`, so nothing but that finding brings it into the sweep. PR#364's
+# deferred finding's thread is resolved. PR#365's declined finding's thread
+# cannot be resolved by this identity at first: the pass reports it and leaves
+# the finding owed, and the pass after the right is restored resolves it.
+store "[$(anchor MQ 364 "$UTCUT"), $(mfind DF10 MQ deferred closed 'assets/scripts/x.sh: parse_name' codex ',"finding.follow_up":"tk-fu","finding.pr_comment":"36401","finding.pr_answered":"1"'),
+  $(anchor MR 365 "$UTCUT"), $(mfind DF11 MR declined closed 'assets/scripts/x.sh: parse_name' codex ',"finding.pr_comment":"36501","finding.pr_answered":"1"')]"
+printf '%s' "$(prview 364 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_364.json"
+printf '%s' "$(prview 365 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_365.json"
+threads 364 "{\"reviews\":[],\"issue_comments\":[],\"threads\":[$(mfopen 364 DF10)]}"
+threads 365 "$(printf '{"reviews":[],"issue_comments":[],"threads":[%s]}' "$(mfopen 365 DF11)" | jq -c '
+  .threads[0].viewerCanResolve = false
+  | .threads[0].comments.nodes[0].body |= (sub("ruled deferred"; "ruled declined")
+      | sub("Deferred: follow-up tk-fu carries this after the merge."; "Declined: the parser reads only the declared forms."))')"
+mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
+out=$(run)
+eq "$(tresolved 364 FT-364)" "true" "the thread on a PR with no human batch is resolved"
+hasnt "$(gh_since "$mark")" "REPLY FT-364" "…with nothing posted into it"
+eq "$(meta DF10 finding.pr_answered)" "settled" "…and the finding recorded settled"
+eq "$(tresolved 365 FT-365)" "false" "a thread this identity cannot resolve is left open"
+has "$out" "MR — PR#365 thread FT-365 is not resolvable by this identity" "…which the pass reports"
+eq "$(meta DF11 finding.pr_answered)" "1" "…leaving the finding owed its answer"
+jq -c '.threads[0].viewerCanResolve = true' "$GH_DIR/threads_365.json" > "$TMP/t365.json" && mv "$TMP/t365.json" "$GH_DIR/threads_365.json"
+mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
+out=$(run)
+eq "$(tresolved 365 FT-365)" "true" "the next pass, able to resolve it, does"
+eq "$(meta DF11 finding.pr_answered)" "settled" "…and records the finding settled"
+hasnt "$(gh_since "$mark")" "RESOLVE FT-364" "…resolving nothing it already resolved"
+hasnt "$(gh_since "$mark")" "REPLY" "…and posting nothing"
 
 echo "# a re-raise re-blocks: a re-review after a decline re-opens the human validation pass"
 # Declining closes the finding, so a still-standing objection re-adopts as a

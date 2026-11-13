@@ -542,9 +542,10 @@ WB_GLYPH_AWAITING="❓"
 # carries `<!-- gc-finding:<id>:answered -->`. A later pass finds the finding's
 # comment by the first. An answer on a PR can also carry
 # `<!-- gc-finding:<id>:open -->`, which this script does not write: it marks a
-# thread left open for a person to accept or overrule the ruling. The
-# reply-and-resolve plan resolves such a thread while it holds only the city's
-# finding comments. Every post also carries the city's mark, which pr-post.sh
+# thread left open for a person to accept or overrule the ruling. Its finding,
+# declined or deferred and recorded answered `1`, is answered again (WB_FOWED),
+# which resolves such a thread like any answered finding's. Every post also
+# carries the city's mark, which pr-post.sh
 # appends. None carries WB_MARKER, so the reply-and-resolve plan never reads a
 # finding's thread as one the city already answered.
 WB_FINDING_MARKER="<!-- gc-finding:"
@@ -4148,10 +4149,14 @@ fi
 # pass already running against its deadline cannot spend one per open PR. A
 # finding is owed a post when it is ruled must-fix or deferred and carries no
 # finding.pr_comment, and owed an answer once it has been posted and has closed
-# and carries no finding.pr_answered. Each stamp is written only after the
-# GitHub write it records, so an anchor whose findings are all settled costs no
-# GitHub call. A finding records its locus as the first line of its body
-# (finding.sh upsert), and the objection follows it.
+# and carries no finding.pr_answered. A declined or deferred finding's answer
+# is recorded `settled`, so one recorded `1` is owed its answer still: its
+# answer can carry the open line (WB_FINDING_MARKER, below), which leaves its
+# thread open for a person, and answering it again resolves that thread. Each
+# stamp is written only after the GitHub write it records, so an anchor whose
+# findings are all settled costs no GitHub call. A finding records its locus
+# as the first line of its body (finding.sh upsert), and the objection follows
+# it.
 WB_FOWED="[]"
 if [ -n "$WB_ANCHORS" ] && [ "$WB_ANCHORS" != "[]" ]; then
   if wbf_rows=$(bd_list --metadata-field task_kind=finding --status="$ALL_STATUSES"); then
@@ -4167,7 +4172,9 @@ if [ -n "$WB_ANCHORS" ] && [ "$WB_ANCHORS" != "[]" ]; then
         | (((.status // "open") | tostring | ascii_downcase) == "closed") as $closed
         | (if m("finding.pr_comment") == ""
            then (if $d == "must-fix" or $d == "deferred" then "post" else "" end)
-           elif $closed and m("finding.pr_answered") == "" then "answer"
+           elif $closed and (m("finding.pr_answered") == ""
+                             or (m("finding.pr_answered") == "1" and ($d == "declined" or $d == "deferred")))
+             then "answer"
            else "" end) as $act
         | select($act != "")
         | ((.description // "") | tostring) as $desc
@@ -4715,19 +4722,17 @@ WB_ROUNDS
   #   R <node-id>                       react EYES: routed, carrying neither reaction
   #   T <thread> <reply> <why> <body> <swaps>
   #                                     a thread whose routed comments are all
-  #                                     resolved, or a thread holding only
-  #                                     the city's comments for a machine finding
-  #                                     whose answer carries the open line. reply
-  #                                     is 1 when a comment its batch resolved
-  #                                     sits after our last resolved answer, and
-  #                                     body is the answer naming the beads that
-  #                                     resolved them, a fix's commits by the
-  #                                     token wb_expand cites. why is ok, live (a
-  #                                     human answered after us), owed (this read
-  #                                     does not show a finding's owed reply in it
-  #                                     on the PR, so only answered), norights
-  #                                     (cannot resolve), or resolved (already,
-  #                                     so only answered).
+  #                                     resolved. reply is 1 when a comment its
+  #                                     batch resolved sits after our last
+  #                                     resolved answer, and body is the answer
+  #                                     naming the beads that resolved them, a
+  #                                     fix's commits by the token wb_expand
+  #                                     cites. why is ok, live (a human answered
+  #                                     after us), owed (this read does not show
+  #                                     a finding's owed reply in it on the PR,
+  #                                     so only answered), norights (cannot
+  #                                     resolve), or resolved (already, so only
+  #                                     answered).
   #   Q <thread> <gate> <body>          the awaiting answer for one open gate
   #   P <mark> <tokens> <swaps> <body>  a Conversation-tab answer for the review
   #                                     bodies and Conversation comments one bead
@@ -4760,7 +4765,7 @@ WB_ROUNDS
   wplan=$(printf '%s' "$wview" | jq -r \
     --arg self "$SELF_LOGIN" --arg since "$wsince" --arg reaction "$WB_REACTION" --arg handled "$WB_RESOLVED_REACTION" \
     --arg marker "$WB_MARKER" --arg gres "$WB_GLYPH_RESOLVED" --arg gwait "$WB_GLYPH_AWAITING" \
-    --arg fm "$WB_FINDING_MARKER" --argjson cwm "$wcwm" --argjson rwm "$wrwm" --argjson iwm "$wiwm" \
+    --argjson cwm "$wcwm" --argjson rwm "$wrwm" --argjson iwm "$wiwm" \
     --argjson led "$wled" --argjson fnd "$wfnd" --argjson marking "$wfnd_ok" "$CITY_OWN_DEF"'
     def rg($rgs; $c): [ ($rgs // [])[] | select(.content == $c and .viewerHasReacted) ] | length > 0;
     def foreign: gc_feedback($self; $since);
@@ -4919,14 +4924,6 @@ WB_ROUNDS
           | "T\t" + $x.id + "\t" + ($reply | tostring) + "\t" + $why
             + "\t" + (if $reply == 1 then resolved_text([ $pend[] | $led.c[.ri] + { fixed, key: (.d | tostring) } ]) else "-" end)
             + "\t" + ($pend | swaps) ]
-      # A thread holding only comments of the city for one machine finding,
-      # whose answer carries the open line, asks nothing more of anyone, so it
-      # is resolved like the thread of any other answered finding.
-      + [ $v.threads[] | select((.isResolved // false) | not) | (.comments.nodes // []) as $cs
-          | select(($cs | length) > 0)
-          | select(all($cs[]; gc_city_own($self; $since) and ((.body // "") | contains($fm))))
-          | select(any($cs[]; (.body // "") | test("<!-- gc-finding:[^ >]+:open -->")))
-          | "T\t" + .id + "\t0\t" + (if (.viewerCanResolve // false) == true then "ok" else "norights" end) + "\t-\t-" ]
       + [ $T[] | . as $x
           | [ $x.held[] | select(.st == "awaiting" and .by == "batch") | .gate ] | unique[]
           | select(("awaiting:" + .) as $m | ($x.sts | index($m)) == null)
@@ -5371,12 +5368,15 @@ WB_REVIEW_CLEARS
   # declined or deferred, is resolved unless a post that is not the city's own
   # has come after it, which leaves that conversation to whoever wrote it. One
   # this identity cannot resolve leaves the finding owed its answer, so every
-  # later pass tries the resolve again. The markers are read back before any
-  # write, so a post whose stamp did not land is recorded rather than repeated,
-  # and a thread opened this pass is resolved by the next one, which can read it
-  # back. A posted finding whose
-  # comment is gone from the PR has nothing left to answer. Only a pass that read
-  # the threads cleanly acts.
+  # later pass tries the resolve again. A declined or deferred finding's answer
+  # is recorded `settled`. One recorded `1` can have its thread still open
+  # behind an answer carrying the open line, so it is answered again: its
+  # answer is already in place, and its thread is resolved by the same rule.
+  # The markers are read back before any write, so a post whose stamp did not
+  # land is recorded rather than repeated, and a thread opened this pass is
+  # resolved by the next one, which can read it back. A posted finding whose
+  # comment is gone from the PR has nothing left to answer. Only a pass that
+  # read the threads cleanly acts.
   if [ -n "$wfown" ] && [ "$wplan_ok" = 1 ] && [ -n "$whead" ]; then
     wffiles=""; wffiles_rc=""
     while IFS= read -r wfrow; do
@@ -5385,6 +5385,10 @@ WB_REVIEW_CLEARS
       wfid=$(printf '%s' "$wfj" | jq -r '.id // empty' 2>/dev/null)
       wfact=$(printf '%s' "$wfj" | jq -r '.act // empty' 2>/dev/null)
       [ -n "$wfid" ] && [ -n "$wfact" ] || continue
+      # The value finding.pr_answered records once the finding's answer is on
+      # the PR and its thread settled.
+      wfdone=1
+      case "$(printf '%s' "$wfj" | jq -r '.disp // ""' 2>/dev/null)" in declined|deferred) wfdone=settled ;; esac
       # Where the finding already sits: the city's own comment carrying its
       # marker, in a review thread or the Conversation. A post after it that is
       # feedback (gc_feedback) is someone writing in the thread, whoever wrote it,
@@ -5481,7 +5485,7 @@ WB_REVIEW_CLEARS
           # A Conversation comment posted with its answer in place owes nothing
           # more; a thread still owes its resolve.
           if [ -n "$wfans" ] && [ -z "$wfpath" ]; then
-            gc bd update "$wfid" --set-metadata finding.pr_comment="$wfnew" --set-metadata finding.pr_answered=1 >/dev/null 2>&1
+            gc bd update "$wfid" --set-metadata finding.pr_comment="$wfnew" --set-metadata finding.pr_answered="$wfdone" >/dev/null 2>&1
           else
             gc bd update "$wfid" --set-metadata finding.pr_comment="$wfnew" >/dev/null 2>&1
           fi || echo "$PROG: $wid — PR#$wnum finding $wfid posted but its stamp did not record; the next pass reads the marker back" >&2
@@ -5539,7 +5543,7 @@ $WB_FINDING_MARKER$wfid:answered -->"; then
             wfwrote=1
           fi
           [ "$wfwrote" = 0 ] || fanswered=$((fanswered + 1))
-          gc bd update "$wfid" --set-metadata finding.pr_answered=1 >/dev/null 2>&1 \
+          gc bd update "$wfid" --set-metadata finding.pr_answered="$wfdone" >/dev/null 2>&1 \
             || echo "$PROG: $wid — PR#$wnum finding $wfid answered but its stamp did not record; the next pass reads the answer back" >&2
           ;;
       esac
