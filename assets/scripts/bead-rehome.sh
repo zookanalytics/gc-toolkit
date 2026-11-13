@@ -28,10 +28,13 @@
 # writes, and never between a run's read of the record and its write. The close
 # clears the record's marker, pr_reconcile_pending, in its own write when the
 # origin carries it, so no later run of the landing order reopens the closed
-# bead. --check and --dry-run write nothing and take no lock. Every gc call made
-# while the lock is held runs with its descriptor closed, so no process a call
-# starts, such as a Dolt server, keeps the lock after this script ends, and the
-# lock is freed once the close has landed, before the branch is ended.
+# bead. A closed origin clears it the same way: the repair's note carries the
+# clear, and an origin that already records this disposition and still carries
+# the marker gets a note that carries it, held to the status and assignee this
+# run read. --check and --dry-run write nothing and take no lock. Every gc call
+# made while the lock is held runs with its descriptor closed, so no process a
+# call starts, such as a Dolt server, keeps the lock after this script ends, and
+# the lock is freed once the close has landed, before the branch is ended.
 #
 # The edge goes on just before the close, the order `bd duplicate` and
 # `bd supersede` write the two in. So this writer's close names its
@@ -195,7 +198,10 @@ The close takes the store's record lock (pr-record.lock in the origin store's
 .beads directory) before it reads the origin, waiting up to
 $PR_RECORD_LOCK_WAIT_SECS (300) while a writer of a PR's pending record holds
 it, and clears the landing order's marker, pr_reconcile_pending, in its own
-write when the origin carries it.
+write when the origin carries it. A closed origin that already records this
+disposition and still carries the marker has it cleared in a write of its own,
+which lands only while the origin has the status and assignee this run read
+(exit 4 otherwise).
 
 --check evaluates that evidence and a duplicate's waiters, and exits 0
 (eligible) or non-zero (refused, reason on stderr) without writing anything.
@@ -926,8 +932,23 @@ if [ "$ORIGIN_STATUS" = "closed" ]; then
     # The repair path: the close happened earlier, so the edge and a note record
     # the disposition now. A note says when it was recorded, because the close
     # it explains predates it.
-    if [ -n "$EDGE_STANDS" ]; then
+    if [ -n "$EDGE_STANDS" ] && [ "${#CLEAR_MARKER[@]}" -eq 0 ]; then
         printf 'bead-rehome: %s already records this disposition (%s %s) — nothing to do\n' \
+            "$ORIGIN" "$EDGE_TYPE" "$SUCCESSOR"
+    elif [ -n "$EDGE_STANDS" ]; then
+        # The disposition is recorded, but the close that made it left the
+        # landing order's marker on the bead, and a run of the order reopens a
+        # closed bead that carries the marker with no verified merge. So the
+        # marker clears now, in a write held to the status and assignee this
+        # run read, as the repair's note is below.
+        if ! bd_at "$ORIGIN_PATH" update "$ORIGIN" \
+                --if-status="$JUDGED_STATUS" --if-assignee="$JUDGED_ASSIGNEE" \
+                "${CLEAR_MARKER[@]}" \
+                --append-notes "Disposition confirmed $(date -u +%Y-%m-%dT%H:%MZ): $REASON. The landing order's pending-record marker is cleared, so no run of the order reopens this closed bead." \
+                >/dev/null 2>&1; then
+            die "$ORIGIN already records this disposition ($EDGE_TYPE $SUCCESSOR), but the landing order's pr_reconcile_pending marker did not clear under the status and assignee this run read (${JUDGED_STATUS}, ${JUDGED_ASSIGNEE:-unassigned}): a reopen, a claim or an assignment landed since, or the store did not answer. While the marker stands, a run of the landing order reopens the closed bead. Re-run to judge it as it stands now" 4
+        fi
+        printf 'bead-rehome: %s already records this disposition (%s %s); the landing order'\''s pr_reconcile_pending marker is cleared\n' \
             "$ORIGIN" "$EDGE_TYPE" "$SUCCESSOR"
     else
         # A wait onto the successor that a forced close left behind ends with

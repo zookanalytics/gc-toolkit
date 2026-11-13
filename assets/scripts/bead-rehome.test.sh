@@ -102,7 +102,10 @@
 #       pending record take: it waits while another writer holds it, reads the
 #       origin only once it holds it, so a marker a publication wrote meanwhile
 #       is read, and clears that marker, pr_reconcile_pending, in the close's
-#       own update. An origin without the marker gets no such flag. --check and
+#       own update. An origin without the marker gets no such flag. A closed
+#       origin that already records the disposition and carries the marker has
+#       it cleared in a note held to the status and assignee read, and a claim
+#       since that read keeps it (exit 4). --check and
 #       --dry-run take no lock, and a lock that does not come within
 #       PR_RECORD_LOCK_WAIT_SECS writes nothing (exit 5);
 #   (aw) with no identity of its own the writer compares an assignee with the actor
@@ -1936,6 +1939,26 @@ CLOSE_LINE=$(grep -- '--status=closed' "$FAKE_UPDATE_LOG" | grep '^al-lock3 ' ||
 eq "$rc" 0 "(ax) an unmarked origin closes"
 case "$CLOSE_LINE" in *--unset-metadata*) bad "(ax) …and its close clears no marker it does not carry" ;;
     *) ok "(ax) …and its close clears no marker it does not carry" ;; esac
+
+# A closed origin that already records this disposition can still carry the
+# marker, as a close made without this writer leaves it. The run clears it in a
+# note held to what it read, since the landing order reopens a closed bead that
+# carries it with no verified merge.
+mkbead alpha closed al-lock5; mkbead alpha open al-lock-succ5
+printf 'dep.al-lock-succ5=supersedes\nm.pr_reconcile_pending=true\n' >> "$ALPHA/al-lock5"
+: > "$FAKE_UPDATE_LOG"
+rc=0; run --origin al-lock5 --successor al-lock-succ5 --kind re-homed || rc=$?
+eq "$rc" 0 "(ax) a closed origin that already records the disposition and carries the marker is confirmed"
+eq "$(field alpha m.pr_reconcile_pending al-lock5)/$(field alpha status al-lock5)" "/closed" "(ax) …its marker is cleared and it stays closed"
+has "$(grep '^al-lock5 ' "$FAKE_UPDATE_LOG" || true)" "al-lock5 --if-status=closed --if-assignee= --unset-metadata pr_reconcile_pending --append-notes" "(ax) …in a note held to the status and assignee it read"
+has "$(cat "$TMP/out")" "marker is cleared" "(ax) …and the output says so"
+mkbead alpha closed al-lock6; mkbead alpha open al-lock-succ6
+printf 'dep.al-lock-succ6=supersedes\nm.pr_reconcile_pending=true\n' >> "$ALPHA/al-lock6"
+H=$(reopen_hook l6 al-lock6)
+rc=0; FAKE_RACE_BEFORE_NOTE="$H" run --origin al-lock6 --successor al-lock-succ6 --kind re-homed || rc=$?
+eq "$rc" 4 "(ax) a reopen and a claim since the read leave the marker: exit 4"
+eq "$(field alpha status al-lock6)/$(field alpha m.pr_reconcile_pending al-lock6)" "in_progress/true" "(ax) …the claim stands, and the marker with it"
+has "$(cat "$TMP/err")" "marker did not clear" "(ax) …and the refusal says the marker did not clear"
 unset FAKE_UPDATE_LOG
 
 # --check and --dry-run write nothing and take no lock; a held lock bounds the
