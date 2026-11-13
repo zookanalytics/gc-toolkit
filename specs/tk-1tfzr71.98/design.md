@@ -1,6 +1,6 @@
 ---
 name: Design — deferred dispatch keeps only the arm, as gctk's bead verbs and one order
-description: The design for tk-1tfzr71.98, the design child of initiative tk-1tfzr71.16, taken at main dbe034457 and checked against Gas City upstream main 3bcab243e, the city's gc build 6589a7df45 and bd 1.3.4. It states what is left of deferred dispatch and where it lives, the trigger its start runs on, how the start sends each arm exactly once, what holds an armed bead, how a named agent hears about ready work, how a stop removes an arm first, what each writer and reader becomes, how the tests reach the real store, the upstream asks it proposes, and the three units the implementation child files. Read it to approve the design at its gate, or to build one of its units.
+description: The design for tk-1tfzr71.98, the design child of initiative tk-1tfzr71.16, taken at main dbe034457 and checked against Gas City upstream main 3bcab243e, the city's gc build 6589a7df45 and bd 1.3.4. It states what is left of deferred dispatch, where it lives and which package owns the arm's keys, the trigger its start runs on, how the start sends each arm exactly once, what holds an armed bead, how a named agent hears about ready work, how a stop removes an arm first, what each writer and reader becomes, how the tests reach the real store, the upstream asks it proposes, and the three units the implementation child files. Read it to approve the design at its gate, or to build one of its units.
 ---
 
 # Design: deferred dispatch keeps only the arm
@@ -22,9 +22,11 @@ second job: telling a named agent, such as the mechanik or a refinery, that
 work assigned to it is ready. Approving this design keeps the arm, which is the
 one job Gas City cannot do, and rebuilds it as three gctk verbs and one order.
 It deletes the script and drops what Gas City now does or reports itself. The
-203 arms open across six rig stores carry over with no write. What reaches you
-does not change: a start that keeps failing still asks you through a human
-gate.
+arm's keys move with it: gctk's `bead` domain becomes their one owner, and the
+scripts, doctor checks and skills that read an arm ask gctk instead
+(section 10). The 203 arms open across six rig stores carry over with no
+write. What reaches you does not change: a start that keeps failing still asks
+you through a human gate.
 
 Three calls carry a cost either way:
 
@@ -96,8 +98,8 @@ upstream commit it builds against.
 
 Retiring here: the notice and its record (`deferred-dispatch.sh notify`,
 `gc.notify_when_ready`), the per-rig pass lock, the two-state crash marker
-(`gc.dispatch_when_ready_slung`), the pass's partial-outcome declarations, and
-the script itself.
+(`gc.dispatch_when_ready_slung`), the pass's partial-outcome declarations, the
+script itself, and each surviving reader's own decoding of the arm's keys.
 
 ## 2. Where it lives
 
@@ -105,17 +107,39 @@ The arm moves into gctk's `bead` domain in this member, as
 `docs/gctk-architecture.md` plans it, and the port deletes the shell it
 replaces in the same change (item P5 of `docs/built-once-target.md`).
 
+The domain is two packages, so that it forms no import cycle with `waits`.
+
+- **The record**, `services/gctk/arm/record`, declares the arm's keys as its
+  own, decodes a bead's arm into typed values, and makes every write to them,
+  each as one ledger write. It asks no other domain. Its answer for a bead is
+  the target, the formula the arm names (its `--on`, empty when it names none,
+  so the start pours the target's default), the reason, who armed it and when,
+  the attempts, and whether they have reached the cap, which is
+  `GC_MAX_DISPATCH_SLING_FAILURES` (3 by default). At the cap the start asks a
+  person instead of slinging.
+- **The verbs' rules**, `services/gctk/arm`, are what `gctk bead arm` refuses,
+  the dispatch lock that `arm`, `disarm` and the start hold (section 4), and
+  the start itself. They ask `waits` what holds a bead and the record for its
+  arm, and no domain asks them.
+
+`waits` asks the record for the arm that `gctk bead holds` prints, so
+`waits.Holds.Arm` is the record's answer, and the arm `bead holds` prints
+carries the record's `formula` and `capped`. `queue` reads the arm from
+`waits.Holds` to tell whether a bead starts by itself, so it needs no change.
+
 | Verb | Caller class | What it does |
 |---|---|---|
 | `gctk bead arm <bead> --target <rig>/<pool> [--on <formula>] --reason <text> [--db <path>]` | agent, hook | Records the arm. With no `--on` it records the target's default formula, read from `gc config show --json` (`DefaultSlingFormula`). It refuses a closed bead, a bead not `open`, a bead already dispatched (`in_progress`, or a `gc.routed_to` route), a target with no formula to pour, and a bead with a wait edge into another store. An arm already present with the same target and formula is a success that writes nothing, and a different one is refused. |
 | `gctk bead disarm <bead> --reason <text> [--db <path>]` | agent, hook | Removes the arm in one write, under the bead's dispatch lock (section 4). It exits 0 once no arm remains, the case where none was there included. Once it exits 0, no start has the bead in flight and none will send it. |
-| `gctk bead start-armed [--db <path>] [--dry-run]` | order | Retires the arm on each closed or delivered bead, starts each armed bead nothing holds (section 4), and nudges each named session about its ready, unclaimed assigned work (section 6). |
+| `gctk bead start-armed [--db <path>] [--dry-run]` | order | Retires the arm on each closed or delivered bead, starts each armed bead nothing holds (section 4), and nudges each named session about its ready, unclaimed assigned work (section 6). It prints one JSON object per arm it reads: `gctk bead holds`' answer for the bead, with what the pass did with the arm, or with `--dry-run` would do. That is a retire and its case, a start, an exit 3 read as already sent, a hold and what holds the bead, a cap reached, a failed sling or a malformed record. |
 
 Nothing remains of `deferred-dispatch.sh`. `orders/deferred-dispatch.toml`
 keeps its name, cadence, rig scope and single-flight gate, so
 `doctor/check-cadence-live` and the order's history carry on, and its `exec`
-runs `gctk bead start-armed`. `assets/scripts/dispatch-path.sh` stays as it is:
-the arm's key is still a dispatch path, and its readers need no change.
+runs `gctk bead start-armed`. `assets/scripts/dispatch-path.sh` keeps the route
+half of a dispatch path and the hold labels, and gives up the arm half: whether
+a bead is armed is the record's answer, which each of its readers asks through
+`gctk bead holds` (section 10).
 
 The whole files that retire are `assets/scripts/deferred-dispatch.sh` and
 `assets/scripts/deferred-dispatch.test.sh`, 3,515 lines at dbe034457. They take
@@ -133,13 +157,26 @@ of it to one line):
 "$GCTK" bead disarm <bead> --reason "<why>"
 ```
 
-Listing the arms needs no verb. `gc bd list --has-metadata-key
-gc.dispatch_when_ready` lists them natively, and `gctk bead holds` already
-prints each bead's arm beside what holds it.
+Listing the arms needs no verb of its own. The start's dry run prints every arm
+in a store and what the start would do with each, which is what
+`deferred-dispatch.sh list` prints today, and `gctk bead holds` prints the arm
+of each bead it is given.
 
-The arm keeps its keys, so no stored arm is rewritten: `gc.dispatch_when_ready`
-(the target), `_args`, `_armed_by`, `_armed_at`, `_reason` and `_fail_count`.
-The crash marker `gc.dispatch_when_ready_slung` and the notice key
+The arm keeps its keys' stored spellings, so no stored arm is rewritten:
+`gc.dispatch_when_ready` (the target), `_args`, `_armed_by`, `_armed_at`,
+`_reason` and `_fail_count`. What changes is who may read them. The record
+declares the six as its own, so the compiler refuses any other package that
+would read or write them, and `waits` drops the read-only declarations it makes
+of them today. They leave `lifecycle/lifecycle.toml`'s
+`[metadata.deferred_dispatch]` group, and the generated
+`services/gctk/key-registry.json` names the record as their owner. This is the
+takeover `docs/gctk-architecture.md`'s ledger sets for the change that moves a
+key's writer, and by its rule 6 a key's name then appears once, so each
+surviving reader asks the record instead of spelling a key. Section 10 lists
+them, and the readers it leaves to the members that retire their code, the
+board's among them.
+`resling_target`, which shares the group, is `await-ruling.sh`'s own key and
+stays. The crash marker `gc.dispatch_when_ready_slung` and the notice key
 `gc.notify_when_ready` stay registered in `lifecycle/lifecycle.toml` as
 retired, so residue reads as known and no doctor error fires on it. The arm's
 note keeps its prefix, `deferred-dispatch: `, because `mol-validate-close`
@@ -511,46 +548,119 @@ assignment and the `watch-dispatched-work` fragment. Unit 2 reads each site's
 bead at the write before it picks the form, and a site whose bead can be either
 nudges only when bd reports it ready.
 
-**Readers of the keys** keep reading the same keys and need no change:
-`dispatch-path.sh` and the readers that source it (`tools/gc-proactive.sh`,
-`check-blocked-work-armed`, `check-step-terminal`), `bead-context.sh`
-(`--frontier` reads the fail count), `blocker-holder.sh`, `pr-facts.sh`,
-`pre-open-rebase.sh`, `seed-audit-reaudit.sh`, `finding.sh`'s read-back,
-`gc-helm.sh place`'s comparison, `check-po-queue-only`, and in Go
-`queue.scheduled`, `cli.mergeInDeferred` and the helm board's `selfStart`. Four
-readers change. `stand-down.sh` stops reading the notice key (unit 2).
-`services/gctk/waits/keys.go` drops `armSlungKey` (unit 1) and `noticeKey`
-(unit 2), and `key-registry.json` follows. `skills/work/integration-effort.md`
-stops testing `.arm.slung` from `gctk bead holds` and tests the arm alone
-(unit 1).
+**Readers of the keys** ask the record instead of reading them. From shell they
+ask `gctk bead holds`, which takes many ids and whose `arm` object is the
+record's answer, and from Go they read `waits.Holds.Arm`. Only the record
+decodes a key, so a reader that tests the formula reads `formula`, not
+`_args`, and one that tests the cap reads `capped`, not `_fail_count`. The line
+numbers are at dbe034457.
+
+- **In Go** (unit 1). `waits` asks the record for the arm it prints and drops
+  its read-only declarations of the arm's keys. `queue.scheduled` reads the arm
+  from `waits.Holds`, which now carries the record's answer, so it needs no
+  change. `skills/work/integration-effort.md` stops testing `.arm.slung` from
+  `gctk bead holds` and tests the arm alone.
+- **Every arm in a store** (unit 1). `check-armed-dispatch-owed` lists the arms
+  by their key, reads the target, the marker, the arm time and the fail count
+  itself (lines 86 to 89 and 260), and reads the cap from the environment
+  (line 96). It asks the start's dry run instead, which prints every arm in the
+  store with what holds it and what the start would do. It reports an arm the
+  start would send whose last wait landed, or which was armed, longer ago than
+  the cadence window.
+- **The arm half of a dispatch path** (unit 3). `dispatch-path.sh` drops
+  `gc.dispatch_when_ready` from `dispatch_path_keys` (line 52). Each reader
+  that asks `has_dispatch_path` asks `gctk bead holds` for the arm of each bead
+  that has no route: `tools/gc-proactive.sh` (lines 343 and 829),
+  `check-blocked-work-armed` (line 240), `check-step-terminal` (line 184),
+  `gc-helm.sh place` (line 2296) and `converse-signoff.sh` (lines 660 and 661).
+  `dispatch-path.test.sh` fails a file that tests the route and arm keys
+  itself. Its scan then fails any script, doctor check or skill that spells an
+  arm key, outside the files rule 7 leaves to their members below.
+- **The arm's own values** (unit 3). `bead-context.sh --frontier` reads
+  `capped` (lines 294 and 295). `blocker-holder.sh` reads the target it names a
+  blocker armed to (line 93), and `seed-audit-reaudit.sh` the target it reports
+  (line 138). `gc-helm.sh` reads whether a bead is armed and for what (lines
+  1920 and 2299), and `place` reads the target and formula it compares with its
+  own placement (lines 2354 and 2357). `check-po-queue-only` reads the target
+  and whether the formula is `mol-validate-close` (lines 458 to 462), and
+  `converse-signoff.sh` makes the same test of its subject's arm (lines 653,
+  654 and 691). `await-ruling.sh` reads the target it falls back on to re-sling
+  (line 293).
+- **The sitting skills** (unit 3). `converse-continue` and `converse-settle`
+  show the subject's arm and its formula through `gctk bead holds` (lines 31
+  and 138). Their withdraw block calls `gctk bead disarm` with no read first
+  (lines 41 and 149), since the verb exits 0 once no arm remains.
+- **A reader that stops reading** (unit 2). `stand-down.sh` reads the arm and
+  the notice to decide whether to disarm (line 192). It disarms with no read
+  first, for the same reason.
 
 **The doctor checks:**
 
 - `check-armed-dispatch-owed` survives. It still reports an arm at a status
   other than `open` or `closed`, and an arm nothing holds past the cadence
-  window, through `gctk bead holds`. It still passes over the arm on a closed or
-  delivered bead, which the start retires. It stops reading the marker
-  (unit 1).
-- `check-blocked-work-armed` survives unchanged. Its finding's remedy names
-  `gctk bead arm` (unit 3). Open PR #1486 (tk-ltcv43q) edits this check, and
-  whichever lands second takes the other's lines.
-- `check-po-queue-only` survives. Its remedy text names the verbs (unit 3).
-- `check-step-terminal` survives unchanged.
+  window. It still passes over the arm on a closed or delivered bead, which the
+  start retires. It reads each arm from the start's dry run, so it stops
+  listing the arms by their key and reading the marker, the fail count and the
+  cap (unit 1).
+- `check-blocked-work-armed` survives. It asks `gctk bead holds` for the arm
+  half of a dispatch path, and its finding's remedy names `gctk bead arm`
+  (unit 3). Open PR #1486 (tk-ltcv43q) edits this check, and whichever lands
+  second takes the other's lines.
+- `check-po-queue-only` survives. It reads the arm's target and formula from
+  `gctk bead holds`, and its remedy text names the verbs (unit 3).
+- `check-step-terminal` survives. It asks `gctk bead holds` for the arm half of
+  a dispatch path (unit 3).
 - `check-cadence-live` drops its `flock` requirement only if no pass lock
   remains anywhere. `refinery-reconcile.sh` takes one through `bd-lib.sh`, so
   unit 1 checks before it removes it.
 
 **Files the deletion plan retires.** `finding.sh` (tk-1tfzr71.22) and
 `rejection-repool.sh` (tk-1tfzr71.20) each change only the line that calls the
-script, so they keep working until their retirement. `pr-facts.sh`
-(tk-1tfzr71.21) and `pre-open-rebase.sh` (tk-1tfzr71.20) only read keys that
-do not change, so they take no edit.
+script. That is rule 7's exception in `docs/gctk-architecture.md`: the move
+deletes the script, so each of its call sites swaps onto the verb, in retiring
+code too, and nothing else there changes. Their reads of the arm's keys stay,
+and so do those of `pr-facts.sh` (tk-1tfzr71.21) and `pre-open-rebase.sh`
+(tk-1tfzr71.20), because rule 7 leaves a caller in retiring code to the member
+that retires it, and that member's replacement asks the record. The reads are
+`finding.sh`'s read-back that a follow-up is armed for its fix pool (lines 865
+to 873), `rejection-repool.sh`'s read of the arm on the bead it adopts
+(line 279), `pr-facts.sh`'s armed anchor that defers a conflict rework and
+armed rework child that it leaves to its arm (lines 1775, 1813, 2733, 2843 and
+3850), and `pre-open-rebase.sh`'s armed rework child (line 267). `gctk
+merge`'s `mergeInDeferred`, which defers a merge-in on an armed anchor
+(`services/gctk/internal/cli/merge.go`, line 1014), is left the same way. It
+has no row in `tools/deletion-plan.tsv`, but the re-implementation register and
+the Debt entry in `docs/gctk-architecture.md` retire gctk's `merge` whole with
+tk-1tfzr71.20 and give it no layering work.
+The liveness scripts that tk-1tfzr71.19 retires source `dispatch-path.sh` for
+the hold labels alone, which do not change, so the exception asks nothing of
+them. Section 14 names, in each member's notes, the question its replacement
+asks the record.
+
+**The helm board.** The board's `selfStart`
+(`services/helm/internal/board/state.go`, lines 46 and 142) reads the arm's key
+from the board's own rows, beside the route and the assignee, to say a queued
+bead starts by itself. Those rows are the board's second data plane, which the
+board member (tk-1tfzr71.24) retires. Asking the record there would need a
+domain read of every bead the board shows as queued, and the board's one domain
+read covers only the anchors that record a wait. So unit 1 adds the read to the
+board's Debt entry in `docs/gctk-architecture.md`, which today names human
+gates as the one place the board still derives an answer from its rows.
+Section 14's note on tk-1tfzr71.24 names the question that replaces it: whether
+a bead starts by itself, which the rig page already asks of `queue`.
 
 **Open PR #1488** (tk-1tfzr71.20) adds an arm in `refinery-requeue.sh` and a
 notice in `effort-bring-current.sh`, and drops `rejection-repool.sh`'s arm. It
-also edits `dispatch-path.sh`'s header and `stand-down.sh`'s refusals, lines
-this design does not change. Whichever of #1488 and unit 2 or 3 lands second
-converts the other's call sites.
+also edits `stand-down.sh`'s refusals, lines this design does not change, and
+`dispatch-path.sh`'s header, where it names a new reader. Its
+`refinery-lib.sh` asks `has_dispatch_path` of a rework child the refinery's
+requeue filed, and sends on a child with no dispatch path and no hold (line 53
+at #1488's head f91d15788). Once unit 3 drops the arm half from
+`dispatch-path.sh`, an armed child would read as having no dispatch path there,
+and the patrol would send it on beside its arm. Whichever of #1488 and unit 2
+or 3 lands second converts the other's call sites, and `refinery-lib.sh`'s
+question is one of them: it asks `gctk bead holds` for the arm half, as
+section 10's other readers do.
 
 **The docs** that describe the script move to the verbs in the unit that
 changes the behavior they describe: `docs/deferred-dispatch.md`,
@@ -565,12 +675,17 @@ pass lock through `bd-lib.sh`, which unit 1 ends. `docs/pack-authoring.md`
 links the notice section that unit 2 rewrites. `docs/review-correctness.md` and
 `docs/review-demo.md` take their examples from the script and its test, and
 `assets/scripts/test-harness.sh`'s comments name both, so unit 3 replaces each
-when it deletes them.
+when it deletes them. In unit 1, `services/gctk/README.md`'s layout gains the
+two packages and `docs/gctk-architecture.md`'s Debt entry for the board gains
+its read of the arm. The pages that say `dispatch-path.sh` defines the arm half
+of a dispatch path, `docs/component-model.md` and `docs/deferred-dispatch.md`
+among them, change in unit 3, when the arm half leaves it.
 
 Callers find the script today through `GC_DEFERRED_DISPATCH_TOOL` or
 `GC_DEFERRED_DISPATCH_SH`, which their tests set. Both retire with it, and the
-tests set `GCTK_BIN`. `GC_MAX_DISPATCH_SLING_FAILURES`, which `bead-context.sh`
-and the owed check also read, stays the cap's setting.
+tests set `GCTK_BIN`. `GC_MAX_DISPATCH_SLING_FAILURES` stays the cap's
+setting. The record reads it, so `bead-context.sh` and the owed check, which
+read it today, read `capped` instead.
 
 ## 11. Tests against the real store
 
@@ -596,6 +711,10 @@ the bd the city runs against a scratch store on a Dolt server of its own
   then the gate's answer, after which the start sends nothing.
 - **The writes**: `arm` and `disarm` against the real store, and the start's
   disarm after a sling.
+- **The record's answer**, in gctk's ordinary suite on the fake store: the
+  formula from each stored form of `_args` (`["--on","<formula>"]`,
+  `["--on=<formula>"]`, `[]`, absent and malformed), and `capped` below, at and
+  past the cap, as `gctk bead holds` prints them.
 
 A test cannot run Gas City's launch, so `gc sling` is a shim that records each
 call and exits 0, 1 or 3 as the case says, and the exit-3 case pins
@@ -628,38 +747,52 @@ decision, and neither is sent.
 Each unit lands on `integration/tk-1tfzr71.16` and leaves the pack's tests
 passing. Nothing reaches the city until the effort's PR merges to main, so the
 new start replaces the old pass at that landing, with every arm carried over
-(section 5). Each unit waits on the one before it.
+(section 5). Each unit waits on the one before it. Between units 1 and 3, the
+shell readers on the effort's branch still spell keys the record owns. None of
+that reaches main, where the effort's PR lands all three units at once.
 
-1. **The start in gctk.** Build `gctk bead arm`, `gctk bead disarm` and
-   `gctk bead start-armed` with sections 4 and 7: the retirement of the arm on
-   a closed or delivered bead, the dispatch lock, the formula resolution, the
-   token, exit 3 as sent, the cap's ask and the time bound. Point
-   `orders/deferred-dispatch.toml`'s `exec` at the verb. Delete
+1. **The start in gctk, and the arm's keys with it.** Build `gctk bead arm`,
+   `gctk bead disarm` and `gctk bead start-armed` in `services/gctk/arm`, over
+   the record in `services/gctk/arm/record` (section 2), with sections 4 and 7:
+   the retirement of the arm on a closed or delivered bead, the dispatch lock,
+   the formula resolution, the token, exit 3 as sent, the cap's ask and the
+   time bound. Take the six live keys over in the record, have `waits` ask the
+   record for the arm and drop its declarations of the arm's keys and the
+   marker, add both packages to `layers_test.go`'s domains, regenerate
+   `key-registry.json`, and remove the six from
+   `lifecycle/lifecycle.toml`, where the marker stays registered as retired.
+   Point `orders/deferred-dispatch.toml`'s `exec` at the verb. Delete
    `reconcile` from `deferred-dispatch.sh` with its pass lock, budget, marker
    and outcome code, and have its `arm` and `disarm` call the gctk verbs until
-   unit 3 deletes the file. Register the marker key as retired, drop
-   `armSlungKey`, change the owed check and `integration-effort.md`'s
-   `.arm.slung` test, and add section 11's cases, with the retirements in
-   gctk's ordinary suite as well as the store harness. Update
-   `docs/deferred-dispatch.md`'s account of what performs the arm,
-   `docs/gctk-architecture.md`'s rows, `docs/refinery-merge-cadence.md`'s lock
-   line and the warrant, whose Covers gains the dispatch lock and the token and
-   whose evidence is re-verified at the upstream commit the unit builds
-   against. It answers tk-ajlktr0, tk-v6bnjjp and tk-cedhuvm.
+   unit 3 deletes the file. Move the owed check onto the start's dry run and
+   `integration-effort.md`'s `.arm.slung` test onto the arm alone, and add
+   section 11's cases, with the retirements in gctk's ordinary suite as well as
+   the store harness. Update `docs/deferred-dispatch.md`'s account of what
+   performs the arm, `docs/gctk-architecture.md`'s rows and its Debt entry for
+   the board, `services/gctk/README.md`'s layout, `gctk bead holds`' help on
+   the arm it prints,
+   `docs/refinery-merge-cadence.md`'s lock line and the warrant, whose Covers
+   gains the dispatch lock and the token and whose evidence is re-verified at
+   the upstream commit the unit builds against. It answers tk-ajlktr0,
+   tk-v6bnjjp and tk-cedhuvm.
 2. **Notices from the pass.** Add section 6's notice half and its ledger to
    `gctk bead start-armed`. Retire `notify` and `gc.notify_when_ready`
-   (registered as retired, `noticeKey` dropped, `stand-down.sh`'s read
-   removed), move each notice caller to section 10's form, rewrite the notice
+   (registered as retired, and `noticeKey` dropped from `waits`). Remove
+   `stand-down.sh`'s read of the arm and the notice, so it disarms with no read
+   first. Move each notice caller to section 10's form, rewrite the notice
    section of `docs/deferred-dispatch.md`, and point `docs/pack-authoring.md`'s
    link at the rewritten section. Record a live check that a default nudge
    gives an idle named session a turn on the city's build. It answers
    tk-t91hbtx.
-3. **Callers onto the verbs, and the script goes.** Move every arm and disarm
-   caller in section 10 onto the verbs, add the disarm to `takeaway --release`
-   and `accept` (section 9), delete `deferred-dispatch.sh` and its test, retire
-   the two path variables, move the remaining docs, re-run stand-down's
-   real-store proof, and update lane B's row in `docs/built-once-target.md`.
-   It answers tk-5trydl2.
+3. **Callers onto the verbs, readers onto the record, and the script goes.**
+   Move every arm and disarm caller in section 10 onto the verbs, add the
+   disarm to `takeaway --release` and `accept` (section 9), and move each
+   shell reader and skill that section 10 lists among the readers of the keys
+   onto the record's answer. That takes the arm half out of `dispatch-path.sh`
+   and turns its test's scan on any file that spells an arm key. Delete
+   `deferred-dispatch.sh` and its test, retire the two path variables, move the
+   remaining docs, re-run stand-down's real-store proof, and update lane B's
+   row in `docs/built-once-target.md`. It answers tk-5trydl2.
 
 What each unit releases: none releases a waiting bead by itself. tk-1tfzr71.17
 and tk-1tfzr71.25 wait on tk-1tfzr71.16 with `blocks` edges, and so do the four
@@ -677,10 +810,27 @@ closers check each answer above once that landing is on main.
 - **tk-nt5uda** loses its `blocks` edge onto gc-vz6v0, a closed bead in the
   gascity store, with a note saying why, so section 7's rule cannot hold it once
   its own blocker tk-wmwcdlc.4 closes.
-- **tk-1tfzr71.20** gets a note naming section 10's #1488 call sites and which
-  unit converts them if #1488 lands first.
+- **tk-1tfzr71.20** gets a note naming section 10's #1488 call sites,
+  `refinery-lib.sh`'s question among them, and which unit converts them if
+  #1488 lands first. The note also names the reads of the arm in the code it
+  retires, which section 10 leaves to it: `pre-open-rebase.sh`'s armed rework
+  child, `rejection-repool.sh`'s arm on the bead it adopts, and `gctk merge`'s
+  `mergeInDeferred`. Each asks whether a bead is armed, and for what. Its
+  replacement asks the record, through `gctk bead holds`' `arm` from shell and
+  `waits.Holds.Arm` from Go.
+- **tk-1tfzr71.21** gets a note naming `pr-facts.sh`'s reads of the arm, the
+  armed anchor that defers a conflict rework and the armed rework child it
+  leaves to its arm, and that its replacement asks the record the same
+  question.
 - **tk-1tfzr71.22** gets a note that `finding.sh`'s arm call moves to
-  `gctk bead arm`, so its replacement arms through the verb.
+  `gctk bead arm`, so its replacement arms through the verb. The note also
+  names `finding.sh`'s read-back, which asks whether the follow-up is armed for
+  its fix pool. The verb's exit answers that, and the record answers it for a
+  reader through `gctk bead holds`.
+- **tk-1tfzr71.24** gets a note that the board's `selfStart` reads the arm's
+  key from the board's own rows, which unit 1 adds to the board's Debt entry.
+  Whether a bead starts by itself is `queue`'s answer, which reads the arm from
+  the record and which the rig page already asks.
 - **The units** are filed as tk-1tfzr71.99's description says, with
   `target=integration/tk-1tfzr71.16` in each create, and tk-1tfzr71.16 and the
   summary task wait on each.
@@ -688,14 +838,19 @@ closers check each answer above once that landing is on main.
 ## 15. Gas City facts, and the search behind the surface the units add
 
 The units add three verbs, an order's new `exec`, a lock per bead, a title
-token on the pours they make and a notice ledger. For each, the search was for
-a Gas City or bd primitive that pours on readiness, nudges a named session
-about assigned work, or reports a finished launch, and none covers the need.
+token on the pours they make and a notice ledger. They also add two fields to
+the arm `gctk bead holds` prints, `formula` and `capped`, and a line per arm
+that the start prints. For each, the search was for a Gas City or bd primitive
+that pours on readiness, nudges a named session about assigned work, reports a
+finished launch, or keeps and reads a launch put off until a bead is ready, and
+none covers the need. The two fields and the start's lines decode the arm, a
+record only the pack keeps, so no primitive reads it.
 
 | Fact | Upstream 3bcab243e | The city's build 6589a7df45 |
 |---|---|---|
 | Nothing pours a formula when a bead's blockers close | no core order or script calls `gc sling`; `cascade-nudge-on-blocker-close.sh` and `nudge-on-route.sh` only nudge | same scripts, plus the queued delivery below |
 | `gc sling` pours without reading readiness | `internal/sling`: `validateExistingBeadInQuerier` checks existence only, and no readiness check precedes a pour | a dry run on a blocked armed bead prints "A wisp will be attached automatically" |
+| Nothing keeps a launch for later, so nothing lists or decodes one | no command or order records a launch for a later pour (the two rows above), so none reports one | same; bd 1.3.4's `list --has-metadata-key` selects the rows that carry a key and decodes no value |
 | Exit 3 means a live workflow already works the bead | `cmd/gc/cmd_sling.go`: the `DoSling` error branch returns 3 for `*sourceworkflow.ConflictError` only; `internal/sourceworkflow/sourceworkflow.go` documents the mapping; `checkLegacySourceWorkflowConflict` in `internal/sling/sling_core.go` raises it for a live root of the same formula that the bead's input convoy tracks, or of any formula whose `gc.source_bead_id` names the bead | same |
 | A dry run reports a live same-formula root, and nothing reports a finished one | `dryRunReportBlockingMolecule` with `sling.LiveConvoyTrackedWorkflowRoots`, "the same check checkLegacySourceWorkflowConflict runs at launch time" | same |
 | `--title` names the root of a formula pour | `cmd/gc/cmd_sling.go`: "wisp root bead title (with --formula or --on)" | same |
