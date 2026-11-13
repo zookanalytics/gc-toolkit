@@ -255,7 +255,9 @@ helm-svc form --helm <gc-helm.sh> --return     # the conversations to return to
 The screen `gc-helm.sh engage`, which a bare `gc-helm.sh` on a terminal runs,
 and `gc-helm.sh attach` hand a terminal to, which they run with their own path
 as `--helm` and the converse variants as `--models`. Its pages are tabs at its
-top: starting a conversation, returning to one, and People. ↑ from the subject
+top: starting a conversation (Ctrl+N), returning to one (Ctrl+R), and People
+(Ctrl+P). Each tab shows its key, which goes to that page from any page and
+field, and the key of the page on screen does nothing. ↑ from the subject
 reaches the tabs, ←/→ move along them, and on a list page ←/→ move along them
 at once. The page for starting a conversation holds the subject, a multiline
 question, the model, shown with each word of its name capitalized (claude-opus

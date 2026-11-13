@@ -183,16 +183,24 @@ discussing is still open and unassigned until the sitting answers it.
 
 The operator comes in through Engage. A bare `gc-helm` on a terminal opens
 engage's form on starting a conversation, with the cursor in the subject. The
-form's pages are tabs at its top, and the operator moves between them on the
-tabs, with no key of a page's own:
+form's pages are tabs at its top, and each page has a key of its own, which its
+tab shows before its name:
 
-- **Start a conversation** takes a subject, a bead, a PR, or a rig's name or
-  prefix for a new topic, and the question (*Engage*, below).
-- **Return to a conversation** lists the open conversations (*Returning to a
-  conversation*, below).
-- **People** lists the seats the operator sits with: mechanik, of which the
-  city has one, and each rig's po, the Product Owner, by its rig's name and
-  prefix. The city's HQ has none.
+- **Start a conversation**, Ctrl+N, takes a subject, a bead, a PR, or a rig's
+  name or prefix for a new topic, and the question (*Engage*, below).
+- **Return to a conversation**, Ctrl+R, lists the open conversations
+  (*Returning to a conversation*, below).
+- **People**, Ctrl+P, lists the seats the operator sits with: mechanik, of
+  which the city has one, and each rig's po, the Product Owner, by its rig's
+  name and prefix. The city's HQ has none.
+
+A page's key goes straight to that page from any page and any field, and the
+key of the page on screen does nothing. In the question, Ctrl+N and Ctrl+P go
+to their pages rather than to the line below and above, and ↓ and ↑ move
+between its lines. Start a conversation comes back as the operator left it,
+with what they typed and the cursor in the field it was in. The screen that
+shows a save or a start as it runs is not a page, and the pages' keys do
+nothing there.
 
 ↑ from the subject reaches the tabs, and ←/→ move along them, wrapping around
 at either end, as they cycle a value on the form's choosers. ↓ goes back down
