@@ -579,9 +579,10 @@ have "the design-convoy formula's own description says which work it fits" 'high
 lacks "the design-convoy doc carries no formula choice for an agent" 'When to reach for it' "$DESIGN_DOC" \
     "which work a formula fits is its own description, which the work skill reads"
 # The effort recipe pushes the effort's branch, and converse sittings, which
-# never push, load the work skill. So the skill and the recipe name the session
-# that runs it, and the skill sends a sitting's effort to the Accept path or to
-# that session. Read with whitespace squeezed, so a re-wrap keeps them.
+# push only the branch of a change the operator rules them make, load the work
+# skill. So the skill and the recipe name the session that runs it, and the
+# skill sends a sitting's effort to the Accept path or to that session. Read
+# with whitespace squeezed, so a re-wrap keeps them.
 WORK_JOINED="$TMP/work-squeezed"
 tr -s '[:space:]' ' ' <"$WORK_SKILL" >"$WORK_JOINED"
 EFFORT_JOINED="$TMP/effort-squeezed"
@@ -589,7 +590,7 @@ tr -s '[:space:]' ' ' <"$SKILLS/work/integration-effort.md" >"$EFFORT_JOINED"
 have "the work skill names the session that runs the effort recipe" \
     'beside this file, which the mechanik runs.' "$WORK_JOINED"
 have "…and the recipe names it too" 'The mechanik runs this recipe.' "$EFFORT_JOINED"
-have "…and a sitting does not run it" 'a converse sitting never pushes, so a sitting does not run it.' "$WORK_JOINED"
+have "…and a sitting does not run it" "a converse sitting pushes only the branch of a change the operator rules it make, through Work's hand-off, so a sitting does not run it." "$WORK_JOINED"
 have "…but takes a design-convoy recommendation through Accept" \
     "When the subject's recommendation is \`mol-design-convoy\`, the sign-off's \`--accept\` takes it" "$WORK_JOINED"
 have "…and hands any other effort to the mechanik" 'Any other effort goes to the mechanik' "$WORK_JOINED"
@@ -714,7 +715,7 @@ lacks "the skill gives a finding no pack kind: bd's status, label and edge carry
 for probe in '--status deferred' 'isSecurityPolicyEnabled' 'private-vulnerability-reporting'; do
     lacks "…and the doc does not: $probe" "$probe" "$OUTBOUND" "each command an agent runs lives only in the skill"
 done
-for probe in 'human-gate.sh' 'escalate.sh' 'gh issue create' 'gh pr create' 'gh issue comment' 'upstream-finding.sh'; do
+for probe in 'human-gate.sh' 'gh issue create' 'gh pr create' 'gh issue comment' 'upstream-finding.sh'; do
     lacks "the skill drafts no send and asks nothing: no $probe" "$probe" "$EXTERNAL" \
         "a finding is set aside with nothing drafted and no question owed; the send is drafted when the operator picks it up"
 done
@@ -910,6 +911,20 @@ for sh_ in $shells; do
         bad "($sh_) converse-iterate-document: a scaffold the store refuses is not reported as written" "exit $rc"
     fi
 done
+echo "── a sitting makes a change the operator rules it make through Work's writers ──"
+# A sitting's change is held on its conversation and goes through the writers a
+# polecat's work goes through, under --held-by, so the step table loads the edit
+# skill by name and the skill calls both writers that way.
+EDIT="$REPO/skills/converse-edit/SKILL.md"
+have "the step table sends a sitting the operator rules make a change to its skill" '**Steps 5–8, when the operator rules that the sitting make a change with them**' "$PROMPT"
+have "…by name" '`converse-edit` |' "$PROMPT"
+have "the edit skill holds the change on the conversation" 'gc bd dep add "$CHANGE" "$CONVERSATION" --type=blocks' "$EDIT"
+have "…cuts its tree through Work's setup under --held-by" '"$CONV/work-setup.sh" --bead "$CHANGE" --held-by "$CONVERSATION"' "$EDIT"
+have "…and hands it off through Work's hand-off under --held-by" '"$CONV/work-submit.sh" --bead "$CHANGE" --held-by "$CONVERSATION"' "$EDIT"
+have "…and reads the polecat class's standards before the first edit" 'template-fragments/work-quality-polecats.template.md' "$EDIT"
+have "…shows the operator a copy of a UI change at an address of its own" 'GCTK_SCRIPTS_DIR="$CONV" "$GC_CITY_PATH/.gc/services/gctk/bin/gctk" rig serve --command "$SERVE"' "$EDIT"
+have "…with the city's publisher" '--publish-command "$(var ui_publish_command)" --address-pattern "$(var ui_address_pattern)"' "$EDIT"
+have "…and stops the copy" '( cd "$TREE" && "$GC_CITY_PATH/.gc/services/gctk/bin/gctk" rig serve --stop )' "$EDIT"
 echo "── a moot or benign close settles a headline that waits on nothing ──"
 # A cut-short sitting leaves its hold's headline on the subject, and the next
 # sitting's premise re-check can find the conversation moot and close it. The

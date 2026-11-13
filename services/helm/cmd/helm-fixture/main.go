@@ -1,15 +1,17 @@
 // Command helm-fixture serves the Helm board on fixture data: the app this
 // commit embeds, a board answer read from a file, one rig's document read from a
 // file at the rig board's routes, and canned answers for the write verbs (see
-// package fixture). A demo capture of the board passes it to
-// demo-screenshot.sh as its --serve command, as docs/review-demo.md shows, so the
-// capture shows the board the reviewed commit builds and never reaches the live
-// city.
+// package fixture). The serve command the rig declares runs it, and the rig's
+// demo guide, docs/review-demo.md, names the same command as the app a demo
+// capture of the board brings up, so the capture shows the board the reviewed
+// commit builds and never reaches the live city. The capture serves it as a
+// copy that `gctk rig serve` runs, and a sitting's live copy of the board runs
+// the same command through the same verb.
 //
 // It is a command of its own rather than a helm-svc subcommand. helm-svc links
 // the beads library and, through Dolt, cgo and ICU, so a cold build takes minutes
-// (assets/scripts/gc-build.sh), longer than the 30 s the engine waits for a
-// --serve command to answer. This command imports package fixture, the app's
+// (assets/scripts/gc-build.sh), and a copy that compiled it would keep a capture
+// or a sitting waiting that long. This command imports package fixture, the app's
 // package and the standard library only, so `go run` starts it in seconds with
 // no cgo flags, and it links nothing that could read or write a city.
 //
@@ -80,7 +82,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stderr 
 	if *addr == "" {
 		port := getenv("PORT")
 		if port == "" {
-			logger.Print("no address to listen on: pass --addr, or set PORT, which demo-screenshot.sh's --port 0 sets")
+			logger.Print("no address to listen on: pass --addr, or set PORT, which gctk rig serve sets for a copy")
 			return 2
 		}
 		*addr = net.JoinHostPort("127.0.0.1", port)

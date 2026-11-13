@@ -51,16 +51,13 @@ OUT="$TMPD/out.mp4"
 # (narrated, silent), in the engine's words. $RUN_FAILED writes the clip, prints
 # that report with its failed-proof line for that many steps, and exits 1, as
 # the engine does when a step of a captured clip fails its proof. $RUN_LATE_RC
-# writes the clip and then exits with that code without any report. A run also
-# logs the PORT its environment carries, which a --serve command inherits, to
-# $RUNLOG.port.
+# writes the clip and then exits with that code without any report.
 STUB="$TMPD/sprintshow-stub"
 cat >"$STUB" <<'STUB'
 #!/usr/bin/env bash
 if [ "${1:-}" = "lint" ]; then exit "${LINT_RC:-0}"; fi
 if [ "${1:-}" = "run" ]; then
   printf '%s\n' "$*" >>"${RUNLOG:?}"
-  printf '%s\n' "${PORT-unset}" >"$RUNLOG.port"
   o=""; prev=""
   for a in "$@"; do [ "$prev" = "-o" ] && o="$a"; prev="$a"; done
   [ "${RUN_RC:-0}" != 0 ] && exit "${RUN_RC}"
@@ -98,16 +95,73 @@ if [ "${1:-}" = "-e" ] && [ $# -ge 3 ]; then exit 0; fi
 if [ "${1:-}" = "-e" ]; then printf 50123; exit 0; fi
 echo "node stub: unexpected call: $*" >&2; exit 97
 NODE
-chmod +x "$SBX/sandbox-exec" "$SBX/node"
-SANDBOX_LOG="$TMPD/sandbox.log"
+# gctk stands in for gctk rig serve: --check answers with a copy running on
+# 50200 once one was started, or when COPY_RUNNING names its checkout,
+# --command starts one and says it started it, or reports the one that runs, or
+# one that another caller started as this start ran when COPY_FOUND is set, or
+# fails as a copy that did not answer when COPY_FAIL is set, or as a checkout
+# whose copy runs another command when COPY_OTHER is set, and --stop ends it.
+# lsof names the copy's process as the one listening on its port, working in the
+# checkout it was started from. Each logs to $RUNLOG. git and jq read the
+# checkout and the copy's report.
+cat >"$SBX/gctk" <<'GCTK'
+#!/usr/bin/env bash
+printf 'gctk %s (in %s)\n' "$*" "$(pwd)" >>"${RUNLOG:?}"
+case "$*" in
+  "rig serve --check")
+    if [ -n "${COPY_RUNNING:-}" ] || [ -s "${COPY_STATE:?}" ]; then
+      printf '{"state":"running","checkout":"%s","port":50200,"address":""}\n' "$(pwd)"; exit 0
+    fi
+    printf '{"state":"none","checkout":"%s"}\n' "$(pwd)"; exit 3 ;;
+  "rig serve --command "*)
+    if [ -n "${COPY_OTHER:-}" ]; then
+      printf '{"state":"failed","reason":"other-command","checkout":"%s","detail":"a copy of this checkout already runs another serve command (npm start)"}\n' "$(pwd)"; exit 1
+    fi
+    if [ -n "${COPY_FAIL:-}" ]; then
+      printf '{"state":"failed","reason":"not-answering","checkout":"%s","detail":"the copy did not answer"}\n' "$(pwd)"; exit 1
+    fi
+    if [ -n "${COPY_RUNNING:-}" ] || [ -n "${COPY_FOUND:-}" ]; then
+      [ -n "${COPY_RUNNING:-}" ] || pwd >"$COPY_STATE"
+      printf '{"state":"running","checkout":"%s","port":50200,"address":""}\n' "$(pwd)"; exit 0
+    fi
+    pwd >"$COPY_STATE"
+    printf '{"state":"running","checkout":"%s","port":50200,"address":"","started":true}\n' "$(pwd)"; exit 0 ;;
+  "rig serve --stop") : >"$COPY_STATE"; printf '{"state":"stopped","checkout":"%s"}\n' "$(pwd)"; exit 0 ;;
+esac
+exit 2
+GCTK
+cat >"$SBX/lsof" <<'LSOF'
+#!/usr/bin/env bash
+dir=$(cat "${COPY_STATE:?}" 2>/dev/null); [ -n "$dir" ] || dir=${COPY_RUNNING:-}
+[ -n "$dir" ] || exit 1
+case "$*" in
+  *"-iTCP:50200 "*) echo 4321 ;;
+  *"-p 4321 "*) printf 'p4321\nfcwd\nn%s\n' "$dir" ;;
+  *) exit 1 ;;
+esac
+LSOF
+chmod +x "$SBX/sandbox-exec" "$SBX/node" "$SBX/gctk" "$SBX/lsof"
+for c in git jq; do
+  p="$(command -v "$c")" || { echo "test setup: required tool '$c' not found" >&2; exit 2; }
+  ln -s "$p" "$SBX/$c"
+done
+SANDBOX_LOG="$TMPD/sandbox.log"; COPY_STATE="$TMPD/copy-state"
+# The checkout a --serve command's copy runs from.
+SITE="$(cd "$TMPD" && pwd -P)/site"; mkdir -p "$SITE"
+git -C "$SITE" init -q && git -C "$SITE" -c user.name=t -c user.email=t@example.com commit -q --allow-empty -m one \
+  || { echo "test setup: git could not make the copy's checkout" >&2; exit 2; }
 
 RUNLOG="$TMPD/run.log"
 # run [KEY=VAL ...] -- <sut args...>; per-call knobs, combined stdout+stderr.
 # $RUN_PATH replaces the sandbox directory on PATH for one call.
 run() {
-  local lint_rc=0 run_rc=0 nofile="" empty="" report="" failed="" late_rc=0
+  local lint_rc=0 run_rc=0 nofile="" empty="" report="" failed="" late_rc=0 copy_running="" copy_found="" copy_fail="" copy_other=""
   while [ $# -gt 0 ]; do
     case "$1" in
+      COPY_RUNNING=*) copy_running="${1#*=}" ;;
+      COPY_FOUND=*) copy_found="${1#*=}" ;;
+      COPY_FAIL=*) copy_fail="${1#*=}" ;;
+      COPY_OTHER=*) copy_other="${1#*=}" ;;
       LINT_RC=*)   lint_rc="${1#*=}" ;;
       RUN_RC=*)    run_rc="${1#*=}" ;;
       RUN_NOFILE=*) nofile="${1#*=}" ;;
@@ -120,10 +174,11 @@ run() {
     esac
     shift
   done
-  : >"$RUNLOG"; : >"$SANDBOX_LOG"; rm -f "$OUT" "$RUNLOG.port"
+  : >"$RUNLOG"; : >"$SANDBOX_LOG"; : >"$COPY_STATE"; rm -f "$OUT"
   ( cd "$TMPD" && env -i PATH="${RUN_PATH-$SBX}:$FARM" RUNLOG="$RUNLOG" SPRINTSHOW_BIN="$STUB" SANDBOX_LOG="$SANDBOX_LOG" GIT_CEILING_DIRECTORIES="$TMPD" \
       LINT_RC="$lint_rc" RUN_RC="$run_rc" RUN_NOFILE="$nofile" RUN_EMPTY="$empty" \
       RUN_REPORT="$report" RUN_FAILED="$failed" RUN_LATE_RC="$late_rc" \
+      GCTK_BIN="$SBX/gctk" COPY_STATE="$COPY_STATE" COPY_RUNNING="$copy_running" COPY_FOUND="$copy_found" COPY_FAIL="$copy_fail" COPY_OTHER="$copy_other" \
       bash "$SUT" "$@" 2>&1 )
 }
 
@@ -165,7 +220,7 @@ out="$(run -- --script "$SCRIPT" --output "$OUT" --serve-dir "$SERVE_DIR" --mode
 ok "proof mode exits 0" "[ '$rc' = 0 ]"
 has "--mode proof" "$(cat "$RUNLOG")" "proof mode is forwarded"
 
-echo "# --base-url and --serve are each forwarded; --no-narrate too; a --base-url on this host is refused"
+echo "# --base-url is forwarded; --no-narrate too; a --base-url on this host is refused"
 out="$(run -- --script "$SCRIPT" --output "$OUT" --base-url https://preview.example.com)"; rc=$?
 ok "base-url exits 0" "[ '$rc' = 0 ]"
 has "--base-url https://preview.example.com" "$(cat "$RUNLOG")" "base-url is forwarded"
@@ -173,33 +228,42 @@ out="$(run -- --script "$SCRIPT" --output "$OUT" --base-url http://localhost:300
 ok "a base-url on this host exits 1" "[ '$rc' = 1 ]"
 has "names a server on this host" "$out" "it says a server here runs outside the sandbox"
 ok "nothing is captured" "[ ! -s '$RUNLOG' ] && [ ! -e '$OUT' ]"
-out="$(run -- --script "$SCRIPT" --output "$OUT" --serve 'npm run dev' --port 4321 --no-narrate --cwd "$SERVE_DIR")"; rc=$?
+
+echo "# --serve: the app is served as a copy that gctk rig serve runs from --cwd, and the engine records the copy"
+out="$(run -- --script "$SCRIPT" --output "$OUT" --serve 'npm run dev' --no-narrate --cwd "$SITE")"; rc=$?
 ok "serve exits 0" "[ '$rc' = 0 ]"
 RL="$(cat "$RUNLOG")"
-has "--serve npm run dev" "$RL" "serve command is forwarded"
-has "--port 4321" "$RL" "port is forwarded"
+has "gctk rig serve --command npm run dev (in $SITE)" "$RL" "it starts a copy from --cwd with the command"
+has "gctk rig serve --command" "$(grep 'gctk rig serve' "$RUNLOG" | head -n 1)" "the start is its first call to gctk rig serve: no --check before it decides whose the copy is"
+has "run $SCRIPT --mode walkthrough -o $OUT --base-url http://127.0.0.1:50200/" "$RL" "the engine records the copy at its loopback port"
+hasnt "--serve " "$RL" "and is given no --serve of its own"
 has "--no-narrate" "$RL" "no-narrate is forwarded"
-
-echo "# a --serve command gets its port as PORT, and --port 0 picks a free one, as a screenshot's command does"
-out="$(run -- --script "$SCRIPT" --output "$OUT" --serve 'npm run dev' --port 4321 --cwd "$SERVE_DIR")"; rc=$?
-P="$(cat "$RUNLOG.port")"
-ok "a --serve with a --port exits 0" "[ '$rc' = 0 ]"
-ok "the command's environment carries the port as PORT (got $P)" "[ '$P' = 4321 ]"
-out="$(run -- --script "$SCRIPT" --output "$OUT" --serve 'npm run dev' --port 0 --cwd "$SERVE_DIR")"; rc=$?
-P="$(cat "$RUNLOG.port")"
-ok "a --serve with --port 0 exits 0" "[ '$rc' = 0 ]"
-has "--port 50123" "$(cat "$RUNLOG")" "--port 0 becomes the free port the library picks"
-ok "and the command gets that port as PORT (got $P)" "[ '$P' = 50123 ]"
-out="$(run -- --script "$SCRIPT" --output "$OUT" --serve 'npm run dev' --cwd "$SERVE_DIR")"; rc=$?
-P="$(cat "$RUNLOG.port")"
-ok "a --serve with no --port gets no PORT (got $P)" "[ '$P' = unset ]"
-out="$(run -- --script "$SCRIPT" --output "$OUT" --serve-dir "$SERVE_DIR" --port 4321)"; rc=$?
-P="$(cat "$RUNLOG.port")"
-ok "a --serve-dir, which spawns no command, sets no PORT (got $P)" "[ '$P' = unset ]"
-out="$(run -- --script "$SCRIPT" --output "$OUT" --serve-dir "$SERVE_DIR" --port 0)"; rc=$?
-ok "--port 0 with a --serve-dir exits 2" "[ '$rc' = 2 ]"
-has "give it with --serve only" "$out" "it says --port 0 picks a port for a command"
-ok "nothing is captured" "[ ! -s '$RUNLOG' ] && [ ! -e '$OUT' ]"
+has "gctk rig serve --stop (in $SITE)" "$RL" "the capture stops the copy its start reports it started"
+out="$(run COPY_RUNNING="$SITE" -- --script "$SCRIPT" --output "$OUT" --serve 'npm run dev' --cwd "$SITE")"; rc=$?
+ok "a capture of a checkout whose copy runs the command exits 0" "[ '$rc' = 0 ]"
+RL="$(cat "$RUNLOG")"
+has "gctk rig serve --command npm run dev (in $SITE)" "$RL" "it asks the start, which reports the copy that runs"
+has "--base-url http://127.0.0.1:50200/" "$RL" "the engine records that copy"
+hasnt "rig serve --stop" "$RL" "and leaves the running copy running"
+has "already runs from $SITE, so the capture takes it and leaves it running" "$out" "it says it takes a copy it did not start"
+out="$(run COPY_FOUND=1 -- --script "$SCRIPT" --output "$OUT" --serve 'npm run dev' --cwd "$SITE")"; rc=$?
+ok "a capture whose start reports a copy another caller started, though none ran before it, exits 0" "[ '$rc' = 0 ]"
+RL="$(cat "$RUNLOG")"
+has "--base-url http://127.0.0.1:50200/" "$RL" "the engine records that copy"
+hasnt "rig serve --stop" "$RL" "and the capture leaves it running, since its start did not run it"
+out="$(run COPY_RUNNING="$SITE" COPY_OTHER=1 -- --script "$SCRIPT" --output "$OUT" --serve 'npm run dev' --cwd "$SITE")"; rc=$?
+ok "a capture of a checkout whose copy runs another command exits 1" "[ '$rc' = 1 ]"
+has "the app's copy did not start: other-command" "$out" "it says why"
+RL="$(cat "$RUNLOG")"
+hasnt "rig serve --stop" "$RL" "nor is the running copy stopped"
+ok "nothing is captured" "[ ! -e '$OUT' ]"
+out="$(run COPY_FAIL=1 -- --script "$SCRIPT" --output "$OUT" --serve 'npm run dev' --cwd "$SITE")"; rc=$?
+ok "a copy that does not start exits 1" "[ '$rc' = 1 ]"
+has "the app's copy did not start: not-answering" "$out" "it says why"
+ok "nothing is captured" "[ ! -e '$OUT' ]"
+out="$(run -- --script "$SCRIPT" --output "$OUT" --serve 'npm run dev' --port 4321 --cwd "$SITE")"; rc=$?
+ok "--port with --serve exits 2" "[ '$rc' = 2 ]"
+has "--port names the --serve-dir server's port" "$out" "it says --port is the --serve-dir server's"
 
 # A terminal script declares **Terminal:** among its head lines and drives a
 # shell in the engine's own terminal.
@@ -265,24 +329,21 @@ guide() {
 }
 GW="$GBASE/rig-wt"; mkdir -p "$GW/web"
 guide "$GW" '**Serve:** `npm run dev`
-**Cwd:** `web`
-**Port:** `4321`'
-echo "# --guide takes the app the rig's demo guide names: its command, the directory it runs in, and its port"
+**Cwd:** `web`'
+echo "# --guide takes the app the rig's demo guide names: its command, served as a copy from the worktree's root"
 out="$(run -- --script "$SCRIPT" --output "$OUT" --guide "$GW")"; rc=$?
 ok "a page script with --guide exits 0" "[ '$rc' = 0 ]"
 RL="$(cat "$RUNLOG")"
-has "--serve npm run dev" "$RL" "the guide's command is the app"
-has "--cwd $GW/web" "$RL" "it runs in the guide's directory, under the worktree"
-has "--port 4321" "$RL" "on the guide's port"
+has "gctk rig serve --command npm run dev (in $GW)" "$RL" "the guide's command is served as a copy from the worktree's root, whatever **Cwd:** says"
+has "--base-url http://127.0.0.1:50200/" "$RL" "the engine records the copy"
 hasnt "not-the-app" "$RL" "a line in another section of the guide names nothing"
-P="$(cat "$RUNLOG.port")"
-ok "the command gets the guide's port as PORT (got $P)" "[ '$P' = 4321 ]"
 has "the app is the one docs/review-demo.md at " "$out" "it says the app came from the guide at a commit"
 has " in $GW names" "$out" "in the worktree --guide named"
-printf '\n**Port:** `9999`\n' >>"$GW/docs/review-demo.md"
+sed 's/npm run dev/npm start/' "$GW/docs/review-demo.md" >"$GW/docs/edited" && mv "$GW/docs/edited" "$GW/docs/review-demo.md"
 out="$(run -- --script "$SCRIPT" --output "$OUT" --guide "$GW")"; rc=$?
 ok "a guide edited in the worktree and not committed still captures" "[ '$rc' = 0 ]"
-has "--port 4321" "$(cat "$RUNLOG")" "the guide is read at the commit, not from the working tree"
+has "gctk rig serve --command npm run dev (in $GW)" "$(cat "$RUNLOG")" "the guide is read at the commit, not from the working tree"
+hasnt "npm start" "$(cat "$RUNLOG")" "and the edit is not served"
 git -C "$GW" checkout -q -- docs/review-demo.md
 
 GS="$GBASE/rig-static"; mkdir -p "$GS/site"
@@ -297,14 +358,19 @@ out="$(run -- --script "$SCRIPT" --output "$OUT" --guide "$GU")"; rc=$?
 ok "a guide's running endpoint exits 0" "[ '$rc' = 0 ]"
 has "--base-url https://preview.example.com" "$(cat "$RUNLOG")" "the engine drives the endpoint the guide names"
 
-GZ="$GBASE/rig-port0"; guide "$GZ" '**Serve:** `go run ./cmd/fixture`
-**Port:** `0`'
+GP="$GBASE/rig-static-port"; mkdir -p "$GP/site"
+guide "$GP" '**Serve dir:** `site`
+**Port:** `4321`'
+out="$(run -- --script "$SCRIPT" --output "$OUT" --guide "$GP")"; rc=$?
+ok "a guide's static directory with a port exits 0" "[ '$rc' = 0 ]"
+has "--serve-dir $GP/site --port 4321" "$(cat "$RUNLOG")" "the engine's server serves it on the guide's port"
+
+GZ="$GBASE/rig-serve-port"; guide "$GZ" '**Serve:** `go run ./cmd/fixture`
+**Port:** `5173`'
 out="$(run -- --script "$SCRIPT" --output "$OUT" --guide "$GZ")"; rc=$?
-P="$(cat "$RUNLOG.port")"
-ok "a guide whose port is 0 exits 0" "[ '$rc' = 0 ]"
-has "--port 50123" "$(cat "$RUNLOG")" "its command gets a free port"
-ok "as PORT (got $P)" "[ '$P' = 50123 ]"
-has "--cwd $GZ" "$(cat "$RUNLOG")" "and a guide that names no directory runs the command in the worktree"
+ok "a guide that names **Port:** beside **Serve:** exits 2" "[ '$rc' = 2 ]"
+has "names **Port:**, which is the port of the server that serves a **Serve dir:**" "$out" "it says a command's copy takes a port of its own"
+ok "nothing is linted or captured" "[ ! -s '$RUNLOG' ] && [ ! -s '$SANDBOX_LOG' ] && [ ! -e '$OUT' ]"
 
 echo "# a guide that cannot name the app refuses the capture -> exit 2, with nothing captured"
 GN="$GBASE/rig-none"; mkdir -p "$GN"; printf 'x\n' >"$GN/README"; commit_all "$GN"
@@ -354,9 +420,9 @@ has "**Serve dir:** \`site\` leads outside the worktree, to $GS/site" "$out" "it
 ok "nothing is captured" "[ ! -s '$RUNLOG' ] && [ ! -e '$OUT' ]"
 GI="$GBASE/rig-inside"; mkdir -p "$GI/build/web"; ln -s build/web "$GI/web"; guide "$GI" '**Serve:** `npm run dev`
 **Cwd:** `web`'
-out="$(run -- --script "$SCRIPT" --output "$OUT" --guide "$GI")"; rc=$?
+out="$(run -- --script "$TSCRIPT" --output "$OUT" --guide "$GI")"; rc=$?
 ok "a **Cwd:** that a symlink leads elsewhere in the repository captures (exit 0)" "[ '$rc' = 0 ]"
-has "--cwd $GI/web" "$(cat "$RUNLOG")" "the command runs in the directory the guide names"
+has "--cwd $GI/web" "$(cat "$RUNLOG")" "a terminal script's shell starts in the directory the guide names"
 GD="$GBASE/rig-unbuilt"; mkdir -p "$GD"; guide "$GD" '**Serve dir:** `dist`'
 out="$(run -- --script "$SCRIPT" --output "$OUT" --guide "$GD")"; rc=$?
 ok "a **Serve dir:** that a build has not made yet captures (exit 0)" "[ '$rc' = 0 ]"
@@ -376,7 +442,8 @@ out="$(run -- --script "$TSCRIPT" --output "$OUT" --guide "$GW")"; rc=$?
 ok "a terminal script with --guide exits 0" "[ '$rc' = 0 ]"
 RL="$(cat "$RUNLOG")"
 has "--cwd $GW/web" "$RL" "its shell starts in the guide's directory"
-for f in --serve --port; do hasnt "$f " "$RL" "the guide's app gives the engine no $f"; done
+for f in --serve --port --base-url; do hasnt "$f " "$RL" "the guide's app gives the engine no $f"; done
+hasnt "gctk rig serve" "$RL" "and no copy of the guide's command is started"
 out="$(run -- --script "$TSCRIPT" --output "$OUT" --guide "$GN")"; rc=$?
 ok "a terminal script under a worktree that keeps no guide exits 0" "[ '$rc' = 0 ]"
 has "--cwd $GN" "$(cat "$RUNLOG")" "its shell starts in the worktree"

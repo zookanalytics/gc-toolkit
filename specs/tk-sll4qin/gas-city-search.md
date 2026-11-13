@@ -16,19 +16,21 @@ check asks what Gas City already ships for it
    `docs/review-demo.md` names the app a capture brings up, in the options the
    capture takes: `**Serve:**`, `**Serve dir:**` or `**Base URL:**`, and
    `**Cwd:**` and `**Port:**`. `demo_engine_guide` in `demo-engine-lib.sh`
-   reads them.
+   reads them. A `**Serve:**` command runs as a copy that `gctk rig serve`
+   runs from the worktree's root, on a port of its own that it gets as
+   `$PORT`, so `**Port:**` names only a `**Serve dir:**` server's port, and
+   `**Cwd:**` names where a terminal script's shell starts.
 2. **`--guide <worktree>`.** `rig-demo-capture.sh` and `demo-screenshot.sh`
    take the app the guide in that worktree names. It is a second way of
    naming the options a capture already takes, not an option of its own.
 3. **A terminal script through the video capture.** `rig-demo-capture.sh`
    reads a script's kind as the engine's parser does, takes a terminal script
    with no app target, and refuses one given an app target or a port, as the
-   engine does. A `--serve` command gets its port as `PORT`, and `--port 0`
-   picks a free one, as a screenshot's command already does.
+   engine does.
 4. **A pour with no app target.** `mol-rig-demo` declines only a pour that names
    more than one of `serve_dir`, `serve_cmd` and `base_url`. A pour that names
-   none hands the capture `--guide` and the worktree it makes, and `serve_port`
-   defaults to empty, the engine's own default.
+   none hands the capture `--guide` and the worktree it makes, and `serve_port`,
+   the port of a `serve_dir` server, defaults to empty, a free port.
 
 The change adds no metadata key, bead kind or lifecycle state, so it carries no
 warrant.
@@ -72,11 +74,21 @@ each hit in its context. Source is cited by package and symbol at that commit.
   holds one answer for every commit, and nothing the rig reviews changes it.
   `app_reads_city` lives in `formula_vars` for the opposite reason: no change a
   rig reviews may remove it ([its search](../tk-vd66j1.14/gas-city-search.md)).
-- **Only a pour reads it.** `formula_vars` fill a formula's vars when the
-  formula runs in the rig. The demo check captures inside a review session, and
-  an agent demoing a PR captures from its own shell. Neither pours
-  `mol-rig-demo`, so neither would see the value, and the paths would name a
-  rig's app in two places.
+- **A pour reads it, and any other reader gets the city's one value.**
+  `formula_vars` fill a formula's vars when the formula runs in the rig. The
+  demo check captures inside a review session, and an agent demoing a PR
+  captures from its own shell, and neither pours `mol-rig-demo`. Such a caller
+  can read a rig's value with `gc formula show mol-rig-demo --rig <rig>
+  --json`, as gc-toolkit's board capture read `ui_serve_command` before this
+  change, but what it reads is still the city's value and not the commit's.
+- **`ui_serve_command` stays the live copy's.** The pack declares it as a
+  `mol-rig-demo` var that a city sets among a rig's `formula_vars`, the command
+  a sitting's live copy of the rig's UI runs through `gctk rig serve`. A
+  sitting's live copy is not one of the demo paths this change moves onto the
+  guide, so it keeps reading the var, and a capture reads the guide. For
+  gc-toolkit both name one command, and helm-fixture's test
+  (`TestTheDocumentedCommandServesTheBoard`) holds the guide's `**Serve:**`
+  line equal to the value the city declares.
 - **The operator ruled the guide the one place.** "docs/review-demo.md should
   be the singular doc" (the operator, 2026-11-12, quoted in tk-sll4qin).
 

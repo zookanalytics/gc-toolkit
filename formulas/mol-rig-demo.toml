@@ -67,7 +67,7 @@ description = "Static directory the engine serves with its built-in file server.
 default = ""
 
 [vars.serve_cmd]
-description = "Dev-server command the engine spawns, waits for, and tears down (e.g. 'npm run dev'). It runs in a detached worktree of the rig_name checkout at its HEAD, which holds only what the rig commits, so it installs what it needs. At most one of serve_dir / serve_cmd / base_url; with none, the rig's docs/review-demo.md names the app."
+description = "Command that serves the rig's app (e.g. 'npm run dev'). The capture runs it as a copy that `gctk rig serve` runs inside the capture's sandbox, with a free port of its own as $PORT, from a detached worktree of the rig_name checkout at its HEAD, which holds only what the rig commits, so it installs what it needs. At most one of serve_dir / serve_cmd / base_url; with none, the rig's docs/review-demo.md names the app."
 default = ""
 
 [vars.base_url]
@@ -75,7 +75,7 @@ description = "URL of a deployed preview, or of the rig's app that a worktree of
 default = ""
 
 [vars.serve_port]
-description = "Port for serve_dir / serve_cmd. Empty takes the engine's default: 5173 for a command, a free port for a directory. 0 picks a free port and hands it to the command as PORT. A pour that names no app target takes the port the rig's guide names, so it sets none."
+description = "Port for serve_dir's server. Empty takes a free port. A serve_cmd's copy takes a free port of its own, and a pour that names no app target takes the app, and any port, that the rig's guide names."
 default = ""
 
 [vars.capture_mode]
@@ -97,6 +97,18 @@ default = ""
 [vars.app_reads_city]
 description = "\"true\" for a rig whose app reads the city, such as a rig that develops code for a city. A city sets it among the rig's [rigs.formula_vars] in city.toml, and a demo capture then refuses the rig's servers. Any value but \"false\" counts as \"true\". demo-engine-lib.sh reads it, and this formula's steps do not use it."
 default = "false"
+
+[vars.ui_serve_command]
+description = "The command that serves the rig's UI for a live copy, run from the root of the tree the copy shows with the copy's loopback port as $PORT. It serves the UI on fixture data with no city behind it, listens on loopback at $PORT, and takes nothing two copies would share. It is one value for every branch of the rig, so it names an entry point every branch carries. A city sets it among the rig's [rigs.formula_vars] in city.toml, and a rig that sets none offers no live copy. A caller of `gctk rig serve`, such as the converse-edit skill, reads it and passes it to the verb, and this formula's steps do not use it. A demo capture does not read it: it takes the app from its own app target, or from the rig's demo guide."
+default = ""
+
+[vars.ui_publish_command]
+description = "The city's command that publishes a live copy's loopback port, $PORT, at an origin of its own for exactly as long as the command runs, such as a foreground `tailscale serve --yes --https=$PORT http://127.0.0.1:$PORT`. Gas City sets a formula var only for a rig, so a city sets it, with ui_address_pattern, among the [rigs.formula_vars] of each rig that offers a live copy, and a copy gets no address where either is unset. A caller of `gctk rig serve` that gives a person a copy, such as the converse-edit skill, reads it and passes it to the verb, and this formula's steps do not use it."
+default = ""
+
+[vars.ui_address_pattern]
+description = "The address ui_publish_command gives a live copy, with $PORT or ${PORT} where the copy's port goes, such as https://<the host's tailnet name>:$PORT/. A city sets it beside ui_publish_command. A caller of `gctk rig serve` that gives a person a copy, such as the converse-edit skill, reads it and passes it to the verb, and this formula's steps do not use it."
+default = ""
 
 [vars.binding_prefix]
 description = "The binding the city imports the pack under, with its trailing dot. A step drops the dot to call the pack's own scripts as gc <binding> scripts-dir prints them. Gas City's sling adds it to every pour it makes; a pour that names none takes this default."
@@ -229,8 +241,8 @@ capture, and fails closed if no MP4 appears. With no app target from the pour,
 `--guide` hands it the worktree, whose guide names the app:
 ```bash
 # >>> rig-demo-capture-run
-set -- --script "$SCRIPT_PATH" --output "$OUT" --mode "{{capture_mode}}" --port "{{serve_port}}"
-if [ -n "$SERVE_DIR" ]; then set -- "$@" --serve-dir "$SERVE_DIR" --cwd "$APP_ROOT"
+set -- --script "$SCRIPT_PATH" --output "$OUT" --mode "{{capture_mode}}"
+if [ -n "$SERVE_DIR" ]; then set -- "$@" --serve-dir "$SERVE_DIR" --cwd "$APP_ROOT" --port "{{serve_port}}"
 elif [ -n "$SERVE_CMD" ]; then set -- "$@" --serve "$SERVE_CMD" --cwd "$APP_ROOT"
 elif [ -n "$BASE_URL" ]; then set -- "$@" --base-url "$BASE_URL"
 else set -- "$@" --guide "$APP_ROOT"

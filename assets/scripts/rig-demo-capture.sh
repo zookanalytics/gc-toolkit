@@ -27,11 +27,13 @@
 # for one, so this script refuses them first. Its shell starts in --cwd.
 #
 # The engine runs inside the sandbox demo-engine-lib.sh defines, where the live
-# city cannot be reached, so a --serve command, a terminal's commands or a page
-# that reads the city's stores or its API fails there, and the clip shows the
-# app on fixture data, or shows the failure, and never live state. The one
-# server outside the sandbox a clip can reach is a rig's app that --base-url
-# names, as below.
+# city cannot be reached. A --serve command's app runs as a copy of the rig's UI
+# that `gctk rig serve` runs inside the same sandbox, and the engine records
+# the copy at its loopback port. So a copy, a terminal's commands or a page that
+# reads the city's stores or its API fails there, and the clip shows the app on
+# fixture data, or shows the failure, and never live state. The one server
+# outside the sandbox a clip can reach is a rig's app that --base-url names, as
+# below.
 #
 # It FAILS CLOSED. A host with no sandbox, a capture the sandbox refuses, a
 # missing engine, a browser that cannot be installed, a script the linter
@@ -50,30 +52,36 @@
 #   --output     MP4 output path (required). Write outside the repo tree — a
 #                demo clip is an artifact, delivered to a PR, never committed.
 #   --serve-dir  serve a static directory with the engine's built-in server.
-#   --serve      spawn a dev-server command, wait for it, then tear it down.
-#                With --port, the command's environment carries the port as
-#                PORT, and --port 0 picks a free one first.
-#   --base-url   drive a deployed preview, or an app that a worktree of a rig
-#                serves on this host. Any other server on this host is refused,
-#                as is the app of a rig that city.toml sets to
-#                app_reads_city = "true".
+#   --serve      serve the app with this command as a copy that `gctk rig
+#                serve` runs from the checkout --cwd names (default: here),
+#                with no address, on a free port of its own, which the command
+#                gets as $PORT. A checkout has one copy, so captures from one
+#                checkout run one after another. A copy of that checkout that
+#                already runs the command is the one recorded, and it keeps
+#                running, and one that runs another command is refused. One
+#                this capture starts ends with it.
+#   --base-url   drive a deployed preview, a copy that `gctk rig serve` runs,
+#                or an app that a worktree of a rig serves on this host. Any
+#                other server on this host is refused, as is the app of a rig
+#                that city.toml sets to app_reads_city = "true".
 #                A page script takes exactly one of --serve-dir / --serve /
 #                --base-url, or --guide; it is how this rig's app is reached. A
 #                terminal script takes none of the three.
 #   --guide      a worktree of the rig at the commit to demo, whose demo guide,
 #                the docs/review-demo.md that commit carries, names the app in
-#                its section "Bring the app up": its app target, --cwd and
-#                --port, each directory relative to the worktree's root. The
-#                command, or a terminal script's shell, runs in the guide's
-#                --cwd, or at the worktree's root when the guide names none.
-#                A terminal script takes no app target, so only the directory
-#                applies to one. --guide names the whole app, so it takes no
-#                app target, --cwd or --port beside it.
-#   --port       port for --serve (default 5173) or --serve-dir (default: a free
-#                port). A port that a server already answers on is refused.
-#   --cwd        working directory for the --serve command, the directory a
-#                relative --serve-dir resolves against, and where a terminal
-#                script's shell starts (default: here).
+#                its section "Bring the app up": its app target, the
+#                --serve-dir server's --port, and --cwd, each directory
+#                relative to the worktree's root. A command's copy runs from
+#                the worktree, and a terminal script's shell starts in the
+#                guide's --cwd, or at the worktree's root when the guide names
+#                none. A terminal script takes no app target, so only the
+#                directory applies to one. --guide names the whole app, so it
+#                takes no app target, --cwd or --port beside it.
+#   --port       port for --serve-dir (default: a free port). A port that a
+#                server already answers on is refused.
+#   --cwd        the checkout a --serve command serves the app from, the
+#                directory a relative --serve-dir resolves against, and where a
+#                terminal script's shell starts (default: here).
 #   --mode       walkthrough (default, one continuous take) | proof (one checked
 #                screenshot per step).
 #   --no-narrate force a silent clip even when OPENAI_API_KEY is set.
@@ -159,12 +167,14 @@ if [ -n "$GUIDE" ]; then
   [ -d "$GUIDE" ] || { echo "$PROG: --guide '$GUIDE' is not a directory" >&2; exit 1; }
   GUIDE=$(abspath "$GUIDE")
   demo_engine_guide "$GUIDE" || exit 2
-  # The app runs in the guide's directory, or at the worktree's root when it
-  # names none, so a command or a shell runs the commit the worktree holds.
+  # The app runs from the worktree, so a command's copy or a shell runs the
+  # commit the worktree holds. A command's copy runs from the worktree's root,
+  # and a terminal script's shell starts in the guide's directory, or at the
+  # root when the guide names none.
   SERVE_CWD="${DEMO_GUIDE_CWD:-$DEMO_GUIDE_ROOT}"
   if [ "$KIND" = page ]; then
     SERVE_DIR="$DEMO_GUIDE_SERVE_DIR"; SERVE_CMD="$DEMO_GUIDE_SERVE"; BASE_URL="$DEMO_GUIDE_BASE_URL"
-    PORT="$DEMO_GUIDE_PORT"
+    PORT="$DEMO_GUIDE_PORT"; SERVE_CWD="$DEMO_GUIDE_ROOT"
     if [ -z "$DEMO_GUIDE" ]; then
       echo "$PROG: the commit checked out in $DEMO_GUIDE_ROOT carries no docs/review-demo.md, so nothing names the app this page script drives; name it with --serve-dir / --serve / --base-url" >&2
       exit 2
@@ -195,11 +205,13 @@ elif [ "$TARGETS" -ne 1 ]; then
   echo "$PROG: give exactly one of --serve-dir / --serve / --base-url, or --guide (got $TARGETS)" >&2
   usage >&2; exit 2
 fi
-# Only a command can be told which port to take; --serve-dir takes a free one
-# by itself.
-[ "$PORT" != 0 ] || [ -n "$SERVE_CMD" ] || { echo "$PROG: --port 0 picks a free port for a --serve command; give it with --serve only" >&2; exit 2; }
 [ -z "$SERVE_CWD" ] || [ -d "$SERVE_CWD" ] || { echo "$PROG: --cwd '$SERVE_CWD' is not a directory" >&2; exit 1; }
 [ -z "$MUSIC" ] || [ -f "$MUSIC" ] || { echo "$PROG: --music '$MUSIC' does not exist" >&2; exit 1; }
+# A --serve command's copy takes a free port of its own.
+if [ -n "$PORT" ] && [ -z "$SERVE_DIR" ]; then
+  echo "$PROG: --port names the --serve-dir server's port; a --serve command's copy takes a free port of its own" >&2
+  exit 2
+fi
 
 SCRIPT=$(abspath "$SCRIPT")
 OUTPUT=$(abspath "$OUTPUT")
@@ -227,16 +239,6 @@ else
 fi
 sprintshow() { demo_engine_cli "$@"; }
 
-# The engine sets no PORT for a --serve command, and the sandbox refuses a port
-# a server already answers on, so a capture that runs beside another takes a
-# port of its own. --port 0 names one that is free when it is read here, and
-# stays so unless another process binds it before the command does. The
-# command's environment carries the port as PORT, as a screenshot's does.
-if [ "$PORT" = 0 ]; then
-  PORT=$(demo_engine_free_port) || { echo "$PROG: could not find a free port for the --serve command" >&2; exit 1; }
-fi
-[ -z "$SERVE_CMD" ] || [ -z "$PORT" ] || export PORT
-
 # --- lint before capturing ----------------------------------------------
 # The linter reads the script exactly as the driver will; a script that lints
 # clean is one the capture will not silently skip steps from. Fail closed on a
@@ -247,12 +249,17 @@ if ! sprintshow lint "$SCRIPT"; then
 fi
 
 # --- capture --------------------------------------------------------------
+# A --serve command's app runs as a copy, inside the sandbox, and the engine
+# records the copy at its loopback port, which the sandbox opens because gctk
+# rig serve answers that the copy holds it.
+trap 'demo_engine_copy_stop' EXIT
+if [ -n "$SERVE_CMD" ]; then
+  demo_engine_copy "${SERVE_CWD:-$(pwd)}" "$SERVE_CMD" || exit 1
+  BASE_URL=$DEMO_ENGINE_COPY_URL
+fi
 set -- run "$SCRIPT" --mode "$MODE" -o "$OUTPUT"
 if [ -n "$SERVE_DIR" ]; then
   set -- "$@" --serve-dir "$SERVE_DIR"
-elif [ -n "$SERVE_CMD" ]; then
-  set -- "$@" --serve "$SERVE_CMD"
-  [ -z "$SERVE_CWD" ] || set -- "$@" --cwd "$SERVE_CWD"
 elif [ -n "$BASE_URL" ]; then
   set -- "$@" --base-url "$BASE_URL"
 else
@@ -266,7 +273,7 @@ fi
 
 echo "$PROG: capturing $SCRIPT ($MODE) -> $OUTPUT" >&2
 REPORT=$(mktemp "${TMPDIR:-/tmp}/rig-demo-capture.XXXXXX") || { echo "$PROG: cannot create a file for the engine's report" >&2; exit 1; }
-trap 'rm -f "$REPORT"' EXIT
+trap 'demo_engine_copy_stop; rm -f "$REPORT"' EXIT
 sprintshow "$@" | tee "$REPORT"
 RC=${PIPESTATUS[0]}
 

@@ -73,20 +73,21 @@ the same thing in the same place:
   capture takes, one line each:
 
   ```markdown
-  **Serve:** `npm ci && npm run dev`
-  **Cwd:** `web`
-  **Port:** `5173`
+  **Serve:** `cd web && npm ci && npm run dev -- --port $PORT`
+  **Cwd:** `cli`
   ```
 
-  `**Serve:**` names a command that brings the app up. It runs in a worktree
-  that holds only what the rig commits, so it installs what it needs.
-  `**Serve dir:**` names a static directory instead, and `**Base URL:**` an app
-  already running. Name at most one of the three, and none for a rig whose
-  surfaces are terminal sessions. `**Cwd:**` names the directory the command
-  runs in, which is also where a terminal script's shell starts. `**Port:**`
-  names the port the command binds, and `0` has the capture pick a free one and
-  hand it to the command as `$PORT`. Each value is one code span, and each
-  directory is relative to the root of the repository and lies in it. A
+  `**Serve:**` names a command that brings the app up. A capture runs it as a
+  copy that `gctk rig serve` runs from the root of a worktree that holds only
+  what the rig commits, on a free port of its own that the command gets as
+  `$PORT`. So the command changes into the app's directory, installs what it
+  needs, and serves on `$PORT`. `**Serve dir:**` names a static directory
+  instead, which the engine's own server serves on the port `**Port:**` names,
+  or on a free one, and `**Base URL:**` names an app already running. Name at
+  most one of the three, and none for a rig whose surfaces are terminal
+  sessions. `**Port:**` goes only beside `**Serve dir:**`. `**Cwd:**` names the
+  directory a terminal script's shell starts in. Each value is one code span,
+  and each directory is relative to the root of the repository and lies in it. A
   capture refuses a guide whose directory leads out of the repository, by an
   absolute path, `..` or a symlink, because a capture reads and writes where
   each directory it is given leads. The section's prose says what the lines
@@ -125,7 +126,6 @@ assemble the MP4:
 
 ```bash
 demo_engine_cli run demo.md --serve-dir ./public          # serve a static directory
-demo_engine_cli run demo.md --serve "npm run dev" --port 5173   # spin up a dev server, tear it down
 demo_engine_cli run demo.md --base-url https://<preview-host>   # drive a deployed preview
 demo_engine_cli run terminal.md --cwd ./cli               # a terminal script: no app, its shell starts in --cwd
 ```
@@ -134,10 +134,18 @@ A script that declares `**Terminal:**` drives a bash session in the engine's own
 terminal instead of a page, so it brings up no app, and the engine refuses an
 app target or a `--port` for it.
 
-A `--base-url` on this host works for a rig's own app running in a worktree of
-that rig, unless `city.toml` sets `app_reads_city = "true"` for the rig.
-Otherwise the capture refuses the URL and says why. Then serve the app with
-`--serve` or `--serve-dir`, or capture a deployed preview.
+An app a command serves, such as a dev server, runs as a copy that
+`gctk rig serve` runs from a checkout, inside the same sandbox, and the engine
+captures the copy at its loopback port. `rig-demo-capture.sh` and
+`demo-screenshot.sh page` do that for `--serve "<command>" --cwd <checkout>`:
+they start the copy, capture it and stop it. The engine's own `--serve` is
+refused, because the sandbox cannot vouch for the server it would start.
+
+A `--base-url` on this host works for a copy that `gctk rig serve` runs, and for
+a rig's own app running in a worktree of that rig, unless `city.toml` sets
+`app_reads_city = "true"` for the rig. Otherwise the capture refuses the URL and
+says why. Then serve the app as a copy or with `--serve-dir`, or capture a
+deployed preview.
 
 Two capture modes come from one script:
 
@@ -170,8 +178,8 @@ assets/scripts/rig-demo-capture.sh --script demo.md --output <out.mp4> \
 A page script needs its app. Name it with one of the three flags, or give
 `--guide <worktree>`, which takes the app the rig's guide in that worktree
 names. A terminal script takes none of them, and its shell starts in `--cwd`,
-or under `--guide` in the directory the guide names. A `--serve` command given
-a `--port` gets it as `$PORT`, and `--port 0` picks a free one first, as a
+or under `--guide` in the directory the guide names. A `--serve` command runs
+as a copy on a free port of its own, which it gets as `$PORT`, as a
 screenshot's command does.
 
 `mol-rig-demo` runs that call as a pool workflow against any rig. It turns the

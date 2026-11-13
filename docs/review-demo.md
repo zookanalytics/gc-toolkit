@@ -39,27 +39,29 @@ The sections after [Worked examples](#worked-examples) say how to capture each.
 
 ## Bring the app up
 
-**Serve:** `go run ./cmd/helm-fixture`
+**Serve:** `cd services/helm && exec go run ./cmd/helm-fixture`
 **Cwd:** `services/helm`
-**Port:** `0`
 
 The app is the helm board on fixture data. The service's `helm-fixture` command
 serves the board of the commit it runs from, with no city behind it
-(`services/helm/README.md`). A capture with `--port 0` picks a free port and
-hands it to the command as `$PORT`, where `helm-fixture` reads it, so two
-captures each get a server of their own. On a cold Go build cache the first run
-compiles Go's HTTP stack and can take most of the 30 s the engine waits for the
-command. When the engine reports that the command did not answer in time,
-capture again, because what the first run compiled stays cached.
+(`services/helm/README.md`). A capture serves the command as a copy that
+`gctk rig serve` runs from the worktree's root, inside the capture's sandbox, on
+a free port of its own that the command gets as `$PORT`, where `helm-fixture`
+reads it. A worktree has one copy, so take its captures one after another. A
+capture whose command differs from a copy that still runs there is refused until
+`gctk rig serve --stop`, run in the worktree, ends it. On a cold Go build cache
+the first run compiles Go's HTTP stack, and the copy's start waits up to three
+minutes for it to answer. A sitting's live copy of the board runs the same
+command, which the city declares as gc-toolkit's `ui_serve_command`.
 
 Capture the board through `helm-fixture`, never through a running helm
 service. A capture refuses a `--base-url` that any gc-toolkit server answers,
 and the service's verbs act on the live city. The verdict says that the board
 shows fixture data.
 
-A terminal capture given `--guide` starts its shell in `services/helm` too,
-which is where the conversation form runs. A report runs from the worktree's
-root, so give its capture `--cwd <worktree>` instead.
+A terminal capture given `--guide` starts its shell in `services/helm`, which
+is where the conversation form runs. A report runs from the worktree's root, so
+give its capture `--cwd <worktree>` instead.
 
 ## A known state
 
@@ -71,8 +73,7 @@ read builds from the committed fixture of real gc-toolkit beads, so a script's
 start path is `/?rig=gc-toolkit`. To show another rig's document, write it in
 the shape `services/helm/web/src/rigboard/document.gen.ts` names and add
 `--rig-board $PWD/<file>` to the command, which a capture then names with
-`--serve`, `--port 0` and `--cwd <worktree>/services/helm` in place of
-`--guide`.
+`--serve` and `--cwd <worktree>` in place of `--guide`.
 
 A state that a verb leads to needs that verb's answer. Add
 `--answers $PWD/answers` to the command, named with the flags as above. A file
