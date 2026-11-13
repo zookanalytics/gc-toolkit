@@ -8,8 +8,8 @@
 #               of "schedule an action for a bead": a routed, unassigned,
 #               open bead is what a pool's find-work offers. Work that is a
 #               named agent's own (a town-repo edit is mechanik's) is handed
-#               TO that agent instead (--assign), through Gas City's hand-off,
-#               which routes it to the agent's hook and nudges the agent.
+#               TO that agent instead (--assign): gc sling routes it to the
+#               agent's hook, and the exit nudges the agent.
 #   recommend   the action is known but warrants the operator's trigger -> put
 #               it to the operator as a human gate (as ruling does) AND stamp
 #               gc.recommended_formula on the subject, so the board offers
