@@ -97,7 +97,7 @@ jobs:
     runs-on: macos-latest
     # The same suite takes the macOS runner more than twice as long as
     # ubuntu's, so its limit is higher.
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
