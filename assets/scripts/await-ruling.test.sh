@@ -3,8 +3,8 @@
 #
 # The constraint: a declined run is cancelled, and nothing resumes a cancelled
 # run, so the wait for a person's ruling sits on the WORK bead: a `blocks` edge
-# onto the human gate that asks for the ruling, and a deferred-dispatch arm that
-# re-slings the work when the gate is cleared. A cancel with no recorded wait
+# onto the human gate that asks for the ruling, and an arm that re-slings the
+# work when the gate is cleared. A cancel with no recorded wait
 # would leave the work open, unrouted and unarmed, so every way the wait can
 # fail to land exits non-zero.
 #
@@ -14,9 +14,10 @@
 #     blocks another bead is not taken; a gate filed on --subject gets the work
 #     bead's own edge, and --subject falls back to the work bead's own gates; a
 #     gate or blocker in another store gets no edge;
-#   * the arm: the real deferred-dispatch.sh records a re-sling to the pool the
-#     last pour ran on, --on <formula>, after the route keys a pour leaves are
-#     cleared (the arm refuses a routed bead);
+#   * the arm: the real `gctk bead arm` records a re-sling to the pool the last
+#     pour ran on, --on <formula>, after the route keys a pour leaves are
+#     cleared (the arm refuses a routed bead); with no gctk binary nothing is
+#     written;
 #   * a wait the store already keeps (--held-by) takes no edge, and its arm,
 #     claim release and route clear land as any wait's do;
 #   * re-running converges: an edge and an arm already in place count as landed
@@ -103,8 +104,8 @@ mkdir -p "$TMP/bin"
 set -u
 S="${FAKE_STORE:?}"; D="${FAKE_DEPS:?}"
 printf '%s\n' "$*" >> "${GC_LOG:?}"
-# gctk's calls, made by the arm deferred-dispatch.sh hands to it, answer from
-# this store through holds-store.stub.sh, and $FAKE_ARM_WRITE_FAIL refuses the
+# gctk's calls, made by the arm await-ruling.sh asks of it, answer from this
+# store through holds-store.stub.sh, and $FAKE_ARM_WRITE_FAIL refuses the
 # arm's write there too. A deps row here names the waiter first, as dep add
 # does, where the stub's blocks row names the blocker first.
 if [ -n "${HOLDS_STUB_READ:-}" ] && [ "${1:-}" = bd ]; then
@@ -259,8 +260,8 @@ GC
 chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
 export FAKE_STORE="$TMP/store.json" FAKE_DEPS="$TMP/deps.txt" GC_LOG="$TMP/gc.log"
-# The arm is gctk's, so the suite builds gctk from this checkout and the real
-# deferred-dispatch.sh runs it over the store above. The config it reads names
+# The arm is gctk's, so the suite builds gctk from this checkout and runs it
+# over the store above. The config it reads names
 # each pool's default formula, for an arm that names none.
 HOLDS_STUB="$HERE/holds-store.stub.sh"
 GCTK_BIN="$("$HOLDS_STUB" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so no arm can be made"; exit 1; }
@@ -328,6 +329,16 @@ run tk-work --key "$KEY" --formula mol-polecat-work
 run tk-work --key "$KEY" --formula mol-polecat-work --target "$POOL"
 eq "$RC" 0 "a re-run naming the pool re-arms in place"
 eq "$(meta tk-work gc.dispatch_when_ready)" "$POOL" "the re-arm holds the same target"
+
+# With no gctk binary to arm with, nothing is written: the arm is the last
+# write, so a wait that cannot be armed takes no edge either.
+reset
+: > "$GC_LOG"
+OUT=$(GCTK_BIN="$TMP/no-such-gctk" "$SCRIPT" tk-work --key "$KEY" --formula mol-polecat-work 2>&1); RC=$?
+eq "$RC" 1 "no gctk binary: exit 1"
+has "$OUT" "no gctk binary at '$TMP/no-such-gctk'" "no gctk binary: said, naming the path it looked at"
+eq "$(grep -c -E '^bd (dep add|update|release-if-current) ' "$GC_LOG" | tr -d ' ')" 0 "no gctk binary: nothing is written"
+eq "$(meta tk-work gc.dispatch_when_ready)" "<absent>" "no gctk binary: nothing is armed"
 eq "$(on_v1)" 1 "the re-arm leaves the one edge"
 
 # ── 3. --target wins over the pour's stamp ───────────────────────────────────
@@ -527,8 +538,8 @@ eq "$(meta tk-work gc.execution_routed_to)" "$POOL" "a refused route clear: the 
 reset
 printf 'tk-work|blocks|xx-9\n' >> "$FAKE_DEPS"
 run tk-work --key "$KEY" --formula mol-polecat-work
-eq "$RC" 1 "an arm deferred-dispatch refuses (a wait into another store): exit 1"
-has "$OUT" "the re-sling was not armed" "a refused arm: said, with deferred-dispatch's reason"
+eq "$RC" 1 "an arm gctk bead arm refuses (a wait into another store): exit 1"
+has "$OUT" "the re-sling was not armed" "a refused arm: said, with gctk's reason"
 eq "$(on_v1)" 1 "a refused arm: the edge onto the gate stays"
 eq "$(meta tk-work gc.execution_routed_to)" "" "a refused arm: the route keys are cleared"
 eq "$(meta tk-work gc.dispatch_when_ready)" "<absent>" "a refused arm: nothing is armed"

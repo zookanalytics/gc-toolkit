@@ -10,8 +10,8 @@
 # wait. bd refuses to close a bead an open gate blocks, and clearing the gate
 # first makes the bead ready, which is what the arm waits for. This runs the one
 # order that does end it:
-#   1. It removes the arm through deferred-dispatch.sh disarm, whose exit says
-#      the arm is gone, whether or not the bead carried one. The disarm takes
+#   1. It removes the arm through `gctk bead disarm`, whose exit says the arm
+#      is gone, whether or not the bead carried one. The disarm takes
 #      the bead's dispatch lock, which the deferred-dispatch start holds while
 #      it sends the bead and reads the arm again under, so a start that reads
 #      the gate closed reads the arm gone, and it retires an arm it finds on a
@@ -125,7 +125,10 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "${GC_BD_LIB:-$SCRIPT_DIR/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh beside this script" >&2; exit 1; }
 # shellcheck source=work-outcome.sh
 . "$SCRIPT_DIR/work-outcome.sh" || { echo "$PROG: cannot source work-outcome.sh beside this script" >&2; exit 1; }
-DEFERRED="$SCRIPT_DIR/deferred-dispatch.sh"
+# The disarm is gctk's, from the binary the city builds.
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 HELM="$SCRIPT_DIR/gc-helm.sh"
 REHOME="$SCRIPT_DIR/bead-rehome.sh"
 
@@ -188,12 +191,14 @@ if [ "$DRY_RUN" = 1 ]; then
   exit 0
 fi
 
+[ -x "$GCTK" ] || refuse "There is no gctk binary at '$GCTK' to remove the arm with (GCTK_BIN names one, or GC_CITY_PATH the city whose build it is)."
+
 # Each step below is one a re-run takes again, so a stop names what stands.
 stopped() { echo "$PROG: $1 Re-run this command once that is repaired." >&2; exit 1; }
 
 # The disarm runs with no read of the arm first: it exits 0 once no arm remains,
 # and an arm written after the read above is removed too.
-"$DEFERRED" disarm "$WORK" --reason "stand-down: $RULING" >/dev/null \
+"$GCTK" bead disarm "$WORK" --reason "stand-down: $RULING" >/dev/null \
   || stopped "the arm on $WORK was not removed, so no gate was answered."
 
 "$HELM" takeaway "$WORK" "Stood down on a person's ruling, so nothing builds it" --release --no-wait \

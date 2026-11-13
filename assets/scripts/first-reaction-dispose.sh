@@ -90,7 +90,10 @@ PROG="first-reaction-dispose"
 HERE="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 HELM="${GC_HELM_TOOL:-$HERE/gc-helm.sh}"
 HUMAN_GATE="${GC_HUMAN_GATE_TOOL:-$HERE/human-gate.sh}"
-DEFERRED="${GC_DEFERRED_DISPATCH_TOOL:-$HERE/deferred-dispatch.sh}"
+# The arm's verb is gctk's, from the binary the city builds.
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 PROACTIVE="${GC_PROACTIVE_TOOL:-$HERE/../../tools/gc-proactive.sh}"
 
 # >>> control-char-scrub
@@ -160,7 +163,7 @@ Usage:
   not a bead yet; --blocker-key dedups repeats of one recurring cause onto
   that single bead instead of one bead per instance.
   --then-route arms the deferred dispatch that slings the subject when the
-  blocker closes (assets/scripts/deferred-dispatch.sh). An arm that does not
+  blocker closes (gctk bead arm). An arm that does not
   land fails the exit before the landed proof, so a re-run resumes it.
   Intake decides whether the actionable route and the --then-route arm are
   written at all. Only a member of an epic, PR-finishing work (anchor_bead)
@@ -346,8 +349,8 @@ case "$DISPOSITION" in
         # The arm is part of this exit's write-back when the closer waits, and
         # with no tool to record it the exit cannot land, so it does not start.
         if [ -n "$WAITING$AFTER_WORKFLOW" ]; then
-            [ -x "$DEFERRED" ] \
-                || die "a deferred close needs $DEFERRED to arm the validating closer for when $BEAD's wait lifts, and it is not executable. Nothing was written. Restore it and re-run this command."
+            [ -x "$GCTK" ] \
+                || die "a deferred close needs gctk to arm the validating closer for when $BEAD's wait lifts, and there is no gctk binary at '$GCTK' (GCTK_BIN names one, or GC_CITY_PATH the city whose build it is). Nothing was written. Restore it and re-run this command."
         fi
         ;;
     blocked)
@@ -372,8 +375,8 @@ case "$DISPOSITION" in
             case "$THEN_ROUTE" in */*) : ;; *) usage_die "--then-route '$THEN_ROUTE' is not rig-qualified (<rig>/<agent>)" ;; esac
             # The arm is part of this exit's write-back, and with no tool to
             # record it the exit cannot land, so it does not start.
-            [ -x "$DEFERRED" ] \
-                || die "--then-route needs $DEFERRED to arm the dispatch for when $BEAD's wait lifts, and it is not executable. Nothing was written. Restore it and re-run this command."
+            [ -x "$GCTK" ] \
+                || die "--then-route needs gctk to arm the dispatch for when $BEAD's wait lifts, and there is no gctk binary at '$GCTK' (GCTK_BIN names one, or GC_CITY_PATH the city whose build it is). Nothing was written. Restore it and re-run this command."
         else
             [ -z "$EMERGENCY" ] \
                 || usage_die "--emergency admits the dispatch a --then-route arms, at P0, and this blocked exit arms none. Pass --then-route <rig>/<agent>, or drop --emergency."
@@ -983,8 +986,8 @@ $REASON" >/dev/null 2>&1 \
                 || die "could not hold $BEAD on $h; refusing to arm the closer dispatch ungated (the deferred-dispatch order would sling mol-validate-close before $h closes). bd keeps one edge type per pair of beads, so an edge of another type $BEAD already has onto $h refuses this one: remove it with gc bd dep remove $BEAD $h${DB:+ --db $DB}. Clear the cause and re-run this command."
         done
         # shellcheck disable=SC2086  # $BD_DB_ARGS expands to 0 or 2 space-free fields
-        "$DEFERRED" arm "$BEAD" --target "$ROUTE" --sling-arg --on --sling-arg mol-validate-close --reason "first reaction close: $REASON" $BD_DB_ARGS >/dev/null 2>&1 \
-            || die "could not arm the validating-closer dispatch on $BEAD (deferred-dispatch arm --on mol-validate-close failed). Clear the cause and re-run this command."
+        "$GCTK" bead arm "$BEAD" --target "$ROUTE" --on mol-validate-close --reason "first reaction close: $REASON" $BD_DB_ARGS >/dev/null 2>&1 \
+            || die "could not arm the validating-closer dispatch on $BEAD (gctk bead arm --on mol-validate-close failed). Clear the cause and re-run this command."
     else
         SLING_RIG_ARG=""
         [ -n "${GC_RIG:-}" ] && SLING_RIG_ARG="--rig $GC_RIG"
@@ -1135,10 +1138,10 @@ esac
 # the bead.
 if [ "$DISPOSITION" = "blocked" ] && [ -n "$THEN_ROUTE" ] && [ -n "$ADMIT" ]; then
     # shellcheck disable=SC2086  # $BD_DB_ARGS expands to 0 or 2 space-free fields
-    if ARM_ERR=$("$DEFERRED" arm "$BEAD" --target "$THEN_ROUTE" --reason "first reaction: $REASON" $BD_DB_ARGS 2>&1 >/dev/null); then
+    if ARM_ERR=$("$GCTK" bead arm "$BEAD" --target "$THEN_ROUTE" --reason "first reaction: $REASON" $BD_DB_ARGS 2>&1 >/dev/null); then
         note "armed the dispatch to $THEN_ROUTE for when the wait lifts"
     else
-        die "the blocked disposition on $BEAD did not land. The dispatch to $THEN_ROUTE for when its wait lifts was not armed (${ARM_ERR:-deferred-dispatch.sh arm exited non-zero and named no cause}), so nothing would route $BEAD once the wait lifts. The headline, the release and the hold stand. No landed proof was stamped and the reaction bead stays open, so clear the cause and re-run this command: a re-run resumes rather than refusing."
+        die "the blocked disposition on $BEAD did not land. The dispatch to $THEN_ROUTE for when its wait lifts was not armed (${ARM_ERR:-gctk bead arm exited non-zero and named no cause}), so nothing would route $BEAD once the wait lifts. The headline, the release and the hold stand. No landed proof was stamped and the reaction bead stays open, so clear the cause and re-run this command: a re-run resumes rather than refusing."
     fi
 fi
 

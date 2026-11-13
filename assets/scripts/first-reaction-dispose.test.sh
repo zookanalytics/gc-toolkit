@@ -4,8 +4,8 @@
 # and the frozen no-reaction-bead call an in-flight mol-first-reaction molecule
 # still makes. Runs the REAL script with a
 # stubbed `gc`, a stubbed gc-helm.sh, a stubbed human-gate.sh, a stubbed
-# gc-proactive.sh and a stubbed deferred-dispatch.sh (all reached through the
-# tool-override env vars), so no
+# gc-proactive.sh and a stubbed gctk (all reached through the tool-override env
+# vars, gctk's through GCTK_BIN), so no
 # live city, Dolt or network is touched. What each block guards is named above it.
 set -euo pipefail
 
@@ -199,20 +199,20 @@ exit 0
 PA
 chmod +x "$TMP/proactive"
 
-cat > "$TMP/deferred" <<'DD'
+cat > "$TMP/gctk" <<'GCTK'
 #!/usr/bin/env bash
-printf 'DEFERRED %s\n' "$*" >> "$FAKE_LOG"
-# FAKE_DEFERRED_FAILS models an arm the real script refuses: it names why on
-# stderr and exits 1.
-[ -n "${FAKE_DEFERRED_FAILS:-}" ] && { echo "deferred-dispatch: arm: $2 is already dispatched (fake refusal)" >&2; exit 1; }
-# deferred-dispatch.sh arm keys on gc.routed_to and status, NOT on
+printf 'GCTK %s\n' "$*" >> "$FAKE_LOG"
+# FAKE_ARM_FAILS models an arm gctk bead arm refuses: it names why on stderr and
+# exits 1.
+[ -n "${FAKE_ARM_FAILS:-}" ] && { echo "gctk bead arm: $3 is dispatched already (fake refusal)" >&2; exit 1; }
+# gctk bead arm refuses on gc.routed_to and status, NOT on
 # gc.execution_routed_to — that stamp is a finished pour's provenance, not a live
 # queue. A first-reaction subject carries only the stamp and no gc.routed_to, so
 # a plain arm lands whether or not the release cleared the stamp. The stub arms
 # unconditionally, which is exactly that behavior.
 exit 0
-DD
-chmod +x "$TMP/deferred"
+GCTK
+chmod +x "$TMP/gctk"
 
 # An emergency's check reads the subject's repository from its rig checkout and
 # main's checks from GitHub. FAKE_ORIGIN_URL is the origin the checkout names
@@ -268,7 +268,7 @@ export FAKE_STATE="$TMP/reco_state"
 MEMBER='"parent":"tk-epic","dependencies":[{"id":"tk-epic","dependency_type":"parent-child","status":"open"}]'
 UNPLACED='[{"id":"tk-sub","metadata":{}}]'
 export DEFAULT_SHOW='[{"id":"tk-sub",'"$MEMBER"',"metadata":{}}]'
-export GC_HELM_TOOL="$TMP/helm" GC_DEFERRED_DISPATCH_TOOL="$TMP/deferred" \
+export GC_HELM_TOOL="$TMP/helm" GCTK_BIN="$TMP/gctk" \
        GC_PROACTIVE_TOOL="$TMP/proactive" GC_HUMAN_GATE_TOOL="$TMP/human-gate"
 
 R="tk-react"   # the reaction bead the worker holds
@@ -424,7 +424,7 @@ has "gc-toolkit.mechanik tk-sub --no-formula --no-convoy" "$(grep '^SLING ' "$FA
 eq "$(grep -c '^SLING ' "$FAKE_LOG")" "1" "(ACTHANDOFF) …once"
 before '^HELM takeaway' '^SLING ' "(ACTHANDOFF) …after the release leaves the bead at rest"
 before '^SLING ' 'gc.reacted_by' "(ACTHANDOFF) …and before the landed proof"
-hasnt "DEFERRED" "$LOG" "(ACTHANDOFF) …arming nothing for a named agent"
+hasnt "GCTK" "$LOG" "(ACTHANDOFF) …arming nothing for a named agent"
 has "NUDGE session nudge gc-toolkit.mechanik tk-sub is routed to you and ready" "$LOG" \
     "(ACTHANDOFF) the agent is nudged with the bead's id, since a route alone gives it no turn"
 before '^SLING ' '^NUDGE ' "(ACTHANDOFF) …once the bead is routed to it"
@@ -490,11 +490,11 @@ has "SLING " "$LOG" "(HANDOFFFAIL) …after the route, which stands"
 hasnt "gc.reacted_by" "$LOG" "(HANDOFFFAIL) …with no landed proof, so a re-run nudges again"
 unset FAKE_NUDGE_FAILS
 
-# (HANDOFFTOOL) the hand-off is gc sling's, so --assign lands with no
-# deferred-dispatch.sh to call.
-GC_DEFERRED_DISPATCH_TOOL="$TMP/no-such-deferred-dispatch" \
+# (HANDOFFTOOL) the hand-off is gc sling's, so --assign lands with no gctk
+# binary to arm with.
+GCTK_BIN="$TMP/no-such-gctk" \
     run tk-sub --disposition actionable --reason "r" --takeaway "t" --assign gc-toolkit.mechanik --reaction-bead "$R"
-eq "$RC" "0" "(HANDOFFTOOL) --assign lands with no deferred-dispatch.sh"
+eq "$RC" "0" "(HANDOFFTOOL) --assign lands with no gctk binary"
 has "SLING " "$LOG" "(HANDOFFTOOL) …handing the bead over"
 
 # ── blocked: the wait is an edge, in one store ───────────────────────────────
@@ -507,7 +507,7 @@ has "SLING " "$LOG" "(HANDOFFTOOL) …handing the bead over"
 #   (BLKARM)   --then-route arms the dispatch that resumes the work
 #   (BLKARMFAIL)  an arm that did not land fails the exit the same way, and a
 #                 re-run arms, then stamps the landed proof, then closes R
-#   (BLKARMTOOL)  --then-route with no deferred-dispatch.sh to arm it is
+#   (BLKARMTOOL)  --then-route with no gctk binary to arm it is
 #                 refused before anything is written
 export FAKE_DEPS_JSON='[{"id":"tk-blk1"}]'
 run tk-sub --disposition blocked --reason "waits on the schema migration" \
@@ -565,14 +565,14 @@ run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk
     --then-route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
 eq "$RC" "4" "(BLKEDGE) a wait edge takeaway could not write fails the exit"
 hasnt "gc.reacted_by" "$LOG" "(BLKEDGE) …the landed proof is NOT stamped over an unheld bead"
-hasnt "DEFERRED arm" "$LOG" "(BLKEDGE) …nothing is armed on a wait that does not exist"
+hasnt "GCTK bead arm" "$LOG" "(BLKEDGE) …nothing is armed on a wait that does not exist"
 hasnt "UPDATE bd update $R" "$LOG" "(BLKEDGE) …and the reaction bead is NOT closed"
 hasnt "disposed as blocked" "$OUT" "(BLKEDGE) …and the run does not report a disposition"
 unset FAKE_HELM_FAILS
 
 # A first-reaction subject can carry the pour stamp gc.execution_routed_to. The
 # blocked exit releases it (gc-helm.sh --release retires that stamp as
-# provenance) and arms a PLAIN deferred dispatch. deferred-dispatch's arm keys on
+# provenance) and arms a PLAIN deferred dispatch. gctk bead arm keys on
 # gc.routed_to, not the execution stamp, and the subject carries no gc.routed_to,
 # so the arm lands whether or not the release cleared the stamp. The stubs model
 # that, so the arm is exercised against the real guard rather than a fixture no
@@ -583,13 +583,13 @@ export FAKE_SHOW_JSON='[{"id":"tk-sub",'"$MEMBER"',"metadata":{"gc.execution_rou
 export FAKE_DEPS_JSON='[{"id":"tk-blk1"}]'
 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 \
     --then-route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
-has "DEFERRED arm tk-sub --target gc-toolkit/gc-toolkit.polecat" "$LOG" \
+has "GCTK bead arm tk-sub --target gc-toolkit/gc-toolkit.polecat" "$LOG" \
     "(BLKARM) --then-route arms the dispatch for when the wait lifts"
 hasnt "--sling-arg" "$LOG" \
     "(BLKARM) …a plain arm, no --on — the order's start slings it even with the pour stamp set"
 has "armed the dispatch to gc-toolkit/gc-toolkit.polecat" "$ERR" \
     "(BLKARM) …and the arm lands"
-before '^DEFERRED arm' 'gc.reacted_by' "(BLKARM) …before the landed proof, which is the last write"
+before '^GCTK bead arm' 'gc.reacted_by' "(BLKARM) …before the landed proof, which is the last write"
 
 # Control: a pour stamp still set after a release that exits 0 still lets the
 # plain arm land. gc-helm.sh takeaway --release clears the stamp in the update
@@ -613,7 +613,7 @@ export FAKE_HELM_FAILS=1
 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 \
     --then-route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
 eq "$RC" "4" "(BLKARM) a genuine gc-helm release failure fails the disposition"
-hasnt "DEFERRED arm" "$LOG" "(BLKARM) …and nothing is armed after a release that did not land"
+hasnt "GCTK bead arm" "$LOG" "(BLKARM) …and nothing is armed after a release that did not land"
 hasnt "gc.reacted_by" "$LOG" "(BLKARM) …and the landed proof is not stamped"
 hasnt "UPDATE bd update $R" "$LOG" "(BLKARM) …and the reaction bead is not closed"
 unset FAKE_HELM_FAILS FAKE_EXEC_ROUTED_FILE FAKE_SHOW_JSON
@@ -623,12 +623,12 @@ unset FAKE_HELM_FAILS FAKE_EXEC_ROUTED_FILE FAKE_SHOW_JSON
 # lifts, and a closed R brings no re-offer to arm it later. So an arm that does
 # not land fails the exit, as a missing edge does: no landed proof, R left open.
 export FAKE_DEPS_JSON='[{"id":"tk-blk1"}]'
-FAKE_DEFERRED_FAILS=1 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 \
+FAKE_ARM_FAILS=1 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 \
     --then-route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
 eq "$RC" "4" "(BLKARMFAIL) an arm that did not land fails the exit"
-has "DEFERRED arm tk-sub --target gc-toolkit/gc-toolkit.polecat" "$LOG" "(BLKARMFAIL) …after the arm was tried"
+has "GCTK bead arm tk-sub --target gc-toolkit/gc-toolkit.polecat" "$LOG" "(BLKARMFAIL) …after the arm was tried"
 has "nothing would route tk-sub once the wait lifts" "$ERR" "(BLKARMFAIL) …and the failure says what it costs"
-has "already dispatched (fake refusal)" "$ERR" "(BLKARMFAIL) …carrying the cause the arm named"
+has "dispatched already (fake refusal)" "$ERR" "(BLKARMFAIL) …carrying the cause the arm named"
 has "a re-run resumes" "$ERR" "(BLKARMFAIL) …and that a re-run resumes, since no landed proof was stamped"
 hasnt "gc.reacted_by" "$LOG" "(BLKARMFAIL) …the landed proof is NOT stamped"
 hasnt "UPDATE bd update $R" "$LOG" "(BLKARMFAIL) …and the reaction bead stays open"
@@ -642,21 +642,21 @@ run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk
     --then-route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
 eq "$RC" "0" "(BLKARMFAIL) the re-run after a failed arm succeeds"
 has "armed the dispatch to gc-toolkit/gc-toolkit.polecat" "$ERR" "(BLKARMFAIL) …the arm lands"
-before '^DEFERRED arm' 'gc.reacted_by' "(BLKARMFAIL) …then the landed proof"
+before '^GCTK bead arm' 'gc.reacted_by' "(BLKARMFAIL) …then the landed proof"
 before 'gc.reacted_by' "UPDATE bd update $R" "(BLKARMFAIL) …then the reaction bead closes"
 has "UPDATE bd update $R --set-metadata gc.outcome=reacted --set-metadata gc.work_outcome=no-op --status=closed" "$LOG" \
     "(BLKARMFAIL) …recording its outcome"
 unset FAKE_SHOW_JSON
 
-# (BLKARMTOOL) With no deferred-dispatch.sh to arm it, the exit cannot land, so
+# (BLKARMTOOL) With no gctk binary to arm it, the exit cannot land, so
 # it is refused before the first write.
-GC_DEFERRED_DISPATCH_TOOL="$TMP/no-such-deferred-dispatch" \
+GCTK_BIN="$TMP/no-such-gctk" \
     run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 \
     --then-route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
-eq "$RC" "4" "(BLKARMTOOL) --then-route with no deferred-dispatch.sh is refused"
-has "no-such-deferred-dispatch" "$ERR" "(BLKARMTOOL) …naming the tool it looked for"
+eq "$RC" "4" "(BLKARMTOOL) --then-route with no gctk binary is refused"
+has "no-such-gctk" "$ERR" "(BLKARMTOOL) …naming the binary it looked for"
 eq "$LOG" "" "(BLKARMTOOL) …before anything is written"
-GC_DEFERRED_DISPATCH_TOOL="$TMP/no-such-deferred-dispatch" \
+GCTK_BIN="$TMP/no-such-gctk" \
     run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 --reaction-bead "$R"
 eq "$RC" "0" "(BLKARMTOOL) a blocked exit that asks for no arm does not need the tool"
 unset FAKE_DEPS_JSON
@@ -672,7 +672,7 @@ run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk
 eq "$RC" "2" "(BLKROUTE) --then-route to a pool nothing runs is refused"
 has "PROACTIVE deliverable gc-toolkit/gc-toolkit.nosuchpool tk-sub" "$LOG" \
     "(BLKROUTE) …the exit asks whether that pool can claim before arming"
-hasnt "DEFERRED arm" "$LOG" "(BLKROUTE) …and nothing is armed to a target that would fail every pass of the order"
+hasnt "GCTK bead arm" "$LOG" "(BLKROUTE) …and nothing is armed to a target that would fail every pass of the order"
 unset FAKE_POOL_DEAD FAKE_DEPS_JSON
 
 # (BLKASSIGN) a town-repo edit that must wait on a rig change is held on that
@@ -693,7 +693,7 @@ has "UPDATE bd update $R --set-metadata gc.outcome=reacted --set-metadata gc.wor
 has "--release --waiting-on tk-blk1" "$LOG" "(BLKASSIGN) the wait rides the release"
 hasnt "--assign" "$(grep '^HELM' "$FAKE_LOG")" "(BLKASSIGN) …which writes no assignee"
 hasnt "--no-wait" "$LOG" "(BLKASSIGN) …and the named wait is not called settled"
-hasnt "DEFERRED" "$LOG" "(BLKASSIGN) …and nothing is armed for a named agent"
+hasnt "GCTK" "$LOG" "(BLKASSIGN) …and nothing is armed for a named agent"
 has "PROACTIVE assignable gc-toolkit.mechanik tk-sub" "$LOG" "(BLKASSIGN) the exit asks whether the agent's hook would offer the bead"
 has "gc-toolkit.mechanik tk-sub --no-formula --no-convoy" "$(grep '^SLING ' "$FAKE_LOG")" \
     "(BLKHANDOFF) gc sling hands the waiting bead to the agent's own name"
@@ -1089,7 +1089,7 @@ hasnt "gc.proactive_reaction" "$LOG" "(CLOSE) …no legacy landed proof on the r
 hasnt "held on" "$LOG" "(CLOSEBRIEF) …and a close that waits on nothing names no hold"
 has "UPDATE bd update $R" "$LOG" "(CLOSE) …and closes the reaction bead"
 hasnt "CLOSE bd close" "$LOG" "(CLOSE) …and never closes the subject itself"
-hasnt "DEFERRED" "$LOG" "(CLOSE) …with no deferred arm: nothing on the subject has to close first"
+hasnt "GCTK" "$LOG" "(CLOSE) …with no deferred arm: nothing on the subject has to close first"
 
 # With no GC_RIG, an explicit --route still slings — and pins nothing.
 : > "$FAKE_LOG"; RC=0
@@ -1159,12 +1159,12 @@ eq "$LOG" "" "(CLOSE) …and nothing is written"
 GC_RIG=gc-toolkit run tk-sub --disposition close --reason "already fixed" --takeaway "close: fixed in #123" --after-workflow tk-root
 eq "$RC" "0" "(CLOSEDEFER) the deferred close exit succeeds"
 has "DEP bd dep add tk-sub tk-root -t blocks" "$LOG" "(CLOSEDEFER) it holds the bead on the reaction root so the order waits for it to close"
-before 'Close brief' '^DEFERRED arm' "(CLOSEDEFER) …with the close brief on the subject before the closer is armed"
-has "DEFERRED arm tk-sub --target gc-toolkit/gc-toolkit.polecat --sling-arg --on --sling-arg mol-validate-close" "$LOG" \
+before 'Close brief' '^GCTK bead arm' "(CLOSEDEFER) …with the close brief on the subject before the closer is armed"
+has "GCTK bead arm tk-sub --target gc-toolkit/gc-toolkit.polecat --on mol-validate-close" "$LOG" \
    "(CLOSEDEFER) …and arms a deferred dispatch carrying the --on mol-validate-close the order pours"
 hasnt "SLING" "$LOG" "(CLOSEDEFER) …and slings nothing now — the deferred-dispatch order does it once the reaction closes"
 has "gc.proactive_reaction=1" "$LOG" "(CLOSEDEFER) …and stamps the legacy landed proof so a re-offer does not queue a second closer"
-before '^DEFERRED arm' 'gc.proactive_reaction=1' "(CLOSEDEFER) …after the arm"
+before '^GCTK bead arm' 'gc.proactive_reaction=1' "(CLOSEDEFER) …after the arm"
 hasnt "gc.reacted_by" "$LOG" "(CLOSEDEFER) …with no reaction-bead marker on the frozen path"
 hasnt "CLOSE bd close" "$LOG" "(CLOSEDEFER) …and never closes the bead itself"
 
@@ -1175,16 +1175,16 @@ hasnt "CLOSE bd close" "$LOG" "(CLOSEDEFER) …and never closes the bead itself"
 # landed proof is left unstamped so the documented re-run resumes.
 FAKE_DEP_FAILS=1 GC_RIG=gc-toolkit run tk-sub --disposition close --reason "r" --takeaway "t" --after-workflow tk-root
 eq "$RC" "4" "(CLOSEDEFER) a hold that did not land fails the exit closed"
-hasnt "DEFERRED arm" "$LOG" "(CLOSEDEFER) …and the ungated dispatch is NOT armed"
+hasnt "GCTK bead arm" "$LOG" "(CLOSEDEFER) …and the ungated dispatch is NOT armed"
 hasnt "gc.proactive_reaction=1" "$LOG" "(CLOSEDEFER) …and the landed proof is not stamped"
 unset FAKE_DEP_FAILS
 
 # An arm that fails to record IS a runtime failure: no closer would be
 # dispatched, so the documented re-run resumes (the landed proof is unstamped).
-FAKE_DEFERRED_FAILS=1 GC_RIG=gc-toolkit run tk-sub --disposition close --reason "r" --takeaway "t" --after-workflow tk-root
+FAKE_ARM_FAILS=1 GC_RIG=gc-toolkit run tk-sub --disposition close --reason "r" --takeaway "t" --after-workflow tk-root
 eq "$RC" "4" "(CLOSEDEFER) a failed arm is a runtime failure"
 hasnt "gc.proactive_reaction=1" "$LOG" "(CLOSEDEFER) …and the landed proof is not stamped"
-unset FAKE_DEFERRED_FAILS
+unset FAKE_ARM_FAILS
 
 # --after-workflow belongs to close only, and must be same-store as the subject.
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --after-workflow tk-root
@@ -1204,12 +1204,12 @@ eq "$RC" "0" "(CLOSEWAIT) a close that waits on the bead retiring its code succe
 has "DEP bd dep add tk-sub tk-retire -t blocks" "$LOG" "(CLOSEWAIT) it holds the subject on that bead"
 before 'Close brief' '^DEP bd dep add' "(CLOSEWAIT) …with the close brief on the subject first"
 has "--append-notes ## Close brief (first reaction, held on tk-retire, " "$LOG" "(CLOSEWAIT) …naming the bead it is held on"
-has "DEFERRED arm tk-sub --target gc-toolkit/gc-toolkit.polecat --sling-arg --on --sling-arg mol-validate-close" "$LOG" \
+has "GCTK bead arm tk-sub --target gc-toolkit/gc-toolkit.polecat --on mol-validate-close" "$LOG" \
    "(CLOSEWAIT) …and arms the validating closer for when it closes"
-before '^DEP bd dep add' '^DEFERRED arm' "(CLOSEWAIT) …after the hold, so the arm never fires ungated"
+before '^DEP bd dep add' '^GCTK bead arm' "(CLOSEWAIT) …after the hold, so the arm never fires ungated"
 hasnt "SLING" "$LOG" "(CLOSEWAIT) …and slings nothing now"
 has "gc.reacted_by=$R" "$LOG" "(CLOSEWAIT) …stamps the landed proof"
-before '^DEFERRED arm' 'gc.reacted_by' "(CLOSEWAIT) …after the arm"
+before '^GCTK bead arm' 'gc.reacted_by' "(CLOSEWAIT) …after the arm"
 has "UPDATE bd update $R" "$LOG" "(CLOSEWAIT) …and closes the reaction bead"
 hasnt "CLOSE bd close" "$LOG" "(CLOSEWAIT) …and never closes the subject itself"
 has "disposed as close (gc-toolkit/gc-toolkit.polecat once tk-retire closes)" "$OUT" "(CLOSEWAIT) …and the run reports what it waits for"
@@ -1218,27 +1218,27 @@ GC_RIG=gc-toolkit run tk-sub --disposition close --reason "r" --takeaway "t" --w
 eq "$RC" "0" "(CLOSEWAIT) a close that waits on two beads succeeds"
 has "DEP bd dep add tk-sub tk-a -t blocks" "$LOG" "(CLOSEWAIT) …holding the subject on the first"
 has "DEP bd dep add tk-sub tk-b -t blocks" "$LOG" "(CLOSEWAIT) …and on the second"
-eq "$(grep -c '^DEFERRED arm' "$FAKE_LOG")" "1" "(CLOSEWAIT) …and arming the closer once"
+eq "$(grep -c '^GCTK bead arm' "$FAKE_LOG")" "1" "(CLOSEWAIT) …and arming the closer once"
 has "--append-notes ## Close brief (first reaction, held on tk-a,tk-b, " "$LOG" "(CLOSEWAIT) …with a brief that names both"
 
 FAKE_DEP_FAILS=1 GC_RIG=gc-toolkit run tk-sub --disposition close --reason "r" --takeaway "t" --waiting-on tk-retire --reaction-bead "$R"
 eq "$RC" "4" "(CLOSEWAIT) a hold that did not land fails the exit closed"
 has "gc bd dep remove tk-sub tk-retire" "$ERR" "(CLOSEWAIT) …naming the edge of another type that would refuse it"
-hasnt "DEFERRED arm" "$LOG" "(CLOSEWAIT) …and the ungated closer is NOT armed"
+hasnt "GCTK bead arm" "$LOG" "(CLOSEWAIT) …and the ungated closer is NOT armed"
 hasnt "gc.reacted_by" "$LOG" "(CLOSEWAIT) …and the landed proof is not stamped"
 unset FAKE_DEP_FAILS
 
-FAKE_DEFERRED_FAILS=1 GC_RIG=gc-toolkit run tk-sub --disposition close --reason "r" --takeaway "t" --waiting-on tk-retire --reaction-bead "$R"
+FAKE_ARM_FAILS=1 GC_RIG=gc-toolkit run tk-sub --disposition close --reason "r" --takeaway "t" --waiting-on tk-retire --reaction-bead "$R"
 eq "$RC" "4" "(CLOSEWAIT) a failed arm is a runtime failure"
 hasnt "gc.reacted_by" "$LOG" "(CLOSEWAIT) …and the landed proof is not stamped"
-unset FAKE_DEFERRED_FAILS
+unset FAKE_ARM_FAILS
 
 GC_RIG=gc-toolkit run tk-sub --disposition close --reason "r" --takeaway "t" --waiting-on tk-retire --dry-run
 eq "$RC" "0" "(CLOSEWAIT) a dry run of a close that waits succeeds"
 has "would wait tk-sub on: tk-retire, then arm a deferred dispatch to validating closer gc-toolkit/gc-toolkit.polecat (mol-validate-close)" "$OUT" \
    "(CLOSEWAIT) …and names the wait and the closer"
 hasnt "DEP" "$LOG" "(CLOSEWAIT) …writing no edge"
-hasnt "DEFERRED" "$LOG" "(CLOSEWAIT) …and arming nothing"
+hasnt "GCTK" "$LOG" "(CLOSEWAIT) …and arming nothing"
 
 GC_RIG=gc-toolkit run tk-sub --disposition close --reason "r" --takeaway "t" --waiting-on ra-foreign --reaction-bead "$R"
 eq "$RC" "2" "(CLOSEWAIT) a bead in another store is refused"
@@ -1249,8 +1249,8 @@ eq "$RC" "2" "(CLOSEWAIT) a bead cannot wait on itself"
 GC_RIG=gc-toolkit run tk-sub --disposition close --reason "r" --takeaway "t" --waiting-on tk-retire --after-workflow tk-root
 eq "$RC" "2" "(CLOSEWAIT) --waiting-on and --after-workflow together are refused"
 eq "$LOG" "" "(CLOSEWAIT) …and nothing was written"
-GC_DEFERRED_DISPATCH_TOOL="$TMP/no-such-deferred" GC_RIG=gc-toolkit run tk-sub --disposition close --reason "r" --takeaway "t" --waiting-on tk-retire --reaction-bead "$R"
-eq "$RC" "4" "(CLOSEWAIT) with no deferred-dispatch.sh, a close that waits is refused"
+GCTK_BIN="$TMP/no-such-gctk" GC_RIG=gc-toolkit run tk-sub --disposition close --reason "r" --takeaway "t" --waiting-on tk-retire --reaction-bead "$R"
+eq "$RC" "4" "(CLOSEWAIT) with no gctk binary, a close that waits is refused"
 eq "$LOG" "" "(CLOSEWAIT) …before anything is written"
 
 # Called by hand with no live workflow and no reaction bead, the closer is slung
@@ -1413,10 +1413,10 @@ unset FAKE_PROACTIVE_STAMP_FAILS
 # fails before gc.proactive_reaction=1, so a re-offered frozen step reads no
 # landed proof and runs the write-back again.
 export FAKE_DEPS_JSON='[{"id":"tk-blk1"}]'
-FAKE_DEFERRED_FAILS=1 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 \
+FAKE_ARM_FAILS=1 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 \
     --then-route gc-toolkit/gc-toolkit.polecat
 eq "$RC" "4" "(LEGACY) a --then-route arm that did not land fails the frozen exit"
-has "DEFERRED arm tk-sub" "$LOG" "(LEGACY) …after the arm was tried"
+has "GCTK bead arm tk-sub" "$LOG" "(LEGACY) …after the arm was tried"
 hasnt "gc.proactive_reaction=1" "$LOG" "(LEGACY) …before the legacy landed proof is stamped"
 export FAKE_DEPS_JSON='[{"id":"tk-gate1"}]'
 
@@ -1474,7 +1474,7 @@ export FAKE_RIG_PATH="$TMP/rig" FAKE_DEPS_JSON='[{"id":"tk-blk1"}]'
 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 \
     --then-route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
 has "--db $TMP/rig/.beads" "$LOG" "(PIN) the subject's own store is passed to every bead write"
-has "DEFERRED arm tk-sub --target gc-toolkit/gc-toolkit.polecat --reason first reaction: r --db $TMP/rig/.beads" \
+has "GCTK bead arm tk-sub --target gc-toolkit/gc-toolkit.polecat --reason first reaction: r --db $TMP/rig/.beads" \
     "$LOG" "(PIN) …and to the deferred dispatch it arms"
 has "UPDATE bd update $R --set-metadata gc.outcome=reacted --set-metadata gc.work_outcome=no-op --status=closed --db $TMP/rig/.beads" \
     "$LOG" "(PIN) …and to the close of the reaction bead"
@@ -1686,7 +1686,7 @@ run tk-sub --disposition blocked --reason "waits on the migration" --takeaway "h
 eq "$RC" "0" "(INTAKEBLK) an unplaced blocked subject's exit succeeds"
 has "hold=mayor" "$LOG" "(INTAKEBLK) …held for placement"
 has "--release --waiting-on tk-blk1" "$LOG" "(INTAKEBLK) …its wait still an edge"
-hasnt "DEFERRED arm" "$LOG" "(INTAKEBLK) …and no dispatch armed: placing it is the sitting's"
+hasnt "GCTK bead arm" "$LOG" "(INTAKEBLK) …and no dispatch armed: placing it is the sitting's"
 hasnt "PROACTIVE deliverable" "$LOG" "(INTAKEBLK) …so the then-route is not probed"
 has "disposed as blocked (tk-blk1; held for placement)" "$OUT" "(INTAKEBLK) …and the run names both waits"
 unset FAKE_DEPS_JSON
@@ -1714,14 +1714,14 @@ for who in gc-toolkit.po po gc-toolkit/gc-toolkit.po; do
     run tk-sub --disposition actionable --reason "r" --takeaway "t" --assign "$who" --reaction-bead "$R"
     eq "$RC" "2" "(PO) --assign $who is refused"
     has "--assign $who names the po, which takes no work by assignment" "$ERR" "(PO) …saying why"
-    eq "$(grep -c -E '^(UPDATE|SETSTATE|HELM|DEFERRED|CREATE) ' "$FAKE_LOG")" "0" "(PO) …and writing nothing"
+    eq "$(grep -c -E '^(UPDATE|SETSTATE|HELM|GCTK|CREATE) ' "$FAKE_LOG")" "0" "(PO) …and writing nothing"
 done
 export FAKE_DEPS_JSON='[{"id":"tk-blk1"}]'
 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 --then-assign gc-toolkit.po --reaction-bead "$R"
 eq "$RC" "2" "(PO) --then-assign naming the po is refused"
 has "--then-assign gc-toolkit.po names the po" "$ERR" "(PO) …naming the flag"
 has "Pass --then-route" "$ERR" "(PO) …and the pool flag that does the job"
-eq "$(grep -c -E '^(UPDATE|SETSTATE|HELM|DEFERRED|CREATE) ' "$FAKE_LOG")" "0" "(PO) …writing nothing"
+eq "$(grep -c -E '^(UPDATE|SETSTATE|HELM|GCTK|CREATE) ' "$FAKE_LOG")" "0" "(PO) …writing nothing"
 unset FAKE_DEPS_JSON
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --assign gc-toolkit.polecat-po --reaction-bead "$R"
 hasnt "names the po" "$ERR" "(PO) an agent whose name only ends in po is not the po"
@@ -1848,8 +1848,8 @@ export FAKE_DEPS_JSON='[{"id":"tk-blk1"}]'
 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 \
     --then-route gc-toolkit/gc-toolkit.polecat --emergency test-macos --reaction-bead "$R"
 eq "$RC" "0" "(EMERGBLK) a blocked emergency's exit succeeds"
-before '--priority 0' '^DEFERRED arm' "(EMERGBLK) …P0 written before the arm"
-has "DEFERRED arm tk-sub --target gc-toolkit/gc-toolkit.polecat" "$LOG" "(EMERGBLK) …and the dispatch armed"
+before '--priority 0' '^GCTK bead arm' "(EMERGBLK) …P0 written before the arm"
+has "GCTK bead arm tk-sub --target gc-toolkit/gc-toolkit.polecat" "$LOG" "(EMERGBLK) …and the dispatch armed"
 has "disposed as blocked (tk-blk1; armed at P0)" "$OUT" "(EMERGBLK) …and the run says the arm is at P0"
 unset FAKE_DEPS_JSON
 

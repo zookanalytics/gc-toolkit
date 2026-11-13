@@ -29,8 +29,8 @@
 #     blocks it, and that edge is the wait. A gate filed on another bead gets
 #     the work bead's own edge here, because a rework child's `related` edge to
 #     its anchor holds nothing, and the gate is then about both beads;
-#   * a deferred-dispatch arm that re-slings the work through <formula> once bd
-#     reports it ready. Clearing the gate is the "proceed" ruling: the edge
+#   * an arm, written by `gctk bead arm`, that re-slings the work through
+#     <formula> once bd reports it ready. Clearing the gate is the "proceed" ruling: the edge
 #     clears and the deferred-dispatch order's next pass pours a fresh molecule.
 #     A ruling not to proceed goes through stand-down.sh, which removes the arm
 #     before it answers the gate, because bd refuses to close a bead the open
@@ -180,7 +180,10 @@ esac
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$SCRIPT_DIR/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh beside this script" >&2; exit 1; }
-DEFERRED="${GC_DEFERRED_DISPATCH_TOOL:-$SCRIPT_DIR/deferred-dispatch.sh}"
+# The arm's verb is gctk's, from the binary the city builds.
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 
 bd_json_array() { # <bd args...> -> the array on stdout; non-zero on a failed read or a non-array payload
   local out
@@ -307,6 +310,13 @@ if [ "$DRY_RUN" = 1 ]; then
   exit 0
 fi
 
+# The arm is the last write, so the binary that makes it is found before the
+# first one.
+if [ ! -x "$GCTK" ]; then
+  echo "$PROG: no gctk binary at '$GCTK' to arm the re-sling with (GCTK_BIN names one, or GC_CITY_PATH the city whose build it is); no wait was recorded" >&2
+  exit 1
+fi
+
 # `dep add <bead> <blocker>` reads "<bead> is blocked by <blocker>". A gate filed
 # on the work bead already blocks it, and bd takes that edge again as a no-op.
 if [ -z "$HELD_BY" ] && ! gc bd dep add "$WORK" "$GATE" --type=blocks </dev/null >/dev/null 2>&1; then
@@ -354,7 +364,7 @@ if ! gc bd update "$WORK" --set-metadata gc.routed_to="" --set-metadata gc.execu
   echo "$PROG: could not clear the route keys on $WORK, so the re-sling cannot be armed; it waits on $WAIT_ON unarmed" >&2
   exit 1
 fi
-if ! ARM_OUT=$("$DEFERRED" arm "$WORK" --target "$TARGET" --sling-arg --on --sling-arg "$FORMULA" \
+if ! ARM_OUT=$("$GCTK" bead arm "$WORK" --target "$TARGET" --on "$FORMULA" \
     --reason "${KEY:+waits on the ruling asked by $WAIT_ON ($KEY)}${BLOCKER:+waits on $BLOCKER}${HELD_BY:+held by a wait on $HELD_BY}" 2>&1); then
   echo "$PROG: the re-sling was not armed on $WORK: $ARM_OUT; it waits on $WAIT_ON unarmed, and a re-run arms it to $TARGET, recorded as resling_target" >&2
   exit 1

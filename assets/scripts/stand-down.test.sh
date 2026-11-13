@@ -3,11 +3,11 @@
 # human gate holds will not go on.
 #
 # The constraint: bd refuses to close a bead an open gate blocks, and answering
-# the gate first makes the bead ready, which is what a deferred-dispatch arm waits
-# for. So the suite gives the fake store what makes those two true, a `blocks` edge
-# that holds a close and keeps a bead out of the ready listing, and runs the real
-# stand-down.sh, deferred-dispatch.sh, gc-helm.sh, bead-rehome.sh and
-# finalize-gate.sh over it.
+# the gate first makes the bead ready, which is what an arm waits for. So the
+# suite gives the fake store what makes those two true, a `blocks` edge that holds
+# a close and keeps a bead out of the ready listing, and runs the real
+# stand-down.sh, gc-helm.sh, bead-rehome.sh and finalize-gate.sh over it, with
+# the arm's verbs those scripts call run by gctk built from this checkout.
 #
 # What is exercised here:
 #   * the orders a person would try by hand, as controls: a close first is refused,

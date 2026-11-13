@@ -239,6 +239,11 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=bd-lib.sh
 . "$HERE/bd-lib.sh" || { echo "converse-signoff: cannot source bd-lib.sh from $HERE" >&2; exit 2; }
 DIE_STATUS=2
+# The arm of a subject's validating closer is gctk's, from the binary the city
+# builds.
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 # stopped <why> — refuse the sign-off (exit 1). Whatever ran before it is a write
 # a re-run repeats safely.
 stopped() {
@@ -879,9 +884,8 @@ for p in "${STANDS[@]+"${STANDS[@]}"}"; do echo "the ruling leaves the branch of
 # the arm an earlier attempt wrote, and writes neither again.
 # The closer checks the latest close brief in the subject's notes: the last
 # `## Close brief (` heading and the lines after it, up to the next heading.
-# The notes deferred-dispatch.sh appends end it too: the arm's own note
-# follows the brief, and the record's clearing follows that once the closer
-# is sent. So the brief counts as written only when that heading is held on
+# The notes the arm's verbs append end it too: the arm's own note follows the
+# brief, and the record's clearing follows that once the closer is sent. So the brief counts as written only when that heading is held on
 # these same waits and its lines are this brief. The same words anywhere
 # else, such as in an older brief or in a sitting's notes, do not count,
 # because the closer would then check the older claim.
@@ -906,12 +910,12 @@ $CLOSE_BRIEF" >/dev/null 2>&1 \
   if [ -n "$CLOSER_ARMED" ]; then
     echo "$SUBJECT's validating closer is already armed"
   else
-    DD=$(pack_script deferred-dispatch.sh) \
-      || stopped "no deferred-dispatch.sh beside $0, so $SUBJECT's validating closer was not armed; the headline and the close brief are written, no gate was resolved and the conversation is not closed"
-    ( cd "$CLOSER_PATH" && GC_RIG="$CLOSER_RIG" GC_RIG_ROOT="$CLOSER_PATH" "$DD" arm "$SUBJECT" --db "$CLOSER_PATH/.beads" \
-        --target "$CLOSER_RIG/gc-toolkit.polecat" --sling-arg --on --sling-arg mol-validate-close \
-        --reason "waits for $CLOSER_WAITS, the work conversation $CONVERSATION's ruling sent; the validating closer checks it once that lands" ) \
-      || stopped "$SUBJECT's validating closer was not armed, and deferred-dispatch.sh's message above says why; the headline and the close brief are written, no gate was resolved and the conversation is not closed"
+    [ -x "$GCTK" ] \
+      || stopped "no gctk binary at '$GCTK' (GCTK_BIN names one, or GC_CITY_PATH the city whose build it is), so $SUBJECT's validating closer was not armed; the headline and the close brief are written, no gate was resolved and the conversation is not closed"
+    "$GCTK" bead arm "$SUBJECT" --db "$CLOSER_PATH/.beads" \
+        --target "$CLOSER_RIG/gc-toolkit.polecat" --on mol-validate-close \
+        --reason "waits for $CLOSER_WAITS, the work conversation $CONVERSATION's ruling sent; the validating closer checks it once that lands" \
+      || stopped "$SUBJECT's validating closer was not armed, and gctk bead arm's message above says why; the headline and the close brief are written, no gate was resolved and the conversation is not closed"
   fi
   # A subject held for placement carries Gas City's hold:mayor, and the
   # deferred-dispatch pass sends no arm while a hold label holds its bead, so

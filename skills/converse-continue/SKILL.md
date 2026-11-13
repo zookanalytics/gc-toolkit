@@ -33,14 +33,18 @@ ROW=$(gc bd show "$SUBJECT" --json) \
 When the ruling leaves the subject to go where its arm or route already sends
 it, by the same method, keep them. Under any other ruling, one that sends it
 elsewhere or nowhere, withdraw them before the answer, with or without
-`--accept`. The block disarms an arm and clears a pool route. It prints its
-`carries no arm and no pool route` line only once each write has exited 0:
+`--accept`. The block disarms the subject and clears a pool route. The disarm
+reads no arm first: it exits 0 once no arm remains, an arm written since the
+read above included. The block prints its `carries no arm and no pool route`
+line only once each write has exited 0:
 ```bash
 WHY="<the ruling, one line>"
-ROW=$(gc bd show "$SUBJECT" --json) \
-  && ARM=$(printf '%s\n' "$ROW" | jq -er --arg s "$SUBJECT" 'if type == "array" and length == 1 and .[0].id == $s then (.[0].metadata["gc.dispatch_when_ready"] // "") | tostring else error("unread") end') \
-  && ROUTE=$(printf '%s\n' "$ROW" | jq -er '(.[0].metadata["gc.routed_to"] // "") | tostring') \
-  && { [ -z "$ARM" ] || "$CONV/deferred-dispatch.sh" disarm "$SUBJECT" --reason "$WHY"; } \
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" bead disarm "$SUBJECT" --reason "$WHY" \
+  && ROW=$(gc bd show "$SUBJECT" --json) \
+  && ROUTE=$(printf '%s\n' "$ROW" | jq -er --arg s "$SUBJECT" 'if type == "array" and length == 1 and .[0].id == $s then (.[0].metadata["gc.routed_to"] // "") | tostring else error("unread") end') \
   && { [ -z "$ROUTE" ] || gc bd update "$SUBJECT" --unset-metadata gc.routed_to; } \
   && echo "$SUBJECT carries no arm and no pool route"
 ```
