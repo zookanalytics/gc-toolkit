@@ -172,8 +172,7 @@ alone. When the blocker closes, core's `cascade-nudge-on-blocker-close` nudges
 each dependent that no other blocker holds, naming it: the assignee with a
 queued nudge, which reaches a running session at its next idle boundary, or
 else the route with the default delivery. The controller also wakes a stopped
-session once ready work is assigned to it, and an on-demand named session
-once ready work is routed to it.
+session once ready work is assigned to it.
 
 What no path covers: a running, idle agent is not told about work that becomes
 ready another way, such as a lifted park, a removed hold label or a wait that
@@ -182,9 +181,9 @@ is not a `blocks` edge, and hears at its next turn. Nothing nudges on a raw
 the work skill's send.
 
 `first-reaction-dispose.sh` addresses only an agent whose hook offers the bead,
-so both of its named-agent exits route it: `--assign`, whose bead is ready, and
-nudges the agent, and `--then-assign`, whose bead waits on its blocker, with
-the route alone.
+so both of its named-agent exits route it. The bead `--assign` hands over is
+ready, so that exit nudges the agent too. The bead `--then-assign` hands over
+waits on its blocker, so that exit writes the route alone.
 
 ## What performs it
 
