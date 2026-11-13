@@ -669,14 +669,13 @@ have "…and the withdrawal of its own gate" '"$(gc gc-toolkit scripts-dir)/huma
 for script in gc-bd-watch.sh human-gate.sh; do
     named_only_via "$MECHANIK_RENDER" "$script" gc-toolkit
 done
-for script in gc-bd-watch.sh; do
-    call="\"\$(gc <binding> scripts-dir)/$script\""
-    printf 'printf "%%s" %s\n' "${call/<binding>/kit}" >"$TMP/fragment-call-$script"
-    got=$(cd "$TMP/away" && env -u GC_PACK_DIR -u BASH_ENV -u ENV PATH="$TMP/stub:$PATH" bash "$TMP/fragment-call-$script" 2>/dev/null)
-    [ "$got" = "$ROOT/assets/scripts/$script" ] && [ -x "$got" ] \
-        && ok "with the city's binding filled in, the fragment's call resolves to the pack's own $script" \
-        || bad "with the city's binding filled in, the fragment's call resolves to the pack's own $script" "resolved '$got'"
-done
+script=gc-bd-watch.sh
+call="\"\$(gc <binding> scripts-dir)/$script\""
+printf 'printf "%%s" %s\n' "${call/<binding>/kit}" >"$TMP/fragment-call-$script"
+got=$(cd "$TMP/away" && env -u GC_PACK_DIR -u BASH_ENV -u ENV PATH="$TMP/stub:$PATH" bash "$TMP/fragment-call-$script" 2>/dev/null)
+[ "$got" = "$ROOT/assets/scripts/$script" ] && [ -x "$got" ] \
+    && ok "with the city's binding filled in, the fragment's call resolves to the pack's own $script" \
+    || bad "with the city's binding filled in, the fragment's call resolves to the pack's own $script" "resolved '$got'"
 
 echo "── a problem in software the rig does not own goes through one skill ──"
 # It arises rarely, so its procedure is a skill the situation loads rather than
