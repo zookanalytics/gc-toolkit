@@ -4,9 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
+	"time"
 
+	"charm.land/bubbles/v2/cursor"
 	tea "charm.land/bubbletea/v2"
 )
 
@@ -47,21 +50,16 @@ func toPage(t *testing.T, m *Model, p screen) {
 // The form's pages are tabs. The form opens on starting a conversation with the
 // cursor in the subject, ↑ from the subject reaches the tabs, ←/→ move along
 // them and wrap around, and ↓, Enter or Tab go back down to the subject. On a
-// list page ←/→ move along the tabs at once. No key of its own reaches a page.
-func TestTheTabsAreHowThePagesAreReached(t *testing.T) {
+// list page ←/→ move along the tabs at once.
+func TestTheArrowsMoveAlongTheTabs(t *testing.T) {
 	f := &fakeHelm{city: peopleCity()}
 	m := newForm(t, f, Options{})
 	loadCity(m)
 	if m.scr != composeScreen || m.focus != subjectField {
 		t.Fatalf("the form opened on page %d with the focus on %d", m.scr, m.focus)
 	}
-	for _, k := range []tea.KeyPressMsg{ctrl('r'), ctrl('p'), ctrl('n')} {
-		if m.Update(k); m.scr != composeScreen {
-			t.Fatalf("%s moved to page %d", k, m.scr)
-		}
-	}
 	v := sgr.ReplaceAllString(m.composeView(), "")
-	if !strings.Contains(v, " Start a conversation │ Return to a conversation │ People ") || !strings.Contains(v, "↑ to the tabs") || strings.Contains(v, "Ctrl+R") {
+	if !strings.Contains(v, tabRow) || !strings.Contains(v, "↑ to the tabs") {
 		t.Fatalf("the start page's head:\n%s", v)
 	}
 	m.Update(key(tea.KeyUp))
@@ -109,9 +107,194 @@ func TestTheTabsAreHowThePagesAreReached(t *testing.T) {
 	if m.scr != returnScreen {
 		t.Fatalf("--return opened on page %d", m.scr)
 	}
-	if v := sgr.ReplaceAllString(m.returnView(), ""); !strings.Contains(v, "←/→ another page") || strings.Contains(v, "Ctrl+R") {
+	if v := sgr.ReplaceAllString(m.returnView(), ""); !strings.Contains(v, tabRow) || !strings.Contains(v, "←/→ another page") {
 		t.Fatalf("the return list's head:\n%s", v)
 	}
+}
+
+// tabRow is the row of tabs as each page shows it, each tab with its key.
+const tabRow = " Ctrl+N Start a conversation │ Ctrl+R Return to a conversation │ Ctrl+P People "
+
+// Each page's key goes straight to its page, from each page and from each field
+// of the start page, and the key of the page on screen does nothing. The start
+// page comes back as it was left: the subject and the question as typed, and
+// the focus in the field it was in.
+func TestEachPagesKeyGoesStraightToIt(t *testing.T) {
+	a := subjectAbout("tk-a", "gc-toolkit")
+	a.Conversations = []Conversation{{ID: "tk-c1", Readiness: Queued, Title: "an open question"}}
+	f := &fakeHelm{about: map[string]About{"tk-a": a}, city: peopleCity()}
+	for _, from := range []field{subjectField, questionField, modelField, attachField, contextField, tabsField} {
+		m := newForm(t, f, Options{Subject: "tk-a"})
+		loadCity(m)
+		settle(m)
+		typeText(m, "one\ntwo")
+		if from == tabsField {
+			focusOn(t, m, subjectField)
+			m.Update(key(tea.KeyUp))
+		} else {
+			focusOn(t, m, from)
+		}
+		if m.focus != from {
+			t.Fatalf("could not reach field %d", from)
+		}
+		for i, st := range []struct {
+			k    tea.KeyPressMsg
+			want screen
+		}{
+			{ctrl('n'), composeScreen},
+			{ctrl('r'), returnScreen},
+			{ctrl('r'), returnScreen},
+			{ctrl('p'), peopleScreen},
+			{ctrl('p'), peopleScreen},
+			{ctrl('n'), composeScreen},
+			{ctrl('p'), peopleScreen},
+			{ctrl('r'), returnScreen},
+			{ctrl('n'), composeScreen},
+		} {
+			was := m.scr
+			_, cmd := m.Update(st.k)
+			if was == st.want && cmd != nil {
+				t.Fatalf("from field %d, step %d: %s on its own page asked for a command", from, i, st.k)
+			}
+			deliver(m, cmd)
+			if m.scr != st.want || m.focus != from {
+				t.Fatalf("from field %d, step %d: %s reached page %d with the focus on %d, want page %d", from, i, st.k, m.scr, m.focus, st.want)
+			}
+			if v := sgr.ReplaceAllString(m.View().Content, ""); !strings.Contains(v, tabRow) {
+				t.Fatalf("from field %d, step %d: page %d does not show each tab's key:\n%s", from, i, m.scr, v)
+			}
+		}
+		if m.ref() != "tk-a" || m.question.Value() != "one\ntwo" || m.modelName() != "claude-opus" || !m.attach {
+			t.Fatalf("from field %d: the start page came back with subject %q, question %q, model %q, attach %v", from, m.ref(), m.question.Value(), m.modelName(), m.attach)
+		}
+	}
+}
+
+// In the question Ctrl+N and Ctrl+P go to their pages, ahead of the text box,
+// which binds them to the line below and above, and ↓ and ↑ still move between
+// its lines. Back on the start page the cursor is where it was in the question.
+func TestTheQuestionsArrowsStillMoveItsCursor(t *testing.T) {
+	f := &fakeHelm{about: map[string]About{"tk-a": subjectAbout("tk-a", "gc-toolkit")}, city: peopleCity()}
+	m := newForm(t, f, Options{Subject: "tk-a"})
+	loadCity(m)
+	settle(m)
+	typeText(m, "one\ntwo")
+	line := func(want int, after string) {
+		t.Helper()
+		if m.scr != composeScreen || m.focus != questionField || m.question.ta.Line() != want {
+			t.Fatalf("after %s: page %d, focus %d, the cursor on line %d, want line %d of the question", after, m.scr, m.focus, m.question.ta.Line(), want)
+		}
+	}
+	m.Update(key(tea.KeyUp))
+	line(0, "↑")
+	m.Update(ctrl('n'))
+	line(0, "Ctrl+N")
+	m.Update(key(tea.KeyDown))
+	line(1, "↓")
+	if m.Update(ctrl('p')); m.scr != peopleScreen {
+		t.Fatalf("Ctrl+P in the question reached page %d", m.scr)
+	}
+	m.Update(ctrl('n'))
+	line(1, "Ctrl+P and Ctrl+N")
+	m.Update(key(tea.KeyUp))
+	line(0, "↑ back on the start page")
+}
+
+// A submit's progress is no page, so while a save runs the pages' keys do
+// nothing.
+func TestThePagesKeysDoNothingWhileASaveRuns(t *testing.T) {
+	f := &fakeHelm{about: map[string]About{"tk-a": subjectAbout("tk-a", "gc-toolkit")}, city: peopleCity(),
+		saveResp: Saved{Subject: "tk-a", Conversation: "tk-c1", Filed: true}}
+	m := newForm(t, f, Options{Subject: "tk-a"})
+	loadCity(m)
+	settle(m)
+	typeText(m, "q")
+	if m.Update(ctrl('s')); m.scr != progressScreen || !m.saving {
+		t.Fatalf("Ctrl+S: page %d, saving %v", m.scr, m.saving)
+	}
+	for _, k := range []tea.KeyPressMsg{ctrl('n'), ctrl('r'), ctrl('p')} {
+		if _, cmd := m.Update(k); cmd != nil || m.scr != progressScreen {
+			t.Fatalf("%s while the save runs: page %d", k, m.scr)
+		}
+	}
+}
+
+// A text field's cursor blinks on messages the form hands the field only while
+// the start page is on screen, so while another screen is up the blink stops
+// where it was. The start page comes back with the cursor showing in the field
+// it was left in, whether a page's key brings it back or a save that did not
+// file does.
+func TestTheStartPageComesBackWithItsCursorShowing(t *testing.T) {
+	for _, from := range []field{subjectField, questionField} {
+		f := &fakeHelm{about: map[string]About{"tk-a": subjectAbout("tk-a", "gc-toolkit")}, city: peopleCity(),
+			saveErr: &Refusal{Code: 4, Why: "gc-helm: open: could not create a conversation for 'tk-a'"}}
+		m := newForm(t, f, Options{Subject: "tk-a"})
+		loadCity(m)
+		settle(m)
+		blinkFast(m)
+		typeText(m, "one")
+		focusOn(t, m, from)
+		// ← moves the cursor, which starts its blink, and one blink turns it dark.
+		goDark := func(before string) {
+			t.Helper()
+			_, cmd := m.Update(key(tea.KeyLeft))
+			blink(m, cmd)
+			if cursorShows(m, from) {
+				t.Fatalf("field %d, before %s: the cursor still shows after its blink", from, before)
+			}
+		}
+		goDark("Ctrl+R")
+		m.Update(ctrl('r'))
+		m.Update(ctrl('n'))
+		if m.scr != composeScreen || m.focus != from || !cursorShows(m, from) {
+			t.Fatalf("field %d: Ctrl+R and Ctrl+N came back to page %d with the focus on %d, the cursor showing %v", from, m.scr, m.focus, cursorShows(m, from))
+		}
+		goDark("Ctrl+S")
+		_, cmd := m.Update(ctrl('s'))
+		deliver(m, cmd)
+		if m.scr != composeScreen || !strings.HasPrefix(m.status, "Not saved:") || m.focus != from || !cursorShows(m, from) {
+			t.Fatalf("field %d: the save that did not file came back to page %d with status %q, the focus on %d, the cursor showing %v", from, m.scr, m.status, m.focus, cursorShows(m, from))
+		}
+	}
+}
+
+// blinkFast makes the cursors of the start page's text fields blink every
+// millisecond, so a test can wait for a blink.
+func blinkFast(m *Model) {
+	s := m.subject.Styles()
+	s.Cursor.BlinkSpeed = time.Millisecond
+	m.subject.SetStyles(s)
+	q := m.question.ta.Styles()
+	q.Cursor.BlinkSpeed = time.Millisecond
+	m.question.ta.SetStyles(q)
+}
+
+// blink delivers the cursor's blink that cmd waits for, once, and nothing else
+// cmd asks for.
+func blink(m *Model, cmd tea.Cmd) {
+	if cmd == nil {
+		return
+	}
+	switch msg := cmd().(type) {
+	case tea.BatchMsg:
+		for _, c := range msg {
+			blink(m, c)
+		}
+	case cursor.BlinkMsg:
+		m.Update(msg)
+	}
+}
+
+// reverseVideo is an SGR sequence that turns reverse video on, which is how a
+// text field draws its cursor while the cursor shows.
+var reverseVideo = regexp.MustCompile("\x1b\\[(?:[0-9]+;)*7(?:;[0-9]+)*m")
+
+// cursorShows says whether f, the subject or the question, draws its cursor.
+func cursorShows(m *Model, f field) bool {
+	if f == subjectField {
+		return reverseVideo.MatchString(m.subject.View())
+	}
+	return reverseVideo.MatchString(m.question.View())
 }
 
 // The People page lists mechanik and each rig's Product Owner by its rig's

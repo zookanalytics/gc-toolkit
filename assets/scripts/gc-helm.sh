@@ -200,9 +200,10 @@ rather than file a second conversation; engage files the one conversation
 itself.
 
 A bare gc-helm on a terminal opens engage's form on starting a conversation.
-The form's pages are tabs at its top: starting a conversation, returning to
-one, and People, which lists mechanik and each rig's Product Owner with the
-state of its session. ↑ from the subject reaches the tabs, and ←/→ move along
+The form's pages are tabs at its top: starting a conversation (Ctrl+N),
+returning to one (Ctrl+R), and People (Ctrl+P), which lists mechanik and each
+rig's Product Owner with the state of its session. A page's key goes to it
+from any page and field. ↑ from the subject reaches the tabs, and ←/→ move along
 them. Enter on a person leaves the form and then runs `gc-helm po --rig <name>`
 or `gc-helm mechanik`, so what the verb prints stays on the terminal and its
 exit status is the form's. A seat takes no question, because Gas City's attach
