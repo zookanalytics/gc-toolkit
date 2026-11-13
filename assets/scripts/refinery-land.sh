@@ -33,7 +33,10 @@
 # pre_open_gate, with merged_target and check_set, through lifecycle.sh. On
 # either path a rework child handed back lands on its anchor's branch: the
 # anchor's PR has its title and body brought current before the push, and the
-# child closes with its work record.
+# child closes with its work record. A convoy's rebuild child whose convoy is
+# not open on its branch, or is no bead in the store, lands on neither path: it
+# is parked behind the gate refinery-rebuild-convoy-not-open before anything is
+# pushed (refinery-lib.sh's refinery_owner).
 #
 # Every park files its human gate first, sets the merge_result, and keeps the
 # bead with the refinery, so clearing the gate hands it back. The tree is
@@ -157,7 +160,12 @@ if [ "$(refinery_formula_var pending_through_merge)" = true ]; then
 fi
 
 # The old path, while pending_through_merge is unset.
-refinery_owner "$BEAD" "$BRANCH" || stop "the bead whose PR $BRANCH lands on cannot be told"
+refinery_owner "$BEAD" "$BRANCH"
+case "$?" in
+  0) ;;
+  3) park refinery-rebuild-convoy-not-open blocked "the rebuild of $(bead_meta anchor_bead) has no bead on $BRANCH to carry its PR" "$OWNER_REFUSED" ;;
+  *) stop "the bead whose PR $BRANCH lands on cannot be told" ;;
+esac
 REPO=$(origin_repo "$HOME_DIR") || REPO=""
 # owner_pr: the PR the owner records, read from GitHub into PR_URL and
 # PR_NUMBER and held in PR_ROW, when it is open from the branch into the target.

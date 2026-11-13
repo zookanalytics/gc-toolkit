@@ -8,7 +8,11 @@
 # The bead is the one this iteration prepared, assigned to this refinery
 # ($GC_AGENT), and the refinery's tree for it must hold its branch
 # (refinery-lib.sh). The PR is its owner's: the bead itself, or for a rework
-# child handed back, the bead whose PR its work lands on (refinery_owner).
+# child handed back, the bead whose PR its work lands on (refinery_owner). A
+# convoy's rebuild child whose convoy is not open on its branch, or is no bead
+# in the store, has no owner: it is parked behind the gate
+# refinery-rebuild-convoy-not-open, with merge_result=blocked, before any PR is
+# read, pushed onto, opened or recorded.
 #
 # The PR the step takes is one the owner records (existing_pr, else pr_url,
 # else pr_number), or, when it records none, the PR open on GitHub from the
@@ -93,10 +97,6 @@ refinery_gate_verdict "$HOME_DIR" "$HEAD_OID" \
   || stop "no gate cleared $HEAD_OID, the prepared head: $GATE_VERDICT. Nothing was pushed or recorded; the next patrol prepares and gates it again"
 TARGET=$(bead_meta target)
 [ -n "$TARGET" ] || TARGET=$(refinery_default_branch "$HOME_DIR") || stop "$BEAD carries no target, and origin/HEAD names no default branch"
-refinery_owner "$BEAD" "$BRANCH" || stop "the bead whose PR $BRANCH lands on cannot be told"
-REPO=$(origin_repo "$HOME_DIR") || stop "the rig's origin is not a github.com repository"
-gctk=$(gctk_path) || stop "no gctk binary to compose and record the PR with"
-PR_POST="$HERE/pr-post.sh"
 
 # park <key> <reason>: the bead waits behind a human gate whose message is the
 # reason, with merge_result=blocked, still assigned to the refinery
@@ -104,6 +104,15 @@ PR_POST="$HERE/pr-post.sh"
 park() {
   refinery_park "$BEAD" "$1" blocked "$2" "$2" || stop "the $1 gate on $BEAD did not land ($2)"
 }
+refinery_owner "$BEAD" "$BRANCH"
+case "$?" in
+  0) ;;
+  3) park refinery-rebuild-convoy-not-open "$OWNER_REFUSED" ;;
+  *) stop "the bead whose PR $BRANCH lands on cannot be told" ;;
+esac
+REPO=$(origin_repo "$HOME_DIR") || stop "the rig's origin is not a github.com repository"
+gctk=$(gctk_path) || stop "no gctk binary to compose and record the PR with"
+PR_POST="$HERE/pr-post.sh"
 owner_meta() { row_meta "$OWNER_ROW" "$1"; }
 # pr_repo <url>: the owner/repo a PR's URL names.
 pr_repo() { printf '%s' "$1" | sed -n 's#^https://github\.com/\([^/]*/[^/]*\)/pull/[0-9][0-9]*/*$#\1#p'; }

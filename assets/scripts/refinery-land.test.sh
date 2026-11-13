@@ -18,6 +18,13 @@
 #     and body current, pushes, notes the anchor and closes;
 #   - a bead that owns its PR lands as itself on the old path, though a parked
 #     rework child of it waits on its branch with a merge_result of its own;
+#   - a convoy's rebuild child lands on its convoy while the convoy is open on
+#     its branch; when the convoy is closed or open on another branch, or the
+#     store holds no bead by its id, the child is parked behind
+#     refinery-rebuild-convoy-not-open, with nothing pushed or transitioned, and
+#     a second pass over the parked child parks it again; a named bead that
+#     does not read, or a gate that does not file, writes nothing; and a rework
+#     naming a closed bead that is no convoy lands as itself;
 #   - a branch with no change parks the bead behind refinery-false-completion,
 #     unless the target carries the bead's stamped direct landing, which is
 #     recorded, and a gate that is not filed parks nothing;
@@ -142,6 +149,87 @@ eq "$RC" 0 "the landing exits 0"
 has "$(logged scripts)" "lifecycle transition bp --to pull_request --assignee  --route  --set pr_url=https://github.com/zook/rig/pull/63" "the bead waits at pull_request on its own PR"
 eq "$(bstatus bp)" "open" "it is not closed as a landed rework"
 eq "$(bstatus kid) $(meta kid merge_result)" "open blocked" "the parked rework child is left as it was"
+
+# rebuild <status> <branch> [<type>] [<child metadata>] — a convoy (or a bead of
+# <type>) with status <status> on <branch>, whose open PR #70 is from
+# integration/cv, and its rebuild child rb on integration/cv, handed back and
+# prepared over a main that moved, so its prepared head is new. An empty
+# <status> leaves the named bead out of the store. BEFORE is
+# the branch's tip before the landing.
+rebuild() {
+  fresh
+  branch_with integration/cv cv.txt >/dev/null
+  main_with later.txt >/dev/null
+  [ -z "$1" ] || put "$(jq -nc --arg s "$1" --arg b "$2" --arg t "${3:-convoy}" '{id: "cv", title: "Convoy", status: $s, assignee: "", issue_type: $t,
+    created_at: "2026-11-11T00:00:00Z", notes: "", metadata: {branch: $b, target: "main", pr_url: "https://github.com/zook/rig/pull/70", pr_number: "70"}}')"
+  work rb integration/cv "$(jq -nc --argjson m "${4:-{\}}" '{task_kind: "rework", anchor_bead: "cv", merge_strategy: "mr", existing_pr: "https://github.com/zook/rig/pull/70"} + $m')"
+  prepared rb integration/cv
+  pr 70 integration/cv gc-city-bot
+  BEFORE=$(tip integration/cv)
+}
+# parked_rebuild <case> — rb is parked behind refinery-rebuild-convoy-not-open,
+# with nothing pushed, transitioned or closed.
+parked_rebuild() {
+  eq "$RC" 4 "$1: the landing parks (exit 4)"
+  has "$(logged scripts)" "human-gate --subject rb --key refinery-rebuild-convoy-not-open" "$1: the gate is keyed refinery-rebuild-convoy-not-open"
+  eq "$(bstatus rb) $(meta rb merge_result) $(bassignee rb)" "open blocked $GC_AGENT" "$1: the child records blocked and stays with the refinery"
+  eq "$(tip integration/cv)" "$BEFORE" "$1: nothing is pushed"
+  hasnt "$(logged scripts)" "lifecycle" "$1: no transition is written"
+  hasnt "$(logged gh)" "pr edit" "$1: the PR is not edited"
+}
+
+echo "# a convoy's rebuild child lands on its convoy while the convoy is open on its branch"
+rebuild open integration/cv
+HEAD_RB=$(git -C "$HOME_DIR/worktrees/rb" rev-parse HEAD)
+run --bead rb
+eq "$RC" 0 "the hand-back exits 0"
+eq "$(tip integration/cv)" "$HEAD_RB" "the head is on the convoy's branch"
+has "$(bnotes cv)" "Rework rb landed on integration/cv at $HEAD_RB" "the convoy notes the landing"
+eq "$(bstatus rb)" "closed" "the child closes"
+hasnt "$(logged scripts)" "human-gate" "no gate is filed"
+
+echo "# a rebuild child whose convoy cannot carry its PR is parked, not landed as its own"
+rebuild closed integration/cv
+run --bead rb
+parked_rebuild "a closed convoy"
+has "$(logged scripts)" "but cv is closed, so no bead on integration/cv can carry that PR" "a closed convoy: the gate says the convoy is closed"
+has "$(logged scripts)" "make cv open with branch integration/cv, then clear this gate" "the gate asks for the convoy open on its branch to go on"
+has "$(logged scripts)" "stand-down.sh rb --key refinery-rebuild-convoy-not-open" "…and names the stand-down that abandons the graduation"
+rebuild open integration/other
+run --bead rb
+parked_rebuild "a convoy open on another branch"
+has "$(logged scripts)" "but cv is open on integration/other" "a convoy open on another branch: the gate names that branch"
+hasnt "$(bnotes cv)" "Rework rb landed" "…and the convoy is not noted as landed"
+rebuild ""
+run --bead rb
+parked_rebuild "a named bead the store does not hold"
+has "$(logged scripts)" "but the store holds no bead cv" "a named bead the store does not hold: the gate says so"
+rebuild closed integration/cv convoy '{"merge_result":"blocked","blocked_reason":"the rebuild of cv has no bead on integration/cv to carry its PR"}'
+run --bead rb
+parked_rebuild "a second pass over a parked child whose convoy is still closed"
+
+echo "# a rebuild child whose named bead does not read, or whose gate does not file, writes nothing"
+rebuild closed integration/cv
+STUB_GC_ID_FAIL=1 run --bead rb
+eq "$RC" 1 "an unreadable named bead stops (exit 1)"
+eq "$(logged scripts)" "" "…with no gate, transition or landing written"
+eq "$(meta rb merge_result)" "<absent>" "…and nothing recorded"
+eq "$(tip integration/cv)" "$BEFORE" "…or pushed"
+rebuild closed integration/cv
+STUB_HUMAN_GATE_RC=1 run --bead rb
+eq "$RC" 1 "a gate that does not file stops (exit 1)"
+eq "$(meta rb merge_result)" "<absent>" "…and parks nothing"
+eq "$(tip integration/cv)" "$BEFORE" "…and pushes nothing"
+hasnt "$(logged scripts)" "lifecycle" "…and transitions nothing"
+
+echo "# a rework naming a closed bead that is no convoy keeps today's path"
+rebuild closed integration/cv task
+HEAD_RB=$(git -C "$HOME_DIR/worktrees/rb" rev-parse HEAD)
+run --bead rb
+eq "$RC" 0 "the landing exits 0"
+eq "$(tip integration/cv)" "$HEAD_RB" "the head is pushed"
+has "$(logged scripts)" "lifecycle transition rb --to pull_request" "the child waits at pull_request on the PR it records"
+hasnt "$(logged scripts)" "human-gate" "no gate is filed"
 
 echo "# a branch with no change parks the bead, unless the target carries its stamped landing"
 fresh

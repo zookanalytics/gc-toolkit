@@ -194,6 +194,9 @@ case "$verb" in
     printf '%s\n' "$row" ;;
   list)
     [ -z "${STUB_GC_LIST_FAIL:-}" ] || { echo "store unreachable" >&2; exit 1; }
+    # A read by id (--id) answers in every status, as bd's --all does, and
+    # STUB_GC_ID_FAIL fails that read alone.
+    case " $* " in *" --id "*) [ -z "${STUB_GC_ID_FAIL:-}" ] || { echo "store unreachable" >&2; exit 1; } ;; esac
     f='.'
     for a in "$@"; do
       case "$a" in
@@ -210,6 +213,7 @@ case "$verb" in
         k="${a%%=*}"; v="${a#*=}"
         f="$f | map(select((.metadata[\"$k\"] // \"\") == \"$v\"))"
       fi
+      [ "$prev" != --id ] || f="$f | map(select(.id as \$i | \"$a\" | split(\",\") | index(\$i)))"
       prev="$a"
     done
     jq -c "$f" "$STORE" ;;

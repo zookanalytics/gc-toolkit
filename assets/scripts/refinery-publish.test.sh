@@ -23,6 +23,14 @@
 #   - a rework child handed back records the PR on its anchor and closes;
 #   - a bead that owns its PR records it on itself, though a parked rework
 #     child of it waits on its branch with a merge_result of its own;
+#   - a convoy's rebuild child records the PR on its convoy while the convoy is
+#     open on its branch; when the convoy is closed or open on another branch,
+#     or the store holds no bead by its id, the child is parked behind
+#     refinery-rebuild-convoy-not-open before any PR is read, pushed onto,
+#     opened or recorded, and a second pass over the parked child parks it
+#     again; a named bead that does not read, or a gate that does not file,
+#     writes nothing; and a rework naming a closed bead that is no convoy
+#     records the PR it carries on itself;
 #   - a head no gate cleared, by the gate's record, is neither pushed nor
 #     recorded: no gate finished, one ran at another head, one was cut short,
 #     or one failed a check with no failure tracked at the head; a failed check
@@ -195,6 +203,87 @@ hasnt "$(logged gctk)" "pr record kid" "…and never on the parked rework child"
 eq "$(bstatus bp) $(meta bp merge_result)" "blocked pull_request_pending" "the bead waits on its PR's merge"
 eq "$(bstatus kid) $(meta kid merge_result)" "open blocked" "the parked rework child is left as it was"
 hasnt "$(bnotes bp)" "Rework landed" "the bead that owns the PR is not closed as a landed rework"
+
+# rebuild <status> <branch> [<type>] [<child metadata>] — a convoy (or a bead of
+# <type>) with status <status> on <branch>, whose open PR #70 is from
+# integration/cv, and its rebuild child rb on integration/cv, handed back and
+# prepared over a main that moved, so its prepared head is new. An empty
+# <status> leaves the named bead out of the store. BEFORE is
+# the branch's tip before the publication.
+rebuild() {
+  fresh
+  branch_with integration/cv cv.txt >/dev/null
+  main_with later.txt >/dev/null
+  [ -z "$1" ] || put "$(jq -nc --arg s "$1" --arg b "$2" --arg t "${3:-convoy}" '{id: "cv", title: "Convoy", status: $s, assignee: "", issue_type: $t,
+    created_at: "2026-11-11T00:00:00Z", notes: "", metadata: {branch: $b, target: "main", pr_url: "https://github.com/zook/rig/pull/70", pr_number: "70"}}')"
+  work rb integration/cv "$(jq -nc --argjson m "${4:-{\}}" '{task_kind: "rework", anchor_bead: "cv", merge_strategy: "mr", existing_pr: "https://github.com/zook/rig/pull/70"} + $m')"
+  prepared rb integration/cv
+  pr 70 integration/cv gc-city-bot
+  BEFORE=$(tip integration/cv)
+}
+# parked_rebuild <case> — rb is parked behind refinery-rebuild-convoy-not-open,
+# with no PR read, edited or opened, nothing pushed and no record written.
+parked_rebuild() {
+  eq "$RC" 4 "$1: the publication parks (exit 4)"
+  has "$(logged scripts)" "human-gate --subject rb --key refinery-rebuild-convoy-not-open" "$1: the gate is keyed refinery-rebuild-convoy-not-open"
+  eq "$(bstatus rb) $(meta rb merge_result) $(bassignee rb)" "open blocked $GC_AGENT" "$1: the child records blocked and stays with the refinery"
+  eq "$(tip integration/cv)" "$BEFORE" "$1: nothing is pushed"
+  eq "$(logged gh)" "" "$1: no PR is read, edited or opened"
+  hasnt "$(logged gctk)" "pr record" "$1: no record is written"
+}
+
+echo "# a convoy's rebuild child records the PR on its convoy while the convoy is open on its branch"
+rebuild open integration/cv
+HEAD_RB=$(git -C "$HOME_DIR/worktrees/rb" rev-parse HEAD)
+run --bead rb
+eq "$RC" 0 "the hand-back exits 0"
+has "$(logged gctk)" "pr record cv --pr https://github.com/zook/rig/pull/70" "the convoy's record is written"
+eq "$(tip integration/cv)" "$HEAD_RB" "the head is on the convoy's branch"
+eq "$(bstatus rb)" "closed" "the child closes"
+hasnt "$(logged scripts)" "human-gate" "no gate is filed"
+
+echo "# a rebuild child whose convoy cannot carry its PR is parked, not published as its own"
+rebuild closed integration/cv
+run --bead rb
+parked_rebuild "a closed convoy"
+has "$(logged scripts)" "but cv is closed, so no bead on integration/cv can carry that PR" "a closed convoy: the gate says the convoy is closed"
+has "$(logged scripts)" "make cv open with branch integration/cv, then clear this gate" "the gate asks for the convoy open on its branch to go on"
+has "$(logged scripts)" "stand-down.sh rb --key refinery-rebuild-convoy-not-open" "…and names the stand-down that abandons the graduation"
+rebuild open integration/other
+run --bead rb
+parked_rebuild "a convoy open on another branch"
+has "$(logged scripts)" "but cv is open on integration/other" "a convoy open on another branch: the gate names that branch"
+eq "$(meta cv merge_result)" "<absent>" "…and the convoy records nothing"
+rebuild ""
+run --bead rb
+parked_rebuild "a named bead the store does not hold"
+has "$(logged scripts)" "but the store holds no bead cv" "a named bead the store does not hold: the gate says so"
+rebuild closed integration/cv convoy '{"merge_result":"blocked","blocked_reason":"parked behind a gate"}'
+run --bead rb
+parked_rebuild "a second pass over a parked child whose convoy is still closed"
+
+echo "# a rebuild child whose named bead does not read, or whose gate does not file, writes nothing"
+rebuild closed integration/cv
+STUB_GC_ID_FAIL=1 run --bead rb
+eq "$RC" 1 "an unreadable named bead stops (exit 1)"
+eq "$(logged scripts)" "" "…with no gate filed"
+eq "$(logged gh)" "" "…no PR read, edited or opened"
+eq "$(meta rb merge_result)" "<absent>" "…and nothing recorded"
+eq "$(tip integration/cv)" "$BEFORE" "…or pushed"
+rebuild closed integration/cv
+STUB_HUMAN_GATE_RC=1 run --bead rb
+eq "$RC" 1 "a gate that does not file stops (exit 1)"
+eq "$(meta rb merge_result)" "<absent>" "…and parks nothing"
+eq "$(tip integration/cv)" "$BEFORE" "…and pushes nothing"
+eq "$(logged gh)" "" "…and reads, edits or opens no PR"
+hasnt "$(logged gctk)" "pr record" "…and records nothing"
+
+echo "# a rework naming a closed bead that is no convoy keeps today's path"
+rebuild closed integration/cv task
+run --bead rb
+eq "$RC" 0 "the publication exits 0"
+has "$(logged gctk)" "pr record rb --pr https://github.com/zook/rig/pull/70" "the child records the PR it carries on itself"
+hasnt "$(logged scripts)" "human-gate" "no gate is filed"
 
 echo "# a head no gate cleared is neither pushed nor recorded"
 fresh
