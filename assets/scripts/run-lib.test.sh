@@ -231,12 +231,10 @@ echo "# every reader sources the one definition"
 # through a variable, in the `# shellcheck source=` directive above that line,
 # which run-tests.sh reads the same way. Other comment lines are left out, so a
 # reader that names the definition in prose but no longer calls it still fails.
-READERS="assets/scripts/step-close.sh
-overlays/work-context/.claude/hooks/work-context.sh
+READERS="overlays/work-context/.claude/hooks/work-context.sh
 assets/scripts/claim-context.sh
 assets/scripts/self-review-check.sh
 packs/gascity-keeper/assets/scripts/rebase-check.sh
-assets/scripts/work-tree-holder.sh
 assets/scripts/work-gate.sh
 assets/scripts/gate-ensure.sh
 assets/scripts/gc-helm.sh

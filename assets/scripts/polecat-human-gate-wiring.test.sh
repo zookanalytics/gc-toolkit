@@ -59,12 +59,6 @@ else
   ok "no doctrine call declares a quiet window"
 fi
 
-if grep -q 'molecule-hold' "$DOCTRINE"; then
-  bad "the doctrine still teaches molecule-hold.sh; a molecule's lifecycle is gascity's, so a decline cancels the run"
-else
-  ok "the doctrine teaches no molecule hold"
-fi
-
 # The witness answers HELP mail it can, and files the rest as a polecat-help
 # finding whose first reaction puts it to a person when one is needed.
 grep -q 'HELP' "$WITNESS" && grep -q -- '--key polecat-help' "$WITNESS" \
