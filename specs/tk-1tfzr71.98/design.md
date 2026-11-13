@@ -196,17 +196,20 @@ Both retire the arm whatever holds the bead. The start names each arm it
 retires, and a dry run names each retire it would make and writes nothing.
 
 `merge_result` is the anchor state (`lifecycle/lifecycle.toml`). The
-refinery's patrol writes it when it takes a bead's work: `pre_open_gate` or
-`pull_request` at merge-push, or `blocked` or `refused_false_completion` when
-one of its checks stops the work. `pr-open.sh`, `pr-facts.sh` and `merge.sh`
-move an anchor on from there. A polecat's hand-off writes none. Work sent back for rework
-carries none either. A sign-off's rework is a child bead of its own, and
-`rejection-repool.sh` moves a rejected bead to unanchored, which removes the
-key, before it pours the rework or arms its re-sling. So the retire leaves
-alone the arm that re-sends work in flight, the case section 7's exception
-covers. tk-iqpxk89 is one, read on 2026-11-13 at 03:32Z: a sign-off's rework
-armed for `mol-polecat-work` that carries its branch and rejection reason and
-no `merge_result`.
+refinery's patrol writes it when it takes a bead's work. At merge-push it
+writes `pre_open_gate` or `pull_request`, or `merged` in the write that closes
+the bead when the strategy is direct. It writes `blocked` or
+`refused_false_completion` when one of its checks stops the work. `pr-open.sh`,
+`pr-facts.sh` and `merge.sh` move an anchor on from there. A polecat's hand-off
+writes none. Work sent back for rework carries none either. A rework of a
+branch under review is a child bead of its own, whether a sign-off, a ruling or
+the merge cadence files it, and merge-push closes the child with none once its
+work lands on the branch. `rejection-repool.sh` moves a rejected bead to
+unanchored, which removes the key, before it pours the rework or arms its
+re-sling. So the retire leaves alone the arm that re-sends work in flight, the
+case section 7's exception covers. tk-iqpxk89 is one, read on 2026-11-13 at
+03:32Z: a sign-off's rework armed for `mol-polecat-work` that carries its
+branch and rejection reason and no `merge_result`.
 
 Each start of an armed bead runs these steps, holding the bead's dispatch lock
 from the first to the last. The lock is a `flock` file per store and bead under
