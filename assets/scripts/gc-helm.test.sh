@@ -361,7 +361,7 @@ unset GC_HELM_FIXTURE || true
 # GC_RIG and BEADS_DIR too: the current-sitting lookup resolves the session's
 # rig, and an ambient value from the runner's own agent env would pin a store
 # the fixtures never set up.
-unset GC_SESSION_NAME GC_SESSION_ID GC_ALIAS GC_AGENT GC_RIG BEADS_DIR || true
+unset GC_SESSION_NAME GC_SESSION_ID GC_ALIAS GC_RIG BEADS_DIR || true
 
 # --- Run: park A-PARKED with --release. ---------------------------------------
 : > "$TMP/run-lib.log"; : > "$FAKE_CANCELS"

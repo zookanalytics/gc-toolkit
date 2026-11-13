@@ -7,10 +7,8 @@
 # hook --claim`, and this script writes to no other. A close is the one write
 # that advances a workflow, so the bead must also show it is the step the caller
 # is finishing, the way upstream's mol-do-work and mol-polecat-commit check it:
-# its gc.step_ref is <ref>, and this session holds it. bd-lib.sh's claimed_step
-# makes that check, the same one run-cancel.sh makes before it ends a run. A
-# close re-run after the claim moved on therefore refuses, rather than closing
-# the next step unrun.
+# its gc.step_ref is <ref>, and this session holds it. A close re-run after the
+# claim moved on therefore refuses, rather than closing the next step unrun.
 #
 # <ref> is the step's gc.step_ref, such as mol-review.review. For a check loop's
 # step it is the loop's name, such as self-review, whose claims carry
@@ -81,23 +79,25 @@ _bd_lib_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh beside this script" >&2; exit 1; }
 
-claimed_step "$STEP"; HELD=$?
-case "$HELD" in
-  1)
-    if [ -z "$CLAIMED_ID" ]; then
-      echo "$PROG: $CLAIMED_WHY, so $STEP is not closed. When this session has not claimed it yet, claim it with gc hook --claim --json." >&2
-    else
-      echo "$PROG: $CLAIMED_WHY, so $STEP is not closed" >&2
-    fi
-    exit 1 ;;
-  2)
-    echo "$PROG: $CLAIMED_WHY, so nothing was closed. When you have not claimed $STEP yet, run gc hook --claim --json first." >&2
+if ! ID=$(gc hook current --id-only </dev/null) || [ -z "$ID" ]; then
+  echo "$PROG: gc hook current names no bead this session claimed, so $STEP is not closed. Claim it with gc hook --claim --json." >&2
+  exit 1
+fi
+ROW=$(bd_json show "$ID")
+if ! printf '%s' "$ROW" | jq -e --arg id "$ID" 'type == "array" and .[0].id == $id' >/dev/null 2>&1; then
+  echo "$PROG: could not read $ID, the bead this session claimed, so $STEP is not closed" >&2
+  exit 1
+fi
+
+REF=$(printf '%s' "$ROW" | jq -r '.[0].metadata["gc.step_ref"] // ""')
+case "$REF" in
+  "$STEP"|"$STEP".iteration.*) ;;
+  *)
+    echo "$PROG: this session's current claim is $ID (${REF:-not a formula step}), not $STEP, so nothing was closed. When you have not claimed $STEP yet, run gc hook --claim --json first." >&2
     exit 2 ;;
 esac
-ID="$CLAIMED_ID"; REF="$CLAIMED_REF"; STATUS="$CLAIMED_STATUS"
 
-# A closed step reads as done whoever holds it; the holder is judged only for a
-# close.
+STATUS=$(printf '%s' "$ROW" | jq -r '.[0].status // ""')
 if [ "$STATUS" = closed ]; then
   echo "$PROG: $ID ($REF) is already closed"
   exit 0
@@ -108,10 +108,17 @@ case "$STATUS" in
     echo "$PROG: $ID ($REF) is $STATUS, so nothing was closed" >&2
     exit 2 ;;
 esac
-if [ "$HELD" -ne 0 ]; then
-  echo "$PROG: $CLAIMED_WHY; nothing was closed" >&2
-  exit 2
-fi
+
+ASSIGNEE=$(printf '%s' "$ROW" | jq -r '.[0].assignee // ""')
+case "$ASSIGNEE" in
+  "")
+    echo "$PROG: $ID ($REF) has no assignee, so this session no longer holds it; nothing was closed" >&2
+    exit 2 ;;
+  "${GC_ALIAS:-}"|"${GC_SESSION_ID:-}"|"${GC_SESSION_NAME:-}"|"${GC_AGENT:-}") ;;
+  *)
+    echo "$PROG: $ID ($REF) is held by $ASSIGNEE, not this session; nothing was closed" >&2
+    exit 2 ;;
+esac
 
 if [ "$DRY_RUN" = 1 ]; then
   echo "$PROG: DRY RUN: would close $ID ($REF) outcome=$OUTCOME"
