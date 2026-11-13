@@ -1016,6 +1016,41 @@ func TestServeMovesACopyWhosePortIsRefusedAsTaken(t *testing.T) {
 		if f.me.Answers(first) || !f.me.Answers(r.Port) {
 			t.Errorf("the refused port %d answers, or the new port %d does not", first, r.Port)
 		}
+		if !r.Started {
+			t.Error("the start that ran the copy and moved it does not say it started it")
+		}
+		f.copies.Stop(f.repo)
+	})
+}
+
+// A copy a start found may serve another caller on its port, such as a
+// capture's engine, so a start that asks for its address, refused because
+// another mapping holds that port, fails and leaves the copy where it runs.
+// A check then says why the copy has no address.
+func TestServeLeavesACopyItFoundOnItsPortWhenAnotherMappingHoldsIt(t *testing.T) {
+	serveTest(t, func(t *testing.T, f *serveFixture) {
+		r := f.copies.Serve(f.repo, f.opts("serve"))
+		mustRun(t, r)
+		leader := f.leader(f.repo)
+
+		busy := f.copies.Serve(f.repo, f.publishing("taken-first", "https://host.example:$PORT/"))
+		if busy.State != CopyFailed || busy.Reason != "address-taken" || busy.Started ||
+			!strings.Contains(busy.Detail, strconv.Itoa(r.Port)) || !strings.Contains(busy.Detail, "--stop") {
+			t.Errorf("the start = %s %s, started %v (%s), want failed address-taken, naming the port and how to stop the copy",
+				busy.State, busy.Reason, busy.Started, busy.Detail)
+		}
+		if got := f.list(&f.published); !slices.Equal(got, []string{"taken-first " + strconv.Itoa(r.Port)}) {
+			t.Errorf("published %q, want one run on the copy's port, %d", got, r.Port)
+		}
+		if f.leader(f.repo) != leader || !f.running(leader) || !f.me.Answers(r.Port) ||
+			len(f.starts("leader")) != 1 || len(f.list(&f.served)) != 1 {
+			t.Errorf("the start moved or ended the copy it found: leader %d (was %d, running %v), port %d answers %v, leaders started %d, serve commands run %d",
+				f.leader(f.repo), leader, f.running(leader), r.Port, f.me.Answers(r.Port), len(f.starts("leader")), len(f.list(&f.served)))
+		}
+		c := f.copies.Check(f.repo)
+		if c.State != CopyRunning || c.Port != r.Port || address(c) != "" || !strings.Contains(c.Detail, "another mapping") {
+			t.Errorf("check = %s on port %d at %q (%s), want running on port %d with no address, and why", c.State, c.Port, address(c), c.Detail, r.Port)
+		}
 		f.copies.Stop(f.repo)
 	})
 }

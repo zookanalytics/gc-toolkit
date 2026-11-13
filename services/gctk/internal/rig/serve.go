@@ -352,6 +352,9 @@ func (r copyRec) noAddressWhy() string {
 		return "no publish command or no address pattern was given, so no address can be given"
 	}
 	last := strings.TrimSpace(tail(r.path("publish.log"), 1))
+	if r.publishSaid("already exists for port") {
+		return fmt.Sprintf("another mapping already publishes its port (%q), so it has no address while it runs on that port; stop it with gctk rig serve --stop and start it again with --publish-command, which runs it on another port", last)
+	}
 	if last != "" {
 		last = fmt.Sprintf(" (%q)", last)
 	}
@@ -405,7 +408,9 @@ func leaderArgv(dir string) ([]string, error) {
 // repeat. The report of a start that ran the copy says so, in Started. A start
 // whose command differs from the running copy's fails and leaves that copy
 // running, and so does one that asks for an address while the copy's publish
-// command runs, with another publish command or address pattern. A start
+// command runs, with another publish command or address pattern. When another
+// mapping holds the copy's port, a start moves a copy it ran to another port,
+// and fails, leaving the copy where it runs, for a copy it found. A start
 // reports a copy once it answers on its port and holds it, and stops a copy of
 // its command that does not within the wait, whether it ran the copy or found
 // it. A start holds the checkout's lock throughout, so one that finds another
@@ -473,9 +478,13 @@ func (c *Copies) Serve(checkout string, o ServeOpts) Report {
 						return failed("no-state", fmt.Sprintf("the record %s could not be written: %v", rec.dir, err))
 					}
 				}
+				// A copy this start found may serve another caller on its port, so
+				// a publish refused because another mapping holds that port fails
+				// the start and leaves the copy where it runs. Only a copy a start
+				// runs itself moves to another port (launch).
 				if o.PublishCommand != "" && o.AddressPattern != "" && rec.publish() == publishTaken {
-					rec.stopGroup()
-					return c.launch(rec, checkout, o)
+					port, _ := rec.num("port")
+					return failed("address-taken", fmt.Sprintf("another mapping already publishes port %d, which the copy runs on, so the copy can get no address there; it keeps running on that port for whoever uses it. Stop it with gctk rig serve --stop and start it again with --publish-command, which runs it on another port", port))
 				}
 			}
 		}
@@ -560,17 +569,22 @@ func (r copyRec) publish() publishResult {
 		if r.publisherAlive() {
 			return publishOK
 		}
-		log, _ := os.ReadFile(r.path("publish.log"))
 		switch {
-		case strings.Contains(string(log), "already exists for port"):
+		case r.publishSaid("already exists for port"):
 			return publishTaken
-		case strings.Contains(string(log), "try again"):
+		case r.publishSaid("try again"):
 			time.Sleep(time.Second)
 		default:
 			return publishRefused
 		}
 	}
 	return publishRefused
+}
+
+// publishSaid reports whether the last run of the publish command said what.
+func (r copyRec) publishSaid(what string) bool {
+	log, _ := os.ReadFile(r.path("publish.log"))
+	return strings.Contains(string(log), what)
 }
 
 // launch runs a copy over the claimed record, on a free port, publishing it
