@@ -851,7 +851,7 @@ have closed without merging.
 |---|---|
 | open at the head the refinery validated | asks the evaluator whether it is ready, and asks GitHub to squash-merge a ready one only while its head is that commit (`mergePullRequest` with `expectedHeadOid`), or adds it to its base's merge queue with that head where the base requires one; it records the check either way, and the next run reads the PR again |
 | open at another head | sends the bead back to the refinery, open, as `pull_request_head_changed` |
-| merged at the validated head, with the merge commit on the freshly fetched target | records `mr_merged` and closes the bead |
+| merged at the validated head, with the merge commit on the freshly fetched target | records `mr_merged` and closes the bead; when bd refuses that close, for an open child or a live blocker, records the exception `pull_request_merged_close_refused` with the merge's evidence, and files its human gate |
 | closed unmerged, merged at another head, or no longer the PR the record names | records the exception, keeps the bead blocked and files a human gate keyed by its value |
 | a lookup or a fetch that failed, or a merge commit not yet on the target | records why in `pr_reconcile_error`, and the next run reads it again |
 

@@ -48,6 +48,11 @@ const (
 	// verified merge, such as one a close that took no lock reached between
 	// the publication's two writes.
 	LegacyClosed = "pull_request_legacy_closed_unverified"
+	// CloseRefused: the PR merged the validated head and the merge commit is on
+	// the target, but bd refused to close the bead, such as for an open child or
+	// a live blocker. The record keeps the merge's evidence beside it. Gas
+	// Town's record has no such value: its run retries the close.
+	CloseRefused = "pull_request_merged_close_refused"
 )
 
 // OnRecord reports whether a bead whose merge_result is v owns a PR open on the
@@ -58,7 +63,7 @@ func OnRecord(v string) bool { return v == Pending || v == HeadChanged }
 // keeps the bead blocked behind a human gate keyed by v.
 func Exception(v string) bool {
 	switch v {
-	case Invalid, ClosedUnmerged, MergedUnvalidatedHead, EvidenceContradiction, LegacyClosed:
+	case Invalid, ClosedUnmerged, MergedUnvalidatedHead, EvidenceContradiction, LegacyClosed, CloseRefused:
 		return true
 	}
 	return false
@@ -220,6 +225,16 @@ func Except(w *ledger.Write, result, state, reason, now string) {
 	prStateKey.Set(w, state)
 	checkedAtKey.Set(w, now)
 	blockedReasonKey.Set(w, reason)
+}
+
+// Refuse records a verified merge whose close bd refused, CloseRefused: the
+// exception, with the merge's evidence beside it, so the person who clears what
+// held the close finds the landing recorded and closes the bead as landed.
+func Refuse(w *ledger.Write, l Landing, reason, now string) {
+	Except(w, CloseRefused, "merged", reason, now)
+	mergedSHAKey.Set(w, l.MergedSHA)
+	mergedTargetKey.Set(w, l.Target)
+	mergedAtKey.Set(w, l.MergedAt)
 }
 
 // Landing is a merge the landing order verified: the merge commit, the target

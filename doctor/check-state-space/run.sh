@@ -37,7 +37,7 @@ BUILTIN_PARK_ROUTE="human"
 # run.test.sh holds this copy to that file. mr_merged is the record's landed
 # value, which only a closed bead carries. None is detached: the record keeps a
 # bead assigned to the refinery, blocked while its PR waits on the merge.
-RECORD_STATES="pull_request_pending pull_request_head_changed mr_merged pull_request_record_incomplete pull_request_reconcile_invalid pull_request_closed_unmerged pull_request_merged_unvalidated_head pull_request_merge_evidence_contradiction pull_request_legacy_closed_unverified"
+RECORD_STATES="pull_request_pending pull_request_head_changed mr_merged pull_request_record_incomplete pull_request_reconcile_invalid pull_request_closed_unmerged pull_request_merged_unvalidated_head pull_request_merge_evidence_contradiction pull_request_legacy_closed_unverified pull_request_merged_close_refused"
 RECORD_CLOSED="mr_merged"
 lifecycle="$dir/lifecycle/lifecycle.toml"
 toml_scalar() { # <file> <key> — the quoted string of the first `<key> = "..."`

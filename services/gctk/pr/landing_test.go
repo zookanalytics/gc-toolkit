@@ -63,18 +63,20 @@ func (c *checkout) Reaches(commit, _ string) (bool, error) {
 
 // gates records each gate filed, and fails a filing when err is set.
 type gates struct {
-	mu    sync.Mutex
-	filed []string
-	err   error
+	mu       sync.Mutex
+	filed    []string
+	messages []string
+	err      error
 }
 
-func (g *gates) File(subject, key, _ string) error {
+func (g *gates) File(subject, key, message string) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.err != nil {
 		return g.err
 	}
 	g.filed = append(g.filed, subject+" "+key)
+	g.messages = append(g.messages, message)
 	return nil
 }
 
@@ -482,23 +484,63 @@ func TestAMergedChangedHeadStaysBlockedBehindAGate(t *testing.T) {
 	}
 }
 
-func TestAVerifiedMergeWhoseCloseIsRefusedRemainsRetryable(t *testing.T) {
+// What holds a verified merge's close, an open child or a live blocker, is no
+// fact the landing order can change, so the close bd refuses is an exception a
+// person resolves, with the merge's evidence kept.
+func TestAVerifiedMergeWhoseCloseBdRefusesIsAnExceptionBehindAGate(t *testing.T) {
 	d := newLand(t)
 	mergedOnGitHub(d, head)
-	refuse := true
 	d.store.BeforeUpdate = func(_ string, args []string) error {
-		if refuse && slices.Contains(args, "--status=closed") {
-			return errors.New("cannot close blocked issue: a live blocker")
+		if slices.Contains(args, "--status=closed") {
+			return errors.New("exit status 1: Error: cannot close blocked issue: " + bead + " is blocked by [tk-kid]")
+		}
+		return nil
+	}
+	is(t, d.once(t), pr.ActExcepted)
+	b := d.row(t)
+	if b.Status != "blocked" {
+		t.Fatalf("a refused close left the bead %s", b.Status)
+	}
+	meta(t, b, map[string]string{"merge_result": record.CloseRefused, "pr_state": "merged", "merged_sha": merged,
+		"merged_target": "main", "pr_merged_at": "2026-11-12T08:30:00Z", "pr_reconcile_pending": "<absent>"})
+	if !strings.Contains(b.Metadata["blocked_reason"], "is blocked by [tk-kid]") {
+		t.Errorf("blocked_reason %q does not name what holds the close", b.Metadata["blocked_reason"])
+	}
+	if got := d.gates.list(); !slices.Equal(got, []string{bead + " " + record.CloseRefused}) {
+		t.Fatalf("gates %v, want one keyed %s", got, record.CloseRefused)
+	}
+	msg := d.gates.messages[0]
+	for _, want := range []string{"is blocked by [tk-kid]", "gc bd update " + bead + " --status=closed --set-metadata merge_result=" + record.Merged} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("the gate's message %q lacks %q", msg, want)
+		}
+	}
+	if out := d.reconcile(t, pr.Options{Count: 10}); len(out) != 0 {
+		t.Fatalf("a run after the exception read %+v, want nothing: the marker is cleared", out)
+	}
+}
+
+// A close the store failed says nothing about what holds it, so it is retried.
+func TestAVerifiedMergeWhoseCloseTheStoreFailedIsRetried(t *testing.T) {
+	d := newLand(t)
+	mergedOnGitHub(d, head)
+	fail := true
+	d.store.BeforeUpdate = func(_ string, args []string) error {
+		if fail && slices.Contains(args, "--status=closed") {
+			return errors.New("exit status 1: Error: database is locked")
 		}
 		return nil
 	}
 	is(t, d.once(t), pr.ActRetry)
 	b := d.row(t)
 	if b.Status != "blocked" {
-		t.Fatalf("a refused close left the bead %s", b.Status)
+		t.Fatalf("a failed close left the bead %s", b.Status)
 	}
 	meta(t, b, map[string]string{"merge_result": record.Pending, "pr_reconcile_pending": "true", "pr_state": "open"})
-	refuse = false
+	if got := d.gates.list(); len(got) != 0 {
+		t.Fatalf("a failed write filed gates %v", got)
+	}
+	fail = false
 	is(t, d.once(t), pr.ActLanded)
 }
 

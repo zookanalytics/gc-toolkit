@@ -454,8 +454,12 @@ func (u *run) blocked(s state) RunOutcome {
 	r := s.rec
 	if record.Exception(r.Result) {
 		// A run recorded the exception and stopped before its gate filed.
-		return u.gate(s, r.Result, fmt.Sprintf("%s %s stays blocked, and what waits on it stays held, until a person "+
-			"decides what becomes of the work.", firstOf(r.BlockedReason, "The pending record met "+r.Result+"."), s.id),
+		message := fmt.Sprintf("%s %s stays blocked, and what waits on it stays held, until a person "+
+			"decides what becomes of the work.", firstOf(r.BlockedReason, "The pending record met "+r.Result+"."), s.id)
+		if r.Result == record.CloseRefused {
+			message = refusedMessage(s.id, firstOf(r.BlockedReason, "A verified merge's close was refused"))
+		}
+		return u.gate(s, r.Result, message,
 			RunOutcome{Bead: s.id, Action: ActExcepted, Detail: r.Result + ": the gate an earlier run did not file is filed"})
 	}
 	switch r.Result {
@@ -623,20 +627,60 @@ func (u *run) merged(s state, head, commit, at string, retry func(string, string
 		return retry("merge_unreachable", why)
 	}
 	number := r.Number
+	landing := record.Landing{MergedSHA: commit, Target: r.Target, MergedAt: at}
 	w := u.Ledger.Write(s.id)
-	record.Land(w, record.Landing{MergedSHA: commit, Target: r.Target, MergedAt: at}, s.now,
-		fmt.Sprintf("PR #%s merged to %s at %s (%s).", number, r.Target, short(commit), r.URL))
-	done := u.commit(s, w, RunOutcome{Bead: s.id, Action: ActLanded,
-		Detail: fmt.Sprintf("PR #%s merged to %s at %s: the bead is closed", number, r.Target, short(commit))})
-	if done.Action == ActFailed {
-		// bd refused the close, such as for a live blocker or an open child, and
-		// wrote nothing, so the record stands and the next run tries again.
-		retryOut := retry("", "the merge is verified, but the close did not land; will retry: "+done.Detail)
-		if retryOut.Action == ActRetry {
-			return retryOut
-		}
+	record.Land(w, landing, s.now, fmt.Sprintf("PR #%s merged to %s at %s (%s).", number, r.Target, short(commit), r.URL))
+	w.Guard(s.status, s.assignee)
+	err = u.Ledger.Commit(w)
+	switch {
+	case err == nil:
+		return RunOutcome{Bead: s.id, Action: ActLanded,
+			Detail: fmt.Sprintf("PR #%s merged to %s at %s: the bead is closed", number, r.Target, short(commit))}
+	case errors.Is(err, ledger.ErrGuard):
+		return RunOutcome{Bead: s.id, Action: ActMoved,
+			Detail: "the bead moved since this run read it, so nothing landed: the merge at " + short(commit) + " is verified"}
+	case closeRefused(err):
+		return u.refused(s, landing, err)
 	}
-	return done
+	// A write the store failed says nothing about the close, so the record
+	// stands and the next run tries again.
+	return retry("", "the merge is verified, but the close did not land; will retry: "+err.Error())
+}
+
+// closeRefused reports whether a write that closes a bead failed because bd
+// refused the close itself, which it says as "cannot close ...": an open child
+// or a live blocker (beads' close policy) holds it. Any other failure is the
+// store's.
+func closeRefused(err error) bool { return strings.Contains(err.Error(), "cannot close") }
+
+// refused keeps a verified merge whose close bd refused blocked behind its
+// gate, the exception CloseRefused, with the merge's evidence recorded: what
+// holds the close is no fact the landing order can change, so a person
+// resolves it.
+func (u *run) refused(s state, l record.Landing, why error) RunOutcome {
+	said := why.Error()
+	if i := strings.Index(said, "cannot close"); i >= 0 {
+		said = said[i:]
+	}
+	reason := fmt.Sprintf("Pull request %s merged to %s at %s, and the merge commit is on the target, but bd refused to close %s: %s",
+		s.rec.URL, l.Target, short(l.MergedSHA), s.id, strings.Join(strings.Fields(said), " "))
+	w := u.Ledger.Write(s.id)
+	record.Refuse(w, l, reason, s.now)
+	done := u.commit(s, w, RunOutcome{Bead: s.id, Action: ActExcepted, Detail: record.CloseRefused + ": " + reason})
+	if done.Action != ActExcepted {
+		return done
+	}
+	s.status = "blocked"
+	return u.gate(s, record.CloseRefused, refusedMessage(s.id, reason), done)
+}
+
+// refusedMessage is the message of a CloseRefused gate: what merged, what bd
+// refused, and how a person finishes the landing once what held the close is
+// gone.
+func refusedMessage(id, reason string) string {
+	return fmt.Sprintf("%s. %s stays blocked, and what waits on it stays held. Close or stand down what holds it, then "+
+		"clear this gate and close %s as landed: gc bd update %s --status=closed --set-metadata merge_result=%s. Its "+
+		"record already carries the merge's evidence.", reason, id, id, id, record.Merged)
 }
 
 // invalid keeps a record that no longer reads as one blocked behind its gate.

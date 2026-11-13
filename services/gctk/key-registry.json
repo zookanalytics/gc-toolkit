@@ -254,7 +254,7 @@
     "name": "merge_result",
     "type": "string",
     "owner": "pr/record",
-    "doc": "Where the work a bead carries stands on its way to its target. On Gas Town's pending record it reads pull_request_pending, pull_request_head_changed, mr_merged, pull_request_record_incomplete or one of the exceptions, pull_request_reconcile_invalid, pull_request_closed_unmerged, pull_request_merged_unvalidated_head, pull_request_merge_evidence_contradiction and pull_request_legacy_closed_unverified, each of which keeps the bead blocked behind a human gate keyed by its value. Absent, the bead has not landed and owns no open PR. The old path's values are lifecycle/lifecycle.toml's [states]. A PR's composition reads a bead on its branch that carries one as the branch's anchor, and one that reads merged as having landed its work on its merged_target."
+    "doc": "Where the work a bead carries stands on its way to its target. On Gas Town's pending record it reads pull_request_pending, pull_request_head_changed, mr_merged, pull_request_record_incomplete or one of the exceptions, pull_request_reconcile_invalid, pull_request_closed_unmerged, pull_request_merged_unvalidated_head, pull_request_merge_evidence_contradiction, pull_request_legacy_closed_unverified and pull_request_merged_close_refused, each of which keeps the bead blocked behind a human gate keyed by its value. Absent, the bead has not landed and owns no open PR. The old path's values are lifecycle/lifecycle.toml's [states]. A PR's composition reads a bead on its branch that carries one as the branch's anchor, and one that reads merged as having landed its work on its merged_target."
   },
   {
     "name": "merged_sha",

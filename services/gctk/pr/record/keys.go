@@ -18,7 +18,7 @@ var (
 	mergeResultKey = ledger.Declare("merge_result", ledger.String,
 		"Where the work a bead carries stands on its way to its target. On Gas Town's pending record it reads "+
 			Pending+", "+HeadChanged+", "+Merged+", "+Incomplete+" or one of the exceptions, "+Invalid+", "+
-			ClosedUnmerged+", "+MergedUnvalidatedHead+", "+EvidenceContradiction+" and "+LegacyClosed+
+			ClosedUnmerged+", "+MergedUnvalidatedHead+", "+EvidenceContradiction+", "+LegacyClosed+" and "+CloseRefused+
 			", each of which keeps the bead blocked behind a human gate keyed by its value. Absent, the bead "+
 			"has not landed and owns no open PR. The old path's values are lifecycle/lifecycle.toml's [states]. "+
 			"A PR's composition reads a bead on its branch that carries one as the branch's anchor, and one "+

@@ -65,7 +65,7 @@ func TestReadReadsTheRecordAndItsMarker(t *testing.T) {
 		}
 	}
 	if !record.OnRecord(record.HeadChanged) || record.OnRecord(record.Merged) || !record.Exception(record.LegacyClosed) ||
-		record.Exception(record.Pending) {
+		!record.Exception(record.CloseRefused) || record.Exception(record.Pending) {
 		t.Fatal("the record's values read wrong")
 	}
 	if !strings.HasPrefix(record.Result.Name(), "merge_result") {

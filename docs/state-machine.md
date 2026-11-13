@@ -222,8 +222,9 @@ request-changes close backs no lane.
 
 On a rig on the new path, the bead that owns a PR carries Gas Town's
 pending-through-merge record, with Gas Town's values and their meanings
-(`gastown/commands/pr-merge-reconcile` in gascity-packs at 7f86098c04ea), and
-the pack keeps no state of its own beside it. `services/gctk/pr/record`
+(`gastown/commands/pr-merge-reconcile` in gascity-packs at 7f86098c04ea). The
+pack adds one value of its own, the exception `pull_request_merged_close_refused`,
+and keeps no other state beside the record. `services/gctk/pr/record`
 declares its keys and values. Two writers write it, and no machine checks
 them: the refinery's `mr` step publishes a PR's record through
 `gctk pr record`, and the landing order writes each later step through
@@ -258,12 +259,14 @@ stateDiagram-v2
 | `pull_request_reconcile_invalid` | `blocked` | The PR's URL, number, branch or base no longer match the record, such as after a change of base, or the record does not read as one. |
 | `pull_request_merge_evidence_contradiction` | `blocked` | GitHub's merge facts contradict a recorded merge. |
 | `pull_request_legacy_closed_unverified` | `blocked` | A closed bead still carries the marker and records no verified merge, such as one that a close taking no lock reached between the publication's two writes. |
+| `pull_request_merged_close_refused` | `blocked` | The PR merged the validated head and the merge commit is on the target, but bd refused to close the bead, such as for an open child or a live blocker. The record keeps the merge's evidence, `merged_sha`, `merged_target` and `pr_merged_at`, and the gate tells a person to clear what holds the close, then close the bead as landed. Gas Town's record has no such value, since its run retries the close. |
 
-The five `blocked` values after `mr_merged`'s row are the exceptions. Each
-keeps the bead open behind a human gate keyed by its value, so none releases
-the work that waits on the bead. A lookup that fails, or a merge commit not yet
-on the fetched target, is recorded in `pr_reconcile_error` and read again by
-the next run, and it never closes the bead. `merged`, the machine's value, is
+The `blocked` values after `mr_merged`'s row are the exceptions. Each keeps
+the bead open behind a human gate keyed by its value, so none releases the work
+that waits on the bead. A lookup that fails, a merge commit not yet on the
+fetched target, or a close the store failed for a reason of its own is recorded
+in `pr_reconcile_error` and read again by the next run, and it never closes the
+bead. `merged`, the machine's value, is
 the record of a `direct` landing on either path, and the doctor's landing
 checks (I2 and I5) read it and `mr_merged` alike as landed.
 
