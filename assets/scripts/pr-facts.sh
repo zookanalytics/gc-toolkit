@@ -4566,19 +4566,20 @@ WB_RECORDS
   # a Conversation comment's carries none. Findings that cannot be read leave
   # every comment acknowledged and nothing marked this pass. The list reaches the
   # plan as one jq argument, under the OS per-argument limit, so it carries
-  # whether a finding owes a reply and never the reply's text.
+  # whether a finding owes a reply and never the reply's text. Whether that
+  # reply is on the PR is read off GitHub once the PR is read, below.
   wfnd="[]"; wfnd_ok=0
   if [ "$wbatch_ok" = 1 ] && wfrows=$(bd_anchor_children "$wid" "$ALL_STATUSES"); then
     wfnd=$(printf '%s' "$wfrows" | jq -c '[ .[]?
         | select(((.metadata.task_kind // "") | tostring) == "finding")
         | select(((.metadata["finding.lane"] // "") | tostring) == "human")
         | select(((.metadata["finding.comment_id"] // "") | tostring) != "")
-        | { cid: ((.metadata["finding.comment_id"]) | tostring),
+        | { id, cid: ((.metadata["finding.comment_id"]) | tostring),
             rid: ((.metadata["finding.review_id"] // "") | tostring),
             open: (((.status // "") | tostring | ascii_downcase) != "closed"),
             disp: ((.metadata["finding.disposition"] // "") | tostring),
             reply: (((.metadata["finding.reply"] // "") | tostring) != ""),
-            posted: ((.metadata["finding.reply_posted"] // "") | tostring) } ]' 2>/dev/null) \
+            posted: (((.metadata["finding.reply_posted"] // "") | tostring) == "1") } ]' 2>/dev/null) \
       && [ -n "$wfnd" ] && wfnd_ok=1 || wfnd="[]"
   fi
   if [ "$wbatch_ok" = 1 ] && [ "$wfnd_ok" != 1 ]; then
@@ -4665,6 +4666,34 @@ WB_ROUNDS
     [ "$wrnd_n" = 0 ] || bd_cache_clear
   fi
 
+  # Whether a human finding's owed reply is on the PR is this read's to say, by
+  # the matcher the reply arm below reads it back with (ra_answer_post): in the
+  # thread holding the comment it answers, or on the Conversation tab.
+  # finding.reply_posted records an earlier read, and the reply can be gone
+  # since, or its ruling replaced by one whose reply is not yet posted, so the
+  # plan resolves a thread only behind a reply this read shows. A review body
+  # sits in no thread, and its living answer delivers its reply and stamps it,
+  # so its stamp stands.
+  if [ "$wfnd_ok" = 1 ] && [ "$wfnd" != "[]" ]; then
+    wfnd=$({ printf '%s\n' "$wview"; printf '%s\n' "$wfrows"; } | jq -cn --argjson fnd "$wfnd" \
+        --arg self "$SELF_LOGIN" --arg m "$WB_MARKER" "$WB_OWED_REPLY_DEF"'
+      input as $v
+      | [ input[]? | select(owes_reply)
+          | ((.metadata["finding.comment_id"] // "") | tostring) as $cid
+          | select($cid != "")
+          | ((.metadata["finding.reply"] // "") | tostring) as $reply
+          | .id as $id
+          | select(ra_comment_thread($v; $cid) as $t
+                   | (if $t != null then ($t.comments.nodes // []) else $v.issue_comments end)
+                   | any(.[]?; ra_answer_post($self; $m; $id; $reply)))
+          | $id ] as $seen
+      | $fnd | map(if .rid != "" and .rid == .cid then . else .posted = ((.id as $i | $seen | index($i)) != null) end)' 2>/dev/null) \
+      && [ -n "$wfnd" ] || {
+        wfnd="[]"; wfnd_ok=0
+        echo "$PROG: $wid — PR#$wnum findings' answers unreadable on the PR; acknowledging only, nothing marked this pass" >&2
+      }
+  fi
+
   # One jq pass decides everything, so the shell below only performs writes.
   # Every comment the city routed (a foreign comment at or below its space's mark)
   # is in one of three states, read from its own finding first and then from its
@@ -4694,9 +4723,9 @@ WB_ROUNDS
   #                                     body is the answer naming the beads that
   #                                     resolved them, a fix's commits by the
   #                                     token wb_expand cites. why is ok, live (a
-  #                                     human answered after us), owed (a finding's
-  #                                     owed reply in it is not yet recorded on
-  #                                     the PR, so only answered), norights
+  #                                     human answered after us), owed (this read
+  #                                     does not show a finding's owed reply in it
+  #                                     on the PR, so only answered), norights
   #                                     (cannot resolve), or resolved (already,
   #                                     so only answered).
   #   Q <thread> <gate> <body>          the awaiting answer for one open gate
@@ -4755,14 +4784,14 @@ WB_ROUNDS
     # $off: the routing arm read this comment as already answered in its threads,
     # so a batch whose range holds it did not carry it unless a finding names it.
     # posted marks a comment a declined or deferred finding answers once that
-    # finding owes no reply or its owed reply is recorded on the PR.
+    # finding owes no reply or this read shows its owed reply on the PR.
     # fixed marks a comment whose must-fix finding closed when its fix landed.
     def cstate($s; $d; $off):
       finding_at($s; $d) as $f | rec_at($s; $d) as $ri
       | (if $ri == null then null else $led[$s][$ri] end) as $r
       | if $f != null and $f.open and $f.disp == "needs-you" then { st: "awaiting", by: "finding", ri: $ri }
         elif $f != null and ($f.open | not) and ($f.disp == "declined" or $f.disp == "deferred")
-          then { st: "resolved", by: "finding", posted: (($f.reply | not) or $f.posted == "1"), ri: $ri }
+          then { st: "resolved", by: "finding", posted: (($f.reply | not) or $f.posted), ri: $ri }
         elif $r == null or ($f == null and $off) then { st: "looked", ri: null }
         elif $r.kind == "human" and $r.state == "open" then { st: "awaiting", by: "batch", gate: $r.bead, ri: $ri }
         elif $r.state == "closed" and ($r.kind == "human" or $r.landed != "") and ($f == null or ($f.open | not))

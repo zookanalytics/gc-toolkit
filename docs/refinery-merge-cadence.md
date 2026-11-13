@@ -510,7 +510,8 @@ the cadence — the arms run whether or not any refinery session is awake.
    comments a batch resolved by one reply naming each bead, and a comment its
    own finding answers by that finding's owed reply. It is resolved behind
    those answers, whether the city fixed, declined or deferred the point, on
-   the pass that reads each owed reply in it recorded on the PR. A thread
+   a pass whose own read of the PR shows each owed reply in it, never on a
+   stamp an earlier read left. A thread
    holding a needs-you finding stays open until the person rules. A post in a
    thread the city resolved is feedback like any other, so a reply of the
    reviewer's there is ruled as a finding of its own, and the declined or

@@ -5392,8 +5392,9 @@ hasnt "$(gh_since "$mark")" "REPLY" "a later pass finds the answer and posts not
 echo "# a needs-you answer does not stand in for the ruling that replaced it"
 # The operator ruled on the gate and the finding was re-ruled declined with a new
 # reply, while its stamp still records the needs-you answer under the same line.
-# The plan reads that stamp as the answer recorded, so the thread is resolved in
-# the pass that posts the new answer.
+# The plan reads the PR for the new ruling's answer, never the stamp, so the
+# thread stays open on the pass that posts that answer, and the pass that reads
+# it on the PR resolves the thread.
 store "[$(anchor WRR 337 "$(wb_meta rework:KRR)"), $(child KRR closed), $(hfind FRR WRR 100 900 declined closed 'Declined: the operator ruled the cap stays.' | stamped)]"
 printf '%s' "$(prview 337 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_337.json"
 threads 337 "$(printf '%s' "$(one_thread 337)" | jq -c '
@@ -5401,7 +5402,9 @@ threads 337 "$(printf '%s' "$(one_thread 337)" | jq -c '
     {"id":"NC-337q","databaseId":0,"author":{"login":"gc-city-bot"},"body":"❓ This comment needs your decision — filed human gate tk-g337.\n<!-- gc-writeback -->\n<!-- gc-writeback-finding:FRR -->","reactionGroups":[]}]')"
 out=$(run)
 has "$(treply 337 T-337)" "Declined: the operator ruled the cap stays." "the new ruling's answer is posted under the old one"
-eq "$(tresolved 337 T-337)" "true" "…and the thread is resolved"
+eq "$(tresolved 337 T-337)" "false" "…and the thread waits, since the PR that pass read held only the old answer"
+out=$(run)
+eq "$(tresolved 337 T-337)" "true" "the next pass reads the new answer on the PR and resolves the thread"
 
 echo "# a stamped answer that is missing and fails to post drops its stamp, so the review waits"
 store "[$(anchor WSD 338 "$(wb_meta rework:KSD)"), $(child KSD closed), $(hfind FSD WSD 100 900 declined closed 'Declined: not an objection.' | stamped)]"
@@ -5409,9 +5412,13 @@ printf '%s' "$(prview 338 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_338.json"
 threads 338 "$(one_thread 338)"
 out=$(STUB_REPLY_RC=1 run)
 eq "$(meta FSD finding.reply_posted)" "<absent>" "the stamp is dropped while the answer is not on the PR"
+eq "$(tresolved 338 T-338)" "false" "…and the thread is not resolved over the missing answer"
 out=$(run)
 has "$(treply 338 T-338)" "Declined: not an objection." "the next pass posts the answer"
 eq "$(meta FSD finding.reply_posted)" "1" "…and stamps it"
+eq "$(tresolved 338 T-338)" "false" "…leaving the thread to the pass that reads the answer on the PR"
+out=$(run)
+eq "$(tresolved 338 T-338)" "true" "which resolves it"
 
 echo "# a thread holding a fixed and a declined finding is answered for both, then resolved"
 store "[$(anchor WPB 339 "$(wb_meta rework:KPB 101)"), $(child KPB closed), $(hfind FPA WPB 100 900 must-fix closed), $(hfind FPB WPB 101 900 declined closed 'Declined: the second ask is already handled.')]"
