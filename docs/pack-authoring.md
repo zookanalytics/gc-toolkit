@@ -173,6 +173,12 @@ it. A here-document's body is data when any part of its delimiter is quoted.
 Otherwise the shell expands the body, and a substitution in it counts as one
 in an argument does.
 
+A `cd` that `&&` runs after a call is no procedure, and that `&&` is no control
+flow. It moves the agent's own shell once the call exits 0, which no script can
+do for its caller, and Claude Code carries the shell's directory from one call
+to the next. So a call that removes the directory the agent's shell stands in
+ends in `&& cd <a directory that stays>`.
+
 `tools/lint-step-text.sh` holds the rule, and `tools/lint.sh` runs it on the
 files a change names. It reads every TOML string in a formula as Python's
 `tomllib` decodes it, so it needs a Python 3.11 or newer on PATH. It judges
