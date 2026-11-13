@@ -587,9 +587,10 @@ numbers are at dbe034457.
   654 and 691). `await-ruling.sh` reads the target it falls back on to re-sling
   (line 293).
 - **The sitting skills** (unit 3). `converse-continue` and `converse-settle`
-  show the subject's arm and its formula through `gctk bead holds` (lines 31
-  and 138). Their withdraw block calls `gctk bead disarm` with no read first
-  (lines 41 and 149), since the verb exits 0 once no arm remains.
+  show the subject's arm and its formula through `gctk bead holds` (line 31 of
+  `converse-continue`, line 138 of `converse-settle`). Their withdraw block
+  calls `gctk bead disarm` with no read first (lines 41 and 149), since the
+  verb exits 0 once no arm remains.
 - **A reader that stops reading** (unit 2). `stand-down.sh` reads the arm and
   the notice to decide whether to disarm (line 192). It disarms with no read
   first, for the same reason.
@@ -642,10 +643,12 @@ asks the record.
 from the board's own rows, beside the route and the assignee, to say a queued
 bead starts by itself. Those rows are the board's second data plane, which the
 board member (tk-1tfzr71.24) retires. Asking the record there would need a
-domain read of every bead the board shows as queued, and the board's one domain
-read covers only the anchors that record a wait. So unit 1 adds the read to the
-board's Debt entry in `docs/gctk-architecture.md`, which today names human
-gates as the one place the board still derives an answer from its rows.
+domain read of every bead the board shows as queued, and the board reads
+`waits` only for the anchors that record a wait and the children that have
+blockers (`startWaits`, `services/helm/internal/source/beads.go`). So unit 1
+adds the read to the board's Debt entry in `docs/gctk-architecture.md`, which
+today names human gates as the one place the board still derives an answer
+from its rows.
 Section 14's note on tk-1tfzr71.24 names the question that replaces it: whether
 a bead starts by itself, which the rig page already asks of `queue`.
 
@@ -661,6 +664,18 @@ and the patrol would send it on beside its arm. Whichever of #1488 and unit 2
 or 3 lands second converts the other's call sites, and `refinery-lib.sh`'s
 question is one of them: it asks `gctk bead holds` for the arm half, as
 section 10's other readers do.
+
+**Open PRs #1480, #1481 and #1484** change sites this section converts, and
+whichever of each and unit 2 or 3 lands second converts the other's sites.
+#1480 (tk-pb9wnr3) rewrites the converse skills: `converse-continue` no longer
+shows, reads or disarms the subject's arm, and `converse-settle` keeps its
+reads, its withdraw block and its arms at new lines. #1481 (tk-bvw8j5t) adds
+the `converse-edit` skill, which reads its subject's arm and disarms it, arms
+the subject for its validating closer (`mol-validate-close`), and disarms the
+subject when the operator drops the change. #1484 (tk-qs1fqpu) rewrites the
+refinery prompt's bring-current conflict hand-off: its block files a task for a
+polecat before it records the notice, and its recovery steps name the notice
+command again. #1488 moves the same block into `effort-bring-current.sh`.
 
 **The docs** that describe the script move to the verbs in the unit that
 changes the behavior they describe: `docs/deferred-dispatch.md`,
