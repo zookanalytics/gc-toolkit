@@ -39,7 +39,8 @@ of the effort lands with no PR of its own unless it is a stage, slung
 `--merge mr`, whose PR goes into the branch.
 
 Cutting the branch is the one step a converse sitting cannot perform, because a
-sitting never pushes. Everything downstream expects the integration branch to
+sitting pushes only the branch of a change the operator rules it make, through
+Work's hand-off. Everything downstream expects the integration branch to
 already exist: a polecat branches from `origin/<target>`, the refinery brings a
 branch current by merging `origin/<target>` into it, and pre-open review diffs
 against the anchor's target. None of them creates it. So the branch cut is the

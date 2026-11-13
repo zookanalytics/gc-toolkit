@@ -1787,8 +1787,10 @@ it under a real service mount) and leave `GC_HELM_SOURCE` unset.
 `cmd/helm-fixture` serves the app this commit embeds with no city behind it.
 `/helm` answers a board file as JSON, `GET /helm/rigs` and
 `GET /helm/rigs/{rig}` answer one rig's document, and `POST /helm/<verb>`
-answers a canned answer, so nothing it serves reads or writes a city. A demo
-capture of the board runs it as its `--serve` command (`docs/review-demo.md`).
+answers a canned answer, so nothing it serves reads or writes a city. It is
+gc-toolkit's declared `ui_serve_command`, so a demo capture of the board serves
+it as its `--serve` command (`docs/review-demo.md`), and a sitting's live copy
+of the board runs it too, each as a copy that `gctk rig serve` runs.
 
 ```bash
 cd services/helm
@@ -1815,9 +1817,10 @@ go run ./cmd/helm-fixture --addr 127.0.0.1:5199 --rig-board <file> --answers <di
 - It listens on loopback only: `--addr`, else `127.0.0.1:$PORT`.
 
 It is a command of its own, not a helm-svc subcommand, because a cold build of
-helm-svc, which links Dolt through cgo, takes minutes, past the 30 s a capture's
-engine waits for a `--serve` command to answer. Its tests hold its import graph
-to the standard library, the app's package and `internal/fixture`.
+helm-svc, which links Dolt through cgo, takes minutes, and a copy that compiled
+it would keep a capture or a sitting waiting that long. Its tests hold its
+import graph to the standard library, the app's package and
+`internal/fixture`.
 
 ## What's proven vs. deferred
 

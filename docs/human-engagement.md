@@ -1,6 +1,6 @@
 ---
 name: Human engagement — gc-toolkit's subject, human gate and conversation model
-description: gc-toolkit's own model for engaging a person — the subject, the human gate and the conversation, how a gate reaches the operator, the way in through Engage, how a conversation starts, how a sitting claims, holds, answers and ends, Accept, how a parked subject comes back, how a po sitting opens, the helm board, and the ground the pack builds itself. A pack convention; the Gas City primitives it rides are gascity/human-engagement.md.
+description: gc-toolkit's own model for engaging a person — the subject, the human gate and the conversation, how a gate reaches the operator, the way in through Engage, how a conversation starts, how a sitting claims, holds, answers, edits a change and ends, Accept, how a parked subject comes back, how a po sitting opens, the helm board, and the ground the pack builds itself. A pack convention; the Gas City primitives it rides are gascity/human-engagement.md.
 ---
 
 # Human engagement
@@ -33,9 +33,11 @@ the pack uses them only in these senses.
   subject. It tracks its subject, which is always a bead and never a gate, and
   it replies to each human gate it answers, through bd's `replies-to` edge from
   the conversation onto the gate. Neither edge holds anything. A conversation
-  on an open PR holds the PR's merge until it closes, and otherwise blocks
-  nothing: the PR's anchor depends on it (*A conversation on an open PR holds
-  its merge*, below). Its description is the ask, the concern the operator
+  on an open PR holds the PR's merge until it closes, because the PR's anchor
+  depends on it (*A conversation on an open PR holds its merge*, below), and a
+  change its sitting makes with the operator waits on it the same way until its
+  hand-off to the refinery (*A sitting's change*, below). Otherwise it blocks
+  nothing. Its description is the ask, the concern the operator
   brought or the gate engage was pointed at. It is assigned to `human` while it
   waits in the operator's queue, and to its sitting's alias while a sitting
   holds it. Two dialogues about one bead are two conversations.
@@ -65,7 +67,7 @@ model the pack builds on them.
 
 **Mandate.** gc-toolkit's model for engaging a person: the four terms, how a
 human gate reaches the operator, the way in through Engage, how a conversation
-starts, how a sitting claims, holds, answers and ends,
+starts, how a sitting claims, holds, answers, edits a change and ends,
 Accept, how a parked subject comes back, how a po sitting opens, the helm
 board, and the ground the pack builds itself.
 
@@ -235,8 +237,8 @@ session carries `human`. A sitting starts only when the operator engages.
 
 ### A conversation on an open PR holds its merge
 
-A conversation on an open PR holds the PR's merge until it closes, and
-otherwise blocks nothing. The subject counts as an open PR when it is the PR's
+A conversation on an open PR holds the PR's merge until it closes. The subject
+counts as an open PR when it is the PR's
 anchor (`merge_result=pull_request`, not closed), or a bead whose
 `anchor_bead` names that anchor, such as the PR's review, rework or
 supplement. The hold is bd's own: the anchor depends on the conversation
@@ -281,7 +283,10 @@ conversation would stop that work: the pool's offer, the work gate at
 load-context, the refinery's hand-off and the bead's close. So a pre-open
 anchor takes no edge, and a conversation on any subject that is no open PR
 files a gate only when something must wait for its answer (*The sitting*,
-below).
+below). The one exception is a change the sitting makes with the operator,
+whose work the sitting does itself: its edge onto the conversation keeps the
+pool off, which is the point, and its hand-off to the refinery removes the edge
+(*A sitting's change*, below).
 
 ### Engage
 
@@ -988,14 +993,17 @@ passed since its last detach or terminal output
 ([gascity/human-engagement.md](gascity/human-engagement.md#a-manual-session-stays-up-until-it-is-closed)).
 That record stays asleep, holding no process, until something closes it.
 
-**Iterating on a document.** A sitting writes no files, so it changes a document
-by sending work, and a worker sent on a short ruling makes every call the ruling
-left open. When more than one call stands between a document's text and what the
-operator wants, the sitting settles them with the operator item by item, reading
-the operator's guidance for its intent and pushing back where it disagrees, and
-then sends one rework that carries the decisions. The big picture between
-sittings is the subject's notes: the dated rulings and the newest
-`## Current state` block. That block with no open question left is the scaffold.
+**Iterating on a document.** A worker sent on a short ruling makes every call
+the ruling left open. So when more than one call stands between a document's
+text and what the operator wants, the sitting settles them with the operator
+item by item, reading the operator's guidance for its intent and pushing back
+where it disagrees. The document then changes in one of two ways. The operator
+can rule that the sitting edit it with them (*A sitting's change*, below), or
+the sitting sends one rework that carries the decisions, which is also how a
+document on an open PR changes, because a sitting edits no open PR's branch.
+The big picture between sittings is the subject's notes: the dated rulings and
+the newest `## Current state` block. That block with no open question left is
+the scaffold.
 It names only what changes, by section or once for the whole document, and gives
 each change its direction and substance, with exact words only where the wording
 itself was settled. Its first lines are the rules the worker follows for what the
@@ -1004,6 +1012,127 @@ block leaves open, the wording included. The ruling's line names the block,
 runs it, so the loop needs no formula, key or script of its own. With no PR open,
 the work is sent as a sign-off sends any other, and its bead names the block. The
 `gc-toolkit.converse-iterate-document` skill holds the steps and the block's form.
+
+### A sitting's change
+
+A sitting changes a repository only when the operator rules, in the sitting,
+that it make the change, and only a change whose next step is the operator's
+reaction: a document's wording or a screen's look, which they react to as it
+takes shape, or a small fix agreed in the sitting, whose spec would take as long
+to write as the change. Work whose spec can be written down goes to a pool on a
+formula. The ruling licenses the edit, and the line is how the sitting judges
+what to propose: a sitting holds the operator while it works, so work that needs
+no reaction would spend their attention for nothing, and a pool does it as well
+without them. Whatever the ruling, a sitting holds one change in flight per
+conversation and changes only its own rig's repository, the rig its
+conversation is filed in, because the hold below is a `blocks` edge, which holds
+only within one store. It never edits in its home, edits an open PR's branch,
+cuts an integration effort's branch, pushes to a target branch, merges, or
+forces a push. The `gc-toolkit.converse-edit` skill carries a change from the
+ruling to the refinery.
+
+**The change is a bead the sitting files**, in its own rig's store, with its
+target in the create: the rig's default branch, or the integration branch of an
+effort the change belongs to. It carries no route and no `hold:mayor`, because
+the operator routed it in the sitting, and for an epic subject it is the epic's
+member. Its description records the ruling, the operator's words quoted with
+the date and the conversation, and the change's scope, so a reviewer sees where
+the change's decisions came from. The subject is never the change: a bead the
+sitting did not file can carry a gate, a route, an arm, a hold label, an earlier
+branch and a description written before the ruling, which Work's writers would
+meet and reviewers would judge the change against. When a pool, a run or the
+refinery already holds the subject, the operator rules whether that work stops
+before the change is filed.
+
+**The subject waits on the change from its filing.** The sitting withdraws the
+subject's arm and pool route, and writes the wait the waits skill gives a bead
+that is checked and closed once other work lands: the close brief, the `blocks`
+edge and the validating closer's arm. So no pool takes the subject while the
+sitting edits, and a dismiss leaves the subject waiting on the change. The
+sitting also records the ruling and the change on the subject. At the sign-off
+it names the same wait, and the sign-off writes none of it a second time. An
+epic subject already waits on its member and takes no edge, brief or arm.
+
+**The hold** is the change's `blocks` edge onto the conversation, which the
+sitting adds before the change's tree is cut. While the conversation is open, bd
+counts the change blocked, so no pool is offered it, and Work's writers take the
+edge as the proof that the sitting holds the change. It is the edge that holds
+an open PR's merge for a conversation, and here keeping the pool off is the
+point. Work's hand-off removes it as its last write. When Work's writers refuse
+the change because someone else holds it, the sitting removes the edge itself,
+and a conversation's close ends its effect.
+
+**The tree.** Work's setup, `work-setup.sh --held-by <conversation>`, cuts the
+change's tree at `<the sitting's home>/worktrees/<bead>` on `polecat/<bead>`,
+fresh from its target, and records `work_dir` and `branch` on the bead, where and
+how it cuts a polecat's. It refuses a change that carries a rejection reason,
+writing nothing: a check sent that change back, and a polecat's resume brings
+its branch current by merging its target in, which a sitting never does. The
+home's start syncs the home to the default branch and leaves `worktrees/`
+alone. Before its first edit the sitting reads the polecat class's standards
+from their fragments. It commits after each step the operator agrees, with no
+identity flags, because each agent home's git configuration signs its commits,
+and the commits stay local until Work's hand-off pushes them.
+
+**The hand-off to the refinery** comes on the operator's go, which the sitting
+asks for once the agreed steps are in, or which the operator gives when they
+rule the edit. It is Work's hand-off, `work-submit.sh --held-by <conversation>`:
+the polecat's submit, with the same branch gate, push and check of origin's ref,
+bring-current guard, anchor summary and title, three hand-off writes, refinery
+wake and removal of the tree. Under `--held-by` both writers take as proof that
+`gc hook current` names the conversation and the bead has its edge onto it, and
+they refuse a bead assigned to anyone, the refinery included, one a run works or
+one routed to a pool. A refusal writes nothing, files no gate, cancels nothing
+and drains nothing, because the operator is in the sitting to hear it. The
+hand-off removes the edge as its last write, once it has assigned the bead to
+the refinery, whose queue leaves an assigned bead that a wait of its own holds,
+so the assignment starts nothing while the edge stands. A hand-off cut short
+before the assignment leaves the bead unassigned and held, and the sitting runs
+it again. Once the refinery holds the bead, every run is refused as the
+refinery's, and the sitting removes its edge if it still stands and wakes the
+refinery. The change is then an anchor, as a polecat's fresh work is: one bound
+for the default branch reaches a PR, and one in an effort lands on the effort's
+branch. The sitting writes the PR's summary, quoting the ruling, to the standard
+in the `gc-toolkit.commit-conventions` skill.
+
+**Its checks** are the PR's checks: the refinery's gate, the review checks, CI
+and the operator's approval, so the sitting runs no self-review loop. Before the
+hand-off it runs the checks a polecat's self-review runs, through `gctk rig`, so
+the pass is recorded at the head it hands off, where the correctness review reads
+it as it reads a polecat's. A suite that pins a prompt's or a skill's wording can
+fail on a wording change, and the operator is in the sitting to decide whether
+the pin or the wording changes.
+
+**A check's send-back** goes where any change's goes, even while the sitting is
+open: a failure the branch caused at the refinery's gate returns the change to
+the polecat pool with its branch kept, and a review that requests changes files
+a rework child the pool runs. A finding is written down, which is the line's own
+test for a pool's work. When the operator wants to react to a finding live, they
+engage the change.
+
+**In flight.** The idle sleep skips a sitting that holds its conversation, and a
+restart re-opens the sitting at its hold, where Work's setup re-enters the tree
+the bead records. A sitting that must end with the change in flight commits what
+it has, records where the change stands on the conversation and hands the
+conversation back, so the change stays held and the next sitting resumes it from
+the record. A dismiss closes the conversation and ends the hold: the change stays
+open and unrouted with its tree, the subject keeps waiting on it, and the
+operator engages the change to resume it or drops it. A sitting resumes a change
+because the change's own record says a sitting filed it, never because of who
+holds it, and it adds only its own hold and its ruling, because the original
+subject's wait stands.
+
+**A drop.** When the operator drops a change, the sitting withdraws the subject's
+validating-closer arm, so the closer does not ask the operator about a drop they
+ruled, closes the change through the disposition writer as not needed with the
+conversation as the evidence, removes the tree and its local branch, and carries
+out what the ruling says of the subject. A tree whose sitting ended first stays
+on its branch, and Gas City's reaper removes it once the change closes.
+
+**An open PR's branch** takes one writer at a time, the PR's rework child, which
+a polecat runs and on which the review machinery keys. So a sitting does not
+edit it, and a ruling that changes an open PR's branch files a rework through the
+sign-off.
 
 ## Accept
 
@@ -1552,17 +1681,18 @@ This is the genuinely native ground, and it is deliberately small.
   cannot tell a conversation first taken up from one whose work has returned.
   The entry reads that from the conversation's record (*The sitting*, above).
 
-**A sitting is not a unit of work, and it acts on its subject's universe in
+**A sitting asks for work, and it acts on its subject's universe in
 coordination with the operator.** It files beads, slings them to a pool, wires
 edges, answers gates and appends an outcome to the subject; and on an
 operator-agreed ruling it acts on the subject's PR — commenting, replying to
 and resolving review threads, and retiring it, which closes the PR and disposes
-the anchor as superseded. It writes no files and makes no commits, because
-moving a bead forward is what a molecule does, so a sitting that finds work
-needing doing routes it to one, and where nothing can reach the work, the gap
-is itself a bead to file. The one line it does not cross is a repo change. What
-reaches the operator is the point where the operator is needed for a judgment,
-which is narrower than judgment and narrower still than action.
+the anchor as superseded. Moving a bead forward is what a molecule does, so a
+sitting that finds work needing doing routes it to one, and where nothing can
+reach the work, the gap is itself a bead to file. The one exception is a change
+the operator rules it make with them, which it hands to the refinery as a
+polecat's work is handed off (*A sitting's change*, above). What reaches the
+operator is the point where the operator is needed for a judgment, which is
+narrower than judgment and narrower still than action.
 
 Everything else in the engagement model is assembly of the primitives above —
 which is the point.

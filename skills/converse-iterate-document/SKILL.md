@@ -5,12 +5,15 @@ description: Converse's iteration on a document with the operator.
 
 # Iterating on a document with the operator
 
-A sitting writes no files, so it changes a document by sending work. A worker
-sent on a short ruling makes every call the ruling left open, the operator
-redlines those calls at the next gate, and each round costs a whole re-review.
-So settle the calls here with the operator, item by item, and then send one
-rework that carries the decisions, for a worker to write the text from. The
-block of notes that carries them is the scaffold.
+A worker sent on a short ruling makes every call the ruling left open, the
+operator redlines those calls at the next gate, and each round costs a whole
+re-review. So settle the calls here with the operator, item by item. The
+document then changes in one of two ways. The operator can rule that you edit
+it with them, and `converse-edit` carries that change. Otherwise you send one
+rework that carries the decisions, for a worker to write the text from, which
+is also the way to change a document on an open PR, because a sitting edits no
+open PR's branch. The block of notes that carries the decisions for a worker is
+the scaffold.
 
 This applies when the operator wants a document's content changed and more than
 one call stands between its text and what they want. The document can be a
@@ -59,15 +62,24 @@ direction.
 It lives on the subject's notes: the dated rulings, and the newest
 `## Current state` block, which the next sitting primes from (`converse-prep`). When a
 sitting stops with items still open, write that block with them under
-`Open questions`. A spec cannot hold it, because a sitting writes no files and a
-spec moves only when a rework lands. A spec gains the decisions as a line of the
-scaffold, when the document's reasons belong in the repo.
+`Open questions`. A spec cannot hold it, because a spec moves only when a change
+to it lands. A spec gains the decisions as a line of the scaffold, or as a step
+of a change you make with the operator, when the document's reasons belong in
+the repo.
+
+## Edit it with the operator
+
+When the operator rules that you make the change with them, load
+`converse-edit` and make it in this sitting: the items you settled are its
+steps, each committed once they agree to it. No scaffold is written, because
+the change carries the decisions and its summary quotes the rulings. A
+document on an open PR takes the scaffold and one rework below instead.
 
 ## Write the scaffold
 
-Once nothing is open, name what the rework will carry in the hand-back and take
-the operator's go. Their go is the ruling, and the block is how it is written
-down, so they owe no second read of it.
+When the document goes to a worker, once nothing is open, name what the rework
+will carry in the hand-back and take the operator's go. Their go is the ruling,
+and the block is how it is written down, so they owe no second read of it.
 
 Then write every decision into one `## Current state` block. That block is the
 scaffold, the rework's whole brief. A worker who reads only the block, the

@@ -10,8 +10,8 @@
 #   - it files nothing while an open human gate under the key already blocks
 #     the bead, though two writers in the same instant can each file (below);
 #   - it files nothing inside a quiet period the call declares;
-#   - it refuses a `*-wisp-*` id as the subject, a patrol wisp's or a
-#     session's;
+#   - it refuses a `*-wisp-*` id as the subject, such as a patrol wisp's, by
+#     its shape alone, so a session whose id lacks `-wisp-` is not refused;
 #   - it titles the gate with the message's first line, capped;
 #   - it makes the gate's description the message it was given;
 #   - it stops when the gate it filed is in another store than the bead,
@@ -56,8 +56,9 @@ usage: human-gate.sh --subject <bead-id> --key <situation-key> --message <text>
 
   --subject       the bead that waits for the person; the gate blocks it
                   (required). One bead id, [A-Za-z0-9._-] only. A `*-wisp-*`
-                  id names a patrol wisp or a session and is refused: file a
-                  patrol finding with patrol-finding.sh instead.
+                  id, such as a patrol wisp's, is refused by its shape alone:
+                  file a patrol finding with patrol-finding.sh instead. A
+                  session whose id lacks `-wisp-` is not refused.
   --key           names the SITUATION, not the wording: one open gate per bead
                   and key. It is the gate's await id. [A-Za-z0-9._-] only
                   (required).
