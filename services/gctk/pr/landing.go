@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -393,7 +392,7 @@ func (u *run) open(s state) RunOutcome {
 		record.Settle(w)
 		return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActSettled,
 			Detail: "its changed head already waits on the refinery's validation: the marker is cleared"})
-	case s.rec.Result == record.Pending && len(gaps(s.rec, s.branch)) == 0:
+	case s.rec.Result == record.Pending && len(recordGaps(s.rec, s.branch)) == 0:
 		w := u.Ledger.Write(s.id)
 		record.Block(w)
 		done := u.commit(s, w, RunOutcome{Bead: s.id, Action: ActBlocked, Detail: "the whole record had landed on an open bead"})
@@ -409,22 +408,6 @@ func (u *run) open(s state) RunOutcome {
 		Detail: "the record was half written: the bead goes back to the refinery, and no merge is requested"})
 }
 
-// gaps names what a record lacks to name its PR, as the evaluator reads it:
-// the URL must name the repository and number the record names, and the head
-// must be a full commit id.
-func gaps(r record.Record, branch string) []string {
-	missing := recordGaps(record.Pending, r.URL, r.Number, r.Repo, r.Head, r.Target, branch)
-	if _, repo, n, ok := record.ParseURL(r.URL); ok && len(missing) == 0 {
-		if !strings.EqualFold(repo, r.Repo) || strconv.Itoa(n) != r.Number {
-			missing = append(missing, "a URL that names its repository and number")
-		}
-	}
-	if r.Head != "" && !record.IsObjectID(r.Head) {
-		missing = append(missing, "a validated head that is a full commit id")
-	}
-	return missing
-}
-
 // blocked handles a blocked bead the refinery holds: the record must be whole
 // and must read pending, or a verified merge whose close did not land. Its PR is
 // read from GitHub by its number.
@@ -438,14 +421,14 @@ func (u *run) blocked(s state) RunOutcome {
 	}
 	switch r.Result {
 	case record.Pending:
-		if missing := gaps(r, s.branch); len(missing) > 0 {
+		if missing := recordGaps(r, s.branch); len(missing) > 0 {
 			return u.invalid(s, "the pending record is incomplete: it lacks "+strings.Join(missing, ", "))
 		}
 		if r.MergedSHA != "" || r.MergedAt != "" || r.State == "merged" {
 			return u.invalid(s, "the pending record carries a merge's evidence")
 		}
 	case record.Merged:
-		if !mergeEvidence(r) || len(gaps(r, s.branch)) > 0 {
+		if !mergeEvidence(r) || len(recordGaps(r, s.branch)) > 0 {
 			return u.invalid(s, "the record names a merge without its whole evidence")
 		}
 	default:

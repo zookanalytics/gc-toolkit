@@ -24,7 +24,6 @@ package pr
 
 import (
 	"fmt"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -134,9 +133,6 @@ type Sources struct {
 // Town's pending record, the PRs the evaluator answers for.
 func OnRecord(v string) bool { return record.OnRecord(v) }
 
-// prURL is a PR's URL: https, its host, its repository and its number.
-var prURL = regexp.MustCompile(`^https://([^/]+)/([^/]+/[^/]+)/pull/([0-9]+)$`)
-
 // Ready answers whether the PR the bead owns is ready to merge at its current
 // revision. A read that fails returns its error and no answer. A bead with no
 // complete pending record is not ready, and its answer says what the record
@@ -159,13 +155,11 @@ func Ready(src Sources, bead string) (Answer, error) {
 		}
 		return strings.TrimSpace(v)
 	}
-	stored, serr := record.Read(r)
+	rec, serr := record.Read(r)
 	if err == nil {
 		err = serr
 	}
-	rec := struct{ result, url, number, repo, head, target, branch string }{
-		stored.Result, stored.URL, stored.Number, stored.Repo, stored.Head, stored.Target, read(branchKey),
-	}
+	branch := read(branchKey)
 	holds := []string{read(mergeHoldKey), read(rebaseHoldKey)}
 	rc := receipts{
 		review: mark(read(reviewWatermarkKey)), comment: mark(read(commentWatermarkKey)),
@@ -182,13 +176,13 @@ func Ready(src Sources, bead string) (Answer, error) {
 	}
 
 	// The record names the PR the rest is read about.
-	host, number, missing := "", 0, recordGaps(rec.result, rec.url, rec.number, rec.repo, rec.head, rec.target, rec.branch)
-	if m := prURL.FindStringSubmatch(rec.url); m != nil && len(missing) == 0 {
-		host = m[1]
-		number, _ = strconv.Atoi(rec.number)
-		if !strings.EqualFold(m[2], rec.repo) || m[3] != rec.number {
-			missing = append(missing, "a URL that names its repository and number")
-		}
+	missing := recordGaps(rec, branch)
+	if !OnRecord(rec.Result) {
+		missing = append([]string{fmt.Sprintf("a pending merge_result (it reads %q)", rec.Result)}, missing...)
+	}
+	host, number := "", 0
+	if len(missing) == 0 {
+		host, _, number, _ = record.ParseURL(rec.URL)
 	}
 	if len(missing) > 0 {
 		ans.Conditions = append(ans.Conditions, Condition{Kind: KindRecord,
@@ -218,14 +212,14 @@ func Ready(src Sources, bead string) (Answer, error) {
 
 	// GitHub's side, read fresh.
 	hub := src.GitHub(host)
-	p, err := hub.PullRequest(rec.repo, number)
+	p, err := hub.PullRequest(rec.Repo, number)
 	if err != nil {
 		return Answer{}, err
 	}
 	ans.Head, ans.Target = p.HeadRefOid, p.BaseRefName
 	// Empty rather than nil, so a ready answer's conditions encode as [].
 	front := []Condition{}
-	if ids := identityGaps(p, rec.url, number, rec.repo, rec.branch, rec.target); len(ids) > 0 {
+	if ids := identityGaps(p, rec.URL, number, rec.Repo, branch, rec.Target); len(ids) > 0 {
 		front = append(front, Condition{Kind: KindRecord,
 			Detail: "the PR on GitHub is not the one the record names: " + strings.Join(ids, ", ")})
 	}
@@ -235,20 +229,20 @@ func Ready(src Sources, bead string) (Answer, error) {
 	if p.IsDraft {
 		front = append(front, Condition{Kind: KindDraft, Detail: "the PR is a draft"})
 	}
-	if p.HeadRefOid != rec.head {
+	if p.HeadRefOid != rec.Head {
 		front = append(front, Condition{Kind: KindHead,
-			Detail: fmt.Sprintf("the PR's head %s is not the head the refinery validated, %s", p.HeadRefOid, rec.head)})
+			Detail: fmt.Sprintf("the PR's head %s is not the head the refinery validated, %s", p.HeadRefOid, rec.Head)})
 	}
 	if p.MergeStateStatus != "CLEAN" {
 		front = append(front, Condition{Kind: KindMergeState, Value: p.MergeStateStatus,
 			Detail: fmt.Sprintf("GitHub reports the PR's merge state %s, not CLEAN", p.MergeStateStatus)})
 	}
-	suites, err := hub.CheckSuites(rec.repo, p.HeadRefOid, number)
+	suites, err := hub.CheckSuites(rec.Repo, p.HeadRefOid, number)
 	if err != nil {
 		return Answer{}, err
 	}
 	front = append(front, checks(suites)...)
-	reviews, err := hub.Reviews(rec.repo, number)
+	reviews, err := hub.Reviews(rec.Repo, number)
 	if err != nil {
 		return Answer{}, err
 	}
@@ -271,11 +265,11 @@ func Ready(src Sources, bead string) (Answer, error) {
 	if err != nil {
 		return Answer{}, err
 	}
-	threads, err := hub.ReviewThreads(rec.repo, number)
+	threads, err := hub.ReviewThreads(rec.Repo, number)
 	if err != nil {
 		return Answer{}, err
 	}
-	comments, err := hub.IssueComments(rec.repo, number)
+	comments, err := hub.IssueComments(rec.Repo, number)
 	if err != nil {
 		return Answer{}, err
 	}
@@ -294,29 +288,38 @@ func Ready(src Sources, bead string) (Answer, error) {
 	return ans, nil
 }
 
-// recordGaps names what a pending record lacks.
-func recordGaps(result, url, number, repo, head, target, branch string) []string {
+// recordGaps names what a pending record lacks to name its PR, the one reading
+// of a whole record that the evaluator and the landing order share: a PR URL,
+// read through record.ParseURL, that names the repository and the number the
+// record names, the number, the repository, the head the refinery validated as
+// a full commit id, the target and the branch. Whether its merge_result reads
+// pending is each reader's own question.
+func recordGaps(r record.Record, branch string) []string {
 	var gaps []string
-	if !OnRecord(result) {
-		gaps = append(gaps, fmt.Sprintf("a pending merge_result (it reads %q)", result))
-	}
-	if !prURL.MatchString(url) {
+	_, repo, number, urlOK := record.ParseURL(r.URL)
+	if !urlOK {
 		gaps = append(gaps, "a PR URL")
 	}
-	if n, err := strconv.Atoi(number); err != nil || n < 1 {
+	if n, err := strconv.Atoi(r.Number); err != nil || n < 1 {
 		gaps = append(gaps, "a PR number")
 	}
-	if repo == "" {
+	if r.Repo == "" {
 		gaps = append(gaps, "a repository")
 	}
-	if head == "" {
+	if r.Head == "" {
 		gaps = append(gaps, "the head the refinery validated")
 	}
-	if target == "" {
+	if r.Target == "" {
 		gaps = append(gaps, "a target")
 	}
 	if branch == "" {
 		gaps = append(gaps, "a branch")
+	}
+	if len(gaps) == 0 && (!strings.EqualFold(repo, r.Repo) || strconv.Itoa(number) != r.Number) {
+		gaps = append(gaps, "a URL that names its repository and number")
+	}
+	if r.Head != "" && !record.IsObjectID(r.Head) {
+		gaps = append(gaps, "a validated head that is a full commit id")
 	}
 	return gaps
 }

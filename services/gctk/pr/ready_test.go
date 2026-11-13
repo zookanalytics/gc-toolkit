@@ -386,6 +386,16 @@ func TestAnIncompleteRecordReadsNoGitHub(t *testing.T) {
 		w.md["pr_url"] = "https://github.com/acme/widgets/pull/8"
 		only(t, w.answer(t), pr.KindRecord)
 	})
+	// The landing order reads such a head as a record that no longer names its
+	// PR, and the evaluator shares its reading of a whole record.
+	t.Run("a validated head that is no full commit id", func(t *testing.T) {
+		w := ready()
+		w.md["pr_head_sha"] = "abc1234"
+		only(t, w.answer(t), pr.KindRecord)
+		if reads := w.github.Reads(); len(reads) > 0 {
+			t.Fatalf("read GitHub %v for a record whose head is no commit id", reads)
+		}
+	})
 }
 
 func TestTheBeadsOwnWaitsAndHolds(t *testing.T) {
