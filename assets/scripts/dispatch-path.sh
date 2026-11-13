@@ -24,8 +24,8 @@
 # check-step-terminal, which counts a step as offerable only when it has one.
 # The readers that leave a held bead alone source it too: the proactive scan and
 # sling, which file no first reaction for one; check-blocked-work-armed, which
-# owes one no arm; deferred-dispatch.sh's reconcile, which slings no armed bead
-# while it is held, because a sling reads no hold, and
+# owes one no arm; deferred-dispatch.sh's list, which shows an armed bead held
+# while it is held, as the start (gctk bead start-armed) sends none, and
 # check-armed-dispatch-owed, which owes such an arm no dispatch for the same
 # reason; check-po-queue-only, which reads a bead routed or assigned to the po
 # as reaching it only when no hold holds it, since a held bead reaches no seat;

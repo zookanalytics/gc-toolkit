@@ -51,12 +51,13 @@ says how the pass applies them.
     --reason "waits for <blocker> to land"
 ```
 
-That writes the pending dispatch onto the work bead as metadata, appends
-a note saying who armed it and why, and returns. Nothing is held in your
-context; you may drain immediately.
+That hands the call to `gctk bead arm`, which writes the pending dispatch onto
+the work bead in one write, with a note saying who armed it and why, and
+returns. Nothing is held in your context; you may drain immediately.
 
-Extra `gc sling` arguments are recorded too, and replayed verbatim when
-the dispatch fires:
+The arm records the formula the start pours: the one `--sling-arg --on
+--sling-arg <formula>` names, or else the target's default, which the city's
+config gives. The arm passes `gc sling` nothing else:
 
 ```bash
 deferred-dispatch.sh arm tk-abc --target gc-toolkit/gc-toolkit.polecat \
@@ -64,8 +65,12 @@ deferred-dispatch.sh arm tk-abc --target gc-toolkit/gc-toolkit.polecat \
 ```
 
 `arm` is fail-closed. It refuses a bead that is closed, one that is
-already dispatched (`in_progress`, or carrying `gc.routed_to`), one with
-no `--target`, and one held at any status other than `open`.
+already dispatched (`in_progress`, or carrying `gc.routed_to`), one already
+armed for another target or formula, one with no `--target`, a target that
+names no formula to pour, one held at any status other than `open`, and one
+with a wait edge onto a bead in another store, which bd never holds a bead on.
+An arm already on the bead for the same target and formula is a success that
+writes nothing.
 `gc.execution_routed_to` alone does not count as dispatched: it is
 execution provenance, not a live queue, and an open bead carrying only it
 is the shape `doctor/check-blocked-work-armed` flags and names arming as
@@ -96,8 +101,9 @@ dispatch is already decided sources that file: the proactive scan and sling,
 `assets/scripts/stand-down.sh`. So an arm also keeps the bead out of the
 proactive scan. `tools/gc-proactive.sh scan` looks for raw input to react to,
 and it drops a bead that has a dispatch path.
-Otherwise a sweep that ran between a blocker closing and the next reconcile
-pass would sling a first reaction at a bead the arm is about to dispatch.
+Otherwise a sweep that ran between a blocker closing and the deferred-dispatch
+order's next pass would sling a first reaction at a bead the arm is about to
+dispatch.
 `gc-helm.sh react` and `operator-intake.sh` skip the scan and name a bead to
 `tools/gc-proactive.sh sling` directly, so the sling refuses a bead that has a
 dispatch path too, and a reaction they ask for cannot race the arm either.
@@ -105,7 +111,7 @@ dispatch path too, and a reaction they ask for cannot race the arm either.
 To see what is owed, in this rig's store:
 
 ```bash
-deferred-dispatch.sh list        # each armed bead: held (and by what) / dispatchable / closed; then each notice owed
+deferred-dispatch.sh list        # each armed bead and what the next pass would do with it; then each notice owed
 deferred-dispatch.sh list --json # the armed beads alone, as bd lists them: no hold, no notice
 deferred-dispatch.sh disarm <bead> --reason "superseded by <x>"
 ```
@@ -121,9 +127,10 @@ A person who rules that armed work a human gate holds will not go on runs
 `stand-down.sh <bead> --key <situation-key> --ruling "<why>"`. Answering the gate
 first would send the work, and bd refuses to close a bead an open gate blocks,
 so it removes the arm, ends the run beneath the bead, answers the gate and closes
-the bead, in that order. The pass reads the arm once more just before it slings,
-so a pass already running cannot send the work past that disarm: a pass that read
-the gate open holds the bead, and one that read it closed reads the arm gone. A
+the bead, in that order. The disarm takes the bead's dispatch lock, which a start
+holds while it sends the bead and reads the arm once more under, so a pass already
+running cannot send the work past that disarm: a pass that read the gate open
+holds the bead, and one that read it closed reads the arm gone. A
 gate that also holds another open bead takes no answer, because an answer releases
 everything it blocks. With `--successor` naming the evidence, the bead leaves that
 gate after its arm and route are gone. Removing that edge first would send the work,
@@ -214,219 +221,149 @@ bead waits on its blocker.
 
 ## What performs it
 
-`orders/deferred-dispatch.toml` — a `cooldown` exec order at `scope =
-"rig"`, so each importing rig reconciles its own store on its own clock,
-one pass at a time (see
-[One pass at a time, inside the timeout](#one-pass-at-a-time-inside-the-timeout)).
-Each pass runs `deferred-dispatch.sh reconcile`, which:
+`orders/deferred-dispatch.toml` is a `cooldown` exec order at `scope = "rig"`,
+so each importing rig's pass reads its own store on its own clock. Each pass
+runs `gctk bead start-armed` on the rig's store (`services/gctk/arm`), which:
 
-- **notifies** first: it sends every notice owed whose bead `bd` reports
-  ready, and retires the notices no longer owed (see
-  [Work assigned to a named agent owes a notice](#work-assigned-to-a-named-agent-owes-a-notice));
-- **dispatches** every armed open bead nothing holds — the ones `bd` reports
-  ready, and also a bead in flight that bd keeps unready only through a held
-  ancestor (see below) — reading the bead once more, so that an arm disarmed
-  since the pass's listing is not sent and one a hold label has held since then
-  keeps its arm, then stamping its own
-  `gc.dispatch_when_ready_slung` marker in its unproven `slinging@` state,
-  running the recorded sling, promoting the marker to `slung@` on success,
-  then clearing the record;
-- **retires** the record on an armed bead that has closed, or whose sling
-  reconcile has proven — a `slung@` (or pre-two-state bare-timestamp)
-  `gc.dispatch_when_ready_slung` marker surviving into a later pass, from a
-  pass that died before disarming — so recovery reads one marker reconcile
-  owns rather than the lane-specific stamps a sling leaves (`gc.routed_to`
-  for a plain sling, `gc.execution_routed_to` for an `--on` pour) — without
-  slinging again;
-- **re-slings** an arm whose marker survived in the unproven `slinging@`
-  state — a pass that died before or during its sling, or a failed sling
-  whose rollback did not land — because that dispatch was never proven and
-  retiring it would silently lose the work;
-- **withholds** — leaving the record armed and saying so — when a blocker
-  holds the bead, on it or on an ancestor, when someone has it by `assignee`,
-  when the sling fails, when the recorded arguments are malformed, or when
-  the pass has spent its budget;
-- **names as STRANDED**, every pass and on stderr, an armed bead sitting
-  at a non-`open` live status. The record is kept, because the status may
-  yet be cleared, but it is counted apart from `held` and reported rather
-  than left in a silent count. `list` marks the same beads
-  `STRANDED — status=<s> is never slung`. A stranded bead and a held
-  one are both "not ready", and conflating them is what hides a dead arm:
-  the held one dispatches when its hold releases, the stranded one never
-  dispatches at all.
+- **retires** the arm on each armed bead that has closed, and on each that
+  carries a `merge_result`, whatever holds the bead. Another path has delivered
+  the work of a bead that carries one, and pouring its formula again would make
+  a redundant workflow and input convoy. The arm is cleared with a note that
+  names the case, and nothing is slung.
+- **selects** the beads to start by the pool's own serve rule: `bd ready` over
+  the beads that carry `gc.dispatch_when_ready`, with the flags Gas City
+  renders for a pool's routed demand, `--unassigned`, `--exclude-type=epic`
+  and an `--exclude-label` for each of `hold:mayor`, `hold:external` and
+  `human`. The arm sends what the pool would serve. bd's readiness holds a bead
+  on a wait of its own or of any ancestor, so a park on an epic holds an armed
+  bead under it whether or not its work has started.
+- **holds back** what bd cannot judge, from `gctk bead holds`' answer for the
+  bead: a `waits-for` edge of its own, which the answer calls `unjudged`, and a
+  wait edge into another store, which bd never holds a bead on. It also holds a
+  bead that carries one of Gas City's hold labels in any spelling, as the
+  pool's hook does after bd's exact comparison.
+- **starts** each bead left, under the bead's dispatch lock (below). It reads
+  the bead once more, so an arm removed since the pass listed it is not sent, a
+  hold label set since then keeps the arm, and a bead that closed or was
+  delivered since then has its arm retired. It resolves the formula: the one
+  the arm names, else the target's default. After an earlier attempt it first
+  looks for the root that attempt poured (below). It counts the attempt in one
+  write, runs `gc sling <target> <bead> --on <formula> --title "<formula>
+  arm:<bead>@<armed at>"`, and clears the arm once the sling exits 0.
+- **prints** one JSON line per armed bead: `gctk bead holds`' answer for it,
+  with what the pass did with its arm. That is a retire and its case, a start,
+  a send already made, a hold and what holds the bead, a question to a person,
+  a bead left for the next pass, or a failure. A bead at a status other than
+  `open` is held, and its line says so on every pass, because no wait landing
+  dispatches it.
 
-The arm waits on what holds the bead, as `gctk bead holds` answers it, the
-store's own rule. A wait of the bead's own that has not landed holds it: a
-`blocks` or `conditional-blocks` edge onto a bead in the same store that is
-neither closed nor pinned. So does a wait on one of its parent-child ancestors,
-while the bead's work has not started, which is bd's cascade. A park, a
-prerequisite and a human gate hold alike, so an armed member of a parked epic,
-of an epic that waits on a task, or of an epic that waits on a person's answer
-is held at any depth under it, and so is a bead whose own blocker is still
-open. A wait on an epic is a wait of the whole, which bd's cascade carries to
-every part that has not started, so a wait that belongs to one member goes on
-that member
-([component-model.md](component-model.md#i1-in-full-the-hold-the-demand-and-the-shape-law)).
-A closed or pinned blocker holds nothing, a human gate included, as the store
-counts it, and so does an edge onto a bead in another store, which `bd dep
-add` accepts: `arm` warns of one when it records the arm, and
-`doctor/check-wait-is-an-edge` lists every one. A `waits-for` edge of the
-bead's own is one the bd the city runs cannot judge yet, so the answer is
-unjudged and the pass holds the bead.
+A held arm keeps its record. Releasing the hold, by closing a park's gate or by
+the prerequisite landing, needs no re-arm: the first pass after it dispatches
+the bead. `deferred-dispatch.sh list` prints each arm as the start's dry run
+reads it: `HELD by <blocker> "<title>"`, adding `on ancestor <id>` when the
+wait sits on an ancestor and `(waits-for, unjudged)` for a wait the store
+cannot judge yet, `DISPATCHABLE NOW`, `STRANDED` for a status the start never
+sends, and the rest by the act the next pass would take.
 
-A read that fails fails the pass, so an unread hold never passes for none. A
-bead the read could not answer stays armed for the next pass, and `list` marks
-it `UNREAD`.
+### Exactly once
 
-A hold holds work that has not started. A bead whose work has started is in
-flight: it is claimed (`in_progress` or `hooked`), it carries a `branch`, a
-`merge_result` or a `rejection_reason`, or a live run past its load-context
-works it. Only a wait of its own holds a bead in flight, so a park on its epic
-leaves it running. An armed re-dispatch of work already begun therefore fires
-under a parked epic once its own blockers close, while the epic's members that
-have not started stay held, including the ones under a parent in flight.
+Two records Gas City keeps send each arm once.
 
-The pass asks `gctk bead holds` once for every open armed bead in the store and
-slings each one it answers clear. One it answers blocked, held or unjudged
-keeps its arm. The status gate still holds (a non-`open` bead is never
-dispatched), and an assignee still keeps the pass off the bead. The one read
-lists the beads named and then each generation of ancestors, so its cost does
-not grow with the number of armed beads under a held epic.
+- `gc sling` exits 3 only when its launch check counts a live workflow on the
+  bead, and it names each one. Gas City's launch check refuses a second pour of
+  the same formula while the first run is live, so two passes, or a pass and a
+  sling a killed pass left running, pour once. An exit 3 that names a workflow
+  which is not an unfinished pour (below) means the work is sent already, so
+  the arm is cleared and nothing is slung.
+- The token `arm:<bead>@<armed at>` titles the root each start pours. Gas
+  City's launch check counts only a run that has not finished, so a start that
+  died after its sling landed and before it cleared the arm would pour again
+  once that run had ended. After an earlier attempt, the start searches for the
+  token first (`gc bd list --all --include-ephemeral --include-gates
+  --title-contains "arm:<bead>@<armed at>"`). A root it finds that is not an
+  unfinished pour means that attempt landed, whichever formula it poured, so the
+  arm is cleared and nothing is slung. A start that succeeds the first time
+  searches nothing.
 
-A hold label holds an arm too. An open bead carrying one of Gas City's hold
-labels, `hold:mayor` or `hold:external` (`has_dispatch_hold` in
-`dispatch-path.sh`), names a next actor that is not a worker. bd's readiness
-does not read the label and a sling reads no hold, so the pass leaves the arm
-until a write lifts the label, and `list` shows it as
-`HELD by its hold:mayor label`. `arm` still records an arm on a held bead, and
-it fires once the hold is lifted.
+A root is an unfinished pour when it carries `molecule_failed=true`, or when it
+or a bead poured under it still carries the fence `gc.instantiating`, whatever
+their status. Gas City leaves one when a pour fails part way or the sling that
+made it is killed, and while such a root is open, `gc sling` refuses every pour
+of that formula on the bead. So the start never reads one as the work sent.
+When each root an exit 3 names, or each open root the token finds, is an
+unfinished pour, the start keeps the arm and asks a person, naming each root
+and the command that closes it with its steps, `gc convoy delete <root>
+--force`. A closed unfinished pour holds nothing back, so the next start slings.
 
-A held arm keeps its record. Releasing the hold, by closing a park's gate or
-by the prerequisite landing, needs no re-arm: the first pass after it
-dispatches the bead. `list` shows a held arm as `HELD by <blocker>
-"<title>"`, adding `on ancestor <id>` when the edge sits on an ancestor, and
-`(waits-for, unjudged)` for a wait the store cannot judge yet, so a parked arm
-says why it is parked and what releases it. The pass log names,
-on every pass, each hold that sits on an ancestor once, followed by the arms
-it keeps. An arm its own blocker holds is counted in the summary without a
-line, because the output of a failing pass reaches its `order.failed` event
-only as its last 2 KB, and a line per arm would push the pass's warnings out.
+The retire on a delivered bead covers what neither record sees: the run that
+delivered the work was not poured by the arm, so it carries no token, and once
+it has ended no live root is left for exit 3.
 
-The pass stamps `gc.dispatch_when_ready_slung` as `slinging@<ts>`
-**first**, slings **second**, promotes the marker to `slung@<ts>` on
-success **third**, and clears the whole record **last**. A pass that dies
-before promoting the marker leaves the unproven `slinging@` state, which
-the next pass re-slings rather than retires — so a crash mid-dispatch costs
-a retry, never a silently lost dispatch. A marker surviving as `slung@` (or
-an unprefixed timestamp) is a proven dispatch whose pass died before
-disarming, and the next pass retires it rather than pouring a second time —
-one marker reconcile owns, not an inference from whichever stamp a delivery
-lane happened to leave. A sling that fails rolls the marker back, so the arm
-retries next pass.
+### When a start keeps failing
 
-An unreadable listing exits non-zero and says so. It never prints a
-zero-count summary — for a dispatcher, "I could not see the queue" and
-"nothing was owed" reading alike is the same disappearing hold this
-machinery exists to remove.
+The arm counts its attempts. At three, `GC_MAX_DISPATCH_SLING_FAILURES` by
+default, the start asks a person instead of slinging again, because each
+attempt mints an input convoy. It asks through a human gate on the bead under
+the key `deferred-dispatch-sling-failed.<bead>`, or through a conversation
+(`gc-helm.sh open`) when the bead has an open child, since a gate on a parent
+would hold its unstarted parts too. The arm stays. Disarming it ends the retry,
+and disarming and arming it again starts its attempts over. An ask that does
+not reach a person keeps the arm, and the next pass asks again.
 
-Three checks keep the halves together. The positive control closing
-`assets/scripts/deferred-dispatch.test.sh` asserts the order file ships,
-is a rig-scoped cooldown, does not opt out of the single-flight gate, and
-still reaches this script's `reconcile` verb. `doctor/check-cadence-live`
-(I10) then asserts the registration is live on every importing rig and
-has fired within its cadence window: `max(3×interval, floor)`, where the floor
-is one trip of the order dispatch rotation (`assets/scripts/order-cadence.sh`).
-Ship the arm without the cadence
-and `arm` still succeeds, still writes a well-formed record, and nothing
-ever performs it — the same invisible hold, one layer down.
-`doctor/check-armed-dispatch-owed` closes the gap the other two leave: the
-cadence can be live and the pass still leave a dispatch unmade, so it flags an
-arm nothing holds that has stayed open and armed past the reconcile window, or
-one armed at a non-open status the pass can never dispatch — a dispatch
-silently not firing, surfaced before a human has to notice it days later. It
-reads holds through the same `gctk bead holds`, and hold labels through the
-same `dispatch-path.sh`, so an arm a park or a label holds is not reported.
+A record the start cannot read, such as arguments that name no formula alone,
+is reported as malformed, and nothing is slung on it.
 
-## One pass at a time, inside the timeout
+A listing that cannot be read exits non-zero and says so. It never prints an
+empty pass, because for a dispatcher "I could not see the queue" and "nothing
+was owed" reading alike is the same disappearing hold this machinery exists to
+remove. A read of what holds the arms, or of bd's ready set, that fails sends
+nothing and fails the pass, while the retires still run.
 
-Two passes over one store would sling the same ready bead twice, which
-mints two input convoys for one work bead and bumps its attempt count
-twice. The controller's open-tracking gate keeps a second run from
-starting only while the first run's tracking bead stays open, and a sweep
-can close that bead under a pass that is still running. The core
-`order-tracking-sweep` order closes any tracking bead older than its
-`--stale-after` (10m). On a gc build that does not extend the window to the
-order's timeout, the controller watchdog closes it 2m after dispatch. So
-the pass carries its own lock:
+Three checks keep the halves together. A test in `services/gctk/arm` asserts
+that the order ships, is a rig-scoped cooldown that does not opt out of the
+single-flight gate, runs `gctk bead start-armed` on its rig's store, and gives
+the start's deadline room below its timeout. `doctor/check-cadence-live` (I10)
+asserts the registration is live on every importing rig and has fired within
+its cadence window: `max(3×interval, floor)`, where the floor is one trip of
+the order dispatch rotation (`assets/scripts/order-cadence.sh`). Ship the arm
+without the cadence and `arm` still succeeds and writes a well-formed record,
+and nothing ever performs it. `doctor/check-armed-dispatch-owed` closes the gap
+the other two leave: the cadence can be live and the pass still leave a
+dispatch unmade, so it reads each arm from the start's dry run and flags one
+the next pass would start that has stayed armed past the order's window, or
+one armed at a status other than `open`, which the start never sends.
 
-- Before it reads the store, `reconcile` takes a non-blocking exclusive
-  `flock` on `<GC_PACK_STATE_DIR>/deferred-dispatch/<rig>/pass.lock` and
-  records its pid and start time in `pass.holder` beside it. `<rig>` is
-  `GC_RIG`. With only `GC_RIG_ROOT` set, it is the root's last path element
-  plus a checksum of the whole path, so two rigs never share a lock. The
-  lock depends on no bead surviving.
-- The lock, its state key and the way a pass runs what it calls are
-  `bd-lib.sh`'s `take_pass_lock`, `rig_state_key` and `pass_child`.
-  `refinery-reconcile.sh` takes its pass lock through the same
-  `take_pass_lock` and runs its arms through `pass_child`, under a state key
-  of its own.
-- Every `gc`, `human-gate.sh` and `gc-helm.sh` call the pass makes runs
-  through `pass_child`, with the lock's descriptor closed. A process
-  that a `gc` call starts can outlive the pass: a store read can bring up a
-  Dolt server, and `gc` hands the descriptors it was given to what it starts. A
-  process that kept the descriptor would hold the lock against every later
-  pass. The subshell `pass_child` runs a call from holds the descriptor until
-  the call exits, so a pass killed by itself leaves the lock held while the
-  call it was making runs on. The kernel releases the lock once the pass and
-  its calls have exited, however they exit, `SIGKILL` included. The order's
-  timeout kills the pass's whole process group, its `gc sling` with it, and
-  the next pass re-attempts the unconfirmed sling through the `slinging@`
-  recovery.
-- A pass that finds the lock held prints one line and exits 0 without
-  listing or slinging. Under the order it also declares the run `skipped`
-  in the file the controller names in `GC_ORDER_OUTCOME_FILE` (gascity's
-  exec-order outcome contract, `internal/orders/exec_outcome.go`), which the
-  controller records as an `order.skipped` event. The controller keeps an
-  exit-0 run's output nowhere else.
-- A holder older than `DEFERRED_DISPATCH_LOCK_STALL_SECS` (900s) is not a
-  slow pass, because the order's timeout would have killed it. That pass
-  exits 1, so `order.failed` reports the wedge.
-- A pass that cannot take the lock at all exits 1 before it reads the
-  store. That covers `flock` missing from `PATH` and a lock file the pass
-  cannot create or open. Nothing else carries single-flight, so a pass that
-  ran anyway would be the second slinger the lock exists to prevent.
+## The dispatch lock and the time bound
 
-The order's `timeout` kills a pass wherever it stands. A sling killed
-mid-flight has already minted its input convoy, leaves it with no
-workflow, and spends one of the bead's attempts. So a pass measures a
-budget from its own start, `DEFERRED_DISPATCH_PASS_BUDGET_SECS` (420s,
-0 = unpaced), and starts a notice or a sling only while at least
-`DEFERRED_DISPATCH_SLING_ALLOWANCE_SECS` (90s) of it is left. Past that
-point it sends no notice, starts no sling and files no escalation, since
-`human-gate.sh` is store work the timeout can cut short too. Each remaining
-ready bead keeps its arm with no marker on it, this pass counts no attempt
-against it, and the next pass slings it. A notice it leaves keeps its record,
-and the next pass sends it. A capped bead stays capped and armed, and the next
-pass files its escalation. The pass names the beads and notices it left,
-counts them as `left for the next pass` in its summaries, and declares the
-run `partial`, naming each bead and what it left there. The controller reads a
-declaration only after a run that exits 0, so a pass that also had a
-failure declares nothing. It exits 1, and its output, which the controller
-keeps for a failed run, names what it left. The retires and reports for the
-rest of the armed set still run. Each retire is one write, and a retire the
-timeout cuts short is made again by the next pass.
+Every start of an armed bead holds the bead's dispatch lock from its read of
+the bead to its last write, and so do `gctk bead arm` and `gctk bead disarm`.
+The lock is an `flock` on `dispatch-<bead>.lock` under the city's
+`.gc/runtime/packs/gc-toolkit/`, the directory Accept's lock uses, and the
+bead's id names its store by its prefix. While it is held the file names its
+holder's process and when it took the lock. The kernel releases the lock when
+its holder ends, however it ends, and no process the holder starts, `gc sling`
+among them, carries it.
 
-The budget sits at least one allowance below the timeout, so the last
-sling a pass starts can run for twice its allowance before the timeout
-lands. The stall bound sits above the timeout, so a pass that is still
-running never reads as a wedged one. `deferred-dispatch.test.sh` reads
-these numbers from the files that set them and asserts both pairs. A city
-override that lowers the order's `timeout` has to lower the budget in its
-`env` as well.
+- A start that finds a bead's lock held leaves the bead for the next pass.
+- `arm` and `disarm` wait for a start that holds the lock, up to one sling's
+  allowance, and exit non-zero, writing nothing and naming the holder, if it is
+  still held. So once `disarm` exits 0, no start has the bead in flight and
+  none will send it.
+- Two passes over one store need no lock of their own: each sling runs under
+  its bead's lock and Gas City's launch lock, and the order's open-tracking
+  gate keeps most passes apart anyway.
 
-`--dry-run` writes, sends and slings nothing, so it takes no lock and
-spends no budget. It lists every notice a pass would send or retire and
-every bead it would sling, whether or not a pass is in flight.
+The order's `timeout` kills a pass wherever it stands, and a sling killed
+mid-flight has already minted its input convoy and spent one of the bead's
+attempts. So the start begins no sling once less than one sling's allowance,
+90 seconds, is left before its deadline, 7 minutes after it began, which sits
+below the order's 600-second timeout. Each bead it leaves keeps its arm
+untouched, and the next pass starts it. A sling the timeout does kill is found
+by the next start's token search, which asks a person when that sling left its
+pour unfinished.
+
+`--dry-run` writes, slings and asks nothing and takes no lock. It prints the
+line a pass would print for each armed bead.
 
 ## A bead whose job ends when other work lands
 
@@ -470,12 +407,10 @@ the call site.
 The layer analysis behind that split, and what each `gc`-side direction
 would take, is in `specs/tk-y0ygs/layer-determination.md`.
 
-A blocker in another store holds nothing here either. `bd` resolves a
-dependency id within one store, so a `blocks` edge naming a bead in
-another rig is dropped from `bd show`, absent from `bd blocked`, and
-counts for nothing in `bd list --ready`. An armed bead whose only blocker
-lives elsewhere therefore reads as ready, and the next pass slings it
-while that blocker is still open. The same-store limit belongs to the
-hold doctrine (`docs/component-model.md`, I1), and sequencing across rigs
-needs the blocker mirrored into the waiting bead's own store; that `arm`
-inherits the limit without saying so is tracked on `tk-6shsru`.
+A blocker in another store holds nothing in bd. `bd` resolves a dependency
+id within one store, so a `blocks` edge naming a bead in another rig is
+dropped from `bd show`, absent from `bd blocked`, and counts for nothing in
+`bd ready`. So `arm` refuses a bead with such an edge, and the start holds an
+armed bead that gains one, naming the edge on every pass, until the wait moves
+into the bead's own store or the arm is removed. The same-store limit belongs
+to the hold doctrine (`docs/component-model.md`, I1).

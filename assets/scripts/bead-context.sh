@@ -222,8 +222,8 @@ bd_rows() {
 #                cycle owns. The pour that dispatched it clears its route, so an
 #                empty route there is the pour's residue, not a gate.
 #              routed to a worker or pool.
-#              armed for deferred dispatch: the reconcile order slings it once
-#                its own blockers close.
+#              armed for deferred dispatch: the deferred-dispatch order slings
+#                it once nothing holds it.
 #              assigned to an agent, whose queue holds it.
 #              a merge anchor the cadence acts on: its recorded machine axis is
 #                progressing, or settled before a PR exists (the PR-open pass

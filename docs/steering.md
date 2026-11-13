@@ -352,8 +352,10 @@ dispatches the rebuild as a fresh `mol-polecat-work` pour. A rejected convoy's
 reason and pour go to its rebuild child, which is born with no parent. The
 cascade does not reach a poured workflow, and the rejected bead is in flight, so
 load-context holds it only by its own waits and the rebuild runs. When that
-sling fails, the script arms a retry, which deferred dispatch slings once the
-bead's own blockers close.
+sling fails, the script arms a retry. Deferred dispatch slings it once bd reports
+the bead ready, which a park on its epic delays until the park lifts, because
+bd's readiness holds a bead on its ancestors' waits whether or not its work has
+started.
 
 ### What a park holds
 
@@ -362,9 +364,9 @@ A park holds this work that has not started, in the bead and under it:
 - the bead itself and every pool-routed member, because the pool offers only
   what `bd ready` returns;
 - a member placed under the bead later, through the same cascade;
-- an armed member, because deferred dispatch slings an armed bead only when
-  `gctk bead holds` answers it clear, and a wait on any of its ancestors holds
-  work that has not started;
+- an armed member, because deferred dispatch slings an armed bead only once
+  bd reports it ready, and a wait on any of its ancestors keeps it from bd's
+  ready set;
 - a sling of the parked bead or a member onto mol-polecat-work, made by hand or
   poured before the park, until its run passes load-context. `gc sling --on`
   pours without reading any edge, so the run starts, and load-context's gate
@@ -372,9 +374,11 @@ A park holds this work that has not started, in the bead and under it:
   run and arms a re-dispatch that fires once nothing holds the bead. `park`
   names the poured workflows still at load-context.
 
-An armed member in flight keeps running, such as a rejected handoff armed for a
-retry: once a bead is in flight, as the section above says, only its own waits
-hold it.
+An armed member in flight waits too, such as a rejected handoff armed for a
+retry. Deferred dispatch sends what the pool would serve, and bd's readiness
+holds a bead in flight under a parked epic as it holds one not yet started, so
+the retry waits for the park to lift. That is the one place a park holds work in
+flight: work already running keeps running.
 
 ### Releasing a park
 

@@ -97,9 +97,10 @@ gc sling <rig>/<binding>.polecat "$WORK"
    task is the bead the landing bead waits on whose title begins `summary:`,
    the newest when there are several. It waits on the bead, never the reverse,
    because the summary must read the branch after the bead has landed. The
-   block adds the wait only while the summary task is armed and not yet slung
-   and a wait of its own is still pending, as `gctk bead holds` answers it,
-   because then the deferred-dispatch order cannot sling it first.
+   block adds the wait only while the summary task is armed and a wait of its
+   own is still pending, as `gctk bead holds` answers it, because then the
+   deferred-dispatch order cannot sling it first: the order clears an arm once
+   it has sent the bead.
 3. When the block refuses, file a fresh summary task by step 5 with the bead
    among its waits, which makes the landing bead wait on it too, and arm it as
    in step 7. A summary task that has been dispatched may already have read the
@@ -113,7 +114,7 @@ GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
 RIG_ROOT=$(gc rig list --json | jq -r --arg r <rig> '.rigs[] | select(.name == $r) | .path')
 # dep add's second id is the bead that is waited on.
-"$GCTK" bead holds --db "$RIG_ROOT/.beads" "$SUMMARY" | jq -e '.error == null and (.arm.target // "") != "" and (.arm.slung // "") == "" and (.pending | length) > 0' >/dev/null \
+"$GCTK" bead holds --db "$RIG_ROOT/.beads" "$SUMMARY" | jq -e '.error == null and (.arm.target // "") != "" and (.pending | length) > 0' >/dev/null \
   && gc bd --rig <rig> dep add "$SUMMARY" "$WORK" --type=blocks \
   || { echo "$SUMMARY may already be dispatched, or the store refused its wait on $WORK; file a fresh summary task by step 5" >&2; exit 1; }
 ```

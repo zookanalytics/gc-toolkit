@@ -1682,10 +1682,10 @@ cmd_takeaway() {
     # bead on only through gc sling, once its run has ended. It also drops
     # gc.execution_routed_to, the stamp a pour leaves naming the pool it
     # dispatched to. That stamp is execution provenance, not a live dispatch
-    # path: deferred-dispatch's reconcile keys idempotency on its own
-    # gc.dispatch_when_ready_slung marker, and arm refuses on a live route
-    # (gc.routed_to) or that marker, so neither reads gc.execution_routed_to. No
-    # queue reads it either, a held bead's included, since a hold is its label.
+    # path: the deferred-dispatch start finds an earlier pour by the token on
+    # its root and by gc sling's exit 3, and arm refuses on a live route
+    # (gc.routed_to), so neither reads gc.execution_routed_to. No queue reads
+    # it either, a held bead's included, since a hold is its label.
     # The release drops it.
     #
     # The park unassigns the bead, or assigns it to the --assign agent, so the

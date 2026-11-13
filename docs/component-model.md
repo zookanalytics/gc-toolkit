@@ -257,7 +257,7 @@ closes and no pool is offered it; a bead a live molecule drives is exempt on a
 liveness check, and a bead carrying a hold label is exempt because its dispatch
 is the placement sitting's, warn-only), and `doctor/check-armed-dispatch-owed`
 (the complement to `check-cadence-live`: a bead armed with `gc.dispatch_when_ready`
-that nothing holds is slung by the deferred-dispatch reconcile order within its
+that nothing holds is slung by the deferred-dispatch order's pass within its
 cadence, so one that has stayed armed and open past that window — or one armed at a
 non-open status `bd ready` never answers — is a dispatch silently not firing; a hold
 is `gctk bead holds`' answer or a hold label (`dispatch-path.sh`), so an arm a

@@ -144,7 +144,7 @@ Usage:
   --waiting-on (close, one or more) names a bead in the subject's store whose
   landing ends the subject's job, such as the bead that retires its code. The
   closer is then DEFERRED: the bead waits on each through a `blocks` edge, and
-  a deferred dispatch is armed, so the reconcile pass slings
+  a deferred dispatch is armed, so the deferred-dispatch order slings
   mol-validate-close once they have all closed, and the closer checks that
   their landing did end the job. A bead in another store is refused, because
   a `blocks` edge holds nothing across stores: a person closes the subject
@@ -152,7 +152,7 @@ Usage:
   --after-workflow (close) names the live workflow this close runs inside — a
   frozen mol-first-reaction molecule's own root. The closer is then DEFERRED,
   not slung now: the bead is held on that root and a deferred dispatch is
-  armed, so the reconcile pass slings mol-validate-close once the root closes
+  armed, so the deferred-dispatch order slings mol-validate-close once the root closes
   and the bead is the sole live workflow's target. Omit both to sling the
   closer immediately (a reaction bead, which is not a workflow on the subject,
   or an operator running this by hand).
@@ -757,13 +757,13 @@ fi
 # blocker lifts, so it is held to the SAME roster and store test as --route. Its
 # own check at parse time only tests for a "/", which a copied `<rig>/<agent>`
 # placeholder passes; a target the roster does not know, or one whose rig does
-# not own this bead's store, would arm a dispatch every reconcile pass replays
-# into a failure. The probe answers no only on a positive finding, so an
+# not own this bead's store, would arm a dispatch every pass of the
+# deferred-dispatch order replays into a failure. The probe answers no only on a positive finding, so an
 # unrunnable probe leaves the arm alone. An arm intake holds for placement is
 # never written, so it is not asked about either.
 if [ "$DISPOSITION" = "blocked" ] && [ -n "$THEN_ROUTE" ] && [ -n "$ADMIT" ] && [ -x "$PROACTIVE" ]; then
     DELIVERABLE_WHY="$("$PROACTIVE" deliverable "$THEN_ROUTE" "$BEAD" 2>/dev/null)" || {
-        usage_die "--then-route $THEN_ROUTE cannot pick this bead up — ${DELIVERABLE_WHY:-the pool answered no}. Arming it would record a dispatch the reconcile pass replays into a failure every cycle. Pass a pool that runs (e.g. <rig>/<rig>.polecat), or omit --then-route if no pool takes this bead."
+        usage_die "--then-route $THEN_ROUTE cannot pick this bead up — ${DELIVERABLE_WHY:-the pool answered no}. Arming it would record a dispatch the deferred-dispatch order replays into a failure every cycle. Pass a pool that runs (e.g. <rig>/<rig>.polecat), or omit --then-route if no pool takes this bead."
     }
 fi
 
@@ -956,8 +956,8 @@ notify_assignee() { # <named-agent>
 # bead that retires its code. Its close is owed once they land, and the closer
 # checks that their landing did end the job, so that sling is DEFERRED: the bead
 # is held on each of them and a deferred dispatch is armed, and the
-# deferred-dispatch reconcile pass slings mol-validate-close once they have all
-# closed and bd reports the bead ready.
+# deferred-dispatch order slings mol-validate-close once they have all closed and
+# bd reports the bead ready.
 # --after-workflow names the live reaction workflow a frozen molecule's close
 # runs inside. The closer must be the bead's SOLE dispatch surface, never a
 # second workflow stacked on the still-live reaction

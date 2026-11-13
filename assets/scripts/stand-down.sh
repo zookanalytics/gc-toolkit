@@ -11,9 +11,10 @@
 # first makes the bead ready, which is what the arm waits for. This runs the one
 # order that does end it:
 #   1. It removes the arm, and any notice owed, through deferred-dispatch.sh
-#      disarm, whose exit says the arm is gone. The reconcile pass reads an arm
-#      again just before it slings, so a pass that reads the gate closed reads
-#      the arm gone, and it retires an arm it finds on a closed bead.
+#      disarm, whose exit says the arm is gone. The disarm takes the bead's
+#      dispatch lock, which the deferred-dispatch start holds while it sends the
+#      bead and reads the arm again under, so a start that reads the gate closed
+#      reads the arm gone, and it retires an arm it finds on a closed bead.
 #   2. It ends the run beneath the bead and clears the bead's route and session
 #      pins through gc-helm.sh takeaway --release --no-wait, whose exit says the
 #      release landed, so the bead is left with no route. So nothing is still

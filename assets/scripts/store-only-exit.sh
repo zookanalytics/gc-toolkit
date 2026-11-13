@@ -35,9 +35,9 @@
 #     root in gc.root_bead_id; run-lib.sh confirms that run is live and works
 #     the bead over --convoy;
 #   * deferred-dispatch.sh arms mol-validate-close on the pool this run
-#     executes on (gc.execution_routed_to, else gc.routed_to), and its
-#     reconcile pass slings it once nothing holds the bead.
-# The arm refuses a claimed or routed bead, and reconcile never slings over an
+#     executes on (gc.execution_routed_to, else gc.routed_to), and the
+#     deferred-dispatch order slings it once nothing holds the bead.
+# The arm refuses a claimed or routed bead, and the start never slings over an
 # assignee, so --done needs the bead open, unassigned and unrouted, the shape
 # Gas City leaves the bead a graph.v2 run works.
 #
