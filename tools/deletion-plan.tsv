@@ -4,9 +4,6 @@
 # test. tools/measure.sh reads them at a PR's merge base, so the PR's size
 # section names the lines a change adds to each. A change that retires a file
 # removes its row.
-assets/scripts/escalate.sh	tk-kvdomjb
-assets/scripts/escalation-rig.sh	tk-kvdomjb
-assets/scripts/escalation-rig.test.sh	tk-kvdomjb
 assets/scripts/branch-context.sh	tk-1tfzr71.20
 assets/scripts/branch-context.test.sh	tk-1tfzr71.20
 assets/scripts/branch-supersession.sh	tk-1tfzr71.20
