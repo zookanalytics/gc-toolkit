@@ -52,7 +52,7 @@ type Bead struct {
 	// Anchor is the merge anchor it is a child of, empty on a bead that is no
 	// anchor's child.
 	Anchor string
-	// RoutedTo is the pool, agent or person it is routed to.
+	// RoutedTo is the pool or agent it is routed to.
 	RoutedTo string
 	// WorkOutcome is how its work ended, as the bead reports it.
 	WorkOutcome string

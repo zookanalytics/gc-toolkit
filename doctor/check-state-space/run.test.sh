@@ -26,7 +26,6 @@ states = [
 ]
 closed_states = ["merged"]
 detached_states = ["pre_open_gate"]
-park_route = "parked-with-a-person"
 EOF
 
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
@@ -192,18 +191,16 @@ OUT=$(run_check); RC=$?
 eq "$RC" "2" "both fields set is an ERROR"
 eq "$(printf '%s' "$OUT" | grep -c 'a-14')" "2" "each violated field is reported separately"
 
-store '[{"id":"a-15","status":"open","assignee":"","metadata":{"merge_result":"abandoned","gc.routed_to":"human"}}]'
+store '[{"id":"a-15","status":"open","assignee":"","metadata":{"merge_result":"abandoned","gc.routed_to":"alpha/pool"}}]'
 OUT=$(run_check); RC=$?
-eq "$RC" "0" "a route on a NON-detached state is the declared routing, not a finding"
+eq "$RC" "0" "a route on a NON-detached state is not this rule's finding"
 
-# The park sentinel is a rest, not an offer: signoff.sh routes a round-capped
-# anchor there and it stays parked across the flip to pull_request.
-store '[{"id":"a-17","status":"open","assignee":"","metadata":{"merge_result":"pre_open_gate","gc.routed_to":"parked-with-a-person"}}]'
-OUT=$(run_check); RC=$?
-eq "$RC" "0" "the declared park_route on a detached state is not a finding"
 store '[{"id":"a-18","status":"open","assignee":"","metadata":{"merge_result":"pre_open_gate","gc.routed_to":"human"}}]'
 OUT=$(run_check); RC=$?
-eq "$RC" "2" "a value that is NOT the declared park_route still is (the sentinel is read, not assumed)"
+eq "$RC" "2" "a human route on a detached state is a finding, as any route is"
+has "$OUT" 'gc.routed_to="human"' "it quotes the route"
+OUT=$(GC_PACK_DIR="$TMP/nopack" RIGS_JSON="$TMP/rigs.json" bash "$CHECK" 2>&1); RC=$?
+eq "$RC" "2" "…under the builtin declaration too, which carries no park route"
 
 # --- 11. the detached set is read from lifecycle.toml ---------------------
 # The fixture declares pre_open_gate alone; the builtin fallback also carries

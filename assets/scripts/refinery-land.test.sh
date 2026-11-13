@@ -20,7 +20,7 @@
 #     rework child of it waits on its branch with a merge_result of its own;
 #   - a branch with no change parks the bead behind refinery-false-completion,
 #     unless the target carries the bead's stamped direct landing, which is
-#     recorded;
+#     recorded, and a gate that is not filed parks nothing;
 #   - an unsupported strategy parks the bead behind
 #     refinery-unsupported-strategy;
 #   - a target that moved after the prep lands nothing (exit 6);
@@ -153,6 +153,13 @@ eq "$RC" 4 "the landing parks (exit 4)"
 has "$(logged scripts)" "human-gate --subject z --key refinery-false-completion" "the gate is keyed refinery-false-completion"
 eq "$(meta z merge_result)" "refused_false_completion" "the bead records refused_false_completion"
 eq "$(bassignee z)" "$GC_AGENT" "…and stays with the refinery, held by its gate"
+fresh
+git -C "$SEED" fetch -q origin && git -C "$SEED" branch -f polecat/y origin/main && git -C "$SEED" push -q origin polecat/y
+work y polecat/y
+prepared y polecat/y
+STUB_HUMAN_GATE_RC=1 run --bead y
+eq "$RC" 1 "a refusal whose gate is not filed stops (exit 1)"
+eq "$(meta y merge_result)" "<absent>" "…and parks nothing, so the bead stays with the refinery for the next patrol"
 fresh
 integration
 STAMP=$(branch_with polecat/s s.txt integration/e)

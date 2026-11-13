@@ -202,7 +202,7 @@ if [ -n "$(row_meta "$WORK_JSON" gc.dispatch_when_ready)$(row_meta "$WORK_JSON" 
 fi
 
 "$HELM" takeaway "$WORK" "Stood down on a person's ruling, so nothing builds it" --release --no-wait \
-  || stopped "the arm on $WORK is gone, but its run did not end or its route did not clear, so no gate was answered."
+  || stopped "the arm on $WORK is gone, but its run did not end or its route did not clear, or a live session still holds its claim, as gc-helm.sh says above, so no gate was answered."
 
 for gate in $(printf '%s' "$OPEN_GATES" | jq -r '.[].id' 2>/dev/null); do
   case " $SHARED " in

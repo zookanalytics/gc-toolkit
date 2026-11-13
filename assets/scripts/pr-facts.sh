@@ -3922,7 +3922,6 @@ $CBODY"
                 esac
               fi
               if on_record "$amr" || "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
-                   --route human \
                    --takeaway "PR#$num has a required check failing for a non-code cause — re-run it or fix the infrastructure; the park lifts once it is green" >/dev/null; then
                 human_gate "$id" "pr-fix-noncode.$num" \
                   "PR#$num ($live_url) has failing required check(s) ($rc_allnames) whose cause no code change can fix: a timeout, a cancellation, a startup failure, an action-required check or a deploy-type check.$rc_rerun_note Parked to a human: re-run the check(s) or fix the infrastructure. Once GitHub reads the PR mergeable, this gate is withdrawn and the anchor's park route is cleared."
@@ -4014,7 +4013,6 @@ $CBODY"
                 skipped=$((skipped + 1)); continue
               fi
               if on_record "$amr" || "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
-                   --route human \
                    --takeaway "PR#$num is still red at the head an auto-fixer was already sent to. Fix the failing check by hand or re-run it." >/dev/null; then
                 human_gate "$id" "pr-fix-unmoved.$num" \
                   "PR#$num ($live_url) is red on required check(s) ($rc_names) at head $head_oid, and red-check child $rc_tried was already sent to that head and closed without moving it. Another fixer would only repeat that attempt, so the anchor is parked to a human. Read $rc_tried's notes for why it closed, then fix the check(s) by hand or re-run them. Clearing this gate and gc.routed_to at this head parks it again. Once a push moves the head, clearing both lets the auto-fixer try the new head, up to the attempt cap ($RC_FIX_ATTEMPT_CAP)."
@@ -4040,7 +4038,6 @@ $CBODY"
             case "$rc_attempts" in ''|*[!0-9]*) rc_attempts=0 ;; esac
             if [ -z "$rc_stranded" ] && [ "$rc_attempts" -ge "$RC_FIX_ATTEMPT_CAP" ]; then
               if on_record "$amr" || "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
-                   --route human \
                    --takeaway "PR#$num is still red after $rc_attempts auto-fix attempts — fix the failing check by hand; no more fixers will be sent" >/dev/null; then
                 human_gate "$id" "pr-fix-capped.$num" \
                   "PR#$num ($live_url) has drawn $rc_attempts auto-fix attempts across successive red heads without reaching green on required check(s) ($rc_names); the attempt cap ($RC_FIX_ATTEMPT_CAP) is reached. Parked to a human rather than dispatch another fixer: take it over and fix the check(s) by hand, or merge once it is green. No further fixer is dispatched for this PR, so clearing this gate and gc.routed_to while it is still red parks it again."

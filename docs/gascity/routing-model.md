@@ -181,11 +181,11 @@ differently from a plain sling:
   `workflow-finalize` step by a non-blocking `tracks` edge, so finalize does
   not block it.
 - **The work bead gets `gc.execution_routed_to`**, a key no offer predicate
-  reads. Upstream leaves any `gc.routed_to` the work bead already carried in
-  place, so a bead an earlier plain sling routed stays claimable beside its
-  workflow. The city's fork clears it, on the attach bead and on every member
-  of the root's input convoy, so a workflow is the bead's one live dispatch
-  surface.
+  reads. The same write clears the work bead's `gc.routed_to` and its
+  `gc.run_target`, so a bead an earlier plain sling routed is not claimable
+  beside its workflow, and the workflow's steps are the bead's one live
+  dispatch surface. A later plain sling of a bead that is no workflow's member
+  routes it and then clears that `gc.execution_routed_to`.
 - **A classic (non-graph) attach routes the work bead instead**, with the
   plain sling's contract, and leaves the wisp root unrouted, because the work
   bead is the claimable unit. A standalone launch (`gc sling <target>
@@ -215,23 +215,24 @@ differently from a plain sling:
   !result.DryRun)`, so it is true for an attach that wrote no claim route on
   the work bead.
 
-So a bead meant to be claimed directly — whose own `gc.routed_to` is the
-offer — must not be slung to a target that carries a graph.v2 default
-formula without `--no-formula`: the sling wraps it in a workflow, and on the
-fork it also loses its route.
+So a bead meant to be claimed directly, whose own `gc.routed_to` is the
+offer, is slung with `--no-formula --no-convoy`. Without `--no-formula`, a
+target that carries a graph.v2 default formula wraps the bead in a workflow,
+and the attach clears its route. Without `--no-convoy`, the plain sling also
+files a convoy to track the bead.
 
 *Evidence:* `ApplyGraphRouting` and `DecorateGraphWorkflowRecipe`
 (`internal/graphroute/graphroute.go`); `attachFormulaToBead`,
-`restampWorkBeadRouting` and `checkLegacySourceWorkflowConflict`
-(`internal/sling/sling_core.go`); `PromoteWorkflowLaunchBead` and
-`stampGraphV2RootMetadata` (`internal/sling/sling.go`);
-`liveConvoyTrackedWorkflowRoots` (`internal/sling/sling_attachment.go`);
-`addWorkflowRootDeps` (`internal/formula/compile.go`);
-`deferGraphNodeRouting` (`internal/molecule/graph_apply.go`) and its
-activation in `internal/molecule/molecule.go`; `slingJSONFromResult`
-(`cmd/gc/cmd_sling.go`); read at upstream `1e05ae624` and the fork on
-2026-10-19. The fork's route clear is `retireClaimRoute` and
-`retireInputConvoyClaimRoutes`, which upstream does not have. A convoy
+`restampWorkBeadRouting`, `finalizeInStore`, `clearGraphTakeoverRoute` and
+`checkLegacySourceWorkflowConflict` (`internal/sling/sling_core.go`);
+`PromoteWorkflowLaunchBead` and `stampGraphV2RootMetadata`
+(`internal/sling/sling.go`); `liveConvoyTrackedWorkflowRoots`
+(`internal/sling/sling_attachment.go`); `addWorkflowRootDeps`
+(`internal/formula/compile.go`); `deferGraphNodeRouting`
+(`internal/molecule/graph_apply.go`) and its activation in
+`internal/molecule/molecule.go`; `slingJSONFromResult` (`cmd/gc/cmd_sling.go`);
+read at upstream `e40616cfd` and the installed build `cb80c5354` on
+2026-11-08, where `internal/sling/sling_core.go` is byte-identical. A convoy
 target's input convoy is `NormalizeInputConvoy` and
 `CreateSingleItemInputConvoy` (`internal/graphv2/invocation.go`), and the
 launch lock is `withGraphV2SourceWorkflowLock`

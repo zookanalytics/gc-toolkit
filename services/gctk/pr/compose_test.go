@@ -354,7 +354,6 @@ func TestComposeTheBranchBeads(t *testing.T) {
 		s := storeWith(anchor(nil),
 			rider("F", "2026-02-01T00:00:00Z", map[string]string{"fold_target": "polecat/A"}),
 			rider("M", "2026-03-01T00:00:00Z", map[string]string{"branch": "polecat/M", "merged_target": "polecat/A", "merge_result": "merged"}),
-			rider("H", "2026-04-01T00:00:00Z", map[string]string{"branch": "polecat/A", "gc.routed_to": "human"}),
 			rider("R", "2026-05-01T00:00:00Z", map[string]string{"branch": "polecat/A", "gc.routed_to": "", "fold_target": "polecat/A"}),
 		)
 		got := beads(s, "Body.\n")
@@ -363,9 +362,8 @@ func TestComposeTheBranchBeads(t *testing.T) {
 			"- `A` — feat: add the widget _(opener)_\n" +
 			"- `F` — rider F\n" +
 			"- `M` — rider M _(merged in from `polecat/M`)_\n" +
-			"- `H` — rider H\n" +
 			"- `R` — rider R\n" + beadsClose + "\n"
-		if got.BranchBeads != Written || got.BranchBeadCount != 5 || got.Body != want {
+		if got.BranchBeads != Written || got.BranchBeadCount != 4 || got.Body != want {
 			t.Errorf("(%q, %d):\n%s", got.BranchBeads, got.BranchBeadCount, got.Body)
 		}
 		if again := beads(s, got.Body); again.BranchBeads != Current || again.Body != got.Body {
@@ -385,6 +383,15 @@ func TestComposeTheBranchBeads(t *testing.T) {
 			fake.Bead{ID: "W", Title: "wisp", Status: "open", Ephemeral: true, Metadata: map[string]string{"branch": "polecat/A"}},
 			fake.Bead{ID: "T", Title: "template", Status: "open", Template: true, Metadata: map[string]string{"fold_target": "polecat/A"}},
 		)
+		if got := beads(s, "Body.\n"); got.BranchBeads != Single || got.BranchBeadCount != 1 {
+			t.Errorf("(%q, %d)", got.BranchBeads, got.BranchBeadCount)
+		}
+	})
+
+	// A human route is a route like any other: the child stays out until its
+	// route clears, as a pool-routed one does.
+	t.Run("a child routed to human stays out until its route clears", func(t *testing.T) {
+		s := storeWith(anchor(nil), rider("H", "2026-04-01T00:00:00Z", map[string]string{"branch": "polecat/A", "gc.routed_to": "human"}))
 		if got := beads(s, "Body.\n"); got.BranchBeads != Single || got.BranchBeadCount != 1 {
 			t.Errorf("(%q, %d)", got.BranchBeads, got.BranchBeadCount)
 		}

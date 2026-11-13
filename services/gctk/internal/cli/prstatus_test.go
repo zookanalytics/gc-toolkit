@@ -239,9 +239,9 @@ func TestPRStatusDerive(t *testing.T) {
 }
 
 // --json prints the status beside what holds the PR, the values the held: labels
-// carry. An open human gate blocking the anchor holds it, and a live blocker
-// routed to a person or a decision holds it as the merge pass's stuck-blocker
-// verdict does.
+// carry. An open human gate blocking the anchor holds it, and a live decision
+// holds it as the merge pass's stuck-blocker verdict does. A route marks no
+// blocker as a person's.
 func TestPRStatusDeriveHeld(t *testing.T) {
 	approved := `[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"approved@abc@t","pr.machine":"settled@abc@t"}}]`
 	rework := `[{"id":"tk-k","status":"in_progress","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}}]`
@@ -262,17 +262,17 @@ func TestPRStatusDeriveHeld(t *testing.T) {
 		{"a closed human gate releases the PR", approved, `[]`,
 			map[string]string{"STUB_BLOCKERS": `[{"id":"tk-g","status":"closed","issue_type":"gate","await_type":"human","dependency_type":"blocks"}]`},
 			`{"status":"merging","held":[],"reasons":[]}`},
-		{"a live blocker routed to a person", approved, `[]`,
+		{"a live blocker routed to human is no person's", approved, `[]`,
 			map[string]string{"STUB_BLOCKERS": `[{"id":"tk-d","status":"open","metadata":{"gc.routed_to":"human"},"dependency_type":"blocks"}]`},
-			`{"status":"needs-attention","held":["blocked"],"reasons":[{"held":"blocked","id":"tk-d","title":""}]}`},
+			`{"status":"merging","held":[],"reasons":[]}`},
 		{"a live decision blocker", approved, `[]`,
 			map[string]string{"STUB_BLOCKERS": `[{"id":"tk-d","status":"open","issue_type":"decision","metadata":{},"dependency_type":"blocks"}]`},
 			`{"status":"needs-attention","held":["blocked"],"reasons":[{"held":"blocked","id":"tk-d","title":""}]}`},
-		{"a blocker routed to a person with no status reads open", approved, `[]`,
-			map[string]string{"STUB_BLOCKERS": `[{"id":"tk-d","metadata":{"gc.routed_to":"human"},"dependency_type":"blocks"}]`},
+		{"a decision with no status reads open", approved, `[]`,
+			map[string]string{"STUB_BLOCKERS": `[{"id":"tk-d","issue_type":"decision","metadata":{},"dependency_type":"blocks"}]`},
 			`{"status":"needs-attention","held":["blocked"],"reasons":[{"held":"blocked","id":"tk-d","title":""}]}`},
-		{"a closed blocker routed to a person no longer holds", approved, `[]`,
-			map[string]string{"STUB_BLOCKERS": `[{"id":"tk-d","status":"closed","metadata":{"gc.routed_to":"human"},"dependency_type":"blocks"}]`},
+		{"a closed decision no longer holds", approved, `[]`,
+			map[string]string{"STUB_BLOCKERS": `[{"id":"tk-d","status":"closed","issue_type":"decision","metadata":{},"dependency_type":"blocks"}]`},
 			`{"status":"merging","held":[],"reasons":[]}`},
 		{"a blocker a pool will claim is the city's", approved, `[]`,
 			map[string]string{"STUB_BLOCKERS": `[{"id":"tk-d","status":"open","metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"},"dependency_type":"blocks"}]`},
@@ -286,7 +286,7 @@ func TestPRStatusDeriveHeld(t *testing.T) {
 		{"the merge freeze reads needs-attention and holds nothing", `[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","merge_hold":"true"}}]`, `[]`, nil,
 			`{"status":"needs-attention","held":[],"reasons":[]}`},
 		{"a human gate on the anchor beside a person's blocker", approved, `[]`,
-			map[string]string{"STUB_BLOCKERS": `[{"id":"tk-g","status":"open","issue_type":"gate","await_type":"human","dependency_type":"blocks"},{"id":"tk-d","status":"open","metadata":{"gc.routed_to":"human"},"dependency_type":"blocks"}]`},
+			map[string]string{"STUB_BLOCKERS": `[{"id":"tk-g","status":"open","issue_type":"gate","await_type":"human","dependency_type":"blocks"},{"id":"tk-d","status":"open","issue_type":"decision","metadata":{},"dependency_type":"blocks"}]`},
 			`{"status":"needs-attention","held":["gate","blocked"],"reasons":[{"held":"gate","id":"tk-g","title":""},{"held":"blocked","id":"tk-d","title":""}]}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -471,20 +471,20 @@ func TestPRStatusDeriveWalksToTheGate(t *testing.T) {
 		})
 	}
 
-	t.Run("a gate routed to a person counts once, as a gate", func(t *testing.T) {
+	t.Run("a human gate among the blockers counts once, as a gate", func(t *testing.T) {
 		stubGC(t, unapproved, `[]`)
-		t.Setenv("STUB_BLOCKERS", `[{"id":"tk-g","status":"open","issue_type":"gate","await_type":"human","dependency_type":"blocks","metadata":{"gc.routed_to":"human"}}]`)
+		t.Setenv("STUB_BLOCKERS", `[{"id":"tk-g","status":"open","issue_type":"gate","await_type":"human","dependency_type":"blocks","metadata":{}}]`)
 		out, code := derive(t, "tk-a", "--json")
 		if want := `{"status":"needs-attention","held":["gate"],"reasons":[{"held":"gate","id":"tk-g","title":""}]}` + "\n"; code != 0 || out != want {
 			t.Errorf("derive --json = (%q, %d), want (%q, 0)", out, code, want)
 		}
 	})
 
-	t.Run("a gate that awaits no person, routed to one, is a person's blocker", func(t *testing.T) {
+	t.Run("a gate that awaits no person is no person's blocker, routed to human or not", func(t *testing.T) {
 		stubGC(t, unapproved, `[]`)
 		t.Setenv("STUB_BLOCKERS", `[{"id":"tk-g","status":"open","issue_type":"gate","await_type":"timer","dependency_type":"blocks","metadata":{"gc.routed_to":"human"}}]`)
 		out, code := derive(t, "tk-a", "--json")
-		if want := `{"status":"needs-attention","held":["blocked"],"reasons":[{"held":"blocked","id":"tk-g","title":""}]}` + "\n"; code != 0 || out != want {
+		if want := `{"status":"needs-review","held":[],"reasons":[]}` + "\n"; code != 0 || out != want {
 			t.Errorf("derive --json = (%q, %d), want (%q, 0)", out, code, want)
 		}
 	})

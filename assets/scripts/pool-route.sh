@@ -67,10 +67,6 @@ agent_ids() {
 route_verdict() {
   local route="$1" rig_seg ids
   [ -z "$route" ] && { printf 'no-identity'; return 0; }
-  # `human` is the city's durable "the operator owns it; no agent will take
-  # it" marker (services/helm/README.md), so it is already held by the reader
-  # a caller wants — not a pool name that failed to resolve.
-  [ "$route" = "human" ] && { printf 'ok'; return 0; }
   rig_seg="${route%%/*}"; [ "$rig_seg" = "$route" ] && rig_seg=""
   # A route naming another rig addresses a pool that never reads the store
   # this caller's bead lands in, so it is unreachable however live it is.
@@ -113,13 +109,9 @@ esac
 [ "$#" -eq 1 ] || { usage; exit 2; }
 
 NAME="$1"
-# `human` is the board marker the operator holds directly, not a pool a rig
-# scopes, so it is passed through unqualified — qualifying it would build a
-# `<rig>/human` no agent claims, and route_verdict already reads bare `human`
-# as ok. Already rig-qualified: the caller named the store as well as the pool.
-# Which of the two it was decides the repair a refusal can honestly suggest.
+# Already rig-qualified: the caller named the store as well as the pool. Which
+# of the two it was decides the repair a refusal can honestly suggest.
 case "$NAME" in
-  human) ROUTE="human"; QUALIFIED=1 ;;
   */*)   ROUTE="$NAME"; QUALIFIED=1 ;;
   *)     ROUTE="${GC_RIG:+$GC_RIG/}$NAME"; QUALIFIED=0 ;;
 esac

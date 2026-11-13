@@ -2109,7 +2109,6 @@ func TestDeriveStateReadsTheGraphNotTheMarkers(t *testing.T) {
 	prGate := Blocker{ID: "ra-pg", Title: "Gate: gh:pr 42", Status: "open", IssueType: "gate", AwaitType: "gh:pr", Wait: WaitPending}
 	mailGate := Blocker{ID: "ra-mg", Title: "Gate: mail", Status: "open", IssueType: "gate", AwaitType: "mail", Wait: WaitPending}
 	decision := Blocker{ID: "ra-dec", Title: "pick a vendor", Status: "open", IssueType: "decision", Wait: WaitPending}
-	ask := Blocker{ID: "ra-ask", Title: "rule on it", Status: "open", IssueType: "task", RoutedTo: routedHuman, Wait: WaitPending}
 	landed := Blocker{ID: "ra-done", Title: "landed work", Status: "closed", IssueType: "task", Wait: WaitLanded}
 	// The store's own answer alone decides whether a wait still holds: a pinned
 	// blocker reads open on its row and holds nothing, and a waits-for spawner
@@ -2182,7 +2181,6 @@ func TestDeriveStateReadsTheGraphNotTheMarkers(t *testing.T) {
 		{name: "waits on a gate the sweep does not check", in: stateInput{id: "ra-a", blockers: []Blocker{mailGate}}, want: stateParked},
 		{name: "a person's gate outranks a swept one", in: stateInput{id: "ra-a", blockers: []Blocker{timerGate, gate}}, want: stateParked},
 		{name: "waits on a decision", in: stateInput{id: "ra-a", blockers: []Blocker{decision}}, want: stateParked},
-		{name: "waits on work routed to the operator", in: stateInput{id: "ra-a", blockers: []Blocker{ask}}, want: stateParked},
 		{name: "a gate outranks open work", in: stateInput{id: "ra-a", blockers: []Blocker{work, gate},
 			metadata: map[string]string{mdDispatchWhenReady: "rig-a/gc-toolkit.polecat"}}, want: stateParked},
 		{name: "routed to the operator", in: stateInput{id: "ra-a", metadata: map[string]string{mdRoutedTo: routedHuman}}, want: stateParked},
@@ -3346,7 +3344,7 @@ func TestPRHeldNamesWhatHoldsThePR(t *testing.T) {
 		mdPRMachine:           dated(MachineSettled, headLive, at),
 		mdPRUnansweredThreads: "1@" + headLive,
 	}
-	person := Blocker{ID: "tk-d", Title: "decide the flag name", Status: "open", RoutedTo: routedHuman, Wait: WaitPending}
+	person := Blocker{ID: "tk-d", Title: "decide the flag name", Status: "open", IssueType: "decision", Wait: WaitPending}
 	gate := gateAnchor("tk-g", "sign off the release", "tk-a")
 	for _, tc := range []struct {
 		name     string
@@ -3359,11 +3357,9 @@ func TestPRHeldNamesWhatHoldsThePR(t *testing.T) {
 		{"an open human gate on the anchor", []Anchor{mergeAnchor("tk-a", approved), gate}, []string{"gate"}, true, PhaseNeedsAttention},
 		{"a conversation on the anchor holds nothing", []Anchor{mergeAnchor("tk-a", approved),
 			conversationAnchor("tk-c", "tk-a", "talk the release through", assigneeHuman)}, nil, true, PhaseMerging},
-		{"a blocker routed to a person", []Anchor{mergeAnchor("tk-a", approved, person)}, []string{"blocked"}, false, PhaseNeedsAttention},
-		{"a decision blocker", []Anchor{mergeAnchor("tk-a", approved, Blocker{ID: "tk-d", Status: "open", IssueType: "decision", Wait: WaitPending})},
-			[]string{"blocked"}, false, PhaseNeedsAttention},
-		{"a closed blocker routed to a person no longer holds", []Anchor{mergeAnchor("tk-a", approved,
-			Blocker{ID: "tk-d", Status: "closed", RoutedTo: routedHuman, Wait: WaitLanded})}, nil, false, PhaseMerging},
+		{"a decision blocker", []Anchor{mergeAnchor("tk-a", approved, person)}, []string{"blocked"}, false, PhaseNeedsAttention},
+		{"a closed decision no longer holds", []Anchor{mergeAnchor("tk-a", approved,
+			Blocker{ID: "tk-d", Status: "closed", IssueType: "decision", Wait: WaitLanded})}, nil, false, PhaseMerging},
 		{"a blocker a pool is landing is the city's", []Anchor{mergeAnchor("tk-a", approved,
 			Blocker{ID: "tk-d", Status: "open", RoutedTo: "gc-toolkit/gc-toolkit.polecat", Wait: WaitPending})}, nil, false, PhaseMerging},
 		{"the merge pass's thread verdict", []Anchor{mergeAnchor("tk-a", threads)}, []string{"review"}, false, PhaseNeedsAttention},
@@ -3977,7 +3973,7 @@ func TestAskingIsOwedAndCarriesTheQuestion(t *testing.T) {
 			"pr.machine": dated(MachineSettled, headLive, fixtureNow),
 			"pr_posture": dated(postureNone, headLive, fixtureNow),
 		}, Blocker{ID: "tk-dem", Title: "Which base should this land on?", Status: "open",
-			RoutedTo: "human", IssueType: "task", CreatedAt: askedAt, Wait: WaitPending}),
+			IssueType: "decision", CreatedAt: askedAt, Wait: WaitPending}),
 		// A `decision` asks a person by construction, the way the board's own
 		// decision kind does, and needs no route to say so.
 		mergeAnchor("tk-ask2", map[string]string{
@@ -4028,7 +4024,7 @@ func TestAskingIsOwedAndCarriesTheQuestion(t *testing.T) {
 func TestPersonOwedBlockerIsNotProgressing(t *testing.T) {
 	anchors := []Anchor{
 		mergeAnchor("tk-q", nil,
-			Blocker{ID: "tk-dem", Title: "a question", Status: "open", RoutedTo: "human", Wait: WaitPending},
+			Blocker{ID: "tk-dem", Title: "a question", Status: "open", IssueType: "decision", Wait: WaitPending},
 			Blocker{ID: "tk-hg", Title: "a gate", Status: "open", IssueType: "gate", AwaitType: "human", Wait: WaitPending},
 			// An ordinary prerequisite: no route, no actor.
 			Blocker{ID: "tk-pre", Title: "land the other thing first", Status: "open", Wait: WaitPending},
@@ -4169,7 +4165,7 @@ func TestOwedSinceTakesTheEarliestCause(t *testing.T) {
 	a := mergeAnchor("tk-both", map[string]string{
 		"pr.machine": dated(MachineBlocked, headLive, blockedAt),
 	}, Blocker{ID: "tk-d", Title: "and a question", Status: "open",
-		RoutedTo: "human", CreatedAt: askedAt, Wait: WaitPending})
+		IssueType: "decision", CreatedAt: askedAt, Wait: WaitPending})
 
 	tile := mustTile(t, buildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}), "tk-both")
 	if !tile.PROwedSince.Equal(blockedAt) {
@@ -4236,7 +4232,7 @@ func TestConversationAxisRendersTheRecordedPosition(t *testing.T) {
 		// asking is the edge, and it renders ahead of the recorded position.
 		{"tk-ask", live(ConversationOutstanding),
 			[]Blocker{{ID: "tk-dem", Title: "Which base?", Status: "open",
-				RoutedTo: "human", CreatedAt: askedAt, Wait: WaitPending}}, ConversationAsking},
+				IssueType: "decision", CreatedAt: askedAt, Wait: WaitPending}}, ConversationAsking},
 		// Pinned to a head the cadence has moved past: unknown, never the stale value.
 		{"tk-stale", map[string]string{
 			"pr.machine":      dated(MachineSettled, headLive, fixtureNow),
@@ -4363,52 +4359,6 @@ func TestHumanRoutedMergeAnchorGathersTwiceAndCollapsesToOneRow(t *testing.T) {
 	// sees depends on which copy won.
 	if !strings.Contains(tile.Needs, "blocked") {
 		t.Errorf("needs = %q, want the block named", tile.Needs)
-	}
-}
-
-// TestHumanRoutedBlockerAsksAPerson is the one case where the person-owed test is
-// wider than the human gate and the `decision` issue type.
-//
-// The shape it is built from: an anchor blocks on a `bug` that was routed to a
-// person and left open for days. It is not a `decision` and not a gate, so a
-// narrow reading calls it an ordinary prerequisite and the waiting row stays
-// out of the queue — banded LOW, under a takeaway saying the work was finished
-// and only an operator could open its PR.
-//
-// The route is what makes a person owe it: nothing but a person closes a bead
-// held by a person, whether or not that wait has been expressed as a gate.
-func TestHumanRoutedBlockerAsksAPerson(t *testing.T) {
-	routedAt := fixtureNow.Add(-13 * 24 * time.Hour)
-	a := mergeAnchor("tk-waiter", map[string]string{"pr_number": "473"},
-		Blocker{
-			ID: "tk-held", Title: "the fix its PR cannot open", Status: "open",
-			// Routed to a person, no pool route, an ordinary work type.
-			RoutedTo: "human", IssueType: "bug", CreatedAt: routedAt,
-			Wait: WaitPending,
-		})
-	tile := mustTile(t, buildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}), "tk-waiter")
-
-	if !tile.Owed {
-		t.Error("an anchor whose only blocker no automated actor will close is waiting on a person")
-	}
-	if !tile.PROwedSince.Equal(routedAt) {
-		t.Errorf("pr_owed_since = %v, want the blocker's own created_at %v", tile.PROwedSince, routedAt)
-	}
-	// Two rows in the queue can share one cause, so the waiting row has to name
-	// the bead it is waiting on rather than just asserting that it waits.
-	if !strings.Contains(tile.Needs, "the fix its PR cannot open") {
-		t.Errorf("needs must name what it is waiting on, got %q", tile.Needs)
-	}
-
-	// A pool-routed blocker of the same shape is the control: something will
-	// claim it, so nothing is owed.
-	b := mergeAnchor("tk-busy", nil, Blocker{
-		ID: "tk-rework", Title: "rework in flight", Status: "open",
-		RoutedTo: "gc-toolkit/gc-toolkit.polecat", IssueType: "bug", CreatedAt: routedAt,
-		Wait: WaitPending,
-	})
-	if mustTile(t, buildBoard([]Anchor{b}, fixtureNow, false, nil, Facts{}), "tk-busy").Owed {
-		t.Error("a pool-routed blocker of the same shape is the city's move, not the operator's")
 	}
 }
 

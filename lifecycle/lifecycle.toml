@@ -18,32 +18,19 @@ states = [
   "blocked",
   "refused_false_completion",
 ]
-# States that also route the bead to a human (lifecycle.sh stamps
-# gc.routed_to=human in the same atomic update). A self-transition that passes
-# --keep-route records on the bead and writes no route, so it keeps the route
-# the bead carries.
-human_states = ["abandoned", "retargeted", "blocked", "refused_false_completion"]
 # States the merge cadence drives and no queue offers, so an anchor in one rests
 # both unrouted and unheld. lifecycle.sh writes the two halves in the same
-# atomic update: it clears gc.routed_to unless --route or --keep-route is given
-# or the bead already rests on park_route, and it clears the assignee unless
-# --assignee is given, at status=open only. A pool route on one of these is demand for work
-# already in the merge queue, and the claim it invites moves the anchor out of
-# `--status=open`, where merge.sh and pr-facts.sh both stop seeing it. An
-# assignee is the same anchor still sitting in the refinery's own find-work
-# queue, which flags a merge_result-bearing bead it finds there and does not
-# take it. The assignee clear stops at status=open because bd refuses to take a
-# live claim and drops the whole update with it, and because a live claim is a
-# hold to escalate rather than one to overwrite.
+# atomic update: it clears gc.routed_to unless --route or --keep-route is given,
+# and it clears the assignee unless --assignee is given, at status=open only. A
+# pool route on one of these is demand for work already in the merge queue, and
+# the claim it invites moves the anchor out of `--status=open`, where merge.sh
+# and pr-facts.sh both stop seeing it. An assignee is the same anchor still
+# sitting in the refinery's own find-work queue, which flags a
+# merge_result-bearing bead it finds there and does not take it. The assignee
+# clear stops at status=open because bd refuses to take a live claim and drops
+# the whole update with it, and because a live claim is a hold to escalate
+# rather than one to overwrite.
 detached_states = ["pre_open_gate", "pull_request"]
-# The one route value that is not a queue. No pool claims it, so it parks the
-# bead for a person (docs/human-engagement.md). A detached state may
-# rest on it, and a transition that finds it leaves it alone. Every other route
-# is a pool offer.
-# A park must NAME what it waits for: writing this route without a gc.takeaway
-# is refused, because the helm board spends the takeaway as the row's NEEDS
-# sentence and reports a park without one as no question recorded.
-park_route = "human"
 # States whose legal status is closed; every other declared state is open.
 # lifecycle.sh enforces the pairing both ways: --close is accepted only into a
 # closed state, and a transition into a closed state must carry --close.
@@ -85,11 +72,11 @@ meaning = "landed; merged_sha recorded"
 
 [states.abandoned]
 status = "open"
-meaning = "PR closed unmerged externally; routed to human"
+meaning = "PR closed unmerged externally; a human gate parks it for a person"
 
 [states.retargeted]
 status = "open"
-meaning = "PR base moved externally; routed to human"
+meaning = "PR base moved externally; a human gate parks it for a person"
 
 [states.blocked]
 status = "open"
@@ -236,10 +223,6 @@ settled_keys = ["gc.takeaway=gc.takeaway_settled"]
 # merge_hold is not a marker_key: an operator's freeze is theirs to lift, and a
 # hold that must show as an edge asserts it through blocked_reason or
 # gc.takeaway beside it, both declared above, which carry the wait's sentence.
-# The route that parks a bead for a person is park_route in [machine]. A bead
-# resting on it waits on somebody, and that wait has the same shape as any
-# other.
-route_key = "gc.routed_to"
 # The terminal end of a wait is a bead of this issue type: the bead others
 # block ON, which by construction can hold no `blocks` edge of its own. A human
 # gate is filed blocking the bead that waits (human-gate.sh, or the native
@@ -404,27 +387,20 @@ since_format = "RFC 3339 UTC"
 # Four field-vocabulary rules the whole registry rests on, each settled against
 # the code that reads it:
 #
-# ROUTE. On a bead making a lifecycle transition, gc.routed_to is written by
-# lifecycle.sh --route in the same atomic update as the --to edge, and a direct
-# --set of the key is refused there, so a transition-coupled route cannot bypass
-# it. Routes on beads outside that state machine — a bead with no --to edge for
-# --route to carry — are stamped directly with gc bd update --set-metadata by
-# whichever script or formula owns that bead's dispatch. The recurring shapes: a
-# bead with no run parked to `human` until a person decides (mol-polecat-work's
-# hand-back of a bring-current it cannot finish); a
-# reaction bead routed to the proactive pool (gc-proactive.sh); a rework child
-# routed to its fix pool (pr-facts.sh, pre-open-rebase.sh); a review
-# bead's pool route restored after an abandoned round (mol-review.toml). A route
-# value is a rig-qualified pool identity (<rig>/<agent>) or
-# the park sentinel `human` ([machine] park_route); the pool
-# offer is exact byte equality (gascity hookClaimMatchesRoute), so a bare,
+# ROUTE. A lifecycle transition writes no park route and routes no work. It
+# clears gc.routed_to, on a detached state's entry or for a caller's empty
+# --route, or it keeps the route the bead carries: every caller of --route
+# passes an empty route or the one the bead already carries. lifecycle.sh
+# refuses a --route that is not rig-qualified (<rig>/<agent>), `human`
+# included, and a direct --set of the key. A park is a human gate:
+# human-gate.sh files it on the bead, and its blocks edge keeps the bead out of
+# bd ready until a person clears it, whatever the bead's route. Routes on beads
+# outside that state machine — a bead with no --to edge for --route to carry —
+# are written by whichever script or formula owns that bead's dispatch. The
+# pool offer is exact byte equality (gascity hookClaimMatchesRoute), so a bare,
 # unqualified or padded value matches no pool and doctor/check-routed-work-
 # claimable reports it. Absent and empty mean the same thing — unrouted — and
 # every reader treats them alike; clearing a route writes "" or unsets the key.
-# Empty is NOT a park: an open, unassigned bead with an empty route is a
-# re-routing candidate that pr-facts.sh's stranded-rework rescue re-stamps, so a
-# park is the `human` sentinel, and lifecycle.sh refuses to write it without a
-# gc.takeaway.
 #
 # ASSIGNED vs ROUTED. Both may be set, and on a claimed pool bead both are: a
 # claim writes the assignee and leaves the route as the record of which queue
@@ -434,9 +410,8 @@ since_format = "RFC 3339 UTC"
 # demand for work no pool is offered.
 #
 # THE OPERATOR-FACING QUESTION is gc.takeaway. The helm board spends it as the
-# row's NEEDS sentence, so lifecycle.sh refuses to park a bead for a person
-# (--route human) without one, and a park with an empty takeaway renders as
-# "routed to you — no question recorded".
+# row's NEEDS sentence, so lifecycle.sh refuses a --takeaway that normalizes to
+# nothing, and one longer than the 140 codepoints the cell holds.
 #
 # A WAIT IS AN EDGE, never a metadata string (I1, doctor/check-wait-is-an-edge):
 # `blocks` is the edge type the pack writes for a hold, one of the three bd
@@ -1102,16 +1077,15 @@ keys = [
 #   neither one failed, or with a fail a rig_check_pre_existing value holds this
 #   very note for. Each run of the step rewrites it. Absent means no run noted
 #   them. Never cleared.
-# aborted_at — `self-review-exhausted`, stamped by self-review-check.sh on the
-#   budget's last failing attempt. The same update reopens the work bead, clears
-#   its route and session pins, reassigns it to the witness derived from its
-#   pool route, and appends the failure to its notes. self-review-check.sh is
-#   also its only reader: a bead already carrying it gets no second handback.
-#   Absent means no handback has run. Never cleared. The opt-in
-#   packs/gascity-keeper sub-pack stamps the same key with its own step names.
-# self_review_loop_attempts — the attempt number that exhausted the budget,
-#   written in the same handback. No pack path reads it back. Absent means no
-#   handback has run. Never cleared. An integer string.
+# aborted_at — RETIRED for the self-review loop. `self-review-exhausted`,
+#   which self-review-check.sh stamped on the budget's last failing attempt.
+#   No core pack path writes or reads it. The opt-in packs/gascity-keeper
+#   sub-pack stamps the same key with its own step names. Registered so that
+#   residue on a pre-retirement bead reads as known, not as a stray.
+# self_review_loop_attempts — RETIRED. The attempt number that exhausted the
+#   budget, which self-review-check.sh wrote beside aborted_at. No pack path
+#   writes or reads it. Registered so that residue on a pre-retirement bead
+#   reads as known, not as a stray.
 
 [metadata.rig_checks]
 # A caller's judgment, on a bead, that a rig's recorded fail is pre-existing.
@@ -1685,8 +1659,7 @@ keys = [
   "gc.dispatch_when_ready_armed_by", "gc.dispatch_when_ready_armed_at",
   "gc.dispatch_when_ready_reason", "gc.dispatch_when_ready_slung",
   "gc.dispatch_when_ready_fail_count", "gc.notify_when_ready",
-  "gc.deferred_routed_to", "gc.deferred_execution_routed_to",
-  "gc.deferred_assignee", "resling_target",
+  "resling_target",
 ]
 # gc.dispatch_when_ready — the sling target (agent or pool); its PRESENCE means
 #   armed, and its value is what deferred-dispatch.sh slings to. Cleared with
@@ -1721,12 +1694,6 @@ keys = [
 #   these clears re-reads the bead first and leaves a value that names another
 #   agent by then. The disarm verb clears it with the family, while reconcile
 #   retiring an arm on the same bead leaves it.
-# gc.deferred_routed_to / gc.deferred_execution_routed_to / gc.deferred_assignee —
-#   the deferred counterparts of gc.routed_to, gc.execution_routed_to and the
-#   assignee: the routing a fired dispatch restores. mol-polecat-work's bd-ready
-#   guard clears them (to "") alongside the live route when it de-routes a bead
-#   that reached a polecat while blocked, and await-ruling.sh clears them the
-#   same way before it arms a declined run's re-sling.
 # resling_target — the pool a declined run's work re-slings to. await-ruling.sh
 #   writes it in the update that clears the work bead's route keys before the
 #   arm, because from that clear until the arm lands nothing else on the bead

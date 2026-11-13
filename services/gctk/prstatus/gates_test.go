@@ -344,13 +344,6 @@ func decision(id string) Blocker {
 	return Blocker{ID: id, Title: "decide " + id, Status: "open", IssueType: "decision"}
 }
 
-// toPerson is the metadata of a bead routed to a person.
-var toPerson = map[string]string{"gc.routed_to": "human"}
-
-func routedToPerson(id string) Blocker {
-	return Blocker{ID: id, Title: "for " + id, Status: "open", IssueType: "task", Metadata: toPerson}
-}
-
 // The walk keeps the beads a person owes the next move on, other than the human
 // gates it keeps apart, wherever they hold the root: on it, or behind a bead it
 // waits on. A merge anchor it reaches is weighed by its own state, its own edges
@@ -365,8 +358,8 @@ func TestHoldingOwed(t *testing.T) {
 	}{
 		{"nothing blocks the bead", nil, []string{}, []string{}},
 		{"a decision on the bead", map[string][]Blocker{"a": {decision("d")}}, []string{}, []string{"d"}},
-		{"a bead routed to a person behind a rework",
-			map[string][]Blocker{"a": {task("rw")}, "rw": {routedToPerson("p")}}, []string{}, []string{"p"}},
+		{"a decision behind a rework",
+			map[string][]Blocker{"a": {task("rw")}, "rw": {decision("p")}}, []string{}, []string{"p"}},
 		{"another pull request waiting on a review behind a rework",
 			map[string][]Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", awaitingReview)}}, []string{}, []string{"b"}},
 		{"another pull request the city is changing",
@@ -407,8 +400,8 @@ func TestHoldingOwed(t *testing.T) {
 		{"a pull request that landed holds nothing",
 			map[string][]Blocker{"a": {task("rw")}, "rw": {closed(anchorBlocker("b", with(awaitingReview, "merge_result", "merged")))}}, []string{}, []string{}},
 		{"a closed decision holds nothing", map[string][]Blocker{"a": {closed(decision("d"))}}, []string{}, []string{}},
-		{"a human gate routed to a person counts once, as a gate",
-			map[string][]Blocker{"a": {task("rw")}, "rw": {{ID: "g", Status: "open", IssueType: "gate", AwaitType: "human", Metadata: toPerson}}},
+		{"a human gate counts once, as a gate",
+			map[string][]Blocker{"a": {task("rw")}, "rw": {gate("g")}},
 			[]string{"g"}, []string{}},
 		{"owed beads nearest first",
 			map[string][]Blocker{"a": {task("rw"), decision("near")}, "rw": {decision("far")}}, []string{}, []string{"near", "far"}},

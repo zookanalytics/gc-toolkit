@@ -890,17 +890,19 @@ pr_finishing_settle() {
 }
 
 # route_finishing <child> <pool> — route a PR-finishing child to <pool> at its
-# priority, for the creators that route a child rather than sling it
+# priority, for the creators whose child runs with no poured formula
 # (pr-facts.sh, pre-open-rebase.sh). The route makes the child claimable, so the
-# child is settled first (pr_finishing_settle), and the route is then written
-# alone, with no priority in it. No pool can claim the child before the route
-# lands, and a priority move that runs between the two writes rewrites the child
-# itself. Returns 1, having routed nothing, when the child does not settle; it
-# is left unrouted for a later pass. A route write bd refuses can still exit 0,
-# so the caller reads the route back.
+# child is settled first (pr_finishing_settle). Then `gc sling <pool> <child>
+# --no-formula --no-convoy` routes it, with no priority in the write, no formula
+# poured and no convoy filed. No pool can claim the child before the route
+# lands, and a priority move that runs between the settle and the sling rewrites
+# the child itself. The sling's exit is the answer, since it fails when its
+# route write fails, and its refusal is on stderr. Returns non-zero when the
+# child does not settle, having routed nothing, or when the sling fails, and the
+# caller leaves the child for a later pass.
 route_finishing() {
   pr_finishing_settle "${1:-}" >/dev/null || return 1
-  gc bd update "$1" --set-metadata gc.routed_to="${2:-}" </dev/null >/dev/null 2>&1 || true
+  gc sling "${2:-}" "$1" --no-formula --no-convoy </dev/null >/dev/null
 }
 
 # The keys a validation pass is found by: signoff.sh's machine-lane probe and

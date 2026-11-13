@@ -26,9 +26,9 @@ type onBranch struct {
 // closed bead's work is on the branch as much as an open one's. Three records
 // put a bead there, and the beads are their union:
 //   - its own branch, when it is the branch's anchor (it carries a
-//     merge_result) or no pool holds it, because a rework child carries the
+//     merge_result) or carries no route, because a rework child carries the
 //     branch from its creation, and its fix is not on the branch until its
-//     polecat's hand-off clears the pool route;
+//     polecat's hand-off clears the route;
 //   - fold_target, when a polecat folded its work onto the branch;
 //   - merged_target with merge_result=merged, when its work landed on the
 //     branch.
@@ -76,7 +76,7 @@ func branchBeads(l *ledger.Ledger, branch string) ([]onBranch, error) {
 		if err != nil {
 			return nil, err
 		}
-		if result == "" && route != "" && route != "human" {
+		if result == "" && route != "" {
 			continue
 		}
 		if err := add(r); err != nil {

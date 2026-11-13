@@ -177,12 +177,15 @@ run and returns the review to the pool, because the next claim may get through.
 Closing this step would advance the graph into `review` with nothing gathered, so
 append what failed to the review bead's notes, then cancel the run, which can
 interrupt that call: `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/run-cancel.sh" --step mol-review.load-dispatch --reason "the gather failed: <what failed>"`.
-Only once the run has ended, restore the bead's route, so the run and the route
-never offer the review together, and drain:
+Only once the run has ended, return the review to your pool, so the run and the
+route never offer it together, and drain. A sling that fails is noted on the
+review, which then rests unrouted until gate-ensure asks a person:
 ```bash
-POOL=$(gc bd show "{{review_bead}}" --json | jq -r '.[0].metadata.review_pool // empty')
-[ -n "$POOL" ] && gc bd update "{{review_bead}}" --set-metadata gc.routed_to="$POOL"
+# >>> review-return
+OUT=$(gc sling "$GC_TEMPLATE" "{{review_bead}}" --no-formula --no-convoy 2>&1) || gc bd update "{{review_bead}}" --append-notes "gc sling could not return this review to its pool '$GC_TEMPLATE', so it rests unrouted until gate-ensure asks a person: $OUT"
+echo "$OUT"
 gc runtime drain-ack
+# <<< review-return
 ```
 
 **3. Close this step bead so the graph advances.** Non-terminal step, no
@@ -397,24 +400,27 @@ land on top of the reviewed commit while you read do not stale your findings.
 Only a rewrite that takes the reviewed commit off the branch (a rebase, amend
 or force-push) is different: signoff refuses the verdict, closes the review
 bead itself `gc.outcome=superseded` and exits 0 — there is nothing here to
-append and nothing to restore, and gate-ensure pours a fresh review at the live
+append and nothing to return, and gate-ensure pours a fresh review at the live
 head next pass. "already closed" is not a failure either: this dispatch was
 recorded or retired before you judged it, so drop the verdict, close this step
 and drain. Any other failure, in this order: append `findings.md` and
 `findings.json` to the review bead
 (`gc bd update "{{review_bead}}" --append-notes ...`); close this step with
-part 3's claim-close.sh call; then, only after the step is closed, restore the
-bead's claimability from the dispatch-stamped pool and drain:
+part 3's claim-close.sh call; then, only after the step is closed, return the
+review to your pool and drain:
 ```bash
-POOL=$(gc bd show "{{review_bead}}" --json | jq -r '.[0].metadata.review_pool // empty')
-[ -n "$POOL" ] && gc bd update "{{review_bead}}" --set-metadata gc.routed_to="$POOL"
+# >>> review-return
+OUT=$(gc sling "$GC_TEMPLATE" "{{review_bead}}" --no-formula --no-convoy 2>&1) || gc bd update "{{review_bead}}" --append-notes "gc sling could not return this review to its pool '$GC_TEMPLATE', so it rests unrouted until gate-ensure asks a person: $OUT"
+echo "$OUT"
 gc runtime drain-ack
+# <<< review-return
 ```
-The pour retired gc.routed_to and this workflow's steps are now closed, so no
-second authority remains; restoring the route returns the bead to the pool's
-routed tier as a review with no workflow, whose description says how to run it
-(the documented recovery shape), so the next claim genuinely resumes — an
-unrecorded verdict is recoverable; a hand-rolled one is not. The review's
+The pour cleared the review's route and this workflow's steps are now closed,
+so the sling's route is the review's one offer. It returns the bead to the
+pool's routed tier as a review with no workflow, whose description says how to
+run it, so the next claim resumes. An unrecorded verdict is recoverable, and a
+hand-rolled one is not. A sling that fails is noted on the review, which rests
+unrouted until gate-ensure asks a person once its run reads spent. The review's
 workspace stays where it is, and the reviewer who claims the bead next gets
 the same worktree back from load-dispatch's gather block.
 
@@ -435,8 +441,8 @@ gc runtime drain-ack
 touch the anchor. Done means gone.
 
 **Exit criteria:** exactly one signoff.sh call succeeded (or findings are
-appended and, after this step closed, the bead's route is restored so the
-pool can re-claim it), this step closed, the workspace removed unless
+appended and, after this step closed, the review is slung back to your pool,
+or its failed sling noted on it), this step closed, the workspace removed unless
 the bead went back to the pool, drain acknowledged.
 """
 metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
