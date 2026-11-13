@@ -369,7 +369,11 @@ corrective feedback into standing behavior, so attention is never spent twice:
    brings corrective feedback; the `feedback-miner` order sweeps merged PRs'
    review comments, recording every review post from outside the city and
    what self-report missed in the city's own; "learn this: …" is the
-   operator fast path.
+   operator fast path. Agents' memory notes are a second intake: a note
+   holds what should change the next agent's behavior, and an observation
+   holds what is to be evaluated. The distiller judges notes beside
+   observations onto the same patterns, and a note leaves memory once its
+   pattern closes or it holds nothing worth keeping.
 2. **Distill.** The `feedback-distiller` order clusters observations into
    patterns and promotes recurring ones as ordinary PRs against the pack —
    prompt edits, lint rules under `tools/lint-learned.d/`, doc changes.
@@ -419,6 +423,10 @@ first. Either way the change is a decision on the record, not a drift.
 
 ## Debt
 
+- **The distiller reads no memory notes yet.** A note stays in its memory
+  directory until an agent or a person removes it, and what it shows reaches
+  the learning loop only when an agent also reports it. Epic tk-zlot608 builds
+  the memory intake.
 - **A sitting does not edit an open PR's branch.** A ruling on an open PR still
   files a rework a polecat runs. A unit that waits on the review-lanes member
   (tk-1tfzr71.22) and the merge member (tk-1tfzr71.20) retires it
