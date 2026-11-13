@@ -1059,12 +1059,9 @@ keys = [
 ]
 # self_review_passed_sha — RETIRED. The full commit sha an iteration verified,
 #   which the self-review step stamped when an agent's word stood for the
-#   checks' result. No step text a pour renders writes it now. A molecule
-#   poured before keeps step text that does, so self-review-check.sh still
-#   takes it, when it names the live HEAD, in place of records only where no
-#   run the step declares is recorded at that HEAD, and in place of
-#   self_review_setup_build, which such a run never writes. Registered so that
-#   residue on a pre-retirement bead reads as known, not as a stray.
+#   checks' result. Nothing writes or reads it: self-review-check.sh converges
+#   on the records `gctk rig` keeps and on self_review_setup_build. Registered
+#   so that residue on a pre-retirement bead reads as known, not as a stray.
 # self_review_setup_build — what setup and build, the declared checks `gctk
 #   rig` records nothing for, did at the commit an iteration ran them at. One
 #   JSON object stored as a string: commit, the full sha; setup and build, each
