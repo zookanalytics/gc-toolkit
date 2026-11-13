@@ -886,7 +886,63 @@ no_thread_blocks() {
   [ "$n" = 0 ] && NTB_WHY="No review thread blocks PR#$1's merge: none it counts is left unresolved."
   return 0
 }
-# withdraw_stale_gates <anchor> <num> <head-oid> <base> <recorded-target> <merge-state> <route>
+# live_feedback_work <anchor> <anchor-row> — the city's own feedback work on the
+# anchor's PR that is still live, its ids joined by ", ", or nothing when none
+# is. That work is each rework child a comment batch was routed to, named by a
+# rework:<id> disposition in the batch ledgers <anchor-row> carries, and the
+# human-lane validation pass that rules the batches' findings
+# (task_kind=validation, check_name=human). It answers the review threads of
+# those batches, and the write-back resolves a thread once its fix lands. It is
+# live while its status is open, in progress or hooked. Any other status holds
+# it (docs/bead-store-resolution.md), and held work answers nothing until it is
+# released. Non-zero when the anchor's children do not read.
+LFW_STATUSES="open,in_progress,hooked"
+live_feedback_work() {
+  local kids out
+  kids=$(bd_anchor_children "$1" "$LFW_STATUSES") || return 1
+  out=$(printf '%s\n%s' "$2" "$kids" | jq -rs '
+    .[0] as $row
+    | [ ($row.metadata // {})
+        | .pr_comment_batch, .pr_review_batch, .pr_issue_comment_batch, .pr_comment_disposition
+        | (. // "") | tostring | scan("rework:([A-Za-z0-9._-]+)")[] ] as $routed
+    | [ .[1][]
+        | ((.id // "") | tostring) as $i
+        | ((.metadata.task_kind // "") | tostring) as $t
+        | select(($t == "rework" and any($routed[]; . == $i))
+                 or ($t == "validation" and ((.metadata.check_name // "") | tostring) == "human"))
+        | $i ]
+    | unique | join(", ")' 2>/dev/null) || return 1
+  printf '%s' "$out"
+}
+# The opening of the reason a merge-blocked-threads gate is withdrawn with while
+# the city's feedback work on PR#<num> is live (withdraw_stale_gates). By it,
+# mbt_quiet_window tells that withdrawal from a person's answer.
+mbt_live_lead() { # <num>
+  printf "PR#%s's review threads are being answered by the city's own feedback work" "$1"
+}
+# mbt_quiet_window <anchor> <num> — the quiet window the BLOCKED arm declares
+# when it files merge-blocked-threads: PR_STANDING_QUIET_WINDOW, or none when the
+# answer human-gate.sh weighs is this script's withdrawal while the city's
+# feedback work was live. human-gate.sh weighs the newest closed gate under the
+# key, picked as here, and reads a reason headed moot: as a person's answer.
+# That withdrawal's reason is headed moot:, so weighed as one it would keep the
+# gate quiet for a day after the work closed, and a thread the work left
+# unresolved would go unasked. A gate read that does not answer keeps the
+# standing window.
+mbt_quiet_window() {
+  local gates
+  if gates=$(bd_human_gates "$1") \
+     && printf '%s' "$gates" | jq -e --arg lead "moot: $(mbt_live_lead "$2")" '
+          [ .[] | select((.await_id // "") == "merge-blocked-threads" and (.status // "") == "closed")
+                | { reason: (.close_reason // ""),
+                    at: (((.closed_at // "") | sub("\\.[0-9]+"; "") | fromdateiso8601?) // 0) }
+                | select(.at > 0) ]
+          | sort_by(.at) | last | ((.reason // "") | startswith($lead))' >/dev/null 2>&1; then
+    return 0
+  fi
+  printf '%s' "$PR_STANDING_QUIET_WINDOW"
+}
+# withdraw_stale_gates <anchor> <num> <head-oid> <base> <recorded-target> <merge-state> <route> <anchor-row>
 # — withdraw this script's merge-path gates on an open PR's anchor once the
 # situation each asked about is gone. An open one holds the merge, and through
 # takeaway_is_holding the merge-in and red-check dispatch, so a gate that
@@ -894,7 +950,10 @@ no_thread_blocks() {
 # answered. Each key MERGE_PATH_KEYS_JQ names reads as gone:
 #   pr-unengaged-threads.<num>.<head>    once the PR's head is past <head>; the
 #                                        threads are read again at the new head
-#   merge-blocked-threads                once no review thread blocks the merge
+#   merge-blocked-threads                while the city's own feedback work on
+#                                        the PR is live (live_feedback_work,
+#                                        read off <anchor-row>), and otherwise
+#                                        once no review thread blocks the merge
 #                                        (no_thread_blocks)
 #   pr-retargeted.<num>                  once the PR's base is its recorded
 #                                        target again
@@ -912,7 +971,7 @@ no_thread_blocks() {
 # under the key moot. A key with an open gate a person is assigned is left to
 # them. A gate read that does not answer withdraws nothing this pass.
 withdraw_stale_gates() {
-  local id="$1" num="$2" head="$3" base="$4" rtarget="$5" mstate="$6" route="$7" gates keys key who why at
+  local id="$1" num="$2" head="$3" base="$4" rtarget="$5" mstate="$6" route="$7" arow="$8" gates keys key who why at lfw
   [ -x "$HUMAN_GATE" ] || return 0
   if ! gates=$(bd_open_human_gates "$id"); then
     echo "$PROG: $id — PR#$num's human gates did not read; no stale gate is withdrawn this pass" >&2
@@ -931,7 +990,19 @@ withdraw_stale_gates() {
         [ -n "$head" ] && [ "$at" != "$head" ] \
           && why="PR#$num's head moved from $at to $head, so the threads this gate counted as unengaged at $at are read again at $head." ;;
       merge-blocked-threads)
-        no_thread_blocks "$num" "$base" "$mstate"; why="$NTB_WHY" ;;
+        # While the city's feedback work is live, the gate is withdrawn for that
+        # reason even when no thread blocks any more. Once the work closes,
+        # mbt_quiet_window tells this reason from a person's answer, and it
+        # cannot tell no_thread_blocks' reason from one.
+        if ! lfw=$(live_feedback_work "$id" "$arow"); then
+          echo "$PROG: $id — whether the city's feedback work on PR#$num is live did not read; its merge-blocked-threads gate is left for the next pass" >&2
+          continue
+        fi
+        if [ -n "$lfw" ]; then
+          why="$(mbt_live_lead "$num") ($lfw), so no person is asked to resolve them yet. A thread still unresolved once that work closes is put to a person then."
+        else
+          no_thread_blocks "$num" "$base" "$mstate"; why="$NTB_WHY"
+        fi ;;
       "pr-retargeted.$num")
         [ -n "$rtarget" ] && [ "$base" = "$rtarget" ] \
           && why="PR#$num's base is $base again, its recorded target, and its anchor is back in pull_request." ;;
@@ -2145,7 +2216,7 @@ MP_EOF
   if [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ] && [ "$state" = OPEN ]; then
     withdraw_stale_gates "$id" "$num" "$head_oid" "$base" \
       "$(printf '%s' "$row" | jq -r '(.metadata.merged_target // "") | tostring')" "$merge_state" \
-      "$(printf '%s' "$row" | jq -r '(.metadata["gc.routed_to"] // "") | tostring')"
+      "$(printf '%s' "$row" | jq -r '(.metadata["gc.routed_to"] // "") | tostring')" "$row"
   fi
 
   # --- status label: project the human-attention axis onto the PR list ----------
@@ -3492,12 +3563,19 @@ $CBODY"
   # A PR whose city-side feedback is all routed can still sit on branch
   # protection. The one cause this cadence puts to a person is an unresolved review
   # thread where thread resolution is required (required_review_thread_resolution),
-  # read from the branch's own rules. A missing approving review is NOT put to one:
+  # read from the branch's own rules, and only while none of the city's own
+  # feedback work on the PR is live (live_feedback_work). While a rework child or
+  # the human-lane validation pass of its comment batches is live, the city is
+  # still answering the threads, so the block asks nothing of a person yet. A
+  # thread still unresolved once that work closes, one the city declined,
+  # deferred or could not resolve, is put to a person then. A
+  # missing approving review is NOT put to one:
   # a PR waiting on a required approving review is the operator's own review queue,
   # state the board's review section already surfaces from the posture recorded
   # above (pr_posture), not a question a gate should ask. Anything else — a
   # rule this cadence does not model, unreadable rules, a thread count that
-  # could not be read, or no acting login — files nothing rather than a guess;
+  # could not be read, feedback work that could not be read, or no acting
+  # login — files nothing rather than a guess;
   # the next reconcile retries. Without the acting login, a thread holding only
   # the city's own findings would count as one a person must resolve.
   # CHANGES_REQUESTED is active feedback the arms above and the dismissal
@@ -3514,11 +3592,21 @@ $CBODY"
     fi
     case "$bcause" in
       threads)
+        if ! lfw=$(live_feedback_work "$id" "$row"); then
+          echo "$PROG: $id — PR#$num BLOCKED on $bthreads unresolved review thread(s), but whether the city's feedback work on them is live did not read; no gate filed (retry next pass)" >&2
+          skipped=$((skipped + 1)); continue
+        fi
+        if [ -n "$lfw" ]; then
+          echo "$PROG: $id — PR#$num BLOCKED on $bthreads unresolved review thread(s), which the city's own feedback work ($lfw) is answering; no gate filed"
+          continue
+        fi
         # A blocked merge stays blocked until its threads are resolved, and every
-        # pass detects it again, so the call declares the standing quiet window.
+        # pass detects it again, so the call declares the standing quiet window,
+        # unless the answer it would weigh is this script's withdrawal while the
+        # feedback work was live (mbt_quiet_window).
         human_gate "$id" "merge-blocked-threads" \
           "PR#$num ($live_url) is BLOCKED by branch protection: $bthreads unresolved review thread(s) must be resolved before it can merge (required_review_thread_resolution is on). Resolve the thread(s), or say why the block should lift." \
-          "$PR_STANDING_QUIET_WINDOW"
+          "$(mbt_quiet_window "$id" "$num")"
         echo "$PROG: $id — PR#$num BLOCKED on $bthreads unresolved review thread(s); gate filed (merge-blocked-threads)"
         flagged=$((flagged + 1)); continue ;;
     esac

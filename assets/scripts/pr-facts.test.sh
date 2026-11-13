@@ -5,7 +5,10 @@
 # markers cleared, human-routed); BLOCKED -> a gate only for an unresolved-thread
 # block (merge-blocked-threads, read from reviewThreads because reviewDecision is
 # masked while threads are open; no guess when the read fails, and an operator
-# merge_hold left alone) while a pending required approving review files no gate
+# merge_hold left alone), and none while the city's own feedback work on the PR
+# is live: an open one is withdrawn then, and the gate is filed again once that
+# work closes, with no quiet window kept by the withdrawal, while a person's
+# answer keeps one. A pending required approving review files no gate
 # and any stale merge-blocked-approval gate is retired; CONFLICTING -> one rework child per head (dedup on
 # branch+head, holds and a live human gate veto, unstamped orphans adopted, a
 # supersession hold from branch-supersession.sh vetoes — asked only on an
@@ -2772,6 +2775,105 @@ eq "$(bstatus SGu4)" "open" "a gate read that does not answer withdraws nothing"
 has "$out" "PR#604's human gates did not read; no stale gate is withdrawn this pass" "…and the pass says so"
 out=$(run)
 eq "$(bstatus SGu4)" "closed" "the next pass that reads the gates withdraws it"
+
+echo "# BLOCKED on threads the city's own feedback work is answering files no gate until that work closes"
+# A comment batch's rework child, and the human-lane validation pass that rules
+# the batch's findings, answer the batch's review threads, and the write-back
+# resolves each thread once its fix lands, so while that work is live the block
+# asks nothing of a person. LF1's batch went to a rework a worker holds, LF2
+# carries an open human-lane validation pass, and a worker has hooked LF3's
+# rework. LN1's live rework was routed no comment batch, and its validation pass
+# rules another lane, so neither answers the threads. LN2's batch rework is
+# blocked, waiting for a person to move it. The children of LR1 and LR2 do not
+# read this pass.
+# A rework child of PR <num>'s comment batches, or with a lane, a validation
+# pass on that lane.
+fbkid() { # id anchor num status [lane]
+  jq -nc --arg id "$1" --arg a "$2" --arg n "$3" --arg st "$4" --arg l "${5:-}" --arg fix "$FIX" '
+    if $l == "" then
+      {id: $id, status: $st, assignee: (if $st == "open" or $st == "blocked" then "" else "rig/polecat-1" end), notes: "",
+       title: ("Address review comments on PR#" + $n + " (through review 0, comment 7)"),
+       metadata: {task_kind: "rework", anchor_bead: $a, branch: ("polecat/x" + $n), target: "main",
+                  prepare_mode: "merge", "gc.routed_to": $fix}}
+    else
+      {id: $id, status: $st, assignee: "", notes: "", title: ("Validate PR#" + $n + " feedback (through review 0, comment 7)"),
+       metadata: {task_kind: "validation", anchor_bead: $a, check_name: $l, reviewed_oid: ("sha-" + $n)}}
+    end'
+}
+# The batch ledger of an anchor whose feedback through comment 7 was routed to <rework>.
+routed_to() { printf ',"pr_comment_watermark":7,"pr_comment_batch":"rework:%s|0|7","pr_comment_disposition":"rework:%s"' "$1" "$1"; }
+blocked_on_a_thread() { # num...
+  local n
+  for n in "$@"; do
+    printf '%s' "$(prview "$n" OPEN BLOCKED MERGEABLE ',"labels":[]')" > "$GH_DIR/pr_view_$n.json"
+    printf '{"threads":[{"id":"t%s","isResolved":false}]}' "$n" > "$GH_DIR/threads_$n.json"
+  done
+  printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":true,"required_approving_review_count":1}}]' > "$GH_DIR/rules_main.json"
+}
+: > "$STUB_DEPS"
+store "[$(anchor LF1 741 "$(routed_to LFr1)"), $(fbkid LFr1 LF1 741 in_progress),
+        $(anchor LF2 742), $(fbkid LFv2 LF2 742 open human),
+        $(anchor LF3 743 "$(routed_to LFr3)"), $(fbkid LFr3 LF3 743 hooked),
+        $(anchor LN1 744), $(child LNm1 polecat/x744 ',"task_kind":"rework","anchor_bead":"LN1"' in_progress rig/polecat-1), $(fbkid LNv1 LN1 744 open correctness),
+        $(anchor LN2 745 "$(routed_to LNr2)"), $(fbkid LNr2 LN2 745 blocked),
+        $(anchor LR1 749 "$(routed_to LRr1)"), $(fbkid LRr1 LR1 749 in_progress), $(hgate LRg1 LR1 merge-blocked-threads),
+        $(anchor LR2 751 "$(routed_to LRr2)"), $(fbkid LRr2 LR2 751 in_progress)]"
+blocked_on_a_thread 741 742 743 744 745 749 751
+: > "$STUB_ESC_LOG"
+out=$(STUB_LIST_FAIL_ON="anchor_bead=LR" run)
+hasnt "$(cat "$STUB_ESC_LOG")" "--subject LF1 --key merge-blocked-threads" "a live rework child a comment batch was routed to files no gate on the threads it answers"
+has "$out" "PR#741 BLOCKED on 1 unresolved review thread(s), which the city's own feedback work (LFr1) is answering; no gate filed" "…and the pass names the work answering them"
+hasnt "$(cat "$STUB_ESC_LOG")" "--subject LF2 --key merge-blocked-threads" "…nor does an open human-lane validation pass"
+hasnt "$(cat "$STUB_ESC_LOG")" "--subject LF3 --key merge-blocked-threads" "…nor a batch's rework a worker has hooked"
+has "$(cat "$STUB_ESC_LOG")" "--subject LN1 --key merge-blocked-threads" "a live rework no batch was routed to, and a validation pass on another lane, answer no thread, so the gate is filed"
+has "$(cat "$STUB_ESC_LOG")" "--subject LN2 --key merge-blocked-threads" "…and it is filed while the batch's rework is blocked, waiting for a person"
+eq "$(bstatus LRg1)" "open" "a children read that does not answer withdraws no gate"
+has "$out" "whether the city's feedback work on PR#749 is live did not read; its merge-blocked-threads gate is left for the next pass" "…and the pass says so"
+hasnt "$(cat "$STUB_ESC_LOG")" "--subject LR2 --key merge-blocked-threads" "…and files none on a guess"
+has "$out" "PR#751 BLOCKED on 1 unresolved review thread(s), but whether the city's feedback work on them is live did not read; no gate filed (retry next pass)" "…which the pass says too"
+
+echo "# …an open gate is withdrawn while that work is live, and filed again once the work closes with a thread unresolved"
+# LW1's gate was filed before its batch's rework took the threads up, and LK1's
+# is assigned to a person. LP1 has no live work, and its newest answer under the
+# key is a person's moot, given after a withdrawal of this script's own.
+# A merge-blocked-threads gate on <subject> that closed at <at> with <reason>.
+mbtgate() { # id subject at reason
+  jq -nc --arg id "$1" --arg s "$2" --arg at "$3" --arg r "$4" \
+    '{id: $id, status: "closed", assignee: "", title: ("Rule on " + $s), description: "", notes: "",
+      issue_type: "gate", await_type: "human", await_id: "merge-blocked-threads", close_reason: $r, closed_at: $at, metadata: {}}'
+  printf '%s|blocks|%s\n' "$1" "$2" >> "$STUB_DEPS"
+}
+: > "$STUB_DEPS"
+store "[$(anchor LW1 746 "$(routed_to LWr1)"), $(fbkid LWr1 LW1 746 in_progress), $(hgate LWg1 LW1 merge-blocked-threads),
+        $(anchor LK1 747 "$(routed_to LKr1)"), $(fbkid LKr1 LK1 747 in_progress), $(hgate LKg1 LK1 merge-blocked-threads open hq-sitting),
+        $(anchor LP1 748),
+        $(mbtgate LPg1 LP1 2026-11-12T10:00:00Z "moot: PR#748's review threads are being answered by the city's own feedback work (LPr1), so no person is asked to resolve them yet."),
+        $(mbtgate LPg2 LP1 2026-11-12T11:00:00Z "moot: resolving these by hand")]"
+blocked_on_a_thread 746 747 748
+# The real label writer over gctk's derivation, so the label LW1's PR reads is
+# what the shared code path decides.
+printf '#!/usr/bin/env bash\nexec %q "$@"\n' "$HERE/pr-status-label.sh" > "$SD/pr-status-label.sh"
+chmod +x "$SD/pr-status-label.sh"
+: > "$STUB_ESC_LOG"
+out=$(run)
+rm -f "$SD/pr-status-label.sh"
+eq "$(bstatus LWg1)" "closed" "an open merge-blocked-threads gate is withdrawn while the batch's rework is live"
+has "$(creason LWg1)" "moot: PR#746's review threads are being answered by the city's own feedback work (LWr1)" "…moot, naming the work answering them"
+has "$(cat "$STUB_ESC_LOG")" "--retract --subject LW1 --key merge-blocked-threads" "…through human-gate.sh --retract"
+eq "$(grep -c -- '^--subject LW1 ' "$STUB_ESC_LOG")" "0" "…and no gate is filed in its place"
+eq "$(jq -r '[.labels[]?.name] | sort | join(",")' "$GH_DIR/pr_view_746.json")" "status: working" "…so the PR reads working, not held by a gate"
+eq "$(bstatus LKg1)" "open" "a gate a person is assigned is kept while the work is live"
+has "$out" "its merge-blocked-threads gate is assigned to hq-sitting, who is left to clear it" "…left to them, and the pass says so"
+has "$(cat "$STUB_ESC_LOG")" "--subject LP1 --key merge-blocked-threads --quiet-window 86400" "with no live work, a person's moot answer newest under the key keeps the standing quiet window"
+# The rework lands and closes, and the store records when the withdrawn gate closed.
+jq -c --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  'map(if .id == "LWr1" then .status = "closed" elif .id == "LWg1" then .closed_at = $at else . end)' \
+  "$STUB_STORE" > "$STUB_STORE.tmp" && mv "$STUB_STORE.tmp" "$STUB_STORE"
+: > "$STUB_ESC_LOG"
+out=$(run)
+has "$(cat "$STUB_ESC_LOG")" "--subject LW1 --key merge-blocked-threads --message PR#746 (" "once the work closes with a thread unresolved, the gate is filed again, with no quiet window: the answer it would weigh is the script's own withdrawal while the work was live"
+eq "$(bstatus LKg1)" "open" "…and the assigned gate still stands"
+rm -f "$GH_DIR/rules_main.json"
 
 fi # part posture
 

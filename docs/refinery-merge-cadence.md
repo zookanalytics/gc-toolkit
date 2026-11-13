@@ -434,7 +434,11 @@ the cadence — the arms run whether or not any refinery session is awake.
    child, as for arm 5), `BLOCKED`
    (→ a human gate under `merge-blocked-threads`, only where
    `required_review_thread_resolution` is on and a thread is unresolved, read
-   from the branch's own rules. A missing required approving review files no
+   from the branch's own rules, and no rework child or human-lane validation
+   pass of the PR's comment batches is open, in progress or hooked. That work
+   answers the threads, and the write-back resolves a thread once its fix
+   lands, so the gate asks only about a thread still unresolved once the work closes, and
+   the withdrawal of a gate while the work is live starts no quiet window. A missing required approving review files no
    gate: it is the operator's own review queue, the state the board's review
    section already surfaces from the recorded `pr_posture`. Because such a
    review is state and never a question for a person, the cadence also
@@ -443,12 +447,13 @@ the cadence — the arms run whether or not any refinery session is awake.
    lists the store's gates and reaches the beads each one blocks from the
    gate's end, and leaves a gate whose beads do not read for the next pass. A
    cause the rules cannot name — an unmodeled rule, or unreadable
-   rules or thread count — files nothing and the next reconcile retries.
+   rules, thread count or feedback work — files nothing and the next reconcile retries.
    `reviewDecision` cannot name the cause alone, reading EMPTY while threads
    are unresolved, so the rules are read directly),
    hold-resolved retraction, and the withdrawal of its own merge-path gates
    once their situation is gone (an unengaged-threads gate once the head moves
-   past the one it counted, `merge-blocked-threads` once no thread blocks the
+   past the one it counted, `merge-blocked-threads` while that feedback work
+   is live and once no thread blocks the
    merge, the retarget and abandoned gates once the base or the PR is back, and
    a red-check park's gate once GitHub reads the PR mergeable). A feedback gate
    waits for its answer, and a gate a person is assigned is left to them. It re-reviews no moved head: a lane state is a
