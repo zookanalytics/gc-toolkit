@@ -196,12 +196,6 @@ yet. Each remaining difference names its reason and what ends it:
   nothing escalated. What holds the close is no fact a run can change, so a
   retry alone leaves a landed merge holding its work with no one told. This
   ends when Gas Town's command escalates a close it cannot make.
-- **The publication reads the gate's record.** The `mr` step records a head as
-  the one the refinery validated only once the gate's own record shows it
-  passed there, or failed only checks with a failure tracked as pre-existing.
-  Gas Town goes on to merge-push on the agent's reading of its run-tests step.
-  The recorded head is the one head the landing order may merge. This ends when
-  Gas Town's merge step reads its gate's result.
 - **find-work reads waits.** It skips a bead something holds or whose branch
   another open bead works on, and takes a rework child before its anchor. Gas
   Town takes any bead assigned to the refinery. Two writers on one branch would
