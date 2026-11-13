@@ -17,9 +17,10 @@ Town's pending-through-merge record is the other, which `gctk`'s pr domain
 declares and writes on a rig on the new path, and no machine checks it
 ([The pending record](#the-pending-record)). The refinery's parks write their
 value with one guarded `gc bd update` after the park's human gate. An unknown
-`merge_result` value is an error: every reader surfaces it via `escalate.sh`,
-and `doctor/check-state-space` catches it. A bead closed while `merge_result`
-is a non-closed state of the machine is repaired by `lifecycle.sh reopen`
+`merge_result` value is an error: `lifecycle.sh` names it and refuses to
+transition or reopen the bead, and `doctor/check-state-space` catches it. A
+bead closed while `merge_result` is a non-closed state of the machine is
+repaired by `lifecycle.sh reopen`
 (human-invoked; `merge_result` untouched).
 
 `lifecycle.sh` is the command every caller invokes, and `gctk lifecycle`

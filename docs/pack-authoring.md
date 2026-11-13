@@ -136,8 +136,8 @@ resolves the directory once, probes what it needs, and empties the variable
 when gc or a probe fails, so the guard after it stops the text:
 
 ```bash
-SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/escalate.sh" ] || SCRIPTS=""
-: "${SCRIPTS:?escalate.sh not found in the pack}"
+SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""
+: "${SCRIPTS:?human-gate.sh not found in the pack}"
 ```
 
 An empty or wrong binding fails loud: gc answers `unknown command`, and the
