@@ -9,10 +9,10 @@
 # ($GC_AGENT), and the refinery's tree for it must hold its branch
 # (refinery-lib.sh). The PR is its owner's: the bead itself, or for a rework
 # child handed back, the bead whose PR its work lands on (refinery_owner). A
-# convoy's rebuild child whose convoy is not open on its branch, or is no bead
-# in the store, has no owner: it is parked behind the gate
-# refinery-rebuild-convoy-not-open, with merge_result=blocked, before any PR is
-# read, pushed onto, opened or recorded.
+# convoy's rebuild child whose convoy is not open on its branch, is no bead in
+# the store, or is open there with no merge_result and assigned to nobody, has
+# no owner: it is parked behind the gate refinery-rebuild-convoy-not-open, with
+# merge_result=blocked, before any PR is read, pushed onto, opened or recorded.
 #
 # The PR the step takes is one the owner records (existing_pr, else pr_url,
 # else pr_number), or, when it records none, the PR open on GitHub from the

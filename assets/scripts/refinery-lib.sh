@@ -202,6 +202,10 @@ refinery_gate_dir() {
 # that bead is read by its id in every status, and when it is a convoy, or the
 # store holds no bead by that id, the call returns 3, with OWNER empty and the
 # message of the human gate the caller parks <bead> behind in OWNER_REFUSED.
+# A convoy open on <branch> that carries no merge_result and is assigned to
+# nobody returns 3 the same way, since neither the merge cadence nor the
+# refinery would take its PR on: the requeue keeps a convoy it rebuilds with
+# the refinery, and the gate names the assignment that goes on.
 # The gate is keyed refinery-rebuild-convoy-not-open, and the caller files it
 # before it pushes, publishes or records anything. A named bead of any other
 # kind leaves the rest of this rule. Else it is <bead> itself when <bead>
@@ -215,7 +219,7 @@ refinery_gate_dir() {
 # read.
 # shellcheck disable=SC2034  # OWNER_ROW and OWNER_REFUSED are read by the scripts that source this
 refinery_owner() {
-  local on named key rows found
+  local on named key rows found go_on
   on=$(bd_json list ${GC_RIG:+--rig="$GC_RIG"} --metadata-field "branch=$2" \
     --status=open,in_progress,blocked,deferred,hooked,pinned --limit=0) || on=""
   printf '%s' "$on" | jq -e 'type == "array"' >/dev/null 2>&1 \
@@ -224,23 +228,36 @@ refinery_owner() {
   OWNER=""; OWNER_REFUSED=""
   [ -z "$named" ] || [ "$named" = "$1" ] \
     || OWNER=$(printf '%s' "$on" | jq -r --arg n "$named" '[ .[] | select(.id == $n) ] | .[0].id // empty')
-  if [ -z "$OWNER" ] && [ -n "$named" ] && [ "$named" != "$1" ] && [ "$(bead_meta task_kind)" = rework ] \
+  if [ -n "$named" ] && [ "$named" != "$1" ] && [ "$(bead_meta task_kind)" = rework ] \
      && [ -z "$(bead_meta source_review_bead)" ] && [ -z "$(bead_meta source_ruling_bead)" ]; then
-    rows=$(bd_json list ${GC_RIG:+--rig="$GC_RIG"} --id "$named" --all --limit=0) || rows=""
-    found=$(printf '%s' "$rows" | jq -r --arg n "$named" 'if type != "array" then empty
-      else ([ .[] | objects | select(.id == $n) ][0]) as $r
-        | if $r == null then "the store holds no bead \($n)"
-          elif (($r.issue_type // $r.type // "") | tostring) != "convoy" then "kept"
-          elif (($r.status // "") | tostring) == "closed" then "\($n) is closed"
-          else (($r.metadata.branch // "") | tostring) as $b
-            | "\($n) is \(($r.status // "") | tostring) " + (if $b == "" then "with no branch" else "on \($b)" end)
-          end
-      end' 2>/dev/null)
+    if [ -n "$OWNER" ]; then
+      found=$(printf '%s' "$on" | jq -r --arg n "$named" --arg b "$2" '[ .[] | select(.id == $n) ][0] as $r
+        | if (($r.issue_type // $r.type // "") | tostring) == "convoy" and (($r.metadata.merge_result // "") | tostring) == ""
+             and (($r.assignee // "") | tostring) == ""
+          then "\($n) is open on \($b) with no merge_result and assigned to nobody, so neither the merge cadence nor the refinery would take that PR on"
+          else "kept" end' 2>/dev/null)
+      go_on="put $named back in a merge queue by assigning it to the refinery (gc bd update $named --assignee=$GC_AGENT)"
+    else
+      rows=$(bd_json list ${GC_RIG:+--rig="$GC_RIG"} --id "$named" --all --limit=0) || rows=""
+      found=$(printf '%s' "$rows" | jq -r --arg n "$named" --arg branch "$2" 'if type != "array" then empty
+        else ([ .[] | objects | select(.id == $n) ][0]) as $r
+          | if $r == null then "the store holds no bead \($n)"
+            elif (($r.issue_type // $r.type // "") | tostring) != "convoy" then "kept"
+            elif (($r.status // "") | tostring) == "closed" then "\($n) is closed"
+            else (($r.metadata.branch // "") | tostring) as $b
+              | "\($n) is \(($r.status // "") | tostring) " + (if $b == "" then "with no branch" else "on \($b)" end)
+            end
+            | if . == "kept" then . else . + ", so no bead on \($branch) can carry that PR" end
+        end' 2>/dev/null)
+      go_on="make $named open with branch $2"
+    fi
     case "$found" in
-      "") echo "$named, which $1 names as its anchor_bead, did not read, so whether $1 rebuilds a convoy cannot be told" >&2
+      "") OWNER=""
+          echo "$named, which $1 names as its anchor_bead, did not read, so whether $1 rebuilds a convoy cannot be told" >&2
           return 1 ;;
       kept) ;;
-      *) OWNER_REFUSED="$1, the rebuild of $named, lands on $named's PR, but $found, so no bead on $2 can carry that PR, and the refinery pushed, published and recorded nothing for $1. To go on with the graduation, make $named open with branch $2, then clear this gate: clearing it hands $1 back to the refinery, whose next pass lands it on $named. To abandon the graduation, run $_refinery_lib_dir/stand-down.sh $1 --key refinery-rebuild-convoy-not-open --ruling '<why>'."
+      *) OWNER=""
+         OWNER_REFUSED="$1, the rebuild of $named, lands on $named's PR, but $found, and the refinery pushed, published and recorded nothing for $1. To go on with the graduation, $go_on, then clear this gate: clearing it hands $1 back to the refinery, whose next pass lands it on $named. To abandon the graduation, run $_refinery_lib_dir/stand-down.sh $1 --key refinery-rebuild-convoy-not-open --ruling '<why>'."
          return 3 ;;
     esac
   fi

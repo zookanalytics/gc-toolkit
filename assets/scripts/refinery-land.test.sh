@@ -22,12 +22,15 @@
 #   - a bead that owns its PR lands as itself on the old path, though a parked
 #     rework child of it waits on its branch with a merge_result of its own;
 #   - a convoy's rebuild child lands on its convoy while the convoy is open on
-#     its branch; when the convoy is closed or open on another branch, or the
-#     store holds no bead by its id, the child is parked behind
-#     refinery-rebuild-convoy-not-open, with nothing pushed or transitioned, and
-#     a second pass over the parked child parks it again; a named bead that
-#     does not read, or a gate that does not file, writes nothing; and a rework
-#     naming a closed bead that is no convoy lands as itself;
+#     its branch in a queue, the refinery's or the merge cadence's, and the
+#     convoy stays where it was; when the convoy is closed or open on another
+#     branch, the store holds no bead by its id, or the convoy is open on its
+#     branch with no merge_result and assigned to nobody, the child is parked
+#     behind refinery-rebuild-convoy-not-open, with nothing pushed, edited or
+#     transitioned, and a second pass over the parked child parks it again; a
+#     named bead that does not read, or a gate that does not file, writes
+#     nothing; and a rework naming a closed bead that is no convoy lands as
+#     itself;
 #   - a branch with no change parks the bead behind refinery-false-completion,
 #     unless the target carries the bead's stamped direct landing, which is
 #     recorded, and a gate that is not filed parks nothing;
@@ -176,18 +179,22 @@ has "$(logged scripts)" "lifecycle transition bp --to pull_request --assignee  -
 eq "$(bstatus bp)" "open" "it is not closed as a landed rework"
 eq "$(bstatus kid) $(meta kid merge_result)" "open blocked" "the parked rework child is left as it was"
 
-# rebuild <status> <branch> [<type>] [<child metadata>] — a convoy (or a bead of
-# <type>) with status <status> on <branch>, whose open PR #70 is from
-# integration/cv, and its rebuild child rb on integration/cv, handed back and
-# prepared over a main that moved, so its prepared head is new. An empty
-# <status> leaves the named bead out of the store. BEFORE is
-# the branch's tip before the landing.
+# rebuild <status> <branch> [<type>] [<child metadata>] [<convoy assignee>]
+# [<convoy metadata>] — a convoy (or a bead of <type>) with status <status> on
+# <branch>, assigned to <convoy assignee>, by default the refinery, as the
+# requeue leaves a convoy it rebuilds, whose open PR #70 is from integration/cv,
+# and its rebuild child rb on integration/cv, handed back and prepared over a
+# main that moved, so its prepared head is new. The convoy carries no
+# merge_result unless <convoy metadata> gives it one, so an empty
+# <convoy assignee> alone leaves it in neither queue. An empty <status> leaves
+# the named bead out of the store. BEFORE is the branch's tip before the
+# landing.
 rebuild() {
   fresh
   branch_with integration/cv cv.txt >/dev/null
   main_with later.txt >/dev/null
-  [ -z "$1" ] || put "$(jq -nc --arg s "$1" --arg b "$2" --arg t "${3:-convoy}" '{id: "cv", title: "Convoy", status: $s, assignee: "", issue_type: $t,
-    created_at: "2026-11-11T00:00:00Z", notes: "", metadata: {branch: $b, target: "main", pr_url: "https://github.com/zook/rig/pull/70", pr_number: "70"}}')"
+  [ -z "$1" ] || put "$(jq -nc --arg s "$1" --arg b "$2" --arg t "${3:-convoy}" --arg a "${5-$GC_AGENT}" --argjson m "${6:-{\}}" '{id: "cv", title: "Convoy", status: $s, assignee: $a, issue_type: $t,
+    created_at: "2026-11-11T00:00:00Z", notes: "", metadata: ({branch: $b, target: "main", pr_url: "https://github.com/zook/rig/pull/70", pr_number: "70"} + $m)}')"
   work rb integration/cv "$(jq -nc --argjson m "${4:-{\}}" '{task_kind: "rework", anchor_bead: "cv", merge_strategy: "mr", existing_pr: "https://github.com/zook/rig/pull/70"} + $m')"
   prepared rb integration/cv
   pr 70 integration/cv gc-city-bot
@@ -204,7 +211,7 @@ parked_rebuild() {
   hasnt "$(logged gh)" "pr edit" "$1: the PR is not edited"
 }
 
-echo "# a convoy's rebuild child lands on its convoy while the convoy is open on its branch"
+echo "# a convoy's rebuild child lands on its convoy while the convoy is open on its branch in a queue"
 rebuild open integration/cv
 HEAD_RB=$(git -C "$HOME_DIR/worktrees/rb" rev-parse HEAD)
 run --bead rb
@@ -213,6 +220,14 @@ eq "$(tip integration/cv)" "$HEAD_RB" "the head is on the convoy's branch"
 has "$(bnotes cv)" "Rework rb landed on integration/cv at $HEAD_RB" "the convoy notes the landing"
 eq "$(bstatus rb)" "closed" "the child closes"
 hasnt "$(logged scripts)" "human-gate" "no gate is filed"
+eq "$(bstatus cv) $(bassignee cv)" "open $GC_AGENT" "the convoy stays open and the refinery's, which takes it again once the child closes"
+rebuild open integration/cv convoy '{}' "" '{"merge_result":"pull_request"}'
+HEAD_RB=$(git -C "$HOME_DIR/worktrees/rb" rev-parse HEAD)
+run --bead rb
+eq "$RC" 0 "a convoy the merge cadence holds at pull_request: the hand-back exits 0"
+eq "$(tip integration/cv)" "$HEAD_RB" "…with the head on the convoy's branch"
+eq "$(bstatus rb)" "closed" "…and the child closed"
+eq "$(meta cv merge_result) $(bassignee cv)" "pull_request " "…and the convoy left at pull_request for the cadence"
 
 echo "# a rebuild child whose convoy cannot carry its PR is parked, not landed as its own"
 rebuild closed integration/cv
@@ -230,6 +245,13 @@ rebuild ""
 run --bead rb
 parked_rebuild "a named bead the store does not hold"
 has "$(logged scripts)" "but the store holds no bead cv" "a named bead the store does not hold: the gate says so"
+rebuild open integration/cv convoy '{}' ""
+run --bead rb
+parked_rebuild "a convoy open on its branch in neither queue"
+has "$(logged scripts)" "but cv is open on integration/cv with no merge_result and assigned to nobody" "a convoy in neither queue: the gate says so"
+has "$(logged scripts)" "put cv back in a merge queue by assigning it to the refinery (gc bd update cv --assignee=$GC_AGENT), then clear this gate" "…and names the assignment that goes on"
+has "$(logged scripts)" "stand-down.sh rb --key refinery-rebuild-convoy-not-open" "…or the stand-down that abandons the graduation"
+eq "$(bassignee cv)|$(meta cv merge_result)|$(bnotes cv)" "|<absent>|" "…and the convoy is left as it was"
 rebuild closed integration/cv convoy '{"merge_result":"blocked","blocked_reason":"the rebuild of cv has no bead on integration/cv to carry its PR"}'
 run --bead rb
 parked_rebuild "a second pass over a parked child whose convoy is still closed"

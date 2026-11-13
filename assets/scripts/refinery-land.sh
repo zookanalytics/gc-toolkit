@@ -35,8 +35,9 @@
 # a PR open from its branch, else at pre_open_gate, with merged_target and
 # check_set, through lifecycle.sh. On either path a rework child handed back
 # lands on its anchor's branch and closes with its work record. A convoy's
-# rebuild child whose convoy is not open on its branch, or is no bead in the
-# store, lands on neither path: it is parked behind the gate
+# rebuild child whose convoy is not open on its branch, is no bead in the
+# store, or is open there with no merge_result and assigned to nobody, lands
+# on neither path: it is parked behind the gate
 # refinery-rebuild-convoy-not-open before anything is pushed (refinery-lib.sh's
 # refinery_owner).
 #

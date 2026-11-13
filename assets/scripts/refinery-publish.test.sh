@@ -24,8 +24,12 @@
 #   - a bead that owns its PR records it on itself, though a parked rework
 #     child of it waits on its branch with a merge_result of its own;
 #   - a convoy's rebuild child records the PR on its convoy while the convoy is
-#     open on its branch; when the convoy is closed or open on another branch,
-#     or the store holds no bead by its id, the child is parked behind
+#     open on its branch and the refinery's; a convoy the merge cadence holds
+#     at pull_request refuses the record, as `gctk pr record` refuses any owner
+#     that is not the refinery's, so its notes name the PR and the child
+#     closes; when the convoy is closed or open on another branch, the store
+#     holds no bead by its id, or the convoy is open on its branch with no
+#     merge_result and assigned to nobody, the child is parked behind
 #     refinery-rebuild-convoy-not-open before any PR is read, pushed onto,
 #     opened or recorded, and a second pass over the parked child parks it
 #     again; a named bead that does not read, or a gate that does not file,
@@ -200,18 +204,22 @@ eq "$(bstatus bp) $(meta bp merge_result)" "blocked pull_request_pending" "the b
 eq "$(bstatus kid) $(meta kid merge_result)" "open blocked" "the parked rework child is left as it was"
 hasnt "$(bnotes bp)" "Rework landed" "the bead that owns the PR is not closed as a landed rework"
 
-# rebuild <status> <branch> [<type>] [<child metadata>] — a convoy (or a bead of
-# <type>) with status <status> on <branch>, whose open PR #70 is from
-# integration/cv, and its rebuild child rb on integration/cv, handed back and
-# prepared over a main that moved, so its prepared head is new. An empty
-# <status> leaves the named bead out of the store. BEFORE is
-# the branch's tip before the publication.
+# rebuild <status> <branch> [<type>] [<child metadata>] [<convoy assignee>]
+# [<convoy metadata>] — a convoy (or a bead of <type>) with status <status> on
+# <branch>, assigned to <convoy assignee>, by default the refinery, as the
+# requeue leaves a convoy it rebuilds, whose open PR #70 is from integration/cv,
+# and its rebuild child rb on integration/cv, handed back and prepared over a
+# main that moved, so its prepared head is new. The convoy carries no
+# merge_result unless <convoy metadata> gives it one, so an empty
+# <convoy assignee> alone leaves it in neither queue. An empty <status> leaves
+# the named bead out of the store. BEFORE is the branch's tip before the
+# publication.
 rebuild() {
   fresh
   branch_with integration/cv cv.txt >/dev/null
   main_with later.txt >/dev/null
-  [ -z "$1" ] || put "$(jq -nc --arg s "$1" --arg b "$2" --arg t "${3:-convoy}" '{id: "cv", title: "Convoy", status: $s, assignee: "", issue_type: $t,
-    created_at: "2026-11-11T00:00:00Z", notes: "", metadata: {branch: $b, target: "main", pr_url: "https://github.com/zook/rig/pull/70", pr_number: "70"}}')"
+  [ -z "$1" ] || put "$(jq -nc --arg s "$1" --arg b "$2" --arg t "${3:-convoy}" --arg a "${5-$GC_AGENT}" --argjson m "${6:-{\}}" '{id: "cv", title: "Convoy", status: $s, assignee: $a, issue_type: $t,
+    created_at: "2026-11-11T00:00:00Z", notes: "", metadata: ({branch: $b, target: "main", pr_url: "https://github.com/zook/rig/pull/70", pr_number: "70"} + $m)}')"
   work rb integration/cv "$(jq -nc --argjson m "${4:-{\}}" '{task_kind: "rework", anchor_bead: "cv", merge_strategy: "mr", existing_pr: "https://github.com/zook/rig/pull/70"} + $m')"
   prepared rb integration/cv
   pr 70 integration/cv gc-city-bot
@@ -228,15 +236,23 @@ parked_rebuild() {
   hasnt "$(logged gctk)" "pr record" "$1: no record is written"
 }
 
-echo "# a convoy's rebuild child records the PR on its convoy while the convoy is open on its branch"
+echo "# a convoy's rebuild child records the PR on its convoy while the convoy is open on its branch and the refinery's"
 rebuild open integration/cv
 HEAD_RB=$(git -C "$HOME_DIR/worktrees/rb" rev-parse HEAD)
 run --bead rb
 eq "$RC" 0 "the hand-back exits 0"
 has "$(logged gctk)" "pr record cv --pr https://github.com/zook/rig/pull/70" "the convoy's record is written"
+eq "$(bstatus cv) $(meta cv merge_result) $(bassignee cv)" "blocked pull_request_pending $GC_AGENT" "…and the convoy waits on its PR's merge, the refinery's"
 eq "$(tip integration/cv)" "$HEAD_RB" "the head is on the convoy's branch"
 eq "$(bstatus rb)" "closed" "the child closes"
 hasnt "$(logged scripts)" "human-gate" "no gate is filed"
+rebuild open integration/cv convoy '{}' "" '{"merge_result":"pull_request"}'
+HEAD_RB=$(git -C "$HOME_DIR/worktrees/rb" rev-parse HEAD)
+run --bead rb
+eq "$RC" 0 "a convoy the merge cadence holds at pull_request: the hand-back exits 0"
+eq "$(meta cv merge_result) $(bassignee cv)" "pull_request " "…and the record, which takes only an owner that is the refinery's, leaves the convoy as it was"
+has "$(bnotes cv)" "Refinery: published https://github.com/zook/rig/pull/70 from integration/cv at $HEAD_RB" "…its notes name the PR"
+eq "$(bstatus rb)" "closed" "…and the child closes"
 
 echo "# a rebuild child whose convoy cannot carry its PR is parked, not published as its own"
 rebuild closed integration/cv
@@ -254,6 +270,12 @@ rebuild ""
 run --bead rb
 parked_rebuild "a named bead the store does not hold"
 has "$(logged scripts)" "but the store holds no bead cv" "a named bead the store does not hold: the gate says so"
+rebuild open integration/cv convoy '{}' ""
+run --bead rb
+parked_rebuild "a convoy open on its branch in neither queue"
+has "$(logged scripts)" "but cv is open on integration/cv with no merge_result and assigned to nobody" "a convoy in neither queue: the gate says so"
+has "$(logged scripts)" "put cv back in a merge queue by assigning it to the refinery (gc bd update cv --assignee=$GC_AGENT), then clear this gate" "…and names the assignment that goes on"
+eq "$(bassignee cv)|$(meta cv merge_result)|$(bnotes cv)" "|<absent>|" "…and the convoy is left as it was"
 rebuild closed integration/cv convoy '{"merge_result":"blocked","blocked_reason":"parked behind a gate"}'
 run --bead rb
 parked_rebuild "a second pass over a parked child whose convoy is still closed"

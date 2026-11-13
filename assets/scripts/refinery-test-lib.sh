@@ -11,11 +11,13 @@
 #     proves (human-gate.sh, deferred-dispatch.sh, patrol-finding.sh,
 #     pool-route.sh, lifecycle.sh, preexisting-failure.sh,
 #     rig-check-pre-existing.sh, stand-down.sh), each logging its argv;
-#   - fake gc, gh and gctk on PATH, over a JSON bead store ($STORE). Its wait
-#     edges are lines of $STUB_HOLDS, "<bead> <what it waits on>": a blocks
-#     edge a create or `gc bd dep` writes is added there, `gc bd dep list`
-#     reads them, and `gctk bead holds` answers from the ones whose far bead
-#     the store does not hold closed.
+#   - fake gc, gh and gctk on PATH, over a JSON bead store ($STORE). The fake
+#     `gctk pr record` keeps the real one's guard: it writes nothing on a bead
+#     that is closed or assigned to anyone but the refinery, and exits 3. The
+#     store's wait edges are lines of $STUB_HOLDS, "<bead> <what it waits on>":
+#     a blocks edge a create or `gc bd dep` writes is added there, `gc bd dep
+#     list` reads them, and `gctk bead holds` answers from the ones whose far
+#     bead the store does not hold closed.
 # No live city, store, GitHub or network.
 
 PASS=0; FAIL=0
@@ -346,13 +348,21 @@ case "$1 $2" in
     jq -n --arg t "feat: $owner (${owner})" --arg b "$body" --arg o "$outcome" \
       '{title: $t, body: $b, summary: $o, branch_beads: "single", branch_bead_count: 1}' ;;
   "pr record")
-    bead="$3"; shift 3; url=""; head=""; target=""
+    bead="$3"; shift 3; url=""; head=""; target=""; refinery=""
     while [ $# -gt 0 ]; do
-      case "$1" in --pr) url="$2"; shift ;; --head) head="$2"; shift ;; --target) target="$2"; shift ;; esac
+      case "$1" in --pr) url="$2"; shift ;; --head) head="$2"; shift ;; --target) target="$2"; shift ;; --refinery) refinery="$2"; shift ;; esac
       shift
     done
     rc="${STUB_RECORD_RC:-0}"
     [ "$rc" = 0 ] || exit "$rc"
+    # Landing.Record's guard: a bead that is closed, or assigned to anyone but
+    # the refinery, gets nothing written and exit 3.
+    row=$(jq -c --arg id "$bead" '[ .[] | select(.id == $id) ][0] // empty' "$STORE")
+    [ -n "$row" ] || { echo "gctk pr record: $bead: the store holds no such bead" >&2; exit 2; }
+    if [ "$(printf '%s' "$row" | jq -r '.status')" = closed ] || [ "$(printf '%s' "$row" | jq -r '.assignee // ""')" != "$refinery" ]; then
+      echo "gctk pr record: $bead: nothing written: it is closed or not assigned to the refinery, $refinery" >&2
+      exit 3
+    fi
     jq --arg id "$bead" --arg u "$url" --arg h "$head" --arg t "$target" \
       'map(if .id == $id then .status = "blocked" | .metadata += {merge_result: "pull_request_pending", pr_url: $u, pr_head_sha: $h, merged_target: $t, pr_reconcile_pending: "true", existing_pr: $u} else . end)' \
       "$STORE" > "$STORE.n" && mv "$STORE.n" "$STORE" ;;
