@@ -20,14 +20,26 @@
 #   work_stop_with_gate <key> <message> <reason>
 #                                 a person must rule before the work goes on, so
 #                                 the run ends on a gate its work bead waits on
+#   work_drain                    ends the session's run
+#   work_held_by_proof            whether the sitting WORK_HELD_BY names holds the
+#                                 work bead: 0, or 1 having said why not
+#   work_held_stop <why>          stops a sitting's call, ending nothing
 #
 # The store's answer decides, not a jq filter's: `gc bd show` exits 1 and prints
 # an error object for a bead it does not have, and exits non-zero with no JSON
 # when it cannot answer. A filter fed either one yields an empty value with exit
 # 0, which a step would read as an absent field.
 #
+# A converse sitting calls work-setup.sh and work-submit.sh with --held-by
+# <conversation>, which the caller puts in WORK_HELD_BY. The sitting's claim is
+# the conversation, it outlives the call, and it is in the conversation to hear
+# why a call stopped. So under WORK_HELD_BY nothing here files a gate, cancels a
+# run or drains: work_outage and work_stop_with_gate say why and stop, and
+# work_drain does nothing.
+#
 # A caller sets PROG and SCRIPT_DIR before it sources this file, and STEP and
-# FORMULA before it calls work_stop_with_gate. WORK_READ_TRIES and WORK_READ_WAIT bound
+# FORMULA before it calls work_stop_with_gate. It sources run-lib.sh before it
+# calls work_held_by_proof. WORK_READ_TRIES and WORK_READ_WAIT bound
 # the retry; a suite sets the wait to 0.
 
 WORK_READ_TRIES="${WORK_READ_TRIES:-3}"
@@ -106,14 +118,57 @@ work_owner_listed() {
 }
 
 # A store that cannot answer is no fact about the work: no gate and no cancel,
-# so the step is offered again once the store answers.
+# so the step is offered again once the store answers, and a sitting runs the
+# call again.
 work_outage() {
+  [ -z "${WORK_HELD_BY:-}" ] || work_held_stop "$1. The store did not answer, so run this again once it answers"
   echo "$PROG: $1. The store did not answer, so nothing was asked and nothing was cancelled, and this step goes back to the pool." >&2
   gc runtime drain-ack
   exit 1
 }
 
 work_stop_with_gate() {
+  [ -z "${WORK_HELD_BY:-}" ] || work_held_stop "$3"
   "$SCRIPT_DIR/decline.sh" --step "$STEP" --reason "$3" --subject "$WORK_ID" --key "$1" --formula "$FORMULA" --message "$2"
   exit 1
+}
+
+work_drain() {
+  [ -n "${WORK_HELD_BY:-}" ] || gc runtime drain-ack
+}
+
+work_held_stop() {
+  echo "$PROG: $1. Nothing was asked, cancelled or drained." >&2
+  exit 1
+}
+
+# The reader run-lib.sh's verbs call: bd's own arguments, against this store.
+work_bd() { gc bd "$@"; }
+
+# The sitting holds the work bead when gc hook current names its conversation
+# and the bead has a blocks edge onto it, which keeps every pool off the bead
+# while the conversation is open. A bead someone else holds or is queued to take
+# is refused whatever the hook and the edge say: one assigned to anyone, the
+# refinery included; one a live run works, which only run-lib.sh tells, since
+# Gas City leaves a bead under a run open, unassigned and unrouted; and one
+# whose gc.routed_to names the pool queue that serves it once bd reports it
+# ready (dispatch-path.sh). Every reason is named, the holder's first, so a bead
+# the refinery has is refused as the refinery's whether or not its edge stands.
+work_held_by_proof() {
+  local why="" owner runs live route claimed
+  owner=$(work_field .assignee)
+  [ -z "$owner" ] || why="$why; it is assigned to $owner"
+  runs=$(run_lib runs work_bd "$WORK_ID") || work_outage "could not read the runs that work $WORK_ID"
+  live=$(printf '%s' "$runs" | jq -r '[.[] | select(.live) | .root] | join(", ")')
+  [ -z "$live" ] || why="$why; a run works it ($live)"
+  route=$(work_meta gc.routed_to)
+  [ -z "$(printf '%s' "$route" | tr -d '[:space:]')" ] || why="$why; it is routed to $route"
+  claimed=$(gc hook current --id-only </dev/null 2>/dev/null) || claimed=""
+  [ "$claimed" = "$WORK_HELD_BY" ] || why="$why; gc hook current names ${claimed:-no bead}, not $WORK_HELD_BY"
+  printf '%s' "$WORK_ROW" | jq -e --arg c "$WORK_HELD_BY" \
+      'any(.[0].dependencies[]?; (.id // "") == $c and (.dependency_type // "") == "blocks")' >/dev/null 2>&1 \
+    || why="$why; it has no blocks edge onto $WORK_HELD_BY"
+  [ -n "$why" ] || return 0
+  echo "$PROG: $WORK_ID is not held by $WORK_HELD_BY: ${why#; }. Nothing was written." >&2
+  return 1
 }

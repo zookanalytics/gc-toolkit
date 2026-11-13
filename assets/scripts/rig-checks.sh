@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # rig-checks — run a rig's declared checks through `gctk rig` for one of
 # mol-polecat-work's steps. setup and preflight run in the current directory, and
-# self-review in the tree its work bead records.
+# self-review in the tree its work bead records. A converse sitting runs
+# self-review on the change it makes with the operator before its hand-off, with
+# the commands the rig declares for mol-polecat-work.
 #
 #   rig-checks.sh setup --setup <command>
 #   rig-checks.sh preflight --typecheck <command> --lint <command> --test <command>

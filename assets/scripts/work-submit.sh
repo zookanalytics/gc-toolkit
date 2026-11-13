@@ -4,6 +4,8 @@
 #
 #   work-submit.sh --convoy <id>|--bead <id> --base <branch> --notes "<text>"
 #                  [--anchor <id>] [--summary-file <path>] [--title "<text>"]
+#   work-submit.sh --bead <id> --held-by <conversation> --notes "<text>"
+#                  [--summary-file <path>] [--title "<text>"]
 #   work-submit.sh --anchor-only --convoy <id>|--bead <id>
 #   work-submit.sh --store-only "<what the run filed>" --notes "<text>" [--done "<brief>"]
 #                  --convoy <id>|--bead <id> --base <branch>
@@ -65,13 +67,29 @@
 # it. Both are read before anything is pushed or written, because a close refused
 # after the handoff can only be reported.
 #
+# A converse sitting hands its change off with --held-by <conversation> beside
+# --bead. Its claim is the conversation, so in place of that check the bead must
+# show that the sitting holds it (work_held_by_proof in work-lib.sh), which
+# refuses a bead the refinery holds as it refuses any other holder's. The bead's
+# target is its base, and there is no step to close. The sitting outlives the
+# call and is in the conversation to hear why it stopped, so no stop files a
+# gate, cancels or drains. The rest is this same code. The hand-off removes the
+# edge onto the conversation as its last write, after the assignment and before
+# the wake, because the refinery's queue leaves an assigned bead that a wait of
+# its own holds, so the assignment starts nothing while the edge stands. A call
+# that stops before the assignment leaves the bead unassigned and still held,
+# and the call run again finishes it, appending its notes again. Once the
+# assignment lands, every run is refused as the refinery's, whether or not the
+# release landed.
+#
 # --anchor-only prints the anchor and its title, for the caller to judge whether
 # the title opens with the type and scope that fit and names what the branch
 # does, and writes nothing.
 #
 # exit: 0 handed off, or halted as asked, and drained · 3 the caller owes something
 # first, nothing handed off, no drain · 1 stopped, and what follows was taken care
-# of · 2 usage
+# of · 2 usage. Under --held-by nothing drains, and 1 is a stop that asked and
+# ended nothing.
 set -uo pipefail
 
 PROG="work-submit"
@@ -80,6 +98,8 @@ usage() {
   cat >&2 <<'USAGE'
 usage: work-submit.sh --convoy <id>|--bead <id> --base <branch> --notes "<text>"
                       [--anchor <id>] [--summary-file <path>] [--title "<text>"]
+       work-submit.sh --bead <id> --held-by <conversation> --notes "<text>"
+                      [--summary-file <path>] [--title "<text>"]
        work-submit.sh --anchor-only --convoy <id>|--bead <id>
        work-submit.sh --store-only "<what the run filed>" --notes "<text>" [--done "<brief>"]
                       --convoy <id>|--bead <id> --base <branch>
@@ -88,6 +108,9 @@ usage: work-submit.sh --convoy <id>|--bead <id> --base <branch> --notes "<text>"
   --bead           the work bead, for a claimant with no poured workflow, which
                    this session must hold; exit 3 when it holds neither that bead
                    nor this step
+  --held-by        the conversation a converse sitting holds, whose blocks edge
+                   holds the --bead; the bead's target is the base, and no stop
+                   gates, cancels or drains
   --base           the branch the work was poured from
   --notes          appended to the work bead's notes with the handoff
   --anchor         the anchor --anchor-only printed; absent, it is resolved here
@@ -116,12 +139,13 @@ require_value() {
 }
 
 CONVOY=""; BEAD=""; BASE=""; NOTES=""; ANCHOR=""; ANCHOR_SET=0; SUMMARY_FILE=""; TITLE=""; STORE_ONLY=""; DONE_BRIEF=""
-ANCHOR_ONLY=0; STEP="mol-polecat-work.submit-and-exit"; FORMULA="mol-polecat-work"; BINDING_PREFIX="gc-toolkit."
+ANCHOR_ONLY=0; STEP="mol-polecat-work.submit-and-exit"; FORMULA="mol-polecat-work"; BINDING_PREFIX="gc-toolkit."; WORK_HELD_BY=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --anchor-only)    ANCHOR_ONLY=1; shift ;;
     --convoy)         require_value "$@"; CONVOY="$2";         shift 2 ;;
     --bead)           require_value "$@"; BEAD="$2";           shift 2 ;;
+    --held-by)        require_value "$@"; WORK_HELD_BY="$2";   shift 2 ;;
     --base)           require_value "$@"; BASE="$2";           shift 2 ;;
     --notes)          require_value "$@"; NOTES="$2";          shift 2 ;;
     --anchor)         require_value "$@"; ANCHOR="$2"; ANCHOR_SET=1; shift 2 ;;
@@ -141,8 +165,18 @@ if { [ -n "$CONVOY" ] && [ -n "$BEAD" ]; } || { [ -z "$CONVOY" ] && [ -z "$BEAD"
   usage
   exit 2
 fi
-if [ "$ANCHOR_ONLY" = 0 ] && { [ -z "$NOTES" ] || [ -z "$BASE" ]; }; then
-  echo "$PROG: --notes and --base are required" >&2
+if [ -n "$WORK_HELD_BY" ] && { [ -n "$CONVOY" ] || [ -n "$BASE" ] || [ -n "$STORE_ONLY" ] || [ "$ANCHOR_ONLY" = 1 ]; }; then
+  echo "$PROG: --held-by hands off the bead --bead names, to its own target, so it takes no --convoy, no --base and no other mode" >&2
+  usage
+  exit 2
+fi
+if [ "$ANCHOR_ONLY" = 0 ] && [ -z "$NOTES" ]; then
+  echo "$PROG: --notes is required" >&2
+  usage
+  exit 2
+fi
+if [ "$ANCHOR_ONLY" = 0 ] && [ -z "$BASE" ] && [ -z "$WORK_HELD_BY" ]; then
+  echo "$PROG: --base is required" >&2
   usage
   exit 2
 fi
@@ -152,6 +186,8 @@ SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "${GC_BD_LIB:-$SCRIPT_DIR/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh beside this script" >&2; exit 1; }
 # shellcheck source=work-lib.sh
 . "$SCRIPT_DIR/work-lib.sh"
+# shellcheck source=run-lib.sh
+. "${GC_RUN_LIB:-$SCRIPT_DIR/run-lib.sh}" || { echo "$PROG: cannot source run-lib.sh beside this script" >&2; exit 1; }
 
 work_resolve "$CONVOY" "$BEAD"
 case $? in
@@ -172,7 +208,13 @@ refuse_claim() {
   echo "$PROG: $1 Nothing is pushed, and $WORK_ID is NOT handed off." >&2
   exit 3
 }
-if [ -n "$BEAD" ] && [ "$ANCHOR_ONLY" = 0 ]; then
+if [ -n "$WORK_HELD_BY" ]; then
+  # A sitting holds the bead through its conversation, and has no step to close.
+  work_held_by_proof || exit 1
+  BASE=$(work_meta target)
+  [ -n "$BASE" ] || work_held_stop "$WORK_ID records no target, the branch its change lands on, so nothing is pushed"
+  DIRECT_CLAIM=1
+elif [ -n "$BEAD" ] && [ "$ANCHOR_ONLY" = 0 ]; then
   CLAIMED=$(gc hook current --id-only </dev/null 2>/dev/null) || CLAIMED=""
   OWNER=$(work_field .assignee)
   if [ -n "$(work_meta gc.step_ref)" ]; then
@@ -196,12 +238,12 @@ close_step() {
 if [ "$ANCHOR_ONLY" = 0 ] && [ "$(work_field .status)" = closed ]; then
   if [ "$(work_meta gc.work_outcome)" = shipped ] || [ "$(work_meta merge_result)" = merged ]; then
     close_step
-    gc runtime drain-ack
+    work_drain
     exit 0
   fi
   if [ "$DIRECT_CLAIM" = 1 ]; then
     echo "$PROG: $WORK_ID was closed while this session held it, so nothing is handed off." >&2
-    gc runtime drain-ack
+    work_drain
     exit 1
   fi
   "$SCRIPT_DIR/decline.sh" --step "$STEP" --reason "work bead $WORK_ID was closed while its run was mid-flight"
@@ -216,11 +258,11 @@ fi
 if [ -n "$STORE_ONLY" ]; then
   # store-only-exit.sh refuses a run with work to land, and writes nothing then.
   "$SCRIPT_DIR/store-only-exit.sh" --bead "$WORK_ID" --base "$BASE" ${CONVOY:+--convoy "$CONVOY"} --done "$DONE_BRIEF" \
-    || { gc runtime drain-ack; exit 1; }
+    || { work_drain; exit 1; }
   gc bd update "$WORK_ID" --set-metadata halt_reason=store_only --append-notes "Store-only exit: filed $STORE_ONLY. $NOTES" </dev/null >/dev/null || exit 1
   "$SCRIPT_DIR/hand-back.sh" "$WORK_ID" --set-metadata gc.routed_to="" || exit 1
   close_step
-  gc runtime drain-ack
+  work_drain
   exit 0
 fi
 
@@ -339,7 +381,7 @@ if [ "$(printf '%s' "$WORK_ROW" | jq -r '.[0].metadata | if has("auto_push") the
   gc bd update "$WORK_ID" --set-metadata "branch=$CURRENT_BRANCH" --set-metadata "target=$LANDING_TARGET" --set-metadata branch_ready=true --set-metadata halt_reason=auto_push_false --append-notes "Branch ready: auto_push=false (no push, no refinery handoff)" </dev/null >/dev/null || exit 1
   "$SCRIPT_DIR/hand-back.sh" "$WORK_ID" --set-metadata gc.routed_to="" || exit 1
   close_step
-  gc runtime drain-ack
+  work_drain
   exit 0
 fi
 
@@ -347,14 +389,14 @@ fi
 PRE_PUSH_HEAD=$(git ls-remote origin "refs/heads/$CURRENT_BRANCH" 2>/dev/null | awk '{print $1}')
 if ! git push origin HEAD; then
   echo "PUSH FAILED: $WORK_ID stays with this run. A non-fast-forward rejection means the branch moved under you; re-fetch, MERGE origin in, and retry. Never force-push: branches are brought current by merge, never rebase." >&2
-  gc runtime drain-ack
+  work_drain
   exit 1
 fi
 REMOTE_REF=$(git ls-remote origin "refs/heads/$CURRENT_BRANCH" 2>/dev/null | awk '{print $1}')
 LOCAL_HEAD=$(git rev-parse HEAD)
 if [ -z "$REMOTE_REF" ] || [ "$REMOTE_REF" != "$LOCAL_HEAD" ]; then
   echo "PUSH VERIFICATION FAILED: origin/$CURRENT_BRANCH (${REMOTE_REF:-absent}) != local HEAD ($LOCAL_HEAD). Aborting handoff." >&2
-  gc runtime drain-ack
+  work_drain
   exit 1
 fi
 
@@ -366,7 +408,7 @@ case $? in
     exit 3 ;;
   *)
     echo "BRING-CURRENT GUARD DID NOT FINISH: the push stands, but $WORK_ID is NOT handed off. It stays open, which holds any merge it gates, and the session that re-runs submit-and-exit retries the guard." >&2
-    gc runtime drain-ack
+    work_drain
     exit 1 ;;
 esac
 
@@ -387,7 +429,7 @@ elif ! grep -qxF "$REFINERY_TARGET" <<< "$ROSTER"; then
   echo "REFINERY ADDRESS NAMES NO AGENT: $REFINERY_TARGET" >&2
   echo "The refinery reads its queue by exact-match assignee, so a bead sent here is never seen and nothing reports it." >&2
   echo "Bound refineries: $BOUND" >&2
-  gc runtime drain-ack
+  work_drain
   exit 1
 fi
 
@@ -410,10 +452,16 @@ fi
 if ! { gc bd update "$WORK_ID" "${HANDOFF_META[@]}" --append-notes "$NOTES" </dev/null >/dev/null \
     && gc bd update "$WORK_ID" --status=open </dev/null >/dev/null \
     && gc bd update "$WORK_ID" "--assignee=$REFINERY_TARGET" </dev/null >/dev/null; }; then
+  [ -z "$WORK_HELD_BY" ] || work_held_stop "HANDOFF REFUSED: a gc bd update in the handoff exited non-zero and rolled itself back, so $WORK_ID is not yet assigned to $REFINERY_TARGET. The branch is pushed and the edge onto $WORK_HELD_BY stands, so this call run again finishes the hand-off"
   echo "HANDOFF REFUSED: a gc bd update in the handoff exited non-zero and rolled itself back, so $WORK_ID is not open, assigned to $REFINERY_TARGET, and unrouted. The branch is pushed, and this run is cancelled after the wait below lands." >&2
   work_stop_with_gate polecat-handoff-refused \
     "Refinery handoff for $WORK_ID was refused: a gc bd update exited non-zero and rolled back. The branch is pushed but the bead is not open+assigned to the refinery, and its run is cancelled." \
     "refinery handoff refused: a gc bd update exited non-zero and rolled back; the branch is pushed but the bead is not handed off"
+fi
+# A sitting's edge goes only once the refinery holds the bead, so a call that
+# stops before the assignment leaves the bead held for the call run again.
+if [ -n "$WORK_HELD_BY" ] && ! gc bd dep remove "$WORK_ID" "$WORK_HELD_BY" </dev/null >/dev/null; then
+  work_held_stop "$WORK_ID is handed off to $REFINERY_TARGET, but its blocks edge onto $WORK_HELD_BY stands, so the refinery leaves it while $WORK_HELD_BY is open. Remove the edge (gc bd dep remove $WORK_ID $WORK_HELD_BY), then wake the refinery (gc session wake $REFINERY_TARGET)"
 fi
 [ ! -f "${SUMMARY_FILE:-/nonexistent}" ] || rm -f "$SUMMARY_FILE"
 
@@ -457,5 +505,5 @@ release_tree() {
 }
 release_tree
 
-gc runtime drain-ack
+work_drain
 exit 0

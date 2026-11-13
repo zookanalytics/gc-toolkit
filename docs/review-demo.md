@@ -23,23 +23,40 @@ particular to this rig.
 
 The board is the app the helm service embeds. The service's `helm-fixture`
 command serves the reviewed commit's board on fixture data, with no city behind
-it (`services/helm/README.md`). Capture it from the review workspace under the
-keepalive, as every capture runs, with the pack's `demo-screenshot.sh`:
-`demo-screenshot.sh page --script board.md --serve "go run ./cmd/helm-fixture"
---port 0 --cwd <worktree>/services/helm --output board.png`.
+it (`services/helm/README.md`). The command that runs it is the rig's declared
+serve command, `ui_serve_command`, which the city sets among gc-toolkit's
+formula vars and which a sitting's live copy of the board runs too, through
+`gctk rig serve`. It runs from the worktree's root. A capture of the board needs
+that value as gc reads it: the city sets it for gc-toolkit, and the
+`mol-rig-demo` that gc loads declares the var, since `gc formula show` lists
+only the vars a formula declares. Read it as that var's `rig_default`, and
+capture the board from the review workspace under the keepalive, as every
+capture runs, with the pack's `demo-screenshot.sh`. Where gc reads no value, the
+block captures nothing and says why:
+
+```bash
+SERVE=$(gc formula show mol-rig-demo --rig gc-toolkit --json | jq -r '[.vars[] | select(.name == "ui_serve_command")][0].rig_default // empty')
+if [ -z "$SERVE" ]; then
+  echo "no capture of the board: gc reads no ui_serve_command for gc-toolkit; the city sets none for it, or the mol-rig-demo that gc loads declares none" >&2
+  false
+else
+  demo-screenshot.sh page --script board.md --serve "$SERVE" --cwd <worktree> --output board.png
+fi
+```
 
 The page shows the gc-toolkit rig's document,
 `services/helm/internal/rigboard/testdata/gc-toolkit.board.json`, which the rig
 read builds from the committed fixture of real gc-toolkit beads, so the
 script's start path is `/?rig=gc-toolkit`. To show another rig's document,
 write it in the shape `services/helm/web/src/rigboard/document.gen.ts` names
-and add `--rig-board $PWD/<file>` to the command. `demo-screenshot.sh` turns
-`--port 0` into a free port and hands it to the command as `$PORT`, where
-`helm-fixture` reads it, so two captures each get a server of their own. On a
-cold Go build cache the first run compiles Go's HTTP stack and can take most of
-the 30 s the engine waits for the command. When the engine reports that the
-command did not answer in time, capture again, because what the first run
-compiled stays cached.
+and add `--rig-board $PWD/<file>` to the command. `demo-screenshot.sh` serves
+the command as a copy that `gctk rig serve` runs from the worktree, inside the
+capture's sandbox, on a free port of its own that the command gets as `$PORT`,
+where `helm-fixture` reads it. A worktree has one copy, so take its captures one
+after another. A capture whose command differs from a copy that still runs
+there is refused until `gctk rig serve --stop`, run in the worktree, ends it.
+On a cold Go build cache the first run compiles Go's HTTP stack, and the copy's
+start waits up to three minutes for it to answer.
 
 A state that a verb leads to needs that verb's answer. Add
 `--answers $PWD/answers` to the command. A file there named for the verb, such
