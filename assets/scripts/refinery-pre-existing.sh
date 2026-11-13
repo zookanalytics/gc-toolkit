@@ -13,10 +13,7 @@
 # bead. The lookup reads every live status, and a lookup that does not answer
 # is unknown, never "none": nothing is filed and nothing lands. With no
 # tracker, one is filed with the failure's evidence, read from --log-file or
-# stdin: the check, where it ran, and its raw output. The check is then named,
-# with the prepared head, in the gate's record (refinery-lib.sh's
-# refinery_gate_verdict), which the publication reads before it records that
-# head as validated.
+# stdin: the check, where it ran, and its raw output.
 #
 # The bead must be assigned to this refinery ($GC_AGENT), and the refinery's
 # tree for it must hold its branch (refinery-lib.sh). The tracker is then
@@ -85,12 +82,6 @@ $LOG") || stop "no tracker was filed for $KEY"
   [ -n "$TRACKER" ] || stop "the filing of $KEY named no tracker"
   echo "$PROG: $KEY is tracked as $TRACKER, filed now" >&2
 fi
-
-# The gate's record names the check tracked at the prepared head, which the
-# publication reads before it records that head as validated
-# (refinery_gate_verdict), so a failure the record does not name lands nothing.
-GATE=$(refinery_gate_dir "$HOME_DIR") && mkdir -p "$GATE" && printf '%s %s\n' "$CHECK" "$PREP_HEAD" >> "$GATE/tracked" \
-  || stop "$KEY is tracked as $TRACKER, but the gate's record of it did not write"
 
 MARKED_ON=$(bead_meta anchor_bead)
 [ -n "$MARKED_ON" ] || MARKED_ON="$BEAD"

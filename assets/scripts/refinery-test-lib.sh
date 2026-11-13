@@ -146,8 +146,7 @@ pr() {
       baseRefName: $t, headRepository: {name: ($r | split("/")[1])}, headRepositoryOwner: {login: ($r | split("/")[0])},
       isCrossRepository: false, author: {login: $a}, title: ("old title " + ($n | tostring)), body: $body}' > "$GH_DIR/view_$1.json"
 }
-# prepared <bead> <branch> — the refinery's tree for <bead>, as the prep leaves it,
-# with the record of a gate that passed at its prepared head.
+# prepared <bead> <branch> — the refinery's tree for <bead>, as the prep leaves it.
 prepared() {
   git -C "$HOME_DIR" fetch -q origin "+refs/heads/$2:refs/remotes/origin/$2" "+refs/heads/main:refs/remotes/origin/main"
   local read; read=$(git -C "$HOME_DIR" rev-parse "refs/remotes/origin/$2")
@@ -155,20 +154,6 @@ prepared() {
   git -C "$HOME_DIR" worktree add -q --detach "$HOME_DIR/worktrees/$1" "$read"
   git -C "$HOME_DIR/worktrees/$1" update-ref "refs/worktree/refinery/$2" "$read"
   git -C "$HOME_DIR/worktrees/$1" merge -q --no-edit refs/remotes/origin/main >/dev/null 2>&1 || true
-  gate_record "$1" 0 "GATE PASSED"
-}
-# gate_dir — the gate's record, in the rig's git common dir.
-gate_dir() { printf '%s/gc-refinery-gate\n' "$(git -C "$HOME_DIR" rev-parse --path-format=absolute --git-common-dir)"; }
-# gate_record <bead> <rc> <verdict line> [<head>] — the gate's record as
-# refinery-gate.sh's job leaves it: the head it ran at, by default the bead's
-# prepared head, and its verdict, with no failure tracked yet.
-gate_record() {
-  local gate head
-  gate=$(gate_dir); mkdir -p "$gate"
-  head="${4:-$(git -C "$HOME_DIR/worktrees/$1" rev-parse HEAD)}"
-  printf 'GATE AT %s\n== lint\n%s\n' "$head" "$3" > "$gate/log"
-  printf '%s\n' "$2" > "$gate/rc"
-  rm -f "$gate/tracked"
 }
 
 _rt_gc() {

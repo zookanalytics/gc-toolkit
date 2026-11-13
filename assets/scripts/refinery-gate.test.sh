@@ -7,8 +7,7 @@
 #   - the checks run in the refinery's tree for the bead, through gctk rig, in
 #     the order setup, typecheck, lint, build, test, and the gate names every
 #     failed check, not just the last, and a check cut short ahead of any
-#     failure; the log's first line names the head the checks ran at, and a
-#     start clears the failures tracked against the gate before it;
+#     failure;
 #   - the rig's value wins over the formula's default, an empty one turns its
 #     check off, and run_tests=false skips the test command;
 #   - a rig with no check commands starts no gate until checks are given with
@@ -52,7 +51,6 @@ finish() {
 
 echo "# the checks run in the refinery's tree, in order, and every failure is named"
 fresh
-printf 'lint 0123456789abcdef0123456789abcdef01234567\n' > "$GATE/tracked"
 rt_vars setup_command='echo setup-ran > setup.out' lint_command='exit 1' build_command='pwd > build.out' test_command='exit 1'
 start --bead a
 eq "$RC" 0 "the gate starts"
@@ -61,8 +59,6 @@ eq "$WRC" 1 "the wait exits 1 for a gate that finished with failures"
 has "$WAIT" "state=done" "…and reports it done"
 has "$WAIT" "rc=1" "…with the gate's exit"
 has "$LOG" "GATE FAILED: lint:1 test:1" "every failed check is named"
-eq "$(printf '%s\n' "$LOG" | head -n 1)" "GATE AT $(git -C "$HOME_DIR/worktrees/a" rev-parse HEAD)" "the log's first line names the head the checks ran at"
-eq "$(cat "$GATE/tracked" 2>/dev/null)" "" "the start cleared the failures tracked against the gate before it"
 eq "$(cat "$HOME_DIR/worktrees/a/build.out" 2>/dev/null)" "$HOME_DIR/worktrees/a" "the checks run in the tree for the bead"
 eq "$(printf '%s\n' "$LOG" | grep '^== ' | tr '\n' ' ')" "== setup == lint == build == test " "they run in order, and an empty check is skipped"
 has "$(logged gctk)" "rig test --scope full --command exit 1" "the test command runs as the full suite"

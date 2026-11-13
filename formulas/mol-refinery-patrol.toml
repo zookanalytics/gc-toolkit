@@ -241,9 +241,7 @@ description = """
 ```
 It refuses a branch with no change against its target, then lands by the
 bead's strategy. `direct` is a fast-forward push, recorded `merged` and closed.
-`mr` on a rig on the new path first reads the gate's record, and refuses a head
-the gate did not pass unless each check it failed has a failure you tracked
-there in handle-failures. It then edits the PR's title and body, pushes the head
+`mr` on a rig on the new path edits the PR's title and body, pushes the head
 under the lease on the commit the prep read, opens the PR as a draft when none
 is open, and records it pending with `gctk pr record`; it takes a PR only when
 the city's account opened it. `mr` on any other rig pushes the head and parks

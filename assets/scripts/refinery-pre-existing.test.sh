@@ -5,10 +5,8 @@
 # preexisting-failure.sh and rig-check-pre-existing.sh that log their calls.
 # Proves:
 #   - a failure already tracked is confirmed, nothing is filed, and the tracker
-#     is marked on the bead at the prepared head and printed, and the gate's
-#     record names the check tracked at that head;
+#     is marked on the bead at the prepared head and printed;
 #   - an untracked failure is filed with its key and its evidence, then marked;
-#   - a tracked failure the gate's record does not take lands nothing;
 #   - a rework child's mark goes on the anchor it names;
 #   - a lookup that does not answer, a filing that does not land, or a failure
 #     given no evidence lands nothing, and nothing is marked;
@@ -50,7 +48,6 @@ eq "$RC" 0 "the path exits 0, so the landing goes ahead"
 eq "$OUT" "tk-old" "it prints the tracker"
 hasnt "$(logged scripts)" "preexisting-failure file" "nothing is filed"
 has "$(logged scripts)" "rig-check-pre-existing --bead a --check test --commit $HEAD_A --worktree $HOME_DIR/worktrees/a --trackers tk-old" "the tracker is marked on the bead at the prepared head"
-eq "$(cat "$(gate_dir)/tracked")" "test $HEAD_A" "the gate's record names the check tracked at the prepared head"
 
 echo "# an untracked failure is filed with its evidence, then marked"
 fresh
@@ -61,7 +58,6 @@ has "$(logged scripts)" "preexisting-failure key --lint shellcheck assets/script
 has "$(cat "$LOGS/filed.txt")" "FAIL: TestFoo (pkg/x)" "the filing carries the evidence"
 has "$(cat "$LOGS/filed.txt")" "while the refinery merged a" "…and where it was seen"
 has "$(logged scripts)" "--trackers tk-filed" "the new tracker is marked"
-eq "$(cat "$(gate_dir)/tracked")" "lint $HEAD_A" "the gate's record names the check filed at the prepared head"
 
 echo "# a rework child's mark goes on its anchor"
 fresh
@@ -84,14 +80,6 @@ fresh
 EVIDENCE="" run --bead a --check test --test TestFoo
 eq "$RC" 1 "a failure given no evidence exits 1"
 hasnt "$(logged scripts)" "preexisting-failure file" "…and files nothing"
-
-echo "# a tracked failure the gate's record does not take lands nothing"
-fresh
-mkdir -p "$(gate_dir)/tracked"
-PF_FOUND=tk-old run --bead a --check test --test TestFoo
-eq "$RC" 1 "the path exits 1, so nothing lands"
-has "$ERR" "is tracked as tk-old, but the gate's record of it did not write" "it says the record did not write"
-hasnt "$(logged scripts)" "rig-check-pre-existing" "nothing is marked"
 
 echo "# a mark that does not land leaves the landing going ahead"
 fresh
