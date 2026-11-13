@@ -1645,8 +1645,8 @@ keys = ["warrant.target", "warrant.reason", "warrant.requester"]
 # The arm itself, gc.dispatch_when_ready and its _args, _armed_by, _armed_at,
 # _reason and _fail_count, is gctk's: services/gctk/arm/record declares each key
 # and is its one writer, and services/gctk/key-registry.json lists them. What
-# stays here is the notice deferred-dispatch.sh records, the pool a ruling's
-# wait re-slings to, and the arm's retired crash marker.
+# stays here is the pool a ruling's wait re-slings to, the arm's retired crash
+# marker and the retired notice.
 keys = [
   "gc.dispatch_when_ready_slung", "gc.notify_when_ready", "resling_target",
 ]
@@ -1656,17 +1656,13 @@ keys = [
 #   pour by the token on its root's title and reads gc sling's exit 3 instead,
 #   and nothing writes or reads the marker. Registered so that residue on a
 #   pre-retirement bead reads as known, not as a stray.
-# gc.notify_when_ready — a notice owed to the named agent the bead is assigned
-#   to; its PRESENCE means owed, and its value is the agent. `deferred-dispatch.sh
-#   notify` writes it, then mails the agent (gc mail send --notify) at once when
-#   bd already reports the bead ready, and clears it once the agent's turn is
-#   requested: by the mail's `notified`, or else by gc session nudge. Otherwise
-#   reconcile does both once bd does. A notice that gets no turn requested keeps
-#   it for the next pass. A pass clears it unsent on a bead that closed, that
-#   the agent claimed, or that is no longer assigned to that agent. Each of
-#   these clears re-reads the bead first and leaves a value that names another
-#   agent by then. The disarm verb clears it with the family, while reconcile
-#   retiring an arm on the same bead leaves it.
+# gc.notify_when_ready — RETIRED. The notice owed to the named agent a bead was
+#   assigned to, whose value named the agent. A named agent hears about ready
+#   work through Gas City's hand-off, its nudges and its controller's wake
+#   (docs/deferred-dispatch.md), and nothing writes or reads the key. A bead
+#   that still carries it stays assigned to the agent it names, which hears
+#   through those paths. Registered so that residue on a pre-retirement bead
+#   reads as known, not as a stray.
 # resling_target — the pool a declined run's work re-slings to. await-ruling.sh
 #   writes it in the update that clears the work bead's route keys before the
 #   arm, because from that clear until the arm lands nothing else on the bead

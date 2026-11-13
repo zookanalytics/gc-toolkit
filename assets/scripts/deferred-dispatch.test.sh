@@ -8,7 +8,7 @@
 # deferred-dispatch order's pass, `gctk bead start-armed`, performs it once
 # nothing holds the bead. The arm's keys, its verbs and its start are gctk's,
 # and services/gctk/arm's Go tests hold the start's rules; this script keeps
-# `arm` and `disarm` for the callers that name it, and `notify` and `list`.
+# `arm` and `disarm` for the callers that name it, and `list`.
 #
 # What is exercised:
 #   * arm hands its call to the gctk this checkout builds, which writes the
@@ -18,20 +18,11 @@
 #     or --on=<formula> and nothing else; arm's refusals (already routed,
 #     closed, at a status other than open, a wait edge into another store, no
 #     target, a bead the store does not hold) write nothing;
-#   * disarm removes the arm through gctk and then clears a notice owed, in a
-#     write of its own;
+#   * disarm removes the arm through gctk, and a bead with no arm is a success
+#     that writes nothing;
 #   * list prints the start's dry run for each arm, one line each in the shape
-#     `<id> -> <target> [<state>] — <reason>`, then each notice owed;
-#     list --json prints the listing alone;
-#   * notify, the dispatch a named agent's work owes: a mail at once when bd
-#     reports the bead ready, otherwise a notice recorded on the bead; it
-#     refuses a bead not assigned to the agent, owes nothing on a closed or
-#     claimed one, and keeps the record when no turn is requested or its
-#     readiness read fails. A notice is done only once the agent's turn is
-#     requested: a mail that fails, or is saved with no turn requested, is
-#     followed by gc session nudge, and a notice whose nudge fails too stays
-#     owed; its retire leaves a record that names another agent since its read;
-#     a title or a notice value that spells a second row forges none;
+#     `<id> -> <target> [<state>] — <reason>`; list --json prints the listing
+#     alone;
 #   * the store each verb's reads are pinned to;
 #   * SCRATCH CLEANUP — every verb that stages a temp file leaves none behind.
 #
@@ -65,10 +56,8 @@ export STUB_GCTK_LOG="$TMP/gctk-reads.log"
 LOCKS="$TMP/gctk/city/.gc/runtime/packs/gc-toolkit"
 
 # --- stubs -------------------------------------------------------------------
-# $TMP/beads.json is the store: an array of beads, each carrying an extra
-# `_ready` flag standing in for bd's own readiness predicate, which the
-# notices' readiness read asks for. gctk's own calls read and write the same
-# store through holds-store.stub.sh.
+# $TMP/beads.json is the store: an array of beads. gctk's own calls read and
+# write the same store through holds-store.stub.sh.
 BIN="$TMP/bin"; mkdir -p "$BIN"
 
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/bd" <<'STUB'
@@ -108,32 +97,18 @@ fi
 case "${1:-}" in
   list)
     shift
-    key=""; ready=0; all=0; gates=0; id=""; parent=""
+    key=""; all=0; gates=0; id=""; parent=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --has-metadata-key) shift; key="${1:-}" ;;
         --parent) shift; parent="${1:-}" ;;
         --id) shift; id="${1:-}" ;;
-        --ready) ready=1 ;;
         --all) all=1 ;;
         --include-gates) gates=1 ;;
         *) : ;;
       esac
       shift || true
     done
-    # A listing by one metadata key that fails while every other answers: the
-    # notice listing failing on its own.
-    if [ -n "${STUB_BD_LIST_FAIL_KEY:-}" ] && [ "$key" = "$STUB_BD_LIST_FAIL_KEY" ]; then
-      echo "bd: simulated listing failure for $key" >&2; exit 1
-    fi
-    # Real bd refuses this combination outright:
-    #   "validation failed: --ready cannot filter on IDFilter (--id); the
-    #    blocker-aware ready query cannot be narrowed to specific ids"
-    # The stub must refuse it too, or it will happily serve a query that can
-    # only ever error against the live tool.
-    if [ "$ready" = "1" ] && [ -n "$id" ]; then
-      echo "Error: validation failed: --ready cannot filter on IDFilter (--id)" >&2; exit 1
-    fi
     # A by-id read that fails while the armed listings answer: the hold walk's
     # read, failing on its own.
     if [ -n "${STUB_BD_LIST_ID_FAIL:-}" ] && [ -n "$id" ]; then
@@ -167,19 +142,18 @@ case "${1:-}" in
     # it, so a fixture bead with issue_type "gate" is hidden the same way.
     # --parent names the parent a listed bead carries in the fixture's `parent`
     # field; a fixture with none is no bead's child.
-    jq -c --arg k "$key" --arg id "$id" --argjson ready "$ready" --argjson all "$all" --argjson gates "$gates" \
+    jq -c --arg k "$key" --arg id "$id" --argjson all "$all" --argjson gates "$gates" \
           --arg parent "$parent" '
       ($id | if . == "" then [] else split(",") end) as $ids
       | [ .[]
         | select($k == "" or (.metadata | has($k)))
         | select(($ids | length) == 0 or (.id as $i | $ids | index($i)))
         | select($all == 1 or .status != "closed")
-        | select($ready == 0 or (._ready == true))
         | select($gates == 1 or (.issue_type // "") != "gate")
         | select($parent == "" or (.parent // "") == $parent)
         | . as $b
         | .dependencies = [ ($b._deps // [])[] | {issue_id: $b.id, depends_on_id: .id, type: .dependency_type} ]
-        | del(._ready) | del(._deps) ]' "$src"
+        | del(._deps) ]' "$src"
     ;;
   show)
     # Real `bd show --json` renders the bead's own edges under `.dependencies`
@@ -196,7 +170,7 @@ case "${1:-}" in
               | ($store | map(select(.id == $e.id)) | .[0]) as $t
               | select($t != null)
               | {id: $e.id, dependency_type: $e.dependency_type, issue_type: ($t.issue_type // "task"), status: $t.status} ]
-          | del(._ready) | del(._deps) ]' "$src")"
+          | del(._deps) ]' "$src")"
     if [ "$(printf '%s' "$out" | jq 'length')" = "0" ]; then
       # bd answers an OBJECT, not an empty array, when nothing resolves.
       echo '{"error":"no issues found matching the provided IDs","schema_version":1}'
@@ -290,54 +264,6 @@ if [ "${1:-}" = "sling" ]; then
     printf '%s\n' "$*" >> "${STUB_SLING_LOG:?}"
     exit 0
 fi
-# A notice is a `gc mail send`, one line per call, answering as gascity's
-# doMailSendJSON does. STUB_MAIL_RC fails the send outright, saving nothing.
-# A send whose dedup key matches a message still in the agent's mailbox
-# (STUB_MAILBOX, one "<to> <key>" line per saved message) saves nothing,
-# requests no turn and exits 0 with already_done. Any other send saves the
-# message and then requests the turn, and STUB_MAIL_NUDGE_FAILS fails that
-# request: the real command then says so only on stderr and by leaving
-# `notified` out of its --json result, and still exits 0.
-if [ "${1:-}" = "mail" ]; then
-    shift
-    printf '%s\n' "$*" >> "${STUB_MAIL_LOG:?}"
-    if [ "${STUB_MAIL_RC:-0}" != 0 ]; then
-        echo "gc mail send: simulated send failure" >&2; exit "$STUB_MAIL_RC"
-    fi
-    to="${2:-}"; dedup=""; json=0; prev=""
-    for a in "$@"; do
-        [ "$prev" = "--dedup" ] && dedup="$a"
-        [ "$a" = "--json" ] && json=1
-        prev="$a"
-    done
-    if [ -n "$dedup" ] && grep -qxF -- "$to $dedup" "${STUB_MAILBOX:?}" 2>/dev/null; then
-        [ "$json" = 1 ] && printf '%s\n' '{"schema_version":"1","ok":true,"command":"mail.send","action":"send","id":"m-first","count":0,"already_done":true}'
-        exit 0
-    fi
-    printf '%s %s\n' "$to" "$dedup" >> "$STUB_MAILBOX"
-    # STUB_MAIL_REWRITE is a jq program applied to the store while the mail is
-    # sent: a write another caller lands in the meantime.
-    if [ -n "${STUB_MAIL_REWRITE:-}" ]; then
-        jq -c "$STUB_MAIL_REWRITE" "${STUB_STORE:?}" > "$STUB_STORE.rw" && mv "$STUB_STORE.rw" "$STUB_STORE"
-    fi
-    if [ -n "${STUB_MAIL_NUDGE_FAILS:-}" ]; then
-        echo "gc mail send: nudge failed: simulated nudge-store failure" >&2
-        [ "$json" = 1 ] && printf '%s\n' '{"schema_version":"1","ok":true,"command":"mail.send","action":"send","id":"m-new","count":1}'
-        exit 0
-    fi
-    [ "$json" = 1 ] && printf '%s\n' '{"schema_version":"1","ok":true,"command":"mail.send","action":"send","id":"m-new","count":1,"notified":true}'
-    exit 0
-fi
-# A turn requested directly is a `gc session nudge`: one line per call, and
-# STUB_NUDGE_RC is its exit.
-if [ "${1:-}" = "session" ] && [ "${2:-}" = "nudge" ]; then
-    shift 2
-    printf '%s\n' "$*" >> "${STUB_NUDGE_LOG:?}"
-    if [ "${STUB_NUDGE_RC:-0}" != 0 ]; then
-        echo "gc session nudge: simulated nudge failure" >&2; exit "$STUB_NUDGE_RC"
-    fi
-    exit 0
-fi
 echo "gc stub: unsupported '${1:-}'" >&2; exit 2
 STUB
 chmod +x "$BIN/bd" "$BIN/gc"
@@ -345,22 +271,16 @@ chmod +x "$BIN/bd" "$BIN/gc"
 export PATH="$BIN:$PATH"
 export STUB_STORE="$TMP/beads.json"
 export STUB_SLING_LOG="$TMP/sling.log"
-export STUB_MAIL_LOG="$TMP/mail.log"
-export STUB_MAILBOX="$TMP/mailbox"
-export STUB_NUDGE_LOG="$TMP/nudge.log"
 export BEADS_ACTOR="test-actor"
 unset GC_AGENT GC_RIG GC_RIG_ROOT GC_MAX_DISPATCH_SLING_FAILURES 2>/dev/null || true
 
 store() {
     printf '%s' "$1" > "$STUB_STORE"
-    : > "$STUB_SLING_LOG"; : > "$STUB_MAIL_LOG"; : > "$STUB_MAILBOX"; : > "$STUB_NUDGE_LOG"
+    : > "$STUB_SLING_LOG"
 }
 meta()  { jq -r --arg id "$1" --arg k "$2" '(.[] | select(.id == $id) | .metadata[$k]) // "<absent>"' "$STUB_STORE"; }
 notes() { jq -r --arg id "$1" '(.[] | select(.id == $id) | .notes) // ""' "$STUB_STORE"; }
 slings() { wc -l < "$STUB_SLING_LOG" | tr -d ' '; }
-mails() { wc -l < "$STUB_MAIL_LOG" | tr -d ' '; }
-mailbox() { wc -l < "$STUB_MAILBOX" | tr -d ' '; }
-nudges() { wc -l < "$STUB_NUDGE_LOG" | tr -d ' '; }
 locks_left() { find "$LOCKS" -name 'dispatch-*.lock' 2>/dev/null | wc -l | tr -d ' '; }
 # armed <target> [<formula>] [<more>]: the metadata of a bead armed for <target>
 # on <formula>, or on its default, with <more> JSON members added.
@@ -373,7 +293,7 @@ armed() {
 
 # --- ARM ---------------------------------------------------------------------
 echo "# arm"
-store '[{"id":"b-1","status":"open","assignee":"","metadata":{},"notes":"mayor: dispatch after b-0 lands","_ready":false}]'
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{},"notes":"mayor: dispatch after b-0 lands"}]'
 out="$("$SUT" arm b-1 --target rig/pool --reason "needs b-0" 2>&1)"; rc=$?
 eq "$rc" 0 "arm exits 0"
 eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "arm records the target"
@@ -496,14 +416,6 @@ done
 has "$(notes b-1)" "keep me" "disarm appends to notes rather than replacing"
 has "$(notes b-1)" "deferred-dispatch: dispatch record cleared at" "disarm's note keeps its prefix"
 has "$(notes b-1)" "superseded" "disarm records why"
-store '[{"id":"n-1","status":"open","assignee":"gc-toolkit.mechanik","metadata":{"gc.notify_when_ready":"gc-toolkit.mechanik"},"notes":""}]'
-"$SUT" disarm n-1 >/dev/null 2>&1; rc=$?
-eq "$rc" 0 "disarm on a bead with only a notice exits 0"
-eq "$(meta n-1 gc.notify_when_ready)" "<absent>" "disarm clears a notice owed too"
-store '[{"id":"n-1","status":"open","assignee":"gc-toolkit.mechanik","metadata":{'"$(armed rig/pool mol-x '"gc.notify_when_ready":"gc-toolkit.mechanik"')"'},"notes":""}]'
-"$SUT" disarm n-1 >/dev/null 2>&1
-eq "$(meta n-1 gc.dispatch_when_ready)" "<absent>" "disarm on a bead with an arm and a notice clears the arm"
-eq "$(meta n-1 gc.notify_when_ready)" "<absent>" "and the notice, in the same verb"
 store '[{"id":"p-1","status":"open","assignee":"","metadata":{},"notes":"untouched"}]'
 out="$("$SUT" disarm p-1 2>&1)"; rc=$?
 eq "$rc" 0 "disarm of a bead with no arm exits 0"
@@ -554,186 +466,29 @@ eq "$rc" 1 "list fails loudly when the arms cannot be read"
 has "$out" "could not enumerate armed beads" "saying so"
 
 
-# --- notify: the dispatch a named agent's work owes ---------------------------
-# A named session's hook offers it a bead by assignee once bd reports the bead
-# ready, and nothing wakes an idle named session when that happens. So notify
-# mails the agent: at once when bd already reports the bead ready, and otherwise
-# it records the notice for the reconcile pass.
-echo "# notify"
-store '[{"id":"n-1","title":"Edit city.toml","status":"open","assignee":"gc-toolkit.mechanik","metadata":{},"notes":"card: a city.toml edit","_ready":true}]'
-out="$("$SUT" notify n-1 --agent gc-toolkit.mechanik --reason "first reaction: r" 2>&1)"; rc=$?
-eq "$rc" 0 "notify exits 0"
-eq "$(mails)" "1" "notify on a bead bd reports ready mails the agent at once"
-has "$(cat "$STUB_MAIL_LOG")" "send gc-toolkit.mechanik --notify" "the mail goes to the agent and asks for its turn"
-has "$(cat "$STUB_MAIL_LOG")" "-s Ready for you: n-1" "the mail names the bead"
-has "$(cat "$STUB_MAIL_LOG")" "n-1 (Edit city.toml) is assigned to you" "with its title"
-has "$(cat "$STUB_MAIL_LOG")" "run gc hook" "and says how to pick it up"
-has "$(cat "$STUB_MAIL_LOG")" "--dedup ready-notice:n-1" "a resend about the same bead collapses onto the first"
-has "$(cat "$STUB_MAIL_LOG")" "--json" "and the send reports whether it requested the turn"
-eq "$(nudges)" "0" "a mail that requested the turn needs no nudge"
-eq "$(meta n-1 gc.notify_when_ready)" "<absent>" "a notice sent at once leaves no record behind"
-has "$(notes n-1)" "card: a city.toml edit" "notify APPENDS to notes (prior note survives)"
-has "$(notes n-1)" "first reaction: r" "the note carries the reason"
-has "$(notes n-1)" "notice sent to gc-toolkit.mechanik" "and records that the agent was told"
-has "$out" "notified gc-toolkit.mechanik that n-1 is ready" "notify says what it did"
-eq "$(slings)" "0" "a notice slings nothing"
-
-store '[{"id":"n-2","status":"open","assignee":"gc-toolkit.mechanik","metadata":{},"notes":"","_ready":false,"_deps":[{"id":"b-0","dependency_type":"blocks"}]},
-        {"id":"b-0","status":"open","assignee":"","metadata":{},"notes":""}]'
-out="$("$SUT" notify n-2 --agent gc-toolkit.mechanik 2>&1)"; rc=$?
-eq "$rc" 0 "notify on a bead that still waits exits 0"
-eq "$(mails)" "0" "and sends nothing while bd does not report the bead ready"
-eq "$(meta n-2 gc.notify_when_ready)" "gc-toolkit.mechanik" "it records the notice on the bead"
-has "$(notes n-2)" "notice armed by test-actor" "with a note saying who armed it"
-has "$out" "armed a notice on n-2 -> gc-toolkit.mechanik" "and says it armed the notice"
-
-store '[{"id":"n-3","status":"open","assignee":"someone-else","metadata":{},"notes":"","_ready":true}]'
-out="$("$SUT" notify n-3 --agent gc-toolkit.mechanik 2>&1)"; rc=$?
-eq "$rc" 1 "notify refuses a bead assigned to someone else"
-has "$out" "its assignee is someone-else" "naming who holds it"
-eq "$(mails)" "0" "and sends nothing"
-eq "$(meta n-3 gc.notify_when_ready)" "<absent>" "and records nothing"
-store '[{"id":"n-3","status":"open","assignee":"","metadata":{},"notes":"","_ready":true}]'
-out="$("$SUT" notify n-3 --agent gc-toolkit.mechanik 2>&1)"; rc=$?
-eq "$rc" 1 "notify refuses an unassigned bead"
-has "$out" "Assign it first" "naming the write that comes first"
-
-store '[{"id":"n-4","status":"closed","assignee":"gc-toolkit.mechanik","metadata":{},"notes":"","_ready":false}]'
-out="$("$SUT" notify n-4 --agent gc-toolkit.mechanik 2>&1)"; rc=$?
-eq "$rc" 0 "a closed bead owes no notice, and notify exits 0"
-eq "$(mails)" "0" "sending nothing"
-eq "$(meta n-4 gc.notify_when_ready)" "<absent>" "and recording nothing"
-store '[{"id":"n-5","status":"in_progress","assignee":"gc-toolkit.mechanik","metadata":{},"notes":"","_ready":false}]'
-out="$("$SUT" notify n-5 --agent gc-toolkit.mechanik 2>&1)"; rc=$?
-eq "$rc" 0 "a bead its agent already claimed owes no notice"
-eq "$(mails)" "0" "and gets none"
-has "$out" "already claimed" "notify says why"
-out="$("$SUT" notify n-5 2>&1)"; rc=$?
-eq "$rc" 2 "notify without --agent is a usage error"
-out="$("$SUT" notify nope --agent gc-toolkit.mechanik 2>&1)"; rc=$?
-eq "$rc" 1 "notify on a bead the store does not hold fails"
-
-# Once the record is down the notice is owed. A send that fails outright
-# requests no turn, so gc session nudge requests it. A notice that gets no turn
-# requested either way, or a readiness read that fails, leaves the record for
-# the pass and still exits 0.
-store '[{"id":"n-6","title":"Edit city.toml","status":"open","assignee":"gc-toolkit.mechanik","metadata":{},"notes":"","_ready":true}]'
-out="$(STUB_MAIL_RC=1 "$SUT" notify n-6 --agent gc-toolkit.mechanik 2>&1)"; rc=$?
-eq "$rc" 0 "a send that fails exits 0"
-eq "$(mailbox)" "0" "saving no mail"
-eq "$(nudges)" "1" "so the turn is requested with gc session nudge"
-has "$(cat "$STUB_NUDGE_LOG")" "gc-toolkit.mechanik Ready for you: n-6 (Edit city.toml) is assigned to you" "naming the agent and the bead"
-eq "$(meta n-6 gc.notify_when_ready)" "<absent>" "and the requested turn retires the notice"
-has "$out" "requested gc-toolkit.mechanik's turn for n-6 with gc session nudge: gc mail send could not mail gc-toolkit.mechanik about n-6 (gc mail send: simulated send failure)" "notify says the mail failed and the nudge requested the turn"
-store '[{"id":"n-6","status":"open","assignee":"gc-toolkit.mechanik","metadata":{},"notes":"","_ready":true}]'
-out="$(STUB_MAIL_RC=1 STUB_NUDGE_RC=1 "$SUT" notify n-6 --agent gc-toolkit.mechanik 2>&1)"; rc=$?
-eq "$rc" 0 "a send and a nudge that both fail still exit 0, since the notice is recorded"
-eq "$(meta n-6 gc.notify_when_ready)" "gc-toolkit.mechanik" "and the record stays for the pass"
-has "$out" "the next reconcile pass tries again" "notify says who tries again"
-has "$out" "could not request gc-toolkit.mechanik's turn for n-6: gc mail send could not mail gc-toolkit.mechanik about n-6 (gc mail send: simulated send failure), and gc session nudge failed: gc session nudge: simulated nudge failure" "one line names both causes"
-
-# gc mail send saves the mail before it requests the agent's turn, and exits 0
-# when that request fails: it says so on stderr and leaves `notified` out of its
-# --json result. Unread mail requests no turn, so the notice is not done.
-echo "# notify on mail saved with no turn requested"
-store '[{"id":"n-6","title":"Edit city.toml","status":"open","assignee":"gc-toolkit.mechanik","metadata":{},"notes":"","_ready":true}]'
-out="$(STUB_MAIL_NUDGE_FAILS=1 "$SUT" notify n-6 --agent gc-toolkit.mechanik 2>&1)"; rc=$?
-eq "$rc" 0 "notify exits 0"
-eq "$(mailbox)" "1" "the mail is saved in the agent's mailbox"
-eq "$(nudges)" "1" "and, since it requested no turn, the turn is requested with gc session nudge"
-has "$(cat "$STUB_NUDGE_LOG")" "gc-toolkit.mechanik Ready for you: n-6 (Edit city.toml) is assigned to you" "naming the agent and the bead"
-has "$(cat "$STUB_NUDGE_LOG")" "--reference-bead n-6" "about that bead, so a nudge still queued for it gives way"
-eq "$(meta n-6 gc.notify_when_ready)" "<absent>" "the requested turn retires the notice"
-has "$out" "nudge failed: simulated nudge-store failure" "gc mail send's diagnostic is kept, not discarded"
-has "$out" "requested gc-toolkit.mechanik's turn for n-6 with gc session nudge" "notify says how the turn was requested"
-
-store '[{"id":"n-6","title":"Edit city.toml","status":"open","assignee":"gc-toolkit.mechanik","metadata":{},"notes":"","_ready":true}]'
-out="$(STUB_MAIL_NUDGE_FAILS=1 STUB_NUDGE_RC=1 "$SUT" notify n-6 --agent gc-toolkit.mechanik 2>&1)"; rc=$?
-eq "$rc" 0 "a notice that gets no turn requested still exits 0, since it is recorded"
-eq "$(meta n-6 gc.notify_when_ready)" "gc-toolkit.mechanik" "and stays owed for the pass, though its mail was saved"
-eq "$(mailbox)" "1" "the saved mail stays in the mailbox"
-has "$out" "nudge failed: simulated nudge-store failure" "the mail's diagnostic is kept"
-has "$out" "simulated nudge failure" "and so is the nudge's"
-has "$out" "turn was not requested; the next reconcile pass tries again" "notify says the turn was not requested"
-hasnt "$(notes n-6)" "notice sent" "and no note says the agent was told"
-store '[{"id":"n-7","status":"open","assignee":"gc-toolkit.mechanik","metadata":{},"notes":"","_ready":true}]'
-out="$(STUB_BD_LIST_FAIL_KEY=gc.notify_when_ready "$SUT" notify n-7 --agent gc-toolkit.mechanik 2>&1)"; rc=$?
-eq "$rc" 0 "a readiness read that fails still exits 0"
-eq "$(mails)" "0" "sending nothing it could not prove ready"
-eq "$(meta n-7 gc.notify_when_ready)" "gc-toolkit.mechanik" "and leaving the record for the pass"
-has "$out" "could not read whether bd reports it ready" "notify says so"
-
-echo "# list shows the notices owed"
-NOTICES='[
- {"id":"n-1","title":"Edit city.toml","status":"open","assignee":"gc-toolkit.mechanik","metadata":{"gc.notify_when_ready":"gc-toolkit.mechanik"},"notes":"","_ready":true},
- {"id":"n-2","status":"open","assignee":"gc-toolkit.mechanik","metadata":{"gc.notify_when_ready":"gc-toolkit.mechanik"},"notes":"","_ready":false,"_deps":[{"id":"b-0","dependency_type":"blocks"}]},
- {"id":"b-0","status":"open","assignee":"","metadata":{},"notes":""},
- {"id":"n-3","status":"closed","assignee":"gc-toolkit.mechanik","metadata":{"gc.notify_when_ready":"gc-toolkit.mechanik"},"notes":""},
- {"id":"n-4","status":"in_progress","assignee":"gc-toolkit.mechanik","metadata":{"gc.notify_when_ready":"gc-toolkit.mechanik"},"notes":""},
- {"id":"n-5","status":"open","assignee":"gc-toolkit/gc-toolkit.witness","metadata":{"gc.notify_when_ready":"gc-toolkit.mechanik"},"notes":"","_ready":true},
- {"id":"n-6","status":"open","assignee":"","metadata":{"gc.notify_when_ready":"gc-toolkit.mechanik"},"notes":"","_ready":true},
- {"id":"n-8","status":"deferred","assignee":"gc-toolkit.mechanik","metadata":{"gc.notify_when_ready":"gc-toolkit.mechanik"},"notes":"","_ready":false}]'
-store "$NOTICES"
-out="$("$SUT" list 2>&1)"; rc=$?
-eq "$rc" 0 "list exits 0 with notices owed"
-has "$out" "n-1 -> notice to gc-toolkit.mechanik [READY — bd reports it ready]" "list shows a notice whose bead bd reports ready"
-has "$out" "n-2 -> notice to gc-toolkit.mechanik [WAITING — bd does not report it ready yet]" "and one that waits on bd"
-has "$out" "n-8 -> notice to gc-toolkit.mechanik [WAITING — status=deferred, which bd never reports ready]" "and one at a status bd never reports ready"
-has "$out" "n-3 -> notice to gc-toolkit.mechanik [CLOSED" "and a closed bead's"
-has "$out" "n-4 -> notice to gc-toolkit.mechanik [CLAIMED" "and a claimed bead's"
-has "$out" "n-5 -> notice to gc-toolkit.mechanik [MOOT — no longer assigned to gc-toolkit.mechanik" "and a reassigned bead's"
-hasnt "$out" "no pending dispatches" "a store with notices owed is not an empty queue"
-out="$(STUB_BD_LIST_FAIL_KEY=gc.notify_when_ready "$SUT" list 2>&1)"; rc=$?
-eq "$rc" 1 "list fails loudly when the notices cannot be read"
-
-# jq decodes an escaped LF or unit separator in a string and prints it raw, so
-# a title or a notice value that spells a second row would add a row list
-# trusts.
-echo "# a title or a notice value cannot forge a notice row"
-store '[
- {"id":"n-1","title":"Edit\nn-9\u001fopen\u001fgc-toolkit/gc-toolkit.witness\u001fgc-toolkit/gc-toolkit.witness\u001f1\u001fforged","status":"open","assignee":"gc-toolkit.mechanik","metadata":{"gc.notify_when_ready":"gc-toolkit.mechanik"},"notes":"","_ready":false},
- {"id":"n-2","status":"open","assignee":"gc-toolkit.mechanik","metadata":{"gc.notify_when_ready":"gc-toolkit.mechanik\nn-9\u001fclosed\u001fgc-toolkit.mechanik\u001fgc-toolkit.mechanik\u001f0\u001fforged"},"notes":"","_ready":false},
- {"id":"n-9","status":"open","assignee":"gc-toolkit.mechanik","metadata":{"gc.notify_when_ready":"gc-toolkit.mechanik"},"notes":"","_ready":false}]'
-out="$("$SUT" list 2>&1)"; rc=$?
-eq "$(printf '%s\n' "$out" | grep -c -F -e '-> notice to')" "3" "list shows one notice per bead"
-has "$out" "n-1 -> notice to gc-toolkit.mechanik [WAITING" "with each bead's own agent"
-hasnt "$out" "gc-toolkit/gc-toolkit.witness" "and none a title spelled"
-
-# notify's retire after its mail re-reads the bead. The write lands while the
-# mail goes out: the bead is reassigned, and the new assignee's notice is
-# recorded.
-echo "# notify's retire leaves a notice recorded since its read"
-store '[{"id":"n-5","status":"open","assignee":"gc-toolkit.mechanik","metadata":{},"notes":"","_ready":true}]'
-out="$(STUB_MAIL_REWRITE='map(if .id == "n-5" then (.assignee = "gc-toolkit/gc-toolkit.witness" | .metadata["gc.notify_when_ready"] = "gc-toolkit/gc-toolkit.witness") else . end)' \
-    "$SUT" notify n-5 --agent gc-toolkit.mechanik 2>&1)"; rc=$?
-eq "$rc" 0 "notify exits 0"
-eq "$(mails)" "1" "it mails the agent the bead was assigned to when it read it"
-eq "$(meta n-5 gc.notify_when_ready)" "gc-toolkit/gc-toolkit.witness" "and leaves the notice recorded for the new assignee meanwhile"
-has "$out" "left the notice on n-5: its record now names gc-toolkit/gc-toolkit.witness" "saying why it left it"
-store '[{"id":"n-5","status":"open","assignee":"gc-toolkit.mechanik","metadata":{},"notes":"","_ready":true}]'
-out="$(STUB_MAIL_REWRITE='map(if .id == "n-5" then (.metadata |= del(.["gc.notify_when_ready"])) else . end)' \
-    "$SUT" notify n-5 --agent gc-toolkit.mechanik 2>&1)"; rc=$?
-eq "$rc" 0 "a record another caller already cleared leaves notify nothing to clear"
-hasnt "$(notes n-5)" "notice record cleared" "so it writes no retire"
-has "$out" "notified gc-toolkit.mechanik that n-5 is ready" "and says the agent was told"
-
 # --- the store the reads are pinned to ---------------------------------------
 # `gc bd` resolves its ledger from the invoking rig and ignores BEADS_DIR, so a
 # rig-scoped call that does not pin --db reads whatever rig gc resolves.
+# The script's own read is list --json's listing, and list's reads are the
+# start's dry run, so each case runs both verbs.
 echo "# store pinning"
 export STUB_BD_LOG="$TMP/bd.log"
 store '[{"id":"p-1","status":"open","assignee":"","metadata":{'"$(armed rig/pool mol-x)"'},"notes":""}]'
 : > "$STUB_BD_LOG"; : > "$STUB_GCTK_LOG"
-(GC_RIG_ROOT="$TMP/rigroot" "$SUT" list >/dev/null 2>&1)
+(GC_RIG_ROOT="$TMP/rigroot" "$SUT" list --json >/dev/null 2>&1; GC_RIG_ROOT="$TMP/rigroot" "$SUT" list >/dev/null 2>&1)
 has "$(cat "$STUB_BD_LOG")" "--db $TMP/rigroot/.beads" "GC_RIG_ROOT pins the script's reads to that rig's store"
+[ -s "$STUB_GCTK_LOG" ] || bad "the dry run made no read to check"
 eq "$(grep -c -v "^--db $TMP/rigroot/.beads " "$STUB_GCTK_LOG")" "0" "and every read of the dry run it runs"
 : > "$STUB_BD_LOG"; : > "$STUB_GCTK_LOG"
-("$SUT" list >/dev/null 2>&1)
+("$SUT" list --json >/dev/null 2>&1; "$SUT" list >/dev/null 2>&1)
+[ -s "$STUB_BD_LOG" ] || bad "list --json made no read to check"
 hasnt "$(cat "$STUB_BD_LOG")" "--db" "with no GC_RIG_ROOT and no --db, the script pins nothing"
 : > "$STUB_BD_LOG"; : > "$STUB_GCTK_LOG"
-(GC_RIG_ROOT="$TMP/rigroot" "$SUT" list --db "$TMP/explicit/.beads" >/dev/null 2>&1)
+(GC_RIG_ROOT="$TMP/rigroot" "$SUT" list --json --db "$TMP/explicit/.beads" >/dev/null 2>&1
+ GC_RIG_ROOT="$TMP/rigroot" "$SUT" list --db "$TMP/explicit/.beads" >/dev/null 2>&1)
 has "$(cat "$STUB_BD_LOG")" "--db $TMP/explicit/.beads" "an explicit --db overrides GC_RIG_ROOT"
 hasnt "$(cat "$STUB_BD_LOG")" "--db $TMP/rigroot/.beads" "and the rig-root default is not also passed"
+[ -s "$STUB_GCTK_LOG" ] || bad "the dry run made no read to check"
 eq "$(grep -c -v "^--db $TMP/explicit/.beads " "$STUB_GCTK_LOG")" "0" "and the dry run reads the store --db names"
 unset STUB_BD_LOG
 
@@ -746,8 +501,6 @@ SCRATCH="$TMP/scratch"
 mkdir -p "$SCRATCH"
 TMPDIR="$SCRATCH" "$SUT" list        >/dev/null 2>&1
 TMPDIR="$SCRATCH" "$SUT" list --json >/dev/null 2>&1
-store '[{"id":"n-1","status":"open","assignee":"gc-toolkit.mechanik","metadata":{},"notes":"","_ready":true}]'
-TMPDIR="$SCRATCH" "$SUT" notify n-1 --agent gc-toolkit.mechanik >/dev/null 2>&1
 LEFT=$(find "$SCRATCH" -maxdepth 1 -name 'gctk-deferred-dispatch.*' 2>/dev/null | wc -l | tr -d ' ')
 eq "$LEFT" "0" "no verb leaves a staging file behind in TMPDIR"
 
