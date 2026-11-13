@@ -524,9 +524,6 @@ case "$(printf '%s' "$DESIGN_GATED_RAW" | tr '[:upper:]' '[:lower:]' | tr -d '[:
 esac
 # <<< design-gated-resolve
 
-SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/deferred-dispatch.sh" ] || SCRIPTS=""
-[ -n "$SCRIPTS" ] || { echo "deferred-dispatch.sh not found in the pack" >&2; exit 1; }
-
 POOL="${GC_RIG:+$GC_RIG/}gc-toolkit.polecat"
 REFINERY="${GC_RIG:+$GC_RIG/}gc-toolkit.refinery"
 case "$POOL" in */*) ;; *) echo "cannot rig-qualify the pool and the refinery; set GC_RIG" >&2; exit 1 ;; esac
@@ -536,7 +533,11 @@ case "$POOL" in */*) ;; *) echo "cannot rig-qualify the pool and the refinery; s
 or a subject someone else holds, stops the step before anything is dispatched:
 ```bash
 # >>> setup-dispatch
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 if [ -z "$SUMMARY_ARMED" ]; then
+  [ -x "$GCTK" ] || { echo "no gctk binary at '$GCTK' to arm the implementation child and the summary task with; handing nothing over and dispatching nothing" >&2; exit 1; }
   ROSTER=$(gc agent list --json 2>/dev/null | jq -r '.agents[]? | .qualified_name // empty | ., (split("/") | .[-1])' 2>/dev/null) || true
   if [ -z "$ROSTER" ]; then
     echo "roster unreadable; handing $SUBJECT to $REFINERY unchecked" >&2
@@ -557,13 +558,13 @@ if [ -z "$SUMMARY_ARMED" ]; then
   fi
   if [ -z "$IMPL_ARMED" ]; then
     if [ "$DESIGN_GATED" = "true" ]; then
-      "$SCRIPTS/deferred-dispatch.sh" arm "$IMPL_CHILD" --target "$POOL" --sling-arg --on --sling-arg mol-polecat-work --reason "design-convoy: implementation armed behind design child $DESIGN_CHILD's approval" || { echo "deferred-dispatch arm of implementation child $IMPL_CHILD failed" >&2; exit 1; }
+      "$GCTK" bead arm "$IMPL_CHILD" --target "$POOL" --on mol-polecat-work --reason "design-convoy: implementation armed behind design child $DESIGN_CHILD's approval" || { echo "gctk bead arm of implementation child $IMPL_CHILD failed" >&2; exit 1; }
     else
       gc sling "$POOL" "$IMPL_CHILD" --on mol-polecat-work || { echo "sling of implementation child $IMPL_CHILD failed" >&2; exit 1; }
     fi
     gc bd update "$SUBJECT" --set-metadata "gc.impl_armed=1" || { echo "implementation child $IMPL_CHILD is dispatched but gc.impl_armed did not record on $SUBJECT; record it by hand before a re-run, or the re-run dispatches it again" >&2; exit 1; }
   fi
-  "$SCRIPTS/deferred-dispatch.sh" arm "$SUMMARY_TASK" --target "$POOL" --sling-arg --on --sling-arg mol-polecat-report --reason "design-convoy: writes the pr_summary of $SUBJECT once the effort's beads have landed" || { echo "deferred-dispatch arm of summary task $SUMMARY_TASK failed" >&2; exit 1; }
+  "$GCTK" bead arm "$SUMMARY_TASK" --target "$POOL" --on mol-polecat-report --reason "design-convoy: writes the pr_summary of $SUBJECT once the effort's beads have landed" || { echo "gctk bead arm of summary task $SUMMARY_TASK failed" >&2; exit 1; }
   gc bd update "$SUBJECT" --set-metadata "gc.summary_armed=1" || { echo "summary task $SUMMARY_TASK is armed but gc.summary_armed did not record on $SUBJECT; record it by hand before a re-run" >&2; exit 1; }
 fi
 # <<< setup-dispatch

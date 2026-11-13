@@ -39,7 +39,10 @@ nothing here reads it again. A follow-up that is BLOCKED on another bead takes a
 edge and an arm, never a watcher (the `waits` skill):
 
 ```
-"$(gc <binding> scripts-dir)/deferred-dispatch.sh" arm <bead> \
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" bead arm <bead> \
     --target <rig>/<agent> --reason "waits for <blocker>"
 ```
 

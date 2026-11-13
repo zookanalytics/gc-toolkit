@@ -27,7 +27,10 @@ checks it once the retirement lands and closes it or asks a person:
 gc bd update <bead> --append-notes "## Close brief (held on <retiring-bead>, $(date -u +%Y-%m-%dT%H:%M:%SZ))
 <what the retirement removes, and what to check once it lands>"
 gc bd dep add <bead> <retiring-bead> --type=blocks
-"$(gc gc-toolkit scripts-dir)/deferred-dispatch.sh" arm <bead> --target gc-toolkit/gc-toolkit.polecat --sling-arg --on --sling-arg mol-validate-close --reason "waits for <retiring-bead>; the validating closer checks it once that closes"
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" bead arm <bead> --target gc-toolkit/gc-toolkit.polecat --on mol-validate-close --reason "waits for <retiring-bead>; the validating closer checks it once that closes"
 ```
 
 Write the edge only when both beads carry one id prefix, and arm it only once

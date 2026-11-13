@@ -189,9 +189,9 @@ polecat pool is `mol-polecat-work`.
   the bead itself, for work whose method the bead carries. It needs both flags,
   because without them the sling pours the pool's default formula and files a
   convoy for the bead, and it is never a `gc.routed_to` written by hand. Arming
-  the bead (`deferred-dispatch.sh arm`) has the deferred-dispatch order sling it
-  once nothing holds it. Send it one way, and disarm an armed bead before you
-  send it another. Any two start two workers on one branch.
+  the bead (`gctk bead arm`, the waits skill) has the deferred-dispatch order
+  sling it once nothing holds it. Send it one way, and disarm an armed bead
+  before you send it another. Any two start two workers on one branch.
 - **Release its wait first.** A worker's first step builds nothing that still
   waits. It re-arms a bead with an open blocker to be sent again when the
   blocker closes, and it ends the run on a bead that carries a `merge_result`
@@ -330,10 +330,11 @@ name the formula and why you chose it.
 - **Stop it.**
   `"$(gc <binding> scripts-dir)/gc-helm.sh" takeaway <bead> "<why it stops>" --release --no-wait`
   stops any workflow running on the bead and leaves the bead open, unassigned
-  and routed to no pool, with that sentence as its headline. It leaves a
-  deferred-dispatch arm in place, and an armed bead is sent again once nothing
-  holds it, so disarm it first (the waits skill). When the bead now waits on
-  something, pass `--waiting-on <bead>` in place of `--no-wait`.
+  and routed to no pool, with that sentence as its headline. Its first write
+  removes the bead's deferred-dispatch arm, so the order does not send the bead
+  again once nothing holds it, and a disarm that does not land stops the
+  release with nothing else written. When the bead now waits on something, pass
+  `--waiting-on <bead>` in place of `--no-wait`.
   A claim a live session holds is not taken from it: the release writes the
   headline and any wait, nudges the holder to stop and give the bead back, and
   exits 4 naming the holder. If the holder dies before it gives the bead back,
@@ -401,7 +402,13 @@ Before you run it:
   skill), which closes the PR too: a bare `gc bd close` on a bead whose
   `merge_result` is not a closed state leaves its PR unlanded.
 - Disarm an armed bead, so that a wait cleared before the close cannot send
-  it: `"$(gc <binding> scripts-dir)/deferred-dispatch.sh" disarm <bead> --reason "<why>"`.
+  it:
+```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" bead disarm <bead> --reason "<why>"
+```
 - In a sitting, close a subject only on the operator's agreement, and only
   after the sign-off, which answers the gates the ruling settles.
 

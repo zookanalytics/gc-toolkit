@@ -88,8 +88,11 @@ gc bd --rig <rig> update "$LANDING" --assignee <rig>/<binding>.refinery \
 # runs once the effort's beads have landed, and once it closes, the refinery
 # takes the landing bead and opens the PR with the summary it wrote.
 gc sling <rig>/<binding>.polecat "$WORK"
-"$(gc <binding> scripts-dir)/deferred-dispatch.sh" arm "$SUMMARY" --target <rig>/<binding>.polecat \
-  --sling-arg --on --sling-arg mol-polecat-report --reason "writes the pr_summary of $LANDING once the effort's beads land"
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" bead arm "$SUMMARY" --target <rig>/<binding>.polecat --on mol-polecat-report \
+  --reason "writes the pr_summary of $LANDING once the effort's beads land"
 ```
 
 ## Add a bead to an existing effort
