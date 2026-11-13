@@ -39,7 +39,8 @@ command ended. A start with them while the copy's publish command runs, with
 another publish command or address pattern, an empty one included, fails with
 reason other-publisher and leaves the copy and its publish command running.
 --check reports the copy's state and starts nothing. --stop ends the copy's
-whole process group.
+whole process group. Starts and stops of one checkout take turns: one that
+finds another under way waits for it to end, and acts on the copy it left.
 
 The sandbox is the one demo-engine-lib.sh defines, in the pack's scripts
 directory, which GCTK_SCRIPTS_DIR names. The serve command cannot read the
@@ -66,8 +67,9 @@ go to stderr.
   died           1     --check: the copy's leader has ended
   none           3     --check: no copy of the checkout runs
   none, stopped  0     --stop: no copy runs, or its process group has ended
-  running        1     --stop: the copy's process group survived SIGTERM and
-                       SIGKILL
+  running        1     --stop: the copy still runs, because its process group
+                       survived SIGTERM and SIGKILL, or the lock on its record
+                       could not be taken
   failed         1     start: no copy of the command runs as the start asks
 exit 2 is a usage error.
 

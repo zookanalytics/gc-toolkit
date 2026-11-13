@@ -35,11 +35,17 @@ package rig
 // Every process a copy starts, signals or reads, and every connection it
 // opens, goes through the host adapter (internal/host), so each decision here
 // is tested on its fake.
+//
+// Starts and stops of one checkout take turns under the checkout's lock, so
+// each reads the record the one before it left and none acts on a record
+// another is changing.
 
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -131,6 +137,66 @@ func NewCopies(commonDir string, h host.Host) *Copies {
 func (c *Copies) Dir(checkout string) string {
 	sum := sha256.Sum256([]byte(checkout))
 	return filepath.Join(c.root, hex.EncodeToString(sum[:16]))
+}
+
+// lockPoll is how often a start or a stop that finds the checkout's lock held
+// tries it again.
+const lockPoll = 200 * time.Millisecond
+
+// lock takes the checkout's lock, waiting while another start or stop holds
+// it, and returns its release. A start holds it from its first read of the
+// record to its report, and a stop from its first read to its last removal,
+// so two starts that find a copy that died run one copy in its place, two that
+// publish a running copy run one publish command, and a stop ends the copy a
+// start left. The call that holds it ends within its own waits.
+//
+// The lock is an flock(2) of a file beside the record directory, outside what
+// a start removes when it replaces a copy that died, and the kernel releases it
+// when its holder ends, so a start cut off partway holds up no later one. Go
+// opens the file close-on-exec, and the host passes a process it starts only
+// its output, so the copy's leader never holds it. The release removes the
+// file once the checkout has no record, and a call that took the lock on a
+// file removed meanwhile takes the file that replaced it.
+func (c *Copies) lock(checkout string) (func(), error) {
+	dir := c.Dir(checkout)
+	path := dir + ".lock"
+	for {
+		f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o644)
+		if err != nil {
+			return nil, err
+		}
+		fd := int(f.Fd())
+		for {
+			err = syscall.Flock(fd, syscall.LOCK_EX|syscall.LOCK_NB)
+			if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EINTR) {
+				break
+			}
+			time.Sleep(lockPoll)
+		}
+		if err != nil {
+			_ = f.Close()
+			return nil, err
+		}
+		held, err := f.Stat()
+		if err != nil {
+			_ = f.Close()
+			return nil, err
+		}
+		now, err := os.Stat(path)
+		if err == nil && os.SameFile(held, now) {
+			return func() {
+				if _, err := os.Stat(dir); errors.Is(err, fs.ErrNotExist) {
+					_ = os.Remove(path)
+				}
+				_ = syscall.Flock(fd, syscall.LOCK_UN)
+				_ = f.Close()
+			}, nil
+		}
+		_ = f.Close()
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return nil, err
+		}
+	}
 }
 
 // copyRec is one copy's record directory, a file per value, and the host the
@@ -342,7 +408,8 @@ func leaderArgv(dir string) ([]string, error) {
 // command runs, with another publish command or address pattern. A start
 // reports a copy once it answers on its port and holds it, and stops a copy of
 // its command that does not within the wait, whether it ran the copy or found
-// it.
+// it. A start holds the checkout's lock throughout, so one that finds another
+// start or a stop of the checkout under way waits for it to end first.
 func (c *Copies) Serve(checkout string, o ServeOpts) Report {
 	failed := func(reason, detail string) Report {
 		return Report{State: CopyFailed, Reason: reason, Checkout: checkout, Detail: detail}
@@ -356,6 +423,11 @@ func (c *Copies) Serve(checkout string, o ServeOpts) Report {
 	if err := os.MkdirAll(c.root, 0o755); err != nil {
 		return failed("no-state", fmt.Sprintf("the copies' directory %s could not be made: %v", c.root, err))
 	}
+	unlock, err := c.lock(checkout)
+	if err != nil {
+		return failed("no-state", fmt.Sprintf("the lock on the copy's record %s could not be taken: %v", c.Dir(checkout), err))
+	}
+	defer unlock()
 	rec := c.rec(checkout)
 	for claims := 0; ; claims++ {
 		if err := os.Mkdir(rec.dir, 0o755); err == nil {
@@ -364,8 +436,8 @@ func (c *Copies) Serve(checkout string, o ServeOpts) Report {
 		if claims >= tries {
 			return failed("no-state", fmt.Sprintf("the record %s could neither be claimed nor read", rec.dir))
 		}
-		// A record that holds no leader yet is a start in progress, or one that
-		// died before its leader ran.
+		// A record that holds no leader yet is one whose start ended before its
+		// leader recorded its pid: the leader may still record it, or never will.
 		if !rec.awaitLeader(30*time.Second) || !rec.alive() {
 			_ = os.RemoveAll(rec.dir)
 			continue
@@ -622,9 +694,23 @@ func (c *Copies) Check(checkout string) Report {
 	return rep
 }
 
-// Stop ends the checkout's copy and its record.
+// Stop ends the checkout's copy and its record. It holds the checkout's lock
+// throughout, so one that finds a start of the checkout under way waits for it
+// to end, and then ends the copy that start left.
 func (c *Copies) Stop(checkout string) Report {
 	rec := c.rec(checkout)
+	if _, err := os.Stat(c.root); err != nil {
+		return Report{State: CopyNone, Checkout: checkout}
+	}
+	unlock, err := c.lock(checkout)
+	if err != nil {
+		if !rec.alive() {
+			return Report{State: CopyNone, Checkout: checkout}
+		}
+		return Report{State: CopyRunning, Checkout: checkout,
+			Detail: fmt.Sprintf("the lock on the copy's record could not be taken, so the copy was not stopped: %v", err)}
+	}
+	defer unlock()
 	if _, err := os.Stat(rec.dir); err != nil {
 		return Report{State: CopyNone, Checkout: checkout}
 	}

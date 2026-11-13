@@ -104,11 +104,15 @@ the rig's `ui_serve_command`, and the city's `ui_publish_command` and
 `ui_address_pattern`, from the rig's formula vars and passes them. A copy is a
 process group led by a detached gctk, `rig serve --lead`, which ends the group
 when the serve command ends, and Gas City's orphan sweep ends it once the
-session that started it has ended. Its record lives beside the check records:
+session that started it has ended. Starts and stops of one checkout take turns
+under a lock beside the copy's record, so two starts that find a copy that died
+run one copy in its place, and two that ask to publish a running copy run one
+publish command. The record and the lock live beside the check records:
 
 | Path under the git common directory | What it holds |
 |---|---|
 | `gc-rig-serve/<hash of the checkout's path>/` | a copy's port, its commands, its leader's pid and start, and its logs |
+| `gc-rig-serve/<hash of the checkout's path>.lock` | the file a start or a stop of that checkout's copy holds an flock on while it runs, which the kernel releases if the call dies |
 
 `gctk rig serve --help` states the flags, the states a call reports and the
 exit codes. `specs/tk-rymdhac/gas-city-search.md` records what Gas City offers

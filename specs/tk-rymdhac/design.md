@@ -502,7 +502,10 @@ without parsing prose:
   copy's is refused and leaves that copy running, because the copy shows
   another app, so a capture never takes a copy of another command. A start
   reports a copy once it answers on its port as its own, and stops a copy that
-  does not within its wait.
+  does not within its wait. Starts and stops of one checkout take turns under
+  a lock beside the copy's record, so two starts that find a copy that died run
+  one copy in its place, and two that ask to publish a running copy run one
+  publish command.
 - **An address on request.** With `--publish-command` and `--address-pattern`
   it also publishes the port and prints the address to give the operator. A
   copy a capture runs takes no address.

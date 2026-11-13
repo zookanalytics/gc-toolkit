@@ -189,6 +189,48 @@ func (f *serveFixture) publishing(mode, pattern string) ServeOpts {
 
 func (f *serveFixture) rec(checkout string) copyRec { return f.copies.rec(checkout) }
 
+// copiesOn returns the fixture's copies' directory as another gctk process
+// sees it, one whose calls run on h.
+func (f *serveFixture) copiesOn(h host.Host) *Copies {
+	return NewCopies(filepath.Join(f.dir, "common"), h)
+}
+
+// gated is the host one call runs on in a test that drives two calls through
+// an interleaving: before each signal the call sends, hold runs, and it can
+// wait there for the other call to reach a point of its own.
+type gated struct {
+	host.Host
+	hold func(pid int, sig syscall.Signal)
+}
+
+func (g gated) Signal(pid int, sig syscall.Signal) error {
+	g.hold(pid, sig)
+	return g.Host.Signal(pid, sig)
+}
+
+// flags are the points calls in a test have reached.
+type flags struct {
+	mu  sync.Mutex
+	set map[string]bool
+}
+
+func (fl *flags) mark(name string) {
+	fl.mu.Lock()
+	defer fl.mu.Unlock()
+	if fl.set == nil {
+		fl.set = map[string]bool{}
+	}
+	fl.set[name] = true
+}
+
+func (fl *flags) reached(name string) func() bool {
+	return func() bool {
+		fl.mu.Lock()
+		defer fl.mu.Unlock()
+		return fl.set[name]
+	}
+}
+
 func (f *serveFixture) leader(checkout string) int {
 	pid, _ := f.rec(checkout).num("pid")
 	return pid
@@ -591,9 +633,9 @@ func TestServeACopyThatEndsTakesItsPublishCommandWithIt(t *testing.T) {
 	})
 }
 
-// Two starts at once find no copy running, and the one whose claim of the
-// record wins runs the copy. The other reports that copy, so exactly one says
-// it started it.
+// Two starts at once find no copy running, and the one that takes the
+// checkout's lock first runs the copy. The other reports that copy, so exactly
+// one says it started it.
 func TestServeTwoStartsAtOnceRunOneCopyAndOneSaysItStartedIt(t *testing.T) {
 	serveTest(t, func(t *testing.T, f *serveFixture) {
 		reps := make(chan Report, 2)
@@ -610,6 +652,286 @@ func TestServeTwoStartsAtOnceRunOneCopyAndOneSaysItStartedIt(t *testing.T) {
 			t.Errorf("started = %v and %v, want exactly one start to say it ran the copy", a.Started, b.Started)
 		}
 		f.copies.Stop(f.repo)
+	})
+}
+
+// Two starts that find a copy that died take turns under the checkout's lock,
+// so one runs a copy in its place and the other reports that copy. The test
+// drives the interleaving the lock rules out: each start's check of the dead
+// leader waits until the other start has checked it too, and the second waits
+// until the first's copy runs. A start that went on without the lock would
+// remove the running copy's record and run a second copy, which the
+// checkout's stop would leave running.
+func TestServeTwoStartsThatFindACopyThatDiedRunOneCopyInItsPlace(t *testing.T) {
+	serveTest(t, func(t *testing.T, f *serveFixture) {
+		rec := f.claim(t, f.repo, map[string]string{"command": "serve", "port": "1"})
+		dead, err := f.me.Start(host.Spec{Argv: []string{"stubborn", rec.dir}, Session: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !rec.awaitLeader(15 * time.Second) {
+			t.Fatal("the leader of the copy that dies did not record its pid")
+		}
+		_ = f.me.Signal(dead.Pid(), syscall.SIGKILL)
+		if c := f.copies.Check(f.repo); c.State != CopyDied {
+			t.Fatalf("check = %s, want died", c.State)
+		}
+
+		var at flags
+		replaced := func() bool {
+			pid := f.leader(f.repo)
+			return pid > 0 && pid != dead.Pid() && f.running(pid)
+		}
+		first := gated{Host: f.me, hold: func(pid int, sig syscall.Signal) {
+			if pid == dead.Pid() && sig == 0 {
+				at.mark("first checked")
+				waitFor(10*time.Second, at.reached("second checked"))
+			}
+		}}
+		second := gated{Host: f.me, hold: func(pid int, sig syscall.Signal) {
+			if pid == dead.Pid() && sig == 0 {
+				at.mark("second checked")
+				waitFor(10*time.Second, replaced)
+			}
+		}}
+		reps := make(chan Report, 2)
+		for _, h := range []host.Host{first, second} {
+			copies := f.copiesOn(h)
+			go func() { reps <- copies.Serve(f.repo, f.opts("serve")) }()
+		}
+		a, b := <-reps, <-reps
+		mustRun(t, a)
+		mustRun(t, b)
+		if leaders, served := len(f.starts("leader")), f.list(&f.served); a.Port != b.Port || leaders != 1 || len(served) != 1 {
+			t.Errorf("two starts over a copy that died ran %d leaders and served %q, and report ports %d and %d: want one copy both report",
+				leaders, served, a.Port, b.Port)
+		}
+		if a.Started == b.Started {
+			t.Errorf("started = %v and %v, want exactly one start to say it ran the copy", a.Started, b.Started)
+		}
+		if s := f.copies.Stop(f.repo); s.State != CopyStopped {
+			t.Fatalf("stop = %s (%s), want stopped", s.State, s.Detail)
+		}
+		for _, s := range f.starts("serve") {
+			if f.running(s.Pid) {
+				t.Errorf("the serve command %d still runs after the checkout's stop", s.Pid)
+			}
+		}
+		if entries, _ := os.ReadDir(f.copies.root); len(entries) != 0 {
+			t.Errorf("the stop left %v in the copies' directory", entries)
+		}
+	})
+}
+
+// Two starts that ask for an address for a running copy with none take turns
+// under the checkout's lock. The first publishes the copy with its own publish
+// command and address pattern and reports the address they give, and the
+// second, which asks for others, finds that publish command running and fails
+// other-publisher. The test drives the interleaving the lock rules out: each
+// start decides that no publish command runs before either asks the leader to
+// run one, and the first's request waits until the second's start has ended.
+// Starts that went on without the lock would each run a publish command, and
+// the first would report the address the second asked for.
+func TestServeTwoStartsThatPublishARunningCopyRunOnePublishCommand(t *testing.T) {
+	serveTest(t, func(t *testing.T, f *serveFixture) {
+		r := f.copies.Serve(f.repo, f.opts("serve"))
+		mustRun(t, r)
+		leader := f.leader(f.repo)
+
+		var at flags
+		first := gated{Host: f.me, hold: func(pid int, sig syscall.Signal) {
+			if pid == leader && sig == syscall.SIGUSR1 {
+				at.mark("first asked")
+				waitFor(30*time.Second, at.reached("second ended"))
+			}
+		}}
+		second := gated{Host: f.me, hold: func(pid int, sig syscall.Signal) {
+			if pid == leader && sig == syscall.SIGUSR1 {
+				waitFor(30*time.Second, at.reached("first asked"))
+			}
+		}}
+		patterns := map[string]string{"first": "https://first.example:$PORT/", "second": "https://second.example:$PORT/"}
+		firstCopies, secondCopies := f.copiesOn(first), f.copiesOn(second)
+		firstRep, secondRep := make(chan Report, 1), make(chan Report, 1)
+		go func() { firstRep <- firstCopies.Serve(f.repo, f.publishing("ok", patterns["first"])) }()
+		go func() {
+			rep := secondCopies.Serve(f.repo, f.publishing("other", patterns["second"]))
+			at.mark("second ended")
+			secondRep <- rep
+		}()
+		reps := map[string]Report{"first": <-firstRep, "second": <-secondRep}
+
+		won := ""
+		for name, rep := range reps {
+			if rep.State == CopyRunning {
+				won += name
+			}
+		}
+		lost := map[string]string{"first": "second", "second": "first"}[won]
+		if lost == "" {
+			var got []string
+			for _, name := range []string{"first", "second"} {
+				rep := reps[name]
+				got = append(got, fmt.Sprintf("%s %s %s at %q", name, rep.State, rep.Reason, address(rep)))
+			}
+			t.Fatalf("starts report %q and publish commands run %q: want one start to publish the copy and the other to fail other-publisher", got, f.list(&f.published))
+		}
+		want := addressFor(patterns[won], r.Port)
+		if address(reps[won]) != want {
+			t.Errorf("the %s start, which published the copy, reports the address %q, want the one its pattern gives, %q", won, address(reps[won]), want)
+		}
+		if l := reps[lost]; l.State != CopyFailed || l.Reason != "other-publisher" || !strings.Contains(l.Detail, want) {
+			t.Errorf("the %s start = %s %s (%s), want failed other-publisher naming %s", lost, l.State, l.Reason, l.Detail, want)
+		}
+		if got := f.list(&f.published); len(got) != 1 {
+			t.Errorf("publish commands run: %q, want one", got)
+		}
+		rec := f.rec(f.repo)
+		if got := rec.read("address"); got != want || !rec.publisherAlive() {
+			t.Errorf("the record holds the address %q (publisher running %v), want %q and its publish command running", got, rec.publisherAlive(), want)
+		}
+		if c := f.copies.Check(f.repo); c.State != CopyRunning || address(c) != want || f.leader(f.repo) != leader {
+			t.Errorf("check = %s at %q under leader %d, want running at %q under the copy's leader, %d", c.State, address(c), f.leader(f.repo), want, leader)
+		}
+		f.copies.Stop(f.repo)
+	})
+}
+
+// A stop holds the checkout's lock too, so one that comes while a start is
+// under way waits for that start to report, and then ends the copy it left.
+func TestServeAStopWaitsForAStartUnderWayAndEndsTheCopyItLeft(t *testing.T) {
+	serveTest(t, func(t *testing.T, f *serveFixture) {
+		var at flags
+		starting := gated{Host: f.me, hold: func(pid int, sig syscall.Signal) {
+			if sig == 0 && pid > 0 && pid == f.leader(f.repo) && !at.reached("start under way")() {
+				at.mark("start under way")
+				waitFor(10*time.Second, at.reached("stop ended"))
+			}
+		}}
+		startCopies := f.copiesOn(starting)
+		started := make(chan Report, 1)
+		go func() {
+			rep := startCopies.Serve(f.repo, f.opts("serve"))
+			at.mark("start ended")
+			started <- rep
+		}()
+		if !waitFor(10*time.Second, at.reached("start under way")) {
+			t.Error("the start did not reach its wait for the copy")
+		}
+		stopped := make(chan Report, 1)
+		go func() {
+			rep := f.copies.Stop(f.repo)
+			at.mark("stop ended")
+			stopped <- rep
+		}()
+		r, s := <-started, <-stopped
+		mustRun(t, r)
+		if !r.Started {
+			t.Error("the start that ran the copy does not say so")
+		}
+		if s.State != CopyStopped {
+			t.Errorf("stop = %s (%s), want stopped: the stop ends the copy the start left", s.State, s.Detail)
+		}
+		for _, sv := range f.starts("serve") {
+			if f.running(sv.Pid) {
+				t.Errorf("the serve command %d still runs after the stop", sv.Pid)
+			}
+		}
+	})
+}
+
+// The release removes the lock's file once the checkout has no record, and a
+// call that was waiting on that file takes the lock again on the file at the
+// lock's path, whether a later call made it or it makes it, so no two calls
+// hold the checkout's lock at once.
+func TestServeTheLockHoldsAcrossTheRemovalOfItsFile(t *testing.T) {
+	serveTest(t, func(t *testing.T, f *serveFixture) {
+		if err := os.MkdirAll(f.copies.root, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		path := f.copies.Dir(f.repo) + ".lock"
+		release, err := f.copies.lock(f.repo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var at flags
+		go func() {
+			next, err := f.copies.lock(f.repo)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			at.mark("second holds")
+			waitFor(time.Minute, at.reached("third tried"))
+			time.Sleep(5 * time.Second)
+			at.mark("second releases")
+			next()
+		}()
+		time.Sleep(time.Second)
+		// The release removes the file the second call waits on, and a call
+		// that comes before the second tries it again makes the file anew.
+		release()
+		later, err := f.copies.lock(f.repo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(5 * time.Second)
+		if at.reached("second holds")() {
+			t.Error("the call that waited on the removed file took the lock while a later call held it")
+		}
+		later()
+		if !waitFor(10*time.Second, at.reached("second holds")) {
+			t.Fatal("the call waiting on the lock did not take it once it was released")
+		}
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("the lock's file %s is gone while a call holds the lock: %v", path, err)
+		}
+		at.mark("third tried")
+		third, err := f.copies.lock(f.repo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !at.reached("second releases")() {
+			t.Error("a third call took the checkout's lock while the second held it")
+		}
+		third()
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("the lock's file outlives its last holder with no record: %v", err)
+		}
+	})
+}
+
+// A start or a stop that cannot take the checkout's lock acts on nothing: the
+// start fails, and the stop reports the copy still running, and why.
+func TestServeACallThatCannotTakeTheLockLeavesTheCopyAsItIs(t *testing.T) {
+	serveTest(t, func(t *testing.T, f *serveFixture) {
+		r := f.copies.Serve(f.repo, f.opts("serve"))
+		mustRun(t, r)
+		leader := f.leader(f.repo)
+		path := f.copies.Dir(f.repo) + ".lock"
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Mkdir(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		s := f.copies.Stop(f.repo)
+		if s.State != CopyRunning || !strings.Contains(s.Detail, "could not be taken") {
+			t.Errorf("a stop that cannot take the lock = %s (%s), want running, and why", s.State, s.Detail)
+		}
+		again := f.copies.Serve(f.repo, f.opts("serve"))
+		if again.State != CopyFailed || again.Reason != "no-state" || !strings.Contains(again.Detail, "could not be taken") {
+			t.Errorf("a start that cannot take the lock = %s %s (%s), want failed no-state, and why", again.State, again.Reason, again.Detail)
+		}
+		if f.leader(f.repo) != leader || !f.running(leader) || !f.me.Answers(r.Port) {
+			t.Error("a call that could not take the lock changed the copy")
+		}
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+		if s := f.copies.Stop(f.repo); s.State != CopyStopped {
+			t.Errorf("stop = %s (%s), want stopped once the lock can be taken", s.State, s.Detail)
+		}
 	})
 }
 
