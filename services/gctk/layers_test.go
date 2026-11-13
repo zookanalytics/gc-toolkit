@@ -40,6 +40,8 @@ var pkgLayer = map[string]struct {
 	layer   int
 	adapter string
 }{
+	"internal/host":      {adapter, "host"},
+	"internal/host/fake": {adapter, "host"},
 	"internal/gcbd":      {adapter, "store"},
 	"internal/gcbd/fake": {adapter, "store"},
 	"internal/daemon":    {adapter, "store"},

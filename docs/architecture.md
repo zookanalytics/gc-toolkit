@@ -1,6 +1,6 @@
 ---
 name: Architecture — how gc-toolkit composes Gas City to deliver its beliefs
-description: The 30,000-ft guide to gc-toolkit — the boundary between operator, runtime, pack, and GitHub; how a piece of work moves from filed to landed; what a review reads from the installed pack and what from the rig under review; how humans engage; how lessons compound; the consistency test a new capability must pass to belong; the decisions that settle how a PR merges; and the debt where what is built falls short of this account. Read it to know what the system is, to place a new capability, or to check an existing one.
+description: The 30,000-ft guide to gc-toolkit — the boundary between operator, runtime, pack, and GitHub; how a piece of work moves from filed to landed; what a review reads from the installed pack and what from the rig under review; how humans engage; how lessons compound; the consistency test a new capability must pass to belong; the decisions the architecture rests on; and the debt where what is built falls short of it. Read it to know what the system is, to place a new capability, or to check an existing one.
 ---
 
 # Architecture
@@ -16,8 +16,8 @@ declared shared primitive; nothing exists because an incident once happened.
 **Mandate.** How gc-toolkit composes Gas City's primitives to deliver
 foundation: the system boundary, how work moves end to end, what the installed
 pack supplies and what a rig supplies, how humans engage, how lessons compound,
-the test that keeps new work grounded, the decisions that settle how a PR
-merges, and the debt where what is built falls short of this account.
+the test that keeps new work grounded, the decisions the architecture rests on,
+and the debt where what is built falls short of it.
 
 **Boundaries.** It works at altitude. The anchor lifecycle's states, writers,
 and check mechanics are owned by [state-machine.md](state-machine.md); the
@@ -184,6 +184,9 @@ the effort's beads and on its summary task, which writes the PR's summary from
 the finished branch. Once they have closed, it takes steps 6 to 9 like any bead
 bound for main.
 
+A converse sitting can take steps 4 and 5 itself, on the operator's ruling in
+the sitting, for a change whose next step is the operator's reaction.
+
 External facts the pack does not write — GitHub closing or retargeting a PR, a
 session dying, a provider quota park, a `gc` build that moves the text the seed
 audit renders — are handled by these reactive paths: `pr-facts.sh` (an arm of
@@ -329,7 +332,8 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   it blocks.
 - **A conversation is a task about one subject.** It tracks its subject,
   replies to each human gate it answers through bd's `replies-to` edge, and
-  blocks nothing but an open PR's anchor, whose merge it holds until it closes.
+  blocks nothing but an open PR's anchor, whose merge it holds until it closes,
+  and the change its sitting makes, which it holds until the hand-off.
   It waits in the operator's queue, assigned to `human`, until
   the operator engages it. `gc-helm.sh open` files one, and so do the
   operator's intake, `operator-intake.sh`, and a caller asking about a bead with
@@ -443,6 +447,10 @@ first. Either way the change is a decision on the record, not a drift.
   commits its approval and its threads were given on.
 - **No machine checks a landing's transitions,** and the doctor checks the
   beads after they are written.
+- **After the hand-off, a sitting's change takes every step a polecat's
+  takes,** and the sitting is not one of its checks.
+- **A copy of a rig's UI that a session runs from a change's tree serves
+  fixture data,** never the live city's.
 
 ## Debt
 
@@ -469,3 +477,7 @@ why a reader must know it, and the work that retires it.
   directory until an agent or a person removes it, and what it shows reaches
   the learning loop only when an agent also reports it. Epic tk-zlot608 builds
   the memory intake.
+- **A sitting does not edit an open PR's branch.** A ruling on an open PR still
+  files a rework a polecat runs. A unit that waits on the review-lanes member
+  (tk-1tfzr71.22) and the merge member (tk-1tfzr71.20) retires it
+  (tk-e70808f).

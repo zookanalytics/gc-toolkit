@@ -270,6 +270,21 @@ exit 0
 ENGINE
 chmod +x "$ENGINE_STUB"
 
+# gctk answers `rig serve --check` with a copy running on $COPY_PORT, and with
+# no copy when COPY_PORT is unset, logging each call and where it ran.
+GCTK_STUB="$TMPD/gctk"
+cat >"$GCTK_STUB" <<'GCTK'
+#!/usr/bin/env bash
+printf 'gctk %s (in %s)\n' "$*" "$(pwd)" >>"${CALLLOG:?}"
+if [ "$*" = "rig serve --check" ] && [ -n "${COPY_PORT:-}" ]; then
+  printf '{"state":"running","checkout":"%s","port":%s,"address":""}\n' "$(pwd)" "$COPY_PORT"
+  exit 0
+fi
+printf '{"state":"none","checkout":"%s"}\n' "$(pwd)"
+exit 3
+GCTK
+chmod +x "$GCTK_STUB"
+
 # The engine checkout, with its dependencies installed, and a rig named
 # sprintshow that is not the engine.
 ENGINE="$TMPD/sprintshow"; mkdir -p "$ENGINE/node_modules"
@@ -586,15 +601,13 @@ for cap in video screenshot; do
   has "(allow file-read-data (subpath \"$RIGA/.git\"))" "$(profile)" "($cap) and its repository's, to read"
   hasnt "(allow file-read-data file-write* (subpath \"$RIGA\"))" "$(profile)" "($cap) and the rig's checkout stays denied"
 
-  echo "# ($cap) PORTS: a port a server answers on, and a --base-url on this host, stop the capture"
-  capture "$cap" SS_RIG="$ENGINE" PORT_ANSWERS=5175 -- --serve 'npm run dev' --port 5175 --cwd "$WORK/app"
-  eq "$RC" 1 "($cap) a --serve port a server already answers on exits 1"
+  echo "# ($cap) PORTS: a --serve-dir port a server answers on, and a --base-url on this host, stop the capture"
+  capture "$cap" SS_RIG="$ENGINE" PORT_ANSWERS=5175 -- --serve-dir "$WORK/app" --port 5175
+  eq "$RC" 1 "($cap) a --serve-dir port a server already answers on exits 1"
   has "a server already answers on port 5175" "$(err)" "($cap) it names the port"
   not_run "$cap"
-  capture "$cap" SS_RIG="$ENGINE" PORT_ANSWERS=5173 -- --serve 'npm run dev' --cwd "$WORK/app"
-  eq "$RC" 1 "($cap) a --serve with no --port is checked on the engine's own 5173"
-  capture "$cap" SS_RIG="$ENGINE" -- --serve 'npm run dev' --port 5175 --cwd "$WORK/app"
-  eq "$RC" 0 "($cap) a --serve port nothing answers on captures"
+  capture "$cap" SS_RIG="$ENGINE" -- --serve-dir "$WORK/app" --port 5175
+  eq "$RC" 0 "($cap) a --serve-dir port nothing answers on captures"
   has "(allow network-outbound (remote ip \"localhost:5175\"))" "$(profile)" "($cap) and the sandbox opens it"
   for url in http://localhost:3000 http://127.0.0.1:8372/v0 'http://[::1]:5173/'; do
     capture "$cap" SS_RIG="$ENGINE" -- --base-url "$url"
@@ -641,6 +654,16 @@ for cap in video screenshot; do
   capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" LISTENERS="5181 4243 $BWT" -- --base-url http://127.0.0.1:5181/
   local_refused "$cap" "a server in a worktree of a rig set to \"true\"" "process 4243, which listens on port 5181, works in a worktree of $RIGB, for which city.toml sets app_reads_city = \"true\""
 
+  echo "# ($cap) LOCAL-APP: a copy that gctk rig serve runs holds its port, so a capture reaches it whatever the rig's app_reads_city"
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" GCTK_BIN="$GCTK_STUB" COPY_PORT=5181 LISTENERS="5181 4243 $BWT" -- --base-url http://127.0.0.1:5181/
+  eq "$RC" 0 "($cap) a copy's port, in a worktree of a rig set to \"true\", captures"
+  has "--base-url http://127.0.0.1:5181/ is a copy that gctk rig serve runs from $BWT inside the sandbox" "$(err)" "($cap) it says a copy holds the port"
+  has "gctk rig serve --check (in $BWT)" "$(calls)" "($cap) it asks gctk in the checkout the listener works in"
+  has "(allow network-outbound (remote ip \"localhost:5181\"))" "$(profile)" "($cap) the sandbox opens the copy's port"
+  eq "$(grep -c 'allow network-outbound (remote ip' "$SANDBOX_PROFILE")" 1 "($cap) and no other loopback port"
+  capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" GCTK_BIN="$GCTK_STUB" COPY_PORT=5999 LISTENERS="5181 4243 $BWT" -- --base-url http://127.0.0.1:5181/
+  local_refused "$cap" "a port the checkout's copy does not hold" "for which city.toml sets app_reads_city = \"true\""
+
   echo "# ($cap) LOCAL-APP: any value but \"false\", and a read that fails, counts as \"true\""
   for v in yes True ''; do
     capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" RIG_VARS="{\"alpha\":{\"app_reads_city\":\"$v\"}}" LISTENERS="5180 4242 $RWT" -- --base-url http://127.0.0.1:5180/
@@ -686,6 +709,42 @@ for cap in video screenshot; do
   capture "$cap" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" LISTENERS="5180 4242 $RWT" -- --base-url http://localhost:99999/
   local_refused "$cap" "a URL that names no port a server can take" "the URL names no port from 1 to 65535"
 done
+
+echo "# SANDBOXED: demo_engine_sandboxed runs a command inside the capture's sandbox, with the one loopback port it names open"
+cat >"$TMPD/sandboxed.sh" <<'SH'
+. "$PACK_SCRIPTS/demo-engine-lib.sh" || exit 1
+demo_engine_sandboxed "$@"
+SH
+# sandboxed [VAR=VAL ...] -- <port> <dir> <command...>: run demo_engine_sandboxed
+# from $RWT, as gctk rig serve runs a copy's serve command from its checkout.
+sandboxed() {
+  local -a envs
+  while [ $# -gt 0 ] && [ "$1" != -- ]; do envs+=("$1"); shift; done
+  shift
+  : >"$CALLLOG"; rm -f "$SANDBOX_PROFILE" "$SANDBOX_ENV"
+  ( cd "$RWT" && env -i PATH="${STUB_PATH:-$BIN}:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
+      SANDBOX_PROFILE="$SANDBOX_PROFILE" SANDBOX_ENV="$SANDBOX_ENV" PACK_SCRIPTS="$HERE" \
+      ${envs[@]+"${envs[@]}"} bash "$TMPD/sandboxed.sh" "$@" >"$OUTF" 2>"$ERRF" )
+  RC=$?
+}
+sandboxed "${CITY_ENV[@]}" GC_SESSION_ID=s1 -- 5197 "$RWT" bash -c 'echo ran in the sandbox'
+eq "$RC" 0 "(sandboxed) the command runs"
+eq "$(cat "$OUTF")" "ran in the sandbox" "(sandboxed) with its output its own"
+has '(allow network-outbound (remote ip "localhost:5197"))' "$(profile)" "(sandboxed) the profile opens the port it names"
+eq "$(grep -c 'allow network-outbound (remote ip' "$SANDBOX_PROFILE")" 1 "(sandboxed) and no other loopback port"
+has '(deny network-outbound (remote ip "localhost:*"))' "$(profile)" "(sandboxed) and denies every other one"
+has "(allow file-read-data file-write* (subpath \"$RWT\"))" "$(profile)" "(sandboxed) the directory is read and written, as its rig worktree"
+has "(deny file-read-data file-write* (subpath \"$RIGA\"))" "$(profile)" "(sandboxed) and the rig's checkout stays denied"
+eq "$(grep -cE '^((GC|GT|BEADS|BD|DOLT)_|TMUX)' "$SANDBOX_ENV")" 0 "(sandboxed) the command runs with none of the variables that point at the city"
+sandboxed "${CITY_ENV[@]}" -- 0 "$RWT" true
+eq "$RC" 1 "(sandboxed) a port that is no port is refused"
+sandboxed "${CITY_ENV[@]}" -- 5197 "$TMPD/nowhere" true
+eq "$RC" 1 "(sandboxed) a directory that does not exist is refused"
+sandboxed "${CITY_ENV[@]}" -- 5197 "$TMPD" true
+eq "$RC" 1 "(sandboxed) a directory that holds the city's is refused"
+has "$TMPD holds " "$(err)" "(sandboxed) and it names what the directory holds"
+STUB_PATH="$NOSBX" sandboxed "${CITY_ENV[@]}" -- 5197 "$RWT" true
+eq "$RC" 1 "(sandboxed) a host with no sandbox runs nothing"
 
 echo "# ISOLATION: a terminal capture whose command reads the city reaches none of it, through the host's own sandbox"
 if [ ! -x /usr/bin/sandbox-exec ] || ! /usr/bin/sandbox-exec -p '(version 1)(allow default)' /usr/bin/true 2>/dev/null; then
@@ -993,6 +1052,7 @@ echo "# SHELLS: the library runs in the agent's own shell, which can be zsh or m
 skill_block 2 | sed 's#<command> <arguments\.\.\.>#run demo.md --serve-dir app --port 5199 -o clip.mp4#' >"$TMPD/skill-serve.sh"
 skill_block 2 | sed 's#<command> <arguments\.\.\.>#run demo.md --base-url http://127.0.0.1:5180/ -o clip.mp4#' >"$TMPD/skill-base.sh"
 skill_block 2 | sed 's#<command> <arguments\.\.\.>#run demo.md --base-url http://127.0.0.1:5180/ --serve-dir app -o clip.mp4#' >"$TMPD/skill-two.sh"
+skill_block 2 | sed 's#<command> <arguments\.\.\.>#run demo.md --serve "npm run dev" --port 5173 -o clip.mp4#' >"$TMPD/skill-engine-serve.sh"
 # shell_run <shell> <block> [VAR=VAL ...]: run the block through the shell, in
 # the city's environment and the variables given.
 shell_run() {
@@ -1014,7 +1074,11 @@ has '(allow network-outbound (remote ip "localhost:5180"))' "$(profile)" "(shell
 BASE_CALLS="$(calls)"; BASE_PROFILE="$(profile)"
 shell_run bash "$TMPD/skill-two.sh" "${LOCAL_ENV[@]}" LISTENERS="5180 4242 $RWT"
 eq "$RC" 1 "(shells) an engine call that names a --base-url on this host and a --serve-dir exits 1"
-has "--base-url http://127.0.0.1:5180/ and --serve or --serve-dir each name an app to capture" "$(err)" "(shells) it says the call names two apps"
+has "--base-url http://127.0.0.1:5180/ and --serve-dir each name an app to capture" "$(err)" "(shells) it says the call names two apps"
+hasnt "engine run" "$(calls)" "(shells) and the engine never runs"
+shell_run bash "$TMPD/skill-engine-serve.sh"
+eq "$RC" 1 "(shells) an engine call that names --serve exits 1"
+has "the engine's --serve would start a server whose port the sandbox cannot vouch for; serve the app as a copy with gctk rig serve" "$(err)" "(shells) it says why, and what serves the app instead"
 hasnt "engine run" "$(calls)" "(shells) and the engine never runs"
 for sh in /bin/zsh /bin/bash; do
   if [ ! -x "$sh" ]; then echo "# SHELLS: $sh SKIPPED (not on this host)"; continue; fi

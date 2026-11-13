@@ -547,44 +547,15 @@ the difference between a bead someone can dispose of and one that just sits:
   state, then closes the bead as done, or asks the operator when the record
   does not hold. The note says its validating closer closes it.
 
-**3. Compose the PR summary.** `pr-open.sh` publishes the anchor's PR summary
-as the PR's `## Summary`, and falls back to the anchor's description: the
-dispatch text, written before the diff existed and addressed to you, not to a
-reviewer. You are the only actor that has read the diff, so say what changed
-and why, for a reviewer who was not in the originating conversation.
-
-The operator accepts or rejects a PR from its summary, so the summary opens
-with a brief they can answer in about a minute, in plain words, with any
-identifier in parentheses. It says what approving changes and what that
-costs, and names anything approving sets in motion or has to wait for, such as
-a build that starts on merge or a branch that must not deploy before another
-lands. A branch that asks the operator to decide something more, such as a
-design doc's decision for them or a call the branch made for them that costs
-something either way, opens on that decision: the stake, every option and
-what it costs, which option the branch takes, and what happens if they do not
-decide. Leave out what does not apply, so a small change's brief can be a
-sentence or two.
-
-The account of the diff follows the brief. Anything that would take the open
-text past one screen goes in a collapsed section.
-
-Write the brief, then the account of the diff (the behavior before, the behavior
-now, and the shape of the change, in a short paragraph or a few bullets of
-markdown), to a file outside the worktree, and fix each mention of another rig
-this lists. An empty or absent file writes no summary: one already on the anchor
-stands, and with none the PR body falls back to the dispatch text.
+**3. Compose the PR summary.** Load the skill
+`{{binding_prefix}}commit-conventions` and write the summary to the standard it
+gives, in a file outside the worktree, which the hand-off below reads. Fix each
+mention of another rig this lists. An empty or absent file writes no summary and
+leaves one already on the anchor standing, so leave the file empty only when that
+one meets the standard.
 ```bash
 "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-mentions.sh" --file "<the summary file>"
 ```
-
-What the summary describes is the BRANCH, not this pass. On a rework or
-rebase child the PR body publishes the whole branch, so an account of only
-the fix you just made describes something no reviewer is looking at. Every
-stamp owes the same brief, a restamp as much as the first composition, and a
-summary an earlier step stamped stands only if it opens this way. Rewrite the
-brief to the branch's current state instead of extending it, put a new
-qualification of its headline beside the headline, and put the round's
-mechanics in the account.
 
 **4. Name the branch on the anchor's title.** `pr-open.sh`, `pr-facts.sh` and
 `merge.sh` read the anchor, the open bead that carries a `merge_result` for this

@@ -16,7 +16,9 @@ closes when that PR merges, as any PR's owning bead does, so work queued behind
 it starts then. Doctrine: docs/design-convoy.md.
 
 The molecule writes no code and needs no worktree of its own. Its one push is a
-ref push from the rig's checkout, which a converse sitting cannot make. Each step
+ref push from the rig's checkout, which a converse sitting cannot make, because
+a sitting pushes only the branch of a change the operator rules it make, through
+Work's hand-off. Each step
 re-derives the subject from the input convoy ({{convoy_id}}'s one tracked member)
 in its own shell, records its result on the subject so a resume is idempotent,
 and closes its own step bead through assets/scripts/claim-close.sh.

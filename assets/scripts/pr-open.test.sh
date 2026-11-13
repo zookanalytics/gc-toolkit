@@ -600,6 +600,21 @@ title_slot=$(grep -o -E -e '--title "[^"]*"' "$HERE/../../formulas/mol-polecat-w
 has "$title_slot" '--title "<type>(<scope>): ' "submit's handoff call has the author write the title with its type and scope"
 hasnt "$title_slot" '--title ""' "…and offers no empty title as the line to run"
 
+echo "# a PR summary's standard is the commit-conventions skill's, and submit loads it"
+# Every author of a PR's summary writes it to one standard, so the skill states it
+# and the submit step's summary paragraph loads the skill in its place, keeping its
+# call on the summary file. The paragraph is found by its heading's words, whatever
+# number the step gives it.
+has "$conventions" "**The summary opens with a brief the operator can answer in about a minute**" \
+    "the skill opens a PR's summary with a brief the operator can answer in about a minute"
+has "$conventions" "**The account of the diff follows the brief**" "…follows it with the account of the diff"
+has "$conventions" "**The summary describes the branch, not the pass that writes it.**" \
+    "…and has every stamp describe the whole branch"
+summary_part=$(awk '/^\*\*[0-9]+[a-z]?\. Compose the PR summary/{on=1} /^\*\*[0-9]+[a-z]?\. Name the branch on the anchor/{on=0} on' "$HERE/../../formulas/mol-polecat-work.toml")
+has "$summary_part" '{{binding_prefix}}commit-conventions' "submit's summary paragraph loads the skill"
+has "$summary_part" 'rig-mentions.sh" --file "<the summary file>"' "…keeps its call on the summary file"
+hasnt "$summary_part" "about a minute" "…and leaves the standard to the skill"
+
 # The label writer pr-open delegates to. It is absent from the SUT dir above, where
 # the reconcile calls are best-effort and silently no-op without it (no earlier
 # case asserts a label). Installed now so the cases below exercise the real

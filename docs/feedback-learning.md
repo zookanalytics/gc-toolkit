@@ -243,11 +243,13 @@ read. It is elected by the roles that author durable output, which is a wider
 set than the profile's — a role that never addresses the operator still writes
 code, docs, and bead bodies someone else reads. Each such role composes the base
 and its class fragment, so a universal standard lives in the base once while a
-class-specific one reaches only the classes it impacts — a standard about
-changing a repo does not reach the human converse class. The classes: polecats
-(polecat, polecat-codex), human (every converse-<model> sitting), system
-(deacon, mechanik, proactive, witness, refinery, keeper). The mechanik composes
-neither of its fragments, because its prime has to fit Claude Code's
+class-specific one reaches only the classes it impacts. A standard about
+changing a repository lives in the polecats' fragment, and it reaches a converse
+sitting through the edit skill, `gc-toolkit.converse-edit`, which has the
+sitting read the polecat class's fragments before its first edit. The classes:
+polecats (polecat, polecat-codex), human (every converse-<model> sitting),
+system (deacon, mechanik, proactive, witness, refinery, keeper). The mechanik
+composes neither of its fragments, because its prime has to fit Claude Code's
 10,000-character session-start cap, which
 `assets/scripts/mechanik-prime-cap.test.sh` holds it to. Its prompt instead
 gives the command that reads both from their files, and has it read them

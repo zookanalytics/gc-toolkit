@@ -23,7 +23,7 @@ through `gc bd` and the supervisor's API.
 | `pr status` | a PR's status (working, merging, needs-review or needs-attention), the one derivation the `status:` label and the helm board share, and the open human gates that hold it, which `gc-helm engage` offers; for a PR on Gas Town's pending record, the pr domain's evaluator decides it, and each condition not met follows it | `gctk pr status --help`, `internal/cli/prstatus.go`, `prstatus`, `pr` |
 | `pr record` | the refinery's record of the PR a bead owns as pending until its merge is verified, in Gas Town's two writes under the store's record lock, each guarded on the status and assignee it read, so a bead that a close or a release reached first gets no record | `gctk pr record --help`, `internal/cli/prland.go`, `pr`, `pr/record` |
 | `pr reconcile` | one run of the landing order over the store's pending records, the least recently checked first, each under the store's record lock: a ready PR merged with its head pinned, a bead closed once its merge commit is on the target, a changed head sent back to the refinery, and each exception kept blocked behind a human gate | `gctk pr reconcile --help`, `internal/cli/prland.go`, `pr`, `pr/record` |
-| `rig` | actions taken on the rig: running its checks and recording each result against the commit | `gctk rig --help`, `internal/cli/rig.go`, `internal/rig` |
+| `rig` | actions taken on the rig: running its checks and recording each result against the commit, and running a copy of its UI from a checkout for a demo capture or a person | `gctk rig --help`, `internal/cli/rig.go`, `internal/cli/rig_serve.go`, `internal/rig` |
 | `session` | actions taken on a session: giving it a title its Gas City record and its terminal both show, made of the bead it is about (`--subject`), the pull request it is about (`--pr`) and its topic (`--topic`). A Claude Code or Codex terminal takes the title at the session's next boundary, a few seconds after the turn ends | `gctk session --help`, `internal/cli/session.go` |
 | `version` | the revision the binary was built from | `cmd/gctk` |
 
@@ -109,6 +109,31 @@ pre-existing writes that judgment on a bead with
 flags, which record answers a call, and the exit codes. `specs/tk-1hazlo2/rig-checks.md`
 records the design and its measured cost.
 
+`serve` runs a copy of the rig's UI from the checkout it is called in: the serve
+command its caller passes, with bash at the checkout's top, on a free loopback
+port it is given as `$PORT`, inside the sandbox that
+`assets/scripts/demo-engine-lib.sh` defines for a demo capture, which
+`GCTK_SCRIPTS_DIR` names. A demo capture's `--serve` starts one with no address
+and points the engine at its port. The `converse-edit` skill starts one with the
+city's publish command and address pattern for the operator. Each caller reads
+the rig's `ui_serve_command`, and the city's `ui_publish_command` and
+`ui_address_pattern`, from the rig's formula vars and passes them. A copy is a
+process group led by a detached gctk, `rig serve --lead`, which ends the group
+when the serve command ends, and Gas City's orphan sweep ends it once the
+session that started it has ended. Starts and stops of one checkout take turns
+under a lock beside the copy's record, so two starts that find a copy that died
+run one copy in its place, and two that ask to publish a running copy run one
+publish command. The record and the lock live beside the check records:
+
+| Path under the git common directory | What it holds |
+|---|---|
+| `gc-rig-serve/<hash of the checkout's path>/` | a copy's port, its commands, its leader's pid and start, and its logs |
+| `gc-rig-serve/<hash of the checkout's path>.lock` | the file a start or a stop of that checkout's copy holds an flock on while it runs, which the kernel releases if the call dies |
+
+`gctk rig serve --help` states the flags, the states a call reports and the
+exit codes. `specs/tk-rymdhac/gas-city-search.md` records what Gas City offers
+for it.
+
 ## Build and deploy
 
 `orders/gctk-build.toml` runs `assets/scripts/gc-build.sh gctk --deploy` on a
@@ -128,6 +153,9 @@ internal/cli/        the command tree, each command with its help, flags and exi
 internal/lifecycle/  the lifecycle state machine, which lifecycle/lifecycle.toml declares
 internal/ledger/     typed bead records: each key's declaration, one write per act
                      whose exit decides, snapshots, and a pass that reads each bead once
+internal/host/       the host adapter: the processes gctk starts and signals, the process
+                     table, and the loopback ports and their listeners
+internal/host/fake/  the host adapter's in-memory fake, for the domains' tests
 internal/gcbd/       the store adapter: bead reads and writes through `gc bd` and the
                      supervisor API, the store's listing, and its blocked set
 internal/gcbd/fake/  the store adapter's in-memory fake, for the domains' tests
@@ -137,7 +165,7 @@ internal/gh/         the GitHub adapter: one `gh api` call per read, paged to it
 internal/gh/fake/    the GitHub adapter's in-memory fake, for the domains' tests
 internal/feedback/   the pack's one definition of feedback, pr-post.sh's feedback-def, run
                      through jq
-internal/rig/        rig's runner and its commit-keyed record store
+internal/rig/        rig's runner, its commit-keyed record store, and a copy of the rig's UI
 pr/                  the pr domain: whether the PR a bead owns is ready to merge at its
                      current revision, from the store, GitHub and the definition of
                      feedback; the account of the change its author records, the PR
