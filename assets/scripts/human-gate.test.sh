@@ -33,10 +33,7 @@ hasnt() { if hasin "$1" "$2"; then bad "$3 (found '$2')"; else ok "$3"; fi; }
 #   update <id> --description <d> — sets the bead's description; STUB_UPDATE_FAIL
 #     refuses it and writes nothing.
 #   show <id> --json — the bead's row; a bead it cannot find is an error object,
-#     exit 1. STUB_SHOW_FAIL=1 fails it with nothing on stdout, as a store that
-#     did not answer does, STUB_SHOW_RAW=<payload> answers it with that payload
-#     verbatim, and STUB_SHOW_RC=<n> exits n after the answer. None touches the
-#     other calls.
+#     exit 1.
 #   dep add <issue> <depends-on> --type <t> — records the edge, for the hold
 #     skill's reply from a conversation onto its gate.
 # The store is a JSON array of beads; EDGES holds `<issue>|<type>|<depends-on>`
@@ -128,14 +125,12 @@ case "${1:-}" in
     jq -c --arg id "$id" --arg d "$desc" 'map(if .id == $id then .description = $d else . end)' "$STORE" | save
     exit 0 ;;
   show)
-    [ -n "${STUB_SHOW_FAIL:-}" ] && { echo "bd: store unreachable" >&2; exit 1; }
-    [ -n "${STUB_SHOW_RAW:-}" ] && { printf '%s\n' "$STUB_SHOW_RAW"; exit 0; }
     out=$(jq -c --arg id "${2:-}" '[.[] | select(.id == $id)]' "$STORE")
     if [ "$(printf '%s' "$out" | jq 'length')" = 0 ]; then
       printf '{"error":"no issue found matching %s"}\n' "${2:-}"; exit 1
     fi
     printf '%s\n' "$out"
-    exit "${STUB_SHOW_RC:-0}" ;;
+    exit 0 ;;
   *) echo "stub gc: unexpected bd call: $*" >&2; exit 1 ;;
 esac
 STUB
@@ -148,7 +143,6 @@ unset GC_AGENT GC_RIG 2>/dev/null || true
 # iso_ago <seconds> — an RFC-3339 UTC time that many seconds ago.
 iso_ago() { jq -nr --argjson s "$1" '(now - $s) | floor | todate'; }
 task()   { printf '{"id":"%s","title":"%s","status":"open","issue_type":"task"}' "$1" "$1"; }
-session() { printf '{"id":"%s","title":"%s","status":"open","issue_type":"session"}' "$1" "$1"; }
 # gate <id> <key> <status> [<close_reason> <closed_at>] [<await_type>]
 gate() {
   jq -nc --arg id "$1" --arg k "$2" --arg st "$3" --arg r "${4:-}" --arg at "${5:-}" --arg ty "${6:-human}" \
@@ -161,7 +155,7 @@ reset() {
   printf '[%s]' "$beads" > "$STUB_STORE"
   printf '%s' "${2:-}" > "$STUB_EDGES"
   : > "$STUB_GC_LOG"; printf '0' > "$STUB_SEQ"
-  unset STUB_DEP_FAIL STUB_CREATE_FAIL STUB_CREATE_STORE STUB_CREATE_RACE STUB_RESOLVE_FAIL STUB_RESOLVE_RACE STUB_SHOW_FAIL STUB_SHOW_RAW STUB_SHOW_RC STUB_UPDATE_FAIL 2>/dev/null || true
+  unset STUB_DEP_FAIL STUB_CREATE_FAIL STUB_CREATE_STORE STUB_CREATE_RACE STUB_RESOLVE_FAIL STUB_RESOLVE_RACE STUB_UPDATE_FAIL 2>/dev/null || true
 }
 field()   { jq -r --arg id "$1" --arg k "$2" '(.[] | select(.id == $id) | .[$k]) // "<absent>"' "$STUB_STORE"; }
 creates() { cat "$STUB_SEQ"; }
@@ -316,7 +310,7 @@ eq "$rc" 0 "exits 0"
 eq "$(creates)" 1 "the gate is filed on the parent"
 hasnt "$(calls)" "[--parent]" "no children were read"
 
-echo "# a wisp id names no bead that can wait, and is refused by its shape"
+echo "# a *-wisp-* id, such as a patrol wisp's, is refused by its shape alone"
 for subj in hq-wisp-abc12 tk-wisp-9f; do
   reset "$(task "$subj")"
   err=$("$SUT" --subject "$subj" --key k --message m 2>&1 >/dev/null); rc=$?
@@ -328,76 +322,12 @@ for subj in hq-wisp-abc12 tk-wisp-9f; do
   eq "$rc" 2 "$subj: a retract on it is refused too"
 done
 
-echo "# a session names no bead that can wait, and is refused whatever the shape of its id"
-# Not every session id has the wisp shape, so the subject's own row decides.
-reset "$(task tk-w),$(session hq-abc12)"
-err=$("$SUT" --subject hq-abc12 --key k --message m 2>&1 >/dev/null); rc=$?
-eq "$rc" 2 "a subject whose row reads as a session bead is refused with exit 2"
-eq "$(creates)" 0 "  ... no gate blocks the session bead"
-hasnt "$(calls)" "[dep] [list]" "  ... and its gates are never read"
-has "$err" "'hq-abc12' is a session" "  ... it says why"
-has "$err" "patrol-finding.sh --key k --about hq-abc12" "  ... and names a patrol finding about the session as the durable route"
-"$SUT" --retract --subject hq-abc12 --key k --message m >/dev/null 2>&1; rc=$?
-eq "$rc" 2 "a retract on a session is refused too"
-hasnt "$(calls)" "[gate] [resolve]" "  ... and resolves nothing"
-reset "$(task tk-w),$(session hq-abc12)"
-STUB_SHOW_RAW="$(printf 'gc bd: answering from the city store\n[{"id":"hq-abc12","title":"a\001b","status":"open","issue_type":"session"}]')" \
-  "$SUT" --subject hq-abc12 --key k --message m >/dev/null 2>&1; rc=$?
-eq "$rc" 2 "a session row behind the store's notice line, carrying a raw control byte, still reads as a session"
-eq "$(creates)" 0 "  ... and no gate is filed"
-
-echo "# a row with no type is a bead that can wait, unless it carries the session label"
-# bd leaves an empty issue_type out of its JSON. Gas City counts a bead with no
-# type and the gc:session label as a damaged session bead, and nothing else
-# with no type as a session.
-reset "{\"id\":\"tk-legacy\",\"title\":\"legacy\",\"status\":\"open\"}"
-out=$("$SUT" --subject tk-legacy --key k --message m 2>/dev/null); rc=$?
-eq "$rc$out" "0tk-gate1" "a bead whose row carries no type gets its gate"
-has "$(cat "$STUB_EDGES")" "tk-legacy|blocks|tk-gate1" "  ... which blocks the bead"
-reset "{\"id\":\"hq-broken\",\"title\":\"s\",\"status\":\"open\",\"labels\":[\"agent:rig/rig.witness\",\"gc:session\"]}"
-err=$("$SUT" --subject hq-broken --key k --message m 2>&1 >/dev/null); rc=$?
-eq "$rc" 2 "a row with no type and the gc:session label is refused as a session"
-eq "$(creates)" 0 "  ... and no gate blocks the damaged session bead"
-has "$err" "'hq-broken' is a session" "  ... it says why"
-reset "{\"id\":\"tk-typed\",\"title\":\"t\",\"status\":\"open\",\"issue_type\":\"task\",\"labels\":[\"gc:session\"]}"
-out=$("$SUT" --subject tk-typed --key k --message m 2>/dev/null); rc=$?
-eq "$rc$out" "0tk-gate1" "a row whose type is not session is a bead that can wait, label or not"
-
-echo "# a subject whose own row does not read files nothing, before its gates are read"
-# The gate read reads only the subject's edges, which can answer where the row
-# did not, so a session let through would get a gate.
-# unread_case <label> <stub-knob> — a call about session hq-abc12 whose row
-# reads wrong under the knob.
-unread_case() {
-  reset "$(task tk-w),$(session hq-abc12)"
-  out=$(env "$2" "$SUT" --subject hq-abc12 --key k --message m 2>"$TMP/err"); rc=$?
-  eq "$rc" 1 "$1: the call exits 1, so its caller retries"
-  eq "$out" "" "  ... names no gate"
-  eq "$(creates)" 0 "  ... files no gate on the session bead"
-  hasnt "$(calls)" "[dep] [list]" "  ... never reads the subject's gates"
-  has "$(cat "$TMP/err")" "could not read 'hq-abc12' as one bead" "  ... and says the subject did not read"
-}
-unread_case "a read that fails" STUB_SHOW_FAIL=1
-unread_case "a read that exits 1 after the session's row" STUB_SHOW_RC=1
-unread_case "a payload cut short" 'STUB_SHOW_RAW=[{"id":"hq-abc12","status":"open","issue_type":"sess'
-unread_case "an error object" 'STUB_SHOW_RAW={"error":"no issue found matching hq-abc12"}'
-unread_case "a row for a longer id" 'STUB_SHOW_RAW=[{"id":"hq-abc123","status":"open","issue_type":"session"}]'
-reset "$(task tk-w),$(session hq-abc12)"
-STUB_SHOW_FAIL=1 "$SUT" --retract --subject hq-abc12 --key k --message m >/dev/null 2>&1; rc=$?
-eq "$rc" 1 "a retract whose subject does not read exits 1 too"
-hasnt "$(calls)" "[gate] [resolve]" "  ... and resolves nothing"
-
-echo "# a call about a bead costs one read of its row"
-reset "$(task tk-w)"
-"$SUT" --subject tk-w --key k --message m >/dev/null 2>&1
-eq "$(grep -c '\[show\] \[tk-w\]' "$STUB_GC_LOG")" "1" "the subject's row is read once"
-
 echo "# a subject that names no bead files nothing"
 reset "$(task tk-w)"
 err=$("$SUT" --subject tk-nope --key k --message m 2>&1 >/dev/null); rc=$?
 eq "$rc" 1 "exit 1"
 eq "$(creates)" 0 "nothing filed"
-has "$err" "could not read 'tk-nope' as one bead" "it says the bead could not be read"
+has "$err" "could not read the human gates of 'tk-nope'" "it says the bead could not be read"
 
 echo "# an unreadable store files nothing: an unread gate may already ask"
 reset "$(task tk-w)"
@@ -425,8 +355,7 @@ out=$(STUB_CREATE_STORE=hq "$SUT" --subject tk-w --key k --message m 2>"$TMP/err
 eq "$rc" 1 "exit 1"
 eq "$out" "" "no id is reported as asking"
 has "$(cat "$TMP/err")" "gc bd gate resolve hq-gate1" "the warning names the withdrawal of the stray gate"
-eq "$(grep -c -E '^CALL \[bd\] \[(show|dep)\]' "$STUB_GC_LOG")" 2 "…found from the create's reply: its reads are the subject's row and the dedup before it"
-hasnt "$(calls)" "[show] [hq-gate1]" "…and no read names the stray gate"
+eq "$(grep -c -E '^CALL \[bd\] \[(show|dep)\]' "$STUB_GC_LOG")" 1 "…found from the create's reply: its one read is the dedup before it"
 
 echo "# usage"
 reset "$(task tk-w)"

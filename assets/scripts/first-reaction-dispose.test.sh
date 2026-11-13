@@ -901,7 +901,6 @@ real_gate_title() {
   mkdir -p "$TMP/real-gate/bin"
   { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/real-gate/bin/gc" <<'RG'
 case "$1 ${2:-} ${3:-}" in
-  "bd show "*) printf '[{"id":"%s","status":"open","issue_type":"task"}]\n' "$3" ;;
   "bd dep list") echo '[]' ;;
   "bd gate create")
     while [ $# -gt 0 ]; do

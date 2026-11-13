@@ -10,8 +10,8 @@
 #   - it files nothing while an open human gate under the key already blocks
 #     the bead, though two writers in the same instant can each file (below);
 #   - it files nothing inside a quiet period the call declares;
-#   - it refuses a patrol wisp or a session as the subject: a `*-wisp-*` id
-#     by its shape, and any other id whose own row reads as a session bead;
+#   - it refuses a `*-wisp-*` id as the subject, such as a patrol wisp's, by
+#     its shape alone, so a session whose id lacks `-wisp-` is not refused;
 #   - it titles the gate with the message's first line, capped;
 #   - it makes the gate's description the message it was given;
 #   - it stops when the gate it filed is in another store than the bead,
@@ -27,9 +27,8 @@
 # already open), and with --retract the id of each gate this call resolved.
 # Everything else goes to stderr.
 # Exit: 0 filed, already open, inside a declared quiet window, or (--retract)
-# resolved or nothing open · 1 could not read the bead or its gates, file or
-# resolve, or the gate landed in another store · 2 usage, or a wisp or a session
-# named as the subject
+# resolved or nothing open · 1 could not read the bead's gates, file or resolve,
+# or the gate landed in another store · 2 usage, or a wisp named as the subject
 set -uo pipefail
 
 PROG="human-gate"
@@ -56,10 +55,10 @@ usage: human-gate.sh --subject <bead-id> --key <situation-key> --message <text>
                      --message <one-line reading>
 
   --subject       the bead that waits for the person; the gate blocks it
-                  (required). One bead id, [A-Za-z0-9._-] only. A patrol
-                  wisp (a `*-wisp-*` id) or a session bead, whatever the shape
-                  of its id, can wait for nobody and is refused: file a patrol
-                  finding with patrol-finding.sh instead.
+                  (required). One bead id, [A-Za-z0-9._-] only. A `*-wisp-*`
+                  id, such as a patrol wisp's, is refused by its shape alone:
+                  file a patrol finding with patrol-finding.sh instead. A
+                  session whose id lacks `-wisp-` is not refused.
   --key           names the SITUATION, not the wording: one open gate per bead
                   and key. It is the gate's await id. [A-Za-z0-9._-] only
                   (required).
@@ -123,31 +122,6 @@ case "$SUBJECT" in
     warn "'$SUBJECT' names a patrol wisp or a session, not a bead that can wait for a person. Nothing was filed or resolved. A situation with no bead of its own is a patrol finding: file it with patrol-finding.sh --key $KEY --title <one line> --message <text>, and its first reaction files a human gate on the finding when a person must answer."
     exit 2 ;;
 esac
-
-# A session names no work that can wait, and a gate would block its session
-# bead. Not every session id has the wisp shape, so the subject's own row
-# decides, by the test Gas City uses to count a bead as a session
-# (session.IsSessionBeadOrRepairable): its type is `session`, or it has no type
-# and carries the `gc:session` label. bd leaves an empty issue_type out of its
-# JSON, and it also answers an id that is a prefix of another bead's, so only a
-# row carrying this exact id is an answer. When no such row reads, nothing is
-# filed or resolved and the call exits 1, so its caller retries, because the
-# gate read below reads only the subject's edges, which can answer where the
-# row did not.
-if ! SUBJECT_KIND=$(bd_json show "$SUBJECT" | jq -er --arg id "$SUBJECT" '
-    if type == "array" then [ .[] | objects | select(.id == $id) ][0] else null end
-    | if type == "object" then
-        ((.issue_type // "") | tostring) as $t
-        | if $t == "session" or ($t == "" and any((.labels // [])[]?; . == "gc:session"))
-          then "session" else "bead" end
-      else null end' 2>/dev/null); then
-  warn "could not read '$SUBJECT' as one bead (no such bead, or its store did not answer), so nothing shows whether it is a session, which no gate may hold. Nothing was filed or resolved."
-  exit 1
-fi
-if [ "$SUBJECT_KIND" = session ]; then
-  warn "'$SUBJECT' is a session, not a bead that can wait for a person. Nothing was filed or resolved. A situation about a session is a patrol finding about it: file it with patrol-finding.sh --key $KEY --about $SUBJECT --title <one line> --message <text>, and its first reaction files a human gate on the finding when a person must answer."
-  exit 2
-fi
 
 # Every decision below reads this one read (bd_human_gates), closed gates
 # included, and tells the open ones by open_human_gate.
