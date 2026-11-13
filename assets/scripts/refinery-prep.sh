@@ -76,8 +76,7 @@ git check-ref-format --branch "$BRANCH" >/dev/null 2>&1 || stop "'$BRANCH' is no
 git check-ref-format --branch "$TARGET" >/dev/null 2>&1 || stop "'$TARGET' is not a branch name"
 [ "$BRANCH" != "$TARGET" ] || stop "$BEAD's branch is its own target, $TARGET"
 
-COMMON=$(git -C "$HOME_DIR" rev-parse --path-format=absolute --git-common-dir) || stop "no repository at $HOME_DIR"
-GATE="$COMMON/gc-refinery-gate"
+GATE=$(refinery_gate_dir "$HOME_DIR") || stop "no repository at $HOME_DIR"
 # A gate an interrupted iteration left running runs in a tree this prep
 # removes, so it is stopped first. Its TERM-to-KILL grace outlasts the ten
 # seconds `gctk rig` takes to stop a check's command.
@@ -91,17 +90,11 @@ for LEFT in "$HOME_DIR"/worktrees/*; do
 done
 
 # park <key> <reason>: the bead waits behind a human gate, with
-# merge_result=blocked, still assigned to the refinery, so clearing the gate
-# hands it back. The gate is filed first, and a gate that does not land parks
-# nothing.
+# merge_result=blocked, still assigned to the refinery (refinery_park), and the
+# gate tells a person how to stand the work down instead.
 park() {
-  if ! "$HERE/human-gate.sh" --subject "$BEAD" --key "$1" --message "$2 Fix that, then clear this gate: clearing it hands $BEAD back to the refinery, which prepares it again. To drop the work instead, do not clear this gate: run $HERE/stand-down.sh $BEAD --key $1 --ruling '<why>'." >/dev/null; then
-    stop "the $1 gate on $BEAD did not land ($2)"
-  fi
-  gc bd update "$BEAD" --if-assignee="$GC_AGENT" --set-metadata merge_result=blocked --set-metadata "blocked_reason=$2" </dev/null >/dev/null \
-    || echo "$PROG: the $1 gate holds $BEAD, but merge_result=blocked did not land on it" >&2
-  echo "$PROG: parked $BEAD behind its $1 gate: $2"
-  exit 4
+  refinery_park "$BEAD" "$1" blocked "$2" "$2 Fix that, then clear this gate: clearing it hands $BEAD back to the refinery, which prepares it again. To drop the work instead, do not clear this gate: run $HERE/stand-down.sh $BEAD --key $1 --ruling '<why>'." \
+    || stop "the $1 gate on $BEAD did not land ($2)"
 }
 
 if ! FETCH=$(git -C "$HOME_DIR" fetch --no-tags origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH" "+refs/heads/$TARGET:refs/remotes/origin/$TARGET" 2>&1); then

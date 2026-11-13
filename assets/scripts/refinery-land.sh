@@ -82,28 +82,17 @@ DEFAULT_BRANCH=$(refinery_default_branch "$HOME_DIR") || stop "origin/HEAD names
 TARGET=$(bead_meta target)
 [ -n "$TARGET" ] || TARGET="$DEFAULT_BRANCH"
 
-[ -n "${GC_RIG:-}" ] || stop "GC_RIG is unset, so the rig's formula vars cannot be read"
-VARS=$(gc formula show mol-refinery-patrol --rig "$GC_RIG" --json </dev/null 2>/dev/null) || VARS=""
-printf '%s' "$VARS" | jq -e '.ok == true and (.vars | type == "array")' >/dev/null 2>&1 \
-  || stop "the formula vars of rig '$GC_RIG' did not read (gc formula show --rig)"
-var() {
-  printf '%s' "$VARS" | jq -r --arg n "$1" '[.vars[] | select(.name == $n)][0]
-    | if . == null then "" elif .rig_default != null then .rig_default else (.default // "") end'
-}
+refinery_formula_vars || stop "the rig's formula vars did not read"
 
-# park <key> <merge_result> <reason> <gate message>
+# park <key> <merge_result> <reason> <gate message>: the bead waits behind a
+# human gate, still assigned to the refinery, and its tree is removed
+# (refinery_park).
 park() {
-  "$HERE/human-gate.sh" --subject "$BEAD" --key "$1" --message "$4" >/dev/null \
-    || stop "the $1 gate on $BEAD did not land ($3)"
-  gc bd update "$BEAD" --if-assignee="$GC_AGENT" --set-metadata "merge_result=$2" --set-metadata "blocked_reason=$3" </dev/null >/dev/null \
-    || echo "$PROG: the $1 gate holds $BEAD, but merge_result=$2 did not land on it" >&2
-  teardown
-  echo "$PROG: parked $BEAD behind its $1 gate: $3"
-  exit 4
+  refinery_park "$BEAD" "$1" "$2" "$3" "$4" "$HOME_DIR" || stop "the $1 gate on $BEAD did not land ($3)"
 }
 
 STRATEGY=$(bead_meta merge_strategy)
-[ -n "$STRATEGY" ] || STRATEGY=$(var default_merge_strategy)
+[ -n "$STRATEGY" ] || STRATEGY=$(refinery_formula_var default_merge_strategy)
 [ -n "$STRATEGY" ] || STRATEGY=direct
 [ "$STRATEGY" != pr ] || STRATEGY=mr
 if [ "$STRATEGY" = direct ] && { [ "$TARGET" = "$DEFAULT_BRANCH" ] || [ -n "$(bead_meta existing_pr)" ]; }; then
@@ -151,7 +140,7 @@ esac
 
 if [ "$STRATEGY" = direct ]; then
   DIRECT=(--work "$BEAD" --branch "$BRANCH" --target "$TARGET")
-  [ "$(var delete_merged_branches)" != true ] || DIRECT+=(--delete-branch)
+  [ "$(refinery_formula_var delete_merged_branches)" != true ] || DIRECT+=(--delete-branch)
   "$HERE/direct-merge-push.sh" "${DIRECT[@]}"
   case "$?" in
     0) teardown; exit 0 ;;
@@ -161,7 +150,7 @@ if [ "$STRATEGY" = direct ]; then
   esac
 fi
 
-if [ "$(var pending_through_merge)" = true ]; then
+if [ "$(refinery_formula_var pending_through_merge)" = true ]; then
   "$HERE/refinery-publish.sh" --bead "$BEAD"
   RC=$?
   case "$RC" in 0|4|6) teardown; exit "$RC" ;; *) exit 1 ;; esac
@@ -233,9 +222,9 @@ fi
 
 # An empty check set never un-gates a PR: it recovers the declared default.
 # The none sentinel is stamped as itself.
-CHECK_SET=$(var check_set)
+CHECK_SET=$(refinery_formula_var check_set)
 case "$(printf '%s' "$CHECK_SET" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:],')" in
-  '') CHECK_SET=$(printf '%s' "$VARS" | jq -r '[.vars[] | select(.name == "check_set")][0].default // ""') ;;
+  '') CHECK_SET=$(refinery_formula_var --default check_set) ;;
   none|off) CHECK_SET="none" ;;
 esac
 push

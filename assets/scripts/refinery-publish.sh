@@ -88,17 +88,11 @@ REPO=$(origin_repo "$HOME_DIR") || stop "the rig's origin is not a github.com re
 gctk=$(gctk_path) || stop "no gctk binary to compose and record the PR with"
 PR_POST="$HERE/pr-post.sh"
 
-# park <key> <reason>: the bead waits behind a human gate, with
-# merge_result=blocked, still assigned to the refinery, so clearing the gate
-# hands it back. The gate is filed first, and a gate that does not land parks
-# nothing.
+# park <key> <reason>: the bead waits behind a human gate whose message is the
+# reason, with merge_result=blocked, still assigned to the refinery
+# (refinery_park).
 park() {
-  "$HERE/human-gate.sh" --subject "$BEAD" --key "$1" --message "$2" >/dev/null \
-    || stop "the $1 gate on $BEAD did not land ($2)"
-  gc bd update "$BEAD" --if-assignee="$GC_AGENT" --set-metadata merge_result=blocked --set-metadata "blocked_reason=$2" </dev/null >/dev/null \
-    || echo "$PROG: the $1 gate holds $BEAD, but merge_result=blocked did not land on it" >&2
-  echo "$PROG: parked $BEAD behind its $1 gate: $2"
-  exit 4
+  refinery_park "$BEAD" "$1" blocked "$2" "$2" || stop "the $1 gate on $BEAD did not land ($2)"
 }
 owner_meta() { row_meta "$OWNER_ROW" "$1"; }
 # pr_repo <url>: the owner/repo a PR's URL names.

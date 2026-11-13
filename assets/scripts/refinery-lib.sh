@@ -142,6 +142,57 @@ refinery_teardown() {
   fi
 }
 
+# refinery_park <bead> <key> <merge_result> <reason> <message> [<home>] — park
+# <bead> behind a human gate keyed <key>, still assigned to this refinery
+# ($GC_AGENT), so clearing the gate hands it back. The gate is filed first,
+# with <message>, and a gate that does not land parks nothing: the call returns
+# non-zero, with nothing written, and the caller stops. Otherwise one write,
+# guarded on the assignee, sets merge_result to <merge_result> and
+# blocked_reason to <reason>; a write that does not land is named on stderr,
+# and the gate still holds the bead. With <home>, the bead's tree under it is
+# removed. The call then ends the step: it prints what was parked and exits 4,
+# the exit every refinery step gives a parked bead.
+refinery_park() {
+  "$_refinery_lib_dir/human-gate.sh" --subject "$1" --key "$2" --message "$5" >/dev/null || return 1
+  gc bd update "$1" --if-assignee="$GC_AGENT" --set-metadata "merge_result=$3" --set-metadata "blocked_reason=$4" </dev/null >/dev/null \
+    || echo "${PROG:-refinery}: the $2 gate holds $1, but merge_result=$3 did not land on it" >&2
+  [ -z "${6:-}" ] || refinery_teardown "$6" "$1" || echo "${PROG:-refinery}: the next prep removes the tree for $1" >&2
+  echo "${PROG:-refinery}: parked $1 behind its $2 gate: $4"
+  exit 4
+}
+
+# refinery_formula_vars — mol-refinery-patrol's vars as this rig sets them, read
+# once with `gc formula show --rig $GC_RIG --json` into REFINERY_VARS, so every
+# step and every session reads the same values. Non-zero, with a line on stderr,
+# when GC_RIG is unset or the read does not answer with the vars, since an
+# unread answer would look like a rig that sets none.
+refinery_formula_vars() {
+  REFINERY_VARS=""
+  [ -n "${GC_RIG:-}" ] || { echo "GC_RIG is unset, so the rig's formula vars cannot be read" >&2; return 1; }
+  REFINERY_VARS=$(gc formula show mol-refinery-patrol --rig "$GC_RIG" --json </dev/null 2>/dev/null) || REFINERY_VARS=""
+  printf '%s' "$REFINERY_VARS" | jq -e '.ok == true and (.vars | type == "array")' >/dev/null 2>&1 \
+    || { echo "the formula vars of rig '$GC_RIG' did not read (gc formula show --rig)" >&2; return 1; }
+}
+
+# refinery_formula_var [--default] <name> — one var off REFINERY_VARS: the rig's
+# own value when it sets one, an empty one included, else the formula's default,
+# else empty. --default reads the formula's default alone.
+refinery_formula_var() {
+  local which=rig
+  [ "$1" != --default ] || { which=default; shift; }
+  printf '%s' "$REFINERY_VARS" | jq -r --arg n "$1" --arg w "$which" '[.vars[] | select(.name == $n)][0]
+    | if . == null then "" elif $w == "rig" and .rig_default != null then .rig_default else (.default // "") end'
+}
+
+# refinery_gate_dir <dir> — the record of the rig's gate (refinery-gate.sh), in
+# the git common dir of the repository <dir> sits in, printed. One per rig,
+# since the refinery prepares and gates one bead at a time.
+refinery_gate_dir() {
+  local common
+  common=$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 1
+  printf '%s/gc-refinery-gate\n' "$common"
+}
+
 # refinery_owner <bead> <branch> — the bead whose PR the work on <branch>
 # lands on, in OWNER, with its row in OWNER_ROW. BEAD_ROW must be <bead>'s row.
 # It is the bead <bead> names as its anchor_bead when that bead is open on

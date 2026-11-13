@@ -58,17 +58,11 @@ usage() { echo "usage: $PROG start --bead <id> [--add <check> <command>]... | $P
 VERB="${1:-}"; [ $# -gt 0 ] && shift
 stop() { echo "$PROG: $1; no gate started, and the work stays with the refinery to retry" >&2; exit 1; }
 
-gate_dir() { # <dir in the rig's repository>
-  local common
-  common=$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 1
-  printf '%s/gc-refinery-gate\n' "$common"
-}
-
 case "$VERB" in
   wait)
     [ $# -eq 0 ] || usage
     HOME_DIR=$(refinery_home) || { echo "$PROG: the refinery's own worktree is unknown, so the gate cannot be found; it keeps running" >&2; exit 1; }
-    GATE=$(gate_dir "$HOME_DIR") || { echo "$PROG: no repository at $HOME_DIR; the gate keeps running" >&2; exit 1; }
+    GATE=$(refinery_gate_dir "$HOME_DIR") || { echo "$PROG: no repository at $HOME_DIR; the gate keeps running" >&2; exit 1; }
     DETACHED_JOB_STOP_GRACE=20 exec "$JOB" wait "$GATE" --limit 7200 ;;
   start) ;;
   -h|--help) sed -n '2,/^set -uo pipefail$/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -91,7 +85,7 @@ done
 HOME_DIR=$(refinery_home) || stop "the refinery's own worktree is unknown"
 refinery_bead "$BEAD" || stop "$BEAD did not read"
 refinery_require "$HOME_DIR" "$BEAD" "$(bead_meta branch)" || stop "this iteration did not prepare $BEAD"
-GATE=$(gate_dir "$HOME_DIR") || stop "no repository at $HOME_DIR"
+GATE=$(refinery_gate_dir "$HOME_DIR") || stop "no repository at $HOME_DIR"
 gctk=$(gctk_path) || stop "no gctk binary to run the checks through"
 
 if ! OUT=$(DETACHED_JOB_STOP_GRACE=20 "$JOB" stop "$GATE" 2>&1); then
@@ -106,28 +100,20 @@ done
 
 # One read serves every check. An unreadable answer would look like a rig with
 # no checks, so it runs nothing.
-[ -n "${GC_RIG:-}" ] || stop "GC_RIG is unset, so the rig's check commands cannot be read"
-CHECKS_JSON=$(gc formula show mol-refinery-patrol --rig "$GC_RIG" --json </dev/null 2>/dev/null) || CHECKS_JSON=""
-printf '%s' "$CHECKS_JSON" | jq -e '.ok == true and (.vars | type == "array")' >/dev/null 2>&1 \
-  || stop "the check commands of rig '$GC_RIG' did not read (gc formula show --rig)"
-# check_value <var>: the rig's own value when it sets one, else the default.
-check_value() {
-  printf '%s' "$CHECKS_JSON" | jq -r --arg n "$1" '[.vars[] | select(.name == $n)][0]
-    | if . == null then "" elif .rig_default != null then .rig_default else (.default // "") end'
-}
+refinery_formula_vars || stop "the rig's check commands did not read"
 CHECKS=0
 add_check() { # <check> <command>
   CHECKS=$((CHECKS + 1))
   printf '%s' "$2" > "$GATE/checks/$(printf '%02d' "$CHECKS")-$1" || stop "cannot write the $1 check into $GATE/checks"
   echo "$PROG: ${1}_command = $2"
 }
-RUN_TESTS=$(check_value run_tests)
+RUN_TESTS=$(refinery_formula_var run_tests)
 for CHECK in setup typecheck lint build test; do
   if [ "$CHECK" = test ] && [ "$RUN_TESTS" != true ]; then
     echo "$PROG: test_command skipped (run_tests=${RUN_TESTS})"
     continue
   fi
-  CMD=$(check_value "${CHECK}_command")
+  CMD=$(refinery_formula_var "${CHECK}_command")
   [ -n "$CMD" ] || continue
   add_check "$CHECK" "$CMD"
 done
