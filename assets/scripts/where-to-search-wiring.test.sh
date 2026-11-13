@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# where-to-search-wiring.test.sh — every agent the pack ships renders the
-# where-to-search rule once, and no prompt cites a formula by its file.
+# where-to-search-wiring.test.sh — every agent this repository ships renders
+# the where-to-search rule once, and no prompt cites a formula by its file.
 #
 # An agent that does not know where a thing lives searches the disk for it, and
 # on macOS a search of the home folder, /Users or the disk root waits on a
@@ -11,11 +11,12 @@
 # composes it, nested fragments included.
 #
 #   (1) the fragment defines where-to-search;
-#   (2) every agent under agents/ renders the rule's heading exactly once,
-#       except two: the mechanik, whose prime has no room for it under the
-#       session-start cap mechanik-prime-cap.test.sh holds it to, and the dog,
-#       whose prompt the deletion plan retires (tools/deletion-plan.tsv), so it
-#       takes no new text;
+#   (2) every agent under agents/, and under a sub-pack's agents/ in packs/,
+#       renders the rule's heading exactly once, except two: the mechanik,
+#       whose prime has no room for it under the session-start cap
+#       mechanik-prime-cap.test.sh holds it to, and the dog, whose prompt the
+#       deletion plan retires (tools/deletion-plan.tsv), so it takes no new
+#       text;
 #   (3) no prompt or fragment cites a formula by its file path, which reads as
 #       a file to go and find, where `gc formula show <name>` reads it.
 #
@@ -27,7 +28,7 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 FRAG="$ROOT/template-fragments/where-to-search.template.md"
 RENDERS="$ROOT/generated/seed-audit/agents"
 HEADING='## Where to search'
-EXEMPT=" mechanik dog "
+EXEMPT=" agents/mechanik agents/dog "
 
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); printf '  ok    %s\n' "$1"; }
@@ -49,33 +50,41 @@ fi
 
 # --- (2) every agent renders it once --------------------------------------
 # A render is named for the agent, or for <binding>.<agent> where agents from
-# two packs share a name, and the render binds this pack under its own name.
-# The loader skips a directory whose name starts with `_`, which holds a prompt
-# that agents share and is no agent of its own.
-PACK="$(sed -n 's/^name = "\(.*\)"$/\1/p' "$ROOT/pack.toml" | head -n 1)"
-[ -n "$PACK" ] || { echo "no [pack] name in $ROOT/pack.toml" >&2; exit 1; }
-for dir in "$ROOT"/agents/*/; do
+# two packs share a name, and the render binds each pack under the name its
+# pack.toml gives it. The loader skips a directory whose name starts with `_`,
+# which holds a prompt that agents share and is no agent of its own.
+pack_name() { sed -n 's/^name = "\(.*\)"$/\1/p' "$1/pack.toml" | head -n 1; }
+for dir in "$ROOT"/agents/*/ "$ROOT"/packs/*/agents/*/; do
+  [ -d "$dir" ] || continue
+  dir="${dir%/}"
   name="$(basename "$dir")"
+  rel="${dir#"$ROOT"/}"
   case "$name" in _*) continue ;; esac
-  case "$EXEMPT" in *" $name "*) continue ;; esac
+  case "$EXEMPT" in *" $rel "*) continue ;; esac
+  pack="$(pack_name "$(dirname "$(dirname "$dir")")")"
+  if [ -z "$pack" ]; then
+    bad "$rel has a pack name" "no [pack] name in the pack.toml two levels above it"
+    continue
+  fi
   render=""
-  for cand in "$RENDERS/$name.md" "$RENDERS/$PACK.$name.md"; do
+  for cand in "$RENDERS/$name.md" "$RENDERS/$pack.$name.md"; do
     [ -f "$cand" ] && { render="$cand"; break; }
   done
   if [ -z "$render" ]; then
-    bad "$name has a seed-audit render" "none under generated/seed-audit/agents: run assets/scripts/render-seed-audit.sh"
+    bad "$rel has a seed-audit render" "none under generated/seed-audit/agents: run assets/scripts/render-seed-audit.sh"
     continue
   fi
   n="$(grep -cxF "$HEADING" "$render")"
   if [ "$n" -eq 1 ]; then
-    ok "$name renders the rule once"
+    ok "$rel renders the rule once"
   else
-    bad "$name renders the rule once" "$(basename "$render") carries '$HEADING' $n times: compose {{ template \"where-to-search\" . }} once"
+    bad "$rel renders the rule once" "$(basename "$render") carries '$HEADING' $n times: compose {{ template \"where-to-search\" . }} once"
   fi
 done
 
 # --- (3) no formula cited by its file -------------------------------------
-cited="$(grep -nE 'formulas/[A-Za-z0-9._-]+\.toml' "$ROOT"/agents/*/prompt.template.md "$ROOT"/template-fragments/*.template.md 2>/dev/null | sed "s|^$ROOT/||")"
+cited="$(grep -nE 'formulas/[A-Za-z0-9._-]+\.toml' "$ROOT"/agents/*/prompt.template.md "$ROOT"/template-fragments/*.template.md \
+  "$ROOT"/packs/*/agents/*/prompt.template.md "$ROOT"/packs/*/template-fragments/*.template.md 2>/dev/null | sed "s|^$ROOT/||")"
 if [ -z "$cited" ]; then
   ok "no prompt or fragment cites a formula by its file path"
 else

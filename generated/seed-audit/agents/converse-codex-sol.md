@@ -568,7 +568,8 @@ the tool's time limit ends it. Look up anything else where it lives:
 
 - a formula: `gc formula show <name>`, whose `--json` carries each step's text
   under `.steps[]`, or `gc formula list`;
-- the pack's scripts: `"$(gc gc-toolkit scripts-dir)"`;
+- the gc-toolkit pack's scripts: `"$(gc <binding> scripts-dir)"`, where
+  `<binding>` is the name in front of its skills, as in `gc-toolkit.work`;
 - the packs the city imports, and their sources: `gc import list`;
 - Gas City's own source: the rig that checks it out (`gc rig list`), with the
   core pack at `internal/bootstrap/packs/core` and bd at `examples/bd`;
