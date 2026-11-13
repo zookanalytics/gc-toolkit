@@ -21,8 +21,8 @@
 # open-as-draft gates read green.
 # The PR's title and body come from `gctk pr compose`, which composes them from
 # the anchor. The body's managed region sits between the gc:pr-summary markers,
-# so an adoption rewrites a fresh region while keeping text an operator or a
-# later arm (pr-stack) added.
+# so an adoption rewrites a fresh region while keeping the text an operator
+# added and the branch-beads section the refinery writes.
 # Args: [--deadline <epoch-secs>] [--cursor <file>] pace the walk (pace-lib.sh):
 # anchors gate-ensure last recorded as settled, and whose rows carry no hold
 # this arm applies, are visited first and the rest after them, each group in a
@@ -313,8 +313,8 @@ api_head() { # <branch> -> sha from the API, or nothing
 # Refresh an OPEN PR's published body from the anchor before the adoption flip,
 # so a rework's restamped summary reaches the merge surface: read the body, then
 # have `gctk pr compose --opening` bring its managed region current. It writes the
-# region between a well-formed marker pair, leaving operator edits and pr-stack's
-# section in place, and marks one over a body a create wrote before the markers
+# region between a well-formed marker pair, leaving the rest of the body in
+# place, and marks one over a body a create wrote before the markers
 # existed (## Summary … ## Refinery handoff), keeping whatever follows. A body
 # with no managed region, empty, hand-written or with its markers cut into
 # another shape, has no stale managed summary to republish and is adopted as it
