@@ -411,9 +411,9 @@ shares only the word ([authority-map.md](authority-map.md)).
     a reader keys on. The `gastown` pack's `pr-merge-reconcile` records a PR's
     lifecycle in `pr_state`, a key of its own.
   - The search is [specs/tk-blloeo/gas-city-search.md](../specs/tk-blloeo/gas-city-search.md).
-- **Verified.** 2026-11-08, at `gastownhall/gascity` main fdfec4c19dc4,
-  `gastownhall/gascity-packs` main 2a3b142e3fbd, and `gastownhall/beads` main
-  2edea9ced8c6.
+- **Verified.** 2026-11-13, at `gastownhall/gascity` main f4bf76d1597d,
+  `gastownhall/gascity-packs` main 1f6d8e41c5b0, and `gastownhall/beads` main
+  526c1c877e26.
 - **Retires when.** Gas City records a pull request's merge readiness where a
   reader of the PR's own bead finds it, and tells a required check still
   running from a block, for example once its PR monitor reads the base
@@ -468,7 +468,7 @@ shares only the word ([authority-map.md](authority-map.md)).
   waits on an answer.
 - **Evidence.**
   - In `gastownhall/gascity`, the `gc` binary's pull request readiness monitor
-    reads each open PR's draft flag, merge state, head and check rollup
+    reads each open PR's author, draft flag, merge state, head and check rollup
     (`pullRequestsQuery` in `internal/githubmonitor/client.go`, and
     `classifyPullRequest` in `internal/githubmonitor/monitor.go`), and records
     its class on a repair bead it files. No source under `cmd/`, `internal/` or
@@ -492,9 +492,9 @@ shares only the word ([authority-map.md](authority-map.md)).
     findings, and its `ce-pr-comment-resolver` agent is handed a thread to fix
     or answer. Neither keeps a record of the thread.
   - The search is [specs/tk-iydyiup/gas-city-search.md](../specs/tk-iydyiup/gas-city-search.md).
-- **Verified.** 2026-11-08, at `gastownhall/gascity` main 9f1abb50188b with
+- **Verified.** 2026-11-13, at `gastownhall/gascity` main f4bf76d1597d with
   the `gastown` pack it bundles at 66897e7132c9, `gastownhall/gascity-packs`
-  main 2a3b142e3fbd, and `gastownhall/beads` main 2edea9ced8c6.
+  main 1f6d8e41c5b0, and `gastownhall/beads` main 526c1c877e26.
 - **Retires when.** Gas City records a pull request's review threads where a
   reader of the PR's own bead finds them, for example once its readiness
   monitor reads review threads, or a webhook receiver keeps their state from
