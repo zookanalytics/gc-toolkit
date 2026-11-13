@@ -750,7 +750,7 @@ values every later call sets and the skill to load next:
 | `waiting` | No ready work (a `no_work` drain), and the conversation open under the alias waits on open work, as `gctk bead holds` reads it, through an edge onto each bead its newest `staying:` line names that is still out. | `converse-stay`. |
 | `returned` | A claim whose newest `holding:` or `staying:` line is a `staying:` line that names work, each bead of which has closed, with nothing left open that the conversation waits on. | `converse-stay`. |
 | `none` | No ready work (a `no_work` drain), and no conversation under the alias. | Drain. |
-| `stop` | A drain for a reason other than `no_work` and `claims_errored`, such as `drain_pending` or `stale_session`: Gas City is stopping the session and hands it no work, whatever the conversation's state. The entry prints what the hook wrote to stderr, which can name the acknowledgement to run. | Drain. |
+| `stop` | A drain for a reason other than `no_work` and `claims_errored`, such as `drain_pending` or `stale_session`: Gas City is stopping the session and hands it no work, whatever the conversation's state. The entry prints what the hook wrote to stderr, which can name the acknowledgement to run. | Drain. Gas City refuses the acknowledgement while the session holds a claim it started and has not finished, as a conversation in progress under it is, and tells it to continue. So a sitting refused over its conversation goes on with it, and acknowledges the drain once the conversation is closed, back in the operator's queue or left to wait. |
 
 A read that fails, a listing that answers no list, a conversation assigned to
 the sitting with nothing holding it though the claim found no work, a claim

@@ -10,8 +10,12 @@ wake, with that conversation, when the work it sent closes. The change adds one
 mode to an existing writer, `converse-signoff.sh --stay`, and one kind of line in
 a conversation's notes, `staying:`. Everything that sleeps and wakes the sitting
 is Gas City's or bd's. Each Gas City citation is at upstream
-`gastownhall/gascity` commit `6bd609f5bf`, whose files named here match the
-installed build, and [stay-probe.md](stay-probe.md) ran each one.
+`gastownhall/gascity` commit `6bd609f5bf`. The code it names is the same at
+the installed build `6589a7df45`, where `cmd/gc/cmd_hook_claim.go` and
+`schemas/hook/result.schema.json` differ from it only by the `step_reminder`
+a claim's result carries. [stay-probe.md](stay-probe.md) ran the sleep, the
+wake and the claims it records. A drain's other reasons and the
+acknowledgement were read and not run.
 
 ## What it composes
 
@@ -130,6 +134,25 @@ search looked for a native signal that says so, at the same upstream commit.
   assigned to the session. A stop hands the session no work, giving back a
   claim it had taken (`unwindUndeliveredHookClaim`), so it says nothing about a
   conversation the session holds.
+- **The acknowledgement.** `gc runtime drain-ack` checks the session's
+  incarnation first, and then refuses a session's own ack, releasing nothing,
+  while the session holds a claim it started and has not finished: "this
+  session holds <id>, which it started and has not finished: continue it (an
+  operator acks from outside this session with --operator); nothing
+  acknowledged" (`runtimeDrainAck` and `releaseUnexecutedClaimsForSessionStore`
+  in `cmd/gc/cmd_runtime_drain.go`, `releaseDrainAckClaims` in
+  `cmd/gc/session_beads.go`, and `ReleaseClaims`' `RefuseStarted` in
+  `cmd/gc/work_release.go`). A started claim is one the session row's
+  `work_started` cell names, and the hook writes there each claim it hands a
+  turn (`recordHookWorkStarted` in `cmd/gc/cmd_hook_claim.go`). The hook's drain
+  fence answers ahead of its adoption of an in-progress bead (`tryHookClaim`:
+  "Refusing here also puts the fence ahead of hookClaimExistingAssignment"). So
+  a sitting whose conversation is in progress under it gets a stop and then a
+  refused ack, and Gas City's answer is to continue the conversation. A stay
+  leaves its conversation open, and the ack takes back only `in_progress`
+  claims (`releaseDrainAck` in `releasePolicies`), so a stay holds no ack back.
+  A superseded incarnation is refused at the incarnation check, so only the
+  live session meets the refusal over a held claim.
 - **The session.** The start environment carries identity and epochs, and no
   wake cause (`RuntimeEnvWithSessionContext` in `internal/session/lifecycle.go`).
   A resume gets the whole startup prompt again as its first input
@@ -158,7 +181,12 @@ work has returned, so the pack reads its own record:
   a state it could not read. It reads the record only on a `no_work` drain or a
   claim. A `claims_errored` drain reads as `unreadable`, and a drain for any
   other reason answers `stop`, which passes on the hook's stderr, so the
-  sitting acknowledges Gas City's drain the way Gas City asks. It adds no store, no metadata key, no lifecycle
-  state and no bead kind, and it writes nothing but the claim.
+  sitting acknowledges Gas City's drain the way Gas City asks. The stop also
+  says what follows an ack refused over the conversation the session holds:
+  the sitting goes on with it, and acknowledges the drain once the
+  conversation is closed, back in the operator's queue or left to wait. The
+  ack is Gas City's answer to whether the session holds a started claim, so
+  the entry reads nothing more to say it. It adds no store, no metadata key,
+  no lifecycle state and no bead kind, and it writes nothing but the claim.
   `assets/scripts/converse-entry.test.sh` runs each entry and each unreadable
   case.

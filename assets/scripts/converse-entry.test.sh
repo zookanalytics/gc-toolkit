@@ -369,6 +369,12 @@ stopped "a drain under way over a hold that stands"
 has "…naming the reason" "$(line ENTRY)" "(drain_pending)"
 has "…and passing on the acknowledgement the hook names" "$OUT" "$DRAIN_SAID"
 hasnt "…never as a hold to continue" "$OUT" "NEXT=converse-continue"
+# Gas City refuses the session's own drain-ack while it holds the conversation
+# it claimed and has not finished, and tells it to continue.
+has "…and, when the ack is refused over the conversation the session holds, going on with it" "$(line ENTRY)" \
+  "When the ack is refused because this session holds its conversation, which it started and has not finished, the sitting goes on with that conversation"
+has "…until the conversation no longer holds the session, when it acknowledges the drain" "$(line ENTRY)" \
+  "acknowledges the drain once the conversation is closed, back in the operator's queue or left to wait."
 fresh; hook drain drain_pending "$DRAIN_SAID"; conv tk-c open "staying: keep the API (waits on tk-w)" tracks:tk-s blocks:tk-w; holds tk-c tk-w; assigned "$FIXDIR/row-tk-c.json"
 OUT=$(enter)
 stopped "a drain under way over a stay whose work is out"

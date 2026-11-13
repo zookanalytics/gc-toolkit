@@ -14,7 +14,8 @@
 #   returned     the work the sitting stayed for has closed (converse-stay)
 #   none         this session holds no conversation (drain)
 #   stop         Gas City refused the claim to stop this session, as when a
-#                drain is under way or the session has closed (drain)
+#                drain is under way or the session has closed (drain, and
+#                go on with the conversation when the ack is refused over it)
 #
 # A state that does not read is no answer. The script then prints
 # `ENTRY unreadable` and exits 1, so the sitting neither drains nor closes on
@@ -34,7 +35,10 @@
 #   reason, such as `drain_pending` or `stale_session`, is Gas City stopping
 #   this session, and the hook hands it no work, whatever the conversation's
 #   state. The script answers `stop` and prints what the hook wrote to stderr,
-#   which can name the acknowledgement to run.
+#   which can name the acknowledgement to run. Gas City refuses that
+#   acknowledgement while the session holds a claim it started and has not
+#   finished, as a conversation in progress under it is, and tells the session
+#   to continue the claim, so the answer says the sitting then goes on.
 # - the conversation's row: its shape (conversation.sh), its subject, the gates
 #   it replies to, the work it waits on through its own `blocks` edges, its
 #   notes, and the last hand-back recorded on it.
@@ -268,8 +272,10 @@ case "$ACTION:$REASON" in
     # Gas City is stopping this session, as for a drain under way, a stale or
     # unregistered session or a suspension, and hands it no work, whatever its
     # conversation's state. Nothing is read or written here, so the
-    # conversation's record stays as it is.
-    echo "ENTRY stop: Gas City is stopping this session ($REASON), and its claim hands it no work. Acknowledge the drain with gc runtime drain-ack, in the form the hook names when it names one, and end, with nothing written to the conversation."
+    # conversation's record stays as it is. The acknowledgement is refused
+    # while the session holds the conversation, which it claimed through this
+    # entry and has not finished, and Gas City then tells it to continue.
+    echo "ENTRY stop: Gas City is stopping this session ($REASON), and its claim hands it no work. Acknowledge the drain with gc runtime drain-ack, in the form the hook names when it names one, and end, with nothing written to the conversation. When the ack is refused because this session holds its conversation, which it started and has not finished, the sitting goes on with that conversation, and acknowledges the drain once the conversation is closed, back in the operator's queue or left to wait."
     echo "NEXT=drain"
     hook_said
     exit 0 ;;

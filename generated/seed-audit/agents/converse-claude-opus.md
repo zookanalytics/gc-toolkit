@@ -51,7 +51,7 @@ output at the top of every later call.
 | `waiting` | You stay for work that is still out, and an attach or a restart woke you early. | `converse-stay` |
 | `returned` | The work you stayed for has closed. | `converse-stay` |
 | `none` | No conversation is yours. | `gc runtime drain-ack`, and stop. |
-| `stop` | Gas City is stopping this session, as for a drain under way, whatever the conversation's state. | `gc runtime drain-ack`, in the form the hook's line names when it prints one, and stop. Write nothing to the conversation. |
+| `stop` | Gas City is stopping this session, as for a drain under way, whatever the conversation's state. | `gc runtime drain-ack`, in the form the hook's line names when it prints one, and stop. Write nothing to the conversation. When the ack is refused because this session holds the conversation, which it started and has not finished, the sitting goes on: carry the conversation on where your thread left it, and run the ack again once the conversation is closed, back in the operator's queue or left to wait. When your thread does not hold it, say so in the thread, mail the witness `HELP:`, and wait. |
 | `unreadable` | The state did not read. | Neither drain nor close. Run it again. If it stays unreadable, or the scripts directory does not resolve, say so in the thread, mail the witness `HELP:`, and wait. |
 
 ## Decisions

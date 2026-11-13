@@ -532,6 +532,14 @@ have "…and says a sitting that ends promises nothing it cannot keep" \
     'makes no promise of its own to confirm, check, watch or follow up' "$TMP/prompt-stay"
 have "the prompt enters through converse-entry.sh, which tells each entry apart" \
     '/converse-entry.sh"' "$PROMPT"
+# Gas City refuses a session's own drain-ack while the session holds a claim it
+# started and has not finished, so a sitting that holds its conversation when
+# Gas City stops the session goes on with it, and acknowledges the drain once
+# the conversation no longer holds it.
+have "…whose stop says a sitting refused its ack over its conversation goes on with it" \
+    'When the ack is refused because this session holds the conversation, which it started and has not finished, the sitting goes on: carry the conversation on where your thread left it, and run the ack again once the conversation is closed, back in the operator'"'"'s queue or left to wait.' "$TMP/prompt-stay"
+have "…and asks for help when its thread does not hold the conversation" \
+    'When your thread does not hold it, say so in the thread, mail the witness `HELP:`, and wait.' "$TMP/prompt-stay"
 lacks "…and reconstructs no entry from a conversation's notes" 'staying:' "$PROMPT" \
     "the entry reads the record; the prompt acts on what it prints"
 have "the stay skill stays through the sign-off" \
