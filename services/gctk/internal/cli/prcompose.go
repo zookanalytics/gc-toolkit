@@ -10,7 +10,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
 )
@@ -56,7 +55,8 @@ when the bead's title has no words.
 
 exit: 0 printed
       1 usage
-      2 the bead, or the body named, did not read: nothing is printed`
+      2 the bead, the store holding it, or the body named did not read:
+        nothing is printed`
 
 // The sections a composition takes, as --sections names them.
 const (
@@ -152,7 +152,15 @@ func prCompose(bead, bodyFile string, req pr.Request, stdout, stderr io.Writer) 
 		body := string(raw)
 		req.Body = &body
 	}
-	got, err := pr.Compose(ledger.New(gcbd.New()), bead, req)
+	// Every read is pinned to the store gc routes the bead to. The beads on its
+	// branch are read by their keys, which name no bead, so an unpinned read of
+	// them would answer from the store the caller sits in.
+	l, err := ledger.Open("", bead)
+	if err != nil {
+		fmt.Fprintf(stderr, "gctk pr compose: the store holding %s did not resolve: %v\n", bead, err)
+		return 2
+	}
+	got, err := pr.Compose(l, bead, req)
 	if err != nil {
 		fmt.Fprintf(stderr, "gctk pr compose: %s did not read: %v\n", bead, err)
 		return 2

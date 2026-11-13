@@ -344,6 +344,17 @@ case "$sub" in
     fi
     echo "gc stub: unsupported '$sub'" >&2; exit 2 ;;
 esac
+# A read pinned to a store names it with bd's --db ahead of the verb. The stub
+# serves one store, so it drops the pin, and `bd where` names that store, at
+# no prefix, as the one gc resolves here.
+case "${1:-}" in
+  --db) shift 2 || shift ;;
+  --db=*) shift ;;
+esac
+if [ "${1:-}" = where ]; then
+  jq -nc --arg p "${S%/*}/.beads" '{path: $p, prefix: ""}'
+  exit 0
+fi
 verb="${1:-}"; shift || true
 # Edge rows are "A|TYPE|B" = "A <TYPE>-edges B" (A blocks B, A tracks B,
 # child A parent-childs parent B). Dependency orientation per type:
