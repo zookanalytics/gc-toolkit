@@ -569,7 +569,9 @@ shares only the word ([authority-map.md](authority-map.md)).
   nudges each open dependent's assignee or routed pool with `gc session nudge`.
   It slings nothing, and no core order or script calls `gc sling`
   (`internal/bootstrap/packs/core/assets/scripts/cascade-nudge-on-blocker-close.sh`).
-- **Verified.** 2026-11-09, at `gastownhall/gascity` main e35c1602d936.
+- **Verified.** 2026-11-13, at `gastownhall/gascity` main 189612d9a, and at
+  `gastownhall/beads` main 8cdfa796a, whose `bd mol pour` pours a formula only
+  when it is called (`docs/cli-reference/mol.md`).
 - **Retires when.** Gas City or bd pours a formula on a bead once its blockers
   close.
 
