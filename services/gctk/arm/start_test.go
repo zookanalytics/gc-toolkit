@@ -259,6 +259,30 @@ func TestStartReadsTheArmAgainBeforeItsSling(t *testing.T) {
 	}
 }
 
+// An arm removed between the pass's listing and its read of what holds the
+// bead, as a stop that lands mid-pass removes it, is reported withdrawn, held or
+// not, and nothing is sent.
+func TestStartReportsAnArmRemovedBeforeItsHoldsRead(t *testing.T) {
+	w := newWorld(t)
+	w.put(fake.Bead{ID: "ready", Metadata: armedBead("mol-x", nil)})
+	w.put(fake.Bead{ID: "held", Metadata: armedBead("mol-x", nil)})
+	w.store.MakeReady("ready")
+	w.store.OnFind = func(q gcbd.Query) {
+		for _, id := range q.IDs {
+			row, _ := w.store.Row(id)
+			row.Metadata = nil
+			w.store.Put(row)
+		}
+	}
+	lines, sum := w.run(false)
+	for _, id := range []string{"ready", "held"} {
+		act(t, lines, id, arm.ActWithdrawn, "", "removed after this pass listed it")
+	}
+	if s := w.rt.Slings(); len(s) != 0 || sum.Failed() != 0 {
+		t.Errorf("slung %v, summary %v", s, sum)
+	}
+}
+
 // A sling that fails keeps the arm with its attempt counted, and fails the
 // pass, so the next pass tries again.
 func TestStartKeepsTheArmWhenTheSlingFails(t *testing.T) {

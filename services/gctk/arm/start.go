@@ -255,6 +255,9 @@ func (a *Arms) judge(r *ledger.Record, arm *record.Arm, h waits.Holds, holdsErr,
 	if holdsErr != nil {
 		return Act{Action: ActFail, Case: "read", Why: "what holds it could not be read, so it stays armed: " + holdsErr.Error()}, true
 	}
+	if h.Arm == nil {
+		return Act{Action: ActWithdrawn, Why: "its arm was removed after this pass listed it, so nothing is sent"}, true
+	}
 	if h.Status == waits.Unjudged {
 		return Act{Action: ActHold, Case: "unjudged",
 			Why: fmt.Sprintf("its waits-for edge onto %s is one the store cannot judge yet, so the start holds it", waitIDs(h.Waits))}, true
@@ -307,7 +310,7 @@ func (a *Arms) start(listed *ledger.Record, opts StartOptions) Act {
 	if act, retire := retireCase(r); retire {
 		return a.retireLocked(id, act, opts.DryRun)
 	}
-	if act, held := a.judge(r, arm, waits.Holds{Status: waits.Clear}, nil, nil, true); held {
+	if act, held := a.judge(r, arm, waits.Holds{Status: waits.Clear, Arm: arm}, nil, nil, true); held {
 		if act.Action == ActHold {
 			act.Why += ", which a read after this pass listed it found"
 		}
