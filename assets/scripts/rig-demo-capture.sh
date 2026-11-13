@@ -18,7 +18,9 @@
 # carries no browser MCP.
 #
 # The engine runs inside the sandbox demo-engine-lib.sh defines, where the live
-# city cannot be reached, so a --serve command or a page that reads the city's
+# city cannot be reached. A --serve command's app runs as a copy of the rig's UI
+# that `gctk rig serve` runs inside the same sandbox, and the engine records
+# the copy at its loopback port. So a copy or a page that reads the city's
 # stores or its API fails there, and the clip shows the app on fixture data, or
 # shows the failure, and never live state. The one server outside the sandbox
 # a clip can reach is a rig's app that --base-url names, as below.
@@ -40,17 +42,24 @@
 #   --output     MP4 output path (required). Write outside the repo tree — a
 #                demo clip is an artifact, delivered to a PR, never committed.
 #   --serve-dir  serve a static directory with the engine's built-in server.
-#   --serve      spawn a dev-server command, wait for it, then tear it down.
-#   --base-url   drive a deployed preview, or an app that a worktree of a rig
-#                serves on this host. Any other server on this host is refused,
-#                as is the app of a rig that city.toml sets to
-#                app_reads_city = "true".
+#   --serve      serve the app with this command as a copy that `gctk rig
+#                serve` runs from the checkout --cwd names (default: here),
+#                with no address, on a free port of its own, which the command
+#                gets as $PORT. A checkout has one copy, so captures from one
+#                checkout run one after another. A copy of that checkout that
+#                already runs the command is the one recorded, and it keeps
+#                running, and one that runs another command is refused. One
+#                this capture starts ends with it.
+#   --base-url   drive a deployed preview, a copy that `gctk rig serve` runs,
+#                or an app that a worktree of a rig serves on this host. Any
+#                other server on this host is refused, as is the app of a rig
+#                that city.toml sets to app_reads_city = "true".
 #                Exactly one of --serve-dir / --serve / --base-url is required;
 #                it is how this rig's app is reached, the one rig-specific input.
-#   --port       port for --serve (default 5173) or --serve-dir (default: a free
-#                port). A port that a server already answers on is refused.
-#   --cwd        working directory for the --serve command, and the directory a
-#                relative --serve-dir resolves against.
+#   --port       port for --serve-dir (default: a free port). A port that a
+#                server already answers on is refused.
+#   --cwd        the checkout a --serve command serves the app from, and the
+#                directory a relative --serve-dir resolves against.
 #   --mode       walkthrough (default, one continuous take) | proof (one checked
 #                screenshot per step).
 #   --no-narrate force a silent clip even when OPENAI_API_KEY is set.
@@ -117,6 +126,11 @@ if [ "$TARGETS" -ne 1 ]; then
   usage >&2; exit 2
 fi
 [ -z "$MUSIC" ] || [ -f "$MUSIC" ] || { echo "$PROG: --music '$MUSIC' does not exist" >&2; exit 1; }
+# A --serve command's copy takes a free port of its own.
+if [ -n "$PORT" ] && [ -z "$SERVE_DIR" ]; then
+  echo "$PROG: --port names the --serve-dir server's port; a --serve command's copy takes a free port of its own" >&2
+  exit 2
+fi
 
 # The engine resolves relative --script / --serve-dir against its own cwd, which
 # its CLI shares with this script; absolute paths make the capture independent
@@ -158,12 +172,17 @@ if ! sprintshow lint "$SCRIPT"; then
 fi
 
 # --- capture --------------------------------------------------------------
+# A --serve command's app runs as a copy, inside the sandbox, and the engine
+# records the copy at its loopback port, which the sandbox opens because gctk
+# rig serve answers that the copy holds it.
+trap 'demo_engine_copy_stop' EXIT
+if [ -n "$SERVE_CMD" ]; then
+  demo_engine_copy "${SERVE_CWD:-$(pwd)}" "$SERVE_CMD" || exit 1
+  BASE_URL=$DEMO_ENGINE_COPY_URL
+fi
 set -- run "$SCRIPT" --mode "$MODE" -o "$OUTPUT"
 if [ -n "$SERVE_DIR" ]; then
   set -- "$@" --serve-dir "$SERVE_DIR"
-elif [ -n "$SERVE_CMD" ]; then
-  set -- "$@" --serve "$SERVE_CMD"
-  [ -z "$SERVE_CWD" ] || set -- "$@" --cwd "$SERVE_CWD"
 else
   set -- "$@" --base-url "$BASE_URL"
 fi
@@ -174,7 +193,7 @@ fi
 
 echo "$PROG: capturing $SCRIPT ($MODE) -> $OUTPUT" >&2
 REPORT=$(mktemp "${TMPDIR:-/tmp}/rig-demo-capture.XXXXXX") || { echo "$PROG: cannot create a file for the engine's report" >&2; exit 1; }
-trap 'rm -f "$REPORT"' EXIT
+trap 'demo_engine_copy_stop; rm -f "$REPORT"' EXIT
 sprintshow "$@" | tee "$REPORT"
 RC=${PIPESTATUS[0]}
 
