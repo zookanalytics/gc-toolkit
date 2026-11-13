@@ -746,16 +746,18 @@ values every later call sets and the skill to load next:
 | Entry | What the record shows | Next |
 |---|---|---|
 | `fresh` | A new claim, with no `staying:` line newest. | The premise re-check. |
-| `interrupted` | A restart, where the claim returns the conversation as an existing assignment: a `holding:` line newest means the hold stands, and none means nothing was held yet. A drain over a conversation whose newest line is `holding:` is a hold that stands too. Or a stay that stopped short: its newest `staying:` line names no work yet, or names work that is still out with no edge onto it, or the conversation is still claimed while its work is out. | `converse-continue`, the premise re-check, or `converse-stay`. |
-| `waiting` | No ready work, and the conversation open under the alias waits on open work, as `gctk bead holds` reads it, through an edge onto each bead its newest `staying:` line names that is still out. | `converse-stay`. |
+| `interrupted` | A restart, where the claim returns the conversation as an existing assignment: a `holding:` line newest means the hold stands, and none means nothing was held yet. A `no_work` drain over a conversation whose newest line is `holding:` is a hold that stands too. Or a stay that stopped short: its newest `staying:` line names no work yet, or names work that is still out with no edge onto it, or the conversation is still claimed while its work is out. | `converse-continue`, the premise re-check, or `converse-stay`. |
+| `waiting` | No ready work (a `no_work` drain), and the conversation open under the alias waits on open work, as `gctk bead holds` reads it, through an edge onto each bead its newest `staying:` line names that is still out. | `converse-stay`. |
 | `returned` | A claim whose newest `holding:` or `staying:` line is a `staying:` line that names work, each bead of which has closed, with nothing left open that the conversation waits on. | `converse-stay`. |
-| `none` | No ready work, and no conversation under the alias. | Drain. |
+| `none` | No ready work (a `no_work` drain), and no conversation under the alias. | Drain. |
+| `stop` | A drain for a reason other than `no_work` and `claims_errored`, such as `drain_pending` or `stale_session`: Gas City is stopping the session and hands it no work, whatever the conversation's state. The entry prints what the hook wrote to stderr, which can name the acknowledgement to run. | Drain. |
 
 A read that fails, a listing that answers no list, a conversation assigned to
-the sitting with nothing holding it though the claim found no work, and a claim
-served while its work still reads open are each `unreadable`, and so are a
-conversation that waits on open work with no `staying:` line and a bead a
-`staying:` line names that does not read: the entry exits 1, and the sitting
+the sitting with nothing holding it though the claim found no work, a claim
+served while its work still reads open, a drain with no reason and a claim of
+ready work that did not land (`claims_errored`) are each `unreadable`, and so
+are a conversation that waits on open work with no `staying:` line and a bead
+a `staying:` line names that does not read: the entry exits 1, and the sitting
 neither drains nor closes. The hold writes its `holding:` line before it posts
 the framing. The stay writes `staying: <what was agreed>` before anything else,
 and `staying: <what was agreed> (waits on <the work>)` once all but the wait

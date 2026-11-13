@@ -7,8 +7,9 @@
 # stay that stopped short in each window its writes leave, with its work open
 # and with it closed, a second stay with an earlier stay's text, a hold claimed
 # back over a second stay that stopped short, while the earlier work is out and
-# once it closes, the return of the work, no conversation at all, and each way
-# the state can fail to read, which is never an answer to drain on.
+# once it closes, the return of the work, no conversation at all, Gas City
+# stopping the session whatever its conversation's state, and each way the
+# state can fail to read, which is never an answer to drain on.
 #
 # Hermetic: stubs gc and gctk, reads the repo only; no city, no network.
 
@@ -41,6 +42,7 @@ printf '%s\n' "$*" >>"$FIXDIR/calls"
 case "$*" in
   "hook --claim --json")
     [ -r "$FIXDIR/hook" ] && cat "$FIXDIR/hook"
+    [ ! -r "$FIXDIR/hook.err" ] || cat "$FIXDIR/hook.err" >&2
     exit "$(cat "$FIXDIR/hook.rc" 2>/dev/null || echo 0)" ;;
   "bd list --id "*" --all --json")
     id=$4
@@ -68,11 +70,13 @@ bash -n "$SUT" && ok "converse-entry.sh: valid bash" || bad "converse-entry.sh: 
 ALIAS="gc-toolkit/gc-toolkit.tk-c"
 
 fresh() { rm -f "$FIXDIR"/*; }
-# hook work <reason> <bead> | hook drain | hook raw <text> [<rc>]
+# hook work <reason> <bead> | hook drain [<reason> [<stderr>]] | hook raw <text> [<rc>]
+# A drain's reason defaults to no_work; <stderr> is what the hook writes there.
 hook() {
   case "$1" in
     work)  jq -nc --arg r "$2" --arg b "$3" '{schema_version: "1", ok: true, command: "hook", action: "work", reason: $r, bead_id: $b}' >"$FIXDIR/hook" ;;
-    drain) jq -nc '{schema_version: "1", ok: true, command: "hook", action: "drain", reason: "no_work"}' >"$FIXDIR/hook"; echo 1 >"$FIXDIR/hook.rc" ;;
+    drain) jq -nc --arg r "${2:-no_work}" '{schema_version: "1", ok: true, command: "hook", action: "drain", reason: $r}' >"$FIXDIR/hook"; echo 1 >"$FIXDIR/hook.rc"
+           [ -z "${3:-}" ] || printf '%s\n' "$3" >"$FIXDIR/hook.err" ;;
     raw)   printf '%s' "$2" >"$FIXDIR/hook"; echo "${3:-0}" >"$FIXDIR/hook.rc" ;;
   esac
 }
@@ -349,6 +353,40 @@ assigned "$FIXDIR/x.json"
 enter >/dev/null
 is "an open bead under the alias that is no conversation leaves nothing to hold" "$(line NEXT=)" "NEXT=drain"
 
+echo "── stop: Gas City stops the session, whatever its conversation's state ──"
+DRAIN_SAID="gc hook --claim: drain pending for this session; run: gc runtime drain-ack lx-s1 — then exit"
+# stopped <what> — the case's entry is a stop that drains on the hook's word,
+# reads nothing past the claim, and passes on what the hook said.
+stopped() {
+  is "$1: stop" "$(line ENTRY | cut -d: -f1)" "ENTRY stop"
+  is "$1: …drains" "$(line NEXT=)" "NEXT=drain"
+  is "$1: …exiting 0" "$(rc)" 0
+  is "$1: …reading nothing past the claim" "$(tr '\n' '|' <"$FIXDIR/calls")" "hook --claim --json|"
+}
+fresh; hook drain drain_pending "$DRAIN_SAID"; conv tk-c in_progress "holding: decide the route" tracks:tk-s; holds tk-c; assigned "$FIXDIR/row-tk-c.json"
+OUT=$(enter)
+stopped "a drain under way over a hold that stands"
+has "…naming the reason" "$(line ENTRY)" "(drain_pending)"
+has "…and passing on the acknowledgement the hook names" "$OUT" "$DRAIN_SAID"
+hasnt "…never as a hold to continue" "$OUT" "NEXT=converse-continue"
+fresh; hook drain drain_pending "$DRAIN_SAID"; conv tk-c open "staying: keep the API (waits on tk-w)" tracks:tk-s blocks:tk-w; holds tk-c tk-w; assigned "$FIXDIR/row-tk-c.json"
+OUT=$(enter)
+stopped "a drain under way over a stay whose work is out"
+hasnt "…never as a stay that waits on" "$OUT" "NEXT=converse-stay"
+fresh; hook drain drain_pending "$DRAIN_SAID"; conv tk-c open "" tracks:tk-s; holds tk-c; assigned "$FIXDIR/row-tk-c.json"
+enter >/dev/null
+stopped "a drain under way over a conversation nothing holds"
+fresh; hook drain stale_session; conv tk-c in_progress "holding: decide the route" tracks:tk-s; holds tk-c; assigned "$FIXDIR/row-tk-c.json"
+OUT=$(enter)
+stopped "a stale session over a hold that stands"
+hasnt "…with no hook line when the hook wrote none" "$OUT" "The hook said:"
+fresh; hook drain stale_session; printf '[]' >"$FIXDIR/assigned"
+enter >/dev/null
+stopped "a stale session holding no conversation"
+fresh; hook drain rig_suspended; conv tk-c open "staying: keep the API (waits on tk-w)" tracks:tk-s blocks:tk-w; holds tk-c tk-w; assigned "$FIXDIR/row-tk-c.json"
+enter >/dev/null
+stopped "a suspended rig over a stay whose work is out"
+
 echo "── unreadable: never an answer to drain or close on ──"
 unread() {
   enter >/dev/null
@@ -361,6 +399,11 @@ fresh; hook raw "" 1; unread "the hook answers nothing"
 fresh; hook raw "Error: store unavailable" 1; unread "the hook answers no JSON"
 fresh; hook raw '{"action":"wait"}'; unread "the hook answers an action it does not know"
 fresh; hook raw '{"action":"work","reason":"ready_assignment"}'; unread "the claim names no bead"
+fresh; hook raw '{"action":"drain"}' 1; unread "the hook drains with no reason"
+fresh; hook drain claims_errored "gc hook --claim: claiming tk-c: database is locked"; conv tk-c open "" tracks:tk-s; holds tk-c; assigned "$FIXDIR/row-tk-c.json"
+unread "the claim of a ready conversation did not land"
+has "…passing on what the hook said" "$(cat "$FIXDIR/out")" "claiming tk-c: database is locked"
+is "…reading nothing past the claim" "$(tr '\n' '|' <"$FIXDIR/calls")" "hook --claim --json|"
 fresh; hook work ready_assignment tk-c; unread "the claimed conversation does not read"
 fresh; hook work ready_assignment tk-c; conv tk-c in_progress "" replies-to:tk-g1; holds tk-c
 unread "the claimed bead is no conversation"

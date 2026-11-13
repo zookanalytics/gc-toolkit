@@ -13,20 +13,28 @@
 #                a restart woke it early (converse-stay)
 #   returned     the work the sitting stayed for has closed (converse-stay)
 #   none         this session holds no conversation (drain)
+#   stop         Gas City refused the claim to stop this session, as when a
+#                drain is under way or the session has closed (drain)
 #
 # A state that does not read is no answer. The script then prints
 # `ENTRY unreadable` and exits 1, so the sitting neither drains nor closes on
 # it. The hook's own claim is the only write it makes.
 #
 # What it reads:
-# - `gc hook --claim --json`: `work` and the bead it claimed, or `drain` when
-#   no ready work is assigned to this session, with exit 1. Its reason tells a
-#   restart (`existing_assignment`) from a new claim. It gives the same
-#   new-claim answer for a conversation a sitting first takes up and for one
-#   whose work has returned, so the record tells those two apart. It serves no
-#   bead that waits on open work, an in-progress one included, so on `drain`
-#   the script lists the open and in-progress conversations under this
-#   session's alias.
+# - `gc hook --claim --json`: `work` and the bead it claimed, or `drain` with
+#   exit 1. Its reason tells a restart (`existing_assignment`) from a new
+#   claim. It gives the same new-claim answer for a conversation a sitting
+#   first takes up and for one whose work has returned, so the record tells
+#   those two apart. A drain's reason says why. `no_work` is the one answer
+#   about this session's work: no ready work is assigned to it. The hook serves
+#   no bead that waits on open work, an in-progress one included, so on
+#   `no_work` the script lists the open and in-progress conversations under
+#   this session's alias. `claims_errored` is ready work whose claim did not
+#   land, which reads as unreadable, so the sitting claims again. Every other
+#   reason, such as `drain_pending` or `stale_session`, is Gas City stopping
+#   this session, and the hook hands it no work, whatever the conversation's
+#   state. The script answers `stop` and prints what the hook wrote to stderr,
+#   which can name the acknowledgement to run.
 # - the conversation's row: its shape (conversation.sh), its subject, the gates
 #   it replies to, the work it waits on through its own `blocks` edges, its
 #   notes, and the last hand-back recorded on it.
@@ -49,10 +57,11 @@
 #   edge onto, its status.
 #
 # Output: a first line `ENTRY <entry>: <what it means>`, then `NEXT=<skill>`
-# (`NEXT=drain` for none), then one KEY=value line each for CONV, CONVERSATION,
-# SUBJECT and GATES, and for a stay WORK, the beads its newest line names, and
-# AGREED. An interrupted entry whose hold stands ends with the last hand-back
-# recorded on the conversation.
+# (`NEXT=drain` for none and stop), then one KEY=value line each for CONV,
+# CONVERSATION, SUBJECT and GATES, and for a stay WORK, the beads its newest
+# line names, and AGREED. An interrupted entry whose hold stands ends with the
+# last hand-back recorded on the conversation. A stop, and an unreadable claim,
+# end with what the hook wrote to stderr.
 #
 # Environment: GC_ALIAS, this session's alias, which the conversation it holds
 # is assigned to; GCTK_BIN or GC_CITY_PATH, to find gctk.
@@ -84,9 +93,18 @@ scrub() { tr -d '\000-\037'; }
 GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
 
+# hook_said — what the claim wrote to stderr, as the hook wrote it, once the
+# claim has run and wrote anything.
+hook_said() {
+  [ -n "${HOOK_ERR:-}" ] && [ -s "$HOOK_ERR" ] || return 0
+  echo "The hook said:"
+  cat "$HOOK_ERR"
+}
+
 unreadable() {
   echo "ENTRY unreadable: $*"
   echo "NEXT=none: do not drain and do not close anything. Run this again, and if it stays unreadable, say so in the thread, mail the witness HELP:, and wait"
+  hook_said
   exit 1
 }
 
@@ -202,13 +220,22 @@ stay_entry() {
   exit 0
 }
 
-HOOK=$(gc hook --claim --json 2>/dev/null)
+# The claim's stderr is kept for the answers that pass it on. Without a file
+# to keep it in, it goes to this script's own stderr, which the sitting sees.
+HOOK_ERR=$(mktemp "${TMPDIR:-/tmp}/converse-entry.XXXXXX" 2>/dev/null) || HOOK_ERR=""
+trap '[ -z "$HOOK_ERR" ] || rm -f "$HOOK_ERR"' EXIT
+HOOK=$(gc hook --claim --json 2>"${HOOK_ERR:-/dev/stderr}")
 HOOK_RC=$?
 ACTION=$(printf '%s\n' "$HOOK" | scrub | jq -er 'if type == "object" and ((.action // "") | tostring) != "" then .action | tostring else error("no action") end' 2>/dev/null) \
   || unreadable "gc hook --claim --json answered no action (exit $HOOK_RC)"
+REASON=$(printf '%s\n' "$HOOK" | scrub | jq -r '.reason // "" | tostring')
 
-case "$ACTION" in
-  drain)
+case "$ACTION:$REASON" in
+  drain:)
+    unreadable "gc hook --claim --json answered drain with no reason, which does not say whether Gas City is stopping this session" ;;
+  drain:claims_errored)
+    unreadable "the hook found ready work for this session, and its claim did not land (claims_errored); run this again, which claims it once the store takes the write" ;;
+  drain:no_work)
     # Nothing ready is assigned to this session. A sitting that stays gets
     # this answer while its work is out, because its conversation waits on
     # that work: open once the stay is written, still in progress when the
@@ -237,12 +264,20 @@ case "$ACTION" in
       staying) stay_entry "$C" "$ROW" "$PENDING" ;;
       *) unreadable "conversation $C waits on open work ($PENDING), and no staying: line records the stay that made it wait" ;;
     esac ;;
-  work) ;;
+  drain:*)
+    # Gas City is stopping this session, as for a drain under way, a stale or
+    # unregistered session or a suspension, and hands it no work, whatever its
+    # conversation's state. Nothing is read or written here, so the
+    # conversation's record stays as it is.
+    echo "ENTRY stop: Gas City is stopping this session ($REASON), and its claim hands it no work. Acknowledge the drain with gc runtime drain-ack, in the form the hook names when it names one, and end, with nothing written to the conversation."
+    echo "NEXT=drain"
+    hook_said
+    exit 0 ;;
+  work:*) ;;
   *) unreadable "gc hook --claim --json answered action '$ACTION'" ;;
 esac
 
 BEAD=$(printf '%s\n' "$HOOK" | scrub | jq -r '.bead_id // "" | tostring')
-REASON=$(printf '%s\n' "$HOOK" | scrub | jq -r '.reason // "" | tostring')
 [ -n "$BEAD" ] || unreadable "the claim named no bead"
 ROW=$(row_of "$BEAD") || unreadable "the claim returned $BEAD, which did not read as a conversation"
 PENDING=$(pending_of "$BEAD") || unreadable "gctk bead holds did not answer for conversation $BEAD"

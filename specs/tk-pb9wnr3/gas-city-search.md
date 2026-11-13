@@ -102,7 +102,17 @@ search looked for a native signal that says so, at the same upstream commit.
   (`inProgressBlockedByEnrichmentScript` in `internal/config/workquery.go`), so
   the claim answers `drain` with reason `no_work` and exits 1
   (`writeHookClaimNoWork`). The result carries no other hint of why the session
-  runs (`hookClaimJSONResult`, `schemas/hook/result.schema.json`).
+  runs (`hookClaimJSONResult`, `schemas/hook/result.schema.json`). A drain's
+  other reasons, the `hookClaimReason*` constants in `cmd/gc/cmd_hook_claim.go`,
+  say why it claimed nothing. `drain_pending` comes from a session whose row
+  reads draining, and its stderr line names the `gc runtime drain-ack <session>`
+  to run (`writeHookClaimDrainPending`). `stale_session`,
+  `missing_session_registration` and the city, agent and rig suspensions stop a
+  session the hook will not serve. `claims_errored` is ready work whose every
+  claim errored (`writeHookClaimNoWork`). Only `no_work` says nothing ready is
+  assigned to the session. A stop hands the session no work, giving back a
+  claim it had taken (`unwindUndeliveredHookClaim`), so it says nothing about a
+  conversation the session holds.
 - **The session.** The start environment carries identity and epochs, and no
   wake cause (`RuntimeEnvWithSessionContext` in `internal/session/lifecycle.go`).
   A resume gets the whole startup prompt again as its first input
@@ -128,7 +138,10 @@ work has returned, so the pack reads its own record:
   that newest `staying:` line names with no edge onto it. It prints the
   entry, the conversation's values and the skill to load next, and exits 1
   with `unreadable` when any read fails, so a sitting never drains or closes on
-  a state it could not read. It adds no store, no metadata key, no lifecycle
+  a state it could not read. It reads the record only on a `no_work` drain or a
+  claim. A `claims_errored` drain reads as `unreadable`, and a drain for any
+  other reason answers `stop`, which passes on the hook's stderr, so the
+  sitting acknowledges Gas City's drain the way Gas City asks. It adds no store, no metadata key, no lifecycle
   state and no bead kind, and it writes nothing but the claim.
   `assets/scripts/converse-entry.test.sh` runs each entry and each unreadable
   case.
