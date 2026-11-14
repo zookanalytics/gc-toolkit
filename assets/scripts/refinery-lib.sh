@@ -29,12 +29,14 @@ REFINERY_READ_NS="refs/worktree/refinery"
 
 # A rework child the requeue filed and never sent on. refinery-requeue.sh files
 # a bead's rework child whole, with its blocks edge onto the bead in the create,
-# then settles and slings it, and a settle or a sling can still fail after the
-# create, or the run can end there. The child it leaves is open on the bead's
-# branch, with no assignee, no pour and no dispatch path or dispatch hold
-# (dispatch-path.sh), so no one works it. find-work counts such a child,
-# once nothing holds it, as neither a wait on the bead nor a writer of its
-# branch, and the bead's prep runs the requeue again, which sends the child on.
+# then settles and slings it, and arms it when the settle or the sling fails. A
+# run that ends between the create and the sling or the arm, or that cannot
+# read back the child a create with a lost reply filed, leaves the child open
+# on the bead's branch, with no assignee, no pour and no dispatch path or
+# dispatch hold (dispatch-path.sh), so no one works it. find-work counts such a
+# child, once nothing holds it, as neither a wait on the bead nor a writer of
+# its branch, and the bead's prep runs the requeue again, which sends the child
+# on.
 # A child carrying a review's or a ruling's source key was filed by
 # rework-child.sh, and a re-run of its filer adopts it and sends it on, so it
 # is never one of these.
