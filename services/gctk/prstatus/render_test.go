@@ -9,10 +9,12 @@ import (
 )
 
 // Render puts the evaluator's answer in the status vocabulary, by Derive's
-// precedence: what a person must clear, then an approved PR the city lands,
-// then the city's work, then the approval alone.
+// precedence: what a person must clear, then an approved PR the city lands
+// unless a conversation stays for work, then the city's work, then the
+// approval alone.
 func TestRenderTheEvaluatorsAnswer(t *testing.T) {
 	cond := func(k pr.Kind, value string) pr.Condition { return pr.Condition{Kind: k, Value: value} }
+	staying := prstatus.Facts{Staying: []prstatus.Blocker{{ID: "tk-conv", Title: "a conversation that stays for its work"}}}
 	cases := []struct {
 		name  string
 		ready bool
@@ -65,6 +67,12 @@ func TestRenderTheEvaluatorsAnswer(t *testing.T) {
 			prstatus.Facts{}, prstatus.Working},
 		{"one beside feedback the intake has yet to route is the city's",
 			false, []pr.Condition{cond(pr.KindThread, "T1"), cond(pr.KindFeedback, "")}, prstatus.Facts{}, prstatus.Merging},
+		{"an approved PR a conversation whose sitting stays for work holds is working, as Derive reads it",
+			false, []pr.Condition{{Kind: pr.KindWait, ID: "tk-conv"}}, staying, prstatus.Working},
+		{"an unapproved PR a conversation whose sitting stays for work holds is working",
+			false, []pr.Condition{cond(pr.KindApproval, ""), {Kind: pr.KindWait, ID: "tk-conv"}}, staying, prstatus.Working},
+		{"a review thread beside a stay, with nothing of the city's acting on it, needs attention",
+			false, []pr.Condition{cond(pr.KindThread, "T1"), {Kind: pr.KindWait, ID: "tk-conv"}}, staying, prstatus.NeedsAttention},
 		{"the merge pass's verdict and thread count, left from the old record, hold nothing",
 			false, []pr.Condition{cond(pr.KindCheckPending, "test")},
 			prstatus.Facts{PRPosture: "approved@oid@t", PRMachine: "blocked@oid@t", PRMachineCause: prstatus.CauseBlocker,
@@ -82,8 +90,9 @@ func TestRenderTheEvaluatorsAnswer(t *testing.T) {
 
 // RenderReasons names what holds a PR on the pending record in the order the
 // held: labels take: the gates the walk finds, the review threads waiting on
-// the city's answer, then the beads a person owes. A wait on a gate or on a
-// bead a person owes is no work of the city's, so the threads still hold.
+// the city's answer, then the beads a person owes. A wait on a gate, on a bead
+// a person owes or on a conversation whose sitting stays for work is no work
+// of the city's on the threads, so they still hold.
 func TestRenderReasons(t *testing.T) {
 	f := prstatus.Facts{
 		Gates: []prstatus.Blocker{{ID: "tk-gate", Title: "decide the scope"}},
@@ -105,6 +114,14 @@ func TestRenderReasons(t *testing.T) {
 	if got := prstatus.RenderHeld(a, f); !reflect.DeepEqual(got, wantHeld) {
 		t.Fatalf("RenderHeld = %v, want %v", got, wantHeld)
 	}
+	t.Run("a stay's wait acts on no thread, so the thread holds", func(t *testing.T) {
+		stay := prstatus.Facts{Staying: []prstatus.Blocker{{ID: "tk-conv", Title: "a conversation that stays for its work"}}}
+		a := pr.Answer{Conditions: []pr.Condition{{Kind: pr.KindThread, Value: "T1"}, {Kind: pr.KindWait, ID: "tk-conv"}}}
+		want := []prstatus.Reason{{Held: prstatus.HeldReview, Title: "1 review thread waits on the city's answer"}}
+		if got := prstatus.RenderReasons(a, stay); !reflect.DeepEqual(got, want) {
+			t.Fatalf("RenderReasons = %+v, want %+v", got, want)
+		}
+	})
 	t.Run("the merge pass's records hold nothing, and neither does a thread the city's work acts on", func(t *testing.T) {
 		stale := prstatus.Facts{PRPosture: "review_required@oid@t", PRMachine: "blocked@oid@t",
 			PRMachineCause: prstatus.CauseReviewThreads, PRUnansweredThreads: "1@oid"}

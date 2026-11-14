@@ -26,7 +26,10 @@ import (
 //  4. A wait behind its status is a gate that is no human gate, its own or an
 //     ancestor's: "Held by a gate", with the gate's title. Group Not moving.
 //  5. Its status is deferred: "Deferred". Any other status that is neither
-//     open nor a claim reads as the store's word. Group Not moving.
+//     open nor a claim reads as the store's word. Group Not moving. A
+//     conversation its sitting stays in (staying) then reads "Waits on <id>",
+//     naming each wait, in Group Queued: its sitting comes back once that work
+//     closes.
 //  6. waits says it is in flight. With an open pull request: "Pull request
 //     #<n>", with where it stands. Otherwise "In flight", with its assignee.
 //     Group Queued.
@@ -153,6 +156,15 @@ func gateHold(h waits.Holds) *waits.Wait {
 	return nil
 }
 
+// staying reports whether a conversation's row is its sitting's stay
+// ([conversation.Staying]), with a wait of its own holding it as waits answers.
+// prstatus reads a conversation a pull request waits on by the same rule, so
+// the conversation's row and its pull request's agree on whether the operator
+// owes a move.
+func staying(b bead, h waits.Holds) bool {
+	return conversation.Staying(b.Status, b.Assignee, h.Status == waits.Blocked)
+}
+
 // table answers one row. in carries the readers' answers about it.
 type tableInput struct {
 	b       bead
@@ -201,6 +213,9 @@ func table(in tableInput) verdict {
 		return verdict{out: outNotOpen, group: GroupNotMoving, signal: st}
 	}
 	if in.kind == KindConversation {
+		if staying(b, h) && len(h.Waits) > 0 {
+			return verdict{out: outNone, group: GroupQueued, signal: "Waits on " + joinIDs(refsOf(h.Waits))}
+		}
 		return verdict{out: outNone, signal: conversationWords(b.Assignee)}
 	}
 	if in.kind != KindWork {
@@ -292,8 +307,11 @@ func joinIDs(refs []Ref) string {
 //
 //   - Question: an open human gate, or an open decision.
 //   - Conversation: an open conversation that replies to no open gate a
-//     person answers. One that replies to such a gate belongs to that gate's
-//     ask, as its conversation.
+//     person answers and that its sitting does not stay in. One that replies
+//     to such a gate belongs to that gate's ask, as its conversation. One its
+//     sitting stays in (staying) waits for the return of the work it sent,
+//     which comes back to the operator once that work closes, so until then it
+//     is no person's move.
 //   - Pull request: a bead whose pull request reads needs-review or
 //     needs-attention, in those words.
 //   - Routed to you: any other open bead prstatus.IsPersonBlocker counts, as
@@ -302,7 +320,7 @@ func joinIDs(refs []Ref) string {
 //
 // A gate that is no human gate is never an ask.
 func askOf(b bead, k Kind, answeredBy string, answeredByAssignee string, openQuestionGate func(string) bool,
-	facts *prstatus.Facts, membersOpen, members int) *askAnswer {
+	facts *prstatus.Facts, membersOpen, members int, stay bool) *askAnswer {
 	if !isOpen(b) {
 		return nil
 	}
@@ -315,6 +333,9 @@ func askOf(b bead, k Kind, answeredBy string, answeredByAssignee string, openQue
 	case KindDecision:
 		return questionAsk("", "")
 	case KindConversation:
+		if stay {
+			return nil
+		}
 		for _, g := range edgesOf(b, "replies-to") {
 			if openQuestionGate(g) {
 				return nil

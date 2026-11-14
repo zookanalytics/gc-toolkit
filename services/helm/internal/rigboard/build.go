@@ -254,7 +254,11 @@ func build(g *gathered) Document {
 				}
 			}
 		}
-		if a := askOf(b, k, conv, convAssignee, ix.openHumanGate, factsOf(g, id), open, members); a != nil {
+		stay := false
+		if h, ok := g.holds[id]; ok && k == KindConversation {
+			stay = staying(b, h)
+		}
+		if a := askOf(b, k, conv, convAssignee, ix.openHumanGate, factsOf(g, id), open, members, stay); a != nil {
 			bt.asks[id] = a
 		}
 	}
