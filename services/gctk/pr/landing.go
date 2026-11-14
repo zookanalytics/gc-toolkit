@@ -22,7 +22,9 @@ import (
 // lock, Record across both of its writes and a run for one record at a time,
 // and every write they make carries bd's guards on the status and the assignee
 // read under the lock, so neither writes over a bead that a close or a release
-// reached first.
+// reached first. A run that lands a PR on the rig's default branch then checks
+// that branch's seed audit with the lock free, and asks for the branch's
+// re-render when the audit is stale, holding no PR for it (the design's call 1).
 
 // Hub is GitHub as the landing order reaches it: the evaluator's reads, and a
 // merge request or an enqueue pinned to the head it judged.
@@ -33,11 +35,30 @@ type Hub interface {
 }
 
 // Checkout is the rig's clone, as the record reads it: its origin, the target
-// it fetches, and whether a merge commit is on the target fetched.
+// it fetches, whether a merge commit is on the target fetched, its default
+// branch, and a branch's tip as it was last fetched.
 type Checkout interface {
 	OriginURL() (string, error)
 	FetchBranch(branch string) error
 	Reaches(commit, branch string) (bool, error)
+	DefaultBranch() (string, error)
+	Tip(branch string) (string, error)
+}
+
+// Audit is the seed audit a landing can leave stale: the pages a repository
+// renders from its whole tree and commits per branch, so a landing whose render
+// was made before another landing moved an input, or a gc that moved the text
+// its own packs carry, leaves the default branch committing pages that no longer
+// render as committed. Stale names those pages at a commit, and Reaudit hands
+// them to the one writer of the default branch's re-render.
+type Audit interface {
+	// Stale names each page of the audit that commit commits other than as its
+	// tree renders it, none when every page renders as committed. An error is a
+	// check that did not run.
+	Stale(commit string) ([]string, error)
+	// Reaudit hands the pages branch is stale in to the writer of its
+	// re-render, with who found them, and returns what the writer answered.
+	Reaudit(branch, seenBy string, pages []string) (string, error)
 }
 
 // Gates files a human gate on a bead under a key, or finds the one open there.
@@ -48,7 +69,8 @@ type Gates interface {
 // Landing is what the record's verbs act through. Dir is the store's .beads
 // directory, where the record lock lives, and Refinery the assignee of a bead
 // the refinery holds. Feedback loads the definition of feedback, once a run
-// first needs the evaluator. Wait bounds how long a writer waits for the lock,
+// first needs the evaluator. Audit is the rig's seed audit, nil for a rig whose
+// repository carries none. Wait bounds how long a writer waits for the lock,
 // and Yield is how long a run lets the lock stand free between two records, so
 // a writer waiting for it takes it.
 type Landing struct {
@@ -59,6 +81,7 @@ type Landing struct {
 	Feedback func() (Feedback, error)
 	Checkout Checkout
 	Gates    Gates
+	Audit    Audit
 	Now      func() time.Time
 	Wait     time.Duration
 	Yield    time.Duration
@@ -198,7 +221,9 @@ type Options struct {
 // Reconcile is one run of the landing order. It lists the beads that carry the
 // marker, takes up to o.Count of them, the least recently checked first, and
 // reads each under the record lock, from its read of the record to its last
-// write of it, waiting while another writer holds the lock. It reports each
+// write of it, waiting while another writer holds the lock. A record that lands
+// on the rig's default branch has the branch's seed audit checked once the lock
+// is released, and its outcome says what the check found. It reports each
 // record's outcome to report as it goes, and returns an error when the listing
 // or a lock did not answer, or when a record's outcome failed.
 func (l Landing) Reconcile(o Options, report func(RunOutcome)) error {
@@ -214,12 +239,16 @@ func (l Landing) Reconcile(o Options, report func(RunOutcome)) error {
 				Detail: fmt.Sprintf("the run reached its deadline; %d records wait for the next run", len(ids)-i)})
 			break
 		}
+		run.landed = nil
 		out, err := run.one(id)
 		if err != nil {
 			return fmt.Errorf("%s: %w", id, err)
 		}
 		if out.Action == ActFailed {
 			failed++
+		}
+		if run.landed != nil {
+			out.Detail += run.audit(*run.landed, o.Deadline)
 		}
 		report(out)
 		if l.Yield > 0 && i < len(ids)-1 {
@@ -282,11 +311,22 @@ func (l Landing) read(id string) (*ledger.Record, error) {
 
 // run is one run of the landing order, which loads the definition of feedback
 // once, when a record first needs the evaluator, and reads the login the city's
-// account acts as once for each host.
+// account acts as once for each host. landed is the merge the record just read
+// closed its bead on, for the seed audit's check once the lock is free, and
+// audited names, for each tip of the default branch the run has checked, the
+// bead whose landing checked it.
 type run struct {
 	Landing
 	feedback Feedback
 	logins   map[string]string
+	landed   *landedMerge
+	audited  map[string]string
+}
+
+// landedMerge is a PR the run closed its bead on: the bead, the PR's number and
+// the branch it merged into.
+type landedMerge struct {
+	bead, number, target string
 }
 
 // login is the login the city's account acts as on host, read from hub the
@@ -594,9 +634,9 @@ func (u *run) decide(s state, host string, hub Hub, p *gh.PullRequest, retry fun
 }
 
 // merged closes the bead once the PR merged the validated head and the merge
-// commit is on a freshly fetched target. A merge of another head is an
-// exception, and a merge whose commit the target does not reach yet is read
-// again by the next run.
+// commit is on a freshly fetched target, and keeps the merge it closed on for
+// the seed audit's check. A merge of another head is an exception, and a merge
+// whose commit the target does not reach yet is read again by the next run.
 func (u *run) merged(s state, head, commit, at string, retry func(string, string) RunOutcome) RunOutcome {
 	r := s.rec
 	if head != r.Head {
@@ -634,6 +674,7 @@ func (u *run) merged(s state, head, commit, at string, retry func(string, string
 	err = u.Ledger.Commit(w)
 	switch {
 	case err == nil:
+		u.landed = &landedMerge{bead: s.id, number: number, target: r.Target}
 		return RunOutcome{Bead: s.id, Action: ActLanded,
 			Detail: fmt.Sprintf("PR #%s merged to %s at %s: the bead is closed", number, r.Target, short(commit))}
 	case errors.Is(err, ledger.ErrGuard):
@@ -645,6 +686,66 @@ func (u *run) merged(s state, head, commit, at string, retry func(string, string
 	// A write the store failed says nothing about the close, so the record
 	// stands and the next run tries again.
 	return retry("", "the merge is verified, but the close did not land; will retry: "+err.Error())
+}
+
+// audit checks the seed audit on the rig's default branch once a PR has landed
+// on it, and hands the pages stale there to the writer of the branch's
+// re-render. It reads the branch at its tip as the run fetched it to verify the
+// merge, so the check judges every merge on the branch, this one and any after
+// it, and a tip already checked in this run is not checked again. It runs with
+// the record lock free and holds nothing, whatever it finds: the bead has
+// closed, and a check that does not run is asked for again at a later landing.
+// It returns the clause the landing's outcome carries, none for a landing on
+// another branch or a rig whose repository carries no audit.
+func (u *run) audit(m landedMerge, deadline time.Time) string {
+	if u.Audit == nil {
+		return ""
+	}
+	def, err := u.Checkout.DefaultBranch()
+	if err != nil {
+		return "; the rig's default branch did not read, so no seed audit was checked, and a later landing checks it: " +
+			err.Error()
+	}
+	if m.target != def {
+		return ""
+	}
+	if !deadline.IsZero() && !time.Now().Before(deadline) {
+		return fmt.Sprintf("; the run reached its deadline, so the seed audit on %s was not checked, and a later "+
+			"landing checks it", def)
+	}
+	tip, err := u.Checkout.Tip(def)
+	if err != nil {
+		return fmt.Sprintf("; the tip of %s did not read, so its seed audit was not checked, and a later landing "+
+			"checks it: %v", def, err)
+	}
+	if by, ok := u.audited[tip]; ok {
+		return fmt.Sprintf("; the seed audit on %s at %s was checked after %s landed", def, short(tip), by)
+	}
+	pages, err := u.Audit.Stale(tip)
+	if err != nil {
+		return fmt.Sprintf("; the seed audit on %s at %s was not checked, and a later landing checks it: %v",
+			def, short(tip), err)
+	}
+	if len(pages) == 0 {
+		u.checked(tip, m.bead)
+		return fmt.Sprintf("; the seed audit on %s is current at %s", def, short(tip))
+	}
+	stale := fmt.Sprintf("; the seed audit on %s at %s is stale in %d of its pages", def, short(tip), len(pages))
+	seenBy := fmt.Sprintf("The landing order, checking %s at %s after PR #%s landed,", def, tip, m.number)
+	answer, err := u.Audit.Reaudit(def, seenBy, pages)
+	if err != nil {
+		return stale + ", and its re-render was not asked for, so a later landing asks again: " + err.Error()
+	}
+	u.checked(tip, m.bead)
+	return stale + ", and its re-render's writer answered " + answer
+}
+
+// checked keeps that the landing of bead checked the seed audit at tip.
+func (u *run) checked(tip, bead string) {
+	if u.audited == nil {
+		u.audited = map[string]string{}
+	}
+	u.audited[tip] = bead
 }
 
 // closeRefused reports whether a write that closes a bead failed because bd
