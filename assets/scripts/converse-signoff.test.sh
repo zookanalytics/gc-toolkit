@@ -128,9 +128,8 @@
 #             re-run of one that named its work, and a second stay with the
 #             same text, whether the earlier stay's rework has returned or its
 #             work is still out; a wait on the subject itself, which the
-#             conversation tracks, is refused before any write, in a stay, in
-#             one that takes the recommendation, beside other work, and in a
-#             sign-off that does not stay; a
+#             conversation tracks, is refused before any write in a sign-off
+#             that does not stay; a
 #             dismiss that closes an open conversation while the call runs
 #             fails that write and stops the stay, the call less --stay, with
 #             --no-wait for its waits and brief and --no-rework for a --rework,
@@ -147,6 +146,20 @@
 #             after its rework is filed, run again once that rework has closed,
 #             with the PR open or merged, files no second rework and waits on
 #             the closed one, and run while it is open adopts it
+#   (STAY-SUBJECT*, STAY-ACCEPT*) a stay on the subject itself, sent on a
+#             formula or taking its recommendation, or for the landing of the
+#             PR it anchors once no hold of the conversation's holds that
+#             merge, waits on the newest open convoy that tracks the subject
+#             alone and carries no owned label, the input convoy its dispatch
+#             poured its run over, and keeps the conversation's tracks edge as
+#             its one edge onto the subject: its line names the subject, the
+#             headline waits on nothing of it and no closer is armed on it;
+#             with --accept it waits on the convoy Accept's run was poured
+#             over, and stops with no edge written when Accept poured none;
+#             without --accept, a subject nothing has sent, a subject in another
+#             store and one whose merge the conversation holds are refused
+#             before any write, a read of its convoys that fails stops before
+#             any write, and a subject that has closed takes no edge
 #   (APPROVE*) a PR a ruling leaves standing whose status (gctk pr status)
 #             reads needs-review with no approval standing, or does not read, is
 #             named in the headline, the close reason and the reminder, and
@@ -490,9 +503,11 @@ chmod +x "$TMP/bin/timeout"
 # --- stub pack scripts at the rig root the sign-off searches first ------------
 # gc-helm.sh's accept leaves the store as Accept's writer would, per
 # ACCEPT_DOES: take (the default) answers each open first-reaction gate on the
-# subject with an Accept's answer and records the dispatch; refuse writes
-# nothing, as a run refused at the lock does; other finds the gate answered
-# first; dispatched finds the recommendation already dispatched.
+# subject with an Accept's answer, pours the run's input convoy, which tracks
+# the subject alone, as the formula's sling mints it, unless ACCEPT_NO_POUR is
+# set, and records the dispatch; refuse writes nothing, as a run refused at the
+# lock does; other finds the gate answered first; dispatched finds the
+# recommendation already dispatched.
 S="$TMP/rig/assets/scripts"
 cat > "$S/gc-helm.sh" <<'H'
 #!/usr/bin/env bash
@@ -526,6 +541,10 @@ case "$1" in
               echo "gc-helm.sh: accept: another answer reached $_s's recommendation gate first" >&2; exit 4 ;;
       dispatched) echo "gc-helm.sh: accept: $_s carries no gc.recommended_formula: its recommendation was dispatched. Nothing to accept; nothing dispatched." >&2; exit 2 ;;
       *) close_rec "ruled: accepted $_f accept:0123456789abcdef"
+         if [ -z "${ACCEPT_NO_POUR:-}" ] && [ ! -f "$B/${_s%%-*}-accv.json" ]; then
+           jq -n --arg id "${_s%%-*}-accv" --arg s "$_s" '{id:$id, title:("input convoy for " + $s), issue_type:"convoy", status:"open",
+               assignee:"", metadata:{"gc.synthetic":"true"}, deps:[{type:"tracks", on:$s}]}' > "$B/${_s%%-*}-accv.json"
+         fi
          jq --arg f "$_f" '.metadata["gc.recommended_formula_dispatched"] = $f | del(.metadata["gc.recommended_formula"])' "$B/$_s.json" > "$B/x" && mv "$B/x" "$B/$_s.json"
          echo "gc-helm.sh: accept: dispatched $_f at $_s (acceptance 0123456789abcdef)" ;;
     esac ;;
@@ -596,6 +615,13 @@ acts() { jq -r '[.[].text] | join("|")' "$STORE/b/$1.comments.json" 2>/dev/null;
 meta()  { jq -r --arg k "$2" '.metadata[$k] // ""' "$STORE/b/$1.json" 2>/dev/null; }
 # conv <id> <subject> [assignee] — a conversation a sitting holds.
 conv() { bead "$1" task in_progress "${3:-gc-toolkit/gc-toolkit.$1}"; edge "$1" tracks "$2"; }
+# convoy <id> <tracked>... — an open convoy that tracks those beads, as the input
+# convoy a formula's sling of a bead pours its run over tracks that bead alone.
+convoy() {
+    local id="$1" t; shift
+    bead "$id" convoy open ""; setf "$id" title "input convoy for $1"
+    for t in "$@"; do edge "$id" tracks "$t"; done
+}
 # The acceptance case's anchor: a recommendation's gate and a review gate, and
 # the conversation that took up the review gate alone.
 acceptance() {
@@ -2247,33 +2273,19 @@ eq "$RC" 1 "(STAY-AGAIN-BESIDE) a second stay with the same text, beside that wo
 eq "$(field tk-conv notes | grep -E '^(holding|staying):' | tail -n 1)" "staying: the retry backs off" "(STAY-AGAIN-BESIDE) …leaving its own first line newest, not the earlier line that names only the earlier work"
 
 # The conversation tracks its subject, and bd keeps one edge from a bead onto
-# another, so a wait on the subject itself is refused before any write: in a
-# stay, whose edge onto the subject bd would refuse only once every gate is
-# answered, in one that takes the recommendation, before Accept dispatches
-# anything, beside other work, and in a sign-off that does not stay.
+# another, so a stay on the subject itself never writes an edge onto it: it
+# waits on the convoy of the subject's dispatch, which tracks the subject alone
+# and which Gas City closes once the subject closes (the stay on the subject,
+# below). A sign-off that does not stay names no wait on its own subject.
 closer_case
 (cd "$TMP/cwd" && gc bd dep add tk-conv tk-sub --type blocks >/dev/null 2>&1) \
   && bad "(ONE-EDGE) the stub took a blocks edge beside the conversation's tracks edge onto its subject" \
   || ok "(ONE-EDGE) the stub refuses a blocks edge beside the conversation's tracks edge onto its subject, as bd does"
 closer_case
-run_signoff --conversation tk-conv --outcome x --ruled yes --ruling "fix it on the report itself" --waiting-on tk-sub --stay "the dialog keeps what is typed"
-eq "$RC" 2 "(STAY-SUBJECT) a stay whose work is the subject itself exits 2"
-has "$OUT" "because it tracks tk-sub" "(STAY-SUBJECT) …saying the conversation tracks the subject"
-has "$OUT" "the sitting ends at the hand-off" "(STAY-SUBJECT) …and that the sitting ends at the hand-off"
-eq "$(writes)" 0 "(STAY-SUBJECT) …and writes nothing"
-closer_case; setm tk-sub gc.recommended_formula mol-fix
-run_signoff --conversation tk-conv --outcome x --ruled yes --ruling "take the recommended fix" --waiting-on tk-sub --accept --stay "the dialog keeps what is typed"
-eq "$RC" 2 "(STAY-SUBJECT-ACCEPT) a stay that takes the subject's recommendation, waiting on the subject, exits 2"
-eq "$(meta tk-sub gc.recommended_formula_dispatched)" "" "(STAY-SUBJECT-ACCEPT) …dispatching nothing"
-eq "$(writes)" 0 "(STAY-SUBJECT-ACCEPT) …and writes nothing"
-closer_case
-run_signoff --conversation tk-conv --outcome x --ruled yes --ruling "fix it on the report once tk-work lands" --waiting-on tk-sub --waiting-on tk-work --close-brief "$BRIEF" --stay "the dialog keeps what is typed"
-eq "$RC" 2 "(STAY-SUBJECT-BESIDE) a stay on the subject beside other work exits 2"
-eq "$(writes)" 0 "(STAY-SUBJECT-BESIDE) …and writes nothing"
-closer_case
 run_signoff --conversation tk-conv --outcome x --ruled yes --ruling "fix it on the report itself" --waiting-on tk-sub
 eq "$RC" 2 "(SELF-WAIT) a sign-off that does not stay, waiting on its own subject, exits 2"
 has "$OUT" "names the subject itself" "(SELF-WAIT) …saying why"
+has "$OUT" "names the subject beside --stay" "(SELF-WAIT) …and how a sitting that stays for it names it"
 eq "$(writes)" 0 "(SELF-WAIT) …and writes nothing"
 # The subject can close before the return, which still writes what landed as
 # its headline and closes the conversation.
@@ -2357,13 +2369,15 @@ has "$OUT" "and each --waiting-on is a gate" "(STAY-GATE) …saying a gate is no
 eq "$(writes)" 0 "(STAY-GATE) …and writes nothing"
 # The conversation holds the merge of the PR it is about: the anchor waits on
 # it through a blocks edge, as gc-helm open and engage write that hold. That
-# anchor is the subject itself, which no stay waits on, so a lift of the hold
-# would change nothing.
-open_pr; edge tk-anc blocks tk-conv
+# anchor is the subject itself, which the stay would wait on through the
+# convoy of its dispatch, an edge bd's cycle check does not follow, so neither
+# could close. The stay is refused before any write, naming the lift of the
+# hold, after which it waits for the PR's landing (STAY-SUBJECT-PR).
+open_pr; edge tk-anc blocks tk-conv; convoy tk-cv tk-anc
 run_signoff --conversation tk-conv --outcome x --ruled yes --ruling "land it as it stands" --no-rework --waiting-on tk-anc --stay "x"
 eq "$RC" 2 "(STAY-HOLDS-MERGE) a stay on the PR the conversation is about, whose merge it holds, exits 2"
-has "$OUT" "the sitting ends at the hand-off" "(STAY-HOLDS-MERGE) …ending the sitting at the hand-off"
-hasnt "$OUT" "gc bd dep remove" "(STAY-HOLDS-MERGE) …and offering no lift of the hold"
+has "$OUT" "tk-anc already waits on tk-conv" "(STAY-HOLDS-MERGE) …saying the subject waits on the conversation"
+has "$OUT" "gc bd dep remove tk-anc tk-conv" "(STAY-HOLDS-MERGE) …naming the lift of that hold"
 eq "$(writes)" 0 "(STAY-HOLDS-MERGE) …and writes nothing"
 # A conversation about the PR's rework holds that PR's merge too, and a stay
 # there waits on the PR's landing only once the sitting lifts the hold.
@@ -2511,6 +2525,135 @@ run_signoff --conversation tk-conv --outcome "decomposed — the first unit is b
 eq "$RC" 1 "(MEMBER-ENDING) an ending sign-off that waits on the epic's own member stops"
 has "$(cat "$CALLS")" "bd dep add tk-epic tk-mem --type blocks" "(MEMBER-ENDING) …at the headline's edge, which bd refuses"
 eq "$(field tk-g status)/$(field tk-conv status)" "open/in_progress" "(MEMBER-ENDING) …before any gate is answered or the conversation closes"
+
+echo "# a stay on the subject itself waits on the convoy of the subject's dispatch"
+# A ruling whose work is the subject itself. The sitting answers the ruling's
+# gate on a turn that does not sign off, sends the subject, whose sling pours
+# its run over an input convoy that tracks the subject alone, and then stays.
+# The conversation tracks the subject and waits on that convoy, which Gas City
+# closes once the subject closes.
+SUBJECT_STAY=(--conversation tk-conv --outcome "staying — the report's own fix is building" --ruled yes --ruling "fix it on the report itself" --stay "the dialog keeps what is typed")
+closer_case
+run_signoff --conversation tk-conv --answer tk-g --ruling "fix it on the report itself" --outcome "ruled — the report's own fix goes out"
+eq "$RC/$(field tk-g status)" "0/closed" "(STAY-SUBJECT) the ruling's gate is answered on a turn that does not sign off"
+convoy tk-cv tk-sub
+: > "$CALLS"
+run_signoff "${SUBJECT_STAY[@]}" --waiting-on tk-sub
+eq "$RC" 0 "(STAY-SUBJECT) a stay on the subject, once its dispatch has poured, exits 0"
+has "$(cat "$CALLS")" "bd dep add tk-conv tk-cv --type blocks" "(STAY-SUBJECT) …waiting on the convoy of the subject's dispatch"
+hasnt "$(cat "$CALLS")" "bd dep add tk-conv tk-sub" "(STAY-SUBJECT) …and attempting no edge onto the subject, which bd would refuse"
+eq "$(jq -c '[.deps[] | select(.on == "tk-sub") | .type]' "$STORE/b/tk-conv.json")" '["tracks"]' "(STAY-SUBJECT) …so the conversation keeps its tracks edge onto the subject, and no other"
+has "$(field tk-conv notes)" "staying: the dialog keeps what is typed (waits on tk-sub)" "(STAY-SUBJECT) …its staying: line naming the subject, the work the return compares"
+has "$(cat "$CALLS")" "gc-helm takeaway tk-sub staying — the report's own fix is building --by converse --no-wait" "(STAY-SUBJECT) …the headline waiting on nothing, as a sign-off that sends the subject does"
+eq "$(meta tk-sub gc.dispatch_when_ready)" "" "(STAY-SUBJECT) …arming no closer, since the subject's own run carries its close"
+eq "$(field tk-conv status)/$(field tk-conv assignee)" "open/gc-toolkit/gc-toolkit.tk-conv" "(STAY-SUBJECT) …leaving the conversation open under its sitting"
+has "$OUT" "tk-sub through convoy tk-cv, which Gas City closes once tk-sub closes" "(STAY-SUBJECT) …and saying what it waits through"
+has "$OUT" "gate tk-g was already cleared before this sign-off" "(STAY-SUBJECT) …finding the gate the earlier turn answered"
+run_signoff "${SUBJECT_STAY[@]}" --waiting-on tk-sub
+eq "$RC" 0 "(STAY-SUBJECT-RERUN) a re-run of the stay exits 0"
+eq "$(grep -c '^bd dep add tk-conv tk-cv --type blocks' "$CALLS")" 2 "(STAY-SUBJECT-RERUN) …writing the same edge again, which bd keeps once"
+# The stay's call is the same when the dispatch poured first and the call
+# answers the gate itself.
+closer_case; convoy tk-cv tk-sub
+run_signoff "${SUBJECT_STAY[@]}" --waiting-on tk-sub
+eq "$RC/$(field tk-g status)" "0/closed" "(STAY-SUBJECT-ANSWERS) a stay on a subject already sent answers the ruling's gate itself"
+has "$(cat "$CALLS")" "bd dep add tk-conv tk-cv --type blocks" "(STAY-SUBJECT-ANSWERS) …and waits on the convoy"
+# Nothing has sent the subject: no convoy tracks it, so nothing would close for
+# the conversation to wait on. The stay is refused before any write, saying how
+# to send it first.
+closer_case
+run_signoff "${SUBJECT_STAY[@]}" --waiting-on tk-sub
+eq "$RC" 2 "(STAY-SUBJECT-UNSENT) a stay on a subject nothing has sent exits 2"
+has "$OUT" "no open convoy tracks tk-sub alone, so tk-sub has not been sent" "(STAY-SUBJECT-UNSENT) …saying so"
+has "$OUT" "(--answer), send tk-sub (gc sling <rig>/<pool> tk-sub --on <formula>), then run this call again" "(STAY-SUBJECT-UNSENT) …and naming the order that sends it first"
+eq "$(writes)" 0 "(STAY-SUBJECT-UNSENT) …and writes nothing"
+eq "$(field tk-g status)" "open" "(STAY-SUBJECT-UNSENT) …leaving the gate open"
+# Only a convoy that Gas City closes with the subject stands in for it: open,
+# without the owned label, which keeps Gas City from closing it, and tracking
+# the subject alone, since one that tracks another bead too closes only once
+# that one has closed as well.
+closer_case; convoy tk-cvo tk-sub; labelled tk-cvo owned; convoy tk-cvb tk-sub tk-work; convoy tk-cvc tk-sub; setf tk-cvc status closed
+run_signoff "${SUBJECT_STAY[@]}" --waiting-on tk-sub
+eq "$RC/$(writes)" "2/0" "(STAY-SUBJECT-CONVOYS) an owned convoy, one that also tracks other work and a closed one stand for no dispatch, so the stay exits 2, writing nothing"
+convoy tk-cv tk-sub
+run_signoff "${SUBJECT_STAY[@]}" --waiting-on tk-sub
+eq "$RC" 0 "(STAY-SUBJECT-CONVOYS) …and beside them the convoy of a dispatch is the one the stay waits on"
+has "$(cat "$CALLS")" "bd dep add tk-conv tk-cv --type blocks" "(STAY-SUBJECT-CONVOYS) …through its edge"
+hasnt "$(cat "$CALLS")" "bd dep add tk-conv tk-cvo" "(STAY-SUBJECT-CONVOYS) …and none onto the owned one"
+hasnt "$(cat "$CALLS")" "bd dep add tk-conv tk-cvb" "(STAY-SUBJECT-CONVOYS) …or the one that tracks other work"
+# A subject sent twice, as after a run that was cancelled, has a convoy from
+# each pour, each of which closes with the subject. The stay waits on the newest.
+closer_case; convoy tk-cv1 tk-sub; setf tk-cv1 created_at 2026-11-14T10:00:00Z; convoy tk-cv2 tk-sub; setf tk-cv2 created_at 2026-11-14T11:00:00Z
+run_signoff "${SUBJECT_STAY[@]}" --waiting-on tk-sub
+has "$(cat "$CALLS")" "bd dep add tk-conv tk-cv2 --type blocks" "(STAY-SUBJECT-NEWEST) a subject poured twice is waited on through its newest convoy"
+hasnt "$(cat "$CALLS")" "bd dep add tk-conv tk-cv1" "(STAY-SUBJECT-NEWEST) …alone"
+closer_case; convoy tk-cv tk-sub
+DEP_UP_DOWN=tk-sub run_signoff "${SUBJECT_STAY[@]}" --waiting-on tk-sub
+eq "$RC/$(writes)" "1/0" "(STAY-SUBJECT-UNREAD) a stay whose read of the subject's convoys fails stops, writing nothing"
+has "$OUT" "the convoys that track tk-sub could not be read" "(STAY-SUBJECT-UNREAD) …saying so"
+LIST_DOWN_ID=tk-cv run_signoff "${SUBJECT_STAY[@]}" --waiting-on tk-sub
+eq "$RC/$(writes)" "1/0" "(STAY-SUBJECT-UNREAD) …and so does one whose read of those convoys' own edges fails"
+# A subject in another store than its conversation's has a convoy there, and
+# an edge from the conversation onto it would hold nothing.
+fresh; bead rb-sub; gate rb-g first-reaction; edge rb-sub blocks rb-g
+conv tk-conv rb-sub; edge tk-conv replies-to rb-g; convoy rb-cv rb-sub
+run_signoff "${SUBJECT_STAY[@]}" --waiting-on rb-sub
+eq "$RC/$(writes)" "2/0" "(STAY-SUBJECT-ELSEWHERE) a stay on a subject in another store exits 2, writing nothing"
+has "$OUT" "in another store, where its edge holds nothing" "(STAY-SUBJECT-ELSEWHERE) …saying why"
+# Beside other work: the subject's headline waits on that work alone, whose
+# landing its closer checks, and the conversation waits on both.
+closer_case; convoy tk-cv tk-sub
+run_signoff "${SUBJECT_STAY[@]}" --waiting-on tk-sub --waiting-on tk-work --close-brief "$BRIEF"
+eq "$RC" 0 "(STAY-SUBJECT-BESIDE) a stay on the subject beside other work exits 0"
+has "$(cat "$CALLS")" "gc-helm takeaway tk-sub staying — the report's own fix is building --by converse --waiting-on tk-work" "(STAY-SUBJECT-BESIDE) …the headline waiting on the other work alone"
+has "$(field tk-sub notes)" "## Close brief (held on tk-work, " "(STAY-SUBJECT-BESIDE) …its close brief held on that work"
+eq "$(meta tk-sub gc.dispatch_when_ready_args)" "$CLOSER_ARGS" "(STAY-SUBJECT-BESIDE) …the closer armed for it"
+has "$(cat "$CALLS")" "bd dep add tk-conv tk-cv --type blocks" "(STAY-SUBJECT-BESIDE) …while the conversation waits on the subject's convoy"
+has "$(cat "$CALLS")" "bd dep add tk-conv tk-work --type blocks" "(STAY-SUBJECT-BESIDE) …and on the work"
+has "$(field tk-conv notes)" "(waits on tk-sub, tk-work)" "(STAY-SUBJECT-BESIDE) …its line naming both"
+# A subject that has closed needs no wait: the stay names it and writes no edge
+# for it, and the sitting's entry reads the return.
+closer_case; convoy tk-cv tk-sub; setf tk-sub status closed; setf tk-cv status closed
+run_signoff "${SUBJECT_STAY[@]}" --waiting-on tk-sub
+eq "$RC" 0 "(STAY-SUBJECT-CLOSED) a stay on a subject that has closed exits 0"
+hasnt "$(cat "$CALLS")" "bd dep add tk-conv" "(STAY-SUBJECT-CLOSED) …writing no edge"
+has "$(field tk-conv notes)" "(waits on tk-sub)" "(STAY-SUBJECT-CLOSED) …its line naming the subject"
+has "$OUT" "Run the entry now" "(STAY-SUBJECT-CLOSED) …and sending the sitting to its entry, which reads the return"
+
+echo "# a stay that takes the subject's recommendation waits on the run Accept pours"
+closer_case; setm tk-sub gc.recommended_formula mol-fix
+run_signoff "${SUBJECT_STAY[@]}" --waiting-on tk-sub --accept
+eq "$RC" 0 "(STAY-ACCEPT) a stay that takes the recommendation exits 0"
+eq "$(meta tk-sub gc.recommended_formula_dispatched)" "mol-fix" "(STAY-ACCEPT) …dispatching it through Accept"
+has "$(cat "$CALLS")" "bd dep add tk-conv tk-accv --type blocks" "(STAY-ACCEPT) …and waiting on the input convoy its run was poured over"
+case "$(cat "$CALLS")" in
+  *"gc-helm accept tk-sub"*"bd dep add tk-conv tk-accv"*) ok "(STAY-ACCEPT) …which Accept poured before the stay waits on it" ;;
+  *) bad "(STAY-ACCEPT) the writes ran out of order: $(cat "$CALLS")" ;;
+esac
+has "$(cat "$CALLS")" "--by converse --no-wait" "(STAY-ACCEPT) …the headline waiting on nothing, as a sign-off that takes the recommendation does"
+has "$(field tk-conv notes)" "staying: the dialog keeps what is typed (waits on tk-sub)" "(STAY-ACCEPT) …its line naming the subject"
+eq "$(field tk-conv status)" "open" "(STAY-ACCEPT) …and the conversation open"
+closer_case; setm tk-sub gc.recommended_formula mol-fix
+ACCEPT_DOES=other run_signoff "${SUBJECT_STAY[@]}" --waiting-on tk-sub --accept
+eq "$RC" 1 "(STAY-ACCEPT-NOT-TAKEN) a stay whose recommendation another answer reached first stops"
+has "$OUT" "no open convoy tracks tk-sub alone, so no dispatch of tk-sub poured a run for conversation tk-conv to wait on" "(STAY-ACCEPT-NOT-TAKEN) …saying no run was poured"
+has "$OUT" "sign off without --stay to end at the hand-off" "(STAY-ACCEPT-NOT-TAKEN) …and naming the hand-off ending"
+eq "$(field tk-conv notes | grep -E '^(holding|staying):' | tail -n 1)" "staying: the dialog keeps what is typed" "(STAY-ACCEPT-NOT-TAKEN) …its first line still newest, naming no work"
+hasnt "$(cat "$CALLS")" "bd dep add tk-conv" "(STAY-ACCEPT-NOT-TAKEN) …with no edge written"
+eq "$(field tk-conv status)" "in_progress" "(STAY-ACCEPT-NOT-TAKEN) …and the conversation still claimed"
+closer_case; setm tk-sub gc.recommended_formula mol-fix
+ACCEPT_NO_POUR=1 run_signoff "${SUBJECT_STAY[@]}" --waiting-on tk-sub --accept
+eq "$RC" 1 "(STAY-ACCEPT-NO-POUR) a stay whose Accept poured no run stops"
+hasnt "$(cat "$CALLS")" "bd dep add tk-conv" "(STAY-ACCEPT-NO-POUR) …with no edge written"
+
+echo "# a stay for the landing of the PR its conversation is about, once its hold is lifted"
+open_pr; convoy tk-cv tk-anc
+run_signoff --conversation tk-conv --outcome "staying — the PR lands as it stands" --ruled yes --ruling "land it as it stands" --no-rework --waiting-on tk-anc --stay "the retry backs off as agreed"
+eq "$RC" 0 "(STAY-SUBJECT-PR) a stay on the PR the conversation is about, with no hold on its merge, exits 0"
+has "$(cat "$CALLS")" "bd dep add tk-conv tk-cv --type blocks" "(STAY-SUBJECT-PR) …waiting on the convoy of the anchor's dispatch, which closes once the PR merges"
+eq "$(field tk-rev status)" "closed" "(STAY-SUBJECT-PR) …answering the gate that held the merge"
+has "$(cat "$CALLS")" "gc-helm takeaway tk-anc staying — the PR lands as it stands" "(STAY-SUBJECT-PR) …and writing the headline"
+hasnt "$(cat "$CALLS")" "gc-helm takeaway tk-anc staying — the PR lands as it stands --by converse --waiting-on" "(STAY-SUBJECT-PR) …which waits on nothing of the anchor's own"
 
 echo
 echo "converse-signoff: $PASS passed, $FAIL failed"

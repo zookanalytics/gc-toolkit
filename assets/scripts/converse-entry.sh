@@ -57,9 +57,14 @@
 #   the record agrees with that second line: the conversation waits through a
 #   `blocks` edge on each bead it names, or the bead has closed. Until then, the
 #   stay stopped short. An edge alone proves nothing, because a conversation
-#   keeps its edges onto the work of a stay that returned.
+#   keeps its edges onto the work of a stay that returned. A stay on the
+#   conversation's own subject, which the conversation tracks and so cannot
+#   wait on through an edge of its own, waits on the convoy of the subject's
+#   dispatch, which tracks the subject and which Gas City closes once the
+#   subject closes, so a `blocks` edge onto a convoy that tracks the subject
+#   counts as the wait on the subject.
 # - for each bead the newest `staying:` line names that the conversation has no
-#   edge onto, its status.
+#   edge onto, its status, and for the subject the beads its edges reach.
 #
 # Output: a first line `ENTRY <entry>: <what it means>`, then `NEXT=<skill>`
 # (`NEXT=drain` for none and stop), then one KEY=value line each for CONV,
@@ -166,6 +171,26 @@ mark_of() {
   jq -r "$MARK_JQ"'mark_word'
 }
 
+# convoyed <row> <subject> — whether the conversation waits on its own subject
+# through a convoy: a `blocks` edge, onto a bead in the conversation's own store,
+# where an edge holds, that reaches a convoy tracking the subject. Returns 0
+# when one does, 1 when none does, and 2 when the beads its edges reach do not
+# read as the beads asked for, gates and infrastructure beads included, since a
+# read that hides one cannot show what it tracks.
+convoyed() {
+  local row=$1 subject=$2 on json
+  on=$(printf '%s' "$row" | jq -r "$MARK_JQ"'((.id // "") | tostring | split("-")[0] + "-") as $p
+    | edged | map(select(startswith($p))) | unique | join(",")')
+  [ -n "$on" ] || return 1
+  json=$(gc bd list --id "$on" --all --include-gates --include-infra --include-templates --json --limit 0 2>/dev/null) || return 2
+  printf '%s\n' "$json" | grep -av '^gc bd:' | scrub | jq -er --arg want "$on" --arg s "$subject" '
+    if type != "array" or ([ .[] | (.id // "") | tostring ] | sort) != ($want | split(",") | sort)
+    then error("not the beads asked for") else . end
+    | any(.[]; (.issue_type // "") == "convoy"
+        and any(.dependencies[]? | objects; (.type // "") == "tracks" and ((.depends_on_id // "") | tostring) == $s))' >/dev/null 2>&1
+  case $? in 0) return 0 ;; 1) return 1 ;; *) return 2 ;; esac
+}
+
 # still_out <ids> — those of the beads that have not closed, space-separated.
 # Fails when one does not read as itself.
 still_out() {
@@ -197,13 +222,27 @@ hold_stands() {
 # newest mark is a `staying:` line, read against the record, then its values.
 # <pending> is the open work it waits on through its edges, as holds reads it.
 # The line a stay writes first names no work, so its sign-off stopped before
-# it finished. A bead the newer line names with no edge onto it holds nothing:
-# when it is still out, the stay stopped before it made the conversation wait
-# on it, and when it has closed, it needs no edge.
+# it finished. A bead the newer line names with no edge onto it holds nothing,
+# unless it is the conversation's own subject and a convoy the conversation
+# waits on tracks it: when it is still out, the stay stopped before it made the
+# conversation wait on it, and when it has closed, it needs no edge.
 stay_entry() {
-  local c=$1 row=$2 pending=$3 work unedged out
+  local c=$1 row=$2 pending=$3 work unedged out subject rest w crc
   work=$(printf '%s' "$row" | jq -r "$MARK_JQ"'stay_work | join(" ")')
   unedged=$(printf '%s' "$row" | jq -r "$MARK_JQ"'unedged | join(" ")')
+  subject=$(printf '%s' "$row" | jq -r "$CONVERSATION_JQ"'conversation_subjects | first // ""')
+  case " $unedged " in
+    *" $subject "*)
+      crc=0
+      convoyed "$row" "$subject" || crc=$?
+      case "$crc" in
+        0) rest=""
+           for w in $unedged; do [ "$w" = "$subject" ] || rest="${rest:+$rest }$w"; done
+           unedged="$rest" ;;
+        1) ;;
+        *) unreadable "conversation $c's stay names its subject $subject, which it has no edge onto, and the beads it waits on could not be read to tell whether a convoy among them tracks $subject" ;;
+      esac ;;
+  esac
   out=""
   if [ -n "$unedged" ]; then
     out=$(still_out "$unedged") || unreadable "conversation $c's stay names $unedged, which it has no edge onto, and one of them could not be read to tell whether it is still out"

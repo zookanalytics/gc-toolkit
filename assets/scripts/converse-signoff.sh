@@ -108,6 +108,33 @@
 # conversation's wait alone. The headline leaves it out, and says --no-wait
 # when it is all the work, and no closer is armed on it.
 #
+# The subject itself is the conversation's wait alone too, when the ruling's
+# work runs on it: the subject sent on a formula, its recommendation taken, or
+# the landing of the PR it anchors. The conversation cannot wait on it through
+# an edge of its own, because it tracks the subject and bd keeps one edge from
+# a bead onto another (DependencyTypeConflictError). So it waits on the convoy
+# the subject's dispatch poured its run over: a formula's sling of a bead mints
+# an input convoy that tracks that bead alone (gascity graphv2
+# CreateSingleItemInputConvoy), and Gas City closes a convoy once every bead it
+# tracks has closed, from that bead's own bead.closed (cmd/gc
+# doConvoyAutocloseWith) or, when that run did not finish, from the
+# controller's autoclose sweep. So the convoy closes when the subject does,
+# whatever became of the run, and its close is a bead.closed of its own, which
+# wakes the sitting as any wait's close does. The stay waits on the newest open
+# convoy that tracks the subject alone and carries no owned label, which keeps
+# Gas City from closing it. That convoy exists once the subject is dispatched:
+# Accept's dispatch makes it at step 4, and a sitting that sends the subject
+# itself answers the ruling's gates on a turn that does not sign off (--answer),
+# sends the subject, and only then stays. A stay on the subject with no such
+# convoy and no --accept is refused before any write. A subject that has closed
+# needs no convoy, and its close returns the stay. bd's cycle check walks no
+# tracks edge, so it would take that edge from a conversation whose subject
+# waits on it, as the anchor of a PR whose merge the conversation holds does,
+# and neither could close: that stay is refused before any write, as a stay on
+# work that waits on the conversation is. A close made while the controller is
+# down is one its sweep never sees (cmd/gc/autoclose_sweep.go), which leaves
+# the convoy open until `gc convoy check` closes it.
+#
 # A ruling given on a turn that does not sign off (--answer) runs steps 1 to 3
 # for the gates --answer names, and step 4 when it takes the recommendation,
 # and stops there: the conversation stays open under its sitting, and the
@@ -256,15 +283,17 @@
 #     "(waits on ...)" is refused. Each bead of that work must be in the
 #     conversation's own store, and none may wait on the conversation itself,
 #     as the anchor of an open PR whose merge the conversation holds does,
-#     since then neither could close. None may be the subject, which the
-#     conversation tracks: bd keeps one edge from a bead onto another, so the
-#     conversation cannot wait on the subject too, and a sitting whose work is
-#     the subject itself, sent on a formula or taking its recommendation, ends
-#     at the hand-off. A bead that is a member of the subject, at any depth,
-#     as an epic's own decomposition is, is the conversation's wait alone: the
-#     subject's headline leaves it out, with --no-wait when it is all the work,
-#     and arms no closer on it, since bd refuses the subject's blocks edge onto
-#     its own descendant.
+#     since then neither could close. A bead that is a member of the subject,
+#     at any depth, as an epic's own decomposition is, is the conversation's
+#     wait alone: the subject's headline leaves it out, with --no-wait when it
+#     is all the work, and arms no closer on it, since bd refuses the subject's
+#     blocks edge onto its own descendant. So is the subject itself, for a
+#     ruling whose work runs on the subject, sent on a formula or taking its
+#     recommendation: the conversation waits on the convoy the subject's
+#     dispatch poured its run over (above), since the conversation tracks the
+#     subject and bd keeps one edge from a bead onto another. With --accept,
+#     step 4 makes that dispatch. Otherwise the subject must be sent before
+#     this call, and with no such convoy the stay is refused, nothing written.
 #     It is refused on a conversation no sitting holds, and with nothing to
 #     wait on. The sitting signs off on its return with the same call less
 #     --stay, with --no-wait in place of its --waiting-on and --close-brief,
@@ -293,9 +322,11 @@
 #   form <key>=<value>, or a ruling that leaves the subject waiting on work its
 #   closer would check with no --close-brief, a --close-brief where no closer
 #   is armed, a subject waiting on work in the city's own store, or a
-#   --waiting-on that names the subject itself, or a re-run of a --rework
-#   whose record names the PR and no rework while a closed rework of this
-#   conversation on that PR that no recorded answer names stands.
+#   --waiting-on that names the subject itself without --stay, or with --stay
+#   and no --accept while no convoy of the subject's dispatch is open, or a
+#   re-run of a --rework whose record names the PR and no rework while a
+#   closed rework of this conversation on that PR that no recorded answer
+#   names stands.
 set -u
 
 # >>> control-char-scrub
@@ -416,6 +447,36 @@ walk_to() {
 }
 waits_on_conversation() { walk_to "$1" "$CONVERSATION" blocks conditional-blocks parent-child; }
 member_of_subject() { walk_to "$1" "$SUBJECT" parent-child; }
+
+# subject_convoy — the convoy a stay on the subject waits on in the subject's
+# place: the newest open convoy that tracks the subject alone and carries no
+# owned label, as the input convoy of a formula's sling of the subject does.
+# Gas City closes it once the subject closes. The convoys that track the
+# subject are read through the subject's tracks dependents, whose rows carry no
+# edges, and then by id, whose rows carry the convoy's own tracks edges, so a
+# convoy that also tracks another bead, and closes only once that one has
+# closed too, is left out. Prints that convoy and returns 0, returns 1 when no
+# convoy qualifies, and 2 when a read did not answer as the beads it asked for.
+subject_convoy() {
+  local ids rows out
+  ids=$(gc bd dep list "$SUBJECT" --direction=up --type tracks --json 2>/dev/null | grep -av '^gc bd:' | scrub \
+    | jq -er 'if type == "array" then [ .[] | objects | select((.issue_type // "") == "convoy")
+        | select(((.status // "") | tostring | ascii_downcase) != "closed") | (.id // "") | tostring | select(. != "") ]
+        | unique | join(",") else error("unread") end' 2>/dev/null) || return 2
+  [ -n "$ids" ] || return 1
+  rows=$(gc bd list --id "$ids" --all --json --limit 0 2>/dev/null) || return 2
+  out=$(printf '%s\n' "$rows" | grep -av '^gc bd:' | scrub | jq -r --arg s "$SUBJECT" --arg want "$ids" '
+      if type != "array" or ([ .[] | (.id // "") | tostring ] | sort) != ($want | split(",") | sort)
+      then error("not the beads asked for") else . end
+      | [ .[] | select((.issue_type // "") == "convoy" and ((.status // "") | tostring | ascii_downcase) != "closed")
+              | select(((.labels // []) | index("owned")) == null)
+              | select([ .dependencies[]? | objects | select(((.type // .dependency_type) // "") == "tracks")
+                         | (.depends_on_id // "") | tostring ] == [$s]) ]
+      | sort_by(((.created_at // "") | tostring), (.id | tostring)) | last | if . == null then "NONE" else .id end' 2>/dev/null) \
+    || return 2
+  case "$out" in "") return 2 ;; NONE) return 1 ;; esac
+  printf '%s' "$out"
+}
 
 # record_action <text> — record an act this sign-off took on the conversation,
 # as a comment in plain words, which the comment that shows the visit on the
@@ -551,16 +612,15 @@ if [ -n "$SUBJECT" ] && [ "$SUBJECT" != "$TRACKED" ]; then
   die "--subject $SUBJECT is not the bead conversation $CONVERSATION tracks ($TRACKED), and its record goes on that bead alone; nothing was written"
 fi
 SUBJECT="$TRACKED"
-# A --waiting-on never names the subject. The subject waits on nothing of its
-# own, and the conversation, which tracks it, cannot wait on it either: bd keeps
-# one edge from a bead onto another, so a stay's blocks edge onto the subject
-# would be refused at the last write, after every gate is answered. A ruling
-# whose work is the subject itself, sent on a formula or taking its
-# recommendation, signs off with --no-wait, and a sitting that would stay for
-# that work ends at the hand-off.
+# A --waiting-on names the subject only in a stay. The subject waits on nothing
+# of its own, so a ruling whose work is the subject itself, sent on a formula or
+# taking its recommendation, signs off with --no-wait. A sitting that stays for
+# that work names the subject, which is then the conversation's wait alone,
+# through the convoy of the subject's dispatch (subject_convoy).
 case " $WAIT_IDS " in
   *" $SUBJECT "*)
-    die "--waiting-on $SUBJECT names the subject itself, which waits on nothing of its own${STAY:+, and conversation $CONVERSATION cannot wait on it, because it tracks $SUBJECT and bd keeps one edge from a bead onto another}; nothing was written. A ruling that sends the subject itself as the work, or takes its recommendation, signs off with --no-wait${STAY:+ and without --stay, so the sitting ends at the hand-off}" ;;
+    [ -n "$STAY" ] \
+      || die "--waiting-on $SUBJECT names the subject itself, which waits on nothing of its own; nothing was written. A ruling that sends the subject itself as the work, or takes its recommendation, signs off with --no-wait, and a sitting that stays for that work names the subject beside --stay" ;;
 esac
 CONV_STATUS=$(printf '%s' "$CONV_ROW" | jq -r '(.status // "") | ascii_downcase')
 HOLDER=$(printf '%s' "$CONV_ROW" | jq -r '(.assignee // "") | tostring')
@@ -848,20 +908,23 @@ if [ -n "$ACCEPT" ]; then
   [ -z "$OTHERS" ] \
     || die "$SUBJECT's recommendation is dispatched only once no other human gate holds it, and $OTHERS still holds it, which this ruling does not answer; nothing was written. Answer that gate in the same ruling once the operator rules on it, or leave the recommendation's gate owed until it is cleared, when Accept on the board takes the recommendation"
 fi
-# A stay's work can be a member of the subject, as an epic's own decomposition
-# is, at any depth. The subject cannot wait on it, since bd refuses a blocks
-# edge from a bead onto its own descendant, so the conversation alone waits on
-# it: the headline leaves it out, and no closer is armed on it, because the
-# subject's members carry its close. Without --stay such a wait reaches the
-# headline, whose edge the store refuses.
-MEMBER_WAITS=""
+# A stay's work can be the subject itself, or a member of the subject, as an
+# epic's own decomposition is, at any depth. The subject waits on neither: on
+# itself it waits on nothing of its own, and bd refuses a blocks edge from a
+# bead onto its own descendant. So the conversation alone waits on each of
+# them: the headline leaves it out, and no closer is armed on it, because the
+# subject's own work or its members carry its close. Without --stay a wait on
+# the subject is refused above, and one on a member reaches the headline, whose
+# edge the store refuses.
+ALONE_WAITS=""
 if [ -n "$STAY" ]; then
   for w in $WAIT_IDS; do
+    if [ "$w" = "$SUBJECT" ]; then ALONE_WAITS="${ALONE_WAITS:+$ALONE_WAITS }$w"; continue; fi
     [ "${w%%-*}" = "${SUBJECT%%-*}" ] || continue
     MEMBER_RC=0
     member_of_subject "$w" >/dev/null || MEMBER_RC=$?
     case "$MEMBER_RC" in
-      0) MEMBER_WAITS="${MEMBER_WAITS:+$MEMBER_WAITS }$w" ;;
+      0) ALONE_WAITS="${ALONE_WAITS:+$ALONE_WAITS }$w" ;;
       1) ;;
       3) stopped "the beads above $w lead more than 50 levels deep, so the sign-off could not tell whether $w is a member of $SUBJECT, which cannot wait on its own member; nothing was written" ;;
       *) stopped "the beads above $w could not be read to tell whether it is a member of $SUBJECT, which cannot wait on its own member; nothing was written" ;;
@@ -891,7 +954,7 @@ CLOSER_ARMED=""
 if [ "$RULED" = yes ]; then
   for w in $WAIT_IDS; do
     [ "$w" != "$SUBJECT" ] && [ "${w%%-*}" = "${SUBJECT%%-*}" ] || continue
-    case " $MEMBER_WAITS " in *" $w "*) continue ;; esac
+    case " $ALONE_WAITS " in *" $w "*) continue ;; esac
     WROW=$(show_row "$w") \
       || stopped "$w, which this ruling leaves $SUBJECT waiting on, could not be read to tell whether it is work whose landing $SUBJECT's validating closer checks; nothing was written"
     printf '%s' "$WROW" | jq -e '(.issue_type // "") == "gate"' >/dev/null 2>&1 \
@@ -1106,6 +1169,21 @@ if [ -n "$STAY" ]; then
   done
   [ -n "$STAY_ON" ] || [ "$PR_ANSWER" = rework ] \
     || die "--stay waits on the work this ruling sent, and each --waiting-on is a gate; nothing was written"
+  # The subject is waited on through the convoy of its dispatch, which a
+  # subject sent before this call already has. Accept's dispatch makes it at
+  # step 4, after this read, so with --accept it is read at step 5 alone.
+  case " $STAY_ON " in
+    *" $SUBJECT "*)
+      if [ -z "$ACCEPT" ] && [ "$(printf '%s' "$SUBJECT_ROW" | jq -r '(.status // "") | tostring | ascii_downcase')" != closed ]; then
+        SC_RC=0
+        subject_convoy >/dev/null || SC_RC=$?
+        case "$SC_RC" in
+          0) ;;
+          1) die "--stay would make conversation $CONVERSATION wait on $SUBJECT through the convoy its dispatch poured its run over, and no open convoy tracks $SUBJECT alone, so $SUBJECT has not been sent; nothing was written. Answer the ruling's gates on a turn that does not sign off (--answer), send $SUBJECT (gc sling <rig>/<pool> $SUBJECT --on <formula>), then run this call again. A ruling that takes the recommendation stays with --accept, whose dispatch makes that convoy" ;;
+          *) stopped "the convoys that track $SUBJECT could not be read to find the one its dispatch poured its run over, which the conversation would wait on; nothing was written" ;;
+        esac
+      fi ;;
+  esac
 fi
 
 # A stay records itself before anything else is written, as `staying: <text>`,
@@ -1229,16 +1307,17 @@ fi
 # 2. The headline. An ARRAY, not a string: this city runs zsh, which does not
 # word-split an unquoted parameter, so "${HEADLINE_WAIT[@]}" is what passes each
 # flag as its own argument, and nothing when it is empty. Its waits are the
-# call's own, less each member of the subject a stay waits on through the
-# conversation alone, and with none left it says --no-wait, as an epic's
-# sign-off on its own decomposition does. An explicit --no-wait stays, so
-# takeaway still refuses it beside a wait. The resolves, the release and the
-# close below cannot be undone, so they wait on takeaway's exit.
+# call's own, less the subject itself and each member of the subject that a stay
+# waits on through the conversation alone, and with none left it says
+# --no-wait, as a sign-off that sends the subject, or an epic's on its own
+# decomposition, does. An explicit --no-wait stays, so takeaway still refuses
+# it beside a wait. The resolves, the release and the close below cannot be
+# undone, so they wait on takeaway's exit.
 HEADLINE_WAIT=("${WAIT[@]+"${WAIT[@]}"}")
-if [ -n "$MEMBER_WAITS" ]; then
+if [ -n "$ALONE_WAITS" ]; then
   HEADLINE_WAIT=()
   for w in $WAIT_IDS; do
-    case " $MEMBER_WAITS " in *" $w "*) ;; *) HEADLINE_WAIT+=(--waiting-on "$w") ;; esac
+    case " $ALONE_WAITS " in *" $w "*) ;; *) HEADLINE_WAIT+=(--waiting-on "$w") ;; esac
   done
   case " ${WAIT[*]} " in *" --no-wait "*) HEADLINE_WAIT+=(--no-wait) ;; esac
   [ "${#HEADLINE_WAIT[@]}" -gt 0 ] || HEADLINE_WAIT=(--no-wait)
@@ -1378,12 +1457,36 @@ if [ "$RULED" = yes ]; then
     # conversation that already reads open, as on a re-run or a second stay
     # from a sitting woken early, the write changes nothing, and its guard is
     # what finds a dismiss that closed the conversation while this call ran.
+    # The line names the subject itself, and the edge for it goes onto the
+    # convoy of its dispatch, read here, before the line, so a stay that finds
+    # none stops with its first line still newest. A subject that has closed
+    # takes no edge, as work that closed before its edge needs none.
+    SUBJECT_ON=""
+    case " $STAY_ON " in
+      *" $SUBJECT "*)
+        SUB_NOW=$(show_row "$SUBJECT") \
+          || stopped "$SUBJECT could not be read to tell whether it has closed, before the conversation waits on its dispatch; every gate above is answered, the conversation is not yet left to wait, and a re-run writes the wait"
+        if [ "$(printf '%s' "$SUB_NOW" | jq -r '(.status // "") | tostring | ascii_downcase')" != closed ]; then
+          SC_RC=0
+          SUBJECT_ON=$(subject_convoy) || SC_RC=$?
+          case "$SC_RC" in
+            0) ;;
+            1) stopped "no open convoy tracks $SUBJECT alone, so no dispatch of $SUBJECT poured a run for conversation $CONVERSATION to wait on${ACCEPT:+, and the take of the recommendation above poured none}; every gate above is answered, and the conversation does not stay. Send $SUBJECT and run this call again, or sign off without --stay to end at the hand-off" ;;
+            *) stopped "the convoys that track $SUBJECT could not be read to find the one its dispatch poured its run over; every gate above is answered, the conversation is not yet left to wait, and a re-run writes the wait" ;;
+          esac
+        fi ;;
+    esac
     STAY_LINE="staying: $STAY (waits on $(printf '%s' "$STAY_ON" | sed 's/ /, /g'))"
     gc bd update "$CONVERSATION" --append-notes "$STAY_LINE" >/dev/null 2>&1 \
       || stopped "the store refused the staying: line that names the work conversation $CONVERSATION waits on, which the sitting's entry reads to tell a stay that stopped short from one whose work is out; every gate above is answered, the conversation is not yet left to wait, and a re-run writes it"
     for w in $STAY_ON; do
-      gc bd dep add "$CONVERSATION" "$w" --type blocks >/dev/null 2>&1 \
-        || stopped "the store refused the edge that makes conversation $CONVERSATION wait on $w, so it would not wake its sitting when $w closes; every gate above is answered, its staying: line names the work, the conversation is not yet left to wait, and a re-run writes the edge"
+      ON="$w"; VIA=""
+      if [ "$w" = "$SUBJECT" ]; then
+        [ -n "$SUBJECT_ON" ] || continue
+        ON="$SUBJECT_ON"; VIA=", the convoy that closes with $SUBJECT,"
+      fi
+      gc bd dep add "$CONVERSATION" "$ON" --type blocks >/dev/null 2>&1 \
+        || stopped "the store refused the edge that makes conversation $CONVERSATION wait on $ON$VIA so it would not wake its sitting when $ON closes; every gate above is answered, its staying: line names the work, the conversation is not yet left to wait, and a re-run writes the edge"
     done
     STAY_RC=0
     gc bd update "$CONVERSATION" --if-assignee "$HOLDER" --if-status "$CONV_STATUS" --status open >/dev/null 2>&1 || STAY_RC=$?
@@ -1407,7 +1510,7 @@ if [ "$RULED" = yes ]; then
     # sleep spares assigned work). So the sitting runs its entry now, which
     # reads the stay as waiting while the work is out and as returned once it
     # has closed.
-    echo "STAYING conversation $CONVERSATION on $SUBJECT: it waits on $STAY_ON under $HOLDER. Run the entry now: it reads waiting while that work is out, and returned once it has closed, which the sitting then carries out at once"
+    echo "STAYING conversation $CONVERSATION on $SUBJECT: it waits on $STAY_ON${SUBJECT_ON:+ ($SUBJECT through convoy $SUBJECT_ON, which Gas City closes once $SUBJECT closes)} under $HOLDER. Run the entry now: it reads waiting while that work is out, and returned once it has closed, which the sitting then carries out at once"
     tell_approval
     exit 0
   fi

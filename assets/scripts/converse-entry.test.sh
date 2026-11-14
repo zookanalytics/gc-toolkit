@@ -7,9 +7,10 @@
 # stay that stopped short in each window its writes leave, with its work open
 # and with it closed, a second stay with an earlier stay's text, a hold claimed
 # back over a second stay that stopped short, while the earlier work is out and
-# once it closes, the return of the work, no conversation at all, Gas City
-# stopping the session whatever its conversation's state, and each way the
-# state can fail to read, which is never an answer to drain on.
+# once it closes, the return of the work, a stay on the conversation's own
+# subject through the convoy of the subject's dispatch, no conversation at all,
+# Gas City stopping the session whatever its conversation's state, and each way
+# the state can fail to read, which is never an answer to drain on.
 #
 # Hermetic: stubs gc and gctk, reads the repo only; no city, no network.
 
@@ -36,7 +37,9 @@ mkdir -p "$BIN" "$FIXDIR"
 
 # The gc stub answers the three reads the entry makes from fixtures, logs every
 # call, and refuses anything else, so a write the entry should never make fails
-# the case that reaches it.
+# the case that reaches it. A list by --id names one bead or several, joined by
+# commas, and answers the rows the fixtures hold, as bd leaves out an id it
+# does not find; one id it does not find is an error.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 printf '%s\n' "$*" >>"$FIXDIR/calls"
 case "$*" in
@@ -44,11 +47,13 @@ case "$*" in
     [ -r "$FIXDIR/hook" ] && cat "$FIXDIR/hook"
     [ ! -r "$FIXDIR/hook.err" ] || cat "$FIXDIR/hook.err" >&2
     exit "$(cat "$FIXDIR/hook.rc" 2>/dev/null || echo 0)" ;;
-  "bd list --id "*" --all --json")
-    id=$4
-    [ -r "$FIXDIR/row-$id.json" ] || { echo "Error: no issue found matching $id" >&2; exit 1; }
+  "bd list --id "*" --all "*"--json"*)
+    ids=(); files=()
+    IFS=, read -r -a ids <<<"$4"
+    for id in "${ids[@]}"; do [ ! -r "$FIXDIR/row-$id.json" ] || files+=("$FIXDIR/row-$id.json"); done
+    [ "${#ids[@]}" -gt 1 ] || [ "${#files[@]}" -gt 0 ] || { echo "Error: no issue found matching $4" >&2; exit 1; }
     [ ! -r "$FIXDIR/notice" ] || cat "$FIXDIR/notice"
-    jq -c '[.]' "$FIXDIR/row-$id.json" ;;
+    if [ "${#files[@]}" -gt 0 ]; then jq -sc '.' "${files[@]}"; else printf '[]\n'; fi ;;
   "bd list --assignee "*" --status open,in_progress --json")
     [ -r "$FIXDIR/assigned" ] || { echo "Error: list failed" >&2; exit 1; }
     cat "$FIXDIR/assigned" ;;
@@ -109,6 +114,14 @@ assigned() { jq -sc '.' "$@" >"$FIXDIR/assigned"; }
 # item <id> <status> — the list row of a bead of work, as the entry reads the
 # status of one a stay names with no edge onto it.
 item() { jq -nc --arg id "$1" --arg s "$2" '{id: $id, issue_type: "task", status: $s}' >"$FIXDIR/row-$1.json"; }
+# convoy <id> <status> <tracked>... — the list row of a convoy that tracks those
+# beads, as the input convoy of a dispatch tracks the bead it was poured for.
+convoy() {
+  local id=$1 st=$2
+  shift 2
+  jq -nc --arg id "$id" --arg s "$st" --args '{id: $id, issue_type: "convoy", status: $s, title: ("input convoy for " + $ARGS.positional[0]),
+      dependencies: [ $ARGS.positional[] | {issue_id: $id, depends_on_id: ., type: "tracks"} ]}' "$@" >"$FIXDIR/row-$id.json"
+}
 # enter — run the script as a sitting would; prints stdout, leaves the status
 # in $FIXDIR/rc and the calls it made in $FIXDIR/calls.
 enter() {
@@ -340,6 +353,56 @@ OUT=$(enter)
 is "a hold after a stay whose work is still out stands" "$(line ENTRY | cut -d: -f1)" "ENTRY interrupted"
 is "…and goes on with the hold" "$(line NEXT=)" "NEXT=converse-continue"
 has "…printing the last hand-back" "$OUT" "tk-s — the follow-up"
+
+echo "── a stay on its own subject waits through the convoy of the subject's dispatch ──"
+# The conversation tracks its subject and cannot wait on it through an edge of
+# its own, so converse-signoff.sh --stay makes it wait on the convoy the
+# subject's dispatch poured its run over, which Gas City closes once the
+# subject closes. The stay's line names the subject, and an edge onto a convoy
+# that tracks a bead the line names is the wait on that bead.
+fresh; hook drain; conv tk-c open "staying: the dialog keeps what is typed (waits on tk-s)" tracks:tk-s blocks:tk-cv
+convoy tk-cv open tk-s; holds tk-c tk-cv
+assigned "$FIXDIR/row-tk-c.json"
+OUT=$(enter)
+is "a stay on its subject, the convoy open, is waiting" "$(line ENTRY | cut -d: -f1)" "ENTRY waiting"
+has "…on the convoy" "$(line ENTRY)" "(tk-cv)"
+is "…naming the subject as its work" "$(line WORK=)" "WORK=tk-s"
+is "…and what was agreed" "$(line AGREED=)" "AGREED=the dialog keeps what is typed"
+has "…after reading the convoy its edge reaches" "$(cat "$FIXDIR/calls")" "bd list --id tk-cv --all --include-gates --include-infra --include-templates --json --limit 0"
+hasnt "…and not the subject's status, which the convoy stands for" "$(cat "$FIXDIR/calls")" "bd list --id tk-s "
+fresh; hook work ready_assignment tk-c; conv tk-c in_progress "staying: the dialog keeps what is typed (waits on tk-s)" tracks:tk-s blocks:tk-cv
+convoy tk-cv closed tk-s; holds tk-c
+OUT=$(enter)
+is "once the convoy closes with the subject, the stay is the return" "$(line ENTRY | cut -d: -f1)" "ENTRY returned"
+is "…naming the subject as the work that returned" "$(line WORK=)" "WORK=tk-s"
+fresh; hook drain; conv tk-c open "staying: keep the API (waits on tk-s, tk-w)" tracks:tk-s blocks:tk-cv blocks:tk-w
+convoy tk-cv open tk-s; item tk-w open; holds tk-c tk-cv tk-w
+assigned "$FIXDIR/row-tk-c.json"
+enter >/dev/null
+is "a stay on its subject beside other work waits on both" "$(line ENTRY | cut -d: -f1)" "ENTRY waiting"
+is "…naming both" "$(line WORK=)" "WORK=tk-s tk-w"
+has "…reading every bead its edges reach in one call" "$(cat "$FIXDIR/calls")" "bd list --id tk-cv,tk-w --all"
+# Stopped after the line that names the subject, before its edge: the subject's
+# own status decides, as for any work with no edge.
+fresh; hook work existing_assignment tk-c; conv tk-c in_progress "staying: keep the API (waits on tk-s)" tracks:tk-s; holds tk-c; item tk-s open
+enter >/dev/null
+is "a stay on its subject stopped before its edge, the subject open, is interrupted" "$(line ENTRY | cut -d: -f1)" "ENTRY interrupted"
+has "…naming the subject it does not wait on yet" "$(line ENTRY)" "wait on tk-s, which is still out"
+fresh; hook work existing_assignment tk-c; conv tk-c in_progress "staying: keep the API (waits on tk-s)" tracks:tk-s; holds tk-c; item tk-s closed
+enter >/dev/null
+is "…and with the subject closed, it is the return" "$(line ENTRY | cut -d: -f1)" "ENTRY returned"
+# A convoy that tracks other beads, and not the subject, is no wait on it.
+fresh; hook drain; conv tk-c in_progress "staying: keep the API (waits on tk-s)" tracks:tk-s blocks:tk-w
+convoy tk-w open tk-other; item tk-s open; holds tk-c tk-w
+assigned "$FIXDIR/row-tk-c.json"
+enter >/dev/null
+is "an edge onto a convoy that tracks another bead is no wait on the subject" "$(line ENTRY | cut -d: -f1)" "ENTRY interrupted"
+has "…so the stay stopped before its wait on the subject" "$(line ENTRY)" "wait on tk-s, which is still out"
+fresh; hook drain; conv tk-c open "staying: keep the API (waits on tk-s)" tracks:tk-s blocks:tk-cv; holds tk-c tk-cv
+assigned "$FIXDIR/row-tk-c.json"
+enter >/dev/null
+is "a convoy the conversation waits on that does not read is no answer" "$(line ENTRY | cut -d: -f1)" "ENTRY unreadable"
+is "…exiting 1" "$(rc)" 1
 
 echo "── none: no conversation is this session's ──"
 fresh; hook drain; printf '[]' >"$FIXDIR/assigned"
