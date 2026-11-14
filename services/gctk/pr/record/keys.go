@@ -13,8 +13,16 @@ import (
 // pr_number, merged_target, merged_sha, existing_pr, blocked_reason and
 // rejection_reason) keep those shell writers, whose definitions stay in
 // lifecycle/lifecycle.toml's [metadata.merge_identity], until the merge
-// member's retirement removes them.
+// member's retirement removes them. So does branch, the merge identity's
+// source branch, which the work formula's workspace-setup writes, and which a
+// review ask names through NameBranch.
 var (
+	branchKey = ledger.Declare("branch", ledger.String,
+		"The source branch a work bead's change is on, which the work formula's workspace-setup writes, and "+
+			"the PR's branch on each ask gctk review ask files. A bead carrying it is in flight. The pr "+
+			"evaluator and the landing order hold a PR whose head branch is not this one, a PR's composition "+
+			"finds the beads whose work the branch carries by it, and a review run takes only an ask that names "+
+			"the branch of its PR.")
 	mergeResultKey = ledger.Declare("merge_result", ledger.String,
 		"Where the work a bead carries stands on its way to its target. On Gas Town's pending record it reads "+
 			Pending+", "+HeadChanged+", "+Merged+", "+Incomplete+" or one of the exceptions, "+Invalid+", "+
@@ -76,7 +84,16 @@ var (
 	PRURL     = prURLKey.View()
 	PRNumber  = prNumberKey.View()
 	Rejection = rejectionReasonKey.View()
+	Branch    = branchKey.View()
 )
+
+// OnBranch selects the beads whose branch is branch: the ones whose work the
+// branch carries, and the asks on its PR.
+func OnBranch(branch string) ledger.Selection { return ledger.Matching(branchKey, branch) }
+
+// NameBranch names, in w, the branch the bead's work is on, as an ask names
+// the branch of the PR it asks a change of.
+func NameBranch(w *ledger.Write, branch string) { branchKey.Set(w, branch) }
 
 // OnTarget selects the beads whose merged_target is branch: the ones whose PR
 // is to merge into it, and the ones whose work landed on it.

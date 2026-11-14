@@ -40,7 +40,7 @@ type onBranch struct {
 // templates, which carry no work. A read that fails fails the whole set, since
 // a short list published as the whole one would drop beads the body names.
 func branchBeads(l *ledger.Ledger, branch string) ([]onBranch, error) {
-	direct, err := l.Find(ledger.Matching(branchKey, branch).WithClosed())
+	direct, err := l.Find(record.OnBranch(branch).WithClosed())
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +61,7 @@ func branchBeads(l *ledger.Ledger, branch string) ([]onBranch, error) {
 		if err != nil || !worked {
 			return err
 		}
-		own, _, err := branchKey.Get(r)
+		own, _, err := record.Branch.Get(r)
 		if err != nil {
 			return err
 		}

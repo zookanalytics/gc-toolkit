@@ -353,7 +353,7 @@ func (u *run) one(id string) (RunOutcome, error) {
 	if !rec.Marked {
 		return RunOutcome{Bead: id, Action: ActSkipped, Detail: "the bead no longer carries the marker"}, nil
 	}
-	branch, _, err := branchKey.Get(r)
+	branch, _, err := record.Branch.Get(r)
 	if err != nil {
 		return RunOutcome{Bead: id, Action: ActFailed, Detail: "the branch did not read: " + err.Error()}, nil
 	}

@@ -9,6 +9,7 @@
 package fake
 
 import (
+	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
@@ -54,10 +55,11 @@ type Store struct {
 	marked []string
 	ready  map[string]bool
 	writes []Write
+	filed  []Write
 
 	// RowsErr, BlockedErr, FindErr and ReadyErr fail the matching read when
-	// set, and UpdateErr fails every write.
-	RowsErr, BlockedErr, FindErr, ReadyErr, UpdateErr error
+	// set, UpdateErr fails every update, and CreateErr every create.
+	RowsErr, BlockedErr, FindErr, ReadyErr, UpdateErr, CreateErr error
 
 	// OnFind, when set, runs before each find the store takes, outside the
 	// store's lock, and fails nothing. A test lands another actor's write in it.
@@ -328,6 +330,100 @@ func (s *Store) Update(id string, args ...string) (string, error) {
 	s.rows[id] = b
 	s.writes = append(s.writes, Write{ID: id, Args: slices.Clone(args)})
 	return "", nil
+}
+
+// Create files a bead from a create's arguments, as bd does: the title, its
+// type (-t, task by default), --description, --metadata as a JSON object of
+// strings, --parent, and --deps as type:id pairs, where blocks:<id> gives <id> a
+// blocks edge onto the new bead and any other type gives the new bead its own
+// edge onto <id>. The new bead is open and takes the id fake-<n>, the nth bead
+// filed. A create naming a blocks or parent bead the store does not hold, or an
+// argument bd's create takes that this store does not read, files nothing.
+func (s *Store) Create(args ...string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.CreateErr != nil {
+		return "", s.CreateErr
+	}
+	b := Bead{Status: "open", IssueType: "task", Metadata: map[string]string{}}
+	var deps []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if !strings.HasPrefix(a, "-") {
+			if b.Title != "" {
+				return "", fmt.Errorf("fake store: create takes one title, got %q and %q", b.Title, a)
+			}
+			b.Title = a
+			continue
+		}
+		name, value, inline := strings.Cut(a, "=")
+		if !inline {
+			if i+1 >= len(args) {
+				return "", fmt.Errorf("fake store: %s needs a value", name)
+			}
+			i++
+			value = args[i]
+		}
+		switch name {
+		case "-t", "--type":
+			b.IssueType = value
+		case "-d", "--description":
+			b.Description = value
+		case "--metadata":
+			var meta map[string]string
+			if err := json.Unmarshal([]byte(value), &meta); err != nil {
+				return "", fmt.Errorf("fake store: --metadata %q is not an object of strings: %w", value, err)
+			}
+			maps.Copy(b.Metadata, meta)
+		case "--parent":
+			deps = append(deps, gcbd.EdgeParentChild+":"+value)
+		case "--deps":
+			deps = append(deps, strings.Split(value, ",")...)
+		default:
+			return "", fmt.Errorf("fake store: create takes no %s", name)
+		}
+	}
+	if b.Title == "" {
+		return "", fmt.Errorf("fake store: a create names no title")
+	}
+	b.ID = fmt.Sprintf("fake-%d", len(s.filed)+1)
+	blocked := map[string]Bead{}
+	for _, d := range deps {
+		typ, id, ok := strings.Cut(d, ":")
+		if !ok || id == "" {
+			return "", fmt.Errorf("fake store: --deps %q is not type:id", d)
+		}
+		if typ == gcbd.EdgeBlocks {
+			far, held := s.rows[id]
+			if !held {
+				return "", fmt.Errorf("fake store: no bead %s to block", id)
+			}
+			if prior, ok := blocked[id]; ok {
+				far = prior
+			}
+			far.Edges = append(slices.Clone(far.Edges), gcbd.Edge{ID: b.ID, Type: gcbd.EdgeBlocks})
+			blocked[id] = far
+			continue
+		}
+		if _, held := s.rows[id]; typ == gcbd.EdgeParentChild && !held {
+			return "", fmt.Errorf("fake store: no parent %s", id)
+		}
+		b.Edges = append(b.Edges, gcbd.Edge{ID: id, Type: typ})
+	}
+	for id, far := range blocked {
+		s.rows[id] = far
+	}
+	s.rows[b.ID] = b
+	s.filed = append(s.filed, Write{ID: b.ID, Args: slices.Clone(args)})
+	return b.ID, nil
+}
+
+// Filed returns every create the store took, in order, each under the id it
+// gave the new bead.
+func (s *Store) Filed() []Write {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.filed)
 }
 
 // row renders b as gcbd decodes a `gc bd show --json` row, whose edges carry

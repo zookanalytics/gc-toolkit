@@ -23,6 +23,8 @@ package ledger
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -85,7 +87,16 @@ type Write struct {
 	status string
 	note   string
 	guard  *guard
+	file   *filing
 	err    error
+}
+
+// filing is what a write that files a new bead adds: its issue type, its
+// description, the beads it blocks and the bead it was found from.
+type filing struct {
+	issueType, description string
+	blocks                 []string
+	from                   string
 }
 
 // guard is the status and assignee a write lands under.
@@ -124,6 +135,20 @@ func (w *Write) Status(status string) { w.status = status }
 // Note appends text to the bead's notes in the same write, so the act and its
 // record land together or not at all. A later Note replaces an earlier one.
 func (w *Write) Note(text string) { w.note = text }
+
+// WorkRecord gives the bead the runtime's work record in the same write: its
+// outcome, which reads shipped for work that landed and no-op for none, and,
+// unless commit is empty, the commit that carries the work. The keys are Gas
+// City's (gc.work_outcome and gc.work_commit, lifecycle/lifecycle.toml,
+// [metadata.runtime_owned]), whose work-record gate reads them as a plain task
+// bead closes, so no domain declares them, and the act that closes such a bead
+// sets them here.
+func (w *Write) WorkRecord(outcome, commit string) {
+	w.set("gc.work_outcome", outcome)
+	if commit != "" {
+		w.set("gc.work_commit", commit)
+	}
+}
 
 // Guard makes the write land only while the bead still has status and assignee,
 // "" for unassigned, which bd checks in the write's own transaction. A write
@@ -164,6 +189,9 @@ func (l *Ledger) Commit(w *Write) error {
 	if w.err != nil {
 		return w.err
 	}
+	if w.file != nil {
+		return fmt.Errorf("ledger: a write that files a new bead lands through Filed")
+	}
 	if len(w.sets)+len(w.unsets) == 0 && w.status == "" && w.title == "" && w.note == "" {
 		return fmt.Errorf("ledger: a write to %s carries no key", w.id)
 	}
@@ -174,4 +202,107 @@ func (l *Ledger) Commit(w *Write) error {
 		return fmt.Errorf("ledger: the write to %s did not land: %w", w.id, err)
 	}
 	return nil
+}
+
+// File starts an act that files a new bead titled title, of issue type typ.
+// Its keys, its description and its edges ride the one create Filed makes.
+func (l *Ledger) File(title, typ string) *Write {
+	return &Write{title: title, file: &filing{issueType: typ}}
+}
+
+// Description gives the bead a write files its description.
+func (w *Write) Description(text string) {
+	if w.file == nil {
+		w.fail(errors.New("ledger: a description rides only a write that files a new bead"))
+		return
+	}
+	w.file.description = text
+}
+
+// Blocks makes the bead a write files block id: id gains a blocks edge onto it,
+// a wait that holds id until the new bead closes.
+func (w *Write) Blocks(id string) {
+	if w.file == nil {
+		w.fail(errors.New("ledger: a blocks edge rides only a write that files a new bead"))
+		return
+	}
+	w.file.blocks = append(w.file.blocks, id)
+}
+
+// From records the bead a write files was found from, as its discovered-from
+// edge, which is no wait and holds nothing.
+func (w *Write) From(id string) {
+	if w.file == nil {
+		w.fail(errors.New("ledger: a discovered-from edge rides only a write that files a new bead"))
+		return
+	}
+	w.file.from = id
+}
+
+// Filed makes w, an act File started, as one create, and returns the id the
+// store gave the new bead. It gives the bead no parent, assignee or route.
+// Each bead the new one blocks is read first in the ledger's store, and a bead
+// the store does not hold refuses the create, because bd reports success for
+// an edge onto an id its store does not hold, and the edge holds nothing. A
+// create that fails may still have landed (gcbd.Store.Create), so a caller
+// that retries finds the bead an earlier attempt filed before it files again.
+func (l *Ledger) Filed(w *Write) (string, error) {
+	if w.err != nil {
+		return "", w.err
+	}
+	f := w.file
+	switch {
+	case f == nil:
+		return "", errors.New("ledger: a write to a bead that exists lands through Commit")
+	case w.title == "":
+		return "", errors.New("ledger: a new bead needs a title")
+	case len(w.unsets) > 0 || w.status != "" || w.note != "" || w.guard != nil:
+		return "", errors.New("ledger: a new bead's create carries its keys, description and edges alone")
+	}
+	if len(f.blocks) > 0 {
+		rows, err := l.store.Rows(f.blocks)
+		if err != nil {
+			return "", fmt.Errorf("ledger: the beads a new bead blocks did not read, so nothing was filed: %w", err)
+		}
+		held := map[string]bool{}
+		for _, r := range rows {
+			held[r.ID] = true
+		}
+		for _, id := range f.blocks {
+			if !held[id] {
+				return "", fmt.Errorf("ledger: the store holds no %s for a new bead to block, so nothing was filed", id)
+			}
+		}
+	}
+	args := []string{w.title, "-t", f.issueType}
+	if f.description != "" {
+		args = append(args, "--description", f.description)
+	}
+	if len(w.sets) > 0 {
+		meta := make(map[string]string, len(w.sets))
+		for _, kv := range w.sets {
+			k, v, _ := strings.Cut(kv, "=")
+			meta[k] = v
+		}
+		raw, err := json.Marshal(meta)
+		if err != nil {
+			return "", fmt.Errorf("ledger: a new bead's keys did not encode: %w", err)
+		}
+		args = append(args, "--metadata", string(raw))
+	}
+	var deps []string
+	for _, id := range f.blocks {
+		deps = append(deps, "blocks:"+id)
+	}
+	if f.from != "" {
+		deps = append(deps, "discovered-from:"+f.from)
+	}
+	if len(deps) > 0 {
+		args = append(args, "--deps", strings.Join(deps, ","))
+	}
+	id, err := l.store.Create(args...)
+	if err != nil {
+		return "", fmt.Errorf("ledger: the create may not have landed: %w", err)
+	}
+	return id, nil
 }

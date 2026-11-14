@@ -30,6 +30,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/review"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
@@ -104,14 +105,6 @@ type Answer struct {
 	Conditions []Condition `json:"conditions"`
 }
 
-// ReviewResult is one result of the review loop: the head and the target it
-// judged, and whether the review passed there.
-type ReviewResult struct {
-	Head   string `json:"head"`
-	Target string `json:"target"`
-	Passed bool   `json:"passed"`
-}
-
 // GitHub is the reads the evaluator makes of GitHub, which the gh
 // adapter's Client carries out and its fake answers.
 type GitHub interface {
@@ -162,7 +155,11 @@ func Ready(src Sources, bead string) (Answer, error) {
 	if err == nil {
 		err = serr
 	}
-	branch := read(branchKey)
+	branch, _, berr := record.Branch.Get(r)
+	if err == nil {
+		err = berr
+	}
+	branch = strings.TrimSpace(branch)
 	holds := []string{read(mergeHoldKey), read(rebaseHoldKey)}
 	rc := receipts{
 		review: mark(read(reviewWatermarkKey)), comment: mark(read(commentWatermarkKey)),
@@ -170,7 +167,7 @@ func Ready(src Sources, bead string) (Answer, error) {
 		reviewAnswered: mark(read(reviewAnsweredKey)), commentAnswered: mark(read(commentAnsweredKey)),
 	}
 	since := read(provenanceKey)
-	results, _, rerr := reviewResultsKey.Get(r)
+	results, _, rerr := review.Results.Get(r)
 	if err == nil {
 		err = rerr
 	}
@@ -355,7 +352,7 @@ func identityGaps(p *gh.PullRequest, rawURL string, number int, repo, branch, ta
 
 // passedAt reports whether a review result passed at head into target. A result
 // for another head or another target counts for nothing.
-func passedAt(results []ReviewResult, head, target string) bool {
+func passedAt(results []review.Result, head, target string) bool {
 	for _, r := range results {
 		if r.Head == head && r.Target == target && r.Passed {
 			return true

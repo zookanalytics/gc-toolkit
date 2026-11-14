@@ -17,11 +17,8 @@
   {
     "name": "branch",
     "type": "string",
-    "readers": [
-      "pr",
-      "waits"
-    ],
-    "doc": "The source branch a work bead's change is on, which the work formula's workspace-setup writes (lifecycle/lifecycle.toml, [metadata.merge_identity]). A bead carrying it is in flight. The pr evaluator and the landing order hold a PR whose head branch is not this one. A composition reads it for the PR's source branch, and finds the beads whose work the branch carries by it."
+    "owner": "pr/record",
+    "doc": "The source branch a work bead's change is on, which the work formula's workspace-setup writes, and the PR's branch on each ask gctk review ask files. A bead carrying it is in flight. The pr evaluator and the landing order hold a PR whose head branch is not this one, a PR's composition finds the beads whose work the branch carries by it, and a review run takes only an ask that names the branch of its PR."
   },
   {
     "name": "check_set",
@@ -147,6 +144,14 @@
     "doc": "Why the bead was armed, as free text."
   },
   {
+    "name": "gc.final_disposition",
+    "type": "string",
+    "readers": [
+      "review"
+    ],
+    "doc": "How the runtime finally closed a control bead. A review run's loop that reads hard_fail was ended by a step's hard failure, so the run records no result."
+  },
+  {
     "name": "gc.formula_contract",
     "type": "string",
     "readers": [
@@ -174,18 +179,36 @@
     "name": "gc.kind",
     "type": "string",
     "readers": [
+      "review",
       "waits"
     ],
-    "doc": "The runtime's kind of a bead. A root reading workflow is a run's root."
+    "doc": "The runtime's kind of a bead. A root reading workflow is a run's root. A review run's loop is the bead of its run that reads ralph, the control bead of its checked step."
+  },
+  {
+    "name": "gc.outcome",
+    "type": "string",
+    "readers": [
+      "review"
+    ],
+    "doc": "The terminal disposition a step records. A review run's loop that closed reading pass passed its check."
+  },
+  {
+    "name": "gc.output_json",
+    "type": "string",
+    "readers": [
+      "review"
+    ],
+    "doc": "A step's structured output, one JSON object, which the step writes before it closes. A review run's triage, lanes and rule-and-repair each write theirs in the shape the review domain declares."
   },
   {
     "name": "gc.root_bead_id",
     "type": "string",
     "readers": [
       "arm",
+      "review",
       "waits"
     ],
-    "doc": "The workflow root a step was poured under. The start reads the fence of each bead poured under a root to tell a pour Gas City left unfinished."
+    "doc": "The workflow root a step was poured under. The start reads the fence of each bead poured under a root to tell a pour Gas City left unfinished. A review run's outputs are on the beads that name its root."
   },
   {
     "name": "gc.routed_to",
@@ -193,9 +216,10 @@
     "readers": [
       "arm",
       "listing",
-      "pr"
+      "pr",
+      "review"
     ],
-    "doc": "gctk bead arm refuses a routed bead, which is dispatched already. The pool, agent or person a bead is routed to (lifecycle/lifecycle.toml, ROUTE and [metadata.runtime_owned]). A bead on a branch that a pool still holds has not pushed its work. The pool or agent a bead is routed to, written by lifecycle.sh's --route and by the script or formula that owns the bead's dispatch (lifecycle/lifecycle.toml, ROUTE and [metadata.runtime_owned])."
+    "doc": "gctk bead arm refuses a routed bead, which is dispatched already. An ask carries none, so no pool claims it and the review run is the one that works it. The pool, agent or person a bead is routed to (lifecycle/lifecycle.toml, ROUTE and [metadata.runtime_owned]). A bead on a branch that a pool still holds has not pushed its work. The pool or agent a bead is routed to, written by lifecycle.sh's --route and by the script or formula that owns the bead's dispatch (lifecycle/lifecycle.toml, ROUTE and [metadata.runtime_owned])."
   },
   {
     "name": "gc.step_ref",
@@ -206,12 +230,44 @@
     "doc": "The formula step a step bead carries out, as \u003cformula\u003e.\u003cstep\u003e. A live run with an open step whose ref ends in .load-context has not passed load-context."
   },
   {
+    "name": "gc.var.head",
+    "type": "string",
+    "readers": [
+      "review"
+    ],
+    "doc": "A review run's head var: the head the refinery validated, the run's first head."
+  },
+  {
     "name": "gc.var.issue",
     "type": "string",
     "readers": [
       "waits"
     ],
     "doc": "The bead a classic molecule's issue variable names, which a root that names no input convoy works. A root whose input convoy tracks another bead works none."
+  },
+  {
+    "name": "gc.var.pr_bead",
+    "type": "string",
+    "readers": [
+      "review"
+    ],
+    "doc": "A review run's pr_bead var: the bead that owns the PR the run judges."
+  },
+  {
+    "name": "gc.var.shadow",
+    "type": "string",
+    "readers": [
+      "review"
+    ],
+    "doc": "A review run's shadow var. Reading true, the run writes nothing outside itself, so gctk review record writes no result and closes no ask."
+  },
+  {
+    "name": "gc.var.target",
+    "type": "string",
+    "readers": [
+      "review"
+    ],
+    "doc": "A review run's target var: the branch the PR merges into, the target its result is for."
   },
   {
     "name": "gc.work_outcome",
@@ -388,12 +444,16 @@
     "doc": "Why the work was sent back to the refinery: a head it has not validated, or a record left half written. A publication clears it."
   },
   {
+    "name": "review_checks",
+    "type": "string",
+    "owner": "review",
+    "doc": "On an ask, the checks it sends back, a comma list of names from the check index at the PR's validated head, which gctk review ask writes as it files the ask. A review run picks each at the first head it judges once it can take the ask. Absent, the ask sends back no check."
+  },
+  {
     "name": "review_results",
     "type": "json",
-    "readers": [
-      "pr"
-    ],
-    "doc": "The review loop's results on the bead that owns a PR, a JSON array of {head, target, passed}, one for each head and target the loop judged. The evaluator counts only a result for the PR's live head and target."
+    "owner": "review",
+    "doc": "The review loop's results on the bead that owns a PR, a JSON array of {head, target, passed}, one for each head and target a run judged, which gctk review record writes under the store's record lock, replacing the entry for the same head and target. The pr evaluator counts only a result for the PR's live head and target, and reads none while the key is absent."
   },
   {
     "name": "rig_check.lint",

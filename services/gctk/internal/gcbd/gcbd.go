@@ -631,6 +631,59 @@ func (c *Client) Update(id string, args ...string) (string, error) {
 	return strings.TrimRight(string(out), "\n"), err
 }
 
+// Create runs one `gc bd create` with args and --json, returning the id bd's
+// reply names. A create that exits non-zero, or whose reply names no bead, is
+// an error that carries bd's message, and either may still have written: bd
+// answers a create whose commit result it lost with the same reply and exit 1
+// as a refusal (cmd/bd/create.go).
+func (c *Client) Create(args ...string) (string, error) {
+	cmd := c.command(append(append([]string{"bd", "create"}, args...), "--json")...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	id, why := createReply(out)
+	if err == nil && id != "" {
+		return id, nil
+	}
+	if why == "" {
+		why = strings.TrimSpace(stderr.String())
+	}
+	if err == nil {
+		err = errors.New("gc bd create's reply names no bead")
+	}
+	if why != "" {
+		return "", fmt.Errorf("%w: %s", err, why)
+	}
+	return "", err
+}
+
+// createReply reads a `gc bd create --json` reply: the id of the bead it
+// names, as an object or an array holding one, or the message of bd's error
+// object, which says why the create failed and not whether it wrote.
+func createReply(out []byte) (id, why string) {
+	var v any
+	if json.NewDecoder(bytes.NewReader(Scrub(out))).Decode(&v) != nil {
+		return "", ""
+	}
+	if arr, ok := v.([]any); ok {
+		if len(arr) == 0 {
+			return "", ""
+		}
+		v = arr[0]
+	}
+	obj, ok := v.(map[string]any)
+	if !ok {
+		return "", ""
+	}
+	if s, ok := obj["id"].(string); ok && s != "" {
+		return s, ""
+	}
+	if s, ok := obj["error"].(string); ok {
+		return "", strings.TrimSpace(s)
+	}
+	return "", ""
+}
+
 // ExitCode reports the exit status behind an Update error. A command that could
 // not be run at all reports 127, which is the status a shell caller would have
 // seen for the same failure.
