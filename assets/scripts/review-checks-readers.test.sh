@@ -158,33 +158,17 @@ TRIAGE_GATE=triage
 FIXTURE
 eq "$(lists "$TMP/not-lists.sh")" "" "a comment, skill names, file names and one check are not lists"
 
-# The rig's docs/review-demo.md is also its demo guide, which every demo path
-# reads at the commit it shows. Each path that reads it asks the one reader:
-# the library both captures take --guide through, the drafter's skill and
-# mol-rig-demo's prepare-script. The PR flow and mol-rig-demo's capture hand the
-# capture --guide, so they read it through the library, and a sitting's live copy
-# of a rig's UI takes its serve command from the library's reader.
+# The rig's docs/review-demo.md is also its demo guide, plain text that the demo
+# paths read at the commit they show. The drafter's skill and mol-rig-demo's
+# prepare-script, which hands the drafter that commit, each ask the one reader.
 DEMO_READ='review-checks.sh" --extension demo --at'
-for f in assets/scripts/demo-engine-lib.sh skills/gc-demo-script/SKILL.md formulas/mol-rig-demo.toml; do
+for f in skills/gc-demo-script/SKILL.md formulas/mol-rig-demo.toml; do
   if grep -qF -- "$DEMO_READ" "$ROOT/$f"; then
     ok "$f reads the demo guide through review-checks.sh --extension demo, at a commit"
   else
     bad "$f reads the demo guide through review-checks.sh --extension demo, at a commit" "no '$DEMO_READ' in it"
   fi
 done
-PR_FLOW=$(awk '/^## / { s = ($0 == "## Demo a PR") } s' "$ROOT/skills/demo-capture/SKILL.md")
-case "$PR_FLOW" in
-  *'rig-demo-capture.sh" --script <script.md> --output <clip.mp4> --guide .'*) ok "the demo:capture skill's Demo a PR captures with the app the guide names (--guide)" ;;
-  *) bad "the demo:capture skill's Demo a PR captures with the app the guide names (--guide)" "no rig-demo-capture.sh call with --guide in its Demo a PR section" ;;
-esac
-case "$(cat "$ROOT/formulas/mol-rig-demo.toml")" in
-  *'else set -- "$@" --guide "$APP_ROOT"'*) ok "mol-rig-demo's capture hands a pour with no app target the guide in its worktree" ;;
-  *) bad "mol-rig-demo's capture hands a pour with no app target the guide in its worktree" ;;
-esac
-case "$(cat "$ROOT/skills/converse-edit/SKILL.md")" in
-  *'. "$CONV/demo-engine-lib.sh" && demo_engine_guide "$TREE" && SERVE=$DEMO_GUIDE_SERVE'*) ok "the converse-edit skill's live copy takes its serve command from the guide through the library's reader" ;;
-  *) bad "the converse-edit skill's live copy takes its serve command from the guide through the library's reader" "no demo_engine_guide call in its copy of a UI" ;;
-esac
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
