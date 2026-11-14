@@ -15,6 +15,15 @@ This page explains what you see along the way: the labels on the PR, which
 say whose move it is, and the merge state on its bead, which says where the
 PR is on its way to merging.
 
+## Scope
+
+**Mandate.** What a person reading a pull request the city opened sees of its
+state, what each value means, and whose move it is.
+
+**Boundaries.** Which part of the city writes each state, and when, is
+[state-machine.md](state-machine.md). How the city decides when to merge is
+[refinery-merge-cadence.md](refinery-merge-cadence.md).
+
 ## The labels on a pull request
 
 Each open PR the city opened carries exactly one `status:` label. The board
