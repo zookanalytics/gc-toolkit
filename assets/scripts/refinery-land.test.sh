@@ -49,6 +49,15 @@
 #   - a branch with no change parks the bead behind refinery-false-completion,
 #     unless the target carries the bead's stamped direct landing, which is
 #     recorded, and a gate that is not filed parks nothing;
+#   - an effort hand-off's merge (task_kind=effort-bring-current) whose head
+#     changes no file lands direct once it brings in commits of the effort's
+#     target, the one its landing bead records, that its own target lacks; a
+#     bead of no such kind with that head, a merge that brings in nothing, one
+#     that resolves to mr, and one whose branch two landing beads give two
+#     targets each park behind refinery-false-completion; a store that does
+#     not list the landing bead stops the landing with nothing written; and a
+#     fast-forward origin refuses for branch protection parks the merge, with
+#     no PR opened;
 #   - an unsupported strategy parks the bead behind
 #     refinery-unsupported-strategy;
 #   - a target that moved after the prep lands nothing (exit 6);
@@ -504,6 +513,114 @@ prepared s polecat/s
 run --bead s
 eq "$RC" 0 "a stamped landing the target carries is recorded"
 has "$(logged scripts)" "lifecycle transition s --to merged --close --set merged_sha=$STAMP" "…at the stamped commit"
+
+# commit_on <branch> <file> <text>: a commit on origin's <branch> that writes
+# <text> to <file>, made from the seed clone.
+commit_on() {
+  git -C "$SEED" fetch -q origin
+  git -C "$SEED" checkout -q --detach "origin/$1"
+  printf '%s\n' "$3" > "$SEED/$2"
+  git -C "$SEED" add "$2" && git -C "$SEED" commit -q -m "$1: $2"
+  git -C "$SEED" push -q origin "HEAD:refs/heads/$1"
+}
+# effort_merge_on <bead> <metadata json>: main and integration/e each write
+# shared.txt, and polecat/<bead>, cut from integration/e, merges main and keeps
+# the effort's side, so the merge changes no file of integration/e. The landing
+# bead land-e records integration/e and its target, main. The bead is the
+# hand-off's merge, its metadata joined by <metadata json>, where a null drops
+# a key, and it is prepared; MERGE is its head.
+effort_merge_on() {
+  integration
+  commit_on integration/e shared.txt "the effort's line"
+  commit_on main shared.txt "main's line"
+  git -C "$SEED" fetch -q origin
+  git -C "$SEED" checkout -q -B "polecat/$1" origin/integration/e
+  git -C "$SEED" merge -q --no-edit origin/main >/dev/null 2>&1
+  git -C "$SEED" checkout -q --ours shared.txt && git -C "$SEED" add shared.txt
+  git -C "$SEED" commit -q --no-edit
+  git -C "$SEED" push -q -f origin "polecat/$1"
+  MERGE=$(git -C "$SEED" rev-parse HEAD)
+  put '{"id":"land-e","title":"Landing","status":"open","assignee":"","issue_type":"task","notes":"","metadata":{"branch":"integration/e","target":"main"}}'
+  work "$1" "polecat/$1" "$(jq -nc --argjson m "$2" '{target: "integration/e", merge_strategy: "direct", task_kind: "effort-bring-current"} + $m
+    | with_entries(select(.value != null))')"
+  prepared "$1" "polecat/$1"
+}
+
+echo "# an effort's merge that changes no file lands once it brings in commits of the effort's target"
+fresh
+effort_merge_on m '{}'
+BEFORE=$(tip integration/e)
+eq "$(git -C "$SEED" diff --quiet "$BEFORE" "$MERGE" && echo same)" "same" "the merge leaves the tree of integration/e as it is"
+run --bead m
+eq "$RC" 0 "the landing exits 0"
+eq "$(tip integration/e)" "$MERGE" "integration/e is fast-forwarded to the merge"
+has "$(logged scripts)" "lifecycle transition m --to merged --close --set merged_sha=$MERGE --set merged_target=integration/e" "the merge is recorded and the bead closed"
+has "$OUT" "it brings in 1 of the commits origin/main carries and origin/integration/e lacks" "it says what the merge brings in"
+hasnt "$(logged scripts)" "human-gate" "no gate is filed"
+
+echo "# the exception holds the guard whole for every other bead"
+fresh
+effort_merge_on u '{"task_kind":null}'
+BEFORE=$(tip integration/e)
+run --bead u
+eq "$RC" 4 "a bead of no effort-bring-current kind whose head merges main and changes no file parks (exit 4)"
+has "$(logged scripts)" "human-gate --subject u --key refinery-false-completion" "…behind refinery-false-completion"
+eq "$(tip integration/e)" "$BEFORE" "…with nothing pushed"
+hasnt "$(logged scripts)" "is the merge of an effort's hand-off" "…and its gate says nothing of an effort's merge"
+fresh
+integration
+commit_on main shared.txt "main's line"
+git -C "$SEED" fetch -q origin && git -C "$SEED" branch -q -f --no-track polecat/n origin/integration/e && git -C "$SEED" push -q origin polecat/n
+put '{"id":"land-e","title":"Landing","status":"open","assignee":"","issue_type":"task","notes":"","metadata":{"branch":"integration/e","target":"main"}}'
+work n polecat/n '{"target":"integration/e","merge_strategy":"direct","task_kind":"effort-bring-current"}'
+prepared n polecat/n
+# The prep merges the bead's target, which the branch already carries, so the
+# head is the branch as it stands, without the fixture's merge of main.
+git -C "$HOME_DIR/worktrees/n" reset -q --hard "$(git -C "$SEED" rev-parse polecat/n)"
+run --bead n
+eq "$RC" 4 "an effort's merge whose head brings in nothing of main parks (exit 4)"
+has "$(logged scripts)" "n is the merge of an effort's hand-off, and its head brings in no commit of origin/main that origin/integration/e lacks" \
+  "…its gate saying the head brings in nothing"
+fresh
+effort_merge_on r '{"merge_strategy":"mr"}'
+run --bead r
+eq "$RC" 4 "an effort's merge that resolves to mr parks (exit 4)"
+has "$(logged scripts)" "it resolves to merge_strategy=mr, and such a merge lands only as a fast-forward of integration/e" "…its gate saying it lands only as a fast-forward"
+hasnt "$(logged gh)" "pr create" "…and no PR is opened"
+fresh
+effort_merge_on t '{}'
+put '{"id":"land-x","title":"Another landing","status":"open","assignee":"","issue_type":"task","notes":"","metadata":{"branch":"integration/e","target":"release"}}'
+run --bead t
+eq "$RC" 4 "an effort's merge whose branch two landing beads give two targets parks (exit 4)"
+has "$(logged scripts)" "no one landing bead on integration/e records the target it brings in" "…its gate saying the effort's target is unknown"
+
+echo "# a store that does not list the landing bead stops the landing with nothing written"
+fresh
+effort_merge_on l '{}'
+BEFORE=$(tip integration/e)
+STUB_GC_LIST_FAIL=1 run --bead l
+eq "$RC" 1 "the landing stops (exit 1)"
+has "$OUT" "what it brings in could not be read: the beads on integration/e did not list" "it says the store did not answer"
+eq "$(meta l merge_result) $(tip integration/e)" "<absent> $BEFORE" "nothing is parked or pushed, so the next pass tries again"
+
+echo "# an effort's merge whose fast-forward origin refuses for branch protection parks, opening no PR"
+fresh
+effort_merge_on p '{}'
+BEFORE=$(tip integration/e)
+cat > "$ORIGIN/hooks/pre-receive" <<'HOOK'
+#!/bin/sh
+while read -r _old _new ref; do
+  [ "$ref" != refs/heads/integration/e ] || { echo "GH006: Protected branch update failed for $ref." >&2; exit 1; }
+done
+HOOK
+chmod +x "$ORIGIN/hooks/pre-receive"
+run --bead p
+eq "$RC" 4 "the landing parks (exit 4)"
+has "$(logged scripts)" "human-gate --subject p --key refinery-false-completion" "…behind refinery-false-completion"
+has "$(logged scripts)" "so it lands only as a fast-forward: a pull request lands by squash and would leave those commits out" "…its gate saying why no PR stands in"
+eq "$(tip integration/e) $(tip polecat/p)" "$BEFORE $MERGE" "nothing is pushed"
+hasnt "$(logged gh)" "pr create" "no PR is opened"
+hasnt "$(logged scripts)" "--to pre_open_gate" "…and the bead is not parked for the merge cadence"
 
 echo "# an unsupported strategy parks the bead"
 fresh

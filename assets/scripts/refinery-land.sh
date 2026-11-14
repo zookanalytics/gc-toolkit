@@ -19,9 +19,19 @@
 #
 # A prepared head with no change against its target is no landing. When the
 # target carries the commit the bead's direct_landing_sha stamp names, a direct
-# landing an earlier patrol pushed is recorded on the direct path. Otherwise
-# the bead is parked behind the gate refinery-false-completion, with
-# merge_result=refused_false_completion, and never retried silently.
+# landing an earlier patrol pushed is recorded on the direct path. A merge that
+# an effort's hand-off filed (effort-bring-current.sh) carries
+# task_kind=effort-bring-current, and its resolution can keep the effort's side
+# of every file the effort's target changed, so that the merge changes no file.
+# Such a merge lands on the direct path when it resolves to direct and its head
+# brings in commits of the effort's target that the bead's target lacks. The
+# effort's target is the one its landing bead records: the open bead on the
+# bead's target that names no other bead as its anchor. The merge lands only as
+# a fast-forward, because a pull request lands by squash and would leave those
+# commits out, so a push refused for branch protection parks it instead of
+# promoting it to mr. Any other head with no change parks the bead behind the
+# gate refinery-false-completion, with merge_result=refused_false_completion,
+# and is never retried silently.
 #
 # direct lands through direct-merge-push.sh, which records merged and closes the
 # bead, and deletes the branch when delete_merged_branches says so. A push it
@@ -255,6 +265,46 @@ branch_has_real_change() {
     || { BHRC_ERROR="rev-list failed: $(printf '%s' "$out" | tr -s '[:space:]' ' ')"; return 2; }
   [ "$(printf '%s' "$out" | tail -n 1)" -ge 1 ] || return 1
 }
+# effort_merge: whether the bead is the merge an effort's hand-off filed, which
+# resolves to direct and whose prepared head brings in commits of the effort's
+# target that origin/$TARGET lacks. 0 when it brings some in, with BROUGHT their
+# count and EFFORT_TARGET the effort's target. 1 when the bead is no such merge,
+# or brings none in, with EFFORT_MISS saying why for a merge. 2 when the store
+# or git did not answer, with EFFORT_MISS saying which.
+effort_merge() {
+  local rows lacks kept
+  EFFORT_TARGET=""; EFFORT_MISS=""; BROUGHT=0
+  [ "$(bead_meta task_kind)" = effort-bring-current ] || return 1
+  if [ "$STRATEGY" != direct ]; then
+    EFFORT_MISS="it resolves to merge_strategy=$STRATEGY, and such a merge lands only as a fast-forward of $TARGET"
+    return 1
+  fi
+  rows=$(bd_json list ${GC_RIG:+--rig="$GC_RIG"} --metadata-field "branch=$TARGET" \
+    --status=open,in_progress,blocked,deferred,hooked,pinned --limit=0) || rows=""
+  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 \
+    || { EFFORT_MISS="the beads on $TARGET did not list"; return 2; }
+  EFFORT_TARGET=$(printf '%s' "$rows" | jq -r '[ .[] | select(((.metadata.anchor_bead // "") | tostring) as $a | $a == "" or $a == .id)
+    | (.metadata.target // "") | tostring | select(. != "") ] | unique | if length == 1 then .[0] else "" end')
+  if [ -z "$EFFORT_TARGET" ]; then
+    EFFORT_MISS="no one landing bead on $TARGET records the target it brings in"
+    return 1
+  fi
+  git -C "$HOME_DIR" fetch --no-tags origin "+refs/heads/$EFFORT_TARGET:refs/remotes/origin/$EFFORT_TARGET" >/dev/null 2>&1 \
+    || { EFFORT_MISS="origin/$EFFORT_TARGET did not fetch"; return 2; }
+  # Of the commits the effort's target carries and the bead's target lacks, the
+  # ones the head also lacks are counted apart, and the rest it brings in.
+  if ! lacks=$(git -C "$HOME_DIR" rev-list --count "refs/remotes/origin/$EFFORT_TARGET" --not "refs/remotes/origin/$TARGET" 2>/dev/null) \
+     || ! kept=$(git -C "$HOME_DIR" rev-list --count "refs/remotes/origin/$EFFORT_TARGET" --not "refs/remotes/origin/$TARGET" "$HEAD_OID" 2>/dev/null); then
+    EFFORT_MISS="git did not count the commits of origin/$EFFORT_TARGET that origin/$TARGET lacks"
+    return 2
+  fi
+  BROUGHT=$((lacks - kept))
+  if [ "$BROUGHT" -lt 1 ]; then
+    EFFORT_MISS="its head brings in no commit of origin/$EFFORT_TARGET that origin/$TARGET lacks"
+    return 1
+  fi
+}
+UNCHANGED_TREE=""
 branch_has_real_change
 case "$?" in
   0) ;;
@@ -264,8 +314,16 @@ case "$?" in
       echo "$PROG: origin/$TARGET carries $STAMP, which a direct landing of $BEAD pushed without recording; taking the direct path to record it"
       STRATEGY=direct
     else
-      park refinery-false-completion refused_false_completion "branch $BRANCH has no verified change against origin/$TARGET; refused close-as-merged" \
-        "Branch $BRANCH of $BEAD introduces no verified change against origin/$TARGET, so the refinery refused to close it as landed and opened no PR. Inspect the branch: push the work it should carry, then clear this gate, which hands $BEAD back to the refinery; or drop the work: run $HERE/stand-down.sh $BEAD --key refinery-false-completion --ruling '<why>'."
+      effort_merge
+      case "$?" in
+        0) UNCHANGED_TREE=1
+           echo "$PROG: $BEAD's merge changes no file, and it brings in $BROUGHT of the commits origin/$EFFORT_TARGET carries and origin/$TARGET lacks; landing it as a fast-forward of $TARGET" ;;
+        1) MISS=""
+           [ -z "$EFFORT_MISS" ] || MISS=" $BEAD is the merge of an effort's hand-off, and $EFFORT_MISS."
+           park refinery-false-completion refused_false_completion "branch $BRANCH has no verified change against origin/$TARGET; refused close-as-merged" \
+             "Branch $BRANCH of $BEAD introduces no verified change against origin/$TARGET, so the refinery refused to close it as landed and opened no PR.$MISS Inspect the branch: push the work it should carry, then clear this gate, which hands $BEAD back to the refinery; or drop the work: run $HERE/stand-down.sh $BEAD --key refinery-false-completion --ruling '<why>'." ;;
+        *) stop "$BEAD's merge changes no file, and what it brings in could not be read: $EFFORT_MISS" ;;
+      esac
     fi ;;
   *) stop "the zero-diff check of $HEAD_OID against origin/$TARGET could not run ($BHRC_ERROR), which says nothing about the branch" ;;
 esac
@@ -282,7 +340,9 @@ if [ "$STRATEGY" = direct ]; then
   "$HERE/direct-merge-push.sh" "${DIRECT[@]}"
   case "$?" in
     0) refresh_target_pr; teardown; exit 0 ;;
-    3) STRATEGY=mr ;;
+    3) [ -z "$UNCHANGED_TREE" ] || park refinery-false-completion refused_false_completion "origin refused the fast-forward of $TARGET to $BEAD's merge, which changes no file, for branch protection" \
+         "Origin refused the refinery's fast-forward of $TARGET to the merge $BEAD carries, for branch protection. The merge changes no file and brings in $BROUGHT of the commits origin/$EFFORT_TARGET carries and $TARGET lacks, so it lands only as a fast-forward: a pull request lands by squash and would leave those commits out, so none was opened. To land it, let the refinery push to $TARGET, set merge_strategy=direct on $BEAD (gc bd update $BEAD --set-metadata merge_strategy=direct), then clear this gate, which hands $BEAD back to the refinery; or drop the work: run $HERE/stand-down.sh $BEAD --key refinery-false-completion --ruling '<why>'."
+       STRATEGY=mr ;;
     4) teardown; echo "$PROG: origin/$TARGET moved after $BEAD was prepared, so nothing landed; the next pass prepares it again"; exit 6 ;;
     *) stop "direct-merge-push.sh landed nothing it could record (its output above says what)" ;;
   esac

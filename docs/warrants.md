@@ -325,6 +325,46 @@ shares only the word ([authority-map.md](authority-map.md)).
 - **Retires when.** Gas City can set a merge strategy for a target branch, so the
   rule becomes a line of the rig's config.
 
+## An effort's bring-current merge
+
+- **Covers.** The `effort-bring-current` name, the `task_kind` that
+  `assets/scripts/effort-bring-current.sh` writes on the merge it files when
+  bringing an integration effort's branch current conflicts, and the
+  `effort_merge` function of `assets/scripts/refinery-land.sh`, which lets a
+  bead of that kind land though its merge changes no file.
+- **Stands in for.** A way for a bead to say that what it delivers is the
+  commits its merge brings into its target, so that a landing checks that
+  history rather than a change of files. Gas City needs none, because nothing
+  in it brings an integration branch current while its work is in flight.
+- **Evidence.**
+  - In `gastownhall/gascity-packs`, `gastown/formulas/mol-refinery-patrol.toml`:
+    `branch_has_real_change` reads a branch with no change against its merge
+    base as empty, and the merge-push step's merge-state gate refuses it as a
+    false completion unless the target already carries the branch, which it
+    closes as `already_merged`. The next-iteration step's
+    `integration_branch_auto_land` assigns an owned convoy's integration branch
+    to the refinery once every child is closed, and the refinery lands it like
+    any other branch. Nothing in the gastown pack brings an integration branch
+    current before that.
+  - In `gastownhall/gascity`, a merge strategy says how a bead lands, not what
+    counts as its change (`SlingMergeStrategy` in `internal/sling/sling.go`:
+    `direct`, `mr` or `local`). `gc convoy land` closes an owned convoy and
+    reads no git ref (`newConvoyLandCmd` in `cmd/gc/cmd_convoy.go`). The one bead
+    type for a merge, `merge-request` (`RequiredCustomTypes` in
+    `internal/beads/custom_types.go`), is left out of `Ready()` as "processed by
+    automation" (`readyExcludeTypes` in `internal/beads/beads.go`), so no pool
+    works it.
+  - In `github.com/steveyegge/beads` v1.3.4, no built-in type is a merge
+    (`AllIssueTypes` in `internal/types/types.go`).
+  - The search is
+    [specs/tk-5j1vvnb/gas-city-search.md](../specs/tk-5j1vvnb/gas-city-search.md).
+- **Verified.** 2026-11-14, at `gastownhall/gascity` main 420b7bb65f,
+  `gastownhall/gascity-packs` main 0f07496d2 and `github.com/steveyegge/beads`
+  v1.3.4.
+- **Retires when.** The integration-effort hand-off ends, once the convoys
+  member (tk-1tfzr71.23) moves efforts onto `gc convoy land`, or Gas Town's
+  refinery lands a merge whose change is the commits it brings in.
+
 ## A merged PR's refused close
 
 - **Covers.** The `pull_request_merged_close_refused` name, the exception the

@@ -12,11 +12,16 @@
 #     says so;
 #   - a merge that conflicts pushes nothing and goes to a polecat, never to a
 #     person: the call proves the polecat pool's route, files the merge as a
-#     task whose target is the effort's branch and whose merge strategy is
-#     direct, under the hand-off's parent when it has one, with the hand-off
-#     and the landing bead waiting on it, then settles the task and slings it
-#     on mol-polecat-work with --merge direct; it files no human gate and
-#     leaves the hand-off open;
+#     task whose target is the effort's branch, whose merge strategy is direct
+#     and whose kind is effort-bring-current, under the hand-off's parent when
+#     it has one, with the hand-off and the landing bead waiting on it, then
+#     settles the task and slings it on mol-polecat-work with --merge direct;
+#     it files no human gate and leaves the hand-off open;
+#   - the whole path, with the refinery's own prep and landing: a polecat's
+#     resolution that keeps the effort's side of every file makes a merge that
+#     changes no file, the refinery lands it as a fast-forward of the effort's
+#     branch, and the hand-off, called again, finds nothing left to merge and
+#     closes;
 #   - the task's description lists the conflicted files one per line, as git
 #     names them, unquoted where git allows, and asks the operator only for a
 #     product decision;
@@ -198,8 +203,8 @@ eq "$(logged scripts)" "$SENT" \
 hasnt "$(logged scripts)" "human-gate" "no human gate is filed"
 eq "$(cat "$CREATE/title")" "Merge origin/main into integration/land-1 and resolve its conflicts" "the task's title names the merge"
 eq "$(cat "$CREATE/t") $(cat "$CREATE/parent") $(jq -c . "$CREATE/metadata") $(cat "$CREATE/deps")" \
-  'task ep-1 {"target":"integration/land-1","merge_strategy":"direct"} blocks:ho-1,blocks:land-1' \
-  "the task sits under the hand-off's epic, targets the effort's branch, records direct as its merge strategy, and the hand-off and the landing bead wait on it"
+  'task ep-1 {"target":"integration/land-1","merge_strategy":"direct","task_kind":"effort-bring-current"} blocks:ho-1,blocks:land-1' \
+  "the task sits under the hand-off's epic, targets the effort's branch, records direct as its merge strategy and effort-bring-current as its kind, and the hand-off and the landing bead wait on it"
 if [ -e "$CREATE/unknown" ]; then
   rt_bad "the create passes only the title and the flags read above" "$(tr '\n' ' ' < "$CREATE/unknown")"
 else
@@ -210,7 +215,8 @@ for want in "merging origin/main at $MAIN into it at $OWN conflicts in these fil
             "whose second parent is origin/main, and never rebase or squash it" "say for each file what collided and what you decided" \
             "git show --remerge-diff" "Your checks run on the merged tree" \
             "A check that fails the same way at origin/main is a failure of main's own, so treat it as pre-existing" \
-            "so that git diff --quiet origin/integration/land-1 HEAD exits 0" "Say so in the notes you hand off with, and name the merge commit" \
+            "the merge leaves the tree of integration/land-1 as it is and changes no file" \
+            "That is a resolution like any other: the refinery lands it, because it brings in the commits of main that integration/land-1 lacks" \
             "Ask the operator only when a resolution needs a product decision"; do
   has "$BRIEF" "$want" "the task's description says \"${want%%"$NL"*}\""
 done
@@ -218,6 +224,45 @@ has "$OUT" "pushed nothing: merging origin/main into integration/land-1 conflict
   "it says it pushed nothing, and names the files and the task"
 eq "$(git -C "$HOME_DIR" rev-parse HEAD)" "$HOME_HEAD" "the home's HEAD never moves"
 [ ! -e "$HOME_DIR/worktrees" ] && rt_ok "no tree is added" || rt_bad "no tree is added"
+
+echo "# a resolution that keeps the effort's side lands, and the hand-off then closes"
+# The whole path: the hand-off files the task, a polecat resolves it on a
+# branch cut from the effort's, the refinery prepares and lands it with its
+# own scripts, and the hand-off, called again, finds nothing left to merge.
+fresh; conflict
+for f in refinery-prep.sh detached-job.sh refinery-land.sh direct-merge-push.sh rig-root.sh; do
+  cp "$HERE/$f" "$SUT/"; chmod +x "$SUT/$f"
+done
+export GC_RIG_ROOT="$RIG" DIRECT_MERGE_PUSH_BACKOFF=0
+run
+eq "$RC" 4 "the hand-off files the merge as task-1 (exit 4)"
+git -C "$SEED" fetch -q origin
+git -C "$SEED" checkout -q -B polecat/task-1 origin/integration/land-1
+git -C "$SEED" merge -q --no-edit origin/main >/dev/null 2>&1
+git -C "$SEED" checkout -q --ours shared.txt other.txt && git -C "$SEED" add shared.txt other.txt
+git -C "$SEED" commit -q --no-edit
+git -C "$SEED" push -q origin polecat/task-1
+MERGE=$(git -C "$SEED" rev-parse HEAD)
+eq "$(git -C "$SEED" rev-parse "$MERGE^2") $(git -C "$SEED" diff --quiet "$OWN" "$MERGE" && echo same)" "$MAIN same" \
+  "the polecat's merge has main as its second parent and leaves the effort's tree as it is"
+# The polecat hands the task to the refinery with its branch recorded.
+jq 'map(if .id == "task-1" then .assignee = "rig-a/gc-toolkit.refinery" | .metadata.branch = "polecat/task-1" else . end)' "$STORE" > "$STORE.n" && mv "$STORE.n" "$STORE"
+OUT=$("$SUT/refinery-prep.sh" --bead task-1 2>&1); RC=$?
+eq "$RC" 0 "the refinery prepares the task's branch"
+OUT=$("$SUT/refinery-land.sh" --bead task-1 2>&1); RC=$?
+eq "$RC" 0 "the refinery lands the merge, though it changes no file"
+eq "$(tip integration/land-1)" "$MERGE" "the effort's branch is fast-forwarded to the polecat's merge"
+has "$(logged scripts)" "lifecycle transition task-1 --to merged --close --set merged_sha=$MERGE --set merged_target=integration/land-1" \
+  "the task is recorded merged at its merge commit"
+hasnt "$(logged scripts)" "human-gate" "no human gate is filed"
+# The transition closes the task in the store, and the hand-off reads its
+# blocker closed, as bd reports a dependency's status.
+jq 'map(if .id == "task-1" then .status = "closed" else . end
+  | .dependencies = [ (.dependencies // [])[] | if .id == "task-1" then .status = "closed" else . end ])' "$STORE" > "$STORE.n" && mv "$STORE.n" "$STORE"
+reset_logs; run
+eq "$RC" 0 "the hand-off comes back and exits 0"
+eq "$(tip integration/land-1) $(bstatus ho-1)" "$MERGE closed" "…with nothing left to merge, so it pushes the branch as it is and closes"
+hasnt "$(logged scripts)" "create" "…and files no second task"
 
 echo "# a conflicted path keeps its spaces and its characters outside ASCII"
 fresh "$DEPS_EPIC"

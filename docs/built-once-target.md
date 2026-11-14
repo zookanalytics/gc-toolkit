@@ -202,7 +202,8 @@ yet. Each remaining difference names its reason and what ends it:
   overwrite each other's work. This ends when Gas Town's find-work reads waits.
 - **A branch already on its target.** A direct landing an earlier pass pushed
   but did not record is recorded `merged`, at the commit the bead's
-  `direct_landing_sha` names, and any other branch with no change is refused as
+  `direct_landing_sha` names, and any other branch with no change, except the
+  merge of the integration-effort hand-off below, is refused as
   `refused_false_completion`. Gas Town closes a branch that is an ancestor of
   its target, with a commit since its recorded fork point, as `already_merged`.
   Every reader that asks whether a direct landing happened asks one value. No
@@ -213,8 +214,13 @@ yet. Each remaining difference names its reason and what ends it:
   call bounds it.
 - **The integration-effort hand-off.** The refinery brings an integration
   effort's branch current with its target (`effort-bring-current.sh`). Gas Town
-  has no integration efforts. This ends when the convoys member (tk-1tfzr71.23)
-  moves efforts onto `gc convoy land`.
+  has no integration efforts. The merge the hand-off sends to a polecat on a
+  conflict can keep the branch's side of every file, and so change no file.
+  It lands as a fast-forward of the branch once its head brings in commits of
+  the effort's target that the branch lacks. Gas Town closes a branch with no
+  change only when its target already carries it, which this merge's target
+  does not. This ends when the convoys member (tk-1tfzr71.23) moves efforts
+  onto `gc convoy land`.
 - **One worker per branch.** A conflict on a branch whose rework child is open
   goes to that child's notes. Gas Town has no rework children. This ends when
   the review loop (tk-1tfzr71.22) takes review feedback off rework children.
