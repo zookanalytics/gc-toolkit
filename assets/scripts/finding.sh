@@ -54,7 +54,8 @@
 #                        compared with what was asked (the answer verb)
 #   finding.fix_flag     1 when the fix unit flags the point for the reviewer's look:
 #                        it chose among options they left open, departed from their
-#                        suggestion, or changed code the ruling declined
+#                        suggestion, or changed code the ruling declined, which only
+#                        a later ruling overruling that one allows (the answer verb)
 #   finding.follow_up    the deferred finding's later-work bead, armed to its fix
 #                        pool (deferred-dispatch) to dispatch once the anchor merges
 #   finding.gate         the open human gate that carries a needs-you finding's
@@ -1021,8 +1022,18 @@ cmd_set_disposition() {
 # asked (finding.fix_answer), and whether the reviewer should look at it
 # (finding.fix_flag): the fix chose among options they left open, departed from
 # their suggestion, or changed code the ruling declined. Each call states the
-# whole answer, so one without --flag clears an earlier flag. Exit 1 on a usage
-# error or a bead that is not a finding, 2 when a read or the write fails.
+# whole answer, so one without --flag clears an earlier flag.
+#
+# A fix unit runs while the validator rules its batch, so a ruling can land
+# after the fix unit has begun. A decline, a deferral and a restates ruling
+# close the finding and are its answer on the PR, so the branch carries no
+# change for that point. An answer given without --flag on such a finding is
+# refused, and the refusal prints the ruling, which tells the fix unit to revert
+# what it changed for the point before it hands off. Only a later ruling that
+# overrules the closing one lets the branch change that code, and its answer is
+# recorded with --flag, which shows it under Worth a look. Exit 1 on a usage
+# error, a bead that is not a finding, or that refusal, 2 when a read or the
+# write fails.
 cmd_answer() {
   local finding="" answer="" flag=""
   while [ $# -gt 0 ]; do case "$1" in
@@ -1033,14 +1044,28 @@ cmd_answer() {
   esac; done
   [ -n "$finding" ] && [ -n "$(printf '%s' "$answer" | tr -d '[:space:]')" ] \
     || { warn "answer needs --finding and a non-empty --answer"; exit 1; }
-  local kind
-  kind=$(bd_json show "$finding" | jq -r 'if type == "array" and length > 0 then ((.[0].metadata.task_kind // "") | tostring) else "?" end' 2>/dev/null) \
+  local row kind
+  row=$(bd_json show "$finding") \
+    || { warn "could not read $finding; nothing recorded"; exit 2; }
+  kind=$(printf '%s' "$row" | jq -r 'if type == "array" and length > 0 then ((.[0].metadata.task_kind // "") | tostring) else "?" end' 2>/dev/null) \
     || { warn "could not read $finding; nothing recorded"; exit 2; }
   case "$kind" in
     finding) : ;;
     "?") warn "could not read $finding; nothing recorded"; exit 2 ;;
     *) warn "$finding is not a finding (task_kind '$kind'); nothing recorded"; exit 1 ;;
   esac
+  local disp said
+  disp=$(printf '%s' "$row" | jq -r '(.[0].metadata["finding.disposition"] // "") | tostring' 2>/dev/null)
+  if [ -z "$flag" ]; then
+    case "$disp" in
+      declined|deferred|restates)
+        said=$(printf '%s' "$row" | jq -r '.[0].metadata as $m | (($m["finding.answer"] // "") | tostring) as $a
+          | if $a != "" then $a else (($m["finding.reply"] // "") | tostring) end' 2>/dev/null)
+        warn "$finding is ruled $disp${said:+: $said}"
+        warn "That ruling answers the point on the PR, so the branch carries no change for it, and nothing was recorded. Revert any change you made for it before you hand off. Only a later ruling that overrules this one lets the branch change it, and the answer for that change is recorded with --flag."
+        exit 1 ;;
+    esac
+  fi
   local fl=(--unset-metadata finding.fix_flag)
   [ -z "$flag" ] || fl=(--set-metadata finding.fix_flag=1)
   gc bd update "$finding" --set-metadata "finding.fix_answer=$answer" "${fl[@]}" >/dev/null 2>&1 \

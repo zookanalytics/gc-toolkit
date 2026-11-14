@@ -3101,13 +3101,22 @@ REAP_EOF
 
 $live_url — head $head_oid${CSRC:+, review $CSRC}
 
-Answer every item below with a fix, or with the reason you made none. Each
-item is a finding on $id that names this bead as its fix unit
-(finding.fix_unit), and the city keeps one living comment per review on the PR
-that shows how each point was answered. This lists them, each titled with the
-opening of the comment it carries:
+Answer every item below with a fix, or with the reason you made none, unless its
+ruling has answered it. Each item is a finding on $id that names this bead as
+its fix unit (finding.fix_unit), and the city keeps one living comment per
+review on the PR that shows how each point was answered. This lists them, each
+titled with the opening of the comment it carries:
 
     gc bd list --metadata-field finding.fix_unit=<this bead> --all
+
+A validator rules each finding while you work. A finding it rules declined,
+deferred or restates is answered by that ruling, so the branch carries no change
+for it: change no code for it, record no answer for it, and revert a change you
+made for it before the ruling landed. Read each finding's ruling, its
+finding.disposition, before you change code for it and again before you hand
+off:
+
+    gc bd show <finding>
 
 For each finding you answer, record one sentence, in your own words, that starts
 by saying how you answered it compared with what was asked. \"Fixed as you
@@ -3117,10 +3126,9 @@ widely than you suggested: ...\" are examples, not a template:
     $FINDING answer --finding <finding> --answer \"<sentence>\" [--flag]
 
 Pass --flag when your fix chose for the reviewer among options they left open,
-departed from what they suggested, or changed code a ruling declined. Flag when
-in doubt: a wrong flag costs the reviewer one glance, and a missing one hides
-what they most want to check. Put your notes on the round on this bead, and the
-living comment shows them folded:
+or departed from what they suggested. Flag when in doubt: a wrong flag costs the
+reviewer one glance, and a missing one hides what they most want to check. Put
+your notes on the round on this bead, and the living comment shows them folded:
 
     $FINDING fix-notes --fix-unit <this bead> --notes-file <file>
 
@@ -3145,7 +3153,7 @@ $CBODY"
       # child by. A fresh child is filed with this order, and a child the probe
       # finds is held to it as well.
       CMETA=$(jq -nc --arg a "$id" --arg b "$fix_branch" --arg t "$base" \
-        --arg r "Review feedback on PR#$num is unanswered at head $head_oid. This bead's description carries it verbatim; $live_url is the live copy. Answer every item with a fix or the reason you made none, and record each answer on its finding with $FINDING answer, as the description says, then push to '$fix_branch'. Post no comment of your own that answers the review: the living comment the city keeps for it shows your answers. Do NOT open a new PR: this reworks PR#$num. A comment asking for a decision you cannot make is a question for a person, filed as a human gate, never a silent close." \
+        --arg r "Review feedback on PR#$num is unanswered at head $head_oid. This bead's description carries it verbatim; $live_url is the live copy. Answer every item with a fix or the reason you made none, and record each answer on its finding with $FINDING answer, as the description says, then push to '$fix_branch'. An item its ruling declined, deferred or ruled restates is answered by that ruling: the branch carries no change for it, as the description says. Post no comment of your own that answers the review: the living comment the city keeps for it shows your answers. Do NOT open a new PR: this reworks PR#$num. A comment asking for a decision you cannot make is a question for a person, filed as a human gate, never a silent close." \
         --arg sr "$CSRC" --arg m "$prepare_mode" --arg u "$live_url" --arg n "$num" \
         '{task_kind: "rework", anchor_bead: $a, branch: $b, target: $t, rejection_reason: $r}
          + (if $sr == "" then {} else {source_review: $sr} end)

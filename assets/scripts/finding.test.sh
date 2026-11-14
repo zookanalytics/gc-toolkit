@@ -1434,16 +1434,27 @@ eq "$(meta "$FRF" 'finding.reply')|$(meta "$FRF" 'finding.answer')|$(meta "$FRF"
 # answer: the fix unit's own sentence on a point, and its flag; fix-notes: its
 # notes on the round, on the fix unit itself.
 # ---------------------------------------------------------------------------
-"$SUT" answer --finding "$FRI" --answer "Changed anyway, though the ruling declined it: the guard now logs the skip." --flag
-eq "$(meta "$FRI" 'finding.fix_answer')" "Changed anyway, though the ruling declined it: the guard now logs the skip." "answer records the fix unit's sentence"
-eq "$(meta "$FRI" 'finding.fix_flag')" "1" "…and its flag"
-"$SUT" answer --finding "$FRI" --answer "Fixed as you suggested."
-eq "$(meta "$FRI" 'finding.fix_answer')" "Fixed as you suggested." "a later answer replaces the sentence"
-eq "$(meta "$FRI" 'finding.fix_flag')" "<absent>" "…and one given without --flag clears the flag"
+"$SUT" answer --finding "$FRF" --answer "You asked for a decision, and the fix chose the intent the docs state." --flag
+eq "$(meta "$FRF" 'finding.fix_answer')" "You asked for a decision, and the fix chose the intent the docs state." "answer records the fix unit's sentence"
+eq "$(meta "$FRF" 'finding.fix_flag')" "1" "…and its flag"
+"$SUT" answer --finding "$FRF" --answer "Fixed as you suggested."
+eq "$(meta "$FRF" 'finding.fix_answer')" "Fixed as you suggested." "a later answer replaces the sentence"
+eq "$(meta "$FRF" 'finding.fix_flag')" "<absent>" "…and one given without --flag clears the flag"
 "$SUT" answer --finding tk-ancR --answer "x" 2>/dev/null; rc=$?
 eq "$rc" "1" "answer refuses a bead that is not a finding"
-"$SUT" answer --finding "$FRI" --answer "   " 2>/dev/null; rc=$?
+"$SUT" answer --finding "$FRF" --answer "   " 2>/dev/null; rc=$?
 eq "$rc" "1" "…and an empty sentence"
+# A ruling that closes a finding is its answer on the PR, and it can land while
+# the fix unit works, so the fix unit learns of it when it answers the point.
+err=$("$SUT" answer --finding "$FRI" --answer "Fixed as you suggested." 2>&1 >/dev/null); rc=$?
+eq "$rc|$(meta "$FRI" 'finding.fix_answer')" "1|<absent>" "answer refuses a fix unit's answer on a declined finding, and records nothing"
+has "$err" "Declined: the branch already keeps the opt-out." "…and prints the ruling's own answer"
+has "$err" "Revert any change you made for it" "…with what the fix unit owes the branch"
+"$SUT" answer --finding "$FRQ" --answer "Fixed as you suggested." 2>/dev/null; rc=$?
+eq "$rc|$(meta "$FRQ" 'finding.fix_answer')" "1|<absent>" "…and on a deferred one"
+"$SUT" answer --finding "$FRI" --answer "Your ruling overruled the decline, so the guard now logs the skip." --flag
+eq "$(meta "$FRI" 'finding.fix_answer')|$(meta "$FRI" 'finding.fix_flag')" "Your ruling overruled the decline, so the guard now logs the skip.|1" \
+  "a flagged answer on a declined finding records, since only a later ruling that overrules the decline changes its code"
 store "$(jq -c '. + [{"id":"tk-fuR","status":"open","assignee":"","title":"rework","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-ancR"}}]' "$STUB_STORE")"
 printf 'Each point has its own commit.\n\nThe opt-out keeps its meaning.\n' > "$TMP/fix-notes.md"
 "$SUT" fix-notes --fix-unit tk-fuR --notes-file "$TMP/fix-notes.md"
