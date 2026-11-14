@@ -57,23 +57,25 @@ These calls carry a cost either way:
    reacted bead would be a pack state that needs a warrant.
 4. **The per-sweep cap goes, and the linking waits for its own build.** The cap
    delays reactions and saves none, because the pool runs two at a time and a
-   slung run waits for a slot at no cost. You ruled on 2026-09-20 that it goes
+   slung run waits for a slot at no cost. A sweep still stops before its order's
+   timeout and leaves the rest to the next one (section 1). You ruled on
+   2026-09-20 that it goes
    (gate tk-b8fylm, recorded on tk-georjc). The linking you ruled the same day,
    to the epic, to similar beads and to likely duplicates, adds reads and
    writes to every reaction, and your direction of 2026-10-14, recorded there
    too, asks for its how to be redone at build time, so tk-georjc's validating
    closer asks you about it once this lands. The cost of the cap's
-   end: lifting gascity's override reacts to its 71 waiting beads in one sweep,
-   about $128 at the measured rate.
+   end: lifting your override in the one other rig whose scan is off reacts to
+   its 71 waiting beads, about $128 at the measured rate.
 5. **One rig first.** When the landing merges, the mechanik pauses the scan in
-   signal-loom, shutupandlisten and sprintshow, so the new path's scan runs in
-   growth-factor alone. Once growth-factor's first ten reactions on the new
-   path are checked against its last ten on the old one, the pause lifts.
-   Requests and findings take the new path in every rig at once. The cost: at
-   most about 20 beads a week across those three rigs, their whole reaction
-   count since 2026-11-07, wait for a reaction until the pause lifts. Cutting
-   every rig over at once drops the pause and leaves a revert of the landing as
-   the fallback.
+   three of the four rigs where it runs, so the new path's scan runs in one
+   pilot rig alone, the one of the four with the most reactions in the week
+   measured (section 5). Once the pilot's first ten reactions on the new path are
+   checked against its last ten on the old one, the pause lifts. Requests and
+   findings take the new path in every rig at once. The cost: at most about 20
+   beads a week across the three paused rigs, their whole reaction count since
+   2026-11-07, wait for a reaction until the pause lifts. Cutting every rig over
+   at once drops the pause and leaves a revert of the landing as the fallback.
 
 Approving the design as it stands ships the first option of each. Section 4
 answers each held bug and each constraint in the subject's notes.
@@ -90,6 +92,13 @@ default sling formula as `--on` unless `--no-formula` is given
 the Agent table). So a bare sling to the pool pours the reaction, and a sling or
 arm aimed at the pool can no longer pour `mol-polecat-work` there, which the
 town's `[agent_defaults]` gives every agent today.
+
+The verb itself names the formula with `--on`. When only the target's default
+supplies the formula and a live classic molecule holds the bead, Gas City skips
+the pour, routes the bare bead to the pool and exits 0, where an explicit `--on`
+refuses (attachFormulaToBead, `internal/sling/sling_core.go`). A person's bare
+sling of the pool can still take that path, so a worker whose claim is the bare
+subject rather than a step hands it back unrouted and stands down.
 
 The formula has one work step, `react`, routed to the pool at the pour. Gas
 City's default work query offers a routed, unassigned, ready step, so the pool's
@@ -152,17 +161,25 @@ triages a bead and does no work on it.
 ### What starts it
 
 Every path calls one verb, `tools/gc-proactive.sh sling <S>`. It applies the
-refusals section 2 names, then runs `gc sling <rig>/gc-toolkit.proactive <S>`
-and passes its exit 3 through.
+refusals section 2 names, then runs
+`gc sling <rig>/gc-toolkit.proactive <S> --on mol-first-reaction` and passes its
+exit 3 through.
 
 - **The scan order**, `orders/proactive-scan-sling.toml`, every 15 minutes in
   each rig whose override leaves it on. Its exec becomes
   `$PACK_DIR/tools/gc-proactive.sh scan --sling`, and the script that wrapped it,
   `assets/scripts/proactive-scan-sling.sh` with its test, goes, its
-  `deliverable` gate moving into the scan. The order keeps its name, so the
-  city's overrides that switch it off in gc-toolkit and gascity keep applying
-  through the landing: Gas City reports an override that names no
-  order as an error
+  `deliverable` gate moving into the scan. Gas City ends an exec order at its
+  timeout by signalling the order's whole process group (shellExecRunner,
+  `cmd/gc/order_dispatch.go`), which would cut short a pour in progress, and
+  a sweep with no cap can outlast the order's 300 seconds. So the order's
+  `[order.env]` gives the sweep that timeout, beside the order's own `timeout`,
+  since an override can change both and cannot change the exec line, and the
+  sweep starts no sling once less time is left than its slowest sling so far
+  has taken. The beads it leaves wait for the next sweep. The order keeps its
+  name, so the city's overrides that switch it off in gc-toolkit and one other
+  rig keep applying through the landing: Gas City reports an override that
+  names no order as an error
   ([orders tutorial](https://github.com/gastownhall/gascity/blob/main/docs/tutorials/07-orders.md),
   "Overrides"), and a new order could not be shipped off by default and
   switched on per rig, because a definition's `enabled = false` drops the order
@@ -173,10 +190,13 @@ and passes its exit 3 through.
   `operator-intake.sh` through react.
 
 No Gas City primitive covers the scan's job. An order fires on `bead.created`
-(`internal/events/events.go`, BeadCreated), but an exec order's script
-receives only `ORDER_DIR`, `PACK_DIR` and its `[order.env]`
+(`internal/events/events.go`, BeadCreated), but an exec order's script is told
+no event. Its environment names its order's directory, its pack, its store and
+rig, and carries its `[order.env]`
 ([orders tutorial](https://github.com/gastownhall/gascity/blob/main/docs/tutorials/07-orders.md),
-"Formula orders vs. exec orders"), so it would scan to learn which bead was
+"Formula orders vs. exec orders"; `cmd/gc/order_store.go`), and an order that
+fires on its own gets no arguments (`cmd/gc/order_dispatch.go`, "Auto-triggered
+orders carry no args channel"). So it would scan to learn which bead was
 filed, and in a city where every pour creates beads it would scan on nearly
 every patrol pass. A formula order pours a formula with no subject. Core's
 orders and formulas include none that triages a new bead
@@ -198,16 +218,21 @@ runs:
   and overwritten at its next pour. The takeaway release unsets it in its park
   (`gc-helm.sh:1725`), and every exit but the close goes through that release.
   The close exit's pour of the validating closer overwrites it, at once or when
-  its arm starts.
+  its arm starts. A reaction that declines leaves the stamp until the bead's
+  next sling or pour.
 - No queue reads the stamp (`assets/scripts/dispatch-path.sh:8-9`). Gas City's
   detached-orphan sweep reads it only to leave the bead alone
   (isDetachedHandoffOrphanCandidate, `cmd/gc/pool_detached_orphan_sweep.go`).
-- `gc workflow delete-source` closes the live workflows sourced from a bead and
-  clears its `workflow_id`, and leaves the stamp. `gc workflow reopen-source`
-  clears the stamp, but it reopens the bead and routes it to the pool that ran
-  the workflow (cmdWorkflowReopenSource, `cmd/gc/cmd_convoy_dispatch.go`),
-  which a reaction must never do. The run ends by its own step's close, so it
-  needs neither.
+- `gc workflow delete-source` and `gc workflow reopen-source` find a bead's
+  workflows by `gc.source_bead_id`, which the root of a graph.v2 run slung with
+  `--on` never carries (the pour sets its source to none,
+  `internal/sling/sling.go`; the lookup in
+  `internal/sourceworkflow/sourceworkflow.go`), so neither sees a reaction's
+  run. Delete-source clears only `workflow_id` and leaves the stamp.
+  Reopen-source clears the stamp, but it reopens the bead and routes it to a
+  pool (cmdWorkflowReopenSource, `cmd/gc/cmd_convoy_dispatch.go`), which a
+  reaction must never do. The run ends by its own step's close, so it needs
+  neither.
 
 So the pain the comment names does not arise, and the comment goes with the
 reaction bead's create.
@@ -237,23 +262,42 @@ the record after. No key or bead kind of the pack's replaces them:
   closer, so its headline no longer depends on a best-effort write after the
   sling (`first-reaction-dispose.sh:1066-1068`).
 - **None is missed.** The scan reads every ready bead in its rig each sweep, with
-  no cap and no page (section 5), so a bead nothing slung is slung within one
-  interval. A sling that fails leaves the bead a candidate for the next sweep,
-  and a bead blocked when it is filed is read once its wait lifts.
+  no cap and no page (section 5), so a bead nothing slung is slung by the next
+  sweep with time left for it (section 1). A sling that fails before its pour
+  leaves the bead a candidate for the next sweep, and a bead blocked when it is
+  filed is read once its wait lifts.
+- **A pour cut short.** A sling killed part way through its pour, or one whose
+  failed pour Gas City could not clean up, leaves the reaction's root open as an
+  unfinished pour: the root carries `molecule_failed=true`, or it or its step is
+  still fenced by `gc.instantiating` (markFailed and fenceGraphWorkflowBead,
+  `internal/molecule/molecule.go`). The fence holds the step's route back, and
+  marking the pour failed does not restore it, so no worker is offered the
+  step. Gas City's conflict check counts every root that is not closed, so each
+  later sling on S exits 3 while the root stands. The verb's live-run read and
+  the scan's in-flight filter therefore read an unfinished pour, as gctk's
+  deferred-dispatch start defines one (pours, `services/gctk/arm/start.go`), as
+  no run, so the next sweep reaches S. When the verb's
+  sling then exits 3 on that root, the verb files a human gate on S that names
+  the root and the remedy the start names, `gc convoy delete <root> --force`,
+  and exits 5, as for any bead a gate holds. Clearing the gate returns S to the
+  scan.
 - **Asking again.** A request does not read the headline, so the operator or a
   patrol can ask for another reaction on any bead the refusals below allow.
 
 The beads reacted to before the cut-over already carry a headline: every one of
-the 120 open beads with `gc.reacted_by` or `gc.proactive_reaction=1` in
-gc-toolkit, growth-factor, signal-loom and gascity carries `gc.takeaway`. So the
-scan reads them as reacted with no migration. Their reaction keys stay on them
-as inert residue, registered as retired in `lifecycle/lifecycle.toml`, the
-registry's default for a key whose residue leaves nothing undone.
+the 143 open beads with `gc.reacted_by` or `gc.proactive_reaction=1`, across
+the city's six stores, carries `gc.takeaway`. So the scan reads them as reacted
+with no migration. Thirteen more are deferred upstream findings that carry no
+headline. Neither the old scan nor the new one reads the reaction keys, so
+either path reacts to them again once they reopen. On every bead reacted to
+before the cut-over, the reaction keys stay as inert residue, registered as
+retired in `lifecycle/lifecycle.toml`, the registry's default for a key whose
+residue leaves nothing undone.
 
 ### The refusals, read at both ends
 
-`gc-proactive.sh sling` refuses a subject, writes nothing and exits with a code
-its callers branch on:
+`gc-proactive.sh sling` refuses a subject and exits with a code its callers
+branch on. It writes nothing on a refusal but the gate on an unfinished pour:
 
 | Refusal | Read from | Exit |
 |---|---|---|
@@ -262,12 +306,14 @@ its callers branch on:
 | a live run of another formula | `run-lib.sh` | 4 |
 | a route or an arm, `hold:mayor` or `hold:external`, an assignee, a status other than open | the row: its status and assignee, and `dispatch-path.sh` for the route, the arm and the hold | 5 |
 | an open human gate | `gctk bead holds` | 5 |
+| an unfinished pour of `mol-first-reaction`, named by `gc sling`'s exit 3 | the root's `molecule_failed` and `gc.instantiating` marks, read after the sling; the verb files the gate of section 2 first | 5 |
 | a standing record, or a feedback pattern, which the distiller dispatches | `standing-kinds.sh`; `task_kind=feedback-pattern` | 6 |
 
 `gc sling` itself refuses a bead no store holds (MissingBeadError,
 `internal/sling/sling.go`), a pool that does not read the bead's store
-(CrossStoreRouteError, validateBuiltInRouteStoreReachable) and a target the city
-does not configure. The verb reports each as an error, which
+(CrossStoreRouteError, validateBuiltInRouteStoreReachable in
+`internal/sling/sling_core.go`) and a target the city does not configure
+(`cmd/gc/cmd_sling.go`). The verb reports each as an error, which
 `subject_present_guard` reports today.
 
 The reaction reads the same refusals as its first act, through
@@ -277,8 +323,15 @@ that run, so a reaction re-offered after it filed its gate resumes rather than
 stands down. Any refusal ends the reaction with `decline.sh --step
 mol-first-reaction.react --reason "<the refusal>"`, which declines with no
 gate: it cancels the run and drains. So the refusals hold on every path, a
-person's bare `gc sling` of the pool included, and one definition answers both
-ends.
+person's bare `gc sling` of the pool included, with the one exception below,
+and one definition answers both ends.
+
+A route is the one refusal the reaction cannot read. The pour clears S's
+`gc.routed_to` and `gc.run_target` (restampWorkBeadRouting, section 1), so a
+route S carried when it was poured is gone before its reaction reads S. The verb
+reads S just before it slings, so on its path only a route written in that gap
+is lost this way. A person who slings a routed bead to the pool by hand takes it
+off its route, as any pour onto a routed bead does.
 
 ## 3. Each exit as native writes
 
@@ -367,7 +420,7 @@ a downstream worker had claimed is not re-run, because the claim is a refusal.
   recommendation before anything else, files or reuses the gate, and stamps
   `gc.recommended_formula` only after that, so no recommendation is older than
   the newest first-reaction gate, the order `gc-helm.sh accept` and the board's
-  Accept read (`services/helm/internal/board/derive.go`, readAcceptance; the
+  Accept read (readAcceptance, `services/helm/internal/board/human.go`; the
   note from tk-pchr4j2's validation). `first-reaction-dispose.test.sh` keeps
   its RECO and RECOORDER cases.
 - **Waits are read, never computed.** The blocked exit and the check read
@@ -431,16 +484,17 @@ What the design changes:
 - **Fewer sessions start for nothing.** A subject closed before its sling gets
   no run, and a run whose subject closed, or was handed to another assignee,
   before a worker took it is retired at the claim, so no session starts for
-  either. Of the three cases tk-i829bzv records in growth-factor, each of which
-  spent a session, two would start none: one subject closed before its reaction
-  was filed and one before a worker claimed it.
+  either. Of the three cases tk-i829bzv records, each of which spent a
+  session, two would start none: one subject closed before its reaction was
+  filed and one before a worker claimed it.
 - **The cap goes, and the spend does not move.** The cap delays a reaction to a
   later sweep and prevents none, and two sessions a rig still run at once. The
   measured steady state is small: when this design read the stores, no bead
-  waited for a reaction in the four rigs where the scan runs, 6 waited in
-  gc-toolkit and 71 in gascity, where your overrides keep it off. The reactions of the 7.4 days to
-  2026-11-14 were 58, about $104: gc-toolkit 24 from findings and requests,
-  growth-factor 13, signal-loom 9, shutupandlisten 6, sprintshow 5 and gascity 1.
+  waited for a reaction in the four rigs where the scan runs, and 6 waited in
+  gc-toolkit and 71 in the one other rig where your overrides keep it off. The
+  reactions of the 7.4 days to 2026-11-14 were 58, about $104: 24 in gc-toolkit
+  from findings and requests, 13 in the pilot rig of section 6, 20 in the three
+  rigs it pauses (9, 6 and 5), and 1 in the other rig the overrides keep off.
 - **The cadence stays.** The order's 15-minute interval is unchanged, and so are
   the pool's model and its two sessions.
 
@@ -471,9 +525,8 @@ name.
 
 The stores need no migration. When this design read them, no reaction bead was
 open in any rig's store, and no run of the old `mol-first-reaction` molecule was
-open:
-gc-toolkit holds 700 roots of it, gascity 262, signal-loom 31, sprintshow 8 and
-shutupandlisten 4, all closed. The residue of the old keys is inert (section 2).
+open: gc-toolkit holds 700 roots of it and four other stores 305 between them,
+all closed. The residue of the old keys is inert (section 2).
 
 One window remains. Until the checkout syncs, the old code still files reaction
 beads, and a session that claimed one under the old prompt calls scripts that
@@ -489,16 +542,17 @@ leftover bead is unlikely but possible. The cut-over bead below confirms none is
 left before a polecat removes the clause.
 
 - **C, the cut-over, once the landing merges.** The mechanik adds overrides that
-  switch the scan off in signal-loom, shutupandlisten and sprintshow, beside the
-  city's overrides for gc-toolkit and gascity. Until it does, those rigs' scans may run once on the new
-  path, which is the same path the pilot runs. Once the checkout has synced and
+  switch the scan off in the three rigs call 5 pauses, beside the city's two
+  overrides that keep it off today. The cut-over bead names the rigs. Until the
+  mechanik adds them, those rigs' scans may run once on the new path, which is
+  the same path the pilot runs. Once the checkout has synced and
   no session that started before the sync still runs in a proactive pool, it
   checks that no reaction bead is open in any store, and treats any it finds as
-  the clause does. Once growth-factor's first ten reactions on the new path have
+  the clause does. Once the pilot's first ten reactions on the new path have
   landed, it reads each one: the run's step closed after its exit, the exit's
   writes present (the route or run, the gate or hold, and `gctk bead holds` for
   a wait), no subject reacted to twice, and nothing written to a closed one. It
-  compares the mix of exits with growth-factor's last ten on the old path, which
+  compares the mix of exits with the pilot's last ten on the old path, which
   the subjects' cards record, and writes both on its notes. If the reads hold,
   it removes the overrides it added. If one does not, it files a human gate that
   names what failed, and the remedy is to revert the landing's squash commit,
@@ -513,9 +567,9 @@ the city working.
 
 | Unit | What it does | Waits on | Answers |
 |---|---|---|---|
-| 1. The scan and every request sling a run | `formulas/mol-first-reaction.toml`; `agents/proactive/agent.toml` (Gas City's default query, `default_sling_formula`, the nudge); `tools/gc-proactive.sh` (`sling` through `gc sling` with the refusals and `--check --run`, the scan with no cap, no page and no opt-in read, the retirements in section 3); the order's exec and description; `proactive-scan-sling.sh` and its test deleted; `patrol-finding.sh` without `gc.proactive`; `gc-helm.sh` react's exit 8, `create_subject` without `gc.reaction_owned`, and place passing over a reaction's run; `operator-intake.sh`'s exit 8; `doctor/check-po-queue-only` passing over a reaction's run; `tools/proactive-first-reaction-fixture.sh` deleted; the suites of each | nothing | call 1, call 2, call 4's cap, the standing record and pattern refusals, the sling side of tk-i829bzv |
-| 2. The reaction runs in the step and disposes through native writes | `agents/proactive/prompt.template.md` (claim the step, read S, the check, a card that names its run, the exit, the step's close, the decline, and the cut-over's clause for a reaction bead) and `PROVENANCE.md`; `first-reaction-dispose.sh` with the retirements and write orders of section 3; `formulas/mol-validate-close.toml`'s two note blocks; `first-reaction-dispose.test.sh`, with the RECO and RECOORDER cases kept and the new cases of section 4 | unit 1 | call 3's exit side, tk-qgocr1g, tk-i829bzv, tk-52oz0ts |
-| 3. The reaction bead's keys and pages retire | `lifecycle/lifecycle.toml` registers `gc.reacted_by`, `gc.reaction_kind`, `gc.reaction_subject`, `gc.reaction_subject_store`, `gc.proactive_reaction`, `gc.reaction_owned`, `gc.proactive` and `gc.blocker_key` as retired, and its proactive group stops describing the reaction bead; `bead-context.sh`'s `reacted_by` field; `tools/helm-surface-fixture.sh`; the pages that state the old model (human-engagement.md, component-model.md, steering.md, authority-map.md, deferred-dispatch.md, bead-store-resolution.md, review-correctness.md); built-once-target.md's lane B row and its trade line, and the rows `tools/deletion-plan.tsv` gives this member, which the order's file leaves while its script and test go | units 1 and 2 | the subject's done condition |
+| 1. The scan and every request sling a run | `formulas/mol-first-reaction.toml`; `agents/proactive/agent.toml` (Gas City's default query, `default_sling_formula`, the nudge); `tools/gc-proactive.sh` (`sling` through `gc sling` with the refusals and `--check --run`, an unfinished pour read as no run and gated when `gc sling` exits 3 on it, the scan with no cap, no page and no opt-in read, ending before the order's timeout, the retirements in section 3); the order's exec, its `[order.env]` deadline and its description; `proactive-scan-sling.sh` and its test deleted; `patrol-finding.sh` without `gc.proactive`; `gc-helm.sh` react's exit 8, `create_subject` without `gc.reaction_owned`, and place passing over a reaction's run; `operator-intake.sh`'s exit 8; `doctor/check-po-queue-only` passing over a reaction's run; `tools/proactive-first-reaction-fixture.sh` deleted; the suites of each | nothing | call 1, call 2, call 4's cap, the standing record and pattern refusals, the sling side of tk-i829bzv |
+| 2. The reaction runs in the step and disposes through native writes | `agents/proactive/prompt.template.md` (claim the step, read S, the check, a card that names its run, the exit, the step's close, the decline, the hand-back of a claim that is the bare subject, and the cut-over's clause for a reaction bead) and `PROVENANCE.md`; `first-reaction-dispose.sh` with the retirements and write orders of section 3; `formulas/mol-validate-close.toml`'s two note blocks; `first-reaction-dispose.test.sh`, with the RECO and RECOORDER cases kept and the new cases of section 4 | unit 1 | call 3's exit side, tk-qgocr1g, tk-i829bzv, tk-52oz0ts |
+| 3. The reaction bead's keys and pages retire | `lifecycle/lifecycle.toml` registers `gc.reacted_by`, `gc.reaction_kind`, `gc.reaction_subject`, `gc.reaction_subject_store`, `gc.proactive_reaction`, `gc.reaction_owned`, `gc.proactive` and `gc.blocker_key` as retired, and its proactive group stops describing the reaction bead; `bead-context.sh`'s `reacted_by` field; `tools/helm-surface-fixture.sh`; the pages that state the old model (human-engagement.md, component-model.md, steering.md, authority-map.md, deferred-dispatch.md, bead-store-resolution.md, review-correctness.md), and `doctor/check-claim-advancing`'s description and comment, which list first-reaction beads among the bare beads a pool claims; built-once-target.md's lane B row and its trade line, and the rows `tools/deletion-plan.tsv` gives this member, which the order's file leaves while its script and test go | units 1 and 2 | the subject's done condition |
 
 The cut-over bead of section 6 is the mechanik's and changes the town repo's
 `city.toml`, no file here. The clause's removal is a polecat's change to the
@@ -532,7 +586,8 @@ the child surveys the open branches against each unit's files again, since they
 move.
 
 It files the cut-over bead in the gc-toolkit store with a `blocks` edge onto
-the landing bead, and sends it to the mechanik with
+the landing bead, names in it the pilot rig and the three rigs call 5 pauses,
+which this design's bead records in its notes, and sends it to the mechanik with
 `gc sling gc-toolkit/gc-toolkit.mechanik <bead> --no-formula --no-convoy`, the
 form the mechanik takes work in. Gas City's routed tier offers it once the
 landing closes, and core's `cascade-nudge-on-blocker-close` order nudges the
@@ -554,28 +609,38 @@ It appends a note to each bead below:
 
 ## 9. Gas City facts, and the search behind the surface
 
-Upstream is 297772b4c3. These files are byte-identical there and in the
-installed build 6589a7df45: `internal/sling/sling_core.go`,
-`internal/sling/sling_attachment.go`, `internal/graphv2/invocation.go`,
-`internal/beadmeta/hold_labels.go` and `engdocs/architecture/life-of-a-bead.md`.
-`cmd/gc/cmd_hook_claim.go`, `cmd/gc/cmd_sling.go`, `internal/sling/sling.go`,
-`docs/tutorials/07-orders.md` and `docs/reference/config.md` differ between the
-two, and each symbol and sentence cited from them is in both.
+Upstream is 297772b4c3. Of the Gas City files this record cites, these are
+byte-identical there and in the installed build 6589a7df45:
+`internal/sling/sling_core.go`, `internal/sling/sling_attachment.go`,
+`internal/graphv2/invocation.go`, `internal/beadmeta/hold_labels.go`,
+`internal/orders/scanner.go` and `engdocs/architecture/life-of-a-bead.md`. The
+rest differ between the two: `cmd/gc/cmd_hook_claim.go`, `cmd/gc/cmd_sling.go`,
+`cmd/gc/cmd_convoy.go`, `cmd/gc/cmd_convoy_dispatch.go`,
+`cmd/gc/order_dispatch.go`, `cmd/gc/order_store.go`,
+`cmd/gc/pool_detached_orphan_sweep.go`, `cmd/gc/wisp_gc.go`,
+`internal/sling/sling.go`, `internal/molecule/molecule.go`,
+`internal/sourceworkflow/sourceworkflow.go`,
+`internal/api/huma_handlers_runs.go`, `internal/events/events.go`, the core
+pack's orders, `docs/tutorials/07-orders.md` and `docs/reference/config.md`.
+Each symbol and sentence cited from them is in both.
 
 | Fact | Evidence |
 |---|---|
 | A claim takes only a candidate whose route names the session's pool | hookCandidateClaimable, hookClaimMatchesRoute (`cmd/gc/cmd_hook_claim.go`) |
 | A custom work query is run verbatim to find candidates | life-of-a-bead.md, "The hook mechanism"; config.md, `work_query` |
 | An agent's default sling formula is applied as `--on` | config.md, the Agent table's `default_sling_formula` |
+| A formula only the default supplies gives way to a plain route when a live classic molecule holds the bead, and an explicit `--on` refuses instead | slingDefaultFormula and attachFormulaToBead (`internal/sling/sling_core.go`); checkNoMoleculeChildren (`internal/sling/sling_attachment.go`) |
 | A pour mints an input convoy tracking the bead, refuses a terminal target, and stamps `gc.execution_routed_to` while clearing `gc.routed_to` and `gc.run_target` | CreateSingleItemInputConvoy (`internal/graphv2/invocation.go`); restampWorkBeadRouting (`internal/sling/sling_core.go`) |
 | A second live run of one formula on a bead is refused with exit 3, and one of another formula is not | checkLegacySourceWorkflowConflict; liveConvoyTrackedWorkflowRoots; `cmd/gc/cmd_sling.go`, the conflict's `return 3` |
+| A pour cut short leaves its root open, marked failed or still fenced; the fence holds a bead's route back and marking the pour failed does not restore it; the conflict check counts any root that is not closed | markFailed, fenceGraphWorkflowBead and deferBeadRouting (`internal/molecule/molecule.go`); closeFailedGraphV2Roots (`internal/sling/sling.go`); liveConvoyTrackedWorkflowRoots, which skips only a terminal root |
+| An exec order that outlasts its timeout is ended by signalling its whole process group | shellExecRunner and cancelShellExecProcessGroup (`cmd/gc/order_dispatch.go`) |
 | A claim retires a run whose input is terminal or handed off | retireDoneWorkflowCandidates, hookRetireIfInputSettled (`cmd/gc/cmd_hook_claim.go`) |
-| A plain sling clears the execution route, and reopen-source re-routes the bead | clearGraphTakeoverRoute; cmdWorkflowReopenSource, cmdWorkflowDeleteSource (`cmd/gc/cmd_convoy_dispatch.go`) |
+| A plain sling clears the execution route; reopen-source re-routes the bead; neither source command finds a run slung with `--on` | clearGraphTakeoverRoute; cmdWorkflowReopenSource, cmdWorkflowDeleteSource (`cmd/gc/cmd_convoy_dispatch.go`); the graph.v2 pour's empty source (`internal/sling/sling.go`) and the lookup by `gc.source_bead_id` (`internal/sourceworkflow/sourceworkflow.go`) |
 | A convoy closes only once every member is terminal | closeCompletedConvoyAcross (`cmd/gc/cmd_convoy.go`) |
-| Run cancel closes a run's open steps and stops their holder | `POST /v0/city/{cityName}/runs/{run_id}/cancel` (`internal/api/huma_handlers_runs.go`) |
-| `hold:mayor` and `hold:external` hold a bead from every hook and pool | DispatchHoldLabels, HasDispatchHold (`internal/beadmeta/hold_labels.go`) |
+| Run cancel closes a run's open steps and interrupts the turn of each session holding one, without stopping the session | `POST /v0/city/{cityName}/runs/{run_id}/cancel` (`internal/api/huma_handlers_runs.go`) |
+| `hold:mayor` and `hold:external` keep a bead out of the hook's claim tiers and its result | DispatchHoldLabels, HasDispatchHold (`internal/beadmeta/hold_labels.go`) |
 | An event order's script is told no event; an override naming no order is an error; a definition's `enabled = false` drops the order before overrides | 07-orders.md, "Trigger types", "Formula orders vs. exec orders", "Overrides"; `internal/orders/scanner.go` |
-| A sling refuses a missing bead and a pool that cannot read its store | MissingBeadError, CrossStoreRouteError (`internal/sling/sling.go`); validateBuiltInRouteStoreReachable |
+| A sling refuses a missing bead, a pool that cannot read its store and a target the city does not configure | MissingBeadError, CrossStoreRouteError (`internal/sling/sling.go`); validateBuiltInRouteStoreReachable (`internal/sling/sling_core.go`); the target check in `cmd/gc/cmd_sling.go` |
 | Core ships no order or formula that triages a new bead | `internal/bootstrap/packs/core/orders` and `formulas` |
 | bd's update compare-and-swap writes nothing on a mismatch and exits 13 | `gc bd update --help` (bd 1.3.4), `--if-status` and `--if-assignee` |
 | bd's human gate blocks a bead until a person resolves it | `gc bd gate create --help`, `--type=human --blocks` |
@@ -607,6 +672,21 @@ The surface the change adds or grows, and the search behind each:
   a bead may take a first reaction, a rule of the pack's.
 - **The scan order, kept.** Searched: event orders on `bead.created`, formula
   orders, and core's orders, none of which starts work on a bead nobody slung.
+- **The sweep's deadline, an `[order.env]` key of the scan order.** Searched:
+  the environment Gas City gives an exec order, which carries no deadline
+  (07-orders.md, "Formula orders vs. exec orders"; the exec environment built in
+  `cmd/gc/order_store.go`), and the order runner, which ends a run that
+  outlasts its timeout by signalling its process group. An override can set an
+  order's `timeout` and `env` but not its exec (07-orders.md, "Overrides"), so
+  the deadline sits in `env`.
+- **The gate on an unfinished pour.** Searched: Gas City's own cleanup of a
+  failed pour, which runs only inside the sling that failed
+  (closeFailedGraphV2Roots), and its sweep of abandoned roots
+  (closeAbandonedRoots, `cmd/gc/wisp_gc.go`), which closes a root only once
+  every bead under it is terminal, or a root with none under it only once no
+  live source bead is attached to it, and which only logs unless it is
+  enforced. Neither ends an unfinished pour on an open subject, so the verb asks
+  a person, as gctk's deferred-dispatch start does for an armed bead.
 
 What retires: the reaction bead kind, its keys and `gc.blocker_key`, the
 pool's custom query and `cmd_demand`, the cap, `proactive-scan-sling.sh`,
