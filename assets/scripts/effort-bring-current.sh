@@ -49,6 +49,14 @@
 #       merge conflicts, and the task the call sent has a polecat resolve it
 set -uo pipefail
 
+# >>> control-char-scrub
+# A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
+# C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
+# above 0x1F pass through raw, which JSON permits; the output feeds jq, so
+# dropping a structural LF or TAB just minifies.
+scrub() { tr -d '\000-\037'; }
+# <<< control-char-scrub
+
 PROG="effort-bring-current"
 HERE="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=bd-lib.sh
@@ -118,9 +126,9 @@ When your resolution keeps $BRANCH's side of every file $TARGET changed, so that
 The conflict is yours to resolve. Ask the operator only when a resolution needs a product decision, because the two sides want different behavior and nothing written settles which. Then ask through a human gate on this task with nothing pushed, as your prompt's section on blocked work and human gates says."
       TASK=$(gc bd create "$TITLE" -t task ${PARENT[@]+"${PARENT[@]}"} -d "$BRIEF" \
         --metadata "$(jq -nc --arg t "$BRANCH" '{target: $t, merge_strategy: "direct"}')" --deps "blocks:$H,blocks:$LANDING" --json </dev/null \
-        | tr -d '[:cntrl:]' | jq -r 'if type == "array" then .[0].id else .id end // empty' 2>/dev/null)
+        | scrub | jq -r 'if type == "array" then .[0].id else .id end // empty' 2>/dev/null)
       if [ -z "$TASK" ]; then
-        TASK=$(gc bd show "$H" --json </dev/null | tr -d '[:cntrl:]' \
+        TASK=$(gc bd show "$H" --json </dev/null | scrub \
           | jq -er --arg t "$TITLE" '[.[0].dependencies[]? | select(.dependency_type == "blocks" and .status != "closed" and .title == $t) | .id] | if length < 2 then .[0] // "" else error("more than one") end' 2>/dev/null) \
           || halt "pushed nothing: merging origin/$TARGET into $BRANCH conflicts in $LIST. The create of its task returned no id, and reading $H did not settle whether the create wrote it. gc bd show $H lists what it waits on: finish from the notice with the open task titled \"$TITLE\", or call again when it waits on none"
         [ -n "$TASK" ] || halt "pushed nothing: merging origin/$TARGET into $BRANCH conflicts in $LIST, and the create of its task wrote nothing; call again"
