@@ -206,10 +206,7 @@ bd_() {
     if [ -n "$BD_DB" ]; then pass_child gc bd --db "$BD_DB" "$@"; else pass_child gc bd "$@"; fi
 }
 
-# now_utc, the time a record carries, reads bash's own clock. now_epoch, which
-# the pass budget reads, runs date: a suite sets the pass's clock by standing in
-# for date.
-now_utc() { TZ=UTC printf '%(%Y-%m-%dT%H:%M:%SZ)T\n' -1; }
+now_utc() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 now_epoch() { date -u +%s; }
 
 actor() { printf '%s' "${GC_AGENT:-${BEADS_ACTOR:-${USER:-unknown}}}"; }
@@ -782,12 +779,11 @@ cmd_list() {
         json="$(bead_from_cache "$all_cache" "$id")" || json=""
         target=""; reason=""; slung=""; mr=""; fails=0
         if [ -n "$json" ]; then
-            row_meta_all ARM_META "[$json]"
-            target="${ARM_META[$K_TARGET]-}"
-            reason="${ARM_META[$K_REASON]-}"
-            slung="${ARM_META[$K_SLUNG]-}"
-            mr="${ARM_META[merge_result]-}"
-            fails="${ARM_META[$K_FAILS]-}"; case "$fails" in ''|*[!0-9]*) fails=0 ;; esac
+            target="$(meta_of "$json" "$K_TARGET")"
+            reason="$(meta_of "$json" "$K_REASON")"
+            slung="$(meta_of "$json" "$K_SLUNG")"
+            mr="$(meta_of "$json" merge_result)"
+            fails="$(meta_of "$json" "$K_FAILS")"; case "$fails" in ''|*[!0-9]*) fails=0 ;; esac
         fi
         # An open arm splits by what holds it, and conflating the ways is what
         # hides a dead arm. One a wait holds, its own or an ancestor's, waits on
@@ -1074,9 +1070,8 @@ reconcile_dispatch() {
                 [ -z "$via" ] || printf '%s\t%s\n' "$via" "$id" >> "$heldf"
                 held=$((held + 1)); continue ;;
         esac
-        row_meta_all ARM_META "[$json]"
-        target="${ARM_META[$K_TARGET]-}"
-        args_json="${ARM_META[$K_ARGS]-}"
+        target="$(meta_of "$json" "$K_TARGET")"
+        args_json="$(meta_of "$json" "$K_ARGS")"
         assignee="$(printf '%s' "$json" | jq -r '.assignee // ""')"
         [ -n "$args_json" ] || args_json="[]"
 
