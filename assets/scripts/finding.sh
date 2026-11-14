@@ -1025,13 +1025,15 @@ cmd_set_disposition() {
 # whole answer, so one without --flag clears an earlier flag.
 #
 # A fix unit runs while the validator rules its batch, so a ruling can land
-# after the fix unit has begun. A decline, a deferral and a restates ruling
-# close the finding and are its answer on the PR, so the branch carries no
-# change for that point. An answer given without --flag on such a finding is
-# refused, and the refusal prints the ruling, which tells the fix unit to revert
-# what it changed for the point before it hands off. Only a later ruling that
-# overrules the closing one lets the branch change that code, and its answer is
-# recorded with --flag, which shows it under Worth a look. Exit 1 on a usage
+# after the fix unit has begun. A decline and a deferral close the finding and
+# are its answer on the PR, so the branch carries no change for that point. An
+# answer given without --flag on such a finding is refused. The refusal prints
+# the ruling and tells the fix unit to revert what it changed for the point
+# before it hands off. Only a later ruling that overrules the closing one lets
+# the branch change that code, and its answer is recorded with --flag, which
+# shows it under Worth a look. An answer on a body ruled restates is recorded as
+# given: the living answer has no entry for that body, and its points are the
+# inline comments it frames, each answered on its own finding. Exit 1 on a usage
 # error, a bead that is not a finding, or that refusal, 2 when a read or the
 # write fails.
 cmd_answer() {
@@ -1058,7 +1060,7 @@ cmd_answer() {
   disp=$(printf '%s' "$row" | jq -r '(.[0].metadata["finding.disposition"] // "") | tostring' 2>/dev/null)
   if [ -z "$flag" ]; then
     case "$disp" in
-      declined|deferred|restates)
+      declined|deferred)
         said=$(printf '%s' "$row" | jq -r '.[0].metadata as $m | (($m["finding.answer"] // "") | tostring) as $a
           | if $a != "" then $a else (($m["finding.reply"] // "") | tostring) end' 2>/dev/null)
         warn "$finding is ruled $disp${said:+: $said}"

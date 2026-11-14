@@ -1444,14 +1444,18 @@ eq "$(meta "$FRF" 'finding.fix_flag')" "<absent>" "…and one given without --fl
 eq "$rc" "1" "answer refuses a bead that is not a finding"
 "$SUT" answer --finding "$FRF" --answer "   " 2>/dev/null; rc=$?
 eq "$rc" "1" "…and an empty sentence"
-# A ruling that closes a finding is its answer on the PR, and it can land while
-# the fix unit works, so the fix unit learns of it when it answers the point.
+# A decline or a deferral is the finding's answer on the PR, and it can land
+# while the fix unit works, so the fix unit learns of it when it answers the
+# point.
 err=$("$SUT" answer --finding "$FRI" --answer "Fixed as you suggested." 2>&1 >/dev/null); rc=$?
 eq "$rc|$(meta "$FRI" 'finding.fix_answer')" "1|<absent>" "answer refuses a fix unit's answer on a declined finding, and records nothing"
 has "$err" "Declined: the branch already keeps the opt-out." "…and prints the ruling's own answer"
 has "$err" "Revert any change you made for it" "…with what the fix unit owes the branch"
 "$SUT" answer --finding "$FRQ" --answer "Fixed as you suggested." 2>/dev/null; rc=$?
 eq "$rc|$(meta "$FRQ" 'finding.fix_answer')" "1|<absent>" "…and on a deferred one"
+"$SUT" answer --finding "$FRB" --answer "Each point it frames is answered on its own finding."; rc=$?
+eq "$rc|$(meta "$FRB" 'finding.fix_answer')" "0|Each point it frames is answered on its own finding." \
+  "an answer on a body ruled restates records, since its points are the inline comments it frames"
 "$SUT" answer --finding "$FRI" --answer "Your ruling overruled the decline, so the guard now logs the skip." --flag
 eq "$(meta "$FRI" 'finding.fix_answer')|$(meta "$FRI" 'finding.fix_flag')" "Your ruling overruled the decline, so the guard now logs the skip.|1" \
   "a flagged answer on a declined finding records, since only a later ruling that overrules the decline changes its code"
