@@ -751,8 +751,8 @@ values every later call sets and the skill to load next:
 | Entry | What the record shows | Next |
 |---|---|---|
 | `fresh` | A new claim, with no `staying:` line newest. | The premise re-check. |
-| `interrupted` | A restart, where the claim returns the conversation as an existing assignment: a `holding:` line newest means the hold stands, and none means nothing was held yet. A `no_work` drain over a conversation whose newest line is `holding:` is a hold that stands too. Or a stay that stopped short: its newest `staying:` line names no work yet, or names work that is still out with no edge onto it (for the subject, none onto a convoy that tracks it), or the conversation is still claimed while its work is out. | `converse-continue`, the premise re-check, or `converse-stay`. |
-| `waiting` | No ready work (a `no_work` drain), and the conversation open under the alias waits on open work, as `gctk bead holds` reads it, through an edge onto each bead its newest `staying:` line names that is still out, or for the subject onto a convoy that tracks it. | `converse-stay`. |
+| `interrupted` | A restart, where the claim returns the conversation as an existing assignment: a `holding:` line newest means the hold stands, and none means nothing was held yet. A `no_work` drain over a conversation whose newest line is `holding:` is a hold that stands too. Or a stay that stopped short: its newest `staying:` line names no work yet, or names work that is still out with no edge onto it (for the subject, none onto an open convoy that tracks it), or the conversation is still claimed while its work is out. | `converse-continue`, the premise re-check, or `converse-stay`. |
+| `waiting` | No ready work (a `no_work` drain), and the conversation open under the alias waits on open work, as `gctk bead holds` reads it, through an edge onto each bead its newest `staying:` line names that is still out, or for the subject onto an open convoy that tracks it. | `converse-stay`. |
 | `returned` | A claim whose newest `holding:` or `staying:` line is a `staying:` line that names work, each bead of which has closed, with nothing left open that the conversation waits on. | `converse-stay`. |
 | `none` | No ready work (a `no_work` drain), and no conversation under the alias. | Drain. |
 | `stop` | A drain for a reason other than `no_work` and `claims_errored`, such as `drain_pending` or `stale_session`: Gas City is stopping the session and hands it no work, whatever the conversation's state. The entry prints what the hook wrote to stderr, which can name the acknowledgement to run. | Drain. Gas City refuses the acknowledgement while the session holds a claim it started and has not finished, as a conversation in progress under it is, and tells it to continue. So a sitting refused over its conversation goes on with it, and acknowledges the drain once the conversation is closed, back in the operator's queue or left to wait. |
@@ -771,8 +771,10 @@ began last, and a stay that stops anywhere reads as a stay, never as a hold
 that stands or a sitting that held nothing. A conversation keeps its edges onto
 the work of a stay that returned, so an edge alone proves nothing: the entry
 reads a stay as waiting or returned only once each bead its newest line names
-has an edge or has closed, the subject's edge being one onto a convoy that
-tracks it. A return that leaves the operator something to
+has an edge or has closed, the subject's edge being one onto an open convoy
+that tracks it. A convoy that has closed stands for nothing, because `gc convoy
+close` closes one whatever the state of the beads it tracks, so the subject's
+own status then decides. A return that leaves the operator something to
 answer holds, which writes a newer `holding:` line, so a restart after it reads
 the hold, and a conversation handed back to the queue after such a hold starts
 its next sitting fresh. A stay that stopped short where the record cannot

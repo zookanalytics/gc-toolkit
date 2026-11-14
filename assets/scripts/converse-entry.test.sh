@@ -8,9 +8,10 @@
 # and with it closed, a second stay with an earlier stay's text, a hold claimed
 # back over a second stay that stopped short, while the earlier work is out and
 # once it closes, the return of the work, a stay on the conversation's own
-# subject through the convoy of the subject's dispatch, no conversation at all,
-# Gas City stopping the session whatever its conversation's state, and each way
-# the state can fail to read, which is never an answer to drain on.
+# subject through the convoy of the subject's dispatch while that convoy is
+# open, and by the subject's own status once it has closed, no conversation
+# at all, Gas City stopping the session whatever its conversation's state, and
+# each way the state can fail to read, which is never an answer to drain on.
 #
 # Hermetic: stubs gc and gctk, reads the repo only; no city, no network.
 
@@ -358,8 +359,11 @@ echo "── a stay on its own subject waits through the convoy of the subject's
 # The conversation tracks its subject and cannot wait on it through an edge of
 # its own, so converse-signoff.sh --stay makes it wait on the convoy the
 # subject's dispatch poured its run over, which Gas City closes once the
-# subject closes. The stay's line names the subject, and an edge onto a convoy
-# that tracks a bead the line names is the wait on that bead.
+# subject closes. The stay's line names the subject, and an edge onto an open
+# convoy that tracks the subject is the wait on it. A convoy that has closed is
+# no wait: `gc convoy close` closes one whatever the state of the beads it
+# tracks, and an earlier stay's edge onto an earlier dispatch's convoy stays
+# once the subject is opened again, so the subject's own status then decides.
 fresh; hook drain; conv tk-c open "staying: the dialog keeps what is typed (waits on tk-s)" tracks:tk-s blocks:tk-cv
 convoy tk-cv open tk-s; holds tk-c tk-cv
 assigned "$FIXDIR/row-tk-c.json"
@@ -371,10 +375,50 @@ is "…and what was agreed" "$(line AGREED=)" "AGREED=the dialog keeps what is t
 has "…after reading the convoy its edge reaches" "$(cat "$FIXDIR/calls")" "bd list --id tk-cv --all --include-gates --include-infra --include-templates --json --limit 0"
 hasnt "…and not the subject's status, which the convoy stands for" "$(cat "$FIXDIR/calls")" "bd list --id tk-s "
 fresh; hook work ready_assignment tk-c; conv tk-c in_progress "staying: the dialog keeps what is typed (waits on tk-s)" tracks:tk-s blocks:tk-cv
-convoy tk-cv closed tk-s; holds tk-c
+convoy tk-cv closed tk-s; item tk-s closed; holds tk-c
 OUT=$(enter)
 is "once the convoy closes with the subject, the stay is the return" "$(line ENTRY | cut -d: -f1)" "ENTRY returned"
 is "…naming the subject as the work that returned" "$(line WORK=)" "WORK=tk-s"
+has "…after reading the subject's own status, which a closed convoy no longer stands for" "$(cat "$FIXDIR/calls")" "bd list --id tk-s --all --json"
+# A convoy closed while the subject is still out, as `gc convoy close` closes
+# one, is no return: the subject's own status says it is out.
+fresh; hook work ready_assignment tk-c; conv tk-c in_progress "staying: the dialog keeps what is typed (waits on tk-s)" tracks:tk-s blocks:tk-cv
+convoy tk-cv closed tk-s; item tk-s open; holds tk-c
+OUT=$(enter)
+is "a convoy closed while the subject is still out is no return" "$(line ENTRY | cut -d: -f1)" "ENTRY interrupted"
+has "…naming the subject the conversation no longer waits on" "$(line ENTRY)" "does not wait on tk-s, which its stay names and which is still out"
+has "…and the convoy that closed before it" "$(line ENTRY)" "the convoy of the dispatch of its subject tk-s closed before tk-s did"
+is "…which the stay's skill takes up" "$(line NEXT=)" "NEXT=converse-stay"
+is "…with the subject as its work" "$(line WORK=)" "WORK=tk-s"
+fresh; hook drain; conv tk-c open "staying: keep the API (waits on tk-s, tk-w)" tracks:tk-s blocks:tk-cv blocks:tk-w
+convoy tk-cv closed tk-s; item tk-s open; item tk-w open; holds tk-c tk-w
+assigned "$FIXDIR/row-tk-c.json"
+enter >/dev/null
+is "…and beside other work still out, it is no wait on the subject either" "$(line ENTRY | cut -d: -f1)" "ENTRY interrupted"
+has "…naming the subject" "$(line ENTRY)" "does not wait on tk-s,"
+# A second stay on a subject opened again and sent again, stopped after its
+# line named the subject and before its edge onto the new dispatch's convoy:
+# the edge onto the first stay's convoy, closed with the subject's first close,
+# is no wait, though an open convoy of the new dispatch tracks the subject.
+SECOND="staying: keep the API (waits on tk-s)
+holding: rule on the follow-up
+staying: add the flag
+staying: add the flag (waits on tk-s)"
+fresh; hook work existing_assignment tk-c; conv tk-c in_progress "$SECOND" tracks:tk-s blocks:tk-cv1
+convoy tk-cv1 closed tk-s; convoy tk-cv2 open tk-s; item tk-s open; holds tk-c
+OUT=$(enter)
+is "a second stay stopped before its edge onto the new convoy, the first stay's convoy closed, is interrupted" "$(line ENTRY | cut -d: -f1)" "ENTRY interrupted"
+hasnt "…and no return" "$(line ENTRY)" "returned"
+has "…naming the subject it does not wait on yet" "$(line ENTRY)" "does not wait on tk-s,"
+is "…which the stay's skill runs again" "$(line NEXT=)" "NEXT=converse-stay"
+is "…with the second stay's work" "$(line WORK=)" "WORK=tk-s"
+is "…and its agreement" "$(line AGREED=)" "AGREED=add the flag"
+fresh; hook drain; conv tk-c open "$SECOND" tracks:tk-s blocks:tk-cv1 blocks:tk-cv2
+convoy tk-cv1 closed tk-s; convoy tk-cv2 open tk-s; holds tk-c tk-cv2
+assigned "$FIXDIR/row-tk-c.json"
+enter >/dev/null
+is "…and once its re-run writes the edge onto the new convoy, it waits" "$(line ENTRY | cut -d: -f1)" "ENTRY waiting"
+has "…on that convoy" "$(line ENTRY)" "(tk-cv2)"
 fresh; hook drain; conv tk-c open "staying: keep the API (waits on tk-s, tk-w)" tracks:tk-s blocks:tk-cv blocks:tk-w
 convoy tk-cv open tk-s; item tk-w open; holds tk-c tk-cv tk-w
 assigned "$FIXDIR/row-tk-c.json"
@@ -387,7 +431,7 @@ has "…reading every bead its edges reach in one call" "$(cat "$FIXDIR/calls")"
 fresh; hook work existing_assignment tk-c; conv tk-c in_progress "staying: keep the API (waits on tk-s)" tracks:tk-s; holds tk-c; item tk-s open
 enter >/dev/null
 is "a stay on its subject stopped before its edge, the subject open, is interrupted" "$(line ENTRY | cut -d: -f1)" "ENTRY interrupted"
-has "…naming the subject it does not wait on yet" "$(line ENTRY)" "wait on tk-s, which is still out"
+has "…naming the subject it does not wait on yet" "$(line ENTRY)" "does not wait on tk-s, which its stay names and which is still out"
 fresh; hook work existing_assignment tk-c; conv tk-c in_progress "staying: keep the API (waits on tk-s)" tracks:tk-s; holds tk-c; item tk-s closed
 enter >/dev/null
 is "…and with the subject closed, it is the return" "$(line ENTRY | cut -d: -f1)" "ENTRY returned"
@@ -397,7 +441,7 @@ convoy tk-w open tk-other; item tk-s open; holds tk-c tk-w
 assigned "$FIXDIR/row-tk-c.json"
 enter >/dev/null
 is "an edge onto a convoy that tracks another bead is no wait on the subject" "$(line ENTRY | cut -d: -f1)" "ENTRY interrupted"
-has "…so the stay stopped before its wait on the subject" "$(line ENTRY)" "wait on tk-s, which is still out"
+has "…so the stay stopped before its wait on the subject" "$(line ENTRY)" "does not wait on tk-s, which its stay names and which is still out"
 fresh; hook drain; conv tk-c open "staying: keep the API (waits on tk-s)" tracks:tk-s blocks:tk-cv; holds tk-c tk-cv
 assigned "$FIXDIR/row-tk-c.json"
 enter >/dev/null

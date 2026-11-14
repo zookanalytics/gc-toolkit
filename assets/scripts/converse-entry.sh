@@ -61,10 +61,16 @@
 #   conversation's own subject, which the conversation tracks and so cannot
 #   wait on through an edge of its own, waits on the convoy of the subject's
 #   dispatch, which tracks the subject and which Gas City closes once the
-#   subject closes, so a `blocks` edge onto a convoy that tracks the subject
-#   counts as the wait on the subject.
+#   subject closes, so a `blocks` edge onto an open convoy that tracks the
+#   subject counts as the wait on the subject. A convoy that has closed counts
+#   for nothing, because one can close while the subject is still out: `gc
+#   convoy close` closes a convoy whatever the state of the beads it tracks, and
+#   an earlier stay's edge onto the convoy of an earlier dispatch stays once the
+#   subject is opened again. The subject's own status then decides.
 # - for each bead the newest `staying:` line names that the conversation has no
-#   edge onto, its status, and for the subject the beads its edges reach.
+#   edge onto, its status, and for the subject first the beads the
+#   conversation's edges reach, since an open convoy among them that tracks the
+#   subject stands for it.
 #
 # Output: a first line `ENTRY <entry>: <what it means>`, then `NEXT=<skill>`
 # (`NEXT=drain` for none and stop), then one KEY=value line each for CONV,
@@ -173,10 +179,11 @@ mark_of() {
 
 # convoyed <row> <subject> — whether the conversation waits on its own subject
 # through a convoy: a `blocks` edge, onto a bead in the conversation's own store,
-# where an edge holds, that reaches a convoy tracking the subject. Returns 0
-# when one does, 1 when none does, and 2 when the beads its edges reach do not
-# read as the beads asked for, gates and infrastructure beads included, since a
-# read that hides one cannot show what it tracks.
+# where an edge holds, that reaches an open convoy tracking the subject. A
+# convoy that has closed is no wait, whatever it tracks. Returns 0 when one
+# does, 1 when none does, and 2 when the beads its edges reach do not read as
+# the beads asked for, gates and infrastructure beads included, since a read
+# that hides one cannot show what it tracks.
 convoyed() {
   local row=$1 subject=$2 on json
   on=$(printf '%s' "$row" | jq -r "$MARK_JQ"'((.id // "") | tostring | split("-")[0] + "-") as $p
@@ -186,7 +193,7 @@ convoyed() {
   printf '%s\n' "$json" | grep -av '^gc bd:' | scrub | jq -er --arg want "$on" --arg s "$subject" '
     if type != "array" or ([ .[] | (.id // "") | tostring ] | sort) != ($want | split(",") | sort)
     then error("not the beads asked for") else . end
-    | any(.[]; (.issue_type // "") == "convoy"
+    | any(.[]; (.issue_type // "") == "convoy" and ((.status // "") | tostring | ascii_downcase) != "closed"
         and any(.dependencies[]? | objects; (.type // "") == "tracks" and ((.depends_on_id // "") | tostring) == $s))' >/dev/null 2>&1
   case $? in 0) return 0 ;; 1) return 1 ;; *) return 2 ;; esac
 }
@@ -223,9 +230,11 @@ hold_stands() {
 # <pending> is the open work it waits on through its edges, as holds reads it.
 # The line a stay writes first names no work, so its sign-off stopped before
 # it finished. A bead the newer line names with no edge onto it holds nothing,
-# unless it is the conversation's own subject and a convoy the conversation
-# waits on tracks it: when it is still out, the stay stopped before it made the
-# conversation wait on it, and when it has closed, it needs no edge.
+# unless it is the conversation's own subject and an open convoy the
+# conversation waits on tracks it. Otherwise, when it has closed, it needs no
+# edge, and when it is still out, the conversation does not wait on it: the
+# stay stopped before its edge, or, for the subject, the convoy the
+# conversation waited on closed before the subject did.
 stay_entry() {
   local c=$1 row=$2 pending=$3 work unedged out subject rest w crc
   work=$(printf '%s' "$row" | jq -r "$MARK_JQ"'stay_work | join(" ")')
@@ -250,7 +259,10 @@ stay_entry() {
   if [ -z "$work" ]; then
     echo "ENTRY interrupted: a stay on conversation $c stopped before its sign-off finished, so the conversation does not wait on its work yet. Run the stay's call again."
   elif [ -n "$out" ]; then
-    echo "ENTRY interrupted: a stay on conversation $c stopped before it made the conversation wait on $out, which is still out. Run the stay's call again."
+    case " $out " in
+      *" $subject "*) echo "ENTRY interrupted: conversation $c does not wait on $out, which its stay names and which is still out: the stay stopped before its edges, or the convoy of the dispatch of its subject $subject closed before $subject did. Run the stay's call again." ;;
+      *) echo "ENTRY interrupted: a stay on conversation $c stopped before it made the conversation wait on $out, which is still out. Run the stay's call again." ;;
+    esac
   elif [ -z "$pending" ]; then
     echo "ENTRY returned: the work this sitting stayed for has closed, and conversation $c is back with it."
   elif [ "$(printf '%s' "$row" | jq -r '(.status // "") | ascii_downcase')" = in_progress ]; then

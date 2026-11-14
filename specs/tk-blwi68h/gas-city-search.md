@@ -89,8 +89,8 @@ convoys tracked a bead that was still open.
 
 No script, verb, key, bead kind or state. The sign-off's `--waiting-on` takes
 the subject beside `--stay`, where it refused it before, and the entry reads a
-`blocks` edge onto a convoy that tracks the subject as the stay's wait on the
-subject.
+`blocks` edge onto an open convoy that tracks the subject as the stay's wait on
+the subject, and the subject's own status once that convoy has closed.
 
 ## What it leaves in place
 
