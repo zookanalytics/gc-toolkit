@@ -238,8 +238,8 @@ esac
    # instead, so pass --then-route either way. A blocked work bead left unrouted
    # and unheld is the debt doctor/check-blocked-work-armed flags. Waiting
    # work that is a named agent's own takes --then-assign <agent> instead: the
-   # subject is handed to the agent while it waits, in the same form, and Gas
-   # City nudges the agent once the wait lifts, so no dispatch is armed. Omit
+   # subject is handed to the agent while it waits, in the same form, and the
+   # agent is nudged once the wait lifts, so no dispatch is armed. Omit
    # both only for a bead nobody takes (a decision, a research note).
    "$DISPOSE" "$SUBJECT" --disposition blocked --reaction-bead <R> --by proactive --reason "<what it waits on and why>" --takeaway "<headline>" --waiting-on <blocker-id> --then-route <rig>/<rig>.polecat
    "$DISPOSE" "$SUBJECT" --disposition blocked --reaction-bead <R> --by proactive --reason "<what it waits on and why>" --takeaway "<headline>" --blocker "<what has to happen first>" --blocker-key "<short-cause-slug>" --then-route <rig>/<rig>.polecat

@@ -11,7 +11,7 @@
 #               TO that agent instead (--assign), in the form it finds its
 #               work in: gc sling routes it to the mechanik's hook, the
 #               release assigns it to the refinery or the keeper, and the
-#               exit nudges the agent.
+#               exit nudges the agent when bd reports the bead ready.
 #   recommend   the action is known but warrants the operator's trigger -> put
 #               it to the operator as a human gate (as ruling does) AND stamp
 #               gc.recommended_formula on the subject, so the board offers
@@ -23,8 +23,10 @@
 #               bead in the SAME store (component-model I1). Optionally arm a
 #               deferred dispatch, so the wait converts to work when it lifts,
 #               or hand the bead to the named agent whose work it is, in the
-#               form the agent finds its work in, and Gas City nudges the
-#               agent once the wait lifts.
+#               form the agent finds its work in. The exit nudges the agent
+#               when bd already reports the bead ready, as it does once the
+#               wait has lifted, and otherwise Gas City nudges the agent when
+#               the blocker closes.
 #   close       there is nothing to do, now or once another bead lands -> hand
 #               the bead to a validating-closer pool (mol-validate-close), which
 #               re-checks the call and closes the bead or asks the operator. A
@@ -185,8 +187,9 @@ Usage:
   The mechanik claims through its hook, so the release leaves the bead
   unassigned and gc sling <agent> <bead> --no-formula --no-convoy routes it to
   the agent's own name. The refinery and the keeper list the beads assigned to
-  them, so the release writes the agent as the assignee. Either way gc
-  session nudge then gives the agent a turn for it. A town-repo edit
+  them, so the release writes the agent as the assignee. Either way the exit
+  then reads whether bd reports the bead ready, and when it does, gc session
+  nudge gives the agent a turn for it. A town-repo edit
   (city.toml, packs.lock) is mechanik's, so it takes --assign
   gc-toolkit.mechanik. Refused for the deacon and the witness, which patrol
   their own wisps and take what they must act on as mail, for any other agent
@@ -195,8 +198,10 @@ Usage:
   is not a registered named session whose hook reads this bead's store
   (tools/gc-proactive.sh assignable).
   --then-assign (blocked) hands the held bead to a named agent in the same
-  form, held to the same tests as --assign, and sends no nudge: Gas City
-  nudges the agent when the blocker closes.
+  form, held to the same tests as --assign, and reads its readiness the same
+  way. A blocker that has closed already leaves the bead ready, so the exit
+  nudges the agent. While the blocker holds, the exit sends no nudge, and Gas
+  City nudges the agent when the blocker closes.
   ruling and recommend put the subject to the operator as a native human gate:
   the script files it with human-gate.sh under the key first-reaction, the
   takeaway as its title, and the gate blocks the subject. One open gate stands
@@ -796,9 +801,9 @@ if [ -n "$DRY" ]; then
     printf 'disposition=%s bead=%s reason=%s\n' "$DISPOSITION" "$BEAD" "$REASON"
     case "$DISPOSITION" in
         actionable) if [ "$HANDOFF" = assignee ]; then
-                        printf 'would release %s to named agent %s as its assignee and nudge it, since the bead is ready now\n' "$BEAD" "$ASSIGN"
+                        printf 'would release %s to named agent %s as its assignee and nudge it if bd reports the bead ready\n' "$BEAD" "$ASSIGN"
                     elif [ -n "$ASSIGN" ]; then
-                        printf 'would hand %s to named agent %s (gc sling %s %s --no-formula --no-convoy) and nudge it, since the bead is ready now\n' "$BEAD" "$ASSIGN" "$ASSIGN" "$BEAD"
+                        printf 'would hand %s to named agent %s (gc sling %s %s --no-formula --no-convoy) and nudge it if bd reports the bead ready\n' "$BEAD" "$ASSIGN" "$ASSIGN" "$BEAD"
                     elif [ -z "$ADMIT" ]; then
                         printf 'would hold %s for placement (hold:mayor, unrouted): %s\n' "$BEAD" "$HOLD_WHY"
                     elif [ "$ADMIT" = emergency ]; then
@@ -809,9 +814,9 @@ if [ -n "$DRY" ]; then
         recommend)  printf 'would file a human gate on %s recommending %s and hold %s on it\n' "$BEAD" "$RECOMMENDED_FORMULA" "$BEAD" ;;
         blocked)    printf 'would wait %s on:%s%s\n' "$BEAD" "$WAITING" "${BLOCKER_TITLE:+ (new: $BLOCKER_TITLE)}"
                     if [ "$HANDOFF" = assignee ]; then
-                        printf 'would release %s to named agent %s as its assignee, which Gas City nudges once the wait lifts\n' "$BEAD" "$THEN_ASSIGN"
+                        printf 'would release %s to named agent %s as its assignee and nudge it if bd reports the bead ready; while the wait holds, Gas City nudges it when the blocker closes\n' "$BEAD" "$THEN_ASSIGN"
                     elif [ -n "$THEN_ASSIGN" ]; then
-                        printf 'would hand %s to named agent %s (gc sling %s %s --no-formula --no-convoy), whose hook serves it once the wait lifts\n' "$BEAD" "$THEN_ASSIGN" "$THEN_ASSIGN" "$BEAD"
+                        printf 'would hand %s to named agent %s (gc sling %s %s --no-formula --no-convoy) and nudge it if bd reports the bead ready; while the wait holds, Gas City nudges it when the blocker closes\n' "$BEAD" "$THEN_ASSIGN" "$THEN_ASSIGN" "$BEAD"
                     fi
                     if [ -n "$THEN_ROUTE" ] && [ -z "$ADMIT" ]; then
                         printf 'would hold %s for placement (hold:mayor) and arm no dispatch to %s: %s\n' "$BEAD" "$THEN_ROUTE" "$HOLD_WHY"
@@ -943,15 +948,20 @@ stamp_landed() {
 # once bd reports it ready. The sling pours no formula and, as gc-helm.sh
 # takeaway --route does, files no convoy. The refinery and the keeper take the
 # assignee, which the release above wrote, so nothing more is written for them.
-# A route or an assignee alone gives a running agent no turn, so the actionable
-# exit, whose bead is ready now, nudges the agent with the bead's id; a nudge to
-# an agent that is not running wakes it. The blocked exit's bead still waits,
-# and Gas City nudges its route or its assignee when its blocker closes
-# (docs/deferred-dispatch.md). A hand-off that does not land, the nudge
-# included, fails the exit before the landed proof, as a missing arm does, so a
-# re-run resumes it.
+# A route or an assignee alone gives a running agent no turn, so the exit nudges
+# the agent with the bead's id when bd reports the bead ready; a nudge to an
+# agent that is not running wakes it. Whether the bead is ready is read after
+# the hand-off lands, for either exit, and never taken from the exit's name. A
+# blocked exit's blocker can close before the hand-off is written, even while
+# the reaction is prepared, and its close then found no route or assignee to
+# nudge. A bead the read finds still waiting has a blocker that closes after the
+# hand-off, and Gas City nudges the route or the assignee then
+# (docs/deferred-dispatch.md). The read is bd's ready set, the answer the work
+# skill gives for a ready bead. A hand-off that does not land, the read and the
+# nudge included, fails the exit before the landed proof, as a missing arm does,
+# so a re-run resumes it.
 hand_over() { # <named-agent>
-    local out rc=0 rig_arg="" how=assigned what=assignee
+    local out rc=0 rig_arg="" how=assigned what=assignee ready="" why
     if [ "$HANDOFF" = route ]; then
         how=routed; what=route
         [ -n "${GC_RIG:-}" ] && rig_arg="--rig $GC_RIG"
@@ -961,12 +971,22 @@ hand_over() { # <named-agent>
             die "the $DISPOSITION disposition on $BEAD did not land. gc sling did not hand it to $1 (exit $rc: $(printf '%s' "${out:-it named no cause}" | tr '\n' ' ')), so the agent's hook does not offer it. The headline and the release stand. No landed proof was stamped and the reaction bead stays open, so clear the cause and re-run this command: a re-run resumes rather than refusing."
         fi
     fi
-    if [ "$DISPOSITION" = actionable ]; then
-        out=$(gc session nudge "$1" "$BEAD is $how to you and ready" 2>&1 </dev/null) || rc=$?
-        if [ "$rc" -ne 0 ]; then
-            die "the actionable disposition on $BEAD did not land. It is $how to $1, but gc session nudge did not reach the agent (exit $rc: $(printf '%s' "${out:-it named no cause}" | tr '\n' ' ')), so a running agent gets no turn for it. The headline, the release and the $what stand. No landed proof was stamped and the reaction bead stays open, so clear the cause and re-run this command: a re-run resumes rather than refusing."
-        fi
-    fi
+    # Unreadable is not waiting: only a listing that answers an array decides.
+    out=$(gc_bd ready --brief --json --limit 0 2>/dev/null </dev/null) || rc=$?
+    [ "$rc" -ne 0 ] || ready=$(printf '%s' "$out" | scrub | jq -r --arg b "$BEAD" '
+        if type == "array" then (if any(.[]; (.id // "") == $b) then "ready" else "waits" end) else empty end' 2>/dev/null) || ready=""
+    case "$ready" in
+        waits) ;;
+        ready)
+            out=$(gc session nudge "$1" "$BEAD is $how to you and ready" 2>&1 </dev/null) || rc=$?
+            if [ "$rc" -ne 0 ]; then
+                die "the $DISPOSITION disposition on $BEAD did not land. It is $how to $1, but gc session nudge did not reach the agent (exit $rc: $(printf '%s' "${out:-it named no cause}" | tr '\n' ' ')), so a running agent gets no turn for it. The headline, the release and the $what stand. No landed proof was stamped and the reaction bead stays open, so clear the cause and re-run this command: a re-run resumes rather than refusing."
+            fi ;;
+        *)
+            why="answered no list"
+            [ "$rc" -eq 0 ] || why="exited $rc"
+            die "the $DISPOSITION disposition on $BEAD did not land. It is $how to $1, but whether bd reports it ready could not be read (gc bd ready $why), so whether the agent is owed a nudge now is unknown. The headline, the release and the $what stand. No landed proof was stamped and the reaction bead stays open, so clear the cause and re-run this command: a re-run resumes rather than refusing." ;;
+    esac
     note "handed $BEAD to $1"
 }
 

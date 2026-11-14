@@ -109,6 +109,19 @@ case "$1 ${2:-}" in
   "bd list")
     printf 'LIST %s\n' "$*" >> "$FAKE_LOG"
     printf '%s\n' "${FAKE_LIST_JSON:-[]}" ;;
+  "bd ready")
+    # bd's ready set, which the hand-off to a named agent reads once the bead is
+    # handed over. It holds tk-sub unless FAKE_WAITS says a blocker still holds
+    # it. FAKE_READY_FAILS=1 is a read the store refuses, and
+    # FAKE_READY_FAILS=object an answer that is no list.
+    printf 'READY %s\n' "$*" >> "$FAKE_LOG"
+    case "${FAKE_READY_FAILS:-}" in
+      object) printf '{"error":"fake"}\n'; exit 0 ;;
+      ?*) echo "Error: fake refusal" >&2; exit 1 ;;
+    esac
+    _ready='[{"id":"tk-other"},{"id":"tk-sub"}]'
+    [ -n "${FAKE_WAITS:-}" ] && _ready='[{"id":"tk-other"}]'
+    printf '%s\n' "$_ready" ;;
   "session nudge")
     # The nudge a ready hand-off gives the agent. FAKE_NUDGE_FAILS is a nudge
     # that names why it failed on stderr.
@@ -401,8 +414,11 @@ has "routes to nobody" "$ERR" "(ACTRIG) …and names what a bare target would co
 #                and does not ask the pool question
 #   (ACTHANDOFF) gc sling then routes the bead to the agent's own name, raw: no
 #                formula and no convoy, after the release and before the
-#                landed proof, with no arm and no assignee; the bead is ready
-#                now, so gc session nudge gives the agent a turn for it
+#                landed proof, with no arm and no assignee; bd's ready set,
+#                read once the bead is routed, holds it, so gc session nudge
+#                gives the agent a turn for it
+#   (ACTWAITS)   an actionable bead bd does not report ready is handed over
+#                with no nudge, which its blocker's close sends
 #   (ASSIGNNO)   an agent that cannot be handed the bead refuses the exit
 #   (ASSIGNBOTH) --route and --assign together are refused
 #   (ASSIGNRIG)  a named agent needs no GC_RIG to qualify it
@@ -427,8 +443,18 @@ before '^SLING ' 'gc.reacted_by' "(ACTHANDOFF) …and before the landed proof"
 hasnt "GCTK" "$LOG" "(ACTHANDOFF) …arming nothing for a named agent"
 has "NUDGE session nudge gc-toolkit.mechanik tk-sub is routed to you and ready" "$LOG" \
     "(ACTHANDOFF) the agent is nudged with the bead's id, since a route alone gives it no turn"
-before '^SLING ' '^NUDGE ' "(ACTHANDOFF) …once the bead is routed to it"
+has "READY bd ready --brief --json --limit 0" "$LOG" "(ACTHANDOFF) …once bd's ready set, read whole, holds the bead"
+before '^SLING ' '^READY ' "(ACTHANDOFF) …read once the bead is routed to the agent"
+before '^READY ' '^NUDGE ' "(ACTHANDOFF) …and before the nudge"
 before '^NUDGE ' 'gc.reacted_by' "(ACTHANDOFF) …and before the landed proof"
+
+export FAKE_WAITS=1
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --assign gc-toolkit.mechanik --reaction-bead "$R"
+eq "$RC" "0" "(ACTWAITS) an actionable bead bd does not report ready is still handed over"
+has "gc-toolkit.mechanik tk-sub --no-formula --no-convoy" "$(grep '^SLING ' "$FAKE_LOG")" "(ACTWAITS) …routed to the agent"
+hasnt "NUDGE" "$LOG" "(ACTWAITS) …with no nudge while a blocker holds it"
+has "gc.reacted_by=$R" "$LOG" "(ACTWAITS) …and the landed proof stamped"
+unset FAKE_WAITS
 
 export FAKE_AGENT_GONE=1
 run tk-sub --disposition actionable --reason "r" --takeaway "t" --assign mechanik
@@ -490,6 +516,22 @@ has "SLING " "$LOG" "(HANDOFFFAIL) …after the route, which stands"
 hasnt "gc.reacted_by" "$LOG" "(HANDOFFFAIL) …with no landed proof, so a re-run nudges again"
 unset FAKE_NUDGE_FAILS
 
+# (HANDOFFREAD) a readiness read that does not answer leaves whether the agent
+# is owed a nudge unknown, so the exit fails before the landed proof, rather
+# than read the bead as waiting, and the re-run reads it again.
+for read_case in "1|exited 1" "object|answered no list"; do
+    export FAKE_READY_FAILS="${read_case%%|*}"
+    run tk-sub --disposition actionable --reason "r" --takeaway "t" --assign gc-toolkit.mechanik --reaction-bead "$R"
+    eq "$RC" "4" "(HANDOFFREAD) a readiness read that ${read_case#*|} fails the exit"
+    has "whether bd reports it ready could not be read (gc bd ready ${read_case#*|})" "$ERR" \
+        "(HANDOFFREAD) …saying the read did not answer"
+    has "SLING " "$LOG" "(HANDOFFREAD) …after the route, which stands"
+    hasnt "NUDGE" "$LOG" "(HANDOFFREAD) …with no nudge"
+    hasnt "gc.reacted_by" "$LOG" "(HANDOFFREAD) …and no landed proof"
+    hasnt "UPDATE bd update $R" "$LOG" "(HANDOFFREAD) …and the reaction bead left open"
+done
+unset FAKE_READY_FAILS
+
 # (HANDOFFTOOL) the hand-off is gc sling's, so --assign lands with no gctk
 # binary to arm with.
 GCTK_BIN="$TMP/no-such-gctk" \
@@ -510,6 +552,9 @@ has "SLING " "$LOG" "(HANDOFFTOOL) …handing the bead over"
 #                 nothing for a bead the release left unassigned
 #   (BLKREFINERY) --then-assign to the refinery writes the assignee beside the
 #                 wait, and sends no nudge while the bead waits
+#   (BLKREADY)    a --then-assign whose blocker has closed already, so that no
+#                 blocker close is left to nudge the agent, finds the bead in
+#                 bd's ready set once it is handed over, and nudges the agent
 #   (PATROL)      the deacon and the witness are refused before anything is read
 #                 or written, and the refusal names the mail that reaches them
 #   (UNNAMED)     an agent the row does not name is refused the same way
@@ -576,7 +621,7 @@ has "It is assigned to gc-toolkit/gc-toolkit.refinery, but gc session nudge did 
 hasnt "gc.reacted_by" "$LOG" "(HANDOFFFAIL) …with no landed proof, so a re-run nudges again"
 unset FAKE_NUDGE_FAILS
 
-export FAKE_DEPS_JSON='[{"id":"tk-blk1"}]'
+export FAKE_DEPS_JSON='[{"id":"tk-blk1"}]' FAKE_WAITS=1
 run tk-sub --disposition blocked --reason "the hand-off waits on the unit it brings in" \
     --takeaway "held: bring-current waits on the unit" --waiting-on tk-blk1 --then-assign gc-toolkit/gc-toolkit.refinery \
     --reaction-bead "$R"
@@ -584,11 +629,25 @@ eq "$RC" "0" "(BLKREFINERY) a blocked disposition handed to the refinery succeed
 has "--release --waiting-on tk-blk1 --assign gc-toolkit/gc-toolkit.refinery" "$LOG" \
     "(BLKREFINERY) the release writes the wait and the assignee in one call"
 hasnt "SLING" "$LOG" "(BLKREFINERY) …routing nothing"
-hasnt "NUDGE" "$LOG" "(BLKREFINERY) …and no nudge while the bead still waits"
+before '^HELM takeaway' '^READY ' "(BLKREFINERY) …then reads whether bd reports the bead ready"
+hasnt "NUDGE" "$LOG" "(BLKREFINERY) …and sends no nudge while the bead still waits"
 has "gc.reacted_by=$R" "$LOG" "(BLKREFINERY) …and the landed proof is stamped"
+unset FAKE_WAITS
 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 --then-assign gc-toolkit/gc-toolkit.refinery --dry-run
-has "would release tk-sub to named agent gc-toolkit/gc-toolkit.refinery as its assignee, which Gas City nudges once the wait lifts" "$OUT" \
+has "would release tk-sub to named agent gc-toolkit/gc-toolkit.refinery as its assignee and nudge it if bd reports the bead ready; while the wait holds, Gas City nudges it when the blocker closes" "$OUT" \
     "(BLKREFINERY) a dry run names the form it would take"
+
+run tk-sub --disposition blocked --reason "the hand-off waited on a unit that has landed" \
+    --takeaway "held: bring-current waits on the unit" --waiting-on tk-blk1 --then-assign gc-toolkit/gc-toolkit.refinery \
+    --reaction-bead "$R"
+eq "$RC" "0" "(BLKREADY) a blocked disposition whose blocker has closed already succeeds"
+has "--release --waiting-on tk-blk1 --assign gc-toolkit/gc-toolkit.refinery" "$LOG" \
+    "(BLKREADY) …writing the wait and the assignee as before"
+has "NUDGE session nudge gc-toolkit/gc-toolkit.refinery tk-sub is assigned to you and ready" "$LOG" \
+    "(BLKREADY) the refinery is nudged, since bd reports the bead ready and no blocker close is left to nudge it"
+before '^HELM takeaway' '^READY ' "(BLKREADY) …once the release has assigned it"
+before '^READY ' '^NUDGE ' "(BLKREADY) …and bd's ready set holds it"
+before '^NUDGE ' 'gc.reacted_by' "(BLKREADY) …and before the landed proof"
 unset FAKE_DEPS_JSON FAKE_SHOW_JSON
 
 for who in gc-toolkit.deacon deacon gc-toolkit/gc-toolkit.witness; do
@@ -793,8 +852,9 @@ unset FAKE_POOL_DEAD FAKE_DEPS_JSON
 # agent's hook only once bd reports it ready, so the edge is the gate and no
 # sling is armed: a deferred dispatch slings a pool, and a named agent is not
 # one. The hand-off goes now, while the bead waits (BLKHANDOFF): Gas City nudges
-# the agent's route when the blocker closes.
-export FAKE_DEPS_JSON='[{"id":"tk-blk1"}]'
+# the agent's route when the blocker closes. A blocker that closed already
+# (BLKREADY) leaves no close to nudge the agent, so the exit nudges it.
+export FAKE_DEPS_JSON='[{"id":"tk-blk1"}]' FAKE_WAITS=1
 run tk-sub --disposition blocked --reason "the comment can change only once the order lands" \
     --takeaway "held: city.toml comment waits on the order" --waiting-on tk-blk1 --then-assign gc-toolkit.mechanik \
     --reaction-bead "$R"
@@ -812,7 +872,31 @@ has "gc-toolkit.mechanik tk-sub --no-formula --no-convoy" "$(grep '^SLING ' "$FA
     "(BLKHANDOFF) gc sling hands the waiting bead to the agent's own name"
 before '^HELM takeaway' '^SLING ' "(BLKHANDOFF) …after the release writes the wait"
 before '^SLING ' 'gc.reacted_by' "(BLKHANDOFF) …and before the landed proof"
-hasnt "NUDGE" "$LOG" "(BLKHANDOFF) …and no nudge while the bead still waits"
+before '^SLING ' '^READY ' "(BLKHANDOFF) …then reads whether bd reports the bead ready"
+hasnt "NUDGE" "$LOG" "(BLKHANDOFF) …and sends no nudge while the bead still waits"
+unset FAKE_WAITS
+
+run tk-sub --disposition blocked --reason "the comment waited on an order that has landed" \
+    --takeaway "held: city.toml comment waits on the order" --waiting-on tk-blk1 --then-assign gc-toolkit.mechanik \
+    --reaction-bead "$R"
+eq "$RC" "0" "(BLKREADY) a blocked disposition to the mechanik whose blocker has closed already succeeds"
+has "--release --waiting-on tk-blk1" "$LOG" "(BLKREADY) …writing the wait as before"
+has "gc-toolkit.mechanik tk-sub --no-formula --no-convoy" "$(grep '^SLING ' "$FAKE_LOG")" "(BLKREADY) …and routing the bead to the agent"
+has "NUDGE session nudge gc-toolkit.mechanik tk-sub is routed to you and ready" "$LOG" \
+    "(BLKREADY) the mechanik is nudged, since bd reports the bead ready and no blocker close is left to nudge it"
+before '^SLING ' '^READY ' "(BLKREADY) …once the bead is routed to it"
+before '^READY ' '^NUDGE ' "(BLKREADY) …and bd's ready set holds it"
+before '^NUDGE ' 'gc.reacted_by' "(BLKREADY) …and before the landed proof"
+has "UPDATE bd update $R --set-metadata gc.outcome=reacted --set-metadata gc.work_outcome=no-op --status=closed" "$LOG" \
+    "(BLKREADY) …and the reaction bead closes"
+
+export FAKE_NUDGE_FAILS=1
+run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 --then-assign gc-toolkit.mechanik --reaction-bead "$R"
+eq "$RC" "4" "(HANDOFFFAIL) a --then-assign whose nudge did not reach the agent fails the exit"
+has "the blocked disposition on tk-sub did not land. It is routed to gc-toolkit.mechanik, but gc session nudge did not reach the agent" "$ERR" \
+    "(HANDOFFFAIL) …naming the exit and saying the route stands"
+hasnt "gc.reacted_by" "$LOG" "(HANDOFFFAIL) …with no landed proof, so a re-run nudges again"
+unset FAKE_NUDGE_FAILS
 
 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 \
     --then-route gc-toolkit/gc-toolkit.polecat --then-assign gc-toolkit.mechanik
@@ -825,7 +909,7 @@ eq "$RC" "2" "(BLKASSIGN) blocked refuses --assign, the actionable exit's flag"
 run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 --then-assign gc-toolkit.mechanik --dry-run
 eq "$RC" "0" "(BLKASSIGN) a dry run of the --then-assign exit succeeds"
 has "would wait tk-sub on: tk-blk1" "$OUT" "(BLKASSIGN) …and names the wait"
-has "would hand tk-sub to named agent gc-toolkit.mechanik (gc sling gc-toolkit.mechanik tk-sub --no-formula --no-convoy), whose hook serves it once the wait lifts" "$OUT" \
+has "would hand tk-sub to named agent gc-toolkit.mechanik (gc sling gc-toolkit.mechanik tk-sub --no-formula --no-convoy) and nudge it if bd reports the bead ready; while the wait holds, Gas City nudges it when the blocker closes" "$OUT" \
     "(BLKASSIGN) …and the agent the held bead goes to"
 hasnt "UPDATE" "$LOG" "(BLKASSIGN) …writing nothing"
 hasnt "SLING" "$LOG" "(BLKASSIGN) …and handing nothing over"

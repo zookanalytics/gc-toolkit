@@ -202,10 +202,12 @@ the work skill's send.
 
 `first-reaction-dispose.sh` hands a bead to the mechanik as a route and to the
 refinery or the keeper as the assignee, and refuses the deacon, the witness and
-any agent this section does not name before it writes anything. The bead
-`--assign` hands over is ready, so that exit nudges the agent too. The bead
-`--then-assign` hands over waits on its blocker, so that exit writes the route
-or the assignee alone.
+any agent this section does not name before it writes anything. Once the bead
+is handed over, either exit reads whether `bd` reports it ready, and nudges the
+agent when it does. That covers a `--then-assign` bead whose blocker closed
+before the hand-off was written, since that close found no route or assignee to
+nudge. A bead whose blocker is still open takes the route or the assignee
+alone.
 
 ## What performs it
 
