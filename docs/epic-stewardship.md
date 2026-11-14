@@ -138,8 +138,10 @@ Until it lands, nothing files the checkpoint sitting. A landed Delivery's row on
 the helm board asks for the checkpoint, among the rows the operator owes, and the
 operator calls the sitting from there. An epic with no Deliveries whose work has
 landed is reviewed only when a review is called
-([epics.md](epics.md#reviewing-an-epic)), so an answered or stalled epic stays
-open until someone looks. A Delivery that stalls before it lands is
+([epics.md](epics.md#reviewing-an-epic)). The rig's po proposes one at its
+portfolio sync for an epic with no open work or one that has stalled, so an
+answered or stalled epic waits until a sync proposes its review or someone else
+calls one. A Delivery that stalls before it lands is
 inspected only by such a sitting, and the machinery may add a nudge on a
 Delivery's age.
 

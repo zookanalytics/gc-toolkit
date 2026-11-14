@@ -278,6 +278,14 @@ bead out. So a park on an epic takes the epic and every member under it out of
 blocker. The rig board tells a park apart only to leave parked work out of what
 Needs you counts ([below](#what-reads-a-park-as-a-fault)).
 
+Across a rig's epics, a park separates whether the rig works on an epic from
+where the epic ranks. An epic nothing parks is one the rig works on now, and
+every other epic is parked, with what releases it. Priority ranks the epics
+within each group. How many epics the rig works on is the operator's choice as
+they prioritize, never a count. The rig's po brings these parks and priorities
+to the operator in its portfolio sync
+([human-engagement.md](human-engagement.md#a-po-sitting)).
+
 ### Parking a bead
 
 ```

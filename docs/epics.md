@@ -200,11 +200,18 @@ and the operator rules ([How an epic closes](#how-an-epic-closes)). A review is
 called when the operator calls a sitting on the epic, when a Delivery under it
 lands, for its [Epic Checkpoint](#deliveries-and-epic-checkpoints), or when an
 agent needs the operator's judgment on the contract, because its work depends
-on the answer or what it found contradicts the contract. Work that does not
-depend on the ruling goes on meanwhile. No status marks an epic as reviewed, so
-every review judges the contract as it reads then. The
+on the answer or what it found contradicts the contract. The rig's po proposes
+a review at its [portfolio sync](../skills/portfolio-sync/SKILL.md) for each
+epic due one, such as one whose Delivery has landed, one with no open work or
+one that has stalled, and the operator calls it. Work that does not depend on
+the ruling goes on meanwhile. No status marks an epic as reviewed, so every
+review judges the contract as it reads then. The
 [`converse-epic-review`](../skills/converse-epic-review/SKILL.md) skill is the
 procedure.
+
+The po takes part before a review and after it, never in its ruling. A close or
+shift can change what the rig works on and in what order, so a review that rules
+either points the operator to the po's next portfolio sync, which weighs it.
 
 ## Deliveries and Epic Checkpoints
 

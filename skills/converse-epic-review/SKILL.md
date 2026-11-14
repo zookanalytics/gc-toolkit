@@ -205,7 +205,7 @@ Grades: <each graded criterion and the operator's grade, or why it has no way to
 Indicators: <each leading indicator and the backstop invariant, as read, or none>
 Deliveries: <each landed Delivery's aim and what its landing showed, or none>
 Open: <each judgment still owed, the gate that asks it and the work that waits on it, or none>
-Next: <what comes next; on a close, each piece of open work and what becomes of it>
+Next: <what comes next; on a close, each piece of open work and what becomes of it; on a close or shift, that the po's next portfolio sync weighs what it changes>
 Mechanical: <what was mechanical>
 Judgment: <what took judgment>
 Contract lacked: <what the contract lacked>
@@ -388,4 +388,10 @@ PR standing. Add `--leave <gate>` for each gate write 2 left owed: the sign-off
 answers every gate the conversation replies to that no `--leave` names, which
 would release the work still waiting on that judgment. When a gate left owed
 holds the subject, leave out `--no-wait` too, because the subject is then parked
-for a person. Then drain.
+for a person.
+
+A close or shift can change what the epic's rig works on and in what order,
+beyond the epic itself, and the rig's po weighs that with the operator. So on a
+close or shift, the sign-off's message also tells the operator that the po's
+next portfolio sync weighs it, and gives the command that opens the po:
+`gc-helm po --rig <the epic's rig>`. Then drain.
