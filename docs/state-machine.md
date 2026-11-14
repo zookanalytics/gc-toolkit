@@ -1035,9 +1035,11 @@ review's result set.
   as a graduation's anchor, is never poured, because a run poured onto a convoy
   works on the beads it tracks. Each comes back as a rework child instead: a
   task on the same branch that carries the reason and blocks the bead, which
-  stays assigned to the refinery. A child filed and not sent on, as when its
-  settle fails, holds the bead until the refinery's next patrol sends it on
-  (`refinery-lib.sh`). The child's hand-back lands its work on the
+  stays assigned to the refinery. A child whose settle or sling fails is armed,
+  and the deferred-dispatch order sends it on. A child a run filed and never
+  sent on, as when the run ends before its sling, holds the bead until the
+  refinery's next patrol sends it on (`refinery-lib.sh`), which comes once
+  other work wakes the refinery. The child's hand-back lands its work on the
   branch: it records the bead's PR pending again at the new head, and a convoy
   is the refinery's to take again once the child closes. One worker per branch: when an
   open rework child is already on the branch, running or parked, the reason
