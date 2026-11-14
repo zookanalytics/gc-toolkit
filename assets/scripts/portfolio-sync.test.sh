@@ -68,7 +68,8 @@ run() {
 # and c1, a child epic with a hypothesis of its own, closed. e7 closed earlier
 # on the day of the last sync, which the read counts, since a note carries the
 # day only. Before it, e4 shifted and e6 closed. e2's latest ruling is continue,
-# and d1 is a Delivery, an epic under an epic with no hypothesis.
+# and d1 is a Delivery, an epic under an epic with no hypothesis. o1 closed under
+# a parent that is none of the rig's epics, so it is no Delivery and is listed.
 cat >"$TMP/synced.json" <<'JSON'
 [
   {"id": "e1", "status": "open", "notes": "Portfolio sync, po sitting 2026-11-13: in focus, left unparked.", "metadata": {}},
@@ -79,7 +80,8 @@ cat >"$TMP/synced.json" <<'JSON'
   {"id": "e6", "status": "closed", "closed_at": "2026-11-10T00:00:00Z", "close_reason": "old close", "metadata": {"epic_ruling": "close"}},
   {"id": "e7", "status": "closed", "closed_at": "2026-11-14T00:30:00Z", "close_reason": "same day", "metadata": {"epic_ruling": "close"}},
   {"id": "d1", "status": "closed", "parent": "e5", "closed_at": "2026-11-15T03:30:00Z", "close_reason": "checkpoint", "metadata": {}},
-  {"id": "c1", "status": "closed", "parent": "e5", "closed_at": "2026-11-15T04:00:00Z", "close_reason": "answered", "metadata": {"epic_hypothesis": "for whom, what changes, and the signal", "epic_ruling": "close"}}
+  {"id": "c1", "status": "closed", "parent": "e5", "closed_at": "2026-11-15T04:00:00Z", "close_reason": "answered", "metadata": {"epic_hypothesis": "for whom, what changes, and the signal", "epic_ruling": "close"}},
+  {"id": "o1", "status": "closed", "parent": "t1", "closed_at": "2026-11-15T05:00:00Z", "close_reason": "under a task", "metadata": {"epic_ruling": "close"}}
 ]
 JSON
 cat >"$TMP/synced.want" <<'WANT'
@@ -88,6 +90,7 @@ last sync: 2026-11-14
 2026-11-15T02:00:00Z e3 shifted: re-aimed
 2026-11-15T03:00:00Z e5 closed: held
 2026-11-15T04:00:00Z c1 closed: answered
+2026-11-15T05:00:00Z o1 closed: under a task
 WANT
 # The same epics with no sync's note: every close and shift, Deliveries left out.
 jq '[.[] | .notes = ""]' "$TMP/synced.json" >"$TMP/first.json"
@@ -99,6 +102,7 @@ last sync: none
 2026-11-15T02:00:00Z e3 shifted: re-aimed
 2026-11-15T03:00:00Z e5 closed: held
 2026-11-15T04:00:00Z c1 closed: answered
+2026-11-15T05:00:00Z o1 closed: under a task
 WANT
 
 for sh_ in $shells; do

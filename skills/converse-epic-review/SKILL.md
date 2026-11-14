@@ -392,6 +392,6 @@ for a person.
 
 A close or shift can change what the epic's rig works on and in what order,
 beyond the epic itself, and the rig's po weighs that with the operator. So on a
-close or shift, the sign-off's message also tells the operator that the po's
+close or shift, the sign-off you post also tells the operator that the po's
 next portfolio sync weighs it, and gives the command that opens the po:
 `gc-helm po --rig <the epic's rig>`. Then drain.

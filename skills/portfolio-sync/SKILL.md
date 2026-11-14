@@ -35,15 +35,16 @@ That ruling is the operator's, made in the review and never in this sitting,
 but a close or a shift can change what the rig works on and in what order, so
 weigh each one. Every note a sync writes carries its date (section 4), so the
 newest such date is the last sync's. This prints that date, then each epic
-closed or shifted since, oldest first. It leaves out Deliveries, whose close is
-one of the writes of their epic's ruling, and a rig with no sync yet lists every
-one:
+closed or shifted since, oldest first. It leaves out Deliveries, the epics under
+another of the rig's epics with no hypothesis of their own, whose close is one
+of the writes of their epic's ruling. A rig with no sync yet lists every one:
 
 ```bash
 gc bd --rig <rig> list --type epic --all --limit 0 --json | jq -r '
-  ([.[] | (.notes // "") | scan("Portfolio sync, po sitting ([0-9]{4}-[0-9]{2}-[0-9]{2})") | .[0]] | max // "") as $since
+  (reduce .[] as $e ({}; .[$e.id] = true)) as $epic
+  | ([.[] | (.notes // "") | scan("Portfolio sync, po sitting ([0-9]{4}-[0-9]{2}-[0-9]{2})") | .[0]] | max // "") as $since
   | "last sync: \(if $since == "" then "none" else $since end)",
-    ([.[] | select((.parent // "") == "" or (.metadata.epic_hypothesis // "") != "")
+    ([.[] | select(($epic[.parent // ""] | not) or (.metadata.epic_hypothesis // "") != "")
       | select((.status == "closed" and (.closed_at // "") >= $since)
         or (.status != "closed" and .metadata.epic_ruling == "shift" and (.metadata.epic_ruling_at // "") >= $since))]
     | sort_by(.closed_at // .metadata.epic_ruling_at)[]
