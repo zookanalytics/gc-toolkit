@@ -64,10 +64,12 @@ type SlingResult struct {
 }
 
 // City is the Gas City gctk runs in, reached through `gc` on PATH and the
-// pack's scripts directory GCTK_SCRIPTS_DIR names.
+// pack's scripts directory GCTK_SCRIPTS_DIR names. Every command it runs starts
+// in dir, the process's own working directory when dir is empty.
 type City struct {
 	bin        string
 	scriptsDir string
+	dir        string
 
 	once   sync.Once
 	agents []agent
@@ -81,6 +83,21 @@ func New() *City {
 	return &City{bin: "gc", scriptsDir: os.Getenv("GCTK_SCRIPTS_DIR")}
 }
 
+// In returns the city with every command it runs starting in dir, for a
+// command that reads its checkout or its store from its working directory, as
+// seed-audit-reaudit.sh reads the default branch from origin/HEAD there, and gc
+// bd resolves the store there when GC_RIG names no rig. An empty dir is the
+// process's own. A relative scripts directory is taken from the process's
+// working directory first, since a command path that is relative is read from
+// dir.
+func (c *City) In(dir string) *City {
+	scripts := c.scriptsDir
+	if abs, err := filepath.Abs(scripts); scripts != "" && err == nil {
+		scripts = abs
+	}
+	return &City{bin: c.bin, scriptsDir: scripts, dir: dir}
+}
+
 // Sling runs the sling in gctk's own process group, so whatever stops gctk's
 // group, such as an order's timeout, stops the sling with it. Its standard
 // input reads nothing.
@@ -90,7 +107,7 @@ func (c *City) Sling(s Sling) SlingResult {
 		args = append(args, "--rig", s.Rig)
 	}
 	args = append(args, s.Target, s.Bead, "--on", s.Formula, "--title", s.Title)
-	r := run(c.bin, args...)
+	r := run(c.dir, c.bin, args...)
 	out := SlingResult{Result: r}
 	if r.Code == 3 {
 		out.Live = liveWorkflows(r.Output, s.Bead)
@@ -195,7 +212,7 @@ func (c *City) dryRunFormula(s Sling) (string, error) {
 		args = append(args, "--rig", s.Rig)
 	}
 	args = append(args, s.Target, s.Bead, "--dry-run", "--force")
-	r := run(c.bin, args...)
+	r := run(c.dir, c.bin, args...)
 	if r.Code != 0 {
 		return "", fmt.Errorf("%s names no default formula of its own, and gc sling --dry-run did not say which its pack gives it: %s", s.Target, r.why())
 	}
@@ -246,7 +263,7 @@ func dryRunDefault(preview string) (formula string, ok bool) {
 }
 
 func (c *City) readAgents() ([]agent, error) {
-	r := run(c.bin, "config", "show", "--json")
+	r := run(c.dir, c.bin, "config", "show", "--json")
 	if r.Code != 0 {
 		return nil, fmt.Errorf("gc config show did not read the city's config: %s", r.why())
 	}
@@ -279,7 +296,7 @@ func (c *City) Script(name string, args ...string) Result {
 	if c.scriptsDir == "" {
 		return Result{Code: -1, Err: errors.New("GCTK_SCRIPTS_DIR names no pack scripts directory, so " + name + " cannot be run")}
 	}
-	return run(filepath.Join(c.scriptsDir, name), args...)
+	return run(c.dir, filepath.Join(c.scriptsDir, name), args...)
 }
 
 // CityRoot is GC_CITY_PATH, GC_CITY or GC_CITY_ROOT, the first that names an
@@ -292,7 +309,7 @@ func (c *City) CityRoot() (string, error) {
 			return p, nil
 		}
 	}
-	r := run(c.bin, "rig", "list", "--json")
+	r := run(c.dir, c.bin, "rig", "list", "--json")
 	if r.Code != 0 {
 		return "", fmt.Errorf("no city root: GC_CITY_PATH, GC_CITY and GC_CITY_ROOT name none, and gc rig list did not read: %s", r.why())
 	}
@@ -318,10 +335,12 @@ func isDir(p string) bool {
 	return err == nil && fi.IsDir()
 }
 
-// run runs bin with args, its standard input reading nothing, and returns its
-// exit code and its output.
-func run(bin string, args ...string) Result {
+// run runs bin with args in dir, the process's own working directory when dir
+// is empty, its standard input reading nothing, and returns its exit code and
+// its output.
+func run(dir, bin string, args ...string) Result {
 	cmd := exec.Command(bin, args...)
+	cmd.Dir = dir
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	err := cmd.Run()
