@@ -416,6 +416,24 @@ eq "$(left z.md)" "z.md:kept " "so the note stays"
 run read
 eq "$(left z.md)" "z.md:gone " "until the edges are read"
 
+# ── what an entry is, and what leaves ──────────────────────────────────────
+echo "── an item with lines under a blank line is an entry, though it opens with a link to a gone note ──"
+city boundary
+rig b tk
+M=$(memdir "$B/rigs/b")
+ENTRY=$(printf -- '- [Lesson](gone.md) — the lesson\n\n  What the lesson holds, under a blank line.')
+printf '%s\n' "$ENTRY" > "$M/hub-b.md"
+printf '# Memory Index\n\n- [Gone](gone.md) — g\n  what the gone note held\n- [Hub](hub-b.md) — b\n' > "$M/MEMORY.md"
+run read
+eq "$(cat "$M/hub-b.md" 2>/dev/null)" "$ENTRY" "read keeps the entry whole, its first line included, and leaves its collection note"
+has "$OUT" "b: 0 notes and 1 entries" "it is one unit"
+eq "$(due_json | jq -r '.[0].memory_text')" "$ENTRY" "listed with all its text"
+has "$(cat "$M/MEMORY.md")" "$(printf -- '- [Gone](gone.md) — g\n  what the gone note held')" "an index item with a line under it is kept whole"
+R=$(due_json | jq -r '.[0].memory_ref'); K=$(printf '%s' "$R" | cut -c1-16); SD=$(find "$STATE" -mindepth 1 -maxdepth 1 -type d -name "$K*")
+apply_lines "$R drop"
+has "$OUT" "removed hub-b.md, which has no entries left" "dropped, the entry leaves with its collection note"
+eq "$(cat "$SD"/removed/hub-b.md@"${R##*@}"*)" "$ENTRY" "its whole text kept"
+
 echo "── off the home rig ──"
 city offhome
 rig q tk

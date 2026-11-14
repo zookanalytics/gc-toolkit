@@ -296,25 +296,41 @@ keep_text() {
 }
 
 # --- reading a directory ------------------------------------------------------
-# One top-level list item and the indented lines under it make an entry. Blank
-# lines belong to it only when an indented line follows them.
-ENTRY_AWK='
+# The entry boundary that every program reading a collection note shares, over
+# a file's lines in L[1..n]. One top-level list item and the indented lines
+# under it make an entry, and blank lines belong to it only when an indented
+# line follows them. An entry of one line that begins with a link is a pointer.
+BOUNDARY_AWK='
 function link_start(s) { return s ~ /^\[\[[^]]+\]\]/ || s ~ /^\[[^]]*\]\([^)]+\)/ }
-function flush(   i, f) {
-  if (n > 0 && !(n == 1 && link_start(substr(L[1], 3)))) {
-    k++; f = W "/e/" k
-    for (i = 1; i <= n; i++) print L[i] > f
-    close(f)
-    printf "%s\t%d\t%d\t%d\n", hub, k, first, first + n - 1
+function entry_end(n, i,   k, e) {
+  e = i
+  for (k = i + 1; k <= n; k++) {
+    if (L[k] ~ /^[ \t]*$/) continue
+    if (L[k] !~ /^[ \t]/) break
+    e = k
   }
-  n = 0; nb = 0
+  return e
 }
-FNR == 1 { flush(); hub = FILENAME; sub(/.*\//, "", hub) }
-/^- / { flush(); n = 1; L[1] = $0; first = FNR; next }
-/^[ \t]*$/ { if (n > 0) B[++nb] = $0; next }
-/^[ \t]+/ { if (n > 0) { for (i = 1; i <= nb; i++) L[++n] = B[i]; nb = 0; L[++n] = $0; next } }
-{ flush() }
-END { flush() }'
+function pointer(n, i) { return entry_end(n, i) == i && link_start(substr(L[i], 3)) }
+'
+ENTRY_AWK="$BOUNDARY_AWK"'
+function emit(   i, e, f, x) {
+  for (i = 1; i <= nl; i++) {
+    if (substr(L[i], 1, 2) != "- ") continue
+    e = entry_end(nl, i)
+    if (!pointer(nl, i)) {
+      k++; f = W "/e/" k
+      for (x = i; x <= e; x++) print L[x] > f
+      close(f)
+      printf "%s\t%d\t%d\t%d\n", hub, k, i, e
+    }
+    i = e
+  }
+  nl = 0
+}
+FNR == 1 { emit(); hub = FILENAME; sub(/.*\//, "", hub) }
+{ L[++nl] = $0 }
+END { emit() }'
 
 # scan <dir> <work> — the directory as <work>/files.tsv (name, hash, mtime of
 # each note and collection note) and <work>/units.tsv (kind, name, hash for
@@ -407,14 +423,13 @@ due_rows() {
 }
 
 # --- links in the index and collection notes ----------------------------------
-# A pointer is a list item whose text begins with a link to a note in this
-# directory, and in a collection note it is one line. A pointer line can hold
-# several, joined by " · ". Each pointer to a note no longer in the directory
-# is taken out with the text that follows it, and a line left with none goes.
-# A listing that does not name the file being edited was not read, and nothing
-# is taken out on it.
-PRUNE_AWK='
-function link_start(s) { return s ~ /^\[\[[^]]+\]\]/ || s ~ /^\[[^]]*\]\([^)]+\)/ }
+# A pointer is a list item of one line whose text begins with a link to a note
+# in this directory, and an item with lines under it is kept whole. A pointer
+# line can hold several, joined by " · ". Each pointer to a note no longer in
+# the directory is taken out with the text that follows it, and a line left
+# with none goes. A listing that does not name the file being edited was not
+# read, and nothing is taken out on it.
+PRUNE_AWK="$BOUNDARY_AWK"'
 function target(s,   t) {
   if (s ~ /^\[\[/) { t = substr(s, 3); t = substr(t, 1, index(t, "]]") - 1); sub(/\|.*/, "", t); sub(/#.*/, "", t); if (t !~ /\.md$/) t = t ".md"; return t }
   t = s; sub(/^\[[^]]*\]\(/, "", t); t = substr(t, 1, index(t, ")") - 1)
@@ -427,9 +442,9 @@ BEGIN { while ((getline x < NAMES) > 0) present[x] = 1; if (!(SELF in present)) 
 END {
   if (unread) exit 2
   for (i = 1; i <= NR; i++) {
-    line = L[i]
-    if (substr(line, 1, 2) != "- " || !link_start(substr(line, 3)) || (MODE == "hub" && i < NR && L[i + 1] ~ /^[ \t]+[^ \t]/)) { print line; continue }
-    n = split(substr(line, 3), seg, / · /); out = ""; kept = 0; keep = 1
+    if (substr(L[i], 1, 2) != "- ") { print L[i]; continue }
+    if (!pointer(NR, i)) { e = entry_end(NR, i); for (x = i; x <= e; x++) print L[x]; i = e; continue }
+    n = split(substr(L[i], 3), seg, / · /); out = ""; kept = 0; keep = 1
     for (j = 1; j <= n; j++) {
       if (link_start(seg[j])) keep = !gone(seg[j])
       if (keep) out = (kept++ ? out " · " : "") seg[j]
@@ -437,26 +452,21 @@ END {
     if (kept) print "- " out
   }
 }'
-prune_links() { LC_ALL=C awk -v NAMES="$1" -v MODE="$2" -v SELF="$3" "$PRUNE_AWK"; }
+prune_links() { LC_ALL=C awk -v NAMES="$1" -v SELF="$2" "$PRUNE_AWK"; }
 
-DROP_ENTRY_AWK='
+DROP_ENTRY_AWK="$BOUNDARY_AWK"'
 BEGIN { while ((getline x < ENTRY) > 0) E[++m] = x }
 { L[NR] = $0 }
 END {
-  i = 1; done = 0
-  while (i <= NR) {
-    if (done || substr(L[i], 1, 2) != "- ") { print L[i]; i++; continue }
-    e = i; k = i + 1
-    while (k <= NR) {
-      if (L[k] ~ /^[ \t]*$/) { b = k; while (b <= NR && L[b] ~ /^[ \t]*$/) b++; if (b <= NR && L[b] ~ /^[ \t]+[^ \t]/) { k = b; continue }; break }
-      if (L[k] ~ /^[ \t]+/) { e = k; k++; continue }
-      break
-    }
+  done = 0
+  for (i = 1; i <= NR; i++) {
+    if (done || substr(L[i], 1, 2) != "- ") { print L[i]; continue }
+    e = entry_end(NR, i)
     same = (e - i + 1 == m)
     for (x = 0; same && x < m; x++) if (L[i + x] != E[x + 1]) same = 0
     if (same) done = 1
     else for (x = i; x <= e; x++) print L[x]
-    i = e + 1
+    i = e
   }
 }'
 drop_entry() { LC_ALL=C awk -v ENTRY="$1" "$DROP_ENTRY_AWK"; }
@@ -475,7 +485,7 @@ tidy() {
       [ -f "$f" ] || continue
       mode=hub; [ "${f##*/}" = MEMORY.md ] && mode=index
       had=$(grep -c '^- ' "$f" 2>/dev/null)
-      rewrite "$f" prune_links "$WORK/present" "$mode" "${f##*/}"; rc=$?
+      rewrite "$f" prune_links "$WORK/present" "${f##*/}"; rc=$?
       case $rc in
         0) ;;
         3) err "$f kept changing while its links were tidied; the next run tries again"; continue ;;
