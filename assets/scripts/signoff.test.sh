@@ -103,14 +103,17 @@ case "${1:-}" in
     for pair in ${STUB_DROP_KEYS:-}; do
       case "$pair" in "$id:"*) drops="${pair#*:}" ;; esac
     done
-    tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-signoff-test.XXXXXX"); cp "$STORE" "$tmp"
+    # Each flag becomes one operation, in the order given, and one jq pass
+    # lands them all: --set-metadata k=v split at its first =, --unset-metadata,
+    # --append-notes, --status=<s>, and --priority, which a value that is not a
+    # number leaves as it was. The knobs above drop an operation here. The --
+    # after --args keeps a value that begins with a dash, such as -s or a note
+    # that opens with ---, from reading as one of jq's options.
+    ops=()
     while [ $# -gt 0 ]; do
       case "$1" in
         --set-metadata) shift; k="${1%%=*}"; v="${1#*=}"
-          case ",$drops," in *",$k,"*) : ;; *)
-          jq -c --arg id "$id" --arg k "$k" --arg v "$v" \
-            'map(if .id == $id then .metadata[$k] = $v else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
-          esac ;;
+          case ",$drops," in *",$k,"*) : ;; *) ops+=(set "$k" "$v") ;; esac ;;
         --unset-metadata) shift
           # A concurrent writer re-stamping the key loses the delete without
           # failing the call: rc 0, key untouched. Denial is STUB_UPD_FAIL.
@@ -120,8 +123,7 @@ case "${1:-}" in
              { grep -qxF "$id" "$STUB_UNSET_NOOP" 2>/dev/null ||
                grep -qxF "$id $1" "$STUB_UNSET_NOOP" 2>/dev/null; }; then :
           else
-            jq -c --arg id "$id" --arg k "$1" \
-              'map(if .id == $id then (.metadata |= del(.[$k])) else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp"
+            ops+=(unset "$1" "")
           fi ;;
         --append-notes) shift
           # A line "<id>" in STUB_DROP_NOTES loses that bead's notes append
@@ -130,19 +132,25 @@ case "${1:-}" in
           # half-landed. Denial is STUB_UPD_FAIL.
           if grep -qxF "$id" "${STUB_DROP_NOTES:-/dev/null}" 2>/dev/null; then :
           else
-            jq -c --arg id "$id" --arg n "$1" \
-              'map(if .id == $id then .notes = ((.notes // "") + "\n" + $n) else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp"
+            ops+=(note "$1" "")
           fi ;;
-        --status=*) st="${1#--status=}"
-          jq -c --arg id "$id" --arg s "$st" \
-            'map(if .id == $id then .status = $s else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
-        --priority|-p) shift
-          jq -c --arg id "$id" --arg p "${1#P}" \
-            'map(if .id == $id then .priority = ($p | tonumber) else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
+        --status=*) ops+=(status "${1#--status=}" "") ;;
+        --priority|-p) shift; ops+=(priority "${1#P}" "") ;;
       esac
       shift || true
     done
-    mv "$tmp" "$STORE"; echo "updated $id" ;;
+    jq -c --arg id "$id" '
+      [ $ARGS.positional | range(0; length; 3) as $i | .[$i:$i + 3] ] as $ops
+      | map(if .id == $id then
+          reduce $ops[] as [$op, $a, $b] (.;
+            if $op == "set" then .metadata[$a] = $b
+            elif $op == "unset" then .metadata |= del(.[$a])
+            elif $op == "note" then .notes = ((.notes // "") + "\n" + $a)
+            elif $op == "status" then .status = $a
+            elif $op == "priority" then .priority = (($a | tonumber?) // .priority)
+            else . end)
+        else . end)' "$STORE" --args -- ${ops[@]+"${ops[@]}"} > "$STORE.$$" && mv "$STORE.$$" "$STORE"
+    echo "updated $id" ;;
   create)
     shift; title="$1"; shift
     [ -n "${STUB_CREATE_FAIL:-}" ] && exit 1

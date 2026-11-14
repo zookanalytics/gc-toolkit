@@ -124,7 +124,6 @@ mktemp_tracked() { REPLY="$(mktemp "${TMPDIR:-/tmp}/gctk-queue-priority.XXXXXX")
 # wherever it stands, and a stub gc that answers by the verb after `bd` reads
 # the same call.
 bd_() { gc bd "$@" --db "$BD_DB" 9>&-; }
-now_epoch() { date -u +%s; }
 
 usage() {
     cat <<'EOF'
@@ -166,7 +165,7 @@ EOF
 resolve_db() {
     [ -n "$BD_DB" ] && return 0
     local prefix="${1%%-*}" path=""
-    path="$("$SCRIPTS_DIR/rig-map.sh" 9>&- | jq -r --arg p "$prefix" '.rigs[]? | objects | select((.prefix // "") == $p) | .path // empty' 2>/dev/null | head -n1)"
+    path="$("$SCRIPTS_DIR/rig-map.sh" 9>&- | jq -r --arg p "$prefix" 'first(.rigs[]? | objects | select((.prefix // "") == $p) | .path // empty)' 2>/dev/null)"
     if [ -n "$path" ] && [ -d "$path/.beads" ]; then BD_DB="$path/.beads"; return 0; fi
     if [ -n "${GC_RIG_ROOT:-}" ] && [ -d "$GC_RIG_ROOT/.beads" ]; then BD_DB="$GC_RIG_ROOT/.beads"; return 0; fi
     return 1
@@ -193,7 +192,7 @@ take_lock() {
         flock -w "$LOCK_WAIT_SECS" 9 && got=1
     fi
     if [ "$got" = 1 ]; then
-        printf '%s %s %s\n' "$$" "$(now_epoch)" "$verb" > "$holder" 2>/dev/null || true
+        printf '%s %s %s\n' "$$" "$EPOCHSECONDS" "$verb" > "$holder" 2>/dev/null || true
         LOCK_HELD=1
         return 0
     fi
@@ -208,7 +207,7 @@ take_lock() {
                return 1
            fi ;;
     esac
-    case "$held_since" in ''|*[!0-9]*) ;; *) elapsed=$(( $(now_epoch) - held_since )) ;; esac
+    case "$held_since" in ''|*[!0-9]*) ;; *) elapsed=$(( EPOCHSECONDS - held_since )) ;; esac
     LOCK_NOTE="${held_verb:-a writer}, pid ${held_pid:-unknown}${elapsed:+, ${elapsed}s elapsed}"
     if [ -n "$elapsed" ] && [ "$elapsed" -gt "$LOCK_STALL_SECS" ]; then return 2; fi
     return 1
@@ -274,38 +273,40 @@ POURED_JQ='def poured_for($on): prio_live and (prio_follows | .kind == "workflow
 # convoy whose sling poured no root yet, which no run names. Returns 1 when a
 # read fails, so a settle never reports a workflow it could not read as settled.
 workflow_rows() {
-    local row="$1" subject is_convoy runs over raw ids all='[]' roots root_ids="" r steps
-    subject="$(printf '%s' "$row" | jq -r '.id')"
-    is_convoy="$(printf '%s' "$row" | jq -r '(.issue_type // "") == "convoy"')"
-    printf '%s' "$row" | jq -e '(((.metadata // {}) | if type == "object" then . else {} end)["gc.kind"] // "" | tostring) == "workflow"' >/dev/null 2>&1 \
-        && root_ids="$subject"
+    local row="$1" subject="" is_convoy="" is_workflow="" runs over raw ids="" all='[]' roots="" root_ids="" r out
+    # Each jq below answers on one line per value it prints, the JSON ones
+    # compact, so the reads that follow it take its lines in order.
+    out="$(printf '%s' "$row" | jq -r '(.id | tostring), ((.issue_type // "") == "convoy"),
+        ((((.metadata // {}) | if type == "object" then . else {} end)["gc.kind"] // "" | tostring) == "workflow")' 2>/dev/null)"
+    { IFS= read -r subject; IFS= read -r is_convoy; IFS= read -r is_workflow; } <<< "$out"
+    [ "$is_workflow" = true ] && root_ids="$subject"
     runs="$(run_lib runs bd_ "$subject")" || return 1
     if [ "$is_convoy" = true ]; then
         over="$(run_lib subject bd_ "$subject")" || return 1
         runs="$(jq -cn --argjson a "$runs" --argjson b "$over" '$a + $b')" || return 1
     fi
-    runs="$(printf '%s' "$runs" | jq -c '[ .[] | select(.live) ]' 2>/dev/null)" || return 1
-    ids="$(printf '%s' "$runs" | jq -r '[ .[] | .convoy, .root | select(. != "") ] | unique | join(",")' 2>/dev/null)" || return 1
+    out="$(printf '%s' "$runs" | jq -r '[ .[] | select(.live) ] | tojson, ([ .[] | .convoy, .root | select(. != "") ] | unique | join(","))' 2>/dev/null)" || return 1
+    { IFS= read -r runs; IFS= read -r ids; } <<< "$out"
     if [ -n "$ids" ]; then
         raw="$(qp_read "$ids")" || return 1
         # A run's convoy is written when it follows the subject, and its root
         # when it follows a convoy that is the subject or one written here.
-        all="$(printf '%s' "$raw" | scrub | jq -c --arg on "$subject" --argjson runs "$runs" "$PRIORITY_JQ$POURED_JQ$ROWS_JQ"'
+        out="$(printf '%s' "$raw" | scrub | jq -r --arg on "$subject" --argjson runs "$runs" "$PRIORITY_JQ$POURED_JQ$ROWS_JQ"'
             | ([ .[] | objects | {key: (.id | tostring), value: .} ] | from_entries) as $by
             | [ $runs[] | select(.convoy != $on) | $by[.convoy] // empty | select(poured_for($on)) ] as $convoys
             | ([$on] + [ $convoys[] | .id | tostring ]) as $followed
             | $convoys + [ $runs[] | . as $run | select(any($followed[]; . == $run.convoy))
                            | $by[$run.root] // empty | select(poured_for($run.convoy)) ]
-            | unique_by(.id)' 2>/dev/null)" || return 1
+            | unique_by(.id)
+            | tojson, ([ .[] | (.id | tostring) as $i | select(any($runs[]; .root == $i)) | $i ] | join(" "))' 2>/dev/null)" || return 1
+        { IFS= read -r all; IFS= read -r roots; } <<< "$out"
         [ -n "$all" ] || return 1
-        roots="$(printf '%s' "$all" | jq -r --argjson runs "$runs" '[ .[] | (.id | tostring) as $i | select(any($runs[]; .root == $i)) | $i ] | join(" ")')" || return 1
         root_ids="$root_ids $roots"
     fi
     for r in $root_ids; do
         raw="$(qp_list --metadata-field "gc.root_bead_id=$r")" || return 1
-        steps="$(printf '%s' "$raw" | scrub | jq -c --arg on "$r" "$PRIORITY_JQ$POURED_JQ$ROWS_JQ"' | [ .[] | objects | select(poured_for($on)) ]' 2>/dev/null)" || return 1
-        [ -n "$steps" ] || return 1
-        all="$(jq -cn --argjson a "$all" --argjson b "$steps" '$a + $b')" || return 1
+        all="$(printf '%s' "$raw" | scrub | jq -c --arg on "$r" --argjson a "$all" "$PRIORITY_JQ$POURED_JQ$ROWS_JQ"' | $a + [ .[] | objects | select(poured_for($on)) ]' 2>/dev/null)" || return 1
+        [ -n "$all" ] || return 1
     done
     printf '%s\n' "$all"
 }
@@ -315,29 +316,33 @@ workflow_rows() {
 # Returns 1 when a write fails, naming it in MISMATCH.
 WROTE=0
 MISMATCH=""
+PLAN_IDS=""
 write_priorities() {
-    local plan="$1" p ids n i id batch
-    WROTE=0; MISMATCH=""
-    n="$(jq 'length' "$plan" 2>/dev/null)" || return 1
-    [ "$n" -gt 0 ] || return 0
-    for p in 0 1 2 3 4; do
-        ids="$(jq -r --argjson p "$p" '[ .[] | select(.to == $p) | .id ] | unique | .[]' "$plan")"
-        [ -n "$ids" ] || continue
-        batch=()
-        i=0
-        while IFS= read -r id; do
-            batch+=("$id"); i=$((i + 1))
-            if [ "$i" -ge "$WRITE_BATCH" ]; then
-                bd_ update "${batch[@]}" --priority "$p" >/dev/null 2>&1 || { MISMATCH="the write of P$p to ${batch[*]} failed"; return 1; }
-                WROTE=$((WROTE + i)); batch=(); i=0
+    local plan="$1" out p id at="" batch=()
+    WROTE=0; MISMATCH=""; PLAN_IDS=""
+    # The plan's ids on the first line, then one "<level> <id>" line for each
+    # bead to write, by level and then by id.
+    out="$(jq -r '([ .[].id ] | join(" ")),
+        (range(0; 5) as $p | [ .[] | select(.to == $p) | .id ] | unique | .[] | "\($p)\t\(.)")' "$plan" 2>/dev/null)" || return 1
+    {
+        IFS= read -r PLAN_IDS
+        while IFS=$'\t' read -r p id; do
+            [ -n "$id" ] || continue
+            if [ "${#batch[@]}" -gt 0 ] && { [ "$p" != "$at" ] || [ "${#batch[@]}" -ge "$WRITE_BATCH" ]; }; then
+                write_batch "$at" "${batch[@]}" || return 1
+                batch=()
             fi
-        done <<< "$ids"
-        if [ "$i" -gt 0 ]; then
-            bd_ update "${batch[@]}" --priority "$p" >/dev/null 2>&1 || { MISMATCH="the write of P$p to ${batch[*]} failed"; return 1; }
-            WROTE=$((WROTE + i))
-        fi
-    done
-    return 0
+            at="$p"; batch+=("$id")
+        done
+    } <<< "$out"
+    [ "${#batch[@]}" -eq 0 ] || write_batch "$at" "${batch[@]}"
+}
+# write_batch <level> <id>... — one write of the level to the ids, counted in
+# WROTE, or MISMATCH naming it when it fails.
+write_batch() {
+    local p="$1"; shift
+    bd_ update "$@" --priority "$p" >/dev/null 2>&1 || { MISMATCH="the write of P$p to $* failed"; return 1; }
+    WROTE=$((WROTE + $#))
 }
 
 # settle_subject <subject-row-json> <priority> <plan-file> — add to the plan
@@ -346,16 +351,17 @@ write_priorities() {
 # workflow could not be read. SKIPPED names a claimed subject left as it is.
 SKIPPED=""
 settle_subject() {
-    local row="$1" p="$2" plan="$3" wf next
+    local row="$1" p="$2" plan="$3" wf out next=""
     SKIPPED=""
     wf="$(workflow_rows "$row")" || return 1
-    next="$(jq -c --argjson self "$row" --argjson p "$p" --argjson wf "$wf" "$WRITABLE_JQ"'
-        . + [ ([$self] + $wf)[] | select(writable) | select(.priority != $p) | {id: (.id | tostring), to: $p} ]
-        | unique_by(.id)' "$plan")" || return 1
+    # The plan on its first line, and on its second the subject when it is
+    # claimed, else nothing.
+    out="$(jq -r --argjson self "$row" --argjson p "$p" --argjson wf "$wf" "$WRITABLE_JQ"'
+        (. + [ ([$self] + $wf)[] | select(writable) | select(.priority != $p) | {id: (.id | tostring), to: $p} ]
+         | unique_by(.id) | tojson),
+        ($self | if writable then "" else "\(.id) (\(.status // ""))" end)' "$plan")" || return 1
+    { IFS= read -r next; IFS= read -r SKIPPED; } <<< "$out"
     printf '%s\n' "$next" > "$plan" || return 1
-    if ! printf '%s' "$row" | jq -e "$WRITABLE_JQ"'writable' >/dev/null 2>&1; then
-        SKIPPED="$(printf '%s' "$row" | jq -r '"\(.id) (\(.status // ""))"')"
-    fi
     return 0
 }
 
@@ -383,35 +389,43 @@ cmd_settle() {
         fi
     fi
 
-    local seed graph raw result row p
+    local seed graph raw out rows="" n="" row="" verdict="" what="" derivation="" p
     mktemp_tracked || return 1; seed="$REPLY"
     mktemp_tracked || return 1; graph="$REPLY"
     raw="$(qp_read "$bead")" || { echo "$PROG: settle: could not read $bead from $BD_DB" >&2; return 1; }
-    printf '%s' "$raw" | scrub | jq -c --arg b "$bead" "$ROWS_JQ"' | [ .[] | objects | select(.id == $b) ]' > "$seed" 2>/dev/null \
+    # The rows that are the bead, how many there are, and the first, one line each.
+    out="$(printf '%s' "$raw" | scrub | jq -c --arg b "$bead" "$ROWS_JQ"' | [ .[] | objects | select(.id == $b) ] | ., length, .[0]' 2>/dev/null)" \
         || { echo "$PROG: settle: the read of $bead from $BD_DB did not parse" >&2; return 1; }
-    jq -e 'length == 1' "$seed" >/dev/null 2>&1 || { echo "$PROG: settle: $bead does not resolve in $BD_DB" >&2; return 1; }
+    { IFS= read -r rows; IFS= read -r n; IFS= read -r row; } <<< "$out"
+    [ "$n" = 1 ] || { echo "$PROG: settle: $bead does not resolve in $BD_DB" >&2; return 1; }
+    printf '%s\n' "$rows" > "$seed" || { echo "$PROG: settle: could not keep the row of $bead in a scratch file" >&2; return 1; }
     priority_graph qp_read "$seed" "$graph" || { echo "$PROG: settle: could not read what $bead follows" >&2; return 1; }
-    result="$(jq -c --slurpfile g "$graph" "$PRIORITY_JQ"'.[0] | priority_of($g[0])' "$seed" 2>/dev/null)"
-    if [ -z "$result" ] || printf '%s' "$result" | jq -e 'has("error")' >/dev/null 2>&1; then
-        echo "$PROG: settle: cannot compute the priority of $bead: $(printf '%s' "$result" | jq -r '.error // "the function did not answer"' 2>/dev/null)" >&2
+    # ok, the level and its derivation; or error and why. Each ends in a NUL.
+    { IFS= read -r -d '' verdict; IFS= read -r -d '' what; IFS= read -r -d '' derivation; } < <(
+        jq -j --slurpfile g "$graph" "$PRIORITY_JQ"'.[0] | priority_of($g[0])
+            | if has("error") then "error", (.error // "the function did not answer")
+              else "ok", (.priority | tostring), ('"$DERIVATION_JQ"') end
+            | "\(.)\u0000"' "$seed" 2>/dev/null)
+    if [ "$verdict" != ok ]; then
+        echo "$PROG: settle: cannot compute the priority of $bead: $what" >&2
         return 1
     fi
-    p="$(printf '%s' "$result" | jq -r '.priority')"
+    p="$what"
     if [ "$print" = 1 ]; then
         printf '%s\n' "$p"
         return 0
     fi
 
-    local plan
+    local plan wrote="nothing to write"
     mktemp_tracked || return 1; plan="$REPLY"
     echo '[]' > "$plan"
-    row="$(jq -c '.[0]' "$seed")"
     settle_subject "$row" "$p" "$plan" || { echo "$PROG: settle: could not read the workflows poured for $bead, so it was not settled" >&2; return 1; }
     if ! write_priorities "$plan"; then
         echo "$PROG: settle: $bead did not settle at P$p: $MISMATCH" >&2
         return 1
     fi
-    echo "$PROG: settled $bead at $(printf '%s' "$result" | jq -r "$DERIVATION_JQ")${SKIPPED:+; claimed, left as it is: $SKIPPED}; $( [ "$WROTE" -gt 0 ] && printf 'wrote %s bead(s): %s' "$WROTE" "$(jq -r '[ .[].id ] | join(" ")' "$plan")" || printf 'nothing to write')"
+    [ "$WROTE" -gt 0 ] && wrote="wrote $WROTE bead(s): $PLAN_IDS"
+    echo "$PROG: settled $bead at $derivation${SKIPPED:+; claimed, left as it is: $SKIPPED}; $wrote"
 }
 
 # --- move ----------------------------------------------------------------------
@@ -553,25 +567,33 @@ cmd_move() {
         echo "$PROG: move: could not compute what follows $bead. Nothing was written." >&2
         return 1
     fi
-    if printf '%s' "$out" | jq -e 'has("refusal")' >/dev/null 2>&1; then
-        echo "$PROG: move: $(printf '%s' "$out" | jq -r '.refusal') Nothing was written." >&2
-        return 2
-    fi
-    if printf '%s' "$out" | jq -e '.self | has("error")' >/dev/null 2>&1; then
-        echo "$PROG: move: the priority of $bead cannot be computed: $(printf '%s' "$out" | jq -r '.self.error'). Nothing was written." >&2
-        return 1
-    fi
-
-    local derivation plan errors claimed n
-    derivation="$(printf '%s' "$out" | jq -r ".self | $DERIVATION_JQ")"
-    errors="$(printf '%s' "$out" | jq -r '[ .errors[] | "\(.id) (\(.error))" ] | join("; ")')"
-    claimed="$(printf '%s' "$out" | jq -r '[ .claimed[] | "\(.id) (\(.status), P\(.to) once released)" ] | join(", ")')"
+    # What the move computed, each part ending in a NUL: refusal and why, error
+    # and why, or ok, the derivation, the unreadable, the claimed, the plan, its
+    # length and the writes it makes.
+    local kind="" derivation="" errors="" claimed="" planjson="" n="" writes="" plan
+    {
+        IFS= read -r -d '' kind; IFS= read -r -d '' derivation; IFS= read -r -d '' errors
+        IFS= read -r -d '' claimed; IFS= read -r -d '' planjson; IFS= read -r -d '' n; IFS= read -r -d '' writes
+    } < <(printf '%s' "$out" | jq -j '
+        if has("refusal") then "refusal", .refusal
+        elif (.self | has("error")) then "error", .self.error
+        else "ok", (.self | '"$DERIVATION_JQ"'),
+             ([ .errors[] | "\(.id) (\(.error))" ] | join("; ")),
+             ([ .claimed[] | "\(.id) (\(.status), P\(.to) once released)" ] | join(", ")),
+             ([ .writes[] | {id, to} ] | tojson, length),
+             ([ .writes[] | "\(.id) P\(.from)->P\(.to)" ] | join(", ")) end
+        | "\(.)\u0000"' 2>/dev/null)
+    case "$kind" in
+        refusal) echo "$PROG: move: $derivation Nothing was written." >&2; return 2 ;;
+        error) echo "$PROG: move: the priority of $bead cannot be computed: $derivation. Nothing was written." >&2; return 1 ;;
+        ok) ;;
+        *) echo "$PROG: move: could not compute what follows $bead. Nothing was written." >&2; return 1 ;;
+    esac
     mktemp_tracked || return 1; plan="$REPLY"
-    printf '%s' "$out" | jq -c '[ .writes[] | {id, to} ]' > "$plan"
-    n="$(jq 'length' "$plan")"
+    printf '%s\n' "$planjson" > "$plan"
     if [ "$DRY_RUN" = 1 ]; then
         echo "priority $bead $derivation (dry run, nothing written)"
-        echo "would write $n bead(s)$( [ "$n" -gt 0 ] && printf ': %s' "$(printf '%s' "$out" | jq -r '[ .writes[] | "\(.id) P\(.from)->P\(.to)" ] | join(", ")')")"
+        echo "would write $n bead(s)$( [ "$n" -gt 0 ] && printf ': %s' "$writes")"
         [ -z "$claimed" ] || echo "claimed, left as they are: $claimed"
         [ -z "$errors" ] || echo "unreadable, left as they are: $errors"
         return 0
@@ -589,7 +611,7 @@ cmd_move() {
     fi
     echo "priority $bead $derivation"
     if [ "$n" -gt 0 ]; then
-        echo "re-ranked $n bead(s): $(printf '%s' "$out" | jq -r '[ .writes[] | "\(.id) P\(.from)->P\(.to)" ] | join(", ")')"
+        echo "re-ranked $n bead(s): $writes"
     else
         echo "no other bead needed a new priority"
     fi
@@ -618,7 +640,7 @@ declare_outcome() { # <skipped|partial> <reason> [<bead-id> <what-was-left>]...
 
 settle_fits_budget() {
     [ "$PASS_BUDGET_SECS" -gt 0 ] || return 0
-    [ $(( PASS_T0 + PASS_BUDGET_SECS - $(now_epoch) )) -ge "$SETTLE_ALLOWANCE_SECS" ]
+    [ $(( PASS_T0 + PASS_BUDGET_SECS - EPOCHSECONDS )) -ge "$SETTLE_ALLOWANCE_SECS" ]
 }
 
 # resolve_pool <rig> — the rig's polecat pool, in REPLY: the qualified name of
@@ -663,7 +685,7 @@ cmd_reconcile() {
     [ -n "$BD_DB" ] || { echo "$PROG: reconcile: no store to read: GC_RIG_ROOT is unset and no --db was given" >&2; return 2; }
     [ -n "$pool" ] || [ -n "${GC_RIG:-}" ] || { echo "$PROG: reconcile: no pool to read: GC_RIG is unset and no --pool was given" >&2; return 2; }
 
-    PASS_T0="$(now_epoch)"
+    PASS_T0="$EPOCHSECONDS"
     if [ -z "$pool" ]; then
         local pool_rc=0
         resolve_pool "$GC_RIG" || pool_rc=$?
@@ -744,39 +766,52 @@ cmd_reconcile() {
            | sort_by(.rank, .first) | .[])' "$seed" > "$rows" 2>/dev/null \
         || { echo "$PROG: reconcile: could not compute the queued beads' priorities" >&2; return 1; }
 
-    local line subject sp derivation queued_note missing next failed=0 settled=0 stale=0 left=0 wf_plan
-    local -a left_ids=() scopes=()
+    local line part subject sp derivation queued_note subject_row missing next plan_note out failed=0 settled=0 stale=0 left=0 wf_plan
+    local -a left_ids=() scopes=() parts=()
     while IFS= read -r line; do
         [ -n "$line" ] || continue
-        if printf '%s' "$line" | jq -e 'has("error")' >/dev/null 2>&1; then
-            echo "$PROG: WARN the priority of queued $(printf '%s' "$line" | jq -r '.id') cannot be computed: $(printf '%s' "$line" | jq -r '.error')" >&2
+        # The line's parts, each ending in a NUL: error, the queued bead and
+        # why; or ok, how many beads are queued, the subject, its level and its
+        # derivation, the queued beads' note and the subject's row.
+        parts=()
+        while IFS= read -r -d '' part; do parts+=("$part"); done < <(printf '%s' "$line" | jq -j '
+            if has("error") then "error", .id, .error
+            else "ok", (.queued | length), .subject.id, .sp.priority, (.sp | '"$DERIVATION_JQ"'),
+                 ([ .queued[] | "\(.id) was P\(.stored)" ] | join(", ")), (.subject | tojson) end
+            | "\(.)\u0000"' 2>/dev/null)
+        if [ "${parts[0]-}" = error ]; then
+            echo "$PROG: WARN the priority of queued ${parts[1]-} cannot be computed: ${parts[2]-}" >&2
             failed=$((failed + 1)); continue
         fi
-        stale=$((stale + $(printf '%s' "$line" | jq '.queued | length')))
-        subject="$(printf '%s' "$line" | jq -r '.subject.id')"
-        sp="$(printf '%s' "$line" | jq -r '.sp.priority')"
-        derivation="$(printf '%s' "$line" | jq -r ".sp | $DERIVATION_JQ")"
-        queued_note="$(printf '%s' "$line" | jq -r '[ .queued[] | "\(.id) was P\(.stored)" ] | join(", ")')"
+        stale=$((stale + ${parts[1]:-0}))
+        subject="${parts[2]-}"; sp="${parts[3]-}"; derivation="${parts[4]-}"
+        queued_note="${parts[5]-}"; subject_row="${parts[6]-}"
         if ! settle_fits_budget; then
             left=$((left + 1)); left_ids+=("$subject"); scopes+=("$subject" "settle left for the next pass")
             continue
         fi
         mktemp_tracked || { failed=$((failed + 1)); continue; }; wf_plan="$REPLY"
         echo '[]' > "$wf_plan"
-        if ! settle_subject "$(printf '%s' "$line" | jq -c '.subject')" "$sp" "$wf_plan"; then
+        if ! settle_subject "$subject_row" "$sp" "$wf_plan"; then
             echo "$PROG: WARN could not read the workflows poured for $subject; left at its old priority" >&2
             failed=$((failed + 1)); continue
         fi
         # The beads between each queued bead and its subject join the plan: a
         # workflow poured for a step of another workflow is not one of the
-        # workflows poured for the subject, and still follows it.
-        next="$(jq -c --argjson line "$line" '. + $line.chain | unique_by(.id)' "$wf_plan")" && printf '%s\n' "$next" > "$wf_plan" \
+        # workflows poured for the subject, and still follows it. A queued bead
+        # the plan does not reach would stay stale on every pass, so the pass
+        # names it and counts the subject failed. One line each: the plan, the
+        # queued beads it misses, and what it writes.
+        next=""; missing=""; plan_note=""
+        out="$(jq -r --argjson line "$line" '(. + $line.chain | unique_by(.id)) as $plan
+            | ($plan | tojson),
+              ($plan | map(.id) as $ids | [ $line.queued[].id | select(. as $q | $ids | index($q) | not) ] | join(" ")),
+              ([ $plan[] | "\(.id)->P\(.to)" ] | join(" "))' "$wf_plan")" \
+            && { IFS= read -r next; IFS= read -r missing; IFS= read -r plan_note; } <<< "$out" \
+            && printf '%s\n' "$next" > "$wf_plan" \
             || { echo "$PROG: WARN could not plan the queued beads of $subject; left at their old priority" >&2; failed=$((failed + 1)); continue; }
-        # A queued bead the plan does not reach would stay stale on every pass,
-        # so the pass names it and counts the subject failed.
-        missing="$(jq -r --argjson line "$line" 'map(.id) as $ids | [ $line.queued[].id | select(. as $q | $ids | index($q) | not) ] | join(" ")' "$wf_plan")"
         if [ "$DRY_RUN" = 1 ]; then
-            echo "$PROG: DRY-RUN would settle $subject at $derivation, queued $queued_note: $(jq -r '[ .[] | "\(.id)->P\(.to)" ] | join(" ")' "$wf_plan")"
+            echo "$PROG: DRY-RUN would settle $subject at $derivation, queued $queued_note: $plan_note"
             if [ -n "$missing" ]; then
                 echo "$PROG: WARN settling $subject would not reach queued $missing" >&2
                 failed=$((failed + 1))
