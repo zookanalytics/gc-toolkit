@@ -44,16 +44,19 @@ for that request first and never files a second:
 gc bd --rig <rig> list --all --type=bug --title-contains "docs/product-goals.md: missing" --json
 ```
 
+- **The request is closed**, whether or not it carries the operator's words:
+  reopen it first, with
+  `gc bd --rig <rig> reopen <bead> --reason "docs/product-goals.md is still missing"`.
+  The page it asked for is still missing, `place` refuses a closed bead, and a
+  sling would start work on a bead that stays closed. The reopen keeps its
+  words, so the bullets below take it as an open request.
 - **The request carries the operator's words**, in its description or its
   notes: open from them, and ask nothing.
 - **Otherwise ask the operator what the rig's work is for.** Their answer is the
   rig's goals for this sitting. Once they agree on the words, put them on the
   request, so the page states them and no later sitting asks again:
-  - an open request:
+  - the request the list found:
     `gc bd --rig <rig> update <bead> --append-notes "The operator's product goals: <their words>"`;
-  - a closed one, since the page it asked for is still missing: reopen it with
-    `gc bd --rig <rig> reopen <bead> --reason "docs/product-goals.md is still missing"`,
-    then append their words as above;
   - none, when the list printed `[]`:
     `gc bd --rig <rig> create "State the operator's product goals (docs/product-goals.md: missing)" -t bug -d "<their words>" --json`.
 
