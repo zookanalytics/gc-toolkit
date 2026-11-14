@@ -19,17 +19,56 @@ The pack's scripts are called through `gc <binding> scripts-dir`, where
 `<binding>` is the name the city imports the pack under. `gc skill list` prints
 it in this skill's FROM column.
 
-## 1. Read the queue against the target
+## 1. Read the queue against the rig's goals
 
-Open from your rig's target, which its `AGENTS.md` states (your prompt's "The
-rig's target"). Then list the queue with each bead's priority, by the queue read
-in your prompt's "Reads", piped through `sort`. That read keeps the beads of
-your rig's store and takes the label trimmed and in any case, as Gas City's hold
-does. `--label hold:mayor` matches only the exact text, so it would leave out a
-bead a person labeled `Hold:Mayor`, which no worker is served either.
+Open from your rig's product goals, as your prompt's "The rig's goals" reads
+them from the default branch. Then list the queue with each bead's priority, by
+the queue read in your prompt's "Reads", piped through `sort`. That read keeps
+the beads of your rig's store and takes the label trimmed and in any case, as
+Gas City's hold does. `--label hold:mayor` matches only the exact text, so it
+would leave out a bead a person labeled `Hold:Mayor`, which no worker is served
+either.
 
 Read your rig's open epics, with what holds each, since most dispositions name
 one (your prompt's "Reads").
+
+### When the goals are missing or change
+
+A rig whose default branch carries no `docs/product-goals.md`, and whose
+`docs/review-pm.md` names no other place for its goals, is asked for that page
+by one request. A PM review files it under the token
+`docs/product-goals.md: missing` and counts a closed one too, so a sitting looks
+for that request first and never files a second:
+
+```bash
+gc bd --rig <rig> list --all --type=bug --title-contains "docs/product-goals.md: missing" --json
+```
+
+- **The request carries the operator's words**, in its description or its
+  notes: open from them, and ask nothing.
+- **Otherwise ask the operator what the rig's work is for.** Their answer is the
+  rig's goals for this sitting. Once they agree on the words, put them on the
+  request, so the page states them and no later sitting asks again:
+  - an open request:
+    `gc bd --rig <rig> update <bead> --append-notes "The operator's product goals: <their words>"`;
+  - a closed one, since the page it asked for is still missing: reopen it with
+    `gc bd --rig <rig> reopen <bead> --reason "docs/product-goals.md is still missing"`,
+    then append their words as above;
+  - none, when the list printed `[]`:
+    `gc bd --rig <rig> create "State the operator's product goals (docs/product-goals.md: missing)" -t bug -d "<their words>" --json`.
+
+  A list that printed no JSON array did not answer: file nothing, and tell the
+  operator their words wait for the store.
+- **Send the request on**, so a normal PR writes the page. While `hold:mayor`
+  holds it, place it, which sends it and lifts the hold:
+  `"$(gc <binding> scripts-dir)/gc-helm.sh" place <bead> --standalone`.
+  Otherwise sling it: `gc sling <rig>/<binding>.polecat <bead>`. A request
+  already routed or in progress is on its way, so send it nothing.
+
+When the operator changes goals the rig already keeps, file the change once they
+agree on its words, with
+`gc bd --rig <rig> create "docs: <the change> in the rig's product goals" -t task -d "<their words>" --json`,
+and send it with `gc sling <rig>/<binding>.polecat <bead>`.
 
 ## 2. Propose one disposition for each bead
 
@@ -77,7 +116,7 @@ that does not settle it, propose `ask` or say that your confidence is low.
 
 ## 3. Sequence what you would place
 
-Order the beads you propose to place by WSJF against the rig's target, as your
+Order the beads you propose to place by WSJF against the rig's goals, as your
 prompt's "Sequencing: WSJF" says: value, time criticality, and
 risk reduction or opportunity enablement, over job size. Compare them with one
 another and recommend each bead's priority, or its shift under its parent, with
@@ -90,8 +129,8 @@ Tell the operator how long the sort will run and that they can step away while
 it does.
 
 - Split the queue into chunks of about 20 beads, and start one sorter per chunk,
-  all at once. Give each its chunk, the open epics with what holds each, each
-  rig's `AGENTS.md` target, and sections 2 and 3 of this skill.
+  all at once. Give each its chunk, the open epics with what holds each, the
+  rig's goals as section 1 read them, and sections 2 and 3 of this skill.
 - A sorter changes nothing: no bead writes, no slings, no closes, no notes, and
   no edits, fetches or checkouts in any repository. It writes one file, one
   tab-separated row per bead in its chunk: id, priority, disposition, what it

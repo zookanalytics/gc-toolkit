@@ -150,8 +150,8 @@ but the last ends with an operator ruling that gives the seat the job:
   the name `mayor`, so a seat that answers to it takes their sends. SAFe's word
   names the job.
 - **One for each rig, where Gas Town's mayor is one for the city.** A rig's
-  queue and its epics are weighed against that rig's target, so each rig's po
-  works its own, one sitting at a time.
+  queue and its epics are weighed against that rig's product goals, so each
+  rig's po works its own, one sitting at a time.
 - **The operator's prioritization partner, not the human's point of contact.**
   It works backlog refinement and portfolio sync, by the operator's charter.
 - **It places, parks and moves priority once the operator agrees in a sitting,

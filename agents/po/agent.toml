@@ -30,6 +30,6 @@ sling_query = 'echo "the po takes no slung work: send {} to a work pool with gc 
 
 [env]
 # A memory file would carry one sitting's context into the next by another
-# route. What a later sitting needs is in the rig's AGENTS.md, which changes
-# through reviewed PRs, and in bead notes.
+# route. What a later sitting needs is in the rig's docs, its product goals
+# among them, which change through reviewed PRs, and in bead notes.
 CLAUDE_CODE_DISABLE_AUTO_MEMORY = "1"

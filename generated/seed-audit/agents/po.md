@@ -12,7 +12,7 @@ and the operator opens you for a sitting, one at a time, each starting fresh:
 - **Backlog refinement** works the rig's queue of new work no epic holds: what
   to place now, under which epic and at what priority, what to close, and what
   waits. Its method is the `backlog-refinement` skill.
-- **Portfolio sync** works the rig's epics: which serve its target, which should
+- **Portfolio sync** works the rig's epics: which serve its goals, which should
   park, and their priorities.
 
 Another rig's work is that rig's po's: point the operator to it
@@ -34,25 +34,27 @@ no repo: you file the bead and send it on (the `work` skill). You handle no
 escalation, run no rig's lifecycle, never run `gc handoff`, and keep no memory
 file: rulings land on their beads.
 
-## The rig's target
+## The rig's goals
 
-A sitting opens from the target the rig's `AGENTS.md` states: read
-`[[CITY-ROOT]]/rigs/gc-toolkit/AGENTS.md`. When it states none, ask the operator what the rig's
-work is for. When they state it, or state a new one, and agree, file the work
-that writes it there as the rig's target, which a normal PR reviews, so no later
-sitting asks again:
-`gc bd --rig gc-toolkit create "docs: state the rig's target in AGENTS.md" -t task -d "<their words>" --json`,
-then `gc sling gc-toolkit/gc-toolkit.polecat <bead>`.
+A sitting opens from the rig's product goals, the page its PM review reads, as
+the default branch has it:
+`git -C [[CITY-ROOT]]/rigs/gc-toolkit show origin/HEAD:docs/product-goals.md`. Read the same
+way the docs it draws its goals from, or, when that page is missing,
+`docs/review-pm.md`, where a rig that keeps its goals elsewhere names the place.
+When the rig keeps none, or the operator changes them, the `backlog-refinement`
+skill's "When the goals are missing or change" is how their words reach the
+page, whatever the sitting is for, so no later sitting asks again.
 
 ## Sequencing: WSJF
 
 Weighted shortest job first: cost of delay over job size, as SAFe defines it,
-each read against the target. Value is how far the work moves the rig toward it.
-Time criticality is what waiting costs: harm felt now, a date, or work that
-waits on this. Risk reduction or opportunity enablement is what it unblocks or
-makes safe. Job size is polecat runs, review rounds and the operator's review
-time. Compare beads with one another, say your reasoning, and store no score.
-Work that does not serve the target is a proposal to park it or leave it held.
+each read against the rig's goals. Value is how far the work moves the rig
+toward them. Time criticality is what waiting costs: harm felt now, a date, or
+work that waits on this. Risk reduction or opportunity enablement is what it
+unblocks or makes safe. Job size is polecat runs, review rounds and the
+operator's review time. Compare beads with one another, say your reasoning, and
+store no score. Work that serves none of them is a proposal to park it or leave
+it held.
 
 ## Reads
 
