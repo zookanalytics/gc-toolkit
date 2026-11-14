@@ -895,12 +895,15 @@ keys = [
   # Set once the post lands, so a later pass leaves the finding alone until it
   # closes.
   "finding.pr_comment",
-  # Set by the same write-back once a posted finding has closed and its comment
-  # carries the answer: `1` when it was answered and its thread, if it has one,
-  # is resolved, carries a later post that is feedback, or stays open
-  # for the operator because the finding was declined or deferred, and `gone`
-  # when the comment had been removed from the PR and nothing was left to
-  # answer. A finding carrying it costs the write-back no GitHub read.
+  # Set by the same write-back once a posted finding has closed, its comment
+  # carries the answer, and its thread, if it has one, is resolved or carries a
+  # later post that is feedback: `settled` for a declined or deferred finding,
+  # `1` for any other. `gone` when the comment had been removed from the PR and
+  # nothing was left to answer. A declined or deferred finding recorded `1` can
+  # still have its thread open, behind an answer carrying the open line, so the
+  # write-back answers it again, which resolves that thread, and records it
+  # `settled`. Any other finding carrying it costs the write-back no GitHub
+  # read.
   "finding.pr_answered",
   # The claimable follow-up bead a deferred finding files to carry the later work,
   # set by finding.sh as the deferral runs. It carries the objection and the
@@ -1724,11 +1727,51 @@ keys = [
 # observation surface — obs.category, obs.scope, obs.source, obs.directive,
 # obs.provenance, obs.distilled and their siblings — written by the observer at
 # filing and read by the distiller; the wildcard registers the whole namespace.
-keys = ["obs.*", "remedy_class", "eng_bead"]
+# The other keys sit on a pattern bead (task_kind=feedback-pattern), backlog
+# work whose state is its bd status: open while it needs a decision, waiting on
+# its follow-up through a blocks edge, deferred while it gathers evidence, and
+# closed once resolved (formulas/mol-feedback-distiller.toml, judge-and-cluster
+# §7). The keys record the judgments behind that state, and none of them is the
+# state.
+keys = [
+  "obs.*", "remedy_class", "eng_bead",
+  "evidence_count", "distinct_sources", "first_seen", "last_seen",
+  "promotion_hold", "proposal_bead", "proposal_carrier", "proposal_action",
+  "remedy_note",
+  "promotion_disposition", "disposition", "remedy_outcome", "remedy_veto_ref",
+  "origin",
+]
 # remedy_class — `structural` on a promoted feedback pattern the distiller judged
 #   belongs in code rather than a prompt rule; written with eng_bead by
 #   mol-feedback-distiller.toml. eng_bead — the engineering bead that structural
 #   remedy was filed as. A bead id; neither is cleared.
+# evidence_count / distinct_sources / first_seen / last_seen — a pattern's
+#   rollups, which the distiller derives from the observations stamped onto it
+#   and overwrites on every pattern it touches, whatever its status
+#   (judge-and-cluster §3): the distinct obs.provenance events, the distinct
+#   obs.source values among them, and the dates of the earliest and the latest
+#   observation. The rubric weighs them as evidence. Never cleared; the next run
+#   that touches the pattern overwrites them. Two counts and two RFC 3339 UTC
+#   timestamps.
+# promotion_hold — the block a deferred pattern is held on, as a slug such as
+#   `gate1-single-source-self`, written by the distiller when it defers the
+#   pattern (judge-and-cluster §7) and read by the run that judges it next.
+#   Absent on a pattern never held. Not cleared, so it names the last hold, and
+#   the pattern's status says whether it is held now. A slug.
+# proposal_bead / proposal_carrier / proposal_action — the prompt-update the
+#   distiller filed for a pattern, with that proposal's carrier and action
+#   (file-and-dispatch §1), read by a later run to learn what the pattern
+#   spawned. Absent on a pattern that never promoted. Not cleared; a later
+#   proposal overwrites them. A bead id and two words from the proposal's Rule
+#   section.
+# remedy_note — a sentence the distiller's judgment leaves on a pattern about its
+#   remedy, read by the run that judges the pattern next. Freeform; not cleared.
+# promotion_disposition / disposition / remedy_outcome / remedy_veto_ref /
+#   origin — RETIRED. Nothing writes them now. Earlier runs recorded a pattern's
+#   outcome in the first four, which its status and its close or defer reason
+#   now carry, and origin named the audit that seeded a pattern
+#   (`audit:<bead>`). Registered so that residue on a pattern reads as known,
+#   not as a stray. Strings; never cleared.
 
 [metadata.upstream_send]
 # An upstream finding (docs/outbound-sends.md) is known by its upstream-finding

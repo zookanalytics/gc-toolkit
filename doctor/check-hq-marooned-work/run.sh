@@ -43,8 +43,8 @@ city="${GC_CITY_PATH:-${GC_CITY:-}}"
 # HQ store must still be caught.
 INFRA_TYPES='["session","message","molecule","chore","rig","agent","role","gate","merge-request","step","convoy","startup-health-episode"]'
 
-# Standing-record task_kinds: a held-by-design host for escalation or feedback
-# state, not work anyone claims. The one definition, shared with the liveness
+# Standing-record task_kinds: a held-by-design host for escalations, not work
+# anyone claims. The one definition, shared with the liveness
 # sweep and the proactive scan, exposes $STANDING_KINDS_JQ. An unsourceable one
 # warns: without it a standing record would read as marooned work.
 # shellcheck source=../../assets/scripts/standing-kinds.sh

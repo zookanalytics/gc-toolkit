@@ -344,3 +344,5 @@ worktree.
 {{ template "work-quality-base" . }}
 
 {{ template "work-quality-system" . }}
+
+{{ template "where-to-search" . }}

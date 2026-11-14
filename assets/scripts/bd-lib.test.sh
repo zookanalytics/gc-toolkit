@@ -50,6 +50,32 @@ eq "$(row_meta "$ROW" gc.routed_to)" "rig/pool" "…a dotted key whole"
 eq "$(row_meta "$ROW" target)" "" "…an absent key as empty"
 eq "$(row_meta '{"error":"no issues found"}' branch)" "" "…and a row that is not a show array as empty"
 
+# --- row_meta_all: every metadata value of a row, as row_meta reads each -------
+# Values whose reading row_meta settles: a number, false and null, an object,
+# newlines inside and at the end, shell syntax a reader must not run, and keys a
+# subscript must keep whole.
+WIDE=$(jq -nc '[{id: "tk-w", metadata: {branch: "polecat/tk-w", n: 42, f: false, z: null, o: {a: [1, "b"]},
+  nl: "one\ntwo\n\n", only: "\n\n", sh: "it'"'"'s $(touch '"$TMP"'/ran) `touch '"$TMP"'/ran` ${HOME} \\ \"q\"",
+  "gc.routed_to": "rig/pool", "a]b[c": "bracketed", "q'"'"'k": "quoted key", "sp ace": "spaced"}}]')
+row_meta_all WIDE_META "$WIDE"
+eq "$?" 0 "row_meta_all reads a row"
+same=1
+for k in branch n f z o nl only sh gc.routed_to "a]b[c" "q'k" "sp ace" absent; do
+  [ "${WIDE_META[$k]-}" = "$(row_meta "$WIDE" "$k")" ] || { same=0; bad "…row_meta_all reads '$k' as '${WIDE_META[$k]-}', row_meta as '$(row_meta "$WIDE" "$k")'"; }
+done
+[ "$same" = 1 ] && ok "…each key as row_meta reads it, an absent one as empty"
+eq "${WIDE_META[nl]-}" "one
+two" "…a value losing the newlines that end it, as a command substitution drops them"
+eq "$([ -e "$TMP/ran" ] && echo ran || echo not-run)" "not-run" "…and runs nothing a value spells"
+row_meta_all WIDE_META "$ROW"
+eq "${#WIDE_META[@]}:${WIDE_META[branch]-}:${WIDE_META[n]-}" "3:polecat/tk-m:" "…emptying the array before it reads the next row"
+eq "$(row_meta_all WIDE_META '[{"metadata":{"":"blank","k":"v"}}]' 2>&1; echo "${#WIDE_META[@]}:${WIDE_META[k]-}")" "1:v" \
+  "…a key that is empty taking no subscript, and saying nothing about it"
+row_meta_all WIDE_META '{"error":"no issues found"}'
+eq "${#WIDE_META[@]}" 0 "…and a row that is not a show array as no key at all"
+row_meta_all 'not-a-name' "$ROW"
+eq "$?" 2 "…and refuses an array name that is not a name"
+
 # --- bd_gates_open_under_key: the open gates under a key, in the one order ----
 # gate_row <id> <key> <status> <created_at> — one row as bd_human_gates prints it.
 gate_row() { jq -nc --arg id "$1" --arg k "$2" --arg st "$3" --arg at "$4" \

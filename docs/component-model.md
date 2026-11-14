@@ -67,12 +67,14 @@ Dropping these is as much the design as keeping the list above.
 
 A bead of one of the pack's own kinds names that kind in
 `metadata.task_kind`. Every reader that branches on such a kind reads that key
-and nothing else. `review`, `triage-subject`, `observation` and the standing
-kinds are all resolved this way, in the liveness sweeps, the gate scripts and
-the doctor checks. The standing kinds name a record that is open, unrouted and
-unassigned by design and never closes. Their one definition is
-`assets/scripts/standing-kinds.sh`, which a reader sources for the list and
-for the `is_standing_kind` test.
+and nothing else. `review`, `triage-subject`, `observation`, `feedback-pattern`
+and the standing kinds are all resolved this way, in the liveness sweeps, the
+gate scripts and the doctor checks. The standing kinds name a record that is
+open, unrouted and unassigned by design and never closes. Their one definition
+is `assets/scripts/standing-kinds.sh`, which a reader sources for the list and
+for the `is_standing_kind` test. A feedback pattern is no standing kind: it is
+backlog work the feedback distiller triages, which closes once resolved and
+reopens when its feedback recurs (`formulas/mol-feedback-distiller.toml`).
 
 A human gate and a conversation carry no `task_kind`. Each is known by its
 shape, read off the bead's own fields and edges, and every reader of a shape
@@ -254,8 +256,9 @@ blocked, unassigned, plainly-work bead — an allowlisted work issue_type, not a
 review/step/workflow bead or a merge anchor — must carry a dispatch path,
 `gc.routed_to` or a `gc.dispatch_when_ready` arm, or it strands when its blocker
 closes and no pool is offered it; a bead a live molecule drives is exempt on a
-liveness check, and a bead carrying a hold label is exempt because its dispatch
-is the placement sitting's, warn-only), and `doctor/check-armed-dispatch-owed`
+liveness check, a bead carrying a hold label is exempt because its dispatch
+is the placement sitting's, and a feedback pattern is exempt because the
+distiller decides it on every run once its wait clears, warn-only), and `doctor/check-armed-dispatch-owed`
 (the complement to `check-cadence-live`: a bead armed with `gc.dispatch_when_ready`
 that nothing holds is slung by the deferred-dispatch reconcile order within its
 cadence, so one that has stayed armed and open past that window — or one armed at a
@@ -452,7 +455,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/rejection-repool.sh` | merge | The patrol's rejection: hands a work bead the refinery will not land back to the polecat pool as a fresh `mol-polecat-work` pour, which no hold on the bead's epic reaches, after a release that records why. It never pours a convoy, such as a graduation's anchor, since a run poured onto a convoy works on the beads the convoy tracks: a convoy's rebuild is poured onto its rebuild child, an ordinary task that resumes the convoy's branch and lands on it. A failed sling is armed for a retry, and any other stop files a human gate on the work bead, or a patrol finding when that bead cannot be read. No merge authority. |
 | `assets/scripts/pr-open.sh` | merge | Arm 3: `pre_open_gate` to `pull_request`. |
 | `assets/scripts/pr-facts.sh` | merge | Arm 7: records external PR facts. No merge authority. Its write-back is the one writer of each human review round's living answer, the Conversation comment that says what became of every point the round raised. |
-| `assets/scripts/review-answer.sh` | merge | What a human review round's living answer shows, as jq definitions sourced by `pr-facts.sh`, its one writer: the round, the reviews one reviewer submitted against one commit however many GitHub reviews carry them, which one comment answers; a point per finding, labelled and answered in the words the validator and the fix unit recorded, sorted into Needs you, Worth a look, In progress and Done, with a declined or deferred point under Needs you while its thread waits on the reviewer; the line such a point and its reply in the thread both end with, and the lookup of a comment's thread and the test for the city's answer in it, which the reply arm reads the thread by too; and the one-line note the review's dismissal carries. |
+| `assets/scripts/review-answer.sh` | merge | What a human review round's living answer shows, as jq definitions sourced by `pr-facts.sh`, its one writer: the round, the reviews one reviewer submitted against one commit however many GitHub reviews carry them, which one comment answers; a point per finding, labelled and answered in the words the validator and the fix unit recorded, sorted into Needs you, Worth a look, In progress and Done; the lookup of a comment's thread and the test for the city's answer in it, which the reply arm reads the thread by too; and the one-line note the review's dismissal carries. |
 | `assets/scripts/review-sweep.sh` | merge | Arm 8: closes a dispatched review with no reviewable surface left. No merge authority. |
 | `assets/scripts/scaffolding-sweep.sh` | merge | Arm 9: retires a disposed anchor's machine review scaffolding (`task_kind=validation\|finding\|rework`) so it can finalize, and carries a finding that can cite code the target branch already carries forward to a bug bead instead of mooting it. `pr-facts.sh` runs it for one anchor before consummating that anchor's PR-close disposition. Leaves reviews, the human side (human gates, conversations), operator freezes, and the anchor itself alone. No merge authority. |
 | `assets/scripts/pr-stack.sh` | merge | Arm 10: keeps each open PR current with its anchor — the branch-beads section, the `pr-summary` region a rework moved past, and the title composed from the anchor's. Writes only PR bodies and titles. No merge authority. |

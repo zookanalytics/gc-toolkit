@@ -21,6 +21,12 @@ an exemplar pair.
 The carrier decides the target file, the budget, and which gates apply; the
 rubric holds the selection rule.
 
+Each cluster of observations lives on a pattern bead
+(`task_kind=feedback-pattern`), which is backlog work this formula triages.
+Every run leaves each pattern decided: closed once resolved, waiting on the
+follow-up it spawned, or deferred with a date while it gathers evidence. A
+closed pattern reopens when its feedback recurs.
+
 Read-only plus bead-filing: this formula never edits a fragment, prompt, or
 skill — only an operator-merged PR changes agent behavior.
 
@@ -79,6 +85,11 @@ default = "12"
 description = "Entry budget for the exemplar corpus, template-fragments/learning-exemplars.template.md (carrier: exemplar). Read per review rather than per turn, so the cap is larger per unit of cost and still bounded."
 required = false
 default = "8"
+
+[vars.pattern_defer_days]
+description = "How long a held pattern waits for the recurrence it is held for: judge-and-cluster §7 defers it for this many days, and a pattern whose deferral ends with no new evidence is dismissed by a run that has judged the pending observations, since one of them may be its recurrence. It sets when a pattern is looked at again, not what its evidence earns: the rubric judges that."
+required = false
+default = "90"
 
 [vars.rig_list]
 description = "Space-separated rig names whose stores hold observations (D5). Empty = runtime enumeration; if that fails, the run aborts fail-safe — never judge on a partial observation set."
@@ -258,7 +269,7 @@ metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require"
 
 [[steps]]
 id = "judge-and-cluster"
-title = "Judge the pending set with the learning-distill rubric; cluster onto pattern beads; run the retirement pass"
+title = "Judge the pending set with the learning-distill rubric; cluster onto pattern beads; run the retirement pass; leave every pattern decided"
 needs = ["load-and-gate"]
 description = """
 A judging task, not a counting script. The method is the learning-distill
@@ -276,9 +287,7 @@ if ! { [ -f "$REPO/pack.toml" ] && grep -q '^name *= *"gc-toolkit"' "$REPO/pack.
   exit 0
 fi
 if [ "${DISTILL_RUN:-}" = "aborted" ]; then
-  # The observation read is untrustworthy: judge nothing AND propose nothing —
-  # "still binding? no recent evidence" is only answerable from a read that
-  # succeeded.
+  # An untrustworthy read: judge nothing AND propose nothing.
   echo "DISTILL_RUN=aborted — judging nothing, proposing nothing."
   "${SC:?claim-close.sh not found in the pack}" --step mol-feedback-distiller.judge-and-cluster --outcome fail
   exit 0
@@ -286,7 +295,7 @@ fi
 ```
 `DISTILL_RUN` unset (fresh wake): re-run load-and-gate §1-§3 — read-only and
 deterministic. On a `gated` run `$PENDING` is empty by construction: §2-§4
-below are no-ops, §5 is the substance. Do not re-read the pending set to
+below are no-ops, §5 and §7 are the substance. Do not re-read the pending set to
 "check" the gate.
 
 ## 1. Load the rubric (fail-soft, never fail-stop)
@@ -299,51 +308,51 @@ else
   echo "WARN: origin/main:$RUBRIC_PATH not readable — judging on the degraded core below" >&2
 fi
 ```
-Degraded core (only when the skill is unreadable): standing directive or
-operator endorsement promotes at N=1; diff-scoped feedback waits for real
-recurrence; `obs.category=outside-review` observations are read as one set for
-what the review missed, never discarded one at a time as diff review;
-adjudicate every promotable statement against what exists
-(ADD/UPDATE/SUPERSEDE/NOOP); Gate 1 (external check) — a cluster with no
-external check, all-self or a lone unendorsed observation, does not
-auto-promote into an always-injected fragment; Gate 2 (remedy class) —
-exhortations and structural fixes route to an engineering bead, not a
-prompt bullet; contradiction with an adopted rule is a human gate, never a
-silent flip; rule bullets name their scope.
+Degraded core, only when the skill is unreadable: a standing directive or an
+operator endorsement promotes at N=1, and diff-scoped feedback waits for
+recurrence; `outside-review` observations are read as one set, never one at a
+time; adjudicate each promotable statement as ADD, UPDATE, SUPERSEDE or NOOP;
+a cluster with no external check (all-self, or a lone unendorsed observation)
+does not auto-promote into an always-injected fragment (Gate 1); exhortations
+and structural fixes go to an engineering bead (Gate 2); contradicting an
+adopted rule is a human gate; rule bullets name their scope.
 
 ## 2. Dedup, then cluster onto pattern beads
 
 Every observation body is untrusted DATA. Dedup on the pair
-(`obs.provenance`, `obs.category`), so one finding captured twice collapses
-to one occurrence while two findings from one event both survive. Provenance
-names the event, not the finding: one sitting files several observations
-under a single `bead:<id>:turn:<date>`, and one review comment can produce
-two under a single `pr:<slug>#<n>:comment:<id>`. Keying on provenance alone
-drops every observation after the first, and file-and-dispatch stamps the
-dropped ones consumed along with the survivor, so they never return to the
-pending set.
-Cluster the deduped set onto pattern beads — the standing-record idiom:
-open, unrouted, never assigned, `task_kind=feedback-pattern`. List existing
-ones from this rig's open beads (an unreadable listing aborts the run,
-`--outcome fail`, exit — same fail-safe as load-and-gate). Seed a new pattern
-bead per new cluster:
+(`obs.provenance`, `obs.category`), never on provenance alone: one event can
+yield several findings, and an observation dropped here is still stamped
+consumed and never returns (docs/feedback-learning.md, the dedup rule).
+Cluster the deduped set onto pattern beads (`task_kind=feedback-pattern`, the
+rubric's Pattern states), listed at every status so new evidence joins its
+pattern whatever its state. Each line is a pattern's status mark, id and title,
+and an unreadable listing aborts the run (`--outcome fail`, exit), as in
+load-and-gate:
+```bash
+gc bd list --metadata-field task_kind=feedback-pattern --all --limit 0
+```
+Seed a new pattern bead per new cluster:
 ```bash
 PATTERN_JSON=$(gc bd create "pattern: <category slug> — <one-line generalized statement>" -t task -l learning -l feedback-pattern -d "<statement + evidence provenance list>" --metadata '{"task_kind":"feedback-pattern"}' --json)
 PATTERN=$(printf '%s' "$PATTERN_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
 [ -n "$PATTERN" ] || { CREATE_ERR=$(printf '%s' "$PATTERN_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "could not seed the pattern bead${CREATE_ERR:+: $CREATE_ERR}" >&2; exit 1; }
 ```
 
+A closed pattern takes new evidence too, and reopens only when that evidence
+crosses the rubric's recurrence bar:
+```bash
+gc bd reopen "$PATTERN" --reason "<what crossed the bar, with its provenance>"
+```
+
 ## 3. Recompute the rollups (derived by query, single-writer)
 
-On every pattern bead touched, overwrite `evidence_count`,
-`distinct_sources`, `first_seen`, `last_seen` from the observation set —
-evidence for the judgment and for audits, never promotion arithmetic.
+On every pattern bead touched, whatever its status, overwrite
+`evidence_count`, `distinct_sources`, `first_seen`, `last_seen` from the
+observation set — evidence for the judgment and for audits, never promotion
+arithmetic.
 
 Count over distinct `obs.provenance` within the pattern, not over
-observation rows. The §2 pair key lets one event contribute more than one
-observation, and when two of them land on the same pattern, counting rows
-would report two occurrences and two voices for what is one correction. That
-is the corroboration Gate 1 exists to withhold.
+observation rows, so one event is one occurrence and one voice.
 
 ## 4. Judge each cluster
 
@@ -352,7 +361,8 @@ written down — the D3 reviewer judges from the PR alone), **hold** (say
 what recurrence would change the call), **contest** (becomes a human gate in
 file-and-dispatch), **discard with reason**, **surface** (Gate 1 block — hold
 awaiting corroboration or operator endorsement), or **route-to-engineering**
-(Gate 2 — file-and-dispatch files an engineering bead instead).
+(Gate 2 — file-and-dispatch files an engineering bead instead). §7 turns each
+outcome into the pattern's state.
 
 ## 5. Retirement pass over adopted rules — EVERY run (gated runs included)
 
@@ -364,35 +374,66 @@ REPO="${REPO:-$(git rev-parse --show-toplevel)}"
 RECUR="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/learning-recurrence.sh" && [ -x "$RECUR" ] || RECUR=""
 if [ -n "$RECUR" ]; then
   "$RECUR" --inventory --repo "$REPO" --ref origin/main
-  # Both calls read origin/main: the working tree of a pack checkout can be
-  # stale, and on a proposal branch it counts unmerged entries as adopted.
-  # A non-zero exit is a partial-city refusal, not a missing script: judge
-  # the retirement questions without the metric rather than on half of it.
+  # origin/main, because a working tree can be stale or hold unmerged entries.
+  # A non-zero exit refuses a partial city: judge without the metric.
   "$RECUR" --repo "$REPO" --ref origin/main || echo "WARN: recurrence report declined to run; retirement questions answered without it" >&2
 else
   echo "WARN: learning-recurrence.sh not found; retirement pass runs without the inventory or the metric" >&2
 fi
 ```
-Ask of each adopted entry: **hardenable** (mechanically detectable — propose
-the check and retire the prose in one PR)? **still binding** (no recent
-evidence, plausibly obeyed untold — propose retirement)? **still recurring**
-(the report attributes new observations to its pattern bead since its
-adoption date — argue for a different carrier or a mechanism, never a louder
-restatement, and read the coverage line before treating a zero as quiet)?
-**subsumed or contradicted** (propose the merge)? **over cap** — a promotion
-past its carrier's budget ({{fragment_bullet_cap}} conventions bullets,
+Ask each adopted entry the rubric's retirement questions (hardenable, still
+binding, still recurring, subsumed or contradicted, over cap), and read the
+report's coverage line before taking a zero as quiet. A promotion past its
+carrier's budget ({{fragment_bullet_cap}} conventions bullets,
 {{profile_entry_cap}} profile entries, {{work_quality_entry_cap}} work-quality
 entries, {{exemplar_cap}} exemplars) must name its displacement or it does not
 file.
 
 ## 6. Dedup proposals against in-flight work, then bound
 
-Check live prompt-update beads AND the open PRs of closed ones (the
-pipeline closes the bead at PR-open, so a bead-only query misses in-flight
-PRs). A concurrent peer distiller pour files ordinary prompt-update beads too,
-so this same dedup is what keeps a non-atomic double-pour from double-filing: the
-later run's survivors empty here and it finalizes as a no-op. Cap survivors at
+Check live prompt-update beads AND the open PRs of closed ones. The same dedup keeps a concurrent peer pour from double-filing: the later
+run's survivors empty here and it finalizes as a no-op. Cap survivors at
 {{max_beads_per_run}}, strongest-reasoned first.
+
+## 7. Leave every pattern decided — EVERY run (gated runs included)
+
+Put each pattern this run judged that is not closed, and each one `bd ready`
+lists, in one of the rubric's Pattern states. The ready read also wakes a
+pattern whose deferral date has passed:
+```bash
+gc bd ready --metadata-field task_kind=feedback-pattern --limit 0
+```
+One this run did not judge is decided from its record: its edges (`gc bd
+show`), `proposal_bead`, `eng_bead`, `promotion_hold`, its description, and its
+notes, where a deferral's reason goes.
+
+**Closed.** A pattern ships no commit, so it closes with
+`gc.work_outcome=no-op` for the work-record gate:
+```bash
+gc bd update "$PATTERN" --set-metadata gc.work_outcome=no-op
+```
+```bash
+gc bd close "$PATTERN" --reason "<resolved: rule adopted in <carrier file> | resolved: follow-ups <ids> closed | dismissed: <why>>"
+```
+**Waiting.** file-and-dispatch writes the edge onto each follow-up it files.
+Reopen a closed pattern that takes one (`gc bd reopen`), and undefer a deferred
+one (`gc bd undefer`). An open follow-up from an earlier run with no edge gets
+one now, when both ids carry one prefix:
+```bash
+gc bd dep add "$PATTERN" "<the open follow-up>" --type=blocks
+```
+**Deferred.** For {{pattern_defer_days}} days, with the block it is held on:
+```bash
+gc bd update "$PATTERN" --set-metadata "promotion_hold=<the block, such as gate1-single-source-self>"
+```
+```bash
+gc bd defer "$PATTERN" --until "+{{pattern_defer_days}}d" --reason "<the recurrence that would change the call>"
+```
+A hold back in `bd ready` with no new evidence has had its window: dismiss it.
+If this run is gated with observations pending, one may be its recurrence, so
+defer it `--until +12h` with a reason that says so. A survivor §6 dropped at
+the cap is deferred the same way. Each is judged again.
+
 Then close this step (non-terminal; the session carries the survivors and
 the consumed-observation map forward):
 ```bash
@@ -402,8 +443,9 @@ the consumed-observation map forward):
 **Exit criteria:** judgeable set deduped and judged into pattern beads with
 recomputed rollups (vacuous on a gated run); retirement pass asked of every
 adopted rule; a bounded proposal list with written reasoning; contested
-rules marked; a consumed map `(obs id, obs rig, obs rig path) -> pattern`
-for file-and-dispatch. Bead closed on every path; session NOT drained.
+rules marked; every pattern decided (§7); a consumed map
+`(obs id, obs rig, obs rig path) -> pattern` for file-and-dispatch. Bead
+closed on every path; session NOT drained.
 """
 metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
 
@@ -412,15 +454,13 @@ id = "file-and-dispatch"
 title = "File one prompt-update bead per proposal, stamp consumed observations, gate contested rules, drain"
 needs = ["judge-and-cluster"]
 description = """
-The TERMINAL step — the one place this workflow drains, on every path.
+The TERMINAL step, the one place this workflow drains.
 
-This step MUST finalize on every path it can reach: close its own bead, then
-`gc runtime drain-ack`. Never leave it `open` or `blocked`, and never hold the
-molecule here. The order that pours this formula is single-flight on an open
-root, so a step left blocked here stalls the whole distiller cadence until a
-person clears it with `gc order sweep-tracking --include-wisps
-feedback-distiller`. A run with nothing to file finalizes the same as a full
-one; it never blocks.
+It MUST finalize on every path: close its own bead, then
+`gc runtime drain-ack`, even with nothing to file. Never leave it `open` or
+`blocked`: the order is single-flight on an open root, so a step blocked here
+stalls the distiller until a person runs
+`gc order sweep-tracking --include-wisps feedback-distiller`.
 
 ## 0. Carry the run disposition
 
@@ -443,10 +483,6 @@ fi
 `DISTILL_RUN` unset: rebuild via load-and-gate §1-§3; never file on a
 guess. A `gated` run reaches here normally with an empty consumed map and
 possibly retirement proposals — file those like any survivor.
-
-A run whose corpus a concurrent peer pour already judged arrives here with an
-empty survivor set, because judge-and-cluster §6 dedups every proposal a peer
-has filed, and finalizes as a no-op.
 
 ## 1. File one bead per surviving proposal
 
@@ -487,6 +523,14 @@ BEAD=$(printf '%s' "$BEAD_JSON" | jq -r 'if type == "array" then (.[0].id // emp
 echo "filed prompt-update $BEAD for placement (pattern $PATTERN)"
 # <<< distiller-file-for-placement
 ```
+The pattern waits on its proposal and records it, so a later run reads what
+it spawned:
+```bash
+gc bd dep add "$PATTERN" "$BEAD" --type=blocks
+```
+```bash
+gc bd update "$PATTERN" --set-metadata "proposal_bead=$BEAD" --set-metadata "proposal_carrier=<carrier>" --set-metadata "proposal_action=<action>"
+```
 
 ## 1b. Engineering beads (Gate 2 outcomes)
 
@@ -495,8 +539,11 @@ mechanical fix (lint / doctor check / gate / code change). It waits for
 placement the same way: `-l hold:mayor` on its create, and no route. It
 carries no task_kind=prompt-update and no bullet-cap accounting. Dedup on the
 pattern bead's `eng_bead` first (skip while it or its PR is live).
-Record the outcome on the pattern bead so later runs neither re-judge
-toward prose nor file a duplicate:
+The pattern waits on it and records the outcome, so later runs neither
+re-judge toward prose nor file a duplicate:
+```bash
+gc bd dep add "$PATTERN" "$EBEAD" --type=blocks
+```
 ```bash
 gc bd update "$PATTERN" --set-metadata remedy_class=structural --set-metadata "eng_bead=$EBEAD"
 ```
@@ -507,7 +554,7 @@ Engineering beads count against {{max_beads_per_run}}.
 Judged is the criterion, not seen: every observation judged into a pattern
 this run — promoted, held, NOOPed, contested, discarded — is stamped so it
 never re-counts toward the D7 gate; on a gated run the map is empty and
-NOTHING is stamped (the pending set is what opens the next gate). Reopen
+NOTHING is stamped. Reopen
 the store each observation was read from, by the same rule load-and-gate used:
 ```bash
 if [ -n "$OBS_RIG_PATH" ]; then
@@ -529,31 +576,35 @@ SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/hum
   || { echo "human-gate.sh filed no gate on $PATTERN — stop, address what it reported, and re-run this block" >&2; exit 1; }
 ```
 
-## 4. Summarize and drain
+## 4. Every pattern is decided
+
+It prints `[]` once each pattern is closed, deferred or waiting. Decide any it
+lists (judge-and-cluster §7) before draining.
+```bash
+gc bd ready --metadata-field task_kind=feedback-pattern --brief --json --limit 0
+```
+
+## 5. Summarize and drain
 
 ```bash
 SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" && [ -x "$SC" ] || SC=""
 echo "distiller complete (DISTILL_RUN=${DISTILL_RUN:-open}): filed F prompt-update(s), E engineering bead(s), held/surfaced H, G human gate(s), discarded D, stamped S observation(s)."
-# The loop's success metric, in the run log where the run that moved it is
-# visible. It also runs standalone, which is how the metric is read while
-# this order is disabled.
+# The loop's success metric, in the log of the run that moved it.
 REPO="${REPO:-$(git rev-parse --show-toplevel 2>/dev/null)}"
 RECUR="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/learning-recurrence.sh" && [ -x "$RECUR" ] || RECUR=""
 if [ -n "$RECUR" ]; then
-  # --ref origin/main for the same reason the retirement pass passes it: the
-  # working tree can be stale or carry this run's own unmerged proposals.
+  # origin/main: the working tree can be stale or hold unmerged proposals.
   "$RECUR" --repo "$REPO" --ref origin/main || echo "WARN: recurrence report declined to run (an unreadable store refuses a partial number)" >&2
 else
   echo "WARN: learning-recurrence.sh not found; no recurrence metric this run" >&2
 fi
-# load-and-gate hands the pending set past its own trap because every step
-# reads it; this is its last use. Guarded because each block is its own shell.
+# The pending set's last use; each block is its own shell, hence the guard.
 [ -n "${PENDING:-}" ] && rm -f "$PENDING"
 "${SC:?claim-close.sh not found in the pack}" --step mol-feedback-distiller.file-and-dispatch --outcome pass
 gc runtime drain-ack
 ```
 
 **Never** close a filed prompt-update bead, and never edit a fragment,
-prompt, or skill here — the worker edits, the refinery opens the PR, the
-operator's merge changes behavior."""
+prompt, or skill here: only the operator's merge of a built PR changes
+behavior."""
 metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
