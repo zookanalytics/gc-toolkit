@@ -115,3 +115,5 @@ attach starts a new sitting.
 {{ template "ask-for-work" . }}
 
 {{ template "operator-profile" . }}
+
+{{ template "where-to-search" . }}
