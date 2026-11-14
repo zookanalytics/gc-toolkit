@@ -73,12 +73,14 @@ SUMMARY=$(gc bd --rig <rig> create "summary: the PR for <what the effort deliver
   --parent <epic> --deps "<each bead of the effort, comma-separated>,blocks:$LANDING" --json | jq -r '.id // empty')
 [ -n "$SUMMARY" ] || { echo "no summary task filed; stopping" >&2; exit 1; }
 
-# 6. Assign the landing bead to the refinery, and notify it. The refinery takes
-# it once nothing it waits on is open, so assign it only after every wait above
-# is written: then it cannot reach the default branch before every bead of the
-# effort and the summary task has closed.
+# 6. Assign the landing bead to the refinery. Its patrol finds its work by the
+# beads assigned to it, and the landing bead waits on the effort's beads, so
+# the assignee alone hands it over: Gas City nudges the refinery when the last
+# of them closes. The refinery takes it once nothing it waits on is open, so
+# assign it only after every wait above is written: then it cannot reach the
+# default branch before every bead of the effort and the summary task has
+# closed.
 gc bd --rig <rig> update "$LANDING" --assignee <rig>/<binding>.refinery \
-  && "$(gc <binding> scripts-dir)/deferred-dispatch.sh" notify "$LANDING" --agent <rig>/<binding>.refinery \
   || { echo "$LANDING is not handed to the refinery; dispatching nothing" >&2; exit 1; }
 
 # 7. Sling each bead of the effort, or arm it when it waits on other work, and
@@ -86,8 +88,11 @@ gc bd --rig <rig> update "$LANDING" --assignee <rig>/<binding>.refinery \
 # runs once the effort's beads have landed, and once it closes, the refinery
 # takes the landing bead and opens the PR with the summary it wrote.
 gc sling <rig>/<binding>.polecat "$WORK"
-"$(gc <binding> scripts-dir)/deferred-dispatch.sh" arm "$SUMMARY" --target <rig>/<binding>.polecat \
-  --sling-arg --on --sling-arg mol-polecat-report --reason "writes the pr_summary of $LANDING once the effort's beads land"
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" bead arm "$SUMMARY" --target <rig>/<binding>.polecat --on mol-polecat-report \
+  --reason "writes the pr_summary of $LANDING once the effort's beads land"
 ```
 
 ## Add a bead to an existing effort
@@ -97,9 +102,10 @@ gc sling <rig>/<binding>.polecat "$WORK"
    task is the bead the landing bead waits on whose title begins `summary:`,
    the newest when there are several. It waits on the bead, never the reverse,
    because the summary must read the branch after the bead has landed. The
-   block adds the wait only while the summary task is armed and not yet slung
-   and a wait of its own is still pending, as `gctk bead holds` answers it,
-   because then the deferred-dispatch order cannot sling it first.
+   block adds the wait only while the summary task is armed and a wait of its
+   own is still pending, as `gctk bead holds` answers it, because then the
+   deferred-dispatch order cannot sling it first: the order clears an arm once
+   it has sent the bead.
 3. When the block refuses, file a fresh summary task by step 5 with the bead
    among its waits, which makes the landing bead wait on it too, and arm it as
    in step 7. A summary task that has been dispatched may already have read the
@@ -113,7 +119,7 @@ GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
 RIG_ROOT=$(gc rig list --json | jq -r --arg r <rig> '.rigs[] | select(.name == $r) | .path')
 # dep add's second id is the bead that is waited on.
-"$GCTK" bead holds --db "$RIG_ROOT/.beads" "$SUMMARY" | jq -e '.error == null and (.arm.target // "") != "" and (.arm.slung // "") == "" and (.pending | length) > 0' >/dev/null \
+"$GCTK" bead holds --db "$RIG_ROOT/.beads" "$SUMMARY" | jq -e '.error == null and (.arm.target // "") != "" and (.pending | length) > 0' >/dev/null \
   && gc bd --rig <rig> dep add "$SUMMARY" "$WORK" --type=blocks \
   || { echo "$SUMMARY may already be dispatched, or the store refused its wait on $WORK; file a fresh summary task by step 5" >&2; exit 1; }
 ```
@@ -138,14 +144,14 @@ default branch's commits as its change.
 
 1. File the hand-off by the block below. It names the effort's landing bead
    and waits on the outside work by a `blocks` edge. The block assigns it to
-   the refinery and notifies it, as the work skill sends a named agent a bead.
-   It carries no `branch`, because the refinery's patrol takes a bead that
-   carries one as a branch to land.
+   the refinery, as the work skill sends the refinery a bead. It carries no
+   `branch`, because the refinery's patrol takes a bead that carries one as a
+   branch to land.
 2. Make the bead that needs the branch current wait on the hand-off by a
    `blocks` edge, and arm it to dispatch when the hand-off closes (the waits
    skill).
-3. Once the outside work has landed, deferred dispatch sends the notice, and
-   the refinery brings the branch current. It fast-forwards the branch to the
+3. Once the outside work has landed, Gas City nudges the refinery with the
+   hand-off's id, and the refinery brings the branch current. It fast-forwards the branch to the
    default branch when the branch holds nothing the default branch lacks, and
    otherwise merges the default branch into it. It pushes the result and
    closes the hand-off, which releases the bead.
@@ -176,7 +182,6 @@ HANDOFF=$(gc bd --rig <rig> create "Bring integration/$LANDING current once <the
   --parent <epic> --deps "$OUTSIDE" --json | jq -r '.id // empty')
 [ -n "$HANDOFF" ] || { echo "no hand-off filed, with its wait on the outside work; stopping" >&2; exit 1; }
 gc bd --rig <rig> update "$HANDOFF" --assignee <rig>/<binding>.refinery \
-  && "$(gc <binding> scripts-dir)/deferred-dispatch.sh" notify "$HANDOFF" --agent <rig>/<binding>.refinery \
   || { echo "$HANDOFF is not handed to the refinery; make nothing wait on it yet" >&2; exit 1; }
 ```
 

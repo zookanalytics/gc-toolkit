@@ -7,9 +7,11 @@
 #   actionable  the bead is work -> release it TO a pool, which is the whole
 #               of "schedule an action for a bead": a routed, unassigned,
 #               open bead is what a pool's find-work offers. Work that is a
-#               named agent's own (a town-repo edit is mechanik's) is released
-#               TO that agent instead, as its assignee (--assign), and the
-#               agent is told.
+#               named agent's own (a town-repo edit is mechanik's) is handed
+#               TO that agent instead (--assign), in the form it finds its
+#               work in: gc sling routes it to the mechanik's hook, the
+#               release assigns it to the refinery or the keeper, and the
+#               exit nudges the agent when bd reports the bead ready.
 #   recommend   the action is known but warrants the operator's trigger -> put
 #               it to the operator as a human gate (as ruling does) AND stamp
 #               gc.recommended_formula on the subject, so the board offers
@@ -20,9 +22,11 @@
 #   blocked     the bead is waiting -> the wait becomes a `blocks` edge on a
 #               bead in the SAME store (component-model I1). Optionally arm a
 #               deferred dispatch, so the wait converts to work when it lifts,
-#               or assign the bead to the named agent whose work it is, whose
-#               hook offers it once the wait lifts, and arm the notice that
-#               tells the agent then.
+#               or hand the bead to the named agent whose work it is, in the
+#               form the agent finds its work in. The exit nudges the agent
+#               when bd already reports the bead ready, as it does once the
+#               wait has lifted, and otherwise Gas City nudges the agent when
+#               the blocker closes.
 #   close       there is nothing to do, now or once another bead lands -> hand
 #               the bead to a validating-closer pool (mol-validate-close), which
 #               re-checks the call and closes the bead or asks the operator. A
@@ -90,7 +94,10 @@ PROG="first-reaction-dispose"
 HERE="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 HELM="${GC_HELM_TOOL:-$HERE/gc-helm.sh}"
 HUMAN_GATE="${GC_HUMAN_GATE_TOOL:-$HERE/human-gate.sh}"
-DEFERRED="${GC_DEFERRED_DISPATCH_TOOL:-$HERE/deferred-dispatch.sh}"
+# The arm's verb is gctk's, from the binary the city builds.
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 PROACTIVE="${GC_PROACTIVE_TOOL:-$HERE/../../tools/gc-proactive.sh}"
 
 # >>> control-char-scrub
@@ -144,7 +151,7 @@ Usage:
   --waiting-on (close, one or more) names a bead in the subject's store whose
   landing ends the subject's job, such as the bead that retires its code. The
   closer is then DEFERRED: the bead waits on each through a `blocks` edge, and
-  a deferred dispatch is armed, so the reconcile pass slings
+  a deferred dispatch is armed, so the deferred-dispatch order slings
   mol-validate-close once they have all closed, and the closer checks that
   their landing did end the job. A bead in another store is refused, because
   a `blocks` edge holds nothing across stores: a person closes the subject
@@ -152,7 +159,7 @@ Usage:
   --after-workflow (close) names the live workflow this close runs inside — a
   frozen mol-first-reaction molecule's own root. The closer is then DEFERRED,
   not slung now: the bead is held on that root and a deferred dispatch is
-  armed, so the reconcile pass slings mol-validate-close once the root closes
+  armed, so the deferred-dispatch order slings mol-validate-close once the root closes
   and the bead is the sole live workflow's target. Omit both to sling the
   closer immediately (a reaction bead, which is not a workflow on the subject,
   or an operator running this by hand).
@@ -160,8 +167,8 @@ Usage:
   not a bead yet; --blocker-key dedups repeats of one recurring cause onto
   that single bead instead of one bead per instance.
   --then-route arms the deferred dispatch that slings the subject when the
-  blocker closes (assets/scripts/deferred-dispatch.sh). An arm that does not
-  land fails the exit before the landed proof, so a re-run resumes it.
+  blocker closes (gctk bead arm). An arm that does not land fails the exit
+  before the landed proof, so a re-run resumes it.
   Intake decides whether the actionable route and the --then-route arm are
   written at all. Only a member of an epic, PR-finishing work (anchor_bead)
   or a confirmed emergency reaches a pool. Any other bead is held with Gas
@@ -175,21 +182,26 @@ Usage:
   there confirms nothing. A confirmed emergency is routed, or armed, at P0. An
   unconfirmed one is held for placement like any other bead, and its note says
   what the check found.
-  --assign (actionable) releases the bead to a named agent instead of a pool:
-  the agent becomes its assignee, the address its own hook matches, and no
-  route is stamped. A town-repo edit (city.toml, packs.lock) is mechanik's, so
-  it takes --assign gc-toolkit.mechanik. Refused unless the agent is a
-  registered named session whose hook reads this bead's store
-  (tools/gc-proactive.sh assignable), and never the po, which takes no work
-  by assignment: its queue is the new work intake holds with hold:mayor.
-  The agent is then told, because under
-  wake_mode = "resume" nothing else wakes an idle named session for a new
-  assignee: deferred-dispatch.sh notify mails it the bead id at once when bd
-  reports the bead ready, and otherwise arms the notice to go when bd does.
-  --then-assign (blocked) assigns the held bead to a named agent in the same
-  release, held to the same test as --assign. Its hook offers the bead once
-  the wait lifts, and the notice
-  deferred-dispatch.sh notify arms tells the agent then, not before.
+  --assign (actionable) hands the bead to a named agent instead of a pool, in
+  the form the agent finds its work in (docs/authority-map.md, Route work).
+  The mechanik claims through its hook, so the release leaves the bead
+  unassigned and gc sling <agent> <bead> --no-formula --no-convoy routes it to
+  the agent's own name. The refinery and the keeper list the beads assigned to
+  them, so the release writes the agent as the assignee. Either way the exit
+  then reads whether bd reports the bead ready, and when it does, gc session
+  nudge gives the agent a turn for it. A town-repo edit
+  (city.toml, packs.lock) is mechanik's, so it takes --assign
+  gc-toolkit.mechanik. Refused for the deacon and the witness, which patrol
+  their own wisps and take what they must act on as mail, for any other agent
+  the row does not name, for the po, which takes no work by assignment (its
+  queue is the new work intake holds with hold:mayor), and for an agent that
+  is not a registered named session whose hook reads this bead's store
+  (tools/gc-proactive.sh assignable).
+  --then-assign (blocked) hands the held bead to a named agent in the same
+  form, held to the same tests as --assign, and reads its readiness the same
+  way. A blocker that has closed already leaves the bead ready, so the exit
+  nudges the agent. While the blocker holds, the exit sends no nudge, and Gas
+  City nudges the agent when the blocker closes.
   ruling and recommend put the subject to the operator as a native human gate:
   the script files it with human-gate.sh under the key first-reaction, the
   takeaway as its title, and the gate blocks the subject. One open gate stands
@@ -300,19 +312,11 @@ case "$DISPOSITION" in
     actionable)
         [ -z "$WAITING$BLOCKER_TITLE$THEN_ROUTE$THEN_ASSIGN$AFTER_WORKFLOW$RECOMMENDED_FORMULA" ] \
             || usage_die "actionable takes --route or --assign only (--waiting-on/--blocker/--then-route/--then-assign/--after-workflow/--recommended-formula belong to the other exits)"
-        # A bead goes to a pool by gc.routed_to or to a named agent by assignee,
-        # never both. The agent's hook offers the bead by its assignee whatever
-        # the route, and a pool's claim and Gas City's pool demand count both
-        # skip an assigned bead. So a route beside the assignee offers the bead
-        # to no pool member until the assignee is cleared, and then hands it to
-        # the pool instead of the agent.
+        # A bead goes to one place: a pool, or the named agent whose work it is.
+        # Both are routes, so the one gc.routed_to carries either, never both.
         if [ -n "$ASSIGN" ]; then
             [ -z "$ROUTE" ] || usage_die "--route and --assign both name where $BEAD goes; pass --route for a pool or --assign for a named agent, not both"
             [ -z "$EMERGENCY" ] || usage_die "--emergency admits a bead to a pool at P0, and --assign hands it to a named agent instead, which intake does not hold. Pass --route for the pool an emergency goes to, or drop --emergency."
-            # Telling the agent is part of this exit's write-back, and with no
-            # tool to send it the exit cannot land, so it does not start.
-            [ -x "$DEFERRED" ] \
-                || die "--assign needs $DEFERRED to tell $ASSIGN about $BEAD, and it is not executable. Nothing was written. Restore it and re-run this command."
         else
             [ -n "$ROUTE" ] || ROUTE="${GC_RIG:+$GC_RIG/}gc-toolkit.polecat"
             case "$ROUTE" in
@@ -356,8 +360,8 @@ case "$DISPOSITION" in
         # The arm is part of this exit's write-back when the closer waits, and
         # with no tool to record it the exit cannot land, so it does not start.
         if [ -n "$WAITING$AFTER_WORKFLOW" ]; then
-            [ -x "$DEFERRED" ] \
-                || die "a deferred close needs $DEFERRED to arm the validating closer for when $BEAD's wait lifts, and it is not executable. Nothing was written. Restore it and re-run this command."
+            [ -x "$GCTK" ] \
+                || die "a deferred close needs gctk to arm the validating closer for when $BEAD's wait lifts, and there is no gctk binary at '$GCTK' (GCTK_BIN names one, or GC_CITY_PATH the city whose build it is). Nothing was written. Restore it and re-run this command."
         fi
         ;;
     blocked)
@@ -382,15 +386,11 @@ case "$DISPOSITION" in
             case "$THEN_ROUTE" in */*) : ;; *) usage_die "--then-route '$THEN_ROUTE' is not rig-qualified (<rig>/<agent>)" ;; esac
             # The arm is part of this exit's write-back, and with no tool to
             # record it the exit cannot land, so it does not start.
-            [ -x "$DEFERRED" ] \
-                || die "--then-route needs $DEFERRED to arm the dispatch for when $BEAD's wait lifts, and it is not executable. Nothing was written. Restore it and re-run this command."
+            [ -x "$GCTK" ] \
+                || die "--then-route needs gctk to arm the dispatch for when $BEAD's wait lifts, and there is no gctk binary at '$GCTK' (GCTK_BIN names one, or GC_CITY_PATH the city whose build it is). Nothing was written. Restore it and re-run this command."
         else
             [ -z "$EMERGENCY" ] \
                 || usage_die "--emergency admits the dispatch a --then-route arms, at P0, and this blocked exit arms none. Pass --then-route <rig>/<agent>, or drop --emergency."
-        fi
-        if [ -n "$THEN_ASSIGN" ]; then
-            [ -x "$DEFERRED" ] \
-                || die "--then-assign needs $DEFERRED to arm the notice that tells $THEN_ASSIGN when $BEAD's wait lifts, and it is not executable. Nothing was written. Restore it and re-run this command."
         fi
         ;;
     recommend|ruling)
@@ -439,6 +439,26 @@ for _who in "$ASSIGN" "$THEN_ASSIGN"; do
             usage_die "$_flag $_who names the po, which takes no work by assignment: its queue is the new work intake holds with hold:mayor. Pass $_route for the pool that would build $BEAD, and intake holds it for placement when no epic holds it, or pass $_flag for the named agent whose work it is." ;;
     esac
 done
+
+# ── The form a named agent takes its work in ─────────────────────────
+# docs/authority-map.md's Route work row: a route reaches a named agent that
+# claims its work through its hook, as the mechanik does. The refinery and the
+# keeper list the beads assigned to them, which a route never reaches, so each
+# takes the assignee, which the release writes. The deacon and the witness
+# patrol their own wisps and take no bead, and an agent the row does not name
+# has no form this exit knows, so each is refused here, before anything is read
+# or written.
+WHO="${ASSIGN:-$THEN_ASSIGN}"; HANDOFF=""
+if [ -n "$WHO" ]; then
+    _flag=--assign; [ -z "$THEN_ASSIGN" ] || _flag=--then-assign
+    case "${WHO##*/}" in
+        mechanik|*.mechanik) HANDOFF=route ;;
+        refinery|*.refinery|keeper|*.keeper) HANDOFF=assignee ;;
+        deacon|*.deacon|witness|*.witness)
+            usage_die "$_flag $WHO names an agent that patrols its own wisps and takes no bead, so a bead handed to it is read by nobody. Send it what it must act on as mail (gc mail send $WHO -s \"<what it must do>\" -m \"<the bead, and what to do about it>\"), and dispose $BEAD another way." ;;
+        *)  usage_die "$_flag $WHO names no agent this exit can hand a bead to. The mechanik takes a route, and the refinery and the keeper take the assignee (docs/authority-map.md, Route work), so pass $_flag with one of their qualified names, or route the bead to a pool." ;;
+    esac
+fi
 
 # ── Pin the store, do not let the cwd choose it ──────────────────────
 # This runs from a pool worktree, where .beads is gitignored, so an unpinned
@@ -743,27 +763,26 @@ if [ -n "$CLAIM_ROUTE" ] && [ -x "$PROACTIVE" ]; then
         fi
     }
 fi
-# An assignment is held to the same standard: --assign and --then-assign name a
+# A hand-off is held to the same standard: --assign and --then-assign name a
 # named agent whose own hook must offer the bead, and gc-proactive.sh
 # `assignable` answers that against the roster, the named sessions and the
 # stores the agent's hook reads, answering no only on a positive finding.
-WHO="${ASSIGN:-$THEN_ASSIGN}"
 if [ -n "$WHO" ] && [ -x "$PROACTIVE" ]; then
     ASSIGNABLE_WHY="$("$PROACTIVE" assignable "$WHO" "$BEAD" 2>/dev/null)" || {
-        usage_die "$WHO cannot be handed this bead — ${ASSIGNABLE_WHY:-the agent answered no}. Assigning it there would leave $BEAD offered to nobody. Name the agent by its exact qualified name (gc-toolkit.mechanik for a town-repo edit), or route a pool with --route/--then-route."
+        usage_die "$WHO cannot be handed this bead — ${ASSIGNABLE_WHY:-the agent answered no}. Handing it there would leave $BEAD offered to nobody. Name the agent by its exact qualified name (gc-toolkit.mechanik for a town-repo edit), or route a pool with --route/--then-route."
     }
 fi
 # --then-route names the pool the deferred dispatch slings the bead to once its
 # blocker lifts, so it is held to the SAME roster and store test as --route. Its
 # own check at parse time only tests for a "/", which a copied `<rig>/<agent>`
 # placeholder passes; a target the roster does not know, or one whose rig does
-# not own this bead's store, would arm a dispatch every reconcile pass replays
-# into a failure. The probe answers no only on a positive finding, so an
+# not own this bead's store, would arm a dispatch every pass of the
+# deferred-dispatch order replays into a failure. The probe answers no only on a positive finding, so an
 # unrunnable probe leaves the arm alone. An arm intake holds for placement is
 # never written, so it is not asked about either.
 if [ "$DISPOSITION" = "blocked" ] && [ -n "$THEN_ROUTE" ] && [ -n "$ADMIT" ] && [ -x "$PROACTIVE" ]; then
     DELIVERABLE_WHY="$("$PROACTIVE" deliverable "$THEN_ROUTE" "$BEAD" 2>/dev/null)" || {
-        usage_die "--then-route $THEN_ROUTE cannot pick this bead up — ${DELIVERABLE_WHY:-the pool answered no}. Arming it would record a dispatch the reconcile pass replays into a failure every cycle. Pass a pool that runs (e.g. <rig>/<rig>.polecat), or omit --then-route if no pool takes this bead."
+        usage_die "--then-route $THEN_ROUTE cannot pick this bead up — ${DELIVERABLE_WHY:-the pool answered no}. Arming it would record a dispatch the deferred-dispatch order replays into a failure every cycle. Pass a pool that runs (e.g. <rig>/<rig>.polecat), or omit --then-route if no pool takes this bead."
     }
 fi
 
@@ -781,9 +800,10 @@ fi
 if [ -n "$DRY" ]; then
     printf 'disposition=%s bead=%s reason=%s\n' "$DISPOSITION" "$BEAD" "$REASON"
     case "$DISPOSITION" in
-        actionable) if [ -n "$ASSIGN" ]; then
-                        printf 'would release %s to named agent %s (assignee, no route)\n' "$BEAD" "$ASSIGN"
-                        printf 'would tell %s about %s once bd reports it ready, at once if it already does (deferred-dispatch.sh notify)\n' "$ASSIGN" "$BEAD"
+        actionable) if [ "$HANDOFF" = assignee ]; then
+                        printf 'would release %s to named agent %s as its assignee and nudge it if bd reports the bead ready\n' "$BEAD" "$ASSIGN"
+                    elif [ -n "$ASSIGN" ]; then
+                        printf 'would hand %s to named agent %s (gc sling %s %s --no-formula --no-convoy) and nudge it if bd reports the bead ready\n' "$BEAD" "$ASSIGN" "$ASSIGN" "$BEAD"
                     elif [ -z "$ADMIT" ]; then
                         printf 'would hold %s for placement (hold:mayor, unrouted): %s\n' "$BEAD" "$HOLD_WHY"
                     elif [ "$ADMIT" = emergency ]; then
@@ -792,9 +812,12 @@ if [ -n "$DRY" ]; then
                         printf 'would release %s to %s\n' "$BEAD" "$ROUTE"
                     fi ;;
         recommend)  printf 'would file a human gate on %s recommending %s and hold %s on it\n' "$BEAD" "$RECOMMENDED_FORMULA" "$BEAD" ;;
-        blocked)    printf 'would wait %s on:%s%s%s\n' "$BEAD" "$WAITING" "${BLOCKER_TITLE:+ (new: $BLOCKER_TITLE)}" "${THEN_ASSIGN:+, assigned to $THEN_ASSIGN}"
-                    [ -z "$THEN_ASSIGN" ] \
-                        || printf 'would tell %s about %s once bd reports it ready, at once if it already does (deferred-dispatch.sh notify)\n' "$THEN_ASSIGN" "$BEAD"
+        blocked)    printf 'would wait %s on:%s%s\n' "$BEAD" "$WAITING" "${BLOCKER_TITLE:+ (new: $BLOCKER_TITLE)}"
+                    if [ "$HANDOFF" = assignee ]; then
+                        printf 'would release %s to named agent %s as its assignee and nudge it if bd reports the bead ready; while the wait holds, Gas City nudges it when the blocker closes\n' "$BEAD" "$THEN_ASSIGN"
+                    elif [ -n "$THEN_ASSIGN" ]; then
+                        printf 'would hand %s to named agent %s (gc sling %s %s --no-formula --no-convoy) and nudge it if bd reports the bead ready; while the wait holds, Gas City nudges it when the blocker closes\n' "$BEAD" "$THEN_ASSIGN" "$THEN_ASSIGN" "$BEAD"
+                    fi
                     if [ -n "$THEN_ROUTE" ] && [ -z "$ADMIT" ]; then
                         printf 'would hold %s for placement (hold:mayor) and arm no dispatch to %s: %s\n' "$BEAD" "$THEN_ROUTE" "$HOLD_WHY"
                     elif [ -n "$THEN_ROUTE" ]; then
@@ -917,29 +940,54 @@ stamp_landed() {
     fi
 }
 
-# ── A named agent hears about the bead it was assigned ───────────────
-# An assignment by itself wakes nobody. A named session's hook offers it a
-# bead by its assignee once bd reports the bead ready, and the agent reads its
-# hook only in a turn: at launch, when the operator types, or when a nudge
-# arrives. The controller's claim, continuation and execution backstops govern
-# pool sessions only, and its restart of an alive named session onto a new
-# assignment runs only under wake_mode = "fresh", so under "resume" nothing
-# gives an idle agent that turn. So the exit that assigns asks
-# deferred-dispatch.sh notify to tell the agent, by the identity
-# gc-proactive.sh assignable checked above. The mail goes at once when bd reports the bead ready, the actionable
-# exit's case. Otherwise the notice is recorded for the deferred-dispatch pass
-# to send once bd does, the blocked exit's case, since a notice sent while the
-# bead still waits would wake the agent for a bead its hook does not offer yet.
-# A notice that is neither sent nor recorded fails the exit before the landed
-# proof, as a missing arm does, so a re-run resumes it.
-notify_assignee() { # <named-agent>
-    local out
-    # shellcheck disable=SC2086  # $BD_DB_ARGS expands to 0 or 2 space-free fields
-    if out=$("$DEFERRED" notify "$BEAD" --agent "$1" --reason "first reaction: $REASON" $BD_DB_ARGS 2>&1); then
-        [ -z "$out" ] || printf '%s\n' "$out" >&2
-    else
-        die "the $DISPOSITION disposition on $BEAD did not land. $1 was not told about it and no notice was armed (${out:-deferred-dispatch.sh notify exited non-zero and named no cause}), so nothing would wake $1 into its hook for it. The headline and the release stand. No landed proof was stamped and the reaction bead stays open, so clear the cause and re-run this command: a re-run resumes rather than refusing."
+# ── A named agent is handed the bead ─────────────────────────────────
+# --assign and --then-assign name an agent by the identity gc-proactive.sh
+# assignable checked above, and the hand-off takes the form HANDOFF chose for
+# it. The mechanik takes Gas City's own route: gc sling routes the bead to the
+# agent's name, and a named session's hook serves work routed to its own name
+# once bd reports it ready. The sling pours no formula and, as gc-helm.sh
+# takeaway --route does, files no convoy. The refinery and the keeper take the
+# assignee, which the release above wrote, so nothing more is written for them.
+# A route or an assignee alone gives a running agent no turn, so the exit nudges
+# the agent with the bead's id when bd reports the bead ready; a nudge to an
+# agent that is not running wakes it. Whether the bead is ready is read after
+# the hand-off lands, for either exit, and never taken from the exit's name. A
+# blocked exit's blocker can close before the hand-off is written, even while
+# the reaction is prepared, and its close then found no route or assignee to
+# nudge. A bead the read finds still waiting has a blocker that closes after the
+# hand-off, and Gas City nudges the route or the assignee then
+# (docs/deferred-dispatch.md). The read is bd's ready set, the answer the work
+# skill gives for a ready bead. A hand-off that does not land, the read and the
+# nudge included, fails the exit before the landed proof, as a missing arm does,
+# so a re-run resumes it.
+hand_over() { # <named-agent>
+    local out rc=0 rig_arg="" how=assigned what=assignee ready="" why
+    if [ "$HANDOFF" = route ]; then
+        how=routed; what=route
+        [ -n "${GC_RIG:-}" ] && rig_arg="--rig $GC_RIG"
+        # shellcheck disable=SC2086  # $rig_arg expands to 0 or 2 space-free fields
+        out=$(gc sling $rig_arg "$1" "$BEAD" --no-formula --no-convoy 2>&1 </dev/null) || rc=$?
+        if [ "$rc" -ne 0 ]; then
+            die "the $DISPOSITION disposition on $BEAD did not land. gc sling did not hand it to $1 (exit $rc: $(printf '%s' "${out:-it named no cause}" | tr '\n' ' ')), so the agent's hook does not offer it. The headline and the release stand. No landed proof was stamped and the reaction bead stays open, so clear the cause and re-run this command: a re-run resumes rather than refusing."
+        fi
     fi
+    # Unreadable is not waiting: only a listing that answers an array decides.
+    out=$(gc_bd ready --brief --json --limit 0 2>/dev/null </dev/null) || rc=$?
+    [ "$rc" -ne 0 ] || ready=$(printf '%s' "$out" | scrub | jq -r --arg b "$BEAD" '
+        if type == "array" then (if any(.[]; (.id // "") == $b) then "ready" else "waits" end) else empty end' 2>/dev/null) || ready=""
+    case "$ready" in
+        waits) ;;
+        ready)
+            out=$(gc session nudge "$1" "$BEAD is $how to you and ready" 2>&1 </dev/null) || rc=$?
+            if [ "$rc" -ne 0 ]; then
+                die "the $DISPOSITION disposition on $BEAD did not land. It is $how to $1, but gc session nudge did not reach the agent (exit $rc: $(printf '%s' "${out:-it named no cause}" | tr '\n' ' ')), so a running agent gets no turn for it. The headline, the release and the $what stand. No landed proof was stamped and the reaction bead stays open, so clear the cause and re-run this command: a re-run resumes rather than refusing."
+            fi ;;
+        *)
+            why="answered no list"
+            [ "$rc" -eq 0 ] || why="exited $rc"
+            die "the $DISPOSITION disposition on $BEAD did not land. It is $how to $1, but whether bd reports it ready could not be read (gc bd ready $why), so whether the agent is owed a nudge now is unknown. The headline, the release and the $what stand. No landed proof was stamped and the reaction bead stays open, so clear the cause and re-run this command: a re-run resumes rather than refusing." ;;
+    esac
+    note "handed $BEAD to $1"
 }
 
 # ── The close exit: hand the bead to a validating closer, never close here ────
@@ -956,8 +1004,8 @@ notify_assignee() { # <named-agent>
 # bead that retires its code. Its close is owed once they land, and the closer
 # checks that their landing did end the job, so that sling is DEFERRED: the bead
 # is held on each of them and a deferred dispatch is armed, and the
-# deferred-dispatch reconcile pass slings mol-validate-close once they have all
-# closed and bd reports the bead ready.
+# deferred-dispatch order slings mol-validate-close once they have all closed and
+# bd reports the bead ready.
 # --after-workflow names the live reaction workflow a frozen molecule's close
 # runs inside. The closer must be the bead's SOLE dispatch surface, never a
 # second workflow stacked on the still-live reaction
@@ -979,21 +1027,22 @@ $REASON" >/dev/null 2>&1 \
         || die "could not append the close brief to $BEAD's notes; the validating closer reads it there, so nothing was dispatched. Clear the cause and re-run this command."
     if [ -n "$WAITING$AFTER_WORKFLOW" ]; then
         # Gate the deferred dispatch: hold the bead on what it waits for so
-        # reconcile does not sling until that closes. The hold is a REQUIRED
-        # write. Reconcile dispatches from `bd list --ready`, so a bead left
-        # unheld reads ready and mol-validate-close slings at once: before the
-        # landing it waits on, or beside the still-live reaction, the
-        # two-live-surfaces shape (formula-spec-v2 §3). A hold that does not
+        # the deferred-dispatch order does not sling until that closes. The
+        # hold is a REQUIRED write. The order dispatches by bd's readiness
+        # (`bd ready`), so a bead left unheld reads ready and mol-validate-close
+        # slings at once: before the landing it waits on, or beside the
+        # still-live reaction, the two-live-surfaces shape (formula-spec-v2
+        # §3). A hold that does not
         # land therefore fails closed: refuse to arm, and let the documented
         # re-run resume. bd keeps one edge type per pair of beads, so an edge of
         # another type onto the same bead refuses this one.
         for h in $WAITING $AFTER_WORKFLOW; do
             gc_bd dep add "$BEAD" "$h" -t blocks >/dev/null 2>&1 \
-                || die "could not hold $BEAD on $h; refusing to arm the closer dispatch ungated (reconcile would sling mol-validate-close before $h closes). bd keeps one edge type per pair of beads, so an edge of another type $BEAD already has onto $h refuses this one: remove it with gc bd dep remove $BEAD $h${DB:+ --db $DB}. Clear the cause and re-run this command."
+                || die "could not hold $BEAD on $h; refusing to arm the closer dispatch ungated (the deferred-dispatch order would sling mol-validate-close before $h closes). bd keeps one edge type per pair of beads, so an edge of another type $BEAD already has onto $h refuses this one: remove it with gc bd dep remove $BEAD $h${DB:+ --db $DB}. Clear the cause and re-run this command."
         done
         # shellcheck disable=SC2086  # $BD_DB_ARGS expands to 0 or 2 space-free fields
-        "$DEFERRED" arm "$BEAD" --target "$ROUTE" --sling-arg --on --sling-arg mol-validate-close --reason "first reaction close: $REASON" $BD_DB_ARGS >/dev/null 2>&1 \
-            || die "could not arm the validating-closer dispatch on $BEAD (deferred-dispatch arm --on mol-validate-close failed). Clear the cause and re-run this command."
+        "$GCTK" bead arm "$BEAD" --target "$ROUTE" --on mol-validate-close --reason "first reaction close: $REASON" $BD_DB_ARGS >/dev/null 2>&1 \
+            || die "could not arm the validating-closer dispatch on $BEAD (gctk bead arm --on mol-validate-close failed). Clear the cause and re-run this command."
     else
         SLING_RIG_ARG=""
         [ -n "${GC_RIG:-}" ] && SLING_RIG_ARG="--rig $GC_RIG"
@@ -1100,17 +1149,18 @@ fi
 
 # ── The act ──────────────────────────────────────────────────────────
 # gc-helm.sh takeaway carries the headline, the release, and the wait edges;
-# --route releases the bead to a pool instead of back to the human, and
-# --assign releases it to a named agent as its assignee.
+# --route releases the bead to a pool instead of back to the human. A bead for
+# the refinery or the keeper is released to it as its assignee (--assign), and
+# one for the mechanik is released at rest and routed after (hand_over, below).
 #
 # Each disposition also answers the headline's own question — is anything still
 # waiting on this bead? An actionable one is not waiting on a bead: it is
-# moving, and the pool its route names, or the agent it is assigned to, will
+# moving, and the pool its route names, or the agent it is handed to, will
 # take it. Held for placement, it is released with no route into the sitting's
 # queue, which its hold:mayor label puts it in and
 # `gc beads list --label hold:mayor` lists. Either way --no-wait says so. A
-# blocked one names its wait as an edge, and a --then-assign rides the same
-# release, so the agent's hook offers the bead once the edge clears. A recommend
+# blocked one names its wait as an edge, and a --then-assign hands the bead over
+# in the same form, so the agent reads it once the edge clears. A recommend
 # or a ruling names its human gate as its wait: the subject is waiting on a
 # person, and the gate carries the wait, so --waiting-on records the blocks edge
 # onto it. That edge is the one the gate's create already wrote, and adding it
@@ -1120,12 +1170,12 @@ fi
 set -- takeaway "$BEAD" "$TAKEAWAY" --by "$BY" --release
 case "$DISPOSITION" in
     actionable)
-        if [ -n "$ASSIGN" ]; then set -- "$@" --assign "$ASSIGN" --no-wait
-        elif [ -n "$ADMIT" ]; then set -- "$@" --route "$ROUTE" --no-wait
+        if [ -z "$ASSIGN" ] && [ -n "$ADMIT" ]; then set -- "$@" --route "$ROUTE" --no-wait
+        elif [ "$HANDOFF" = assignee ]; then set -- "$@" --assign "$ASSIGN" --no-wait
         else set -- "$@" --no-wait; fi ;;
     blocked)
         for w in $WAITING; do set -- "$@" --waiting-on "$w"; done
-        if [ -n "$THEN_ASSIGN" ]; then set -- "$@" --assign "$THEN_ASSIGN"; fi ;;
+        [ "$HANDOFF" != assignee ] || set -- "$@" --assign "$THEN_ASSIGN" ;;
     recommend|ruling) set -- "$@" --waiting-on "$GATE" ;;
 esac
 "$HELM" "$@" || die "gc-helm.sh takeaway failed on $BEAD; its message above names what landed and what did not. Clear the cause and re-run this command."
@@ -1146,16 +1196,15 @@ esac
 # the bead.
 if [ "$DISPOSITION" = "blocked" ] && [ -n "$THEN_ROUTE" ] && [ -n "$ADMIT" ]; then
     # shellcheck disable=SC2086  # $BD_DB_ARGS expands to 0 or 2 space-free fields
-    if ARM_ERR=$("$DEFERRED" arm "$BEAD" --target "$THEN_ROUTE" --reason "first reaction: $REASON" $BD_DB_ARGS 2>&1 >/dev/null); then
+    if ARM_ERR=$("$GCTK" bead arm "$BEAD" --target "$THEN_ROUTE" --reason "first reaction: $REASON" $BD_DB_ARGS 2>&1 >/dev/null); then
         note "armed the dispatch to $THEN_ROUTE for when the wait lifts"
     else
-        die "the blocked disposition on $BEAD did not land. The dispatch to $THEN_ROUTE for when its wait lifts was not armed (${ARM_ERR:-deferred-dispatch.sh arm exited non-zero and named no cause}), so nothing would route $BEAD once the wait lifts. The headline, the release and the hold stand. No landed proof was stamped and the reaction bead stays open, so clear the cause and re-run this command: a re-run resumes rather than refusing."
+        die "the blocked disposition on $BEAD did not land. The dispatch to $THEN_ROUTE for when its wait lifts was not armed (${ARM_ERR:-gctk bead arm exited non-zero and named no cause}), so nothing would route $BEAD once the wait lifts. The headline, the release and the hold stand. No landed proof was stamped and the reaction bead stays open, so clear the cause and re-run this command: a re-run resumes rather than refusing."
     fi
 fi
 
-# --assign and --then-assign told the release who the bead goes to, and that
-# agent is told the bead is its own once its hook offers it.
-[ -z "$WHO" ] || notify_assignee "$WHO"
+# --assign and --then-assign name the agent the released bead is handed to.
+[ -z "$WHO" ] || hand_over "$WHO"
 
 stamp_landed
 close_reaction

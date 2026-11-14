@@ -18,7 +18,7 @@
 # two steps judges the prepared head and decides nothing here, so it is left
 # out. The blocks run against real git repositories, the real
 # direct-merge-push.sh, refinery-workspace.sh, detached-job.sh, bd-lib.sh,
-# await-ruling.sh and deferred-dispatch.sh, a stub gc that keeps the beads and
+# await-ruling.sh and the arm's verbs in gctk, a stub gc that keeps the beads and
 # their edges in files, a stub lifecycle.sh that logs, and a stub human-gate.sh
 # that logs and files its gate. They run from a directory that is no git
 # checkout, as a refinery's scratch directory is, so every git call has to name
@@ -133,9 +133,9 @@ CITY="$TMP/city"
 PACK="$CITY/rigs/gc-toolkit/assets/scripts"
 mkdir -p "$PACK" "$TMP/bin"
 cp "$HERE/direct-merge-push.sh" "$HERE/bd-lib.sh" "$HERE/refinery-workspace.sh" "$HERE/detached-job.sh" "$HERE/rig-root.sh" \
-  "$HERE/await-ruling.sh" "$HERE/deferred-dispatch.sh" "$HERE/dispatch-path.sh" "$PACK/"
-# The pass reads what holds the work through gctk bead holds, built from this
-# checkout and run over the stub store the gc below keeps.
+  "$HERE/await-ruling.sh" "$HERE/dispatch-path.sh" "$PACK/"
+# The arm and the pass's dry run are gctk's, built from this checkout and run
+# over the stub store the gc below keeps.
 export HOLDS_STUB="$HERE/holds-store.stub.sh" GC_NO_API=1
 GCTK_BIN="$("$HOLDS_STUB" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so no pass can read what holds the work"; exit 1; }
 export GCTK_BIN
@@ -198,7 +198,7 @@ chmod +x "$PACK"/*.sh
 # --assignee, --set-metadata, --unset-metadata and --append-notes to the work
 # bead. Every call but a read is logged. A `--db <path>` pin is dropped. A read
 # the gctk under test makes answers from the same beads and edges, through the
-# seam holds-store.stub.sh keeps.
+# seam holds-store.stub.sh keeps, and its write is the update above.
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 if [ "$1" = bd ] && [ "${2:-}" = --db ]; then set -- bd "${@:4}"; fi
@@ -209,7 +209,7 @@ rows() {
 edges() {
   { [ -n "${FAKE_DEPS:-}" ] && [ -f "$FAKE_DEPS" ] && cat "$FAKE_DEPS"; } | jq -R -s -c 'split("\n") | map(select(length > 0) | split("|") | {from: .[0], type: .[1], to: .[2]})'
 }
-if [ -n "${HOLDS_STUB_READ:-}" ] && [ "$1" = bd ]; then
+if [ -n "${HOLDS_STUB_READ:-}" ] && [ "$1" = bd ] && [ "${2:-}" != update ]; then
   shift
   rows | jq -c --argjson e "$(edges)" '[ .[] | . as $b
     | .dependencies = ((.dependencies // []) + [ $e[] | select(.from == $b.id) | {depends_on_id: .to, type: .type} ]) ]' > "$FAKE_META.holds"
@@ -570,9 +570,14 @@ nocheck_merge_push() {
   : > "$D/gc.log"; : > "$D/lc.log"
   OUT=$(cd "$ELSEWHERE" && "${NOCHECK_ENV[@]}" "$@" bash "$TMP/merge-push.sh" 2>&1); RC=$?
 }
-# armed_state: the work's arm as the real deferred-dispatch.sh list reads it,
-# through the hold definition its reconcile pass slings by.
-armed_state() { (cd "$ELSEWHERE" && "${NOCHECK_ENV[@]}" bash "$PACK/deferred-dispatch.sh" list 2>&1) | grep '^wb -> ' || true; }
+# armed_state: the work's arm as the deferred-dispatch order's pass reads it,
+# from its dry run (gctk bead start-armed --dry-run): the arm's target, the act
+# the pass would take and its case, the first wait that holds the work, and why
+# the work is in flight.
+armed_state() {
+  (cd "$ELSEWHERE" && "${NOCHECK_ENV[@]}" "$GCTK_BIN" bead start-armed --dry-run --db "$D/rig/.beads" 2>/dev/null) \
+    | jq -r 'select(.id == "wb") | "\(.arm.target // "") \(.start.action // "")/\(.start.case // "") \((.waits // [])[0].id // "") \(.in_flight // "")"' 2>/dev/null || true
+}
 nocheck_fixture "$TMP/nocheck"
 eq "$PREP_RC" 0 "nocheck: the prepare stages the branch"
 for n in 1 2; do
@@ -619,10 +624,11 @@ eq "$(merged_tries)" 0 "nocheck: nothing is recorded as merged"
 eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "nocheck: nothing is pushed"
 
 echo "── clearing the gate lets the armed pour take the work ──"
-has "$(armed_state)" "wb -> $POOL [HELD by $GATE" "nocheck, gate open: the deferred-dispatch pass holds the pour on the gate"
+has "$(armed_state)" "$POOL hold/blocked $GATE" "nocheck, gate open: the deferred-dispatch pass holds the pour on the gate"
 jq -c --arg g "$GATE" 'map(if .id == $g then .status = "closed" else . end)' "$D/store.json" > "$D/store.json.new" \
   && mv "$D/store.json.new" "$D/store.json"
-has "$(armed_state)" "wb -> $POOL [DISPATCHABLE NOW (in flight, carries branch" "nocheck, gate cleared: the deferred-dispatch pass pours the work on its next pass"
+has "$(armed_state)" "$POOL start/" "nocheck, gate cleared: the deferred-dispatch pass pours the work on its next pass"
+has "$(armed_state)" "carries branch" "nocheck, gate cleared: …though the work carries its branch, which the pour resumes"
 
 echo "── a gate or a wait that does not land leaves the work with the refinery ──"
 # third_failure <dir>: the nocheck fixture with two failed checks counted, so

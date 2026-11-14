@@ -31,8 +31,9 @@
 # once, with one fragment pointing both prompts at the skills. It pins how the
 # prompt's hand-back definition has a framing name its subject, and that the
 # hold skill points at it. It pins that the
-# dispatch fragment the keeper composes calls deferred-dispatch.sh and
-# gc-bd-watch.sh the work skill's way, and that the mechanik's prompt calls
+# dispatch fragment the keeper composes arms through gctk's verb by the gctk-bin
+# block and calls gc-bd-watch.sh the work skill's way, and that the mechanik's
+# prompt calls
 # gc-bd-watch.sh and human-gate.sh under the binding it is rendered with, so
 # each render reaches the pack's own copies. It pins the prs
 # skill's supplement command: filed in the PR's rig, holding the anchor's merge,
@@ -203,7 +204,10 @@ for s in $BLOCKS; do
     else
         bad "$s: says where the agent reads the binding" "no \`gc-toolkit\` in \`gc-toolkit.$s\` with gc skill list's FROM column"
     fi
-    stray=$(grep -oE '"\$(\{[^}]*\}|[A-Za-z_][A-Za-z_0-9]*)/[A-Za-z0-9._-]+' "$f" | sort -u | tr '\n' ' ')
+    # The gctk-bin block names the city's build of gctk, which is no writer of
+    # the pack's, by the one definition gctk-bin.test.sh holds.
+    stray=$(awk '/# >>> gctk-bin$/ { skip = 1; next } /# <<< gctk-bin$/ { skip = 0; next } !skip' "$f" \
+        | grep -oE '"\$(\{[^}]*\}|[A-Za-z_][A-Za-z_0-9]*)/[A-Za-z0-9._-]+' | sort -u | tr '\n' ' ')
     [ -z "$stray" ] && ok "$s: every writer an example calls goes through the pack command" \
         || bad "$s: every writer an example calls goes through the pack command" "stray: $stray"
     missing=""
@@ -480,7 +484,7 @@ have "…and says the parent lookup climbs past a closed parent" \
     'This prints that parent, or the nearest open bead above it once' "$WORK_SKILL"
 have "the settle step says the same of the subject's parent" \
     "It is the subject's own parent, or the nearest open" "$SETTLE"
-have "the settle step gives the arm it names" 'deferred-dispatch.sh" arm <follow-up>' "$SETTLE"
+have "the settle step gives the arm it names" '"$GCTK" bead arm <follow-up>' "$SETTLE"
 have "…once the follow-up and the blocker carry one id prefix" '[ "$(echo <follow-up> | cut -d- -f1)" = "$(echo <blocker> | cut -d- -f1)" ]' "$SETTLE"
 have "…and holds a follow-up on another rig's bead with a human gate in its own store" 'human-gate.sh" --subject <follow-up>' "$SETTLE"
 have "the prompt gives the disposal writer's call" 'bead-rehome.sh" --origin "$SUBJECT"' "$PROMPT"
@@ -495,7 +499,7 @@ lacks "…and never through a bare gate resolve" 'gc bd gate resolve <gate>' "$C
 # blocker releases it to them. Before the answer, a ruling that sends the
 # subject elsewhere withdraws both, by the sign-off's own rule and block, which
 # the dispatch-path section below compares whole and runs.
-have "…and first withdraws an arm the ruling does not keep" '"$CONV/deferred-dispatch.sh" disarm "$SUBJECT" --reason "$WHY"' "$CONTINUE"
+have "…and first withdraws an arm the ruling does not keep" '"$GCTK" bead disarm "$SUBJECT" --reason "$WHY"' "$CONTINUE"
 have "…and a pool route" 'gc bd update "$SUBJECT" --unset-metadata gc.routed_to' "$CONTINUE"
 have "…by step 7's rule" "by step 7's" "$CONTINUE"
 have "the prompt gives the call that withdraws a recommendation" 'converse-invalidate-recommendation.sh" "<why' "$PROMPT"
@@ -632,12 +636,12 @@ fenced_block() {
 # pack, so its prompt calls its watch and its gate withdrawal under the binding
 # it is rendered with, which the seed audit renders as gc-toolkit.
 DISPATCH="$REPO/template-fragments/watch-dispatched-work.template.md"
-DD_CALL='"$(gc <binding> scripts-dir)/deferred-dispatch.sh"'
 WATCH_CALL='"$(gc <binding> scripts-dir)/gc-bd-watch.sh"'
 KEEPER_RENDER="$REPO/generated/seed-audit/agents/keeper.md"
 MECHANIK_RENDER="$REPO/generated/seed-audit/agents/mechanik.md"
-have "the dispatch fragment gives the work skill's notice call" "$DD_CALL notify <bead> --agent <qualified-name>" "$DISPATCH"
-have "…the call the work skill gives" "$DD_CALL notify <bead> --agent <qualified-name>" "$WORK_SKILL"
+HANDOFF='gc sling <qualified-name> <bead> --no-formula --no-convoy'
+have "the dispatch fragment gives the work skill's hand-off to a named agent" "$HANDOFF" "$DISPATCH"
+have "…the hand-off the work skill gives" "$HANDOFF" "$WORK_SKILL"
 have "…and runs its watch through the pack command" "command: '$WATCH_CALL <bead>'" "$DISPATCH"
 # named_only_via <render> <script> [<binding>] — prose names a script by its bare
 # name in backticks. Every other mention is a call, and goes through the pack
@@ -650,28 +654,28 @@ named_only_via() {
     [ "$via" -gt 0 ] && [ "$named" = "$((via + prose))" ] && ok "…and names $2 no other way ($via calls)" \
         || bad "…and names $2 no other way" "$via of its $((named - prose)) calls go through the pack command"
 }
-verbs=$(grep -oF -- "$DD_CALL notify
-$DD_CALL arm" "$KEEPER_RENDER" | sed 's/.* //' | sort -u | tr '\n' ' ')
-[ "$verbs" = "arm notify " ] && ok "keeper's render gives the notice and the arm as calls through the pack command" \
-    || bad "keeper's render gives the notice and the arm as calls through the pack command" "found: '$verbs'"
+# The arm is gctk's verb, from the binary the city builds, so the render names
+# no pack path for it and reaches the same binary whichever pack it came from.
+ARM_CALL='"$GCTK" bead arm <bead>'
+have "the dispatch fragment arms a blocked follow-up through gctk's verb" "$ARM_CALL" "$DISPATCH"
+have "…and keeper's render gives that arm" "$ARM_CALL" "$KEEPER_RENDER"
+have "…with GCTK set by the gctk-bin block" 'GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"' "$KEEPER_RENDER"
+lacks "…and names no script for it" 'deferred-dispatch.sh' "$KEEPER_RENDER" "the arm is gctk bead arm, and no script of the pack writes it"
 have "…and the watch" "command: '$WATCH_CALL <bead>'" "$KEEPER_RENDER"
-for script in deferred-dispatch.sh gc-bd-watch.sh; do
-    named_only_via "$KEEPER_RENDER" "$script"
-done
+named_only_via "$KEEPER_RENDER" gc-bd-watch.sh
 MECHANIK_WATCH_CALL='"$(gc gc-toolkit scripts-dir)/gc-bd-watch.sh"'
 have "the mechanik's render gives the watch as a call through the pack command" "command: '$MECHANIK_WATCH_CALL <bead>'" "$MECHANIK_RENDER"
 have "…and the withdrawal of its own gate" '"$(gc gc-toolkit scripts-dir)/human-gate.sh" --retract --subject <bead>' "$MECHANIK_RENDER"
 for script in gc-bd-watch.sh human-gate.sh; do
     named_only_via "$MECHANIK_RENDER" "$script" gc-toolkit
 done
-for script in deferred-dispatch.sh gc-bd-watch.sh; do
-    call="\"\$(gc <binding> scripts-dir)/$script\""
-    printf 'printf "%%s" %s\n' "${call/<binding>/kit}" >"$TMP/fragment-call-$script"
-    got=$(cd "$TMP/away" && env -u GC_PACK_DIR -u BASH_ENV -u ENV PATH="$TMP/stub:$PATH" bash "$TMP/fragment-call-$script" 2>/dev/null)
-    [ "$got" = "$ROOT/assets/scripts/$script" ] && [ -x "$got" ] \
-        && ok "with the city's binding filled in, the fragment's call resolves to the pack's own $script" \
-        || bad "with the city's binding filled in, the fragment's call resolves to the pack's own $script" "resolved '$got'"
-done
+script=gc-bd-watch.sh
+call="\"\$(gc <binding> scripts-dir)/$script\""
+printf 'printf "%%s" %s\n' "${call/<binding>/kit}" >"$TMP/fragment-call-$script"
+got=$(cd "$TMP/away" && env -u GC_PACK_DIR -u BASH_ENV -u ENV PATH="$TMP/stub:$PATH" bash "$TMP/fragment-call-$script" 2>/dev/null)
+[ "$got" = "$ROOT/assets/scripts/$script" ] && [ -x "$got" ] \
+    && ok "with the city's binding filled in, the fragment's call resolves to the pack's own $script" \
+    || bad "with the city's binding filled in, the fragment's call resolves to the pack's own $script" "resolved '$got'"
 
 echo "── a problem in software the rig does not own goes through one skill ──"
 # It arises rarely, so its procedure is a skill the situation loads rather than
@@ -781,10 +785,10 @@ echo "$n" >"$CHAIN_DIR/count"
 if [ "$n" = "${CHAIN_FAIL_AT:-}" ]; then echo "writer: refused" >&2; exit 1; fi
 exit 0
 STUB
-cp "$CH/pack/assets/scripts/bead-rehome.sh" "$CH/pack/assets/scripts/deferred-dispatch.sh"
+cp "$CH/pack/assets/scripts/bead-rehome.sh" "$CH/bin/gctk"
 cp "$CH/pack/assets/scripts/bead-rehome.sh" "$CH/pack/assets/scripts/human-gate.sh"
 cp "$CH/pack/assets/scripts/bead-rehome.sh" "$CH/pack/assets/scripts/finalize-gate.sh"
-chmod +x "$CH/bin/gc" "$CH/pack/assets/scripts/bead-rehome.sh" "$CH/pack/assets/scripts/deferred-dispatch.sh" \
+chmod +x "$CH/bin/gc" "$CH/pack/assets/scripts/bead-rehome.sh" "$CH/bin/gctk" \
     "$CH/pack/assets/scripts/human-gate.sh" "$CH/pack/assets/scripts/finalize-gate.sh"
 # fill_block — an example with each <placeholder> filled with x, the stub pack in
 # for a template's {{ .ConfigDir }}, and the disposition kinds cut to one.
@@ -802,7 +806,7 @@ run_chain() {
     : >"$CH/log"
     : >"$CH/edges"
     : >"$CH/notes"
-    (cd "$TMP/away" && env -u BASH_ENV -u ENV CHAIN_DIR="$CH" CHAIN_FAIL_AT="${3:-}" \
+    (cd "$TMP/away" && env -u BASH_ENV -u ENV CHAIN_DIR="$CH" CHAIN_FAIL_AT="${3:-}" GCTK_BIN="$CH/bin/gctk" \
         CONV="$CH/pack/assets/scripts" SUBJECT=tk-x CONVERSATION=tk-v EPIC=tk-e \
         PATH="$CH/bin:$PATH" $1 "$2" </dev/null >/dev/null 2>&1)
     echo $?
@@ -853,19 +857,19 @@ for sh_ in $shells; do
     run=$sh_
     [ "$sh_" = zsh ] && run="zsh -f"
     rc=$(run_chain "$run" "$CH/xstore-block")
-    if [ "$rc" -ne 0 ] && ! grep -q ' dep add ' "$CH/log" && ! grep -q '^writer deferred-dispatch.sh arm ' "$CH/log"; then
+    if [ "$rc" -ne 0 ] && ! grep -q ' dep add ' "$CH/log" && ! grep -q '^writer gctk bead arm ' "$CH/log"; then
         ok "($sh_) converse-settle: a blocker in another store gets no edge and no arm"
     else
         bad "($sh_) converse-settle: a blocker in another store gets no edge and no arm" "exit $rc, calls: $(tr '\n' ';' <"$CH/log")"
     fi
     rc=$(run_chain "$run" "$CH/block")
-    if [ "$rc" -eq 0 ] && grep -q '^gc bd --rig x dep add x x ' "$CH/log" && grep -q '^writer deferred-dispatch.sh arm ' "$CH/log"; then
+    if [ "$rc" -eq 0 ] && grep -q '^gc bd --rig x dep add x x ' "$CH/log" && grep -q '^writer gctk bead arm ' "$CH/log"; then
         ok "($sh_) converse-settle: …and a blocker in the follow-up's store is waited on and armed"
     else
         bad "($sh_) converse-settle: …and a blocker in the follow-up's store is waited on and armed" "exit $rc, calls: $(tr '\n' ';' <"$CH/log")"
     fi
     rc=$(run_chain "$run" "$CH/gate-block" 1)
-    if [ "$rc" -ne 0 ] && grep -q '^writer human-gate.sh --subject ' "$CH/log" && ! grep -q '^writer deferred-dispatch.sh arm ' "$CH/log"; then
+    if [ "$rc" -ne 0 ] && grep -q '^writer human-gate.sh --subject ' "$CH/log" && ! grep -q '^writer gctk bead arm ' "$CH/log"; then
         ok "($sh_) converse-settle: a gate that did not land arms nothing"
     else
         bad "($sh_) converse-settle: a gate that did not land arms nothing" "exit $rc, calls: $(tr '\n' ';' <"$CH/log")"
@@ -1134,10 +1138,10 @@ case "$1 ${2:-}" in
 esac
 exit 0
 STUB
-cat >"$DP/pack/assets/scripts/deferred-dispatch.sh" <<'STUB'
+cat >"$DP/bin/gctk" <<'STUB'
 #!/usr/bin/env bash
-printf 'deferred-dispatch.sh %s\n' "$*" >>"$DP_DIR/log"
-[ "${1:-}" = disarm ] || exit 2
+printf 'gctk %s\n' "$*" >>"$DP_DIR/log"
+[ "${1:-} ${2:-}" = "bead disarm" ] || exit 2
 jq -c '.[0].metadata |= with_entries(select(.key | startswith("gc.dispatch_when_ready") | not))' "$DP_DIR/row.json" >"$DP_DIR/row.tmp" \
     && mv "$DP_DIR/row.tmp" "$DP_DIR/row.json"
 STUB
@@ -1146,7 +1150,7 @@ cat >"$DP/pack/assets/scripts/converse-signoff.sh" <<'STUB'
 printf 'converse-signoff.sh %s\n' "$*" >>"$DP_DIR/log"
 jq -r '.[0].metadata | "answered with arm \(.["gc.dispatch_when_ready"] // "none") route \(.["gc.routed_to"] // "none")"' "$DP_DIR/row.json" >>"$DP_DIR/log"
 STUB
-chmod +x "$DP/bin/gc" "$DP/pack/assets/scripts/"*.sh
+chmod +x "$DP/bin/gc" "$DP/bin/gctk" "$DP/pack/assets/scripts/"*.sh
 fenced_block "$CONTINUE" "$DP_WITHDRAW_MARK" | fill_block >"$DP/withdraw"
 fenced_block "$CONTINUE" 'converse-signoff.sh" --conversation "$CONVERSATION" --answer <gate>' | fill_block >"$DP/answer"
 # dp_seed <metadata-json> — a store whose subject tk-x carries that metadata,
@@ -1157,7 +1161,7 @@ dp_seed() { jq -cn --argjson m "$1" '[{id: "tk-x", metadata: $m}]' >"$DP/row.jso
 run_dp() {
     local run=$1 block=$2
     shift 2
-    (cd "$TMP/away" && env -u BASH_ENV -u ENV DP_DIR="$DP" "$@" CONV="$DP/pack/assets/scripts" \
+    (cd "$TMP/away" && env -u BASH_ENV -u ENV DP_DIR="$DP" GCTK_BIN="$DP/bin/gctk" "$@" CONV="$DP/pack/assets/scripts" \
         SUBJECT=tk-x CONVERSATION=tk-v PATH="$DP/bin:$PATH" $run "$block" >"$DP/out" 2>&1)
     echo $?
 }
@@ -1174,7 +1178,7 @@ for sh_ in $shells; do
     rc2=$(run_dp "$run" "$DP/answer")
     calls=$(tr '\n' ';' <"$DP/log")
     case "$rc:$rc2:$calls" in
-        0:0:*"deferred-dispatch.sh disarm tk-x --reason x;"*"gc bd update tk-x --unset-metadata gc.routed_to;"*"converse-signoff.sh --conversation tk-v --answer x "*"answered with arm none route none;")
+        0:0:*"gctk bead disarm tk-x --reason x;"*"gc bd update tk-x --unset-metadata gc.routed_to;"*"converse-signoff.sh --conversation tk-v --answer x "*"answered with arm none route none;")
             ok "($sh_) dispatch path: a turn's ruling that sends the subject elsewhere answers only once its old arm and pool route are gone" ;;
         *) bad "($sh_) dispatch path: a turn's ruling that sends the subject elsewhere answers only once its old arm and pool route are gone" "exit $rc/$rc2, calls: $calls" ;;
     esac
@@ -1186,7 +1190,7 @@ for sh_ in $shells; do
     rc=$(run_dp "$run" "$DP/withdraw")
     calls=$(tr '\n' ';' <"$DP/log")
     case "$rc:$calls:$(cat "$DP/out")" in
-        *"deferred-dispatch.sh"*|*"bd update"*) bad "($sh_) dispatch path: a subject with no arm and no route is left as it is" "exit $rc, calls: $calls" ;;
+        *"bd update"*) bad "($sh_) dispatch path: a subject with no arm and no route is left as it is" "exit $rc, calls: $calls" ;;
         0:*"carries no arm and no pool route"*) ok "($sh_) dispatch path: a subject with no arm and no route is left as it is, and the withdrawal says so" ;;
         *) bad "($sh_) dispatch path: a subject with no arm and no route is left as it is" "exit $rc, calls: $calls, out: $(cat "$DP/out")" ;;
     esac
@@ -1218,7 +1222,7 @@ EOF
         esac
         [ -z "$says" ] || has "$out" "$says" "($sh_) dispatch path: …and names what is left"
         case "$setting:$calls" in
-            DP_SHOW_*:*"deferred-dispatch.sh"*|DP_SHOW_*:*"bd update"*) bad "($sh_) dispatch path: …$what writes nothing" "calls: $calls" ;;
+            DP_SHOW_*:*"bead disarm"*|DP_SHOW_*:*"bd update"*) bad "($sh_) dispatch path: …$what writes nothing" "calls: $calls" ;;
             DP_SHOW_*) ok "($sh_) dispatch path: …and writes nothing" ;;
         esac
     done
@@ -1295,8 +1299,8 @@ have "…and a gate on waiting work is the sign-off's, once every write has land
     'A gate on work that waits for a judgment takes no call here, because its answer sends that work on. The sign-off answers it once every write below has landed' "$EPIC_REVIEW_JOINED"
 have "a close stands down waiting work it retires, which disarms it before the answer" \
     '"$CONV/stand-down.sh" <bead> --key <situation-key> --ruling "<the ruling, one sentence>" --successor "$CONVERSATION"' "$EPIC_REVIEW"
-have "…and disarms and releases waiting work it re-homes into another store before its gate is answered" \
-    '"$CONV/deferred-dispatch.sh" disarm <bead> --reason "<the ruling, one sentence>" && "$CONV/gc-helm.sh" takeaway <bead> "<the ruling, one sentence>" --release --no-wait' "$EPIC_REVIEW"
+have "…and releases waiting work it re-homes into another store, a release that disarms it first, before its gate is answered" \
+    '`"$CONV/gc-helm.sh" takeaway <bead> "<the ruling, one sentence>" --release --no-wait`' "$EPIC_REVIEW"
 have "…then answers that gate on its own call and runs the writer last" \
     'then answer its gate on a call of its own, as write 2 answers one, and run the writer last' "$EPIC_REVIEW_JOINED"
 have "each gate on a PR's anchor is answered on a call of its own, under that PR's own ruling" \

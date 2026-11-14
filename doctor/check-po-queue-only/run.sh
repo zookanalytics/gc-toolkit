@@ -459,7 +459,7 @@ done <<< "$(jq -r --argjson stores "$STORES_JSON" "$DISPATCH_PATH_JQ"'
          (if ($m["gc.dispatch_when_ready_args"] | arm_args | any(.[]; tostring | test("(^|=)mol-validate-close$"))) then
             "queued bead \($id) is armed for its validating closer (mol-validate-close) on \($m["gc.dispatch_when_ready"] | tostring): it waits on another bead to land and is checked then, so it is not new work to place, and while it is held the closer never runs. Lift its hold by removing each spelling of it the bead carries, \($lift), and keep the arm"
           else
-            "queued bead \($id) is armed for dispatch to \($m["gc.dispatch_when_ready"] | tostring): a placement that stopped before its lift, or an arm set while it was held. Finish its placement with gc-helm.sh place \($id) --under <parent> or --standalone, which lifts the hold without dispatching again, or disarm it: deferred-dispatch.sh disarm \($id)"
+            "queued bead \($id) is armed for dispatch to \($m["gc.dispatch_when_ready"] | tostring): a placement that stopped before its lift, or an arm set while it was held. Finish its placement with gc-helm.sh place \($id) --under <parent> or --standalone, which lifts the hold without dispatching again, or disarm it: gctk bead disarm \($id) --reason \"<why>\""
           end)
        else empty end),
       (if (.assignee | nonblank) then

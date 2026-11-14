@@ -1,26 +1,26 @@
-# deferred-dispatch — perform the dispatches owed once their blockers clear.
+# deferred-dispatch — start each armed bead once nothing holds it.
 # `gc sling` reads no `blocks` deps, so a dep between work beads holds nothing;
-# `deferred-dispatch.sh arm` records the owed dispatch ON the bead and this
-# order slings each armed bead once `bd` reports it ready. It also mails each
-# named agent a notice owed to it (`deferred-dispatch.sh notify`) once `bd`
-# reports the bead assigned to it ready. Exec, not a formula: store reads plus
-# one sling or mail per owed bead need no LLM. Rig-scoped: one pass per
-# importing rig against its own store.
-# Single-flight is the runtime's open-tracking gate plus a per-rig pass lock the
-# script holds for the life of a pass. The gate holds only while a run's
-# tracking bead stays open, and a controller sweep can close that bead under a
-# pass still running, so never set no_work_gate and never drop the lock.
-# `timeout` gives a pass room to list the armed set, which can take two minutes
-# on a loaded store, and then finish several slings of 30-80s each. The script's
-# pass budget (DEFERRED_DISPATCH_PASS_BUDGET_SECS) starts no sling it cannot
-# finish before the timeout and leaves the rest armed for the next pass, so an
-# override that lowers `timeout` has to lower that budget in its env too.
-# deferred-dispatch.test.sh asserts the budget sits below this timeout and the
-# script's lock-stall bound above it. Tune from city.toml [[orders.overrides]].
+# `gctk bead arm` records the start ON the bead, and this order's pass,
+# `gctk bead start-armed`, slings each armed bead the pool's own serve rule
+# would serve, exactly once, and retires the arm of a bead that closed or whose
+# work another path delivered (docs/deferred-dispatch.md). Exec, not a formula:
+# store reads plus one sling per owed bead need no LLM. Rig-scoped: one pass
+# per importing rig against its own store, named by --db.
+# Single-flight is the runtime's open-tracking gate, and beneath it each sling
+# runs under the bead's own dispatch lock and Gas City's launch lock, so two
+# passes over one store pour once. Never set no_work_gate.
+# `timeout` gives a pass room to read the armed set and finish several slings.
+# The start begins no sling once less than one 90s allowance is left before its
+# 7m deadline, so `timeout` stays above that deadline: an override that lowers
+# it below 7m lets the timeout cut a sling short, and the next pass finds that
+# sling's pour by its title token. services/gctk/arm's test asserts the
+# deadline sits below this timeout. GCTK_SCRIPTS_DIR names the pack's scripts,
+# through which the start asks a person. Tune from city.toml
+# [[orders.overrides]].
 [order]
-description = "Deferred dispatch: sling every bead whose dispatch was armed and whose blockers have now cleared, and send every notice owed to a named agent whose bead is now ready; retire the record on beads that closed first"
+description = "Deferred dispatch: start every armed bead that nothing holds any more, once, and retire the arm on a bead that closed or whose work another path delivered"
 trigger = "cooldown"
 interval = "5m"
 timeout = "600s"
-exec = "$PACK_DIR/assets/scripts/deferred-dispatch.sh reconcile"
+exec = "GCTK_SCRIPTS_DIR=\"$PACK_DIR/assets/scripts\" \"${GCTK_BIN:-$GC_CITY_PATH/.gc/services/gctk/bin/gctk}\" bead start-armed --db \"$GC_RIG_ROOT/.beads\""
 scope = "rig"
