@@ -200,10 +200,12 @@ is not a `blocks` edge, and hears at its next turn. Nothing nudges on a raw
 `bd update --assignee` either, so a person hands work to a named agent through
 the work skill's send.
 
-`first-reaction-dispose.sh` addresses only an agent whose hook offers the bead,
-so both of its named-agent exits route it. The bead `--assign` hands over is
-ready, so that exit nudges the agent too. The bead `--then-assign` hands over
-waits on its blocker, so that exit writes the route alone.
+`first-reaction-dispose.sh` hands a bead to the mechanik as a route and to the
+refinery or the keeper as the assignee, and refuses the deacon, the witness and
+any agent this section does not name before it writes anything. The bead
+`--assign` hands over is ready, so that exit nudges the agent too. The bead
+`--then-assign` hands over waits on its blocker, so that exit writes the route
+or the assignee alone.
 
 ## What performs it
 

@@ -220,11 +220,12 @@ esac
    # routes at P0 only when the check it names is failing.
    "$DISPOSE" "$SUBJECT" --disposition actionable --reaction-bead <R> --by proactive --reason "<what is red on main, and why this bead fixes it>" --takeaway "<headline>" --emergency "<the failing check on main>"
    # Work that is a named agent's own goes TO that agent: --assign hands the
-   # subject to it through Gas City's hand-off, which routes it to the agent's
-   # own hook and nudges the agent.
+   # subject to it in the form it finds its work in, a route for the mechanik
+   # and the assignee for the refinery or the keeper, and nudges the agent.
    # A town-repo edit takes gc-toolkit.mechanik. The exit refuses the po, which
    # takes no work by assignment: work no epic holds is routed, and the exit
-   # holds it for placement.
+   # holds it for placement. It refuses the deacon and the witness, which take
+   # mail and no bead.
    "$DISPOSE" "$SUBJECT" --disposition actionable --reaction-bead <R> --by proactive --reason "<why this is work, and why it is mechanik's>" --takeaway "<headline>" --assign gc-toolkit.mechanik
 
    # blocked — the wait is an EDGE, never prose: an unheld bead is still ready
@@ -237,10 +238,9 @@ esac
    # instead, so pass --then-route either way. A blocked work bead left unrouted
    # and unheld is the debt doctor/check-blocked-work-armed flags. Waiting
    # work that is a named agent's own takes --then-assign <agent> instead: the
-   # subject is handed to the agent while it waits, the agent's hook offers it
-   # once the wait lifts, and Gas City nudges the agent then, so no dispatch is
-   # armed. Omit both only for a bead nobody takes (a decision, a research
-   # note).
+   # subject is handed to the agent while it waits, in the same form, and Gas
+   # City nudges the agent once the wait lifts, so no dispatch is armed. Omit
+   # both only for a bead nobody takes (a decision, a research note).
    "$DISPOSE" "$SUBJECT" --disposition blocked --reaction-bead <R> --by proactive --reason "<what it waits on and why>" --takeaway "<headline>" --waiting-on <blocker-id> --then-route <rig>/<rig>.polecat
    "$DISPOSE" "$SUBJECT" --disposition blocked --reaction-bead <R> --by proactive --reason "<what it waits on and why>" --takeaway "<headline>" --blocker "<what has to happen first>" --blocker-key "<short-cause-slug>" --then-route <rig>/<rig>.polecat
    "$DISPOSE" "$SUBJECT" --disposition blocked --reaction-bead <R> --by proactive --reason "<what it waits on and why>" --takeaway "<headline>" --waiting-on <blocker-id> --then-assign gc-toolkit.mechanik

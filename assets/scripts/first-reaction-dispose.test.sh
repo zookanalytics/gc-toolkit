@@ -497,6 +497,119 @@ GCTK_BIN="$TMP/no-such-gctk" \
 eq "$RC" "0" "(HANDOFFTOOL) --assign lands with no gctk binary"
 has "SLING " "$LOG" "(HANDOFFTOOL) …handing the bead over"
 
+# ── A named agent takes the bead in the form it finds its work in ────────────
+# docs/authority-map.md's Route work row: the mechanik claims through its hook
+# and takes a route (above). The refinery and the keeper list the beads
+# assigned to them, which a route never reaches, so each takes the assignee.
+# The deacon and the witness patrol their own wisps and take no bead.
+#   (ACTREFINERY) --assign to the refinery or the keeper writes the agent as the
+#                 assignee in the release, routes nothing, and nudges it, since
+#                 the bead is ready now
+#   (REFFIND)     the refinery's own find-work listing, read from its patrol
+#                 formula, lists the bead as that release leaves it, and lists
+#                 nothing for a bead the release left unassigned
+#   (BLKREFINERY) --then-assign to the refinery writes the assignee beside the
+#                 wait, and sends no nudge while the bead waits
+#   (PATROL)      the deacon and the witness are refused before anything is read
+#                 or written, and the refusal names the mail that reaches them
+#   (UNNAMED)     an agent the row does not name is refused the same way
+
+# The refinery's find-work listing as its patrol runs it, the line taken from
+# the formula's marked find-work-select block, over a store that holds tk-sub,
+# an open task with a branch, as the last release in the log left it: assigned
+# to the agent its --assign named, or to nobody.
+FIND_WORK="$(awk '/# >>> find-work-select$/{f=1;next} /# <<< find-work-select$/{f=0} f' "$HERE/../../formulas/mol-refinery-patrol.toml" | grep '^WORK_ROWS=' || true)"
+[ -n "$FIND_WORK" ] && ok "(REFFIND) the refinery's patrol formula carries its find-work listing" \
+    || bad "(REFFIND) no WORK_ROWS= line in mol-refinery-patrol.toml's find-work-select block"
+mkdir -p "$TMP/store-bin"
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/store-bin/gc" <<'STORE'
+[ "$1 ${2:-}" = "bd list" ] || exit 2
+want=""
+for a in "$@"; do case "$a" in --assignee=*) want="${a#--assignee=}" ;; esac; done
+had="$(grep '^HELM takeaway tk-sub ' "$FAKE_LOG" | tail -n 1 | sed -n 's/.* --release.* --assign \([^ ]*\).*/\1/p')"
+if [ -n "$want" ] && [ "$want" = "$had" ]; then
+  printf '[{"id":"tk-sub","status":"open","issue_type":"task","assignee":"%s","metadata":{"branch":"polecat/tk-sub"}}]\n' "$had"
+else
+  printf '[]\n'
+fi
+STORE
+chmod +x "$TMP/store-bin/gc"
+find_work() { # <agent> — the ids the agent's find-work listing returns
+  ( export PATH="$TMP/store-bin:$PATH" GC_RIG=gc-toolkit GC_AGENT="$1"; WORK_ROWS=""
+    eval "$FIND_WORK"; printf '%s' "$WORK_ROWS" | jq -r '.[].id' )
+}
+
+export FAKE_SHOW_JSON='[{"id":"tk-sub",'"$MEMBER"',"status":"open","metadata":{"branch":"polecat/tk-sub"}}]'
+run tk-sub --disposition actionable --reason "the branch is ready for the merge queue" \
+    --takeaway "branch handed to the refinery" --assign gc-toolkit/gc-toolkit.refinery --reaction-bead "$R"
+eq "$RC" "0" "(ACTREFINERY) an actionable disposition addressed to the refinery succeeds"
+has "HELM takeaway tk-sub branch handed to the refinery --by proactive --release --assign gc-toolkit/gc-toolkit.refinery --no-wait" "$LOG" \
+    "(ACTREFINERY) the release writes the refinery as the assignee and says nothing waits, in one call"
+hasnt "SLING" "$LOG" "(ACTREFINERY) …and routes nothing"
+has "PROACTIVE assignable gc-toolkit/gc-toolkit.refinery tk-sub" "$LOG" "(ACTREFINERY) the exit asks whether the agent can be handed the bead"
+has "NUDGE session nudge gc-toolkit/gc-toolkit.refinery tk-sub is assigned to you and ready" "$LOG" \
+    "(ACTREFINERY) the refinery is nudged with the bead's id, since an assignee alone gives it no turn"
+before '^HELM takeaway' '^NUDGE ' "(ACTREFINERY) …once the release has assigned it"
+before '^NUDGE ' 'gc.reacted_by' "(ACTREFINERY) …and before the landed proof"
+eq "$(find_work gc-toolkit/gc-toolkit.refinery)" "tk-sub" "(REFFIND) the refinery's own find-work lists the bead the exit handed it"
+
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --assign gc-toolkit.mechanik --reaction-bead "$R"
+eq "$(find_work gc-toolkit/gc-toolkit.refinery)" "" "(REFFIND) …and lists nothing for a bead the release left unassigned, as a route leaves it"
+
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --assign gascity/gascity-keeper.keeper --reaction-bead "$R"
+eq "$RC" "0" "(ACTREFINERY) the keeper takes the bead the same way"
+has "--release --assign gascity/gascity-keeper.keeper --no-wait" "$LOG" "(ACTREFINERY) …as its assignee, written in the release"
+hasnt "SLING" "$LOG" "(ACTREFINERY) …with no route"
+has "NUDGE session nudge gascity/gascity-keeper.keeper tk-sub is assigned to you and ready" "$LOG" "(ACTREFINERY) …and a nudge"
+
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --assign gc-toolkit/gc-toolkit.refinery --dry-run
+eq "$RC" "0" "(ACTREFINERY) a dry run of the refinery's hand-off succeeds"
+has "would release tk-sub to named agent gc-toolkit/gc-toolkit.refinery as its assignee and nudge it" "$OUT" \
+    "(ACTREFINERY) …and names the form it would take"
+hasnt "HELM" "$LOG" "(ACTREFINERY) …releasing nothing"
+
+export FAKE_NUDGE_FAILS=1
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --assign gc-toolkit/gc-toolkit.refinery --reaction-bead "$R"
+eq "$RC" "4" "(HANDOFFFAIL) an assignee whose nudge did not reach the agent fails the exit"
+has "It is assigned to gc-toolkit/gc-toolkit.refinery, but gc session nudge did not reach the agent" "$ERR" \
+    "(HANDOFFFAIL) …saying the assignment stands"
+hasnt "gc.reacted_by" "$LOG" "(HANDOFFFAIL) …with no landed proof, so a re-run nudges again"
+unset FAKE_NUDGE_FAILS
+
+export FAKE_DEPS_JSON='[{"id":"tk-blk1"}]'
+run tk-sub --disposition blocked --reason "the hand-off waits on the unit it brings in" \
+    --takeaway "held: bring-current waits on the unit" --waiting-on tk-blk1 --then-assign gc-toolkit/gc-toolkit.refinery \
+    --reaction-bead "$R"
+eq "$RC" "0" "(BLKREFINERY) a blocked disposition handed to the refinery succeeds"
+has "--release --waiting-on tk-blk1 --assign gc-toolkit/gc-toolkit.refinery" "$LOG" \
+    "(BLKREFINERY) the release writes the wait and the assignee in one call"
+hasnt "SLING" "$LOG" "(BLKREFINERY) …routing nothing"
+hasnt "NUDGE" "$LOG" "(BLKREFINERY) …and no nudge while the bead still waits"
+has "gc.reacted_by=$R" "$LOG" "(BLKREFINERY) …and the landed proof is stamped"
+run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 --then-assign gc-toolkit/gc-toolkit.refinery --dry-run
+has "would release tk-sub to named agent gc-toolkit/gc-toolkit.refinery as its assignee, which Gas City nudges once the wait lifts" "$OUT" \
+    "(BLKREFINERY) a dry run names the form it would take"
+unset FAKE_DEPS_JSON FAKE_SHOW_JSON
+
+for who in gc-toolkit.deacon deacon gc-toolkit/gc-toolkit.witness; do
+    run tk-sub --disposition actionable --reason "r" --takeaway "t" --assign "$who" --reaction-bead "$R"
+    eq "$RC" "2" "(PATROL) --assign $who is refused"
+    has "--assign $who names an agent that patrols its own wisps and takes no bead" "$ERR" "(PATROL) …saying why"
+    has "gc mail send $who" "$ERR" "(PATROL) …and naming the mail that reaches it"
+    eq "$LOG" "" "(PATROL) …before anything is read or written"
+done
+export FAKE_DEPS_JSON='[{"id":"tk-blk1"}]'
+run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 --then-assign gc-toolkit/gc-toolkit.witness --reaction-bead "$R"
+eq "$RC" "2" "(PATROL) --then-assign naming the witness is refused"
+has "--then-assign gc-toolkit/gc-toolkit.witness names an agent that patrols its own wisps" "$ERR" "(PATROL) …naming the flag"
+eq "$LOG" "" "(PATROL) …and nothing was read or written"
+unset FAKE_DEPS_JSON
+
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --assign gc-toolkit/gc-toolkit.dog --reaction-bead "$R"
+eq "$RC" "2" "(UNNAMED) an agent the Route work row does not name is refused"
+has "--assign gc-toolkit/gc-toolkit.dog names no agent this exit can hand a bead to" "$ERR" "(UNNAMED) …saying which agents it can"
+eq "$LOG" "" "(UNNAMED) …before anything is read or written"
+
 # ── blocked: the wait is an edge, in one store ───────────────────────────────
 #   (BLK)      the release carries the wait as --waiting-on
 #   (BLKCROSS) a cross-store blocker is refused with the I1 remedy
@@ -726,8 +839,9 @@ hasnt "UPDATE bd update $R" "$LOG" "(HANDOFFFAIL) …and the reaction bead left 
 unset FAKE_SLING_FAILS
 
 export FAKE_AGENT_GONE=1
-run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 --then-assign gc-toolkit/gc-toolkit.witness
+run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-blk1 --then-assign gc-toolkit/gc-toolkit.refinery
 eq "$RC" "2" "(BLKASSIGN) a --then-assign agent that cannot be handed the bead is refused"
+has "PROACTIVE assignable gc-toolkit/gc-toolkit.refinery tk-sub" "$LOG" "(BLKASSIGN) …on the agent's own answer"
 hasnt "HELM" "$LOG" "(BLKASSIGN) …and the bead is not released"
 unset FAKE_AGENT_GONE FAKE_DEPS_JSON
 
