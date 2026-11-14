@@ -14,7 +14,7 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 RENDER="generated/seed-audit/agents/po.md"
-INPUTS=(agents/po/prompt.template.md template-fragments/ask-for-work.template.md template-fragments/operator-profile.template.md)
+INPUTS=(agents/po/prompt.template.md template-fragments/ask-for-work.template.md template-fragments/operator-profile.template.md template-fragments/where-to-search.template.md)
 CAP=10000
 # gc prime's header names the city, the agent and the time, and the margin
 # keeps a long city or rig name inside the cap.

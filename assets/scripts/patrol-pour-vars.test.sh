@@ -12,7 +12,9 @@
 #   (P) PARITY. The next-iteration pour (`patrol-wisp-pour`) and the pour line
 #       in the formula's root description pass exactly the vars the startup
 #       pour passes. A var the startup pour sets is the chain's own choice and
-#       is carried; a var it leaves to the formula default is not.
+#       is carried; a var it leaves to the formula default is not. The prompt's
+#       step read passes the startup pour's vars with their values, so a step's
+#       text renders as the wisp runs it.
 #   (C) CHAIN. A refinery chain started under one check_set and
 #       default_merge_strategy default renders the new defaults on its next
 #       wisp once the formula defaults change, and the merge-push stamp
@@ -68,6 +70,16 @@ declared_vars() {
 
 # pour_line <title> — the lines of stdin that pour <title>.
 pour_line() { grep -F "gc bd mol wisp $1 " || true; }
+
+# read_line <title> — the lines of stdin that read <title>'s step text.
+read_line() { grep -F "gc formula show $1 " || true; }
+
+# var_args — the --var arguments on stdin's lines, each name with its value,
+# sorted, one line.
+var_args() {
+  { grep -oE -- "--var [A-Za-z_][A-Za-z0-9_]*=('[^']*'|\{\{[^}]*\}\}|[^ ]*)" || true; } \
+    | sort -u | tr '\n' ' ' | sed 's/ $//'
+}
 
 # var_names — the var names the pour lines on stdin pass, sorted, one line.
 var_names() {
@@ -193,6 +205,11 @@ for AGENT in witness deacon refinery; do
     "$AGENT: the next-iteration pour passes exactly the startup pour's vars"
   eq "$(printf '%s\n' "$ROOT_POUR" | var_names)" "$S_VARS" \
     "$AGENT: the root description shows the pour the startup pour runs"
+
+  READ="$(read_line "$TITLE" < "$PROMPT")"
+  eq "$(printf '%s\n' "$READ" | grep -c .)" "1" "$AGENT: the prompt carries exactly one step read"
+  eq "$(printf '%s\n' "$READ" | var_args)" "$(printf '%s\n' "$STARTUP" | var_args)" \
+    "$AGENT: the step read passes the startup pour's vars and values"
 done
 
 # --- (C) A chain picks up a changed default on its next wisp. ---------------

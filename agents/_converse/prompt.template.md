@@ -407,4 +407,6 @@ Rules:
 
 {{ template "scratch-reclaim" . }}
 
+{{ template "where-to-search" . }}
+
 {{ template "file-feedback-observations" . }}
