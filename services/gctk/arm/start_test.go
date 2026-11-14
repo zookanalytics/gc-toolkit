@@ -318,6 +318,47 @@ func TestStartKeepsTheArmWhenTheSlingFails(t *testing.T) {
 	}
 }
 
+// An arm written on a bead soon after an earlier arm's pour landed carries a
+// token of its own. The earlier root stays in the store and the later arm's
+// first sling fails, so its retry searches its own token, finds no pour, and
+// slings, rather than read the earlier arm's pour as its own and retire unsent.
+func TestALaterArmKeepsItsOwnToken(t *testing.T) {
+	w := newWorld(t)
+	w.put(fake.Bead{ID: "b"})
+	w.store.MakeReady("b")
+	if _, err := w.arms.Arm(arm.Request{ID: "b", Target: pool, Formula: "mol-x", Reason: "the first wait"}); err != nil {
+		t.Fatal(err)
+	}
+	first, _ := w.meta("b", "gc.dispatch_when_ready_armed_at")
+	lines, _ := w.run(false)
+	act(t, lines, "b", arm.ActStart, "", "dispatched")
+	w.put(fake.Bead{ID: "r1", Status: "closed", Title: "mol-x arm:b@" + first})
+
+	w.now = w.now.Add(100 * time.Millisecond)
+	if _, err := w.arms.Arm(arm.Request{ID: "b", Target: pool, Formula: "mol-x", Reason: "the second wait"}); err != nil {
+		t.Fatal(err)
+	}
+	second, _ := w.meta("b", "gc.dispatch_when_ready_armed_at")
+	if second == first {
+		t.Errorf("two arms 100ms apart both record %q", first)
+	}
+	w.rt.OnSling = func(gascity.Sling) gascity.SlingResult {
+		return gascity.SlingResult{Result: gascity.Result{Code: 1, Output: "gc sling: the target refused the pour\n"}}
+	}
+	lines, _ = w.run(false)
+	act(t, lines, "b", arm.ActFail, "sling", "the target refused the pour")
+	w.rt.OnSling = nil
+	lines, _ = w.run(false)
+	act(t, lines, "b", arm.ActStart, "", "dispatched")
+	slings := w.rt.Slings()
+	if len(slings) != 3 || slings[2].Title != "mol-x arm:b@"+second {
+		t.Errorf("slings = %+v; want the later arm's retry slung under its own token", slings)
+	}
+	if w.armed("b") {
+		t.Error("the later arm survived the sling that sent it")
+	}
+}
+
 // exit3 has gc sling answer exit 3, naming live as the bead's live workflows.
 func exit3(live ...string) func(gascity.Sling) gascity.SlingResult {
 	return func(s gascity.Sling) gascity.SlingResult {

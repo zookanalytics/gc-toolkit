@@ -267,7 +267,10 @@ Two records Gas City keeps send each arm once.
   sling a killed pass left running, pour once. An exit 3 that names a workflow
   which is not an unfinished pour (below) means the work is sent already, so
   the arm is cleared and nothing is slung.
-- The token `arm:<bead>@<armed at>` titles the root each start pours. Gas
+- The token `arm:<bead>@<armed at>` titles the root each start pours. `gctk
+  bead arm` records the arm's time to the nanosecond, and the bead's dispatch
+  lock writes its arms one after the other, so each arm's token is its own and
+  a later arm on the bead does not find an earlier arm's root under it. Gas
   City's launch check counts only a run that has not finished, so a start that
   died after its sling landed and before it cleared the arm would pour again
   once that run had ended. After an earlier attempt, the start searches for the

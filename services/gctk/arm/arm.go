@@ -139,7 +139,7 @@ func (a *Arms) Arm(req Request) (string, error) {
 	if len(h.Foreign) > 0 {
 		return "", refuse("%s has a wait edge onto %s, which its store does not hold, so the store holds nothing on it and the start would send %s while that bead is still open. Move the wait into this store, or sequence the two by hand", req.ID, foreignIDs(h.Foreign), req.ID)
 	}
-	at := a.Now().UTC().Format(time.RFC3339)
+	at := record.ArmedAt(a.Now())
 	w := a.Ledger.Write(req.ID)
 	record.Set(w, req.Target, formula, req.Reason, a.Actor, at)
 	w.Note(fmt.Sprintf("deferred-dispatch: dispatch armed by %s at %s, for %s on %s%s. The deferred-dispatch order starts it once nothing holds this bead, and no agent keeps it in context.",

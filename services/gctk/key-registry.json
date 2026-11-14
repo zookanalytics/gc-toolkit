@@ -96,7 +96,7 @@
     "name": "gc.dispatch_when_ready_armed_at",
     "type": "string",
     "owner": "arm/record",
-    "doc": "When the bead was armed, in RFC 3339 UTC. The title of every root the start pours for the arm carries it, in the token arm:\u003cbead\u003e@\u003carmed at\u003e."
+    "doc": "When the bead was armed, in RFC 3339 UTC, which gctk bead arm writes to the nanosecond. The title of every root the start pours for the arm carries it, in the token arm:\u003cbead\u003e@\u003carmed at\u003e. The bead's dispatch lock writes its arms one after the other, and the nanosecond keeps each arm's token apart from the token of any arm written before it."
   },
   {
     "name": "gc.dispatch_when_ready_armed_by",

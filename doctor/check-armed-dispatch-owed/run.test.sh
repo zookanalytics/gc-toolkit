@@ -727,6 +727,16 @@ eq "$RC" "0" "with no release either, the arm cannot be aged and is skipped"
 hasnt "$OUT" "alpha bead u-1" "…so it is not reported"
 clear_stores
 
+# --- 28. an armed_at to the nanosecond, as gctk bead arm writes it, dates the
+#          window as a whole second does: an arm armed just now whose own
+#          blocker closed long ago is not owed --------------------------------
+armed_store alpha "$(aedged n-1 "" b-0 | jq -c --arg t "${RECENT%Z}.123456789Z" '.metadata["gc.dispatch_when_ready_armed_at"] = $t')"
+blockers_store alpha "$(b_closed b-0 "$OLD")"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "an arm armed just now, to the nanosecond, whose own blocker closed long ago is not owed"
+hasnt "$OUT" "alpha bead n-1" "…so it is not reported"
+clear_stores
+
 # --- the owed window is the deferred-dispatch order's cadence window ----------
 # check-cadence-live (I10) and this check read one definition
 # (assets/scripts/order-cadence.sh): max(3×interval, one trip of the order

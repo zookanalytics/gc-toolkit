@@ -118,9 +118,13 @@ scrub() { tr -d '\000-\037'; }
 
 now_epoch() { budget_now; }
 # ISO-8601 UTC -> epoch seconds, or empty if it will not parse (GNU then BSD).
+# BSD date's format has no field for a fractional second, which an arm's time
+# carries, so it reads the whole seconds alone.
 iso_to_epoch() {
     [ -n "$1" ] || { printf ''; return; }
-    date -u -d "$1" +%s 2>/dev/null || date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$1" +%s 2>/dev/null || printf ''
+    local whole="$1"
+    case "$whole" in *.*Z) whole="${whole%%.*}Z" ;; esac
+    date -u -d "$1" +%s 2>/dev/null || date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$whole" +%s 2>/dev/null || printf ''
 }
 
 # >>> doctor-parallel-reads

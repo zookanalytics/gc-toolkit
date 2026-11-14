@@ -16,6 +16,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 )
@@ -32,8 +33,10 @@ var (
 	armedByKey = ledger.Declare("gc.dispatch_when_ready_armed_by", ledger.String,
 		"Who armed the bead.")
 	armedAtKey = ledger.Declare("gc.dispatch_when_ready_armed_at", ledger.String,
-		"When the bead was armed, in RFC 3339 UTC. The title of every root the start pours for the arm "+
-			"carries it, in the token arm:<bead>@<armed at>.")
+		"When the bead was armed, in RFC 3339 UTC, which gctk bead arm writes to the nanosecond. The title of "+
+			"every root the start pours for the arm carries it, in the token arm:<bead>@<armed at>. The bead's "+
+			"dispatch lock writes its arms one after the other, and the nanosecond keeps each arm's token apart "+
+			"from the token of any arm written before it.")
 	reasonKey = ledger.Declare("gc.dispatch_when_ready_reason", ledger.String,
 		"Why the bead was armed, as free text.")
 	failCountKey = ledger.Declare("gc.dispatch_when_ready_fail_count", ledger.String,
@@ -170,6 +173,13 @@ func Armed() ledger.Selection { return ledger.Carrying(targetKey) }
 func Ready(l *ledger.Ledger, rule ledger.ServeRule) ([]*ledger.Record, error) {
 	return ledger.Ready(l, targetKey, rule)
 }
+
+// ArmedAt is the time an arm records for t: RFC 3339 in UTC, with all nine
+// digits of the nanosecond. The time is the arm's half of the token on its
+// pours, so two arms of one bead must not share one, or the start would read
+// the earlier arm's pour as the later arm's. Whole seconds would let two arms
+// written within one second share it.
+func ArmedAt(t time.Time) string { return t.UTC().Format("2006-01-02T15:04:05.000000000Z07:00") }
 
 // Set adds the arm to w: its target, the formula it pours, why and by whom it
 // was armed and when, and no attempts.

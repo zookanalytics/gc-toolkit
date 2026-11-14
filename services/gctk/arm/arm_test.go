@@ -108,13 +108,13 @@ func TestArmWritesTheArmInOneWrite(t *testing.T) {
 	if args, _ := w.meta("b", "gc.dispatch_when_ready_args"); args != `["--on","mol-polecat-work"]` {
 		t.Errorf("args = %q, want the target's default formula named", args)
 	}
-	if at, _ := w.meta("b", "gc.dispatch_when_ready_armed_at"); at != "2026-11-13T12:00:00Z" {
-		t.Errorf("armed at = %q", at)
+	if at, _ := w.meta("b", "gc.dispatch_when_ready_armed_at"); at != "2026-11-13T12:00:00.000000000Z" {
+		t.Errorf("armed at = %q, want the time to the nanosecond", at)
 	}
 	if by, _ := w.meta("b", "gc.dispatch_when_ready_armed_by"); by != "the-test" {
 		t.Errorf("armed by = %q", by)
 	}
-	if n := w.notes("b"); !strings.HasPrefix(n, "deferred-dispatch: dispatch armed by the-test at 2026-11-13T12:00:00Z, for "+pool+" on mol-polecat-work: waits for the base.") {
+	if n := w.notes("b"); !strings.HasPrefix(n, "deferred-dispatch: dispatch armed by the-test at 2026-11-13T12:00:00.000000000Z, for "+pool+" on mol-polecat-work: waits for the base.") {
 		t.Errorf("note = %q", n)
 	}
 	if _, err := os.ReadDir(w.arms.Locks); err != nil {
