@@ -24,7 +24,10 @@
 # the effort's branch, under the hand-off's parent when it has one, which the
 # hand-off and the landing bead wait on. It proves the polecat pool's route
 # first (pool-route.sh), so a pool no agent claims files nothing. The task's
-# create records the branch as its target and direct as its merge strategy. The
+# create records the branch as its target, direct as its merge strategy and
+# effort-bring-current as its task_kind. A resolution that keeps the branch's
+# side of every file the target changed makes a merge that changes no file,
+# and the kind is what lets the refinery land it (refinery-land.sh). The
 # call then settles the task and slings it to the pool on mol-polecat-work with
 # --merge direct, because a sling otherwise stamps the rig's default merge
 # strategy over it. The hand-off stays assigned to the refinery while it waits
@@ -121,11 +124,11 @@ It pushed nothing, and $H waits on this task.
 
 Merge origin/$TARGET into this task's branch, which is cut from $BRANCH, and resolve each conflict by keeping what each side meant. Make one merge commit whose second parent is origin/$TARGET, and never rebase or squash it, so that once it lands on $BRANCH the refinery finds nothing left to merge and closes $H. In its message, say for each file what collided and what you decided. The diff against $BRANCH holds all that $TARGET gained since the branch was cut, and your change is the resolution: run git show --remerge-diff on the merge to see only the hunks resolved by hand. Your checks run on the merged tree, and a check that reads a diff reads all of it. A check that fails the same way at origin/$TARGET is a failure of $TARGET's own, so treat it as pre-existing, as your self-review step says of a failure on its base.
 
-When your resolution keeps $BRANCH's side of every file $TARGET changed, so that git diff --quiet origin/$BRANCH HEAD exits 0, the merge leaves the tree of $BRANCH as it is. The refinery refuses a landing that changes no file and puts the task to a person. Say so in the notes you hand off with, and name the merge commit, because pushing it to $BRANCH as a fast-forward and closing this task lands it.
+When your resolution keeps $BRANCH's side of every file $TARGET changed, the merge leaves the tree of $BRANCH as it is and changes no file. That is a resolution like any other: the refinery lands it, because it brings in the commits of $TARGET that $BRANCH lacks.
 
 The conflict is yours to resolve. Ask the operator only when a resolution needs a product decision, because the two sides want different behavior and nothing written settles which. Then ask through a human gate on this task with nothing pushed, as your prompt's section on blocked work and human gates says."
       TASK=$(gc bd create "$TITLE" -t task ${PARENT[@]+"${PARENT[@]}"} -d "$BRIEF" \
-        --metadata "$(jq -nc --arg t "$BRANCH" '{target: $t, merge_strategy: "direct"}')" --deps "blocks:$H,blocks:$LANDING" --json </dev/null \
+        --metadata "$(jq -nc --arg t "$BRANCH" '{target: $t, merge_strategy: "direct", task_kind: "effort-bring-current"}')" --deps "blocks:$H,blocks:$LANDING" --json </dev/null \
         | scrub | jq -r 'if type == "array" then .[0].id else .id end // empty' 2>/dev/null)
       if [ -z "$TASK" ]; then
         TASK=$(gc bd show "$H" --json </dev/null | scrub \
