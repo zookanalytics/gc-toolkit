@@ -9,6 +9,11 @@
 # scans for. A heading that drifted from the pattern would make every sync read
 # as a rig's first, and list every epic the rig ever closed.
 #
+# The read decides what the sitting weighs by what it lists, so a store that
+# did not answer must stop it rather than read as a rig where nothing changed.
+# The suite runs it under a gc that fails with no answer, one that fails after
+# printing a list, and one that answers with something other than a list.
+#
 # Hermetic: runs the skill's two blocks in bash, and in zsh where it is
 # installed, under a stub gc that answers the list from a fixture and records
 # the note. No city, no network.
@@ -47,9 +52,10 @@ block '--append-notes "Portfolio sync, po sitting' >"$TMP/note.sh"
 mkdir -p "$TMP/bin" "$TMP/away"
 cat >"$TMP/bin/gc" <<'STUB'
 #!/usr/bin/env bash
-# The rig's epics come from $FIXTURE, and a note's text goes to $NOTE_OUT.
+# The rig's epics come from $FIXTURE, the list exits $LIST_EXIT, and a note's
+# text goes to $NOTE_OUT.
 case "$1 $2 $3 $4" in
-    "bd --rig x list") cat "$FIXTURE" ;;
+    "bd --rig x list") cat "$FIXTURE"; exit "${LIST_EXIT:-0}" ;;
     "bd --rig x update")
         [ "${5:-}" = x ] && [ "${6:-}" = --append-notes ] || { echo "stub gc: unexpected update: $*" >&2; exit 2; }
         printf '%s' "$7" >"$NOTE_OUT" ;;
@@ -58,10 +64,11 @@ esac
 STUB
 chmod +x "$TMP/bin/gc"
 
-# run <shell> <block> <fixture> — the block's output, run from outside any repo.
+# run <shell> <block> <fixture> [<list exit>] — the block's output, run from
+# outside any repo.
 run() {
-    (cd "$TMP/away" && env -u BASH_ENV -u ENV FIXTURE="$3" NOTE_OUT="$TMP/note" \
-        PATH="$TMP/bin:$PATH" $1 "$2" 2>"$TMP/err")
+    (cd "$TMP/away" && env -u BASH_ENV -u ENV FIXTURE="$3" LIST_EXIT="${4:-0}" \
+        NOTE_OUT="$TMP/note" PATH="$TMP/bin:$PATH" $1 "$2" 2>"$TMP/err")
 }
 
 # Two syncs noted, the newest on 2026-11-14. Since then, e3 shifted, e5 closed,
@@ -104,6 +111,17 @@ last sync: none
 2026-11-15T04:00:00Z c1 closed: answered
 2026-11-15T05:00:00Z o1 closed: under a task
 WANT
+# A store that answers with something other than a list, as when gc relays an
+# error in place of the epics.
+printf '{"error": "no store"}\n' >"$TMP/notalist.json"
+# A rig with no epics answers with an empty list, which is an answer.
+printf '[]\n' >"$TMP/empty.json"
+# A note that carries a raw control byte, which jq refuses unscrubbed.
+printf '[{"id": "k1", "status": "closed", "closed_at": "2026-11-15T07:00:00Z", "close_reason": "kept", "notes": "a raw \001 byte", "metadata": {}}]\n' >"$TMP/ctrl.json"
+cat >"$TMP/ctrl.want" <<'WANT'
+last sync: none
+2026-11-15T07:00:00Z k1 closed: kept
+WANT
 
 for sh_ in $shells; do
     sh_run=$sh_
@@ -120,6 +138,44 @@ for sh_ in $shells; do
         ok "($sh_) a rig with no sync noted lists every epic closed or shifted, Deliveries left out"
     else
         bad "($sh_) a rig with no sync noted lists every epic closed or shifted, Deliveries left out" \
+            "exit $rc, got: $(printf '%s' "$got" | tr '\n' '|') $(cat "$TMP/err")"
+    fi
+
+    # A store that did not answer stops the read, which lists nothing and says
+    # so, rather than reading as a rig where nothing closed or shifted.
+    got=$(run "$sh_run" "$TMP/read.sh" /dev/null 17); rc=$?
+    if [ "$rc" -ne 0 ] && [ -z "$got" ] && grep -q 'did not read' "$TMP/err"; then
+        ok "($sh_) a gc that fails with no answer stops the read, which says so"
+    else
+        bad "($sh_) a gc that fails with no answer stops the read, which says so" \
+            "exit $rc, got: $(printf '%s' "$got" | tr '\n' '|') stderr: $(cat "$TMP/err")"
+    fi
+    got=$(run "$sh_run" "$TMP/read.sh" "$TMP/synced.json" 1); rc=$?
+    if [ "$rc" -ne 0 ] && [ -z "$got" ] && grep -q 'did not read' "$TMP/err"; then
+        ok "($sh_) a gc that fails after printing a list stops the read, which says so"
+    else
+        bad "($sh_) a gc that fails after printing a list stops the read, which says so" \
+            "exit $rc, got: $(printf '%s' "$got" | tr '\n' '|') stderr: $(cat "$TMP/err")"
+    fi
+    got=$(run "$sh_run" "$TMP/read.sh" "$TMP/notalist.json"); rc=$?
+    if [ "$rc" -ne 0 ] && [ -z "$got" ] && grep -q 'did not read' "$TMP/err"; then
+        ok "($sh_) an answer that is not a list stops the read, which says so"
+    else
+        bad "($sh_) an answer that is not a list stops the read, which says so" \
+            "exit $rc, got: $(printf '%s' "$got" | tr '\n' '|') stderr: $(cat "$TMP/err")"
+    fi
+    got=$(run "$sh_run" "$TMP/read.sh" "$TMP/empty.json"); rc=$?
+    if [ "$rc" -eq 0 ] && [ "$got" = "last sync: none" ]; then
+        ok "($sh_) a rig with no epics is an answer, not a read that failed"
+    else
+        bad "($sh_) a rig with no epics is an answer, not a read that failed" \
+            "exit $rc, got: $(printf '%s' "$got" | tr '\n' '|') $(cat "$TMP/err")"
+    fi
+    got=$(run "$sh_run" "$TMP/read.sh" "$TMP/ctrl.json"); rc=$?
+    if [ "$rc" -eq 0 ] && [ "$got" = "$(cat "$TMP/ctrl.want")" ]; then
+        ok "($sh_) a raw control byte in a note costs the read nothing"
+    else
+        bad "($sh_) a raw control byte in a note costs the read nothing" \
             "exit $rc, got: $(printf '%s' "$got" | tr '\n' '|') $(cat "$TMP/err")"
     fi
 

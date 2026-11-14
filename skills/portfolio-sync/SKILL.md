@@ -37,10 +37,23 @@ weigh each one. Every note a sync writes carries its date (section 4), so the
 newest such date is the last sync's. This prints that date, then each epic
 closed or shifted since, oldest first. It leaves out Deliveries, the epics under
 another of the rig's epics with no hypothesis of their own, whose close is one
-of the writes of their epic's ruling. A rig with no sync yet lists every one:
+of the writes of their epic's ruling. A rig with no sync yet lists every one.
+When the store does not answer, it lists nothing and says so, since a list it
+could not read is not an empty one:
 
 ```bash
-gc bd --rig <rig> list --type epic --all --limit 0 --json | jq -r '
+# >>> control-char-scrub
+# A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
+# C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
+# above 0x1F pass through raw, which JSON permits; the output feeds jq, so
+# dropping a structural LF or TAB just minifies.
+scrub() { tr -d '\000-\037'; }
+# <<< control-char-scrub
+EPICS=$(gc bd --rig <rig> list --type epic --all --limit 0 --json) \
+  && EPICS=$(printf '%s' "$EPICS" | scrub) \
+  && printf '%s' "$EPICS" | jq -e 'type == "array"' >/dev/null \
+  || { echo "The rig's epics did not read, so what closed or shifted is unknown. Run this again before you weigh any change." >&2; exit 1; }
+printf '%s' "$EPICS" | jq -r '
   (reduce .[] as $e ({}; .[$e.id] = true)) as $epic
   | ([.[] | (.notes // "") | scan("Portfolio sync, po sitting ([0-9]{4}-[0-9]{2}-[0-9]{2})") | .[0]] | max // "") as $since
   | "last sync: \(if $since == "" then "none" else $since end)",
